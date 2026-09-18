@@ -341,10 +341,12 @@ interface AgentRuntime {
   stream(runId: string): AsyncIterable<RunEvent>;
   cancel(runId: string): Promise<void>;
   resume(runId: string): Promise<AgentRun>;
+  installSkill(input: InstallSkillInput): Promise<SkillInstallation>;
+  listSkills(input?: ListSkillsInput): Promise<SkillInfo[]>;
 }
 ~~~
 
-Pi 只实现 PiRuntimeAdapter。
+Pi 只实现 PiRuntimeAdapter。`installSkill` 和 `listSkills` 由 Runtime Adapter 对接 Pi 的原生 Skill 生命周期；业务层只依赖上述抽象，不依赖 Pi 内部对象。
 
 Pi 不直接访问：
 
@@ -392,9 +394,9 @@ interface CredentialStore {
 }
 ~~~
 
-系统凭证不得进入前端、Agent Transcript、Trace、Replay、Audit 明文或错误消息。
+CredentialStore 只负责 Cookie、Token、API Key、密码等系统凭证。卡券正文、夸克链接和提取码属于受控业务数据，由 `coupons` / 交付领域及其存储负责，不作为系统凭证写入 CredentialStore。
 
-卡券正文、夸克链接和提取码属于受控业务数据，按 deliveryScope 和用途校验后才能读取或交付。
+系统凭证不得进入前端、Agent Transcript、Trace、Replay、Audit 明文或错误消息；受控业务数据通过领域接口按 `deliveryScope` 和用途授权后读取或交付，并保留访问审计。
 
 ## 11. WebSocket 和事件
 
@@ -535,4 +537,3 @@ Docker Compose
 - 对象存储使用云 S3、MinIO 还是现有文件服务；
 - Pi Runtime 以同进程包、子进程还是独立服务运行；
 - 部署环境是否允许 Docker Compose 作为首期生产编排方式。
-
