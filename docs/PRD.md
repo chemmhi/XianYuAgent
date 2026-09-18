@@ -22,8 +22,8 @@ XianyuSellerAgent 是面向闲鱼数字商品卖家的轻量化运营控制台�
 2. 保持当前高保真控制台的视觉、信息架构和操作密度。
 3. 让 Workspace 能通过自然语言发起查询、生成、上传、发布和发货任务。
 4. 让 Agent 可替换，Pi 只是一个可插拔运行时，不成为业务代码依赖。
-5. 所有外部写动作经过 Policy Gateway，必要时展示确认卡片后才进入 Outbox。
-6. 账号 Cookie、Token、密码和 API Key 等系统凭证继续由后端管理；卡券正文、夸克链接和提取码对管理员直接开放，前端、Workspace 和 Agent 可以直接读取、展示、复制和用于交付。
+5. 所有业务写动作先经过 Policy Gateway；仅当策略要求人工确认时展示 Confirmation Card，确认后进入 Outbox。无需确认的低风险写动作在策略通过后直接进入执行阶段。
+6. 账号 Cookie、Token、密码和 API Key 等系统凭证继续由后端管理；卡券正文、夸克链接和提取码属于受控业务数据，管理员可通过受控领域接口查看明文，前端、Workspace 和 Agent 可按授权直接读取、展示、复制和用于交付。
 
 ### 1.2 非目标
 
@@ -50,7 +50,8 @@ XianyuSellerAgent 是面向闲鱼数字商品卖家的轻量化运营控制台�
 - 页面权限与动作权限分离。能查看订单不代表能发货，能查看账号不代表能重新授权。
 - 账号级数据必须按管理员的账号范围和授权范围过滤。
 - 高风险动作至少需要 `capability + account_scope + permission + policy` 同时通过。
-- 账号 Cookie、Token、登录密码和 API Key 仍属于系统凭证，由后端统一管理；卡券正文、夸克链接和提取码属于管理员业务数据，可直接进入卡券管理、Workspace、订单和聊天交付流程，不额外要求脱敏、临时揭示、二次确认或超时隐藏。
+- 账号 Cookie、Token、登录密码和 API Key 仍属于系统凭证，由后端统一管理；卡券正文、夸克链接和提取码属于受控业务数据，可通过受控领域接口进入卡券管理、Workspace、订单和聊天交付流程。受控接口必须校验管理员会话、账号范围、交付范围和用途，并记录最小必要的访问审计；业务上不额外要求脱敏、二次确认或超时隐藏。
+- `system_only` 仅允许后端 Runtime / Executor 读取；`operator_only` 允许管理员和受授权 Agent 读取，但不得交付给买家；`buyer_deliverable` 允许管理员、Workspace 和受授权 Agent 读取，并可在订单策略通过后交付给买家。
 
 ## 3. 一级页面需求
 
@@ -93,8 +94,8 @@ XianyuSellerAgent 是面向闲鱼数字商品卖家的轻量化运营控制台�
 
 1. 管理员进入卡券管理，选择商品和卡券类型。
 2. 输入批次名称、数量、内容来源、交付范围和可选延迟。
-3. 生成卡券批次，卡券正文直接写入卡券业务数据或外部交付数据。
-4. 直接展示批次号、库存、状态、绑定商品、卡券正文和交付信息；管理员可以直接查看、复制、编辑和使用卡券内容。
+3. 生成卡券批次，卡券正文写入受控卡券数据或外部交付数据，并关联 `deliveryScope` 和 `contentRef`。
+4. 卡券管理页面通过受控领域接口直接展示批次号、库存、状态、绑定商品、卡券正文和交付信息；管理员可以直接查看、复制、编辑和使用卡券内容。前端不直接访问 Credential Vault 或平台原始接口。
 5. 管理员可以批量绑定商品、解除绑定、补充库存或作废批次。
 6. 订单交付时由后端按幂等键扣减库存并生成交付记录。
 
@@ -144,19 +145,39 @@ XianyuSellerAgent 是面向闲鱼数字商品卖家的轻量化运营控制台�
 - 右侧显示管理员消息、Agent 回复、执行计划、步骤状态和工具调用摘要。
 - 支持查询账号、商品、卡券、订单和聊天信息。
 - 支持生成卡密、上传商品、上传图片、发布商品和查询订单。
-- 写动作必须生成 Confirmation Card；管理员确认后才执行。
+- 写动作必须先经过 Policy Gateway。`requiresConfirmation=true` 时生成 Confirmation Card，管理员确认后才执行；`requiresConfirmation=false` 时跳过等待确认，策略通过后直接进入执行阶段。
 - 支持取消 Run、重试失败 Step、查看 Audit 和打开业务详情页。
 
 **P0 Run 状态**
 
 `queued -> running -> waiting_confirmation -> executing -> succeeded`
 
+无确认路径：
+
+- `queued -> running -> executing -> succeeded`
+- `queued -> running -> executing -> partially_succeeded`
+
 异常分支：
 
-- `running -> failed`
-- `waiting_confirmation -> cancelled`
-- `executing -> partially_succeeded`
+- `queued -> cancelled`
+- `running -> waiting_confirmation | executing | failed | cancelling`
+- `waiting_confirmation -> executing | expired | cancelled`
+- `executing -> succeeded | partially_succeeded | retrying | failed | cancelling`
+- `retrying -> executing | partially_succeeded | failed`
+- `partially_succeeded -> retrying | succeeded | failed`
+- `cancelling -> cancelled | partially_succeeded | failed`
+- Confirmation Card 超过 `expiresAt` 未确认时，Confirmation 状态变为 `expired`，Run 终止为 `expired`，不得自动执行。
+- 取消请求进入 `cancelling`。尚未投递外部动作时进入 `cancelled`；已投递但结果未知时必须先查询幂等键对应的外部状态，不能简单重放。
+- 重试只重试失败或结果未知的 Step，已成功 Step 不得重复执行；继续使用原幂等键。
+- `partially_succeeded` 恢复时保留已成功 Step 的输出，仅对可重试 Step 重新投递；全部补偿成功后转为 `succeeded`，不可恢复时保持 `partially_succeeded` 并生成待人工处理项。
 - 同一幂等键重复确认时，返回原执行结果，不重复调用外部接口。
+
+**状态定义**
+
+- `RunStatus`：`queued`、`running`、`waiting_confirmation`、`executing`、`retrying`、`cancelling`、`succeeded`、`partially_succeeded`、`failed`、`cancelled`、`expired`。
+- `StepStatus`：`pending`、`running`、`waiting_confirmation`、`executing`、`retrying`、`succeeded`、`partially_succeeded`、`failed`、`skipped`、`cancelled`。
+- `OutboxStatus`：`pending`、`running`、`retrying`、`succeeded`、`failed`、`dead_letter`、`cancelling`、`cancelled`。
+- Outbox 进入 `dead_letter` 后不得自动重放；只有管理员发起恢复或重试，且仍使用原业务幂等键并先执行外部状态查询。
 
 **Confirmation Card 必须包含**
 
@@ -164,7 +185,7 @@ XianyuSellerAgent 是面向闲鱼数字商品卖家的轻量化运营控制台�
 - 修改前 / 修改后或执行前 / 执行后摘要。
 - 影响范围、权限来源、Policy Ref、Audit Ref、Idempotency Key。
 - 需要管理员确认的按钮和取消按钮。
-- 可根据任务需要展示卡券正文、夸克链接和提取码，供管理员直接确认、复制或交付；Cookie、Token、API Key 等系统凭证仍不得展示。
+- 可根据任务需要通过受控领域接口展示卡券正文、夸克链接和提取码，供管理员直接查看、确认、复制或交付；Agent 可读取同一授权范围内的明文业务数据。Cookie、Token、API Key 等系统凭证仍不得展示或返回给前端、Workspace 和 Agent。
 
 ### 5.3 账号管理
 
@@ -311,7 +332,7 @@ XianyuSellerAgent 是面向闲鱼数字商品卖家的轻量化运营控制台�
 | 商品 | `GET /api/v1/items/paginated`、`POST /api/v1/items/get-all-from-account`、`GET /api/v1/items/{cookieId}/{itemId}/seller-detail`、`PUT /api/v1/items/{cookieId}/{itemId}/seller-edit` | 旧字段映射为 `Product` 契约 |
 | 商品发布 | `POST /api/v1/product-publish/materials`、`GET /api/v1/product-publish/materials`、`POST /api/v1/product-publish/publish/single`、`POST /api/v1/product-publish/publish/batch` | 发布动作必须经过确认卡和 Outbox |
 | 商品素材 | `POST /api/v1/product-publish/upload/images`、`POST /api/v1/product-publish/upload/videos`、`POST /api/v1/upload/upload-image` | 返回 `assetId` 和访问地址，不返回本地路径 |
-| 卡券 | `GET/POST /api/v1/cards`、`GET /api/v1/cards/{id}`、`PUT /api/v1/cards/{id}`、`POST /api/v1/cards/batch-bind` | 卡券内容只保存引用或受控内容 |
+| 卡券 | `GET/POST /api/v1/cards`、`GET /api/v1/cards/{id}`、`GET /api/v1/cards/{id}/content`、`PUT /api/v1/cards/{id}`、`POST /api/v1/cards/batch-bind` | 卡券正文通过受控领域接口返回明文；接口校验权限、账号范围、deliveryScope 和用途，并记录访问审计 |
 | 订单 | `GET /api/v1/orders`、`GET /api/v1/orders/{orderNo}`、`POST /api/v1/orders/fetch-xianyu` | 订单查询和同步可直接复用 |
 | 订单发货 | `POST /api/v1/orders/manual-delivery`、`POST /api/v1/orders/no-logistics-delivery`、`POST /api/v1/orders/cancel` | 外部写动作走 Gateway + Outbox |
 | AI 设置 | `GET/PUT /api/v1/ai-reply-settings`、`POST /api/v1/ai-reply-settings/models` | 映射为 Agent Provider 配置 |
@@ -378,18 +399,19 @@ Pi 作为第一种 Runtime Adapter；后续可以替换为其他 Node Agent、�
 
 Pi 或其他 Agent 负责理解意图、选择后端业务能力或调用 Pi 原生 Skill。Pi 原生 Skill 不自动访问当前项目数据库；需要业务数据时，可以通过后端 Manifest 提供的查询能力获取。后端 Agent Gateway 按读写类型处理业务能力：
 
-1. `read` 能力：Agent 可以直接通过 Manifest 调用查询接口获取数据库业务数据，不进入 Confirmation Card 和 Outbox。
-2. `write` 能力：新增、修改、删除、发布、发货、发送消息等写操作进入 Policy Gateway。
-3. 写操作校验管理员身份、账号和资源权限，并按风险决定是否需要 Confirmation Card。
-4. 写操作生成幂等键，进入 Outbox，并记录 Audit、Trace、ToolCall 和最终结果。
-5. Pi 原生 Skill 仍使用 Pi 自身的 Skill 机制，不因为使用了后端查询能力而被重新注册或改写。
+1. `read` 能力：Agent 可以直接通过 Manifest 调用领域查询能力获取业务数据，不进入 Confirmation Card 和 Outbox；读取卡券正文必须使用受控内容能力，并按 `deliveryScope` 校验用途。
+2. `write` 能力：新增、修改、删除、发布、发货、发送消息等写操作进入 Policy Gateway；外部写动作最终只能由 Gateway 投递到 Outbox。
+3. Skill 只能调用明确提供的领域 API 或 Manifest 能力，不得导入、调用或绕过 `xianyuApi`、闲鱼原始平台接口或 Credential Vault 原始接口。
+4. 写操作校验管理员身份、账号和资源权限，并按策略决定是否需要 Confirmation Card；无需确认的写操作也必须记录 Audit、Trace、ToolCall 并进入幂等执行链路。
+5. 写操作生成幂等键，进入 Outbox，并记录 Audit、Trace、ToolCall、SkillResult 和最终结果；重复请求不得重复扣库存、发货、发布或发送消息。
+6. Pi 原生 Skill 仍使用 Pi 自身的安装和运行机制，但其业务访问必须通过当前项目提供的领域边界；不因为使用了后端查询能力而被重新注册或改写。
 ### 7.3 Pi 原生 Skill
 
 Skill 属于 Pi Runtime 的扩展能力，直接使用 Pi 原生的安装、加载、配置和调用机制，不要求在当前项目的业务 Manifest 中重复注册。
 
 - Pi 负责 Skill 的安装、启用、禁用、版本和运行生命周期。
 - XianYuAgent 负责启动和配置 Pi Runtime，不改写 Skill 的原生能力定义。
-- Skill 不自动访问当前项目数据库；需要业务数据时，可以由 Pi Agent 通过后端 Manifest 的 `read` 能力获取，或由 Skill 自行调用明确提供的后端 API。
+- Skill 不自动访问当前项目数据库；需要业务数据时，可以由 Pi Agent 通过后端 Manifest 的 `read` 能力获取，或由 Skill 调用明确提供的领域 API。任何闲鱼或交付写动作仍必须经过 Policy Gateway、Audit、Idempotency 和 Outbox，Skill 不得直接调用底层 `xianyuApi` 或原始平台接口。
 - 夸克网盘 Skill 可以直接使用其原生网盘能力完成上传、生成分享链接、获取提取码和生成交付文本。
 - Pi Skill 与当前项目业务能力解耦，未来替换 Pi 时再单独实现对应 Runtime Adapter。
 
@@ -421,9 +443,9 @@ Skill 属于 Pi Runtime 的扩展能力，直接使用 Pi 原生的安装、加�
 
 ### 9.1 安全
 
-- Cookie、Token、API Key 和密码等系统凭证必须由后端统一管理；卡券正文和外部交付凭证按业务需要直接提供给管理员和 Agent 使用。
-- 卡券正文、夸克链接和提取码可以在前端、Workspace、订单和聊天交付流程中直接展示、复制和使用，不额外增加脱敏、临时查看、二次确认、超时失效或审计限制。
-- 日志、Trace、Replay 和 Prompt 不写入 Cookie、Token、API Key 和密码等系统凭证明文；卡券正文、夸克链接和提取码不受此限制。
+- Cookie、Token、API Key 和密码等系统凭证必须由后端统一管理；卡券正文和外部交付凭证通过受控领域接口按业务需要直接提供给管理员、Workspace 和 Agent 使用。
+- 卡券正文、夸克链接和提取码可以在前端、Workspace、订单和聊天交付流程中直接展示、复制和使用；不额外增加脱敏、二次确认或超时隐藏，但受控接口必须校验权限、deliveryScope、用途和账号范围，并记录访问审计。
+- 日志、Trace、Replay 和 Prompt 不写入 Cookie、Token、API Key 和密码等系统凭证明文；卡券正文、夸克链接和提取码可以返回给授权调用方，但仍不得写入日志、Trace、Replay、Prompt、浏览器本地持久化或错误消息。
 - WebSocket 必须校验管理员登录 Token、账号归属和会话权限。
 
 ### 9.2 一致性与可靠性
@@ -454,7 +476,8 @@ Skill 属于 Pi Runtime 的扩展能力，直接使用 Pi 原生的安装、加�
 ### 10.2 Agent 验收
 
 - Agent 通过后端 Manifest 直接调用 `read` 能力获取业务数据；调用 `write` 能力时进入审计和闸门流程；调用 Pi 原生 Skill 时遵循 Pi 自身的 Skill 机制。
-- Agent 无法直接访问闲鱼 Cookie 和系统级凭证。
+- Agent 可以通过受控领域能力读取授权范围内的卡券正文、夸克链接和提取码，但无法直接访问闲鱼 Cookie、Token、API Key、密码和 Credential Vault 原始接口。
+- Agent 只能调用领域 API / Manifest；闲鱼和交付写动作必须经过 Policy Gateway、Audit、Idempotency 和 Outbox，不得直接调用底层 `xianyuApi` 或原始平台接口。
 - 发布商品、发货、发送消息、修改账号策略等外部写动作必须经过闸门。
 - 重复确认同一幂等键不会重复执行。
 - Run 的每个 Step 都可追踪到 ToolCall、Audit 和最终结果。
@@ -508,7 +531,7 @@ Skill 属于 Pi Runtime 的扩展能力，直接使用 Pi 原生的安装、加�
 - 以 `xianyu-auto-reply` 为能力来源，不复制其全部业务和数据库结构。
 - 前端通过稳定领域契约访问后端，旧接口由适配层隔离。
 - Pi 是可替换的 Runtime Adapter，业务代码只依赖 AgentRuntime 抽象；Pi Skill 使用 Pi 原生机制，不与当前业务数据库和领域模型耦合。
-- Agent 的读取能力可以通过 Manifest 直接调用；所有业务写动作必须经过 Policy Gateway、审计、幂等处理，并按风险进入 Confirmation Card 和 Outbox。
+- Agent 的读取能力可以通过 Manifest 或受控领域 API 直接调用；卡券正文、夸克链接和提取码按授权直接展示、复制和读取。所有业务写动作必须经过 Policy Gateway、审计、幂等处理；需要确认的动作进入 Confirmation Card，其余低风险动作直接进入 Outbox 执行。
 - 第一阶段优先迁移账号、商品、卡券、订单和聊天基础能力，然后再接入 Agent。
 
 
