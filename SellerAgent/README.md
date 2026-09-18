@@ -2,6 +2,20 @@
 
 基于 xianyu-admin-design-style 设计规范生成的当前产品 UI 原型，参考 docs/prototypes/static-product/index.html、docs/PRD.md 与 xianyu-admin-design-style/assets/design-tokens.json。
 
+## 架构入口
+
+- 页面与接口分层说明：`docs/ARCHITECTURE.md`
+- 导航模型：`src/app/navigation.ts`
+- 领域契约：`src/api/contracts.ts`
+- mock/live API 门面：`src/api/index.ts`
+
+默认使用 mock 数据，当前页面无需启动后端即可交互。接入参考项目的 `backend-web` 时：
+
+```powershell
+$env:VITE_API_MODE = 'live'
+$env:VITE_API_BASE_URL = 'http://localhost:8089'
+```
+
 ## 实时预览
 
 1. cd SellerAgent

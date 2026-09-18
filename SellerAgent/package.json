@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc && vite build",
+    "test": "node --experimental-strip-types --experimental-specifier-resolution=node scripts/test-mock-api.mjs",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {

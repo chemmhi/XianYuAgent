@@ -1,0 +1,4 @@
+# Local Codex scratch and cache files
+.codex*
+.test.txt
+.workspace.txt
