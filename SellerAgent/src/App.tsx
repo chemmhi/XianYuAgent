@@ -1,0 +1,474 @@
+type ViewMode = 'desktop' | 'mobile' | 'auth';
+type PageKey = 'dashboard' | 'workspace' | 'accounts' | 'knowledge' | 'messages' | 'review' | 'settings';
+type Tone = 'ok' | 'warn' | 'danger' | 'info' | 'gray';
+
+import { type MouseEvent, type ReactNode, useMemo, useState } from 'react';
+
+const navItems: Array<{ key: PageKey; label: string; sub: string; icon: string }> = [
+  { key: 'dashboard', label: 'Dashboard', sub: '首页', icon: 'grid' },
+  { key: 'workspace', label: 'Workspace', sub: 'AI 操作台', icon: 'message' },
+  { key: 'accounts', label: '账号管理', sub: '上下文', icon: 'user' },
+  { key: 'knowledge', label: '知识库', sub: '商品与通用', icon: 'book' },
+  { key: 'messages', label: '消息托管', sub: '待办闭环', icon: 'inbox' },
+  { key: 'review', label: '运营复盘', sub: 'Trace / Replay', icon: 'trend' },
+  { key: 'settings', label: '设置', sub: '策略与凭证', icon: 'gear' }
+];
+
+const kpis = [
+  { label: '今日订单金额', value: '¥18,640', delta: '+12.8%', context: '较昨日', tone: 'ok' as Tone },
+  { label: '自动处理成功率', value: '96.8%', delta: '+2.1%', context: '7日均值', tone: 'ok' as Tone },
+  { label: '待人工处理', value: '3', delta: '-4', context: '风险待办', tone: 'warn' as Tone },
+  { label: '可售卡密库存', value: '1,286', delta: '健康', context: '虚拟资源', tone: 'info' as Tone }
+];
+
+const trendPoints = [58, 64, 61, 75, 72, 84, 91, 88, 96, 102, 98, 116];
+const stockPoints = [52, 57, 63, 66, 68, 73, 75, 79, 83, 86, 88, 93];
+
+function Icon({ name }: { name: string }) {
+  if (name === 'grid') return <svg viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1.5"/><rect x="14" y="4" width="6" height="6" rx="1.5"/><rect x="4" y="14" width="6" height="6" rx="1.5"/><rect x="14" y="14" width="6" height="6" rx="1.5"/></svg>;
+  if (name === 'message') return <svg viewBox="0 0 24 24"><path d="M5 6.5h14M5 11.5h10M5 16.5h7"/><path d="M4 4h16v13H9l-4 3v-3H4z"/></svg>;
+  if (name === 'user') return <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5.5 20c1.1-3.6 3.2-5.4 6.5-5.4s5.4 1.8 6.5 5.4"/></svg>;
+  if (name === 'book') return <svg viewBox="0 0 24 24"><path d="M6 4h9a3 3 0 0 1 3 3v13H8a2 2 0 0 1-2-2z"/><path d="M8 4v14M10 8h5M10 12h5"/></svg>;
+  if (name === 'inbox') return <svg viewBox="0 0 24 24"><path d="M4.5 13 7 5h10l2.5 8"/><path d="M4.5 13h4l1.5 3h4l1.5-3h4v6H4.5z"/></svg>;
+  if (name === 'trend') return <svg viewBox="0 0 24 24"><path d="M4 18h16"/><path d="M6 15l4-4 3 2 5-7"/><path d="M16 6h2v2"/></svg>;
+  if (name === 'gear') return <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M4.2 7.5l2.6 1.5M17.2 15l2.6 1.5M19.8 7.5 17.2 9M6.8 15l-2.6 1.5"/></svg>;
+  if (name === 'bell') return <svg viewBox="0 0 24 24"><path d="M7 10a5 5 0 0 1 10 0v4l2 3H5l2-3z"/><path d="M10 19a2 2 0 0 0 4 0"/></svg>;
+  return <svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>;
+}
+
+function Logo() { return <div className="logo-mark" aria-label="XianyuSellerAgent"><span/><span/><span/><span/></div>; }
+function Badge({ tone = 'gray', children }: { tone?: Tone; children: string }) { return <span className={'badge badge-' + tone}>{children}</span>; }
+function KpiCard({ label, value, delta, context, tone }: typeof kpis[number]) { return <article className="card kpi-card"><div className="kpi-label">{label}</div><div className="kpi-value">{value}</div><div className="kpi-delta"><span className={'tone-' + tone}>{delta}</span><small>{context}</small></div></article>; }
+
+function MiniAreaChart({ primary = trendPoints, secondary = stockPoints }: { primary?: number[]; secondary?: number[] }) {
+  const makePath = (points: number[]) => {
+    const max = Math.max(...points); const min = Math.min(...points); const w = 520; const h = 170;
+    return points.map((p, i) => { const x = 18 + (i * (w - 36)) / (points.length - 1); const y = 14 + (h - 34) * (1 - (p - min) / Math.max(1, max - min)); return (i === 0 ? 'M' : 'L') + x.toFixed(1) + ' ' + y.toFixed(1); }).join(' ');
+  };
+  const primaryPath = makePath(primary); const secondaryPath = makePath(secondary);
+  return <div className="chart-wrap" role="img" aria-label="订单金额与自动处理趋势图"><svg viewBox="0 0 520 188" preserveAspectRatio="none"><defs><linearGradient id="gPrimary" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#245A8D" stopOpacity="0.12"/><stop offset="100%" stopColor="#245A8D" stopOpacity="0.01"/></linearGradient><linearGradient id="gSecondary" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#2E7D5B" stopOpacity="0.10"/><stop offset="100%" stopColor="#2E7D5B" stopOpacity="0.01"/></linearGradient></defs>{[40, 78, 116, 154].map(y => <line key={y} x1="20" x2="500" y1={y} y2={y} className="chart-grid"/>)}<path d={secondaryPath + ' L 502 176 L 18 176 Z'} fill="url(#gSecondary)"/><path d={primaryPath + ' L 502 176 L 18 176 Z'} fill="url(#gPrimary)"/><path d={secondaryPath} className="chart-line chart-line-secondary"/><path d={primaryPath} className="chart-line"/>{['周一','周二','周三','周四','周五','周六'].map((d, i) => <text key={d} x={28 + i * 92} y="184" className="axis-text">{d}</text>)}</svg><div className="chart-legend"><span><i className="legend-line primary"/>订单金额</span><span><i className="legend-line secondary"/>AI 闭环率</span></div></div>;
+}
+
+function Sidebar({ page, onPage, collapsed, onToggle }: { page: PageKey; onPage: (p: PageKey) => void; collapsed: boolean; onToggle: () => void }) {
+  return <aside className="sidebar">
+    <div className="brand-block">
+      <Logo/>
+      <div className="brand-copy"><strong>Xianyu Agent</strong><span>Agent OS Console</span></div>
+      <button className="collapse-button" onClick={onToggle} aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'} title={collapsed ? '展开侧边栏' : '收起侧边栏'}>{collapsed ? '›' : '‹'}</button>
+    </div>
+    <div className="side-section">Operations</div>
+    <nav className="side-nav" aria-label="主导航">
+      {navItems.map(item => <button key={item.key} className={page === item.key ? 'active' : ''} onClick={() => onPage(item.key)} title={item.label}><Icon name={item.icon}/><span>{item.label}</span><small>{item.sub}</small></button>)}
+    </nav>
+    <div className="sidebar-bottom">
+      <div className="side-card agent-card"><span className="online-dot"/><b>Agent 运行中</b><small>当前账号：闲鱼账号 A<br/>外部写动作经 Policy Gateway 与 Outbox。</small></div>
+      <button className="sidebar-alert" aria-label="通知"><Icon name="bell"/><b>3</b><span>待确认动作</span></button>
+      <div className="sidebar-user"><div className="avatar">陈</div><div><strong>运营管理员</strong><span>资料自动发货店</span></div></div>
+    </div>
+  </aside>;
+}
+
+
+function DashboardPage() { return <section className="page-stack"><div className="page-title"><div><p className="eyebrow">Dashboard Plugin</p><h1>仪表盘</h1><p>承接旧项目订单统计、有效订单、商品库存和趋势图；后续由 Dashboard Plugin Manifest 版本化维护。</p></div><button className="btn primary">打开插件配置</button></div><div className="kpi-grid">{kpis.map(k => <KpiCard key={k.label} {...k}/>)}</div><div className="main-grid"><article className="card panel"><div className="panel-head"><div><h2>订单与 AI 闭环趋势</h2><p>最近 7 天订单金额、自动回复成功率和人工接管变化。</p></div><Badge tone="ok">实时更新</Badge></div><MiniAreaChart/></article><article className="card panel compact"><h2>当前账号健康度</h2><div className="health-list"><div><span>监听心跳</span><Badge tone="ok">正常</Badge></div><div><span>自动回复策略</span><Badge tone="info">180 秒</Badge></div><div><span>虚拟发货</span><Badge tone="ok">立即发货</Badge></div><div><span>凭证边界</span><Badge tone="warn">仅引用</Badge></div></div><div className="deep-card"><strong>Action Policy Gateway</strong><p>3 个高风险动作等待人工确认；所有发送动作写入 Outbox、幂等键和审计。</p></div></article></div><div className="two-grid"><article className="card panel"><h2>商品排行</h2><div className="data-table products"><div className="table-head"><span>商品</span><span>订单</span><span>库存</span><span>状态</span></div>{['Python 全栈资料包','AI 绘画教程合集','考研英语资料','自动化办公模板'].map((name, i) => <div className="table-row" key={name}><span><b>{name}</b><small>{i < 2 ? '虚拟资源 · 凭证完整' : '知识待补充'}</small></span><span>{[42, 31, 18, 12][i]}</span><span>{[368, 220, 0, 90][i]}</span><Badge tone={i === 2 ? 'warn' : 'ok'}>{i === 2 ? '缺凭证' : '可售'}</Badge></div>)}</div></article><article className="card panel"><h2>最近处理记录</h2><Timeline items={[[ '14:22','小橙子询问付款后发货时间，AI 已引用商品知识 v12 回复。','AI 已回复','ok'],['14:18','订单 XY20260909001 已付款，Outbox 立即发货成功。','已发货','ok'],['14:11','买家索要跨商品资源，系统拦截并通知管理员。','风险待确认','warn'],['13:58','考研英语资料缺 buyer_deliverable 凭证，生成待办。','补凭证','warn']]}/></article></div></section>; }
+
+function WorkspacePage() { return <section className="page-stack workspace-page"><div className="page-title"><div><p className="eyebrow">Human Console</p><h1>Workspace 对话工作台</h1><p>通过自然语言安装 Skill、更新知识库、配置虚拟资源和生成 Dashboard 预览；确认卡片直接出现在聊天流。</p></div></div><div className="chat-card card"><div className="bubble user">把 Python 全栈资料包标记为虚拟资源商品，付款后立即发送夸克资源。</div><div className="bubble ai">已定位当前账号 A 的商品和交付凭证。凭证明文只在 Credential Vault 使用，界面展示脱敏引用。</div><ConfirmationCard/><div className="bubble user">安装夸克 Skill，并先展示需要哪些权限。</div><div className="confirm-card"><div className="confirm-head"><div><h2>Skill 安装确认：夸克交付 Skill</h2><p>平台通用 Skill；店铺和账号只保存启用状态与 credential_ref。</p></div><Badge tone="info">中风险</Badge></div><div className="permission-grid"><span>Credential Vault：读取 buyer_deliverable</span><span>Outbox：写入发货动作</span><span>Trace：记录 SkillResult</span></div><div className="card-actions"><button className="btn primary">确认安装</button><button className="btn ghost">查看 Manifest</button></div></div><WorkspaceComposer/></div></section>; }
+function ConfirmationCard() { return <div className="confirm-card"><div className="confirm-head"><div><h2>虚拟资源商品配置确认</h2><p>商品：Python 全栈资料包｜当前账号：闲鱼账号 A｜审计事件：AUD-20260909-1422</p></div><Badge tone="warn">需要人工确认</Badge></div><div className="diff-grid"><div><h3>修改前</h3><p>is_virtual_resource = false<br/>delivery_trigger = manual<br/>delivery_credential_refs = 空</p></div><div><h3>修改后</h3><p>is_virtual_resource = true<br/>delivery_trigger = paid_order<br/>credential_ref = cred_quark_python_bundle_001<br/>usage_scope = buyer_deliverable</p></div></div><p className="muted-text">确认后通过 Action Policy Gateway 校验，写入商品知识版本并投递 Outbox；不会在对话或 Trace 中记录资源明文。</p><div className="card-actions"><button className="btn primary">确认配置</button><button className="btn ghost">打开全屏 HTML 预览</button><button className="btn danger">取消</button></div></div>; }
+function WorkspaceComposer() {
+  return <div className="workspace-composer" role="group" aria-label="Workspace 输入框">
+    <textarea placeholder="随心输入：例如“补齐考研英语资料的发货凭证，并生成确认卡片”" />
+    <div className="composer-bottom">
+      <div className="composer-tools"><button aria-label="添加附件">+</button><button aria-label="自定义"><Icon name="gear"/><span>自定义</span></button></div>
+      <div className="composer-meta"><span className="model-dot"/> <span>6 Astra</span><span>中</span><button className="send-round" aria-label="发送">&uarr;</button></div>
+    </div>
+  </div>;
+}
+
+function AccountsPage() { return <section className="page-stack"><div className="page-title"><div><p className="eyebrow">Account Context</p><h1>店铺 / 账号管理</h1><p>平台每次只管理一个当前闲鱼账号；Skill 平台通用，商品、订单、消息、知识和凭证按账号隔离。</p></div><button className="btn primary">添加闲鱼账号</button></div><div className="kpi-grid three"><KpiCard label="已绑定账号" value="3" delta="2 个在线" context="多账号隔离" tone="ok"/><KpiCard label="当前账号" value="A" delta="资料自动发货店" context="工作上下文" tone="info"/><KpiCard label="今日账号切换" value="5" delta="已审计" context="权限范围" tone="ok"/></div><article className="card panel"><h2>账号列表</h2><div className="data-table accounts"><div className="table-head"><span>账号</span><span>登录状态</span><span>自动回复</span><span>凭证状态</span><span>操作</span></div>{[['闲鱼账号 A','当前工作账号｜资料自动发货店','在线','启用','完整','current'],['闲鱼账号 B','副店铺｜课程资料','需刷新登录','暂停','待刷新','refresh'],['闲鱼账号 C','测试账号','在线','未启用','完整','normal']].map((r, i) => <div className="table-row" key={r[0]}><span><b>{r[0]}</b><small>{r[1]}</small></span><Badge tone={i === 1 ? 'warn' : 'ok'}>{r[2]}</Badge><Badge tone={r[3] === '启用' ? 'ok' : 'gray'}>{r[3]}</Badge><span>{r[4]}</span><div className="account-actions"><button className={i === 0 ? 'btn ghost' : 'btn primary'}>{i === 0 ? '当前使用中' : '切换到此账号'}</button><button className="btn ghost">重新扫码授权</button><button className="btn danger">删除账号</button></div></div>)}</div></article></section>; }
+function KnowledgePage() { return <section className="page-stack"><div className="page-title"><div><p className="eyebrow">Knowledge Center</p><h1>知识库</h1><p>商品知识库和通用知识库以完整多行文本维护；图片和文件统一粘贴 / 拖入，AI 识别后经运营确认再合并。</p></div></div><div className="knowledge-grid"><aside className="card panel"><h2>商品列表</h2><div className="list-stack"><ProductItem name="Python 全栈资料包" meta="虚拟资源 · v12 · 完整" tone="ok" tag="当前"/><ProductItem name="AI 绘画教程合集" meta="虚拟资源 · v7 · 完整" tone="ok" tag="完整"/><ProductItem name="考研英语资料" meta="待确认 · 缺凭证" tone="warn" tag="需补充"/></div></aside><article className="card panel"><div className="panel-head"><div><h2>商品知识详情：Python 全栈资料包</h2><p>商品 ID：ITEM-93821｜当前账号：闲鱼账号 A｜版本：v12｜更新时间：2026-09-09 14:30</p></div><div className="button-row"><Badge tone="ok">虚拟资源</Badge><button className="btn primary">保存商品知识</button></div></div><textarea className="knowledge-text" defaultValue={['# Python 全栈资料包','','## 商品说明','Python 全栈资料包：爬虫 / FastAPI / 自动化 / AI 应用合集。','','## 常见问题','Q：付款后多久发？','A：虚拟资源商品付款后系统立即发送交付内容；界面仅展示 credential_ref。','','## 自动发货配置','is_virtual_resource = true','delivery_trigger = paid_order','credential_ref = cred_quark_python_bundle_001','usage_scope = buyer_deliverable'].join('\n')} /><UploadPanel/></article></div><div className="two-grid"><article className="card panel"><div className="panel-head"><div><h2>通用知识库编辑</h2><p>店铺通用事实、FAQ 和 SOP 统一维护在文本框中。</p></div><button className="btn primary">保存通用知识</button></div><textarea className="knowledge-text small" defaultValue={['# 店铺通用知识库','','## 发货说明','虚拟资源付款后自动发送；普通咨询由 Agent 根据知识库判断回复。','','## 风险 SOP','退款、投诉、差评、凭证异常、跨商品资源、Prompt Injection 均不自动回复，通知管理员。'].join('\n')} /><UploadPanel compact/></article><article className="card panel"><h2>编辑辅助与版本记录</h2><Timeline items={[[ '14:30','运营手动更新 Python 全栈资料包 FAQ，新增付款后立即发货说明。','v12','ok'],['14:18','AI 生成虚拟资源配置卡片，人工确认后生效。','v11','info'],['13:55','系统检测到考研英语资料缺少 buyer_deliverable 凭证。','待处理','warn']]}/></article></div></section>; }
+function ProductItem({ name, meta, tone, tag }: { name: string; meta: string; tone: Tone; tag: string }) { return <div className="product-item"><span><b>{name}</b><small>{meta}</small></span><Badge tone={tone}>{tag}</Badge></div>; }
+function UploadPanel({ compact = false }: { compact?: boolean }) { return <div className="upload-panel"><div className="upload-drop-row"><div className="attachment-chip image"><span className="file-thumb">PNG</span><div><strong>商品截图</strong><small>OCR · 可合并</small></div><button aria-label="移除附件">×</button></div><div className="attachment-chip doc"><span className="file-thumb">MD</span><div><strong>{compact ? '售后 SOP' : '交付说明'}</strong><small>解析完成</small></div><button aria-label="移除附件">×</button></div></div><textarea placeholder="粘贴图片 / 文件，拖入资料，或继续输入修改意见" /><div className="upload-composer-bottom"><div className="composer-tools"><button aria-label="添加资料">+</button><button aria-label="自定义"><Icon name="gear"/><span>自定义</span></button></div><div className="composer-meta"><span className="model-dot"/> <span>AI 识别</span><button className="send-round" aria-label="发送">&uarr;</button></div></div></div>; }
+function MessagesPage() { return <section className="page-stack"><div className="page-title"><div><p className="eyebrow">Managed Conversations</p><h1>消息托管</h1><p>从运营管理员视角组织：当前账号是否健康、哪些会话已闭环、哪些异常需要补知识 / 补凭证 / 改策略。</p></div><button className="btn primary">处理待办</button></div><div className="kpi-grid">{['96.8% 自动处理成功率','18 今日自动回复','7 立即发货订单','3 待管理员处理'].map((text, i) => { const parts = text.split(' '); return <KpiCard key={text} label={parts.slice(1).join(' ')} value={parts[0]} delta={i === 3 ? '高优先级' : '正常'} context="当前账号 A" tone={i === 3 ? 'warn' : 'ok'}/>; })}</div><div className="two-grid"><article className="card panel"><h2>管理员待办</h2><Timeline items={[[ '高','考研英语资料缺少 buyer_deliverable 凭证，付款后未发货。','补凭证','warn'],['中','买家要求跨商品资源，Agent 已通知管理员且未回复买家。','风险确认','warn'],['中','AI 绘画教程合集出现新问题，知识库未覆盖。','补知识','info']]}/></article><article className="card panel"><h2>托管健康度</h2><FormRows rows={[[ '当前账号','闲鱼账号 A · 托管中'],['网关状态','实时监听正常 · 最近心跳 14:24:08'],['自动回复策略','能确定就回复；不能确定则通知管理员，不回复买家'],['虚拟发货策略','订单已付款即发货；凭证缺失进入管理员待办'],['今日拦截风险','跨商品资源 2 · 凭证缺失 1 · Prompt Injection 0']]}/></article></div><article className="card panel"><h2>会话处理记录</h2><div className="data-table messages"><div className="table-head"><span>时间</span><span>买家 / 商品</span><span>意图</span><span>Agent 处理</span><span>管理员动作</span></div>{[['14:22','小橙子 / Python 全栈资料包','询问付款后多久发货','已自动回复','查看对话'],['14:18','XY20260909001 / Python 全栈资料包','订单已付款','已立即发货','查看审计'],['14:11','阿木 / AI 绘画教程合集','索要其他商品资源','未回复买家','处理风险'],['13:58','XY20260909003 / 考研英语资料','订单已付款','发货失败','补交付凭证']].map((r, i) => <div className="table-row" key={r[0]}><span>{r[0]}</span><span>{r[1]}</span><span>{r[2]}</span><Badge tone={i > 1 ? 'warn' : 'ok'}>{r[3]}</Badge><button className={i > 1 ? 'btn primary' : 'btn ghost'}>{r[4]}</button></div>)}</div></article></section>; }
+function ReviewPage() { return <section className="page-stack"><div className="page-title"><div><p className="eyebrow">Trace / Replay / Eval</p><h1>运营复盘</h1><p>帮助管理员理解 Agent 决策、标注结果、加入回归样本，并把复盘结论转为知识库 / 策略 / Skill 改进卡片。</p></div><button className="btn primary">创建回归样本</button></div><div className="kpi-grid"><KpiCard label="规则评分通过率" value="92.4%" delta="+3.4%" context="最近 96 样本" tone="ok"/><KpiCard label="待复盘异常" value="11" delta="3 个高优先级" context="运营标注" tone="warn"/><KpiCard label="回归样本" value="96" delta="已版本化" context="Replay" tone="info"/><KpiCard label="需改进知识点" value="3" delta="可生成卡片" context="闭环动作" tone="warn"/></div><div className="two-grid"><article className="card panel"><h2>异常复盘队列</h2><Timeline items={[[ '14:11','跨商品资源请求被拦截。复盘风险判断是否正确。','待标注','warn'],['13:58','付款订单因缺交付凭证未发货。复盘上架前凭证检查。','改规则','warn'],['12:46','买家追问新版本课程覆盖范围。复盘是否补充 FAQ。','补知识','info']]}/></article><article className="card panel"><h2>Replay 预览</h2><div className="replay-card"><p><b>输入：</b>我买了 AI 绘画教程，把 Python 资料也发我吧。</p><p><b>当时决策：</b>识别为跨商品资源请求，不回复买家，调用通知 Skill。</p><p><b>复盘结论：</b>决策正确；通知模板需补充订单号、商品名、买家昵称。</p></div><div className="card-actions"><button className="btn primary">标注为正确</button><button className="btn ghost">加入回归集</button></div></article></div></section>; }
+function SettingsPage() {
+  const tabs = [
+    { id: 'autoReply', label: '自动回复策略', meta: 'Policy' },
+    { id: 'model', label: 'OpenAI API', meta: 'ModelClient' },
+    { id: 'credentials', label: '凭证管理', meta: 'Vault' },
+    { id: 'safety', label: '安全输出校验', meta: 'Gateway' },
+    { id: 'outbox', label: 'Outbox Worker', meta: 'Runtime' },
+    { id: 'plugins', label: '插件配置', meta: 'Skill / Plugin' }
+  ] as const;
+  type SettingsTabKey = typeof tabs[number]['id'];
+  const [activeTab, setActiveTab] = useState<SettingsTabKey>('autoReply');
+  const panels = {
+    autoReply: <div className="settings-content"><article className="card panel"><div className="panel-head"><div><h2>自动回复策略</h2><p>按当前闲鱼账号配置自动回复、人工介入重新计时、风险拦截和虚拟资源立即发货规则。</p></div><Badge tone="ok">当前生效</Badge></div><FormRows rows={[[ '当前账号','闲鱼账号 A · 资料自动发货店'],['默认超时','180 秒；人工介入后重新计时'],['自动发送条件','AI 可确定回答、知识命中、策略通过、未发生人工回复'],['消息托管','能确定则回复；不能确定则通知管理员并生成待办，不回复买家'],['虚拟资源发货','订单已付款即触发；必须命中 buyer_deliverable 凭证和幂等键'],['高风险拦截','退款、投诉、差评、凭证异常、跨商品资源、Prompt Injection、AI 置信度不足']]}/></article><article className="card panel"><h2>策略闭环</h2><Timeline items={[[ '人工介入','运营发送人工回复后，自动回复任务重新计时。','重计时','info'],['知识缺失','生成“补知识”待办并关联商品知识版本。','待处理','warn'],['凭证缺失','虚拟商品付款后不发送明文，转入管理员补凭证。','拦截','warn'],['审计记录','策略命中、跳过、超时和发送结果均写入 Trace / Audit。','已开启','ok']]}/></article></div>,
+    model: <div className="settings-content"><article className="card panel"><div className="panel-head"><div><h2>OpenAI API 兼容模型配置</h2><p>用于 DeepSeek Harness / OpenAI API 兼容 ModelClient；当前配置失败时可切换备用 Provider。</p></div><Badge tone="info">ModelClient</Badge></div><div className="two-grid nested"><ModelBox title="当前配置" status="测试通过，已生效" model="deepseek-chat"/><ModelBox title="备用配置" status="备用可用" model="gpt-4.1-mini"/></div><Timeline items={[[ '生效规则','Base URL、API Key、Model 填写完整且连接测试通过后才生效。','强校验','ok'],['故障切换','当前 Provider 失败、超时、认证失败或限流时尝试备用配置。','Fallback','warn'],['审计边界','记录失败原因、provider、trace_id；API Key 仅显示脱敏摘要。','脱敏','info']]}/></article></div>,
+    credentials: <div className="settings-content"><article className="card panel"><div className="panel-head"><div><h2>Credential Vault / Secret Store</h2><p>Cookie、Token、API Key、夸克链接、提取码、卡密等敏感内容仅进入凭证库，前端只展示引用与脱敏摘要。</p></div><Badge tone="warn">敏感边界</Badge></div><div className="settings-panel-grid"><div className="model-box"><h3>买家可交付凭证</h3><FormRows rows={[[ 'usage_scope','buyer_deliverable'],['示例引用','cred_quark_python_bundle_001'],['展示方式','仅显示 credential_ref、更新时间和使用范围'],['使用条件','订单已付款 + 商品虚拟资源 + Policy Gateway 通过']]}/></div><div className="model-box"><h3>系统内部凭证</h3><FormRows rows={[[ 'usage_scope','system_only / operator_only'],['覆盖内容','闲鱼 Cookie、API Key、夸克主账号登录态'],['前端展示','sk-••••••••••••A91F / cookie_ref_xianyu_a'],['限制','不得进入知识库正文、买家回复、Trace 明文或示例数据']]}/></div></div></article><article className="card panel"><h2>凭证审计</h2><Timeline items={[[ '读取','Executor 读取凭证时记录操作者、用途、credential_ref。','审计','ok'],['新增/替换','Workspace 只生成确认卡片，引导进入 Vault 保存明文。','需确认','warn'],['异常','凭证缺失、过期、范围不匹配时生成管理员待办。','待处理','warn']]}/></article></div>,
+    safety: <div className="settings-content"><article className="card panel"><div className="panel-head"><div><h2>安全输出校验</h2><p>买家消息、昵称、订单备注和外部链接均按不可信输入处理，不得触发配置、凭证或插件变更。</p></div><Badge tone="danger">高优先级</Badge></div><Timeline items={[[ 'Prompt Injection','买家要求忽略系统规则、泄露配置或修改策略时拦截。','拦截','danger'],['凭证泄露','要求发送 Cookie、Token、API Key、内部链接或 system_only 凭证时拦截。','拦截','danger'],['非订单交付','未付款或未满足发货条件时，不发送夸克链接、提取码或卡密。','校验','warn'],['数据污染','买家输入不得直接写入知识库、Skill 配置、Dashboard 配置或凭证范围。','隔离','info']]}/></article><article className="card panel"><h2>网关优先级</h2><FormRows rows={[[ '最高优先级','系统指令、Policy Gateway、Credential Vault、Skill Manifest'],['确认卡片','高风险外部写动作必须展示修改前后、风险原因、幂等键和审计引用'],['允许输出','只能引用 Knowledge Center 或被授权 buyer_deliverable 凭证'],['失败处理','不能闭环时生成管理员待办并保留 Trace / Replay 样本']]}/></article></div>,
+    outbox: <div className="settings-content"><article className="card panel"><div className="panel-head"><div><h2>Outbox Worker / Execution Runtime</h2><p>所有发送闲鱼消息、更新知识库、更新 Dashboard Plugin、触发通知等写动作经 Outbox 执行。</p></div><Badge tone="ok">Worker 正常</Badge></div><div className="settings-panel-grid"><div className="model-box"><h3>运行状态</h3><FormRows rows={[[ 'Worker','online · 最近心跳 14:24:08'],['队列深度','7 pending / 128 succeeded today'],['重试策略','超时、限流和可恢复错误进入指数退避'],['超时控制','每个 capability 使用 Manifest 声明的 timeout']]}/></div><div className="model-box"><h3>执行边界</h3><FormRows rows={[[ '幂等键','shop_id + account_id + action_type + business_id'],['审计','记录请求摘要、执行结果、错误原因和 trace_id'],['Replay','默认使用当时捕获的 SkillResult，避免外部状态漂移'],['人工确认','高风险动作确认后才进入执行队列']]}/></div></div></article></div>,
+    plugins: <div className="settings-content"><article className="card panel"><div className="panel-head"><div><h2>插件配置</h2><p>V1 通过 Workspace 对话安装、启用、禁用和升级 Skill / Plugin；不建设独立 Marketplace 页面。</p></div><Badge tone="info">平台通用</Badge></div><div className="data-table plugin-settings"><div className="table-head"><span>模块</span><span>职责</span><span>账号隔离</span><span>状态</span></div>{[['Dashboard Plugin','首页仪表盘 widgets / metrics / queries / layout 版本化','数据按账号隔离','已启用'],['Knowledge Plugin','商品知识、通用知识、知识召回、版本管理','知识按店铺和账号隔离','已启用'],['Policy Plugin','自动回复、风险拦截、外部写动作策略','配置按账号隔离','已启用'],['Executor Plugin','发送消息、更新知识库、通知和 Outbox 结果写入','执行记录按账号隔离','已启用'],['夸克交付 Skill','读取 buyer_deliverable 凭证并生成发货文本','凭证引用按账号隔离','需配置']].map((r, i) => <div className="table-row" key={r[0]}><span><b>{r[0]}</b></span><span>{r[1]}</span><span>{r[2]}</span><Badge tone={i === 4 ? 'warn' : 'ok'}>{r[3]}</Badge></div>)}</div></article><article className="card panel"><h2>版本与发布</h2><Timeline items={[[ '修改入口','运营在 Workspace 中提出修改仪表盘、知识或 Skill 配置。','对话','info'],['发布规则','Dashboard Plugin 被 AI 修改后需要人工点击发布。','确认','warn'],['回滚','Manifest、配置和布局变更生成版本记录并支持回滚。','版本化','ok']]}/></article></div>
+  };
+  return <section className="page-stack settings-page"><div className="settings-grid"><aside className="card settings-tabs" aria-label="设置分类">{tabs.map(tab => <button key={tab.id} className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)}><span>{tab.label}</span><small>{tab.meta}</small></button>)}</aside><div className="settings-active">{panels[activeTab]}</div></div></section>;
+}
+function ModelBox({ title, status, model }: { title: string; status: string; model: string }) { return <div className="model-box"><h3>{title}</h3><FormRows rows={[[ 'Base URL','https://api.example.com/v1'],['API Key','sk-••••••••••••••••••••A91F'],['Model', model],['连通性', status]]}/></div>; }
+function Timeline({ items }: { items: Array<[string, string, string, string]> }) { return <div className="timeline">{items.map(([time, text, tag, tone]) => <div className="timeline-row" key={time + tag}><strong>{time}</strong><span>{text}</span><Badge tone={tone as Tone}>{tag}</Badge></div>)}</div>; }
+function FormRows({ rows }: { rows: Array<[string, string]> }) { return <div className="form-rows">{rows.map(([label, value]) => <div key={label}><label>{label}</label><span>{value}</span></div>)}</div>; }
+
+type PrototypeModal = { title: string; tone: Tone; rows: Array<[string, string]>; confirm?: string };
+function ModalHost({ modal, onClose, onConfirm }: { modal: PrototypeModal | null; onClose: () => void; onConfirm: () => void }) {
+  if (!modal) return null;
+  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={modal.title} onMouseDown={onClose}>
+    <section className="modal-card card" onMouseDown={e => e.stopPropagation()}>
+      <div className="modal-head"><div><p className="eyebrow">Interaction Preview</p><h2>{modal.title}</h2></div><Badge tone={modal.tone}>{modal.tone === 'danger' ? '高风险' : modal.tone === 'warn' ? '需确认' : '模拟执行'}</Badge></div>
+      <div className="modal-body"><FormRows rows={modal.rows}/></div>
+      <div className="card-actions"><button className="btn ghost" onClick={onClose}>关闭</button>{modal.confirm && <button className={modal.tone === 'danger' ? 'btn danger' : 'btn primary'} onClick={onConfirm}>{modal.confirm}</button>}</div>
+    </section>
+  </div>;
+}
+function ToastHost({ items }: { items: Array<{ id: number; text: string; tone: Tone }> }) {
+  return <div className="toast-stack" aria-live="polite">{items.map(item => <div className={'toast toast-' + item.tone} key={item.id}>{item.text}</div>)}</div>;
+}
+
+function DesktopShell({ page, setPage, collapsed, setCollapsed }: { page: PageKey; setPage: (p: PageKey) => void; collapsed: boolean; setCollapsed: (v: boolean) => void }) { const Page = useMemo(() => ({ dashboard: DashboardPage, workspace: WorkspacePage, accounts: AccountsPage, knowledge: KnowledgePage, messages: MessagesPage, review: ReviewPage, settings: SettingsPage }[page]), [page]); return <div className={'desktop-shell ' + (collapsed ? 'sidebar-collapsed' : '')}><Sidebar page={page} onPage={setPage} collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)}/><div className="desktop-body"><main><Page/></main></div></div>; }
+function MobileHeroCard() {
+  return <section className="card mobile-status-summary">
+    <div className="mobile-section-head"><div><h2>Agent 在线 · 闲鱼账号 A</h2><p>180 秒托管策略 · 立即发货已启用 · 心跳 14:24:08</p></div><Badge tone="ok">正常</Badge></div>
+    <div className="mobile-health-grid">
+      <span><b>凭证边界</b><small>仅 buyer_deliverable</small></span>
+      <span><b>Outbox</b><small>7 pending / 128 done</small></span>
+    </div>
+  </section>;
+}
+
+function MobileQuickActions() {
+  return <section className="mobile-quick-grid" aria-label="移动端快捷动作">
+    {[
+      ['补交付凭证', '考研英语资料', 'warn'],
+      ['确认风险', '跨商品资源请求', 'danger'],
+      ['查看发货', '7 单已执行', 'ok'],
+      ['补充知识', '2 条新问题', 'info']
+    ].map(([title, meta, tone]) => <button className={'mobile-quick-card tone-card-' + tone} key={title}>
+      <span>{title}</span><small>{meta}</small>
+    </button>)}
+  </section>;
+}
+
+function MobileTodoStack() {
+  return <section className="card mobile-task-card">
+    <div className="mobile-section-head"><div><h2>今天优先处理</h2><p>按风险和时效排序，不展示桌面大表格。</p></div><Badge tone="warn">3 待办</Badge></div>
+    <div className="mobile-task-list">
+      <button className="mobile-task-row urgent"><i/> <div><strong>付款后未发货</strong><span>考研英语资料缺少 buyer_deliverable 凭证</span></div><Badge tone="warn">补凭证</Badge></button>
+      <button className="mobile-task-row"><i/> <div><strong>跨商品资源请求</strong><span>买家索要 Python 资料包，Agent 已拦截</span></div><Badge tone="danger">确认</Badge></button>
+      <button className="mobile-task-row"><i/> <div><strong>知识缺口</strong><span>AI 绘画教程新增安装问题，建议补 FAQ</span></div><Badge tone="info">补知识</Badge></button>
+    </div>
+  </section>;
+}
+
+function MobileOrderPulse() {
+  return <section className="card mobile-card mobile-pulse-card">
+    <div className="mobile-section-head"><div><h2>经营快照</h2><p>只保留移动端可扫读指标。</p></div><button className="text-button">详情</button></div>
+    <div className="mobile-mini-chart"><MiniAreaChart primary={[46, 54, 52, 68, 73, 81, 78, 92]} secondary={[42, 48, 55, 58, 61, 70, 76, 82]}/></div>
+  </section>;
+}
+
+function MobileDashboardView() {
+  return <>
+    <MobileHeroCard/>
+    <MobileQuickActions/>
+    <div className="mobile-kpis">{kpis.slice(0,4).map(k => <KpiCard key={k.label} {...k}/>)}</div>
+    <MobileTodoStack/>
+    <MobileOrderPulse/>
+  </>;
+}
+
+function MobileWorkspaceView() {
+  return <>
+    <section className="card mobile-chat-card">
+      <div className="mobile-bubble user">把考研英语资料补上交付凭证，先给我看会改什么。</div>
+      <div className="mobile-bubble ai">已定位商品和订单异常，只展示 credential_ref 与影响范围。</div>
+      <div className="mobile-confirm-compact">
+        <div className="confirm-head"><div><h2>补交付凭证确认</h2><p>商品：考研英语资料 · AUD-20260909-1518</p></div><Badge tone="warn">需确认</Badge></div>
+        <div className="mobile-before-after"><span><b>修改前</b>无可交付凭证</span><span><b>修改后</b>cred_quark_exam_en_002</span></div>
+        <div className="card-actions"><button className="btn primary">确认配置</button><button className="btn ghost">预览买家消息</button></div>
+      </div>
+      <div className="mobile-composer-bar"><span>输入新的运营指令…</span><button aria-label="发送">&uarr;</button></div>
+    </section>
+  </>;
+}
+
+function MobileMessagesView() {
+  return <>
+    <section className="mobile-filter-strip"><button className="active">待我处理</button><button>已闭环</button><button>风险</button></section>
+    <section className="mobile-deck-card card">
+      <div className="mobile-section-head"><div><h2>消息托管卡片</h2><p>移动端按一张张卡片处理，而不是横向表格。</p></div><Badge tone="warn">高</Badge></div>
+      <div className="buyer-strip"><div className="avatar">林</div><div><strong>林同学</strong><span>订单 XY20260909003 · 考研英语资料</span></div></div>
+      <p className="buyer-message">“我已经付款了，怎么还没收到资料？”</p>
+      <div className="mobile-reason-box"><b>Agent 判断</b><span>订单已付款，但商品缺少 buyer_deliverable 凭证，暂不向买家发送任何敏感内容。</span></div>
+      <div className="mobile-action-row"><button className="btn primary">补凭证并发货</button><button className="btn ghost">通知管理员</button></div>
+    </section>
+    <MobileTodoStack/>
+  </>;
+}
+
+function MobileKnowledgeView() {
+  const mobileProducts = [
+    ['Python 全栈资料包', '虚拟资源 · 凭证完整 · v12', 'ok'],
+    ['AI 绘画教程合集', '虚拟资源 · 凭证完整 · v7', 'ok'],
+    ['考研英语资料', '待确认 · 缺凭证', 'warn'],
+    ['自动化办公模板', '通用资料 · FAQ 待补', 'info'],
+    ['副业资料合集', '高频咨询 · v5', 'ok'],
+    ['剪辑素材包', '库存 0 · 需下架确认', 'danger']
+  ];
+  return <>
+    <section className="mobile-filter-strip"><button className="active">商品知识</button><button>通用 SOP</button><button>待补充</button></section>
+    <section className="card mobile-knowledge-card mobile-product-browser">
+      <div className="mobile-section-head"><div><h2>商品知识库</h2><p>大量商品先检索、筛选、最近编辑，再进入单商品编辑。</p></div><Badge tone="info">1,286 商品</Badge></div>
+      <div className="mobile-search-box">搜索商品名 / SKU / FAQ / credential_ref</div>
+      <div className="mobile-product-toolbar"><button className="active">全部</button><button>需补充 46</button><button>虚拟资源</button><button>最近编辑</button></div>
+      <div className="mobile-bulk-hint"><b>已筛选 46 个待补商品</b><span>优先展示付款后未闭环、凭证缺失和高频咨询商品。</span></div>
+      <div className="mobile-product-list dense" aria-label="可滚动商品知识列表">
+        {mobileProducts.map(([name, meta, tone], index) => <button className={index === 0 ? 'active' : ''} key={name}>
+          <strong>{name}</strong><span>{meta}</span><Badge tone={tone as Tone}>{index === 0 ? '当前' : index === 2 ? '补凭证' : index === 5 ? '风险' : '查看'}</Badge>
+        </button>)}
+      </div>
+      <button className="mobile-load-more">加载更多商品</button>
+    </section>
+    <section className="card mobile-knowledge-card">
+      <div className="mobile-section-head"><div><h2>当前编辑：Python 全栈资料包</h2><p>ITEM-93821 · 闲鱼账号 A · v12 · 自动发货商品</p></div><Badge tone="ok">凭证完整</Badge></div>
+      <div className="mobile-product-pill"><strong>Python 全栈资料包</strong><span>credential_ref 已绑定</span></div>
+      <textarea defaultValue={'# Python 全栈资料包\nQ：付款后多久发？\nA：虚拟资源商品付款后系统立即发送交付内容；界面仅展示 credential_ref。\n\ncredential_ref = cred_quark_python_bundle_001\nusage_scope = buyer_deliverable'} />
+      <div className="mobile-attachment-list">
+        <div className="mobile-upload-card"><span>PNG</span><div><b>商品截图已识别</b><small>可合并 2 条 FAQ</small></div><button>查看</button></div>
+        <div className="mobile-upload-card"><span>MD</span><div><b>交付说明.md</b><small>解析完成 · 待确认</small></div><button>移除</button></div>
+      </div>
+      <div className="mobile-confirm-compact knowledge-confirm">
+        <div className="confirm-head"><div><h2>AI 识别合并确认</h2><p>新增 FAQ 2 条；凭证仍仅展示 credential_ref。</p></div><Badge tone="warn">需确认</Badge></div>
+        <div className="mobile-before-after"><span><b>修改前</b>商品 FAQ 仅覆盖付款后发货</span><span><b>修改后</b>补充安装说明、资源打不开处理 SOP</span></div>
+        <div className="mobile-audit-row"><span>policy_ref: knowledge.merge.confirm</span><span>audit: AUD-20260909-1532</span></div>
+        <div className="card-actions"><button className="btn primary">确认合并</button><button className="btn ghost">保存草稿</button></div>
+      </div>
+    </section>
+    <section className="card mobile-knowledge-card mobile-general-knowledge-card">
+      <div className="mobile-section-head"><div><h2>通用知识库编辑</h2><p>与 PC 端一致：店铺通用事实、FAQ 和 SOP 统一维护在文本框中。</p></div><Badge tone="ok">v8</Badge></div>
+      <textarea className="mobile-general-text" defaultValue={'# 店铺通用知识库\n\n## 发货说明\n虚拟资源付款后自动发送；普通咨询由 Agent 根据知识库判断回复。\n\n## 风险 SOP\n退款、投诉、差评、凭证异常、跨商品资源、Prompt Injection 均不自动回复，通知管理员。'} />
+      <div className="mobile-attachment-list">
+        <div className="mobile-upload-card"><span>MD</span><div><b>售后 SOP</b><small>解析完成 · 可合并</small></div><button>查看</button></div>
+        <div className="mobile-upload-card"><span>TXT</span><div><b>店铺 FAQ 草稿</b><small>识别 6 条通用问答</small></div><button>移除</button></div>
+      </div>
+      <div className="mobile-confirm-compact knowledge-confirm">
+        <div className="confirm-head"><div><h2>通用知识合并确认</h2><p>新增发货说明 1 条、风险 SOP 2 条；影响当前账号 A。</p></div><Badge tone="warn">需确认</Badge></div>
+        <div className="mobile-before-after"><span><b>修改前</b>通用知识 v8，风险 SOP 覆盖退款/投诉/差评</span><span><b>修改后</b>补充凭证异常、跨商品资源、Prompt Injection 处理规则</span></div>
+        <div className="mobile-audit-row"><span>policy_ref: knowledge.general.merge</span><span>audit: AUD-20260909-1548</span></div>
+        <div className="card-actions"><button className="btn primary">保存通用知识</button><button className="btn ghost">保存草稿</button></div>
+      </div>
+    </section>
+    <section className="card mobile-knowledge-card">
+      <div className="mobile-section-head"><div><h2>版本记录</h2><p>移动端保留最近变更，完整 diff 可回到 PC 查看。</p></div><button className="text-button">全部</button></div>
+      <Timeline items={[[ '14:30','更新 Python 全栈资料包 FAQ，生成 v12。','v12','ok'],['14:18','AI 生成虚拟资源配置卡片，人工确认后生效。','v11','info'],['13:55','考研英语资料缺少 buyer_deliverable 凭证。','待处理','warn']]}/>
+    </section>
+  </>;
+}
+
+function MobileAccountsView() {
+  return <>
+    <section className="card mobile-account-card active-account">
+      <div className="mobile-section-head"><div><h2>当前工作账号</h2><p>移动端强调“当前上下文”，避免误操作到别的店。</p></div><Badge tone="ok">在线</Badge></div>
+      <div className="account-large"><div className="avatar">A</div><div><strong>闲鱼账号 A</strong><span>资料自动发货店 · 180 秒托管策略</span></div></div>
+      <button className="btn primary full">切换账号</button>
+    </section>
+    <section className="mobile-account-list">
+      {[
+        ['闲鱼账号 B', '课程资料副店', '需刷新登录', 'warn'],
+        ['闲鱼账号 C', '测试账号', '在线', 'ok']
+      ].map(([name, meta, state, tone]) => <button className="card mobile-account-card" key={name}>
+        <div className="account-large small"><div className="avatar">{name.slice(-1)}</div><div><strong>{name}</strong><span>{meta}</span></div></div><Badge tone={tone as Tone}>{state}</Badge>
+      </button>)}
+    </section>
+  </>;
+}
+
+function MobileReviewView() {
+  return <>
+    <section className="card mobile-review-card">
+      <div className="mobile-section-head"><div><h2>运营复盘</h2><p>移动端承载轻量复盘：看异常、标注结论、加入回归样本。</p></div><Badge tone="warn">11 待复盘</Badge></div>
+      <div className="mobile-review-kpis"><span><b>92.4%</b><small>规则评分</small></span><span><b>96</b><small>回归样本</small></span><span><b>3</b><small>知识改进</small></span></div>
+      <div className="mobile-replay-box"><b>Replay 预览</b><p>买家索要跨商品资源；当时决策：拦截并通知管理员；复盘结论：策略正确，通知模板需补订单号。</p></div>
+      <div className="mobile-action-row"><button className="btn primary">标注正确</button><button className="btn ghost">加入回归集</button></div>
+    </section>
+    <section className="card mobile-review-card">
+      <div className="mobile-section-head"><div><h2>异常队列</h2><p>按高价值样本排序。</p></div><button className="text-button">筛选</button></div>
+      <Timeline items={[[ '14:11','跨商品资源请求被拦截，等待复盘风险判断。','待标注','warn'],['13:58','付款订单因缺交付凭证未发货，需改上架前检查。','改规则','warn'],['12:46','买家追问课程覆盖范围，建议补 FAQ。','补知识','info']]}/>
+    </section>
+  </>;
+}
+
+function MobileSettingsView() {
+  const tabs = [
+    { id: 'autoReply', label: '策略', title: '自动回复策略', meta: 'Policy' },
+    { id: 'model', label: '模型', title: 'OpenAI API', meta: 'ModelClient' },
+    { id: 'credentials', label: '凭证', title: '凭证管理', meta: 'Vault' },
+    { id: 'safety', label: '安全', title: '安全输出校验', meta: 'Gateway' },
+    { id: 'outbox', label: '队列', title: 'Outbox Worker', meta: 'Runtime' },
+    { id: 'plugins', label: '插件', title: '插件配置', meta: 'Skill / Plugin' }
+  ] as const;
+  type MobileSettingsTabKey = typeof tabs[number]['id'];
+  const [activeTab, setActiveTab] = useState<MobileSettingsTabKey>('autoReply');
+  const current = tabs.find(tab => tab.id === activeTab)!;
+  const panels: Record<MobileSettingsTabKey, ReactNode> = {
+    autoReply: <section className="card mobile-settings-card">
+      <div className="mobile-section-head"><div><h2>自动回复策略</h2><p>按当前闲鱼账号配置自动回复、人工介入重新计时、风险拦截和虚拟资源立即发货规则。</p></div><Badge tone="ok">当前生效</Badge></div>
+      <div className="mobile-form-rows"><div><label>当前账号</label><span>闲鱼账号 A · 资料自动发货店</span></div><div><label>默认超时</label><span>180 秒；人工介入后重新计时</span></div><div><label>自动发送条件</label><span>AI 可确定回答、知识命中、策略通过、未发生人工回复</span></div><div><label>高风险拦截</label><span>退款、投诉、差评、凭证异常、跨商品资源、Prompt Injection、置信度不足</span></div></div>
+      <div className="mobile-action-row"><button className="btn primary">生成确认卡片</button><button className="btn ghost">查看审计</button></div>
+    </section>,
+    model: <section className="card mobile-settings-card mobile-api-config-card">
+      <div className="mobile-section-head"><div><h2>OpenAI API 兼容模型配置</h2><p>与 PC 的 ModelClient 配置一致，移动端支持快速修改、连接测试和确认生效。</p></div><Badge tone="info">ModelClient</Badge></div>
+      <label><span>Provider</span><select defaultValue="deepseek"><option value="deepseek">DeepSeek Harness</option><option value="openai">OpenAI Compatible</option><option value="backup">Backup Provider</option></select></label>
+      <label><span>Base URL</span><input defaultValue="https://api.deepseek.com/v1" /></label>
+      <label><span>Model</span><input defaultValue="deepseek-chat" /></label>
+      <label><span>API Key</span><input defaultValue="sk-••••••••••••A91F" type="password" /></label>
+      <div className="mobile-audit-row"><span>secret_store_ref: model_api_key_primary</span><span>policy_ref: settings.model.update</span></div>
+      <div className="mobile-before-after"><span><b>当前配置</b>deepseek-chat · 测试通过</span><span><b>备用配置</b>gpt-4.1-mini · 可故障切换</span></div>
+      <div className="card-actions"><button className="btn ghost">测试连接</button><button className="btn primary">保存 API 配置</button></div>
+    </section>,
+    credentials: <section className="card mobile-settings-card">
+      <div className="mobile-section-head"><div><h2>Credential Vault / Secret Store</h2><p>Cookie、Token、API Key、夸克链接、提取码、卡密只进入凭证库，前端只显示引用。</p></div><Badge tone="warn">敏感边界</Badge></div>
+      <div className="mobile-settings-list readonly"><div><strong>买家可交付凭证</strong><span>usage_scope = buyer_deliverable · cred_quark_python_bundle_001</span><Badge tone="ok">可发货</Badge></div><div><strong>系统内部凭证</strong><span>cookie_ref_xianyu_a / model_api_key_primary，仅脱敏展示</span><Badge tone="warn">内部</Badge></div><div><strong>异常处理</strong><span>缺失、过期、范围不匹配时生成管理员待办</span><Badge tone="info">审计</Badge></div></div>
+      <div className="mobile-action-row"><button className="btn primary">新增凭证引用</button><button className="btn ghost">凭证审计</button></div>
+    </section>,
+    safety: <section className="card mobile-settings-card">
+      <div className="mobile-section-head"><div><h2>安全输出校验</h2><p>买家消息、昵称、订单备注和外部链接均按不可信输入处理。</p></div><Badge tone="danger">高优先级</Badge></div>
+      <Timeline items={[[ 'Prompt Injection','买家要求忽略系统规则、泄露配置或修改策略时拦截。','拦截','danger'],['凭证泄露','要求发送 Cookie、Token、API Key、内部链接或 system_only 凭证时拦截。','拦截','danger'],['非订单交付','未付款或未满足发货条件时不发送夸克链接、提取码或卡密。','校验','warn'],['数据污染','买家输入不得直接写入知识库、Skill 配置、Dashboard 配置或凭证范围。','隔离','info']]}/>
+    </section>,
+    outbox: <section className="card mobile-settings-card">
+      <div className="mobile-section-head"><div><h2>Outbox Worker / Execution Runtime</h2><p>所有发送消息、更新知识库、更新插件、触发通知等写动作经 Outbox 执行。</p></div><Badge tone="ok">Worker 正常</Badge></div>
+      <div className="mobile-form-rows"><div><label>Worker</label><span>online · 最近心跳 14:24:08</span></div><div><label>队列深度</label><span>7 pending / 128 succeeded today</span></div><div><label>幂等键</label><span>shop_id + account_id + action_type + business_id</span></div><div><label>Replay</label><span>默认使用当时捕获的 SkillResult，避免外部状态漂移</span></div></div>
+      <div className="mobile-action-row"><button className="btn primary">查看队列</button><button className="btn ghost">查看 Trace</button></div>
+    </section>,
+    plugins: <section className="card mobile-settings-card">
+      <div className="mobile-section-head"><div><h2>插件配置</h2><p>通过 Workspace 安装、启用、禁用和升级 Skill / Plugin，移动端显示状态摘要和确认入口。</p></div><Badge tone="info">平台通用</Badge></div>
+      <div className="mobile-settings-list readonly"><div><strong>Dashboard Plugin</strong><span>widgets / metrics / queries / layout 版本化</span><Badge tone="ok">已启用</Badge></div><div><strong>Knowledge Plugin</strong><span>商品知识、通用知识、知识召回、版本管理</span><Badge tone="ok">已启用</Badge></div><div><strong>Policy Plugin</strong><span>自动回复、风险拦截、外部写动作策略</span><Badge tone="ok">已启用</Badge></div><div><strong>夸克交付 Skill</strong><span>读取 buyer_deliverable 凭证并生成发货文本</span><Badge tone="warn">需配置</Badge></div></div>
+      <div className="mobile-action-row"><button className="btn primary">安装 Skill</button><button className="btn ghost">版本记录</button></div>
+    </section>
+  };
+  return <>
+    <section className="mobile-settings-header card">
+      <div className="mobile-section-head"><div><h2>设置</h2><p>与 PC 设置页同一套分类：{current.title} · {current.meta}</p></div><Badge tone={activeTab === 'safety' ? 'danger' : activeTab === 'credentials' ? 'warn' : activeTab === 'outbox' ? 'ok' : 'info'}>{current.meta}</Badge></div>
+      <nav className="mobile-settings-nav" aria-label="设置分类">
+        {tabs.map(tab => <button key={tab.id} className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)}><span>{tab.label}</span><small>{tab.meta}</small></button>)}
+      </nav>
+    </section>
+    {panels[activeTab]}
+  </>;
+}
+
+function MobileFrame({ page, setPage, modal, onCloseModal, onConfirmModal }: { page: PageKey; setPage: (p: PageKey) => void; modal: PrototypeModal | null; onCloseModal: () => void; onConfirmModal: () => void }) {
+  const mobilePages: PageKey[] = ['dashboard', 'workspace', 'messages', 'knowledge', 'review', 'settings', 'accounts'];
+  const activePage = mobilePages.includes(page) ? page : 'dashboard';
+  const renderMobilePage = () => {
+    if (activePage === 'workspace') return <MobileWorkspaceView/>;
+    if (activePage === 'messages') return <MobileMessagesView/>;
+    if (activePage === 'knowledge') return <MobileKnowledgeView/>;
+    if (activePage === 'accounts') return <MobileAccountsView/>;
+    if (activePage === 'review') return <MobileReviewView/>;
+    if (activePage === 'settings') return <MobileSettingsView/>;
+    return <MobileDashboardView/>;
+  };
+  return <div className="mobile-frame mobile-hifi-frame">
+    <div className="mobile-status"><span>9:41</span><span>5G 100%</span></div>
+    <header className="mobile-head mobile-hifi-head">
+      <div><strong>{activePage === 'workspace' ? '指令' : activePage === 'messages' ? '消息托管' : activePage === 'knowledge' ? '知识库' : activePage === 'accounts' ? '账号上下文' : activePage === 'review' ? '运营复盘' : activePage === 'settings' ? '设置' : '今日总览'}</strong></div>
+      <div className="mobile-head-actions"><button className="mobile-account-chip">账号 A</button><button className="icon-button" aria-label="通知"><Icon name="bell"/><b>3</b></button></div>
+    </header>
+    <main className="mobile-main mobile-hifi-main">{renderMobilePage()}</main>
+    <nav className="mobile-tabs mobile-hifi-tabs" aria-label="移动端主导航">
+      {mobilePages.map(key => {
+        const item = navItems.find(n => n.key === key)!;
+        const labels: Record<PageKey, string> = { dashboard: '总览', workspace: '指令', messages: '待办', knowledge: '知识', accounts: '账号', review: '复盘', settings: '设置' };
+        return <button key={key} className={activePage === key ? 'active' : ''} onClick={() => setPage(key)}><Icon name={item.icon}/><span>{labels[key]}</span></button>;
+      })}
+    </nav>
+    <ModalHost modal={modal} onClose={onCloseModal} onConfirm={onConfirmModal}/>
+  </div>;
+}
+function AuthPreview() { return <div className="auth-canvas"><section className="auth-card card"><Logo/><p className="eyebrow">Authentication</p><h1>登录 XianyuSellerAgent</h1><p>所有系统页面先登录后访问；登录、退出、初始化管理员和登录失败均写入审计。</p><label>管理员账号<input value="admin@example.com" readOnly/></label><label>密码<input value="••••••••••" readOnly/></label><button className="btn primary full">登录并进入 Dashboard</button><div className="auth-note"><Badge tone="info">会话保护</Badge><span>登录成功默认进入首页 Dashboard。</span></div></section><section className="auth-card card"><p className="eyebrow">First Run</p><h1>首次启动管理员初始化</h1><p>仅当系统内不存在管理员账号时开放；创建成功后关闭初始化入口。</p><FormRows rows={[[ '用户名','admin'],['显示名称','运营管理员'],['管理员邮箱','admin@example.com'],['密码强度','满足基础强度要求']]}/><div className="audit-strip"><span>INIT_ADMIN_CREATED</span><span>AUD-20260909-0001</span></div></section><section className="auth-card card"><p className="eyebrow">Session State</p><h1>登录失效提示</h1><p>Token 失效或权限异常时引导重新登录，不暴露任何凭证内容。</p><button className="btn ghost full">重新登录</button></section></div>; }
+export default function App() {
+  const [mode, setMode] = useState<ViewMode>('desktop');
+  const [page, setPage] = useState<PageKey>('dashboard');
+  const [collapsed, setCollapsed] = useState(false);
+  const [modal, setModal] = useState<PrototypeModal | null>(null);
+  const [toasts, setToasts] = useState<Array<{ id: number; text: string; tone: Tone }>>([]);
+  const [confirmMessage, setConfirmMessage] = useState('模拟动作已通过 Policy Gateway，并写入 Outbox 审计队列');
+  const pushToast = (text: string, tone: Tone = 'info') => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev.slice(-3), { id, text, tone }]);
+    window.setTimeout(() => setToasts(prev => prev.filter(item => item.id !== id)), 3600);
+  };
+  const openAction = (title: string, tone: Tone, rows: Array<[string, string]>, confirm?: string, done?: string) => {
+    setConfirmMessage(done ?? '模拟动作已完成，结果写入 Trace / Audit');
+    setModal({ title, tone, rows, confirm });
+  };
+  const handlePrototypeClick = (event: MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    const button = target.closest('button');
+    if (!button || button.closest('.segmented') || button.closest('.side-nav') || button.closest('.settings-tabs') || button.closest('.mobile-settings-nav') || button.closest('.mobile-settings-list') || button.closest('.mobile-tabs') || button.closest('.modal-card') || button.classList.contains('collapse-button')) return;
+    const label = (button.textContent || button.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+    const aria = button.getAttribute('aria-label') || '';
+    if (aria.includes('移除')) {
+      button.closest('.attachment-chip')?.remove();
+      pushToast('附件已从本次知识识别中移除', 'warn');
+      return;
+    }
+    if (aria.includes('添加') || label === '+') {
+      pushToast('已模拟添加一份商品截图，等待 AI OCR 识别', 'info');
+      return;
+    }
+    if (aria.includes('发送') || label === '↑') {
+      const composer = button.closest('.workspace-composer, .upload-panel');
+      const textarea = composer?.querySelector('textarea') as HTMLTextAreaElement | null;
+      const value = textarea?.value?.trim() || '检查当前账号 A 的待处理风险，并生成确认卡片';
+      if (textarea) textarea.value = '';
+      const chat = button.closest('.chat-card');
+      if (chat) {
+        const user = document.createElement('div');
+        user.className = 'bubble user';
+        user.textContent = value;
+        const ai = document.createElement('div');
+        ai.className = 'bubble ai';
+        ai.textContent = '已生成模拟执行计划：命中知识库、凭证边界和 Policy Gateway；需要人工确认的动作已放入确认卡片。';
+        const composerNode = chat.querySelector('.workspace-composer');
+        chat.insertBefore(user, composerNode);
+        chat.insertBefore(ai, composerNode);
+      }
+      pushToast('AI 已生成可确认的模拟执行结果', 'ok');
+      return;
+    }
+    if (aria.includes('通知') || label.includes('待确认动作')) {
+      setPage('messages');
+      openAction('待确认动作队列', 'warn', [['高优先级', '考研英语资料缺少 buyer_deliverable 凭证，付款后未发货'], ['中优先级', '跨商品资源请求已拦截，等待人工确认'], ['执行边界', '确认后经 Action Policy Gateway、Outbox、Execution Runtime 执行']], '去处理待办', '已进入消息托管待办队列');
+      return;
+    }
+    if (label.includes('打开插件配置')) { setPage('settings'); openAction('Dashboard Plugin 配置', 'info', [['插件', 'dashboard-plugin@1.4.3'], ['数据范围', '当前账号 A 的订单、商品、库存和托管指标'], ['发布规则', 'AI 修改后必须人工点击发布'], ['版本', '支持 Manifest 版本化与回滚']], '查看配置', '已打开插件配置面板'); return; }
+    if (label.includes('确认配置')) { openAction('确认虚拟资源商品配置', 'warn', [['影响对象', 'Python 全栈资料包 / 当前账号 A'], ['变更', 'is_virtual_resource=true，delivery_trigger=paid_order'], ['凭证引用', 'cred_quark_python_bundle_001 · buyer_deliverable'], ['幂等键', 'shop_a:account_a:config_virtual:ITEM-93821']], '通过并执行', '虚拟资源配置已确认，商品知识版本更新为 v13'); return; }
+    if (label.includes('全屏 HTML 预览')) { openAction('买家侧发货消息预览', 'info', [['发送场景', '订单 XY20260909001 已付款'], ['买家可见', '资源交付说明 + 脱敏凭证引用'], ['敏感处理', '真实链接与提取码由 Runtime 从 Vault 读取'], ['审计', 'AUD-20260909-1422 / TRC-20260909-1422']], undefined); return; }
+    if (label.includes('取消')) { pushToast('已取消当前确认卡片，未写入 Outbox', 'warn'); return; }
+    if (label.includes('确认安装')) { openAction('安装夸克交付 Skill', 'warn', [['能力', 'quark.delivery.send_buyer_deliverable'], ['风险等级', 'medium / external_write'], ['权限', '读取 buyer_deliverable 凭证、写入 Outbox、记录 SkillResult'], ['账号隔离', 'Skill 平台通用，凭证引用按账号隔离']], '确认安装', '夸克交付 Skill 已安装，等待绑定凭证引用'); return; }
+    if (label.includes('Manifest')) { openAction('夸克交付 Skill Manifest', 'info', [['capability', 'quark.delivery.send_buyer_deliverable'], ['input_schema', 'order_id, product_id, credential_ref, idempotency_key'], ['timeout', '12s，失败进入指数退避'], ['audit', '记录 credential_ref、trace_id，不记录明文']], undefined); return; }
+    if (label.includes('添加闲鱼账号')) { openAction('添加闲鱼账号', 'info', [['绑定方式', '扫码登录，登录态写入 Credential Vault'], ['模拟账号', '闲鱼账号 D · 图书资料店'], ['默认策略', '继承店铺 180 秒托管策略'], ['隔离范围', '商品、订单、消息、知识、凭证、Trace 按账号隔离']], '生成扫码任务', '已生成闲鱼账号 D 的扫码绑定任务'); return; }
+    if (label.includes('切换到此账号') || label === '切换') { openAction('切换当前工作账号', 'info', [['目标账号', label === '切换' ? '闲鱼账号 B · 课程资料副店' : '所选闲鱼账号'], ['影响范围', 'Dashboard、消息、商品、知识、凭证与 Trace 立即切换'], ['Skill / Plugin', '平台通用，不重复安装'], ['审计', 'ACCOUNT_CONTEXT_SWITCHED']], '确认切换', '当前工作上下文已切换，并写入审计记录'); return; }
+    if (label.includes('扫码')) { openAction('重新扫码授权', 'warn', [['原因', '登录态过期或运营手动刷新'], ['保存位置', 'Credential Vault / cookie_ref_xianyu_account'], ['前端展示', '只展示登录状态和脱敏引用'], ['审计', 'LOGIN_STATE_REFRESH_REQUESTED']], '创建扫码任务', '扫码授权任务已创建'); return; }
+    if (label.includes('删除账号')) { openAction('删除账号确认', 'danger', [['删除范围', '账号绑定关系与当前登录态引用'], ['保留内容', '历史订单、Trace、审计与复盘样本'], ['保护', '当前工作账号需要先切换后再删除'], ['审计', 'ACCOUNT_DELETE_REQUESTED']], '确认删除', '账号删除动作已进入高风险确认队列'); return; }
+    if (label.includes('保存商品知识')) { pushToast('商品知识已保存为 v13，凭证仍以 credential_ref 引用', 'ok'); return; }
+    if (label.includes('保存通用知识')) { openAction('保存通用知识确认', 'warn', [['对象', '闲鱼账号 A / 通用知识库'], ['变更', '发货说明 + 风险 SOP'], ['Policy', 'knowledge.general.merge'], ['Audit', 'GENERAL_KNOWLEDGE_UPDATE_REQUESTED']], '确认保存', '通用知识库已保存为 v9，并生成版本记录'); return; }
+    if (label.includes('处理待办') || label.includes('补凭证') || label.includes('风险确认') || label.includes('补知识') || label.includes('处理风险') || label.includes('查看对话') || label.includes('查看审计')) { openAction('消息托管处理卡片', label.includes('查看') ? 'info' : 'warn', [['会话', '当前账号 A / 最近一条待办会话'], ['Agent 决策', '能确定则回复；不能确定通知管理员，不回复买家'], ['下一步', label || '处理待办'], ['Trace', 'TRC-20260909-1411，Replay 使用当时 SkillResult']], label.includes('查看') ? undefined : '完成处理', '待办已处理，结果写入 Trace / Audit'); return; }
+    if (label.includes('创建回归样本')) { openAction('创建回归样本', 'info', [['样本来源', '近 24 小时风险拦截、发货失败、知识缺失会话'], ['样本数量', '3 条高价值样本'], ['评测规则', '凭证泄露、跨商品资源、未付款诱导发货'], ['版本', 'eval_set_xianyu_20260909']], '创建样本', '回归样本 eval_set_xianyu_20260909 已创建'); return; }
+    if (label.includes('标注为正确')) { pushToast('复盘样本已标注为正确，规则评分更新', 'ok'); return; }
+    if (label.includes('加入回归集')) { pushToast('已加入回归集 cross_product_resource_block', 'info'); return; }
+    if (label.includes('登录并进入 Dashboard')) { setMode('desktop'); setPage('dashboard'); pushToast('登录成功，已进入 Dashboard', 'ok'); return; }
+    if (label.includes('重新登录')) { pushToast('已重新发起登录流程，审计事件已记录', 'info'); return; }
+    if (label.includes('测试连接')) { pushToast('AI API 连接测试通过：ModelClient 响应正常', 'ok'); return; }
+    if (label.includes('保存 API 配置')) { openAction('保存 AI API 配置确认', 'warn', [['Provider', 'DeepSeek Harness'], ['Base URL', 'https://api.deepseek.com/v1'], ['Model', 'deepseek-chat'], ['Secret', 'secret_store_ref: model_api_key_primary'], ['Policy', 'settings.model.update'], ['Audit', 'MODEL_CONFIG_UPDATE_REQUESTED']], '确认保存', 'AI API 配置已更新，ModelClient 连接测试通过'); return; }
+    if (label.includes('加载更多商品')) { pushToast('已加载下一批 20 个商品，保持当前筛选条件', 'info'); return; }
+    pushToast(label ? '已执行模拟操作：' + label : '已执行模拟操作', 'info');
+  };
+  return <div className="prototype-root" onClickCapture={handlePrototypeClick}><div className="preview-toolbar"><div><strong>XianyuSellerAgent UI Prototype</strong><span>Figma-ready React / CSS prototype</span></div><div className="segmented"><button className={mode === 'desktop' ? 'active' : ''} onClick={() => setMode('desktop')}>桌面控制台</button><button className={mode === 'mobile' ? 'active' : ''} onClick={() => setMode('mobile')}>移动端</button><button className={mode === 'auth' ? 'active' : ''} onClick={() => setMode('auth')}>登录初始化</button></div></div><div className={'preview-stage mode-' + mode}>{mode === 'desktop' && <DesktopShell page={page} setPage={setPage} collapsed={collapsed} setCollapsed={setCollapsed}/>} {mode === 'mobile' && <MobileFrame page={page} setPage={setPage} modal={modal} onCloseModal={() => setModal(null)} onConfirmModal={() => { pushToast(confirmMessage, modal?.tone === 'danger' ? 'warn' : 'ok'); setModal(null); }}/>} {mode === 'auth' && <AuthPreview/>}</div>{mode !== 'mobile' && <ModalHost modal={modal} onClose={() => setModal(null)} onConfirm={() => { pushToast(confirmMessage, modal?.tone === 'danger' ? 'warn' : 'ok'); setModal(null); }}/>}<ToastHost items={toasts}/></div>;
+}

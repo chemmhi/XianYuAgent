@@ -1,0 +1,28 @@
+{
+  "name": "xianyu-admin-design-style",
+  "source": "智能运营后台设计 React high-fidelity prototype",
+  "fonts": {
+    "family": "'Inter', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif",
+    "imports": [
+      "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
+      "https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap"
+    ],
+    "sizesPx": { "micro": 10, "badge": 11, "body": 12, "rowTitle": 13, "hero": 15, "mobileTitle": 16, "mobileMetric": 22, "desktopKpi": 24 },
+    "weights": { "regular": 400, "medium": 500, "semibold": 600, "bold": 700, "heavy": 800 }
+  },
+  "colors": {
+    "bg": "#F6F7F9", "previewBg": "#ECEEF2", "card": "#FFFFFF", "sidebar": "#1D2638", "sidebarHover": "#253348",
+    "brand": "#1F3A5F", "link": "#245A8D", "text": "#111827", "sub": "#6B7280", "muted": "#475569", "border": "#E5E7EB",
+    "success": "#2E7D5B", "successBright": "#6EE7B7", "successBg": "#EAF4EF", "successBorder": "#BBE0D0",
+    "warn": "#B7791F", "warnBg": "#FEF3E2", "danger": "#B42318", "dangerBg": "#FEF0EF", "dangerSoft": "#FCA5A5",
+    "info": "#2F6F8F", "softBlueBg": "#EBF3FA", "chartGrid": "#F3F4F6", "axis": "#9CA3AF"
+  },
+  "layout": {
+    "desktop": { "width": 1440, "height": 900, "sidebarWidth": 224, "headerHeight": 56, "contentPadding": "22px 28px", "contentGap": 18, "gridGap": 14, "chartSidePanelWidth": 296 },
+    "mobile": { "width": 390, "height": 844, "statusBarHeight": 44, "headerPadding": "10px 20px 14px", "contentPadding": "14px 16px", "contentGap": 14, "kpiGap": 10, "bottomNavPadding": "8px 0 24px" }
+  },
+  "shape": { "cardRadius": 10, "mobileStatusRadius": 12, "buttonRadius": 8, "smallButtonRadius": 6, "tagRadius": 4, "inputRadius": 7, "bottomTabIconRadius": 8, "avatarRadius": "50%" },
+  "shadow": { "card": "0 1px 3px rgba(0,0,0,0.04)", "tooltip": "0 4px 12px rgba(0,0,0,0.08)", "device": "0 20px 80px rgba(0,0,0,0.15)" },
+  "chart": { "type": "AreaChart", "curve": "monotone", "strokeWidth": 1.5, "dot": false, "primaryStroke": "#245A8D", "secondaryStroke": "#2E7D5B", "gridStroke": "#F3F4F6", "gridDasharray": "3 3", "axisFontSize": 10, "axisFill": "#9CA3AF", "tooltipRadius": 8, "tooltipFontSize": 11 },
+  "icons": { "style": "inline SVG currentColor", "strokeWidth": [1.3, 1.5], "motifs": ["2x2 dashboard grid", "message lines", "square plus", "rising analytics line", "profile circle/arc", "bell with badge", "check confirmation"] }
+}

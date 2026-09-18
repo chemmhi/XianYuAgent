@@ -1,0 +1,3 @@
+display_name: Xianyu Admin Design Style
+short_description: Recreate the high-fidelity XianyuSellerAgent admin console visual system.
+default_prompt: Use $xianyu-admin-design-style to create or restyle this interface so it matches the 智能运营后台设计 prototype.
