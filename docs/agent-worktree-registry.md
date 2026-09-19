@@ -23,7 +23,7 @@
 
 | agent_id | slice_id | branch | worktree | owner | created_at | status | merge_commit | cleaned_at | notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `root` | `docs-multi-agent-collaboration` | `docs/multi-agent-collaboration` | `F:\ChenHai\Project\XianYuAgent-multi-agent-docs` | Codex `/root` | `2026-09-19 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 分支提交 `9e1684c`；协作规范、登记表、AGENT 长期规则和决策记录已完成；等待人工审核，审核通过后再按 merge lock 合并 |
+| `root` | `docs-multi-agent-collaboration` | `docs/multi-agent-collaboration` | `F:\ChenHai\Project\XianYuAgent-multi-agent-docs` | Codex `/root` | `2026-09-19 00:00:00 +08:00` | `READY_FOR_MERGE` | `-` | `-` | 用户已明确批准合入 `master`；分支提交 `1b39e6c`，待获取全局 merge lock 后合并 |
 
 ## 主工作区
 
