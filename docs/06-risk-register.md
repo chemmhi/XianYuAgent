@@ -2,7 +2,7 @@
 
 - 文档版本：v0.1
 - 更新日期：2026-09-19
-- 当前阶段：阶段 3——前端信息架构与设计契约
+- 当前阶段：阶段 4——迭代计划与纵向切片编排
 - 风险状态：开放风险已登记；当前无 P0
 - 阶段门禁规则：只有设计契约、数据流、路由/API、canonical ViewModel 和设计级超级组件问题阻断阶段 3；源码拆分、真实 API、WebSocket、移动端实现和 E2E 均后置，不作为当前设计门禁证据。
 
@@ -30,6 +30,13 @@
 | S3-I008 | 原型源码 Products/Coupons/Orders 移动端回退 Dashboard | P1 | 中 | 后续实现移动端功能承载不完整 | 前端负责人 | 阶段 4/5 按 8×2 设计矩阵实现；不作为阶段 3 设计门禁证据 | 阶段 4/5 实现前 | 开放，后续实现风险 |
 | S3-I009 | FirstRun bootstrap 与消息 handoff 的 canonical endpoint、字段和缓存失效语义已补齐并完成跨文档复审 | P1 | 中 | 路由与命令若漂移会重新形成不可执行闭环 | API / 前端负责人 | 统一为 `/api/v1/auth/bootstrap`、`/api/v1/conversations/{id}/handoff`、`/api/v1/conversations/{id}/release`，并同步 request/response/scope/幂等/审计/失效矩阵 | 2026-09-19 独立设计复审 | VERIFIED / CLOSED |
 | S3-I010 | ControllerResult、canonical ViewModel 和错误码映射已冻结并通过独立设计复审 | P1 | 高 | 页面若绕过 controller 仍可能重现超级组件 | 前端 / API 负责人 | `docs/03-component-contract.md` 已补齐字段级类型、逐条 API、queryKey/invalidation、恢复矩阵、Runtime/Outbox 拆分和反超级组件规则 | 2026-09-19 独立设计复审 | VERIFIED / CLOSED |
+| S4-I001 | ENV-0 的 Session/CSRF、幂等、账号范围、最小审计和 Execution foundation 尚未在真实环境运行 | P1 | 高 | 首个账号切片无法形成可审计、可回滚闭环 | 架构 / 后端负责人 | 先完成 `docs/04-plan.md` ENV-0；在 S4-VS1 前验证 Compose、迁移、健康检查、幂等和审计 | S4-VS1 启动前 | 开放，首片阻断项 |
+| S4-I002 | 闲鱼登录、QR/login-session、连接刷新协议与可复现凭证仍依赖外部平台 | P1 | 高 | 账号、商品同步和订单查询无法稳定验收 | 后端负责人 | 建立脱敏协议探针、adapter contract fixture 和真实凭证验证入口；页面不得直连平台 | S4-VS1/S4-VS2 前 | 开放 |
+| S4-I003 | 卡券正文、夸克链接、提取码和库存状态进入真实链路后存在越权或日志泄露风险 | P1 | 中 | 可能造成敏感交付泄露或错误交付 | 安全 / 后端负责人 | 受控 content API、deliveryScope、账号/商品/订单匹配、库存锁、AuditEvent 和脱敏验证 | S4-VS3/S4-VS4 前 | 开放 |
+| S4-I004 | 订单交付、商品发布和外部动作可能出现 unknown/timeout，重复写会造成重复发货或扣库存 | P1 | 中 | 外部状态与本地订单/库存不一致 | 后端 / QA 负责人 | 所有高风险写入使用 Idempotency + Confirmation + Outbox；unknown 只查询/人工恢复 | S4-VS2/S4-VS4 前 | 开放 |
+| S4-I005 | 迁移顺序、执行基础和业务表之间存在耦合，回滚可能影响历史订单或审计 | P1 | 中 | 无法安全回退首片 | 架构 / 数据负责人 | 为每片冻结迁移编号、expand/backfill/verify/switch/rollback、fixture 和兼容读路径 | 各切片实现前 | 开放 |
+| S4-I006 | 实现阶段可能因赶主体功能重新形成超级组件或跨域保存入口 | P1 | 中 | 组件不可独立测试，后续功能扩展失控 | 前端负责人 | 严格复用阶段 3 owner/VM/API 矩阵；每片复审组件边界和 forbidden dependencies | S4-VS1 至 S4-VS4 | 开放 |
+| S4-I007 | 移动端对等、视觉回归和真实验收证据可能后置，导致主体功能只在桌面可用 | P2 | 中 | 影响正式页面承载和验收完整性 | 前端 / QA 负责人 | 每片固定 1440×900、390×844、代表性数据、状态截图和回归记录 | 各切片验收前 | 开放 |
 
 ## 风险分级说明
 

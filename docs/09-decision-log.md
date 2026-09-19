@@ -99,6 +99,19 @@
 3. 组件职责矩阵、canonical ViewModel、8×2 页面矩阵、QR/account detail API、queryKey 账号隔离、ControllerResult、canonical error map、`stockAlert`/`inventoryStatus` 均已复核通过。
 4. 阶段 3 门禁由 `REOPENED / DESIGN REVIEW` 更新为 `PASS`，允许进入阶段 4 迭代计划与纵向切片编排；阶段 3 不包含具体编码。
 
+## 阶段 4 主体功能优先决策
+
+2026-09-19，进入阶段 4 后确定主体功能优先于运营和辅助页面，阶段 5 按独立纵向切片执行：
+
+1. `S4-VS1`：账号管理，覆盖登录态、账号列表/详情、QR 扫码会话、账号授权会话、连接刷新、scope 和最小 CredentialRef 管理。
+2. `S4-VS2`：商品管理，覆盖商品草稿、基础信息、SKU、素材、同步/拉取契约和 Policy → Confirmation → Idempotency → Outbox 发布链路。
+3. `S4-VS3`：卡券首页 / 批次与库存，覆盖批次列表、库存、`stockAlert`、导入/批量编辑、绑定关系、作废和管理员受控正文预览。
+4. `S4-VS4`：订单列表、详情与交付，覆盖四套状态、筛选/刷新、交付预览、manual/no_logistics/coupon_only/mixed、取消、重试、DeliveryRecord 和审计。
+5. Dashboard、Messages、Workspace/Agent、Settings 扩展后置，不得抢占前四个主体切片；ENV-0 的执行基础、最小审计、幂等和 adapter 探针必须在 S4-VS1 前完成或明确阻断。
+6. 阶段 4 只输出计划、依赖、DoD、风险、测试范围、视觉基线和回滚动作；阶段 5 才开始真实代码。每个切片完成后必须更新状态/评审/风险/决策记录并使用中文 Conventional Commit。
+
+该优先级不改变既有产品范围和交付数据边界，只冻结实现顺序与门禁要求。
+
 ## 长期执行规则
 
 - 已确认的决策不重复询问；只有出现越权、泄密、不可回滚、库存重复扣减或核心链路不可用等新高风险证据时，才重新发起人工裁决。

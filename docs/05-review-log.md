@@ -103,3 +103,15 @@
 | --- | --- | --- |
 | S3-I009 | VERIFIED / CLOSED：FirstRun bootstrap 与消息 handoff 的 canonical endpoint、字段和缓存失效语义跨文档一致 | `docs/02-data-api.md`、`docs/03-frontend-design.md`、`docs/03-component-contract.md`；MR-015/MR-016 |
 | S3-I010 | VERIFIED / CLOSED：ControllerResult、canonical ViewModel、错误码映射和反超级组件规则经独立设计复审通过 | `docs/03-component-contract.md` §6.9、§8、§9、§10；S3-R7 / MR-018 |
+
+## 9. 阶段 4 计划门禁
+
+阶段 4 仍只做迭代计划与纵向切片编排，不写业务代码；阶段 5 才按切片执行实现。
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S4-R1 | 业务 / 验收 | 账号管理 → 商品管理 → 卡券首页/库存 → 订单列表/详情/交付的主体功能优先级、用户旅程和后置范围 | stage4_slice_plan | PASS | `docs/04-plan.md` §1、§3、§4；Dashboard、Messages、Workspace、Settings 不抢占前四片 |
+| S4-R2 | 架构 / 数据流 | ENV-0、账号范围、Execution foundation、API/VM、query invalidation 和 VS1→VS2→VS3→VS4 依赖 | stage4_dependency_audit | PASS | `docs/04-plan.md` §2、§3、§5；执行基础与最小审计前置，QR session 与 login-session 分离；迁移拆分、DTO 冻结、fixture/清理责任在阶段 5 各片执行前回写并验证 |
+| S4-R3 | 质量 / 安全 / 运维 | 幂等、unknown/timeout、敏感交付、库存锁、审计、测试证据、视觉基线和回滚动作 | stage4_gate_review | PASS | `docs/04-plan.md` §3、§5、§6；阶段 5 执行时逐片留存真实测试、视觉和回滚证据 |
+
+阶段 4 计划门禁：PASS。允许进入阶段 5 的 S4-VS1 账号管理真实纵向切片；未满足 ENV-0 或首片字段冻结前，不得扩展到商品、卡券和订单写入。
