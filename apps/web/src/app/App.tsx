@@ -6,6 +6,7 @@ import { createAuthApi } from '../features/auth/api';
 import { AuthGate } from '../features/auth/components/AuthGate';
 import { createProductsApi } from '../features/products/api';
 import { ProductsPage } from '../features/products/components/ProductsPage';
+import { AccountContextProvider } from './account-context';
 import { navItems, pathForPage, type PageKey } from './navigation';
 
 function pageFromPath(pathname: string): PageKey {
@@ -34,7 +35,7 @@ export default function App() {
     return transport;
   }, []);
   const authApi = useMemo(() => createAuthApi({ get: transport.get, post: transport.post }), [transport]);
-  const accountsApi = useMemo(() => createAccountsApi({ get: transport.get, post: transport.post }), [transport]);
+  const accountsApi = useMemo(() => createAccountsApi({ get: transport.get, post: transport.post, delete: transport.delete }), [transport]);
   const productsApi = useMemo(() => createProductsApi({ get: transport.get, post: transport.post, patch: transport.patch }), [transport]);
 
   useEffect(() => {
@@ -52,7 +53,9 @@ export default function App() {
   const activeNav = navItems.find((item) => item.key === page) ?? navItems[0];
 
   return <AuthGate api={authApi}>
-    <AuthenticatedShell page={page} activeNav={activeNav} accountsApi={accountsApi} productsApi={productsApi} navigate={navigate} />
+    <AccountContextProvider api={accountsApi}>
+      <AuthenticatedShell page={page} activeNav={activeNav} accountsApi={accountsApi} productsApi={productsApi} navigate={navigate} />
+    </AccountContextProvider>
   </AuthGate>;
 }
 

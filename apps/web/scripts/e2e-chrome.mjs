@@ -69,15 +69,17 @@ async function createCdpClient() {
   await new Promise((resolve, reject) => { socket.addEventListener('open', resolve, { once: true }); socket.addEventListener('error', reject, { once: true }); });
   let nextId = 0;
   const pending = new Map();
+  const events = [];
   socket.addEventListener('message', (event) => {
     const message = JSON.parse(event.data);
+    if (!message.id && message.method) events.push(message);
     if (!message.id || !pending.has(message.id)) return;
     const entry = pending.get(message.id);
     pending.delete(message.id);
     if (message.error) entry.reject(new Error(message.error.message)); else entry.resolve(message.result);
   });
   const send = (method, params = {}) => new Promise((resolve, reject) => { const id = ++nextId; pending.set(id, { resolve, reject }); socket.send(JSON.stringify({ id, method, params })); });
-  return { socket, send };
+  return { socket, send, events };
 }
 
 async function evaluate(cdp, expression, awaitPromise = true) {
@@ -148,11 +150,47 @@ async function run() {
   await evaluate(cdp, 'Array.from(document.querySelectorAll(".account-login-form button")).find((button) => button.textContent?.includes("验证 Cookie"))?.click()');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('真实闲鱼昵称'), 'cookie login persisted account');
   await assertText(cdp, '真实店铺备注');
+  // Seed one additional account through the isolated E2E API harness so the
+  // browser can exercise explicit context switching and current-account delete.
+  const accountListResponse = await fetch(`${apiUrl}/api/v1/accounts`, { headers: { cookie: auth.cookie } });
+  if (!accountListResponse.ok) throw new Error(`account list seed failed: ${accountListResponse.status}`);
+  const accountListPayload = await accountListResponse.json();
+  const primaryAccount = accountListPayload.data?.items?.[0];
+  if (!primaryAccount?.id) throw new Error('primary account missing after cookie login');
+  const secondaryResponse = await fetch(`${apiUrl}/api/v1/accounts`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      cookie: auth.cookie,
+      'x-csrf-token': auth.csrf,
+      'Idempotency-Key': `chrome-delete-account-${process.pid}`,
+    },
+    body: JSON.stringify({ platform: 'xianyu', sellerRef: `chrome-delete-${process.pid}`, displayName: 'Chrome Delete Secondary' }),
+  });
+  if (!secondaryResponse.ok) throw new Error(`secondary account seed failed: ${secondaryResponse.status} ${await secondaryResponse.text()}`);
+  const secondaryPayload = await secondaryResponse.json();
+  const secondaryAccount = secondaryPayload.data;
+  if (!secondaryAccount?.id) throw new Error('secondary account missing after seed');
+
+  await cdp.send('Page.reload', { ignoreCache: true });
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome Delete Secondary'), 'secondary account row');
+  const switched = await evaluate(cdp, `(() => { const rows = Array.from(document.querySelectorAll('[role="row"]')); const row = rows.find((candidate) => candidate.textContent?.includes(${JSON.stringify(secondaryAccount.displayName)})); const button = row?.querySelector('[data-testid="account-switch"]'); if (!button || button.disabled) return false; button.click(); return true; })()`);
+  if (!switched) throw new Error('secondary account switch button missing or disabled');
+  await waitFor(async () => String(await evaluate(cdp, 'localStorage.getItem("xianyu.activeAccountId") ?? ""')) === secondaryAccount.id, 'secondary account context switch');
+
+  const deleteMark = cdp.events.length;
+  await evaluate(cdp, 'window.confirm = () => true');
+  const deleted = await evaluate(cdp, `(() => { const rows = Array.from(document.querySelectorAll('[role="row"]')); const row = rows.find((candidate) => candidate.textContent?.includes(${JSON.stringify(secondaryAccount.displayName)})); const button = row?.querySelector('[data-testid="account-delete"]'); if (!button) return false; button.click(); return true; })()`);
+  if (!deleted) throw new Error('secondary account delete button missing');
+  await waitFor(async () => cdp.events.slice(deleteMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'DELETE' && event.params?.request?.url?.includes(`/api/v1/accounts/${encodeURIComponent(secondaryAccount.id)}`)), 'account delete request');
+  await waitFor(async () => !String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome Delete Secondary'), 'deleted account removed from list');
+  await waitFor(async () => String(await evaluate(cdp, 'localStorage.getItem("xianyu.activeAccountId") ?? ""')) === primaryAccount.id, 'context falls back after current account delete');
+
   mkdirSync(screenshotDir, { recursive: true });
   await captureViewport(cdp, 1440, 900, 'accounts-desktop-1440x900.png');
   await captureViewport(cdp, 390, 844, 'accounts-mobile-390x844.png');
   await cdp.send('Emulation.clearDeviceMetricsOverride');
-  console.log('local Chrome E2E passed: login method selector -> real API cookie login -> persisted profile visible');
+  console.log('local Chrome E2E passed: login -> persisted profile -> account context switch -> current account delete');
   cdp.socket.close();
 }
 

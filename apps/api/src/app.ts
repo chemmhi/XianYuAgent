@@ -329,6 +329,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     const accountId = decodeURIComponent(accountMatch[1]);
     if (!accountMatch[2] && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, await accounts.get(authContext.admin.id, accountId)).body };
      if (!accountMatch[2] && ctx.method === 'PATCH') return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await accounts.update({ adminId: authContext.admin.id, accountId, patch: { sellerRef: optionalString(ctx.body.sellerRef), displayName: optionalString(ctx.body.displayName), remark: optionalString(ctx.body.remark), avatarUrl: optionalString(ctx.body.avatarUrl), platformUserId: optionalString(ctx.body.platformUserId), status: typeof ctx.body.status === 'string' ? ctx.body.status as never : undefined }, requestId: ctx.requestId, traceId: ctx.traceId })));
+     if (!accountMatch[2] && ctx.method === 'DELETE') return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, { account: await accounts.delete({ adminId: authContext.admin.id, accountId, requestId: ctx.requestId, traceId: ctx.traceId }), deleted: true }));
     if (accountMatch[2] === 'connection' && ctx.method === 'GET') {
       const account = await accounts.get(authContext.admin.id, accountId);
       return { statusCode: 200, body: success(ctx, connectionView(account)).body };

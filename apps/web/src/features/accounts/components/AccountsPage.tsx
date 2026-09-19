@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useAccountContext } from '../../../app/account-context';
 import { createAccountsApi, createMockAccountsApi, type AccountsApi } from '../api';
 import { useAccountsController } from '../controller';
 import type { AccountVM } from '../types';
@@ -8,15 +9,15 @@ import { AccountToolbar } from './AccountToolbar';
 import { AccountLoginModal } from './AccountLoginModal';
 import './accounts.css';
 
-export interface AccountsPageProps {
-  api?: AccountsApi;
-}
+export interface AccountsPageProps { api?: AccountsApi; }
 
 export function AccountsPage({ api: providedApi }: AccountsPageProps) {
   const api = useMemo(() => providedApi ?? createMockAccountsApi(), [providedApi]);
   const controller = useAccountsController({ api });
+  const { currentAccountId, currentAccount, setCurrentAccountId, removeAccount, refreshAccounts } = useAccountContext();
   const [loginAccountId, setLoginAccountId] = useState<string | null>(null);
   const [loginOpen, setLoginOpen] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const accounts = controller.state.data?.items ?? [];
   const total = controller.state.data?.total ?? 0;
   const metrics = summarize(accounts);
@@ -32,27 +33,48 @@ export function AccountsPage({ api: providedApi }: AccountsPageProps) {
     setLoginAccountId(null);
   }
 
+  async function switchAccount(account: AccountVM) {
+    setActionError(null);
+    try {
+      await setCurrentAccountId(account.id);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '账号切换失败');
+    }
+  }
+
+  async function deleteAccount(account: AccountVM) {
+    if (!window.confirm(`确认删除账号“${account.displayName}”？删除后会撤销登录凭证，但会保留历史商品记录。`)) return;
+    setActionError(null);
+    try {
+      await removeAccount(account.id);
+      await controller.reload();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '账号删除失败');
+    }
+  }
+
   return (
     <section className="page-stack accounts-domain" data-accounts-domain>
       <div className="page-title">
         <div>
           <p className="eyebrow">Account Context</p>
           <h1>店铺 / 账号管理</h1>
-          <p>从真实闲鱼登录链路添加账号，登录成功后由服务端保存凭证并同步昵称、备注和头像。</p>
+          <p>账号登录状态、凭证和当前操作上下文统一在这里管理。</p>
         </div>
         <div className="page-title-actions"><span className="accounts-domain-scope">管理员账号范围</span><button className="btn primary" type="button" onClick={() => openLogin()}>添加闲鱼账号</button></div>
       </div>
       <div className="kpi-grid three accounts-domain-kpis">
         <article className="card kpi-card"><div className="kpi-label">已绑定账号</div><div className="kpi-value">{total}</div><div className="kpi-delta"><span className="tone-ok">{metrics.online} 个在线</span><small>当前可用连接</small></div></article>
-        <article className="card kpi-card"><div className="kpi-label">当前账号</div><div className="kpi-value">{accounts.find((account) => account.enabled)?.displayName?.slice(-1) ?? '—'}</div><div className="kpi-delta"><span className="tone-info">账号上下文</span><small>后续接入切换命令</small></div></article>
-        <article className="card kpi-card"><div className="kpi-label">需要处理</div><div className="kpi-value">{metrics.needsAttention}</div><div className="kpi-delta"><span className={metrics.needsAttention > 0 ? 'tone-warn' : 'tone-ok'}>{metrics.needsAttention > 0 ? '需刷新或补凭证' : '状态健康'}</span><small>不展示敏感凭证</small></div></article>
+        <article className="card kpi-card"><div className="kpi-label">当前账号</div><div className="kpi-value">{currentAccount?.displayName?.slice(-1) ?? '—'}</div><div className="kpi-delta"><span className="tone-info">账号上下文</span><small>{currentAccount?.displayName ?? '请先选择账号'}</small></div></article>
+        <article className="card kpi-card"><div className="kpi-label">需要处理</div><div className="kpi-value">{metrics.needsAttention}</div><div className="kpi-delta"><span className={metrics.needsAttention > 0 ? 'tone-warn' : 'tone-ok'}>{metrics.needsAttention > 0 ? '需要刷新或补凭证' : '状态健康'}</span><small>不展示敏感凭证</small></div></article>
       </div>
       <article className="card panel accounts-domain-panel">
         <AccountToolbar filters={controller.filters} phase={controller.state.phase} total={total} onSearchChange={controller.setSearch} onStatusChange={(status) => controller.setFilters((previous) => ({ ...previous, status, page: 1 }))} onRefresh={controller.reload} />
-        {controller.state.phase === 'success' && <AccountTable accounts={accounts} onReauthorize={(account) => openLogin(account)} />}
+        {actionError && <div className="accounts-inline-error" role="alert">{actionError}</div>}
+        {controller.state.phase === 'success' && <AccountTable accounts={accounts} activeAccountId={currentAccountId} onReauthorize={openLogin} onSwitch={switchAccount} onDelete={deleteAccount} />}
         <AccountStateView phase={controller.state.phase} error={controller.state.error} onRetry={controller.reload} />
       </article>
-      {loginOpen && <AccountLoginModal api={api} account={loginAccount} onClose={closeLogin} onCompleted={() => { void controller.reload(); closeLogin(); }} />}
+      {loginOpen && <AccountLoginModal api={api} account={loginAccount} onClose={closeLogin} onCompleted={() => { void controller.reload(); void refreshAccounts(); closeLogin(); }} />}
     </section>
   );
 }

@@ -13,11 +13,13 @@ import type { QrLoginSessionVM, QrLoginStatus } from './qr-login/model';
 export interface AccountsApiTransport {
   get<T>(path: string): Promise<T>;
   post?<T>(path: string, body?: unknown, init?: RequestInit): Promise<T>;
+  delete?<T>(path: string, init?: RequestInit): Promise<T>;
 }
 
 export interface AccountsApi {
   list(filters?: AccountListFilters): Promise<AccountsPageVM>;
   createAccount(input: { platform: 'xianyu'; sellerRef: string; displayName?: string }): Promise<AccountVM>;
+  deleteAccount?(accountId: string): Promise<void>;
   getDetail(accountId: string): Promise<AccountVM>;
   getConnection(accountId: string): Promise<AccountConnectionVM>;
   createQrSession(accountId?: string): Promise<QrLoginSessionVM>;
@@ -100,6 +102,7 @@ function toQrLoginSession(payload: CanonicalQrSessionResponse): QrLoginSessionVM
 
 function unwrapQrSession(payload: CanonicalQrSessionResponse | ApiEnvelope<CanonicalQrSessionResponse>): QrLoginSessionVM { return toQrLoginSession(unwrapEnvelope(payload)); }
 function requirePost(transport: AccountsApiTransport): NonNullable<AccountsApiTransport['post']> { if (!transport.post) throw new Error('ACCOUNT_MUTATION_UNAVAILABLE'); return transport.post.bind(transport); }
+function requireDelete(transport: AccountsApiTransport): NonNullable<AccountsApiTransport['delete']> { if (!transport.delete) throw new Error('ACCOUNT_DELETE_UNAVAILABLE'); return transport.delete.bind(transport); }
 
 function queryString(filters: AccountListFilters = {}): string {
   const params = new URLSearchParams();
@@ -116,6 +119,7 @@ export function createAccountsApi(transport: AccountsApiTransport): AccountsApi 
   return {
     async list(filters) { return toCanonicalPage(unwrapEnvelope(await transport.get<CanonicalAccountsPayload | ApiEnvelope<CanonicalAccountsPayload>>(`/api/v1/accounts${queryString(filters)}`))); },
     async createAccount(input) { const post = requirePost(transport); return toAccountVM(unwrapEnvelope(await post<CanonicalAccountResponse | ApiEnvelope<CanonicalAccountResponse>>('/api/v1/accounts', input, { headers: { 'Idempotency-Key': `account-create-${input.sellerRef}-${Date.now()}` } }))); },
+    async deleteAccount(accountId) { const del = requireDelete(transport); await del<unknown>(`/api/v1/accounts/${encodeURIComponent(accountId)}`, { headers: { 'Idempotency-Key': `account-delete-${accountId}-${Date.now()}` } }); },
     async getDetail(accountId) { return toAccountVM(unwrapEnvelope(await transport.get<CanonicalAccountResponse | ApiEnvelope<CanonicalAccountResponse>>(`/api/v1/accounts/${encodeURIComponent(accountId)}`))); },
     async getConnection(accountId) { return unwrapEnvelope(await transport.get<AccountConnectionVM | ApiEnvelope<AccountConnectionVM>>(`/api/v1/accounts/${encodeURIComponent(accountId)}/connection`)); },
     async createQrSession(accountId) { const post = requirePost(transport); return unwrapQrSession(await post<CanonicalQrSessionResponse | ApiEnvelope<CanonicalQrSessionResponse>>('/api/v1/auth/qr-sessions', accountId ? { accountId } : {}, { headers: { 'Idempotency-Key': `qr-login-${accountId ?? 'onboarding'}-${Date.now()}` } })); },
@@ -149,6 +153,7 @@ export function createMockAccountsApi(seed: AccountSummary[] = [
   return {
     async list(filters = {}) { const search = filters.search?.trim().toLowerCase(); const filtered = accounts.filter((account) => (!search || [account.id, account.displayName, account.remark ?? ''].some((value) => value.toLowerCase().includes(search))) && (!filters.status || filters.status === 'all' || account.status === filters.status) && (!filters.connectionStatus || filters.connectionStatus === 'all' || account.connection.status === filters.connectionStatus)); const page = filters.page ?? 1; const pageSize = filters.pageSize ?? 20; const start = (page - 1) * pageSize; return { items: filtered.slice(start, start + pageSize), total: filtered.length, page, pageSize, totalPages: Math.max(1, Math.ceil(filtered.length / pageSize)) }; },
     async createAccount(input) { if (accounts.some((account) => account.sellerRef === input.sellerRef)) throw new Error('ACCOUNT_ALREADY_EXISTS'); const account: AccountVM = { id: `account-${Date.now()}`, platform: 'xianyu', sellerRef: input.sellerRef, displayName: input.displayName?.trim() || input.sellerRef, status: 'pending', connection: { status: 'unknown' }, enabled: true, aiEnabled: false, credentialState: 'missing', version: 1, updatedAt: new Date().toISOString() }; accounts.unshift(account); return account; },
+    async deleteAccount(accountId) { const index = accounts.findIndex((account) => account.id === accountId); if (index < 0) throw new Error('ACCOUNT_NOT_FOUND'); accounts.splice(index, 1); },
     async getDetail(accountId) { const account = accounts.find((item) => item.id === accountId); if (!account) throw new Error('account not found'); return account; },
     async getConnection(accountId) { return (await this.getDetail(accountId)).connection; },
     async createQrSession(accountId) { return createQrSession(accountId); },
@@ -164,6 +169,7 @@ export function createLegacyAccountsApi(legacyApi: { list(query?: { page?: numbe
   return {
     async list(filters) { const result = await legacyApi.list(filters); return { ...result, items: result.items.map(fromLegacySummary) }; },
     async createAccount() { throw new Error('ACCOUNT_CREATE_UNAVAILABLE'); },
+    async deleteAccount() { throw new Error('ACCOUNT_DELETE_UNAVAILABLE'); },
     async getDetail(accountId) { const result = await legacyApi.list({ search: accountId }); const account = result.items.find((item) => item.id === accountId); if (!account) throw new Error('account not found'); return fromLegacySummary(account); },
     async getConnection(accountId) { return (await this.getDetail(accountId)).connection; },
     async createQrSession() { throw new Error('QR_LOGIN_UNAVAILABLE'); },

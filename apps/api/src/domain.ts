@@ -240,6 +240,7 @@ export interface Store {
   getAccount(adminId: string, accountId: string): Promise<AccountRecord | undefined>;
   createAccount(input: { platform: string; sellerRef: string; displayName?: string; adminId: string }): Promise<AccountRecord>;
   updateAccount(adminId: string, accountId: string, patch: { sellerRef?: string; displayName?: string; remark?: string; avatarUrl?: string; platformUserId?: string; status?: AccountStatus; lastConnectedAt?: string }): Promise<AccountRecord | undefined>;
+  deleteAccount(adminId: string, accountId: string): Promise<AccountRecord | undefined>;
   createLoginSession(input: { adminId: string; accountId?: string; provisionalAccountRef?: string; loginMethod: string; expiresAt: string; qrTokenRef?: string }): Promise<LoginSessionRecord>;
   getLoginSession(adminId: string, accountId: string, sessionId: string): Promise<LoginSessionRecord | undefined>;
   getLoginSessionById(adminId: string, sessionId: string): Promise<LoginSessionRecord | undefined>;

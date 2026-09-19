@@ -56,15 +56,17 @@ async function createCdpClient(debugPort) {
   await new Promise((resolve, reject) => { socket.addEventListener('open', resolve, { once: true }); socket.addEventListener('error', reject, { once: true }); });
   let nextId = 0;
   const pending = new Map();
+  const events = [];
   socket.addEventListener('message', (event) => {
     const message = JSON.parse(event.data);
+    if (!message.id && message.method) events.push(message);
     if (!message.id || !pending.has(message.id)) return;
     const entry = pending.get(message.id);
     pending.delete(message.id);
     if (message.error) entry.reject(new Error(message.error.message)); else entry.resolve(message.result);
   });
   const send = (method, params = {}) => new Promise((resolve, reject) => { const id = ++nextId; pending.set(id, { resolve, reject }); socket.send(JSON.stringify({ id, method, params })); });
-  return { socket, send };
+  return { socket, send, events };
 }
 
 async function evaluate(cdp, expression) {
@@ -99,9 +101,9 @@ async function run() {
   if (!bootstrap.ok) throw new Error(`bootstrap failed: ${bootstrap.status}`);
   const bootstrapPayload = await bootstrap.json();
   const adminId = bootstrapPayload.data.profile.id;
-  const account = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `products-e2e-${process.pid}` });
-  await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `products-e2e-secondary-${process.pid}` });
-  await apiRuntime.store.createProduct({ adminId, accountId: account.id, externalProductRef: `ITEM-${process.pid}`, title: 'Chrome E2E 商品', description: '商品详情来自独立 detail API。', categoryCode: 'digital', attributes: { source: 'chrome-e2e' }, priceMinor: 3990, status: 'published' });
+  const account = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `products-e2e-${process.pid}`, displayName: 'Chrome 商品账号' });
+  const secondaryAccount = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `products-e2e-secondary-${process.pid}`, displayName: 'Secondary 商品账号' });
+  await apiRuntime.store.createProduct({ adminId, accountId: account.id, externalProductRef: `ITEM-${process.pid}`, title: 'Chrome E2E 商品', description: '商品详情来自独立 detail API', categoryCode: 'digital', attributes: { source: 'chrome-e2e' }, priceMinor: 3990, status: 'published' });
   apiRuntime.xianyu.fetchItemsAll = async () => {
     const items = Array.from({ length: 29 }, (_, index) => ({ externalProductRef: `SYNC-${process.pid}-${index + 1}`, title: `Chrome E2E 同步商品 ${index + 1}`, description: '来自闲鱼同步 fixture', categoryCode: 'digital', priceMinor: 1290 + index, detailUrl: `https://www.goofish.com/item?id=SYNC-${process.pid}-${index + 1}`, imageUrls: ['https://img.example/sync.jpg'], attributes: { source: 'chrome-sync-e2e' }, sourcePayloadDigest: `sync-${process.pid}-${index + 1}` }));
     return { pages: [{ success: true, accountInvalid: false, cookieHeader: '', items, pageNumber: 1, pageSize: 20, totalCount: items.length, totalPages: 1, hasMore: false }], items, hasMore: false };
@@ -114,23 +116,26 @@ async function run() {
   const cdp = await createCdpClient(debugPort);
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
+  await cdp.send('Network.enable');
   for (const pair of cookie.split('; ')) { const [name, ...valueParts] = pair.split('='); await cdp.send('Network.setCookie', { name, value: valueParts.join('='), url: `${webUrl}/` }); }
   await cdp.send('Page.navigate', { url: `${webUrl}/products` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'products page');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('商品目录'), 'products list');
+  await evaluate(cdp, `localStorage.setItem('xianyu.activeAccountId', ${JSON.stringify(account.id)}); location.reload();`);
+  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("[data-testid=product-account-context]")?.textContent ?? ""')).includes('Chrome 商品账号'), 'active account context');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 商品'), 'product row');
-  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("[data-testid=product-account-select]")?.value ?? ""')) === '', 'explicit product account selection');
-  const initiallyDisabled = await evaluate(cdp, 'Boolean(document.querySelector("[data-testid=sync-products]")?.disabled)');
-  if (!initiallyDisabled) throw new Error('sync products button should require account selection when multiple accounts exist');
-  await evaluate(cdp, `(() => { const select = document.querySelector('[data-testid=product-account-select]'); if (!select) throw new Error('product account selector missing'); select.value = ${JSON.stringify(account.id)}; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
-  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("[data-testid=product-account-select]")?.value ?? ""')).includes(account.id), 'selected product account scope');
   const syncButton = await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=sync-products]"); if (!button || button.disabled) return false; button.click(); return true; })()');
   if (!syncButton) throw new Error('sync products button missing or disabled');
+  await waitFor(async () => cdp.events.some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'POST' && event.params?.request?.url?.includes('/api/v1/products/sync')), 'xianyu product sync request');
   await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("[data-testid=products-total]")?.textContent ?? ""')).includes('30'), '29 synced products plus local product');
-  await captureViewport(cdp, 1440, 900, 'products-desktop-1440x900.png');
-  const openedCreate = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((item) => item.textContent?.includes("新建商品")); if (!button) return false; button.click(); return true; })()');
-  if (!openedCreate) throw new Error('create draft button missing');
+  const refreshMark = cdp.events.length;
+  if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=refresh-products]"); if (!button || button.disabled) return false; button.click(); return true; })()')) throw new Error('refresh products button missing or disabled');
+  await waitFor(async () => cdp.events.slice(refreshMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'GET' && event.params?.request?.url?.match(/\/api\/v1\/products(?:\?|$)/)), 'local product refresh request');
+  if (cdp.events.slice(refreshMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.url?.includes('/api/v1/products/sync'))) throw new Error('refresh must not call xianyu sync endpoint');
+  const publishMark = cdp.events.length;
+  if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=publish-product]"); if (!button || button.disabled) return false; button.click(); return true; })()')) throw new Error('publish product button missing or disabled');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('新建商品草稿'), 'create draft drawer');
+  if (cdp.events.slice(publishMark).some((event) => event.method === 'Network.requestWillBeSent' && /publish|bulk-publish|mtop/i.test(event.params?.request?.url ?? ''))) throw new Error('publish draft entry must not call a real publish endpoint');
   await evaluate(cdp, '(() => { const set = (label, value) => { const input = document.querySelector(`[aria-label="${label}"]`); if (!input) throw new Error(`missing ${label}`); const setter = Object.getOwnPropertyDescriptor(input.__proto__, "value")?.set; setter?.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); }; set("商品标题", "Chrome 创建草稿"); set("分类编码", "digital"); set("价格（分）", "2990"); set("商品描述", "来自 Chrome E2E 的草稿"); })()');
   const savedCreate = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((item) => item.textContent?.includes("保存草稿")); if (!button || button.disabled) return false; button.click(); return true; })()');
   if (!savedCreate) throw new Error('save draft button disabled');
@@ -147,9 +152,26 @@ async function run() {
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome 编辑草稿'), 'updated draft row');
   await cdp.send('Page.reload', { ignoreCache: true });
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome 编辑草稿'), 'products persisted after reload');
+  await captureViewport(cdp, 1440, 900, 'products-desktop-1440x900.png');
   await captureViewport(cdp, 390, 844, 'products-mobile-390x844.png');
+  await cdp.send('Page.navigate', { url: `${webUrl}/accounts` });
+  await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'accounts page after product flow');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('账号列表'), 'accounts list for UI switch');
+  const switched = await evaluate(cdp, `(() => { const rows = Array.from(document.querySelectorAll('[role="row"]')); const row = rows.find((candidate) => candidate.textContent?.includes(${JSON.stringify(secondaryAccount.displayName)}) && candidate.querySelector('[data-testid="account-switch"]')?.textContent?.includes('切换账号')); const button = row?.querySelector('[data-testid="account-switch"]'); if (!button) return false; button.click(); return true; })()`);
+  if (!switched) throw new Error('secondary account switch button missing or disabled');
+  await waitFor(async () => String(await evaluate(cdp, 'localStorage.getItem("xianyu.activeAccountId") ?? ""')) === secondaryAccount.id, 'ui account switch persisted');
+  const secondaryProductsMark = cdp.events.length;
+  await cdp.send('Page.navigate', { url: `${webUrl}/products` });
+  await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'products page after account switch');
+  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("[data-testid=product-account-context]")?.textContent ?? ""')).includes('Secondary 商品账号'), 'switched product account context');
+  await waitFor(async () => cdp.events.slice(secondaryProductsMark).some((event) => {
+    if (event.method !== 'Network.requestWillBeSent' || event.params?.request?.method !== 'GET') return false;
+    const url = new URL(event.params.request.url);
+    return url.pathname === '/api/v1/products' && url.searchParams.get('accountId') === secondaryAccount.id;
+  }), 'secondary scoped product request');
+  if (String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome 编辑草稿')) throw new Error('switched account should not show primary account product');
   await cdp.send('Emulation.clearDeviceMetricsOverride');
-  console.log('local Chrome E2E passed: real API/store products list -> detail -> reload persistence');
+  console.log('local Chrome E2E passed: account context -> sync -> local refresh -> draft create/detail/edit/reload -> UI account switch');
   cdp.socket.close();
 }
 

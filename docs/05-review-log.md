@@ -230,3 +230,5 @@
 | S5-R15 | 管理员初始化 / 认证 | 初始化页是否仍由真实 `bootstrapRequired` 驱动，已有管理员时是否只显示登录页 | root | PASS | `GET /api/v1/auth/session` 返回 `bootstrapRequired=false` 与 PostgreSQL 中现有管理员一致；`1051585831@qq.com` 登录成功，账号列表读取成功 |
 
 本轮结论：本地 dev 与 Compose 已统一持久化数据源；当前不显示初始化页是因为开发 PostgreSQL 已存在管理员，不是前端渲染缺陷。若需再次演示首次初始化，必须人工确认后清理管理员数据。
+- 2026-09-19 S5-R31 账号上下文与删除账号：PASS。账号管理新增 `DELETE /api/v1/accounts/{id}` 软删除，撤销当前管理员 scope 与 active credential，保留历史商品/审计；前端通过 `AccountContextProvider` + localStorage 传播当前账号，商品页不再重复选择账号。证据：`npm test`、`npm run test:e2e:chrome`、`npm run test:e2e:chrome:products`。
+- 2026-09-19 S5-R32 商品动作边界：PASS。商品页明确区分“同步闲鱼”（POST `/api/v1/products/sync`）、“刷新本地”（GET `/api/v1/products`）和“发布商品”（仅打开本地草稿流程）；Chrome/CDP E2E 覆盖同步、刷新网络门禁、草稿创建/详情/编辑/持久化及 UI 账号切换。

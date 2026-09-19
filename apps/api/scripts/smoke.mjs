@@ -144,6 +144,27 @@ try {
   const accountAfterExpiry = await request(`/api/v1/accounts/${accountId}`, { headers: { cookie } });
   assert.equal(accountAfterExpiry.body.data.status, 'expired');
 
+  const deleted = await request(`/api/v1/accounts/${accountId}`, {
+    method: 'DELETE',
+    headers: { cookie, 'X-CSRF-Token': decodeURIComponent(csrf), 'Idempotency-Key': 'account-delete-1' },
+    body: JSON.stringify({}),
+  });
+  assert.equal(deleted.response.status, 200);
+  assert.equal(deleted.body.data.deleted, true);
+  assert.equal(deleted.body.data.account.status, 'disabled');
+  const afterDeleteList = await request('/api/v1/accounts', { headers: { cookie } });
+  assert.equal(afterDeleteList.response.status, 200);
+  assert.equal(afterDeleteList.body.data.items.length, 0);
+  const afterDeleteGet = await request(`/api/v1/accounts/${accountId}`, { headers: { cookie } });
+  assert.equal(afterDeleteGet.response.status, 404);
+  const deletedReplay = await request(`/api/v1/accounts/${accountId}`, {
+    method: 'DELETE',
+    headers: { cookie, 'X-CSRF-Token': decodeURIComponent(csrf), 'Idempotency-Key': 'account-delete-1' },
+    body: JSON.stringify({}),
+  });
+  assert.equal(deletedReplay.response.status, 200);
+  assert.deepEqual(deletedReplay.body, deleted.body);
+
   console.log('env0 smoke passed');
 } finally {
   child.kill('SIGTERM');

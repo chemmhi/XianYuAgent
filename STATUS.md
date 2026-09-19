@@ -85,3 +85,6 @@
 - 2026-09-19 S4-VS2 商品同步首片完成：`POST /api/v1/products/sync`、MTOP 脱敏 mapper、Memory/PostgreSQL 幂等 Upsert、本地草稿跳过、商品页同步按钮和 Chrome/CDP fixture E2E 均通过；提交 `edecc3e`。真实发布仍未接入。
 - 2026-09-19 S4-VS2 商品同步入口修复完成：普通 `/products` 自动选择可用账号并携带 `accountId` 查询/同步，Chrome/CDP fixture 验证 29 件同步商品可见；本轮已单独提交。真实闲鱼外部验收仍待人工执行。
 - 2026-09-19 S4-VS2 商品同步 Compose 回归修复：PostgreSQL 外部商品 Upsert 补齐部分唯一索引冲突谓词，真实 19 件账号同步由 500 恢复为 200 并落库；多账号无 query 时改为要求显式选择，避免静默同步到返回 0 件的错误账号。当前 Compose 两个账号实测为 0/19 件，用户所说 29 件仍待确认目标账号与统计口径。
+- 2026-09-19 当前切片：账号管理新增软删除与全局账号上下文；商品页移除重复账号选择，新增“同步闲鱼 / 刷新本地 / 发布商品”三项动作。发布入口只创建本地草稿，不调用真实闲鱼发布接口。
+- 验证证据：`npm run typecheck`、`npm test`、`npm run test:products:postgres`、`npm run test:e2e:chrome`、`npm run test:e2e:chrome:products`、`npm run compose:config`、`git diff --check` 均通过。
+- 范围边界：账号上下文采用认证后前端壳层的 localStorage 持久化；删除账号采用软删除，撤销 scope/credential，保留历史商品与审计记录；真实闲鱼 APP 扫码和真实发布仍未完成外部验收。

@@ -35,7 +35,7 @@ export class MemoryStore implements Store {
   async rotateSessionCsrf(id: string, csrfTokenHash: string): Promise<void> { const session = this.sessions.get(id); if (session) session.csrfTokenHash = csrfTokenHash; }
   async revokeSession(id: string, reason: string): Promise<void> { const session = this.sessions.get(id); if (session) session.revokedAt = new Date().toISOString(); void reason; }
   async listScopes(adminId: string): Promise<AccountScopeRecord[]> { return [...this.scopes.values()].filter((scope) => scope.adminId === adminId && scope.status === 'active' && (!scope.expiresAt || Date.parse(scope.expiresAt) > Date.now())); }
-  async hasAccountScope(adminId: string, accountId: string): Promise<boolean> { return (await this.listScopes(adminId)).some((scope) => scope.accountId === accountId); }
+  async hasAccountScope(adminId: string, accountId: string): Promise<boolean> { const account = this.accounts.get(accountId); return account?.status !== 'disabled' && (await this.listScopes(adminId)).some((scope) => scope.accountId === accountId); }
   async grantScope(input: { adminId: string; accountId: string; scope: string }): Promise<AccountScopeRecord> {
     const existing = [...this.scopes.values()].find((item) => item.adminId === input.adminId && item.accountId === input.accountId && item.scope === input.scope);
     if (existing) { existing.status = 'active'; existing.revokedAt = undefined; return existing; }
@@ -44,7 +44,7 @@ export class MemoryStore implements Store {
     return row;
   }
   async revokeScope(adminId: string, accountId: string, scope: string): Promise<void> { const item = [...this.scopes.values()].find((row) => row.adminId === adminId && row.accountId === accountId && row.scope === scope); if (item) { item.status = 'revoked'; item.revokedAt = new Date().toISOString(); } }
-  async listAccounts(adminId: string): Promise<AccountRecord[]> { const ids = new Set((await this.listScopes(adminId)).map((scope) => scope.accountId)); return [...this.accounts.values()].filter((account) => ids.has(account.id)); }
+  async listAccounts(adminId: string): Promise<AccountRecord[]> { const ids = new Set((await this.listScopes(adminId)).map((scope) => scope.accountId)); return [...this.accounts.values()].filter((account) => ids.has(account.id) && account.status !== 'disabled'); }
   async getAccount(adminId: string, accountId: string): Promise<AccountRecord | undefined> { if (!(await this.hasAccountScope(adminId, accountId))) return undefined; return this.accounts.get(accountId); }
   async createAccount(input: { platform: string; sellerRef: string; displayName?: string; adminId: string }): Promise<AccountRecord> {
     const duplicate = [...this.accounts.values()].find((account) => account.platform === input.platform && account.sellerRef === input.sellerRef);
@@ -56,6 +56,7 @@ export class MemoryStore implements Store {
     return account;
   }
   async updateAccount(adminId: string, accountId: string, patch: { sellerRef?: string; displayName?: string; remark?: string; avatarUrl?: string; platformUserId?: string; status?: AccountRecord['status']; lastConnectedAt?: string }): Promise<AccountRecord | undefined> { const account = await this.getAccount(adminId, accountId); if (!account) return undefined; if (patch.sellerRef !== undefined) account.sellerRef = patch.sellerRef; if (patch.displayName !== undefined) account.displayName = patch.displayName; if (patch.remark !== undefined) account.remark = patch.remark; if (patch.avatarUrl !== undefined) account.avatarUrl = patch.avatarUrl; if (patch.platformUserId !== undefined) account.platformUserId = patch.platformUserId; if (patch.status !== undefined) account.status = patch.status; if (patch.lastConnectedAt !== undefined) account.lastConnectedAt = patch.lastConnectedAt; account.updatedAt = new Date().toISOString(); return account; }
+  async deleteAccount(adminId: string, accountId: string): Promise<AccountRecord | undefined> { const account = await this.getAccount(adminId, accountId); if (!account) return undefined; account.status = 'disabled'; account.updatedAt = new Date().toISOString(); const credential = this.credentials.get(accountId); if (credential && credential.status === 'active') { credential.status = 'revoked'; credential.updatedAt = account.updatedAt; } for (const scope of this.scopes.values()) { if (scope.accountId === accountId && scope.status === 'active') { scope.status = 'revoked'; scope.revokedAt = account.updatedAt; } } return { ...account }; }
   async listProducts(adminId: string, query: ProductListQuery): Promise<ProductListResult> {
     const scopedAccountIds = new Set((await this.listScopes(adminId)).map((scope) => scope.accountId));
     const normalizedKeyword = query.keyword?.trim().toLowerCase();

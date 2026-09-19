@@ -28,7 +28,7 @@
 .accounts-domain-enabled { color: var(--success); font-weight: 700; }
 .accounts-domain-muted { color: var(--sub); }
 .accounts-domain-updated { color: var(--sub); font-size: 10px; font-variant-numeric: tabular-nums; }
-.accounts-domain-row-actions { display: flex; justify-content: flex-end; }
+.accounts-domain-row-actions { display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
 .accounts-domain-row-actions .btn { white-space: nowrap; }
 .accounts-domain-state { display: grid; place-items: center; gap: 6px; min-height: 210px; padding: 28px; color: var(--sub); text-align: center; }
 .accounts-domain-state strong { color: var(--text); font-size: 13px; }
