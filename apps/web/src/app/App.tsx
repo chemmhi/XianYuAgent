@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { createHttpClient } from '../api/http';
 import { createAccountsApi } from '../features/accounts/api';
 import { AccountsPage } from '../features/accounts/components/AccountsPage';
+import { createAuthApi } from '../features/auth/api';
+import { AuthGate } from '../features/auth/components/AuthGate';
 import { navItems, pathForPage, type PageKey } from './navigation';
 
 function pageFromPath(pathname: string): PageKey {
@@ -25,10 +27,12 @@ function iconFor(name: string) {
 
 export default function App() {
   const [page, setPage] = useState<PageKey>(() => pageFromPath(window.location.pathname));
-  const accountsApi = useMemo(() => {
+  const transport = useMemo(() => {
     const transport = createHttpClient({ baseUrl: import.meta.env.VITE_API_BASE_URL ?? '', credentials: 'include' });
-    return createAccountsApi({ get: transport.get, post: transport.post });
+    return transport;
   }, []);
+  const authApi = useMemo(() => createAuthApi({ get: transport.get, post: transport.post }), [transport]);
+  const accountsApi = useMemo(() => createAccountsApi({ get: transport.get, post: transport.post }), [transport]);
 
   useEffect(() => {
     const handlePopState = () => setPage(pageFromPath(window.location.pathname));
@@ -44,6 +48,12 @@ export default function App() {
 
   const activeNav = navItems.find((item) => item.key === page) ?? navItems[0];
 
+  return <AuthGate api={authApi}>
+    <AuthenticatedShell page={page} activeNav={activeNav} accountsApi={accountsApi} navigate={navigate} />
+  </AuthGate>;
+}
+
+function AuthenticatedShell({ page, activeNav, accountsApi, navigate }: { page: PageKey; activeNav: typeof navItems[number]; accountsApi: ReturnType<typeof createAccountsApi>; navigate: (next: PageKey) => void }) {
   return (
     <div className="app-viewport">
       <div className="desktop-shell">
