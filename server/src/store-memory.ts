@@ -1,4 +1,4 @@
-import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, IdempotencyRecord, SessionRecord, Store } from './domain.js';
+import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, IdempotencyRecord, LoginSessionRecord, SessionRecord, Store } from './domain.js';
 import { createId } from './security.js';
 
 export class MemoryStore implements Store {
@@ -6,6 +6,7 @@ export class MemoryStore implements Store {
   private readonly admins = new Map<string, AdminRecord>();
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly accounts = new Map<string, AccountRecord>();
+  private readonly loginSessions = new Map<string, LoginSessionRecord>();
   private readonly scopes = new Map<string, AccountScopeRecord>();
   private readonly idempotency = new Map<string, IdempotencyRecord>();
   readonly audits: AuditEventRecord[] = [];
@@ -53,6 +54,26 @@ export class MemoryStore implements Store {
     return account;
   }
   async updateAccount(adminId: string, accountId: string, patch: { displayName?: string; status?: AccountRecord['status'] }): Promise<AccountRecord | undefined> { const account = await this.getAccount(adminId, accountId); if (!account) return undefined; if (patch.displayName !== undefined) account.displayName = patch.displayName; if (patch.status !== undefined) account.status = patch.status; account.updatedAt = new Date().toISOString(); return account; }
+  async createLoginSession(input: { adminId: string; accountId: string; loginMethod: string; expiresAt: string; qrTokenRef?: string }): Promise<LoginSessionRecord> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const now = new Date().toISOString();
+    const session: LoginSessionRecord = { id: createId(), accountId: input.accountId, loginMethod: input.loginMethod, status: 'waiting', startedAt: now, expiresAt: input.expiresAt, qrTokenRef: input.qrTokenRef };
+    this.loginSessions.set(session.id, session);
+    return session;
+  }
+  async getLoginSession(adminId: string, accountId: string, sessionId: string): Promise<LoginSessionRecord | undefined> {
+    if (!(await this.hasAccountScope(adminId, accountId))) return undefined;
+    const session = this.loginSessions.get(sessionId);
+    if (!session || session.accountId !== accountId) return undefined;
+    if (session.status === 'waiting' && Date.parse(session.expiresAt) <= Date.now()) session.status = 'expired';
+    return session;
+  }
+  async updateLoginSession(adminId: string, accountId: string, sessionId: string, patch: { status?: LoginSessionRecord['status']; expiresAt?: string; completedAt?: string; failureCode?: string }): Promise<LoginSessionRecord | undefined> {
+    const session = await this.getLoginSession(adminId, accountId, sessionId);
+    if (!session) return undefined;
+    Object.assign(session, patch);
+    return session;
+  }
   async getIdempotency(scope: string, key: string): Promise<IdempotencyRecord | undefined> { const row = this.idempotency.get(`${scope}:${key}`); if (row && Date.parse(row.expiresAt) <= Date.now()) { this.idempotency.delete(`${scope}:${key}`); return undefined; } return row; }
   async beginIdempotency(record: IdempotencyRecord): Promise<void> { this.idempotency.set(`${record.scope}:${record.key}`, record); }
   async abortIdempotency(scope: string, key: string): Promise<void> { this.idempotency.delete(`${scope}:${key}`); }

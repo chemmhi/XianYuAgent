@@ -1,6 +1,7 @@
 export type AdminStatus = 'active' | 'disabled';
 export type AccountStatus = 'pending' | 'connected' | 'degraded' | 'disconnected' | 'expired' | 'disabled';
 export type ScopeStatus = 'active' | 'revoked' | 'expired';
+export type LoginSessionStatus = 'created' | 'waiting' | 'scanned' | 'succeeded' | 'expired' | 'failed' | 'cancelled';
 
 export interface AdminRecord {
   id: string;
@@ -42,6 +43,18 @@ export interface AccountScopeRecord {
   status: ScopeStatus;
   expiresAt?: string;
   revokedAt?: string;
+}
+
+export interface LoginSessionRecord {
+  id: string;
+  accountId: string;
+  loginMethod: string;
+  status: LoginSessionStatus;
+  startedAt: string;
+  expiresAt: string;
+  completedAt?: string;
+  failureCode?: string;
+  qrTokenRef?: string;
 }
 
 export interface IdempotencyRecord {
@@ -90,6 +103,9 @@ export interface Store {
   getAccount(adminId: string, accountId: string): Promise<AccountRecord | undefined>;
   createAccount(input: { platform: string; sellerRef: string; displayName?: string; adminId: string }): Promise<AccountRecord>;
   updateAccount(adminId: string, accountId: string, patch: { displayName?: string; status?: AccountStatus }): Promise<AccountRecord | undefined>;
+  createLoginSession(input: { adminId: string; accountId: string; loginMethod: string; expiresAt: string; qrTokenRef?: string }): Promise<LoginSessionRecord>;
+  getLoginSession(adminId: string, accountId: string, sessionId: string): Promise<LoginSessionRecord | undefined>;
+  updateLoginSession(adminId: string, accountId: string, sessionId: string, patch: { status?: LoginSessionStatus; expiresAt?: string; completedAt?: string; failureCode?: string }): Promise<LoginSessionRecord | undefined>;
   getIdempotency(scope: string, key: string): Promise<IdempotencyRecord | undefined>;
   beginIdempotency(record: IdempotencyRecord): Promise<void>;
   abortIdempotency(scope: string, key: string): Promise<void>;

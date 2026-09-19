@@ -73,6 +73,32 @@ try {
   assert.equal(detail.sellerRef, 'live-seller-001');
   const connection = await accountsApi.getConnection(page.items[0].id);
   assert.equal(connection.status, 'connecting');
+
+  const loginSession = await request(`/api/v1/accounts/${page.items[0].id}/login-sessions`, {
+    method: 'POST',
+    headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'live-login-session-1' },
+    body: JSON.stringify({ loginMethod: 'qr' }),
+  });
+  assert.equal(loginSession.response.status, 201);
+  assert.equal(loginSession.body.data.status, 'waiting');
+  const loginSessionId = loginSession.body.data.id;
+  const loginSessionRead = await request(`/api/v1/accounts/${page.items[0].id}/login-sessions/${loginSessionId}`, { headers: { cookie } });
+  assert.equal(loginSessionRead.body.data.status, 'waiting');
+  const cancelled = await request(`/api/v1/accounts/${page.items[0].id}/login-sessions/${loginSessionId}/cancel`, {
+    method: 'POST',
+    headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'live-login-session-cancel-1' },
+    body: JSON.stringify({}),
+  });
+  assert.equal(cancelled.body.data.status, 'cancelled');
+
+  const qrSession = await request('/api/v1/auth/qr-sessions', {
+    method: 'POST',
+    headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'live-qr-session-1' },
+    body: JSON.stringify({ accountId: page.items[0].id }),
+  });
+  assert.equal(qrSession.body.data.status, 'waiting');
+  const qrRead = await request(`/api/v1/auth/qr-sessions/${qrSession.body.data.qrSessionId}?accountId=${encodeURIComponent(page.items[0].id)}`, { headers: { cookie } });
+  assert.equal(qrRead.body.data.status, 'waiting');
   console.log('live accounts API integration passed');
 } finally {
   child.kill('SIGTERM');

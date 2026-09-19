@@ -39,7 +39,7 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
   const method = (request.method ?? 'GET').toUpperCase();
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
   const ids = createIds();
-  const ctx: RequestContext = { requestId: ids.requestId, traceId: ids.traceId, method, path: url.pathname, body: {}, headers: Object.fromEntries(Object.entries(request.headers).map(([key, value]) => [key.toLowerCase(), Array.isArray(value) ? value[0] : value])), cookies: parseCookies(request.headers.cookie) };
+  const ctx: RequestContext = { requestId: ids.requestId, traceId: ids.traceId, method, path: url.pathname, query: Object.fromEntries(url.searchParams.entries()), body: {}, headers: Object.fromEntries(Object.entries(request.headers).map(([key, value]) => [key.toLowerCase(), Array.isArray(value) ? value[0] : value])), cookies: parseCookies(request.headers.cookie) };
   try {
     if (method === 'OPTIONS') { response.statusCode = 204; response.end(); return; }
     if (method !== 'GET' && method !== 'HEAD') ctx.body = await readJson(request);
@@ -103,6 +103,31 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     return { statusCode: 200, body: success(ctx, { loggedOut: true }).body };
   }
 
+  const loginSessionMatch = ctx.path.match(/^\/api\/v1\/accounts\/([^/]+)\/login-sessions(?:\/([^/]+)(?:\/(cancel|renew))?)?$/);
+  if (ctx.path === '/api/v1/auth/qr-sessions' && ctx.method === 'POST') {
+    const accountId = String(ctx.body.accountId ?? '');
+    if (!accountId) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
+    const result = await mutation(runtime, ctx, authContext, accountId, async () => success(ctx, toQrSessionView(await accounts.createLoginSession({ adminId: authContext.admin.id, accountId, loginMethod: 'qr', requestId: ctx.requestId, traceId: ctx.traceId })), 201));
+    return result;
+  }
+  if (ctx.path.startsWith('/api/v1/auth/qr-sessions/') && ctx.method === 'GET') {
+    const sessionId = decodeURIComponent(ctx.path.split('/').pop() ?? '');
+    const accountId = String(ctx.query.accountId ?? '');
+    if (!accountId) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId query is required');
+    return { statusCode: 200, body: success(ctx, toQrSessionView(await accounts.getLoginSession({ adminId: authContext.admin.id, accountId, sessionId }))).body };
+  }
+  if (loginSessionMatch) {
+    const accountId = decodeURIComponent(loginSessionMatch[1]);
+    const sessionId = loginSessionMatch[2] ? decodeURIComponent(loginSessionMatch[2]) : undefined;
+    if (!sessionId && ctx.method === 'POST') {
+      const result = await mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await accounts.createLoginSession({ adminId: authContext.admin.id, accountId, loginMethod: String(ctx.body.loginMethod ?? 'qr'), requestId: ctx.requestId, traceId: ctx.traceId }), 201));
+      return result;
+    }
+    if (sessionId && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, await accounts.getLoginSession({ adminId: authContext.admin.id, accountId, sessionId })).body };
+    if (sessionId && loginSessionMatch[3] === 'cancel' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId, sessionId, patch: { status: 'cancelled', completedAt: new Date().toISOString() }, requestId: ctx.requestId, traceId: ctx.traceId })));
+    if (sessionId && loginSessionMatch[3] === 'renew' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId, sessionId, patch: { status: 'waiting', expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(), failureCode: undefined }, requestId: ctx.requestId, traceId: ctx.traceId })));
+  }
+
   const accountMatch = ctx.path.match(/^\/api\/v1\/accounts\/([^/]+)(?:\/(scopes|connection))?$/);
   if (ctx.path === '/api/v1/accounts' && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, { items: await accounts.list(authContext.admin.id) }).body };
   if (ctx.path === '/api/v1/accounts' && ctx.method === 'POST') {
@@ -154,4 +179,8 @@ function connectionView(account: { status: string; lastConnectedAt?: string }) {
     failureCode: account.status === 'degraded' ? 'ADAPTER_UNKNOWN' : undefined,
     failureMessage: account.status === 'degraded' ? '外部闲鱼连接结果未知，需要人工复核。' : undefined,
   };
+}
+
+function toQrSessionView(session: { id: string; accountId: string; status: string; expiresAt: string; failureCode?: string }) {
+  return { qrSessionId: session.id, accountId: session.accountId, status: session.status, expiresAt: session.expiresAt, pollAfterMs: 1500, errorCode: session.failureCode };
 }

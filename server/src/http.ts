@@ -15,6 +15,7 @@ export interface RequestContext {
   traceId: string;
   method: string;
   path: string;
+  query: Record<string, string>;
   body: Record<string, unknown>;
   headers: Record<string, string | undefined>;
   cookies: Record<string, string>;
