@@ -32,3 +32,4 @@
 - `d134f9d`、`2567714`、`50cbe0b`：ENV-0 后端运行时、bootstrap Cookie 重放修复、幂等竞争/异常清理修复。
 - `65b48d6`：接通账号真实读取链路、统一 envelope adapter、Compose 与首片迁移骨架，并回写阶段记录。
 - `2de5ff7`：接通账号详情与连接状态读取；外部闲鱼结果未知时返回明确 `unknown`/`ADAPTER_UNKNOWN`，不伪造成功。
+- `325161f`：落地账号登录会话持久化状态机与 QR session 查询/取消/续期入口，当前只推进 waiting/expired/cancelled，不伪造外部扫码成功。
