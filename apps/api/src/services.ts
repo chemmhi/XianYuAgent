@@ -1,5 +1,5 @@
 import type { AppConfig } from './config.js';
-import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductListQuery, ProductListResult, ProductRecord, SessionRecord, Store } from './domain.js';
+import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CouponBatchListQuery, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductListQuery, ProductListResult, ProductRecord, SessionRecord, Store } from './domain.js';
 import { createId, createToken, digestJson, hashPassword, isSessionFresh, sha256, verifyPassword } from './security.js';
 
 export interface AuthContext {
@@ -75,6 +75,130 @@ export class AccountService {
   async scopes(adminId: string, accountId: string): Promise<AccountScopeRecord[]> { if (!(await this.store.hasAccountScope(adminId, accountId))) throw new ServiceError(404, 'NOT_FOUND', 'account not found'); return this.store.listScopes(adminId).then((items) => items.filter((item) => item.accountId === accountId)); }
   async grantScope(input: { adminId: string; accountId: string; scope: string; requestId: string; traceId: string }): Promise<AccountScopeRecord> { await this.get(input.adminId, input.accountId); const row = await this.store.grantScope(input); await this.audit({ actorId: input.adminId, action: 'account.scope.granted', targetRef: row.id, requestId: input.requestId, traceId: input.traceId, payload: { scope: input.scope }, accountId: input.accountId }); return row; }
   async revokeScope(input: { adminId: string; accountId: string; scope: string; requestId: string; traceId: string }): Promise<void> { await this.get(input.adminId, input.accountId); await this.store.revokeScope(input.adminId, input.accountId, input.scope); await this.audit({ actorId: input.adminId, action: 'account.scope.revoked', requestId: input.requestId, traceId: input.traceId, payload: { scope: input.scope }, accountId: input.accountId }); }
+}
+
+export class CouponService {
+  constructor(private readonly store: Store, private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string; reason?: string }) => Promise<string>) {}
+
+  async list(adminId: string, query: CouponBatchListQuery): Promise<{ items: ReturnType<CouponService['toBatchView']>[]; page: number; pageSize: number; total: number; totalPages: number }> {
+    if (query.accountId && !(await this.store.hasAccountScope(adminId, query.accountId))) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    if (!Number.isInteger(page) || page < 1) throw new ServiceError(422, 'VALIDATION_FAILED', 'page must be a positive integer');
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new ServiceError(422, 'VALIDATION_FAILED', 'pageSize must be between 1 and 100');
+    if (query.status && !['draft', 'active', 'paused', 'closed', 'exhausted', 'voided'].includes(query.status)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon batch status');
+    const result = await this.store.listCouponBatches(adminId, { ...query, page, pageSize });
+    return { ...result, items: result.items.map((batch) => this.toBatchView(batch)) };
+  }
+
+  async get(adminId: string, batchId: string): Promise<ReturnType<CouponService['toBatchView']>> {
+    const batch = await this.store.getCouponBatch(adminId, batchId);
+    if (!batch) throw new ServiceError(404, 'NOT_FOUND', 'coupon batch not found');
+    return this.toBatchView(batch, true);
+  }
+
+  async create(input: { adminId: string; accountId: string; label?: string; purpose: string; deliveryScope: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; requestId: string; traceId: string }): Promise<ReturnType<CouponService['toBatchView']>> {
+    if (!input.accountId.trim()) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
+    if (!input.purpose.trim()) throw new ServiceError(422, 'VALIDATION_FAILED', 'purpose is required');
+    if (!['system_only', 'operator_only', 'buyer_deliverable'].includes(input.deliveryScope)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid deliveryScope');
+    try {
+      const batch = await this.store.createCouponBatch(input);
+      await this.audit({ actorId: input.adminId, action: 'coupon.batch.created', targetRef: batch.id, requestId: input.requestId, traceId: input.traceId, payload: { purpose: batch.purpose, deliveryScope: batch.deliveryScope, hasQuarkUrl: Boolean(batch.quarkUrl), hasExtractionCode: Boolean(batch.extractionCode) }, accountId: batch.accountId });
+      return this.toBatchView(batch, true);
+    } catch (error) { throw mapCouponStoreError(error); }
+  }
+
+  async importItems(input: { adminId: string; batchId: string; contents: string[]; requestId: string; traceId: string }): Promise<Record<string, unknown>> {
+    if (!Array.isArray(input.contents) || input.contents.length === 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'items must be a non-empty array');
+    if (input.contents.length > 1000) throw new ServiceError(422, 'VALIDATION_FAILED', 'items cannot exceed 1000 entries');
+    try {
+      const result = await this.store.importCouponItems({ adminId: input.adminId, batchId: input.batchId, contents: input.contents });
+      await this.audit({ actorId: input.adminId, action: 'coupon.items.imported', targetRef: result.batch.id, requestId: input.requestId, traceId: input.traceId, payload: { attempted: input.contents.length, imported: result.items.length, rejected: result.rejected.length }, accountId: result.batch.accountId });
+      const hydrated = await this.store.getCouponBatch(input.adminId, input.batchId) ?? result.batch;
+      return { ...this.toBatchView(hydrated, true), importedCount: result.items.length, rejected: result.rejected, items: result.items.map((item) => this.toItemView(item)) };
+    } catch (error) { throw mapCouponStoreError(error); }
+  }
+
+  async bind(input: { adminId: string; batchId: string; productId: string; requestId: string; traceId: string }): Promise<Record<string, unknown>> {
+    try {
+      const binding = await this.store.bindCouponBatch(input);
+      const batch = await this.store.getCouponBatch(input.adminId, input.batchId);
+      await this.audit({ actorId: input.adminId, action: 'coupon.batch.bound', targetRef: binding.id, requestId: input.requestId, traceId: input.traceId, payload: { productId: input.productId }, accountId: batch?.accountId });
+      return { binding, batch: batch ? this.toBatchView(batch, true) : undefined };
+    } catch (error) { throw mapCouponStoreError(error); }
+  }
+
+  async unbind(input: { adminId: string; batchId: string; productId: string; requestId: string; traceId: string }): Promise<Record<string, unknown>> {
+    try {
+      const binding = await this.store.unbindCouponBatch(input);
+      const batch = await this.store.getCouponBatch(input.adminId, input.batchId);
+      await this.audit({ actorId: input.adminId, action: 'coupon.batch.unbound', targetRef: binding?.id ?? input.batchId, requestId: input.requestId, traceId: input.traceId, payload: { productId: input.productId, found: Boolean(binding) }, accountId: batch?.accountId });
+      return { unbound: Boolean(binding), binding, batch: batch ? this.toBatchView(batch, true) : undefined };
+    } catch (error) { throw mapCouponStoreError(error); }
+  }
+
+  async void(input: { adminId: string; batchId: string; requestId: string; traceId: string }): Promise<Record<string, unknown>> {
+    try {
+      const batch = await this.store.voidCouponBatch(input);
+      if (!batch) throw new ServiceError(404, 'NOT_FOUND', 'coupon batch not found');
+      await this.audit({ actorId: input.adminId, action: 'coupon.batch.voided', targetRef: batch.id, requestId: input.requestId, traceId: input.traceId, payload: { status: batch.status }, accountId: batch.accountId, reason: 'irreversible' });
+      return { voided: true, batch: this.toBatchView(batch, true) };
+    } catch (error) { throw mapCouponStoreError(error); }
+  }
+
+  async delete(input: { adminId: string; batchId: string; requestId: string; traceId: string }): Promise<Record<string, unknown>> {
+    try {
+      const batch = await this.store.voidCouponBatch(input);
+      if (!batch) throw new ServiceError(404, 'NOT_FOUND', 'coupon batch not found');
+      await this.audit({ actorId: input.adminId, action: 'coupon.batch.deleted', targetRef: batch.id, requestId: input.requestId, traceId: input.traceId, payload: { status: batch.status, mode: 'void' }, accountId: batch.accountId, reason: 'soft_delete_preserves_history' });
+      return { deleted: true, batch: this.toBatchView(batch, true) };
+    } catch (error) { throw mapCouponStoreError(error); }
+  }
+
+  async content(input: { adminId: string; itemId: string; purpose: string; deliveryScope: string; requestId: string; traceId: string }): Promise<Record<string, unknown>> {
+    if (!['preview', 'delivery', 'audit'].includes(input.purpose)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid purpose');
+    if (!['system_only', 'operator_only', 'buyer_deliverable'].includes(input.deliveryScope)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid deliveryScope');
+    const found = await this.store.getCouponContent(input.adminId, input.itemId);
+    if (!found) throw new ServiceError(404, 'NOT_FOUND', 'coupon content not found');
+    const allowed = input.purpose === 'preview' && input.deliveryScope === found.batch.deliveryScope;
+    const denialReason = allowed ? undefined : input.purpose !== 'preview' ? 'purpose_not_allowed' : 'scope_mismatch';
+    const auditRef = await this.audit({ actorId: input.adminId, action: 'coupon.content.previewed', targetRef: found.item.id, requestId: input.requestId, traceId: input.traceId, payload: { purpose: input.purpose, deliveryScope: input.deliveryScope, allowed, itemStatus: found.item.status }, accountId: found.batch.accountId, reason: denialReason });
+    const response: Record<string, unknown> = {
+      couponId: found.item.id,
+      batchId: found.batch.id,
+      purpose: input.purpose,
+      deliveryScope: found.batch.deliveryScope,
+      accountIds: [found.batch.accountId],
+      content: allowed ? { body: found.item.content, quarkUrl: found.batch.quarkUrl, extractionCode: found.batch.extractionCode } : undefined,
+      access: { allowed, purpose: input.purpose, auditRef, ...(denialReason ? { denialReason } : {}) },
+      inventoryStatus: found.batch.status === 'voided' ? 'void' : found.item.status === 'consumed' ? 'delivered' : found.item.status,
+    };
+    return response;
+  }
+
+  private toBatchView(batch: CouponBatchRecord, detail = false): Record<string, unknown> {
+    const items = batch.items ?? [];
+    const availableCount = items.length > 0 ? items.filter((item) => item.status === 'available').length : batch.availableCount ?? 0;
+    const reservedCount = items.length > 0 ? items.filter((item) => item.status === 'reserved').length : batch.reservedCount ?? 0;
+    const consumedCount = items.length > 0 ? items.filter((item) => item.status === 'consumed').length : batch.consumedCount ?? 0;
+    const totalCount = batch.totalCount || items.length;
+    const stockAlert = batch.status === 'voided' || availableCount === 0 ? 'exhausted' : availableCount <= 5 ? 'low_stock' : 'normal';
+    const result: Record<string, unknown> = { batchId: batch.id, id: batch.id, accountId: batch.accountId, label: batch.label, purpose: batch.purpose, deliveryScope: batch.deliveryScope, totalCount, availableCount, reservedCount, consumedCount, stockAlert, status: batch.status, version: batch.version, updatedAt: batch.updatedAt, createdAt: batch.createdAt, productBindings: (batch.bindings ?? []).filter((binding) => binding.status === 'active').map((binding) => ({ id: binding.id, productId: binding.productId, priority: binding.priority, status: binding.status, expiresAt: binding.expiresAt })) };
+    if (detail) result.items = items.map((item) => this.toItemView(item));
+    if (detail) result.bindings = batch.bindings ?? [];
+    return result;
+  }
+  private toItemView(item: CouponItemRecord): Record<string, unknown> { return { id: item.id, batchId: item.batchId, status: item.status, reservedUntil: item.reservedUntil, consumedAt: item.consumedAt, createdAt: item.createdAt }; }
+}
+
+function mapCouponStoreError(error: unknown): ServiceError {
+  if (error instanceof ServiceError) return error;
+  const code = error instanceof Error ? error.message : String(error);
+  if (code === 'COUPON_NOT_FOUND') return new ServiceError(404, 'NOT_FOUND', 'coupon batch not found');
+  if (code === 'COUPON_BATCH_VOIDED') return new ServiceError(409, 'CONFLICT', 'coupon batch is voided or closed');
+  if (code === 'PRODUCT_NOT_FOUND') return new ServiceError(404, 'NOT_FOUND', 'product not found');
+  if (code === 'ACCOUNT_SCOPE_FORBIDDEN') return new ServiceError(403, 'FORBIDDEN', 'account scope required');
+  return new ServiceError(500, 'INTERNAL_ERROR', error instanceof Error ? error.message : 'coupon operation failed');
 }
 
 export class ProductService {

@@ -6,6 +6,10 @@ export type CredentialStatus = 'active' | 'expired' | 'revoked';
 export type ProductStatus = 'draft' | 'ready' | 'publishing' | 'published' | 'failed' | 'archived';
 export type ProductSkuStatus = 'active' | 'archived';
 export type ProductAssetStatus = 'active' | 'archived' | 'failed';
+export type CouponBatchStatus = 'draft' | 'active' | 'paused' | 'closed' | 'exhausted' | 'voided';
+export type CouponDeliveryScope = 'system_only' | 'operator_only' | 'buyer_deliverable';
+export type CouponItemStatus = 'available' | 'reserved' | 'consumed';
+export type CouponBindingStatus = 'active' | 'inactive';
 
 export interface ProductSkuRecord {
   id: string;
@@ -58,6 +62,63 @@ export interface ProductListQuery {
 
 export interface ProductListResult {
   items: ProductRecord[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface CouponItemRecord {
+  id: string;
+  batchId: string;
+  /** Internal plaintext representation for the memory store; never included in list/detail view models. */
+  content: string;
+  status: CouponItemStatus;
+  reservedUntil?: string;
+  consumedAt?: string;
+  createdAt: string;
+}
+
+export interface CouponBindingRecord {
+  id: string;
+  batchId: string;
+  productId: string;
+  priority: number;
+  status: CouponBindingStatus;
+  expiresAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CouponBatchRecord {
+  id: string;
+  accountId: string;
+  label?: string;
+  purpose: string;
+  deliveryScope: CouponDeliveryScope;
+  quarkUrl?: string;
+  extractionCode?: string;
+  totalCount: number;
+  status: CouponBatchStatus;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  availableCount?: number;
+  reservedCount?: number;
+  consumedCount?: number;
+  items?: CouponItemRecord[];
+  bindings?: CouponBindingRecord[];
+}
+
+export interface CouponBatchListQuery {
+  accountId?: string;
+  status?: CouponBatchStatus;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface CouponBatchListResult {
+  items: CouponBatchRecord[];
   page: number;
   pageSize: number;
   total: number;
@@ -212,4 +273,20 @@ export interface Store {
     priceMinor?: number;
     status?: ProductStatus;
   }): Promise<ProductRecord>;
+  listCouponBatches(adminId: string, query: CouponBatchListQuery): Promise<CouponBatchListResult>;
+  getCouponBatch(adminId: string, batchId: string): Promise<CouponBatchRecord | undefined>;
+  createCouponBatch(input: {
+    adminId: string;
+    accountId: string;
+    label?: string;
+    purpose: string;
+    deliveryScope: CouponDeliveryScope;
+    quarkUrl?: string;
+    extractionCode?: string;
+  }): Promise<CouponBatchRecord>;
+  importCouponItems(input: { adminId: string; batchId: string; contents: string[] }): Promise<{ batch: CouponBatchRecord; items: CouponItemRecord[]; rejected: Array<{ index: number; code: string; message: string }> }>;
+  bindCouponBatch(input: { adminId: string; batchId: string; productId: string }): Promise<CouponBindingRecord>;
+  unbindCouponBatch(input: { adminId: string; batchId: string; productId: string }): Promise<CouponBindingRecord | undefined>;
+  voidCouponBatch(input: { adminId: string; batchId: string }): Promise<CouponBatchRecord | undefined>;
+  getCouponContent(adminId: string, itemId: string): Promise<{ batch: CouponBatchRecord; item: CouponItemRecord } | undefined>;
 }

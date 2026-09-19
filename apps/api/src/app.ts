@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { loadConfig, type AppConfig } from './config.js';
 import type { AuthContext } from './services.js';
-import { AccountService, AuthService, CredentialService, ProductService, ServiceError, idempotent } from './services.js';
+import { AccountService, AuthService, CouponService, CredentialService, ProductService, ServiceError, idempotent } from './services.js';
 import { createIds, failure, fingerprint, parseCookies, readJson, setCookie, success, writeJson, type RequestContext } from './http.js';
 import { createStore } from './store.js';
 import type { Store } from './domain.js';
@@ -14,6 +14,7 @@ export interface AppRuntime {
   store: Store;
   auth: AuthService;
   accounts: AccountService;
+  coupons: CouponService;
   products: ProductService;
   credentials: CredentialService;
   qrLogin: XianyuQrLoginAdapter;
@@ -29,6 +30,11 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
   const accounts = new AccountService(store, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
+    return auditId;
+  });
+  const coupons = new CouponService(store, async (input) => {
+    const auditId = createId();
+    await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, reason: input.reason, createdAt: new Date().toISOString() });
     return auditId;
   });
   const products = new ProductService(store);
@@ -82,7 +88,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
   });
 
   const runtime: AppRuntime = {
-    config, store, auth, accounts, products, credentials, qrLogin, xianyu,
+    config, store, auth, accounts, coupons, products, credentials, qrLogin, xianyu,
     server: createServer((request, response) => { void handleRequest(runtime, request, response); }),
     async listen() { await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve)); },
     async close() { await new Promise<void>((resolve, reject) => runtime.server.close((error) => error ? reject(error) : resolve())); const close = (store as Store & { close?: () => Promise<void> }).close; if (close) await close.call(store); },
@@ -109,7 +115,7 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
 }
 
 async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: ServerResponse): Promise<{ statusCode: number; body: unknown } | undefined> {
-  const { auth, accounts, products, credentials, store, config } = runtime;
+  const { auth, accounts, coupons, products, credentials, store, config } = runtime;
   if (ctx.path === '/healthz' && ctx.method === 'GET') {
     const health = await store.health();
     const body = success(ctx, { status: health.reachable ? 'ok' : 'degraded', storage: health.kind, services: { api: 'ok', database: health.reachable ? 'ok' : 'unavailable', redis: config.redisUrl ? 'configured' : 'not_configured' } });
@@ -340,6 +346,49 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     if (accountMatch[2] && ctx.method === 'DELETE') return mutation(runtime, ctx, authContext, accountId, async () => { await accounts.revokeScope({ adminId: authContext.admin.id, accountId, scope: String(ctx.body.scope ?? 'manage'), requestId: ctx.requestId, traceId: ctx.traceId }); return success(ctx, { revoked: true }); });
   }
 
+  if (ctx.path === '/api/v1/coupons/batches' && ctx.method === 'GET') {
+    const result = await coupons.list(authContext.admin.id, parseCouponBatchListQuery(ctx.query));
+    return { statusCode: 200, body: success(ctx, result).body };
+  }
+  if (ctx.path === '/api/v1/coupons/batches' && ctx.method === 'POST') {
+    const accountId = String(ctx.body.accountId ?? '');
+    const result = await mutation(runtime, ctx, authContext, accountId || undefined, async () => {
+      const batch = await coupons.create({ adminId: authContext.admin.id, accountId, label: optionalString(ctx.body.label), purpose: String(ctx.body.purpose ?? ''), deliveryScope: String(ctx.body.deliveryScope ?? '') as never, quarkUrl: optionalString(ctx.body.quarkUrl), extractionCode: optionalString(ctx.body.extractionCode), requestId: ctx.requestId, traceId: ctx.traceId });
+      return success(ctx, batch, 201);
+    });
+    return result;
+  }
+  const couponBatchMatch = ctx.path.match(/^\/api\/v1\/coupons\/batches\/([^/]+)(?:\/(items\/import|bind|unbind|void))?$/);
+  if (couponBatchMatch) {
+    const batchId = decodeURIComponent(couponBatchMatch[1]);
+    const action = couponBatchMatch[2];
+    if (!action && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, await coupons.get(authContext.admin.id, batchId)).body };
+    if (!action && ctx.method === 'DELETE') {
+      return mutation(runtime, ctx, authContext, batchId, async () => success(ctx, await coupons.delete({ adminId: authContext.admin.id, batchId, requestId: ctx.requestId, traceId: ctx.traceId })));
+    }
+    if (action === 'items/import' && ctx.method === 'POST') {
+      return mutation(runtime, ctx, authContext, batchId, async () => {
+        const items = Array.isArray(ctx.body.items) ? ctx.body.items.filter((item): item is string => typeof item === 'string') : [];
+        return success(ctx, await coupons.importItems({ adminId: authContext.admin.id, batchId, contents: items, requestId: ctx.requestId, traceId: ctx.traceId }));
+      });
+    }
+    if (action === 'bind' && ctx.method === 'POST') {
+      return mutation(runtime, ctx, authContext, batchId, async () => success(ctx, await coupons.bind({ adminId: authContext.admin.id, batchId, productId: String(ctx.body.productId ?? ''), requestId: ctx.requestId, traceId: ctx.traceId })));
+    }
+    if (action === 'unbind' && ctx.method === 'POST') {
+      return mutation(runtime, ctx, authContext, batchId, async () => success(ctx, await coupons.unbind({ adminId: authContext.admin.id, batchId, productId: String(ctx.body.productId ?? ''), requestId: ctx.requestId, traceId: ctx.traceId })));
+    }
+    if (action === 'void' && ctx.method === 'POST') {
+      return mutation(runtime, ctx, authContext, batchId, async () => success(ctx, await coupons.void({ adminId: authContext.admin.id, batchId, requestId: ctx.requestId, traceId: ctx.traceId })));
+    }
+  }
+  const couponContentMatch = ctx.path.match(/^\/api\/v1\/coupons\/([^/]+)\/content$/);
+  if (couponContentMatch && ctx.method === 'GET') {
+    const itemId = optionalString(ctx.query.couponId) ?? decodeURIComponent(couponContentMatch[1]);
+    const preview = await coupons.content({ adminId: authContext.admin.id, itemId, purpose: optionalString(ctx.query.purpose) ?? 'preview', deliveryScope: optionalString(ctx.query.deliveryScope) ?? 'operator_only', requestId: ctx.requestId, traceId: ctx.traceId });
+    return { statusCode: 200, body: success(ctx, preview).body };
+  }
+
   if (ctx.path === '/api/v1/products' && ctx.method === 'GET') {
     const result = await products.list(authContext.admin.id, parseProductListQuery(ctx.query));
     return { statusCode: 200, body: success(ctx, result).body };
@@ -402,6 +451,17 @@ function parseProductListQuery(query: Record<string, string>): import('./domain.
     status: optionalString(query.status) as import('./domain.js').ProductListQuery['status'],
     sortBy: optionalString(query.sortBy) as import('./domain.js').ProductListQuery['sortBy'],
     sortOrder: optionalString(query.sortOrder) as import('./domain.js').ProductListQuery['sortOrder'],
+    page: page === undefined || Number.isNaN(page) ? page : Math.trunc(page),
+    pageSize: pageSize === undefined || Number.isNaN(pageSize) ? pageSize : Math.trunc(pageSize),
+  };
+}
+
+function parseCouponBatchListQuery(query: Record<string, string>): import('./domain.js').CouponBatchListQuery {
+  const page = query.page === undefined ? undefined : Number(query.page);
+  const pageSize = query.pageSize === undefined ? undefined : Number(query.pageSize);
+  return {
+    accountId: optionalString(query.accountId),
+    status: optionalString(query.status) as import('./domain.js').CouponBatchListQuery['status'],
     page: page === undefined || Number.isNaN(page) ? page : Math.trunc(page),
     pageSize: pageSize === undefined || Number.isNaN(pageSize) ? pageSize : Math.trunc(pageSize),
   };
