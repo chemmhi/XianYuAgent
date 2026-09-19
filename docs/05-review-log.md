@@ -232,3 +232,13 @@
 本轮结论：本地 dev 与 Compose 已统一持久化数据源；当前不显示初始化页是因为开发 PostgreSQL 已存在管理员，不是前端渲染缺陷。若需再次演示首次初始化，必须人工确认后清理管理员数据。
 - 2026-09-19 S5-R31 账号上下文与删除账号：PASS。账号管理新增 `DELETE /api/v1/accounts/{id}` 软删除，撤销当前管理员 scope 与 active credential，保留历史商品/审计；前端通过 `AccountContextProvider` + localStorage 传播当前账号，商品页不再重复选择账号。证据：`npm test`、`npm run test:e2e:chrome`、`npm run test:e2e:chrome:products`。
 - 2026-09-19 S5-R32 商品动作边界：PASS。商品页明确区分“同步闲鱼”（POST `/api/v1/products/sync`）、“刷新本地”（GET `/api/v1/products`）和“发布商品”（仅打开本地草稿流程）；Chrome/CDP E2E 覆盖同步、刷新网络门禁、草稿创建/详情/编辑/持久化及 UI 账号切换。
+
+### 10.12 S4-VS3 卡券首页合并后复核（2026-09-19）
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R33 | 后端 / API | 批次、`purpose` 类型、metadata、列表安全摘要、PATCH/PUT 编辑、库存导入、绑定、作废、DELETE 软作废、正文受控预览、scope、审计和加密存储 | root + backend_coupons | PASS（受控环境） | `apps/api/src/services.ts`、`apps/api/src/store-memory.ts`、`apps/api/src/store-postgres.ts`、`apps/api/migrations/013_coupons.sql`、`apps/api/migrations/014_coupon_card_metadata.sql`；`node apps/api/scripts/coupons-smoke.mjs` |
+| S5-R34 | 前端 / API 适配 | `/coupons`、搜索/重置/类型筛选、选择列/批量删除、详情/创建/编辑/复制、启用/禁用、导入/绑定、双栏关联、图片原图预览、错误状态、content 预览/复制、字段映射 | root | PASS（受控环境） | `apps/web/src/features/coupons/`；`npm test`；`npm run typecheck`；`npm run build` |
+| S5-R35 | 真实浏览器 / 人工审核 | 正式路由 → 真实 API → MemoryStore → 列表安全元数据列 → 选择/关联 → 编辑/复制 → 启禁用 → 详情/预览/导入/绑定/作废 → 刷新后状态保持，以及平台样式一致性和移动 viewport | 用户 | READY_FOR_REVIEW | `apps/web/scripts/e2e-coupons-chrome.mjs`；`npm run test:e2e:chrome:coupons`；`docs/evidence/stage5/S4-VS3/test-baseline.md`；人工审核结论待回写，不再阻断代码合入但仍是发布门禁 |
+
+本轮结论：S4-VS3 已与 S4-VS2 共享代码路径并入 `master`；自动化证据保持受控环境边界，真实 PostgreSQL/Redis/MinIO 及浏览器人工复核仍需按 runbook 执行。

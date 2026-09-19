@@ -130,6 +130,17 @@
 
 本轮阶段 5 记录与代码提交已完成：`65b48d6`（feat(阶段5): 接通账号真实读取链路与ENV0部署骨架）。
 
+## S4-VS3 实现与人工审核决策（2026-09-19）
+
+1. 卡券首页在独立 worktree `F:\ChenHai\Project\XianYuAgent-s4-vs3`、分支 `feature/s4-vs3-coupons` 并行开发，不触碰主工作树中的 S4-VS2 未提交改动。
+2. 旧参考项目仅提供字段与操作参考：列表列、详情抽屉、创建/编辑/复制、商品绑定、启停、删除、正文预览/复制、双栏关联和图片原图预览；表格视觉、颜色、密度和响应式行为继续遵循当前平台壳样式。
+3. canonical coupons batch 只接受 `purpose=text/data/api/image`；metadata 通过 `013_coupons.sql` + `014_coupon_card_metadata.sql` 持久化，列表只返回安全摘要，详情才返回正文/API/图片配置。
+4. 首批库存由前端 `createBatch` 先创建批次，再调用 `/items/import` 并重新读取详情；列表 `keyword`、`stockAlert`、`purpose` 由 API、MemoryStore、PostgresStore 一致处理；编辑使用 PATCH/PUT 语义，删除保留为软作废，绑定字段统一归一到 `bindingId`。
+5. Chrome/CDP E2E 通过前端正式路由、真实 API、MemoryStore 和页面刷新可见结果，覆盖列表安全元数据列、选择/关联、编辑/复制、启禁用、详情/预览/导入/绑定/作废，生成固定桌面/移动截图；由于使用隔离临时 profile 和受控内存运行时，门禁结论保持 `READY_FOR_REVIEW`，不得直接描述为生产级持久化通过。
+6. 人工审核通过前不执行 merge；人工审核必须使用真实 PostgreSQL/Redis/MinIO 开发链路打开 `http://localhost:5173/coupons`，逐项复核筛选、批量操作、编辑/复制、启禁用、双栏关联、图片预览和移动端横向表格行为；审核通过后才重新跑验证并将 VS3 分支合入 `master`。
+
+本轮提交：当前分支 HEAD（`feat(阶段5): 完成S4-VS3卡券首页`）。
+
 ## Git 提交记录
 
 - 阶段 0：`38862e5`（`feat: 阶段0文档产出`）

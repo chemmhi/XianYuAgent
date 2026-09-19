@@ -1,0 +1,68 @@
+# S4-VS3 卡券首页验证基线
+
+- 验证日期：2026-09-19
+- worktree：`F:\ChenHai\Project\XianYuAgent-s4-vs3`
+- 分支：`feature/s4-vs3-coupons`
+- 当前门禁：`READY_FOR_REVIEW`，等待人工审核后再合入 `master`
+
+## 用户路径
+
+真实浏览器从 `/coupons` 进入卡券首页，经 AuthGate 使用真实 Session Cookie 访问真实 API，完成：
+
+1. 卡券列表、搜索/重置、类型筛选、库存统计、低库存告警和状态展示；
+2. 当前页全选、批量删除，以及单选后的商品关联入口；
+3. 新建、编辑、复制配置，启用/禁用和软删除；
+4. 打开详情抽屉，导入库存，绑定/解绑商品；
+5. 双栏商品关联：服务端分页、搜索、筛选结果全选、已选商品搜索、移除、保存/取消；
+6. 受控正文预览与复制、图片原图预览；
+7. 刷新页面后确认编辑、启禁用、关联和作废状态仍可见。
+
+## 已执行命令
+
+```text
+npm run typecheck
+npm --workspace apps/web run test
+npm --workspace apps/api run test
+npm --workspace apps/api run build
+npm --workspace apps/web run build
+node apps/api/scripts/coupons-smoke.mjs
+npm --workspace apps/web run test:e2e:chrome:coupons
+git diff --check
+```
+
+结果：以上命令均通过。前端 Vitest 当前为 9 个测试文件、26 个测试；API smoke 额外断言了列表安全 metadata 摘要不会泄露正文；Chrome/CDP E2E 输出：
+
+```text
+local Chrome E2E passed: coupons list -> detail -> preview/copy -> import -> bind -> void -> reload
+```
+
+## 浏览器证据
+
+- 桌面：`screenshots/coupons-desktop-1440x900.png`
+- 移动：`screenshots/coupons-mobile-390x844.png`
+- 固定 viewport：`1440×900`、`390×844`
+- 浏览器：本机 Chrome + Chrome DevTools Protocol；自动化使用隔离临时 profile，仅用于受控测试，不替代人工审核。
+
+## 视觉与交互检查
+
+- 只参考旧卡券项目的字段和操作，不复制旧项目表格视觉；表格、抽屉、按钮、颜色和响应式布局保持当前 XianyuSellerAgent 平台壳样式。
+- 桌面代表数据验证了备注、多规格、延时发货、已发货次数、对接价、最低价和费用承担方等表格列不是 fallback 文案。
+- 列表不返回卡券正文，只展示受控正文占位、库存数量、绑定数量、告警和状态。
+- 正文只有在详情抽屉通过受控 content API 返回后展示，并提供复制动作；访问审计引用可见。
+- loading、empty、error、403、submitting 和 conflict 分支由状态边界/错误映射覆盖；本轮截图以成功态为主，完整逐状态视觉回归仍留给人工复核。
+
+## 人工浏览器审核步骤
+
+1. 进入独立 worktree：`F:\ChenHai\Project\XianYuAgent-s4-vs3`。
+2. 确认主工作树没有占用 `5173`/`8080`；如有，先停止主工作树服务。
+3. 执行 `npm run dev`。该命令使用真实 PostgreSQL/Redis/MinIO，`ALLOW_IN_MEMORY=false`，不是 MemoryStore smoke。
+4. 用 Chrome 打开 `http://localhost:5173/coupons`；已有管理员直接登录，没有管理员先完成初始化。
+5. 固定审核 viewport：桌面 `1440×900`，移动 `390×844`。
+6. 逐项检查：搜索/重置/类型筛选；当前页全选与批量删除；单选关联商品；新建/编辑/复制；启用/禁用；双栏关联保存/移除；图片原图预览；详情、库存导入、正文预览/复制；作废后刷新状态保持；移动端横向表格滚动。
+7. 记录异常态和截图。人工审核通过前，保持 `READY_FOR_REVIEW`，不要合入 `master`。
+
+## 明确未覆盖项
+
+- Chrome E2E 使用隔离临时 profile、MemoryStore 和 stub 运行时，不能替代 PostgreSQL/Redis/MinIO 容器级持久化验收或人工浏览器审核。
+- 真实闲鱼平台、真实买家交付策略、库存 reserve/consume、批量编辑、资产上传和订单交付属于后续切片或人工复核范围；批量删除已纳入本片。
+- 未合并 `master`；人工审核通过前不执行 merge。

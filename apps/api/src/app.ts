@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { loadConfig, type AppConfig } from './config.js';
 import type { AuthContext } from './services.js';
-import { AccountService, AuthService, CredentialService, ProductService, ProductSyncService, ServiceError, idempotent } from './services.js';
+import { AccountService, AuthService, CouponService, CredentialService, ProductService, ProductSyncService, ServiceError, idempotent } from './services.js';
 import { createIds, failure, fingerprint, parseCookies, readJson, setCookie, success, writeJson, type RequestContext } from './http.js';
 import { createStore } from './store.js';
 import type { ProductListResult, ProductRecord, Store } from './domain.js';
@@ -14,6 +14,7 @@ export interface AppRuntime {
   store: Store;
   auth: AuthService;
   accounts: AccountService;
+  coupons: CouponService;
   products: ProductService;
   productSync: ProductSyncService;
   credentials: CredentialService;
@@ -30,6 +31,11 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
   const accounts = new AccountService(store, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
+    return auditId;
+  });
+  const coupons = new CouponService(store, async (input) => {
+    const auditId = createId();
+    await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, reason: input.reason, createdAt: new Date().toISOString() });
     return auditId;
   });
   const products = new ProductService(store, async (input) => {
@@ -93,7 +99,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
   });
 
   const runtime: AppRuntime = {
-    config, store, auth, accounts, products, productSync, credentials, qrLogin, xianyu,
+    config, store, auth, accounts, coupons, products, productSync, credentials, qrLogin, xianyu,
     server: createServer((request, response) => { void handleRequest(runtime, request, response); }),
     async listen() { await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve)); },
     async close() { await new Promise<void>((resolve, reject) => runtime.server.close((error) => error ? reject(error) : resolve())); const close = (store as Store & { close?: () => Promise<void> }).close; if (close) await close.call(store); },
@@ -120,7 +126,7 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
 }
 
 async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: ServerResponse): Promise<{ statusCode: number; body: unknown } | undefined> {
-  const { auth, accounts, products, productSync, credentials, store, config } = runtime;
+  const { auth, accounts, coupons, products, productSync, credentials, store, config } = runtime;
   if (ctx.path === '/healthz' && ctx.method === 'GET') {
     const health = await store.health();
     const body = success(ctx, { status: health.reachable ? 'ok' : 'degraded', storage: health.kind, services: { api: 'ok', database: health.reachable ? 'ok' : 'unavailable', redis: config.redisUrl ? 'configured' : 'not_configured' } });
@@ -352,6 +358,52 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     if (accountMatch[2] && ctx.method === 'DELETE') return mutation(runtime, ctx, authContext, accountId, async () => { await accounts.revokeScope({ adminId: authContext.admin.id, accountId, scope: String(ctx.body.scope ?? 'manage'), requestId: ctx.requestId, traceId: ctx.traceId }); return success(ctx, { revoked: true }); });
   }
 
+  if (ctx.path === '/api/v1/coupons/batches' && ctx.method === 'GET') {
+    const result = await coupons.list(authContext.admin.id, parseCouponBatchListQuery(ctx.query));
+    return { statusCode: 200, body: success(ctx, result).body };
+  }
+  if (ctx.path === '/api/v1/coupons/batches' && ctx.method === 'POST') {
+    const accountId = String(ctx.body.accountId ?? '');
+    const result = await mutation(runtime, ctx, authContext, accountId || undefined, async () => {
+      const batch = await coupons.create({ adminId: authContext.admin.id, accountId, label: optionalString(ctx.body.label), purpose: String(ctx.body.purpose ?? ''), deliveryScope: String(ctx.body.deliveryScope ?? '') as never, quarkUrl: optionalString(ctx.body.quarkUrl), extractionCode: optionalString(ctx.body.extractionCode), metadata: readCouponMetadata(ctx.body.metadata), requestId: ctx.requestId, traceId: ctx.traceId });
+      return success(ctx, batch, 201);
+    });
+    return result;
+  }
+  const couponBatchMatch = ctx.path.match(/^\/api\/v1\/coupons\/batches\/([^/]+)(?:\/(items\/import|bind|unbind|void))?$/);
+  if (couponBatchMatch) {
+    const batchId = decodeURIComponent(couponBatchMatch[1]);
+    const action = couponBatchMatch[2];
+    if (!action && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, await coupons.get(authContext.admin.id, batchId)).body };
+    if (!action && (ctx.method === 'PATCH' || ctx.method === 'PUT')) {
+      return mutation(runtime, ctx, authContext, batchId, async () => success(ctx, await coupons.update({ adminId: authContext.admin.id, batchId, patch: { label: optionalString(ctx.body.label), purpose: optionalString(ctx.body.purpose), deliveryScope: optionalString(ctx.body.deliveryScope) as never, quarkUrl: optionalString(ctx.body.quarkUrl), extractionCode: optionalString(ctx.body.extractionCode), status: optionalString(ctx.body.status) as never, metadata: readCouponMetadata(ctx.body.metadata) }, requestId: ctx.requestId, traceId: ctx.traceId })));
+    }
+    if (!action && ctx.method === 'DELETE') {
+      return mutation(runtime, ctx, authContext, batchId, async () => success(ctx, await coupons.delete({ adminId: authContext.admin.id, batchId, requestId: ctx.requestId, traceId: ctx.traceId })));
+    }
+    if (action === 'items/import' && ctx.method === 'POST') {
+      return mutation(runtime, ctx, authContext, batchId, async () => {
+        const items = Array.isArray(ctx.body.items) ? ctx.body.items.filter((item): item is string => typeof item === 'string') : [];
+        return success(ctx, await coupons.importItems({ adminId: authContext.admin.id, batchId, contents: items, requestId: ctx.requestId, traceId: ctx.traceId }));
+      });
+    }
+    if (action === 'bind' && ctx.method === 'POST') {
+      return mutation(runtime, ctx, authContext, batchId, async () => success(ctx, await coupons.bind({ adminId: authContext.admin.id, batchId, productId: String(ctx.body.productId ?? ''), requestId: ctx.requestId, traceId: ctx.traceId })));
+    }
+    if (action === 'unbind' && ctx.method === 'POST') {
+      return mutation(runtime, ctx, authContext, batchId, async () => success(ctx, await coupons.unbind({ adminId: authContext.admin.id, batchId, productId: String(ctx.body.productId ?? ''), requestId: ctx.requestId, traceId: ctx.traceId })));
+    }
+    if (action === 'void' && ctx.method === 'POST') {
+      return mutation(runtime, ctx, authContext, batchId, async () => success(ctx, await coupons.void({ adminId: authContext.admin.id, batchId, requestId: ctx.requestId, traceId: ctx.traceId })));
+    }
+  }
+  const couponContentMatch = ctx.path.match(/^\/api\/v1\/coupons\/([^/]+)\/content$/);
+  if (couponContentMatch && ctx.method === 'GET') {
+    const itemId = optionalString(ctx.query.couponId) ?? decodeURIComponent(couponContentMatch[1]);
+    const preview = await coupons.content({ adminId: authContext.admin.id, itemId, purpose: optionalString(ctx.query.purpose) ?? 'preview', deliveryScope: optionalString(ctx.query.deliveryScope) ?? 'operator_only', requestId: ctx.requestId, traceId: ctx.traceId });
+    return { statusCode: 200, body: success(ctx, preview).body };
+  }
+
   const productMatch = ctx.path.match(/^\/api\/v1\/products\/([^/]+)$/);
   if (ctx.path === '/api/v1/products/sync' && ctx.method === 'POST') {
     const accountId = optionalString(ctx.body.accountId);
@@ -443,6 +495,20 @@ function parseProductListQuery(query: Record<string, string>): import('./domain.
   };
 }
 
+function parseCouponBatchListQuery(query: Record<string, string>): import('./domain.js').CouponBatchListQuery {
+  const page = query.page === undefined ? undefined : Number(query.page);
+  const pageSize = query.pageSize === undefined ? undefined : Number(query.pageSize);
+  return {
+    accountId: optionalString(query.accountId),
+    keyword: optionalString(query.keyword),
+    status: optionalString(query.status) as import('./domain.js').CouponBatchListQuery['status'],
+    stockAlert: optionalString(query.stockAlert) as import('./domain.js').CouponBatchListQuery['stockAlert'],
+    purpose: optionalString(query.purpose) as import('./domain.js').CouponBatchListQuery['purpose'],
+    page: page === undefined || Number.isNaN(page) ? page : Math.trunc(page),
+    pageSize: pageSize === undefined || Number.isNaN(pageSize) ? pageSize : Math.trunc(pageSize),
+  };
+}
+
 function parseExpectedProductVersion(ctx: RequestContext): number {
   const raw = ctx.headers['if-match-version'] ?? ctx.body.expectedVersion;
   const value = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() ? Number(raw) : Number.NaN;
@@ -516,6 +582,32 @@ function firstProfileString(root: unknown, keys: string[]): string | undefined {
 function readCredentialMetadata(value: unknown): Record<string, string> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, item]) => typeof item === 'string').map(([key, item]) => [key, String(item)]));
+}
+
+function readCouponMetadata(value: unknown): import('./domain.js').CouponBatchMetadata | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const source = value as Record<string, unknown>;
+  const metadata: import('./domain.js').CouponBatchMetadata = {};
+  if (typeof source.description === 'string') metadata.description = source.description;
+  if (typeof source.delaySeconds === 'number' && Number.isFinite(source.delaySeconds)) metadata.delaySeconds = Math.max(0, Math.trunc(source.delaySeconds));
+  if (typeof source.deliveryCount === 'number' && Number.isFinite(source.deliveryCount)) metadata.deliveryCount = Math.max(0, Math.trunc(source.deliveryCount));
+  if (typeof source.useNoLogisticsForm === 'boolean') metadata.useNoLogisticsForm = source.useNoLogisticsForm;
+  if (typeof source.dockable === 'boolean') metadata.dockable = source.dockable;
+  if (typeof source.price === 'string') metadata.price = source.price;
+  if (source.feePayer === 'distributor' || source.feePayer === 'dealer') metadata.feePayer = source.feePayer;
+  if (typeof source.minPrice === 'string') metadata.minPrice = source.minPrice;
+  if (source.dockVisibility === 'public' || source.dockVisibility === 'dealer_only') metadata.dockVisibility = source.dockVisibility;
+  if (typeof source.multiSpec === 'boolean') metadata.multiSpec = source.multiSpec;
+  if (typeof source.specName === 'string') metadata.specName = source.specName;
+  if (typeof source.specValue === 'string') metadata.specValue = source.specValue;
+  if (typeof source.textContent === 'string') metadata.textContent = source.textContent;
+  if (typeof source.dataContent === 'string') metadata.dataContent = source.dataContent;
+  if (source.apiConfig && typeof source.apiConfig === 'object' && !Array.isArray(source.apiConfig)) {
+    const api = source.apiConfig as Record<string, unknown>;
+    if (typeof api.url === 'string' && (api.method === 'GET' || api.method === 'POST')) metadata.apiConfig = { url: api.url, method: api.method, timeout: typeof api.timeout === 'number' ? api.timeout : undefined, headers: typeof api.headers === 'string' ? api.headers : undefined, params: typeof api.params === 'string' ? api.params : undefined, responseField: typeof api.responseField === 'string' ? api.responseField : undefined };
+  }
+  if (Array.isArray(source.imageUrls)) metadata.imageUrls = source.imageUrls.filter((item): item is string => typeof item === 'string').slice(0, 3);
+  return metadata;
 }
 
 function mapQrStatusToLoginStatus(status: string): 'waiting' | 'scanned' | 'succeeded' | 'expired' | 'failed' | 'cancelled' | 'verification_required' | undefined {

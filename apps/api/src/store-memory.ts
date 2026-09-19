@@ -1,4 +1,4 @@
-import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { createId } from './security.js';
 
 export class MemoryStore implements Store {
@@ -9,6 +9,9 @@ export class MemoryStore implements Store {
   private readonly loginSessions = new Map<string, LoginSessionRecord>();
   private readonly credentials = new Map<string, CredentialRecord>();
   private readonly products = new Map<string, ProductRecord>();
+  private readonly couponBatches = new Map<string, CouponBatchRecord>();
+  private readonly couponItems = new Map<string, CouponItemRecord>();
+  private readonly couponBindings = new Map<string, CouponBindingRecord>();
   private readonly scopes = new Map<string, AccountScopeRecord>();
   private readonly idempotency = new Map<string, IdempotencyRecord>();
   readonly audits: AuditEventRecord[] = [];
@@ -135,6 +138,121 @@ export class MemoryStore implements Store {
     product.updatedAt = new Date().toISOString();
     return this.productDetail(product);
   }
+  async listCouponBatches(adminId: string, query: CouponBatchListQuery): Promise<CouponBatchListResult> {
+    const scopedAccounts = new Set((await this.listScopes(adminId)).map((scope) => scope.accountId));
+    const normalizedKeyword = query.keyword?.trim().toLowerCase();
+    const filtered = [...this.couponBatches.values()].filter((batch) => {
+      if (!scopedAccounts.has(batch.accountId)) return false;
+      if (query.accountId && batch.accountId !== query.accountId) return false;
+      if (query.status && batch.status !== query.status) return false;
+      if (query.purpose && batch.purpose !== query.purpose) return false;
+      if (normalizedKeyword && !`${batch.id} ${batch.label ?? ''} ${batch.purpose}`.toLowerCase().includes(normalizedKeyword)) return false;
+      if (query.stockAlert) {
+        const items = [...this.couponItems.values()].filter((item) => item.batchId === batch.id);
+        const available = items.filter((item) => item.status === 'available').length;
+        const stockAlert = batch.status === 'voided' || available === 0 ? 'exhausted' : available <= 5 ? 'low_stock' : 'normal';
+        if (stockAlert !== query.stockAlert) return false;
+      }
+      return true;
+    }).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    const start = (page - 1) * pageSize;
+    return { items: filtered.slice(start, start + pageSize).map((batch) => this.couponSummary(batch)), page, pageSize, total: filtered.length, totalPages: Math.max(1, Math.ceil(filtered.length / pageSize)) };
+  }
+  async getCouponBatch(adminId: string, batchId: string): Promise<CouponBatchRecord | undefined> {
+    const batch = this.couponBatches.get(batchId);
+    if (!batch || !(await this.hasAccountScope(adminId, batch.accountId))) return undefined;
+    const items = [...this.couponItems.values()].filter((item) => item.batchId === batchId).map((item) => ({ ...item }));
+    const bindings = [...this.couponBindings.values()].filter((binding) => binding.batchId === batchId).map((binding) => ({ ...binding }));
+    return { ...batch, items, bindings };
+  }
+  async createCouponBatch(input: { adminId: string; accountId: string; label?: string; purpose: string; deliveryScope: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; metadata?: CouponBatchMetadata }): Promise<CouponBatchRecord> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const now = new Date().toISOString();
+    const batch: CouponBatchRecord = { id: createId(), accountId: input.accountId, label: input.label, purpose: input.purpose, deliveryScope: input.deliveryScope, quarkUrl: input.quarkUrl, extractionCode: input.extractionCode, metadata: input.metadata ?? {}, totalCount: 0, status: 'active', version: 1, createdAt: now, updatedAt: now };
+    this.couponBatches.set(batch.id, batch);
+    return { ...batch };
+  }
+  async updateCouponBatch(input: { adminId: string; batchId: string; patch: { label?: string; purpose?: string; deliveryScope?: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; status?: CouponBatchStatus; metadata?: CouponBatchMetadata } }): Promise<CouponBatchRecord | undefined> {
+    const batch = this.couponBatches.get(input.batchId);
+    if (!batch || !(await this.hasAccountScope(input.adminId, batch.accountId))) return undefined;
+    if (input.patch.label !== undefined) batch.label = input.patch.label;
+    if (input.patch.purpose !== undefined) batch.purpose = input.patch.purpose;
+    if (input.patch.deliveryScope !== undefined) batch.deliveryScope = input.patch.deliveryScope;
+    if (input.patch.quarkUrl !== undefined) batch.quarkUrl = input.patch.quarkUrl || undefined;
+    if (input.patch.extractionCode !== undefined) batch.extractionCode = input.patch.extractionCode || undefined;
+    if (input.patch.status !== undefined) batch.status = input.patch.status;
+    if (input.patch.metadata !== undefined) batch.metadata = input.patch.metadata;
+    batch.version += 1;
+    batch.updatedAt = new Date().toISOString();
+    return { ...batch };
+  }
+  async importCouponItems(input: { adminId: string; batchId: string; contents: string[] }): Promise<{ batch: CouponBatchRecord; items: CouponItemRecord[]; rejected: Array<{ index: number; code: string; message: string }> }> {
+    const batch = this.couponBatches.get(input.batchId);
+    if (!batch || !(await this.hasAccountScope(input.adminId, batch.accountId))) throw new Error('COUPON_NOT_FOUND');
+    if (batch.status === 'voided' || batch.status === 'closed') throw new Error('COUPON_BATCH_VOIDED');
+    const existingContent = new Set([...this.couponItems.values()].filter((item) => item.batchId === batch.id).map((item) => item.content));
+    const created: CouponItemRecord[] = [];
+    const rejected: Array<{ index: number; code: string; message: string }> = [];
+    input.contents.forEach((raw, index) => {
+      const content = raw.trim();
+      if (!content) { rejected.push({ index, code: 'VALIDATION_FAILED', message: 'coupon content is required' }); return; }
+      if (existingContent.has(content)) { rejected.push({ index, code: 'CONFLICT', message: 'duplicate coupon content' }); return; }
+      const item: CouponItemRecord = { id: createId(), batchId: batch.id, content, status: 'available', createdAt: new Date().toISOString() };
+      existingContent.add(content);
+      this.couponItems.set(item.id, item);
+      created.push({ ...item });
+    });
+    batch.totalCount = [...this.couponItems.values()].filter((item) => item.batchId === batch.id).length;
+    batch.version += 1;
+    batch.updatedAt = new Date().toISOString();
+    if (batch.totalCount > 0 && batch.status === 'exhausted') batch.status = 'active';
+    return { batch: { ...batch }, items: created, rejected };
+  }
+  async bindCouponBatch(input: { adminId: string; batchId: string; productId: string }): Promise<CouponBindingRecord> {
+    const batch = this.couponBatches.get(input.batchId);
+    if (!batch || !(await this.hasAccountScope(input.adminId, batch.accountId))) throw new Error('COUPON_NOT_FOUND');
+    if (batch.status === 'voided' || batch.status === 'closed') throw new Error('COUPON_BATCH_VOIDED');
+    const product = await this.getProduct(input.adminId, input.productId);
+    if (!product) throw new Error('PRODUCT_NOT_FOUND');
+    if (product.accountId !== batch.accountId) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const existing = [...this.couponBindings.values()].find((binding) => binding.batchId === batch.id && binding.productId === product.id);
+    if (existing) { existing.status = 'active'; existing.updatedAt = new Date().toISOString(); return { ...existing }; }
+    const now = new Date().toISOString();
+    const binding: CouponBindingRecord = { id: createId(), batchId: batch.id, productId: product.id, priority: 0, status: 'active', createdAt: now, updatedAt: now };
+    this.couponBindings.set(binding.id, binding);
+    batch.version += 1;
+    batch.updatedAt = now;
+    return { ...binding };
+  }
+  async unbindCouponBatch(input: { adminId: string; batchId: string; productId: string }): Promise<CouponBindingRecord | undefined> {
+    const batch = this.couponBatches.get(input.batchId);
+    if (!batch || !(await this.hasAccountScope(input.adminId, batch.accountId))) throw new Error('COUPON_NOT_FOUND');
+    const binding = [...this.couponBindings.values()].find((row) => row.batchId === batch.id && row.productId === input.productId);
+    if (!binding) return undefined;
+    binding.status = 'inactive';
+    binding.updatedAt = new Date().toISOString();
+    batch.version += 1;
+    batch.updatedAt = binding.updatedAt;
+    return { ...binding };
+  }
+  async voidCouponBatch(input: { adminId: string; batchId: string }): Promise<CouponBatchRecord | undefined> {
+    const batch = this.couponBatches.get(input.batchId);
+    if (!batch || !(await this.hasAccountScope(input.adminId, batch.accountId))) return undefined;
+    if (batch.status === 'voided') return { ...batch };
+    batch.status = 'voided';
+    batch.version += 1;
+    batch.updatedAt = new Date().toISOString();
+    return { ...batch };
+  }
+  async getCouponContent(adminId: string, itemId: string): Promise<{ batch: CouponBatchRecord; item: CouponItemRecord } | undefined> {
+    const item = this.couponItems.get(itemId);
+    if (!item) return undefined;
+    const batch = this.couponBatches.get(item.batchId);
+    if (!batch || !(await this.hasAccountScope(adminId, batch.accountId))) return undefined;
+    return { batch: { ...batch }, item: { ...item } };
+  }
   async createLoginSession(input: { adminId: string; accountId?: string; provisionalAccountRef?: string; loginMethod: string; expiresAt: string; qrTokenRef?: string }): Promise<LoginSessionRecord> {
     if (input.accountId && !(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const now = new Date().toISOString();
@@ -223,5 +341,10 @@ export class MemoryStore implements Store {
 
   private productDetail(product: ProductRecord): ProductRecord {
     return { ...product, attributes: { ...product.attributes }, skus: product.skus?.map((sku) => ({ ...sku })), assets: product.assets?.map((asset) => ({ ...asset })), skuCount: product.skus?.filter((sku) => sku.status !== 'archived').length ?? product.skuCount ?? 0, assetCount: product.assets?.filter((asset) => asset.status !== 'archived').length ?? product.assetCount ?? 0 };
+  }
+
+  private couponSummary(batch: CouponBatchRecord): CouponBatchRecord {
+    const items = [...this.couponItems.values()].filter((item) => item.batchId === batch.id);
+    return { ...batch, items: undefined, bindings: undefined, totalCount: items.length, availableCount: items.filter((item) => item.status === 'available').length, reservedCount: items.filter((item) => item.status === 'reserved').length, consumedCount: items.filter((item) => item.status === 'consumed').length };
   }
 }

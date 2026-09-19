@@ -72,3 +72,11 @@
 - `S5-I009`：商品首片范围冻结为只读列表/详情；创建/编辑、SKU、素材上传、发布确认和 Outbox 留待后续切片，当前风险已显式接受，不阻断进入下一切片。
 - `S5-I010`：商品同步首片已落地受控 MTOP mapper、分页聚合与本地 Upsert；仍未完成真实账号外部验收、游标/同步批次持久化、鱼小铺专用列表接口和发布链路。同步不会归档远端缺失商品，也不会覆盖本地草稿；真实发布继续禁止进入本切片。
 - `S5-I010` 进一步缓解：账号删除已采用软删除并在 Memory/PostgreSQL 同时撤销 active credential 与管理员 scope；历史商品和审计记录保留，避免 FK 破坏。商品“发布”当前仅为本地草稿入口，真实闲鱼发布仍明确阻断在后续切片。
+
+## S4-VS3 增量更新（2026-09-19）
+
+- `S4-I003`：卡券受控 content API、管理员 scope、审计摘要、正文加密存储、列表安全元数据摘要和图片/接口配置边界已实现并通过受控 API/Chrome E2E；真实 PostgreSQL/Redis 容器级验收、订单交付策略和真实买家链路仍开放。
+- `S4-I005`：metadata JSON 已通过 `013_coupons.sql` 扩展和 `014_coupon_card_metadata.sql` 迁移接入 Memory/Postgres store；并行 `013` 迁移编号需在后续迁移整理中统一，回滚、旧数据兼容和容器级恢复演练仍开放。
+- `S4-I006`：卡券实现按 `features/coupons` 拆分 API adapter、controller、ViewModel、table、drawer、modal、relation modal、state boundary；待人工审核确认组件边界和操作可发现性。
+- `S4-I007`：已生成非空 `1440×900` 和 `390×844` 截图，并完成桌面/移动浏览器路径；完整逐状态视觉回归仍开放，状态暂不关闭。
+- `S5-I012`：S4-VS3 Chrome/CDP 自动化使用临时 profile + MemoryStore/stub，仅作为真实前端跨层受控证据；人工审核必须在目标环境复核搜索/重置/筛选、全选/批量删除、编辑/复制、启禁用、双栏关联和图片预览，不能把该证据升级为生产持久化或外部平台通过。

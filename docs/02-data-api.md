@@ -169,7 +169,7 @@ DomainEvent 1 --- N AuditEvent / TraceSpan
 | CredentialStore | `GET/POST/PATCH /api/v1/credentials...`、`POST /{id}/rotate`、`POST /{id}/revoke`、`POST /{id}/enable`、`POST /{id}/disable` | `credential-store` | 管理员绝对管理权限；所有操作写 AuditEvent |
 | 仪表盘 | `GET /api/v1/dashboard/snapshot`、`GET /api/v1/dashboard/order-trend` | `dashboard` | 只读聚合，不拥有业务事实 |
 | 商品 | `GET/POST/PATCH /api/v1/products...`、`POST /api/v1/products/sync`、`POST /api/v1/products/pull`、`GET /api/v1/products/{id}/assets`、`POST /api/v1/products/{id}/assets`、`PATCH /api/v1/products/{id}/assets/{assetId}`、`DELETE /api/v1/products/{id}/assets/{assetId}`、`POST /api/v1/products/{id}/publish`、`POST /api/v1/products/bulk-publish` | `products/execution` | 支持指定账号分页拉取与全量同步；发布需要 Confirmation + Outbox；批量操作逐项返回结果 |
-| 卡券批次 | `GET/POST /api/v1/coupons/batches`、`GET/PATCH/DELETE /api/v1/coupons/batches/{id}`、`POST /api/v1/coupons/batches/{id}/bind`、`POST /api/v1/coupons/batches/{id}/unbind`、`POST /api/v1/coupons/batches/{id}/items/import`、`POST /api/v1/coupons/batches/{id}/items/bulk-save`、`POST /api/v1/coupons/batches/{id}/items/bulk-delete`、`POST /api/v1/coupons/batches/{id}/assets`、`POST /api/v1/coupons/batches/{id}/void` | `coupons` | 列表默认不返回正文；图片/素材与正文分开存储；批量保存/删除/绑定/解除绑定逐项返回结果；绑定校验商品与账号一致 |
+| 卡券批次 | `GET/POST /api/v1/coupons/batches`、`GET/PATCH/DELETE /api/v1/coupons/batches/{id}`、`POST /api/v1/coupons/batches/{id}/bind`、`POST /api/v1/coupons/batches/{id}/unbind`、`POST /api/v1/coupons/batches/{id}/items/import`、`POST /api/v1/coupons/batches/{id}/void` | `coupons` | 当前 S4-VS3 列表默认不返回正文，支持 purpose/metadata、单批编辑、批次软删除、绑定/解除绑定和库存导入；`items/bulk-save`、`items/bulk-delete`、`assets` 保留为后续切片契约；绑定校验商品与账号一致 |
 | 卡券正文 | `GET /api/v1/coupons/{id}/content` | `coupons/policy` | 管理员可通过受控领域接口直接查看、复制和编辑；买家可见交付仍按 `deliveryScope`、订单支付、商品/账号匹配、策略和 Audit 校验 |
 | 订单查询 | `GET /api/v1/orders`、`GET /api/v1/orders/{orderNo}`、`POST /api/v1/orders/refresh` | `orders` | 支持账号、状态、商品、买家、时间过滤 |
 | 订单动作 | `POST /api/v1/orders/{orderNo}/delivery-preview`、`/deliver`、`/cancel`、`/retry` | `orders/policy/execution` | 受支付、匹配、deliveryScope、幂等和状态机约束 |
@@ -283,8 +283,8 @@ type ConversationHandlingOutput = {
 | 商品同步 | 已实现同步首片：`Product` 增加 `source`、`lastSyncedAt`、`sourcePayloadDigest`；只读 MTOP mapper + 分页聚合 + 账号 scope 校验 + 外部商品幂等 Upsert；本地 `source=local,status=draft` 草稿遇同外部引用时跳过，不做全量软删除 | `POST /api/v1/products/sync`，请求 `{accountId,pageSize?,maxPages?}`，同步执行并返回 `syncRunId/fetchedCount/createdCount/updatedCount/skippedLocalDraftCount/items/hasMore`；真实发布仍未接入 |
 | 商品素材 | `AssetRef` 具备 storageKey、mimeType、checksum、status 生命周期 | `GET/POST/PATCH/DELETE /api/v1/products/{id}/assets...` |
 | 商品批量发布 | 每个商品产生独立 Confirmation/Outbox/幂等结果 | `POST /api/v1/products/bulk-publish` |
-| 卡券素材 | 新增 `CouponAssetRef`，与 CouponBatch 一对多；素材不等于卡券正文 | `POST /api/v1/coupons/batches/{id}/assets`、`DELETE /api/v1/coupons/batches/{id}/assets/{assetId}` |
-| 卡券批量操作 | CouponItem 的保存、删除、绑定和解除绑定均逐项审计 | `POST /items/bulk-save`、`POST /items/bulk-delete`、`POST /bind`、`POST /unbind` |
+| 卡券素材 | `CouponAssetRef` 与 CouponBatch 一对多；素材不等于卡券正文，当前 S4-VS3 仅保存图片 URL 列表并提供原图预览 | `POST /api/v1/coupons/batches/{id}/assets`（后续切片） |
+| 卡券批量操作 | 当前 S4-VS3 的批量删除作用于批次选择并逐批调用 DELETE；CouponItem 批量保存/删除仍保留后续契约 | `POST /items/bulk-save`、`POST /items/bulk-delete`（后续切片）；`POST /bind`、`POST /unbind` 已实现 |
 | 账号/权限 | AccountScope、AccountLoginSession 独立持久化；连接状态与登录会话分离 | `GET/POST/PATCH/DELETE /api/v1/accounts/{id}/scopes`；`POST/GET /api/v1/accounts/{id}/login-sessions`；`POST /login-sessions/{sid}/renew`、`/reauthorize`、`/cleanup` |
 | 管理员资料与会话 | Admin 保留邮箱、密码哈希、状态和最近登录；Session 可撤销 | `GET/PATCH /api/v1/auth/profile`、`POST /api/v1/auth/password`、`GET /api/v1/auth/sessions`、`POST /api/v1/auth/sessions/revoke-all` |
 | AgentSession | 新增 `AgentSession`：accountId、title、status、summary、lastActiveAt、archivedAt | `GET/POST /api/v1/workspace/agent-sessions`、`GET /search`、`POST /{id}/switch`、`POST /{id}/archive` |
