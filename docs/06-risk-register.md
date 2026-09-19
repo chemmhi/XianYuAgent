@@ -2,7 +2,7 @@
 
 - 文档版本：v0.2
 - 更新日期：2026-09-19
-- 当前阶段：阶段 5——S4-VS2 商品管理只读首片
+- 当前阶段：阶段 5——优先推进 S4-VS5 在线聊天、S4-VS6 Workspace、S4-VS7A Settings API Key
 - 风险状态：开放风险已登记；当前无 P0
 - 阶段门禁规则：阶段 5 允许受控 adapter、内存 store 和本机 Chrome/CDP 先形成证据，但不得把受控验证冒充真实闲鱼 APP 扫码、外部 Cookie 验证或 PostgreSQL/Redis 持久化；未关闭的 P1 外部登录和容器门禁不得扩展到商品、卡券、订单写入。
 
@@ -93,3 +93,9 @@
 | S5-RISK-018 | 发货 unknown/timeout/cancel/retry 的恢复语义未在外部 adapter、worker 和 UI 中闭环 | P1 | 高 | 重试导致重复发货或人工无法判断最终结果 | 后端 / QA 负责人 | 外部状态查询、租约、人工 recover、DeliveryRecord 和审计在真实 E2E 中可复核 | `S4-VS4C` | 开放，承接 S4-I004/R-009 |
 | S5-RISK-019 | 迁移编号并行、已有 PostgreSQL volume、回滚与 Testcontainers 证据未形成发布级闭环 | P1 | 高 | 应用与 schema 漂移，无法安全回退或恢复 | 架构 / 运维负责人 | 迁移清单、apply/rollback、旧数据兼容、容器重启复读和恢复演练全部有证据 | `S4-ENV-RECOVERY` | BLOCKED，承接 R-001/S5-I001 |
 | S5-RISK-020 | Pi Runtime 的健康、超时、重试、取消、不可用与可观测性仍未真实运行验证 | P1 | 中 | Agent/Worker 异常可能卡死或无法恢复 | 架构 / 运维负责人 | Runtime 独立服务健康探针、超时/取消/重试和日志指标通过；不把页面 200 当作证据 | `S4-ENV-RUNTIME` | PLANNED，承接 R-006 |
+| S5-RISK-021 | 在线聊天 WebSocket、cursor 补事件、未读和重连状态尚未形成真实闭环 | P1 | 高 | 断线后消息重复、丢失或跨账号串流 | 消息 / QA 负责人 | Redis/WS 集成、cursor 去重、账号 scope、断线重连和 Chrome/CDP E2E 通过 | `S4-VS5A` | 开放，承接 S3-I004 |
+| S5-RISK-022 | 消息发送、附件上传、撤回的幂等和外部 unknown/timeout 尚未真实验证 | P1 | 高 | 重复发送、孤儿附件、撤回结果误报或敏感内容泄露 | 消息 / 安全负责人 | PostgreSQL/对象存储、Idempotency、敏感字段裁剪、失败/重试/unknown 复核 | `S4-VS5B` | 开放，承接 R-008/R-009 |
+| S5-RISK-023 | 人工接管与 AI 恢复可能绕过会话版本、审计或权限边界 | P1 | 中 | 买家会话处理模式错误或越权切换 | 消息 / 安全负责人 | `expectedVersion`、reason、scope、幂等、AuditEvent 和非法转换测试通过 | `S4-VS5C` | 开放 |
+| S5-RISK-024 | Workspace Run/Step/Confirmation/Outbox 状态可能被页面或 Runtime 直接改写 | P1 | 高 | 高风险动作不可审计、重复执行或无法人工恢复 | Workspace / 执行负责人 | 独立 controller、状态机、Policy→Confirmation→Outbox、worker lease 和 recover E2E | `S4-VS6A`、`S4-VS6B` | 开放，承接 R-006/R-009 |
+| S5-RISK-025 | Workspace 实时事件、unknown、cancel、retry 尚未在真实 Runtime 中形成可恢复证据 | P1 | 中 | Run 卡死、误重试或外部结果未知时无法判断最终状态 | Runtime / QA 负责人 | 真实 Worker/Runtime、超时/取消/重试、事件游标、人工恢复和日志指标通过 | `S4-VS6A`、`S4-VS6B` | 开放，承接 R-006 |
+| S5-RISK-026 | Settings API Key 配置若复用通用设置保存入口，可能泄露明文或覆盖其他凭证 | P1 | 高 | 凭证泄露、轮换失败覆盖旧密钥或跨域读取 | 安全 / 凭证负责人 | CredentialStore 唯一 owner、加密复读、脱敏 UI、轮换/启停/撤销审计和 403/409 E2E | `S4-VS7A` | 开放，承接 R-004/S3-I004 |

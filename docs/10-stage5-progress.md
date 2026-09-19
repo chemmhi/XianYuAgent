@@ -1,8 +1,8 @@
-# 阶段 5 执行进度：S4-VS1 至 S4-VS4 切片索引
+# 阶段 5 执行进度：在线聊天 / Workspace / Settings API Key 优先队列
 
 - 日期：2026-09-19
-- 阶段状态：进行中；S4-VS1 已获人工放行，S4-VS2 只读/同步首片已完成受控验证，S4-VS3 已合入但仍待真实环境人工审核，后续切片已完成拆分但尚未实现。
-- 当前唯一目标：按 `docs/04-plan.md` 逐片推进未完成工作，不把 mock、MemoryStore、fixture、API 200 或页面可打开当作完整交付。
+- 阶段状态：进行中；账号、商品、卡券已具备主体链路，S4-VS3 仍待真实环境人工审核；下一批优先切片为在线聊天、Workspace 和 Settings API Key。
+- 当前唯一目标：按 `docs/04-plan.md` 逐片推进 `S4-VS5A/B/C`、`S4-VS6A/B`、`S4-VS7A`，不把 mock、MemoryStore、fixture、API 200 或页面可打开当作完整交付。
 
 ## 状态矩阵
 
@@ -18,6 +18,12 @@
 | `S4-VS3` 卡券首页 | `READY_FOR_REVIEW` | API smoke、Chrome/CDP、桌面/移动截图、代码已合入 master | 真实 PostgreSQL/Redis/MinIO、逐状态人工浏览器审核、迁移整理 |
 | `S4-VS3A/B` 卡券明细/素材/库存锁 | `PLANNED` | `CouponItem`、`CouponAssetRef`、`InventoryLockVM` 契约已冻结 | bulk-save/delete、MinIO、reserve/consume/release、敏感交付边界 |
 | `S4-VS4A/B/C` 订单与交付 | `PLANNED` | 订单 API、四态、delivery mode 契约已冻结 | 只读、预览、库存锁、交付动作、unknown/重试/取消 |
+| `S4-VS5A` 在线聊天读取与实时连接 | `PLANNED` | Messages route/controller/WS 契约已冻结 | Redis/WS、cursor 重连、未读、403/空、桌面/移动 |
+| `S4-VS5B` 在线聊天发送/附件/撤回 | `PLANNED` | Message 状态机和发送/图片/撤回 API 已冻结 | 持久化、对象存储、幂等、unknown/timeout、脱敏 |
+| `S4-VS5C` 人工接管与 AI 恢复 | `PLANNED` | handoff/release、版本和审计契约已冻结 | 非法转换、403/409、页面禁用、移动端 |
+| `S4-VS6A` Workspace 会话与 Run 首链路 | `PLANNED` | AgentSession/Run/Step/WS 契约已冻结 | Worker/Runtime、持久化、clientRunRef、游标重连 |
+| `S4-VS6B` Workspace Confirmation/Outbox | `PLANNED` | Confirmation/Outbox/恢复 API 已冻结 | Policy、幂等、租约、cancel/retry/recover |
+| `S4-VS7A` Settings API Key 配置 | `PLANNED` | CredentialStore CRUD/rotate/revoke/enable/disable 已冻结 | 加密复读、脱敏、审计、403/409；本片不做 reveal |
 | `S4-ENV-RECOVERY` | `BLOCKED` | Compose/健康检查/部分持久化已有证据 | 完整迁移回滚、Testcontainers、Redis/MinIO 重启和发布级恢复 |
 | `S4-EXT-ACCOUNT` | `BLOCKED` | 真实模式 QR 探针与受控 Cookie 链路 | 真实 APP 扫码、外部 Cookie、`loginuser.get` 资料同步 |
 | `S4-ENV-RUNTIME` | `PLANNED` | 独立 Runtime 架构决策已存在 | 健康、超时、重试、取消、不可用和观测 |
@@ -32,6 +38,7 @@
 ## 当前阻断与执行规则
 
 - `S4-VS3` 的 `READY_FOR_REVIEW` 不得改成 `PASS`，直到按 `docs/evidence/stage5/S4-VS3/test-baseline.md` 在真实 PostgreSQL/Redis/MinIO 环境完成浏览器人工审核并回写截图、偏差和结论。
+- 基础域已成型不等于所有门禁关闭；商品/卡券的真实外部、持久化和视觉收尾继续保留在风险矩阵中，但不阻塞 `S4-VS5A`、`S4-VS6A`、`S4-VS7A` 的切片启动。
 - 未通过 `S4-ENV-RECOVERY` 前，所有新写入切片只能在明确的测试数据库/容器证据下推进，不得宣称发布级可回滚。
 - 未通过 `S4-EXT-ACCOUNT` 前，fixture/受控 adapter 的商品同步和账号登录结果只能标记为 `PARTIALLY_VERIFIED`。
 - 所有前端切片必须固定 `1440×900` 和 `390×844`，覆盖适用的 loading/empty/error/forbidden/disabled/submitting/success/partial-success/unknown 状态。
@@ -39,10 +46,10 @@
 
 ## 下一步顺序
 
-1. `S4-VS2A`：先做商品草稿基础信息的真实写入和冲突回归。
-2. `S4-VS2B` → `S4-VS2C` → `S4-VS2D`：依次补 SKU、素材、受控发布；`S4-VS2E` 可并行做真实外部同步验收。
-3. `S4-VS3A` → `S4-VS3B`：先补卡券明细/素材，再关闭库存 reserve/consume/release 后进入订单交付。
-4. `S4-VS4A` → `S4-VS4B` → `S4-VS4C`：订单只读、交付预览、交付动作分开复核。
+1. `S4-VS5A` → `S4-VS5B` → `S4-VS5C`：在线聊天读取、发送/附件、接管/恢复 AI。
+2. `S4-VS6A` → `S4-VS6B`：Workspace 会话/Run，再做 Confirmation/Outbox/恢复。
+3. `S4-VS7A`：Settings API Key 配置，可与 VS5A/VS6A 并行，但先冻结 CredentialStore 脱敏和 scope。
+4. `S4-VS4A` → `S4-VS4B` → `S4-VS4C`：订单只读、交付预览、交付动作后置。
 5. 横向独立执行 `S4-ENV-RECOVERY`、`S4-EXT-ACCOUNT`、`S4-ENV-RUNTIME`，每项都保留真实环境证据和回滚结果。
 
 ## Git / 证据记录

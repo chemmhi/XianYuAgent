@@ -8,12 +8,15 @@
 
 ## 1. 阶段目标
 
-阶段 4 只负责把阶段 5 的实现顺序、依赖、字段冻结、验收证据和回滚动作编排清楚。主体功能优先于 Dashboard、Messages、Workspace 和 Settings 扩展，首批业务切片按以下顺序推进：
+阶段 4 只负责把阶段 5 的实现顺序、依赖、字段冻结、验收证据和回滚动作编排清楚。账号管理、商品管理和卡券首页已经具备可用主体链路，后续以真实持久化/人工审核门禁收尾；下一批优先建设在线聊天、Workspace 工作台和 Settings API Key 配置，订单交付排在这三项之后。
 
-1. 账号管理
-2. 商品管理
-3. 卡券首页 / 卡券批次与库存管理
+当前优先级：
+
+1. 在线聊天（Messages）
+2. Workspace 工作台（AgentSession / Run / Confirmation / Outbox）
+3. Settings API Key 配置（CredentialStore 的设置页入口）
 4. 订单列表、详情与交付动作
+5. Dashboard、其他 Settings 分区和运营聚合
 
 本阶段不创建真实后端、数据库、API、Worker、闲鱼 adapter 或前端业务实现；高保真原型和现有源码只作为视觉与交互参考，不作为组件拆分依据。
 
@@ -73,6 +76,82 @@ ENV-0 不是用户可见业务切片，但必须在 S4-VS1 开始前完成或明
 - 禁止范围：未知结果时自动再次发货；订单页面直接调用外部交付 adapter；混用支付、订单、交付、售后四套状态。
 - DoD：支持四套独立状态和筛选；交付前校验支付、商品/账号匹配、deliveryScope、库存锁定和策略；重复提交幂等；`unknown/timeout` 只查询 outbox/外部状态或进入人工恢复；失败可按状态重试；交付写 DeliveryRecord 和审计；覆盖未登录/无权/空数据/冲突/超时/重复提交/移动端对等。
 - 回滚：停止新的 delivery outbox，等待租约结束；保留 DeliveryRecord 和审计；必要时退回只读订单和外部状态查询，不回滚已成功交付。
+
+### 3.2 当前优先垂直切片：Messages / Workspace / Settings API Key
+
+账号、商品、卡券不再作为下一批首要开发目标；它们仍需按已有风险矩阵补真实环境和人工审核，但不阻塞下面三个功能进入切片实现。
+
+#### `S4-VS5A` 在线聊天读取与实时连接
+
+- 用户旅程：管理员进入 `/messages` → 选择账号 → 查看会话列表 → 打开会话 → 读取消息时间线 → 连接断开后按游标补事件并恢复。
+- 组件边界：`MessagesPage`、`useMessagesController`、`AccountTabs`、`ConversationList`、`ConversationHeader`、`MessageTimeline`、`ConnectionBanner`。
+- API / 数据：`GET /api/v1/conversations`、`GET /api/v1/conversations/{id}/messages`、`WS /api/v1/conversations/{id}/events`；queryKey 必须包含 `accountId`、`conversationId` 和 cursor。
+- 状态与权限：loading/empty/error/forbidden/reconnect/timeout；WebSocket 校验 Session、Origin、账号 scope 和会话归属；恢复连接先按 cursor 补事件，禁止重复追加。
+- 禁止范围：不发送消息、不接管会话、不读取未授权买家正文、不直连闲鱼 WebSocket。
+- 验收与证据：真实 API + PostgreSQL/Redis 或等价容器、Chrome/CDP 桌面/移动、断线/重连/游标/403/空数据；截图记录时间线、未读状态和连接提示。
+- 回滚：关闭实时订阅、保留历史消息和游标，不删除会话；降级为只读历史查询。
+
+#### `S4-VS5B` 在线聊天发送、附件与消息动作
+
+- 用户旅程：在会话中输入文本 → 提交中 → 发送成功或失败 → 重试；图片先上传再发送；支持撤回时进入 `recalled`。
+- 组件边界：`MessageComposer`、`AttachmentUpload`、`MessageActionMenu`，命令由 `useMessagesController` 唯一发出。
+- API / 数据：`POST /api/v1/conversations/{id}/messages`、`POST /api/v1/conversations/{id}/images`、`POST /api/v1/conversations/{id}/messages/{messageId}/recall`；所有写请求带 Idempotency-Key，外部结果写 `externalOutcome`。
+- 状态与权限：submitting/succeeded/failed/unknown/conflict/timeout/disabled；失败可重试，unknown 只能查询外部结果或人工恢复，不盲目重复发送。
+- 禁止范围：不改变 `handlingMode`，不绕过 Policy，不把凭证、卡券正文或内部提示写入买家消息。
+- 验收与证据：真实 API、对象存储、消息持久化、重复提交、上传失败、撤回不支持、403、外部 timeout/unknown、Chrome/CDP 和移动端输入体验。
+- 回滚：停止新发送和上传，保留已落库消息与审计；未完成附件标记失败并清理临时对象。
+
+#### `S4-VS5C` 在线聊天人工接管与 AI 恢复
+
+- 用户旅程：管理员从会话风险面板选择接管原因 → `handoff` → 会话切为人工 → 处理完成后 `release` 恢复 AI。
+- API / 数据：`POST /api/v1/conversations/{id}/handoff`、`POST /api/v1/conversations/{id}/release`；请求包含 `expectedVersion`、`reason`、Idempotency-Key，响应返回 `handlingMode`、`auditRef`。
+- 状态与权限：confirmation/submitting/succeeded/conflict/forbidden/unknown；版本冲突刷新差异；原因只记录运营元数据，不进入买家可见消息、Trace、Replay 或 Prompt。
+- 禁止范围：不把接管原因当作聊天消息发送，不在页面直接改 `ConversationVM.handlingMode`。
+- 验收与证据：成功、非法转换、重复请求、版本冲突、无权、持久化失败、页面禁用与恢复；人工审核固定桌面/移动截图。
+- 回滚：恢复到最近一致的 `handlingMode`，保留审计；未知结果只允许查询，不自动重复切换。
+
+#### `S4-VS6A` Workspace 会话与 Run 首条链路
+
+- 用户旅程：进入 `/workspace` → 创建/搜索/切换 `AgentSession` → 提交一条受控指令 → 查看 Run/Step 实时状态和业务引用。
+- 组件边界：`WorkspacePage`、`useWorkspaceController`、`SessionToolbar`、`SessionList`、`WorkspaceComposer`、`RunChat`、`RealtimeBanner`。
+- API / 数据：AgentSession 列表/创建/搜索/切换/归档；`POST /api/v1/workspace/runs`、`GET /api/v1/workspace/runs/{id}`、`WS /api/v1/workspace/runs/{id}/events`。
+- 状态与权限：queued/running/executing/succeeded/failed/cancelled/reconnect/forbidden；Run 必须绑定账号 scope 和 session，不暴露 Pi 原始 API。
+- 禁止范围：不确认高风险动作、不直接改 Run/Step 状态、不在页面执行外部平台动作。
+- 验收与证据：真实 API + Worker/Runtime、session 持久化、重复 clientRunRef、断线补事件、403/404/空会话、桌面/移动截图。
+- 回滚：停止新 Run，等待执行租约结束；保留 Session、Run、Step 和审计，回退到只读历史。
+
+#### `S4-VS6B` Workspace Confirmation / Cancel / Retry / Outbox
+
+- 用户旅程：Run 进入 `waiting_confirmation` → 查看 Confirmation → 确认/取消 → 查看 Outbox 结果 → 失败或 unknown 时查询/人工恢复/重试。
+- 组件边界：`ConfirmationCard`、`RunActionBar`、`OutboxResult`，命令由 `useWorkspaceController` 发出；`OutboxPanel` 不承担 Settings 保存。
+- API / 数据：`GET /api/v1/workspace/runs/{id}/confirmation`、`POST /confirm`、`/cancel`、`/retry`；必要时使用 execution outbox query/recover API。
+- 状态与权限：active/expired/confirmed/rejected/cancelled、unknown/timeout/conflict；必须经过 Policy → Confirmation → Idempotency → Outbox，unknown 不盲重放。
+- 禁止范围：不把页面按钮直接映射为外部 adapter 调用，不跳过审计、租约和幂等。
+- 验收与证据：成功、过期、非法转换、重复确认、版本冲突、持久化失败、worker 重试/取消、Outbox 人工恢复、Chrome/CDP 和运行日志。
+- 回滚：停止新确认和 Outbox 写入，等待租约；保留已有执行结果与审计，不回滚已成功外部动作。
+
+#### `S4-VS7A` Settings API Key 配置核心链路
+
+- 用户旅程：进入 `/settings` → 选择明确的 `accountId` → API Key 分区 → 查看该账号已配置 provider/alias/状态（不显示密钥）→ 新增/编辑 → 校验 → 保存 → 轮换/启用/禁用/撤销；切换账号必须失效当前 credentials query，禁止跨账号编辑。
+- 组件边界：`SettingsPage`、`SettingsTabs`、`ExternalServicesPanel` 或独立 `ApiKeyConfigPanel`、`CredentialStorePanel`、`useCredentialController`；保存逻辑不得回到 `SettingsPage` 总入口。
+- API / 数据：复用 `GET/POST/PATCH /api/v1/credentials`、`POST /{id}/rotate`、`/enable`、`/disable`、`/revoke`；Settings 只接收 `CredentialRefVM` 和脱敏 metadata，不接收明文旧值。
+- 状态与权限：loading/empty/forbidden/submitting/saved/conflict/timeout；明文只在创建/轮换请求的受控边界出现，服务端加密存储，列表与日志只返回 alias、provider、status、lastRotatedAt、fingerprint 摘要。
+- 禁止范围：不得把 API Key 放入 URL、localStorage、query cache、日志、Trace、Replay、Prompt 或买家消息；不得让 Workspace/Chat 直接读取 CredentialValue。
+- 验收与证据：PostgreSQL 加密字段复读、创建/编辑/轮换/启停/撤销、重复提交、403/409、错误脱敏、Chrome/CDP 桌面/移动截图和审计记录。
+- 回滚：禁用新增 CredentialRef、保留旧密钥引用与审计；轮换失败不得覆盖旧密文，撤销不可恢复需二次确认并可审计。
+
+#### 新优先级依赖顺序
+
+```text
+S4-VS5A → S4-VS5B → S4-VS5C
+      └──────────────┐
+                     ├→ S4-VS6A → S4-VS6B
+S4-VS7A（可与 VS5A/VS6A 并行，但先完成 CredentialStore 契约）
+                     ↓
+             S4-VS4A/B/C 订单交付
+```
+
+`S4-VS7A` 不依赖订单；`S4-VS6B` 依赖 Execution foundation 和 Runtime 可用性；在线聊天与 Workspace 的账号 scope 均复用已成型的账号上下文，不重新建设账号选择逻辑。
 
 ### 3.1 未完成事项的纵向切片拆分
 
@@ -137,11 +216,12 @@ S4-EXT-ACCOUNT、S4-ENV-RUNTIME 为独立门禁；未通过时只能保留明确
 
 ## 4. 后置切片
 
-在 S4-VS1 至 S4-VS4 完成并通过各自门禁前，不得抢占主体切片：
+以下内容排在当前三项优先切片之后：
 
-1. S4-VS5：消息与人工接管
-2. S4-VS6：Workspace / Agent / Pi Runtime 运行时
-3. S4-VS7：Dashboard、Settings 扩展和运营聚合
+1. `S4-VS4A/B/C`：订单列表、交付预览和交付动作
+2. `S4-VS6C`：Workspace 业务上下文、跨域引用和高级运行能力
+3. `S4-VS7B`：Settings 其他配置分区、Runtime/Outbox 运维面和运营聚合
+4. Dashboard、Messages 高级自动化和非核心运营页面
 
 Dashboard 不先于账号、商品、卡券、订单四个核心域；Settings 仅提供首片所需的最小管理员能力，不扩张为独立业务切片。
 
@@ -162,4 +242,4 @@ Dashboard 不先于账号、商品、卡券、订单四个核心域；Settings �
 
 ## 6. 阶段 4 门禁结果
 
-阶段 4 计划门禁已完成：切片顺序、ENV-0、四个主体功能切片、依赖图、DoD、测试范围、视觉基线和回滚动作均已落档。S4-VS1 账号管理已获人工放行，下一步进入阶段 5 的 S4-VS2 商品管理真实纵向切片；账号切片遗留的非阻塞 UI 缺陷不阻断该切换。
+阶段 4 计划门禁已完成并在 2026-09-19 重排：账号、商品、卡券作为已成型基础域保留收尾门禁；下一批阶段 5 优先进入 `S4-VS5A/B/C`、`S4-VS6A/B`、`S4-VS7A`。每个切片仍需独立完成实现、真实测试、视觉回归、回滚和三轮复审，不能因为基础域已成型而跳过阶段门禁。

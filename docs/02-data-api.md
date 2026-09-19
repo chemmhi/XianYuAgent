@@ -1,11 +1,11 @@
 # XianyuSellerAgent 阶段 2 数据模型与 API 契约
 
-- 文档版本：v0.4
+- 文档版本：v0.5
 - 日期：2026-09-19
 - 状态：PASS（阶段 2 数据模型、API 契约与安全边界已冻结）
 - 前置门禁：阶段 1 PASS
 - 设计边界：本阶段只冻结数据、API、安全和迁移契约，不创建真实业务后端、数据库实现或前后端联调。
-- 本次修订：补充 FirstRun bootstrap 与消息人工接管 / 恢复 AI 的逐字段、幂等、审计和缓存失效契约，供阶段 3 组件设计消费。
+- 本次修订：补充 FirstRun bootstrap、消息人工接管 / 恢复 AI，以及在线聊天、Workspace、Settings API Key 优先切片契约；明确 `clientRunRef`、账号级 CredentialStore scope 和 API Key 不提供 reveal。
 
 ## 1. 设计目标
 
@@ -53,7 +53,7 @@
 | `account_scopes` | `id UUID`、`adminId`、`accountId`、`scope enum`、`status enum` | `expiresAt`、`revokedAt` 可空；`status=active` | PK `id`；FK 管理员/账号；唯一 `(adminId, accountId, scope)` | `active -> revoked/expired`；仅 active 且未过期 scope 可授权请求 |
 | `account_login_sessions` | `id UUID`、`loginMethod`、`status`、`startedAt` | `accountId` 可空；`provisionalAccountRef`、`qrTokenRef`、`failureCode`、`completedAt` 可空 | PK `id`；成功后回填 FK `accountId -> accounts.id`；索引 `(provisionalAccountRef, status)`、`(accountId, status)` | `created -> waiting -> scanned -> succeeded/expired/failed/cancelled`；成功前允许无正式账号 |
 | `accounts` | `id UUID`、`platform enum`、`sellerRef`、`status enum` | `displayName`、`lastConnectedAt` 可空 | PK `id`；唯一 `(platform, sellerRef)` | 停用不删除历史订单与消息 |
-| `credential_refs` | `id UUID`、`accountId`、`kind`、`purpose`、`status` | `label`、`lastRotatedAt` 可空 | PK `id`；FK `accountId`；唯一 `(accountId, kind, purpose)` | `active -> disabled/revoked/rotating`；旧值只保留审计摘要 |
+| `credential_refs` | `id UUID`、`accountId`、`kind`、`purpose`、`status` | `label`、`lastRotatedAt` 可空；API Key 的 `provider/alias/fingerprint` 通过脱敏 metadata 投影 | PK `id`；FK `accountId`；唯一 `(accountId, kind, purpose)` | `active -> disabled/revoked/rotating`；旧值只保留审计摘要 |
 | `credential_values` | `credentialRefId`、`ciphertext`、`keyVersion`、`checksum` | `metadataJson` 默认 `{}` | PK/FK `credentialRefId -> credential_refs.id` | 管理员可读写；API 默认不返回明文 |
 | `products` | `id UUID`、`accountId`、`title`、`status`、`categoryCode`、`attributesJson`、`defaultReplyTemplate`、`aiPrompt`、`configVersion` | `description`、`priceMinor`、`categoryCode`、`attributesJson`、`defaultReplyTemplate`、`aiPrompt` 可空；`attributesJson={}`、`configVersion=1` | PK `id`；FK `accountId`；唯一 `(accountId, externalProductRef)`（外部引用为空时不生效） | `draft -> ready -> publishing -> published/failed/archived`；配置字段随版本审计 |
 | `product_skus` | `id UUID`、`productId`、`skuCode`、`priceMinor`、`status` | `externalSkuRef` 可空 | PK；FK `productId`；唯一 `(productId, skuCode)` | 已售 SKU 不物理删除 |
@@ -327,5 +327,34 @@ type ConversationHandlingOutput = {
 2. 新迁移必须使用新的单调编号，不得继续新建第二个 `013`；已有 volume 必须有明确的 apply 记录，不能依赖重新 initdb。
 3. 所有新增字段先走 expand，再执行 backfill/verify，最后切换读写；回滚优先回退应用并保留兼容读路径，不直接删除历史订单、库存或审计。
 4. 迁移验证至少包含真实 PostgreSQL、重复执行、回滚后健康检查和代表性旧数据读取；MemoryStore 只作为单元/受控 E2E 夹具，不能替代持久化门禁。
+
+## 13. 当前优先切片契约：在线聊天、Workspace、Settings API Key
+
+以下契约承接阶段 2 已冻结的实体和错误码，只补阶段 5 的垂直切片边界，不表示代码已经完成。
+
+### 13.1 在线聊天
+
+| 切片 | API / 事件 | 核心状态与副作用 | 完成门禁 |
+| --- | --- | --- | --- |
+| `S4-VS5A` 读取与实时连接 | `GET /api/v1/conversations`、`GET /api/v1/conversations/{id}/messages`、`WS /api/v1/conversations/{id}/events` | cursor、未读、连接状态独立；断线后先补事件再更新缓存；校验 Session、Origin、账号 scope、会话归属 | 真实 PostgreSQL/Redis 或等价容器、cursor 重连不重复、403/404/空数据、Chrome/CDP 桌面/移动 |
+| `S4-VS5B` 发送与附件 | `POST /api/v1/conversations/{id}/messages`、`POST /api/v1/conversations/{id}/images`、`POST /api/v1/conversations/{id}/messages/{messageId}/recall` | `pending → sent|failed|recalled`；写请求带 Idempotency-Key；附件先入 storage；`externalOutcome=unknown` 只查询/人工恢复 | 消息持久化、对象存储、重复提交、上传失败、撤回不支持、外部 timeout/unknown、敏感字段脱敏 |
+| `S4-VS5C` 接管与恢复 AI | `POST /api/v1/conversations/{id}/handoff`、`POST /api/v1/conversations/{id}/release` | `handlingMode=ai|human`；要求 `expectedVersion`、reason、Idempotency-Key；成功写 AuditEvent 并失效会话/列表缓存 | 非法转换、版本冲突、403、重复请求、持久化失败、页面禁用/恢复、桌面/移动视觉 |
+
+### 13.2 Workspace 工作台
+
+| 切片 | API / 事件 | 核心状态与副作用 | 完成门禁 |
+| --- | --- | --- | --- |
+| `S4-VS6A` 会话与 Run 首链路 | `GET/POST /api/v1/workspace/agent-sessions`、`GET /api/v1/workspace/agent-sessions/search`、`POST /api/v1/workspace/agent-sessions/{id}/switch`、`POST /api/v1/workspace/agent-sessions/{id}/archive`、`POST /api/v1/workspace/runs`、`GET /api/v1/workspace/runs/{id}`、`WS /api/v1/workspace/runs/{id}/events` | Run 绑定 `accountId + sessionId`；`RunStatus`、`StepStatus` 只由服务端状态机迁移；`clientRunRef` 用于业务去重，`Idempotency-Key` 用于请求幂等，二者独立；同 `clientRunRef` 返回既有 Run，同 key 不同指纹返回 `IDEMPOTENCY_CONFLICT` | Worker/Runtime 真实运行、Session/Run/Step 持久化、重复 clientRunRef、断线补事件、403/404/空会话 |
+| `S4-VS6B` Confirmation 与 Outbox | `GET /api/v1/workspace/runs/{id}/confirmation`、`POST /api/v1/workspace/runs/{id}/confirm`、`POST /api/v1/workspace/runs/{id}/cancel`、`POST /api/v1/workspace/runs/{id}/retry`、`GET/POST /api/v1/execution/outbox...` | `active → confirmed|expired|rejected|cancelled`；Policy → Confirmation → Idempotency → Outbox；unknown 不盲重放 | 重复确认、过期、版本冲突、worker 重试/取消、unknown 查询/人工恢复、审计与租约 |
+
+Workspace 的 `Run/Step` 结果可以引用商品、卡券、订单，但只能返回脱敏 `BusinessLinkVM`：`{ type: 'product'|'coupon_batch'|'order'|'conversation', id, accountId, label?, route, redacted: true }`；不得把卡券正文、CredentialValue、买家敏感内容或 Pi 原始 payload 直接放入前端 ViewModel。
+
+### 13.3 Settings API Key 配置
+
+| 切片 | API / 输入输出 | 敏感边界与状态 | 完成门禁 |
+| --- | --- | --- | --- |
+| `S4-VS7A` API Key 配置核心链路 | 复用 `GET/POST/PATCH /api/v1/credentials`、`POST /api/v1/credentials/{id}/rotate`、`POST /api/v1/credentials/{id}/enable`、`POST /api/v1/credentials/{id}/disable`、`POST /api/v1/credentials/{id}/revoke`；前端只接 `CredentialRefVM` 和脱敏 metadata | 明文只允许出现在创建/轮换请求边界；服务端加密存储；列表只返回 provider、alias、status、lastRotatedAt、fingerprint 摘要；`S4-VS7A` 不提供 reveal，`canReveal=false`；禁止进入 URL、localStorage、query cache、日志、Trace、Replay、Prompt | PostgreSQL 密文复读、创建/编辑/轮换/启停/撤销、403/409、错误脱敏、审计、Chrome/CDP 桌面/移动 |
+
+API Key 配置不新增第二套凭证表；`CredentialStore` 继续作为唯一数据 owner。当前统一采用 `scope=account`：API Key 必须绑定 `accountId`，沿用 `credential_refs(accountId, kind, purpose)` 唯一约束和账号 scope queryKey；若未来需要全局 provider key，另立 schema/权限切片，不在 `S4-VS7A` 隐含扩展。Settings 只提供页面入口和脱敏配置编辑，Workspace/Chat 只能消费 capability/ref，不得读取 CredentialValue。
 
 阶段 2 通过后，允许进入阶段 3 前端信息架构与 API 映射设计；仍不得提前创建真实后端实现。

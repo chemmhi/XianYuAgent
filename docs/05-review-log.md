@@ -1,6 +1,6 @@
 # XianyuSellerAgent 阶段评审记录
 
-- 文档版本：v0.5
+- 文档版本：v0.6
 - 更新日期：2026-09-19
 - 评审规则：问题先修复，再复验，再由独立评审关闭；未关闭的 P0-P2 不得进入下一阶段。
 
@@ -254,3 +254,15 @@
 | S5-R38 | 质量 / 安全 / 运维 | 是否明确真实 PostgreSQL/Redis/MinIO、Chrome/CDP、视觉状态、Testcontainers、恢复和外部账号证据；是否避免 smoke/mock 冒充完成 | root + QA/运维待复核 | BLOCKED | `docs/06-risk-register.md` `S5-RISK-013~S5-RISK-020`；`S4-ENV-RECOVERY`、`S4-EXT-ACCOUNT`、`S4-ENV-RUNTIME` 尚无完成证据 |
 
 当前切片拆分门禁结论：`READY_FOR_REVIEW`。切片规划已写入文档，但尚未授权把任何新增切片标记为 `PASS`；实现阶段必须按单片执行 5 → 5.5 → 6 门禁，并在每片完成后追加独立业务/架构/质量复审记录。
+
+### 10.14 优先级重排复核：在线聊天 / Workspace / Settings API Key（2026-09-19）
+
+本节复核基础域已成型后的下一批开发顺序，不代表三项功能已经实现。
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R39 | 业务 / 验收 | 在线聊天、Workspace、Settings API Key 是否分别拆成可交付用户旅程，并明确先后顺序与非目标 | root + 待人工复核 | READY_FOR_REVIEW | `docs/04-plan.md` §3.2；`docs/10-stage5-progress.md` 优先切片队列 |
+| S5-R40 | 架构 / 数据流 | Messages、Workspace、CredentialStore 是否保持独立 owner、API/store/WS/Runtime 边界，是否复用既有账号上下文 | root + 待独立复核 | READY_FOR_REVIEW | `docs/02-data-api.md` §13；`docs/03-component-contract.md` §12 |
+| S5-R41 | 质量 / 安全 / 运维 | WebSocket 重连、Run unknown、Outbox recover、API Key 脱敏/加密/轮换是否都有真实测试和回滚门禁 | root + QA/安全待复核 | BLOCKED | `docs/06-risk-register.md` `S5-RISK-021~S5-RISK-026`；真实实现与证据尚未开始 |
+
+重排结论：下一批只进入 `S4-VS5A/B/C`、`S4-VS6A/B`、`S4-VS7A`；订单交付及其他 Settings/运营页面继续后置。账号、商品、卡券的剩余真实环境复核仍按原风险矩阵推进，不被本次重排宣称为全部 PASS。

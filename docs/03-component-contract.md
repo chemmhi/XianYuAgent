@@ -1,8 +1,8 @@
 # XianyuSellerAgent 阶段 3 前端组件详细契约
 
-- 文档版本：v0.1
+- 文档版本：v0.2
 - 更新日期：2026-09-19
-- 评审状态：阶段 3 设计审查中；实现明确后置，不作为当前门禁证据
+- 评审状态：阶段 3 设计 PASS；阶段 5 优先切片 owner/API/禁止依赖已补充，具体实现仍需独立门禁
 - 适用范围：组件职责、页面容器、数据流、路由/API 映射、状态边界、移动端对等性
 - 关联文档：`docs/03-frontend-design.md`、`docs/02-data-api.md`、`docs/02-database-schema.md`
 
@@ -239,7 +239,8 @@ type CouponContentPreviewVM = {
 type SettingsSectionVM = {
   sectionKey:
     | 'agent' | 'reply-policy' | 'delivery-policy' | 'policy-gateway'
-    | 'external-services' | 'runtime' | 'outbox' | 'account-scopes';
+    | 'external-services' | 'runtime' | 'outbox' | 'account-scopes'
+    | 'credentials';
   configVersion: number;
   values: Record<string, unknown>;
   editableFields: string[];
@@ -252,12 +253,16 @@ type CredentialRefVM = {
   credentialId: string;
   accountId?: string;
   kind: 'cookie' | 'token' | 'password' | 'api_key' | 'other';
+  provider?: string;
+  alias?: string;
   label: string;
   status: 'active' | 'disabled' | 'rotating' | 'revoked';
   maskedPreview: string;
+  fingerprint?: string;
   createdAt: string;
   updatedAt: string;
   lastUsedAt?: string;
+  lastRotatedAt?: string;
   canReveal: boolean;
   revealExpiresAt?: string;
   auditRef?: string;
@@ -283,9 +288,18 @@ type MutationViewModel = {
   errorCode?: string;
   retryAfterAt?: string;
 };
+
+type BusinessLinkVM = {
+  type: 'product' | 'coupon_batch' | 'order' | 'conversation';
+  id: string;
+  accountId: string;
+  label?: string;
+  route: string;
+  redacted: true;
+};
 ```
 
-敏感字段规则：`CredentialRefVM` 永不包含明文凭证；`CouponContentPreviewVM.content` 可由管理员在受控领域接口中直接查看、复制和编辑，但买家可见链路仍必须满足 `deliveryScope=buyer_deliverable`、订单已支付、商品与账号匹配、策略通过并完成审计；`MessageVM.bodyText` 由 adapter 按买家可见边界裁剪。`externalOutcome = 'unknown'` 只表示外部平台结果未知，不是 Outbox 状态，也不允许页面自动重放写请求。
+敏感字段规则：`CredentialRefVM` 永不包含明文凭证；`S4-VS7A` 中 `canReveal=false`，不提供明文 reveal；若未来需要受控 reveal，必须另立切片并增加独立审计和人工复核。`CouponContentPreviewVM.content` 可由管理员在受控领域接口中直接查看、复制和编辑，但买家可见链路仍必须满足 `deliveryScope=buyer_deliverable`、订单已支付、商品与账号匹配、策略通过并完成审计；`MessageVM.bodyText` 由 adapter 按买家可见边界裁剪。`externalOutcome = 'unknown'` 只表示外部平台结果未知，不是 Outbox 状态，也不允许页面自动重放写请求。
 
 `api/adapters/*` 必须完成旧字段到上述模型的映射。若映射失败，返回 `CONFLICT` 或 `VALIDATION_FAILED`，不得让页面组件自行兜底成“成功”。
 
@@ -317,7 +331,7 @@ type MutationViewModel = {
 | `/products` | `ProductsPage` | products、product detail/assets | create/update/sync/pull/assets/publish/bulk-publish | product list/detail、coupon bindings、workspace links |
 | `/coupons` | `CouponsPage` | batches、batch detail、content preview | create/update/delete/bind/unbind/items/assets/void | batch inventory、product bindings、order delivery preview |
 | `/orders` | `OrdersPage` | orders、order detail、refresh | delivery-preview/deliver/cancel/retry | order、delivery record、conversation、coupon inventory |
-| `/settings` | `SettingsPage` | agent/reply-policy/delivery-policy/policy-gateway/external-services/runtime/outbox/account-scopes/profile/sessions | settings PATCH、credential CRUD/rotate/revoke/enable/disable、password/session revoke | only affected settings/domain query |
+| `/settings` | `SettingsPage` | agent/reply-policy/delivery-policy/policy-gateway/external-services/runtime/outbox/account-scopes/credentials/profile/sessions | settings PATCH、credential CRUD/rotate/revoke/enable/disable、password/session revoke | only affected settings/domain query; credentials 必须带明确 accountId |
 
 所有写命令统一由 controller 生成 `Idempotency-Key`，将服务端 envelope 转为 `MutationViewModel`，未知结果必须进入查询或恢复流程。
 
@@ -432,14 +446,14 @@ type ConversationHandlingOutput = {
 | `useAccountsController` | `POST /api/v1/accounts/{id}/login-sessions/{sid}/renew` | 空 → `LoginSessionVM` | admin + account scope；Idempotency-Key | 失效 login session、connection | unknown 仅查询状态 |
 | `useAccountsController` | `POST /api/v1/accounts/{id}/login-sessions/{sid}/reauthorize` | `ReauthorizeRequest` → `LoginSessionVM` | admin + account scope；Idempotency-Key | 失效 login session、connection | 需重新授权时展示明确 CTA |
 | `useAccountsController` | `POST /api/v1/accounts/{id}/login-sessions/{sid}/cleanup` | 空 → `MutationViewModel` | admin + account scope；Idempotency-Key | 失效 login session | NOT_FOUND 可视为已清理 |
-| `useCredentialController` | `GET /api/v1/credentials` | `CredentialFilters` → `CredentialRefVM[]` | admin only；只读 | `['credentials','global','list',filters]` | 明文永不进入错误/缓存 |
-| `useCredentialController` | `POST /api/v1/credentials` | `CreateCredentialRequest` → `CredentialRefVM` | admin only；Idempotency-Key | 失效 credentials、account connection | `VALIDATION_FAILED` 保留表单，不回显 secret |
-| `useCredentialController` | `GET /api/v1/credentials/{id}` | Query 空 → `CredentialRefVM` | admin only；只读；`credentialId` 全局唯一例外 | `['credentials','global','detail',credentialId]` | 不返回明文；需要 reveal 走独立受控动作 |
-| `useCredentialController` | `PATCH /api/v1/credentials/{id}` | `CredentialPatchRequest` → `CredentialRefVM` | admin only；Idempotency-Key | 失效 credential detail/list | `VERSION_CONFLICT` 展示差异 |
-| `useCredentialController` | `POST /api/v1/credentials/{id}/rotate` | `RotateCredentialRequest` → `CredentialRefVM` | admin only；Idempotency-Key | 失效 credential、connection、account health | `EXTERNAL_UNKNOWN` 进入人工恢复 |
-| `useCredentialController` | `POST /api/v1/credentials/{id}/revoke` | `RevokeCredentialRequest` → `MutationViewModel` | admin only；Idempotency-Key | 失效 credential、connection、account health | 不自动重放；刷新最终状态 |
-| `useCredentialController` | `POST /api/v1/credentials/{id}/enable` | 空 → `CredentialRefVM` | admin only；Idempotency-Key | 失效 credential、health | `CONFLICT` 刷新状态 |
-| `useCredentialController` | `POST /api/v1/credentials/{id}/disable` | `DisableCredentialRequest` → `CredentialRefVM` | admin only；Idempotency-Key | 失效 credential、health | 已 disabled 视为幂等成功 |
+| `useCredentialController` | `GET /api/v1/credentials` | `CredentialFilters(accountId)` → `CredentialRefVM[]` | admin + account scope；只读 | `['credentials',accountId,'list',filters]` | 明文永不进入错误/缓存；切换账号失效旧 query |
+| `useCredentialController` | `POST /api/v1/credentials` | `CreateCredentialRequest(accountId)` → `CredentialRefVM` | admin + account scope；Idempotency-Key | 失效 `['credentials',accountId,*]`、account connection | `VALIDATION_FAILED` 保留表单，不回显 secret |
+| `useCredentialController` | `GET /api/v1/credentials/{id}` | Query 空 → `CredentialRefVM` | admin + account scope；只读；必须校验 credential.accountId | `['credentials',accountId,'detail',credentialId]` | 不返回明文；`S4-VS7A` 不提供 reveal |
+| `useCredentialController` | `PATCH /api/v1/credentials/{id}` | `CredentialPatchRequest` → `CredentialRefVM` | admin + account scope；Idempotency-Key | 失效 credential detail/list | `VERSION_CONFLICT` 展示差异 |
+| `useCredentialController` | `POST /api/v1/credentials/{id}/rotate` | `RotateCredentialRequest` → `CredentialRefVM` | admin + account scope；Idempotency-Key | 失效 credential、connection、account health | `EXTERNAL_UNKNOWN` 进入人工恢复 |
+| `useCredentialController` | `POST /api/v1/credentials/{id}/revoke` | `RevokeCredentialRequest` → `MutationViewModel` | admin + account scope；Idempotency-Key | 失效 credential、connection、account health | 不自动重放；刷新最终状态 |
+| `useCredentialController` | `POST /api/v1/credentials/{id}/enable` | 空 → `CredentialRefVM` | admin + account scope；Idempotency-Key | 失效 credential、health | `CONFLICT` 刷新状态 |
+| `useCredentialController` | `POST /api/v1/credentials/{id}/disable` | `DisableCredentialRequest` → `CredentialRefVM` | admin + account scope；Idempotency-Key | 失效 credential、health | 已 disabled 视为幂等成功 |
 | `useMessagesController` | `GET /api/v1/conversations` | `ConversationFilters` → `ConversationVM[]` | account scope；只读 | `['messages',accountId,'conversations',filters]` | 空结果走 EmptyState |
 | `useMessagesController` | `GET /api/v1/conversations/{id}/messages` | `MessageCursorQuery` → `MessageVM[]` | account scope；只读 | `['messages',accountId,'timeline',conversationId,cursor]` | cursor 失效则从最新 cursor 重拉 |
 | `useMessagesController` | `POST /api/v1/conversations/{id}/messages` | `SendMessageRequest` → `MessageVM` | account scope；Idempotency-Key | 失效 conversation/messages/unread | unknown 只查消息状态，不重复发送 |
@@ -521,7 +535,7 @@ type ConversationHandlingOutput = {
 Query key 统一遵循以下规则：
 
 1. 账号作用域资源使用 `['domain', accountId, route, normalized identity, normalized filters]`；detail、timeline、preview、realtime 和 QR login-session key 默认都必须带 `accountId`。
-2. 全局管理员资源使用 `['domain', 'global', route, normalized identity, normalized filters]`，仅限明确声明“全局唯一 ID/不属于任何账号”的资源：`auth` session/profile/sessions、`credentialId`、`outboxId`、settings section 和账号全局列表。
+2. 全局管理员资源使用 `['domain', 'global', route, normalized identity, normalized filters]`，仅限明确声明“全局唯一 ID/不属于任何账号”的资源：`auth` session/profile/sessions、`outboxId`、settings section 和账号全局列表。`credentialId` 不属于全局例外，`S4-VS7A` 必须绑定 `accountId` 并使用账号级 queryKey。
 3. `runId`、`conversationId`、`productId`、`batchId`、`orderNo` 即使服务端可能全局唯一，也不使用例外，仍保留 `accountId` 以防跨账号缓存碰撞；`qrSessionId` 同样必须带 `accountId`。
 4. 任何 mutation 只能失效受影响 key，不能清空全局缓存作为“修复”；query key 顺序不得由页面自行改变。
 
@@ -905,3 +919,28 @@ Controller 只返回阶段 2 canonical error code；断网属于 transport 状�
 - 商品、卡券、订单共用 `MutationViewModel` 形状，但各自拥有 mutation key、缓存失效和审计引用；不得把一个领域的 `version` 当成另一个领域的版本。
 - Desktop/Mobile 共用 controller、ViewModel、command 和错误映射，仅替换布局组合；每片都要对 `1440×900` 与 `390×844` 的适用状态分别留证。
 - 横向门禁（迁移恢复、真实外部账号、Pi Runtime）不属于任何页面 owner；只能由对应 execution/ops 模块提供状态，不得把门禁逻辑塞进页面组件。
+
+## 12. 当前优先切片的组件 owner
+
+### 12.1 在线聊天
+
+| Slice | Owner | 输入 / 输出 | 禁止依赖 |
+| --- | --- | --- | --- |
+| `S4-VS5A` | `useMessagesController` + `ConversationList` / `MessageTimeline` / `ConnectionBanner` | `ConversationVM[]`、`MessageVM[]`、cursor、`RealtimeVM`；输出选择会话、补事件、重连命令 | 直接调用闲鱼 WebSocket、直接修改 unread 或 `MessageVM.status` |
+| `S4-VS5B` | `MessageComposer` / `AttachmentUpload` / `MessageActionMenu` | `SendMessageRequest`、`UploadImageRequest`、`RecallMessageRequest`；输出 typed callbacks | 读取 CredentialValue、修改 `handlingMode`、绕过 Idempotency/Policy |
+| `S4-VS5C` | `HandoffRiskPanel` | `conversationId`、`handlingMode`、风险标签、`expectedVersion`、MutationViewModel | 发送消息、写买家可见正文、直接 fetch handoff/release |
+
+### 12.2 Workspace
+
+| Slice | Owner | 输入 / 输出 | 禁止依赖 |
+| --- | --- | --- | --- |
+| `S4-VS6A` | `useWorkspaceController` + `SessionList` / `WorkspaceComposer` / `RunChat` | `WorkspaceSessionVM`、`RunVM`、`StepVM`、`RealtimeVM`；输出 session/run commands | 直接调用 Pi Runtime、页面自行推断 RunStatus、修改 Step 状态 |
+| `S4-VS6B` | `ConfirmationCard` / `RunActionBar` / `OutboxResult` | `ConfirmationVM`、`OutboxResultVM`、confirm/cancel/retry/recover typed commands | 跳过 Policy/Confirmation/Outbox、直接执行外部 adapter、与 Settings 共用 mutation state |
+
+### 12.3 Settings API Key
+
+| Slice | Owner | 输入 / 输出 | 禁止依赖 |
+| --- | --- | --- | --- |
+| `S4-VS7A` | `ApiKeyConfigPanel`（或 `ExternalServicesPanel` 内的独立子域）+ `useCredentialController` | `CredentialRefVM[]`、`CredentialPatchRequest`、`RotateCredentialRequest`；输出 create/edit/rotate/enable/disable/revoke commands | `SettingsPage` 总保存入口、明文落地 localStorage/query cache、Workspace/Chat 直接读取凭证值 |
+
+这些切片共享 `ControllerResult` 和 canonical error map，但必须各自拥有 queryKey、mutation key、缓存失效范围、审计引用和视觉证据目录。Desktop/Mobile 只复用 domain VM 与命令，不复制一套消息、Run 或凭证状态机。

@@ -154,6 +154,18 @@
 
 该决策只调整工作拆分和门禁，不改变已合入 `master` 的代码，也不把当前受控卡券 E2E 或商品 fixture 结果升级为生产级验收。
 
+## 下一批优先切片决策（2026-09-19）
+
+用户确认账号管理、商品管理和卡券首页已基本成型，下一阶段优先推进以下三类能力：
+
+1. **在线聊天**：按 `S4-VS5A` 实时读取与重连、`S4-VS5B` 发送/附件/撤回、`S4-VS5C` 人工接管与 AI 恢复拆分；复用现有账号上下文，不重新建设账号选择。
+2. **Workspace 工作台**：按 `S4-VS6A` AgentSession + Run 首条链路、`S4-VS6B` Confirmation/Cancel/Retry/Outbox 拆分；`Run/Step` 只能由服务端状态机迁移，页面不得直改状态或调用 Pi 原始 API。
+3. **Settings API Key 配置**：按 `S4-VS7A` 建立设置页入口和 CredentialStore 脱敏管理；不新增第二套凭证表，不让 Workspace 或 Chat 直接读取 `CredentialValue`。
+
+顺序与并行规则：`S4-VS5A → S4-VS5B → S4-VS5C`；`S4-VS6A → S4-VS6B`；`S4-VS7A` 可与前两条只读首片并行，但必须先冻结 CredentialStore 脱敏、加密、轮换和审计契约。订单交付、Dashboard、其他 Settings 分区和运营聚合继续后置。
+
+该决策不表示新切片已实现；当前状态统一为 `PLANNED`，质量/安全/运维评审保持 `BLOCKED`，直至真实 API、持久化、WebSocket/Worker/Runtime、Chrome/CDP 和视觉证据完成。
+
 ## Git 提交记录
 
 - 阶段 0：`38862e5`（`feat: 阶段0文档产出`）

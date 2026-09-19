@@ -124,6 +124,7 @@
 - 阶段 5 已落地实现使用 `003_catalog.sql`、`013_product_sync.sql`、`013_coupons.sql` 和 `014_coupon_card_metadata.sql`；其中两个 `013` 文件属于历史并行实现，本轮不直接重命名，避免破坏已合入代码和已有 PostgreSQL volume。
 - `013_coupons.sql` / `014_coupon_card_metadata.sql` 的真实执行顺序、重复执行行为、旧数据兼容和回滚必须在 `S4-ENV-RECOVERY` 中验证；文档编号并行不等于发布级迁移已通过。
 - 后续 `S4-VS2C`、`S4-VS3A/B`、`S4-VS4B/C` 新增字段或表时，必须使用新的单调编号，不得继续占用 `013`；每个迁移都要记录 apply、verify、rollback、已有 volume 处理和恢复后读写结果。
+- `S4-VS7A` 不新增 Settings/API Key 平行表，继续使用现有账号绑定的 `accounts.credential_refs` / `credential_values`；全局 provider key 不属于本片范围，必须另立 schema、权限和迁移评审。
 - 在 `CouponItem` reserve/consume/release、DeliveryRecord 唯一性或 AssetRef 对象存储 contract 未完成真实集成验证前，只能保留设计契约，不能把本表中的结构当作已完成 DDL 或生产可回滚证据。
 
 ## 6. 阶段 2 验收证据
