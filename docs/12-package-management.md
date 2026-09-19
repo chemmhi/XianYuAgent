@@ -1,0 +1,41 @@
+# 根目录包管理与开发编排规范
+
+更新时间：2026-09-19
+
+## 规范结论
+
+- 根目录 `package.json` 是唯一正式安装入口，使用 npm workspaces 管理 `apps/web` 与 `apps/api`。
+- 根目录 `package-lock.json` 是唯一正式 workspace 锁文件；`apps/api/package-lock.json` 已删除。
+- `SellerAgent/package-lock.json` 属于独立的高保真参考项目，不参与根 workspace 安装。
+- 构建工具、类型检查器、测试运行器和开发编排工具必须放在对应 workspace 或根目录的 `devDependencies`，不得作为运行时依赖发布。
+- Node/npm 版本通过 `.nvmrc`、`.node-version`、`package.json#packageManager` 与 `engines` 四处保持一致。
+- 本地首次安装和 CI/验收安装统一使用 `npm ci`；依赖变更必须在根目录执行 npm 命令并提交根锁文件。
+
+## 版本基线
+
+```text
+Node.js 24.12.0
+npm 11.6.2
+```
+
+`engine-strict=true` 会让版本不符合约束的环境在安装阶段直接失败，避免“本机可用、CI 不可复现”。
+
+## 根目录命令
+
+```powershell
+npm ci
+npm run dev
+npm run typecheck
+npm test
+npm run build
+npm run verify
+```
+
+`npm run dev` 使用成熟的 `concurrently` 同时启动 API、Worker 和正式前端；脚本只作为命令入口，不承担自定义进程编排实现。
+
+## 变更规则
+
+1. 不在 `apps/*` 内执行独立的正式安装，不新增子目录 lockfile。
+2. 修改依赖时使用 `npm install --workspace <workspace> ...` 或根目录等价命令。
+3. 提交前必须执行 `npm ci`、类型检查、测试、构建、Compose 配置检查和 `git diff --check`。
+4. 依赖升级必须同时审查运行时/开发时归类、Node/npm engine、锁文件变化和 Docker 构建入口。

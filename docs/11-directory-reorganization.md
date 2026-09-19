@@ -12,7 +12,7 @@
 ## 根目录命令
 
 ```text
-npm install
+npm ci
 npm run dev
 npm run dev:api
 npm run dev:worker

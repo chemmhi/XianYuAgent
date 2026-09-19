@@ -14,7 +14,7 @@
 首次安装：
 
 ```powershell
-npm install
+npm ci
 ```
 
 本地同时启动 API 与前端：

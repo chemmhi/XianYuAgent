@@ -2,17 +2,17 @@
   "name": "xianyu-agent",
   "private": true,
   "version": "0.1.0",
-  "packageManager": "npm@11",
+  "packageManager": "npm@11.6.2",
   "engines": {
-    "node": ">=24",
-    "npm": ">=11"
+    "node": ">=24.12.0 <25",
+    "npm": ">=11.6.0 <12"
   },
   "workspaces": [
     "apps/web",
     "apps/api"
   ],
   "scripts": {
-    "dev": "node scripts/dev.mjs",
+    "dev": "concurrently --kill-others-on-fail --names api,worker,web --prefix-colors blue,magenta,green \"npm:dev:api\" \"npm:dev:worker\" \"npm:dev:web\"",
     "dev:api": "npm --workspace apps/api run dev",
     "dev:web": "npm --workspace apps/web run dev",
     "dev:worker": "npm --workspace apps/api run dev:worker",
@@ -34,5 +34,8 @@
     "compose:down": "docker compose down",
     "compose:logs": "docker compose logs -f api worker",
     "compose:ps": "docker compose ps"
+  },
+  "devDependencies": {
+    "concurrently": "10.0.5"
   }
 }
