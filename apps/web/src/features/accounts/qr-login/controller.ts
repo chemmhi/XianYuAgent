@@ -143,6 +143,9 @@ export function useQrLoginController(options: { api: AccountsApi; accountId?: st
   useEffect(() => {
     if (!enabled) {
       clearTimer();
+      // A disabled QR view must not retain an in-flight promise from a
+      // previous method selection; switching back to QR needs a fresh start.
+      startDedupeRef.current = null;
       setModel(createInitialQrLoginModel());
       setActiveAccountId(accountId ?? '');
       requestId.current += 1;
