@@ -2,14 +2,15 @@
 
 - 文档版本：v0.1
 - 更新日期：2026-09-19
-- 状态：REOPENED / FAIL（概念页面契约已完成，组件职责与实现级数据流仍待细化复审）
+- 状态：PASS（阶段 3 只审前端组件设计；源码与高保真原型不作为本阶段验收依据）
 - 前置门禁：阶段 2 PASS（`docs/02-data-api.md`、`docs/02-database-schema.md`）
 - 适用范围：前端信息架构、响应式布局、组件边界、状态归属、API 映射和可访问性
 - 非范围：真实后端、数据库、WebSocket 服务、Pi Runtime、闲鱼适配器和前后端联调实现
+- 设计边界：SellerAgent 源码和高保真原型只作为参考，不用于证明组件已实现或用于反推组件职责。
 
 ## 1. 阶段目标与已确认决策
 
-本阶段把 SellerAgent 原型冻结为可执行的前端设计契约，确保后续阶段可以按同一页面、路由、组件、状态和接口边界实施，不再依赖页面内硬编码数据或未定义的旧接口。
+本阶段把正式页面、路由、组件、状态和接口边界冻结为可执行的前端设计契约；SellerAgent 原型只提供视觉、文案和交互参考，不决定组件拆分。
 
 已确认决策：
 
@@ -26,8 +27,8 @@
 
 | 输入 | 位置 | 阶段 3 约束 |
 | --- | --- | --- |
-| React 原型 | `SellerAgent/src/App.tsx` | 作为页面结构、文案和交互状态参考，不视为真实业务实现 |
-| 导航定义 | `SellerAgent/src/app/navigation.ts` | 8 个 `PageKey` 是唯一一级导航集合 |
+| 高保真原型参考 | SellerAgent 原型页面 | 仅作为页面结构、文案和交互状态参考，不作为组件拆分或 API 设计依据 |
+| 路由设计契约 | 本文 §3、`docs/03-component-contract.md` §5 | 8 个 `PageKey` 和 canonical path 以设计契约为准 |
 | Design token | `xianyu-admin-design-style/assets/design-tokens.json` | 颜色、字体、间距、圆角、阴影和 viewport 的单一来源 |
 | 组件参考 | `xianyu-admin-design-style/references/design-system.md`、`component-recipes.md` | 复用卡片、状态标签、表格、确认卡和移动端底部 Tab 规则 |
 
@@ -111,7 +112,7 @@ App
 | Server state | 各页面 controller / query cache | dashboard snapshot、商品列表、订单列表、会话消息 | 按 `accountId + route + query` 缓存，成功/失败/过期可重取 |
 | Page state | 页面组件 | 当前筛选、分页、选中行、活动 Tab、展开项 | 路由卸载时清理，URL 可表达的筛选需同步 query |
 | Form state | 表单/Modal | 草稿值、校验错误、dirty、提交中 | 提交成功后清空或刷新；取消不写服务端 |
-| Mutation state | controller | `idle`、`submitting`、`succeeded`、`failed`、`unknown` | 通过 Idempotency-Key 与 Outbox 关联；未知结果必须提供查询/恢复入口 |
+| Mutation state | controller | `idle`、`submitting`、`succeeded`、`failed`、`unknown`、`conflict`、`timeout` | 通过 Idempotency-Key 与 Outbox 关联；冲突、超时和未知结果必须提供刷新/查询/恢复入口 |
 | Realtime state | Messages / Workspace | WebSocket 连接、重连、事件游标 | Origin、Session、账号范围校验失败时转错误态 |
 | Feedback | app-level `ToastHost` / `ModalHost` | toast、确认卡、错误抽屉 | 可关闭；不得把敏感正文写入 toast、Trace 或 Replay |
 
@@ -171,7 +172,7 @@ App
 ### 7.2 Workspace `/workspace`
 
 - 目标：通过 AgentSession 发起查询或受控写动作，展示 Run/Step/Confirmation/Outbox 结果。
-- 组件树：`SessionList + ContextPanel + RunChat + StepTimeline + ConfirmationCard + AuditStrip + Composer`。
+- 组件树：`SessionToolbar + SessionList + SessionControls + ContextPanel + RunChat (ToolCallSummary + StepTimeline + RunResult + BusinessLink) + ConfirmationCard + OutboxResult + RunActionBar + RealtimeBanner + WorkspaceComposer`。
 - 读取 API：`GET/POST /api/v1/workspace/agent-sessions`、`GET /api/v1/workspace/agent-sessions/search`、`GET /api/v1/workspace/runs/{id}`、`GET /api/v1/workspace/runs/{id}/confirmation`、`WS /api/v1/workspace/runs/{id}/events`。
 - 写 API：`POST /api/v1/workspace/runs`、`POST /api/v1/workspace/runs/{id}/confirm`、`POST /api/v1/workspace/runs/{id}/cancel`、`POST /api/v1/workspace/runs/{id}/retry`、会话切换/归档接口。
 - 状态：输入框 idle、校验失败、提交中；Run queued/running/waiting_confirmation/executing/retrying/cancelling/succeeded/partially_succeeded/failed/cancelled/expired；Confirmation active/confirmed/rejected/cancelled/expired；WebSocket connecting/connected/reconnecting/closed；无会话显示创建 CTA；无账号范围显示先连接账号；403 禁用写入但允许查看历史。
@@ -180,54 +181,54 @@ App
 ### 7.3 Accounts `/accounts`
 
 - 目标：查看账号连接状态、切换当前账号、发起二维码登录/刷新授权、管理账号范围。
-- 组件树：`PageHeader + AccountKpiGrid + AccountTable + LoginSessionDrawer + ScopeEditor + CredentialLink`。
-- 读取 API：`GET /api/v1/accounts`、`GET /api/v1/accounts/{id}/connection`、`GET /api/v1/accounts/{id}/login-sessions/{sid}`、`GET /api/v1/accounts/{id}/scopes`。
-- 写 API：`POST /api/v1/accounts`、`PATCH /api/v1/accounts/{id}`、`POST /api/v1/accounts/{id}/refresh`、`POST /api/v1/accounts/{id}/login-sessions`、`POST /api/v1/accounts/{id}/login-sessions/{sid}/cancel`、`POST /api/v1/accounts/{id}/login-sessions/{sid}/renew`、`POST /api/v1/accounts/{id}/login-sessions/{sid}/reauthorize`、`POST /api/v1/accounts/{id}/login-sessions/{sid}/cleanup`、账号切换和 scope 修改接口。
+- 组件树：`AccountToolbar + AccountKpiGrid + AccountTable + AccountStatusActions + AddAccountDialog (LoginMethodPicker) + LoginSessionDrawer + ScopeEditor + AccountPolicyEditor + CredentialLink`。
+- 读取 API：`GET /api/v1/accounts`、`GET /api/v1/accounts/{id}`、`GET /api/v1/accounts/{id}/connection`、`GET /api/v1/accounts/{id}/login-sessions/{sid}`、`GET /api/v1/accounts/{id}/scopes`、`GET /api/v1/auth/qr-sessions/{id}`。
+- 写 API：`POST /api/v1/accounts`、`PATCH /api/v1/accounts/{id}`、`POST /api/v1/accounts/{id}/refresh`、`POST /api/v1/auth/qr-sessions`、`POST /api/v1/accounts/{id}/login-sessions`、`POST /api/v1/accounts/{id}/login-sessions/{sid}/cancel`、`POST /api/v1/accounts/{id}/login-sessions/{sid}/renew`、`POST /api/v1/accounts/{id}/login-sessions/{sid}/reauthorize`、`POST /api/v1/accounts/{id}/login-sessions/{sid}/cleanup`、账号切换和 scope 修改接口。
 - 状态：账号列表 loading/success/empty/error/403；登录会话 created/waiting/scanned/succeeded/expired/failed/cancelled；切换账号 submitting/succeeded/conflict；账号 disabled 时保留历史但禁用业务写动作；刷新授权超时提供继续轮询/取消。
 - 安全：账号切换后清理不属于新账号的页面缓存；二维码 token 只显示短期引用，不进入 URL、日志或截图。
 
 ### 7.4 Messages `/messages`
 
 - 目标：按账号查看会话、接收实时消息、人工发送文本/图片、撤回自己发送的消息。
-- 组件树：`AccountTabs + ConversationList + ConversationHeader + MessageTimeline + Composer + ConnectionBanner + MessageActionMenu`。
+- 组件树：`AccountTabs + ConversationList + ConversationHeader + BuyerContextPanel + MessageTimeline + AiSuggestionPanel + HandoffRiskPanel + AttachmentUpload + MessageComposer + MessageActionMenu + ConnectionBanner`。
 - 读取 API：`GET /api/v1/conversations`、`GET /api/v1/conversations/{id}/messages`、`WS /api/v1/conversations/{id}/events`。
-- 写 API：`POST /api/v1/conversations/{id}/messages`、`POST /api/v1/conversations/{id}/images`、`POST /api/v1/conversations/{id}/messages/{messageId}/recall`。
-- 状态：会话列表 loading/empty/error；消息首次加载/分页补历史；WebSocket connecting/connected/reconnecting/forbidden；发送 idle/submitting/sent/failed/unknown；撤回 pending/succeeded/failed；图片 uploading/processed/failed；买家发起 Prompt Injection 或索取 system_only 凭证时显示拦截提示，不把内容复制到配置或知识能力。
+- 写 API：`POST /api/v1/conversations/{id}/messages`、`POST /api/v1/conversations/{id}/images`、`POST /api/v1/conversations/{id}/messages/{messageId}/recall`、`POST /api/v1/conversations/{id}/handoff`、`POST /api/v1/conversations/{id}/release`。
+- 状态：会话列表 loading/empty/error；消息首次加载/分页补历史；WebSocket connecting/connected/reconnecting/forbidden；发送 idle/submitting/sent/failed/unknown；撤回 pending/succeeded/failed；图片 uploading/processed/failed；人工接管 handoff submitting/succeeded/conflict/failed；恢复 AI release submitting/succeeded/conflict/failed；买家发起 Prompt Injection 或索取 system_only 凭证时显示拦截提示，不把内容复制到配置或知识能力。
 - 可访问性：消息流使用 `aria-live="polite"`，但不朗读敏感正文；发送按钮在空文本、上传中或无权限时禁用；键盘支持 Enter 发送、Shift+Enter 换行。
 
 ### 7.5 Products `/products`
 
 - 目标：按账号查看/编辑商品、管理素材、同步商品、生成发布确认并执行批量发布。
-- 组件树：`CatalogToolbar + ProductTable + ProductFilterDrawer + ProductEditor + AssetPanel + PublishPreview + ConfirmationCard`。
+- 组件树：`ProductToolbar + SyncPullToolbar + ProductTable + BulkActionBar + ProductDrawer (ProductBasicForm + PricingInventoryForm + SkuVariantEditor + ReplyPromptEditor + AssetPanel + PublishPreview) + PublishConfirmation`。
 - 读取 API：`GET /api/v1/products`、`GET /api/v1/products/{id}`、`GET /api/v1/products/{id}/assets`。
-- 写 API：`POST/PATCH /api/v1/products`、`POST /api/v1/products/sync`、`POST /api/v1/products/pull`、`POST/PATCH/DELETE /api/v1/products/{id}/assets...`、`POST /api/v1/products/{id}/publish`、`POST /api/v1/products/bulk-publish`。
+- 写 API：`POST /api/v1/products`、`PATCH /api/v1/products/{id}`、`POST /api/v1/products/sync`、`POST /api/v1/products/pull`、`POST /api/v1/products/{id}/assets`、`PATCH /api/v1/products/{id}/assets/{assetId}`、`DELETE /api/v1/products/{id}/assets/{assetId}`、`POST /api/v1/products/{id}/publish`、`POST /api/v1/products/bulk-publish`。
 - 状态：列表 loading/success/empty/error/403；编辑 dirty/validation-error/submitting/saved/conflict；素材 upload/progress/failed/removed；发布 preview/confirmation/submitting/succeeded/failed/unknown；批量发布逐项显示 succeeded/failed/skipped/unknown，不将整体标记为全成功。
 - 安全：发布动作必须进入 Policy → Confirmation → Idempotency → Outbox；前端不能直接把商品 status 从 draft 改为 published。
 
 ### 7.6 Coupons `/coupons`
 
 - 目标：创建批次、导入/保存/删除卡券项、上传素材、绑定商品、作废批次和进行受控正文预览。
-- 组件树：`BatchToolbar + CouponBatchTable + BatchDrawer + ItemBulkEditor + AssetPanel + BindingPanel + ContentPreview + InventoryLockBanner`。
+- 组件树：`BatchToolbar + CouponBatchTable + BatchDrawer (BatchMetadataForm + CouponItemEditor + AssetPanel + BindingPanel + ContentPreview) + DeliveryActionBar + InventoryLockBanner`。
 - 读取 API：`GET /api/v1/coupons/batches`、`GET /api/v1/coupons/batches/{id}`、`GET /api/v1/coupons/{id}/content`（显式用途与审计前置）。
-- 写 API：`POST /api/v1/coupons/batches`、`PATCH/DELETE /api/v1/coupons/batches/{id}`、`POST /bind|unbind`、`POST /items/import|bulk-save|bulk-delete`、`POST /assets`、`POST /void`。
-- 状态：批次 loading/empty/error；库存 available/low_stock/exhausted/reserved；批量保存/删除显示逐项结果；绑定账号不匹配时阻断；正文预览默认脱敏，未满足 `buyer_deliverable` 或无有效订单时显示 forbidden；作废提交中禁用重复操作。
-- 安全：系统凭证与买家可交付卡券分离；任何正文、夸克链接、提取码展示都必须带用途、账号范围、订单条件和 auditRef。
+- 写 API：`POST /api/v1/coupons/batches`、`PATCH /api/v1/coupons/batches/{id}`、`DELETE /api/v1/coupons/batches/{id}`、`POST /api/v1/coupons/batches/{id}/bind`、`POST /api/v1/coupons/batches/{id}/unbind`、`POST /api/v1/coupons/batches/{id}/items/import`、`POST /api/v1/coupons/batches/{id}/items/bulk-save`、`POST /api/v1/coupons/batches/{id}/items/bulk-delete`、`POST /api/v1/coupons/batches/{id}/assets`、`POST /api/v1/coupons/batches/{id}/void`。
+- 状态：批次 loading/empty/error；批次库存生命周期使用 `inventoryStatus`（available/reserved/delivered/void/exhausted），批次列表另使用由 `availableCount` 与阈值派生的 `stockAlert`（normal/low_stock/exhausted）；批量保存/删除显示逐项结果；绑定账号不匹配时阻断；管理员正文预览/编辑直接由受控领域接口提供，买家可见交付在不满足 `buyer_deliverable`、订单已支付、商品与账号匹配、策略通过和审计完成时显示 forbidden；作废提交中禁用重复操作。
+- 安全：系统凭证与买家可交付卡券分离；管理员查看正文、夸克链接、提取码时保留 purpose、账号范围和 auditRef；买家交付仍必须满足全部策略条件。
 
 ### 7.7 Orders `/orders`
 
 - 目标：查询订单、查看支付/交付/售后状态、生成交付预览、执行人工发货或失败重试。
-- 组件树：`OrderFilters + OrderTable + OrderDetailDrawer + DeliveryPreview + RetryConfirmation + AuditTimeline`。
+- 组件树：`OrderSyncToolbar + OrderFilters + OrderTable + OrderDetailDrawer (OrderStatusMatrix + DeliveryModeSelector + DeliveryPreview + OrderActionBar + ConversationLink) + RetryConfirmation + AuditTimeline`。
 - 读取 API：`GET /api/v1/orders`、`GET /api/v1/orders/{orderNo}`、`POST /api/v1/orders/refresh`。
-- 写 API：`POST /api/v1/orders/{orderNo}/delivery-preview`、`/deliver`、`/cancel`、`/retry`。
+- 写 API：`POST /api/v1/orders/{orderNo}/delivery-preview`、`POST /api/v1/orders/{orderNo}/deliver`、`POST /api/v1/orders/{orderNo}/cancel`、`POST /api/v1/orders/{orderNo}/retry`。
 - 状态：列表 loading/success/empty/error/403；`paymentStatus` unpaid/paid/closed/unknown；`orderStatus` open/cancelling/cancelled/completed/closed/failed；`deliveryStatus` pending/reserving/delivered/partially_delivered/failed/cancelled；`afterSalesStatus` none/requested/refunding/refunded/rejected/closed；预览 ready/blocked；发货/重试 submitting/succeeded/failed/unknown；结果未知时只能查询外部状态或恢复 Outbox，不直接再次发货。
 - 安全：只有订单已支付、商品和账号匹配、deliveryScope 允许、库存成功锁定、Policy 通过且 Audit 完成时，才显示买家交付内容和可执行 CTA。
 
 ### 7.8 Settings `/settings`
 
-- 目标：管理 Agent、回复策略、交付策略、Policy Gateway、外部服务、Runtime、Outbox 和账号范围。
-- 组件树：`SettingsTabs + SettingsPanel + FormRows + SecretReferenceField + VersionBanner + AuditTimeline + SaveBar`。
-- 读取 API：`GET/PATCH /api/v1/settings/agent`、`/reply-policy`、`/delivery-policy`、`/policy-gateway`、`/external-services`、`/runtime`、`/outbox`、`/account-scopes`；CredentialStore 使用 `/api/v1/credentials...` 管理接口。
-- 写 API：同上各设置 PATCH；凭证 `POST /rotate|revoke|enable|disable`；设置保存必须带 config version 和 Idempotency-Key。
+- 目标：管理 Agent、回复策略、交付策略、Policy Gateway、外部服务、Runtime、Outbox 和账号范围；管理员资料、密码和会话仍由 auth feature controller 持有。
+- 组件树：`SettingsTabs + AgentPanel + AutoReplyPolicyPanel + DeliveryPolicyPanel + PolicyGatewayPanel + CredentialStorePanel + ExternalServicesPanel + RuntimePanel + OutboxPanel + AccountPermissionPanel + AdminProfilePanel + SessionManagementPanel + DirtyFormGuard`；`RuntimePanel` 与 `OutboxPanel` 分属不同 controller 和状态机，不合并为超级组件。
+- 读取 API：`GET/PATCH /api/v1/settings/agent`、`/reply-policy`、`/delivery-policy`、`/policy-gateway`、`/external-services`、`/runtime`、`/outbox`、`/account-scopes`；CredentialStore 使用 `/api/v1/credentials...` 管理接口；`AdminProfileController` 单独读取 `/api/v1/auth/profile` 与 `/api/v1/auth/sessions`。
+- 写 API：同上各设置 PATCH；凭证 `POST /api/v1/credentials/{id}/rotate`、`/revoke`、`/enable`、`/disable`；设置保存必须带 config version 和 Idempotency-Key；`AdminProfileController` 负责 profile/password，`SessionManagementController` 负责 session revoke。
 - 状态：tab loading/success/error/403；表单 clean/dirty/validation-error/submitting/saved/conflict；凭证 masked/reference-only/rotating/revoked/disabled；危险配置变更显示 before/after 与确认；保存超时进入 unknown + 查询状态，不重复写入。
 - 安全：管理员拥有绝对管理权限，但任何凭证值只在管理员受控界面显示；前端不得将明文放入 React error、toast、URL、localStorage、Trace 或 Replay。
 
@@ -260,26 +261,29 @@ App
 
 | 错误类别 | 前端行为 | 是否允许自动重试 |
 | --- | --- | --- |
-| `UNAUTHENTICATED` | 清理敏感页面状态并跳 `/login` | 否 |
+| `UNAUTHENTICATED` | 交给 `AuthGate`，清理敏感 query 并进入登录 / SessionExpired | 否 |
 | `FORBIDDEN` | 显示 403 状态，保留路径和上下文；账号范围拒绝写入 `details.reason` | 否 |
+| `NOT_FOUND` | 显示资源不存在或已失效，保留返回列表入口 | 否 |
 | `VALIDATION_FAILED` | 定位字段错误，保留用户输入 | 否 |
+| `VERSION_CONFLICT` | 刷新资源并展示服务端版本差异，不自动覆盖 | 否 |
+| `CONFLICT` | 显示业务冲突、受影响资源和替代动作 | 否 |
 | `IDEMPOTENCY_CONFLICT` | 展示原请求结果或刷新状态 | 否 |
+| `IDEMPOTENCY_IN_PROGRESS` | 显示处理中并轮询原请求状态 | 仅轮询 |
 | `EXTERNAL_TIMEOUT` / `EXTERNAL_UNKNOWN` | 显示查询外部状态 / 恢复 Outbox | 否，除非服务端明确安全 |
+| `CSRF_INVALID` | 由 `AuthGate` 刷新 CSRF 并重建会话上下文 | 否 |
 | `RATE_LIMITED` | 显示退避时间 | 仅按服务端 retry-after |
 | `SERVICE_UNAVAILABLE` | 顶部服务不可用提示，提供手动重试 | 读请求可限次重试，写请求不可盲重试 |
-| `CONFLICT` | 显示库存锁失败或业务冲突及替代动作 | 否 |
-| `FORBIDDEN` | 显示策略命中原因和管理员下一步；具体原因放入 `details.reason` | 否 |
 
 ## 10. 高保真页面映射与验证证据
 
-| 设计页面/状态 | 原型实现位置 | 目标实现边界 | 验证证据 |
+| 设计页面/状态 | 视觉参考位置 | 目标实现边界 | 设计/后续验证证据 |
 | --- | --- | --- | --- |
-| Desktop shell / nav | `App.tsx` `DesktopShell`、`Sidebar` | `/dashboard` 等 8 路由共享外壳 | 1440×900 截图/回归 |
-| Mobile shell / tabs | `App.tsx` `MobileFrame` | 390×844 独立移动组合 | 390×844 截图/回归 |
-| Workspace confirmation | `WorkspacePage`、`MobileWorkspaceView` | Confirmation + Outbox 结果只由 API 驱动 | Run/Confirmation E2E |
-| Message stream | `MessagesPage`、`MobileMessagesView` | WebSocket 事件、重连、发送失败 | WebSocket 集成/E2E |
-| Credential boundary | `SettingsPage` credentials panel | 只显示引用/元数据，明文不进入买家链路 | 安全测试与审计检查 |
-| Order delivery | `OrdersPage`、`MobileMessagesView` task card | delivery preview → policy → outbox | 订单交付 E2E |
+| Desktop shell / nav | SellerAgent 桌面原型 | `/dashboard` 等 8 路由共享外壳 | 设计契约；阶段 5/6 1440×900 回归 |
+| Mobile shell / tabs | SellerAgent 移动原型 | 390×844 独立移动组合 | 设计契约；阶段 5/6 390×844 回归 |
+| Workspace confirmation | SellerAgent Workspace 视觉参考 | Confirmation + Outbox 结果只由 API 驱动 | 设计走查；后续 Run/Confirmation E2E |
+| Message stream | SellerAgent 消息视觉参考 | WebSocket 事件、重连、发送失败 | 设计走查；后续 WebSocket 集成/E2E |
+| Credential boundary | SellerAgent 设置视觉参考 | 只显示引用/元数据，明文不进入买家链路 | 设计契约；后续安全测试与审计检查 |
+| Order delivery | SellerAgent 订单/消息视觉参考 | delivery preview → policy → outbox | 设计走查；后续订单交付 E2E |
 
 阶段 3 只冻结映射，不宣称上述真实 API、WebSocket 或截图回归已经完成。真实高保真截图、浏览器交互、端到端数据和视觉偏差记录属于阶段 5/6 验证证据。
 
@@ -299,17 +303,17 @@ App
 
 | 编号 | 风险 | 级别 | 处理阶段 |
 | --- | --- | --- | --- |
-| S3-I001 | 当前原型部分页面仍使用静态数组，尚未接入阶段 2 全量 API | P1 | 阶段 5 首个前端纵向切片 |
-| S3-I002 | 当前移动原型对 Products/Coupons/Orders 复用 Dashboard fallback，需要按本契约补齐移动页面 | P1 | 阶段 4/5 前置 |
-| S3-I003 | 原型 liveApi 仍读取 `localStorage.auth_token` | P1 | 阶段 5/6 真实鉴权集成 |
-| S3-I004 | 真实 WebSocket、CredentialStore、Outbox 和视觉回归尚未执行 | P1 | 阶段 5–7 |
-| S3-I005 | `App.tsx` 集中承载路由、全局反馈、业务动作分派和 DOM click capture，形成超级组件 | P1 | 阶段 4 组件拆分前置 |
-| S3-I006 | Settings、Workspace、Auth、ProductEditor 等组件职责过宽，缺少独立 Controller/ViewModel/StateBoundary | P1 | 阶段 4 组件契约与骨架 |
-| S3-I007 | `api/contracts.ts` 与阶段 2 canonical RunStatus、Order 四态不一致 | P1 | 阶段 4 adapter 与类型收敛 |
-| S3-I008 | Products/Coupons/Orders 移动端页面未实现，组件树与功能承载不完整 | P1 | 阶段 4/5 |
+| S3-I001 | 当前原型部分页面使用静态数组，尚未接入阶段 2 全量 API | P1 | 阶段 5 实现风险，不阻断当前设计门禁 |
+| S3-I002 | 移动端实际实现尚未完成 | P1 | 阶段 4/5 实现风险，不阻断当前设计门禁 |
+| S3-I003 | 原型 liveApi 使用 `localStorage.auth_token` | P1 | 阶段 5/6 实现风险，不阻断当前设计门禁 |
+| S3-I004 | 真实 WebSocket、CredentialStore、Outbox 和视觉回归尚未执行 | P1 | 阶段 5–7 实现/验证风险，不阻断当前设计门禁 |
+| S3-I005 | 原型源码存在超级宿主 | P1 | 阶段 4/5 实现风险，不阻断当前设计门禁 |
+| S3-I006 | 原型源码页面职责过宽 | P1 | 阶段 4/5 实现风险，不阻断当前设计门禁 |
+| S3-I007 | 原型源码 DTO 与 canonical 状态不一致 | P1 | 阶段 4/5 实现风险，不阻断当前设计门禁 |
+| S3-I008 | 原型源码移动端回退 Dashboard | P1 | 阶段 4/5 实现风险，不阻断当前设计门禁 |
 
-S3-I005 至 S3-I008 为当前阶段 3 门禁阻断项；在详细组件契约、ViewModel、API façade、移动端对等页面和独立复审完成前，不得进入阶段 4 执行门禁。
+S3-I005 至 S3-I008 属于后续实现阶段的落地风险，不作为当前阶段 3 设计门禁的验收证据；S3-I009/S3-I010 已完成跨文档复核并关闭。
 
 ## 12. 阶段 3 下一步
 
-阶段 3 门禁已重新打开。必须先完成 `docs/03-component-contract.md` §9 的 DoD，独立评审确认无超级组件、无隐式文案分派、无页面直连原始字段后，才能重新判定 PASS 并进入阶段 4。
+阶段 3 设计门禁已通过。`docs/03-component-contract.md` §9 的设计 DoD、独立评审、数据流和路由/API 契约均已完成；可进入阶段 4 迭代计划与纵向切片编排，本阶段不进行具体编码。

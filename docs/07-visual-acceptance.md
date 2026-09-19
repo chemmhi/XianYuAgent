@@ -9,7 +9,7 @@
 
 | 项目 | 当前基线 |
 | --- | --- |
-| 实现参考 | SellerAgent/ React + Vite + TypeScript 原型 |
+| 视觉参考 | SellerAgent/ React + Vite + TypeScript 原型；仅供视觉、文案和交互参考 |
 | 设计 token | xianyu-admin-design-style/assets/design-tokens.json |
 | 图标资源 | xianyu-admin-design-style/assets/icon-symbols.svg |
 | 组件参考 | xianyu-admin-design-style/references/component-recipes.md、design-system.md |
@@ -48,4 +48,4 @@ knowledge、review 不属于本轮正式一级页面，已决定直接删除原�
 | 逐状态标注 | 已补齐 8 个正式页面的状态清单 | `docs/03-frontend-design.md` §6–§7 |
 | 视觉回归截图 | 当前未执行 | 阶段 5 每个前端切片提供目标 viewport 截图或回归对比 |
 
-阶段 3 只冻结视觉与交互契约，不把原型可打开等同于真实 API、E2E 或最终视觉回归通过。截图、浏览器交互和逐项偏差记录在阶段 5/6 的纵向切片中执行。
+阶段 3 只冻结视觉与交互契约，不把原型可打开、源码结构或当前交互实现等同于组件设计通过，也不等同于真实 API、E2E 或最终视觉回归通过。截图、浏览器交互和逐项偏差记录在阶段 5/6 的纵向切片中执行。

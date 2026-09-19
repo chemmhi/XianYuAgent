@@ -61,11 +61,43 @@
 
 2026-09-19，经组件职责复核，用户裁决阶段 3 门禁未通过，原因不是页面数量不足，而是组件边界、数据流和 API 适配尚未达到可执行细节：
 
-1. 拒绝超级组件；`App.tsx` 不得继续集中路由、业务动作、全局反馈和 DOM click capture。
+1. 拒绝超级组件；目标设计不得把路由、业务动作、全局反馈和 DOM click capture 集中到单一组件，源码实现留到后续阶段。
 2. 每个页面必须明确 Container、Controller、canonical ViewModel、View、StateBoundary 和 typed commands。
 3. 组件必须明确数据来源、状态持有者、缓存失效范围、错误处理和路由/API 映射。
 4. `Settings`、`Workspace`、`Auth`、`ProductEditor` 等宽职责组件必须拆分为独立模块；移动端 Products/Coupons/Orders 不得回退 Dashboard。
-5. 阶段 3 在 `docs/03-component-contract.md` §9 DoD 完成并经独立复审前保持 `REOPENED / FAIL`，不得进入阶段 4 执行门禁。
+5. 阶段 3 在 `docs/03-component-contract.md` §9 设计 DoD 完成并经独立设计复审前保持 `REOPENED / DESIGN REVIEW`，不得进入阶段 4 执行门禁。
+
+## 阶段 3 范围澄清
+
+2026-09-19，用户进一步明确：
+
+1. 当前阶段只进行前端组件设计，不进行具体编码。
+2. 高保真原型图只作为视觉和交互参考，不作为组件拆分依据。
+3. 现有源码不作为当前组件设计的证据，也不以源码现状判定阶段 3 设计门禁。
+4. 阶段 3 门禁只审设计契约：组件职责、Container/Controller/ViewModel/View/StateBoundary、数据流、路由/API、错误码、8×2 页面矩阵和设计级反超级组件规则。
+5. 源码拆分、API façade 实现、移动端页面编码和真实联调均后置到后续实现阶段。
+
+因此，S3-R5 的源码实现审计不再作为当前阶段 3 设计门禁结论；阶段 3 当前状态为 `REOPENED / DESIGN REVIEW`，等待设计契约独立复审。
+
+## 阶段 3 契约同步结论
+
+2026-09-19，针对阶段 3 复审发现的跨文档命名漂移，采用以下唯一 canonical contract，不再保留平行路径：
+
+1. FirstRun 初始化使用 `GET /api/v1/auth/session` 返回 `bootstrapRequired`，写入使用 `POST /api/v1/auth/bootstrap`。
+2. 消息人工接管使用 `POST /api/v1/conversations/{id}/handoff`，恢复 AI 使用 `POST /api/v1/conversations/{id}/release`。
+3. 请求/响应类型统一为 `BootstrapAdminInput/Output`、`HandoffConversationInput`、`ReleaseConversationInput`、`ConversationHandlingOutput`；会话状态统一使用 `handlingMode`，乐观并发字段统一使用 `expectedVersion`。
+4. `docs/03-component-contract.md` 已补齐字段级 ViewModel、逐条 method/path catalog、queryKey/invalidation/recovery matrix，并明确 Settings route 下 profile/sessions/password 由 auth controller 唯一持有。
+
+该同步属于设计契约收敛，不改变用户已接受的产品范围、交付数据边界或“阶段 3 只设计不编码”的边界；后续独立设计复审已于 2026-09-19 通过，详见下节。
+
+## 阶段 3 独立设计复审通过
+
+2026-09-19，`feature_coverage_review` 完成最终只读复审并给出 `PASS`：
+
+1. `RunActionBar` 改为 `onRecoverOutbox(RecoverOutboxRequest)`，并与阶段 2 的 Outbox recover API 对齐；不再保留未定义的 `RecoverRunRequest`。
+2. `RuntimePanel` 与 `OutboxPanel` 已拆分为不同 owner、controller、query、mutation state 和保存入口，禁止跨域合并。
+3. 组件职责矩阵、canonical ViewModel、8×2 页面矩阵、QR/account detail API、queryKey 账号隔离、ControllerResult、canonical error map、`stockAlert`/`inventoryStatus` 均已复核通过。
+4. 阶段 3 门禁由 `REOPENED / DESIGN REVIEW` 更新为 `PASS`，允许进入阶段 4 迭代计划与纵向切片编排；阶段 3 不包含具体编码。
 
 ## 长期执行规则
 

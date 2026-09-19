@@ -1,27 +1,30 @@
 # XianyuSellerAgent 项目状态
 
 - 项目阶段：3
-- 阶段状态：REOPENED / FAIL（阶段 3 组件职责、数据流与 API 细化未完成）
-- 最近一次通过门禁：阶段 2 / 2026-09-19
-- 当前目标：完成阶段 3 详细组件契约、ViewModel、Controller、路由/API 映射与超级组件拆分门禁
+- 阶段状态：PASS（阶段 3 组件设计已通过独立复审；阶段 3 未进行具体编码）
+- 最近一次通过门禁：阶段 3 / 2026-09-19
+- 当前目标：完成阶段 3 设计交付并进入阶段 4 迭代计划与纵向切片编排
 - 已完成范围：阶段 0 范围门禁；阶段 1 架构与模块边界；阶段 2 数据模型、数据库表设计、关系基数、状态机、API envelope、幂等、鉴权、敏感交付、迁移边界
 - 未完成范围：真实后端、数据库、API、Worker、闲鱼 adapter、Pi Runtime 运行时、真实集成和端到端测试
-- 未解决风险：R-001/P1、R-002/P1、R-005/P2、R-006/P2、R-007/P2、R-008/P1、R-009/P1、R-011/P1、S3-I001/P1、S3-I002/P1、S3-I003/P1、S3-I004/P1、S3-I005/P1、S3-I006/P1、S3-I007/P1、S3-I008/P1、S3-I009/P1、S3-I010/P1；S3-I005 至 S3-I010 阻断阶段 3
-- 待复审问题：S3-R5 组件职责与实现落地 FAIL；阶段 3 门禁已重新打开；S1-I004 保持 P2 跟进项
-- 下一步：完成 `docs/03-component-contract.md` DoD，补齐组件模块边界、canonical ViewModel、Controller/API façade 和移动端页面后重新独立复审
+- 未解决风险：R-001/P1、R-002/P1、R-005/P2、R-006/P2、R-007/P2、R-008/P1、R-009/P1、R-011/P1、S3-I001/P1、S3-I002/P1、S3-I003/P1、S3-I004/P1、S3-I005/P1、S3-I006/P1、S3-I007/P1、S3-I008/P1；S3-I005 至 S3-I008 属于后续实现风险，S3-I009/S3-I010 已完成复核并关闭
+- 待复审问题：S3-R5 为超出当前范围的实现审计；S3-R6 设计范围已澄清；S1-I004 保持 P2 跟进项；阶段 3 设计门禁无待复审项
+- 下一步：进入阶段 4 迭代计划与纵向切片编排；阶段 3 仅完成组件设计契约，不代表已开始具体编码
 
 ## 当前证据
 
 - `SellerAgent/npm test`：已通过，`mock API contract flow passed`；
 - `SellerAgent/npm run build`：已通过，TypeScript 检查和 Vite production build 通过；
 - `git diff --check`：阶段 2 文档修订后重新执行；
-- `docs/02-data-api.md`：v0.3，状态 PASS，覆盖字段级 schema、PK/FK、唯一约束、关系基数、状态机、P0 API、幂等、安全和迁移；
+- `docs/02-data-api.md`：v0.4，状态 PASS，覆盖字段级 schema、PK/FK、唯一约束、关系基数、状态机、P0 API、FirstRun bootstrap、消息 handoff、幂等、安全和迁移；
 - `docs/02-database-schema.md`：v0.1，状态 PASS，覆盖 PostgreSQL 表清单、列类型、默认值、PK/FK、唯一/部分唯一索引、跨表约束、迁移顺序和回滚边界；
 - `docs/05-review-log.md`：S2-R1、S2-R2、S2-R3 均 PASS，S2-I001 至 S2-I005 已关闭；
-- `docs/03-frontend-design.md`：v0.1，阶段 3 原始契约；因组件职责复核重新打开门禁；
-- `docs/03-component-contract.md`：v0.1，补充模块树、组件职责矩阵、canonical ViewModel、路由/API、数据流、移动端对等性和 DoD；待独立复审；
-- `SellerAgent/npm test`、`SellerAgent/npm run build`、`git diff --check`：阶段 3 文档修订后重新执行并通过；
-- 以上证据只证明原型可构建和阶段 2 契约存在，不证明阶段 3 组件边界已冻结或真实业务链路已完成。
+- `docs/03-frontend-design.md`：v0.1，阶段 3 组件树、状态边界与 stockAlert/inventoryStatus 契约已同步；
+- `docs/03-component-contract.md`：v0.1，补充模块树、组件职责矩阵、canonical ViewModel、路由/API、数据流、移动端对等性和 DoD；独立设计复审 PASS；
+- `SellerAgent/npm test`、`SellerAgent/npm run build`、`git diff --check`：仅作为原型健康检查，不作为阶段 3 组件设计证据；
+- 高保真原型和现有源码：仅作为视觉与背景参考，不作为阶段 3 组件拆分依据；
+- 以上证据不证明真实业务链路已完成，阶段 3 以文档化设计契约和独立设计复审为准。
+
+- canonical 设计同步：FirstRun 使用 `POST /api/v1/auth/bootstrap`；消息人工接管使用 `POST /api/v1/conversations/{id}/handoff`，恢复 AI 使用 `POST /api/v1/conversations/{id}/release`；统一字段为 `BootstrapAdminInput/Output`、`HandoffConversationInput`、`ReleaseConversationInput`、`ConversationHandlingOutput`，状态字段为 `handlingMode`，版本字段为 `expectedVersion`。
 
 ## 长期决策摘要
 
@@ -37,7 +40,7 @@
 
 ## 阶段边界
 
-阶段 3 未通过前不得进入阶段 4 执行门禁；仍不得提前创建真实后端、数据库、API、Worker 或前后端联调实现。阶段 3 重新通过后，才允许进入阶段 4 迭代计划与纵向切片编排。
+阶段 3 设计门禁未关闭前不得进入阶段 4 执行门禁；本阶段不得创建真实后端、数据库、API、Worker 或前后端联调实现。设计门禁关闭后，才允许进入阶段 4 迭代计划与纵向切片编排。
 
 ## Git 提交记录
 

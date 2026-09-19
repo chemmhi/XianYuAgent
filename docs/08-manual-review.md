@@ -61,3 +61,16 @@
 4. 后续 P1/P2 风险继续在对应阶段关闭，不阻止阶段 1 架构设计启动。
 
 阶段 1 仍必须在其自身门禁通过前，保持不进入阶段 2 数据 / API 设计和真实业务联调。
+
+## 6. 阶段 3 人工复核（当前）
+
+当前阶段状态为 `PASS`。以下项目已完成内部一致性检查和独立设计复审，不新增用户裁决项：
+
+| 编号 | 复核事项 | 当前证据 | 需要人工确认的结论 | 影响 |
+| --- | --- | --- | --- | --- |
+| MR-015 | FirstRun bootstrap canonical 一致性检查 | 草案统一为 `POST /api/v1/auth/bootstrap`，使用 `BootstrapAdminInput/BootstrapAdminOutput`、专用幂等键和 `bootstrapRequired` | 已核对三份契约文档的路径、字段和幂等语义一致 | VERIFIED / CLOSED；不新增用户裁决 |
+| MR-016 | 消息人工接管 canonical 一致性检查 | 草案统一为 `/handoff`、`/release`，使用 `HandoffConversationInput`、`ReleaseConversationInput`、`ConversationHandlingOutput`、`handlingMode` 和 `expectedVersion` | 已核对 route catalog、状态模型、缓存失效和 WebSocket handling event 一致 | VERIFIED / CLOSED；不新增用户裁决 |
+| MR-017 | 评审与风险记录同步检查 | `docs/05-review-log.md`、`docs/06-risk-register.md`、`STATUS.md` 已同步为阶段 3 PASS、S3-I009/S3-I010 CLOSED | 已复核无旧路径、旧字段和“尚无 endpoint”表述残留 | VERIFIED / CLOSED |
+| MR-018 | 阶段 3 独立设计复审 | `docs/05-review-log.md` 的 S3-R7 已为 `PASS` | 独立复审确认 §9 DoD、8×2 页面矩阵、ControllerResult、canonical error map、stockAlert/inventoryStatus 和反超级组件规则 | PASS；阶段 3 门禁关闭，可进入阶段 4 |
+
+MR-015 至 MR-018 已完成；阶段 3 门禁关闭，可进入阶段 4。阶段 3 仍不包含具体编码。

@@ -1,10 +1,11 @@
 # XianyuSellerAgent 阶段 2 数据模型与 API 契约
 
-- 文档版本：v0.3
+- 文档版本：v0.4
 - 日期：2026-09-19
 - 状态：PASS（阶段 2 数据模型、API 契约与安全边界已冻结）
 - 前置门禁：阶段 1 PASS
 - 设计边界：本阶段只冻结数据、API、安全和迁移契约，不创建真实业务后端、数据库实现或前后端联调。
+- 本次修订：补充 FirstRun bootstrap 与消息人工接管 / 恢复 AI 的逐字段、幂等、审计和缓存失效契约，供阶段 3 组件设计消费。
 
 ## 1. 设计目标
 
@@ -136,7 +137,7 @@ DomainEvent 1 --- N AuditEvent / TraceSpan
   "data": null,
   "requestId": "req_01...",
   "traceId": "trc_01...",
-  "error": { "code": "ORDER_DELIVERY_NOT_ALLOWED", "retryable": false, "details": {} }
+  "error": { "code": "FORBIDDEN", "retryable": false, "details": { "reason": "order_delivery_not_allowed" } }
 }
 ```
 
@@ -157,24 +158,78 @@ DomainEvent 1 --- N AuditEvent / TraceSpan
 | 能力 | 方法与路径 | 权限域 | 关键约束 |
 | --- | --- | --- | --- |
 | 当前会话 | `GET /api/v1/auth/session` | `auth` | 返回管理员与账号范围，不返回凭证值 |
+| 首次初始化状态 | `GET /api/v1/auth/session` | `auth` | 未登录时返回 `bootstrapRequired`；已完成初始化时为 `false` |
 | 登录/注销 | `POST /api/v1/auth/login`、`POST /api/v1/auth/logout` | `auth` | Cookie Session；注销立即失效 |
 | 密码登录 | `POST /api/v1/auth/password-login` | `auth` | 登录成功后轮换 Session 与 CSRF token |
+| 首次管理员初始化 | `POST /api/v1/auth/bootstrap` | `auth` | 仅当系统尚无管理员时允许；专用幂等键；成功后创建管理员、Session、CSRF 和审计事件 |
 | 二维码登录 | `POST /api/v1/auth/qr-sessions`、`GET /api/v1/auth/qr-sessions/{id}` | `auth/accounts` | 状态包含 waiting/succeeded/expired/failed |
-| 账号与连接 | `GET/POST/PATCH /api/v1/accounts...`、`GET /api/v1/accounts/{id}/connection`、`POST /api/v1/accounts/{id}/refresh` | `accounts` | 账号范围过滤；连接状态由 adapter 回写 |
+| 账号与连接 | `GET /api/v1/accounts`、`GET /api/v1/accounts/{id}`、`POST /api/v1/accounts`、`PATCH /api/v1/accounts/{id}`、`GET /api/v1/accounts/{id}/connection`、`POST /api/v1/accounts/{id}/refresh` | `accounts` | 账号范围过滤；连接状态由 adapter 回写 |
 | 账号权限 | `GET/POST/PATCH/DELETE /api/v1/accounts/{id}/scopes` | `auth/accounts` | 只允许管理员修改授权范围并写审计 |
 | 账号登录态 | `POST /api/v1/accounts/{id}/login-sessions`、`GET /api/v1/accounts/{id}/login-sessions/{sid}`、`POST /{sid}/cancel` | `accounts` | 轮询受账号范围与幂等约束 |
 | CredentialStore | `GET/POST/PATCH /api/v1/credentials...`、`POST /{id}/rotate`、`POST /{id}/revoke`、`POST /{id}/enable`、`POST /{id}/disable` | `credential-store` | 管理员绝对管理权限；所有操作写 AuditEvent |
 | 仪表盘 | `GET /api/v1/dashboard/snapshot`、`GET /api/v1/dashboard/order-trend` | `dashboard` | 只读聚合，不拥有业务事实 |
 | 商品 | `GET/POST/PATCH /api/v1/products...`、`POST /api/v1/products/sync`、`POST /api/v1/products/pull`、`GET /api/v1/products/{id}/assets`、`POST /api/v1/products/{id}/assets`、`PATCH /api/v1/products/{id}/assets/{assetId}`、`DELETE /api/v1/products/{id}/assets/{assetId}`、`POST /api/v1/products/{id}/publish`、`POST /api/v1/products/bulk-publish` | `products/execution` | 支持指定账号分页拉取与全量同步；发布需要 Confirmation + Outbox；批量操作逐项返回结果 |
 | 卡券批次 | `GET/POST /api/v1/coupons/batches`、`GET/PATCH/DELETE /api/v1/coupons/batches/{id}`、`POST /api/v1/coupons/batches/{id}/bind`、`POST /api/v1/coupons/batches/{id}/unbind`、`POST /api/v1/coupons/batches/{id}/items/import`、`POST /api/v1/coupons/batches/{id}/items/bulk-save`、`POST /api/v1/coupons/batches/{id}/items/bulk-delete`、`POST /api/v1/coupons/batches/{id}/assets`、`POST /api/v1/coupons/batches/{id}/void` | `coupons` | 列表默认不返回正文；图片/素材与正文分开存储；批量保存/删除/绑定/解除绑定逐项返回结果；绑定校验商品与账号一致 |
-| 卡券正文 | `GET /api/v1/coupons/{id}/content` | `coupons/policy` | 显式用途、账号范围和 Audit 校验；默认脱敏 |
+| 卡券正文 | `GET /api/v1/coupons/{id}/content` | `coupons/policy` | 管理员可通过受控领域接口直接查看、复制和编辑；买家可见交付仍按 `deliveryScope`、订单支付、商品/账号匹配、策略和 Audit 校验 |
 | 订单查询 | `GET /api/v1/orders`、`GET /api/v1/orders/{orderNo}`、`POST /api/v1/orders/refresh` | `orders` | 支持账号、状态、商品、买家、时间过滤 |
 | 订单动作 | `POST /api/v1/orders/{orderNo}/delivery-preview`、`/deliver`、`/cancel`、`/retry` | `orders/policy/execution` | 受支付、匹配、deliveryScope、幂等和状态机约束 |
 | 会话与消息 | `GET /api/v1/conversations`、`GET /api/v1/conversations/{id}/messages`、`POST /api/v1/conversations/{id}/messages`、`POST /api/v1/conversations/{id}/images`、`POST /api/v1/conversations/{id}/messages/{messageId}/recall` | `messages` | 图片先入 storage；外部发送结果写回 Message；撤回必须幂等并记录平台结果 |
+| 消息人工接管 | `POST /api/v1/conversations/{id}/handoff`、`POST /api/v1/conversations/{id}/release` | `messages/policy` | `handoff` 切换为人工处理，`release` 恢复 AI；均校验账号范围、会话版本、幂等键和审计；不得让买家看到内部原因 |
 | 实时事件 | `WS /api/v1/conversations/{id}/events`、`WS /api/v1/workspace/runs/{id}/events` | `messages/workspace` | 校验 Session、Origin 和账号范围 |
 | AgentSession / Workspace | `GET/POST /api/v1/workspace/agent-sessions`、`GET /api/v1/workspace/agent-sessions/search`、`POST /api/v1/workspace/agent-sessions/{id}/switch`、`POST /api/v1/workspace/agent-sessions/{id}/archive`、`POST /api/v1/workspace/runs`、`GET /api/v1/workspace/runs/{id}`、`GET /api/v1/workspace/runs/{id}/confirmation`、`POST /api/v1/workspace/runs/{id}/confirm`、`POST /api/v1/workspace/runs/{id}/cancel`、`POST /api/v1/workspace/runs/{id}/retry` | `workspace/execution` | 会话归档后只读；仅暴露领域 Manifest，不暴露 Pi 原始 API |
 | Runtime / Outbox | `GET /api/v1/execution/outbox`、`GET /api/v1/execution/outbox/{id}`、`POST /api/v1/execution/outbox/{id}/retry`、`POST /api/v1/execution/outbox/{id}/recover` | `execution` | 管理员可审计和恢复 dead_letter，不可跳过状态机 |
 | 设置 | `GET/PATCH /api/v1/settings/agent`、`/reply-policy`、`/delivery-policy`、`GET/PATCH /api/v1/settings/policy-gateway`、`GET/PATCH /api/v1/settings/external-services`、`GET/PATCH /api/v1/settings/runtime`、`GET/PATCH /api/v1/settings/outbox`、`GET/PATCH /api/v1/settings/account-scopes` | `settings/policy/execution/auth` | 配置版本化、审计化、可回滚；Policy Gateway、外部服务、Runtime/Outbox 和账号权限均有独立配置面 |
+
+### 5.4 阶段 3 所需的新增细节契约
+
+#### 5.4.1 FirstRun bootstrap
+
+`GET /api/v1/auth/session` 在未登录状态也返回 `bootstrapRequired: boolean`。当且仅当系统不存在管理员记录时为 `true`；已有管理员时为 `false`，不得因为前端路由或本地缓存推断该值。
+
+```ts
+type BootstrapAdminInput = {
+  email: string;
+  password: string;
+  displayName: string;
+  idempotencyKey: string;
+};
+
+type BootstrapAdminOutput = {
+  session: SessionVM;
+  profile: AdminProfileVM;
+  auditRef: string;
+};
+```
+
+- `POST /api/v1/auth/bootstrap` 只允许在 `bootstrapRequired=true` 时调用；成功后原子创建管理员、Session、CSRF token 和 `auth.bootstrap.completed` 审计事件。
+- bootstrap 请求没有 `adminId`，幂等作用域固定为 `bootstrap + normalizedRoute + Idempotency-Key`；同指纹重放原 envelope，不重复创建管理员或 Session；不同指纹返回 `409 IDEMPOTENCY_CONFLICT`。
+- 初始化完成后再次调用返回 `409 CONFLICT`，`error.details.reason=bootstrap_already_completed`，不得覆盖现有管理员。
+- `FirstRunPage` 只消费 `bootstrapRequired`、`BootstrapAdminInput` 和 `BootstrapAdminOutput`；不得直接访问 `admins` 表或拼装 Session。
+
+#### 5.4.2 消息人工接管
+
+```ts
+type HandoffConversationInput = {
+  reason: 'buyer_risk' | 'refund' | 'complaint' | 'prompt_injection' | 'credential_request' | 'manual';
+  expectedVersion: number;
+  idempotencyKey: string;
+};
+
+type ReleaseConversationInput = {
+  expectedVersion: number;
+  idempotencyKey: string;
+};
+
+type ConversationHandlingOutput = {
+  conversation: ConversationVM;
+  handlingMode: 'human' | 'ai';
+  auditRef: string;
+};
+```
+
+- `POST /api/v1/conversations/{id}/handoff` 将 `handlingMode` 切换为 `human`，记录原因和审计引用；`POST /api/v1/conversations/{id}/release` 将其切换为 `ai`，两者均要求管理员 Session、账号 scope、`expectedVersion` 和 `Idempotency-Key`。
+- 成功后失效 `conversation:{id}`、`conversation-list:{accountId}`、`unread-count:{accountId}` 和风险待人工队列；版本冲突返回 `409 VERSION_CONFLICT`，同 key 不同指纹返回 `409 IDEMPOTENCY_CONFLICT`。
+- 人工接管原因属于运营元数据，不得写入买家可见消息、外部交付文本、Trace、Replay 或 Prompt。
 
 ## 6. 访问语义与敏感交付
 
