@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: xianyu_agent
+      POSTGRES_USER: xianyu
+      POSTGRES_PASSWORD: xianyu_dev_only
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./server/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xianyu -d xianyu_agent"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  object-storage:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: xianyu
+      MINIO_ROOT_PASSWORD: xianyu_dev_only
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - object_storage_data:/data
+
+  api:
+    build:
+      context: ./server
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      DATABASE_URL: postgres://xianyu:xianyu_dev_only@postgres:5432/xianyu_agent
+      REDIS_URL: redis://redis:6379
+      COOKIE_SECURE: "false"
+      ALLOW_IN_MEMORY: "false"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      object-storage:
+        condition: service_started
+    command: ["node", "dist/index.js"]
+
+  worker:
+    build:
+      context: ./server
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://xianyu:xianyu_dev_only@postgres:5432/xianyu_agent
+      REDIS_URL: redis://redis:6379
+      ALLOW_IN_MEMORY: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["node", "dist/worker.js"]
+
+volumes:
+  postgres_data:
+  object_storage_data:

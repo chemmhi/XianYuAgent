@@ -43,3 +43,10 @@
 - P0：必须立即停止推进，存在数据破坏、凭证泄露、不可回滚或不可复现构建；当前为 0。
 - P1：未缓解前不得进入对应阶段的实现或联调；必须有负责人和验证条件。
 - P2：可在当前阶段推进，但必须在指定阶段前关闭或转为书面接受。
+
+## 阶段 5 更新（2026-09-19）
+
+- `S4-I001`：ENV-0 已有可运行 Memory/Postgres store、API、Worker、Session/CSRF、幂等、账号 scope 与审计最小实现；状态改为“部分缓解，容器实跑待 Docker engine”。
+- `S4-I002`：保持开放；当前只完成协议边界和账号 CRUD，QR/login-session 与闲鱼 adapter 探针仍未实现。
+- `S4-I005`：首片迁移保持阶段 2 逻辑编号，新增 `server/migrations/README.md` 说明未实现的 002-005 后续域；状态改为“部分缓解”。
+- 新增 `S5-I001`：Docker Desktop Linux engine 未启动，无法完成 Compose/PostgreSQL/Redis/Testcontainers 验收；不影响内存 smoke，但阻断容器级门禁。

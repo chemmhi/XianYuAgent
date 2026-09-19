@@ -2,8 +2,8 @@ import { Badge } from './Badge';
 import type { AccountConnectionStatus, AccountCredentialState, AccountStatus } from '../types';
 
 export function AccountStatusBadge({ status }: { status: AccountStatus }) {
-  const labels: Record<AccountStatus, string> = { active: '已启用', disabled: '已停用', pending: '待连接', error: '异常' };
-  const tones: Record<AccountStatus, 'ok' | 'gray' | 'warn' | 'danger'> = { active: 'ok', disabled: 'gray', pending: 'warn', error: 'danger' };
+  const labels: Record<AccountStatus, string> = { pending: '待连接', connected: '已连接', degraded: '降级', disconnected: '已断开', expired: '已过期', disabled: '已停用' };
+  const tones: Record<AccountStatus, 'ok' | 'gray' | 'warn' | 'danger'> = { pending: 'warn', connected: 'ok', degraded: 'warn', disconnected: 'gray', expired: 'danger', disabled: 'gray' };
   return <Badge tone={tones[status]}>{labels[status]}</Badge>;
 }
 

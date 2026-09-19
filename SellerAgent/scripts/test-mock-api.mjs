@@ -16,8 +16,8 @@ const canonicalAccountsApi = createAccountsApi({
     return { items: [], total: 0, page: 2, pageSize: 10, totalPages: 1 };
   },
 });
-await canonicalAccountsApi.list({ search: 'A', status: 'active', page: 2, pageSize: 10 });
-assert.equal(requestedPaths[0], '/api/v1/accounts?search=A&status=active&page=2&pageSize=10');
+await canonicalAccountsApi.list({ search: 'A', status: 'connected', page: 2, pageSize: 10 });
+assert.equal(requestedPaths[0], '/api/v1/accounts?search=A&status=connected&page=2&pageSize=10');
 
 const snapshot = await api.dashboard.getSnapshot();
 assert.equal(snapshot.pendingManualCount, 3);

@@ -22,7 +22,7 @@ interface CanonicalAccountResponse {
   sellerRef?: string;
   displayName: string;
   remark?: string;
-  status?: AccountStatus;
+  status?: AccountStatus | 'active' | 'error';
   connection?: {
     status: AccountConnectionStatus;
     lastConnectedAt?: string;
@@ -45,14 +45,38 @@ interface CanonicalAccountsPayload {
   totalPages?: number;
 }
 
+interface ApiEnvelope<T> {
+  success: boolean;
+  data: T | null;
+  error?: { code?: string; details?: unknown };
+  message?: string | null;
+}
+
+function unwrapEnvelope<T>(payload: T | ApiEnvelope<T>): T {
+  if (payload && typeof payload === 'object' && 'success' in payload && 'data' in payload) {
+    const envelope = payload as ApiEnvelope<T>;
+    if (!envelope.success || envelope.data === null) {
+      const message = envelope.message ?? envelope.error?.code ?? '账号请求失败';
+      throw new Error(message);
+    }
+    return envelope.data;
+  }
+  return payload as T;
+}
+
 function toAccountVM(account: CanonicalAccountResponse): AccountVM {
+  const normalizedStatus: AccountStatus = account.status === 'active'
+    ? 'connected'
+    : account.status === 'error'
+      ? 'degraded'
+      : account.status ?? (account.enabled === false ? 'disabled' : 'pending');
   return {
     id: account.id,
     platform: 'xianyu',
     sellerRef: account.sellerRef ?? account.id,
     displayName: account.displayName,
     remark: account.remark,
-    status: account.status ?? (account.enabled === false ? 'disabled' : 'active'),
+    status: normalizedStatus,
     connection: {
       status: account.connection?.status ?? 'unknown',
       lastConnectedAt: account.connection?.lastConnectedAt,
@@ -96,8 +120,8 @@ function queryString(filters: AccountListFilters = {}): string {
 export function createAccountsApi(transport: AccountsApiTransport): AccountsApi {
   return {
     async list(filters) {
-      const payload = await transport.get<CanonicalAccountsPayload>(`/api/v1/accounts${queryString(filters)}`);
-      return toCanonicalPage(payload);
+      const rawPayload = await transport.get<CanonicalAccountsPayload | ApiEnvelope<CanonicalAccountsPayload>>(`/api/v1/accounts${queryString(filters)}`);
+      return toCanonicalPage(unwrapEnvelope(rawPayload));
     },
   };
 }
@@ -117,7 +141,7 @@ function fromLegacySummary(account: AccountSummary): AccountVM {
     sellerRef: account.id,
     displayName: account.displayName,
     remark: account.remark,
-    status: account.enabled ? 'active' : 'disabled',
+    status: account.enabled ? 'connected' : 'disabled',
     connection: { status: connectionStatus },
     enabled: account.enabled,
     aiEnabled: account.aiEnabled,

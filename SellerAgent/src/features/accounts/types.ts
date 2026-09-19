@@ -1,4 +1,4 @@
-export type AccountStatus = 'active' | 'disabled' | 'pending' | 'error';
+export type AccountStatus = 'pending' | 'connected' | 'degraded' | 'disconnected' | 'expired' | 'disabled';
 
 export type AccountConnectionStatus = 'online' | 'offline' | 'connecting' | 'expired' | 'unknown';
 

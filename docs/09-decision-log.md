@@ -117,6 +117,15 @@
 - 已确认的决策不重复询问；只有出现越权、泄密、不可回滚、库存重复扣减或核心链路不可用等新高风险证据时，才重新发起人工裁决。
 - 每个阶段完成后必须：更新 `STATUS.md`、评审记录、风险登记和本日志；运行适用验证命令；使用中文 Conventional Commit 提交；将 commit hash 写回 `STATUS.md` 和本日志。
 
+## 阶段 5 启动与 ENV-0 执行记录
+
+2026-09-19，按用户确认的“主体功能优先、继续执行、每个阶段提交并回写长期记忆”规则，开始阶段 5：
+
+1. 先实现 ENV-0 最小真实运行骨架：`server/` Node API、独立 Worker、统一 envelope、HttpOnly Session + CSRF 双提交、幂等记录、账号范围、最小审计和 Memory/Postgres store。
+2. 保留阶段 2 逻辑迁移编号，仅落地账号首片与 execution/observability foundation；未实现的 Credential/Catalog/Coupon/Order 迁移继续后置，不创建空表伪实现。
+3. S4-VS1 前端首片只接账号只读列表，使用独立 `features/accounts` 领域模块和 canonical API adapter；高保真原型只作为视觉基线，不作为组件拆分依据。
+4. 真实跨层内存验证已经通过；Compose 文件解析通过，但 Docker Desktop Linux engine 未启动，容器级验证必须在环境恢复后补跑。
+
 ## Git 提交记录
 
 - 阶段 0：`38862e5`（`feat: 阶段0文档产出`）

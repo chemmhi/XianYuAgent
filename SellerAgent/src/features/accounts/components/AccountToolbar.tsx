@@ -23,10 +23,12 @@ export function AccountToolbar({ filters, phase, total, onSearchChange, onStatus
         </label>
         <select aria-label="账号状态筛选" value={filters.status ?? 'all'} onChange={(event) => onStatusChange(event.target.value as AccountListFilters['status'])}>
           <option value="all">全部状态</option>
-          <option value="active">已启用</option>
+          <option value="connected">已连接</option>
+          <option value="degraded">降级</option>
+          <option value="disconnected">已断开</option>
+          <option value="expired">已过期</option>
           <option value="disabled">已停用</option>
           <option value="pending">待连接</option>
-          <option value="error">异常</option>
         </select>
         <button className="btn ghost" type="button" onClick={onRefresh} disabled={phase === 'loading'}>
           {phase === 'loading' ? '刷新中…' : '刷新'}

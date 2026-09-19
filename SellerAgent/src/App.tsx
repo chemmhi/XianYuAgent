@@ -1,9 +1,10 @@
 import { type MouseEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
 import { api, apiMode } from './api';
+import { createHttpClient } from './api/http';
 import type { DashboardSnapshot } from './api/contracts';
 import { navItems, type PageKey } from './app/navigation';
 import type { Tone } from './shared/ui/types';
-import { AccountsPage as AccountsDomainPage } from './features/accounts';
+import { AccountsPage as AccountsDomainPage, createAccountsApi } from './features/accounts';
 
 type ViewMode = 'desktop' | 'mobile' | 'auth';
 
@@ -194,7 +195,27 @@ function ToastHost({ items }: { items: Array<{ id: number; text: string; tone: T
   return <div className="toast-stack" aria-live="polite">{items.map(item => <div className={'toast toast-' + item.tone} key={item.id}>{item.text}</div>)}</div>;
 }
 
-function DesktopShell({ page, setPage, collapsed, setCollapsed }: { page: PageKey; setPage: (p: PageKey) => void; collapsed: boolean; setCollapsed: (v: boolean) => void }) { const Page = useMemo(() => ({ dashboard: DashboardPage, workspace: WorkspacePage, accounts: AccountsDomainPage, messages: MessagesPage, products: ProductsPage, coupons: CouponsPage, orders: OrdersPage, settings: SettingsPage }[page]), [page]); return <div className={'desktop-shell ' + (collapsed ? 'sidebar-collapsed' : '')}><Sidebar page={page} onPage={setPage} collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)}/><div className="desktop-body"><main><Page/></main></div></div>; }
+function DesktopShell({ page, setPage, collapsed, setCollapsed }: { page: PageKey; setPage: (p: PageKey) => void; collapsed: boolean; setCollapsed: (v: boolean) => void }) {
+  const accountsApi = useMemo(() => {
+    if (apiMode !== 'live') return undefined;
+    const transport = createHttpClient({
+      baseUrl: import.meta.env.VITE_API_BASE_URL ?? '',
+      getToken: () => window.localStorage.getItem('auth_token'),
+    });
+    return createAccountsApi({ get: transport.get });
+  }, []);
+  const Page = useMemo(() => ({
+    dashboard: DashboardPage,
+    workspace: WorkspacePage,
+    accounts: () => <AccountsDomainPage api={accountsApi} />,
+    messages: MessagesPage,
+    products: ProductsPage,
+    coupons: CouponsPage,
+    orders: OrdersPage,
+    settings: SettingsPage,
+  }[page]), [accountsApi, page]);
+  return <div className={'desktop-shell ' + (collapsed ? 'sidebar-collapsed' : '')}><Sidebar page={page} onPage={setPage} collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)}/><div className="desktop-body"><main><Page/></main></div></div>;
+}
 function MobileHeroCard() {
   return <section className="card mobile-status-summary">
     <div className="mobile-section-head"><div><h2>Agent 在线 · 闲鱼账号 A</h2><p>180 秒托管策略 · 立即发货已启用 · 心跳 14:24:08</p></div><Badge tone="ok">正常</Badge></div>
