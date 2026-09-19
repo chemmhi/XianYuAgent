@@ -1,4 +1,4 @@
-import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, SessionRecord, Store } from './domain.js';
+import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductListQuery, ProductListResult, ProductRecord, ProductStatus, SessionRecord, Store } from './domain.js';
 import { createId } from './security.js';
 
 export class MemoryStore implements Store {
@@ -8,6 +8,7 @@ export class MemoryStore implements Store {
   private readonly accounts = new Map<string, AccountRecord>();
   private readonly loginSessions = new Map<string, LoginSessionRecord>();
   private readonly credentials = new Map<string, CredentialRecord>();
+  private readonly products = new Map<string, ProductRecord>();
   private readonly scopes = new Map<string, AccountScopeRecord>();
   private readonly idempotency = new Map<string, IdempotencyRecord>();
   readonly audits: AuditEventRecord[] = [];
@@ -55,6 +56,43 @@ export class MemoryStore implements Store {
     return account;
   }
   async updateAccount(adminId: string, accountId: string, patch: { sellerRef?: string; displayName?: string; remark?: string; avatarUrl?: string; platformUserId?: string; status?: AccountRecord['status']; lastConnectedAt?: string }): Promise<AccountRecord | undefined> { const account = await this.getAccount(adminId, accountId); if (!account) return undefined; if (patch.sellerRef !== undefined) account.sellerRef = patch.sellerRef; if (patch.displayName !== undefined) account.displayName = patch.displayName; if (patch.remark !== undefined) account.remark = patch.remark; if (patch.avatarUrl !== undefined) account.avatarUrl = patch.avatarUrl; if (patch.platformUserId !== undefined) account.platformUserId = patch.platformUserId; if (patch.status !== undefined) account.status = patch.status; if (patch.lastConnectedAt !== undefined) account.lastConnectedAt = patch.lastConnectedAt; account.updatedAt = new Date().toISOString(); return account; }
+  async listProducts(adminId: string, query: ProductListQuery): Promise<ProductListResult> {
+    const scopedAccountIds = new Set((await this.listScopes(adminId)).map((scope) => scope.accountId));
+    const normalizedKeyword = query.keyword?.trim().toLowerCase();
+    const filtered = [...this.products.values()].filter((product) => {
+      if (!scopedAccountIds.has(product.accountId)) return false;
+      if (query.accountId && product.accountId !== query.accountId) return false;
+      if (query.status && product.status !== query.status) return false;
+      if (normalizedKeyword && ![product.title, product.externalProductRef ?? '', product.description ?? ''].some((value) => value.toLowerCase().includes(normalizedKeyword))) return false;
+      return true;
+    });
+    const sortBy = query.sortBy ?? 'updatedAt';
+    const sortOrder = query.sortOrder === 'asc' ? 1 : -1;
+    filtered.sort((left, right) => {
+      const leftValue = sortBy === 'title' ? left.title.toLowerCase() : sortBy === 'priceMinor' ? (left.priceMinor ?? 0) : sortBy === 'createdAt' ? left.createdAt : left.updatedAt;
+      const rightValue = sortBy === 'title' ? right.title.toLowerCase() : sortBy === 'priceMinor' ? (right.priceMinor ?? 0) : sortBy === 'createdAt' ? right.createdAt : right.updatedAt;
+      return (leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0) * sortOrder;
+    });
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    const start = (page - 1) * pageSize;
+    const items = filtered.slice(start, start + pageSize).map((product) => this.productSummary(product));
+    return { items, page, pageSize, total: filtered.length, totalPages: Math.max(1, Math.ceil(filtered.length / pageSize)) };
+  }
+  async getProduct(adminId: string, productId: string): Promise<ProductRecord | undefined> {
+    const product = this.products.get(productId);
+    if (!product || !(await this.hasAccountScope(adminId, product.accountId))) return undefined;
+    return this.productDetail(product);
+  }
+  async createProduct(input: { adminId: string; accountId: string; externalProductRef?: string; title: string; description?: string; categoryCode?: string; attributes?: Record<string, unknown>; defaultReplyTemplate?: string; aiPrompt?: string; priceMinor?: number; status?: ProductStatus }): Promise<ProductRecord> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const duplicate = [...this.products.values()].find((product) => product.accountId === input.accountId && input.externalProductRef && product.externalProductRef === input.externalProductRef);
+    if (duplicate) throw new Error('PRODUCT_DUPLICATE');
+    const now = new Date().toISOString();
+    const product: ProductRecord = { id: createId(), accountId: input.accountId, externalProductRef: input.externalProductRef, title: input.title, description: input.description, categoryCode: input.categoryCode, attributes: input.attributes ?? {}, defaultReplyTemplate: input.defaultReplyTemplate, aiPrompt: input.aiPrompt, configVersion: 1, priceMinor: input.priceMinor, status: input.status ?? 'draft', createdAt: now, updatedAt: now, skuCount: 0, assetCount: 0, skus: [], assets: [] };
+    this.products.set(product.id, product);
+    return product;
+  }
   async createLoginSession(input: { adminId: string; accountId?: string; provisionalAccountRef?: string; loginMethod: string; expiresAt: string; qrTokenRef?: string }): Promise<LoginSessionRecord> {
     if (input.accountId && !(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const now = new Date().toISOString();
@@ -136,4 +174,12 @@ export class MemoryStore implements Store {
   async abortIdempotency(scope: string, key: string): Promise<void> { this.idempotency.delete(`${scope}:${key}`); }
   async completeIdempotency(input: { scope: string; key: string; status: IdempotencyRecord['status']; responseEnvelope: unknown; statusCode: number; traceId: string }): Promise<void> { const row = this.idempotency.get(`${input.scope}:${input.key}`); if (row) Object.assign(row, input); }
   async recordAudit(event: AuditEventRecord): Promise<void> { this.audits.push(event); }
+
+  private productSummary(product: ProductRecord): ProductRecord {
+    return { ...product, attributes: { ...product.attributes }, skuCount: product.skus?.filter((sku) => sku.status !== 'archived').length ?? product.skuCount ?? 0, assetCount: product.assets?.filter((asset) => asset.status !== 'archived').length ?? product.assetCount ?? 0, skus: undefined, assets: undefined };
+  }
+
+  private productDetail(product: ProductRecord): ProductRecord {
+    return { ...product, attributes: { ...product.attributes }, skus: product.skus?.map((sku) => ({ ...sku })), assets: product.assets?.map((asset) => ({ ...asset })), skuCount: product.skus?.filter((sku) => sku.status !== 'archived').length ?? product.skuCount ?? 0, assetCount: product.assets?.filter((asset) => asset.status !== 'archived').length ?? product.assetCount ?? 0 };
+  }
 }

@@ -1,5 +1,5 @@
 import type { AppConfig } from './config.js';
-import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, SessionRecord, Store } from './domain.js';
+import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductListQuery, ProductListResult, ProductRecord, SessionRecord, Store } from './domain.js';
 import { createId, createToken, digestJson, hashPassword, isSessionFresh, sha256, verifyPassword } from './security.js';
 
 export interface AuthContext {
@@ -76,6 +76,31 @@ export class AccountService {
   async grantScope(input: { adminId: string; accountId: string; scope: string; requestId: string; traceId: string }): Promise<AccountScopeRecord> { await this.get(input.adminId, input.accountId); const row = await this.store.grantScope(input); await this.audit({ actorId: input.adminId, action: 'account.scope.granted', targetRef: row.id, requestId: input.requestId, traceId: input.traceId, payload: { scope: input.scope }, accountId: input.accountId }); return row; }
   async revokeScope(input: { adminId: string; accountId: string; scope: string; requestId: string; traceId: string }): Promise<void> { await this.get(input.adminId, input.accountId); await this.store.revokeScope(input.adminId, input.accountId, input.scope); await this.audit({ actorId: input.adminId, action: 'account.scope.revoked', requestId: input.requestId, traceId: input.traceId, payload: { scope: input.scope }, accountId: input.accountId }); }
 }
+
+export class ProductService {
+  constructor(private readonly store: Store) {}
+
+  async list(adminId: string, query: ProductListQuery): Promise<ProductListResult> {
+    if (query.accountId && (!isUuid(query.accountId) || !(await this.store.hasAccountScope(adminId, query.accountId)))) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    if (!Number.isInteger(page) || page < 1) throw new ServiceError(422, 'VALIDATION_FAILED', 'page must be a positive integer');
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new ServiceError(422, 'VALIDATION_FAILED', 'pageSize must be between 1 and 100');
+    if (query.status && !['draft', 'ready', 'publishing', 'published', 'failed', 'archived'].includes(query.status)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid product status');
+    if (query.sortBy && !['createdAt', 'updatedAt', 'title', 'priceMinor'].includes(query.sortBy)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid product sort field');
+    if (query.sortOrder && !['asc', 'desc'].includes(query.sortOrder)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid product sort order');
+    return this.store.listProducts(adminId, { ...query, page, pageSize });
+  }
+
+  async get(adminId: string, productId: string): Promise<ProductRecord> {
+    if (!isUuid(productId)) throw new ServiceError(404, 'NOT_FOUND', 'product not found');
+    const product = await this.store.getProduct(adminId, productId);
+    if (!product) throw new ServiceError(404, 'NOT_FOUND', 'product not found');
+    return product;
+  }
+}
+
+function isUuid(value: string): boolean { return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value); }
 
 export class CredentialService {
   constructor(private readonly store: Store, private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => Promise<string>) {}

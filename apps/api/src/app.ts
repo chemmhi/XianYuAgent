@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { loadConfig, type AppConfig } from './config.js';
 import type { AuthContext } from './services.js';
-import { AccountService, AuthService, CredentialService, ServiceError, idempotent } from './services.js';
+import { AccountService, AuthService, CredentialService, ProductService, ServiceError, idempotent } from './services.js';
 import { createIds, failure, fingerprint, parseCookies, readJson, setCookie, success, writeJson, type RequestContext } from './http.js';
 import { createStore } from './store.js';
 import type { Store } from './domain.js';
@@ -14,6 +14,7 @@ export interface AppRuntime {
   store: Store;
   auth: AuthService;
   accounts: AccountService;
+  products: ProductService;
   credentials: CredentialService;
   qrLogin: XianyuQrLoginAdapter;
   xianyu: XianyuMtopClient;
@@ -30,6 +31,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   });
+  const products = new ProductService(store);
   const credentials = new CredentialService(store, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
@@ -80,7 +82,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
   });
 
   const runtime: AppRuntime = {
-    config, store, auth, accounts, credentials, qrLogin, xianyu,
+    config, store, auth, accounts, products, credentials, qrLogin, xianyu,
     server: createServer((request, response) => { void handleRequest(runtime, request, response); }),
     async listen() { await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve)); },
     async close() { await new Promise<void>((resolve, reject) => runtime.server.close((error) => error ? reject(error) : resolve())); const close = (store as Store & { close?: () => Promise<void> }).close; if (close) await close.call(store); },
@@ -107,7 +109,7 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
 }
 
 async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: ServerResponse): Promise<{ statusCode: number; body: unknown } | undefined> {
-  const { auth, accounts, credentials, store, config } = runtime;
+  const { auth, accounts, products, credentials, store, config } = runtime;
   if (ctx.path === '/healthz' && ctx.method === 'GET') {
     const health = await store.health();
     const body = success(ctx, { status: health.reachable ? 'ok' : 'degraded', storage: health.kind, services: { api: 'ok', database: health.reachable ? 'ok' : 'unavailable', redis: config.redisUrl ? 'configured' : 'not_configured' } });
@@ -338,6 +340,16 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     if (accountMatch[2] && ctx.method === 'DELETE') return mutation(runtime, ctx, authContext, accountId, async () => { await accounts.revokeScope({ adminId: authContext.admin.id, accountId, scope: String(ctx.body.scope ?? 'manage'), requestId: ctx.requestId, traceId: ctx.traceId }); return success(ctx, { revoked: true }); });
   }
 
+  if (ctx.path === '/api/v1/products' && ctx.method === 'GET') {
+    const result = await products.list(authContext.admin.id, parseProductListQuery(ctx.query));
+    return { statusCode: 200, body: success(ctx, result).body };
+  }
+  const productMatch = ctx.path.match(/^\/api\/v1\/products\/([^/]+)$/);
+  if (productMatch && ctx.method === 'GET') {
+    const product = await products.get(authContext.admin.id, decodeURIComponent(productMatch[1]));
+    return { statusCode: 200, body: success(ctx, product).body };
+  }
+
   return { statusCode: 404, body: failure(ctx, 404, 'NOT_FOUND', 'route not found').body };
 }
 
@@ -379,6 +391,20 @@ function optionalString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const normalized = value.trim();
   return normalized ? normalized : undefined;
+}
+
+function parseProductListQuery(query: Record<string, string>): import('./domain.js').ProductListQuery {
+  const page = query.page === undefined ? undefined : Number(query.page);
+  const pageSize = query.pageSize === undefined ? undefined : Number(query.pageSize);
+  return {
+    keyword: optionalString(query.keyword),
+    accountId: optionalString(query.accountId),
+    status: optionalString(query.status) as import('./domain.js').ProductListQuery['status'],
+    sortBy: optionalString(query.sortBy) as import('./domain.js').ProductListQuery['sortBy'],
+    sortOrder: optionalString(query.sortOrder) as import('./domain.js').ProductListQuery['sortOrder'],
+    page: page === undefined || Number.isNaN(page) ? page : Math.trunc(page),
+    pageSize: pageSize === undefined || Number.isNaN(pageSize) ? pageSize : Math.trunc(pageSize),
+  };
 }
 
 function readCookieValue(cookieHeader: string, name: string): string | undefined {

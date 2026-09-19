@@ -3,6 +3,66 @@ export type AccountStatus = 'pending' | 'connected' | 'degraded' | 'disconnected
 export type ScopeStatus = 'active' | 'revoked' | 'expired';
 export type LoginSessionStatus = 'created' | 'waiting' | 'scanned' | 'succeeded' | 'expired' | 'failed' | 'cancelled' | 'verification_required';
 export type CredentialStatus = 'active' | 'expired' | 'revoked';
+export type ProductStatus = 'draft' | 'ready' | 'publishing' | 'published' | 'failed' | 'archived';
+export type ProductSkuStatus = 'active' | 'archived';
+export type ProductAssetStatus = 'active' | 'archived' | 'failed';
+
+export interface ProductSkuRecord {
+  id: string;
+  productId: string;
+  skuCode: string;
+  externalSkuRef?: string;
+  priceMinor: number;
+  status: ProductSkuStatus;
+}
+
+export interface ProductAssetRecord {
+  id: string;
+  productId: string;
+  storageKey: string;
+  mimeType: string;
+  checksum?: string;
+  status: ProductAssetStatus;
+}
+
+export interface ProductRecord {
+  id: string;
+  accountId: string;
+  externalProductRef?: string;
+  title: string;
+  description?: string;
+  categoryCode?: string;
+  attributes: Record<string, unknown>;
+  defaultReplyTemplate?: string;
+  aiPrompt?: string;
+  configVersion: number;
+  priceMinor?: number;
+  status: ProductStatus;
+  createdAt: string;
+  updatedAt: string;
+  skuCount?: number;
+  assetCount?: number;
+  skus?: ProductSkuRecord[];
+  assets?: ProductAssetRecord[];
+}
+
+export interface ProductListQuery {
+  keyword?: string;
+  accountId?: string;
+  status?: ProductStatus;
+  sortBy?: 'createdAt' | 'updatedAt' | 'title' | 'priceMinor';
+  sortOrder?: 'asc' | 'desc';
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ProductListResult {
+  items: ProductRecord[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
 
 export interface AdminRecord {
   id: string;
@@ -137,4 +197,19 @@ export interface Store {
   abortIdempotency(scope: string, key: string): Promise<void>;
   completeIdempotency(input: { scope: string; key: string; status: IdempotencyRecord['status']; responseEnvelope: unknown; statusCode: number; traceId: string }): Promise<void>;
   recordAudit(event: AuditEventRecord): Promise<void>;
+  listProducts(adminId: string, query: ProductListQuery): Promise<ProductListResult>;
+  getProduct(adminId: string, productId: string): Promise<ProductRecord | undefined>;
+  createProduct(input: {
+    adminId: string;
+    accountId: string;
+    externalProductRef?: string;
+    title: string;
+    description?: string;
+    categoryCode?: string;
+    attributes?: Record<string, unknown>;
+    defaultReplyTemplate?: string;
+    aiPrompt?: string;
+    priceMinor?: number;
+    status?: ProductStatus;
+  }): Promise<ProductRecord>;
 }

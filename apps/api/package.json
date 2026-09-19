@@ -9,8 +9,9 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "worker": "node dist/worker.js",
+    "test:postgres": "npm run build && node scripts/products-postgres-smoke.mjs",
     "smoke": "npm run build && node scripts/smoke.mjs",
-    "test": "npm run build && node scripts/smoke.mjs && node scripts/onboarding-smoke.mjs"
+    "test": "npm run build && node scripts/smoke.mjs && node scripts/onboarding-smoke.mjs && node scripts/products-smoke.mjs"
   },
   "dependencies": {
     "ioredis": "^5.7.0",
