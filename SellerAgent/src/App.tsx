@@ -3,6 +3,7 @@ import { api, apiMode } from './api';
 import type { DashboardSnapshot } from './api/contracts';
 import { navItems, type PageKey } from './app/navigation';
 import type { Tone } from './shared/ui/types';
+import { AccountsPage as AccountsDomainPage } from './features/accounts';
 
 type ViewMode = 'desktop' | 'mobile' | 'auth';
 
@@ -193,7 +194,7 @@ function ToastHost({ items }: { items: Array<{ id: number; text: string; tone: T
   return <div className="toast-stack" aria-live="polite">{items.map(item => <div className={'toast toast-' + item.tone} key={item.id}>{item.text}</div>)}</div>;
 }
 
-function DesktopShell({ page, setPage, collapsed, setCollapsed }: { page: PageKey; setPage: (p: PageKey) => void; collapsed: boolean; setCollapsed: (v: boolean) => void }) { const Page = useMemo(() => ({ dashboard: DashboardPage, workspace: WorkspacePage, accounts: AccountsPage, messages: MessagesPage, products: ProductsPage, coupons: CouponsPage, orders: OrdersPage, settings: SettingsPage }[page]), [page]); return <div className={'desktop-shell ' + (collapsed ? 'sidebar-collapsed' : '')}><Sidebar page={page} onPage={setPage} collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)}/><div className="desktop-body"><main><Page/></main></div></div>; }
+function DesktopShell({ page, setPage, collapsed, setCollapsed }: { page: PageKey; setPage: (p: PageKey) => void; collapsed: boolean; setCollapsed: (v: boolean) => void }) { const Page = useMemo(() => ({ dashboard: DashboardPage, workspace: WorkspacePage, accounts: AccountsDomainPage, messages: MessagesPage, products: ProductsPage, coupons: CouponsPage, orders: OrdersPage, settings: SettingsPage }[page]), [page]); return <div className={'desktop-shell ' + (collapsed ? 'sidebar-collapsed' : '')}><Sidebar page={page} onPage={setPage} collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)}/><div className="desktop-body"><main><Page/></main></div></div>; }
 function MobileHeroCard() {
   return <section className="card mobile-status-summary">
     <div className="mobile-section-head"><div><h2>Agent 在线 · 闲鱼账号 A</h2><p>180 秒托管策略 · 立即发货已启用 · 心跳 14:24:08</p></div><Badge tone="ok">正常</Badge></div>
@@ -398,7 +399,7 @@ export default function App() {
   const handlePrototypeClick = (event: MouseEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
     const button = target.closest('button');
-    if (!button || button.closest('.segmented') || button.closest('.side-nav') || button.closest('.settings-tabs') || button.closest('.mobile-settings-nav') || button.closest('.mobile-settings-list') || button.closest('.mobile-tabs') || button.closest('.modal-card') || button.classList.contains('collapse-button')) return;
+    if (!button || button.closest('[data-accounts-domain]') || button.closest('.segmented') || button.closest('.side-nav') || button.closest('.settings-tabs') || button.closest('.mobile-settings-nav') || button.closest('.mobile-settings-list') || button.closest('.mobile-tabs') || button.closest('.modal-card') || button.classList.contains('collapse-button')) return;
     const label = (button.textContent || button.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
     const aria = button.getAttribute('aria-label') || '';
     if (aria.includes('移除')) {
