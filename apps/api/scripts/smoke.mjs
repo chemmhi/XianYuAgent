@@ -35,6 +35,7 @@ try {
   await waitForServer();
   const health = await request('/healthz');
   assert.equal(health.body.success, true);
+  assert.equal(health.body.data.storage, 'memory');
 
   const initial = await request('/api/v1/auth/session');
   assert.equal(initial.body.data.bootstrapRequired, true);

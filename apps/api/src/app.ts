@@ -110,12 +110,12 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   const { auth, accounts, credentials, store, config } = runtime;
   if (ctx.path === '/healthz' && ctx.method === 'GET') {
     const health = await store.health();
-    const body = success(ctx, { status: health.reachable ? 'ok' : 'degraded', services: { api: 'ok', database: health.reachable ? 'ok' : 'unavailable', redis: config.redisUrl ? 'configured' : 'not_configured' } });
+    const body = success(ctx, { status: health.reachable ? 'ok' : 'degraded', storage: health.kind, services: { api: 'ok', database: health.reachable ? 'ok' : 'unavailable', redis: config.redisUrl ? 'configured' : 'not_configured' } });
     return { statusCode: health.reachable ? 200 : 503, body: body.body };
   }
   if (ctx.path === '/readyz' && ctx.method === 'GET') {
     const health = await store.health();
-    const body = success(ctx, { ready: health.reachable, database: health.reachable ? 'ok' : 'unavailable' });
+    const body = success(ctx, { ready: health.reachable, storage: health.kind, database: health.reachable ? 'ok' : 'unavailable' });
     return { statusCode: health.reachable ? 200 : 503, body: body.body };
   }
   if (ctx.path === '/api/v1/auth/session' && ctx.method === 'GET') {

@@ -4,6 +4,7 @@ import { MemoryStore } from './store-memory.js';
 import { PostgresStore } from './store-postgres.js';
 
 export function createStore(config: AppConfig): Store {
-  if (config.databaseUrl && !config.allowInMemory) return new PostgresStore(config.databaseUrl);
-  return new MemoryStore();
+  if (config.allowInMemory) return new MemoryStore();
+  if (!config.databaseUrl) throw new Error('DATABASE_URL is required when ALLOW_IN_MEMORY=false');
+  return new PostgresStore(config.databaseUrl);
 }

@@ -40,6 +40,7 @@ services:
       - object_storage_data:/data
 
   api:
+    profiles: [full]
     build:
       context: ./apps/api
     environment:
@@ -61,6 +62,7 @@ services:
     command: ["node", "dist/index.js"]
 
   worker:
+    profiles: [full]
     build:
       context: ./apps/api
     environment:

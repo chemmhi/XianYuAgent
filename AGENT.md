@@ -168,3 +168,10 @@ git diff --check
 - 交付结论必须区分“已实现”“已验证”“部分验证”和“BLOCKED”；不得把计划、占位、Mock 或局部成功描述为完成。
 - 需要人工裁决的事项必须直接提出具体问题；不需要裁决的事项按文档和既定规范继续执行，不得因不确定就无限停滞。
 - 任何代理在下一次修改前都必须先阅读本文件，并在工作说明中明确本次功能的用户行为、边界、验证证据和剩余风险。
+
+## 2026-09-19 运行时经验：本地开发与 Compose 必须共享同一持久化数据源
+
+- 本地 dev 默认必须连接 Compose 暴露的 PostgreSQL/Redis/MinIO，`ALLOW_IN_MEMORY=false`；MemoryStore 只能由 smoke/E2E 显式启用。
+- 全 Compose 模式使用 `full` profile；本地 dev 启动前停止 Compose API/Worker，禁止两个 API 同时抢占 `8080`。
+- 首次管理员页面必须由真实 `bootstrapRequired` 数据驱动；已有管理员时只显示登录页，不在前端硬编码邮箱或密码。
+- 健康检查必须暴露实际 storage kind，便于确认浏览器请求没有误连到另一套内存 API。

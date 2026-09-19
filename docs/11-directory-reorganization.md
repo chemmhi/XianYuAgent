@@ -25,9 +25,9 @@ npm run compose:up
 npm run compose:down
 ```
 
-`npm run dev` 会同时启动 API、Worker 和正式前端；Compose 当前负责 API、Worker、PostgreSQL、Redis 和 MinIO，前端仍由根 npm 命令启动。
+`npm run dev` 会先执行 `dev:prepare`，停止 Compose API/Worker，仅保留 PostgreSQL、Redis、MinIO，再由根 npm 命令启动本地 API、Worker 和正式前端。全 Compose 模式通过 `full` profile 运行；两种模式不得同时占用 `8080`。
 
-真实本地环境必须设置 `VITE_API_MODE=live` 和 `VITE_API_BASE_URL=http://localhost:8080`；否则正式前端会按 Vite 约定回退到 mock 模式。
+根脚本通过 `cross-env` 显式设置 `VITE_API_MODE=live`、`VITE_API_PROXY_TARGET=http://127.0.0.1:8080`、`ALLOW_IN_MEMORY=false` 以及宿主机 PostgreSQL/Redis 地址，不再依赖进入子目录手动设置环境变量，也不会回退到 mock 模式。
 
 ## 迁移边界
 

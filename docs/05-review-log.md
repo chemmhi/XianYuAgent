@@ -155,3 +155,13 @@
 | S5-R12 | 浏览器 E2E / 交付门禁 | AuthGate 增量后是否可重新通过 Chrome/CDP、Cookie 登录和截图生成 | root | PASS（受控 harness） | `npm run test:e2e:chrome` 已通过：未认证 AuthGate 阻断、bootstrap cookie 注入、账号列表、登录方式选择、无旧创建弹窗、无模拟二维码、Cookie 登录和页面可见资料均通过；截图已重生成 |
 
 当前增量复核结论：Vite 代理 404 根因已关闭；AuthGate 代码接入和受控浏览器门禁已通过；根 `npm run verify` 已通过。Compose 已完成容器健康与账号持久化复读，但完整迁移回滚/Testcontainers/发布级恢复、真实闲鱼 APP 扫码与外部 Cookie 验证仍待人工复核。
+
+### 10.4 本地 dev / Compose 数据源统一复核（2026-09-19）
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R13 | 开发环境 / 数据源 | 本地 dev 是否与 Compose 使用同一 PostgreSQL/Redis/MinIO，且不再静默回退 MemoryStore | root | PASS | `apps/api/src/config.ts` 默认 `ALLOW_IN_MEMORY=false`；根 `dev:*` 显式注入宿主机 PostgreSQL/Redis；`GET /healthz` 返回 `storage=postgres`、`database=ok`、`redis=configured` |
+| S5-R14 | 运行编排 / 端口 | 本地 API 与 Compose API 是否避免同时占用 `8080` | root | PASS | `docker-compose.yml` 的 API/Worker 使用 `full` profile；`npm run dev` 的 `dev:prepare` 停止 Compose API/Worker 后再启动本地进程 |
+| S5-R15 | 管理员初始化 / 认证 | 初始化页是否仍由真实 `bootstrapRequired` 驱动，已有管理员时是否只显示登录页 | root | PASS | `GET /api/v1/auth/session` 返回 `bootstrapRequired=false` 与 PostgreSQL 中现有管理员一致；`compose-e2e@example.com / password-123` 登录成功，账号列表读取成功 |
+
+本轮结论：本地 dev 与 Compose 已统一持久化数据源；当前不显示初始化页是因为开发 PostgreSQL 已存在验收管理员，不是前端渲染缺陷。若需再次演示首次初始化，必须人工确认后清理测试管理员数据。

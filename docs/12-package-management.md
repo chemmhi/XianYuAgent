@@ -32,7 +32,9 @@ npm run verify
 npm run test:e2e:chrome
 ```
 
-`npm run dev` 使用成熟的 `concurrently` 同时启动 API、Worker 和正式前端；脚本只作为命令入口，不承担自定义进程编排实现。
+`npm run dev` 使用成熟的 `concurrently` 同时启动 API、Worker 和正式前端；`predev` 先执行 `dev:prepare`，停止 Compose API/Worker，仅启动 PostgreSQL、Redis、MinIO 作为本地共享依赖。根脚本使用 `cross-env` 注入统一环境变量，不需要进入子目录手动切换数据源或 mock/live 模式。
+
+`npm run infra:up` / `npm run infra:down` 只管理本地开发依赖，不删除数据卷；`npm run compose:up:d` 使用 Compose `full` profile 启动全容器模式。两种模式互斥，不能同时占用 `8080`。
 
 `npm run test:e2e:chrome` 使用本机 Chrome + Chrome DevTools Protocol，验证真实前端入口、Vite 代理、API、Session/CSRF、账号创建、持久化可见结果、二维码授权弹窗，并保存 1440×900 与 390×844 截图证据；不安装 Playwright。若 Chrome 不在默认路径，可设置 `CHROME_PATH`。
 

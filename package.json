@@ -12,10 +12,14 @@
     "apps/api"
   ],
   "scripts": {
+    "predev": "npm run dev:prepare",
     "dev": "concurrently --kill-others-on-fail --names api,worker,web --prefix-colors blue,magenta,green \"npm:dev:api\" \"npm:dev:worker\" \"npm:dev:web\"",
-    "dev:api": "npm --workspace apps/api run dev",
-    "dev:web": "npm --workspace apps/web run dev",
-    "dev:worker": "npm --workspace apps/api run dev:worker",
+    "dev:prepare": "docker compose stop api worker && docker compose up -d postgres redis object-storage",
+    "infra:up": "docker compose up -d postgres redis object-storage",
+    "infra:down": "docker compose stop postgres redis object-storage",
+    "dev:api": "cross-env NODE_ENV=development DATABASE_URL=postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/xianyu_agent REDIS_URL=redis://127.0.0.1:6379 ALLOW_IN_MEMORY=false COOKIE_SECURE=false XIANYU_QR_MODE=real npm --workspace apps/api run dev",
+    "dev:web": "cross-env VITE_API_MODE=live VITE_API_BASE_URL= VITE_API_PROXY_TARGET=http://127.0.0.1:8080 npm --workspace apps/web run dev",
+    "dev:worker": "cross-env NODE_ENV=development DATABASE_URL=postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/xianyu_agent REDIS_URL=redis://127.0.0.1:6379 ALLOW_IN_MEMORY=false npm --workspace apps/api run dev:worker",
     "build": "npm run build:api && npm run build:web",
     "build:api": "npm --workspace apps/api run build",
     "build:web": "npm --workspace apps/web run build",
@@ -30,13 +34,14 @@
     "start:worker": "npm --workspace apps/api run worker",
     "test:e2e:chrome": "npm --workspace apps/web run test:e2e:chrome",
     "compose:config": "docker compose config --quiet",
-    "compose:up": "docker compose up --build",
-    "compose:up:d": "docker compose up -d --build",
+    "compose:up": "docker compose --profile full up --build",
+    "compose:up:d": "docker compose --profile full up -d --build",
     "compose:down": "docker compose down",
-    "compose:logs": "docker compose logs -f api worker",
+    "compose:logs": "docker compose --profile full logs -f api worker",
     "compose:ps": "docker compose ps"
   },
   "devDependencies": {
-    "concurrently": "10.0.5"
+    "concurrently": "10.0.5",
+    "cross-env": "10.1.0"
   }
 }
