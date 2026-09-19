@@ -210,7 +210,7 @@ App
 - 目标：创建批次、导入/保存/删除卡券项、上传素材、绑定商品、作废批次和进行受控正文预览。
 - 组件树：`BatchToolbar + CouponBatchTable + BatchDrawer (BatchMetadataForm + CouponItemEditor + AssetPanel + BindingPanel + ContentPreview) + DeliveryActionBar + InventoryLockBanner`。
 - 读取 API：`GET /api/v1/coupons/batches`、`GET /api/v1/coupons/batches/{id}`、`GET /api/v1/coupons/{id}/content`（显式用途与审计前置）。
-- 写 API：`POST /api/v1/coupons/batches`、`PATCH /api/v1/coupons/batches/{id}`、`DELETE /api/v1/coupons/batches/{id}`、`POST /api/v1/coupons/batches/{id}/bind`、`POST /api/v1/coupons/batches/{id}/unbind`、`POST /api/v1/coupons/batches/{id}/items/import`、`POST /api/v1/coupons/batches/{id}/items/bulk-save`、`POST /api/v1/coupons/batches/{id}/items/bulk-delete`、`POST /api/v1/coupons/batches/{id}/assets`、`POST /api/v1/coupons/batches/{id}/void`。
+- 写 API：`POST /api/v1/coupons/batches`、`PATCH /api/v1/coupons/batches/{id}`、`DELETE /api/v1/coupons/batches/{id}`、`POST /api/v1/coupons/batches/{id}/bind`、`POST /api/v1/coupons/batches/{id}/unbind`、`POST /api/v1/coupons/batches/{id}/items/import`、`POST /api/v1/coupons/batches/{id}/void`；`items/bulk-save`、`items/bulk-delete`、`assets` 为后续切片契约，当前页面使用批次级批量删除和 metadata.imageUrls 原图预览。
 - 状态：批次 loading/empty/error；批次库存生命周期使用 `inventoryStatus`（available/reserved/delivered/void/exhausted），批次列表另使用由 `availableCount` 与阈值派生的 `stockAlert`（normal/low_stock/exhausted）；批量保存/删除显示逐项结果；绑定账号不匹配时阻断；管理员正文预览/编辑直接由受控领域接口提供，买家可见交付在不满足 `buyer_deliverable`、订单已支付、商品与账号匹配、策略通过和审计完成时显示 forbidden；作废提交中禁用重复操作。
 - 安全：系统凭证与买家可交付卡券分离；管理员查看正文、夸克链接、提取码时保留 purpose、账号范围和 auditRef；买家交付仍必须满足全部策略条件。
 

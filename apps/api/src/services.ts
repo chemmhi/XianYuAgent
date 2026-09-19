@@ -1,5 +1,5 @@
 import type { AppConfig } from './config.js';
-import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CouponBatchListQuery, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductListQuery, ProductListResult, ProductRecord, SessionRecord, Store } from './domain.js';
+import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CouponBatchListQuery, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductListQuery, ProductListResult, ProductRecord, SessionRecord, Store, CouponBatchMetadata } from './domain.js';
 import { createId, createToken, digestJson, hashPassword, isSessionFresh, sha256, verifyPassword } from './security.js';
 
 export interface AuthContext {
@@ -88,6 +88,7 @@ export class CouponService {
     if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new ServiceError(422, 'VALIDATION_FAILED', 'pageSize must be between 1 and 100');
     if (query.status && !['draft', 'active', 'paused', 'closed', 'exhausted', 'voided'].includes(query.status)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon batch status');
     if (query.stockAlert && !['normal', 'low_stock', 'exhausted'].includes(query.stockAlert)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon stock alert');
+    if (query.purpose && !['text', 'data', 'api', 'image'].includes(query.purpose)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon purpose');
     const result = await this.store.listCouponBatches(adminId, { ...query, page, pageSize });
     return { ...result, items: result.items.map((batch) => this.toBatchView(batch)) };
   }
@@ -98,13 +99,26 @@ export class CouponService {
     return this.toBatchView(batch, true);
   }
 
-  async create(input: { adminId: string; accountId: string; label?: string; purpose: string; deliveryScope: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; requestId: string; traceId: string }): Promise<ReturnType<CouponService['toBatchView']>> {
+  async create(input: { adminId: string; accountId: string; label?: string; purpose: string; deliveryScope: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; metadata?: CouponBatchMetadata; requestId: string; traceId: string }): Promise<ReturnType<CouponService['toBatchView']>> {
     if (!input.accountId.trim()) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
     if (!input.purpose.trim()) throw new ServiceError(422, 'VALIDATION_FAILED', 'purpose is required');
+    if (!['text', 'data', 'api', 'image'].includes(input.purpose)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon purpose');
     if (!['system_only', 'operator_only', 'buyer_deliverable'].includes(input.deliveryScope)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid deliveryScope');
     try {
       const batch = await this.store.createCouponBatch(input);
       await this.audit({ actorId: input.adminId, action: 'coupon.batch.created', targetRef: batch.id, requestId: input.requestId, traceId: input.traceId, payload: { purpose: batch.purpose, deliveryScope: batch.deliveryScope, hasQuarkUrl: Boolean(batch.quarkUrl), hasExtractionCode: Boolean(batch.extractionCode) }, accountId: batch.accountId });
+      return this.toBatchView(batch, true);
+    } catch (error) { throw mapCouponStoreError(error); }
+  }
+
+  async update(input: { adminId: string; batchId: string; patch: { label?: string; purpose?: string; deliveryScope?: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; status?: CouponBatchStatus; metadata?: CouponBatchMetadata }; requestId: string; traceId: string }): Promise<ReturnType<CouponService['toBatchView']>> {
+    if (input.patch.purpose && !['text', 'data', 'api', 'image'].includes(input.patch.purpose)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon purpose');
+    if (input.patch.deliveryScope && !['system_only', 'operator_only', 'buyer_deliverable'].includes(input.patch.deliveryScope)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid deliveryScope');
+    if (input.patch.status && !['draft', 'active', 'paused', 'closed', 'exhausted', 'voided'].includes(input.patch.status)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon batch status');
+    try {
+      const batch = await this.store.updateCouponBatch(input);
+      if (!batch) throw new ServiceError(404, 'NOT_FOUND', 'coupon batch not found');
+      await this.audit({ actorId: input.adminId, action: 'coupon.batch.updated', targetRef: batch.id, requestId: input.requestId, traceId: input.traceId, payload: { purpose: batch.purpose, status: batch.status, metadataKeys: Object.keys(batch.metadata ?? {}) }, accountId: batch.accountId });
       return this.toBatchView(batch, true);
     } catch (error) { throw mapCouponStoreError(error); }
   }
@@ -188,7 +202,22 @@ export class CouponService {
     const consumedCount = items.length > 0 ? items.filter((item) => item.status === 'consumed').length : batch.consumedCount ?? 0;
     const totalCount = batch.totalCount || items.length;
     const stockAlert = batch.status === 'voided' || availableCount === 0 ? 'exhausted' : availableCount <= 5 ? 'low_stock' : 'normal';
-    const result: Record<string, unknown> = { batchId: batch.id, id: batch.id, accountId: batch.accountId, label: batch.label, purpose: batch.purpose, deliveryScope: batch.deliveryScope, quarkUrl: batch.quarkUrl, extractCode: batch.extractionCode, totalCount, availableCount, reservedCount, consumedCount, stockAlert, status: batch.status, version: batch.version, updatedAt: batch.updatedAt, createdAt: batch.createdAt, productBindings: (batch.bindings ?? []).filter((binding) => binding.status === 'active').map((binding) => ({ id: binding.id, bindingId: binding.id, batchId: binding.batchId, productId: binding.productId, priority: binding.priority, status: binding.status, expiresAt: binding.expiresAt })) };
+    const metadata = batch.metadata ?? {};
+    const listMetadata = {
+      description: metadata.description,
+      delaySeconds: metadata.delaySeconds,
+      deliveryCount: metadata.deliveryCount,
+      useNoLogisticsForm: metadata.useNoLogisticsForm,
+      dockable: metadata.dockable,
+      price: metadata.price,
+      feePayer: metadata.feePayer,
+      minPrice: metadata.minPrice,
+      dockVisibility: metadata.dockVisibility,
+      multiSpec: metadata.multiSpec,
+      specName: metadata.specName,
+      specValue: metadata.specValue,
+    };
+    const result: Record<string, unknown> = { batchId: batch.id, id: batch.id, accountId: batch.accountId, label: batch.label, purpose: batch.purpose, deliveryScope: batch.deliveryScope, quarkUrl: batch.quarkUrl, extractCode: batch.extractionCode, totalCount, availableCount, reservedCount, consumedCount, stockAlert, status: batch.status, version: batch.version, updatedAt: batch.updatedAt, createdAt: batch.createdAt, metadata: detail ? metadata : listMetadata, contentPreview: { text: metadata.textContent ? metadata.textContent.slice(0, 140) : undefined, dataRemaining: availableCount, apiUrl: metadata.apiConfig?.url, imageUrls: metadata.imageUrls ?? [] }, productBindings: (batch.bindings ?? []).filter((binding) => binding.status === 'active').map((binding) => ({ id: binding.id, bindingId: binding.id, batchId: binding.batchId, productId: binding.productId, priority: binding.priority, status: binding.status, expiresAt: binding.expiresAt })) };
     if (detail) result.items = items.map((item) => this.toItemView(item));
     if (detail) result.bindings = batch.bindings ?? [];
     return result;

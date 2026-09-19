@@ -1,4 +1,4 @@
-import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductListQuery, ProductListResult, ProductRecord, ProductStatus, SessionRecord, Store } from './domain.js';
+import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductListQuery, ProductListResult, ProductRecord, ProductStatus, SessionRecord, Store, CouponBatchMetadata } from './domain.js';
 import { createId } from './security.js';
 
 export class MemoryStore implements Store {
@@ -103,6 +103,7 @@ export class MemoryStore implements Store {
       if (!scopedAccounts.has(batch.accountId)) return false;
       if (query.accountId && batch.accountId !== query.accountId) return false;
       if (query.status && batch.status !== query.status) return false;
+      if (query.purpose && batch.purpose !== query.purpose) return false;
       if (normalizedKeyword && !`${batch.id} ${batch.label ?? ''} ${batch.purpose}`.toLowerCase().includes(normalizedKeyword)) return false;
       if (query.stockAlert) {
         const items = [...this.couponItems.values()].filter((item) => item.batchId === batch.id);
@@ -124,11 +125,25 @@ export class MemoryStore implements Store {
     const bindings = [...this.couponBindings.values()].filter((binding) => binding.batchId === batchId).map((binding) => ({ ...binding }));
     return { ...batch, items, bindings };
   }
-  async createCouponBatch(input: { adminId: string; accountId: string; label?: string; purpose: string; deliveryScope: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string }): Promise<CouponBatchRecord> {
+  async createCouponBatch(input: { adminId: string; accountId: string; label?: string; purpose: string; deliveryScope: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; metadata?: CouponBatchMetadata }): Promise<CouponBatchRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const now = new Date().toISOString();
-    const batch: CouponBatchRecord = { id: createId(), accountId: input.accountId, label: input.label, purpose: input.purpose, deliveryScope: input.deliveryScope, quarkUrl: input.quarkUrl, extractionCode: input.extractionCode, totalCount: 0, status: 'active', version: 1, createdAt: now, updatedAt: now };
+    const batch: CouponBatchRecord = { id: createId(), accountId: input.accountId, label: input.label, purpose: input.purpose, deliveryScope: input.deliveryScope, quarkUrl: input.quarkUrl, extractionCode: input.extractionCode, metadata: input.metadata ?? {}, totalCount: 0, status: 'active', version: 1, createdAt: now, updatedAt: now };
     this.couponBatches.set(batch.id, batch);
+    return { ...batch };
+  }
+  async updateCouponBatch(input: { adminId: string; batchId: string; patch: { label?: string; purpose?: string; deliveryScope?: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; status?: CouponBatchStatus; metadata?: CouponBatchMetadata } }): Promise<CouponBatchRecord | undefined> {
+    const batch = this.couponBatches.get(input.batchId);
+    if (!batch || !(await this.hasAccountScope(input.adminId, batch.accountId))) return undefined;
+    if (input.patch.label !== undefined) batch.label = input.patch.label;
+    if (input.patch.purpose !== undefined) batch.purpose = input.patch.purpose;
+    if (input.patch.deliveryScope !== undefined) batch.deliveryScope = input.patch.deliveryScope;
+    if (input.patch.quarkUrl !== undefined) batch.quarkUrl = input.patch.quarkUrl || undefined;
+    if (input.patch.extractionCode !== undefined) batch.extractionCode = input.patch.extractionCode || undefined;
+    if (input.patch.status !== undefined) batch.status = input.patch.status;
+    if (input.patch.metadata !== undefined) batch.metadata = input.patch.metadata;
+    batch.version += 1;
+    batch.updatedAt = new Date().toISOString();
     return { ...batch };
   }
   async importCouponItems(input: { adminId: string; batchId: string; contents: string[] }): Promise<{ batch: CouponBatchRecord; items: CouponItemRecord[]; rejected: Array<{ index: number; code: string; message: string }> }> {

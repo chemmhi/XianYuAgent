@@ -57,4 +57,23 @@ describe('coupons api adapter', () => {
     expect(page.items[0].items?.[0].maskedLabel).toBeTruthy();
     expect(page.items[0].items?.[0].maskedLabel).not.toContain('GitHub');
   });
+
+  it('maps card metadata previews and sends purpose filters and updates', async () => {
+    const get = vi.fn(async <T>(path: string) => {
+      if (path.includes('/batch-001')) return { success: true, data: { ...batchPayload, metadata: { description: '备注', textContent: '正文预览', dockable: true, price: '9.90' }, contentPreview: { text: '正文预览' } } } as T;
+      return { success: true, data: { items: [{ ...batchPayload, metadata: { description: '备注' }, contentPreview: { text: '正文预览' } }], total: 1, page: 1, pageSize: 20, totalPages: 1 } } as T;
+    });
+    const patch = vi.fn(async <T>() => ({ success: true, data: { ...batchPayload, metadata: { description: 'updated' } } } as T));
+    const api = createCouponsApi({
+      get: get as unknown as CouponsApiTransport['get'],
+      post: vi.fn() as unknown as CouponsApiTransport['post'],
+      patch: patch as unknown as CouponsApiTransport['patch'],
+      delete: vi.fn() as unknown as CouponsApiTransport['delete'],
+    });
+    const page = await api.list({ purpose: 'text', keyword: '备注' });
+    expect(get).toHaveBeenCalledWith('/api/v1/coupons/batches?keyword=%E5%A4%87%E6%B3%A8&purpose=text&page=1&pageSize=20');
+    expect(page.items[0].contentPreview?.text).toBe('正文预览');
+    await api.updateBatch('batch-001', { status: 'paused', metadata: { description: 'updated' } });
+    expect(patch).toHaveBeenCalledWith('/api/v1/coupons/batches/batch-001', { status: 'paused', metadata: { description: 'updated' } }, expect.objectContaining({ headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }) }));
+  });
 });

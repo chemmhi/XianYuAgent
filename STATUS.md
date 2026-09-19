@@ -2,7 +2,7 @@
 
 - 项目阶段：5
 - 阶段状态：进行中（S4-VS1 账号管理切片已获人工放行；S4-VS2 商品管理正在主工作树开发；S4-VS3 卡券首页已在独立 worktree 完成实现与受控验证，等待人工审核，不合入 master）
-- 最近一次通过门禁：S4-VS1 账号管理人工复核 / 2026-09-20
+- 最近一次通过门禁：S4-VS1 账号管理人工复核 / 2026-09-19
 - 当前目标：人工审核 S4-VS3 卡券首页；审核通过后再合入 `master`，随后继续 S4-VS2 / S4-VS4 的门禁推进
 - 已完成范围：阶段 0 范围门禁；阶段 1 架构与模块边界；阶段 2 数据模型、数据库表设计、关系基数、状态机、API envelope、幂等、鉴权、敏感交付、迁移边界；阶段 5 账号登录方法选择、真实 QR 适配器、Cookie 登录、账号资料同步、登录会话持久化、AuthGate 会话门禁、Vite 默认代理、前端列表刷新和 Chrome/CDP 控制环境 E2E
 - 未完成范围：真实闲鱼 APP 扫码成功回调、真实外部 Cookie 验证、完整迁移/回滚/Testcontainers 与视觉差异回归；账号密码登录依赖独立浏览器运行时，当前明确不可用
@@ -40,12 +40,12 @@
 
 - worktree：`F:\ChenHai\Project\XianYuAgent-s4-vs3`
 - 分支：`feature/s4-vs3-coupons`
-- 实现：批次列表、库存/`stockAlert`、创建批次、首批库存、导入库存、绑定/解绑契约、作废、DELETE 软作废、管理员受控正文预览/复制、403/404/409/网络错误状态。
-- 后端：`apps/api/migrations/013_coupons.sql`、Memory/Postgres store、scope 校验、加密正文存储、审计摘要。
+- 实现：批次列表、搜索/重置/类型筛选、当前页全选、批量删除、创建/编辑/复制、启用/禁用、库存/`stockAlert`、首批库存、导入库存、绑定/解绑、双栏商品关联、图片原图预览、作废、DELETE 软作废、管理员受控正文预览/复制、403/404/409/网络错误状态。
+- 后端：`apps/api/migrations/013_coupons.sql` + `014_coupon_card_metadata.sql`、Memory/Postgres store、`purpose=text/data/api/image` 校验、列表安全元数据摘要、PATCH/PUT 编辑、scope 校验、加密正文存储、审计摘要。
 - 前端：`apps/web/src/features/coupons/`，通过 `/coupons` 正式路由接入，表格视觉保持平台样式，仅参考旧项目字段和操作。
-- 验证：`npm run typecheck`、前后端测试、API smoke、web build、Chrome/CDP E2E 和 1440×900 / 390×844 截图均已通过；详见 `docs/evidence/stage5/S4-VS3/test-baseline.md`。
+- 验证：`npm run verify`、`node apps/api/scripts/coupons-smoke.mjs`、卡券 Chrome/CDP E2E 和 1440×900 / 390×844 截图均已通过；E2E 使用 MemoryStore/stub，真实 PostgreSQL/Redis/MinIO 人工审核仍待执行，详见 `docs/evidence/stage5/S4-VS3/test-baseline.md`。
 - 门禁：`READY_FOR_REVIEW`；人工审核通过前不得 merge 到 `master`。
-- 本轮提交：`ff3645e`（`feat(阶段5): 完成S4-VS3卡券首页`）。
+- 本轮提交：当前分支 HEAD（`feat(阶段5): 完成S4-VS3卡券首页`）。
 
 ## 长期决策摘要
 
@@ -87,4 +87,4 @@
 - 2026-09-19 二维码首开竞态已修复：保留 StrictMode，前端 QR controller 增加 in-flight 去重、弹窗增加一次性自动启动保护；Chrome/CDP E2E 断言首开仅发送 1 个二维码创建请求，前端并发回归测试已补齐。
 - 2026-09-19 二维码 creating 卡死已修复：移除 StrictMode 开发期 cleanup 对有效请求的误失效，Chrome/CDP E2E 现在同时断言二维码区域实际渲染。
 - 2026-09-19 本轮运行时统一：本地 dev 默认使用 PostgreSQL/Redis/MinIO，MemoryStore 仅限显式测试；Compose API/Worker 使用 `full` profile，避免与本地 API 竞争 `8080`。`/healthz`/`/readyz` 增加 `storage` 诊断字段。验证：`npm run verify`、真实本地 dev `storage=postgres`、PostgreSQL 管理员登录与账号列表读取均通过。
-- 2026-09-20 人工裁决：S4-VS1 账号管理审核通过；账号列表及账号信息可正常加载。现存页面 UI 缺陷标记为非阻塞后续项，下一切片切换至 S4-VS2 商品管理。
+- 2026-09-19 人工裁决：S4-VS1 账号管理审核通过；账号列表及账号信息可正常加载。现存页面 UI 缺陷标记为非阻塞后续项，下一切片切换至 S4-VS2 商品管理。

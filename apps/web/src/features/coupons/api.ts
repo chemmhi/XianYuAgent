@@ -1,4 +1,4 @@
-import type { CouponBatchFilters, CouponBatchVM, CouponBindingVM, CouponContentPreviewVM, CouponItemVM, CreateCouponBatchRequest, CouponsPageVM, DeliveryScope, InventoryLockVM, StockAlert } from './types';
+import type { CouponBatchFilters, CouponBatchVM, CouponBindingVM, CouponContentPreviewVM, CouponItemVM, CreateCouponBatchRequest, CouponsPageVM, DeliveryScope, InventoryLockVM, StockAlert, UpdateCouponBatchRequest, CouponMetadataVM } from './types';
 
 export interface CouponsApiTransport {
   get<T>(path: string): Promise<T>;
@@ -11,10 +11,13 @@ export interface CouponsApi {
   list(filters?: CouponBatchFilters): Promise<CouponsPageVM>;
   getDetail(batchId: string): Promise<CouponBatchVM>;
   createBatch(input: CreateCouponBatchRequest): Promise<CouponBatchVM>;
+  updateBatch(batchId: string, input: UpdateCouponBatchRequest): Promise<CouponBatchVM>;
   importItems(batchId: string, items: string[]): Promise<InventoryLockVM>;
   bindBatch(batchId: string, productId: string): Promise<InventoryLockVM>;
+  unbindBatch(batchId: string, productId: string): Promise<InventoryLockVM>;
   voidBatch(batchId: string): Promise<InventoryLockVM>;
   deleteBatch(batchId: string): Promise<InventoryLockVM>;
+  batchDelete(batchIds: string[]): Promise<InventoryLockVM[]>;
   getContent(couponId: string, options?: { purpose?: 'delivery' | 'preview' | 'audit'; deliveryScope?: DeliveryScope }): Promise<CouponContentPreviewVM>;
 }
 
@@ -29,6 +32,8 @@ interface CouponPayload extends Omit<Partial<CouponBatchVM>, 'bindings'> {
   items?: CouponItemVM[];
   productBindings?: Array<Partial<CouponBindingVM> & { id?: string }>;
   bindings?: Array<Partial<CouponBindingVM> & { id?: string }>;
+  metadata?: CouponMetadataVM;
+  contentPreview?: CouponBatchVM['contentPreview'];
 }
 
 interface CouponMutationPayload extends Partial<InventoryLockVM> {
@@ -89,6 +94,9 @@ function toBatchVM(payload: CouponPayload): CouponBatchVM {
     items: payload.items?.map((item) => ({ ...item, batchId: item.batchId || batchId })),
     quarkUrl: payload.quarkUrl,
     extractCode: payload.extractCode,
+    createdAt: payload.createdAt,
+    metadata: payload.metadata,
+    contentPreview: payload.contentPreview,
   };
 }
 
@@ -120,6 +128,7 @@ function queryString(filters: CouponBatchFilters = {}): string {
   if (filters.keyword?.trim()) params.set('keyword', filters.keyword.trim());
   if (filters.status && filters.status !== 'all') params.set('status', filters.status);
   if (filters.stockAlert && filters.stockAlert !== 'all') params.set('stockAlert', filters.stockAlert);
+  if (filters.purpose && filters.purpose !== 'all') params.set('purpose', filters.purpose);
   params.set('page', String(filters.page ?? 1));
   params.set('pageSize', String(filters.pageSize ?? 20));
   return `?${params.toString()}`;
@@ -144,12 +153,20 @@ export function createCouponsApi(transport: CouponsApiTransport): CouponsApi {
       await this.importItems(created.batchId, input.items);
       return this.getDetail(created.batchId);
     },
+    async updateBatch(batchId, input) {
+      const payload = await transport.patch<CouponPayload | ApiEnvelope<CouponPayload>>(`/api/v1/coupons/batches/${encodeURIComponent(batchId)}`, input, mutationOptions(`coupons.update.${batchId}.${Date.now()}`));
+      return toBatchVM(unwrapEnvelope(payload));
+    },
     async importItems(batchId, items) {
       const payload = await transport.post<CouponMutationPayload | ApiEnvelope<CouponMutationPayload>>(`/api/v1/coupons/batches/${encodeURIComponent(batchId)}/items/import`, { items }, mutationOptions(`coupons.import.${batchId}.${Date.now()}`));
       return toInventoryLockVM(unwrapEnvelope(payload));
     },
     async bindBatch(batchId, productId) {
       const payload = await transport.post<CouponMutationPayload | ApiEnvelope<CouponMutationPayload>>(`/api/v1/coupons/batches/${encodeURIComponent(batchId)}/bind`, { productId }, mutationOptions(`coupons.bind.${batchId}.${productId}.${Date.now()}`));
+      return toInventoryLockVM(unwrapEnvelope(payload));
+    },
+    async unbindBatch(batchId, productId) {
+      const payload = await transport.post<CouponMutationPayload | ApiEnvelope<CouponMutationPayload>>(`/api/v1/coupons/batches/${encodeURIComponent(batchId)}/unbind`, { productId }, mutationOptions(`coupons.unbind.${batchId}.${productId}.${Date.now()}`));
       return toInventoryLockVM(unwrapEnvelope(payload));
     },
     async voidBatch(batchId) {
@@ -159,6 +176,11 @@ export function createCouponsApi(transport: CouponsApiTransport): CouponsApi {
     async deleteBatch(batchId) {
       const payload = await transport.delete<CouponMutationPayload | ApiEnvelope<CouponMutationPayload>>(`/api/v1/coupons/batches/${encodeURIComponent(batchId)}`, mutationOptions(`coupons.delete.${batchId}.${Date.now()}`));
       return toInventoryLockVM(unwrapEnvelope(payload));
+    },
+    async batchDelete(batchIds) {
+      const results: InventoryLockVM[] = [];
+      for (const batchId of batchIds) results.push(await this.deleteBatch(batchId));
+      return results;
     },
     async getContent(couponId, options = {}) {
       const params = new URLSearchParams({ purpose: options.purpose ?? 'preview', deliveryScope: options.deliveryScope ?? 'operator_only' });
@@ -177,7 +199,7 @@ export function createMockCouponsApi(seed: CouponBatchVM[] = [
   return {
     async list(filters = {}) {
       const keyword = filters.keyword?.trim().toLowerCase();
-      const filtered = batches.filter((batch) => (!filters.accountId || batch.accountId === filters.accountId) && (!filters.status || filters.status === 'all' || batch.status === filters.status) && (!filters.stockAlert || filters.stockAlert === 'all' || batch.stockAlert === filters.stockAlert) && (!keyword || `${batch.label} ${batch.batchId}`.toLowerCase().includes(keyword)));
+      const filtered = batches.filter((batch) => (!filters.accountId || batch.accountId === filters.accountId) && (!filters.status || filters.status === 'all' || batch.status === filters.status) && (!filters.stockAlert || filters.stockAlert === 'all' || batch.stockAlert === filters.stockAlert) && (!filters.purpose || filters.purpose === 'all' || batch.purpose === filters.purpose) && (!keyword || `${batch.label} ${batch.batchId} ${batch.metadata?.description ?? ''}`.toLowerCase().includes(keyword)));
       const page = filters.page ?? 1;
       const pageSize = filters.pageSize ?? 20;
       const start = (page - 1) * pageSize;
@@ -188,18 +210,21 @@ export function createMockCouponsApi(seed: CouponBatchVM[] = [
       const now = new Date().toISOString();
       const items = (input.items ?? []).filter(Boolean).map((body, index) => ({ id: `coupon-${Date.now()}-${index}`, batchId: `batch-${Date.now()}`, maskedLabel: body.length > 6 ? `${body.slice(0, 3)}••••${body.slice(-2)}` : '••••••', status: 'available' as const }));
       const batchId = items[0]?.batchId ?? `batch-${Date.now()}`;
-      const batch: CouponBatchVM = { batchId, accountId: input.accountId, label: input.label, purpose: input.purpose, deliveryScope: input.deliveryScope, status: 'draft', totalCount: items.length, availableCount: items.length, reservedCount: 0, consumedCount: 0, stockAlert: items.length ? 'normal' : 'exhausted', version: 1, updatedAt: now, bindings: [], items };
+      const batch: CouponBatchVM = { batchId, accountId: input.accountId, label: input.label, purpose: input.purpose, deliveryScope: input.deliveryScope, status: 'draft', totalCount: items.length, availableCount: items.length, reservedCount: 0, consumedCount: 0, stockAlert: items.length ? 'normal' : 'exhausted', version: 1, updatedAt: now, createdAt: now, bindings: [], items, metadata: input.metadata, contentPreview: { text: input.metadata?.textContent?.slice(0, 140), dataRemaining: items.length, apiUrl: input.metadata?.apiConfig?.url, imageUrls: input.metadata?.imageUrls ?? [] } };
       batches = [batch, ...batches];
       return batch;
     },
+    async updateBatch(batchId, input) { const batch = batches.find((item) => item.batchId === batchId); if (!batch) throw Object.assign(new Error('BATCH_NOT_FOUND'), { status: 404 }); Object.assign(batch, input); if (input.metadata !== undefined) batch.metadata = input.metadata; batch.updatedAt = new Date().toISOString(); batch.version += 1; batch.contentPreview = { text: batch.metadata?.textContent?.slice(0, 140), dataRemaining: batch.availableCount, apiUrl: batch.metadata?.apiConfig?.url, imageUrls: batch.metadata?.imageUrls ?? [] }; return { ...batch, bindings: [...batch.bindings] }; },
     async importItems(batchId, items) {
       const batch = batches.find((item) => item.batchId === batchId); if (!batch) throw Object.assign(new Error('BATCH_NOT_FOUND'), { status: 404 });
       const nextItems = items.filter(Boolean).map((body, index) => ({ id: `coupon-${Date.now()}-${index}`, batchId, maskedLabel: body.length > 6 ? `${body.slice(0, 3)}••••${body.slice(-2)}` : '••••••', status: 'available' as const }));
       batch.items = [...(batch.items ?? []), ...nextItems]; batch.totalCount += nextItems.length; batch.availableCount += nextItems.length; batch.version += 1; batch.updatedAt = new Date().toISOString(); batch.stockAlert = toStockAlert(batch.stockAlert, batch.availableCount, batch.totalCount); return batch;
     },
     async bindBatch(batchId, productId) { const batch = batches.find((item) => item.batchId === batchId); if (!batch) throw Object.assign(new Error('BATCH_NOT_FOUND'), { status: 404 }); batch.bindings = [{ bindingId: `binding-${Date.now()}`, batchId, productId, priority: 0, status: 'active' }, ...batch.bindings.filter((item) => item.productId !== productId)]; batch.version += 1; batch.updatedAt = new Date().toISOString(); return batch; },
+    async unbindBatch(batchId, productId) { const batch = batches.find((item) => item.batchId === batchId); if (!batch) throw Object.assign(new Error('BATCH_NOT_FOUND'), { status: 404 }); batch.bindings = batch.bindings.map((binding) => binding.productId === productId ? { ...binding, status: 'unbound' as const } : binding); batch.version += 1; batch.updatedAt = new Date().toISOString(); return batch; },
     async voidBatch(batchId) { const batch = batches.find((item) => item.batchId === batchId); if (!batch) throw Object.assign(new Error('BATCH_NOT_FOUND'), { status: 404 }); batch.status = 'voided'; batch.availableCount = 0; batch.stockAlert = 'exhausted'; batch.version += 1; batch.updatedAt = new Date().toISOString(); return batch; },
     async deleteBatch(batchId) { const batch = batches.find((item) => item.batchId === batchId); if (!batch) throw Object.assign(new Error('BATCH_NOT_FOUND'), { status: 404 }); batch.status = 'voided'; batch.availableCount = 0; batch.stockAlert = 'exhausted'; batch.version += 1; batch.updatedAt = new Date().toISOString(); return batch; },
+    async batchDelete(batchIds) { return Promise.all(batchIds.map((batchId) => this.deleteBatch(batchId))); },
     async getContent(couponId, options = {}) { return { couponId, batchId: 'batch-001', purpose: options.purpose ?? 'preview', deliveryScope: options.deliveryScope ?? 'operator_only', accountIds: ['account-001'], content: { body: 'preview-only coupon content', quarkUrl: 'https://pan.quark.cn/s/example', extractionCode: 'AB12' }, access: { allowed: true, purpose: options.purpose ?? 'preview', auditRef: `AUD-${Date.now()}` }, inventoryStatus: 'available' }; },
   };
 }

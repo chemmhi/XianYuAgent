@@ -11,6 +11,34 @@ export type CouponDeliveryScope = 'system_only' | 'operator_only' | 'buyer_deliv
 export type CouponItemStatus = 'available' | 'reserved' | 'consumed';
 export type CouponBindingStatus = 'active' | 'inactive';
 
+export interface CouponApiConfig {
+  url: string;
+  method: 'GET' | 'POST';
+  timeout?: number;
+  headers?: string;
+  params?: string;
+  responseField?: string;
+}
+
+export interface CouponBatchMetadata {
+  description?: string;
+  delaySeconds?: number;
+  deliveryCount?: number;
+  useNoLogisticsForm?: boolean;
+  dockable?: boolean;
+  price?: string;
+  feePayer?: 'distributor' | 'dealer';
+  minPrice?: string;
+  dockVisibility?: 'public' | 'dealer_only';
+  multiSpec?: boolean;
+  specName?: string;
+  specValue?: string;
+  textContent?: string;
+  dataContent?: string;
+  apiConfig?: CouponApiConfig;
+  imageUrls?: string[];
+}
+
 export interface ProductSkuRecord {
   id: string;
   productId: string;
@@ -108,6 +136,7 @@ export interface CouponBatchRecord {
   consumedCount?: number;
   items?: CouponItemRecord[];
   bindings?: CouponBindingRecord[];
+  metadata?: CouponBatchMetadata;
 }
 
 export interface CouponBatchListQuery {
@@ -115,6 +144,7 @@ export interface CouponBatchListQuery {
   keyword?: string;
   status?: CouponBatchStatus;
   stockAlert?: 'normal' | 'low_stock' | 'exhausted';
+  purpose?: 'text' | 'data' | 'api' | 'image';
   page?: number;
   pageSize?: number;
 }
@@ -285,7 +315,9 @@ export interface Store {
     deliveryScope: CouponDeliveryScope;
     quarkUrl?: string;
     extractionCode?: string;
+    metadata?: CouponBatchMetadata;
   }): Promise<CouponBatchRecord>;
+  updateCouponBatch(input: { adminId: string; batchId: string; patch: { label?: string; purpose?: string; deliveryScope?: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; status?: CouponBatchStatus; metadata?: CouponBatchMetadata } }): Promise<CouponBatchRecord | undefined>;
   importCouponItems(input: { adminId: string; batchId: string; contents: string[] }): Promise<{ batch: CouponBatchRecord; items: CouponItemRecord[]; rejected: Array<{ index: number; code: string; message: string }> }>;
   bindCouponBatch(input: { adminId: string; batchId: string; productId: string }): Promise<CouponBindingRecord>;
   unbindCouponBatch(input: { adminId: string; batchId: string; productId: string }): Promise<CouponBindingRecord | undefined>;

@@ -1,22 +1,22 @@
-import type { CouponBatchFilters, CouponBatchStatus, CouponsLoadPhase, StockAlert } from '../types';
+import type { CouponBatchFilters, CouponBatchVM, CouponsLoadPhase } from '../types';
 
-const statuses: Array<{ value: CouponBatchStatus | 'all'; label: string }> = [
-  { value: 'all', label: '全部状态' }, { value: 'active', label: '启用中' }, { value: 'draft', label: '草稿' }, { value: 'paused', label: '已暂停' }, { value: 'closed', label: '已关闭' }, { value: 'exhausted', label: '已耗尽' }, { value: 'voided', label: '已作废' },
-];
-const alerts: Array<{ value: StockAlert | 'all'; label: string }> = [
-  { value: 'all', label: '全部库存' }, { value: 'normal', label: '库存正常' }, { value: 'low_stock', label: '低库存' }, { value: 'exhausted', label: '已耗尽' },
+const types: Array<{ value: CouponBatchVM['purpose'] | 'all'; label: string }> = [
+  { value: 'all', label: '全部' },
+  { value: 'text', label: '文本' },
+  { value: 'api', label: 'API' },
+  { value: 'data', label: '批量数据' },
+  { value: 'image', label: '图片' },
 ];
 
-export function CouponToolbar({ filters, phase, total, onKeywordChange, onStatusChange, onAlertChange, onRefresh, onCreate }: { filters: CouponBatchFilters; phase: CouponsLoadPhase; total: number; onKeywordChange: (value: string) => void; onStatusChange: (value: CouponBatchStatus | 'all') => void; onAlertChange: (value: StockAlert | 'all') => void; onRefresh: () => void; onCreate: () => void }) {
+export function CouponToolbar({ filters, phase, total, onKeywordChange, onPurposeChange, onSearch, onReset }: { filters: CouponBatchFilters; phase: CouponsLoadPhase; total: number; onKeywordChange: (value: string) => void; onPurposeChange: (value: CouponBatchVM['purpose'] | 'all') => void; onSearch: () => void; onReset: () => void }) {
   return <div className="coupons-toolbar">
-    <div><h2>卡券批次</h2><p>按当前账号范围管理库存、绑定关系与受控正文预览。</p></div>
+    <div><h2>卡券列表</h2><p>按卡券名称、描述和类型筛选配置；列表操作与参考卡券页保持一致。</p></div>
     <div className="coupons-toolbar-actions">
-      <label className="coupons-search"><span className="sr-only">搜索卡券批次</span><input aria-label="搜索卡券批次" value={filters.keyword ?? ''} onChange={(event) => onKeywordChange(event.target.value)} placeholder="搜索批次名称或编号" /></label>
-      <label><span className="sr-only">批次状态</span><select aria-label="批次状态" value={filters.status ?? 'all'} onChange={(event) => onStatusChange(event.target.value as CouponBatchStatus | 'all')}>{statuses.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}</select></label>
-      <label><span className="sr-only">库存告警</span><select aria-label="库存告警" value={filters.stockAlert ?? 'all'} onChange={(event) => onAlertChange(event.target.value as StockAlert | 'all')}>{alerts.map((alert) => <option key={alert.value} value={alert.value}>{alert.label}</option>)}</select></label>
-      <span className="coupons-total">共 {total} 批</span>
-      <button className="btn ghost" type="button" onClick={onRefresh} disabled={phase === 'loading'}>刷新</button>
-      <button className="btn primary" type="button" onClick={onCreate}>新建批次</button>
+      <label className="coupons-search"><span className="sr-only">搜索卡券</span><input aria-label="搜索卡券名称或描述" value={filters.keyword ?? ''} onChange={(event) => onKeywordChange(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') onSearch(); }} placeholder="搜索卡券名称或描述..." /></label>
+      <label><span className="sr-only">卡券类型</span><select aria-label="卡券类型" value={filters.purpose ?? 'all'} onChange={(event) => onPurposeChange(event.target.value as CouponBatchVM['purpose'] | 'all')}>{types.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></label>
+      <button className="btn primary" type="button" onClick={onSearch} disabled={phase === 'loading'}>查询</button>
+      <button className="btn ghost" type="button" onClick={onReset}>重置筛选</button>
+      <span className="coupons-total">共 {total} 张</span>
     </div>
   </div>;
 }

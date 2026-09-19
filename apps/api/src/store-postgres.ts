@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchRecord, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductAssetRecord, ProductListQuery, ProductListResult, ProductRecord, ProductSkuRecord, ProductStatus, SessionRecord, Store } from './domain.js';
+import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchRecord, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductAssetRecord, ProductListQuery, ProductListResult, ProductRecord, ProductSkuRecord, ProductStatus, SessionRecord, Store, CouponBatchMetadata, CouponBatchStatus } from './domain.js';
 import { createId } from './security.js';
 
 type Row = Record<string, unknown>;
@@ -72,6 +72,7 @@ export class PostgresStore implements Store {
     const conditions = ["EXISTS (SELECT 1 FROM auth.account_scopes scope WHERE scope.account_id=b.account_id AND scope.admin_id=$1 AND scope.status='active' AND (scope.expires_at IS NULL OR scope.expires_at>now()))"];
     if (query.accountId) { params.push(query.accountId); conditions.push(`b.account_id=$${params.length}`); }
     if (query.status) { params.push(query.status); conditions.push(`b.status=$${params.length}`); }
+    if (query.purpose) { params.push(query.purpose); conditions.push(`b.purpose=$${params.length}`); }
     if (query.keyword) { params.push(`%${query.keyword.trim().toLowerCase()}%`); conditions.push(`(lower(b.id) like $${params.length} or lower(coalesce(b.label,'')) like $${params.length} or lower(b.purpose) like $${params.length})`); }
     if (query.stockAlert) {
       const alertIndex = params.length + 1;
@@ -100,10 +101,18 @@ export class PostgresStore implements Store {
     batch.bindings = bindings.rows.map((row) => this.toCouponBinding(row));
     return batch;
   }
-  async createCouponBatch(input: { adminId: string; accountId: string; label?: string; purpose: string; deliveryScope: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string }): Promise<CouponBatchRecord> {
+  async createCouponBatch(input: { adminId: string; accountId: string; label?: string; purpose: string; deliveryScope: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; metadata?: CouponBatchMetadata }): Promise<CouponBatchRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
-    const result = await this.pool.query('insert into coupons.coupon_batches (id,account_id,label,purpose,delivery_scope,quark_url,extract_code_ciphertext,total_count,status,version) values ($1,$2,$3,$4,$5,$6,$7,$8,\'active\',1) returning *', [createId(), input.accountId, input.label ?? null, input.purpose, input.deliveryScope, input.quarkUrl ?? null, input.extractionCode ? encryptCouponValue(input.extractionCode) : null, 0]);
+    const result = await this.pool.query('insert into coupons.coupon_batches (id,account_id,label,purpose,delivery_scope,quark_url,extract_code_ciphertext,total_count,status,version,metadata_json) values ($1,$2,$3,$4,$5,$6,$7,$8,\'active\',1,$9::jsonb) returning *', [createId(), input.accountId, input.label ?? null, input.purpose, input.deliveryScope, input.quarkUrl ?? null, input.extractionCode ? encryptCouponValue(input.extractionCode) : null, 0, JSON.stringify(input.metadata ?? {})]);
     return this.toCouponBatch(result.rows[0]);
+  }
+  async updateCouponBatch(input: { adminId: string; batchId: string; patch: { label?: string; purpose?: string; deliveryScope?: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; status?: CouponBatchStatus; metadata?: CouponBatchMetadata } }): Promise<CouponBatchRecord | undefined> {
+    const current = await this.getCouponBatch(input.adminId, input.batchId);
+    if (!current) return undefined;
+    const nextMetadata = input.patch.metadata ?? current.metadata ?? {};
+    const extractionCode = input.patch.extractionCode === undefined ? current.extractionCode : input.patch.extractionCode;
+    const result = await this.pool.query('update coupons.coupon_batches set label=$2,purpose=$3,delivery_scope=$4,quark_url=$5,extract_code_ciphertext=$6,status=$7,metadata_json=$8::jsonb,version=version+1,updated_at=now() where id=$1 returning *', [input.batchId, input.patch.label ?? current.label ?? null, input.patch.purpose ?? current.purpose, input.patch.deliveryScope ?? current.deliveryScope, input.patch.quarkUrl ?? current.quarkUrl ?? null, extractionCode ? encryptCouponValue(extractionCode) : null, input.patch.status ?? current.status, JSON.stringify(nextMetadata)]);
+    return result.rows[0] ? this.toCouponBatch(result.rows[0]) : current;
   }
   async importCouponItems(input: { adminId: string; batchId: string; contents: string[] }): Promise<{ batch: CouponBatchRecord; items: CouponItemRecord[]; rejected: Array<{ index: number; code: string; message: string }> }> {
     const client = await this.pool.connect();
@@ -206,7 +215,8 @@ export class PostgresStore implements Store {
 
   private toCouponBatch(row: Row): CouponBatchRecord {
     const totalCount = Number(row.computed_total_count ?? row.total_count ?? 0);
-    return { id: String(row.id), accountId: String(row.account_id), label: row.label ? String(row.label) : undefined, purpose: String(row.purpose), deliveryScope: row.delivery_scope as CouponBatchRecord['deliveryScope'], quarkUrl: row.quark_url ? String(row.quark_url) : undefined, extractionCode: row.extract_code_ciphertext ? decryptCouponValue(row.extract_code_ciphertext) : undefined, totalCount, availableCount: row.computed_available_count === undefined ? undefined : Number(row.computed_available_count), reservedCount: row.computed_reserved_count === undefined ? undefined : Number(row.computed_reserved_count), consumedCount: row.computed_consumed_count === undefined ? undefined : Number(row.computed_consumed_count), status: row.status as CouponBatchRecord['status'], version: Number(row.version ?? 1), createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString() };
+    const metadata = row.metadata_json && typeof row.metadata_json === 'object' && !Array.isArray(row.metadata_json) ? row.metadata_json as CouponBatchMetadata : {};
+    return { id: String(row.id), accountId: String(row.account_id), label: row.label ? String(row.label) : undefined, purpose: String(row.purpose), deliveryScope: row.delivery_scope as CouponBatchRecord['deliveryScope'], quarkUrl: row.quark_url ? String(row.quark_url) : undefined, extractionCode: row.extract_code_ciphertext ? decryptCouponValue(row.extract_code_ciphertext) : undefined, metadata, totalCount, availableCount: row.computed_available_count === undefined ? undefined : Number(row.computed_available_count), reservedCount: row.computed_reserved_count === undefined ? undefined : Number(row.computed_reserved_count), consumedCount: row.computed_consumed_count === undefined ? undefined : Number(row.computed_consumed_count), status: row.status as CouponBatchRecord['status'], version: Number(row.version ?? 1), createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString() };
   }
   private toCouponItem(row: Row): CouponItemRecord { return { id: String(row.id), batchId: String(row.batch_id), content: decryptCouponValue(row.content_ciphertext), status: row.status as CouponItemRecord['status'], reservedUntil: iso(row.reserved_until), consumedAt: iso(row.consumed_at), createdAt: new Date(String(row.created_at)).toISOString() }; }
   private toCouponBinding(row: Row): CouponBindingRecord { return { id: String(row.id), batchId: String(row.coupon_batch_id), productId: String(row.product_id), priority: Number(row.priority ?? 0), status: row.status as CouponBindingRecord['status'], expiresAt: iso(row.expires_at), createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString() }; }

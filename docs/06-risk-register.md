@@ -64,7 +64,8 @@
 
 ## S4-VS3 增量更新（2026-09-19）
 
-- `S4-I003`：卡券受控 content API、管理员 scope、审计摘要、正文加密存储和前端不进列表已实现并通过受控 API/Chrome E2E；真实 PostgreSQL/Redis 容器级验收、订单交付策略和真实买家链路仍开放。
-- `S4-I006`：卡券实现按 `features/coupons` 拆分 API adapter、controller、ViewModel、table、drawer、modal、state boundary；待人工审核确认组件边界和操作可发现性。
-- `S4-I007`：已生成 `1440×900` 和 `390×844` 截图，并完成桌面/移动浏览器路径；完整逐状态视觉回归仍开放，状态暂不关闭。
-- `S5-I007`：S4-VS3 Chrome/CDP 自动化使用临时 profile + MemoryStore/stub，仅作为真实前端跨层受控证据；人工审核必须在目标环境复核，不能把该证据升级为生产持久化或外部平台通过。
+- `S4-I003`：卡券受控 content API、管理员 scope、审计摘要、正文加密存储、列表安全元数据摘要和图片/接口配置边界已实现并通过受控 API/Chrome E2E；真实 PostgreSQL/Redis 容器级验收、订单交付策略和真实买家链路仍开放。
+- `S4-I005`：metadata JSON 已通过 `013_coupons.sql` 扩展和 `014_coupon_card_metadata.sql` 迁移接入 Memory/Postgres store；Postgres 迁移回滚、旧数据兼容和容器级恢复演练仍开放。
+- `S4-I006`：卡券实现按 `features/coupons` 拆分 API adapter、controller、ViewModel、table、drawer、modal、relation modal、state boundary；待人工审核确认组件边界和操作可发现性。
+- `S4-I007`：已生成非空 `1440×900` 和 `390×844` 截图，并完成桌面/移动浏览器路径；完整逐状态视觉回归仍开放，状态暂不关闭。
+- `S5-I007`：S4-VS3 Chrome/CDP 自动化使用临时 profile + MemoryStore/stub，仅作为真实前端跨层受控证据；人工审核必须在目标环境复核搜索/重置/筛选、全选/批量删除、编辑/复制、启禁用、双栏关联和图片预览，不能把该证据升级为生产持久化或外部平台通过。

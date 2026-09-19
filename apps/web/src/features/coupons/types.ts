@@ -3,6 +3,26 @@ export type DeliveryScope = 'system_only' | 'operator_only' | 'buyer_deliverable
 export type CouponItemStatus = 'available' | 'reserved' | 'consumed' | 'delivered' | 'void' | 'exhausted';
 export type StockAlert = 'normal' | 'low_stock' | 'exhausted';
 
+export interface CouponApiConfigVM { url: string; method: 'GET' | 'POST'; timeout?: number; headers?: string; params?: string; responseField?: string; }
+export interface CouponMetadataVM {
+  description?: string;
+  delaySeconds?: number;
+  deliveryCount?: number;
+  useNoLogisticsForm?: boolean;
+  dockable?: boolean;
+  price?: string;
+  feePayer?: 'distributor' | 'dealer';
+  minPrice?: string;
+  dockVisibility?: 'public' | 'dealer_only';
+  multiSpec?: boolean;
+  specName?: string;
+  specValue?: string;
+  textContent?: string;
+  dataContent?: string;
+  apiConfig?: CouponApiConfigVM;
+  imageUrls?: string[];
+}
+
 export interface CouponItemVM {
   id: string;
   batchId: string;
@@ -40,6 +60,9 @@ export interface CouponBatchVM {
   items?: CouponItemVM[];
   quarkUrl?: string;
   extractCode?: string;
+  createdAt?: string;
+  metadata?: CouponMetadataVM;
+  contentPreview?: { text?: string; dataRemaining?: number; apiUrl?: string; imageUrls?: string[] };
 }
 
 export interface CouponContentPreviewVM {
@@ -69,6 +92,7 @@ export interface CouponBatchFilters {
   keyword?: string;
   status?: CouponBatchStatus | 'all';
   stockAlert?: StockAlert | 'all';
+  purpose?: CouponBatchVM['purpose'] | 'all';
   page?: number;
   pageSize?: number;
 }
@@ -95,4 +119,7 @@ export interface CreateCouponBatchRequest {
   quarkUrl?: string;
   extractionCode?: string;
   items?: string[];
+  metadata?: CouponMetadataVM;
 }
+
+export type UpdateCouponBatchRequest = Partial<Omit<CreateCouponBatchRequest, 'items'>> & { status?: CouponBatchStatus };

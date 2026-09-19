@@ -25,11 +25,23 @@ try {
   assert.equal(empty.response.status, 200);
   assert.equal(empty.body.data.total, 0);
 
-  const created = await request('/api/v1/coupons/batches', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-create-1' }, body: JSON.stringify({ accountId: account.id, label: 'Demo cards', purpose: 'product_delivery', deliveryScope: 'operator_only', quarkUrl: 'https://quark.example/demo', extractionCode: 'extract-123' }) });
+  const created = await request('/api/v1/coupons/batches', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-create-1' }, body: JSON.stringify({ accountId: account.id, label: 'Demo cards', purpose: 'text', deliveryScope: 'operator_only', metadata: { description: 'Demo description', textContent: 'Demo content', delaySeconds: 5, dockable: true, price: '9.90' }, quarkUrl: 'https://quark.example/demo', extractionCode: 'extract-123' }) });
   assert.equal(created.response.status, 201);
   const batchId = created.body.data.batchId;
   assert.equal(created.body.data.availableCount, 0);
   assert.equal(created.body.data.stockAlert, 'exhausted');
+  assert.equal(created.body.data.purpose, 'text');
+
+  const updated = await request(`/api/v1/coupons/batches/${batchId}`, { method: 'PATCH', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-update-1' }, body: JSON.stringify({ label: 'Demo cards edited', status: 'paused', metadata: { description: 'Edited description', textContent: 'Edited content' } }) });
+  assert.equal(updated.response.status, 200);
+  assert.equal(updated.body.data.label, 'Demo cards edited');
+  assert.equal(updated.body.data.status, 'paused');
+  assert.equal(updated.body.data.metadata.textContent, 'Edited content');
+
+  const listed = await request(`/api/v1/coupons/batches?accountId=${account.id}`, { headers: { cookie } });
+  assert.equal(listed.response.status, 200);
+  assert.equal(listed.body.data.items[0].metadata.description, 'Edited description');
+  assert.equal(listed.body.data.items[0].metadata.textContent, undefined);
 
   const imported = await request(`/api/v1/coupons/batches/${batchId}/items/import`, { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-import-1' }, body: JSON.stringify({ items: ['code-a', 'code-b', 'code-a', ''] }) });
   assert.equal(imported.response.status, 200);

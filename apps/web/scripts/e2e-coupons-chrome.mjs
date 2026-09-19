@@ -80,7 +80,9 @@ async function assertText(cdp, text) {
 
 async function captureViewport(cdp, width, height, filename) {
   await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
-  const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true });
+  await evaluate(cdp, 'new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false });
   mkdirSync(screenshotDir, { recursive: true });
   writeFileSync(join(screenshotDir, filename), Buffer.from(screenshot.data, 'base64'));
 }
@@ -107,7 +109,25 @@ async function run() {
   const adminId = bootstrapPayload.data.profile.id;
   const account = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `coupons-e2e-${process.pid}` });
   const product = await apiRuntime.store.createProduct({ adminId, accountId: account.id, externalProductRef: `COUPON-ITEM-${process.pid}`, title: '卡券 E2E 商品', description: '受控绑定商品', categoryCode: 'digital', attributes: { source: 'coupons-e2e' }, priceMinor: 1990, status: 'published' });
-  const batch = await apiRuntime.store.createCouponBatch({ adminId, accountId: account.id, label: 'Chrome E2E 卡券批次', purpose: 'text', deliveryScope: 'operator_only' });
+  const batch = await apiRuntime.store.createCouponBatch({
+    adminId,
+    accountId: account.id,
+    label: 'Chrome E2E 卡券批次',
+    purpose: 'text',
+    deliveryScope: 'operator_only',
+    metadata: {
+      description: 'E2E 列表元数据',
+      delaySeconds: 15,
+      deliveryCount: 3,
+      dockable: true,
+      price: '9.90',
+      minPrice: '5.00',
+      feePayer: 'dealer',
+      multiSpec: true,
+      specName: '套餐',
+      specValue: '标准',
+    },
+  });
   await apiRuntime.store.importCouponItems({ adminId, batchId: batch.id, contents: ['E2E-COUPON-001', 'E2E-COUPON-002'] });
   await apiRuntime.store.bindCouponBatch({ adminId, batchId: batch.id, productId: product.id });
 
@@ -123,10 +143,40 @@ async function run() {
   await cdp.send('Page.navigate', { url: `${webUrl}/coupons` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'coupons page');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 卡券批次'), 'coupon list');
-  await assertText(cdp, '低库存批次');
+  await assertText(cdp, '低库存卡券');
+  await assertText(cdp, 'E2E 列表元数据');
+  await assertText(cdp, '对接价：¥9.90');
   await captureViewport(cdp, 1440, 900, 'coupons-desktop-1440x900.png');
 
-  const opened = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.getAttribute("aria-label") === "查看"); if (!button) return false; button.click(); return true; })()');
+  const selected = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("[data-coupons-table] button")).find((candidate) => candidate.getAttribute("aria-label")?.startsWith("选择 ")); if (!button) return false; button.click(); return true; })()');
+  if (!selected) throw new Error('coupon selection checkbox missing');
+  await assertText(cdp, '删除选中 (1)');
+  await assertText(cdp, '关联商品');
+  await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "关联商品")?.click()');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('待选商品'), 'coupon relation modal');
+  await assertText(cdp, '已选商品');
+  await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "取消")?.click()');
+
+  await evaluate(cdp, 'Array.from(document.querySelectorAll("[data-coupons-table] button")).find((button) => button.getAttribute("aria-label") === "编辑")?.click()');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('编辑卡券'), 'coupon edit modal');
+  const edited = await evaluate(cdp, '(() => { const input = Array.from(document.querySelectorAll("input")).find((item) => item.value === "Chrome E2E 卡券批次"); if (!input) return false; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set; setter?.call(input, "Chrome E2E 卡券编辑"); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); return true; })()');
+  if (!edited) throw new Error('coupon edit name input missing');
+  await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "保存")?.click()');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 卡券编辑'), 'coupon edit persisted');
+
+  await evaluate(cdp, 'Array.from(document.querySelectorAll("[data-coupons-table] button")).find((button) => button.getAttribute("aria-label") === "复制")?.click()');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('复制卡券'), 'coupon copy modal');
+  const copied = await evaluate(cdp, '(() => { const input = Array.from(document.querySelectorAll("input")).find((item) => item.value === "Chrome E2E 卡券编辑"); if (!input) return false; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set; setter?.call(input, "Chrome E2E 卡券复制"); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); return true; })()');
+  if (!copied) throw new Error('coupon copy name input missing');
+  await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "保存")?.click()');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 卡券复制'), 'coupon copy persisted');
+
+  await evaluate(cdp, 'Array.from(document.querySelectorAll("[data-coupons-table] button")).find((button) => button.getAttribute("aria-label") === "禁用")?.click()');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('禁用'), 'coupon toggle disabled');
+  await evaluate(cdp, 'Array.from(document.querySelectorAll("[data-coupons-table] button")).find((button) => button.getAttribute("aria-label") === "启用")?.click()');
+  await waitFor(async () => !String(await evaluate(cdp, 'document.body.innerText')).includes('禁用'), 'coupon toggle enabled');
+
+  const opened = await evaluate(cdp, '(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes("Chrome E2E 卡券编辑")); const button = row ? Array.from(row.querySelectorAll("button")).find((candidate) => ["查看", "查看明细"].includes(candidate.getAttribute("aria-label") ?? "")) : undefined; if (!button) return false; button.click(); return true; })()');
   if (!opened) throw new Error('coupon detail button missing');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('导入库存'), 'coupon drawer');
   const previewButton = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent?.includes("查看首条可用正文")); if (!button) return false; button.click(); return true; })()');
@@ -147,7 +197,7 @@ async function run() {
   await evaluate(cdp, 'window.confirm = () => true; Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.includes("作废批次"))?.click()');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('voided'), 'coupon void completed');
   await cdp.send('Page.reload', { ignoreCache: true });
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 卡券批次'), 'coupon reload persistence');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 卡券编辑'), 'coupon reload persistence');
   await captureViewport(cdp, 390, 844, 'coupons-mobile-390x844.png');
   await cdp.send('Emulation.clearDeviceMetricsOverride');
   console.log('local Chrome E2E passed: coupons list -> detail -> preview/copy -> import -> bind -> void -> reload');

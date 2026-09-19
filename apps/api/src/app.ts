@@ -353,7 +353,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   if (ctx.path === '/api/v1/coupons/batches' && ctx.method === 'POST') {
     const accountId = String(ctx.body.accountId ?? '');
     const result = await mutation(runtime, ctx, authContext, accountId || undefined, async () => {
-      const batch = await coupons.create({ adminId: authContext.admin.id, accountId, label: optionalString(ctx.body.label), purpose: String(ctx.body.purpose ?? ''), deliveryScope: String(ctx.body.deliveryScope ?? '') as never, quarkUrl: optionalString(ctx.body.quarkUrl), extractionCode: optionalString(ctx.body.extractionCode), requestId: ctx.requestId, traceId: ctx.traceId });
+      const batch = await coupons.create({ adminId: authContext.admin.id, accountId, label: optionalString(ctx.body.label), purpose: String(ctx.body.purpose ?? ''), deliveryScope: String(ctx.body.deliveryScope ?? '') as never, quarkUrl: optionalString(ctx.body.quarkUrl), extractionCode: optionalString(ctx.body.extractionCode), metadata: readCouponMetadata(ctx.body.metadata), requestId: ctx.requestId, traceId: ctx.traceId });
       return success(ctx, batch, 201);
     });
     return result;
@@ -363,6 +363,9 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     const batchId = decodeURIComponent(couponBatchMatch[1]);
     const action = couponBatchMatch[2];
     if (!action && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, await coupons.get(authContext.admin.id, batchId)).body };
+    if (!action && (ctx.method === 'PATCH' || ctx.method === 'PUT')) {
+      return mutation(runtime, ctx, authContext, batchId, async () => success(ctx, await coupons.update({ adminId: authContext.admin.id, batchId, patch: { label: optionalString(ctx.body.label), purpose: optionalString(ctx.body.purpose), deliveryScope: optionalString(ctx.body.deliveryScope) as never, quarkUrl: optionalString(ctx.body.quarkUrl), extractionCode: optionalString(ctx.body.extractionCode), status: optionalString(ctx.body.status) as never, metadata: readCouponMetadata(ctx.body.metadata) }, requestId: ctx.requestId, traceId: ctx.traceId })));
+    }
     if (!action && ctx.method === 'DELETE') {
       return mutation(runtime, ctx, authContext, batchId, async () => success(ctx, await coupons.delete({ adminId: authContext.admin.id, batchId, requestId: ctx.requestId, traceId: ctx.traceId })));
     }
@@ -464,6 +467,7 @@ function parseCouponBatchListQuery(query: Record<string, string>): import('./dom
     keyword: optionalString(query.keyword),
     status: optionalString(query.status) as import('./domain.js').CouponBatchListQuery['status'],
     stockAlert: optionalString(query.stockAlert) as import('./domain.js').CouponBatchListQuery['stockAlert'],
+    purpose: optionalString(query.purpose) as import('./domain.js').CouponBatchListQuery['purpose'],
     page: page === undefined || Number.isNaN(page) ? page : Math.trunc(page),
     pageSize: pageSize === undefined || Number.isNaN(pageSize) ? pageSize : Math.trunc(pageSize),
   };
@@ -524,6 +528,32 @@ function firstProfileString(root: unknown, keys: string[]): string | undefined {
 function readCredentialMetadata(value: unknown): Record<string, string> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, item]) => typeof item === 'string').map(([key, item]) => [key, String(item)]));
+}
+
+function readCouponMetadata(value: unknown): import('./domain.js').CouponBatchMetadata | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const source = value as Record<string, unknown>;
+  const metadata: import('./domain.js').CouponBatchMetadata = {};
+  if (typeof source.description === 'string') metadata.description = source.description;
+  if (typeof source.delaySeconds === 'number' && Number.isFinite(source.delaySeconds)) metadata.delaySeconds = Math.max(0, Math.trunc(source.delaySeconds));
+  if (typeof source.deliveryCount === 'number' && Number.isFinite(source.deliveryCount)) metadata.deliveryCount = Math.max(0, Math.trunc(source.deliveryCount));
+  if (typeof source.useNoLogisticsForm === 'boolean') metadata.useNoLogisticsForm = source.useNoLogisticsForm;
+  if (typeof source.dockable === 'boolean') metadata.dockable = source.dockable;
+  if (typeof source.price === 'string') metadata.price = source.price;
+  if (source.feePayer === 'distributor' || source.feePayer === 'dealer') metadata.feePayer = source.feePayer;
+  if (typeof source.minPrice === 'string') metadata.minPrice = source.minPrice;
+  if (source.dockVisibility === 'public' || source.dockVisibility === 'dealer_only') metadata.dockVisibility = source.dockVisibility;
+  if (typeof source.multiSpec === 'boolean') metadata.multiSpec = source.multiSpec;
+  if (typeof source.specName === 'string') metadata.specName = source.specName;
+  if (typeof source.specValue === 'string') metadata.specValue = source.specValue;
+  if (typeof source.textContent === 'string') metadata.textContent = source.textContent;
+  if (typeof source.dataContent === 'string') metadata.dataContent = source.dataContent;
+  if (source.apiConfig && typeof source.apiConfig === 'object' && !Array.isArray(source.apiConfig)) {
+    const api = source.apiConfig as Record<string, unknown>;
+    if (typeof api.url === 'string' && (api.method === 'GET' || api.method === 'POST')) metadata.apiConfig = { url: api.url, method: api.method, timeout: typeof api.timeout === 'number' ? api.timeout : undefined, headers: typeof api.headers === 'string' ? api.headers : undefined, params: typeof api.params === 'string' ? api.params : undefined, responseField: typeof api.responseField === 'string' ? api.responseField : undefined };
+  }
+  if (Array.isArray(source.imageUrls)) metadata.imageUrls = source.imageUrls.filter((item): item is string => typeof item === 'string').slice(0, 3);
+  return metadata;
 }
 
 function mapQrStatusToLoginStatus(status: string): 'waiting' | 'scanned' | 'succeeded' | 'expired' | 'failed' | 'cancelled' | 'verification_required' | undefined {

@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS coupons.coupon_batches (
   total_count integer NOT NULL DEFAULT 0 CHECK (total_count >= 0),
   status text NOT NULL DEFAULT 'active' CHECK (status IN ('draft', 'active', 'paused', 'closed', 'exhausted', 'voided')),
   version integer NOT NULL DEFAULT 1 CHECK (version > 0),
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );

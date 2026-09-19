@@ -73,7 +73,7 @@ function AuthenticatedShell({ page, activeNav, accountsApi, productsApi, coupons
         </aside>
         <div className="desktop-body">
           <header className="topbar"><div className="topbar-copy"><strong>{activeNav.label}</strong><span>{activeNav.sub} · 管理员工作空间</span></div><label className="search-box"><span aria-hidden="true">⌕</span><input aria-label="全局搜索" placeholder="搜索账号、商品或订单" /></label><div className="top-actions"><button className="icon-button" type="button" aria-label="通知"><span aria-hidden="true">♢</span><b>3</b></button><div className="user-chip"><div className="avatar">管</div><span>管理员</span></div></div></header>
-          <main>{page === 'accounts' ? <AccountsPage api={accountsApi} /> : page === 'products' ? <ProductsPage api={productsApi} /> : page === 'coupons' ? <CouponsPage api={couponsApi} /> : <PlaceholderPage page={page} />}</main>
+          <main>{page === 'accounts' ? <AccountsPage api={accountsApi} /> : page === 'products' ? <ProductsPage api={productsApi} /> : page === 'coupons' ? <CouponsPage api={couponsApi} productsApi={productsApi} /> : <PlaceholderPage page={page} />}</main>
         </div>
       </div>
     </div>

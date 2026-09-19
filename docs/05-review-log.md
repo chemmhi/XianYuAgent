@@ -176,12 +176,12 @@
 
 | 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
 | --- | --- | --- | --- | --- | --- |
-| S5-R16 | 后端 / API | 批次、库存导入、绑定、作废、DELETE 软作废、正文受控预览、scope、审计和加密存储 | root + backend_coupons | PASS（受控环境） | `apps/api/src/services.ts`、`apps/api/src/store-memory.ts`、`apps/api/src/store-postgres.ts`、`apps/api/migrations/013_coupons.sql`；`npm --workspace apps/api run test`；`node apps/api/scripts/coupons-smoke.mjs` |
-| S5-R17 | 前端 / API 适配 | `/coupons`、列表/详情/创建/导入/绑定/作废、错误状态、content 预览/复制、字段映射 | root | PASS（受控环境） | `apps/web/src/features/coupons/`；`npm --workspace apps/web run test`；`npm --workspace apps/web run build` |
-| S5-R18 | 真实浏览器 E2E | 正式路由 → 真实 API → MemoryStore → 页面可见结果 → 刷新后状态保持 | root | PASS（受控环境） | `apps/web/scripts/e2e-coupons-chrome.mjs`；`npm --workspace apps/web run test:e2e:chrome:coupons`；`docs/evidence/stage5/S4-VS3/screenshots/` |
-| S5-R19 | 视觉 / 人工审核 | 平台样式一致性、桌面/移动 viewport、列表密度、操作可发现性、逐状态视觉回归 | 用户 | READY_FOR_REVIEW | `docs/evidence/stage5/S4-VS3/test-baseline.md`；等待人工审核，不合入 `master` |
+| S5-R16 | 后端 / API | 批次、`purpose` 类型、metadata、列表安全摘要、PATCH/PUT 编辑、库存导入、绑定、作废、DELETE 软作废、正文受控预览、scope、审计和加密存储 | root + backend_coupons | PASS（受控环境） | `apps/api/src/services.ts`、`apps/api/src/store-memory.ts`、`apps/api/src/store-postgres.ts`、`apps/api/migrations/013_coupons.sql`、`apps/api/migrations/014_coupon_card_metadata.sql`；`npm --workspace apps/api run test`；`node apps/api/scripts/coupons-smoke.mjs` |
+| S5-R17 | 前端 / API 适配 | `/coupons`、搜索/重置/类型筛选、选择列/批量删除、详情/创建/编辑/复制、启用/禁用、导入/绑定、双栏关联、图片原图预览、错误状态、content 预览/复制、字段映射 | root | PASS（受控环境） | `apps/web/src/features/coupons/`；`npm test`；`npm run typecheck`；`npm run build` |
+| S5-R18 | 真实浏览器 E2E | 正式路由 → 真实 API → MemoryStore → 列表安全元数据列 → 选择/关联 → 编辑/复制 → 启禁用 → 详情/预览/导入/绑定/作废 → 刷新后状态保持 | root | PASS（受控环境） | `apps/web/scripts/e2e-coupons-chrome.mjs`；`npm run test:e2e:chrome:coupons`；`docs/evidence/stage5/S4-VS3/screenshots/` |
+| S5-R19 | 视觉 / 人工审核 | 平台样式一致性、桌面/移动 viewport、列表密度、操作可发现性、搜索/重置/类型筛选、全选/批量删除、编辑/复制、启禁用、双栏关联保存/移除、图片原图预览和逐状态视觉回归 | 用户 | READY_FOR_REVIEW | `docs/evidence/stage5/S4-VS3/test-baseline.md`；等待人工审核，不合入 `master` |
 
-### 10.7 S4-VS1 账号管理人工放行（2026-09-20）
+### 10.7 S4-VS1 账号管理人工放行（2026-09-19）
 
 | 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
 | --- | --- | --- | --- | --- | --- |
