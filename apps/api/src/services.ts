@@ -1,6 +1,7 @@
 import type { AppConfig } from './config.js';
-import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductListQuery, ProductListResult, ProductRecord, SessionRecord, Store } from './domain.js';
+import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSyncResult, SessionRecord, Store } from './domain.js';
 import { createId, createToken, digestJson, hashPassword, isSessionFresh, sha256, verifyPassword } from './security.js';
+import type { XianyuMtopClient } from './xianyu-mtop.js';
 
 export interface AuthContext {
   admin: AdminRecord;
@@ -78,7 +79,7 @@ export class AccountService {
 }
 
 export class ProductService {
-  constructor(private readonly store: Store) {}
+  constructor(private readonly store: Store, private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => Promise<string>) {}
 
   async list(adminId: string, query: ProductListQuery): Promise<ProductListResult> {
     if (query.accountId && (!isUuid(query.accountId) || !(await this.store.hasAccountScope(adminId, query.accountId)))) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
@@ -98,9 +99,133 @@ export class ProductService {
     if (!product) throw new ServiceError(404, 'NOT_FOUND', 'product not found');
     return product;
   }
+
+  async create(input: { adminId: string; accountId: string; externalProductRef?: string; title: unknown; description?: unknown; categoryCode?: unknown; attributesJson?: unknown; defaultReplyTemplate?: unknown; aiPrompt?: unknown; priceMinor?: unknown; requestId: string; traceId: string }): Promise<ProductRecord> {
+    if (!isUuid(input.accountId) || !(await this.store.hasAccountScope(input.adminId, input.accountId))) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
+    const normalized = validateProductWrite(input, false);
+    if (!normalized.title) throw new ServiceError(422, 'VALIDATION_FAILED', 'title must be between 1 and 200 characters');
+    try {
+      const product = await this.store.createProduct({ adminId: input.adminId, accountId: input.accountId, externalProductRef: normalizeOptionalString(input.externalProductRef), title: normalized.title, description: normalized.description ?? undefined, categoryCode: normalized.categoryCode ?? undefined, attributes: normalized.attributes, defaultReplyTemplate: normalized.defaultReplyTemplate ?? undefined, aiPrompt: normalized.aiPrompt ?? undefined, priceMinor: normalized.priceMinor ?? undefined, status: 'draft' });
+      await this.audit({ actorId: input.adminId, action: 'product.created', targetRef: product.id, requestId: input.requestId, traceId: input.traceId, payload: { accountId: product.accountId, title: product.title, externalProductRef: product.externalProductRef, status: product.status }, accountId: product.accountId });
+      return product;
+    } catch (error) {
+      throw mapProductStoreError(error);
+    }
+  }
+
+  async update(input: { adminId: string; productId: string; accountId?: string; expectedConfigVersion: unknown; patch: Record<string, unknown>; requestId: string; traceId: string }): Promise<ProductRecord> {
+    if (!isUuid(input.productId)) throw new ServiceError(404, 'NOT_FOUND', 'product not found');
+    if (!Number.isSafeInteger(input.expectedConfigVersion) || Number(input.expectedConfigVersion) < 1) throw new ServiceError(422, 'VALIDATION_FAILED', 'expectedConfigVersion must be a positive integer');
+    if (input.accountId !== undefined) {
+      if (!isUuid(input.accountId) || !(await this.store.hasAccountScope(input.adminId, input.accountId))) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
+      const scopedProduct = await this.store.getProduct(input.adminId, input.productId);
+      if (!scopedProduct) throw new ServiceError(404, 'NOT_FOUND', 'product not found');
+      if (scopedProduct.accountId !== input.accountId) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
+    }
+    const patch = validateProductWrite(input.patch, true);
+    if (Object.keys(patch).length === 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'product patch must contain at least one editable field');
+    try {
+      const product = await this.store.updateProduct({ adminId: input.adminId, productId: input.productId, expectedConfigVersion: Number(input.expectedConfigVersion), patch });
+      if (!product) throw new ServiceError(404, 'NOT_FOUND', 'product not found');
+      await this.audit({ actorId: input.adminId, action: 'product.updated', targetRef: product.id, requestId: input.requestId, traceId: input.traceId, payload: { fields: Object.keys(patch), expectedConfigVersion: input.expectedConfigVersion, configVersion: product.configVersion }, accountId: product.accountId });
+      return product;
+    } catch (error) {
+      throw mapProductStoreError(error);
+    }
+  }
+}
+
+export class ProductSyncService {
+  constructor(private readonly store: Store, private readonly xianyu: XianyuMtopClient, private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => Promise<string>) {}
+
+  async sync(input: { adminId: string; accountId: string; pageSize?: unknown; maxPages?: unknown; requestId: string; traceId: string }): Promise<ProductSyncResult> {
+    if (!isUuid(input.accountId) || !(await this.store.hasAccountScope(input.adminId, input.accountId))) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
+    const pageSize = normalizeBoundedInteger(input.pageSize, 20, 1, 100);
+    const maxPages = normalizeBoundedInteger(input.maxPages, 20, 1, 100);
+    const syncRunId = createId();
+    const fetched = await this.xianyu.fetchItemsAll(input.adminId, input.accountId, pageSize, maxPages);
+    const firstFailure = fetched.pages.find((page) => !page.success);
+    if (firstFailure) {
+      if (firstFailure.accountInvalid) throw new ServiceError(409, 'ACCOUNT_REAUTH_REQUIRED', firstFailure.message ?? 'xianyu credential is invalid', { errorCode: firstFailure.errorCode });
+      throw new ServiceError(502, 'XIANYU_SYNC_FAILED', firstFailure.message ?? 'xianyu product sync failed', { errorCode: firstFailure.errorCode });
+    }
+    let createdCount = 0;
+    let updatedCount = 0;
+    let skippedLocalDraftCount = 0;
+    const products: ProductRecord[] = [];
+    const syncedAt = new Date().toISOString();
+    for (const item of fetched.items) {
+      const upserted = await this.store.upsertExternalProduct({ adminId: input.adminId, accountId: input.accountId, item, syncedAt });
+      products.push(upserted.product);
+      if (upserted.action === 'created') createdCount += 1;
+      else if (upserted.action === 'updated') updatedCount += 1;
+      else skippedLocalDraftCount += 1;
+    }
+    await this.audit({ actorId: input.adminId, action: 'product.sync.completed', targetRef: syncRunId, requestId: input.requestId, traceId: input.traceId, accountId: input.accountId, payload: { pagesFetched: fetched.pages.length, fetchedCount: fetched.items.length, createdCount, updatedCount, skippedLocalDraftCount, hasMore: fetched.hasMore } });
+    return { syncRunId, accountId: input.accountId, pageNumber: 1, pageSize, pagesFetched: fetched.pages.length, fetchedCount: fetched.items.length, createdCount, updatedCount, skippedLocalDraftCount, items: products, hasMore: fetched.hasMore, nextPageNumber: fetched.hasMore ? fetched.pages.length + 1 : undefined };
+  }
 }
 
 function isUuid(value: string): boolean { return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value); }
+
+function normalizeBoundedInteger(value: unknown, fallback: number, minimum: number, maximum: number): number {
+  const numeric = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : Number.NaN;
+  if (!Number.isSafeInteger(numeric)) return fallback;
+  return Math.min(maximum, Math.max(minimum, numeric));
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  return normalized || undefined;
+}
+
+function validateProductWrite(input: Record<string, unknown>, patch: boolean): ProductPatch {
+  const result: ProductPatch = {};
+  if (!patch || Object.prototype.hasOwnProperty.call(input, 'title')) {
+    if (typeof input.title !== 'string' || input.title.trim().length < 1 || input.title.trim().length > 200) throw new ServiceError(422, 'VALIDATION_FAILED', 'title must be between 1 and 200 characters');
+    result.title = input.title.trim();
+  }
+  if (Object.prototype.hasOwnProperty.call(input, 'description') && input.description !== undefined) {
+    if (input.description !== null && typeof input.description !== 'string') throw new ServiceError(422, 'VALIDATION_FAILED', 'description must be a string or null');
+    if (typeof input.description === 'string' && input.description.trim().length > 5000) throw new ServiceError(422, 'VALIDATION_FAILED', 'description must be at most 5000 characters');
+    result.description = input.description === null ? null : input.description.trim();
+  }
+  if (Object.prototype.hasOwnProperty.call(input, 'categoryCode') && input.categoryCode !== undefined) {
+    if (input.categoryCode !== null && typeof input.categoryCode !== 'string') throw new ServiceError(422, 'VALIDATION_FAILED', 'categoryCode must be a string or null');
+    if (typeof input.categoryCode === 'string' && input.categoryCode.trim().length > 64) throw new ServiceError(422, 'VALIDATION_FAILED', 'categoryCode must be at most 64 characters');
+    result.categoryCode = input.categoryCode === null ? null : (input.categoryCode.trim() || null);
+  }
+  if (Object.prototype.hasOwnProperty.call(input, 'attributesJson') && input.attributesJson !== undefined) {
+    if (!input.attributesJson || typeof input.attributesJson !== 'object' || Array.isArray(input.attributesJson)) throw new ServiceError(422, 'VALIDATION_FAILED', 'attributesJson must be an object');
+    result.attributes = { ...(input.attributesJson as Record<string, unknown>) };
+  } else if (Object.prototype.hasOwnProperty.call(input, 'attributes') && input.attributes !== undefined) {
+    if (!input.attributes || typeof input.attributes !== 'object' || Array.isArray(input.attributes)) throw new ServiceError(422, 'VALIDATION_FAILED', 'attributesJson must be an object');
+    result.attributes = { ...(input.attributes as Record<string, unknown>) };
+  }
+  for (const key of ['defaultReplyTemplate', 'aiPrompt'] as const) {
+    if (!Object.prototype.hasOwnProperty.call(input, key)) continue;
+    const value = input[key];
+    if (value === undefined) continue;
+    if (value !== null && typeof value !== 'string') throw new ServiceError(422, 'VALIDATION_FAILED', `${key} must be a string or null`);
+    result[key] = value === null ? null : value.trim();
+  }
+  if (Object.prototype.hasOwnProperty.call(input, 'priceMinor') && input.priceMinor !== undefined) {
+    if (input.priceMinor !== null && (!Number.isSafeInteger(input.priceMinor) || Number(input.priceMinor) < 0)) throw new ServiceError(422, 'VALIDATION_FAILED', 'priceMinor must be a non-negative integer');
+    result.priceMinor = input.priceMinor === null ? null : Number(input.priceMinor);
+  }
+  return result;
+}
+
+function mapProductStoreError(error: unknown): ServiceError {
+  const code = error instanceof Error ? error.message : String(error);
+  if (code === 'ACCOUNT_SCOPE_FORBIDDEN') return new ServiceError(403, 'FORBIDDEN', 'account scope required');
+  if (code === 'PRODUCT_VERSION_CONFLICT') return new ServiceError(409, 'PRODUCT_VERSION_CONFLICT', 'product config version conflict');
+  if (code === 'PRODUCT_DUPLICATE' || (error as { code?: string })?.code === '23505') return new ServiceError(409, 'CONFLICT', 'product already exists');
+  if (code === 'PRODUCT_PATCH_EMPTY') return new ServiceError(422, 'VALIDATION_FAILED', 'product patch must contain at least one editable field');
+  if (error instanceof ServiceError) return error;
+  throw error;
+}
 
 export class CredentialService {
   constructor(private readonly store: Store, private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => Promise<string>) {}

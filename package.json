@@ -14,7 +14,7 @@
   "scripts": {
     "predev": "npm run dev:prepare",
     "dev": "concurrently --kill-others-on-fail --names api,worker,web --prefix-colors blue,magenta,green \"npm:dev:api\" \"npm:dev:worker\" \"npm:dev:web\"",
-    "dev:prepare": "docker compose stop api worker && docker compose up -d postgres redis object-storage",
+    "dev:prepare": "docker compose stop api worker && docker compose up -d postgres redis object-storage && npm run db:migrate",
     "infra:up": "docker compose up -d postgres redis object-storage",
     "infra:down": "docker compose stop postgres redis object-storage",
     "dev:api": "cross-env NODE_ENV=development DATABASE_URL=postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/xianyu_agent REDIS_URL=redis://127.0.0.1:6379 ALLOW_IN_MEMORY=false COOKIE_SECURE=false XIANYU_QR_MODE=real npm --workspace apps/api run dev",
@@ -40,7 +40,8 @@
     "compose:up:d": "docker compose --profile full up -d --build",
     "compose:down": "docker compose down",
     "compose:logs": "docker compose --profile full logs -f api worker",
-    "compose:ps": "docker compose ps"
+    "compose:ps": "docker compose ps",
+    "db:migrate": "npm --workspace apps/api run migrate"
   },
   "devDependencies": {
     "concurrently": "10.0.5",

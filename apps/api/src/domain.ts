@@ -6,6 +6,7 @@ export type CredentialStatus = 'active' | 'expired' | 'revoked';
 export type ProductStatus = 'draft' | 'ready' | 'publishing' | 'published' | 'failed' | 'archived';
 export type ProductSkuStatus = 'active' | 'archived';
 export type ProductAssetStatus = 'active' | 'archived' | 'failed';
+export type ProductSource = 'local' | 'xianyu';
 
 export interface ProductSkuRecord {
   id: string;
@@ -38,12 +39,57 @@ export interface ProductRecord {
   configVersion: number;
   priceMinor?: number;
   status: ProductStatus;
+  source: ProductSource;
+  lastSyncedAt?: string;
+  sourcePayloadDigest?: string;
   createdAt: string;
   updatedAt: string;
   skuCount?: number;
   assetCount?: number;
   skus?: ProductSkuRecord[];
   assets?: ProductAssetRecord[];
+}
+
+export interface XianyuProductItem {
+  externalProductRef: string;
+  title: string;
+  description?: string;
+  categoryCode?: string;
+  priceMinor?: number;
+  externalStatus?: string;
+  detailUrl?: string;
+  imageUrls: string[];
+  attributes: Record<string, unknown>;
+  sourcePayloadDigest: string;
+}
+
+export interface ProductSyncPageResult {
+  items: XianyuProductItem[];
+  pageNumber: number;
+  pageSize: number;
+  totalCount?: number;
+  totalPages?: number;
+  hasMore: boolean;
+}
+
+export interface ProductSyncResult {
+  syncRunId: string;
+  accountId: string;
+  pageNumber: number;
+  pageSize: number;
+  pagesFetched: number;
+  fetchedCount: number;
+  createdCount: number;
+  updatedCount: number;
+  skippedLocalDraftCount: number;
+  items: ProductRecord[];
+  hasMore: boolean;
+  nextPageNumber?: number;
+}
+
+export interface ProductUpsertResult {
+  action: 'created' | 'updated' | 'skipped_local_draft';
+  product: ProductRecord;
 }
 
 export interface ProductListQuery {
@@ -62,6 +108,16 @@ export interface ProductListResult {
   pageSize: number;
   total: number;
   totalPages: number;
+}
+
+export interface ProductPatch {
+  title?: string;
+  description?: string | null;
+  categoryCode?: string | null;
+  attributes?: Record<string, unknown>;
+  defaultReplyTemplate?: string | null;
+  aiPrompt?: string | null;
+  priceMinor?: number | null;
 }
 
 export interface AdminRecord {
@@ -212,4 +268,6 @@ export interface Store {
     priceMinor?: number;
     status?: ProductStatus;
   }): Promise<ProductRecord>;
+  updateProduct(input: { adminId: string; productId: string; expectedConfigVersion: number; patch: ProductPatch }): Promise<ProductRecord | undefined>;
+  upsertExternalProduct(input: { adminId: string; accountId: string; item: XianyuProductItem; syncedAt: string }): Promise<ProductUpsertResult>;
 }

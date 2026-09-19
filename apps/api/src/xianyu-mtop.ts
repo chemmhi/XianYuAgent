@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import type { ProductSyncPageResult } from './domain.js';
+import { mapXianyuProductPage } from './xianyu-product-mapper.js';
 
 const APP_KEY = '34839810';
 const BASE_URL = 'https://h5api.m.goofish.com/h5';
@@ -14,6 +16,8 @@ export interface MtopResult {
   response?: Record<string, unknown>;
   cookieHeader: string;
 }
+
+export interface XianyuItemsPageResult extends MtopResult, ProductSyncPageResult {}
 
 export interface XianyuMtopClientOptions {
   timeoutMs?: number;
@@ -42,6 +46,40 @@ export class XianyuMtopClient {
 
   async fetchItems(adminId: string, accountId: string, data: Record<string, unknown> = {}): Promise<MtopResult> {
     return this.call(adminId, accountId, 'mtop.idle.web.xyh.item.list', '1.0', data);
+  }
+
+  async fetchItemsPage(adminId: string, accountId: string, pageNumber = 1, pageSize = 20): Promise<XianyuItemsPageResult> {
+    const credential = await this.loadCredential(adminId, accountId);
+    const cookieHeader = credential?.cookieHeader?.trim() ?? '';
+    const userId = cookieValue(cookieHeader, 'unb');
+    const response = await this.call(adminId, accountId, 'mtop.idle.web.xyh.item.list', '1.0', {
+      needGroupInfo: false,
+      pageNumber: Math.max(1, Math.trunc(pageNumber)),
+      pageSize: Math.min(100, Math.max(1, Math.trunc(pageSize))),
+      groupName: '在售',
+      groupId: '58877261',
+      defaultGroup: true,
+      ...(userId ? { userId } : {}),
+    }, { spm_cnt: 'a21ybx.im.0.0' });
+    const normalizedPage = mapXianyuProductPage(response.response, Math.max(1, Math.trunc(pageNumber)), Math.min(100, Math.max(1, Math.trunc(pageSize))));
+    return { ...response, ...normalizedPage };
+  }
+
+  async fetchItemsAll(adminId: string, accountId: string, pageSize = 20, maxPages = 20): Promise<{ pages: XianyuItemsPageResult[]; items: ProductSyncPageResult['items']; hasMore: boolean }> {
+    const pages: XianyuItemsPageResult[] = [];
+    const items: ProductSyncPageResult['items'] = [];
+    let pageNumber = 1;
+    let hasMore = false;
+    const limit = Math.min(100, Math.max(1, Math.trunc(maxPages)));
+    do {
+      const page = await this.fetchItemsPage(adminId, accountId, pageNumber, pageSize);
+      pages.push(page);
+      if (!page.success) return { pages, items, hasMore: false };
+      items.push(...page.items);
+      hasMore = page.hasMore;
+      pageNumber += 1;
+    } while (hasMore && pages.length < limit);
+    return { pages, items, hasMore };
   }
 
   async fetchSoldOrders(adminId: string, accountId: string, data: Record<string, unknown> = {}): Promise<MtopResult> {

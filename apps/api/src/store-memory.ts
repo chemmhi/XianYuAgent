@@ -1,4 +1,4 @@
-import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductListQuery, ProductListResult, ProductRecord, ProductStatus, SessionRecord, Store } from './domain.js';
+import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { createId } from './security.js';
 
 export class MemoryStore implements Store {
@@ -89,9 +89,50 @@ export class MemoryStore implements Store {
     const duplicate = [...this.products.values()].find((product) => product.accountId === input.accountId && input.externalProductRef && product.externalProductRef === input.externalProductRef);
     if (duplicate) throw new Error('PRODUCT_DUPLICATE');
     const now = new Date().toISOString();
-    const product: ProductRecord = { id: createId(), accountId: input.accountId, externalProductRef: input.externalProductRef, title: input.title, description: input.description, categoryCode: input.categoryCode, attributes: input.attributes ?? {}, defaultReplyTemplate: input.defaultReplyTemplate, aiPrompt: input.aiPrompt, configVersion: 1, priceMinor: input.priceMinor, status: input.status ?? 'draft', createdAt: now, updatedAt: now, skuCount: 0, assetCount: 0, skus: [], assets: [] };
+    const product: ProductRecord = { id: createId(), accountId: input.accountId, externalProductRef: input.externalProductRef, title: input.title, description: input.description, categoryCode: input.categoryCode, attributes: input.attributes ?? {}, defaultReplyTemplate: input.defaultReplyTemplate, aiPrompt: input.aiPrompt, configVersion: 1, priceMinor: input.priceMinor, status: input.status ?? 'draft', source: 'local', createdAt: now, updatedAt: now, skuCount: 0, assetCount: 0, skus: [], assets: [] };
     this.products.set(product.id, product);
     return product;
+  }
+
+  async upsertExternalProduct(input: { adminId: string; accountId: string; item: XianyuProductItem; syncedAt: string }): Promise<ProductUpsertResult> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const existing = [...this.products.values()].find((product) => product.accountId === input.accountId && product.externalProductRef === input.item.externalProductRef);
+    if (existing?.source === 'local' && existing.status === 'draft') return { action: 'skipped_local_draft', product: this.productDetail(existing) };
+    const now = new Date().toISOString();
+    const attributes = { ...input.item.attributes, xianyu: { detailUrl: input.item.detailUrl, externalStatus: input.item.externalStatus, imageUrls: input.item.imageUrls } };
+    if (existing) {
+      existing.title = input.item.title;
+      existing.description = input.item.description;
+      existing.categoryCode = input.item.categoryCode;
+      existing.priceMinor = input.item.priceMinor;
+      existing.attributes = attributes;
+      existing.source = 'xianyu';
+      existing.sourcePayloadDigest = input.item.sourcePayloadDigest;
+      existing.lastSyncedAt = input.syncedAt;
+      existing.status = 'published';
+      existing.configVersion += 1;
+      existing.updatedAt = now;
+      return { action: 'updated', product: this.productDetail(existing) };
+    }
+    const product: ProductRecord = { id: createId(), accountId: input.accountId, externalProductRef: input.item.externalProductRef, title: input.item.title, description: input.item.description, categoryCode: input.item.categoryCode, attributes, configVersion: 1, priceMinor: input.item.priceMinor, status: 'published', source: 'xianyu', lastSyncedAt: input.syncedAt, sourcePayloadDigest: input.item.sourcePayloadDigest, createdAt: now, updatedAt: now, skuCount: 0, assetCount: 0, skus: [], assets: [] };
+    this.products.set(product.id, product);
+    return { action: 'created', product: this.productDetail(product) };
+  }
+  async updateProduct(input: { adminId: string; productId: string; expectedConfigVersion: number; patch: ProductPatch }): Promise<ProductRecord | undefined> {
+    const product = this.products.get(input.productId);
+    if (!product) return undefined;
+    if (!(await this.hasAccountScope(input.adminId, product.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    if (product.configVersion !== input.expectedConfigVersion) throw new Error('PRODUCT_VERSION_CONFLICT');
+    if (input.patch.title !== undefined) product.title = input.patch.title;
+    if (input.patch.description !== undefined) product.description = input.patch.description ?? undefined;
+    if (input.patch.categoryCode !== undefined) product.categoryCode = input.patch.categoryCode ?? undefined;
+    if (input.patch.attributes !== undefined) product.attributes = { ...input.patch.attributes };
+    if (input.patch.defaultReplyTemplate !== undefined) product.defaultReplyTemplate = input.patch.defaultReplyTemplate ?? undefined;
+    if (input.patch.aiPrompt !== undefined) product.aiPrompt = input.patch.aiPrompt ?? undefined;
+    if (input.patch.priceMinor !== undefined) product.priceMinor = input.patch.priceMinor ?? undefined;
+    product.configVersion += 1;
+    product.updatedAt = new Date().toISOString();
+    return this.productDetail(product);
   }
   async createLoginSession(input: { adminId: string; accountId?: string; provisionalAccountRef?: string; loginMethod: string; expiresAt: string; qrTokenRef?: string }): Promise<LoginSessionRecord> {
     if (input.accountId && !(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');

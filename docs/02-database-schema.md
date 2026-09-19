@@ -117,6 +117,8 @@
 
 迁移采用 expand → backfill → verify → switch → contract；每次迁移必须可重复执行或具备可靠回滚说明。不可逆变更前必须完成数据库备份、读写验证和恢复演练。
 
+| `013_product_sync` | products.source、last_synced_at、source_payload_digest、来源索引 | 003_catalog | 外部商品同步元数据；`local` 草稿与 `xianyu` 外部商品分离，禁止同步删除本地草稿 |
+
 ## 6. 阶段 2 验收证据
 
 - 表级覆盖：身份、账号、凭证、商品、卡券、订单、消息、AgentSession、Run/Step、Confirmation、Idempotency、Outbox、审计与观测；

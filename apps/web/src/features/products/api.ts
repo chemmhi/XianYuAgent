@@ -1,12 +1,17 @@
-import type { ProductAssetVM, ProductFilters, ProductSkuVM, ProductStatus, ProductVM, ProductsPageVM } from './types';
+import type { ProductAssetVM, ProductDraftInput, ProductDraftPatch, ProductFilters, ProductSkuVM, ProductStatus, ProductSyncResultVM, ProductVM, ProductsPageVM } from './types';
 
 export interface ProductsApiTransport {
   get<T>(path: string): Promise<T>;
+  post?<T>(path: string, body?: unknown, init?: RequestInit): Promise<T>;
+  patch?<T>(path: string, body?: unknown, init?: RequestInit): Promise<T>;
 }
 
 export interface ProductsApi {
   list(filters?: ProductFilters): Promise<ProductsPageVM>;
   getDetail(productId: string): Promise<ProductVM>;
+  createDraft(input: ProductDraftInput, options?: { idempotencyKey?: string }): Promise<ProductVM>;
+  updateDraft(productId: string, patch: ProductDraftPatch, options: { configVersion: number; idempotencyKey?: string }): Promise<ProductVM>;
+  syncFromXianyu(accountId: string, options?: { pageSize?: number; maxPages?: number; idempotencyKey?: string }): Promise<ProductSyncResultVM>;
 }
 
 interface ApiEnvelope<T> {
@@ -30,6 +35,9 @@ interface ProductPayload {
   configVersion?: number;
   priceMinor?: number | null;
   status: ProductStatus;
+  source?: 'local' | 'xianyu';
+  lastSyncedAt?: string;
+  sourcePayloadDigest?: string;
   updatedAt?: string;
   skus?: ProductSkuVM[];
   assets?: ProductAssetVM[];
@@ -70,6 +78,9 @@ function toProductVM(product: ProductPayload): ProductVM {
     configVersion: product.configVersion ?? 1,
     priceMinor: product.priceMinor ?? undefined,
     status: product.status,
+    source: product.source,
+    lastSyncedAt: product.lastSyncedAt,
+    sourcePayloadDigest: product.sourcePayloadDigest,
     updatedAt: product.updatedAt ?? new Date(0).toISOString(),
     skuCount: product.skuCount ?? skus?.length ?? 0,
     assetCount: product.assetCount ?? assets?.length ?? 0,
@@ -97,6 +108,17 @@ function queryString(filters: ProductFilters = {}): string {
   return value ? `?${value}` : '';
 }
 
+function idempotencyKey(prefix: string): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return `${prefix}-${crypto.randomUUID()}`;
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function requireTransportMethod<T extends 'post' | 'patch'>(transport: ProductsApiTransport, method: T): NonNullable<ProductsApiTransport[T]> {
+  const handler = transport[method];
+  if (!handler) throw new Error(`PRODUCT_${method.toUpperCase()}_TRANSPORT_UNAVAILABLE`);
+  return handler as NonNullable<ProductsApiTransport[T]>;
+}
+
 export function createProductsApi(transport: ProductsApiTransport): ProductsApi {
   return {
     async list(filters = {}) {
@@ -106,6 +128,37 @@ export function createProductsApi(transport: ProductsApiTransport): ProductsApi 
     async getDetail(productId) {
       const payload = await transport.get<ProductPayload | ApiEnvelope<ProductPayload>>(`/api/v1/products/${encodeURIComponent(productId)}`);
       return toProductVM(unwrapEnvelope(payload));
+    },
+    async createDraft(input, options = {}) {
+      const post = requireTransportMethod(transport, 'post');
+      const payload = await post<ProductPayload | ApiEnvelope<ProductPayload>>('/api/v1/products', {
+        accountId: input.accountId,
+        title: input.title,
+        description: input.description ?? null,
+        categoryCode: input.categoryCode ?? null,
+        priceMinor: input.priceMinor ?? null,
+      }, { headers: { 'Idempotency-Key': options.idempotencyKey ?? idempotencyKey('product-create') } });
+      return toProductVM(unwrapEnvelope(payload));
+    },
+    async updateDraft(productId, patch, options) {
+      const patchRequest = requireTransportMethod(transport, 'patch');
+      const payload = await patchRequest<ProductPayload | ApiEnvelope<ProductPayload>>(`/api/v1/products/${encodeURIComponent(productId)}`, patch, {
+        headers: {
+          'Idempotency-Key': options.idempotencyKey ?? idempotencyKey('product-update'),
+          'If-Match-Version': String(options.configVersion),
+        },
+      });
+      return toProductVM(unwrapEnvelope(payload));
+    },
+    async syncFromXianyu(accountId, options = {}) {
+      const post = requireTransportMethod(transport, 'post');
+      const payload = await post<{ syncRunId: string; accountId: string; fetchedCount: number; createdCount: number; updatedCount: number; skippedLocalDraftCount: number; hasMore: boolean; nextPageNumber?: number; items: ProductPayload[] } | ApiEnvelope<{ syncRunId: string; accountId: string; fetchedCount: number; createdCount: number; updatedCount: number; skippedLocalDraftCount: number; hasMore: boolean; nextPageNumber?: number; items: ProductPayload[] }>>('/api/v1/products/sync', {
+        accountId,
+        pageSize: options.pageSize,
+        maxPages: options.maxPages,
+      }, { headers: { 'Idempotency-Key': options.idempotencyKey ?? idempotencyKey('product-sync') } });
+      const result = unwrapEnvelope(payload);
+      return { ...result, items: result.items.map(toProductVM) };
     },
   };
 }
@@ -127,6 +180,39 @@ export function createMockProductsApi(seed: ProductVM[] = [
       const product = seed.find((item) => item.id === productId);
       if (!product) throw new Error('PRODUCT_NOT_FOUND');
       return product;
+    },
+    async createDraft(input) {
+      const product: ProductVM = {
+        id: `draft-${seed.length + 1}`,
+        accountId: input.accountId,
+        title: input.title,
+        description: input.description,
+        categoryCode: input.categoryCode,
+        attributesJson: {},
+        configVersion: 1,
+        priceMinor: input.priceMinor,
+        status: 'draft',
+        updatedAt: new Date().toISOString(),
+        skuCount: 0,
+        assetCount: 0,
+      };
+      seed.push(product);
+      return product;
+    },
+    async updateDraft(productId, patch, options) {
+      const product = seed.find((item) => item.id === productId);
+      if (!product) throw new Error('PRODUCT_NOT_FOUND');
+      if (product.configVersion !== options.configVersion) {
+        const error = new Error('PRODUCT_VERSION_CONFLICT') as Error & { status?: number };
+        error.status = 409;
+        throw error;
+      }
+      Object.assign(product, patch, { configVersion: product.configVersion + 1, updatedAt: new Date().toISOString() });
+      return product;
+    },
+    async syncFromXianyu(accountId) {
+      const items = seed.filter((item) => item.accountId === accountId);
+      return { syncRunId: `mock-sync-${Date.now()}`, accountId, fetchedCount: items.length, createdCount: 0, updatedCount: items.length, skippedLocalDraftCount: 0, hasMore: false, items };
     },
   };
 }

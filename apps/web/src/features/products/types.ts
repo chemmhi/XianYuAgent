@@ -31,11 +31,51 @@ export interface ProductVM {
   configVersion: number;
   priceMinor?: number;
   status: ProductStatus;
+  source?: 'local' | 'xianyu';
+  lastSyncedAt?: string;
+  sourcePayloadDigest?: string;
   updatedAt: string;
   skuCount: number;
   assetCount: number;
   skus?: ProductSkuVM[];
   assets?: ProductAssetVM[];
+}
+
+export interface ProductSyncResultVM {
+  syncRunId: string;
+  accountId: string;
+  fetchedCount: number;
+  createdCount: number;
+  updatedCount: number;
+  skippedLocalDraftCount: number;
+  hasMore: boolean;
+  nextPageNumber?: number;
+  items: ProductVM[];
+}
+
+export interface ProductDraftInput {
+  accountId: string;
+  title: string;
+  description?: string;
+  categoryCode?: string;
+  priceMinor?: number;
+}
+
+export interface ProductDraftPatch {
+  title?: string;
+  description?: string;
+  categoryCode?: string;
+  priceMinor?: number;
+}
+
+export interface ProductMutationError {
+  code: 'FORBIDDEN' | 'VERSION_CONFLICT' | 'VALIDATION_FAILED' | 'NETWORK_ERROR' | 'ACCOUNT_REAUTH_REQUIRED' | 'SYNC_FAILED' | 'UNKNOWN';
+  message: string;
+  retryable: boolean;
+  conflict?: {
+    server?: ProductVM;
+    local: ProductDraftPatch;
+  };
 }
 
 export interface ProductFilters {

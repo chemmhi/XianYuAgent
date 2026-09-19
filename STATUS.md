@@ -1,14 +1,14 @@
 # XianyuSellerAgent 项目状态
 
 - 项目阶段：5
-- 阶段状态：进行中（S4-VS1 账号管理切片已获人工放行；账号列表可正常加载数据库账号信息；页面仍有非阻塞 UI 缺陷，转为后续修复项，不阻断下一切片）
-- 最近一次通过门禁：S4-VS1 账号管理人工复核 / 2026-09-20
-- 当前目标：进入 S4-VS2 商品管理切片，先冻结商品列表、详情、草稿、素材、SKU、账号绑定和发布确认的数据契约
-- 已完成范围：阶段 0 范围门禁；阶段 1 架构与模块边界；阶段 2 数据模型、数据库表设计、关系基数、状态机、API envelope、幂等、鉴权、敏感交付、迁移边界；阶段 5 账号登录方法选择、真实 QR 适配器、Cookie 登录、账号资料同步、登录会话持久化、AuthGate 会话门禁、Vite 默认代理、前端列表刷新和 Chrome/CDP 控制环境 E2E
-- 未完成范围：真实闲鱼 APP 扫码成功回调、真实外部 Cookie 验证、完整迁移/回滚/Testcontainers 与视觉差异回归；账号密码登录依赖独立浏览器运行时，当前明确不可用
+- 阶段状态：进行中（S4-VS1 账号管理切片已获人工放行；S4-VS2 商品列表/详情只读首片已完成验证；页面仍有非阻塞 UI 缺陷，转为后续修复项）
+- 最近一次通过门禁：S4-VS2 商品列表/详情只读首片复核 / 2026-09-19
+- 当前目标：继续 S4-VS2 商品管理，已完成“按闲鱼账号同步商品到本地目录”首个纵向切片；下一步冻结并实现草稿编辑、SKU、素材和受控发布确认边界
+- 已完成范围：阶段 0 范围门禁；阶段 1 架构与模块边界；阶段 2 数据模型、数据库表设计、关系基数、状态机、API envelope、幂等、鉴权、敏感交付、迁移边界；阶段 5 账号登录方法选择、真实 QR 适配器、Cookie 登录、账号资料同步、登录会话持久化、AuthGate 会话门禁、Vite 默认代理、账号列表真实读取和 Chrome/CDP 控制环境 E2E；S4-VS2 商品列表/详情只读首片、003_catalog 迁移、Memory/Postgres scope-aware 查询、真实 PostgreSQL smoke 和 Chrome/CDP 商品 E2E
+- 未完成范围：完整商品创建/编辑、SKU 写入、素材上传、闲鱼商品同步/拉取、发布确认/Policy/Outbox、真实闲鱼 APP 扫码成功回调、真实外部 Cookie 验证、完整迁移/回滚/Testcontainers 与视觉差异回归；账号密码登录依赖独立浏览器运行时，当前明确不可用
 - 未解决风险：R-001/P1、R-002/P1、R-005/P2、R-006/P2、R-007/P2、R-008/P1、R-009/P1、R-011/P1、S3-I001/P1、S3-I002/P1、S3-I003/P1、S3-I004/P1、S3-I005/P1、S3-I006/P1、S3-I007/P1、S3-I008/P1、S4-I003/P1、S4-I004/P1、S4-I005/P1、S4-I006/P1、S4-I007/P2、S5-I001/P1、S5-I002/P1、S5-I003/P1、S5-I004/P1；S3-I009/S3-I010/S5-I006 已关闭，S4-I001/S4-I002 已部分缓解
 - 待复审问题：S3-R5 为超出当前范围的实现审计；S3-R6 设计范围已澄清；S1-I004 保持 P2 跟进项；阶段 4 计划门禁已通过
-- 下一步：在当前已登录 Chrome 中打开 `http://localhost:9000/accounts` 完成参考项目登录态复核；再用真实闲鱼 APP 扫码验证回调、资料同步和凭证落库；补齐迁移回滚、重启恢复和 Testcontainers 证据
+- 下一步：继续 S4-VS2 商品草稿/素材/SKU 子切片；真实闲鱼 APP 扫码、外部 Cookie 验证、迁移回滚、重启恢复和 Testcontainers 证据继续作为独立复核项。商品同步已通过 Memory/PostgreSQL smoke、MTOP 脱敏 mapper smoke 和 Chrome/CDP fixture E2E；真实发布仍未接入
 
 ## 当前证据
 
@@ -29,6 +29,9 @@
 - `docs/evidence/stage5/S4-VS1/test-baseline.md`：已补充 Cookie 登录、资料同步、登录会话落库、当前 Chrome 参考项目登录态前置条件，以及受控 E2E 与真实外部验收的边界；
 - `docs/13-account-login-slice.md`：新增账号登录切片实现说明、路由/数据流、迁移、测试证据、Chrome 登录态复核步骤和当前门禁结论；
 - `docs/evidence/stage5/S4-VS1/screenshots/`：已由最新 Chrome/CDP 受控 E2E 重新生成 `accounts-desktop-1440x900.png` 与 `accounts-mobile-390x844.png`；
+- `npm run test:products:postgres`：已通过真实 PostgreSQL 商品迁移、管理员账号范围、商品列表/详情读取和测试数据清理；
+- `npm run test:e2e:chrome:products`：已通过本机 Chrome/CDP 真实 API + MemoryStore 商品列表 → 详情 → 刷新后持久化可见链路；生成 `docs/evidence/stage5/S4-VS2/screenshots/` 桌面/移动证据；
+- `docs/evidence/stage5/S4-VS2/test-baseline.md`：已记录商品首片范围、迁移/API/组件边界、实际验证命令、证据与回滚边界；
 - `SellerAgent/npm test`、`SellerAgent/npm run build`、`git diff --check`：仅作为原型健康检查，不作为阶段 3 组件设计证据；
 - 高保真原型和现有源码：仅作为视觉与背景参考，不作为阶段 3 组件拆分依据；正式前端账号页已独立按 design token 重建壳层与账号切片。
 - 以上受控证据不证明真实闲鱼 APP 扫码成功或真实外部 Cookie 验证；阶段 5 的剩余门禁必须按 `docs/13-account-login-slice.md` 的人工复核步骤关闭。
@@ -76,4 +79,5 @@
 - 2026-09-19 二维码首开竞态已修复：保留 StrictMode，前端 QR controller 增加 in-flight 去重、弹窗增加一次性自动启动保护；Chrome/CDP E2E 断言首开仅发送 1 个二维码创建请求，前端并发回归测试已补齐。
 - 2026-09-19 二维码 creating 卡死已修复：移除 StrictMode 开发期 cleanup 对有效请求的误失效，Chrome/CDP E2E 现在同时断言二维码区域实际渲染。
 - 2026-09-19 本轮运行时统一：本地 dev 默认使用 PostgreSQL/Redis/MinIO，MemoryStore 仅限显式测试；Compose API/Worker 使用 `full` profile，避免与本地 API 竞争 `8080`。`/healthz`/`/readyz` 增加 `storage` 诊断字段。验证：`npm run verify`、真实本地 dev `storage=postgres`、PostgreSQL 管理员登录与账号列表读取均通过。
-- 2026-09-20 人工裁决：S4-VS1 账号管理审核通过；账号列表及账号信息可正常加载。现存页面 UI 缺陷标记为非阻塞后续项，下一切片切换至 S4-VS2 商品管理。
+- 2026-09-19 人工裁决：S4-VS1 账号管理审核通过；账号列表及账号信息可正常加载。现存页面 UI 缺陷标记为非阻塞后续项，切换至 S4-VS2 商品管理。
+- 2026-09-19 S4-VS2 商品列表/详情只读首片完成：003_catalog、统一商品 API、前端 Products feature、PostgreSQL smoke 和 Chrome/CDP E2E 均通过；商品写入、同步、素材、SKU、发布仍未宣称完成。

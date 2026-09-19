@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createMockProductsApi, type ProductsApi } from './api';
-import type { ProductDetailState, ProductFilters, ProductsLoadError, ProductsQueryState } from './types';
+import type { ProductDetailState, ProductDraftInput, ProductDraftPatch, ProductFilters, ProductMutationError, ProductsLoadError, ProductsQueryState, ProductVM } from './types';
 
 const defaultProductsApi = createMockProductsApi();
 
@@ -12,6 +12,26 @@ export function toProductsLoadError(error: unknown): ProductsLoadError {
   return { code: 'UNKNOWN', message: error instanceof Error ? error.message : '商品列表加载失败，请重试。', retryable: true };
 }
 
+export function toProductsMutationError(error: unknown): ProductMutationError {
+  const status = typeof error === 'object' && error && 'status' in error ? Number((error as { status?: unknown }).status) : undefined;
+  const payload = typeof error === 'object' && error && 'payload' in error ? (error as { payload?: unknown }).payload : undefined;
+  const code = typeof payload === 'object' && payload && 'error' in payload && typeof (payload as { error?: unknown }).error === 'object'
+    ? String(((payload as { error?: { code?: string } }).error?.code) ?? '')
+    : '';
+  if (status === 409 && code === 'ACCOUNT_REAUTH_REQUIRED') return { code: 'ACCOUNT_REAUTH_REQUIRED', message: '闲鱼账号登录态已失效，请先重新登录账号。', retryable: false };
+  if (status === 502 || code === 'XIANYU_SYNC_FAILED') return { code: 'SYNC_FAILED', message: '闲鱼商品同步失败，请稍后重试。', retryable: true };
+  if (status === 403) return { code: 'FORBIDDEN', message: '当前管理员没有写入商品的权限。', retryable: false };
+  if (status === 409 || code === 'PRODUCT_VERSION_CONFLICT') return { code: 'VERSION_CONFLICT', message: '商品已被其他操作更新，请保留本地草稿后重新加载。', retryable: false };
+  if (status === 422) return { code: 'VALIDATION_FAILED', message: '商品字段校验失败，请检查输入。', retryable: false };
+  if (error instanceof TypeError) return { code: 'NETWORK_ERROR', message: '商品服务暂时不可用，请检查连接后重试。', retryable: true };
+  return { code: 'UNKNOWN', message: error instanceof Error ? error.message : '商品保存失败，请重试。', retryable: true };
+}
+
+export interface ProductsMutationState {
+  phase: 'idle' | 'saving' | 'success' | 'error';
+  error: ProductMutationError | null;
+}
+
 export interface ProductsController {
   filters: ProductFilters;
   setFilters: (filters: ProductFilters | ((previous: ProductFilters) => ProductFilters)) => void;
@@ -19,8 +39,13 @@ export interface ProductsController {
   reload: () => Promise<void>;
   openProduct: (productId: string) => Promise<void>;
   closeProduct: () => void;
+  createDraft: (input: ProductDraftInput) => Promise<ProductVM | null>;
+  updateDraft: (productId: string, patch: ProductDraftPatch, configVersion: number) => Promise<ProductVM | null>;
+  syncFromXianyu: (accountId: string) => Promise<boolean>;
+  clearMutation: () => void;
   state: ProductsQueryState;
   detail: ProductDetailState;
+  mutation: ProductsMutationState;
 }
 
 export function useProductsController(options: { api?: ProductsApi; initialFilters?: ProductFilters } = {}): ProductsController {
@@ -28,6 +53,7 @@ export function useProductsController(options: { api?: ProductsApi; initialFilte
   const [filters, setFilters] = useState<ProductFilters>({ page: 1, pageSize: 20, ...options.initialFilters });
   const [state, setState] = useState<ProductsQueryState>({ phase: 'idle', data: null, error: null });
   const [detail, setDetail] = useState<ProductDetailState>({ phase: 'idle', data: null, error: null });
+  const [mutation, setMutation] = useState<ProductsMutationState>({ phase: 'idle', error: null });
   const requestId = useRef(0);
   const detailRequestId = useRef(0);
   const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);
@@ -65,5 +91,49 @@ export function useProductsController(options: { api?: ProductsApi; initialFilte
   const closeProduct = useCallback(() => { detailRequestId.current += 1; setDetail({ phase: 'idle', data: null, error: null }); }, []);
   const setKeyword = useCallback((keyword: string) => { setFilters((previous) => ({ ...previous, keyword, page: 1 })); }, []);
 
-  return { filters, setFilters, setKeyword, reload, openProduct, closeProduct, state, detail };
+  const createDraft = useCallback(async (input: ProductDraftInput) => {
+    setMutation({ phase: 'saving', error: null });
+    try {
+      const product = await productsApi.createDraft(input);
+      setMutation({ phase: 'success', error: null });
+      await reload();
+      return product;
+    } catch (error) {
+      setMutation({ phase: 'error', error: toProductsMutationError(error) });
+      return null;
+    }
+  }, [productsApi, reload]);
+
+  const updateDraft = useCallback(async (productId: string, patch: ProductDraftPatch, configVersion: number) => {
+    setMutation({ phase: 'saving', error: null });
+    try {
+      const product = await productsApi.updateDraft(productId, patch, { configVersion });
+      setMutation({ phase: 'success', error: null });
+      await reload();
+      setDetail({ phase: 'success', productId, data: product, error: null });
+      return product;
+    } catch (error) {
+      const normalized = toProductsMutationError(error);
+      if (normalized.code === 'VERSION_CONFLICT') {
+        try { normalized.conflict = { server: await productsApi.getDetail(productId), local: patch }; } catch { normalized.conflict = { local: patch }; }
+      }
+      setMutation({ phase: 'error', error: normalized });
+      return null;
+    }
+  }, [productsApi, reload]);
+  const syncFromXianyu = useCallback(async (accountId: string) => {
+    setMutation({ phase: 'saving', error: null });
+    try {
+      await productsApi.syncFromXianyu(accountId);
+      setMutation({ phase: 'success', error: null });
+      await reload();
+      return true;
+    } catch (error) {
+      setMutation({ phase: 'error', error: toProductsMutationError(error) });
+      return false;
+    }
+  }, [productsApi, reload]);
+  const clearMutation = useCallback(() => setMutation({ phase: 'idle', error: null }), []);
+
+  return { filters, setFilters, setKeyword, reload, openProduct, closeProduct, createDraft, updateDraft, syncFromXianyu, clearMutation, state, detail, mutation };
 }

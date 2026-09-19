@@ -280,7 +280,7 @@ type ConversationHandlingOutput = {
 
 | 能力 | 数据 / 状态补充 | API 映射 |
 | --- | --- | --- |
-| 商品同步 | `Product` 保留 `accountId`、`externalProductRef`、`categoryCode`、`attributesJson`、`defaultReplyTemplate`、`aiPrompt`、`configVersion`；同步任务复用 Run/Outbox | `POST /api/v1/products/sync`、`POST /api/v1/products/pull`，支持指定账号、分页游标、全量同步和逐项结果 |
+| 商品同步 | 已实现同步首片：`Product` 增加 `source`、`lastSyncedAt`、`sourcePayloadDigest`；只读 MTOP mapper + 分页聚合 + 账号 scope 校验 + 外部商品幂等 Upsert；本地 `source=local,status=draft` 草稿遇同外部引用时跳过，不做全量软删除 | `POST /api/v1/products/sync`，请求 `{accountId,pageSize?,maxPages?}`，同步执行并返回 `syncRunId/fetchedCount/createdCount/updatedCount/skippedLocalDraftCount/items/hasMore`；真实发布仍未接入 |
 | 商品素材 | `AssetRef` 具备 storageKey、mimeType、checksum、status 生命周期 | `GET/POST/PATCH/DELETE /api/v1/products/{id}/assets...` |
 | 商品批量发布 | 每个商品产生独立 Confirmation/Outbox/幂等结果 | `POST /api/v1/products/bulk-publish` |
 | 卡券素材 | 新增 `CouponAssetRef`，与 CouponBatch 一对多；素材不等于卡券正文 | `POST /api/v1/coupons/batches/{id}/assets`、`DELETE /api/v1/coupons/batches/{id}/assets/{assetId}` |

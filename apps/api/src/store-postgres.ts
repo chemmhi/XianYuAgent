@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductAssetRecord, ProductListQuery, ProductListResult, ProductRecord, ProductSkuRecord, ProductStatus, SessionRecord, Store } from './domain.js';
+import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, SessionRecord, Store, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { createId } from './security.js';
 
 type Row = Record<string, unknown>;
@@ -61,8 +61,51 @@ export class PostgresStore implements Store {
   async createProduct(input: { adminId: string; accountId: string; externalProductRef?: string; title: string; description?: string; categoryCode?: string; attributes?: Record<string, unknown>; defaultReplyTemplate?: string; aiPrompt?: string; priceMinor?: number; status?: ProductStatus }): Promise<ProductRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const id = createId();
-    const result = await this.pool.query('insert into products.products (id,account_id,external_product_ref,title,description,category_code,attributes_json,default_reply_template,ai_prompt,price_minor,status) values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11) returning *', [id, input.accountId, input.externalProductRef ?? null, input.title, input.description ?? null, input.categoryCode ?? null, JSON.stringify(input.attributes ?? {}), input.defaultReplyTemplate ?? null, input.aiPrompt ?? null, input.priceMinor ?? null, input.status ?? 'draft']);
-    return this.toProduct(result.rows[0]);
+    await this.pool.query('insert into products.products (id,account_id,external_product_ref,title,description,category_code,attributes_json,default_reply_template,ai_prompt,price_minor,status,source) values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,\'local\')', [id, input.accountId, input.externalProductRef ?? null, input.title, input.description ?? null, input.categoryCode ?? null, JSON.stringify(input.attributes ?? {}), input.defaultReplyTemplate ?? null, input.aiPrompt ?? null, input.priceMinor ?? null, input.status ?? 'draft']);
+    const product = await this.getProduct(input.adminId, id);
+    if (!product) throw new Error('PRODUCT_CREATE_READBACK_FAILED');
+    return product;
+  }
+  async updateProduct(input: { adminId: string; productId: string; expectedConfigVersion: number; patch: ProductPatch }): Promise<ProductRecord | undefined> {
+    const current = await this.pool.query('select account_id from products.products where id=$1', [input.productId]);
+    if (!current.rows[0]) return undefined;
+    const accountId = String(current.rows[0].account_id);
+    if (!(await this.hasAccountScope(input.adminId, accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const fields: string[] = [];
+    const values: unknown[] = [input.productId, input.expectedConfigVersion];
+    const add = (column: string, value: unknown) => { values.push(value); fields.push(`${column}=$${values.length}`); };
+    if (input.patch.title !== undefined) add('title', input.patch.title);
+    if (input.patch.description !== undefined) add('description', input.patch.description);
+    if (input.patch.categoryCode !== undefined) add('category_code', input.patch.categoryCode);
+    if (input.patch.attributes !== undefined) { values.push(JSON.stringify(input.patch.attributes)); fields.push(`attributes_json=$${values.length}::jsonb`); }
+    if (input.patch.defaultReplyTemplate !== undefined) add('default_reply_template', input.patch.defaultReplyTemplate);
+    if (input.patch.aiPrompt !== undefined) add('ai_prompt', input.patch.aiPrompt);
+    if (input.patch.priceMinor !== undefined) add('price_minor', input.patch.priceMinor);
+    if (fields.length === 0) throw new Error('PRODUCT_PATCH_EMPTY');
+    fields.push('config_version=config_version+1', 'updated_at=now()');
+    const result = await this.pool.query(`update products.products set ${fields.join(', ')} where id=$1 and config_version=$2 returning *`, values);
+    if (!result.rows[0]) throw new Error('PRODUCT_VERSION_CONFLICT');
+    return this.getProduct(input.adminId, input.productId);
+  }
+
+  async upsertExternalProduct(input: { adminId: string; accountId: string; item: XianyuProductItem; syncedAt: string }): Promise<ProductUpsertResult> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const existingResult = await this.pool.query('select id,source,status from products.products where account_id=$1 and external_product_ref=$2 limit 1', [input.accountId, input.item.externalProductRef]);
+    const existing = existingResult.rows[0] as Row | undefined;
+    if (existing && String(existing.source ?? 'local') === 'local' && String(existing.status) === 'draft') {
+      const product = await this.getProduct(input.adminId, String(existing.id));
+      if (!product) throw new Error('PRODUCT_SYNC_READBACK_FAILED');
+      return { action: 'skipped_local_draft', product };
+    }
+    const attributes = { ...input.item.attributes, xianyu: { detailUrl: input.item.detailUrl, externalStatus: input.item.externalStatus, imageUrls: input.item.imageUrls } };
+    const id = existing ? String(existing.id) : createId();
+    await this.pool.query(`insert into products.products (id,account_id,external_product_ref,title,description,category_code,attributes_json,price_minor,status,source,last_synced_at,source_payload_digest)
+      values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'published','xianyu',$9,$10)
+      on conflict (account_id,external_product_ref) do update set title=excluded.title,description=excluded.description,category_code=excluded.category_code,attributes_json=excluded.attributes_json,price_minor=excluded.price_minor,status='published',source='xianyu',last_synced_at=excluded.last_synced_at,source_payload_digest=excluded.source_payload_digest,config_version=products.products.config_version+1,updated_at=now()
+      returning id`, [id, input.accountId, input.item.externalProductRef, input.item.title, input.item.description ?? null, input.item.categoryCode ?? null, JSON.stringify(attributes), input.item.priceMinor ?? null, input.syncedAt, input.item.sourcePayloadDigest]);
+    const product = await this.getProduct(input.adminId, id);
+    if (!product) throw new Error('PRODUCT_SYNC_READBACK_FAILED');
+    return { action: existing ? 'updated' : 'created', product };
   }
   async createLoginSession(input: { adminId: string; accountId?: string; provisionalAccountRef?: string; loginMethod: string; expiresAt: string; qrTokenRef?: string }): Promise<LoginSessionRecord> { if (input.accountId && !(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN'); const result = await this.pool.query('insert into auth.account_login_sessions (id,admin_id,account_id,provisional_account_ref,login_method,status,started_at,expires_at,qr_token_ref) values ($1,$2,$3,$4,$5,\'waiting\',now(),$6,$7) returning *', [createId(), input.adminId, input.accountId ?? null, input.provisionalAccountRef ?? null, input.loginMethod, input.expiresAt, input.qrTokenRef ?? null]); return this.toLoginSession(result.rows[0]); }
   async getLoginSession(adminId: string, accountId: string, sessionId: string): Promise<LoginSessionRecord | undefined> { const result = await this.pool.query('select s.* from auth.account_login_sessions s join auth.account_scopes scope on scope.account_id=s.account_id where s.id=$1 and s.account_id=$2 and scope.admin_id=$3 and scope.status=\'active\' and (scope.expires_at is null or scope.expires_at>now())', [sessionId, accountId, adminId]); return this.normalizeLoginSession(result.rows[0]); }
@@ -109,7 +152,7 @@ export class PostgresStore implements Store {
   private toAccount(row: Row): AccountRecord { return { id: String(row.id), platform: String(row.platform), sellerRef: String(row.seller_ref), displayName: row.display_name ? String(row.display_name) : undefined, remark: row.remark ? String(row.remark) : undefined, avatarUrl: row.avatar_url ? String(row.avatar_url) : undefined, platformUserId: row.platform_user_id ? String(row.platform_user_id) : undefined, status: row.status as AccountRecord['status'], createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString(), lastConnectedAt: iso(row.last_connected_at) }; }
   private toProduct(row: Row): ProductRecord {
     const attributes = row.attributes_json && typeof row.attributes_json === 'object' && !Array.isArray(row.attributes_json) ? row.attributes_json as Record<string, unknown> : {};
-    return { id: String(row.id), accountId: String(row.account_id), externalProductRef: row.external_product_ref ? String(row.external_product_ref) : undefined, title: String(row.title), description: row.description ? String(row.description) : undefined, categoryCode: row.category_code ? String(row.category_code) : undefined, attributes: { ...attributes }, defaultReplyTemplate: row.default_reply_template ? String(row.default_reply_template) : undefined, aiPrompt: row.ai_prompt ? String(row.ai_prompt) : undefined, configVersion: Number(row.config_version ?? 1), priceMinor: row.price_minor === null || row.price_minor === undefined ? undefined : Number(row.price_minor), status: row.status as ProductRecord['status'], createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString(), skuCount: Number(row.sku_count ?? 0), assetCount: Number(row.asset_count ?? 0) };
+    return { id: String(row.id), accountId: String(row.account_id), externalProductRef: row.external_product_ref ? String(row.external_product_ref) : undefined, title: String(row.title), description: row.description ? String(row.description) : undefined, categoryCode: row.category_code ? String(row.category_code) : undefined, attributes: { ...attributes }, defaultReplyTemplate: row.default_reply_template ? String(row.default_reply_template) : undefined, aiPrompt: row.ai_prompt ? String(row.ai_prompt) : undefined, configVersion: Number(row.config_version ?? 1), priceMinor: row.price_minor === null || row.price_minor === undefined ? undefined : Number(row.price_minor), status: row.status as ProductRecord['status'], source: (row.source ?? 'local') as ProductRecord['source'], lastSyncedAt: iso(row.last_synced_at), sourcePayloadDigest: row.source_payload_digest ? String(row.source_payload_digest) : undefined, createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString(), skuCount: Number(row.sku_count ?? 0), assetCount: Number(row.asset_count ?? 0) };
   }
   private toProductSku(row: Row): ProductSkuRecord { return { id: String(row.id), productId: String(row.product_id), skuCode: String(row.sku_code), externalSkuRef: row.external_sku_ref ? String(row.external_sku_ref) : undefined, priceMinor: Number(row.price_minor), status: row.status as ProductSkuRecord['status'] }; }
   private toProductAsset(row: Row): ProductAssetRecord { return { id: String(row.id), productId: String(row.product_id), storageKey: String(row.storage_key), mimeType: String(row.mime_type), checksum: row.checksum ? String(row.checksum) : undefined, status: row.status as ProductAssetRecord['status'] }; }

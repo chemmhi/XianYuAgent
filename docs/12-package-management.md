@@ -30,6 +30,7 @@ npm test
 npm run build
 npm run verify
 npm run test:e2e:chrome
+npm run db:migrate
 ```
 
 `npm run dev` 使用成熟的 `concurrently` 同时启动 API、Worker 和正式前端；`predev` 先执行 `dev:prepare`，停止 Compose API/Worker，仅启动 PostgreSQL、Redis、MinIO 作为本地共享依赖。根脚本使用 `cross-env` 注入统一环境变量，不需要进入子目录手动切换数据源或 mock/live 模式。

@@ -1,10 +1,10 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { loadConfig, type AppConfig } from './config.js';
 import type { AuthContext } from './services.js';
-import { AccountService, AuthService, CredentialService, ProductService, ServiceError, idempotent } from './services.js';
+import { AccountService, AuthService, CredentialService, ProductService, ProductSyncService, ServiceError, idempotent } from './services.js';
 import { createIds, failure, fingerprint, parseCookies, readJson, setCookie, success, writeJson, type RequestContext } from './http.js';
 import { createStore } from './store.js';
-import type { Store } from './domain.js';
+import type { ProductListResult, ProductRecord, Store } from './domain.js';
 import { createId, digestJson } from './security.js';
 import { XianyuQrLoginAdapter, type XianyuQrPublicSession } from './xianyu-qr-login.js';
 import { XianyuMtopClient } from './xianyu-mtop.js';
@@ -15,6 +15,7 @@ export interface AppRuntime {
   auth: AuthService;
   accounts: AccountService;
   products: ProductService;
+  productSync: ProductSyncService;
   credentials: CredentialService;
   qrLogin: XianyuQrLoginAdapter;
   xianyu: XianyuMtopClient;
@@ -31,13 +32,18 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   });
-  const products = new ProductService(store);
+  const products = new ProductService(store, async (input) => {
+    const auditId = createId();
+    await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
+    return auditId;
+  });
   const credentials = new CredentialService(store, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   });
   let xianyu: XianyuMtopClient;
+  let productSync: ProductSyncService;
   const qrLogin = new XianyuQrLoginAdapter({
     onStatus: async (status) => {
       const localStatus = mapQrStatusToLoginStatus(status.status);
@@ -80,9 +86,14 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       await credentials.save({ adminId, accountId, cookieHeader, requestId: 'xianyu-mtop', traceId: 'xianyu-mtop' });
     },
   });
+  productSync = new ProductSyncService(store, xianyu, async (input) => {
+    const auditId = createId();
+    await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
+    return auditId;
+  });
 
   const runtime: AppRuntime = {
-    config, store, auth, accounts, products, credentials, qrLogin, xianyu,
+    config, store, auth, accounts, products, productSync, credentials, qrLogin, xianyu,
     server: createServer((request, response) => { void handleRequest(runtime, request, response); }),
     async listen() { await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve)); },
     async close() { await new Promise<void>((resolve, reject) => runtime.server.close((error) => error ? reject(error) : resolve())); const close = (store as Store & { close?: () => Promise<void> }).close; if (close) await close.call(store); },
@@ -109,7 +120,7 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
 }
 
 async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: ServerResponse): Promise<{ statusCode: number; body: unknown } | undefined> {
-  const { auth, accounts, products, credentials, store, config } = runtime;
+  const { auth, accounts, products, productSync, credentials, store, config } = runtime;
   if (ctx.path === '/healthz' && ctx.method === 'GET') {
     const health = await store.health();
     const body = success(ctx, { status: health.reachable ? 'ok' : 'degraded', storage: health.kind, services: { api: 'ok', database: health.reachable ? 'ok' : 'unavailable', redis: config.redisUrl ? 'configured' : 'not_configured' } });
@@ -340,14 +351,38 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     if (accountMatch[2] && ctx.method === 'DELETE') return mutation(runtime, ctx, authContext, accountId, async () => { await accounts.revokeScope({ adminId: authContext.admin.id, accountId, scope: String(ctx.body.scope ?? 'manage'), requestId: ctx.requestId, traceId: ctx.traceId }); return success(ctx, { revoked: true }); });
   }
 
+  const productMatch = ctx.path.match(/^\/api\/v1\/products\/([^/]+)$/);
+  if (ctx.path === '/api/v1/products/sync' && ctx.method === 'POST') {
+    const accountId = optionalString(ctx.body.accountId);
+    return mutation(runtime, ctx, authContext, accountId, async () => {
+      if (!accountId) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
+      const result = await productSync.sync({ adminId: authContext.admin.id, accountId, pageSize: ctx.body.pageSize, maxPages: ctx.body.maxPages, requestId: ctx.requestId, traceId: ctx.traceId });
+      return success(ctx, { ...result, items: result.items.map(toProductView) });
+    });
+  }
+  if (ctx.path === '/api/v1/products' && ctx.method === 'POST') {
+    const accountId = optionalString(ctx.body.accountId);
+    return mutation(runtime, ctx, authContext, accountId, async () => {
+      const product = await products.create({ adminId: authContext.admin.id, accountId: accountId ?? '', externalProductRef: optionalString(ctx.body.externalProductRef), title: ctx.body.title, description: ctx.body.description, categoryCode: ctx.body.categoryCode, attributesJson: ctx.body.attributesJson, defaultReplyTemplate: ctx.body.defaultReplyTemplate, aiPrompt: ctx.body.aiPrompt, priceMinor: ctx.body.priceMinor, requestId: ctx.requestId, traceId: ctx.traceId });
+      return success(ctx, toProductView(product), 201);
+    });
+  }
   if (ctx.path === '/api/v1/products' && ctx.method === 'GET') {
     const result = await products.list(authContext.admin.id, parseProductListQuery(ctx.query));
-    return { statusCode: 200, body: success(ctx, result).body };
+    return { statusCode: 200, body: success(ctx, toProductListView(result)).body };
   }
-  const productMatch = ctx.path.match(/^\/api\/v1\/products\/([^/]+)$/);
   if (productMatch && ctx.method === 'GET') {
     const product = await products.get(authContext.admin.id, decodeURIComponent(productMatch[1]));
-    return { statusCode: 200, body: success(ctx, product).body };
+    return { statusCode: 200, body: success(ctx, toProductView(product)).body };
+  }
+  if (productMatch && ctx.method === 'PATCH') {
+    const productId = decodeURIComponent(productMatch[1]);
+    const expectedConfigVersion = parseExpectedProductVersion(ctx);
+    const accountId = optionalString(ctx.body.accountId);
+    return mutation(runtime, ctx, authContext, undefined, async () => {
+      const product = await products.update({ adminId: authContext.admin.id, productId, accountId, expectedConfigVersion, patch: ctx.body, requestId: ctx.requestId, traceId: ctx.traceId });
+      return success(ctx, toProductView(product));
+    });
   }
 
   return { statusCode: 404, body: failure(ctx, 404, 'NOT_FOUND', 'route not found').body };
@@ -358,7 +393,7 @@ function requireIdempotencyKey(ctx: RequestContext): string { const key = ctx.he
 async function mutation(runtime: AppRuntime, ctx: RequestContext, authContext: AuthContext, accountId: string | undefined, handler: () => Promise<{ statusCode: number; body: unknown }>): Promise<{ statusCode: number; body: unknown }> {
   const key = requireIdempotencyKey(ctx);
   const scope = `${authContext.admin.id}:${accountId ?? 'global'}:${ctx.method}:${ctx.path}`;
-  const result = await idempotent(runtime.store, { scope, key, fingerprint: fingerprint(ctx.method, ctx.path, ctx.body), traceId: ctx.traceId, handler });
+  const result = await idempotent(runtime.store, { scope, key, fingerprint: fingerprint(ctx.method, ctx.path, { body: ctx.body, ifMatchVersion: ctx.headers['if-match-version'] ?? null }), traceId: ctx.traceId, handler });
   return { statusCode: result.statusCode, body: result.body };
 }
 function setSessionCookies(response: ServerResponse, csrfToken: string, sessionId: string, secure: boolean): void { setCookie(response, 'session_id', sessionId, { httpOnly: true, secure }); setCookie(response, 'csrf_token', csrfToken, { secure }); }
@@ -405,6 +440,24 @@ function parseProductListQuery(query: Record<string, string>): import('./domain.
     page: page === undefined || Number.isNaN(page) ? page : Math.trunc(page),
     pageSize: pageSize === undefined || Number.isNaN(pageSize) ? pageSize : Math.trunc(pageSize),
   };
+}
+
+function parseExpectedProductVersion(ctx: RequestContext): number {
+  const raw = ctx.headers['if-match-version'] ?? ctx.body.expectedVersion;
+  const value = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() ? Number(raw) : Number.NaN;
+  if (!Number.isSafeInteger(value) || value < 1) throw new ServiceError(422, 'VALIDATION_FAILED', 'If-Match-Version or expectedVersion must be a positive integer');
+  return value;
+}
+
+type ProductView = Omit<ProductRecord, 'attributes'> & { attributesJson: Record<string, unknown> };
+
+function toProductListView(result: ProductListResult): Omit<ProductListResult, 'items'> & { items: ProductView[] } {
+  return { ...result, items: result.items.map(toProductView) };
+}
+
+function toProductView(product: ProductRecord): ProductView {
+  const { attributes, ...rest } = product;
+  return { ...rest, attributesJson: attributes };
 }
 
 function readCookieValue(cookieHeader: string, name: string): string | undefined {

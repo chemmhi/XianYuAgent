@@ -2,7 +2,7 @@
 
 - 文档版本：v0.2
 - 更新日期：2026-09-19
-- 当前阶段：阶段 5——S4-VS1 账号登录纵向切片
+- 当前阶段：阶段 5——S4-VS2 商品管理只读首片
 - 风险状态：开放风险已登记；当前无 P0
 - 阶段门禁规则：阶段 5 允许受控 adapter、内存 store 和本机 Chrome/CDP 先形成证据，但不得把受控验证冒充真实闲鱼 APP 扫码、外部 Cookie 验证或 PostgreSQL/Redis 持久化；未关闭的 P1 外部登录和容器门禁不得扩展到商品、卡券、订单写入。
 
@@ -43,6 +43,9 @@
 | S5-I004 | 受控 E2E 使用临时 Chrome profile 与 stub adapter，不能证明真实外部扫码和真实数据库持久化 | P1 | 高 | 可能把测试绿色误报为生产链路完成 | QA / 后端负责人 | 当前 Chrome/CDP 已覆盖 AuthGate 阻断、bootstrap cookie 注入、账号列表、登录方式、Cookie 登录和截图；仍需补真实扫码、外部 Cookie、PostgreSQL/Redis 证据后关闭 | S4-VS1 关闭前 | 开放 |
 | S5-I005 | 账号密码登录依赖独立浏览器运行时，当前后端明确返回 `PASSWORD_LOGIN_UNAVAILABLE` | P2 | 中 | 入口若被误当成已实现会造成错误承诺 | 产品 / 后端负责人 | 保留入口但显示不可用原因；在独立浏览器运行时具备可复现验证前不得宣称密码登录完成 | 阶段 6 评审前 | 已接受，显式未实现 |
 | S5-I006 | 开发环境 `/api` 请求曾因 Vite 未配置默认代理而落到 404；AuthGate 接入后需证明未认证业务面不会越过会话门禁 | P1 | 高 | 登录页、账号列表和真实 API 联调可能被错误判定为不可用或未鉴权 | 前端 / QA 负责人 | `apps/web/vite.config.ts` 默认代理到 `http://127.0.0.1:8080`；Chrome/CDP 验证未认证 `/accounts` 不渲染业务面、session cookie 注入后才放行，且 `npm run verify` 通过 | 2026-09-19 增量复核 | VERIFIED / CLOSED（受控环境） |
+| S5-I007 | 商品目录首片新增 `003_catalog` 迁移；已有 PostgreSQL volume 不会自动重新执行 initdb 脚本，迁移顺序和回滚证据仍需独立复核 | P1 | 中 | API 与数据库 schema 不一致会导致商品列表/详情不可用或发布后续迁移受阻 | 架构 / 数据负责人 | 已补 `apps/api/migrations/003_catalog.sql`、PostgreSQL 持久化 smoke 和重复执行校验；正式环境仍需记录 expand/verify/rollback 与已有 volume 的执行方式 | S4-VS2 关闭前 | 部分缓解，迁移回滚证据开放 |
+| S5-I008 | 闲鱼 MTOP `fetchItems` 只读探针已存在，但商品列表首片仍以本地目录持久化为主，外部商品同步/pull 尚未接入 | P1 | 高 | 真实账号商品无法自动拉取，列表数据可能与闲鱼外部状态不一致 | 后端负责人 | 保留 `XianyuMtopClient.fetchItems` 作为后续 sync/pull 适配入口；当前只验收本地列表/详情，外部同步前需补脱敏 fixture、字段映射、超时/unknown 与账号凭证复核 | S4-VS2 外部同步扩展前 | 已接受，明确不属于只读首片 |
+| S5-I009 | 商品首片当前只覆盖列表/详情只读链路，创建/编辑、SKU、素材、发布确认与 Outbox 尚未实现 | P1 | 中 | 若将当前页面误当作完整商品管理，会造成范围误判并影响后续切片排期 | 产品 / 前端 / 后端负责人 | 页面与 API 明确标注只读；后续切片按 ProductEditor 子域、Asset、SKU、Policy → Confirmation → Idempotency → Outbox 依次扩展，不把写入逻辑塞入列表组件 | S4-VS3 前 | 已接受，后续切片风险 |
 
 ## 风险分级说明
 
@@ -61,3 +64,7 @@
 - `S5-I004`：本机 Chrome/CDP E2E 已通过 AuthGate 未认证阻断、bootstrap cookie 注入、账号列表、登录方式、Cookie 登录和截图生成；仍只证明受控跨层链路，不等价于真实外部平台和数据库验收。
 - `S5-I005`：账号密码登录入口保留但后端显式返回 `PASSWORD_LOGIN_UNAVAILABLE`，直到独立浏览器运行时具备可复现验证条件前，不得宣称完成。
 - `S5-I006`：默认 Vite `/api` 代理与 AuthGate 门禁已通过受控 E2E 和 `npm run verify` 复核；未认证业务面被阻断，认证 cookie 注入后才放行账号页。
+- `S5-I007`：S4-VS2 已新增 `003_catalog` 商品、SKU、素材引用迁移，并通过 Memory/PostgreSQL 持久化 smoke；已有 PostgreSQL volume 的迁移执行、完整回滚和发布级恢复仍开放。
+- `S5-I008`：商品首片已通过本地目录列表/详情真实 API 链路；闲鱼 `fetchItems` 仅保留为后续同步/pull 适配入口，未将外部同步冒充为当前切片完成。
+- `S5-I009`：商品首片范围冻结为只读列表/详情；创建/编辑、SKU、素材上传、发布确认和 Outbox 留待后续切片，当前风险已显式接受，不阻断进入下一切片。
+- `S5-I010`：商品同步首片已落地受控 MTOP mapper、分页聚合与本地 Upsert；仍未完成真实账号外部验收、游标/同步批次持久化、鱼小铺专用列表接口和发布链路。同步不会归档远端缺失商品，也不会覆盖本地草稿；真实发布继续禁止进入本切片。

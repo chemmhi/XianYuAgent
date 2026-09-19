@@ -172,7 +172,7 @@
 
 当前增量复核结论：Vite 代理 404 根因已关闭；AuthGate 代码接入和受控浏览器门禁已通过；根 `npm run verify` 已通过。Compose 已完成容器健康与账号持久化复读，但完整迁移回滚/Testcontainers/发布级恢复、真实闲鱼 APP 扫码与外部 Cookie 验证仍待人工复核。
 
-### 10.7 S4-VS1 账号管理人工放行（2026-09-20）
+### 10.7 S4-VS1 账号管理人工放行（2026-09-19）
 
 | 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
 | --- | --- | --- | --- | --- | --- |
@@ -180,6 +180,27 @@
 | S5-I015 | 遗留问题 / UI | 页面仍存在若干 UI 缺陷，但未影响账号列表读取、账号信息展示或进入下一主体切片 | 用户 + root | NON-BLOCKING | 转入后续 UI 修复队列；不阻断 S4-VS2 |
 
 本次放行仅针对账号管理切片的可用性与进入下一切片条件；真实闲鱼 APP 扫码、外部 Cookie 验证、完整迁移回滚/Testcontainers 和发布级恢复仍保留独立待复核状态。
+
+### 10.8 S4-VS2 商品列表/详情只读首片复核（2026-09-19）
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R16 | 后端 / 数据 | 003_catalog 迁移、Product domain、账号 scope 过滤、分页/筛选/排序、列表/详情 API、403/404/422 错误 envelope | inspect_product_backend + root | PASS | `apps/api/migrations/003_catalog.sql`、`apps/api/src/services.ts`、`apps/api/src/store-memory.ts`、`apps/api/src/store-postgres.ts`、`apps/api/scripts/products-smoke.mjs`；`npm run test:api` |
+| S5-R17 | 数据库 / 持久化 | 真实 PostgreSQL 执行迁移、写入商品、通过 API 读取列表/详情、校验后清理测试数据 | root | PASS | `apps/api/scripts/products-postgres-smoke.mjs`；`npm run test:products:postgres` |
+| S5-R18 | 前端 / 组件边界 | Products feature 按 api/controller/types/components 拆分；列表 loading/empty/error/forbidden；详情抽屉、重试和移动端共用 controller | inspect_product_frontend + root | PASS | `apps/web/src/features/products/`、`apps/web/src/app/App.tsx`；`npm run test:web`、`npm run typecheck:web`、`npm run build:web` |
+| S5-R19 | 浏览器 / 端到端 | 本机 Chrome/CDP 从 `/products` 进入真实 API，读取商品列表、打开详情、刷新后确认商品仍可见 | root | PASS | `apps/web/scripts/e2e-products-chrome.mjs`；`npm run test:e2e:chrome:products`；`docs/evidence/stage5/S4-VS2/screenshots/` |
+| S5-R20 | 范围 / 发布门禁 | 商品创建/编辑、SKU、素材、同步/拉取、发布确认、Policy、Outbox 是否被错误宣称完成 | root | PARTIAL PASS | 首片明确只读；完整 S4-VS2 仍保持开放，后续必须补写入状态机、外部同步和发布链路后再复审 |
+
+### 10.9 S4-VS2 商品同步只读切片复核（2026-09-19）
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R21 | 后端 / 闲鱼适配 | MTOP 商品卡片脱敏映射、分页聚合、账号 scope、凭证失效错误边界 | root + inspect_product_backend | PASS（受控 adapter） | `apps/api/src/xianyu-product-mapper.ts`、`apps/api/src/xianyu-mtop.ts`、`npm --workspace apps/api run test` |
+| S5-R22 | 数据 / 幂等 | `(accountId, externalProductRef)` Upsert、重复同步更新、本地草稿跳过、Memory/PostgreSQL 一致性 | root | PASS | `apps/api/src/store-memory.ts`、`apps/api/src/store-postgres.ts`、`apps/api/scripts/products-sync-smoke.mjs`、`npm run test:products:postgres` |
+| S5-R23 | 前端 / Chrome E2E | 商品页触发“从闲鱼同步”，真实 API/store 返回同步商品并刷新列表；不调用真实发布 | root | PASS（fixture adapter） | `apps/web/scripts/e2e-products-chrome.mjs`、`npm run test:e2e:chrome:products` |
+| S5-R24 | 发布范围门禁 | 同步切片是否误触发闲鱼真实发布、素材上传、Outbox/Worker | root | PASS（范围受控） | 当前仅新增 `POST /api/v1/products/sync`；发布继续保持未实现，后置到 Policy → Confirmation → Outbox → Worker |
+
+本轮门禁结论：S4-VS2 商品列表/详情只读首片 PASS，可继续同一商品切片的草稿、素材、SKU 和发布子切片；不能将当前结果表述为完整商品管理或真实闲鱼商品同步/发布完成。
 
 ### 10.4 本地 dev / Compose 数据源统一复核（2026-09-19）
 
