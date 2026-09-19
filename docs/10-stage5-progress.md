@@ -36,3 +36,4 @@
 - 2026-09-19 S4-VS1 增量：真实 `XIANYU_QR_MODE=real` 集成探针已通过创建、二维码 Data URL 返回、轮询 waiting 与取消；`apps/web` 已接入 QR modal、轮询、重试、取消和成功后刷新。自动化测试继续使用 stub，人工扫码成功、Cookie 落库与 `connection/verify` 仍待真实账号复核。`verification_required` 已保留为独立可恢复状态。
 - 2026-09-19 前端增量：正式 `apps/web` 账号页按 design token 重建控制台壳层，补充账号创建表单；本机 Chrome + CDP E2E 已通过“创建账号 → API → 页面可见持久化账号 → 二维码授权弹窗”。
 - Git 提交：`c04b189`（`feat(阶段5): 接通闲鱼二维码登录与凭证校验`）。
+- Git 提交：`7cf0c0e`（`feat(阶段5): 完成账号管理前端与Chrome端到端验证`）。
