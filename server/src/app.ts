@@ -103,7 +103,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     return { statusCode: 200, body: success(ctx, { loggedOut: true }).body };
   }
 
-  const accountMatch = ctx.path.match(/^\/api\/v1\/accounts\/([^/]+)(?:\/(scopes))?$/);
+  const accountMatch = ctx.path.match(/^\/api\/v1\/accounts\/([^/]+)(?:\/(scopes|connection))?$/);
   if (ctx.path === '/api/v1/accounts' && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, { items: await accounts.list(authContext.admin.id) }).body };
   if (ctx.path === '/api/v1/accounts' && ctx.method === 'POST') {
     const result = await mutation(runtime, ctx, authContext, undefined, async () => {
@@ -116,6 +116,10 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     const accountId = decodeURIComponent(accountMatch[1]);
     if (!accountMatch[2] && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, await accounts.get(authContext.admin.id, accountId)).body };
     if (!accountMatch[2] && ctx.method === 'PATCH') return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await accounts.update({ adminId: authContext.admin.id, accountId, patch: { displayName: typeof ctx.body.displayName === 'string' ? ctx.body.displayName : undefined, status: typeof ctx.body.status === 'string' ? ctx.body.status as never : undefined }, requestId: ctx.requestId, traceId: ctx.traceId })));
+    if (accountMatch[2] === 'connection' && ctx.method === 'GET') {
+      const account = await accounts.get(authContext.admin.id, accountId);
+      return { statusCode: 200, body: success(ctx, connectionView(account)).body };
+    }
     if (accountMatch[2] && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, { items: await accounts.scopes(authContext.admin.id, accountId) }).body };
     if (accountMatch[2] && ctx.method === 'POST') return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await accounts.grantScope({ adminId: authContext.admin.id, accountId, scope: String(ctx.body.scope ?? 'read'), requestId: ctx.requestId, traceId: ctx.traceId }), 201));
     if (accountMatch[2] && ctx.method === 'DELETE') return mutation(runtime, ctx, authContext, accountId, async () => { await accounts.revokeScope({ adminId: authContext.admin.id, accountId, scope: String(ctx.body.scope ?? 'manage'), requestId: ctx.requestId, traceId: ctx.traceId }); return success(ctx, { revoked: true }); });
@@ -133,3 +137,21 @@ async function mutation(runtime: AppRuntime, ctx: RequestContext, authContext: A
   return { statusCode: result.statusCode, body: result.body };
 }
 function setSessionCookies(response: ServerResponse, csrfToken: string, sessionId: string, secure: boolean): void { setCookie(response, 'session_id', sessionId, { httpOnly: true, secure }); setCookie(response, 'csrf_token', csrfToken, { secure }); }
+
+function connectionView(account: { status: string; lastConnectedAt?: string }) {
+  const status = account.status === 'connected'
+    ? 'online'
+    : account.status === 'pending'
+      ? 'connecting'
+      : account.status === 'expired'
+        ? 'expired'
+        : account.status === 'degraded'
+          ? 'unknown'
+          : 'offline';
+  return {
+    status,
+    lastConnectedAt: account.lastConnectedAt,
+    failureCode: account.status === 'degraded' ? 'ADAPTER_UNKNOWN' : undefined,
+    failureMessage: account.status === 'degraded' ? '外部闲鱼连接结果未知，需要人工复核。' : undefined,
+  };
+}

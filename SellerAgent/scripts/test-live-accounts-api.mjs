@@ -69,6 +69,10 @@ try {
   assert.equal(page.items.length, 1);
   assert.equal(page.items[0]?.sellerRef, 'live-seller-001');
   assert.equal(page.items[0]?.displayName, 'Live Account');
+  const detail = await accountsApi.getDetail(page.items[0].id);
+  assert.equal(detail.sellerRef, 'live-seller-001');
+  const connection = await accountsApi.getConnection(page.items[0].id);
+  assert.equal(connection.status, 'connecting');
   console.log('live accounts API integration passed');
 } finally {
   child.kill('SIGTERM');

@@ -1,5 +1,6 @@
 import type { AccountSummary, PageResult } from '../../api/contracts';
 import type {
+  AccountConnectionVM,
   AccountConnectionStatus,
   AccountCredentialState,
   AccountListFilters,
@@ -14,6 +15,8 @@ export interface AccountsApiTransport {
 
 export interface AccountsApi {
   list(filters?: AccountListFilters): Promise<AccountsPageVM>;
+  getDetail(accountId: string): Promise<AccountVM>;
+  getConnection(accountId: string): Promise<AccountConnectionVM>;
 }
 
 interface CanonicalAccountResponse {
@@ -123,6 +126,14 @@ export function createAccountsApi(transport: AccountsApiTransport): AccountsApi 
       const rawPayload = await transport.get<CanonicalAccountsPayload | ApiEnvelope<CanonicalAccountsPayload>>(`/api/v1/accounts${queryString(filters)}`);
       return toCanonicalPage(unwrapEnvelope(rawPayload));
     },
+    async getDetail(accountId) {
+      const rawPayload = await transport.get<CanonicalAccountResponse | ApiEnvelope<CanonicalAccountResponse>>(`/api/v1/accounts/${encodeURIComponent(accountId)}`);
+      return toAccountVM(unwrapEnvelope(rawPayload));
+    },
+    async getConnection(accountId) {
+      const rawPayload = await transport.get<AccountVM['connection'] | ApiEnvelope<AccountVM['connection']>>(`/api/v1/accounts/${encodeURIComponent(accountId)}/connection`);
+      return unwrapEnvelope(rawPayload);
+    },
   };
 }
 
@@ -177,6 +188,16 @@ export function createMockAccountsApi(seed: AccountSummary[] = [
         totalPages: Math.max(1, Math.ceil(filtered.length / pageSize)),
       };
     },
+    async getDetail(accountId) {
+      const account = accounts.find((item) => item.id === accountId);
+      if (!account) throw new Error('account not found');
+      return account;
+    },
+    async getConnection(accountId) {
+      const account = accounts.find((item) => item.id === accountId);
+      if (!account) throw new Error('account not found');
+      return account.connection;
+    },
   };
 }
 
@@ -188,6 +209,16 @@ export function createLegacyAccountsApi(legacyApi: { list(query?: { page?: numbe
         ...result,
         items: result.items.map(fromLegacySummary),
       };
+    },
+    async getDetail(accountId) {
+      const result = await legacyApi.list({ search: accountId });
+      const account = result.items.find((item) => item.id === accountId);
+      if (!account) throw new Error('account not found');
+      return fromLegacySummary(account);
+    },
+    async getConnection(accountId) {
+      const detail = await this.getDetail(accountId);
+      return detail.connection;
     },
   };
 }
