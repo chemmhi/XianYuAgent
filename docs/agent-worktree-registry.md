@@ -23,7 +23,7 @@
 
 | agent_id | slice_id | branch | worktree | owner | created_at | status | merge_commit | cleaned_at | notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `root` | `docs-multi-agent-collaboration` | `docs/multi-agent-collaboration` | `F:\ChenHai\Project\XianYuAgent-multi-agent-docs` | Codex `/root` | `2026-09-19 00:00:00 +08:00` | `MERGED` | `e9aaf782` | `-` | 用户已批准；分支提交 `b278617` 已在全局 merge lock 内以 `--no-ff` 合入 `master`，待完成 worktree/分支清理 |
+| - | - | - | - | - | - | - | - | - | 当前没有活动 agent worktree；主工作区 `master` 受保护 |
 
 ## 主工作区
 
@@ -35,7 +35,7 @@
 
 | agent_id | slice_id | branch | worktree | owner | created_at | status | merge_commit | cleaned_at | notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| - | - | - | - | - | - | - | - | - | 当前规范启用前没有可追溯的活动子 agent 登记 |
+| `root` | `docs-multi-agent-collaboration` | `docs/multi-agent-collaboration` | `F:\ChenHai\Project\XianYuAgent-multi-agent-docs` | Codex `/root` | `2026-09-19 00:00:00 +08:00` | `CLEANED` | `e9aaf782` | `2026-09-19 04:15:00 +08:00` | 分支提交 `b278617` 已在全局 merge lock 内以 `--no-ff` 合入 `master`；worktree 已删除，分支已删除 |
 
 ## 登记维护规则
 
