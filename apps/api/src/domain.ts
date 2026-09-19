@@ -112,7 +112,9 @@ export interface CouponBatchRecord {
 
 export interface CouponBatchListQuery {
   accountId?: string;
+  keyword?: string;
   status?: CouponBatchStatus;
+  stockAlert?: 'normal' | 'low_stock' | 'exhausted';
   page?: number;
   pageSize?: number;
 }

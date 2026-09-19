@@ -130,6 +130,16 @@
 
 本轮阶段 5 记录与代码提交已完成：`65b48d6`（feat(阶段5): 接通账号真实读取链路与ENV0部署骨架）。
 
+## S4-VS3 实现与人工审核决策（2026-09-19）
+
+1. 卡券首页在独立 worktree `F:\ChenHai\Project\XianYuAgent-s4-vs3`、分支 `feature/s4-vs3-coupons` 并行开发，不触碰主工作树中的 S4-VS2 未提交改动。
+2. 旧参考项目仅提供字段与操作参考：列表列、详情抽屉、创建/复制、商品绑定、启停/作废、删除和正文预览/复制；表格视觉、颜色、密度和响应式行为继续遵循当前平台壳样式。
+3. 首批库存由前端 `createBatch` 先创建批次，再调用 `/items/import` 并重新读取详情；列表 `keyword`、`stockAlert` 由 API、MemoryStore、PostgresStore 一致处理；绑定字段统一归一到 `bindingId`。
+4. Chrome/CDP E2E 通过前端正式路由、真实 API、MemoryStore 和页面刷新可见结果，生成固定桌面/移动截图；由于使用隔离临时 profile 和受控内存运行时，门禁结论保持 `READY_FOR_REVIEW`，不得直接描述为生产级持久化通过。
+5. 人工审核通过前不执行 merge；审核通过后才重新跑验证并将 VS3 分支合入 `master`。
+
+本轮提交：`867fbf0`（`feat(阶段5): 完成S4-VS3卡券首页`）。
+
 ## Git 提交记录
 
 - 阶段 0：`38862e5`（`feat: 阶段0文档产出`）

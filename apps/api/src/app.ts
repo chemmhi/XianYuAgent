@@ -461,7 +461,9 @@ function parseCouponBatchListQuery(query: Record<string, string>): import('./dom
   const pageSize = query.pageSize === undefined ? undefined : Number(query.pageSize);
   return {
     accountId: optionalString(query.accountId),
+    keyword: optionalString(query.keyword),
     status: optionalString(query.status) as import('./domain.js').CouponBatchListQuery['status'],
+    stockAlert: optionalString(query.stockAlert) as import('./domain.js').CouponBatchListQuery['stockAlert'],
     page: page === undefined || Number.isNaN(page) ? page : Math.trunc(page),
     pageSize: pageSize === undefined || Number.isNaN(pageSize) ? pageSize : Math.trunc(pageSize),
   };

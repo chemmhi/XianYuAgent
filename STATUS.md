@@ -1,14 +1,14 @@
 # XianyuSellerAgent 项目状态
 
 - 项目阶段：5
-- 阶段状态：进行中（S4-VS1 账号管理切片已获人工放行；账号列表可正常加载数据库账号信息；页面仍有非阻塞 UI 缺陷，转为后续修复项，不阻断下一切片）
+- 阶段状态：进行中（S4-VS1 账号管理切片已获人工放行；S4-VS2 商品管理正在主工作树开发；S4-VS3 卡券首页已在独立 worktree 完成实现与受控验证，等待人工审核，不合入 master）
 - 最近一次通过门禁：S4-VS1 账号管理人工复核 / 2026-09-20
-- 当前目标：进入 S4-VS2 商品管理切片，先冻结商品列表、详情、草稿、素材、SKU、账号绑定和发布确认的数据契约
+- 当前目标：人工审核 S4-VS3 卡券首页；审核通过后再合入 `master`，随后继续 S4-VS2 / S4-VS4 的门禁推进
 - 已完成范围：阶段 0 范围门禁；阶段 1 架构与模块边界；阶段 2 数据模型、数据库表设计、关系基数、状态机、API envelope、幂等、鉴权、敏感交付、迁移边界；阶段 5 账号登录方法选择、真实 QR 适配器、Cookie 登录、账号资料同步、登录会话持久化、AuthGate 会话门禁、Vite 默认代理、前端列表刷新和 Chrome/CDP 控制环境 E2E
 - 未完成范围：真实闲鱼 APP 扫码成功回调、真实外部 Cookie 验证、完整迁移/回滚/Testcontainers 与视觉差异回归；账号密码登录依赖独立浏览器运行时，当前明确不可用
 - 未解决风险：R-001/P1、R-002/P1、R-005/P2、R-006/P2、R-007/P2、R-008/P1、R-009/P1、R-011/P1、S3-I001/P1、S3-I002/P1、S3-I003/P1、S3-I004/P1、S3-I005/P1、S3-I006/P1、S3-I007/P1、S3-I008/P1、S4-I003/P1、S4-I004/P1、S4-I005/P1、S4-I006/P1、S4-I007/P2、S5-I001/P1、S5-I002/P1、S5-I003/P1、S5-I004/P1；S3-I009/S3-I010/S5-I006 已关闭，S4-I001/S4-I002 已部分缓解
 - 待复审问题：S3-R5 为超出当前范围的实现审计；S3-R6 设计范围已澄清；S1-I004 保持 P2 跟进项；阶段 4 计划门禁已通过
-- 下一步：在当前已登录 Chrome 中打开 `http://localhost:9000/accounts` 完成参考项目登录态复核；再用真实闲鱼 APP 扫码验证回调、资料同步和凭证落库；补齐迁移回滚、重启恢复和 Testcontainers 证据
+- 下一步：在独立 worktree `feature/s4-vs3-coupons` 上完成人工审核；确认 `/coupons` 列表、详情、预览/复制、库存导入、商品绑定、作废与刷新持久化后，再由 root 合入 `master`；同时保留真实闲鱼、PostgreSQL/Redis、迁移回滚和逐状态视觉回归风险
 
 ## 当前证据
 
@@ -35,6 +35,17 @@
 - Vite 默认代理证据：未设置 `VITE_API_PROXY_TARGET` 时，`GET /api/v1/auth/session` 经 Vite 返回 HTTP 200 canonical envelope；未认证业务读取被 API 返回 401，AuthGate 不渲染账号业务面。
 
 - canonical 设计同步：FirstRun 使用 `POST /api/v1/auth/bootstrap`；消息人工接管使用 `POST /api/v1/conversations/{id}/handoff`，恢复 AI 使用 `POST /api/v1/conversations/{id}/release`；统一字段为 `BootstrapAdminInput/Output`、`HandoffConversationInput`、`ReleaseConversationInput`、`ConversationHandlingOutput`，状态字段为 `handlingMode`，版本字段为 `expectedVersion`。
+
+## S4-VS3 卡券首页（独立 worktree）
+
+- worktree：`F:\ChenHai\Project\XianYuAgent-s4-vs3`
+- 分支：`feature/s4-vs3-coupons`
+- 实现：批次列表、库存/`stockAlert`、创建批次、首批库存、导入库存、绑定/解绑契约、作废、DELETE 软作废、管理员受控正文预览/复制、403/404/409/网络错误状态。
+- 后端：`apps/api/migrations/013_coupons.sql`、Memory/Postgres store、scope 校验、加密正文存储、审计摘要。
+- 前端：`apps/web/src/features/coupons/`，通过 `/coupons` 正式路由接入，表格视觉保持平台样式，仅参考旧项目字段和操作。
+- 验证：`npm run typecheck`、前后端测试、API smoke、web build、Chrome/CDP E2E 和 1440×900 / 390×844 截图均已通过；详见 `docs/evidence/stage5/S4-VS3/test-baseline.md`。
+- 门禁：`READY_FOR_REVIEW`；人工审核通过前不得 merge 到 `master`。
+- 本轮提交：`867fbf0`（`feat(阶段5): 完成S4-VS3卡券首页`）。
 
 ## 长期决策摘要
 

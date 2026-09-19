@@ -87,6 +87,7 @@ export class CouponService {
     if (!Number.isInteger(page) || page < 1) throw new ServiceError(422, 'VALIDATION_FAILED', 'page must be a positive integer');
     if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new ServiceError(422, 'VALIDATION_FAILED', 'pageSize must be between 1 and 100');
     if (query.status && !['draft', 'active', 'paused', 'closed', 'exhausted', 'voided'].includes(query.status)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon batch status');
+    if (query.stockAlert && !['normal', 'low_stock', 'exhausted'].includes(query.stockAlert)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon stock alert');
     const result = await this.store.listCouponBatches(adminId, { ...query, page, pageSize });
     return { ...result, items: result.items.map((batch) => this.toBatchView(batch)) };
   }
@@ -130,8 +131,12 @@ export class CouponService {
 
   async unbind(input: { adminId: string; batchId: string; productId: string; requestId: string; traceId: string }): Promise<Record<string, unknown>> {
     try {
-      const binding = await this.store.unbindCouponBatch(input);
       const batch = await this.store.getCouponBatch(input.adminId, input.batchId);
+      if (!batch) throw new ServiceError(404, 'NOT_FOUND', 'coupon batch not found');
+      const product = await this.store.getProduct(input.adminId, input.productId);
+      if (!product) throw new ServiceError(404, 'NOT_FOUND', 'product not found');
+      if (product.accountId !== batch.accountId) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
+      const binding = await this.store.unbindCouponBatch(input);
       await this.audit({ actorId: input.adminId, action: 'coupon.batch.unbound', targetRef: binding?.id ?? input.batchId, requestId: input.requestId, traceId: input.traceId, payload: { productId: input.productId, found: Boolean(binding) }, accountId: batch?.accountId });
       return { unbound: Boolean(binding), binding, batch: batch ? this.toBatchView(batch, true) : undefined };
     } catch (error) { throw mapCouponStoreError(error); }
@@ -183,7 +188,7 @@ export class CouponService {
     const consumedCount = items.length > 0 ? items.filter((item) => item.status === 'consumed').length : batch.consumedCount ?? 0;
     const totalCount = batch.totalCount || items.length;
     const stockAlert = batch.status === 'voided' || availableCount === 0 ? 'exhausted' : availableCount <= 5 ? 'low_stock' : 'normal';
-    const result: Record<string, unknown> = { batchId: batch.id, id: batch.id, accountId: batch.accountId, label: batch.label, purpose: batch.purpose, deliveryScope: batch.deliveryScope, totalCount, availableCount, reservedCount, consumedCount, stockAlert, status: batch.status, version: batch.version, updatedAt: batch.updatedAt, createdAt: batch.createdAt, productBindings: (batch.bindings ?? []).filter((binding) => binding.status === 'active').map((binding) => ({ id: binding.id, productId: binding.productId, priority: binding.priority, status: binding.status, expiresAt: binding.expiresAt })) };
+    const result: Record<string, unknown> = { batchId: batch.id, id: batch.id, accountId: batch.accountId, label: batch.label, purpose: batch.purpose, deliveryScope: batch.deliveryScope, quarkUrl: batch.quarkUrl, extractCode: batch.extractionCode, totalCount, availableCount, reservedCount, consumedCount, stockAlert, status: batch.status, version: batch.version, updatedAt: batch.updatedAt, createdAt: batch.createdAt, productBindings: (batch.bindings ?? []).filter((binding) => binding.status === 'active').map((binding) => ({ id: binding.id, bindingId: binding.id, batchId: binding.batchId, productId: binding.productId, priority: binding.priority, status: binding.status, expiresAt: binding.expiresAt })) };
     if (detail) result.items = items.map((item) => this.toItemView(item));
     if (detail) result.bindings = batch.bindings ?? [];
     return result;

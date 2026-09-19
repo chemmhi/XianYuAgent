@@ -61,3 +61,10 @@
 - `S5-I004`：本机 Chrome/CDP E2E 已通过 AuthGate 未认证阻断、bootstrap cookie 注入、账号列表、登录方式、Cookie 登录和截图生成；仍只证明受控跨层链路，不等价于真实外部平台和数据库验收。
 - `S5-I005`：账号密码登录入口保留但后端显式返回 `PASSWORD_LOGIN_UNAVAILABLE`，直到独立浏览器运行时具备可复现验证条件前，不得宣称完成。
 - `S5-I006`：默认 Vite `/api` 代理与 AuthGate 门禁已通过受控 E2E 和 `npm run verify` 复核；未认证业务面被阻断，认证 cookie 注入后才放行账号页。
+
+## S4-VS3 增量更新（2026-09-19）
+
+- `S4-I003`：卡券受控 content API、管理员 scope、审计摘要、正文加密存储和前端不进列表已实现并通过受控 API/Chrome E2E；真实 PostgreSQL/Redis 容器级验收、订单交付策略和真实买家链路仍开放。
+- `S4-I006`：卡券实现按 `features/coupons` 拆分 API adapter、controller、ViewModel、table、drawer、modal、state boundary；待人工审核确认组件边界和操作可发现性。
+- `S4-I007`：已生成 `1440×900` 和 `390×844` 截图，并完成桌面/移动浏览器路径；完整逐状态视觉回归仍开放，状态暂不关闭。
+- `S5-I007`：S4-VS3 Chrome/CDP 自动化使用临时 profile + MemoryStore/stub，仅作为真实前端跨层受控证据；人工审核必须在目标环境复核，不能把该证据升级为生产持久化或外部平台通过。

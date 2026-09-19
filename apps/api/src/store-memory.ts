@@ -98,10 +98,18 @@ export class MemoryStore implements Store {
   }
   async listCouponBatches(adminId: string, query: CouponBatchListQuery): Promise<CouponBatchListResult> {
     const scopedAccounts = new Set((await this.listScopes(adminId)).map((scope) => scope.accountId));
+    const normalizedKeyword = query.keyword?.trim().toLowerCase();
     const filtered = [...this.couponBatches.values()].filter((batch) => {
       if (!scopedAccounts.has(batch.accountId)) return false;
       if (query.accountId && batch.accountId !== query.accountId) return false;
       if (query.status && batch.status !== query.status) return false;
+      if (normalizedKeyword && !`${batch.id} ${batch.label ?? ''} ${batch.purpose}`.toLowerCase().includes(normalizedKeyword)) return false;
+      if (query.stockAlert) {
+        const items = [...this.couponItems.values()].filter((item) => item.batchId === batch.id);
+        const available = items.filter((item) => item.status === 'available').length;
+        const stockAlert = batch.status === 'voided' || available === 0 ? 'exhausted' : available <= 5 ? 'low_stock' : 'normal';
+        if (stockAlert !== query.stockAlert) return false;
+      }
       return true;
     }).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
     const page = query.page ?? 1;

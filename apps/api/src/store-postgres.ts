@@ -72,6 +72,14 @@ export class PostgresStore implements Store {
     const conditions = ["EXISTS (SELECT 1 FROM auth.account_scopes scope WHERE scope.account_id=b.account_id AND scope.admin_id=$1 AND scope.status='active' AND (scope.expires_at IS NULL OR scope.expires_at>now()))"];
     if (query.accountId) { params.push(query.accountId); conditions.push(`b.account_id=$${params.length}`); }
     if (query.status) { params.push(query.status); conditions.push(`b.status=$${params.length}`); }
+    if (query.keyword) { params.push(`%${query.keyword.trim().toLowerCase()}%`); conditions.push(`(lower(b.id) like $${params.length} or lower(coalesce(b.label,'')) like $${params.length} or lower(b.purpose) like $${params.length})`); }
+    if (query.stockAlert) {
+      const alertIndex = params.length + 1;
+      const availableExpr = `(select count(*) from coupons.coupon_items ci where ci.batch_id=b.id and ci.status='available')`;
+      const alertExpr = `case when b.status='voided' or ${availableExpr}=0 then 'exhausted' when ${availableExpr}<=5 then 'low_stock' else 'normal' end`;
+      params.push(query.stockAlert);
+      conditions.push(`${alertExpr}=$${alertIndex}`);
+    }
     const where = conditions.join(' AND ');
     const count = await this.pool.query(`select count(*)::int as count from coupons.coupon_batches b where ${where}`, params);
     const total = Number(count.rows[0]?.count ?? 0);
