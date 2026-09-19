@@ -121,3 +121,4 @@
 - 验证证据：`npm run typecheck`、`npm test`、`npm run test:products:postgres`、`npm run test:e2e:chrome`、`npm run test:e2e:chrome:products`、`npm run compose:config`、`git diff --check` 均通过。
 - 范围边界：账号上下文采用认证后前端壳层的 localStorage 持久化；删除账号采用软删除，撤销 scope/credential，保留历史商品与审计记录；真实闲鱼 APP 扫码和真实发布仍未完成外部验收。
 - 2026-09-19 文档切片拆分提交：`d2ba0c3`（`docs(阶段5): 拆分未完成纵向切片`）；已同步更新阶段 4 计划、阶段 5 状态矩阵、数据/API 契约、组件 owner、风险、决策和评审记录。验证：`git diff --check`、风险号唯一性与 Markdown 风险表列数检查通过；未重复执行代码 E2E（本轮仅文档变更）。
+- 2026-09-19 优先级重排提交：`56b6260`（`docs(阶段5): 重排聊天工作台与凭证切片`）；已将下一批切片调整为 `S4-VS5A/B/C`、`S4-VS6A/B`、`S4-VS7A`，并同步补齐 canonical API、账号级 CredentialStore、BusinessLinkVM、clientRunRef/Idempotency-Key 和风险/评审记录。验证：`git diff --check`、新风险号唯一性、canonical 路径和状态一致性检查通过；未执行代码 E2E（本轮仅文档变更）。
