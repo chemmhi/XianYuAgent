@@ -11,12 +11,17 @@ describe('product account scope selection', () => {
     expect(chooseProductAccountId([account('pending', 'pending'), account('connected', 'connected', 'online')], 'pending')).toBe('pending');
   });
 
-  it('prefers a connected account when no request exists', () => {
-    expect(chooseProductAccountId([account('pending', 'pending'), account('connected', 'connected', 'online')])).toBe('connected');
+  it('auto-selects the only available account when no request exists', () => {
+    expect(chooseProductAccountId([account('connected', 'connected', 'online')])).toBe('connected');
+  });
+
+  it('requires explicit selection when multiple accounts are available', () => {
+    expect(chooseProductAccountId([account('first', 'connected', 'online'), account('second', 'connected', 'online')])).toBeUndefined();
   });
 
   it('does not select disabled accounts', () => {
     expect(chooseProductAccountId([account('disabled', 'disabled'), account('pending', 'pending')])).toBe('pending');
+    expect(chooseProductAccountId([account('disabled', 'disabled'), account('pending', 'pending'), account('connected', 'connected', 'online')])).toBeUndefined();
     expect(chooseProductAccountId([account('disabled', 'disabled')])).toBeUndefined();
   });
 });

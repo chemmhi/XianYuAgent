@@ -95,8 +95,26 @@ try {
 
   const persisted = await runtime.store.getProduct(adminId, productId);
   assert.equal(persisted?.externalProductRef, `PG-${process.pid}`);
+
+  runtime.xianyu.fetchItemsAll = async () => {
+    const items = [
+      { externalProductRef: `SYNC-${process.pid}-1`, title: 'Postgres 同步商品一', categoryCode: 'digital', priceMinor: 1990, sourcePayloadDigest: 'pg-sync-1' },
+      { externalProductRef: `SYNC-${process.pid}-2`, title: 'Postgres 同步商品二', categoryCode: 'digital', priceMinor: 2990, sourcePayloadDigest: 'pg-sync-2' },
+    ];
+    return { pages: [{ success: true, accountInvalid: false, cookieHeader: '', items, pageNumber: 1, pageSize: 20, totalCount: items.length, totalPages: 1, hasMore: false }], items, hasMore: false };
+  };
+  const synced = await request('/api/v1/products/sync', {
+    method: 'POST',
+    headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': `products-postgres-sync-${process.pid}` },
+    body: JSON.stringify({ accountId }),
+  });
+  assert.equal(synced.response.status, 200);
+  assert.equal(synced.body.data.fetchedCount, 2);
+  assert.equal(synced.body.data.createdCount, 2);
+  assert.equal((await runtime.store.listProducts(adminId, { accountId })).items.filter((item) => item.source === 'xianyu').length, 2);
   console.log('products postgres smoke passed');
 } finally {
+  if (accountId) await runtime.store.pool.query('delete from products.products where account_id=$1', [accountId]);
   if (createdId) await runtime.store.pool.query('delete from products.products where id=$1', [createdId]);
   if (productId) await runtime.store.pool.query('delete from products.products where id=$1', [productId]);
   if (accountId) await runtime.store.pool.query('delete from observability.audit_events where account_id=$1', [accountId]);

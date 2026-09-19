@@ -211,6 +211,16 @@
 
 本轮门禁结论：S4-VS2 商品列表/详情只读首片 PASS，可继续同一商品切片的草稿、素材、SKU 和发布子切片；不能将当前结果表述为完整商品管理或真实闲鱼商品同步/发布完成。
 
+### 10.11 S4-VS2 商品同步 Compose 回归复核（2026-09-19）
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R28 | 后端 / PostgreSQL | 外部商品 Upsert 是否正确命中 `products_account_external_ref_uq` 部分唯一索引，避免真实同步返回 500 | root | PASS | `apps/api/src/store-postgres.ts` 在 `ON CONFLICT` 中补充 `WHERE external_product_ref IS NOT NULL`；`npm run test:products:postgres` 通过；真实 Compose 同步接口返回 200 |
+| S5-R29 | 前端 / 账号上下文 | 多个可用闲鱼账号时是否避免静默选中错误账号，要求显式选择后再加载/同步 | root + inspect_sync_backend_bug | PASS（受控 E2E） | `apps/web/src/features/products/account-scope.ts`、`ProductStateView.tsx`；`npm run test:web`、`npm run test:e2e:chrome:products` 通过 |
+| S5-R30 | 外部平台 / 商品数量口径 | 当前 Compose 凭证是否实际返回用户所说的 29 件商品 | root + inspect_sync_backend_bug | PENDING 人工复核 | 当前两个 connected 账号 MTOP 实测分别返回 0 和 19 件；`nextPage=false`，在售分组为 19；未发现可安全推导 29 件的分组/分页参数，不能用 fixture 结果替代外部验收 |
+
+本轮结论：已关闭 PostgreSQL 同步 500 与多账号误选账号两个代码问题；真实闲鱼“29 件”数量口径仍需确认目标账号及是否包含非在售分组，当前同步继续保持只读在售范围，不伪造或扩大外部数量。
+
 ### 10.4 本地 dev / Compose 数据源统一复核（2026-09-19）
 
 | 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |

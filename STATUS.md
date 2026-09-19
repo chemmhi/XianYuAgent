@@ -84,3 +84,4 @@
 - 2026-09-19 S4-VS2 商品列表/详情只读首片完成：003_catalog、统一商品 API、前端 Products feature、PostgreSQL smoke 和 Chrome/CDP E2E 均通过；商品写入、同步、素材、SKU、发布仍未宣称完成。
 - 2026-09-19 S4-VS2 商品同步首片完成：`POST /api/v1/products/sync`、MTOP 脱敏 mapper、Memory/PostgreSQL 幂等 Upsert、本地草稿跳过、商品页同步按钮和 Chrome/CDP fixture E2E 均通过；提交 `edecc3e`。真实发布仍未接入。
 - 2026-09-19 S4-VS2 商品同步入口修复完成：普通 `/products` 自动选择可用账号并携带 `accountId` 查询/同步，Chrome/CDP fixture 验证 29 件同步商品可见；本轮已单独提交。真实闲鱼外部验收仍待人工执行。
+- 2026-09-19 S4-VS2 商品同步 Compose 回归修复：PostgreSQL 外部商品 Upsert 补齐部分唯一索引冲突谓词，真实 19 件账号同步由 500 恢复为 200 并落库；多账号无 query 时改为要求显式选择，避免静默同步到返回 0 件的错误账号。当前 Compose 两个账号实测为 0/19 件，用户所说 29 件仍待确认目标账号与统计口径。

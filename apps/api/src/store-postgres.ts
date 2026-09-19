@@ -101,7 +101,7 @@ export class PostgresStore implements Store {
     const id = existing ? String(existing.id) : createId();
     await this.pool.query(`insert into products.products (id,account_id,external_product_ref,title,description,category_code,attributes_json,price_minor,status,source,last_synced_at,source_payload_digest)
       values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'published','xianyu',$9,$10)
-      on conflict (account_id,external_product_ref) do update set title=excluded.title,description=excluded.description,category_code=excluded.category_code,attributes_json=excluded.attributes_json,price_minor=excluded.price_minor,status='published',source='xianyu',last_synced_at=excluded.last_synced_at,source_payload_digest=excluded.source_payload_digest,config_version=products.products.config_version+1,updated_at=now()
+      on conflict (account_id,external_product_ref) where external_product_ref is not null do update set title=excluded.title,description=excluded.description,category_code=excluded.category_code,attributes_json=excluded.attributes_json,price_minor=excluded.price_minor,status='published',source='xianyu',last_synced_at=excluded.last_synced_at,source_payload_digest=excluded.source_payload_digest,config_version=products.products.config_version+1,updated_at=now()
       returning id`, [id, input.accountId, input.item.externalProductRef, input.item.title, input.item.description ?? null, input.item.categoryCode ?? null, JSON.stringify(attributes), input.item.priceMinor ?? null, input.syncedAt, input.item.sourcePayloadDigest]);
     const product = await this.getProduct(input.adminId, id);
     if (!product) throw new Error('PRODUCT_SYNC_READBACK_FAILED');

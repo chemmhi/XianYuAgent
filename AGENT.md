@@ -175,3 +175,9 @@ git diff --check
 - 全 Compose 模式使用 `full` profile；本地 dev 启动前停止 Compose API/Worker，禁止两个 API 同时抢占 `8080`。
 - 首次管理员页面必须由真实 `bootstrapRequired` 数据驱动；已有管理员时只显示登录页，不在前端硬编码邮箱或密码。
 - 健康检查必须暴露实际 storage kind，便于确认浏览器请求没有误连到另一套内存 API。
+
+## 2026-09-19 商品同步真实环境经验
+
+- PostgreSQL 部分唯一索引用于外部商品幂等 Upsert 时，`ON CONFLICT` 必须带与索引一致的谓词；仅写 `(account_id, external_product_ref)` 会在真实数据库返回“没有匹配唯一约束”的 500，内存测试无法发现该问题。
+- 多闲鱼账号的商品页不得静默选择第一个 connected 账号；没有明确 `accountId` 时必须要求管理员显式选择，避免把空账号或错误账号的结果误报为“当前账号没有商品”。
+- Chrome/CDP fixture 中的“29 件”只能证明前端链路可承载 29 件数据，不能替代真实 MTOP 外部验收；真实商品数量必须按目标账号、分组、分页和当前 Cookie 的实际返回记录，数量口径不一致时提出人工复核，不得硬编码补齐。

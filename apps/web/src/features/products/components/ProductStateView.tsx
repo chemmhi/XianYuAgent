@@ -1,7 +1,8 @@
 import type { ProductDetailState, ProductsLoadError, ProductsLoadPhase } from '../types';
 
-export function ProductListStateView({ phase, error, onRetry }: { phase: ProductsLoadPhase; error: ProductsLoadError | null; onRetry: () => void }) {
+export function ProductListStateView({ phase, error, onRetry, accountSelectionRequired = false }: { phase: ProductsLoadPhase; error: ProductsLoadError | null; onRetry: () => void; accountSelectionRequired?: boolean }) {
   if (phase === 'idle' || phase === 'loading') return <div className="products-state" aria-live="polite"><div className="products-skeleton"/><div className="products-skeleton"/><div className="products-skeleton"/></div>;
+  if (accountSelectionRequired) return <div className="products-state"><strong>请选择闲鱼账号</strong><span>当前有多个可用账号，请先选择账号后再加载商品或执行同步。</span></div>;
   if (phase === 'empty') return <div className="products-state"><strong>暂无商品</strong><span>当前账号范围内没有匹配商品，可调整筛选条件后重试。</span></div>;
   if (phase === 'forbidden') return <div className="products-state products-error" role="alert"><strong>无权查看商品</strong><span>{error?.message}</span></div>;
   if (phase === 'error' && error) return <div className="products-state products-error" role="alert"><strong>商品列表加载失败</strong><span>{error.message}</span>{error.retryable && <button className="btn ghost" type="button" onClick={onRetry}>重新加载</button>}</div>;

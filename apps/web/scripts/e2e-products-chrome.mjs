@@ -100,6 +100,7 @@ async function run() {
   const bootstrapPayload = await bootstrap.json();
   const adminId = bootstrapPayload.data.profile.id;
   const account = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `products-e2e-${process.pid}` });
+  await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `products-e2e-secondary-${process.pid}` });
   await apiRuntime.store.createProduct({ adminId, accountId: account.id, externalProductRef: `ITEM-${process.pid}`, title: 'Chrome E2E 商品', description: '商品详情来自独立 detail API。', categoryCode: 'digital', attributes: { source: 'chrome-e2e' }, priceMinor: 3990, status: 'published' });
   apiRuntime.xianyu.fetchItemsAll = async () => {
     const items = Array.from({ length: 29 }, (_, index) => ({ externalProductRef: `SYNC-${process.pid}-${index + 1}`, title: `Chrome E2E 同步商品 ${index + 1}`, description: '来自闲鱼同步 fixture', categoryCode: 'digital', priceMinor: 1290 + index, detailUrl: `https://www.goofish.com/item?id=SYNC-${process.pid}-${index + 1}`, imageUrls: ['https://img.example/sync.jpg'], attributes: { source: 'chrome-sync-e2e' }, sourcePayloadDigest: `sync-${process.pid}-${index + 1}` }));
@@ -118,7 +119,11 @@ async function run() {
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'products page');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('商品目录'), 'products list');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 商品'), 'product row');
-  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("[data-testid=product-account-select]")?.value ?? ""')).includes(account.id), 'product account scope');
+  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("[data-testid=product-account-select]")?.value ?? ""')) === '', 'explicit product account selection');
+  const initiallyDisabled = await evaluate(cdp, 'Boolean(document.querySelector("[data-testid=sync-products]")?.disabled)');
+  if (!initiallyDisabled) throw new Error('sync products button should require account selection when multiple accounts exist');
+  await evaluate(cdp, `(() => { const select = document.querySelector('[data-testid=product-account-select]'); if (!select) throw new Error('product account selector missing'); select.value = ${JSON.stringify(account.id)}; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("[data-testid=product-account-select]")?.value ?? ""')).includes(account.id), 'selected product account scope');
   const syncButton = await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=sync-products]"); if (!button || button.disabled) return false; button.click(); return true; })()');
   if (!syncButton) throw new Error('sync products button missing or disabled');
   await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("[data-testid=products-total]")?.textContent ?? ""')).includes('30'), '29 synced products plus local product');
