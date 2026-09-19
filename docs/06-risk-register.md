@@ -80,3 +80,16 @@
 - `S4-I006`：卡券实现按 `features/coupons` 拆分 API adapter、controller、ViewModel、table、drawer、modal、relation modal、state boundary；待人工审核确认组件边界和操作可发现性。
 - `S4-I007`：已生成非空 `1440×900` 和 `390×844` 截图，并完成桌面/移动浏览器路径；完整逐状态视觉回归仍开放，状态暂不关闭。
 - `S5-I012`：S4-VS3 Chrome/CDP 自动化使用临时 profile + MemoryStore/stub，仅作为真实前端跨层受控证据；人工审核必须在目标环境复核搜索/重置/筛选、全选/批量删除、编辑/复制、启禁用、双栏关联和图片预览，不能把该证据升级为生产持久化或外部平台通过。
+
+## 未完成切片拆分风险（2026-09-19）
+
+| 风险编号 | 风险描述 | 级别 | 影响 | 负责人 | 关闭条件 | 关联切片 | 状态 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| S5-RISK-013 | 商品草稿、SKU、素材和发布若未按 ProductEditor 子域拆分，可能重新形成跨域保存入口和版本覆盖 | P1 | 中 | 商品写入不可独立测试，冲突时覆盖用户草稿 | 前端 / API 负责人 | `S4-VS2A/B/C/D` 分别具备独立 controller、API、版本校验、真实 E2E 和复审记录 | `S4-VS2A`–`S4-VS2D` | 开放，已拆分待实现 |
+| S5-RISK-014 | 商品 SKU/库存与发布命令的并发、幂等和部分成功语义尚未落到真实持久化 | P1 | 高 | 可能出现重复发布、库存覆盖或部分成功被误报为整体成功 | 后端 / QA 负责人 | PostgreSQL 并发集成、Idempotency/Outbox worker、逐项结果和 unknown 人工恢复均通过 | `S4-VS2B`、`S4-VS2D` | 开放 |
+| S5-RISK-015 | AssetRef 与 MinIO contract 尚未完成，上传失败、过期 URL、删除和重启恢复可能污染草稿 | P1 | 中 | 图片不可见、对象泄漏或草稿引用悬空 | 后端 / 运维负责人 | MinIO 持久化/重启复读、失败重试、403/过期、checksum/status 和回滚验证通过 | `S4-VS2C` | 开放，承接 R-005 |
+| S5-RISK-016 | CouponItem 批量操作、卡券素材和库存锁仍停留在后续契约，真实订单交付前没有原子 reserve/consume/release 证据 | P1 | 高 | 重复发券、库存负数、正文越权或失败无法恢复 | 后端 / 安全负责人 | PostgreSQL/Redis/MinIO 真实集成、并发锁、敏感字段裁剪和订单联调通过 | `S4-VS3A`、`S4-VS3B` | 开放，承接 S4-I003/R-009 |
+| S5-RISK-017 | 订单只读、交付预览和商品/卡券状态尚未拆成独立门禁，可能混用支付、交付、售后状态 | P1 | 中 | 预览误扣库存、退款订单重复交付或页面状态误导 | API / 前端负责人 | `OrderStatusMatrix` 四态独立、预览不写入、交付动作单独走 Confirmation/Outbox | `S4-VS4A`、`S4-VS4B` | 开放 |
+| S5-RISK-018 | 发货 unknown/timeout/cancel/retry 的恢复语义未在外部 adapter、worker 和 UI 中闭环 | P1 | 高 | 重试导致重复发货或人工无法判断最终结果 | 后端 / QA 负责人 | 外部状态查询、租约、人工 recover、DeliveryRecord 和审计在真实 E2E 中可复核 | `S4-VS4C` | 开放，承接 S4-I004/R-009 |
+| S5-RISK-019 | 迁移编号并行、已有 PostgreSQL volume、回滚与 Testcontainers 证据未形成发布级闭环 | P1 | 高 | 应用与 schema 漂移，无法安全回退或恢复 | 架构 / 运维负责人 | 迁移清单、apply/rollback、旧数据兼容、容器重启复读和恢复演练全部有证据 | `S4-ENV-RECOVERY` | BLOCKED，承接 R-001/S5-I001 |
+| S5-RISK-020 | Pi Runtime 的健康、超时、重试、取消、不可用与可观测性仍未真实运行验证 | P1 | 中 | Agent/Worker 异常可能卡死或无法恢复 | 架构 / 运维负责人 | Runtime 独立服务健康探针、超时/取消/重试和日志指标通过；不把页面 200 当作证据 | `S4-ENV-RUNTIME` | PLANNED，承接 R-006 |

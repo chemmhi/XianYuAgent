@@ -141,6 +141,19 @@
 
 本轮提交：当前分支 HEAD（`feat(阶段5): 完成S4-VS3卡券首页`）。
 
+## 未完成任务切片化决策（2026-09-19）
+
+为避免继续把“完整商品管理”“完整卡券库存”“订单交付”和“发布级环境”混成一个大任务，阶段 5 后续按以下规则推进：
+
+1. `S4-VS2` 拆为 `S4-VS2A` 草稿基础信息、`S4-VS2B` SKU/多规格、`S4-VS2C` 素材/对象存储、`S4-VS2D` 受控发布、`S4-VS2E` 外部同步真实验收；其中 `VS2E` 可并行，但真实外部结果不能替代本地持久化与页面证据。
+2. `S4-VS3` 当前只代表已合入的批次首页与受控操作，后续拆为 `S4-VS3A` CouponItem/素材和 `S4-VS3B` 库存锁定/消耗；真实 PostgreSQL/Redis/MinIO 与人工浏览器复核未完成前，状态保持 `READY_FOR_REVIEW`。
+3. `S4-VS4` 拆为 `S4-VS4A` 订单只读、`S4-VS4B` 交付预览/库存预锁、`S4-VS4C` 发货/取消/重试/unknown 人工恢复；预览不扣库存、不创建 DeliveryRecord，交付动作不得绕过 Outbox。
+4. `S4-ENV-RECOVERY`、`S4-EXT-ACCOUNT`、`S4-ENV-RUNTIME` 作为横向门禁独立记录，不因业务页面可打开、API 200、MemoryStore 或 fixture 通过而关闭。
+5. `013_coupons.sql` 与 `013_product_sync.sql` 的并行编号本轮不做历史重命名；在新增迁移前先补齐迁移清单、apply/rollback、已有 volume 执行记录和恢复演练，新迁移不得继续使用 `013`。
+6. 每个切片使用 `PLANNED / IN_PROGRESS / PARTIALLY_VERIFIED / READY_FOR_REVIEW / PASS / BLOCKED` 状态；只有真实适用层级测试、视觉证据、回滚证据和两轮独立复审完成，才允许标记 `PASS`。
+
+该决策只调整工作拆分和门禁，不改变已合入 `master` 的代码，也不把当前受控卡券 E2E 或商品 fixture 结果升级为生产级验收。
+
 ## Git 提交记录
 
 - 阶段 0：`38862e5`（`feat: 阶段0文档产出`）

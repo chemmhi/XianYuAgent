@@ -1,14 +1,14 @@
 # XianyuSellerAgent 项目状态
 
 - 项目阶段：5
-- 阶段状态：进行中（S4-VS1 账号管理切片已获人工放行；S4-VS2 商品列表/详情只读首片已完成验证；页面仍有非阻塞 UI 缺陷，转为后续修复项）
+- 阶段状态：进行中（S4-VS1 账号管理切片已获人工放行；S4-VS2 商品列表/详情与同步首片已完成受控验证；S4-VS3 卡券首页已合入但仍待真实环境人工复核；后续工作已拆成独立纵向切片）
 - 最近一次通过门禁：S4-VS2 商品列表/详情只读首片复核 / 2026-09-19
-- 当前目标：继续 S4-VS2 商品管理，已完成“按闲鱼账号同步商品到本地目录”首个纵向切片；下一步冻结并实现草稿编辑、SKU、素材和受控发布确认边界
+- 当前目标：按 `docs/04-plan.md` 执行未完成切片，先冻结并实现 `S4-VS2A` 商品草稿基础信息，再依次推进 SKU、素材、受控发布、卡券库存明细和订单交付；横向恢复与外部账号门禁单独复核
 - 已完成范围：阶段 0 范围门禁；阶段 1 架构与模块边界；阶段 2 数据模型、数据库表设计、关系基数、状态机、API envelope、幂等、鉴权、敏感交付、迁移边界；阶段 5 账号登录方法选择、真实 QR 适配器、Cookie 登录、账号资料同步、登录会话持久化、AuthGate 会话门禁、Vite 默认代理、账号列表真实读取和 Chrome/CDP 控制环境 E2E；S4-VS2 商品列表/详情只读首片、003_catalog 迁移、Memory/Postgres scope-aware 查询、真实 PostgreSQL smoke 和 Chrome/CDP 商品 E2E
-- 未完成范围：完整商品创建/编辑、SKU 写入、素材上传、发布确认/Policy/Outbox、真实闲鱼 APP 扫码成功回调、真实外部 Cookie 验证、完整迁移/回滚/Testcontainers 与视觉差异回归；账号密码登录依赖独立浏览器运行时，当前明确不可用。商品同步首片已完成，但真实账号外部验收仍未完成
-- 未解决风险：R-001/P1、R-002/P1、R-005/P2、R-006/P2、R-007/P2、R-008/P1、R-009/P1、R-011/P1、S3-I001/P1、S3-I002/P1、S3-I003/P1、S3-I004/P1、S3-I005/P1、S3-I006/P1、S3-I007/P1、S3-I008/P1、S4-I003/P1、S4-I004/P1、S4-I005/P1、S4-I006/P1、S4-I007/P2、S5-I001/P1、S5-I002/P1、S5-I003/P1、S5-I004/P1；S3-I009/S3-I010/S5-I006 已关闭，S4-I001/S4-I002 已部分缓解
+- 未完成范围：`S4-VS2A/B/C/D` 商品写入、SKU、素材和受控发布；`S4-VS2E` 真实外部同步验收；`S4-VS3A/B` CouponItem/素材与库存锁定消耗；`S4-VS4A/B/C` 订单只读、交付预览和交付动作；`S4-ENV-RECOVERY`、`S4-EXT-ACCOUNT`、`S4-ENV-RUNTIME`；完整迁移/回滚/Testcontainers、Redis/MinIO 恢复和逐状态视觉回归。账号密码登录依赖独立浏览器运行时，当前明确不可用。
+- 未解决风险：R-001/P1、R-002/P1、R-005/P2、R-006/P2、R-007/P2、R-008/P1、R-009/P1、R-011/P1、S3-I001/P1、S3-I002/P1、S3-I003/P1、S3-I004/P1、S3-I005/P1、S3-I006/P1、S3-I007/P1、S3-I008/P1、S4-I003/P1、S4-I004/P1、S4-I005/P1、S4-I006/P1、S4-I007/P2、S5-I001/P1、S5-I002/P1、S5-I003/P1、S5-I004/P1、S5-I007/P1、S5-I008/P1、S5-I009/P1、S5-RISK-013/P1、S5-RISK-014/P1、S5-RISK-015/P1、S5-RISK-016/P1、S5-RISK-017/P1、S5-RISK-018/P1、S5-RISK-019/P1、S5-RISK-020/P1；S3-I009/S3-I010/S5-I006 已关闭，S4-I001/S4-I002 已部分缓解
 - 待复审问题：S3-R5 为超出当前范围的实现审计；S3-R6 设计范围已澄清；S1-I004 保持 P2 跟进项；阶段 4 计划门禁已通过
-- 下一步：继续 S4-VS2 商品草稿/素材/SKU 子切片；真实闲鱼 APP 扫码、外部 Cookie 验证、迁移回滚、重启恢复和 Testcontainers 证据继续作为独立复核项。商品同步已通过 Memory/PostgreSQL smoke、MTOP 脱敏 mapper smoke 和 Chrome/CDP fixture E2E；真实发布仍未接入
+- 下一步：先按 `S4-VS2A` 建立商品草稿真实写入与冲突回归，再进入 `S4-VS2B/C/D`；并行准备 `S4-ENV-RECOVERY` 与 `S4-EXT-ACCOUNT` 的人工证据。商品同步已通过 Memory/PostgreSQL smoke、MTOP 脱敏 mapper smoke 和 Chrome/CDP fixture E2E；这些证据不等价于真实外部账号验收，真实发布仍未接入
 
 ## 当前证据
 - `2026-09-19 S4-VS2 商品同步入口修复`：商品页从普通 `/products` 入口加载管理员可见账号，默认选择可用账号并将 `accountId` 写回列表查询与同步请求；Chrome/CDP fixture 验证 29 件同步商品可落库，列表总数由 1 增至 30。
@@ -48,6 +48,23 @@
 - 前端：`apps/web/src/features/coupons/`，通过 `/coupons` 正式路由接入，表格视觉保持平台样式，仅参考旧项目字段和操作。
 - 验证：已完成类型检查、单测、构建、API smoke、Chrome/CDP E2E、桌面/移动截图；Chrome/CDP 使用 MemoryStore/stub，真实 PostgreSQL/Redis/MinIO 仍需人工浏览器复核。
 - 门禁：代码已合入 `master`，人工审核仍需按 `docs/evidence/stage5/S4-VS3/test-baseline.md` 执行并回写结论。
+
+## 未完成切片索引（2026-09-19）
+
+| 切片 | 状态 | 当前边界 | 下一证据 |
+| --- | --- | --- | --- |
+| `S4-VS2A` 商品草稿与基础信息 | `PLANNED` | create/detail/PATCH、账号 scope、`expectedVersion`、草稿保留 | 真实 PostgreSQL 写入/复读、403/404/409、Chrome/CDP 桌面/移动 |
+| `S4-VS2B` SKU / 多规格与库存 | `PLANNED` | SKU 增删改、校验、并发和逐项结果 | PostgreSQL 并发集成、部分成功与移动端 |
+| `S4-VS2C` 商品素材与对象存储 | `PLANNED` | AssetRef、上传/替换/删除、失败重试、MinIO | MinIO 持久化/重启复读、过期/403/失败截图 |
+| `S4-VS2D` 受控发布 | `PLANNED` | Policy → Confirmation → Idempotency → Outbox | worker/unknown/timeout/人工恢复与真实页面状态 |
+| `S4-VS2E` 商品外部同步真实验收 | `PARTIALLY_VERIFIED` | 真实账号、Cookie、分页、字段映射和数量口径 | 当前已登录 Chrome + 真实闲鱼账号人工复核 |
+| `S4-VS3A/B` 卡券明细、素材、库存锁定消耗 | `PLANNED` | CouponItem bulk 操作、素材、reserve/consume/release | PostgreSQL/Redis/MinIO 并发集成、敏感字段裁剪 |
+| `S4-VS4A/B/C` 订单与交付 | `PLANNED` | 订单只读、delivery-preview、发货/取消/重试/unknown 恢复 | 四套状态、库存锁、Outbox、DeliveryRecord、移动端 |
+| `S4-ENV-RECOVERY` | `BLOCKED` | 迁移回滚、Testcontainers、Redis/MinIO 重启恢复 | 发布级恢复演练和旧数据兼容证据 |
+| `S4-EXT-ACCOUNT` | `BLOCKED` | 真实 APP 扫码、Cookie、资料同步 | 真实外部账号人工验收 |
+| `S4-ENV-RUNTIME` | `PLANNED` | Pi Runtime 健康、超时、重试、取消和观测 | 独立运行时验证；不以页面/API smoke 代替 |
+
+切片状态说明：`PASS` 仅表示所有适用测试、视觉、持久化、回滚和独立评审均通过；当前新增切片均未达到 `PASS`。`S4-VS3` 代码虽已合入，但其人工真实环境审核仍保持 `READY_FOR_REVIEW`。
 
 ## 长期决策摘要
 

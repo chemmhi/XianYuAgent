@@ -242,3 +242,15 @@
 | S5-R35 | 真实浏览器 / 人工审核 | 正式路由 → 真实 API → MemoryStore → 列表安全元数据列 → 选择/关联 → 编辑/复制 → 启禁用 → 详情/预览/导入/绑定/作废 → 刷新后状态保持，以及平台样式一致性和移动 viewport | 用户 | READY_FOR_REVIEW | `apps/web/scripts/e2e-coupons-chrome.mjs`；`npm run test:e2e:chrome:coupons`；`docs/evidence/stage5/S4-VS3/test-baseline.md`；人工审核结论待回写，不再阻断代码合入但仍是发布门禁 |
 
 本轮结论：S4-VS3 已与 S4-VS2 共享代码路径并入 `master`；自动化证据保持受控环境边界，真实 PostgreSQL/Redis/MinIO 及浏览器人工复核仍需按 runbook 执行。
+
+### 10.13 未完成任务切片拆分复核（2026-09-19）
+
+本节只复核“后续工作是否被拆成可执行纵向切片”，不把计划当作实现结论。
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R36 | 业务 / 验收 | 商品草稿、SKU、素材、受控发布、外部同步、卡券库存、订单交付和环境门禁是否有清晰用户路径、正式路由、非目标与完成门禁 | root + 待人工复核 | READY_FOR_REVIEW | `docs/04-plan.md` §3.1；`STATUS.md` 未完成切片索引 |
+| S5-R37 | 架构 / 数据流 | 每个切片是否有独立 owner、API/store/migration 边界、账号 scope、状态机、幂等/审计和回滚；迁移 `013` 并行编号是否被显式阻断 | root + 待独立复核 | READY_FOR_REVIEW | `docs/02-data-api.md` §12；`docs/03-component-contract.md` §11；`docs/09-decision-log.md` 未完成任务切片化决策 |
+| S5-R38 | 质量 / 安全 / 运维 | 是否明确真实 PostgreSQL/Redis/MinIO、Chrome/CDP、视觉状态、Testcontainers、恢复和外部账号证据；是否避免 smoke/mock 冒充完成 | root + QA/运维待复核 | BLOCKED | `docs/06-risk-register.md` `S5-RISK-013~S5-RISK-020`；`S4-ENV-RECOVERY`、`S4-EXT-ACCOUNT`、`S4-ENV-RUNTIME` 尚无完成证据 |
+
+当前切片拆分门禁结论：`READY_FOR_REVIEW`。切片规划已写入文档，但尚未授权把任何新增切片标记为 `PASS`；实现阶段必须按单片执行 5 → 5.5 → 6 门禁，并在每片完成后追加独立业务/架构/质量复审记录。

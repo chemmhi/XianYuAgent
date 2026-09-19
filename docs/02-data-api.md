@@ -304,4 +304,28 @@ type ConversationHandlingOutput = {
 | `messages.status` | `pending|sent|failed|recalled`；撤回请求必须带 `Idempotency-Key`，外部结果写 `externalOutcome` | `POST /api/v1/conversations/{id}/messages/{messageId}/recall` 只允许发送者或管理员，平台不支持撤回时返回可审计失败 |
 | 管理员资料与权限 | `Admin` 增加 `displayName`、`role`、`quotaJson`；Session 支持列出、撤销单个和撤销全部 | `GET/PATCH /api/v1/auth/profile`、`POST /api/v1/auth/password`、`GET /api/v1/auth/sessions`、`POST /api/v1/auth/sessions/{id}/revoke`、`POST /api/v1/auth/sessions/revoke-all` |
 
+## 12. 阶段 5 未完成切片契约冻结
+
+以下契约只冻结边界与验证要求，不表示对应代码已经实现。实现时必须沿用第 5-8 节的 envelope、错误码、账号 scope、幂等、审计和敏感字段规则。
+
+| 切片 | 领域输入 / 输出 | 持久化与状态要求 | 完成前置 |
+| --- | --- | --- | --- |
+| `S4-VS2A` 商品草稿 | `POST /products`、`GET /products/{id}`、`PATCH /products/{id}`；请求带 `accountId`、`expectedVersion`，响应返回 `ProductVM` 与 `auditRef` | 草稿保留 `source=local,status=draft`；版本冲突返回 `VERSION_CONFLICT`；跨账号访问返回 `FORBIDDEN`；字段校验失败保留用户草稿 | 真实 PostgreSQL 写入/复读、403/404/409、桌面/移动 Chrome/CDP |
+| `S4-VS2B` SKU / 多规格 | `POST/PATCH/DELETE /products/{id}/skus`；批量结果逐项返回 `succeeded|failed|conflict` | SKU 唯一键、价格/库存非负校验；商品版本和 SKU 版本同时参与乐观锁；部分成功不得覆盖失败项 | 单元校验 + PostgreSQL 并发集成 + 真实浏览器编辑/刷新 |
+| `S4-VS2C` 商品素材 | `GET/POST/PATCH/DELETE /products/{id}/assets`；上传返回 `AssetRef`，预览使用受控 URL | `storageKey/mimeType/checksum/status` 必须持久化；失败素材不得污染草稿；删除保留审计引用；MinIO 重启后仍可读 | MinIO contract、失败/过期/403/重试、截图和持久化复读 |
+| `S4-VS2D` 受控发布 | `POST /products/{id}/publish`、`POST /products/bulk-publish`；返回 Confirmation/Outbox 引用及逐项结果 | 必须经过 Policy → Confirmation → Idempotency → Outbox；`unknown/timeout` 只能查询或人工恢复，不盲重放；审计不写正文 | Execution foundation、幂等冲突、worker 重试/取消、真实页面状态 |
+| `S4-VS2E` 外部同步验收 | 复用 `POST /products/sync`，冻结真实 `accountId`、分页、分组、数量口径和错误映射 | 外部结果与本地 Upsert 分离；外部超时/未知不覆盖本地草稿；Cookie/Token 不出日志和响应 | 当前已登录 Chrome + 真实账号人工复核；受控 fixture 只能作为补充证据 |
+| `S4-VS3A` 卡券明细/素材 | `POST /coupons/batches/{id}/items/bulk-save`、`/items/bulk-delete`、`/assets` | CouponItem 正文、图片和 metadata 分域；批量结果逐项返回；敏感正文只允许管理员受控读取 | 真实 PostgreSQL/MinIO、批量部分成功、403/409、移动端 |
+| `S4-VS3B` 库存锁定/消耗 | 领域命令 `reserve/consume/release`，由订单交付服务调用，不由 CouponsPage 直接写库存 | 行级锁/事务保证同一 CouponItem 只被一个交付占用；`reserved → consumed/released` 非法转换可审计 | 并发集成、失败恢复、重启复读、与订单预览联调 |
+| `S4-VS4A` 订单只读 | `GET /orders`、`GET /orders/{orderNo}`、`POST /orders/refresh` | 支付、订单、交付、售后四套状态分开；列表只读，不触发外部动作 | 真实订单 fixture/DB、筛选/空/403/错误、桌面/移动 |
+| `S4-VS4B` 交付预览 | `POST /orders/{orderNo}/delivery-preview` | 校验支付、商品/账号匹配、`deliveryScope`、库存可用性和策略；预览不扣库存、不创建交付记录 | VS3B 库存锁、Policy/Confirmation、失败原因可解释 |
+| `S4-VS4C` 交付动作 | `POST /orders/{orderNo}/deliver|cancel|retry` | `manual/no_logistics/coupon_only/mixed` 分开处理；Idempotency + Outbox + DeliveryRecord；unknown 仅查询/人工恢复 | 外部 adapter、worker、重复提交/超时/取消/人工恢复 |
+
+### 12.1 迁移与兼容要求
+
+1. `013_coupons.sql` 与 `013_product_sync.sql` 的并行编号在本轮保持不动；在新增 `CouponItem`、资产、库存锁或订单交付迁移前，先补迁移目录、执行顺序和回滚证据。
+2. 新迁移必须使用新的单调编号，不得继续新建第二个 `013`；已有 volume 必须有明确的 apply 记录，不能依赖重新 initdb。
+3. 所有新增字段先走 expand，再执行 backfill/verify，最后切换读写；回滚优先回退应用并保留兼容读路径，不直接删除历史订单、库存或审计。
+4. 迁移验证至少包含真实 PostgreSQL、重复执行、回滚后健康检查和代表性旧数据读取；MemoryStore 只作为单元/受控 E2E 夹具，不能替代持久化门禁。
+
 阶段 2 通过后，允许进入阶段 3 前端信息架构与 API 映射设计；仍不得提前创建真实后端实现。

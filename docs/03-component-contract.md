@@ -880,3 +880,28 @@ Controller 只返回阶段 2 canonical error code；断网属于 transport 状�
 | `CSRF_INVALID` | 重新获取 CSRF 后由 AuthGate 处理 | 否 |
 | `RATE_LIMITED` | 使用 `retry-after` 倒计时 | 按服务端指示 |
 | `SERVICE_UNAVAILABLE` | 服务不可用状态 | 读请求限次重试 |
+
+## 11. 阶段 5 未完成切片的 owner 与禁止依赖
+
+阶段 5 实现按以下纵向切片落地。每片只能由自己的 controller 发出命令，页面组件不得跨片直接写入别的领域。
+
+| 切片 | 页面 / owner | 允许承担 | 明确禁止 |
+| --- | --- | --- | --- |
+| `S4-VS2A` | `ProductDrawer` / `useProductsController` | 草稿基础信息、版本校验、字段错误、保存后刷新 | 直接发布、直接上传对象存储、修改 SKU 或卡券库存 |
+| `S4-VS2B` | `SkuVariantEditor` / `useProductsController` | SKU 变体编辑、价格/库存校验、逐项结果 | 在列表组件中拼装 SKU 状态；绕过商品版本或库存约束 |
+| `S4-VS2C` | `AssetPanel` / `useProductsController` | AssetRef 上传/替换/删除、上传状态和单项重试 | 直接调用 MinIO SDK；把临时 URL 写入 ProductVM 作为永久事实 |
+| `S4-VS2D` | `PublishConfirmation` / `useProductsController` | Policy 预检、Confirmation、发布结果和恢复入口 | 页面直接调用外部闲鱼发布 adapter；unknown 自动重放 |
+| `S4-VS2E` | `SyncPullToolbar` / `useProductsController` | 账号选择、分页同步、结果摘要、外部错误展示 | 用 fixture 数量冒充真实账号结果；改写本地草稿或静默切换账号 |
+| `S4-VS3A` | `CouponItemEditor`、`AssetPanel` / `useCouponsController` | CouponItem bulk-save/delete、素材状态、批量部分成功 | 直接扣减库存；在列表返回正文或敏感链接 |
+| `S4-VS3B` | `InventoryLockBanner` / `useCouponsController` + execution adapter | 仅展示锁定/消耗/释放结果和恢复状态 | CouponsPage 直接执行订单交付或买家可见发送 |
+| `S4-VS4A` | `OrdersPage` / `useOrdersController` | 订单只读、筛选、四套状态、详情关联 | 读取卡券正文；从列表按钮直接发货 |
+| `S4-VS4B` | `DeliveryPreview` / `useOrdersController` | 预览校验、策略结果、库存预锁提示 | 预览阶段创建 DeliveryRecord 或提交外部动作 |
+| `S4-VS4C` | `OrderActionBar` / `useOrdersController` | Confirmation、deliver/cancel/retry、unknown 人工恢复入口 | 直接调用外部 adapter；跳过 Outbox、审计或幂等 |
+
+### 11.1 跨切片状态边界
+
+- `ProductDrawer`、`BatchDrawer` 和 `OrderDetailDrawer` 只组合子组件，不拥有跨领域保存入口。
+- `CouponContentPreview` 只能消费受控内容 ViewModel；`OrderActionBar` 只能消费 `DeliveryPreviewVM` 和 typed delivery command，不能读取正文。
+- 商品、卡券、订单共用 `MutationViewModel` 形状，但各自拥有 mutation key、缓存失效和审计引用；不得把一个领域的 `version` 当成另一个领域的版本。
+- Desktop/Mobile 共用 controller、ViewModel、command 和错误映射，仅替换布局组合；每片都要对 `1440×900` 与 `390×844` 的适用状态分别留证。
+- 横向门禁（迁移恢复、真实外部账号、Pi Runtime）不属于任何页面 owner；只能由对应 execution/ops 模块提供状态，不得把门禁逻辑塞进页面组件。
