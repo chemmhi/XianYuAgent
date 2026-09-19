@@ -11,11 +11,11 @@ describe('auth api', () => {
 
   it('sends login and bootstrap through canonical endpoints', async () => {
     const post = vi.fn()
-      .mockResolvedValueOnce({ success: true, data: { authenticated: true, bootstrapRequired: false } })
-      .mockResolvedValueOnce({ success: true, data: { authenticated: true, bootstrapRequired: false } });
+      .mockResolvedValueOnce({ success: true, data: { session: { id: 's1', expiresAt: '2026-09-19T00:00:00.000Z' }, profile: { id: 'a1', email: 'admin@example.com', displayName: 'Admin', role: 'admin' } } })
+      .mockResolvedValueOnce({ success: true, data: { session: { id: 's2', expiresAt: '2026-09-19T00:00:00.000Z' }, profile: { id: 'a2', email: 'first@example.com', displayName: 'First Admin', role: 'admin' } } });
     const api = createAuthApi({ get: vi.fn(), post });
-    await api.login({ email: 'admin@example.com', password: 'password-123' });
-    await api.bootstrap({ email: 'first@example.com', password: 'password-123', displayName: 'First Admin' });
+    await expect(api.login({ email: 'admin@example.com', password: 'password-123' })).resolves.toMatchObject({ authenticated: true, admin: { email: 'admin@example.com' } });
+    await expect(api.bootstrap({ email: 'first@example.com', password: 'password-123', displayName: 'First Admin' })).resolves.toMatchObject({ authenticated: true, admin: { email: 'first@example.com' } });
     expect(post).toHaveBeenNthCalledWith(1, '/api/v1/auth/password-login', { email: 'admin@example.com', password: 'password-123' });
     expect(post).toHaveBeenNthCalledWith(2, '/api/v1/auth/bootstrap', { email: 'first@example.com', password: 'password-123', displayName: 'First Admin' }, expect.objectContaining({ headers: expect.objectContaining({ 'Idempotency-Key': expect.stringContaining('auth-bootstrap-') }) }));
   });

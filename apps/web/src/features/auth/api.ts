@@ -30,6 +30,11 @@ interface ApiEnvelope<T> {
   error?: { code?: string };
 }
 
+interface AuthMutationOutput {
+  session: { id: string; expiresAt: string };
+  profile: AdminProfile;
+}
+
 function unwrap<T>(payload: T | ApiEnvelope<T>): T {
   if (payload && typeof payload === 'object' && 'success' in payload && 'data' in payload) {
     const envelope = payload as ApiEnvelope<T>;
@@ -53,13 +58,17 @@ export function createAuthApi(transport: AuthApiTransport): AuthApi {
     },
     async login(input) {
       const post = requirePost(transport);
-      return unwrap(await post<AuthSessionView | ApiEnvelope<AuthSessionView>>('/api/v1/auth/password-login', input));
+      return normalizeMutation(unwrap(await post<AuthMutationOutput | ApiEnvelope<AuthMutationOutput>>('/api/v1/auth/password-login', input)));
     },
     async bootstrap(input) {
       const post = requirePost(transport);
-      return unwrap(await post<AuthSessionView | ApiEnvelope<AuthSessionView>>('/api/v1/auth/bootstrap', input, {
+      return normalizeMutation(unwrap(await post<AuthMutationOutput | ApiEnvelope<AuthMutationOutput>>('/api/v1/auth/bootstrap', input, {
         headers: { 'Idempotency-Key': `auth-bootstrap-${Date.now()}` },
-      }));
+      })));
     },
   };
+}
+
+function normalizeMutation(output: AuthMutationOutput): AuthSessionView {
+  return { authenticated: true, bootstrapRequired: false, session: output.session, admin: output.profile };
 }
