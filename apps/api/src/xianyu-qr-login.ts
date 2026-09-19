@@ -14,7 +14,7 @@ export type XianyuQrStatus = 'waiting' | 'scanned' | 'succeeded' | 'expired' | '
 
 export interface XianyuQrPublicSession {
   sessionId: string;
-  accountId: string;
+  accountId?: string;
   status: XianyuQrStatus;
   qrImageDataUrl?: string;
   expiresAt: string;
@@ -28,7 +28,7 @@ export type XianyuQrStatusEvent = XianyuQrPublicSession & { adminId: string };
 export interface XianyuQrSuccess {
   sessionId: string;
   adminId: string;
-  accountId: string;
+  accountId?: string;
   cookieHeader: string;
   unb: string;
 }
@@ -46,7 +46,7 @@ type LoginParams = Record<string, string>;
 
 interface InternalSession {
   sessionId: string;
-  accountId: string;
+  accountId?: string;
   adminId: string;
   createdAt: number;
   expiresAt: number;
@@ -75,7 +75,7 @@ export class XianyuQrLoginAdapter {
     this.onStatus = options.onStatus;
   }
 
-  async create(input: { sessionId: string; adminId: string; accountId: string }): Promise<XianyuQrPublicSession> {
+  async create(input: { sessionId: string; adminId: string; accountId?: string }): Promise<XianyuQrPublicSession> {
     const now = Date.now();
     const session: InternalSession = {
       sessionId: input.sessionId,

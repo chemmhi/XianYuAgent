@@ -18,6 +18,8 @@ export interface AccountVM {
   sellerRef: string;
   displayName: string;
   remark?: string;
+  avatarUrl?: string;
+  platformUserId?: string;
   status: AccountStatus;
   connection: AccountConnectionVM;
   enabled: boolean;

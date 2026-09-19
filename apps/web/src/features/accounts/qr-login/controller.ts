@@ -25,8 +25,9 @@ function toQrLoginError(error: unknown): QrLoginError {
   };
 }
 
-export function useQrLoginController(options: { api: AccountsApi; accountId: string; enabled: boolean }): QrLoginController {
+export function useQrLoginController(options: { api: AccountsApi; accountId?: string; enabled: boolean }): QrLoginController {
   const { api, accountId, enabled } = options;
+  const [activeAccountId, setActiveAccountId] = useState(accountId ?? '');
   const [model, setModel] = useState<QrLoginModel>(createInitialQrLoginModel);
   const requestId = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -47,13 +48,14 @@ export function useQrLoginController(options: { api: AccountsApi; accountId: str
   }, []);
 
   const start = useCallback(async () => {
-    if (!enabled || !accountId) return;
+    if (!enabled) return;
     clearTimer();
     const currentRequest = ++requestId.current;
     setModel({ phase: 'creating', session: null, error: null });
     try {
-      const session = await api.createQrSession(accountId);
+      const session = await api.createQrSession(accountId || undefined);
       if (currentRequest !== requestId.current) return;
+      setActiveAccountId(session.accountId ?? '');
       applySession(session);
     } catch (error) {
       if (currentRequest !== requestId.current) return;
@@ -63,21 +65,22 @@ export function useQrLoginController(options: { api: AccountsApi; accountId: str
 
   const refresh = useCallback(async () => {
     const session = model.session;
-    if (!enabled || !accountId || !session || isTerminalQrStatus(session.status)) return;
+    if (!enabled || !session || isTerminalQrStatus(session.status)) return;
     const currentRequest = ++requestId.current;
     try {
-      const next = await api.getQrSession(accountId, session.qrSessionId);
+      const next = await api.getQrSession(activeAccountId || session.accountId, session.qrSessionId);
       if (currentRequest !== requestId.current) return;
+      if (next.accountId) setActiveAccountId(next.accountId);
       applySession(next);
     } catch (error) {
       if (currentRequest !== requestId.current) return;
       setModel((previous) => ({ ...previous, error: toQrLoginError(error) }));
     }
-  }, [accountId, api, applySession, enabled, model.session]);
+  }, [activeAccountId, api, applySession, enabled, model.session]);
 
   const retry = useCallback(async () => {
     const session = model.session;
-    if (!enabled || !accountId) return;
+    if (!enabled) return;
     clearTimer();
     if (!session || !api.renewQrSession) {
       await start();
@@ -86,22 +89,23 @@ export function useQrLoginController(options: { api: AccountsApi; accountId: str
     const currentRequest = ++requestId.current;
     setModel((previous) => ({ ...previous, phase: 'creating', error: null }));
     try {
-      const next = await api.renewQrSession(accountId, session.qrSessionId);
+      const next = await api.renewQrSession(activeAccountId || session.accountId, session.qrSessionId);
       if (currentRequest !== requestId.current) return;
+      if (next.accountId) setActiveAccountId(next.accountId);
       applySession(next);
     } catch (error) {
       if (currentRequest !== requestId.current) return;
       setModel((previous) => ({ ...previous, phase: 'failed', error: toQrLoginError(error) }));
     }
-  }, [accountId, api, applySession, clearTimer, enabled, model.session, start]);
+  }, [activeAccountId, api, applySession, clearTimer, enabled, model.session, start]);
 
   const cancel = useCallback(async () => {
     const session = model.session;
-    if (!enabled || !accountId || !session || !api.cancelQrSession) return;
+    if (!enabled || !session || !api.cancelQrSession) return;
     clearTimer();
     const currentRequest = ++requestId.current;
     try {
-      await api.cancelQrSession(accountId, session.qrSessionId);
+      await api.cancelQrSession(activeAccountId || session.accountId, session.qrSessionId);
       if (currentRequest !== requestId.current) return;
       setModel((previous) => previous.session ? {
         phase: 'cancelled',
@@ -112,12 +116,13 @@ export function useQrLoginController(options: { api: AccountsApi; accountId: str
       if (currentRequest !== requestId.current) return;
       setModel((previous) => ({ ...previous, error: toQrLoginError(error) }));
     }
-  }, [accountId, api, clearTimer, enabled, model.session]);
+  }, [activeAccountId, api, clearTimer, enabled, model.session]);
 
   useEffect(() => {
     if (!enabled) {
       clearTimer();
       setModel(createInitialQrLoginModel());
+      setActiveAccountId(accountId ?? '');
       requestId.current += 1;
       return;
     }
@@ -138,4 +143,3 @@ export function useQrLoginController(options: { api: AccountsApi; accountId: str
 
   return { model, start, refresh, retry, cancel };
 }
-

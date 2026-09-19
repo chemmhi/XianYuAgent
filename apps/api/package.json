@@ -10,7 +10,7 @@
     "start": "node dist/index.js",
     "worker": "node dist/worker.js",
     "smoke": "npm run build && node scripts/smoke.mjs",
-    "test": "npm run build && node scripts/smoke.mjs"
+    "test": "npm run build && node scripts/smoke.mjs && node scripts/onboarding-smoke.mjs"
   },
   "dependencies": {
     "ioredis": "^5.7.0",

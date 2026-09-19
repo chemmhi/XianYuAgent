@@ -11,6 +11,8 @@
 4. Pi Runtime 采用独立服务；业务 API 与 Worker 只依赖 `AgentRuntime` / `PiRuntimeAdapter` 抽象接口。
 5. 首期生产允许使用 Docker Compose；健康检查、备份、迁移、监控和回滚在阶段 7/8 验证。
 6. 闲鱼协议与凭证当前项目尚未实现，只参考 PRD 中提到的参考项目；真实适配器和可复现验证放后续阶段。
+
+7. 参考项目 `http://localhost:9000/accounts` 的人工复核必须在当前已经打开且已登录闲鱼的 Chrome 窗口中进行，以复用既有浏览器 Cookie / Local Storage；新建 Chrome profile、无痕窗口、headless 或其他浏览器实例均不作为登录态证据。
 7. CredentialStore 直接存项目数据库。管理员拥有绝对管理权限，可查看、编辑、替换、启停、轮换、撤销和操作系统凭证；唯一硬边界是不得暴露给闲鱼买家。
 8. 系统凭证不得进入闲鱼买家可见消息、订单交付内容、外部买家响应、日志、Trace、Replay 或 Prompt。
 9. 卡券正文、夸克链接和提取码只有在 `buyer_deliverable`、订单已支付、商品与账号匹配、策略校验通过、库存成功锁定并记录审计后，才可交付买家。

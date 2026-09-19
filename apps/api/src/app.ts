@@ -47,21 +47,27 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       } catch { /* QR 状态回写失败不影响外部轮询；下一次 GET 会重试 */ }
     },
     onSuccess: async ({ sessionId, adminId, accountId, cookieHeader, unb }) => {
-      const account = await accounts.get(adminId, accountId);
-      if (account.sellerRef && account.sellerRef !== unb) {
-        await accounts.updateLoginSession({ adminId, accountId, sessionId, patch: { status: 'failed', failureCode: 'QR_ACCOUNT_MISMATCH', completedAt: new Date().toISOString() }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
-        throw new Error('QR_ACCOUNT_MISMATCH');
+      if (accountId) {
+        const existing = await accounts.get(adminId, accountId);
+        if (existing.sellerRef && !existing.sellerRef.startsWith('pending_') && existing.sellerRef !== unb) {
+          await accounts.updateLoginSession({ adminId, accountId, sessionId, patch: { status: 'failed', failureCode: 'QR_ACCOUNT_MISMATCH', completedAt: new Date().toISOString() }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+          throw new Error('QR_ACCOUNT_MISMATCH');
+        }
       }
-      await credentials.save({ adminId, accountId, cookieHeader, metadata: { unb, loginMethod: 'qr_http' }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
-      const verification = await xianyu.verifyLogin(adminId, accountId);
+      const resolvedAccount = await ensureAccountForLogin({ accounts, adminId, accountId, sellerRef: unb, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+      const resolvedAccountId = resolvedAccount.id;
+      if (resolvedAccountId !== accountId) await accounts.updateLoginSession({ adminId, accountId, sessionId, patch: { accountId: resolvedAccountId }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+      await credentials.save({ adminId, accountId: resolvedAccountId, cookieHeader, metadata: { unb, loginMethod: 'qr_http' }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+      const verification = await xianyu.verifyLogin(adminId, resolvedAccountId);
       if (!verification.success) {
         const status = verification.accountInvalid ? (verification.errorCode === 'SESSION_EXPIRED' ? 'expired' : 'revoked') : 'expired';
-        try { await credentials.verify({ adminId, accountId, status, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` }); } catch { /* preserve original verification error */ }
-        await accounts.updateLoginSession({ adminId, accountId, sessionId, patch: { status: 'failed', failureCode: verification.errorCode ?? 'LOGIN_STATE_VERIFY_FAILED', completedAt: new Date().toISOString() }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+        try { await credentials.verify({ adminId, accountId: resolvedAccountId, status, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` }); } catch { /* preserve original verification error */ }
+        await accounts.updateLoginSession({ adminId, accountId: resolvedAccountId, sessionId, patch: { status: 'failed', failureCode: verification.errorCode ?? 'LOGIN_STATE_VERIFY_FAILED', completedAt: new Date().toISOString() }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
         throw new Error(verification.errorCode ?? 'LOGIN_STATE_VERIFY_FAILED');
       }
-      await credentials.verify({ adminId, accountId, status: 'active', requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
-      await accounts.updateLoginSession({ adminId, accountId, sessionId, patch: { status: 'succeeded', completedAt: new Date().toISOString(), failureCode: undefined }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+      await credentials.verify({ adminId, accountId: resolvedAccountId, status: 'active', requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+      await hydrateAccountProfile({ accounts, xianyu, adminId, accountId: resolvedAccountId, fallbackSellerRef: unb, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+      await accounts.updateLoginSession({ adminId, accountId: resolvedAccountId, sessionId, patch: { status: 'succeeded', completedAt: new Date().toISOString(), failureCode: undefined }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
     },
   });
   xianyu = new XianyuMtopClient({
@@ -152,13 +158,12 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
 
   const loginSessionMatch = ctx.path.match(/^\/api\/v1\/accounts\/([^/]+)\/login-sessions(?:\/([^/]+)(?:\/(cancel|renew|complete))?)?$/);
   if (ctx.path === '/api/v1/auth/qr-sessions' && ctx.method === 'POST') {
-    const accountId = String(ctx.body.accountId ?? '');
-    if (!accountId) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
+    const accountId = optionalString(ctx.body.accountId);
     const result = await mutation(runtime, ctx, authContext, accountId, async () => {
       const loginSession = await accounts.createLoginSession({ adminId: authContext.admin.id, accountId, loginMethod: 'qr', requestId: ctx.requestId, traceId: ctx.traceId });
       if (config.xianyuQrMode === 'stub') return success(ctx, toQrSessionView(loginSession), 201);
       try {
-        const qrSession = await runtime.qrLogin.create({ sessionId: loginSession.id, adminId: authContext.admin.id, accountId });
+        const qrSession = await runtime.qrLogin.create({ sessionId: loginSession.id, adminId: authContext.admin.id, accountId: loginSession.accountId });
         return success(ctx, { ...toQrSessionView(loginSession), qrImageDataUrl: qrSession.qrImageDataUrl, pollAfterMs: qrSession.pollAfterMs, expiresAt: qrSession.expiresAt, status: qrSession.status, errorCode: qrSession.errorCode, verificationUrl: qrSession.verificationUrl }, 201);
       } catch (error) {
         await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId, sessionId: loginSession.id, patch: { status: 'failed', failureCode: error instanceof Error ? error.message : 'QR_GENERATE_FAILED', completedAt: new Date().toISOString() }, requestId: ctx.requestId, traceId: ctx.traceId });
@@ -173,6 +178,56 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     const external = runtime.qrLogin.get(sessionId);
     const terminal = ['succeeded', 'cancelled', 'failed', 'expired'].includes(local.status);
     return { statusCode: 200, body: success(ctx, external ? { ...toQrSessionView(local), qrImageDataUrl: external.qrImageDataUrl, pollAfterMs: external.pollAfterMs, expiresAt: external.expiresAt, status: terminal ? local.status : external.status, errorCode: terminal ? local.failureCode : external.errorCode, verificationUrl: external.verificationUrl } : toQrSessionView(local)).body };
+  }
+  const globalQrAction = ctx.path.match(/^\/api\/v1\/auth\/qr-sessions\/([^/]+)\/(cancel|renew)$/);
+  if (globalQrAction && ctx.method === 'POST') {
+    const sessionId = decodeURIComponent(globalQrAction[1]);
+    const local = await accounts.getLoginSessionById({ adminId: authContext.admin.id, sessionId });
+    const accountId = local.accountId;
+    return mutation(runtime, ctx, authContext, accountId, async () => {
+      if (globalQrAction[2] === 'cancel') {
+        runtime.qrLogin.cancel(sessionId);
+        const cancelled = await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId, sessionId, patch: { status: 'cancelled', completedAt: new Date().toISOString() }, requestId: ctx.requestId, traceId: ctx.traceId });
+        return success(ctx, toQrSessionView(cancelled));
+      }
+      const renewed = await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId, sessionId, patch: { status: 'waiting', expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(), failureCode: undefined }, requestId: ctx.requestId, traceId: ctx.traceId });
+      if (config.xianyuQrMode === 'stub') return success(ctx, toQrSessionView(renewed));
+      const qrSession = await runtime.qrLogin.create({ sessionId, adminId: authContext.admin.id, accountId: renewed.accountId });
+      return success(ctx, { ...toQrSessionView(renewed), qrImageDataUrl: qrSession.qrImageDataUrl, pollAfterMs: qrSession.pollAfterMs, expiresAt: qrSession.expiresAt, status: qrSession.status, errorCode: qrSession.errorCode, verificationUrl: qrSession.verificationUrl });
+    });
+  }
+
+  if (ctx.path === '/api/v1/auth/cookie-login' && ctx.method === 'POST') {
+    const cookieHeader = String(ctx.body.cookieHeader ?? '').trim();
+    if (!cookieHeader) throw new ServiceError(422, 'VALIDATION_FAILED', 'cookieHeader is required');
+    const result = await mutation(runtime, ctx, authContext, undefined, async () => {
+      const loginSession = await accounts.createLoginSession({ adminId: authContext.admin.id, loginMethod: 'cookie', requestId: ctx.requestId, traceId: ctx.traceId });
+      try {
+        const unb = readCookieValue(cookieHeader, 'unb') || `cookie_${createId()}`;
+        const account = await ensureAccountForLogin({ accounts, adminId: authContext.admin.id, accountId: undefined, sellerRef: unb, requestId: ctx.requestId, traceId: ctx.traceId });
+        await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId: undefined, sessionId: loginSession.id, patch: { accountId: account.id }, requestId: ctx.requestId, traceId: ctx.traceId });
+        await credentials.save({ adminId: authContext.admin.id, accountId: account.id, cookieHeader, metadata: { unb, loginMethod: 'cookie' }, requestId: ctx.requestId, traceId: ctx.traceId });
+        const verification = await runtime.xianyu.verifyLogin(authContext.admin.id, account.id);
+        if (!verification.success) {
+          await credentials.verify({ adminId: authContext.admin.id, accountId: account.id, status: verification.accountInvalid ? 'revoked' : 'expired', requestId: ctx.requestId, traceId: ctx.traceId });
+          await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId: account.id, sessionId: loginSession.id, patch: { status: 'failed', failureCode: verification.errorCode ?? 'COOKIE_VERIFY_FAILED', completedAt: new Date().toISOString() }, requestId: ctx.requestId, traceId: ctx.traceId });
+          throw new ServiceError(422, 'COOKIE_VERIFY_FAILED', verification.message ?? '闲鱼 Cookie 校验失败');
+        }
+        await credentials.verify({ adminId: authContext.admin.id, accountId: account.id, status: 'active', requestId: ctx.requestId, traceId: ctx.traceId });
+        await hydrateAccountProfile({ accounts, xianyu: runtime.xianyu, adminId: authContext.admin.id, accountId: account.id, fallbackSellerRef: unb, requestId: ctx.requestId, traceId: ctx.traceId });
+        const completed = await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId: account.id, sessionId: loginSession.id, patch: { status: 'succeeded', completedAt: new Date().toISOString(), failureCode: undefined }, requestId: ctx.requestId, traceId: ctx.traceId });
+        return success(ctx, { account: await accounts.get(authContext.admin.id, account.id), session: completed }, 201);
+      } catch (error) {
+        if (error instanceof ServiceError) throw error;
+        await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId: loginSession.accountId, sessionId: loginSession.id, patch: { status: 'failed', failureCode: error instanceof Error ? error.message : 'COOKIE_LOGIN_FAILED', completedAt: new Date().toISOString() }, requestId: ctx.requestId, traceId: ctx.traceId });
+        throw new ServiceError(502, 'COOKIE_LOGIN_FAILED', '无法完成闲鱼 Cookie 登录');
+      }
+    });
+    return result;
+  }
+  if (ctx.path === '/api/v1/accounts/password-login' && ctx.method === 'POST') {
+    if (!optionalString(ctx.body.account) || !optionalString(ctx.body.password)) throw new ServiceError(422, 'VALIDATION_FAILED', 'account and password are required');
+    throw new ServiceError(501, 'PASSWORD_LOGIN_UNAVAILABLE', '闲鱼账号密码登录需要独立浏览器运行时，当前版本仅开放扫码和 Cookie 登录');
   }
 
   const credentialMatch = ctx.path.match(/^\/api\/v1\/accounts\/([^/]+)\/credential(?:\/(verify|revoke))?$/);
@@ -260,7 +315,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   if (accountMatch) {
     const accountId = decodeURIComponent(accountMatch[1]);
     if (!accountMatch[2] && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, await accounts.get(authContext.admin.id, accountId)).body };
-    if (!accountMatch[2] && ctx.method === 'PATCH') return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await accounts.update({ adminId: authContext.admin.id, accountId, patch: { displayName: typeof ctx.body.displayName === 'string' ? ctx.body.displayName : undefined, status: typeof ctx.body.status === 'string' ? ctx.body.status as never : undefined }, requestId: ctx.requestId, traceId: ctx.traceId })));
+     if (!accountMatch[2] && ctx.method === 'PATCH') return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await accounts.update({ adminId: authContext.admin.id, accountId, patch: { sellerRef: optionalString(ctx.body.sellerRef), displayName: optionalString(ctx.body.displayName), remark: optionalString(ctx.body.remark), avatarUrl: optionalString(ctx.body.avatarUrl), platformUserId: optionalString(ctx.body.platformUserId), status: typeof ctx.body.status === 'string' ? ctx.body.status as never : undefined }, requestId: ctx.requestId, traceId: ctx.traceId })));
     if (accountMatch[2] === 'connection' && ctx.method === 'GET') {
       const account = await accounts.get(authContext.admin.id, accountId);
       return { statusCode: 200, body: success(ctx, connectionView(account)).body };
@@ -314,10 +369,68 @@ function connectionView(account: { status: string; lastConnectedAt?: string }) {
   };
 }
 
-function toQrSessionView(session: { id: string; accountId: string; status: string; expiresAt: string; failureCode?: string }) {
+function toQrSessionView(session: { id: string; accountId?: string; status: string; expiresAt: string; failureCode?: string }) {
   // Keep the historical login-session `id` field while exposing the
   // canonical QR-specific alias used by the new auth entry point.
   return { id: session.id, qrSessionId: session.id, accountId: session.accountId, status: session.status, expiresAt: session.expiresAt, pollAfterMs: 1500, errorCode: session.failureCode };
+}
+
+function optionalString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  return normalized ? normalized : undefined;
+}
+
+function readCookieValue(cookieHeader: string, name: string): string | undefined {
+  for (const part of cookieHeader.split(';')) {
+    const index = part.indexOf('=');
+    if (index <= 0) continue;
+    if (part.slice(0, index).trim() === name) return part.slice(index + 1).trim();
+  }
+  return undefined;
+}
+
+async function ensureAccountForLogin(input: { accounts: AccountService; adminId: string; accountId?: string; sellerRef: string; requestId: string; traceId: string }) {
+  if (input.accountId) return input.accounts.get(input.adminId, input.accountId);
+  const existing = (await input.accounts.list(input.adminId)).find((item) => item.platform === 'xianyu' && item.sellerRef === input.sellerRef);
+  if (existing) return existing;
+  try {
+    return await input.accounts.create({ adminId: input.adminId, platform: 'xianyu', sellerRef: input.sellerRef, displayName: input.sellerRef, requestId: input.requestId, traceId: input.traceId });
+  } catch (error) {
+    if (error instanceof ServiceError && error.code === 'CONFLICT') {
+      const retry = (await input.accounts.list(input.adminId)).find((item) => item.platform === 'xianyu' && item.sellerRef === input.sellerRef);
+      if (retry) return retry;
+    }
+    throw error;
+  }
+}
+
+async function hydrateAccountProfile(input: { accounts: AccountService; xianyu: XianyuMtopClient; adminId: string; accountId: string; fallbackSellerRef: string; requestId: string; traceId: string }): Promise<void> {
+  const profile = await input.xianyu.fetchProfile(input.adminId, input.accountId);
+  if (!profile.success || !profile.response) return;
+  const displayName = firstProfileString(profile.response, ['userNick', 'nickname', 'nick', 'displayName', 'userName', 'username']) ?? input.fallbackSellerRef;
+  const sellerRef = firstProfileString(profile.response, ['userId', 'sellerId', 'accountId', 'unb']) ?? input.fallbackSellerRef;
+  const remark = firstProfileString(profile.response, ['remark', 'shopName', 'userDesc']);
+  const avatarUrl = firstProfileString(profile.response, ['avatarUrl', 'avatar', 'headPic', 'userAvatar']);
+  const platformUserId = firstProfileString(profile.response, ['userId', 'sellerId', 'accountId', 'unb']);
+  await input.accounts.update({ adminId: input.adminId, accountId: input.accountId, patch: { sellerRef, displayName, remark, avatarUrl, platformUserId }, requestId: input.requestId, traceId: input.traceId });
+}
+
+function firstProfileString(root: unknown, keys: string[]): string | undefined {
+  const expected = new Set(keys.map((key) => key.toLowerCase()));
+  const queue: unknown[] = [root];
+  const visited = new Set<object>();
+  while (queue.length > 0) {
+    const value = queue.shift();
+    if (!value || typeof value !== 'object') continue;
+    if (visited.has(value)) continue;
+    visited.add(value);
+    for (const [key, candidate] of Object.entries(value as Record<string, unknown>)) {
+      if (expected.has(key.toLowerCase()) && typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+      if (candidate && typeof candidate === 'object') queue.push(candidate);
+    }
+  }
+  return undefined;
 }
 
 function readCredentialMetadata(value: unknown): Record<string, string> | undefined {

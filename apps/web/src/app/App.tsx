@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { apiMode } from '../api';
 import { createHttpClient } from '../api/http';
 import { createAccountsApi } from '../features/accounts/api';
 import { AccountsPage } from '../features/accounts/components/AccountsPage';
@@ -27,7 +26,6 @@ function iconFor(name: string) {
 export default function App() {
   const [page, setPage] = useState<PageKey>(() => pageFromPath(window.location.pathname));
   const accountsApi = useMemo(() => {
-    if (apiMode !== 'live') return undefined;
     const transport = createHttpClient({ baseUrl: import.meta.env.VITE_API_BASE_URL ?? '', credentials: 'include' });
     return createAccountsApi({ get: transport.get, post: transport.post });
   }, []);

@@ -5,7 +5,7 @@ export type QrLoginPhase = 'idle' | 'creating' | 'polling' | 'succeeded' | 'expi
 
 export interface QrLoginSessionVM {
   qrSessionId: string;
-  accountId: string;
+  accountId?: string;
   status: QrLoginStatus;
   qrImageDataUrl?: string;
   qrImageRef?: string;

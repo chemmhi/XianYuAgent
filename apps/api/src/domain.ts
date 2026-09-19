@@ -30,6 +30,9 @@ export interface AccountRecord {
   platform: string;
   sellerRef: string;
   displayName?: string;
+  remark?: string;
+  avatarUrl?: string;
+  platformUserId?: string;
   status: AccountStatus;
   createdAt: string;
   updatedAt: string;
@@ -48,7 +51,9 @@ export interface AccountScopeRecord {
 
 export interface LoginSessionRecord {
   id: string;
-  accountId: string;
+  adminId?: string;
+  accountId?: string;
+  provisionalAccountRef?: string;
   loginMethod: string;
   status: LoginSessionStatus;
   startedAt: string;
@@ -118,11 +123,11 @@ export interface Store {
   listAccounts(adminId: string): Promise<AccountRecord[]>;
   getAccount(adminId: string, accountId: string): Promise<AccountRecord | undefined>;
   createAccount(input: { platform: string; sellerRef: string; displayName?: string; adminId: string }): Promise<AccountRecord>;
-  updateAccount(adminId: string, accountId: string, patch: { displayName?: string; status?: AccountStatus; lastConnectedAt?: string }): Promise<AccountRecord | undefined>;
-  createLoginSession(input: { adminId: string; accountId: string; loginMethod: string; expiresAt: string; qrTokenRef?: string }): Promise<LoginSessionRecord>;
+  updateAccount(adminId: string, accountId: string, patch: { sellerRef?: string; displayName?: string; remark?: string; avatarUrl?: string; platformUserId?: string; status?: AccountStatus; lastConnectedAt?: string }): Promise<AccountRecord | undefined>;
+  createLoginSession(input: { adminId: string; accountId?: string; provisionalAccountRef?: string; loginMethod: string; expiresAt: string; qrTokenRef?: string }): Promise<LoginSessionRecord>;
   getLoginSession(adminId: string, accountId: string, sessionId: string): Promise<LoginSessionRecord | undefined>;
   getLoginSessionById(adminId: string, sessionId: string): Promise<LoginSessionRecord | undefined>;
-  updateLoginSession(adminId: string, accountId: string, sessionId: string, patch: { status?: LoginSessionStatus; expiresAt?: string; completedAt?: string; failureCode?: string }): Promise<LoginSessionRecord | undefined>;
+  updateLoginSession(adminId: string, accountId: string | undefined, sessionId: string, patch: { accountId?: string; status?: LoginSessionStatus; expiresAt?: string; completedAt?: string; failureCode?: string }): Promise<LoginSessionRecord | undefined>;
   getCredential(adminId: string, accountId: string): Promise<CredentialRecord | undefined>;
   upsertCredential(input: { adminId: string; accountId: string; platform: string; cookieHeader?: string; accessToken?: string; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string }): Promise<CredentialRecord>;
   revokeCredential(adminId: string, accountId: string): Promise<CredentialRecord | undefined>;

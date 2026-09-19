@@ -58,6 +58,12 @@ npm run verify
 
 前端真实浏览器 E2E 使用本机已安装的 Google Chrome，通过 Chrome DevTools Protocol 执行；项目不安装或引入 Playwright。
 
+### 参考项目的真实登录态
+
+`http://localhost:9000/accounts` 是 PRD 中的参考项目账号页，不是本项目正式前端。进行真实闲鱼扫码、复用参考项目 Cookie 或检查参考项目接口时，必须在当前已经打开且已登录闲鱼的 Chrome 窗口中直接打开该地址。不要使用无痕窗口、无头窗口、另一套 `--user-data-dir` 或新启动的独立 Chrome 实例，否则浏览器 Cookie、Local Storage 和登录态不会复用。
+
+本项目的 `npm run test:e2e:chrome` 使用临时隔离 Chrome profile 仅验证本地前端/API 跨层链路；它不会证明参考项目的真实浏览器登录态，也不会替代人工在当前 Chrome 中打开上述地址进行复核。
+
 Docker Compose：
 
 ```powershell

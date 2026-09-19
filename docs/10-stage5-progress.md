@@ -21,8 +21,9 @@
 ## 当前阻断与后续
 
 - Docker Desktop Linux engine 未启动，无法完成 PostgreSQL/Redis/MinIO 容器实跑、迁移持久化和 Testcontainers 验证。
-- QR session 与 account login-session 状态机、连接刷新、闲鱼 adapter 协议探针和真实凭证复现仍未实现。
-- 继续实现顺序：账号写入/详情/连接 → QR/login-session → scope/policy/CredentialRef 最小管理 → 本机 Chrome 390×844 补充路径与视觉偏差复核 → 再进入商品切片；1440×900 截图已执行。
+- 真实闲鱼 APP 扫码成功、Cookie 持久化和 `loginuser.get` 资料校验仍需人工复核；复核时必须在当前已打开且已登录的 Chrome 中打开 `http://localhost:9000/accounts`，不能新建浏览器 profile。
+- `verification_required`、超时和未知外部结果必须保持可恢复失败/待处理状态，不得伪造为成功。
+- 继续实现顺序：完成 S4-VS1 真实环境复核与容器持久化证据 → 再进入商品切片；1440×900 与 390×844 截图已执行。
 
 ## Git 记录
 

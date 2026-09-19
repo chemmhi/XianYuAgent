@@ -56,6 +56,20 @@
 .qr-login-success { border: 1px solid var(--success-border); background: var(--success-bg); }
 .qr-login-error { border: 1px solid rgba(180,35,24,.18); background: var(--danger-bg); }
 .qr-login-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.account-login-modal { width: min(560px, calc(100vw - 32px)); }
+.account-login-methods { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0 0 16px; }
+.account-login-method { display: grid; gap: 6px; min-height: 92px; padding: 11px; border: 1px solid var(--border); border-radius: 10px; background: #fff; color: var(--text); text-align: left; cursor: pointer; }
+.account-login-method.active { border-color: var(--brand); background: var(--soft-blue-bg); box-shadow: 0 0 0 2px rgba(36,90,141,.12); }
+.account-login-method-title { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 800; }
+.account-login-method-title em { padding: 2px 5px; border-radius: 999px; background: var(--brand); color: #fff; font-size: 9px; font-style: normal; }
+.account-login-method-description { color: var(--sub); font-size: 10px; line-height: 1.45; }
+.account-login-body { min-height: 260px; }
+.account-login-form { display: grid; gap: 12px; }
+.account-login-form label { display: grid; gap: 6px; }
+.account-login-form label > span { color: var(--text); font-size: 11px; font-weight: 800; }
+.account-login-form input, .account-login-form textarea { width: 100%; box-sizing: border-box; padding: 10px 11px; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--text); font: inherit; font-size: 12px; }
+.account-login-form textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+.account-login-hint { margin: 0; color: var(--sub); font-size: 10px; line-height: 1.55; }
 @media (max-width: 900px) {
   .accounts-domain-toolbar { align-items: stretch; flex-direction: column; }
   .accounts-domain-toolbar-actions { justify-content: stretch; }
@@ -65,4 +79,5 @@
   .accounts-domain-row { grid-template-columns: minmax(190px, 1.7fr) .8fr .9fr .8fr .9fr 1fr auto; min-width: 940px; }
   .accounts-domain-row-actions { grid-column: auto; }
   .accounts-domain-table { min-width: 0; overflow-x: auto; }
+  .account-login-methods { grid-template-columns: 1fr; }
 }

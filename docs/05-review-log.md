@@ -126,3 +126,19 @@
 
 阶段 5 当前结论：允许继续 S4-VS1 账号管理；本机 Chrome + CDP、内存 API、QR stub 的账号创建与授权入口 E2E 已通过，并已生成 1440×900 与 390×844 截图。仍不得宣称 PostgreSQL/Redis 容器、真实闲鱼扫码成功、真实凭证落库或完整视觉回归已完成；商品、卡券、订单仍冻结。
 - 2026-09-19 S5-R4：QR/login-session 复核为 PARTIAL PASS。后端真实二维码生成、轮询与取消通过；前端二维码展示、状态轮询、重试/取消、成功后刷新已通过构建与单测。人工扫码成功及外部凭证落库尚未完成，不能关闭该门禁。
+
+### 10.1 账号登录切片增量复核（2026-09-19）
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R5 | 纵向切片 / Cookie 登录 | Cookie 校验、账号创建或更新、CredentialStore、闲鱼资料同步、登录会话状态和账号列表读取 | api_onboarding_smoke + root | PASS（受控 adapter） | `apps/api/scripts/onboarding-smoke.mjs`；`npm --workspace apps/api run test`；`docs/13-account-login-slice.md` §3.2 |
+| S5-R6 | 前端 / 浏览器 E2E | 登录方式选择、旧占位创建弹窗移除、无模拟二维码、Cookie 登录后昵称/备注回显和列表刷新 | chrome_e2e + root | PASS（受控 harness） | `apps/web/scripts/e2e-chrome.mjs`；`npm run test:e2e:chrome`；`docs/evidence/stage5/S4-VS1/screenshots/` |
+| S5-R7 | 外部平台 / 人工验收 | 真实闲鱼 APP 扫码、真实 Cookie 验证、`verification_required` 恢复路径、外部凭证落库 | manual_review | PENDING | 必须在当前已登录 Chrome 打开 `http://localhost:9000/accounts` 后执行；真实扫码成功前不得关闭 |
+| S5-R8 | 数据库 / 运维 | PostgreSQL/Redis 迁移、重启恢复、真实持久化和容器级 E2E | root | BLOCKED | `docker compose config --quiet` 通过；Docker Desktop Linux engine 未启动 |
+
+### 10.2 人工复核入口
+
+1. 参考项目 `http://localhost:9000/accounts` 必须在当前已经打开且已登录的 Chrome 中访问；新建 profile、无痕窗口或另一浏览器不视为等价环境。
+2. 使用真实闲鱼 APP 扫描项目生成的二维码，记录 waiting → scanned → succeeded 或 `verification_required` 的实际结果。
+3. 成功后核对昵称、备注、头像、平台用户 ID、CredentialStore 和 `account_login_sessions` 是否来自服务端持久化；买家侧不得看到 Cookie、Token 或内部凭证。
+4. 若出现风控挑战，保留 `verificationUrl` 和失败码，禁止人工把失败状态改成 `succeeded`。

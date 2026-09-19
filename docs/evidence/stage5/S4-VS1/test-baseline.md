@@ -33,6 +33,13 @@ npm run test:e2e:chrome
 - 当前浏览器门禁使用本机 Chrome + Chrome DevTools Protocol，不安装 Playwright；Vitest 锁文件中的 `@vitest/browser-playwright` 仅为可选 peer 元数据，未安装、未执行。
 - 原因：容器级数据库/Redis 链路和真实闲鱼账号扫码仍需环境与人工复核；当前 E2E 使用内存 API + QR stub 仅验证前端跨层账号创建与授权入口。
 
+## 真实环境人工复核前提
+
+- 参考项目账号页：`http://localhost:9000/accounts`。
+- 必须在当前已打开、已登录闲鱼的 Chrome 窗口中直接打开该地址，复用该浏览器 profile 的 Cookie / Local Storage；不得使用无痕窗口、新的 `--user-data-dir`、headless Chrome 或其他浏览器实例。
+- 只有在同一 Chrome profile 下，参考项目的扫码登录、手动 Cookie 登录和后续接口校验才具备可复现的登录态前提。
+- 自动化 `test:e2e:chrome` 使用临时隔离 profile，目的仅是验证本项目本地页面、API、会话和数据库适配链路；该测试不替代上述人工复核。
+
 ## 后续门禁
 
 ENV-0 完成后，S4-VS1 必须补齐：
@@ -41,5 +48,6 @@ ENV-0 完成后，S4-VS1 必须补齐：
 2. Testcontainers：PostgreSQL/Redis 持久化、迁移、审计与回滚验证。
 3. 本机 Chrome：1440×900 与 390×844，从登录/初始化到账号切换、授权失败/超时/重试的真实用户路径。
 4. 视觉回归：固定代表性数据与截图差异记录。
+5. 人工真实环境：在当前已登录 Chrome 中打开参考项目账号页，使用真实闲鱼 APP 扫码，确认回调、Cookie 持久化、昵称/备注/头像拉取以及 `verification_required` 不被误报为成功。
 
 以上缺失项不能由当前 mock contract 或生产构建替代。

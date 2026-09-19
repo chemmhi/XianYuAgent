@@ -62,6 +62,8 @@
 - 单元测试或组件测试；
 - 只验证函数调用，没有验证持久化和用户可见结果。
 
+参考项目登录态另有一条强制规则：`http://localhost:9000/accounts` 必须在当前已打开且已登录闲鱼的 Chrome 窗口中打开，才能复用该浏览器 profile 的 Cookie / Local Storage。无痕窗口、新建 `--user-data-dir`、headless Chrome 或其他浏览器实例都不能作为真实登录态证据；自动化 E2E 的临时 Chrome profile 只用于隔离测试，不替代人工复核。
+
 ### 3. 视觉回归门禁
 
 正式前端每个高保真切片必须提供：

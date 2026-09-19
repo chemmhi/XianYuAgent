@@ -72,7 +72,22 @@ describe('accounts canonical API adapter', () => {
     expect(polled.status).toBe('waiting');
     expect(calls[0]).toMatchObject({ path: '/api/v1/auth/qr-sessions' });
     expect(calls[0]?.headers).toEqual(expect.objectContaining({ 'Idempotency-Key': expect.any(String) }));
-    expect(calls[1]?.path).toBe('/api/v1/auth/qr-sessions/qr-session-1?accountId=account-1');
+    expect(calls[1]?.path).toBe('/api/v1/auth/qr-sessions/qr-session-1');
+  });
+
+  it('submits Cookie login without asking the UI for a placeholder account id', async () => {
+    const calls: Array<{ path: string; body?: unknown }> = [];
+    const api = createAccountsApi({
+      async get<T>() { throw new Error('unexpected GET'); },
+      async post<T>(path: string, body?: unknown) {
+        calls.push({ path, body });
+        return { success: true, data: { account: { id: 'account-cookie', sellerRef: 'seller-cookie', displayName: '闲鱼昵称', status: 'connected', connection: { status: 'online' }, credentialState: 'configured' } } } as T;
+      },
+    });
+
+    const account = await api.loginWithCookie({ cookieHeader: 'unb=seller-cookie; _m_h5_tk=token_1' });
+    expect(account).toMatchObject({ id: 'account-cookie', displayName: '闲鱼昵称', sellerRef: 'seller-cookie' });
+    expect(calls[0]).toMatchObject({ path: '/api/v1/auth/cookie-login', body: { cookieHeader: 'unb=seller-cookie; _m_h5_tk=token_1' } });
   });
 
   it('creates an account through the canonical mutation and maps the response', async () => {
