@@ -1,6 +1,6 @@
 # XianyuSellerAgent 阶段评审记录
 
-- 文档版本：v0.4
+- 文档版本：v0.5
 - 更新日期：2026-09-19
 - 评审规则：问题先修复，再复验，再由独立评审关闭；未关闭的 P0-P2 不得进入下一阶段。
 
@@ -122,9 +122,9 @@
 | --- | --- | --- | --- | --- | --- |
 | S5-R1 | 基础设施 / 安全 | API、Worker、Session/CSRF、统一 envelope、幂等、账号范围、最小审计、Memory/Postgres store | env0_recon + root | PASS（内存运行） | `apps/api/src/app.ts`、`apps/api/src/services.ts`、`apps/api/scripts/smoke.mjs`；`npm run test:api` |
 | S5-R2 | 前端 / API 适配 | 账号只读页面按 AccountVM/Controller/StateBoundary 拆分，接入 canonical `/api/v1/accounts` envelope | account_frontend_recon + root | PASS（迁移复核中） | `apps/web/src/features/accounts/`、`apps/web/src/features/accounts/api.test.ts`、`npm run typecheck:web`、`npm run test:web` |
-| S5-R3 | 运维 / 发布 | Compose 拓扑与迁移文件可解析，容器实跑与 PostgreSQL/Redis 持久化验证 | root | PARTIAL / BLOCKED | `docker compose config --quiet` 通过；Docker Desktop Linux engine 未启动，`docker compose up` 未完成 |
+| S5-R3 | 运维 / 发布 | Compose 拓扑与迁移文件可解析，容器实跑与 PostgreSQL/Redis 持久化验证 | root | PARTIAL PASS | `docker compose up -d --build` 已启动；health/ready、`pg_isready`、Redis `PONG`、账号写入/列表读取和 API 重启后持久化复读通过；迁移回滚/Testcontainers 未覆盖 |
 
-阶段 5 当前结论：允许继续 S4-VS1 账号管理；本机 Chrome + CDP、内存 API、QR stub 的账号创建与授权入口 E2E 已通过，并已生成 1440×900 与 390×844 截图。仍不得宣称 PostgreSQL/Redis 容器、真实闲鱼扫码成功、真实凭证落库或完整视觉回归已完成；商品、卡券、订单仍冻结。
+阶段 5 当前结论：允许继续 S4-VS1 账号管理；AuthGate 未认证阻断、bootstrap cookie 注入、账号列表、登录方式选择、受控 Cookie 登录和 1440×900 / 390×844 截图的 Chrome/CDP E2E 已通过。仍不得宣称 PostgreSQL/Redis 容器、真实闲鱼扫码成功、真实凭证落库或完整视觉回归已完成；商品、卡券、订单仍冻结。
 - 2026-09-19 S5-R4：QR/login-session 复核为 PARTIAL PASS。后端真实二维码生成、轮询与取消通过；前端二维码展示、状态轮询、重试/取消、成功后刷新已通过构建与单测。人工扫码成功及外部凭证落库尚未完成，不能关闭该门禁。
 
 ### 10.1 账号登录切片增量复核（2026-09-19）
@@ -134,7 +134,7 @@
 | S5-R5 | 纵向切片 / Cookie 登录 | Cookie 校验、账号创建或更新、CredentialStore、闲鱼资料同步、登录会话状态和账号列表读取 | api_onboarding_smoke + root | PASS（受控 adapter） | `apps/api/scripts/onboarding-smoke.mjs`；`npm --workspace apps/api run test`；`docs/13-account-login-slice.md` §3.2 |
 | S5-R6 | 前端 / 浏览器 E2E | 登录方式选择、旧占位创建弹窗移除、无模拟二维码、Cookie 登录后昵称/备注回显和列表刷新 | chrome_e2e + root | PASS（受控 harness） | `apps/web/scripts/e2e-chrome.mjs`；`npm run test:e2e:chrome`；`docs/evidence/stage5/S4-VS1/screenshots/` |
 | S5-R7 | 外部平台 / 人工验收 | 真实闲鱼 APP 扫码、真实 Cookie 验证、`verification_required` 恢复路径、外部凭证落库 | manual_review | PENDING | 必须在当前已登录 Chrome 打开 `http://localhost:9000/accounts` 后执行；真实扫码成功前不得关闭 |
-| S5-R8 | 数据库 / 运维 | PostgreSQL/Redis 迁移、重启恢复、真实持久化和容器级 E2E | root | BLOCKED | `docker compose config --quiet` 通过；Docker Desktop Linux engine 未启动 |
+| S5-R8 | 数据库 / 运维 | PostgreSQL/Redis 迁移、重启恢复、真实持久化和容器级 E2E | root | PARTIAL PASS | 容器健康、真实账号写入/读取与 API 重启后的持久化复读已通过；完整迁移回滚、Testcontainers 和发布级恢复演练仍待补证 |
 
 ### 10.2 人工复核入口
 
@@ -142,3 +142,16 @@
 2. 使用真实闲鱼 APP 扫描项目生成的二维码，记录 waiting → scanned → succeeded 或 `verification_required` 的实际结果。
 3. 成功后核对昵称、备注、头像、平台用户 ID、CredentialStore 和 `account_login_sessions` 是否来自服务端持久化；买家侧不得看到 Cookie、Token 或内部凭证。
 4. 若出现风控挑战，保留 `verificationUrl` 和失败码，禁止人工把失败状态改成 `succeeded`。
+
+### 10.3 404 / Vite proxy / AuthGate 增量复核（2026-09-19）
+
+本节记录当前工作树在 AuthGate 与开发代理修复后的最新证据。此前 S5-R6 的 PASS 结论已由本节重新执行并覆盖到当前增量。
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R9 | 开发环境 / 路由 | 浏览器 `/api/v1/auth/session` 是否因 Vite 未配置代理而落到 404 | root | PASS | `apps/web/vite.config.ts` 默认转发到 `http://127.0.0.1:8080`；未设置 `VITE_API_PROXY_TARGET` 时，经 Vite 代理请求返回 HTTP 200 canonical envelope |
+| S5-R10 | 前端 / 鉴权门禁 | `App` 根布局是否先经过 `AuthGate`，并按 session、bootstrap、login、error、authenticated 分支阻断或放行业务页面 | root | PASS（受控 E2E） | `apps/web/src/app/App.tsx`、`apps/web/src/features/auth/`；未认证 `/accounts` 不渲染业务面，bootstrap cookie 注入后才放行账号列表 |
+| S5-R11 | 外部适配器 / QR | 真实 QR 适配器是否保留 token 初始化、二维码生成、轮询、取消、超时和 `verification_required` | root | PARTIAL PASS | `apps/api/src/xianyu-qr-login.ts`、`apps/api/src/xianyu-mtop.ts`；受控 API smoke/adapter 测试通过，真实 APP 扫码和外部凭证落库仍待人工验收 |
+| S5-R12 | 浏览器 E2E / 交付门禁 | AuthGate 增量后是否可重新通过 Chrome/CDP、Cookie 登录和截图生成 | root | PASS（受控 harness） | `npm run test:e2e:chrome` 已通过：未认证 AuthGate 阻断、bootstrap cookie 注入、账号列表、登录方式选择、无旧创建弹窗、无模拟二维码、Cookie 登录和页面可见资料均通过；截图已重生成 |
+
+当前增量复核结论：Vite 代理 404 根因已关闭；AuthGate 代码接入和受控浏览器门禁已通过；根 `npm run verify` 已通过。Compose 已完成容器健康与账号持久化复读，但完整迁移回滚/Testcontainers/发布级恢复、真实闲鱼 APP 扫码与外部 Cookie 验证仍待人工复核。

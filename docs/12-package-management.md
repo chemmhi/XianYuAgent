@@ -36,6 +36,8 @@ npm run test:e2e:chrome
 
 `npm run test:e2e:chrome` 使用本机 Chrome + Chrome DevTools Protocol，验证真实前端入口、Vite 代理、API、Session/CSRF、账号创建、持久化可见结果、二维码授权弹窗，并保存 1440×900 与 390×844 截图证据；不安装 Playwright。若 Chrome 不在默认路径，可设置 `CHROME_PATH`。
 
+Compose 使用 `quay.io/minio/minio:latest`；对象存储宿主端口为 `19000/19001`，不得占用 PRD 参考项目使用的 `localhost:9000`。
+
 ## 变更规则
 
 1. 不在 `apps/*` 内执行独立的正式安装，不新增子目录 lockfile。

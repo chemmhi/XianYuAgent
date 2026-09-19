@@ -1,8 +1,6 @@
-import type { AccountVM } from '../../types';
 import { qrStatusLabel, secondsUntilQrExpiry, type QrLoginModel } from '../model';
 
 interface QrLoginViewProps {
-  account?: AccountVM;
   model: QrLoginModel;
   onStart: () => void;
   onRefresh: () => void;
@@ -10,7 +8,7 @@ interface QrLoginViewProps {
   onCancel: () => void;
 }
 
-export function QrLoginView({ account, model, onStart, onRefresh, onRetry, onCancel }: QrLoginViewProps) {
+export function QrLoginView({ model, onStart, onRefresh, onRetry, onCancel }: QrLoginViewProps) {
   const session = model.session;
   const busy = model.phase === 'creating';
   const terminal = ['succeeded', 'expired', 'failed', 'cancelled', 'verification_required'].includes(model.phase);
@@ -24,10 +22,6 @@ export function QrLoginView({ account, model, onStart, onRefresh, onRetry, onCan
 
   return (
     <div className="qr-login-view">
-      <div className="qr-login-account">
-        <span className="accounts-domain-avatar">{account?.displayName?.slice(-1) || '?'}</span>
-        <div><strong>{account?.displayName || '等待闲鱼返回账号资料'}</strong><small>{account?.remark || account?.sellerRef || '登录成功后自动从闲鱼同步'}</small></div>
-      </div>
       {!session && busy && <div className="qr-login-state"><div className="accounts-domain-skeleton"/><strong>正在生成二维码</strong><span>正在创建账号登录会话，请稍候。</span></div>}
       {!session && model.phase === 'idle' && <div className="qr-login-state"><strong>准备二维码登录</strong><span>二维码仅用于管理员授权，不会出现在买家消息或订单交付中。</span><button className="btn primary" type="button" onClick={onStart}>生成二维码</button></div>}
       {!session && model.phase === 'failed' && <div className="qr-login-state qr-login-error" role="alert"><strong>二维码生成失败</strong><span>{model.error?.message}</span><button className="btn primary" type="button" onClick={onRetry}>重新生成</button></div>}

@@ -27,14 +27,15 @@ services:
       retries: 20
 
   object-storage:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: xianyu
       MINIO_ROOT_PASSWORD: xianyu_dev_only
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      # Keep 9000 free for the PRD reference project.
+      - "19000:9000"
+      - "19001:9001"
     volumes:
       - object_storage_data:/data
 

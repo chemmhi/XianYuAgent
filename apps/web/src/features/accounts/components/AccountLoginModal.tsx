@@ -32,7 +32,7 @@ export function AccountLoginModal({ api, account, onClose, onCompleted }: { api:
         </header>
         {!account && <LoginMethodSelector value={method} onChange={setMethod} />}
         <div className="account-login-body">
-          {method === 'qr' && <QrLoginView account={account} model={qrController.model} onStart={qrController.start} onRefresh={qrController.refresh} onRetry={qrController.retry} onCancel={qrController.cancel} />}
+          {method === 'qr' && <QrLoginView model={qrController.model} onStart={qrController.start} onRefresh={qrController.refresh} onRetry={qrController.retry} onCancel={qrController.cancel} />}
           {method === 'cookie' && <CookieLoginForm api={api} onCompleted={onCompleted} />}
           {method === 'password' && <PasswordLoginForm api={api} onCompleted={onCompleted} />}
         </div>

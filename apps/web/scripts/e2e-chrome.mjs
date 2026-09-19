@@ -115,6 +115,11 @@ async function run() {
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
   await cdp.send('Network.enable');
+  await cdp.send('Page.navigate', { url: `${webUrl}/accounts` });
+  await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'unauthenticated accounts page');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".auth-gate"))'), 'unauthenticated AuthGate');
+  const unauthenticatedBusinessPage = await evaluate(cdp, 'Boolean(document.querySelector("[data-accounts-domain]"))');
+  if (unauthenticatedBusinessPage) throw new Error('unauthenticated page rendered the accounts business surface');
   for (const pair of auth.cookie.split('; ')) { const [name, ...valueParts] = pair.split('='); await cdp.send('Network.setCookie', { name, value: valueParts.join('='), url: `${webUrl}/` }); }
   await cdp.send('Page.navigate', { url: `${webUrl}/accounts` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'accounts page');

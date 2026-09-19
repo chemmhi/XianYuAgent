@@ -40,9 +40,6 @@
 @keyframes accounts-domain-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 .qr-login-modal { width: min(460px, calc(100vw - 32px)); }
 .qr-login-view { display: grid; gap: 14px; }
-.qr-login-account { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
-.qr-login-account strong, .qr-login-account small { display: block; }
-.qr-login-account small { margin-top: 3px; color: var(--sub); font-size: 10px; }
 .qr-login-status-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .qr-login-expiry { color: var(--sub); font-size: 11px; }
 .qr-login-code { display: grid; place-items: center; min-height: 260px; padding: 14px; border: 1px dashed var(--border); border-radius: 12px; background: #fff; }

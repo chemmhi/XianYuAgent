@@ -24,9 +24,10 @@ $env:XIANYU_QR_MODE = "real"
 $env:ALLOW_IN_MEMORY = "true"
 $env:COOKIE_SECURE = "false"
 $env:VITE_API_MODE = "live"
-$env:VITE_API_BASE_URL = "http://localhost:8080"
 npm run dev
 ```
+
+默认情况下，Vite 会把 `/api` 请求代理到 `http://127.0.0.1:8080`；只有 API 不在默认端口时，才需要设置 `VITE_API_PROXY_TARGET` 或 `VITE_API_BASE_URL`。
 
 需要单独观察 Worker 时：
 
@@ -75,6 +76,6 @@ npm run compose:ps
 npm run compose:down
 ```
 
-Compose 当前负责 API、Worker、PostgreSQL、Redis 和 MinIO；本地前端由根命令 `npm run dev` 启动。
+Compose 当前负责 API、Worker、PostgreSQL、Redis 和 MinIO；对象存储映射到 `19000/19001`，保留 `9000` 给 PRD 参考项目；本地前端由根命令 `npm run dev` 启动。
 
 真实闲鱼二维码模式由 `XIANYU_QR_MODE=real` 控制；未设置或设置为其他值时，后端默认仍采用真实模式，自动化测试会显式使用 `stub`。

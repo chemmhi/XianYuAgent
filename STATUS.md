@@ -1,20 +1,20 @@
 # XianyuSellerAgent 项目状态
 
 - 项目阶段：5
-- 阶段状态：进行中（S4-VS1 账号登录切片已完成受控 QR/Cookie/API/前端闭环和本机 Chrome/CDP 跨层验证；真实闲鱼 APP 扫码、当前已登录 Chrome 参考项目复核及容器持久化仍待人工/环境验收）
+- 阶段状态：进行中（S4-VS1 账号登录切片已完成受控 QR/Cookie/API/前端闭环、Vite `/api` 代理修复、AuthGate 未认证阻断和本机 Chrome/CDP 跨层验证；真实闲鱼 APP 扫码、当前已登录 Chrome 参考项目复核及容器持久化仍待人工/环境验收）
 - 最近一次通过门禁：阶段 5 ENV-0 / 2026-09-19
 - 当前目标：完成 S4-VS1 的真实外部验收：当前已登录 Chrome 参考项目登录态复核、真实 APP 扫码成功回调、Cookie/凭证落库和 PostgreSQL/Redis 持久化
-- 已完成范围：阶段 0 范围门禁；阶段 1 架构与模块边界；阶段 2 数据模型、数据库表设计、关系基数、状态机、API envelope、幂等、鉴权、敏感交付、迁移边界；阶段 5 账号登录方法选择、真实 QR 适配器、Cookie 登录、账号资料同步、登录会话持久化、前端列表刷新和 Chrome/CDP 控制环境 E2E
-- 未完成范围：真实闲鱼 APP 扫码成功回调、真实外部 Cookie 验证、PostgreSQL/Redis 容器实跑和完整视觉差异回归；账号密码登录依赖独立浏览器运行时，当前明确不可用
-- 未解决风险：R-001/P1、R-002/P1、R-005/P2、R-006/P2、R-007/P2、R-008/P1、R-009/P1、R-011/P1、S3-I001/P1、S3-I002/P1、S3-I003/P1、S3-I004/P1、S3-I005/P1、S3-I006/P1、S3-I007/P1、S3-I008/P1、S4-I003/P1、S4-I004/P1、S4-I005/P1、S4-I006/P1、S4-I007/P2、S5-I001/P1、S5-I002/P1、S5-I003/P1、S5-I004/P1；S3-I009/S3-I010 已关闭，S4-I001/S4-I002 已部分缓解
+- 已完成范围：阶段 0 范围门禁；阶段 1 架构与模块边界；阶段 2 数据模型、数据库表设计、关系基数、状态机、API envelope、幂等、鉴权、敏感交付、迁移边界；阶段 5 账号登录方法选择、真实 QR 适配器、Cookie 登录、账号资料同步、登录会话持久化、AuthGate 会话门禁、Vite 默认代理、前端列表刷新和 Chrome/CDP 控制环境 E2E
+- 未完成范围：真实闲鱼 APP 扫码成功回调、真实外部 Cookie 验证、完整迁移/回滚/Testcontainers 与视觉差异回归；账号密码登录依赖独立浏览器运行时，当前明确不可用
+- 未解决风险：R-001/P1、R-002/P1、R-005/P2、R-006/P2、R-007/P2、R-008/P1、R-009/P1、R-011/P1、S3-I001/P1、S3-I002/P1、S3-I003/P1、S3-I004/P1、S3-I005/P1、S3-I006/P1、S3-I007/P1、S3-I008/P1、S4-I003/P1、S4-I004/P1、S4-I005/P1、S4-I006/P1、S4-I007/P2、S5-I001/P1、S5-I002/P1、S5-I003/P1、S5-I004/P1；S3-I009/S3-I010/S5-I006 已关闭，S4-I001/S4-I002 已部分缓解
 - 待复审问题：S3-R5 为超出当前范围的实现审计；S3-R6 设计范围已澄清；S1-I004 保持 P2 跟进项；阶段 4 计划门禁已通过
-- 下一步：在当前已登录 Chrome 中打开 `http://localhost:9000/accounts` 完成参考项目登录态复核；再用真实闲鱼 APP 扫码验证回调、资料同步和凭证落库；Docker daemon 可用后重跑 Compose、迁移和 Testcontainers 验证
+- 下一步：在当前已登录 Chrome 中打开 `http://localhost:9000/accounts` 完成参考项目登录态复核；再用真实闲鱼 APP 扫码验证回调、资料同步和凭证落库；补齐迁移回滚、重启恢复和 Testcontainers 证据
 
 ## 当前证据
 
 - `SellerAgent/npm test`：已通过，`mock API contract flow passed`；
 - `SellerAgent/npm run build`：已通过，TypeScript 检查和 Vite production build 通过；
-- `git diff --check`：阶段 2 文档修订后重新执行；
+- `git diff --check`：当前工作树已通过；仅有换行格式提示，无 diff 空白错误；
 - `docs/02-data-api.md`：v0.4，状态 PASS，覆盖字段级 schema、PK/FK、唯一约束、关系基数、状态机、P0 API、FirstRun bootstrap、消息 handoff、幂等、安全和迁移；
 - `docs/02-database-schema.md`：v0.1，状态 PASS，覆盖 PostgreSQL 表清单、列类型、默认值、PK/FK、唯一/部分唯一索引、跨表约束、迁移顺序和回滚边界；
 - `docs/05-review-log.md`：S2-R1、S2-R2、S2-R3 均 PASS，S2-I001 至 S2-I005 已关闭；
@@ -23,15 +23,16 @@
 - `docs/04-plan.md`：v0.1，阶段 4 主体功能优先的 ENV-0 与 S4-VS1 至 S4-VS4 纵向切片计划、依赖、DoD、测试、视觉基线和回滚边界；计划门禁 PASS；
 - `npm --workspace apps/api run test`：已通过，`env0 smoke passed`、`onboarding cookie login smoke passed`；覆盖 health、bootstrap、Session/CSRF、幂等重放/冲突、账号创建、Cookie 登录、资料同步、登录状态和账号列表读取；
 - `npm --workspace apps/web run test`：已通过，覆盖账号 API adapter、QR 状态机和组件相关单元/契约测试；
-- `docker compose config --quiet`：已通过；`docker compose up` 尚未执行成功，阻断原因为当前 Docker Desktop Linux engine 未启动；
-- `npm run verify`：已通过；包含类型检查、API smoke、前端测试、构建、本机 Chrome/CDP E2E、1440×900 与 390×844 截图生成、Compose 配置和 diff 检查。
-- `npm run test:e2e:chrome`：已通过；本机 Chrome + CDP 完成登录方式选择、无旧创建弹窗、无模拟二维码、Cookie 登录、服务端资料回传和页面可见持久化结果；不安装或执行 Playwright。
+- `docker compose config --quiet`：已通过；`docker compose up -d --build` 已启动 API、Worker、PostgreSQL、Redis、MinIO；`pg_isready`、Redis `PONG`、容器内 health/ready 通过，并完成账号写入、列表读取及 API 重启后的持久化复读；完整迁移回滚/Testcontainers 仍未覆盖；
+- `npm run verify`：已通过；包含类型检查、API smoke、前端 4 个测试文件/15 个测试、构建、本机 Chrome/CDP E2E、1440×900 与 390×844 截图生成、Compose 配置和 diff 检查。
+- `npm run test:e2e:chrome`：已通过；未认证 `/accounts` 先停留在 AuthGate 且不渲染账号业务面，注入 bootstrap session cookie 后完成账号列表、登录方式选择、无旧创建弹窗、无模拟二维码、Cookie 登录、服务端资料回传和页面可见持久化结果；不安装或执行 Playwright。
 - `docs/evidence/stage5/S4-VS1/test-baseline.md`：已补充 Cookie 登录、资料同步、登录会话落库、当前 Chrome 参考项目登录态前置条件，以及受控 E2E 与真实外部验收的边界；
 - `docs/13-account-login-slice.md`：新增账号登录切片实现说明、路由/数据流、迁移、测试证据、Chrome 登录态复核步骤和当前门禁结论；
-- `docs/evidence/stage5/S4-VS1/screenshots/`：保存 `accounts-desktop-1440x900.png` 与 `accounts-mobile-390x844.png`；
+- `docs/evidence/stage5/S4-VS1/screenshots/`：已由最新 Chrome/CDP 受控 E2E 重新生成 `accounts-desktop-1440x900.png` 与 `accounts-mobile-390x844.png`；
 - `SellerAgent/npm test`、`SellerAgent/npm run build`、`git diff --check`：仅作为原型健康检查，不作为阶段 3 组件设计证据；
 - 高保真原型和现有源码：仅作为视觉与背景参考，不作为阶段 3 组件拆分依据；正式前端账号页已独立按 design token 重建壳层与账号切片。
-- 以上受控证据不证明真实闲鱼 APP 扫码成功、真实外部 Cookie 验证或 PostgreSQL/Redis 容器持久化已完成；阶段 5 的剩余门禁必须按 `docs/13-account-login-slice.md` 的人工复核步骤关闭。
+- 以上受控证据不证明真实闲鱼 APP 扫码成功或真实外部 Cookie 验证；阶段 5 的剩余门禁必须按 `docs/13-account-login-slice.md` 的人工复核步骤关闭。
+- Vite 默认代理证据：未设置 `VITE_API_PROXY_TARGET` 时，`GET /api/v1/auth/session` 经 Vite 返回 HTTP 200 canonical envelope；未认证业务读取被 API 返回 401，AuthGate 不渲染账号业务面。
 
 - canonical 设计同步：FirstRun 使用 `POST /api/v1/auth/bootstrap`；消息人工接管使用 `POST /api/v1/conversations/{id}/handoff`，恢复 AI 使用 `POST /api/v1/conversations/{id}/release`；统一字段为 `BootstrapAdminInput/Output`、`HandoffConversationInput`、`ReleaseConversationInput`、`ConversationHandlingOutput`，状态字段为 `handlingMode`，版本字段为 `expectedVersion`。
 
