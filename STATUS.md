@@ -45,7 +45,7 @@
 - 前端：`apps/web/src/features/coupons/`，通过 `/coupons` 正式路由接入，表格视觉保持平台样式，仅参考旧项目字段和操作。
 - 验证：`npm run typecheck`、前后端测试、API smoke、web build、Chrome/CDP E2E 和 1440×900 / 390×844 截图均已通过；详见 `docs/evidence/stage5/S4-VS3/test-baseline.md`。
 - 门禁：`READY_FOR_REVIEW`；人工审核通过前不得 merge 到 `master`。
-- 本轮提交：`867fbf0`（`feat(阶段5): 完成S4-VS3卡券首页`）。
+- 本轮提交：`ff3645e`（`feat(阶段5): 完成S4-VS3卡券首页`）。
 
 ## 长期决策摘要
 
