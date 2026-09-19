@@ -1,6 +1,6 @@
 # XianyuSellerAgent 阶段评审记录
 
-- 文档版本：v0.3
+- 文档版本：v0.4
 - 更新日期：2026-09-19
 - 评审规则：问题先修复，再复验，再由独立评审关闭；未关闭的 P0-P2 不得进入下一阶段。
 
@@ -44,7 +44,18 @@
 
 阶段 2 门禁：PASS。允许进入阶段 3 前端信息架构与 API 映射设计；仍不得提前创建真实后端实现。
 
-## 5. 阶段 2 人工裁决关闭记录
+## 5. 阶段 3 评审结论
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S3-R1 | 业务 / 验收 | 8 个正式页面、canonical path、用户旅程、异常态和确认卡边界 | stage3_review | PASS | `docs/03-frontend-design.md` §1、§3、§6–§7；`SellerAgent/src/app/navigation.ts` |
+| S3-R2 | 架构 / 数据流 | 组件树、状态归属、请求生命周期、缓存失效、WebSocket、阶段 2 API 映射 | repo_audit | PASS | `docs/03-frontend-design.md` §4–§10；`docs/02-data-api.md` §5–§11 |
+| S3-R3 | 质量 / 安全 / 运维 | 权限一致性、敏感数据边界、可访问性、viewport、回滚与后续验证边界 | root + stage3_review | PASS | `docs/03-frontend-design.md` §2、§5、§8、§9、§11；`docs/07-visual-acceptance.md` |
+| S3-R4 | 视觉 | SellerAgent 原型、design token、1440×900 / 390×844、状态映射可追踪性 | stage3_review | PASS | `xianyu-admin-design-style/assets/design-tokens.json`；`docs/03-frontend-design.md` §2、§8、§10 |
+
+阶段 3 门禁：PASS。允许进入阶段 4 迭代计划与纵向切片编排；真实后端、数据库、API、Worker 和前后端联调仍不得提前创建。
+
+## 6. 阶段 2 人工裁决关闭记录
 
 | 编号 | 用户裁决 | 关闭结论 |
 | --- | --- | --- |
@@ -54,7 +65,7 @@
 | S2-I004 | 交付数据边界 | 三类 deliveryScope、正文读取、交付预览和订单交付 API 纳入阶段 2 |
 | S2-I005 | CredentialStore 范围 | CRUD、rotate、revoke、enable、disable 纳入阶段 2；管理员绝对管理但不得暴露给买家 |
 
-## 6. 当前失败点（供人工复核）
+## 7. 当前失败点（供人工复核）
 
 当前没有未关闭的 P0-P2 阻断。保留以下 P2/后续工程风险，不阻塞阶段 3：
 

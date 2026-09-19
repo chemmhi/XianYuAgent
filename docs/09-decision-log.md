@@ -45,6 +45,18 @@
 
 阶段 2 评审结论：S2-R1、S2-R2、S2-R3 均 PASS；阶段状态更新为 PASS，允许进入阶段 3 前端设计契约。
 
+## 阶段 3 决策与完成结论
+
+2026-09-19，阶段 3 前端设计契约完成并通过独立复核：
+
+1. 正式一级页面冻结为 8 个：`dashboard`、`workspace`、`accounts`、`messages`、`products`、`coupons`、`orders`、`settings`；不存在 `knowledge` / `review` 一级入口。
+2. 生产 canonical path 冻结为 `/dashboard`、`/workspace`、`/accounts`、`/messages`、`/products`、`/coupons`、`/orders`、`/settings`，认证路径为 `/login` 与 `/first-run`。
+3. 桌面目标 viewport 固定为 1440×900，移动目标 viewport 固定为 390×844；SellerAgent 原型和 design token 继续作为临时视觉基线。
+4. 页面状态统一覆盖 loading、success、empty、error、未登录、403、disabled、submitting，并补充 timeout、conflict、reconnect、unknown 等适用状态。
+5. 前端只调用 `/api/v1` 领域 API；高风险写动作遵循 Policy → Confirmation → Idempotency → Outbox，前端不得直接修改服务端状态或访问 Pi/闲鱼原始接口。
+
+阶段 3 评审结论：S3-R1、S3-R2、S3-R3、S3-R4 均 PASS；阶段状态更新为 PASS，允许进入阶段 4 迭代计划与纵向切片编排。
+
 ## 长期执行规则
 
 - 已确认的决策不重复询问；只有出现越权、泄密、不可回滚、库存重复扣减或核心链路不可用等新高风险证据时，才重新发起人工裁决。
