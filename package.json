@@ -33,6 +33,8 @@
     "start:api": "npm --workspace apps/api run start",
     "start:worker": "npm --workspace apps/api run worker",
     "test:e2e:chrome": "npm --workspace apps/web run test:e2e:chrome",
+    "test:e2e:chrome:products": "npm --workspace apps/web run test:e2e:chrome:products",
+    "test:products:postgres": "npm --workspace apps/api run test:postgres",
     "compose:config": "docker compose config --quiet",
     "compose:up": "docker compose --profile full up --build",
     "compose:up:d": "docker compose --profile full up -d --build",

@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && vite build",
     "test": "vitest run",
-    "test:e2e:chrome": "node scripts/e2e-chrome.mjs"
+    "test:e2e:chrome": "node scripts/e2e-chrome.mjs",
+    "test:e2e:chrome:products": "node scripts/e2e-products-chrome.mjs"
   },
   "dependencies": {
     "react": "19.2.8",
