@@ -163,6 +163,13 @@
 
 本项只关闭前端首开竞态，不替代真实闲鱼 APP 扫码、外部凭证落库和人工验收门禁。
 
+### 10.6 二维码 creating 状态卡死修复（2026-09-19）
+
+| 评审编号 | 类型 | 发现 | 处理 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-I014 | 前端生命周期 / QR | React `StrictMode` 的开发期 effect cleanup 递增 `requestId`，但自动启动保护阻止第二次 start；首个 API 成功结果被判定为过期，界面永久停在 `creating` | 不再在普通卸载 cleanup 中使请求失效；真实登录方式切换仍在 `enabled=false` 分支中取消旧请求并重置去重锁 | CLOSED | `apps/web/src/features/accounts/qr-login/controller.ts` |
+| S5-R14 | 浏览器 E2E | 仅断言 POST 发出不足以覆盖“请求成功但 UI 仍卡住” | Chrome/CDP 额外断言 `.qr-login-code` 已渲染；类型检查、前端单测和 Chrome E2E 通过 | PASS（受控环境） | `apps/web/scripts/e2e-chrome.mjs`；`npm run typecheck:web`；`npm run test:web`；`npm run test:e2e:chrome` |
+
 当前增量复核结论：Vite 代理 404 根因已关闭；AuthGate 代码接入和受控浏览器门禁已通过；根 `npm run verify` 已通过。Compose 已完成容器健康与账号持久化复读，但完整迁移回滚/Testcontainers/发布级恢复、真实闲鱼 APP 扫码与外部 Cookie 验证仍待人工复核。
 
 ### 10.4 本地 dev / Compose 数据源统一复核（2026-09-19）

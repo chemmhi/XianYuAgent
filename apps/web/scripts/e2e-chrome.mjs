@@ -134,6 +134,7 @@ async function run() {
   await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "添加闲鱼账号")?.click()');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('扫码登录'), 'login method selector');
   await waitFor(async () => qrCreateCount >= 1, 'initial QR create request');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".qr-login-code"))'), 'initial QR session rendered');
   await new Promise((resolve) => setTimeout(resolve, 500));
   if (qrCreateCount !== 1) throw new Error(`initial QR open issued ${qrCreateCount} create requests`);
   const hasLegacyForm = await evaluate(cdp, 'Boolean(document.querySelector(".create-account-form"))');

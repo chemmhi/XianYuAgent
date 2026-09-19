@@ -162,8 +162,11 @@ export function useQrLoginController(options: { api: AccountsApi; accountId?: st
   }, [clearTimer, enabled, model.session, refresh]);
 
   useEffect(() => () => {
+    // Do not invalidate an in-flight start here. React StrictMode runs this
+    // cleanup between its development-only effect passes while the component
+    // is still mounted; the disabled branch above already invalidates a real
+    // method switch and resets the dedupe gate.
     clearTimer();
-    requestId.current += 1;
   }, [clearTimer]);
 
   return { model, start, refresh, retry, cancel };
