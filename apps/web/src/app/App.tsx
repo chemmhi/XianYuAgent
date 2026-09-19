@@ -8,6 +8,8 @@ import { createProductsApi } from '../features/products/api';
 import { ProductsPage } from '../features/products/components/ProductsPage';
 import { createCouponsApi } from '../features/coupons/api';
 import { CouponsPage } from '../features/coupons/components/CouponsPage';
+import { createMessagesApi } from '../features/messages/api';
+import { MessagesPage } from '../features/messages/components/MessagesPage';
 import { AccountContextProvider } from './account-context';
 import { navItems, pathForPage, type PageKey } from './navigation';
 
@@ -40,6 +42,7 @@ export default function App() {
   const accountsApi = useMemo(() => createAccountsApi({ get: transport.get, post: transport.post, delete: transport.delete }), [transport]);
   const productsApi = useMemo(() => createProductsApi({ get: transport.get, post: transport.post, patch: transport.patch }), [transport]);
   const couponsApi = useMemo(() => createCouponsApi({ get: transport.get, post: transport.post, patch: transport.patch, delete: transport.delete }), [transport]);
+  const messagesApi = useMemo(() => createMessagesApi({ get: transport.get, baseUrl: import.meta.env.VITE_API_BASE_URL ?? undefined }), [transport]);
 
   useEffect(() => {
     const handlePopState = () => setPage(pageFromPath(window.location.pathname));
@@ -57,12 +60,12 @@ export default function App() {
 
   return <AuthGate api={authApi}>
     <AccountContextProvider api={accountsApi}>
-      <AuthenticatedShell page={page} activeNav={activeNav} accountsApi={accountsApi} productsApi={productsApi} couponsApi={couponsApi} navigate={navigate} />
+      <AuthenticatedShell page={page} activeNav={activeNav} accountsApi={accountsApi} productsApi={productsApi} couponsApi={couponsApi} messagesApi={messagesApi} navigate={navigate} />
     </AccountContextProvider>
   </AuthGate>;
 }
 
-function AuthenticatedShell({ page, activeNav, accountsApi, productsApi, couponsApi, navigate }: { page: PageKey; activeNav: typeof navItems[number]; accountsApi: ReturnType<typeof createAccountsApi>; productsApi: ReturnType<typeof createProductsApi>; couponsApi: ReturnType<typeof createCouponsApi>; navigate: (next: PageKey) => void }) {
+function AuthenticatedShell({ page, activeNav, accountsApi, productsApi, couponsApi, messagesApi, navigate }: { page: PageKey; activeNav: typeof navItems[number]; accountsApi: ReturnType<typeof createAccountsApi>; productsApi: ReturnType<typeof createProductsApi>; couponsApi: ReturnType<typeof createCouponsApi>; messagesApi: ReturnType<typeof createMessagesApi>; navigate: (next: PageKey) => void }) {
   return (
     <div className="app-viewport">
       <div className="desktop-shell">
@@ -76,7 +79,7 @@ function AuthenticatedShell({ page, activeNav, accountsApi, productsApi, coupons
         </aside>
         <div className="desktop-body">
           <header className="topbar"><div className="topbar-copy"><strong>{activeNav.label}</strong><span>{activeNav.sub} · 管理员工作空间</span></div><label className="search-box"><span aria-hidden="true">⌕</span><input aria-label="全局搜索" placeholder="搜索账号、商品或订单" /></label><div className="top-actions"><button className="icon-button" type="button" aria-label="通知"><span aria-hidden="true">♢</span><b>3</b></button><div className="user-chip"><div className="avatar">管</div><span>管理员</span></div></div></header>
-          <main>{page === 'accounts' ? <AccountsPage api={accountsApi} /> : page === 'products' ? <ProductsPage api={productsApi} accountsApi={accountsApi} /> : page === 'coupons' ? <CouponsPage api={couponsApi} productsApi={productsApi} /> : <PlaceholderPage page={page} />}</main>
+          <main>{page === 'accounts' ? <AccountsPage api={accountsApi} /> : page === 'products' ? <ProductsPage api={productsApi} accountsApi={accountsApi} /> : page === 'coupons' ? <CouponsPage api={couponsApi} productsApi={productsApi} /> : page === 'messages' ? <MessagesPage api={messagesApi} /> : <PlaceholderPage page={page} />}</main>
         </div>
       </div>
     </div>
