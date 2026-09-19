@@ -2,12 +2,10 @@ export type PageKey =
   | 'dashboard'
   | 'workspace'
   | 'accounts'
-  | 'knowledge'
   | 'messages'
   | 'products'
   | 'coupons'
   | 'orders'
-  | 'review'
   | 'settings';
 
 export interface NavItem {

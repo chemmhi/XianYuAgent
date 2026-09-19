@@ -40,7 +40,7 @@ Knowledge、Review、Trace / Replay / Eval 不作为本轮页面和正式领域�
 | 异步执行 | PostgreSQL Outbox + Worker | 保证业务事务和异步任务记录一致 |
 | 缓存 | Redis | 会话、缓存、限流、在线状态和临时事件 |
 | 文件存储 | S3 兼容对象存储 | 商品图片、视频和上传素材，开发环境可使用 MinIO |
-| 凭证 | CredentialStore 抽象 | 生产接入 Vault 或云 Secret Manager |
+| 凭证 | 数据库 CredentialStore | 直接存储在项目数据库，由管理员统一管理 |
 | Agent | AgentRuntime + Pi Runtime Adapter | 业务层依赖抽象，不依赖 Pi 内部对象 |
 | 模型 | ModelClient 抽象 | 支持 OpenAI-compatible Provider |
 | 契约 | OpenAPI + JSON Schema | HTTP DTO、Manifest、Capability 输入输出可校验 |
@@ -388,15 +388,16 @@ Manifest Capability
 ~~~ts
 interface CredentialStore {
   create(input: CreateCredentialInput): Promise<CredentialRef>;
-  read(ref: CredentialRef, purpose: AccessPurpose): Promise<CredentialValue>;
+  read(ref: CredentialRef): Promise<CredentialValue>;
+  update(ref: CredentialRef, input: UpdateCredentialInput): Promise<CredentialRef>;
   rotate(ref: CredentialRef): Promise<void>;
   revoke(ref: CredentialRef): Promise<void>;
 }
 ~~~
 
-CredentialStore 只负责 Cookie、Token、API Key、密码等系统凭证。卡券正文、夸克链接和提取码属于受控业务数据，由 `coupons` / 交付领域及其存储负责，不作为系统凭证写入 CredentialStore。
+CredentialStore 只负责 Cookie、Token、API Key、密码等系统凭证，直接落在项目数据库。卡券正文、夸克链接和提取码属于受控业务数据，由 `coupons` / 交付领域及其存储负责，不作为系统凭证写入 CredentialStore。
 
-系统凭证不得进入前端、Agent Transcript、Trace、Replay、Audit 明文或错误消息；受控业务数据通过领域接口按 `deliveryScope` 和用途授权后读取或交付，并保留访问审计。
+管理员拥有系统凭证的绝对管理权限，可以通过管理界面查看、编辑、替换、启停和操作。唯一硬边界是系统凭证不得进入闲鱼买家可见的消息、订单交付内容或外部买家可见响应。受控业务数据仍通过领域接口按 `deliveryScope` 和用途读取或交付。
 
 ## 11. WebSocket 和事件
 
@@ -513,7 +514,7 @@ Docker Compose
 | 卡券重复扣减 | PostgreSQL 事务、行级锁和唯一交付记录 |
 | Agent 输出错误参数 | Manifest JSON Schema、Policy 校验和领域 Command 校验三层防护 |
 | WebSocket 断线 | 事件 ID、断线重连、重新拉取 Run / Message 状态 |
-| 凭证泄露 | CredentialStore、最小用途授权、日志脱敏和禁止 Transcript 持久化明文 |
+| 凭证泄露 | 数据库存储，管理员绝对管理；买家可见链路禁止返回系统凭证 |
 | 单体变大 | 维持模块边界，优先拆 Worker，再考虑拆独立服务 |
 
 ## 15. 实施顺序
@@ -532,8 +533,12 @@ Docker Compose
 
 以下事项不影响当前技术基线，但在正式实施前需要确认：
 
-- 生产环境使用哪一种 Vault 或云 Secret Manager；
-- 闲鱼接入所需的登录、签名和 WebSocket 协议是否需要独立 Worker；
-- 对象存储使用云 S3、MinIO 还是现有文件服务；
-- Pi Runtime 以同进程包、子进程还是独立服务运行；
-- 部署环境是否允许 Docker Compose 作为首期生产编排方式。
+- 闲鱼接入所需的登录、签名和 WebSocket 协议可复现条件；
+- 对象存储使用云 S3、MinIO 还是现有文件服务。
+
+已确认的启动阶段决策：
+
+- Pi Runtime 采用独立服务；
+- 首期生产允许使用 Docker Compose；
+- CredentialStore 直接存储在项目数据库，管理员拥有绝对管理权限，系统凭证不得暴露给闲鱼买家；
+- 阶段 0 仅锁定范围，不提前开发真实后端。
