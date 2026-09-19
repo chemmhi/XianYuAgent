@@ -92,6 +92,7 @@ export interface Store {
   updateAccount(adminId: string, accountId: string, patch: { displayName?: string; status?: AccountStatus }): Promise<AccountRecord | undefined>;
   getIdempotency(scope: string, key: string): Promise<IdempotencyRecord | undefined>;
   beginIdempotency(record: IdempotencyRecord): Promise<void>;
+  abortIdempotency(scope: string, key: string): Promise<void>;
   completeIdempotency(input: { scope: string; key: string; status: IdempotencyRecord['status']; responseEnvelope: unknown; statusCode: number; traceId: string }): Promise<void>;
   recordAudit(event: AuditEventRecord): Promise<void>;
 }

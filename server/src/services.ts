@@ -85,8 +85,26 @@ export async function idempotent<T>(store: Store, input: { scope: string; key: s
     return { statusCode: existing.statusCode ?? 200, body: existing.responseEnvelope, replayed: true };
   }
   const record: IdempotencyRecord = { scope: input.scope, key: input.key, requestFingerprint: input.fingerprint, status: 'processing', expiresAt: new Date(Date.now() + 30 * 24 * 3_600_000).toISOString() };
-  await store.beginIdempotency(record);
-  const result = await input.handler();
+  try {
+    await store.beginIdempotency(record);
+  } catch (error) {
+    if ((error as { code?: string }).code === '23505') {
+      const concurrent = await store.getIdempotency(input.scope, input.key);
+      if (concurrent) {
+        if (concurrent.requestFingerprint !== input.fingerprint) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'idempotency key reused with a different request');
+        if (concurrent.status === 'processing') throw new ServiceError(202, 'IDEMPOTENCY_IN_PROGRESS', 'request is already processing');
+        return { statusCode: concurrent.statusCode ?? 200, body: concurrent.responseEnvelope, replayed: true };
+      }
+    }
+    throw error;
+  }
+  let result: { statusCode: number; body: unknown };
+  try {
+    result = await input.handler();
+  } catch (error) {
+    await store.abortIdempotency(input.scope, input.key);
+    throw error;
+  }
   await store.completeIdempotency({ scope: input.scope, key: input.key, status: result.statusCode >= 400 ? 'failed' : 'succeeded', responseEnvelope: result.body, statusCode: result.statusCode, traceId: input.traceId });
   return { ...result, replayed: false };
 }

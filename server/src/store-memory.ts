@@ -55,6 +55,7 @@ export class MemoryStore implements Store {
   async updateAccount(adminId: string, accountId: string, patch: { displayName?: string; status?: AccountRecord['status'] }): Promise<AccountRecord | undefined> { const account = await this.getAccount(adminId, accountId); if (!account) return undefined; if (patch.displayName !== undefined) account.displayName = patch.displayName; if (patch.status !== undefined) account.status = patch.status; account.updatedAt = new Date().toISOString(); return account; }
   async getIdempotency(scope: string, key: string): Promise<IdempotencyRecord | undefined> { const row = this.idempotency.get(`${scope}:${key}`); if (row && Date.parse(row.expiresAt) <= Date.now()) { this.idempotency.delete(`${scope}:${key}`); return undefined; } return row; }
   async beginIdempotency(record: IdempotencyRecord): Promise<void> { this.idempotency.set(`${record.scope}:${record.key}`, record); }
+  async abortIdempotency(scope: string, key: string): Promise<void> { this.idempotency.delete(`${scope}:${key}`); }
   async completeIdempotency(input: { scope: string; key: string; status: IdempotencyRecord['status']; responseEnvelope: unknown; statusCode: number; traceId: string }): Promise<void> { const row = this.idempotency.get(`${input.scope}:${input.key}`); if (row) Object.assign(row, input); }
   async recordAudit(event: AuditEventRecord): Promise<void> { this.audits.push(event); }
 }
