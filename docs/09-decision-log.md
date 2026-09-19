@@ -176,7 +176,7 @@
 4. 已有锁时必须读取 owner 信息并等待或人工确认 stale lock，禁止绕过锁、强制删除有效锁或并行修改 `master`。
 5. 只有人工审核通过且登记状态为 `READY_FOR_MERGE` 的切片才能进入 merge lock；合并成功并验证后才允许将 worktree/分支标记为 `CLEANED` 并删除。
 
-该决策是后续 agent 的长期默认行为，详见 [`docs/15-multi-agent-collaboration.md`](./15-multi-agent-collaboration.md)。当前 root agent 正在独立 worktree `docs/multi-agent-collaboration` 中编写本规范，等待人工审核后再合入 `master`。
+该决策是后续 agent 的长期默认行为，详见 [`docs/15-multi-agent-collaboration.md`](./15-multi-agent-collaboration.md)。本轮规范已在人工审核通过后于 merge lock 内合入 `master`，合并提交为 `e9aaf782`。
 
 ## Git 提交记录
 
@@ -189,5 +189,5 @@
 - 阶段 4 主体功能纵向切片计划：`f55f7dc`（`docs(阶段4): 编排主体功能纵向切片计划`）
 - 2026-09-19 未完成任务切片拆分：`d2ba0c3`（`docs(阶段5): 拆分未完成纵向切片`）；仅更新计划、契约、风险、决策、评审和状态文档，未改变业务代码。
 - 2026-09-19 优先级重排：`56b6260`（`docs(阶段5): 重排聊天工作台与凭证切片`）；下一批实现固定为在线聊天、Workspace、Settings API Key，订单和其他 Settings 分区继续后置。
-- 2026-09-19 多 Agent 协作规范：`9e1684c`（`docs(协作): 建立多agent worktree与合并锁规则`）；新增独立 worktree、登记表、全局 merge lock、主工作区保护和清理状态机。本分支等待人工审核，尚未合入 `master`。
+- 2026-09-19 多 Agent 协作规范：`9e1684c`（`docs(协作): 建立多agent worktree与合并锁规则`）；新增独立 worktree、登记表、全局 merge lock、主工作区保护和清理状态机。后续登记状态回写提交为 `1b39e6c`、`b278617`，已通过人工审核并在 merge lock 内以 `e9aaf782` 合入 `master`。
 - 2026-09-19 阶段5 决策：二维码登录 API 同时返回历史兼容字段 `id` 与 canonical 字段 `qrSessionId`；二维码风控状态 `verification_required` 独立持久化并展示验证链接，不降级为普通失败或伪造成功；自动化测试使用 `XIANYU_QR_MODE=stub`，真实模式仅用于可控网络探针与人工扫码验收。

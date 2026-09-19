@@ -200,4 +200,4 @@ PLANNED
 
 ## 9. 当前启用记录
 
-本规范于 2026-09-19 启用。当前只有一个主工作区和一个用于编写本规范的 root agent 独立 worktree，详见 [`docs/agent-worktree-registry.md`](./agent-worktree-registry.md)。后续任何 agent 开始任务前，必须先创建并登记自己的 worktree。
+本规范于 2026-09-19 启用。本轮规范已通过人工审核并在 merge lock 内合入 `master`；当前活动 worktree 与历史清理记录详见 [`docs/agent-worktree-registry.md`](./agent-worktree-registry.md)。后续任何 agent 开始任务前，必须先创建并登记自己的 worktree。

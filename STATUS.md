@@ -123,4 +123,4 @@
 - 范围边界：账号上下文采用认证后前端壳层的 localStorage 持久化；删除账号采用软删除，撤销 scope/credential，保留历史商品与审计记录；真实闲鱼 APP 扫码和真实发布仍未完成外部验收。
 - 2026-09-19 文档切片拆分提交：`d2ba0c3`（`docs(阶段5): 拆分未完成纵向切片`）；已同步更新阶段 4 计划、阶段 5 状态矩阵、数据/API 契约、组件 owner、风险、决策和评审记录。验证：`git diff --check`、风险号唯一性与 Markdown 风险表列数检查通过；未重复执行代码 E2E（本轮仅文档变更）。
 - 2026-09-19 优先级重排提交：`56b6260`（`docs(阶段5): 重排聊天工作台与凭证切片`）；已将下一批切片调整为 `S4-VS5A/B/C`、`S4-VS6A/B`、`S4-VS7A`，并同步补齐 canonical API、账号级 CredentialStore、BusinessLinkVM、clientRunRef/Idempotency-Key 和风险/评审记录。验证：`git diff --check`、新风险号唯一性、canonical 路径和状态一致性检查通过；未执行代码 E2E（本轮仅文档变更）。
-- 2026-09-19 多 Agent 协作规范提交：`9e1684c`（`docs(协作): 建立多agent worktree与合并锁规则`）；新增独立 worktree/登记/全局 merge lock 规范、登记表，并同步回写 `AGENT.md`、`docs/09-decision-log.md` 和 `STATUS.md`。当前分支保持 `READY_FOR_REVIEW`，未获取 merge lock、未合入 `master`。
+- 2026-09-19 多 Agent 协作规范提交：`9e1684c`（`docs(协作): 建立多agent worktree与合并锁规则`）；登记状态回写提交为 `1b39e6c`、`b278617`，已通过人工审核并在 merge lock 内以 `e9aaf782` 合入 `master`，随后完成 worktree/分支清理登记。
