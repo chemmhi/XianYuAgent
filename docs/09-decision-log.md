@@ -126,6 +126,8 @@
 3. S4-VS1 前端首片只接账号只读列表，使用独立 `features/accounts` 领域模块和 canonical API adapter；高保真原型只作为视觉基线，不作为组件拆分依据。
 4. 真实跨层内存验证已经通过；Compose 文件解析通过，但 Docker Desktop Linux engine 未启动，容器级验证必须在环境恢复后补跑。
 
+本轮阶段 5 记录与代码提交已完成：`65b48d6`（feat(阶段5): 接通账号真实读取链路与ENV0部署骨架）。
+
 ## Git 提交记录
 
 - 阶段 0：`38862e5`（`feat: 阶段0文档产出`）
