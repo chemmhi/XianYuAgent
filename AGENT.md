@@ -181,3 +181,18 @@ git diff --check
 - PostgreSQL 部分唯一索引用于外部商品幂等 Upsert 时，`ON CONFLICT` 必须带与索引一致的谓词；仅写 `(account_id, external_product_ref)` 会在真实数据库返回“没有匹配唯一约束”的 500，内存测试无法发现该问题。
 - 多闲鱼账号的商品页不得静默选择第一个 connected 账号；没有明确 `accountId` 时必须要求管理员显式选择，避免把空账号或错误账号的结果误报为“当前账号没有商品”。
 - Chrome/CDP fixture 中的“29 件”只能证明前端链路可承载 29 件数据，不能替代真实 MTOP 外部验收；真实商品数量必须按目标账号、分组、分页和当前 Cookie 的实际返回记录，数量口径不一致时提出人工复核，不得硬编码补齐。
+
+## 2026-09-19 多 Agent 协作：独立 Worktree 与全局 Merge Lock 为强制规则
+
+后续所有 agent、子 agent 和人工协作者必须遵守 [`docs/15-multi-agent-collaboration.md`](docs/15-multi-agent-collaboration.md)，并在 [`docs/agent-worktree-registry.md`](docs/agent-worktree-registry.md) 登记。核心规则如下：
+
+1. 每个 agent 开始写代码、测试、迁移、配置或交付文档前，必须新建独立 worktree 和 feature 分支；禁止直接在 `master` 主 worktree 开发。
+2. 每个 agent 必须登记 `agent_id`、`slice_id`、`branch`、`worktree`、`owner`、`created_at`、`status`、`merge_commit`、`cleaned_at` 和 `notes`。
+3. 一个纵向切片只能由一个 agent 负责写入；其他 agent 通过评审和证据复核参与，不得共用 worktree 或同时编辑同一切片。
+4. `master` 主 worktree 只允许执行合并、合并后验证、状态/登记文档回写和清理；出现未登记修改时必须停止合并。
+5. 合并前必须在所有 worktree 共享的 Git common dir 创建原子目录锁 `agent-merge.lock`，并在锁区间内完成门禁、`git merge --no-ff`、合并后验证、登记回写和提交记录。
+6. 锁目录必须记录 owner、branch、worktree、acquired_at 和 pid。发现已有锁时必须等待或人工核实 stale lock，禁止绕过锁直接 merge；不得仅因等待超时强制删除有效 owner 的锁。
+7. 只有人工审核通过并将登记状态改为 `READY_FOR_MERGE` 后，主 agent 才能获取锁合并。合并完成后写入 merge commit，确认验证通过，再删除已合并 worktree 和分支并登记 `CLEANED`。
+8. 未登记、`IN_PROGRESS`、`READY_FOR_REVIEW` 或 `BLOCKED` 的 worktree 不得删除；禁止用 `git reset --hard`、强制推送或覆盖式复制隐藏其他 agent 改动。
+
+本规则属于长期执行约束。任何新 agent 在下一次修改前必须先阅读本节和协作文档；违反独立 worktree、登记或 merge lock 任一条款时，交付状态不得标记为完成。

@@ -166,6 +166,18 @@
 
 该决策不表示新切片已实现；当前状态统一为 `PLANNED`，质量/安全/运维评审保持 `BLOCKED`，直至真实 API、持久化、WebSocket/Worker/Runtime、Chrome/CDP 和视觉证据完成。
 
+## 多 Agent 协作与主工作区保护决策（2026-09-19）
+
+为支持在线聊天、Workspace 和 Settings API Key 等切片并行开发，长期采用以下协作规则：
+
+1. 每个 agent 必须在开始写入前创建独立 worktree 和 feature 分支，并在 `docs/agent-worktree-registry.md` 登记 agent、切片、分支、绝对路径、负责人、创建时间和状态。
+2. `master` 主 worktree 视为受保护工作区，不允许直接开发；主工作区仅用于锁内合并、合并后验证、登记/状态文档回写和清理。
+3. 合并前必须在共享 Git common dir 创建原子目录锁 `agent-merge.lock`。锁内完成主工作区清洁检查、门禁、`git merge --no-ff`、合并后验证、commit hash 回写和登记更新；锁释放后才能结束合并流程。
+4. 已有锁时必须读取 owner 信息并等待或人工确认 stale lock，禁止绕过锁、强制删除有效锁或并行修改 `master`。
+5. 只有人工审核通过且登记状态为 `READY_FOR_MERGE` 的切片才能进入 merge lock；合并成功并验证后才允许将 worktree/分支标记为 `CLEANED` 并删除。
+
+该决策是后续 agent 的长期默认行为，详见 [`docs/15-multi-agent-collaboration.md`](./15-multi-agent-collaboration.md)。当前 root agent 正在独立 worktree `docs/multi-agent-collaboration` 中编写本规范，等待人工审核后再合入 `master`。
+
 ## Git 提交记录
 
 - 阶段 0：`38862e5`（`feat: 阶段0文档产出`）

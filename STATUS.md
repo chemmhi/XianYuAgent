@@ -4,6 +4,7 @@
 - 阶段状态：进行中（账号管理、商品、卡券已具备主体链路；S4-VS3 仍待真实环境人工复核；下一批优先切片调整为在线聊天、Workspace 工作台和 Settings API Key 配置）
 - 最近一次通过门禁：S4-VS2 商品列表/详情只读首片复核 / 2026-09-19
 - 当前目标：按 `docs/04-plan.md` 执行 `S4-VS5A/B/C` 在线聊天、`S4-VS6A/B` Workspace、`S4-VS7A` Settings API Key 三组优先垂直切片；账号/商品/卡券剩余真实环境门禁继续收尾，不再抢占下一批开发顺序
+- 多 Agent 协作状态：已启用独立 worktree、登记表和全局 merge lock 强制规则；当前活动登记见 `docs/agent-worktree-registry.md`，主工作区禁止直接开发
 - 已完成范围：阶段 0 范围门禁；阶段 1 架构与模块边界；阶段 2 数据模型、数据库表设计、关系基数、状态机、API envelope、幂等、鉴权、敏感交付、迁移边界；阶段 5 账号登录方法选择、真实 QR 适配器、Cookie 登录、账号资料同步、登录会话持久化、AuthGate 会话门禁、Vite 默认代理、账号列表真实读取和 Chrome/CDP 控制环境 E2E；S4-VS2 商品列表/详情只读首片、003_catalog 迁移、Memory/Postgres scope-aware 查询、真实 PostgreSQL smoke 和 Chrome/CDP 商品 E2E
 - 未完成范围：在线聊天 `S4-VS5A/B/C`、Workspace `S4-VS6A/B`、Settings API Key `S4-VS7A`；订单 `S4-VS4A/B/C`；商品/卡券剩余写入与库存门禁；`S4-ENV-RECOVERY`、`S4-EXT-ACCOUNT`、`S4-ENV-RUNTIME`；完整迁移/回滚/Testcontainers、Redis/MinIO 恢复和逐状态视觉回归。账号密码登录依赖独立浏览器运行时，当前明确不可用。
 - 未解决风险：R-001/P1、R-002/P1、R-005/P2、R-006/P2、R-007/P2、R-008/P1、R-009/P1、R-011/P1、S3-I001/P1、S3-I002/P1、S3-I003/P1、S3-I004/P1、S3-I005/P1、S3-I006/P1、S3-I007/P1、S3-I008/P1、S4-I003/P1、S4-I004/P1、S4-I005/P1、S4-I006/P1、S4-I007/P2、S5-I001/P1、S5-I002/P1、S5-I003/P1、S5-I004/P1、S5-I007/P1、S5-I008/P1、S5-I009/P1、S5-RISK-013/P1、S5-RISK-014/P1、S5-RISK-015/P1、S5-RISK-016/P1、S5-RISK-017/P1、S5-RISK-018/P1、S5-RISK-019/P1、S5-RISK-020/P1、S5-RISK-021/P1、S5-RISK-022/P1、S5-RISK-023/P1、S5-RISK-024/P1、S5-RISK-025/P1、S5-RISK-026/P1；S3-I009/S3-I010/S5-I006 已关闭，S4-I001/S4-I002 已部分缓解
