@@ -31,3 +31,4 @@
 - `5c8f9e5`：阶段 5 前端测试门禁。
 - `d134f9d`、`2567714`、`50cbe0b`：ENV-0 后端运行时、bootstrap Cookie 重放修复、幂等竞争/异常清理修复。
 - `65b48d6`：接通账号真实读取链路、统一 envelope adapter、Compose 与首片迁移骨架，并回写阶段记录。
+- `2de5ff7`：接通账号详情与连接状态读取；外部闲鱼结果未知时返回明确 `unknown`/`ADAPTER_UNKNOWN`，不伪造成功。
