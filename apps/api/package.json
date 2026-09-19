@@ -12,7 +12,7 @@
     "migrate": "node scripts/migrate.mjs",
     "test:postgres": "npm run build && node scripts/products-postgres-smoke.mjs",
     "smoke": "npm run build && node scripts/smoke.mjs",
-    "test": "npm run build && node scripts/smoke.mjs && node scripts/onboarding-smoke.mjs && node scripts/products-smoke.mjs && node scripts/products-sync-smoke.mjs && node scripts/xianyu-product-mapper-smoke.mjs"
+    "test": "npm run build && node scripts/smoke.mjs && node scripts/onboarding-smoke.mjs && node scripts/workspace-smoke.mjs && node scripts/workspace-ws-smoke.mjs && node scripts/products-smoke.mjs && node scripts/products-sync-smoke.mjs && node scripts/xianyu-product-mapper-smoke.mjs"
   },
   "dependencies": {
     "ioredis": "^5.7.0",

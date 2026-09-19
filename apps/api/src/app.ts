@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { Duplex } from 'node:stream';
 import { loadConfig, type AppConfig } from './config.js';
 import type { AuthContext } from './services.js';
 import { AccountService, AuthService, CouponService, CredentialService, ProductService, ProductSyncService, ServiceError, idempotent } from './services.js';
@@ -8,6 +10,7 @@ import type { ProductListResult, ProductRecord, Store } from './domain.js';
 import { createId, digestJson } from './security.js';
 import { XianyuQrLoginAdapter, type XianyuQrPublicSession } from './xianyu-qr-login.js';
 import { XianyuMtopClient } from './xianyu-mtop.js';
+import { InProcessAgentRuntime, isTerminalRunStatus, WorkspaceService } from './workspace.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -18,6 +21,8 @@ export interface AppRuntime {
   products: ProductService;
   productSync: ProductSyncService;
   credentials: CredentialService;
+  workspace: WorkspaceService;
+  workspaceRuntime: InProcessAgentRuntime;
   qrLogin: XianyuQrLoginAdapter;
   xianyu: XianyuMtopClient;
   server: Server;
@@ -98,12 +103,20 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     return auditId;
   });
 
+  const workspaceRuntime = new InProcessAgentRuntime(store);
+  const workspace = new WorkspaceService(store, workspaceRuntime, async (input) => {
+    const auditId = createId();
+    await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
+    return auditId;
+  });
+
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, products, productSync, credentials, qrLogin, xianyu,
+    config, store, auth, accounts, coupons, products, productSync, credentials, workspace, workspaceRuntime, qrLogin, xianyu,
     server: createServer((request, response) => { void handleRequest(runtime, request, response); }),
     async listen() { await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve)); },
-    async close() { await new Promise<void>((resolve, reject) => runtime.server.close((error) => error ? reject(error) : resolve())); const close = (store as Store & { close?: () => Promise<void> }).close; if (close) await close.call(store); },
+    async close() { workspaceRuntime.stop(); await new Promise<void>((resolve, reject) => runtime.server.close((error) => error ? reject(error) : resolve())); const close = (store as Store & { close?: () => Promise<void> }).close; if (close) await close.call(store); },
   };
+  runtime.server.on('upgrade', (request, socket) => { void handleWorkspaceUpgrade(runtime, request, socket); });
   return runtime;
 }
 
@@ -126,7 +139,7 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
 }
 
 async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: ServerResponse): Promise<{ statusCode: number; body: unknown } | undefined> {
-  const { auth, accounts, coupons, products, productSync, credentials, store, config } = runtime;
+  const { auth, accounts, coupons, products, productSync, credentials, workspace, store, config } = runtime;
   if (ctx.path === '/healthz' && ctx.method === 'GET') {
     const health = await store.health();
     const body = success(ctx, { status: health.reachable ? 'ok' : 'degraded', storage: health.kind, services: { api: 'ok', database: health.reachable ? 'ok' : 'unavailable', redis: config.redisUrl ? 'configured' : 'not_configured' } });
@@ -358,6 +371,41 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     if (accountMatch[2] && ctx.method === 'DELETE') return mutation(runtime, ctx, authContext, accountId, async () => { await accounts.revokeScope({ adminId: authContext.admin.id, accountId, scope: String(ctx.body.scope ?? 'manage'), requestId: ctx.requestId, traceId: ctx.traceId }); return success(ctx, { revoked: true }); });
   }
 
+  const workspaceSessionAction = ctx.path.match(/^\/api\/v1\/workspace\/agent-sessions\/([^/]+)\/(switch|archive)$/);
+  if (ctx.path === '/api/v1/workspace/agent-sessions' && ctx.method === 'GET') {
+    return { statusCode: 200, body: success(ctx, { items: await workspace.listSessions({ adminId: authContext.admin.id, accountId: optionalString(ctx.query.accountId), search: optionalString(ctx.query.search) }) }).body };
+  }
+  if (ctx.path === '/api/v1/workspace/agent-sessions/search' && ctx.method === 'GET') {
+    return { statusCode: 200, body: success(ctx, { items: await workspace.listSessions({ adminId: authContext.admin.id, accountId: optionalString(ctx.query.accountId), search: optionalString(ctx.query.q ?? ctx.query.search) }) }).body };
+  }
+  if (ctx.path === '/api/v1/workspace/agent-sessions' && ctx.method === 'POST') {
+    const accountId = optionalString(ctx.body.accountId);
+    return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await workspace.createSession({ adminId: authContext.admin.id, accountId: accountId ?? '', title: String(ctx.body.title ?? ''), summary: optionalString(ctx.body.summary), requestId: ctx.requestId, traceId: ctx.traceId }), 201));
+  }
+  if (workspaceSessionAction && ctx.method === 'POST') {
+    const sessionId = decodeURIComponent(workspaceSessionAction[1]);
+    return mutation(runtime, ctx, authContext, undefined, async () => workspaceSessionAction[2] === 'switch'
+      ? success(ctx, await workspace.switchSession({ adminId: authContext.admin.id, sessionId, requestId: ctx.requestId, traceId: ctx.traceId }))
+      : success(ctx, await workspace.archiveSession({ adminId: authContext.admin.id, sessionId, requestId: ctx.requestId, traceId: ctx.traceId })));
+  }
+
+  if (ctx.path === '/api/v1/workspace/runs' && ctx.method === 'POST') {
+    const accountId = optionalString(ctx.body.accountId);
+    return mutation(runtime, ctx, authContext, accountId, async () => {
+      const result = await workspace.startRun({ adminId: authContext.admin.id, accountId: accountId ?? '', sessionId: String(ctx.body.sessionId ?? ''), instruction: String(ctx.body.instruction ?? ''), clientRunRef: optionalString(ctx.body.clientRunRef), requestId: ctx.requestId, traceId: ctx.traceId });
+      return success(ctx, result.run, result.duplicate ? 200 : 201);
+    });
+  }
+  const workspaceRunMatch = ctx.path.match(/^\/api\/v1\/workspace\/runs\/([^/]+)(?:\/events)?$/);
+  if (workspaceRunMatch && ctx.method === 'GET') {
+    const runId = decodeURIComponent(workspaceRunMatch[1]);
+    if (ctx.path.endsWith('/events')) {
+      const after = Number(ctx.query.after ?? 0);
+      return { statusCode: 200, body: success(ctx, { items: await workspace.listEvents({ adminId: authContext.admin.id, runId, afterSequence: Number.isFinite(after) ? after : 0 }) }).body };
+    }
+    return { statusCode: 200, body: success(ctx, await workspace.getRun({ adminId: authContext.admin.id, runId })).body };
+  }
+
   if (ctx.path === '/api/v1/coupons/batches' && ctx.method === 'GET') {
     const result = await coupons.list(authContext.admin.id, parseCouponBatchListQuery(ctx.query));
     return { statusCode: 200, body: success(ctx, result).body };
@@ -442,6 +490,70 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
 }
 
 async function requireAuth(auth: AuthService, ctx: RequestContext): Promise<AuthContext> { const context = await auth.contextFromSession(ctx.cookies.session_id); if (!context) throw new ServiceError(401, 'UNAUTHENTICATED', 'session required'); return context; }
+
+async function handleWorkspaceUpgrade(runtime: AppRuntime, request: IncomingMessage, socket: Duplex): Promise<void> {
+  const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
+  const match = url.pathname.match(/^\/api\/v1\/workspace\/runs\/([^/]+)\/events$/);
+  if (!match) { socket.destroy(); return; }
+  const origin = request.headers.origin;
+  if (origin) {
+    try {
+      if (new URL(origin).host !== request.headers.host) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
+    } catch { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
+  }
+  const authContext = await runtime.auth.contextFromSession(parseCookies(request.headers.cookie).session_id);
+  if (!authContext) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
+  const runId = decodeURIComponent(match[1]);
+  let run;
+  try { run = await runtime.workspace.getRun({ adminId: authContext.admin.id, runId }); }
+  catch (error) {
+    const status = error instanceof ServiceError ? error.statusCode : 500;
+    const phrase = status === 403 ? 'Forbidden' : status === 404 ? 'Not Found' : 'Internal Server Error';
+    socket.write(`HTTP/1.1 ${status} ${phrase}\r\n\r\n`);
+    socket.destroy();
+    return;
+  }
+  const key = request.headers['sec-websocket-key'];
+  if (!key || Array.isArray(key)) { socket.write('HTTP/1.1 400 Bad Request\r\n\r\n'); socket.destroy(); return; }
+  const accept = createHash('sha1').update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
+  socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+  let closed = false;
+  const requestedCursor = Number(url.searchParams.get('after') ?? 0);
+  let cursor = Number.isFinite(requestedCursor) ? Math.max(0, Math.trunc(requestedCursor)) : 0;
+  socket.on('close', () => { closed = true; });
+  socket.on('error', () => { closed = true; });
+  socket.on('data', () => { /* client frames are intentionally ignored in the read-only VS6A stream */ });
+  writeWsFrame(socket, JSON.stringify({ type: 'snapshot', run, cursor }));
+  while (!closed) {
+    const events = await runtime.workspace.listEvents({ adminId: authContext.admin.id, runId, afterSequence: cursor });
+    for (const event of events) {
+      if (closed) break;
+      cursor = Math.max(cursor, event.sequence);
+      writeWsFrame(socket, JSON.stringify({ type: 'event', cursor, event }));
+    }
+    if (isTerminalRunStatus(run.status) && events.length === 0) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const latest = await runtime.workspace.getRun({ adminId: authContext.admin.id, runId });
+    run.status = latest.status;
+    run.updatedAt = latest.updatedAt;
+    run.finishedAt = latest.finishedAt;
+    run.startedAt = latest.startedAt;
+    run.steps = latest.steps;
+    run.resultSummary = latest.resultSummary;
+    run.errorCode = latest.errorCode;
+  }
+  if (!closed) socket.end();
+}
+
+function writeWsFrame(socket: Duplex, payload: string): void {
+  const body = Buffer.from(payload);
+  let header: Buffer;
+  if (body.length < 126) header = Buffer.from([0x81, body.length]);
+  else if (body.length < 65_536) { header = Buffer.alloc(4); header[0] = 0x81; header[1] = 126; header.writeUInt16BE(body.length, 2); }
+  else { header = Buffer.alloc(10); header[0] = 0x81; header[1] = 127; header.writeBigUInt64BE(BigInt(body.length), 2); }
+  socket.write(Buffer.concat([header, body]));
+}
+
 function requireIdempotencyKey(ctx: RequestContext): string { const key = ctx.headers['idempotency-key']; if (!key) throw new ServiceError(400, 'VALIDATION_FAILED', 'Idempotency-Key header is required'); return key; }
 async function mutation(runtime: AppRuntime, ctx: RequestContext, authContext: AuthContext, accountId: string | undefined, handler: () => Promise<{ statusCode: number; body: unknown }>): Promise<{ statusCode: number; body: unknown }> {
   const key = requireIdempotencyKey(ctx);

@@ -21,7 +21,7 @@
 | `S4-VS5A` 在线聊天读取与实时连接 | `PLANNED` | Messages route/controller/WS 契约已冻结 | Redis/WS、cursor 重连、未读、403/空、桌面/移动 |
 | `S4-VS5B` 在线聊天发送/附件/撤回 | `PLANNED` | Message 状态机和发送/图片/撤回 API 已冻结 | 持久化、对象存储、幂等、unknown/timeout、脱敏 |
 | `S4-VS5C` 人工接管与 AI 恢复 | `PLANNED` | handoff/release、版本和审计契约已冻结 | 非法转换、403/409、页面禁用、移动端 |
-| `S4-VS6A` Workspace 会话与 Run 首链路 | `PLANNED` | AgentSession/Run/Step/WS 契约已冻结 | Worker/Runtime、持久化、clientRunRef、游标重连 |
+| `S4-VS6A` Workspace 会话与 Run 首链路 | `PARTIALLY_VERIFIED` | AgentSession/Run/Step、Memory/Postgres Store、受控 Runtime、前端 `/workspace`、clientRunRef、WS cursor replay | 独立 Worker/Pi Runtime、真实 PostgreSQL smoke、浏览器桌面/移动截图、断线恢复人工复核 |
 | `S4-VS6B` Workspace Confirmation/Outbox | `PLANNED` | Confirmation/Outbox/恢复 API 已冻结 | Policy、幂等、租约、cancel/retry/recover |
 | `S4-VS7A` Settings API Key 配置 | `PLANNED` | CredentialStore CRUD/rotate/revoke/enable/disable 已冻结 | 加密复读、脱敏、审计、403/409；本片不做 reveal |
 | `S4-ENV-RECOVERY` | `BLOCKED` | Compose/健康检查/部分持久化已有证据 | 完整迁移回滚、Testcontainers、Redis/MinIO 重启和发布级恢复 |
@@ -54,5 +54,13 @@
 
 ## Git / 证据记录
 
-- 现有提交与验证记录保留在 `STATUS.md`；本轮仅更新计划、契约、风险、决策、评审和状态文档，未新增代码或伪造测试证据。
+### 2026-09-19：S4-VS6A 首链路实现（PARTIALLY_VERIFIED）
+
+- 已实现：`workspace.agent_sessions`、`workspace.runs`、`workspace.steps`、`workspace.task_contexts`、`workspace.run_events` 迁移；Memory/Postgres Store；服务端 Run/Step 状态迁移；`clientRunRef` 业务去重与 `Idempotency-Key` 独立；canonical session/run API；只读 WebSocket snapshot + cursor replay；前端 Workspace session list、composer、Run/Step timeline、重连和错误状态。
+- 已执行：`npm --workspace apps/api run test`、`npm --workspace apps/web run typecheck`、`npm --workspace apps/web run test`、`npm --workspace apps/web run build`、`git diff --check`。
+- 已覆盖：API session/run smoke、Run terminal、Step terminal、事件游标、重复 `clientRunRef`、幂等冲突、归档阻断、WS 101/snapshot/replay/无重复、`after=NaN`、Origin/认证/404 门禁。
+- 未关闭：独立 Worker/Pi Runtime、真实 PostgreSQL 迁移/复读、浏览器 Chrome/CDP 桌面与移动视觉证据、真实断线恢复人工复核、Confirmation/Outbox（留在 `S4-VS6B`）。
+- 回滚边界：停止新 Run enqueue、关闭 Workspace 路由和 WS 订阅，保留 Session/Run/Step/事件历史；迁移回滚前必须先确认没有后续数据依赖。
+
+- 现有提交与验证记录保留在 `STATUS.md`；本轮同步更新 Workspace 实现与阶段证据文档，所有测试结果均来自实际执行，未伪造测试证据。
 - 阶段 5 证据目录统一为 `docs/evidence/stage5/<slice-id>/`；尚未执行的切片不得提前创建“通过”截图、测试输出或回滚记录。

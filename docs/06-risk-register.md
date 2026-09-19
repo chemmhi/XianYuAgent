@@ -99,3 +99,8 @@
 | S5-RISK-024 | Workspace Run/Step/Confirmation/Outbox 状态可能被页面或 Runtime 直接改写 | P1 | 高 | 高风险动作不可审计、重复执行或无法人工恢复 | Workspace / 执行负责人 | 独立 controller、状态机、Policy→Confirmation→Outbox、worker lease 和 recover E2E | `S4-VS6A`、`S4-VS6B` | 开放，承接 R-006/R-009 |
 | S5-RISK-025 | Workspace 实时事件、unknown、cancel、retry 尚未在真实 Runtime 中形成可恢复证据 | P1 | 中 | Run 卡死、误重试或外部结果未知时无法判断最终状态 | Runtime / QA 负责人 | 真实 Worker/Runtime、超时/取消/重试、事件游标、人工恢复和日志指标通过 | `S4-VS6A`、`S4-VS6B` | 开放，承接 R-006 |
 | S5-RISK-026 | Settings API Key 配置若复用通用设置保存入口，可能泄露明文或覆盖其他凭证 | P1 | 高 | 凭证泄露、轮换失败覆盖旧密钥或跨域读取 | 安全 / 凭证负责人 | CredentialStore 唯一 owner、加密复读、脱敏 UI、轮换/启停/撤销审计和 403/409 E2E | `S4-VS7A` | 开放，承接 R-004/S3-I004 |
+
+### 2026-09-19 S4-VS6A 风险复核
+
+- `S5-RISK-024`：受控首链路已降低“页面直接改写 Run/Step 状态”的风险；服务端状态迁移、脱敏 ViewModel、controller cursor 去重和 API/WS smoke 已落地，但独立 Worker lease、Confirmation/Outbox 与真实 Runtime 仍未完成，风险保持开放。
+- `S5-RISK-025`：MemoryStore + 受控 Runtime 已证明事件追加、cursor replay、`after=NaN` 防护和基础权限门禁；真实 Runtime 的 unknown/timeout/cancel/retry、断线人工复核和生产级观测仍缺失，风险保持开放。
