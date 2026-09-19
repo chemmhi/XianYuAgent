@@ -80,6 +80,11 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
       setSessionCookies(response, result.csrfToken, result.session.id, config.cookieSecure);
       return success(ctx, { session: { id: result.session.id, expiresAt: result.session.expiresAt }, profile: { id: result.admin.id, email: result.admin.email, displayName: result.admin.displayName, role: result.admin.role }, auditRef: result.auditRef });
     } });
+    if (result.replayed) {
+      const sessionId = (result.body as { data?: { session?: { id?: string } } })?.data?.session?.id;
+      const csrfToken = sessionId ? auth.getCsrfToken(sessionId) : undefined;
+      if (sessionId && csrfToken) setSessionCookies(response, csrfToken, sessionId, config.cookieSecure);
+    }
     return { statusCode: result.statusCode, body: result.body };
   }
   if (ctx.path === '/api/v1/auth/password-login' && ctx.method === 'POST') {
