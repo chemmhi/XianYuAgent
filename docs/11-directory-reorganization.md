@@ -27,6 +27,8 @@ npm run compose:down
 
 `npm run dev` 会同时启动 API、Worker 和正式前端；Compose 当前负责 API、Worker、PostgreSQL、Redis 和 MinIO，前端仍由根 npm 命令启动。
 
+真实本地环境必须设置 `VITE_API_MODE=live` 和 `VITE_API_BASE_URL=http://localhost:8080`；否则正式前端会按 Vite 约定回退到 mock 模式。
+
 ## 迁移边界
 
 阶段 5 S4-VS1 的账号管理切片已迁移到 `apps/web/src/features/accounts/`。本次迁移不复制 `SellerAgent/src/App.tsx` 或 `SellerAgent/src/styles.css`，避免把原型超级宿主带入正式前端。

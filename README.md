@@ -23,6 +23,8 @@ npm install
 $env:XIANYU_QR_MODE = "real"
 $env:ALLOW_IN_MEMORY = "true"
 $env:COOKIE_SECURE = "false"
+$env:VITE_API_MODE = "live"
+$env:VITE_API_BASE_URL = "http://localhost:8080"
 npm run dev
 ```
 
