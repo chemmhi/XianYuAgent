@@ -7,6 +7,7 @@ import type { AccountVM } from '../types';
 import { AccountTable } from './AccountTable';
 import { AccountStateView } from './AccountStateView';
 import { AccountToolbar } from './AccountToolbar';
+import { CreateAccountModal } from './CreateAccountModal';
 import './accounts.css';
 
 export interface AccountsPageProps {
@@ -17,6 +18,7 @@ export function AccountsPage({ api: providedApi }: AccountsPageProps) {
   const api = useMemo(() => providedApi ?? createMockAccountsApi(), [providedApi]);
   const controller = useAccountsController({ api });
   const [qrAccountId, setQrAccountId] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
   const accounts = controller.state.data?.items ?? [];
   const total = controller.state.data?.total ?? 0;
   const metrics = summarize(accounts);
@@ -36,10 +38,10 @@ export function AccountsPage({ api: providedApi }: AccountsPageProps) {
       <div className="page-title">
         <div>
           <p className="eyebrow">Account Context</p>
-          <h1>账号管理</h1>
+          <h1>店铺 / 账号管理</h1>
           <p>查看账号连接状态、凭证引用和当前能力范围；二维码授权通过独立登录会话完成。</p>
         </div>
-        <span className="accounts-domain-scope">管理员账号范围</span>
+        <div className="page-title-actions"><span className="accounts-domain-scope">管理员账号范围</span><button className="btn primary" type="button" onClick={() => setCreateOpen(true)}>添加闲鱼账号</button></div>
       </div>
       <div className="kpi-grid three accounts-domain-kpis">
         <article className="card kpi-card"><div className="kpi-label">已绑定账号</div><div className="kpi-value">{total}</div><div className="kpi-delta"><span className="tone-ok">{metrics.online} 个在线</span><small>当前可用连接</small></div></article>
@@ -59,6 +61,7 @@ export function AccountsPage({ api: providedApi }: AccountsPageProps) {
         <AccountStateView phase={controller.state.phase} error={controller.state.error} onRetry={controller.reload} />
       </article>
       {qrAccount && <QrLoginModal account={qrAccount} controller={qrController} onClose={() => setQrAccountId(null)} />}
+      {createOpen && <CreateAccountModal api={api} onClose={() => setCreateOpen(false)} onCreated={(account) => { setCreateOpen(false); setQrAccountId(account.id); void controller.reload(); }} />}
     </section>
   );
 }

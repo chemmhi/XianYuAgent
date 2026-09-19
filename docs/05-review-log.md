@@ -124,5 +124,5 @@
 | S5-R2 | 前端 / API 适配 | 账号只读页面按 AccountVM/Controller/StateBoundary 拆分，接入 canonical `/api/v1/accounts` envelope | account_frontend_recon + root | PASS（迁移复核中） | `apps/web/src/features/accounts/`、`apps/web/src/features/accounts/api.test.ts`、`npm run typecheck:web`、`npm run test:web` |
 | S5-R3 | 运维 / 发布 | Compose 拓扑与迁移文件可解析，容器实跑与 PostgreSQL/Redis 持久化验证 | root | PARTIAL / BLOCKED | `docker compose config --quiet` 通过；Docker Desktop Linux engine 未启动，`docker compose up` 未完成 |
 
-阶段 5 当前结论：允许继续 S4-VS1 账号管理，但不得宣称 PostgreSQL/Redis 容器、QR/login-session、闲鱼真实 adapter、E2E 和视觉回归已完成；商品、卡券、订单仍冻结。
+阶段 5 当前结论：允许继续 S4-VS1 账号管理；本机 Chrome + CDP、内存 API、QR stub 的账号创建与授权入口 E2E 已通过，并已生成 1440×900 与 390×844 截图。仍不得宣称 PostgreSQL/Redis 容器、真实闲鱼扫码成功、真实凭证落库或完整视觉回归已完成；商品、卡券、订单仍冻结。
 - 2026-09-19 S5-R4：QR/login-session 复核为 PARTIAL PASS。后端真实二维码生成、轮询与取消通过；前端二维码展示、状态轮询、重试/取消、成功后刷新已通过构建与单测。人工扫码成功及外部凭证落库尚未完成，不能关闭该门禁。

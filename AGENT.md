@@ -19,7 +19,7 @@
 
 - 没有用固定 `1440×900` 和 `390×844` viewport 对比正式前端与视觉基线。
 - 没有保存基线截图、实现截图、逐项偏差记录和复核结论。
-- 没有 Playwright 或等价真实浏览器端到端测试。
+- 事故发生时没有真实浏览器端到端测试；当前正式前端使用本机 Chrome + Chrome DevTools Protocol，明确不安装或执行 Playwright。
 - 没有从真实前端入口走到真实 API、测试数据、持久化结果的跨层验收。
 - 现有测试只有 TypeScript 检查、Vitest 单测/契约测试、API smoke、构建和 Compose 配置检查；这些不能替代视觉回归和端到端验收。
 - 没有实际对照 `SellerAgent` 原型和 `xianyu-admin-design-style/assets/design-tokens.json` 逐项检查颜色、字号、间距、圆角、阴影、图标、状态和响应式断点。
@@ -105,10 +105,10 @@ git diff --check
 ## 当前纠偏结论
 
 - 当前 `apps/web` 账号页视觉门禁：`FAIL / BLOCKED`。
-- 当前 `apps/web` 账号页真实浏览器 E2E：未完成。
+- 当前 `apps/web` 账号页真实浏览器 E2E：本机 Chrome + CDP 已完成账号创建、真实 API、页面可见持久化结果和二维码授权入口验证；容器级持久化、真实闲鱼扫码成功和完整视觉回归仍未完成。
 - 当前 `apps/web` 视觉回归：未完成。
 - 当前已通过的类型检查、Vitest、API smoke、构建和 Compose 配置，只能作为基础健康证据，不能替代以上门禁。
-- 后续必须重新按视觉基线重做正式页面，再补齐 Playwright/E2E、固定 viewport 截图和偏差复核；不得在当前通用壳上继续堆叠“完成”结论。
+- 后续必须继续按视觉基线补齐固定 viewport 截图和逐项偏差复核；浏览器 E2E 统一使用本机 Chrome + CDP，不得重新引入 Playwright，也不得在证据不足时堆叠“完成”结论。
 
 ## 代理行为要求
 

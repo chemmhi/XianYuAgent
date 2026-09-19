@@ -1,71 +1,72 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiMode } from '../api';
 import { createHttpClient } from '../api/http';
 import { createAccountsApi } from '../features/accounts/api';
 import { AccountsPage } from '../features/accounts/components/AccountsPage';
+import { navItems, pathForPage, type PageKey } from './navigation';
 
-type Route = '/dashboard' | '/accounts' | '/products' | '/coupons' | '/orders';
+function pageFromPath(pathname: string): PageKey {
+  const page = pathname.replace(/^\//, '') as PageKey;
+  return navItems.some((item) => item.key === page) ? page : 'dashboard';
+}
 
-const routes: Array<{ path: Route; label: string }> = [
-  { path: '/dashboard', label: '仪表盘' },
-  { path: '/accounts', label: '账号管理' },
-  { path: '/products', label: '商品管理' },
-  { path: '/coupons', label: '卡券管理' },
-  { path: '/orders', label: '订单管理' },
-];
-
-function normalizeRoute(pathname: string): Route {
-  return routes.some((route) => route.path === pathname) ? pathname as Route : '/dashboard';
+function iconFor(name: string) {
+  const paths: Record<string, string> = {
+    grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
+    message: 'M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v7a2.5 2.5 0 0 1-2.5 2.5H11l-4.5 4v-4h0A2.5 2.5 0 0 1 4 12.5z',
+    user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0',
+    inbox: 'M4 5h16v14H4zM4 14h4l1.5 2h5L16 14h4',
+    box: 'm12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Zm0 9 8-4.5M12 12v9M4 7.5 12 12',
+    ticket: 'M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3a2 2 0 1 0 0 4v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3a2 2 0 1 0 0-4V7Zm8-2v14',
+    cart: 'M4 5h2l1.5 10h9.5l2-7H7m2 12h.01M17 20h.01',
+    gear: 'M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm0-5v2m0 13v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M3 12h2m14 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42',
+  };
+  return <svg aria-hidden="true" viewBox="0 0 24 24" className="nav-icon"><path d={paths[name] ?? paths.grid} /></svg>;
 }
 
 export default function App() {
-  const [route, setRoute] = useState<Route>(() => normalizeRoute(window.location.pathname));
+  const [page, setPage] = useState<PageKey>(() => pageFromPath(window.location.pathname));
   const accountsApi = useMemo(() => {
     if (apiMode !== 'live') return undefined;
-    const transport = createHttpClient({
-      baseUrl: import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080',
-      getToken: () => window.localStorage.getItem('auth_token'),
-    });
+    const transport = createHttpClient({ baseUrl: import.meta.env.VITE_API_BASE_URL ?? '', credentials: 'include' });
     return createAccountsApi({ get: transport.get, post: transport.post });
   }, []);
 
-  const navigate = (nextRoute: Route) => {
-    window.history.pushState({}, '', nextRoute);
-    setRoute(nextRoute);
-  };
+  useEffect(() => {
+    const handlePopState = () => setPage(pageFromPath(window.location.pathname));
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  function navigate(next: PageKey) {
+    const path = pathForPage(next);
+    window.history.pushState({}, '', path);
+    setPage(next);
+  }
+
+  const activeNav = navItems.find((item) => item.key === page) ?? navItems[0];
 
   return (
-    <div className="web-shell">
-      <header className="web-header">
-        <div>
-          <strong>XianyuSellerAgent Admin</strong>
-          <span>正式前端应用 · {apiMode === 'live' ? 'Live API' : 'Mock API'}</span>
+    <div className="app-viewport">
+      <div className="desktop-shell">
+        <aside className="sidebar">
+          <div className="brand-block"><div className="brand-mark">Y</div><div className="brand-copy"><strong>XianyuSellerAgent</strong><span>运营控制台</span></div></div>
+          <div className="side-section">运营台</div>
+          <nav className="side-nav" aria-label="主导航">
+            {navItems.map((item) => <button key={item.key} type="button" className={page === item.key ? 'active' : ''} aria-current={page === item.key ? 'page' : undefined} onClick={() => navigate(item.key)}>{iconFor(item.icon)}<span>{item.label}</span><small>{item.sub}</small></button>)}
+          </nav>
+          <div className="sidebar-bottom"><div className="agent-card"><span className="online-dot" /> <strong>Agent Runtime</strong><small>独立服务 · 正常</small></div><div className="sidebar-user"><div className="avatar">管</div><div><strong>运营管理员</strong><span>admin@example.com</span></div></div></div>
+        </aside>
+        <div className="desktop-body">
+          <header className="topbar"><div className="topbar-copy"><strong>{activeNav.label}</strong><span>{activeNav.sub} · 管理员工作空间</span></div><label className="search-box"><span aria-hidden="true">⌕</span><input aria-label="全局搜索" placeholder="搜索账号、商品或订单" /></label><div className="top-actions"><button className="icon-button" type="button" aria-label="通知"><span aria-hidden="true">♢</span><b>3</b></button><div className="user-chip"><div className="avatar">管</div><span>管理员</span></div></div></header>
+          <main>{page === 'accounts' ? <AccountsPage api={accountsApi} /> : <PlaceholderPage page={page} />}</main>
         </div>
-        <span className="env-badge">{apiMode}</span>
-      </header>
-      <div className="web-layout">
-        <nav className="web-nav" aria-label="主导航">
-          {routes.map((item) => (
-            <button key={item.path} className={route === item.path ? 'active' : ''} onClick={() => navigate(item.path)}>
-              {item.label}
-            </button>
-          ))}
-        </nav>
-        <main className="web-main">
-          {route === '/accounts' ? <AccountsPage api={accountsApi} /> : <PlaceholderPage route={route} />}
-        </main>
       </div>
     </div>
   );
 }
 
-function PlaceholderPage({ route }: { route: Route }) {
-  const item = routes.find((candidate) => candidate.path === route)!;
-  return (
-    <section className="page-placeholder">
-      <p className="eyebrow">正式前端路由</p>
-      <h1>{item.label}</h1>
-      <p>该页面将在对应纵向切片中实现。当前已接入账号管理切片。</p>
-    </section>
-  );
+function PlaceholderPage({ page }: { page: PageKey }) {
+  const item = navItems.find((candidate) => candidate.key === page) ?? navItems[0];
+  return <section className="page-stack page-placeholder"><p className="eyebrow">{item.sub}</p><h1>{item.label}</h1><p>该页面将在对应纵向切片中实现。账号管理切片已接入真实 API 适配和二维码授权流程。</p></section>;
 }

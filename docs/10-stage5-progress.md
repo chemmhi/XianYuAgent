@@ -22,7 +22,7 @@
 
 - Docker Desktop Linux engine 未启动，无法完成 PostgreSQL/Redis/MinIO 容器实跑、迁移持久化和 Testcontainers 验证。
 - QR session 与 account login-session 状态机、连接刷新、闲鱼 adapter 协议探针和真实凭证复现仍未实现。
-- 继续实现顺序：账号写入/详情/连接 → QR/login-session → scope/policy/CredentialRef 最小管理 → Playwright 1440×900 与 390×844 → S4-VS1 复审后再进入商品切片。
+- 继续实现顺序：账号写入/详情/连接 → QR/login-session → scope/policy/CredentialRef 最小管理 → 本机 Chrome 390×844 补充路径与视觉偏差复核 → 再进入商品切片；1440×900 截图已执行。
 
 ## Git 记录
 
@@ -34,4 +34,5 @@
 - `2de5ff7`：接通账号详情与连接状态读取；外部闲鱼结果未知时返回明确 `unknown`/`ADAPTER_UNKNOWN`，不伪造成功。
 - `325161f`：落地账号登录会话持久化状态机与 QR session 查询/取消/续期入口，当前只推进 waiting/expired/cancelled，不伪造外部扫码成功。
 - 2026-09-19 S4-VS1 增量：真实 `XIANYU_QR_MODE=real` 集成探针已通过创建、二维码 Data URL 返回、轮询 waiting 与取消；`apps/web` 已接入 QR modal、轮询、重试、取消和成功后刷新。自动化测试继续使用 stub，人工扫码成功、Cookie 落库与 `connection/verify` 仍待真实账号复核。`verification_required` 已保留为独立可恢复状态。
+- 2026-09-19 前端增量：正式 `apps/web` 账号页按 design token 重建控制台壳层，补充账号创建表单；本机 Chrome + CDP E2E 已通过“创建账号 → API → 页面可见持久化账号 → 二维码授权弹窗”。
 - Git 提交：`c04b189`（`feat(阶段5): 接通闲鱼二维码登录与凭证校验`）。

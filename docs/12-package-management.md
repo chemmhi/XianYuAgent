@@ -29,9 +29,12 @@ npm run typecheck
 npm test
 npm run build
 npm run verify
+npm run test:e2e:chrome
 ```
 
 `npm run dev` 使用成熟的 `concurrently` 同时启动 API、Worker 和正式前端；脚本只作为命令入口，不承担自定义进程编排实现。
+
+`npm run test:e2e:chrome` 使用本机 Chrome + Chrome DevTools Protocol，验证真实前端入口、Vite 代理、API、Session/CSRF、账号创建、持久化可见结果、二维码授权弹窗，并保存 1440×900 与 390×844 截图证据；不安装 Playwright。若 Chrome 不在默认路径，可设置 `CHROME_PATH`。
 
 ## 变更规则
 

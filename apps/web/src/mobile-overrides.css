@@ -1,0 +1,14 @@
+@media (max-width: 900px) {
+  .topbar {
+    flex-basis: auto;
+    flex-shrink: 1;
+  }
+
+  .side-nav {
+    scrollbar-width: none;
+  }
+
+  .side-nav::-webkit-scrollbar {
+    display: none;
+  }
+}

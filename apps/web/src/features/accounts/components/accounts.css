@@ -1,4 +1,11 @@
 .accounts-domain { min-width: 0; }
+.badge { display: inline-flex; align-items: center; min-height: 22px; padding: 0 8px; border-radius: 4px; font-size: 10px; font-weight: 800; white-space: nowrap; }
+.badge-ok { color: var(--success); background: var(--success-bg); }
+.badge-info { color: var(--info); background: var(--soft-blue-bg); }
+.badge-warn { color: var(--warn); background: var(--warn-bg); }
+.badge-danger { color: var(--danger); background: var(--danger-bg); }
+.badge-gray { color: var(--muted); background: #F1F5F9; }
+.card-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .accounts-domain-scope { align-self: flex-start; padding: 8px 11px; border: 1px solid var(--border); border-radius: 999px; background: #fff; color: var(--muted); font-size: 11px; font-weight: 700; }
 .accounts-domain-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .accounts-domain-panel { padding: 0; overflow: hidden; }
@@ -57,4 +64,5 @@
   .accounts-domain-kpis { grid-template-columns: 1fr; }
   .accounts-domain-row { grid-template-columns: minmax(190px, 1.7fr) .8fr .9fr .8fr .9fr 1fr auto; min-width: 940px; }
   .accounts-domain-row-actions { grid-column: auto; }
+  .accounts-domain-table { min-width: 0; overflow-x: auto; }
 }

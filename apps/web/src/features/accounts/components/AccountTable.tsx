@@ -27,7 +27,7 @@ export function AccountTable({ accounts, onReauthorize }: { accounts: AccountVM[
           <span role="cell"><span className={account.aiEnabled ? 'accounts-domain-enabled' : 'accounts-domain-muted'}>{account.aiEnabled ? '已启用' : '未启用'}</span></span>
           <span role="cell"><AccountCredentialBadge state={account.credentialState} /></span>
           <span role="cell" className="accounts-domain-updated">{formatUpdatedAt(account.updatedAt)}</span>
-          <span role="cell" className="accounts-domain-row-actions"><button className="btn ghost" type="button" onClick={() => onReauthorize(account)}>扫码授权</button></span>
+          <span role="cell" className="accounts-domain-row-actions"><button className={account.status === 'connected' ? 'btn ghost' : 'btn primary'} type="button" onClick={() => onReauthorize(account)}>{account.status === 'connected' ? '重新授权' : '扫码授权'}</button></span>
         </div>
       ))}
     </div>

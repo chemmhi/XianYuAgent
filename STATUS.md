@@ -1,14 +1,14 @@
 # XianyuSellerAgent 项目状态
 
 - 项目阶段：5
-- 阶段状态：进行中（S4-VS1 账号管理已完成 ENV-0 与前端只读首片，继续补齐真实账号写入/登录会话）
+- 阶段状态：进行中（S4-VS1 账号管理已完成前端创建、列表筛选、QR 授权入口和本机 Chrome/CDP 真实跨层验证，继续补齐真实登录成功回调与容器持久化）
 - 最近一次通过门禁：阶段 5 ENV-0 / 2026-09-19
 - 当前目标：完成 S4-VS1 账号管理的真实读写、QR/login-session、连接刷新与审计闭环
 - 已完成范围：阶段 0 范围门禁；阶段 1 架构与模块边界；阶段 2 数据模型、数据库表设计、关系基数、状态机、API envelope、幂等、鉴权、敏感交付、迁移边界
-- 未完成范围：闲鱼真实 adapter/凭证复现、PostgreSQL/Redis 容器实跑、QR/login-session 完整流程、Playwright/E2E 和视觉回归
+- 未完成范围：闲鱼真实 adapter/凭证复现、PostgreSQL/Redis 容器实跑、真实扫码成功回调、完整账号状态机和与正式设计基线的完整偏差复核
 - 未解决风险：R-001/P1、R-002/P1、R-005/P2、R-006/P2、R-007/P2、R-008/P1、R-009/P1、R-011/P1、S3-I001/P1、S3-I002/P1、S3-I003/P1、S3-I004/P1、S3-I005/P1、S3-I006/P1、S3-I007/P1、S3-I008/P1、S4-I001/P1、S4-I002/P1、S4-I003/P1、S4-I004/P1、S4-I005/P1、S4-I006/P1、S4-I007/P2；S3-I009/S3-I010 已关闭，S4 风险转入阶段 5 实现前验证
 - 待复审问题：S3-R5 为超出当前范围的实现审计；S3-R6 设计范围已澄清；S1-I004 保持 P2 跟进项；阶段 4 计划门禁已通过
-- 下一步：补齐 S4-VS1 账号写入与登录会话状态机；Docker daemon 可用后重跑 Compose、迁移和 Testcontainers 验证
+- 下一步：补齐 S4-VS1 真实登录成功回调、连接刷新和审计闭环；Docker daemon 可用后重跑 Compose、迁移和 Testcontainers 验证
 
 ## 当前证据
 
@@ -24,9 +24,12 @@
 - `server/npm test`：已通过，`env0 smoke passed`；覆盖 health、bootstrap、Session/CSRF、幂等重放/冲突、账号创建与账号范围读取；
 - `SellerAgent/npm run test:integration`：已通过，真实启动 server 内存运行时并通过 canonical envelope 读取账号列表；
 - `docker compose config --quiet`：已通过；`docker compose up` 尚未执行成功，阻断原因为当前 Docker Desktop Linux engine 未启动；
-- `docs/evidence/stage5/S4-VS1/test-baseline.md`：已补充前端单元、契约、真实内存跨层验证及容器/E2E 未完成边界；
+- `npm run verify`：已通过；包含类型检查、API smoke、11 个前端测试、构建、本机 Chrome/CDP E2E、1440×900 与 390×844 截图生成、Compose 配置和 diff 检查。
+- `npm --workspace apps/web run test:e2e:chrome`：已通过；本机 Chrome 真实浏览器完成添加账号、真实 API、页面可见持久化结果和二维码授权弹窗验证；不安装或执行 Playwright。
+- `docs/evidence/stage5/S4-VS1/test-baseline.md`：已补充前端单元、契约、真实内存跨层验证、Chrome/CDP E2E、固定 viewport 截图及容器/E2E 未完成边界；
+- `docs/evidence/stage5/S4-VS1/screenshots/`：保存 `accounts-desktop-1440x900.png` 与 `accounts-mobile-390x844.png`；
 - `SellerAgent/npm test`、`SellerAgent/npm run build`、`git diff --check`：仅作为原型健康检查，不作为阶段 3 组件设计证据；
-- 高保真原型和现有源码：仅作为视觉与背景参考，不作为阶段 3 组件拆分依据；
+- 高保真原型和现有源码：仅作为视觉与背景参考，不作为阶段 3 组件拆分依据；正式前端账号页已独立按 design token 重建壳层与账号切片。
 - 以上证据不证明真实业务链路已完成，阶段 3 以文档化设计契约和独立设计复审为准。
 
 - canonical 设计同步：FirstRun 使用 `POST /api/v1/auth/bootstrap`；消息人工接管使用 `POST /api/v1/conversations/{id}/handoff`，恢复 AI 使用 `POST /api/v1/conversations/{id}/release`；统一字段为 `BootstrapAdminInput/Output`、`HandoffConversationInput`、`ReleaseConversationInput`、`ConversationHandlingOutput`，状态字段为 `handlingMode`，版本字段为 `expectedVersion`。

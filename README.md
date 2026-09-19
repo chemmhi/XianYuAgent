@@ -52,8 +52,11 @@ npm run dev:web
 npm run typecheck
 npm run build
 npm test
+npm run test:e2e:chrome
 npm run verify
 ```
+
+前端真实浏览器 E2E 使用本机已安装的 Google Chrome，通过 Chrome DevTools Protocol 执行；项目不安装或引入 Playwright。
 
 Docker Compose：
 

@@ -150,7 +150,7 @@ pending、running、retrying、succeeded、failed、dead_letter、cancelling、c
 - 异步：PostgreSQL Outbox + 独立 Worker；
 - 对象存储：S3 兼容接口，开发环境可使用 MinIO；
 - 契约：OpenAPI + JSON Schema；
-- 测试：Vitest、Supertest、Playwright、Testcontainers；
+- 测试：Vitest、Supertest、本机 Chrome + Chrome DevTools Protocol、Testcontainers；前端 E2E 不安装 Playwright。
 - 本地编排：Docker Compose。
 
 ### 7.2 当前假设 / 已决策待验证项

@@ -17,6 +17,7 @@ export interface AccountsApiTransport {
 
 export interface AccountsApi {
   list(filters?: AccountListFilters): Promise<AccountsPageVM>;
+  createAccount(input: { platform: 'xianyu'; sellerRef: string; displayName?: string }): Promise<AccountVM>;
   getDetail(accountId: string): Promise<AccountVM>;
   getConnection(accountId: string): Promise<AccountConnectionVM>;
   createQrSession(accountId: string): Promise<QrLoginSessionVM>;
@@ -181,6 +182,13 @@ export function createAccountsApi(transport: AccountsApiTransport): AccountsApi 
       const rawPayload = await transport.get<CanonicalAccountsPayload | ApiEnvelope<CanonicalAccountsPayload>>(`/api/v1/accounts${queryString(filters)}`);
       return toCanonicalPage(unwrapEnvelope(rawPayload));
     },
+    async createAccount(input) {
+      const post = requirePost(transport);
+      const rawPayload = await post<CanonicalAccountResponse | ApiEnvelope<CanonicalAccountResponse>>('/api/v1/accounts', input, {
+        headers: { 'Idempotency-Key': `account-create-${input.sellerRef}-${Date.now()}` },
+      });
+      return toAccountVM(unwrapEnvelope(rawPayload));
+    },
     async getDetail(accountId) {
       const rawPayload = await transport.get<CanonicalAccountResponse | ApiEnvelope<CanonicalAccountResponse>>(`/api/v1/accounts/${encodeURIComponent(accountId)}`);
       return toAccountVM(unwrapEnvelope(rawPayload));
@@ -277,6 +285,25 @@ export function createMockAccountsApi(seed: AccountSummary[] = [
         totalPages: Math.max(1, Math.ceil(filtered.length / pageSize)),
       };
     },
+    async createAccount(input) {
+      if (accounts.some((account) => account.sellerRef === input.sellerRef)) throw new Error('ACCOUNT_ALREADY_EXISTS');
+      const account: AccountVM = {
+        id: `account-${Date.now()}`,
+        platform: 'xianyu',
+        sellerRef: input.sellerRef,
+        displayName: input.displayName?.trim() || input.sellerRef,
+        remark: '新建账号 · 待扫码授权',
+        status: 'pending',
+        connection: { status: 'unknown' },
+        enabled: true,
+        aiEnabled: false,
+        credentialState: 'missing',
+        version: 1,
+        updatedAt: new Date().toISOString(),
+      };
+      accounts.unshift(account);
+      return account;
+    },
     async getDetail(accountId) {
       const account = accounts.find((item) => item.id === accountId);
       if (!account) throw new Error('account not found');
@@ -316,6 +343,7 @@ export function createLegacyAccountsApi(legacyApi: { list(query?: { page?: numbe
         items: result.items.map(fromLegacySummary),
       };
     },
+    async createAccount() { throw new Error('ACCOUNT_CREATE_UNAVAILABLE'); },
     async getDetail(accountId) {
       const result = await legacyApi.list({ search: accountId });
       const account = result.items.find((item) => item.id === accountId);

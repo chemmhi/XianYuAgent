@@ -46,7 +46,7 @@ Knowledge、Review、Trace / Replay / Eval 不作为本轮页面和正式领域�
 | 契约 | OpenAPI + JSON Schema | HTTP DTO、Manifest、Capability 输入输出可校验 |
 | 日志 | Pino | 结构化日志，禁止记录系统凭证明文 |
 | 可观测性 | OpenTelemetry | Trace、Metric、Log 关联 |
-| 测试 | Vitest + Supertest + Playwright + Testcontainers | 覆盖单元、集成、跨层和真实用户流程 |
+| 测试 | Vitest + Supertest + 本机 Chrome/CDP + Testcontainers | 覆盖单元、集成、跨层和真实用户流程；前端 E2E 不安装 Playwright |
 | 本地部署 | Docker Compose | API、Worker、PostgreSQL、Redis 和对象存储统一启动 |
 
 ## 3. 架构原则

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createAccountsApi } from './api';
+import { createAccountsApi, createMockAccountsApi } from './api';
 
 describe('accounts canonical API adapter', () => {
   it('unwraps the shared API envelope before mapping account rows', async () => {
@@ -73,5 +73,40 @@ describe('accounts canonical API adapter', () => {
     expect(calls[0]).toMatchObject({ path: '/api/v1/auth/qr-sessions' });
     expect(calls[0]?.headers).toEqual(expect.objectContaining({ 'Idempotency-Key': expect.any(String) }));
     expect(calls[1]?.path).toBe('/api/v1/auth/qr-sessions/qr-session-1?accountId=account-1');
+  });
+
+  it('creates an account through the canonical mutation and maps the response', async () => {
+    const calls: Array<{ path: string; body?: unknown; headers?: HeadersInit }> = [];
+    const api = createAccountsApi({
+      async get<T>(_path: string) { throw new Error('unexpected GET'); },
+      async post<T>(path: string, body?: unknown, init?: RequestInit) {
+        calls.push({ path, body, headers: init?.headers });
+        return {
+          success: true,
+          data: {
+            id: 'account-new',
+            sellerRef: 'seller-new',
+            displayName: '新店铺',
+            status: 'pending',
+            connection: { status: 'unknown' },
+            credentialState: 'missing',
+          },
+        } as T;
+      },
+    });
+
+    const created = await api.createAccount({ platform: 'xianyu', sellerRef: 'seller-new', displayName: '新店铺' });
+
+    expect(created).toMatchObject({ id: 'account-new', displayName: '新店铺', status: 'pending', credentialState: 'missing' });
+    expect(calls[0]).toMatchObject({ path: '/api/v1/accounts', body: { platform: 'xianyu', sellerRef: 'seller-new', displayName: '新店铺' } });
+    expect(calls[0]?.headers).toEqual(expect.objectContaining({ 'Idempotency-Key': expect.any(String) }));
+  });
+
+  it('adds a mock account and rejects duplicate seller references', async () => {
+    const api = createMockAccountsApi([]);
+    const created = await api.createAccount({ platform: 'xianyu', sellerRef: 'seller-new', displayName: '新店铺' });
+    expect((await api.list()).items).toHaveLength(1);
+    expect(created.status).toBe('pending');
+    await expect(api.createAccount({ platform: 'xianyu', sellerRef: 'seller-new' })).rejects.toThrow('ACCOUNT_ALREADY_EXISTS');
   });
 });
