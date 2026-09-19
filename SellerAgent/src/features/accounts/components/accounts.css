@@ -10,7 +10,7 @@
 .accounts-domain-search input { width: 210px; }
 .accounts-domain-total { color: var(--sub); font-size: 11px; white-space: nowrap; }
 .accounts-domain-table { display: grid; min-width: 760px; overflow-x: auto; }
-.accounts-domain-row { display: grid; grid-template-columns: minmax(210px, 1.7fr) .75fr .9fr .8fr .9fr 1fr; gap: 12px; align-items: center; min-height: 64px; padding: 11px 18px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.accounts-domain-row { display: grid; grid-template-columns: minmax(210px, 1.7fr) .75fr .9fr .8fr .9fr 1fr auto; gap: 12px; align-items: center; min-height: 64px; padding: 11px 18px; border-bottom: 1px solid var(--border); font-size: 12px; }
 .accounts-domain-row:last-child { border-bottom: 0; }
 .accounts-domain-head { min-height: 40px; background: var(--bg); color: var(--sub); font-size: 11px; font-weight: 800; }
 .accounts-domain-account-cell { display: flex; align-items: center; gap: 9px; min-width: 0; }
@@ -21,6 +21,8 @@
 .accounts-domain-enabled { color: var(--success); font-weight: 700; }
 .accounts-domain-muted { color: var(--sub); }
 .accounts-domain-updated { color: var(--sub); font-size: 10px; font-variant-numeric: tabular-nums; }
+.accounts-domain-row-actions { display: flex; justify-content: flex-end; }
+.accounts-domain-row-actions .btn { white-space: nowrap; }
 .accounts-domain-state { display: grid; place-items: center; gap: 6px; min-height: 210px; padding: 28px; color: var(--sub); text-align: center; }
 .accounts-domain-state strong { color: var(--text); font-size: 13px; }
 .accounts-domain-state span { font-size: 11px; }
@@ -29,10 +31,30 @@
 .accounts-domain-skeleton { width: 92%; height: 38px; border-radius: 8px; background: linear-gradient(90deg, var(--bg), #fff, var(--bg)); background-size: 200% 100%; animation: accounts-domain-shimmer 1.4s ease-in-out infinite; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 @keyframes accounts-domain-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.qr-login-modal { width: min(460px, calc(100vw - 32px)); }
+.qr-login-view { display: grid; gap: 14px; }
+.qr-login-account { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.qr-login-account strong, .qr-login-account small { display: block; }
+.qr-login-account small { margin-top: 3px; color: var(--sub); font-size: 10px; }
+.qr-login-status-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.qr-login-expiry { color: var(--sub); font-size: 11px; }
+.qr-login-code { display: grid; place-items: center; min-height: 260px; padding: 14px; border: 1px dashed var(--border); border-radius: 12px; background: #fff; }
+.qr-login-code img { width: min(240px, 100%); aspect-ratio: 1; image-rendering: pixelated; }
+.qr-login-placeholder { display: grid; gap: 5px; place-items: center; min-height: 220px; color: var(--sub); text-align: center; }
+.qr-login-placeholder strong { color: var(--text); font-size: 13px; }
+.qr-login-placeholder span, .qr-login-state span, .qr-login-success span, .qr-login-error span { color: var(--sub); font-size: 11px; line-height: 1.5; }
+.qr-login-link { color: var(--link); font-size: 11px; text-align: center; }
+.qr-login-state, .qr-login-success, .qr-login-error { display: grid; gap: 8px; justify-items: center; padding: 22px 14px; border-radius: 10px; background: var(--bg); text-align: center; }
+.qr-login-state strong, .qr-login-success strong, .qr-login-error strong { color: var(--text); font-size: 13px; }
+.qr-login-success { border: 1px solid var(--success-border); background: var(--success-bg); }
+.qr-login-error { border: 1px solid rgba(180,35,24,.18); background: var(--danger-bg); }
+.qr-login-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 @media (max-width: 900px) {
   .accounts-domain-toolbar { align-items: stretch; flex-direction: column; }
   .accounts-domain-toolbar-actions { justify-content: stretch; }
   .accounts-domain-search { flex: 1; }
   .accounts-domain-search input { width: 100%; }
   .accounts-domain-kpis { grid-template-columns: 1fr; }
+  .accounts-domain-row { grid-template-columns: minmax(190px, 1.7fr) .8fr .9fr .8fr .9fr 1fr auto; min-width: 940px; }
+  .accounts-domain-row-actions { grid-column: auto; }
 }

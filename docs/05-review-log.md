@@ -125,3 +125,4 @@
 | S5-R3 | 运维 / 发布 | Compose 拓扑与迁移文件可解析，容器实跑与 PostgreSQL/Redis 持久化验证 | root | PARTIAL / BLOCKED | `docker compose config --quiet` 通过；Docker Desktop Linux engine 未启动，`docker compose up` 未完成 |
 
 阶段 5 当前结论：允许继续 S4-VS1 账号管理，但不得宣称 PostgreSQL/Redis 容器、QR/login-session、闲鱼真实 adapter、E2E 和视觉回归已完成；商品、卡券、订单仍冻结。
+- 2026-09-19 S5-R4：QR/login-session 复核为 PARTIAL PASS。后端真实二维码生成、轮询与取消通过；前端二维码展示、状态轮询、重试/取消、成功后刷新已通过构建与单测。人工扫码成功及外部凭证落库尚未完成，不能关闭该门禁。

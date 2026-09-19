@@ -1,6 +1,8 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createAccountsApi, createMockAccountsApi, type AccountsApi } from '../api';
 import { useAccountsController } from '../controller';
+import { useQrLoginController } from '../qr-login/controller';
+import { QrLoginModal } from '../qr-login/components/QrLoginModal';
 import type { AccountVM } from '../types';
 import { AccountTable } from './AccountTable';
 import { AccountStateView } from './AccountStateView';
@@ -14,9 +16,20 @@ export interface AccountsPageProps {
 export function AccountsPage({ api: providedApi }: AccountsPageProps) {
   const api = useMemo(() => providedApi ?? createMockAccountsApi(), [providedApi]);
   const controller = useAccountsController({ api });
+  const [qrAccountId, setQrAccountId] = useState<string | null>(null);
   const accounts = controller.state.data?.items ?? [];
   const total = controller.state.data?.total ?? 0;
   const metrics = summarize(accounts);
+  const qrAccount = qrAccountId ? accounts.find((account) => account.id === qrAccountId) ?? null : null;
+  const qrController = useQrLoginController({ api, accountId: qrAccountId ?? '', enabled: Boolean(qrAccountId) });
+
+  useEffect(() => {
+    if (qrController.model.phase === 'succeeded') void controller.reload();
+  }, [controller.reload, qrController.model.phase]);
+
+  useEffect(() => {
+    if (qrAccountId) void qrController.start();
+  }, [qrAccountId, qrController.start]);
 
   return (
     <section className="page-stack accounts-domain" data-accounts-domain>
@@ -24,7 +37,7 @@ export function AccountsPage({ api: providedApi }: AccountsPageProps) {
         <div>
           <p className="eyebrow">Account Context</p>
           <h1>账号管理</h1>
-          <p>查看账号连接状态、凭证引用和当前能力范围。真实账号写操作将在后续切片接入。</p>
+          <p>查看账号连接状态、凭证引用和当前能力范围；二维码授权通过独立登录会话完成。</p>
         </div>
         <span className="accounts-domain-scope">管理员账号范围</span>
       </div>
@@ -42,9 +55,10 @@ export function AccountsPage({ api: providedApi }: AccountsPageProps) {
           onStatusChange={(status) => controller.setFilters((previous) => ({ ...previous, status, page: 1 }))}
           onRefresh={controller.reload}
         />
-        {controller.state.phase === 'success' && <AccountTable accounts={accounts} />}
+        {controller.state.phase === 'success' && <AccountTable accounts={accounts} onReauthorize={(account) => setQrAccountId(account.id)} />}
         <AccountStateView phase={controller.state.phase} error={controller.state.error} onRetry={controller.reload} />
       </article>
+      {qrAccount && <QrLoginModal account={qrAccount} controller={qrController} onClose={() => setQrAccountId(null)} />}
     </section>
   );
 }

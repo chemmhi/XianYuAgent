@@ -1,7 +1,7 @@
 import { AccountConnectionBadge, AccountCredentialBadge, AccountStatusBadge } from './AccountStatusBadge';
 import type { AccountVM } from '../types';
 
-export function AccountTable({ accounts }: { accounts: AccountVM[] }) {
+export function AccountTable({ accounts, onReauthorize }: { accounts: AccountVM[]; onReauthorize: (account: AccountVM) => void }) {
   return (
     <div className="accounts-domain-table" role="table" aria-label="账号列表">
       <div className="accounts-domain-row accounts-domain-head" role="row">
@@ -11,6 +11,7 @@ export function AccountTable({ accounts }: { accounts: AccountVM[] }) {
         <span role="columnheader">自动回复</span>
         <span role="columnheader">凭证引用</span>
         <span role="columnheader">最近更新</span>
+        <span role="columnheader">操作</span>
       </div>
       {accounts.map((account) => (
         <div className="accounts-domain-row" role="row" key={account.id}>
@@ -26,6 +27,7 @@ export function AccountTable({ accounts }: { accounts: AccountVM[] }) {
           <span role="cell"><span className={account.aiEnabled ? 'accounts-domain-enabled' : 'accounts-domain-muted'}>{account.aiEnabled ? '已启用' : '未启用'}</span></span>
           <span role="cell"><AccountCredentialBadge state={account.credentialState} /></span>
           <span role="cell" className="accounts-domain-updated">{formatUpdatedAt(account.updatedAt)}</span>
+          <span role="cell" className="accounts-domain-row-actions"><button className="btn ghost" type="button" onClick={() => onReauthorize(account)}>扫码授权</button></span>
         </div>
       ))}
     </div>

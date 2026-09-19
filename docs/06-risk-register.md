@@ -50,3 +50,4 @@
 - `S4-I002`：保持开放；当前只完成协议边界和账号 CRUD，QR/login-session 与闲鱼 adapter 探针仍未实现。
 - `S4-I005`：首片迁移保持阶段 2 逻辑编号，新增 `server/migrations/README.md` 说明未实现的 002-005 后续域；状态改为“部分缓解”。
 - 新增 `S5-I001`：Docker Desktop Linux engine 未启动，无法完成 Compose/PostgreSQL/Redis/Testcontainers 验收；不影响内存 smoke，但阻断容器级门禁。
+- 2026-09-19 新增 S5-I002 / P1：真实闲鱼扫码成功、Cookie 持久化、loginuser.get 校验尚未完成；缓解措施为保留真实模式探针、前端人工扫码验收清单，并禁止将 verification_required 伪造为 succeeded。另记录 IM `login.token` / WebSocket 能力后置，不阻塞当前 HTTP 登录态切片。

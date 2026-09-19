@@ -202,7 +202,7 @@ function DesktopShell({ page, setPage, collapsed, setCollapsed }: { page: PageKe
       baseUrl: import.meta.env.VITE_API_BASE_URL ?? '',
       getToken: () => window.localStorage.getItem('auth_token'),
     });
-    return createAccountsApi({ get: transport.get });
+    return createAccountsApi({ get: transport.get, post: transport.post });
   }, []);
   const Page = useMemo(() => ({
     dashboard: DashboardPage,

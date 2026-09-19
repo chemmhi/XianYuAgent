@@ -1,0 +1,141 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { AccountsApi } from '../api';
+import {
+  createInitialQrLoginModel,
+  isTerminalQrStatus,
+  phaseForQrStatus,
+  type QrLoginError,
+  type QrLoginModel,
+} from './model';
+
+export interface QrLoginController {
+  model: QrLoginModel;
+  start: () => Promise<void>;
+  refresh: () => Promise<void>;
+  retry: () => Promise<void>;
+  cancel: () => Promise<void>;
+}
+
+function toQrLoginError(error: unknown): QrLoginError {
+  const code = error instanceof Error && error.message ? error.message : 'QR_LOGIN_FAILED';
+  return {
+    code,
+    message: code === 'QR_LOGIN_UNAVAILABLE' ? '当前账号暂未接入二维码登录服务。' : '二维码登录请求失败，请重试。',
+    retryable: code !== 'FORBIDDEN',
+  };
+}
+
+export function useQrLoginController(options: { api: AccountsApi; accountId: string; enabled: boolean }): QrLoginController {
+  const { api, accountId, enabled } = options;
+  const [model, setModel] = useState<QrLoginModel>(createInitialQrLoginModel);
+  const requestId = useRef(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const applySession = useCallback((session: NonNullable<QrLoginModel['session']>) => {
+    setModel({
+      phase: phaseForQrStatus(session.status),
+      session,
+      error: session.errorCode ? { code: session.errorCode, message: session.errorCode, retryable: true } : null,
+    });
+  }, []);
+
+  const start = useCallback(async () => {
+    if (!enabled || !accountId) return;
+    clearTimer();
+    const currentRequest = ++requestId.current;
+    setModel({ phase: 'creating', session: null, error: null });
+    try {
+      const session = await api.createQrSession(accountId);
+      if (currentRequest !== requestId.current) return;
+      applySession(session);
+    } catch (error) {
+      if (currentRequest !== requestId.current) return;
+      setModel({ phase: 'failed', session: null, error: toQrLoginError(error) });
+    }
+  }, [accountId, api, applySession, clearTimer, enabled]);
+
+  const refresh = useCallback(async () => {
+    const session = model.session;
+    if (!enabled || !accountId || !session || isTerminalQrStatus(session.status)) return;
+    const currentRequest = ++requestId.current;
+    try {
+      const next = await api.getQrSession(accountId, session.qrSessionId);
+      if (currentRequest !== requestId.current) return;
+      applySession(next);
+    } catch (error) {
+      if (currentRequest !== requestId.current) return;
+      setModel((previous) => ({ ...previous, error: toQrLoginError(error) }));
+    }
+  }, [accountId, api, applySession, enabled, model.session]);
+
+  const retry = useCallback(async () => {
+    const session = model.session;
+    if (!enabled || !accountId) return;
+    clearTimer();
+    if (!session || !api.renewQrSession) {
+      await start();
+      return;
+    }
+    const currentRequest = ++requestId.current;
+    setModel((previous) => ({ ...previous, phase: 'creating', error: null }));
+    try {
+      const next = await api.renewQrSession(accountId, session.qrSessionId);
+      if (currentRequest !== requestId.current) return;
+      applySession(next);
+    } catch (error) {
+      if (currentRequest !== requestId.current) return;
+      setModel((previous) => ({ ...previous, phase: 'failed', error: toQrLoginError(error) }));
+    }
+  }, [accountId, api, applySession, clearTimer, enabled, model.session, start]);
+
+  const cancel = useCallback(async () => {
+    const session = model.session;
+    if (!enabled || !accountId || !session || !api.cancelQrSession) return;
+    clearTimer();
+    const currentRequest = ++requestId.current;
+    try {
+      await api.cancelQrSession(accountId, session.qrSessionId);
+      if (currentRequest !== requestId.current) return;
+      setModel((previous) => previous.session ? {
+        phase: 'cancelled',
+        session: { ...previous.session, status: 'cancelled' },
+        error: null,
+      } : previous);
+    } catch (error) {
+      if (currentRequest !== requestId.current) return;
+      setModel((previous) => ({ ...previous, error: toQrLoginError(error) }));
+    }
+  }, [accountId, api, clearTimer, enabled, model.session]);
+
+  useEffect(() => {
+    if (!enabled) {
+      clearTimer();
+      setModel(createInitialQrLoginModel());
+      requestId.current += 1;
+      return;
+    }
+    const session = model.session;
+    if (!session || isTerminalQrStatus(session.status)) {
+      clearTimer();
+      return;
+    }
+    clearTimer();
+    timerRef.current = setTimeout(() => { void refresh(); }, Math.max(500, session.pollAfterMs));
+    return clearTimer;
+  }, [clearTimer, enabled, model.session, refresh]);
+
+  useEffect(() => () => {
+    clearTimer();
+    requestId.current += 1;
+  }, [clearTimer]);
+
+  return { model, start, refresh, retry, cancel };
+}
+

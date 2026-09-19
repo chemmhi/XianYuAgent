@@ -1,7 +1,8 @@
 export type AdminStatus = 'active' | 'disabled';
 export type AccountStatus = 'pending' | 'connected' | 'degraded' | 'disconnected' | 'expired' | 'disabled';
 export type ScopeStatus = 'active' | 'revoked' | 'expired';
-export type LoginSessionStatus = 'created' | 'waiting' | 'scanned' | 'succeeded' | 'expired' | 'failed' | 'cancelled';
+export type LoginSessionStatus = 'created' | 'waiting' | 'scanned' | 'succeeded' | 'expired' | 'failed' | 'cancelled' | 'verification_required';
+export type CredentialStatus = 'active' | 'expired' | 'revoked';
 
 export interface AdminRecord {
   id: string;
@@ -57,6 +58,21 @@ export interface LoginSessionRecord {
   qrTokenRef?: string;
 }
 
+export interface CredentialRecord {
+  id: string;
+  accountId: string;
+  platform: string;
+  status: CredentialStatus;
+  cookieHeader?: string;
+  accessToken?: string;
+  deviceId?: string;
+  metadata: Record<string, string>;
+  expiresAt?: string;
+  lastVerifiedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface IdempotencyRecord {
   scope: string;
   key: string;
@@ -102,10 +118,15 @@ export interface Store {
   listAccounts(adminId: string): Promise<AccountRecord[]>;
   getAccount(adminId: string, accountId: string): Promise<AccountRecord | undefined>;
   createAccount(input: { platform: string; sellerRef: string; displayName?: string; adminId: string }): Promise<AccountRecord>;
-  updateAccount(adminId: string, accountId: string, patch: { displayName?: string; status?: AccountStatus }): Promise<AccountRecord | undefined>;
+  updateAccount(adminId: string, accountId: string, patch: { displayName?: string; status?: AccountStatus; lastConnectedAt?: string }): Promise<AccountRecord | undefined>;
   createLoginSession(input: { adminId: string; accountId: string; loginMethod: string; expiresAt: string; qrTokenRef?: string }): Promise<LoginSessionRecord>;
   getLoginSession(adminId: string, accountId: string, sessionId: string): Promise<LoginSessionRecord | undefined>;
+  getLoginSessionById(adminId: string, sessionId: string): Promise<LoginSessionRecord | undefined>;
   updateLoginSession(adminId: string, accountId: string, sessionId: string, patch: { status?: LoginSessionStatus; expiresAt?: string; completedAt?: string; failureCode?: string }): Promise<LoginSessionRecord | undefined>;
+  getCredential(adminId: string, accountId: string): Promise<CredentialRecord | undefined>;
+  upsertCredential(input: { adminId: string; accountId: string; platform: string; cookieHeader?: string; accessToken?: string; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string }): Promise<CredentialRecord>;
+  revokeCredential(adminId: string, accountId: string): Promise<CredentialRecord | undefined>;
+  markCredentialVerified(input: { adminId: string; accountId: string; status: CredentialStatus; expiresAt?: string }): Promise<CredentialRecord | undefined>;
   getIdempotency(scope: string, key: string): Promise<IdempotencyRecord | undefined>;
   beginIdempotency(record: IdempotencyRecord): Promise<void>;
   abortIdempotency(scope: string, key: string): Promise<void>;

@@ -1,5 +1,5 @@
 import type { AppConfig } from './config.js';
-import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, IdempotencyRecord, LoginSessionRecord, SessionRecord, Store } from './domain.js';
+import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, SessionRecord, Store } from './domain.js';
 import { createId, createToken, digestJson, hashPassword, isSessionFresh, sha256, verifyPassword } from './security.js';
 
 export interface AuthContext {
@@ -70,10 +70,65 @@ export class AccountService {
   async update(input: { adminId: string; accountId: string; patch: { displayName?: string; status?: AccountRecord['status'] }; requestId: string; traceId: string }): Promise<AccountRecord> { const account = await this.store.updateAccount(input.adminId, input.accountId, input.patch); if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found'); await this.audit({ actorId: input.adminId, action: 'account.updated', targetRef: account.id, requestId: input.requestId, traceId: input.traceId, payload: input.patch, accountId: account.id }); return account; }
   async createLoginSession(input: { adminId: string; accountId: string; loginMethod: string; requestId: string; traceId: string }): Promise<LoginSessionRecord> { await this.get(input.adminId, input.accountId); const session = await this.store.createLoginSession({ adminId: input.adminId, accountId: input.accountId, loginMethod: input.loginMethod, expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(), qrTokenRef: `qr_ref_${createId()}` }); await this.audit({ actorId: input.adminId, action: 'account.login_session.created', targetRef: session.id, requestId: input.requestId, traceId: input.traceId, payload: { loginMethod: session.loginMethod, status: session.status }, accountId: input.accountId }); return session; }
   async getLoginSession(input: { adminId: string; accountId: string; sessionId: string }): Promise<LoginSessionRecord> { const session = await this.store.getLoginSession(input.adminId, input.accountId, input.sessionId); if (!session) throw new ServiceError(404, 'NOT_FOUND', 'login session not found'); return session; }
+  async getLoginSessionById(input: { adminId: string; sessionId: string }): Promise<LoginSessionRecord> { const session = await this.store.getLoginSessionById(input.adminId, input.sessionId); if (!session) throw new ServiceError(404, 'NOT_FOUND', 'login session not found'); return session; }
   async updateLoginSession(input: { adminId: string; accountId: string; sessionId: string; patch: { status?: LoginSessionRecord['status']; expiresAt?: string; completedAt?: string; failureCode?: string }; requestId: string; traceId: string }): Promise<LoginSessionRecord> { const session = await this.store.updateLoginSession(input.adminId, input.accountId, input.sessionId, input.patch); if (!session) throw new ServiceError(404, 'NOT_FOUND', 'login session not found'); await this.audit({ actorId: input.adminId, action: `account.login_session.${input.patch.status ?? 'updated'}`, targetRef: session.id, requestId: input.requestId, traceId: input.traceId, payload: input.patch, accountId: input.accountId }); return session; }
   async scopes(adminId: string, accountId: string): Promise<AccountScopeRecord[]> { if (!(await this.store.hasAccountScope(adminId, accountId))) throw new ServiceError(404, 'NOT_FOUND', 'account not found'); return this.store.listScopes(adminId).then((items) => items.filter((item) => item.accountId === accountId)); }
   async grantScope(input: { adminId: string; accountId: string; scope: string; requestId: string; traceId: string }): Promise<AccountScopeRecord> { await this.get(input.adminId, input.accountId); const row = await this.store.grantScope(input); await this.audit({ actorId: input.adminId, action: 'account.scope.granted', targetRef: row.id, requestId: input.requestId, traceId: input.traceId, payload: { scope: input.scope }, accountId: input.accountId }); return row; }
   async revokeScope(input: { adminId: string; accountId: string; scope: string; requestId: string; traceId: string }): Promise<void> { await this.get(input.adminId, input.accountId); await this.store.revokeScope(input.adminId, input.accountId, input.scope); await this.audit({ actorId: input.adminId, action: 'account.scope.revoked', requestId: input.requestId, traceId: input.traceId, payload: { scope: input.scope }, accountId: input.accountId }); }
+}
+
+export class CredentialService {
+  constructor(private readonly store: Store, private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => Promise<string>) {}
+
+  async get(adminId: string, accountId: string): Promise<CredentialRecord> {
+    const credential = await this.store.getCredential(adminId, accountId);
+    if (!credential) throw new ServiceError(404, 'NOT_FOUND', 'credential not found');
+    return credential;
+  }
+
+  async save(input: { adminId: string; accountId: string; cookieHeader?: string; accessToken?: string; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string; requestId: string; traceId: string }): Promise<CredentialRecord> {
+    const account = await this.store.getAccount(input.adminId, input.accountId);
+    if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found');
+    const current = await this.store.getCredential(input.adminId, input.accountId);
+    const cookieHeader = input.cookieHeader?.trim() || current?.cookieHeader;
+    const accessToken = input.accessToken?.trim() || current?.accessToken;
+    const deviceId = input.deviceId?.trim() || current?.deviceId;
+    const metadata = { ...(current?.metadata ?? {}), ...(input.metadata ?? {}) };
+    if (!cookieHeader && !accessToken && !deviceId && Object.keys(metadata).length === 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'at least one credential field is required');
+    if (input.expiresAt && !Number.isFinite(Date.parse(input.expiresAt))) throw new ServiceError(422, 'VALIDATION_FAILED', 'expiresAt must be an ISO timestamp');
+    const credential = await this.store.upsertCredential({ adminId: input.adminId, accountId: input.accountId, platform: account.platform, cookieHeader, accessToken, deviceId, metadata, expiresAt: input.expiresAt ?? current?.expiresAt });
+    await this.store.updateAccount(input.adminId, input.accountId, { status: 'connected', lastConnectedAt: new Date().toISOString() });
+    await this.audit({ actorId: input.adminId, action: current ? 'account.credential.updated' : 'account.credential.created', targetRef: credential.id, requestId: input.requestId, traceId: input.traceId, payload: { fields: Object.keys({ cookieHeader: input.cookieHeader, accessToken: input.accessToken, deviceId: input.deviceId, metadata: input.metadata, expiresAt: input.expiresAt }).filter((key) => input[key as keyof typeof input] !== undefined) }, accountId: input.accountId });
+    return credential;
+  }
+
+  async revoke(input: { adminId: string; accountId: string; requestId: string; traceId: string }): Promise<CredentialRecord> {
+    const credential = await this.store.revokeCredential(input.adminId, input.accountId);
+    if (!credential) throw new ServiceError(404, 'NOT_FOUND', 'credential not found');
+    await this.store.updateAccount(input.adminId, input.accountId, { status: 'disconnected' });
+    await this.audit({ actorId: input.adminId, action: 'account.credential.revoked', targetRef: credential.id, requestId: input.requestId, traceId: input.traceId, payload: { status: credential.status }, accountId: input.accountId });
+    return credential;
+  }
+
+  async verify(input: { adminId: string; accountId: string; status: CredentialRecord['status']; expiresAt?: string; requestId: string; traceId: string }): Promise<CredentialRecord> {
+    if (!['active', 'expired', 'revoked'].includes(input.status)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid credential status');
+    const credential = await this.store.markCredentialVerified(input);
+    if (!credential) throw new ServiceError(404, 'NOT_FOUND', 'credential not found');
+    await this.store.updateAccount(input.adminId, input.accountId, { status: input.status === 'active' ? 'connected' : input.status === 'revoked' ? 'disconnected' : 'expired', ...(input.status === 'active' ? { lastConnectedAt: new Date().toISOString() } : {}) });
+    await this.audit({ actorId: input.adminId, action: 'account.credential.verified', targetRef: credential.id, requestId: input.requestId, traceId: input.traceId, payload: { status: credential.status }, accountId: input.accountId });
+    return credential;
+  }
+
+  async completeLoginSession(input: { adminId: string; accountId: string; sessionId: string; cookieHeader?: string; accessToken?: string; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string; requestId: string; traceId: string }): Promise<{ session: LoginSessionRecord; credential: CredentialRecord }> {
+    const loginSession = await this.store.getLoginSession(input.adminId, input.accountId, input.sessionId);
+    if (!loginSession) throw new ServiceError(404, 'NOT_FOUND', 'login session not found');
+    if (!['waiting', 'scanned'].includes(loginSession.status)) throw new ServiceError(409, 'CONFLICT', `login session cannot complete from ${loginSession.status}`);
+    const credential = await this.save(input);
+    const session = await this.store.updateLoginSession(input.adminId, input.accountId, input.sessionId, { status: 'succeeded', completedAt: new Date().toISOString(), failureCode: undefined });
+    if (!session) throw new ServiceError(404, 'NOT_FOUND', 'login session not found');
+    await this.audit({ actorId: input.adminId, action: 'account.login_session.succeeded', targetRef: session.id, requestId: input.requestId, traceId: input.traceId, payload: { status: session.status, credentialId: credential.id }, accountId: input.accountId });
+    return { session, credential };
+  }
 }
 
 export class ServiceError extends Error {

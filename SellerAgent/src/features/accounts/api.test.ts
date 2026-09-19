@@ -39,4 +39,39 @@ describe('accounts canonical API adapter', () => {
     });
     expect(result.total).toBe(1);
   });
+
+  it('creates and polls QR sessions through canonical account-scoped routes', async () => {
+    const calls: Array<{ path: string; body?: unknown; headers?: HeadersInit }> = [];
+    const qrPayload = {
+      success: true,
+      data: {
+        id: 'login-session-1',
+        qrSessionId: 'qr-session-1',
+        accountId: 'account-1',
+        status: 'waiting',
+        qrImageDataUrl: 'data:image/svg+xml;base64,stub',
+        expiresAt: '2026-09-19T00:05:00.000Z',
+        pollAfterMs: 1200,
+      },
+    };
+    const api = createAccountsApi({
+      async get<T>(path: string) {
+        calls.push({ path });
+        return qrPayload as T;
+      },
+      async post<T>(path: string, body?: unknown, init?: RequestInit) {
+        calls.push({ path, body, headers: init?.headers });
+        return qrPayload as T;
+      },
+    });
+
+    const created = await api.createQrSession('account-1');
+    const polled = await api.getQrSession('account-1', created.qrSessionId);
+
+    expect(created).toMatchObject({ qrSessionId: 'qr-session-1', accountId: 'account-1', pollAfterMs: 1200 });
+    expect(polled.status).toBe('waiting');
+    expect(calls[0]).toMatchObject({ path: '/api/v1/auth/qr-sessions' });
+    expect(calls[0]?.headers).toEqual(expect.objectContaining({ 'Idempotency-Key': expect.any(String) }));
+    expect(calls[1]?.path).toBe('/api/v1/auth/qr-sessions/qr-session-1?accountId=account-1');
+  });
 });

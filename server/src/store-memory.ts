@@ -1,4 +1,4 @@
-import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, IdempotencyRecord, LoginSessionRecord, SessionRecord, Store } from './domain.js';
+import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, SessionRecord, Store } from './domain.js';
 import { createId } from './security.js';
 
 export class MemoryStore implements Store {
@@ -7,6 +7,7 @@ export class MemoryStore implements Store {
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly accounts = new Map<string, AccountRecord>();
   private readonly loginSessions = new Map<string, LoginSessionRecord>();
+  private readonly credentials = new Map<string, CredentialRecord>();
   private readonly scopes = new Map<string, AccountScopeRecord>();
   private readonly idempotency = new Map<string, IdempotencyRecord>();
   readonly audits: AuditEventRecord[] = [];
@@ -53,7 +54,7 @@ export class MemoryStore implements Store {
     await this.grantScope({ adminId: input.adminId, accountId: account.id, scope: 'manage' });
     return account;
   }
-  async updateAccount(adminId: string, accountId: string, patch: { displayName?: string; status?: AccountRecord['status'] }): Promise<AccountRecord | undefined> { const account = await this.getAccount(adminId, accountId); if (!account) return undefined; if (patch.displayName !== undefined) account.displayName = patch.displayName; if (patch.status !== undefined) account.status = patch.status; account.updatedAt = new Date().toISOString(); return account; }
+  async updateAccount(adminId: string, accountId: string, patch: { displayName?: string; status?: AccountRecord['status']; lastConnectedAt?: string }): Promise<AccountRecord | undefined> { const account = await this.getAccount(adminId, accountId); if (!account) return undefined; if (patch.displayName !== undefined) account.displayName = patch.displayName; if (patch.status !== undefined) account.status = patch.status; if (patch.lastConnectedAt !== undefined) account.lastConnectedAt = patch.lastConnectedAt; account.updatedAt = new Date().toISOString(); return account; }
   async createLoginSession(input: { adminId: string; accountId: string; loginMethod: string; expiresAt: string; qrTokenRef?: string }): Promise<LoginSessionRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const now = new Date().toISOString();
@@ -68,11 +69,67 @@ export class MemoryStore implements Store {
     if (session.status === 'waiting' && Date.parse(session.expiresAt) <= Date.now()) session.status = 'expired';
     return session;
   }
+  async getLoginSessionById(adminId: string, sessionId: string): Promise<LoginSessionRecord | undefined> {
+    const session = this.loginSessions.get(sessionId);
+    if (!session || !(await this.hasAccountScope(adminId, session.accountId))) return undefined;
+    if (session.status === 'waiting' && Date.parse(session.expiresAt) <= Date.now()) session.status = 'expired';
+    return session;
+  }
   async updateLoginSession(adminId: string, accountId: string, sessionId: string, patch: { status?: LoginSessionRecord['status']; expiresAt?: string; completedAt?: string; failureCode?: string }): Promise<LoginSessionRecord | undefined> {
     const session = await this.getLoginSession(adminId, accountId, sessionId);
     if (!session) return undefined;
     Object.assign(session, patch);
     return session;
+  }
+  async getCredential(adminId: string, accountId: string): Promise<CredentialRecord | undefined> {
+    if (!(await this.hasAccountScope(adminId, accountId))) return undefined;
+    const credential = this.credentials.get(accountId);
+    if (!credential) return undefined;
+    if (credential.status === 'active' && credential.expiresAt && Date.parse(credential.expiresAt) <= Date.now()) {
+      credential.status = 'expired';
+      const account = this.accounts.get(accountId);
+      if (account && account.status === 'connected') { account.status = 'expired'; account.updatedAt = new Date().toISOString(); }
+    }
+    return credential;
+  }
+  async upsertCredential(input: { adminId: string; accountId: string; platform: string; cookieHeader?: string; accessToken?: string; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string }): Promise<CredentialRecord> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const now = new Date().toISOString();
+    const existing = this.credentials.get(input.accountId);
+    const credential: CredentialRecord = existing
+      ? Object.assign(existing, {
+          platform: input.platform,
+          status: 'active' as const,
+          cookieHeader: input.cookieHeader,
+          accessToken: input.accessToken,
+          deviceId: input.deviceId,
+          metadata: input.metadata ?? {},
+          expiresAt: input.expiresAt,
+          updatedAt: now,
+        })
+      : {
+          id: createId(), accountId: input.accountId, platform: input.platform, status: 'active',
+          cookieHeader: input.cookieHeader, accessToken: input.accessToken, deviceId: input.deviceId,
+          metadata: input.metadata ?? {}, expiresAt: input.expiresAt, createdAt: now, updatedAt: now,
+        };
+    this.credentials.set(input.accountId, credential);
+    return credential;
+  }
+  async revokeCredential(adminId: string, accountId: string): Promise<CredentialRecord | undefined> {
+    const credential = await this.getCredential(adminId, accountId);
+    if (!credential) return undefined;
+    credential.status = 'revoked';
+    credential.updatedAt = new Date().toISOString();
+    return credential;
+  }
+  async markCredentialVerified(input: { adminId: string; accountId: string; status: CredentialRecord['status']; expiresAt?: string }): Promise<CredentialRecord | undefined> {
+    const credential = await this.getCredential(input.adminId, input.accountId);
+    if (!credential) return undefined;
+    credential.status = input.status;
+    credential.expiresAt = input.expiresAt ?? credential.expiresAt;
+    credential.lastVerifiedAt = new Date().toISOString();
+    credential.updatedAt = credential.lastVerifiedAt;
+    return credential;
   }
   async getIdempotency(scope: string, key: string): Promise<IdempotencyRecord | undefined> { const row = this.idempotency.get(`${scope}:${key}`); if (row && Date.parse(row.expiresAt) <= Date.now()) { this.idempotency.delete(`${scope}:${key}`); return undefined; } return row; }
   async beginIdempotency(record: IdempotencyRecord): Promise<void> { this.idempotency.set(`${record.scope}:${record.key}`, record); }

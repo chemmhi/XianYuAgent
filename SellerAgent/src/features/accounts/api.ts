@@ -8,15 +8,21 @@ import type {
   AccountsPageVM,
   AccountStatus,
 } from './types';
+import type { QrLoginSessionVM, QrLoginStatus } from './qr-login/model';
 
 export interface AccountsApiTransport {
   get<T>(path: string): Promise<T>;
+  post?<T>(path: string, body?: unknown, init?: RequestInit): Promise<T>;
 }
 
 export interface AccountsApi {
   list(filters?: AccountListFilters): Promise<AccountsPageVM>;
   getDetail(accountId: string): Promise<AccountVM>;
   getConnection(accountId: string): Promise<AccountConnectionVM>;
+  createQrSession(accountId: string): Promise<QrLoginSessionVM>;
+  getQrSession(accountId: string, qrSessionId: string): Promise<QrLoginSessionVM>;
+  renewQrSession?(accountId: string, qrSessionId: string): Promise<QrLoginSessionVM>;
+  cancelQrSession?(accountId: string, qrSessionId: string): Promise<void>;
 }
 
 interface CanonicalAccountResponse {
@@ -55,6 +61,21 @@ interface ApiEnvelope<T> {
   message?: string | null;
 }
 
+interface CanonicalQrSessionResponse {
+  id?: string;
+  qrSessionId?: string;
+  accountId: string;
+  status: string;
+  qrImageDataUrl?: string;
+  qrImageRef?: string;
+  verificationUrl?: string;
+  expiresAt: string;
+  pollAfterMs?: number;
+  connection?: AccountConnectionVM;
+  errorCode?: string;
+  auditRef?: string;
+}
+
 function unwrapEnvelope<T>(payload: T | ApiEnvelope<T>): T {
   if (payload && typeof payload === 'object' && 'success' in payload && 'data' in payload) {
     const envelope = payload as ApiEnvelope<T>;
@@ -81,7 +102,7 @@ function toAccountVM(account: CanonicalAccountResponse): AccountVM {
     remark: account.remark,
     status: normalizedStatus,
     connection: {
-      status: account.connection?.status ?? 'unknown',
+      status: account.connection?.status ?? (normalizedStatus === 'connected' ? 'online' : normalizedStatus === 'expired' ? 'expired' : 'unknown'),
       lastConnectedAt: account.connection?.lastConnectedAt,
       latencyMs: account.connection?.latencyMs,
       failureCode: account.connection?.failureCode,
@@ -89,7 +110,7 @@ function toAccountVM(account: CanonicalAccountResponse): AccountVM {
     },
     enabled: account.enabled ?? true,
     aiEnabled: account.aiEnabled ?? false,
-    credentialState: account.credentialState ?? 'unknown',
+    credentialState: account.credentialState ?? (normalizedStatus === 'connected' ? 'configured' : 'unknown'),
     version: account.version ?? 1,
     updatedAt: account.updatedAt ?? new Date(0).toISOString(),
   };
@@ -107,6 +128,40 @@ function toCanonicalPage(payload: CanonicalAccountsPayload): AccountsPageVM {
     pageSize,
     totalPages: payload.totalPages ?? Math.max(1, Math.ceil(total / pageSize)),
   };
+}
+
+function toQrLoginStatus(status: string): QrLoginStatus {
+  if (status === 'created') return 'waiting';
+  if (status === 'verification_required') return 'failed';
+  if (['waiting', 'scanned', 'succeeded', 'expired', 'failed', 'cancelled'].includes(status)) return status as QrLoginStatus;
+  return 'failed';
+}
+
+function toQrLoginSession(payload: CanonicalQrSessionResponse): QrLoginSessionVM {
+  const qrSessionId = payload.qrSessionId ?? payload.id;
+  if (!qrSessionId) throw new Error('QR_SESSION_ID_MISSING');
+  return {
+    qrSessionId,
+    accountId: payload.accountId,
+    status: toQrLoginStatus(payload.status),
+    qrImageDataUrl: payload.qrImageDataUrl,
+    qrImageRef: payload.qrImageRef,
+    verificationUrl: payload.verificationUrl,
+    expiresAt: payload.expiresAt,
+    pollAfterMs: payload.pollAfterMs ?? 1500,
+    connection: payload.connection,
+    errorCode: payload.errorCode,
+    auditRef: payload.auditRef,
+  };
+}
+
+function unwrapQrSession(payload: CanonicalQrSessionResponse | ApiEnvelope<CanonicalQrSessionResponse>): QrLoginSessionVM {
+  return toQrLoginSession(unwrapEnvelope(payload));
+}
+
+function requirePost(transport: AccountsApiTransport): NonNullable<AccountsApiTransport['post']> {
+  if (!transport.post) throw new Error('QR_LOGIN_UNAVAILABLE');
+  return transport.post.bind(transport);
 }
 
 function queryString(filters: AccountListFilters = {}): string {
@@ -133,6 +188,30 @@ export function createAccountsApi(transport: AccountsApiTransport): AccountsApi 
     async getConnection(accountId) {
       const rawPayload = await transport.get<AccountVM['connection'] | ApiEnvelope<AccountVM['connection']>>(`/api/v1/accounts/${encodeURIComponent(accountId)}/connection`);
       return unwrapEnvelope(rawPayload);
+    },
+    async createQrSession(accountId) {
+      const post = requirePost(transport);
+      const rawPayload = await post<CanonicalQrSessionResponse | ApiEnvelope<CanonicalQrSessionResponse>>('/api/v1/auth/qr-sessions', { accountId }, {
+        headers: { 'Idempotency-Key': `qr-login-${accountId}-${Date.now()}` },
+      });
+      return unwrapQrSession(rawPayload);
+    },
+    async getQrSession(accountId, qrSessionId) {
+      const rawPayload = await transport.get<CanonicalQrSessionResponse | ApiEnvelope<CanonicalQrSessionResponse>>(`/api/v1/auth/qr-sessions/${encodeURIComponent(qrSessionId)}?accountId=${encodeURIComponent(accountId)}`);
+      return unwrapQrSession(rawPayload);
+    },
+    async renewQrSession(accountId, qrSessionId) {
+      const post = requirePost(transport);
+      const rawPayload = await post<CanonicalQrSessionResponse | ApiEnvelope<CanonicalQrSessionResponse>>(`/api/v1/accounts/${encodeURIComponent(accountId)}/login-sessions/${encodeURIComponent(qrSessionId)}/renew`, {}, {
+        headers: { 'Idempotency-Key': `qr-login-renew-${accountId}-${qrSessionId}-${Date.now()}` },
+      });
+      return unwrapQrSession(rawPayload);
+    },
+    async cancelQrSession(accountId, qrSessionId) {
+      const post = requirePost(transport);
+      await post(`/api/v1/accounts/${encodeURIComponent(accountId)}/login-sessions/${encodeURIComponent(qrSessionId)}/cancel`, {}, {
+        headers: { 'Idempotency-Key': `qr-login-cancel-${accountId}-${qrSessionId}-${Date.now()}` },
+      });
     },
   };
 }
@@ -168,6 +247,16 @@ export function createMockAccountsApi(seed: AccountSummary[] = [
   { id: 'C', displayName: '闲鱼账号 C', remark: '测试账号', enabled: false, online: true, aiEnabled: false, credentialState: 'missing' },
 ]): AccountsApi {
   const accounts = seed.map(fromLegacySummary);
+  const qrSessions = new Map<string, QrLoginSessionVM>();
+  const createQrSession = (accountId: string): QrLoginSessionVM => {
+    if (!accounts.some((account) => account.id === accountId)) throw new Error('account not found');
+    const qrSessionId = `qr_${accountId}_${Date.now()}`;
+    const expiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
+    const qrImageDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240"><rect width="240" height="240" rx="18" fill="#f8fafc"/><rect x="30" y="30" width="180" height="180" rx="10" fill="#fff" stroke="#245a8d" stroke-width="4"/><path d="M58 74h34v34H58zM148 74h34v34h-34zM58 148h34v34H58zM126 126h16v16h-16zM154 126h28v16h-28zM126 154h16v28h-16zM154 154h28v28h-28z" fill="#245a8d"/><text x="120" y="222" text-anchor="middle" font-size="11" fill="#475569">模拟二维码 · ${accountId}</text></svg>`)}`;
+    const session: QrLoginSessionVM = { qrSessionId, accountId, status: 'waiting', qrImageDataUrl, expiresAt, pollAfterMs: 1500 };
+    qrSessions.set(qrSessionId, session);
+    return session;
+  };
   return {
     async list(filters = {}) {
       const search = filters.search?.trim().toLowerCase();
@@ -198,6 +287,23 @@ export function createMockAccountsApi(seed: AccountSummary[] = [
       if (!account) throw new Error('account not found');
       return account.connection;
     },
+    async createQrSession(accountId) { return createQrSession(accountId); },
+    async getQrSession(accountId, qrSessionId) {
+      const session = qrSessions.get(qrSessionId);
+      if (!session || session.accountId !== accountId) throw new Error('qr session not found');
+      return session;
+    },
+    async renewQrSession(accountId, qrSessionId) {
+      const previous = qrSessions.get(qrSessionId);
+      if (!previous || previous.accountId !== accountId) throw new Error('qr session not found');
+      previous.status = 'expired';
+      return createQrSession(accountId);
+    },
+    async cancelQrSession(accountId, qrSessionId) {
+      const session = qrSessions.get(qrSessionId);
+      if (!session || session.accountId !== accountId) throw new Error('qr session not found');
+      session.status = 'cancelled';
+    },
   };
 }
 
@@ -220,5 +326,9 @@ export function createLegacyAccountsApi(legacyApi: { list(query?: { page?: numbe
       const detail = await this.getDetail(accountId);
       return detail.connection;
     },
+    async createQrSession() { throw new Error('QR_LOGIN_UNAVAILABLE'); },
+    async getQrSession() { throw new Error('QR_LOGIN_UNAVAILABLE'); },
+    async renewQrSession() { throw new Error('QR_LOGIN_UNAVAILABLE'); },
+    async cancelQrSession() { throw new Error('QR_LOGIN_UNAVAILABLE'); },
   };
 }

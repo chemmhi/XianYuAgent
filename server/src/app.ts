@@ -1,17 +1,22 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { loadConfig, type AppConfig } from './config.js';
 import type { AuthContext } from './services.js';
-import { AccountService, AuthService, ServiceError, idempotent } from './services.js';
+import { AccountService, AuthService, CredentialService, ServiceError, idempotent } from './services.js';
 import { createIds, failure, fingerprint, parseCookies, readJson, setCookie, success, writeJson, type RequestContext } from './http.js';
 import { createStore } from './store.js';
 import type { Store } from './domain.js';
 import { createId, digestJson } from './security.js';
+import { XianyuQrLoginAdapter, type XianyuQrPublicSession } from './xianyu-qr-login.js';
+import { XianyuMtopClient } from './xianyu-mtop.js';
 
 export interface AppRuntime {
   config: AppConfig;
   store: Store;
   auth: AuthService;
   accounts: AccountService;
+  credentials: CredentialService;
+  qrLogin: XianyuQrLoginAdapter;
+  xianyu: XianyuMtopClient;
   server: Server;
   listen(): Promise<void>;
   close(): Promise<void>;
@@ -25,9 +30,51 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   });
+  const credentials = new CredentialService(store, async (input) => {
+    const auditId = createId();
+    await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
+    return auditId;
+  });
+  let xianyu: XianyuMtopClient;
+  const qrLogin = new XianyuQrLoginAdapter({
+    onStatus: async (status) => {
+      const localStatus = mapQrStatusToLoginStatus(status.status);
+      if (!localStatus) return;
+      try {
+        const current = await accounts.getLoginSessionById({ adminId: status.adminId, sessionId: status.sessionId });
+        if (current.status === 'succeeded' && localStatus !== 'succeeded') return;
+        await accounts.updateLoginSession({ adminId: status.adminId, accountId: status.accountId, sessionId: status.sessionId, patch: { status: localStatus, failureCode: status.errorCode, completedAt: ['succeeded', 'expired', 'failed', 'cancelled'].includes(localStatus) ? new Date().toISOString() : undefined }, requestId: `qr:${status.sessionId}`, traceId: `qr:${status.sessionId}` });
+      } catch { /* QR 状态回写失败不影响外部轮询；下一次 GET 会重试 */ }
+    },
+    onSuccess: async ({ sessionId, adminId, accountId, cookieHeader, unb }) => {
+      const account = await accounts.get(adminId, accountId);
+      if (account.sellerRef && account.sellerRef !== unb) {
+        await accounts.updateLoginSession({ adminId, accountId, sessionId, patch: { status: 'failed', failureCode: 'QR_ACCOUNT_MISMATCH', completedAt: new Date().toISOString() }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+        throw new Error('QR_ACCOUNT_MISMATCH');
+      }
+      await credentials.save({ adminId, accountId, cookieHeader, metadata: { unb, loginMethod: 'qr_http' }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+      const verification = await xianyu.verifyLogin(adminId, accountId);
+      if (!verification.success) {
+        const status = verification.accountInvalid ? (verification.errorCode === 'SESSION_EXPIRED' ? 'expired' : 'revoked') : 'expired';
+        try { await credentials.verify({ adminId, accountId, status, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` }); } catch { /* preserve original verification error */ }
+        await accounts.updateLoginSession({ adminId, accountId, sessionId, patch: { status: 'failed', failureCode: verification.errorCode ?? 'LOGIN_STATE_VERIFY_FAILED', completedAt: new Date().toISOString() }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+        throw new Error(verification.errorCode ?? 'LOGIN_STATE_VERIFY_FAILED');
+      }
+      await credentials.verify({ adminId, accountId, status: 'active', requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+      await accounts.updateLoginSession({ adminId, accountId, sessionId, patch: { status: 'succeeded', completedAt: new Date().toISOString(), failureCode: undefined }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+    },
+  });
+  xianyu = new XianyuMtopClient({
+    loadCredential: async (adminId, accountId) => store.getCredential(adminId, accountId),
+    saveCookie: async (adminId, accountId, cookieHeader) => {
+      const account = await store.getAccount(adminId, accountId);
+      if (!account) return;
+      await credentials.save({ adminId, accountId, cookieHeader, requestId: 'xianyu-mtop', traceId: 'xianyu-mtop' });
+    },
+  });
 
   const runtime: AppRuntime = {
-    config, store, auth, accounts,
+    config, store, auth, accounts, credentials, qrLogin, xianyu,
     server: createServer((request, response) => { void handleRequest(runtime, request, response); }),
     async listen() { await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve)); },
     async close() { await new Promise<void>((resolve, reject) => runtime.server.close((error) => error ? reject(error) : resolve())); const close = (store as Store & { close?: () => Promise<void> }).close; if (close) await close.call(store); },
@@ -54,7 +101,7 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
 }
 
 async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: ServerResponse): Promise<{ statusCode: number; body: unknown } | undefined> {
-  const { auth, accounts, store, config } = runtime;
+  const { auth, accounts, credentials, store, config } = runtime;
   if (ctx.path === '/healthz' && ctx.method === 'GET') {
     const health = await store.health();
     const body = success(ctx, { status: health.reachable ? 'ok' : 'degraded', services: { api: 'ok', database: health.reachable ? 'ok' : 'unavailable', redis: config.redisUrl ? 'configured' : 'not_configured' } });
@@ -103,32 +150,105 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     return { statusCode: 200, body: success(ctx, { loggedOut: true }).body };
   }
 
-  const loginSessionMatch = ctx.path.match(/^\/api\/v1\/accounts\/([^/]+)\/login-sessions(?:\/([^/]+)(?:\/(cancel|renew))?)?$/);
+  const loginSessionMatch = ctx.path.match(/^\/api\/v1\/accounts\/([^/]+)\/login-sessions(?:\/([^/]+)(?:\/(cancel|renew|complete))?)?$/);
   if (ctx.path === '/api/v1/auth/qr-sessions' && ctx.method === 'POST') {
     const accountId = String(ctx.body.accountId ?? '');
     if (!accountId) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
-    const result = await mutation(runtime, ctx, authContext, accountId, async () => success(ctx, toQrSessionView(await accounts.createLoginSession({ adminId: authContext.admin.id, accountId, loginMethod: 'qr', requestId: ctx.requestId, traceId: ctx.traceId })), 201));
+    const result = await mutation(runtime, ctx, authContext, accountId, async () => {
+      const loginSession = await accounts.createLoginSession({ adminId: authContext.admin.id, accountId, loginMethod: 'qr', requestId: ctx.requestId, traceId: ctx.traceId });
+      if (config.xianyuQrMode === 'stub') return success(ctx, toQrSessionView(loginSession), 201);
+      try {
+        const qrSession = await runtime.qrLogin.create({ sessionId: loginSession.id, adminId: authContext.admin.id, accountId });
+        return success(ctx, { ...toQrSessionView(loginSession), qrImageDataUrl: qrSession.qrImageDataUrl, pollAfterMs: qrSession.pollAfterMs, expiresAt: qrSession.expiresAt, status: qrSession.status, errorCode: qrSession.errorCode, verificationUrl: qrSession.verificationUrl }, 201);
+      } catch (error) {
+        await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId, sessionId: loginSession.id, patch: { status: 'failed', failureCode: error instanceof Error ? error.message : 'QR_GENERATE_FAILED', completedAt: new Date().toISOString() }, requestId: ctx.requestId, traceId: ctx.traceId });
+        throw new ServiceError(502, 'QR_GENERATE_FAILED', 'unable to generate xianyu qr session');
+      }
+    });
     return result;
   }
   if (ctx.path.startsWith('/api/v1/auth/qr-sessions/') && ctx.method === 'GET') {
     const sessionId = decodeURIComponent(ctx.path.split('/').pop() ?? '');
-    const accountId = String(ctx.query.accountId ?? '');
-    if (!accountId) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId query is required');
-    return { statusCode: 200, body: success(ctx, toQrSessionView(await accounts.getLoginSession({ adminId: authContext.admin.id, accountId, sessionId }))).body };
+    const local = await accounts.getLoginSessionById({ adminId: authContext.admin.id, sessionId });
+    const external = runtime.qrLogin.get(sessionId);
+    const terminal = ['succeeded', 'cancelled', 'failed', 'expired'].includes(local.status);
+    return { statusCode: 200, body: success(ctx, external ? { ...toQrSessionView(local), qrImageDataUrl: external.qrImageDataUrl, pollAfterMs: external.pollAfterMs, expiresAt: external.expiresAt, status: terminal ? local.status : external.status, errorCode: terminal ? local.failureCode : external.errorCode, verificationUrl: external.verificationUrl } : toQrSessionView(local)).body };
+  }
+
+  const credentialMatch = ctx.path.match(/^\/api\/v1\/accounts\/([^/]+)\/credential(?:\/(verify|revoke))?$/);
+  if (credentialMatch) {
+    const accountId = decodeURIComponent(credentialMatch[1]);
+    const action = credentialMatch[2];
+    if (!action && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, await credentials.get(authContext.admin.id, accountId)).body };
+    if (!action && (ctx.method === 'PUT' || ctx.method === 'POST')) {
+      const result = await mutation(runtime, ctx, authContext, accountId, async () => {
+        const credential = await credentials.save({
+          adminId: authContext.admin.id,
+          accountId,
+          cookieHeader: typeof ctx.body.cookieHeader === 'string' ? ctx.body.cookieHeader : undefined,
+          accessToken: typeof ctx.body.accessToken === 'string' ? ctx.body.accessToken : undefined,
+          deviceId: typeof ctx.body.deviceId === 'string' ? ctx.body.deviceId : undefined,
+          metadata: readCredentialMetadata(ctx.body.metadata),
+          expiresAt: typeof ctx.body.expiresAt === 'string' ? ctx.body.expiresAt : undefined,
+          requestId: ctx.requestId,
+          traceId: ctx.traceId,
+        });
+        return success(ctx, credentialMutationView(credential));
+      });
+      return result;
+    }
+    if (action === 'revoke' && (ctx.method === 'POST' || ctx.method === 'DELETE')) return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, credentialMutationView(await credentials.revoke({ adminId: authContext.admin.id, accountId, requestId: ctx.requestId, traceId: ctx.traceId }))));
+    if (action === 'verify' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, credentialMutationView(await credentials.verify({ adminId: authContext.admin.id, accountId, status: (typeof ctx.body.status === 'string' ? ctx.body.status : 'active') as never, expiresAt: typeof ctx.body.expiresAt === 'string' ? ctx.body.expiresAt : undefined, requestId: ctx.requestId, traceId: ctx.traceId }))));
   }
   if (loginSessionMatch) {
     const accountId = decodeURIComponent(loginSessionMatch[1]);
     const sessionId = loginSessionMatch[2] ? decodeURIComponent(loginSessionMatch[2]) : undefined;
     if (!sessionId && ctx.method === 'POST') {
-      const result = await mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await accounts.createLoginSession({ adminId: authContext.admin.id, accountId, loginMethod: String(ctx.body.loginMethod ?? 'qr'), requestId: ctx.requestId, traceId: ctx.traceId }), 201));
+      const result = await mutation(runtime, ctx, authContext, accountId, async () => {
+        const loginMethod = String(ctx.body.loginMethod ?? 'qr');
+        const loginSession = await accounts.createLoginSession({ adminId: authContext.admin.id, accountId, loginMethod, requestId: ctx.requestId, traceId: ctx.traceId });
+        if (loginMethod !== 'qr' || config.xianyuQrMode === 'stub') return success(ctx, loginSession, 201);
+        try {
+          const qrSession = await runtime.qrLogin.create({ sessionId: loginSession.id, adminId: authContext.admin.id, accountId });
+          return success(ctx, { ...toQrSessionView(loginSession), qrImageDataUrl: qrSession.qrImageDataUrl, pollAfterMs: qrSession.pollAfterMs, expiresAt: qrSession.expiresAt, status: qrSession.status, errorCode: qrSession.errorCode, verificationUrl: qrSession.verificationUrl }, 201);
+        } catch (error) {
+          await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId, sessionId: loginSession.id, patch: { status: 'failed', failureCode: error instanceof Error ? error.message : 'QR_GENERATE_FAILED', completedAt: new Date().toISOString() }, requestId: ctx.requestId, traceId: ctx.traceId });
+          throw new ServiceError(502, 'QR_GENERATE_FAILED', 'unable to generate xianyu qr session');
+        }
+      });
       return result;
     }
-    if (sessionId && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, await accounts.getLoginSession({ adminId: authContext.admin.id, accountId, sessionId })).body };
-    if (sessionId && loginSessionMatch[3] === 'cancel' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId, sessionId, patch: { status: 'cancelled', completedAt: new Date().toISOString() }, requestId: ctx.requestId, traceId: ctx.traceId })));
-    if (sessionId && loginSessionMatch[3] === 'renew' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId, sessionId, patch: { status: 'waiting', expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(), failureCode: undefined }, requestId: ctx.requestId, traceId: ctx.traceId })));
+    if (sessionId && ctx.method === 'GET') {
+      const local = await accounts.getLoginSession({ adminId: authContext.admin.id, accountId, sessionId });
+      const external = runtime.qrLogin.get(sessionId);
+      const terminal = ['succeeded', 'cancelled', 'failed', 'expired'].includes(local.status);
+      return { statusCode: 200, body: success(ctx, external ? { ...toQrSessionView(local), qrImageDataUrl: external.qrImageDataUrl, pollAfterMs: external.pollAfterMs, expiresAt: external.expiresAt, status: terminal ? local.status : external.status, errorCode: terminal ? local.failureCode : external.errorCode, verificationUrl: external.verificationUrl } : local).body };
+    }
+    if (sessionId && loginSessionMatch[3] === 'cancel' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, accountId, async () => { runtime.qrLogin.cancel(sessionId); return success(ctx, await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId, sessionId, patch: { status: 'cancelled', completedAt: new Date().toISOString() }, requestId: ctx.requestId, traceId: ctx.traceId })); });
+    if (sessionId && loginSessionMatch[3] === 'renew' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, accountId, async () => {
+      const renewed = await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId, sessionId, patch: { status: 'waiting', expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(), failureCode: undefined }, requestId: ctx.requestId, traceId: ctx.traceId });
+      if (config.xianyuQrMode === 'stub') return success(ctx, renewed);
+      const qrSession = await runtime.qrLogin.create({ sessionId, adminId: authContext.admin.id, accountId });
+      return success(ctx, { ...toQrSessionView(renewed), qrImageDataUrl: qrSession.qrImageDataUrl, pollAfterMs: qrSession.pollAfterMs, expiresAt: qrSession.expiresAt, status: qrSession.status, errorCode: qrSession.errorCode, verificationUrl: qrSession.verificationUrl });
+    });
+    if (sessionId && loginSessionMatch[3] === 'complete' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, accountId, async () => {
+      const result = await credentials.completeLoginSession({
+        adminId: authContext.admin.id,
+        accountId,
+        sessionId,
+        cookieHeader: typeof ctx.body.cookieHeader === 'string' ? ctx.body.cookieHeader : undefined,
+        accessToken: typeof ctx.body.accessToken === 'string' ? ctx.body.accessToken : undefined,
+        deviceId: typeof ctx.body.deviceId === 'string' ? ctx.body.deviceId : undefined,
+        metadata: readCredentialMetadata(ctx.body.metadata),
+        expiresAt: typeof ctx.body.expiresAt === 'string' ? ctx.body.expiresAt : undefined,
+        requestId: ctx.requestId,
+        traceId: ctx.traceId,
+      });
+      return success(ctx, { session: result.session, credential: credentialMutationView(result.credential) });
+    });
   }
 
-  const accountMatch = ctx.path.match(/^\/api\/v1\/accounts\/([^/]+)(?:\/(scopes|connection))?$/);
+  const accountMatch = ctx.path.match(/^\/api\/v1\/accounts\/([^/]+)(?:\/(scopes|connection|connection\/verify))?$/);
   if (ctx.path === '/api/v1/accounts' && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, { items: await accounts.list(authContext.admin.id) }).body };
   if (ctx.path === '/api/v1/accounts' && ctx.method === 'POST') {
     const result = await mutation(runtime, ctx, authContext, undefined, async () => {
@@ -144,6 +264,19 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     if (accountMatch[2] === 'connection' && ctx.method === 'GET') {
       const account = await accounts.get(authContext.admin.id, accountId);
       return { statusCode: 200, body: success(ctx, connectionView(account)).body };
+    }
+    if (accountMatch[2] === 'connection/verify' && ctx.method === 'POST') {
+      const result = await mutation(runtime, ctx, authContext, accountId, async () => {
+        const verification = await runtime.xianyu.verifyLogin(authContext.admin.id, accountId);
+        if (verification.success) {
+          await credentials.verify({ adminId: authContext.admin.id, accountId, status: 'active', requestId: ctx.requestId, traceId: ctx.traceId });
+        } else if (verification.accountInvalid) {
+          const status = verification.errorCode === 'SESSION_EXPIRED' ? 'expired' : 'revoked';
+          try { await credentials.verify({ adminId: authContext.admin.id, accountId, status, requestId: ctx.requestId, traceId: ctx.traceId }); } catch { /* missing credential remains a verification failure */ }
+        }
+        return success(ctx, { success: verification.success, accountInvalid: verification.accountInvalid, errorCode: verification.errorCode, message: verification.message, response: verification.response });
+      });
+      return result;
     }
     if (accountMatch[2] && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, { items: await accounts.scopes(authContext.admin.id, accountId) }).body };
     if (accountMatch[2] && ctx.method === 'POST') return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await accounts.grantScope({ adminId: authContext.admin.id, accountId, scope: String(ctx.body.scope ?? 'read'), requestId: ctx.requestId, traceId: ctx.traceId }), 201));
@@ -182,5 +315,31 @@ function connectionView(account: { status: string; lastConnectedAt?: string }) {
 }
 
 function toQrSessionView(session: { id: string; accountId: string; status: string; expiresAt: string; failureCode?: string }) {
-  return { qrSessionId: session.id, accountId: session.accountId, status: session.status, expiresAt: session.expiresAt, pollAfterMs: 1500, errorCode: session.failureCode };
+  // Keep the historical login-session `id` field while exposing the
+  // canonical QR-specific alias used by the new auth entry point.
+  return { id: session.id, qrSessionId: session.id, accountId: session.accountId, status: session.status, expiresAt: session.expiresAt, pollAfterMs: 1500, errorCode: session.failureCode };
+}
+
+function readCredentialMetadata(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, item]) => typeof item === 'string').map(([key, item]) => [key, String(item)]));
+}
+
+function mapQrStatusToLoginStatus(status: string): 'waiting' | 'scanned' | 'succeeded' | 'expired' | 'failed' | 'cancelled' | 'verification_required' | undefined {
+  if (['waiting', 'scanned', 'succeeded', 'expired', 'failed', 'cancelled', 'verification_required'].includes(status)) return status as 'waiting' | 'scanned' | 'succeeded' | 'expired' | 'failed' | 'cancelled' | 'verification_required';
+  return undefined;
+}
+
+function credentialMutationView(credential: { id: string; accountId: string; platform: string; status: string; cookieHeader?: string; accessToken?: string; deviceId?: string; metadata: Record<string, string>; expiresAt?: string; lastVerifiedAt?: string; createdAt: string; updatedAt: string }) {
+  return {
+    id: credential.id,
+    accountId: credential.accountId,
+    platform: credential.platform,
+    status: credential.status,
+    fields: { cookieHeader: Boolean(credential.cookieHeader), accessToken: Boolean(credential.accessToken), deviceId: Boolean(credential.deviceId), metadataKeys: Object.keys(credential.metadata) },
+    expiresAt: credential.expiresAt,
+    lastVerifiedAt: credential.lastVerifiedAt,
+    createdAt: credential.createdAt,
+    updatedAt: credential.updatedAt,
+  };
 }

@@ -5,7 +5,7 @@ const { createAccountsApi } = await import('../src/features/accounts/api.ts');
 const port = 18500 + Math.floor(Math.random() * 300);
 const child = spawn(process.execPath, ['dist/index.js'], {
   cwd: new URL('../../server', import.meta.url),
-  env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', DATABASE_URL: '' },
+  env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', DATABASE_URL: '', XIANYU_QR_MODE: process.env.XIANYU_QR_MODE ?? 'stub' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let output = '';
@@ -97,7 +97,7 @@ try {
     body: JSON.stringify({ accountId: page.items[0].id }),
   });
   assert.equal(qrSession.body.data.status, 'waiting');
-  const qrRead = await request(`/api/v1/auth/qr-sessions/${qrSession.body.data.qrSessionId}?accountId=${encodeURIComponent(page.items[0].id)}`, { headers: { cookie } });
+  const qrRead = await request(`/api/v1/auth/qr-sessions/${qrSession.body.data.qrSessionId}`, { headers: { cookie } });
   assert.equal(qrRead.body.data.status, 'waiting');
   console.log('live accounts API integration passed');
 } finally {
