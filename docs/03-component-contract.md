@@ -26,7 +26,7 @@
 目标目录如下；这是阶段 3 的设计蓝图，不代表当前源码已经创建这些文件，也不要求本阶段编码：
 
 ```text
-SellerAgent/src/
+apps/web/src/
 ├─ app/
 │  ├─ AppShell.tsx
 │  ├─ route-registry.ts

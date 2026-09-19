@@ -121,7 +121,7 @@
 
 2026-09-19，按用户确认的“主体功能优先、继续执行、每个阶段提交并回写长期记忆”规则，开始阶段 5：
 
-1. 先实现 ENV-0 最小真实运行骨架：`server/` Node API、独立 Worker、统一 envelope、HttpOnly Session + CSRF 双提交、幂等记录、账号范围、最小审计和 Memory/Postgres store。
+1. 先实现 ENV-0 最小真实运行骨架：`apps/api/` Node API、独立 Worker、统一 envelope、HttpOnly Session + CSRF 双提交、幂等记录、账号范围、最小审计和 Memory/Postgres store。
 2. 保留阶段 2 逻辑迁移编号，仅落地账号首片与 execution/observability foundation；未实现的 Credential/Catalog/Coupon/Order 迁移继续后置，不创建空表伪实现。
 3. S4-VS1 前端首片只接账号只读列表，使用独立 `features/accounts` 领域模块和 canonical API adapter；高保真原型只作为视觉基线，不作为组件拆分依据。
 4. 真实跨层内存验证已经通过；Compose 文件解析通过，但 Docker Desktop Linux engine 未启动，容器级验证必须在环境恢复后补跑。

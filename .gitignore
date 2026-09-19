@@ -2,3 +2,15 @@
 .codex*
 .test.txt
 .workspace.txt
+
+# Dependencies and build output
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+*.tsbuildinfo
+apps/*/package-lock.json
+
+# Local environment files
+.env
+**/.env

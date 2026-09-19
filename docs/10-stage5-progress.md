@@ -5,17 +5,17 @@
 
 ## 已落地
 
-1. `server/`：Node HTTP API、独立 Worker、统一 API envelope、HttpOnly Session、CSRF 双提交、幂等记录、账号范围、最小 AuditEvent、Memory/Postgres Store。
-2. `server/migrations/`：保留阶段 2 逻辑编号，落地 `001_auth_accounts.sql`、`006_workspace_execution.sql`、`007_observability.sql`；Credential/Catalog/Coupon/Order 迁移继续后置。
-3. `SellerAgent/src/features/accounts/`：AccountVM、AccountConnectionVM、Accounts API adapter、controller、toolbar/table/state boundary，避免复用原型超级组件。
-4. `SellerAgent` live 模式已能通过 canonical `/api/v1/accounts` 读取统一 envelope，账号页面仍保持 mock/live 可替换。
+1. `apps/api/`：Node HTTP API、独立 Worker、统一 API envelope、HttpOnly Session、CSRF 双提交、幂等记录、账号范围、最小 AuditEvent、Memory/Postgres Store。
+2. `apps/api/migrations/`：保留阶段 2 逻辑编号，落地 `001_auth_accounts.sql`、`006_workspace_execution.sql`、`007_observability.sql`；Credential/Catalog/Coupon/Order 迁移继续后置。
+3. `apps/web/src/features/accounts/`：AccountVM、AccountConnectionVM、Accounts API adapter、controller、toolbar/table/state boundary，避免复用原型超级组件。
+4. `apps/web` live 模式已能通过 canonical `/api/v1/accounts` 读取统一 envelope；`SellerAgent/` 仅保留视觉原型。
 
 ## 已验证
 
-- `cd server && npm test`：通过，`env0 smoke passed`。
-- `cd server && npm run build`：通过。
-- `cd SellerAgent && npm run verify:stage5`：通过（typecheck、Vitest 6 tests、mock contract、Vite build）。
-- `cd SellerAgent && npm run test:integration`：通过，真实启动 `server/dist/index.js`，bootstrap 后创建账号，再由前端 canonical adapter 读取账号。
+- `npm run test:api`：通过，`env0 smoke passed`。
+- `npm run build:api`：通过。
+- `npm run typecheck:web && npm run test:web && npm run build:web`：通过（正式前端工作区）。
+- `npm run test:web`：通过，真实启动 `apps/api/dist/index.js`，bootstrap 后创建账号，再由前端 canonical adapter 读取账号。
 - `docker compose config --quiet`：通过。
 
 ## 当前阻断与后续
@@ -33,5 +33,5 @@
 - `65b48d6`：接通账号真实读取链路、统一 envelope adapter、Compose 与首片迁移骨架，并回写阶段记录。
 - `2de5ff7`：接通账号详情与连接状态读取；外部闲鱼结果未知时返回明确 `unknown`/`ADAPTER_UNKNOWN`，不伪造成功。
 - `325161f`：落地账号登录会话持久化状态机与 QR session 查询/取消/续期入口，当前只推进 waiting/expired/cancelled，不伪造外部扫码成功。
-- 2026-09-19 S4-VS1 增量：真实 `XIANYU_QR_MODE=real` 集成探针已通过创建、二维码 Data URL 返回、轮询 waiting 与取消；SellerAgent 已接入 QR modal、轮询、重试、取消和成功后刷新。自动化测试继续使用 stub，人工扫码成功、Cookie 落库与 `connection/verify` 仍待真实账号复核。`verification_required` 已保留为独立可恢复状态。
+- 2026-09-19 S4-VS1 增量：真实 `XIANYU_QR_MODE=real` 集成探针已通过创建、二维码 Data URL 返回、轮询 waiting 与取消；`apps/web` 已接入 QR modal、轮询、重试、取消和成功后刷新。自动化测试继续使用 stub，人工扫码成功、Cookie 落库与 `connection/verify` 仍待真实账号复核。`verification_required` 已保留为独立可恢复状态。
 - Git 提交：`c04b189`（`feat(阶段5): 接通闲鱼二维码登录与凭证校验`）。

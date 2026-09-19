@@ -120,8 +120,8 @@
 
 | 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
 | --- | --- | --- | --- | --- | --- |
-| S5-R1 | 基础设施 / 安全 | API、Worker、Session/CSRF、统一 envelope、幂等、账号范围、最小审计、Memory/Postgres store | env0_recon + root | PASS（内存运行） | `server/src/app.ts`、`server/src/services.ts`、`server/scripts/smoke.mjs`；`server/npm test` |
-| S5-R2 | 前端 / API 适配 | 账号只读页面按 AccountVM/Controller/StateBoundary 拆分，接入 canonical `/api/v1/accounts` envelope | account_frontend_recon + root | PASS | `SellerAgent/src/features/accounts/`、`SellerAgent/src/features/accounts/api.test.ts`、`SellerAgent/npm run verify:stage5`、`npm run test:integration` |
+| S5-R1 | 基础设施 / 安全 | API、Worker、Session/CSRF、统一 envelope、幂等、账号范围、最小审计、Memory/Postgres store | env0_recon + root | PASS（内存运行） | `apps/api/src/app.ts`、`apps/api/src/services.ts`、`apps/api/scripts/smoke.mjs`；`npm run test:api` |
+| S5-R2 | 前端 / API 适配 | 账号只读页面按 AccountVM/Controller/StateBoundary 拆分，接入 canonical `/api/v1/accounts` envelope | account_frontend_recon + root | PASS（迁移复核中） | `apps/web/src/features/accounts/`、`apps/web/src/features/accounts/api.test.ts`、`npm run typecheck:web`、`npm run test:web` |
 | S5-R3 | 运维 / 发布 | Compose 拓扑与迁移文件可解析，容器实跑与 PostgreSQL/Redis 持久化验证 | root | PARTIAL / BLOCKED | `docker compose config --quiet` 通过；Docker Desktop Linux engine 未启动，`docker compose up` 未完成 |
 
 阶段 5 当前结论：允许继续 S4-VS1 账号管理，但不得宣称 PostgreSQL/Redis 容器、QR/login-session、闲鱼真实 adapter、E2E 和视觉回归已完成；商品、卡券、订单仍冻结。

@@ -26,3 +26,8 @@ export const navItems: NavItem[] = [
   { key: 'orders', label: '订单管理', sub: '交易与发货', icon: 'cart' },
   { key: 'settings', label: '设置', sub: '策略与凭证', icon: 'gear' },
 ];
+
+/** URL skeleton retained while the prototype still switches pages in memory. */
+export function pathForPage(page: PageKey): `/${PageKey}` {
+  return `/${page}`;
+}

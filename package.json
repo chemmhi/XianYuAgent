@@ -1,0 +1,38 @@
+{
+  "name": "xianyu-agent",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "npm@11",
+  "engines": {
+    "node": ">=24",
+    "npm": ">=11"
+  },
+  "workspaces": [
+    "apps/web",
+    "apps/api"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:api": "npm --workspace apps/api run dev",
+    "dev:web": "npm --workspace apps/web run dev",
+    "dev:worker": "npm --workspace apps/api run dev:worker",
+    "build": "npm run build:api && npm run build:web",
+    "build:api": "npm --workspace apps/api run build",
+    "build:web": "npm --workspace apps/web run build",
+    "test": "npm run test:api && npm run test:web",
+    "test:api": "npm --workspace apps/api run test",
+    "test:web": "npm --workspace apps/web run test",
+    "verify": "npm run typecheck && npm test && npm run build && npm run compose:config && git diff --check",
+    "typecheck": "npm run typecheck:api && npm run typecheck:web",
+    "typecheck:api": "npm --workspace apps/api exec tsc -- --noEmit",
+    "typecheck:web": "npm --workspace apps/web run typecheck",
+    "start:api": "npm --workspace apps/api run start",
+    "start:worker": "npm --workspace apps/api run worker",
+    "compose:config": "docker compose config --quiet",
+    "compose:up": "docker compose up --build",
+    "compose:up:d": "docker compose up -d --build",
+    "compose:down": "docker compose down",
+    "compose:logs": "docker compose logs -f api worker",
+    "compose:ps": "docker compose ps"
+  }
+}

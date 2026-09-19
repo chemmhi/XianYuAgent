@@ -18,12 +18,13 @@
 
 - docs/PRD.md：产品目标、非目标、核心流程、页面需求、接口原则、Agent 闸门、领域实体和验收标准。
 - docs/TECHNICAL_SELECTION.md：TypeScript 全栈、React + Vite、NestJS + Fastify、PostgreSQL、Redis、Outbox、AgentRuntime + Pi Adapter 等技术基线。
-- SellerAgent/：React + Vite + TypeScript 高保真原型，作为页面结构、信息密度和交互基线；当前仅使用 mock/live API 门面。
+- SellerAgent/：React + Vite + TypeScript 高保真原型，作为页面结构、信息密度和交互基线；仅供视觉与交互参考，不是业务实现目录。
+- apps/web/：正式 React + Vite + TypeScript 前端应用，按阶段 3 组件契约承载真实页面、状态和 API adapter。
 - xianyu-admin-design-style/：设计 token、图标和组件设计参考。
 
 ### 2.2 尚不存在的交付物
 
-- 后端 apps/api、apps/worker 和业务模块目录；
+- 后端 apps/api（API + 独立 Worker 进程入口）和业务模块目录；
 - PostgreSQL 迁移、Redis、对象存储和 Docker Compose；
 - 当前项目自己的 xianyu 平台适配器；
 - OpenAPI / JSON Schema 契约、真实鉴权、Policy、Confirmation、Idempotency、Outbox 和 Agent Runtime；
@@ -167,7 +168,7 @@ pending、running、retrying、succeeded、failed、dead_letter、cancelling、c
 
 ## 8. 设计输入与视觉基线
 
-- 基线实现：SellerAgent/ 当前 React 原型；
+- 视觉基线：SellerAgent/ 当前 React 原型；正式实现：apps/web/；
 - 设计资源：xianyu-admin-design-style/assets/design-tokens.json、icon-symbols.svg 和组件参考文档；
 - 已知目标尺寸：README 中登记了桌面控制台和 390px 移动端构图；桌面精确 viewport 需在阶段 3 前固定；
 - 视觉基线决策：已确认以 SellerAgent 原型和 xianyu-admin-design-style design token 作为临时视觉基线；阶段 3 仍需固定桌面 viewport 和状态验收清单。

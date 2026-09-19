@@ -17,7 +17,7 @@
 ## 2. 系统上下文
 
 ```text
-管理员浏览器 / SellerAgent 原型
+管理员浏览器 / apps/web 正式前端
         |
         v
   Web API / WebSocket

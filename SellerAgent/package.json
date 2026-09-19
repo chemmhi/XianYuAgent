@@ -5,25 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "typecheck": "tsc --noEmit",
-    "build": "npm run typecheck && vite build",
-    "test:unit": "vitest run",
-    "test:contract": "node --experimental-strip-types --experimental-specifier-resolution=node scripts/test-mock-api.mjs",
-    "test:integration": "node --experimental-strip-types --experimental-specifier-resolution=node scripts/test-live-accounts-api.mjs",
-    "test": "npm run test:unit && npm run test:contract",
-    "verify:stage5": "npm run typecheck && npm test && npm run build",
+    "build": "tsc && vite build",
+    "test": "node --experimental-strip-types --experimental-specifier-resolution=node scripts/test-mock-api.mjs",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "6.1.1",
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "typescript": "7.0.2",
-    "vite": "8.2.2"
+    "@vitejs/plugin-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "typescript": "latest",
+    "vite": "latest"
   },
   "devDependencies": {
-    "@types/react": "19.2.18",
-    "@types/react-dom": "19.2.7",
-    "vitest": "5.0.1"
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7"
   }
 }
