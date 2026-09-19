@@ -152,7 +152,16 @@
 | S5-R9 | 开发环境 / 路由 | 浏览器 `/api/v1/auth/session` 是否因 Vite 未配置代理而落到 404 | root | PASS | `apps/web/vite.config.ts` 默认转发到 `http://127.0.0.1:8080`；未设置 `VITE_API_PROXY_TARGET` 时，经 Vite 代理请求返回 HTTP 200 canonical envelope |
 | S5-R10 | 前端 / 鉴权门禁 | `App` 根布局是否先经过 `AuthGate`，并按 session、bootstrap、login、error、authenticated 分支阻断或放行业务页面 | root | PASS（受控 E2E） | `apps/web/src/app/App.tsx`、`apps/web/src/features/auth/`；未认证 `/accounts` 不渲染业务面，bootstrap cookie 注入后才放行账号列表 |
 | S5-R11 | 外部适配器 / QR | 真实 QR 适配器是否保留 token 初始化、二维码生成、轮询、取消、超时和 `verification_required` | root | PARTIAL PASS | `apps/api/src/xianyu-qr-login.ts`、`apps/api/src/xianyu-mtop.ts`；受控 API smoke/adapter 测试通过，真实 APP 扫码和外部凭证落库仍待人工验收 |
-| S5-R12 | 浏览器 E2E / 交付门禁 | AuthGate 增量后是否可重新通过 Chrome/CDP、Cookie 登录和截图生成 | root | PASS（受控 harness） | `npm run test:e2e:chrome` 已通过：未认证 AuthGate 阻断、bootstrap cookie 注入、账号列表、登录方式选择、无旧创建弹窗、无模拟二维码、Cookie 登录和页面可见资料均通过；截图已重生成 |
+ | S5-R12 | 浏览器 E2E / 交付门禁 | AuthGate 增量后是否可重新通过 Chrome/CDP、Cookie 登录和截图生成 | root | PASS（受控 harness） | `npm run test:e2e:chrome` 已通过：未认证 AuthGate 阻断、bootstrap cookie 注入、账号列表、登录方式选择、无旧创建弹窗、无模拟二维码、Cookie 登录和页面可见资料均通过；截图已重生成 |
+
+### 10.5 二维码首开竞态修复（2026-09-19）
+
+| 评审编号 | 类型 | 发现 | 处理 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-I013 | 前端并发 / QR | 开发模式 `StrictMode` 重放 `AccountLoginModal` 首次 effect，导致首开并发发送两个 `POST /api/v1/auth/qr-sessions`；后一个请求可能收到 `IDEMPOTENCY_IN_PROGRESS`，覆盖前一个成功结果并显示“二维码生成失败” | QR controller 增加 in-flight promise 去重，弹窗增加一次性自动启动保护；保留 `StrictMode`，不以关闭开发检查规避问题 | CLOSED | `apps/web/src/features/accounts/qr-login/controller.ts`、`apps/web/src/features/accounts/components/AccountLoginModal.tsx`、`apps/web/src/features/accounts/qr-login/controller.test.ts` |
+| S5-R13 | 回归验证 | 首次打开二维码弹窗只能发出一个创建请求，且后续重试仍可执行 | Chrome/CDP E2E 监听 `Network.requestWillBeSent` 并断言首开创建请求数为 1；前端单测验证并发调用共享同一 promise；API smoke、构建和类型检查通过 | PASS（受控环境） | `npm run test:e2e:chrome`、`npm run test:web`、`npm run test:api`、`npm run build`、`npm run typecheck:web` |
+
+本项只关闭前端首开竞态，不替代真实闲鱼 APP 扫码、外部凭证落库和人工验收门禁。
 
 当前增量复核结论：Vite 代理 404 根因已关闭；AuthGate 代码接入和受控浏览器门禁已通过；根 `npm run verify` 已通过。Compose 已完成容器健康与账号持久化复读，但完整迁移回滚/Testcontainers/发布级恢复、真实闲鱼 APP 扫码与外部 Cookie 验证仍待人工复核。
 

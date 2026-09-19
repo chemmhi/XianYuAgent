@@ -16,6 +16,24 @@ export interface QrLoginController {
   cancel: () => Promise<void>;
 }
 
+/**
+ * Runs one async action at a time and shares the in-flight promise with
+ * concurrent callers. This protects QR creation from React StrictMode
+ * re-running mount effects and from accidental double clicks.
+ */
+export function createInFlightDedupe() {
+  let active: Promise<void> | null = null;
+  return (run: () => Promise<void>): Promise<void> => {
+    if (active) return active;
+    let current: Promise<void>;
+    current = run().finally(() => {
+      if (active === current) active = null;
+    });
+    active = current;
+    return current;
+  };
+}
+
 function toQrLoginError(error: unknown): QrLoginError {
   const code = error instanceof Error && error.message ? error.message : 'QR_LOGIN_FAILED';
   return {
@@ -31,6 +49,8 @@ export function useQrLoginController(options: { api: AccountsApi; accountId?: st
   const [model, setModel] = useState<QrLoginModel>(createInitialQrLoginModel);
   const requestId = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startDedupeRef = useRef<ReturnType<typeof createInFlightDedupe> | null>(null);
+  if (!startDedupeRef.current) startDedupeRef.current = createInFlightDedupe();
 
   const clearTimer = useCallback(() => {
     if (timerRef.current) {
@@ -47,20 +67,22 @@ export function useQrLoginController(options: { api: AccountsApi; accountId?: st
     });
   }, []);
 
-  const start = useCallback(async () => {
-    if (!enabled) return;
-    clearTimer();
-    const currentRequest = ++requestId.current;
-    setModel({ phase: 'creating', session: null, error: null });
-    try {
-      const session = await api.createQrSession(accountId || undefined);
-      if (currentRequest !== requestId.current) return;
-      setActiveAccountId(session.accountId ?? '');
-      applySession(session);
-    } catch (error) {
-      if (currentRequest !== requestId.current) return;
-      setModel({ phase: 'failed', session: null, error: toQrLoginError(error) });
-    }
+  const start = useCallback(() => {
+    if (!enabled) return Promise.resolve();
+    return startDedupeRef.current!(async () => {
+      clearTimer();
+      const currentRequest = ++requestId.current;
+      setModel({ phase: 'creating', session: null, error: null });
+      try {
+        const session = await api.createQrSession(accountId || undefined);
+        if (currentRequest !== requestId.current) return;
+        setActiveAccountId(session.accountId ?? '');
+        applySession(session);
+      } catch (error) {
+        if (currentRequest !== requestId.current) return;
+        setModel({ phase: 'failed', session: null, error: toQrLoginError(error) });
+      }
+    });
   }, [accountId, api, applySession, clearTimer, enabled]);
 
   const refresh = useCallback(async () => {

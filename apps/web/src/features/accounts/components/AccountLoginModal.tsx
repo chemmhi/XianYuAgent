@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AccountsApi } from '../api';
 import type { AccountVM } from '../types';
 import { useQrLoginController } from '../qr-login/controller';
@@ -10,9 +10,17 @@ import { PasswordLoginForm } from './PasswordLoginForm';
 export function AccountLoginModal({ api, account, onClose, onCompleted }: { api: AccountsApi; account?: AccountVM; onClose: () => void; onCompleted: () => void }) {
   const [method, setMethod] = useState<AccountLoginMethod>('qr');
   const qrController = useQrLoginController({ api, accountId: account?.id, enabled: method === 'qr' });
+  const autoStartedRef = useRef(false);
 
   useEffect(() => {
-    if (method === 'qr' && qrController.model.phase === 'idle') void qrController.start();
+    if (method !== 'qr') {
+      autoStartedRef.current = false;
+      return;
+    }
+    if (!autoStartedRef.current && qrController.model.phase === 'idle') {
+      autoStartedRef.current = true;
+      void qrController.start();
+    }
   }, [method, qrController.model.phase, qrController.start]);
 
   useEffect(() => {
