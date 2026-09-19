@@ -35,7 +35,7 @@ export default function App() {
   }, []);
   const authApi = useMemo(() => createAuthApi({ get: transport.get, post: transport.post }), [transport]);
   const accountsApi = useMemo(() => createAccountsApi({ get: transport.get, post: transport.post }), [transport]);
-  const productsApi = useMemo(() => createProductsApi({ get: transport.get }), [transport]);
+  const productsApi = useMemo(() => createProductsApi({ get: transport.get, post: transport.post, patch: transport.patch }), [transport]);
 
   useEffect(() => {
     const handlePopState = () => setPage(pageFromPath(window.location.pathname));
@@ -70,7 +70,7 @@ function AuthenticatedShell({ page, activeNav, accountsApi, productsApi, navigat
         </aside>
         <div className="desktop-body">
           <header className="topbar"><div className="topbar-copy"><strong>{activeNav.label}</strong><span>{activeNav.sub} · 管理员工作空间</span></div><label className="search-box"><span aria-hidden="true">⌕</span><input aria-label="全局搜索" placeholder="搜索账号、商品或订单" /></label><div className="top-actions"><button className="icon-button" type="button" aria-label="通知"><span aria-hidden="true">♢</span><b>3</b></button><div className="user-chip"><div className="avatar">管</div><span>管理员</span></div></div></header>
-          <main>{page === 'accounts' ? <AccountsPage api={accountsApi} /> : page === 'products' ? <ProductsPage api={productsApi} /> : <PlaceholderPage page={page} />}</main>
+          <main>{page === 'accounts' ? <AccountsPage api={accountsApi} /> : page === 'products' ? <ProductsPage api={productsApi} accountsApi={accountsApi} /> : <PlaceholderPage page={page} />}</main>
         </div>
       </div>
     </div>

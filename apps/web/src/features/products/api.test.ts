@@ -29,4 +29,21 @@ describe('products canonical API adapter', () => {
     expect(result.items).toHaveLength(1);
     expect(result.items[0]?.title).toContain('GitHub');
   });
+
+  it('sends canonical create and patch headers for draft writes', async () => {
+    const calls: Array<{ method: string; path: string; body?: unknown; headers?: Headers }> = [];
+    const api = createProductsApi({
+      async get<T>() { return { success: true, data: { items: [], total: 0, page: 1, pageSize: 20, totalPages: 1 } } as T; },
+      async post<T>(path: string, body?: unknown, init?: RequestInit) { calls.push({ method: 'POST', path, body, headers: new Headers(init?.headers) }); return { success: true, data: { id: 'product-1', accountId: 'account-1', title: '草稿', status: 'draft', configVersion: 1, updatedAt: '2026-09-20T00:00:00.000Z' } } as T; },
+      async patch<T>(path: string, body?: unknown, init?: RequestInit) { calls.push({ method: 'PATCH', path, body, headers: new Headers(init?.headers) }); return { success: true, data: { id: 'product-1', accountId: 'account-1', title: '草稿2', status: 'draft', configVersion: 2, updatedAt: '2026-09-20T00:00:00.000Z' } } as T; },
+    });
+
+    await api.createDraft({ accountId: 'account-1', title: '草稿', priceMinor: 1990 }, { idempotencyKey: 'create-key' });
+    await api.updateDraft('product-1', { title: '草稿2' }, { configVersion: 1, idempotencyKey: 'update-key' });
+    expect(calls[0]).toMatchObject({ method: 'POST', path: '/api/v1/products' });
+    expect(calls[0]?.headers?.get('Idempotency-Key')).toBe('create-key');
+    expect(calls[1]).toMatchObject({ method: 'PATCH', path: '/api/v1/products/product-1' });
+    expect(calls[1]?.headers?.get('Idempotency-Key')).toBe('update-key');
+    expect(calls[1]?.headers?.get('If-Match-Version')).toBe('1');
+  });
 });

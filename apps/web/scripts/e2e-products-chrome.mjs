@@ -102,8 +102,8 @@ async function run() {
   const account = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `products-e2e-${process.pid}` });
   await apiRuntime.store.createProduct({ adminId, accountId: account.id, externalProductRef: `ITEM-${process.pid}`, title: 'Chrome E2E 商品', description: '商品详情来自独立 detail API。', categoryCode: 'digital', attributes: { source: 'chrome-e2e' }, priceMinor: 3990, status: 'published' });
   apiRuntime.xianyu.fetchItemsAll = async () => {
-    const item = { externalProductRef: `SYNC-${process.pid}`, title: 'Chrome E2E 同步商品', description: '来自闲鱼同步 fixture', categoryCode: 'digital', priceMinor: 1290, detailUrl: `https://www.goofish.com/item?id=SYNC-${process.pid}`, imageUrls: ['https://img.example/sync.jpg'], attributes: { source: 'chrome-sync-e2e' }, sourcePayloadDigest: `sync-${process.pid}` };
-    return { pages: [{ success: true, accountInvalid: false, cookieHeader: '', items: [item], pageNumber: 1, pageSize: 20, totalCount: 1, totalPages: 1, hasMore: false }], items: [item], hasMore: false };
+    const items = Array.from({ length: 29 }, (_, index) => ({ externalProductRef: `SYNC-${process.pid}-${index + 1}`, title: `Chrome E2E 同步商品 ${index + 1}`, description: '来自闲鱼同步 fixture', categoryCode: 'digital', priceMinor: 1290 + index, detailUrl: `https://www.goofish.com/item?id=SYNC-${process.pid}-${index + 1}`, imageUrls: ['https://img.example/sync.jpg'], attributes: { source: 'chrome-sync-e2e' }, sourcePayloadDigest: `sync-${process.pid}-${index + 1}` }));
+    return { pages: [{ success: true, accountInvalid: false, cookieHeader: '', items, pageNumber: 1, pageSize: 20, totalCount: items.length, totalPages: 1, hasMore: false }], items, hasMore: false };
   };
   const cookie = cookiesFrom(bootstrap);
   spawnProcess(npm, npmArgs(['--workspace', 'apps/web', 'run', 'dev', '--', '--host', '127.0.0.1', '--port', String(webPort)]), { env: { ...process.env, VITE_API_MODE: 'live', VITE_API_BASE_URL: '', VITE_API_PROXY_TARGET: apiUrl } });
@@ -114,13 +114,14 @@ async function run() {
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
   for (const pair of cookie.split('; ')) { const [name, ...valueParts] = pair.split('='); await cdp.send('Network.setCookie', { name, value: valueParts.join('='), url: `${webUrl}/` }); }
-  await cdp.send('Page.navigate', { url: `${webUrl}/products?accountId=${encodeURIComponent(account.id)}` });
+  await cdp.send('Page.navigate', { url: `${webUrl}/products` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'products page');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('商品目录'), 'products list');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 商品'), 'product row');
+  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("[data-testid=product-account-select]")?.value ?? ""')).includes(account.id), 'product account scope');
   const syncButton = await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=sync-products]"); if (!button || button.disabled) return false; button.click(); return true; })()');
   if (!syncButton) throw new Error('sync products button missing or disabled');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 同步商品'), 'synced product row');
+  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("[data-testid=products-total]")?.textContent ?? ""')).includes('30'), '29 synced products plus local product');
   await captureViewport(cdp, 1440, 900, 'products-desktop-1440x900.png');
   const openedCreate = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((item) => item.textContent?.includes("新建商品")); if (!button) return false; button.click(); return true; })()');
   if (!openedCreate) throw new Error('create draft button missing');

@@ -191,6 +191,15 @@
 | S5-R19 | 浏览器 / 端到端 | 本机 Chrome/CDP 从 `/products` 进入真实 API，读取商品列表、打开详情、刷新后确认商品仍可见 | root | PASS | `apps/web/scripts/e2e-products-chrome.mjs`；`npm run test:e2e:chrome:products`；`docs/evidence/stage5/S4-VS2/screenshots/` |
 | S5-R20 | 范围 / 发布门禁 | 商品创建/编辑、SKU、素材、同步/拉取、发布确认、Policy、Outbox 是否被错误宣称完成 | root | PARTIAL PASS | 首片明确只读；完整 S4-VS2 仍保持开放，后续必须补写入状态机、外部同步和发布链路后再复审 |
 
+### 10.10 S4-VS2 商品同步入口账号上下文复核（2026-09-19）
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R25 | 前端 / 账号上下文 | 普通 `/products` 入口是否自动加载账号、选择可用账号、刷新列表并启用同步按钮 | root + inspect_sync_ui_bug | PASS | `apps/web/src/features/products/account-scope.ts`、`ProductsPage.tsx`、`ProductToolbar.tsx`；`npm run typecheck:web`、`npm --workspace apps/web run test` |
+| S5-R26 | 浏览器 / 端到端 | 无 `accountId` query 时是否能选择账号、触发同步并展示 29 件同步商品 | root + inspect_sync_backend_bug | PASS（fixture adapter） | `apps/web/scripts/e2e-products-chrome.mjs`；`npm run test:e2e:chrome:products` |
+| S5-R27 | 范围 / 发布门禁 | 修复是否误触发真实发布或修改闲鱼发布链路 | root | PASS | 仅修复账号上下文和同步入口；仍只调用 `POST /api/v1/products/sync`，未接入发布 |
+
+本轮结论：已关闭“普通 `/products` 入口同步按钮置灰”问题；真实闲鱼账号的 29 件商品仍需在当前已登录 Chrome / Compose 环境执行人工外部验收，fixture E2E 不替代外部平台验收。
+
 ### 10.9 S4-VS2 商品同步只读切片复核（2026-09-19）
 
 | 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
