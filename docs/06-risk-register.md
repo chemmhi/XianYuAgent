@@ -20,9 +20,15 @@
 | R-011 | 原型 liveApi 使用 `localStorage.auth_token`，与生产 HttpOnly Cookie 会话基线不一致 | P1 | 中 | 真实鉴权可能出现会话泄露、生命周期和退出语义不一致 | 安全 / 后端负责人 | 阶段 0 仅登记为原型例外；阶段 1/2 改为服务端会话、HttpOnly Cookie、Secure、SameSite，并补真实鉴权集成与 E2E | 阶段 1/2 鉴权实现前 | 开放 |
 
 | S3-I001 | 当前原型部分页面使用静态数组，尚未接入阶段 2 全量 API | P1 | 高 | 影响首个真实前端切片 | 前端负责人 | 阶段 3 已冻结 API 映射；阶段 5 先接订单交付纵向切片 | 阶段 5 首切片前 | 开放 |
-| S3-I002 | 移动原型对 Products/Coupons/Orders 尚未形成独立页面组合 | P2 | 中 | 影响移动端设计实现一致性 | 前端负责人 | 阶段 3 已冻结卡片化/抽屉化方案，阶段 4 纳入切片计划 | 阶段 4/5 | 开放 |
+| S3-I002 | 移动原型对 Products/Coupons/Orders 尚未形成独立页面组合 | P1 | 中 | 影响移动端正式页面功能承载 | 前端负责人 | 阶段 4/5 补齐三组移动页面，复用同一 controller/ViewModel，不允许回退 Dashboard | 阶段 4/5 前置 | 开放，阻断阶段 3 |
 | S3-I003 | 原型仍使用 `localStorage.auth_token`，与生产 Session 基线不一致 | P1 | 中 | 影响真实鉴权和退出语义 | 安全 / 后端负责人 | 阶段 3 只记录为原型例外；阶段 5/6 接入服务端 Session + HttpOnly Cookie | 阶段 5/6 | 开放 |
 | S3-I004 | 真实 WebSocket、CredentialStore、Outbox 和截图回归尚未执行 | P1 | 中 | 影响端到端与视觉验收 | 后端 / QA / 前端负责人 | 阶段 5–7 按纵向切片补集成、E2E、安全和视觉证据 | 阶段 5–7 | 开放 |
+| S3-I005 | `App.tsx` 集中承载路由、全局反馈、业务动作分派和 DOM click capture，形成超级组件 | P1 | 高 | 组件无法独立测试和演进 | 前端负责人 | 拆 AppShell/AuthGate/Provider/Controller；改为 typed callback/command | 阶段 4 组件骨架完成前 | 开放，阻断阶段 3 |
+| S3-I006 | Settings、Workspace、Auth、ProductEditor 等组件职责过宽，缺少独立 Controller/ViewModel/StateBoundary | P1 | 高 | 数据流和职责边界不可验证 | 前端负责人 | 按 `docs/03-component-contract.md` 拆分并补 props/事件契约 | 阶段 4 组件契约完成前 | 开放，阻断阶段 3 |
+| S3-I007 | `api/contracts.ts` 与阶段 2 canonical RunStatus、Order 四态不一致 | P1 | 高 | 状态渲染会产生错误映射 | 前端 / API 负责人 | 增加 domain adapter 和 canonical ViewModel，禁止页面自行推断状态 | 阶段 4 adapter 完成前 | 开放，阻断阶段 3 |
+| S3-I008 | Products/Coupons/Orders 移动端页面回退 Dashboard，功能承载不完整 | P1 | 中 | 移动端无法覆盖正式页面旅程 | 前端负责人 | 增加三组移动页面，复用 controller/ViewModel，不复制 API 逻辑 | 阶段 4/5 | 开放，阻断阶段 3 |
+| S3-I009 | FirstRun bootstrap 与消息 handoff 尚无阶段 2 canonical endpoint | P1 | 中 | 路由与命令无法形成可执行闭环 | API / 前端负责人 | 补齐 endpoint、request/response、scope、幂等和审计契约 | 阶段 3 复审前 | 开放，阻断阶段 3 |
+| S3-I010 | ControllerResult、canonical ViewModel 和错误码映射尚未冻结为可调用类型 | P1 | 高 | 页面会再次自行拼装状态并重现超级组件 | 前端 / API 负责人 | 冻结泛型 command contract、完整 VM inventory 和 canonical error map | 阶段 3 复审前 | 开放，阻断阶段 3 |
 
 ## 风险分级说明
 

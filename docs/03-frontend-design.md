@@ -2,7 +2,7 @@
 
 - 文档版本：v0.1
 - 更新日期：2026-09-19
-- 状态：PASS（阶段 3 前端页面、路由、组件、状态、数据流和 API 映射已冻结）
+- 状态：REOPENED / FAIL（概念页面契约已完成，组件职责与实现级数据流仍待细化复审）
 - 前置门禁：阶段 2 PASS（`docs/02-data-api.md`、`docs/02-database-schema.md`）
 - 适用范围：前端信息架构、响应式布局、组件边界、状态归属、API 映射和可访问性
 - 非范围：真实后端、数据库、WebSocket 服务、Pi Runtime、闲鱼适配器和前后端联调实现
@@ -293,18 +293,23 @@ App
 - 1440×900 与 390×844 viewport 已冻结，token 来源和视觉边界已记录。
 - 设计契约不依赖未定义字段、未定义接口或 Pi/闲鱼原始 API。
 - `knowledge` / `review` 无一级入口；残留“Knowledge Plugin / 知识补充”等仅表示插件能力或风险任务，不产生独立页面。
+- 详细组件职责、模块路径、ViewModel、Controller、路由/API、数据流和禁止超级组件规则见 `docs/03-component-contract.md`。
 
 ### 11.2 遗留风险
 
 | 编号 | 风险 | 级别 | 处理阶段 |
 | --- | --- | --- | --- |
 | S3-I001 | 当前原型部分页面仍使用静态数组，尚未接入阶段 2 全量 API | P1 | 阶段 5 首个前端纵向切片 |
-| S3-I002 | 当前移动原型对 Products/Coupons/Orders 复用 Dashboard fallback，需要按本契约补齐移动页面 | P2 | 阶段 4/5 |
+| S3-I002 | 当前移动原型对 Products/Coupons/Orders 复用 Dashboard fallback，需要按本契约补齐移动页面 | P1 | 阶段 4/5 前置 |
 | S3-I003 | 原型 liveApi 仍读取 `localStorage.auth_token` | P1 | 阶段 5/6 真实鉴权集成 |
 | S3-I004 | 真实 WebSocket、CredentialStore、Outbox 和视觉回归尚未执行 | P1 | 阶段 5–7 |
+| S3-I005 | `App.tsx` 集中承载路由、全局反馈、业务动作分派和 DOM click capture，形成超级组件 | P1 | 阶段 4 组件拆分前置 |
+| S3-I006 | Settings、Workspace、Auth、ProductEditor 等组件职责过宽，缺少独立 Controller/ViewModel/StateBoundary | P1 | 阶段 4 组件契约与骨架 |
+| S3-I007 | `api/contracts.ts` 与阶段 2 canonical RunStatus、Order 四态不一致 | P1 | 阶段 4 adapter 与类型收敛 |
+| S3-I008 | Products/Coupons/Orders 移动端页面未实现，组件树与功能承载不完整 | P1 | 阶段 4/5 |
 
-上述风险均属于后续实现/验证，不阻断本阶段设计契约；若出现越权、凭证明文泄露、订单重复交付或无法回滚的设计变更，必须重新打开阶段 3 门禁。
+S3-I005 至 S3-I008 为当前阶段 3 门禁阻断项；在详细组件契约、ViewModel、API façade、移动端对等页面和独立复审完成前，不得进入阶段 4 执行门禁。
 
 ## 12. 阶段 3 下一步
 
-阶段 3 PASS 后进入阶段 4：建立依赖图与纵向切片计划。首个切片建议从“订单交付预览 → Confirmation → Outbox 结果”开始，因为它同时验证账号范围、deliveryScope、库存锁、幂等、敏感交付和失败恢复边界。
+阶段 3 门禁已重新打开。必须先完成 `docs/03-component-contract.md` §9 的 DoD，独立评审确认无超级组件、无隐式文案分派、无页面直连原始字段后，才能重新判定 PASS 并进入阶段 4。

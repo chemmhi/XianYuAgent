@@ -53,7 +53,15 @@
 | S3-R3 | 质量 / 安全 / 运维 | 权限一致性、敏感数据边界、可访问性、viewport、回滚与后续验证边界 | root + stage3_review | PASS | `docs/03-frontend-design.md` §2、§5、§8、§9、§11；`docs/07-visual-acceptance.md` |
 | S3-R4 | 视觉 | SellerAgent 原型、design token、1440×900 / 390×844、状态映射可追踪性 | stage3_review | PASS | `xianyu-admin-design-style/assets/design-tokens.json`；`docs/03-frontend-design.md` §2、§8、§10 |
 
-阶段 3 门禁：PASS。允许进入阶段 4 迭代计划与纵向切片编排；真实后端、数据库、API、Worker 和前后端联调仍不得提前创建。
+阶段 3 初审结论：PASS。但该结论仅覆盖页面旅程和概念映射，不覆盖实现级组件职责落地。
+
+### 5.1 阶段 3 组件职责复核
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S3-R5 | 架构 / 组件 / 数据流 | 是否存在超级组件、页面职责是否拆分、Controller/ViewModel/API/移动端是否完整 | component_split_review + feature_coverage_review | FAIL | `SellerAgent/src/App.tsx` §382–§460；`docs/03-component-contract.md`；`SellerAgent/src/api/xianyuApi.ts` |
+
+阶段 3 门禁：REOPENED / FAIL。未完成详细组件契约、canonical ViewModel、API façade、移动端对等页面和独立复审前，不得进入阶段 4 执行门禁。
 
 ## 6. 阶段 2 人工裁决关闭记录
 
@@ -67,12 +75,18 @@
 
 ## 7. 当前失败点（供人工复核）
 
-当前没有未关闭的 P0-P2 阻断。保留以下 P2/后续工程风险，不阻塞阶段 3：
+当前存在阶段 3 的 P1 阻断，需先修复后复审：
 
 | 编号 | 风险 | 级别 | 处理阶段 |
 | --- | --- | --- | --- |
 | S1-I004 | local/test/staging/production 的完整拓扑、环境隔离和回滚演练尚未实现 | P2 | 阶段 7/8 |
 | R-011 | 原型 `localStorage.auth_token` 尚未替换为真实 Session + HttpOnly Cookie | P1 | 阶段 5/6 |
 | R-008 | CredentialStore 字段加密、备份与轮换演练尚未实现 | P1 | 阶段 7 |
+| S3-I005 | App.tsx 集中路由、全局反馈、业务动作和 DOM click capture，形成超级组件 | P1 | 阶段 4 组件拆分前置 |
+| S3-I006 | Settings、Workspace、Auth、ProductEditor 等职责过宽，缺少独立 Controller/ViewModel/StateBoundary | P1 | 阶段 4 组件契约与骨架 |
+| S3-I007 | `api/contracts.ts` 与阶段 2 canonical RunStatus、Order 四态不一致 | P1 | 阶段 4 adapter 与类型收敛 |
+| S3-I008 | Products/Coupons/Orders 移动端页面回退 Dashboard，功能承载不完整 | P1 | 阶段 4/5 |
+| S3-I009 | FirstRun bootstrap 与消息 handoff 尚无阶段 2 canonical endpoint | P1 | 阶段 3 API 契约补齐 |
+| S3-I010 | ControllerResult、canonical ViewModel 和错误码映射尚未冻结为可调用类型 | P1 | 阶段 3 类型与 adapter 补齐 |
 
 如出现新的越权、凭证明文泄露、库存重复扣减、不可回滚迁移或核心链路不可用，必须重新打开阶段门禁并人工复核。

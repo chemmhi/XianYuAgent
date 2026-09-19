@@ -57,6 +57,16 @@
 
 阶段 3 评审结论：S3-R1、S3-R2、S3-R3、S3-R4 均 PASS；阶段状态更新为 PASS，允许进入阶段 4 迭代计划与纵向切片编排。
 
+## 阶段 3 门禁重新打开
+
+2026-09-19，经组件职责复核，用户裁决阶段 3 门禁未通过，原因不是页面数量不足，而是组件边界、数据流和 API 适配尚未达到可执行细节：
+
+1. 拒绝超级组件；`App.tsx` 不得继续集中路由、业务动作、全局反馈和 DOM click capture。
+2. 每个页面必须明确 Container、Controller、canonical ViewModel、View、StateBoundary 和 typed commands。
+3. 组件必须明确数据来源、状态持有者、缓存失效范围、错误处理和路由/API 映射。
+4. `Settings`、`Workspace`、`Auth`、`ProductEditor` 等宽职责组件必须拆分为独立模块；移动端 Products/Coupons/Orders 不得回退 Dashboard。
+5. 阶段 3 在 `docs/03-component-contract.md` §9 DoD 完成并经独立复审前保持 `REOPENED / FAIL`，不得进入阶段 4 执行门禁。
+
 ## 长期执行规则
 
 - 已确认的决策不重复询问；只有出现越权、泄密、不可回滚、库存重复扣减或核心链路不可用等新高风险证据时，才重新发起人工裁决。
