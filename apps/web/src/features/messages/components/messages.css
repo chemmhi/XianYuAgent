@@ -114,8 +114,8 @@
 /* High-fidelity messages surface: align the live page with SellerAgent tokens. */
 .messages-layout.card.panel {
   grid-template-columns: 318px minmax(0, 1fr);
-  min-height: 680px;
-  height: clamp(680px, calc(100dvh - 180px), 760px);
+  min-height: 0;
+  height: calc(100dvh - 44px);
   padding: 0;
   border-radius: 10px;
   border-color: var(--border);
