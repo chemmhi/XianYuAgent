@@ -62,14 +62,13 @@ export function buildOrderFixture({ processId = process.pid, accountId, secondar
 }
 
 export async function seedOrderFixture(runtime, { adminId, accountId, secondaryAccountId, processId = process.pid } = {}) {
-  const createOrder = runtime?.store?.createOrder;
-  if (typeof createOrder !== 'function') {
+  if (typeof runtime?.store?.createOrder !== 'function') {
     throw new Error('Orders E2E fixture requires runtime.store.createOrder()');
   }
   const fixture = buildOrderFixture({ processId, accountId, secondaryAccountId });
   const created = [];
   for (const order of fixture) {
-    created.push(await createOrder({ adminId, order }));
+    created.push(await runtime.store.createOrder({ adminId, order }));
   }
   return { fixture, created };
 }

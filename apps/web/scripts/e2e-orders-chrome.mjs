@@ -224,6 +224,8 @@ async function run() {
   const localRefreshMark = cdp.events.length;
   if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=refresh-orders]"); if (!button || button.disabled) return false; button.click(); return true; })()')) throw new Error('local orders refresh button missing or disabled');
   await waitFor(async () => apiEvent(cdp.events.slice(localRefreshMark), 'GET', '/api/v1/orders'), 'local orders refresh request');
+  await waitFor(async () => Boolean(await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=refresh-orders]"); return Boolean(button && !button.disabled); })()')), 'local orders refresh completion');
+  await waitFor(async () => Boolean(await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=sync-orders]"); return Boolean(button && !button.disabled); })()')), 'Xianyu orders refresh enabled');
   if (cdp.events.slice(localRefreshMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.url?.includes('/api/v1/orders/refresh'))) throw new Error('local refresh called Xianyu refresh endpoint');
 
   const syncMark = cdp.events.length;
