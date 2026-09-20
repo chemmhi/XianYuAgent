@@ -28,6 +28,10 @@ function pageFromPath(pathname: string): PageKey {
   return navItems.some((item) => item.key === page) ? page : 'dashboard';
 }
 
+export function resolveDashboardMode(apiModeValue: typeof apiMode, dashboardModeOverride?: string): typeof apiMode {
+  return dashboardModeOverride ? (dashboardModeOverride === 'live' ? 'live' : 'mock') : apiModeValue;
+}
+
 function iconFor(name: string) {
   const paths: Record<string, string> = {
     grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
@@ -44,6 +48,7 @@ function iconFor(name: string) {
 
 export default function App() {
   const [page, setPage] = useState<PageKey>(() => pageFromPath(window.location.pathname));
+  const dashboardMode = resolveDashboardMode(apiMode, import.meta.env.VITE_DASHBOARD_MODE);
   const transport = useMemo(() => {
     const transport = createHttpClient({ baseUrl: import.meta.env.VITE_API_BASE_URL ?? '', credentials: 'include' });
     return transport;
@@ -56,7 +61,7 @@ export default function App() {
   const workspaceApi = useMemo(() => createWorkspaceApi({ get: transport.get, post: transport.post }, { baseUrl: import.meta.env.VITE_API_BASE_URL ?? '' }), [transport]);
   const ordersApi = useMemo(() => createOrdersApi({ get: transport.get, post: transport.post }), [transport]);
   const settingsApi = useMemo(() => createCredentialApi({ get: transport.get, post: transport.post, patch: transport.patch }), [transport]);
-  const dashboardApi = useMemo(() => import.meta.env.VITE_DASHBOARD_MODE === 'live' ? createDashboardApi({ get: transport.get }) : createMockDashboardApi(), [transport]);
+  const dashboardApi = useMemo(() => dashboardMode === 'live' ? createDashboardApi({ get: transport.get }) : createMockDashboardApi(), [dashboardMode, transport]);
 
   useEffect(() => {
     const handlePopState = () => setPage(pageFromPath(window.location.pathname));
@@ -78,7 +83,7 @@ export default function App() {
 }
 
 function AuthenticatedShell({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, dashboardApi, navigate }: { page: PageKey; accountsApi: ReturnType<typeof createAccountsApi>; productsApi: ReturnType<typeof createProductsApi>; couponsApi: ReturnType<typeof createCouponsApi>; messagesApi: ReturnType<typeof createMessagesApi>; workspaceApi: ReturnType<typeof createWorkspaceApi>; ordersApi: ReturnType<typeof createOrdersApi>; settingsApi: ReturnType<typeof createCredentialApi>; dashboardApi: ReturnType<typeof createDashboardApi>; navigate: (next: PageKey) => void }) {
-  if (page === 'dashboard') return <DashboardPage api={dashboardApi} apiMode={import.meta.env.VITE_DASHBOARD_MODE === 'live' ? apiMode : 'mock'} onNavigate={navigate} />;
+  if (page === 'dashboard') return <DashboardPage api={dashboardApi} apiMode={resolveDashboardMode(apiMode, import.meta.env.VITE_DASHBOARD_MODE)} onNavigate={navigate} />;
   return (
     <div className="app-viewport">
       <div className={`desktop-shell${page === 'products' ? ' products-shell' : page === 'accounts' ? ' accounts-shell' : page === 'settings' ? ' settings-shell' : ''}`}>

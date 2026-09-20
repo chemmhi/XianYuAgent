@@ -173,7 +173,8 @@ async function run() {
   browserSessionId = sessionContext.session.id;
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   spawnProcess(npm, ['--workspace', 'apps/web', 'run', 'dev', '--', '--host', '127.0.0.1', '--port', String(webPort)], {
-    env: { ...process.env, VITE_API_MODE: 'live', VITE_DASHBOARD_MODE: 'live', VITE_API_BASE_URL: '', VITE_API_PROXY_TARGET: apiUrl },
+    // Dashboard should inherit live mode from VITE_API_MODE unless an explicit mock override is requested.
+    env: { ...process.env, VITE_API_MODE: 'live', VITE_API_BASE_URL: '', VITE_API_PROXY_TARGET: apiUrl },
   });
   await waitFor(async () => (await fetch(`${webUrl}/dashboard`)).ok, 'Vite frontend');
 
