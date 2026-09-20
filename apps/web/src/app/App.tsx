@@ -69,7 +69,7 @@ export default function App() {
 function AuthenticatedShell({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, navigate }: { page: PageKey; accountsApi: ReturnType<typeof createAccountsApi>; productsApi: ReturnType<typeof createProductsApi>; couponsApi: ReturnType<typeof createCouponsApi>; messagesApi: ReturnType<typeof createMessagesApi>; workspaceApi: ReturnType<typeof createWorkspaceApi>; navigate: (next: PageKey) => void }) {
   return (
     <div className="app-viewport">
-      <div className="desktop-shell">
+      <div className={`desktop-shell${page === 'products' ? ' products-shell' : ''}`}>
         <aside className="sidebar">
           <div className="brand-block"><div className="brand-mark">Y</div><div className="brand-copy"><strong>XianyuSellerAgent</strong><span>运营控制台</span></div></div>
           <div className="side-section">运营台</div>
@@ -79,7 +79,7 @@ function AuthenticatedShell({ page, accountsApi, productsApi, couponsApi, messag
           <div className="sidebar-bottom"><div className="agent-card"><span className="online-dot" /> <strong>Agent Runtime</strong><small>独立服务 · 正常</small></div><div className="sidebar-user"><div className="avatar">管</div><div><strong>运营管理员</strong><span>admin@example.com</span></div></div></div>
         </aside>
         <div className="desktop-body">
-          <main>{page === 'accounts' ? <AccountsPage api={accountsApi} /> : page === 'products' ? <ProductsPage api={productsApi} accountsApi={accountsApi} /> : page === 'coupons' ? <CouponsPage api={couponsApi} productsApi={productsApi} /> : page === 'messages' ? <MessagesPage api={messagesApi} /> : page === 'workspace' ? <WorkspacePage api={workspaceApi} /> : <PlaceholderPage page={page} />}</main>
+          <main className={page === 'products' ? 'products-main' : undefined}>{page === 'accounts' ? <AccountsPage api={accountsApi} /> : page === 'products' ? <ProductsPage api={productsApi} accountsApi={accountsApi} /> : page === 'coupons' ? <CouponsPage api={couponsApi} productsApi={productsApi} /> : page === 'messages' ? <MessagesPage api={messagesApi} /> : page === 'workspace' ? <WorkspacePage api={workspaceApi} /> : <PlaceholderPage page={page} />}</main>
         </div>
       </div>
     </div>
