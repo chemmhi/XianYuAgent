@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
-import { OpenAICompatibleModelClient, PiModelClientError, PiRuntimeAdapter } from '../dist/pi-runtime.js';
+import { loadPiRuntimeConfig, OpenAICompatibleModelClient, PiModelClientError, PiRuntimeAdapter } from '../dist/pi-runtime.js';
 
 const requests = [];
 const server = createServer(async (request, response) => {
@@ -59,6 +59,10 @@ async function waitFor(predicate, timeoutMs = 1_000) {
 }
 
 try {
+  const envConfig = loadPiRuntimeConfig({ API_KEY: 'test-key', BASE_URL: `${baseUrl}/`, MODEL: 'test-model', MODEL_TIMEOUT_MS: '123' });
+  assert.deepEqual(envConfig, { apiKey: 'test-key', baseUrl: `${baseUrl}/`, model: 'test-model', timeoutMs: 123 });
+  assert.equal(loadPiRuntimeConfig({}), undefined);
+
   const client = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl, model: 'test-model', timeoutMs: 500 });
   const result = await client.complete({ messages: [{ role: 'user', content: 'hello' }] });
   assert.equal(result.content, 'Pi answer with sk-test-secret-value');
