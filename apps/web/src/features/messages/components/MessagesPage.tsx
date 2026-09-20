@@ -27,6 +27,7 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
   const composerToolsRef = useRef<HTMLDivElement>(null);
   const activeConversation = controller.state.conversations.find((conversation) => conversation.conversationId === controller.state.activeConversationId);
   const visibleConversations = useMemo(() => filterConversations(controller.state.conversations, search, unreadOnly), [controller.state.conversations, search, unreadOnly]);
+  const conversationsLoading = controller.state.listPhase === 'loading';
 
   useEffect(() => {
     return () => { if (pendingImage) URL.revokeObjectURL(pendingImage.url); };
@@ -126,7 +127,7 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
     </div>
     <div className="messages-layout card panel">
       <aside className="messages-sidebar">
-        <div className="messages-sidebar-header"><div><strong>会话</strong><small>{controller.state.conversations.length} 个已加载{controller.state.hasMore ? '，还有更多' : ''}</small></div><button className="btn ghost" type="button" onClick={() => void controller.reload()} aria-label="刷新会话">刷新</button></div>
+        <div className="messages-sidebar-header"><div><strong>会话</strong>{conversationsLoading ? <small className="messages-header-loading" role="status" aria-label="正在加载会话"><span className="messages-header-loading-line" aria-hidden="true" /></small> : <small>{controller.state.conversations.length} 个已加载{controller.state.hasMore ? '，还有更多' : ''}</small>}</div><button className="btn ghost" type="button" onClick={() => void controller.reload()} aria-label="刷新会话">刷新</button></div>
         <div className="messages-sidebar-tools">
           <label className="messages-search"><span aria-hidden="true">⌕</span><input aria-label="搜索会话" placeholder="搜索用户、商品或消息" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
           <div className="messages-filter-tabs" aria-label="会话筛选"><button type="button" aria-pressed={!unreadOnly} className={!unreadOnly ? 'active' : ''} onClick={() => setUnreadOnly(false)}>全部会话</button><button type="button" aria-pressed={unreadOnly} className={unreadOnly ? 'active' : ''} onClick={() => setUnreadOnly(true)}>未读{controller.state.conversations.filter((item) => item.unreadCount > 0).length ? ` (${controller.state.conversations.filter((item) => item.unreadCount > 0).length})` : ''}</button></div>

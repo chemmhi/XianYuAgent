@@ -8,6 +8,8 @@ describe('ConnectionBanner', () => {
     const html = renderToStaticMarkup(createElement(ConnectionBanner, { phase: 'connecting', onRetry: vi.fn() }));
     expect(html).toContain('messages-connection-status connecting');
     expect(html).toContain('messages-connection-spinner');
+    expect(html).toContain('aria-label="正在建立实时连接"');
+    expect(html).not.toContain('title=');
     expect(html).not.toContain('messages-connection-banner');
     expect(html).not.toContain('正在连接实时消息');
   });
@@ -16,6 +18,7 @@ describe('ConnectionBanner', () => {
     const html = renderToStaticMarkup(createElement(ConnectionBanner, { phase: 'reconnecting', onRetry: vi.fn() }));
     expect(html).toContain('messages-connection-status reconnecting');
     expect(html).toContain('aria-label="正在同步最新消息"');
+    expect(html).not.toContain('title=');
     expect(html).not.toContain('messages-connection-banner');
     expect(html).not.toContain('连接已断开，正在按游标补回消息');
   });

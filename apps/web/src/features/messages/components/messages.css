@@ -160,6 +160,22 @@
   font-size: 11px;
 }
 
+.messages-header-loading {
+  display: inline-flex;
+  align-items: center;
+  min-height: 11px;
+}
+
+.messages-header-loading-line {
+  display: block;
+  width: 92px;
+  height: 7px;
+  border-radius: 999px;
+  background: linear-gradient(100deg, color-mix(in srgb, var(--bg, #f8fafc) 84%, #fff) 20%, color-mix(in srgb, var(--border, #e2e8f0) 70%, #fff) 45%, color-mix(in srgb, var(--bg, #f8fafc) 84%, #fff) 70%);
+  background-size: 220% 100%;
+  animation: messages-shimmer 1.35s ease-in-out infinite;
+}
+
 .messages-sidebar-tools {
   gap: 10px;
   padding: 12px 14px 10px;
@@ -736,6 +752,7 @@
   .messages-skeleton-thumb,
   .messages-skeleton-line,
   .messages-skeleton-bubble,
+  .messages-header-loading-line,
   .messages-connection-spinner,
   .messages-inline-spinner {
     animation: none;
