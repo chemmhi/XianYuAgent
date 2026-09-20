@@ -23,7 +23,9 @@
 
 | agent_id | slice_id | branch | worktree | owner | created_at | status | merge_commit | cleaned_at | notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `root` | `s4-vs6a-workspace` | `feature/s4-vs6a-workspace` | `F:\ChenHai\Project\XianYuAgent-s4-vs6a-workspace` | Codex `/root` | `2026-09-19 04:19:53 +08:00` | `READY_FOR_MERGE` | `-` | `-` | Workspace AgentSession/Run/Step 首链路、真实 PostgreSQL/Chrome/CDP/WS 复核已完成；当前结论 `PARTIALLY_VERIFIED`，Confirmation/Outbox、独立 Worker/Pi Runtime、发布级恢复和人工视觉签核留在后续门禁 |
+| `root` | `s4-vs6a-workspace` | `feature/s4-vs6a-workspace` | `F:\ChenHai\Project\XianYuAgent-s4-vs6a-workspace` | Codex `/root` | `2026-09-19 04:19:53 +08:00` | `MERGED` | `99649cd` | `-` | Workspace AgentSession/Run/Step 首链路、真实 PostgreSQL/Chrome/CDP/WS 复核已完成并合入 master；当前结论 `PARTIALLY_VERIFIED`，Confirmation/Outbox、独立 Worker/Pi Runtime、发布级恢复和人工视觉签核留在后续门禁 |
+| `root` | `s4-vs5a-chat-read` | `feature/s4-vs5a-chat-read` | `F:\ChenHai\Project\XianYuAgent-s4-vs5a-chat-read` | Codex `/root` | `2026-09-19 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | VS5A 首片已完成并通过 typecheck/test/build/API WS smoke；真实 Redis/Postgres/Chrome 证据后置，保持 PARTIALLY_VERIFIED |
+| - | - | - | - | - | - | - | - | - | 主工作区 `master` 受保护；活动 agent 见上表 |
 
 ## 主工作区
 
