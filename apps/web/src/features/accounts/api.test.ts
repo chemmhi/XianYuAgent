@@ -40,6 +40,21 @@ describe('accounts canonical API adapter', () => {
     expect(result.total).toBe(1);
   });
 
+  it('passes account search, filters, and pagination to the canonical list route', async () => {
+    const calls: string[] = [];
+    const api = createAccountsApi({
+      async get<T>(path: string) {
+        calls.push(path);
+        return { success: true, data: { items: [], total: 0, page: 2, pageSize: 10, totalPages: 1 } } as T;
+      },
+    });
+
+    const result = await api.list({ search: '主账号', status: 'pending', connectionStatus: 'connecting', page: 2, pageSize: 10 });
+
+    expect(calls[0]).toBe('/api/v1/accounts?search=%E4%B8%BB%E8%B4%A6%E5%8F%B7&status=pending&connectionStatus=connecting&page=2&pageSize=10');
+    expect(result).toMatchObject({ page: 2, pageSize: 10, totalPages: 1 });
+  });
+
   it('creates and polls QR sessions through canonical account-scoped routes', async () => {
     const calls: Array<{ path: string; body?: unknown; headers?: HeadersInit }> = [];
     const qrPayload = {

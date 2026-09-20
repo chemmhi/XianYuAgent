@@ -14,12 +14,13 @@ export interface AccountsPageProps { api?: AccountsApi; }
 export function AccountsPage({ api: providedApi }: AccountsPageProps) {
   const api = useMemo(() => providedApi ?? createMockAccountsApi(), [providedApi]);
   const controller = useAccountsController({ api });
-  const { currentAccountId, currentAccount, setCurrentAccountId, removeAccount, refreshAccounts } = useAccountContext();
+  const { currentAccount, refreshAccounts } = useAccountContext();
   const [loginAccountId, setLoginAccountId] = useState<string | null>(null);
   const [loginOpen, setLoginOpen] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
   const accounts = controller.state.data?.items ?? [];
   const total = controller.state.data?.total ?? 0;
+  const page = controller.state.data?.page ?? controller.filters.page ?? 1;
+  const totalPages = controller.state.data?.totalPages ?? 1;
   const metrics = summarize(accounts);
   const loginAccount = loginAccountId ? accounts.find((account) => account.id === loginAccountId) : undefined;
 
@@ -33,26 +34,6 @@ export function AccountsPage({ api: providedApi }: AccountsPageProps) {
     setLoginAccountId(null);
   }
 
-  async function switchAccount(account: AccountVM) {
-    setActionError(null);
-    try {
-      await setCurrentAccountId(account.id);
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : '账号切换失败');
-    }
-  }
-
-  async function deleteAccount(account: AccountVM) {
-    if (!window.confirm(`确认删除账号“${account.displayName}”？删除后会撤销登录凭证，但会保留历史商品记录。`)) return;
-    setActionError(null);
-    try {
-      await removeAccount(account.id);
-      await controller.reload();
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : '账号删除失败');
-    }
-  }
-
   return (
     <section className="page-stack accounts-domain" data-accounts-domain>
       <div className="kpi-grid three accounts-domain-kpis">
@@ -61,9 +42,8 @@ export function AccountsPage({ api: providedApi }: AccountsPageProps) {
         <article className="card kpi-card"><div className="kpi-label">需要处理</div><div className="kpi-value">{metrics.needsAttention}</div><div className="kpi-delta"><span className={metrics.needsAttention > 0 ? 'tone-warn' : 'tone-ok'}>{metrics.needsAttention > 0 ? '需要刷新或补凭证' : '状态健康'}</span><small>不展示敏感凭证</small></div></article>
       </div>
       <article className="card panel accounts-domain-panel">
-        <AccountToolbar filters={controller.filters} phase={controller.state.phase} total={total} onSearchChange={controller.setSearch} onStatusChange={(status) => controller.setFilters((previous) => ({ ...previous, status, page: 1 }))} onRefresh={controller.reload} onAddAccount={() => openLogin()} />
-        {actionError && <div className="accounts-inline-error" role="alert">{actionError}</div>}
-        {controller.state.phase === 'success' && <AccountTable accounts={accounts} activeAccountId={currentAccountId} onReauthorize={openLogin} onSwitch={switchAccount} onDelete={deleteAccount} />}
+        <AccountToolbar filters={controller.filters} phase={controller.state.phase} onSearchChange={controller.setSearch} onStatusChange={(status) => controller.setFilters((previous) => ({ ...previous, status, page: 1 }))} onRefresh={controller.reload} onAddAccount={() => openLogin()} />
+        {controller.state.phase === 'success' && <AccountTable accounts={accounts} page={page} totalPages={totalPages} onPageChange={(nextPage) => controller.setFilters((previous) => ({ ...previous, page: Math.max(1, Math.min(nextPage, totalPages)) }))} />}
         <AccountStateView phase={controller.state.phase} error={controller.state.error} onRetry={controller.reload} />
       </article>
       {loginOpen && <AccountLoginModal api={api} account={loginAccount} onClose={closeLogin} onCompleted={() => { void controller.reload(); void refreshAccounts(); closeLogin(); }} />}

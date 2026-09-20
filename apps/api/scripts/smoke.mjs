@@ -68,6 +68,12 @@ try {
   const listed = await request('/api/v1/accounts', { headers: { cookie } });
   assert.equal(listed.body.data.items.length, 1);
   assert.equal(listed.body.data.items[0].sellerRef, 'seller-001');
+  assert.deepEqual({ page: listed.body.data.page, pageSize: listed.body.data.pageSize, total: listed.body.data.total, totalPages: listed.body.data.totalPages }, { page: 1, pageSize: 20, total: 1, totalPages: 1 });
+  const filtered = await request('/api/v1/accounts?search=Primary&status=pending&connectionStatus=connecting&page=1&pageSize=1', { headers: { cookie } });
+  assert.equal(filtered.response.status, 200);
+  assert.equal(filtered.body.data.items.length, 1);
+  assert.equal(filtered.body.data.items[0].sellerRef, 'seller-001');
+  assert.deepEqual({ page: filtered.body.data.page, pageSize: filtered.body.data.pageSize, total: filtered.body.data.total, totalPages: filtered.body.data.totalPages }, { page: 1, pageSize: 1, total: 1, totalPages: 1 });
   const accountId = listed.body.data.items[0].id;
 
   const missingCredential = await request(`/api/v1/accounts/${accountId}/credential`, { headers: { cookie } });

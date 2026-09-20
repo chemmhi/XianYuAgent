@@ -1,5 +1,5 @@
 import type { AppConfig } from './config.js';
-import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CouponBatchListQuery, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSyncResult, SessionRecord, Store } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CouponBatchListQuery, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSyncResult, SessionRecord, Store } from './domain.js';
 import { createId, createToken, digestJson, hashPassword, isSessionFresh, sha256, verifyPassword } from './security.js';
 import type { XianyuMtopClient } from './xianyu-mtop.js';
 
@@ -65,7 +65,15 @@ export class AuthService {
 
 export class AccountService {
   constructor(private readonly store: Store, private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => Promise<string>) {}
-  async list(adminId: string): Promise<AccountRecord[]> { return this.store.listAccounts(adminId); }
+  async list(adminId: string, query: AccountListQuery = {}): Promise<AccountListResult> {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    if (!Number.isInteger(page) || page < 1) throw new ServiceError(422, 'VALIDATION_FAILED', 'page must be a positive integer');
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new ServiceError(422, 'VALIDATION_FAILED', 'pageSize must be between 1 and 100');
+    if (query.status && !['pending', 'connected', 'degraded', 'disconnected', 'expired', 'disabled'].includes(query.status)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid account status');
+    if (query.connectionStatus && !['online', 'offline', 'connecting', 'expired', 'unknown'].includes(query.connectionStatus)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid account connection status');
+    return this.store.listAccounts(adminId, { ...query, search: query.search?.trim() || undefined, page, pageSize });
+  }
   async get(adminId: string, accountId: string): Promise<AccountRecord> { const account = await this.store.getAccount(adminId, accountId); if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found'); return account; }
   async create(input: { adminId: string; platform: string; sellerRef: string; displayName?: string; requestId: string; traceId: string }): Promise<AccountRecord> { if (!input.platform || !input.sellerRef) throw new ServiceError(422, 'VALIDATION_FAILED', 'platform and sellerRef are required'); try { const account = await this.store.createAccount(input); await this.audit({ actorId: input.adminId, action: 'account.created', targetRef: account.id, requestId: input.requestId, traceId: input.traceId, payload: { platform: account.platform, sellerRef: account.sellerRef }, accountId: account.id }); return account; } catch (error) { if (error instanceof Error && error.message === 'ACCOUNT_DUPLICATE') throw new ServiceError(409, 'CONFLICT', 'account already exists'); const code = (error as { code?: string }).code; if (code === '23505') throw new ServiceError(409, 'CONFLICT', 'account already exists'); throw error; } }
   async update(input: { adminId: string; accountId: string; patch: { sellerRef?: string; displayName?: string; remark?: string; avatarUrl?: string; platformUserId?: string; status?: AccountRecord['status'] }; requestId: string; traceId: string }): Promise<AccountRecord> { const account = await this.store.updateAccount(input.adminId, input.accountId, input.patch); if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found'); await this.audit({ actorId: input.adminId, action: 'account.updated', targetRef: account.id, requestId: input.requestId, traceId: input.traceId, payload: input.patch, accountId: account.id }); return account; }
