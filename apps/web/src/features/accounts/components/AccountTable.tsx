@@ -1,11 +1,13 @@
 import { AccountConnectionBadge, AccountCredentialBadge, AccountStatusBadge } from './AccountStatusBadge';
 import type { AccountVM } from '../types';
 
-export function AccountTable({ accounts, page, totalPages, onPageChange }: {
+export function AccountTable({ accounts, page, totalPages, onPageChange, currentAccountId, onSelectAccount }: {
   accounts: AccountVM[];
   page: number;
   totalPages: number;
   onPageChange: (page: number) => void;
+  currentAccountId?: string;
+  onSelectAccount?: (accountId: string) => void;
 }) {
   const pageItems = getPageItems(page, totalPages);
   return <div className="accounts-domain-table-region">
@@ -27,6 +29,14 @@ export function AccountTable({ accounts, page, totalPages, onPageChange }: {
                 <strong>{account.displayName}</strong>
                 <small>{account.remark || account.sellerRef}</small>
               </span>
+              {onSelectAccount && <button
+                className={`accounts-domain-switch${currentAccountId === account.id ? ' active' : ''}`}
+                type="button"
+                data-testid="account-switch"
+                aria-label={currentAccountId === account.id ? `${account.displayName} 当前账号` : `切换到${account.displayName}`}
+                onClick={() => onSelectAccount(account.id)}
+                disabled={currentAccountId === account.id || account.status === 'disabled' || account.enabled === false}
+              >{currentAccountId === account.id ? '当前账号' : '设为当前'}</button>}
             </div>
             <span role="cell"><AccountStatusBadge status={account.status} /></span>
             <span role="cell"><AccountConnectionBadge status={account.connection.status} /></span>

@@ -86,7 +86,7 @@ function queryParams(filters: OrderFilters): string {
   return params.toString();
 }
 
-export function createOrdersApi(options: { get: <T>(path: string) => Promise<T>; post: <T>(path: string, body?: unknown) => Promise<T> }): OrdersApi {
+export function createOrdersApi(options: { get: <T>(path: string) => Promise<T>; post: <T>(path: string, body?: unknown, init?: RequestInit) => Promise<T> }): OrdersApi {
   return {
     async list(filters) {
       const payload = await options.get<OrdersEnvelope>(`/api/v1/orders?${queryParams(filters)}`);
@@ -99,7 +99,7 @@ export function createOrdersApi(options: { get: <T>(path: string) => Promise<T>;
       return mapOrder(body.data ?? payload, accountId);
     },
     async refresh(accountId) {
-      await options.post('/api/v1/orders/refresh', accountId ? { accountId } : {});
+      await options.post('/api/v1/orders/refresh', accountId ? { accountId } : {}, { headers: { 'Idempotency-Key': `order-refresh-${accountId ?? 'active'}-${Date.now()}` } });
     },
   };
 }

@@ -22,6 +22,11 @@
 .accounts-domain-row:last-child { border-bottom: 0; }
 .accounts-domain-head { position: sticky; top: 0; z-index: 1; min-height: 40px; background: var(--bg); color: var(--sub); font-size: 11px; font-weight: 800; }
 .accounts-domain-account-cell { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.accounts-domain-account-cell > span:nth-child(2) { min-width: 0; }
+.accounts-domain-switch { flex: 0 0 auto; margin-left: auto; padding: 4px 7px; border: 1px solid var(--border); border-radius: 6px; background: #fff; color: var(--link); font-size: 10px; font-weight: 700; white-space: nowrap; }
+.accounts-domain-switch:hover:not(:disabled) { border-color: var(--link); background: var(--soft-blue-bg); }
+.accounts-domain-switch.active { border-color: var(--success-border); background: var(--success-bg); color: var(--success); }
+.accounts-domain-switch:disabled { cursor: default; opacity: .9; }
 .accounts-domain-account-cell strong, .accounts-domain-account-cell small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .accounts-domain-account-cell strong { margin-bottom: 3px; font-size: 12px; }
 .accounts-domain-account-cell small { color: var(--sub); font-size: 10px; }

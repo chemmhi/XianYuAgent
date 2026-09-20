@@ -14,7 +14,7 @@ export interface AccountsPageProps { api?: AccountsApi; }
 export function AccountsPage({ api: providedApi }: AccountsPageProps) {
   const api = useMemo(() => providedApi ?? createMockAccountsApi(), [providedApi]);
   const controller = useAccountsController({ api });
-  const { currentAccount, refreshAccounts } = useAccountContext();
+  const { currentAccount, currentAccountId, refreshAccounts, setCurrentAccountId } = useAccountContext();
   const [loginAccountId, setLoginAccountId] = useState<string | null>(null);
   const [loginOpen, setLoginOpen] = useState(false);
   const accounts = controller.state.data?.items ?? [];
@@ -43,7 +43,7 @@ export function AccountsPage({ api: providedApi }: AccountsPageProps) {
       </div>
       <article className="card panel accounts-domain-panel">
         <AccountToolbar filters={controller.filters} phase={controller.state.phase} onSearchChange={controller.setSearch} onStatusChange={(status) => controller.setFilters((previous) => ({ ...previous, status, page: 1 }))} onRefresh={controller.reload} onAddAccount={() => openLogin()} />
-        {controller.state.phase === 'success' && <AccountTable accounts={accounts} page={page} totalPages={totalPages} onPageChange={(nextPage) => controller.setFilters((previous) => ({ ...previous, page: Math.max(1, Math.min(nextPage, totalPages)) }))} />}
+        {controller.state.phase === 'success' && <AccountTable accounts={accounts} page={page} totalPages={totalPages} currentAccountId={currentAccountId} onSelectAccount={(accountId) => { void setCurrentAccountId(accountId); }} onPageChange={(nextPage) => controller.setFilters((previous) => ({ ...previous, page: Math.max(1, Math.min(nextPage, totalPages)) }))} />}
         <AccountStateView phase={controller.state.phase} error={controller.state.error} onRetry={controller.reload} />
       </article>
       {loginOpen && <AccountLoginModal api={api} account={loginAccount} onClose={closeLogin} onCompleted={() => { void controller.reload(); void refreshAccounts(); closeLogin(); }} />}
