@@ -8,6 +8,7 @@ import { emojiURL, renderXianyuText, xianyuEmojis } from '../xianyu-emojis';
 import { ConnectionBanner } from './ConnectionBanner';
 import { ConversationList } from './ConversationList';
 import { MessageTimeline } from './MessageTimeline';
+import { ConversationListSkeleton, TimelineSkeleton } from './MessagesSkeletons';
 import './messages.css';
 
 export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
@@ -123,7 +124,6 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
       <div><p className="eyebrow">Messages / Realtime</p><h1>在线聊天</h1><p>沿用账号管理中的当前账号，读取真实闲鱼会话并实时回复。</p></div>
       <div className="page-title-actions"><span className="messages-account-context">当前账号：{currentAccount.displayName || currentAccount.sellerRef || currentAccountId}</span><span className="messages-live-badge">真实连接</span></div>
     </div>
-    <ConnectionBanner phase={controller.state.realtimePhase} onRetry={controller.retryRealtime} />
     <div className="messages-layout card panel">
       <aside className="messages-sidebar">
         <div className="messages-sidebar-header"><div><strong>会话</strong><small>{controller.state.conversations.length} 个已加载{controller.state.hasMore ? '，还有更多' : ''}</small></div><button className="btn ghost" type="button" onClick={() => void controller.reload()} aria-label="刷新会话">刷新</button></div>
@@ -131,7 +131,7 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
           <label className="messages-search"><span aria-hidden="true">⌕</span><input aria-label="搜索会话" placeholder="搜索用户、商品或消息" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
           <div className="messages-filter-tabs" aria-label="会话筛选"><button type="button" aria-pressed={!unreadOnly} className={!unreadOnly ? 'active' : ''} onClick={() => setUnreadOnly(false)}>全部会话</button><button type="button" aria-pressed={unreadOnly} className={unreadOnly ? 'active' : ''} onClick={() => setUnreadOnly(true)}>未读{controller.state.conversations.filter((item) => item.unreadCount > 0).length ? ` (${controller.state.conversations.filter((item) => item.unreadCount > 0).length})` : ''}</button></div>
         </div>
-        {controller.state.listPhase === 'loading' && <div className="messages-state">正在加载会话…</div>}
+        {controller.state.listPhase === 'loading' && <ConversationListSkeleton />}
         {controller.state.listPhase === 'empty' && <div className="messages-state">当前账号暂无会话。</div>}
         {controller.state.listPhase === 'forbidden' && <div className="messages-state messages-error" role="alert">无权读取该账号会话。</div>}
         {controller.state.listPhase === 'error' && <div className="messages-state messages-error" role="alert">{controller.state.error?.message}<button className="btn ghost" type="button" onClick={() => void controller.reload()}>重试</button></div>}
@@ -144,7 +144,7 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
             <span className="messages-main-avatar">{activeConversation?.buyerAvatarUrl ? <img src={activeConversation.buyerAvatarUrl} alt="" /> : (activeConversation?.buyerDisplayName || activeConversation?.buyerRef || '会').slice(0, 1)}</span>
             <div><strong>{activeConversation?.buyerDisplayName || activeConversation?.buyerRef || '选择会话'}</strong><small>{activeConversation ? `用户 ID：${activeConversation.buyerRef}` : '从左侧选择一个会话'}</small></div>
           </div>
-          <div className="messages-main-header-meta"><span>{activeConversation?.itemTitle || '未关联商品'}</span><span className={`messages-connection-dot ${controller.state.realtimePhase}`} /></div>
+          <div className="messages-main-header-meta"><span>{activeConversation?.itemTitle || '未关联商品'}</span><span className={`messages-connection-dot ${controller.state.realtimePhase}`} aria-hidden="true" /><ConnectionBanner phase={controller.state.realtimePhase} onRetry={controller.retryRealtime} /></div>
         </header>
         {controller.state.activeConversationId ? <>
           <MessageTimeline
@@ -199,7 +199,7 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
               <img src={chatImagePreviewUrl ?? pendingImage?.url} alt={chatImagePreviewUrl ? '聊天图片大图预览' : '待发送图片大图预览'} />
             </div>
           </div>}
-        </> : <div className="messages-state messages-empty-main"><strong>选择一个会话开始查看</strong><span>左侧可以搜索、筛选并选择全部会话。</span></div>}
+        </> : controller.state.listPhase === 'loading' ? <TimelineSkeleton /> : <div className="messages-state messages-empty-main"><strong>选择一个会话开始查看</strong><span>左侧可以搜索、筛选并选择全部会话。</span></div>}
       </main>
     </div>
   </section>;

@@ -51,7 +51,7 @@ export function ConversationList({ conversations, activeConversationId, onSelect
         </span>
       </button>)}
     </div>
-    {hasMore && <button className="messages-load-more" type="button" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? '正在加载…' : '加载更多会话'}</button>}
+    {hasMore && <button className="messages-load-more" type="button" onClick={onLoadMore} disabled={loadingMore} aria-label={loadingMore ? '正在加载更多会话' : '加载更多会话'}>{loadingMore ? <><span className="messages-inline-spinner" aria-hidden="true" /><span>加载中</span></> : '加载更多会话'}</button>}
   </div>;
 }
 

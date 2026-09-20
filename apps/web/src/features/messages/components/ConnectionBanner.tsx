@@ -2,6 +2,17 @@ import type { RealtimePhase } from '../types';
 
 export function ConnectionBanner({ phase, onRetry }: { phase: RealtimePhase; onRetry: () => void }) {
   if (phase === 'connected' || phase === 'closed') return null;
-  const copy = phase === 'connecting' ? '正在连接实时消息…' : phase === 'reconnecting' ? '连接已断开，正在按游标补回消息…' : phase === 'timeout' ? '实时连接超时，当前仅显示历史消息。' : phase === 'forbidden' ? '无权建立该会话的实时连接。' : '实时连接已关闭。';
-  return <div className={`messages-connection-banner ${phase}`} role="status"><span>{copy}</span>{phase === 'timeout' && <button className="btn ghost" type="button" onClick={onRetry}>重新连接</button>}</div>;
+  if (phase === 'connecting') {
+    return <span className="messages-connection-status connecting" role="status" aria-label="正在建立实时连接" title="正在建立实时连接"><span className="messages-connection-spinner" aria-hidden="true" /></span>;
+  }
+  if (phase === 'reconnecting') {
+    return <span className="messages-connection-status reconnecting" role="status" aria-label="正在同步最新消息" title="正在同步最新消息"><span className="messages-connection-spinner" aria-hidden="true" /></span>;
+  }
+  if (phase === 'timeout') {
+    return <span className="messages-connection-status timeout" role="status"><span className="messages-connection-status-dot" aria-hidden="true" /><span>离线</span><button type="button" onClick={onRetry}>重试</button></span>;
+  }
+  if (phase === 'forbidden') {
+    return <span className="messages-connection-status forbidden" role="status" title="无权建立该会话的实时连接"><span className="messages-connection-status-dot" aria-hidden="true" /><span>连接受限</span></span>;
+  }
+  return null;
 }

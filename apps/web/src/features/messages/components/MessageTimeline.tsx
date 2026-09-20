@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import type { MessageVM } from '../types';
 import { renderXianyuText } from '../xianyu-emojis';
+import { TimelineSkeleton } from './MessagesSkeletons';
 
 type Participant = { displayName: string; avatarUrl?: string };
 
@@ -25,12 +26,12 @@ export function MessageTimeline({ messages, phase, hasMoreHistory = false, loadi
     lastMessageIdRef.current = lastMessageId;
   }, [messages, phase]);
 
-  if (phase === 'loading') return <div className="messages-timeline-state" aria-live="polite">正在加载消息时间线…</div>;
+  if (phase === 'loading') return <TimelineSkeleton />;
   if (phase === 'empty') return <div className="messages-timeline-state">暂无历史消息</div>;
   if (phase === 'forbidden') return <div className="messages-timeline-state messages-error" role="alert">无权查看该会话消息。</div>;
   if (phase === 'error') return <div className="messages-timeline-state messages-error" role="alert">消息时间线加载失败。</div>;
   return <div ref={timelineRef} className="messages-timeline" aria-live="polite">
-    {hasMoreHistory && onLoadMore && <button className="messages-history-load-more" type="button" onClick={onLoadMore} disabled={loadingMoreHistory}>{loadingMoreHistory ? '正在加载更早消息…' : '加载更早消息'}</button>}
+    {hasMoreHistory && onLoadMore && <button className="messages-history-load-more" type="button" onClick={onLoadMore} disabled={loadingMoreHistory} aria-label={loadingMoreHistory ? '正在加载更早消息' : '加载更早消息'}>{loadingMoreHistory ? <><span className="messages-inline-spinner" aria-hidden="true" /><span>加载中</span></> : '加载更早消息'}</button>}
     {messages.map((message) => {
       const isSystem = message.bodyType === 'system' || message.senderRole === 'system' || message.bodyText === '[系统消息]';
       const isOutbound = message.direction === 'outbound';
