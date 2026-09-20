@@ -10,6 +10,7 @@ const root = join(import.meta.dirname, '..', '..', '..');
 const chromePath = process.env.CHROME_PATH ?? join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe');
 const chromeProfile = join(tmpdir(), `xianyu-agent-messages-chrome-${process.pid}`);
 const fixtureImagePath = join(tmpdir(), `xianyu-agent-messages-${process.pid}.png`);
+const fixtureImagePath2 = join(tmpdir(), `xianyu-agent-messages-${process.pid}-2.png`);
 const screenshotDir = join(root, 'docs', 'evidence', 'stage5', 's4-vs5a-chat-read', 'screenshots');
 const children = [];
 let apiRuntime;
@@ -90,11 +91,11 @@ async function evaluate(cdp, expression) {
   return result.result?.value;
 }
 
-async function setFileInputFiles(cdp, filePath) {
+async function setFileInputFiles(cdp, filePaths) {
   const document = await cdp.send('DOM.getDocument', { depth: -1 });
   const node = await cdp.send('DOM.querySelector', { nodeId: document.root.nodeId, selector: '.messages-file-input' });
   assert.ok(node.nodeId, 'messages file input must be present before selecting a file');
-  await cdp.send('DOM.setFileInputFiles', { nodeId: node.nodeId, files: [filePath] });
+  await cdp.send('DOM.setFileInputFiles', { nodeId: node.nodeId, files: Array.isArray(filePaths) ? filePaths : [filePaths] });
 }
 
 async function assertText(cdp, text) {
@@ -137,6 +138,7 @@ async function run() {
 
   mkdirSync(chromeProfile, { recursive: true });
   writeFileSync(fixtureImagePath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'));
+  writeFileSync(fixtureImagePath2, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAADUlEQVR42mNk+M/wHwAF/gL+VQfP7wAAAABJRU5ErkJggg==', 'base64'));
   const apiBuild = spawnProcess(npm, npmArgs(['--workspace', 'apps/api', 'run', 'build']));
   const buildExit = await new Promise((resolve) => apiBuild.once('exit', resolve));
   if (buildExit !== 0) throw new Error(`API build failed with ${buildExit}`);
@@ -169,7 +171,7 @@ async function run() {
   const conversation = await apiRuntime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'buyer-messages-e2e', buyerDisplayName: '买家 E2E', buyerAvatarUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2240%22 height=%2240%22%3E%3Crect width=%2240%22 height=%2240%22 rx=%2220%22 fill=%22%232563eb%22/%3E%3Ctext x=%2220%22 y=%2226%22 text-anchor=%22middle%22 font-size=%2220%22 fill=%22white%22%3EE%3C/text%3E%3C/svg%3E', itemTitle: '实时消息验证商品', itemImageUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2244%22 height=%2236%22%3E%3Crect width=%2244%22 height=%2236%22 rx=%226%22 fill=%22%23bfdbfe%22/%3E%3C/svg%3E', externalConversationRef: `messages-chrome-${process.pid}` });
   const seedMessage = await apiRuntime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '历史消息 001：请问什么时候发货？', source: 'system', traceId: 'messages-chrome-seed', createdAt: '2026-09-20T23:00:01.000Z' });
   assert.equal(seedMessage.event.cursor, 1);
-  await apiRuntime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: '已收到，我来帮你处理发货问题。', source: 'human', traceId: 'messages-chrome-outbound-seed', createdAt: '2026-09-20T23:00:02.000Z' });
+  await apiRuntime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: '已收到，我来帮你处理发货问题。', externalMessageRef: 'seller-read-e2e.PNM', source: 'human', traceId: 'messages-chrome-outbound-seed', createdAt: '2026-09-20T23:00:02.000Z' });
   for (let index = 3; index <= 205; index += 1) {
     await apiRuntime.store.createMessage({
       adminId,
@@ -321,6 +323,19 @@ async function run() {
   const completeBodies = await messageBodies(cdp);
   assert.equal(completeBodies[0], '历史消息 001：请问什么时候发货？');
   assert.equal(completeBodies.at(-1), '历史消息 205');
+  assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-read-state.unread"))'), true, 'seller message must remain unread before the platform receipt');
+  await apiRuntime.messages.markExternalMessageRead({
+    adminId,
+    accountId: account.id,
+    conversationId: conversation.id,
+    externalMessageRef: 'seller-read-e2e.PNM',
+    readAt: '2026-09-20T23:04:00.000Z',
+    requestId: 'messages-chrome-read-receipt',
+    traceId: 'messages-chrome-read-receipt',
+  });
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-read-state.read"))'), 'platform 40103 read receipt');
+  const outboundAlignment = await evaluate(cdp, '(() => { const row = document.querySelector(".messages-bubble-row.outbound"); const stack = row?.querySelector(".messages-message-stack"); if (!row || !stack) return null; const rowStyle = getComputedStyle(row); const stackStyle = getComputedStyle(stack); return { flexDirection: rowStyle.flexDirection, justifyContent: rowStyle.justifyContent, textAlign: stackStyle.textAlign }; })()');
+  assert.deepEqual(outboundAlignment, { flexDirection: 'row-reverse', justifyContent: 'flex-start', textAlign: 'left' }, 'seller messages stay right-positioned while bubble text aligns left');
 
   assert.equal(await evaluate(cdp, 'document.querySelector("textarea[aria-label=\\"消息内容\\"]")?.getAttribute("placeholder")'), '输入回复，Enter 发送，Shift + Enter 换行，Ctrl + V 粘贴图片。');
   assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-send-button")?.disabled)'), true, 'send button disabled for empty draft');
@@ -336,21 +351,59 @@ async function run() {
   await evaluate(cdp, 'document.querySelector(".messages-emoji-picker button")?.click()');
   await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("textarea[aria-label=\\"消息内容\\"]")?.value ?? ""')).startsWith('['), 'emoji insertion');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-composer-visual .messages-emoji-inline"))'), 'emoji visual rendering');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-composer-caret[data-composer-caret]"))'), 'emoji visual caret');
+  assert.equal(await evaluate(cdp, 'document.querySelector(".messages-composer-visual")?.textContent ?? ""'), '', 'composer visual must not expose emoji marker names');
+  const emojiCaretBeforeClick = await evaluate(cdp, '(() => { const image = document.querySelector(".messages-composer-visual .messages-emoji-inline"); const caret = document.querySelector(".messages-composer-caret[data-composer-caret]"); const textarea = document.querySelector("textarea[aria-label=\\"消息内容\\"]"); if (!image || !caret || !textarea) return null; const imageRect = image.getBoundingClientRect(); const caretRect = caret.getBoundingClientRect(); return { imageRight: imageRect.right, caretLeft: caretRect.left, selectionStart: textarea.selectionStart, selectionEnd: textarea.selectionEnd, valueLength: textarea.value.length, clickX: imageRect.left + imageRect.width / 2, clickY: imageRect.top + imageRect.height / 2 }; })()');
+  assert.ok(emojiCaretBeforeClick, 'emoji caret geometry must be available');
+  assert.equal(emojiCaretBeforeClick.selectionStart, emojiCaretBeforeClick.valueLength, 'emoji insertion selection must be after the marker token');
+  assert.equal(emojiCaretBeforeClick.selectionEnd, emojiCaretBeforeClick.valueLength, 'emoji insertion selection must stay collapsed after the marker token');
+  assert.ok(Math.abs(emojiCaretBeforeClick.caretLeft - emojiCaretBeforeClick.imageRight) <= 4, 'visual caret must sit immediately after the emoji image');
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: emojiCaretBeforeClick.clickX, y: emojiCaretBeforeClick.clickY, button: 'left', clickCount: 1 });
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: emojiCaretBeforeClick.clickX, y: emojiCaretBeforeClick.clickY, button: 'left', clickCount: 1 });
+  await waitFor(async () => await evaluate(cdp, '(() => { const textarea = document.querySelector("textarea[aria-label=\\"消息内容\\"]"); return Boolean(textarea && textarea.selectionStart === textarea.value.length && textarea.selectionEnd === textarea.value.length); })()'), 'emoji click caret normalization');
+  const emojiCaretAfterClick = await evaluate(cdp, '(() => { const image = document.querySelector(".messages-composer-visual .messages-emoji-inline"); const caret = document.querySelector(".messages-composer-caret[data-composer-caret]"); if (!image || !caret) return null; return { imageRight: image.getBoundingClientRect().right, caretLeft: caret.getBoundingClientRect().left }; })()');
+  assert.ok(emojiCaretAfterClick, 'emoji caret geometry must remain available after click');
+  assert.ok(Math.abs(emojiCaretAfterClick.caretLeft - emojiCaretAfterClick.imageRight) <= 4, 'clicking the emoji must keep the visual caret after the image');
+  await evaluate(cdp, '(() => { const textarea = document.querySelector("textarea[aria-label=\\"消息内容\\"]"); if (!textarea) return false; textarea.focus(); textarea.setSelectionRange(textarea.value.length, textarea.value.length); textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true })); return true; })()');
+  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("textarea[aria-label=\\"消息内容\\"]")?.value ?? ""')) === '', 'emoji marker atomic deletion');
+  assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-composer-visual .messages-emoji-inline"))'), false, 'emoji visual must disappear after one Backspace');
   await evaluate(cdp, '(() => { const textarea = document.querySelector("textarea[aria-label=\\"消息内容\\"]"); const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set; setter?.call(textarea, ""); textarea.dispatchEvent(new Event("input", { bubbles: true })); })()');
   await evaluate(cdp, '(() => { const input = document.querySelector(".messages-file-input"); window.__messagesFilePickerClicks = 0; input?.addEventListener("click", () => { window.__messagesFilePickerClicks += 1; }); document.querySelector(".messages-composer-tools .messages-tool-button:not(.messages-emoji-button)")?.click(); })()');
   await waitFor(async () => await evaluate(cdp, 'window.__messagesFilePickerClicks === 1'), 'direct file picker');
-  await setFileInputFiles(cdp, fixtureImagePath);
-  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-inline-attachment img"))'), 'image attachment preview');
-  assert.equal(await evaluate(cdp, 'document.querySelector(".messages-attachment-copy strong")?.textContent'), fixtureImagePath.split(/[\\/]/).at(-1));
+  await setFileInputFiles(cdp, [fixtureImagePath, fixtureImagePath2]);
+  await waitFor(async () => await evaluate(cdp, 'document.querySelectorAll(".messages-inline-attachment").length === 2'), 'multiple image attachment previews');
+  assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-attachment-copy"))'), false, 'attachment preview must not show filename or size');
+  assert.equal(await evaluate(cdp, '(() => { const boxes = Array.from(document.querySelectorAll(".messages-inline-attachment")); return boxes.every((box) => { const image = box.querySelector("img"); return image && box.getBoundingClientRect().width <= image.getBoundingClientRect().width + 20; }); })()'), true, 'attachment previews must hug their thumbnails');
+  assert.equal(await evaluate(cdp, 'Array.from(document.querySelectorAll(".messages-inline-attachment")).every((box) => box.getBoundingClientRect().width <= 250)'), true, 'attachment previews must stay compact');
   assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-send-button")?.disabled)'), false, 'send button enabled for image attachment');
   assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-inline-attachment")?.closest(".messages-composer-shell"))'), true, 'image attachment must be inside composer shell');
-  await evaluate(cdp, 'document.querySelector("button[aria-label=\\"预览待发送图片\\"]")?.click()');
+  await evaluate(cdp, 'document.querySelector(".messages-inline-attachment-trigger")?.click()');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-image-lightbox[role=\\"dialog\\"]"))'), 'image lightbox preview');
   await evaluate(cdp, 'document.querySelector("button[aria-label=\\"关闭图片预览\\"]")?.click()');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-image-lightbox")) === false'), 'close image lightbox');
+  await evaluate(cdp, 'document.querySelectorAll(".messages-inline-attachment-trigger")[1]?.click()');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-image-lightbox[role=\\"dialog\\"]"))'), 'second image lightbox preview');
+  assert.equal(await evaluate(cdp, 'document.querySelector(".messages-image-lightbox img")?.src === document.querySelectorAll(".messages-inline-attachment img")[1]?.src'), true, 'lightbox must preview the clicked attachment');
+  await evaluate(cdp, 'document.querySelector("button.messages-lightbox-close")?.click()');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-image-lightbox")) === false'), 'close second image lightbox');
+  await evaluate(cdp, 'document.querySelector(".messages-attachment-remove")?.click()');
+  await waitFor(async () => await evaluate(cdp, 'document.querySelectorAll(".messages-inline-attachment").length === 1'), 'remove one image attachment preview');
+  assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-send-button")?.disabled)'), false, 'send button stays enabled while one attachment remains');
   await evaluate(cdp, 'document.querySelector(".messages-attachment-remove")?.click()');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-inline-attachment")) === false'), 'remove image attachment preview');
   assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-send-button")?.disabled)'), true, 'send button disabled after removing attachment');
+  await evaluate(cdp, `(() => {
+    const textarea = document.querySelector('textarea[aria-label="消息内容"]');
+    const itemFile = new File([new Uint8Array([137, 80, 78, 71])], 'paste.png', { type: 'image/png', lastModified: 1 });
+    const mirroredFile = new File([new Uint8Array([137, 80, 78, 71])], 'paste.png', { type: 'image/png', lastModified: 2 });
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: { items: [{ kind: 'file', getAsFile: () => itemFile }], files: [mirroredFile] } });
+    textarea?.dispatchEvent(event);
+    return true;
+  })()`);
+  await waitFor(async () => await evaluate(cdp, 'document.querySelectorAll(".messages-inline-attachment").length === 1'), 'deduplicated pasted image preview');
+  await evaluate(cdp, 'document.querySelector(".messages-attachment-remove")?.click()');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-inline-attachment")) === false'), 'remove pasted image preview');
   await captureViewport(cdp, 1896, 900, 'messages-desktop-1896x900.png');
 
   const offlineMethod = await disconnectBrowserRealtime(cdp);
@@ -371,7 +424,7 @@ async function run() {
     requestId: 'messages-chrome-recovery',
     traceId: 'messages-chrome-recovery',
   });
-   assert.equal(recovered.event.cursor, 206);
+   assert.equal(recovered.event.cursor, 207);
   await new Promise((resolve) => setTimeout(resolve, 500));
   assert.equal((await messageBodies(cdp)).length, 205);
 
@@ -432,4 +485,5 @@ try {
   }
   try { rmSync(chromeProfile, { recursive: true, force: true }); } catch (error) { console.warn(`Chrome temporary profile cleanup failed: ${error.message}`); }
   try { rmSync(fixtureImagePath, { force: true }); } catch (error) { console.warn(`Chrome fixture cleanup failed: ${error.message}`); }
+  try { rmSync(fixtureImagePath2, { force: true }); } catch (error) { console.warn(`Chrome second fixture cleanup failed: ${error.message}`); }
 }

@@ -43,6 +43,23 @@ export interface XianyuImMessageEvent {
   raw?: Record<string, unknown>;
 }
 
+/**
+ * Platform 40103 read receipt. The compact payload uses numeric keys while
+ * some gateways wrap the same event in a JSON object with named fields.
+ */
+export interface XianyuImReadReceipt {
+  externalMessageRef?: string;
+  externalConversationRef?: string;
+  readAt: number;
+}
+
+export interface XianyuImReadReceiptEvent extends XianyuImReadReceipt {
+  accountId: string;
+  kind: 'read';
+}
+
+export type XianyuImEvent = XianyuImMessageEvent | XianyuImReadReceiptEvent;
+
 interface ImWebSocket {
   readyState: number;
   send(data: string): void;
@@ -60,7 +77,7 @@ export interface XianyuImClientOptions {
   fetch?: typeof fetch;
   webSocketFactory?: (url: string, options: { headers: Record<string, string> }) => ImWebSocket;
   saveCredential?: (credential: XianyuImCredential) => Promise<void>;
-  onEvent?: (event: XianyuImMessageEvent) => Promise<void> | void;
+  onEvent?: (event: XianyuImEvent) => Promise<void> | void;
 }
 
 export class XianyuImRequestRejected extends Error {
@@ -150,6 +167,12 @@ export class XianyuImClient {
     const start = startCursor ?? Number.MAX_SAFE_INTEGER;
     const response = await this.sendLwp('/r/MessageManager/listUserMessages', [cid, false, start, clampLimit(limit), false]);
     return asRecord(response.body) as XianyuImMessagePage;
+  }
+
+  async markRead(messageRefs: string[]): Promise<void> {
+    const ids = [...new Set(messageRefs.map((value) => value.trim()).filter(Boolean))];
+    if (ids.length === 0) return;
+    await this.sendLwp('/r/MessageStatus/read', [ids]);
   }
 
   async sendText(conversationRef: string, recipientRef: string, text: string): Promise<{ externalMessageRef?: string }> {
@@ -349,6 +372,11 @@ export class XianyuImClient {
     for (const entry of entries) {
       const encoded = asRecord(entry).data;
       if (typeof encoded !== 'string') continue;
+      const readReceipt = parseReadReceiptPayload(decodePushData(encoded));
+      if (readReceipt) {
+        await this.onEvent?.({ ...readReceipt, accountId: this.accountId, kind: 'read' });
+        continue;
+      }
       const parsed = parsePushPayload(encoded, this.accountId, this.myId);
       if (parsed) await this.onEvent?.(parsed);
     }
@@ -419,6 +447,127 @@ export function parsePushPayload(encoded: string, accountId: string, myId: strin
     raw: message,
   };
 }
+
+/**
+ * Extract a platform 40103 outbound-message read receipt from a decoded push
+ * payload. Goofish uses both a compact numeric-key envelope and named nested
+ * envelopes depending on the gateway path, so this parser intentionally stays
+ * pure and accepts either representation.
+ */
+export function parseReadReceiptPayload(value: unknown, now: () => number = Date.now): XianyuImReadReceipt | undefined {
+  const root = parseMaybeJsonValue(value);
+  if (root === undefined) return undefined;
+  return parseCompactReadReceipt(root, now) ?? findNestedReadReceipt(root, now);
+}
+
+function parseCompactReadReceipt(value: unknown, now: () => number): XianyuImReadReceipt | undefined {
+  const record = asRecord(value);
+  if (!Object.prototype.hasOwnProperty.call(record, '1') || readReceiptString(record['2']) !== '2') return undefined;
+  const messageId = readReceiptMessageId(record['1']);
+  const preferredConversation = readReceiptString(record['4']);
+  const fallbackConversation = readReceiptString(record['3']);
+  const conversation = preferredConversation?.includes('@goofish') ? preferredConversation : fallbackConversation;
+  if (!messageId && !conversation) return undefined;
+  return {
+    ...(messageId ? { externalMessageRef: messageId } : {}),
+    ...(conversation ? { externalConversationRef: stripGoofish(conversation) } : {}),
+    readAt: now(),
+  };
+}
+
+function findNestedReadReceipt(value: unknown, now: () => number, depth = 0): XianyuImReadReceipt | undefined {
+  if (depth > 20) return undefined;
+  if (typeof value === 'string') {
+    const decoded = parseMaybeJsonValue(value);
+    return decoded === value ? undefined : findNestedReadReceipt(decoded, now, depth + 1);
+  }
+  if (Array.isArray(value)) {
+    for (const child of value) {
+      const receipt = findNestedReadReceipt(child, now, depth + 1);
+      if (receipt) return receipt;
+    }
+    return undefined;
+  }
+  const record = asRecord(value);
+  if (Object.keys(record).length === 0) return undefined;
+  if (isReadReceiptEnvelope(record)) {
+    const messageId = findNestedFieldString(record, ['messageid', 'message_id', 'id']);
+    const conversation = findNestedFieldString(record, ['cid', 'chatid', 'chat_id']);
+    if ((!messageId || isPnmMessageId(messageId)) && conversation) {
+      return {
+        ...(messageId && isPnmMessageId(messageId) ? { externalMessageRef: messageId } : {}),
+        ...(conversation ? { externalConversationRef: stripGoofish(conversation) } : {}),
+        readAt: now(),
+      };
+    }
+  }
+  for (const child of Object.values(record)) {
+    const receipt = findNestedReadReceipt(child, now, depth + 1);
+    if (receipt) return receipt;
+  }
+  return undefined;
+}
+
+function isReadReceiptEnvelope(record: Record<string, any>): boolean {
+  return Object.entries(record).some(([key, value]) => {
+    const normalized = key.toLowerCase();
+    return (normalized === 'biztype' || normalized === 'biz_type' || normalized === 'type') && readReceiptString(value) === '40103';
+  });
+}
+
+function findNestedFieldString(value: unknown, keys: string[], depth = 0): string | undefined {
+  if (depth > 20) return undefined;
+  if (typeof value === 'string') {
+    const decoded = parseMaybeJsonValue(value);
+    return decoded === value ? undefined : findNestedFieldString(decoded, keys, depth + 1);
+  }
+  if (Array.isArray(value)) {
+    for (const child of value) {
+      const found = findNestedFieldString(child, keys, depth + 1);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  const record = asRecord(value);
+  for (const [key, child] of Object.entries(record)) {
+    if (keys.some((candidate) => key.toLowerCase() === candidate.toLowerCase())) {
+      const found = readReceiptString(child);
+      if (found) return found;
+    }
+  }
+  for (const child of Object.values(record)) {
+    const found = findNestedFieldString(child, keys, depth + 1);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function parseMaybeJsonValue(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  try { return JSON.parse(trimmed); } catch { return value; }
+}
+
+function readReceiptMessageId(value: unknown): string | undefined {
+  if (Array.isArray(value)) {
+    for (const child of value) {
+      const messageId = readReceiptMessageId(child);
+      if (messageId) return messageId;
+    }
+    return undefined;
+  }
+  const messageId = readReceiptString(value);
+  return messageId && isPnmMessageId(messageId) ? messageId : undefined;
+}
+
+function readReceiptString(value: unknown): string | undefined {
+  if (typeof value === 'string') return value.trim() || undefined;
+  if (typeof value === 'number' || typeof value === 'bigint') return String(value);
+  return undefined;
+}
+
+function isPnmMessageId(value: string): boolean { return value.toUpperCase().endsWith('.PNM'); }
 
 function decodePushData(encoded: string): unknown {
   const bytes = Buffer.from(encoded, 'base64');

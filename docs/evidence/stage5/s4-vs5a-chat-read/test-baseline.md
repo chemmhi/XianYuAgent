@@ -18,6 +18,7 @@ npm run typecheck
 npm test
 npm run build
 node apps/api/scripts/messages-smoke.mjs
+npm --workspace apps/api run test:xianyu-im-read
 npm --workspace apps/api run test:messages:infra
 npm --workspace apps/web run test:e2e:chrome:messages
 git diff --check
@@ -30,8 +31,10 @@ git diff --check
 - `npm run build`: passed for API and web.
 - `messages-smoke.mjs`: passed history reads, cursor replay, incremental replay, connected event, pagination, WS 401/403/404 rejection, and scope checks.
 - `test:messages:infra`: passed against isolated PostgreSQL and Redis containers; two API runtimes received the same event through Redis, Redis restart recovered delivery, and PostgreSQL restart recovered message read/write.
+- `test:xianyu-im-read`: passed 8/8; compact, batch, nested, and JSON-string 40103 receipts route to the read callback, `/r/MessageStatus/read` is exercised, and frame ACK behavior is preserved.
+- Read-status integration: `017_message_read_status.sql` applied; real server-side `read_status=2/read_at` persistence and `chat.message.updated` delivery were verified in the PostgreSQL/Redis smoke.
 - `test:e2e:chrome:messages`: passed connected → forced WebSocket disconnect → reconnecting banner → cursor backfill → automatic reconnect → de-duplicated timeline.
-- `npm --workspace apps/api run migrate`: applied `016_conversation_media.sql`; PostgreSQL now exposes `buyer_avatar_url` and `item_image_url` on `messages.conversations`.
+- `npm --workspace apps/api run migrate`: applied `016_conversation_media.sql` and `017_message_read_status.sql`; PostgreSQL exposes conversation media plus `read_status/read_at` on `messages.messages`.
 - Chrome/CDP interaction checks: search by item and buyer, unread filter, avatar/item thumbnail rendering, independent `overflow-y:auto` regions, whole-row selection, and no account selector on `/messages`.
 
 ## Real Xianyu credential readback

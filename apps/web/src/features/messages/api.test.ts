@@ -18,6 +18,18 @@ const sentImage: MessageVM = {
 };
 
 describe('messages API media contract', () => {
+  it('posts a conversation read receipt after opening the timeline', async () => {
+    let capturedPath = '';
+    const api = createMessagesApi({
+      get: async <T>() => ({ data: null } as unknown as T),
+      post: async <T>(path: string) => { capturedPath = path; return { data: { conversationId: 'c-1', accountId: 'a-1', buyerRef: 'b-1', unreadCount: 0 } } as unknown as T; },
+    });
+    const result = await api.markConversationRead?.({ accountId: 'a-1', conversationId: 'c-1' });
+    expect(result?.conversationId).toBe('c-1');
+    expect(result?.unreadCount).toBe(0);
+    expect(capturedPath).toBe('/api/v1/conversations/c-1/read');
+  });
+
   it('passes the opaque history cursor for older-message pagination', async () => {
     let capturedPath = '';
     const api = createMessagesApi({

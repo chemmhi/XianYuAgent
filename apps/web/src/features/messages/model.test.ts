@@ -20,6 +20,21 @@ describe('messages realtime model', () => {
     expect(mergeTimelineMessages([message], [message])).toHaveLength(1);
   });
 
+  it('preserves an existing outbound read state when a later payload omits it', () => {
+    const readMessage = { ...message, direction: 'outbound' as const, senderRole: 'agent' as const, readState: 'read' as const };
+    const { readState: _ignoredReadState, ...partialMessage } = readMessage;
+    expect(mergeTimelineMessages([readMessage], [partialMessage])[0]?.readState).toBe('read');
+  });
+
+  it('does not infer seller read state from a buyer reply', () => {
+    const sellerBeforeReply: MessageVM = { ...message, messageId: 'seller-1', direction: 'outbound', senderRole: 'agent', bodyText: '已发货', createdAt: '2026-09-19T00:00:02.000Z' };
+    const buyerReply: MessageVM = { ...message, messageId: 'buyer-2', createdAt: '2026-09-19T00:00:03.000Z' };
+    const sellerAfterReply: MessageVM = { ...sellerBeforeReply, messageId: 'seller-3', bodyText: '补充说明', createdAt: '2026-09-19T00:00:04.000Z' };
+    const reconciled = mergeTimelineMessages([], [sellerBeforeReply, buyerReply, sellerAfterReply]);
+    expect(reconciled.find((item) => item.messageId === 'seller-1')?.readState).toBeUndefined();
+    expect(reconciled.find((item) => item.messageId === 'seller-3')?.readState).toBeUndefined();
+  });
+
   it('updates conversation ordering when a newer event arrives', () => {
     const newer = { ...conversation, version: 2, updatedAt: '2026-09-19T00:00:02.000Z', unreadCount: 1 };
     expect(mergeConversation([conversation], newer)[0]?.version).toBe(2);

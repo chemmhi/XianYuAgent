@@ -68,12 +68,14 @@ export function resolveMessageReadState(message: MessageVM): MessageReadState | 
   const normalizedStatus = typeof rawStatus === 'string' ? rawStatus.trim().toLowerCase().replace(/[\s_-]+/g, '') : '';
   if (['read', 'seen', 'opened', 'acknowledged', 'readed'].includes(normalizedStatus)) return 'read';
   if (['unread', 'unseen', 'notread', 'sent', 'delivered'].includes(normalizedStatus)) return 'unread';
+  if (message.direction === 'outbound' && normalizedStatus === 'created') return 'unread';
   return undefined;
 }
 
 function renderReadState(message: MessageVM): ReactNode {
-  const readState = resolveMessageReadState(message);
-  if (!readState) return null;
+  // Outbound messages are not considered seen until the adapter supplies an
+  // explicit server-side receipt.
+  const readState = resolveMessageReadState(message) ?? 'unread';
   return <span className={`messages-read-state ${readState}`}>{readState === 'read' ? '已读' : '未读'}</span>;
 }
 

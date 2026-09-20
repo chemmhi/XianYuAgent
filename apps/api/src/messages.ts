@@ -32,6 +32,8 @@ export interface MessageVM {
   bodyRef?: string;
   redactionState: MessageRecord['redactionState'];
   status: MessageRecord['status'];
+  readState: 'read' | 'unread';
+  readAt?: string;
   createdAt: string;
   externalMessageRef?: string;
   source?: MessageRecord['source'];
@@ -59,7 +61,7 @@ function toConversationVM(conversation: ConversationRecord): ConversationVM {
 }
 
 function toMessageVM(message: MessageRecord): MessageVM {
-  return { messageId: message.id, conversationId: message.conversationId, accountId: message.accountId, direction: message.direction, senderRole: message.senderRole, bodyType: message.bodyType, bodyText: message.redactionState === 'visible' ? message.bodyText : undefined, bodyRef: message.bodyRef, redactionState: message.redactionState, status: message.status, createdAt: message.createdAt, externalMessageRef: message.externalMessageRef, source: message.source, orderRef: message.orderRef, productRef: message.productRef, riskFlags: [...message.riskFlags], handlingMode: message.handlingMode };
+  return { messageId: message.id, conversationId: message.conversationId, accountId: message.accountId, direction: message.direction, senderRole: message.senderRole, bodyType: message.bodyType, bodyText: message.redactionState === 'visible' ? message.bodyText : undefined, bodyRef: message.bodyRef, redactionState: message.redactionState, status: message.status, readState: message.readStatus === 2 ? 'read' : 'unread', readAt: message.readAt, createdAt: message.createdAt, externalMessageRef: message.externalMessageRef, source: message.source, orderRef: message.orderRef, productRef: message.productRef, riskFlags: [...message.riskFlags], handlingMode: message.handlingMode };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -135,6 +137,13 @@ export class MessageService {
     return this.toConversationView(conversation);
   }
 
+  async markConversationRead(adminId: string, conversationId: string, requestId: string, traceId: string): Promise<ConversationVM> {
+    const conversation = await this.store.markConversationRead(adminId, conversationId);
+    if (!conversation) throw new ServiceError(404, 'NOT_FOUND', 'conversation not found');
+    await this.audit({ actorId: adminId, action: 'conversation.read', targetRef: conversationId, requestId, traceId, payload: { unreadCount: 0 }, accountId: conversation.accountId });
+    return this.toConversationView(conversation);
+  }
+
   async listMessages(adminId: string, conversationId: string, query: MessageListQuery): Promise<{ items: MessageVM[]; nextCursor?: number; hasMore: boolean; latestCursor: number; hasMoreHistory: boolean; historyCursor?: string }> {
     await this.getConversation(adminId, conversationId);
     this.validateLimit(query.limit, 200);
@@ -169,6 +178,22 @@ export class MessageService {
     this.realtime.publish(created.event);
     try { void Promise.resolve(this.publishExternal?.(created.event)).catch(() => undefined); } catch { /* Redis transport must not fail a committed external message */ }
     return { message: this.toMessageView(created.message), event, created: true };
+  }
+
+  async markExternalMessageRead(input: { adminId: string; accountId: string; conversationId: string; externalMessageRef?: string; readAt?: string; requestId: string; traceId: string }): Promise<{ messages: MessageVM[]; events: RealtimeEventVM[] }> {
+    const conversation = await this.store.getConversation(input.adminId, input.conversationId);
+    if (!conversation || conversation.accountId !== input.accountId) return { messages: [], events: [] };
+    const result = input.externalMessageRef
+      ? await this.store.markMessagesReadByExternalRef({ adminId: input.adminId, conversationId: input.conversationId, externalMessageRef: input.externalMessageRef, readAt: input.readAt })
+      : await this.store.markLatestOutgoingRead({ adminId: input.adminId, conversationId: input.conversationId, readAt: input.readAt });
+    if (result.messages.length === 0) return { messages: [], events: [] };
+    await this.audit({ actorId: input.adminId, action: 'conversation.message.read', targetRef: input.conversationId, requestId: input.requestId, traceId: input.traceId, payload: { externalMessageRef: input.externalMessageRef, count: result.messages.length }, accountId: conversation.accountId });
+    const events = result.events.map((event) => {
+      this.realtime.publish(event);
+      try { void Promise.resolve(this.publishExternal?.(event)).catch(() => undefined); } catch { /* Redis transport must not fail a committed receipt */ }
+      return toEventView(event);
+    });
+    return { messages: result.messages.map((message) => this.toMessageView(message)), events };
   }
 
   private toConversationView(conversation: Awaited<ReturnType<Store['getConversation']>> extends infer T ? Exclude<T, undefined> : never): ConversationVM { return toConversationVM(conversation); }

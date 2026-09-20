@@ -46,7 +46,8 @@ describe('MessageTimeline', () => {
   it('renders Xianyu bracketed emoji markers as official image assets', () => {
     const html = renderToStaticMarkup(createElement(MessageTimeline, { phase: 'success', messages: [message({ bodyText: '收到[尊嘟假嘟]' })] }));
     expect(html).toContain('class="messages-emoji-inline"');
-    expect(html).toContain('alt="[尊嘟假嘟]"');
+    expect(html).toContain('alt=""');
+    expect(html).toContain('aria-hidden="true"');
     expect(html).not.toContain('收到[尊嘟假嘟]');
   });
 
@@ -76,9 +77,9 @@ describe('MessageTimeline', () => {
     expect(html).not.toContain('>已读</span>');
   });
 
-  it('does not claim a read state when the adapter provides no receipt', () => {
-    expect(resolveMessageReadState(message({ direction: 'outbound' }))).toBeUndefined();
-    expect(resolveMessageReadState(message({ direction: 'outbound', status: 'created' }))).toBeUndefined();
+  it('defaults outbound created messages to unread until a receipt arrives', () => {
+    expect(resolveMessageReadState(message({ direction: 'inbound' }))).toBeUndefined();
+    expect(resolveMessageReadState(message({ direction: 'outbound', status: 'created' }))).toBe('unread');
     expect(resolveMessageReadState({ ...message({ direction: 'outbound' }), status: 'sent' } as unknown as MessageVM)).toBe('unread');
   });
 

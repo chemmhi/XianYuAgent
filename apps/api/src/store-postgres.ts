@@ -257,6 +257,11 @@ export class PostgresStore implements Store {
     return result.rows[0] ? this.toConversation(result.rows[0]) : undefined;
   }
 
+  async markConversationRead(adminId: string, conversationId: string): Promise<ConversationRecord | undefined> {
+    const result = await this.pool.query("update messages.conversations c set unread_count=0, version=c.version+1 where c.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=c.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now())) returning c.*", [conversationId, adminId]);
+    return result.rows[0] ? this.toConversation(result.rows[0]) : undefined;
+  }
+
   async findConversationByExternalRef(adminId: string, accountId: string, externalConversationRef: string): Promise<ConversationRecord | undefined> {
     const result = await this.pool.query("select c.* from messages.conversations c where c.account_id=$1 and c.external_conversation_ref=$2 and exists (select 1 from auth.account_scopes scope where scope.account_id=c.account_id and scope.admin_id=$3 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))", [accountId, externalConversationRef, adminId]);
     return result.rows[0] ? this.toConversation(result.rows[0]) : undefined;
@@ -281,7 +286,7 @@ export class PostgresStore implements Store {
     let fetchLimit = limit + 1;
     if (query.cursor !== undefined) {
       params.push(query.cursor);
-      cursorClause = ` and e.cursor>$${params.length}`;
+      cursorClause = ` and exists (select 1 from messages.events e where e.conversation_id=m.conversation_id and (e.payload_json->'message'->>'id')=m.id::text and e.cursor>$${params.length})`;
       orderClause = 'm.created_at asc, m.id asc';
       fetchLimit = limit;
     } else if (history?.beforeCreatedAt) {
@@ -295,7 +300,8 @@ export class PostgresStore implements Store {
       }
     }
     params.push(fetchLimit);
-    const rows = await this.pool.query(`select m.*, e.cursor as event_cursor from messages.messages m join messages.events e on e.conversation_id=m.conversation_id and (e.payload_json->'message'->>'id')=m.id::text where m.conversation_id=$1${cursorClause} order by ${orderClause} limit $${params.length}`, params);
+    const latestEventCursor = "(select max(e2.cursor) from messages.events e2 where e2.conversation_id=m.conversation_id and (e2.payload_json->'message'->>'id')=m.id::text)";
+    const rows = await this.pool.query(`select m.*, ${latestEventCursor} as event_cursor from messages.messages m where m.conversation_id=$1${cursorClause} order by ${orderClause} limit $${params.length}`, params);
     const hasMoreHistory = query.cursor === undefined && rows.rows.length > limit;
     const pageRows = hasMoreHistory ? rows.rows.slice(0, limit) : rows.rows;
     if (query.cursor === undefined) pageRows.reverse();
@@ -354,6 +360,50 @@ export class PostgresStore implements Store {
       const eventResult = await client.query('insert into messages.events (event_id,conversation_id,account_id,cursor,type,occurred_at,trace_id,payload_json) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb) returning *', [event.eventId, event.conversationId, event.accountId, event.cursor, event.type, event.occurredAt, event.traceId, JSON.stringify(event.payload)]);
       await client.query('commit');
       return { message, event: this.toConversationEvent(eventResult.rows[0]) };
+    } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
+  }
+
+  async markMessagesReadByExternalRef(input: { adminId: string; conversationId: string; externalMessageRef: string; readAt?: string }): Promise<{ messages: MessageRecord[]; events: ConversationEventRecord[] }> {
+    return this.markOutgoingRead(input, input.externalMessageRef);
+  }
+
+  async markLatestOutgoingRead(input: { adminId: string; conversationId: string; readAt?: string }): Promise<{ messages: MessageRecord[]; events: ConversationEventRecord[] }> {
+    return this.markOutgoingRead(input);
+  }
+
+  private async markOutgoingRead(input: { adminId: string; conversationId: string; externalMessageRef?: string; readAt?: string }, externalMessageRef?: string): Promise<{ messages: MessageRecord[]; events: ConversationEventRecord[] }> {
+    const conversation = await this.getConversation(input.adminId, input.conversationId);
+    if (!conversation) return { messages: [], events: [] };
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      await client.query('select pg_advisory_xact_lock(hashtext($1))', [conversation.id]);
+      const readAt = input.readAt ?? new Date().toISOString();
+      let targetResult;
+      if (externalMessageRef) {
+        targetResult = await client.query('select created_at from messages.messages where conversation_id=$1 and external_message_ref=$2 and direction=\'outbound\' limit 1', [conversation.id, externalMessageRef]);
+      } else {
+        targetResult = await client.query('select created_at from messages.messages where conversation_id=$1 and direction=\'outbound\' and read_status<>2 order by created_at desc, id desc limit 1', [conversation.id]);
+      }
+      const targetCreatedAt = targetResult.rows[0]?.created_at;
+      if (!targetCreatedAt) { await client.query('commit'); return { messages: [], events: [] }; }
+      const rows = await client.query('select * from messages.messages where conversation_id=$1 and direction=\'outbound\' and read_status<>2 and created_at<=$2 order by created_at asc, id asc', [conversation.id, targetCreatedAt]);
+      const events: ConversationEventRecord[] = [];
+      const messages: MessageRecord[] = [];
+      let cursor = Number((await client.query('select coalesce(max(cursor),0)::bigint as cursor from messages.events where conversation_id=$1', [conversation.id])).rows[0]?.cursor ?? 0);
+      for (const row of rows.rows) {
+        const updated = await client.query('update messages.messages set read_status=2, read_at=coalesce(read_at,$2::timestamptz) where id=$1 returning *', [row.id, readAt]);
+        const message = this.toMessage(updated.rows[0]);
+        const conversationResult = await client.query('update messages.conversations set version=version+1 where id=$1 returning *', [conversation.id]);
+        const updatedConversation = this.toConversation(conversationResult.rows[0]);
+        cursor += 1;
+        const event: ConversationEventRecord = { eventId: createId(), conversationId: conversation.id, accountId: conversation.accountId, cursor, type: 'chat.message.updated', occurredAt: readAt, traceId: `read:${message.id}`, payload: { message, conversation: updatedConversation } };
+        const eventResult = await client.query('insert into messages.events (event_id,conversation_id,account_id,cursor,type,occurred_at,trace_id,payload_json) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb) returning *', [event.eventId, event.conversationId, event.accountId, event.cursor, event.type, event.occurredAt, event.traceId, JSON.stringify(event.payload)]);
+        messages.push(message);
+        events.push(this.toConversationEvent(eventResult.rows[0]));
+      }
+      await client.query('commit');
+      return { messages, events };
     } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
   }
   async createLoginSession(input: { adminId: string; accountId?: string; provisionalAccountRef?: string; loginMethod: string; expiresAt: string; qrTokenRef?: string }): Promise<LoginSessionRecord> { if (input.accountId && !(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN'); const result = await this.pool.query('insert into auth.account_login_sessions (id,admin_id,account_id,provisional_account_ref,login_method,status,started_at,expires_at,qr_token_ref) values ($1,$2,$3,$4,$5,\'waiting\',now(),$6,$7) returning *', [createId(), input.adminId, input.accountId ?? null, input.provisionalAccountRef ?? null, input.loginMethod, input.expiresAt, input.qrTokenRef ?? null]); return this.toLoginSession(result.rows[0]); }
@@ -514,7 +564,7 @@ export class PostgresStore implements Store {
   private toCouponBinding(row: Row): CouponBindingRecord { return { id: String(row.id), batchId: String(row.coupon_batch_id), productId: String(row.product_id), priority: Number(row.priority ?? 0), status: row.status as CouponBindingRecord['status'], expiresAt: iso(row.expires_at), createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString() }; }
 
   private toConversation(row: Row): ConversationRecord { return { id: String(row.id), accountId: String(row.account_id), externalConversationRef: row.external_conversation_ref ? String(row.external_conversation_ref) : undefined, buyerRef: String(row.buyer_ref), buyerDisplayName: row.buyer_display_name ? String(row.buyer_display_name) : undefined, buyerAvatarUrl: row.buyer_avatar_url ? String(row.buyer_avatar_url) : undefined, itemRef: row.item_ref ? String(row.item_ref) : undefined, itemTitle: row.item_title ? String(row.item_title) : undefined, itemImageUrl: row.item_image_url ? String(row.item_image_url) : undefined, unreadCount: Number(row.unread_count ?? 0), lastMessagePreview: row.last_message_preview ? String(row.last_message_preview) : undefined, lastMessageAt: iso(row.last_message_at), handlingMode: row.handling_mode as ConversationRecord['handlingMode'], version: Number(row.version ?? 1), createdAt: dateIso(row.created_at), updatedAt: dateIso(row.updated_at) }; }
-  private toMessage(row: Row): MessageRecord { const riskFlags = Array.isArray(row.risk_flags) ? row.risk_flags.map(String) : []; return { id: String(row.id), conversationId: String(row.conversation_id), accountId: String(row.account_id), direction: row.direction as MessageRecord['direction'], senderRole: row.sender_role as MessageRecord['senderRole'], bodyType: row.body_type as MessageRecord['bodyType'], bodyText: row.body_text ? String(row.body_text) : undefined, bodyRef: row.body_ref ? String(row.body_ref) : undefined, redactionState: row.redaction_state as MessageRecord['redactionState'], status: row.status as MessageRecord['status'], externalMessageRef: row.external_message_ref ? String(row.external_message_ref) : undefined, source: row.source as MessageRecord['source'], orderRef: row.order_ref ? String(row.order_ref) : undefined, productRef: row.product_ref ? String(row.product_ref) : undefined, riskFlags, handlingMode: row.handling_mode as MessageRecord['handlingMode'], createdAt: new Date(String(row.created_at)).toISOString() }; }
+  private toMessage(row: Row): MessageRecord { const riskFlags = Array.isArray(row.risk_flags) ? row.risk_flags.map(String) : []; return { id: String(row.id), conversationId: String(row.conversation_id), accountId: String(row.account_id), direction: row.direction as MessageRecord['direction'], senderRole: row.sender_role as MessageRecord['senderRole'], bodyType: row.body_type as MessageRecord['bodyType'], bodyText: row.body_text ? String(row.body_text) : undefined, bodyRef: row.body_ref ? String(row.body_ref) : undefined, redactionState: row.redaction_state as MessageRecord['redactionState'], status: row.status as MessageRecord['status'], readStatus: Number(row.read_status ?? 0) === 2 ? 2 : 0, readAt: iso(row.read_at), externalMessageRef: row.external_message_ref ? String(row.external_message_ref) : undefined, source: row.source as MessageRecord['source'], orderRef: row.order_ref ? String(row.order_ref) : undefined, productRef: row.product_ref ? String(row.product_ref) : undefined, riskFlags, handlingMode: row.handling_mode as MessageRecord['handlingMode'], createdAt: new Date(String(row.created_at)).toISOString() }; }
   private toConversationEvent(row: Row): ConversationEventRecord { const payload = row.payload_json && typeof row.payload_json === 'object' && !Array.isArray(row.payload_json) ? row.payload_json as Record<string, unknown> : {}; return { eventId: String(row.event_id), conversationId: String(row.conversation_id), accountId: String(row.account_id), cursor: Number(row.cursor), type: row.type as ConversationEventRecord['type'], occurredAt: new Date(String(row.occurred_at)).toISOString(), traceId: String(row.trace_id), payload }; }
 
   private toAdmin(row: Row): AdminRecord { return { id: String(row.id), email: String(row.email), passwordHash: String(row.password_hash), displayName: String(row.display_name ?? ''), role: String(row.role), status: row.status as AdminRecord['status'], createdAt: new Date(String(row.created_at)).toISOString(), lastLoginAt: iso(row.last_login_at) }; }

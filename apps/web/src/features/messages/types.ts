@@ -35,6 +35,7 @@ export interface MessageVM {
   status: 'created';
   /** Optional read receipt supplied by the external chat adapter. */
   readState?: MessageReadState;
+  readAt?: string;
   createdAt: string;
   externalMessageRef?: string;
   source?: 'human' | 'ai' | 'system';
@@ -49,7 +50,7 @@ export interface RealtimeEvent {
   conversationId: string;
   accountId: string;
   cursor: number;
-  type: 'chat.message.created' | 'chat.conversation.updated' | 'chat.connection.changed';
+  type: 'chat.message.created' | 'chat.message.updated' | 'chat.conversation.updated' | 'chat.connection.changed';
   occurredAt: string;
   traceId: string;
   payload: Record<string, unknown>;

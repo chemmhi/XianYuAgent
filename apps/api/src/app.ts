@@ -269,6 +269,13 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     const result = await messages.listConversations(authContext.admin.id, query);
     return { statusCode: 200, body: success(ctx, result).body };
   }
+  const conversationReadMatch = ctx.path.match(/^\/api\/v1\/conversations\/([^/]+)\/read$/);
+  if (conversationReadMatch && ctx.method === 'POST') {
+    const conversationId = decodeURIComponent(conversationReadMatch[1]);
+    const local = await messages.getConversation(authContext.admin.id, conversationId);
+    const result = await xianyuIm.markConversationRead(authContext.admin.id, local.accountId, conversationId, ctx.requestId, ctx.traceId);
+    return { statusCode: 200, body: success(ctx, result).body };
+  }
   const conversationMessagesMatch = ctx.path.match(/^\/api\/v1\/conversations\/([^/]+)\/messages$/);
   if (conversationMessagesMatch && ctx.method === 'GET') {
     const conversationId = decodeURIComponent(conversationMessagesMatch[1]);

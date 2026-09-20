@@ -114,7 +114,13 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
       const result = await api.listMessages({ accountId, conversationId, limit: 100 });
       if (currentRequest !== requestId.current) return;
       cursorRef.current = result.latestCursor;
-      setState((previous) => ({ ...previous, timelinePhase: result.items.length === 0 ? 'empty' : 'success', messages: result.items, cursor: result.latestCursor, hasMoreHistory: result.hasMoreHistory, historyCursor: result.historyCursor, loadingMoreHistory: false, realtimePhase: 'connecting', error: null }));
+      setState((previous) => ({ ...previous, timelinePhase: result.items.length === 0 ? 'empty' : 'success', messages: mergeTimelineMessages([], result.items), cursor: result.latestCursor, hasMoreHistory: result.hasMoreHistory, historyCursor: result.historyCursor, loadingMoreHistory: false, realtimePhase: 'connecting', error: null }));
+      if (api.markConversationRead) {
+        void api.markConversationRead({ accountId, conversationId }).then((conversation) => {
+          if (!conversation || currentRequest !== requestId.current || activeIdRef.current !== conversationId) return;
+          setState((previous) => ({ ...previous, conversations: mergeConversation(previous.conversations, conversation) }));
+        }).catch(() => undefined);
+      }
       connectRealtime(conversationId, result.latestCursor);
     } catch (error) {
       if (currentRequest !== requestId.current) return;

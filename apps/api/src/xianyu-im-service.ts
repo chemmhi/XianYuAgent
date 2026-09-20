@@ -1,7 +1,7 @@
 import type { AccountRecord, ConversationRecord, CredentialRecord, Store } from './domain.js';
 import { ServiceError } from './services.js';
 import type { MessageService } from './messages.js';
-import { XianyuImClient, XianyuImMessageEvent, XianyuImCredential } from './xianyu-im.js';
+import { XianyuImClient, XianyuImMessageEvent, XianyuImReadReceiptEvent, XianyuImCredential } from './xianyu-im.js';
 import { XianyuMtopClient } from './xianyu-mtop.js';
 
 interface ExternalPage {
@@ -29,8 +29,15 @@ export class XianyuImService {
       // types: some rows include the avatar but omit the nickname and others
       // include neither. Enrich whenever either identity field is missing so
       // the list does not silently fall back to a numeric buyer id.
-      const enrichTargets = parsedItems.filter((item) => !item.buyerAvatarUrl || !item.buyerDisplayName).slice(0, 8);
-      const enrichedEntries = await Promise.all(enrichTargets.map(async (item) => [item.externalConversationRef, await this.enrichConversationIdentity(adminId, accountId, item)] as const));
+      const enrichTargets = parsedItems.filter((item) => !item.buyerAvatarUrl || !item.buyerDisplayName);
+      const enrichedEntries: Array<readonly [string, typeof parsedItems[number]]> = [];
+      // Resolve every incomplete row, but keep the external profile calls bounded
+      // so a large conversation page does not create an unbounded request burst.
+      for (let index = 0; index < enrichTargets.length; index += 8) {
+        const batch = enrichTargets.slice(index, index + 8);
+        const resolved = await Promise.all(batch.map(async (item) => [item.externalConversationRef, await this.enrichConversationIdentity(adminId, accountId, item)] as const));
+        enrichedEntries.push(...resolved);
+      }
       const enrichedByRef = new Map(enrichedEntries);
       for (const parsed of parsedItems) await this.store.upsertExternalConversation({ adminId, accountId, ...(enrichedByRef.get(parsed.externalConversationRef) ?? parsed) });
       hasMore = Boolean(page.hasMore);
@@ -66,6 +73,26 @@ export class XianyuImService {
       });
     }
     return { hasMore: Boolean(page.hasMore), nextCursor: numeric(page.nextCursor) };
+  }
+
+  async markConversationRead(adminId: string, accountId: string, conversationId: string, requestId: string, traceId: string): Promise<unknown> {
+    const conversation = await this.getConversation(adminId, accountId, conversationId);
+    const externalRef = conversation.externalConversationRef;
+    if (externalRef) {
+      try {
+        const client = await this.ensureClient(adminId, accountId);
+        const history = await this.messages.listMessages(adminId, conversationId, { limit: 200 });
+        const refs = history.items
+          .filter((message) => message.direction === 'inbound' && message.externalMessageRef)
+          .map((message) => message.externalMessageRef!)
+          .filter(Boolean);
+        await client.markRead(refs);
+      } catch {
+        // Local unread state is authoritative for the UI. A transient Xianyu
+        // receipt failure must not leave the conversation badge stuck.
+      }
+    }
+    return this.messages.markConversationRead(adminId, conversationId, requestId, traceId);
   }
 
   async sendText(adminId: string, accountId: string, conversationId: string, text: string, requestId: string, traceId: string): Promise<unknown> {
@@ -185,7 +212,23 @@ export class XianyuImService {
     }
   }
 
-  private async importPush(adminId: string, event: XianyuImMessageEvent): Promise<void> {
+  private async importPush(adminId: string, event: XianyuImMessageEvent | XianyuImReadReceiptEvent): Promise<void> {
+    if (isReadReceiptEvent(event)) {
+      const externalConversationRef = event.externalConversationRef;
+      if (!externalConversationRef) return;
+      const conversation = await this.store.findConversationByExternalRef(adminId, event.accountId, externalConversationRef);
+      if (!conversation) return;
+      await this.messages.markExternalMessageRead({
+        adminId,
+        accountId: event.accountId,
+        conversationId: conversation.id,
+        externalMessageRef: event.externalMessageRef,
+        readAt: new Date(event.readAt).toISOString(),
+        requestId: `xianyu:read:${event.externalMessageRef}`,
+        traceId: `xianyu:read:${event.externalMessageRef}`,
+      });
+      return;
+    }
     const conversation = await this.store.findConversationByExternalRef(adminId, event.accountId, event.externalConversationRef);
     if (!conversation) return;
     await this.messages.importExternalMessage({
@@ -202,6 +245,10 @@ export class XianyuImService {
       traceId: `xianyu:push:${event.externalMessageRef}`,
     });
   }
+}
+
+function isReadReceiptEvent(event: XianyuImMessageEvent | XianyuImReadReceiptEvent): event is XianyuImReadReceiptEvent {
+  return 'kind' in event && event.kind === 'read';
 }
 
 function toImCredential(credential: CredentialRecord): XianyuImCredential {

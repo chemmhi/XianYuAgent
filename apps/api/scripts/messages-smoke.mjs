@@ -98,6 +98,11 @@ try {
   assert.equal(history.response.status, 200);
   assert.equal(history.body.data.items[0].messageId, first.message.id);
   assert.equal(history.body.data.latestCursor, 1);
+  const markRead = await request(`/api/v1/conversations/${conversation.id}/read`, { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf }, body: JSON.stringify({}) });
+  assert.equal(markRead.response.status, 200);
+  assert.equal(markRead.body.data.unreadCount, 0);
+  const listAfterRead = await request(`/api/v1/conversations?accountId=${accountId}`, { headers: { cookie } });
+  assert.equal(listAfterRead.body.data.items.find((item) => item.conversationId === conversation.id)?.unreadCount, 0);
 
   console.log('messages smoke: ws rejection checks');
   await expectHandshakeFailure(`ws://127.0.0.1:${port}/api/v1/conversations/${conversation.id}/events?cursor=0`, { headers: { Origin: 'http://localhost:5173' } }, 401);
@@ -126,6 +131,14 @@ try {
   ws2.close();
   await new Promise((resolve) => ws2.once('close', resolve));
 
+  const receiptTarget = await runtime.messages.createMessage({ adminId, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: '等待闲鱼真实已读回执', externalMessageRef: 'seller-read-1.PNM', source: 'human', requestId: 'req-message-read-1', traceId: 'trace-message-read-1' });
+  const readReceipt = await runtime.messages.markExternalMessageRead({ adminId, accountId, conversationId: conversation.id, externalMessageRef: 'seller-read-1.PNM', readAt: '2030-01-01T00:00:04.000Z', requestId: 'req-read-1', traceId: 'trace-read-1' });
+  assert.deepEqual(new Set(readReceipt.messages.map((message) => message.messageId)), new Set([second.message.messageId, receiptTarget.message.messageId]));
+  assert.ok(readReceipt.messages.every((message) => message.readState === 'read'));
+  const readHistory = await runtime.messages.listMessages(adminId, conversation.id, {});
+  assert.equal(readHistory.items.find((message) => message.messageId === receiptTarget.message.messageId)?.readState, 'read');
+  console.log('messages smoke: server read receipt state passed');
+
   // History pagination returns the newest local page first, then prepends
   // older messages using an opaque cursor without mixing realtime cursors.
   const historySecond = await runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '历史分页第二条', source: 'system', traceId: 'history-2', createdAt: '2030-01-01T00:00:02.000Z' });
@@ -135,8 +148,12 @@ try {
   assert.equal(historyHead.body.data.hasMoreHistory, true);
   assert.equal(typeof historyHead.body.data.historyCursor, 'string');
   const historyOlder = await request(`/api/v1/conversations/${conversation.id}/messages?limit=2&beforeCursor=${encodeURIComponent(historyHead.body.data.historyCursor)}`, { headers: { cookie } });
-  assert.deepEqual(historyOlder.body.data.items.map((item) => item.messageId), [first.message.id, second.message.messageId]);
-  assert.equal(historyOlder.body.data.hasMoreHistory, false);
+  assert.deepEqual(new Set(historyOlder.body.data.items.map((item) => item.messageId)), new Set([second.message.messageId, receiptTarget.message.messageId]));
+  assert.equal(historyOlder.body.data.hasMoreHistory, true);
+  const fallbackTarget = await runtime.messages.createMessage({ adminId, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: '缺少消息键时回退最近一条', source: 'human', requestId: 'req-message-read-fallback', traceId: 'trace-message-read-fallback' });
+  const fallbackRead = await runtime.messages.markExternalMessageRead({ adminId, accountId, conversationId: conversation.id, readAt: '2030-01-01T00:00:07.000Z', requestId: 'req-read-fallback', traceId: 'trace-read-fallback' });
+  assert.equal(fallbackRead.messages.at(-1)?.messageId, fallbackTarget.message.messageId);
+  assert.equal(fallbackRead.messages.at(-1)?.readState, 'read');
 
   const forbidden = await request('/api/v1/conversations?accountId=00000000-0000-0000-0000-000000000000', { headers: { cookie } });
   assert.equal(forbidden.response.status, 403);

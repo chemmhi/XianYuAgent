@@ -62,7 +62,7 @@
 .messages-bubble.outbound { background: #dbeafe; }
 .messages-bubble > span { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
 .messages-link { color: #1d4ed8; text-decoration: underline; text-underline-offset: 2px; }
-.messages-image-button { display: block; max-width: min(360px, 100%); padding: 0; border: 0; border-radius: 10px; background: transparent; cursor: zoom-in; }
+.messages-image-button { display: block; width: fit-content; max-width: min(360px, 100%); align-self: flex-start; padding: 0; border: 0; border-radius: 10px; background: transparent; cursor: zoom-in; }
 .messages-image-button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
 .messages-image { display: block; max-width: 100%; max-height: 320px; border-radius: 10px; object-fit: contain; background: #e2e8f0; }
 .messages-bubble small { color: #64748b; font-size: 11px; }
@@ -72,15 +72,12 @@
 .messages-live-badge { border-radius: 999px; background: #dcfce7; color: #166534; font-size: 12px; padding: 8px 12px; }
 .messages-composer { flex: 0 0 auto; border-top: 1px solid #e2e8f0; padding: 12px 18px 16px; background: #fff; }
 .messages-composer-inner { width: min(100%, 760px); margin: 0 auto; }
-.messages-inline-attachment { position: relative; display: flex; align-items: stretch; max-width: min(100%, 360px); margin: 1px 0 6px; padding: 4px; border: 1px solid #bfdbfe; border-radius: 12px; background: #eff6ff; }
-.messages-inline-attachment-trigger { min-width: 0; display: flex; align-items: center; gap: 10px; border: 0; border-radius: 9px; padding: 4px 32px 4px 4px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.messages-inline-attachments { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px; max-width: 100%; margin: 1px 0 6px; }
+.messages-inline-attachment { position: relative; display: inline-flex; width: fit-content; max-width: 100%; justify-self: start; align-self: start; overflow: hidden; padding: 4px; border: 1px solid #bfdbfe; border-radius: 12px; background: #eff6ff; }
+.messages-inline-attachment-trigger { width: fit-content; max-width: 100%; min-width: 0; display: inline-flex; align-items: center; border: 0; border-radius: 9px; padding: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .messages-inline-attachment-trigger:hover { background: #dbeafe; }
 .messages-inline-attachment-trigger:focus-visible { outline: 2px solid #2563eb; outline-offset: 1px; }
-.messages-inline-attachment-trigger img { width: 56px; height: 56px; flex: 0 0 auto; border-radius: 8px; object-fit: cover; background: #dbeafe; }
-.messages-attachment-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.messages-attachment-copy strong, .messages-attachment-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.messages-attachment-copy strong { max-width: 220px; color: #1e3a8a; font-size: 12px; }
-.messages-attachment-copy small { color: #64748b; font-size: 11px; }
+.messages-inline-attachment-trigger img { display: block; width: auto; height: auto; max-width: 240px; max-height: 120px; flex: 0 0 auto; border-radius: 8px; object-fit: contain; background: #dbeafe; }
 .messages-attachment-remove { position: absolute; top: 4px; right: 5px; width: 22px; height: 22px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .88); color: #475569; cursor: pointer; font-size: 16px; line-height: 1; }
 .messages-attachment-remove:hover { background: #fff; color: #b91c1c; }
 .messages-attachment-remove:focus-visible { outline: 2px solid #2563eb; outline-offset: 1px; }
@@ -158,6 +155,22 @@
 .messages-main-header small {
   color: var(--sub);
   font-size: 11px;
+}
+
+.messages-header-loading {
+  display: inline-flex;
+  align-items: center;
+  min-height: 11px;
+}
+
+.messages-header-loading-line {
+  display: block;
+  width: 92px;
+  height: 7px;
+  border-radius: 999px;
+  background: linear-gradient(100deg, color-mix(in srgb, var(--bg, #f8fafc) 84%, #fff) 20%, color-mix(in srgb, var(--border, #e2e8f0) 70%, #fff) 45%, color-mix(in srgb, var(--bg, #f8fafc) 84%, #fff) 70%);
+  background-size: 220% 100%;
+  animation: messages-shimmer 1.35s ease-in-out infinite;
 }
 
 .messages-sidebar-tools {
@@ -393,7 +406,7 @@
 }
 
 .messages-bubble-row.outbound .messages-message-stack {
-  text-align: right;
+  text-align: left;
   align-items: flex-end;
 }
 
@@ -504,17 +517,29 @@
 .messages-composer-editor .messages-composer-input {
   position: relative;
   z-index: 1;
+  background: transparent;
 }
 
 .messages-composer-input--masked {
   color: transparent !important;
-  caret-color: var(--text);
+  -webkit-text-fill-color: transparent;
+  caret-color: transparent;
+}
+
+/* The textarea keeps the real marker text for editing, while the visual layer
+   above it renders official Xianyu emoji assets.  Keeping the textarea's
+   selection text transparent prevents browser selection painting from leaking
+   `[表情名]` into the composer. */
+.messages-composer-input--masked::selection {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  background: rgba(37, 99, 235, .14);
 }
 
 .messages-composer-visual {
   position: absolute;
   inset: 0;
-  z-index: 0;
+  z-index: 2;
   overflow: hidden;
   padding: 7px 0 10px;
   color: var(--text);
@@ -529,6 +554,21 @@
   width: 22px;
   height: 22px;
   margin: 0 1px;
+}
+
+.messages-composer-caret {
+  display: inline-block;
+  width: 1px;
+  min-height: 1.2em;
+  margin-left: -1px;
+  background: var(--link, #2563eb);
+  vertical-align: text-bottom;
+  animation: messages-caret-blink 1s steps(2, jump-none) infinite;
+}
+
+@keyframes messages-caret-blink {
+  0%, 45% { opacity: 1; }
+  46%, 100% { opacity: 0; }
 }
 
 .messages-composer textarea::placeholder {
@@ -736,6 +776,7 @@
   .messages-skeleton-thumb,
   .messages-skeleton-line,
   .messages-skeleton-bubble,
+  .messages-header-loading-line,
   .messages-connection-spinner,
   .messages-inline-spinner {
     animation: none;

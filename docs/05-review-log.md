@@ -287,5 +287,6 @@
 | S5-R42 | 业务 / 验收 | 账号管理页设置当前账号后，消息页是否复用全局账号上下文且不再渲染账号选择器 | root + Chrome/CDP | PASS（当前切片） | `apps/web/src/app/account-context.tsx`、`apps/web/src/features/messages/components/MessagesPage.tsx`、`npm run test:e2e:chrome:messages`、桌面/移动截图 |
 | S5-R43 | 外部平台 / 数据读取 | 使用 PostgreSQL 中已有登录态读取真实会话和历史消息，是否保持账号 scope、分页游标和消息去重 | root + real_api_verify | PASS（真实回读） | 账号 `19cf…`：3 会话 / 首会话 4 条；账号 `6f0…`：1 会话 / 首会话 20 条且 `hasMore=true`；数据库 `duplicate_external_refs=0` |
 | S5-R44 | 质量 / 安全 / 运维 | 是否避免把真实登录态用于无意义测试或发送真实买家消息，并保持发布级边界声明 | root | PASS（范围受控） | 本轮未重复 Cookie 登录、未发送真实消息；`docs/evidence/stage5/s4-vs5a-chat-read/test-baseline.md`；`S5-RISK-021` 保持开放 |
+| S5-R45 | 消息状态 / 实时链路 | 是否使用闲鱼真实 40103 已读回执与 `/r/MessageStatus/read`，并通过服务端事件更新 UI，而不是用买家回复推断卖家已读 | root | PASS（受控验证） | `npm --workspace apps/api run test:xianyu-im-read` 8/8；`npm --workspace apps/api run test:messages:infra`；`apps/api/src/xianyu-im.ts`、`apps/api/src/xianyu-im-service.ts`、`apps/api/migrations/017_message_read_status.sql`；`S4-VS5A` 仍保持 `PARTIALLY_VERIFIED`，外部线上 40103 仍待独立复审 |
 
-本轮结论：真实闲鱼凭证回读、账号级上下文复用、Redis/PostgreSQL 恢复和 Chrome/CDP 视觉证据均已形成可复核记录；`S4-VS5A` 仍为 `PARTIALLY_VERIFIED`，独立复审与生产部署拓扑确认未关闭前不得宣称发布级完成。发送、附件、撤回继续进入 `S4-VS5B`。
+本轮结论：真实闲鱼凭证回读、账号级上下文复用、40103 已读回执链路、Redis/PostgreSQL 恢复和 Chrome/CDP 视觉证据均已形成可复核记录；`S4-VS5A` 仍为 `PARTIALLY_VERIFIED`，独立复审与生产部署拓扑确认未关闭前不得宣称发布级完成。发送、附件、撤回继续进入 `S4-VS5B`。

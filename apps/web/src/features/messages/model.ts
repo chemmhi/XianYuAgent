@@ -4,7 +4,12 @@ export interface MergeState { conversations: ConversationVM[]; messages: Message
 
 export function mergeTimelineMessages(existing: MessageVM[], incoming: MessageVM[]): MessageVM[] {
   const byId = new Map(existing.map((message) => [message.messageId, message]));
-  for (const message of incoming) byId.set(message.messageId, message);
+  for (const message of incoming) {
+    const previous = byId.get(message.messageId);
+    // Realtime/backfill payloads may omit optional receipts. Keep an already
+    // known read state when a later partial copy of the same message arrives.
+    byId.set(message.messageId, previous ? { ...previous, ...message } : message);
+  }
   return [...byId.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.messageId.localeCompare(right.messageId));
 }
 
@@ -43,7 +48,7 @@ export function applyRealtimeEvent(state: MergeState, event: RealtimeEvent): Mer
   const message = isMessage(event.payload.message) ? event.payload.message : undefined;
   const conversation = isConversation(event.payload.conversation) ? event.payload.conversation : undefined;
   if (conversation) conversations = mergeConversation(conversations, conversation);
-  if (message && !messages.some((item) => item.messageId === message.messageId)) messages = mergeTimelineMessages(messages, [message]);
+  if (message) messages = mergeTimelineMessages(messages, [message]);
   return { conversations, messages, cursor: Math.max(state.cursor, event.cursor), seenEventIds };
 }
 

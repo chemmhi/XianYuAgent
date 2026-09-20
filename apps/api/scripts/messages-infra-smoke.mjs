@@ -118,6 +118,7 @@ async function cleanup() {
         await pool.query('delete from messages.conversations where id=$1', [id]);
       }
       if (accountId) {
+        await pool.query('delete from observability.audit_events where account_id=$1', [accountId]);
         await pool.query('delete from auth.account_scopes where account_id=$1', [accountId]);
         await pool.query('delete from auth.account_credentials where account_id=$1', [accountId]);
         await pool.query('delete from accounts.accounts where id=$1', [accountId]);
@@ -196,7 +197,20 @@ try {
   assert.equal(historyOlder.hasMoreHistory, false);
   console.log('messages infra smoke: PostgreSQL message history pagination passed');
 
+  const outgoingOne = await runtime1.store.createMessage({ adminId, conversationId, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: 'postgres read receipt one', externalMessageRef: `receipt-one-${suffix}.PNM`, source: 'human', createdAt: '2030-01-01T00:00:04.000Z', traceId: `receipt-one-${suffix}` });
+  const outgoingTwo = await runtime1.store.createMessage({ adminId, conversationId, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: 'postgres read receipt two', externalMessageRef: `receipt-two-${suffix}.PNM`, source: 'human', createdAt: '2030-01-01T00:00:05.000Z', traceId: `receipt-two-${suffix}` });
   ws = await openSocket(port2, cookie);
+  const readEventPromise = waitForMessage(ws, (event) => event.type === 'chat.message.updated' && event.payload?.message?.externalMessageRef === `receipt-two-${suffix}.PNM`);
+  const readReceipt = await runtime1.messages.markExternalMessageRead({ adminId, accountId, conversationId, externalMessageRef: `receipt-two-${suffix}.PNM`, readAt: '2030-01-01T00:00:06.000Z', requestId: `receipt-read-${suffix}`, traceId: `receipt-read-${suffix}` });
+  assert.deepEqual(new Set(readReceipt.messages.map((message) => message.messageId)), new Set([outgoingOne.message.id, outgoingTwo.message.id]));
+  assert.ok(readReceipt.messages.every((message) => message.readState === 'read' && message.readAt === '2030-01-01T00:00:06.000Z'));
+  const readState = await runtime1.store.listMessages(adminId, conversationId, {});
+  assert.equal(readState.items.find((message) => message.id === outgoingTwo.message.id)?.readStatus, 2);
+  const readEvent = await readEventPromise;
+  assert.equal(readEvent.payload.message.readState, 'read');
+  assert.equal(readEvent.payload.message.readAt, '2030-01-01T00:00:06.000Z');
+  console.log('messages infra smoke: PostgreSQL real read receipt persistence passed');
+
   await runtime1.messages.createMessage({ adminId, conversationId, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: 'cross process before restart', source: 'system', requestId: `infra-before-${suffix}`, traceId: `infra-before-${suffix}` });
   const beforeRestart = await waitForMessage(ws, (event) => event.type === 'chat.message.created' && event.payload?.message?.bodyText === 'cross process before restart');
   assert.equal(beforeRestart.payload.message.conversationId, conversationId);

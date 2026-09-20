@@ -13,6 +13,7 @@
     "test:postgres": "npm run build && node scripts/products-postgres-smoke.mjs",
     "test:messages:infra": "npm run build && node scripts/messages-infra-smoke.mjs",
     "test:pi:live": "npm run build && node scripts/pi-runtime-live-smoke.mjs",
+    "test:xianyu-im-read": "node --import tsx --test scripts/xianyu-im-read.test.ts",
     "smoke": "npm run build && node scripts/smoke.mjs",
     "test": "npm run build && node scripts/smoke.mjs && node scripts/messages-smoke.mjs && node scripts/onboarding-smoke.mjs && node scripts/workspace-smoke.mjs && node scripts/workspace-ws-smoke.mjs && node scripts/products-smoke.mjs && node scripts/products-sync-smoke.mjs && node scripts/xianyu-product-mapper-smoke.mjs && node scripts/pi-runtime-smoke.mjs"
   },

@@ -290,6 +290,14 @@ export class MemoryStore implements Store {
     return { ...conversation };
   }
 
+  async markConversationRead(adminId: string, conversationId: string): Promise<ConversationRecord | undefined> {
+    const conversation = this.conversations.get(conversationId);
+    if (!conversation || !(await this.hasAccountScope(adminId, conversation.accountId))) return undefined;
+    conversation.unreadCount = 0;
+    conversation.version += 1;
+    return { ...conversation };
+  }
+
   async findConversationByExternalRef(adminId: string, accountId: string, externalConversationRef: string): Promise<ConversationRecord | undefined> {
     if (!(await this.hasAccountScope(adminId, accountId))) return undefined;
     const conversation = [...this.conversations.values()].find((item) => item.accountId === accountId && item.externalConversationRef === externalConversationRef);
@@ -384,7 +392,7 @@ export class MemoryStore implements Store {
       }
     }
     const now = input.createdAt ?? new Date().toISOString();
-    const message: MessageRecord = { id: createId(), conversationId: conversation.id, accountId: conversation.accountId, direction: input.direction, senderRole: input.senderRole, bodyType: input.bodyType, bodyText: input.bodyText, bodyRef: input.bodyRef, redactionState: 'visible', status: 'created', externalMessageRef: input.externalMessageRef, source: input.source, orderRef: input.orderRef, productRef: input.productRef, riskFlags: [...(input.riskFlags ?? [])], handlingMode: conversation.handlingMode, createdAt: now };
+    const message: MessageRecord = { id: createId(), conversationId: conversation.id, accountId: conversation.accountId, direction: input.direction, senderRole: input.senderRole, bodyType: input.bodyType, bodyText: input.bodyText, bodyRef: input.bodyRef, redactionState: 'visible', status: 'created', readStatus: 0, externalMessageRef: input.externalMessageRef, source: input.source, orderRef: input.orderRef, productRef: input.productRef, riskFlags: [...(input.riskFlags ?? [])], handlingMode: conversation.handlingMode, createdAt: now };
     this.messages.set(message.id, message);
     if (!conversation.lastMessageAt || now >= conversation.lastMessageAt) {
       conversation.lastMessagePreview = message.bodyText?.slice(0, 180);
@@ -400,7 +408,51 @@ export class MemoryStore implements Store {
     return { message: { ...message, riskFlags: [...message.riskFlags] }, event: { ...event, payload: { ...event.payload } } };
   }
 
-  private eventForMessage(conversationId: string, messageId: string): ConversationEventRecord | undefined { return (this.conversationEvents.get(conversationId) ?? []).find((event) => (event.payload.message as { id?: string } | undefined)?.id === messageId); }
+  async markMessagesReadByExternalRef(input: { adminId: string; conversationId: string; externalMessageRef: string; readAt?: string }): Promise<{ messages: MessageRecord[]; events: ConversationEventRecord[] }> {
+    const conversation = await this.getConversation(input.adminId, input.conversationId);
+    if (!conversation) return { messages: [], events: [] };
+    const target = [...this.messages.values()].find((message) => message.conversationId === input.conversationId && message.externalMessageRef === input.externalMessageRef && message.direction === 'outbound');
+    if (!target) return { messages: [], events: [] };
+    return this.markOutgoingReadUntil(conversation, target.createdAt, input.readAt);
+  }
+
+  async markLatestOutgoingRead(input: { adminId: string; conversationId: string; readAt?: string }): Promise<{ messages: MessageRecord[]; events: ConversationEventRecord[] }> {
+    const conversation = await this.getConversation(input.adminId, input.conversationId);
+    if (!conversation) return { messages: [], events: [] };
+    const target = [...this.messages.values()]
+      .filter((message) => message.conversationId === input.conversationId && message.direction === 'outbound' && message.readStatus !== 2)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id))[0];
+    if (!target) return { messages: [], events: [] };
+    return this.markOutgoingReadUntil(conversation, target.createdAt, input.readAt);
+  }
+
+  private markOutgoingReadUntil(conversation: ConversationRecord, createdAt: string, readAt?: string): { messages: MessageRecord[]; events: ConversationEventRecord[] } {
+    const effectiveReadAt = readAt ?? new Date().toISOString();
+    const changed = [...this.messages.values()]
+      .filter((message) => message.conversationId === conversation.id && message.direction === 'outbound' && message.readStatus !== 2 && message.createdAt <= createdAt)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+    const events: ConversationEventRecord[] = [];
+    for (const message of changed) {
+      message.readStatus = 2;
+      message.readAt = effectiveReadAt;
+      conversation.version += 1;
+      const cursor = (this.conversationCursors.get(conversation.id) ?? 0) + 1;
+      this.conversationCursors.set(conversation.id, cursor);
+      const event: ConversationEventRecord = { eventId: createId(), conversationId: conversation.id, accountId: conversation.accountId, cursor, type: 'chat.message.updated', occurredAt: effectiveReadAt, traceId: `read:${message.id}`, payload: { message: { ...message, riskFlags: [...message.riskFlags] }, conversation: { ...conversation } } };
+      this.conversationEvents.get(conversation.id)?.push(event);
+      events.push({ ...event, payload: { ...event.payload } });
+    }
+    return { messages: changed.map((message) => ({ ...message, riskFlags: [...message.riskFlags] })), events };
+  }
+
+  private eventForMessage(conversationId: string, messageId: string): ConversationEventRecord | undefined {
+    const events = this.conversationEvents.get(conversationId) ?? [];
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index];
+      if ((event?.payload.message as { id?: string } | undefined)?.id === messageId) return event;
+    }
+    return undefined;
+  }
 
   async createLoginSession(input: { adminId: string; accountId?: string; provisionalAccountRef?: string; loginMethod: string; expiresAt: string; qrTokenRef?: string }): Promise<LoginSessionRecord> {
     if (input.accountId && !(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');

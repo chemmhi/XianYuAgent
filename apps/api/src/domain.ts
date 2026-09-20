@@ -16,8 +16,9 @@ export type MessageDirection = 'inbound' | 'outbound';
 export type MessageSenderRole = 'buyer' | 'agent' | 'system';
 export type MessageBodyType = 'text' | 'image' | 'system';
 export type MessageStatus = 'created';
+export type MessageReadStatus = 0 | 2;
 export type MessageRedactionState = 'visible' | 'redacted';
-export type ConversationEventType = 'chat.message.created' | 'chat.conversation.updated' | 'chat.connection.changed';
+export type ConversationEventType = 'chat.message.created' | 'chat.message.updated' | 'chat.conversation.updated' | 'chat.connection.changed';
 
 export interface CouponApiConfig {
   url: string;
@@ -309,6 +310,8 @@ export interface MessageRecord {
   bodyRef?: string;
   redactionState: MessageRedactionState;
   status: MessageStatus;
+  readStatus: MessageReadStatus;
+  readAt?: string;
   externalMessageRef?: string;
   source?: 'human' | 'ai' | 'system';
   orderRef?: string;
@@ -553,6 +556,7 @@ export interface Store {
   getCouponContent(adminId: string, itemId: string): Promise<{ batch: CouponBatchRecord; item: CouponItemRecord } | undefined>;
   listConversations(adminId: string, query: ConversationListQuery): Promise<ConversationListResult>;
   getConversation(adminId: string, conversationId: string): Promise<ConversationRecord | undefined>;
+  markConversationRead(adminId: string, conversationId: string): Promise<ConversationRecord | undefined>;
   findConversationByExternalRef(adminId: string, accountId: string, externalConversationRef: string): Promise<ConversationRecord | undefined>;
   upsertExternalConversation(input: { adminId: string; accountId: string; externalConversationRef: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; unreadCount?: number; lastMessagePreview?: string; lastMessageAt?: string }): Promise<ConversationRecord>;
   listMessages(adminId: string, conversationId: string, query: MessageListQuery): Promise<MessageListResult>;
@@ -560,4 +564,6 @@ export interface Store {
   findMessageByExternalRef(adminId: string, conversationId: string, externalMessageRef: string): Promise<MessageRecord | undefined>;
   createConversation(input: { adminId: string; accountId: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; externalConversationRef?: string }): Promise<ConversationRecord>;
   createMessage(input: { adminId: string; conversationId: string; direction: MessageDirection; senderRole: MessageSenderRole; bodyType: MessageBodyType; bodyText?: string; bodyRef?: string; externalMessageRef?: string; source?: MessageRecord['source']; orderRef?: string; productRef?: string; riskFlags?: string[]; createdAt?: string; traceId?: string }): Promise<{ message: MessageRecord; event: ConversationEventRecord }>;
+  markMessagesReadByExternalRef(input: { adminId: string; conversationId: string; externalMessageRef: string; readAt?: string }): Promise<{ messages: MessageRecord[]; events: ConversationEventRecord[] }>;
+  markLatestOutgoingRead(input: { adminId: string; conversationId: string; readAt?: string }): Promise<{ messages: MessageRecord[]; events: ConversationEventRecord[] }>;
 }

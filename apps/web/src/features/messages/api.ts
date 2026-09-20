@@ -5,6 +5,7 @@ interface Envelope<T> { data?: T; }
 export interface MessagesApi {
   listConversations(input: { accountId: string; cursor?: string; limit?: number }): Promise<{ items: ConversationVM[]; nextCursor?: string; hasMore: boolean }>;
   listMessages(input: { accountId: string; conversationId: string; cursor?: number; beforeCursor?: string; limit?: number }): Promise<{ items: MessageVM[]; nextCursor?: number; hasMore: boolean; latestCursor: number; hasMoreHistory: boolean; historyCursor?: string }>;
+  markConversationRead?(input: { accountId: string; conversationId: string }): Promise<ConversationVM>;
   sendMessage(input: { accountId: string; conversationId: string; text: string; idempotencyKey: string }): Promise<MessageVM>;
   sendImage(input: { accountId: string; conversationId: string; file: File; idempotencyKey: string }): Promise<MessageVM>;
   openRealtime(input: { accountId: string; conversationId: string; cursor: number; onEvent: (event: RealtimeEvent) => void; onOpen?: () => void; onClose?: () => void; onError?: () => void }): { close: () => void };
@@ -24,6 +25,12 @@ export function createMessagesApi(input: { get: <T>(path: string) => Promise<T>;
       if (query.beforeCursor !== undefined) params.set('beforeCursor', query.beforeCursor);
       const payload = await input.get<Envelope<{ items: MessageVM[]; nextCursor?: number; hasMore: boolean; latestCursor: number; hasMoreHistory: boolean; historyCursor?: string }>>(`/api/v1/conversations/${encodeURIComponent(query.conversationId)}/messages?${params.toString()}`);
       return payload.data ?? { items: [], hasMore: false, latestCursor: 0, hasMoreHistory: false };
+    },
+    async markConversationRead(query) {
+      if (!input.post) throw new Error('messages read api unavailable');
+      const payload = await input.post<Envelope<ConversationVM>>(`/api/v1/conversations/${encodeURIComponent(query.conversationId)}/read`, {});
+      if (!payload.data) throw new Error('conversation read returned no data');
+      return payload.data;
     },
     async sendMessage(query) {
       if (!input.post) throw new Error('messages send api unavailable');
