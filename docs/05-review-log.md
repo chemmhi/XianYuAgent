@@ -329,10 +329,12 @@
 | S5-R54 | 业务 / 验收 | 订单页面是否支持账号 scope、关键词、支付/订单/发货/售后四态、分页、详情和空/错/403 状态，且不暴露交付正文 | root + test_recon | PASS | `apps/web/src/features/orders/`、`apps/api/scripts/orders-smoke.mjs`、`npm test`、`npm run test:e2e:chrome:orders` |
 | S5-R55 | 架构 / 数据流 | `018_orders.sql`、Postgres/Memory Store、OrderService、HTTP route 和闲鱼 mapper 是否职责分离、金额/时间/外部 upsert 契约一致 | root + test_recon | PASS | `apps/api/migrations/018_orders.sql`、`apps/api/src/store-postgres.ts`、`apps/api/src/services.ts`、`apps/api/src/xianyu-order-mapper.ts`、`npm --workspace apps/api run test:orders:postgres` |
 | S5-R56 | 浏览器 / 视觉 | 真实 Vite + API + Chrome/CDP 是否完成桌面/移动订单旅程，桌面列是否完整可见，移动端是否无横向溢出 | root + test_recon + orders_e2e | PASS | `npm run test:e2e:chrome:orders`；`docs/evidence/stage5/S4-VS4A/screenshots/` |
-| S5-R57 | 外部平台 / 质量 | 真实闲鱼 active 凭证是否可完成只读订单请求，失败不泄露敏感凭证，空结果不被伪造为订单 | root + test_recon + ydisks_order_recon | PARTIALLY_VERIFIED/BLOCKED | 修复后请求已对齐 Ydisks seller 契约，mapper 已覆盖 `data.module.items/commonData/buyerInfoVO/priceVO/rightVO`；当前两个 active 账号明确返回 `MTOP_PERMISSION_DENIED / PERMISSION_EXCEPTION::无权限访问`，不再记录为成功 0 条；未输出 Cookie/Token/raw payload |
+| S5-R57 | 外部平台 / 质量 | 真实闲鱼 active 凭证是否可完成只读订单请求，失败不泄露敏感凭证，空结果不被伪造为订单 | root + test_recon + ydisks_order_recon | PASS | A/B 复验确认 `idle_site_biz_code: COMMONPRO` 请求头触发 `MTOP_PERMISSION_DENIED`；移除该头后真实返回 5 条订单，Chrome/CDP refresh 经 API 写入 PostgreSQL 并在订单页可见；未输出 Cookie/Token/raw payload |
+
+| S5-R58 | 前端 / 架构 / 质量 | Dashboard 真实入口是否经 API、数据库和闲鱼完成跨层闭环，且浏览器可见结果与持久化一致 | root + fullchain_audit + integration_audit | PASS | `ALLOW_SHARED_E2E=1 REQUIRE_XIANYU_ORDER_SYNC=1 npm run test:e2e:chrome:dashboard:fullchain` 通过；PostgreSQL/Redis 可达，资料/商品/IM/订单读取成功，商品同步与订单刷新均落库并回读，桌面/移动截图与 `fullchain-evidence.json` 已归档 |
 | S5-R58 | 范围 / 发布门禁 | 是否误把交付预览、发货/取消/重试、库存锁、Outbox、DeliveryRecord 宣称为本片完成 | root | PASS | `docs/evidence/stage5/S4-VS4A/test-baseline.md`；`S4-VS4B/C` 保持后置 |
 
-本轮结论：`S4-VS4A = PARTIALLY_VERIFIED/BLOCKED`。前端、后端、PostgreSQL、浏览器和参考响应解析已通过；真实 seller 订单请求仍被当前账号权限拒绝，待补充完整浏览器 Cookie/Jar 或可访问订单权限后复验；交付相关能力继续按 `S4-VS4B/C` 单独立项和复审。
+本轮结论：`S4-VS4A = PASS（只读范围）`。前端、后端、PostgreSQL、浏览器和真实 seller 订单读取/落库复读均已通过；交付相关能力继续按 `S4-VS4B/C` 单独立项和复审。
 
 ### 2026-09-20：S4-VS4A 订单列表界面修订复核
 
@@ -364,3 +366,12 @@
 | S5-R64 | 质量 / 安全 / 视觉 | 403/409、secret 不进入 URL/localStorage/input、1440×900/390×844 双端视觉与短标签导航 | root + prototype_audit | PASS（受控环境） | `apps/web/scripts/e2e-settings-chrome.mjs`；`docs/evidence/stage5/S4-VS7A/README.md` |
 
 增量结论：`S4-VS7A` 已完成首片真实浏览器与临时 PostgreSQL 证据闭环，状态仍保持 `READY_FOR_REVIEW`；发布级 rollback、旧明文 `auth.account_credentials` 双读单写兼容迁移和正式 merge lock 签核未关闭前，不标记 `PASS`。
+
+### 2026-09-20：Dashboard 默认真实 API 入口修复复核
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R65 | 前端 / 配置 | `VITE_API_MODE=live` 且未设置 `VITE_DASHBOARD_MODE` 时是否使用真实 Dashboard API；显式 mock 覆盖是否仍可用 | root | PASS | `6522286`；`apps/web/src/app/App.tsx`、`App.dashboard-mode.test.ts`；Web 37 files / 110 tests、typecheck、build、显式 mock Chrome E2E、默认 live fullchain |
+| S5-R66 | 真实全链路 | 默认模式是否完成 Chrome → API → PostgreSQL/Redis → 闲鱼 → Dashboard 回读，且不依赖显式 live 开关 | root + fullchain_audit + integration_audit | PASS | `ALLOW_SHARED_E2E=1 REQUIRE_XIANYU_ORDER_SYNC=1 npm run test:e2e:chrome:dashboard:fullchain`；`docs/evidence/stage5/S4-VS-DASHBOARD/fullchain-evidence.json` |
+
+本轮结论：Dashboard 不再因缺少独立 `VITE_DASHBOARD_MODE` 而默认展示 mock；mock 仅作为显式测试覆盖保留。高保真视觉签核、旧 `/order-trend` 兼容接口与 rollback 门禁仍按 `S4-VS-DASHBOARD` 原范围开放。

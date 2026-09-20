@@ -186,6 +186,18 @@
 4. 表格采用自适应最大高度、内部滚动、sticky 表头和分页；本轮只改前端呈现与交互，不改变订单 API、数据库、canonical 状态映射、闲鱼请求契约或真实外部权限结论。
 5. 本轮代码已在 merge lock 内以 `--no-ff` 合入 `master`，合并提交为 `8ad36cd`；`S4-VS4A` 仍保持 `PARTIALLY_VERIFIED/BLOCKED`，因为真实 seller 订单请求继续返回 `PERMISSION_EXCEPTION::无权限访问`。
 
+## 2026-09-20 订单 MTOP 权限回归与 Dashboard 全链路复验
+
+1. 对照订单管理页同步接口保留 seller origin/referer、`type=json`、`valueType=string`、`spm_cnt` 与标准 body；确认 `idle_site_biz_code: COMMONPRO` 不应作为请求头发送，A/B 真实请求中该头会触发 `PERMISSION_EXCEPTION::无权限访问`。
+2. `374b3ef` 固化请求头移除与请求契约回归；`555070d` 补充严格全链路脚本、显式共享库写入保护、会话清理、真实订单刷新落库断言和双 viewport 证据。
+3. `ba925a3` 已在 merge lock 内以 `--no-ff` 合入 `master`；`S4-VS4A` 只读范围复验通过，`S4-VS-DASHBOARD` 的 API/数据库/闲鱼跨层链路复验通过；Dashboard 旧 `/order-trend` 兼容接口与全状态视觉签核仍作为后续风险记录。
+
+## 2026-09-20 Dashboard API 模式决策
+
+1. `VITE_DASHBOARD_MODE` 作为可选覆盖项：未设置时继承 `VITE_API_MODE`，因此根开发脚本设置 `VITE_API_MODE=live` 时 Dashboard 默认请求真实 `/api/v1/dashboard/snapshot`。
+2. `VITE_DASHBOARD_MODE=mock` 仅用于受控 fixture / 视觉测试；mock E2E 必须断言 `Mock API` 且不发起 Dashboard snapshot 请求，避免把 fixture 结果误认为真实链路。
+3. 修复已通过独立 worktree `fix/dashboard-live-default` 提交 `4d634ed`，并在 merge lock 内以 `6522286` 合入 `master`；默认 live fullchain 与显式 mock E2E 均通过。
+
 ## Git 提交记录
 
 - 阶段 0：`38862e5`（`feat: 阶段0文档产出`）

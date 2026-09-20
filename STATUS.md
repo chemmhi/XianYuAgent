@@ -2,12 +2,12 @@
 
 - 项目阶段：5
 - 阶段状态：进行中（账号管理、商品、卡券已具备主体链路；S4-VS3 仍待真实环境人工复核；下一批优先切片调整为在线聊天、Workspace 工作台和 Settings API Key 配置）
-- 最近一次通过门禁：S4-VS5A 真实恢复与浏览器证据复核 / 2026-09-20（PARTIALLY_VERIFIED）
+- 最近一次通过门禁：S4-VS-DASHBOARD 全链路复核 / 2026-09-20（PASS；项目整体仍处于阶段 5 进行中）
 - 当前目标：完成 `S4-VS5A` 独立复审后推进 `S4-VS5B/C`；并行收尾 `S4-VS6B`、`S4-VS7A` 的真实 PostgreSQL、浏览器视觉和独立评审门禁，以及既有账号/商品/卡券真实环境门禁，不再把受控证据冒充发布级完成
 - 多 Agent 协作状态：已启用独立 worktree、登记表和全局 merge lock 强制规则；当前活动登记见 `docs/agent-worktree-registry.md`，主工作区禁止直接开发
 - 已完成范围：阶段 0 范围门禁；阶段 1 架构与模块边界；阶段 2 数据模型、数据库表设计、关系基数、状态机、API envelope、幂等、鉴权、敏感交付、迁移边界；阶段 5 账号登录方法选择、真实 QR 适配器、Cookie 登录、账号资料同步、登录会话持久化、AuthGate 会话门禁、Vite 默认代理、账号列表真实读取和 Chrome/CDP 控制环境 E2E；S4-VS2 商品列表/详情只读首片、003_catalog 迁移、Memory/Postgres scope-aware 查询、真实 PostgreSQL smoke 和 Chrome/CDP 商品 E2E
-- 未完成范围：在线聊天 `S4-VS5B/C`、Workspace `S4-VS6B`、Settings API Key `S4-VS7A` 已完成首片并保持 `READY_FOR_REVIEW`；订单交付 `S4-VS4B/C`；订单只读列表 `S4-VS4A` 的前端、后端、PostgreSQL、Chrome/CDP 和参考响应解析已通过，但真实闲鱼订单请求当前被现有账号返回 `PERMISSION_EXCEPTION::无权限访问`，外部门禁保持 `PARTIALLY_VERIFIED/BLOCKED`；VS5A 保持 `PARTIALLY_VERIFIED`，待独立复审确认生产部署拓扑后关闭 `S5-RISK-021`；`S4-VS6A` 已完成真实 PostgreSQL、WS 和 Chrome/CDP 首链路复核并保持 `PARTIALLY_VERIFIED`，尚未满足独立 Worker/Pi Runtime、发布级恢复和人工视觉签核；商品/卡券剩余写入与库存门禁；`S4-ENV-RECOVERY`、`S4-EXT-ACCOUNT`、`S4-ENV-RUNTIME`；完整迁移/回滚/Testcontainers、Redis/MinIO 恢复和逐状态视觉回归。账号密码登录依赖独立浏览器运行时，当前明确不可用。
-- 未解决风险：R-001/P1、R-002/P1、R-005/P2、R-006/P2、R-007/P2、R-008/P1、R-009/P1、R-011/P1、S3-I001/P1、S3-I002/P1、S3-I003/P1、S3-I004/P1、S3-I005/P1、S3-I006/P1、S3-I007/P1、S3-I008/P1、S4-I003/P1、S4-I004/P1、S4-I005/P1、S4-I006/P1、S4-I007/P2、S5-I001/P1、S5-I002/P1、S5-I003/P1、S5-I004/P1、S5-I007/P1、S5-I008/P1、S5-I009/P1、S5-RISK-013/P1、S5-RISK-014/P1、S5-RISK-015/P1、S5-RISK-016/P1、S5-RISK-017/P1、S5-RISK-018/P1、S5-RISK-019/P1、S5-RISK-020/P1、S5-RISK-021/P1、S5-RISK-022/P1、S5-RISK-023/P1、S5-RISK-024/P1、S5-RISK-025/P1、S5-RISK-026/P1、S5-RISK-027/P1、S5-RISK-028/P2；S3-I009/S3-I010/S5-I006 已关闭，S4-I001/S4-I002 已部分缓解
+- 未完成范围：在线聊天 `S4-VS5B/C`、Workspace `S4-VS6B`、Settings API Key `S4-VS7A` 已完成首片并保持 `READY_FOR_REVIEW`；订单交付 `S4-VS4B/C`；订单只读列表 `S4-VS4A` 的真实闲鱼读取与 PostgreSQL 落库已通过，交付动作仍后置；Dashboard 全状态截图、独立视觉签核与 rollback 仍开放；VS5A 保持 `PARTIALLY_VERIFIED`，待独立复审确认生产部署拓扑后关闭 `S5-RISK-021`；`S4-VS6A` 已完成真实 PostgreSQL、WS 和 Chrome/CDP 首链路复核并保持 `PARTIALLY_VERIFIED`，尚未满足独立 Worker/Pi Runtime、发布级恢复和人工视觉签核；商品/卡券剩余写入与库存门禁；`S4-ENV-RECOVERY`、`S4-EXT-ACCOUNT`、`S4-ENV-RUNTIME`；完整迁移/回滚/Testcontainers、Redis/MinIO 恢复和逐状态视觉回归。账号密码登录依赖独立浏览器运行时，当前明确不可用。
+- 未解决风险：R-001/P1、R-002/P1、R-005/P2、R-006/P2、R-007/P2、R-008/P1、R-009/P1、R-011/P1、S3-I001/P1、S3-I002/P1、S3-I003/P1、S3-I004/P1、S3-I005/P1、S3-I006/P1、S3-I007/P1、S3-I008/P1、S4-I003/P1、S4-I004/P1、S4-I005/P1、S4-I006/P1、S4-I007/P2、S5-I001/P1、S5-I002/P1、S5-I003/P1、S5-I004/P1、S5-I007/P1、S5-I008/P1、S5-I009/P1、S5-RISK-013/P1、S5-RISK-014/P1、S5-RISK-015/P1、S5-RISK-016/P1、S5-RISK-017/P1、S5-RISK-018/P1、S5-RISK-019/P1、S5-RISK-020/P1、S5-RISK-021/P1、S5-RISK-022/P1、S5-RISK-023/P1、S5-RISK-024/P1、S5-RISK-025/P1、S5-RISK-026/P1、S5-RISK-028/P2；S3-I009/S3-I010/S5-I006/S5-RISK-027 已关闭，S4-I001/S4-I002 已部分缓解
 - 待复审问题：S3-R5 为超出当前范围的实现审计；S3-R6 设计范围已澄清；S1-I004 保持 P2 跟进项；阶段 4 计划门禁已通过
 - 下一步：推进 `S4-VS5B/C`、`S4-VS6B`；并完成 `S4-VS7A` 的真实 PostgreSQL、Chrome/CDP 双 viewport、403/409 跨层 E2E、迁移回滚和三轮独立复审。VS5A 的真实 Redis/PostgreSQL、跨进程广播、重启恢复和 Chrome/CDP 断线证据已归档，待独立复审确认生产部署拓扑。商品同步、卡券首页等既有首片证据继续保留，但不替代真实外部账号、持久化和人工视觉门禁
 
@@ -25,8 +25,10 @@
 - `docs/04-plan.md`：v0.1，阶段 4 主体功能优先的 ENV-0 与 S4-VS1 至 S4-VS4 纵向切片计划、依赖、DoD、测试、视觉基线和回滚边界；计划门禁 PASS；
 - `npm --workspace apps/api run test`：已通过，`env0 smoke passed`、`onboarding cookie login smoke passed`；覆盖 health、bootstrap、Session/CSRF、幂等重放/冲突、账号创建、Cookie 登录、资料同步、登录状态和账号列表读取；
 - `npm --workspace apps/web run test`：已通过，覆盖账号 API adapter、QR 状态机和组件相关单元/契约测试；
-- `2026-09-20 S4-VS4A 订单列表只读切片`：完成 `018_orders.sql`、Memory/Postgres Store、OrderService、订单列表/详情/refresh API、闲鱼订单 mapper 和正式 `/orders` 页面；本轮修复 seller 工作台请求体（`rowsPerPage/orderIds/queryCode/orderSearchParam`）、seller headers/query（`type=json/valueType/spm_cnt/idle_site_biz_code`）和 `data.module.items/commonData/buyerInfoVO/priceVO/rightVO` 响应映射，并补充请求/映射回归 smoke。受控前后端、PostgreSQL、Chrome/CDP 和参考响应解析通过；真实账号探针现在明确返回 `MTOP_PERMISSION_DENIED / PERMISSION_EXCEPTION::无权限访问`，不再把错误吞成成功 0 条。`S4-VS4A` 降级为 `PARTIALLY_VERIFIED/BLOCKED`，待补充完整浏览器 Cookie/Jar 或可访问订单权限后复验；交付预览、发货/取消/重试仍属于 `S4-VS4B/C` 后置范围。详见 `docs/evidence/stage5/S4-VS4A/test-baseline.md`。
-- `2026-09-20 S4-VS4A 订单列表界面修订`：合入 `8ad36cd`；移除 `orders-page-title`，筛选区仅保留订单号/买家昵称/商品名称关键词搜索与“全部/待付款/待发货/待收货/待评价/退款中”单一状态筛选，表格改为六个业务列并保留操作列、查看详情按钮和详情抽屉，买家昵称增加姓名悬浮提示，表格改为自适应高度 + 内部滚动 + 分页。订单 Chrome/CDP E2E 覆盖账号切换、搜索、筛选、tooltip、详情抽屉、分页、内部滚动、本地/闲鱼刷新和账号隔离；详情抽屉内容本轮不改，真实 seller 订单权限仍保持 `PARTIALLY_VERIFIED/BLOCKED`。
+- `2026-09-20 S4-VS4A 订单列表只读切片复验`：保留 seller origin/referer、`type=json/valueType=string/spm_cnt` 与标准 body，移除会触发权限拒绝的 `idle_site_biz_code` 请求头；真实 active 凭证返回 5 条订单，Chrome/CDP 触发 refresh 后 PostgreSQL 落库复读成功，`S4-VS4A` 只读范围通过，交付预览/发货/取消/重试仍属于 `S4-VS4B/C` 后置范围。详见 `docs/evidence/stage5/S4-VS4A/test-baseline.md`。
+- `2026-09-20 S4-VS4A 订单列表界面修订`：合入 `8ad36cd`；移除 `orders-page-title`，筛选区仅保留订单号/买家昵称/商品名称关键词搜索与“全部/待付款/待发货/待收货/待评价/退款中”单一状态筛选，表格改为六个业务列并保留操作列、查看详情按钮和详情抽屉，买家昵称增加姓名悬浮提示，表格改为自适应高度 + 内部滚动 + 分页。订单 Chrome/CDP E2E 覆盖账号切换、搜索、筛选、tooltip、详情抽屉、分页、内部滚动、本地/闲鱼刷新和账号隔离；详情抽屉内容本轮不改，真实 seller 订单权限已在 `374b3ef` 修复后通过真实复验。
+- `2026-09-20 S4-VS-DASHBOARD 全链路复验`：`npm --workspace apps/api run test:dashboard`、`test:dashboard:postgres`、API 全量测试、`npm run typecheck`、`npm run build` 与 `ALLOW_SHARED_E2E=1 REQUIRE_XIANYU_ORDER_SYNC=1 npm run test:e2e:chrome:dashboard:fullchain` 均通过；真实 Chrome/CDP → Live API → PostgreSQL/Redis → 闲鱼资料/商品/IM/订单 → 商品与订单落库 → Dashboard/Orders 页面回读闭环通过，证据位于 `docs/evidence/stage5/S4-VS-DASHBOARD/`。
+- `2026-09-20 Dashboard 默认模式修复`：根因是 `App.tsx` 仅读取 `VITE_DASHBOARD_MODE`，而根脚本只设置 `VITE_API_MODE=live`，导致未设置 Dashboard 覆盖时回退 mock。已合入 `6522286`：Dashboard 默认继承 `VITE_API_MODE`，仍支持显式 `VITE_DASHBOARD_MODE=mock`；`npm run typecheck:web`、`npm run test:web`（37 files / 110 tests）、`npm run build:web`、显式 mock Chrome E2E 与未设置 Dashboard 覆盖的真实 Chrome/CDP → API → PostgreSQL/Redis → 闲鱼 fullchain 均通过。
 - `npm --workspace apps/web run typecheck`、`npm --workspace apps/web run test`、`npm --workspace apps/web run build`：已通过；Workspace adapter、Run cursor 去重、页面状态边界已接入，当前 web 测试为 13 files / 41 tests。
 - `S4-VS6A` 专项复核：`npm --workspace apps/api run build`、`node apps/api/scripts/workspace-smoke.mjs`、`node apps/api/scripts/workspace-ws-smoke.mjs` 均已通过，覆盖 queued→succeeded、Step、clientRunRef、Idempotency-Key 冲突、WS snapshot/replay、`after=NaN`、Origin 403、未认证 401、未知 Run 404。
 - `npm --workspace apps/api run test`：已通过；覆盖 env0、onboarding、Workspace session/run、Workspace WebSocket、products、products-sync、mapper smoke。
@@ -89,7 +91,7 @@
 | `S4-VS2D` 受控发布 | `PLANNED` | Policy → Confirmation → Idempotency → Outbox | worker/unknown/timeout/人工恢复与真实页面状态 |
 | `S4-VS2E` 商品外部同步真实验收 | `PARTIALLY_VERIFIED` | 真实账号、Cookie、分页、字段映射和数量口径 | 当前已登录 Chrome + 真实闲鱼账号人工复核 |
 | `S4-VS3A/B` 卡券明细、素材、库存锁定消耗 | `PLANNED` | CouponItem bulk 操作、素材、reserve/consume/release | PostgreSQL/Redis/MinIO 并发集成、敏感字段裁剪 |
-| `S4-VS4A` 订单列表只读 | `PARTIALLY_VERIFIED/BLOCKED` | 订单列表/详情/refresh、四套状态、账号 scope、分页、桌面/移动；真实 seller 订单接口权限待补齐 | API、PostgreSQL、Chrome/CDP、参考响应解析通过；真实账号返回 `PERMISSION_EXCEPTION` |
+| `S4-VS4A` 订单列表只读 | `PASS` | 订单列表/详情/refresh、四套状态、账号 scope、分页、桌面/移动；真实 seller 订单读取与 PostgreSQL refresh 落库 | 交付预览、库存锁、发货/取消/重试转入 `S4-VS4B/C` |
 | `S4-VS4B/C` 订单交付 | `PLANNED` | delivery-preview、发货/取消/重试/unknown 恢复 | 四套状态、库存锁、Outbox、DeliveryRecord |
 | `S4-VS5A` 在线聊天读取与实时连接 | `PARTIALLY_VERIFIED` | 会话列表、消息时间线、MemoryStore/PostgreSQL HTTP/WS、Redis 跨进程广播与重启恢复、cursor 重连去重、Chrome/CDP 双 viewport 断线视觉证据；本轮补齐搜索、全部/未读筛选、独立滚动、整行选择、头像/商品缩略图和 `016_conversation_media.sql` | 独立复审、生产部署拓扑确认；发送/附件/撤回仍属 `S4-VS5B` |
 | `S4-VS5B` 在线聊天发送/附件/撤回 | `PLANNED` | 文本发送、图片上传、失败重试、撤回 | PostgreSQL/对象存储、幂等、unknown/timeout、脱敏 |
@@ -97,7 +99,7 @@
 | `S4-VS6A` Workspace 会话与 Run 首链路 | `PARTIALLY_VERIFIED` | AgentSession/Run/Step、Memory/Postgres Store、受控 Runtime、clientRunRef、WS 游标补事件、真实 PostgreSQL/Chrome/CDP 首链路、前端 Workspace 页面 | 独立 Worker/Pi Runtime、发布级恢复、人工视觉签核与完整状态回归 |
 | `S4-VS6B` Workspace Confirmation/Outbox | `PLANNED` | confirm/cancel/retry/recover、unknown 恢复 | Policy、幂等、租约、审计、真实 Runtime |
 | `S4-VS7A` Settings API Key 配置 | `READY_FOR_REVIEW` | 正式 `/settings`、CredentialRef API、AES-256-GCM 加密、创建/编辑/轮换/启停/撤销、脱敏 metadata、Web/API 定向验证 | PostgreSQL migration 018 加密复读与回滚、真实 403/409 跨层 E2E、1440×900/390×844 视觉证据、三轮独立复审 |
-| `S4-VS-DASHBOARD` 仪表盘高保真界面 | `PARTIALLY_VERIFIED` | `/dashboard` 正式 feature、桌面/移动独立 MobileFrame、KPI/趋势/健康度/商品排行/最近处理/风险抽屉；Web 32 files / 102 tests、build、Chrome/CDP 双 viewport 截图通过 | Dashboard API 路由尚未在后端实现；当前截图使用显式 `VITE_DASHBOARD_MODE=mock` fixture，真实 API/持久化 E2E、全状态截图和独立视觉签核仍开放 |
+| `S4-VS-DASHBOARD` 仪表盘高保真界面 | `PARTIALLY_VERIFIED` | `/dashboard` 正式 feature、桌面/移动独立 MobileFrame、KPI/趋势/健康度/商品排行/最近处理/风险抽屉；Web 32 files / 102 tests、build、真实 Chrome/CDP + PostgreSQL/Redis + 闲鱼商品/订单全链路通过 | 当前 feature 使用 `/api/v1/dashboard/snapshot`；旧 `/order-trend` 兼容接口、全状态截图、独立视觉签核与 rollback 仍开放 |
 | `S4-ENV-RECOVERY` | `BLOCKED` | 迁移回滚、Testcontainers、Redis/MinIO 重启恢复 | 发布级恢复演练和旧数据兼容证据 |
 | `S4-EXT-ACCOUNT` | `BLOCKED` | 真实 APP 扫码、Cookie、资料同步 | 真实外部账号人工验收 |
 | `S4-ENV-RUNTIME` | `PLANNED` | Pi Runtime 健康、超时、重试、取消和观测 | 独立运行时验证；不以页面/API smoke 代替 |

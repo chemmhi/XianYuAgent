@@ -17,7 +17,7 @@
 | `S4-VS2E` 商品外部同步真实验收 | `PARTIALLY_VERIFIED` | 受控 MTOP mapper、Memory/Postgres、fixture E2E | 当前已登录 Chrome + 真实闲鱼账号、分页和数量口径复核 |
 | `S4-VS3` 卡券首页 | `READY_FOR_REVIEW` | API smoke、Chrome/CDP、桌面/移动截图、代码已合入 master | 真实 PostgreSQL/Redis/MinIO、逐状态人工浏览器审核、迁移整理 |
 | `S4-VS3A/B` 卡券明细/素材/库存锁 | `PLANNED` | `CouponItem`、`CouponAssetRef`、`InventoryLockVM` 契约已冻结 | bulk-save/delete、MinIO、reserve/consume/release、敏感交付边界 |
-| `S4-VS4A` 订单列表只读 | `PARTIALLY_VERIFIED/BLOCKED` | 订单 API、四态、账号 scope、关键词搜索、单状态筛选、六列 + 操作列、详情抽屉、分页、内部滚动、桌面/移动截图 | 真实 seller 订单接口权限、完整浏览器 Cookie/Jar 或可访问订单权限的账号 |
+| `S4-VS4A` 订单列表只读 | `PASS` | 订单 API、四态、账号 scope、关键词搜索、单状态筛选、六列 + 操作列、详情抽屉、分页、内部滚动、桌面/移动截图、真实 seller 订单读取与 PostgreSQL refresh 落库 | 交付预览、库存锁、发货/取消/重试转入 `S4-VS4B/C` |
 | `S4-VS4B/C` 订单交付 | `PLANNED` | delivery mode 契约已冻结 | 交付预览、库存锁、发货/取消/重试、unknown/Outbox/DeliveryRecord |
 | `S4-VS5A` 在线聊天读取与实时连接 | `PARTIALLY_VERIFIED` | canonical HTTP/WS、MemoryStore/PostgreSQL + `015_messages.sql` + `016_conversation_media.sql`、双 API 实例 Redis 跨进程广播、Redis/PostgreSQL 重启恢复、cursor 去重、Chrome/CDP 双 viewport 断线视觉证据、搜索/未读/独立滚动/选择/头像/商品缩略图交互 | 独立复审、生产部署拓扑确认；发送/附件/撤回进入 `S4-VS5B` |
 | `S4-VS5B` 在线聊天发送/附件/撤回 | `PLANNED` | Message 状态机和发送/图片/撤回 API 已冻结 | 持久化、对象存储、幂等、unknown/timeout、脱敏 |
@@ -25,7 +25,7 @@
 | `S4-VS6A` Workspace 会话与 Run 首链路 | `PARTIALLY_VERIFIED` | AgentSession/Run/Step、Memory/Postgres Store、受控 Runtime、前端 `/workspace`、clientRunRef、WS cursor replay、真实 PostgreSQL/Chrome/CDP 首链路 | 独立 Worker/Pi Runtime、发布级恢复、人工视觉签核与完整状态回归 |
 | `S4-VS6B` Workspace Confirmation/Outbox | `PLANNED` | Confirmation/Outbox/恢复 API 已冻结 | Policy、幂等、租约、cancel/retry/recover |
 | `S4-VS7A` Settings API Key 配置 | `READY_FOR_REVIEW` | `/settings` 正式路由、账号级 CredentialRef API、AES-256-GCM 加密引用、create/update/rotate/enable/disable/revoke、幂等/版本冲突、前端 loading/empty/error/submitting/saved 状态、Web/API 定向验证 | 真实 PostgreSQL 018 迁移加密复读与回滚、Chrome/CDP 1440×900/390×844 视觉证据、真实 403/409 跨层 E2E、独立三轮评审；本片不做 reveal |
-| `S4-VS-DASHBOARD` 仪表盘高保真界面 | `PARTIALLY_VERIFIED` | `/dashboard` 正式 feature、桌面/移动独立组合、KPI/趋势/健康度/商品排行/最近处理/风险抽屉、Web 单测/构建、Chrome/CDP 双 viewport 截图 | 后端 `/api/v1/dashboard/snapshot` 与 `/order-trend` 路由、真实 PostgreSQL 跨层 E2E、全状态截图、独立视觉签核与 rollback |
+| `S4-VS-DASHBOARD` 仪表盘高保真界面 | `PARTIALLY_VERIFIED` | `/dashboard` 正式 feature、桌面/移动独立组合、KPI/趋势/健康度/商品排行/最近处理/风险抽屉、Web 单测/构建、真实 Chrome/CDP + PostgreSQL/Redis + 闲鱼全链路、双 viewport 截图 | 旧 `/order-trend` 兼容接口、全状态截图、独立视觉签核与 rollback |
 | `S4-ENV-RECOVERY` | `BLOCKED` | Compose/健康检查/部分持久化已有证据 | 完整迁移回滚、Testcontainers、Redis/MinIO 重启和发布级恢复 |
 | `S4-EXT-ACCOUNT` | `BLOCKED` | 真实模式 QR 探针与受控 Cookie 链路 | 真实 APP 扫码、外部 Cookie、`loginuser.get` 资料同步 |
 | `S4-ENV-RUNTIME` | `PLANNED` | 独立 Runtime 架构决策已存在 | 健康、超时、重试、取消、不可用和观测 |
@@ -62,7 +62,14 @@
 - `8ad36cd` 已在 merge lock 内以 `--no-ff` 合入 `master`；`fix/orders-ui` 的独立 worktree 已完成主线验证前的代码交付。
 - 本轮通过 `npm run typecheck`、`npm test`（API smoke + Web 36 个测试文件 / 107 个用例）、`npm run build`、`npm run compose:config`、`node --check apps/web/scripts/e2e-orders-chrome.mjs` 和 `git diff --check`。
 - Chrome/CDP 订单 E2E 覆盖账号切换与隔离、六列表头、关键词搜索、单状态筛选、买家姓名 tooltip、详情抽屉、分页、表格内部滚动、本地刷新和闲鱼刷新；桌面/移动截图已归档至 `docs/evidence/stage5/S4-VS4A/screenshots/`。
-- 详情抽屉内容本轮保持不变；真实 seller 订单读取仍因 `MTOP_PERMISSION_DENIED / PERMISSION_EXCEPTION::无权限访问` 保持 `PARTIALLY_VERIFIED/BLOCKED`，不宣称真实外部订单验收完成。
+- 详情抽屉内容本轮保持不变；真实 seller 订单读取已在移除错误 `idle_site_biz_code` 请求头后通过，订单交付动作继续后置。
+
+### 2026-09-20：S4-VS-DASHBOARD 与订单全链路复验
+
+- `npm --workspace apps/api run test:dashboard`、`npm --workspace apps/api run test:dashboard:postgres`、`npm --workspace apps/api run test`、`npm run typecheck`、`npm run build` 均通过。
+- `ALLOW_SHARED_E2E=1 REQUIRE_XIANYU_ORDER_SYNC=1 npm run test:e2e:chrome:dashboard:fullchain` 通过真实 Chrome/CDP → Live API → PostgreSQL/Redis → 闲鱼资料/商品/IM/订单 → 商品与订单落库 → Dashboard/Orders 页面回读；外部订单 5 条，PostgreSQL 复读 58 条，桌面/移动证据已归档。
+- 全链路脚本要求 `E2E_DATABASE_URL` 或显式 `ALLOW_SHARED_E2E=1`，并在结束时回收浏览器会话，避免无意写入共享开发库。
+- Dashboard 模式修复已合入 `6522286`：当 `VITE_DASHBOARD_MODE` 未设置时继承 `VITE_API_MODE`，根脚本的 `VITE_API_MODE=live` 不再落回 mock；显式 `VITE_DASHBOARD_MODE=mock` 的受控 E2E 仍通过，并断言不请求 `/api/v1/dashboard/snapshot`。
 
 ### 2026-09-20：S4-VS5A 真实恢复与浏览器证据
 
