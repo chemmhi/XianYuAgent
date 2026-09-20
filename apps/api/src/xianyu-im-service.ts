@@ -259,10 +259,10 @@ function normalizeConversation(value: unknown, myId: string): { externalConversa
   ];
   const itemRef = firstString(identitySources, ['itemId', 'itemID', 'itemRef']) ?? parseQueryParam(reminderUrl, 'itemId');
   const itemTitle = firstString(identitySources, ['itemTitle', 'title', 'itemName']);
-  const buyerDisplayName = firstString(identitySources, ['peerNick', 'buyerNick', 'userNick', 'fishNick', 'nickname', 'nick', 'displayName', 'userName'])
+  const buyerDisplayName = firstString(identitySources, ['peerNick', 'peerUserNick', 'buyerNick', 'buyerName', 'userNick', 'userNickname', 'fishNick', 'nickname', 'nick', 'displayName', 'userName', 'name'])
     ?? parseQueryParam(reminderUrl, 'peerUserNick')
     ?? parseQueryParam(reminderUrl, 'buyerNick');
-  const buyerAvatarUrl = normalizeAssetUrl(firstString(identitySources, ['peerAvatar', 'buyerAvatar', 'avatarUrl', 'peerHeadPic', 'headPic', 'headPicUrl', 'logo', 'avatar', 'userAvatar', 'profilePic']));
+  const buyerAvatarUrl = normalizeAssetUrl(firstString(identitySources, ['peerAvatar', 'peerUserAvatar', 'buyerAvatar', 'buyerHeadPic', 'avatarUrl', 'peerHeadPic', 'headPic', 'headPicUrl', 'logo', 'avatar', 'userAvatar', 'profilePic', 'headPortrait', 'iconUrl']));
   const itemImageUrl = normalizeAssetUrl(firstString(identitySources, ['itemMainPic', 'itemImage', 'itemImageUrl', 'mainPic', 'itemPic', 'itemCover']));
   const timestamp = normalizeTimestamp(last.createAt ?? conv.modifyTime);
   return { externalConversationRef, buyerRef, buyerDisplayName, buyerAvatarUrl, itemRef, itemTitle, itemImageUrl, unreadCount: numberValue(conv.redPoint), lastMessagePreview: preview, lastMessageAt: timestamp };
