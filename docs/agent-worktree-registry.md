@@ -37,6 +37,7 @@
 | `root` | `coupons-toolbar` | `fix/coupons-toolbar` | `F:\ChenHai\Project\XianYuAgent-coupons-toolbar` | Codex `/root` | `2026-09-20 18:51:55 +08:00` | `CLEANED` | `19c6798` | `2026-09-20 19:00:37 +08:00` | 用户已明确授权直接合入 master；合并后 master typecheck、Vitest、前后端 build、Chrome/CDP E2E 与 diff 检查均通过；Git worktree 元数据与分支已清理，目录因保留非 Git 内容未删除。 |
 | `root` | `accounts-pagination-toolbar` | `fix/accounts-pagination-toolbar` | `F:\ChenHai\Project\XianYuAgent-accounts-pagination` | Codex `/root` | `2026-09-20 19:17:59 +08:00` | `MERGED` | `8b7c398` | `-` | 用户已明确要求完成后合入 master；提交 `383d1c8` 在 merge lock 内以 `--no-ff` 合入。账号列表服务端分页/搜索/筛选，分页 UI、空态居中、移除操作列与共计统计、表格最大高度和内部滚动。合并后 `npm run verify` 全部通过。 |
 | `root` | `coupons-toolbar-empty-state` | `fix/coupons-toolbar-empty-state` | `F:\ChenHai\Project\XianYuAgent-coupons-toolbar-followup` | Codex `/root` | `2026-09-20 19:09:44 +08:00` | `CLEANED` | `5a9f3cb` | `2026-09-20 19:23:44 +08:00` | 用户已明确要求完成后合入 master；`5a9f3cb` 已以 `--no-ff` 合入 `master`；主线 typecheck、Vitest 23/83、Web/API build、Coupons Chrome/CDP E2E 与 `git diff --check` 均通过。Git worktree 元数据与分支已清理，目录因保留非 Git 内容未删除。 |
+| `orders_backend` | `s4-vs4a-orders-backend` | `feature/s4-vs4a-orders-backend` | `F:\ChenHai\Project\XianYuAgent-orders-backend` | Codex `/root/orders_backend` | `2026-09-20 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 订单迁移、领域类型、Memory/Postgres Store、OrderService、只读 API、闲鱼 mapper 与定向 smoke 已完成；全量 API test 在既有 127.0.0.1:18872 端口占用处阻塞，待独立复核与合并。 |
 
 ## 主工作区
 
