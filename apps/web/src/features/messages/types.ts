@@ -2,6 +2,7 @@ export type MessagesLoadPhase = 'idle' | 'loading' | 'success' | 'empty' | 'erro
 export type TimelineLoadPhase = 'idle' | 'loading' | 'success' | 'empty' | 'error' | 'forbidden';
 export type RealtimePhase = 'closed' | 'connecting' | 'connected' | 'reconnecting' | 'timeout' | 'forbidden';
 export type SendPhase = 'idle' | 'submitting' | 'sent' | 'error';
+export type MessageReadState = 'read' | 'unread';
 
 export interface ConversationVM {
   conversationId: string;
@@ -32,6 +33,8 @@ export interface MessageVM {
   bodyRef?: string;
   redactionState: 'visible' | 'redacted';
   status: 'created';
+  /** Optional read receipt supplied by the external chat adapter. */
+  readState?: MessageReadState;
   createdAt: string;
   externalMessageRef?: string;
   source?: 'human' | 'ai' | 'system';

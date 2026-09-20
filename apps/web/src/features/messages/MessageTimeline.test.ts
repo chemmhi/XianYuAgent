@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createElement } from 'react';
 import { describe, expect, it } from 'vitest';
-import { MessageTimeline } from './components/MessageTimeline';
+import { MessageTimeline, resolveMessageReadState } from './components/MessageTimeline';
 import type { MessageVM } from './types';
 
 function message(overrides: Partial<MessageVM>): MessageVM {
@@ -55,7 +55,7 @@ describe('MessageTimeline', () => {
       phase: 'success',
       messages: [
         message({ direction: 'inbound', senderRole: 'buyer', source: 'ai', bodyText: '自动回复' }),
-        message({ messageId: 'm-2', direction: 'outbound', senderRole: 'agent', source: 'human', bodyText: '已收到' }),
+        message({ messageId: 'm-2', direction: 'outbound', senderRole: 'agent', source: 'human', bodyText: '已收到', readState: 'read' }),
       ],
       outboundParticipant: { displayName: 'Seller', avatarUrl: 'https://cdn.example.com/seller.png' },
     }));
@@ -66,6 +66,20 @@ describe('MessageTimeline', () => {
     expect(html).toContain('AI');
     expect(html).toContain('人工');
     expect(html).toContain('messages-read-state');
+    expect(html).toContain('>已读</span>');
+  });
+
+  it('renders outbound unread state from the supplied message receipt', () => {
+    const html = renderToStaticMarkup(createElement(MessageTimeline, { phase: 'success', messages: [message({ direction: 'outbound', senderRole: 'agent', readState: 'unread', bodyText: '待确认' })] }));
+    expect(html).toContain('messages-read-state unread');
+    expect(html).toContain('>未读</span>');
+    expect(html).not.toContain('>已读</span>');
+  });
+
+  it('does not claim a read state when the adapter provides no receipt', () => {
+    expect(resolveMessageReadState(message({ direction: 'outbound' }))).toBeUndefined();
+    expect(resolveMessageReadState(message({ direction: 'outbound', status: 'created' }))).toBeUndefined();
+    expect(resolveMessageReadState({ ...message({ direction: 'outbound' }), status: 'sent' } as unknown as MessageVM)).toBe('unread');
   });
 
   it('renders system messages as a centered status row', () => {

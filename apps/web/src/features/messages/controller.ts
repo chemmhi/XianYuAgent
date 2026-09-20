@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createMessagesApi, type MessagesApi } from './api';
-import { applyRealtimeEvent, mergeConversation, mergeTimelineMessages } from './model';
+import { applyRealtimeEvent, markConversationRead, mergeConversation, mergeTimelineMessages } from './model';
 import type { MessagesError, MessagesState, RealtimeEvent } from './types';
 
 const defaultApi = createMessagesApi({ get: async () => { throw new Error('messages api unavailable'); } });
@@ -83,7 +83,8 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
         setState((previous) => {
           const merged = applyRealtimeEvent({ conversations: previous.conversations, messages: previous.messages, cursor: previous.cursor, seenEventIds: new Set<string>() }, event);
           cursorRef.current = merged.cursor;
-          return { ...previous, conversations: merged.conversations, messages: merged.messages, cursor: merged.cursor, realtimePhase: event.type === 'chat.connection.changed' && event.payload.status === 'connected' ? 'connected' : previous.realtimePhase, error: null };
+          const conversations = previous.activeConversationId ? markConversationRead(merged.conversations, previous.activeConversationId) : merged.conversations;
+          return { ...previous, conversations, messages: merged.messages, cursor: merged.cursor, realtimePhase: event.type === 'chat.connection.changed' && event.payload.status === 'connected' ? 'connected' : previous.realtimePhase, error: null };
         });
       },
       onError: () => {
@@ -134,7 +135,7 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
       if (currentRequest !== requestId.current) return;
       const activeConversationId = activeIdRef.current && result.items.some((item) => item.conversationId === activeIdRef.current) ? activeIdRef.current : result.items[0]?.conversationId;
       activeIdRef.current = activeConversationId;
-      setState((previous) => ({ ...previous, accountId, listPhase: result.items.length === 0 ? 'empty' : 'success', loadingMore: false, hasMore: result.hasMore, nextCursor: result.nextCursor, conversations: result.items, activeConversationId, error: null }));
+      setState((previous) => ({ ...previous, accountId, listPhase: result.items.length === 0 ? 'empty' : 'success', loadingMore: false, hasMore: result.hasMore, nextCursor: result.nextCursor, conversations: activeConversationId ? markConversationRead(result.items, activeConversationId) : result.items, activeConversationId, error: null }));
       if (activeConversationId) await loadTimeline(activeConversationId);
     } catch (error) {
       if (currentRequest !== requestId.current) return;
@@ -150,7 +151,10 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
     try {
       const result = await api.listConversations({ accountId, cursor: state.nextCursor, limit: 50 });
       if (currentRequest !== requestId.current) return;
-      setState((previous) => ({ ...previous, loadingMore: false, hasMore: result.hasMore, nextCursor: result.nextCursor, conversations: result.items.reduce((items, conversation) => mergeConversation(items, conversation), previous.conversations) }));
+      setState((previous) => {
+        const mergedConversations = result.items.reduce((items, conversation) => mergeConversation(items, conversation), previous.conversations);
+        return { ...previous, loadingMore: false, hasMore: result.hasMore, nextCursor: result.nextCursor, conversations: previous.activeConversationId ? markConversationRead(mergedConversations, previous.activeConversationId) : mergedConversations };
+      });
     } catch (error) {
       if (currentRequest !== requestId.current) return;
       const normalized = normalizeError(error);
@@ -231,7 +235,7 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
 
   useEffect(() => { activeIdRef.current = undefined; reconnectAttempt.current = 0; void reload(); return closeRealtime; }, [accountKey, reload, closeRealtime]);
 
-  const setActiveConversation = useCallback((conversationId?: string) => { activeIdRef.current = conversationId; setState((previous) => ({ ...previous, activeConversationId: conversationId, messages: [], cursor: 0, hasMoreHistory: false, loadingMoreHistory: false, historyCursor: undefined, timelinePhase: conversationId ? 'loading' : 'idle', realtimePhase: 'closed', error: null })); if (conversationId) void loadTimeline(conversationId); else closeRealtime(); }, [closeRealtime, loadTimeline]);
+  const setActiveConversation = useCallback((conversationId?: string) => { activeIdRef.current = conversationId; setState((previous) => ({ ...previous, conversations: conversationId ? markConversationRead(previous.conversations, conversationId) : previous.conversations, activeConversationId: conversationId, messages: [], cursor: 0, hasMoreHistory: false, loadingMoreHistory: false, historyCursor: undefined, timelinePhase: conversationId ? 'loading' : 'idle', realtimePhase: 'closed', error: null })); if (conversationId) void loadTimeline(conversationId); else closeRealtime(); }, [closeRealtime, loadTimeline]);
   const retryRealtime = useCallback(() => { if (state.activeConversationId) { reconnectAttempt.current = 0; connectRealtime(state.activeConversationId, cursorRef.current); } }, [connectRealtime, state.activeConversationId]);
 
   const sendMessage = useCallback(async (text: string) => {

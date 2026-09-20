@@ -14,6 +14,12 @@ export function mergeConversation(existing: ConversationVM[], incoming: Conversa
   return [...byId.values()].sort((left, right) => conversationSortKey(right).localeCompare(conversationSortKey(left)) || left.conversationId.localeCompare(right.conversationId));
 }
 
+export function markConversationRead(conversations: ConversationVM[], conversationId: string): ConversationVM[] {
+  return conversations.map((conversation) => conversation.conversationId === conversationId && conversation.unreadCount > 0
+    ? { ...conversation, unreadCount: 0 }
+    : conversation);
+}
+
 function conversationSortKey(conversation: ConversationVM): string {
   return conversation.lastMessageAt ?? conversation.updatedAt;
 }

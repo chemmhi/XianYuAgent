@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
-import type { MessageVM } from '../types';
+import type { MessageReadState, MessageVM } from '../types';
 import { renderXianyuText } from '../xianyu-emojis';
 import { TimelineSkeleton } from './MessagesSkeletons';
 
@@ -52,11 +52,29 @@ export function MessageTimeline({ messages, phase, hasMoreHistory = false, loadi
           <div className={`messages-bubble ${isOutbound ? 'outbound' : 'inbound'}`}>
             {imageUrl ? <button className="messages-image-button" type="button" aria-label="查看聊天图片" onClick={() => onOpenImage?.(imageUrl)}><img className="messages-image" src={imageUrl} alt="聊天图片" loading="lazy" /></button> : <span>{renderMessageText(message.bodyText || (message.bodyType === 'image' ? '[图片]' : '[系统消息]'))}</span>}
           </div>
-          <div className="messages-message-foot"><time>{formatTime(message.createdAt)}</time>{message.source === 'ai' && <span>AI</span>}{message.source === 'human' && <span>人工</span>}{isOutbound && <span className="messages-read-state">已读</span>}</div>
+          <div className="messages-message-foot"><time>{formatTime(message.createdAt)}</time>{message.source === 'ai' && <span>AI</span>}{message.source === 'human' && <span>人工</span>}{isOutbound && renderReadState(message)}</div>
         </div>
       </div>;
     })}
   </div>;
+}
+
+export function resolveMessageReadState(message: MessageVM): MessageReadState | undefined {
+  const candidate = message as MessageVM & { isRead?: unknown; read?: unknown; readStatus?: unknown; readState?: unknown; deliveryStatus?: unknown };
+  if (candidate.readState === 'read' || candidate.readState === 'unread') return candidate.readState;
+  if (typeof candidate.isRead === 'boolean') return candidate.isRead ? 'read' : 'unread';
+  if (typeof candidate.read === 'boolean') return candidate.read ? 'read' : 'unread';
+  const rawStatus = [candidate.readStatus, candidate.deliveryStatus, candidate.status].find((value) => typeof value === 'string');
+  const normalizedStatus = typeof rawStatus === 'string' ? rawStatus.trim().toLowerCase().replace(/[\s_-]+/g, '') : '';
+  if (['read', 'seen', 'opened', 'acknowledged', 'readed'].includes(normalizedStatus)) return 'read';
+  if (['unread', 'unseen', 'notread', 'sent', 'delivered'].includes(normalizedStatus)) return 'unread';
+  return undefined;
+}
+
+function renderReadState(message: MessageVM): ReactNode {
+  const readState = resolveMessageReadState(message);
+  if (!readState) return null;
+  return <span className={`messages-read-state ${readState}`}>{readState === 'read' ? '已读' : '未读'}</span>;
 }
 
 function renderMessageText(value: string): ReactNode {

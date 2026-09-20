@@ -439,6 +439,10 @@
   font-weight: 700;
 }
 
+.messages-read-state.unread {
+  color: #d97706;
+}
+
 .messages-link {
   color: var(--link);
 }

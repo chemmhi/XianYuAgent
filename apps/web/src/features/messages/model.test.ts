@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createSocketGenerationGuard } from './controller';
-import { applyRealtimeEvent, filterConversations, mergeConversation, mergeTimelineMessages } from './model';
+import { applyRealtimeEvent, filterConversations, markConversationRead, mergeConversation, mergeTimelineMessages } from './model';
 import type { ConversationVM, MessageVM, RealtimeEvent } from './types';
 
 const conversation: ConversationVM = { conversationId: 'c1', accountId: 'a1', buyerRef: 'b1', buyerDisplayName: '买家', unreadCount: 0, handlingMode: 'ai', version: 1, createdAt: '2026-09-19T00:00:00.000Z', updatedAt: '2026-09-19T00:00:00.000Z' };
@@ -47,5 +47,12 @@ describe('messages realtime model', () => {
     expect(filterConversations([conversation, unread], 'buyer-2', false)).toEqual([unread]);
     expect(filterConversations([conversation, unread], '请问', false)).toEqual([unread]);
     expect(filterConversations([conversation, unread], '', true)).toEqual([unread]);
+  });
+
+  it('clears the selected conversation unread count without mutating other rows', () => {
+    const unread = { ...conversation, conversationId: 'c2', unreadCount: 3 };
+    const cleared = markConversationRead([conversation, unread], 'c2');
+    expect(cleared.map((item) => item.unreadCount)).toEqual([0, 0]);
+    expect(markConversationRead([conversation, unread], 'missing')).toEqual([conversation, unread]);
   });
 });
