@@ -50,15 +50,21 @@ describe('MessageTimeline', () => {
     expect(html).not.toContain('收到[尊嘟假嘟]');
   });
 
-  it('renders participant identity and outbound read state', () => {
+  it('renders avatar, compact message metadata, and outbound read state without names', () => {
     const html = renderToStaticMarkup(createElement(MessageTimeline, {
       phase: 'success',
-      messages: [message({ direction: 'outbound', senderRole: 'agent', bodyText: '已收到' })],
+      messages: [
+        message({ direction: 'inbound', senderRole: 'buyer', source: 'ai', bodyText: '自动回复' }),
+        message({ messageId: 'm-2', direction: 'outbound', senderRole: 'agent', source: 'human', bodyText: '已收到' }),
+      ],
       outboundParticipant: { displayName: 'Seller', avatarUrl: 'https://cdn.example.com/seller.png' },
     }));
     expect(html).toContain('messages-message-avatar self');
     expect(html).toContain('https://cdn.example.com/seller.png');
-    expect(html).toContain('Seller');
+    expect(html).not.toContain('messages-message-author');
+    expect(html).not.toContain('Seller');
+    expect(html).toContain('AI');
+    expect(html).toContain('人工');
     expect(html).toContain('messages-read-state');
   });
 

@@ -28,7 +28,6 @@ export function MessageTimeline({ messages, phase, hasMoreHistory = false, loadi
           {participant?.avatarUrl ? <img src={participant.avatarUrl} alt="" /> : <span>{(participant?.displayName || fallbackName).slice(0, 1)}</span>}
         </div>
         <div className="messages-message-stack">
-          <div className="messages-message-author"><strong>{participant?.displayName || fallbackName}</strong><span>{isOutbound ? '我' : '买家'}</span></div>
           <div className={`messages-bubble ${isOutbound ? 'outbound' : 'inbound'}`}>
             {imageUrl ? <button className="messages-image-button" type="button" aria-label="查看聊天图片" onClick={() => onOpenImage?.(imageUrl)}><img className="messages-image" src={imageUrl} alt="聊天图片" loading="lazy" /></button> : <span>{renderMessageText(message.bodyText || (message.bodyType === 'image' ? '[图片]' : '[系统消息]'))}</span>}
           </div>

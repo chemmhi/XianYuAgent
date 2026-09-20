@@ -273,7 +273,8 @@
 }
 
 .messages-bubble {
-  max-width: min(70%, 580px);
+  width: fit-content;
+  max-width: 100%;
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 10px 12px;
@@ -309,7 +310,7 @@
   grid-template-columns: 28px minmax(0, 1fr);
   column-gap: 8px;
   align-items: start;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .messages-bubble-row.outbound {
@@ -377,11 +378,16 @@
 
 .messages-message-stack {
   min-width: 0;
+  width: fit-content;
   max-width: min(70%, 580px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 .messages-bubble-row.outbound .messages-message-stack {
   text-align: right;
+  align-items: flex-end;
 }
 
 .messages-message-author {
@@ -411,7 +417,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 4px;
+  width: fit-content;
+  margin-top: 3px;
   color: var(--axis);
   font-size: 9px;
 }
