@@ -18,6 +18,11 @@ export interface ProductAssetVM {
   status: 'active' | 'failed' | 'archived';
 }
 
+export interface ProductCouponVM {
+  id: string;
+  label?: string;
+}
+
 export interface ProductVM {
   id: string;
   accountId: string;
@@ -34,7 +39,9 @@ export interface ProductVM {
   source?: 'local' | 'xianyu';
   lastSyncedAt?: string;
   sourcePayloadDigest?: string;
+  createdAt: string;
   updatedAt: string;
+  couponBatches?: ProductCouponVM[];
   skuCount: number;
   assetCount: number;
   skus?: ProductSkuVM[];
@@ -82,6 +89,8 @@ export interface ProductFilters {
   accountId?: string;
   keyword?: string;
   status?: ProductStatus | 'all';
+  sortBy?: 'createdAt' | 'updatedAt';
+  sortOrder?: 'asc' | 'desc';
   page?: number;
   pageSize?: number;
 }
