@@ -23,7 +23,7 @@
 
 | agent_id | slice_id | branch | worktree | owner | created_at | status | merge_commit | cleaned_at | notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `root` | `s4-vs6a-workspace` | `feature/s4-vs6a-workspace` | `F:\ChenHai\Project\XianYuAgent-s4-vs6a-workspace` | Codex `/root` | `2026-09-19 04:19:53 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | Workspace AgentSession/Run/Step 首链路、受控 Runtime、API/WS smoke、前端 Workspace 已完成；当前结论 `PARTIALLY_VERIFIED`，Confirmation/Outbox 留在 S4-VS6B，独立 Worker/Pi Runtime/真实 Postgres/浏览器证据待后续 |
+| `root` | `s4-vs6a-workspace` | `feature/s4-vs6a-workspace` | `F:\ChenHai\Project\XianYuAgent-s4-vs6a-workspace` | Codex `/root` | `2026-09-19 04:19:53 +08:00` | `READY_FOR_MERGE` | `-` | `-` | Workspace AgentSession/Run/Step 首链路、真实 PostgreSQL/Chrome/CDP/WS 复核已完成；当前结论 `PARTIALLY_VERIFIED`，Confirmation/Outbox、独立 Worker/Pi Runtime、发布级恢复和人工视觉签核留在后续门禁 |
 
 ## 主工作区
 
