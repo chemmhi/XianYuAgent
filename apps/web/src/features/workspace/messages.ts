@@ -2,35 +2,43 @@ import type { WorkspaceMessageVM, WorkspaceRunEventVM, WorkspaceRunVM, Workspace
 
 const terminalStatuses = new Set(['succeeded', 'partially_succeeded', 'failed', 'cancelled', 'expired']);
 
+function statusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    queued: '排队中', running: '运行中', waiting_confirmation: '等待确认', executing: '执行中', retrying: '重试中', cancelling: '取消中',
+    succeeded: '已完成', partially_succeeded: '部分完成', failed: '失败', cancelled: '已取消', expired: '已过期', pending: '待执行', skipped: '已跳过',
+  };
+  return labels[status] ?? status;
+}
+
 function safeStatus(payload: Record<string, unknown>): string | undefined {
   return typeof payload.status === 'string' ? payload.status : undefined;
 }
 
 function eventTitle(eventType: string): string {
   const labels: Record<string, string> = {
-    'run.queued': 'Run queued',
-    'run.started': 'Run started',
-    'run.executing': 'Agent executing',
-    'run.succeeded': 'Run completed',
-    'run.failed': 'Run failed',
-    'step.started': 'Step started',
-    'step.executing': 'Tool step executing',
-    'step.succeeded': 'Step completed',
-    'step.failed': 'Step failed',
+    'run.queued': 'Run 已排队',
+    'run.started': 'Run 已开始',
+    'run.executing': 'Agent 执行中',
+    'run.succeeded': 'Run 已完成',
+    'run.failed': 'Run 失败',
+    'step.started': '步骤已开始',
+    'step.executing': '工具步骤执行中',
+    'step.succeeded': '步骤已完成',
+    'step.failed': '步骤失败',
   };
   return labels[eventType] ?? eventType.replace(/[._]/g, ' ');
 }
 
 function stepSummary(step: WorkspaceStepVM): string {
   if (step.outputSummary) return step.outputSummary;
-  return `${step.label} is ${step.status}.`;
+  return `${step.label}：${statusLabel(step.status)}。`;
 }
 
 function eventSummary(event: WorkspaceRunEventVM): string {
   const status = safeStatus(event.payload);
   const errorCode = typeof event.payload.errorCode === 'string' ? event.payload.errorCode : undefined;
   if (errorCode) return `${eventTitle(event.eventType)} · ${errorCode}`;
-  if (status) return `${eventTitle(event.eventType)} · ${status}`;
+  if (status) return `${eventTitle(event.eventType)} · ${statusLabel(status)}`;
   return eventTitle(event.eventType);
 }
 
@@ -44,7 +52,7 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
     id: `${run.runId}:user`,
     type: 'user_message',
     createdAt: run.createdAt,
-    title: 'You',
+    title: '用户',
     content: run.instructionSummary,
   }];
 
@@ -54,9 +62,9 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
       id: `${run.runId}:reasoning:${step.stepId}`,
       type: 'reasoning_summary',
       createdAt: step.startedAt ?? run.updatedAt,
-      title: 'Reasoning summary',
+      title: '推理摘要',
       content: stepSummary(step),
-      summary: `${step.label} · ${step.status}`,
+      summary: `${step.label} · ${statusLabel(step.status)}`,
       status: step.status,
       collapsible: true,
     });
@@ -69,7 +77,7 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
       id: `${run.runId}:event:${event.sequence}`,
       type: messageKind ?? 'tool_event',
       createdAt: event.createdAt,
-      title: messageKind === 'reasoning_summary' ? 'Reasoning summary' : messageKind === 'final_answer' ? 'Agent' : 'Tool event',
+      title: messageKind === 'reasoning_summary' ? '推理摘要' : messageKind === 'final_answer' ? 'Agent' : '工具事件',
       content: typeof event.payload.content === 'string' ? event.payload.content : eventSummary(event),
       summary: typeof event.payload.summary === 'string' ? event.payload.summary : undefined,
       eventType: event.eventType,
@@ -85,8 +93,8 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
       id: `${run.runId}:final`,
       type: 'final_answer',
       createdAt: run.finishedAt ?? run.updatedAt,
-      title: failed ? 'Run outcome' : 'Agent',
-      content: run.errorCode ? `${run.errorCode}: ${run.resultSummary ?? 'The run did not complete successfully.'}` : (run.resultSummary ?? `Run ${run.status}.`),
+      title: failed ? 'Run 结果' : 'Agent',
+      content: run.errorCode ? `${run.errorCode}：${run.resultSummary ?? '本次 Run 未成功完成。'}` : (run.resultSummary ?? `Run ${statusLabel(run.status)}。`),
       status: run.status,
     });
   }
