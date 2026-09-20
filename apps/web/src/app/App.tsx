@@ -59,16 +59,14 @@ export default function App() {
     setPage(next);
   }
 
-  const activeNav = navItems.find((item) => item.key === page) ?? navItems[0];
-
   return <AuthGate api={authApi}>
     <AccountContextProvider api={accountsApi}>
-      <AuthenticatedShell page={page} activeNav={activeNav} accountsApi={accountsApi} productsApi={productsApi} couponsApi={couponsApi} messagesApi={messagesApi} workspaceApi={workspaceApi} navigate={navigate} />
+      <AuthenticatedShell page={page} accountsApi={accountsApi} productsApi={productsApi} couponsApi={couponsApi} messagesApi={messagesApi} workspaceApi={workspaceApi} navigate={navigate} />
     </AccountContextProvider>
   </AuthGate>;
 }
 
-function AuthenticatedShell({ page, activeNav, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, navigate }: { page: PageKey; activeNav: typeof navItems[number]; accountsApi: ReturnType<typeof createAccountsApi>; productsApi: ReturnType<typeof createProductsApi>; couponsApi: ReturnType<typeof createCouponsApi>; messagesApi: ReturnType<typeof createMessagesApi>; workspaceApi: ReturnType<typeof createWorkspaceApi>; navigate: (next: PageKey) => void }) {
+function AuthenticatedShell({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, navigate }: { page: PageKey; accountsApi: ReturnType<typeof createAccountsApi>; productsApi: ReturnType<typeof createProductsApi>; couponsApi: ReturnType<typeof createCouponsApi>; messagesApi: ReturnType<typeof createMessagesApi>; workspaceApi: ReturnType<typeof createWorkspaceApi>; navigate: (next: PageKey) => void }) {
   return (
     <div className="app-viewport">
       <div className="desktop-shell">
@@ -81,7 +79,6 @@ function AuthenticatedShell({ page, activeNav, accountsApi, productsApi, coupons
           <div className="sidebar-bottom"><div className="agent-card"><span className="online-dot" /> <strong>Agent Runtime</strong><small>独立服务 · 正常</small></div><div className="sidebar-user"><div className="avatar">管</div><div><strong>运营管理员</strong><span>admin@example.com</span></div></div></div>
         </aside>
         <div className="desktop-body">
-          <header className="topbar"><div className="topbar-copy"><strong>{activeNav.label}</strong><span>{activeNav.sub} · 管理员工作空间</span></div><label className="search-box"><span aria-hidden="true">⌕</span><input aria-label="全局搜索" placeholder="搜索账号、商品或订单" /></label><div className="top-actions"><button className="icon-button" type="button" aria-label="通知"><span aria-hidden="true">♢</span><b>3</b></button><div className="user-chip"><div className="avatar">管</div><span>管理员</span></div></div></header>
           <main>{page === 'accounts' ? <AccountsPage api={accountsApi} /> : page === 'products' ? <ProductsPage api={productsApi} accountsApi={accountsApi} /> : page === 'coupons' ? <CouponsPage api={couponsApi} productsApi={productsApi} /> : page === 'messages' ? <MessagesPage api={messagesApi} /> : page === 'workspace' ? <WorkspacePage api={workspaceApi} /> : <PlaceholderPage page={page} />}</main>
         </div>
       </div>

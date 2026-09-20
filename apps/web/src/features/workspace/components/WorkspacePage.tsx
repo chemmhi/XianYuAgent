@@ -54,7 +54,6 @@ export function WorkspacePage({ api }: WorkspacePageProps) {
   function chooseAccount() { window.history.pushState({}, '', '/accounts'); window.dispatchEvent(new PopStateEvent('popstate')); }
 
   return <section className="page-stack workspace-domain" data-workspace-domain>
-    <div className="page-title workspace-page-title"><div><p className="eyebrow">Agent 工作区</p><h1>工作区</h1><p>管理工作区会话，连续跟踪每次 Run 的 Agent 对话。</p></div><div className="workspace-scope"><span className={`workspace-scope-dot ${currentAccountId ? 'online' : ''}`} /><span>{currentAccount?.displayName ?? (contextMissing ? '未选择账号' : '账号加载中')}</span></div></div>
     {accountsError && <div className="workspace-inline-error" role="alert">账号上下文加载失败：{accountsError}</div>}
     {state.error && <div className="workspace-inline-error" role="alert">{state.error}</div>}
     {contextMissing ? <WorkspaceState title="请先选择账号" message="每个工作区会话都绑定一个可用的闲鱼账号。" action={<button className="btn primary" type="button" onClick={chooseAccount}>前往账号管理</button>} />

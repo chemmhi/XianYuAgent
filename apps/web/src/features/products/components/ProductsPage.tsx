@@ -33,14 +33,6 @@ export function ProductsPage({ api: providedApi }: ProductsPageProps) {
 
   return (
     <section className="page-stack products-domain" data-products-domain>
-      <div className="page-title">
-        <div>
-          <p className="eyebrow">Product Catalog</p>
-          <h1>商品管理</h1>
-          <p>商品列表、闲鱼同步和草稿发布流程统一使用当前账号上下文。</p>
-        </div>
-        <div className="page-title-actions"><span className="products-domain-scope">管理员商品范围</span></div>
-      </div>
       <div className="kpi-grid three products-kpis">
         <article className="card kpi-card"><div className="kpi-label">商品总数</div><div className="kpi-value">{total}</div><div className="kpi-delta"><span className="tone-info">当前账号范围</span></div></article>
         <article className="card kpi-card"><div className="kpi-label">已发布</div><div className="kpi-value">{published}</div><div className="kpi-delta"><span className="tone-ok">可继续进入发布校验</span></div></article>

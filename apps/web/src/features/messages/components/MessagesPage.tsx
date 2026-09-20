@@ -168,11 +168,8 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
   if (!currentAccountId || !currentAccount) return <section className="page-stack messages-domain"><div className="messages-state"><strong>请先设置当前账号</strong><span>聊天页沿用账号管理中的全局账号上下文，不在此处切换账号。</span><a className="btn ghost" href="/accounts">前往账号管理</a></div></section>;
 
   return <section className="page-stack messages-domain" data-messages-domain>
-    <div className="page-title">
-      <div><p className="eyebrow">Messages / Realtime</p><h1>在线聊天</h1><p>沿用账号管理中的当前账号，读取真实闲鱼会话并实时回复。</p></div>
-      <div className="page-title-actions"><span className="messages-account-context">当前账号：{currentAccount.displayName || currentAccount.sellerRef || currentAccountId}</span><span className="messages-live-badge">真实连接</span></div>
-    </div>
     <div className="messages-layout card panel">
+      <h1 className="messages-visually-hidden">在线聊天</h1>
       <aside className="messages-sidebar">
         <div className="messages-sidebar-header"><div><strong>会话</strong>{conversationsLoading ? <small className="messages-header-loading" role="status" aria-label="正在加载会话"><span className="messages-header-loading-line" aria-hidden="true" /></small> : <small>{controller.state.conversations.length} 个已加载{controller.state.hasMore ? '，还有更多' : ''}</small>}</div><button className="btn ghost" type="button" onClick={() => void controller.reload()} aria-label="刷新会话">刷新</button></div>
         <div className="messages-sidebar-tools">
@@ -192,7 +189,7 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
             <span className="messages-main-avatar">{activeConversation?.buyerAvatarUrl ? <img src={activeConversation.buyerAvatarUrl} alt="" /> : (activeConversation?.buyerDisplayName || activeConversation?.buyerRef || '会').slice(0, 1)}</span>
             <div><strong>{activeConversation?.buyerDisplayName || activeConversation?.buyerRef || '选择会话'}</strong><small>{activeConversation ? `用户 ID：${activeConversation.buyerRef}` : '从左侧选择一个会话'}</small></div>
           </div>
-          <div className="messages-main-header-meta"><span>{activeConversation?.itemTitle || '未关联商品'}</span><span className={`messages-connection-dot ${controller.state.realtimePhase}`} aria-hidden="true" /><ConnectionBanner phase={controller.state.realtimePhase} onRetry={controller.retryRealtime} /></div>
+          <div className="messages-main-header-meta"><span>{activeConversation?.itemTitle || '未关联商品'}</span><span className="messages-live-badge">真实连接</span><span className={`messages-connection-dot ${controller.state.realtimePhase}`} aria-hidden="true" /><ConnectionBanner phase={controller.state.realtimePhase} onRetry={controller.retryRealtime} /></div>
         </header>
         {controller.state.activeConversationId ? <>
           <MessageTimeline
