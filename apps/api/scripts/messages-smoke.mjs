@@ -126,6 +126,18 @@ try {
   ws2.close();
   await new Promise((resolve) => ws2.once('close', resolve));
 
+  // History pagination returns the newest local page first, then prepends
+  // older messages using an opaque cursor without mixing realtime cursors.
+  const historySecond = await runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '历史分页第二条', source: 'system', traceId: 'history-2', createdAt: '2030-01-01T00:00:02.000Z' });
+  const historyThird = await runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '历史分页第三条', source: 'system', traceId: 'history-3', createdAt: '2030-01-01T00:00:03.000Z' });
+  const historyHead = await request(`/api/v1/conversations/${conversation.id}/messages?limit=2`, { headers: { cookie } });
+  assert.deepEqual(historyHead.body.data.items.map((item) => item.messageId), [historySecond.message.id, historyThird.message.id]);
+  assert.equal(historyHead.body.data.hasMoreHistory, true);
+  assert.equal(typeof historyHead.body.data.historyCursor, 'string');
+  const historyOlder = await request(`/api/v1/conversations/${conversation.id}/messages?limit=2&beforeCursor=${encodeURIComponent(historyHead.body.data.historyCursor)}`, { headers: { cookie } });
+  assert.deepEqual(historyOlder.body.data.items.map((item) => item.messageId), [first.message.id, second.message.messageId]);
+  assert.equal(historyOlder.body.data.hasMoreHistory, false);
+
   const forbidden = await request('/api/v1/conversations?accountId=00000000-0000-0000-0000-000000000000', { headers: { cookie } });
   assert.equal(forbidden.response.status, 403);
   const missing = await request('/api/v1/conversations/00000000-0000-0000-0000-000000000000/messages', { headers: { cookie } });

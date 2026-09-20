@@ -40,7 +40,7 @@ describe('MessageTimeline', () => {
     const html = renderToStaticMarkup(createElement(MessageTimeline, { phase: 'success', messages: [message({ bodyType: 'image', bodyRef: 'https://cdn.example.com/chat/photo.jpg' })] }));
     expect(html).toContain('class="messages-image"');
     expect(html).toContain('src="https://cdn.example.com/chat/photo.jpg"');
-    expect(html).toContain('class="messages-image-link"');
+    expect(html).toContain('class="messages-image-button"');
   });
 
   it('renders Xianyu bracketed emoji markers as official image assets', () => {

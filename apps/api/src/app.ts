@@ -14,6 +14,7 @@ import { XianyuMtopClient } from './xianyu-mtop.js';
 import { XianyuImService } from './xianyu-im-service.js';
 import { MessageRealtimeHub, MessageService } from './messages.js';
 import { RedisConversationEventBridge } from './messages-realtime.js';
+import { decodeMessageHistoryCursor, encodeMessageHistoryCursor } from './message-history-cursor.js';
 import { InProcessAgentRuntime, isTerminalRunStatus, WorkspaceService, type WorkspaceRuntime } from './workspace.js';
 import { OpenAICompatibleModelClient, PiRuntimeAdapter } from './pi-runtime.js';
 
@@ -272,10 +273,22 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   if (conversationMessagesMatch && ctx.method === 'GET') {
     const conversationId = decodeURIComponent(conversationMessagesMatch[1]);
     const local = await messages.getConversation(authContext.admin.id, conversationId);
-    try { await xianyuIm.listMessages(authContext.admin.id, local.accountId, conversationId, undefined, parseMessageListQuery(ctx.query).limit); }
-    catch { /* preserve locally persisted history when the external session is unavailable */ }
-    const result = await messages.listMessages(authContext.admin.id, conversationId, { cursor: undefined, limit: parseMessageListQuery(ctx.query).limit });
-    return { statusCode: 200, body: success(ctx, result).body };
+    const query = parseMessageListQuery(ctx.query);
+    const history = decodeMessageHistoryCursor(query.beforeCursor);
+    if (query.beforeCursor !== undefined && !history) throw new ServiceError(422, 'VALIDATION_FAILED', 'beforeCursor is invalid');
+    let externalPage: { hasMore: boolean; nextCursor?: number } = { hasMore: false };
+    const shouldReadExternalHistory = query.beforeCursor === undefined || history?.externalCursor !== undefined;
+    if (shouldReadExternalHistory) {
+      try { externalPage = await xianyuIm.listMessages(authContext.admin.id, local.accountId, conversationId, history?.externalCursor, query.limit); }
+      catch { /* preserve locally persisted history when the external session is unavailable */ }
+    }
+    const result = await messages.listMessages(authContext.admin.id, conversationId, query);
+    const oldest = result.items[0];
+    const hasMoreHistory = Boolean(externalPage.hasMore || result.hasMoreHistory);
+    const historyCursor = hasMoreHistory && oldest
+      ? encodeMessageHistoryCursor({ externalCursor: externalPage.nextCursor, beforeCreatedAt: oldest.createdAt, beforeMessageId: oldest.messageId })
+      : undefined;
+    return { statusCode: 200, body: success(ctx, { ...result, hasMoreHistory, historyCursor }).body };
   }
   const conversationSendMatch = ctx.path.match(/^\/api\/v1\/conversations\/([^/]+)\/messages$/);
   if (conversationSendMatch && ctx.method === 'POST') {
@@ -749,8 +762,9 @@ function parseConversationListQuery(query: Record<string, string>): import('./do
 
 function parseMessageListQuery(query: Record<string, string>): import('./domain.js').MessageListQuery {
   const cursor = query.cursor === undefined ? undefined : Number(query.cursor);
+  const beforeCursor = query.beforeCursor === undefined ? undefined : query.beforeCursor;
   const limit = query.limit === undefined ? undefined : Number(query.limit);
-  return { cursor: cursor === undefined || Number.isNaN(cursor) ? cursor : Math.trunc(cursor), limit: limit === undefined || Number.isNaN(limit) ? limit : Math.trunc(limit) };
+  return { cursor: cursor === undefined || Number.isNaN(cursor) ? cursor : Math.trunc(cursor), beforeCursor, limit: limit === undefined || Number.isNaN(limit) ? limit : Math.trunc(limit) };
 }
 
 async function handleConversationUpgrade(runtime: AppRuntime, wsServer: WebSocketServer, request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {

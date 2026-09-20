@@ -18,6 +18,17 @@ const sentImage: MessageVM = {
 };
 
 describe('messages API media contract', () => {
+  it('passes the opaque history cursor for older-message pagination', async () => {
+    let capturedPath = '';
+    const api = createMessagesApi({
+      get: async <T>(path: string) => { capturedPath = path; return { data: { items: [], hasMore: false, latestCursor: 4, hasMoreHistory: false } } as unknown as T; },
+    });
+    const result = await api.listMessages({ accountId: 'a-1', conversationId: 'c-1', beforeCursor: 'eyJmb28iOiJiYXIifQ', limit: 25 });
+    expect(result.latestCursor).toBe(4);
+    expect(capturedPath).toContain('beforeCursor=eyJmb28iOiJiYXIifQ');
+    expect(capturedPath).toContain('limit=25');
+  });
+
   it('posts a multipart image payload without forcing JSON headers', async () => {
     let capturedPath = '';
     let capturedBody: unknown;

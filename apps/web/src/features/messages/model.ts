@@ -11,7 +11,11 @@ export function mergeTimelineMessages(existing: MessageVM[], incoming: MessageVM
 export function mergeConversation(existing: ConversationVM[], incoming: ConversationVM): ConversationVM[] {
   const byId = new Map(existing.map((conversation) => [conversation.conversationId, conversation]));
   byId.set(incoming.conversationId, incoming);
-  return [...byId.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.conversationId.localeCompare(right.conversationId));
+  return [...byId.values()].sort((left, right) => conversationSortKey(right).localeCompare(conversationSortKey(left)) || left.conversationId.localeCompare(right.conversationId));
+}
+
+function conversationSortKey(conversation: ConversationVM): string {
+  return conversation.lastMessageAt ?? conversation.updatedAt;
 }
 
 export function filterConversations(conversations: ConversationVM[], search: string, unreadOnly: boolean): ConversationVM[] {

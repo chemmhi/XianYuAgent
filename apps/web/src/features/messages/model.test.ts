@@ -25,6 +25,12 @@ describe('messages realtime model', () => {
     expect(mergeConversation([conversation], newer)[0]?.version).toBe(2);
   });
 
+  it('orders conversations by latest message time before metadata refresh time', () => {
+    const olderMessage = { ...conversation, conversationId: 'older', updatedAt: '2026-09-20T10:00:00.000Z', lastMessageAt: '2026-09-20T10:00:00.000Z' };
+    const newerMessage = { ...conversation, conversationId: 'newer', updatedAt: '2026-09-20T09:00:00.000Z', lastMessageAt: '2026-09-20T11:00:00.000Z' };
+    expect(mergeConversation([olderMessage], newerMessage).map((item) => item.conversationId)).toEqual(['newer', 'older']);
+  });
+
   it('dedupes repeated event ids and repeated message ids', () => {
     const event: RealtimeEvent = { eventId: 'e1', conversationId: 'c1', accountId: 'a1', cursor: 1, type: 'chat.message.created', occurredAt: '2026-09-19T00:00:01.000Z', traceId: 't1', payload: { message, conversation: { ...conversation, version: 2, updatedAt: '2026-09-19T00:00:01.000Z', unreadCount: 1 } } };
     const initial = { conversations: [conversation], messages: [message], cursor: 0, seenEventIds: new Set<string>() };

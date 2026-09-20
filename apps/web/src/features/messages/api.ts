@@ -4,7 +4,7 @@ interface Envelope<T> { data?: T; }
 
 export interface MessagesApi {
   listConversations(input: { accountId: string; cursor?: string; limit?: number }): Promise<{ items: ConversationVM[]; nextCursor?: string; hasMore: boolean }>;
-  listMessages(input: { accountId: string; conversationId: string; cursor?: number; limit?: number }): Promise<{ items: MessageVM[]; nextCursor?: number; hasMore: boolean; latestCursor: number }>;
+  listMessages(input: { accountId: string; conversationId: string; cursor?: number; beforeCursor?: string; limit?: number }): Promise<{ items: MessageVM[]; nextCursor?: number; hasMore: boolean; latestCursor: number; hasMoreHistory: boolean; historyCursor?: string }>;
   sendMessage(input: { accountId: string; conversationId: string; text: string; idempotencyKey: string }): Promise<MessageVM>;
   sendImage(input: { accountId: string; conversationId: string; file: File; idempotencyKey: string }): Promise<MessageVM>;
   openRealtime(input: { accountId: string; conversationId: string; cursor: number; onEvent: (event: RealtimeEvent) => void; onOpen?: () => void; onClose?: () => void; onError?: () => void }): { close: () => void };
@@ -21,8 +21,9 @@ export function createMessagesApi(input: { get: <T>(path: string) => Promise<T>;
     async listMessages(query) {
       const params = new URLSearchParams({ limit: String(query.limit ?? 100) });
       if (query.cursor !== undefined) params.set('cursor', String(query.cursor));
-      const payload = await input.get<Envelope<{ items: MessageVM[]; nextCursor?: number; hasMore: boolean; latestCursor: number }>>(`/api/v1/conversations/${encodeURIComponent(query.conversationId)}/messages?${params.toString()}`);
-      return payload.data ?? { items: [], hasMore: false, latestCursor: 0 };
+      if (query.beforeCursor !== undefined) params.set('beforeCursor', query.beforeCursor);
+      const payload = await input.get<Envelope<{ items: MessageVM[]; nextCursor?: number; hasMore: boolean; latestCursor: number; hasMoreHistory: boolean; historyCursor?: string }>>(`/api/v1/conversations/${encodeURIComponent(query.conversationId)}/messages?${params.toString()}`);
+      return payload.data ?? { items: [], hasMore: false, latestCursor: 0, hasMoreHistory: false };
     },
     async sendMessage(query) {
       if (!input.post) throw new Error('messages send api unavailable');

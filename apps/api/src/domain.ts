@@ -343,6 +343,8 @@ export interface ConversationListResult {
 
 export interface MessageListQuery {
   cursor?: number;
+  /** Opaque cursor used to load messages older than the current timeline. */
+  beforeCursor?: string;
   limit?: number;
 }
 
@@ -351,6 +353,8 @@ export interface MessageListResult {
   nextCursor?: number;
   hasMore: boolean;
   latestCursor: number;
+  hasMoreHistory: boolean;
+  historyCursor?: string;
 }
 
 export interface CredentialRecord {

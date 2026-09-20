@@ -1,6 +1,7 @@
 import type { ConversationEventRecord, ConversationListQuery, ConversationRecord, MessageListQuery, MessageRecord, Store } from './domain.js';
 import { ServiceError } from './services.js';
 import { decodeConversationCursor } from './conversation-cursor.js';
+import { decodeMessageHistoryCursor } from './message-history-cursor.js';
 
 export interface ConversationVM {
   conversationId: string;
@@ -134,10 +135,11 @@ export class MessageService {
     return this.toConversationView(conversation);
   }
 
-  async listMessages(adminId: string, conversationId: string, query: MessageListQuery): Promise<{ items: MessageVM[]; nextCursor?: number; hasMore: boolean; latestCursor: number }> {
+  async listMessages(adminId: string, conversationId: string, query: MessageListQuery): Promise<{ items: MessageVM[]; nextCursor?: number; hasMore: boolean; latestCursor: number; hasMoreHistory: boolean; historyCursor?: string }> {
     await this.getConversation(adminId, conversationId);
     this.validateLimit(query.limit, 200);
     if (query.cursor !== undefined && (!Number.isSafeInteger(query.cursor) || query.cursor < 0)) throw new ServiceError(422, 'VALIDATION_FAILED', 'cursor must be a non-negative integer');
+    if (query.beforeCursor !== undefined && !decodeMessageHistoryCursor(query.beforeCursor)) throw new ServiceError(422, 'VALIDATION_FAILED', 'beforeCursor is invalid');
     const result = await this.store.listMessages(adminId, conversationId, query);
     return { ...result, items: result.items.map((message) => this.toMessageView(message)) };
   }

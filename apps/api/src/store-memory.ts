@@ -1,7 +1,10 @@
 import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor, isAfterConversationCursor } from './conversation-cursor.js';
+import { decodeMessageHistoryCursor } from './message-history-cursor.js';
 import type { AgentSessionRecord, RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, WorkspaceMessageRecord, WorkspaceMessageType } from './domain.js';
+
+function conversationSortKey(conversation: ConversationRecord): string { return conversation.lastMessageAt ?? conversation.updatedAt; }
 
 export class MemoryStore implements Store {
   readonly kind = 'memory' as const;
@@ -273,11 +276,11 @@ export class MemoryStore implements Store {
     const cursor = query.cursor ? decodeConversationCursor(query.cursor) : undefined;
     const filtered = [...this.conversations.values()]
       .filter((item) => scoped.has(item.accountId) && (!query.accountId || item.accountId === query.accountId))
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id));
-    const candidates = filtered.filter((item) => !cursor || isAfterConversationCursor(item.updatedAt, item.id, cursor));
+      .sort((left, right) => conversationSortKey(right).localeCompare(conversationSortKey(left)) || right.id.localeCompare(left.id));
+    const candidates = filtered.filter((item) => !cursor || isAfterConversationCursor(conversationSortKey(item), item.id, cursor));
     const page = candidates.slice(0, limit);
     const hasMore = candidates.length > page.length;
-    const nextCursor = hasMore ? encodeConversationCursor({ updatedAt: page[page.length - 1]!.updatedAt, id: page[page.length - 1]!.id }) : undefined;
+    const nextCursor = hasMore ? encodeConversationCursor({ updatedAt: conversationSortKey(page[page.length - 1]!), id: page[page.length - 1]!.id }) : undefined;
     return { items: page.map((item) => ({ ...item })), nextCursor, hasMore };
   }
 
@@ -305,9 +308,13 @@ export class MemoryStore implements Store {
       current.itemTitle = input.itemTitle ?? current.itemTitle;
       current.itemImageUrl = input.itemImageUrl ?? current.itemImageUrl;
       if (input.unreadCount !== undefined) current.unreadCount = Math.max(0, Math.trunc(input.unreadCount));
-      current.lastMessagePreview = input.lastMessagePreview ?? current.lastMessagePreview;
-      current.lastMessageAt = input.lastMessageAt ?? current.lastMessageAt;
-      current.updatedAt = new Date().toISOString();
+      if (input.lastMessageAt && (!current.lastMessageAt || input.lastMessageAt >= current.lastMessageAt)) {
+        current.lastMessagePreview = input.lastMessagePreview ?? current.lastMessagePreview;
+        current.lastMessageAt = input.lastMessageAt;
+      } else if (!current.lastMessageAt && input.lastMessagePreview !== undefined) {
+        current.lastMessagePreview = input.lastMessagePreview;
+      }
+      if (input.lastMessageAt && input.lastMessageAt > current.updatedAt) current.updatedAt = input.lastMessageAt;
       current.version += 1;
       return { ...current };
     }
@@ -322,16 +329,25 @@ export class MemoryStore implements Store {
 
   async listMessages(adminId: string, conversationId: string, query: MessageListQuery): Promise<MessageListResult> {
     const conversation = await this.getConversation(adminId, conversationId);
-    if (!conversation) return { items: [], hasMore: false, latestCursor: 0 };
+    if (!conversation) return { items: [], hasMore: false, latestCursor: 0, hasMoreHistory: false };
     const limit = Math.min(200, Math.max(1, query.limit ?? 100));
     const latestCursor = this.conversationCursors.get(conversationId) ?? 0;
     const cursor = query.cursor ?? latestCursor;
     const items = [...this.messages.values()]
       .filter((item) => item.conversationId === conversationId)
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
-    const selected = query.cursor === undefined ? items.slice(Math.max(0, items.length - limit)) : items.filter((item) => (this.eventForMessage(conversationId, item.id)?.cursor ?? 0) > cursor).slice(0, limit);
+    const history = decodeMessageHistoryCursor(query.beforeCursor);
+    const olderItems = history?.beforeCreatedAt
+      ? items.filter((item) => item.createdAt < history.beforeCreatedAt! || (item.createdAt === history.beforeCreatedAt && (!history.beforeMessageId || item.id < history.beforeMessageId)))
+      : items;
+    const selected = query.beforeCursor !== undefined
+      ? olderItems.slice(Math.max(0, olderItems.length - limit))
+      : query.cursor === undefined
+        ? items.slice(Math.max(0, items.length - limit))
+        : items.filter((item) => (this.eventForMessage(conversationId, item.id)?.cursor ?? 0) > cursor).slice(0, limit);
+    const hasMoreHistory = query.beforeCursor !== undefined ? olderItems.length > selected.length : items.length > selected.length;
     const nextCursor = selected.length === limit ? this.eventForMessage(conversationId, selected[selected.length - 1]!.id)?.cursor : undefined;
-    return { items: selected.map((item) => ({ ...item, riskFlags: [...item.riskFlags] })), nextCursor, hasMore: nextCursor !== undefined, latestCursor };
+    return { items: selected.map((item) => ({ ...item, riskFlags: [...item.riskFlags] })), nextCursor, hasMore: nextCursor !== undefined, latestCursor, hasMoreHistory };
   }
 
   async listConversationEvents(adminId: string, conversationId: string, afterCursor: number, limit: number): Promise<ConversationEventRecord[]> {
@@ -370,9 +386,11 @@ export class MemoryStore implements Store {
     const now = input.createdAt ?? new Date().toISOString();
     const message: MessageRecord = { id: createId(), conversationId: conversation.id, accountId: conversation.accountId, direction: input.direction, senderRole: input.senderRole, bodyType: input.bodyType, bodyText: input.bodyText, bodyRef: input.bodyRef, redactionState: 'visible', status: 'created', externalMessageRef: input.externalMessageRef, source: input.source, orderRef: input.orderRef, productRef: input.productRef, riskFlags: [...(input.riskFlags ?? [])], handlingMode: conversation.handlingMode, createdAt: now };
     this.messages.set(message.id, message);
-    conversation.lastMessagePreview = message.bodyText?.slice(0, 180);
-    conversation.lastMessageAt = now;
-    conversation.updatedAt = now;
+    if (!conversation.lastMessageAt || now >= conversation.lastMessageAt) {
+      conversation.lastMessagePreview = message.bodyText?.slice(0, 180);
+      conversation.lastMessageAt = now;
+    }
+    if (now > conversation.updatedAt) conversation.updatedAt = now;
     conversation.version += 1;
     if (message.direction === 'inbound') conversation.unreadCount += 1;
     const cursor = (this.conversationCursors.get(conversation.id) ?? 0) + 1;
@@ -383,6 +401,7 @@ export class MemoryStore implements Store {
   }
 
   private eventForMessage(conversationId: string, messageId: string): ConversationEventRecord | undefined { return (this.conversationEvents.get(conversationId) ?? []).find((event) => (event.payload.message as { id?: string } | undefined)?.id === messageId); }
+
   async createLoginSession(input: { adminId: string; accountId?: string; provisionalAccountRef?: string; loginMethod: string; expiresAt: string; qrTokenRef?: string }): Promise<LoginSessionRecord> {
     if (input.accountId && !(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const now = new Date().toISOString();

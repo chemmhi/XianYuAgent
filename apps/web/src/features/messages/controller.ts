@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createMessagesApi, type MessagesApi } from './api';
-import { applyRealtimeEvent, mergeConversation } from './model';
+import { applyRealtimeEvent, mergeConversation, mergeTimelineMessages } from './model';
 import type { MessagesError, MessagesState, RealtimeEvent } from './types';
 
 const defaultApi = createMessagesApi({ get: async () => { throw new Error('messages api unavailable'); } });
@@ -13,7 +13,7 @@ function normalizeError(error: unknown): MessagesError {
   return { code: 'UNKNOWN', message: error instanceof Error ? error.message : '消息加载失败，请重试。', retryable: true };
 }
 
-export interface MessagesController { state: MessagesState; setActiveConversation: (conversationId?: string) => void; reload: () => Promise<void>; loadMoreConversations: () => Promise<void>; retryRealtime: () => void; sendMessage: (text: string) => Promise<void>; sendImage: (file: File) => Promise<void>; }
+export interface MessagesController { state: MessagesState; setActiveConversation: (conversationId?: string) => void; reload: () => Promise<void>; loadMoreConversations: () => Promise<void>; loadMoreMessages: () => Promise<void>; retryRealtime: () => void; sendMessage: (text: string) => Promise<void>; sendImage: (file: File) => Promise<void>; }
 
 /**
  * A socket can emit `close` after a replacement socket has already opened.
@@ -36,7 +36,7 @@ export function createSocketGenerationGuard(): SocketGenerationGuard {
 export function useMessagesController(options: { api?: MessagesApi; accountId?: string }): MessagesController {
   const api = options.api ?? defaultApi;
   const accountId = options.accountId;
-  const [state, setState] = useState<MessagesState>({ accountId, listPhase: 'idle', loadingMore: false, hasMore: false, nextCursor: undefined, timelinePhase: 'idle', realtimePhase: 'closed', conversations: [], messages: [], cursor: 0, sendPhase: 'idle', error: null });
+  const [state, setState] = useState<MessagesState>({ accountId, listPhase: 'idle', loadingMore: false, hasMore: false, nextCursor: undefined, timelinePhase: 'idle', realtimePhase: 'closed', conversations: [], messages: [], cursor: 0, hasMoreHistory: false, loadingMoreHistory: false, historyCursor: undefined, sendPhase: 'idle', error: null });
   const socketRef = useRef<{ close: () => void } | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestId = useRef(0);
@@ -103,14 +103,14 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
     if (!accountId) return;
     const currentRequest = ++requestId.current;
     closeRealtime();
-    setState((previous) => ({ ...previous, timelinePhase: 'loading', realtimePhase: 'connecting', error: null, messages: [], cursor: 0 }));
+    setState((previous) => ({ ...previous, timelinePhase: 'loading', realtimePhase: 'connecting', error: null, messages: [], cursor: 0, hasMoreHistory: false, loadingMoreHistory: false, historyCursor: undefined }));
     seenEventIdsRef.current = new Set();
     cursorRef.current = 0;
     try {
       const result = await api.listMessages({ accountId, conversationId, limit: 100 });
       if (currentRequest !== requestId.current) return;
       cursorRef.current = result.latestCursor;
-      setState((previous) => ({ ...previous, timelinePhase: result.items.length === 0 ? 'empty' : 'success', messages: result.items, cursor: result.latestCursor, realtimePhase: 'connecting', error: null }));
+      setState((previous) => ({ ...previous, timelinePhase: result.items.length === 0 ? 'empty' : 'success', messages: result.items, cursor: result.latestCursor, hasMoreHistory: result.hasMoreHistory, historyCursor: result.historyCursor, loadingMoreHistory: false, realtimePhase: 'connecting', error: null }));
       connectRealtime(conversationId, result.latestCursor);
     } catch (error) {
       if (currentRequest !== requestId.current) return;
@@ -122,10 +122,10 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
   const reload = useCallback(async () => {
     const currentRequest = ++requestId.current;
     closeRealtime();
-    if (!accountId) { setState({ accountId, listPhase: 'empty', loadingMore: false, hasMore: false, nextCursor: undefined, timelinePhase: 'idle', realtimePhase: 'closed', conversations: [], activeConversationId: undefined, messages: [], cursor: 0, sendPhase: 'idle', error: null }); return; }
+    if (!accountId) { setState({ accountId, listPhase: 'empty', loadingMore: false, hasMore: false, nextCursor: undefined, timelinePhase: 'idle', realtimePhase: 'closed', conversations: [], activeConversationId: undefined, messages: [], cursor: 0, hasMoreHistory: false, loadingMoreHistory: false, historyCursor: undefined, sendPhase: 'idle', error: null }); return; }
     seenEventIdsRef.current = new Set();
     cursorRef.current = 0;
-    setState((previous) => ({ ...previous, accountId, listPhase: 'loading', loadingMore: false, hasMore: false, nextCursor: undefined, timelinePhase: 'idle', realtimePhase: 'closed', conversations: [], messages: [], cursor: 0, sendPhase: 'idle', sendError: undefined, error: null }));
+    setState((previous) => ({ ...previous, accountId, listPhase: 'loading', loadingMore: false, hasMore: false, nextCursor: undefined, timelinePhase: 'idle', realtimePhase: 'closed', conversations: [], messages: [], cursor: 0, hasMoreHistory: false, loadingMoreHistory: false, historyCursor: undefined, sendPhase: 'idle', sendError: undefined, error: null }));
     try {
       const result = await api.listConversations({ accountId, limit: 50 });
       if (currentRequest !== requestId.current) return;
@@ -155,9 +155,32 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
     }
   }, [accountId, api, state.hasMore, state.loadingMore, state.nextCursor]);
 
+  const loadMoreMessages = useCallback(async () => {
+    const conversationId = activeIdRef.current;
+    if (!accountId || !conversationId || !state.hasMoreHistory || !state.historyCursor || state.loadingMoreHistory) return;
+    const currentRequest = requestId.current;
+    setState((previous) => ({ ...previous, loadingMoreHistory: true, error: null }));
+    try {
+      const result = await api.listMessages({ accountId, conversationId, beforeCursor: state.historyCursor, limit: 100 });
+      if (currentRequest !== requestId.current || activeIdRef.current !== conversationId) return;
+      setState((previous) => ({
+        ...previous,
+        loadingMoreHistory: false,
+        messages: mergeTimelineMessages(previous.messages, result.items),
+        hasMoreHistory: result.hasMoreHistory,
+        historyCursor: result.historyCursor,
+        timelinePhase: previous.messages.length || result.items.length ? 'success' : 'empty',
+      }));
+    } catch (error) {
+      if (currentRequest !== requestId.current) return;
+      const normalized = normalizeError(error);
+      setState((previous) => ({ ...previous, loadingMoreHistory: false, error: normalized }));
+    }
+  }, [accountId, api, state.hasMoreHistory, state.historyCursor, state.loadingMoreHistory]);
+
   useEffect(() => { activeIdRef.current = undefined; reconnectAttempt.current = 0; void reload(); return closeRealtime; }, [accountKey, reload, closeRealtime]);
 
-  const setActiveConversation = useCallback((conversationId?: string) => { activeIdRef.current = conversationId; setState((previous) => ({ ...previous, activeConversationId: conversationId, messages: [], cursor: 0, timelinePhase: conversationId ? 'loading' : 'idle', realtimePhase: 'closed', error: null })); if (conversationId) void loadTimeline(conversationId); else closeRealtime(); }, [closeRealtime, loadTimeline]);
+  const setActiveConversation = useCallback((conversationId?: string) => { activeIdRef.current = conversationId; setState((previous) => ({ ...previous, activeConversationId: conversationId, messages: [], cursor: 0, hasMoreHistory: false, loadingMoreHistory: false, historyCursor: undefined, timelinePhase: conversationId ? 'loading' : 'idle', realtimePhase: 'closed', error: null })); if (conversationId) void loadTimeline(conversationId); else closeRealtime(); }, [closeRealtime, loadTimeline]);
   const retryRealtime = useCallback(() => { if (state.activeConversationId) { reconnectAttempt.current = 0; connectRealtime(state.activeConversationId, cursorRef.current); } }, [connectRealtime, state.activeConversationId]);
 
   const sendMessage = useCallback(async (text: string) => {
@@ -186,7 +209,7 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
     }
   }, [accountId, api, state.activeConversationId]);
 
-  return { state, setActiveConversation, reload, loadMoreConversations, retryRealtime, sendMessage, sendImage };
+  return { state, setActiveConversation, reload, loadMoreConversations, loadMoreMessages, retryRealtime, sendMessage, sendImage };
 }
 
 export { createMessagesApi };

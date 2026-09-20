@@ -2,17 +2,18 @@ import type { ReactNode } from 'react';
 import type { MessageVM } from '../types';
 import { renderXianyuText } from '../xianyu-emojis';
 
-export function MessageTimeline({ messages, phase }: { messages: MessageVM[]; phase: string }) {
+export function MessageTimeline({ messages, phase, hasMoreHistory = false, loadingMoreHistory = false, onLoadMore, onOpenImage }: { messages: MessageVM[]; phase: string; hasMoreHistory?: boolean; loadingMoreHistory?: boolean; onLoadMore?: () => void; onOpenImage?: (url: string) => void }) {
   if (phase === 'loading') return <div className="messages-timeline-state" aria-live="polite">正在加载消息时间线…</div>;
   if (phase === 'empty') return <div className="messages-timeline-state">暂无历史消息</div>;
   if (phase === 'forbidden') return <div className="messages-timeline-state messages-error" role="alert">无权查看该会话消息。</div>;
   if (phase === 'error') return <div className="messages-timeline-state messages-error" role="alert">消息时间线加载失败。</div>;
   return <div className="messages-timeline" aria-live="polite">
+    {hasMoreHistory && onLoadMore && <button className="messages-history-load-more" type="button" onClick={onLoadMore} disabled={loadingMoreHistory}>{loadingMoreHistory ? '正在加载更早消息…' : '加载更早消息'}</button>}
     {messages.map((message) => {
       const imageUrl = message.bodyType === 'image' ? safeUrl(message.bodyRef) : undefined;
       return <div key={message.messageId} className={`messages-bubble-row ${message.direction === 'outbound' ? 'outbound' : 'inbound'}`}>
         <div className={`messages-bubble ${message.direction === 'outbound' ? 'outbound' : 'inbound'}`}>
-          {imageUrl ? <a className="messages-image-link" href={imageUrl} target="_blank" rel="noreferrer noopener"><img className="messages-image" src={imageUrl} alt="聊天图片" loading="lazy" /></a> : <span>{renderMessageText(message.bodyText || (message.bodyType === 'image' ? '[图片]' : '[系统消息]'))}</span>}
+          {imageUrl ? <button className="messages-image-button" type="button" aria-label="查看聊天图片" onClick={() => onOpenImage?.(imageUrl)}><img className="messages-image" src={imageUrl} alt="聊天图片" loading="lazy" /></button> : <span>{renderMessageText(message.bodyText || (message.bodyType === 'image' ? '[图片]' : '[系统消息]'))}</span>}
           <small>{formatTime(message.createdAt)}{message.source === 'ai' ? ' · AI' : message.source === 'human' ? ' · 人工' : ''}</small>
         </div>
       </div>;

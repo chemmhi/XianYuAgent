@@ -3,6 +3,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 import type { AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor } from './conversation-cursor.js';
+import { decodeMessageHistoryCursor } from './message-history-cursor.js';
 
 type Row = Record<string, unknown>;
 function dateIso(value: unknown): string {
@@ -240,15 +241,15 @@ export class PostgresStore implements Store {
       params.push(cursor.updatedAt);
       const idIndex = params.length + 1;
       params.push(cursor.id);
-      conditions.push(`(date_trunc('milliseconds', c.updated_at) < $${updatedAtIndex} or (date_trunc('milliseconds', c.updated_at) = $${updatedAtIndex} and c.id < $${idIndex}))`);
+      conditions.push(`(date_trunc('milliseconds', coalesce(c.last_message_at, c.updated_at)) < $${updatedAtIndex} or (date_trunc('milliseconds', coalesce(c.last_message_at, c.updated_at)) = $${updatedAtIndex} and c.id < $${idIndex}))`);
     }
     const limit = Math.min(100, Math.max(1, query.limit ?? 50));
     const limitIndex = params.length + 1;
-    const result = await this.pool.query(`select c.* from messages.conversations c where ${conditions.join(' and ')} order by date_trunc('milliseconds', c.updated_at) desc, c.id desc limit $${limitIndex}`, [...params, limit + 1]);
+    const result = await this.pool.query(`select c.* from messages.conversations c where ${conditions.join(' and ')} order by date_trunc('milliseconds', coalesce(c.last_message_at, c.updated_at)) desc, c.id desc limit $${limitIndex}`, [...params, limit + 1]);
     const hasMore = result.rows.length > limit;
     const items = result.rows.slice(0, limit).map((row) => this.toConversation(row));
     const last = items[items.length - 1];
-    return { items, nextCursor: hasMore && last ? encodeConversationCursor({ updatedAt: last.updatedAt, id: last.id }) : undefined, hasMore };
+    return { items, nextCursor: hasMore && last ? encodeConversationCursor({ updatedAt: last.lastMessageAt ?? last.updatedAt, id: last.id }) : undefined, hasMore };
   }
 
   async getConversation(adminId: string, conversationId: string): Promise<ConversationRecord | undefined> {
@@ -263,24 +264,44 @@ export class PostgresStore implements Store {
 
   async upsertExternalConversation(input: { adminId: string; accountId: string; externalConversationRef: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; unreadCount?: number; lastMessagePreview?: string; lastMessageAt?: string }): Promise<ConversationRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
-    const result = await this.pool.query("insert into messages.conversations (id,account_id,external_conversation_ref,buyer_ref,buyer_display_name,buyer_avatar_url,item_ref,item_title,item_image_url,unread_count,last_message_preview,last_message_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) on conflict (account_id,external_conversation_ref) where external_conversation_ref is not null do update set buyer_ref=excluded.buyer_ref,buyer_display_name=coalesce(excluded.buyer_display_name,messages.conversations.buyer_display_name),buyer_avatar_url=coalesce(excluded.buyer_avatar_url,messages.conversations.buyer_avatar_url),item_ref=coalesce(excluded.item_ref,messages.conversations.item_ref),item_title=coalesce(excluded.item_title,messages.conversations.item_title),item_image_url=coalesce(excluded.item_image_url,messages.conversations.item_image_url),unread_count=coalesce(excluded.unread_count,messages.conversations.unread_count),last_message_preview=coalesce(excluded.last_message_preview,messages.conversations.last_message_preview),last_message_at=coalesce(excluded.last_message_at,messages.conversations.last_message_at),version=messages.conversations.version+1,updated_at=now() returning *", [createId(), input.accountId, input.externalConversationRef, input.buyerRef, input.buyerDisplayName ?? null, input.buyerAvatarUrl ?? null, input.itemRef ?? null, input.itemTitle ?? null, input.itemImageUrl ?? null, input.unreadCount ?? 0, input.lastMessagePreview ?? null, input.lastMessageAt ?? null]);
+    const result = await this.pool.query("insert into messages.conversations (id,account_id,external_conversation_ref,buyer_ref,buyer_display_name,buyer_avatar_url,item_ref,item_title,item_image_url,unread_count,last_message_preview,last_message_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) on conflict (account_id,external_conversation_ref) where external_conversation_ref is not null do update set buyer_ref=excluded.buyer_ref,buyer_display_name=coalesce(excluded.buyer_display_name,messages.conversations.buyer_display_name),buyer_avatar_url=coalesce(excluded.buyer_avatar_url,messages.conversations.buyer_avatar_url),item_ref=coalesce(excluded.item_ref,messages.conversations.item_ref),item_title=coalesce(excluded.item_title,messages.conversations.item_title),item_image_url=coalesce(excluded.item_image_url,messages.conversations.item_image_url),unread_count=coalesce(excluded.unread_count,messages.conversations.unread_count),last_message_preview=case when excluded.last_message_at is not null and (messages.conversations.last_message_at is null or excluded.last_message_at>=messages.conversations.last_message_at) then coalesce(excluded.last_message_preview,messages.conversations.last_message_preview) else messages.conversations.last_message_preview end,last_message_at=case when excluded.last_message_at is not null and (messages.conversations.last_message_at is null or excluded.last_message_at>=messages.conversations.last_message_at) then excluded.last_message_at else messages.conversations.last_message_at end,version=messages.conversations.version+1,updated_at=greatest(messages.conversations.updated_at, coalesce(excluded.last_message_at, messages.conversations.updated_at)) returning *", [createId(), input.accountId, input.externalConversationRef, input.buyerRef, input.buyerDisplayName ?? null, input.buyerAvatarUrl ?? null, input.itemRef ?? null, input.itemTitle ?? null, input.itemImageUrl ?? null, input.unreadCount ?? 0, input.lastMessagePreview ?? null, input.lastMessageAt ?? null]);
     return this.toConversation(result.rows[0]);
   }
 
   async listMessages(adminId: string, conversationId: string, query: MessageListQuery): Promise<MessageListResult> {
     const conversation = await this.getConversation(adminId, conversationId);
-    if (!conversation) return { items: [], hasMore: false, latestCursor: 0 };
+    if (!conversation) return { items: [], hasMore: false, latestCursor: 0, hasMoreHistory: false };
     const limit = Math.min(200, Math.max(1, query.limit ?? 100));
     const latest = await this.pool.query('select coalesce(max(cursor),0)::bigint as cursor from messages.events where conversation_id=$1', [conversationId]);
     const latestCursor = Number(latest.rows[0]?.cursor ?? 0);
+    const history = decodeMessageHistoryCursor(query.beforeCursor);
     const params: unknown[] = [conversationId];
     let cursorClause = '';
-    if (query.cursor !== undefined) { params.push(query.cursor); cursorClause = ` and e.cursor>$${params.length}`; }
-    params.push(limit);
-    const rows = await this.pool.query(`select m.*, e.cursor as event_cursor from messages.messages m join messages.events e on e.conversation_id=m.conversation_id and (e.payload_json->'message'->>'id')=m.id::text where m.conversation_id=$1${cursorClause} order by m.created_at asc, m.id asc limit $${params.length}`, params);
-    const items = rows.rows.map((row) => this.toMessage(row));
-    const nextCursor = items.length === limit ? Number(rows.rows[rows.rows.length - 1]?.event_cursor ?? 0) : undefined;
-    return { items, nextCursor, hasMore: nextCursor !== undefined, latestCursor };
+    let orderClause = 'm.created_at desc, m.id desc';
+    let fetchLimit = limit + 1;
+    if (query.cursor !== undefined) {
+      params.push(query.cursor);
+      cursorClause = ` and e.cursor>$${params.length}`;
+      orderClause = 'm.created_at asc, m.id asc';
+      fetchLimit = limit;
+    } else if (history?.beforeCreatedAt) {
+      params.push(history.beforeCreatedAt);
+      const timestampParam = `$${params.length}`;
+      if (history.beforeMessageId) {
+        params.push(history.beforeMessageId);
+        cursorClause = ` and (m.created_at<${timestampParam}::timestamptz or (m.created_at=${timestampParam}::timestamptz and m.id<$${params.length}::uuid))`;
+      } else {
+        cursorClause = ` and m.created_at<${timestampParam}::timestamptz`;
+      }
+    }
+    params.push(fetchLimit);
+    const rows = await this.pool.query(`select m.*, e.cursor as event_cursor from messages.messages m join messages.events e on e.conversation_id=m.conversation_id and (e.payload_json->'message'->>'id')=m.id::text where m.conversation_id=$1${cursorClause} order by ${orderClause} limit $${params.length}`, params);
+    const hasMoreHistory = query.cursor === undefined && rows.rows.length > limit;
+    const pageRows = hasMoreHistory ? rows.rows.slice(0, limit) : rows.rows;
+    if (query.cursor === undefined) pageRows.reverse();
+    const items = pageRows.map((row) => this.toMessage(row));
+    const nextCursor = items.length === limit ? Number(pageRows[pageRows.length - 1]?.event_cursor ?? 0) : undefined;
+    return { items, nextCursor, hasMore: nextCursor !== undefined, latestCursor, hasMoreHistory };
   }
 
   async listConversationEvents(adminId: string, conversationId: string, afterCursor: number, limit: number): Promise<ConversationEventRecord[]> {
@@ -320,7 +341,7 @@ export class PostgresStore implements Store {
       const id = createId();
       const createdAt = input.createdAt ?? new Date().toISOString();
       const messageResult = await client.query('insert into messages.messages (id,conversation_id,account_id,direction,sender_role,body_type,body_text,body_ref,external_message_ref,source,order_ref,product_ref,risk_flags,handling_mode,created_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15) returning *', [id, conversation.id, conversation.accountId, input.direction, input.senderRole, input.bodyType, input.bodyText ?? null, input.bodyRef ?? null, input.externalMessageRef ?? null, input.source ?? null, input.orderRef ?? null, input.productRef ?? null, JSON.stringify(input.riskFlags ?? []), conversation.handlingMode, createdAt]);
-      const updated = await client.query("update messages.conversations set unread_count=unread_count + case when $2='inbound' then 1 else 0 end, last_message_preview=$3, last_message_at=$4, version=version+1, updated_at=now() where id=$1 returning *", [conversation.id, input.direction, input.bodyText?.slice(0, 180) ?? null, createdAt]);
+      const updated = await client.query("update messages.conversations set unread_count=unread_count + case when $2='inbound' then 1 else 0 end, last_message_preview=case when last_message_at is null or $4::timestamptz>=last_message_at then $3 else last_message_preview end, last_message_at=greatest(coalesce(last_message_at,$4::timestamptz),$4::timestamptz), version=version+1, updated_at=greatest(updated_at, $4::timestamptz) where id=$1 returning *", [conversation.id, input.direction, input.bodyText?.slice(0, 180) ?? null, createdAt]);
       // Serialize cursor allocation per conversation. PostgreSQL does not allow
       // FOR UPDATE on an aggregate result, so use a transaction-scoped advisory
       // lock before reading max(cursor) and inserting the next event.

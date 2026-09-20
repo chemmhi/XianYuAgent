@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { createApp } from '../dist/app.js';
 import { loadConfig } from '../dist/config.js';
 import { hashPassword } from '../dist/security.js';
+import { encodeMessageHistoryCursor } from '../dist/message-history-cursor.js';
 import { WebSocket } from 'ws';
 
 const execFileAsync = promisify(execFile);
@@ -181,6 +182,19 @@ try {
   assert.equal(secondConversationPage.items.length, 1);
   assert.notEqual(secondConversationPage.items[0].id, firstConversationPage.items[0].id);
   console.log('messages infra smoke: PostgreSQL conversation cursor precision passed');
+
+  const paginationMessages = [];
+  for (const [index, createdAt] of ['2030-01-01T00:00:01.000Z', '2030-01-01T00:00:02.000Z', '2030-01-01T00:00:03.000Z'].entries()) {
+    paginationMessages.push(await runtime1.store.createMessage({ adminId, conversationId: paginationConversationId, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: `history-${index + 1}`, source: 'system', createdAt, traceId: `history-${index + 1}` }));
+  }
+  const historyHead = await runtime1.store.listMessages(adminId, paginationConversationId, { limit: 2 });
+  assert.deepEqual(historyHead.items.map((message) => message.id), [paginationMessages[1].message.id, paginationMessages[2].message.id]);
+  assert.equal(historyHead.hasMoreHistory, true);
+  const historyCursor = encodeMessageHistoryCursor({ beforeCreatedAt: historyHead.items[0].createdAt, beforeMessageId: historyHead.items[0].id });
+  const historyOlder = await runtime1.store.listMessages(adminId, paginationConversationId, { limit: 2, beforeCursor: historyCursor });
+  assert.deepEqual(historyOlder.items.map((message) => message.id), [paginationMessages[0].message.id]);
+  assert.equal(historyOlder.hasMoreHistory, false);
+  console.log('messages infra smoke: PostgreSQL message history pagination passed');
 
   ws = await openSocket(port2, cookie);
   await runtime1.messages.createMessage({ adminId, conversationId, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: 'cross process before restart', source: 'system', requestId: `infra-before-${suffix}`, traceId: `infra-before-${suffix}` });

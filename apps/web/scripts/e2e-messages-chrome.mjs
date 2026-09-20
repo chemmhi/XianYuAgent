@@ -158,10 +158,24 @@ async function run() {
   const cookie = `session_id=${login.session.id}; csrf_token=${encodeURIComponent(login.csrfToken)}`;
   const account = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `messages-chrome-${process.pid}`, displayName: '在线聊天 E2E 账号' });
   const conversation = await apiRuntime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'buyer-messages-e2e', buyerDisplayName: '买家 E2E', buyerAvatarUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2240%22 height=%2240%22%3E%3Crect width=%2240%22 height=%2240%22 rx=%2220%22 fill=%22%232563eb%22/%3E%3Ctext x=%2220%22 y=%2226%22 text-anchor=%22middle%22 font-size=%2220%22 fill=%22white%22%3EE%3C/text%3E%3C/svg%3E', itemTitle: '实时消息验证商品', itemImageUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2244%22 height=%2236%22%3E%3Crect width=%2244%22 height=%2236%22 rx=%226%22 fill=%22%23bfdbfe%22/%3E%3C/svg%3E', externalConversationRef: `messages-chrome-${process.pid}` });
-  const seedMessage = await apiRuntime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '历史消息：请问什么时候发货？', source: 'system', traceId: 'messages-chrome-seed' });
+  const seedMessage = await apiRuntime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '历史消息 001：请问什么时候发货？', source: 'system', traceId: 'messages-chrome-seed', createdAt: '2026-09-20T23:00:01.000Z' });
   assert.equal(seedMessage.event.cursor, 1);
+  for (let index = 2; index <= 205; index += 1) {
+    await apiRuntime.store.createMessage({
+      adminId,
+      conversationId: conversation.id,
+      direction: 'inbound',
+      senderRole: 'buyer',
+      bodyType: 'text',
+      bodyText: `历史消息 ${String(index).padStart(3, '0')}`,
+      source: 'system',
+      traceId: `messages-chrome-history-${index}`,
+      createdAt: new Date(Date.UTC(2026, 8, 20, 23, 0, index)).toISOString(),
+    });
+  }
   const secondConversation = await apiRuntime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'buyer-search-e2e', buyerDisplayName: '搜索用户 E2E', buyerAvatarUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2240%22 height=%2240%22%3E%3Crect width=%2240%22 height=%2240%22 rx=%2220%22 fill=%22%23f97316%22/%3E%3Ctext x=%2220%22 y=%2226%22 text-anchor=%22middle%22 font-size=%2220%22 fill=%22white%22%3ES%3C/text%3E%3C/svg%3E', itemTitle: '搜索商品缩略图', itemImageUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2244%22 height=%2236%22%3E%3Crect width=%2244%22 height=%2236%22 rx=%226%22 fill=%22%23fed7aa%22/%3E%3C/svg%3E', externalConversationRef: `messages-search-${process.pid}` });
   await apiRuntime.store.createMessage({ adminId, conversationId: secondConversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '搜索商品还有库存吗？', source: 'system', traceId: 'messages-chrome-search-seed' });
+  await apiRuntime.store.createMessage({ adminId, conversationId: secondConversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'image', bodyRef: 'https://cdn.example.com/chat/messages-e2e-image.png', source: 'system', traceId: 'messages-chrome-image-seed' });
 
   testAccountId = account.id;
   spawnProcess(npm, npmArgs(['--workspace', 'apps/web', 'run', 'dev', '--', '--host', '127.0.0.1', '--port', String(webPort)]), {
@@ -221,7 +235,7 @@ async function run() {
   await cdp.send('Page.navigate', { url: `${webUrl}/messages` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'messages page');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-messages-domain]"))'), 'messages domain');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('历史消息：请问什么时候发货？'), 'seed message');
+  await waitFor(async () => (await messageBodies(cdp)).includes('历史消息 205'), 'latest history page');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-connection-dot.connected"))'), 'realtime connected');
   assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-account-tabs"))'), false, 'messages page must not render an account selector');
   assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(`[role="tablist"]`))'), false, 'messages page must not render a tablist account selector');
@@ -242,11 +256,28 @@ async function run() {
   await waitFor(async () => await evaluate(cdp, 'document.querySelectorAll(".messages-conversation-list button").length === 1'), 'buyer search filtering');
   await evaluate(cdp, 'document.querySelector(".messages-conversation-list button")?.click()');
   await waitFor(async () => String(await evaluate(cdp, 'document.querySelector(".messages-main-header strong")?.textContent')).includes('搜索用户'), 'conversation selection');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-image-button"))'), 'sent image message');
+  const pageTargetsBeforeImagePreview = await cdp.send('Target.getTargets');
+  await evaluate(cdp, 'document.querySelector(".messages-image-button")?.click()');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-image-lightbox[role=\\"dialog\\"]"))'), 'sent image lightbox preview');
+  const pageTargetsAfterImagePreview = await cdp.send('Target.getTargets');
+  assert.equal(pageTargetsAfterImagePreview.targetInfos.filter((target) => target.type === 'page').length, pageTargetsBeforeImagePreview.targetInfos.filter((target) => target.type === 'page').length, 'sent image preview must stay in current page');
+  await evaluate(cdp, 'document.querySelector("button[aria-label=\\"关闭图片预览\\"]")?.click()');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-image-lightbox")) === false'), 'close sent image lightbox');
   await evaluate(cdp, `(() => { const input = document.querySelector('input[aria-label="搜索会话"]'); const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set; setter?.call(input, ''); input.dispatchEvent(new Event('input', { bubbles: true })); document.querySelectorAll('.messages-filter-tabs button')[0]?.click(); })()`);
   await evaluate(cdp, `document.querySelector('[data-conversation-id="${conversation.id}"]')?.click()`);
-  await waitFor(async () => (await messageBodies(cdp)).length === 1, 'primary conversation history');
+  await waitFor(async () => (await messageBodies(cdp)).length === 100, 'primary conversation latest history page');
   await waitFor(async () => String(await evaluate(cdp, 'document.querySelector(".messages-main-header strong")?.textContent')).includes('买家 E2E'), 'primary conversation selection');
-  assert.deepEqual(await messageBodies(cdp), ['历史消息：请问什么时候发货？']);
+  const latestBodies = await messageBodies(cdp);
+  assert.equal(latestBodies[0], '历史消息 106');
+  assert.equal(latestBodies.at(-1), '历史消息 205');
+  await evaluate(cdp, 'document.querySelector(".messages-history-load-more")?.click()');
+  await waitFor(async () => (await messageBodies(cdp)).length === 200, 'first older history page');
+  await evaluate(cdp, 'document.querySelector(".messages-history-load-more")?.click()');
+  await waitFor(async () => (await messageBodies(cdp)).length === 205, 'complete history pages');
+  const completeBodies = await messageBodies(cdp);
+  assert.equal(completeBodies[0], '历史消息 001：请问什么时候发货？');
+  assert.equal(completeBodies.at(-1), '历史消息 205');
 
   assert.equal(await evaluate(cdp, 'document.querySelector("textarea[aria-label=\\"消息内容\\"]")?.getAttribute("placeholder")'), '输入回复，Enter 发送，Shift + Enter 换行，Ctrl + V 粘贴图片。');
   assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-send-button")?.disabled)'), true, 'send button disabled for empty draft');
@@ -261,11 +292,16 @@ async function run() {
   await evaluate(cdp, 'document.querySelector("button[aria-label=\\"打开附件菜单\\"]")?.click()');
   await evaluate(cdp, 'document.querySelector("button[role=\\"menuitem\\"]")?.click()');
   await evaluate(cdp, `(() => { const input = document.querySelector('.messages-file-input'); if (!input) return false; const transfer = new DataTransfer(); transfer.items.add(new File(['png'], 'preview.png', { type: 'image/png' })); Object.defineProperty(input, 'files', { configurable: true, value: transfer.files }); input.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
-  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-attachment-preview img"))'), 'image attachment preview');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-inline-attachment img"))'), 'image attachment preview');
   assert.equal(await evaluate(cdp, 'document.querySelector(".messages-attachment-copy strong")?.textContent'), 'preview.png');
   assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-send-button")?.disabled)'), false, 'send button enabled for image attachment');
+  assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-inline-attachment")?.closest(".messages-composer-shell"))'), true, 'image attachment must be inside composer shell');
+  await evaluate(cdp, 'document.querySelector("button[aria-label=\\"预览待发送图片\\"]")?.click()');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-image-lightbox[role=\\"dialog\\"]"))'), 'image lightbox preview');
+  await evaluate(cdp, 'document.querySelector("button[aria-label=\\"关闭图片预览\\"]")?.click()');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-image-lightbox")) === false'), 'close image lightbox');
   await evaluate(cdp, 'document.querySelector(".messages-attachment-remove")?.click()');
-  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-attachment-preview")) === false'), 'remove image attachment preview');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-inline-attachment")) === false'), 'remove image attachment preview');
   assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-send-button")?.disabled)'), true, 'send button disabled after removing attachment');
   await captureViewport(cdp, 1440, 900, 'messages-desktop-1440x900.png');
 
@@ -286,9 +322,9 @@ async function run() {
     requestId: 'messages-chrome-recovery',
     traceId: 'messages-chrome-recovery',
   });
-  assert.equal(recovered.event.cursor, 2);
+   assert.equal(recovered.event.cursor, 206);
   await new Promise((resolve) => setTimeout(resolve, 500));
-  assert.deepEqual(await messageBodies(cdp), ['历史消息：请问什么时候发货？']);
+  assert.equal((await messageBodies(cdp)).length, 205);
 
   await releaseBrowserRealtime(cdp);
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-connection-dot.connected"))'), 'realtime recovery');
@@ -297,7 +333,7 @@ async function run() {
   }
   const recoveredBodies = await messageBodies(cdp);
   assert.equal(recoveredBodies.filter((body) => body === '断线期间新消息：已按游标补回。').length, 1, 'recovered message rendered exactly once');
-  assert.equal(recoveredBodies.length, 2, 'timeline has one historical and one recovered message');
+  assert.equal(recoveredBodies.length, 206, 'timeline contains complete history plus one recovered message');
   await assertText(cdp, '按游标补回');
   await captureViewport(cdp, 390, 844, 'messages-mobile-390x844.png');
   await cdp.send('Emulation.clearDeviceMetricsOverride');

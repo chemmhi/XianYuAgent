@@ -20,6 +20,8 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [extensionOpen, setExtensionOpen] = useState(false);
   const [pendingImage, setPendingImage] = useState<{ file: File; url: string } | null>(null);
+  const [attachmentPreviewOpen, setAttachmentPreviewOpen] = useState(false);
+  const [chatImagePreviewUrl, setChatImagePreviewUrl] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const activeConversation = controller.state.conversations.find((conversation) => conversation.conversationId === controller.state.activeConversationId);
@@ -34,12 +36,27 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
     setEmojiOpen(false);
     setExtensionOpen(false);
     setPendingImage(null);
+    setAttachmentPreviewOpen(false);
+    setChatImagePreviewUrl(null);
   }, [controller.state.activeConversationId, currentAccountId]);
+
+  useEffect(() => {
+    if (!attachmentPreviewOpen && !chatImagePreviewUrl) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') { setAttachmentPreviewOpen(false); setChatImagePreviewUrl(null); } };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [attachmentPreviewOpen, chatImagePreviewUrl]);
 
   const setImagePreview = (file?: File) => {
     if (!file || !file.type.startsWith('image/')) return;
     setPendingImage({ file, url: URL.createObjectURL(file) });
+    setAttachmentPreviewOpen(false);
     setExtensionOpen(false);
+  };
+
+  const removePendingImage = () => {
+    setAttachmentPreviewOpen(false);
+    setPendingImage(null);
   };
 
   const resizeComposer = () => {
@@ -81,7 +98,7 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
     if (pendingImage) {
       try {
         await controller.sendImage(pendingImage.file);
-        setPendingImage(null);
+        removePendingImage();
       } catch {
         return;
       }
@@ -124,11 +141,17 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
           <div className="messages-main-header-meta"><span>{activeConversation?.itemTitle || '未关联商品'}</span><span className={`messages-connection-dot ${controller.state.realtimePhase}`} /></div>
         </header>
         {controller.state.activeConversationId ? <>
-          <MessageTimeline messages={controller.state.messages} phase={controller.state.timelinePhase} />
+          <MessageTimeline messages={controller.state.messages} phase={controller.state.timelinePhase} hasMoreHistory={controller.state.hasMoreHistory} loadingMoreHistory={controller.state.loadingMoreHistory} onLoadMore={() => void controller.loadMoreMessages()} onOpenImage={setChatImagePreviewUrl} />
           <form className="messages-composer" onSubmit={(event) => { event.preventDefault(); void handleComposerSubmit(); }}>
             <div className="messages-composer-inner">
-              {pendingImage && <div className="messages-attachment-strip"><div className="messages-attachment-preview"><img src={pendingImage.url} alt="待发送图片预览" /><div className="messages-attachment-copy"><strong>{pendingImage.file.name || '图片'}</strong><small>{Math.ceil(pendingImage.file.size / 1024)} KB</small></div><button className="messages-attachment-remove" type="button" aria-label="移除附件" onClick={() => setPendingImage(null)}>×</button></div></div>}
               <div className="messages-composer-shell">
+                {pendingImage && <div className="messages-inline-attachment" aria-label="待发送附件">
+                  <button className="messages-inline-attachment-trigger" type="button" aria-label="预览待发送图片" onClick={() => setAttachmentPreviewOpen(true)}>
+                    <img src={pendingImage.url} alt="待发送图片缩略图" />
+                    <span className="messages-attachment-copy"><strong>{pendingImage.file.name || '图片'}</strong><small>{Math.ceil(pendingImage.file.size / 1024)} KB</small></span>
+                  </button>
+                  <button className="messages-attachment-remove" type="button" aria-label="移除附件" onClick={removePendingImage}>×</button>
+                </div>}
                 <textarea ref={textareaRef} aria-label="消息内容" value={draft} maxLength={2000} rows={1} onChange={(event) => setDraft(event.target.value)} onPaste={(event) => { const image = Array.from(event.clipboardData.items).map((item) => item.kind === 'file' ? item.getAsFile() : null).find((file): file is File => Boolean(file && file.type.startsWith('image/'))) ?? Array.from(event.clipboardData.files).find((file) => file.type.startsWith('image/')); if (image) { event.preventDefault(); setImagePreview(image); } }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={MESSAGES_COMPOSER_PLACEHOLDER} />
                 <div className="messages-composer-footer">
                   <div className="messages-composer-tools">
@@ -144,6 +167,12 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
               </div>
             </div>
           </form>
+          {(chatImagePreviewUrl || (pendingImage && attachmentPreviewOpen)) && <div className="messages-image-lightbox" role="dialog" aria-modal="true" aria-label="图片预览" onClick={() => { setAttachmentPreviewOpen(false); setChatImagePreviewUrl(null); }}>
+            <div className="messages-lightbox-content" onClick={(event) => event.stopPropagation()}>
+              <button className="messages-lightbox-close" type="button" aria-label="关闭图片预览" onClick={() => { setAttachmentPreviewOpen(false); setChatImagePreviewUrl(null); }}>×</button>
+              <img src={chatImagePreviewUrl ?? pendingImage?.url} alt={chatImagePreviewUrl ? '聊天图片大图预览' : '待发送图片大图预览'} />
+            </div>
+          </div>}
         </> : <div className="messages-state messages-empty-main"><strong>选择一个会话开始查看</strong><span>左侧可以搜索、筛选并选择全部会话。</span></div>}
       </main>
     </div>

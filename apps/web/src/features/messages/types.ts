@@ -66,6 +66,9 @@ export interface MessagesState {
   activeConversationId?: string;
   messages: MessageVM[];
   cursor: number;
+  historyCursor?: string;
+  hasMoreHistory: boolean;
+  loadingMoreHistory: boolean;
   sendPhase: SendPhase;
   sendError?: string;
   error: MessagesError | null;
