@@ -302,3 +302,15 @@
 | S5-R48 | 质量 / 交付 | 是否在独立 worktree、merge lock 和主线门禁内完成合入 | root | PASS | `8b7c398`、`npm run verify`、`docs/agent-worktree-registry.md` |
 
 本轮结论：账号列表分页/筛选和页面布局修订已合入 `master`；账号管理外部闲鱼登录、真实 PostgreSQL/外部账号人工验收等既有风险边界不变。
+
+### 2026-09-20：S4-VS4A 订单列表只读切片复审
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R49 | 业务 / 验收 | 订单页面是否支持账号 scope、关键词、支付/订单/发货/售后四态、分页、详情和空/错/403 状态，且不暴露交付正文 | root + test_recon | PASS | `apps/web/src/features/orders/`、`apps/api/scripts/orders-smoke.mjs`、`npm test`、`npm run test:e2e:chrome:orders` |
+| S5-R50 | 架构 / 数据流 | `018_orders.sql`、Postgres/Memory Store、OrderService、HTTP route 和闲鱼 mapper 是否职责分离、金额/时间/外部 upsert 契约一致 | root + test_recon | PASS | `apps/api/migrations/018_orders.sql`、`apps/api/src/store-postgres.ts`、`apps/api/src/services.ts`、`apps/api/src/xianyu-order-mapper.ts`、`npm --workspace apps/api run test:orders:postgres` |
+| S5-R51 | 浏览器 / 视觉 | 真实 Vite + API + Chrome/CDP 是否完成桌面/移动订单旅程，桌面列是否完整可见，移动端是否无横向溢出 | root + test_recon + orders_e2e | PASS | `npm run test:e2e:chrome:orders`；`docs/evidence/stage5/S4-VS4A/screenshots/` |
+| S5-R52 | 外部平台 / 质量 | 真实闲鱼 active 凭证是否可完成只读订单请求，失败不泄露敏感凭证，空结果不被伪造为订单 | root + test_recon | PASS（只读） | `fetchSoldOrders` 返回 `SUCCESS::调用成功`；`fetchOrdersAll` / `OrderService.refresh` 1 页、0 条；未输出 Cookie/Token/raw payload |
+| S5-R53 | 范围 / 发布门禁 | 是否误把交付预览、发货/取消/重试、库存锁、Outbox、DeliveryRecord 宣称为本片完成 | root | PASS | `docs/evidence/stage5/S4-VS4A/test-baseline.md`；`S4-VS4B/C` 保持后置 |
+
+本轮结论：`S4-VS4A = PASS`。只读订单列表切片已完成前端、后端、PostgreSQL、浏览器和实闲鱼只读验证；交付相关能力继续按 `S4-VS4B/C` 单独立项和复审。

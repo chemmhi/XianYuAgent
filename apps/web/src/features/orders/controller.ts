@@ -47,7 +47,16 @@ export function useOrdersController(options: { api?: OrdersApi; initialFilters?:
     }
   }, [api, filters]);
 
-  useEffect(() => { void reload(); }, [filtersKey, reload]);
+  useEffect(() => {
+    // AccountContext uses a sentinel while accounts are still loading or none is selected.
+    // Do not send that UI-only value to the scoped API and surface a misleading 403 state.
+    if (filters.accountId === '__no_active_account__') {
+      requestId.current += 1;
+      setState({ phase: 'idle', data: null, error: null });
+      return;
+    }
+    void reload();
+  }, [filters.accountId, filtersKey, reload]);
 
   const refreshFromXianyu = useCallback(async () => { await api.refresh(filters.accountId); await reload(); }, [api, filters.accountId, reload]);
   const openOrder = useCallback(async (orderNo: string) => {
@@ -68,4 +77,3 @@ export function useOrdersController(options: { api?: OrdersApi; initialFilters?:
 
   return { filters, setFilters, setKeyword, reload, refreshFromXianyu, openOrder, closeOrder, state, detail };
 }
-

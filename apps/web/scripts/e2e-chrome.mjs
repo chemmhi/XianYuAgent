@@ -175,7 +175,7 @@ async function run() {
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome Delete Secondary'), 'secondary account row');
   const hasOperationHeader = await evaluate(cdp, 'Array.from(document.querySelectorAll("[role=\\\"columnheader\\\"]")).some((node) => node.textContent?.trim() === "操作")');
   if (hasOperationHeader) throw new Error('account operation column is still rendered');
-  const hasOperationButtons = await evaluate(cdp, 'Boolean(document.querySelector("[data-testid=\\\"account-delete\\\"], [data-testid=\\\"account-switch\\\"]"))');
+  const hasOperationButtons = await evaluate(cdp, 'Boolean(document.querySelector("[data-testid=\\\"account-delete\\\"]"))');
   if (hasOperationButtons) throw new Error('account operation buttons are still rendered');
   await evaluate(cdp, '(() => { const input = document.querySelector(".accounts-domain-search input"); if (!input) throw new Error("account search input missing"); const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set; if (!setter) throw new Error("input setter missing"); setter.call(input, ' + JSON.stringify(secondaryAccount.displayName) + '); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); })()');
   await waitFor(async () => await evaluate(cdp, '(() => { const rows = Array.from(document.querySelectorAll("[role=\\\"row\\\"]")); return rows.some((row) => row.textContent?.includes(' + JSON.stringify(secondaryAccount.displayName) + ')) && !rows.some((row) => row.textContent?.includes(' + JSON.stringify(primaryAccount.displayName ?? '') + ')); })()'), 'account search result');

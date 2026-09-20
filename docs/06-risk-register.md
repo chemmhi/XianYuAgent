@@ -89,7 +89,7 @@
 | S5-RISK-014 | 商品 SKU/库存与发布命令的并发、幂等和部分成功语义尚未落到真实持久化 | P1 | 高 | 可能出现重复发布、库存覆盖或部分成功被误报为整体成功 | 后端 / QA 负责人 | PostgreSQL 并发集成、Idempotency/Outbox worker、逐项结果和 unknown 人工恢复均通过 | `S4-VS2B`、`S4-VS2D` | 开放 |
 | S5-RISK-015 | AssetRef 与 MinIO contract 尚未完成，上传失败、过期 URL、删除和重启恢复可能污染草稿 | P1 | 中 | 图片不可见、对象泄漏或草稿引用悬空 | 后端 / 运维负责人 | MinIO 持久化/重启复读、失败重试、403/过期、checksum/status 和回滚验证通过 | `S4-VS2C` | 开放，承接 R-005 |
 | S5-RISK-016 | CouponItem 批量操作、卡券素材和库存锁仍停留在后续契约，真实订单交付前没有原子 reserve/consume/release 证据 | P1 | 高 | 重复发券、库存负数、正文越权或失败无法恢复 | 后端 / 安全负责人 | PostgreSQL/Redis/MinIO 真实集成、并发锁、敏感字段裁剪和订单联调通过 | `S4-VS3A`、`S4-VS3B` | 开放，承接 S4-I003/R-009 |
-| S5-RISK-017 | 订单只读、交付预览和商品/卡券状态尚未拆成独立门禁，可能混用支付、交付、售后状态 | P1 | 中 | 预览误扣库存、退款订单重复交付或页面状态误导 | API / 前端负责人 | `OrderStatusMatrix` 四态独立、预览不写入、交付动作单独走 Confirmation/Outbox | `S4-VS4A`、`S4-VS4B` | 开放 |
+| S5-RISK-017 | 订单只读、交付预览和商品/卡券状态尚未拆成独立门禁，可能混用支付、交付、售后状态 | P1 | 中 | 预览误扣库存、退款订单重复交付或页面状态误导 | API / 前端负责人 | `OrderStatusMatrix` 四态独立、预览不写入、交付动作单独走 Confirmation/Outbox | `S4-VS4A`、`S4-VS4B` | 部分缓解：S4-VS4A 只读列表、四态、账号隔离和真实 PostgreSQL/Chrome/闲鱼只读已通过；交付预览与动作仍开放 |
 | S5-RISK-018 | 发货 unknown/timeout/cancel/retry 的恢复语义未在外部 adapter、worker 和 UI 中闭环 | P1 | 高 | 重试导致重复发货或人工无法判断最终结果 | 后端 / QA 负责人 | 外部状态查询、租约、人工 recover、DeliveryRecord 和审计在真实 E2E 中可复核 | `S4-VS4C` | 开放，承接 S4-I004/R-009 |
 | S5-RISK-019 | 迁移编号并行、已有 PostgreSQL volume、回滚与 Testcontainers 证据未形成发布级闭环 | P1 | 高 | 应用与 schema 漂移，无法安全回退或恢复 | 架构 / 运维负责人 | 迁移清单、apply/rollback、旧数据兼容、容器重启复读和恢复演练全部有证据 | `S4-ENV-RECOVERY` | BLOCKED，承接 R-001/S5-I001 |
 | S5-RISK-020 | Pi Runtime 的健康、超时、重试、取消、不可用与可观测性仍未真实运行验证 | P1 | 中 | Agent/Worker 异常可能卡死或无法恢复 | 架构 / 运维负责人 | Runtime 独立服务健康探针、超时/取消/重试和日志指标通过；不把页面 200 当作证据 | `S4-ENV-RUNTIME` | PLANNED，承接 R-006 |
@@ -116,3 +116,9 @@
 - `S5-RISK-021` 已部分缓解并保持开放：真实登录态回读确认了两个账号的会话列表、历史消息分页和消息去重（`19cf…`：3 会话 / 4 条历史；`6f0…`：1 会话 / 20 条历史且 `hasMore=true`；`duplicate_external_refs=0`），但独立复审和生产部署拓扑仍未确认。
 - 消息页已移除账号选择器，统一消费 `/accounts` 设置的 `AccountContext.currentAccountId`；Chrome/CDP 已断言无 tablist/账号选择器，桌面与移动截图显示“真实连接”和断线恢复状态。
 - 本轮未重复 Cookie 登录、未发送真实闲鱼消息；发送/附件/撤回的外部 unknown/timeout 与幂等风险继续由 `S5-RISK-022` 和 `S4-VS5B` 承接。
+
+### 2026-09-20 S4-VS4A 订单列表只读复核
+
+- `S5-RISK-017` 部分缓解：四套订单状态已在 `OrderVM`、PostgreSQL 约束、API 筛选和详情抽屉中独立维护；`npm --workspace apps/api run test:orders`、`npm --workspace apps/api run test:orders:postgres` 和 `npm run test:e2e:chrome:orders` 通过。交付预览、库存锁、发货动作、unknown/timeout/retry 仍未实现，不能关闭 `S4-VS4B/C` 风险。
+- 新增 `018_orders.sql` 使用单调编号并已在当前 PostgreSQL 实例执行；`S5-RISK-019` 仍开放，因为完整迁移回滚、旧数据兼容、Testcontainers 和发布级恢复演练尚未完成。
+- 实闲鱼只读请求返回 `SUCCESS::调用成功`，本次账号返回 0 条订单；空结果被原样保留，未使用 fixture 伪造真实外部订单。

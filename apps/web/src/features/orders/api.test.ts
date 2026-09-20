@@ -30,5 +30,16 @@ describe('orders api', () => {
     const search = await api.list({ keyword: '胡桃夹子', page: 1, pageSize: 20 });
     expect(search.items[0]?.orderNo).toBe('XY202609170061');
   });
-});
 
+  it('sends an idempotency key for Xianyu refresh mutations', async () => {
+    const calls: Array<{ path: string; body: unknown; init?: RequestInit }> = [];
+    const api = createOrdersApi({
+      get: async <T>() => ({ items: [] } as T),
+      post: async <T>(path: string, body?: unknown, init?: RequestInit) => { calls.push({ path, body, init }); return undefined as T; },
+    });
+    await api.refresh('ACCOUNT-A');
+    expect(calls[0]?.path).toBe('/api/v1/orders/refresh');
+    expect(calls[0]?.body).toEqual({ accountId: 'ACCOUNT-A' });
+    expect((calls[0]?.init?.headers as Record<string, string>)['Idempotency-Key']).toMatch(/^order-refresh-ACCOUNT-A-/);
+  });
+});

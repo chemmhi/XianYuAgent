@@ -36,7 +36,7 @@ export function AccountTable({ accounts, page, totalPages, onPageChange, current
                 aria-label={currentAccountId === account.id ? `${account.displayName} 当前账号` : `切换到${account.displayName}`}
                 onClick={() => onSelectAccount(account.id)}
                 disabled={currentAccountId === account.id || account.status === 'disabled' || account.enabled === false}
-              >{currentAccountId === account.id ? '当前账号' : '设为当前'}</button>}
+              >{currentAccountId === account.id ? '当前账号' : '切换账号'}</button>}
             </div>
             <span role="cell"><AccountStatusBadge status={account.status} /></span>
             <span role="cell"><AccountConnectionBadge status={account.connection.status} /></span>

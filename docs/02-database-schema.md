@@ -70,7 +70,7 @@
 
 | 表 | 关键列 | 主键与外键 | 唯一索引 / 普通索引 | 关键检查 |
 | --- | --- | --- | --- | --- |
-| `orders.orders` | `id uuid`；`account_id uuid`；`order_no text`；`product_id uuid`；`buyer_ref text null`；`payment_status text`；`order_status text`；`delivery_status text`；`after_sales_status text`；`paid_at null`；`cancelled_at null`；`closed_at null`；`refund_requested_at null` | PK；FK account/product | UQ `(account_id, order_no)`；IDX `(account_id, payment_status, delivery_status)` | 四套状态机独立维护；退款中禁止再次交付 |
+| `orders.orders` | `id uuid`；`order_no text`；`account_id uuid`；`account_name text null`；`buyer_id text`；`buyer_name text`；`item_id text`；`item_title text`；`amount_minor bigint`；`payment_status text`；`order_status text`；`delivery_status text`；`after_sales_status text`；`delivery_type text`；`created_at timestamptz`；`updated_at timestamptz`；`source text`；`config_version int` | PK；FK account；可选 FK product | UQ `(account_id, order_no)`；IDX `(account_id, created_at)`、状态组合、`order_no` | 四套状态独立维护；金额为最小单位；`source` 仅 `local|xianyu`；外部刷新按账号+订单号 upsert |
 | `orders.delivery_records` | `id uuid`；`order_id uuid`；`delivery_type text`；`status text`；`attempt int default 1`；`idempotency_scope text`；`coupon_item_id uuid null`；`tracking_ref text null`；`delivered_at null`；`failure_code null` | PK；FK order/coupon item | UQ partial `coupon_item_id` for successful coupon delivery；IDX `(order_id, attempt)` | `delivery_type in ('manual','no_logistics','coupon_only','mixed')` |
 
 ### 3.6 消息与工作区
@@ -114,6 +114,7 @@
 | `005_orders_messages` | orders、delivery_records、conversations、messages | 001/003/004 | 向前修复优先，禁止物理删除订单和消息 |
 | `006_workspace_execution` | agent_sessions、runs、steps、task_contexts、confirmations、idempotency_records、outbox_jobs | 001/005 | 停止新任务，等待租约过期后回退应用 |
 | `007_observability` | audit_events、trace_spans、health_snapshots、索引与约束加固 | 全部 | 审计/追踪表只追加，回滚只撤销非关键索引 |
+| `018_orders` | orders.orders 订单只读事实、四态约束、账号唯一键、列表索引 | 001_auth_accounts、003_catalog | 回退应用读取后保留订单表；禁止物理删除历史订单，交付表按后续独立迁移追加 |
 
 迁移采用 expand → backfill → verify → switch → contract；每次迁移必须可重复执行或具备可靠回滚说明。不可逆变更前必须完成数据库备份、读写验证和恢复演练。
 
