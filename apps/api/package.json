@@ -18,8 +18,7 @@
     "smoke": "npm run build && node scripts/smoke.mjs",
     "test:orders": "npm run build && node scripts/orders-smoke.mjs",
     "test:orders:postgres": "npm run build && node scripts/orders-postgres-smoke.mjs",
-    "test:postgres:credentials": "npm run build && node scripts/credential-store-postgres-smoke.mjs",
-    "test": "npm run build && node scripts/smoke.mjs && node scripts/credential-store-smoke.mjs && node scripts/messages-smoke.mjs && node scripts/onboarding-smoke.mjs && node scripts/workspace-smoke.mjs && node scripts/workspace-ws-smoke.mjs && node scripts/products-smoke.mjs && node scripts/products-sync-smoke.mjs && node scripts/xianyu-product-mapper-smoke.mjs && node scripts/xianyu-order-mapper-smoke.mjs && node scripts/xianyu-order-request-smoke.mjs && node scripts/orders-smoke.mjs && node scripts/pi-runtime-smoke.mjs"
+    "test": "npm run build && node scripts/smoke.mjs && node scripts/credential-store-smoke.mjs && node scripts/messages-smoke.mjs && node scripts/onboarding-smoke.mjs && node scripts/workspace-smoke.mjs && node scripts/workspace-ws-smoke.mjs && node scripts/products-smoke.mjs && node scripts/products-sync-smoke.mjs && node scripts/xianyu-product-mapper-smoke.mjs && node scripts/xianyu-order-mapper-smoke.mjs && node scripts/xianyu-cookie-jar-smoke.mjs && node scripts/xianyu-order-request-smoke.mjs && node scripts/orders-smoke.mjs && node scripts/pi-runtime-smoke.mjs"
   },
   "dependencies": {
     "ioredis": "^5.7.0",

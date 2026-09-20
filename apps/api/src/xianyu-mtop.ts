@@ -2,6 +2,17 @@ import crypto from 'node:crypto';
 import type { ProductSyncPageResult, XianyuOrderItem } from './domain.js';
 import { mapXianyuProductPage } from './xianyu-product-mapper.js';
 import { mapXianyuOrderPage, type XianyuOrderPageResult } from './xianyu-order-mapper.js';
+import {
+  applySetCookies,
+  cookieHeaderForSigning,
+  cookieHeaderForUrl,
+  cookieHeaderFromSnapshot,
+  cookieSnapshotFromMetadata,
+  metadataWithCookieSnapshot,
+  setCookieValues,
+  XIANYU_TOP_SITE,
+  type XianyuCookieSnapshot,
+} from './xianyu-cookie-jar.js';
 
 const APP_KEY = '34839810';
 export const XIANYU_IM_APP_KEY = '444e9908a51d1cb236a27862abc769c9';
@@ -10,7 +21,7 @@ const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 const SOLD_ORDERS_API = 'mtop.taobao.idle.trade.merchant.sold.get';
 const SOLD_ORDERS_REFERER = 'https://seller.goofish.com/?site=COMMONPRO#/seller-trade/order-manage';
 
-export interface MtopCredential { cookieHeader?: string; }
+export interface MtopCredential { cookieHeader?: string; metadata?: Record<string, string>; }
 
 export interface MtopResult {
   success: boolean;
@@ -38,7 +49,7 @@ export interface XianyuChatImageUploadResult {
 export interface XianyuMtopClientOptions {
   timeoutMs?: number;
   loadCredential: (adminId: string, accountId: string) => Promise<MtopCredential | undefined>;
-  saveCookie: (adminId: string, accountId: string, cookieHeader: string) => Promise<void>;
+  saveCookie: (adminId: string, accountId: string, cookieHeader: string, metadata?: Record<string, string>) => Promise<void>;
 }
 
 export class XianyuMtopClient {
@@ -196,14 +207,21 @@ export class XianyuMtopClient {
     const credential = await this.loadCredential(adminId, accountId);
     const initialCookieHeader = credential?.cookieHeader?.trim() ?? '';
     let cookieHeader = initialCookieHeader;
+    let cookieSnapshot: XianyuCookieSnapshot | undefined = cookieSnapshotFromMetadata(credential?.metadata);
+    const initialMetadata = credential?.metadata;
+    if (!cookieHeader && cookieSnapshot) cookieHeader = cookieHeaderFromSnapshot(cookieSnapshot);
     if (!cookieHeader) return { success: false, accountInvalid: true, errorCode: 'CREDENTIAL_MISSING', message: 'account credential is missing', cookieHeader };
     const dataValue = JSON.stringify(data);
     let lastError = 'MTOP_REQUEST_FAILED';
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const token = cookieValue(cookieHeader, '_m_h5_tk').split('_', 1)[0] ?? '';
+      const isSellerOrders = api === SOLD_ORDERS_API;
+      const documentUrl = isSellerOrders ? SOLD_ORDERS_REFERER : 'https://www.goofish.com/im';
+      const requestUrl = `${BASE_URL}/${api}/${version}/`;
+      const signingCookieHeader = cookieSnapshot ? cookieHeaderForSigning(cookieSnapshot, documentUrl, XIANYU_TOP_SITE) : cookieHeader;
+      const requestCookieHeader = cookieSnapshot ? cookieHeaderForUrl(cookieSnapshot, requestUrl, Date.now(), XIANYU_TOP_SITE) : cookieHeader;
+      const token = (cookieSnapshot ? cookieValue(signingCookieHeader, '_m_h5_tk') : cookieValue(cookieHeader, '_m_h5_tk')).split('_', 1)[0] ?? '';
       if (!token) return { success: false, accountInvalid: true, errorCode: 'MTOP_TOKEN_MISSING', message: 'credential does not contain _m_h5_tk', cookieHeader };
       const timestamp = String(Date.now());
-      const isSellerOrders = api === SOLD_ORDERS_API;
       const params = new URLSearchParams({
         jsv: '2.7.2', appKey: APP_KEY, t: timestamp, sign: md5(`${token}&${timestamp}&${APP_KEY}&${dataValue}`),
         v: version,
@@ -231,19 +249,25 @@ export class XianyuMtopClient {
           'sec-ch-ua-mobile': '?0',
           'sec-ch-ua-platform': '"Windows"',
           'user-agent': USER_AGENT,
-          cookie: cookieHeader,
+          cookie: requestCookieHeader,
         };
         if (isSellerOrders) requestHeaders.idle_site_biz_code = 'COMMONPRO';
-        const response = await fetch(`${BASE_URL}/${api}/${version}/?${params.toString()}`, {
+        const response = await fetch(`${requestUrl}?${params.toString()}`, {
           method: 'POST',
           headers: requestHeaders,
           body: new URLSearchParams({ data: dataValue }).toString(),
           signal: AbortSignal.timeout(this.timeoutMs),
         });
+        const setCookies = setCookieValues(response.headers);
+        if (cookieSnapshot) {
+          if (setCookies.length > 0) cookieSnapshot = applySetCookies(cookieSnapshot, requestUrl, setCookies, Date.now(), XIANYU_TOP_SITE);
+          cookieHeader = cookieHeaderFromSnapshot(cookieSnapshot);
+        } else if (setCookies.length > 0) {
+          cookieHeader = mergeCookies(cookieHeader, setCookies);
+        }
+        const nextMetadata = cookieSnapshot ? metadataWithCookieSnapshot(initialMetadata, cookieSnapshot) : initialMetadata;
+        if (cookieHeader !== initialCookieHeader || (cookieSnapshot && JSON.stringify(nextMetadata) !== JSON.stringify(initialMetadata))) await this.saveCookie(adminId, accountId, cookieHeader, nextMetadata);
         const payload = await response.json() as Record<string, unknown>;
-        const setCookies = getSetCookies(response.headers);
-        if (setCookies.length > 0) cookieHeader = mergeCookies(cookieHeader, setCookies);
-        if (cookieHeader !== initialCookieHeader) await this.saveCookie(adminId, accountId, cookieHeader);
         const ret = Array.isArray(payload.ret) ? payload.ret.map(String) : [];
         const retMessage = ret[0] ?? '';
         if (retMessage.includes('SUCCESS::')) return { success: true, accountInvalid: false, response: payload, cookieHeader };
