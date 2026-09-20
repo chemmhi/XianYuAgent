@@ -501,10 +501,24 @@
 }
 
 .messages-send-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-width: 70px;
   height: 32px;
   border-radius: 8px;
   background: var(--link);
+}
+
+.messages-send-icon {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.45;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .messages-send-button:hover:not(:disabled) {

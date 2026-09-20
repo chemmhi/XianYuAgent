@@ -182,7 +182,10 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
                     <span>按 Enter 发送 · Shift + Enter 换行</span>
                     <span className={controller.state.sendPhase === 'error' ? 'messages-send-error' : 'messages-send-status'} role={controller.state.sendPhase === 'error' ? 'alert' : undefined}>{controller.state.sendPhase === 'submitting' ? '正在发送…' : controller.state.sendPhase === 'sent' ? '已发送' : controller.state.sendError ?? ''}</span>
                   </div>
-                  <button className="messages-send-button" type="submit" disabled={!canSubmitComposer(draft, Boolean(pendingImage)) || controller.state.sendPhase === 'submitting'}>发送</button>
+                  <button className="messages-send-button" type="submit" disabled={!canSubmitComposer(draft, Boolean(pendingImage)) || controller.state.sendPhase === 'submitting'}>
+                    <svg className="messages-send-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 16 8-16 8 3.5-8L4 4Z" /><path d="M7.5 12H20" /></svg>
+                    <span>发送</span>
+                  </button>
                 </div>
               </div>
             </div>
