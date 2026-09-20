@@ -66,8 +66,12 @@ export class XianyuMtopClient {
   async fetchChatUserInfo(adminId: string, accountId: string, sessionId: string): Promise<{ success: boolean; accountInvalid: boolean; errorCode?: string; message?: string; buyerDisplayName?: string; buyerAvatarUrl?: string }> {
     const normalizedSessionId = sessionId.replace(/@goofish$/, '');
     const result = await this.call(adminId, accountId, 'mtop.taobao.idlemessage.pc.user.query', '4.0', { type: 0, sessionType: 1, sessionId: normalizedSessionId, isOwner: false });
-    const userInfo = recordAt(result.response, ['data', 'userInfo']);
-    return { success: result.success, accountInvalid: result.accountInvalid, errorCode: result.errorCode, message: result.message, buyerDisplayName: stringAt(userInfo, ['fishNick', 'nick', 'nickname']), buyerAvatarUrl: stringAt(userInfo, ['logo', 'avatar', 'avatarUrl']) };
+    const data = recordAt(result.response, ['data']);
+    // The web endpoint has returned both `userInfo` and `user` wrappers in
+    // different sessions. Keep the adapter tolerant so a valid identity does
+    // not disappear just because the envelope changed slightly.
+    const userInfo = record(data.userInfo ?? data.user ?? data.profile ?? result.response);
+    return { success: result.success, accountInvalid: result.accountInvalid, errorCode: result.errorCode, message: result.message, buyerDisplayName: stringAt(userInfo, ['fishNick', 'nick', 'nickname', 'userNick', 'displayName']), buyerAvatarUrl: stringAt(userInfo, ['logo', 'avatar', 'avatarUrl', 'headPic', 'userAvatar']) };
   }
 
   async uploadChatImage(adminId: string, accountId: string, filename: string, contentType: string, data: Buffer): Promise<XianyuChatImageUploadResult> {

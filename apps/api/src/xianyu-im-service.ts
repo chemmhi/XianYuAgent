@@ -25,7 +25,11 @@ export class XianyuImService {
       const page = await client.listConversations(cursor, limit);
       const items = Array.isArray(page.userConvs) ? page.userConvs : [];
       const parsedItems = items.map((item) => normalizeConversation(item, client.userId)).filter((item): item is NonNullable<ReturnType<typeof normalizeConversation>> => Boolean(item));
-      const enrichTargets = parsedItems.filter((item) => !item.buyerAvatarUrl).slice(0, 8);
+      // The conversation payload is not consistent across account/session
+      // types: some rows include the avatar but omit the nickname and others
+      // include neither. Enrich whenever either identity field is missing so
+      // the list does not silently fall back to a numeric buyer id.
+      const enrichTargets = parsedItems.filter((item) => !item.buyerAvatarUrl || !item.buyerDisplayName).slice(0, 8);
       const enrichedEntries = await Promise.all(enrichTargets.map(async (item) => [item.externalConversationRef, await this.enrichConversationIdentity(adminId, accountId, item)] as const));
       const enrichedByRef = new Map(enrichedEntries);
       for (const parsed of parsedItems) await this.store.upsertExternalConversation({ adminId, accountId, ...(enrichedByRef.get(parsed.externalConversationRef) ?? parsed) });
@@ -211,19 +215,55 @@ function normalizeConversation(value: unknown, myId: string): { externalConversa
   const externalConversationRef = strip(single.cid ?? conv.cid ?? wrapper.cid);
   const first = strip(single.pairFirst ?? conv.pairFirst);
   const second = strip(single.pairSecond ?? conv.pairSecond);
-  const extension = record(single.extension ?? conv.extension ?? wrapper.extension);
-  const buyerRef = first === myId ? second : second === myId ? first : strip(extension.extUserId ?? extension.peerUserId ?? first);
-  if (!externalConversationRef || !buyerRef || buyerRef === '0') return undefined;
+  const extension = mergeRecords(
+    record(single.extension),
+    parseJsonObject(record(single.extension).extJson),
+    record(conv.extension),
+    parseJsonObject(record(conv.extension).extJson),
+    record(wrapper.extension),
+    parseJsonObject(record(wrapper.extension).extJson),
+  );
   const last = record(record(conv.lastMessage).message ?? conv.lastMessage);
-  const lastExtension = record(last.extension);
+  const lastExtension = mergeRecords(record(last.extension), parseJsonObject(record(last.extension).extJson));
+  const reminderUrl = string(lastExtension.reminderUrl ?? extension.reminderUrl);
+  const buyerRef = first === myId
+      ? second
+      : second === myId
+        ? first
+      : strip(extension.extUserId ?? extension.peerUserId ?? (first || second)) || strip(parseQueryParam(reminderUrl, 'peerUserId'));
+  if (!externalConversationRef || !buyerRef || buyerRef === '0') return undefined;
   const content = decodeCustom(record(last.content).custom);
   const custom = record(record(last.content).custom);
   const preview = content.text ?? string(lastExtension.reminderContent ?? lastExtension.detailNotice ?? custom.summary);
-  const itemRef = string(extension.itemId ?? lastExtension.itemId ?? parseQueryParam(string(lastExtension.reminderUrl), 'itemId'));
-  const itemTitle = string(extension.itemTitle ?? lastExtension.itemTitle);
-  const buyerDisplayName = string(extension.peerNick ?? extension.buyerNick ?? extension.userNick ?? extension.nick);
-  const buyerAvatarUrl = string(extension.peerAvatar ?? extension.avatarUrl ?? extension.peerHeadPic ?? extension.headPic ?? lastExtension.peerAvatar ?? lastExtension.avatarUrl);
-  const itemImageUrl = string(extension.itemMainPic ?? extension.itemImage ?? extension.itemImageUrl ?? extension.mainPic ?? lastExtension.itemMainPic ?? lastExtension.itemImage ?? lastExtension.itemImageUrl);
+  const identitySources = [
+    extension,
+    lastExtension,
+    record(single.peer),
+    record(single.buyer),
+    record(single.user),
+    record(single.userInfo),
+    record(conv.peer),
+    record(conv.buyer),
+    record(conv.user),
+    record(conv.userInfo),
+    record(extension.peer),
+    record(extension.buyer),
+    record(extension.user),
+    record(extension.userInfo),
+    record(extension.peerInfo),
+    record(extension.targetUser),
+    record(lastExtension.peer),
+    record(lastExtension.buyer),
+    record(lastExtension.user),
+    record(lastExtension.userInfo),
+  ];
+  const itemRef = firstString(identitySources, ['itemId', 'itemID', 'itemRef']) ?? parseQueryParam(reminderUrl, 'itemId');
+  const itemTitle = firstString(identitySources, ['itemTitle', 'title', 'itemName']);
+  const buyerDisplayName = firstString(identitySources, ['peerNick', 'buyerNick', 'userNick', 'fishNick', 'nickname', 'nick', 'displayName', 'userName'])
+    ?? parseQueryParam(reminderUrl, 'peerUserNick')
+    ?? parseQueryParam(reminderUrl, 'buyerNick');
+  const buyerAvatarUrl = normalizeAssetUrl(firstString(identitySources, ['peerAvatar', 'buyerAvatar', 'avatarUrl', 'peerHeadPic', 'headPic', 'headPicUrl', 'logo', 'avatar', 'userAvatar', 'profilePic']));
+  const itemImageUrl = normalizeAssetUrl(firstString(identitySources, ['itemMainPic', 'itemImage', 'itemImageUrl', 'mainPic', 'itemPic', 'itemCover']));
   const timestamp = normalizeTimestamp(last.createAt ?? conv.modifyTime);
   return { externalConversationRef, buyerRef, buyerDisplayName, buyerAvatarUrl, itemRef, itemTitle, itemImageUrl, unreadCount: numberValue(conv.redPoint), lastMessagePreview: preview, lastMessageAt: timestamp };
 }
@@ -260,6 +300,25 @@ function decodeCustom(value: unknown): { text?: string; images: string[] } {
 
 function record(value: unknown): Record<string, any> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}; }
 function string(value: unknown): string | undefined { return typeof value === 'string' && value.trim() && value !== '<nil>' ? value.trim() : undefined; }
+function parseJsonObject(value: unknown): Record<string, any> {
+  if (typeof value !== 'string' || !value.trim()) return {};
+  try { return record(JSON.parse(value)); } catch { return {}; }
+}
+function mergeRecords(...values: Record<string, any>[]): Record<string, any> { return Object.assign({}, ...values); }
+function firstString(records: Record<string, any>[], keys: string[]): string | undefined {
+  for (const source of records) {
+    for (const key of keys) {
+      const value = string(source[key]);
+      if (value) return value;
+    }
+  }
+  return undefined;
+}
+function normalizeAssetUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  if (value.startsWith('//')) return `https:${value}`;
+  return value;
+}
 function strip(value: unknown): string { return String(value ?? '').replace(/@goofish$/, '').trim(); }
 function numberValue(value: unknown): number | undefined { const number = Number(value); return Number.isFinite(number) ? Math.max(0, Math.trunc(number)) : undefined; }
 function numeric(value: unknown): number | undefined { const number = Number(value); return Number.isSafeInteger(number) ? number : undefined; }

@@ -1,4 +1,31 @@
+import { useEffect, useState } from 'react';
 import type { ConversationVM } from '../types';
+
+export function conversationDisplayName(conversation: Pick<ConversationVM, 'buyerDisplayName' | 'buyerRef'>): string {
+  return conversation.buyerDisplayName?.trim() || conversation.buyerRef?.trim() || '未知买家';
+}
+
+export function conversationInitial(conversation: Pick<ConversationVM, 'buyerDisplayName' | 'buyerRef'>): string {
+  return conversationDisplayName(conversation).slice(0, 1).toUpperCase();
+}
+
+function ConversationAvatar({ conversation }: { conversation: ConversationVM }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const displayName = conversationDisplayName(conversation);
+  useEffect(() => setImageFailed(false), [conversation.buyerAvatarUrl]);
+  const avatarUrl = normalizeAvatarUrl(conversation.buyerAvatarUrl);
+  return <span className="messages-conversation-avatar" aria-hidden="true">
+    {avatarUrl && !imageFailed
+      ? <img src={avatarUrl} alt="" onError={() => setImageFailed(true)} />
+      : <span>{conversationInitial(conversation)}</span>}
+  </span>;
+}
+
+function normalizeAvatarUrl(value?: string): string | undefined {
+  const normalized = value?.trim();
+  if (!normalized) return undefined;
+  return normalized.startsWith('//') ? `https:${normalized}` : normalized;
+}
 
 export function ConversationList({ conversations, activeConversationId, onSelect, hasMore, loadingMore, onLoadMore }: {
   conversations: ConversationVM[];
@@ -11,11 +38,9 @@ export function ConversationList({ conversations, activeConversationId, onSelect
   return <div className="messages-conversation-scroll" aria-label="会话列表">
     <div className="messages-conversation-list">
       {conversations.map((conversation) => <button key={conversation.conversationId} type="button" data-conversation-id={conversation.conversationId} className={conversation.conversationId === activeConversationId ? 'active' : ''} onClick={() => onSelect(conversation.conversationId)}>
-        <span className="messages-conversation-avatar" aria-hidden="true">
-          {conversation.buyerAvatarUrl ? <img src={conversation.buyerAvatarUrl} alt="" /> : <span>{(conversation.buyerDisplayName || conversation.buyerRef).slice(0, 1)}</span>}
-        </span>
+        <ConversationAvatar conversation={conversation} />
         <span className="messages-conversation-copy">
-          <strong>{conversation.buyerDisplayName || conversation.buyerRef}</strong>
+          <strong>{conversationDisplayName(conversation)}</strong>
           <small>{conversation.lastMessagePreview || '暂无消息'}</small>
           <em>{conversation.itemTitle || '未关联商品'}</em>
         </span>
