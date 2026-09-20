@@ -75,9 +75,10 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
       onEvent: (event: RealtimeEvent) => {
         if (!socketGenerationRef.current!.isCurrent(generation)) return;
         if (event.accountId !== accountId || event.conversationId !== conversationId) return;
+        if (seenEventIdsRef.current.has(event.eventId)) return;
+        seenEventIdsRef.current = new Set(seenEventIdsRef.current).add(event.eventId);
         setState((previous) => {
-          const merged = applyRealtimeEvent({ conversations: previous.conversations, messages: previous.messages, cursor: previous.cursor, seenEventIds: seenEventIdsRef.current }, event);
-          seenEventIdsRef.current = merged.seenEventIds;
+          const merged = applyRealtimeEvent({ conversations: previous.conversations, messages: previous.messages, cursor: previous.cursor, seenEventIds: new Set<string>() }, event);
           cursorRef.current = merged.cursor;
           return { ...previous, conversations: merged.conversations, messages: merged.messages, cursor: merged.cursor, realtimePhase: event.type === 'chat.connection.changed' && event.payload.status === 'connected' ? 'connected' : previous.realtimePhase, error: null };
         });
