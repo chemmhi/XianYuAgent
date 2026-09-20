@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canSubmitComposer, insertXianyuEmojiMarker, MESSAGES_COMPOSER_PLACEHOLDER, removeXianyuEmojiMarkerAtCursor } from './composer';
+import { canSubmitComposer, insertXianyuEmojiMarker, MESSAGES_COMPOSER_PLACEHOLDER, moveXianyuEmojiCursor, removeXianyuEmojiMarkerAtCursor } from './composer';
 
 describe('message composer model', () => {
   it('keeps the requested placeholder and enables submit for text or attachments', () => {
@@ -18,5 +18,16 @@ describe('message composer model', () => {
     expect(removeXianyuEmojiMarkerAtCursor('你好[拒绝]世界', 6, 6, 'Backspace')).toEqual({ value: '你好世界', cursor: 2, handled: true });
     expect(removeXianyuEmojiMarkerAtCursor('你好[拒绝]世界', 2, 2, 'Delete')).toEqual({ value: '你好世界', cursor: 2, handled: true });
     expect(removeXianyuEmojiMarkerAtCursor('你好[拒绝]世界', 2, 6, 'Backspace')).toEqual({ value: '你好世界', cursor: 2, handled: true });
+    expect(removeXianyuEmojiMarkerAtCursor('你好[拒绝]世界', 4, 4, 'Backspace')).toEqual({ value: '你好世界', cursor: 2, handled: true });
+    expect(removeXianyuEmojiMarkerAtCursor('你好[拒绝]世界', 4, 4, 'Delete')).toEqual({ value: '你好世界', cursor: 2, handled: true });
+    expect(removeXianyuEmojiMarkerAtCursor('你好[拒绝]世界', 3, 5, 'Backspace')).toEqual({ value: '你好世界', cursor: 2, handled: true });
+  });
+
+  it('moves the caret across an emoji marker as one inline token', () => {
+    const draft = '你好[拒绝]世界';
+    expect(moveXianyuEmojiCursor(draft, 6, 'ArrowLeft')).toBe(2);
+    expect(moveXianyuEmojiCursor(draft, 2, 'ArrowRight')).toBe(6);
+    expect(moveXianyuEmojiCursor(draft, 4, 'ArrowLeft')).toBe(2);
+    expect(moveXianyuEmojiCursor(draft, 4, 'ArrowRight')).toBe(6);
   });
 });

@@ -19,21 +19,50 @@ export function removeXianyuEmojiMarkerAtCursor(
   key: 'Backspace' | 'Delete',
 ): { value: string; cursor: number; handled: boolean } {
   if (start !== end) {
-    const selected = draft.slice(start, end);
-    if (/^\[[^\[\]]+\]$/.test(selected)) {
-      return { value: `${draft.slice(0, start)}${draft.slice(end)}`, cursor: start, handled: true };
-    }
-    return { value: draft, cursor: start, handled: false };
+    const range = expandRangeAcrossEmojiMarkers(draft, start, end);
+    return { value: `${draft.slice(0, range.start)}${draft.slice(range.end)}`, cursor: range.start, handled: true };
   }
 
   if (key === 'Backspace') {
-    const match = draft.slice(0, start).match(/\[[^\[\]]+\]$/);
-    if (!match) return { value: draft, cursor: start, handled: false };
-    const markerStart = start - match[0].length;
-    return { value: `${draft.slice(0, markerStart)}${draft.slice(start)}`, cursor: markerStart, handled: true };
+    const marker = findEmojiMarkerRange(draft, start, 'backward');
+    if (!marker) return { value: draft, cursor: start, handled: false };
+    return { value: `${draft.slice(0, marker.start)}${draft.slice(marker.end)}`, cursor: marker.start, handled: true };
   }
 
-  const match = draft.slice(start).match(/^\[[^\[\]]+\]/);
-  if (!match) return { value: draft, cursor: start, handled: false };
-  return { value: `${draft.slice(0, start)}${draft.slice(start + match[0].length)}`, cursor: start, handled: true };
+  const marker = findEmojiMarkerRange(draft, start, 'forward');
+  if (!marker) return { value: draft, cursor: start, handled: false };
+  return { value: `${draft.slice(0, marker.start)}${draft.slice(marker.end)}`, cursor: marker.start, handled: true };
+}
+
+export function moveXianyuEmojiCursor(draft: string, cursor: number, key: 'ArrowLeft' | 'ArrowRight'): number {
+  const marker = findEmojiMarkerRange(draft, cursor, key === 'ArrowLeft' ? 'backward' : 'forward');
+  if (!marker) return cursor;
+  return key === 'ArrowLeft' ? marker.start : marker.end;
+}
+
+type EmojiMarkerRange = { start: number; end: number };
+
+function findEmojiMarkerRange(draft: string, cursor: number, direction: 'backward' | 'forward'): EmojiMarkerRange | undefined {
+  const markerPattern = /\[[^\[\]]+\]/g;
+  for (const match of draft.matchAll(markerPattern)) {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    const containsCursor = direction === 'backward' ? cursor > start && cursor <= end : cursor >= start && cursor < end;
+    if (containsCursor) return { start, end };
+  }
+  return undefined;
+}
+
+function expandRangeAcrossEmojiMarkers(draft: string, start: number, end: number): EmojiMarkerRange {
+  let expandedStart = start;
+  let expandedEnd = end;
+  for (const match of draft.matchAll(/\[[^\[\]]+\]/g)) {
+    const markerStart = match.index ?? 0;
+    const markerEnd = markerStart + match[0].length;
+    if (markerEnd > expandedStart && markerStart < expandedEnd) {
+      expandedStart = Math.min(expandedStart, markerStart);
+      expandedEnd = Math.max(expandedEnd, markerEnd);
+    }
+  }
+  return { start: expandedStart, end: expandedEnd };
 }
