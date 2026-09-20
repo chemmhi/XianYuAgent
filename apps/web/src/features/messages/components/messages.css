@@ -306,26 +306,15 @@
 }
 
 .messages-bubble-row {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  column-gap: 8px;
+  display: flex;
+  gap: 8px;
   align-items: start;
   margin-bottom: 12px;
 }
 
 .messages-bubble-row.outbound {
-  grid-template-columns: minmax(0, 1fr) 28px;
-  justify-items: end;
-}
-
-.messages-bubble-row.outbound .messages-message-stack {
-  grid-column: 1;
-  justify-self: end;
-}
-
-.messages-bubble-row.outbound .messages-message-avatar {
-  grid-column: 2;
-  justify-self: end;
+  justify-content: flex-start;
+  flex-direction: row-reverse;
 }
 
 .messages-system-row {

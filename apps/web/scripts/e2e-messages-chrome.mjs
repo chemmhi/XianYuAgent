@@ -186,7 +186,7 @@ async function run() {
 
   const chrome = spawnProcess(chromePath, [
     '--headless=new', '--disable-gpu', '--disable-extensions', '--no-first-run', '--no-default-browser-check', '--remote-allow-origins=*',
-    `--remote-debugging-port=${debugPort}`, `--user-data-dir=${chromeProfile}`, '--window-size=1440,900', 'about:blank',
+    `--remote-debugging-port=${debugPort}`, `--user-data-dir=${chromeProfile}`, '--window-size=1896,900', 'about:blank',
   ]);
   await waitFor(async () => chrome.exitCode === null && (await fetch(`http://127.0.0.1:${debugPort}/json/version`)).ok, 'local Chrome');
   const cdp = await createCdpClient(debugPort);
@@ -304,13 +304,13 @@ async function run() {
   await evaluate(cdp, 'document.querySelector(".messages-attachment-remove")?.click()');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-inline-attachment")) === false'), 'remove image attachment preview');
   assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-send-button")?.disabled)'), true, 'send button disabled after removing attachment');
-  await captureViewport(cdp, 1440, 900, 'messages-desktop-1440x900.png');
+  await captureViewport(cdp, 1896, 900, 'messages-desktop-1896x900.png');
 
   const offlineMethod = await disconnectBrowserRealtime(cdp);
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-connection-banner.reconnecting"))'), 'reconnecting banner');
   await waitFor(async () => await evaluate(cdp, 'Boolean(window.__xianyuTestSockets?.some((candidate) => candidate.__xianyuFake && candidate.readyState === 0 && String(candidate.__xianyuUrl ?? "").includes("/api/v1/conversations/") && String(candidate.__xianyuUrl ?? "").includes("/events")))'), 'blocked reconnect attempt');
   await assertText(cdp, '连接已断开，正在按游标补回消息');
-  await captureViewport(cdp, 1440, 900, 'messages-reconnecting-1440x900.png');
+  await captureViewport(cdp, 1896, 900, 'messages-reconnecting-1896x900.png');
 
   const recovered = await apiRuntime.messages.createMessage({
     adminId,

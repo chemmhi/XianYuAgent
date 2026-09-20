@@ -44,11 +44,11 @@ git diff --check
 
 ## Browser evidence
 
-- `screenshots/messages-desktop-1440x900.png`
-- `screenshots/messages-reconnecting-1440x900.png`
+- `screenshots/messages-desktop-1896x900.png`
+- `screenshots/messages-reconnecting-1896x900.png`
 - `screenshots/messages-mobile-390x844.png`
 
-The desktop screenshot captures the connected timeline with two sessions, avatars, item thumbnails, search, unread filter, and selected-session header; the reconnecting screenshot captures the visible disconnect banner; the mobile screenshot captures the responsive sidebar and independent conversation scroll at `390x844`. The mobile evidence is intentionally captured at the top of the page, so the timeline is below the first viewport; mobile interaction coverage is asserted by the Chrome/CDP flow rather than by a second screenshot.
+The desktop screenshot captures the connected timeline with two sessions, avatars, item thumbnails, search, unread filter, and selected-session header at `1896x900` to match the high-fidelity reference; the reconnecting screenshot captures the visible disconnect banner; the mobile screenshot captures the responsive sidebar and independent conversation scroll at `390x844`. The mobile evidence is intentionally captured at the top of the page, so the timeline is below the first viewport; mobile interaction coverage is asserted by the Chrome/CDP flow rather than by a second screenshot.
 
 ## Composer interaction evidence
 
