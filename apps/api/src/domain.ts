@@ -391,6 +391,65 @@ export interface AuditEventRecord {
   createdAt: string;
 }
 
+export type AgentSessionStatus = 'active' | 'archived';
+export type RunStatus = 'queued' | 'running' | 'waiting_confirmation' | 'executing' | 'retrying' | 'cancelling' | 'succeeded' | 'partially_succeeded' | 'failed' | 'cancelled' | 'expired';
+export type StepStatus = 'pending' | 'running' | 'waiting_confirmation' | 'executing' | 'retrying' | 'succeeded' | 'partially_succeeded' | 'failed' | 'skipped' | 'cancelled';
+export type StepKind = 'plan' | 'tool_call' | 'policy_check' | 'mutation' | 'observation';
+export type ExternalOutcome = 'known_success' | 'known_failure' | 'unknown';
+
+export interface AgentSessionRecord {
+  id: string;
+  accountId: string;
+  title: string;
+  status: AgentSessionStatus;
+  summary?: string;
+  lastActiveAt: string;
+  archivedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RunRecord {
+  id: string;
+  accountId: string;
+  sessionId: string;
+  route: string;
+  instruction: string;
+  status: RunStatus;
+  requestedBy: string;
+  clientRunRef?: string;
+  resultSummary?: string;
+  errorCode?: string;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+}
+
+export interface StepRecord {
+  id: string;
+  runId: string;
+  stepNo: number;
+  kind: StepKind;
+  label: string;
+  status: StepStatus;
+  attempt: number;
+  inputSummary?: string;
+  outputSummary?: string;
+  errorCode?: string;
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+}
+
+export interface RunEventRecord {
+  sequence: number;
+  runId: string;
+  eventType: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface Store {
   kind: 'memory' | 'postgres';
   health(): Promise<{ kind: string; reachable: boolean }>;
@@ -426,6 +485,17 @@ export interface Store {
   abortIdempotency(scope: string, key: string): Promise<void>;
   completeIdempotency(input: { scope: string; key: string; status: IdempotencyRecord['status']; responseEnvelope: unknown; statusCode: number; traceId: string }): Promise<void>;
   recordAudit(event: AuditEventRecord): Promise<void>;
+  listAgentSessions(adminId: string, query?: { accountId?: string; search?: string }): Promise<AgentSessionRecord[]>;
+  createAgentSession(input: { adminId: string; accountId: string; title: string; summary?: string }): Promise<AgentSessionRecord>;
+  getAgentSession(adminId: string, sessionId: string): Promise<AgentSessionRecord | undefined>;
+  archiveAgentSession(adminId: string, sessionId: string): Promise<AgentSessionRecord | undefined>;
+  createRun(input: { adminId: string; accountId: string; sessionId: string; instruction: string; clientRunRef?: string; route?: string }): Promise<{ run: RunRecord; steps: StepRecord[] }>;
+  findRunByClientRef(adminId: string, accountId: string, clientRunRef: string): Promise<{ run: RunRecord; steps: StepRecord[] } | undefined>;
+  getRun(adminId: string, runId: string): Promise<{ run: RunRecord; steps: StepRecord[] } | undefined>;
+  updateRun(runId: string, patch: { status?: RunStatus; resultSummary?: string; errorCode?: string; startedAt?: string; finishedAt?: string }): Promise<RunRecord | undefined>;
+  updateRunStep(stepId: string, patch: { status?: StepStatus; inputSummary?: string; outputSummary?: string; errorCode?: string; startedAt?: string; finishedAt?: string }): Promise<StepRecord | undefined>;
+  appendRunEvent(input: { runId: string; eventType: string; payload: Record<string, unknown> }): Promise<RunEventRecord>;
+  listRunEvents(adminId: string, runId: string, afterSequence?: number): Promise<RunEventRecord[]>;
   listProducts(adminId: string, query: ProductListQuery): Promise<ProductListResult>;
   getProduct(adminId: string, productId: string): Promise<ProductRecord | undefined>;
   createProduct(input: {

@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, SessionRecord, Store, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor } from './conversation-cursor.js';
 
@@ -334,6 +334,102 @@ export class PostgresStore implements Store {
   async abortIdempotency(scope: string, key: string): Promise<void> { await this.pool.query('delete from execution.idempotency_records where scope=$1 and key=$2 and status=\'processing\'', [scope, key]); }
   async completeIdempotency(input: { scope: string; key: string; status: IdempotencyRecord['status']; responseEnvelope: unknown; statusCode: number; traceId: string }): Promise<void> { await this.pool.query('update execution.idempotency_records set status=$3,response_envelope=$4,status_code=$5,trace_id=$6 where scope=$1 and key=$2', [input.scope, input.key, input.status, JSON.stringify(input.responseEnvelope), input.statusCode, input.traceId]); }
   async recordAudit(event: AuditEventRecord): Promise<void> { await this.pool.query('insert into observability.audit_events (id,actor_type,actor_id,action,target_ref,request_id,trace_id,payload_digest,account_id,reason) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [event.id, event.actorType, event.actorId ?? null, event.action, event.targetRef ?? null, event.requestId, event.traceId, event.payloadDigest, event.accountId ?? null, event.reason ?? null]); }
+
+  async listAgentSessions(adminId: string, query: { accountId?: string; search?: string } = {}): Promise<AgentSessionRecord[]> {
+    const params: unknown[] = [adminId];
+    const where = ['exists (select 1 from auth.account_scopes scope where scope.account_id=s.account_id and scope.admin_id=$1 and scope.status=\'active\' and (scope.expires_at is null or scope.expires_at>now()))'];
+    if (query.accountId) { params.push(query.accountId); where.push(`s.account_id=$${params.length}`); }
+    if (query.search?.trim()) { params.push(`%${query.search.trim()}%`); where.push(`(s.title ilike $${params.length} or coalesce(s.summary, '') ilike $${params.length})`); }
+    const result = await this.pool.query(`select s.* from workspace.agent_sessions s where ${where.join(' and ')} order by s.last_active_at desc`, params);
+    return result.rows.map((row) => this.toAgentSession(row));
+  }
+
+  async createAgentSession(input: { adminId: string; accountId: string; title: string; summary?: string }): Promise<AgentSessionRecord> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const result = await this.pool.query('insert into workspace.agent_sessions (id,account_id,title,summary) values ($1,$2,$3,$4) returning *', [createId(), input.accountId, input.title, input.summary ?? null]);
+    return this.toAgentSession(result.rows[0]);
+  }
+
+  async getAgentSession(adminId: string, sessionId: string): Promise<AgentSessionRecord | undefined> {
+    const result = await this.pool.query('select s.* from workspace.agent_sessions s where s.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=s.account_id and scope.admin_id=$2 and scope.status=\'active\' and (scope.expires_at is null or scope.expires_at>now()))', [sessionId, adminId]);
+    return result.rows[0] ? this.toAgentSession(result.rows[0]) : undefined;
+  }
+
+  async archiveAgentSession(adminId: string, sessionId: string): Promise<AgentSessionRecord | undefined> {
+    const result = await this.pool.query("update workspace.agent_sessions s set status='archived',archived_at=now(),updated_at=now() where s.id=$1 and s.status='active' and exists (select 1 from auth.account_scopes scope where scope.account_id=s.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now())) returning s.*", [sessionId, adminId]);
+    return result.rows[0] ? this.toAgentSession(result.rows[0]) : this.getAgentSession(adminId, sessionId).then((session) => session);
+  }
+
+  async createRun(input: { adminId: string; accountId: string; sessionId: string; instruction: string; clientRunRef?: string; route?: string }): Promise<{ run: RunRecord; steps: StepRecord[] }> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const session = await client.query('select * from workspace.agent_sessions where id=$1 and account_id=$2 for update', [input.sessionId, input.accountId]);
+      if (!session.rows[0]) throw new Error('SESSION_NOT_FOUND');
+      if (session.rows[0].status !== 'active') throw new Error('SESSION_ARCHIVED');
+      if (input.clientRunRef) {
+        const existing = await client.query('select * from workspace.runs where account_id=$1 and client_run_ref=$2 limit 1', [input.accountId, input.clientRunRef]);
+        if (existing.rows[0]) {
+          const steps = await client.query('select * from workspace.steps where run_id=$1 order by step_no,attempt', [existing.rows[0].id]);
+          await client.query('commit');
+          return { run: this.toRun(existing.rows[0]), steps: steps.rows.map((row) => this.toStep(row)) };
+        }
+      }
+      const runId = createId();
+      const stepId = createId();
+      const now = new Date().toISOString();
+      await client.query('insert into workspace.runs (id,account_id,session_id,route,instruction,status,requested_by,client_run_ref) values ($1,$2,$3,$4,$5,\'queued\',$6,$7)', [runId, input.accountId, input.sessionId, input.route ?? 'workspace', input.instruction, input.adminId, input.clientRunRef ?? null]);
+      await client.query('insert into workspace.steps (id,run_id,step_no,kind,label,status,attempt,input_summary) values ($1,$2,1,\'plan\',$3,\'pending\',1,$4)', [stepId, runId, '解析指令并准备执行上下文', input.instruction.slice(0, 200)]);
+      await client.query('insert into workspace.task_contexts (id,run_id,context_json,redacted_summary) values ($1,$2,$3::jsonb,$4)', [createId(), runId, JSON.stringify({ instruction: input.instruction.slice(0, 200) }), '受控工作区上下文']);
+      await client.query('update workspace.agent_sessions set last_active_at=now(),updated_at=now() where id=$1', [input.sessionId]);
+      const runResult = await client.query('select * from workspace.runs where id=$1', [runId]);
+      const stepResult = await client.query('select * from workspace.steps where id=$1', [stepId]);
+      await client.query('commit');
+      return { run: this.toRun(runResult.rows[0]), steps: stepResult.rows.map((row) => this.toStep(row)) };
+    } catch (error) {
+      await client.query('rollback');
+      if ((error as { code?: string }).code === '23505' && input.clientRunRef) {
+        const existing = await this.findRunByClientRef(input.adminId, input.accountId, input.clientRunRef);
+        if (existing) return existing;
+      }
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async findRunByClientRef(adminId: string, accountId: string, clientRunRef: string): Promise<{ run: RunRecord; steps: StepRecord[] } | undefined> {
+    const result = await this.pool.query('select r.* from workspace.runs r where r.account_id=$1 and r.client_run_ref=$2 and exists (select 1 from auth.account_scopes scope where scope.account_id=r.account_id and scope.admin_id=$3 and scope.status=\'active\' and (scope.expires_at is null or scope.expires_at>now())) limit 1', [accountId, clientRunRef, adminId]);
+    if (!result.rows[0]) return undefined;
+    const steps = await this.pool.query('select * from workspace.steps where run_id=$1 order by step_no,attempt', [result.rows[0].id]);
+    return { run: this.toRun(result.rows[0]), steps: steps.rows.map((row) => this.toStep(row)) };
+  }
+
+  async getRun(adminId: string, runId: string): Promise<{ run: RunRecord; steps: StepRecord[] } | undefined> {
+    const result = await this.pool.query('select r.* from workspace.runs r where r.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=r.account_id and scope.admin_id=$2 and scope.status=\'active\' and (scope.expires_at is null or scope.expires_at>now()))', [runId, adminId]);
+    if (!result.rows[0]) return undefined;
+    const steps = await this.pool.query('select * from workspace.steps where run_id=$1 order by step_no,attempt', [runId]);
+    return { run: this.toRun(result.rows[0]), steps: steps.rows.map((row) => this.toStep(row)) };
+  }
+
+  async updateRun(runId: string, patch: { status?: RunStatus; resultSummary?: string; errorCode?: string; startedAt?: string; finishedAt?: string }): Promise<RunRecord | undefined> {
+    const result = await this.pool.query('update workspace.runs set status=coalesce($2,status),result_summary=coalesce($3,result_summary),error_code=coalesce($4,error_code),started_at=coalesce($5,started_at),finished_at=coalesce($6,finished_at),updated_at=now() where id=$1 returning *', [runId, patch.status ?? null, patch.resultSummary ?? null, patch.errorCode ?? null, patch.startedAt ?? null, patch.finishedAt ?? null]);
+    return result.rows[0] ? this.toRun(result.rows[0]) : undefined;
+  }
+
+  async updateRunStep(stepId: string, patch: { status?: StepStatus; inputSummary?: string; outputSummary?: string; errorCode?: string; startedAt?: string; finishedAt?: string }): Promise<StepRecord | undefined> {
+    const result = await this.pool.query('update workspace.steps set status=coalesce($2,status),input_summary=coalesce($3,input_summary),output_summary=coalesce($4,output_summary),error_code=coalesce($5,error_code),started_at=coalesce($6,started_at),finished_at=coalesce($7,finished_at) where id=$1 returning *', [stepId, patch.status ?? null, patch.inputSummary ?? null, patch.outputSummary ?? null, patch.errorCode ?? null, patch.startedAt ?? null, patch.finishedAt ?? null]);
+    return result.rows[0] ? this.toStep(result.rows[0]) : undefined;
+  }
+
+  async appendRunEvent(input: { runId: string; eventType: string; payload: Record<string, unknown> }): Promise<RunEventRecord> {
+    const result = await this.pool.query('insert into workspace.run_events (run_id,event_type,payload_json) values ($1,$2,$3::jsonb) returning *', [input.runId, input.eventType, JSON.stringify(input.payload)]);
+    return this.toRunEvent(result.rows[0]);
+  }
+
+  async listRunEvents(adminId: string, runId: string, afterSequence = 0): Promise<RunEventRecord[]> {
+    const result = await this.pool.query('select e.* from workspace.run_events e join workspace.runs r on r.id=e.run_id where e.run_id=$1 and e.sequence>$2 and exists (select 1 from auth.account_scopes scope where scope.account_id=r.account_id and scope.admin_id=$3 and scope.status=\'active\' and (scope.expires_at is null or scope.expires_at>now())) order by e.sequence asc', [runId, afterSequence, adminId]);
+    return result.rows.map((row) => this.toRunEvent(row));
+  }
   async close(): Promise<void> { await this.pool.end(); }
 
   private toCouponBatch(row: Row): CouponBatchRecord {
@@ -359,6 +455,10 @@ export class PostgresStore implements Store {
   private toProductSku(row: Row): ProductSkuRecord { return { id: String(row.id), productId: String(row.product_id), skuCode: String(row.sku_code), externalSkuRef: row.external_sku_ref ? String(row.external_sku_ref) : undefined, priceMinor: Number(row.price_minor), status: row.status as ProductSkuRecord['status'] }; }
   private toProductAsset(row: Row): ProductAssetRecord { return { id: String(row.id), productId: String(row.product_id), storageKey: String(row.storage_key), mimeType: String(row.mime_type), checksum: row.checksum ? String(row.checksum) : undefined, status: row.status as ProductAssetRecord['status'] }; }
   private toIdempotency(row: Row): IdempotencyRecord { return { scope: String(row.scope), key: String(row.key), requestFingerprint: String(row.request_fingerprint), status: row.status as IdempotencyRecord['status'], responseEnvelope: row.response_envelope, statusCode: row.status_code ? Number(row.status_code) : undefined, traceId: row.trace_id ? String(row.trace_id) : undefined, expiresAt: new Date(String(row.expires_at)).toISOString() }; }
+  private toAgentSession(row: Row): AgentSessionRecord { return { id: String(row.id), accountId: String(row.account_id), title: String(row.title), status: row.status as AgentSessionRecord['status'], summary: row.summary ? String(row.summary) : undefined, lastActiveAt: new Date(String(row.last_active_at)).toISOString(), archivedAt: iso(row.archived_at), createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString() }; }
+  private toRun(row: Row): RunRecord { return { id: String(row.id), accountId: String(row.account_id), sessionId: String(row.session_id), route: String(row.route), instruction: String(row.instruction), status: row.status as RunRecord['status'], requestedBy: String(row.requested_by), clientRunRef: row.client_run_ref ? String(row.client_run_ref) : undefined, resultSummary: row.result_summary ? String(row.result_summary) : undefined, errorCode: row.error_code ? String(row.error_code) : undefined, createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString(), startedAt: iso(row.started_at), finishedAt: iso(row.finished_at) }; }
+  private toStep(row: Row): StepRecord { return { id: String(row.id), runId: String(row.run_id), stepNo: Number(row.step_no), kind: row.kind as StepRecord['kind'], label: String(row.label), status: row.status as StepRecord['status'], attempt: Number(row.attempt ?? 1), inputSummary: row.input_summary ? String(row.input_summary) : undefined, outputSummary: row.output_summary ? String(row.output_summary) : undefined, errorCode: row.error_code ? String(row.error_code) : undefined, createdAt: new Date(String(row.created_at)).toISOString(), startedAt: iso(row.started_at), finishedAt: iso(row.finished_at) }; }
+  private toRunEvent(row: Row): RunEventRecord { const payload = row.payload_json && typeof row.payload_json === 'object' && !Array.isArray(row.payload_json) ? row.payload_json as Record<string, unknown> : {}; return { sequence: Number(row.sequence), runId: String(row.run_id), eventType: String(row.event_type), payload: { ...payload }, createdAt: new Date(String(row.created_at)).toISOString() }; }
   private normalizeLoginSession(row?: Row): LoginSessionRecord | undefined { if (!row) return undefined; if (row.status === 'waiting' && row.expires_at && new Date(String(row.expires_at)).getTime() <= Date.now()) { void this.pool.query('update auth.account_login_sessions set status=\'expired\', completed_at=now() where id=$1 and status=\'waiting\'', [row.id]); row.status = 'expired'; } return this.toLoginSession(row); }
   private toLoginSession(row: Row): LoginSessionRecord { return { id: String(row.id), adminId: row.admin_id ? String(row.admin_id) : undefined, accountId: row.account_id ? String(row.account_id) : undefined, provisionalAccountRef: row.provisional_account_ref ? String(row.provisional_account_ref) : undefined, loginMethod: String(row.login_method), status: row.status as LoginSessionRecord['status'], startedAt: new Date(String(row.started_at)).toISOString(), expiresAt: new Date(String(row.expires_at)).toISOString(), completedAt: iso(row.completed_at), failureCode: row.failure_code ? String(row.failure_code) : undefined, qrTokenRef: row.qr_token_ref ? String(row.qr_token_ref) : undefined }; }
   private toCredential(row: Row): CredentialRecord {

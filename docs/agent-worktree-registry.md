@@ -23,7 +23,7 @@
 
 | agent_id | slice_id | branch | worktree | owner | created_at | status | merge_commit | cleaned_at | notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| - | - | - | - | - | - | - | - | - | 当前没有活动 agent worktree；主工作区 `master` 受保护 |
+| `root` | `s4-vs6a-workspace` | `feature/s4-vs6a-workspace` | `F:\ChenHai\Project\XianYuAgent-s4-vs6a-workspace` | Codex `/root` | `2026-09-19 04:19:53 +08:00` | `READY_FOR_MERGE` | `-` | `-` | Workspace AgentSession/Run/Step 首链路、真实 PostgreSQL/Chrome/CDP/WS 复核已完成；当前结论 `PARTIALLY_VERIFIED`，Confirmation/Outbox、独立 Worker/Pi Runtime、发布级恢复和人工视觉签核留在后续门禁 |
 
 ## 主工作区
 

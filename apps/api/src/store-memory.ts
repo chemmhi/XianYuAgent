@@ -1,6 +1,7 @@
 import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor, isAfterConversationCursor } from './conversation-cursor.js';
+import type { AgentSessionRecord, RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus } from './domain.js';
 
 export class MemoryStore implements Store {
   readonly kind = 'memory' as const;
@@ -19,6 +20,11 @@ export class MemoryStore implements Store {
   private readonly conversationCursors = new Map<string, number>();
   private readonly scopes = new Map<string, AccountScopeRecord>();
   private readonly idempotency = new Map<string, IdempotencyRecord>();
+  private readonly agentSessions = new Map<string, AgentSessionRecord>();
+  private readonly runs = new Map<string, RunRecord>();
+  private readonly steps = new Map<string, StepRecord>();
+  private readonly runEvents = new Map<string, RunEventRecord[]>();
+  private runEventSequence = 0;
   readonly audits: AuditEventRecord[] = [];
 
   async health(): Promise<{ kind: string; reachable: boolean }> { return { kind: this.kind, reachable: true }; }
@@ -410,6 +416,102 @@ export class MemoryStore implements Store {
   async abortIdempotency(scope: string, key: string): Promise<void> { this.idempotency.delete(`${scope}:${key}`); }
   async completeIdempotency(input: { scope: string; key: string; status: IdempotencyRecord['status']; responseEnvelope: unknown; statusCode: number; traceId: string }): Promise<void> { const row = this.idempotency.get(`${input.scope}:${input.key}`); if (row) Object.assign(row, input); }
   async recordAudit(event: AuditEventRecord): Promise<void> { this.audits.push(event); }
+
+  async listAgentSessions(adminId: string, query: { accountId?: string; search?: string } = {}): Promise<AgentSessionRecord[]> {
+    const scopedAccountIds = new Set((await this.listScopes(adminId)).map((scope) => scope.accountId));
+    const needle = query.search?.trim().toLowerCase();
+    return [...this.agentSessions.values()]
+      .filter((session) => scopedAccountIds.has(session.accountId))
+      .filter((session) => !query.accountId || session.accountId === query.accountId)
+      .filter((session) => !needle || `${session.title} ${session.summary ?? ''}`.toLowerCase().includes(needle))
+      .sort((left, right) => Date.parse(right.lastActiveAt) - Date.parse(left.lastActiveAt))
+      .map((session) => ({ ...session }));
+  }
+
+  async createAgentSession(input: { adminId: string; accountId: string; title: string; summary?: string }): Promise<AgentSessionRecord> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const now = new Date().toISOString();
+    const session: AgentSessionRecord = { id: createId(), accountId: input.accountId, title: input.title, status: 'active', summary: input.summary, lastActiveAt: now, createdAt: now, updatedAt: now };
+    this.agentSessions.set(session.id, session);
+    return { ...session };
+  }
+
+  async getAgentSession(adminId: string, sessionId: string): Promise<AgentSessionRecord | undefined> {
+    const session = this.agentSessions.get(sessionId);
+    if (!session || !(await this.hasAccountScope(adminId, session.accountId))) return undefined;
+    return { ...session };
+  }
+
+  async archiveAgentSession(adminId: string, sessionId: string): Promise<AgentSessionRecord | undefined> {
+    const session = this.agentSessions.get(sessionId);
+    if (!session || !(await this.hasAccountScope(adminId, session.accountId))) return undefined;
+    const now = new Date().toISOString();
+    session.status = 'archived';
+    session.archivedAt = now;
+    session.updatedAt = now;
+    return { ...session };
+  }
+
+  async createRun(input: { adminId: string; accountId: string; sessionId: string; instruction: string; clientRunRef?: string; route?: string }): Promise<{ run: RunRecord; steps: StepRecord[] }> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const session = this.agentSessions.get(input.sessionId);
+    if (!session || session.accountId !== input.accountId) throw new Error('SESSION_NOT_FOUND');
+    if (session.status !== 'active') throw new Error('SESSION_ARCHIVED');
+    if (input.clientRunRef) {
+      const existing = await this.findRunByClientRef(input.adminId, input.accountId, input.clientRunRef);
+      if (existing) return existing;
+    }
+    const now = new Date().toISOString();
+    const run: RunRecord = { id: createId(), accountId: input.accountId, sessionId: input.sessionId, route: input.route ?? 'workspace', instruction: input.instruction, status: 'queued', requestedBy: input.adminId, clientRunRef: input.clientRunRef, createdAt: now, updatedAt: now };
+    const step: StepRecord = { id: createId(), runId: run.id, stepNo: 1, kind: 'plan', label: '解析指令并准备执行上下文', status: 'pending', attempt: 1, inputSummary: input.instruction.slice(0, 200), createdAt: now };
+    this.runs.set(run.id, run);
+    this.steps.set(step.id, step);
+    this.runEvents.set(run.id, []);
+    session.lastActiveAt = now;
+    session.updatedAt = now;
+    return { run: { ...run }, steps: [{ ...step }] };
+  }
+
+  async findRunByClientRef(adminId: string, accountId: string, clientRunRef: string): Promise<{ run: RunRecord; steps: StepRecord[] } | undefined> {
+    if (!(await this.hasAccountScope(adminId, accountId))) return undefined;
+    const run = [...this.runs.values()].find((candidate) => candidate.accountId === accountId && candidate.clientRunRef === clientRunRef);
+    if (!run) return undefined;
+    return { run: { ...run }, steps: [...this.steps.values()].filter((step) => step.runId === run.id).sort((left, right) => left.stepNo - right.stepNo || left.attempt - right.attempt).map((step) => ({ ...step })) };
+  }
+
+  async getRun(adminId: string, runId: string): Promise<{ run: RunRecord; steps: StepRecord[] } | undefined> {
+    const run = this.runs.get(runId);
+    if (!run || !(await this.hasAccountScope(adminId, run.accountId))) return undefined;
+    return { run: { ...run }, steps: [...this.steps.values()].filter((step) => step.runId === run.id).sort((left, right) => left.stepNo - right.stepNo || left.attempt - right.attempt).map((step) => ({ ...step })) };
+  }
+
+  async updateRun(runId: string, patch: { status?: RunStatus; resultSummary?: string; errorCode?: string; startedAt?: string; finishedAt?: string }): Promise<RunRecord | undefined> {
+    const run = this.runs.get(runId);
+    if (!run) return undefined;
+    Object.assign(run, patch, { updatedAt: new Date().toISOString() });
+    return { ...run };
+  }
+
+  async updateRunStep(stepId: string, patch: { status?: StepStatus; inputSummary?: string; outputSummary?: string; errorCode?: string; startedAt?: string; finishedAt?: string }): Promise<StepRecord | undefined> {
+    const step = this.steps.get(stepId);
+    if (!step) return undefined;
+    Object.assign(step, patch);
+    return { ...step };
+  }
+
+  async appendRunEvent(input: { runId: string; eventType: string; payload: Record<string, unknown> }): Promise<RunEventRecord> {
+    const event: RunEventRecord = { sequence: ++this.runEventSequence, runId: input.runId, eventType: input.eventType, payload: { ...input.payload }, createdAt: new Date().toISOString() };
+    const events = this.runEvents.get(input.runId) ?? [];
+    events.push(event);
+    this.runEvents.set(input.runId, events);
+    return { ...event, payload: { ...event.payload } };
+  }
+
+  async listRunEvents(adminId: string, runId: string, afterSequence = 0): Promise<RunEventRecord[]> {
+    const run = this.runs.get(runId);
+    if (!run || !(await this.hasAccountScope(adminId, run.accountId))) return [];
+    return (this.runEvents.get(runId) ?? []).filter((event) => event.sequence > afterSequence).map((event) => ({ ...event, payload: { ...event.payload } }));
+  }
 
   private productSummary(product: ProductRecord): ProductRecord {
     return { ...product, attributes: { ...product.attributes }, skuCount: product.skus?.filter((sku) => sku.status !== 'archived').length ?? product.skuCount ?? 0, assetCount: product.assets?.filter((asset) => asset.status !== 'archived').length ?? product.assetCount ?? 0, skus: undefined, assets: undefined };

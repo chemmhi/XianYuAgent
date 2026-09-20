@@ -1,7 +1,7 @@
 # XianyuSellerAgent 风险登记册
 
 - 文档版本：v0.2
-- 更新日期：2026-09-19
+- 更新日期：2026-09-20
 - 当前阶段：阶段 5——优先推进 S4-VS5 在线聊天、S4-VS6 Workspace、S4-VS7A Settings API Key
 - 风险状态：开放风险已登记；当前无 P0
 - 阶段门禁规则：阶段 5 允许受控 adapter、内存 store 和本机 Chrome/CDP 先形成证据，但不得把受控验证冒充真实闲鱼 APP 扫码、外部 Cookie 验证或 PostgreSQL/Redis 持久化；未关闭的 P1 外部登录和容器门禁不得扩展到商品、卡券、订单写入。
@@ -99,3 +99,14 @@
 | S5-RISK-024 | Workspace Run/Step/Confirmation/Outbox 状态可能被页面或 Runtime 直接改写 | P1 | 高 | 高风险动作不可审计、重复执行或无法人工恢复 | Workspace / 执行负责人 | 独立 controller、状态机、Policy→Confirmation→Outbox、worker lease 和 recover E2E | `S4-VS6A`、`S4-VS6B` | 开放，承接 R-006/R-009 |
 | S5-RISK-025 | Workspace 实时事件、unknown、cancel、retry 尚未在真实 Runtime 中形成可恢复证据 | P1 | 中 | Run 卡死、误重试或外部结果未知时无法判断最终状态 | Runtime / QA 负责人 | 真实 Worker/Runtime、超时/取消/重试、事件游标、人工恢复和日志指标通过 | `S4-VS6A`、`S4-VS6B` | 开放，承接 R-006 |
 | S5-RISK-026 | Settings API Key 配置若复用通用设置保存入口，可能泄露明文或覆盖其他凭证 | P1 | 高 | 凭证泄露、轮换失败覆盖旧密钥或跨域读取 | 安全 / 凭证负责人 | CredentialStore 唯一 owner、加密复读、脱敏 UI、轮换/启停/撤销审计和 403/409 E2E | `S4-VS7A` | 开放，承接 R-004/S3-I004 |
+
+### 2026-09-19 S4-VS6A 风险复核
+
+- `S5-RISK-024`：受控首链路已降低“页面直接改写 Run/Step 状态”的风险；服务端状态迁移、脱敏 ViewModel、controller cursor 去重和 API/WS smoke 已落地，但独立 Worker lease、Confirmation/Outbox 与真实 Runtime 仍未完成，风险保持开放。
+- `S5-RISK-025`：MemoryStore + 受控 Runtime 已证明事件追加、cursor replay、`after=NaN` 防护和基础权限门禁；真实 Runtime 的 unknown/timeout/cancel/retry、断线人工复核和生产级观测仍缺失，风险保持开放。
+
+### 2026-09-20 S4-VS6A 证据复核
+
+- `S5-RISK-024` 与 `S5-RISK-025` 继续保持开放；本轮已确认 Workspace 专项 build、API 全量 smoke、HTTP/WS smoke、真实 PostgreSQL/Chrome/CDP 首链路、Web typecheck/test/build 和 diff hygiene，但不提前关闭独立 Worker/Pi Runtime、发布级恢复、Confirmation/Outbox 或人工视觉签核门禁。
+- 端口占用属于已清理的验证环境问题；清理残留 `dist/index.js` 进程后，`npm --workspace apps/api run test` 完整通过，未留下业务数据（真实验证临时数据已事务化清理）。
+- 当前切片复核状态为 `READY_FOR_REVIEW`；后续仅需补齐独立 Runtime、发布级恢复、人工视觉签核与 `S4-VS6B` 业务门禁，不把已完成的真实 PostgreSQL/浏览器证据重复列为未执行。
