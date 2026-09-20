@@ -245,9 +245,13 @@ export class XianyuQrLoginAdapter {
 
   private async completeConfirmedLogin(session: InternalSession): Promise<void> {
     if (!this.isCurrent(session)) return;
-    const response = await this.request(QR_VERIFY_TARGET, { method: 'GET', headers: { ...documentHeaders(), cookie: cookieHeader(session.jar, QR_VERIFY_TARGET) } });
-    absorbSetCookies(session.jar, QR_VERIFY_TARGET, response.headers);
-    const unb = cookieValue(session.jar, 'unb', QR_VERIFY_TARGET);
+    const response = await this.fetchWithCookieRedirect(session, QR_VERIFY_TARGET, documentHeaders());
+    const finalUrl = response.url || QR_VERIFY_TARGET;
+    absorbSetCookies(session.jar, finalUrl, response.headers);
+    await response.arrayBuffer();
+    const unb = cookieValue(session.jar, 'unb', finalUrl)
+      || cookieValue(session.jar, 'unb', QR_VERIFY_TARGET)
+      || cookieValue(session.jar, 'unb');
     if (!unb) throw new Error('QR_CONFIRMED_WITHOUT_UNB');
     try {
       if (!this.isCurrent(session)) return;
@@ -268,6 +272,24 @@ export class XianyuQrLoginAdapter {
     return this.sessions.get(session.sessionId) === session;
   }
 
+  private async fetchWithCookieRedirect(session: InternalSession, initialUrl: string, headers: Record<string, string>): Promise<Response> {
+    let currentUrl = initialUrl;
+    const requestHeaders = { ...headers };
+    for (let redirectCount = 0; redirectCount <= 10; redirectCount += 1) {
+      if (!this.isCurrent(session)) throw new Error('QR_SESSION_REPLACED');
+      requestHeaders.cookie = cookieHeader(session.jar, currentUrl);
+      const response = await this.request(currentUrl, { method: 'GET', headers: requestHeaders, redirect: 'manual' });
+      absorbSetCookies(session.jar, currentUrl, response.headers);
+      if (response.status < 300 || response.status >= 400) return response;
+      const location = response.headers.get('location');
+      await response.arrayBuffer();
+      if (!location) throw new Error('QR_REDIRECT_LOCATION_MISSING');
+      requestHeaders.referer = currentUrl;
+      currentUrl = new URL(location, currentUrl).toString();
+    }
+    throw new Error('QR_REDIRECT_LIMIT');
+  }
+
   private toPublic(session: InternalSession): XianyuQrPublicSession {
     return { sessionId: session.sessionId, accountId: session.accountId, status: session.status, qrImageDataUrl: session.qrImageDataUrl, expiresAt: new Date(session.expiresAt).toISOString(), pollAfterMs: this.pollIntervalMs, errorCode: session.errorCode, verificationUrl: session.verificationUrl };
   }
@@ -280,7 +302,7 @@ export class XianyuQrLoginAdapter {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const response = await fetch(url, { ...init, redirect: 'follow', signal: controller.signal });
+      const response = await fetch(url, { ...init, redirect: init.redirect ?? 'follow', signal: controller.signal });
       if (!response.ok && response.status >= 500) throw new Error(`HTTP_${response.status}`);
       return response;
     } finally { clearTimeout(timeout); }

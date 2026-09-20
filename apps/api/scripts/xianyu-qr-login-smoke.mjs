@@ -50,6 +50,40 @@ try {
 
   assert.equal(adapter.get('same-session')?.status, 'scanned');
   assert.equal(statuses.includes('expired'), false);
+
+  let confirmedCount = 0;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith('/mtop.gaia.nodejs.gaia.idle.data.gw.v2.index.get/1.0/')) {
+      return new Response('', { status: 200, headers: { 'set-cookie': '_m_h5_tk=confirm-token_suffix; Domain=.goofish.com; Path=/; Secure' } });
+    }
+    if (url.pathname.endsWith('/mini_login.htm')) {
+      return new Response('<script>window.viewData = {"loginFormData":{"lg_token":"login-token"}};</script>', { status: 200, headers: { 'content-type': 'text/html' } });
+    }
+    if (url.pathname.endsWith('/newlogin/qrcode/generate.do')) {
+      return new Response(JSON.stringify({ content: { success: true, data: { codeContent: 'qr-confirm', t: String(Date.now()), ck: 'ck-confirm' } } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.pathname.endsWith('/newlogin/qrcode/query.do')) {
+      return new Response(JSON.stringify({ content: { data: { qrCodeStatus: 'CONFIRMED' } } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.hostname === 'www.goofish.com' && url.pathname === '/im') {
+      assert.equal(init.redirect, 'manual');
+      return new Response(null, { status: 302, headers: { location: 'https://passport.goofish.com/bridge', 'set-cookie': 'bridge=1; Domain=.goofish.com; Path=/; Secure' } });
+    }
+    if (url.hostname === 'passport.goofish.com' && url.pathname === '/bridge') {
+      return new Response('ok', { status: 200, headers: { 'set-cookie': 'unb=confirmed-user; Domain=.passport.goofish.com; Path=/; Secure' } });
+    }
+    throw new Error(`unexpected confirmed QR request: ${url.href}`);
+  };
+  const confirmed = new XianyuQrLoginAdapter({
+    pollIntervalMs: 5,
+    maxWaitMs: 250,
+    onSuccess: async (result) => { confirmedCount += result.unb === 'confirmed-user' ? 1 : 0; },
+  });
+  await confirmed.create({ sessionId: 'confirmed-session', adminId: 'admin-1' });
+  for (let attempt = 0; attempt < 40 && confirmedCount === 0; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(confirmedCount, 1);
+  assert.equal(confirmed.get('confirmed-session')?.status, 'succeeded');
   console.log('xianyu qr login renewal smoke passed');
 } finally {
   globalThis.fetch = originalFetch;
