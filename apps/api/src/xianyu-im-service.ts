@@ -1,6 +1,7 @@
 import type { AccountRecord, ConversationRecord, CredentialRecord, Store } from './domain.js';
 import { ServiceError } from './services.js';
 import type { MessageService } from './messages.js';
+import type { AutoReplyProcessResult, AutoReplyService } from './auto-reply.js';
 import { XianyuImClient, XianyuImMessageEvent, XianyuImReadReceiptEvent, XianyuImCredential } from './xianyu-im.js';
 import { XianyuMtopClient } from './xianyu-mtop.js';
 
@@ -13,7 +14,7 @@ export class XianyuImService {
   private readonly clients = new Map<string, XianyuImClient>();
   private readonly identityCache = new Map<string, { buyerDisplayName?: string; buyerAvatarUrl?: string }>();
 
-  constructor(private readonly store: Store, private readonly mtop: XianyuMtopClient, private readonly messages: MessageService) {}
+  constructor(private readonly store: Store, private readonly mtop: XianyuMtopClient, private readonly messages: MessageService, private readonly autoReply?: AutoReplyService) {}
 
   async listConversations(adminId: string, accountId: string, startCursor?: number, limit = 50): Promise<ExternalPage> {
     const client = await this.ensureClient(adminId, accountId);
@@ -171,7 +172,7 @@ export class XianyuImService {
     const client = new XianyuImClient({
       accountId,
       credential: toImCredential(credential),
-      onEvent: (event) => this.importPush(adminId, event),
+      onEvent: async (event) => { await this.handleExternalEvent(adminId, event); },
       saveCredential: async (next) => { await this.saveCredential(adminId, account, next); },
     });
     try { await client.connect(); } catch (error) {
@@ -212,12 +213,12 @@ export class XianyuImService {
     }
   }
 
-  private async importPush(adminId: string, event: XianyuImMessageEvent | XianyuImReadReceiptEvent): Promise<void> {
+  async handleExternalEvent(adminId: string, event: XianyuImMessageEvent | XianyuImReadReceiptEvent): Promise<{ created: boolean; autoReply?: AutoReplyProcessResult }> {
     if (isReadReceiptEvent(event)) {
       const externalConversationRef = event.externalConversationRef;
-      if (!externalConversationRef) return;
+      if (!externalConversationRef) return { created: false };
       const conversation = await this.store.findConversationByExternalRef(adminId, event.accountId, externalConversationRef);
-      if (!conversation) return;
+      if (!conversation) return { created: false };
       await this.messages.markExternalMessageRead({
         adminId,
         accountId: event.accountId,
@@ -227,11 +228,11 @@ export class XianyuImService {
         requestId: `xianyu:read:${event.externalMessageRef}`,
         traceId: `xianyu:read:${event.externalMessageRef}`,
       });
-      return;
+      return { created: false };
     }
     const conversation = await this.store.findConversationByExternalRef(adminId, event.accountId, event.externalConversationRef);
-    if (!conversation) return;
-    await this.messages.importExternalMessage({
+    if (!conversation) return { created: false };
+    const imported = await this.messages.importExternalMessage({
       adminId,
       conversationId: conversation.id,
       direction: event.direction,
@@ -244,6 +245,9 @@ export class XianyuImService {
       createdAt: event.occurredAt,
       traceId: `xianyu:push:${event.externalMessageRef}`,
     });
+    if (!imported.created || event.direction !== 'inbound' || event.bodyType !== 'text' || !this.autoReply) return { created: imported.created };
+    const autoReply = await this.autoReply.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: imported.message.messageId, requestId: `xianyu:auto-reply:${event.externalMessageRef}`, traceId: `xianyu:auto-reply:${event.externalMessageRef}` });
+    return { created: imported.created, autoReply };
   }
 }
 

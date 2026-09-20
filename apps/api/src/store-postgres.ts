@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyRunRecord, AutoReplyDecision, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor } from './conversation-cursor.js';
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
@@ -441,6 +441,51 @@ export class PostgresStore implements Store {
     } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
   }
 
+  async createAutoReplyRun(input: { adminId: string; accountId: string; conversationId: string; inboundMessageId: string; intent: string; decision: AutoReplyDecision; status: AutoReplyRunStatus; riskFlags?: string[]; productId?: string; orderRefs?: string[]; inputDigest: string; contextDigest?: string; replyDigest?: string; senderOutcome?: AutoReplyRunRecord['senderOutcome']; outboundMessageId?: string; failureCode?: string }): Promise<AutoReplyRunRecord> {
+    const existing = await this.pool.query('select * from messages.auto_reply_runs where admin_id=$1 and inbound_message_id=$2 limit 1', [input.adminId, input.inboundMessageId]);
+    if (existing.rows[0]) return this.toAutoReplyRun(existing.rows[0]);
+    const id = createId();
+    const result = await this.pool.query(`insert into messages.auto_reply_runs (id,admin_id,account_id,conversation_id,inbound_message_id,intent,decision,status,risk_flags,product_id,order_refs,input_digest,context_digest,reply_digest,sender_outcome,outbound_message_id,failure_code)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11::jsonb,$12,$13,$14,$15,$16,$17) returning *`, [id, input.adminId, input.accountId, input.conversationId, input.inboundMessageId, input.intent, input.decision, input.status, JSON.stringify(input.riskFlags ?? []), input.productId ?? null, JSON.stringify(input.orderRefs ?? []), input.inputDigest, input.contextDigest ?? null, input.replyDigest ?? null, input.senderOutcome ?? null, input.outboundMessageId ?? null, input.failureCode ?? null]);
+    return this.toAutoReplyRun(result.rows[0]);
+  }
+
+  async updateAutoReplyRun(id: string, patch: { intent?: string; decision?: AutoReplyDecision; status?: AutoReplyRunStatus; riskFlags?: string[]; productId?: string; orderRefs?: string[]; contextDigest?: string; replyDigest?: string; senderOutcome?: AutoReplyRunRecord['senderOutcome']; outboundMessageId?: string; failureCode?: string }): Promise<AutoReplyRunRecord | undefined> {
+    const fields: string[] = [];
+    const values: unknown[] = [id];
+    const add = (field: string, value: unknown, cast?: string) => { values.push(value); fields.push(`${field}=$${values.length}${cast ?? ''}`); };
+    if (patch.intent !== undefined) add('intent', patch.intent);
+    if (patch.decision !== undefined) add('decision', patch.decision);
+    if (patch.status !== undefined) add('status', patch.status);
+    if (patch.riskFlags !== undefined) add('risk_flags', JSON.stringify(patch.riskFlags), '::jsonb');
+    if (patch.productId !== undefined) add('product_id', patch.productId);
+    if (patch.orderRefs !== undefined) add('order_refs', JSON.stringify(patch.orderRefs), '::jsonb');
+    if (patch.contextDigest !== undefined) add('context_digest', patch.contextDigest);
+    if (patch.replyDigest !== undefined) add('reply_digest', patch.replyDigest);
+    if (patch.senderOutcome !== undefined) add('sender_outcome', patch.senderOutcome);
+    if (patch.outboundMessageId !== undefined) add('outbound_message_id', patch.outboundMessageId);
+    if (patch.failureCode !== undefined) add('failure_code', patch.failureCode);
+    if (fields.length === 0) return this.getAutoReplyRunById(id);
+    fields.push('updated_at=now()');
+    const result = await this.pool.query(`update messages.auto_reply_runs set ${fields.join(', ')} where id=$1 returning *`, values);
+    return result.rows[0] ? this.toAutoReplyRun(result.rows[0]) : undefined;
+  }
+
+  async getAutoReplyRun(adminId: string, id: string): Promise<AutoReplyRunRecord | undefined> {
+    const result = await this.pool.query('select * from messages.auto_reply_runs where id=$1 and admin_id=$2 limit 1', [id, adminId]);
+    return result.rows[0] ? this.toAutoReplyRun(result.rows[0]) : undefined;
+  }
+
+  async findAutoReplyRunByInboundMessage(adminId: string, inboundMessageId: string): Promise<AutoReplyRunRecord | undefined> {
+    const result = await this.pool.query('select * from messages.auto_reply_runs where admin_id=$1 and inbound_message_id=$2 limit 1', [adminId, inboundMessageId]);
+    return result.rows[0] ? this.toAutoReplyRun(result.rows[0]) : undefined;
+  }
+
+  private async getAutoReplyRunById(id: string): Promise<AutoReplyRunRecord | undefined> {
+    const result = await this.pool.query('select * from messages.auto_reply_runs where id=$1 limit 1', [id]);
+    return result.rows[0] ? this.toAutoReplyRun(result.rows[0]) : undefined;
+  }
+
   async markMessagesReadByExternalRef(input: { adminId: string; conversationId: string; externalMessageRef: string; readAt?: string }): Promise<{ messages: MessageRecord[]; events: ConversationEventRecord[] }> {
     return this.markOutgoingRead(input, input.externalMessageRef);
   }
@@ -710,6 +755,11 @@ export class PostgresStore implements Store {
 
   private toConversation(row: Row): ConversationRecord { return { id: String(row.id), accountId: String(row.account_id), externalConversationRef: row.external_conversation_ref ? String(row.external_conversation_ref) : undefined, buyerRef: String(row.buyer_ref), buyerDisplayName: row.buyer_display_name ? String(row.buyer_display_name) : undefined, buyerAvatarUrl: row.buyer_avatar_url ? String(row.buyer_avatar_url) : undefined, itemRef: row.item_ref ? String(row.item_ref) : undefined, itemTitle: row.item_title ? String(row.item_title) : undefined, itemImageUrl: row.item_image_url ? String(row.item_image_url) : undefined, unreadCount: Number(row.unread_count ?? 0), lastMessagePreview: row.last_message_preview ? String(row.last_message_preview) : undefined, lastMessageAt: iso(row.last_message_at), handlingMode: row.handling_mode as ConversationRecord['handlingMode'], version: Number(row.version ?? 1), createdAt: dateIso(row.created_at), updatedAt: dateIso(row.updated_at) }; }
   private toMessage(row: Row): MessageRecord { const riskFlags = Array.isArray(row.risk_flags) ? row.risk_flags.map(String) : []; return { id: String(row.id), conversationId: String(row.conversation_id), accountId: String(row.account_id), direction: row.direction as MessageRecord['direction'], senderRole: row.sender_role as MessageRecord['senderRole'], bodyType: row.body_type as MessageRecord['bodyType'], bodyText: row.body_text ? String(row.body_text) : undefined, bodyRef: row.body_ref ? String(row.body_ref) : undefined, redactionState: row.redaction_state as MessageRecord['redactionState'], status: row.status as MessageRecord['status'], readStatus: Number(row.read_status ?? 0) === 2 ? 2 : 0, readAt: iso(row.read_at), externalMessageRef: row.external_message_ref ? String(row.external_message_ref) : undefined, source: row.source as MessageRecord['source'], orderRef: row.order_ref ? String(row.order_ref) : undefined, productRef: row.product_ref ? String(row.product_ref) : undefined, riskFlags, handlingMode: row.handling_mode as MessageRecord['handlingMode'], createdAt: new Date(String(row.created_at)).toISOString() }; }
+  private toAutoReplyRun(row: Row): AutoReplyRunRecord {
+    const riskFlags = Array.isArray(row.risk_flags) ? row.risk_flags.map(String) : [];
+    const orderRefs = Array.isArray(row.order_refs) ? row.order_refs.map(String) : [];
+    return { id: String(row.id), adminId: String(row.admin_id), accountId: String(row.account_id), conversationId: String(row.conversation_id), inboundMessageId: String(row.inbound_message_id), intent: String(row.intent), decision: row.decision as AutoReplyRunRecord['decision'], status: row.status as AutoReplyRunRecord['status'], riskFlags, productId: row.product_id ? String(row.product_id) : undefined, orderRefs, inputDigest: String(row.input_digest), contextDigest: row.context_digest ? String(row.context_digest) : undefined, replyDigest: row.reply_digest ? String(row.reply_digest) : undefined, senderOutcome: row.sender_outcome as AutoReplyRunRecord['senderOutcome'], outboundMessageId: row.outbound_message_id ? String(row.outbound_message_id) : undefined, failureCode: row.failure_code ? String(row.failure_code) : undefined, createdAt: dateIso(row.created_at), updatedAt: dateIso(row.updated_at) };
+  }
   private toConversationEvent(row: Row): ConversationEventRecord { const payload = row.payload_json && typeof row.payload_json === 'object' && !Array.isArray(row.payload_json) ? row.payload_json as Record<string, unknown> : {}; return { eventId: String(row.event_id), conversationId: String(row.conversation_id), accountId: String(row.account_id), cursor: Number(row.cursor), type: row.type as ConversationEventRecord['type'], occurredAt: new Date(String(row.occurred_at)).toISOString(), traceId: String(row.trace_id), payload }; }
 
   private toAdmin(row: Row): AdminRecord { return { id: String(row.id), email: String(row.email), passwordHash: String(row.password_hash), displayName: String(row.display_name ?? ''), role: String(row.role), status: row.status as AdminRecord['status'], createdAt: new Date(String(row.created_at)).toISOString(), lastLoginAt: iso(row.last_login_at) }; }

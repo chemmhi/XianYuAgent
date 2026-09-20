@@ -427,6 +427,35 @@ export interface MessageRecord {
   createdAt: string;
 }
 
+export type AutoReplyDecision = 'replied' | 'handoff' | 'skipped' | 'failed';
+export type AutoReplyRunStatus = 'received' | 'classified' | 'context_loaded' | 'generated' | 'simulated' | 'persisted' | 'handoff' | 'skipped' | 'failed';
+
+/**
+ * Persisted, redacted evidence for one automatic-reply attempt.
+ * Raw buyer text and prompt/context bodies are intentionally not stored here.
+ */
+export interface AutoReplyRunRecord {
+  id: string;
+  adminId: string;
+  accountId: string;
+  conversationId: string;
+  inboundMessageId: string;
+  intent: string;
+  decision: AutoReplyDecision;
+  status: AutoReplyRunStatus;
+  riskFlags: string[];
+  productId?: string;
+  orderRefs: string[];
+  inputDigest: string;
+  contextDigest?: string;
+  replyDigest?: string;
+  senderOutcome?: 'simulated' | 'known_success' | 'known_failure' | 'unknown';
+  outboundMessageId?: string;
+  failureCode?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ConversationEventRecord {
   eventId: string;
   conversationId: string;
@@ -701,6 +730,10 @@ export interface Store {
   findMessageByExternalRef(adminId: string, conversationId: string, externalMessageRef: string): Promise<MessageRecord | undefined>;
   createConversation(input: { adminId: string; accountId: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; externalConversationRef?: string }): Promise<ConversationRecord>;
   createMessage(input: { adminId: string; conversationId: string; direction: MessageDirection; senderRole: MessageSenderRole; bodyType: MessageBodyType; bodyText?: string; bodyRef?: string; externalMessageRef?: string; source?: MessageRecord['source']; orderRef?: string; productRef?: string; riskFlags?: string[]; createdAt?: string; traceId?: string }): Promise<{ message: MessageRecord; event: ConversationEventRecord }>;
+  createAutoReplyRun(input: { adminId: string; accountId: string; conversationId: string; inboundMessageId: string; intent: string; decision: AutoReplyDecision; status: AutoReplyRunStatus; riskFlags?: string[]; productId?: string; orderRefs?: string[]; inputDigest: string; contextDigest?: string; replyDigest?: string; senderOutcome?: AutoReplyRunRecord['senderOutcome']; outboundMessageId?: string; failureCode?: string }): Promise<AutoReplyRunRecord>;
+  updateAutoReplyRun(id: string, patch: { intent?: string; decision?: AutoReplyDecision; status?: AutoReplyRunStatus; riskFlags?: string[]; productId?: string; orderRefs?: string[]; contextDigest?: string; replyDigest?: string; senderOutcome?: AutoReplyRunRecord['senderOutcome']; outboundMessageId?: string; failureCode?: string }): Promise<AutoReplyRunRecord | undefined>;
+  getAutoReplyRun(adminId: string, id: string): Promise<AutoReplyRunRecord | undefined>;
+  findAutoReplyRunByInboundMessage(adminId: string, inboundMessageId: string): Promise<AutoReplyRunRecord | undefined>;
   markMessagesReadByExternalRef(input: { adminId: string; conversationId: string; externalMessageRef: string; readAt?: string }): Promise<{ messages: MessageRecord[]; events: ConversationEventRecord[] }>;
   markLatestOutgoingRead(input: { adminId: string; conversationId: string; readAt?: string }): Promise<{ messages: MessageRecord[]; events: ConversationEventRecord[] }>;
 }

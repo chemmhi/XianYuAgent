@@ -394,3 +394,13 @@
 | S5-R66 | 真实全链路 | 默认模式是否完成 Chrome → API → PostgreSQL/Redis → 闲鱼 → Dashboard 回读，且不依赖显式 live 开关 | root + fullchain_audit + integration_audit | PASS | `ALLOW_SHARED_E2E=1 REQUIRE_XIANYU_ORDER_SYNC=1 npm run test:e2e:chrome:dashboard:fullchain`；`docs/evidence/stage5/S4-VS-DASHBOARD/fullchain-evidence.json` |
 
 本轮结论：Dashboard 不再因缺少独立 `VITE_DASHBOARD_MODE` 而默认展示 mock；mock 仅作为显式测试覆盖保留。高保真视觉签核、旧 `/order-trend` 兼容接口与 rollback 门禁仍按 `S4-VS-DASHBOARD` 原范围开放。
+
+### 2026-09-20：自动回复链路切片复审
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R70 | 业务 / 验收 | 闲鱼监听事件是否完成入站规范化、消息幂等、风险优先意图识别、商品/订单/会话上下文组装、受事实约束的生成与高风险转人工 | root + docs_scan | PASS（dry-run 范围） | `docs/16-auto-reply-slice.md`、`apps/api/src/auto-reply.ts`、`apps/api/src/xianyu-im-service.ts`、`npm --workspace apps/api run test:auto-reply:unit`、`npm --workspace apps/api run test:auto-reply:e2e` |
+| S5-R71 | 架构 / 数据流 | 自动回复是否复用 `MessageService` 和 Store 边界，入站/出站/运行记录是否可回读，是否按 `adminId + inboundMessageId` 幂等 | root + code_scan | PASS | `apps/api/migrations/021_auto_reply_runs.sql`、`apps/api/src/store-memory.ts`、`apps/api/src/store-postgres.ts`、`npm run db:migrate`、`npm --workspace apps/api run test:auto-reply:postgres` |
+| S5-R72 | 质量 / 安全 / 运维 | 是否禁止真实闲鱼发送，敏感正文是否不进入运行记录，重复事件是否不重复出站，完整门禁是否通过 | root + postgres_verify | PASS（受控验证） | E2E 断言 `/r/MessageSend/sendByReceiverScope` 调用为 0；PostgreSQL 关闭/重启后回读 `messages.messages` 与 `messages.auto_reply_runs`；`npm run typecheck`、`npm test`、`npm run build`、`npm run compose:config`、`git diff --check` |
+
+本轮结论：自动回复 dry-run 纵向切片通过。其科学链路不是无条件直通，而是“事实先落库、风险先门禁、上下文分层、生成受事实约束、Noop 投递、审计回读”；真实发送、模型 Provider、Outbox Worker、人工接管 API 和发布级恢复继续保持后置范围。

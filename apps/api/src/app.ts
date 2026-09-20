@@ -20,6 +20,7 @@ import { InProcessAgentRuntime, isTerminalRunStatus, WorkspaceService, type Work
 import { OpenAICompatibleModelClient, PiRuntimeAdapter } from './pi-runtime.js';
 import { ApiKeyCredentialService } from './credential-store.js';
 import { DashboardService } from './dashboard.js';
+import { AutoReplyService } from './auto-reply.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -34,6 +35,7 @@ export interface AppRuntime {
   apiKeyCredentials: ApiKeyCredentialService;
   dashboard: DashboardService;
   messages: MessageService;
+  autoReply: AutoReplyService;
   redisRealtime?: RedisConversationEventBridge;
   workspace: WorkspaceService;
   workspaceRuntime: WorkspaceRuntime;
@@ -84,6 +86,11 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   }, realtime, (event) => redisRealtime?.publish(event));
+  const autoReply = new AutoReplyService(store, messages, async (input) => {
+    const auditId = createId();
+    await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
+    return auditId;
+  }, { sendMode: 'simulate' });
   let xianyu: XianyuMtopClient;
   let productSync: ProductSyncService;
   const qrLogin = new XianyuQrLoginAdapter({
@@ -138,7 +145,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   });
-  const xianyuIm = new XianyuImService(store, xianyu, messages);
+  const xianyuIm = new XianyuImService(store, xianyu, messages, autoReply);
 
   const wsServer = new WebSocketServer({ noServer: true });
   const workspaceRuntime: WorkspaceRuntime = config.agentRuntime === 'pi'
@@ -152,7 +159,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, orders, products, productSync, credentials, apiKeyCredentials, dashboard, messages, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuIm,
+    config, store, auth, accounts, coupons, orders, products, productSync, credentials, apiKeyCredentials, dashboard, messages, autoReply, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuIm,
     server,
     async listen() { await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve)); },
     async close() {

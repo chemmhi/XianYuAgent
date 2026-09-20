@@ -152,3 +152,9 @@
 - `S5-RISK-026` 已部分缓解但保持开放：CredentialStore 已独立于通用设置保存入口，API 只返回 `CredentialRef` 脱敏 metadata，明文仅在 create/rotate 请求边界出现；`Idempotency-Key`、`expectedVersion`、账号 scope、轮换/启停/撤销审计、403/409 与撤销后禁止启用均已由 smoke/Chrome/CDP 覆盖。旧 `auth.account_credentials` 兼容迁移仍需独立方案与签核。
 - `S5-RISK-027` 已部分缓解但保持开放：临时 PostgreSQL 已执行 `001`–`018`，并复读 `credential_values.ciphertext/key_version/checksum/metadata_json`；发布级 rollback、已有 volume 回退与重复迁移后的恢复演练仍未覆盖。
 - `S5-RISK-028` 已部分缓解但保持开放：Settings 已生成 `1440×900`、`390×844` 固定 viewport 截图并完成桌面/移动偏差记录；loading/empty/error/submitting/saved 与移动短标签导航均有浏览器路径，正式人工视觉签核仍待 merge lock 后完成。
+
+### 2026-09-20 自动回复链路风险复核
+
+- 新增 `S5-RISK-029`：自动回复目前为 dry-run / Noop 投递，未接入真实模型 Provider、Outbox Worker、超时/unknown 恢复和人工接管 API；不影响本轮监听到落库的受控验证，但不能把 `auto_reply_runs.status=persisted` 解释为买家已收到真实消息。状态：开放，承接 `S4-VS5B/C` 与发布级执行门禁。
+- 新增 `S5-RISK-030`：当前意图识别与模板生成是可解释的规则首片，尚未覆盖多轮指代消解、商品事实缺失时的澄清策略、真实模型评测和离线回放集。状态：开放；在接入模型前补离线评测集、置信度阈值、事实引用和人工抽检。
+- 已关闭本轮专项风险：入站重复消息导致重复自动回复、跨账号商品查询、敏感内容进入运行记录、模拟发送误触发闲鱼发送。证据为 `auto_reply_runs` 唯一约束、账号范围商品/订单查询、digest-only 审计以及 E2E 的真实发送调用数为 0。

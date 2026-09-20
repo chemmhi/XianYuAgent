@@ -1,4 +1,4 @@
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyRunRecord, AutoReplyDecision, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor, isAfterConversationCursor } from './conversation-cursor.js';
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
@@ -39,6 +39,7 @@ export class MemoryStore implements Store {
   private readonly couponBindings = new Map<string, CouponBindingRecord>();
   private readonly conversations = new Map<string, ConversationRecord>();
   private readonly messages = new Map<string, MessageRecord>();
+  private readonly autoReplyRuns = new Map<string, AutoReplyRunRecord>();
   private readonly conversationEvents = new Map<string, ConversationEventRecord[]>();
   private readonly conversationCursors = new Map<string, number>();
   private readonly scopes = new Map<string, AccountScopeRecord>();
@@ -490,6 +491,33 @@ export class MemoryStore implements Store {
     const event: ConversationEventRecord = { eventId: createId(), conversationId: conversation.id, accountId: conversation.accountId, cursor, type: 'chat.message.created', occurredAt: now, traceId: input.traceId ?? `memory:${message.id}`, payload: { message: { ...message, riskFlags: [...message.riskFlags] }, conversation: { ...conversation } } };
     this.conversationEvents.get(conversation.id)?.push(event);
     return { message: { ...message, riskFlags: [...message.riskFlags] }, event: { ...event, payload: { ...event.payload } } };
+  }
+
+  async createAutoReplyRun(input: { adminId: string; accountId: string; conversationId: string; inboundMessageId: string; intent: string; decision: AutoReplyDecision; status: AutoReplyRunStatus; riskFlags?: string[]; productId?: string; orderRefs?: string[]; inputDigest: string; contextDigest?: string; replyDigest?: string; senderOutcome?: AutoReplyRunRecord['senderOutcome']; outboundMessageId?: string; failureCode?: string }): Promise<AutoReplyRunRecord> {
+    const existing = [...this.autoReplyRuns.values()].find((run) => run.adminId === input.adminId && run.inboundMessageId === input.inboundMessageId);
+    if (existing) return { ...existing, riskFlags: [...existing.riskFlags], orderRefs: [...existing.orderRefs] };
+    const now = new Date().toISOString();
+    const run: AutoReplyRunRecord = { id: createId(), adminId: input.adminId, accountId: input.accountId, conversationId: input.conversationId, inboundMessageId: input.inboundMessageId, intent: input.intent, decision: input.decision, status: input.status, riskFlags: [...(input.riskFlags ?? [])], productId: input.productId, orderRefs: [...(input.orderRefs ?? [])], inputDigest: input.inputDigest, contextDigest: input.contextDigest, replyDigest: input.replyDigest, senderOutcome: input.senderOutcome, outboundMessageId: input.outboundMessageId, failureCode: input.failureCode, createdAt: now, updatedAt: now };
+    this.autoReplyRuns.set(run.id, run);
+    return { ...run, riskFlags: [...run.riskFlags], orderRefs: [...run.orderRefs] };
+  }
+
+  async updateAutoReplyRun(id: string, patch: { intent?: string; decision?: AutoReplyDecision; status?: AutoReplyRunStatus; riskFlags?: string[]; productId?: string; orderRefs?: string[]; contextDigest?: string; replyDigest?: string; senderOutcome?: AutoReplyRunRecord['senderOutcome']; outboundMessageId?: string; failureCode?: string }): Promise<AutoReplyRunRecord | undefined> {
+    const run = this.autoReplyRuns.get(id);
+    if (!run) return undefined;
+    Object.assign(run, patch, { updatedAt: new Date().toISOString() });
+    return { ...run, riskFlags: [...run.riskFlags], orderRefs: [...run.orderRefs] };
+  }
+
+  async getAutoReplyRun(adminId: string, id: string): Promise<AutoReplyRunRecord | undefined> {
+    const run = this.autoReplyRuns.get(id);
+    if (!run || run.adminId !== adminId) return undefined;
+    return { ...run, riskFlags: [...run.riskFlags], orderRefs: [...run.orderRefs] };
+  }
+
+  async findAutoReplyRunByInboundMessage(adminId: string, inboundMessageId: string): Promise<AutoReplyRunRecord | undefined> {
+    const run = [...this.autoReplyRuns.values()].find((candidate) => candidate.adminId === adminId && candidate.inboundMessageId === inboundMessageId);
+    return run ? { ...run, riskFlags: [...run.riskFlags], orderRefs: [...run.orderRefs] } : undefined;
   }
 
   async markMessagesReadByExternalRef(input: { adminId: string; conversationId: string; externalMessageRef: string; readAt?: string }): Promise<{ messages: MessageRecord[]; events: ConversationEventRecord[] }> {
