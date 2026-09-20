@@ -81,7 +81,7 @@ function AuthenticatedShell({ page, accountsApi, productsApi, couponsApi, messag
   if (page === 'dashboard') return <DashboardPage api={dashboardApi} apiMode={import.meta.env.VITE_DASHBOARD_MODE === 'live' ? apiMode : 'mock'} onNavigate={navigate} />;
   return (
     <div className="app-viewport">
-      <div className={`desktop-shell${page === 'products' ? ' products-shell' : page === 'accounts' ? ' accounts-shell' : page === 'settings' ? ' settings-shell' : ''}`}>
+      <div className={`desktop-shell${page === 'products' ? ' products-shell' : page === 'accounts' ? ' accounts-shell' : page === 'orders' ? ' orders-shell' : page === 'settings' ? ' settings-shell' : ''}`}>
         <aside className="sidebar">
           <div className="brand-block"><div className="brand-mark">Y</div><div className="brand-copy"><strong>XianyuSellerAgent</strong><span>运营控制台</span></div></div>
           <div className="side-section">运营台</div>
