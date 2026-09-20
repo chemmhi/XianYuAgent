@@ -24,7 +24,7 @@
 | Web typecheck | `npm --workspace apps/web run typecheck` | 通过 |
 | Web unit tests | `npm --workspace apps/web run test` | 通过：15 files / 47 tests |
 | Web production build | `npm --workspace apps/web run build` | 通过 |
-| Real browser E2E | `WORKSPACE_E2E_RUNTIME=in-process npm --workspace apps/web run test:e2e:chrome:workspace` | 通过：临时 PostgreSQL + `ALLOW_IN_MEMORY=false` API + Vite + Chrome/CDP；session/run 持久化回读、`user=1 / reasoning=1 / tool=7 / final=1`、2 次 WS handshake、断线/重连、`run.succeeded` 事件回放、`errorNodes=[]`、桌面/移动截图 |
+| Real browser E2E | `npm --workspace apps/web run test:e2e:chrome:workspace`（默认 `WORKSPACE_E2E_RUNTIME=in-process`） | 通过：临时 PostgreSQL + `ALLOW_IN_MEMORY=false` API + Vite + Chrome/CDP；session/run 持久化回读、`user=1 / reasoning=1 / tool=7 / final=1`、2 次 WS handshake、断线/重连、`run.succeeded` 事件回放、`errorNodes=[]`、桌面/移动截图 |
 | Diff hygiene | `git diff --check` | 通过 |
 
 > 复核说明：本轮 API 全量 smoke 已在清理残留测试进程后完整通过；真实浏览器脚本使用临时 PostgreSQL 数据库和独立 Chrome profile，验证了前端真实入口、持久化、断线重连与事件回放。该证据仍不替代独立 Worker/Pi Runtime、发布级恢复和人工视觉签核。
