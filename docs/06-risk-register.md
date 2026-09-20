@@ -99,6 +99,8 @@
 | S5-RISK-024 | Workspace Run/Step/Confirmation/Outbox 状态可能被页面或 Runtime 直接改写 | P1 | 高 | 高风险动作不可审计、重复执行或无法人工恢复 | Workspace / 执行负责人 | 独立 controller、状态机、Policy→Confirmation→Outbox、worker lease 和 recover E2E | `S4-VS6A`、`S4-VS6B` | 开放，承接 R-006/R-009 |
 | S5-RISK-025 | Workspace 实时事件、unknown、cancel、retry 尚未在真实 Runtime 中形成可恢复证据 | P1 | 中 | Run 卡死、误重试或外部结果未知时无法判断最终状态 | Runtime / QA 负责人 | 真实 Worker/Runtime、超时/取消/重试、事件游标、人工恢复和日志指标通过 | `S4-VS6A`、`S4-VS6B` | 开放，承接 R-006 |
 | S5-RISK-026 | Settings API Key 配置若复用通用设置保存入口，可能泄露明文或覆盖其他凭证 | P1 | 高 | 凭证泄露、轮换失败覆盖旧密钥或跨域读取 | 安全 / 凭证负责人 | CredentialStore 唯一 owner、加密复读、脱敏 UI、轮换/启停/撤销审计和 403/409 E2E | `S4-VS7A` | 开放，承接 R-004/S3-I004 |
+| S5-RISK-027 | `018_credential_store.sql` 已实现但尚未在真实 PostgreSQL volume 完成 apply/verify/rollback 与密文复读 | P1 | 高 | schema 漂移、密文不可读或回滚破坏旧凭证引用，无法证明发布级持久化安全 | 架构 / 数据 / 运维负责人 | 真实 PostgreSQL 执行 018、加密字段复读、重复执行、旧数据兼容、回滚演练和清理证据 | `S4-VS7A`、`S4-ENV-RECOVERY` | 开放，承接 R-001/S5-I001 |
+| S5-RISK-028 | Settings 首片尚无 Chrome/CDP 1440×900 与 390×844 截图、逐状态视觉偏差和真实跨层 403/409 E2E | P2 | 中 | 页面可能仅在单元/MemoryStore 下可用，移动端或真实权限冲突被遗漏 | 前端 / QA / 安全负责人 | 固定双 viewport 覆盖 loading/empty/error/forbidden/submitting/saved，真实 API + PostgreSQL + 浏览器回写证据并完成独立复审 | `S4-VS7A` | 开放，承接 S4-I007/S5-RISK-026 |
 
 ### 2026-09-19 S4-VS6A 风险复核
 
@@ -120,3 +122,9 @@
 ### 2026-09-20 商品表格空态修订风险复核
 
 - 本轮只调整前端状态容器布局、工具栏冗余统计展示和对应回归/E2E 断言，不改变商品 API、数据库、外部同步或持久化边界；`S5-I007`、`S5-I008`、`S5-I009` 及商品后续切片风险保持原状态。
+
+### 2026-09-20 S4-VS7A Settings API Key 风险复核
+
+- `S5-RISK-026` 部分缓解但保持开放：CredentialStore 已独立于通用设置保存入口，API 只返回 `CredentialRef` 脱敏 metadata，明文仅在 create/rotate 请求边界出现；`Idempotency-Key`、`expectedVersion`、账号 scope、轮换/启停/撤销审计和撤销后禁止启用已由受控 smoke 覆盖。真实 PostgreSQL 加密复读、403/409 跨层 E2E、Chrome/CDP 视觉证据和独立三轮复审尚未完成。
+- `S5-RISK-027` 新增并保持开放：`018_credential_store.sql` 与 AES-256-GCM 代码已落地，但当前验证使用 `allowInMemory=true`；必须在真实 PostgreSQL volume 执行 apply/verify/rollback、检查 ciphertext/key_version/checksum/metadata_json，并证明重复迁移与旧数据兼容后才能关闭。
+- `S5-RISK-028` 新增并保持开放：Settings 首片尚无 1440×900、390×844 固定 viewport 截图和逐状态偏差记录；移动端底部设置导航、loading/empty/error/forbidden/submitting/saved 仍需浏览器复核，不能以 Web 单测和 build 代替视觉门禁。

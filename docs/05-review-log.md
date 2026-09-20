@@ -311,3 +311,15 @@
 | S5-R50 | 质量 / 交付 | 是否补充回归测试并在独立 worktree、merge lock 和主线完成验证 | root | PASS | `99c60bf`、Web typecheck、Vitest 25 files / 86 tests、Web/API build、商品 Chrome/CDP E2E、`git diff --check` |
 
 本轮结论：商品列表空态/失败态布局修订和工具栏统计清理已合入 `master`；商品真实 PostgreSQL、外部闲鱼数据和视觉人工复核等既有边界保持不变。
+
+### 2026-09-20：S4-VS7A Settings API Key 首片复核
+
+本节只复核当前实现和受控证据，不把 MemoryStore smoke、构建成功或页面可打开升级为发布级通过。
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R54 | 业务 / 验收 | `/settings` 是否要求明确 `accountId`，并支持 API Key 引用的列表、创建、编辑、轮换、启用、禁用、撤销；密钥是否不回显 | root + 待人工复核 | READY_FOR_REVIEW | `apps/web/src/features/settings/`、`apps/api/src/credential-store.ts`、`apps/api/scripts/credential-store-smoke.mjs`；受控 smoke 覆盖 create/list/rotate/status/version conflict/revoked guard |
+| S5-R55 | 架构 / 数据流 | CredentialStore 是否独立于通用 Settings 保存入口，是否使用 `credential_refs` / `credential_values`、AES-256-GCM、fingerprint、scope、expectedVersion、Idempotency-Key 和审计摘要 | root + 待独立复核 | READY_FOR_REVIEW | `apps/api/migrations/018_credential_store.sql`、`apps/api/src/credential-crypto.ts`、`apps/api/src/credential-store.ts`、`apps/api/src/app.ts`；`npm --workspace apps/api run build` 已通过，真实 PostgreSQL 迁移复读尚未执行 |
+| S5-R56 | 质量 / 安全 / 运维 | 是否完成真实 PostgreSQL/403/409/回滚、Chrome/CDP 双 viewport、逐状态视觉和三轮独立评审 | root + QA/安全待复核 | BLOCKED | 当前仅有 `allowInMemory=true` credential-store smoke、Web 26 files / 88 tests、typecheck/build；暂无 Settings 专属 1440×900 / 390×844 截图、真实 DB 回读或跨层浏览器证据 |
+
+本轮结论：`S4-VS7A = READY_FOR_REVIEW`。实现已形成可审计首片，但 `S5-RISK-026` 及新增的 migration/视觉证据风险仍开放；未达到 `PASS`，不得宣称已完成发布级 Settings。

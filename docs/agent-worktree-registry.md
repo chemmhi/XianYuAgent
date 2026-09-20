@@ -40,6 +40,7 @@
 
 | `root` | `products-empty-state` | `codex/products-empty-state` | `F:\ChenHai\Project\XianYuAgent-products-empty-state` | Codex `/root` | `2026-09-20 19:35:00 +08:00` | `MERGED` | `c641d29` | `-` | 商品管理表格空态/失败态居中展示，移除工具栏“共0件”统计；Vitest、typecheck、Web/API build、商品 Chrome/CDP E2E（含空态/失败态布局）与 diff 检查已通过。 |
 | `root` | `settings-feature-slice` | `feature/settings-feature-slice` | `F:\ChenHai\Project\XianYuAgent-settings-feature-slice` | Codex `/root` | `2026-09-20 20:45:00 +08:00` | `REGISTERED` | `-` | `-` | 设置功能切片：按项目规范实现正式路由、真实 API/状态和高保真 UI；待实现与评审。 |
+| `root/prototype_audit` | `settings-docs-evidence` | `docs/settings-slice-evidence` | `F:\ChenHai\Project\XianYuAgent-settings-docs` | Codex `/root` | `2026-09-20 20:59:57 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 已同步 STATUS、stage5 progress、review log、risk register 与 migrations README；已完成 API/Web 定向验证，真实 PostgreSQL/视觉/独立三轮评审仍开放。 |
 
 ## 主工作区
 
