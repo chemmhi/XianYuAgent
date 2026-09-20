@@ -54,6 +54,7 @@ export interface WorkspaceRunEventVM {
 
 export interface WorkspaceMessageVM {
   id: string;
+  runId?: string;
   type: WorkspaceMessageType;
   createdAt: string;
   title: string;
@@ -70,6 +71,7 @@ export interface WorkspaceState {
   sessions: WorkspaceSessionVM[];
   activeSessionId?: string;
   run: WorkspaceRunVM | null;
+  messages: WorkspaceMessageVM[];
   events: WorkspaceRunEventVM[];
   connection: 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'closed';
   error: string | null;

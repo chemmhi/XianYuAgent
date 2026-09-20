@@ -11,11 +11,12 @@ function normalizeError(error: unknown): { message: string; forbidden: boolean }
 
 export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?: string }): WorkspaceController {
   const api = options.api ?? defaultApi;
-  const [state, setState] = useState<WorkspaceState>({ phase: 'idle', sessions: [], run: null, events: [], connection: 'idle', error: null, submitting: false });
+  const [state, setState] = useState<WorkspaceState>({ phase: 'idle', sessions: [], run: null, messages: [], events: [], connection: 'idle', error: null, submitting: false });
   const socketRef = useRef<WebSocket | null>(null);
   const runRef = useRef<WorkspaceRunVM | null>(null);
   const eventCursorRef = useRef(0);
   const requestRef = useRef(0);
+  const activeSessionIdRef = useRef<string | undefined>(undefined);
 
   const reload = useCallback(async () => {
     const requestId = ++requestRef.current;
@@ -23,7 +24,8 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
       socketRef.current?.close();
       runRef.current = null;
       eventCursorRef.current = 0;
-      setState((previous) => ({ ...previous, phase: 'empty', sessions: [], activeSessionId: undefined, run: null, events: [], connection: 'idle', error: null }));
+      activeSessionIdRef.current = undefined;
+      setState((previous) => ({ ...previous, phase: 'empty', sessions: [], activeSessionId: undefined, run: null, messages: [], events: [], connection: 'idle', error: null }));
       return;
     }
     setState((previous) => ({ ...previous, phase: 'loading', error: null }));
@@ -31,7 +33,11 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
       const sessions = await api.listSessions(options.accountId);
       if (requestId !== requestRef.current) return;
       const firstActive = sessions.find((session) => session.status === 'active');
-      setState((previous) => ({ ...previous, phase: sessions.length ? 'success' : 'empty', sessions, activeSessionId: previous.activeSessionId && sessions.some((session) => session.id === previous.activeSessionId && session.status === 'active') ? previous.activeSessionId : firstActive?.id, error: null }));
+      const activeSessionId = activeSessionIdRef.current && sessions.some((session) => session.id === activeSessionIdRef.current && session.status === 'active') ? activeSessionIdRef.current : firstActive?.id;
+      const messages = activeSessionId ? await api.listMessages(activeSessionId).catch(() => []) : [];
+      if (requestId !== requestRef.current) return;
+      activeSessionIdRef.current = activeSessionId;
+      setState((previous) => ({ ...previous, phase: sessions.length ? 'success' : 'empty', sessions, activeSessionId, messages: activeSessionId ? messages : [], run: null, events: [], connection: 'idle', error: null }));
     } catch (error) {
       if (requestId !== requestRef.current) return;
       const normalized = normalizeError(error);
@@ -46,20 +52,21 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     setState((previous) => ({ ...previous, submitting: true, error: null }));
     try {
       const session = await api.createSession({ accountId: options.accountId, title });
-      setState((previous) => ({ ...previous, sessions: [session, ...previous.sessions], activeSessionId: session.id, phase: 'success', submitting: false }));
+      activeSessionIdRef.current = session.id;
+      setState((previous) => ({ ...previous, sessions: [session, ...previous.sessions], activeSessionId: session.id, phase: 'success', messages: [], run: null, events: [], connection: 'idle', submitting: false }));
       return session;
     } catch (error) { const normalized = normalizeError(error); setState((previous) => ({ ...previous, submitting: false, error: normalized.message })); return null; }
   }, [api, options.accountId]);
 
   const switchSession = useCallback(async (sessionId: string) => {
     setState((previous) => ({ ...previous, submitting: true, error: null }));
-    try { const session = await api.switchSession(sessionId); setState((previous) => ({ ...previous, activeSessionId: session.id, submitting: false })); return session; }
+    try { const session = await api.switchSession(sessionId); const messages = await api.listMessages(session.id).catch(() => []); activeSessionIdRef.current = session.id; setState((previous) => ({ ...previous, activeSessionId: session.id, messages, run: null, events: [], connection: 'idle', submitting: false })); return session; }
     catch (error) { const normalized = normalizeError(error); setState((previous) => ({ ...previous, submitting: false, error: normalized.message })); return null; }
   }, [api]);
 
   const archiveSession = useCallback(async (sessionId: string) => {
     setState((previous) => ({ ...previous, submitting: true, error: null }));
-    try { const session = await api.archiveSession(sessionId); setState((previous) => ({ ...previous, sessions: previous.sessions.map((item) => item.id === session.id ? session : item), activeSessionId: previous.activeSessionId === session.id ? undefined : previous.activeSessionId, submitting: false })); return session; }
+    try { const session = await api.archiveSession(sessionId); if (activeSessionIdRef.current === session.id) activeSessionIdRef.current = undefined; setState((previous) => ({ ...previous, sessions: previous.sessions.map((item) => item.id === session.id ? session : item), activeSessionId: previous.activeSessionId === session.id ? undefined : previous.activeSessionId, submitting: false })); return session; }
     catch (error) { const normalized = normalizeError(error); setState((previous) => ({ ...previous, submitting: false, error: normalized.message })); return null; }
   }, [api]);
 
@@ -95,11 +102,12 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     }
   }, [api, appendEvent]);
 
-  const startRun = useCallback(async (instruction: string) => {
-    if (!options.accountId || !state.activeSessionId) throw new Error('WORKSPACE_SESSION_REQUIRED');
+  const startRun = useCallback(async (instruction: string, sessionIdOverride?: string) => {
+    const sessionId = sessionIdOverride ?? state.activeSessionId;
+    if (!options.accountId || !sessionId) throw new Error('WORKSPACE_SESSION_REQUIRED');
     setState((previous) => ({ ...previous, submitting: true, error: null }));
     try {
-      const run = await api.startRun({ accountId: options.accountId, sessionId: state.activeSessionId, instruction, clientRunRef: `web-${Date.now()}-${Math.random().toString(16).slice(2)}` });
+      const run = await api.startRun({ accountId: options.accountId, sessionId, instruction, clientRunRef: `web-${Date.now()}-${Math.random().toString(16).slice(2)}` });
       runRef.current = run;
       eventCursorRef.current = 0;
       setState((previous) => ({ ...previous, run, events: [], connection: 'connecting', submitting: false }));
@@ -122,6 +130,6 @@ export interface WorkspaceController {
   createSession: (title: string) => Promise<WorkspaceState['sessions'][number] | null>;
   switchSession: (sessionId: string) => Promise<WorkspaceState['sessions'][number] | null>;
   archiveSession: (sessionId: string) => Promise<WorkspaceState['sessions'][number] | null>;
-  startRun: (instruction: string) => Promise<WorkspaceState['run']>;
+  startRun: (instruction: string, sessionIdOverride?: string) => Promise<WorkspaceState['run']>;
   reconnectRun: () => void;
 }

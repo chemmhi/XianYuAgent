@@ -49,4 +49,19 @@ describe('workspace canonical API adapter', () => {
     expect(events).toHaveLength(1);
     expect(events[0]?.sequence).toBe(4);
   });
+
+  it('loads persisted workspace messages for a switched session', async () => {
+    let requestedPath = '';
+    const api = createWorkspaceApi({
+      async get<T>(path: string) {
+        requestedPath = path;
+        return { success: true, data: { items: [{ id: 'message-1', sessionId: 'session-1', runId: 'run-1', type: 'user_message', content: '查看状态', createdAt: '2026-09-19T00:00:00.000Z', sequence: 1 }] } } as T;
+      },
+    });
+
+    const messages = await api.listMessages('session-1');
+
+    expect(requestedPath).toBe('/api/v1/workspace/agent-sessions/session-1/messages?limit=100');
+    expect(messages[0]).toMatchObject({ id: 'message-1', title: '用户', runId: 'run-1', type: 'user_message' });
+  });
 });
