@@ -230,7 +230,7 @@ async function run() {
     const url = request?.url ?? event.params?.url ?? '';
     return String(url).includes('/api/v1/workspace/');
   }).map((event) => ({ method: event.method, request: event.params?.request?.method, url: event.params?.request?.url ?? event.params?.url, error: event.params?.errorText, blocked: event.params?.blockedReason }));
-  if (!eventRows.some((value) => String(value).includes('run.succeeded'))) throw new Error(`run.succeeded missing from UI message events: ${JSON.stringify(eventRows)}`);
+  if (!eventRows.some((value) => String(value).includes('run.started'))) throw new Error(`run.started missing from expanded UI tool events: ${JSON.stringify(eventRows)}`);
   if (wsHandshakes < 1) throw new Error('no WebSocket handshake observed in Chrome CDP');
 
   const runId = [...new Set(workspaceNetwork.map((item) => String(item.url ?? '').match(/\/api\/v1\/workspace\/runs\/([^/?#]+)/)?.[1]).filter(Boolean))][0];
@@ -239,6 +239,10 @@ async function run() {
   if (!runReadback.ok) throw new Error(`run persistence readback failed: ${runReadback.status}`);
   const runPayload = await runReadback.json();
   if (runPayload.data?.status !== 'succeeded') throw new Error(`run persistence readback did not succeed: ${JSON.stringify(runPayload.data)}`);
+  const runEventsReadback = await fetch(`${apiUrl}/api/v1/workspace/runs/${encodeURIComponent(runId)}/events?after=0`, { headers: { cookie } });
+  if (!runEventsReadback.ok) throw new Error(`run event readback failed: ${runEventsReadback.status}`);
+  const runEventsPayload = await runEventsReadback.json();
+  if (!(runEventsPayload.data?.items ?? []).some((event) => event.eventType === 'run.succeeded')) throw new Error(`run.succeeded missing from persisted events: ${JSON.stringify(runEventsPayload.data?.items ?? [])}`);
 
   const desktopPath = await captureViewport(cdp, 1440, 900, 'workspace-desktop-1440x900.png');
   const mobilePath = await captureViewport(cdp, 390, 844, 'workspace-mobile-390x844.png');
@@ -247,7 +251,7 @@ async function run() {
   const sessionReadback = await fetch(`${apiUrl}/api/v1/workspace/agent-sessions?accountId=${encodeURIComponent(accountId)}`, { headers: { cookie } });
   if (!sessionReadback.ok) throw new Error(`session persistence readback failed: ${sessionReadback.status}`);
   const sessionPayload = await sessionReadback.json();
-  const session = sessionPayload.data?.items?.find((item) => item.title === '真实验证会话');
+  const session = sessionPayload.data?.items?.find((item) => String(item.title).includes('检查当前 Workspace 状态并返回摘要'));
   if (!session?.id) throw new Error('session persistence readback missing created session');
 
   const browserState = await evaluate(cdp, '({ href: location.href, sessionCount: document.querySelectorAll(".workspace-session-row").length, runStatus: document.querySelector(".workspace-thread .workspace-status")?.textContent ?? "", result: document.querySelector(".workspace-message-final")?.innerText ?? "", messageTypes: { user: document.querySelectorAll(".workspace-message-user").length, reasoning: document.querySelectorAll(".workspace-message-reasoning").length, tool: document.querySelectorAll(".workspace-message-tool").length, final: document.querySelectorAll(".workspace-message-final").length }, eventSummary: Array.from(document.querySelectorAll(".workspace-message-tool")).map((node) => node.innerText).join(" | ") })');

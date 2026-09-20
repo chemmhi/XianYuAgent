@@ -11,7 +11,7 @@
 - 后端：`WorkspaceService`、Memory/Postgres Store、服务端 Run/Step 状态迁移、`clientRunRef` 业务去重、`Idempotency-Key` 请求幂等、指令/Step 脱敏 ViewModel。
 - API：`GET/POST /api/v1/workspace/agent-sessions`、search/switch/archive、`POST /api/v1/workspace/runs`、Run/event GET。
 - WebSocket：Session Cookie、Origin host、Run scope 校验；先发 snapshot，再按 `after` 游标补发事件；无效游标归一化为 0。
-- 前端：`WorkspacePage`、`useWorkspaceController`、左侧会话列表、右侧连续消息线程、固定底部 composer、Run/Step 实时状态、reasoning summary 折叠、realtime/reconnect/error/empty/forbidden 状态。
+- 前端：`WorkspacePage`、`useWorkspaceController`、左侧会话列表、右侧连续消息线程、自动标题草稿流、历史消息回读、reasoning summary 折叠、tool_event 聚合折叠、消息列居中限宽、realtime/reconnect/error/empty/forbidden 状态。
 
 ## 已执行命令
 
@@ -22,9 +22,9 @@
 | Workspace WebSocket smoke | `node apps/api/scripts/workspace-ws-smoke.mjs` | 通过：101、snapshot、事件 replay、游标去重、`after=NaN`、Origin/认证/404 门禁 |
 | API full suite | `npm --workspace apps/api run test` | 通过：env0、onboarding、workspace session/run、workspace websocket、products、sync、mapper |
 | Web typecheck | `npm --workspace apps/web run typecheck` | 通过 |
-| Web unit tests | `npm --workspace apps/web run test` | 通过：15 files / 47 tests |
+| Web unit tests | `npm --workspace apps/web run test` | 通过：15 files / 50 tests |
 | Web production build | `npm --workspace apps/web run build` | 通过 |
-| Real browser E2E | `npm --workspace apps/web run test:e2e:chrome:workspace`（默认 `WORKSPACE_E2E_RUNTIME=in-process`） | 通过：临时 PostgreSQL + `ALLOW_IN_MEMORY=false` API + Vite + Chrome/CDP；session/run 持久化回读、`user=1 / reasoning=1 / tool=7 / final=1`、2 次 WS handshake、断线/重连、`run.succeeded` 事件回放、`errorNodes=[]`、桌面/移动截图 |
+| Real browser E2E | `$env:WORKSPACE_E2E_RUNTIME='pi'; npm run test:e2e:chrome:workspace` | 通过：临时 PostgreSQL + `ALLOW_IN_MEMORY=false` API + Pi runtime + Vite + Chrome/CDP；无标题表单、首条消息自动命名、`user=1 / reasoning=4 / toolGroup=2 / final=1`、工具组展开、session/run 与 `run.succeeded` 持久化回读、2 次 WS handshake、断线/重连、`errorNodes=[]`、桌面/移动截图 |
 | Diff hygiene | `git diff --check` | 通过 |
 
 > 复核说明：本轮 API 全量 smoke 已在清理残留测试进程后完整通过；真实浏览器脚本使用临时 PostgreSQL 数据库和独立 Chrome profile，验证了前端真实入口、持久化、断线重连与事件回放。该证据仍不替代独立 Worker/Pi Runtime、发布级恢复和人工视觉签核。
@@ -38,7 +38,7 @@
 
 ## 未关闭门禁
 
-- 当前 Runtime 是 API 进程内受控实现，不等同于独立 Worker/Pi Runtime；未覆盖 lease、超时、取消、重试、unknown 和观测指标。
+- 当前 Runtime 在本次浏览器证据中使用 Pi adapter，但仍运行在 API 进程内，不等同于独立 Worker/Pi Runtime；未覆盖 lease、超时、取消、重试、unknown 和观测指标。
 - 已执行真实 PostgreSQL migration/复读 smoke，并由真实浏览器脚本验证 session/Run 持久化；发布级迁移回滚、Testcontainers 和恢复演练仍未覆盖。
 - 已生成 Chrome/CDP `1440x900` 与 `390x844` 截图，且自动化验证断线/重连和事件回放；独立人工视觉签核与偏差记录仍待完成。
 - `S4-VS6B` 的 Confirmation/Outbox、confirm/cancel/retry/recover 留待后续切片。
@@ -53,5 +53,5 @@
 - Workspace 右侧改为单一连续对话线程，消息类型为 `user_message`、`reasoning_summary`、`tool_event`、`final_answer`；reasoning summary 默认折叠，仅展示高层摘要，不透传原始逐 token 思维链。
 - `workspace.messages` 已接入 MemoryStore/PostgresStore；后续 Run 会把历史消息压缩为模型上下文，消息与 Run 事件均可持久化回放。
 - 真实 `.env` smoke：`npm --workspace apps/api run test:pi:live`，provider host `api.deepseek.com`，model `deepseek-flash`，Run `succeeded`，`keyPrinted=false`。
-- API 全量 smoke、Web 15 files / 47 tests、API/Web build 与 typecheck、`git diff --check` 均已通过。
+- API 全量 smoke、Web 15 files / 50 tests、API/Web build 与 typecheck、真实 Pi + Chrome E2E、`git diff --check` 均已通过。
 - 当前结论仍为 `PARTIALLY_VERIFIED`：独立 Worker/Pi 服务、发布级恢复/取消/重试/unknown、人工视觉签核仍未完成，不能宣称发布级完成。
