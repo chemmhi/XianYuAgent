@@ -85,7 +85,10 @@ export interface DashboardSnapshot {
   pendingManualCount: number;
   availableCouponCount: number;
   trend: Array<{ label: string; orderAmount: number; autoProcessRate: number }>;
-  riskTodos: Array<{ id: string; title: string; severity: 'high' | 'medium' | 'low'; href: string }>;
+  health?: Array<{ label: string; value: string; tone: 'ok' | 'warn' | 'danger' | 'info' | 'gray' }>;
+  productRank?: Array<{ title: string; subtitle: string; orders: string; stock: string; status: string; tone: 'ok' | 'warn' | 'danger' | 'info' | 'gray' }>;
+  recentActivity?: Array<{ time: string; text: string; status: string; tone: 'ok' | 'warn' | 'danger' | 'info' | 'gray'; href?: string }>;
+  riskTodos: Array<{ id: string; title: string; detail?: string; severity: 'high' | 'medium' | 'low'; href: string }>;
 }
 
 export interface WorkspaceSession {

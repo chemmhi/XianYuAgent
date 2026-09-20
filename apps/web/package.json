@@ -9,6 +9,7 @@
     "build": "npm run typecheck && vite build",
     "test": "vitest run",
     "test:e2e:chrome": "node scripts/e2e-chrome.mjs",
+    "test:e2e:chrome:dashboard": "node scripts/e2e-dashboard-chrome.mjs",
     "test:e2e:chrome:products": "node scripts/e2e-products-chrome.mjs",
     "test:e2e:chrome:coupons": "node scripts/e2e-coupons-chrome.mjs",
     "test:e2e:chrome:messages": "node scripts/e2e-messages-chrome.mjs",

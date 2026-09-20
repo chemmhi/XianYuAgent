@@ -96,6 +96,7 @@
 | `S4-VS6A` Workspace 会话与 Run 首链路 | `PARTIALLY_VERIFIED` | AgentSession/Run/Step、Memory/Postgres Store、受控 Runtime、clientRunRef、WS 游标补事件、真实 PostgreSQL/Chrome/CDP 首链路、前端 Workspace 页面 | 独立 Worker/Pi Runtime、发布级恢复、人工视觉签核与完整状态回归 |
 | `S4-VS6B` Workspace Confirmation/Outbox | `PLANNED` | confirm/cancel/retry/recover、unknown 恢复 | Policy、幂等、租约、审计、真实 Runtime |
 | `S4-VS7A` Settings API Key 配置 | `READY_FOR_REVIEW` | 正式 `/settings`、CredentialRef API、AES-256-GCM 加密、创建/编辑/轮换/启停/撤销、脱敏 metadata、Web/API 定向验证 | PostgreSQL migration 018 加密复读与回滚、真实 403/409 跨层 E2E、1440×900/390×844 视觉证据、三轮独立复审 |
+| `S4-VS-DASHBOARD` 仪表盘高保真界面 | `PARTIALLY_VERIFIED` | `/dashboard` 正式 feature、桌面/移动独立 MobileFrame、KPI/趋势/健康度/商品排行/最近处理/风险抽屉；Web 32 files / 102 tests、build、Chrome/CDP 双 viewport 截图通过 | Dashboard API 路由尚未在后端实现；当前截图使用显式 `VITE_DASHBOARD_MODE=mock` fixture，真实 API/持久化 E2E、全状态截图和独立视觉签核仍开放 |
 | `S4-ENV-RECOVERY` | `BLOCKED` | 迁移回滚、Testcontainers、Redis/MinIO 重启恢复 | 发布级恢复演练和旧数据兼容证据 |
 | `S4-EXT-ACCOUNT` | `BLOCKED` | 真实 APP 扫码、Cookie、资料同步 | 真实外部账号人工验收 |
 | `S4-ENV-RUNTIME` | `PLANNED` | Pi Runtime 健康、超时、重试、取消和观测 | 独立运行时验证；不以页面/API smoke 代替 |
