@@ -66,13 +66,14 @@
 - 2026-09-20 商品表格空态修订已通过合并后门禁并合入 `master`：`c641d29`（`merge: 合入商品表格空态与工具栏修订`），空表格/加载失败提示占满列表剩余区域并居中，工具栏移除 `共 0 件`，分页底部统计保留；Web/API 构建、Vitest、商品 Chrome/CDP E2E 与 diff 检查通过。
 - 门禁：代码已合入 `master`，人工审核仍需按 `docs/evidence/stage5/S4-VS3/test-baseline.md` 执行并回写结论。
 
-## S4-VS7A Settings API Key（首片实现，待独立复核）
+## S4-VS7A Settings API Key（首片实现，真实证据已补，待发布级复核）
 
 - 实现边界：`/settings` 选择明确 `accountId` 后管理模型 API Key 的 CredentialRef；列表仅返回 provider、alias、status、version、fingerprint、metadata 和 `canReveal=false`，不提供 reveal。
 - 后端：新增 `apps/api/migrations/018_credential_store.sql`、`credential-crypto.ts`、`credential-store.ts` 与 `/api/v1/credentials` CRUD/rotate/enable/disable/revoke；写入带 `Idempotency-Key` 和 `expectedVersion`，服务端按账号 scope 校验并写审计摘要。
 - 前端：新增 `apps/web/src/features/settings/`，接入正式 `/settings` 路由、账号选择、CredentialStore panel、创建/编辑/轮换/启用/禁用/撤销、loading/empty/error/submitting/saved 状态与移动端底部设置导航。
 - 受控验证：API build、credential-store smoke（AES-256-GCM 加解密、创建/列表、轮换、版本冲突、禁用、撤销及撤销后禁止启用）、Web typecheck、26 files / 88 tests、Web build、`git diff --check` 已通过。
-- 未关闭门禁：当前 smoke 为 `allowInMemory=true`；尚无真实 PostgreSQL migration 018 加密字段复读/回滚、Settings Chrome/CDP 1440×900 与 390×844 截图、真实 403/409 跨层 E2E、逐状态视觉偏差记录及三轮独立复审。因此状态仅为 `READY_FOR_REVIEW`，不能标记 `PASS`。
+- 真实增量验证：临时 PostgreSQL 已执行迁移 `001`–`018`，`credential_values.ciphertext` 真实落库且不等于明文；Chrome/CDP 已通过 `/settings`、403/409、create/rotate/disable/revoke 与 secret redaction，并生成 `1440×900` / `390×844` 截图；证据见 `docs/evidence/stage5/S4-VS7A/`。
+- 未关闭门禁：018 的发布级 rollback / 已有 volume 回退演练、旧 `auth.account_credentials` 双读单写兼容迁移与正式 merge lock 复核仍开放。因此状态保持 `READY_FOR_REVIEW`，不标记 `PASS`。
 
 ## 未完成切片索引（2026-09-19）
 

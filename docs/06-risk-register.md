@@ -125,6 +125,6 @@
 
 ### 2026-09-20 S4-VS7A Settings API Key 风险复核
 
-- `S5-RISK-026` 部分缓解但保持开放：CredentialStore 已独立于通用设置保存入口，API 只返回 `CredentialRef` 脱敏 metadata，明文仅在 create/rotate 请求边界出现；`Idempotency-Key`、`expectedVersion`、账号 scope、轮换/启停/撤销审计和撤销后禁止启用已由受控 smoke 覆盖。真实 PostgreSQL 加密复读、403/409 跨层 E2E、Chrome/CDP 视觉证据和独立三轮复审尚未完成。
-- `S5-RISK-027` 新增并保持开放：`018_credential_store.sql` 与 AES-256-GCM 代码已落地，但当前验证使用 `allowInMemory=true`；必须在真实 PostgreSQL volume 执行 apply/verify/rollback、检查 ciphertext/key_version/checksum/metadata_json，并证明重复迁移与旧数据兼容后才能关闭。
-- `S5-RISK-028` 新增并保持开放：Settings 首片尚无 1440×900、390×844 固定 viewport 截图和逐状态偏差记录；移动端底部设置导航、loading/empty/error/forbidden/submitting/saved 仍需浏览器复核，不能以 Web 单测和 build 代替视觉门禁。
+- `S5-RISK-026` 已部分缓解但保持开放：CredentialStore 已独立于通用设置保存入口，API 只返回 `CredentialRef` 脱敏 metadata，明文仅在 create/rotate 请求边界出现；`Idempotency-Key`、`expectedVersion`、账号 scope、轮换/启停/撤销审计、403/409 与撤销后禁止启用均已由 smoke/Chrome/CDP 覆盖。旧 `auth.account_credentials` 兼容迁移仍需独立方案与签核。
+- `S5-RISK-027` 已部分缓解但保持开放：临时 PostgreSQL 已执行 `001`–`018`，并复读 `credential_values.ciphertext/key_version/checksum/metadata_json`；发布级 rollback、已有 volume 回退与重复迁移后的恢复演练仍未覆盖。
+- `S5-RISK-028` 已部分缓解但保持开放：Settings 已生成 `1440×900`、`390×844` 固定 viewport 截图并完成桌面/移动偏差记录；loading/empty/error/submitting/saved 与移动短标签导航均有浏览器路径，正式人工视觉签核仍待 merge lock 后完成。

@@ -11,6 +11,7 @@
     "worker": "node dist/worker.js",
     "migrate": "node scripts/migrate.mjs",
     "test:postgres": "npm run build && node scripts/products-postgres-smoke.mjs",
+    "test:postgres:credentials": "npm run build && node scripts/credential-store-postgres-smoke.mjs",
     "test:messages:infra": "npm run build && node scripts/messages-infra-smoke.mjs",
     "test:pi:live": "npm run build && node scripts/pi-runtime-live-smoke.mjs",
     "test:xianyu-im-read": "node --import tsx --test scripts/xianyu-im-read.test.ts",

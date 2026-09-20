@@ -87,5 +87,5 @@
 
 - 已实现：`/settings` 正式路由；账号级 `CredentialRefVM`；`GET/POST/PATCH /api/v1/credentials` 与 `rotate/enable/disable/revoke`；`expectedVersion`、`Idempotency-Key`、账号 scope、审计摘要和 AES-256-GCM 应用层加密；前端 CredentialStore panel、创建/编辑/轮换/启用/禁用/撤销及 loading/empty/error/submitting/saved 状态。
 - 已执行：`npm --workspace apps/api run build`、`node apps/api/scripts/credential-store-smoke.mjs`（加密/解密、创建、列表、轮换、版本冲突、禁用、撤销、撤销后禁止启用）；`npm --workspace apps/web run typecheck`、`npm --workspace apps/web run test -- --run`（26 files / 88 tests）、`npm --workspace apps/web run build`、`git diff --check`。
-- 当前结论：`S4-VS7A = READY_FOR_REVIEW`。当前 smoke 使用 `allowInMemory=true`，没有证明 PostgreSQL migration 018 的真实加密字段复读、迁移回滚、真实浏览器用户路径或视觉 1:1；尚未生成 `1440×900` / `390×844` Settings 截图，也未执行独立业务/架构/质量三轮复审。
+- 当前结论：`S4-VS7A = READY_FOR_REVIEW`。已补真实 PostgreSQL `001`–`018` migration 与 `credential_values.ciphertext` 密文复读、Chrome/CDP `/settings` 用户路径、403/409 跨层断言和 `1440×900` / `390×844` 截图；证据见 `docs/evidence/stage5/S4-VS7A/`。仍开放发布级 rollback、旧 `auth.account_credentials` 双读单写兼容迁移与 merge lock 后独立签核。
 - 回滚边界：先停止 `/api/v1/credentials` 新写入，保留旧凭证引用和审计；迁移回退前确认没有 018 表依赖，按 expand/verify/switch/contract 顺序处理，不删除历史审计或旧密文。

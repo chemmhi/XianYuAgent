@@ -483,7 +483,7 @@ export class PostgresStore implements Store {
       await client.query(`insert into accounts.credential_values (credential_ref_id,ciphertext,key_version,checksum,metadata_json)
         values ($1,$2,1,$3,$4::jsonb)`, [id, Buffer.from(input.secretCiphertext, 'utf8'), input.fingerprint, JSON.stringify(input.metadata ?? {})]);
       await client.query('commit');
-      return this.toCredentialRef({ ...ref.rows[0], metadata_json: input.metadata ?? {} });
+      return this.toCredentialRef({ ...ref.rows[0], metadata_json: input.metadata ?? {}, checksum: input.fingerprint });
     } catch (error) {
       await client.query('rollback');
       throw error;

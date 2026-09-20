@@ -323,3 +323,13 @@
 | S5-R56 | 质量 / 安全 / 运维 | 是否完成真实 PostgreSQL/403/409/回滚、Chrome/CDP 双 viewport、逐状态视觉和三轮独立评审 | root + QA/安全待复核 | BLOCKED | 当前仅有 `allowInMemory=true` credential-store smoke、Web 26 files / 88 tests、typecheck/build；暂无 Settings 专属 1440×900 / 390×844 截图、真实 DB 回读或跨层浏览器证据 |
 
 本轮结论：`S4-VS7A = READY_FOR_REVIEW`。实现已形成可审计首片，但 `S5-RISK-026` 及新增的 migration/视觉证据风险仍开放；未达到 `PASS`，不得宣称已完成发布级 Settings。
+
+### 2026-09-20：S4-VS7A 真实证据增量复核
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R57 | 业务 / 验收 | `/settings` 账号隔离、create/rotate/disable/revoke、刷新后状态与明文不回显 | root + Chrome/CDP | PASS（受控链路） | `npm run test:e2e:chrome:settings`；`docs/evidence/stage5/S4-VS7A/screenshots/` |
+| S5-R58 | 架构 / 数据流 | 真实 PostgreSQL migration 018、ciphertext/key_version/checksum、PG ref 投影指纹与 API 脱敏 | root + settings_audit | PASS（临时 PostgreSQL） | `npm --workspace apps/api run test:postgres:credentials`；`apps/api/scripts/credential-store-postgres-smoke.mjs` |
+| S5-R59 | 质量 / 安全 / 视觉 | 403/409、secret 不进入 URL/localStorage/input、1440×900/390×844 双端视觉与短标签导航 | root + prototype_audit | PASS（受控环境） | `apps/web/scripts/e2e-settings-chrome.mjs`；`docs/evidence/stage5/S4-VS7A/README.md` |
+
+增量结论：`S4-VS7A` 已完成首片真实浏览器与临时 PostgreSQL 证据闭环，状态仍保持 `READY_FOR_REVIEW`；发布级 rollback、旧明文 `auth.account_credentials` 双读单写兼容迁移和正式 merge lock 签核未关闭前，不标记 `PASS`。

@@ -21,4 +21,4 @@ VS5A 回滚边界：先关闭 `/api/v1/conversations/{id}/events` 实时订阅�
 - Apply：在目标 PostgreSQL 上按顺序执行 `018_credential_store.sql`，确认 `accounts.accounts` 已存在且管理员账号 scope 可用；重复执行必须保持幂等。
 - Verify：检查 `credential_refs` 与 `credential_values` 的 1:1 外键、`UNIQUE (account_id, kind, purpose)`、status/version/checksum 约束；通过真实 PostgreSQL 创建/列表/轮换/禁用/启用/撤销复读验证 ciphertext 不等于明文，API 响应不含 `apiKey`。
 - Rollback：先停止 `/api/v1/credentials` 新写入并保留旧 CredentialRef、密文和审计；确认没有依赖 018 表的应用版本后，再按 contract → switch → verify 逆序回退。不得直接删除历史审计、旧密文或账号绑定凭证；轮换失败必须保留旧密文引用。
-- 当前证据边界：`node apps/api/scripts/credential-store-smoke.mjs` 已覆盖 AES-256-GCM 加解密、create/list/rotate、版本冲突、disable/revoke 和 revoked guard，但使用 `allowInMemory=true`，不等价于 PostgreSQL migration apply/rollback 或发布级恢复证据。
+- 当前证据边界：`node apps/api/scripts/credential-store-smoke.mjs` 覆盖 MemoryStore 行为；`node apps/api/scripts/credential-store-postgres-smoke.mjs` 已在临时 PostgreSQL 上覆盖 migration `001`–`018`、ciphertext/key_version/checksum 复读与 API 脱敏。发布级 rollback、已有 volume 回退、旧 `auth.account_credentials` 双读单写兼容和恢复演练仍需单独证据。
