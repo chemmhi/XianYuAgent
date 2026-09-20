@@ -13,6 +13,7 @@ export interface OrderVM {
   buyerAvatarUrl?: string;
   itemId: string;
   itemTitle: string;
+  itemImageUrl?: string;
   amountMinor: number;
   paymentStatus: PaymentStatus;
   orderStatus: OrderStatus;

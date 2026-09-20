@@ -4,6 +4,23 @@ import { decodeConversationCursor, encodeConversationCursor, isAfterConversation
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
 import type { AgentSessionRecord, RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, WorkspaceMessageRecord, WorkspaceMessageType } from './domain.js';
 
+function meaningfulOrderTitle(value: string | undefined, references: Array<string | undefined>): string | undefined {
+  const title = value?.trim();
+  if (!title) return undefined;
+  const normalizedReferences = references.map((reference) => reference?.trim()).filter(Boolean);
+  return normalizedReferences.some((reference) => reference === title) ? undefined : title;
+}
+function firstImageUrl(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (Array.isArray(value)) return value.map((item) => firstImageUrl(item)).find(Boolean);
+  return undefined;
+}
+function productImageUrl(product: ProductRecord | undefined): string | undefined {
+  const attributes = product?.attributes ?? {};
+  const xianyu = attributes.xianyu && typeof attributes.xianyu === 'object' && !Array.isArray(attributes.xianyu) ? attributes.xianyu as Record<string, unknown> : {};
+  return firstImageUrl(xianyu.imageUrls) ?? firstImageUrl(xianyu.imageUrl) ?? firstImageUrl(attributes.imageUrls) ?? firstImageUrl(attributes.imageUrl);
+}
+
 function conversationSortKey(conversation: ConversationRecord): string { return conversation.lastMessageAt ?? conversation.updatedAt; }
 
 export class MemoryStore implements Store {
@@ -785,10 +802,18 @@ export class MemoryStore implements Store {
     const scopedConversation = conversation?.accountId === order.accountId ? conversation : undefined;
     const matchedConversation = scopedConversation
       ?? [...this.conversations.values()].find((candidate) => candidate.accountId === order.accountId && candidate.buyerRef === order.buyerId);
-    const itemTitle = (!order.itemTitle.trim() || order.itemTitle.trim() === order.itemId.trim()) ? (matchedProduct?.title ?? '') : order.itemTitle;
+    const matchedItemConversation = [...this.conversations.values()].find((candidate) => candidate.accountId === order.accountId && candidate.itemRef === order.itemId && Boolean(candidate.itemTitle?.trim()));
+    const itemTitle = meaningfulOrderTitle(order.itemTitle, [order.itemId])
+      ?? meaningfulOrderTitle(matchedProduct?.title, [order.itemId, matchedProduct?.externalProductRef])
+      ?? meaningfulOrderTitle(matchedItemConversation?.itemTitle, [order.itemId, matchedItemConversation?.itemRef])
+      ?? meaningfulOrderTitle(matchedConversation?.itemTitle, [order.itemId, matchedConversation?.itemRef])
+      ?? '';
+    const itemImageUrl = matchedItemConversation?.itemImageUrl?.trim()
+      || matchedConversation?.itemImageUrl?.trim()
+      || productImageUrl(matchedProduct);
     const buyerNickname = order.buyerNickname?.trim() || matchedConversation?.buyerDisplayName?.trim() || undefined;
     const buyerAvatarUrl = order.buyerAvatarUrl?.trim() || matchedConversation?.buyerAvatarUrl?.trim() || undefined;
-    return { ...order, buyerNickname, buyerAvatarUrl, itemTitle };
+    return { ...order, buyerNickname, buyerAvatarUrl, itemTitle, itemImageUrl };
   }
 
   private productDetail(product: ProductRecord): ProductRecord {

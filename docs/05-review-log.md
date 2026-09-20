@@ -355,6 +355,15 @@
 | S5-R67 | 质量 / 交付 | 迁移、构建、全量测试、PostgreSQL 持久化与 Chrome/CDP 订单旅程是否在 merge lock 后于 master 重跑通过 | root | PASS | merge `490e145`；`npm run typecheck`、`npm test`、`npm run build`、`npm run db:migrate`、`npm --workspace apps/api run test:orders:postgres`、`npm run test:e2e:chrome:orders`、`docker compose config --quiet`、`git diff --check` |
 
 本轮结论：订单列表字段与头像聚合修订已通过复审并合入 `master`；详情抽屉内容仍按用户更正保留原样。真实外部 seller 权限与发布级回滚风险继续沿用 `S4-VS4A` 既有结论，不以受控 fixture 代替真实外部验收。
+
+### 2026-09-20：S4-VS4A 订单状态筛选边界复核
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R68 | 业务 / 状态机 | “待发货”“待收货”“待评价”是否按已支付、订单、发货和售后 canonical 字段组合筛选，避免把未付款、待发货或退款订单误归入“待评价” | root + verify_pending_review_filter | PASS | `apps/web/src/features/orders/order-status.ts`、`apps/web/src/features/orders/order-status.test.ts` |
+| S5-R69 | 浏览器 / 回归 | Chrome/CDP 是否验证“待评价”请求包含 `paymentStatus=paid`、`orderStatus=completed`、`deliveryStatus=delivered`、`afterSalesStatus=none`，且结果不混入“待发货/待收货” | root + orders_e2e | PASS | `apps/web/scripts/e2e-orders-chrome.mjs`、`npm run test:e2e:chrome:orders`、`npm test` |
+
+本轮结论：此前记录的“待评价”筛选异常已修复并固定为四字段组合；回归用例明确排除已退款订单。该项作为状态机回归关注点继续保留，后续修改不得退回到仅按 `orderStatus=completed` 判定。详情抽屉内容本轮仍保持不变，交付动作继续后置至 `S4-VS4B/C`。
 ### 2026-09-20：S4-VS7A Settings API Key 首片复核
 
 本节只复核当前实现和受控证据，不把 MemoryStore smoke、构建成功或页面可打开升级为发布级通过。

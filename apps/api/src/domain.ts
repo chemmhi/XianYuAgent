@@ -174,6 +174,7 @@ export interface OrderRecord {
   buyerAvatarUrl?: string;
   itemId: string;
   itemTitle: string;
+  itemImageUrl?: string;
   amountMinor: number;
   paymentStatus: PaymentStatus;
   orderStatus: OrderStatus;
@@ -198,6 +199,7 @@ export interface XianyuOrderItem {
   buyerAvatarUrl?: string;
   itemId: string;
   itemTitle: string;
+  itemImageUrl?: string;
   amountMinor: number;
   paymentStatus: PaymentStatus;
   orderStatus: OrderStatus;

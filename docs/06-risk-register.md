@@ -137,9 +137,15 @@
 ### 2026-09-20 S4-VS4A 订单字段与头像聚合风险复核
 
 - `S5-RISK-017` 继续保持开放：本轮只读列表仍不包含交付预览、库存锁、发货/取消/重试、unknown/timeout、Outbox 和 DeliveryRecord。
-- 字段完整性风险已部分关闭：`OrderRecord` / `XianyuOrderItem` 已分离买家昵称、姓名和头像；MemoryStore/PostgresStore 按账号从本地会话与商品表聚合缺失值，列表不再回退显示买家姓名、用户 ID 或商品 ID。
+- 字段完整性风险已部分关闭：`OrderRecord` / `XianyuOrderItem` 已分离买家昵称、姓名和头像；MemoryStore/PostgresStore 按账号从本地会话与商品表聚合缺失昵称、头像、商品名称和商品缩略图，列表不再回退显示买家姓名、用户 ID 或商品 ID；商品无法从本地数据聚合时显示“商品已删除”提示。
 - 迁移风险继续开放：`019_order_display_fields.sql` 与 `020_order_buyer_avatar.sql` 已幂等执行，完整迁移回滚、旧数据兼容、Testcontainers 和发布级恢复演练仍未覆盖。
 - 真实外部 seller 权限仍沿用 S4-VS4A 既有结论，不以受控 fixture 的头像/订单数据代替真实外部验收。
+
+### 2026-09-20 S4-VS4A 订单状态筛选边界风险复核
+
+- “待发货”已收紧为 `paymentStatus=paid + deliveryStatus=pending`；“待收货”已收紧为 `paymentStatus=paid + orderStatus=open + deliveryStatus=delivered`；“待评价”已收紧为 `paymentStatus=paid + orderStatus=completed + deliveryStatus=delivered + afterSalesStatus=none`。
+- 此前的“待评价”筛选异常已通过 `order-status` 单元测试和 Chrome/CDP E2E 修复并锁定，回归断言明确排除待发货、待收货及已退款订单；该项不单独关闭 `S5-RISK-017`，因为交付预览、库存锁和发货动作仍属 `S4-VS4B/C`。
+- 后续任何订单状态字段调整必须同步更新 `filtersForStatus`、`statusFilterFromFilters`、`getOrderDisplayStatus` 与浏览器回归断言，避免再次退回到仅按 `orderStatus=completed` 识别待评价。
 
 ### 2026-09-20 S4-VS7A Settings API Key 风险复核
 

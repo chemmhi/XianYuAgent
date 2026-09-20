@@ -11,12 +11,14 @@ export function OrderTable({ orders, page, totalPages, total, onPageChange, onOp
         {orders.map((order) => {
           const buyerNickname = order.buyerNickname?.trim() ?? '';
           const buyerName = order.buyerName?.trim() ?? '';
-          const buyerAvatarUrl = (order as OrderVM & { buyerAvatarUrl?: string }).buyerAvatarUrl?.trim() ?? '';
+          const buyerAvatarUrl = normalizeImageUrl(order.buyerAvatarUrl);
           const itemTitle = order.itemTitle?.trim() && order.itemTitle.trim() !== order.itemId.trim() ? order.itemTitle.trim() : '';
+          const itemUnavailable = !itemTitle;
+          const itemImageUrl = normalizeImageUrl(order.itemImageUrl);
           return <div className="orders-row" role="row" key={order.orderNo} data-order-no={order.orderNo}>
           <button className="orders-order-link" type="button" onClick={() => onOpen(order.orderNo)}><strong>{order.orderNo}</strong><small>{order.deliveryType === 'coupon_only' ? '卡券交付' : order.deliveryType === 'no_logistics' ? '免物流' : order.deliveryType === 'mixed' ? '混合交付' : '人工发货'}</small></button>
-          <div className="orders-buyer"><span className="orders-avatar">{buyerAvatarUrl ? <img src={buyerAvatarUrl} alt="" /> : null}</span><span title={`买家姓名：${buyerName}`} aria-label={`买家昵称，悬浮查看买家姓名：${buyerName}`}><strong>{buyerNickname}</strong></span></div>
-          <div className="orders-product"><strong>{itemTitle}</strong></div>
+          <div className="orders-buyer"><span className="orders-avatar">{buyerAvatarUrl ? <img src={buyerAvatarUrl} alt="" onError={(event) => { event.currentTarget.style.display = 'none'; }} /> : null}</span><span title={`买家姓名：${buyerName}`} aria-label={`买家昵称，悬浮查看买家姓名：${buyerName}`}><strong>{buyerNickname}</strong></span></div>
+          <div className="orders-product" title={itemUnavailable ? '商品已删除或暂无本地商品信息' : itemTitle}><span className="orders-product-thumb">{itemImageUrl ? <img src={itemImageUrl} alt="" onError={(event) => { event.currentTarget.style.display = 'none'; }} /> : null}</span><strong className={itemUnavailable ? 'orders-product-missing' : undefined}>{itemUnavailable ? '商品已删除' : itemTitle}</strong></div>
           <span className="orders-amount">¥{(order.amountMinor / 100).toFixed(2)}</span>
           <time className="orders-time" dateTime={order.createdAt}>{formatOrderDate(order.createdAt)}</time>
           {(() => { const status = getOrderDisplayStatus(order); return <StatusPill tone={orderDisplayStatusTone(status)}>{orderDisplayStatusLabel(status)}</StatusPill>; })()}
@@ -30,4 +32,9 @@ export function OrderTable({ orders, page, totalPages, total, onPageChange, onOp
 }
 
 function StatusPill({ tone, children }: { tone: 'success' | 'warn' | 'danger' | 'neutral' | 'info'; children: string }) { return <b className={`orders-status orders-status-${tone}`}>{children}</b>; }
+function normalizeImageUrl(value?: string): string | undefined {
+  const normalized = value?.trim();
+  if (!normalized) return undefined;
+  return normalized.startsWith('//') ? `https:${normalized}` : normalized;
+}
 function getPageItems(page: number, totalPages: number): Array<number | 'ellipsis'> { if (totalPages <= 5) return Array.from({ length: totalPages }, (_, index) => index + 1); if (page <= 3) return [1, 2, 3, 4, 'ellipsis', totalPages]; if (page >= totalPages - 2) return [1, 'ellipsis', totalPages - 3, totalPages - 2, totalPages - 1, totalPages]; return [1, 'ellipsis', page - 1, page, page + 1, 'ellipsis', totalPages]; }

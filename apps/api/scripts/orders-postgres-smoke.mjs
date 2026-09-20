@@ -38,7 +38,7 @@ try {
   const cookie = cookieHeader(loggedIn);
   const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef, displayName: 'PostgreSQL 订单账号' });
   accountId = account.id;
-  await runtime.store.createProduct({ adminId, accountId, externalProductRef: 'pg-item', title: 'PostgreSQL 订单商品' });
+  await runtime.store.createProduct({ adminId, accountId, externalProductRef: 'pg-item', title: 'PostgreSQL 订单商品', attributes: { xianyu: { imageUrls: ['https://img.example/pg-product.png'] } } });
   const buyerConversation = await runtime.store.createConversation({ adminId, accountId, buyerRef: 'pg-buyer', buyerDisplayName: 'pg-nickname', buyerAvatarUrl: 'https://img.example/pg-nick.png', externalConversationRef: `orders-pg-buyer-${process.pid}` });
   orderNo = `PG-${process.pid}-${Date.now()}`;
   await runtime.store.createOrder({
@@ -67,10 +67,24 @@ try {
   assert.equal(listed.body.data.items[0].buyerNickname, 'pg-nickname');
   assert.equal(listed.body.data.items[0].buyerAvatarUrl, 'https://img.example/pg-nick.png');
   assert.equal(listed.body.data.items[0].itemTitle, 'PostgreSQL 订单商品');
+  assert.equal(listed.body.data.items[0].itemImageUrl, 'https://img.example/pg-product.png');
   const buyerIdSearch = await request(port, `/api/v1/orders?accountId=${encodeURIComponent(accountId)}&keyword=pg-buyer`, { headers: { cookie } });
   assert.equal(buyerIdSearch.body.data.total, 0);
   const itemIdSearch = await request(port, `/api/v1/orders?accountId=${encodeURIComponent(accountId)}&keyword=pg-item`, { headers: { cookie } });
   assert.equal(itemIdSearch.body.data.total, 0);
+
+  const conversationOnly = await runtime.store.createConversation({ adminId, accountId, buyerRef: 'pg-conversation-buyer', itemRef: 'pg-conversation-item', itemTitle: 'PostgreSQL 会话聚合商品', itemImageUrl: 'https://img.example/pg-conversation-product.png', externalConversationRef: `orders-pg-item-only-${process.pid}` });
+  const conversationOnlyOrder = `PG-${process.pid}-${Date.now()}-ITEM`;
+  await runtime.store.createOrder({ adminId, order: { orderNo: conversationOnlyOrder, accountId, buyerId: 'pg-conversation-buyer', buyerName: 'PostgreSQL 会话买家', itemId: 'pg-conversation-item', itemTitle: 'pg-conversation-item', amountMinor: 1990, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'manual' } });
+  const conversationOnlyList = await request(port, `/api/v1/orders?accountId=${encodeURIComponent(accountId)}&keyword=${encodeURIComponent('PostgreSQL 会话聚合商品')}`, { headers: { cookie } });
+  assert.equal(conversationOnlyList.body.data.total, 1);
+  assert.equal(conversationOnlyList.body.data.items[0].orderNo, conversationOnlyOrder);
+  assert.equal(conversationOnlyList.body.data.items[0].itemTitle, 'PostgreSQL 会话聚合商品');
+  assert.equal(conversationOnlyList.body.data.items[0].itemImageUrl, 'https://img.example/pg-conversation-product.png');
+  const conversationOnlyDetail = await request(port, `/api/v1/orders/${encodeURIComponent(conversationOnlyOrder)}?accountId=${encodeURIComponent(accountId)}`, { headers: { cookie } });
+  assert.equal(conversationOnlyDetail.body.data.itemTitle, 'PostgreSQL 会话聚合商品');
+  const conversationOnlyIdSearch = await request(port, `/api/v1/orders?accountId=${encodeURIComponent(accountId)}&keyword=pg-conversation-item`, { headers: { cookie } });
+  assert.equal(conversationOnlyIdSearch.body.data.total, 0);
 
   const refreshedOrderNo = `${orderNo}-X`;
   await runtime.store.createProduct({ adminId, accountId, externalProductRef: 'pg-xianyu-item', title: '闲鱼同步商品标题' });

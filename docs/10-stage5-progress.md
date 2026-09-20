@@ -17,7 +17,7 @@
 | `S4-VS2E` 商品外部同步真实验收 | `PARTIALLY_VERIFIED` | 受控 MTOP mapper、Memory/Postgres、fixture E2E | 当前已登录 Chrome + 真实闲鱼账号、分页和数量口径复核 |
 | `S4-VS3` 卡券首页 | `READY_FOR_REVIEW` | API smoke、Chrome/CDP、桌面/移动截图、代码已合入 master | 真实 PostgreSQL/Redis/MinIO、逐状态人工浏览器审核、迁移整理 |
 | `S4-VS3A/B` 卡券明细/素材/库存锁 | `PLANNED` | `CouponItem`、`CouponAssetRef`、`InventoryLockVM` 契约已冻结 | bulk-save/delete、MinIO、reserve/consume/release、敏感交付边界 |
-| `S4-VS4A` 订单列表只读 | `PASS` | 订单 API、四态、账号 scope、关键词搜索、单状态筛选、六列 + 操作列、详情抽屉、分页、内部滚动、桌面/移动截图、真实 seller 订单读取与 PostgreSQL refresh 落库 | 交付预览、库存锁、发货/取消/重试转入 `S4-VS4B/C` |
+| `S4-VS4A` 订单列表只读 | `PASS` | 订单 API、四态（含待发货/待评价边界）、账号 scope、关键词搜索、单状态筛选、六列 + 操作列、详情抽屉、分页、内部滚动、昵称/商品标题与缩略图聚合、桌面/移动截图、真实 seller 订单读取与 PostgreSQL refresh 落库 | 交付预览、库存锁、发货/取消/重试转入 `S4-VS4B/C` |
 | `S4-VS4B/C` 订单交付 | `PLANNED` | delivery mode 契约已冻结 | 交付预览、库存锁、发货/取消/重试、unknown/Outbox/DeliveryRecord |
 | `S4-VS5A` 在线聊天读取与实时连接 | `PARTIALLY_VERIFIED` | canonical HTTP/WS、MemoryStore/PostgreSQL + `015_messages.sql` + `016_conversation_media.sql`、双 API 实例 Redis 跨进程广播、Redis/PostgreSQL 重启恢复、cursor 去重、Chrome/CDP 双 viewport 断线视觉证据、搜索/未读/独立滚动/选择/头像/商品缩略图交互 | 独立复审、生产部署拓扑确认；发送/附件/撤回进入 `S4-VS5B` |
 | `S4-VS5B` 在线聊天发送/附件/撤回 | `PLANNED` | Message 状态机和发送/图片/撤回 API 已冻结 | 持久化、对象存储、幂等、unknown/timeout、脱敏 |
@@ -66,10 +66,16 @@
 
 ### 2026-09-20：S4-VS4A 订单字段与头像聚合修订
 
-- `d403e75`、`465f723` 已在 merge lock 内以 `490e145` 合入 `master`；新增 `buyerNickname` / `buyerAvatarUrl` 契约、019/020 迁移，并按账号从本地会话/商品表聚合缺失昵称、头像和商品名称。
-- 订单列表移除用户 ID、商品 ID 副文本；头像 URL 渲染真实头像，无头像不显示昵称首字；昵称继续保留姓名 hover；搜索只命中订单号、昵称和商品名称。
-- 合并后主线通过 `npm run typecheck`、`npm test`（37 files / 114 tests）、`npm run build`、`npm run db:migrate`、`npm --workspace apps/api run test:orders:postgres`、`npm run test:e2e:chrome:orders`、`docker compose config --quiet` 和 `git diff --check`。
+- `d403e75`、`465f723` 已在 merge lock 内以 `490e145` 合入 `master`；新增 `buyerNickname` / `buyerAvatarUrl` / `itemImageUrl` 契约、019/020 迁移，并按账号从本地会话/商品表聚合缺失昵称、头像、商品名称和商品缩略图。
+- 订单列表移除用户 ID、商品 ID 副文本；头像 URL 渲染真实头像，无头像不显示昵称首字；昵称继续保留姓名 hover；商品无本地匹配时显示“商品已删除”提示；搜索只命中订单号、昵称和商品名称。
+- 合并后主线通过 `npm run typecheck`、`npm test`（37 files / 115 tests）、`npm run build`、`npm run db:migrate`、`npm --workspace apps/api run test:orders:postgres`、`npm run test:e2e:chrome:orders`、`docker compose config --quiet` 和 `git diff --check`。
 - 详情抽屉内容按用户更正保持不变；真实外部 seller 权限与订单交付动作继续按既有风险和 `S4-VS4B/C` 后置范围处理。
+
+### 2026-09-20：S4-VS4A 订单状态筛选边界修订
+
+- 修复“待发货/待评价”筛选异常：`待发货 = paymentStatus=paid + deliveryStatus=pending`；`待收货 = paymentStatus=paid + orderStatus=open + deliveryStatus=delivered`；`待评价 = paymentStatus=paid + orderStatus=completed + deliveryStatus=delivered + afterSalesStatus=none`。
+- `apps/web/src/features/orders/order-status.test.ts` 固定了四字段组合和已退款排除；`apps/web/scripts/e2e-orders-chrome.mjs` 验证请求参数及页面结果不混入待发货/待收货订单。
+- 该“待评价”异常项当前已修复，但作为后续状态机回归关注点保留；详情抽屉内容仍不在本轮修改范围。
 
 ### 2026-09-20：S4-VS-DASHBOARD 与订单全链路复验
 

@@ -11,6 +11,7 @@ export const ORDER_FIXTURE_SECONDARY_NAME = 'Secondary 订单账号';
 
 const BASE_TIME = Date.parse('2026-09-20T10:00:00+08:00');
 const BUYER_AVATAR_URL = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2240%22 height=%2240%22 viewBox=%220 0 40 40%22%3E%3Ccircle cx=%2220%22 cy=%2220%22 r=%2220%22 fill=%22%23dbeafe%22/%3E%3Ccircle cx=%2220%22 cy=%2216%22 r=%227%22 fill=%22%231d4ed8%22/%3E%3Cpath d=%22M9 34c2-7 20-7 22 0%22 fill=%22%231d4ed8%22/%3E%3C/svg%3E';
+const PRODUCT_IMAGE_URL = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2248%22 height=%2248%22%3E%3Crect width=%2248%22 height=%2248%22 rx=%228%22 fill=%22%23bfdbfe%22/%3E%3Cpath d=%22M10 34 20 23l7 7 4-4 7 8H10Z%22 fill=%22%231d4ed8%22/%3E%3C/svg%3E';
 
 const paymentStatuses = ['paid', 'paid', 'paid', 'closed', 'unpaid'];
 const orderStatuses = ['open', 'completed', 'failed', 'closed', 'cancelled'];
@@ -71,8 +72,8 @@ export async function seedOrderFixture(runtime, { adminId, accountId, secondaryA
   const fixture = buildOrderFixture({ processId, accountId, secondaryAccountId });
   const created = [];
   for (const order of fixture) {
-    await runtime.store.createProduct({ adminId, accountId: order.accountId, externalProductRef: order.itemId, title: order.itemTitle });
-    await runtime.store.createConversation({ adminId, accountId: order.accountId, buyerRef: order.buyerId, buyerDisplayName: order.buyerNickname, buyerAvatarUrl: order.buyerAvatarUrl, externalConversationRef: `orders-e2e-${processId}-${order.orderNo}` });
+    await runtime.store.createProduct({ adminId, accountId: order.accountId, externalProductRef: order.itemId, title: order.itemTitle, attributes: { xianyu: { imageUrls: [PRODUCT_IMAGE_URL] } } });
+    await runtime.store.createConversation({ adminId, accountId: order.accountId, buyerRef: order.buyerId, buyerDisplayName: order.buyerNickname, buyerAvatarUrl: order.buyerAvatarUrl, itemRef: order.itemId, itemTitle: order.itemTitle, itemImageUrl: PRODUCT_IMAGE_URL, externalConversationRef: `orders-e2e-${processId}-${order.orderNo}` });
     const storedOrder = order.orderNo.endsWith('-001')
       ? { ...order, buyerNickname: undefined, itemTitle: order.itemId, conversationId: undefined, productId: undefined }
       : { ...order, conversationId: undefined, productId: undefined };

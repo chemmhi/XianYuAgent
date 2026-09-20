@@ -27,9 +27,11 @@ try {
   const adminId = bootstrap.body.data.profile.id;
   const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: 'seller-orders', displayName: '订单账号' });
   const second = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: 'seller-orders-2', displayName: '第二账号' });
-  await runtime.store.createProduct({ adminId, accountId: account.id, externalProductRef: 'item-XY202609200001', title: '第一商品标题' });
+  await runtime.store.createProduct({ adminId, accountId: account.id, externalProductRef: 'item-XY202609200001', title: '第一商品标题', attributes: { xianyu: { imageUrls: ['https://img.example/order-product.png'] } } });
   const buyerConversation = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'buyer-XY202609200001', buyerDisplayName: '昵称甲', buyerAvatarUrl: 'https://img.example/nick-a.png', externalConversationRef: 'orders-smoke-buyer-1' });
   const first = await runtime.store.createOrder({ adminId, order: order(account.id, 'XY202609200001', { buyerNickname: undefined, buyerName: '甲', conversationId: buyerConversation.id, itemTitle: 'item-XY202609200001', amountMinor: 3990, orderStatus: 'completed', deliveryStatus: 'delivered' }) });
+  const conversationOnly = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'buyer-XY202609200004', itemRef: 'item-conversation-only', itemTitle: '会话聚合商品标题', itemImageUrl: 'https://img.example/conversation-product.png', externalConversationRef: 'orders-smoke-item-only' });
+  const conversationOnlyOrder = await runtime.store.createOrder({ adminId, order: order(account.id, 'XY202609200099', { buyerId: 'buyer-XY202609200099', itemId: 'item-conversation-only', itemTitle: 'item-conversation-only', conversationId: undefined }) });
   await runtime.store.createOrder({ adminId, order: order(account.id, 'XY202609200002', { buyerName: '乙', paymentStatus: 'unpaid', orderStatus: 'open', deliveryStatus: 'pending' }) });
   await runtime.store.createOrder({ adminId, order: order(second.id, 'XY202609200003', { buyerName: '丙', orderStatus: 'failed', deliveryStatus: 'failed', amountMinor: 12900 }) });
 
@@ -41,6 +43,16 @@ try {
   assert.equal(list.body.data.items[0].buyerNickname, '昵称甲');
   assert.equal(list.body.data.items[0].buyerAvatarUrl, 'https://img.example/nick-a.png');
   assert.equal(list.body.data.items[0].itemTitle, '第一商品标题');
+  assert.equal(list.body.data.items[0].itemImageUrl, 'https://img.example/order-product.png');
+  const conversationOnlyList = await request('/api/v1/orders?accountId=' + encodeURIComponent(account.id) + '&keyword=' + encodeURIComponent('会话聚合商品标题'), { headers: { cookie } });
+  assert.equal(conversationOnlyList.body.data.total, 1);
+  assert.equal(conversationOnlyList.body.data.items[0].orderNo, conversationOnlyOrder.orderNo);
+  assert.equal(conversationOnlyList.body.data.items[0].itemTitle, '会话聚合商品标题');
+  assert.equal(conversationOnlyList.body.data.items[0].itemImageUrl, 'https://img.example/conversation-product.png');
+  const conversationOnlyDetail = await request(`/api/v1/orders/${encodeURIComponent(conversationOnlyOrder.orderNo)}?accountId=${encodeURIComponent(account.id)}`, { headers: { cookie } });
+  assert.equal(conversationOnlyDetail.body.data.itemTitle, '会话聚合商品标题');
+  const conversationOnlyIdSearch = await request('/api/v1/orders?accountId=' + encodeURIComponent(account.id) + '&keyword=item-conversation-only', { headers: { cookie } });
+  assert.equal(conversationOnlyIdSearch.body.data.total, 0);
   const keyword = await request('/api/v1/orders?keyword=' + encodeURIComponent('昵称-XY202609200002') + '&page=1&pageSize=20', { headers: { cookie } });
   assert.equal(keyword.response.status, 200);
   assert.deepEqual(keyword.body.data.items.map((item) => item.orderNo), ['XY202609200002']);

@@ -5,7 +5,7 @@ import { OrderTable } from './OrderTable';
 import type { OrderVM } from '../types';
 
 const order = {
-  orderNo: 'O-1', accountId: 'A', buyerId: 'buyer-1', buyerNickname: '买家昵称', buyerName: '买家姓名', buyerAvatarUrl: 'https://img.example/avatar.png', itemId: 'I-1', itemTitle: '测试商品', amountMinor: 1990,
+  orderNo: 'O-1', accountId: 'A', buyerId: 'buyer-1', buyerNickname: '买家昵称', buyerName: '买家姓名', buyerAvatarUrl: 'https://img.example/avatar.png', itemId: 'I-1', itemTitle: '测试商品', itemImageUrl: 'https://img.example/product.png', amountMinor: 1990,
   paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'delivered', afterSalesStatus: 'none', deliveryType: 'manual', createdAt: '2026-09-20T09:00:00Z', configVersion: 1,
 } as OrderVM & { buyerAvatarUrl?: string };
 
@@ -22,7 +22,7 @@ describe('OrderTable', () => {
     expect(html).toContain('查看详情');
     expect(html).toContain('title="买家姓名：买家姓名"');
     expect(html).toContain('<strong>买家昵称</strong>');
-    expect(html).toContain('<strong>测试商品</strong>');
+    expect(html).toContain('<span class="orders-product-thumb"><img src="https://img.example/product.png" alt=""/></span><strong>测试商品</strong>');
     expect(html).toContain('<span class="orders-avatar"><img src="https://img.example/avatar.png" alt=""/></span>');
     expect(html).not.toContain('<small>buyer-1</small>');
     expect(html).not.toContain('<small>I-1</small>');
@@ -35,7 +35,8 @@ describe('OrderTable', () => {
 
   it('does not substitute the buyer name or item id for missing display fields', () => {
     const html = renderToStaticMarkup(createElement(OrderTable, { orders: [{ ...order, buyerNickname: undefined, itemTitle: 'I-1' }], page: 1, totalPages: 1, total: 1, onPageChange: vi.fn(), onOpen: vi.fn() }));
-    expect(html).toContain('<strong></strong>');
+    expect(html).toContain('<strong class="orders-product-missing">商品已删除</strong>');
+    expect(html).toContain('title="商品已删除或暂无本地商品信息"');
     expect(html).not.toContain('<strong>买家姓名</strong>');
     expect(html).not.toContain('<strong>I-1</strong>');
     expect(html).not.toContain('<small>buyer-1</small>');

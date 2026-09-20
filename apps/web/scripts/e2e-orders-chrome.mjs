@@ -185,6 +185,7 @@ async function run() {
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('订单验收商品'), 'seeded order row');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('订单验收昵称'), 'seeded buyer nickname');
   await waitFor(async () => Boolean(await evaluate(cdp, 'document.querySelectorAll("[data-order-no] .orders-avatar img").length > 0')), 'seeded buyer avatar');
+  await waitFor(async () => Boolean(await evaluate(cdp, 'document.querySelectorAll("[data-order-no] .orders-product-thumb img").length > 0')), 'seeded product thumbnail');
   await waitFor(async () => apiEvent(cdp.events, 'GET', '/api/v1/orders', (url) => url.searchParams.get('accountId') === account.id), 'scoped orders request');
   if (!String(await evaluate(cdp, 'document.body.innerText')).includes('共 21 单')) throw new Error('initial order total missing');
   const tableHeaders = String(await evaluate(cdp, 'document.querySelector("[data-testid=orders-table]")?.textContent ?? ""'));
@@ -199,6 +200,18 @@ async function run() {
   if (!await evaluate(cdp, setSelectScript('订单状态', 'pending_payment'))) throw new Error('order status filter missing');
   await waitFor(async () => apiEvent(cdp.events.slice(statusFilterMark), 'GET', '/api/v1/orders', (url) => url.searchParams.get('paymentStatus') === 'unpaid'), 'order status request');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('待付款'), 'order status filtered rows');
+
+  const deliveryFilterMark = cdp.events.length;
+  if (!await evaluate(cdp, setSelectScript('订单状态', 'pending_delivery'))) throw new Error('pending delivery filter missing');
+  await waitFor(async () => apiEvent(cdp.events.slice(deliveryFilterMark), 'GET', '/api/v1/orders', (url) => url.searchParams.get('paymentStatus') === 'paid' && url.searchParams.get('deliveryStatus') === 'pending'), 'pending delivery request');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('待发货'), 'pending delivery rows');
+  if (await evaluate(cdp, 'Array.from(document.querySelectorAll("[data-order-no]")).some((row) => row.textContent?.includes("待付款"))')) throw new Error('pending delivery includes unpaid orders');
+
+  const reviewFilterMark = cdp.events.length;
+  if (!await evaluate(cdp, setSelectScript('订单状态', 'pending_review'))) throw new Error('pending review filter missing');
+  await waitFor(async () => apiEvent(cdp.events.slice(reviewFilterMark), 'GET', '/api/v1/orders', (url) => url.searchParams.get('paymentStatus') === 'paid' && url.searchParams.get('orderStatus') === 'completed' && url.searchParams.get('deliveryStatus') === 'delivered' && url.searchParams.get('afterSalesStatus') === 'none'), 'pending review request');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('待评价'), 'pending review rows');
+  if (await evaluate(cdp, 'Array.from(document.querySelectorAll("[data-order-no]")).some((row) => row.textContent?.includes("待发货") || row.textContent?.includes("待收货"))')) throw new Error('pending review includes non-review orders');
 
   const statusResetMark = cdp.events.length;
   if (!await evaluate(cdp, setSelectScript('订单状态', 'all'))) throw new Error('order status reset missing');
@@ -246,6 +259,7 @@ async function run() {
 
   await cdp.send('Page.navigate', { url: `${webUrl}/accounts` });
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('账号列表'), 'accounts page after order flow');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes(secondaryAccount.displayName), 'secondary account row after order flow');
   const switchedSecondary = await evaluate(cdp, `(() => { const rows = Array.from(document.querySelectorAll('[role="row"]')); const row = rows.find((candidate) => candidate.textContent?.includes(${JSON.stringify(secondaryAccount.displayName)})); const button = row?.querySelector('[data-testid="account-switch"]'); if (!button || button.disabled) return false; button.click(); return true; })()`);
   if (!switchedSecondary) throw new Error('secondary account switch button missing or disabled');
   await waitFor(async () => String(await evaluate(cdp, 'localStorage.getItem("xianyu.activeAccountId") ?? ""')) === secondaryAccount.id, 'secondary account selection');

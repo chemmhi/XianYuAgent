@@ -41,6 +41,20 @@ function parsePage(payload: OrdersEnvelope, fallback: OrderFilters): { items: un
 }
 
 function asStatus<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T { return typeof value === 'string' && allowed.includes(value as T) ? value as T : fallback; }
+function firstNonBlankString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+function nestedItemTitle(item: Record<string, unknown>): string | undefined {
+  const nested = ['item', 'product', 'goods', 'auction', 'itemInfo', 'item_info'].map((key) => asObject(item[key]));
+  return firstNonBlankString(...nested.flatMap((value) => [value.displayItemTitle, value.display_item_title, value.itemTitle, value.item_title, value.itemName, value.item_name, value.productName, value.product_name, value.goodsTitle, value.goods_title, value.productTitle, value.product_title, value.auctionTitle, value.auction_title, value.title, value.name]));
+}
+function nestedItemImageUrl(item: Record<string, unknown>): string | undefined {
+  const nested = ['item', 'product', 'goods', 'auction', 'itemInfo', 'item_info'].map((key) => asObject(item[key]));
+  return firstNonBlankString(...nested.flatMap((value) => [value.itemImageUrl, value.item_image_url, value.imageUrl, value.image_url, value.picUrl, value.pic_url, value.mainImageUrl, value.main_image_url]));
+}
 function mapOrder(raw: unknown, fallbackAccountId?: string): OrderVM {
   const item = asObject(raw);
   const orderNo = String(item.orderNo ?? item.order_no ?? item.orderId ?? item.order_id ?? '');
@@ -53,8 +67,9 @@ function mapOrder(raw: unknown, fallbackAccountId?: string): OrderVM {
   const rawBuyerAvatarUrl = item.buyerAvatarUrl ?? item.buyer_avatar_url ?? item.buyerAvatar ?? item.buyer_avatar ?? item.avatarUrl ?? item.avatar_url ?? item.headPic ?? item.head_pic;
   const buyerAvatarUrl = typeof rawBuyerAvatarUrl === 'string' && rawBuyerAvatarUrl.trim() ? rawBuyerAvatarUrl.trim() : undefined;
   const itemId = String(item.itemId ?? item.item_id ?? '');
-  const rawItemTitle = item.itemTitle ?? item.item_title ?? item.itemName ?? item.item_name ?? item.goodsTitle ?? item.goods_title ?? item.productTitle ?? item.product_title ?? item.title;
-  const itemTitle = typeof rawItemTitle === 'string' && rawItemTitle.trim() && rawItemTitle.trim() !== itemId.trim() ? rawItemTitle.trim() : '';
+  const rawItemTitle = firstNonBlankString(item.displayItemTitle, item.display_item_title, item.itemTitle, item.item_title, item.itemName, item.item_name, item.productName, item.product_name, item.goodsTitle, item.goods_title, item.productTitle, item.product_title, item.auctionTitle, item.auction_title, item.title, nestedItemTitle(item));
+  const itemTitle = rawItemTitle && rawItemTitle !== itemId.trim() ? rawItemTitle : '';
+  const itemImageUrl = firstNonBlankString(item.itemImageUrl, item.item_image_url, item.itemImage, item.item_image, item.imageUrl, item.image_url, item.picUrl, item.pic_url, item.mainImageUrl, item.main_image_url, nestedItemImageUrl(item));
   return {
     orderNo,
     accountId: String(item.accountId ?? item.account_id ?? item.cookieId ?? item.cookie_id ?? fallbackAccountId ?? ''),
@@ -65,6 +80,7 @@ function mapOrder(raw: unknown, fallbackAccountId?: string): OrderVM {
     buyerAvatarUrl,
     itemId,
     itemTitle,
+    itemImageUrl,
     amountMinor: hasMinorAmount ? amount : Math.round(amount * 100),
     paymentStatus: asStatus(item.paymentStatus ?? item.payment_status, paymentStatuses, 'unknown'),
     orderStatus: asStatus(item.orderStatus ?? item.order_status, orderStatuses, 'open'),

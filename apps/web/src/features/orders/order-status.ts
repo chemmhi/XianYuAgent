@@ -20,28 +20,28 @@ export function filtersForStatus(value: OrderListStatusFilter): Partial<OrderFil
     afterSalesStatus: 'all',
   };
   if (value === 'pending_payment') return { ...base, paymentStatus: 'unpaid' };
-  if (value === 'pending_delivery') return { ...base, deliveryStatus: 'pending' };
-  if (value === 'pending_receipt') return { ...base, orderStatus: 'open', deliveryStatus: 'delivered' };
-  if (value === 'pending_review') return { ...base, orderStatus: 'completed', deliveryStatus: 'delivered' };
+  if (value === 'pending_delivery') return { ...base, paymentStatus: 'paid', deliveryStatus: 'pending' };
+  if (value === 'pending_receipt') return { ...base, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'delivered' };
+  if (value === 'pending_review') return { ...base, paymentStatus: 'paid', orderStatus: 'completed', deliveryStatus: 'delivered', afterSalesStatus: 'none' };
   if (value === 'refunding') return { ...base, afterSalesStatus: 'refunding' };
   return base;
 }
 
 export function statusFilterFromFilters(filters: Pick<OrderFilters, 'paymentStatus' | 'orderStatus' | 'deliveryStatus' | 'afterSalesStatus'>): OrderListStatusFilter {
   if (filters.paymentStatus === 'unpaid') return 'pending_payment';
-  if (filters.deliveryStatus === 'pending') return 'pending_delivery';
-  if (filters.deliveryStatus === 'delivered' && filters.orderStatus === 'open') return 'pending_receipt';
-  if (filters.orderStatus === 'completed') return 'pending_review';
   if (filters.afterSalesStatus === 'refunding') return 'refunding';
+  if (filters.paymentStatus === 'paid' && filters.deliveryStatus === 'pending') return 'pending_delivery';
+  if (filters.paymentStatus === 'paid' && filters.deliveryStatus === 'delivered' && filters.orderStatus === 'open') return 'pending_receipt';
+  if (filters.paymentStatus === 'paid' && filters.orderStatus === 'completed' && filters.deliveryStatus === 'delivered' && filters.afterSalesStatus === 'none') return 'pending_review';
   return 'all';
 }
 
 export function getOrderDisplayStatus(order: Pick<OrderVM, 'paymentStatus' | 'orderStatus' | 'deliveryStatus' | 'afterSalesStatus'>): OrderDisplayStatus {
   if (order.paymentStatus === 'unpaid') return 'pending_payment';
   if (order.afterSalesStatus === 'refunding') return 'refunding';
-  if (order.deliveryStatus === 'pending') return 'pending_delivery';
-  if (order.deliveryStatus === 'delivered' && order.orderStatus === 'open') return 'pending_receipt';
-  if (order.deliveryStatus === 'delivered' && order.orderStatus === 'completed') return 'pending_review';
+  if (order.paymentStatus === 'paid' && order.deliveryStatus === 'pending') return 'pending_delivery';
+  if (order.paymentStatus === 'paid' && order.deliveryStatus === 'delivered' && order.orderStatus === 'open') return 'pending_receipt';
+  if (order.paymentStatus === 'paid' && order.deliveryStatus === 'delivered' && order.orderStatus === 'completed' && order.afterSalesStatus === 'none') return 'pending_review';
   if (order.deliveryStatus === 'failed' || order.orderStatus === 'failed') return 'failed';
   if (order.orderStatus === 'completed') return 'completed';
   if (order.orderStatus === 'closed' || order.orderStatus === 'cancelled') return 'closed';

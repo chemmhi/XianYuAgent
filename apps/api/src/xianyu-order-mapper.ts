@@ -43,6 +43,7 @@ export function mapXianyuOrder(value: unknown): XianyuOrderItem | undefined {
   const buyerName = firstString(raw.buyerName, raw.buyer_name, raw.buyerRealName, raw.buyer_real_name, raw.receiverName, raw.receiver_name, buyer.realName, buyer.receiverName, buyer.name, buyerInfo.realName, buyerInfo.receiverName, buyerInfo.name) ?? '';
   const itemId = firstString(raw.itemId, raw.item_id, raw.auctionId, raw.auction_id, raw.commodityId, raw.commodity_id, item.id, itemInfo.itemId, itemInfo.item_id, itemInfo.id) ?? 'unknown-item';
   const itemTitle = firstString(raw.itemTitle, raw.item_title, raw.itemName, raw.item_name, raw.goodsTitle, raw.goods_title, raw.productTitle, raw.product_title, raw.title, raw.auctionTitle, raw.auction_title, item.title, item.itemTitle, item.itemName, item.name, item.goodsTitle, item.productTitle, item.auctionTitle, itemInfo.title, itemInfo.itemTitle, itemInfo.itemName, itemInfo.name, itemInfo.goodsTitle, itemInfo.productTitle, itemInfo.auctionTitle) ?? '';
+  const itemImageUrl = firstString(raw.itemImageUrl, raw.item_image_url, raw.itemImage, raw.item_image, raw.imageUrl, raw.image_url, raw.picUrl, raw.pic_url, raw.mainImageUrl, raw.main_image_url, item.imageUrl, item.image_url, item.picUrl, item.pic_url, item.mainImageUrl, item.main_image_url, itemInfo.imageUrl, itemInfo.image_url, itemInfo.picUrl, itemInfo.pic_url, itemInfo.mainImageUrl, itemInfo.main_image_url);
   const amountMinor = parseAmountMinorFields(raw);
   const createdAt = parseDate(firstValue(raw.createdAt, raw.created_at, raw.placedAt, raw.placed_at, raw.createTime, raw.create_time, raw.orderTime, raw.order_time)) ?? new Date().toISOString();
   const updatedAt = parseDate(firstValue(raw.updatedAt, raw.updated_at, raw.updateTime, raw.update_time, raw.modifyTime, raw.modify_time)) ?? createdAt;
@@ -55,6 +56,7 @@ export function mapXianyuOrder(value: unknown): XianyuOrderItem | undefined {
     buyerAvatarUrl,
     itemId,
     itemTitle,
+    itemImageUrl,
     amountMinor,
     paymentStatus: mapPaymentStatus(firstString(raw.paymentStatus, raw.payment_status, raw.payStatus, raw.pay_status, raw.tradeStatus, raw.trade_status)),
     orderStatus: mapOrderStatus(statusValue),
@@ -95,6 +97,7 @@ function unwrapOrder(value: unknown): Record<string, unknown> {
       amount: firstString(priceInfo.totalPrice, priceInfo.confirmFee, priceInfo.auctionPrice),
       quantity: firstString(priceInfo.buyNum, priceInfo.quantity),
       itemTitle: firstString(commonData.itemTitle, commonData.itemName, commonData.goodsTitle, commonData.productTitle, commonData.title, root.itemTitle, root.itemName, root.goodsTitle, root.productTitle),
+      itemImageUrl: firstString(commonData.itemImageUrl, commonData.item_image_url, commonData.imageUrl, commonData.image_url, commonData.picUrl, commonData.pic_url, root.itemImageUrl, root.item_image_url, root.imageUrl, root.image_url, root.picUrl, root.pic_url),
       createdAt: firstValue(commonData.createTime, commonData.orderCreateTime, commonData.createdAt, root.createdAt),
       updatedAt: firstValue(commonData.updateTime, commonData.modifyTime, commonData.updatedAt, root.updatedAt),
       inRefund,
