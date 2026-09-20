@@ -181,22 +181,26 @@ async function run() {
 
   await cdp.send('Page.navigate', { url: `${webUrl}/orders` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'orders page');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('订单管理'), 'orders heading');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('订单列表'), 'orders heading');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('订单验收商品'), 'seeded order row');
   await waitFor(async () => apiEvent(cdp.events, 'GET', '/api/v1/orders', (url) => url.searchParams.get('accountId') === account.id), 'scoped orders request');
   if (!String(await evaluate(cdp, 'document.body.innerText')).includes('共 21 单')) throw new Error('initial order total missing');
+  const tableHeaders = String(await evaluate(cdp, 'document.querySelector("[data-testid=orders-table]")?.textContent ?? ""'));
+  for (const header of ['订单号', '买家昵称', '商品名称', '金额', '下单时间', '当前状态', '操作']) if (!tableHeaders.includes(header)) throw new Error(`orders table header missing: ${header}`);
+  for (const removed of ['支付状态', '订单状态', '发货状态', '售后', '账号']) if (tableHeaders.includes(removed)) throw new Error(`legacy orders column remains: ${removed}`);
+  if (!await evaluate(cdp, 'Boolean(document.querySelector("[data-order-no] [title^=\\"买家姓名：\\"]"))')) throw new Error('buyer nickname tooltip missing');
   const initialPagination = String(await evaluate(cdp, 'document.querySelector("[data-testid=orders-pagination]")?.textContent ?? ""'));
   if (!initialPagination.includes('第 1 / 2 页')) throw new Error('orders pagination missing');
   if (await evaluate(cdp, 'document.querySelector(".orders-risk-note") !== null')) throw new Error('risk note must not appear on first page fixture');
 
-  const paymentFilterMark = cdp.events.length;
-  if (!await evaluate(cdp, setSelectScript('支付状态', 'closed'))) throw new Error('payment status filter missing');
-  await waitFor(async () => apiEvent(cdp.events.slice(paymentFilterMark), 'GET', '/api/v1/orders', (url) => url.searchParams.get('paymentStatus') === 'closed'), 'payment status request');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('已关闭'), 'payment status filtered rows');
+  const statusFilterMark = cdp.events.length;
+  if (!await evaluate(cdp, setSelectScript('订单状态', 'pending_payment'))) throw new Error('order status filter missing');
+  await waitFor(async () => apiEvent(cdp.events.slice(statusFilterMark), 'GET', '/api/v1/orders', (url) => url.searchParams.get('paymentStatus') === 'unpaid'), 'order status request');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('待付款'), 'order status filtered rows');
 
-  const paymentResetMark = cdp.events.length;
-  if (!await evaluate(cdp, setSelectScript('支付状态', 'all'))) throw new Error('payment status reset missing');
-  await waitFor(async () => apiEvent(cdp.events.slice(paymentResetMark), 'GET', '/api/v1/orders', (url) => !url.searchParams.has('paymentStatus')), 'payment status reset request');
+  const statusResetMark = cdp.events.length;
+  if (!await evaluate(cdp, setSelectScript('订单状态', 'all'))) throw new Error('order status reset missing');
+  await waitFor(async () => apiEvent(cdp.events.slice(statusResetMark), 'GET', '/api/v1/orders', (url) => !url.searchParams.has('paymentStatus') && !url.searchParams.has('deliveryStatus') && !url.searchParams.has('orderStatus') && !url.searchParams.has('afterSalesStatus')), 'order status reset request');
 
   const keywordMark = cdp.events.length;
   if (!await evaluate(cdp, setInputScript('搜索订单', '订单验收买家'))) throw new Error('order search input missing');
@@ -204,7 +208,7 @@ async function run() {
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('E2E-'), 'keyword result');
 
   // Reset filters before exercising detail, pagination and sync.
-  await evaluate(cdp, `(() => { const input = document.querySelector('[aria-label="搜索订单"]'); if (input) { const setter = Object.getOwnPropertyDescriptor(input.__proto__, 'value')?.set; setter?.call(input, ''); input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); } for (const label of ['支付状态', '订单状态', '发货状态', '售后状态']) { const select = document.querySelector('[aria-label="' + label + '"]'); if (select) { select.value = 'all'; select.dispatchEvent(new Event('change', { bubbles: true })); } } return true; })()`);
+  await evaluate(cdp, `(() => { const input = document.querySelector('[aria-label="搜索订单"]'); if (input) { const setter = Object.getOwnPropertyDescriptor(input.__proto__, 'value')?.set; setter?.call(input, ''); input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); } const select = document.querySelector('[aria-label="订单状态"]'); if (select) { select.value = 'all'; select.dispatchEvent(new Event('change', { bubbles: true })); } return true; })()`);
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('共 21 单'), 'orders filter reset');
 
   const detailOpened = await evaluate(cdp, '(() => { const button = document.querySelector("[data-order-no] .orders-order-link"); if (!button) return false; button.click(); return true; })()');

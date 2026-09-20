@@ -27,7 +27,6 @@ export function OrdersPage({ api: providedApi }: { api?: OrdersApi }) {
   const retry = contextLoadFailure ? () => void refreshAccounts() : controller.reload;
   const orders = pageData?.items ?? [];
   return <section className="page-stack orders-domain" data-orders-domain>
-    <div className="orders-page-title"><div><p className="eyebrow">Order Center</p><h1>订单管理</h1><p>查询订单、查看支付与发货状态；订单写动作仍由 Outbox 幂等执行。</p></div><span className="orders-page-badge">{pageData ? `共 ${pageData.total} 单` : '订单中心'}</span></div>
     <article className="card panel orders-panel">
       <OrderSyncToolbar currentAccount={currentAccount} contextLoading={accountsLoading} contextMissing={contextMissing} loading={controller.state.phase === 'loading'} onRefresh={() => void controller.reload()} onSync={() => void controller.refreshFromXianyu()} />
       <div className="orders-filters-wrap"><OrderFilters filters={controller.filters} onChange={(patch) => setFilters((previous) => ({ ...previous, ...patch }))} />{accountsError && !contextLoadFailure && <span className="orders-context-error" role="alert">账号上下文加载失败</span>}</div>
