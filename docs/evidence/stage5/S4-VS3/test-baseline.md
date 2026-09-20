@@ -12,6 +12,12 @@
 - 搜索与类型筛选改为变更即生效，移除“查询”和“重置筛选”按钮。
 - 回归证据：`CouponToolbar.test.tsx`、Coupons Chrome/CDP E2E，以及 `1440×900` / `390×844` 截图。
 
+## 2026-09-20 空态与工具栏顺序修订
+
+- 本次修订 worktree：`F:\ChenHai\Project\XianYuAgent-coupons-toolbar-followup`；分支：`fix/coupons-toolbar-empty-state`。
+- 新建卡券按钮后置到工具栏最后，移除 `共 N 张` 统计；无匹配批次时保留居中的空态标题与引导文案。
+- 回归证据：`CouponToolbar.test.tsx`、`CouponStateView.test.tsx`、Coupons Chrome/CDP E2E。
+
 ## 用户路径
 
 真实浏览器从 `/coupons` 进入卡券首页，经 AuthGate 使用真实 Session Cookie 访问真实 API，完成：
