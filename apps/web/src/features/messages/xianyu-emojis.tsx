@@ -515,3 +515,40 @@ export const renderXianyuText = (text: string) => text.split(/(\[[^\]]+\])/g).ma
   const url = part.startsWith('[') ? emojiLookup.get(part.slice(1, -1)) : undefined; /* url 表示请求地址。 */
   return url ? <img key={index} src={url} alt="" aria-hidden="true" className="messages-emoji-inline" /> : <React.Fragment key={index}>{part}</React.Fragment>;
 }) /* part 是待解析文本片段，index 为 React 列表键。 */; /* renderXianyuText 将文本中的表情标记替换为图片节点。 */
+
+export const renderXianyuTextWithCaret = (text: string, caretIndex?: number) => {
+  const parts = text.split(/(\[[^\]]+\])/g);
+  const nodes: React.ReactNode[] = [];
+  let offset = 0;
+  let caretRendered = false;
+  const caret = (key: string) => <span key={key} className="messages-composer-caret" data-composer-caret aria-hidden="true" />;
+
+  parts.forEach((part, index) => {
+    const start = offset;
+    const end = offset + part.length;
+    const url = part.startsWith('[') ? emojiLookup.get(part.slice(1, -1)) : undefined;
+    if (url) {
+      if (caretIndex !== undefined && !caretRendered && caretIndex === start) {
+        nodes.push(caret(`caret-before-${index}`));
+        caretRendered = true;
+      }
+      nodes.push(<img key={`emoji-${index}`} src={url} alt="" aria-hidden="true" className="messages-emoji-inline" />);
+      if (caretIndex !== undefined && !caretRendered && caretIndex >= start && caretIndex <= end) {
+        nodes.push(caret(`caret-after-${index}`));
+        caretRendered = true;
+      }
+    } else if (caretIndex !== undefined && !caretRendered && caretIndex >= start && caretIndex <= end) {
+      const splitAt = Math.max(0, Math.min(part.length, caretIndex - start));
+      nodes.push(<React.Fragment key={`text-before-${index}`}>{part.slice(0, splitAt)}</React.Fragment>);
+      nodes.push(caret(`caret-text-${index}`));
+      nodes.push(<React.Fragment key={`text-after-${index}`}>{part.slice(splitAt)}</React.Fragment>);
+      caretRendered = true;
+    } else {
+      nodes.push(<React.Fragment key={`text-${index}`}>{part}</React.Fragment>);
+    }
+    offset = end;
+  });
+
+  if (caretIndex !== undefined && !caretRendered && caretIndex >= text.length) nodes.push(caret('caret-end'));
+  return nodes;
+};
