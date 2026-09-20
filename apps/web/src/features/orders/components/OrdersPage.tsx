@@ -4,7 +4,6 @@ import { createMockOrdersApi, type OrdersApi } from '../api';
 import { hasOrdersContextLoadFailure } from '../context-state';
 import { useOrdersController } from '../controller';
 import { OrderDetailDrawer } from './OrderDetailDrawer';
-import { OrderFilters } from './OrderFilters';
 import { OrderStateView } from './OrderStateView';
 import { OrderSyncToolbar } from './OrderSyncToolbar';
 import { OrderTable } from './OrderTable';
@@ -28,8 +27,7 @@ export function OrdersPage({ api: providedApi }: { api?: OrdersApi }) {
   const orders = pageData?.items ?? [];
   return <section className="page-stack orders-domain" data-orders-domain>
     <article className="card panel orders-panel">
-      <OrderSyncToolbar currentAccount={currentAccount} contextLoading={accountsLoading} contextMissing={contextMissing} loading={controller.state.phase === 'loading'} onRefresh={() => void controller.reload()} onSync={() => void controller.refreshFromXianyu()} />
-      <div className="orders-filters-wrap"><OrderFilters filters={controller.filters} onChange={(patch) => setFilters((previous) => ({ ...previous, ...patch }))} />{accountsError && !contextLoadFailure && <span className="orders-context-error" role="alert">账号上下文加载失败</span>}</div>
+      <OrderSyncToolbar currentAccount={currentAccount} contextLoading={accountsLoading} contextMissing={contextMissing} loading={controller.state.phase === 'loading'} filters={controller.filters} contextError={accountsError && !contextLoadFailure ? '账号上下文加载失败' : undefined} onFilterChange={(patch) => setFilters((previous) => ({ ...previous, ...patch }))} onRefresh={() => void controller.reload()} onSync={() => void controller.refreshFromXianyu()} />
       {controller.state.phase === 'success' && pageData && <OrderTable orders={orders} page={pageData.page} totalPages={pageData.totalPages} total={pageData.total} onPageChange={(page) => setFilters((previous) => ({ ...previous, page }))} onOpen={controller.openOrder} />}
       <OrderStateView phase={statePhase} error={stateError} onRetry={retry} accountSelectionRequired={contextMissing} onChooseAccount={() => { window.history.pushState({}, '', '/accounts'); window.dispatchEvent(new PopStateEvent('popstate')); }} />
     </article>

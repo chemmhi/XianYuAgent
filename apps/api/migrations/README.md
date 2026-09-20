@@ -13,6 +13,8 @@
 - `010_login_session_verification_required.sql`：为二维码风控人工验证保留独立的 `verification_required` 登录会话状态。
 - `015_messages.sql`：建立 `messages.conversations`、`messages.messages` 与 `messages.events`，支持 VS5A 历史读取、事件游标和 WebSocket 断线补偿；当前只读首片不包含发送/接管写入。
 - `018_orders.sql`：建立 `orders.orders` 订单只读事实表及账号/状态索引；订单刷新按 `(account_id, order_no)` 幂等 upsert，交付记录仍由后续 VS4B/C 迁移承接。
+- `019_order_display_fields.sql`：为订单补充可选 `buyer_nickname` 字段；订单读取会按账号从本地会话与商品表聚合缺失的昵称和商品名称，前端不再用买家姓名或商品 ID 回退展示。
+- `020_order_buyer_avatar.sql`：为订单补充可选 `buyer_avatar_url` 字段，支持订单头像持久化并与本地会话头像聚合。
 - `018_credential_store.sql`：为 S4-VS7A 建立账号级 `accounts.credential_refs` 与 `accounts.credential_values`；仅支持 `api_key/model_client`，保存 provider/alias/status/version/last_rotated_at 与 AES-256-GCM 密文、key_version、checksum、metadata_json。API 默认只读 CredentialRef 脱敏投影，不返回明文。
 
 VS5A 回滚边界：先关闭 `/api/v1/conversations/{id}/events` 实时订阅入口，保留历史会话、消息与事件游标；若迁移需要回退，按 expand/backfill/verify/switch/contract 顺序先停止新读流量，再保留表结构用于审计和离线恢复，不直接删除消息历史。

@@ -38,6 +38,8 @@ try {
   const cookie = cookieHeader(loggedIn);
   const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef, displayName: 'PostgreSQL 订单账号' });
   accountId = account.id;
+  await runtime.store.createProduct({ adminId, accountId, externalProductRef: 'pg-item', title: 'PostgreSQL 订单商品' });
+  const buyerConversation = await runtime.store.createConversation({ adminId, accountId, buyerRef: 'pg-buyer', buyerDisplayName: 'pg-nickname', buyerAvatarUrl: 'https://img.example/pg-nick.png', externalConversationRef: `orders-pg-buyer-${process.pid}` });
   orderNo = `PG-${process.pid}-${Date.now()}`;
   await runtime.store.createOrder({
     adminId,
@@ -46,8 +48,9 @@ try {
       accountId,
       buyerId: 'pg-buyer',
       buyerName: 'PostgreSQL 买家',
+      conversationId: buyerConversation.id,
       itemId: 'pg-item',
-      itemTitle: 'PostgreSQL 订单商品',
+      itemTitle: 'pg-item',
       amountMinor: 3990,
       paymentStatus: 'paid',
       orderStatus: 'open',
@@ -61,11 +64,19 @@ try {
   assert.equal(listed.body.data.total, 1);
   assert.equal(listed.body.data.items[0].orderNo, orderNo);
   assert.equal(listed.body.data.items[0].amountMinor, 3990);
+  assert.equal(listed.body.data.items[0].buyerNickname, 'pg-nickname');
+  assert.equal(listed.body.data.items[0].buyerAvatarUrl, 'https://img.example/pg-nick.png');
+  assert.equal(listed.body.data.items[0].itemTitle, 'PostgreSQL 订单商品');
+  const buyerIdSearch = await request(port, `/api/v1/orders?accountId=${encodeURIComponent(accountId)}&keyword=pg-buyer`, { headers: { cookie } });
+  assert.equal(buyerIdSearch.body.data.total, 0);
+  const itemIdSearch = await request(port, `/api/v1/orders?accountId=${encodeURIComponent(accountId)}&keyword=pg-item`, { headers: { cookie } });
+  assert.equal(itemIdSearch.body.data.total, 0);
 
   const refreshedOrderNo = `${orderNo}-X`;
+  await runtime.store.createProduct({ adminId, accountId, externalProductRef: 'pg-xianyu-item', title: '闲鱼同步商品标题' });
   runtime.xianyu.fetchOrdersAll = async () => ({
     pages: [{ success: true, accountInvalid: false, pageNumber: 1, pageSize: 30, items: [] }],
-    items: [{ orderNo: refreshedOrderNo, buyerId: 'pg-xianyu-buyer', buyerName: '闲鱼同步买家', itemId: 'pg-xianyu-item', itemTitle: '闲鱼同步商品', amountMinor: 12900, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'manual', createdAt: new Date().toISOString(), sourcePayloadDigest: 'postgres-xianyu-fixture' }],
+    items: [{ orderNo: refreshedOrderNo, buyerId: 'pg-xianyu-buyer', buyerNickname: '闲鱼同步昵称', buyerName: '闲鱼同步买家', itemId: 'pg-xianyu-item', itemTitle: 'pg-xianyu-item', amountMinor: 12900, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'manual', createdAt: new Date().toISOString(), sourcePayloadDigest: 'postgres-xianyu-fixture' }],
     hasMore: false,
   });
   const refreshed = await request(port, '/api/v1/orders/refresh', { method: 'POST', headers: { cookie, 'X-CSRF-Token': loggedIn.csrfToken, 'Idempotency-Key': `orders-pg-refresh-${process.pid}` }, body: JSON.stringify({ accountId }) });
@@ -82,11 +93,15 @@ try {
   assert.equal(reread.body.data.total, 1);
   assert.equal(reread.body.data.items[0].orderNo, refreshedOrderNo);
   assert.equal(reread.body.data.items[0].source, 'xianyu');
+  assert.equal(reread.body.data.items[0].buyerNickname, '闲鱼同步昵称');
+  assert.equal(reread.body.data.items[0].itemTitle, '闲鱼同步商品标题');
   console.log('orders postgres persistence smoke passed');
 } finally {
   const active = restarted ?? runtime;
   if (active?.store?.pool) {
     if (accountId) await active.store.pool.query('delete from orders.orders where account_id=$1', [accountId]);
+    if (accountId) await active.store.pool.query('delete from products.products where account_id=$1', [accountId]);
+    if (accountId) await active.store.pool.query('delete from messages.conversations where account_id=$1', [accountId]);
     if (accountId) await active.store.pool.query('delete from observability.audit_events where account_id=$1', [accountId]);
     if (accountId) await active.store.pool.query('delete from auth.account_credentials where account_id=$1', [accountId]);
     if (accountId) await active.store.pool.query('delete from auth.account_scopes where account_id=$1', [accountId]);

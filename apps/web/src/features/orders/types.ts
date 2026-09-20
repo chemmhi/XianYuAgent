@@ -9,6 +9,8 @@ export interface OrderVM {
   accountName?: string;
   buyerId: string;
   buyerName: string;
+  buyerNickname?: string;
+  buyerAvatarUrl?: string;
   itemId: string;
   itemTitle: string;
   amountMinor: number;

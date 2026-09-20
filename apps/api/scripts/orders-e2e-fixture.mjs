@@ -10,6 +10,7 @@ export const ORDER_FIXTURE_PRIMARY_NAME = 'Chrome 订单账号';
 export const ORDER_FIXTURE_SECONDARY_NAME = 'Secondary 订单账号';
 
 const BASE_TIME = Date.parse('2026-09-20T10:00:00+08:00');
+const BUYER_AVATAR_URL = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2240%22 height=%2240%22 viewBox=%220 0 40 40%22%3E%3Ccircle cx=%2220%22 cy=%2220%22 r=%2220%22 fill=%22%23dbeafe%22/%3E%3Ccircle cx=%2220%22 cy=%2216%22 r=%227%22 fill=%22%231d4ed8%22/%3E%3Cpath d=%22M9 34c2-7 20-7 22 0%22 fill=%22%231d4ed8%22/%3E%3C/svg%3E';
 
 const paymentStatuses = ['paid', 'paid', 'paid', 'closed', 'unpaid'];
 const orderStatuses = ['open', 'completed', 'failed', 'closed', 'cancelled'];
@@ -31,6 +32,8 @@ function fixtureOrder({ processId, index, accountId, accountName, suffix = '' })
     accountId,
     accountName,
     buyerId: `buyer-${processId}-${index + 1}`,
+    buyerNickname: index === 0 ? '订单验收昵称' : `昵称_${String(index + 1).padStart(2, '0')}`,
+    buyerAvatarUrl: BUYER_AVATAR_URL,
     buyerName: index === 0 ? '订单验收买家' : `买家_${String(index + 1).padStart(2, '0')}`,
     itemId: `ITEM-${processId}-${index + 1}`,
     itemTitle: index === 0 ? 'Chrome 订单验收商品' : `闲鱼订单商品 ${index + 1}`,
@@ -68,7 +71,12 @@ export async function seedOrderFixture(runtime, { adminId, accountId, secondaryA
   const fixture = buildOrderFixture({ processId, accountId, secondaryAccountId });
   const created = [];
   for (const order of fixture) {
-    created.push(await runtime.store.createOrder({ adminId, order }));
+    await runtime.store.createProduct({ adminId, accountId: order.accountId, externalProductRef: order.itemId, title: order.itemTitle });
+    await runtime.store.createConversation({ adminId, accountId: order.accountId, buyerRef: order.buyerId, buyerDisplayName: order.buyerNickname, buyerAvatarUrl: order.buyerAvatarUrl, externalConversationRef: `orders-e2e-${processId}-${order.orderNo}` });
+    const storedOrder = order.orderNo.endsWith('-001')
+      ? { ...order, buyerNickname: undefined, itemTitle: order.itemId, conversationId: undefined, productId: undefined }
+      : { ...order, conversationId: undefined, productId: undefined };
+    created.push(await runtime.store.createOrder({ adminId, order: storedOrder }));
   }
   return { fixture, created };
 }
@@ -76,5 +84,5 @@ export async function seedOrderFixture(runtime, { adminId, accountId, secondaryA
 export function buildRefreshOrderFixture({ processId = process.pid, accountId, accountName = ORDER_FIXTURE_PRIMARY_NAME } = {}) {
   if (!accountId) throw new Error('refresh fixture requires account id');
   const order = fixtureOrder({ processId, index: 99, accountId, accountName, suffix: 'R' });
-  return { ...order, orderNo: `E2E-${processId}-REFRESH`, externalOrderRef: `E2E-${processId}-REFRESH`, buyerName: '闲鱼刷新买家', itemTitle: '闲鱼刷新订单', createdAt: new Date(BASE_TIME + 60 * 60 * 1000).toISOString(), updatedAt: new Date(BASE_TIME + 60 * 60 * 1000).toISOString() };
+  return { ...order, orderNo: `E2E-${processId}-REFRESH`, externalOrderRef: `E2E-${processId}-REFRESH`, buyerNickname: '闲鱼刷新昵称', buyerName: '闲鱼刷新买家', itemTitle: '闲鱼刷新订单', createdAt: new Date(BASE_TIME + 60 * 60 * 1000).toISOString(), updatedAt: new Date(BASE_TIME + 60 * 60 * 1000).toISOString() };
 }

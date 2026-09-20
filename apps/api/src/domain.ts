@@ -170,6 +170,8 @@ export interface OrderRecord {
   accountName?: string;
   buyerId: string;
   buyerName: string;
+  buyerNickname?: string;
+  buyerAvatarUrl?: string;
   itemId: string;
   itemTitle: string;
   amountMinor: number;
@@ -192,6 +194,8 @@ export interface XianyuOrderItem {
   orderNo: string;
   buyerId: string;
   buyerName: string;
+  buyerNickname?: string;
+  buyerAvatarUrl?: string;
   itemId: string;
   itemTitle: string;
   amountMinor: number;

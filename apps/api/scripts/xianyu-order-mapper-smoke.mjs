@@ -8,8 +8,8 @@ const page = mapXianyuOrderPage({
       nextPage: 'false',
       totalCount: '1',
       items: [{
-        commonData: { orderId: 'X-1', itemId: 'item-1', orderStatus: '待发货', inRefund: 'false' },
-        buyerInfoVO: { buyerId: 'buyer-1', name: '买家1' },
+        commonData: { orderId: 'X-1', itemId: 'item-1', itemInfo: { itemName: '测试商品' }, orderStatus: '待发货', inRefund: 'false' },
+        buyerInfoVO: { buyerId: 'buyer-1', nick: '买家昵称1', name: '买家姓名1', avatar: 'https://img.example/buyer-1.png' },
         priceVO: { totalPrice: '39.90', buyNum: '2' },
         rightVO: { btnList: [{ tradeAction: 'SKIP_PIN' }] },
       }],
@@ -19,8 +19,11 @@ const page = mapXianyuOrderPage({
 assert.equal(page.items.length, 1);
 assert.equal(page.items[0].orderNo, 'X-1');
 assert.equal(page.items[0].buyerId, 'buyer-1');
-assert.equal(page.items[0].buyerName, '买家1');
+assert.equal(page.items[0].buyerNickname, '买家昵称1');
+assert.equal(page.items[0].buyerName, '买家姓名1');
 assert.equal(page.items[0].itemId, 'item-1');
+assert.equal(page.items[0].buyerAvatarUrl, 'https://img.example/buyer-1.png');
+assert.equal(page.items[0].itemTitle, '测试商品');
 assert.equal(page.items[0].amountMinor, 3990);
 assert.equal(page.items[0].paymentStatus, 'paid');
 assert.equal(page.items[0].orderStatus, 'open');
