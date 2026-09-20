@@ -6,7 +6,7 @@
 - 当前目标：按 `docs/04-plan.md` 执行 `S4-VS5A/B/C` 在线聊天、`S4-VS6A/B` Workspace、`S4-VS7A` Settings API Key 三组优先垂直切片；账号/商品/卡券剩余真实环境门禁继续收尾，不再抢占下一批开发顺序
 - 多 Agent 协作状态：已启用独立 worktree、登记表和全局 merge lock 强制规则；当前活动登记见 `docs/agent-worktree-registry.md`，主工作区禁止直接开发
 - 已完成范围：阶段 0 范围门禁；阶段 1 架构与模块边界；阶段 2 数据模型、数据库表设计、关系基数、状态机、API envelope、幂等、鉴权、敏感交付、迁移边界；阶段 5 账号登录方法选择、真实 QR 适配器、Cookie 登录、账号资料同步、登录会话持久化、AuthGate 会话门禁、Vite 默认代理、账号列表真实读取和 Chrome/CDP 控制环境 E2E；S4-VS2 商品列表/详情只读首片、003_catalog 迁移、Memory/Postgres scope-aware 查询、真实 PostgreSQL smoke 和 Chrome/CDP 商品 E2E
-- 未完成范围：在线聊天 `S4-VS5A/B/C`、Workspace `S4-VS6B`、Settings API Key `S4-VS7A`；订单 `S4-VS4A/B/C`；商品/卡券剩余写入与库存门禁；`S4-ENV-RECOVERY`、`S4-EXT-ACCOUNT`、`S4-ENV-RUNTIME`；完整迁移/回滚/Testcontainers、Redis/MinIO 恢复和逐状态视觉回归。`S4-VS6A` 已完成受控首链路实现并标记 `PARTIALLY_VERIFIED`，尚未满足独立 Worker/Pi Runtime、真实 PostgreSQL、浏览器 E2E 与视觉门禁。账号密码登录依赖独立浏览器运行时，当前明确不可用。
+- 未完成范围：在线聊天 `S4-VS5A/B/C`、Workspace `S4-VS6B`、Settings API Key `S4-VS7A`；订单 `S4-VS4A/B/C`；商品/卡券剩余写入与库存门禁；`S4-ENV-RECOVERY`、`S4-EXT-ACCOUNT`、`S4-ENV-RUNTIME`；完整迁移/回滚/Testcontainers、Redis/MinIO 恢复和逐状态视觉回归。`S4-VS6A` 已完成真实 PostgreSQL、WS 和 Chrome/CDP 首链路复核并保持 `PARTIALLY_VERIFIED`，尚未满足独立 Worker/Pi Runtime、发布级恢复和人工视觉签核。账号密码登录依赖独立浏览器运行时，当前明确不可用。
 - 未解决风险：R-001/P1、R-002/P1、R-005/P2、R-006/P2、R-007/P2、R-008/P1、R-009/P1、R-011/P1、S3-I001/P1、S3-I002/P1、S3-I003/P1、S3-I004/P1、S3-I005/P1、S3-I006/P1、S3-I007/P1、S3-I008/P1、S4-I003/P1、S4-I004/P1、S4-I005/P1、S4-I006/P1、S4-I007/P2、S5-I001/P1、S5-I002/P1、S5-I003/P1、S5-I004/P1、S5-I007/P1、S5-I008/P1、S5-I009/P1、S5-RISK-013/P1、S5-RISK-014/P1、S5-RISK-015/P1、S5-RISK-016/P1、S5-RISK-017/P1、S5-RISK-018/P1、S5-RISK-019/P1、S5-RISK-020/P1、S5-RISK-021/P1、S5-RISK-022/P1、S5-RISK-023/P1、S5-RISK-024/P1、S5-RISK-025/P1、S5-RISK-026/P1；S3-I009/S3-I010/S5-I006 已关闭，S4-I001/S4-I002 已部分缓解
 - 待复审问题：S3-R5 为超出当前范围的实现审计；S3-R6 设计范围已澄清；S1-I004 保持 P2 跟进项；阶段 4 计划门禁已通过
 - 下一步：先冻结并实现 `S4-VS5A` 在线聊天读取与实时重连；随后推进 `S4-VS5B/C`、`S4-VS6B` 和 `S4-VS7A`，并为 `S4-VS6A` 补齐独立 Worker/Pi Runtime、真实持久化和浏览器证据。商品同步、卡券首页等既有首片证据继续保留，但不替代真实外部账号、持久化和人工视觉门禁
@@ -26,7 +26,9 @@
 - `npm --workspace apps/api run test`：已通过，`env0 smoke passed`、`onboarding cookie login smoke passed`；覆盖 health、bootstrap、Session/CSRF、幂等重放/冲突、账号创建、Cookie 登录、资料同步、登录状态和账号列表读取；
 - `npm --workspace apps/web run test`：已通过，覆盖账号 API adapter、QR 状态机和组件相关单元/契约测试；
 - `npm --workspace apps/web run typecheck`、`npm --workspace apps/web run test`、`npm --workspace apps/web run build`：已通过；Workspace adapter、Run cursor 去重、页面状态边界已接入，当前 web 测试为 13 files / 41 tests。
-- `npm --workspace apps/api run test`：已通过；新增 Workspace session/run smoke 与 raw WebSocket smoke，覆盖 queued→succeeded、Step、clientRunRef、Idempotency-Key 冲突、WS snapshot/replay、`after=NaN`、Origin 403、未认证 401、未知 Run 404。
+- `S4-VS6A` 专项复核：`npm --workspace apps/api run build`、`node apps/api/scripts/workspace-smoke.mjs`、`node apps/api/scripts/workspace-ws-smoke.mjs` 均已通过，覆盖 queued→succeeded、Step、clientRunRef、Idempotency-Key 冲突、WS snapshot/replay、`after=NaN`、Origin 403、未认证 401、未知 Run 404。
+- `npm --workspace apps/api run test`：已通过；覆盖 env0、onboarding、Workspace session/run、Workspace WebSocket、products、products-sync、mapper smoke。
+- `npm run test:e2e:chrome:workspace`：已通过真实浏览器首链路；临时 PostgreSQL 迁移 001–015、`ALLOW_IN_MEMORY=false` API、Vite、Chrome/CDP 均真实启动，session/Run 持久化成功，断线重连后事件回放 7 条且无错误 banner，生成 `artifacts/real-verify/S4-VS6A/screenshots/` 桌面/移动截图。
 - `docker compose config --quiet`：已通过；`docker compose up -d --build` 已启动 API、Worker、PostgreSQL、Redis、MinIO；`pg_isready`、Redis `PONG`、容器内 health/ready 通过，并完成账号写入、列表读取及 API 重启后的持久化复读；完整迁移回滚/Testcontainers 仍未覆盖；
 - `npm run verify`：已通过；包含类型检查、API smoke、前端 4 个测试文件/15 个测试、构建、本机 Chrome/CDP E2E、1440×900 与 390×844 截图生成、Compose 配置和 diff 检查。
 - `npm run test:e2e:chrome`：已通过；未认证 `/accounts` 先停留在 AuthGate 且不渲染账号业务面，注入 bootstrap session cookie 后完成账号列表、登录方式选择、无旧创建弹窗、无模拟二维码、Cookie 登录、服务端资料回传和页面可见持久化结果；不安装或执行 Playwright。
@@ -66,7 +68,7 @@
 | `S4-VS5A` 在线聊天读取与实时连接 | `PLANNED` | 会话列表、消息时间线、WebSocket、cursor 重连 | 真实 Redis/WS、断线补事件不重复、403/空/移动端 |
 | `S4-VS5B` 在线聊天发送/附件/撤回 | `PLANNED` | 文本发送、图片上传、失败重试、撤回 | PostgreSQL/对象存储、幂等、unknown/timeout、脱敏 |
 | `S4-VS5C` 人工接管与 AI 恢复 | `PLANNED` | handoff/release、版本冲突、审计 | 非法转换、403/409、桌面/移动状态 |
-| `S4-VS6A` Workspace 会话与 Run 首链路 | `PARTIALLY_VERIFIED` | AgentSession/Run/Step、Memory/Postgres Store、受控 Runtime、clientRunRef、WS 游标补事件、前端 Workspace 页面 | 独立 Worker/Pi Runtime、真实 PostgreSQL smoke、浏览器桌面/移动截图、断线恢复人工复核 |
+| `S4-VS6A` Workspace 会话与 Run 首链路 | `PARTIALLY_VERIFIED` | AgentSession/Run/Step、Memory/Postgres Store、受控 Runtime、clientRunRef、WS 游标补事件、真实 PostgreSQL/Chrome/CDP 首链路、前端 Workspace 页面 | 独立 Worker/Pi Runtime、发布级恢复、人工视觉签核与完整状态回归 |
 | `S4-VS6B` Workspace Confirmation/Outbox | `PLANNED` | confirm/cancel/retry/recover、unknown 恢复 | Policy、幂等、租约、审计、真实 Runtime |
 | `S4-VS7A` Settings API Key 配置 | `PLANNED` | CredentialStore 入口、创建/轮换/启停/撤销、脱敏 metadata | PostgreSQL 加密复读、403/409、审计、禁止明文回显 |
 | `S4-ENV-RECOVERY` | `BLOCKED` | 迁移回滚、Testcontainers、Redis/MinIO 重启恢复 | 发布级恢复演练和旧数据兼容证据 |

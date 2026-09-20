@@ -270,6 +270,12 @@
 ### 2026-09-19：S4-VS6A 首链路复审结论
 
 - 业务/架构复核：Workspace 已形成 AgentSession → Run → Step → event stream 的受控首链路；Run 绑定 `accountId + sessionId`，状态迁移由服务端负责，前端只消费脱敏 ViewModel。
-- 质量复核：API 全量 smoke、raw WebSocket smoke、Web typecheck/test/build 均通过；覆盖 `clientRunRef` 去重、`Idempotency-Key` 冲突、cursor replay 去重、Origin/认证/404 门禁。
+- 质量复核：API Workspace 专项 smoke、raw WebSocket smoke、Web typecheck/test/build 均通过；覆盖 `clientRunRef` 去重、`Idempotency-Key` 冲突、cursor replay 去重、Origin/认证/404 门禁。
 - 结论：`S4-VS6A = PARTIALLY_VERIFIED`。受控进程内 Runtime 和 MemoryStore 只能证明首链路行为，不足以关闭独立 Worker/Pi Runtime、真实 PostgreSQL 持久化、浏览器 E2E/视觉和人工断线恢复门禁。
 - 后续门禁：先补真实 Worker/Pi Runtime 与 Postgres smoke，再补 Chrome/CDP `1440x900` / `390x844` 截图和断线恢复复核；Confirmation/Outbox 不提前并入本片，按 `S4-VS6B` 执行。
+
+### 2026-09-20：S4-VS6A 证据复核与状态维持
+
+- 本轮复核通过：`npm --workspace apps/api run build`、`npm --workspace apps/api run test`、Workspace HTTP/WS smoke、`npm --workspace apps/web run typecheck`、`npm --workspace apps/web run test`（13 files / 41 tests）、`npm --workspace apps/web run build`、`git diff --check`。
+- 真实浏览器 `npm run test:e2e:chrome:workspace` 通过：临时 PostgreSQL 迁移 001–015、`ALLOW_IN_MEMORY=false` API、Vite、Chrome/CDP、session/Run 持久化、断线重连、7 条事件回放、WS handshake 和 1440×900 / 390×844 截图均有可复现证据。
+- 结论维持：`S4-VS6A = PARTIALLY_VERIFIED`；本轮切片文档/独立复核状态为 `READY_FOR_REVIEW`，未关闭独立 Worker/Pi Runtime、发布级恢复、人工视觉签核与 `S4-VS6B` Confirmation/Outbox 门禁。

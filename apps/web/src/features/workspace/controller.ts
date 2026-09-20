@@ -76,14 +76,14 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
 
   const connectRun = useCallback(async (runId: string, afterSequence = eventCursorRef.current) => {
     socketRef.current?.close();
-    setState((previous) => ({ ...previous, connection: 'reconnecting' }));
+    setState((previous) => ({ ...previous, connection: 'reconnecting', error: null }));
     try {
       const replay = await api.listEvents(runId, afterSequence);
       replay.forEach((event) => appendEvent(event));
       const cursor = replay.reduce((max, event) => Math.max(max, event.sequence), afterSequence);
       eventCursorRef.current = Math.max(eventCursorRef.current, cursor);
       const socket = api.openRunEvents(runId, eventCursorRef.current, {
-        onOpen: () => setState((previous) => ({ ...previous, connection: 'connected' })),
+        onOpen: () => setState((previous) => ({ ...previous, connection: 'connected', error: null })),
         onError: () => setState((previous) => ({ ...previous, connection: 'reconnecting' })),
         onClose: () => setState((previous) => ({ ...previous, connection: 'closed' })),
         onEvent: appendEvent,

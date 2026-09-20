@@ -1,6 +1,6 @@
 # S4-VS6A Workspace 会话与 Run 首链路验证基线
 
-- 验证日期：2026-09-19
+- 验证日期：2026-09-20
 - 当前结论：`PARTIALLY_VERIFIED`
 - 范围：`/workspace` 页面、AgentSession 列表/创建/搜索/切换/归档、Run 创建与脱敏详情、Step 状态、事件列表、只读 WebSocket snapshot/cursor replay。
 - 明确不在本片：Confirmation/Outbox、confirm/cancel/retry/recover、独立 Worker/Pi Runtime、真实外部平台动作。
@@ -17,11 +17,17 @@
 
 | 层级 | 命令 | 结果 |
 | --- | --- | --- |
-| API build + smoke | `npm --workspace apps/api run test` | 通过：env0、onboarding、workspace session/run、workspace websocket、products、sync、mapper |
+| API build | `npm --workspace apps/api run build` | 通过 |
+| Workspace HTTP smoke | `node apps/api/scripts/workspace-smoke.mjs` | 通过：session/run、queued→succeeded、Step、clientRunRef、Idempotency-Key 冲突、归档阻断 |
+| Workspace WebSocket smoke | `node apps/api/scripts/workspace-ws-smoke.mjs` | 通过：101、snapshot、事件 replay、游标去重、`after=NaN`、Origin/认证/404 门禁 |
+| API full suite | `npm --workspace apps/api run test` | 通过：env0、onboarding、workspace session/run、workspace websocket、products、sync、mapper |
 | Web typecheck | `npm --workspace apps/web run typecheck` | 通过 |
 | Web unit tests | `npm --workspace apps/web run test` | 通过：13 files / 41 tests |
 | Web production build | `npm --workspace apps/web run build` | 通过 |
+| Real browser E2E | `npm run test:e2e:chrome:workspace` | 通过：临时 PostgreSQL + `ALLOW_IN_MEMORY=false` API + Vite + Chrome/CDP；session 持久化、Run/Step 成功、7 条事件回放、断线/重连、WS handshake、桌面/移动截图 |
 | Diff hygiene | `git diff --check` | 通过 |
+
+> 复核说明：本轮 API 全量 smoke 已在清理残留测试进程后完整通过；真实浏览器脚本使用临时 PostgreSQL 数据库和独立 Chrome profile，验证了前端真实入口、持久化、断线重连与事件回放。该证据仍不替代独立 Worker/Pi Runtime、发布级恢复和人工视觉签核。
 
 ## Workspace 关键覆盖
 
@@ -33,8 +39,8 @@
 ## 未关闭门禁
 
 - 当前 Runtime 是 API 进程内受控实现，不等同于独立 Worker/Pi Runtime；未覆盖 lease、超时、取消、重试、unknown 和观测指标。
-- 尚未执行真实 PostgreSQL migration/复读 smoke；MemoryStore 只能作为受控测试证据。
-- 尚未生成 Chrome/CDP `1440x900` 与 `390x844` 截图，也未完成真实断线恢复人工复核。
+- 已执行真实 PostgreSQL migration/复读 smoke，并由真实浏览器脚本验证 session/Run 持久化；发布级迁移回滚、Testcontainers 和恢复演练仍未覆盖。
+- 已生成 Chrome/CDP `1440x900` 与 `390x844` 截图，且自动化验证断线/重连和事件回放；独立人工视觉签核与偏差记录仍待完成。
 - `S4-VS6B` 的 Confirmation/Outbox、confirm/cancel/retry/recover 留待后续切片。
 
 ## 回滚边界

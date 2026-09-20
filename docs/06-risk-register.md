@@ -1,7 +1,7 @@
 # XianyuSellerAgent 风险登记册
 
 - 文档版本：v0.2
-- 更新日期：2026-09-19
+- 更新日期：2026-09-20
 - 当前阶段：阶段 5——优先推进 S4-VS5 在线聊天、S4-VS6 Workspace、S4-VS7A Settings API Key
 - 风险状态：开放风险已登记；当前无 P0
 - 阶段门禁规则：阶段 5 允许受控 adapter、内存 store 和本机 Chrome/CDP 先形成证据，但不得把受控验证冒充真实闲鱼 APP 扫码、外部 Cookie 验证或 PostgreSQL/Redis 持久化；未关闭的 P1 外部登录和容器门禁不得扩展到商品、卡券、订单写入。
@@ -104,3 +104,9 @@
 
 - `S5-RISK-024`：受控首链路已降低“页面直接改写 Run/Step 状态”的风险；服务端状态迁移、脱敏 ViewModel、controller cursor 去重和 API/WS smoke 已落地，但独立 Worker lease、Confirmation/Outbox 与真实 Runtime 仍未完成，风险保持开放。
 - `S5-RISK-025`：MemoryStore + 受控 Runtime 已证明事件追加、cursor replay、`after=NaN` 防护和基础权限门禁；真实 Runtime 的 unknown/timeout/cancel/retry、断线人工复核和生产级观测仍缺失，风险保持开放。
+
+### 2026-09-20 S4-VS6A 证据复核
+
+- `S5-RISK-024` 与 `S5-RISK-025` 继续保持开放；本轮已确认 Workspace 专项 build、API 全量 smoke、HTTP/WS smoke、真实 PostgreSQL/Chrome/CDP 首链路、Web typecheck/test/build 和 diff hygiene，但不提前关闭独立 Worker/Pi Runtime、发布级恢复、Confirmation/Outbox 或人工视觉签核门禁。
+- 端口占用属于已清理的验证环境问题；清理残留 `dist/index.js` 进程后，`npm --workspace apps/api run test` 完整通过，未留下业务数据（真实验证临时数据已事务化清理）。
+- 当前切片复核状态为 `READY_FOR_REVIEW`；后续仅需补齐独立 Runtime、发布级恢复、人工视觉签核与 `S4-VS6B` 业务门禁，不把已完成的真实 PostgreSQL/浏览器证据重复列为未执行。
