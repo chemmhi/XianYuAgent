@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 const root = join(import.meta.dirname, '..', '..', '..');
 const chromePath = process.env.CHROME_PATH ?? join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe');
 const chromeProfile = join(tmpdir(), `xianyu-agent-messages-chrome-${process.pid}`);
+const fixtureImagePath = join(tmpdir(), `xianyu-agent-messages-${process.pid}.png`);
 const screenshotDir = join(root, 'docs', 'evidence', 'stage5', 's4-vs5a-chat-read', 'screenshots');
 const children = [];
 let apiRuntime;
@@ -89,6 +90,13 @@ async function evaluate(cdp, expression) {
   return result.result?.value;
 }
 
+async function setFileInputFiles(cdp, filePath) {
+  const document = await cdp.send('DOM.getDocument', { depth: -1 });
+  const node = await cdp.send('DOM.querySelector', { nodeId: document.root.nodeId, selector: '.messages-file-input' });
+  assert.ok(node.nodeId, 'messages file input must be present before selecting a file');
+  await cdp.send('DOM.setFileInputFiles', { nodeId: node.nodeId, files: [filePath] });
+}
+
 async function assertText(cdp, text) {
   const body = await evaluate(cdp, 'document.body.innerText');
   assert.ok(String(body).includes(text), `page missing text: ${text}`);
@@ -128,6 +136,7 @@ async function run() {
   const npmArgs = (args) => process.env.npm_execpath ? [process.env.npm_execpath, ...args] : args;
 
   mkdirSync(chromeProfile, { recursive: true });
+  writeFileSync(fixtureImagePath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'));
   const apiBuild = spawnProcess(npm, npmArgs(['--workspace', 'apps/api', 'run', 'build']));
   const buildExit = await new Promise((resolve) => apiBuild.once('exit', resolve));
   if (buildExit !== 0) throw new Error(`API build failed with ${buildExit}`);
@@ -193,6 +202,7 @@ async function run() {
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
   await cdp.send('Network.enable');
+  await cdp.send('DOM.enable');
   await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
     source: `(() => {
       const NativeWebSocket = window.WebSocket;
@@ -265,6 +275,14 @@ async function run() {
   assert.equal(pageTargetsAfterImagePreview.targetInfos.filter((target) => target.type === 'page').length, pageTargetsBeforeImagePreview.targetInfos.filter((target) => target.type === 'page').length, 'sent image preview must stay in current page');
   await evaluate(cdp, 'document.querySelector("button[aria-label=\\"关闭图片预览\\"]")?.click()');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-image-lightbox")) === false'), 'close sent image lightbox');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-connection-dot.connected"))'), 'secondary conversation realtime connected');
+  await evaluate(cdp, '(() => { window.__messagesConversationFetches = 0; window.__messagesNativeFetch = window.fetch.bind(window); window.fetch = (...args) => { const url = String(args[0]?.url ?? args[0] ?? ""); if (url.includes("/api/v1/conversations?")) window.__messagesConversationFetches += 1; return window.__messagesNativeFetch(...args); }; })()');
+  const fetchesBeforeLiveMessage = await evaluate(cdp, 'window.__messagesConversationFetches');
+  await apiRuntime.store.createMessage({ adminId, conversationId: secondConversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: 'live-message-without-refresh', source: 'system', traceId: 'messages-chrome-live-no-refresh' });
+  await waitFor(async () => (await messageBodies(cdp)).includes('live-message-without-refresh'), 'live message without refresh');
+  const fetchesAfterLiveMessage = await evaluate(cdp, 'window.__messagesConversationFetches');
+  assert.equal(fetchesAfterLiveMessage, fetchesBeforeLiveMessage, 'live message must arrive without a conversation refresh request');
+  assert.equal(await evaluate(cdp, '(() => { const timeline = document.querySelector(".messages-timeline"); return Boolean(timeline && timeline.scrollTop + timeline.clientHeight >= timeline.scrollHeight - 2); })()'), true, 'timeline must stay pinned to the newest message');
   await evaluate(cdp, `(() => { const input = document.querySelector('input[aria-label="搜索会话"]'); const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set; setter?.call(input, ''); input.dispatchEvent(new Event('input', { bubbles: true })); document.querySelectorAll('.messages-filter-tabs button')[0]?.click(); })()`);
   await evaluate(cdp, `document.querySelector('[data-conversation-id="${conversation.id}"]')?.click()`);
   await waitFor(async () => (await messageBodies(cdp)).length === 100, 'primary conversation latest history page');
@@ -282,19 +300,24 @@ async function run() {
 
   assert.equal(await evaluate(cdp, 'document.querySelector("textarea[aria-label=\\"消息内容\\"]")?.getAttribute("placeholder")'), '输入回复，Enter 发送，Shift + Enter 换行，Ctrl + V 粘贴图片。');
   assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-send-button")?.disabled)'), true, 'send button disabled for empty draft');
-  await evaluate(cdp, 'document.querySelector("button[aria-label=\\"打开附件菜单\\"]")?.click()');
-  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-extension-menu[role=\\"menu\\"]"))'), 'attachment menu');
-  await evaluate(cdp, 'document.querySelector("button[aria-label=\\"打开附件菜单\\"]")?.click()');
-  await evaluate(cdp, 'document.querySelector("button[aria-label=\\"插入闲鱼表情\\"]")?.click()');
+  await evaluate(cdp, 'document.querySelector(".messages-emoji-button")?.click()');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-emoji-picker[role=\\"dialog\\"]"))'), 'emoji picker');
+  const emojiLayout = await evaluate(cdp, '(() => { const picker = document.querySelector(".messages-emoji-picker"); if (!picker) return null; const style = getComputedStyle(picker); return { overflowX: style.overflowX, scrollWidth: picker.scrollWidth, clientWidth: picker.clientWidth }; })()');
+  assert.equal(emojiLayout.overflowX, 'hidden', 'emoji picker must hide horizontal overflow');
+  assert.ok(emojiLayout.scrollWidth <= emojiLayout.clientWidth, 'emoji picker must not overflow horizontally');
+  await evaluate(cdp, 'document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-emoji-picker")) === false'), 'emoji picker closes on outside click');
+  await evaluate(cdp, 'document.querySelector(".messages-emoji-button")?.click()');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-emoji-picker[role=\\"dialog\\"]"))'), 'emoji picker reopen');
   await evaluate(cdp, 'document.querySelector(".messages-emoji-picker button")?.click()');
   await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("textarea[aria-label=\\"消息内容\\"]")?.value ?? ""')).startsWith('['), 'emoji insertion');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-composer-visual .messages-emoji-inline"))'), 'emoji visual rendering');
   await evaluate(cdp, '(() => { const textarea = document.querySelector("textarea[aria-label=\\"消息内容\\"]"); const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set; setter?.call(textarea, ""); textarea.dispatchEvent(new Event("input", { bubbles: true })); })()');
-  await evaluate(cdp, 'document.querySelector("button[aria-label=\\"打开附件菜单\\"]")?.click()');
-  await evaluate(cdp, 'document.querySelector("button[role=\\"menuitem\\"]")?.click()');
-  await evaluate(cdp, `(() => { const input = document.querySelector('.messages-file-input'); if (!input) return false; const transfer = new DataTransfer(); transfer.items.add(new File(['png'], 'preview.png', { type: 'image/png' })); Object.defineProperty(input, 'files', { configurable: true, value: transfer.files }); input.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  await evaluate(cdp, '(() => { const input = document.querySelector(".messages-file-input"); window.__messagesFilePickerClicks = 0; input?.addEventListener("click", () => { window.__messagesFilePickerClicks += 1; }); document.querySelector(".messages-composer-tools .messages-tool-button:not(.messages-emoji-button)")?.click(); })()');
+  await waitFor(async () => await evaluate(cdp, 'window.__messagesFilePickerClicks === 1'), 'direct file picker');
+  await setFileInputFiles(cdp, fixtureImagePath);
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-inline-attachment img"))'), 'image attachment preview');
-  assert.equal(await evaluate(cdp, 'document.querySelector(".messages-attachment-copy strong")?.textContent'), 'preview.png');
+  assert.equal(await evaluate(cdp, 'document.querySelector(".messages-attachment-copy strong")?.textContent'), fixtureImagePath.split(/[\\/]/).at(-1));
   assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-send-button")?.disabled)'), false, 'send button enabled for image attachment');
   assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-inline-attachment")?.closest(".messages-composer-shell"))'), true, 'image attachment must be inside composer shell');
   await evaluate(cdp, 'document.querySelector("button[aria-label=\\"预览待发送图片\\"]")?.click()');
@@ -383,4 +406,5 @@ try {
     await apiRuntime.close();
   }
   try { rmSync(chromeProfile, { recursive: true, force: true }); } catch (error) { console.warn(`Chrome temporary profile cleanup failed: ${error.message}`); }
+  try { rmSync(fixtureImagePath, { force: true }); } catch (error) { console.warn(`Chrome fixture cleanup failed: ${error.message}`); }
 }

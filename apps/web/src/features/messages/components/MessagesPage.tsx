@@ -4,7 +4,7 @@ import { createMessagesApi, type MessagesApi } from '../api';
 import { canSubmitComposer, insertXianyuEmojiMarker, MESSAGES_COMPOSER_PLACEHOLDER } from '../composer';
 import { useMessagesController } from '../controller';
 import { filterConversations } from '../model';
-import { emojiURL, xianyuEmojis } from '../xianyu-emojis';
+import { emojiURL, renderXianyuText, xianyuEmojis } from '../xianyu-emojis';
 import { ConnectionBanner } from './ConnectionBanner';
 import { ConversationList } from './ConversationList';
 import { MessageTimeline } from './MessageTimeline';
@@ -18,12 +18,12 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
   const [search, setSearch] = useState('');
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
-  const [extensionOpen, setExtensionOpen] = useState(false);
   const [pendingImage, setPendingImage] = useState<{ file: File; url: string } | null>(null);
   const [attachmentPreviewOpen, setAttachmentPreviewOpen] = useState(false);
   const [chatImagePreviewUrl, setChatImagePreviewUrl] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const composerToolsRef = useRef<HTMLDivElement>(null);
   const activeConversation = controller.state.conversations.find((conversation) => conversation.conversationId === controller.state.activeConversationId);
   const visibleConversations = useMemo(() => filterConversations(controller.state.conversations, search, unreadOnly), [controller.state.conversations, search, unreadOnly]);
 
@@ -34,7 +34,6 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
   useEffect(() => {
     setDraft('');
     setEmojiOpen(false);
-    setExtensionOpen(false);
     setPendingImage(null);
     setAttachmentPreviewOpen(false);
     setChatImagePreviewUrl(null);
@@ -51,7 +50,6 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
     if (!file || !file.type.startsWith('image/')) return;
     setPendingImage({ file, url: URL.createObjectURL(file) });
     setAttachmentPreviewOpen(false);
-    setExtensionOpen(false);
   };
 
   const removePendingImage = () => {
@@ -75,13 +73,22 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
     const result = insertXianyuEmojiMarker(draft, start, end, name);
     setDraft(result.value);
     setEmojiOpen(false);
-    setExtensionOpen(false);
     requestAnimationFrame(() => {
       textarea?.focus();
       textarea?.setSelectionRange(result.cursor, result.cursor);
       resizeComposer();
     });
   };
+
+  useEffect(() => {
+    if (!emojiOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (composerToolsRef.current?.contains(event.target as Node)) return;
+      setEmojiOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [emojiOpen]);
 
   const handleComposerSubmit = async () => {
     if (controller.state.sendPhase === 'submitting') return;
@@ -104,7 +111,6 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
       }
     }
     setEmojiOpen(false);
-    setExtensionOpen(false);
   };
 
   if (accountsLoading) return <section className="page-stack messages-domain"><div className="messages-state">正在加载账号范围…</div></section>;
@@ -141,11 +147,6 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
           <div className="messages-main-header-meta"><span>{activeConversation?.itemTitle || '未关联商品'}</span><span className={`messages-connection-dot ${controller.state.realtimePhase}`} /></div>
         </header>
         {controller.state.activeConversationId ? <>
-          <div className="messages-main-meta" aria-label="会话状态">
-            <span>当前会话</span>
-            <span>当前商品：{activeConversation?.itemTitle || '未关联商品'}</span>
-            <span>{activeConversation?.handlingMode === 'human' ? '人工接管中' : 'AI 托管中'}</span>
-          </div>
           <MessageTimeline
             messages={controller.state.messages}
             phase={controller.state.timelinePhase}
@@ -167,16 +168,18 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
                   <button className="messages-attachment-remove" type="button" aria-label="移除附件" onClick={removePendingImage}>×</button>
                 </div>}
                 <div className="messages-composer-assist-row">
-                  <div className="messages-composer-tools">
-                    <button className="messages-tool-button" type="button" aria-label="打开附件菜单" aria-expanded={extensionOpen} onClick={() => { setExtensionOpen((open) => !open); setEmojiOpen(false); }}>+</button>
-                    <button className="messages-tool-button messages-emoji-button" type="button" aria-label="插入闲鱼表情" aria-expanded={emojiOpen} onClick={() => { setEmojiOpen((open) => !open); setExtensionOpen(false); }}>☺</button>
+                  <div ref={composerToolsRef} className="messages-composer-tools">
+                    <button className="messages-tool-button" type="button" aria-label="添加图片附件" onClick={() => { setEmojiOpen(false); imageInputRef.current?.click(); }}>+</button>
+                    <button className="messages-tool-button messages-emoji-button" type="button" aria-label="插入闲鱼表情" aria-expanded={emojiOpen} onClick={() => setEmojiOpen((open) => !open)}>☺</button>
                     <span className="messages-ai-assist-label">AI 建议回复已开启</span>
                     <input ref={imageInputRef} className="messages-file-input" type="file" accept="image/*" onChange={(event) => { setImagePreview(event.target.files?.[0]); event.currentTarget.value = ''; }} />
-                    {extensionOpen && <div className="messages-extension-menu" role="menu" aria-label="附件和扩展功能"><button type="button" role="menuitem" onClick={() => { setExtensionOpen(false); imageInputRef.current?.click(); }}>图片附件</button></div>}
                     {emojiOpen && <div className="messages-emoji-picker" role="dialog" aria-label="闲鱼表情选择器">{xianyuEmojis.map(([name, url], index) => <button key={`${name}-${index}`} type="button" aria-label={`插入${name}`} title={name} onClick={() => insertEmoji(name)}><img src={emojiURL(url)} alt={name} /></button>)}</div>}
                   </div>
                 </div>
-                <textarea ref={textareaRef} aria-label="消息内容" value={draft} maxLength={2000} rows={1} onChange={(event) => setDraft(event.target.value)} onPaste={(event) => { const image = Array.from(event.clipboardData.items).map((item) => item.kind === 'file' ? item.getAsFile() : null).find((file): file is File => Boolean(file && file.type.startsWith('image/'))) ?? Array.from(event.clipboardData.files).find((file) => file.type.startsWith('image/')); if (image) { event.preventDefault(); setImagePreview(image); } }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={MESSAGES_COMPOSER_PLACEHOLDER} />
+                <div className="messages-composer-editor">
+                  {draft && <div className="messages-composer-visual" aria-hidden="true">{renderXianyuText(draft)}</div>}
+                  <textarea ref={textareaRef} className={draft ? 'messages-composer-input messages-composer-input--masked' : 'messages-composer-input'} aria-label="消息内容" value={draft} maxLength={2000} rows={1} onChange={(event) => setDraft(event.target.value)} onPaste={(event) => { const image = Array.from(event.clipboardData.items).map((item) => item.kind === 'file' ? item.getAsFile() : null).find((file): file is File => Boolean(file && file.type.startsWith('image/'))) ?? Array.from(event.clipboardData.files).find((file) => file.type.startsWith('image/')); if (image) { event.preventDefault(); setImagePreview(image); } }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={MESSAGES_COMPOSER_PLACEHOLDER} />
+                </div>
                 <div className="messages-composer-footer">
                   <div className="messages-composer-shortcuts">
                     <span>按 Enter 发送 · Shift + Enter 换行</span>
