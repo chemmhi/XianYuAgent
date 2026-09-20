@@ -345,6 +345,16 @@
 | S5-R64 | 质量 / 交付 | 修订是否在独立 worktree、merge lock 和主线验证后合入，且不误改详情抽屉内容或真实外部权限结论 | root | PASS | `8ad36cd`、`npm run typecheck`、`npm test`、`npm run build`、`npm run compose:config`、`git diff --check`、`docs/agent-worktree-registry.md` |
 
 本轮结论：订单列表界面修订已合入 `master`；详情抽屉内容按用户更正保留原样，下一步再单独调整。真实 seller 订单请求仍返回 `PERMISSION_EXCEPTION::无权限访问`，因此 `S4-VS4A` 整体继续保持 `PARTIALLY_VERIFIED/BLOCKED`。
+
+### 2026-09-20：S4-VS4A 订单字段、头像与列表信息复审
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R65 | 业务 / 验收 | 缺失昵称、头像或商品名称时，是否从账号隔离的本地会话/商品数据聚合，而不是回退显示买家姓名、用户 ID 或商品 ID | root + orders_display_review | PASS | `apps/api/src/store-memory.ts`、`apps/api/src/store-postgres.ts`、`apps/api/scripts/orders-smoke.mjs`、`apps/api/scripts/orders-postgres-smoke.mjs` |
+| S5-R66 | UI / 交互 | 列表是否只展示昵称/商品名称，头像 URL 是否渲染真实头像，无头像时不显示首字，昵称是否仍保留姓名 hover | root + orders_display_review | PASS | `apps/web/src/features/orders/components/OrderTable.tsx`、`OrderTable.test.ts`、订单桌面/移动截图 |
+| S5-R67 | 质量 / 交付 | 迁移、构建、全量测试、PostgreSQL 持久化与 Chrome/CDP 订单旅程是否在 merge lock 后于 master 重跑通过 | root | PASS | merge `490e145`；`npm run typecheck`、`npm test`、`npm run build`、`npm run db:migrate`、`npm --workspace apps/api run test:orders:postgres`、`npm run test:e2e:chrome:orders`、`docker compose config --quiet`、`git diff --check` |
+
+本轮结论：订单列表字段与头像聚合修订已通过复审并合入 `master`；详情抽屉内容仍按用户更正保留原样。真实外部 seller 权限与发布级回滚风险继续沿用 `S4-VS4A` 既有结论，不以受控 fixture 代替真实外部验收。
 ### 2026-09-20：S4-VS7A Settings API Key 首片复核
 
 本节只复核当前实现和受控证据，不把 MemoryStore smoke、构建成功或页面可打开升级为发布级通过。

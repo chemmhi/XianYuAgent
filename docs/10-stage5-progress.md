@@ -64,6 +64,13 @@
 - Chrome/CDP 订单 E2E 覆盖账号切换与隔离、六列表头、关键词搜索、单状态筛选、买家姓名 tooltip、详情抽屉、分页、表格内部滚动、本地刷新和闲鱼刷新；桌面/移动截图已归档至 `docs/evidence/stage5/S4-VS4A/screenshots/`。
 - 详情抽屉内容本轮保持不变；真实 seller 订单读取已在移除错误 `idle_site_biz_code` 请求头后通过，订单交付动作继续后置。
 
+### 2026-09-20：S4-VS4A 订单字段与头像聚合修订
+
+- `d403e75`、`465f723` 已在 merge lock 内以 `490e145` 合入 `master`；新增 `buyerNickname` / `buyerAvatarUrl` 契约、019/020 迁移，并按账号从本地会话/商品表聚合缺失昵称、头像和商品名称。
+- 订单列表移除用户 ID、商品 ID 副文本；头像 URL 渲染真实头像，无头像不显示昵称首字；昵称继续保留姓名 hover；搜索只命中订单号、昵称和商品名称。
+- 合并后主线通过 `npm run typecheck`、`npm test`（37 files / 114 tests）、`npm run build`、`npm run db:migrate`、`npm --workspace apps/api run test:orders:postgres`、`npm run test:e2e:chrome:orders`、`docker compose config --quiet` 和 `git diff --check`。
+- 详情抽屉内容按用户更正保持不变；真实外部 seller 权限与订单交付动作继续按既有风险和 `S4-VS4B/C` 后置范围处理。
+
 ### 2026-09-20：S4-VS-DASHBOARD 与订单全链路复验
 
 - `npm --workspace apps/api run test:dashboard`、`npm --workspace apps/api run test:dashboard:postgres`、`npm --workspace apps/api run test`、`npm run typecheck`、`npm run build` 均通过。

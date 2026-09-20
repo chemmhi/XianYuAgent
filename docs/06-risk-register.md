@@ -134,6 +134,13 @@
 - `S5-RISK-027` 已关闭：完整浏览器入口、真实 active 凭证、MTOP、API、PostgreSQL 与页面可见结果均通过；订单交付动作另由 `S4-VS4B/C` 承接。
 - 买家昵称与实名目前继续共用既有 `buyerName` 数据契约；本轮只增加悬浮提示，不伪造额外实名字段。详情抽屉内容留待下一步单独调整。
 
+### 2026-09-20 S4-VS4A 订单字段与头像聚合风险复核
+
+- `S5-RISK-017` 继续保持开放：本轮只读列表仍不包含交付预览、库存锁、发货/取消/重试、unknown/timeout、Outbox 和 DeliveryRecord。
+- 字段完整性风险已部分关闭：`OrderRecord` / `XianyuOrderItem` 已分离买家昵称、姓名和头像；MemoryStore/PostgresStore 按账号从本地会话与商品表聚合缺失值，列表不再回退显示买家姓名、用户 ID 或商品 ID。
+- 迁移风险继续开放：`019_order_display_fields.sql` 与 `020_order_buyer_avatar.sql` 已幂等执行，完整迁移回滚、旧数据兼容、Testcontainers 和发布级恢复演练仍未覆盖。
+- 真实外部 seller 权限仍沿用 S4-VS4A 既有结论，不以受控 fixture 的头像/订单数据代替真实外部验收。
+
 ### 2026-09-20 S4-VS7A Settings API Key 风险复核
 
 - `S5-RISK-026` 已部分缓解但保持开放：CredentialStore 已独立于通用设置保存入口，API 只返回 `CredentialRef` 脱敏 metadata，明文仅在 create/rotate 请求边界出现；`Idempotency-Key`、`expectedVersion`、账号 scope、轮换/启停/撤销审计、403/409 与撤销后禁止启用均已由 smoke/Chrome/CDP 覆盖。旧 `auth.account_credentials` 兼容迁移仍需独立方案与签核。
