@@ -7,7 +7,7 @@
 
 ## 2026-09-20 工具栏修订
 
-- 本次修订 worktree：`F:\ChenHai\Project\XianYuAgent-coupons-toolbar`；分支：`fix/coupons-toolbar`。
+- 本次修订 worktree：`F:\ChenHai\Project\XianYuAgent-coupons-toolbar`；分支：`fix/coupons-toolbar`；已通过合并提交 `19c6798` 合入 `master`。
 - 移除卡券首页顶部 KPI 卡片，将新建、刷新及选中后的批量操作并入列表工具栏。
 - 搜索与类型筛选改为变更即生效，移除“查询”和“重置筛选”按钮。
 - 回归证据：`CouponToolbar.test.tsx`、Coupons Chrome/CDP E2E，以及 `1440×900` / `390×844` 截图。

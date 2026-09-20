@@ -59,6 +59,7 @@
 - 后端：`apps/api/migrations/013_coupons.sql` + `014_coupon_card_metadata.sql`、Memory/Postgres store、`purpose=text/data/api/image` 校验、列表安全元数据摘要、PATCH/PUT 编辑、scope 校验、加密正文存储、审计摘要。
 - 前端：`apps/web/src/features/coupons/`，通过 `/coupons` 正式路由接入，表格视觉保持平台样式，仅参考旧项目字段和操作。
 - 验证：已完成类型检查、单测、构建、API smoke、Chrome/CDP E2E、桌面/移动截图；Chrome/CDP 使用 MemoryStore/stub，真实 PostgreSQL/Redis/MinIO 仍需人工浏览器复核。
+- 2026-09-20 工具栏修订已通过合并后门禁并合入 `master`：`19c6798`（`merge: 合入卡券列表工具栏修订`），移除首页 KPI 卡片，将搜索/筛选/新建/刷新及条件批量操作统一到列表工具栏，并移除查询/重置筛选按钮。
 - 门禁：代码已合入 `master`，人工审核仍需按 `docs/evidence/stage5/S4-VS3/test-baseline.md` 执行并回写结论。
 
 ## 未完成切片索引（2026-09-19）
