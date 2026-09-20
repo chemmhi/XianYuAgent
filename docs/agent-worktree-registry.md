@@ -14,7 +14,7 @@
 | `worktree` | worktree 绝对路径 |
 | `owner` | 负责人或委派主体 |
 | `created_at` | 创建时间，含时区 |
-| `status` | `PLANNED` / `REGISTERED` / `READY_FOR_REVIEW` / `READY_FOR_REVIEW` / `READY_FOR_MERGE` / `MERGING` / `MERGED` / `CLEANED` / `BLOCKED` |
+| `status` | `PLANNED` / `REGISTERED` / `READY_FOR_REVIEW` / `READY_FOR_MERGE` / `MERGING` / `MERGED` / `CLEANED` / `BLOCKED` |
 | `merge_commit` | 合并提交哈希；未合并填写 `-` |
 | `cleaned_at` | worktree 清理时间；未清理填写 `-` |
 | `notes` | 审核、阻塞、环境、冲突、回滚或其他说明 |
@@ -29,7 +29,7 @@
 | `root/workspace_ux_fix` | `s4-vs6a-workspace-ux` | `feature/s4-vs6a-workspace-ux` | `F:\ChenHai\Project\XianYuAgent-workspace-ux` | Codex `/root` | `2026-09-20 11:20:00 +08:00` | `CLEANED` | `833eb69` | `2026-09-20 11:30:34 +08:00` | 自动标题、历史消息回读、连续消息聚合、对话区居中限宽与真实 Pi Chrome E2E 已合入 master；Git worktree 元数据已 prune，目录因含非 Git 内容未删除；保持 `PARTIALLY_VERIFIED` |
 | `root` | `s4-vs5a-chat-read` | `feature/s4-vs5a-chat-read` | `F:\ChenHai\Project\XianYuAgent-s4-vs5a-chat-read` | Codex `/root` | `2026-09-19 00:00:00 +08:00` | `CLEANED` | `a13b68f` | `2026-09-20 10:25:17 +08:00` | VS5A worktree/branch 已清理并合入 `master`；真实 Redis/Postgres/Chrome/CDP 证据已归档，首片保持 `PARTIALLY_VERIFIED` |
 | `root` | `s4-vs5a-chat-session-ui` | `feature/s4-vs5a-chat-session-ui` | `F:\ChenHai\Project\XianYuAgent-s4-vs5a-chat-session-ui` | Codex `/root` | `2026-09-20 00:00:00 +08:00` | `CLEANED` | `1efaecf` | `2026-09-20 12:36:30 +08:00` | 在线聊天会话列表适配已在 merge lock 内以 `--no-ff` 合入 `master`；主线 typecheck、全量测试、构建和 diff 检查通过，临时 worktree/分支已清理。 |
-| `root` | `remove-page-chrome` | `feature/remove-page-chrome` | `F:\ChenHai\Project\XianYuAgent-remove-page-chrome` | Codex `/root` | `2026-09-20 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 移除所有页面的 header.topbar 与 div.page-title 区域，补充回归验证。 |
+| `root` | `remove-page-chrome` | `feature/remove-page-chrome` | `F:\ChenHai\Project\XianYuAgent-remove-page-chrome` | Codex `/root` | `2026-09-20 00:00:00 +08:00` | `CLEANED` | `b38fafd` | `2026-09-20 17:34:00 +08:00` | 页面顶部清理已合入 master；消息页高度适配已补充于 `795ee39`。Git worktree 与分支已清理，目录因含非 Git 内容保留。 |
 | - | - | - | - | - | - | - | - | - | 主工作区 `master` 受保护；活动 agent 见上表 |
 
 ## 主工作区
