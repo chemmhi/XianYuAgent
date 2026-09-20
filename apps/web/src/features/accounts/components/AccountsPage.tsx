@@ -55,21 +55,13 @@ export function AccountsPage({ api: providedApi }: AccountsPageProps) {
 
   return (
     <section className="page-stack accounts-domain" data-accounts-domain>
-      <div className="page-title">
-        <div>
-          <p className="eyebrow">Account Context</p>
-          <h1>店铺 / 账号管理</h1>
-          <p>账号登录状态、凭证和当前操作上下文统一在这里管理。</p>
-        </div>
-        <div className="page-title-actions"><span className="accounts-domain-scope">管理员账号范围</span><button className="btn primary" type="button" onClick={() => openLogin()}>添加闲鱼账号</button></div>
-      </div>
       <div className="kpi-grid three accounts-domain-kpis">
         <article className="card kpi-card"><div className="kpi-label">已绑定账号</div><div className="kpi-value">{total}</div><div className="kpi-delta"><span className="tone-ok">{metrics.online} 个在线</span><small>当前可用连接</small></div></article>
         <article className="card kpi-card"><div className="kpi-label">当前账号</div><div className="kpi-value">{currentAccount?.displayName?.slice(-1) ?? '—'}</div><div className="kpi-delta"><span className="tone-info">账号上下文</span><small>{currentAccount?.displayName ?? '请先选择账号'}</small></div></article>
         <article className="card kpi-card"><div className="kpi-label">需要处理</div><div className="kpi-value">{metrics.needsAttention}</div><div className="kpi-delta"><span className={metrics.needsAttention > 0 ? 'tone-warn' : 'tone-ok'}>{metrics.needsAttention > 0 ? '需要刷新或补凭证' : '状态健康'}</span><small>不展示敏感凭证</small></div></article>
       </div>
       <article className="card panel accounts-domain-panel">
-        <AccountToolbar filters={controller.filters} phase={controller.state.phase} total={total} onSearchChange={controller.setSearch} onStatusChange={(status) => controller.setFilters((previous) => ({ ...previous, status, page: 1 }))} onRefresh={controller.reload} />
+        <AccountToolbar filters={controller.filters} phase={controller.state.phase} total={total} onSearchChange={controller.setSearch} onStatusChange={(status) => controller.setFilters((previous) => ({ ...previous, status, page: 1 }))} onRefresh={controller.reload} onAddAccount={() => openLogin()} />
         {actionError && <div className="accounts-inline-error" role="alert">{actionError}</div>}
         {controller.state.phase === 'success' && <AccountTable accounts={accounts} activeAccountId={currentAccountId} onReauthorize={openLogin} onSwitch={switchAccount} onDelete={deleteAccount} />}
         <AccountStateView phase={controller.state.phase} error={controller.state.error} onRetry={controller.reload} />

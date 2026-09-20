@@ -7,9 +7,10 @@ interface AccountToolbarProps {
   onSearchChange: (value: string) => void;
   onStatusChange: (value: AccountListFilters['status']) => void;
   onRefresh: () => void;
+  onAddAccount: () => void;
 }
 
-export function AccountToolbar({ filters, phase, total, onSearchChange, onStatusChange, onRefresh }: AccountToolbarProps) {
+export function AccountToolbar({ filters, phase, total, onSearchChange, onStatusChange, onRefresh, onAddAccount }: AccountToolbarProps) {
   return (
     <div className="accounts-domain-toolbar">
       <div>
@@ -33,6 +34,7 @@ export function AccountToolbar({ filters, phase, total, onSearchChange, onStatus
         <button className="btn ghost" type="button" onClick={onRefresh} disabled={phase === 'loading'}>
           {phase === 'loading' ? '刷新中…' : '刷新'}
         </button>
+        <button className="btn primary" type="button" onClick={onAddAccount}>添加闲鱼账号</button>
         <span className="accounts-domain-total">共 {total} 个账号</span>
       </div>
     </div>

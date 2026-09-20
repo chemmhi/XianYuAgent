@@ -1,5 +1,4 @@
 .workspace-domain { min-width: 0; }
-.workspace-page-title { align-items: center; }
 .workspace-scope { display: inline-flex; align-items: center; gap: 8px; padding: 8px 11px; border: 1px solid var(--border); border-radius: 999px; background: #fff; color: var(--muted); font-size: 11px; font-weight: 700; white-space: nowrap; }
 .workspace-scope-dot { width: 7px; height: 7px; border-radius: 50%; background: #CBD5E1; }
 .workspace-scope-dot.online { background: var(--success); box-shadow: 0 0 0 3px var(--success-bg); }
@@ -76,7 +75,6 @@
 .workspace-state.compact { min-height: 150px; }
 .workspace-inline-error { padding: 10px 12px; border: 1px solid rgba(180,35,24,.18); border-radius: 8px; background: var(--danger-bg); color: var(--danger); font-size: 11px; }
 @media (max-width: 900px) {
-  .workspace-page-title { align-items: flex-start; }
   .workspace-layout { grid-template-columns: 1fr; }
   .workspace-sessions-panel { min-height: 260px; }
   .workspace-session-list { max-height: 300px; }
