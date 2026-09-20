@@ -118,16 +118,37 @@ async function run() {
   await cdp.send('Runtime.enable');
   await cdp.send('Network.enable');
   for (const pair of cookie.split('; ')) { const [name, ...valueParts] = pair.split('='); await cdp.send('Network.setCookie', { name, value: valueParts.join('='), url: `${webUrl}/` }); }
+  await cdp.send('Page.navigate', { url: `${webUrl}/accounts` });
+  await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'accounts page before products');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('账号列表'), 'accounts list before products');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes(account.displayName), 'primary account row');
+  const initialSwitched = await evaluate(cdp, `(() => { const rows = Array.from(document.querySelectorAll('[role="row"]')); const row = rows.find((candidate) => candidate.textContent?.includes(${JSON.stringify(account.displayName)})); const button = row?.querySelector('[data-testid="account-switch"]'); if (!button || button.disabled) return false; button.click(); return true; })()`);
+  if (!initialSwitched) throw new Error('primary account switch button missing or disabled');
+  await waitFor(async () => String(await evaluate(cdp, 'localStorage.getItem("xianyu.activeAccountId") ?? ""')) === account.id, 'primary account selection');
   await cdp.send('Page.navigate', { url: `${webUrl}/products` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'products page');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('商品目录'), 'products list');
-  await evaluate(cdp, `localStorage.setItem('xianyu.activeAccountId', ${JSON.stringify(account.id)}); location.reload();`);
-  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("[data-testid=product-account-context]")?.textContent ?? ""')).includes('Chrome 商品账号'), 'active account context');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('当前账号：Chrome 商品账号'), 'active account context');
+  if (await evaluate(cdp, 'document.querySelector("[data-testid=product-account-context]") !== null')) throw new Error('redundant toolbar account name should be removed');
+  if (await evaluate(cdp, 'document.querySelectorAll(".products-kpis").length !== 0')) throw new Error('product KPI cards should be removed');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 商品'), 'product row');
+  const scrollState = await evaluate(cdp, '(() => { const table = document.querySelector(".products-table-scroll"); const main = document.querySelector("main.products-main"); return { tableOverflowY: table ? getComputedStyle(table).overflowY : "", mainOverflowY: main ? getComputedStyle(main).overflowY : "" }; })()');
+  if (scrollState.tableOverflowY !== 'auto' || scrollState.mainOverflowY !== 'hidden') throw new Error(`products scroll container mismatch: ${JSON.stringify(scrollState)}`);
   const syncButton = await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=sync-products]"); if (!button || button.disabled) return false; button.click(); return true; })()');
   if (!syncButton) throw new Error('sync products button missing or disabled');
   await waitFor(async () => cdp.events.some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'POST' && event.params?.request?.url?.includes('/api/v1/products/sync')), 'xianyu product sync request');
   await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("[data-testid=products-total]")?.textContent ?? ""')).includes('30'), '29 synced products plus local product');
+  if (!await evaluate(cdp, 'String(document.querySelector("[data-testid=products-pagination]")?.textContent ?? "").includes("第 1 / 2 页")')) throw new Error('products pagination missing after sync');
+  const pageTwoMark = cdp.events.length;
+  if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=products-page-2]"); if (!button || button.disabled) return false; button.click(); return true; })()')) throw new Error('products page 2 button missing or disabled');
+  await waitFor(async () => cdp.events.slice(pageTwoMark).some((event) => {
+    if (event.method !== 'Network.requestWillBeSent' || event.params?.request?.method !== 'GET') return false;
+    const url = new URL(event.params.request.url);
+    return url.pathname === '/api/v1/products' && url.searchParams.get('page') === '2';
+  }), 'products page 2 request');
+  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("[data-testid=products-page-2][aria-current=page]") ? document.body.innerText : ""')).includes('第 2 / 2 页'), 'products page 2 state');
+  if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=products-page-1]"); if (!button || button.disabled) return false; button.click(); return true; })()')) throw new Error('products page 1 button missing or disabled');
+  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("[data-testid=products-page-1][aria-current=page]") ? document.body.innerText : ""')).includes('第 1 / 2 页'), 'products page 1 state after pagination');
   const refreshMark = cdp.events.length;
   if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=refresh-products]"); if (!button || button.disabled) return false; button.click(); return true; })()')) throw new Error('refresh products button missing or disabled');
   await waitFor(async () => cdp.events.slice(refreshMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'GET' && event.params?.request?.url?.match(/\/api\/v1\/products(?:\?|$)/)), 'local product refresh request');
@@ -163,7 +184,7 @@ async function run() {
   const secondaryProductsMark = cdp.events.length;
   await cdp.send('Page.navigate', { url: `${webUrl}/products` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'products page after account switch');
-  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("[data-testid=product-account-context]")?.textContent ?? ""')).includes('Secondary 商品账号'), 'switched product account context');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('当前账号：Secondary 商品账号'), 'switched product account context');
   await waitFor(async () => cdp.events.slice(secondaryProductsMark).some((event) => {
     if (event.method !== 'Network.requestWillBeSent' || event.params?.request?.method !== 'GET') return false;
     const url = new URL(event.params.request.url);

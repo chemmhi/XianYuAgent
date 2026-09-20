@@ -31,7 +31,6 @@ export function ProductToolbar({ currentAccount, contextLoading, contextError, c
   return <div className="products-toolbar">
     <div><h2>商品目录</h2><p>{contextLoading ? '正在加载账号上下文…' : currentAccount ? `当前账号：${currentAccount.displayName}` : '请先在账号管理选择当前账号'}</p></div>
     <div className="products-toolbar-actions">
-      <span className="products-account-context" data-testid="product-account-context">{currentAccount ? currentAccount.displayName : '未选择账号'}</span>
       {contextMissing && <button className="btn ghost" type="button" data-testid="choose-account" onClick={onChooseAccount}>去选择账号</button>}
       {contextError && <span className="products-account-error" role="alert">账号上下文加载失败</span>}
       <label className="products-search"><span className="sr-only">搜索商品</span><input aria-label="搜索商品" value={filters.keyword ?? ''} onChange={(event) => onKeywordChange(event.target.value)} placeholder="搜索商品名称或外部编号" /></label>
