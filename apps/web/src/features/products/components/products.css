@@ -7,7 +7,6 @@
 .products-toolbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .products-toolbar-actions select, .products-search input { height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font-size: 12px; }
 .products-search input { width: 230px; }
-.products-total { color: var(--sub); font-size: 11px; white-space: nowrap; }
 .products-table-region { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .products-table-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .products-table { display: grid; min-width: 980px; }
@@ -38,7 +37,7 @@
 .products-page-button:disabled { cursor: not-allowed; opacity: .48; }
 .products-pagination-ellipsis { min-width: 16px; text-align: center; color: var(--sub); }
 .products-pagination-status { white-space: nowrap; font-variant-numeric: tabular-nums; }
-.products-state { display: grid; place-items: center; gap: 6px; min-height: 210px; padding: 28px; color: var(--sub); text-align: center; }
+.products-state { display: grid; flex: 1; place-items: center; gap: 6px; width: 100%; min-height: 0; box-sizing: border-box; padding: 28px; color: var(--sub); text-align: center; }
 .products-state strong, .products-detail-state strong { color: var(--text); font-size: 13px; }
 .products-state span, .products-detail-state span { font-size: 11px; }
 .products-error { color: var(--danger); }
