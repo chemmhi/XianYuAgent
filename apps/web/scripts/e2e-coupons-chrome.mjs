@@ -165,6 +165,13 @@ async function run() {
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 卡券批次'), 'coupon list reset');
   await assertText(cdp, 'E2E 列表元数据');
   await assertText(cdp, '对接价：¥9.90');
+  await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "新建卡券")?.click()');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('固定文字配置'), 'coupon create modal');
+  await assertText(cdp, '填写到无需邮寄凭证');
+  await assertText(cdp, '图片配置（可选，最多3张）');
+  const removedDockControls = await evaluate(cdp, '({ price: document.body.innerText.includes("对接价格"), dockable: document.body.innerText.includes("是否可对接") })');
+  if (removedDockControls.price || removedDockControls.dockable) throw new Error('coupon create modal still exposes removed docking controls');
+  await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "取消")?.click()');
   await captureViewport(cdp, 1440, 900, 'coupons-desktop-1440x900.png');
 
   const selected = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("[data-coupons-table] button")).find((candidate) => candidate.getAttribute("aria-label")?.startsWith("选择 ")); if (!button) return false; button.click(); return true; })()');
