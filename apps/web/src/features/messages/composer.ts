@@ -11,3 +11,29 @@ export function insertXianyuEmojiMarker(draft: string, start: number, end: numbe
     cursor: start + marker.length,
   };
 }
+
+export function removeXianyuEmojiMarkerAtCursor(
+  draft: string,
+  start: number,
+  end: number,
+  key: 'Backspace' | 'Delete',
+): { value: string; cursor: number; handled: boolean } {
+  if (start !== end) {
+    const selected = draft.slice(start, end);
+    if (/^\[[^\[\]]+\]$/.test(selected)) {
+      return { value: `${draft.slice(0, start)}${draft.slice(end)}`, cursor: start, handled: true };
+    }
+    return { value: draft, cursor: start, handled: false };
+  }
+
+  if (key === 'Backspace') {
+    const match = draft.slice(0, start).match(/\[[^\[\]]+\]$/);
+    if (!match) return { value: draft, cursor: start, handled: false };
+    const markerStart = start - match[0].length;
+    return { value: `${draft.slice(0, markerStart)}${draft.slice(start)}`, cursor: markerStart, handled: true };
+  }
+
+  const match = draft.slice(start).match(/^\[[^\[\]]+\]/);
+  if (!match) return { value: draft, cursor: start, handled: false };
+  return { value: `${draft.slice(0, start)}${draft.slice(start + match[0].length)}`, cursor: start, handled: true };
+}

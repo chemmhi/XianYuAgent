@@ -513,5 +513,5 @@ const emojiLookup = new Map<string, string>(xianyuEmojis.map(([name, url]) => [n
 
 export const renderXianyuText = (text: string) => text.split(/(\[[^\]]+\])/g).map((part, index) => {
   const url = part.startsWith('[') ? emojiLookup.get(part.slice(1, -1)) : undefined; /* url 表示请求地址。 */
-  return url ? <img key={index} src={url} alt={part} title={part} className="messages-emoji-inline" /> : <React.Fragment key={index}>{part}</React.Fragment>;
+  return url ? <img key={index} src={url} alt="" aria-hidden="true" className="messages-emoji-inline" /> : <React.Fragment key={index}>{part}</React.Fragment>;
 }) /* part 是待解析文本片段，index 为 React 列表键。 */; /* renderXianyuText 将文本中的表情标记替换为图片节点。 */

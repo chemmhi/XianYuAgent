@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAccountContext } from '../../../app/account-context';
 import { createMessagesApi, type MessagesApi } from '../api';
-import { canSubmitComposer, insertXianyuEmojiMarker, MESSAGES_COMPOSER_PLACEHOLDER } from '../composer';
+import { canSubmitComposer, insertXianyuEmojiMarker, MESSAGES_COMPOSER_PLACEHOLDER, removeXianyuEmojiMarkerAtCursor } from '../composer';
 import { useMessagesController } from '../controller';
 import { filterConversations } from '../model';
 import { emojiURL, renderXianyuText, xianyuEmojis } from '../xianyu-emojis';
@@ -178,7 +178,7 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
                 </div>
                 <div className="messages-composer-editor">
                   {draft && <div className="messages-composer-visual" aria-hidden="true">{renderXianyuText(draft)}</div>}
-                  <textarea ref={textareaRef} className={draft ? 'messages-composer-input messages-composer-input--masked' : 'messages-composer-input'} aria-label="消息内容" value={draft} maxLength={2000} rows={1} onChange={(event) => setDraft(event.target.value)} onPaste={(event) => { const image = Array.from(event.clipboardData.items).map((item) => item.kind === 'file' ? item.getAsFile() : null).find((file): file is File => Boolean(file && file.type.startsWith('image/'))) ?? Array.from(event.clipboardData.files).find((file) => file.type.startsWith('image/')); if (image) { event.preventDefault(); setImagePreview(image); } }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={MESSAGES_COMPOSER_PLACEHOLDER} />
+                  <textarea ref={textareaRef} className={draft ? 'messages-composer-input messages-composer-input--masked' : 'messages-composer-input'} aria-label="消息内容" value={draft} maxLength={2000} rows={1} onChange={(event) => setDraft(event.target.value)} onPaste={(event) => { const image = Array.from(event.clipboardData.items).map((item) => item.kind === 'file' ? item.getAsFile() : null).find((file): file is File => Boolean(file && file.type.startsWith('image/'))) ?? Array.from(event.clipboardData.files).find((file) => file.type.startsWith('image/')); if (image) { event.preventDefault(); setImagePreview(image); } }} onKeyDown={(event) => { if (event.nativeEvent.isComposing) return; if ((event.key === 'Backspace' || event.key === 'Delete') && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) { const result = removeXianyuEmojiMarkerAtCursor(event.currentTarget.value, event.currentTarget.selectionStart ?? 0, event.currentTarget.selectionEnd ?? 0, event.key); if (result.handled) { event.preventDefault(); setDraft(result.value); requestAnimationFrame(() => { textareaRef.current?.focus(); textareaRef.current?.setSelectionRange(result.cursor, result.cursor); resizeComposer(); }); return; } } if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={MESSAGES_COMPOSER_PLACEHOLDER} />
                 </div>
                 <div className="messages-composer-footer">
                   <div className="messages-composer-shortcuts">
