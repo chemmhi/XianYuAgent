@@ -200,6 +200,11 @@ async function run() {
     return row?.querySelector('[data-testid="account-switch"]')?.textContent?.trim() === '当前账号';
   })()`), 'account switch result');
 
+  mkdirSync(screenshotDir, { recursive: true });
+  await captureViewport(cdp, 1440, 900, 'accounts-desktop-1440x900.png');
+  await captureViewport(cdp, 390, 844, 'accounts-mobile-390x844.png');
+  await cdp.send('Emulation.clearDeviceMetricsOverride');
+
   await evaluate(cdp, 'window.confirm = () => true;');
   const deletedViaUi = await evaluate(cdp, `(() => {
     const row = Array.from(document.querySelectorAll('[role="row"]')).find((candidate) => candidate.textContent?.includes(${JSON.stringify(secondaryAccount.displayName)}));
@@ -210,11 +215,6 @@ async function run() {
   })()`);
   if (!deletedViaUi) throw new Error('account delete action did not trigger');
   await waitFor(async () => !(await evaluate(cdp, `document.body.innerText.includes(${JSON.stringify(secondaryAccount.displayName)})`)), 'account delete result');
-
-  mkdirSync(screenshotDir, { recursive: true });
-  await captureViewport(cdp, 1440, 900, 'accounts-desktop-1440x900.png');
-  await captureViewport(cdp, 390, 844, 'accounts-mobile-390x844.png');
-  await cdp.send('Emulation.clearDeviceMetricsOverride');
   console.log('local Chrome E2E passed: login -> persisted profile -> account search -> switch -> delete');
   cdp.socket.close();
 }
