@@ -21,6 +21,7 @@ describe('message composer model', () => {
     expect(removeXianyuEmojiMarkerAtCursor('你好[拒绝]世界', 4, 4, 'Backspace')).toEqual({ value: '你好世界', cursor: 2, handled: true });
     expect(removeXianyuEmojiMarkerAtCursor('你好[拒绝]世界', 4, 4, 'Delete')).toEqual({ value: '你好世界', cursor: 2, handled: true });
     expect(removeXianyuEmojiMarkerAtCursor('你好[拒绝]世界', 3, 5, 'Backspace')).toEqual({ value: '你好世界', cursor: 2, handled: true });
+    expect(removeXianyuEmojiMarkerAtCursor('你好世界', 1, 3, 'Backspace')).toEqual({ value: '你好世界', cursor: 1, handled: false });
   });
 
   it('moves the caret across an emoji marker as one inline token', () => {

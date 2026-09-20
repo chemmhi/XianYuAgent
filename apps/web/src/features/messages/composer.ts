@@ -20,6 +20,9 @@ export function removeXianyuEmojiMarkerAtCursor(
 ): { value: string; cursor: number; handled: boolean } {
   if (start !== end) {
     const range = expandRangeAcrossEmojiMarkers(draft, start, end);
+    if (range.start === start && range.end === end) {
+      return { value: draft, cursor: start, handled: false };
+    }
     return { value: `${draft.slice(0, range.start)}${draft.slice(range.end)}`, cursor: range.start, handled: true };
   }
 
