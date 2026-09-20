@@ -6,6 +6,7 @@ export interface MessagesApi {
   listConversations(input: { accountId: string; cursor?: string; limit?: number }): Promise<{ items: ConversationVM[]; nextCursor?: string; hasMore: boolean }>;
   listMessages(input: { accountId: string; conversationId: string; cursor?: number; limit?: number }): Promise<{ items: MessageVM[]; nextCursor?: number; hasMore: boolean; latestCursor: number }>;
   sendMessage(input: { accountId: string; conversationId: string; text: string; idempotencyKey: string }): Promise<MessageVM>;
+  sendImage(input: { accountId: string; conversationId: string; file: File; idempotencyKey: string }): Promise<MessageVM>;
   openRealtime(input: { accountId: string; conversationId: string; cursor: number; onEvent: (event: RealtimeEvent) => void; onOpen?: () => void; onClose?: () => void; onError?: () => void }): { close: () => void };
 }
 
@@ -27,6 +28,14 @@ export function createMessagesApi(input: { get: <T>(path: string) => Promise<T>;
       if (!input.post) throw new Error('messages send api unavailable');
       const payload = await input.post<Envelope<MessageVM>>(`/api/v1/conversations/${encodeURIComponent(query.conversationId)}/messages`, { text: query.text }, { headers: { 'Idempotency-Key': query.idempotencyKey } });
       if (!payload.data) throw new Error('message send returned no data');
+      return payload.data;
+    },
+    async sendImage(query) {
+      if (!input.post) throw new Error('messages send api unavailable');
+      const form = new FormData();
+      form.set('image', query.file);
+      const payload = await input.post<Envelope<MessageVM>>(`/api/v1/conversations/${encodeURIComponent(query.conversationId)}/images`, form, { headers: { 'Idempotency-Key': query.idempotencyKey } });
+      if (!payload.data) throw new Error('image send returned no data');
       return payload.data;
     },
     openRealtime(query) {

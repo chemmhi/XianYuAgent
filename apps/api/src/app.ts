@@ -5,7 +5,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { loadConfig, type AppConfig } from './config.js';
 import type { AuthContext } from './services.js';
 import { AccountService, AuthService, CouponService, CredentialService, ProductService, ProductSyncService, ServiceError, idempotent } from './services.js';
-import { createIds, failure, fingerprint, parseCookies, readJson, setCookie, success, writeJson, type RequestContext } from './http.js';
+import { createIds, failure, fingerprint, parseCookies, readBody, setCookie, success, writeJson, type RequestContext } from './http.js';
 import { createStore } from './store.js';
 import type { ProductListResult, ProductRecord, Store } from './domain.js';
 import { createId, digestJson } from './security.js';
@@ -189,7 +189,7 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
   const ctx: RequestContext = { requestId: ids.requestId, traceId: ids.traceId, method, path: url.pathname, query: Object.fromEntries(url.searchParams.entries()), body: {}, headers: Object.fromEntries(Object.entries(request.headers).map(([key, value]) => [key.toLowerCase(), Array.isArray(value) ? value[0] : value])), cookies: parseCookies(request.headers.cookie) };
   try {
     if (method === 'OPTIONS') { response.statusCode = 204; response.end(); return; }
-    if (method !== 'GET' && method !== 'HEAD') ctx.body = await readJson(request);
+    if (method !== 'GET' && method !== 'HEAD') ctx.body = await readBody(request);
     const result = await dispatch(runtime, ctx, response);
     if (result) writeJson(response, result.statusCode, result.body);
   } catch (error) {
@@ -255,8 +255,14 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
 
   if (ctx.path === '/api/v1/conversations' && ctx.method === 'GET') {
     const query = parseConversationListQuery(ctx.query);
-    if (query.accountId) {
-      try { await xianyuIm.listConversations(authContext.admin.id, query.accountId, query.cursor === undefined ? undefined : Number(query.cursor), query.limit); }
+    if (query.accountId && query.cursor === undefined) {
+      // The local API cursor is opaque and must never be forwarded to the
+      // numeric cursor used by the Xianyu IM protocol. Refresh from the
+      // external head only for the first page; the local store owns
+      // pagination for the UI. Re-running the external upsert on later
+      // pages would stamp every conversation with a fresh updated_at and
+      // invalidate the opaque cursor issued by the previous page.
+      try { await xianyuIm.listConversations(authContext.admin.id, query.accountId, undefined, query.limit); }
       catch { /* preserve locally persisted conversations when the external session is unavailable */ }
     }
     const result = await messages.listConversations(authContext.admin.id, query);
@@ -278,6 +284,19 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     const result = await mutation(runtime, ctx, authContext, local.accountId, async () => {
       const text = typeof ctx.body.text === 'string' ? ctx.body.text : typeof ctx.body.bodyText === 'string' ? ctx.body.bodyText : '';
       const sent = await xianyuIm.sendText(authContext.admin.id, local.accountId, conversationId, text, ctx.requestId, ctx.traceId);
+      return { statusCode: 200, body: success(ctx, sent).body };
+    });
+    return result;
+  }
+  const conversationImageMatch = ctx.path.match(/^\/api\/v1\/conversations\/([^/]+)\/images$/);
+  if (conversationImageMatch && ctx.method === 'POST') {
+    const conversationId = decodeURIComponent(conversationImageMatch[1]);
+    const local = await messages.getConversation(authContext.admin.id, conversationId);
+    const file = ctx.body.image;
+    if (!file || typeof file !== 'object' || Array.isArray(file) || !Buffer.isBuffer((file as { data?: unknown }).data)) throw new ServiceError(422, 'VALIDATION_FAILED', 'image file is required');
+    const result = await mutation(runtime, ctx, authContext, local.accountId, async () => {
+      const uploaded = file as { filename?: unknown; contentType?: unknown; data: Buffer };
+      const sent = await xianyuIm.sendImage(authContext.admin.id, local.accountId, conversationId, { filename: String(uploaded.filename ?? 'image'), contentType: String(uploaded.contentType ?? 'application/octet-stream'), data: uploaded.data }, ctx.requestId, ctx.traceId);
       return { statusCode: 200, body: success(ctx, sent).body };
     });
     return result;

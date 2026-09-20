@@ -12,6 +12,11 @@ const chromeProfile = join(tmpdir(), `xianyu-agent-messages-chrome-${process.pid
 const screenshotDir = join(root, 'docs', 'evidence', 'stage5', 's4-vs5a-chat-read', 'screenshots');
 const children = [];
 let apiRuntime;
+let testAdminId;
+let testAccountId;
+const useInMemory = process.env.MESSAGES_E2E_STORAGE === 'memory';
+const databaseUrl = process.env.DATABASE_URL ?? 'postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/xianyu_agent';
+const redisUrl = process.env.REDIS_URL ?? 'redis://127.0.0.1:6379';
 
 async function freePort() {
   return await new Promise((resolve, reject) => {
@@ -46,10 +51,6 @@ async function waitFor(check, label, timeoutMs = 20_000) {
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
   throw new Error(`${label} did not become ready${lastError ? `: ${lastError.message}` : ''}`);
-}
-
-function cookiesFrom(response) {
-  return (response.headers.getSetCookie?.() ?? []).map((value) => value.split(';', 1)[0]).join('; ');
 }
 
 async function createCdpClient(debugPort) {
@@ -133,28 +134,28 @@ async function run() {
 
   const { createApp } = await import(pathToFileURL(join(root, 'apps', 'api', 'dist', 'app.js')).href);
   const { loadConfig } = await import(pathToFileURL(join(root, 'apps', 'api', 'dist', 'config.js')).href);
+  const { hashPassword } = await import(pathToFileURL(join(root, 'apps', 'api', 'dist', 'security.js')).href);
   apiRuntime = createApp(loadConfig({
     ...process.env,
     HOST: '127.0.0.1',
     PORT: String(apiPort),
-    ALLOW_IN_MEMORY: 'true',
-    DATABASE_URL: '',
+    ALLOW_IN_MEMORY: useInMemory ? 'true' : 'false',
+    DATABASE_URL: useInMemory ? '' : databaseUrl,
+    REDIS_URL: useInMemory ? '' : redisUrl,
     COOKIE_SECURE: 'false',
     XIANYU_QR_MODE: 'stub',
     WS_ALLOWED_ORIGINS: webUrl,
   }));
   await apiRuntime.listen();
   await waitFor(async () => (await fetch(`${apiUrl}/healthz`)).ok, 'API');
-
-  const bootstrap = await fetch(`${apiUrl}/api/v1/auth/bootstrap`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'Idempotency-Key': `messages-chrome-bootstrap-${process.pid}` },
-    body: JSON.stringify({ email: `messages-chrome-${process.pid}@example.com`, password: 'password-123', displayName: 'Messages Chrome E2E' }),
-  });
-  if (!bootstrap.ok) throw new Error(`bootstrap failed: ${bootstrap.status} ${await bootstrap.text()}`);
-  const bootstrapPayload = await bootstrap.json();
-  const adminId = bootstrapPayload.data.profile.id;
-  const cookie = cookiesFrom(bootstrap);
+  if (!useInMemory) {
+    await waitFor(async () => (await apiRuntime.store.health()).reachable && Boolean((await apiRuntime.redisRealtime?.health())?.reachable), 'PostgreSQL and Redis', 30_000);
+  }
+  const admin = await apiRuntime.store.createAdmin({ email: `messages-chrome-${process.pid}@example.com`, passwordHash: await hashPassword('password-123'), displayName: 'Messages Chrome E2E' });
+  const login = await apiRuntime.auth.login({ email: admin.email, password: 'password-123' });
+  const adminId = admin.id;
+  testAdminId = admin.id;
+  const cookie = `session_id=${login.session.id}; csrf_token=${encodeURIComponent(login.csrfToken)}`;
   const account = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `messages-chrome-${process.pid}`, displayName: '在线聊天 E2E 账号' });
   const conversation = await apiRuntime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'buyer-messages-e2e', buyerDisplayName: '买家 E2E', buyerAvatarUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2240%22 height=%2240%22%3E%3Crect width=%2240%22 height=%2240%22 rx=%2220%22 fill=%22%232563eb%22/%3E%3Ctext x=%2220%22 y=%2226%22 text-anchor=%22middle%22 font-size=%2220%22 fill=%22white%22%3EE%3C/text%3E%3C/svg%3E', itemTitle: '实时消息验证商品', itemImageUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2244%22 height=%2236%22%3E%3Crect width=%2244%22 height=%2236%22 rx=%226%22 fill=%22%23bfdbfe%22/%3E%3C/svg%3E', externalConversationRef: `messages-chrome-${process.pid}` });
   const seedMessage = await apiRuntime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '历史消息：请问什么时候发货？', source: 'system', traceId: 'messages-chrome-seed' });
@@ -162,6 +163,7 @@ async function run() {
   const secondConversation = await apiRuntime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'buyer-search-e2e', buyerDisplayName: '搜索用户 E2E', buyerAvatarUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2240%22 height=%2240%22%3E%3Crect width=%2240%22 height=%2240%22 rx=%2220%22 fill=%22%23f97316%22/%3E%3Ctext x=%2220%22 y=%2226%22 text-anchor=%22middle%22 font-size=%2220%22 fill=%22white%22%3ES%3C/text%3E%3C/svg%3E', itemTitle: '搜索商品缩略图', itemImageUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2244%22 height=%2236%22%3E%3Crect width=%2244%22 height=%2236%22 rx=%226%22 fill=%22%23fed7aa%22/%3E%3C/svg%3E', externalConversationRef: `messages-search-${process.pid}` });
   await apiRuntime.store.createMessage({ adminId, conversationId: secondConversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '搜索商品还有库存吗？', source: 'system', traceId: 'messages-chrome-search-seed' });
 
+  testAccountId = account.id;
   spawnProcess(npm, npmArgs(['--workspace', 'apps/web', 'run', 'dev', '--', '--host', '127.0.0.1', '--port', String(webPort)]), {
     env: { ...process.env, VITE_API_MODE: 'live', VITE_API_BASE_URL: '', VITE_API_PROXY_TARGET: apiUrl },
   });
@@ -242,8 +244,29 @@ async function run() {
   await waitFor(async () => String(await evaluate(cdp, 'document.querySelector(".messages-main-header strong")?.textContent')).includes('搜索用户'), 'conversation selection');
   await evaluate(cdp, `(() => { const input = document.querySelector('input[aria-label="搜索会话"]'); const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set; setter?.call(input, ''); input.dispatchEvent(new Event('input', { bubbles: true })); document.querySelectorAll('.messages-filter-tabs button')[0]?.click(); })()`);
   await evaluate(cdp, `document.querySelector('[data-conversation-id="${conversation.id}"]')?.click()`);
+  await waitFor(async () => (await messageBodies(cdp)).length === 1, 'primary conversation history');
   await waitFor(async () => String(await evaluate(cdp, 'document.querySelector(".messages-main-header strong")?.textContent')).includes('买家 E2E'), 'primary conversation selection');
   assert.deepEqual(await messageBodies(cdp), ['历史消息：请问什么时候发货？']);
+
+  assert.equal(await evaluate(cdp, 'document.querySelector("textarea[aria-label=\\"消息内容\\"]")?.getAttribute("placeholder")'), '输入回复，Enter 发送，Shift + Enter 换行，Ctrl + V 粘贴图片。');
+  assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-send-button")?.disabled)'), true, 'send button disabled for empty draft');
+  await evaluate(cdp, 'document.querySelector("button[aria-label=\\"打开附件菜单\\"]")?.click()');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-extension-menu[role=\\"menu\\"]"))'), 'attachment menu');
+  await evaluate(cdp, 'document.querySelector("button[aria-label=\\"打开附件菜单\\"]")?.click()');
+  await evaluate(cdp, 'document.querySelector("button[aria-label=\\"插入闲鱼表情\\"]")?.click()');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-emoji-picker[role=\\"dialog\\"]"))'), 'emoji picker');
+  await evaluate(cdp, 'document.querySelector(".messages-emoji-picker button")?.click()');
+  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("textarea[aria-label=\\"消息内容\\"]")?.value ?? ""')).startsWith('['), 'emoji insertion');
+  await evaluate(cdp, '(() => { const textarea = document.querySelector("textarea[aria-label=\\"消息内容\\"]"); const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set; setter?.call(textarea, ""); textarea.dispatchEvent(new Event("input", { bubbles: true })); })()');
+  await evaluate(cdp, 'document.querySelector("button[aria-label=\\"打开附件菜单\\"]")?.click()');
+  await evaluate(cdp, 'document.querySelector("button[role=\\"menuitem\\"]")?.click()');
+  await evaluate(cdp, `(() => { const input = document.querySelector('.messages-file-input'); if (!input) return false; const transfer = new DataTransfer(); transfer.items.add(new File(['png'], 'preview.png', { type: 'image/png' })); Object.defineProperty(input, 'files', { configurable: true, value: transfer.files }); input.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-attachment-preview img"))'), 'image attachment preview');
+  assert.equal(await evaluate(cdp, 'document.querySelector(".messages-attachment-copy strong")?.textContent'), 'preview.png');
+  assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-send-button")?.disabled)'), false, 'send button enabled for image attachment');
+  await evaluate(cdp, 'document.querySelector(".messages-attachment-remove")?.click()');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-attachment-preview")) === false'), 'remove image attachment preview');
+  assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-send-button")?.disabled)'), true, 'send button disabled after removing attachment');
   await captureViewport(cdp, 1440, 900, 'messages-desktop-1440x900.png');
 
   const offlineMethod = await disconnectBrowserRealtime(cdp);
@@ -282,6 +305,29 @@ async function run() {
   console.log(`local Chrome messages E2E passed: connected -> ${offlineMethod} -> cursor backfill -> automatic reconnect -> deduplicated timeline`);
 }
 
+async function cleanupRealData() {
+  if (useInMemory || !apiRuntime || !testAdminId || !apiRuntime.store?.pool) return;
+  const pool = apiRuntime.store.pool;
+  try {
+    await pool.query('begin');
+    if (testAccountId) {
+      await pool.query('delete from messages.events where conversation_id in (select id from messages.conversations where account_id=$1)', [testAccountId]);
+      await pool.query('delete from messages.messages where conversation_id in (select id from messages.conversations where account_id=$1)', [testAccountId]);
+      await pool.query('delete from messages.conversations where account_id=$1', [testAccountId]);
+      await pool.query('delete from auth.account_scopes where account_id=$1', [testAccountId]);
+      await pool.query('delete from auth.account_credentials where account_id=$1', [testAccountId]);
+      await pool.query('delete from observability.audit_events where account_id=$1', [testAccountId]);
+      await pool.query('delete from accounts.accounts where id=$1', [testAccountId]);
+    }
+    await pool.query('delete from auth.sessions where admin_id=$1', [testAdminId]);
+    await pool.query('delete from observability.audit_events where actor_id=$1', [testAdminId]);
+    await pool.query('delete from auth.admins where id=$1', [testAdminId]);
+    await pool.query('commit');
+  } catch {
+    try { await pool.query('rollback'); } catch {}
+  }
+}
+
 try {
   await run();
 } finally {
@@ -296,6 +342,7 @@ try {
   if (apiRuntime) {
     apiRuntime.server.closeAllConnections?.();
     apiRuntime.server.closeIdleConnections?.();
+    await cleanupRealData();
     await apiRuntime.close();
   }
   try { rmSync(chromeProfile, { recursive: true, force: true }); } catch (error) { console.warn(`Chrome temporary profile cleanup failed: ${error.message}`); }

@@ -50,9 +50,16 @@ git diff --check
 
 The desktop screenshot captures the connected timeline with two sessions, avatars, item thumbnails, search, unread filter, and selected-session header; the reconnecting screenshot captures the visible disconnect banner; the mobile screenshot captures the responsive sidebar and independent conversation scroll at `390x844`. The mobile evidence is intentionally captured at the top of the page, so the timeline is below the first viewport; mobile interaction coverage is asserted by the Chrome/CDP flow rather than by a second screenshot.
 
+## Composer interaction evidence
+
+- The current `/messages` composer follows the product-specific interaction contract: centered bottom input, exact placeholder, Enter-to-send / Shift+Enter newline, bounded auto-grow, attachment strip with top-right removal, `+` attachment menu, Xianyu official image emoji picker, and a single bottom-right `发送` action.
+- Empty text and no attachment keep `发送` disabled; an attachment alone enables it. Successful sends clear the corresponding draft/attachment; failed sends keep the unsent input visible and expose the controller error state.
+- `npm --workspace apps/web run test` passed with 18 files / 58 tests, including composer-model and Xianyu emoji rendering regressions.
+- `npm run test:e2e:chrome:messages` passed with CDP assertions for placeholder, disabled/enabled send states, attachment menu, emoji insertion, image preview/removal, reconnect, cursor backfill, and de-duplicated timeline. The E2E uses isolated fixture data; it does not send a real Xianyu message.
+
 ## Remaining review boundary
 
-- The verified acceptance boundary is conversation read and realtime recovery; sending, attachments, recall, handoff, and release remain outside the `S4-VS5A` gate.
+- The verified acceptance boundary is conversation read and realtime recovery plus local composer interaction behavior. Real external Xianyu send/attachment/recall acceptance, handoff, and release remain outside the `S4-VS5A` gate and require a separate controlled write review.
 - `S5-RISK-021` remains open until independent review confirms the evidence and production deployment topology.
 - External buyer identity enrichment is best-effort and short-timeout; if the MTOP profile query is unavailable, the session still renders from persisted nickname/ID/item metadata with a placeholder avatar.
 - This evidence does not claim external Xianyu APP/account acceptance.

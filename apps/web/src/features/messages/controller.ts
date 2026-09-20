@@ -13,7 +13,7 @@ function normalizeError(error: unknown): MessagesError {
   return { code: 'UNKNOWN', message: error instanceof Error ? error.message : '消息加载失败，请重试。', retryable: true };
 }
 
-export interface MessagesController { state: MessagesState; setActiveConversation: (conversationId?: string) => void; reload: () => Promise<void>; loadMoreConversations: () => Promise<void>; retryRealtime: () => void; sendMessage: (text: string) => Promise<void>; }
+export interface MessagesController { state: MessagesState; setActiveConversation: (conversationId?: string) => void; reload: () => Promise<void>; loadMoreConversations: () => Promise<void>; retryRealtime: () => void; sendMessage: (text: string) => Promise<void>; sendImage: (file: File) => Promise<void>; }
 
 /**
  * A socket can emit `close` after a replacement socket has already opened.
@@ -173,7 +173,20 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
     }
   }, [accountId, api, state.activeConversationId]);
 
-  return { state, setActiveConversation, reload, loadMoreConversations, retryRealtime, sendMessage };
+  const sendImage = useCallback(async (file: File) => {
+    if (!accountId || !state.activeConversationId || !file) return;
+    const idempotencyKey = globalThis.crypto?.randomUUID?.() ?? `img-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setState((previous) => ({ ...previous, sendPhase: 'submitting', sendError: undefined }));
+    try {
+      const message = await api.sendImage({ accountId, conversationId: state.activeConversationId, file, idempotencyKey });
+      setState((previous) => ({ ...previous, messages: previous.messages.some((item) => item.messageId === message.messageId) ? previous.messages : [...previous.messages, message], sendPhase: 'sent', sendError: undefined }));
+    } catch (error) {
+      setState((previous) => ({ ...previous, sendPhase: 'error', sendError: error instanceof Error ? error.message : '图片发送失败，请重试' }));
+      throw error;
+    }
+  }, [accountId, api, state.activeConversationId]);
+
+  return { state, setActiveConversation, reload, loadMoreConversations, retryRealtime, sendMessage, sendImage };
 }
 
 export { createMessagesApi };

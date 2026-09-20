@@ -62,22 +62,28 @@ export function createHttpClient(options: HttpClientOptions = {}) {
     return payload as T;
   }
 
+  function encodeBody(body: unknown): BodyInit | undefined {
+    if (body === undefined) return undefined;
+    if (typeof body === 'string' || body instanceof FormData || body instanceof Blob || body instanceof URLSearchParams || body instanceof ArrayBuffer) return body as BodyInit;
+    return JSON.stringify(body);
+  }
+
   return {
     get: <T>(path: string) => request<T>(path),
     post: <T>(path: string, body?: unknown, init: RequestInit = {}) => request<T>(path, {
       ...init,
       method: 'POST',
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: encodeBody(body),
     }),
     patch: <T>(path: string, body?: unknown, init: RequestInit = {}) => request<T>(path, {
       ...init,
       method: 'PATCH',
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: encodeBody(body),
     }),
     put: <T>(path: string, body?: unknown, init: RequestInit = {}) => request<T>(path, {
       ...init,
       method: 'PUT',
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: encodeBody(body),
     }),
     delete: <T>(path: string, init: RequestInit = {}) => request<T>(path, { ...init, method: 'DELETE' }),
   };

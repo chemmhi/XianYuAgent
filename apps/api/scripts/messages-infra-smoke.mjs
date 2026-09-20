@@ -19,6 +19,7 @@ let ws;
 let adminId;
 let accountId;
 let conversationId;
+let paginationConversationId;
 
 function cookiesFrom(response) {
   const setCookies = response.headers.getSetCookie?.() ?? [];
@@ -110,10 +111,10 @@ async function cleanup() {
     const pool = runtimes[0].store.pool;
     try {
       await pool.query('begin');
-      if (conversationId) {
-        await pool.query('delete from messages.events where conversation_id=$1', [conversationId]);
-        await pool.query('delete from messages.messages where conversation_id=$1', [conversationId]);
-        await pool.query('delete from messages.conversations where id=$1', [conversationId]);
+      for (const id of [conversationId, paginationConversationId].filter(Boolean)) {
+        await pool.query('delete from messages.events where conversation_id=$1', [id]);
+        await pool.query('delete from messages.messages where conversation_id=$1', [id]);
+        await pool.query('delete from messages.conversations where id=$1', [id]);
       }
       if (accountId) {
         await pool.query('delete from auth.account_scopes where account_id=$1', [accountId]);
@@ -166,6 +167,20 @@ try {
   accountId = account.body.data.id;
   const conversation = await runtime1.store.createConversation({ adminId, accountId, buyerRef: `buyer-${suffix}`, externalConversationRef: `infra-${suffix}` });
   conversationId = conversation.id;
+  const paginationConversation = await runtime1.store.createConversation({ adminId, accountId, buyerRef: `buyer-pagination-${suffix}`, externalConversationRef: `infra-pagination-${suffix}` });
+  paginationConversationId = paginationConversation.id;
+  // Use deterministic sub-second timestamps to guard the opaque cursor's
+  // millisecond precision (Date#toString would otherwise truncate them).
+  await runtime1.store.pool.query("update messages.conversations set updated_at=$2 where id=$1", [conversationId, '2026-01-01T00:00:00.123456Z']);
+  await runtime1.store.pool.query("update messages.conversations set updated_at=$2 where id=$1", [paginationConversationId, '2026-01-01T00:00:00.122456Z']);
+  const firstConversationPage = await runtime1.store.listConversations(adminId, { accountId, limit: 1 });
+  assert.equal(firstConversationPage.items.length, 1);
+  assert.equal(firstConversationPage.hasMore, true);
+  assert.equal(firstConversationPage.items[0].updatedAt, '2026-01-01T00:00:00.123Z');
+  const secondConversationPage = await runtime1.store.listConversations(adminId, { accountId, limit: 1, cursor: firstConversationPage.nextCursor });
+  assert.equal(secondConversationPage.items.length, 1);
+  assert.notEqual(secondConversationPage.items[0].id, firstConversationPage.items[0].id);
+  console.log('messages infra smoke: PostgreSQL conversation cursor precision passed');
 
   ws = await openSocket(port2, cookie);
   await runtime1.messages.createMessage({ adminId, conversationId, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: 'cross process before restart', source: 'system', requestId: `infra-before-${suffix}`, traceId: `infra-before-${suffix}` });

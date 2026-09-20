@@ -17,14 +17,24 @@ export class XianyuImService {
 
   async listConversations(adminId: string, accountId: string, startCursor?: number, limit = 50): Promise<ExternalPage> {
     const client = await this.ensureClient(adminId, accountId);
-    const page = await client.listConversations(startCursor, limit);
-    const items = Array.isArray(page.userConvs) ? page.userConvs : [];
-    const parsedItems = items.map((item) => normalizeConversation(item, client.userId)).filter((item): item is NonNullable<ReturnType<typeof normalizeConversation>> => Boolean(item));
-    const enrichTargets = parsedItems.filter((item) => !item.buyerAvatarUrl).slice(0, 8);
-    const enrichedEntries = await Promise.all(enrichTargets.map(async (item) => [item.externalConversationRef, await this.enrichConversationIdentity(adminId, accountId, item)] as const));
-    const enrichedByRef = new Map(enrichedEntries);
-    for (const parsed of parsedItems) await this.store.upsertExternalConversation({ adminId, accountId, ...(enrichedByRef.get(parsed.externalConversationRef) ?? parsed) });
-    return { hasMore: Boolean(page.hasMore), nextCursor: numeric(page.nextCursor) };
+    let cursor = startCursor;
+    let hasMore = false;
+    let nextCursor: number | undefined;
+    const maxPages = startCursor === undefined ? 20 : 1;
+    for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+      const page = await client.listConversations(cursor, limit);
+      const items = Array.isArray(page.userConvs) ? page.userConvs : [];
+      const parsedItems = items.map((item) => normalizeConversation(item, client.userId)).filter((item): item is NonNullable<ReturnType<typeof normalizeConversation>> => Boolean(item));
+      const enrichTargets = parsedItems.filter((item) => !item.buyerAvatarUrl).slice(0, 8);
+      const enrichedEntries = await Promise.all(enrichTargets.map(async (item) => [item.externalConversationRef, await this.enrichConversationIdentity(adminId, accountId, item)] as const));
+      const enrichedByRef = new Map(enrichedEntries);
+      for (const parsed of parsedItems) await this.store.upsertExternalConversation({ adminId, accountId, ...(enrichedByRef.get(parsed.externalConversationRef) ?? parsed) });
+      hasMore = Boolean(page.hasMore);
+      nextCursor = numeric(page.nextCursor);
+      if (!hasMore || nextCursor === undefined || nextCursor === cursor) break;
+      cursor = nextCursor;
+    }
+    return { hasMore, nextCursor };
   }
 
   async listMessages(adminId: string, accountId: string, conversationId: string, startCursor?: number, limit = 100): Promise<ExternalPage> {
@@ -69,6 +79,32 @@ export class XianyuImService {
       senderRole: 'agent',
       bodyType: 'text',
       bodyText: normalizedText,
+      externalMessageRef: sent.externalMessageRef,
+      source: 'human',
+      requestId,
+      traceId,
+    });
+    return created.message;
+  }
+
+  async sendImage(adminId: string, accountId: string, conversationId: string, file: { filename: string; contentType: string; data: Buffer }, requestId: string, traceId: string): Promise<unknown> {
+    if (!file.data?.length) throw new ServiceError(422, 'VALIDATION_FAILED', 'image is required');
+    if (!file.contentType.startsWith('image/')) throw new ServiceError(422, 'VALIDATION_FAILED', 'only image files are supported');
+    if (file.data.length > 10 * 1024 * 1024) throw new ServiceError(413, 'PAYLOAD_TOO_LARGE', 'image must be 10MB or smaller');
+    const conversation = await this.getConversation(adminId, accountId, conversationId);
+    const externalRef = conversation.externalConversationRef;
+    if (!externalRef) throw new ServiceError(409, 'EXTERNAL_CONVERSATION_MISSING', 'conversation is not linked to xianyu');
+    const upload = await this.mtop.uploadChatImage(adminId, accountId, file.filename, file.contentType, file.data);
+    if (!upload.success || !upload.url) throw new ServiceError(upload.accountInvalid ? 401 : 502, upload.errorCode ?? 'IMAGE_UPLOAD_FAILED', upload.message ?? 'unable to upload image');
+    const client = await this.ensureClient(adminId, accountId);
+    const sent = await client.sendImage(externalRef, conversation.buyerRef, upload.url, upload.width, upload.height);
+    const created = await this.messages.createMessage({
+      adminId,
+      conversationId,
+      direction: 'outbound',
+      senderRole: 'agent',
+      bodyType: 'image',
+      bodyRef: upload.url,
       externalMessageRef: sent.externalMessageRef,
       source: 'human',
       requestId,
@@ -181,7 +217,8 @@ function normalizeConversation(value: unknown, myId: string): { externalConversa
   const last = record(record(conv.lastMessage).message ?? conv.lastMessage);
   const lastExtension = record(last.extension);
   const content = decodeCustom(record(last.content).custom);
-  const preview = content.text ?? string(lastExtension.reminderContent ?? lastExtension.detailNotice ?? record(record(last.content).custom).summary);
+  const custom = record(record(last.content).custom);
+  const preview = content.text ?? string(lastExtension.reminderContent ?? lastExtension.detailNotice ?? custom.summary);
   const itemRef = string(extension.itemId ?? lastExtension.itemId ?? parseQueryParam(string(lastExtension.reminderUrl), 'itemId'));
   const itemTitle = string(extension.itemTitle ?? lastExtension.itemTitle);
   const buyerDisplayName = string(extension.peerNick ?? extension.buyerNick ?? extension.userNick ?? extension.nick);
@@ -200,14 +237,16 @@ function normalizeHistoryMessage(value: unknown, myId: string): { externalMessag
   const senderRef = strip(extension.senderUserId ?? message.senderUserId);
   const direction = senderRef && senderRef === myId ? 'outbound' : 'inbound';
   const content = decodeCustom(record(message.content).custom);
-  const fallback = string(record(message.content).custom.summary ?? extension.reminderContent ?? extension.detailNotice);
+  const custom = record(record(message.content).custom);
+  const fallback = string(custom.summary ?? extension.reminderContent ?? extension.detailNotice);
   const bodyText = content.text ?? fallback;
   const bodyRef = content.images[0];
   const bodyType = bodyRef ? 'image' : bodyText ? 'text' : 'system';
   return { externalMessageRef, direction, bodyType, bodyText, bodyRef, createdAt: normalizeTimestamp(message.createAt) ?? new Date().toISOString() };
 }
 
-function decodeCustom(custom: Record<string, any>): { text?: string; images: string[] } {
+function decodeCustom(value: unknown): { text?: string; images: string[] } {
+  const custom = record(value);
   const encoded = string(custom.data);
   let parsed: Record<string, any> = {};
   if (encoded) {

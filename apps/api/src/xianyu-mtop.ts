@@ -20,6 +20,17 @@ export interface MtopResult {
 
 export interface XianyuItemsPageResult extends MtopResult, ProductSyncPageResult {}
 
+export interface XianyuChatImageUploadResult {
+  success: boolean;
+  accountInvalid: boolean;
+  errorCode?: string;
+  message?: string;
+  url?: string;
+  width?: number;
+  height?: number;
+  cookieHeader: string;
+}
+
 export interface XianyuMtopClientOptions {
   timeoutMs?: number;
   loadCredential: (adminId: string, accountId: string) => Promise<MtopCredential | undefined>;
@@ -57,6 +68,49 @@ export class XianyuMtopClient {
     const result = await this.call(adminId, accountId, 'mtop.taobao.idlemessage.pc.user.query', '4.0', { type: 0, sessionType: 1, sessionId: normalizedSessionId, isOwner: false });
     const userInfo = recordAt(result.response, ['data', 'userInfo']);
     return { success: result.success, accountInvalid: result.accountInvalid, errorCode: result.errorCode, message: result.message, buyerDisplayName: stringAt(userInfo, ['fishNick', 'nick', 'nickname']), buyerAvatarUrl: stringAt(userInfo, ['logo', 'avatar', 'avatarUrl']) };
+  }
+
+  async uploadChatImage(adminId: string, accountId: string, filename: string, contentType: string, data: Buffer): Promise<XianyuChatImageUploadResult> {
+    const credential = await this.loadCredential(adminId, accountId);
+    const initialCookieHeader = credential?.cookieHeader?.trim() ?? '';
+    if (!initialCookieHeader) return { success: false, accountInvalid: true, errorCode: 'CREDENTIAL_MISSING', message: 'account credential is missing', cookieHeader: initialCookieHeader };
+    const form = new FormData();
+    form.append('file', new Blob([new Uint8Array(data)], { type: contentType || 'application/octet-stream' }), filename || 'image');
+    const endpoint = new URL('https://stream-upload.goofish.com/api/upload.api');
+    endpoint.searchParams.set('floderId', '0');
+    endpoint.searchParams.set('appkey', 'xy_chat');
+    endpoint.searchParams.set('_input_charset', 'utf-8');
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          accept: 'application/json, text/javascript, */*; q=0.01',
+          origin: 'https://www.goofish.com',
+          referer: 'https://www.goofish.com/',
+          'user-agent': USER_AGENT,
+          'x-requested-with': 'XMLHttpRequest',
+          cookie: initialCookieHeader,
+        },
+        body: form,
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+      const cookieHeader = mergeCookies(initialCookieHeader, getSetCookies(response.headers));
+      if (cookieHeader !== initialCookieHeader) await this.saveCookie(adminId, accountId, cookieHeader);
+      const raw = await response.text();
+      if (response.status < 200 || response.status >= 300) return { success: false, accountInvalid: false, errorCode: 'IMAGE_UPLOAD_HTTP_ERROR', message: `image upload failed: http=${response.status}`, cookieHeader };
+      let payload: Record<string, any>;
+      try { payload = JSON.parse(raw) as Record<string, any>; } catch {
+        const accountInvalid = /<html|<!doctype/i.test(raw);
+        return { success: false, accountInvalid, errorCode: accountInvalid ? 'SESSION_EXPIRED' : 'IMAGE_UPLOAD_INVALID_RESPONSE', message: accountInvalid ? 'xianyu session expired' : 'image upload response is not valid JSON', cookieHeader };
+      }
+      const object = record(payload.object ?? payload.data ?? payload);
+      const url = stringAt(object, ['url', 'imageUrl', 'imageURL']) ?? stringAt(payload, ['url', 'imageUrl', 'imageURL']);
+      const [width, height] = parsePix(stringAt(object, ['pix', 'size']) ?? stringAt(payload, ['pix', 'size']));
+      if (!url) return { success: false, accountInvalid: false, errorCode: 'IMAGE_UPLOAD_URL_MISSING', message: 'image upload response missing url', cookieHeader };
+      return { success: true, accountInvalid: false, url, width: width || 800, height: height || 600, cookieHeader };
+    } catch (error) {
+      return { success: false, accountInvalid: false, errorCode: 'IMAGE_UPLOAD_FAILED', message: error instanceof Error ? error.message : 'image upload failed', cookieHeader: initialCookieHeader };
+    }
   }
 
   async fetchItems(adminId: string, accountId: string, data: Record<string, unknown> = {}): Promise<MtopResult> {
@@ -214,3 +268,11 @@ function stringAt(root: Record<string, unknown>, keys: string[]): string | undef
   }
   return undefined;
 }
+
+function parsePix(value: string | undefined): [number, number] {
+  if (!value) return [0, 0];
+  const match = value.match(/(\d+)\s*[xX*]\s*(\d+)/);
+  return match ? [Number(match[1]), Number(match[2])] : [0, 0];
+}
+
+function record(value: unknown): Record<string, any> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}; }

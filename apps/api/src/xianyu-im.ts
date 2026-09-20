@@ -172,10 +172,37 @@ export class XianyuImClient {
         msgReadStatusSetting: 1,
       },
       { actualReceivers: [`${toId}@goofish`, `${this.myId}@goofish`] },
-    ]);
+    ], { retryAfterReconnect: false });
+    assertSendAccepted(response);
     const body = asRecord(response.body);
-    const externalMessageRef = optionalString(body.messageId) ?? optionalString(body.msgId) ?? optionalString(body.id);
+    const externalMessageRef = extractMessageRef(body);
     return { externalMessageRef };
+  }
+
+  async sendImage(conversationRef: string, recipientRef: string, imageUrl: string, width = 800, height = 600): Promise<{ externalMessageRef?: string }> {
+    const cid = stripGoofish(conversationRef);
+    const toId = stripGoofish(recipientRef);
+    const normalizedUrl = imageUrl.trim();
+    if (!cid || !toId || !normalizedUrl) throw new Error('XIANYU_IM_SEND_IMAGE_INPUT_INVALID');
+    if (!this.myId) throw new Error('XIANYU_IM_SENDER_ID_MISSING');
+    const content = Buffer.from(JSON.stringify({ contentType: 2, image: { pics: [{ height: height > 0 ? height : 600, type: 0, url: normalizedUrl, width: width > 0 ? width : 800 }] } }), 'utf8').toString('base64');
+    const response = await this.sendLwp('/r/MessageSend/sendByReceiverScope', [
+      {
+        uuid: crypto.randomUUID(),
+        cid: `${cid}@goofish`,
+        conversationType: 1,
+        content: { contentType: 101, custom: { type: 1, data: content } },
+        redPointPolicy: 0,
+        extension: { extJson: '{}' },
+        ctx: { appVersion: '1.0', platform: 'web' },
+        mtags: {},
+        msgReadStatusSetting: 1,
+      },
+      { actualReceivers: [`${toId}@goofish`, `${this.myId}@goofish`] },
+    ], { retryAfterReconnect: false });
+    assertSendAccepted(response);
+    const body = asRecord(response.body);
+    return { externalMessageRef: extractMessageRef(body) };
   }
 
   private async connectInternal(): Promise<void> {
@@ -261,14 +288,15 @@ export class XianyuImClient {
     await this.saveCredential?.({ ...this.credential });
   }
 
-  private async sendLwp(lwp: string, body: unknown[]): Promise<Record<string, unknown>> {
+  private async sendLwp(lwp: string, body: unknown[], options: { retryAfterReconnect?: boolean } = {}): Promise<Record<string, unknown>> {
+    const retryAfterReconnect = options.retryAfterReconnect ?? true;
     if (!this.connected) await this.connect();
     const generation = this.connectionGeneration;
     const mid = createMid();
     try {
       return await this.sendAndWait(mid, { lwp, headers: { mid }, body });
     } catch (error) {
-      if (!(error instanceof XianyuImRequestRejected) || error.code !== 400) throw error;
+      if (!retryAfterReconnect || !(error instanceof XianyuImRequestRejected) || error.code !== 400) throw error;
       if (this.connectionGeneration === generation) {
         await this.disconnect();
         this.credential.accessToken = undefined;
@@ -489,6 +517,25 @@ function waitForSocketOpen(socket: ImWebSocket, timeoutMs: number): Promise<void
 
 function createDeviceId(userId: string): string {
   return `${crypto.randomUUID()}-${userId}`;
+}
+
+function assertSendAccepted(response: Record<string, unknown>): void {
+  const body = asRecord(response.body);
+  const reason = optionalString(body.reason);
+  if (!reason) return;
+  const moreInfo = optionalString(body.moreInfo);
+  throw new Error(moreInfo ? `${reason} (${moreInfo})` : reason);
+}
+
+function extractMessageRef(body: Record<string, unknown>): string | undefined {
+  const nested = asRecord(body['1']);
+  return optionalString(body.messageId)
+    ?? optionalString(body.msgId)
+    ?? optionalString(body.id)
+    ?? optionalString(nested.messageId)
+    ?? optionalString(nested.msgId)
+    ?? optionalString(nested.id)
+    ?? optionalString(body.uuid);
 }
 
 function createMid(): string { return `${Math.floor(Math.random() * 1000)}${Date.now()} 0`; }

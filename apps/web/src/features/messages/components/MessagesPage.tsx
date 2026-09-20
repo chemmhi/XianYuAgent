@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAccountContext } from '../../../app/account-context';
 import { createMessagesApi, type MessagesApi } from '../api';
+import { canSubmitComposer, insertXianyuEmojiMarker, MESSAGES_COMPOSER_PLACEHOLDER } from '../composer';
 import { useMessagesController } from '../controller';
 import { filterConversations } from '../model';
+import { emojiURL, xianyuEmojis } from '../xianyu-emojis';
 import { ConnectionBanner } from './ConnectionBanner';
 import { ConversationList } from './ConversationList';
 import { MessageTimeline } from './MessageTimeline';
@@ -15,8 +17,78 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
   const [draft, setDraft] = useState('');
   const [search, setSearch] = useState('');
   const [unreadOnly, setUnreadOnly] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [extensionOpen, setExtensionOpen] = useState(false);
+  const [pendingImage, setPendingImage] = useState<{ file: File; url: string } | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const activeConversation = controller.state.conversations.find((conversation) => conversation.conversationId === controller.state.activeConversationId);
   const visibleConversations = useMemo(() => filterConversations(controller.state.conversations, search, unreadOnly), [controller.state.conversations, search, unreadOnly]);
+
+  useEffect(() => {
+    return () => { if (pendingImage) URL.revokeObjectURL(pendingImage.url); };
+  }, [pendingImage]);
+
+  useEffect(() => {
+    setDraft('');
+    setEmojiOpen(false);
+    setExtensionOpen(false);
+    setPendingImage(null);
+  }, [controller.state.activeConversationId, currentAccountId]);
+
+  const setImagePreview = (file?: File) => {
+    if (!file || !file.type.startsWith('image/')) return;
+    setPendingImage({ file, url: URL.createObjectURL(file) });
+    setExtensionOpen(false);
+  };
+
+  const resizeComposer = () => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 128)}px`;
+  };
+
+  useEffect(() => { requestAnimationFrame(resizeComposer); }, [draft]);
+
+  const insertEmoji = (name: string) => {
+    const textarea = textareaRef.current;
+    const start = textarea?.selectionStart ?? draft.length;
+    const end = textarea?.selectionEnd ?? draft.length;
+    const result = insertXianyuEmojiMarker(draft, start, end, name);
+    setDraft(result.value);
+    setEmojiOpen(false);
+    setExtensionOpen(false);
+    requestAnimationFrame(() => {
+      textarea?.focus();
+      textarea?.setSelectionRange(result.cursor, result.cursor);
+      resizeComposer();
+    });
+  };
+
+  const handleComposerSubmit = async () => {
+    if (controller.state.sendPhase === 'submitting') return;
+    const text = draft.trim();
+    if (!canSubmitComposer(text, Boolean(pendingImage))) return;
+    if (text) {
+      try {
+        await controller.sendMessage(text);
+        setDraft('');
+      } catch {
+        return;
+      }
+    }
+    if (pendingImage) {
+      try {
+        await controller.sendImage(pendingImage.file);
+        setPendingImage(null);
+      } catch {
+        return;
+      }
+    }
+    setEmojiOpen(false);
+    setExtensionOpen(false);
+  };
 
   if (accountsLoading) return <section className="page-stack messages-domain"><div className="messages-state">正在加载账号范围…</div></section>;
   if (accountsError) return <section className="page-stack messages-domain"><div className="messages-state messages-error" role="alert">{accountsError}</div></section>;
@@ -31,7 +103,7 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
     <ConnectionBanner phase={controller.state.realtimePhase} onRetry={controller.retryRealtime} />
     <div className="messages-layout card panel">
       <aside className="messages-sidebar">
-        <div className="messages-sidebar-header"><div><strong>会话</strong><small>{controller.state.conversations.length} 个已加载</small></div><button className="btn ghost" type="button" onClick={() => void controller.reload()} aria-label="刷新会话">刷新</button></div>
+        <div className="messages-sidebar-header"><div><strong>会话</strong><small>{controller.state.conversations.length} 个已加载{controller.state.hasMore ? '，还有更多' : ''}</small></div><button className="btn ghost" type="button" onClick={() => void controller.reload()} aria-label="刷新会话">刷新</button></div>
         <div className="messages-sidebar-tools">
           <label className="messages-search"><span aria-hidden="true">⌕</span><input aria-label="搜索会话" placeholder="搜索用户、商品或消息" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
           <div className="messages-filter-tabs" aria-label="会话筛选"><button type="button" aria-pressed={!unreadOnly} className={!unreadOnly ? 'active' : ''} onClick={() => setUnreadOnly(false)}>全部会话</button><button type="button" aria-pressed={unreadOnly} className={unreadOnly ? 'active' : ''} onClick={() => setUnreadOnly(true)}>未读{controller.state.conversations.filter((item) => item.unreadCount > 0).length ? ` (${controller.state.conversations.filter((item) => item.unreadCount > 0).length})` : ''}</button></div>
@@ -51,7 +123,28 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
           </div>
           <div className="messages-main-header-meta"><span>{activeConversation?.itemTitle || '未关联商品'}</span><span className={`messages-connection-dot ${controller.state.realtimePhase}`} /></div>
         </header>
-        {controller.state.activeConversationId ? <><MessageTimeline messages={controller.state.messages} phase={controller.state.timelinePhase} /><form className="messages-composer" onSubmit={(event) => { event.preventDefault(); if (!draft.trim() || controller.state.sendPhase === 'submitting') return; void controller.sendMessage(draft).then(() => setDraft('')).catch(() => undefined); }}><textarea aria-label="消息内容" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder="输入回复，Enter 发送，Shift+Enter 换行" rows={2} /><div className="messages-composer-footer"><span className={controller.state.sendPhase === 'error' ? 'messages-send-error' : 'messages-send-status'}>{controller.state.sendPhase === 'submitting' ? '正在发送…' : controller.state.sendPhase === 'sent' ? '已发送' : controller.state.sendError ?? '发送给当前会话'}</span><button className="btn primary" type="submit" disabled={!draft.trim() || controller.state.sendPhase === 'submitting'}>发送</button></div></form></> : <div className="messages-state messages-empty-main"><strong>选择一个会话开始查看</strong><span>左侧可搜索、筛选并选择全部会话。</span></div>}
+        {controller.state.activeConversationId ? <>
+          <MessageTimeline messages={controller.state.messages} phase={controller.state.timelinePhase} />
+          <form className="messages-composer" onSubmit={(event) => { event.preventDefault(); void handleComposerSubmit(); }}>
+            <div className="messages-composer-inner">
+              {pendingImage && <div className="messages-attachment-strip"><div className="messages-attachment-preview"><img src={pendingImage.url} alt="待发送图片预览" /><div className="messages-attachment-copy"><strong>{pendingImage.file.name || '图片'}</strong><small>{Math.ceil(pendingImage.file.size / 1024)} KB</small></div><button className="messages-attachment-remove" type="button" aria-label="移除附件" onClick={() => setPendingImage(null)}>×</button></div></div>}
+              <div className="messages-composer-shell">
+                <textarea ref={textareaRef} aria-label="消息内容" value={draft} maxLength={2000} rows={1} onChange={(event) => setDraft(event.target.value)} onPaste={(event) => { const image = Array.from(event.clipboardData.items).map((item) => item.kind === 'file' ? item.getAsFile() : null).find((file): file is File => Boolean(file && file.type.startsWith('image/'))) ?? Array.from(event.clipboardData.files).find((file) => file.type.startsWith('image/')); if (image) { event.preventDefault(); setImagePreview(image); } }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={MESSAGES_COMPOSER_PLACEHOLDER} />
+                <div className="messages-composer-footer">
+                  <div className="messages-composer-tools">
+                    <button className="messages-tool-button" type="button" aria-label="打开附件菜单" aria-expanded={extensionOpen} onClick={() => { setExtensionOpen((open) => !open); setEmojiOpen(false); }}>+</button>
+                    <button className="messages-tool-button messages-emoji-button" type="button" aria-label="插入闲鱼表情" aria-expanded={emojiOpen} onClick={() => { setEmojiOpen((open) => !open); setExtensionOpen(false); }}>☺</button>
+                    <input ref={imageInputRef} className="messages-file-input" type="file" accept="image/*" onChange={(event) => { setImagePreview(event.target.files?.[0]); event.currentTarget.value = ''; }} />
+                    {extensionOpen && <div className="messages-extension-menu" role="menu" aria-label="附件和扩展功能"><button type="button" role="menuitem" onClick={() => { setExtensionOpen(false); imageInputRef.current?.click(); }}>图片附件</button></div>}
+                    {emojiOpen && <div className="messages-emoji-picker" role="dialog" aria-label="闲鱼表情选择器">{xianyuEmojis.map(([name, url], index) => <button key={`${name}-${index}`} type="button" aria-label={`插入${name}`} title={name} onClick={() => insertEmoji(name)}><img src={emojiURL(url)} alt={name} /></button>)}</div>}
+                    <span className={controller.state.sendPhase === 'error' ? 'messages-send-error' : 'messages-send-status'} role={controller.state.sendPhase === 'error' ? 'alert' : undefined}>{controller.state.sendPhase === 'submitting' ? '正在发送…' : controller.state.sendPhase === 'sent' ? '已发送' : controller.state.sendError ?? ''}</span>
+                  </div>
+                  <button className="messages-send-button" type="submit" disabled={!canSubmitComposer(draft, Boolean(pendingImage)) || controller.state.sendPhase === 'submitting'}>发送</button>
+                </div>
+              </div>
+            </div>
+          </form>
+        </> : <div className="messages-state messages-empty-main"><strong>选择一个会话开始查看</strong><span>左侧可以搜索、筛选并选择全部会话。</span></div>}
       </main>
     </div>
   </section>;

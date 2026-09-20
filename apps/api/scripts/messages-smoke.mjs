@@ -73,6 +73,11 @@ try {
   const secondConversationForScope = await runtime.store.createConversation({ adminId, accountId: secondAccount.body.data.id, buyerRef: 'buyer-cross', externalConversationRef: 'ext-cross' });
   await runtime.store.revokeScope(adminId, secondAccount.body.data.id, 'manage');
 
+  // Refresh the external head only on the first page. Later pages must keep
+  // using the opaque local cursor without re-upserting every conversation.
+  let externalRefreshCalls = 0;
+  runtime.xianyuIm.listConversations = async () => { externalRefreshCalls += 1; return { items: [], hasMore: false }; };
+
   const list = await request(`/api/v1/conversations?accountId=${accountId}`, { headers: { cookie } });
   assert.equal(list.response.status, 200);
   assert.ok(list.body.data.items.some((item) => item.conversationId === conversation.id));
@@ -81,9 +86,12 @@ try {
   assert.equal(firstPage.body.data.items.length, 1);
   assert.equal(firstPage.body.data.hasMore, true);
   assert.equal(typeof firstPage.body.data.nextCursor, 'string');
+  const refreshCallsAfterFirstPage = externalRefreshCalls;
+  assert.equal(refreshCallsAfterFirstPage, 2);
   const secondPage = await request(`/api/v1/conversations?accountId=${accountId}&limit=1&cursor=${encodeURIComponent(firstPage.body.data.nextCursor)}`, { headers: { cookie } });
   assert.equal(secondPage.response.status, 200);
   assert.equal(secondPage.body.data.items.length, 1);
+  assert.equal(externalRefreshCalls, refreshCallsAfterFirstPage);
   assert.notEqual(secondPage.body.data.items[0].conversationId, firstPage.body.data.items[0].conversationId);
   assert.equal(new Set([firstPage.body.data.items[0].conversationId, secondPage.body.data.items[0].conversationId]).has(secondConversation.id), true);
   const history = await request(`/api/v1/conversations/${conversation.id}/messages`, { headers: { cookie } });
