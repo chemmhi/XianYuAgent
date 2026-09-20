@@ -1,59 +1,96 @@
 import { useMemo, useState } from 'react';
-import type { CouponBatchVM, CreateCouponBatchRequest, UpdateCouponBatchRequest } from '../types';
+import type { FormEvent } from 'react';
+import type { CouponBatchVM, CouponMetadataVM, CreateCouponBatchRequest, UpdateCouponBatchRequest } from '../types';
 
-type FormState = {
+const postParams = [
+  { name: 'order_id', desc: '订单编号' },
+  { name: 'item_id', desc: '商品编号' },
+  { name: 'item_detail', desc: '商品详情' },
+  { name: 'order_amount', desc: '订单金额' },
+  { name: 'order_quantity', desc: '订单数量' },
+  { name: 'spec_name', desc: '规格名称' },
+  { name: 'spec_value', desc: '规格值' },
+  { name: 'cookie_id', desc: 'cookies账号id' },
+  { name: 'buyer_id', desc: '买家id' },
+] as const;
+
+export type CouponCreateFormState = {
   accountId: string; label: string; purpose: CouponBatchVM['purpose']; deliveryScope: CreateCouponBatchRequest['deliveryScope'];
-  quarkUrl: string; extractionCode: string; textContent: string; dataContent: string; apiUrl: string; apiMethod: 'GET' | 'POST'; apiTimeout: number; apiHeaders: string; apiParams: string; apiResponseField: string; imageUrls: string; delaySeconds: number; deliveryCount: number; description: string; dockable: boolean; price: string; minPrice: string; feePayer: 'distributor' | 'dealer'; dockVisibility: 'public' | 'dealer_only'; multiSpec: boolean; specName: string; specValue: string; itemsText: string;
+  quarkUrl: string; extractionCode: string; textContent: string; dataContent: string; apiUrl: string; apiMethod: 'GET' | 'POST'; apiTimeout: number; apiHeaders: string; apiParams: string; apiResponseField: string; imageUrls: string; delaySeconds: number; useNoLogisticsForm: boolean; deliveryCount: number; description: string; feePayer: '' | 'distributor' | 'dealer'; minPrice: string; dockVisibility: 'public' | 'dealer_only'; multiSpec: boolean; specName: string; specValue: string; itemsText: string;
 };
 
-function fromBatch(batch?: CouponBatchVM): FormState {
+function fromBatch(batch?: CouponBatchVM): CouponCreateFormState {
   const metadata = batch?.metadata;
-  return { accountId: batch?.accountId ?? 'account-001', label: batch?.label ?? '', purpose: batch?.purpose ?? 'text', deliveryScope: batch?.deliveryScope ?? 'operator_only', quarkUrl: batch?.quarkUrl ?? '', extractionCode: batch?.extractCode ?? '', textContent: metadata?.textContent ?? '', dataContent: metadata?.dataContent ?? '', apiUrl: metadata?.apiConfig?.url ?? '', apiMethod: metadata?.apiConfig?.method ?? 'GET', apiTimeout: metadata?.apiConfig?.timeout ?? 60, apiHeaders: metadata?.apiConfig?.headers ?? '', apiParams: metadata?.apiConfig?.params ?? '', apiResponseField: metadata?.apiConfig?.responseField ?? '', imageUrls: (metadata?.imageUrls ?? []).join('\n'), delaySeconds: metadata?.delaySeconds ?? 0, deliveryCount: metadata?.deliveryCount ?? batch?.consumedCount ?? 0, description: metadata?.description ?? '', dockable: metadata?.dockable ?? false, price: metadata?.price ?? '', minPrice: metadata?.minPrice ?? '', feePayer: metadata?.feePayer ?? 'distributor', dockVisibility: metadata?.dockVisibility ?? 'public', multiSpec: metadata?.multiSpec ?? false, specName: metadata?.specName ?? '', specValue: metadata?.specValue ?? '', itemsText: '' };
+  return { accountId: batch?.accountId ?? 'account-001', label: batch?.label ?? '', purpose: batch?.purpose ?? 'text', deliveryScope: batch?.deliveryScope ?? 'operator_only', quarkUrl: batch?.quarkUrl ?? '', extractionCode: batch?.extractCode ?? '', textContent: metadata?.textContent ?? '', dataContent: metadata?.dataContent ?? '', apiUrl: metadata?.apiConfig?.url ?? '', apiMethod: metadata?.apiConfig?.method ?? 'GET', apiTimeout: metadata?.apiConfig?.timeout ?? 60, apiHeaders: metadata?.apiConfig?.headers ?? '', apiParams: metadata?.apiConfig?.params ?? '', apiResponseField: metadata?.apiConfig?.responseField ?? '', imageUrls: (metadata?.imageUrls ?? []).join('\n'), delaySeconds: metadata?.delaySeconds ?? 0, useNoLogisticsForm: metadata?.useNoLogisticsForm ?? false, deliveryCount: metadata?.deliveryCount ?? batch?.consumedCount ?? 0, description: metadata?.description ?? '', feePayer: metadata?.feePayer ?? '', minPrice: metadata?.minPrice ?? '', dockVisibility: metadata?.dockVisibility ?? 'public', multiSpec: metadata?.multiSpec ?? false, specName: metadata?.specName ?? '', specValue: metadata?.specValue ?? '', itemsText: '' };
+}
+
+function parseImageUrls(value: string): string[] { return value.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean).slice(0, 3); }
+function parseJson(value: string): boolean { if (!value.trim()) return true; try { JSON.parse(value); return true; } catch { return false; } }
+
+export function validateCouponForm(form: CouponCreateFormState, mode: 'create' | 'edit' | 'copy' = 'create'): string {
+  if (!form.accountId.trim() || !form.label.trim()) return '请填写账号和卡券名称。';
+  if (!form.purpose) return '请选择卡券类型。';
+  if (form.purpose === 'api' && !form.apiUrl.trim()) return '请输入API地址。';
+  if (mode === 'create' && form.purpose === 'text' && !form.textContent.trim()) return '请输入固定文字内容。';
+  if (mode === 'create' && form.purpose === 'data' && !form.dataContent.trim()) return '请输入批量数据。';
+  if (form.multiSpec && (!form.specName.trim() || !form.specValue.trim())) return '多规格卡券必须填写规格名称和规格值。';
+  if (mode === 'create' && form.purpose !== 'image' && form.description.trim() && !form.description.includes('{DELIVERY_CONTENT}')) return '非图片类型卡券的备注中必须包含 {DELIVERY_CONTENT} 变量。';
+  if (!parseJson(form.apiHeaders)) return '请求头格式错误，请输入有效的JSON。';
+  if (!parseJson(form.apiParams)) return '请求参数格式错误，请输入有效的JSON。';
+  if (form.minPrice.trim()) { const minPrice = Number(form.minPrice.trim()); if (!Number.isFinite(minPrice) || minPrice <= 0) return '最低售价必须是大于0的数字。'; if (!/^\d+(\.\d{1,2})?$/.test(form.minPrice.trim())) return '最低售价最多保留两位小数。'; }
+  return '';
+}
+
+export function buildCouponPayload(form: CouponCreateFormState, baseMetadata?: CouponMetadataVM): CreateCouponBatchRequest {
+  const metadata: CouponMetadataVM = { ...baseMetadata, description: form.description.trim() || undefined, delaySeconds: Math.max(0, form.delaySeconds), deliveryCount: Math.max(0, form.deliveryCount), useNoLogisticsForm: form.purpose === 'text' && form.useNoLogisticsForm, feePayer: form.feePayer || undefined, minPrice: form.minPrice.trim() || undefined, dockVisibility: form.dockVisibility, multiSpec: form.multiSpec, specName: form.multiSpec ? form.specName.trim() : undefined, specValue: form.multiSpec ? form.specValue.trim() : undefined, textContent: form.purpose === 'text' ? form.textContent.trim() : undefined, dataContent: form.purpose === 'data' ? form.dataContent.trim() : undefined, apiConfig: form.purpose === 'api' ? { url: form.apiUrl.trim(), method: form.apiMethod, timeout: form.apiTimeout, headers: form.apiHeaders.trim() || undefined, params: form.apiParams.trim() || undefined, responseField: form.apiResponseField.trim() || undefined } : undefined, imageUrls: parseImageUrls(form.imageUrls) };
+  return { accountId: form.accountId.trim(), label: form.label.trim(), purpose: form.purpose, deliveryScope: form.deliveryScope, quarkUrl: form.quarkUrl.trim() || undefined, extractionCode: form.extractionCode.trim() || undefined, metadata, items: form.itemsText.split(/\r?\n/).map((item) => item.trim()).filter(Boolean) };
 }
 
 export function CouponCreateModal({ submitting, mode = 'create', batch, onClose, onSubmit }: { submitting: boolean; mode?: 'create' | 'edit' | 'copy'; batch?: CouponBatchVM; onClose: () => void; onSubmit: (input: CreateCouponBatchRequest | UpdateCouponBatchRequest) => Promise<void> }) {
-  const [form, setForm] = useState<FormState>(() => fromBatch(batch));
+  const [form, setForm] = useState<CouponCreateFormState>(() => fromBatch(batch));
   const [error, setError] = useState('');
   const title = mode === 'edit' ? '编辑卡券' : mode === 'copy' ? '复制卡券' : '新建卡券';
-  const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((previous) => ({ ...previous, [key]: value }));
-  const payload = useMemo(() => {
-    const metadata = { description: form.description.trim() || undefined, delaySeconds: Math.max(0, form.delaySeconds), deliveryCount: Math.max(0, form.deliveryCount), dockable: form.dockable, price: form.price.trim() || undefined, minPrice: form.minPrice.trim() || undefined, feePayer: form.dockable ? form.feePayer : undefined, dockVisibility: form.dockable ? form.dockVisibility : undefined, multiSpec: form.multiSpec, specName: form.multiSpec ? form.specName.trim() : undefined, specValue: form.multiSpec ? form.specValue.trim() : undefined, textContent: form.purpose === 'text' ? form.textContent.trim() : undefined, dataContent: form.purpose === 'data' ? form.dataContent.trim() : undefined, apiConfig: form.purpose === 'api' ? { url: form.apiUrl.trim(), method: form.apiMethod, timeout: form.apiTimeout, headers: form.apiHeaders.trim() || undefined, params: form.apiParams.trim() || undefined, responseField: form.apiResponseField.trim() || undefined } : undefined, imageUrls: form.imageUrls.split(/\r?\n|,/).map((value) => value.trim()).filter(Boolean).slice(0, 3) };
-    return { accountId: form.accountId.trim(), label: form.label.trim(), purpose: form.purpose, deliveryScope: form.deliveryScope, quarkUrl: form.quarkUrl.trim() || undefined, extractionCode: form.extractionCode.trim() || undefined, metadata, items: form.itemsText.split(/\r?\n/).map((item) => item.trim()).filter(Boolean) };
-  }, [form]);
-  async function submit(event: React.FormEvent) {
+  const set = <K extends keyof CouponCreateFormState>(key: K, value: CouponCreateFormState[K]) => setForm((previous) => ({ ...previous, [key]: value }));
+  const payload = useMemo(() => buildCouponPayload(form, batch?.metadata), [batch?.metadata, form]);
+
+  function insertParam(paramName: string) {
+    let json: Record<string, string> = {};
+    if (form.apiParams.trim() && form.apiParams.trim() !== '{}') { try { json = JSON.parse(form.apiParams) as Record<string, string>; } catch { json = {}; } }
+    json[paramName] = `{${paramName}}`;
+    set('apiParams', JSON.stringify(json, null, 2));
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!form.accountId.trim() || !form.label.trim()) { setError('请填写账号和卡券名称。'); return; }
-    if (form.purpose === 'api' && !form.apiUrl.trim()) { setError('API 卡券必须填写接口地址。'); return; }
-    if (form.purpose === 'text' && !form.textContent.trim() && mode === 'create') { setError('文本卡券必须填写文本内容。'); return; }
-    if (form.purpose === 'data' && !form.dataContent.trim() && mode === 'create') { setError('批量数据卡券必须填写数据内容。'); return; }
-    if (form.multiSpec && (!form.specName.trim() || !form.specValue.trim())) { setError('多规格卡券必须填写规格名称和规格值。'); return; }
+    const validationError = validateCouponForm(form, mode);
+    if (validationError) { setError(validationError); return; }
     setError('');
     const next = mode === 'edit' ? { ...payload, items: undefined } : payload;
     await onSubmit(next);
     onClose();
   }
+
   return <div className="coupons-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
     <form className="coupons-modal card coupons-editor-modal" onSubmit={submit} aria-label={title}>
-      <header><div><p className="eyebrow">Coupon Configuration</p><h2>{title}</h2><p>字段和操作与参考卡券页一致，页面视觉继续沿用当前平台风格。</p></div><button className="icon-button" type="button" onClick={onClose} aria-label="关闭">×</button></header>
+      <header><div><p className="eyebrow">Coupon Configuration</p><h2>{title}</h2><p>字段和默认值与参考卡券页保持一致，当前项目额外保留账号、交付和库存字段。</p></div><button className="icon-button" type="button" onClick={onClose} aria-label="关闭">×</button></header>
       <div className="coupons-form-grid">
+        <label>卡券名称 <span className="coupons-required">*</span><input value={form.label} onChange={(event) => set('label', event.target.value)} placeholder="例如：游戏点卡、会员卡等" /></label>
+        <label>卡券类型 <span className="coupons-required">*</span><select value={form.purpose} onChange={(event) => { const purpose = event.target.value as CouponBatchVM['purpose']; set('purpose', purpose); if (purpose !== 'text') set('useNoLogisticsForm', false); }}><option value="text">固定文字</option><option value="data">批量数据</option><option value="api">API接口</option><option value="image">图片</option></select></label>
         <label>账号<input value={form.accountId} onChange={(event) => set('accountId', event.target.value)} disabled={mode === 'edit'} /></label>
-        <label>卡券名称<input value={form.label} onChange={(event) => set('label', event.target.value)} placeholder="例如：会员兑换码" /></label>
-        <label>卡券类型<select value={form.purpose} onChange={(event) => set('purpose', event.target.value as CouponBatchVM['purpose'])}><option value="text">文本</option><option value="data">批量数据</option><option value="api">API</option><option value="image">图片</option></select></label>
-        <label>交付范围<select value={form.deliveryScope} onChange={(event) => set('deliveryScope', event.target.value as FormState['deliveryScope'])}><option value="operator_only">仅管理员</option><option value="buyer_deliverable">可交付买家</option><option value="system_only">仅系统</option></select></label>
-        <label>夸克链接<input value={form.quarkUrl} onChange={(event) => set('quarkUrl', event.target.value)} /></label>
-        <label>提取码<input value={form.extractionCode} onChange={(event) => set('extractionCode', event.target.value)} /></label>
-        {form.purpose === 'text' && <label className="coupons-form-full">文本内容<textarea rows={5} value={form.textContent} onChange={(event) => set('textContent', event.target.value)} /></label>}
-        {form.purpose === 'data' && <label className="coupons-form-full">批量数据（一行一条）<textarea rows={6} value={form.dataContent} onChange={(event) => set('dataContent', event.target.value)} /></label>}
-        {form.purpose === 'api' && <div className="coupons-form-section coupons-form-full"><strong>API 配置</strong><label>接口地址<input type="url" value={form.apiUrl} onChange={(event) => set('apiUrl', event.target.value)} /></label><div className="coupons-form-grid nested"><label>请求方法<select value={form.apiMethod} onChange={(event) => set('apiMethod', event.target.value as 'GET' | 'POST')}><option value="GET">GET</option><option value="POST">POST</option></select></label><label>超时（秒）<input type="number" min={1} value={form.apiTimeout} onChange={(event) => set('apiTimeout', Number(event.target.value) || 60)} /></label></div><label>请求头（JSON）<textarea rows={3} value={form.apiHeaders} onChange={(event) => set('apiHeaders', event.target.value)} /></label><label>请求参数（JSON）<textarea rows={3} value={form.apiParams} onChange={(event) => set('apiParams', event.target.value)} /></label><label>响应取值字段<input value={form.apiResponseField} onChange={(event) => set('apiResponseField', event.target.value)} placeholder="data.cards[0].key" /></label></div>}
-        {form.purpose === 'image' && <label className="coupons-form-full">图片地址（每行一个，最多 3 张）<textarea rows={4} value={form.imageUrls} onChange={(event) => set('imageUrls', event.target.value)} placeholder="https://..." /></label>}
-        <label>延时发货（秒）<input type="number" min={0} max={3600} value={form.delaySeconds} onChange={(event) => set('delaySeconds', Number(event.target.value) || 0)} /></label>
+        <label>交付范围<select value={form.deliveryScope} onChange={(event) => set('deliveryScope', event.target.value as CouponCreateFormState['deliveryScope'])}><option value="operator_only">仅管理员</option><option value="buyer_deliverable">可交付买家</option><option value="system_only">仅系统</option></select></label>
+        <label>夸克链接<input value={form.quarkUrl} onChange={(event) => set('quarkUrl', event.target.value)} placeholder="https://pan.quark.cn/..." /></label>
+        <label>提取码<input value={form.extractionCode} onChange={(event) => set('extractionCode', event.target.value)} placeholder="选填" /></label>
+
+        {form.purpose === 'text' && <div className="coupons-form-section coupons-form-full"><strong>固定文字配置</strong><label>固定文字内容 <span className="coupons-required">*</span><textarea rows={6} value={form.textContent} onChange={(event) => set('textContent', event.target.value)} placeholder="请输入要发送的固定文字内容..." /></label><label className="coupons-inline-checkbox"><input type="checkbox" checked={form.useNoLogisticsForm} onChange={(event) => set('useNoLogisticsForm', event.target.checked)} />填写到无需邮寄凭证</label><p className="coupons-form-hint">开启后不再向买家发送卡券聊天消息。</p></div>}
+        {form.purpose === 'data' && <div className="coupons-form-section coupons-form-full"><strong>批量数据配置</strong><label>数据内容 (一行一个) <span className="coupons-required">*</span><textarea rows={8} value={form.dataContent} onChange={(event) => set('dataContent', event.target.value)} placeholder={'请输入数据，每行一个：\n卡号1:密码1\n卡号2:密码2\n或者\n兑换码1\n兑换码2'} /></label><p className="coupons-form-hint">支持格式：卡号:密码 或 单独的兑换码。</p></div>}
+        {form.purpose === 'api' && <div className="coupons-form-section coupons-form-full"><strong>API配置</strong><label>API地址 <span className="coupons-required">*</span><input type="url" value={form.apiUrl} onChange={(event) => set('apiUrl', event.target.value)} placeholder="https://api.example.com/get-card" /></label><div className="coupons-form-grid nested"><label>请求方法<select value={form.apiMethod} onChange={(event) => set('apiMethod', event.target.value as 'GET' | 'POST')}><option value="GET">GET</option><option value="POST">POST</option></select></label><label>超时时间(秒)<input type="number" min={1} value={form.apiTimeout} onChange={(event) => set('apiTimeout', Number(event.target.value) || 60)} /></label></div><label>请求头 (JSON格式)<textarea rows={4} value={form.apiHeaders} onChange={(event) => set('apiHeaders', event.target.value)} placeholder={'{"Authorization": "Bearer token"}'} /></label><label>请求参数 (JSON格式)<textarea rows={4} value={form.apiParams} onChange={(event) => set('apiParams', event.target.value)} placeholder={'{"type": "card", "count": 1}'} /></label>{form.apiMethod === 'POST' && <div className="coupons-param-picker"><p>POST请求可用参数（点击添加）：</p><div>{postParams.map((param) => <button key={param.name} type="button" className="btn ghost btn-small" onClick={() => insertParam(param.name)} title={param.desc}><code>{param.name}</code></button>)}</div></div>}<label>响应取值字段（选填）<input value={form.apiResponseField} onChange={(event) => set('apiResponseField', event.target.value)} placeholder="data.cards[0].key" /></label></div>}
+        {form.purpose === 'image' && <div className="coupons-form-section coupons-form-full"><strong>图片配置（可选，最多3张）</strong><label>图片地址（每行一个，最多 3 张）<textarea rows={5} value={form.imageUrls} onChange={(event) => set('imageUrls', event.target.value)} placeholder="https://example.com/card-1.jpg" /></label><p className="coupons-form-hint">支持 JPG、PNG、GIF 格式，最大 5MB，最多上传3张图片（当前批次接口接收图片 URL）。</p></div>}
+        <div className="coupons-form-section coupons-form-full"><strong>对接信息</strong><div className="coupons-form-grid nested"><label>对接类型<select value={form.dockVisibility} onChange={(event) => set('dockVisibility', event.target.value as CouponCreateFormState['dockVisibility'])}><option value="public">所有人可见</option><option value="dealer_only">仅分销商可见</option></select></label><label>手续费支付方式<select value={form.feePayer} onChange={(event) => set('feePayer', event.target.value as CouponCreateFormState['feePayer'])}><option value="">不设置</option><option value="distributor">分销主支付</option><option value="dealer">分销商支付</option></select></label><label>最低售价<input value={form.minPrice} onChange={(event) => { const value = event.target.value; if (value === '' || /^\d*\.?\d{0,2}$/.test(value)) set('minPrice', value); }} placeholder="可选，例如：5.00" /></label></div><p className="coupons-form-hint">其余配置保留用于兼容已有卡券批次。</p></div>
+        <label>延时发货时间<input type="number" min={0} max={3600} value={form.delaySeconds} onChange={(event) => set('delaySeconds', Number(event.target.value) || 0)} /><span className="coupons-form-hint">0表示立即发货，最大3600秒(1小时)。</span></label>
         <label>已发货次数<input type="number" min={0} value={form.deliveryCount} onChange={(event) => set('deliveryCount', Number(event.target.value) || 0)} /></label>
-        <label className="coupons-form-full">备注信息<textarea rows={3} value={form.description} onChange={(event) => set('description', event.target.value)} /></label>
-        <label className="coupons-inline-checkbox"><input type="checkbox" checked={form.dockable} onChange={(event) => set('dockable', event.target.checked)} />可对接</label>
-        {form.dockable && <><label>对接价格<input value={form.price} onChange={(event) => set('price', event.target.value)} /></label><label>最低售价<input value={form.minPrice} onChange={(event) => set('minPrice', event.target.value)} /></label><label>手续费承担方<select value={form.feePayer} onChange={(event) => set('feePayer', event.target.value as FormState['feePayer'])}><option value="distributor">分销主承担</option><option value="dealer">分销商承担</option></select></label><label>对接类型<select value={form.dockVisibility} onChange={(event) => set('dockVisibility', event.target.value as FormState['dockVisibility'])}><option value="public">所有人可见</option><option value="dealer_only">仅分销商可见</option></select></label></>}
-        <label className="coupons-inline-checkbox coupons-form-full"><input type="checkbox" checked={form.multiSpec} onChange={(event) => set('multiSpec', event.target.checked)} />多规格卡券</label>
-        {form.multiSpec && <><label>规格名称<input value={form.specName} onChange={(event) => set('specName', event.target.value)} /></label><label>规格值<input value={form.specValue} onChange={(event) => set('specValue', event.target.value)} /></label></>}
-        {mode !== 'edit' && <label className="coupons-form-full">首批库存（每行一条）<textarea rows={4} value={form.itemsText} onChange={(event) => set('itemsText', event.target.value)} /></label>}
+        <label className="coupons-form-full">备注信息<textarea rows={5} value={form.description} onChange={(event) => set('description', event.target.value)} placeholder={form.purpose === 'image' ? '可选的备注信息，图片发送后会发送此内容\n支持变量：{order_id} {item_id} {item_title} {buyer_name} {buyer_id} {seller_name}\n使用 ###### 分隔符可拆分为多条消息发送' : '可选的备注信息，填写后必须包含 {DELIVERY_CONTENT} 变量（必填）\n可选变量：{order_id} {item_id} {item_title} {buyer_name} {buyer_id} {seller_name}\n使用 ###### 分隔符可拆分为多条消息发送'} /><span className="coupons-form-hint">{form.purpose === 'image' ? '图片类型不支持 {DELIVERY_CONTENT} 变量替换。' : '非图片类型卡券填写备注时，必须包含 {DELIVERY_CONTENT} 变量。'} 使用 ###### 可拆分为多条消息，每条消息间隔0.5秒。</span></label>
+        <div className="coupons-form-section coupons-form-full"><label className="coupons-inline-checkbox"><input type="checkbox" checked={form.multiSpec} onChange={(event) => set('multiSpec', event.target.checked)} />多规格卡券</label><p className="coupons-form-hint">开启后可以为同一商品的不同规格创建不同的卡券。<span className="coupons-form-link">不知道怎么填写？先下一单，在订单管理中可以看到规格信息。</span></p>{form.multiSpec && <><div className="coupons-form-grid nested"><label>规格名称 <span className="coupons-required">*</span><input value={form.specName} onChange={(event) => set('specName', event.target.value)} placeholder="例如：套餐类型、颜色、尺寸" /></label><label>规格值 <span className="coupons-required">*</span><input value={form.specValue} onChange={(event) => set('specValue', event.target.value)} placeholder="例如：30天、红色、XL" /></label></div><div className="coupons-form-note"><strong>多规格说明：</strong><ul><li>同一卡券名称可以创建多个不同规格的卡券</li><li>卡券名称+规格名称+规格值必须唯一</li><li>自动发货时会精确匹配订单规格，规格不匹配则不发货</li></ul></div></>}</div>
+        {mode !== 'edit' && <label className="coupons-form-full">首批库存（每行一条）<textarea rows={5} value={form.itemsText} onChange={(event) => set('itemsText', event.target.value)} placeholder="每行填写一条卡券内容" /></label>}
       </div>
       {error && <p className="coupons-form-error" role="alert">{error}</p>}
       <footer><button className="btn ghost" type="button" onClick={onClose}>取消</button><button className="btn primary" type="submit" disabled={submitting}>{submitting ? '保存中…' : '保存'}</button></footer>
