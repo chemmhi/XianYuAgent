@@ -46,7 +46,7 @@
 - canonical 设计同步：FirstRun 使用 `POST /api/v1/auth/bootstrap`；消息人工接管使用 `POST /api/v1/conversations/{id}/handoff`，恢复 AI 使用 `POST /api/v1/conversations/{id}/release`；统一字段为 `BootstrapAdminInput/Output`、`HandoffConversationInput`、`ReleaseConversationInput`、`ConversationHandlingOutput`，状态字段为 `handlingMode`，版本字段为 `expectedVersion`。
 
 - 2026-09-20 `S4-VS5A` 真实恢复与浏览器证据：`npm --workspace apps/api run test:messages:infra` 通过双 API 实例 Redis 跨进程广播、Redis 重启恢复、PostgreSQL 重启后的消息读回/写入；`npm run test:e2e:chrome:messages` 通过 Chrome/CDP 连接、强制断线、重连期间写入、cursor 补回和时间线去重，并生成 `messages-desktop-1440x900.png`、`messages-reconnecting-1440x900.png`、`messages-mobile-390x844.png`。
-- 2026-09-20 `S4-VS5A` 主线门禁：`npm run typecheck`、`npm test`（API smoke + Workspace smoke + Web 15 files / 50 tests）、`npm run build`、上述真实基础设施 smoke、聊天 Chrome/CDP E2E 和 `git diff --check` 均通过；切片仍保持 `PARTIALLY_VERIFIED`，不宣称外部闲鱼账号验收或发布级恢复闭环。
+- 2026-09-20 `S4-VS5A` 主线门禁：`npm run typecheck`、`npm test`（API smoke + Workspace smoke + Web 15 files / 51 tests）、`npm run build`、上述真实基础设施 smoke、聊天 Chrome/CDP E2E 和 `git diff --check` 均通过；切片仍保持 `PARTIALLY_VERIFIED`，不宣称外部闲鱼账号验收或发布级恢复闭环。
 - 2026-09-20 `S4-VS5A` 外部凭证回读：复用 PostgreSQL 中现有登录态，账号 `19cf…` 返回 3 个真实会话，首会话历史 4 条（含文本与图片）；账号 `6f0…` 返回 1 个真实会话，首会话历史 20 条且仍有更多游标（含 inbound/outbound/system）。数据库复核 `duplicate_external_refs=0`；本轮未发送任何真实闲鱼消息，也未重复执行 Cookie 登录。
 - 本轮提交：`6df170c`（`feat(聊天): 接入真实闲鱼会话读取与实时连接`）；提交前已在 merge lock 内重跑 typecheck、全量测试、构建、真实 Redis/PostgreSQL 恢复和 Chrome/CDP 消息 E2E。
 
@@ -70,7 +70,7 @@
 | `S4-VS2E` 商品外部同步真实验收 | `PARTIALLY_VERIFIED` | 真实账号、Cookie、分页、字段映射和数量口径 | 当前已登录 Chrome + 真实闲鱼账号人工复核 |
 | `S4-VS3A/B` 卡券明细、素材、库存锁定消耗 | `PLANNED` | CouponItem bulk 操作、素材、reserve/consume/release | PostgreSQL/Redis/MinIO 并发集成、敏感字段裁剪 |
 | `S4-VS4A/B/C` 订单与交付 | `PLANNED` | 订单只读、delivery-preview、发货/取消/重试/unknown 恢复 | 四套状态、库存锁、Outbox、DeliveryRecord、移动端 |
-| `S4-VS5A` 在线聊天读取与实时连接 | `PARTIALLY_VERIFIED` | 会话列表、消息时间线、MemoryStore/PostgreSQL HTTP/WS、Redis 跨进程广播与重启恢复、cursor 重连去重、Chrome/CDP 双 viewport 断线视觉证据 | 独立复审、生产部署拓扑确认；发送/附件/撤回仍属 `S4-VS5B` |
+| `S4-VS5A` 在线聊天读取与实时连接 | `PARTIALLY_VERIFIED` | 会话列表、消息时间线、MemoryStore/PostgreSQL HTTP/WS、Redis 跨进程广播与重启恢复、cursor 重连去重、Chrome/CDP 双 viewport 断线视觉证据；本轮补齐搜索、全部/未读筛选、独立滚动、整行选择、头像/商品缩略图和 `016_conversation_media.sql` | 独立复审、生产部署拓扑确认；发送/附件/撤回仍属 `S4-VS5B` |
 | `S4-VS5B` 在线聊天发送/附件/撤回 | `PLANNED` | 文本发送、图片上传、失败重试、撤回 | PostgreSQL/对象存储、幂等、unknown/timeout、脱敏 |
 | `S4-VS5C` 人工接管与 AI 恢复 | `PLANNED` | handoff/release、版本冲突、审计 | 非法转换、403/409、桌面/移动状态 |
 | `S4-VS6A` Workspace 会话与 Run 首链路 | `PARTIALLY_VERIFIED` | AgentSession/Run/Step、Memory/Postgres Store、受控 Runtime、clientRunRef、WS 游标补事件、真实 PostgreSQL/Chrome/CDP 首链路、前端 Workspace 页面 | 独立 Worker/Pi Runtime、发布级恢复、人工视觉签核与完整状态回归 |

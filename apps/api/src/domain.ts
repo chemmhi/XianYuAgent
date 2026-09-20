@@ -285,8 +285,10 @@ export interface ConversationRecord {
   externalConversationRef?: string;
   buyerRef: string;
   buyerDisplayName?: string;
+  buyerAvatarUrl?: string;
   itemRef?: string;
   itemTitle?: string;
+  itemImageUrl?: string;
   unreadCount: number;
   lastMessagePreview?: string;
   lastMessageAt?: string;
@@ -548,10 +550,10 @@ export interface Store {
   listConversations(adminId: string, query: ConversationListQuery): Promise<ConversationListResult>;
   getConversation(adminId: string, conversationId: string): Promise<ConversationRecord | undefined>;
   findConversationByExternalRef(adminId: string, accountId: string, externalConversationRef: string): Promise<ConversationRecord | undefined>;
-  upsertExternalConversation(input: { adminId: string; accountId: string; externalConversationRef: string; buyerRef: string; buyerDisplayName?: string; itemRef?: string; itemTitle?: string; unreadCount?: number; lastMessagePreview?: string; lastMessageAt?: string }): Promise<ConversationRecord>;
+  upsertExternalConversation(input: { adminId: string; accountId: string; externalConversationRef: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; unreadCount?: number; lastMessagePreview?: string; lastMessageAt?: string }): Promise<ConversationRecord>;
   listMessages(adminId: string, conversationId: string, query: MessageListQuery): Promise<MessageListResult>;
   listConversationEvents(adminId: string, conversationId: string, afterCursor: number, limit: number): Promise<ConversationEventRecord[]>;
   findMessageByExternalRef(adminId: string, conversationId: string, externalMessageRef: string): Promise<MessageRecord | undefined>;
-  createConversation(input: { adminId: string; accountId: string; buyerRef: string; buyerDisplayName?: string; itemRef?: string; itemTitle?: string; externalConversationRef?: string }): Promise<ConversationRecord>;
+  createConversation(input: { adminId: string; accountId: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; externalConversationRef?: string }): Promise<ConversationRecord>;
   createMessage(input: { adminId: string; conversationId: string; direction: MessageDirection; senderRole: MessageSenderRole; bodyType: MessageBodyType; bodyText?: string; bodyRef?: string; externalMessageRef?: string; source?: MessageRecord['source']; orderRef?: string; productRef?: string; riskFlags?: string[]; createdAt?: string; traceId?: string }): Promise<{ message: MessageRecord; event: ConversationEventRecord }>;
 }

@@ -8,8 +8,10 @@ export interface ConversationVM {
   accountId: string;
   buyerRef: string;
   buyerDisplayName?: string;
+  buyerAvatarUrl?: string;
   itemRef?: string;
   itemTitle?: string;
+  itemImageUrl?: string;
   unreadCount: number;
   lastMessagePreview?: string;
   lastMessageAt?: string;
@@ -55,6 +57,9 @@ export interface MessagesError { code: string; message: string; retryable: boole
 export interface MessagesState {
   accountId?: string;
   listPhase: MessagesLoadPhase;
+  loadingMore: boolean;
+  hasMore: boolean;
+  nextCursor?: string;
   timelinePhase: TimelineLoadPhase;
   realtimePhase: RealtimePhase;
   conversations: ConversationVM[];

@@ -14,6 +14,17 @@ export function mergeConversation(existing: ConversationVM[], incoming: Conversa
   return [...byId.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.conversationId.localeCompare(right.conversationId));
 }
 
+export function filterConversations(conversations: ConversationVM[], search: string, unreadOnly: boolean): ConversationVM[] {
+  const keyword = search.trim().toLocaleLowerCase();
+  return conversations.filter((conversation) => {
+    if (unreadOnly && conversation.unreadCount <= 0) return false;
+    if (!keyword) return true;
+    return [conversation.buyerDisplayName, conversation.buyerRef, conversation.itemTitle, conversation.lastMessagePreview]
+      .filter(Boolean)
+      .some((value) => String(value).toLocaleLowerCase().includes(keyword));
+  });
+}
+
 export function applyRealtimeEvent(state: MergeState, event: RealtimeEvent): MergeState {
   if (state.seenEventIds.has(event.eventId)) return state;
   const seenEventIds = new Set(state.seenEventIds).add(event.eventId);

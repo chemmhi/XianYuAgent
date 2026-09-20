@@ -156,9 +156,11 @@ async function run() {
   const adminId = bootstrapPayload.data.profile.id;
   const cookie = cookiesFrom(bootstrap);
   const account = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `messages-chrome-${process.pid}`, displayName: '在线聊天 E2E 账号' });
-  const conversation = await apiRuntime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'buyer-messages-e2e', buyerDisplayName: '买家 E2E', itemTitle: '实时消息验证商品', externalConversationRef: `messages-chrome-${process.pid}` });
+  const conversation = await apiRuntime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'buyer-messages-e2e', buyerDisplayName: '买家 E2E', buyerAvatarUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2240%22 height=%2240%22%3E%3Crect width=%2240%22 height=%2240%22 rx=%2220%22 fill=%22%232563eb%22/%3E%3Ctext x=%2220%22 y=%2226%22 text-anchor=%22middle%22 font-size=%2220%22 fill=%22white%22%3EE%3C/text%3E%3C/svg%3E', itemTitle: '实时消息验证商品', itemImageUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2244%22 height=%2236%22%3E%3Crect width=%2244%22 height=%2236%22 rx=%226%22 fill=%22%23bfdbfe%22/%3E%3C/svg%3E', externalConversationRef: `messages-chrome-${process.pid}` });
   const seedMessage = await apiRuntime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '历史消息：请问什么时候发货？', source: 'system', traceId: 'messages-chrome-seed' });
   assert.equal(seedMessage.event.cursor, 1);
+  const secondConversation = await apiRuntime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'buyer-search-e2e', buyerDisplayName: '搜索用户 E2E', buyerAvatarUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2240%22 height=%2240%22%3E%3Crect width=%2240%22 height=%2240%22 rx=%2220%22 fill=%22%23f97316%22/%3E%3Ctext x=%2220%22 y=%2226%22 text-anchor=%22middle%22 font-size=%2220%22 fill=%22white%22%3ES%3C/text%3E%3C/svg%3E', itemTitle: '搜索商品缩略图', itemImageUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2244%22 height=%2236%22%3E%3Crect width=%2244%22 height=%2236%22 rx=%226%22 fill=%22%23fed7aa%22/%3E%3C/svg%3E', externalConversationRef: `messages-search-${process.pid}` });
+  await apiRuntime.store.createMessage({ adminId, conversationId: secondConversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '搜索商品还有库存吗？', source: 'system', traceId: 'messages-chrome-search-seed' });
 
   spawnProcess(npm, npmArgs(['--workspace', 'apps/web', 'run', 'dev', '--', '--host', '127.0.0.1', '--port', String(webPort)]), {
     env: { ...process.env, VITE_API_MODE: 'live', VITE_API_BASE_URL: '', VITE_API_PROXY_TARGET: apiUrl },
@@ -225,6 +227,22 @@ async function run() {
   await assertText(cdp, '在线聊天');
   await assertText(cdp, '买家 E2E');
   await assertText(cdp, '真实连接');
+  assert.equal(await evaluate(cdp, 'document.querySelectorAll(".messages-conversation-list button").length'), 2);
+  assert.equal(await evaluate(cdp, 'document.querySelectorAll(".messages-conversation-avatar img").length'), 2);
+  assert.equal(await evaluate(cdp, 'document.querySelectorAll(".messages-conversation-item").length'), 2);
+  assert.equal(await evaluate(cdp, 'getComputedStyle(document.querySelector(".messages-conversation-scroll")).overflowY'), 'auto');
+  assert.equal(await evaluate(cdp, 'getComputedStyle(document.querySelector(".messages-timeline")).overflowY'), 'auto');
+  await evaluate(cdp, `(() => { const input = document.querySelector('input[aria-label="搜索会话"]'); const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set; setter?.call(input, '搜索商品'); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await waitFor(async () => await evaluate(cdp, 'document.querySelectorAll(".messages-conversation-list button").length === 1'), 'search filtering');
+  await evaluate(cdp, `(() => { const input = document.querySelector('input[aria-label="搜索会话"]'); const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set; setter?.call(input, ''); input.dispatchEvent(new Event('input', { bubbles: true })); document.querySelectorAll('.messages-filter-tabs button')[1]?.click(); })()`);
+  await waitFor(async () => await evaluate(cdp, 'document.querySelectorAll(".messages-conversation-list button").length >= 1'), 'unread filtering');
+  await evaluate(cdp, `(() => { const input = document.querySelector('input[aria-label="搜索会话"]'); const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set; setter?.call(input, '搜索用户'); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await waitFor(async () => await evaluate(cdp, 'document.querySelectorAll(".messages-conversation-list button").length === 1'), 'buyer search filtering');
+  await evaluate(cdp, 'document.querySelector(".messages-conversation-list button")?.click()');
+  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector(".messages-main-header strong")?.textContent')).includes('搜索用户'), 'conversation selection');
+  await evaluate(cdp, `(() => { const input = document.querySelector('input[aria-label="搜索会话"]'); const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set; setter?.call(input, ''); input.dispatchEvent(new Event('input', { bubbles: true })); document.querySelectorAll('.messages-filter-tabs button')[0]?.click(); })()`);
+  await evaluate(cdp, `document.querySelector('[data-conversation-id="${conversation.id}"]')?.click()`);
+  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector(".messages-main-header strong")?.textContent')).includes('买家 E2E'), 'primary conversation selection');
   assert.deepEqual(await messageBodies(cdp), ['历史消息：请问什么时候发货？']);
   await captureViewport(cdp, 1440, 900, 'messages-desktop-1440x900.png');
 

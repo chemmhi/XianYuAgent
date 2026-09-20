@@ -18,7 +18,7 @@
 | `S4-VS3` 卡券首页 | `READY_FOR_REVIEW` | API smoke、Chrome/CDP、桌面/移动截图、代码已合入 master | 真实 PostgreSQL/Redis/MinIO、逐状态人工浏览器审核、迁移整理 |
 | `S4-VS3A/B` 卡券明细/素材/库存锁 | `PLANNED` | `CouponItem`、`CouponAssetRef`、`InventoryLockVM` 契约已冻结 | bulk-save/delete、MinIO、reserve/consume/release、敏感交付边界 |
 | `S4-VS4A/B/C` 订单与交付 | `PLANNED` | 订单 API、四态、delivery mode 契约已冻结 | 只读、预览、库存锁、交付动作、unknown/重试/取消 |
-| `S4-VS5A` 在线聊天读取与实时连接 | `PARTIALLY_VERIFIED` | canonical HTTP/WS、MemoryStore/PostgreSQL + `015_messages.sql`、双 API 实例 Redis 跨进程广播、Redis/PostgreSQL 重启恢复、cursor 去重、Chrome/CDP 双 viewport 断线视觉证据 | 独立复审、生产部署拓扑确认；发送/附件/撤回进入 `S4-VS5B` |
+| `S4-VS5A` 在线聊天读取与实时连接 | `PARTIALLY_VERIFIED` | canonical HTTP/WS、MemoryStore/PostgreSQL + `015_messages.sql` + `016_conversation_media.sql`、双 API 实例 Redis 跨进程广播、Redis/PostgreSQL 重启恢复、cursor 去重、Chrome/CDP 双 viewport 断线视觉证据、搜索/未读/独立滚动/选择/头像/商品缩略图交互 | 独立复审、生产部署拓扑确认；发送/附件/撤回进入 `S4-VS5B` |
 | `S4-VS5B` 在线聊天发送/附件/撤回 | `PLANNED` | Message 状态机和发送/图片/撤回 API 已冻结 | 持久化、对象存储、幂等、unknown/timeout、脱敏 |
 | `S4-VS5C` 人工接管与 AI 恢复 | `PLANNED` | handoff/release、版本和审计契约已冻结 | 非法转换、403/409、页面禁用、移动端 |
 | `S4-VS6A` Workspace 会话与 Run 首链路 | `PARTIALLY_VERIFIED` | AgentSession/Run/Step、Memory/Postgres Store、受控 Runtime、前端 `/workspace`、clientRunRef、WS cursor replay、真实 PostgreSQL/Chrome/CDP 首链路 | 独立 Worker/Pi Runtime、发布级恢复、人工视觉签核与完整状态回归 |
@@ -59,6 +59,7 @@
 - `npm run typecheck`、`npm test`、`npm run build` 和 `git diff --check` 均通过；API smoke 覆盖消息/Workspace，Web Vitest 通过 15 files / 50 tests。
 - `npm --workspace apps/api run test:messages:infra` 通过双 API 实例 Redis 跨进程广播、Redis 重启恢复、PostgreSQL 重启后的消息读回与写入。
 - `npm run test:e2e:chrome:messages` 通过 Chrome/CDP 1440×900 与 390×844：连接、强制断线、重连期间写入、cursor 补回、自动重连和时间线去重；证据位于 `docs/evidence/stage5/s4-vs5a-chat-read/screenshots/`。
+- 同一证据还覆盖了当前账号上下文不显示账号选择器、用户/商品/消息搜索、全部/未读筛选、头像与商品缩略图、会话整行选择，以及左栏与消息区独立滚动。
 - 复用 PostgreSQL 中已有登录态完成真实闲鱼凭证回读：账号 `19cf…` 返回 3 个会话、首会话 4 条历史消息；账号 `6f0…` 返回 1 个会话、首会话 20 条历史消息且 `hasMore=true`。未重复登录、未发送真实消息，数据库 `duplicate_external_refs=0`。
 - 当前结论保持 `S4-VS5A = PARTIALLY_VERIFIED`；独立复审与生产部署拓扑确认仍未关闭 `S5-RISK-021`，不宣称外部闲鱼账号验收或发布级恢复闭环。
 
