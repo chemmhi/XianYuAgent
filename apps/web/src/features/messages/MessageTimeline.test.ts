@@ -49,4 +49,22 @@ describe('MessageTimeline', () => {
     expect(html).toContain('alt="[尊嘟假嘟]"');
     expect(html).not.toContain('收到[尊嘟假嘟]');
   });
+
+  it('renders participant identity and outbound read state', () => {
+    const html = renderToStaticMarkup(createElement(MessageTimeline, {
+      phase: 'success',
+      messages: [message({ direction: 'outbound', senderRole: 'agent', bodyText: '已收到' })],
+      outboundParticipant: { displayName: 'Seller', avatarUrl: 'https://cdn.example.com/seller.png' },
+    }));
+    expect(html).toContain('messages-message-avatar self');
+    expect(html).toContain('https://cdn.example.com/seller.png');
+    expect(html).toContain('Seller');
+    expect(html).toContain('messages-read-state');
+  });
+
+  it('renders system messages as a centered status row', () => {
+    const html = renderToStaticMarkup(createElement(MessageTimeline, { phase: 'success', messages: [message({ bodyType: 'system', senderRole: 'system', bodyText: '订单已付款' })] }));
+    expect(html).toContain('messages-system-row');
+    expect(html).not.toContain('messages-bubble-row');
+  });
 });

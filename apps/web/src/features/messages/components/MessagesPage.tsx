@@ -141,7 +141,21 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
           <div className="messages-main-header-meta"><span>{activeConversation?.itemTitle || '未关联商品'}</span><span className={`messages-connection-dot ${controller.state.realtimePhase}`} /></div>
         </header>
         {controller.state.activeConversationId ? <>
-          <MessageTimeline messages={controller.state.messages} phase={controller.state.timelinePhase} hasMoreHistory={controller.state.hasMoreHistory} loadingMoreHistory={controller.state.loadingMoreHistory} onLoadMore={() => void controller.loadMoreMessages()} onOpenImage={setChatImagePreviewUrl} />
+          <div className="messages-main-meta" aria-label="会话状态">
+            <span>当前会话</span>
+            <span>当前商品：{activeConversation?.itemTitle || '未关联商品'}</span>
+            <span>{activeConversation?.handlingMode === 'human' ? '人工接管中' : 'AI 托管中'}</span>
+          </div>
+          <MessageTimeline
+            messages={controller.state.messages}
+            phase={controller.state.timelinePhase}
+            hasMoreHistory={controller.state.hasMoreHistory}
+            loadingMoreHistory={controller.state.loadingMoreHistory}
+            onLoadMore={() => void controller.loadMoreMessages()}
+            onOpenImage={setChatImagePreviewUrl}
+            inboundParticipant={{ displayName: activeConversation?.buyerDisplayName || activeConversation?.buyerRef || '买家', avatarUrl: activeConversation?.buyerAvatarUrl }}
+            outboundParticipant={{ displayName: currentAccount.displayName || currentAccount.sellerRef || '我', avatarUrl: currentAccount.avatarUrl }}
+          />
           <form className="messages-composer" onSubmit={(event) => { event.preventDefault(); void handleComposerSubmit(); }}>
             <div className="messages-composer-inner">
               <div className="messages-composer-shell">
@@ -152,14 +166,20 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
                   </button>
                   <button className="messages-attachment-remove" type="button" aria-label="移除附件" onClick={removePendingImage}>×</button>
                 </div>}
-                <textarea ref={textareaRef} aria-label="消息内容" value={draft} maxLength={2000} rows={1} onChange={(event) => setDraft(event.target.value)} onPaste={(event) => { const image = Array.from(event.clipboardData.items).map((item) => item.kind === 'file' ? item.getAsFile() : null).find((file): file is File => Boolean(file && file.type.startsWith('image/'))) ?? Array.from(event.clipboardData.files).find((file) => file.type.startsWith('image/')); if (image) { event.preventDefault(); setImagePreview(image); } }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={MESSAGES_COMPOSER_PLACEHOLDER} />
-                <div className="messages-composer-footer">
+                <div className="messages-composer-assist-row">
                   <div className="messages-composer-tools">
                     <button className="messages-tool-button" type="button" aria-label="打开附件菜单" aria-expanded={extensionOpen} onClick={() => { setExtensionOpen((open) => !open); setEmojiOpen(false); }}>+</button>
                     <button className="messages-tool-button messages-emoji-button" type="button" aria-label="插入闲鱼表情" aria-expanded={emojiOpen} onClick={() => { setEmojiOpen((open) => !open); setExtensionOpen(false); }}>☺</button>
+                    <span className="messages-ai-assist-label">AI 建议回复已开启</span>
                     <input ref={imageInputRef} className="messages-file-input" type="file" accept="image/*" onChange={(event) => { setImagePreview(event.target.files?.[0]); event.currentTarget.value = ''; }} />
                     {extensionOpen && <div className="messages-extension-menu" role="menu" aria-label="附件和扩展功能"><button type="button" role="menuitem" onClick={() => { setExtensionOpen(false); imageInputRef.current?.click(); }}>图片附件</button></div>}
                     {emojiOpen && <div className="messages-emoji-picker" role="dialog" aria-label="闲鱼表情选择器">{xianyuEmojis.map(([name, url], index) => <button key={`${name}-${index}`} type="button" aria-label={`插入${name}`} title={name} onClick={() => insertEmoji(name)}><img src={emojiURL(url)} alt={name} /></button>)}</div>}
+                  </div>
+                </div>
+                <textarea ref={textareaRef} aria-label="消息内容" value={draft} maxLength={2000} rows={1} onChange={(event) => setDraft(event.target.value)} onPaste={(event) => { const image = Array.from(event.clipboardData.items).map((item) => item.kind === 'file' ? item.getAsFile() : null).find((file): file is File => Boolean(file && file.type.startsWith('image/'))) ?? Array.from(event.clipboardData.files).find((file) => file.type.startsWith('image/')); if (image) { event.preventDefault(); setImagePreview(image); } }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={MESSAGES_COMPOSER_PLACEHOLDER} />
+                <div className="messages-composer-footer">
+                  <div className="messages-composer-shortcuts">
+                    <span>按 Enter 发送 · Shift + Enter 换行</span>
                     <span className={controller.state.sendPhase === 'error' ? 'messages-send-error' : 'messages-send-status'} role={controller.state.sendPhase === 'error' ? 'alert' : undefined}>{controller.state.sendPhase === 'submitting' ? '正在发送…' : controller.state.sendPhase === 'sent' ? '已发送' : controller.state.sendError ?? ''}</span>
                   </div>
                   <button className="messages-send-button" type="submit" disabled={!canSubmitComposer(draft, Boolean(pendingImage)) || controller.state.sendPhase === 'submitting'}>发送</button>

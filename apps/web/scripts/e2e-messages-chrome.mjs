@@ -160,7 +160,8 @@ async function run() {
   const conversation = await apiRuntime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'buyer-messages-e2e', buyerDisplayName: '买家 E2E', buyerAvatarUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2240%22 height=%2240%22%3E%3Crect width=%2240%22 height=%2240%22 rx=%2220%22 fill=%22%232563eb%22/%3E%3Ctext x=%2220%22 y=%2226%22 text-anchor=%22middle%22 font-size=%2220%22 fill=%22white%22%3EE%3C/text%3E%3C/svg%3E', itemTitle: '实时消息验证商品', itemImageUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2244%22 height=%2236%22%3E%3Crect width=%2244%22 height=%2236%22 rx=%226%22 fill=%22%23bfdbfe%22/%3E%3C/svg%3E', externalConversationRef: `messages-chrome-${process.pid}` });
   const seedMessage = await apiRuntime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '历史消息 001：请问什么时候发货？', source: 'system', traceId: 'messages-chrome-seed', createdAt: '2026-09-20T23:00:01.000Z' });
   assert.equal(seedMessage.event.cursor, 1);
-  for (let index = 2; index <= 205; index += 1) {
+  await apiRuntime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: '已收到，我来帮你处理发货问题。', source: 'human', traceId: 'messages-chrome-outbound-seed', createdAt: '2026-09-20T23:00:02.000Z' });
+  for (let index = 3; index <= 205; index += 1) {
     await apiRuntime.store.createMessage({
       adminId,
       conversationId: conversation.id,
