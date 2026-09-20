@@ -168,6 +168,9 @@ async function run() {
   await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "新建卡券")?.click()');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('固定文字配置'), 'coupon create modal');
   await assertText(cdp, '填写到无需邮寄凭证');
+  const imageTypeReady = await evaluate(cdp, '(() => { const select = document.querySelector(".coupons-editor-modal select"); if (!select || !Array.from(select.options).some((option) => option.value === "image")) return false; const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set; setter?.call(select, "image"); select.dispatchEvent(new Event("change", { bubbles: true })); return true; })()');
+  if (!imageTypeReady) throw new Error('coupon type select missing');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('图片配置（可选，最多3张）'), 'coupon image fields');
   await assertText(cdp, '图片配置（可选，最多3张）');
   const removedDockControls = await evaluate(cdp, '({ price: document.body.innerText.includes("对接价格"), dockable: document.body.innerText.includes("是否可对接") })');
   if (removedDockControls.price || removedDockControls.dockable) throw new Error('coupon create modal still exposes removed docking controls');
