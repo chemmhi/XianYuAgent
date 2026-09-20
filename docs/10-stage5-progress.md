@@ -24,6 +24,7 @@
 | `S4-VS6A` Workspace 会话与 Run 首链路 | `PARTIALLY_VERIFIED` | AgentSession/Run/Step、Memory/Postgres Store、受控 Runtime、前端 `/workspace`、clientRunRef、WS cursor replay、真实 PostgreSQL/Chrome/CDP 首链路 | 独立 Worker/Pi Runtime、发布级恢复、人工视觉签核与完整状态回归 |
 | `S4-VS6B` Workspace Confirmation/Outbox | `PLANNED` | Confirmation/Outbox/恢复 API 已冻结 | Policy、幂等、租约、cancel/retry/recover |
 | `S4-VS7A` Settings API Key 配置 | `READY_FOR_REVIEW` | `/settings` 正式路由、账号级 CredentialRef API、AES-256-GCM 加密引用、create/update/rotate/enable/disable/revoke、幂等/版本冲突、前端 loading/empty/error/submitting/saved 状态、Web/API 定向验证 | 真实 PostgreSQL 018 迁移加密复读与回滚、Chrome/CDP 1440×900/390×844 视觉证据、真实 403/409 跨层 E2E、独立三轮评审；本片不做 reveal |
+| `S4-VS-DASHBOARD` 仪表盘高保真界面 | `PARTIALLY_VERIFIED` | `/dashboard` 正式 feature、桌面/移动独立组合、KPI/趋势/健康度/商品排行/最近处理/风险抽屉、Web 单测/构建、Chrome/CDP 双 viewport 截图 | 后端 `/api/v1/dashboard/snapshot` 与 `/order-trend` 路由、真实 PostgreSQL 跨层 E2E、全状态截图、独立视觉签核与 rollback |
 | `S4-ENV-RECOVERY` | `BLOCKED` | Compose/健康检查/部分持久化已有证据 | 完整迁移回滚、Testcontainers、Redis/MinIO 重启和发布级恢复 |
 | `S4-EXT-ACCOUNT` | `BLOCKED` | 真实模式 QR 探针与受控 Cookie 链路 | 真实 APP 扫码、外部 Cookie、`loginuser.get` 资料同步 |
 | `S4-ENV-RUNTIME` | `PLANNED` | 独立 Runtime 架构决策已存在 | 健康、超时、重试、取消、不可用和观测 |

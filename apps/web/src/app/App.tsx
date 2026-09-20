@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { apiMode } from '../api';
 import { createHttpClient } from '../api/http';
 import { createAccountsApi } from '../features/accounts/api';
 import { AccountsPage } from '../features/accounts/components/AccountsPage';
@@ -18,6 +19,9 @@ import { createCredentialApi } from '../features/settings/api';
 import { SettingsPage } from '../features/settings/components/SettingsPage';
 import { AccountContextProvider } from './account-context';
 import { navItems, pathForPage, type PageKey } from './navigation';
+import { createDashboardApi } from '../features/dashboard/api';
+import { createMockDashboardApi } from '../features/dashboard/api.mock';
+import { DashboardPage } from '../features/dashboard/components/DashboardPage';
 
 function pageFromPath(pathname: string): PageKey {
   const page = pathname.replace(/^\//, '') as PageKey;
@@ -52,6 +56,7 @@ export default function App() {
   const workspaceApi = useMemo(() => createWorkspaceApi({ get: transport.get, post: transport.post }, { baseUrl: import.meta.env.VITE_API_BASE_URL ?? '' }), [transport]);
   const ordersApi = useMemo(() => createOrdersApi({ get: transport.get, post: transport.post }), [transport]);
   const settingsApi = useMemo(() => createCredentialApi({ get: transport.get, post: transport.post, patch: transport.patch }), [transport]);
+  const dashboardApi = useMemo(() => import.meta.env.VITE_DASHBOARD_MODE === 'live' ? createDashboardApi({ get: transport.get }) : createMockDashboardApi(), [transport]);
 
   useEffect(() => {
     const handlePopState = () => setPage(pageFromPath(window.location.pathname));
@@ -67,12 +72,13 @@ export default function App() {
 
   return <AuthGate api={authApi}>
     <AccountContextProvider api={accountsApi}>
-      <AuthenticatedShell page={page} accountsApi={accountsApi} productsApi={productsApi} couponsApi={couponsApi} messagesApi={messagesApi} workspaceApi={workspaceApi} ordersApi={ordersApi} settingsApi={settingsApi} navigate={navigate} />
+      <AuthenticatedShell page={page} accountsApi={accountsApi} productsApi={productsApi} couponsApi={couponsApi} messagesApi={messagesApi} workspaceApi={workspaceApi} ordersApi={ordersApi} settingsApi={settingsApi} dashboardApi={dashboardApi} navigate={navigate} />
     </AccountContextProvider>
   </AuthGate>;
 }
 
-function AuthenticatedShell({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, navigate }: { page: PageKey; accountsApi: ReturnType<typeof createAccountsApi>; productsApi: ReturnType<typeof createProductsApi>; couponsApi: ReturnType<typeof createCouponsApi>; messagesApi: ReturnType<typeof createMessagesApi>; workspaceApi: ReturnType<typeof createWorkspaceApi>; ordersApi: ReturnType<typeof createOrdersApi>; settingsApi: ReturnType<typeof createCredentialApi>; navigate: (next: PageKey) => void }) {
+function AuthenticatedShell({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, dashboardApi, navigate }: { page: PageKey; accountsApi: ReturnType<typeof createAccountsApi>; productsApi: ReturnType<typeof createProductsApi>; couponsApi: ReturnType<typeof createCouponsApi>; messagesApi: ReturnType<typeof createMessagesApi>; workspaceApi: ReturnType<typeof createWorkspaceApi>; ordersApi: ReturnType<typeof createOrdersApi>; settingsApi: ReturnType<typeof createCredentialApi>; dashboardApi: ReturnType<typeof createDashboardApi>; navigate: (next: PageKey) => void }) {
+  if (page === 'dashboard') return <DashboardPage api={dashboardApi} apiMode={import.meta.env.VITE_DASHBOARD_MODE === 'live' ? apiMode : 'mock'} onNavigate={navigate} />;
   return (
     <div className="app-viewport">
       <div className={`desktop-shell${page === 'products' ? ' products-shell' : page === 'accounts' ? ' accounts-shell' : page === 'settings' ? ' settings-shell' : ''}`}>
