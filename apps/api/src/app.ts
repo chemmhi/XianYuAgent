@@ -10,7 +10,8 @@ import type { ProductListResult, ProductRecord, Store } from './domain.js';
 import { createId, digestJson } from './security.js';
 import { XianyuQrLoginAdapter, type XianyuQrPublicSession } from './xianyu-qr-login.js';
 import { XianyuMtopClient } from './xianyu-mtop.js';
-import { MessageService } from './messages.js';
+import { MessageRealtimeHub, MessageService } from './messages.js';
+import { RedisConversationEventBridge } from './messages-realtime.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -22,6 +23,7 @@ export interface AppRuntime {
   productSync: ProductSyncService;
   credentials: CredentialService;
   messages: MessageService;
+  redisRealtime?: RedisConversationEventBridge;
   qrLogin: XianyuQrLoginAdapter;
   xianyu: XianyuMtopClient;
   server: Server;
@@ -52,11 +54,16 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   });
+  const realtime = new MessageRealtimeHub();
+  const redisRealtime = config.redisUrl && !config.allowInMemory
+    ? new RedisConversationEventBridge(config.redisUrl, (event) => realtime.publish(event))
+    : undefined;
+  redisRealtime?.start();
   const messages = new MessageService(store, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
-  });
+  }, realtime, (event) => redisRealtime?.publish(event));
   let xianyu: XianyuMtopClient;
   let productSync: ProductSyncService;
   const qrLogin = new XianyuQrLoginAdapter({
@@ -110,13 +117,14 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
   const wsServer = new WebSocketServer({ noServer: true });
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, products, productSync, credentials, messages, qrLogin, xianyu,
+    config, store, auth, accounts, coupons, products, productSync, credentials, messages, redisRealtime, qrLogin, xianyu,
     server,
     async listen() { await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve)); },
     async close() {
       for (const client of wsServer.clients) client.close(1001, 'server shutdown');
       await new Promise<void>((resolve) => wsServer.close(() => resolve()));
       await new Promise<void>((resolve, reject) => runtime.server.close((error) => error ? reject(error) : resolve()));
+      await redisRealtime?.close();
       const close = (store as Store & { close?: () => Promise<void> }).close;
       if (close) await close.call(store);
     },
@@ -151,7 +159,10 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   const { auth, accounts, coupons, products, productSync, credentials, messages, store, config } = runtime;
   if (ctx.path === '/healthz' && ctx.method === 'GET') {
     const health = await store.health();
-    const body = success(ctx, { status: health.reachable ? 'ok' : 'degraded', storage: health.kind, services: { api: 'ok', database: health.reachable ? 'ok' : 'unavailable', redis: config.redisUrl ? 'configured' : 'not_configured' } });
+    const redis = !config.redisUrl || !runtime.redisRealtime
+      ? 'not_configured'
+      : (await runtime.redisRealtime.health()).reachable ? 'ok' : 'unavailable';
+    const body = success(ctx, { status: health.reachable ? 'ok' : 'degraded', storage: health.kind, services: { api: 'ok', database: health.reachable ? 'ok' : 'unavailable', redis } });
     return { statusCode: health.reachable ? 200 : 503, body: body.body };
   }
   if (ctx.path === '/readyz' && ctx.method === 'GET') {

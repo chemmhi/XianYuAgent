@@ -53,6 +53,8 @@ type EventListener = (event: RealtimeEventVM) => void;
 
 export class MessageRealtimeHub {
   private readonly listeners = new Map<string, Set<EventListener>>();
+  private readonly seenEventIds = new Map<string, number>();
+  private readonly seenEventLimit = 5000;
 
   subscribe(conversationId: string, listener: EventListener): () => void {
     const listeners = this.listeners.get(conversationId) ?? new Set<EventListener>();
@@ -65,6 +67,12 @@ export class MessageRealtimeHub {
   }
 
   publish(event: ConversationEventRecord): void {
+    if (this.seenEventIds.has(event.eventId)) return;
+    this.seenEventIds.set(event.eventId, Date.now());
+    if (this.seenEventIds.size > this.seenEventLimit) {
+      const oldest = this.seenEventIds.keys().next().value;
+      if (oldest) this.seenEventIds.delete(oldest);
+    }
     const listeners = this.listeners.get(event.conversationId);
     if (!listeners) return;
     const view = this.toEventView(event);
@@ -79,7 +87,12 @@ export class MessageRealtimeHub {
 }
 
 export class MessageService {
-  constructor(private readonly store: Store, private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => Promise<string>, readonly realtime = new MessageRealtimeHub()) {}
+  constructor(
+    private readonly store: Store,
+    private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => Promise<string>,
+    readonly realtime = new MessageRealtimeHub(),
+    private readonly publishExternal?: (event: ConversationEventRecord) => Promise<void> | void,
+  ) {}
 
   async listConversations(adminId: string, query: ConversationListQuery): Promise<{ items: ConversationVM[]; nextCursor?: string; hasMore: boolean }> {
     if (query.accountId && !(await this.store.hasAccountScope(adminId, query.accountId))) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
@@ -116,6 +129,7 @@ export class MessageService {
     await this.audit({ actorId: input.adminId, action: 'conversation.message.created', targetRef: created.message.id, requestId: input.requestId, traceId: input.traceId, payload: { direction: created.message.direction, bodyType: created.message.bodyType, source: created.message.source }, accountId: created.message.accountId });
     const event = { eventId: created.event.eventId, conversationId: created.event.conversationId, accountId: created.event.accountId, cursor: created.event.cursor, type: created.event.type, occurredAt: created.event.occurredAt, traceId: created.event.traceId, payload: created.event.payload } satisfies RealtimeEventVM;
     this.realtime.publish(created.event);
+    try { void Promise.resolve(this.publishExternal?.(created.event)).catch(() => undefined); } catch { /* Redis transport must not fail a committed message */ }
     return { message: this.toMessageView(created.message), event };
   }
 

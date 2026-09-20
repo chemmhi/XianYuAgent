@@ -18,6 +18,7 @@ npm run typecheck:web
 npm --workspace apps/web run test
 npm --workspace apps/api run build
 node apps/api/scripts/messages-smoke.mjs
+npm --workspace apps/api run test:messages:infra
 ```
 
 截至 2026-09-19，本地结果：
@@ -26,10 +27,11 @@ node apps/api/scripts/messages-smoke.mjs
 - Web TypeScript：通过；
 - Web Vitest：13 个测试文件 / 41 个测试通过；
 - `messages-smoke.mjs`：通过，覆盖历史读取、cursor=0 回放、cursor=1 增量补事件、WS connected 事件、403 scope、404 conversation。
+- `test:messages:infra`：通过真实 PostgreSQL + Redis 容器双 API 实例验证跨进程事件广播；执行 Redis 重启后仍收到新事件；执行 PostgreSQL 重启后消息读回与写入恢复。
 
 ## 尚未验证 / 阻塞
 
-- 尚未在真实 PostgreSQL + Redis 容器上执行迁移、重启恢复和事件索引验证；当前 smoke 使用 MemoryStore。
+- 已在真实 PostgreSQL + Redis 容器上执行 `015_messages.sql` 迁移、双 API 实例事件广播、Redis 重启恢复、PostgreSQL 重启后的消息读回/写入恢复。仍未完成 Chrome/CDP 双 viewport、断线人工操作和视觉证据。
 - 尚未完成 Chrome/CDP `1440×900` 与 `390×844` 截图、断线人工操作和视觉偏差记录。
 - 当前首片仍为只读，发送、附件、撤回、handoff/release 不在本次范围。
 

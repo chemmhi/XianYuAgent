@@ -11,6 +11,7 @@
     "worker": "node dist/worker.js",
     "migrate": "node scripts/migrate.mjs",
     "test:postgres": "npm run build && node scripts/products-postgres-smoke.mjs",
+    "test:messages:infra": "npm run build && node scripts/messages-infra-smoke.mjs",
     "smoke": "npm run build && node scripts/smoke.mjs",
     "test": "npm run build && node scripts/smoke.mjs && node scripts/messages-smoke.mjs && node scripts/onboarding-smoke.mjs && node scripts/products-smoke.mjs && node scripts/products-sync-smoke.mjs && node scripts/xianyu-product-mapper-smoke.mjs"
   },
