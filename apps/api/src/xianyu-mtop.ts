@@ -6,7 +6,9 @@ import { mapXianyuOrderPage, type XianyuOrderPageResult } from './xianyu-order-m
 const APP_KEY = '34839810';
 export const XIANYU_IM_APP_KEY = '444e9908a51d1cb236a27862abc769c9';
 const BASE_URL = 'https://h5api.m.goofish.com/h5';
-const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36';
+const SOLD_ORDERS_API = 'mtop.taobao.idle.trade.merchant.sold.get';
+const SOLD_ORDERS_REFERER = 'https://seller.goofish.com/?site=COMMONPRO#/seller-trade/order-manage';
 
 export interface MtopCredential { cookieHeader?: string; }
 
@@ -158,18 +160,28 @@ export class XianyuMtopClient {
   }
 
   async fetchSoldOrders(adminId: string, accountId: string, data: Record<string, unknown> = {}): Promise<MtopResult> {
-    return this.call(adminId, accountId, 'mtop.taobao.idle.trade.merchant.sold.get', '1.0', data);
+    return this.call(adminId, accountId, SOLD_ORDERS_API, '1.0', data);
   }
 
-  async fetchOrdersAll(adminId: string, accountId: string, pageSize = 100, maxPages = 20): Promise<{ pages: XianyuOrdersPageResult[]; items: XianyuOrderItem[]; hasMore: boolean }> {
+  async fetchOrdersAll(adminId: string, accountId: string, pageSize = 30, maxPages = 20): Promise<{ pages: XianyuOrdersPageResult[]; items: XianyuOrderItem[]; hasMore: boolean }> {
     const pages: XianyuOrdersPageResult[] = [];
     const items: XianyuOrderItem[] = [];
     let pageNumber = 1;
     let hasMore = false;
     const limit = Math.min(100, Math.max(1, Math.trunc(maxPages)));
+    const normalizedPageSize = Math.min(100, Math.max(1, Math.trunc(pageSize)));
     do {
-      const response = await this.fetchSoldOrders(adminId, accountId, { pageNumber, pageSize: Math.min(100, Math.max(1, Math.trunc(pageSize))) });
-      const normalized = mapXianyuOrderPage(response.response, pageNumber, pageSize);
+      // The seller workbench contract uses rowsPerPage plus the legacy filter
+      // fields below. Sending pageSize returns a successful envelope with no
+      // order rows for active seller accounts.
+      const response = await this.fetchSoldOrders(adminId, accountId, {
+        pageNumber,
+        rowsPerPage: normalizedPageSize,
+        orderIds: '',
+        queryCode: 'ALL',
+        orderSearchParam: '{}',
+      });
+      const normalized = mapXianyuOrderPage(response.response, pageNumber, normalizedPageSize);
       const page: XianyuOrdersPageResult = { ...response, ...normalized };
       pages.push(page);
       if (!page.success) return { pages, items, hasMore: false };
@@ -191,28 +203,40 @@ export class XianyuMtopClient {
       const token = cookieValue(cookieHeader, '_m_h5_tk').split('_', 1)[0] ?? '';
       if (!token) return { success: false, accountInvalid: true, errorCode: 'MTOP_TOKEN_MISSING', message: 'credential does not contain _m_h5_tk', cookieHeader };
       const timestamp = String(Date.now());
+      const isSellerOrders = api === SOLD_ORDERS_API;
       const params = new URLSearchParams({
         jsv: '2.7.2', appKey: APP_KEY, t: timestamp, sign: md5(`${token}&${timestamp}&${APP_KEY}&${dataValue}`),
-        v: version, type: 'originaljson', accountSite: 'xianyu', dataType: 'json', timeout: '20000', api,
-        sessionOption: 'AutoLoginOnly', spm_cnt: 'a21ybx.item.0.0', ...extraParams,
+        v: version,
+        type: isSellerOrders ? 'json' : 'originaljson',
+        accountSite: 'xianyu', dataType: 'json', timeout: '20000', api,
+        ...(isSellerOrders ? { valueType: 'string' } : {}),
+        sessionOption: 'AutoLoginOnly',
+        spm_cnt: isSellerOrders ? 'a21107h.42831410.0.0' : 'a21ybx.item.0.0',
+        ...extraParams,
       });
       try {
+        const requestHeaders: Record<string, string> = {
+          accept: 'application/json',
+          'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          'cache-control': 'no-cache',
+          'content-type': 'application/x-www-form-urlencoded',
+          origin: isSellerOrders ? 'https://seller.goofish.com' : 'https://www.goofish.com',
+          pragma: 'no-cache',
+          priority: 'u=1, i',
+          referer: isSellerOrders ? SOLD_ORDERS_REFERER : refererFor(api),
+          'sec-fetch-dest': 'empty',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-site': 'same-site',
+          'sec-ch-ua': '"Chromium";v="139", "Not(A:Brand";v="99"',
+          'sec-ch-ua-mobile': '?0',
+          'sec-ch-ua-platform': '"Windows"',
+          'user-agent': USER_AGENT,
+          cookie: cookieHeader,
+        };
+        if (isSellerOrders) requestHeaders.idle_site_biz_code = 'COMMONPRO';
         const response = await fetch(`${BASE_URL}/${api}/${version}/?${params.toString()}`, {
           method: 'POST',
-          headers: {
-            accept: 'application/json',
-            'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
-            'cache-control': 'no-cache',
-            'content-type': 'application/x-www-form-urlencoded',
-            origin: 'https://www.goofish.com',
-            pragma: 'no-cache',
-            referer: refererFor(api),
-            'sec-fetch-dest': 'empty',
-            'sec-fetch-mode': 'cors',
-            'sec-fetch-site': 'same-site',
-            'user-agent': USER_AGENT,
-            cookie: cookieHeader,
-          },
+          headers: requestHeaders,
           body: new URLSearchParams({ data: dataValue }).toString(),
           signal: AbortSignal.timeout(this.timeoutMs),
         });
@@ -230,6 +254,7 @@ export class XianyuMtopClient {
         }
         if (isSessionExpired(ret)) return { success: false, accountInvalid: true, errorCode: 'SESSION_EXPIRED', message: retMessage, response: payload, cookieHeader };
         if (isValidationFailure(retMessage)) return { success: false, accountInvalid: true, errorCode: 'ACCOUNT_VALIDATION_REQUIRED', message: retMessage, response: payload, cookieHeader };
+        if (isPermissionFailure(retMessage)) return { success: false, accountInvalid: false, errorCode: 'MTOP_PERMISSION_DENIED', message: retMessage, response: payload, cookieHeader };
         return { success: false, accountInvalid: false, errorCode: 'MTOP_BUSINESS_ERROR', message: retMessage || 'mtop request failed', response: payload, cookieHeader };
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
@@ -266,6 +291,7 @@ function md5(value: string): string { return crypto.createHash('md5').update(val
 function isTokenExpired(value: string): boolean { return ['FAIL_SYS_TOKEN_EXOIRED', 'FAIL_SYS_TOKEN_EXPIRED', 'FAIL_SYS_TOKEN_EMPTY', '浠ょ墝杩囨湡', '浠ょ墝涓虹┖'].some((marker) => value.includes(marker)); }
 function isSessionExpired(ret: string[]): boolean { return ret.some((value) => { const normalized = value.toLowerCase(); return normalized.includes('fail_sys_session_expired') || normalized.includes('session_expired') || normalized.includes('session杩囨湡'); }); }
 function isValidationFailure(value: string): boolean { const normalized = value.toLowerCase(); return ['fail_sys_user_validate', 'rgv587', 'fail_sys_illegal_access', 'fail_biz_wua_is_machine', 'wua_is_machine', 'captcha', 'validate', 'punish', 'x5sec'].some((marker) => normalized.includes(marker)); }
+function isPermissionFailure(value: string): boolean { const normalized = value.toLowerCase(); return normalized.includes('permission_exception') || normalized.includes('permission denied') || value.includes('无权限访问'); }
 function refererFor(api: string): string { if (api.includes('merchant.sold') || api.includes('order')) return 'https://seller.goofish.com/'; if (api.includes('loginuser')) return 'https://www.goofish.com/im'; return 'https://www.goofish.com/'; }
 
 function nestedString(root: unknown, path: string[]): string | undefined {

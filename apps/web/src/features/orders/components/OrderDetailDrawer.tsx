@@ -1,4 +1,5 @@
 import type { OrderVM } from '../types';
+import { formatOrderDate } from './order-date';
 
 const labels = {
   paymentStatus: { unpaid: '待付款', paid: '已付款', closed: '已关闭', unknown: '未知' },
@@ -15,11 +16,11 @@ export function OrderDetailDrawer({ order, phase, error, onClose, onRetry }: { o
       {phase === 'loading' && <div className="orders-drawer-state"><span className="orders-spinner" />正在加载订单详情…</div>}
       {(phase === 'error' || phase === 'forbidden') && <div className="orders-drawer-state orders-state-error" role="alert"><strong>{phase === 'forbidden' ? '无权查看订单' : '订单详情加载失败'}</strong><span>{error?.message ?? '订单不存在或已失效。'}</span>{phase === 'error' && <button type="button" className="btn ghost" onClick={onRetry}>重新加载</button>}</div>}
       {phase === 'success' && order && <div className="orders-drawer-body">
-        <section className="orders-detail-summary"><div className="orders-detail-price">¥{(order.amountMinor / 100).toFixed(2)}</div><span className="orders-detail-muted">下单于 {formatDate(order.createdAt)}</span><span className="orders-detail-muted">交付方式：{deliveryModeLabel(order.deliveryType)}</span></section>
+        <section className="orders-detail-summary"><div className="orders-detail-price">¥{(order.amountMinor / 100).toFixed(2)}</div><span className="orders-detail-muted">下单于 {formatOrderDate(order.createdAt)}</span><span className="orders-detail-muted">交付方式：{deliveryModeLabel(order.deliveryType)}</span></section>
         <section><h3>状态矩阵</h3><div className="orders-status-matrix"><StatusCell label="支付状态" value={labels.paymentStatus[order.paymentStatus]} tone={order.paymentStatus === 'paid' ? 'success' : order.paymentStatus === 'unknown' ? 'danger' : 'warn'} /><StatusCell label="订单状态" value={labels.orderStatus[order.orderStatus]} tone={order.orderStatus === 'completed' ? 'success' : order.orderStatus === 'failed' ? 'danger' : 'info'} /><StatusCell label="发货状态" value={labels.deliveryStatus[order.deliveryStatus]} tone={order.deliveryStatus === 'delivered' ? 'success' : order.deliveryStatus === 'failed' ? 'danger' : 'warn'} /><StatusCell label="售后状态" value={labels.afterSalesStatus[order.afterSalesStatus]} tone={order.afterSalesStatus === 'none' ? 'neutral' : 'warn'} /></div></section>
         <section><h3>订单信息</h3><dl className="orders-detail-list"><div><dt>买家</dt><dd>{order.buyerName}<small>{order.buyerId}</small></dd></div><div><dt>商品</dt><dd>{order.itemTitle}<small>{order.itemId}</small></dd></div><div><dt>所属账号</dt><dd>{order.accountName ?? order.accountId}</dd></div><div><dt>会话关联</dt><dd>{order.conversationId ? <a href={`/messages?conversationId=${encodeURIComponent(order.conversationId)}`}>打开聊天会话</a> : '暂无关联会话'}</dd></div></dl></section>
         {order.deliveryFailReason && <section className="orders-risk-note"><span className="orders-risk-dot" /><div><strong>发货异常</strong><p>{order.deliveryFailReason}</p><small>当前为只读订单列表切片，发货、取消和重试将在后续交付切片中接入。</small></div></section>}
-        <section><h3>审计摘要</h3><div className="orders-audit-line"><span>配置版本 v{order.configVersion}</span><span>最后更新 {formatDate(order.updatedAt ?? order.createdAt)}</span><span>敏感交付内容未在列表与详情中返回</span></div></section>
+        <section><h3>审计摘要</h3><div className="orders-audit-line"><span>配置版本 v{order.configVersion}</span><span>最后更新 {formatOrderDate(order.updatedAt ?? order.createdAt)}</span><span>敏感交付内容未在列表与详情中返回</span></div></section>
       </div>}
     </aside>
   </div>;
@@ -27,5 +28,3 @@ export function OrderDetailDrawer({ order, phase, error, onClose, onRetry }: { o
 
 function StatusCell({ label, value, tone }: { label: string; value: string; tone: 'success' | 'warn' | 'danger' | 'neutral' | 'info' }) { return <div className="orders-status-cell"><span>{label}</span><b className={`orders-status orders-status-${tone}`}>{value}</b></div>; }
 function deliveryModeLabel(value: OrderVM['deliveryType']) { return value === 'coupon_only' ? '只发卡券' : value === 'no_logistics' ? '免物流发货' : value === 'mixed' ? '混合交付' : '人工发货'; }
-function formatDate(value: string) { return value ? value.replace('T', ' ').replace(/[+-]\d\d:\d\d$/, '').replace(/\.\d{3}Z$/, '').replace('Z', '') : '—'; }
-

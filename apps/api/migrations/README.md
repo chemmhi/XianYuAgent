@@ -12,5 +12,6 @@
 阶段 2 设计中的 `002_credentials`、`004_coupons`、`005_orders_messages` 仍属于后续纵向切片，不能在账号首片之前伪造为空实现。Compose 会按文件名顺序执行当前首片所需的最小集合；新增后续迁移时保持原编号和 expand/backfill/verify/switch/contract 回滚纪律。
 - `010_login_session_verification_required.sql`：为二维码风控人工验证保留独立的 `verification_required` 登录会话状态。
 - `015_messages.sql`：建立 `messages.conversations`、`messages.messages` 与 `messages.events`，支持 VS5A 历史读取、事件游标和 WebSocket 断线补偿；当前只读首片不包含发送/接管写入。
+- `018_orders.sql`：建立 `orders.orders` 订单只读事实表及账号/状态索引；订单刷新按 `(account_id, order_no)` 幂等 upsert，交付记录仍由后续 VS4B/C 迁移承接。
 
 VS5A 回滚边界：先关闭 `/api/v1/conversations/{id}/events` 实时订阅入口，保留历史会话、消息与事件游标；若迁移需要回退，按 expand/backfill/verify/switch/contract 顺序先停止新读流量，再保留表结构用于审计和离线恢复，不直接删除消息历史。

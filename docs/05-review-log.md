@@ -321,3 +321,15 @@
 | S5-R50 | 质量 / 交付 | 是否补充回归测试并在独立 worktree、merge lock 和主线完成验证 | root | PASS | `99c60bf`、Web typecheck、Vitest 25 files / 86 tests、Web/API build、商品 Chrome/CDP E2E、`git diff --check` |
 
 本轮结论：商品列表空态/失败态布局修订和工具栏统计清理已合入 `master`；商品真实 PostgreSQL、外部闲鱼数据和视觉人工复核等既有边界保持不变。
+
+### 2026-09-20：S4-VS4A 订单列表只读切片复审
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R54 | 业务 / 验收 | 订单页面是否支持账号 scope、关键词、支付/订单/发货/售后四态、分页、详情和空/错/403 状态，且不暴露交付正文 | root + test_recon | PASS | `apps/web/src/features/orders/`、`apps/api/scripts/orders-smoke.mjs`、`npm test`、`npm run test:e2e:chrome:orders` |
+| S5-R55 | 架构 / 数据流 | `018_orders.sql`、Postgres/Memory Store、OrderService、HTTP route 和闲鱼 mapper 是否职责分离、金额/时间/外部 upsert 契约一致 | root + test_recon | PASS | `apps/api/migrations/018_orders.sql`、`apps/api/src/store-postgres.ts`、`apps/api/src/services.ts`、`apps/api/src/xianyu-order-mapper.ts`、`npm --workspace apps/api run test:orders:postgres` |
+| S5-R56 | 浏览器 / 视觉 | 真实 Vite + API + Chrome/CDP 是否完成桌面/移动订单旅程，桌面列是否完整可见，移动端是否无横向溢出 | root + test_recon + orders_e2e | PASS | `npm run test:e2e:chrome:orders`；`docs/evidence/stage5/S4-VS4A/screenshots/` |
+| S5-R57 | 外部平台 / 质量 | 真实闲鱼 active 凭证是否可完成只读订单请求，失败不泄露敏感凭证，空结果不被伪造为订单 | root + test_recon + ydisks_order_recon | PARTIALLY_VERIFIED/BLOCKED | 修复后请求已对齐 Ydisks seller 契约，mapper 已覆盖 `data.module.items/commonData/buyerInfoVO/priceVO/rightVO`；当前两个 active 账号明确返回 `MTOP_PERMISSION_DENIED / PERMISSION_EXCEPTION::无权限访问`，不再记录为成功 0 条；未输出 Cookie/Token/raw payload |
+| S5-R58 | 范围 / 发布门禁 | 是否误把交付预览、发货/取消/重试、库存锁、Outbox、DeliveryRecord 宣称为本片完成 | root | PASS | `docs/evidence/stage5/S4-VS4A/test-baseline.md`；`S4-VS4B/C` 保持后置 |
+
+本轮结论：`S4-VS4A = PARTIALLY_VERIFIED/BLOCKED`。前端、后端、PostgreSQL、浏览器和参考响应解析已通过；真实 seller 订单请求仍被当前账号权限拒绝，待补充完整浏览器 Cookie/Jar 或可访问订单权限后复验；交付相关能力继续按 `S4-VS4B/C` 单独立项和复审。

@@ -54,7 +54,7 @@ try {
   const forbiddenRefresh = await request('/api/v1/orders/refresh', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'orders-refresh-forbidden-account' }, body: JSON.stringify({ accountId: '00000000-0000-0000-0000-000000000000' }) });
   assert.equal(forbiddenRefresh.response.status, 403);
 
-  runtime.xianyu.fetchOrdersAll = async () => ({ pages: [{ success: true, accountInvalid: false, pageNumber: 1, pageSize: 100, items: [] }], items: [{ orderNo: 'XY202609200004', buyerId: 'buyer-refresh', buyerName: '刷新买家', itemId: 'item-refresh', itemTitle: '刷新商品', amountMinor: 4990, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'manual', createdAt: '2026-09-20T01:00:00.000Z', sourcePayloadDigest: 'fixture-refresh' }], hasMore: false });
+  runtime.xianyu.fetchOrdersAll = async () => ({ pages: [{ success: true, accountInvalid: false, pageNumber: 1, pageSize: 30, items: [] }], items: [{ orderNo: 'XY202609200004', buyerId: 'buyer-refresh', buyerName: '刷新买家', itemId: 'item-refresh', itemTitle: '刷新商品', amountMinor: 4990, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'manual', createdAt: '2026-09-20T01:00:00.000Z', sourcePayloadDigest: 'fixture-refresh' }], hasMore: false });
   const refreshed = await request('/api/v1/orders/refresh', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'orders-refresh-1' }, body: JSON.stringify({ accountId: account.id }) });
   assert.equal(refreshed.response.status, 200);
   assert.equal(refreshed.body.data.createdCount, 1);
