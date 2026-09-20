@@ -95,8 +95,10 @@ async function openSocket(port, cookie) {
 }
 
 async function restartService(service) {
-  console.log(`messages infra smoke: docker compose restart ${service}`);
-  await execFileAsync('docker', ['compose', 'restart', service], { windowsHide: true, maxBuffer: 2 * 1024 * 1024 });
+  const container = service === 'redis' ? process.env.REDIS_CONTAINER : process.env.POSTGRES_CONTAINER;
+  const args = container ? ['restart', container] : ['compose', 'restart', service];
+  console.log(`messages infra smoke: docker ${args.join(' ')}`);
+  await execFileAsync('docker', args, { windowsHide: true, maxBuffer: 2 * 1024 * 1024 });
 }
 
 async function cleanup() {

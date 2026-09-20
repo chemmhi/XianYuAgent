@@ -1,40 +1,49 @@
-# S4-VS5A 在线聊天读取与实时连接
+# S4-VS5A Online Chat Read + Realtime
 
-状态：`PARTIALLY_VERIFIED`
+Status: `READY_FOR_REVIEW`
 
-## 已实现
+## Scope
 
-- `GET /api/v1/conversations?accountId=...`：管理员 Session + 账号 scope 校验，会话列表返回 `conversationId`、未读数、最后消息摘要与 `handlingMode`。
-- `GET /api/v1/conversations/{id}/messages`：会话归属校验、历史时间线、`latestCursor` 与增量游标。
-- `WS /api/v1/conversations/{id}/events?cursor=...`：Session、Origin allowlist、账号范围与会话归属校验；握手后先回放 cursor 之后事件，再接收实时事件。
-- 事件 ID、消息 ID 和 cursor 在前端 controller 中去重；断线重连使用最新 cursor。
-- 迁移 `015_messages.sql`：`messages.conversations`、`messages.messages`、`messages.events`。
+- Read-only conversation list and message timeline.
+- Cursor-based WebSocket backfill, reconnect, event/message de-duplication.
+- Session, Origin allowlist, account-scope, and conversation-ownership checks.
+- PostgreSQL persistence, Redis cross-process delivery, and restart recovery.
 
-## 实际验证命令
+## Verification commands
 
 ```text
-npm run typecheck:api
-npm run typecheck:web
-npm --workspace apps/web run test
-npm --workspace apps/api run build
+npm run typecheck
+npm test
+npm run build
 node apps/api/scripts/messages-smoke.mjs
 npm --workspace apps/api run test:messages:infra
+npm --workspace apps/web run test:e2e:chrome:messages
+git diff --check
 ```
 
-截至 2026-09-19，本地结果：
+## Results — September 20, 2026
 
-- API TypeScript：通过；
-- Web TypeScript：通过；
-- Web Vitest：13 个测试文件 / 41 个测试通过；
-- `messages-smoke.mjs`：通过，覆盖历史读取、cursor=0 回放、cursor=1 增量补事件、WS connected 事件、403 scope、404 conversation。
-- `test:messages:infra`：通过真实 PostgreSQL + Redis 容器双 API 实例验证跨进程事件广播；执行 Redis 重启后仍收到新事件；执行 PostgreSQL 重启后消息读回与写入恢复。
+- `npm run typecheck`: passed for API and web.
+- `npm test`: passed; API smoke suite passed and Web Vitest passed with 13 files / 41 tests.
+- `npm run build`: passed for API and web.
+- `messages-smoke.mjs`: passed history reads, cursor replay, incremental replay, connected event, pagination, WS 401/403/404 rejection, and scope checks.
+- `test:messages:infra`: passed against isolated PostgreSQL and Redis containers; two API runtimes received the same event through Redis, Redis restart recovered delivery, and PostgreSQL restart recovered message read/write.
+- `test:e2e:chrome:messages`: passed connected → forced WebSocket disconnect → reconnecting banner → cursor backfill → automatic reconnect → de-duplicated timeline.
 
-## 尚未验证 / 阻塞
+## Browser evidence
 
-- 已在真实 PostgreSQL + Redis 容器上执行 `015_messages.sql` 迁移、双 API 实例事件广播、Redis 重启恢复、PostgreSQL 重启后的消息读回/写入恢复。仍未完成 Chrome/CDP 双 viewport、断线人工操作和视觉证据。
-- 尚未完成 Chrome/CDP `1440×900` 与 `390×844` 截图、断线人工操作和视觉偏差记录。
-- 当前首片仍为只读，发送、附件、撤回、handoff/release 不在本次范围。
+- `screenshots/messages-desktop-1440x900.png`
+- `screenshots/messages-reconnecting-1440x900.png`
+- `screenshots/messages-mobile-390x844.png`
 
-## 回滚
+The desktop screenshot captures the connected timeline, the reconnecting screenshot captures the visible disconnect banner, and the mobile screenshot captures the recovered two-message timeline at `390x844`.
 
-关闭 WebSocket upgrade 入口后保留会话、消息与事件游标，页面降级为历史只读查询；不删除历史消息。
+## Remaining review boundary
+
+- The slice is read-only; sending, attachments, recall, handoff, and release remain out of scope.
+- `S5-RISK-021` remains open until independent review confirms the evidence and production deployment topology.
+- This evidence does not claim external Xianyu APP/account acceptance.
+
+## Rollback
+
+Disable the conversation WebSocket upgrade and keep the `messages.*` tables in place. The UI falls back to historical HTTP reads; no historical messages or event cursors are deleted.

@@ -15,6 +15,24 @@ function normalizeError(error: unknown): MessagesError {
 
 export interface MessagesController { state: MessagesState; setActiveConversation: (conversationId?: string) => void; reload: () => Promise<void>; retryRealtime: () => void; }
 
+/**
+ * A socket can emit `close` after a replacement socket has already opened.
+ * Keep a monotonically increasing generation so delayed callbacks from the
+ * previous connection cannot schedule a second reconnect or mutate state.
+ */
+export interface SocketGenerationGuard {
+  begin: () => number;
+  isCurrent: (generation: number) => boolean;
+}
+
+export function createSocketGenerationGuard(): SocketGenerationGuard {
+  let current = 0;
+  return {
+    begin: () => { current += 1; return current; },
+    isCurrent: (generation) => generation === current,
+  };
+}
+
 export function useMessagesController(options: { api?: MessagesApi; accountId?: string }): MessagesController {
   const api = options.api ?? defaultApi;
   const accountId = options.accountId;
@@ -27,20 +45,35 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
   const seenEventIdsRef = useRef<Set<string>>(new Set());
   const intentionalCloseRef = useRef(false);
   const reconnectAttempt = useRef(0);
+  const socketGenerationRef = useRef<SocketGenerationGuard | null>(null);
+  if (!socketGenerationRef.current) socketGenerationRef.current = createSocketGenerationGuard();
   const accountKey = useMemo(() => accountId ?? '', [accountId]);
 
-  const closeRealtime = useCallback(() => { intentionalCloseRef.current = true; socketRef.current?.close(); socketRef.current = null; if (retryTimerRef.current) clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }, []);
+  const closeRealtime = useCallback(() => {
+    intentionalCloseRef.current = true;
+    socketGenerationRef.current!.begin();
+    socketRef.current?.close();
+    socketRef.current = null;
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    retryTimerRef.current = null;
+  }, []);
 
   const connectRealtime = useCallback((conversationId: string, cursor: number) => {
     closeRealtime();
     if (!accountId) return;
     intentionalCloseRef.current = false;
+    const generation = socketGenerationRef.current!.begin();
     cursorRef.current = cursor;
     setState((previous) => ({ ...previous, realtimePhase: reconnectAttempt.current > 0 ? 'reconnecting' : 'connecting' }));
     socketRef.current = api.openRealtime({
       accountId, conversationId, cursor,
-      onOpen: () => { reconnectAttempt.current = 0; setState((previous) => ({ ...previous, realtimePhase: 'connecting' })); },
+      onOpen: () => {
+        if (!socketGenerationRef.current!.isCurrent(generation)) return;
+        reconnectAttempt.current = 0;
+        setState((previous) => ({ ...previous, realtimePhase: 'connecting' }));
+      },
       onEvent: (event: RealtimeEvent) => {
+        if (!socketGenerationRef.current!.isCurrent(generation)) return;
         if (event.accountId !== accountId || event.conversationId !== conversationId) return;
         setState((previous) => {
           const merged = applyRealtimeEvent({ conversations: previous.conversations, messages: previous.messages, cursor: previous.cursor, seenEventIds: seenEventIdsRef.current }, event);
@@ -49,8 +82,12 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
           return { ...previous, conversations: merged.conversations, messages: merged.messages, cursor: merged.cursor, realtimePhase: event.type === 'chat.connection.changed' && event.payload.status === 'connected' ? 'connected' : previous.realtimePhase, error: null };
         });
       },
-      onError: () => setState((previous) => ({ ...previous, realtimePhase: 'reconnecting' })),
+      onError: () => {
+        if (!socketGenerationRef.current!.isCurrent(generation)) return;
+        setState((previous) => ({ ...previous, realtimePhase: 'reconnecting' }));
+      },
       onClose: () => {
+        if (!socketGenerationRef.current!.isCurrent(generation)) return;
         if (intentionalCloseRef.current) { intentionalCloseRef.current = false; return; }
         if (activeIdRef.current !== conversationId) return;
         const attempt = ++reconnectAttempt.current;

@@ -10,7 +10,12 @@ function iso(value: unknown): string | undefined { return value ? new Date(Strin
 export class PostgresStore implements Store {
   readonly kind = 'postgres' as const;
   readonly pool: Pool;
-  constructor(databaseUrl: string) { this.pool = new Pool({ connectionString: databaseUrl }); }
+  constructor(databaseUrl: string) {
+    this.pool = new Pool({ connectionString: databaseUrl });
+    // A database restart emits errors on idle clients. Keep the process alive
+    // so subsequent pool queries can reconnect and the runtime can recover.
+    this.pool.on('error', () => undefined);
+  }
   async health(): Promise<{ kind: string; reachable: boolean }> { try { await this.pool.query('select 1'); return { kind: this.kind, reachable: true }; } catch { return { kind: this.kind, reachable: false }; } }
   async countAdmins(): Promise<number> { const result = await this.pool.query('select count(*)::int as count from auth.admins'); return Number(result.rows[0].count); }
   async findAdminById(id: string): Promise<AdminRecord | undefined> { const result = await this.pool.query('select * from auth.admins where id=$1 limit 1', [id]); return result.rows[0] ? this.toAdmin(result.rows[0]) : undefined; }

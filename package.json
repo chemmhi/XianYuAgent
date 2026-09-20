@@ -35,6 +35,7 @@
     "test:e2e:chrome": "npm --workspace apps/web run test:e2e:chrome",
     "test:e2e:chrome:products": "npm --workspace apps/web run test:e2e:chrome:products",
     "test:e2e:chrome:coupons": "npm --workspace apps/web run test:e2e:chrome:coupons",
+    "test:e2e:chrome:messages": "npm --workspace apps/web run test:e2e:chrome:messages",
     "test:products:postgres": "npm --workspace apps/api run test:postgres",
     "compose:config": "docker compose config --quiet",
     "compose:up": "docker compose --profile full up --build",

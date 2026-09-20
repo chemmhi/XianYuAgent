@@ -3,7 +3,7 @@ import { createApp } from '../dist/app.js';
 import { loadConfig } from '../dist/config.js';
 import { WebSocket } from 'ws';
 
-const port = 18580 + Math.floor(Math.random() * 300);
+let port = 0;
 const config = loadConfig({ ...process.env, PORT: String(port), HOST: '127.0.0.1', ALLOW_IN_MEMORY: 'true', DATABASE_URL: '', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', WS_ALLOWED_ORIGINS: 'http://localhost:5173' });
 const runtime = createApp(config);
 
@@ -24,6 +24,21 @@ async function waitForOpen(socket) {
   ]);
 }
 
+async function expectHandshakeFailure(url, options, expectedStatus) {
+  const status = await new Promise((resolve, reject) => {
+    const socket = new WebSocket(url, options);
+    const timer = setTimeout(() => { socket.terminate(); reject(new Error(`websocket rejection timeout (expected ${expectedStatus})`)); }, 3_000);
+    socket.once('open', () => { clearTimeout(timer); socket.close(); reject(new Error(`websocket unexpectedly opened (expected ${expectedStatus})`)); });
+    socket.once('unexpected-response', (_request, response) => {
+      clearTimeout(timer);
+      response.resume();
+      resolve(response.statusCode);
+    });
+    socket.once('error', () => { /* ws emits error after an HTTP rejection on some Node versions */ });
+  });
+  assert.equal(status, expectedStatus);
+}
+
 async function collect(socket, count, timeoutMs = 2_000) {
   const events = [];
   await new Promise((resolve, reject) => {
@@ -37,6 +52,9 @@ async function collect(socket, count, timeoutMs = 2_000) {
 try {
   console.log('messages smoke: listen');
   await runtime.listen();
+  const address = runtime.server.address();
+  if (!address || typeof address === 'string') throw new Error('messages smoke: server address unavailable');
+  port = address.port;
   console.log('messages smoke: bootstrap');
   const boot = await request('/api/v1/auth/bootstrap', { method: 'POST', headers: { 'Idempotency-Key': 'messages-bootstrap-1' }, body: JSON.stringify({ email: 'messages@example.com', password: 'password-123', displayName: 'Messages Admin' }) });
   assert.equal(boot.response.status, 200);
@@ -50,6 +68,10 @@ try {
   const first = await runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '请问什么时候发货？', source: 'system', traceId: 'seed-1' });
   console.log('messages smoke: http read');
   const secondConversation = await runtime.store.createConversation({ adminId, accountId, buyerRef: 'buyer-2', externalConversationRef: 'ext-c2' });
+  const secondAccount = await request('/api/v1/accounts', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'messages-account-2' }, body: JSON.stringify({ platform: 'xianyu', sellerRef: 'messages-seller-2', displayName: '聊天账号二' }) });
+  assert.equal(secondAccount.response.status, 201);
+  const secondConversationForScope = await runtime.store.createConversation({ adminId, accountId: secondAccount.body.data.id, buyerRef: 'buyer-cross', externalConversationRef: 'ext-cross' });
+  await runtime.store.revokeScope(adminId, secondAccount.body.data.id, 'manage');
 
   const list = await request(`/api/v1/conversations?accountId=${accountId}`, { headers: { cookie } });
   assert.equal(list.response.status, 200);
@@ -69,23 +91,30 @@ try {
   assert.equal(history.body.data.items[0].messageId, first.message.id);
   assert.equal(history.body.data.latestCursor, 1);
 
+  console.log('messages smoke: ws rejection checks');
+  await expectHandshakeFailure(`ws://127.0.0.1:${port}/api/v1/conversations/${conversation.id}/events?cursor=0`, { headers: { Origin: 'http://localhost:5173' } }, 401);
+  await expectHandshakeFailure(`ws://127.0.0.1:${port}/api/v1/conversations/${conversation.id}/events?cursor=0`, { headers: { Cookie: cookie, Origin: 'http://evil.example' } }, 403);
+  await expectHandshakeFailure(`ws://127.0.0.1:${port}/api/v1/conversations/${secondConversationForScope.id}/events?cursor=0`, { headers: { Cookie: cookie, Origin: 'http://localhost:5173' } }, 404);
+
   const ws1 = new WebSocket(`ws://127.0.0.1:${port}/api/v1/conversations/${conversation.id}/events?cursor=0`, { headers: { Cookie: cookie, Origin: 'http://localhost:5173' } });
   console.log('messages smoke: ws1 open');
   const firstEventsPromise = collect(ws1, 2);
   await waitForOpen(ws1);
   const firstEvents = await firstEventsPromise;
   assert.deepEqual(firstEvents.filter((event) => event.type === 'chat.message.created').map((event) => event.cursor), [1]);
+  assert.equal(firstEvents.find((event) => event.type === 'chat.message.created')?.payload?.message?.messageId, first.message.id);
   assert.ok(firstEvents.some((event) => event.type === 'chat.connection.changed'));
   ws1.close();
   await new Promise((resolve) => ws1.once('close', resolve));
   console.log('messages smoke: ws2');
 
-  await runtime.messages.createMessage({ adminId, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: '付款后会自动发送。', source: 'human', requestId: 'req-message-2', traceId: 'trace-message-2' });
+  const second = await runtime.messages.createMessage({ adminId, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: '付款后会自动发送。', source: 'human', requestId: 'req-message-2', traceId: 'trace-message-2' });
   const ws2 = new WebSocket(`ws://127.0.0.1:${port}/api/v1/conversations/${conversation.id}/events?cursor=1`, { headers: { Cookie: cookie, Origin: 'http://localhost:5173' } });
   const secondEventsPromise = collect(ws2, 2);
   await waitForOpen(ws2);
   const secondEvents = await secondEventsPromise;
   assert.deepEqual(secondEvents.filter((event) => event.type === 'chat.message.created').map((event) => event.cursor), [2]);
+  assert.equal(secondEvents.find((event) => event.type === 'chat.message.created')?.payload?.message?.messageId, second.message.messageId);
   ws2.close();
   await new Promise((resolve) => ws2.once('close', resolve));
 

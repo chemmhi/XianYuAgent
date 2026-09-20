@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createSocketGenerationGuard } from './controller';
 import { applyRealtimeEvent, mergeConversation, mergeTimelineMessages } from './model';
 import type { ConversationVM, MessageVM, RealtimeEvent } from './types';
 
@@ -6,6 +7,15 @@ const conversation: ConversationVM = { conversationId: 'c1', accountId: 'a1', bu
 const message: MessageVM = { messageId: 'm1', conversationId: 'c1', accountId: 'a1', direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '你好', redactionState: 'visible', status: 'created', createdAt: '2026-09-19T00:00:01.000Z', riskFlags: [], handlingMode: 'ai' };
 
 describe('messages realtime model', () => {
+  it('invalidates delayed callbacks from a replaced realtime socket', () => {
+    const guard = createSocketGenerationGuard();
+    const first = guard.begin();
+    const second = guard.begin();
+
+    expect(guard.isCurrent(first)).toBe(false);
+    expect(guard.isCurrent(second)).toBe(true);
+  });
+
   it('merges timeline messages by messageId without duplicates', () => {
     expect(mergeTimelineMessages([message], [message])).toHaveLength(1);
   });
