@@ -32,6 +32,8 @@
 | `root` | `remove-page-chrome` | `feature/remove-page-chrome` | `F:\ChenHai\Project\XianYuAgent-remove-page-chrome` | Codex `/root` | `2026-09-20 00:00:00 +08:00` | `CLEANED` | `b38fafd` | `2026-09-20 17:34:00 +08:00` | 页面顶部清理已合入 master；消息页高度适配已补充于 `795ee39`。Git worktree 与分支已清理，目录因含非 Git 内容保留。 |
 | - | - | - | - | - | - | - | - | - | 主工作区 `master` 受保护；活动 agent 见上表 |
 
+| `root` | `products-pagination` | `fix/products-pagination` | `F:\ChenHai\Project\XianYuAgent-products-pagination` | Codex `/root` | `2026-09-20 00:00:00 +08:00` | `MERGED` | `3219f85f10cc151dd2761afa066a2ee60be8580f` | `-` | 业务/架构/视觉复核通过：移除 KPI 与重复账号名，分页请求与状态切换可用，桌面/移动端均无页面级滚动；Web 类型检查、79 项测试、构建与商品 Chrome E2E 已通过。根级 API smoke 受 127.0.0.1:18872 端口占用阻塞。 |
+
 ## 主工作区
 
 | 类型 | branch | worktree | 规则 |
