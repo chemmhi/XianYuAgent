@@ -1,0 +1,38 @@
+{
+  "status": "PASS",
+  "storage": {
+    "kind": "postgres",
+    "reachable": true
+  },
+  "adminId": "086967b1-a303-422f-b1fe-415aadb7cfae",
+  "accountId": "19cfbfea-a849-4cb3-94ad-573199a32414",
+  "xianyu": {
+    "verifyLogin": true,
+    "profile": true,
+    "productPage": {
+      "success": true,
+      "count": 5,
+      "hasMore": true
+    },
+    "imToken": true,
+    "conversations": {
+      "externalHasMore": false,
+      "localPersisted": 5
+    },
+    "orders": {
+      "success": true,
+      "errorCode": null,
+      "permissionDenied": false,
+      "externalCount": 5,
+      "persistedCount": 58,
+      "browserRequestedRefresh": true
+    }
+  },
+  "dashboard": {
+    "browserRequestedLiveApi": true,
+    "liveBadge": true,
+    "persistedProductCount": 20,
+    "beforeProductCount": 20,
+    "afterProductCount": 20
+  }
+}

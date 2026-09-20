@@ -193,7 +193,17 @@ async function run() {
   await cdp.send('Page.navigate', { url: `${webUrl}/workspace` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'workspace route');
   await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector("[data-workspace-domain]"))')), 'authenticated Workspace surface');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Workspace Real Account'), 'account context');
+  // WorkspacePage intentionally keeps the account context in the shared
+  // AccountContext provider instead of duplicating the display name in the
+  // conversation surface. Assert the authenticated workspace shell is live
+  // and that the "请先选择账号" guard is gone, rather than coupling this
+  // E2E to a non-user-visible account label.
+  await waitFor(async () => await evaluate(cdp, `(() => {
+    const shell = document.querySelector('[data-workspace-domain]');
+    const missing = Array.from(document.querySelectorAll('.workspace-state strong')).some((node) => node.textContent?.includes('请先选择账号'));
+    const error = document.querySelector('.workspace-inline-error');
+    return Boolean(shell && !missing && !error);
+  })()`), 'account context');
 
   const beforeSession = await evaluate(cdp, 'document.querySelectorAll(".workspace-session-row").length');
   if (beforeSession !== 0) throw new Error(`expected empty workspace session list, got ${beforeSession}`);

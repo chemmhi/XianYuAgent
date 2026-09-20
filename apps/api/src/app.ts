@@ -19,6 +19,7 @@ import { decodeMessageHistoryCursor, encodeMessageHistoryCursor } from './messag
 import { InProcessAgentRuntime, isTerminalRunStatus, WorkspaceService, type WorkspaceRuntime } from './workspace.js';
 import { OpenAICompatibleModelClient, PiRuntimeAdapter } from './pi-runtime.js';
 import { ApiKeyCredentialService } from './credential-store.js';
+import { DashboardService } from './dashboard.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -31,6 +32,7 @@ export interface AppRuntime {
   productSync: ProductSyncService;
   credentials: CredentialService;
   apiKeyCredentials: ApiKeyCredentialService;
+  dashboard: DashboardService;
   messages: MessageService;
   redisRealtime?: RedisConversationEventBridge;
   workspace: WorkspaceService;
@@ -71,6 +73,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   });
+  const dashboard = new DashboardService(store);
   const realtime = new MessageRealtimeHub();
   const redisRealtime = config.redisUrl && !config.allowInMemory
     ? new RedisConversationEventBridge(config.redisUrl, (event) => realtime.publish(event))
@@ -149,7 +152,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, orders, products, productSync, credentials, apiKeyCredentials, messages, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuIm,
+    config, store, auth, accounts, coupons, orders, products, productSync, credentials, apiKeyCredentials, dashboard, messages, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuIm,
     server,
     async listen() { await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve)); },
     async close() {
@@ -216,7 +219,7 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
 }
 
 async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: ServerResponse): Promise<{ statusCode: number; body: unknown } | undefined> {
-  const { auth, accounts, coupons, orders, products, productSync, credentials, apiKeyCredentials, messages, workspace, store, config, xianyuIm } = runtime;
+  const { auth, accounts, coupons, orders, products, productSync, credentials, apiKeyCredentials, dashboard, messages, workspace, store, config, xianyuIm } = runtime;
   if (ctx.path === '/healthz' && ctx.method === 'GET') {
     const health = await store.health();
     const redis = !config.redisUrl || !runtime.redisRealtime
@@ -266,6 +269,10 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     setCookie(response, 'session_id', '', { httpOnly: true, secure: config.cookieSecure, maxAge: 0 });
     setCookie(response, 'csrf_token', '', { secure: config.cookieSecure, maxAge: 0 });
     return { statusCode: 200, body: success(ctx, { loggedOut: true }).body };
+  }
+
+  if (ctx.path === '/api/v1/dashboard/snapshot' && ctx.method === 'GET') {
+    return { statusCode: 200, body: success(ctx, await dashboard.getSnapshot(authContext.admin.id)).body };
   }
 
   const credentialCollectionPath = ctx.path === '/api/v1/credentials';

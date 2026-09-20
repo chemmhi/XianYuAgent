@@ -34,6 +34,7 @@
     "start:worker": "npm --workspace apps/api run worker",
     "test:e2e:chrome": "npm --workspace apps/web run test:e2e:chrome",
     "test:e2e:chrome:dashboard": "npm --workspace apps/web run test:e2e:chrome:dashboard",
+    "test:e2e:chrome:dashboard:fullchain": "npm --workspace apps/web run test:e2e:chrome:dashboard:fullchain",
     "test:e2e:chrome:products": "npm --workspace apps/web run test:e2e:chrome:products",
     "test:e2e:chrome:coupons": "npm --workspace apps/web run test:e2e:chrome:coupons",
     "test:e2e:chrome:messages": "npm --workspace apps/web run test:e2e:chrome:messages",

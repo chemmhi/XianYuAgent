@@ -20,6 +20,7 @@ const BASE_URL = 'https://h5api.m.goofish.com/h5';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36';
 const SOLD_ORDERS_API = 'mtop.taobao.idle.trade.merchant.sold.get';
 const SOLD_ORDERS_REFERER = 'https://seller.goofish.com/?site=COMMONPRO#/seller-trade/order-manage';
+const DEFAULT_SOLD_ORDER_PAGE_SIZE = 30;
 
 export interface MtopCredential { cookieHeader?: string; metadata?: Record<string, string>; }
 
@@ -171,10 +172,21 @@ export class XianyuMtopClient {
   }
 
   async fetchSoldOrders(adminId: string, accountId: string, data: Record<string, unknown> = {}): Promise<MtopResult> {
-    return this.call(adminId, accountId, SOLD_ORDERS_API, '1.0', data);
+    const requestedPageNumber = Number(data.pageNumber);
+    const requestedPageSize = Number(data.rowsPerPage ?? data.pageSize);
+    const payload: Record<string, unknown> = {
+      ...data,
+      pageNumber: Number.isFinite(requestedPageNumber) && requestedPageNumber > 0 ? Math.trunc(requestedPageNumber) : 1,
+      rowsPerPage: Number.isFinite(requestedPageSize) && requestedPageSize > 0 ? Math.min(100, Math.trunc(requestedPageSize)) : DEFAULT_SOLD_ORDER_PAGE_SIZE,
+      orderIds: data.orderIds ?? '',
+      queryCode: data.queryCode ?? 'ALL',
+      orderSearchParam: data.orderSearchParam ?? '{}',
+    };
+    delete payload.pageSize;
+    return this.call(adminId, accountId, SOLD_ORDERS_API, '1.0', payload);
   }
 
-  async fetchOrdersAll(adminId: string, accountId: string, pageSize = 30, maxPages = 20): Promise<{ pages: XianyuOrdersPageResult[]; items: XianyuOrderItem[]; hasMore: boolean }> {
+  async fetchOrdersAll(adminId: string, accountId: string, pageSize = DEFAULT_SOLD_ORDER_PAGE_SIZE, maxPages = 20): Promise<{ pages: XianyuOrdersPageResult[]; items: XianyuOrderItem[]; hasMore: boolean }> {
     const pages: XianyuOrdersPageResult[] = [];
     const items: XianyuOrderItem[] = [];
     let pageNumber = 1;
@@ -251,7 +263,6 @@ export class XianyuMtopClient {
           'user-agent': USER_AGENT,
           cookie: requestCookieHeader,
         };
-        if (isSellerOrders) requestHeaders.idle_site_biz_code = 'COMMONPRO';
         const response = await fetch(`${requestUrl}?${params.toString()}`, {
           method: 'POST',
           headers: requestHeaders,
