@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createSocketGenerationGuard } from './controller';
-import { applyRealtimeEvent, mergeConversation, mergeTimelineMessages } from './model';
+import { applyRealtimeEvent, filterConversations, mergeConversation, mergeTimelineMessages } from './model';
 import type { ConversationVM, MessageVM, RealtimeEvent } from './types';
 
 const conversation: ConversationVM = { conversationId: 'c1', accountId: 'a1', buyerRef: 'b1', buyerDisplayName: '买家', unreadCount: 0, handlingMode: 'ai', version: 1, createdAt: '2026-09-19T00:00:00.000Z', updatedAt: '2026-09-19T00:00:00.000Z' };
@@ -33,5 +33,13 @@ describe('messages realtime model', () => {
     expect(once.messages).toHaveLength(1);
     expect(twice.messages).toHaveLength(1);
     expect(twice.cursor).toBe(1);
+  });
+
+  it('filters by buyer, item, preview and unread state', () => {
+    const unread = { ...conversation, conversationId: 'c2', buyerRef: 'buyer-2', buyerDisplayName: '小王', itemTitle: '蓝色外套', lastMessagePreview: '请问还有货吗', unreadCount: 2 };
+    expect(filterConversations([conversation, unread], '外套', false)).toEqual([unread]);
+    expect(filterConversations([conversation, unread], 'buyer-2', false)).toEqual([unread]);
+    expect(filterConversations([conversation, unread], '请问', false)).toEqual([unread]);
+    expect(filterConversations([conversation, unread], '', true)).toEqual([unread]);
   });
 });

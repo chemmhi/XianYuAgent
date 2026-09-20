@@ -11,6 +11,7 @@ interface ExternalPage {
 
 export class XianyuImService {
   private readonly clients = new Map<string, XianyuImClient>();
+  private readonly identityCache = new Map<string, { buyerDisplayName?: string; buyerAvatarUrl?: string }>();
 
   constructor(private readonly store: Store, private readonly mtop: XianyuMtopClient, private readonly messages: MessageService) {}
 
@@ -18,11 +19,11 @@ export class XianyuImService {
     const client = await this.ensureClient(adminId, accountId);
     const page = await client.listConversations(startCursor, limit);
     const items = Array.isArray(page.userConvs) ? page.userConvs : [];
-    for (const item of items) {
-      const parsed = normalizeConversation(item, client.userId);
-      if (!parsed) continue;
-      await this.store.upsertExternalConversation({ adminId, accountId, ...parsed });
-    }
+    const parsedItems = items.map((item) => normalizeConversation(item, client.userId)).filter((item): item is NonNullable<ReturnType<typeof normalizeConversation>> => Boolean(item));
+    const enrichTargets = parsedItems.filter((item) => !item.buyerAvatarUrl).slice(0, 8);
+    const enrichedEntries = await Promise.all(enrichTargets.map(async (item) => [item.externalConversationRef, await this.enrichConversationIdentity(adminId, accountId, item)] as const));
+    const enrichedByRef = new Map(enrichedEntries);
+    for (const parsed of parsedItems) await this.store.upsertExternalConversation({ adminId, accountId, ...(enrichedByRef.get(parsed.externalConversationRef) ?? parsed) });
     return { hasMore: Boolean(page.hasMore), nextCursor: numeric(page.nextCursor) };
   }
 
@@ -79,6 +80,7 @@ export class XianyuImService {
   async close(): Promise<void> {
     const clients = [...this.clients.values()];
     this.clients.clear();
+    this.identityCache.clear();
     await Promise.all(clients.map((client) => client.disconnect()));
   }
 
@@ -124,6 +126,25 @@ export class XianyuImService {
     await this.store.upsertCredential({ adminId, accountId: account.id, platform: account.platform, cookieHeader: credential.cookieHeader, accessToken: credential.accessToken, deviceId: credential.deviceId });
   }
 
+  private async enrichConversationIdentity(adminId: string, accountId: string, parsed: { externalConversationRef: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; unreadCount?: number; lastMessagePreview?: string; lastMessageAt?: string }): Promise<typeof parsed> {
+    const cacheKey = `${accountId}:${parsed.externalConversationRef}`;
+    const cached = this.identityCache.get(cacheKey);
+    if (cached) return { ...parsed, ...cached };
+    if (parsed.buyerAvatarUrl && parsed.buyerDisplayName) {
+      this.identityCache.set(cacheKey, { buyerDisplayName: parsed.buyerDisplayName, buyerAvatarUrl: parsed.buyerAvatarUrl });
+      return parsed;
+    }
+    try {
+      const profile = await withTimeout(this.mtop.fetchChatUserInfo(adminId, accountId, parsed.externalConversationRef), 2_500);
+      if (!profile) return parsed;
+      const identity = { buyerDisplayName: profile.buyerDisplayName, buyerAvatarUrl: profile.buyerAvatarUrl };
+      if (identity.buyerDisplayName || identity.buyerAvatarUrl) this.identityCache.set(cacheKey, identity);
+      return { ...parsed, buyerDisplayName: parsed.buyerDisplayName ?? identity.buyerDisplayName, buyerAvatarUrl: parsed.buyerAvatarUrl ?? identity.buyerAvatarUrl };
+    } catch {
+      return parsed;
+    }
+  }
+
   private async importPush(adminId: string, event: XianyuImMessageEvent): Promise<void> {
     const conversation = await this.store.findConversationByExternalRef(adminId, event.accountId, event.externalConversationRef);
     if (!conversation) return;
@@ -147,7 +168,7 @@ function toImCredential(credential: CredentialRecord): XianyuImCredential {
   return { cookieHeader: credential.cookieHeader ?? '', accessToken: credential.accessToken, deviceId: credential.deviceId };
 }
 
-function normalizeConversation(value: unknown, myId: string): { externalConversationRef: string; buyerRef: string; buyerDisplayName?: string; itemRef?: string; itemTitle?: string; unreadCount?: number; lastMessagePreview?: string; lastMessageAt?: string } | undefined {
+function normalizeConversation(value: unknown, myId: string): { externalConversationRef: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; unreadCount?: number; lastMessagePreview?: string; lastMessageAt?: string } | undefined {
   const wrapper = record(value);
   const conv = record(wrapper.singleChatUserConversation ?? wrapper);
   const single = record(conv.singleChatConversation ?? conv);
@@ -164,8 +185,10 @@ function normalizeConversation(value: unknown, myId: string): { externalConversa
   const itemRef = string(extension.itemId ?? lastExtension.itemId ?? parseQueryParam(string(lastExtension.reminderUrl), 'itemId'));
   const itemTitle = string(extension.itemTitle ?? lastExtension.itemTitle);
   const buyerDisplayName = string(extension.peerNick ?? extension.buyerNick ?? extension.userNick ?? extension.nick);
+  const buyerAvatarUrl = string(extension.peerAvatar ?? extension.avatarUrl ?? extension.peerHeadPic ?? extension.headPic ?? lastExtension.peerAvatar ?? lastExtension.avatarUrl);
+  const itemImageUrl = string(extension.itemMainPic ?? extension.itemImage ?? extension.itemImageUrl ?? extension.mainPic ?? lastExtension.itemMainPic ?? lastExtension.itemImage ?? lastExtension.itemImageUrl);
   const timestamp = normalizeTimestamp(last.createAt ?? conv.modifyTime);
-  return { externalConversationRef, buyerRef, buyerDisplayName, itemRef, itemTitle, unreadCount: numberValue(conv.redPoint), lastMessagePreview: preview, lastMessageAt: timestamp };
+  return { externalConversationRef, buyerRef, buyerDisplayName, buyerAvatarUrl, itemRef, itemTitle, itemImageUrl, unreadCount: numberValue(conv.redPoint), lastMessagePreview: preview, lastMessageAt: timestamp };
 }
 
 function normalizeHistoryMessage(value: unknown, myId: string): { externalMessageRef: string; direction: 'inbound' | 'outbound'; bodyType: 'text' | 'image' | 'system'; bodyText?: string; bodyRef?: string; createdAt: string } | undefined {
@@ -203,3 +226,7 @@ function numberValue(value: unknown): number | undefined { const number = Number
 function numeric(value: unknown): number | undefined { const number = Number(value); return Number.isSafeInteger(number) ? number : undefined; }
 function normalizeTimestamp(value: unknown): string | undefined { const number = Number(value); if (!Number.isFinite(number) || number <= 0) return undefined; const millis = number > 10_000_000_000 ? number : number * 1000; return new Date(millis).toISOString(); }
 function parseQueryParam(value: string | undefined, key: string): string | undefined { if (!value) return undefined; try { return new URL(value.replace(/^fleamarket:\/\//, 'https://placeholder/')).searchParams.get(key) ?? undefined; } catch { return undefined; } }
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | undefined> {
+  return await Promise.race([promise.catch(() => undefined), new Promise<undefined>((resolve) => setTimeout(resolve, timeoutMs))]);
+}

@@ -293,15 +293,17 @@ export class MemoryStore implements Store {
     return conversation ? { ...conversation } : undefined;
   }
 
-  async upsertExternalConversation(input: { adminId: string; accountId: string; externalConversationRef: string; buyerRef: string; buyerDisplayName?: string; itemRef?: string; itemTitle?: string; unreadCount?: number; lastMessagePreview?: string; lastMessageAt?: string }): Promise<ConversationRecord> {
+  async upsertExternalConversation(input: { adminId: string; accountId: string; externalConversationRef: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; unreadCount?: number; lastMessagePreview?: string; lastMessageAt?: string }): Promise<ConversationRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const existing = await this.findConversationByExternalRef(input.adminId, input.accountId, input.externalConversationRef);
     if (existing) {
       const current = this.conversations.get(existing.id)!;
       current.buyerRef = input.buyerRef || current.buyerRef;
       current.buyerDisplayName = input.buyerDisplayName ?? current.buyerDisplayName;
+      current.buyerAvatarUrl = input.buyerAvatarUrl ?? current.buyerAvatarUrl;
       current.itemRef = input.itemRef ?? current.itemRef;
       current.itemTitle = input.itemTitle ?? current.itemTitle;
+      current.itemImageUrl = input.itemImageUrl ?? current.itemImageUrl;
       if (input.unreadCount !== undefined) current.unreadCount = Math.max(0, Math.trunc(input.unreadCount));
       current.lastMessagePreview = input.lastMessagePreview ?? current.lastMessagePreview;
       current.lastMessageAt = input.lastMessageAt ?? current.lastMessageAt;
@@ -309,7 +311,7 @@ export class MemoryStore implements Store {
       current.version += 1;
       return { ...current };
     }
-    const created = await this.createConversation({ adminId: input.adminId, accountId: input.accountId, buyerRef: input.buyerRef, buyerDisplayName: input.buyerDisplayName, itemRef: input.itemRef, itemTitle: input.itemTitle, externalConversationRef: input.externalConversationRef });
+    const created = await this.createConversation({ adminId: input.adminId, accountId: input.accountId, buyerRef: input.buyerRef, buyerDisplayName: input.buyerDisplayName, buyerAvatarUrl: input.buyerAvatarUrl, itemRef: input.itemRef, itemTitle: input.itemTitle, itemImageUrl: input.itemImageUrl, externalConversationRef: input.externalConversationRef });
     const current = this.conversations.get(created.id)!;
     current.unreadCount = Math.max(0, Math.trunc(input.unreadCount ?? 0));
     current.lastMessagePreview = input.lastMessagePreview;
@@ -345,10 +347,10 @@ export class MemoryStore implements Store {
     return message ? { ...message, riskFlags: [...message.riskFlags] } : undefined;
   }
 
-  async createConversation(input: { adminId: string; accountId: string; buyerRef: string; buyerDisplayName?: string; itemRef?: string; itemTitle?: string; externalConversationRef?: string }): Promise<ConversationRecord> {
+  async createConversation(input: { adminId: string; accountId: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; externalConversationRef?: string }): Promise<ConversationRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const now = new Date().toISOString();
-    const conversation: ConversationRecord = { id: createId(), accountId: input.accountId, externalConversationRef: input.externalConversationRef, buyerRef: input.buyerRef, buyerDisplayName: input.buyerDisplayName, itemRef: input.itemRef, itemTitle: input.itemTitle, unreadCount: 0, handlingMode: 'ai', version: 1, createdAt: now, updatedAt: now };
+    const conversation: ConversationRecord = { id: createId(), accountId: input.accountId, externalConversationRef: input.externalConversationRef, buyerRef: input.buyerRef, buyerDisplayName: input.buyerDisplayName, buyerAvatarUrl: input.buyerAvatarUrl, itemRef: input.itemRef, itemTitle: input.itemTitle, itemImageUrl: input.itemImageUrl, unreadCount: 0, handlingMode: 'ai', version: 1, createdAt: now, updatedAt: now };
     this.conversations.set(conversation.id, conversation);
     this.conversationEvents.set(conversation.id, []);
     this.conversationCursors.set(conversation.id, 0);

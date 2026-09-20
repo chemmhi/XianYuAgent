@@ -7,8 +7,10 @@ export interface ConversationVM {
   accountId: string;
   buyerRef: string;
   buyerDisplayName?: string;
+  buyerAvatarUrl?: string;
   itemRef?: string;
   itemTitle?: string;
+  itemImageUrl?: string;
   unreadCount: number;
   lastMessagePreview?: string;
   lastMessageAt?: string;
@@ -52,7 +54,7 @@ export interface RealtimeEventVM {
 type EventListener = (event: RealtimeEventVM) => void;
 
 function toConversationVM(conversation: ConversationRecord): ConversationVM {
-  return { conversationId: conversation.id, accountId: conversation.accountId, buyerRef: conversation.buyerRef, buyerDisplayName: conversation.buyerDisplayName, itemRef: conversation.itemRef, itemTitle: conversation.itemTitle, unreadCount: conversation.unreadCount, lastMessagePreview: conversation.lastMessagePreview, lastMessageAt: conversation.lastMessageAt, handlingMode: conversation.handlingMode, version: conversation.version, createdAt: conversation.createdAt, updatedAt: conversation.updatedAt };
+  return { conversationId: conversation.id, accountId: conversation.accountId, buyerRef: conversation.buyerRef, buyerDisplayName: conversation.buyerDisplayName, buyerAvatarUrl: conversation.buyerAvatarUrl, itemRef: conversation.itemRef, itemTitle: conversation.itemTitle, itemImageUrl: conversation.itemImageUrl, unreadCount: conversation.unreadCount, lastMessagePreview: conversation.lastMessagePreview, lastMessageAt: conversation.lastMessageAt, handlingMode: conversation.handlingMode, version: conversation.version, createdAt: conversation.createdAt, updatedAt: conversation.updatedAt };
 }
 
 function toMessageVM(message: MessageRecord): MessageVM {

@@ -52,6 +52,13 @@ export class XianyuMtopClient {
     return this.call(adminId, accountId, 'mtop.idle.web.user.page.nav', '1.0', {}, { spm_cnt: 'a21ybx.home.0.0', ecode: '0' });
   }
 
+  async fetchChatUserInfo(adminId: string, accountId: string, sessionId: string): Promise<{ success: boolean; accountInvalid: boolean; errorCode?: string; message?: string; buyerDisplayName?: string; buyerAvatarUrl?: string }> {
+    const normalizedSessionId = sessionId.replace(/@goofish$/, '');
+    const result = await this.call(adminId, accountId, 'mtop.taobao.idlemessage.pc.user.query', '4.0', { type: 0, sessionType: 1, sessionId: normalizedSessionId, isOwner: false });
+    const userInfo = recordAt(result.response, ['data', 'userInfo']);
+    return { success: result.success, accountInvalid: result.accountInvalid, errorCode: result.errorCode, message: result.message, buyerDisplayName: stringAt(userInfo, ['fishNick', 'nick', 'nickname']), buyerAvatarUrl: stringAt(userInfo, ['logo', 'avatar', 'avatarUrl']) };
+  }
+
   async fetchItems(adminId: string, accountId: string, data: Record<string, unknown> = {}): Promise<MtopResult> {
     return this.call(adminId, accountId, 'mtop.idle.web.xyh.item.list', '1.0', data);
   }
@@ -189,4 +196,21 @@ function nestedString(root: unknown, path: string[]): string | undefined {
     current = (current as Record<string, unknown>)[key];
   }
   return typeof current === 'string' && current.trim() ? current.trim() : undefined;
+}
+
+function recordAt(root: unknown, path: string[]): Record<string, unknown> {
+  let current: unknown = root;
+  for (const key of path) {
+    if (!current || typeof current !== 'object' || Array.isArray(current)) return {};
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current && typeof current === 'object' && !Array.isArray(current) ? current as Record<string, unknown> : {};
+}
+
+function stringAt(root: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = root[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
 }
