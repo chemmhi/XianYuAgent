@@ -53,15 +53,17 @@ async function createCdpClient(debugPort) {
   await new Promise((resolve, reject) => { socket.addEventListener('open', resolve, { once: true }); socket.addEventListener('error', reject, { once: true }); });
   let nextId = 0;
   const pending = new Map();
+  const events = [];
   socket.addEventListener('message', (event) => {
     const message = JSON.parse(event.data);
+    if (!message.id && message.method) events.push(message);
     if (!message.id || !pending.has(message.id)) return;
     const entry = pending.get(message.id);
     pending.delete(message.id);
     if (message.error) entry.reject(new Error(message.error.message)); else entry.resolve(message.result);
   });
   const send = (method, params = {}) => new Promise((resolve, reject) => { const id = ++nextId; pending.set(id, { resolve, reject }); socket.send(JSON.stringify({ id, method, params })); });
-  return { socket, send };
+  return { socket, send, events };
 }
 
 async function evaluate(cdp, expression) {
@@ -108,10 +110,16 @@ async function run() {
   const cdp = await createCdpClient(debugPort);
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
+  await cdp.send('Network.enable');
   for (const pair of cookie.split('; ')) { const [name, ...valueParts] = pair.split('='); await cdp.send('Network.setCookie', { name, value: valueParts.join('='), url: `${webUrl}/` }); }
   await cdp.send('Page.navigate', { url: `${webUrl}/dashboard` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'dashboard page');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('订单与 AI 闭环趋势'), 'dashboard content');
+  const dashboardBody = String(await evaluate(cdp, 'document.body.innerText'));
+  if (!dashboardBody.includes('Mock API')) throw new Error('dashboard mock override did not render Mock API mode');
+  if (dashboardBody.includes('Live API')) throw new Error('dashboard unexpectedly rendered live mode under explicit mock override');
+  const dashboardRequests = cdp.events.filter((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.url?.includes('/api/v1/dashboard/snapshot'));
+  if (dashboardRequests.length > 0) throw new Error('dashboard unexpectedly requested live snapshot API under explicit mock override');
   await assertText(cdp, '仪表盘');
   await assertText(cdp, '当前账号健康度');
   await assertText(cdp, '商品排行');
