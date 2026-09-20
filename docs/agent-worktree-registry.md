@@ -39,7 +39,7 @@
 | `root` | `coupons-toolbar-empty-state` | `fix/coupons-toolbar-empty-state` | `F:\ChenHai\Project\XianYuAgent-coupons-toolbar-followup` | Codex `/root` | `2026-09-20 19:09:44 +08:00` | `CLEANED` | `5a9f3cb` | `2026-09-20 19:23:44 +08:00` | 用户已明确要求完成后合入 master；`5a9f3cb` 已以 `--no-ff` 合入 `master`；主线 typecheck、Vitest 23/83、Web/API build、Coupons Chrome/CDP E2E 与 `git diff --check` 均通过。Git worktree 元数据与分支已清理，目录因保留非 Git 内容未删除。 |
 
 | `root` | `products-empty-state` | `codex/products-empty-state` | `F:\ChenHai\Project\XianYuAgent-products-empty-state` | Codex `/root` | `2026-09-20 19:35:00 +08:00` | `MERGED` | `c641d29` | `-` | 商品管理表格空态/失败态居中展示，移除工具栏“共0件”统计；Vitest、typecheck、Web/API build、商品 Chrome/CDP E2E（含空态/失败态布局）与 diff 检查已通过。 |
-| `root` | `settings-feature-slice` | `feature/settings-feature-slice` | `F:\ChenHai\Project\XianYuAgent-settings-feature-slice` | Codex `/root` | `2026-09-20 20:45:00 +08:00` | `READY_FOR_REVIEW` | `1183272` | `-` | Settings API Key 首片已补临时 PostgreSQL 密文复读、Chrome/CDP 403/409 与双 viewport 截图；发布级 rollback、旧明文凭证兼容迁移和 merge lock 签核仍开放。 |
+| `root` | `settings-feature-slice` | `feature/settings-feature-slice` | `F:\ChenHai\Project\XianYuAgent-settings-feature-slice` | Codex `/root` | `2026-09-20 20:45:00 +08:00` | `READY_FOR_MERGE` | `1183272` | `-` | Settings API Key 首片已补临时 PostgreSQL 密文复读、Chrome/CDP 403/409 与双 viewport 截图；发布级 rollback、旧明文凭证兼容迁移仍开放，已完成业务/架构/质量独立复核。 |
 | `root/prototype_audit` | `settings-docs-evidence` | `docs/settings-slice-evidence` | `F:\ChenHai\Project\XianYuAgent-settings-docs` | Codex `/root` | `2026-09-20 20:59:57 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 已同步 STATUS、stage5 progress、review log、risk register 与 migrations README；已完成 API/Web 定向验证，真实 PostgreSQL/视觉/独立三轮评审仍开放。 |
 
 ## 主工作区
