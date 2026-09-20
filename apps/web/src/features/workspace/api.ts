@@ -1,4 +1,4 @@
-import type { WorkspaceRunEventVM, WorkspaceRunVM, WorkspaceSessionVM } from './types';
+import type { WorkspaceMessageVM, WorkspaceRunEventVM, WorkspaceRunVM, WorkspaceSessionVM } from './types';
 
 export interface WorkspaceApiTransport {
   get<T>(path: string): Promise<T>;
@@ -10,6 +10,7 @@ export interface WorkspaceApi {
   createSession(input: { accountId: string; title: string; summary?: string }): Promise<WorkspaceSessionVM>;
   switchSession(sessionId: string): Promise<WorkspaceSessionVM>;
   archiveSession(sessionId: string): Promise<WorkspaceSessionVM>;
+  listMessages(sessionId: string, limit?: number): Promise<WorkspaceMessageVM[]>;
   startRun(input: { accountId: string; sessionId: string; instruction: string; clientRunRef: string }): Promise<WorkspaceRunVM>;
   getRun(runId: string): Promise<WorkspaceRunVM>;
   listEvents(runId: string, afterSequence?: number): Promise<WorkspaceRunEventVM[]>;
@@ -19,6 +20,14 @@ export interface WorkspaceApi {
 interface ApiEnvelope<T> { success: boolean; data: T | null; message?: string | null; error?: { code?: string }; }
 interface SessionPayload { items?: WorkspaceSessionVM[]; }
 interface EventPayload { items?: WorkspaceRunEventVM[]; }
+interface MessagePayload { items?: Array<{ id: string; sessionId: string; runId?: string; type: WorkspaceMessageVM['type']; content: string; summary?: string; createdAt: string; sequence: number }>; }
+
+function messageTitle(type: WorkspaceMessageVM['type']): string {
+  if (type === 'user_message') return '用户';
+  if (type === 'reasoning_summary') return '推理摘要';
+  if (type === 'tool_event') return '工具事件';
+  return 'Agent';
+}
 
 function unwrap<T>(payload: T | ApiEnvelope<T>): T {
   if (payload && typeof payload === 'object' && 'success' in payload && 'data' in payload) {
@@ -51,6 +60,10 @@ export function createWorkspaceApi(transport: WorkspaceApiTransport, options: { 
     async createSession(input) { return unwrap(await post<WorkspaceSessionVM | ApiEnvelope<WorkspaceSessionVM>>('/api/v1/workspace/agent-sessions', input, 'workspace-session')); },
     async switchSession(sessionId) { return unwrap(await post<WorkspaceSessionVM | ApiEnvelope<WorkspaceSessionVM>>(`/api/v1/workspace/agent-sessions/${encodeURIComponent(sessionId)}/switch`, {}, 'workspace-switch')); },
     async archiveSession(sessionId) { return unwrap(await post<WorkspaceSessionVM | ApiEnvelope<WorkspaceSessionVM>>(`/api/v1/workspace/agent-sessions/${encodeURIComponent(sessionId)}/archive`, {}, 'workspace-archive')); },
+    async listMessages(sessionId, limit = 100) {
+      const payload = await transport.get<MessagePayload | ApiEnvelope<MessagePayload>>(`/api/v1/workspace/agent-sessions/${encodeURIComponent(sessionId)}/messages?limit=${Math.max(1, Math.min(500, Math.trunc(limit)))}`);
+      return (unwrap(payload).items ?? []).map((message) => ({ id: message.id, runId: message.runId, type: message.type, createdAt: message.createdAt, title: messageTitle(message.type), content: message.content, summary: message.summary, sequence: message.sequence, collapsible: message.type === 'reasoning_summary' }));
+    },
     async startRun(input) { return unwrap(await post<WorkspaceRunVM | ApiEnvelope<WorkspaceRunVM>>('/api/v1/workspace/runs', input, 'workspace-run')); },
     async getRun(runId) { return unwrap(await transport.get<WorkspaceRunVM | ApiEnvelope<WorkspaceRunVM>>(`/api/v1/workspace/runs/${encodeURIComponent(runId)}`)); },
     async listEvents(runId, afterSequence = 0) {
