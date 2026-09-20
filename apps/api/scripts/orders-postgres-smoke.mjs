@@ -64,7 +64,7 @@ try {
 
   const refreshedOrderNo = `${orderNo}-X`;
   runtime.xianyu.fetchOrdersAll = async () => ({
-    pages: [{ success: true, accountInvalid: false, pageNumber: 1, pageSize: 100, items: [] }],
+    pages: [{ success: true, accountInvalid: false, pageNumber: 1, pageSize: 30, items: [] }],
     items: [{ orderNo: refreshedOrderNo, buyerId: 'pg-xianyu-buyer', buyerName: '闲鱼同步买家', itemId: 'pg-xianyu-item', itemTitle: '闲鱼同步商品', amountMinor: 12900, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'manual', createdAt: new Date().toISOString(), sourcePayloadDigest: 'postgres-xianyu-fixture' }],
     hasMore: false,
   });
