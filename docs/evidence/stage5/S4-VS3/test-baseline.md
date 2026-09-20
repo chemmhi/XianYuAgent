@@ -5,11 +5,18 @@
 - 分支：`feature/s4-vs3-coupons`
 - 当前门禁：`READY_FOR_REVIEW`，等待人工审核后再合入 `master`
 
+## 2026-09-20 工具栏修订
+
+- 本次修订 worktree：`F:\ChenHai\Project\XianYuAgent-coupons-toolbar`；分支：`fix/coupons-toolbar`。
+- 移除卡券首页顶部 KPI 卡片，将新建、刷新及选中后的批量操作并入列表工具栏。
+- 搜索与类型筛选改为变更即生效，移除“查询”和“重置筛选”按钮。
+- 回归证据：`CouponToolbar.test.tsx`、Coupons Chrome/CDP E2E，以及 `1440×900` / `390×844` 截图。
+
 ## 用户路径
 
 真实浏览器从 `/coupons` 进入卡券首页，经 AuthGate 使用真实 Session Cookie 访问真实 API，完成：
 
-1. 卡券列表、搜索/重置、类型筛选、库存统计、低库存告警和状态展示；
+1. 卡券列表、搜索、类型筛选、库存/告警列和状态展示；
 2. 当前页全选、批量删除，以及单选后的商品关联入口；
 3. 新建、编辑、复制配置，启用/禁用和软删除；
 4. 打开详情抽屉，导入库存，绑定/解绑商品；
@@ -49,6 +56,7 @@ local Chrome E2E passed: coupons list -> detail -> preview/copy -> import -> bin
 - 桌面代表数据验证了备注、多规格、延时发货、已发货次数、对接价、最低价和费用承担方等表格列不是 fallback 文案。
 - 列表不返回卡券正文，只展示受控正文占位、库存数量、绑定数量、告警和状态。
 - 正文只有在详情抽屉通过受控 content API 返回后展示，并提供复制动作；访问审计引用可见。
+- 卡券首页不再展示独立 KPI 卡片；列表工具栏统一承载搜索、筛选、新建、刷新及条件批量操作。
 - loading、empty、error、403、submitting 和 conflict 分支由状态边界/错误映射覆盖；本轮截图以成功态为主，完整逐状态视觉回归仍留给人工复核。
 
 ## 人工浏览器审核步骤
@@ -58,7 +66,7 @@ local Chrome E2E passed: coupons list -> detail -> preview/copy -> import -> bin
 3. 执行 `npm run dev`。该命令使用真实 PostgreSQL/Redis/MinIO，`ALLOW_IN_MEMORY=false`，不是 MemoryStore smoke。
 4. 用 Chrome 打开 `http://localhost:5173/coupons`；已有管理员直接登录，没有管理员先完成初始化。
 5. 固定审核 viewport：桌面 `1440×900`，移动 `390×844`。
-6. 逐项检查：搜索/重置/类型筛选；当前页全选与批量删除；单选关联商品；新建/编辑/复制；启用/禁用；双栏关联保存/移除；图片原图预览；详情、库存导入、正文预览/复制；作废后刷新状态保持；移动端横向表格滚动。
+6. 逐项检查：搜索/类型筛选、工具栏新建/刷新；当前页全选与批量删除；单选关联商品；新建/编辑/复制；启用/禁用；双栏关联保存/移除；图片原图预览；详情、库存导入、正文预览/复制；作废后刷新状态保持；移动端横向表格滚动。
 7. 记录异常态和截图。人工审核通过前，保持 `READY_FOR_REVIEW`，不要合入 `master`。
 
 ## 明确未覆盖项

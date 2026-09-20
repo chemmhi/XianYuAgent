@@ -143,7 +143,13 @@ async function run() {
   await cdp.send('Page.navigate', { url: `${webUrl}/coupons` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'coupons page');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 卡券批次'), 'coupon list');
-  await assertText(cdp, '低库存卡券');
+  await assertText(cdp, '卡券列表');
+  await assertText(cdp, '新建卡券');
+  await assertText(cdp, '刷新');
+  const legacyBlocks = await evaluate(cdp, 'document.querySelectorAll(".coupons-kpis, .coupons-page-actions").length');
+  if (legacyBlocks !== 0) throw new Error('legacy coupon KPI or page action blocks still render');
+  const toolbarButtons = await evaluate(cdp, 'Array.from(document.querySelectorAll(".coupons-toolbar button")).map((button) => button.textContent?.trim()).filter(Boolean)');
+  if (toolbarButtons.includes('查询') || toolbarButtons.includes('重置筛选')) throw new Error('coupon toolbar still exposes removed filter actions');
   await assertText(cdp, 'E2E 列表元数据');
   await assertText(cdp, '对接价：¥9.90');
   await captureViewport(cdp, 1440, 900, 'coupons-desktop-1440x900.png');
