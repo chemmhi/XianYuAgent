@@ -292,3 +292,13 @@
 | S5-R45 | 消息状态 / 实时链路 | 是否使用闲鱼真实 40103 已读回执与 `/r/MessageStatus/read`，并通过服务端事件更新 UI，而不是用买家回复推断卖家已读 | root | PASS（受控验证） | `npm --workspace apps/api run test:xianyu-im-read` 8/8；`npm --workspace apps/api run test:messages:infra`；`apps/api/src/xianyu-im.ts`、`apps/api/src/xianyu-im-service.ts`、`apps/api/migrations/017_message_read_status.sql`；`S4-VS5A` 仍保持 `PARTIALLY_VERIFIED`，外部线上 40103 仍待独立复审 |
 
 本轮结论：真实闲鱼凭证回读、账号级上下文复用、40103 已读回执链路、Redis/PostgreSQL 恢复和 Chrome/CDP 视觉证据均已形成可复核记录；`S4-VS5A` 仍为 `PARTIALLY_VERIFIED`，独立复审与生产部署拓扑确认未关闭前不得宣称发布级完成。发送、附件、撤回继续进入 `S4-VS5B`。
+
+### 2026-09-20：账号列表分页与工具栏修订复核
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R46 | 业务 / 验收 | 账号列表是否按服务端分页，搜索与状态/连接筛选是否真正生效，空态是否居中且表格滚动不带动页面 | root + Chrome/CDP | PASS（当前切片） | `apps/api/scripts/smoke.mjs`、`apps/web/src/features/accounts/api.test.ts`、`npm run test:e2e:chrome` |
+| S5-R47 | UI / 交互 | 是否移除账号表格操作列与工具栏“共 x 个账号”统计，并保留紧凑的分页导航 | root | PASS（当前切片） | `apps/web/src/features/accounts/components/AccountTable.tsx`、`AccountToolbar.tsx`、`accounts.css` |
+| S5-R48 | 质量 / 交付 | 是否在独立 worktree、merge lock 和主线门禁内完成合入 | root | PASS | `8b7c398`、`npm run verify`、`docs/agent-worktree-registry.md` |
+
+本轮结论：账号列表分页/筛选和页面布局修订已合入 `master`；账号管理外部闲鱼登录、真实 PostgreSQL/外部账号人工验收等既有风险边界不变。
