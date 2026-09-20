@@ -470,7 +470,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   }
 
   const accountMatch = ctx.path.match(/^\/api\/v1\/accounts\/([^/]+)(?:\/(scopes|connection|connection\/verify))?$/);
-  if (ctx.path === '/api/v1/accounts' && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, { items: await accounts.list(authContext.admin.id) }).body };
+  if (ctx.path === '/api/v1/accounts' && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, await accounts.list(authContext.admin.id, parseAccountListQuery(ctx.query))).body };
   if (ctx.path === '/api/v1/accounts' && ctx.method === 'POST') {
     const result = await mutation(runtime, ctx, authContext, undefined, async () => {
       const account = await accounts.create({ adminId: authContext.admin.id, platform: String(ctx.body.platform ?? ''), sellerRef: String(ctx.body.sellerRef ?? ''), displayName: typeof ctx.body.displayName === 'string' ? ctx.body.displayName : undefined, requestId: ctx.requestId, traceId: ctx.traceId });
@@ -747,6 +747,18 @@ function parseProductListQuery(query: Record<string, string>): import('./domain.
   };
 }
 
+function parseAccountListQuery(query: Record<string, string>): import('./domain.js').AccountListQuery {
+  const page = query.page === undefined ? undefined : Number(query.page);
+  const pageSize = query.pageSize === undefined ? undefined : Number(query.pageSize);
+  return {
+    search: optionalString(query.search),
+    status: optionalString(query.status) as import('./domain.js').AccountListQuery['status'],
+    connectionStatus: optionalString(query.connectionStatus) as import('./domain.js').AccountListQuery['connectionStatus'],
+    page: page === undefined || Number.isNaN(page) ? page : Math.trunc(page),
+    pageSize: pageSize === undefined || Number.isNaN(pageSize) ? pageSize : Math.trunc(pageSize),
+  };
+}
+
 function parseCouponBatchListQuery(query: Record<string, string>): import('./domain.js').CouponBatchListQuery {
   const page = query.page === undefined ? undefined : Number(query.page);
   const pageSize = query.pageSize === undefined ? undefined : Number(query.pageSize);
@@ -871,13 +883,13 @@ function readCookieValue(cookieHeader: string, name: string): string | undefined
 
 async function ensureAccountForLogin(input: { accounts: AccountService; adminId: string; accountId?: string; sellerRef: string; requestId: string; traceId: string }) {
   if (input.accountId) return input.accounts.get(input.adminId, input.accountId);
-  const existing = (await input.accounts.list(input.adminId)).find((item) => item.platform === 'xianyu' && item.sellerRef === input.sellerRef);
+  const existing = (await input.accounts.list(input.adminId, { page: 1, pageSize: 100 })).items.find((item) => item.platform === 'xianyu' && item.sellerRef === input.sellerRef);
   if (existing) return existing;
   try {
     return await input.accounts.create({ adminId: input.adminId, platform: 'xianyu', sellerRef: input.sellerRef, displayName: input.sellerRef, requestId: input.requestId, traceId: input.traceId });
   } catch (error) {
     if (error instanceof ServiceError && error.code === 'CONFLICT') {
-      const retry = (await input.accounts.list(input.adminId)).find((item) => item.platform === 'xianyu' && item.sellerRef === input.sellerRef);
+      const retry = (await input.accounts.list(input.adminId, { page: 1, pageSize: 100 })).items.find((item) => item.platform === 'xianyu' && item.sellerRef === input.sellerRef);
       if (retry) return retry;
     }
     throw error;

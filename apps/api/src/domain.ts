@@ -262,6 +262,22 @@ export interface AccountRecord {
   lastConnectedAt?: string;
 }
 
+export interface AccountListQuery {
+  search?: string;
+  status?: AccountStatus;
+  connectionStatus?: 'online' | 'offline' | 'connecting' | 'expired' | 'unknown';
+  page?: number;
+  pageSize?: number;
+}
+
+export interface AccountListResult {
+  items: AccountRecord[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
 export interface AccountScopeRecord {
   id: string;
   adminId: string;
@@ -494,7 +510,7 @@ export interface Store {
   hasAccountScope(adminId: string, accountId: string): Promise<boolean>;
   grantScope(input: { adminId: string; accountId: string; scope: string }): Promise<AccountScopeRecord>;
   revokeScope(adminId: string, accountId: string, scope: string): Promise<void>;
-  listAccounts(adminId: string): Promise<AccountRecord[]>;
+  listAccounts(adminId: string, query?: AccountListQuery): Promise<AccountListResult>;
   getAccount(adminId: string, accountId: string): Promise<AccountRecord | undefined>;
   createAccount(input: { platform: string; sellerRef: string; displayName?: string; adminId: string }): Promise<AccountRecord>;
   updateAccount(adminId: string, accountId: string, patch: { sellerRef?: string; displayName?: string; remark?: string; avatarUrl?: string; platformUserId?: string; status?: AccountStatus; lastConnectedAt?: string }): Promise<AccountRecord | undefined>;
