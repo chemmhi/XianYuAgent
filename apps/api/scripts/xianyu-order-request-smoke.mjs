@@ -37,6 +37,16 @@ try {
     }),
     saveCookie: async (_adminId, _accountId, cookieHeader, metadata) => { savedCookie = cookieHeader; savedMetadata = metadata; },
   });
+  await client.fetchSoldOrders('admin-1', 'account-1');
+  assert.deepEqual(captured.payload, {
+    pageNumber: 1,
+    rowsPerPage: 30,
+    orderIds: '',
+    queryCode: 'ALL',
+    orderSearchParam: '{}',
+  });
+  assert.equal(captured.headers.referer, 'https://seller.goofish.com/?site=COMMONPRO#/seller-trade/order-manage');
+  assert.equal(captured.headers.idle_site_biz_code, undefined);
   const result = await client.fetchOrdersAll('admin-1', 'account-1', 30, 2);
   assert.equal(result.items.length, 1);
   assert.deepEqual(captured.payload, {
@@ -51,7 +61,7 @@ try {
   assert.equal(captured.url.searchParams.get('spm_cnt'), 'a21107h.42831410.0.0');
   assert.equal(captured.headers.origin, 'https://seller.goofish.com');
   assert.equal(captured.headers.referer, 'https://seller.goofish.com/?site=COMMONPRO#/seller-trade/order-manage');
-  assert.equal(captured.headers.idle_site_biz_code, 'COMMONPRO');
+  assert.equal(captured.headers.idle_site_biz_code, undefined);
   assert.match(captured.headers.cookie, /_m_h5_tk=token_1_suffix/);
   assert.match(captured.headers.cookie, /unb=seller-1/);
   assert.doesNotMatch(captured.headers.cookie, /seller_only=1/);
