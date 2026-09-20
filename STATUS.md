@@ -55,11 +55,12 @@
 ## S4-VS3 卡券首页（已合入 master，待人工复核）
 
 - 原独立 worktree：`F:\ChenHai\Project\XianYuAgent-s4-vs3`，分支 `feature/s4-vs3-coupons`；本次以 merge commit 合入 `master`，临时 worktree 与分支随后删除。
-- 实现：批次列表、搜索/重置/类型筛选、当前页全选、批量删除、创建/编辑/复制、启用/禁用、库存/`stockAlert`、首批库存、导入库存、绑定/解绑、双栏商品关联、图片原图预览、作废、DELETE 软作废、管理员受控正文预览/复制、403/404/409/网络错误状态。
+- 实现：批次列表、搜索/类型筛选（变更即生效）、当前页全选、批量删除、创建/编辑/复制、启用/禁用、库存/`stockAlert`、首批库存、导入库存、绑定/解绑、双栏商品关联、图片原图预览、作废、DELETE 软作废、管理员受控正文预览/复制、403/404/409/网络错误状态。
 - 后端：`apps/api/migrations/013_coupons.sql` + `014_coupon_card_metadata.sql`、Memory/Postgres store、`purpose=text/data/api/image` 校验、列表安全元数据摘要、PATCH/PUT 编辑、scope 校验、加密正文存储、审计摘要。
 - 前端：`apps/web/src/features/coupons/`，通过 `/coupons` 正式路由接入，表格视觉保持平台样式，仅参考旧项目字段和操作。
 - 验证：已完成类型检查、单测、构建、API smoke、Chrome/CDP E2E、桌面/移动截图；Chrome/CDP 使用 MemoryStore/stub，真实 PostgreSQL/Redis/MinIO 仍需人工浏览器复核。
 - 2026-09-20 工具栏修订已通过合并后门禁并合入 `master`：`19c6798`（`merge: 合入卡券列表工具栏修订`），移除首页 KPI 卡片，将搜索/筛选/新建/刷新及条件批量操作统一到列表工具栏，并移除查询/重置筛选按钮。
+- 2026-09-20 空态与顺序修订已通过合并后门禁并合入 `master`：`5a9f3cb`（`merge: 合入卡券工具栏与空态修订`），将“新建卡券”置于工具栏末尾，移除 `共 N 张` 统计，并保留居中的“暂无卡券批次 / 当前账号范围内没有匹配的批次，可调整筛选或创建新批次。”空态。
 - 门禁：代码已合入 `master`，人工审核仍需按 `docs/evidence/stage5/S4-VS3/test-baseline.md` 执行并回写结论。
 
 ## 未完成切片索引（2026-09-19）

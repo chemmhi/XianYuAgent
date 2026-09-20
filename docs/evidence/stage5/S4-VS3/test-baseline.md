@@ -3,20 +3,21 @@
 - 验证日期：2026-09-19
 - worktree：`F:\ChenHai\Project\XianYuAgent-s4-vs3`
 - 分支：`feature/s4-vs3-coupons`
-- 当前门禁：`READY_FOR_REVIEW`，等待人工审核后再合入 `master`
+- 当前门禁：代码已合入 `master`；人工浏览器审核与真实持久化复核仍为 `READY_FOR_REVIEW`
 
 ## 2026-09-20 工具栏修订
 
 - 本次修订 worktree：`F:\ChenHai\Project\XianYuAgent-coupons-toolbar`；分支：`fix/coupons-toolbar`；已通过合并提交 `19c6798` 合入 `master`。
 - 移除卡券首页顶部 KPI 卡片，将新建、刷新及选中后的批量操作并入列表工具栏。
 - 搜索与类型筛选改为变更即生效，移除“查询”和“重置筛选”按钮。
-- 回归证据：`CouponToolbar.test.tsx`、Coupons Chrome/CDP E2E，以及 `1440×900` / `390×844` 截图。
+- 回归证据：`CouponToolbar.test.ts`、Coupons Chrome/CDP E2E，以及 `1440×900` / `390×844` 截图。
 
 ## 2026-09-20 空态与工具栏顺序修订
 
 - 本次修订 worktree：`F:\ChenHai\Project\XianYuAgent-coupons-toolbar-followup`；分支：`fix/coupons-toolbar-empty-state`。
+- 已通过合并提交 `5a9f3cb` 合入 `master`。
 - 新建卡券按钮后置到工具栏最后，移除 `共 N 张` 统计；无匹配批次时保留居中的空态标题与引导文案。
-- 回归证据：`CouponToolbar.test.tsx`、`CouponStateView.test.tsx`、Coupons Chrome/CDP E2E。
+- 回归证据：`CouponToolbar.test.ts`、`CouponStateView.test.ts`、Coupons Chrome/CDP E2E。
 
 ## 用户路径
 
@@ -67,16 +68,16 @@ local Chrome E2E passed: coupons list -> detail -> preview/copy -> import -> bin
 
 ## 人工浏览器审核步骤
 
-1. 进入独立 worktree：`F:\ChenHai\Project\XianYuAgent-s4-vs3`。
+1. 在当前 `master` 工作区或等价复核环境启动卡券页面。
 2. 确认主工作树没有占用 `5173`/`8080`；如有，先停止主工作树服务。
 3. 执行 `npm run dev`。该命令使用真实 PostgreSQL/Redis/MinIO，`ALLOW_IN_MEMORY=false`，不是 MemoryStore smoke。
 4. 用 Chrome 打开 `http://localhost:5173/coupons`；已有管理员直接登录，没有管理员先完成初始化。
 5. 固定审核 viewport：桌面 `1440×900`，移动 `390×844`。
 6. 逐项检查：搜索/类型筛选、工具栏新建/刷新；当前页全选与批量删除；单选关联商品；新建/编辑/复制；启用/禁用；双栏关联保存/移除；图片原图预览；详情、库存导入、正文预览/复制；作废后刷新状态保持；移动端横向表格滚动。
-7. 记录异常态和截图。人工审核通过前，保持 `READY_FOR_REVIEW`，不要合入 `master`。
+7. 记录异常态和截图。人工审核未通过前，不得将 S4-VS3 标记为 `PASS`。
 
 ## 明确未覆盖项
 
 - Chrome E2E 使用隔离临时 profile、MemoryStore 和 stub 运行时，不能替代 PostgreSQL/Redis/MinIO 容器级持久化验收或人工浏览器审核。
 - 真实闲鱼平台、真实买家交付策略、库存 reserve/consume、批量编辑、资产上传和订单交付属于后续切片或人工复核范围；批量删除已纳入本片。
-- 未合并 `master`；人工审核通过前不执行 merge。
+- 代码已合入 `master`；真实 PostgreSQL/Redis/MinIO 持久化与人工浏览器审核仍未完成，审核通过前不得宣称整体 `PASS`。
