@@ -3,7 +3,7 @@
 .workspace-scope { display: inline-flex; align-items: center; gap: 8px; padding: 8px 11px; border: 1px solid var(--border); border-radius: 999px; background: #fff; color: var(--muted); font-size: 11px; font-weight: 700; white-space: nowrap; }
 .workspace-scope-dot { width: 7px; height: 7px; border-radius: 50%; background: #CBD5E1; }
 .workspace-scope-dot.online { background: var(--success); box-shadow: 0 0 0 3px var(--success-bg); }
-.workspace-layout { display: grid; grid-template-columns: minmax(250px, 310px) minmax(0, 1fr); gap: 16px; min-height: 560px; }
+.workspace-layout { display: grid; grid-template-columns: minmax(250px, 310px) minmax(0, 1fr); gap: 16px; align-items: start; }
 .workspace-sessions-panel, .workspace-composer-panel, .workspace-run-panel { min-width: 0; overflow: hidden; }
 .workspace-sessions-panel { display: flex; flex-direction: column; padding: 0; }
 .workspace-panel-head { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; padding: 18px; border-bottom: 1px solid var(--border); }
@@ -83,7 +83,7 @@
 }
 
 /* Continuous conversation surface */
-.workspace-thread { display: flex; flex-direction: column; min-height: 640px; overflow: hidden; }
+.workspace-thread { display: flex; flex-direction: column; overflow: hidden; }
 .workspace-thread-header { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; padding: 18px 20px; border-bottom: 1px solid var(--border); background: #fff; }
 .workspace-thread-header h2 { margin: 0 0 4px; font-size: 16px; }
 .workspace-thread-header p { margin: 0; font-size: 11px; }
@@ -93,8 +93,8 @@
 .workspace-connection > span { width: 7px; height: 7px; border-radius: 50%; background: #CBD5E1; }
 .workspace-connection-connected > span { background: var(--success); box-shadow: 0 0 0 3px var(--success-bg); }
 .workspace-connection-connecting > span, .workspace-connection-reconnecting > span { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-bg); }
-.workspace-message-stream { flex: 1 1 auto; min-height: 300px; overflow: auto; background: linear-gradient(180deg, #FBFCFD 0%, #F7F9FB 100%); }
-.workspace-message-list { display: grid; gap: 16px; padding: 24px 24px 30px; }
+.workspace-message-stream { flex: 0 1 auto; min-height: 0; overflow: visible; background: linear-gradient(180deg, #FBFCFD 0%, #F7F9FB 100%); }
+.workspace-message-list { display: grid; gap: 16px; width: min(100%, 820px); box-sizing: border-box; margin: 0 auto; padding: 24px 24px 30px; }
 .workspace-message { display: flex; gap: 11px; max-width: 780px; color: var(--text); }
 .workspace-message-user { align-self: flex-end; flex-direction: row-reverse; max-width: min(82%, 680px); }
 .workspace-message-avatar, .workspace-message-icon { display: grid; place-items: center; flex: 0 0 auto; width: 28px; height: 28px; border-radius: 50%; font-size: 9px; font-weight: 800; }
@@ -108,6 +108,8 @@
 .workspace-message-user .workspace-message-content { padding: 10px 12px; border-radius: 12px 3px 12px 12px; background: var(--link); color: #fff; }
 .workspace-message-user .workspace-message-meta strong, .workspace-message-user .workspace-message-meta time, .workspace-message-user p { color: #fff; }
 .workspace-message-reasoning { display: block; max-width: 720px; padding: 10px 12px; border: 1px solid #DCE5EF; border-radius: 10px; background: rgba(255,255,255,.78); }
+.workspace-tool-group { display: block; max-width: 720px; padding: 10px 12px; border: 1px solid #DCE5EF; border-radius: 10px; background: rgba(255,255,255,.78); }
+.workspace-tool-group-items { display: grid; gap: 10px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
 .workspace-message-toggle { display: flex; align-items: center; gap: 10px; width: 100%; padding: 0; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
 .workspace-message-toggle > span:nth-child(2) { display: grid; gap: 3px; min-width: 0; }
 .workspace-message-toggle strong { font-size: 11px; }
@@ -123,9 +125,8 @@
 .workspace-composer-context { display: flex; align-items: center; gap: 6px; color: var(--sub); font-size: 10px; }
 .workspace-composer-dot { width: 6px; height: 6px; border-radius: 50%; background: #CBD5E1; }
 .workspace-composer-dot.ready { background: var(--success); }
-.workspace-composer-docked textarea { min-height: 76px; max-height: 180px; background: var(--bg); }
+.workspace-composer-docked textarea { min-height: 64px; max-height: 160px; background: var(--bg); }
 @media (max-width: 900px) {
-  .workspace-thread { min-height: 640px; }
   .workspace-thread-header { flex-direction: column; }
   .workspace-thread-meta { width: 100%; justify-content: space-between; }
   .workspace-message-list { padding: 18px 14px 24px; }
