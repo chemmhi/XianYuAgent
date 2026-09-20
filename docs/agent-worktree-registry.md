@@ -33,7 +33,7 @@
 | - | - | - | - | - | - | - | - | - | 主工作区 `master` 受保护；活动 agent 见上表 |
 
 | `root` | `products-pagination` | `fix/products-pagination` | `F:\ChenHai\Project\XianYuAgent-products-pagination` | Codex `/root` | `2026-09-20 00:00:00 +08:00` | `CLEANED` | `3219f85f10cc151dd2761afa066a2ee60be8580f` | `2026-09-20 18:04:00 +08:00` | 已在 merge lock 内合入并完成主线 typecheck、Web 79 项测试、构建与商品 Chrome E2E；API smoke 仍受 127.0.0.1:18872 端口占用阻塞。Git worktree 元数据与分支已清理，目录因含非 Git 内容保留。 |
-| `root` | `products-columns` | `fix/products-columns` | `F:\ChenHai\Project\XianYuAgent-products-columns` | Codex `/root` | `2026-09-20 18:38:05 +08:00` | `MERGED` | `19763b8e543e986d0d6b691f1a4d344a1f9f3eaf` | `-` | 六列表格、闲鱼创建/更新时间排序与关联卡券展示；双端类型检查、单测、构建与商品 Chrome E2E 已通过 |
+| `root` | `products-columns` | `fix/products-columns` | `F:\ChenHai\Project\XianYuAgent-products-columns` | Codex `/root` | `2026-09-20 18:38:05 +08:00` | `CLEANED` | `19763b8e543e986d0d6b691f1a4d344a1f9f3eaf` | `2026-09-20 18:48:19 +08:00` | 六列表格、闲鱼创建/更新时间排序与关联卡券展示；双端类型检查、单测、构建与商品 Chrome E2E 已通过。Git worktree 元数据与分支已清理，目录因含非 Git 内容保留。 |
 
 ## 主工作区
 
