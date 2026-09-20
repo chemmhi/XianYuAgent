@@ -1,7 +1,8 @@
 import { Pool } from 'pg';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, SessionRecord, Store, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, SessionRecord, Store, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { createId } from './security.js';
+import { decodeConversationCursor, encodeConversationCursor } from './conversation-cursor.js';
 
 type Row = Record<string, unknown>;
 function iso(value: unknown): string | undefined { return value ? new Date(String(value)).toISOString() : undefined; }
@@ -9,7 +10,12 @@ function iso(value: unknown): string | undefined { return value ? new Date(Strin
 export class PostgresStore implements Store {
   readonly kind = 'postgres' as const;
   readonly pool: Pool;
-  constructor(databaseUrl: string) { this.pool = new Pool({ connectionString: databaseUrl }); }
+  constructor(databaseUrl: string) {
+    this.pool = new Pool({ connectionString: databaseUrl });
+    // A database restart emits errors on idle clients. Keep the process alive
+    // so subsequent pool queries can reconnect and the runtime can recover.
+    this.pool.on('error', () => undefined);
+  }
   async health(): Promise<{ kind: string; reachable: boolean }> { try { await this.pool.query('select 1'); return { kind: this.kind, reachable: true }; } catch { return { kind: this.kind, reachable: false }; } }
   async countAdmins(): Promise<number> { const result = await this.pool.query('select count(*)::int as count from auth.admins'); return Number(result.rows[0].count); }
   async findAdminById(id: string): Promise<AdminRecord | undefined> { const result = await this.pool.query('select * from auth.admins where id=$1 limit 1', [id]); return result.rows[0] ? this.toAdmin(result.rows[0]) : undefined; }
@@ -218,6 +224,79 @@ export class PostgresStore implements Store {
     const batch = this.toCouponBatch({ id: row.batch_id, account_id: row.account_id, label: row.label, purpose: row.purpose, delivery_scope: row.delivery_scope, quark_url: row.quark_url, extract_code_ciphertext: row.extract_code_ciphertext, total_count: row.total_count, status: row.batch_status, version: row.version, created_at: row.batch_created_at, updated_at: row.batch_updated_at });
     return { batch, item };
   }
+
+  async listConversations(adminId: string, query: ConversationListQuery): Promise<ConversationListResult> {
+    const params: unknown[] = [adminId];
+    const conditions = ["exists (select 1 from auth.account_scopes scope where scope.account_id=c.account_id and scope.admin_id=$1 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))"];
+    if (query.accountId) { params.push(query.accountId); conditions.push(`c.account_id=$${params.length}`); }
+    const cursor = query.cursor ? decodeConversationCursor(query.cursor) : undefined;
+    if (cursor) { params.push(cursor.updatedAt, cursor.id); conditions.push(`(date_trunc('milliseconds', c.updated_at) < $${params.length} or (date_trunc('milliseconds', c.updated_at) = $${params.length} and c.id < $${params.length + 1}))`); }
+    const limit = Math.min(100, Math.max(1, query.limit ?? 50));
+    const limitIndex = params.length + 1;
+    const result = await this.pool.query(`select c.* from messages.conversations c where ${conditions.join(' and ')} order by date_trunc('milliseconds', c.updated_at) desc, c.id desc limit $${limitIndex}`, [...params, limit + 1]);
+    const hasMore = result.rows.length > limit;
+    const items = result.rows.slice(0, limit).map((row) => this.toConversation(row));
+    const last = items[items.length - 1];
+    return { items, nextCursor: hasMore && last ? encodeConversationCursor({ updatedAt: last.updatedAt, id: last.id }) : undefined, hasMore };
+  }
+
+  async getConversation(adminId: string, conversationId: string): Promise<ConversationRecord | undefined> {
+    const result = await this.pool.query("select c.* from messages.conversations c where c.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=c.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))", [conversationId, adminId]);
+    return result.rows[0] ? this.toConversation(result.rows[0]) : undefined;
+  }
+
+  async listMessages(adminId: string, conversationId: string, query: MessageListQuery): Promise<MessageListResult> {
+    const conversation = await this.getConversation(adminId, conversationId);
+    if (!conversation) return { items: [], hasMore: false, latestCursor: 0 };
+    const limit = Math.min(200, Math.max(1, query.limit ?? 100));
+    const latest = await this.pool.query('select coalesce(max(cursor),0)::bigint as cursor from messages.events where conversation_id=$1', [conversationId]);
+    const latestCursor = Number(latest.rows[0]?.cursor ?? 0);
+    const params: unknown[] = [conversationId];
+    let cursorClause = '';
+    if (query.cursor !== undefined) { params.push(query.cursor); cursorClause = ` and e.cursor>$${params.length}`; }
+    params.push(limit);
+    const rows = await this.pool.query(`select m.*, e.cursor as event_cursor from messages.messages m join messages.events e on e.conversation_id=m.conversation_id and (e.payload_json->'message'->>'id')=m.id::text where m.conversation_id=$1${cursorClause} order by m.created_at asc, m.id asc limit $${params.length}`, params);
+    const items = rows.rows.map((row) => this.toMessage(row));
+    const nextCursor = items.length === limit ? Number(rows.rows[rows.rows.length - 1]?.event_cursor ?? 0) : undefined;
+    return { items, nextCursor, hasMore: nextCursor !== undefined, latestCursor };
+  }
+
+  async listConversationEvents(adminId: string, conversationId: string, afterCursor: number, limit: number): Promise<ConversationEventRecord[]> {
+    const conversation = await this.getConversation(adminId, conversationId);
+    if (!conversation) return [];
+    const result = await this.pool.query('select * from messages.events where conversation_id=$1 and cursor>$2 order by cursor asc limit $3', [conversationId, afterCursor, Math.min(limit, 200)]);
+    return result.rows.map((row) => this.toConversationEvent(row));
+  }
+
+  async createConversation(input: { adminId: string; accountId: string; buyerRef: string; buyerDisplayName?: string; itemRef?: string; itemTitle?: string; externalConversationRef?: string }): Promise<ConversationRecord> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const result = await this.pool.query('insert into messages.conversations (id,account_id,external_conversation_ref,buyer_ref,buyer_display_name,item_ref,item_title) values ($1,$2,$3,$4,$5,$6,$7) returning *', [createId(), input.accountId, input.externalConversationRef ?? null, input.buyerRef, input.buyerDisplayName ?? null, input.itemRef ?? null, input.itemTitle ?? null]);
+    return this.toConversation(result.rows[0]);
+  }
+
+  async createMessage(input: { adminId: string; conversationId: string; direction: MessageRecord['direction']; senderRole: MessageRecord['senderRole']; bodyType: MessageRecord['bodyType']; bodyText?: string; bodyRef?: string; externalMessageRef?: string; source?: MessageRecord['source']; orderRef?: string; productRef?: string; riskFlags?: string[]; traceId?: string }): Promise<{ message: MessageRecord; event: ConversationEventRecord }> {
+    const conversation = await this.getConversation(input.adminId, input.conversationId);
+    if (!conversation) throw new Error('CONVERSATION_NOT_FOUND');
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const id = createId();
+      const messageResult = await client.query('insert into messages.messages (id,conversation_id,account_id,direction,sender_role,body_type,body_text,body_ref,external_message_ref,source,order_ref,product_ref,risk_flags,handling_mode) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14) returning *', [id, conversation.id, conversation.accountId, input.direction, input.senderRole, input.bodyType, input.bodyText ?? null, input.bodyRef ?? null, input.externalMessageRef ?? null, input.source ?? null, input.orderRef ?? null, input.productRef ?? null, JSON.stringify(input.riskFlags ?? []), conversation.handlingMode]);
+      const updated = await client.query("update messages.conversations set unread_count=unread_count + case when $2='inbound' then 1 else 0 end, last_message_preview=$3, last_message_at=now(), version=version+1, updated_at=now() where id=$1 returning *", [conversation.id, input.direction, input.bodyText?.slice(0, 180) ?? null]);
+      // Serialize cursor allocation per conversation. PostgreSQL does not allow
+      // FOR UPDATE on an aggregate result, so use a transaction-scoped advisory
+      // lock before reading max(cursor) and inserting the next event.
+      await client.query('select pg_advisory_xact_lock(hashtext($1))', [conversation.id]);
+      const cursorResult = await client.query('select coalesce(max(cursor),0)::bigint + 1 as cursor from messages.events where conversation_id=$1', [conversation.id]);
+      const cursor = Number(cursorResult.rows[0]?.cursor ?? 1);
+      const message = this.toMessage(messageResult.rows[0]);
+      const updatedConversation = this.toConversation(updated.rows[0]);
+      const event: ConversationEventRecord = { eventId: createId(), conversationId: conversation.id, accountId: conversation.accountId, cursor, type: 'chat.message.created', occurredAt: new Date().toISOString(), traceId: input.traceId ?? `postgres:${message.id}`, payload: { message, conversation: updatedConversation } };
+      const eventResult = await client.query('insert into messages.events (event_id,conversation_id,account_id,cursor,type,occurred_at,trace_id,payload_json) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb) returning *', [event.eventId, event.conversationId, event.accountId, event.cursor, event.type, event.occurredAt, event.traceId, JSON.stringify(event.payload)]);
+      await client.query('commit');
+      return { message, event: this.toConversationEvent(eventResult.rows[0]) };
+    } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
+  }
   async createLoginSession(input: { adminId: string; accountId?: string; provisionalAccountRef?: string; loginMethod: string; expiresAt: string; qrTokenRef?: string }): Promise<LoginSessionRecord> { if (input.accountId && !(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN'); const result = await this.pool.query('insert into auth.account_login_sessions (id,admin_id,account_id,provisional_account_ref,login_method,status,started_at,expires_at,qr_token_ref) values ($1,$2,$3,$4,$5,\'waiting\',now(),$6,$7) returning *', [createId(), input.adminId, input.accountId ?? null, input.provisionalAccountRef ?? null, input.loginMethod, input.expiresAt, input.qrTokenRef ?? null]); return this.toLoginSession(result.rows[0]); }
   async getLoginSession(adminId: string, accountId: string, sessionId: string): Promise<LoginSessionRecord | undefined> { const result = await this.pool.query('select s.* from auth.account_login_sessions s join auth.account_scopes scope on scope.account_id=s.account_id where s.id=$1 and s.account_id=$2 and scope.admin_id=$3 and scope.status=\'active\' and (scope.expires_at is null or scope.expires_at>now())', [sessionId, accountId, adminId]); return this.normalizeLoginSession(result.rows[0]); }
   async getLoginSessionById(adminId: string, sessionId: string): Promise<LoginSessionRecord | undefined> { const result = await this.pool.query('select s.* from auth.account_login_sessions s left join auth.account_scopes scope on scope.account_id=s.account_id and scope.admin_id=$2 and scope.status=\'active\' and (scope.expires_at is null or scope.expires_at>now()) where s.id=$1 and (s.admin_id=$2 or scope.admin_id is not null)', [sessionId, adminId]); return this.normalizeLoginSession(result.rows[0]); }
@@ -264,6 +343,10 @@ export class PostgresStore implements Store {
   }
   private toCouponItem(row: Row): CouponItemRecord { return { id: String(row.id), batchId: String(row.batch_id), content: decryptCouponValue(row.content_ciphertext), status: row.status as CouponItemRecord['status'], reservedUntil: iso(row.reserved_until), consumedAt: iso(row.consumed_at), createdAt: new Date(String(row.created_at)).toISOString() }; }
   private toCouponBinding(row: Row): CouponBindingRecord { return { id: String(row.id), batchId: String(row.coupon_batch_id), productId: String(row.product_id), priority: Number(row.priority ?? 0), status: row.status as CouponBindingRecord['status'], expiresAt: iso(row.expires_at), createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString() }; }
+
+  private toConversation(row: Row): ConversationRecord { return { id: String(row.id), accountId: String(row.account_id), externalConversationRef: row.external_conversation_ref ? String(row.external_conversation_ref) : undefined, buyerRef: String(row.buyer_ref), buyerDisplayName: row.buyer_display_name ? String(row.buyer_display_name) : undefined, itemRef: row.item_ref ? String(row.item_ref) : undefined, itemTitle: row.item_title ? String(row.item_title) : undefined, unreadCount: Number(row.unread_count ?? 0), lastMessagePreview: row.last_message_preview ? String(row.last_message_preview) : undefined, lastMessageAt: iso(row.last_message_at), handlingMode: row.handling_mode as ConversationRecord['handlingMode'], version: Number(row.version ?? 1), createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString() }; }
+  private toMessage(row: Row): MessageRecord { const riskFlags = Array.isArray(row.risk_flags) ? row.risk_flags.map(String) : []; return { id: String(row.id), conversationId: String(row.conversation_id), accountId: String(row.account_id), direction: row.direction as MessageRecord['direction'], senderRole: row.sender_role as MessageRecord['senderRole'], bodyType: row.body_type as MessageRecord['bodyType'], bodyText: row.body_text ? String(row.body_text) : undefined, bodyRef: row.body_ref ? String(row.body_ref) : undefined, redactionState: row.redaction_state as MessageRecord['redactionState'], status: row.status as MessageRecord['status'], externalMessageRef: row.external_message_ref ? String(row.external_message_ref) : undefined, source: row.source as MessageRecord['source'], orderRef: row.order_ref ? String(row.order_ref) : undefined, productRef: row.product_ref ? String(row.product_ref) : undefined, riskFlags, handlingMode: row.handling_mode as MessageRecord['handlingMode'], createdAt: new Date(String(row.created_at)).toISOString() }; }
+  private toConversationEvent(row: Row): ConversationEventRecord { const payload = row.payload_json && typeof row.payload_json === 'object' && !Array.isArray(row.payload_json) ? row.payload_json as Record<string, unknown> : {}; return { eventId: String(row.event_id), conversationId: String(row.conversation_id), accountId: String(row.account_id), cursor: Number(row.cursor), type: row.type as ConversationEventRecord['type'], occurredAt: new Date(String(row.occurred_at)).toISOString(), traceId: String(row.trace_id), payload }; }
 
   private toAdmin(row: Row): AdminRecord { return { id: String(row.id), email: String(row.email), passwordHash: String(row.password_hash), displayName: String(row.display_name ?? ''), role: String(row.role), status: row.status as AdminRecord['status'], createdAt: new Date(String(row.created_at)).toISOString(), lastLoginAt: iso(row.last_login_at) }; }
   private toSession(row: Row): SessionRecord { return { id: String(row.id), adminId: String(row.admin_id), issuedAt: new Date(String(row.issued_at)).toISOString(), lastSeenAt: new Date(String(row.last_seen_at)).toISOString(), expiresAt: new Date(String(row.expires_at)).toISOString(), csrfTokenHash: String(row.csrf_token_hash), revokedAt: iso(row.revoked_at) }; }

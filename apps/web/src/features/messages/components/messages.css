@@ -1,0 +1,35 @@
+.messages-domain { min-height: 100%; }
+.messages-account-tabs { display: flex; gap: 8px; margin-bottom: 14px; overflow-x: auto; }
+.messages-account-tabs button { border: 1px solid var(--line, #d9dde7); background: #fff; color: #4b5563; border-radius: 999px; padding: 8px 14px; display: inline-flex; gap: 8px; align-items: center; white-space: nowrap; }
+.messages-account-tabs button.active { color: #1d4ed8; border-color: #93c5fd; background: #eff6ff; }
+.messages-account-tabs small { opacity: .7; }
+.messages-connection-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; background: #f8fafc; color: #475569; }
+.messages-connection-banner.reconnecting, .messages-connection-banner.timeout { background: #fff7ed; color: #9a3412; }
+.messages-connection-banner.forbidden { background: #fef2f2; color: #b91c1c; }
+.messages-layout { display: grid; grid-template-columns: 340px minmax(0, 1fr); min-height: 560px; overflow: hidden; }
+.messages-sidebar { border-right: 1px solid var(--line, #e5e7eb); background: #fbfcfe; }
+.messages-sidebar-header, .messages-main-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--line, #e5e7eb); }
+.messages-conversation-list { display: flex; flex-direction: column; }
+.messages-conversation-list button { border: 0; background: transparent; display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 10px; text-align: left; padding: 14px 16px; border-bottom: 1px solid #eef1f5; }
+.messages-conversation-list button:hover, .messages-conversation-list button.active { background: #eef5ff; }
+.messages-conversation-avatar { width: 38px; height: 38px; border-radius: 12px; background: #dbeafe; color: #1d4ed8; display: grid; place-items: center; font-weight: 700; }
+.messages-conversation-copy, .messages-conversation-meta { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.messages-conversation-copy strong, .messages-conversation-copy small, .messages-conversation-copy em { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.messages-conversation-copy small, .messages-conversation-copy em, .messages-conversation-meta small { color: #64748b; font-size: 12px; font-style: normal; }
+.messages-conversation-meta { align-items: flex-end; }
+.messages-conversation-meta b { min-width: 20px; height: 20px; border-radius: 999px; display: grid; place-items: center; background: #2563eb; color: #fff; font-size: 11px; }
+.messages-main { min-width: 0; display: flex; flex-direction: column; background: #fff; }
+.messages-main-header small { display: block; color: #64748b; margin-top: 3px; }
+.messages-connection-dot { width: 10px; height: 10px; border-radius: 50%; background: #94a3b8; }
+.messages-connection-dot.connected { background: #22c55e; box-shadow: 0 0 0 4px #dcfce7; }
+.messages-connection-dot.connecting, .messages-connection-dot.reconnecting { background: #f59e0b; }
+.messages-timeline { flex: 1; padding: 20px; overflow: auto; background: linear-gradient(#f8fafc, #fff); }
+.messages-bubble-row { display: flex; margin-bottom: 12px; }
+.messages-bubble-row.outbound { justify-content: flex-end; }
+.messages-bubble { max-width: min(72%, 580px); border-radius: 14px; padding: 10px 12px; background: #f1f5f9; color: #1f2937; display: flex; flex-direction: column; gap: 5px; }
+.messages-bubble.outbound { background: #dbeafe; }
+.messages-bubble small { color: #64748b; font-size: 11px; }
+.messages-state, .messages-timeline-state { padding: 32px 20px; color: #64748b; display: flex; flex-direction: column; gap: 8px; }
+.messages-error { color: #b91c1c; }
+.messages-readonly-badge { border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; padding: 8px 12px; }
+@media (max-width: 900px) { .messages-layout { grid-template-columns: 1fr; } .messages-sidebar { border-right: 0; border-bottom: 1px solid var(--line, #e5e7eb); max-height: 300px; } .messages-bubble { max-width: 86%; } }

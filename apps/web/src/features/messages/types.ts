@@ -1,0 +1,64 @@
+export type MessagesLoadPhase = 'idle' | 'loading' | 'success' | 'empty' | 'error' | 'forbidden';
+export type TimelineLoadPhase = 'idle' | 'loading' | 'success' | 'empty' | 'error' | 'forbidden';
+export type RealtimePhase = 'closed' | 'connecting' | 'connected' | 'reconnecting' | 'timeout' | 'forbidden';
+
+export interface ConversationVM {
+  conversationId: string;
+  accountId: string;
+  buyerRef: string;
+  buyerDisplayName?: string;
+  itemRef?: string;
+  itemTitle?: string;
+  unreadCount: number;
+  lastMessagePreview?: string;
+  lastMessageAt?: string;
+  handlingMode: 'ai' | 'human';
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MessageVM {
+  messageId: string;
+  conversationId: string;
+  accountId: string;
+  direction: 'inbound' | 'outbound';
+  senderRole: 'buyer' | 'agent' | 'system';
+  bodyType: 'text' | 'image' | 'system';
+  bodyText?: string;
+  bodyRef?: string;
+  redactionState: 'visible' | 'redacted';
+  status: 'created';
+  createdAt: string;
+  externalMessageRef?: string;
+  source?: 'human' | 'ai' | 'system';
+  orderRef?: string;
+  productRef?: string;
+  riskFlags: string[];
+  handlingMode: 'ai' | 'human';
+}
+
+export interface RealtimeEvent {
+  eventId: string;
+  conversationId: string;
+  accountId: string;
+  cursor: number;
+  type: 'chat.message.created' | 'chat.conversation.updated' | 'chat.connection.changed';
+  occurredAt: string;
+  traceId: string;
+  payload: Record<string, unknown>;
+}
+
+export interface MessagesError { code: string; message: string; retryable: boolean; }
+
+export interface MessagesState {
+  accountId?: string;
+  listPhase: MessagesLoadPhase;
+  timelinePhase: TimelineLoadPhase;
+  realtimePhase: RealtimePhase;
+  conversations: ConversationVM[];
+  activeConversationId?: string;
+  messages: MessageVM[];
+  cursor: number;
+  error: MessagesError | null;
+}

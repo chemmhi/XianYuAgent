@@ -8,6 +8,7 @@ export interface AppConfig {
   sessionIdleMs: number;
   sessionAbsoluteMs: number;
   xianyuQrMode: 'real' | 'stub';
+  webSocketAllowedOrigins: string[];
 }
 
 export const DEFAULT_DATABASE_URL = 'postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/xianyu_agent';
@@ -29,5 +30,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     sessionIdleMs: Number(env.SESSION_IDLE_MINUTES ?? 30) * 60_000,
     sessionAbsoluteMs: Number(env.SESSION_ABSOLUTE_HOURS ?? 8) * 3_600_000,
     xianyuQrMode: env.XIANYU_QR_MODE === 'stub' ? 'stub' : 'real',
+    webSocketAllowedOrigins: (env.WS_ALLOWED_ORIGINS ?? 'http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080').split(',').map((value) => value.trim()).filter(Boolean),
   };
 }

@@ -11,6 +11,13 @@ export type CouponBatchStatus = 'draft' | 'active' | 'paused' | 'closed' | 'exha
 export type CouponDeliveryScope = 'system_only' | 'operator_only' | 'buyer_deliverable';
 export type CouponItemStatus = 'available' | 'reserved' | 'consumed';
 export type CouponBindingStatus = 'active' | 'inactive';
+export type ConversationHandlingMode = 'ai' | 'human';
+export type MessageDirection = 'inbound' | 'outbound';
+export type MessageSenderRole = 'buyer' | 'agent' | 'system';
+export type MessageBodyType = 'text' | 'image' | 'system';
+export type MessageStatus = 'created';
+export type MessageRedactionState = 'visible' | 'redacted';
+export type ConversationEventType = 'chat.message.created' | 'chat.conversation.updated' | 'chat.connection.changed';
 
 export interface CouponApiConfig {
   url: string;
@@ -272,6 +279,78 @@ export interface LoginSessionRecord {
   qrTokenRef?: string;
 }
 
+export interface ConversationRecord {
+  id: string;
+  accountId: string;
+  externalConversationRef?: string;
+  buyerRef: string;
+  buyerDisplayName?: string;
+  itemRef?: string;
+  itemTitle?: string;
+  unreadCount: number;
+  lastMessagePreview?: string;
+  lastMessageAt?: string;
+  handlingMode: ConversationHandlingMode;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MessageRecord {
+  id: string;
+  conversationId: string;
+  accountId: string;
+  direction: MessageDirection;
+  senderRole: MessageSenderRole;
+  bodyType: MessageBodyType;
+  bodyText?: string;
+  bodyRef?: string;
+  redactionState: MessageRedactionState;
+  status: MessageStatus;
+  externalMessageRef?: string;
+  source?: 'human' | 'ai' | 'system';
+  orderRef?: string;
+  productRef?: string;
+  riskFlags: string[];
+  handlingMode: ConversationHandlingMode;
+  createdAt: string;
+}
+
+export interface ConversationEventRecord {
+  eventId: string;
+  conversationId: string;
+  accountId: string;
+  cursor: number;
+  type: ConversationEventType;
+  occurredAt: string;
+  traceId: string;
+  payload: Record<string, unknown>;
+}
+
+export interface ConversationListQuery {
+  accountId?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface ConversationListResult {
+  items: ConversationRecord[];
+  nextCursor?: string;
+  hasMore: boolean;
+}
+
+export interface MessageListQuery {
+  cursor?: number;
+  limit?: number;
+}
+
+export interface MessageListResult {
+  items: MessageRecord[];
+  nextCursor?: number;
+  hasMore: boolean;
+  latestCursor: number;
+}
+
 export interface CredentialRecord {
   id: string;
   accountId: string;
@@ -382,4 +461,10 @@ export interface Store {
   unbindCouponBatch(input: { adminId: string; batchId: string; productId: string }): Promise<CouponBindingRecord | undefined>;
   voidCouponBatch(input: { adminId: string; batchId: string }): Promise<CouponBatchRecord | undefined>;
   getCouponContent(adminId: string, itemId: string): Promise<{ batch: CouponBatchRecord; item: CouponItemRecord } | undefined>;
+  listConversations(adminId: string, query: ConversationListQuery): Promise<ConversationListResult>;
+  getConversation(adminId: string, conversationId: string): Promise<ConversationRecord | undefined>;
+  listMessages(adminId: string, conversationId: string, query: MessageListQuery): Promise<MessageListResult>;
+  listConversationEvents(adminId: string, conversationId: string, afterCursor: number, limit: number): Promise<ConversationEventRecord[]>;
+  createConversation(input: { adminId: string; accountId: string; buyerRef: string; buyerDisplayName?: string; itemRef?: string; itemTitle?: string; externalConversationRef?: string }): Promise<ConversationRecord>;
+  createMessage(input: { adminId: string; conversationId: string; direction: MessageDirection; senderRole: MessageSenderRole; bodyType: MessageBodyType; bodyText?: string; bodyRef?: string; externalMessageRef?: string; source?: MessageRecord['source']; orderRef?: string; productRef?: string; riskFlags?: string[]; traceId?: string }): Promise<{ message: MessageRecord; event: ConversationEventRecord }>;
 }

@@ -1,4 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { Duplex } from 'node:stream';
+import { WebSocket, WebSocketServer } from 'ws';
 import { loadConfig, type AppConfig } from './config.js';
 import type { AuthContext } from './services.js';
 import { AccountService, AuthService, CouponService, CredentialService, ProductService, ProductSyncService, ServiceError, idempotent } from './services.js';
@@ -8,6 +10,8 @@ import type { ProductListResult, ProductRecord, Store } from './domain.js';
 import { createId, digestJson } from './security.js';
 import { XianyuQrLoginAdapter, type XianyuQrPublicSession } from './xianyu-qr-login.js';
 import { XianyuMtopClient } from './xianyu-mtop.js';
+import { MessageRealtimeHub, MessageService } from './messages.js';
+import { RedisConversationEventBridge } from './messages-realtime.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -18,6 +22,8 @@ export interface AppRuntime {
   products: ProductService;
   productSync: ProductSyncService;
   credentials: CredentialService;
+  messages: MessageService;
+  redisRealtime?: RedisConversationEventBridge;
   qrLogin: XianyuQrLoginAdapter;
   xianyu: XianyuMtopClient;
   server: Server;
@@ -48,6 +54,16 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   });
+  const realtime = new MessageRealtimeHub();
+  const redisRealtime = config.redisUrl && !config.allowInMemory
+    ? new RedisConversationEventBridge(config.redisUrl, (event) => realtime.publish(event))
+    : undefined;
+  redisRealtime?.start();
+  const messages = new MessageService(store, async (input) => {
+    const auditId = createId();
+    await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
+    return auditId;
+  }, realtime, (event) => redisRealtime?.publish(event));
   let xianyu: XianyuMtopClient;
   let productSync: ProductSyncService;
   const qrLogin = new XianyuQrLoginAdapter({
@@ -98,12 +114,26 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     return auditId;
   });
 
+  const wsServer = new WebSocketServer({ noServer: true });
+  const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, products, productSync, credentials, qrLogin, xianyu,
-    server: createServer((request, response) => { void handleRequest(runtime, request, response); }),
+    config, store, auth, accounts, coupons, products, productSync, credentials, messages, redisRealtime, qrLogin, xianyu,
+    server,
     async listen() { await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve)); },
-    async close() { await new Promise<void>((resolve, reject) => runtime.server.close((error) => error ? reject(error) : resolve())); const close = (store as Store & { close?: () => Promise<void> }).close; if (close) await close.call(store); },
+    async close() {
+      for (const client of wsServer.clients) client.close(1001, 'server shutdown');
+      await new Promise<void>((resolve) => wsServer.close(() => resolve()));
+      await new Promise<void>((resolve, reject) => runtime.server.close((error) => error ? reject(error) : resolve()));
+      await redisRealtime?.close();
+      const close = (store as Store & { close?: () => Promise<void> }).close;
+      if (close) await close.call(store);
+    },
   };
+  server.on('upgrade', (request, socket, head) => { void handleConversationUpgrade(runtime, wsServer, request, socket, head); });
+  wsServer.on('connection', (socket: WebSocket, request: IncomingMessage) => {
+    const context = (request as IncomingMessage & { __xianyuConversationContext?: { adminId: string; conversationId: string; cursor: number } }).__xianyuConversationContext;
+    if (context) void attachConversationSocket(runtime, socket, request, context);
+  });
   return runtime;
 }
 
@@ -126,10 +156,13 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
 }
 
 async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: ServerResponse): Promise<{ statusCode: number; body: unknown } | undefined> {
-  const { auth, accounts, coupons, products, productSync, credentials, store, config } = runtime;
+  const { auth, accounts, coupons, products, productSync, credentials, messages, store, config } = runtime;
   if (ctx.path === '/healthz' && ctx.method === 'GET') {
     const health = await store.health();
-    const body = success(ctx, { status: health.reachable ? 'ok' : 'degraded', storage: health.kind, services: { api: 'ok', database: health.reachable ? 'ok' : 'unavailable', redis: config.redisUrl ? 'configured' : 'not_configured' } });
+    const redis = !config.redisUrl || !runtime.redisRealtime
+      ? 'not_configured'
+      : (await runtime.redisRealtime.health()).reachable ? 'ok' : 'unavailable';
+    const body = success(ctx, { status: health.reachable ? 'ok' : 'degraded', storage: health.kind, services: { api: 'ok', database: health.reachable ? 'ok' : 'unavailable', redis } });
     return { statusCode: health.reachable ? 200 : 503, body: body.body };
   }
   if (ctx.path === '/readyz' && ctx.method === 'GET') {
@@ -173,6 +206,17 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     setCookie(response, 'session_id', '', { httpOnly: true, secure: config.cookieSecure, maxAge: 0 });
     setCookie(response, 'csrf_token', '', { secure: config.cookieSecure, maxAge: 0 });
     return { statusCode: 200, body: success(ctx, { loggedOut: true }).body };
+  }
+
+  if (ctx.path === '/api/v1/conversations' && ctx.method === 'GET') {
+    const result = await messages.listConversations(authContext.admin.id, parseConversationListQuery(ctx.query));
+    return { statusCode: 200, body: success(ctx, result).body };
+  }
+  const conversationMessagesMatch = ctx.path.match(/^\/api\/v1\/conversations\/([^/]+)\/messages$/);
+  if (conversationMessagesMatch && ctx.method === 'GET') {
+    const conversationId = decodeURIComponent(conversationMessagesMatch[1]);
+    const result = await messages.listMessages(authContext.admin.id, conversationId, parseMessageListQuery(ctx.query));
+    return { statusCode: 200, body: success(ctx, result).body };
   }
 
   const loginSessionMatch = ctx.path.match(/^\/api\/v1\/accounts\/([^/]+)\/login-sessions(?:\/([^/]+)(?:\/(cancel|renew|complete))?)?$/);
@@ -507,6 +551,86 @@ function parseCouponBatchListQuery(query: Record<string, string>): import('./dom
     page: page === undefined || Number.isNaN(page) ? page : Math.trunc(page),
     pageSize: pageSize === undefined || Number.isNaN(pageSize) ? pageSize : Math.trunc(pageSize),
   };
+}
+
+function parseConversationListQuery(query: Record<string, string>): import('./domain.js').ConversationListQuery {
+  const cursor = query.cursor === undefined ? undefined : query.cursor;
+  const limit = query.limit === undefined ? undefined : Number(query.limit);
+  return { accountId: optionalString(query.accountId), cursor, limit: limit === undefined || Number.isNaN(limit) ? limit : Math.trunc(limit) };
+}
+
+function parseMessageListQuery(query: Record<string, string>): import('./domain.js').MessageListQuery {
+  const cursor = query.cursor === undefined ? undefined : Number(query.cursor);
+  const limit = query.limit === undefined ? undefined : Number(query.limit);
+  return { cursor: cursor === undefined || Number.isNaN(cursor) ? cursor : Math.trunc(cursor), limit: limit === undefined || Number.isNaN(limit) ? limit : Math.trunc(limit) };
+}
+
+async function handleConversationUpgrade(runtime: AppRuntime, wsServer: WebSocketServer, request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
+  const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
+  const match = url.pathname.match(/^\/api\/v1\/conversations\/([^/]+)\/events$/);
+  if (!match) { socket.destroy(); return; }
+  const origin = request.headers.origin;
+  if (!origin || !runtime.config.webSocketAllowedOrigins.includes(origin)) { rejectUpgrade(socket, 403, 'origin forbidden'); return; }
+  const cookies = parseCookies(request.headers.cookie);
+  const authContext = await runtime.auth.contextFromSession(cookies.session_id);
+  if (!authContext) { rejectUpgrade(socket, 401, 'session required'); return; }
+  const conversationId = decodeURIComponent(match[1]);
+  try {
+    await runtime.messages.getConversation(authContext.admin.id, conversationId);
+  } catch (error) {
+    const status = error instanceof ServiceError ? error.statusCode : 404;
+    rejectUpgrade(socket, status, status === 403 ? 'forbidden' : 'conversation not found');
+    return;
+  }
+  const rawCursor = Number(url.searchParams.get('cursor') ?? '0');
+  const cursor = Number.isSafeInteger(rawCursor) && rawCursor >= 0 ? rawCursor : 0;
+  Object.assign(request, { __xianyuConversationContext: { adminId: authContext.admin.id, conversationId, cursor } });
+  wsServer.handleUpgrade(request, socket, head, (client) => wsServer.emit('connection', client, request));
+}
+
+async function attachConversationSocket(runtime: AppRuntime, socket: WebSocket, _request: IncomingMessage, context: { adminId: string; conversationId: string; cursor: number }): Promise<void> {
+  let sentCursor = context.cursor;
+  let ready = false;
+  let queue: import('./messages.js').RealtimeEventVM[] = [];
+  const unsubscribe = runtime.messages.realtime.subscribe(context.conversationId, (event) => {
+    if (!ready) { queue.push(event); return; }
+    if (event.cursor <= sentCursor || event.eventId === '') return;
+    sentCursor = event.cursor;
+    sendSocketEvent(socket, event);
+  });
+  socket.on('close', unsubscribe);
+  socket.on('error', unsubscribe);
+  try {
+    if (socket.readyState !== WebSocket.OPEN) return;
+    const backlog = await runtime.messages.listEvents(context.adminId, context.conversationId, context.cursor, 200);
+    for (const event of backlog) {
+      if (event.cursor <= sentCursor) continue;
+      sentCursor = event.cursor;
+      sendSocketEvent(socket, event);
+    }
+    ready = true;
+    const pending = queue;
+    queue = [];
+    for (const event of pending.sort((left, right) => left.cursor - right.cursor)) {
+      if (event.cursor <= sentCursor) continue;
+      sentCursor = event.cursor;
+      sendSocketEvent(socket, event);
+    }
+    if (socket.readyState === WebSocket.OPEN) sendSocketEvent(socket, { eventId: `connection:${context.conversationId}:${Date.now()}`, conversationId: context.conversationId, accountId: (await runtime.messages.getConversation(context.adminId, context.conversationId)).accountId, cursor: sentCursor, type: 'chat.connection.changed', occurredAt: new Date().toISOString(), traceId: `ws:${context.conversationId}`, payload: { status: 'connected', cursor: sentCursor } });
+  } catch {
+    if (socket.readyState === WebSocket.OPEN) socket.close(1011, 'realtime unavailable');
+    unsubscribe();
+  }
+}
+
+function sendSocketEvent(socket: WebSocket, event: import('./messages.js').RealtimeEventVM): void {
+  if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(event));
+}
+
+function rejectUpgrade(socket: Duplex, status: number, message: string): void {
+  const body = `${message}\n`;
+  socket.write(`HTTP/1.1 ${status} ${status === 401 ? 'Unauthorized' : status === 403 ? 'Forbidden' : 'Not Found'}\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
+  socket.destroy();
 }
 
 function parseExpectedProductVersion(ctx: RequestContext): number {

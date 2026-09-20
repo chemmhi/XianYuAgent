@@ -18,7 +18,7 @@
 | `S4-VS3` 卡券首页 | `READY_FOR_REVIEW` | API smoke、Chrome/CDP、桌面/移动截图、代码已合入 master | 真实 PostgreSQL/Redis/MinIO、逐状态人工浏览器审核、迁移整理 |
 | `S4-VS3A/B` 卡券明细/素材/库存锁 | `PLANNED` | `CouponItem`、`CouponAssetRef`、`InventoryLockVM` 契约已冻结 | bulk-save/delete、MinIO、reserve/consume/release、敏感交付边界 |
 | `S4-VS4A/B/C` 订单与交付 | `PLANNED` | 订单 API、四态、delivery mode 契约已冻结 | 只读、预览、库存锁、交付动作、unknown/重试/取消 |
-| `S4-VS5A` 在线聊天读取与实时连接 | `PLANNED` | Messages route/controller/WS 契约已冻结 | Redis/WS、cursor 重连、未读、403/空、桌面/移动 |
+| `S4-VS5A` 在线聊天读取与实时连接 | `PARTIALLY_VERIFIED` | canonical HTTP/WS、MemoryStore + `015_messages.sql`、双 API 实例 Redis 跨进程广播、Redis/PostgreSQL 重启恢复 smoke、前端 MessagesPage/controller、cursor 重连 smoke | Chrome/CDP 桌面/移动、断线人工操作与视觉证据 |
 | `S4-VS5B` 在线聊天发送/附件/撤回 | `PLANNED` | Message 状态机和发送/图片/撤回 API 已冻结 | 持久化、对象存储、幂等、unknown/timeout、脱敏 |
 | `S4-VS5C` 人工接管与 AI 恢复 | `PLANNED` | handoff/release、版本和审计契约已冻结 | 非法转换、403/409、页面禁用、移动端 |
 | `S4-VS6A` Workspace 会话与 Run 首链路 | `PLANNED` | AgentSession/Run/Step/WS 契约已冻结 | Worker/Runtime、持久化、clientRunRef、游标重连 |
