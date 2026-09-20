@@ -127,6 +127,13 @@
 - 新增 `018_orders.sql` 使用单调编号并已在当前 PostgreSQL 实例执行；`S5-RISK-019` 仍开放，因为完整迁移回滚、旧数据兼容、Testcontainers 和发布级恢复演练尚未完成。
 - 实闲鱼只读请求当前返回 `PERMISSION_EXCEPTION::无权限访问`，此前错误请求/错误 mapper 曾把该问题伪装为成功 0 条；修复后权限失败已向 API 暴露为 `MTOP_PERMISSION_DENIED`，未使用 fixture 伪造真实外部订单。
 
+### 2026-09-20 S4-VS4A 订单列表界面修订风险复核
+
+- 本轮仅调整订单列表前端展示与交互：移除页面标题，保留操作列/查看详情/详情抽屉，收敛搜索与状态筛选，增加买家姓名悬浮提示、表格内部滚动和分页；不改变订单 API、数据库、外部请求、状态模型或交付边界。
+- `S5-RISK-017` 继续保持开放：四套订单状态仍按既有 canonical 字段投影到当前状态筛选；交付预览、库存锁、发货/取消/重试、unknown/timeout、Outbox 和 DeliveryRecord 仍不在本轮范围。
+- `S5-RISK-027` 继续保持 OPEN：真实 seller 订单接口仍对当前账号返回 `PERMISSION_EXCEPTION::无权限访问`；受控 Chrome/CDP、PostgreSQL、参考响应和 UI 证据不能替代完整浏览器 Cookie/Jar 或具备 seller 订单权限的真实账号。
+- 买家昵称与实名目前继续共用既有 `buyerName` 数据契约；本轮只增加悬浮提示，不伪造额外实名字段。详情抽屉内容留待下一步单独调整。
+
 ### 2026-09-20 S4-VS7A Settings API Key 风险复核
 
 - `S5-RISK-026` 已部分缓解但保持开放：CredentialStore 已独立于通用设置保存入口，API 只返回 `CredentialRef` 脱敏 metadata，明文仅在 create/rotate 请求边界出现；`Idempotency-Key`、`expectedVersion`、账号 scope、轮换/启停/撤销审计、403/409 与撤销后禁止启用均已由 smoke/Chrome/CDP 覆盖。旧 `auth.account_credentials` 兼容迁移仍需独立方案与签核。

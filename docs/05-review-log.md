@@ -333,6 +333,16 @@
 | S5-R58 | 范围 / 发布门禁 | 是否误把交付预览、发货/取消/重试、库存锁、Outbox、DeliveryRecord 宣称为本片完成 | root | PASS | `docs/evidence/stage5/S4-VS4A/test-baseline.md`；`S4-VS4B/C` 保持后置 |
 
 本轮结论：`S4-VS4A = PARTIALLY_VERIFIED/BLOCKED`。前端、后端、PostgreSQL、浏览器和参考响应解析已通过；真实 seller 订单请求仍被当前账号权限拒绝，待补充完整浏览器 Cookie/Jar 或可访问订单权限后复验；交付相关能力继续按 `S4-VS4B/C` 单独立项和复审。
+
+### 2026-09-20：S4-VS4A 订单列表界面修订复核
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R62 | 业务 / 验收 | 订单列表是否收敛为订单号、买家昵称、商品名称、金额、下单时间、当前状态六个业务列，并保留操作列、查看详情按钮和详情抽屉 | root + orders_e2e | PASS | `apps/web/src/features/orders/components/OrderTable.tsx`、`OrdersPage.tsx`；`npm run test:e2e:chrome:orders` |
+| S5-R63 | UI / 交互 | 筛选区是否仅保留关键词搜索和单状态下拉，买家昵称是否支持姓名悬浮提示，表格是否自适应高度、内部滚动并分页 | root + orders_e2e | PASS | `OrderFilters.tsx`、`orders.css`、`OrderFilters.test.ts`、`OrderTable.test.ts`、订单桌面/移动截图 |
+| S5-R64 | 质量 / 交付 | 修订是否在独立 worktree、merge lock 和主线验证后合入，且不误改详情抽屉内容或真实外部权限结论 | root | PASS | `8ad36cd`、`npm run typecheck`、`npm test`、`npm run build`、`npm run compose:config`、`git diff --check`、`docs/agent-worktree-registry.md` |
+
+本轮结论：订单列表界面修订已合入 `master`；详情抽屉内容按用户更正保留原样，下一步再单独调整。真实 seller 订单请求仍返回 `PERMISSION_EXCEPTION::无权限访问`，因此 `S4-VS4A` 整体继续保持 `PARTIALLY_VERIFIED/BLOCKED`。
 ### 2026-09-20：S4-VS7A Settings API Key 首片复核
 
 本节只复核当前实现和受控证据，不把 MemoryStore smoke、构建成功或页面可打开升级为发布级通过。

@@ -17,7 +17,8 @@
 | `S4-VS2E` 商品外部同步真实验收 | `PARTIALLY_VERIFIED` | 受控 MTOP mapper、Memory/Postgres、fixture E2E | 当前已登录 Chrome + 真实闲鱼账号、分页和数量口径复核 |
 | `S4-VS3` 卡券首页 | `READY_FOR_REVIEW` | API smoke、Chrome/CDP、桌面/移动截图、代码已合入 master | 真实 PostgreSQL/Redis/MinIO、逐状态人工浏览器审核、迁移整理 |
 | `S4-VS3A/B` 卡券明细/素材/库存锁 | `PLANNED` | `CouponItem`、`CouponAssetRef`、`InventoryLockVM` 契约已冻结 | bulk-save/delete、MinIO、reserve/consume/release、敏感交付边界 |
-| `S4-VS4A/B/C` 订单与交付 | `PLANNED` | 订单 API、四态、delivery mode 契约已冻结 | 只读、预览、库存锁、交付动作、unknown/重试/取消 |
+| `S4-VS4A` 订单列表只读 | `PARTIALLY_VERIFIED/BLOCKED` | 订单 API、四态、账号 scope、关键词搜索、单状态筛选、六列 + 操作列、详情抽屉、分页、内部滚动、桌面/移动截图 | 真实 seller 订单接口权限、完整浏览器 Cookie/Jar 或可访问订单权限的账号 |
+| `S4-VS4B/C` 订单交付 | `PLANNED` | delivery mode 契约已冻结 | 交付预览、库存锁、发货/取消/重试、unknown/Outbox/DeliveryRecord |
 | `S4-VS5A` 在线聊天读取与实时连接 | `PARTIALLY_VERIFIED` | canonical HTTP/WS、MemoryStore/PostgreSQL + `015_messages.sql` + `016_conversation_media.sql`、双 API 实例 Redis 跨进程广播、Redis/PostgreSQL 重启恢复、cursor 去重、Chrome/CDP 双 viewport 断线视觉证据、搜索/未读/独立滚动/选择/头像/商品缩略图交互 | 独立复审、生产部署拓扑确认；发送/附件/撤回进入 `S4-VS5B` |
 | `S4-VS5B` 在线聊天发送/附件/撤回 | `PLANNED` | Message 状态机和发送/图片/撤回 API 已冻结 | 持久化、对象存储、幂等、unknown/timeout、脱敏 |
 | `S4-VS5C` 人工接管与 AI 恢复 | `PLANNED` | handoff/release、版本和审计契约已冻结 | 非法转换、403/409、页面禁用、移动端 |
@@ -55,6 +56,13 @@
 5. 横向独立执行 `S4-ENV-RECOVERY`、`S4-EXT-ACCOUNT`、`S4-ENV-RUNTIME`，每项都保留真实环境证据和回滚结果。
 
 ## Git / 证据记录
+
+### 2026-09-20：S4-VS4A 订单列表界面修订
+
+- `8ad36cd` 已在 merge lock 内以 `--no-ff` 合入 `master`；`fix/orders-ui` 的独立 worktree 已完成主线验证前的代码交付。
+- 本轮通过 `npm run typecheck`、`npm test`（API smoke + Web 36 个测试文件 / 107 个用例）、`npm run build`、`npm run compose:config`、`node --check apps/web/scripts/e2e-orders-chrome.mjs` 和 `git diff --check`。
+- Chrome/CDP 订单 E2E 覆盖账号切换与隔离、六列表头、关键词搜索、单状态筛选、买家姓名 tooltip、详情抽屉、分页、表格内部滚动、本地刷新和闲鱼刷新；桌面/移动截图已归档至 `docs/evidence/stage5/S4-VS4A/screenshots/`。
+- 详情抽屉内容本轮保持不变；真实 seller 订单读取仍因 `MTOP_PERMISSION_DENIED / PERMISSION_EXCEPTION::无权限访问` 保持 `PARTIALLY_VERIFIED/BLOCKED`，不宣称真实外部订单验收完成。
 
 ### 2026-09-20：S4-VS5A 真实恢复与浏览器证据
 
