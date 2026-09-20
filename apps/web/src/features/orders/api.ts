@@ -46,14 +46,25 @@ function mapOrder(raw: unknown, fallbackAccountId?: string): OrderVM {
   const orderNo = String(item.orderNo ?? item.order_no ?? item.orderId ?? item.order_id ?? '');
   const hasMinorAmount = item.amountMinor !== undefined || item.amount_minor !== undefined;
   const amount = Number(item.amountMinor ?? item.amount_minor ?? item.amount ?? 0);
+  const buyerName = String(item.buyerName ?? item.buyer_name ?? item.buyerRealName ?? item.buyer_real_name ?? item.receiverName ?? item.receiver_name ?? '');
+  const buyerNickname = typeof (item.buyerNickname ?? item.buyer_nickname ?? item.buyerNick ?? item.buyer_nick ?? item.buyerFishNick ?? item.buyer_fish_nick ?? item.fishNick ?? item.userNick ?? item.user_nick ?? item.nickname ?? item.nick) === 'string'
+    ? String(item.buyerNickname ?? item.buyer_nickname ?? item.buyerNick ?? item.buyer_nick ?? item.buyerFishNick ?? item.buyer_fish_nick ?? item.fishNick ?? item.userNick ?? item.user_nick ?? item.nickname ?? item.nick)
+    : undefined;
+  const rawBuyerAvatarUrl = item.buyerAvatarUrl ?? item.buyer_avatar_url ?? item.buyerAvatar ?? item.buyer_avatar ?? item.avatarUrl ?? item.avatar_url ?? item.headPic ?? item.head_pic;
+  const buyerAvatarUrl = typeof rawBuyerAvatarUrl === 'string' && rawBuyerAvatarUrl.trim() ? rawBuyerAvatarUrl.trim() : undefined;
+  const itemId = String(item.itemId ?? item.item_id ?? '');
+  const rawItemTitle = item.itemTitle ?? item.item_title ?? item.itemName ?? item.item_name ?? item.goodsTitle ?? item.goods_title ?? item.productTitle ?? item.product_title ?? item.title;
+  const itemTitle = typeof rawItemTitle === 'string' && rawItemTitle.trim() && rawItemTitle.trim() !== itemId.trim() ? rawItemTitle.trim() : '';
   return {
     orderNo,
     accountId: String(item.accountId ?? item.account_id ?? item.cookieId ?? item.cookie_id ?? fallbackAccountId ?? ''),
     accountName: typeof item.accountName === 'string' ? item.accountName : undefined,
     buyerId: String(item.buyerId ?? item.buyer_id ?? ''),
-    buyerName: String(item.buyerName ?? item.buyer_name ?? item.buyerFishNick ?? item.buyer_fish_nick ?? item.buyerId ?? item.buyer_id ?? '未知买家'),
-    itemId: String(item.itemId ?? item.item_id ?? ''),
-    itemTitle: String(item.itemTitle ?? item.item_title ?? item.itemId ?? item.item_id ?? '未命名商品'),
+    buyerName,
+    buyerNickname,
+    buyerAvatarUrl,
+    itemId,
+    itemTitle,
     amountMinor: hasMinorAmount ? amount : Math.round(amount * 100),
     paymentStatus: asStatus(item.paymentStatus ?? item.payment_status, paymentStatuses, 'unknown'),
     orderStatus: asStatus(item.orderStatus ?? item.order_status, orderStatuses, 'open'),
@@ -104,13 +115,15 @@ export function createOrdersApi(options: { get: <T>(path: string) => Promise<T>;
   };
 }
 
+const mockBuyerAvatarUrl = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2240%22 height=%2240%22 viewBox=%220 0 40 40%22%3E%3Ccircle cx=%2220%22 cy=%2220%22 r=%2220%22 fill=%22%23dbeafe%22/%3E%3Ccircle cx=%2220%22 cy=%2216%22 r=%227%22 fill=%22%231d4ed8%22/%3E%3Cpath d=%22M9 34c2-7 20-7 22 0%22 fill=%22%231d4ed8%22/%3E%3C/svg%3E';
+
 const mockOrders: OrderVM[] = [
-  { orderNo: 'XY202609180012', accountId: 'A', accountName: '闲鱼账号 A', buyerId: 'buyer_983421', buyerName: '陈赟cc', itemId: 'ITEM-93821', itemTitle: 'Python 全栈资料包', amountMinor: 3990, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'coupon_only', createdAt: '2026-09-18T14:18:00+08:00', updatedAt: '2026-09-18T14:18:00+08:00', configVersion: 1, conversationId: 'cid_001' },
-  { orderNo: 'XY202609180009', accountId: 'A', accountName: '闲鱼账号 A', buyerId: 'buyer_221804', buyerName: '麦麦折扣', itemId: 'ITEM-93817', itemTitle: 'GitHub 源码下载', amountMinor: 1990, paymentStatus: 'paid', orderStatus: 'completed', deliveryStatus: 'delivered', afterSalesStatus: 'none', deliveryType: 'mixed', createdAt: '2026-09-18T14:05:00+08:00', updatedAt: '2026-09-18T14:06:00+08:00', configVersion: 1, conversationId: 'cid_002' },
-  { orderNo: 'XY202609180003', accountId: 'A', accountName: '闲鱼账号 A', buyerId: 'buyer_442118', buyerName: '梵子BooM', itemId: 'ITEM-93011', itemTitle: '雅思单词 7000 词', amountMinor: 2990, paymentStatus: 'closed', orderStatus: 'closed', deliveryStatus: 'delivered', afterSalesStatus: 'refunding', deliveryType: 'manual', createdAt: '2026-09-18T11:26:00+08:00', updatedAt: '2026-09-18T13:12:00+08:00', configVersion: 2, conversationId: 'cid_003' },
-  { orderNo: 'XY202609170088', accountId: 'A', accountName: '闲鱼账号 A', buyerId: 'buyer_668702', buyerName: '北海小姐', itemId: 'ITEM-92007', itemTitle: 'Hermes Agent 企业实战', amountMinor: 5990, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'delivered', afterSalesStatus: 'none', deliveryType: 'no_logistics', createdAt: '2026-09-17T18:41:00+08:00', updatedAt: '2026-09-17T18:42:00+08:00', configVersion: 1 },
-  { orderNo: 'XY202609170061', accountId: 'B', accountName: '闲鱼账号 B', buyerId: 'buyer_712633', buyerName: '胡桃夹子', itemId: 'ITEM-93688', itemTitle: 'ComfyUI 基础训练营', amountMinor: 12900, paymentStatus: 'paid', orderStatus: 'failed', deliveryStatus: 'failed', afterSalesStatus: 'none', deliveryType: 'coupon_only', createdAt: '2026-09-17T16:40:00+08:00', updatedAt: '2026-09-17T16:41:00+08:00', deliveryFailReason: '可用卡券库存不足，等待人工处理', configVersion: 1 },
-  { orderNo: 'XY202609170032', accountId: 'B', accountName: '闲鱼账号 B', buyerId: 'buyer_16254876', buyerName: '用户_16254876', itemId: 'ITEM-91551', itemTitle: '婚礼视频制作', amountMinor: 9900, paymentStatus: 'closed', orderStatus: 'cancelled', deliveryStatus: 'cancelled', afterSalesStatus: 'closed', deliveryType: 'manual', createdAt: '2026-09-17T10:08:00+08:00', updatedAt: '2026-09-17T10:30:00+08:00', configVersion: 1 },
+  { orderNo: 'XY202609180012', accountId: 'A', accountName: '闲鱼账号 A', buyerId: 'buyer_983421', buyerNickname: '陈赟cc', buyerName: '陈赟', buyerAvatarUrl: mockBuyerAvatarUrl, itemId: 'ITEM-93821', itemTitle: 'Python 全栈资料包', amountMinor: 3990, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'coupon_only', createdAt: '2026-09-18T14:18:00+08:00', updatedAt: '2026-09-18T14:18:00+08:00', configVersion: 1, conversationId: 'cid_001' },
+  { orderNo: 'XY202609180009', accountId: 'A', accountName: '闲鱼账号 A', buyerId: 'buyer_221804', buyerNickname: '麦麦折扣', buyerName: '麦麦', itemId: 'ITEM-93817', itemTitle: 'GitHub 源码下载', amountMinor: 1990, paymentStatus: 'paid', orderStatus: 'completed', deliveryStatus: 'delivered', afterSalesStatus: 'none', deliveryType: 'mixed', createdAt: '2026-09-18T14:05:00+08:00', updatedAt: '2026-09-18T14:06:00+08:00', configVersion: 1, conversationId: 'cid_002' },
+  { orderNo: 'XY202609180003', accountId: 'A', accountName: '闲鱼账号 A', buyerId: 'buyer_442118', buyerNickname: '梵子BooM', buyerName: '梵子', itemId: 'ITEM-93011', itemTitle: '雅思单词 7000 词', amountMinor: 2990, paymentStatus: 'closed', orderStatus: 'closed', deliveryStatus: 'delivered', afterSalesStatus: 'refunding', deliveryType: 'manual', createdAt: '2026-09-18T11:26:00+08:00', updatedAt: '2026-09-18T13:12:00+08:00', configVersion: 2, conversationId: 'cid_003' },
+  { orderNo: 'XY202609170088', accountId: 'A', accountName: '闲鱼账号 A', buyerId: 'buyer_668702', buyerNickname: '北海小姐', buyerName: '北海', itemId: 'ITEM-92007', itemTitle: 'Hermes Agent 企业实战', amountMinor: 5990, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'delivered', afterSalesStatus: 'none', deliveryType: 'no_logistics', createdAt: '2026-09-17T18:41:00+08:00', updatedAt: '2026-09-17T18:42:00+08:00', configVersion: 1 },
+  { orderNo: 'XY202609170061', accountId: 'B', accountName: '闲鱼账号 B', buyerId: 'buyer_712633', buyerNickname: '胡桃夹子', buyerName: '胡桃', itemId: 'ITEM-93688', itemTitle: 'ComfyUI 基础训练营', amountMinor: 12900, paymentStatus: 'paid', orderStatus: 'failed', deliveryStatus: 'failed', afterSalesStatus: 'none', deliveryType: 'coupon_only', createdAt: '2026-09-17T16:40:00+08:00', updatedAt: '2026-09-17T16:41:00+08:00', deliveryFailReason: '可用卡券库存不足，等待人工处理', configVersion: 1 },
+  { orderNo: 'XY202609170032', accountId: 'B', accountName: '用户_16254876', buyerId: 'buyer_16254876', buyerNickname: '用户_16254876', buyerName: '用户', itemId: 'ITEM-91551', itemTitle: '婚礼视频制作', amountMinor: 9900, paymentStatus: 'closed', orderStatus: 'cancelled', deliveryStatus: 'cancelled', afterSalesStatus: 'closed', deliveryType: 'manual', createdAt: '2026-09-17T10:08:00+08:00', updatedAt: '2026-09-17T10:30:00+08:00', configVersion: 1 },
 ];
 
 function cloneOrder(order: OrderVM): OrderVM { return { ...order }; }
@@ -119,7 +132,7 @@ export function createMockOrdersApi(): OrdersApi {
     async list(filters) {
       const keyword = filters.keyword?.trim().toLowerCase();
       const filtered = mockOrders.filter((order) => (!filters.accountId || order.accountId === filters.accountId)
-        && (!keyword || [order.orderNo, order.buyerId, order.buyerName, order.itemId, order.itemTitle].some((value) => value.toLowerCase().includes(keyword)))
+        && (!keyword || [order.orderNo, order.buyerNickname ?? '', order.itemTitle].some((value) => value.toLowerCase().includes(keyword)))
         && (!filters.paymentStatus || filters.paymentStatus === 'all' || order.paymentStatus === filters.paymentStatus)
         && (!filters.orderStatus || filters.orderStatus === 'all' || order.orderStatus === filters.orderStatus)
         && (!filters.deliveryStatus || filters.deliveryStatus === 'all' || order.deliveryStatus === filters.deliveryStatus)

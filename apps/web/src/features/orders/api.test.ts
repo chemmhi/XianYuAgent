@@ -7,7 +7,7 @@ describe('orders api', () => {
     const api = createOrdersApi({
       get: async <T>(path: string) => {
         calls.push(path);
-        return { items: [{ orderNo: 'O-1', accountId: 'A', buyerId: 'B', buyerName: '买家', itemId: 'I', itemTitle: '商品', amountMinor: 1990, paymentStatus: 'paid', orderStatus: 'completed', deliveryStatus: 'delivered', afterSalesStatus: 'none', createdAt: '2026-09-20T09:00:00Z', configVersion: 1 }] } as T;
+        return { items: [{ orderNo: 'O-1', accountId: 'A', buyerId: 'B', buyerNickname: '买家昵称', buyerName: '买家姓名', itemId: 'I', itemTitle: '商品标题', amountMinor: 1990, paymentStatus: 'paid', orderStatus: 'completed', deliveryStatus: 'delivered', afterSalesStatus: 'none', createdAt: '2026-09-20T09:00:00Z', configVersion: 1 }] } as T;
       },
       post: async <T>() => undefined as T,
     });
@@ -18,7 +18,16 @@ describe('orders api', () => {
     expect(calls[0]).toContain('orderStatus=completed');
     expect(calls[0]).toContain('deliveryStatus=delivered');
     expect(calls[0]).toContain('afterSalesStatus=none');
-    expect(page.items[0]).toMatchObject({ paymentStatus: 'paid', orderStatus: 'completed', deliveryStatus: 'delivered', afterSalesStatus: 'none', amountMinor: 1990 });
+    expect(page.items[0]).toMatchObject({ paymentStatus: 'paid', orderStatus: 'completed', deliveryStatus: 'delivered', afterSalesStatus: 'none', amountMinor: 1990, buyerNickname: '买家昵称', buyerName: '买家姓名', itemTitle: '商品标题' });
+  });
+
+  it('does not expose an item id as the product title when the backend has no title', async () => {
+    const api = createOrdersApi({
+      get: async <T>() => ({ items: [{ orderNo: 'O-2', accountId: 'A', buyerId: 'B', buyerName: '买家', itemId: 'ITEM-2', amountMinor: 100, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', createdAt: '2026-09-20T09:00:00Z', configVersion: 1 }] } as T),
+      post: async <T>() => undefined as T,
+    });
+    const page = await api.list({ accountId: 'A', page: 1, pageSize: 20 });
+    expect(page.items[0]?.itemTitle).toBe('');
   });
 
   it('filters mock orders by account and keyword without mutating fixtures', async () => {
@@ -29,6 +38,12 @@ describe('orders api', () => {
     expect(failed.items.map((item) => item.orderNo)).toEqual(['XY202609170061']);
     const search = await api.list({ keyword: '胡桃夹子', page: 1, pageSize: 20 });
     expect(search.items[0]?.orderNo).toBe('XY202609170061');
+  });
+
+  it('does not search mock orders by buyer id or item id', async () => {
+    const api = createMockOrdersApi();
+    expect((await api.list({ keyword: 'buyer_712633', page: 1, pageSize: 20 })).total).toBe(0);
+    expect((await api.list({ keyword: 'ITEM-93688', page: 1, pageSize: 20 })).total).toBe(0);
   });
 
   it('sends an idempotency key for Xianyu refresh mutations', async () => {

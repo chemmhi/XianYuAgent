@@ -183,6 +183,8 @@ async function run() {
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'orders page');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('订单列表'), 'orders heading');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('订单验收商品'), 'seeded order row');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('订单验收昵称'), 'seeded buyer nickname');
+  await waitFor(async () => Boolean(await evaluate(cdp, 'document.querySelectorAll("[data-order-no] .orders-avatar img").length > 0')), 'seeded buyer avatar');
   await waitFor(async () => apiEvent(cdp.events, 'GET', '/api/v1/orders', (url) => url.searchParams.get('accountId') === account.id), 'scoped orders request');
   if (!String(await evaluate(cdp, 'document.body.innerText')).includes('共 21 单')) throw new Error('initial order total missing');
   const tableHeaders = String(await evaluate(cdp, 'document.querySelector("[data-testid=orders-table]")?.textContent ?? ""'));
@@ -203,8 +205,8 @@ async function run() {
   await waitFor(async () => apiEvent(cdp.events.slice(statusResetMark), 'GET', '/api/v1/orders', (url) => !url.searchParams.has('paymentStatus') && !url.searchParams.has('deliveryStatus') && !url.searchParams.has('orderStatus') && !url.searchParams.has('afterSalesStatus')), 'order status reset request');
 
   const keywordMark = cdp.events.length;
-  if (!await evaluate(cdp, setInputScript('搜索订单', '订单验收买家'))) throw new Error('order search input missing');
-  await waitFor(async () => apiEvent(cdp.events.slice(keywordMark), 'GET', '/api/v1/orders', (url) => url.searchParams.get('keyword') === '订单验收买家'), 'keyword request');
+  if (!await evaluate(cdp, setInputScript('搜索订单', '订单验收昵称'))) throw new Error('order search input missing');
+  await waitFor(async () => apiEvent(cdp.events.slice(keywordMark), 'GET', '/api/v1/orders', (url) => url.searchParams.get('keyword') === '订单验收昵称'), 'keyword request');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('E2E-'), 'keyword result');
 
   // Reset filters before exercising detail, pagination and sync.

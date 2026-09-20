@@ -30,15 +30,19 @@ export function mapXianyuOrderPage(response: Record<string, unknown> | undefined
 export function mapXianyuOrder(value: unknown): XianyuOrderItem | undefined {
   const raw = unwrapOrder(value);
   const buyer = asRecord(raw.buyer);
+  const buyerInfo = asRecord(raw.buyerInfoVO);
   const item = asRecord(raw.item);
+  const itemInfo = asRecord(raw.itemInfo ?? raw.itemData ?? raw.goods ?? raw.auction);
   const orderNo = firstString(raw.orderNo, raw.order_no, raw.orderId, raw.order_id, raw.orderNumber, raw.bizOrderId, raw.tradeId, raw.trade_id);
   if (!orderNo) return undefined;
   const statusValue = firstString(raw.orderStatus, raw.order_status, raw.status, raw.tradeStatus, raw.trade_status);
   const afterSalesValue = firstString(raw.afterSalesStatus, raw.after_sales_status, raw.refundStatus, raw.refund_status, raw.afterSaleStatus, raw.after_sale_status) ?? (isAfterSalesSignal(statusValue) ? statusValue : undefined);
-  const buyerId = firstString(raw.buyerId, raw.buyer_id, raw.buyerUid, raw.buyer_uid, raw.userId, raw.user_id, buyer.id) ?? 'unknown-buyer';
-  const buyerName = firstString(raw.buyerName, raw.buyer_name, raw.buyerFishNick, raw.buyer_fish_nick, raw.buyerNick, raw.buyer_nick, raw.fishNick, buyer.name, buyer.nick) ?? buyerId;
-  const itemId = firstString(raw.itemId, raw.item_id, raw.auctionId, raw.auction_id, raw.commodityId, raw.commodity_id, item.id) ?? 'unknown-item';
-  const itemTitle = firstString(raw.itemTitle, raw.item_title, raw.title, raw.auctionTitle, raw.auction_title, item.title) ?? itemId;
+  const buyerId = firstString(raw.buyerId, raw.buyer_id, raw.buyerUid, raw.buyer_uid, raw.userId, raw.user_id, buyer.id, buyerInfo.buyerId, buyerInfo.userId, buyerInfo.id) ?? 'unknown-buyer';
+  const buyerNickname = firstString(raw.buyerNickname, raw.buyer_nickname, raw.buyerNickName, raw.buyer_nick_name, raw.buyerNick, raw.buyer_nick, raw.buyerFishNick, raw.buyer_fish_nick, raw.fishNick, raw.userNick, raw.user_nick, raw.nickname, raw.nick, buyer.nickname, buyer.nick, buyer.fishNick, buyer.userNick, buyerInfo.buyerNickname, buyerInfo.buyerNickName, buyerInfo.buyerNick, buyerInfo.nickName, buyerInfo.fishNick, buyerInfo.userNick, buyerInfo.nickname, buyerInfo.nick);
+  const buyerAvatarUrl = firstString(raw.buyerAvatarUrl, raw.buyer_avatar_url, raw.buyerAvatar, raw.buyer_avatar, raw.buyerHeadPic, raw.buyer_head_pic, raw.avatarUrl, raw.avatar_url, raw.headPic, raw.head_pic, buyer.avatarUrl, buyer.avatar, buyer.headPic, buyerInfo.avatarUrl, buyerInfo.avatar, buyerInfo.headPic, buyerInfo.headPicUrl);
+  const buyerName = firstString(raw.buyerName, raw.buyer_name, raw.buyerRealName, raw.buyer_real_name, raw.receiverName, raw.receiver_name, buyer.realName, buyer.receiverName, buyer.name, buyerInfo.realName, buyerInfo.receiverName, buyerInfo.name) ?? '';
+  const itemId = firstString(raw.itemId, raw.item_id, raw.auctionId, raw.auction_id, raw.commodityId, raw.commodity_id, item.id, itemInfo.itemId, itemInfo.item_id, itemInfo.id) ?? 'unknown-item';
+  const itemTitle = firstString(raw.itemTitle, raw.item_title, raw.itemName, raw.item_name, raw.goodsTitle, raw.goods_title, raw.productTitle, raw.product_title, raw.title, raw.auctionTitle, raw.auction_title, item.title, item.itemTitle, item.itemName, item.name, item.goodsTitle, item.productTitle, item.auctionTitle, itemInfo.title, itemInfo.itemTitle, itemInfo.itemName, itemInfo.name, itemInfo.goodsTitle, itemInfo.productTitle, itemInfo.auctionTitle) ?? '';
   const amountMinor = parseAmountMinorFields(raw);
   const createdAt = parseDate(firstValue(raw.createdAt, raw.created_at, raw.placedAt, raw.placed_at, raw.createTime, raw.create_time, raw.orderTime, raw.order_time)) ?? new Date().toISOString();
   const updatedAt = parseDate(firstValue(raw.updatedAt, raw.updated_at, raw.updateTime, raw.update_time, raw.modifyTime, raw.modify_time)) ?? createdAt;
@@ -47,6 +51,8 @@ export function mapXianyuOrder(value: unknown): XianyuOrderItem | undefined {
     orderNo,
     buyerId,
     buyerName,
+    buyerNickname,
+    buyerAvatarUrl,
     itemId,
     itemTitle,
     amountMinor,
@@ -79,13 +85,16 @@ function unwrapOrder(value: unknown): Record<string, unknown> {
       ...root,
       orderNo: orderId,
       itemId: firstString(commonData.itemId, commonData.auctionId, root.itemId),
+      itemInfo: commonData.itemInfo ?? commonData.itemData ?? commonData.itemVO ?? commonData.itemDetail ?? commonData.goods ?? commonData.auction ?? commonData.auctionInfo ?? root.itemInfo ?? root.itemData ?? root.auctionInfo,
       orderStatus: rawStatus,
       tradeStatus: rawStatus,
       buyerId: firstString(buyerInfo.buyerId, buyerInfo.userId, buyerInfo.id),
-      buyerName: firstString(buyerInfo.name, buyerInfo.receiverName, buyerInfo.nick),
+      buyerNickname: firstString(buyerInfo.buyerNickname, buyerInfo.buyerNickName, buyerInfo.buyerNick, buyerInfo.fishNick, buyerInfo.userNick, buyerInfo.userNickname, buyerInfo.nickname, buyerInfo.nick, commonData.buyerNickname, commonData.buyerNick, commonData.buyerFishNick, root.buyerNickname),
+      buyerAvatarUrl: firstString(buyerInfo.avatarUrl, buyerInfo.avatar, buyerInfo.headPic, buyerInfo.headPicUrl, commonData.buyerAvatarUrl, commonData.buyerAvatar, root.buyerAvatarUrl, root.avatarUrl),
+      buyerName: firstString(buyerInfo.name, buyerInfo.realName, buyerInfo.receiverName, commonData.buyerName, commonData.buyerRealName, root.buyerName),
       amount: firstString(priceInfo.totalPrice, priceInfo.confirmFee, priceInfo.auctionPrice),
       quantity: firstString(priceInfo.buyNum, priceInfo.quantity),
-      itemTitle: firstString(commonData.itemTitle, commonData.title, root.itemTitle),
+      itemTitle: firstString(commonData.itemTitle, commonData.itemName, commonData.goodsTitle, commonData.productTitle, commonData.title, root.itemTitle, root.itemName, root.goodsTitle, root.productTitle),
       createdAt: firstValue(commonData.createTime, commonData.orderCreateTime, commonData.createdAt, root.createdAt),
       updatedAt: firstValue(commonData.updateTime, commonData.modifyTime, commonData.updatedAt, root.updatedAt),
       inRefund,

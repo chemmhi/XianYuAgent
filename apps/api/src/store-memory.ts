@@ -128,7 +128,8 @@ export class MemoryStore implements Store {
       if (query.orderStatus && order.orderStatus !== query.orderStatus) return false;
       if (query.deliveryStatus && order.deliveryStatus !== query.deliveryStatus) return false;
       if (query.afterSalesStatus && order.afterSalesStatus !== query.afterSalesStatus) return false;
-      if (normalizedKeyword && ![order.orderNo, order.buyerId, order.buyerName, order.itemId, order.itemTitle].some((value) => value.toLowerCase().includes(normalizedKeyword))) return false;
+      const displayOrder = this.enrichOrder(order);
+      if (normalizedKeyword && ![displayOrder.orderNo, displayOrder.buyerNickname ?? '', displayOrder.itemTitle].some((value) => value.toLowerCase().includes(normalizedKeyword))) return false;
       return true;
     });
     const sortBy = query.sortBy ?? 'createdAt';
@@ -141,12 +142,12 @@ export class MemoryStore implements Store {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
     const start = (page - 1) * pageSize;
-    return { items: filtered.slice(start, start + pageSize).map((order) => ({ ...order })), page, pageSize, total: filtered.length, totalPages: Math.max(1, Math.ceil(filtered.length / pageSize)) };
+    return { items: filtered.slice(start, start + pageSize).map((order) => this.enrichOrder(order)), page, pageSize, total: filtered.length, totalPages: Math.max(1, Math.ceil(filtered.length / pageSize)) };
   }
   async getOrder(adminId: string, orderNo: string, accountId?: string): Promise<OrderRecord | undefined> {
     const order = [...this.orders.values()].find((item) => item.orderNo === orderNo && (!accountId || item.accountId === accountId));
     if (!order || !(await this.hasAccountScope(adminId, order.accountId))) return undefined;
-    return { ...order };
+    return this.enrichOrder(order);
   }
   async createOrder(input: { adminId: string; order: Omit<OrderRecord, 'id' | 'createdAt' | 'updatedAt' | 'configVersion' | 'source'> & { id?: string; createdAt?: string; updatedAt?: string; configVersion?: number; source?: OrderSource } }): Promise<OrderRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.order.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
@@ -155,7 +156,7 @@ export class MemoryStore implements Store {
     const now = new Date().toISOString();
     const order: OrderRecord = { ...input.order, id: input.order.id ?? createId(), createdAt: input.order.createdAt ?? now, updatedAt: input.order.updatedAt ?? now, configVersion: input.order.configVersion ?? 1, source: input.order.source ?? 'local' };
     this.orders.set(order.id, order);
-    return { ...order };
+    return this.enrichOrder(order);
   }
   async upsertExternalOrder(input: { adminId: string; accountId: string; item: XianyuOrderItem; syncedAt: string; accountName?: string }): Promise<OrderUpsertResult> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
@@ -163,11 +164,11 @@ export class MemoryStore implements Store {
     const now = input.syncedAt;
     if (existing) {
       Object.assign(existing, { ...input.item, accountId: input.accountId, accountName: input.accountName ?? existing.accountName, updatedAt: now, source: 'xianyu' as const, sourcePayloadDigest: input.item.sourcePayloadDigest, configVersion: existing.configVersion + 1 });
-      return { action: 'updated', order: { ...existing } };
+      return { action: 'updated', order: this.enrichOrder(existing) };
     }
     const order: OrderRecord = { ...input.item, id: createId(), accountId: input.accountId, accountName: input.accountName, updatedAt: input.item.updatedAt ?? now, configVersion: 1, source: 'xianyu' };
     this.orders.set(order.id, order);
-    return { action: 'created', order: { ...order } };
+    return { action: 'created', order: this.enrichOrder(order) };
   }
   async createProduct(input: { adminId: string; accountId: string; externalProductRef?: string; title: string; description?: string; categoryCode?: string; attributes?: Record<string, unknown>; defaultReplyTemplate?: string; aiPrompt?: string; priceMinor?: number; status?: ProductStatus }): Promise<ProductRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
@@ -773,6 +774,21 @@ export class MemoryStore implements Store {
 
   private productSummary(product: ProductRecord): ProductRecord {
     return { ...product, attributes: { ...product.attributes }, skuCount: product.skus?.filter((sku) => sku.status !== 'archived').length ?? product.skuCount ?? 0, assetCount: product.assets?.filter((asset) => asset.status !== 'archived').length ?? product.assetCount ?? 0, couponBatches: this.productCouponBatches(product.id), skus: undefined, assets: undefined };
+  }
+
+  private enrichOrder(order: OrderRecord): OrderRecord {
+    const product = (order.productId ? this.products.get(order.productId) : undefined);
+    const scopedProduct = product?.accountId === order.accountId ? product : undefined;
+    const matchedProduct = scopedProduct
+      ?? [...this.products.values()].find((candidate) => candidate.accountId === order.accountId && candidate.externalProductRef === order.itemId);
+    const conversation = (order.conversationId ? this.conversations.get(order.conversationId) : undefined);
+    const scopedConversation = conversation?.accountId === order.accountId ? conversation : undefined;
+    const matchedConversation = scopedConversation
+      ?? [...this.conversations.values()].find((candidate) => candidate.accountId === order.accountId && candidate.buyerRef === order.buyerId);
+    const itemTitle = (!order.itemTitle.trim() || order.itemTitle.trim() === order.itemId.trim()) ? (matchedProduct?.title ?? '') : order.itemTitle;
+    const buyerNickname = order.buyerNickname?.trim() || matchedConversation?.buyerDisplayName?.trim() || undefined;
+    const buyerAvatarUrl = order.buyerAvatarUrl?.trim() || matchedConversation?.buyerAvatarUrl?.trim() || undefined;
+    return { ...order, buyerNickname, buyerAvatarUrl, itemTitle };
   }
 
   private productDetail(product: ProductRecord): ProductRecord {
