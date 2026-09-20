@@ -236,6 +236,22 @@ async function run() {
           return socket;
         },
       });
+      const NativeFetch = window.fetch.bind(window);
+      window.__xianyuBlockMessagesListFetch = true;
+      window.__xianyuReleaseMessagesListFetch = null;
+      window.__xianyuBlockTimelineFetchOnce = true;
+      window.__xianyuReleaseTimelineFetch = null;
+      window.fetch = async (...args) => {
+        const url = String(args[0]?.url ?? args[0] ?? '');
+        if (url.includes('/api/v1/conversations?') && window.__xianyuBlockMessagesListFetch) {
+          await new Promise((resolve) => { window.__xianyuReleaseMessagesListFetch = resolve; });
+        }
+        if (url.includes('/api/v1/conversations/') && url.includes('/messages?') && window.__xianyuBlockTimelineFetchOnce) {
+          window.__xianyuBlockTimelineFetchOnce = false;
+          await new Promise((resolve) => { window.__xianyuReleaseTimelineFetch = resolve; });
+        }
+        return NativeFetch(...args);
+      };
     })();`,
   });
   for (const pair of cookie.split('; ')) {
@@ -246,6 +262,14 @@ async function run() {
   await cdp.send('Page.navigate', { url: `${webUrl}/messages` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'messages page');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-messages-domain]"))'), 'messages domain');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-sidebar-skeleton"))'), 'conversation list skeleton');
+  assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-state"))'), false, 'initial conversation loading must use a skeleton, not a text state');
+  await evaluate(cdp, 'window.__xianyuBlockMessagesListFetch = false; window.__xianyuReleaseMessagesListFetch?.();');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-timeline-skeleton"))'), 'message timeline skeleton');
+  assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-timeline-state"))'), false, 'initial message loading must use a skeleton, not a text state');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-connection-status.connecting"))'), 'compact realtime connecting indicator');
+  assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-connection-banner"))'), false, 'initial realtime loading must not render the legacy full-width banner');
+  await evaluate(cdp, 'window.__xianyuReleaseTimelineFetch?.();');
   await waitFor(async () => (await messageBodies(cdp)).includes('历史消息 205'), 'latest history page');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-connection-dot.connected"))'), 'realtime connected');
   assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-account-tabs"))'), false, 'messages page must not render an account selector');
@@ -330,9 +354,10 @@ async function run() {
   await captureViewport(cdp, 1896, 900, 'messages-desktop-1896x900.png');
 
   const offlineMethod = await disconnectBrowserRealtime(cdp);
-  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-connection-banner.reconnecting"))'), 'reconnecting banner');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-connection-status.reconnecting"))'), 'compact reconnecting indicator');
+  assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-connection-banner.reconnecting"))'), false, 'reconnecting must not render the legacy full-width banner');
   await waitFor(async () => await evaluate(cdp, 'Boolean(window.__xianyuTestSockets?.some((candidate) => candidate.__xianyuFake && candidate.readyState === 0 && String(candidate.__xianyuUrl ?? "").includes("/api/v1/conversations/") && String(candidate.__xianyuUrl ?? "").includes("/events")))'), 'blocked reconnect attempt');
-  await assertText(cdp, '连接已断开，正在按游标补回消息');
+  assert.equal(await evaluate(cdp, 'document.body.innerText.includes("连接已断开，正在按游标补回消息")'), false, 'reconnecting must not expose the legacy verbose copy');
   await captureViewport(cdp, 1896, 900, 'messages-reconnecting-1896x900.png');
 
   const recovered = await apiRuntime.messages.createMessage({
