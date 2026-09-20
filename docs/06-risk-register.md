@@ -100,6 +100,8 @@
 | S5-RISK-024 | Workspace Run/Step/Confirmation/Outbox 状态可能被页面或 Runtime 直接改写 | P1 | 高 | 高风险动作不可审计、重复执行或无法人工恢复 | Workspace / 执行负责人 | 独立 controller、状态机、Policy→Confirmation→Outbox、worker lease 和 recover E2E | `S4-VS6A`、`S4-VS6B` | 开放，承接 R-006/R-009 |
 | S5-RISK-025 | Workspace 实时事件、unknown、cancel、retry 尚未在真实 Runtime 中形成可恢复证据 | P1 | 中 | Run 卡死、误重试或外部结果未知时无法判断最终状态 | Runtime / QA 负责人 | 真实 Worker/Runtime、超时/取消/重试、事件游标、人工恢复和日志指标通过 | `S4-VS6A`、`S4-VS6B` | 开放，承接 R-006 |
 | S5-RISK-026 | Settings API Key 配置若复用通用设置保存入口，可能泄露明文或覆盖其他凭证 | P1 | 高 | 凭证泄露、轮换失败覆盖旧密钥或跨域读取 | 安全 / 凭证负责人 | CredentialStore 唯一 owner、加密复读、脱敏 UI、轮换/启停/撤销审计和 403/409 E2E | `S4-VS7A` | 开放，承接 R-004/S3-I004 |
+| S5-RISK-027 | `018_credential_store.sql` 已实现但尚未在真实 PostgreSQL volume 完成 apply/verify/rollback 与密文复读 | P1 | 高 | schema 漂移、密文不可读或回滚破坏旧凭证引用，无法证明发布级持久化安全 | 架构 / 数据 / 运维负责人 | 真实 PostgreSQL 执行 018、加密字段复读、重复执行、旧数据兼容、回滚演练和清理证据 | `S4-VS7A`、`S4-ENV-RECOVERY` | 开放，承接 R-001/S5-I001 |
+| S5-RISK-028 | Settings 首片尚无 Chrome/CDP 1440×900 与 390×844 截图、逐状态视觉偏差和真实跨层 403/409 E2E | P2 | 中 | 页面可能仅在单元/MemoryStore 下可用，移动端或真实权限冲突被遗漏 | 前端 / QA / 安全负责人 | 固定双 viewport 覆盖 loading/empty/error/forbidden/submitting/saved，真实 API + PostgreSQL + 浏览器回写证据并完成独立复审 | `S4-VS7A` | 开放，承接 S4-I007/S5-RISK-026 |
 
 ### 2026-09-19 S4-VS6A 风险复核
 
@@ -124,3 +126,9 @@
 - `S5-RISK-017` 部分缓解：四套订单状态已在 `OrderVM`、PostgreSQL 约束、API 筛选和详情抽屉中独立维护；`npm --workspace apps/api run test:orders`、`npm --workspace apps/api run test:orders:postgres` 和 `npm run test:e2e:chrome:orders` 通过。交付预览、库存锁、发货动作、unknown/timeout/retry 仍未实现，不能关闭 `S4-VS4B/C` 风险。
 - 新增 `018_orders.sql` 使用单调编号并已在当前 PostgreSQL 实例执行；`S5-RISK-019` 仍开放，因为完整迁移回滚、旧数据兼容、Testcontainers 和发布级恢复演练尚未完成。
 - 实闲鱼只读请求当前返回 `PERMISSION_EXCEPTION::无权限访问`，此前错误请求/错误 mapper 曾把该问题伪装为成功 0 条；修复后权限失败已向 API 暴露为 `MTOP_PERMISSION_DENIED`，未使用 fixture 伪造真实外部订单。
+
+### 2026-09-20 S4-VS7A Settings API Key 风险复核
+
+- `S5-RISK-026` 已部分缓解但保持开放：CredentialStore 已独立于通用设置保存入口，API 只返回 `CredentialRef` 脱敏 metadata，明文仅在 create/rotate 请求边界出现；`Idempotency-Key`、`expectedVersion`、账号 scope、轮换/启停/撤销审计、403/409 与撤销后禁止启用均已由 smoke/Chrome/CDP 覆盖。旧 `auth.account_credentials` 兼容迁移仍需独立方案与签核。
+- `S5-RISK-027` 已部分缓解但保持开放：临时 PostgreSQL 已执行 `001`–`018`，并复读 `credential_values.ciphertext/key_version/checksum/metadata_json`；发布级 rollback、已有 volume 回退与重复迁移后的恢复演练仍未覆盖。
+- `S5-RISK-028` 已部分缓解但保持开放：Settings 已生成 `1440×900`、`390×844` 固定 viewport 截图并完成桌面/移动偏差记录；loading/empty/error/submitting/saved 与移动短标签导航均有浏览器路径，正式人工视觉签核仍待 merge lock 后完成。

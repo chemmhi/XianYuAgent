@@ -2,30 +2,54 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { buildCouponPayload, CouponCreateModal, type CouponCreateFormState, validateCouponForm } from './CouponCreateModal';
+import type { CouponBatchVM } from '../types';
 
 const baseForm: CouponCreateFormState = {
-  accountId: 'account-001', label: '', purpose: 'text', deliveryScope: 'operator_only', quarkUrl: '', extractionCode: '', textContent: '', dataContent: '', apiUrl: '', apiMethod: 'GET', apiTimeout: 60, apiHeaders: '', apiParams: '', apiResponseField: '', imageUrls: '', delaySeconds: 0, useNoLogisticsForm: false, deliveryCount: 0, description: '', feePayer: '', minPrice: '', dockVisibility: 'public', multiSpec: false, specName: '', specValue: '', itemsText: '',
+  accountId: 'account-001', deliveryScope: 'operator_only', quarkUrl: '', extractionCode: '', deliveryCount: 0,
+  label: '', purpose: 'text', apiUrl: '', apiMethod: 'GET', apiTimeout: 60, apiHeaders: '', apiParams: '', apiResponseField: '',
+  textContent: '', dataContent: '', imageUrls: [], delaySeconds: 0, useNoLogisticsForm: false, description: '', feePayer: '', minPrice: '', dockVisibility: 'public', multiSpec: false, specName: '', specValue: '',
 };
 
+function batch(purpose: CouponBatchVM['purpose'], metadata: CouponBatchVM['metadata'] = {}): CouponBatchVM {
+  return { batchId: 'batch-test', accountId: 'account-001', label: '测试卡券', purpose, deliveryScope: 'operator_only', status: 'draft', totalCount: 0, availableCount: 0, reservedCount: 0, consumedCount: 0, stockAlert: 'exhausted', version: 1, updatedAt: '2026-09-20T00:00:00.000Z', bindings: [], metadata };
+}
+
 describe('CouponCreateModal', () => {
-  it('matches the reference labels/defaults while omitting removed docking controls', () => {
+  it('matches the reference field set while omitting the two requested docking controls', () => {
     const html = renderToStaticMarkup(createElement(CouponCreateModal, { submitting: false, onClose: vi.fn(), onSubmit: vi.fn(async () => {}) }));
-    expect(html).toContain('例如：游戏点卡、会员卡等');
-    expect(html).toContain('固定文字');
-    expect(html).toContain('批量数据');
-    expect(html).toContain('API接口');
-    expect(html).toContain('填写到无需邮寄凭证');
-    expect(html).toContain('多规格卡券');
+    expect(html).toContain('固定文字配置');
+    expect(html).toContain('图片配置（可选，最多3张）');
+    expect(html).toContain('type="file"');
+    expect(html).toContain('accept="image/*"');
+    expect(html).not.toContain('账号');
+    expect(html).not.toContain('交付范围');
+    expect(html).not.toContain('夸克链接');
+    expect(html).not.toContain('提取码');
+    expect(html).not.toContain('已发货次数');
+    expect(html).not.toContain('首批库存');
     expect(html).not.toContain('对接价格');
     expect(html).not.toContain('是否可对接');
   });
 
-  it('builds canonical metadata with reference defaults and preserves existing fields on edit', () => {
-    const form = { ...baseForm, label: '固定文字卡券', textContent: '兑换内容', useNoLogisticsForm: true, description: '{DELIVERY_CONTENT}' };
-    const payload = buildCouponPayload(form, { dockable: true, price: '9.90', description: '旧备注' });
+  it('keeps API and data fields conditional on card type', () => {
+    const apiHtml = renderToStaticMarkup(createElement(CouponCreateModal, { submitting: false, batch: batch('api', { apiConfig: { url: '', method: 'POST', timeout: 60, headers: '', params: '', responseField: '' } }), onClose: vi.fn(), onSubmit: vi.fn(async () => {}) }));
+    expect(apiHtml).toContain('type="url"');
+    expect(apiHtml).toContain('POST请求可用参数（点击添加）：');
+    expect(apiHtml).toContain('接口返回纯文本时若填写本字段，会因无法解析而取值失败，请务必留空。');
+    const dataHtml = renderToStaticMarkup(createElement(CouponCreateModal, { submitting: false, batch: batch('data'), onClose: vi.fn(), onSubmit: vi.fn(async () => {}) }));
+    expect(dataHtml).toContain('批量数据配置');
+    expect(dataHtml).toContain('支持格式：卡号:密码 或 单独的兑换码');
+    expect(dataHtml).toContain('图片配置（可选，最多3张）');
+  });
+
+  it('builds the canonical payload without legacy visible-only fields', () => {
+    const form = { ...baseForm, label: '固定文字卡券', textContent: '兑换内容', useNoLogisticsForm: true, description: '{DELIVERY_CONTENT}', imageUrls: ['data:image/png;base64,abc'] };
+    const payload = buildCouponPayload(form);
     expect(payload).toMatchObject({ accountId: 'account-001', label: '固定文字卡券', purpose: 'text', deliveryScope: 'operator_only' });
-    expect(payload.metadata).toMatchObject({ dockable: true, price: '9.90', textContent: '兑换内容', useNoLogisticsForm: true, description: '{DELIVERY_CONTENT}', delaySeconds: 0, multiSpec: false });
-    expect(payload.metadata).not.toHaveProperty('isDockable');
+    expect(payload).not.toHaveProperty('items');
+    expect(payload.metadata).toMatchObject({ textContent: '兑换内容', useNoLogisticsForm: true, description: '{DELIVERY_CONTENT}', delaySeconds: 0, multiSpec: false, imageUrls: ['data:image/png;base64,abc'] });
+    expect(payload.metadata).not.toHaveProperty('price');
+    expect(payload.metadata).not.toHaveProperty('dockable');
   });
 
   it('validates reference-specific content and JSON rules', () => {

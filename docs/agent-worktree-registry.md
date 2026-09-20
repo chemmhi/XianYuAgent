@@ -41,6 +41,8 @@
 | `root` | `coupons-create-modal` | `feature/s4-vs4a-orders-list` | `F:\ChenHai\Project\XianYuAgent-coupons-create-modal` | Codex `/root` | `2026-09-20 00:00:00 +08:00` | `MERGED` | `8a4c509` | `-` | 新建卡券弹窗按参考项目对齐；删除对接价格输入框与是否可对接复选框，保留兼容字段；组件测试、typecheck、Web 全量测试、build 与 diff 检查通过。Chrome/CDP E2E 已验证新建弹窗字段，后续在既有绑定商品选择器处失败。 |
 
 | `root` | `products-empty-state` | `codex/products-empty-state` | `F:\ChenHai\Project\XianYuAgent-products-empty-state` | Codex `/root` | `2026-09-20 19:35:00 +08:00` | `MERGED` | `c641d29` | `-` | 商品管理表格空态/失败态居中展示，移除工具栏“共0件”统计；Vitest、typecheck、Web/API build、商品 Chrome/CDP E2E（含空态/失败态布局）与 diff 检查已通过。 |
+| `root` | `settings-feature-slice` | `feature/settings-feature-slice` | `F:\ChenHai\Project\XianYuAgent-settings-feature-slice` | Codex `/root` | `2026-09-20 20:45:00 +08:00` | `READY_FOR_MERGE` | `1183272` | `-` | Settings API Key 首片已补临时 PostgreSQL 密文复读、Chrome/CDP 403/409 与双 viewport 截图；发布级 rollback、旧明文凭证兼容迁移仍开放，已完成业务/架构/质量独立复核。 |
+| `root/prototype_audit` | `settings-docs-evidence` | `docs/settings-slice-evidence` | `F:\ChenHai\Project\XianYuAgent-settings-docs` | Codex `/root` | `2026-09-20 20:59:57 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 已同步 STATUS、stage5 progress、review log、risk register 与 migrations README；已完成 API/Web 定向验证，真实 PostgreSQL/视觉/独立三轮评审仍开放。 |
 
 ## 主工作区
 

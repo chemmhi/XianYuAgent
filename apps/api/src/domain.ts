@@ -475,6 +475,27 @@ export interface CredentialRecord {
   updatedAt: string;
 }
 
+export type CredentialRefStatus = 'active' | 'disabled' | 'rotating' | 'revoked';
+
+/** Redacted credential reference returned to Settings and other admin surfaces. */
+export interface CredentialRefRecord {
+  id: string;
+  accountId: string;
+  kind: 'api_key';
+  purpose: 'model_client';
+  label?: string;
+  status: CredentialRefStatus;
+  version: number;
+  provider: string;
+  alias: string;
+  fingerprint: string;
+  metadata: Record<string, string>;
+  lastRotatedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  canReveal: false;
+}
+
 export interface IdempotencyRecord {
   scope: string;
   key: string;
@@ -601,6 +622,12 @@ export interface Store {
   upsertCredential(input: { adminId: string; accountId: string; platform: string; cookieHeader?: string; accessToken?: string; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string }): Promise<CredentialRecord>;
   revokeCredential(adminId: string, accountId: string): Promise<CredentialRecord | undefined>;
   markCredentialVerified(input: { adminId: string; accountId: string; status: CredentialStatus; expiresAt?: string }): Promise<CredentialRecord | undefined>;
+  listCredentialRefs(adminId: string, accountId: string): Promise<CredentialRefRecord[]>;
+  getCredentialRef(adminId: string, credentialId: string): Promise<CredentialRefRecord | undefined>;
+  createCredentialRef(input: { adminId: string; accountId: string; provider: string; alias: string; label?: string; secretCiphertext: string; fingerprint: string; metadata?: Record<string, string> }): Promise<CredentialRefRecord>;
+  updateCredentialRef(input: { adminId: string; credentialId: string; expectedVersion: number; provider?: string; alias?: string; label?: string; metadata?: Record<string, string> }): Promise<CredentialRefRecord | undefined>;
+  rotateCredentialRef(input: { adminId: string; credentialId: string; expectedVersion: number; secretCiphertext: string; fingerprint: string }): Promise<CredentialRefRecord | undefined>;
+  updateCredentialRefStatus(input: { adminId: string; credentialId: string; expectedVersion: number; status: CredentialRefStatus }): Promise<CredentialRefRecord | undefined>;
   getIdempotency(scope: string, key: string): Promise<IdempotencyRecord | undefined>;
   beginIdempotency(record: IdempotencyRecord): Promise<void>;
   abortIdempotency(scope: string, key: string): Promise<void>;

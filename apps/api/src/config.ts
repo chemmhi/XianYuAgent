@@ -19,6 +19,7 @@ export interface AppConfig {
   modelBaseUrl?: string;
   modelName?: string;
   modelTimeoutMs: number;
+  credentialEncryptionKey: string;
 }
 
 export const DEFAULT_DATABASE_URL = 'postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/xianyu_agent';
@@ -56,6 +57,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     modelBaseUrl,
     modelName,
     modelTimeoutMs: positiveNumber(env.MODEL_TIMEOUT_MS, 60_000),
+    credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY?.trim() || 'development-only-credential-key-change-me',
   };
 }
 

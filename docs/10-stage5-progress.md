@@ -23,7 +23,7 @@
 | `S4-VS5C` 人工接管与 AI 恢复 | `PLANNED` | handoff/release、版本和审计契约已冻结 | 非法转换、403/409、页面禁用、移动端 |
 | `S4-VS6A` Workspace 会话与 Run 首链路 | `PARTIALLY_VERIFIED` | AgentSession/Run/Step、Memory/Postgres Store、受控 Runtime、前端 `/workspace`、clientRunRef、WS cursor replay、真实 PostgreSQL/Chrome/CDP 首链路 | 独立 Worker/Pi Runtime、发布级恢复、人工视觉签核与完整状态回归 |
 | `S4-VS6B` Workspace Confirmation/Outbox | `PLANNED` | Confirmation/Outbox/恢复 API 已冻结 | Policy、幂等、租约、cancel/retry/recover |
-| `S4-VS7A` Settings API Key 配置 | `PLANNED` | CredentialStore CRUD/rotate/revoke/enable/disable 已冻结 | 加密复读、脱敏、审计、403/409；本片不做 reveal |
+| `S4-VS7A` Settings API Key 配置 | `READY_FOR_REVIEW` | `/settings` 正式路由、账号级 CredentialRef API、AES-256-GCM 加密引用、create/update/rotate/enable/disable/revoke、幂等/版本冲突、前端 loading/empty/error/submitting/saved 状态、Web/API 定向验证 | 真实 PostgreSQL 018 迁移加密复读与回滚、Chrome/CDP 1440×900/390×844 视觉证据、真实 403/409 跨层 E2E、独立三轮评审；本片不做 reveal |
 | `S4-ENV-RECOVERY` | `BLOCKED` | Compose/健康检查/部分持久化已有证据 | 完整迁移回滚、Testcontainers、Redis/MinIO 重启和发布级恢复 |
 | `S4-EXT-ACCOUNT` | `BLOCKED` | 真实模式 QR 探针与受控 Cookie 链路 | 真实 APP 扫码、外部 Cookie、`loginuser.get` 资料同步 |
 | `S4-ENV-RUNTIME` | `PLANNED` | 独立 Runtime 架构决策已存在 | 健康、超时、重试、取消、不可用和观测 |
@@ -34,6 +34,7 @@
 - `apps/web` 已按 feature/controller/ViewModel/state boundary 接入账号、商品、卡券首片；Products/Coupons 的桌面/移动截图已生成。
 - `npm run verify`、商品 PostgreSQL smoke、商品/卡券 Chrome/CDP E2E 和 Compose 配置检查已有历史通过记录；这些记录只覆盖对应首片和受控环境。
 - `docs/04-plan.md`、`docs/02-data-api.md`、`docs/03-component-contract.md`、`docs/06-risk-register.md`、`docs/09-decision-log.md` 已同步新增切片、依赖、回滚、状态和风险映射。
+- `S4-VS7A` 当前实现已在独立 worktree 完成首片代码：`apps/api` 提供 `/api/v1/credentials` 及 rotate/enable/disable/revoke，CredentialRef 只返回脱敏 metadata；`apps/web` 提供 `/settings`、明确 `accountId` 选择、CredentialStore panel 与编辑/轮换/启停/撤销交互。`npm --workspace apps/api run build`、`node apps/api/scripts/credential-store-smoke.mjs`、`npm --workspace apps/web run typecheck`、`npm --workspace apps/web run test -- --run`（26 files / 88 tests）、`npm --workspace apps/web run build`、`git diff --check` 已通过；上述证据尚未替代真实 PostgreSQL、浏览器视觉和独立复审。
 
 ## 当前阻断与执行规则
 
@@ -48,7 +49,7 @@
 
 1. `S4-VS5A` → `S4-VS5B` → `S4-VS5C`：在线聊天读取、发送/附件、接管/恢复 AI。
 2. `S4-VS6A` → `S4-VS6B`：Workspace 会话/Run，再做 Confirmation/Outbox/恢复。
-3. `S4-VS7A`：Settings API Key 配置，可与 VS5A/VS6A 并行，但先冻结 CredentialStore 脱敏和 scope。
+3. `S4-VS7A`：补齐 PostgreSQL/浏览器/视觉/三轮复审门禁后再提交合并，不把当前受控 smoke 直接升级为 PASS。
 4. `S4-VS4A` → `S4-VS4B` → `S4-VS4C`：订单只读、交付预览、交付动作后置。
 5. 横向独立执行 `S4-ENV-RECOVERY`、`S4-EXT-ACCOUNT`、`S4-ENV-RUNTIME`，每项都保留真实环境证据和回滚结果。
 
@@ -81,3 +82,10 @@
 - Workspace API build、HTTP session/run smoke、raw WebSocket smoke、API 全量 smoke、Web typecheck/test/build 和 `git diff --check` 已复核通过。
 - 真实浏览器复核已通过：临时 PostgreSQL、Chrome/CDP、断线/重连、事件回放和桌面/移动截图均可复现。
 - 当前结论维持 `S4-VS6A = PARTIALLY_VERIFIED`；实现与文档进入 `READY_FOR_REVIEW`，剩余门禁为独立 Worker/Pi Runtime、发布级恢复、人工视觉签核与 `S4-VS6B` Confirmation/Outbox。
+
+### 2026-09-20：S4-VS7A Settings API Key 首片实现
+
+- 已实现：`/settings` 正式路由；账号级 `CredentialRefVM`；`GET/POST/PATCH /api/v1/credentials` 与 `rotate/enable/disable/revoke`；`expectedVersion`、`Idempotency-Key`、账号 scope、审计摘要和 AES-256-GCM 应用层加密；前端 CredentialStore panel、创建/编辑/轮换/启用/禁用/撤销及 loading/empty/error/submitting/saved 状态。
+- 已执行：`npm --workspace apps/api run build`、`node apps/api/scripts/credential-store-smoke.mjs`（加密/解密、创建、列表、轮换、版本冲突、禁用、撤销、撤销后禁止启用）；`npm --workspace apps/web run typecheck`、`npm --workspace apps/web run test -- --run`（26 files / 88 tests）、`npm --workspace apps/web run build`、`git diff --check`。
+- 当前结论：`S4-VS7A = READY_FOR_REVIEW`。已补真实 PostgreSQL `001`–`018` migration 与 `credential_values.ciphertext` 密文复读、Chrome/CDP `/settings` 用户路径、403/409 跨层断言和 `1440×900` / `390×844` 截图；证据见 `docs/evidence/stage5/S4-VS7A/`。仍开放发布级 rollback、旧 `auth.account_credentials` 双读单写兼容迁移与 merge lock 后独立签核。
+- 回滚边界：先停止 `/api/v1/credentials` 新写入，保留旧凭证引用和审计；迁移回退前确认没有 018 表依赖，按 expand/verify/switch/contract 顺序处理，不删除历史审计或旧密文。
