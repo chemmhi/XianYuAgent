@@ -1,4 +1,5 @@
 import type { OrderVM } from '../types';
+import { formatOrderDate } from './order-date';
 
 const paymentLabels: Record<OrderVM['paymentStatus'], string> = { unpaid: '待付款', paid: '已付款', closed: '已关闭', unknown: '未知' };
 const orderLabels: Record<OrderVM['orderStatus'], string> = { open: '进行中', cancelling: '取消中', cancelled: '已取消', completed: '已完成', closed: '已关闭', failed: '处理失败' };
@@ -20,7 +21,7 @@ export function OrderTable({ orders, page, totalPages, total, onPageChange, onOp
           <StatusPill tone={order.orderStatus === 'completed' ? 'success' : order.orderStatus === 'failed' ? 'danger' : order.orderStatus === 'closed' || order.orderStatus === 'cancelled' ? 'neutral' : 'info'}>{orderLabels[order.orderStatus]}</StatusPill>
           <StatusPill tone={order.deliveryStatus === 'delivered' ? 'success' : order.deliveryStatus === 'failed' ? 'danger' : order.deliveryStatus === 'cancelled' ? 'neutral' : 'warn'}>{deliveryLabels[order.deliveryStatus]}</StatusPill>
           <StatusPill tone={order.afterSalesStatus === 'none' ? 'neutral' : order.afterSalesStatus === 'refunded' || order.afterSalesStatus === 'closed' ? 'success' : 'warn'}>{afterSalesLabels[order.afterSalesStatus]}</StatusPill>
-          <time className="orders-time">{formatDate(order.createdAt)}</time>
+          <time className="orders-time" dateTime={order.createdAt}>{formatOrderDate(order.createdAt)}</time>
           <span className="orders-account">{order.accountName ?? order.accountId}</span>
           <span className="orders-row-actions"><button className="btn ghost btn-small" type="button" onClick={() => onOpen(order.orderNo)}>查看详情</button></span>
         </div>)}
@@ -31,6 +32,4 @@ export function OrderTable({ orders, page, totalPages, total, onPageChange, onOp
 }
 
 function StatusPill({ tone, children }: { tone: 'success' | 'warn' | 'danger' | 'neutral' | 'info'; children: string }) { return <b className={`orders-status orders-status-${tone}`}>{children}</b>; }
-function formatDate(value: string) { if (!value) return '—'; return value.replace('T', ' ').replace(/[+-]\d\d:\d\d$/, '').replace(/\.\d{3}Z$/, '').replace('Z', ''); }
 function getPageItems(page: number, totalPages: number): Array<number | 'ellipsis'> { if (totalPages <= 5) return Array.from({ length: totalPages }, (_, index) => index + 1); if (page <= 3) return [1, 2, 3, 4, 'ellipsis', totalPages]; if (page >= totalPages - 2) return [1, 'ellipsis', totalPages - 3, totalPages - 2, totalPages - 1, totalPages]; return [1, 'ellipsis', page - 1, page, page + 1, 'ellipsis', totalPages]; }
-

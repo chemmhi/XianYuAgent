@@ -271,7 +271,9 @@ export class OrderService {
 
   async refresh(input: { adminId: string; accountId?: string; pageSize?: unknown; maxPages?: unknown; requestId: string; traceId: string }): Promise<OrderRefreshResult> {
     const account = await this.resolveAccount(input.adminId, input.accountId);
-    const pageSize = normalizeBoundedInteger(input.pageSize, 100, 1, 100);
+    // Seller workbench defaults to 30 rows per page; keep the adapter request
+    // aligned with the proven Go/Python integrations when the UI omits it.
+    const pageSize = normalizeBoundedInteger(input.pageSize, 30, 1, 100);
     const maxPages = normalizeBoundedInteger(input.maxPages, 20, 1, 100);
     const fetched = await this.xianyu.fetchOrdersAll(input.adminId, account.id, pageSize, maxPages);
     const firstFailure = fetched.pages.find((page) => !page.success);

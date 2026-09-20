@@ -39,6 +39,7 @@
 | S4-I007 | 移动端对等、视觉回归和真实验收证据可能后置，导致主体功能只在桌面可用 | P2 | 中 | 影响正式页面承载和验收完整性 | 前端 / QA 负责人 | 每片固定 1440×900、390×844、代表性数据、状态截图和回归记录 | 各切片验收前 | 开放 |
 | S5-I001 | Compose 容器已启动，但完整迁移回滚、Testcontainers 和发布级恢复尚未验收 | P1 | 高 | 阻断发布级迁移、恢复和回滚证明 | 运维 / QA 负责人 | 已完成 `docker compose up -d --build`、容器健康、`pg_isready`、Redis `PONG`、账号持久化及 API 重启复读；继续补迁移、Testcontainers 和恢复演练 | S4-VS1 关闭前 | 开放，发布级证据未闭环 |
 | S5-I002 | 真实闲鱼 APP 扫码成功、Cookie 校验和 `loginuser.get` 资料同步仍未在外部账号上完成 | P1 | 高 | 账号凭证与昵称/备注/头像真实性无法最终验收 | 后端 / QA 负责人 | 保留真实 QR 模式；执行当前已登录 Chrome 参考项目复核和真实 APP 扫码；`verification_required` 不得降级 | S4-VS1 关闭前 | 开放 |
+| S5-RISK-027 | seller 订单列表接口对当前账号返回 `PERMISSION_EXCEPTION::无权限访问`；此前错误请求/错误 mapper 曾把该问题伪装为成功 0 条 | P1 | 高 | 真实订单同步无法验收，可能导致运营误判为空单 | 后端 / 外部平台负责人 | 已按 Ydisks 对齐请求体、seller headers/query、浏览器指纹和真实响应映射；新增请求/mapper 回归 smoke；待补充完整浏览器 Cookie/Jar 或具备 seller 订单权限的有效账号并复验；权限失败必须向 API 暴露可识别错误 | S4-VS4A 外部门禁前 | OPEN |
 | S5-I003 | 参考项目登录态依赖当前已登录 Chrome；使用新 profile、无痕窗口或另一浏览器会丢失闲鱼 Cookie | P1 | 中 | 人工复核会误判为未登录，无法复现参考项目正确链路 | QA / 产品负责人 | 人工验收前强制在当前已登录 Chrome 打开 `http://localhost:9000/accounts`；记录浏览器环境和时间 | S4-VS1 人工验收前 | 开放 |
 | S5-I004 | 受控 E2E 使用临时 Chrome profile 与 stub adapter，不能证明真实外部扫码和真实数据库持久化 | P1 | 高 | 可能把测试绿色误报为生产链路完成 | QA / 后端负责人 | 当前 Chrome/CDP 已覆盖 AuthGate 阻断、bootstrap cookie 注入、账号列表、登录方式、Cookie 登录和截图；仍需补真实扫码、外部 Cookie、PostgreSQL/Redis 证据后关闭 | S4-VS1 关闭前 | 开放 |
 | S5-I005 | 账号密码登录依赖独立浏览器运行时，当前后端明确返回 `PASSWORD_LOGIN_UNAVAILABLE` | P2 | 中 | 入口若被误当成已实现会造成错误承诺 | 产品 / 后端负责人 | 保留入口但显示不可用原因；在独立浏览器运行时具备可复现验证前不得宣称密码登录完成 | 阶段 6 评审前 | 已接受，显式未实现 |
@@ -121,4 +122,4 @@
 
 - `S5-RISK-017` 部分缓解：四套订单状态已在 `OrderVM`、PostgreSQL 约束、API 筛选和详情抽屉中独立维护；`npm --workspace apps/api run test:orders`、`npm --workspace apps/api run test:orders:postgres` 和 `npm run test:e2e:chrome:orders` 通过。交付预览、库存锁、发货动作、unknown/timeout/retry 仍未实现，不能关闭 `S4-VS4B/C` 风险。
 - 新增 `018_orders.sql` 使用单调编号并已在当前 PostgreSQL 实例执行；`S5-RISK-019` 仍开放，因为完整迁移回滚、旧数据兼容、Testcontainers 和发布级恢复演练尚未完成。
-- 实闲鱼只读请求返回 `SUCCESS::调用成功`，本次账号返回 0 条订单；空结果被原样保留，未使用 fixture 伪造真实外部订单。
+- 实闲鱼只读请求当前返回 `PERMISSION_EXCEPTION::无权限访问`，此前错误请求/错误 mapper 曾把该问题伪装为成功 0 条；修复后权限失败已向 API 暴露为 `MTOP_PERMISSION_DENIED`，未使用 fixture 伪造真实外部订单。
