@@ -5,6 +5,9 @@ export interface HttpClientOptions {
   credentials?: RequestCredentials;
 }
 
+const NETWORK_RETRY_DELAYS_MS = [100, 300, 800] as const;
+const RETRYABLE_PROXY_STATUSES = new Set([502, 503, 504]);
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -18,6 +21,59 @@ export class ApiError extends Error {
 
 function joinUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
+}
+
+function isRetryableMethod(method: string): boolean {
+  return method === 'GET' || method === 'HEAD';
+}
+
+function isRetryableNetworkError(error: unknown, signal?: AbortSignal | null): boolean {
+  return !signal?.aborted && error instanceof TypeError;
+}
+
+function waitForRetry(delayMs: number, signal?: AbortSignal | null): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new DOMException('The request was aborted', 'AbortError'));
+      return;
+    }
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(signal?.reason ?? new DOMException('The request was aborted', 'AbortError'));
+    };
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+    timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, delayMs);
+  });
+}
+
+async function fetchWithRetry(input: RequestInfo | URL, init: RequestInit, method: string): Promise<Response> {
+  const canRetry = isRetryableMethod(method);
+  let retryIndex = 0;
+
+  while (true) {
+    try {
+      const response = await fetch(input, init);
+      const shouldRetryResponse = canRetry && RETRYABLE_PROXY_STATUSES.has(response.status);
+      if (!shouldRetryResponse || retryIndex >= NETWORK_RETRY_DELAYS_MS.length) return response;
+      await response.body?.cancel();
+      await waitForRetry(NETWORK_RETRY_DELAYS_MS[retryIndex], init.signal);
+      retryIndex += 1;
+    } catch (error) {
+      if (!canRetry || !isRetryableNetworkError(error, init.signal) || retryIndex >= NETWORK_RETRY_DELAYS_MS.length) throw error;
+      await waitForRetry(NETWORK_RETRY_DELAYS_MS[retryIndex], init.signal);
+      retryIndex += 1;
+    }
+  }
 }
 
 export function createHttpClient(options: HttpClientOptions = {}) {
@@ -46,7 +102,11 @@ export function createHttpClient(options: HttpClientOptions = {}) {
       if (csrfToken) headers.set('X-CSRF-Token', csrfToken);
     }
 
-    const response = await fetch(joinUrl(baseUrl, path), { ...init, headers, credentials: options.credentials ?? 'include' });
+    const response = await fetchWithRetry(
+      joinUrl(baseUrl, path),
+      { ...init, headers, credentials: options.credentials ?? 'include' },
+      method,
+    );
     const contentType = response.headers.get('content-type') ?? '';
     const payload = contentType.includes('application/json')
       ? await response.json()
