@@ -38,6 +38,8 @@
 | `root` | `accounts-pagination-toolbar` | `fix/accounts-pagination-toolbar` | `F:\ChenHai\Project\XianYuAgent-accounts-pagination` | Codex `/root` | `2026-09-20 19:17:59 +08:00` | `CLEANED` | `8b7c398` | `2026-09-20 19:34:14 +08:00` | 用户已明确要求完成后合入 master；提交 `383d1c8` 在 merge lock 内以 `--no-ff` 合入。账号列表服务端分页/搜索/筛选，分页 UI、空态居中、移除操作列与共计统计、表格最大高度和内部滚动。合并后 `npm run verify` 全部通过；Git worktree 元数据与分支已清理，目录因含非 Git 内容保留。 |
 | `root` | `coupons-toolbar-empty-state` | `fix/coupons-toolbar-empty-state` | `F:\ChenHai\Project\XianYuAgent-coupons-toolbar-followup` | Codex `/root` | `2026-09-20 19:09:44 +08:00` | `CLEANED` | `5a9f3cb` | `2026-09-20 19:23:44 +08:00` | 用户已明确要求完成后合入 master；`5a9f3cb` 已以 `--no-ff` 合入 `master`；主线 typecheck、Vitest 23/83、Web/API build、Coupons Chrome/CDP E2E 与 `git diff --check` 均通过。Git worktree 元数据与分支已清理，目录因保留非 Git 内容未删除。 |
 
+| `root` | `products-empty-state` | `codex/products-empty-state` | `F:\ChenHai\Project\XianYuAgent-products-empty-state` | Codex `/root` | `2026-09-20 19:35:00 +08:00` | `MERGED` | `c641d29` | `-` | 商品管理表格空态/失败态居中展示，移除工具栏“共0件”统计；Vitest、typecheck、Web/API build、商品 Chrome/CDP E2E（含空态/失败态布局）与 diff 检查已通过。 |
+
 ## 主工作区
 
 | 类型 | branch | worktree | 规则 |

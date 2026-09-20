@@ -302,3 +302,12 @@
 | S5-R48 | 质量 / 交付 | 是否在独立 worktree、merge lock 和主线门禁内完成合入 | root | PASS | `8b7c398`、`npm run verify`、`docs/agent-worktree-registry.md` |
 
 本轮结论：账号列表分页/筛选和页面布局修订已合入 `master`；账号管理外部闲鱼登录、真实 PostgreSQL/外部账号人工验收等既有风险边界不变。
+
+### 2026-09-20：商品表格空态与工具栏修订复核
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R49 | UI / 交互 | 商品表格空态和加载失败提示是否在表格剩余区域完整居中，工具栏是否移除冗余“共 0 件”统计且保留分页底部统计 | root + Chrome/CDP | PASS（当前切片） | `apps/web/src/features/products/components/ProductStateView.tsx`、`ProductToolbar.tsx`、`products.css`；商品 Chrome/CDP E2E 已覆盖空态/失败态布局和工具栏节点缺失 |
+| S5-R50 | 质量 / 交付 | 是否补充回归测试并在独立 worktree、merge lock 和主线完成验证 | root | PASS | `99c60bf`、Web typecheck、Vitest 25 files / 86 tests、Web/API build、商品 Chrome/CDP E2E、`git diff --check` |
+
+本轮结论：商品列表空态/失败态布局修订和工具栏统计清理已合入 `master`；商品真实 PostgreSQL、外部闲鱼数据和视觉人工复核等既有边界保持不变。
