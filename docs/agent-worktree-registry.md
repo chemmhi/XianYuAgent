@@ -41,7 +41,7 @@
 | `root` | `coupons-create-modal` | `feature/s4-vs4a-orders-list` | `F:\ChenHai\Project\XianYuAgent-coupons-create-modal` | Codex `/root` | `2026-09-20 00:00:00 +08:00` | `MERGED` | `8a4c509` | `-` | 新建卡券弹窗按参考项目对齐；删除对接价格输入框与是否可对接复选框，保留兼容字段；组件测试、typecheck、Web 全量测试、build 与 diff 检查通过。Chrome/CDP E2E 已验证新建弹窗字段，后续在既有绑定商品选择器处失败。 |
 
 | `root` | `products-empty-state` | `codex/products-empty-state` | `F:\ChenHai\Project\XianYuAgent-products-empty-state` | Codex `/root` | `2026-09-20 19:35:00 +08:00` | `MERGED` | `c641d29` | `-` | 商品管理表格空态/失败态居中展示，移除工具栏“共0件”统计；Vitest、typecheck、Web/API build、商品 Chrome/CDP E2E（含空态/失败态布局）与 diff 检查已通过。 |
-| `root` | `orders-fetch` | `fix/orders-fetch` | `F:\ChenHai\Project\XianYuAgent-orders-fix` | Codex `/root` | `2026-09-20 21:45:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 已补完整 Cookie snapshot、按域/路径分离 MTOP signing/request Cookie、QR 登录快照持久化、Set-Cookie 旋转回写与旧扁平 header 回退；API 全量 smoke、Web Vitest、typecheck/build、订单 Chrome/CDP E2E、diff check 已通过，待主线合入前复核。 |
+| `root` | `orders-fetch` | `fix/orders-fetch` | `F:\ChenHai\Project\XianYuAgent-orders-fix` | Codex `/root` | `2026-09-20 21:45:00 +08:00` | `READY_FOR_MERGE` | `-` | `-` | 已补完整 Cookie snapshot、按域/路径分离 MTOP signing/request Cookie、QR 登录快照持久化、Set-Cookie 旋转回写与旧扁平 header 回退；API 全量 smoke、Web Vitest、typecheck/build、订单 Chrome/CDP E2E、diff check 已通过。 |
 
 ## 主工作区
 
