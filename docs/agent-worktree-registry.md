@@ -39,6 +39,7 @@
 | `root` | `coupons-toolbar-empty-state` | `fix/coupons-toolbar-empty-state` | `F:\ChenHai\Project\XianYuAgent-coupons-toolbar-followup` | Codex `/root` | `2026-09-20 19:09:44 +08:00` | `CLEANED` | `5a9f3cb` | `2026-09-20 19:23:44 +08:00` | 用户已明确要求完成后合入 master；`5a9f3cb` 已以 `--no-ff` 合入 `master`；主线 typecheck、Vitest 23/83、Web/API build、Coupons Chrome/CDP E2E 与 `git diff --check` 均通过。Git worktree 元数据与分支已清理，目录因保留非 Git 内容未删除。 |
 
 | `root` | `products-empty-state` | `codex/products-empty-state` | `F:\ChenHai\Project\XianYuAgent-products-empty-state` | Codex `/root` | `2026-09-20 19:35:00 +08:00` | `MERGED` | `c641d29` | `-` | 商品管理表格空态/失败态居中展示，移除工具栏“共0件”统计；Vitest、typecheck、Web/API build、商品 Chrome/CDP E2E（含空态/失败态布局）与 diff 检查已通过。 |
+| `root` | `settings-feature-slice` | `feature/settings-feature-slice` | `F:\ChenHai\Project\XianYuAgent-settings-feature-slice` | Codex `/root` | `2026-09-20 20:45:00 +08:00` | `REGISTERED` | `-` | `-` | 设置功能切片：按项目规范实现正式路由、真实 API/状态和高保真 UI；待实现与评审。 |
 
 ## 主工作区
 

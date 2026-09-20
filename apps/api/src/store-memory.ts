@@ -1,4 +1,4 @@
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor, isAfterConversationCursor } from './conversation-cursor.js';
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
@@ -13,6 +13,8 @@ export class MemoryStore implements Store {
   private readonly accounts = new Map<string, AccountRecord>();
   private readonly loginSessions = new Map<string, LoginSessionRecord>();
   private readonly credentials = new Map<string, CredentialRecord>();
+  private readonly credentialRefs = new Map<string, CredentialRefRecord>();
+  private readonly credentialRefSecrets = new Map<string, string>();
   private readonly products = new Map<string, ProductRecord>();
   private readonly couponBatches = new Map<string, CouponBatchRecord>();
   private readonly couponItems = new Map<string, CouponItemRecord>();
@@ -541,6 +543,62 @@ export class MemoryStore implements Store {
     credential.lastVerifiedAt = new Date().toISOString();
     credential.updatedAt = credential.lastVerifiedAt;
     return credential;
+  }
+  async listCredentialRefs(adminId: string, accountId: string): Promise<CredentialRefRecord[]> {
+    if (!(await this.hasAccountScope(adminId, accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    return [...this.credentialRefs.values()]
+      .filter((row) => row.accountId === accountId)
+      .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
+      .map((row) => ({ ...row, metadata: { ...row.metadata }, canReveal: false as const }));
+  }
+  async getCredentialRef(adminId: string, credentialId: string): Promise<CredentialRefRecord | undefined> {
+    const row = this.credentialRefs.get(credentialId);
+    if (!row || !(await this.hasAccountScope(adminId, row.accountId))) return undefined;
+    return { ...row, metadata: { ...row.metadata }, canReveal: false as const };
+  }
+  async createCredentialRef(input: { adminId: string; accountId: string; provider: string; alias: string; label?: string; secretCiphertext: string; fingerprint: string; metadata?: Record<string, string> }): Promise<CredentialRefRecord> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const duplicate = [...this.credentialRefs.values()].find((row) => row.accountId === input.accountId && row.kind === 'api_key' && row.purpose === 'model_client');
+    if (duplicate) throw new Error('CREDENTIAL_ALREADY_EXISTS');
+    const now = new Date().toISOString();
+    const row: CredentialRefRecord = { id: createId(), accountId: input.accountId, kind: 'api_key', purpose: 'model_client', label: input.label?.trim() || undefined, status: 'active', version: 1, provider: input.provider.trim(), alias: input.alias.trim(), fingerprint: input.fingerprint, metadata: { ...(input.metadata ?? {}) }, createdAt: now, updatedAt: now, lastRotatedAt: now, canReveal: false };
+    this.credentialRefs.set(row.id, row);
+    this.credentialRefSecrets.set(row.id, input.secretCiphertext);
+    return { ...row, metadata: { ...row.metadata }, canReveal: false };
+  }
+  async updateCredentialRef(input: { adminId: string; credentialId: string; expectedVersion: number; provider?: string; alias?: string; label?: string; metadata?: Record<string, string> }): Promise<CredentialRefRecord | undefined> {
+    const row = this.credentialRefs.get(input.credentialId);
+    if (!row || !(await this.hasAccountScope(input.adminId, row.accountId))) return undefined;
+    if (row.version !== input.expectedVersion) throw new Error('CREDENTIAL_VERSION_CONFLICT');
+    if (input.provider !== undefined) row.provider = input.provider.trim();
+    if (input.alias !== undefined) row.alias = input.alias.trim();
+    if (input.label !== undefined) row.label = input.label.trim() || undefined;
+    if (input.metadata !== undefined) row.metadata = { ...input.metadata };
+    row.version += 1;
+    row.updatedAt = new Date().toISOString();
+    return { ...row, metadata: { ...row.metadata }, canReveal: false };
+  }
+  async rotateCredentialRef(input: { adminId: string; credentialId: string; expectedVersion: number; secretCiphertext: string; fingerprint: string }): Promise<CredentialRefRecord | undefined> {
+    const row = this.credentialRefs.get(input.credentialId);
+    if (!row || !(await this.hasAccountScope(input.adminId, row.accountId))) return undefined;
+    if (row.version !== input.expectedVersion) throw new Error('CREDENTIAL_VERSION_CONFLICT');
+    row.status = 'active';
+    row.fingerprint = input.fingerprint;
+    row.version += 1;
+    row.lastRotatedAt = new Date().toISOString();
+    row.updatedAt = row.lastRotatedAt;
+    this.credentialRefSecrets.set(row.id, input.secretCiphertext);
+    return { ...row, metadata: { ...row.metadata }, canReveal: false };
+  }
+  async updateCredentialRefStatus(input: { adminId: string; credentialId: string; expectedVersion: number; status: CredentialRefStatus }): Promise<CredentialRefRecord | undefined> {
+    const row = this.credentialRefs.get(input.credentialId);
+    if (!row || !(await this.hasAccountScope(input.adminId, row.accountId))) return undefined;
+    if (row.version !== input.expectedVersion) throw new Error('CREDENTIAL_VERSION_CONFLICT');
+    if (row.status === 'revoked' && input.status !== 'revoked') throw new Error('CREDENTIAL_REVOKED');
+    row.status = input.status;
+    row.version += 1;
+    row.updatedAt = new Date().toISOString();
+    return { ...row, metadata: { ...row.metadata }, canReveal: false };
   }
   async getIdempotency(scope: string, key: string): Promise<IdempotencyRecord | undefined> { const row = this.idempotency.get(`${scope}:${key}`); if (row && Date.parse(row.expiresAt) <= Date.now()) { this.idempotency.delete(`${scope}:${key}`); return undefined; } return row; }
   async beginIdempotency(record: IdempotencyRecord): Promise<void> { this.idempotency.set(`${record.scope}:${record.key}`, record); }

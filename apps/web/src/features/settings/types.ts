@@ -1,0 +1,33 @@
+export type CredentialStatus = 'active' | 'disabled' | 'rotating' | 'revoked';
+
+export interface CredentialRefVM {
+  id: string;
+  accountId: string;
+  kind: 'api_key';
+  purpose: 'model_client';
+  label?: string;
+  status: CredentialStatus;
+  version: number;
+  provider: string;
+  alias: string;
+  fingerprint: string;
+  metadata: Record<string, string>;
+  lastRotatedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  canReveal: false;
+}
+
+export interface CredentialListVM {
+  accountId: string;
+  items: CredentialRefVM[];
+}
+
+export type SettingsLoadPhase = 'idle' | 'loading' | 'empty' | 'success' | 'error' | 'submitting' | 'saved';
+
+export interface SettingsState {
+  phase: SettingsLoadPhase;
+  data: CredentialListVM | null;
+  error: string | null;
+  lastAction?: string;
+}

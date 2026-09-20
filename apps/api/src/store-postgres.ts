@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor } from './conversation-cursor.js';
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
@@ -457,6 +457,73 @@ export class PostgresStore implements Store {
     const result = await this.pool.query('update auth.account_credentials set status=$2,last_verified_at=now(),expires_at=coalesce($3,expires_at),updated_at=now() where id=$1 returning *', [current.id, input.status, input.expiresAt ?? null]);
     return result.rows[0] ? this.toCredential(result.rows[0]) : current;
   }
+  async listCredentialRefs(adminId: string, accountId: string): Promise<CredentialRefRecord[]> {
+    const result = await this.pool.query(`select r.*, v.metadata_json
+      from accounts.credential_refs r
+      join accounts.credential_values v on v.credential_ref_id=r.id
+      where r.account_id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=r.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))
+      order by r.updated_at desc`, [accountId, adminId]);
+    return result.rows.map((row) => this.toCredentialRef(row));
+  }
+  async getCredentialRef(adminId: string, credentialId: string): Promise<CredentialRefRecord | undefined> {
+    const result = await this.pool.query(`select r.*, v.metadata_json
+      from accounts.credential_refs r
+      join accounts.credential_values v on v.credential_ref_id=r.id
+      where r.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=r.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))`, [credentialId, adminId]);
+    return result.rows[0] ? this.toCredentialRef(result.rows[0]) : undefined;
+  }
+  async createCredentialRef(input: { adminId: string; accountId: string; provider: string; alias: string; label?: string; secretCiphertext: string; fingerprint: string; metadata?: Record<string, string> }): Promise<CredentialRefRecord> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const id = createId();
+      const ref = await client.query(`insert into accounts.credential_refs (id,account_id,kind,purpose,label,status,version,provider,alias,last_rotated_at)
+        values ($1,$2,'api_key','model_client',$3,'active',1,$4,$5,now()) returning *`, [id, input.accountId, input.label?.trim() || null, input.provider.trim(), input.alias.trim()]);
+      await client.query(`insert into accounts.credential_values (credential_ref_id,ciphertext,key_version,checksum,metadata_json)
+        values ($1,$2,1,$3,$4::jsonb)`, [id, Buffer.from(input.secretCiphertext, 'utf8'), input.fingerprint, JSON.stringify(input.metadata ?? {})]);
+      await client.query('commit');
+      return this.toCredentialRef({ ...ref.rows[0], metadata_json: input.metadata ?? {} });
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally { client.release(); }
+  }
+  async updateCredentialRef(input: { adminId: string; credentialId: string; expectedVersion: number; provider?: string; alias?: string; label?: string; metadata?: Record<string, string> }): Promise<CredentialRefRecord | undefined> {
+    const current = await this.getCredentialRef(input.adminId, input.credentialId);
+    if (!current) return undefined;
+    if (current.version !== input.expectedVersion) throw new Error('CREDENTIAL_VERSION_CONFLICT');
+    const result = await this.pool.query(`update accounts.credential_refs set provider=coalesce($2,provider), alias=coalesce($3,alias), label=case when $4::text is null then label else nullif($4,'') end, version=version+1, updated_at=now() where id=$1 and version=$5 returning *`, [input.credentialId, input.provider?.trim() ?? null, input.alias?.trim() ?? null, input.label ?? null, input.expectedVersion]);
+    if (!result.rows[0]) throw new Error('CREDENTIAL_VERSION_CONFLICT');
+    if (input.metadata !== undefined) await this.pool.query('update accounts.credential_values set metadata_json=$2::jsonb, updated_at=now() where credential_ref_id=$1', [input.credentialId, JSON.stringify(input.metadata)]);
+    return this.getCredentialRef(input.adminId, input.credentialId);
+  }
+  async rotateCredentialRef(input: { adminId: string; credentialId: string; expectedVersion: number; secretCiphertext: string; fingerprint: string }): Promise<CredentialRefRecord | undefined> {
+    const current = await this.getCredentialRef(input.adminId, input.credentialId);
+    if (!current) return undefined;
+    if (current.version !== input.expectedVersion) throw new Error('CREDENTIAL_VERSION_CONFLICT');
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const ref = await client.query(`update accounts.credential_refs set status='active',version=version+1,last_rotated_at=now(),updated_at=now() where id=$1 and version=$2 returning *`, [input.credentialId, input.expectedVersion]);
+      if (!ref.rows[0]) throw new Error('CREDENTIAL_VERSION_CONFLICT');
+      await client.query(`update accounts.credential_values set ciphertext=$2,key_version=key_version+1,checksum=$3,updated_at=now() where credential_ref_id=$1`, [input.credentialId, Buffer.from(input.secretCiphertext, 'utf8'), input.fingerprint]);
+      await client.query('commit');
+      return this.getCredentialRef(input.adminId, input.credentialId);
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally { client.release(); }
+  }
+  async updateCredentialRefStatus(input: { adminId: string; credentialId: string; expectedVersion: number; status: CredentialRefStatus }): Promise<CredentialRefRecord | undefined> {
+    const current = await this.getCredentialRef(input.adminId, input.credentialId);
+    if (!current) return undefined;
+    if (current.version !== input.expectedVersion) throw new Error('CREDENTIAL_VERSION_CONFLICT');
+    if (current.status === 'revoked' && input.status !== 'revoked') throw new Error('CREDENTIAL_REVOKED');
+    const result = await this.pool.query(`update accounts.credential_refs set status=$2,version=version+1,updated_at=now() where id=$1 and version=$3 returning *`, [input.credentialId, input.status, input.expectedVersion]);
+    if (!result.rows[0]) throw new Error('CREDENTIAL_VERSION_CONFLICT');
+    return this.getCredentialRef(input.adminId, input.credentialId);
+  }
   async getIdempotency(scope: string, key: string): Promise<IdempotencyRecord | undefined> { const result = await this.pool.query('select * from execution.idempotency_records where scope=$1 and key=$2 and expires_at>now()', [scope, key]); return result.rows[0] ? this.toIdempotency(result.rows[0]) : undefined; }
   async beginIdempotency(record: IdempotencyRecord): Promise<void> { await this.pool.query('insert into execution.idempotency_records (id,scope,key,request_fingerprint,status,expires_at) values ($1,$2,$3,$4,$5,$6)', [createId(), record.scope, record.key, record.requestFingerprint, record.status, record.expiresAt]); }
   async abortIdempotency(scope: string, key: string): Promise<void> { await this.pool.query('delete from execution.idempotency_records where scope=$1 and key=$2 and status=\'processing\'', [scope, key]); }
@@ -617,6 +684,28 @@ export class PostgresStore implements Store {
   private toCredential(row: Row): CredentialRecord {
     const metadata = row.metadata_json && typeof row.metadata_json === 'object' && !Array.isArray(row.metadata_json) ? Object.fromEntries(Object.entries(row.metadata_json as Record<string, unknown>).map(([key, value]) => [key, String(value)])) : {};
     return { id: String(row.id), accountId: String(row.account_id), platform: String(row.platform), status: row.status as CredentialRecord['status'], cookieHeader: row.cookie_header ? String(row.cookie_header) : undefined, accessToken: row.access_token ? String(row.access_token) : undefined, deviceId: row.device_id ? String(row.device_id) : undefined, metadata, expiresAt: iso(row.expires_at), lastVerifiedAt: iso(row.last_verified_at), createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString() };
+  }
+  private toCredentialRef(row: Row): CredentialRefRecord {
+    const metadata = row.metadata_json && typeof row.metadata_json === 'object' && !Array.isArray(row.metadata_json)
+      ? Object.fromEntries(Object.entries(row.metadata_json as Record<string, unknown>).map(([key, value]) => [key, String(value)]))
+      : {};
+    return {
+      id: String(row.id),
+      accountId: String(row.account_id),
+      kind: 'api_key',
+      purpose: 'model_client',
+      label: row.label ? String(row.label) : undefined,
+      status: row.status as CredentialRefStatus,
+      version: Number(row.version ?? 1),
+      provider: String(row.provider),
+      alias: String(row.alias),
+      fingerprint: String(row.checksum ?? row.fingerprint ?? ''),
+      metadata,
+      lastRotatedAt: iso(row.last_rotated_at),
+      createdAt: new Date(String(row.created_at)).toISOString(),
+      updatedAt: new Date(String(row.updated_at)).toISOString(),
+      canReveal: false,
+    };
   }
 }
 

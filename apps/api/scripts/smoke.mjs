@@ -94,8 +94,11 @@ try {
 
   const readCredential = await request(`/api/v1/accounts/${accountId}/credential`, { headers: { cookie } });
   assert.equal(readCredential.response.status, 200);
-  assert.equal(readCredential.body.data.accessToken, 'access-token-abc');
-  assert.equal(readCredential.body.data.metadata.source, 'qr');
+  assert.equal(readCredential.body.data.accessToken, undefined);
+  assert.equal(readCredential.body.data.cookieHeader, undefined);
+  assert.equal(readCredential.body.data.deviceId, undefined);
+  assert.equal(readCredential.body.data.fields.accessToken, true);
+  assert.ok(readCredential.body.data.fields.metadataKeys.includes('source'));
 
   const verifiedCredential = await request(`/api/v1/accounts/${accountId}/credential/verify`, {
     method: 'POST',

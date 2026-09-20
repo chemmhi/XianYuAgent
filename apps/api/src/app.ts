@@ -17,6 +17,7 @@ import { RedisConversationEventBridge } from './messages-realtime.js';
 import { decodeMessageHistoryCursor, encodeMessageHistoryCursor } from './message-history-cursor.js';
 import { InProcessAgentRuntime, isTerminalRunStatus, WorkspaceService, type WorkspaceRuntime } from './workspace.js';
 import { OpenAICompatibleModelClient, PiRuntimeAdapter } from './pi-runtime.js';
+import { ApiKeyCredentialService } from './credential-store.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -27,6 +28,7 @@ export interface AppRuntime {
   products: ProductService;
   productSync: ProductSyncService;
   credentials: CredentialService;
+  apiKeyCredentials: ApiKeyCredentialService;
   messages: MessageService;
   redisRealtime?: RedisConversationEventBridge;
   workspace: WorkspaceService;
@@ -58,6 +60,11 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     return auditId;
   });
   const credentials = new CredentialService(store, async (input) => {
+    const auditId = createId();
+    await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
+    return auditId;
+  });
+  const apiKeyCredentials = new ApiKeyCredentialService(store, config.credentialEncryptionKey || 'development-only-credential-key-change-me', async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
@@ -135,7 +142,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, products, productSync, credentials, messages, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuIm,
+    config, store, auth, accounts, coupons, products, productSync, credentials, apiKeyCredentials, messages, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuIm,
     server,
     async listen() { await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve)); },
     async close() {
@@ -202,7 +209,7 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
 }
 
 async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: ServerResponse): Promise<{ statusCode: number; body: unknown } | undefined> {
-  const { auth, accounts, coupons, products, productSync, credentials, messages, workspace, store, config, xianyuIm } = runtime;
+  const { auth, accounts, coupons, products, productSync, credentials, apiKeyCredentials, messages, workspace, store, config, xianyuIm } = runtime;
   if (ctx.path === '/healthz' && ctx.method === 'GET') {
     const health = await store.health();
     const redis = !config.redisUrl || !runtime.redisRealtime
@@ -252,6 +259,73 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     setCookie(response, 'session_id', '', { httpOnly: true, secure: config.cookieSecure, maxAge: 0 });
     setCookie(response, 'csrf_token', '', { secure: config.cookieSecure, maxAge: 0 });
     return { statusCode: 200, body: success(ctx, { loggedOut: true }).body };
+  }
+
+  const credentialCollectionPath = ctx.path === '/api/v1/credentials';
+  if (credentialCollectionPath && ctx.method === 'GET') {
+    const accountId = String(ctx.query.accountId ?? '').trim();
+    const items = await apiKeyCredentials.list({ adminId: authContext.admin.id, accountId });
+    return { statusCode: 200, body: success(ctx, { accountId, items }).body };
+  }
+  if (credentialCollectionPath && ctx.method === 'POST') {
+    const key = requireIdempotencyKey(ctx);
+    const result = await idempotent(store, {
+      scope: 'credentials:/api/v1/credentials',
+      key,
+      fingerprint: fingerprint(ctx.method, ctx.path, ctx.body),
+      traceId: ctx.traceId,
+      handler: async () => {
+        const created = await apiKeyCredentials.create({
+          adminId: authContext.admin.id,
+          accountId: String(ctx.body.accountId ?? ''),
+          provider: String(ctx.body.provider ?? ''),
+          alias: String(ctx.body.alias ?? ''),
+          label: typeof ctx.body.label === 'string' ? ctx.body.label : undefined,
+          apiKey: String(ctx.body.apiKey ?? ''),
+          metadata: readCredentialMetadata(ctx.body.metadata),
+          requestId: ctx.requestId,
+          traceId: ctx.traceId,
+        });
+        return success(ctx, created, 201);
+      },
+    });
+    return { statusCode: result.statusCode, body: result.body };
+  }
+  const credentialRefMatch = ctx.path.match(/^\/api\/v1\/credentials\/([^/]+)(?:\/(rotate|enable|disable|revoke))?$/);
+  if (credentialRefMatch) {
+    const credentialId = decodeURIComponent(credentialRefMatch[1]);
+    const action = credentialRefMatch[2];
+    if (!action && ctx.method === 'PATCH') {
+      const key = requireIdempotencyKey(ctx);
+      const result = await idempotent(store, {
+        scope: `credentials:${credentialId}:patch`,
+        key,
+        fingerprint: fingerprint(ctx.method, ctx.path, ctx.body),
+        traceId: ctx.traceId,
+        handler: async () => {
+          const updated = await apiKeyCredentials.update({ adminId: authContext.admin.id, credentialId, expectedVersion: Number(ctx.body.expectedVersion ?? 0), provider: typeof ctx.body.provider === 'string' ? ctx.body.provider : undefined, alias: typeof ctx.body.alias === 'string' ? ctx.body.alias : undefined, label: typeof ctx.body.label === 'string' ? ctx.body.label : undefined, metadata: ctx.body.metadata ? readCredentialMetadata(ctx.body.metadata) : undefined, requestId: ctx.requestId, traceId: ctx.traceId });
+          return success(ctx, updated);
+        },
+      });
+      return { statusCode: result.statusCode, body: result.body };
+    }
+    if (action && ctx.method === 'POST') {
+      const key = requireIdempotencyKey(ctx);
+      const result = await idempotent(store, {
+        scope: `credentials:${credentialId}:${action}`,
+        key,
+        fingerprint: fingerprint(ctx.method, ctx.path, ctx.body),
+        traceId: ctx.traceId,
+        handler: async () => {
+          const expectedVersion = Number(ctx.body.expectedVersion ?? 0);
+          const payload = action === 'rotate'
+            ? await apiKeyCredentials.rotate({ adminId: authContext.admin.id, credentialId, expectedVersion, apiKey: String(ctx.body.apiKey ?? ''), requestId: ctx.requestId, traceId: ctx.traceId })
+            : await apiKeyCredentials.setStatus({ adminId: authContext.admin.id, credentialId, expectedVersion, status: action === 'enable' ? 'active' : action === 'disable' ? 'disabled' : 'revoked', requestId: ctx.requestId, traceId: ctx.traceId });
+          return success(ctx, payload);
+        },
+      });
+      return { statusCode: result.statusCode, body: result.body };
+    }
   }
 
   if (ctx.path === '/api/v1/conversations' && ctx.method === 'GET') {
@@ -400,7 +474,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   if (credentialMatch) {
     const accountId = decodeURIComponent(credentialMatch[1]);
     const action = credentialMatch[2];
-    if (!action && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, await credentials.get(authContext.admin.id, accountId)).body };
+    if (!action && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, credentialMutationView(await credentials.get(authContext.admin.id, accountId))).body };
     if (!action && (ctx.method === 'PUT' || ctx.method === 'POST')) {
       const result = await mutation(runtime, ctx, authContext, accountId, async () => {
         const credential = await credentials.save({
