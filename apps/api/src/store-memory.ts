@@ -110,7 +110,7 @@ export class MemoryStore implements Store {
     const now = new Date().toISOString();
     const product: ProductRecord = { id: createId(), accountId: input.accountId, externalProductRef: input.externalProductRef, title: input.title, description: input.description, categoryCode: input.categoryCode, attributes: input.attributes ?? {}, defaultReplyTemplate: input.defaultReplyTemplate, aiPrompt: input.aiPrompt, configVersion: 1, priceMinor: input.priceMinor, status: input.status ?? 'draft', source: 'local', createdAt: now, updatedAt: now, skuCount: 0, assetCount: 0, skus: [], assets: [] };
     this.products.set(product.id, product);
-    return product;
+    return this.productDetail(product);
   }
 
   async upsertExternalProduct(input: { adminId: string; accountId: string; item: XianyuProductItem; syncedAt: string }): Promise<ProductUpsertResult> {
@@ -650,11 +650,21 @@ export class MemoryStore implements Store {
   }
 
   private productSummary(product: ProductRecord): ProductRecord {
-    return { ...product, attributes: { ...product.attributes }, skuCount: product.skus?.filter((sku) => sku.status !== 'archived').length ?? product.skuCount ?? 0, assetCount: product.assets?.filter((asset) => asset.status !== 'archived').length ?? product.assetCount ?? 0, skus: undefined, assets: undefined };
+    return { ...product, attributes: { ...product.attributes }, skuCount: product.skus?.filter((sku) => sku.status !== 'archived').length ?? product.skuCount ?? 0, assetCount: product.assets?.filter((asset) => asset.status !== 'archived').length ?? product.assetCount ?? 0, couponBatches: this.productCouponBatches(product.id), skus: undefined, assets: undefined };
   }
 
   private productDetail(product: ProductRecord): ProductRecord {
-    return { ...product, attributes: { ...product.attributes }, skus: product.skus?.map((sku) => ({ ...sku })), assets: product.assets?.map((asset) => ({ ...asset })), skuCount: product.skus?.filter((sku) => sku.status !== 'archived').length ?? product.skuCount ?? 0, assetCount: product.assets?.filter((asset) => asset.status !== 'archived').length ?? product.assetCount ?? 0 };
+    return { ...product, attributes: { ...product.attributes }, couponBatches: this.productCouponBatches(product.id), skus: product.skus?.map((sku) => ({ ...sku })), assets: product.assets?.map((asset) => ({ ...asset })), skuCount: product.skus?.filter((sku) => sku.status !== 'archived').length ?? product.skuCount ?? 0, assetCount: product.assets?.filter((asset) => asset.status !== 'archived').length ?? product.assetCount ?? 0 };
+  }
+
+  private productCouponBatches(productId: string): Array<{ id: string; label?: string }> {
+    return [...this.couponBindings.values()]
+      .filter((binding) => binding.productId === productId && binding.status === 'active')
+      .sort((left, right) => right.priority - left.priority || left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
+      .flatMap((binding) => {
+        const batch = this.couponBatches.get(binding.batchId);
+        return batch ? [{ id: batch.id, label: batch.label }] : [];
+      });
   }
 
   private couponSummary(batch: CouponBatchRecord): CouponBatchRecord {

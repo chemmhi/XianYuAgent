@@ -39,6 +39,11 @@ try {
     priceMinor: 1990,
     status: 'ready',
   });
+  const activeCouponBatch = await runtime.store.createCouponBatch({ adminId, accountId: account.id, label: '绑定卡券', purpose: 'text', deliveryScope: 'operator_only' });
+  await runtime.store.bindCouponBatch({ adminId, batchId: activeCouponBatch.id, productId: product.id });
+  const inactiveCouponBatch = await runtime.store.createCouponBatch({ adminId, accountId: account.id, label: '已解绑卡券', purpose: 'text', deliveryScope: 'operator_only' });
+  await runtime.store.bindCouponBatch({ adminId, batchId: inactiveCouponBatch.id, productId: product.id });
+  await runtime.store.unbindCouponBatch({ adminId, batchId: inactiveCouponBatch.id, productId: product.id });
 
   const list = await request(`/api/v1/products?accountId=${encodeURIComponent(account.id)}&status=ready&keyword=${encodeURIComponent('测试')}`, { headers: { cookie } });
   assert.equal(list.response.status, 200);
@@ -46,6 +51,7 @@ try {
   assert.equal(list.body.data.items[0].priceMinor, 1990);
   assert.equal(list.body.data.items[0].skuCount, 0);
   assert.equal(list.body.data.items[0].assetCount, 0);
+  assert.deepEqual(list.body.data.items[0].couponBatches, [{ id: activeCouponBatch.id, label: '绑定卡券' }]);
   assert.equal(list.body.data.total, 1);
   assert.equal(list.body.data.totalPages, 1);
 
@@ -53,6 +59,7 @@ try {
   assert.equal(detail.response.status, 200);
   assert.equal(detail.body.data.externalProductRef, 'ITEM-001');
   assert.deepEqual(detail.body.data.attributesJson, { deliveryType: 'coupon_only' });
+  assert.deepEqual(detail.body.data.couponBatches, [{ id: activeCouponBatch.id, label: '绑定卡券' }]);
   assert.deepEqual(detail.body.data.skus, []);
   assert.deepEqual(detail.body.data.assets, []);
 

@@ -6,6 +6,7 @@ import { decodeConversationCursor, encodeConversationCursor } from './conversati
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
 
 type Row = Record<string, unknown>;
+const PRODUCT_COUPON_BATCHES_SELECT = `(select coalesce(json_agg(json_build_object('id', cb.id, 'label', cb.label) order by binding.priority desc, binding.created_at, cb.id), '[]'::json) from coupons.coupon_bindings binding join coupons.coupon_batches cb on cb.id=binding.coupon_batch_id where binding.product_id=p.id and binding.status='active') as coupon_batches`;
 function dateIso(value: unknown): string {
   // node-postgres returns timestamptz columns as Date objects. Date#toString()
   // drops milliseconds, so never stringify a Date before serializing it.
@@ -57,11 +58,11 @@ export class PostgresStore implements Store {
     const sortOrder = query.sortOrder === 'asc' ? 'ASC' : 'DESC';
     const limitIndex = params.length + 1;
     const offsetIndex = params.length + 2;
-    const rows = await this.pool.query(`select p.*, (select count(*)::int from products.product_skus sku where sku.product_id=p.id and sku.status <> 'archived') as sku_count, (select count(*)::int from products.asset_refs asset where asset.product_id=p.id and asset.status <> 'archived') as asset_count from products.products p where ${where} order by ${sortColumn} ${sortOrder}, p.id limit $${limitIndex} offset $${offsetIndex}`, [...params, pageSize, (page - 1) * pageSize]);
+    const rows = await this.pool.query(`select p.*, (select count(*)::int from products.product_skus sku where sku.product_id=p.id and sku.status <> 'archived') as sku_count, (select count(*)::int from products.asset_refs asset where asset.product_id=p.id and asset.status <> 'archived') as asset_count, ${PRODUCT_COUPON_BATCHES_SELECT} from products.products p where ${where} order by ${sortColumn} ${sortOrder}, p.id limit $${limitIndex} offset $${offsetIndex}`, [...params, pageSize, (page - 1) * pageSize]);
     return { items: rows.rows.map((row) => this.toProduct(row)), page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
   }
   async getProduct(adminId: string, productId: string): Promise<ProductRecord | undefined> {
-    const result = await this.pool.query("select p.*, (select count(*)::int from products.product_skus sku where sku.product_id=p.id and sku.status <> 'archived') as sku_count, (select count(*)::int from products.asset_refs asset where asset.product_id=p.id and asset.status <> 'archived') as asset_count from products.products p where p.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=p.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))", [productId, adminId]);
+    const result = await this.pool.query(`select p.*, (select count(*)::int from products.product_skus sku where sku.product_id=p.id and sku.status <> 'archived') as sku_count, (select count(*)::int from products.asset_refs asset where asset.product_id=p.id and asset.status <> 'archived') as asset_count, ${PRODUCT_COUPON_BATCHES_SELECT} from products.products p where p.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=p.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))`, [productId, adminId]);
     if (!result.rows[0]) return undefined;
     const product = this.toProduct(result.rows[0]);
     const [skuRows, assetRows] = await Promise.all([
@@ -573,7 +574,17 @@ export class PostgresStore implements Store {
   private toAccount(row: Row): AccountRecord { return { id: String(row.id), platform: String(row.platform), sellerRef: String(row.seller_ref), displayName: row.display_name ? String(row.display_name) : undefined, remark: row.remark ? String(row.remark) : undefined, avatarUrl: row.avatar_url ? String(row.avatar_url) : undefined, platformUserId: row.platform_user_id ? String(row.platform_user_id) : undefined, status: row.status as AccountRecord['status'], createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString(), lastConnectedAt: iso(row.last_connected_at) }; }
   private toProduct(row: Row): ProductRecord {
     const attributes = row.attributes_json && typeof row.attributes_json === 'object' && !Array.isArray(row.attributes_json) ? row.attributes_json as Record<string, unknown> : {};
-    return { id: String(row.id), accountId: String(row.account_id), externalProductRef: row.external_product_ref ? String(row.external_product_ref) : undefined, title: String(row.title), description: row.description ? String(row.description) : undefined, categoryCode: row.category_code ? String(row.category_code) : undefined, attributes: { ...attributes }, defaultReplyTemplate: row.default_reply_template ? String(row.default_reply_template) : undefined, aiPrompt: row.ai_prompt ? String(row.ai_prompt) : undefined, configVersion: Number(row.config_version ?? 1), priceMinor: row.price_minor === null || row.price_minor === undefined ? undefined : Number(row.price_minor), status: row.status as ProductRecord['status'], source: (row.source ?? 'local') as ProductRecord['source'], lastSyncedAt: iso(row.last_synced_at), sourcePayloadDigest: row.source_payload_digest ? String(row.source_payload_digest) : undefined, createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString(), skuCount: Number(row.sku_count ?? 0), assetCount: Number(row.asset_count ?? 0) };
+    return { id: String(row.id), accountId: String(row.account_id), externalProductRef: row.external_product_ref ? String(row.external_product_ref) : undefined, title: String(row.title), description: row.description ? String(row.description) : undefined, categoryCode: row.category_code ? String(row.category_code) : undefined, attributes: { ...attributes }, defaultReplyTemplate: row.default_reply_template ? String(row.default_reply_template) : undefined, aiPrompt: row.ai_prompt ? String(row.ai_prompt) : undefined, configVersion: Number(row.config_version ?? 1), priceMinor: row.price_minor === null || row.price_minor === undefined ? undefined : Number(row.price_minor), status: row.status as ProductRecord['status'], source: (row.source ?? 'local') as ProductRecord['source'], lastSyncedAt: iso(row.last_synced_at), sourcePayloadDigest: row.source_payload_digest ? String(row.source_payload_digest) : undefined, createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString(), skuCount: Number(row.sku_count ?? 0), assetCount: Number(row.asset_count ?? 0), couponBatches: this.toProductCouponBatches(row.coupon_batches) };
+  }
+  private toProductCouponBatches(value: unknown): Array<{ id: string; label?: string }> | undefined {
+    const parsed = typeof value === 'string' ? (() => { try { return JSON.parse(value) as unknown; } catch { return undefined; } })() : value;
+    if (!Array.isArray(parsed)) return undefined;
+    return parsed.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const row = entry as Record<string, unknown>;
+      if (!row.id) return [];
+      return [{ id: String(row.id), label: row.label === null || row.label === undefined ? undefined : String(row.label) }];
+    });
   }
   private toProductSku(row: Row): ProductSkuRecord { return { id: String(row.id), productId: String(row.product_id), skuCode: String(row.sku_code), externalSkuRef: row.external_sku_ref ? String(row.external_sku_ref) : undefined, priceMinor: Number(row.price_minor), status: row.status as ProductSkuRecord['status'] }; }
   private toProductAsset(row: Row): ProductAssetRecord { return { id: String(row.id), productId: String(row.product_id), storageKey: String(row.storage_key), mimeType: String(row.mime_type), checksum: row.checksum ? String(row.checksum) : undefined, status: row.status as ProductAssetRecord['status'] }; }
