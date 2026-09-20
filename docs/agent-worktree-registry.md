@@ -35,6 +35,7 @@
 | `root` | `products-pagination` | `fix/products-pagination` | `F:\ChenHai\Project\XianYuAgent-products-pagination` | Codex `/root` | `2026-09-20 00:00:00 +08:00` | `CLEANED` | `3219f85f10cc151dd2761afa066a2ee60be8580f` | `2026-09-20 18:04:00 +08:00` | 已在 merge lock 内合入并完成主线 typecheck、Web 79 项测试、构建与商品 Chrome E2E；API smoke 仍受 127.0.0.1:18872 端口占用阻塞。Git worktree 元数据与分支已清理，目录因含非 Git 内容保留。 |
 | `root` | `products-columns` | `fix/products-columns` | `F:\ChenHai\Project\XianYuAgent-products-columns` | Codex `/root` | `2026-09-20 18:38:05 +08:00` | `CLEANED` | `19763b8e543e986d0d6b691f1a4d344a1f9f3eaf` | `2026-09-20 18:48:19 +08:00` | 六列表格、闲鱼创建/更新时间排序与关联卡券展示；双端类型检查、单测、构建与商品 Chrome E2E 已通过。Git worktree 元数据与分支已清理，目录因含非 Git 内容保留。 |
 | `root` | `coupons-toolbar` | `fix/coupons-toolbar` | `F:\ChenHai\Project\XianYuAgent-coupons-toolbar` | Codex `/root` | `2026-09-20 18:51:55 +08:00` | `CLEANED` | `19c6798` | `2026-09-20 19:00:37 +08:00` | 用户已明确授权直接合入 master；合并后 master typecheck、Vitest、前后端 build、Chrome/CDP E2E 与 diff 检查均通过；Git worktree 元数据与分支已清理，目录因保留非 Git 内容未删除。 |
+| `root` | `coupons-toolbar-empty-state` | `fix/coupons-toolbar-empty-state` | `F:\ChenHai\Project\XianYuAgent-coupons-toolbar-followup` | Codex `/root` | `2026-09-20 19:09:44 +08:00` | `READY_FOR_MERGE` | `-` | `-` | 用户已明确要求完成后合入 master；工具栏新建卡券按钮后置、移除共计统计，补充空态文案与居中回归；分支 typecheck、Vitest、前后端 build、Chrome/CDP E2E 已通过。 |
 
 ## 主工作区
 

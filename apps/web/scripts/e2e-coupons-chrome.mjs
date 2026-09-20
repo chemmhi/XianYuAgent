@@ -78,6 +78,11 @@ async function assertText(cdp, text) {
   if (!String(body).includes(text)) throw new Error(`page missing text: ${text}`);
 }
 
+async function setSearchValue(cdp, value) {
+  const encoded = JSON.stringify(value);
+  return evaluate(cdp, `(() => { const input = document.querySelector('input[aria-label="搜索卡券名称或描述"]'); if (!input) return false; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set; setter?.call(input, ${encoded}); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
+}
+
 async function captureViewport(cdp, width, height, filename) {
   await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
   await evaluate(cdp, 'new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
@@ -150,6 +155,14 @@ async function run() {
   if (legacyBlocks !== 0) throw new Error('legacy coupon KPI or page action blocks still render');
   const toolbarButtons = await evaluate(cdp, 'Array.from(document.querySelectorAll(".coupons-toolbar button")).map((button) => button.textContent?.trim()).filter(Boolean)');
   if (toolbarButtons.includes('查询') || toolbarButtons.includes('重置筛选')) throw new Error('coupon toolbar still exposes removed filter actions');
+  if (toolbarButtons.indexOf('刷新') >= toolbarButtons.indexOf('新建卡券')) throw new Error('new coupon button is not last in the default toolbar');
+  const totalBadgeCount = await evaluate(cdp, 'document.querySelectorAll(".coupons-total").length');
+  if (totalBadgeCount !== 0) throw new Error('coupon total badge still renders');
+  if (!await setSearchValue(cdp, '__coupon_empty_state__')) throw new Error('coupon search input missing');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('暂无卡券批次'), 'coupon empty state');
+  await assertText(cdp, '当前账号范围内没有匹配的批次，可调整筛选或创建新批次。');
+  await setSearchValue(cdp, '');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 卡券批次'), 'coupon list reset');
   await assertText(cdp, 'E2E 列表元数据');
   await assertText(cdp, '对接价：¥9.90');
   await captureViewport(cdp, 1440, 900, 'coupons-desktop-1440x900.png');
