@@ -91,11 +91,43 @@ function AuthenticatedShell({ page, accountsApi, productsApi, couponsApi, messag
           <div className="sidebar-bottom"><div className="agent-card"><span className="online-dot" /> <strong>Agent Runtime</strong><small>独立服务 · 正常</small></div><div className="sidebar-user"><div className="avatar">管</div><div><strong>运营管理员</strong><span>admin@example.com</span></div></div></div>
         </aside>
         <div className="desktop-body">
-          <main className={page === 'products' ? 'products-main' : page === 'accounts' ? 'accounts-main' : page === 'orders' ? 'orders-main' : page === 'settings' ? 'settings-main' : undefined}>{page === 'accounts' ? <AccountsPage api={accountsApi} /> : page === 'products' ? <ProductsPage api={productsApi} accountsApi={accountsApi} /> : page === 'coupons' ? <CouponsPage api={couponsApi} productsApi={productsApi} /> : page === 'messages' ? <MessagesPage api={messagesApi} /> : page === 'workspace' ? <WorkspacePage api={workspaceApi} /> : page === 'orders' ? <OrdersPage api={ordersApi} /> : page === 'settings' ? <SettingsPage api={settingsApi} /> : <PlaceholderPage page={page} />}</main>
+          <main className={page === 'products' ? 'products-main' : page === 'accounts' ? 'accounts-main' : page === 'orders' ? 'orders-main' : page === 'settings' ? 'settings-main' : undefined}>{renderAuthenticatedPage({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi })}</main>
         </div>
       </div>
     </div>
   );
+}
+
+type AuthenticatedPageProps = {
+  page: PageKey;
+  accountsApi: ReturnType<typeof createAccountsApi>;
+  productsApi: ReturnType<typeof createProductsApi>;
+  couponsApi: ReturnType<typeof createCouponsApi>;
+  messagesApi: ReturnType<typeof createMessagesApi>;
+  workspaceApi: ReturnType<typeof createWorkspaceApi>;
+  ordersApi: ReturnType<typeof createOrdersApi>;
+  settingsApi: ReturnType<typeof createCredentialApi>;
+};
+
+export function renderAuthenticatedPage({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi }: AuthenticatedPageProps) {
+  switch (page) {
+    case 'accounts':
+      return <AccountsPage api={accountsApi} />;
+    case 'products':
+      return <ProductsPage api={productsApi} accountsApi={accountsApi} />;
+    case 'coupons':
+      return <CouponsPage api={couponsApi} productsApi={productsApi} />;
+    case 'messages':
+      return <MessagesPage api={messagesApi} />;
+    case 'workspace':
+      return <WorkspacePage api={workspaceApi} />;
+    case 'orders':
+      return <OrdersPage api={ordersApi} />;
+    case 'settings':
+      return <SettingsPage api={settingsApi} />;
+    default:
+      return <PlaceholderPage page={page} />;
+  }
 }
 
 function PlaceholderPage({ page }: { page: PageKey }) {
