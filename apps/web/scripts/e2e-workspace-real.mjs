@@ -119,8 +119,10 @@ async function run() {
   const debugPort = await freePort();
   const apiUrl = `http://127.0.0.1:${apiPort}`;
   const webUrl = `http://127.0.0.1:${webPort}`;
-  const npm = process.env.npm_execpath ? process.execPath : (process.platform === 'win32' ? 'npm.cmd' : 'npm');
-  const npmArgs = (args) => process.env.npm_execpath ? [process.env.npm_execpath, ...args] : args;
+  // Invoke the platform npm shim directly so child workspace scripts receive
+  // the local node_modules/.bin PATH (important when this script runs under npm).
+  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const npmArgs = (args) => args;
 
   testDatabaseName = `xianyu_workspace_real_${process.pid}_${Date.now()}`.replace(/[^a-z0-9_]/gi, '_');
   const adminPool = new pg.Pool({ connectionString: 'postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/postgres' });
@@ -207,26 +209,33 @@ async function run() {
   await evaluate(cdp, `window.__workspaceRunSockets = []; (() => { const Original = window.WebSocket; window.WebSocket = class extends Original { constructor(...args) { super(...args); window.__workspaceRunSockets.push(this); } }; })()`);
   await evaluate(cdp, `(() => { const area = document.querySelector('.workspace-composer textarea'); const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set; setter?.call(area, '检查当前 Workspace 状态并返回摘要'); area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await evaluate(cdp, 'document.querySelector(".workspace-composer button[type=submit]")?.click()');
-  await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector(".workspace-run-panel .workspace-realtime-banner .btn.ghost"))')), 'reconnect state after blocked event stream', 10_000);
-  const blockedBanner = await evaluate(cdp, 'document.querySelector(".workspace-realtime-banner")?.innerText ?? ""');
+  await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector(".workspace-thread .workspace-reconnect-button"))')), 'reconnect state after blocked event stream', 10_000);
+  const blockedBanner = await evaluate(cdp, 'document.querySelector(".workspace-thread-header")?.innerText ?? ""');
   await cdp.send('Network.setBlockedURLs', { urls: [] });
-  await evaluate(cdp, 'document.querySelector(".workspace-run-panel .workspace-realtime-banner .btn.ghost")?.click()');
-  await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector(".workspace-result-ok"))')), 'successful Run result after reconnect', 15_000);
+  await evaluate(cdp, 'document.querySelector(".workspace-thread .workspace-reconnect-button")?.click()');
+  await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector(".workspace-message-final"))')), 'successful Run result after reconnect', 15_000);
+  const messageTypes = await evaluate(cdp, '({ user: document.querySelectorAll(".workspace-message-user").length, reasoning: document.querySelectorAll(".workspace-message-reasoning").length, tool: document.querySelectorAll(".workspace-message-tool").length, final: document.querySelectorAll(".workspace-message-final").length })');
+  if (messageTypes.user < 1 || messageTypes.reasoning < 1 || messageTypes.tool < 1 || messageTypes.final < 1) throw new Error(`workspace message stream missing canonical types: ${JSON.stringify(messageTypes)}`);
   const errorNodes = await evaluate(cdp, 'Array.from(document.querySelectorAll(".workspace-inline-error")).map((node) => ({ text: node.textContent, html: node.outerHTML }))');
   const socketStates = await evaluate(cdp, 'Array.from(window.__workspaceRunSockets ?? []).map((socket) => socket.readyState)');
-
-  await evaluate(cdp, 'document.querySelector(".workspace-events summary")?.click()');
-  await waitFor(async () => Number(await evaluate(cdp, 'document.querySelectorAll(".workspace-event-row").length')) >= 2, 'event replay in timeline');
-  const eventRows = await evaluate(cdp, 'Array.from(document.querySelectorAll(".workspace-event-row strong")).map((node) => node.textContent?.trim()).filter(Boolean)');
-  const eventSummary = await evaluate(cdp, 'document.querySelector(".workspace-events summary")?.textContent ?? ""');
+  await waitFor(async () => Number(await evaluate(cdp, 'document.querySelectorAll(".workspace-message-tool .workspace-message-code").length')) >= 2, 'event replay in message stream');
+  const eventRows = await evaluate(cdp, 'Array.from(document.querySelectorAll(".workspace-message-tool .workspace-message-code")).map((node) => node.textContent?.trim()).filter(Boolean)');
+  const eventSummary = await evaluate(cdp, 'Array.from(document.querySelectorAll(".workspace-message-tool")).map((node) => node.innerText).join(" | ")');
   const wsHandshakes = cdp.events.filter((event) => event.method === 'Network.webSocketHandshakeResponseReceived').length;
   const workspaceNetwork = cdp.events.filter((event) => {
     const request = event.params?.request;
     const url = request?.url ?? event.params?.url ?? '';
     return String(url).includes('/api/v1/workspace/');
   }).map((event) => ({ method: event.method, request: event.params?.request?.method, url: event.params?.request?.url ?? event.params?.url, error: event.params?.errorText, blocked: event.params?.blockedReason }));
-  if (!eventRows.some((value) => String(value).includes('run.succeeded'))) throw new Error(`run.succeeded missing from UI events: ${JSON.stringify(eventRows)}`);
+  if (!eventRows.some((value) => String(value).includes('run.succeeded'))) throw new Error(`run.succeeded missing from UI message events: ${JSON.stringify(eventRows)}`);
   if (wsHandshakes < 1) throw new Error('no WebSocket handshake observed in Chrome CDP');
+
+  const runId = [...new Set(workspaceNetwork.map((item) => String(item.url ?? '').match(/\/api\/v1\/workspace\/runs\/([^/?#]+)/)?.[1]).filter(Boolean))][0];
+  if (!runId) throw new Error(`workspace run id missing from network trace: ${JSON.stringify(workspaceNetwork)}`);
+  const runReadback = await fetch(`${apiUrl}/api/v1/workspace/runs/${encodeURIComponent(runId)}`, { headers: { cookie } });
+  if (!runReadback.ok) throw new Error(`run persistence readback failed: ${runReadback.status}`);
+  const runPayload = await runReadback.json();
+  if (runPayload.data?.status !== 'succeeded') throw new Error(`run persistence readback did not succeed: ${JSON.stringify(runPayload.data)}`);
 
   const desktopPath = await captureViewport(cdp, 1440, 900, 'workspace-desktop-1440x900.png');
   const mobilePath = await captureViewport(cdp, 390, 844, 'workspace-mobile-390x844.png');
@@ -238,10 +247,10 @@ async function run() {
   const session = sessionPayload.data?.items?.find((item) => item.title === '真实验证会话');
   if (!session?.id) throw new Error('session persistence readback missing created session');
 
-  const browserState = await evaluate(cdp, '({ href: location.href, sessionCount: document.querySelectorAll(".workspace-session-row").length, runStatus: document.querySelector(".workspace-run-panel .workspace-status")?.textContent ?? "", result: document.querySelector(".workspace-result-ok")?.innerText ?? "", eventSummary: document.querySelector(".workspace-events summary")?.textContent ?? "" })');
+  const browserState = await evaluate(cdp, '({ href: location.href, sessionCount: document.querySelectorAll(".workspace-session-row").length, runStatus: document.querySelector(".workspace-thread .workspace-status")?.textContent ?? "", result: document.querySelector(".workspace-message-final")?.innerText ?? "", messageTypes: { user: document.querySelectorAll(".workspace-message-user").length, reasoning: document.querySelectorAll(".workspace-message-reasoning").length, tool: document.querySelectorAll(".workspace-message-tool").length, final: document.querySelectorAll(".workspace-message-final").length }, eventSummary: Array.from(document.querySelectorAll(".workspace-message-tool")).map((node) => node.innerText).join(" | ") })');
   console.log(JSON.stringify({
-    apiStorage: 'postgres', runtime: workspaceE2eRuntime, accountId, sessionId: session.id, sessionPersisted: true,
-    browserState, blockedBanner, errorNodes, socketStates, eventRows, eventSummary, wsHandshakes, workspaceNetwork,
+    apiStorage: 'postgres', runtime: workspaceE2eRuntime, accountId, sessionId: session.id, runId, sessionPersisted: true, runPersisted: true,
+    browserState, blockedBanner, errorNodes, socketStates, messageTypes, eventRows, eventSummary, wsHandshakes, workspaceNetwork,
     screenshots: { desktopPath, mobilePath },
   }, null, 2));
   cdp.socket.close();

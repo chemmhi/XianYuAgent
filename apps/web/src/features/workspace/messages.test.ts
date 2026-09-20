@@ -14,7 +14,7 @@ describe('workspace message projection', () => {
   it('renders the four canonical message types in chronological order', () => {
     const messages = buildWorkspaceMessages(run, events);
     expect(messages.map((message) => message.type)).toEqual(['user_message', 'reasoning_summary', 'tool_event', 'final_answer']);
-    expect(messages[1]).toMatchObject({ collapsible: true, summary: 'Prepare execution context · succeeded' });
+    expect(messages[1]).toMatchObject({ collapsible: true, summary: 'Prepare execution context · 已完成' });
     expect(messages[2]).toMatchObject({ eventType: 'step.succeeded', sequence: 2 });
   });
 
