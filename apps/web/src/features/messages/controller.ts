@@ -70,7 +70,10 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
       onOpen: () => {
         if (!socketGenerationRef.current!.isCurrent(generation)) return;
         reconnectAttempt.current = 0;
-        setState((previous) => ({ ...previous, realtimePhase: 'connecting' }));
+        // Treat the socket as live as soon as the browser handshake succeeds.
+        // The server also emits a connection.changed event, but waiting for
+        // that extra frame made a healthy connection look stale in the UI.
+        setState((previous) => ({ ...previous, realtimePhase: 'connected', error: null }));
       },
       onEvent: (event: RealtimeEvent) => {
         if (!socketGenerationRef.current!.isCurrent(generation)) return;
@@ -177,6 +180,54 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
       setState((previous) => ({ ...previous, loadingMoreHistory: false, error: normalized }));
     }
   }, [accountId, api, state.hasMoreHistory, state.historyCursor, state.loadingMoreHistory]);
+
+  // WebSocket is the primary realtime transport. Reconcile the active
+  // conversation with the cursor endpoint as a low-frequency safety net so a
+  // dropped proxy frame or a cross-process bridge hiccup cannot leave the
+  // operator staring at stale messages until a manual refresh.
+  useEffect(() => {
+    const conversationId = state.activeConversationId;
+    if (!accountId || !conversationId || state.timelinePhase === 'idle') return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const reconcile = async () => {
+      try {
+        let cursor = cursorRef.current;
+        let result = await api.listMessages({ accountId, conversationId, cursor, limit: 100 });
+        // Drain more than one page when several events accumulated while the
+        // socket was unavailable. Never jump straight to latestCursor before
+        // consuming the returned page cursors, otherwise messages after the
+        // first 100 could be skipped permanently.
+        const batches = [result];
+        let guard = 0;
+        while (result.hasMore && result.nextCursor !== undefined && result.nextCursor > cursor && guard < 20) {
+          cursor = result.nextCursor;
+          result = await api.listMessages({ accountId, conversationId, cursor, limit: 100 });
+          batches.push(result);
+          guard += 1;
+        }
+        if (cancelled || activeIdRef.current !== conversationId) return;
+        const nextCursor = Math.max(cursorRef.current, ...batches.map((batch) => batch.latestCursor), ...batches.map((batch) => batch.nextCursor ?? 0));
+        cursorRef.current = nextCursor;
+        setState((previous) => ({
+          ...previous,
+          messages: mergeTimelineMessages(previous.messages, batches.flatMap((batch) => batch.items)),
+          cursor: nextCursor,
+          timelinePhase: previous.messages.length || batches.some((batch) => batch.items.length > 0) ? 'success' : previous.timelinePhase,
+          error: null,
+        }));
+      } catch {
+        // Keep the WebSocket state visible; the next cycle or socket reconnect
+        // will retry without replacing a useful realtime error message.
+      }
+      if (!cancelled) timer = setTimeout(reconcile, 2500);
+    };
+    timer = setTimeout(reconcile, 2500);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [accountId, api, state.activeConversationId, state.timelinePhase]);
 
   useEffect(() => { activeIdRef.current = undefined; reconnectAttempt.current = 0; void reload(); return closeRealtime; }, [accountKey, reload, closeRealtime]);
 

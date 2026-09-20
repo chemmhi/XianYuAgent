@@ -1,15 +1,35 @@
-import type { ReactNode } from 'react';
+import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import type { MessageVM } from '../types';
 import { renderXianyuText } from '../xianyu-emojis';
 
 type Participant = { displayName: string; avatarUrl?: string };
 
 export function MessageTimeline({ messages, phase, hasMoreHistory = false, loadingMoreHistory = false, onLoadMore, onOpenImage, inboundParticipant, outboundParticipant }: { messages: MessageVM[]; phase: string; hasMoreHistory?: boolean; loadingMoreHistory?: boolean; onLoadMore?: () => void; onOpenImage?: (url: string) => void; inboundParticipant?: Participant; outboundParticipant?: Participant }) {
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const lastMessageIdRef = useRef<string | undefined>(undefined);
+
+  // Keep the conversation focused on the newest message when a conversation
+  // first loads, or when a genuinely new message arrives. Loading older
+  // history only prepends rows, so the last message id remains unchanged and
+  // the reader's current scroll position is preserved.
+  useLayoutEffect(() => {
+    if (phase !== 'success' || messages.length === 0) {
+      lastMessageIdRef.current = undefined;
+      return;
+    }
+    const lastMessageId = messages[messages.length - 1]?.messageId;
+    const shouldScrollToLatest = lastMessageIdRef.current === undefined || lastMessageIdRef.current !== lastMessageId;
+    if (shouldScrollToLatest && timelineRef.current) {
+      timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
+    }
+    lastMessageIdRef.current = lastMessageId;
+  }, [messages, phase]);
+
   if (phase === 'loading') return <div className="messages-timeline-state" aria-live="polite">正在加载消息时间线…</div>;
   if (phase === 'empty') return <div className="messages-timeline-state">暂无历史消息</div>;
   if (phase === 'forbidden') return <div className="messages-timeline-state messages-error" role="alert">无权查看该会话消息。</div>;
   if (phase === 'error') return <div className="messages-timeline-state messages-error" role="alert">消息时间线加载失败。</div>;
-  return <div className="messages-timeline" aria-live="polite">
+  return <div ref={timelineRef} className="messages-timeline" aria-live="polite">
     {hasMoreHistory && onLoadMore && <button className="messages-history-load-more" type="button" onClick={onLoadMore} disabled={loadingMoreHistory}>{loadingMoreHistory ? '正在加载更早消息…' : '加载更早消息'}</button>}
     {messages.map((message) => {
       const isSystem = message.bodyType === 'system' || message.senderRole === 'system' || message.bodyText === '[系统消息]';

@@ -43,13 +43,36 @@ export function createMessagesApi(input: { get: <T>(path: string) => Promise<T>;
       const socket = new WebSocket(toWebSocketUrl(input.baseUrl, `/api/v1/conversations/${encodeURIComponent(query.conversationId)}/events?cursor=${encodeURIComponent(String(query.cursor))}`));
       socket.addEventListener('open', () => query.onOpen?.());
       socket.addEventListener('message', (event) => {
-        try { query.onEvent(JSON.parse(String(event.data)) as RealtimeEvent); } catch { query.onError?.(); }
+        try {
+          const parsed: unknown = JSON.parse(String(event.data));
+          // The API currently sends the event directly. Accept the common
+          // `{ event: ... }` envelope as well so a reverse proxy or realtime
+          // bridge cannot silently turn live messages into no-ops.
+          const candidate = isRecord(parsed) && isRecord(parsed.event) ? parsed.event : parsed;
+          if (!isRealtimeEvent(candidate)) { query.onError?.(); return; }
+          query.onEvent(candidate);
+        } catch { query.onError?.(); }
       });
       socket.addEventListener('error', () => query.onError?.());
       socket.addEventListener('close', () => query.onClose?.());
       return { close: () => socket.close() };
     },
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function isRealtimeEvent(value: unknown): value is RealtimeEvent {
+  if (!isRecord(value)) return false;
+  return typeof value.eventId === 'string'
+    && typeof value.conversationId === 'string'
+    && typeof value.accountId === 'string'
+    && Number.isFinite(value.cursor)
+    && typeof value.type === 'string'
+    && typeof value.payload === 'object'
+    && value.payload !== null;
 }
 
 function toWebSocketUrl(baseUrl: string | undefined, path: string): string {
