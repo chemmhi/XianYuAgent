@@ -396,6 +396,7 @@ export type RunStatus = 'queued' | 'running' | 'waiting_confirmation' | 'executi
 export type StepStatus = 'pending' | 'running' | 'waiting_confirmation' | 'executing' | 'retrying' | 'succeeded' | 'partially_succeeded' | 'failed' | 'skipped' | 'cancelled';
 export type StepKind = 'plan' | 'tool_call' | 'policy_check' | 'mutation' | 'observation';
 export type ExternalOutcome = 'known_success' | 'known_failure' | 'unknown';
+export type WorkspaceMessageType = 'user_message' | 'reasoning_summary' | 'tool_event' | 'final_answer';
 
 export interface AgentSessionRecord {
   id: string;
@@ -450,6 +451,17 @@ export interface RunEventRecord {
   createdAt: string;
 }
 
+export interface WorkspaceMessageRecord {
+  id: string;
+  sessionId: string;
+  runId?: string;
+  type: WorkspaceMessageType;
+  content: string;
+  summary?: string;
+  createdAt: string;
+  sequence: number;
+}
+
 export interface Store {
   kind: 'memory' | 'postgres';
   health(): Promise<{ kind: string; reachable: boolean }>;
@@ -496,6 +508,8 @@ export interface Store {
   updateRunStep(stepId: string, patch: { status?: StepStatus; inputSummary?: string; outputSummary?: string; errorCode?: string; startedAt?: string; finishedAt?: string }): Promise<StepRecord | undefined>;
   appendRunEvent(input: { runId: string; eventType: string; payload: Record<string, unknown> }): Promise<RunEventRecord>;
   listRunEvents(adminId: string, runId: string, afterSequence?: number): Promise<RunEventRecord[]>;
+  appendWorkspaceMessage(input: { adminId: string; sessionId: string; runId?: string; type: WorkspaceMessageType; content: string; summary?: string }): Promise<WorkspaceMessageRecord>;
+  listWorkspaceMessages(adminId: string, sessionId: string, limit?: number): Promise<WorkspaceMessageRecord[]>;
   listProducts(adminId: string, query: ProductListQuery): Promise<ProductListResult>;
   getProduct(adminId: string, productId: string): Promise<ProductRecord | undefined>;
   createProduct(input: {

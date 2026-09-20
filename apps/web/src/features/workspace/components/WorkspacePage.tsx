@@ -1,23 +1,24 @@
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { useAccountContext } from '../../../app/account-context';
 import { useWorkspaceController } from '../controller';
+import { buildWorkspaceMessages } from '../messages';
 import type { WorkspaceApi } from '../api';
-import type { WorkspaceRunStatus, WorkspaceSessionVM, WorkspaceStepStatus } from '../types';
+import type { WorkspaceMessageVM, WorkspaceRunStatus, WorkspaceSessionVM } from '../types';
 import './workspace.css';
 
 export interface WorkspacePageProps { api: WorkspaceApi; }
 
 const terminalStatuses = new Set<WorkspaceRunStatus>(['succeeded', 'partially_succeeded', 'failed', 'cancelled', 'expired']);
 
-function statusLabel(status: WorkspaceRunStatus | WorkspaceStepStatus): string {
+function statusLabel(status: string): string {
   const labels: Record<string, string> = {
-    queued: '排队中', running: '运行中', waiting_confirmation: '等待确认', executing: '执行中', retrying: '重试中', cancelling: '取消中',
-    succeeded: '已完成', partially_succeeded: '部分完成', failed: '失败', cancelled: '已取消', expired: '已过期', pending: '待执行', skipped: '已跳过',
+    queued: 'Queued', running: 'Running', waiting_confirmation: 'Waiting for confirmation', executing: 'Executing', retrying: 'Retrying', cancelling: 'Cancelling',
+    succeeded: 'Succeeded', partially_succeeded: 'Partially succeeded', failed: 'Failed', cancelled: 'Cancelled', expired: 'Expired', pending: 'Pending', skipped: 'Skipped',
   };
   return labels[status] ?? status;
 }
 
-function statusTone(status: WorkspaceRunStatus | WorkspaceStepStatus): string {
+function statusTone(status: string): string {
   if (status === 'succeeded') return 'ok';
   if (status === 'failed' || status === 'expired') return 'danger';
   if (status === 'cancelled' || status === 'skipped') return 'muted';
@@ -31,10 +32,6 @@ function formatTime(value?: string): string {
   return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
-function sessionMeta(session: WorkspaceSessionVM): string {
-  return `${session.status === 'archived' ? '已归档' : '活跃'} · ${formatTime(session.lastActiveAt)}`;
-}
-
 export function WorkspacePage({ api }: WorkspacePageProps) {
   const { currentAccountId, currentAccount, accountsLoading, accountsError } = useAccountContext();
   const controller = useWorkspaceController({ api, accountId: currentAccountId });
@@ -43,6 +40,7 @@ export function WorkspacePage({ api }: WorkspacePageProps) {
   const [newTitle, setNewTitle] = useState('');
   const [instruction, setInstruction] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [expandedReasoning, setExpandedReasoning] = useState<string | null>(null);
 
   const visibleSessions = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -51,6 +49,7 @@ export function WorkspacePage({ api }: WorkspacePageProps) {
   }, [search, state.sessions]);
   const activeSession = state.sessions.find((session) => session.id === state.activeSessionId);
   const currentRun = state.run && activeSession && state.run.sessionId === activeSession.id ? state.run : null;
+  const messages = currentRun ? buildWorkspaceMessages(currentRun, state.events) : [];
   const contextMissing = !accountsLoading && !accountsError && !currentAccountId;
 
   async function submitSession(event: FormEvent<HTMLFormElement>) {
@@ -77,90 +76,64 @@ export function WorkspacePage({ api }: WorkspacePageProps) {
   return (
     <section className="page-stack workspace-domain" data-workspace-domain>
       <div className="page-title workspace-page-title">
-        <div>
-          <p className="eyebrow">Agent Workspace</p>
-          <h1>Workspace</h1>
-          <p>围绕当前闲鱼账号管理会话、提交首条 Run，并实时观察执行步骤。</p>
-        </div>
-        <div className="workspace-scope">
-          <span className={`workspace-scope-dot ${currentAccountId ? 'online' : ''}`} />
-          <span>{currentAccount?.displayName ?? (contextMissing ? '未选择账号' : '正在加载账号')}</span>
-        </div>
+        <div><p className="eyebrow">Agent Workspace</p><h1>Workspace</h1><p>Manage sessions and follow each Run as a continuous agent conversation.</p></div>
+        <div className="workspace-scope"><span className={`workspace-scope-dot ${currentAccountId ? 'online' : ''}`} /><span>{currentAccount?.displayName ?? (contextMissing ? 'No account selected' : 'Loading account')}</span></div>
       </div>
 
-      {accountsError && <div className="workspace-inline-error" role="alert">账号上下文加载失败：{accountsError}</div>}
+      {accountsError && <div className="workspace-inline-error" role="alert">Account context failed to load: {accountsError}</div>}
       {state.error && <div className="workspace-inline-error" role="alert">{state.error}</div>}
 
-      {contextMissing ? (
-        <WorkspaceState title="需要先选择账号" message="Workspace 会话必须绑定一个可用的闲鱼账号。" action={<button className="btn primary" type="button" onClick={chooseAccount}>前往账号管理</button>} />
-      ) : state.phase === 'forbidden' ? (
-        <WorkspaceState title="暂无 Workspace 权限" message={state.error ?? '当前账号范围不允许读取 Workspace。'} action={<button className="btn ghost" type="button" onClick={() => void controller.reload()}>重新加载</button>} />
-      ) : (
-        <div className="workspace-layout">
-          <aside className="card workspace-sessions-panel">
-            <div className="workspace-panel-head">
-              <div><h2>会话</h2><p>{state.sessions.length} 个工作区会话</p></div>
-              <button className="btn primary" type="button" onClick={() => setShowCreate((value) => !value)}>新建</button>
-            </div>
-            {showCreate && <form className="workspace-create-form" onSubmit={submitSession}>
-              <label htmlFor="workspace-session-title">会话名称</label>
-              <div className="workspace-create-row"><input id="workspace-session-title" value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder="例如：每日店铺巡检" autoFocus /><button className="btn primary" type="submit" disabled={state.submitting || !newTitle.trim()}>保存</button></div>
-            </form>}
-            <label className="workspace-search"><span aria-hidden="true">⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索会话" aria-label="搜索会话" /></label>
-            <div className="workspace-session-list">
-              {state.phase === 'loading' && <div className="workspace-list-state">正在加载会话…</div>}
-              {state.phase !== 'loading' && visibleSessions.length === 0 && <div className="workspace-list-state">{state.sessions.length ? '没有匹配的会话' : '还没有会话，先新建一个'}</div>}
-              {visibleSessions.map((session) => <SessionRow key={session.id} session={session} active={session.id === state.activeSessionId} busy={state.submitting} onSwitch={() => { if (session.status === 'active') void controller.switchSession(session.id); }} onArchive={() => { if (window.confirm(`归档“${session.title}”？`)) void controller.archiveSession(session.id); }} />)}
-            </div>
-          </aside>
-
-          <div className="workspace-main-column">
-            <article className="card workspace-composer-panel">
-              <div className="workspace-panel-head">
-                <div><p className="eyebrow">Run Composer</p><h2>{activeSession?.title ?? '选择一个活跃会话'}</h2><p>{activeSession ? '提交一条指令，服务端会创建 Run 并通过事件流回放执行进度。' : '从左侧选择一个活跃会话后开始。'}</p></div>
-                {activeSession && <span className={`workspace-status workspace-status-${activeSession.status === 'active' ? 'ok' : 'muted'}`}>{activeSession.status === 'active' ? '可写' : '只读'}</span>}
+      {contextMissing ? <WorkspaceState title="Select an account first" message="Every Workspace session is scoped to one available Xianyu account." action={<button className="btn primary" type="button" onClick={chooseAccount}>Open accounts</button>} />
+        : state.phase === 'forbidden' ? <WorkspaceState title="Workspace access unavailable" message={state.error ?? 'Your current account scope cannot read Workspace.'} action={<button className="btn ghost" type="button" onClick={() => void controller.reload()}>Retry</button>} />
+          : <div className="workspace-layout">
+            <aside className="card workspace-sessions-panel">
+              <div className="workspace-panel-head"><div><h2>Sessions</h2><p>{state.sessions.length} workspace sessions</p></div><button className="btn primary" type="button" onClick={() => setShowCreate((value) => !value)}>New</button></div>
+              {showCreate && <form className="workspace-create-form" onSubmit={submitSession}><label htmlFor="workspace-session-title">Session name</label><div className="workspace-create-row"><input id="workspace-session-title" value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder="Daily shop review" autoFocus /><button className="btn primary" type="submit" disabled={state.submitting || !newTitle.trim()}>Save</button></div></form>}
+              <label className="workspace-search"><span aria-hidden="true">⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search sessions" aria-label="Search sessions" /></label>
+              <div className="workspace-session-list">
+                {state.phase === 'loading' && <div className="workspace-list-state">Loading sessions…</div>}
+                {state.phase !== 'loading' && visibleSessions.length === 0 && <div className="workspace-list-state">{state.sessions.length ? 'No matching sessions' : 'No sessions yet — create one to begin'}</div>}
+                {visibleSessions.map((session) => <SessionRow key={session.id} session={session} active={session.id === state.activeSessionId} busy={state.submitting} onSwitch={() => { if (session.status === 'active') void controller.switchSession(session.id); }} onArchive={() => { if (window.confirm(`Archive “${session.title}”?`)) void controller.archiveSession(session.id); }} />)}
               </div>
-              <form className="workspace-composer" onSubmit={submitRun}>
-                <textarea value={instruction} onChange={(event) => setInstruction(event.target.value)} maxLength={4000} disabled={!activeSession || activeSession.status !== 'active' || state.submitting} placeholder="告诉 Agent 你要完成什么，例如：检查当前账号的工作区状态" />
-                <div className="workspace-composer-foot"><span>{instruction.length}/4000</span><button className="btn primary" type="submit" disabled={!instruction.trim() || !activeSession || activeSession.status !== 'active' || state.submitting}>{state.submitting ? '提交中…' : '运行 Run'}</button></div>
+            </aside>
+
+            <section className="card workspace-thread" aria-label="Workspace conversation">
+              <header className="workspace-thread-header">
+                <div><p className="eyebrow">Live Run Thread</p><h2>{activeSession?.title ?? 'Choose an active session'}</h2><p>{currentRun ? `${messages.length} messages · Run created ${formatTime(currentRun.createdAt)}` : 'Start a Run to see the agent conversation here.'}</p></div>
+                <div className="workspace-thread-meta">{currentRun && <span className={`workspace-status workspace-status-${statusTone(currentRun.status)}`}>{statusLabel(currentRun.status)}</span>}<span className={`workspace-connection workspace-connection-${state.connection}`}><span />{state.connection === 'connected' ? 'Live' : state.connection === 'reconnecting' ? 'Reconnecting' : state.connection === 'connecting' ? 'Connecting' : 'Offline'}</span>{currentRun && !terminalStatuses.has(currentRun.status) && state.connection !== 'connected' && <button className="btn ghost workspace-reconnect-button" type="button" onClick={controller.reconnectRun}>Reconnect</button>}</div>
+              </header>
+
+              <div className="workspace-message-stream">
+                {currentRun ? <MessageStream messages={messages} expandedReasoning={expandedReasoning} onToggleReasoning={(id) => setExpandedReasoning((current) => current === id ? null : id)} /> : <WorkspaceState title="Waiting for the first Run" message={activeSession ? 'Write an instruction below to start a controlled execution.' : 'Choose an active session from the left.'} compact />}
+              </div>
+
+              <form className="workspace-composer workspace-composer-docked" onSubmit={submitRun}>
+                <div className="workspace-composer-context"><span className={`workspace-composer-dot ${activeSession?.status === 'active' ? 'ready' : ''}`} /><span>{activeSession?.status === 'active' ? 'Ready to run' : 'Read-only session'}</span></div>
+                <textarea value={instruction} onChange={(event) => setInstruction(event.target.value)} maxLength={4000} disabled={!activeSession || activeSession.status !== 'active' || state.submitting} placeholder="Ask Agent to inspect, plan, or act…" aria-label="Run instruction" />
+                <div className="workspace-composer-foot"><span>{instruction.length}/4000</span><button className="btn primary" type="submit" disabled={!instruction.trim() || !activeSession || activeSession.status !== 'active' || state.submitting}>{state.submitting ? 'Submitting…' : 'Run'}</button></div>
               </form>
-            </article>
-
-            <article className="card workspace-run-panel">
-              <div className="workspace-panel-head">
-                <div><p className="eyebrow">Execution Timeline</p><h2>Run 执行状态</h2><p>{currentRun ? `创建于 ${formatTime(currentRun.createdAt)}` : '提交指令后，这里会展示 Run 与 Step 的实时状态。'}</p></div>
-                {currentRun && <span className={`workspace-status workspace-status-${statusTone(currentRun.status)}`}>{statusLabel(currentRun.status)}</span>}
-              </div>
-              {currentRun ? <RunTimeline run={currentRun} events={state.events} connection={state.connection} onReconnect={controller.reconnectRun} /> : <WorkspaceState title="等待首条 Run" message={activeSession ? '输入一条指令开始受控执行。' : '请先选择活跃会话。'} compact />}
-            </article>
-          </div>
-        </div>
-      )}
+            </section>
+          </div>}
     </section>
   );
 }
 
 function SessionRow({ session, active, busy, onSwitch, onArchive }: { session: WorkspaceSessionVM; active: boolean; busy: boolean; onSwitch: () => void; onArchive: () => void }) {
   return <div className={`workspace-session-row ${active ? 'active' : ''} ${session.status === 'archived' ? 'archived' : ''}`}>
-    <button type="button" className="workspace-session-select" onClick={onSwitch} disabled={busy || session.status === 'archived'} aria-pressed={active}>
-      <span className="workspace-session-title">{session.title}</span><small>{sessionMeta(session)}</small>{session.summary && <small>{session.summary}</small>}
-    </button>
-    <button type="button" className="workspace-session-action" onClick={onArchive} disabled={busy || session.status === 'archived'} aria-label={`归档 ${session.title}`}>•••</button>
+    <button type="button" className="workspace-session-select" onClick={onSwitch} disabled={busy || session.status === 'archived'} aria-pressed={active}><span className="workspace-session-title">{session.title}</span><small>{session.status === 'archived' ? 'Archived' : 'Active'} · {formatTime(session.lastActiveAt)}</small>{session.summary && <small>{session.summary}</small>}</button>
+    <button type="button" className="workspace-session-action" onClick={onArchive} disabled={busy || session.status === 'archived'} aria-label={`Archive ${session.title}`}>•••</button>
   </div>;
 }
 
-function RunTimeline({ run, events, connection, onReconnect }: { run: NonNullable<ReturnType<typeof useWorkspaceController>['state']['run']>; events: ReturnType<typeof useWorkspaceController>['state']['events']; connection: 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'closed'; onReconnect?: () => void }) {
-  const terminal = terminalStatuses.has(run.status);
-  return <div className="workspace-run-body">
-    <div className="workspace-realtime-banner"><span className={`workspace-realtime-dot ${terminal ? 'terminal' : 'live'}`} /><span>{terminal ? `Run ${statusLabel(run.status)}` : connection === 'connected' ? '实时事件流已连接' : connection === 'reconnecting' ? '实时连接已断开，正在等待重连' : connection === 'connecting' ? '正在连接实时事件流…' : '实时事件流未连接'}</span>{!terminal && onReconnect && connection !== 'connected' && <button className="btn ghost" type="button" onClick={onReconnect}>重连</button>}</div>
-    <div className="workspace-instruction"><span>指令摘要</span><p>{run.instructionSummary}</p></div>
-    <ol className="workspace-timeline">
-      {run.steps.map((step) => <li key={step.stepId} className={`workspace-timeline-item ${step.status}`}><span className={`workspace-step-marker workspace-step-marker-${statusTone(step.status)}`}>{step.status === 'succeeded' ? '✓' : step.status === 'failed' ? '!' : step.sequence}</span><div><div className="workspace-step-head"><strong>{step.label}</strong><span className={`workspace-status workspace-status-${statusTone(step.status)}`}>{statusLabel(step.status)}</span></div><small>{step.inputSummary ?? step.outputSummary ?? '等待服务端更新'}</small>{step.errorCode && <small className="workspace-step-error">错误：{step.errorCode}</small>}</div></li>)}
-    </ol>
-    {run.resultSummary && <div className="workspace-result workspace-result-ok"><strong>结果</strong><span>{run.resultSummary}</span></div>}
-    {run.errorCode && <div className="workspace-result workspace-result-error"><strong>运行失败</strong><span>{run.errorCode}</span></div>}
-    {events.length > 0 && <details className="workspace-events"><summary>事件回放 · {events.length} 条</summary>{events.map((event) => <div key={event.sequence} className="workspace-event-row"><span>#{event.sequence}</span><strong>{event.eventType}</strong><small>{formatTime(event.createdAt)}</small></div>)}</details>}
-  </div>;
+function MessageStream({ messages, expandedReasoning, onToggleReasoning }: { messages: WorkspaceMessageVM[]; expandedReasoning: string | null; onToggleReasoning: (id: string) => void }) {
+  return <div className="workspace-message-list">{messages.map((message) => <MessageBubble key={message.id} message={message} expanded={expandedReasoning === message.id} onToggle={() => onToggleReasoning(message.id)} />)}</div>;
+}
+
+function MessageBubble({ message, expanded, onToggle }: { message: WorkspaceMessageVM; expanded: boolean; onToggle: () => void }) {
+  if (message.type === 'user_message') return <article className="workspace-message workspace-message-user"><div className="workspace-message-avatar">You</div><div className="workspace-message-content"><div className="workspace-message-meta"><strong>You</strong><time>{formatTime(message.createdAt)}</time></div><p>{message.content}</p></div></article>;
+  if (message.type === 'reasoning_summary') return <article className="workspace-message workspace-message-reasoning"><button type="button" className="workspace-message-toggle" onClick={onToggle} aria-expanded={expanded}><span className="workspace-message-icon">◌</span><span><strong>Reasoning summary</strong><small>{message.summary ?? 'High-level execution summary'}</small></span><span className="workspace-message-chevron">{expanded ? '⌃' : '⌄'}</span></button>{expanded && <div className="workspace-reasoning-body"><p>{message.content}</p></div>}</article>;
+  if (message.type === 'tool_event') return <article className="workspace-message workspace-message-tool"><div className="workspace-message-icon">⚙</div><div className="workspace-message-content"><div className="workspace-message-meta"><strong>{message.title}</strong><time>{formatTime(message.createdAt)}</time></div><p>{message.content}</p>{message.eventType && <small className="workspace-message-code">{message.eventType}{message.sequence ? ` · #${message.sequence}` : ''}</small>}</div></article>;
+  return <article className={`workspace-message workspace-message-final ${message.status && statusTone(message.status) === 'danger' ? 'is-error' : ''}`}><div className="workspace-message-icon">✦</div><div className="workspace-message-content"><div className="workspace-message-meta"><strong>{message.title}</strong><time>{formatTime(message.createdAt)}</time></div><p>{message.content}</p></div></article>;
 }
 
 function WorkspaceState({ title, message, action, compact = false }: { title: string; message: string; action?: ReactNode; compact?: boolean }) {

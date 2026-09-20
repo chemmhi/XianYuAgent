@@ -1,7 +1,7 @@
 import type { AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor, isAfterConversationCursor } from './conversation-cursor.js';
-import type { AgentSessionRecord, RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus } from './domain.js';
+import type { AgentSessionRecord, RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, WorkspaceMessageRecord, WorkspaceMessageType } from './domain.js';
 
 export class MemoryStore implements Store {
   readonly kind = 'memory' as const;
@@ -24,6 +24,7 @@ export class MemoryStore implements Store {
   private readonly runs = new Map<string, RunRecord>();
   private readonly steps = new Map<string, StepRecord>();
   private readonly runEvents = new Map<string, RunEventRecord[]>();
+  private readonly workspaceMessages = new Map<string, WorkspaceMessageRecord[]>();
   private runEventSequence = 0;
   readonly audits: AuditEventRecord[] = [];
 
@@ -511,6 +512,23 @@ export class MemoryStore implements Store {
     const run = this.runs.get(runId);
     if (!run || !(await this.hasAccountScope(adminId, run.accountId))) return [];
     return (this.runEvents.get(runId) ?? []).filter((event) => event.sequence > afterSequence).map((event) => ({ ...event, payload: { ...event.payload } }));
+  }
+
+  async appendWorkspaceMessage(input: { adminId: string; sessionId: string; runId?: string; type: WorkspaceMessageType; content: string; summary?: string }): Promise<WorkspaceMessageRecord> {
+    const session = await this.getAgentSession(input.adminId, input.sessionId);
+    if (!session) throw new Error('SESSION_NOT_FOUND');
+    const messages = this.workspaceMessages.get(input.sessionId) ?? [];
+    const message: WorkspaceMessageRecord = { id: createId(), sessionId: input.sessionId, runId: input.runId, type: input.type, content: input.content, summary: input.summary, createdAt: new Date().toISOString(), sequence: messages.length + 1 };
+    messages.push(message);
+    this.workspaceMessages.set(input.sessionId, messages);
+    return { ...message };
+  }
+
+  async listWorkspaceMessages(adminId: string, sessionId: string, limit = 100): Promise<WorkspaceMessageRecord[]> {
+    const session = await this.getAgentSession(adminId, sessionId);
+    if (!session) return [];
+    const messages = this.workspaceMessages.get(sessionId) ?? [];
+    return messages.slice(-Math.max(1, Math.min(limit, 500))).map((message) => ({ ...message }));
   }
 
   private productSummary(product: ProductRecord): ProductRecord {

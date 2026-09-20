@@ -136,6 +136,7 @@ export interface PiRuntimeEvent {
 export type PiRuntimeMessageType = 'user_message' | 'reasoning_summary' | 'tool_event' | 'final_answer';
 
 export interface PiRuntimeMessage {
+  adminId?: string;
   sessionId: string;
   runId: string;
   messageType: PiRuntimeMessageType;
@@ -147,11 +148,13 @@ export interface PiRuntimeAdapterOptions {
   model?: string;
   outputLimit?: number;
   redactSecrets?: string[];
+  persistUserMessage?: boolean;
   messageSink?: (message: PiRuntimeMessage) => void | Promise<void>;
   onEvent?: (event: PiRuntimeEvent) => void | Promise<void>;
 }
 
 export interface PiRuntimeEnqueueInput {
+  adminId?: string;
   run: RunRecord;
   steps: StepRecord[];
   sessionId?: string;
@@ -214,13 +217,14 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     if (!step || this.stopped) return;
     try {
       const sessionId = input.sessionId ?? input.run.sessionId;
-      await this.persistMessage({ sessionId, runId: input.run.id, messageType: 'user_message', content: redactSensitiveText(input.run.instruction, this.options.outputLimit ?? 2_000, this.options.redactSecrets) });
+      if (this.options.persistUserMessage !== false) await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'user_message', content: redactSensitiveText(input.run.instruction, this.options.outputLimit ?? 2_000, this.options.redactSecrets) });
       const startedAt = new Date().toISOString();
       await this.transitionRun(input.run, 'running', { startedAt });
       await this.transitionStep(step, 'running', { startedAt });
       await this.emit(input.run.id, 'run.started', { status: 'running' });
       await this.emit(input.run.id, 'step.started', { stepId: step.id, status: 'running' });
       await this.emit(input.run.id, 'runtime.started', { status: 'running', model: this.options.model, messageType: 'tool_event' });
+      await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: '正在分析请求并准备执行上下文。', summary: '已创建高层推理摘要' });
 
       await this.transitionRun(input.run, 'executing');
       await this.transitionStep(step, 'executing');
@@ -237,8 +241,8 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       const output = redactSensitiveText(result.content, this.options.outputLimit ?? 2_000, this.options.redactSecrets);
       await this.transitionStep(step, 'succeeded', { finishedAt, outputSummary: output });
       await this.transitionRun(input.run, 'succeeded', { finishedAt, resultSummary: output });
-      await this.persistMessage({ sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: 'Pi Runtime 已完成模型生成步骤', summary: step.label });
-      await this.persistMessage({ sessionId, runId: input.run.id, messageType: 'final_answer', content: output });
+      await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: '已完成模型处理并整理结果。', summary: step.label });
+      await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'final_answer', content: output });
       await this.emit(input.run.id, 'step.succeeded', { stepId: step.id, status: 'succeeded', messageType: 'reasoning_summary', summary: step.label });
       await this.emit(input.run.id, 'runtime.succeeded', { status: 'succeeded', model: result.model, messageType: 'final_answer', content: output });
       await this.emit(input.run.id, 'run.succeeded', { status: 'succeeded', resultSummary: output, messageType: 'final_answer', content: output });
@@ -256,7 +260,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       if (step.status !== 'failed') await this.transitionStep(step, 'failed', { finishedAt, errorCode: failure.code, outputSummary: failure.summary });
       if (run.status !== 'failed') await this.transitionRun(run, 'failed', { finishedAt, errorCode: failure.code });
       const sessionId = input.sessionId ?? run.sessionId;
-      await this.persistMessage({ sessionId, runId: run.id, messageType: 'final_answer', content: failure.summary });
+      await this.persistMessage({ adminId: input.adminId, sessionId, runId: run.id, messageType: 'final_answer', content: failure.summary });
       await this.emit(run.id, 'step.failed', { stepId: step.id, status: 'failed', errorCode: failure.code, messageType: 'tool_event' });
       await this.emit(run.id, 'runtime.failed', { status: 'failed', errorCode: failure.code, messageType: 'final_answer', content: failure.summary });
       await this.emit(run.id, 'run.failed', { status: 'failed', errorCode: failure.code, messageType: 'final_answer', content: failure.summary });
@@ -305,12 +309,12 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
 }
 
 export function loadPiRuntimeConfig(env: NodeJS.ProcessEnv = process.env): PiRuntimeConfig | undefined {
-  const apiKey = firstNonEmpty(env.API_KEY, env.OPENAI_API_KEY);
+  const apiKey = firstNonEmpty(env.API_KEY, env.OPENAI_API_KEY, env.PI_API_KEY);
   if (!apiKey) return undefined;
   return {
     apiKey,
-    baseUrl: firstNonEmpty(env.BASE_URL, env.OPENAI_BASE_URL) ?? DEFAULT_PI_BASE_URL,
-    model: firstNonEmpty(env.MODEL, env.OPENAI_MODEL) ?? DEFAULT_PI_MODEL,
+    baseUrl: firstNonEmpty(env.BASE_URL, env.OPENAI_BASE_URL, env.PI_BASE_URL) ?? DEFAULT_PI_BASE_URL,
+    model: firstNonEmpty(env.MODEL, env.OPENAI_MODEL, env.PI_MODEL) ?? DEFAULT_PI_MODEL,
     timeoutMs: positiveInteger(env.PI_RUNTIME_TIMEOUT_MS ?? env.MODEL_TIMEOUT_MS, DEFAULT_PI_TIMEOUT_MS),
   };
 }
