@@ -1,5 +1,5 @@
 import type { AppConfig } from './config.js';
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CouponBatchListQuery, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSyncResult, SessionRecord, Store } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CouponBatchListQuery, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, OrderListQuery, OrderListResult, OrderRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSyncResult, SessionRecord, Store } from './domain.js';
 import { createId, createToken, digestJson, hashPassword, isSessionFresh, sha256, verifyPassword } from './security.js';
 import type { XianyuMtopClient } from './xianyu-mtop.js';
 
@@ -230,6 +230,81 @@ function mapCouponStoreError(error: unknown): ServiceError {
   if (code === 'PRODUCT_NOT_FOUND') return new ServiceError(404, 'NOT_FOUND', 'product not found');
   if (code === 'ACCOUNT_SCOPE_FORBIDDEN') return new ServiceError(403, 'FORBIDDEN', 'account scope required');
   return new ServiceError(500, 'INTERNAL_ERROR', error instanceof Error ? error.message : 'coupon operation failed');
+}
+
+export interface OrderRefreshResult {
+  syncRunId: string;
+  accountId: string;
+  pagesFetched: number;
+  fetchedCount: number;
+  createdCount: number;
+  updatedCount: number;
+  hasMore: boolean;
+  items: OrderRecord[];
+}
+
+export class OrderService {
+  constructor(private readonly store: Store, private readonly xianyu: XianyuMtopClient, private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => Promise<string>) {}
+
+  async list(adminId: string, query: OrderListQuery): Promise<OrderListResult> {
+    if (query.accountId && (!isUuid(query.accountId) || !(await this.store.hasAccountScope(adminId, query.accountId)))) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    if (!Number.isInteger(page) || page < 1) throw new ServiceError(422, 'VALIDATION_FAILED', 'page must be a positive integer');
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new ServiceError(422, 'VALIDATION_FAILED', 'pageSize must be between 1 and 100');
+    if (query.paymentStatus && !['unpaid', 'paid', 'closed', 'unknown'].includes(query.paymentStatus)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid payment status');
+    if (query.orderStatus && !['open', 'cancelling', 'cancelled', 'completed', 'closed', 'failed'].includes(query.orderStatus)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid order status');
+    if (query.deliveryStatus && !['pending', 'reserving', 'delivered', 'partially_delivered', 'failed', 'cancelled'].includes(query.deliveryStatus)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid delivery status');
+    if (query.afterSalesStatus && !['none', 'requested', 'refunding', 'refunded', 'rejected', 'closed'].includes(query.afterSalesStatus)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid after-sales status');
+    if (query.sortBy && !['createdAt', 'amountMinor'].includes(query.sortBy)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid order sort field');
+    if (query.sortOrder && !['asc', 'desc'].includes(query.sortOrder)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid order sort order');
+    return this.store.listOrders(adminId, { ...query, page, pageSize });
+  }
+
+  async get(input: { adminId: string; orderNo: string; accountId?: string }): Promise<OrderRecord> {
+    if (!input.orderNo.trim()) throw new ServiceError(404, 'NOT_FOUND', 'order not found');
+    if (input.accountId && (!isUuid(input.accountId) || !(await this.store.hasAccountScope(input.adminId, input.accountId)))) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
+    const order = await this.store.getOrder(input.adminId, input.orderNo, input.accountId);
+    if (!order) throw new ServiceError(404, 'NOT_FOUND', 'order not found');
+    return order;
+  }
+
+  async refresh(input: { adminId: string; accountId?: string; pageSize?: unknown; maxPages?: unknown; requestId: string; traceId: string }): Promise<OrderRefreshResult> {
+    const account = await this.resolveAccount(input.adminId, input.accountId);
+    const pageSize = normalizeBoundedInteger(input.pageSize, 100, 1, 100);
+    const maxPages = normalizeBoundedInteger(input.maxPages, 20, 1, 100);
+    const fetched = await this.xianyu.fetchOrdersAll(input.adminId, account.id, pageSize, maxPages);
+    const firstFailure = fetched.pages.find((page) => !page.success);
+    if (firstFailure) {
+      if (firstFailure.accountInvalid) throw new ServiceError(409, 'ACCOUNT_REAUTH_REQUIRED', firstFailure.message ?? 'xianyu credential is invalid', { errorCode: firstFailure.errorCode });
+      throw new ServiceError(502, 'XIANYU_SYNC_FAILED', firstFailure.message ?? 'xianyu order refresh failed', { errorCode: firstFailure.errorCode });
+    }
+    const syncedAt = new Date().toISOString();
+    let createdCount = 0;
+    let updatedCount = 0;
+    const items: OrderRecord[] = [];
+    for (const item of fetched.items) {
+      const result = await this.store.upsertExternalOrder({ adminId: input.adminId, accountId: account.id, accountName: account.displayName, item, syncedAt });
+      items.push(result.order);
+      if (result.action === 'created') createdCount += 1;
+      else updatedCount += 1;
+    }
+    const syncRunId = createId();
+    await this.audit({ actorId: input.adminId, action: 'order.refresh.completed', targetRef: syncRunId, requestId: input.requestId, traceId: input.traceId, accountId: account.id, payload: { pagesFetched: fetched.pages.length, fetchedCount: fetched.items.length, createdCount, updatedCount, hasMore: fetched.hasMore } });
+    return { syncRunId, accountId: account.id, pagesFetched: fetched.pages.length, fetchedCount: fetched.items.length, createdCount, updatedCount, hasMore: fetched.hasMore, items };
+  }
+
+  private async resolveAccount(adminId: string, accountId?: string): Promise<AccountRecord> {
+    if (accountId) {
+      if (!isUuid(accountId)) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
+      const account = await this.store.getAccount(adminId, accountId);
+      if (!account) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
+      return account;
+    }
+    const accounts = await this.store.listAccounts(adminId, { page: 1, pageSize: 100 });
+    if (accounts.items.length !== 1) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required when multiple accounts are available');
+    return accounts.items[0];
+  }
 }
 
 export class ProductService {

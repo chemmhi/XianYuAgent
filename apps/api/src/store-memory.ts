@@ -1,4 +1,4 @@
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor, isAfterConversationCursor } from './conversation-cursor.js';
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
@@ -14,6 +14,7 @@ export class MemoryStore implements Store {
   private readonly loginSessions = new Map<string, LoginSessionRecord>();
   private readonly credentials = new Map<string, CredentialRecord>();
   private readonly products = new Map<string, ProductRecord>();
+  private readonly orders = new Map<string, OrderRecord>();
   private readonly couponBatches = new Map<string, CouponBatchRecord>();
   private readonly couponItems = new Map<string, CouponItemRecord>();
   private readonly couponBindings = new Map<string, CouponBindingRecord>();
@@ -114,6 +115,57 @@ export class MemoryStore implements Store {
     const product = this.products.get(productId);
     if (!product || !(await this.hasAccountScope(adminId, product.accountId))) return undefined;
     return this.productDetail(product);
+  }
+  async listOrders(adminId: string, query: OrderListQuery): Promise<OrderListResult> {
+    const scopedAccountIds = new Set((await this.listScopes(adminId)).map((scope) => scope.accountId));
+    const normalizedKeyword = query.keyword?.trim().toLowerCase();
+    const filtered = [...this.orders.values()].filter((order) => {
+      if (!scopedAccountIds.has(order.accountId)) return false;
+      if (query.accountId && order.accountId !== query.accountId) return false;
+      if (query.paymentStatus && order.paymentStatus !== query.paymentStatus) return false;
+      if (query.orderStatus && order.orderStatus !== query.orderStatus) return false;
+      if (query.deliveryStatus && order.deliveryStatus !== query.deliveryStatus) return false;
+      if (query.afterSalesStatus && order.afterSalesStatus !== query.afterSalesStatus) return false;
+      if (normalizedKeyword && ![order.orderNo, order.buyerId, order.buyerName, order.itemId, order.itemTitle].some((value) => value.toLowerCase().includes(normalizedKeyword))) return false;
+      return true;
+    });
+    const sortBy = query.sortBy ?? 'createdAt';
+    const sortOrder = query.sortOrder === 'asc' ? 1 : -1;
+    filtered.sort((left, right) => {
+      const leftValue = sortBy === 'amountMinor' ? left.amountMinor : left.createdAt;
+      const rightValue = sortBy === 'amountMinor' ? right.amountMinor : right.createdAt;
+      return (leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0) * sortOrder;
+    });
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    const start = (page - 1) * pageSize;
+    return { items: filtered.slice(start, start + pageSize).map((order) => ({ ...order })), page, pageSize, total: filtered.length, totalPages: Math.max(1, Math.ceil(filtered.length / pageSize)) };
+  }
+  async getOrder(adminId: string, orderNo: string, accountId?: string): Promise<OrderRecord | undefined> {
+    const order = [...this.orders.values()].find((item) => item.orderNo === orderNo && (!accountId || item.accountId === accountId));
+    if (!order || !(await this.hasAccountScope(adminId, order.accountId))) return undefined;
+    return { ...order };
+  }
+  async createOrder(input: { adminId: string; order: Omit<OrderRecord, 'id' | 'createdAt' | 'updatedAt' | 'configVersion' | 'source'> & { id?: string; createdAt?: string; updatedAt?: string; configVersion?: number; source?: OrderSource } }): Promise<OrderRecord> {
+    if (!(await this.hasAccountScope(input.adminId, input.order.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const duplicate = [...this.orders.values()].find((order) => order.orderNo === input.order.orderNo && order.accountId === input.order.accountId);
+    if (duplicate) throw new Error('ORDER_DUPLICATE');
+    const now = new Date().toISOString();
+    const order: OrderRecord = { ...input.order, id: input.order.id ?? createId(), createdAt: input.order.createdAt ?? now, updatedAt: input.order.updatedAt ?? now, configVersion: input.order.configVersion ?? 1, source: input.order.source ?? 'local' };
+    this.orders.set(order.id, order);
+    return { ...order };
+  }
+  async upsertExternalOrder(input: { adminId: string; accountId: string; item: XianyuOrderItem; syncedAt: string; accountName?: string }): Promise<OrderUpsertResult> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const existing = [...this.orders.values()].find((order) => order.accountId === input.accountId && order.orderNo === input.item.orderNo);
+    const now = input.syncedAt;
+    if (existing) {
+      Object.assign(existing, { ...input.item, accountId: input.accountId, accountName: input.accountName ?? existing.accountName, updatedAt: now, source: 'xianyu' as const, sourcePayloadDigest: input.item.sourcePayloadDigest, configVersion: existing.configVersion + 1 });
+      return { action: 'updated', order: { ...existing } };
+    }
+    const order: OrderRecord = { ...input.item, id: createId(), accountId: input.accountId, accountName: input.accountName, updatedAt: input.item.updatedAt ?? now, configVersion: 1, source: 'xianyu' };
+    this.orders.set(order.id, order);
+    return { action: 'created', order: { ...order } };
   }
   async createProduct(input: { adminId: string; accountId: string; externalProductRef?: string; title: string; description?: string; categoryCode?: string; attributes?: Record<string, unknown>; defaultReplyTemplate?: string; aiPrompt?: string; priceMinor?: number; status?: ProductStatus }): Promise<ProductRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');

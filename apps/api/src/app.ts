@@ -4,7 +4,7 @@ import type { Duplex } from 'node:stream';
 import { WebSocket, WebSocketServer } from 'ws';
 import { loadConfig, type AppConfig } from './config.js';
 import type { AuthContext } from './services.js';
-import { AccountService, AuthService, CouponService, CredentialService, ProductService, ProductSyncService, ServiceError, idempotent } from './services.js';
+import { AccountService, AuthService, CouponService, CredentialService, OrderService, ProductService, ProductSyncService, ServiceError, idempotent } from './services.js';
 import { createIds, failure, fingerprint, parseCookies, readBody, setCookie, success, writeJson, type RequestContext } from './http.js';
 import { createStore } from './store.js';
 import type { ProductListResult, ProductRecord, Store } from './domain.js';
@@ -24,6 +24,7 @@ export interface AppRuntime {
   auth: AuthService;
   accounts: AccountService;
   coupons: CouponService;
+  orders: OrderService;
   products: ProductService;
   productSync: ProductSyncService;
   credentials: CredentialService;
@@ -121,6 +122,11 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   });
+  const orders = new OrderService(store, xianyu, async (input) => {
+    const auditId = createId();
+    await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
+    return auditId;
+  });
   const xianyuIm = new XianyuImService(store, xianyu, messages);
 
   const wsServer = new WebSocketServer({ noServer: true });
@@ -135,7 +141,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, products, productSync, credentials, messages, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuIm,
+    config, store, auth, accounts, coupons, orders, products, productSync, credentials, messages, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuIm,
     server,
     async listen() { await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve)); },
     async close() {
@@ -202,7 +208,7 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
 }
 
 async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: ServerResponse): Promise<{ statusCode: number; body: unknown } | undefined> {
-  const { auth, accounts, coupons, products, productSync, credentials, messages, workspace, store, config, xianyuIm } = runtime;
+  const { auth, accounts, coupons, orders, products, productSync, credentials, messages, workspace, store, config, xianyuIm } = runtime;
   if (ctx.path === '/healthz' && ctx.method === 'GET') {
     const health = await store.health();
     const redis = !config.redisUrl || !runtime.redisRealtime
@@ -546,6 +552,18 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     return { statusCode: 200, body: success(ctx, await workspace.getRun({ adminId: authContext.admin.id, runId })).body };
   }
 
+  if (ctx.path === '/api/v1/orders' && ctx.method === 'GET') {
+    return { statusCode: 200, body: success(ctx, await orders.list(authContext.admin.id, parseOrderListQuery(ctx.query))).body };
+  }
+  if (ctx.path === '/api/v1/orders/refresh' && ctx.method === 'POST') {
+    const accountId = optionalString(ctx.body.accountId);
+    return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await orders.refresh({ adminId: authContext.admin.id, accountId, pageSize: ctx.body.pageSize, maxPages: ctx.body.maxPages, requestId: ctx.requestId, traceId: ctx.traceId })));
+  }
+  const orderDetailMatch = ctx.path.match(/^\/api\/v1\/orders\/([^/]+)$/);
+  if (orderDetailMatch && ctx.method === 'GET') {
+    return { statusCode: 200, body: success(ctx, await orders.get({ adminId: authContext.admin.id, orderNo: decodeURIComponent(orderDetailMatch[1]), accountId: optionalString(ctx.query.accountId) })).body };
+  }
+
   if (ctx.path === '/api/v1/coupons/batches' && ctx.method === 'GET') {
     const result = await coupons.list(authContext.admin.id, parseCouponBatchListQuery(ctx.query));
     return { statusCode: 200, body: success(ctx, result).body };
@@ -742,6 +760,23 @@ function parseProductListQuery(query: Record<string, string>): import('./domain.
     status: optionalString(query.status) as import('./domain.js').ProductListQuery['status'],
     sortBy: optionalString(query.sortBy) as import('./domain.js').ProductListQuery['sortBy'],
     sortOrder: optionalString(query.sortOrder) as import('./domain.js').ProductListQuery['sortOrder'],
+    page: page === undefined || Number.isNaN(page) ? page : Math.trunc(page),
+    pageSize: pageSize === undefined || Number.isNaN(pageSize) ? pageSize : Math.trunc(pageSize),
+  };
+}
+
+function parseOrderListQuery(query: Record<string, string>): import('./domain.js').OrderListQuery {
+  const page = query.page === undefined ? undefined : Number(query.page);
+  const pageSize = query.pageSize === undefined ? undefined : Number(query.pageSize);
+  return {
+    accountId: optionalString(query.accountId),
+    keyword: optionalString(query.keyword),
+    paymentStatus: optionalString(query.paymentStatus) as import('./domain.js').OrderListQuery['paymentStatus'],
+    orderStatus: optionalString(query.orderStatus) as import('./domain.js').OrderListQuery['orderStatus'],
+    deliveryStatus: optionalString(query.deliveryStatus) as import('./domain.js').OrderListQuery['deliveryStatus'],
+    afterSalesStatus: optionalString(query.afterSalesStatus) as import('./domain.js').OrderListQuery['afterSalesStatus'],
+    sortBy: optionalString(query.sortBy) as import('./domain.js').OrderListQuery['sortBy'],
+    sortOrder: optionalString(query.sortOrder) as import('./domain.js').OrderListQuery['sortOrder'],
     page: page === undefined || Number.isNaN(page) ? page : Math.trunc(page),
     pageSize: pageSize === undefined || Number.isNaN(pageSize) ? pageSize : Math.trunc(pageSize),
   };

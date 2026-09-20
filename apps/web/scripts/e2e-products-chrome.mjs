@@ -124,7 +124,7 @@ async function run() {
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'accounts page before products');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('账号列表'), 'accounts list before products');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes(account.displayName), 'primary account row');
-  const initialSwitched = await evaluate(cdp, `(() => { const rows = Array.from(document.querySelectorAll('[role="row"]')); const row = rows.find((candidate) => candidate.textContent?.includes(${JSON.stringify(account.displayName)})); const button = row?.querySelector('[data-testid="account-switch"]'); if (!button || button.disabled) return false; button.click(); return true; })()`);
+  const initialSwitched = await evaluate(cdp, `(() => { if (localStorage.getItem('xianyu.activeAccountId') === ${JSON.stringify(account.id)}) return true; const rows = Array.from(document.querySelectorAll('[role="row"]')); const row = rows.find((candidate) => candidate.textContent?.includes(${JSON.stringify(account.displayName)})); const button = row?.querySelector('[data-testid="account-switch"]'); if (!button || button.disabled) return false; button.click(); return true; })()`);
   if (!initialSwitched) throw new Error('primary account switch button missing or disabled');
   await waitFor(async () => String(await evaluate(cdp, 'localStorage.getItem("xianyu.activeAccountId") ?? ""')) === account.id, 'primary account selection');
   await cdp.send('Page.navigate', { url: `${webUrl}/products` });

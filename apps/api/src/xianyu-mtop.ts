@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
-import type { ProductSyncPageResult } from './domain.js';
+import type { ProductSyncPageResult, XianyuOrderItem } from './domain.js';
 import { mapXianyuProductPage } from './xianyu-product-mapper.js';
+import { mapXianyuOrderPage, type XianyuOrderPageResult } from './xianyu-order-mapper.js';
 
 const APP_KEY = '34839810';
 export const XIANYU_IM_APP_KEY = '444e9908a51d1cb236a27862abc769c9';
@@ -19,6 +20,7 @@ export interface MtopResult {
 }
 
 export interface XianyuItemsPageResult extends MtopResult, ProductSyncPageResult {}
+export interface XianyuOrdersPageResult extends MtopResult, XianyuOrderPageResult {}
 
 export interface XianyuChatImageUploadResult {
   success: boolean;
@@ -157,6 +159,25 @@ export class XianyuMtopClient {
 
   async fetchSoldOrders(adminId: string, accountId: string, data: Record<string, unknown> = {}): Promise<MtopResult> {
     return this.call(adminId, accountId, 'mtop.taobao.idle.trade.merchant.sold.get', '1.0', data);
+  }
+
+  async fetchOrdersAll(adminId: string, accountId: string, pageSize = 100, maxPages = 20): Promise<{ pages: XianyuOrdersPageResult[]; items: XianyuOrderItem[]; hasMore: boolean }> {
+    const pages: XianyuOrdersPageResult[] = [];
+    const items: XianyuOrderItem[] = [];
+    let pageNumber = 1;
+    let hasMore = false;
+    const limit = Math.min(100, Math.max(1, Math.trunc(maxPages)));
+    do {
+      const response = await this.fetchSoldOrders(adminId, accountId, { pageNumber, pageSize: Math.min(100, Math.max(1, Math.trunc(pageSize))) });
+      const normalized = mapXianyuOrderPage(response.response, pageNumber, pageSize);
+      const page: XianyuOrdersPageResult = { ...response, ...normalized };
+      pages.push(page);
+      if (!page.success) return { pages, items, hasMore: false };
+      items.push(...page.items);
+      hasMore = page.hasMore;
+      pageNumber += 1;
+    } while (hasMore && pages.length < limit);
+    return { pages, items, hasMore };
   }
 
   async call(adminId: string, accountId: string, api: string, version: string, data: Record<string, unknown>, extraParams: Record<string, string> = {}): Promise<MtopResult> {

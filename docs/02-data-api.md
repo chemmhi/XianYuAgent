@@ -62,7 +62,7 @@
 | `coupon_items` | `id UUID`、`batchId`、`contentCiphertext`、`status` | `reservedUntil`、`consumedAt` 可空 | PK；FK `batchId`；索引 `(batchId, status)` | `available -> reserved -> consumed`；`reserved -> available` 仅超时释放 |
 | `coupon_asset_refs` | `id UUID`、`couponBatchId`、`storageKey`、`mimeType`、`status` | `checksum`、`caption` 可空 | PK；FK `couponBatchId`；唯一 `(couponBatchId, storageKey)` | 素材归档不影响已交付记录 |
 | `coupon_bindings` | `id UUID`、`couponBatchId`、`productId`、`priority`、`status` | `expiresAt` 可空；`priority=0` | PK；FK 批次/商品；唯一 `(couponBatchId, productId)` | 解绑只改状态，不删除已产生的交付记录 |
-| `orders` | `id UUID`、`orderNo`、`accountId`、`productId`、`paymentStatus`、`orderStatus`、`deliveryStatus`、`afterSalesStatus` | `buyerRef`、`paidAt`、`cancelledAt`、`closedAt`、`refundRequestedAt` 可空 | PK `id`；唯一 `(accountId, orderNo)`；FK 账号/商品 | 支付、订单、交付、售后四个状态机独立迁移，禁止混用单一大枚举 |
+| `orders` | `id UUID`、`orderNo`、`accountId`、`buyerId`、`buyerName`、`itemId`、`itemTitle`、`amountMinor`、`paymentStatus`、`orderStatus`、`deliveryStatus`、`afterSalesStatus`、`deliveryType`、`createdAt`、`updatedAt`、`source` | `accountName`、`deliveryFailReason`、`conversationId`、`productId`、`sourcePayloadDigest` 可空；`configVersion` 默认 1 | PK `id`；唯一 `(accountId, orderNo)`；FK 账号，`productId` 可选 FK 商品；索引 `(accountId, createdAt)` 与状态组合 | 支付、订单、交付、售后四个状态机独立维护；金额为最小单位整数；外部数据 `source=xianyu` 幂等 upsert |
 | `delivery_records` | `id UUID`、`orderId`、`deliveryType`、`status`、`idempotencyScope`、`attempt` | `couponItemId`、`trackingRef`、`deliveredAt`、`failureCode` 可空；`attempt=1` | PK；FK `orderId`；成功卡券交付时 `couponItemId` 非空且唯一 | `deliveryType=manual|no_logistics|coupon_only|mixed`；只追加结果；重试创建新 attempt |
 | `conversations` | `id UUID`、`accountId`、`externalConversationRef`、`status` | `buyerRef` 可空 | PK；FK 账号；唯一 `(accountId, externalConversationRef)` | 关闭后仍可读历史 |
 | `messages` | `id UUID`、`conversationId`、`direction`、`bodyType`、`status` | `bodyText`、`assetRef`、`externalMessageRef`、`recalledAt`、`recallReason` 可空 | PK；FK 会话；唯一 `(conversationId, externalMessageRef)`（非空时） | `pending|sent|failed|recalled`；撤回结果写入审计与幂等记录 |
@@ -317,13 +317,13 @@ type ConversationHandlingOutput = {
 | `S4-VS2E` 外部同步验收 | 复用 `POST /products/sync`，冻结真实 `accountId`、分页、分组、数量口径和错误映射 | 外部结果与本地 Upsert 分离；外部超时/未知不覆盖本地草稿；Cookie/Token 不出日志和响应 | 当前已登录 Chrome + 真实账号人工复核；受控 fixture 只能作为补充证据 |
 | `S4-VS3A` 卡券明细/素材 | `POST /coupons/batches/{id}/items/bulk-save`、`/items/bulk-delete`、`/assets` | CouponItem 正文、图片和 metadata 分域；批量结果逐项返回；敏感正文只允许管理员受控读取 | 真实 PostgreSQL/MinIO、批量部分成功、403/409、移动端 |
 | `S4-VS3B` 库存锁定/消耗 | 领域命令 `reserve/consume/release`，由订单交付服务调用，不由 CouponsPage 直接写库存 | 行级锁/事务保证同一 CouponItem 只被一个交付占用；`reserved → consumed/released` 非法转换可审计 | 并发集成、失败恢复、重启复读、与订单预览联调 |
-| `S4-VS4A` 订单只读 | `GET /orders`、`GET /orders/{orderNo}`、`POST /orders/refresh` | 支付、订单、交付、售后四套状态分开；列表只读，不触发外部动作 | 真实订单 fixture/DB、筛选/空/403/错误、桌面/移动 |
+| `S4-VS4A` 订单只读 | `GET /orders`、`GET /orders/{orderNo}`、`POST /orders/refresh` | 支付、订单、交付、售后四套状态分开；列表只读；refresh 才调用闲鱼 adapter 并以账号+订单号幂等 upsert | API smoke、真实 PostgreSQL 重启复读、Chrome/CDP 双 viewport、实闲鱼只读读取 |
 | `S4-VS4B` 交付预览 | `POST /orders/{orderNo}/delivery-preview` | 校验支付、商品/账号匹配、`deliveryScope`、库存可用性和策略；预览不扣库存、不创建交付记录 | VS3B 库存锁、Policy/Confirmation、失败原因可解释 |
 | `S4-VS4C` 交付动作 | `POST /orders/{orderNo}/deliver|cancel|retry` | `manual/no_logistics/coupon_only/mixed` 分开处理；Idempotency + Outbox + DeliveryRecord；unknown 仅查询/人工恢复 | 外部 adapter、worker、重复提交/超时/取消/人工恢复 |
 
 ### 12.1 迁移与兼容要求
 
-1. `013_coupons.sql` 与 `013_product_sync.sql` 的并行编号在本轮保持不动；在新增 `CouponItem`、资产、库存锁或订单交付迁移前，先补迁移目录、执行顺序和回滚证据。
+1. `013_coupons.sql` 与 `013_product_sync.sql` 的并行编号在本轮保持不动；订单只读事实已通过单调编号 `018_orders.sql` 落地；新增库存锁或订单交付迁移前，仍需先补迁移目录、执行顺序和回滚证据。
 2. 新迁移必须使用新的单调编号，不得继续新建第二个 `013`；已有 volume 必须有明确的 apply 记录，不能依赖重新 initdb。
 3. 所有新增字段先走 expand，再执行 backfill/verify，最后切换读写；回滚优先回退应用并保留兼容读路径，不直接删除历史订单、库存或审计。
 4. 迁移验证至少包含真实 PostgreSQL、重复执行、回滚后健康检查和代表性旧数据读取；MemoryStore 只作为单元/受控 E2E 夹具，不能替代持久化门禁。
