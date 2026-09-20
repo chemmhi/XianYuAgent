@@ -86,6 +86,14 @@ export class XianyuQrLoginAdapter {
   }
 
   async create(input: { sessionId: string; adminId: string; accountId?: string }): Promise<XianyuQrPublicSession> {
+    const previous = this.sessions.get(input.sessionId);
+    if (previous) {
+      // Renewal reuses the persisted login-session id. Mark the previous
+      // in-memory session terminal before replacing it so its monitor can
+      // stop even if it is between polls.
+      previous.status = 'cancelled';
+      previous.errorCode = 'QR_REPLACED';
+    }
     const now = Date.now();
     const session: InternalSession = {
       sessionId: input.sessionId,
@@ -137,9 +145,13 @@ export class XianyuQrLoginAdapter {
     const deadline = Date.now() + this.maxWaitMs;
     let lastStatus = session.status;
     while (Date.now() < deadline && !['succeeded', 'expired', 'cancelled', 'failed'].includes(session.status)) {
+      if (!this.isCurrent(session)) return;
       try {
         const result = await this.pollQrStatus(session);
-        if (result.status === 'SCANNED') session.status = 'scanned';
+        // A renewal may have replaced this session while the HTTP request was
+        // in flight. Never let the old QR overwrite the new QR's state.
+        if (!this.isCurrent(session)) return;
+        if (result.status === 'SCANNED' || result.status === 'SCANED') session.status = 'scanned';
         else if (result.status === 'EXPIRED') { session.status = 'expired'; session.errorCode = 'QR_EXPIRED'; }
         else if (result.status === 'CANCELED') { session.status = 'cancelled'; session.errorCode = 'QR_CANCELLED'; }
         else if (result.status === 'ERROR') { session.status = 'failed'; session.errorCode = 'QR_PROVIDER_ERROR'; }
@@ -154,17 +166,21 @@ export class XianyuQrLoginAdapter {
           }
           await this.completeConfirmedLogin(session);
         }
+        if (!this.isCurrent(session)) return;
         if (session.status !== lastStatus) {
           lastStatus = session.status;
           await this.emitStatus(session);
         }
         if (['succeeded', 'expired', 'cancelled', 'failed', 'verification_required'].includes(session.status)) return;
       } catch (error) {
+        if (!this.isCurrent(session)) return;
         session.errorCode = classifyError(error);
         // 网络抖动不立即失败，继续等待到二维码超时。
       }
+      if (!this.isCurrent(session)) return;
       await sleep(this.pollIntervalMs);
     }
+    if (!this.isCurrent(session)) return;
     if (!['succeeded', 'expired', 'cancelled', 'failed', 'verification_required'].includes(session.status)) {
       session.status = 'expired';
       session.errorCode = 'QR_TIMEOUT';
@@ -228,11 +244,13 @@ export class XianyuQrLoginAdapter {
   }
 
   private async completeConfirmedLogin(session: InternalSession): Promise<void> {
+    if (!this.isCurrent(session)) return;
     const response = await this.request(QR_VERIFY_TARGET, { method: 'GET', headers: { ...documentHeaders(), cookie: cookieHeader(session.jar, QR_VERIFY_TARGET) } });
     absorbSetCookies(session.jar, QR_VERIFY_TARGET, response.headers);
     const unb = cookieValue(session.jar, 'unb', QR_VERIFY_TARGET);
     if (!unb) throw new Error('QR_CONFIRMED_WITHOUT_UNB');
     try {
+      if (!this.isCurrent(session)) return;
       if (!session.completionNotified) {
         session.completionNotified = true;
         if (this.onSuccess) await this.onSuccess({ sessionId: session.sessionId, adminId: session.adminId, accountId: session.accountId, cookieHeader: cookieHeaderFromSnapshot(session.jar), cookieSnapshot: session.jar.map((cookie) => ({ ...cookie })), unb });
@@ -244,6 +262,10 @@ export class XianyuQrLoginAdapter {
       session.errorCode = classifyError(error);
       throw error;
     }
+  }
+
+  private isCurrent(session: InternalSession): boolean {
+    return this.sessions.get(session.sessionId) === session;
   }
 
   private toPublic(session: InternalSession): XianyuQrPublicSession {
