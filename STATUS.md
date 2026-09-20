@@ -2,7 +2,7 @@
 
 - 项目阶段：5
 - 阶段状态：进行中（账号管理、商品、卡券已具备主体链路；S4-VS3 仍待真实环境人工复核；下一批优先切片调整为在线聊天、Workspace 工作台和 Settings API Key 配置）
-- 最近一次通过门禁：S4-VS2 商品列表/详情只读首片复核 / 2026-09-19
+- 最近一次通过门禁：S4-VS5A 真实恢复与浏览器证据复核 / 2026-09-20（PARTIALLY_VERIFIED）
 - 当前目标：完成 `S4-VS5A` 独立复审后推进 `S4-VS5B/C`；并行收尾 `S4-VS6B`、`S4-VS7A` 与既有账号/商品/卡券真实环境门禁，不再把受控证据冒充发布级完成
 - 多 Agent 协作状态：已启用独立 worktree、登记表和全局 merge lock 强制规则；当前活动登记见 `docs/agent-worktree-registry.md`，主工作区禁止直接开发
 - 已完成范围：阶段 0 范围门禁；阶段 1 架构与模块边界；阶段 2 数据模型、数据库表设计、关系基数、状态机、API envelope、幂等、鉴权、敏感交付、迁移边界；阶段 5 账号登录方法选择、真实 QR 适配器、Cookie 登录、账号资料同步、登录会话持久化、AuthGate 会话门禁、Vite 默认代理、账号列表真实读取和 Chrome/CDP 控制环境 E2E；S4-VS2 商品列表/详情只读首片、003_catalog 迁移、Memory/Postgres scope-aware 查询、真实 PostgreSQL smoke 和 Chrome/CDP 商品 E2E
@@ -46,7 +46,8 @@
 - canonical 设计同步：FirstRun 使用 `POST /api/v1/auth/bootstrap`；消息人工接管使用 `POST /api/v1/conversations/{id}/handoff`，恢复 AI 使用 `POST /api/v1/conversations/{id}/release`；统一字段为 `BootstrapAdminInput/Output`、`HandoffConversationInput`、`ReleaseConversationInput`、`ConversationHandlingOutput`，状态字段为 `handlingMode`，版本字段为 `expectedVersion`。
 
 - 2026-09-20 `S4-VS5A` 真实恢复与浏览器证据：`npm --workspace apps/api run test:messages:infra` 通过双 API 实例 Redis 跨进程广播、Redis 重启恢复、PostgreSQL 重启后的消息读回/写入；`npm run test:e2e:chrome:messages` 通过 Chrome/CDP 连接、强制断线、重连期间写入、cursor 补回和时间线去重，并生成 `messages-desktop-1440x900.png`、`messages-reconnecting-1440x900.png`、`messages-mobile-390x844.png`。
-- 2026-09-20 `S4-VS5A` 主线门禁：`npm run typecheck`、`npm test`（API smoke + Workspace smoke + Web 14 files / 45 tests）、`npm run build`、上述真实基础设施 smoke、聊天 Chrome/CDP E2E 和 `git diff --check` 均通过；切片仍保持 `PARTIALLY_VERIFIED`，不宣称外部闲鱼账号验收或发布级恢复闭环。
+- 2026-09-20 `S4-VS5A` 主线门禁：`npm run typecheck`、`npm test`（API smoke + Workspace smoke + Web 15 files / 50 tests）、`npm run build`、上述真实基础设施 smoke、聊天 Chrome/CDP E2E 和 `git diff --check` 均通过；切片仍保持 `PARTIALLY_VERIFIED`，不宣称外部闲鱼账号验收或发布级恢复闭环。
+- 2026-09-20 `S4-VS5A` 外部凭证回读：复用 PostgreSQL 中现有登录态，账号 `19cf…` 返回 3 个真实会话，首会话历史 4 条（含文本与图片）；账号 `6f0…` 返回 1 个真实会话，首会话历史 20 条且仍有更多游标（含 inbound/outbound/system）。数据库复核 `duplicate_external_refs=0`；本轮未发送任何真实闲鱼消息，也未重复执行 Cookie 登录。
 
 ## S4-VS3 卡券首页（已合入 master，待人工复核）
 

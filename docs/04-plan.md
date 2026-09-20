@@ -83,8 +83,8 @@ ENV-0 不是用户可见业务切片，但必须在 S4-VS1 开始前完成或明
 
 #### `S4-VS5A` 在线聊天读取与实时连接
 
-- 用户旅程：管理员进入 `/messages` → 选择账号 → 查看会话列表 → 打开会话 → 读取消息时间线 → 连接断开后按游标补事件并恢复。
-- 组件边界：`MessagesPage`、`useMessagesController`、`AccountTabs`、`ConversationList`、`ConversationHeader`、`MessageTimeline`、`ConnectionBanner`。
+- 用户旅程：管理员在 `/accounts` 设置当前账号 → 进入 `/messages` → 查看会话列表 → 打开会话 → 读取消息时间线 → 连接断开后按游标补事件并恢复；消息页不再提供账号选择器。
+- 组件边界：`MessagesPage`、`useMessagesController`、`ConversationList`、`ConversationHeader`、`MessageTimeline`、`ConnectionBanner`；账号切换归属全局 `AccountContext` 与 `/accounts`。
 - API / 数据：`GET /api/v1/conversations`、`GET /api/v1/conversations/{id}/messages`、`WS /api/v1/conversations/{id}/events`；queryKey 必须包含 `accountId`、`conversationId` 和 cursor。
 - 状态与权限：loading/empty/error/forbidden/reconnect/timeout；WebSocket 校验 Session、Origin、账号 scope 和会话归属；恢复连接先按 cursor 补事件，禁止重复追加。
 - 禁止范围：不发送消息、不接管会话、不读取未授权买家正文、不直连闲鱼 WebSocket。

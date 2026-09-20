@@ -72,7 +72,7 @@ export function AccountContextProvider({ api, children }: { api: AccountsApi; ch
       setCurrent(nextAccountId);
     } catch (error) {
       if (currentRequest !== requestId.current) return;
-      setAccountsError(error instanceof Error ? error.message : '璐﹀彿鍒楄〃鍔犺浇澶辫触');
+      setAccountsError(error instanceof Error ? error.message : '账号加载失败，请稍后重试。');
     } finally {
       if (currentRequest === requestId.current) setAccountsLoading(false);
     }

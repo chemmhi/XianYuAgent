@@ -1,6 +1,7 @@
 export type MessagesLoadPhase = 'idle' | 'loading' | 'success' | 'empty' | 'error' | 'forbidden';
 export type TimelineLoadPhase = 'idle' | 'loading' | 'success' | 'empty' | 'error' | 'forbidden';
 export type RealtimePhase = 'closed' | 'connecting' | 'connected' | 'reconnecting' | 'timeout' | 'forbidden';
+export type SendPhase = 'idle' | 'submitting' | 'sent' | 'error';
 
 export interface ConversationVM {
   conversationId: string;
@@ -60,5 +61,7 @@ export interface MessagesState {
   activeConversationId?: string;
   messages: MessageVM[];
   cursor: number;
+  sendPhase: SendPhase;
+  sendError?: string;
   error: MessagesError | null;
 }

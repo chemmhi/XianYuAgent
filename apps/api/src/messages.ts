@@ -157,6 +157,16 @@ export class MessageService {
     return { message: this.toMessageView(created.message), event };
   }
 
+  async importExternalMessage(input: { adminId: string; conversationId: string; direction: MessageRecord['direction']; senderRole: MessageRecord['senderRole']; bodyType: MessageRecord['bodyType']; bodyText?: string; bodyRef?: string; externalMessageRef: string; source?: MessageRecord['source']; createdAt?: string; traceId: string }): Promise<{ message: MessageVM; event?: RealtimeEventVM; created: boolean }> {
+    const existing = await this.store.findMessageByExternalRef(input.adminId, input.conversationId, input.externalMessageRef);
+    if (existing) return { message: this.toMessageView(existing), created: false };
+    const created = await this.store.createMessage({ ...input, createdAt: input.createdAt });
+    const event = toEventView(created.event);
+    this.realtime.publish(created.event);
+    try { void Promise.resolve(this.publishExternal?.(created.event)).catch(() => undefined); } catch { /* Redis transport must not fail a committed external message */ }
+    return { message: this.toMessageView(created.message), event, created: true };
+  }
+
   private toConversationView(conversation: Awaited<ReturnType<Store['getConversation']>> extends infer T ? Exclude<T, undefined> : never): ConversationVM { return toConversationVM(conversation); }
 
   private toMessageView(message: MessageRecord): MessageVM { return toMessageVM(message); }

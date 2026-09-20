@@ -245,6 +245,17 @@ export class PostgresStore implements Store {
     return result.rows[0] ? this.toConversation(result.rows[0]) : undefined;
   }
 
+  async findConversationByExternalRef(adminId: string, accountId: string, externalConversationRef: string): Promise<ConversationRecord | undefined> {
+    const result = await this.pool.query("select c.* from messages.conversations c where c.account_id=$1 and c.external_conversation_ref=$2 and exists (select 1 from auth.account_scopes scope where scope.account_id=c.account_id and scope.admin_id=$3 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))", [accountId, externalConversationRef, adminId]);
+    return result.rows[0] ? this.toConversation(result.rows[0]) : undefined;
+  }
+
+  async upsertExternalConversation(input: { adminId: string; accountId: string; externalConversationRef: string; buyerRef: string; buyerDisplayName?: string; itemRef?: string; itemTitle?: string; unreadCount?: number; lastMessagePreview?: string; lastMessageAt?: string }): Promise<ConversationRecord> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const result = await this.pool.query("insert into messages.conversations (id,account_id,external_conversation_ref,buyer_ref,buyer_display_name,item_ref,item_title,unread_count,last_message_preview,last_message_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) on conflict (account_id,external_conversation_ref) where external_conversation_ref is not null do update set buyer_ref=excluded.buyer_ref,buyer_display_name=coalesce(excluded.buyer_display_name,messages.conversations.buyer_display_name),item_ref=coalesce(excluded.item_ref,messages.conversations.item_ref),item_title=coalesce(excluded.item_title,messages.conversations.item_title),unread_count=coalesce(excluded.unread_count,messages.conversations.unread_count),last_message_preview=coalesce(excluded.last_message_preview,messages.conversations.last_message_preview),last_message_at=coalesce(excluded.last_message_at,messages.conversations.last_message_at),version=messages.conversations.version+1,updated_at=now() returning *", [createId(), input.accountId, input.externalConversationRef, input.buyerRef, input.buyerDisplayName ?? null, input.itemRef ?? null, input.itemTitle ?? null, input.unreadCount ?? 0, input.lastMessagePreview ?? null, input.lastMessageAt ?? null]);
+    return this.toConversation(result.rows[0]);
+  }
+
   async listMessages(adminId: string, conversationId: string, query: MessageListQuery): Promise<MessageListResult> {
     const conversation = await this.getConversation(adminId, conversationId);
     if (!conversation) return { items: [], hasMore: false, latestCursor: 0 };
@@ -268,21 +279,37 @@ export class PostgresStore implements Store {
     return result.rows.map((row) => this.toConversationEvent(row));
   }
 
+  async findMessageByExternalRef(adminId: string, conversationId: string, externalMessageRef: string): Promise<MessageRecord | undefined> {
+    const conversation = await this.getConversation(adminId, conversationId);
+    if (!conversation) return undefined;
+    const result = await this.pool.query('select * from messages.messages where conversation_id=$1 and external_message_ref=$2 limit 1', [conversationId, externalMessageRef]);
+    return result.rows[0] ? this.toMessage(result.rows[0]) : undefined;
+  }
+
   async createConversation(input: { adminId: string; accountId: string; buyerRef: string; buyerDisplayName?: string; itemRef?: string; itemTitle?: string; externalConversationRef?: string }): Promise<ConversationRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const result = await this.pool.query('insert into messages.conversations (id,account_id,external_conversation_ref,buyer_ref,buyer_display_name,item_ref,item_title) values ($1,$2,$3,$4,$5,$6,$7) returning *', [createId(), input.accountId, input.externalConversationRef ?? null, input.buyerRef, input.buyerDisplayName ?? null, input.itemRef ?? null, input.itemTitle ?? null]);
     return this.toConversation(result.rows[0]);
   }
 
-  async createMessage(input: { adminId: string; conversationId: string; direction: MessageRecord['direction']; senderRole: MessageRecord['senderRole']; bodyType: MessageRecord['bodyType']; bodyText?: string; bodyRef?: string; externalMessageRef?: string; source?: MessageRecord['source']; orderRef?: string; productRef?: string; riskFlags?: string[]; traceId?: string }): Promise<{ message: MessageRecord; event: ConversationEventRecord }> {
+  async createMessage(input: { adminId: string; conversationId: string; direction: MessageRecord['direction']; senderRole: MessageRecord['senderRole']; bodyType: MessageRecord['bodyType']; bodyText?: string; bodyRef?: string; externalMessageRef?: string; source?: MessageRecord['source']; orderRef?: string; productRef?: string; riskFlags?: string[]; createdAt?: string; traceId?: string }): Promise<{ message: MessageRecord; event: ConversationEventRecord }> {
     const conversation = await this.getConversation(input.adminId, input.conversationId);
     if (!conversation) throw new Error('CONVERSATION_NOT_FOUND');
+    if (input.externalMessageRef) {
+      const existing = await this.pool.query('select * from messages.messages where conversation_id=$1 and external_message_ref=$2 limit 1', [input.conversationId, input.externalMessageRef]);
+      if (existing.rows[0]) {
+        const message = this.toMessage(existing.rows[0]);
+        const eventResult = await this.pool.query("select * from messages.events where conversation_id=$1 and payload_json->'message'->>'id'=$2 order by cursor desc limit 1", [input.conversationId, message.id]);
+        if (eventResult.rows[0]) return { message, event: this.toConversationEvent(eventResult.rows[0]) };
+      }
+    }
     const client = await this.pool.connect();
     try {
       await client.query('begin');
       const id = createId();
-      const messageResult = await client.query('insert into messages.messages (id,conversation_id,account_id,direction,sender_role,body_type,body_text,body_ref,external_message_ref,source,order_ref,product_ref,risk_flags,handling_mode) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14) returning *', [id, conversation.id, conversation.accountId, input.direction, input.senderRole, input.bodyType, input.bodyText ?? null, input.bodyRef ?? null, input.externalMessageRef ?? null, input.source ?? null, input.orderRef ?? null, input.productRef ?? null, JSON.stringify(input.riskFlags ?? []), conversation.handlingMode]);
-      const updated = await client.query("update messages.conversations set unread_count=unread_count + case when $2='inbound' then 1 else 0 end, last_message_preview=$3, last_message_at=now(), version=version+1, updated_at=now() where id=$1 returning *", [conversation.id, input.direction, input.bodyText?.slice(0, 180) ?? null]);
+      const createdAt = input.createdAt ?? new Date().toISOString();
+      const messageResult = await client.query('insert into messages.messages (id,conversation_id,account_id,direction,sender_role,body_type,body_text,body_ref,external_message_ref,source,order_ref,product_ref,risk_flags,handling_mode,created_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15) returning *', [id, conversation.id, conversation.accountId, input.direction, input.senderRole, input.bodyType, input.bodyText ?? null, input.bodyRef ?? null, input.externalMessageRef ?? null, input.source ?? null, input.orderRef ?? null, input.productRef ?? null, JSON.stringify(input.riskFlags ?? []), conversation.handlingMode, createdAt]);
+      const updated = await client.query("update messages.conversations set unread_count=unread_count + case when $2='inbound' then 1 else 0 end, last_message_preview=$3, last_message_at=$4, version=version+1, updated_at=now() where id=$1 returning *", [conversation.id, input.direction, input.bodyText?.slice(0, 180) ?? null, createdAt]);
       // Serialize cursor allocation per conversation. PostgreSQL does not allow
       // FOR UPDATE on an aggregate result, so use a transaction-scoped advisory
       // lock before reading max(cursor) and inserting the next event.
@@ -291,7 +318,7 @@ export class PostgresStore implements Store {
       const cursor = Number(cursorResult.rows[0]?.cursor ?? 1);
       const message = this.toMessage(messageResult.rows[0]);
       const updatedConversation = this.toConversation(updated.rows[0]);
-      const event: ConversationEventRecord = { eventId: createId(), conversationId: conversation.id, accountId: conversation.accountId, cursor, type: 'chat.message.created', occurredAt: new Date().toISOString(), traceId: input.traceId ?? `postgres:${message.id}`, payload: { message, conversation: updatedConversation } };
+      const event: ConversationEventRecord = { eventId: createId(), conversationId: conversation.id, accountId: conversation.accountId, cursor, type: 'chat.message.created', occurredAt: createdAt, traceId: input.traceId ?? `postgres:${message.id}`, payload: { message, conversation: updatedConversation } };
       const eventResult = await client.query('insert into messages.events (event_id,conversation_id,account_id,cursor,type,occurred_at,trace_id,payload_json) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb) returning *', [event.eventId, event.conversationId, event.accountId, event.cursor, event.type, event.occurredAt, event.traceId, JSON.stringify(event.payload)]);
       await client.query('commit');
       return { message, event: this.toConversationEvent(eventResult.rows[0]) };

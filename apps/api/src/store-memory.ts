@@ -287,6 +287,37 @@ export class MemoryStore implements Store {
     return { ...conversation };
   }
 
+  async findConversationByExternalRef(adminId: string, accountId: string, externalConversationRef: string): Promise<ConversationRecord | undefined> {
+    if (!(await this.hasAccountScope(adminId, accountId))) return undefined;
+    const conversation = [...this.conversations.values()].find((item) => item.accountId === accountId && item.externalConversationRef === externalConversationRef);
+    return conversation ? { ...conversation } : undefined;
+  }
+
+  async upsertExternalConversation(input: { adminId: string; accountId: string; externalConversationRef: string; buyerRef: string; buyerDisplayName?: string; itemRef?: string; itemTitle?: string; unreadCount?: number; lastMessagePreview?: string; lastMessageAt?: string }): Promise<ConversationRecord> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const existing = await this.findConversationByExternalRef(input.adminId, input.accountId, input.externalConversationRef);
+    if (existing) {
+      const current = this.conversations.get(existing.id)!;
+      current.buyerRef = input.buyerRef || current.buyerRef;
+      current.buyerDisplayName = input.buyerDisplayName ?? current.buyerDisplayName;
+      current.itemRef = input.itemRef ?? current.itemRef;
+      current.itemTitle = input.itemTitle ?? current.itemTitle;
+      if (input.unreadCount !== undefined) current.unreadCount = Math.max(0, Math.trunc(input.unreadCount));
+      current.lastMessagePreview = input.lastMessagePreview ?? current.lastMessagePreview;
+      current.lastMessageAt = input.lastMessageAt ?? current.lastMessageAt;
+      current.updatedAt = new Date().toISOString();
+      current.version += 1;
+      return { ...current };
+    }
+    const created = await this.createConversation({ adminId: input.adminId, accountId: input.accountId, buyerRef: input.buyerRef, buyerDisplayName: input.buyerDisplayName, itemRef: input.itemRef, itemTitle: input.itemTitle, externalConversationRef: input.externalConversationRef });
+    const current = this.conversations.get(created.id)!;
+    current.unreadCount = Math.max(0, Math.trunc(input.unreadCount ?? 0));
+    current.lastMessagePreview = input.lastMessagePreview;
+    current.lastMessageAt = input.lastMessageAt;
+    current.updatedAt = input.lastMessageAt ?? current.updatedAt;
+    return { ...current };
+  }
+
   async listMessages(adminId: string, conversationId: string, query: MessageListQuery): Promise<MessageListResult> {
     const conversation = await this.getConversation(adminId, conversationId);
     if (!conversation) return { items: [], hasMore: false, latestCursor: 0 };
@@ -307,6 +338,13 @@ export class MemoryStore implements Store {
     return (this.conversationEvents.get(conversationId) ?? []).filter((event) => event.cursor > afterCursor).slice(0, Math.min(limit, 200)).map((event) => ({ ...event, payload: { ...event.payload } }));
   }
 
+  async findMessageByExternalRef(adminId: string, conversationId: string, externalMessageRef: string): Promise<MessageRecord | undefined> {
+    const conversation = await this.getConversation(adminId, conversationId);
+    if (!conversation) return undefined;
+    const message = [...this.messages.values()].find((item) => item.conversationId === conversationId && item.externalMessageRef === externalMessageRef);
+    return message ? { ...message, riskFlags: [...message.riskFlags] } : undefined;
+  }
+
   async createConversation(input: { adminId: string; accountId: string; buyerRef: string; buyerDisplayName?: string; itemRef?: string; itemTitle?: string; externalConversationRef?: string }): Promise<ConversationRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const now = new Date().toISOString();
@@ -317,10 +355,17 @@ export class MemoryStore implements Store {
     return { ...conversation };
   }
 
-  async createMessage(input: { adminId: string; conversationId: string; direction: MessageRecord['direction']; senderRole: MessageRecord['senderRole']; bodyType: MessageRecord['bodyType']; bodyText?: string; bodyRef?: string; externalMessageRef?: string; source?: MessageRecord['source']; orderRef?: string; productRef?: string; riskFlags?: string[]; traceId?: string }): Promise<{ message: MessageRecord; event: ConversationEventRecord }> {
+  async createMessage(input: { adminId: string; conversationId: string; direction: MessageRecord['direction']; senderRole: MessageRecord['senderRole']; bodyType: MessageRecord['bodyType']; bodyText?: string; bodyRef?: string; externalMessageRef?: string; source?: MessageRecord['source']; orderRef?: string; productRef?: string; riskFlags?: string[]; createdAt?: string; traceId?: string }): Promise<{ message: MessageRecord; event: ConversationEventRecord }> {
     const conversation = this.conversations.get(input.conversationId);
     if (!conversation || !(await this.hasAccountScope(input.adminId, conversation.accountId))) throw new Error('CONVERSATION_NOT_FOUND');
-    const now = new Date().toISOString();
+    if (input.externalMessageRef) {
+      const existing = [...this.messages.values()].find((item) => item.conversationId === input.conversationId && item.externalMessageRef === input.externalMessageRef);
+      if (existing) {
+        const event = this.eventForMessage(input.conversationId, existing.id);
+        if (event) return { message: { ...existing, riskFlags: [...existing.riskFlags] }, event: { ...event, payload: { ...event.payload } } };
+      }
+    }
+    const now = input.createdAt ?? new Date().toISOString();
     const message: MessageRecord = { id: createId(), conversationId: conversation.id, accountId: conversation.accountId, direction: input.direction, senderRole: input.senderRole, bodyType: input.bodyType, bodyText: input.bodyText, bodyRef: input.bodyRef, redactionState: 'visible', status: 'created', externalMessageRef: input.externalMessageRef, source: input.source, orderRef: input.orderRef, productRef: input.productRef, riskFlags: [...(input.riskFlags ?? [])], handlingMode: conversation.handlingMode, createdAt: now };
     this.messages.set(message.id, message);
     conversation.lastMessagePreview = message.bodyText?.slice(0, 180);

@@ -219,9 +219,12 @@ async function run() {
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-messages-domain]"))'), 'messages domain');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('历史消息：请问什么时候发货？'), 'seed message');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-connection-dot.connected"))'), 'realtime connected');
+  assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-account-tabs"))'), false, 'messages page must not render an account selector');
+  assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(`[role="tablist"]`))'), false, 'messages page must not render a tablist account selector');
+  assert.equal(await evaluate(cdp, 'localStorage.getItem("xianyu.activeAccountId")'), account.id, 'messages page must reuse the account context selected in Accounts');
   await assertText(cdp, '在线聊天');
   await assertText(cdp, '买家 E2E');
-  await assertText(cdp, '只读首片');
+  await assertText(cdp, '真实连接');
   assert.deepEqual(await messageBodies(cdp), ['历史消息：请问什么时候发货？']);
   await captureViewport(cdp, 1440, 900, 'messages-desktop-1440x900.png');
 

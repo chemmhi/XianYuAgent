@@ -648,7 +648,6 @@ AccountsPage
 ```text
 MessagesPage
 ├─ MessagesController
-├─ AccountTabs
 ├─ ConversationList
 ├─ ConversationHeader
 ├─ BuyerContextPanel (buyer/order/product/notes/risk)
@@ -660,6 +659,8 @@ MessagesPage
 ├─ MessageActionMenu (recall)
 └─ ConnectionBanner (reconnect/forbidden)
 ```
+
+`MessagesPage` 只消费全局 `AccountContext` 的 `currentAccountId`；账号切换、连接和凭证管理全部归属 `/accounts`，消息页不得渲染账号选择器。
 
 `MessageComposer` 只管理草稿和上传回调；发送、重试、撤回由 controller 命令完成。
 

@@ -190,7 +190,7 @@ App
 ### 7.4 Messages `/messages`
 
 - 目标：按账号查看会话、接收实时消息、人工发送文本/图片、撤回自己发送的消息。
-- 组件树：`AccountTabs + ConversationList + ConversationHeader + BuyerContextPanel + MessageTimeline + AiSuggestionPanel + HandoffRiskPanel + AttachmentUpload + MessageComposer + MessageActionMenu + ConnectionBanner`。
+- 组件树：`ConversationList + ConversationHeader + BuyerContextPanel + MessageTimeline + AiSuggestionPanel + HandoffRiskPanel + AttachmentUpload + MessageComposer + MessageActionMenu + ConnectionBanner`；账号范围由全局 `AccountContext` 提供，消息页只读当前账号，不提供账号切换控件。
 - 读取 API：`GET /api/v1/conversations`、`GET /api/v1/conversations/{id}/messages`、`WS /api/v1/conversations/{id}/events`。
 - 写 API：`POST /api/v1/conversations/{id}/messages`、`POST /api/v1/conversations/{id}/images`、`POST /api/v1/conversations/{id}/messages/{messageId}/recall`、`POST /api/v1/conversations/{id}/handoff`、`POST /api/v1/conversations/{id}/release`。
 - 状态：会话列表 loading/empty/error；消息首次加载/分页补历史；WebSocket connecting/connected/reconnecting/forbidden；发送 idle/submitting/sent/failed/unknown；撤回 pending/succeeded/failed；图片 uploading/processed/failed；人工接管 handoff submitting/succeeded/conflict/failed；恢复 AI release submitting/succeeded/conflict/failed；买家发起 Prompt Injection 或索取 system_only 凭证时显示拦截提示，不把内容复制到配置或知识能力。

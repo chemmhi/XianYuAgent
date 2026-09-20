@@ -11,6 +11,7 @@ import type { ProductListResult, ProductRecord, Store } from './domain.js';
 import { createId, digestJson } from './security.js';
 import { XianyuQrLoginAdapter, type XianyuQrPublicSession } from './xianyu-qr-login.js';
 import { XianyuMtopClient } from './xianyu-mtop.js';
+import { XianyuImService } from './xianyu-im-service.js';
 import { MessageRealtimeHub, MessageService } from './messages.js';
 import { RedisConversationEventBridge } from './messages-realtime.js';
 import { InProcessAgentRuntime, isTerminalRunStatus, WorkspaceService, type WorkspaceRuntime } from './workspace.js';
@@ -31,6 +32,7 @@ export interface AppRuntime {
   workspaceRuntime: WorkspaceRuntime;
   qrLogin: XianyuQrLoginAdapter;
   xianyu: XianyuMtopClient;
+  xianyuIm: XianyuImService;
   server: Server;
   listen(): Promise<void>;
   close(): Promise<void>;
@@ -118,6 +120,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   });
+  const xianyuIm = new XianyuImService(store, xianyu, messages);
 
   const wsServer = new WebSocketServer({ noServer: true });
   const workspaceRuntime: WorkspaceRuntime = config.agentRuntime === 'pi'
@@ -131,7 +134,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, products, productSync, credentials, messages, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu,
+    config, store, auth, accounts, coupons, products, productSync, credentials, messages, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuIm,
     server,
     async listen() { await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve)); },
     async close() {
@@ -140,6 +143,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       workspaceRuntime.stop();
       await new Promise<void>((resolve, reject) => runtime.server.close((error) => error ? reject(error) : resolve()));
       await redisRealtime?.close();
+      await xianyuIm.close();
       const close = (store as Store & { close?: () => Promise<void> }).close;
       if (close) await close.call(store);
     },
@@ -197,7 +201,7 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
 }
 
 async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: ServerResponse): Promise<{ statusCode: number; body: unknown } | undefined> {
-  const { auth, accounts, coupons, products, productSync, credentials, messages, workspace, store, config } = runtime;
+  const { auth, accounts, coupons, products, productSync, credentials, messages, workspace, store, config, xianyuIm } = runtime;
   if (ctx.path === '/healthz' && ctx.method === 'GET') {
     const health = await store.health();
     const redis = !config.redisUrl || !runtime.redisRealtime
@@ -250,14 +254,33 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   }
 
   if (ctx.path === '/api/v1/conversations' && ctx.method === 'GET') {
-    const result = await messages.listConversations(authContext.admin.id, parseConversationListQuery(ctx.query));
+    const query = parseConversationListQuery(ctx.query);
+    if (query.accountId) {
+      try { await xianyuIm.listConversations(authContext.admin.id, query.accountId, query.cursor === undefined ? undefined : Number(query.cursor), query.limit); }
+      catch { /* preserve locally persisted conversations when the external session is unavailable */ }
+    }
+    const result = await messages.listConversations(authContext.admin.id, query);
     return { statusCode: 200, body: success(ctx, result).body };
   }
   const conversationMessagesMatch = ctx.path.match(/^\/api\/v1\/conversations\/([^/]+)\/messages$/);
   if (conversationMessagesMatch && ctx.method === 'GET') {
     const conversationId = decodeURIComponent(conversationMessagesMatch[1]);
-    const result = await messages.listMessages(authContext.admin.id, conversationId, parseMessageListQuery(ctx.query));
+    const local = await messages.getConversation(authContext.admin.id, conversationId);
+    try { await xianyuIm.listMessages(authContext.admin.id, local.accountId, conversationId, undefined, parseMessageListQuery(ctx.query).limit); }
+    catch { /* preserve locally persisted history when the external session is unavailable */ }
+    const result = await messages.listMessages(authContext.admin.id, conversationId, { cursor: undefined, limit: parseMessageListQuery(ctx.query).limit });
     return { statusCode: 200, body: success(ctx, result).body };
+  }
+  const conversationSendMatch = ctx.path.match(/^\/api\/v1\/conversations\/([^/]+)\/messages$/);
+  if (conversationSendMatch && ctx.method === 'POST') {
+    const conversationId = decodeURIComponent(conversationSendMatch[1]);
+    const local = await messages.getConversation(authContext.admin.id, conversationId);
+    const result = await mutation(runtime, ctx, authContext, local.accountId, async () => {
+      const text = typeof ctx.body.text === 'string' ? ctx.body.text : typeof ctx.body.bodyText === 'string' ? ctx.body.bodyText : '';
+      const sent = await xianyuIm.sendText(authContext.admin.id, local.accountId, conversationId, text, ctx.requestId, ctx.traceId);
+      return { statusCode: 200, body: success(ctx, sent).body };
+    });
+    return result;
   }
 
   const loginSessionMatch = ctx.path.match(/^\/api\/v1\/accounts\/([^/]+)\/login-sessions(?:\/([^/]+)(?:\/(cancel|renew|complete))?)?$/);

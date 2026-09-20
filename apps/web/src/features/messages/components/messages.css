@@ -1,8 +1,4 @@
 .messages-domain { min-height: 100%; }
-.messages-account-tabs { display: flex; gap: 8px; margin-bottom: 14px; overflow-x: auto; }
-.messages-account-tabs button { border: 1px solid var(--line, #d9dde7); background: #fff; color: #4b5563; border-radius: 999px; padding: 8px 14px; display: inline-flex; gap: 8px; align-items: center; white-space: nowrap; }
-.messages-account-tabs button.active { color: #1d4ed8; border-color: #93c5fd; background: #eff6ff; }
-.messages-account-tabs small { opacity: .7; }
 .messages-connection-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; background: #f8fafc; color: #475569; }
 .messages-connection-banner.reconnecting, .messages-connection-banner.timeout { background: #fff7ed; color: #9a3412; }
 .messages-connection-banner.forbidden { background: #fef2f2; color: #b91c1c; }
@@ -31,5 +27,11 @@
 .messages-bubble small { color: #64748b; font-size: 11px; }
 .messages-state, .messages-timeline-state { padding: 32px 20px; color: #64748b; display: flex; flex-direction: column; gap: 8px; }
 .messages-error { color: #b91c1c; }
-.messages-readonly-badge { border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; padding: 8px 12px; }
+.messages-live-badge { border-radius: 999px; background: #dcfce7; color: #166534; font-size: 12px; padding: 8px 12px; }
+.messages-composer { border-top: 1px solid var(--line, #e5e7eb); padding: 14px 18px 16px; background: #fff; }
+.messages-composer textarea { width: 100%; resize: vertical; min-height: 56px; border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px 12px; font: inherit; color: #0f172a; box-sizing: border-box; }
+.messages-composer textarea:focus { outline: 2px solid #bfdbfe; border-color: #2563eb; }
+.messages-composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; }
+.messages-send-status, .messages-send-error { color: #64748b; font-size: 12px; }
+.messages-send-error { color: #b91c1c; }
 @media (max-width: 900px) { .messages-layout { grid-template-columns: 1fr; } .messages-sidebar { border-right: 0; border-bottom: 1px solid var(--line, #e5e7eb); max-height: 300px; } .messages-bubble { max-width: 86%; } }

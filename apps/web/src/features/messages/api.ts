@@ -5,10 +5,11 @@ interface Envelope<T> { data?: T; }
 export interface MessagesApi {
   listConversations(input: { accountId: string; cursor?: string; limit?: number }): Promise<{ items: ConversationVM[]; nextCursor?: string; hasMore: boolean }>;
   listMessages(input: { accountId: string; conversationId: string; cursor?: number; limit?: number }): Promise<{ items: MessageVM[]; nextCursor?: number; hasMore: boolean; latestCursor: number }>;
+  sendMessage(input: { accountId: string; conversationId: string; text: string; idempotencyKey: string }): Promise<MessageVM>;
   openRealtime(input: { accountId: string; conversationId: string; cursor: number; onEvent: (event: RealtimeEvent) => void; onOpen?: () => void; onClose?: () => void; onError?: () => void }): { close: () => void };
 }
 
-export function createMessagesApi(input: { get: <T>(path: string) => Promise<T>; baseUrl?: string }): MessagesApi {
+export function createMessagesApi(input: { get: <T>(path: string) => Promise<T>; post?: <T>(path: string, body?: unknown, init?: RequestInit) => Promise<T>; baseUrl?: string }): MessagesApi {
   return {
     async listConversations(query) {
       const params = new URLSearchParams({ accountId: query.accountId, limit: String(query.limit ?? 50) });
@@ -21,6 +22,12 @@ export function createMessagesApi(input: { get: <T>(path: string) => Promise<T>;
       if (query.cursor !== undefined) params.set('cursor', String(query.cursor));
       const payload = await input.get<Envelope<{ items: MessageVM[]; nextCursor?: number; hasMore: boolean; latestCursor: number }>>(`/api/v1/conversations/${encodeURIComponent(query.conversationId)}/messages?${params.toString()}`);
       return payload.data ?? { items: [], hasMore: false, latestCursor: 0 };
+    },
+    async sendMessage(query) {
+      if (!input.post) throw new Error('messages send api unavailable');
+      const payload = await input.post<Envelope<MessageVM>>(`/api/v1/conversations/${encodeURIComponent(query.conversationId)}/messages`, { text: query.text }, { headers: { 'Idempotency-Key': query.idempotencyKey } });
+      if (!payload.data) throw new Error('message send returned no data');
+      return payload.data;
     },
     openRealtime(query) {
       const socket = new WebSocket(toWebSocketUrl(input.baseUrl, `/api/v1/conversations/${encodeURIComponent(query.conversationId)}/events?cursor=${encodeURIComponent(String(query.cursor))}`));

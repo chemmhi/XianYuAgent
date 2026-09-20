@@ -13,7 +13,7 @@ function normalizeError(error: unknown): MessagesError {
   return { code: 'UNKNOWN', message: error instanceof Error ? error.message : '消息加载失败，请重试。', retryable: true };
 }
 
-export interface MessagesController { state: MessagesState; setActiveConversation: (conversationId?: string) => void; reload: () => Promise<void>; retryRealtime: () => void; }
+export interface MessagesController { state: MessagesState; setActiveConversation: (conversationId?: string) => void; reload: () => Promise<void>; retryRealtime: () => void; sendMessage: (text: string) => Promise<void>; }
 
 /**
  * A socket can emit `close` after a replacement socket has already opened.
@@ -36,7 +36,7 @@ export function createSocketGenerationGuard(): SocketGenerationGuard {
 export function useMessagesController(options: { api?: MessagesApi; accountId?: string }): MessagesController {
   const api = options.api ?? defaultApi;
   const accountId = options.accountId;
-  const [state, setState] = useState<MessagesState>({ accountId, listPhase: 'idle', timelinePhase: 'idle', realtimePhase: 'closed', conversations: [], messages: [], cursor: 0, error: null });
+  const [state, setState] = useState<MessagesState>({ accountId, listPhase: 'idle', timelinePhase: 'idle', realtimePhase: 'closed', conversations: [], messages: [], cursor: 0, sendPhase: 'idle', error: null });
   const socketRef = useRef<{ close: () => void } | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestId = useRef(0);
@@ -122,10 +122,10 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
   const reload = useCallback(async () => {
     const currentRequest = ++requestId.current;
     closeRealtime();
-    if (!accountId) { setState({ accountId, listPhase: 'empty', timelinePhase: 'idle', realtimePhase: 'closed', conversations: [], activeConversationId: undefined, messages: [], cursor: 0, error: null }); return; }
+    if (!accountId) { setState({ accountId, listPhase: 'empty', timelinePhase: 'idle', realtimePhase: 'closed', conversations: [], activeConversationId: undefined, messages: [], cursor: 0, sendPhase: 'idle', error: null }); return; }
     seenEventIdsRef.current = new Set();
     cursorRef.current = 0;
-    setState((previous) => ({ ...previous, accountId, listPhase: 'loading', timelinePhase: 'idle', realtimePhase: 'closed', conversations: [], messages: [], cursor: 0, error: null }));
+    setState((previous) => ({ ...previous, accountId, listPhase: 'loading', timelinePhase: 'idle', realtimePhase: 'closed', conversations: [], messages: [], cursor: 0, sendPhase: 'idle', sendError: undefined, error: null }));
     try {
       const result = await api.listConversations({ accountId, limit: 50 });
       if (currentRequest !== requestId.current) return;
@@ -145,7 +145,20 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
   const setActiveConversation = useCallback((conversationId?: string) => { activeIdRef.current = conversationId; setState((previous) => ({ ...previous, activeConversationId: conversationId, messages: [], cursor: 0, timelinePhase: conversationId ? 'loading' : 'idle', realtimePhase: 'closed', error: null })); if (conversationId) void loadTimeline(conversationId); else closeRealtime(); }, [closeRealtime, loadTimeline]);
   const retryRealtime = useCallback(() => { if (state.activeConversationId) { reconnectAttempt.current = 0; connectRealtime(state.activeConversationId, cursorRef.current); } }, [connectRealtime, state.activeConversationId]);
 
-  return { state, setActiveConversation, reload, retryRealtime };
+  const sendMessage = useCallback(async (text: string) => {
+    if (!accountId || !state.activeConversationId || !text.trim()) return;
+    const idempotencyKey = globalThis.crypto?.randomUUID?.() ?? `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setState((previous) => ({ ...previous, sendPhase: 'submitting', sendError: undefined }));
+    try {
+      const message = await api.sendMessage({ accountId, conversationId: state.activeConversationId, text: text.trim(), idempotencyKey });
+      setState((previous) => ({ ...previous, messages: previous.messages.some((item) => item.messageId === message.messageId) ? previous.messages : [...previous.messages, message], sendPhase: 'sent', sendError: undefined }));
+    } catch (error) {
+      setState((previous) => ({ ...previous, sendPhase: 'error', sendError: error instanceof Error ? error.message : '发送失败，请重试' }));
+      throw error;
+    }
+  }, [accountId, api, state.activeConversationId]);
+
+  return { state, setActiveConversation, reload, retryRealtime, sendMessage };
 }
 
 export { createMessagesApi };

@@ -3,6 +3,7 @@ import type { ProductSyncPageResult } from './domain.js';
 import { mapXianyuProductPage } from './xianyu-product-mapper.js';
 
 const APP_KEY = '34839810';
+export const XIANYU_IM_APP_KEY = '444e9908a51d1cb236a27862abc769c9';
 const BASE_URL = 'https://h5api.m.goofish.com/h5';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
 
@@ -38,6 +39,13 @@ export class XianyuMtopClient {
 
   async verifyLogin(adminId: string, accountId: string): Promise<MtopResult> {
     return this.call(adminId, accountId, 'mtop.taobao.idlemessage.pc.loginuser.get', '1.0', {}, { spm_cnt: 'a21ybx.im.0.0', needLogin: 'false' });
+  }
+
+  async fetchImToken(adminId: string, accountId: string, deviceId: string): Promise<{ success: boolean; accountInvalid: boolean; errorCode?: string; message?: string; accessToken?: string; cookieHeader: string }> {
+    const result = await this.call(adminId, accountId, 'mtop.taobao.idlemessage.pc.login.token', '1.0', { appKey: XIANYU_IM_APP_KEY, deviceId }, { spm_cnt: 'a21ybx.im.0.0', spm_pre: 'a21ybx.item.want.1.14ad3da6ALVq3n', log_id: '14ad3da6ALVq3n' });
+    const accessToken = nestedString(result.response, ['data', 'accessToken']);
+    if (!result.success || !accessToken) return { success: false, accountInvalid: result.accountInvalid, errorCode: result.errorCode ?? 'IM_TOKEN_MISSING', message: result.message ?? 'unable to obtain im token', cookieHeader: result.cookieHeader };
+    return { success: true, accountInvalid: false, accessToken, cookieHeader: result.cookieHeader };
   }
 
   async fetchProfile(adminId: string, accountId: string): Promise<MtopResult> {
@@ -173,3 +181,12 @@ function isTokenExpired(value: string): boolean { return ['FAIL_SYS_TOKEN_EXOIRE
 function isSessionExpired(ret: string[]): boolean { return ret.some((value) => { const normalized = value.toLowerCase(); return normalized.includes('fail_sys_session_expired') || normalized.includes('session_expired') || normalized.includes('session杩囨湡'); }); }
 function isValidationFailure(value: string): boolean { const normalized = value.toLowerCase(); return ['fail_sys_user_validate', 'rgv587', 'fail_sys_illegal_access', 'fail_biz_wua_is_machine', 'wua_is_machine', 'captcha', 'validate', 'punish', 'x5sec'].some((marker) => normalized.includes(marker)); }
 function refererFor(api: string): string { if (api.includes('merchant.sold') || api.includes('order')) return 'https://seller.goofish.com/'; if (api.includes('loginuser')) return 'https://www.goofish.com/im'; return 'https://www.goofish.com/'; }
+
+function nestedString(root: unknown, path: string[]): string | undefined {
+  let current: unknown = root;
+  for (const key of path) {
+    if (!current || typeof current !== 'object' || Array.isArray(current)) return undefined;
+    current = (current as Record<string, unknown>)[key];
+  }
+  return typeof current === 'string' && current.trim() ? current.trim() : undefined;
+}

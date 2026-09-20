@@ -56,9 +56,10 @@
 
 ### 2026-09-20：S4-VS5A 真实恢复与浏览器证据
 
-- `npm run typecheck`、`npm test`、`npm run build` 和 `git diff --check` 均通过；API smoke 覆盖消息/Workspace，Web Vitest 通过 14 files / 45 tests。
+- `npm run typecheck`、`npm test`、`npm run build` 和 `git diff --check` 均通过；API smoke 覆盖消息/Workspace，Web Vitest 通过 15 files / 50 tests。
 - `npm --workspace apps/api run test:messages:infra` 通过双 API 实例 Redis 跨进程广播、Redis 重启恢复、PostgreSQL 重启后的消息读回与写入。
 - `npm run test:e2e:chrome:messages` 通过 Chrome/CDP 1440×900 与 390×844：连接、强制断线、重连期间写入、cursor 补回、自动重连和时间线去重；证据位于 `docs/evidence/stage5/s4-vs5a-chat-read/screenshots/`。
+- 复用 PostgreSQL 中已有登录态完成真实闲鱼凭证回读：账号 `19cf…` 返回 3 个会话、首会话 4 条历史消息；账号 `6f0…` 返回 1 个会话、首会话 20 条历史消息且 `hasMore=true`。未重复登录、未发送真实消息，数据库 `duplicate_external_refs=0`。
 - 当前结论保持 `S4-VS5A = PARTIALLY_VERIFIED`；独立复审与生产部署拓扑确认仍未关闭 `S5-RISK-021`，不宣称外部闲鱼账号验收或发布级恢复闭环。
 
 ### 2026-09-19：S4-VS6A 首链路实现（PARTIALLY_VERIFIED）

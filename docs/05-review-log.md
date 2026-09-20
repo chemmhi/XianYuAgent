@@ -279,3 +279,13 @@
 - 本轮复核通过：`npm --workspace apps/api run build`、`npm --workspace apps/api run test`、Workspace HTTP/WS smoke、`npm --workspace apps/web run typecheck`、`npm --workspace apps/web run test`（13 files / 41 tests）、`npm --workspace apps/web run build`、`git diff --check`。
 - 真实浏览器 `npm run test:e2e:chrome:workspace` 通过：临时 PostgreSQL 迁移 001–015、`ALLOW_IN_MEMORY=false` API、Vite、Chrome/CDP、session/Run 持久化、断线重连、7 条事件回放、WS handshake 和 1440×900 / 390×844 截图均有可复现证据。
 - 结论维持：`S4-VS6A = PARTIALLY_VERIFIED`；本轮切片文档/独立复核状态为 `READY_FOR_REVIEW`，未关闭独立 Worker/Pi Runtime、发布级恢复、人工视觉签核与 `S4-VS6B` Confirmation/Outbox 门禁。
+
+### 2026-09-20：S4-VS5A 真实闲鱼回读与账号上下文复核
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R42 | 业务 / 验收 | 账号管理页设置当前账号后，消息页是否复用全局账号上下文且不再渲染账号选择器 | root + Chrome/CDP | PASS（当前切片） | `apps/web/src/app/account-context.tsx`、`apps/web/src/features/messages/components/MessagesPage.tsx`、`npm run test:e2e:chrome:messages`、桌面/移动截图 |
+| S5-R43 | 外部平台 / 数据读取 | 使用 PostgreSQL 中已有登录态读取真实会话和历史消息，是否保持账号 scope、分页游标和消息去重 | root + real_api_verify | PASS（真实回读） | 账号 `19cf…`：3 会话 / 首会话 4 条；账号 `6f0…`：1 会话 / 首会话 20 条且 `hasMore=true`；数据库 `duplicate_external_refs=0` |
+| S5-R44 | 质量 / 安全 / 运维 | 是否避免把真实登录态用于无意义测试或发送真实买家消息，并保持发布级边界声明 | root | PASS（范围受控） | 本轮未重复 Cookie 登录、未发送真实消息；`docs/evidence/stage5/s4-vs5a-chat-read/test-baseline.md`；`S5-RISK-021` 保持开放 |
+
+本轮结论：真实闲鱼凭证回读、账号级上下文复用、Redis/PostgreSQL 恢复和 Chrome/CDP 视觉证据均已形成可复核记录；`S4-VS5A` 仍为 `PARTIALLY_VERIFIED`，独立复审与生产部署拓扑确认未关闭前不得宣称发布级完成。发送、附件、撤回继续进入 `S4-VS5B`。

@@ -44,7 +44,7 @@ export default function App() {
   const accountsApi = useMemo(() => createAccountsApi({ get: transport.get, post: transport.post, delete: transport.delete }), [transport]);
   const productsApi = useMemo(() => createProductsApi({ get: transport.get, post: transport.post, patch: transport.patch }), [transport]);
   const couponsApi = useMemo(() => createCouponsApi({ get: transport.get, post: transport.post, patch: transport.patch, delete: transport.delete }), [transport]);
-  const messagesApi = useMemo(() => createMessagesApi({ get: transport.get, baseUrl: import.meta.env.VITE_API_BASE_URL ?? undefined }), [transport]);
+  const messagesApi = useMemo(() => createMessagesApi({ get: transport.get, post: transport.post, baseUrl: import.meta.env.VITE_API_BASE_URL ?? undefined }), [transport]);
   const workspaceApi = useMemo(() => createWorkspaceApi({ get: transport.get, post: transport.post }, { baseUrl: import.meta.env.VITE_API_BASE_URL ?? '' }), [transport]);
 
   useEffect(() => {
