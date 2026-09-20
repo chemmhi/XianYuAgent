@@ -103,7 +103,9 @@ async function run() {
   const adminId = bootstrapPayload.data.profile.id;
   const account = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `products-e2e-${process.pid}`, displayName: 'Chrome 商品账号' });
   const secondaryAccount = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `products-e2e-secondary-${process.pid}`, displayName: 'Secondary 商品账号' });
-  await apiRuntime.store.createProduct({ adminId, accountId: account.id, externalProductRef: `ITEM-${process.pid}`, title: 'Chrome E2E 商品', description: '商品详情来自独立 detail API', categoryCode: 'digital', attributes: { source: 'chrome-e2e' }, priceMinor: 3990, status: 'published' });
+  const localProduct = await apiRuntime.store.createProduct({ adminId, accountId: account.id, externalProductRef: `ITEM-${process.pid}`, title: 'Chrome E2E 商品', description: '商品详情来自独立 detail API', categoryCode: 'digital', attributes: { source: 'chrome-e2e' }, aiPrompt: '请用简洁中文回答买家问题。', priceMinor: 3990, status: 'published' });
+  const couponBatch = await apiRuntime.store.createCouponBatch({ adminId, accountId: account.id, label: 'Chrome E2E 卡券', purpose: 'text', deliveryScope: 'operator_only' });
+  await apiRuntime.store.bindCouponBatch({ adminId, batchId: couponBatch.id, productId: localProduct.id });
   apiRuntime.xianyu.fetchItemsAll = async () => {
     const items = Array.from({ length: 29 }, (_, index) => ({ externalProductRef: `SYNC-${process.pid}-${index + 1}`, title: `Chrome E2E 同步商品 ${index + 1}`, description: '来自闲鱼同步 fixture', categoryCode: 'digital', priceMinor: 1290 + index, detailUrl: `https://www.goofish.com/item?id=SYNC-${process.pid}-${index + 1}`, imageUrls: ['https://img.example/sync.jpg'], attributes: { source: 'chrome-sync-e2e' }, sourcePayloadDigest: `sync-${process.pid}-${index + 1}` }));
     return { pages: [{ success: true, accountInvalid: false, cookieHeader: '', items, pageNumber: 1, pageSize: 20, totalCount: items.length, totalPages: 1, hasMore: false }], items, hasMore: false };
@@ -132,6 +134,23 @@ async function run() {
   if (await evaluate(cdp, 'document.querySelector("[data-testid=product-account-context]") !== null')) throw new Error('redundant toolbar account name should be removed');
   if (await evaluate(cdp, 'document.querySelectorAll(".products-kpis").length !== 0')) throw new Error('product KPI cards should be removed');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 商品'), 'product row');
+  const columns = await evaluate(cdp, 'Array.from(document.querySelectorAll(".products-head > span")).map((item) => item.textContent?.trim() ?? "").map((text) => text.replace(/\\s*[↑↓↕]$/, ""))');
+  if (JSON.stringify(columns) !== JSON.stringify(['商品标题', '价格', '关联卡券', 'AI提示词', '创建时间', '更新时间'])) throw new Error(`product columns mismatch: ${JSON.stringify(columns)}`);
+  const productText = String(await evaluate(cdp, 'document.body.innerText'));
+  if (!productText.includes('Chrome E2E 卡券') || !productText.includes('请用简洁中文回答买家问题。')) throw new Error('coupon or AI prompt column content missing');
+  if (!cdp.events.some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'GET' && (() => { const url = new URL(event.params.request.url); return url.pathname === '/api/v1/products' && url.searchParams.get('sortBy') === 'updatedAt' && url.searchParams.get('sortOrder') === 'desc'; })())) throw new Error('default updatedAt desc sort request missing');
+  const createdSortMark = cdp.events.length;
+  if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=product-sort-createdAt]"); if (!button) return false; button.click(); return true; })()')) throw new Error('createdAt sort button missing');
+  await waitFor(async () => cdp.events.slice(createdSortMark).some((event) => { if (event.method !== 'Network.requestWillBeSent' || event.params?.request?.method !== 'GET') return false; const url = new URL(event.params.request.url); return url.pathname === '/api/v1/products' && url.searchParams.get('sortBy') === 'createdAt' && url.searchParams.get('sortOrder') === 'desc' && url.searchParams.get('page') === '1'; }), 'createdAt desc sort request');
+  await waitFor(async () => Boolean(await evaluate(cdp, '!!document.querySelector("[data-testid=product-sort-createdAt]")')), 'createdAt sort controls after desc');
+  const createdSortAscMark = cdp.events.length;
+  if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=product-sort-createdAt]"); if (!button) return false; button.click(); return true; })()')) throw new Error('createdAt asc sort button missing');
+  await waitFor(async () => cdp.events.slice(createdSortAscMark).some((event) => { if (event.method !== 'Network.requestWillBeSent' || event.params?.request?.method !== 'GET') return false; const url = new URL(event.params.request.url); return url.pathname === '/api/v1/products' && url.searchParams.get('sortBy') === 'createdAt' && url.searchParams.get('sortOrder') === 'asc'; }), 'createdAt asc sort request');
+  await waitFor(async () => Boolean(await evaluate(cdp, '!!document.querySelector("[data-testid=product-sort-createdAt]")')), 'createdAt sort controls after asc');
+  const updatedSortMark = cdp.events.length;
+  if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=product-sort-updatedAt]"); if (!button) return false; button.click(); return true; })()')) throw new Error('updatedAt sort button missing');
+  await waitFor(async () => cdp.events.slice(updatedSortMark).some((event) => { if (event.method !== 'Network.requestWillBeSent' || event.params?.request?.method !== 'GET') return false; const url = new URL(event.params.request.url); return url.pathname === '/api/v1/products' && url.searchParams.get('sortBy') === 'updatedAt' && url.searchParams.get('sortOrder') === 'desc'; }), 'updatedAt desc sort request');
+  await waitFor(async () => Boolean(await evaluate(cdp, '!!document.querySelector(".products-table-scroll")')), 'products table after sorting');
   const scrollState = await evaluate(cdp, '(() => { const table = document.querySelector(".products-table-scroll"); const main = document.querySelector("main.products-main"); return { tableOverflowY: table ? getComputedStyle(table).overflowY : "", mainOverflowY: main ? getComputedStyle(main).overflowY : "" }; })()');
   if (scrollState.tableOverflowY !== 'auto' || scrollState.mainOverflowY !== 'hidden') throw new Error(`products scroll container mismatch: ${JSON.stringify(scrollState)}`);
   const syncButton = await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=sync-products]"); if (!button || button.disabled) return false; button.click(); return true; })()');
@@ -161,7 +180,7 @@ async function run() {
   const savedCreate = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((item) => item.textContent?.includes("保存草稿")); if (!button || button.disabled) return false; button.click(); return true; })()');
   if (!savedCreate) throw new Error('save draft button disabled');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome 创建草稿'), 'created draft row');
-  const opened = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((item) => item.textContent?.includes("查看详情")); if (!button) return false; button.click(); return true; })()');
+  const opened = await evaluate(cdp, '(() => { const button = document.querySelector(".products-title-link"); if (!button) return false; button.click(); return true; })()');
   if (!opened) throw new Error('product detail button missing');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome 创建草稿'), 'product detail');
   const openedEdit = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((item) => item.textContent?.includes("编辑草稿")); if (!button) return false; button.click(); return true; })()');

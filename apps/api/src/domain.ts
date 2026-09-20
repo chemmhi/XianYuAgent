@@ -66,6 +66,11 @@ export interface ProductAssetRecord {
   status: ProductAssetStatus;
 }
 
+export interface ProductCouponBatchSummary {
+  id: string;
+  label?: string;
+}
+
 export interface ProductRecord {
   id: string;
   accountId: string;
@@ -86,6 +91,7 @@ export interface ProductRecord {
   updatedAt: string;
   skuCount?: number;
   assetCount?: number;
+  couponBatches?: ProductCouponBatchSummary[];
   skus?: ProductSkuRecord[];
   assets?: ProductAssetRecord[];
 }

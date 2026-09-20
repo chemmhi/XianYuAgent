@@ -16,7 +16,7 @@ export function ProductsPage({ api: providedApi }: ProductsPageProps) {
   const api = useMemo(() => providedApi ?? createMockProductsApi(), [providedApi]);
   const { currentAccountId, currentAccount, accountsLoading, accountsError } = useAccountContext();
   const scopedAccountId = currentAccountId ?? '__no_active_account__';
-  const controller = useProductsController({ api, initialFilters: { accountId: scopedAccountId } });
+  const controller = useProductsController({ api, initialFilters: { accountId: scopedAccountId, sortBy: 'updatedAt', sortOrder: 'desc' } });
   const [drawer, setDrawer] = useState<{ mode: 'create' | 'edit'; product?: NonNullable<typeof controller.detail.data> } | null>(null);
   const { setFilters } = controller;
 
@@ -35,7 +35,7 @@ export function ProductsPage({ api: providedApi }: ProductsPageProps) {
       <article className="card panel products-panel">
         <ProductToolbar currentAccount={currentAccount} contextLoading={accountsLoading} contextError={accountsError} contextMissing={contextMissing} filters={controller.filters} phase={controller.state.phase} total={total} syncing={controller.mutation.phase === 'saving'} onKeywordChange={controller.setKeyword} onStatusChange={(status) => controller.setFilters((previous) => ({ ...previous, status, page: 1 }))} onRefresh={controller.reload} onSync={() => { if (currentAccountId) void controller.syncFromXianyu(currentAccountId); }} onCreate={() => { if (!currentAccountId) return; controller.clearMutation(); setDrawer({ mode: 'create' }); }} onChooseAccount={() => { window.history.pushState({}, '', '/accounts'); window.dispatchEvent(new PopStateEvent('popstate')); }} />
         {controller.mutation.error && <div className="products-inline-error" role="alert">{controller.mutation.error.message}</div>}
-        {controller.state.phase === 'success' && pageData && <ProductTable products={products} page={pageData.page} totalPages={pageData.totalPages} total={pageData.total} onPageChange={(page) => controller.setFilters((previous) => ({ ...previous, page }))} onOpen={controller.openProduct} />}
+        {controller.state.phase === 'success' && pageData && <ProductTable products={products} page={pageData.page} totalPages={pageData.totalPages} total={pageData.total} sortBy={controller.filters.sortBy ?? 'updatedAt'} sortOrder={controller.filters.sortOrder ?? 'desc'} onSortChange={(sortBy, sortOrder) => controller.setFilters((previous) => ({ ...previous, sortBy, sortOrder, page: 1 }))} onPageChange={(page) => controller.setFilters((previous) => ({ ...previous, page }))} onOpen={controller.openProduct} />}
         <ProductListStateView phase={controller.state.phase} error={controller.state.error} onRetry={controller.reload} accountSelectionRequired={contextMissing} />
       </article>
       <ProductDetailPanel state={controller.detail} onClose={controller.closeProduct} onRetry={() => controller.detail.productId && controller.openProduct(controller.detail.productId)} onEdit={(product) => { controller.closeProduct(); controller.clearMutation(); setDrawer({ mode: 'edit', product }); }} />
