@@ -156,6 +156,84 @@ export interface ProductListResult {
   totalPages: number;
 }
 
+export type PaymentStatus = 'unpaid' | 'paid' | 'closed' | 'unknown';
+export type OrderStatus = 'open' | 'cancelling' | 'cancelled' | 'completed' | 'closed' | 'failed';
+export type DeliveryStatus = 'pending' | 'reserving' | 'delivered' | 'partially_delivered' | 'failed' | 'cancelled';
+export type AfterSalesStatus = 'none' | 'requested' | 'refunding' | 'refunded' | 'rejected' | 'closed';
+export type OrderDeliveryType = 'manual' | 'no_logistics' | 'coupon_only' | 'mixed';
+export type OrderSource = 'local' | 'xianyu';
+
+export interface OrderRecord {
+  id: string;
+  orderNo: string;
+  accountId: string;
+  accountName?: string;
+  buyerId: string;
+  buyerName: string;
+  itemId: string;
+  itemTitle: string;
+  amountMinor: number;
+  paymentStatus: PaymentStatus;
+  orderStatus: OrderStatus;
+  deliveryStatus: DeliveryStatus;
+  afterSalesStatus: AfterSalesStatus;
+  deliveryType: OrderDeliveryType;
+  createdAt: string;
+  updatedAt: string;
+  deliveryFailReason?: string;
+  conversationId?: string;
+  productId?: string;
+  configVersion: number;
+  source: OrderSource;
+  sourcePayloadDigest?: string;
+}
+
+export interface XianyuOrderItem {
+  orderNo: string;
+  buyerId: string;
+  buyerName: string;
+  itemId: string;
+  itemTitle: string;
+  amountMinor: number;
+  paymentStatus: PaymentStatus;
+  orderStatus: OrderStatus;
+  deliveryStatus: DeliveryStatus;
+  afterSalesStatus: AfterSalesStatus;
+  deliveryType: OrderDeliveryType;
+  createdAt: string;
+  updatedAt?: string;
+  deliveryFailReason?: string;
+  conversationId?: string;
+  productId?: string;
+  sourcePayloadDigest: string;
+}
+
+export interface OrderListQuery {
+  accountId?: string;
+  keyword?: string;
+  paymentStatus?: PaymentStatus;
+  orderStatus?: OrderStatus;
+  deliveryStatus?: DeliveryStatus;
+  afterSalesStatus?: AfterSalesStatus;
+  sortBy?: 'createdAt' | 'amountMinor';
+  sortOrder?: 'asc' | 'desc';
+  page?: number;
+  pageSize?: number;
+}
+
+export interface OrderListResult {
+  items: OrderRecord[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface OrderUpsertResult {
+  action: 'created' | 'updated';
+  order: OrderRecord;
+}
+
 export interface CouponItemRecord {
   id: string;
   batchId: string;
@@ -543,6 +621,10 @@ export interface Store {
   listWorkspaceMessages(adminId: string, sessionId: string, limit?: number): Promise<WorkspaceMessageRecord[]>;
   listProducts(adminId: string, query: ProductListQuery): Promise<ProductListResult>;
   getProduct(adminId: string, productId: string): Promise<ProductRecord | undefined>;
+  listOrders(adminId: string, query: OrderListQuery): Promise<OrderListResult>;
+  getOrder(adminId: string, orderNo: string, accountId?: string): Promise<OrderRecord | undefined>;
+  createOrder(input: { adminId: string; order: Omit<OrderRecord, 'id' | 'createdAt' | 'updatedAt' | 'configVersion' | 'source'> & { id?: string; createdAt?: string; updatedAt?: string; configVersion?: number; source?: OrderSource } }): Promise<OrderRecord>;
+  upsertExternalOrder(input: { adminId: string; accountId: string; item: XianyuOrderItem; syncedAt: string; accountName?: string }): Promise<OrderUpsertResult>;
   createProduct(input: {
     adminId: string;
     accountId: string;

@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor } from './conversation-cursor.js';
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
@@ -90,6 +90,56 @@ export class PostgresStore implements Store {
     product.skus = skuRows.rows.map((row) => this.toProductSku(row));
     product.assets = assetRows.rows.map((row) => this.toProductAsset(row));
     return product;
+  }
+  async listOrders(adminId: string, query: OrderListQuery): Promise<OrderListResult> {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    const params: unknown[] = [adminId];
+    const conditions = ["EXISTS (SELECT 1 FROM auth.account_scopes scope WHERE scope.account_id=o.account_id AND scope.admin_id=$1 AND scope.status='active' AND (scope.expires_at IS NULL OR scope.expires_at>now()))"];
+    const addParam = (value: unknown) => { params.push(value); return `$${params.length}`; };
+    if (query.accountId) conditions.push(`o.account_id=${addParam(query.accountId)}`);
+    if (query.paymentStatus) conditions.push(`o.payment_status=${addParam(query.paymentStatus)}`);
+    if (query.orderStatus) conditions.push(`o.order_status=${addParam(query.orderStatus)}`);
+    if (query.deliveryStatus) conditions.push(`o.delivery_status=${addParam(query.deliveryStatus)}`);
+    if (query.afterSalesStatus) conditions.push(`o.after_sales_status=${addParam(query.afterSalesStatus)}`);
+    const keyword = query.keyword?.trim();
+    if (keyword) { const p = addParam(`%${keyword}%`); conditions.push(`(o.order_no ILIKE ${p} OR o.buyer_id ILIKE ${p} OR o.buyer_name ILIKE ${p} OR o.item_id ILIKE ${p} OR o.item_title ILIKE ${p})`); }
+    const where = conditions.join(' AND ');
+    const count = await this.pool.query(`select count(*)::int as total from orders.orders o where ${where}`, params);
+    const total = Number(count.rows[0]?.total ?? 0);
+    const sortColumn = query.sortBy === 'amountMinor' ? 'o.amount_minor' : 'o.created_at';
+    const sortOrder = query.sortOrder === 'asc' ? 'ASC' : 'DESC';
+    const rows = await this.pool.query(`select o.* from orders.orders o where ${where} order by ${sortColumn} ${sortOrder}, o.order_no limit $${params.length + 1} offset $${params.length + 2}`, [...params, pageSize, (page - 1) * pageSize]);
+    return { items: rows.rows.map((row) => this.toOrder(row)), page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
+  }
+  async getOrder(adminId: string, orderNo: string, accountId?: string): Promise<OrderRecord | undefined> {
+    const params: unknown[] = [orderNo, adminId];
+    const accountClause = accountId ? ` and o.account_id=$3` : '';
+    if (accountId) params.push(accountId);
+    const result = await this.pool.query(`select o.* from orders.orders o where o.order_no=$1${accountClause} and exists (select 1 from auth.account_scopes scope where scope.account_id=o.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now())) limit 1`, params);
+    return result.rows[0] ? this.toOrder(result.rows[0]) : undefined;
+  }
+  async createOrder(input: { adminId: string; order: Omit<OrderRecord, 'id' | 'createdAt' | 'updatedAt' | 'configVersion' | 'source'> & { id?: string; createdAt?: string; updatedAt?: string; configVersion?: number; source?: OrderSource } }): Promise<OrderRecord> {
+    if (!(await this.hasAccountScope(input.adminId, input.order.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const order = input.order;
+    const id = order.id ?? createId();
+    try {
+      await this.pool.query(`insert into orders.orders (id,order_no,account_id,account_name,buyer_id,buyer_name,item_id,item_title,amount_minor,payment_status,order_status,delivery_status,after_sales_status,delivery_type,created_at,updated_at,delivery_fail_reason,conversation_id,product_id,config_version,source,source_payload_digest)
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,coalesce($15,now()),coalesce($16,now()),$17,$18,$19,coalesce($20,1),coalesce($21,'local'),$22)`, [id, order.orderNo, order.accountId, order.accountName ?? null, order.buyerId, order.buyerName, order.itemId, order.itemTitle, order.amountMinor, order.paymentStatus, order.orderStatus, order.deliveryStatus, order.afterSalesStatus, order.deliveryType, order.createdAt ?? null, order.updatedAt ?? null, order.deliveryFailReason ?? null, order.conversationId ?? null, order.productId ?? null, order.configVersion ?? 1, order.source ?? 'local', order.sourcePayloadDigest ?? null]);
+    } catch (error) { if ((error as { code?: string }).code === '23505') throw new Error('ORDER_DUPLICATE'); throw error; }
+    const created = await this.getOrder(input.adminId, order.orderNo, order.accountId);
+    if (!created) throw new Error('ORDER_CREATE_READBACK_FAILED');
+    return created;
+  }
+  async upsertExternalOrder(input: { adminId: string; accountId: string; item: XianyuOrderItem; syncedAt: string; accountName?: string }): Promise<OrderUpsertResult> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const id = createId();
+    const result = await this.pool.query(`insert into orders.orders (id,order_no,account_id,account_name,buyer_id,buyer_name,item_id,item_title,amount_minor,payment_status,order_status,delivery_status,after_sales_status,delivery_type,created_at,updated_at,delivery_fail_reason,conversation_id,product_id,config_version,source,source_payload_digest)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,1,'xianyu',$20)
+      on conflict (account_id,order_no) do update set account_name=coalesce(excluded.account_name,orders.orders.account_name),buyer_id=excluded.buyer_id,buyer_name=excluded.buyer_name,item_id=excluded.item_id,item_title=excluded.item_title,amount_minor=excluded.amount_minor,payment_status=excluded.payment_status,order_status=excluded.order_status,delivery_status=excluded.delivery_status,after_sales_status=excluded.after_sales_status,delivery_type=excluded.delivery_type,created_at=excluded.created_at,updated_at=$16,delivery_fail_reason=excluded.delivery_fail_reason,conversation_id=excluded.conversation_id,product_id=excluded.product_id,config_version=orders.orders.config_version+1,source='xianyu',source_payload_digest=excluded.source_payload_digest
+      returning *, (xmax = 0) as inserted`, [id, input.item.orderNo, input.accountId, input.accountName ?? null, input.item.buyerId, input.item.buyerName, input.item.itemId, input.item.itemTitle, input.item.amountMinor, input.item.paymentStatus, input.item.orderStatus, input.item.deliveryStatus, input.item.afterSalesStatus, input.item.deliveryType, input.item.createdAt, input.syncedAt, input.item.deliveryFailReason ?? null, input.item.conversationId ?? null, input.item.productId ?? null, input.item.sourcePayloadDigest]);
+    const row = result.rows[0];
+    return { action: row.inserted ? 'created' : 'updated', order: this.toOrder(row) };
   }
   async createProduct(input: { adminId: string; accountId: string; externalProductRef?: string; title: string; description?: string; categoryCode?: string; attributes?: Record<string, unknown>; defaultReplyTemplate?: string; aiPrompt?: string; priceMinor?: number; status?: ProductStatus }): Promise<ProductRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
@@ -593,6 +643,32 @@ export class PostgresStore implements Store {
   private toProduct(row: Row): ProductRecord {
     const attributes = row.attributes_json && typeof row.attributes_json === 'object' && !Array.isArray(row.attributes_json) ? row.attributes_json as Record<string, unknown> : {};
     return { id: String(row.id), accountId: String(row.account_id), externalProductRef: row.external_product_ref ? String(row.external_product_ref) : undefined, title: String(row.title), description: row.description ? String(row.description) : undefined, categoryCode: row.category_code ? String(row.category_code) : undefined, attributes: { ...attributes }, defaultReplyTemplate: row.default_reply_template ? String(row.default_reply_template) : undefined, aiPrompt: row.ai_prompt ? String(row.ai_prompt) : undefined, configVersion: Number(row.config_version ?? 1), priceMinor: row.price_minor === null || row.price_minor === undefined ? undefined : Number(row.price_minor), status: row.status as ProductRecord['status'], source: (row.source ?? 'local') as ProductRecord['source'], lastSyncedAt: iso(row.last_synced_at), sourcePayloadDigest: row.source_payload_digest ? String(row.source_payload_digest) : undefined, createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString(), skuCount: Number(row.sku_count ?? 0), assetCount: Number(row.asset_count ?? 0), couponBatches: this.toProductCouponBatches(row.coupon_batches) };
+  }
+  private toOrder(row: Row): OrderRecord {
+    return {
+      id: String(row.id),
+      orderNo: String(row.order_no),
+      accountId: String(row.account_id),
+      accountName: row.account_name ? String(row.account_name) : undefined,
+      buyerId: String(row.buyer_id ?? ''),
+      buyerName: String(row.buyer_name ?? ''),
+      itemId: String(row.item_id ?? ''),
+      itemTitle: String(row.item_title ?? ''),
+      amountMinor: Number(row.amount_minor ?? 0),
+      paymentStatus: row.payment_status as OrderRecord['paymentStatus'],
+      orderStatus: row.order_status as OrderRecord['orderStatus'],
+      deliveryStatus: row.delivery_status as OrderRecord['deliveryStatus'],
+      afterSalesStatus: row.after_sales_status as OrderRecord['afterSalesStatus'],
+      deliveryType: row.delivery_type as OrderRecord['deliveryType'],
+      createdAt: dateIso(row.created_at),
+      updatedAt: dateIso(row.updated_at),
+      deliveryFailReason: row.delivery_fail_reason ? String(row.delivery_fail_reason) : undefined,
+      conversationId: row.conversation_id ? String(row.conversation_id) : undefined,
+      productId: row.product_id ? String(row.product_id) : undefined,
+      configVersion: Number(row.config_version ?? 1),
+      source: (row.source ?? 'local') as OrderRecord['source'],
+      sourcePayloadDigest: row.source_payload_digest ? String(row.source_payload_digest) : undefined,
+    };
   }
   private toProductCouponBatches(value: unknown): Array<{ id: string; label?: string }> | undefined {
     const parsed = typeof value === 'string' ? (() => { try { return JSON.parse(value) as unknown; } catch { return undefined; } })() : value;
