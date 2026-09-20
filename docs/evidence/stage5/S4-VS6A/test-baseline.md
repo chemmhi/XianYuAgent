@@ -46,3 +46,12 @@
 ## 回滚边界
 
 停止新 Run enqueue，关闭 Workspace API/WS 订阅，保留 Session/Run/Step/事件历史；迁移回滚前先确认没有后续数据依赖。
+## S4-VS6A PI 与消息流补充证据
+
+- 服务端通过根目录 `.env` 回退加载模型配置；feature worktree 未复制或提交 `.env`，且 `.gitignore` 继续忽略本地环境文件。
+- `PiRuntimeAdapter` 只在服务端读取 API key，OpenAI-compatible 请求使用 `Authorization: Bearer`；运行事件、错误、持久化消息和 smoke 输出均验证不包含 key。
+- Workspace 右侧改为单一连续对话线程，消息类型为 `user_message`、`reasoning_summary`、`tool_event`、`final_answer`；reasoning summary 默认折叠，仅展示高层摘要，不透传原始逐 token 思维链。
+- `workspace.messages` 已接入 MemoryStore/PostgresStore；后续 Run 会把历史消息压缩为模型上下文，消息与 Run 事件均可持久化回放。
+- 真实 `.env` smoke：`npm --workspace apps/api run test:pi:live`，provider host `api.deepseek.com`，model `deepseek-flash`，Run `succeeded`，`keyPrinted=false`。
+- API 全量 smoke、Web 15 files / 47 tests、API/Web build 与 typecheck、`git diff --check` 均已通过。
+- 当前结论仍为 `PARTIALLY_VERIFIED`：独立 Worker/Pi 服务、发布级恢复/取消/重试/unknown、人工视觉签核仍未完成，不能宣称发布级完成。

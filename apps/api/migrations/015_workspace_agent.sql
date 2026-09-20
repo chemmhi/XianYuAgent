@@ -75,3 +75,15 @@ CREATE TABLE IF NOT EXISTS workspace.run_events (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS run_events_run_sequence_idx ON workspace.run_events (run_id, sequence);
+
+CREATE TABLE IF NOT EXISTS workspace.messages (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id uuid NOT NULL REFERENCES workspace.agent_sessions(id) ON DELETE CASCADE,
+  run_id uuid REFERENCES workspace.runs(id) ON DELETE SET NULL,
+  message_type text NOT NULL CHECK (message_type IN ('user_message', 'reasoning_summary', 'tool_event', 'final_answer')),
+  content text NOT NULL,
+  summary text,
+  sequence bigserial NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS workspace_messages_session_sequence_idx ON workspace.messages (session_id, sequence);

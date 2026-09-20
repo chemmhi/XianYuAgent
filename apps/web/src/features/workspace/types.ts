@@ -1,5 +1,6 @@
 export type WorkspaceRunStatus = 'queued' | 'running' | 'waiting_confirmation' | 'executing' | 'retrying' | 'cancelling' | 'succeeded' | 'partially_succeeded' | 'failed' | 'cancelled' | 'expired';
 export type WorkspaceStepStatus = 'pending' | 'running' | 'waiting_confirmation' | 'executing' | 'retrying' | 'succeeded' | 'partially_succeeded' | 'failed' | 'skipped' | 'cancelled';
+export type WorkspaceMessageType = 'user_message' | 'reasoning_summary' | 'tool_event' | 'final_answer';
 
 export interface WorkspaceSessionVM {
   id: string;
@@ -49,6 +50,19 @@ export interface WorkspaceRunEventVM {
   eventType: string;
   payload: Record<string, unknown>;
   createdAt: string;
+}
+
+export interface WorkspaceMessageVM {
+  id: string;
+  type: WorkspaceMessageType;
+  createdAt: string;
+  title: string;
+  content: string;
+  summary?: string;
+  status?: WorkspaceRunStatus | WorkspaceStepStatus;
+  eventType?: string;
+  sequence?: number;
+  collapsible?: boolean;
 }
 
 export interface WorkspaceState {

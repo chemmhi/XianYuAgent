@@ -1,4 +1,4 @@
-import type { AgentSessionRecord, RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, Store } from './domain.js';
+import type { AgentSessionRecord, RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, Store, WorkspaceMessageRecord } from './domain.js';
 import { ServiceError } from './services.js';
 
 const terminalRunStatuses = new Set<RunStatus>(['succeeded', 'partially_succeeded', 'failed', 'cancelled', 'expired']);
@@ -73,7 +73,7 @@ export interface WorkspaceRunView {
 }
 
 export interface WorkspaceRuntime {
-  enqueue(input: { run: RunRecord; steps: StepRecord[] }): void;
+  enqueue(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> }): void;
   stop(): void;
 }
 
@@ -195,7 +195,12 @@ export class WorkspaceService {
       const created = await this.store.createRun({ adminId: input.adminId, accountId: input.accountId, sessionId: input.sessionId, instruction, clientRunRef: input.clientRunRef });
       await this.audit({ actorId: input.adminId, action: 'workspace.run.created', targetRef: created.run.id, requestId: input.requestId, traceId: input.traceId, payload: { sessionId: input.sessionId, instructionLength: instruction.length, hasClientRunRef: Boolean(input.clientRunRef) }, accountId: input.accountId });
       await this.store.appendRunEvent({ runId: created.run.id, eventType: 'run.queued', payload: { status: 'queued', sessionId: input.sessionId, accountId: input.accountId } });
-      this.runtime.enqueue(created);
+      await this.appendMessage({ adminId: input.adminId, sessionId: input.sessionId, runId: created.run.id, type: 'user_message', content: instruction.slice(0, 2_000) });
+      const history = (await this.store.listWorkspaceMessages(input.adminId, input.sessionId, 100))
+        .filter((message) => message.id !== undefined)
+        .slice(0, -1)
+        .map((message) => ({ role: message.type === 'user_message' ? 'user' as const : 'assistant' as const, content: `[${message.type}] ${message.summary ?? message.content}` }));
+      this.runtime.enqueue({ ...created, adminId: input.adminId, sessionId: input.sessionId, history });
       return { run: this.toRunView(created.run, created.steps), duplicate: false };
     } catch (error) { throw mapWorkspaceStoreError(error); }
   }
@@ -210,6 +215,17 @@ export class WorkspaceService {
     const run = await this.store.getRun(input.adminId, input.runId);
     if (!run) throw new ServiceError(404, 'NOT_FOUND', 'run not found');
     return this.store.listRunEvents(input.adminId, input.runId, input.afterSequence ?? 0);
+  }
+
+  async listMessages(input: { adminId: string; sessionId: string; limit?: number }): Promise<WorkspaceMessageRecord[]> {
+    const session = await this.store.getAgentSession(input.adminId, input.sessionId);
+    if (!session) throw new ServiceError(404, 'NOT_FOUND', 'agent session not found');
+    return this.store.listWorkspaceMessages(input.adminId, input.sessionId, input.limit ?? 100);
+  }
+
+  private async appendMessage(input: { adminId: string; sessionId: string; runId?: string; type: 'user_message' | 'reasoning_summary' | 'tool_event' | 'final_answer'; content: string; summary?: string }): Promise<void> {
+    const message = await this.store.appendWorkspaceMessage(input);
+    if (input.runId) await this.store.appendRunEvent({ runId: input.runId, eventType: 'message.appended', payload: { messageType: message.type, messageId: message.id, content: message.content, summary: message.summary, createdAt: message.createdAt } });
   }
 
   private toSessionView(session: AgentSessionRecord): WorkspaceSessionView { return { ...session }; }

@@ -10,6 +10,8 @@ const artifactDir = join(root, 'artifacts', 'real-verify', 'S4-VS6A');
 const screenshotDir = join(artifactDir, 'screenshots');
 const chromeProfile = join(tmpdir(), `xianyu-agent-workspace-real-${process.pid}`);
 const chromePath = process.env.CHROME_PATH ?? join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe');
+const workspaceE2eRuntime = (process.env.WORKSPACE_E2E_RUNTIME ?? 'in-process').trim().toLowerCase();
+if (!['in-process', 'pi'].includes(workspaceE2eRuntime)) throw new Error('WORKSPACE_E2E_RUNTIME must be in-process or pi');
 const children = [];
 let testDatabaseName;
 
@@ -143,6 +145,7 @@ async function run() {
       ALLOW_IN_MEMORY: 'false',
       COOKIE_SECURE: 'false',
       XIANYU_QR_MODE: 'stub',
+      AGENT_RUNTIME: workspaceE2eRuntime,
     },
   });
   await waitFor(async () => (await fetch(`${apiUrl}/healthz`)).ok, 'Postgres-backed API');
@@ -237,7 +240,7 @@ async function run() {
 
   const browserState = await evaluate(cdp, '({ href: location.href, sessionCount: document.querySelectorAll(".workspace-session-row").length, runStatus: document.querySelector(".workspace-run-panel .workspace-status")?.textContent ?? "", result: document.querySelector(".workspace-result-ok")?.innerText ?? "", eventSummary: document.querySelector(".workspace-events summary")?.textContent ?? "" })');
   console.log(JSON.stringify({
-    apiStorage: 'postgres', accountId, sessionId: session.id, sessionPersisted: true,
+    apiStorage: 'postgres', runtime: workspaceE2eRuntime, accountId, sessionId: session.id, sessionPersisted: true,
     browserState, blockedBanner, errorNodes, socketStates, eventRows, eventSummary, wsHandshakes, workspaceNetwork,
     screenshots: { desktopPath, mobilePath },
   }, null, 2));

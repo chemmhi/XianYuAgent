@@ -13,7 +13,8 @@ import { XianyuQrLoginAdapter, type XianyuQrPublicSession } from './xianyu-qr-lo
 import { XianyuMtopClient } from './xianyu-mtop.js';
 import { MessageRealtimeHub, MessageService } from './messages.js';
 import { RedisConversationEventBridge } from './messages-realtime.js';
-import { InProcessAgentRuntime, isTerminalRunStatus, WorkspaceService } from './workspace.js';
+import { InProcessAgentRuntime, isTerminalRunStatus, WorkspaceService, type WorkspaceRuntime } from './workspace.js';
+import { OpenAICompatibleModelClient, PiRuntimeAdapter } from './pi-runtime.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -27,7 +28,7 @@ export interface AppRuntime {
   messages: MessageService;
   redisRealtime?: RedisConversationEventBridge;
   workspace: WorkspaceService;
-  workspaceRuntime: InProcessAgentRuntime;
+  workspaceRuntime: WorkspaceRuntime;
   qrLogin: XianyuQrLoginAdapter;
   xianyu: XianyuMtopClient;
   server: Server;
@@ -119,7 +120,9 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
   });
 
   const wsServer = new WebSocketServer({ noServer: true });
-  const workspaceRuntime = new InProcessAgentRuntime(store);
+  const workspaceRuntime: WorkspaceRuntime = config.agentRuntime === 'pi'
+    ? createPiWorkspaceRuntime(config, store)
+    : new InProcessAgentRuntime(store);
   const workspace = new WorkspaceService(store, workspaceRuntime, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
@@ -158,6 +161,21 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     if (context) void attachConversationSocket(runtime, socket, request, context);
   });
   return runtime;
+}
+
+function createPiWorkspaceRuntime(config: AppConfig, store: Store): WorkspaceRuntime {
+  if (!config.modelApiKey || !config.modelBaseUrl || !config.modelName) throw new Error('PI_RUNTIME_CONFIG_MISSING');
+  const modelClient = new OpenAICompatibleModelClient({ apiKey: config.modelApiKey, baseUrl: config.modelBaseUrl, model: config.modelName, timeoutMs: config.modelTimeoutMs });
+  return new PiRuntimeAdapter(store, modelClient, {
+    model: config.modelName,
+    redactSecrets: [config.modelApiKey],
+    persistUserMessage: false,
+    messageSink: async (message) => {
+      if (!message.adminId) return;
+      const record = await store.appendWorkspaceMessage({ adminId: message.adminId, sessionId: message.sessionId, runId: message.runId, type: message.messageType, content: message.content, summary: message.summary });
+      await store.appendRunEvent({ runId: message.runId, eventType: 'message.appended', payload: { messageId: record.id, messageType: record.type, content: record.content, summary: record.summary, createdAt: record.createdAt } });
+    },
+  });
 }
 
 async function handleRequest(runtime: AppRuntime, request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -431,6 +449,12 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   }
   if (ctx.path === '/api/v1/workspace/agent-sessions/search' && ctx.method === 'GET') {
     return { statusCode: 200, body: success(ctx, { items: await workspace.listSessions({ adminId: authContext.admin.id, accountId: optionalString(ctx.query.accountId), search: optionalString(ctx.query.q ?? ctx.query.search) }) }).body };
+  }
+  const workspaceMessagesMatch = ctx.path.match(/^\/api\/v1\/workspace\/agent-sessions\/([^/]+)\/messages$/);
+  if (workspaceMessagesMatch && ctx.method === 'GET') {
+    const sessionId = decodeURIComponent(workspaceMessagesMatch[1]);
+    const limit = Number(ctx.query.limit ?? 100);
+    return { statusCode: 200, body: success(ctx, { items: await workspace.listMessages({ adminId: authContext.admin.id, sessionId, limit: Number.isFinite(limit) ? Math.trunc(limit) : 100 }) }).body };
   }
   if (ctx.path === '/api/v1/workspace/agent-sessions' && ctx.method === 'POST') {
     const accountId = optionalString(ctx.body.accountId);
