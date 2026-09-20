@@ -3,6 +3,8 @@ import { XianyuMtopClient } from '../dist/xianyu-mtop.js';
 
 const originalFetch = globalThis.fetch;
 let captured;
+let savedCookie;
+let savedMetadata;
 let responseMode = 'success';
 globalThis.fetch = async (input, init = {}) => {
   const url = new URL(String(input));
@@ -17,13 +19,23 @@ globalThis.fetch = async (input, init = {}) => {
       priceVO: { totalPrice: '12.34', buyNum: '1' },
       rightVO: { btnList: [] },
     }] } },
-  }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }), { status: 200, headers: { 'content-type': 'application/json', 'set-cookie': 'rotated=1; Domain=.goofish.com; Path=/; Secure' } });
 };
 
 try {
   const client = new XianyuMtopClient({
-    loadCredential: async () => ({ cookieHeader: 'unb=seller-1; _m_h5_tk=token_1' }),
-    saveCookie: async () => {},
+    loadCredential: async () => ({
+      cookieHeader: 'unb=seller-1; _m_h5_tk=token_1',
+      metadata: {
+        cookies_refresh_snapshot: JSON.stringify([
+          { name: '_m_h5_tk', value: 'token_1_suffix', domain: '.goofish.com', path: '/', secure: true },
+          { name: 'unb', value: 'seller-1', domain: '.goofish.com', path: '/', secure: true },
+          { name: 'seller_only', value: '1', domain: 'seller.goofish.com', path: '/', secure: true },
+          { name: 'http_only', value: '1', domain: '.goofish.com', path: '/', secure: true, httpOnly: true },
+        ]),
+      },
+    }),
+    saveCookie: async (_adminId, _accountId, cookieHeader, metadata) => { savedCookie = cookieHeader; savedMetadata = metadata; },
   });
   const result = await client.fetchOrdersAll('admin-1', 'account-1', 30, 2);
   assert.equal(result.items.length, 1);
@@ -40,6 +52,12 @@ try {
   assert.equal(captured.headers.origin, 'https://seller.goofish.com');
   assert.equal(captured.headers.referer, 'https://seller.goofish.com/?site=COMMONPRO#/seller-trade/order-manage');
   assert.equal(captured.headers.idle_site_biz_code, 'COMMONPRO');
+  assert.match(captured.headers.cookie, /_m_h5_tk=token_1_suffix/);
+  assert.match(captured.headers.cookie, /unb=seller-1/);
+  assert.doesNotMatch(captured.headers.cookie, /seller_only=1/);
+  assert.match(savedCookie, /_m_h5_tk=token_1_suffix/);
+  assert.match(savedCookie, /rotated=1/);
+  assert.match(savedMetadata.cookies_refresh_snapshot, /rotated/);
   responseMode = 'success';
   await client.fetchOrdersAll('admin-1', 'account-1', undefined, 1);
   assert.equal(captured.payload.rowsPerPage, 30);
@@ -47,6 +65,12 @@ try {
   const denied = await client.fetchOrdersAll('admin-1', 'account-1', 30, 1);
   assert.equal(denied.items.length, 0);
   assert.equal(denied.pages[0].errorCode, 'MTOP_PERMISSION_DENIED');
+  const emptySnapshotClient = new XianyuMtopClient({
+    loadCredential: async () => ({ cookieHeader: 'unb=legacy; _m_h5_tk=legacy_token', metadata: { cookies_refresh_snapshot: '[]' } }),
+    saveCookie: async () => {},
+  });
+  const emptySnapshot = await emptySnapshotClient.fetchOrdersAll('admin-1', 'account-1', 30, 1);
+  assert.equal(emptySnapshot.pages[0].errorCode, 'MTOP_TOKEN_MISSING');
   console.log('xianyu order request smoke passed');
 } finally {
   globalThis.fetch = originalFetch;

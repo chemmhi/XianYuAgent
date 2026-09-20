@@ -11,6 +11,7 @@ import type { ProductListResult, ProductRecord, Store } from './domain.js';
 import { createId, digestJson } from './security.js';
 import { XianyuQrLoginAdapter, type XianyuQrPublicSession } from './xianyu-qr-login.js';
 import { XianyuMtopClient } from './xianyu-mtop.js';
+import { metadataWithCookieSnapshot } from './xianyu-cookie-jar.js';
 import { XianyuImService } from './xianyu-im-service.js';
 import { MessageRealtimeHub, MessageService } from './messages.js';
 import { RedisConversationEventBridge } from './messages-realtime.js';
@@ -85,7 +86,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
         await accounts.updateLoginSession({ adminId: status.adminId, accountId: status.accountId, sessionId: status.sessionId, patch: { status: localStatus, failureCode: status.errorCode, completedAt: ['succeeded', 'expired', 'failed', 'cancelled'].includes(localStatus) ? new Date().toISOString() : undefined }, requestId: `qr:${status.sessionId}`, traceId: `qr:${status.sessionId}` });
       } catch { /* QR 状态回写失败不影响外部轮询；下一次 GET 会重试 */ }
     },
-    onSuccess: async ({ sessionId, adminId, accountId, cookieHeader, unb }) => {
+    onSuccess: async ({ sessionId, adminId, accountId, cookieHeader, cookieSnapshot, unb }) => {
       if (accountId) {
         const existing = await accounts.get(adminId, accountId);
         if (existing.sellerRef && !existing.sellerRef.startsWith('pending_') && existing.sellerRef !== unb) {
@@ -96,7 +97,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       const resolvedAccount = await ensureAccountForLogin({ accounts, adminId, accountId, sellerRef: unb, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
       const resolvedAccountId = resolvedAccount.id;
       if (resolvedAccountId !== accountId) await accounts.updateLoginSession({ adminId, accountId, sessionId, patch: { accountId: resolvedAccountId }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
-      await credentials.save({ adminId, accountId: resolvedAccountId, cookieHeader, metadata: { unb, loginMethod: 'qr_http' }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+      await credentials.save({ adminId, accountId: resolvedAccountId, cookieHeader, metadata: metadataWithCookieSnapshot({ unb, loginMethod: 'qr_http' }, cookieSnapshot), requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
       const verification = await xianyu.verifyLogin(adminId, resolvedAccountId);
       if (!verification.success) {
         const status = verification.accountInvalid ? (verification.errorCode === 'SESSION_EXPIRED' ? 'expired' : 'revoked') : 'expired';
@@ -111,10 +112,10 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
   });
   xianyu = new XianyuMtopClient({
     loadCredential: async (adminId, accountId) => store.getCredential(adminId, accountId),
-    saveCookie: async (adminId, accountId, cookieHeader) => {
+    saveCookie: async (adminId, accountId, cookieHeader, metadata) => {
       const account = await store.getAccount(adminId, accountId);
       if (!account) return;
-      await credentials.save({ adminId, accountId, cookieHeader, requestId: 'xianyu-mtop', traceId: 'xianyu-mtop' });
+      await credentials.save({ adminId, accountId, cookieHeader, metadata, requestId: 'xianyu-mtop', traceId: 'xianyu-mtop' });
     },
   });
   productSync = new ProductSyncService(store, xianyu, async (input) => {
