@@ -8,6 +8,10 @@
 
 /* OpenAI ModelClient parity with SellerAgent's editable dual-provider panel. */
 .openai-settings-content,.openai-settings-hero,.openai-model-box{min-width:0}
+.timeline{display:grid;gap:10px}
+.timeline-row{display:grid;grid-template-columns:64px minmax(0,1fr) auto;gap:10px;align-items:center;padding:12px;border:1px solid var(--border);border-radius:10px;background:#fff;font-size:12px}
+.timeline-row strong{font-size:11px;color:var(--muted)}
+.timeline-row span{line-height:1.45}
 .openai-settings-hero{padding:18px}
 .openai-settings-hero .panel-head{margin-bottom:16px}
 .openai-config-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:14px}

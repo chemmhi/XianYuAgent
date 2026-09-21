@@ -118,3 +118,13 @@
 - 已执行：`npm --workspace apps/api run build`、`node apps/api/scripts/credential-store-smoke.mjs`（加密/解密、创建、列表、轮换、版本冲突、禁用、撤销、撤销后禁止启用）；`npm --workspace apps/web run typecheck`、`npm --workspace apps/web run test -- --run`（26 files / 88 tests）、`npm --workspace apps/web run build`、`git diff --check`。
 - 当前结论：`S4-VS7A = READY_FOR_REVIEW`。已补真实 PostgreSQL `001`–`018` migration 与 `credential_values.ciphertext` 密文复读、Chrome/CDP `/settings` 用户路径、403/409 跨层断言和 `1440×900` / `390×844` 截图；证据见 `docs/evidence/stage5/S4-VS7A/`。仍开放发布级 rollback、旧 `auth.account_credentials` 双读单写兼容迁移与 merge lock 后独立签核。
 - 回滚边界：先停止 `/api/v1/credentials` 新写入，保留旧凭证引用和审计；迁移回退前确认没有 018 表依赖，按 expand/verify/switch/contract 顺序处理，不删除历史审计或旧密文。
+
+### 2026-09-21：S4-VS7A OpenAI API 主备配置增量复核
+
+- 已新增 OpenAI-compatible 主配置 / 备用配置模型；`024_openai_model_configs.sql` 解除每账号只能有一个 `model_client` 的旧约束，角色写入 `credential_values.metadata_json`，API Key 继续由 CredentialStore 加密保存。
+- 正式 `/settings` OpenAI API 面板严格沿用 SellerAgent 的深色侧栏、设置分类、双列卡片、规则时间线和移动端底部导航；每张配置卡片都有“测试连通性”和“保存”。
+- Model 下拉只在展开时调用 provider `/models`；主、备按 configId 隔离模型列表，provider 返回空列表、请求中、失败和重复展开均有明确状态。
+- `npm --workspace apps/api run test:postgres:openai` 已在真实 PostgreSQL 通过；`npm --workspace apps/web run test:e2e:chrome:settings:openai` 使用真实 Chrome/CDP + PostgreSQL 通过 UI → API → DB → Agent、更新无重启生效、主失败切备用和重启复读。
+- Agent 输出证据：`PRIMARY_V1_REPLY` → 更新后 `PRIMARY_V2_REPLY` → 主配置 401 后 `BACKUP_REPLY`；E2E 同时确认密钥不进入 API 响应、URL、DOM 输入或 localStorage。
+- 视觉证据已更新至 `docs/evidence/stage5/S4-VS7A/screenshots/`，逐项偏差记录见 `docs/evidence/stage5/S4-VS7A/visual-diff.md`。
+- 当前结论仍为 `READY_FOR_REVIEW`：发布级 migration rollback、旧凭证兼容迁移、fallback 专用审计事件和 merge lock 后独立签核未关闭。

@@ -15,13 +15,15 @@ type ConfigForm = {
   wireApi: OpenAIWireApi;
   timeoutMs: number;
   apiKey: string;
+  apiKeyHint?: string;
+  apiKeyMasked: boolean;
   status?: OpenAIConfigVM['status'];
   connectivity: 'unknown' | 'passed' | 'failed';
 };
 
 type ModelLoadPhase = 'idle' | 'loading' | 'success' | 'empty' | 'error';
 
-const emptyForm = (role: OpenAIConfigRole): ConfigForm => ({ role, provider: '', alias: role, baseUrl: '', model: '', wireApi: 'responses', timeoutMs: 60_000, apiKey: '', connectivity: 'unknown' });
+const emptyForm = (role: OpenAIConfigRole): ConfigForm => ({ role, provider: '', alias: role, baseUrl: '', model: '', wireApi: 'responses', timeoutMs: 60_000, apiKey: '', apiKeyMasked: false, connectivity: 'unknown' });
 
 export function OpenAISettingsPanel(props: { accountId: string; accountName?: string; api: OpenAISettingsApi; modelApi: ModelProviderApi; accountsLoading: boolean; accountsError: string | null }) {
   const controller = useOpenAISettingsController(props.api, props.accountId);
@@ -151,7 +153,7 @@ export function OpenAISettingsPanel(props: { accountId: string; accountName?: st
     setBusyRole(form.role); setTestError((previous) => ({ ...previous, [form.role]: null }));
     try {
       const saved = await controller.save({ accountId: props.accountId, configId: form.id, role: form.role, provider: form.provider, alias: form.alias, baseUrl: form.baseUrl, model: form.model, wireApi: form.wireApi, timeoutMs: form.timeoutMs, apiKey: form.apiKey || undefined, expectedVersion: form.version });
-      update(form.role, { id: saved.id, version: saved.version, apiKey: '', connectivity: form.connectivity === 'passed' ? 'passed' : saved.lastConnectivity ?? 'unknown', status: saved.status });
+      update(form.role, { id: saved.id, version: saved.version, apiKey: '', apiKeyHint: saved.apiKeyHint, apiKeyMasked: Boolean(saved.apiKeyHint), connectivity: form.connectivity === 'passed' ? 'passed' : saved.lastConnectivity ?? 'unknown', status: saved.status });
     } catch (error) {
       setTestError((previous) => ({ ...previous, [form.role]: error instanceof Error ? error.message : '保存失败，请重试。' }));
     } finally { setBusyRole(null); }
@@ -191,7 +193,7 @@ function OpenAIConfigCard(props: { form: ConfigForm; role: OpenAIConfigRole; bus
     <div className="openai-form-rows">
       <label><span>Provider</span><input value={props.form.provider} onChange={(event) => props.onChange({ provider: event.target.value })} placeholder="OpenAI Compatible" /></label>
       <label><span>Base URL</span><input value={props.form.baseUrl} onChange={(event) => props.onChange({ baseUrl: event.target.value })} placeholder="https://api.example.com/v1" /></label>
-      <label><span>API Key</span><input type="password" value={props.form.apiKey} onChange={(event) => props.onChange({ apiKey: event.target.value })} placeholder={props.form.id ? props.form.apiKey ? '已填写新密钥' : '留空保持当前密钥' : '输入新的 API Key'} autoComplete="new-password" /></label>
+      <label><span>API Key</span><input type={props.form.apiKeyMasked ? 'text' : 'password'} value={props.form.apiKeyMasked ? (props.form.apiKeyHint ?? '') : props.form.apiKey} onFocus={() => { if (props.form.apiKeyMasked) props.onChange({ apiKey: '', apiKeyMasked: false }); }} onChange={(event) => props.onChange({ apiKey: event.target.value, apiKeyMasked: false })} placeholder={props.form.id ? '留空保持当前密钥' : '输入新的 API Key'} autoComplete="new-password" /></label>
       <label><span>Model</span><select value={props.form.model} onFocus={props.onLoadModels} onClick={props.onLoadModels} onChange={(event) => props.onChange({ model: event.target.value })}><option value="">{modelPlaceholder}</option>{props.form.model && !props.providerModels.includes(props.form.model) && <option value={props.form.model}>{props.form.model}</option>}{props.providerModels.map((model) => <option value={model} key={model}>{model}</option>)}</select></label>
       <div className="openai-status-row"><span>连通性</span><span className="openai-status-copy">{status}{props.error ? ` · ${props.error}` : ''}</span></div>
     </div>
@@ -201,5 +203,5 @@ function OpenAIConfigCard(props: { form: ConfigForm; role: OpenAIConfigRole; bus
 }
 
 function fromView(item: OpenAIConfigVM): ConfigForm {
-  return { id: item.id, version: item.version, role: item.role, provider: item.provider, alias: item.alias, baseUrl: item.baseUrl, model: item.model, wireApi: item.wireApi, timeoutMs: item.timeoutMs, apiKey: '', status: item.status, connectivity: item.lastConnectivity ?? 'unknown' };
+  return { id: item.id, version: item.version, role: item.role, provider: item.provider, alias: item.alias, baseUrl: item.baseUrl, model: item.model, wireApi: item.wireApi, timeoutMs: item.timeoutMs, apiKey: '', apiKeyHint: item.apiKeyHint, apiKeyMasked: Boolean(item.apiKeyHint), status: item.status, connectivity: item.lastConnectivity ?? 'unknown' };
 }

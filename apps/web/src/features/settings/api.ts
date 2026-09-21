@@ -149,7 +149,9 @@ export function createMockAutoReplyAgentSettingsApi(): AutoReplyAgentSettingsApi
 export function createMockOpenAISettingsApi(): OpenAISettingsApi {
   const now = () => new Date().toISOString();
   const rows = new Map<string, OpenAIConfigVM>();
-  const models = ['gpt-4o-mini', 'gpt-4.1-mini'];
+  // Test-only fallback: production Model options always come from the provider /models endpoint.
+  // Keep the fixture provider-neutral so it cannot be mistaken for a production model allowlist.
+  const models = ['mock-provider-model-a', 'mock-provider-model-b'];
   return {
     async list(accountId) { return { accountId, items: [...rows.values()].filter((item) => item.accountId === accountId) }; },
     async save(input) {
