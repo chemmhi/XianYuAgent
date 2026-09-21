@@ -1,4 +1,4 @@
-import type { CredentialListVM, CredentialRefVM, CredentialStatus } from './types';
+import type { AutoReplyAgentConfigVM, CredentialListVM, CredentialRefVM, CredentialStatus } from './types';
 
 interface Transport {
   get<T>(path: string): Promise<T>;
@@ -29,6 +29,11 @@ export interface CredentialApi {
   setStatus(input: { credentialId: string; expectedVersion: number; status: Exclude<CredentialStatus, 'rotating'> }): Promise<CredentialRefVM>;
 }
 
+export interface AutoReplyAgentSettingsApi {
+  get(): Promise<AutoReplyAgentConfigVM>;
+  update(input: { expectedVersion: number; patch: Partial<Omit<AutoReplyAgentConfigVM, 'adminId' | 'configVersion' | 'configDigest' | 'createdAt' | 'updatedAt'>> }): Promise<AutoReplyAgentConfigVM>;
+}
+
 export function createCredentialApi(transport: Transport): CredentialApi {
   return {
     async list(accountId) {
@@ -55,6 +60,18 @@ export function createCredentialApi(transport: Transport): CredentialApi {
   };
 }
 
+export function createAutoReplyAgentSettingsApi(transport: Transport): AutoReplyAgentSettingsApi {
+  return {
+    async get() {
+      return unwrap(await transport.get<AutoReplyAgentConfigVM | ApiEnvelope<AutoReplyAgentConfigVM>>('/api/v1/settings/agent'));
+    },
+    async update(input) {
+      const patch = requirePatch(transport);
+      return unwrap(await patch<AutoReplyAgentConfigVM | ApiEnvelope<AutoReplyAgentConfigVM>>('/api/v1/settings/agent', { expectedVersion: input.expectedVersion, ...input.patch }, { headers: { 'Idempotency-Key': idempotency('auto-reply-agent-settings') } }));
+    },
+  };
+}
+
 export function createMockCredentialApi(): CredentialApi {
   const rows = new Map<string, CredentialRefVM>();
   return {
@@ -68,5 +85,34 @@ export function createMockCredentialApi(): CredentialApi {
     async update(input) { const row = rows.get(input.credentialId); if (!row) throw new Error('credential not found'); if (row.version !== input.expectedVersion) throw new Error('版本冲突'); Object.assign(row, { provider: input.provider ?? row.provider, alias: input.alias ?? row.alias, label: input.label ?? row.label, metadata: input.metadata ?? row.metadata, version: row.version + 1, updatedAt: new Date().toISOString() }); return row; },
     async rotate(input) { const row = rows.get(input.credentialId); if (!row) throw new Error('credential not found'); if (row.version !== input.expectedVersion) throw new Error('版本冲突'); row.version += 1; row.status = 'active'; row.fingerprint = 'mock-rotated'; row.lastRotatedAt = new Date().toISOString(); row.updatedAt = row.lastRotatedAt; return row; },
     async setStatus(input) { const row = rows.get(input.credentialId); if (!row) throw new Error('credential not found'); if (row.version !== input.expectedVersion) throw new Error('版本冲突'); row.status = input.status; row.version += 1; row.updatedAt = new Date().toISOString(); return row; },
+  };
+}
+
+export function createMockAutoReplyAgentSettingsApi(): AutoReplyAgentSettingsApi {
+  let value: AutoReplyAgentConfigVM = {
+    adminId: 'mock-admin', configVersion: 0, configDigest: 'mock-default', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString(),
+    enabled: true,
+    systemPrompt: '你是闲鱼卖家面向买家的自动回复 Agent。只根据工具事实回答，不确定时转人工。',
+    userPromptTemplate: '{{buyerMessage}}',
+    maxLoops: 4,
+    maxToolCalls: 8,
+    toolTimeoutMs: 10_000,
+    totalTimeoutMs: 60_000,
+    maxHistory: 20,
+    maxReplyLength: 1_000,
+    maxReplySegmentChars: 300,
+    maxReplySegments: 4,
+    replySegmentDelayMs: 800,
+    debounceMs: 2_000,
+    allowPaidOrderReply: false,
+    sendMode: 'simulate',
+  };
+  return {
+    async get() { return { ...value }; },
+    async update(input) {
+      if (value.configVersion !== input.expectedVersion) throw new Error('版本冲突');
+      value = { ...value, ...input.patch, configVersion: value.configVersion + 1, configDigest: `mock-${value.configVersion + 1}`, updatedAt: new Date().toISOString() };
+      return { ...value };
+    },
   };
 }

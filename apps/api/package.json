@@ -22,6 +22,7 @@
     "test:xianyu-im-read": "node --import tsx --test scripts/xianyu-im-read.test.ts",
     "test:auto-reply": "npm run build && node scripts/auto-reply-smoke.mjs",
     "test:auto-reply:e2e": "node --import tsx --test scripts/auto-reply-e2e.test.ts",
+    "test:auto-reply:settings": "node --import tsx --test scripts/auto-reply-agent-settings.test.ts",
     "test:auto-reply:postgres": "npm run build && node scripts/auto-reply-postgres-smoke.mjs",
     "test:auto-reply:unit": "node --import tsx --test scripts/auto-reply.test.ts",
     "smoke": "npm run build && node scripts/smoke.mjs",

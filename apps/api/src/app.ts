@@ -22,6 +22,7 @@ import { ApiKeyCredentialService } from './credential-store.js';
 import { DashboardService } from './dashboard.js';
 import { AutoReplyService, ExternalAutoReplySender } from './auto-reply.js';
 import { ModelAutoReplyGenerator } from './auto-reply-model.js';
+import { AutoReplyAgentSettingsService, resolveAutoReplyAgentDefaults } from './auto-reply-agent-settings.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -37,6 +38,7 @@ export interface AppRuntime {
   dashboard: DashboardService;
   messages: MessageService;
   autoReply: AutoReplyService;
+  autoReplyAgentSettings: AutoReplyAgentSettingsService;
   redisRealtime?: RedisConversationEventBridge;
   workspace: WorkspaceService;
   workspaceRuntime: WorkspaceRuntime;
@@ -105,6 +107,11 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       if (!xianyuIm) throw new Error('XIANYU_IM_NOT_READY');
       return xianyuIm.sendExternalText(input.adminId, input.accountId, input.conversation.id, input.text, input.requestId, input.traceId);
     }),
+  });
+  const autoReplyAgentSettings = new AutoReplyAgentSettingsService(store, resolveAutoReplyAgentDefaults(config), async (input) => {
+    const auditId = createId();
+    await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), createdAt: new Date().toISOString() });
+    return auditId;
   });
   let xianyu: XianyuMtopClient;
   let productSync: ProductSyncService;
@@ -178,7 +185,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, orders, products, productSync, credentials, apiKeyCredentials, dashboard, messages, autoReply, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuIm,
+    config, store, auth, accounts, coupons, orders, products, productSync, credentials, apiKeyCredentials, dashboard, messages, autoReply, autoReplyAgentSettings, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuIm,
     server,
     async listen() {
       await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));
@@ -352,6 +359,26 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
 
   if (ctx.path === '/api/v1/dashboard/snapshot' && ctx.method === 'GET') {
     return { statusCode: 200, body: success(ctx, await dashboard.getSnapshot(authContext.admin.id)).body };
+  }
+
+  if (ctx.path === '/api/v1/settings/agent' && ctx.method === 'GET') {
+    return { statusCode: 200, body: success(ctx, await runtime.autoReplyAgentSettings.get(authContext.admin.id)).body };
+  }
+  if (ctx.path === '/api/v1/settings/agent' && ctx.method === 'PATCH') {
+    const key = requireIdempotencyKey(ctx);
+    const result = await idempotent(store, {
+      scope: 'settings:agent',
+      key,
+      fingerprint: fingerprint(ctx.method, ctx.path, ctx.body),
+      traceId: ctx.traceId,
+      handler: async () => {
+        const expectedVersion = Number(ctx.body.expectedVersion ?? ctx.body.configVersion ?? 0);
+        const patch = readAutoReplyAgentPatch(ctx.body);
+        const updated = await runtime.autoReplyAgentSettings.update({ adminId: authContext.admin.id, expectedVersion, patch, requestId: ctx.requestId, traceId: ctx.traceId });
+        return success(ctx, updated);
+      },
+    });
+    return { statusCode: result.statusCode, body: result.body };
   }
 
   const credentialCollectionPath = ctx.path === '/api/v1/credentials';
@@ -1131,6 +1158,17 @@ function firstProfileString(root: unknown, keys: string[]): string | undefined {
 function readCredentialMetadata(value: unknown): Record<string, string> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, item]) => typeof item === 'string').map(([key, item]) => [key, String(item)]));
+}
+
+function readAutoReplyAgentPatch(body: Record<string, unknown>): import('./domain.js').AutoReplyAgentConfigPatch {
+  const patch: import('./domain.js').AutoReplyAgentConfigPatch = {};
+  const booleanFields = ['enabled', 'allowPaidOrderReply'] as const;
+  const stringFields = ['systemPrompt', 'userPromptTemplate', 'sendMode'] as const;
+  const numberFields = ['maxLoops', 'maxToolCalls', 'toolTimeoutMs', 'totalTimeoutMs', 'maxHistory', 'maxReplyLength', 'maxReplySegmentChars', 'maxReplySegments', 'replySegmentDelayMs', 'debounceMs'] as const;
+  for (const field of booleanFields) if (typeof body[field] === 'boolean') patch[field] = body[field] as never;
+  for (const field of stringFields) if (typeof body[field] === 'string') patch[field] = body[field] as never;
+  for (const field of numberFields) if (typeof body[field] === 'number') patch[field] = body[field] as never;
+  return patch;
 }
 
 function readCouponMetadata(value: unknown): import('./domain.js').CouponBatchMetadata | undefined {

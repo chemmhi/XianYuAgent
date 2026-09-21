@@ -31,3 +31,35 @@ export interface SettingsState {
   error: string | null;
   lastAction?: string;
 }
+
+export type AutoReplyAgentSendMode = 'simulate' | 'live';
+
+export interface AutoReplyAgentConfigVM {
+  enabled: boolean;
+  systemPrompt: string;
+  userPromptTemplate: string;
+  maxLoops: number;
+  maxToolCalls: number;
+  toolTimeoutMs: number;
+  totalTimeoutMs: number;
+  maxHistory: number;
+  maxReplyLength: number;
+  maxReplySegmentChars: number;
+  maxReplySegments: number;
+  replySegmentDelayMs: number;
+  debounceMs: number;
+  allowPaidOrderReply: boolean;
+  sendMode: AutoReplyAgentSendMode;
+  adminId: string;
+  configVersion: number;
+  configDigest: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AutoReplyAgentSettingsState {
+  phase: SettingsLoadPhase;
+  data: AutoReplyAgentConfigVM | null;
+  error: string | null;
+  lastAction?: string;
+}

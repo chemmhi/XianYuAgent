@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import type { AutoReplyAgentConfig } from './domain.js';
 
 export type AgentRuntimeMode = 'pi' | 'in-process';
 export type AutoReplySendMode = 'simulate' | 'live';
@@ -21,6 +22,8 @@ export interface AppConfig {
   modelName?: string;
   modelTimeoutMs: number;
   autoReplyModelEnabled?: boolean;
+  /** Buyer-facing Auto Reply Agent config; kept separate from Workspace Agent config. */
+  autoReplyAgent?: Partial<AutoReplyAgentConfig>;
   credentialEncryptionKey: string;
   autoReplySendMode?: AutoReplySendMode;
   autoReplyTestBuyerNames?: string[];

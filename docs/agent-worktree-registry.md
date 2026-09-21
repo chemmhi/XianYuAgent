@@ -59,6 +59,7 @@
 | `root` | `message-dedupe-fix` | `fix/message-dedupe` | `F:\ChenHai\Project\XianYuAgent-message-dedupe-fix` | Codex `/root` | `2026-09-21 12:00:00 +08:00` | `CLEANED` | `1b459a4` | `2026-09-21 11:45:00 +08:00` | 统一历史同步与实时 push 的规范消息号，补 parser、历史导入和原始 push 幂等回归；独立根因/UI 复核通过，定向与全量测试通过；worktree 与分支已清理。 |
 | `root` | `auto-reply-ai` | `feat/auto-reply-ai` | `F:\ChenHai\Project\XianYuAgent-auto-reply-ai` | Codex `/root` | `2026-09-21 12:10:00 +08:00` | `CLEANED` | `baf7e4d78327d52ba11fe8c73fd40cf8b13836d1` | `2026-09-21 12:12:20 +08:00` | 独立复审通过并在 merge lock 内合入；master 上模型单测 18/18、自动回复 E2E 1/1、API 全量 19/19、Web 39/39、构建、Compose 配置和 diff check 均通过；临时 worktree 与分支已清理。 |
 | `root` | `auto-reply-agent` | `feat/auto-reply-agent` | `F:\\ChenHai\\Project\\XianYuAgent-auto-reply` | Codex `/root` | `2026-09-21 12:20:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 自动回复 Agent 设计已确认并归档到 docs/agent/auto-reply；尚未进入编码。 |
+| `root/auto_reply_settings` | `auto-reply-agent-settings` | `codex/auto-reply-settings` | `F:\\ChenHai\\Project\\XianYuAgent-auto-reply-settings` | Codex `/root` delegated agent | `2026-09-21 13:05:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 已完成独立自动回复 Agent SettingsSection API/迁移、中文配置面板与 Chrome/CDP E2E；API/Web 定向测试和版本冲突验证通过。待主 agent 注入 configProvider 并复审合并。 |
 
 ## 主工作区
 

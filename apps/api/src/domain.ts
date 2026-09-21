@@ -456,6 +456,40 @@ export interface AutoReplyRunRecord {
   updatedAt: string;
 }
 
+/**
+ * Admin-configurable buyer-facing Auto Reply Agent settings.
+ * This type is intentionally separate from Workspace Agent settings.
+ */
+export type AutoReplyAgentSendMode = 'simulate' | 'live';
+
+export interface AutoReplyAgentConfig {
+  enabled: boolean;
+  systemPrompt: string;
+  userPromptTemplate: string;
+  maxLoops: number;
+  maxToolCalls: number;
+  toolTimeoutMs: number;
+  totalTimeoutMs: number;
+  maxHistory: number;
+  maxReplyLength: number;
+  maxReplySegmentChars: number;
+  maxReplySegments: number;
+  replySegmentDelayMs: number;
+  debounceMs: number;
+  allowPaidOrderReply: boolean;
+  sendMode: AutoReplyAgentSendMode;
+}
+
+export interface AutoReplyAgentConfigRecord extends AutoReplyAgentConfig {
+  adminId: string;
+  configVersion: number;
+  configDigest: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AutoReplyAgentConfigPatch = Partial<AutoReplyAgentConfig>;
+
 export interface ConversationEventRecord {
   eventId: string;
   conversationId: string;
@@ -664,6 +698,8 @@ export interface Store {
   updateCredentialRef(input: { adminId: string; credentialId: string; expectedVersion: number; provider?: string; alias?: string; label?: string; metadata?: Record<string, string> }): Promise<CredentialRefRecord | undefined>;
   rotateCredentialRef(input: { adminId: string; credentialId: string; expectedVersion: number; secretCiphertext: string; fingerprint: string }): Promise<CredentialRefRecord | undefined>;
   updateCredentialRefStatus(input: { adminId: string; credentialId: string; expectedVersion: number; status: CredentialRefStatus }): Promise<CredentialRefRecord | undefined>;
+  getAutoReplyAgentConfig(adminId: string): Promise<AutoReplyAgentConfigRecord | undefined>;
+  upsertAutoReplyAgentConfig(input: { adminId: string; expectedVersion: number; patch: AutoReplyAgentConfigPatch; config: AutoReplyAgentConfig; configDigest: string }): Promise<AutoReplyAgentConfigRecord | undefined>;
   getIdempotency(scope: string, key: string): Promise<IdempotencyRecord | undefined>;
   beginIdempotency(record: IdempotencyRecord): Promise<void>;
   abortIdempotency(scope: string, key: string): Promise<void>;
