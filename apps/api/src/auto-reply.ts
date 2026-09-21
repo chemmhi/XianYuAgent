@@ -20,7 +20,7 @@ export interface AutoReplyContext {
 }
 
 export interface AutoReplyGenerator {
-  generate(input: { context: AutoReplyContext; classification: AutoReplyClassification }): Promise<string | undefined>;
+  generate(input: { adminId?: string; context: AutoReplyContext; classification: AutoReplyClassification }): Promise<string | undefined>;
 }
 
 export interface AutoReplySendInput {
@@ -108,8 +108,12 @@ export interface AutoReplyServiceOptions {
   sendMode?: 'simulate' | 'live';
   testBuyerNames?: string[];
   allowPaidOrderReply?: boolean;
+  debounceMs?: number;
   maxHistory?: number;
   maxReplyLength?: number;
+  maxReplySegmentChars?: number;
+  maxReplySegments?: number;
+  replySegmentDelayMs?: number;
   classifier?: RuleBasedIntentClassifier;
   generator?: AutoReplyGenerator;
   sender?: AutoReplySender;
@@ -120,11 +124,16 @@ export class AutoReplyService {
   private readonly sendMode: 'simulate' | 'live';
   private readonly testBuyerNames: string[];
   private readonly allowPaidOrderReply: boolean;
+  private readonly debounceMs: number;
   private readonly maxHistory: number;
   private readonly maxReplyLength: number;
+  private readonly maxReplySegmentChars: number;
+  private readonly maxReplySegments: number;
+  private readonly replySegmentDelayMs: number;
   private readonly classifier: RuleBasedIntentClassifier;
   private readonly generator: AutoReplyGenerator;
   private readonly sender: AutoReplySender;
+  private readonly lastAcceptedAt = new Map<string, number>();
 
   constructor(
     private readonly store: Store,
@@ -136,8 +145,12 @@ export class AutoReplyService {
     this.sendMode = options.sendMode ?? 'simulate';
     this.testBuyerNames = [...new Set((options.testBuyerNames ?? []).map(normalizeBuyerName).filter((value): value is string => Boolean(value)))];
     this.allowPaidOrderReply = options.allowPaidOrderReply ?? false;
+    this.debounceMs = Math.max(0, Math.min(options.debounceMs ?? 2_000, 30_000));
     this.maxHistory = Math.max(1, Math.min(options.maxHistory ?? 20, 50));
     this.maxReplyLength = Math.max(20, Math.min(options.maxReplyLength ?? 500, 2_000));
+    this.maxReplySegmentChars = Math.max(40, Math.min(options.maxReplySegmentChars ?? 180, 500));
+    this.maxReplySegments = Math.max(1, Math.min(options.maxReplySegments ?? 4, 8));
+    this.replySegmentDelayMs = Math.max(0, Math.min(options.replySegmentDelayMs ?? 350, 5_000));
     this.classifier = options.classifier ?? new RuleBasedIntentClassifier();
     this.generator = options.generator ?? new TemplateAutoReplyGenerator();
     this.sender = options.sender ?? new NoopAutoReplySender();
@@ -181,6 +194,17 @@ export class AutoReplyService {
 
       const classification = this.classifier.classify(inboundMessage.bodyText);
       await this.store.updateAutoReplyRun(run.id, { intent: classification.intent, decision: classification.decision, status: 'classified', riskFlags: classification.riskFlags });
+      if (classification.decision === 'replied') {
+        const debounceKey = `${input.adminId}:${conversation.id}`;
+        const now = Date.now();
+        const lastAcceptedAt = this.lastAcceptedAt.get(debounceKey);
+        if (this.debounceMs > 0 && lastAcceptedAt !== undefined && now - lastAcceptedAt < this.debounceMs) {
+          const updated = await this.store.updateAutoReplyRun(run.id, { status: 'skipped', decision: 'skipped', failureCode: 'AUTO_REPLY_DEBOUNCED', riskFlags: ['debounced'] });
+          await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'skipped', reason: 'AUTO_REPLY_DEBOUNCED', debounceMs: this.debounceMs });
+          return { run: updated ?? run, inboundMessage };
+        }
+        this.lastAcceptedAt.set(debounceKey, now);
+      }
       const context = await this.buildContext(input.adminId, conversation, inboundMessage);
       const contextDigest = digestJson({ conversationId: conversation.id, productId: context.product?.id, orderRefs: context.orders.map((order) => order.orderNo), history: context.recentMessages.map((message) => ({ direction: message.direction, senderRole: message.senderRole, createdAt: message.createdAt, bodyText: message.bodyText ?? '' })) });
       await this.store.updateAutoReplyRun(run.id, { status: 'context_loaded', contextDigest, productId: context.product?.id, orderRefs: context.orders.map((order) => order.orderNo) });
@@ -193,7 +217,7 @@ export class AutoReplyService {
         return { run: updated ?? run, inboundMessage, classification, context };
       }
 
-      const reply = normalizeReply(await this.generator.generate({ context, classification }), this.maxReplyLength);
+      const reply = normalizeReply(await this.generator.generate({ adminId: input.adminId, context, classification }), this.maxReplyLength);
       if (!reply) {
         const updated = await this.store.updateAutoReplyRun(run.id, { status: 'failed', decision: 'failed', failureCode: 'REPLY_EMPTY' });
         await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'failed', intent: classification.intent, failureCode: 'REPLY_EMPTY' });
@@ -207,14 +231,30 @@ export class AutoReplyService {
 
       const replyDigest = digestJson({ reply });
       await this.store.updateAutoReplyRun(run.id, { status: 'generated', replyDigest });
-      const sent = await this.sender.send({ adminId: input.adminId, accountId: conversation.accountId, requestId, conversation, recipientRef: conversation.buyerRef, text: reply, mode: this.sendMode, traceId });
-      await this.store.updateAutoReplyRun(run.id, { status: 'simulated', senderOutcome: sent.outcome });
-      const outbound = await this.messages.createMessage({ adminId: input.adminId, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: reply, externalMessageRef: sent.externalMessageRef ?? (sent.outcome === 'simulated' ? `simulated:auto-reply:${inboundMessage.id}` : undefined), source: 'ai', productRef: context.product?.id, riskFlags: [...classification.riskFlags, ...(sent.outcome === 'simulated' ? ['simulated_send'] : [])], requestId, traceId });
-      const updated = await this.store.updateAutoReplyRun(run.id, { status: 'persisted', decision: 'replied', senderOutcome: sent.outcome, outboundMessageId: outbound.message.messageId });
-      await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'replied', intent: classification.intent, senderOutcome: sent.outcome, outboundMessageId: outbound.message.messageId, contextDigest, replyDigest });
-      return { run: updated ?? run, inboundMessage, outboundMessage: await this.findMessage(input.adminId, input.conversationId, outbound.message.messageId), classification, context };
+      const segments = splitReplyIntoSegments(reply, this.maxReplySegmentChars, this.maxReplySegments);
+      let lastOutboundMessageId: string | undefined;
+      let lastOutcome: Awaited<ReturnType<AutoReplySender['send']>>['outcome'] = 'simulated';
+      for (let index = 0; index < segments.length; index += 1) {
+        if (index > 0 && this.replySegmentDelayMs > 0) await delay(this.replySegmentDelayMs);
+        const segment = segments[index]!;
+        const sent = await this.sender.send({ adminId: input.adminId, accountId: conversation.accountId, requestId, conversation, recipientRef: conversation.buyerRef, text: segment, mode: this.sendMode, traceId });
+        lastOutcome = sent.outcome;
+        if (sent.outcome === 'known_failure' || sent.outcome === 'unknown') throw new Error(sent.outcome === 'unknown' ? 'AUTO_REPLY_SEND_UNKNOWN' : 'AUTO_REPLY_SEND_FAILED');
+        const simulatedRef = sent.outcome === 'simulated' ? `${sent.externalMessageRef ?? `simulated:auto-reply:${inboundMessage.id}`}:${index + 1}` : sent.externalMessageRef;
+        const outbound = await this.messages.createMessage({ adminId: input.adminId, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: segment, externalMessageRef: simulatedRef, source: 'ai', productRef: context.product?.id, riskFlags: [...classification.riskFlags, ...(sent.outcome === 'simulated' ? ['simulated_send'] : []), ...(segments.length > 1 ? [`reply_segment_${index + 1}_of_${segments.length}`] : [])], requestId, traceId });
+        lastOutboundMessageId = outbound.message.messageId;
+      }
+      await this.store.updateAutoReplyRun(run.id, { status: 'simulated', senderOutcome: lastOutcome });
+      const updated = await this.store.updateAutoReplyRun(run.id, { status: 'persisted', decision: 'replied', senderOutcome: lastOutcome, outboundMessageId: lastOutboundMessageId });
+      await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'replied', intent: classification.intent, senderOutcome: lastOutcome, outboundMessageId: lastOutboundMessageId, segmentCount: segments.length, contextDigest, replyDigest });
+      return { run: updated ?? run, inboundMessage, outboundMessage: lastOutboundMessageId ? await this.findMessage(input.adminId, input.conversationId, lastOutboundMessageId) : undefined, classification, context };
     } catch (error) {
       const failureCode = toFailureCode(error);
+      if (failureCode === 'AGENT_HANDOFF') {
+        const updated = await this.store.updateAutoReplyRun(run.id, { status: 'handoff', decision: 'handoff', failureCode });
+        await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'handoff', intent: run.intent, failureCode });
+        return { run: updated ?? run, inboundMessage };
+      }
       const updated = await this.store.updateAutoReplyRun(run.id, { status: 'failed', decision: 'failed', failureCode });
       await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'failed', failureCode });
       return { run: updated ?? run, inboundMessage };
@@ -278,6 +318,29 @@ function toFailureCode(error: unknown): string {
   if (typeof candidate?.code === 'string' && /^[A-Z0-9_:-]{1,64}$/.test(candidate.code)) return candidate.code;
   if (error instanceof Error && /^[A-Z0-9_:-]{1,64}$/.test(error.message)) return error.message;
   return 'AUTO_REPLY_FAILED';
+}
+
+function splitReplyIntoSegments(value: string, maxChars: number, maxSegments: number): string[] {
+  if (value.length <= maxChars) return [value];
+  const segments: string[] = [];
+  let remaining = value.trim();
+  while (remaining && segments.length < maxSegments) {
+    if (remaining.length <= maxChars) { segments.push(remaining); break; }
+    const window = remaining.slice(0, maxChars + 1);
+    const breakAt = Math.max(window.lastIndexOf('\n'), window.lastIndexOf('。'), window.lastIndexOf('！'), window.lastIndexOf('？'), window.lastIndexOf('!'), window.lastIndexOf('?'), window.lastIndexOf('；'), window.lastIndexOf(';'), window.lastIndexOf('，'), window.lastIndexOf(','), window.lastIndexOf(' '));
+    const cut = breakAt >= Math.floor(maxChars * 0.55) ? breakAt + 1 : maxChars;
+    segments.push(remaining.slice(0, cut).trim());
+    remaining = remaining.slice(cut).trim();
+  }
+  if (remaining) {
+    const last = segments.length - 1;
+    if (last >= 0) segments[last] = `${segments[last]!.slice(0, Math.max(1, maxChars - 1)).trim()}…`;
+  }
+  return segments.filter(Boolean);
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function normalizeBuyerName(value: string | undefined): string | undefined {

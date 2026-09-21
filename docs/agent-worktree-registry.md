@@ -58,6 +58,7 @@
 | `root/listener_ready` | `auto-reply-smoke-race` | `codex/auto-reply-smoke-race` | `F:\ChenHai\Project\XianYuAgent-auto-reply-smoke-race` | Codex `/root` delegated agent | `2026-09-21 10:59:00 +08:00` | `MERGED` | `b59f026` | `-` | 更新自动回复 smoke 断言以匹配新的幂等语义：重复 push 返回同一 run、AI 出站保持单条、无真实发送；完整 API/Web 测试、构建和 Compose 配置通过。 |
 | `root` | `message-dedupe-fix` | `fix/message-dedupe` | `F:\ChenHai\Project\XianYuAgent-message-dedupe-fix` | Codex `/root` | `2026-09-21 12:00:00 +08:00` | `CLEANED` | `1b459a4` | `2026-09-21 11:45:00 +08:00` | 统一历史同步与实时 push 的规范消息号，补 parser、历史导入和原始 push 幂等回归；独立根因/UI 复核通过，定向与全量测试通过；worktree 与分支已清理。 |
 | `root` | `auto-reply-ai` | `feat/auto-reply-ai` | `F:\ChenHai\Project\XianYuAgent-auto-reply-ai` | Codex `/root` | `2026-09-21 12:10:00 +08:00` | `CLEANED` | `baf7e4d78327d52ba11fe8c73fd40cf8b13836d1` | `2026-09-21 12:12:20 +08:00` | 独立复审通过并在 merge lock 内合入；master 上模型单测 18/18、自动回复 E2E 1/1、API 全量 19/19、Web 39/39、构建、Compose 配置和 diff check 均通过；临时 worktree 与分支已清理。 |
+| `root/buyer_agent_impl` | `auto-reply-buyer-agent` | `codex/buyer-agent-impl` | `F:\ChenHai\Project\XianYuAgent-buyer-agent` | Codex `/root` delegated agent | `2026-09-21 13:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 买家侧独立 Agent：四个只读工具、tool-call loop、环境配置；真实 push→tool call→simulate→落库 E2E 通过；不修改 Settings 页面/API。 |
 
 ## 主工作区
 

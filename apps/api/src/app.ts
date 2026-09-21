@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { Duplex } from 'node:stream';
 import { WebSocket, WebSocketServer } from 'ws';
 import { loadConfig, type AppConfig } from './config.js';
+import { resolveAutoReplyAgentConfig } from './auto-reply-agent-config.js';
 import type { AuthContext } from './services.js';
 import { AccountService, AuthService, CouponService, CredentialService, OrderService, ProductService, ProductSyncService, ServiceError, idempotent } from './services.js';
 import { createIds, failure, fingerprint, parseCookies, readBody, setCookie, success, writeJson, type RequestContext } from './http.js';
@@ -21,7 +22,7 @@ import { OpenAICompatibleModelClient, PiRuntimeAdapter, type ModelClient } from 
 import { ApiKeyCredentialService } from './credential-store.js';
 import { DashboardService } from './dashboard.js';
 import { AutoReplyService, ExternalAutoReplySender } from './auto-reply.js';
-import { ModelAutoReplyGenerator } from './auto-reply-model.js';
+import { ToolCallingAutoReplyAgent } from './auto-reply-agent.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -53,6 +54,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     throw new Error('AUTO_REPLY_LIVE_REQUIRES_BUYER_ALLOWLIST');
   }
   const store = createStore(config);
+  const autoReplyAgentConfig = config.autoReplyAgent ?? resolveAutoReplyAgentConfig();
   const modelClient = createConfiguredModelClient(config);
   const autoReplyModelClient = config.autoReplyModelEnabled === false ? undefined : modelClient;
   const auth = new AuthService(store, config);
@@ -100,7 +102,13 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
   }, {
     sendMode: config.autoReplySendMode ?? 'simulate',
     testBuyerNames: config.autoReplyTestBuyerNames,
-    generator: autoReplyModelClient ? new ModelAutoReplyGenerator(autoReplyModelClient) : undefined,
+    debounceMs: autoReplyAgentConfig.debounceMs,
+    maxHistory: autoReplyAgentConfig.maxHistory,
+    maxReplyLength: autoReplyAgentConfig.maxReplyLength,
+    maxReplySegmentChars: autoReplyAgentConfig.maxReplySegmentChars,
+    maxReplySegments: autoReplyAgentConfig.maxReplySegments,
+    replySegmentDelayMs: autoReplyAgentConfig.replySegmentDelayMs,
+    generator: autoReplyModelClient ? new ToolCallingAutoReplyAgent(store, autoReplyModelClient, autoReplyAgentConfig) : undefined,
     sender: new ExternalAutoReplySender(async (input) => {
       if (!xianyuIm) throw new Error('XIANYU_IM_NOT_READY');
       return xianyuIm.sendExternalText(input.adminId, input.accountId, input.conversation.id, input.text, input.requestId, input.traceId);

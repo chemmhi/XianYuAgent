@@ -5,15 +5,38 @@ export const DEFAULT_PI_BASE_URL = 'https://api.openai.com/v1';
 export const DEFAULT_PI_MODEL = 'gpt-4o-mini';
 export const DEFAULT_PI_TIMEOUT_MS = 30_000;
 
-export type ModelMessageRole = 'system' | 'user' | 'assistant';
+export type ModelMessageRole = 'system' | 'user' | 'assistant' | 'tool';
+
+export interface ModelToolCall {
+  id: string;
+  type: 'function';
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+export interface ModelToolDefinition {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
 
 export interface ModelMessage {
   role: ModelMessageRole;
   content: string;
+  name?: string;
+  toolCallId?: string;
+  toolCalls?: ModelToolCall[];
 }
 
 export interface ModelCompletionRequest {
   messages: ModelMessage[];
+  tools?: ModelToolDefinition[];
+  toolChoice?: 'auto' | 'none' | { type: 'function'; function: { name: string } };
   signal?: AbortSignal;
 }
 
@@ -21,6 +44,7 @@ export interface ModelCompletionResult {
   content: string;
   model: string;
   usage?: Record<string, unknown>;
+  toolCalls?: ModelToolCall[];
 }
 
 export interface ModelClient {
@@ -90,7 +114,18 @@ export class OpenAICompatibleModelClient implements ModelClient {
           authorization: `Bearer ${this.options.apiKey}`,
           'content-type': 'application/json',
         },
-        body: JSON.stringify({ model: this.options.model, messages: input.messages }),
+        body: JSON.stringify({
+          model: this.options.model,
+          messages: input.messages.map((message) => ({
+            role: message.role,
+            content: message.content,
+            ...(message.name ? { name: message.name } : {}),
+            ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
+            ...(message.toolCalls ? { tool_calls: message.toolCalls } : {}),
+          })),
+          ...(input.tools?.length ? { tools: input.tools } : {}),
+          ...(input.toolChoice ? { tool_choice: input.toolChoice } : {}),
+        }),
         signal: controller.signal,
       });
 
@@ -105,13 +140,15 @@ export class OpenAICompatibleModelClient implements ModelClient {
         throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model provider returned invalid JSON');
       }
 
+      const toolCalls = extractCompletionToolCalls(payload);
       const content = extractCompletionContent(payload);
-      if (!content) throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model provider returned empty content');
+      if (!content && toolCalls.length === 0) throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model provider returned empty content');
       const record = isRecord(payload) ? payload : undefined;
       return {
         content,
         model: typeof record?.model === 'string' && record.model.trim() ? record.model : this.options.model,
         usage: isRecord(record?.usage) ? record.usage : undefined,
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       };
     } catch (error) {
       if (error instanceof PiModelClientError) throw error;
@@ -344,6 +381,19 @@ function extractCompletionContent(payload: unknown): string {
     if (isRecord(part) && typeof part.text === 'string') return part.text;
     return '';
   }).join('').trim();
+}
+
+function extractCompletionToolCalls(payload: unknown): ModelToolCall[] {
+  if (!isRecord(payload) || !Array.isArray(payload.choices) || payload.choices.length === 0) return [];
+  const choice = isRecord(payload.choices[0]) ? payload.choices[0] : undefined;
+  const message = choice && isRecord(choice.message) ? choice.message : undefined;
+  if (!Array.isArray(message?.tool_calls)) return [];
+  return message.tool_calls.flatMap((candidate): ModelToolCall[] => {
+    if (!isRecord(candidate) || candidate.type !== 'function' || typeof candidate.id !== 'string') return [];
+    const fn = isRecord(candidate.function) ? candidate.function : undefined;
+    if (!fn || typeof fn.name !== 'string' || typeof fn.arguments !== 'string') return [];
+    return [{ id: candidate.id, type: 'function', function: { name: fn.name, arguments: fn.arguments } }];
+  });
 }
 
 function redactSensitiveText(value: string, outputLimit: number, secrets: string[] = []): string {

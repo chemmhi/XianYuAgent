@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { resolveAutoReplyAgentConfig, type AutoReplyAgentConfig } from './auto-reply-agent-config.js';
 
 export type AgentRuntimeMode = 'pi' | 'in-process';
 export type AutoReplySendMode = 'simulate' | 'live';
@@ -24,6 +25,7 @@ export interface AppConfig {
   credentialEncryptionKey: string;
   autoReplySendMode?: AutoReplySendMode;
   autoReplyTestBuyerNames?: string[];
+  autoReplyAgent?: AutoReplyAgentConfig;
 }
 
 export const DEFAULT_DATABASE_URL = 'postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/xianyu_agent';
@@ -41,6 +43,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const modelName = firstDefined(env.MODEL, env.OPENAI_MODEL, env.PI_MODEL);
   const autoReplySendMode: AutoReplySendMode = env.AUTO_REPLY_SEND_MODE?.trim().toLowerCase() === 'live' ? 'live' : 'simulate';
   const autoReplyTestBuyerNames = parseBuyerNames(env.AUTO_REPLY_TEST_BUYER_NAMES);
+  const autoReplyAgent = resolveAutoReplyAgentConfig(env);
   if (autoReplySendMode === 'live' && autoReplyTestBuyerNames.length === 0) {
     throw new Error('AUTO_REPLY_LIVE_REQUIRES_BUYER_ALLOWLIST');
   }
@@ -70,6 +73,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY?.trim() || 'development-only-credential-key-change-me',
     autoReplySendMode,
     autoReplyTestBuyerNames,
+    autoReplyAgent,
   };
 }
 
