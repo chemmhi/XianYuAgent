@@ -20,6 +20,7 @@ export interface AppConfig {
   modelBaseUrl?: string;
   modelName?: string;
   modelTimeoutMs: number;
+  autoReplyModelEnabled?: boolean;
   credentialEncryptionKey: string;
   autoReplySendMode?: AutoReplySendMode;
   autoReplyTestBuyerNames?: string[];
@@ -65,6 +66,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     modelBaseUrl,
     modelName,
     modelTimeoutMs: positiveNumber(env.MODEL_TIMEOUT_MS, 60_000),
+    autoReplyModelEnabled: asBoolean(env.AUTO_REPLY_MODEL_ENABLED, Boolean(modelApiKey && modelBaseUrl && modelName)),
     credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY?.trim() || 'development-only-credential-key-change-me',
     autoReplySendMode,
     autoReplyTestBuyerNames,

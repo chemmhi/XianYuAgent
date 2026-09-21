@@ -428,3 +428,13 @@
 | S5-R76 | 前端 / 鉴权 | 在线聊天页面在 API 重启后是否能恢复旧 CSRF token 并安全重放发送请求 | root + csrf_send_fix | PASS | `apps/web/src/api/http.ts`、`apps/web/src/api/http.test.ts`；403 `CSRF_INVALID` → session refresh → 单次重试，保留幂等键；Web 38 files / 117 tests、typecheck、build |
 | S5-R77 | 业务 / 白名单 | 真实 push 缺少买家昵称时是否会因身份缺失而被错误跳过 | root + listener_ready | PASS（受控回归） | `apps/api/src/xianyu-im-service.ts`、`apps/api/scripts/auto-reply.test.ts`；按 external conversation ref 补全身份后 allowlist 通过，run persisted |
 | S5-R78 | 业务 / 事件幂等 | 历史同步先落库后，真实 push 是否仍会触发一次自动回复 | root + listener_ready | PASS（受控回归） | `apps/api/src/xianyu-im-service.ts`、`apps/api/scripts/auto-reply.test.ts`；`created=false` 的 push 继续调用 `processInbound`，同一 inbound idempotent 且仅一条 outbound |
+
+### 2026-09-21：自动回复模型 Provider 接入复审
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R79 | 架构 / 配置 | 自动回复是否复用 Workspace 的服务端模型配置与客户端，而不是复制一套 Provider | root + workspace_ai_scan | PASS | `apps/api/src/app.ts` 的 `createConfiguredModelClient`；复用 `API_KEY/BASE_URL/MODEL/MODEL_TIMEOUT_MS`，同一 `ModelClient` 注入 Workspace Runtime 与 `ModelAutoReplyGenerator` |
+| S5-R80 | 业务 / 安全 | 规则意图和高风险门禁是否仍在模型调用前执行，模型是否只接收裁剪后的结构化事实 | root + auto_reply_provider_scan | PASS | `apps/api/src/auto-reply.ts`、`apps/api/src/auto-reply-model.ts`；system/user 双消息、商品/订单/会话分层 facts、历史与字段长度限制、敏感输出拦截 |
+| S5-R81 | 质量 / 失败恢复 | Provider 成功、配置缺失、HTTP 失败是否分别落到模型回复、模板回复和失败不发送 | root + listener_ready | PASS（受控环境） | `apps/api/scripts/auto-reply.test.ts`：模型生成持久化、模型上下文裁剪、显式关闭后的模板回退、503 失败 run、不产生 outbound；`npm --workspace apps/api run test:auto-reply:unit` 18/18 |
+
+本轮结论：自动回复已接入与 Workspace 一致的本地环境变量模型配置；配置完整时使用共享模型客户端，配置缺失时保留模板生成，Provider 失败时不回退错误模板、不发送买家消息，仅将安全错误码落库。Settings 页面凭证解析、真实 live 自动化归档、Outbox/unknown 恢复和离线模型评测仍保持后续门禁。
