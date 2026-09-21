@@ -50,7 +50,8 @@ export interface AutoReplyAgentConfigVM {
   debounceMs: number;
   allowPaidOrderReply: boolean;
   sendMode: AutoReplyAgentSendMode;
-  adminId: string;
+  accountId: string;
+  updatedByAdminId?: string;
   configVersion: number;
   configDigest: string;
   createdAt: string;

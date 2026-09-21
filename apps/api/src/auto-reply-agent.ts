@@ -38,7 +38,7 @@ export interface AutoReplyAgentTrace {
 }
 
 export interface ToolCallingAutoReplyAgentOptions {
-  configProvider?: (adminId: string) => Promise<AutoReplyAgentConfig | undefined>;
+  configProvider?: (adminId: string, accountId: string) => Promise<AutoReplyAgentConfig | undefined>;
   onTrace?: (trace: AutoReplyAgentTrace) => void | Promise<void>;
 }
 
@@ -91,7 +91,7 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
 
   async generate(input: { adminId?: string; context: AutoReplyContext; classification: AutoReplyClassification }): Promise<string | undefined> {
     if (!input.adminId) throw new AutoReplyAgentError('AGENT_ADMIN_REQUIRED');
-    const config = await this.options.configProvider?.(input.adminId) ?? this.config;
+    const config = await this.options.configProvider?.(input.adminId, input.context.conversation.accountId) ?? this.config;
     const messages: ModelMessage[] = [
       { role: 'system', content: config.systemPrompt },
       { role: 'user', content: renderUserPrompt(config.userPromptTemplate, this.toInitialContext(input.context, input.classification)) },
@@ -156,7 +156,7 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
     let cursor: string | undefined;
     for (let page = 0; page < 100; page += 1) {
       const result = await this.store.listConversations(adminId, { accountId: context.conversation.accountId, limit: 100, cursor });
-      conversations.push(...result.items.filter((item) => item.buyerRef === context.conversation.buyerRef));
+      conversations.push(...result.items.filter((item) => item.accountId === context.conversation.accountId && item.buyerRef === context.conversation.buyerRef));
       if (!result.hasMore || !result.nextCursor) break;
       cursor = result.nextCursor;
     }
@@ -176,16 +176,14 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
   private async getProductInfo(adminId: string, context: AutoReplyContext, requestedRef?: string): Promise<Record<string, unknown>> {
     const productRef = requestedRef?.trim() || context.conversation.itemRef;
     if (!productRef) return { ok: false, code: 'PRODUCT_REF_REQUIRED' };
-    // External Xianyu item refs are commonly numeric (for example
-    // `1078553391460`) while the local PostgreSQL product primary key is a
-    // UUID. Calling getProduct with an external ref makes PostgreSQL attempt
-    // to cast the value to uuid and abort the whole Agent run with 22P02.
-    // Only issue the primary-key lookup for UUID-shaped refs; external refs
-    // and titles are resolved through the scoped list query below.
+    // External Xianyu item refs are commonly numeric while the local product
+    // primary key is a UUID. Avoid sending an external ref through the UUID
+    // lookup path, which would make PostgreSQL reject the value before the
+    // scoped external-ref query gets a chance to resolve it.
     const byId = isUuid(productRef) ? await this.store.getProduct(adminId, productRef) : undefined;
     if (byId && byId.accountId === context.conversation.accountId) return { ok: true, product: safeProduct(byId) };
     const result = await this.store.listProducts(adminId, { accountId: context.conversation.accountId, keyword: productRef, page: 1, pageSize: 100 });
-    const product = result.items.find((item) => item.id === productRef || item.externalProductRef === productRef || item.title === productRef);
+    const product = result.items.find((item) => item.accountId === context.conversation.accountId && (item.id === productRef || item.externalProductRef === productRef || item.title === productRef));
     return product ? { ok: true, product: safeProduct(product) } : { ok: false, code: 'PRODUCT_NOT_FOUND', productRef };
   }
 
@@ -193,7 +191,7 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
     const orders: OrderRecord[] = [];
     for (let page = 1; page <= 1_000; page += 1) {
       const result = await this.store.listOrders(adminId, { accountId: context.conversation.accountId, page, pageSize: 100 });
-      orders.push(...result.items.filter((order) => order.buyerId === context.conversation.buyerRef || order.conversationId === context.conversation.id));
+      orders.push(...result.items.filter((order) => order.accountId === context.conversation.accountId && (order.buyerId === context.conversation.buyerRef || order.conversationId === context.conversation.id)));
       if (page >= result.totalPages || result.items.length === 0) break;
       if (page === 1_000) throw new AutoReplyAgentError('AGENT_ORDER_CONTEXT_INCOMPLETE');
     }
@@ -206,7 +204,7 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
     let total = 0;
     for (let page = 1; page <= 1_000; page += 1) {
       const result = await this.store.listProducts(adminId, { accountId: context.conversation.accountId, keyword: normalizedKeyword, page, pageSize: 100 });
-      products.push(...result.items);
+      products.push(...result.items.filter((product) => product.accountId === context.conversation.accountId));
       total = result.total;
       if (page >= result.totalPages || result.items.length === 0) break;
       if (page === 1_000) throw new AutoReplyAgentError('AGENT_PRODUCT_CONTEXT_INCOMPLETE');

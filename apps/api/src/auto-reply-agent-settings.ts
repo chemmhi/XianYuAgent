@@ -2,12 +2,11 @@ import type { AppConfig } from './config.js';
 import type { AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, Store } from './domain.js';
 import { digestJson } from './security.js';
 import { ServiceError } from './services.js';
-import { DEFAULT_AUTO_REPLY_AGENT_SYSTEM_PROMPT, DEFAULT_AUTO_REPLY_AGENT_USER_PROMPT } from './auto-reply-agent-config.js';
 
 export const DEFAULT_AUTO_REPLY_AGENT_CONFIG: AutoReplyAgentConfig = {
   enabled: true,
-  systemPrompt: DEFAULT_AUTO_REPLY_AGENT_SYSTEM_PROMPT,
-  userPromptTemplate: DEFAULT_AUTO_REPLY_AGENT_USER_PROMPT,
+  systemPrompt: '你是闲鱼卖家面向买家的自动回复 Agent。只根据工具事实回答，不确定时转人工。',
+  userPromptTemplate: '{{buyerMessage}}',
   maxLoops: 4,
   maxToolCalls: 8,
   toolTimeoutMs: 10_000,
@@ -49,25 +48,31 @@ export class AutoReplyAgentSettingsService {
     private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown }) => Promise<string>,
   ) {}
 
-  async get(adminId: string): Promise<AutoReplyAgentConfigRecord> {
-    const current = await this.store.getAutoReplyAgentConfig(adminId);
+  async get(adminId: string, accountId: string): Promise<AutoReplyAgentConfigRecord> {
+    await this.ensureScope(adminId, accountId);
+    const current = await this.store.getAutoReplyAgentConfig(adminId, accountId);
     if (current) return current;
-    return this.toDefaultRecord(adminId);
+    return this.toDefaultRecord(accountId);
   }
 
-  async update(input: { adminId: string; expectedVersion: number; patch: AutoReplyAgentConfigPatch; requestId: string; traceId: string }): Promise<AutoReplyAgentConfigRecord> {
+  async update(input: { adminId: string; accountId: string; expectedVersion: number; patch: AutoReplyAgentConfigPatch; requestId: string; traceId: string }): Promise<AutoReplyAgentConfigRecord> {
     if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'expectedVersion must be a non-negative integer');
-    const current = await this.get(input.adminId);
+    const current = await this.get(input.adminId, input.accountId);
     if (current.configVersion !== input.expectedVersion) throw new ServiceError(409, 'VERSION_CONFLICT', 'auto reply agent settings version conflict', { server: current });
     const config = validateConfig({ ...current, ...input.patch });
-    const saved = await this.store.upsertAutoReplyAgentConfig({ adminId: input.adminId, expectedVersion: input.expectedVersion, patch: input.patch, config, configDigest: digestJson(config) });
+    const saved = await this.store.upsertAutoReplyAgentConfig({ adminId: input.adminId, accountId: input.accountId, expectedVersion: input.expectedVersion, patch: input.patch, config, configDigest: digestJson(config) });
     if (!saved) throw new ServiceError(500, 'SETTINGS_SAVE_FAILED', 'auto reply agent settings could not be saved');
-    await this.audit({ actorId: input.adminId, action: 'auto_reply_agent.settings.updated', targetRef: `${input.adminId}:v${saved.configVersion}`, requestId: input.requestId, traceId: input.traceId, payload: { configVersion: saved.configVersion, configDigest: saved.configDigest, changedFields: Object.keys(input.patch).sort() } });
+    await this.audit({ actorId: input.adminId, action: 'auto_reply_agent.settings.updated', targetRef: `${input.accountId}:v${saved.configVersion}`, requestId: input.requestId, traceId: input.traceId, payload: { configVersion: saved.configVersion, configDigest: saved.configDigest, changedFields: Object.keys(input.patch).sort() } });
     return saved;
   }
 
-  private toDefaultRecord(adminId: string): AutoReplyAgentConfigRecord {
-    return { ...this.defaults, adminId, configVersion: 0, configDigest: digestJson(this.defaults), createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() };
+  private async ensureScope(adminId: string, accountId: string): Promise<void> {
+    if (!accountId.trim()) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
+    if (!(await this.store.hasAccountScope(adminId, accountId))) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
+  }
+
+  private toDefaultRecord(accountId: string): AutoReplyAgentConfigRecord {
+    return { ...this.defaults, accountId, configVersion: 0, configDigest: digestJson(this.defaults), createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() };
   }
 }
 
@@ -114,21 +119,5 @@ function parseBoundedInteger(value: string | undefined, fallback: number, min: n
 }
 
 export function resolveAutoReplyAgentDefaults(config: AppConfig): AutoReplyAgentConfig {
-  const envDefaults = autoReplyAgentConfigFromEnv();
-  const runtime = config.autoReplyAgent;
-  if (!runtime) return validateConfig(envDefaults);
-  return validateConfig({
-    ...envDefaults,
-    systemPrompt: runtime.systemPrompt,
-    userPromptTemplate: runtime.userPromptTemplate,
-    maxLoops: runtime.maxLoops,
-    maxToolCalls: runtime.maxToolCalls,
-    toolTimeoutMs: runtime.toolTimeoutMs,
-    maxHistory: runtime.maxHistory,
-    maxReplyLength: runtime.maxReplyLength,
-    maxReplySegmentChars: runtime.maxReplySegmentChars,
-    maxReplySegments: runtime.maxReplySegments,
-    replySegmentDelayMs: runtime.replySegmentDelayMs,
-    debounceMs: runtime.debounceMs,
-  });
+  return validateConfig({ ...autoReplyAgentConfigFromEnv(), ...(config.autoReplyAgent ?? {}) });
 }

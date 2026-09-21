@@ -118,7 +118,7 @@ export interface AutoReplyServiceOptions {
   classifier?: RuleBasedIntentClassifier;
   generator?: AutoReplyGenerator;
   sender?: AutoReplySender;
-  configProvider?: (adminId: string) => Promise<AutoReplyServiceRuntimeOptions>;
+  configProvider?: (adminId: string, accountId: string) => Promise<AutoReplyServiceRuntimeOptions>;
 }
 
 export interface AutoReplyServiceRuntimeOptions {
@@ -151,7 +151,7 @@ export class AutoReplyService {
   private readonly classifier: RuleBasedIntentClassifier;
   private readonly generator: AutoReplyGenerator;
   private readonly sender: AutoReplySender;
-  private readonly configProvider?: (adminId: string) => Promise<AutoReplyServiceRuntimeOptions>;
+  private readonly configProvider?: (adminId: string, accountId: string) => Promise<AutoReplyServiceRuntimeOptions>;
   private readonly lastAcceptedAt = new Map<string, number>();
 
   constructor(
@@ -201,7 +201,7 @@ export class AutoReplyService {
       throw error;
     }
     try {
-      const runtime = await this.resolveRuntimeOptions(input.adminId);
+      const runtime = await this.resolveRuntimeOptions(input.adminId, conversation.accountId);
       if (!runtime.enabled || inboundMessage.direction !== 'inbound' || inboundMessage.bodyType !== 'text' || !inboundMessage.bodyText?.trim()) {
         const updated = await this.store.updateAutoReplyRun(run.id, { status: 'skipped', decision: 'skipped', failureCode: !runtime.enabled ? 'AUTO_REPLY_DISABLED' : 'UNSUPPORTED_MESSAGE' });
         return { run: updated ?? run, inboundMessage };
@@ -290,8 +290,8 @@ export class AutoReplyService {
     return { conversation, inboundMessage, recentMessages: history.items.map((message) => ({ direction: message.direction, senderRole: message.senderRole, bodyText: message.bodyText, createdAt: message.createdAt, source: message.source })), product, orders: orders.map((order) => ({ id: order.id, orderNo: order.orderNo, buyerId: order.buyerId, itemId: order.itemId, itemTitle: order.itemTitle, paymentStatus: order.paymentStatus, orderStatus: order.orderStatus, deliveryStatus: order.deliveryStatus, afterSalesStatus: order.afterSalesStatus })) };
   }
 
-  private async resolveRuntimeOptions(adminId: string): Promise<Required<AutoReplyServiceRuntimeOptions>> {
-    const provided = this.configProvider ? await this.configProvider(adminId) : {};
+  private async resolveRuntimeOptions(adminId: string, accountId: string): Promise<Required<AutoReplyServiceRuntimeOptions>> {
+    const provided = this.configProvider ? await this.configProvider(adminId, accountId) : {};
     const testBuyerNames = [...new Set((provided.testBuyerNames ?? this.testBuyerNames).map(normalizeBuyerName).filter((value): value is string => Boolean(value)))];
     return {
       enabled: provided.enabled ?? this.enabled,

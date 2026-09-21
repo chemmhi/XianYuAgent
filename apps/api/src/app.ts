@@ -117,8 +117,8 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     replySegmentDelayMs: autoReplyAgentConfig.replySegmentDelayMs,
     generator: autoReplyModelClient ? new ToolCallingAutoReplyAgent(store, autoReplyModelClient, autoReplyAgentConfig) : undefined,
     totalTimeoutMs: 60_000,
-    configProvider: async (adminId) => {
-      const settings = await autoReplyAgentSettings.get(adminId);
+    configProvider: async (adminId, accountId) => {
+      const settings = await autoReplyAgentSettings.get(adminId, accountId);
       const runtimeConfig = mergeAutoReplyAgentRuntimeConfig(autoReplyAgentConfig, settings);
       const envLiveEnabled = config.autoReplySendMode === 'live';
       return {
@@ -390,19 +390,23 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   }
 
   if (ctx.path === '/api/v1/settings/agent' && ctx.method === 'GET') {
-    return { statusCode: 200, body: success(ctx, await runtime.autoReplyAgentSettings.get(authContext.admin.id)).body };
+    const accountId = String(ctx.query.accountId ?? '').trim();
+    if (!accountId) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
+    return { statusCode: 200, body: success(ctx, await runtime.autoReplyAgentSettings.get(authContext.admin.id, accountId)).body };
   }
   if (ctx.path === '/api/v1/settings/agent' && ctx.method === 'PATCH') {
     const key = requireIdempotencyKey(ctx);
     const result = await idempotent(store, {
-      scope: 'settings:agent',
+      scope: `settings:agent:${String(ctx.body.accountId ?? '').trim()}`,
       key,
       fingerprint: fingerprint(ctx.method, ctx.path, ctx.body),
       traceId: ctx.traceId,
       handler: async () => {
+        const accountId = String(ctx.body.accountId ?? '').trim();
+        if (!accountId) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
         const expectedVersion = Number(ctx.body.expectedVersion ?? ctx.body.configVersion ?? 0);
         const patch = readAutoReplyAgentPatch(ctx.body);
-        const updated = await runtime.autoReplyAgentSettings.update({ adminId: authContext.admin.id, expectedVersion, patch, requestId: ctx.requestId, traceId: ctx.traceId });
+        const updated = await runtime.autoReplyAgentSettings.update({ adminId: authContext.admin.id, accountId, expectedVersion, patch, requestId: ctx.requestId, traceId: ctx.traceId });
         return success(ctx, updated);
       },
     });

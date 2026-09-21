@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { useAccountContext } from '../../../app/account-context';
 import { createCredentialApi, createMockAutoReplyAgentSettingsApi, createMockCredentialApi, type AutoReplyAgentSettingsApi, type CredentialApi } from '../api';
 import { useAutoReplyAgentSettingsController } from '../agent-settings-controller';
@@ -10,36 +10,26 @@ import './settings.css';
 type TabKey = 'autoReply' | 'model' | 'credentials' | 'safety' | 'outbox' | 'plugins';
 
 const tabs: Array<{ id: TabKey; label: string; mobileLabel: string; meta: string }> = [
-  { id: 'autoReply', label: '自动回复 Agent', mobileLabel: '自动回复', meta: '买家 Agent' },
-  { id: 'model', label: 'OpenAI API', mobileLabel: '模型', meta: '模型客户端' },
-  { id: 'credentials', label: '凭证管理', mobileLabel: '凭证', meta: '凭证存储' },
-  { id: 'safety', label: '安全输出校验', mobileLabel: '安全', meta: '策略网关' },
-  { id: 'outbox', label: 'Outbox Worker', mobileLabel: '队列', meta: '运行时' },
-  { id: 'plugins', label: '插件配置', mobileLabel: '插件', meta: '技能 / 插件' },
+  { id: 'autoReply', label: '自动回复 Agent', mobileLabel: 'Agent', meta: 'Buyer Agent' },
+  { id: 'model', label: 'OpenAI API', mobileLabel: '模型', meta: 'ModelClient' },
+  { id: 'credentials', label: '凭证管理', mobileLabel: '凭证', meta: 'CredentialStore' },
+  { id: 'safety', label: '安全输出校验', mobileLabel: '安全', meta: 'Gateway' },
+  { id: 'outbox', label: 'Outbox Worker', mobileLabel: '队列', meta: 'Runtime' },
+  { id: 'plugins', label: '插件配置', mobileLabel: '插件', meta: 'Skill / Plugin' },
 ];
 
 export function SettingsPage({ api: providedApi, agentApi: providedAgentApi }: { api?: CredentialApi; agentApi?: AutoReplyAgentSettingsApi }) {
-  const { accounts, accountsLoading, accountsError, currentAccountId, setCurrentAccountId } = useAccountContext();
+  const { accounts, accountsLoading, accountsError, currentAccountId } = useAccountContext();
   const api = useMemo(() => providedApi ?? createCredentialApiFromRuntime(), [providedApi]);
   const agentApi = useMemo(() => providedAgentApi ?? createMockAutoReplyAgentSettingsApi(), [providedAgentApi]);
-  const [selectedAccountId, setSelectedAccountId] = useState(currentAccountId ?? '');
   const [activeTab, setActiveTab] = useState<TabKey>('credentials');
   const [editor, setEditor] = useState<'create' | 'edit' | 'rotate' | null>(null);
   const [selectedCredential, setSelectedCredential] = useState<CredentialRefVM | undefined>();
-  const controller = useCredentialController({ api, accountId: selectedAccountId || undefined });
-  const agentController = useAutoReplyAgentSettingsController(agentApi);
+  const controller = useCredentialController({ api, accountId: currentAccountId });
+  const agentController = useAutoReplyAgentSettingsController(agentApi, currentAccountId);
 
-  const selectedAccount = accounts.find((account) => account.id === selectedAccountId);
+  const selectedAccount = accounts.find((account) => account.id === currentAccountId);
   const items = controller.state.data?.items ?? [];
-
-  useEffect(() => {
-    if (currentAccountId && currentAccountId !== selectedAccountId) setSelectedAccountId(currentAccountId);
-  }, [currentAccountId, selectedAccountId]);
-
-  function chooseAccount(next: string) {
-    setSelectedAccountId(next);
-    void setCurrentAccountId(next || undefined).catch(() => undefined);
-  }
 
   function openEditor(mode: 'create' | 'edit' | 'rotate', credential?: CredentialRefVM) {
     setSelectedCredential(credential);
@@ -50,17 +40,17 @@ export function SettingsPage({ api: providedApi, agentApi: providedAgentApi }: {
     <section className="page-stack settings-page" data-settings-page>
       <header className="settings-toolbar">
         <div><p className="eyebrow">System Settings</p><h1>设置</h1><p>管理 Agent 策略与受控凭证引用。</p></div>
-        <div className="settings-account-picker"><label htmlFor="settings-account">当前账号</label><select id="settings-account" value={selectedAccountId} onChange={(event) => chooseAccount(event.target.value)} disabled={accountsLoading || accounts.length === 0}><option value="">请选择账号</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.displayName}</option>)}</select></div>
+        {selectedAccount && <span className="settings-scope-chip">当前账号：{selectedAccount.displayName}</span>}
       </header>
       <div className="settings-grid">
         <aside className="card settings-tabs" aria-label="设置分类">
           {tabs.map((tab) => <button key={tab.id} type="button" className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)}><span className="settings-tab-label">{tab.label}</span><span className="settings-tab-mobile-label">{tab.mobileLabel}</span><small>{tab.meta}</small></button>)}
         </aside>
         <div className="settings-active">
-          {activeTab === 'credentials' ? <CredentialStorePanel accountName={selectedAccount?.displayName} accountId={selectedAccountId} accountsLoading={accountsLoading} accountsError={accountsError} state={controller.state} items={items} onCreate={() => openEditor('create')} onEdit={(item) => openEditor('edit', item)} onRotate={(item) => openEditor('rotate', item)} onStatus={(item, status) => { void controller.setStatus({ credentialId: item.id, expectedVersion: item.version, status }); }} onRetry={controller.reload} /> : activeTab === 'autoReply' ? <AutoReplyAgentPanel controller={agentController} /> : <ReferencePanel tab={activeTab} onOpenCredentials={() => setActiveTab('credentials')} />}
+          {activeTab === 'credentials' ? <CredentialStorePanel accountName={selectedAccount?.displayName} accountId={currentAccountId ?? ''} accountsLoading={accountsLoading} accountsError={accountsError} state={controller.state} items={items} onCreate={() => openEditor('create')} onEdit={(item) => openEditor('edit', item)} onRotate={(item) => openEditor('rotate', item)} onStatus={(item, status) => { void controller.setStatus({ credentialId: item.id, expectedVersion: item.version, status }); }} onRetry={controller.reload} /> : activeTab === 'autoReply' ? <AutoReplyAgentPanel controller={agentController} accountName={selectedAccount?.displayName} accountId={currentAccountId} /> : <ReferencePanel tab={activeTab} onOpenCredentials={() => setActiveTab('credentials')} />}
         </div>
       </div>
-      {editor && <CredentialEditor mode={editor} accountId={selectedAccountId} credential={selectedCredential} onClose={() => { setEditor(null); setSelectedCredential(undefined); }} onCreate={controller.create} onUpdate={controller.update} onRotate={controller.rotate} />}
+      {editor && <CredentialEditor mode={editor} accountId={currentAccountId ?? ''} credential={selectedCredential} onClose={() => { setEditor(null); setSelectedCredential(undefined); }} onCreate={controller.create} onUpdate={controller.update} onRotate={controller.rotate} />}
       <nav className="settings-mobile-bottom" aria-label="移动端设置导航">{tabs.slice(0, 4).map((tab) => <button key={tab.id} type="button" className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)}><span>{tab.id === 'credentials' ? '◇' : tab.id === 'model' ? '◌' : tab.id === 'safety' ? '✓' : '≡'}</span><small>{tab.mobileLabel}</small></button>)}</nav>
     </section>
   );

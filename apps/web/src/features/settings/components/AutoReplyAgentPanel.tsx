@@ -2,16 +2,16 @@ import { useEffect, useState, type FormEvent } from 'react';
 import type { AutoReplyAgentSettingsController } from '../agent-settings-controller';
 import type { AutoReplyAgentConfigVM } from '../types';
 
-type EditableConfig = Omit<AutoReplyAgentConfigVM, 'adminId' | 'configVersion' | 'configDigest' | 'createdAt' | 'updatedAt'>;
+type EditableConfig = Omit<AutoReplyAgentConfigVM, 'accountId' | 'updatedByAdminId' | 'configVersion' | 'configDigest' | 'createdAt' | 'updatedAt'>;
 
-export function AutoReplyAgentPanel({ controller }: { controller: AutoReplyAgentSettingsController }) {
+export function AutoReplyAgentPanel({ controller, accountName, accountId }: { controller: AutoReplyAgentSettingsController; accountName?: string; accountId?: string }) {
   const { state } = controller;
   const [draft, setDraft] = useState<EditableConfig | null>(null);
 
   useEffect(() => {
     if (state.data) {
-      const { adminId, configVersion, configDigest, createdAt, updatedAt, ...editable } = state.data;
-      void adminId; void configVersion; void configDigest; void createdAt; void updatedAt;
+      const { accountId: _accountId, updatedByAdminId, configVersion, configDigest, createdAt, updatedAt, ...editable } = state.data;
+      void _accountId; void updatedByAdminId; void configVersion; void configDigest; void createdAt; void updatedAt;
       setDraft(editable);
     }
   }, [state.data]);
@@ -26,12 +26,13 @@ export function AutoReplyAgentPanel({ controller }: { controller: AutoReplyAgent
     await controller.update({ expectedVersion: state.data.configVersion, patch: draft });
   }
 
+  if (!accountId) return <div className="settings-state empty"><strong>请先在账号管理中设置当前账号</strong><span>自动回复 Agent 配置按闲鱼账号隔离，未选择账号时不会读取或编辑配置。</span></div>;
   if (state.phase === 'loading' || state.phase === 'idle') return <div className="settings-state loading"><span className="settings-spinner" />正在读取自动回复 Agent 配置…</div>;
   if (state.phase === 'error' && !state.data) return <div className="settings-state error" role="alert"><strong>{state.error}</strong><button type="button" className="btn ghost" onClick={() => void controller.reload()}>重试</button></div>;
   if (!draft || !state.data) return null;
 
   return <div className="settings-content" data-auto-reply-agent-panel>
-    <article className="card panel settings-hero"><div><p className="eyebrow">自动回复 Agent</p><h2>自动回复 Agent 配置</h2><p>配置只作用于买家侧自动回复 Agent，不进入 Workspace Agent 链路。</p></div><span className="settings-scope-chip">配置版本 v{state.data.configVersion}</span></article>
+    <article className="card panel settings-hero"><div><p className="eyebrow">自动回复 Agent</p><h2>自动回复 Agent 配置</h2><p>配置只作用于买家侧自动回复 Agent，不进入 Workspace Agent 链路。</p></div><span className="settings-scope-chip">{accountName ?? accountId} · v{state.data.configVersion}</span></article>
     {state.error && <div className="settings-state error" role="alert"><strong>{state.error}</strong><button type="button" className="btn ghost" onClick={() => void controller.reload()}>刷新配置</button></div>}
     {state.phase === 'saved' && <div className="settings-save-toast" role="status">自动回复 Agent 配置已保存，下一条消息将读取新配置。</div>}
     <form className="card panel settings-editor auto-reply-agent-editor" onSubmit={(event) => void submit(event)}>

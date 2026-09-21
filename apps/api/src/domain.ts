@@ -481,7 +481,8 @@ export interface AutoReplyAgentConfig {
 }
 
 export interface AutoReplyAgentConfigRecord extends AutoReplyAgentConfig {
-  adminId: string;
+  accountId: string;
+  updatedByAdminId?: string;
   configVersion: number;
   configDigest: string;
   createdAt: string;
@@ -698,8 +699,8 @@ export interface Store {
   updateCredentialRef(input: { adminId: string; credentialId: string; expectedVersion: number; provider?: string; alias?: string; label?: string; metadata?: Record<string, string> }): Promise<CredentialRefRecord | undefined>;
   rotateCredentialRef(input: { adminId: string; credentialId: string; expectedVersion: number; secretCiphertext: string; fingerprint: string }): Promise<CredentialRefRecord | undefined>;
   updateCredentialRefStatus(input: { adminId: string; credentialId: string; expectedVersion: number; status: CredentialRefStatus }): Promise<CredentialRefRecord | undefined>;
-  getAutoReplyAgentConfig(adminId: string): Promise<AutoReplyAgentConfigRecord | undefined>;
-  upsertAutoReplyAgentConfig(input: { adminId: string; expectedVersion: number; patch: AutoReplyAgentConfigPatch; config: AutoReplyAgentConfig; configDigest: string }): Promise<AutoReplyAgentConfigRecord | undefined>;
+  getAutoReplyAgentConfig(adminId: string, accountId: string): Promise<AutoReplyAgentConfigRecord | undefined>;
+  upsertAutoReplyAgentConfig(input: { adminId: string; accountId: string; expectedVersion: number; patch: AutoReplyAgentConfigPatch; config: AutoReplyAgentConfig; configDigest: string }): Promise<AutoReplyAgentConfigRecord | undefined>;
   getIdempotency(scope: string, key: string): Promise<IdempotencyRecord | undefined>;
   beginIdempotency(record: IdempotencyRecord): Promise<void>;
   abortIdempotency(scope: string, key: string): Promise<void>;

@@ -30,8 +30,8 @@ export interface CredentialApi {
 }
 
 export interface AutoReplyAgentSettingsApi {
-  get(): Promise<AutoReplyAgentConfigVM>;
-  update(input: { expectedVersion: number; patch: Partial<Omit<AutoReplyAgentConfigVM, 'adminId' | 'configVersion' | 'configDigest' | 'createdAt' | 'updatedAt'>> }): Promise<AutoReplyAgentConfigVM>;
+  get(accountId: string): Promise<AutoReplyAgentConfigVM>;
+  update(input: { accountId: string; expectedVersion: number; patch: Partial<Omit<AutoReplyAgentConfigVM, 'accountId' | 'updatedByAdminId' | 'configVersion' | 'configDigest' | 'createdAt' | 'updatedAt'>> }): Promise<AutoReplyAgentConfigVM>;
 }
 
 export function createCredentialApi(transport: Transport): CredentialApi {
@@ -62,12 +62,13 @@ export function createCredentialApi(transport: Transport): CredentialApi {
 
 export function createAutoReplyAgentSettingsApi(transport: Transport): AutoReplyAgentSettingsApi {
   return {
-    async get() {
-      return unwrap(await transport.get<AutoReplyAgentConfigVM | ApiEnvelope<AutoReplyAgentConfigVM>>('/api/v1/settings/agent'));
+    async get(accountId) {
+      const params = new URLSearchParams({ accountId });
+      return unwrap(await transport.get<AutoReplyAgentConfigVM | ApiEnvelope<AutoReplyAgentConfigVM>>(`/api/v1/settings/agent?${params.toString()}`));
     },
     async update(input) {
       const patch = requirePatch(transport);
-      return unwrap(await patch<AutoReplyAgentConfigVM | ApiEnvelope<AutoReplyAgentConfigVM>>('/api/v1/settings/agent', { expectedVersion: input.expectedVersion, ...input.patch }, { headers: { 'Idempotency-Key': idempotency('auto-reply-agent-settings') } }));
+      return unwrap(await patch<AutoReplyAgentConfigVM | ApiEnvelope<AutoReplyAgentConfigVM>>('/api/v1/settings/agent', { accountId: input.accountId, expectedVersion: input.expectedVersion, ...input.patch }, { headers: { 'Idempotency-Key': idempotency('auto-reply-agent-settings') } }));
     },
   };
 }
@@ -90,10 +91,10 @@ export function createMockCredentialApi(): CredentialApi {
 
 export function createMockAutoReplyAgentSettingsApi(): AutoReplyAgentSettingsApi {
   let value: AutoReplyAgentConfigVM = {
-    adminId: 'mock-admin', configVersion: 0, configDigest: 'mock-default', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString(),
+    accountId: 'mock-account', configVersion: 0, configDigest: 'mock-default', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString(),
     enabled: true,
     systemPrompt: '你是闲鱼卖家面向买家的自动回复 Agent。只根据工具事实回答，不确定时转人工。',
-    userPromptTemplate: '请处理这条买家消息。\n<buyer_context>\n{{context}}\n</buyer_context>',
+    userPromptTemplate: '{{buyerMessage}}',
     maxLoops: 4,
     maxToolCalls: 8,
     toolTimeoutMs: 10_000,
@@ -108,10 +109,10 @@ export function createMockAutoReplyAgentSettingsApi(): AutoReplyAgentSettingsApi
     sendMode: 'simulate',
   };
   return {
-    async get() { return { ...value }; },
+    async get(accountId) { return { ...value, accountId }; },
     async update(input) {
       if (value.configVersion !== input.expectedVersion) throw new Error('版本冲突');
-      value = { ...value, ...input.patch, configVersion: value.configVersion + 1, configDigest: `mock-${value.configVersion + 1}`, updatedAt: new Date().toISOString() };
+      value = { ...value, accountId: input.accountId, ...input.patch, configVersion: value.configVersion + 1, configDigest: `mock-${value.configVersion + 1}`, updatedAt: new Date().toISOString() };
       return { ...value };
     },
   };

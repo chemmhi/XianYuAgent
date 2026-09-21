@@ -12,31 +12,33 @@ function messageOf(error: unknown): string {
 export interface AutoReplyAgentSettingsController {
   state: AutoReplyAgentSettingsState;
   reload: () => Promise<void>;
-  update: (input: { expectedVersion: number; patch: Partial<Omit<AutoReplyAgentConfigVM, 'adminId' | 'configVersion' | 'configDigest' | 'createdAt' | 'updatedAt'>> }) => Promise<AutoReplyAgentConfigVM>;
+  update: (input: { expectedVersion: number; patch: Partial<Omit<AutoReplyAgentConfigVM, 'accountId' | 'updatedByAdminId' | 'configVersion' | 'configDigest' | 'createdAt' | 'updatedAt'>> }) => Promise<AutoReplyAgentConfigVM>;
 }
 
-export function useAutoReplyAgentSettingsController(api: AutoReplyAgentSettingsApi = fallbackApi): AutoReplyAgentSettingsController {
+export function useAutoReplyAgentSettingsController(api: AutoReplyAgentSettingsApi = fallbackApi, accountId?: string): AutoReplyAgentSettingsController {
   const [state, setState] = useState<AutoReplyAgentSettingsState>({ phase: 'idle', data: null, error: null });
   const requestId = useRef(0);
   const reload = useCallback(async () => {
     const request = ++requestId.current;
     setState((previous) => ({ ...previous, phase: 'loading', error: null }));
     try {
-      const data = await api.get();
+      if (!accountId) { setState({ phase: 'empty', data: null, error: null }); return; }
+      const data = await api.get(accountId);
       if (request !== requestId.current) return;
       setState({ phase: 'success', data, error: null });
     } catch (error) {
       if (request !== requestId.current) return;
       setState({ phase: 'error', data: null, error: messageOf(error) });
     }
-  }, [api]);
+  }, [accountId, api]);
 
   useEffect(() => { void reload(); }, [reload]);
 
-  async function update(input: { expectedVersion: number; patch: Partial<Omit<AutoReplyAgentConfigVM, 'adminId' | 'configVersion' | 'configDigest' | 'createdAt' | 'updatedAt'>> }): Promise<AutoReplyAgentConfigVM> {
+  async function update(input: { expectedVersion: number; patch: Partial<Omit<AutoReplyAgentConfigVM, 'accountId' | 'updatedByAdminId' | 'configVersion' | 'configDigest' | 'createdAt' | 'updatedAt'>> }): Promise<AutoReplyAgentConfigVM> {
+    if (!accountId) throw new Error('ACCOUNT_CONTEXT_REQUIRED');
     setState((previous) => ({ ...previous, phase: 'submitting', error: null, lastAction: 'updated' }));
     try {
-      const data = await api.update(input);
+      const data = await api.update({ ...input, accountId });
       setState({ phase: 'saved', data, error: null, lastAction: 'updated' });
       return data;
     } catch (error) {

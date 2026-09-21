@@ -629,19 +629,24 @@ export class PostgresStore implements Store {
     if (!result.rows[0]) throw new Error('CREDENTIAL_VERSION_CONFLICT');
     return this.getCredentialRef(input.adminId, input.credentialId);
   }
-  async getAutoReplyAgentConfig(adminId: string): Promise<AutoReplyAgentConfigRecord | undefined> {
-    const result = await this.pool.query('select * from settings.auto_reply_agent_configs where admin_id=$1', [adminId]);
+  async getAutoReplyAgentConfig(adminId: string, accountId: string): Promise<AutoReplyAgentConfigRecord | undefined> {
+    const result = await this.pool.query(`select c.* from settings.auto_reply_agent_account_configs c
+      where c.account_id=$2 and exists (
+        select 1 from auth.account_scopes scope
+        where scope.account_id=c.account_id and scope.admin_id=$1 and scope.status='active'
+          and (scope.expires_at is null or scope.expires_at>now())
+      )`, [adminId, accountId]);
     return result.rows[0] ? this.toAutoReplyAgentConfig(result.rows[0]) : undefined;
   }
-  async upsertAutoReplyAgentConfig(input: { adminId: string; expectedVersion: number; patch: AutoReplyAgentConfigPatch; config: AutoReplyAgentConfig; configDigest: string }): Promise<AutoReplyAgentConfigRecord | undefined> {
-    const current = await this.getAutoReplyAgentConfig(input.adminId);
+  async upsertAutoReplyAgentConfig(input: { adminId: string; accountId: string; expectedVersion: number; patch: AutoReplyAgentConfigPatch; config: AutoReplyAgentConfig; configDigest: string }): Promise<AutoReplyAgentConfigRecord | undefined> {
+    const current = await this.getAutoReplyAgentConfig(input.adminId, input.accountId);
     if (current && current.configVersion !== input.expectedVersion) throw new Error('AUTO_REPLY_AGENT_CONFIG_VERSION_CONFLICT');
     const version = current ? current.configVersion + 1 : 1;
     const result = await this.pool.query(`
-      insert into settings.auto_reply_agent_configs (admin_id, config_version, config_json, config_digest)
-      values ($1,$2,$3::jsonb,$4)
-      on conflict (admin_id) do update set config_version=excluded.config_version, config_json=excluded.config_json, config_digest=excluded.config_digest, updated_at=now()
-      returning *`, [input.adminId, version, JSON.stringify(input.config), input.configDigest]);
+      insert into settings.auto_reply_agent_account_configs (account_id, updated_by_admin_id, config_version, config_json, config_digest)
+      values ($1,$2,$3,$4::jsonb,$5)
+      on conflict (account_id) do update set updated_by_admin_id=excluded.updated_by_admin_id, config_version=excluded.config_version, config_json=excluded.config_json, config_digest=excluded.config_digest, updated_at=now()
+      returning *`, [input.accountId, input.adminId, version, JSON.stringify(input.config), input.configDigest]);
     return result.rows[0] ? this.toAutoReplyAgentConfig(result.rows[0]) : undefined;
   }
   async getIdempotency(scope: string, key: string): Promise<IdempotencyRecord | undefined> { const result = await this.pool.query('select * from execution.idempotency_records where scope=$1 and key=$2 and expires_at>now()', [scope, key]); return result.rows[0] ? this.toIdempotency(result.rows[0]) : undefined; }
@@ -866,7 +871,8 @@ export class PostgresStore implements Store {
       ? row.config_json as Record<string, unknown>
       : {};
     return {
-      adminId: String(row.admin_id),
+      accountId: String(row.account_id),
+      updatedByAdminId: row.updated_by_admin_id ? String(row.updated_by_admin_id) : undefined,
       enabled: Boolean(config.enabled),
       systemPrompt: String(config.systemPrompt ?? ''),
       userPromptTemplate: String(config.userPromptTemplate ?? ''),

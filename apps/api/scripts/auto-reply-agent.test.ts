@@ -32,13 +32,15 @@ test('buyer Agent configuration resolves independently from Workspace settings',
 
 test('buyer Agent can resolve the latest persisted configuration per message', async () => {
   const seenPrompts: string[] = [];
+  const providerArgs: Array<[string, string]> = [];
   const client: ModelClient = { complete: async (request) => { seenPrompts.push(request.messages[0]?.content ?? ''); return { content: '已按最新配置处理。', model: 'test' }; } };
   const store = {} as Store;
   const updated = resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_SYSTEM_PROMPT: '设置页最新提示词', AUTO_REPLY_AGENT_CONFIG_VERSION: 'settings-v2' });
-  const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}), { configProvider: async () => updated });
+  const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}), { configProvider: async (adminId, accountId) => { providerArgs.push([adminId, accountId]); return updated; } });
   const reply = await agent.generate({ adminId: 'admin-1', context: context(), classification });
   assert.equal(reply, '已按最新配置处理。');
   assert.deepEqual(seenPrompts, ['设置页最新提示词']);
+  assert.deepEqual(providerArgs, [['admin-1', 'account-1']]);
 });
 
 test('agent chooses product tool then returns final answer', async () => {
@@ -87,8 +89,10 @@ test('buyer conversation tool filters same buyer across products and orders', as
     { id: 'conversation-1', accountId: 'account-1', buyerRef: 'buyer-1', itemRef: 'item-1', itemTitle: '商品一', unreadCount: 0, handlingMode: 'ai', version: 1 },
     { id: 'conversation-2', accountId: 'account-1', buyerRef: 'buyer-1', itemRef: 'item-2', itemTitle: '商品二', unreadCount: 0, handlingMode: 'ai', version: 1 },
     { id: 'conversation-other', accountId: 'account-1', buyerRef: 'buyer-other', itemRef: 'item-3', itemTitle: '其他商品', unreadCount: 0, handlingMode: 'ai', version: 1 },
+    { id: 'conversation-other-account', accountId: 'account-2', buyerRef: 'buyer-1', itemRef: 'item-99', itemTitle: '其他账号商品', unreadCount: 0, handlingMode: 'ai', version: 1 },
   ];
   const calls: string[] = [];
+  const conversationQueries: Array<{ accountId?: string; limit?: number; cursor?: string }> = [];
   const client: ModelClient = {
     complete: async (request) => {
       calls.push(request.messages.at(-1)?.content ?? '');
@@ -97,32 +101,155 @@ test('buyer conversation tool filters same buyer across products and orders', as
     },
   };
   const store = {
-    listConversations: async () => ({ items: conversations, hasMore: false }),
+    listConversations: async (_adminId: string, query: { accountId?: string; limit?: number; cursor?: string }) => { conversationQueries.push(query); return { items: conversations, hasMore: false }; },
     listMessages: async (_adminId: string, conversationId: string) => ({ items: [{ conversationId, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: conversationId, createdAt: '2026-09-21T00:00:00.000Z' }], hasMore: false, latestCursor: 1, hasMoreHistory: false }),
   } as unknown as Store;
   const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}));
   await agent.generate({ adminId: 'admin-1', context: context(), classification });
   const toolPayload = JSON.parse(calls[1] ?? '{}') as { conversations: Array<{ conversationId: string; itemRef?: string }> };
+  assert.equal(conversationQueries[0]?.accountId, 'account-1');
   assert.deepEqual(toolPayload.conversations.map((item) => item.conversationId), ['conversation-1', 'conversation-2']);
   assert.deepEqual(toolPayload.conversations.map((item) => item.itemRef), ['item-1', 'item-2']);
 });
 
 test('buyer orders tool reads all pages and filters buyer/account scope', async () => {
   const pages = [
-    { items: [{ orderNo: 'buyer-1-page-1', accountId: 'account-1', buyerId: 'buyer-1', itemId: 'item-1', itemTitle: '商品一', paymentStatus: 'unpaid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', createdAt: '2026-09-20T00:00:00.000Z', updatedAt: '2026-09-20T00:00:00.000Z' }, { orderNo: 'other-buyer', accountId: 'account-1', buyerId: 'buyer-other', itemId: 'item-1', itemTitle: '商品一', paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', createdAt: '2026-09-20T00:00:00.000Z', updatedAt: '2026-09-20T00:00:00.000Z' }], totalPages: 2 },
+    { items: [{ orderNo: 'buyer-1-page-1', accountId: 'account-1', buyerId: 'buyer-1', itemId: 'item-1', itemTitle: '商品一', paymentStatus: 'unpaid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', createdAt: '2026-09-20T00:00:00.000Z', updatedAt: '2026-09-20T00:00:00.000Z' }, { orderNo: 'other-buyer', accountId: 'account-1', buyerId: 'buyer-other', itemId: 'item-1', itemTitle: '商品一', paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', createdAt: '2026-09-20T00:00:00.000Z', updatedAt: '2026-09-20T00:00:00.000Z' }, { orderNo: 'other-account-same-buyer', accountId: 'account-2', buyerId: 'buyer-1', itemId: 'item-99', itemTitle: '其他账号商品', paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', createdAt: '2026-09-20T00:00:00.000Z', updatedAt: '2026-09-20T00:00:00.000Z' }], totalPages: 2 },
     { items: [{ orderNo: 'buyer-1-page-2', accountId: 'account-1', buyerId: 'buyer-1', itemId: 'item-2', itemTitle: '商品二', paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'shipped', afterSalesStatus: 'none', createdAt: '2026-09-21T00:00:00.000Z', updatedAt: '2026-09-21T00:00:00.000Z' }], totalPages: 2 },
   ];
   const requestedPages: number[] = [];
+  const requestedAccountIds: Array<string | undefined> = [];
+  let orderToolPayload: string | undefined;
   const client: ModelClient = {
-    complete: async (request) => request.messages.at(-1)?.role === 'tool'
-      ? { content: '订单信息已确认。', model: 'test' }
-      : { content: '', model: 'test', toolCalls: [{ id: 'tool-orders', type: 'function', function: { name: 'get_buyer_orders', arguments: '{}' } }] },
+    complete: async (request) => {
+      if (request.messages.at(-1)?.role === 'tool') {
+        orderToolPayload = request.messages.at(-1)?.content;
+        return { content: '订单信息已确认。', model: 'test' };
+      }
+      return { content: '', model: 'test', toolCalls: [{ id: 'tool-orders', type: 'function', function: { name: 'get_buyer_orders', arguments: '{}' } }] };
+    },
   };
-  const store = { listOrders: async (_adminId: string, query: { page?: number }) => { requestedPages.push(query.page ?? 0); return pages[(query.page ?? 1) - 1] as never; } } as unknown as Store;
+  const store = { listOrders: async (_adminId: string, query: { page?: number; accountId?: string }) => { requestedPages.push(query.page ?? 0); requestedAccountIds.push(query.accountId); return pages[(query.page ?? 1) - 1] as never; } } as unknown as Store;
   const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}));
   const reply = await agent.generate({ adminId: 'admin-1', context: context(), classification });
   assert.equal(reply, '订单信息已确认。');
   assert.deepEqual(requestedPages, [1, 2]);
+  assert.deepEqual(requestedAccountIds, ['account-1', 'account-1']);
+  const orderPayload = JSON.parse(orderToolPayload ?? '{}') as { orders: Array<{ orderNo: string }> };
+  assert.deepEqual(orderPayload.orders.map((order) => order.orderNo), ['buyer-1-page-1', 'buyer-1-page-2']);
+});
+
+test('product tool resolves external numeric refs without UUID lookup and stays account scoped', async () => {
+  const product = { id: 'product-account-1', accountId: 'account-1', externalProductRef: '1078553391460', title: '数字资料包', description: '公开说明', priceMinor: 1_999, status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' };
+  const foreignProduct = { id: 'product-account-2', accountId: 'account-2', externalProductRef: '1078553391460', title: '其他账号商品', status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' };
+  let getProductCalls = 0;
+  let productQuery: { accountId?: string; keyword?: string; page?: number; pageSize?: number } | undefined;
+  let toolPayload: string | undefined;
+  const client: ModelClient = {
+    complete: async (request) => {
+      if (request.messages.at(-1)?.role === 'tool') {
+        toolPayload = request.messages.at(-1)?.content;
+        return { content: '这是数字资料包。', model: 'test' };
+      }
+      return { content: '', model: 'test', toolCalls: [{ id: 'tool-product-external', type: 'function', function: { name: 'get_product_info', arguments: JSON.stringify({ productRef: '1078553391460' }) } }] };
+    },
+  };
+  const store = {
+    getProduct: async () => { getProductCalls += 1; throw new Error('UUID_LOOKUP_SHOULD_NOT_RUN'); },
+    listProducts: async (_adminId: string, query: { accountId?: string; keyword?: string; page?: number; pageSize?: number }) => { productQuery = query; return { items: [foreignProduct, product], page: 1, pageSize: 100, total: 2, totalPages: 1 }; },
+  } as unknown as Store;
+  const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}));
+  const reply = await agent.generate({ adminId: 'admin-1', context: { ...context(), conversation: { ...context().conversation, itemRef: '1078553391460' } }, classification });
+  assert.equal(reply, '这是数字资料包。');
+  assert.equal(getProductCalls, 0);
+  assert.deepEqual(productQuery, { accountId: 'account-1', keyword: '1078553391460', page: 1, pageSize: 100 });
+  const payload = JSON.parse(toolPayload ?? '{}') as { ok: boolean; product?: { externalProductRef?: string; title?: string } };
+  assert.equal(payload.ok, true);
+  assert.equal(payload.product?.externalProductRef, '1078553391460');
+  assert.equal(payload.product?.title, '数字资料包');
+});
+
+test('shop product tool searches keyword, paginates, limits results, and excludes other accounts', async () => {
+  const pageResults = [
+    {
+      items: [
+        { id: 'foreign-product', accountId: 'account-2', externalProductRef: 'foreign-earbuds', title: '其他账号耳机', status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' },
+        { id: 'earbuds-a', accountId: 'account-1', externalProductRef: 'earbuds-a', title: '蓝牙耳机 A', status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' },
+      ],
+      page: 1,
+      pageSize: 100,
+      total: 2,
+      totalPages: 2,
+    },
+    {
+      items: [{ id: 'earbuds-b', accountId: 'account-1', externalProductRef: 'earbuds-b', title: '蓝牙耳机 B', status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' }],
+      page: 2,
+      pageSize: 100,
+      total: 2,
+      totalPages: 2,
+    },
+  ];
+  const queries: Array<{ accountId?: string; keyword?: string; page?: number; pageSize?: number }> = [];
+  let toolPayload: string | undefined;
+  const client: ModelClient = {
+    complete: async (request) => {
+      if (request.messages.at(-1)?.role === 'tool') {
+        toolPayload = request.messages.at(-1)?.content;
+        return { content: '有两款相关耳机可以选择。', model: 'test' };
+      }
+      return { content: '', model: 'test', toolCalls: [{ id: 'tool-shop-products', type: 'function', function: { name: 'list_shop_products', arguments: JSON.stringify({ keyword: '耳机', limit: 2 }) } }] };
+    },
+  };
+  const store = {
+    listProducts: async (_adminId: string, query: { accountId?: string; keyword?: string; page?: number; pageSize?: number }) => { queries.push(query); return pageResults[(query.page ?? 1) - 1]!; },
+  } as unknown as Store;
+  const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}));
+  const reply = await agent.generate({ adminId: 'admin-1', context: context(), classification });
+  assert.equal(reply, '有两款相关耳机可以选择。');
+  assert.deepEqual(queries, [
+    { accountId: 'account-1', keyword: '耳机', page: 1, pageSize: 100 },
+    { accountId: 'account-1', keyword: '耳机', page: 2, pageSize: 100 },
+  ]);
+  const payload = JSON.parse(toolPayload ?? '{}') as { ok: boolean; keyword?: string; total?: number; products: Array<{ id: string; accountId?: string }> };
+  assert.equal(payload.ok, true);
+  assert.equal(payload.keyword, '耳机');
+  assert.equal(payload.total, 2);
+  assert.deepEqual(payload.products.map((product) => product.id), ['earbuds-a', 'earbuds-b']);
+  assert.equal(payload.products.some((product) => product.id === 'foreign-product'), false);
+});
+
+test('insufficient product facts return not-found and hand off instead of guessing', async () => {
+  let toolPayload: string | undefined;
+  const client: ModelClient = {
+    complete: async (request) => {
+      if (request.messages.at(-1)?.role === 'tool') {
+        toolPayload = request.messages.at(-1)?.content;
+        return { content: JSON.stringify({ decision: 'handoff', reason: '商品事实不足' }), model: 'test' };
+      }
+      return { content: '', model: 'test', toolCalls: [{ id: 'tool-product-missing', type: 'function', function: { name: 'get_product_info', arguments: JSON.stringify({ productRef: 'missing-item' }) } }] };
+    },
+  };
+  const store = {
+    getProduct: async () => undefined,
+    listProducts: async () => ({ items: [], page: 1, pageSize: 100, total: 0, totalPages: 1 }),
+  } as unknown as Store;
+  const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}));
+  await assert.rejects(() => agent.generate({ adminId: 'admin-1', context: context(), classification }), (error: unknown) => (error as { code?: string }).code === 'AGENT_HANDOFF');
+  const payload = JSON.parse(toolPayload ?? '{}') as { ok: boolean; code?: string; productRef?: string };
+  assert.equal(payload.ok, false);
+  assert.equal(payload.code, 'PRODUCT_NOT_FOUND');
+  assert.equal(payload.productRef, 'missing-item');
+});
+
+test('tool read errors stop generation before a synthesized reply', async () => {
+  let calls = 0;
+  const client: ModelClient = {
+    complete: async () => { calls += 1; return { content: '', model: 'test', toolCalls: [{ id: 'tool-shop-error', type: 'function', function: { name: 'list_shop_products', arguments: '{}' } }] }; },
+  };
+  const store = { listProducts: async () => { throw new Error('PRODUCT_READ_FAILED'); } } as unknown as Store;
+  const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}));
+  await assert.rejects(() => agent.generate({ adminId: 'admin-1', context: context(), classification }), /PRODUCT_READ_FAILED/);
+  assert.equal(calls, 1);
 });
 
 test('agent fails safely when loop limit is reached', async () => {

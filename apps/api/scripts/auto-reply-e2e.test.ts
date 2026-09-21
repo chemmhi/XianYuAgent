@@ -200,9 +200,10 @@ test('persisted Agent settings apply to the next buyer push without restart', as
     assert.equal(results[0]?.autoReply?.run.status, 'persisted');
     assert.equal((modelRequests[0]?.messages as Array<{ role: string; content: string }>)[0]?.content, '初始系统提示');
 
-    const current = await runtime.autoReplyAgentSettings.get(adminId);
+    const current = await runtime.autoReplyAgentSettings.get(adminId, account.id);
     const updated = await runtime.autoReplyAgentSettings.update({
       adminId,
+      accountId: account.id,
       expectedVersion: current.configVersion,
       patch: { systemPrompt: '设置页更新后的系统提示', maxReplyLength: 50, debounceMs: 0 },
       requestId: 'settings-agent-update',

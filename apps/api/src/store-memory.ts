@@ -700,23 +700,26 @@ export class MemoryStore implements Store {
     row.updatedAt = new Date().toISOString();
     return { ...row, metadata: { ...row.metadata }, canReveal: false };
   }
-  async getAutoReplyAgentConfig(adminId: string): Promise<AutoReplyAgentConfigRecord | undefined> {
-    const row = this.autoReplyAgentConfigs.get(adminId);
+  async getAutoReplyAgentConfig(adminId: string, accountId: string): Promise<AutoReplyAgentConfigRecord | undefined> {
+    if (!(await this.hasAccountScope(adminId, accountId))) return undefined;
+    const row = this.autoReplyAgentConfigs.get(accountId);
     return row ? { ...row } : undefined;
   }
-  async upsertAutoReplyAgentConfig(input: { adminId: string; expectedVersion: number; patch: AutoReplyAgentConfigPatch; config: AutoReplyAgentConfig; configDigest: string }): Promise<AutoReplyAgentConfigRecord | undefined> {
+  async upsertAutoReplyAgentConfig(input: { adminId: string; accountId: string; expectedVersion: number; patch: AutoReplyAgentConfigPatch; config: AutoReplyAgentConfig; configDigest: string }): Promise<AutoReplyAgentConfigRecord | undefined> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) return undefined;
     const now = new Date().toISOString();
-    const current = this.autoReplyAgentConfigs.get(input.adminId);
+    const current = this.autoReplyAgentConfigs.get(input.accountId);
     if (current && current.configVersion !== input.expectedVersion) throw new Error('AUTO_REPLY_AGENT_CONFIG_VERSION_CONFLICT');
     const row: AutoReplyAgentConfigRecord = {
       ...input.config,
-      adminId: input.adminId,
+      accountId: input.accountId,
+      updatedByAdminId: input.adminId,
       configVersion: current ? current.configVersion + 1 : 1,
       configDigest: input.configDigest,
       createdAt: current?.createdAt ?? now,
       updatedAt: now,
     };
-    this.autoReplyAgentConfigs.set(input.adminId, row);
+    this.autoReplyAgentConfigs.set(input.accountId, row);
     return { ...row };
   }
   async getIdempotency(scope: string, key: string): Promise<IdempotencyRecord | undefined> { const row = this.idempotency.get(`${scope}:${key}`); if (row && Date.parse(row.expiresAt) <= Date.now()) { this.idempotency.delete(`${scope}:${key}`); return undefined; } return row; }

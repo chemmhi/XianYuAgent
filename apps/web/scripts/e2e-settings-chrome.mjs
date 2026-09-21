@@ -184,37 +184,39 @@ async function run() {
   await cdp.send('Page.navigate', { url: `${webUrl}/settings` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'settings route');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-settings-page]"))'), 'Settings page');
-  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("#settings-account option[value]"))'), 'Settings account options');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('当前账号'), 'Settings account context');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('设置'), 'Settings account context');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('当前账号还没有模型 API Key'), 'empty credential state');
 
-  const agentDefaults = await requestJson(apiUrl, '/api/v1/settings/agent', { headers: { cookie } });
+  const agentPath = `/api/v1/settings/agent?accountId=${encodeURIComponent(accountId)}`;
+  const agentDefaults = await requestJson(apiUrl, agentPath, { headers: { cookie } });
   if (!agentDefaults.response.ok || agentDefaults.body.data?.configVersion !== 0) throw new Error(`agent settings default readback failed: ${agentDefaults.response.status} ${JSON.stringify(agentDefaults.body)}`);
   await clickContainingText(cdp, '自动回复 Agent');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-auto-reply-agent-panel]"))'), 'Auto Reply Agent panel');
-  const disabledState = await evaluate(cdp, `(() => {
-    const panel = document.querySelector('[data-auto-reply-agent-panel]');
-    const enabled = panel?.querySelector('input[type="checkbox"]');
-    if (!enabled) throw new Error('auto-reply enabled checkbox missing');
-    enabled.click();
-    const fields = panel?.querySelector('fieldset.auto-reply-agent-fields');
-    const editable = Array.from(fields?.querySelectorAll('input,textarea,select') ?? []);
-    return { disabled: fields?.disabled === true, allControlsDisabled: editable.length > 0 && editable.every((control) => control.matches(':disabled')), opacity: fields ? Number(getComputedStyle(fields).opacity) : 1 };
+  const settingsTabStyle = await evaluate(cdp, `(() => {
+    const tab = document.querySelector('.settings-tabs button.active');
+    if (!tab) throw new Error('active settings tab missing');
+    const rect = tab.getBoundingClientRect();
+    const style = getComputedStyle(tab);
+    return { height: rect.height, borderRadius: style.borderRadius, boxShadow: style.boxShadow, backgroundColor: style.backgroundColor };
   })()`);
-  if (!disabledState.disabled || !disabledState.allControlsDisabled || disabledState.opacity >= 1) throw new Error(`disabling Agent did not gray configuration: ${JSON.stringify(disabledState)}`);
+  if (settingsTabStyle.height > 72 || settingsTabStyle.height < 40 || !settingsTabStyle.boxShadow.includes('3px 0px 0px')) {
+    throw new Error(`settings tab visual state mismatch: ${JSON.stringify(settingsTabStyle)}`);
+  }
+  const disabledState = await evaluate(cdp, "(() => { const panel = document.querySelector('[data-auto-reply-agent-panel]'); const enabled = panel?.querySelector('input[type=\"checkbox\"]'); if (!enabled) throw new Error('auto-reply enabled checkbox missing'); enabled.click(); const fields = panel?.querySelector('fieldset.auto-reply-agent-fields'); const editable = Array.from(fields?.querySelectorAll('input,textarea,select') ?? []); return { disabled: fields?.disabled === true, allControlsDisabled: editable.length > 0 && editable.every((control) => control.matches(':disabled')), opacity: fields ? Number(getComputedStyle(fields).opacity) : 1 }; })()");
+  if (!disabledState.disabled || !disabledState.allControlsDisabled || disabledState.opacity >= 1) throw new Error('disabling Agent did not gray configuration: ' + JSON.stringify(disabledState));
   const agentDisabledMobilePath = await captureViewport(cdp, 390, 844, 'settings-agent-disabled-mobile-390x844.png');
-  await evaluate(cdp, `(() => { const enabled = document.querySelector('[data-auto-reply-agent-panel] input[type="checkbox"]'); enabled?.click(); return true; })()`);
+  await evaluate(cdp, "(() => { const enabled = document.querySelector('[data-auto-reply-agent-panel] input[type=\"checkbox\"]'); enabled?.click(); return true; })()");
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-auto-reply-agent-panel] fieldset.auto-reply-agent-fields:not([disabled])"))'), 'Auto Reply Agent re-enabled');
   await setLabelInput(cdp, '最大循环次数', '6');
   await setLabelInput(cdp, '防抖窗口（毫秒）', '1500');
   await clickText(cdp, '保存自动回复 Agent 配置');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('自动回复 Agent 配置已保存'), 'agent settings saved');
-  const agentSaved = await requestJson(apiUrl, '/api/v1/settings/agent', { headers: { cookie } });
+  const agentSaved = await requestJson(apiUrl, agentPath, { headers: { cookie } });
   if (!agentSaved.response.ok || agentSaved.body.data?.configVersion !== 1 || agentSaved.body.data?.maxLoops !== 6 || agentSaved.body.data?.debounceMs !== 1500) throw new Error(`agent settings persistence failed: ${agentSaved.response.status} ${JSON.stringify(agentSaved.body)}`);
   const agentStale = await requestJson(apiUrl, '/api/v1/settings/agent', {
     method: 'PATCH',
     headers: { 'content-type': 'application/json', cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': `agent-settings-stale-${process.pid}` },
-    body: JSON.stringify({ expectedVersion: 0, maxLoops: 4 }),
+    body: JSON.stringify({ accountId, expectedVersion: 0, maxLoops: 4 }),
   });
   if (agentStale.response.status !== 409) throw new Error(`expected 409 for stale agent settings, got ${agentStale.response.status}`);
 
@@ -231,12 +233,6 @@ async function run() {
   await clickContainingText(cdp, '凭证管理');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-credential-panel]"))'), 'credential panel after Agent settings');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('当前账号还没有模型 API Key'), 'empty credential state after Agent settings');
-
-  const selectedAccount = await evaluate(cdp, 'document.querySelector("#settings-account")?.value ?? ""');
-  if (selectedAccount !== accountId) {
-    await evaluate(cdp, `(() => { const select = document.querySelector('#settings-account'); if (!select) throw new Error('settings account select missing'); select.value = ${JSON.stringify(accountId)}; select.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
-    await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("#settings-account")?.value ?? ""')) === accountId, 'account selection');
-  }
 
   await clickText(cdp, '新增 API Key');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".settings-editor"))'), 'credential editor');
