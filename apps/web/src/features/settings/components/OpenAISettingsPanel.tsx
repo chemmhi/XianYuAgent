@@ -32,9 +32,21 @@ export function OpenAISettingsPanel(props: { accountId: string; accountName?: st
   const [modelOptions, setModelOptions] = useState<Record<OpenAIConfigRole, string[]>>({ primary: [], backup: [] });
   const [modelPhase, setModelPhase] = useState<Record<OpenAIConfigRole, ModelLoadPhase>>({ primary: 'idle', backup: 'idle' });
   const modelLoadedKey = useRef<Record<OpenAIConfigRole, string | undefined>>({ primary: undefined, backup: undefined });
-  const modelRequestRole = useRef<OpenAIConfigRole | null>(null);
+  const modelRequestId = useRef<Record<OpenAIConfigRole, number>>({ primary: 0, backup: 0 });
 
   useEffect(() => {
+    // A refreshed account/config list invalidates all provider-derived options.
+    // Keeping these arrays across account changes can expose one account's
+    // models in the other account's card before the next lazy probe finishes.
+    modelRequestId.current = {
+      primary: modelRequestId.current.primary + 1,
+      backup: modelRequestId.current.backup + 1,
+    };
+    modelLoadedKey.current = { primary: undefined, backup: undefined };
+    setModelOptions({ primary: [], backup: [] });
+    setLocalModelsState({ primary: [], backup: [] });
+    setModelPhase({ primary: 'idle', backup: 'idle' });
+    setTestError({ primary: null, backup: null });
     setForms((previous) => {
       const next = { primary: emptyForm('primary'), backup: emptyForm('backup') };
       for (const item of controller.state.data?.items ?? []) {
@@ -54,28 +66,38 @@ export function OpenAISettingsPanel(props: { accountId: string; accountName?: st
 
   function update(role: OpenAIConfigRole, patch: Partial<ConfigForm>) {
     setForms((previous) => ({ ...previous, [role]: { ...previous[role], ...patch } }));
+    if ('provider' in patch || 'baseUrl' in patch || 'apiKey' in patch) {
+      invalidateModelState(role);
+    }
+  }
+
+  function invalidateModelState(role: OpenAIConfigRole) {
+    modelRequestId.current[role] += 1;
+    modelLoadedKey.current[role] = undefined;
+    setModelOptions((previous) => ({ ...previous, [role]: [] }));
+    setLocalModelsState((previous) => ({ ...previous, [role]: [] }));
+    setModelPhase((previous) => ({ ...previous, [role]: 'idle' }));
   }
 
   async function loadModels(form: ConfigForm) {
-    if (modelRequestRole.current === form.role) return;
+    const requestId = modelRequestId.current[form.role];
     if (form.id) {
       const requestKey = `${form.id}:${form.baseUrl}`;
       if (modelLoadedKey.current[form.role] === requestKey && modelPhase[form.role] !== 'error') return;
-      modelRequestRole.current = form.role;
       setModelPhase((previous) => ({ ...previous, [form.role]: 'loading' }));
       try {
         const result = await props.modelApi.list({ accountId: props.accountId, configId: form.id });
+        if (requestId !== modelRequestId.current[form.role]) return;
         const models = result.models.map((item) => item.id).filter(Boolean);
         setModelOptions((previous) => ({ ...previous, [form.role]: models }));
         setModelPhase((previous) => ({ ...previous, [form.role]: models.length > 0 ? 'success' : 'empty' }));
         modelLoadedKey.current[form.role] = requestKey;
         setTestError((previous) => ({ ...previous, [form.role]: null }));
       } catch (error) {
+        if (requestId !== modelRequestId.current[form.role]) return;
         modelLoadedKey.current[form.role] = undefined;
         setModelPhase((previous) => ({ ...previous, [form.role]: 'error' }));
         setTestError((previous) => ({ ...previous, [form.role]: error instanceof Error ? error.message : '模型列表暂时不可用，请重试。' }));
-      } finally {
-        modelRequestRole.current = null;
       }
       return;
     }
@@ -83,19 +105,18 @@ export function OpenAISettingsPanel(props: { accountId: string; accountName?: st
       setTestError((previous) => ({ ...previous, [form.role]: '请先填写 Provider、Base URL 和 API Key，再展开模型列表。' }));
       return;
     }
-    modelRequestRole.current = form.role;
     setModelPhase((previous) => ({ ...previous, [form.role]: 'loading' }));
     try {
       const result = await props.api.test({ accountId: props.accountId, role: form.role, provider: form.provider, alias: form.alias, baseUrl: form.baseUrl, model: form.model || 'pending', wireApi: form.wireApi, timeoutMs: form.timeoutMs, apiKey: form.apiKey });
+      if (requestId !== modelRequestId.current[form.role]) return;
       update(form.role, { connectivity: 'passed' });
       setTestError((previous) => ({ ...previous, [form.role]: null }));
       setLocalModels(form.role, result.models);
       setModelPhase((previous) => ({ ...previous, [form.role]: result.models.length > 0 ? 'success' : 'empty' }));
     } catch (error) {
+      if (requestId !== modelRequestId.current[form.role]) return;
       setModelPhase((previous) => ({ ...previous, [form.role]: 'error' }));
       setTestError((previous) => ({ ...previous, [form.role]: error instanceof Error ? error.message : '模型列表暂时不可用，请重试。' }));
-    } finally {
-      modelRequestRole.current = null;
     }
   }
 
