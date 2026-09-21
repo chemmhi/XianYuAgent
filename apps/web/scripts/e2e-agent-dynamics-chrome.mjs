@@ -116,7 +116,7 @@ async function run() {
     const body = JSON.parse(String(init?.body));
     const message = modelCall === 1
       ? { content: '', tool_calls: [{ id: 'agent-dynamics-chrome-product', type: 'function', function: { name: 'get_product_info', arguments: '{}' } }] }
-      : { content: '这是 Chrome/CDP 真实数据库验收回复。' };
+      : { content: JSON.stringify({ decision: 'reply', text: '这是 Chrome/CDP 真实数据库验收回复。' }) };
     return new Response(JSON.stringify({ model: body.model, choices: [{ message }] }), { status: 200, headers: { 'content-type': 'application/json' } });
   });
   try {
@@ -226,6 +226,30 @@ async function run() {
     if (!opened) throw new Error('persisted run row not clickable');
     await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('处理时间线'), 'run detail drawer');
     await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome/CDP 真实数据库验收回复'), 'persisted reply in drawer');
+    const timelineAssertions = await evaluate(cdp, `(() => {
+      const items = Array.from(document.querySelectorAll('.agent-dynamics-timeline-item'));
+      const titles = items.map((item) => item.querySelector('.agent-dynamics-timeline-title')?.textContent?.trim() ?? '');
+      const hints = items.map((item) => item.querySelector('.agent-dynamics-timeline-hint')?.textContent?.trim() ?? '');
+      return {
+        count: items.length,
+        titles,
+        hints,
+        closedByDefault: items.length > 0 && items.every((item) => !item.hasAttribute('open')),
+        hasIntentStage: titles.some((title) => title.includes('意图识别')),
+        hasContextStage: titles.some((title) => title.includes('上下文读取')),
+        hasGenerationStage: titles.some((title) => title.includes('回复生成')),
+        hasSendingStage: titles.some((title) => title.includes('发送提交')),
+        hasPersistedStage: titles.some((title) => title.includes('消息已完成自动回复')),
+        hasInputOutputHint: hints.some((hint) => hint.includes('输入') && hint.includes('输出')),
+      };
+    })()`);
+    if (timelineAssertions.count < 5 || !timelineAssertions.closedByDefault || !timelineAssertions.hasIntentStage || !timelineAssertions.hasContextStage || !timelineAssertions.hasGenerationStage || !timelineAssertions.hasSendingStage || !timelineAssertions.hasPersistedStage || !timelineAssertions.hasInputOutputHint) {
+      throw new Error(`timeline semantics failed: ${JSON.stringify(timelineAssertions)}`);
+    }
+    await evaluate(cdp, `(() => { const first = document.querySelector('.agent-dynamics-timeline-item .agent-dynamics-timeline-summary'); if (!first) return false; first.click(); return true; })()`);
+    await waitFor(async () => Boolean(await evaluate(cdp, 'document.querySelector(".agent-dynamics-timeline-item[open] .agent-dynamics-timeline-details")')), 'timeline input/output details');
+    const timelineDetailsText = String(await evaluate(cdp, 'document.querySelector(".agent-dynamics-timeline-item[open] .agent-dynamics-timeline-details")?.textContent ?? ""'));
+    if (!timelineDetailsText.includes('输入') || !timelineDetailsText.includes('输出')) throw new Error(`timeline input/output groups missing: ${timelineDetailsText}`);
     const drawerText = String(await evaluate(cdp, 'document.body.innerText'));
     const drawerPath = await captureViewport(cdp, 1440, 900, 'agent-dynamics-drawer-desktop-1440x900.png');
     const mobileDrawerPath = await captureViewport(cdp, 390, 844, 'agent-dynamics-mobile-drawer-390x844.png');
@@ -243,9 +267,10 @@ async function run() {
     for (const child of children) { try { child.kill(); } catch { /* best effort */ } }
     if (apiRuntime?.store?.pool) {
       if (accountId) await apiRuntime.store.pool.query('delete from messages.auto_reply_run_events where account_id=$1', [accountId]);
-      if (runIds.length) await apiRuntime.store.pool.query('delete from messages.auto_reply_runs where id = any($1::uuid[])', [runIds]);
-      if (accountId) await apiRuntime.store.pool.query('delete from messages.messages where account_id=$1', [accountId]);
+      if (accountId) await apiRuntime.store.pool.query('delete from messages.auto_reply_runs where account_id=$1', [accountId]);
+      if (accountId) await apiRuntime.store.pool.query('delete from messages.auto_reply_inbound_inbox where account_id=$1', [accountId]);
       if (accountId) await apiRuntime.store.pool.query('delete from messages.events where account_id=$1', [accountId]);
+      if (accountId) await apiRuntime.store.pool.query('delete from messages.messages where account_id=$1', [accountId]);
       for (const conversationId of conversationIds) await apiRuntime.store.pool.query('delete from messages.conversations where id=$1', [conversationId]);
       if (accountId) await apiRuntime.store.pool.query('delete from products.products where account_id=$1', [accountId]);
       if (accountId) await apiRuntime.store.pool.query('delete from observability.audit_events where account_id=$1', [accountId]);
