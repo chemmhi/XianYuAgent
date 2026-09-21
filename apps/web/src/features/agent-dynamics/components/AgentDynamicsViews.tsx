@@ -145,7 +145,22 @@ function RunDrawerContent({ detail, onClose, onOpenChat }: { detail: AgentDynami
 }
 
 function Timeline({ items }: { items: AgentDynamicsTimelineItemVM[] }) {
-  return <div className="agent-dynamics-timeline">{items.map((item) => <div className="agent-dynamics-timeline-item" key={item.id}><span className={`agent-dynamics-timeline-dot ${classTone(item.tone)}`} /><div><div className="agent-dynamics-timeline-title">{item.title}</div><div className="agent-dynamics-timeline-meta">{item.meta}</div></div></div>)}</div>;
+  return <div className="agent-dynamics-timeline">{items.map((item) => <details className="agent-dynamics-timeline-item" key={item.id} open={Boolean(item.details)}>
+    <summary className="agent-dynamics-timeline-summary">
+      <span className={`agent-dynamics-timeline-dot ${classTone(item.tone)}`} />
+      <span><span className="agent-dynamics-timeline-title">{item.title}</span><span className="agent-dynamics-timeline-meta">{item.meta}{item.traceId ? ` · trace ${item.traceId}` : ''}</span></span>
+    </summary>
+    {item.details ? <div className="agent-dynamics-timeline-details">
+      <TimelineDetailGroup label="输入" items={item.details.input} />
+      <TimelineDetailGroup label="输出" items={item.details.output} />
+      <TimelineDetailGroup label="异常" items={item.details.error} tone="danger" />
+    </div> : <div className="agent-dynamics-timeline-empty">暂无该步骤的安全摘要</div>}
+  </details>)}</div>;
+}
+
+function TimelineDetailGroup({ label, items, tone = 'default' }: { label: string; items?: Array<{ label: string; value: string }>; tone?: 'default' | 'danger' }) {
+  if (!items || items.length === 0) return null;
+  return <section className={`agent-dynamics-timeline-group ${tone === 'danger' ? 'danger' : ''}`}><div className="agent-dynamics-timeline-group-title">{label}</div><dl className="agent-dynamics-timeline-fields">{items.map((item) => <div key={`${label}-${item.label}`}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl></section>;
 }
 
 function DetailItem({ label, value }: { label: string; value: ReactNode }) {

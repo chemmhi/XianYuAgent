@@ -13,7 +13,7 @@ test('auto reply activity persists events and exposes summary/list/detail', asyn
   const conversation = await store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'buyer-1', buyerDisplayName: '买家一', itemTitle: '资料包' });
   const inbound = await store.createMessage({ adminId: admin.id, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '有货吗', source: 'human' });
   const run = await store.createAutoReplyRun({ adminId: admin.id, accountId: account.id, conversationId: conversation.id, inboundMessageId: inbound.message.id, intent: 'availability', decision: 'replied', status: 'received', inputDigest: 'sha256:in' });
-  await store.updateAutoReplyRun(run.id, { status: 'generated' });
+  await store.updateAutoReplyRun(run.id, { status: 'generated', eventTraceId: 'trace-activity-1', eventPayload: { input: { kind: 'reply_generation', contextDigest: 'sha256:ctx' }, output: { replyDigest: 'sha256:reply', outputLength: 12 } } });
   await store.updateAutoReplyRun(run.id, { status: 'persisted', senderOutcome: 'known_success' });
   await store.updateAutoReplyRun(run.id, { replyDigest: 'sha256:reply' });
   const activity = new AutoReplyActivityService(store);
@@ -26,6 +26,9 @@ test('auto reply activity persists events and exposes summary/list/detail', asyn
   assert.equal(detail.run.id, run.id);
   assert.equal(detail.events.length, 3);
   assert.equal(detail.inboundMessage?.bodyText, '有货吗');
+  assert.deepEqual(detail.events[0]?.payload.input, { kind: 'inbound_message', messageId: inbound.message.id, digest: 'sha256:in' });
+  assert.deepEqual(detail.events[1]?.payload.output, { status: 'generated', decision: 'replied', intent: 'availability', replyDigest: 'sha256:reply', outputLength: 12 });
+  assert.equal(detail.events[1]?.traceId, 'trace-activity-1');
   const summary = await activity.summary({ adminId: admin.id, accountId: account.id, from, to });
   assert.equal(summary.inboundCount, 1);
   assert.equal(summary.persistedCount, 1);

@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor } from './conversation-cursor.js';
@@ -467,11 +467,17 @@ export class PostgresStore implements Store {
     const result = await this.pool.query(`insert into messages.auto_reply_runs (id,admin_id,account_id,conversation_id,inbound_message_id,intent,decision,status,risk_flags,product_id,order_refs,input_digest,context_digest,reply_digest,sender_outcome,outbound_message_id,failure_code)
       values ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11::jsonb,$12,$13,$14,$15,$16,$17) returning *`, [id, input.adminId, input.accountId, input.conversationId, input.inboundMessageId, input.intent, input.decision, input.status, JSON.stringify(input.riskFlags ?? []), input.productId ?? null, JSON.stringify(input.orderRefs ?? []), input.inputDigest, input.contextDigest ?? null, input.replyDigest ?? null, input.senderOutcome ?? null, input.outboundMessageId ?? null, input.failureCode ?? null]);
     const run = this.toAutoReplyRun(result.rows[0]);
-    await this.appendAutoReplyRunEvent({ runId: run.id, accountId: run.accountId, eventType: 'run.created', status: run.status, stage: autoReplyStageForStatus(run.status), payload: { decision: run.decision, intent: run.intent, failureCode: run.failureCode } });
+    await this.appendAutoReplyRunEvent({ runId: run.id, accountId: run.accountId, eventType: 'run.created', status: run.status, stage: autoReplyStageForStatus(run.status), payload: {
+      decision: run.decision,
+      intent: run.intent,
+      failureCode: run.failureCode,
+      input: { kind: 'inbound_message', messageId: run.inboundMessageId, digest: run.inputDigest },
+      output: { status: run.status, decision: run.decision, intent: run.intent },
+    } });
     return run;
   }
 
-  async updateAutoReplyRun(id: string, patch: { intent?: string; decision?: AutoReplyDecision; status?: AutoReplyRunStatus; riskFlags?: string[]; productId?: string; orderRefs?: string[]; contextDigest?: string; replyDigest?: string; senderOutcome?: AutoReplyRunRecord['senderOutcome']; outboundMessageId?: string; failureCode?: string }): Promise<AutoReplyRunRecord | undefined> {
+  async updateAutoReplyRun(id: string, patch: AutoReplyRunUpdate): Promise<AutoReplyRunRecord | undefined> {
     const fields: string[] = [];
     const values: unknown[] = [id];
     const add = (field: string, value: unknown, cast?: string) => { values.push(value); fields.push(`${field}=$${values.length}${cast ?? ''}`); };
@@ -491,7 +497,7 @@ export class PostgresStore implements Store {
     const result = await this.pool.query(`update messages.auto_reply_runs set ${fields.join(', ')} where id=$1 returning *`, values);
     if (!result.rows[0]) return undefined;
     const run = this.toAutoReplyRun(result.rows[0]);
-    if (patch.status !== undefined) await this.appendAutoReplyRunEvent({ runId: run.id, accountId: run.accountId, eventType: `run.${patch.status}`, status: run.status, stage: autoReplyStageForStatus(run.status), payload: { decision: run.decision, intent: run.intent, failureCode: run.failureCode } });
+    if (patch.status !== undefined) await this.appendAutoReplyRunEvent({ runId: run.id, accountId: run.accountId, eventType: `run.${patch.status}`, status: run.status, stage: autoReplyStageForStatus(run.status), durationMs: patch.eventDurationMs, traceId: patch.eventTraceId, payload: { decision: run.decision, intent: run.intent, failureCode: run.failureCode, ...(patch.eventPayload ?? {}), output: { status: run.status, decision: run.decision, intent: run.intent, ...(patch.eventPayload?.output && typeof patch.eventPayload.output === 'object' && !Array.isArray(patch.eventPayload.output) ? patch.eventPayload.output as Record<string, unknown> : {}) } } });
     return run;
   }
 
