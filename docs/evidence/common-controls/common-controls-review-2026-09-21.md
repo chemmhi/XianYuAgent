@@ -1,14 +1,22 @@
 # Common Controls 复盘与修复登记
 
-更新时间：2026-09-21 22:40（Asia/Shanghai）  
-状态：**FAIL / OPEN — 仅完成问题登记，未开始本轮修复**  
+更新时间：2026-09-21 23:05（Asia/Shanghai）
+状态：**FAIL / OPEN — Phase 1 共享控件已修复，页面级 P0/P1 仍开放**
 唯一视觉基准：`F:\ChenHai\Project\XianYuAgent-search-select-preview\docs\design-preview\xianyu-admin-controls-review.html`
 
 ## 1. 审核结论
 
 用户本轮反馈确认：当前真实页面中的 SearchField 与设计稿存在可见差异，SelectField 差异更大，尤其是展开后的选项菜单。现有 `/controls` 预览页和 `visual-diff.md` 只能证明部分静态 token 接近，不能证明真实业务路由或 Select 展开态 1:1。
 
-本文件先登记问题和修复顺序。**必须先修复共享通用组件并完成浏览器截图/DOM 样式证据，再处理页面级遗漏和非组件问题。** 本文不授权、也不包含正式源码修改。
+本文件先登记问题和修复顺序。**共享通用组件已先修复并完成浏览器截图/DOM 样式证据；下一步才处理页面级遗漏和非组件问题。** 页面级问题仍按本文 Phase 2/3 执行。
+
+## 1.1 当前进度
+
+- Phase 1 共享控件修复已通过 `19 tests passed`、`npm --workspace apps/web run typecheck`、`npm --workspace apps/web run build` 与 `git diff --check`。
+- 合入提交：`fe9358c merge: fix shared search select controls`。
+- 共享控件证据：`docs/evidence/common-controls/shared-search-select-fix-v3/visual-diff.md`；已包含 `1440×900` 与 `390×844` 的基线、实现、差异热图和 DOM 样式指标。
+- SelectField Open preview 已在 `/controls` 实现；该静态菜单仅用于视觉审计，不进入业务实例，真实业务路由仍需继续做页面级复核。
+- 页面 CSS 隔离、Accounts/Coupons/Workspace 功能遗漏和真实业务路由截图仍为 `OPEN`。
 
 ## 2. 已确认的范围决策
 

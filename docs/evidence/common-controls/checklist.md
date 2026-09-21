@@ -1,11 +1,11 @@
 # Common Controls 迁移 Checklist
 
-更新时间：2026-09-21  
+更新时间：2026-09-21 23:05（Asia/Shanghai）
 范围：`apps/web` 正式前端；仅迁移通用搜索、输入、文本框、按钮和空值格。共享组件来源为 `apps/web/src/shared/ui/` 的 `SearchField`、`SelectField`、`InputField`、`TextAreaField`、`Button`、`PlaceholderCell`。
 
 ## 当前审核门禁
 
-**状态：FAIL / OPEN。** 本 checklist 不能作为本轮通过证据；它记录了已存在的迁移结果，但此前没有覆盖“设计要求但缺失的控件”、真实业务路由的共享控件样式覆盖、Select 展开态和 schema→UI 完整映射。详细问题、范围决策和分阶段修复计划见 [`common-controls-review-2026-09-21.md`](./common-controls-review-2026-09-21.md)。
+**状态：FAIL / OPEN。** 共享 SearchField/SelectField 已完成 Phase 1 修复并合入主线，但本 checklist 仍不能作为整体通过证据；页面级 CSS 隔离、设计要求但缺失的控件、真实业务路由覆盖、schema→UI 完整映射和逐页视觉证据仍未关闭。详细问题、范围决策和分阶段修复计划见 [`common-controls-review-2026-09-21.md`](./common-controls-review-2026-09-21.md)。
 
 ### 已确认的范围决策
 
@@ -58,6 +58,7 @@
 ## 合并前检查
 
 - [x] common-controls shared UI 文件已先合入目标分支，再合入本切片的页面改动。
+- [x] Phase 1 shared SearchField/SelectField 修复已合入 `fe9358c`，并完成定向测试、typecheck、build 与双 viewport 视觉证据。
 - [x] `rg -n "MessagesPage|workspace-composer|SellerAgent"` 确认在线聊天 composer 与 SellerAgent 未被本切片改动。
 - [x] `npm run typecheck --workspace apps/web`。
 - [x] `npm run test --workspace apps/web -- --run`（53 个测试文件、165 个测试全部通过）。
