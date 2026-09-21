@@ -420,6 +420,8 @@ export async function run(options) {
         '--headless=new',
         '--disable-gpu',
         '--disable-extensions',
+        '--disable-crash-reporter',
+        '--disable-breakpad',
         '--no-first-run',
         '--no-default-browser-check',
         '--remote-allow-origins=*',
@@ -485,6 +487,7 @@ export async function run(options) {
       child.stdout?.destroy();
       child.stderr?.destroy();
     }
+    await sleep(300);
     try { rmSync(chromeProfile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch (error) { console.warn(`Chrome temporary profile cleanup failed: ${error.message}`); }
     await baselineServer?.close();
   }
