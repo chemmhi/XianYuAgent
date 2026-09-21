@@ -12,6 +12,7 @@ const chromePath = process.env.CHROME_PATH ?? join(process.env.ProgramFiles ?? '
 const screenshotDir = join(root, 'docs', 'evidence', 'stage5', 'S4-VS7A', 'screenshots');
 const chromeProfile = join(tmpdir(), `xianyu-agent-settings-openai-chrome-${process.pid}`);
 const children = [];
+const resources = { runtime: undefined, providers: [], cdp: undefined };
 
 async function freePort() {
   return await new Promise((resolve, reject) => {
@@ -234,6 +235,7 @@ async function run() {
   const primary = await startFakeProvider('primary-v1', 'primary-model-v1', 'PRIMARY_V1_REPLY');
   const primaryV2 = await startFakeProvider('primary-v2', 'primary-model-v2', 'PRIMARY_V2_REPLY');
   const backup = await startFakeProvider('backup', 'backup-model', 'BACKUP_REPLY');
+  resources.providers.push(primary, primaryV2, backup);
   mkdirSync(chromeProfile, { recursive: true });
 
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
@@ -262,6 +264,7 @@ async function run() {
     AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS: '0',
   });
   let runtime = createApp(runtimeConfig);
+  resources.runtime = runtime;
   await runtime.listen();
   const actualApiPort = runtime.server.address()?.port ?? apiPort;
   const actualApiUrl = `http://127.0.0.1:${actualApiPort}`;
@@ -305,6 +308,7 @@ async function run() {
   const chrome = spawnProcess(chromePath, ['--headless=new', '--disable-gpu', '--disable-extensions', '--no-first-run', '--no-default-browser-check', '--remote-allow-origins=*', `--remote-debugging-port=${debugPort}`, `--user-data-dir=${chromeProfile}`, '--window-size=1440,900', 'about:blank']);
   await waitFor(async () => chrome.exitCode === null && (await fetch(`http://127.0.0.1:${debugPort}/json/version`)).ok, 'local Chrome');
   const cdp = await createCdpClient(debugPort);
+  resources.cdp = cdp;
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
   for (const pair of cookie.split('; ')) {
@@ -467,6 +471,7 @@ async function run() {
   if (databaseUrl) {
     await runtime.close();
     runtime = createApp(runtimeConfig);
+    resources.runtime = runtime;
     await runtime.listen();
     const restartConversation = await runtime.store.createConversation({ adminId, accountId, buyerRef: 'buyer-openai-restart', buyerDisplayName: 'Buyer E2E', itemRef: 'item-openai-e2e', itemTitle: 'OpenAI E2E 商品', externalConversationRef: `openai-restart-${process.pid}` });
     const restartInbound = await runtime.store.createMessage({ adminId, conversationId: restartConversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '重启后验证备用配置', source: 'system', externalMessageRef: `openai-restart-${Date.now()}.PNM`, traceId: 'openai-restart' });
@@ -486,12 +491,24 @@ async function run() {
     restart,
     screenshots: { primarySuccessDesktop, primarySuccessMobile, fallbackDesktop, fallbackMobile },
   }, null, 2));
-  cdp.socket.close();
 }
 
 try {
   await run();
 } finally {
+  try { resources.cdp?.socket.close(); } catch { /* already closed */ }
+  if (resources.runtime) {
+    try {
+      resources.runtime.server.closeAllConnections?.();
+      resources.runtime.server.closeIdleConnections?.();
+      await resources.runtime.close();
+    } catch (error) {
+      console.warn(`[settings-openai-e2e] runtime cleanup failed: ${error.message}`);
+    }
+  }
+  for (const provider of resources.providers.reverse()) {
+    try { await provider.close(); } catch (error) { console.warn(`[settings-openai-e2e] provider cleanup failed: ${error.message}`); }
+  }
   for (const child of children.reverse()) {
     if (!child.killed && child.exitCode === null) {
       if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
