@@ -46,6 +46,16 @@ describe('select usage architecture', () => {
     expect(css).toContain('.ui-select-control.is-open select');
     expect(css).not.toMatch(/select:focus-visible,\s*\.ui-select-control\.is-focus select,\s*\.ui-select-control\.is-open select/);
     expect(css).toMatch(/\.ui-select-control\.is-open select\s*\{\s*border-color: var\(--link\);\s*background: #fff;/);
+    expect(css).toContain('.ui-select-menu');
+    expect(css).toContain('.ui-select-menu-option.is-selected');
     expect(css).toContain('stroke-width: 1.5');
+  });
+
+  it('keeps preview-only menu props out of production feature code', () => {
+    const violations = listSourceFiles(featuresRoot)
+      .filter((file) => !/\.test\.(tsx|ts)$/.test(file))
+      .flatMap((file) => /previewMenuOptions|previewSelectedValue/.test(readFileSync(file, 'utf8')) ? [relative(featuresRoot, file)] : []);
+
+    expect(violations).toEqual([]);
   });
 });
