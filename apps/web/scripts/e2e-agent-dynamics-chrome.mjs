@@ -254,6 +254,8 @@ async function run() {
     await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".agent-dynamics-timeline-item[open] .agent-dynamics-timeline-details"))'), 'timeline input/output details');
     const timelineDetailsText = String(await evaluate(cdp, 'document.querySelector(".agent-dynamics-timeline-item[open] .agent-dynamics-timeline-details")?.textContent ?? ""'));
     if (!timelineDetailsText.includes('输入') || !timelineDetailsText.includes('输出')) throw new Error(`timeline input/output groups missing: ${timelineDetailsText}`);
+    const technicalCollapsed = await evaluate(cdp, 'Boolean(document.querySelector(".agent-dynamics-timeline-item[open] .agent-dynamics-timeline-technical") && !document.querySelector(".agent-dynamics-timeline-item[open] .agent-dynamics-timeline-technical")?.hasAttribute("open"))');
+    if (!technicalCollapsed) throw new Error('technical trace should stay collapsed by default');
     const firstNodeIo = await evaluate(cdp, `(() => {
       const root = document.querySelector('.agent-dynamics-timeline-item[open]');
       const groups = Array.from(root?.querySelectorAll('.agent-dynamics-timeline-group') ?? []);

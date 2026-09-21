@@ -366,6 +366,8 @@ const EVENT_DETAIL_LABELS: Record<string, string> = {
   code: '错误码',
 };
 
+const TECHNICAL_DETAIL_KEYS = new Set(['digest', 'inputDigest', 'contextDigest', 'replyDigest', 'messageId', 'inboundMessageId', 'conversationId', 'productId', 'orderRefs', 'outboundMessageId']);
+
 function formatEventDetailValue(value: unknown): string {
   if (value === undefined) return '—';
   if (value === null) return 'null';
@@ -377,10 +379,10 @@ function formatEventDetailValue(value: unknown): string {
   return String(value);
 }
 
-function mapEventDetailFields(value: unknown): Array<{ label: string; value: string }> | undefined {
+function mapEventDetailFields(value: unknown, technical = false): Array<{ label: string; value: string }> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const fields = Object.entries(value as Record<string, unknown>)
-    .filter(([key, fieldValue]) => Boolean(EVENT_DETAIL_LABELS[key]) && fieldValue !== undefined)
+    .filter(([key, fieldValue]) => Boolean(EVENT_DETAIL_LABELS[key]) && fieldValue !== undefined && TECHNICAL_DETAIL_KEYS.has(key) === technical)
     .map(([key, fieldValue]) => ({ label: EVENT_DETAIL_LABELS[key]!, value: formatEventDetailValue(fieldValue) }));
   return fields.length > 0 ? fields : undefined;
 }
@@ -419,6 +421,11 @@ function mapEventDetails(event: RawAutoReplyRunEvent, run: AgentDynamicsRunRowVM
   const input = mapEventDetailFields(payload.input);
   const output = mapEventDetailFields(payload.output);
   const error = mapEventDetailFields(payload.error) ?? (payload.failureCode ? [{ label: '错误码', value: formatEventDetailValue(payload.failureCode) }] : undefined);
+  const technical = [
+    ...(mapEventDetailFields(payload.input, true) ?? []),
+    ...(mapEventDetailFields(payload.output, true) ?? []),
+    ...(mapEventDetailFields(payload.error, true) ?? []),
+  ];
   const fallback = legacyEventDetails(event, run);
   const inferred = !input || !output;
   if (!input && !output && !error && !fallback) return undefined;
@@ -426,6 +433,7 @@ function mapEventDetails(event: RawAutoReplyRunEvent, run: AgentDynamicsRunRowVM
     input: input ?? fallback?.input,
     output: output ?? fallback?.output,
     error,
+    technical: technical.length > 0 ? technical : undefined,
     inferred: inferred && Boolean(fallback),
     note: inferred && fallback ? '该事件没有保存完整的结构化输入 / 输出；下方内容按事件类型和状态推断，仅用于兼容历史记录。' : undefined,
   };

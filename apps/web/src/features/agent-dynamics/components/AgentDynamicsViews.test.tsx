@@ -6,7 +6,7 @@ import type { AgentDynamicsFilters, AgentDynamicsLoadError, AgentDynamicsRunDeta
 const filters: AgentDynamicsFilters = { range: '24h', status: 'all', stage: 'all', keyword: '', page: 1, pageSize: 20 };
 const error: AgentDynamicsLoadError = { code: 'NETWORK_ERROR', message: '服务不可用', retryable: true };
 const detail: AgentDynamicsRunDetailVM = {
-  runId: 'run_success', createdAt: '2026-09-21T06:32:06.000Z', timeLabel: '14:32:06', buyer: { name: '一只橘喵喵亮晶晶', avatar: '橘' }, inboundPreview: '请问这个数字资料包具体包含什么？', product: { name: '数字资料包' }, intent: '商品咨询', stage: { key: 'persistence', label: '已完成', tone: 'info' }, decision: { key: 'replied', label: '自动回复', tone: 'success' }, senderOutcome: { label: '模拟 / 已落库', tone: 'success' }, durationMs: 3200, persisted: true, message: '请问这个数字资料包具体包含什么？', reply: '这个数字资料包包含完整资料说明。', outcomeLabel: '模拟 / 已落库', timeline: [{ id: 'received', title: '已接收买家消息', meta: '14:32:06 · 闲鱼网关 push', tone: 'success', details: { input: [{ label: '类型', value: 'inbound_message' }], output: [{ label: '状态', value: 'received' }] } }],
+  runId: 'run_success', createdAt: '2026-09-21T06:32:06.000Z', timeLabel: '14:32:06', buyer: { name: '一只橘喵喵亮晶晶', avatar: '橘' }, inboundPreview: '请问这个数字资料包具体包含什么？', product: { name: '数字资料包' }, intent: '商品咨询', stage: { key: 'persistence', label: '已完成', tone: 'info' }, decision: { key: 'replied', label: '自动回复', tone: 'success' }, senderOutcome: { label: '模拟 / 已落库', tone: 'success' }, durationMs: 3200, persisted: true, message: '请问这个数字资料包具体包含什么？', reply: '这个数字资料包包含完整资料说明。', outcomeLabel: '模拟 / 已落库', timeline: [{ id: 'received', title: '已接收买家消息', description: '网关接入：读取买家消息并创建本次自动回复运行', meta: '14:32:06 · 闲鱼网关 push', tone: 'success', details: { input: [{ label: '步骤类型', value: 'inbound_message' }], output: [{ label: '状态变化', value: 'received' }], technical: [{ label: '消息 ID', value: 'message-1' }] } }],
 };
 
 describe('AgentDynamicsViews', () => {
@@ -35,6 +35,7 @@ describe('AgentDynamicsViews', () => {
     expect(html).toContain('输入');
     expect(html).toContain('inbound_message');
     expect(html).toContain('输出');
+    expect(html).toContain('技术追踪');
     expect(html).toContain('打开在线聊天');
   });
 });

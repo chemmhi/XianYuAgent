@@ -39,7 +39,8 @@ describe('agent dynamics API adapter', () => {
     expect(runs.items[0]).toMatchObject({ runId: 'run-1', buyer: { name: '买家B' }, stage: { key: 'generation' }, decision: { key: 'failed' }, persisted: true });
     expect(detail.timeline[0]).toMatchObject({ title: '买家B 的回复生成失败', tone: 'danger', sequence: 2, traceId: 'trace-run-1' });
     expect(detail.timeline[0]?.description).toBe('异常终止：该节点返回失败，后续步骤停止');
-    expect(detail.timeline[0]?.details?.input).toEqual(expect.arrayContaining([{ label: '步骤类型', value: 'reply_generation' }, { label: '上下文摘要', value: 'sha256:ctx' }, { label: '输出长度', value: '0' }]));
+    expect(detail.timeline[0]?.details?.input).toEqual(expect.arrayContaining([{ label: '步骤类型', value: 'reply_generation' }, { label: '输出长度', value: '0' }]));
+    expect(detail.timeline[0]?.details?.technical).toEqual(expect.arrayContaining([{ label: '上下文摘要', value: 'sha256:ctx' }]));
     expect(detail.timeline[0]?.details?.output).toEqual(expect.arrayContaining([{ label: '决策结果', value: 'failed' }]));
     expect(detail.timeline[0]?.details?.error).toEqual([{ label: '错误码', value: 'RESPONSES_API_TIMEOUT' }]);
     expect(detail.message).toBe('请问购买后怎么使用？');

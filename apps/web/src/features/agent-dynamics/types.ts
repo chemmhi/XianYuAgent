@@ -140,6 +140,7 @@ export interface AgentDynamicsTimelineItemVM {
     input?: Array<{ label: string; value: string }>;
     output?: Array<{ label: string; value: string }>;
     error?: Array<{ label: string; value: string }>;
+    technical?: Array<{ label: string; value: string }>;
     note?: string;
     inferred?: boolean;
   };

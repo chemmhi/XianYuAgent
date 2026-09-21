@@ -216,6 +216,9 @@
 .agent-dynamics-timeline-fields dd { margin: 0; color: var(--agent-text); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
 .agent-dynamics-timeline-note { padding-top: 2px; color: var(--agent-sub); font-size: 9px; line-height: 1.45; }
 .agent-dynamics-timeline-note.inferred { color: var(--agent-warn); }
+.agent-dynamics-timeline-technical { padding-top: 2px; border-top: 1px dashed var(--agent-border); }
+.agent-dynamics-timeline-technical summary { color: var(--agent-sub); font-size: 9px; cursor: pointer; }
+.agent-dynamics-timeline-technical .agent-dynamics-timeline-fields { margin-top: 6px; }
 .agent-dynamics-timeline-empty { margin: 0 0 10px 27px; color: var(--agent-sub); font-size: 10px; }
 .agent-dynamics-reply-box { padding: 12px; border: 1px solid var(--agent-border); border-radius: 8px; background: #fbfcfd; color: var(--agent-text); font-size: 12px; line-height: 1.65; }
 .agent-dynamics-message-box { padding: 11px 12px; border-left: 3px solid var(--agent-link); border-radius: 0 8px 8px 0; background: var(--agent-soft-blue); color: var(--agent-text); font-size: 12px; line-height: 1.6; }

@@ -155,6 +155,7 @@ function Timeline({ items }: { items: AgentDynamicsTimelineItemVM[] }) {
       <TimelineDetailGroup label="本步输入（读取）" items={item.details.input} />
       <TimelineDetailGroup label="本步输出（产出）" items={item.details.output} />
       <TimelineDetailGroup label="异常 / 拦截" items={item.details.error} tone="danger" />
+      {item.details.technical && <TimelineTechnicalDetails items={item.details.technical} />}
       {item.details.note && <div className={`agent-dynamics-timeline-note${item.details.inferred ? ' inferred' : ''}`}>{item.details.note}</div>}
     </div> : <div className="agent-dynamics-timeline-empty">暂无该步骤的安全摘要</div>}
   </details>)}</div>;
@@ -163,6 +164,10 @@ function Timeline({ items }: { items: AgentDynamicsTimelineItemVM[] }) {
 function TimelineDetailGroup({ label, items, tone = 'default' }: { label: string; items?: Array<{ label: string; value: string }>; tone?: 'default' | 'danger' }) {
   if (!items || items.length === 0) return null;
   return <section className={`agent-dynamics-timeline-group ${tone === 'danger' ? 'danger' : ''}`}><div className="agent-dynamics-timeline-group-title">{label}</div><dl className="agent-dynamics-timeline-fields">{items.map((item) => <div key={`${label}-${item.label}`}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl></section>;
+}
+
+function TimelineTechnicalDetails({ items }: { items: Array<{ label: string; value: string }> }) {
+  return <details className="agent-dynamics-timeline-technical"><summary>技术追踪（{items.length} 项）</summary><dl className="agent-dynamics-timeline-fields">{items.map((item, index) => <div key={`${item.label}-${index}`}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl></details>;
 }
 
 function DetailItem({ label, value }: { label: string; value: ReactNode }) {
