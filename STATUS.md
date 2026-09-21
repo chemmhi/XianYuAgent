@@ -4,6 +4,7 @@
 
 - 在线聊天 CSRF：API 重启后旧页面的 token 失效时，前端刷新 `/api/v1/auth/session` 后仅重试原 mutation 一次并保留 `Idempotency-Key`；Web 38 个测试文件 / 117 个用例、类型检查、构建通过。
 - 自动回复白名单：真实 push 缺少 `senderName` 且本地会话尚无昵称时，先按 `externalConversationRef` 补全闲鱼买家身份并持久化，再进入白名单门禁；新增回归测试覆盖 allowlist 通过与 `auto_reply_runs.status=persisted`。真实买家 push 仍待外部触发，不能用历史同步替代。
+- 历史/push 竞态：若页面历史同步先按 external ref 落库，后续真实 push 即使消息已存在也会继续进入幂等自动回复处理；新增回归覆盖 `history import → same push → persisted` 与重复 push 单次出站。
 
 - 项目阶段：5
 - 阶段状态：进行中（账号管理、商品、卡券已具备主体链路；S4-VS3 仍待真实环境人工复核；下一批优先切片调整为在线聊天、Workspace 工作台和 Settings API Key 配置）

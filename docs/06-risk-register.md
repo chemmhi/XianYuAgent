@@ -164,3 +164,4 @@
 - `S5-RISK-021`：已补充账号级 listener 单飞、启动串行扫描、有限退避重试、网关非 200 响应拒绝、同帧 `syncPushPackage` 继续解析、断线自动重连和 push handler 隔离；相关单测与真实 PostgreSQL 凭证只读探针通过。风险仍开放，因为探针期间没有新的真实买家消息，尚未形成“闲鱼买家 push → 自动回复 → 真实发送 → 落库”的完整证据。
 - `S5-RISK-029`：继续保持 `PARTIALLY_VERIFIED / DRY-RUN ONLY`。现有 live 白名单配置可用，但仓库没有可复现的真实 live 发送归档；不得把历史同步导入、FakeSocket 或直接调用 `handleExternalEvent` 解释为真实买家网关 E2E。
 - 买家身份缺失门禁已修复：真实 push 无 `senderName` 且本地会话无昵称时，监听器会先按稳定会话引用调用闲鱼资料接口补全昵称；资料接口失败仍安全跳过并留下 `TEST_BUYER_NOT_ALLOWLISTED`，真实买家 push 仍需单独验收。
+- 历史/push 竞态已修复：历史导入不会自动回复，但后续同 external ref 的真实 push 不再因去重而提前返回；仍需用下一条真实买家消息确认网关 parser 能产生 push 事件。

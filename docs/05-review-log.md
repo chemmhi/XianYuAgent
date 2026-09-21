@@ -417,3 +417,4 @@
 
 | S5-R76 | 前端 / 鉴权 | 在线聊天页面在 API 重启后是否能恢复旧 CSRF token 并安全重放发送请求 | root + csrf_send_fix | PASS | `apps/web/src/api/http.ts`、`apps/web/src/api/http.test.ts`；403 `CSRF_INVALID` → session refresh → 单次重试，保留幂等键；Web 38 files / 117 tests、typecheck、build |
 | S5-R77 | 业务 / 白名单 | 真实 push 缺少买家昵称时是否会因身份缺失而被错误跳过 | root + listener_ready | PASS（受控回归） | `apps/api/src/xianyu-im-service.ts`、`apps/api/scripts/auto-reply.test.ts`；按 external conversation ref 补全身份后 allowlist 通过，run persisted |
+| S5-R78 | 业务 / 事件幂等 | 历史同步先落库后，真实 push 是否仍会触发一次自动回复 | root + listener_ready | PASS（受控回归） | `apps/api/src/xianyu-im-service.ts`、`apps/api/scripts/auto-reply.test.ts`；`created=false` 的 push 继续调用 `processInbound`，同一 inbound idempotent 且仅一条 outbound |
