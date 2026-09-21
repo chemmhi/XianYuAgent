@@ -115,8 +115,8 @@ test('agent resolves latest persisted config and falls back without restart', as
     if (url.endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'primary-model' }, { id: 'backup-model' }] }), { status: 200 });
     providerCalls.push({ provider: url, authorization });
     if (authorization === 'Bearer primary-fail-secret') return new Response(JSON.stringify({ error: 'primary down' }), { status: 401 });
-    const reply = authorization === 'Bearer backup-secret-key' ? 'BACKUP_REPLY' : authorization === 'Bearer primary-updated-secret' ? 'UPDATED_REPLY' : 'PRIMARY_REPLY';
-    return new Response(JSON.stringify({ model: 'runtime-model', output_text: reply }), { status: 200, headers: { 'content-type': 'application/json' } });
+    const text = authorization === 'Bearer backup-secret-key' ? 'BACKUP_REPLY' : authorization === 'Bearer primary-updated-secret' ? 'UPDATED_REPLY' : 'PRIMARY_REPLY';
+    return new Response(JSON.stringify({ model: 'runtime-model', output_text: JSON.stringify({ decision: 'reply', text }) }), { status: 200, headers: { 'content-type': 'application/json' } });
   }) as typeof fetch;
 
   const runtime = createApp(loadConfig({ HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["Buyer"]', AUTO_REPLY_AGENT_DEBOUNCE_MS: '0' }));

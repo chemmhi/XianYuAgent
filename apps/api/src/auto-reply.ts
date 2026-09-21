@@ -14,8 +14,8 @@ export interface AutoReplyClassification {
 export interface AutoReplyContext {
   conversation: ConversationRecord;
   inboundMessage: MessageRecord;
-  recentMessages: Array<Pick<MessageRecord, 'direction' | 'senderRole' | 'bodyText' | 'createdAt' | 'source'>>;
-  product?: Pick<ProductRecord, 'id' | 'accountId' | 'externalProductRef' | 'title' | 'description' | 'defaultReplyTemplate' | 'aiPrompt' | 'priceMinor'>;
+  recentMessages: Array<Pick<MessageRecord, 'direction' | 'senderRole' | 'bodyText' | 'createdAt' | 'source'> & Partial<Pick<MessageRecord, 'bodyType' | 'bodyRef'>>>;
+  product?: Pick<ProductRecord, 'id' | 'accountId' | 'externalProductRef' | 'title' | 'description' | 'defaultReplyTemplate' | 'aiPrompt' | 'priceMinor' | 'attributes'>;
   orders: Array<Pick<OrderRecord, 'id' | 'orderNo' | 'buyerId' | 'itemId' | 'itemTitle' | 'paymentStatus' | 'orderStatus' | 'deliveryStatus' | 'afterSalesStatus'>>;
 }
 
@@ -25,6 +25,8 @@ export interface AutoReplyGeneratedReply {
 }
 
 export interface AutoReplyGenerator {
+  readonly supportsStructuredDecision?: boolean;
+  readonly supportsMultimodal?: boolean;
   generate(input: { adminId?: string; context: AutoReplyContext; classification: AutoReplyClassification }): Promise<string | AutoReplyGeneratedReply | undefined>;
   segmentReply?(input: { reply: string }): Promise<string[] | undefined>;
 }
@@ -196,7 +198,11 @@ export class AutoReplyService {
     }
     try {
       const runtime = await this.resolveRuntimeOptions(input.adminId, conversation.accountId);
-      if (!runtime.enabled || inboundMessage.direction !== 'inbound' || inboundMessage.bodyType !== 'text' || !inboundMessage.bodyText?.trim()) {
+      const modelDecidesRouting = runtime.generator.supportsStructuredDecision === true;
+      const supportedMessage = inboundMessage.bodyType === 'text'
+        ? Boolean(inboundMessage.bodyText?.trim())
+        : inboundMessage.bodyType === 'image' && runtime.generator.supportsMultimodal === true && Boolean(inboundMessage.bodyRef?.trim());
+      if (!runtime.enabled || inboundMessage.direction !== 'inbound' || !supportedMessage) {
         const updated = await this.store.updateAutoReplyRun(run.id, { status: 'skipped', decision: 'skipped', failureCode: !runtime.enabled ? 'AUTO_REPLY_DISABLED' : 'UNSUPPORTED_MESSAGE' });
         return { run: updated ?? run, inboundMessage };
       }
@@ -208,7 +214,19 @@ export class AutoReplyService {
         return { run: updated ?? run, inboundMessage };
       }
 
-      const classification = this.classifier.classify(inboundMessage.bodyText);
+      const ruleClassification = this.classifier.classify(inboundMessage.bodyText ?? '');
+      const hardSafety = modelDecidesRouting && ['prompt_injection', 'credential_request'].includes(ruleClassification.intent);
+      const classification = modelDecidesRouting
+        ? {
+            intent: hardSafety ? ruleClassification.intent : 'general' as const,
+            confidence: hardSafety ? ruleClassification.confidence : 1,
+            decision: 'replied' as const,
+            riskFlags: [
+              ...(hardSafety ? ruleClassification.riskFlags : []),
+              ...(inboundMessage.bodyType === 'image' ? ['multimodal_input'] : []),
+            ],
+          }
+        : ruleClassification;
       await this.store.updateAutoReplyRun(run.id, { intent: classification.intent, decision: classification.decision, status: 'classified', riskFlags: classification.riskFlags });
       if (classification.decision === 'replied') {
         const debounceKey = `${input.adminId}:${conversation.id}`;
@@ -225,7 +243,7 @@ export class AutoReplyService {
       const contextDigest = digestJson({ conversationId: conversation.id, productId: context.product?.id, orderRefs: context.orders.map((order) => order.orderNo), history: context.recentMessages.map((message) => ({ direction: message.direction, senderRole: message.senderRole, createdAt: message.createdAt, bodyText: message.bodyText ?? '' })) });
       await this.store.updateAutoReplyRun(run.id, { status: 'context_loaded', contextDigest, productId: context.product?.id, orderRefs: context.orders.map((order) => order.orderNo) });
 
-      if (conversation.handlingMode === 'human' || classification.decision === 'handoff') {
+      if (conversation.handlingMode === 'human' || (modelDecidesRouting && hardSafety) || (!modelDecidesRouting && classification.decision === 'handoff')) {
         const riskFlags = [...classification.riskFlags, ...(conversation.handlingMode === 'human' ? ['human_mode'] : [])];
         const updated = await this.store.updateAutoReplyRun(run.id, { status: 'handoff', decision: 'handoff', riskFlags });
         await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'handoff', intent: classification.intent, riskFlags });
@@ -269,7 +287,8 @@ export class AutoReplyService {
       const failureCode = toFailureCode(error);
       if (failureCode === 'AGENT_HANDOFF') {
         const updated = await this.store.updateAutoReplyRun(run.id, { status: 'handoff', decision: 'handoff', failureCode });
-        await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'handoff', intent: run.intent, failureCode });
+        const reason = error instanceof Error && error.message.trim() ? error.message.trim().slice(0, 500) : undefined;
+        await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'handoff', intent: run.intent, failureCode, ...(reason ? { reason } : {}) });
         return { run: updated ?? run, inboundMessage };
       }
       const updated = await this.store.updateAutoReplyRun(run.id, { status: 'failed', decision: 'failed', failureCode });
@@ -282,7 +301,7 @@ export class AutoReplyService {
     const history = await this.store.listMessages(adminId, conversation.id, { limit: maxHistory });
     const product = await this.findProduct(adminId, conversation);
     const orders = await this.findOrders(adminId, conversation);
-    return { conversation, inboundMessage, recentMessages: history.items.map((message) => ({ direction: message.direction, senderRole: message.senderRole, bodyText: message.bodyText, createdAt: message.createdAt, source: message.source })), product, orders: orders.map((order) => ({ id: order.id, orderNo: order.orderNo, buyerId: order.buyerId, itemId: order.itemId, itemTitle: order.itemTitle, paymentStatus: order.paymentStatus, orderStatus: order.orderStatus, deliveryStatus: order.deliveryStatus, afterSalesStatus: order.afterSalesStatus })) };
+    return { conversation, inboundMessage, recentMessages: history.items.map((message) => ({ direction: message.direction, senderRole: message.senderRole, bodyType: message.bodyType, bodyText: message.bodyText, bodyRef: message.bodyRef, createdAt: message.createdAt, source: message.source })), product, orders: orders.map((order) => ({ id: order.id, orderNo: order.orderNo, buyerId: order.buyerId, itemId: order.itemId, itemTitle: order.itemTitle, paymentStatus: order.paymentStatus, orderStatus: order.orderStatus, deliveryStatus: order.deliveryStatus, afterSalesStatus: order.afterSalesStatus })) };
   }
 
   private async resolveRuntimeOptions(adminId: string, accountId: string): Promise<Required<AutoReplyServiceRuntimeOptions>> {
@@ -319,7 +338,7 @@ export class AutoReplyService {
     const result = await this.store.listProducts(adminId, { accountId: conversation.accountId, keyword: conversation.itemRef, page: 1, pageSize: 10 });
     const product = result.items.find((item) => item.id === conversation.itemRef || item.externalProductRef === conversation.itemRef) ?? result.items.find((item) => item.title === conversation.itemTitle);
     if (!product) return undefined;
-    return { id: product.id, accountId: product.accountId, externalProductRef: product.externalProductRef, title: product.title, description: product.description, defaultReplyTemplate: product.defaultReplyTemplate, aiPrompt: product.aiPrompt, priceMinor: product.priceMinor };
+    return { id: product.id, accountId: product.accountId, externalProductRef: product.externalProductRef, title: product.title, description: product.description, defaultReplyTemplate: product.defaultReplyTemplate, aiPrompt: product.aiPrompt, priceMinor: product.priceMinor, attributes: product.attributes };
   }
 
   private async findOrders(adminId: string, conversation: ConversationRecord): Promise<OrderRecord[]> {

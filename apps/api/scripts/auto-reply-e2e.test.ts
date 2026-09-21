@@ -4,6 +4,10 @@ import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { XianyuImClient } from '../src/xianyu-im.js';
 
+function replyPayload(text: string): string {
+  return JSON.stringify({ decision: 'reply', text });
+}
+
 test('xianyu listener drives product and general auto-reply chains without real send', async () => {
   const runtime = createApp(loadConfig({
     ...process.env,
@@ -118,7 +122,7 @@ test('real push enters buyer Agent tool loop, simulates reply, and persists run 
     modelCall += 1;
     const message = modelCall === 1
       ? { content: '', tool_calls: [{ id: 'call-product-1', type: 'function', function: { name: 'get_product_info', arguments: '{}' } }] }
-      : { content: '这是一个数字资料包，页面显示价格为 19.99 元。' };
+      : { content: replyPayload('这是一个数字资料包，页面显示价格为 19.99 元。') };
     return new Response(JSON.stringify({ model: 'buyer-agent-test', choices: [{ message }] }), { status: 200, headers: { 'content-type': 'application/json' } });
   }) as typeof fetch;
   const runtime = createApp(loadConfig({
@@ -171,7 +175,7 @@ test('persisted Agent settings apply to the next buyer push without restart', as
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     modelRequests.push(body);
     modelCall += 1;
-    const content = modelCall === 1 ? '初始配置回复。' : '更新配置后的回复，这是一段用于验证设置即时生效的较长文本。';
+    const content = modelCall === 1 ? replyPayload('初始配置回复。') : replyPayload('更新配置后的回复，这是一段用于验证设置即时生效的较长文本。');
     return new Response(JSON.stringify({ model: 'settings-e2e', choices: [{ message: { content } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
   }) as typeof fetch;
   const runtime = createApp(loadConfig({
@@ -198,7 +202,7 @@ test('persisted Agent settings apply to the next buyer push without restart', as
     socket.emit('message', pushFrame('settings-push-1', 'settings-agent-conversation', 'settings-message-1.PNM', 'settings-agent-buyer', '你好', '设置买家'));
     await waitFor(() => results.length >= 1);
     assert.equal(results[0]?.autoReply?.run.status, 'persisted');
-    assert.equal((modelRequests[0]?.messages as Array<{ role: string; content: string }>)[0]?.content, '初始系统提示');
+    assert.match((modelRequests[0]?.messages as Array<{ role: string; content: string }>)[0]?.content ?? '', /^初始系统提示/);
 
     const current = await runtime.autoReplyAgentSettings.get(adminId, account.id);
     const updated = await runtime.autoReplyAgentSettings.update({
@@ -214,7 +218,7 @@ test('persisted Agent settings apply to the next buyer push without restart', as
     socket.emit('message', pushFrame('settings-push-2', 'settings-agent-conversation', 'settings-message-2.PNM', 'settings-agent-buyer', '请继续介绍', '设置买家'));
     await waitFor(() => results.length >= 2);
     assert.equal(results[1]?.autoReply?.run.status, 'persisted');
-    assert.equal((modelRequests[1]?.messages as Array<{ role: string; content: string }>)[0]?.content, '设置页更新后的系统提示');
+    assert.match((modelRequests[1]?.messages as Array<{ role: string; content: string }>)[0]?.content ?? '', /^设置页更新后的系统提示/);
     assert.ok((results[1]?.autoReply?.outboundMessage?.bodyText ?? '').length <= 50);
     assert.equal(socket.sent.filter((message) => message.lwp === '/r/MessageSend/sendByReceiverScope').length, 0);
     assert.equal((await runtime.messages.listMessages(adminId, conversation.id, { limit: 20 })).items.filter((message) => message.direction === 'outbound').length, 2);

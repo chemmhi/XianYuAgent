@@ -10,6 +10,12 @@ export type ModelWireApi = 'chat' | 'responses';
 
 export type ModelMessageRole = 'system' | 'user' | 'assistant' | 'tool';
 
+export type ModelMessageContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } };
+
+export type ModelMessageContent = string | ModelMessageContentPart[];
+
 export interface ModelToolCall {
   id: string;
   type: 'function';
@@ -30,7 +36,7 @@ export interface ModelToolDefinition {
 
 export interface ModelMessage {
   role: ModelMessageRole;
-  content: string;
+  content: ModelMessageContent;
   name?: string;
   toolCallId?: string;
   toolCalls?: ModelToolCall[];
@@ -428,7 +434,7 @@ function toResponsesInputItems(message: ModelMessage): Array<Record<string, unkn
     items.push({
       type: 'message',
       role: message.role === 'tool' ? 'user' : message.role,
-      content: message.content,
+      content: toResponsesContent(message.content),
       ...(message.name ? { name: message.name } : {}),
     });
   }
@@ -439,9 +445,21 @@ function toResponsesInputItems(message: ModelMessage): Array<Record<string, unkn
   }
   if (message.role === 'tool') {
     items.length = 0;
-    items.push({ type: 'function_call_output', call_id: message.toolCallId ?? 'unknown', output: message.content });
+    items.push({ type: 'function_call_output', call_id: message.toolCallId ?? 'unknown', output: modelContentToText(message.content) });
   }
   return items;
+}
+
+function toResponsesContent(content: ModelMessageContent): string | Array<Record<string, unknown>> {
+  if (typeof content === 'string') return content;
+  return content.map((part) => part.type === 'text'
+    ? { type: 'input_text', text: part.text }
+    : { type: 'input_image', image_url: part.image_url.url, ...(part.image_url.detail ? { detail: part.image_url.detail } : {}) });
+}
+
+function modelContentToText(content: ModelMessageContent): string {
+  if (typeof content === 'string') return content;
+  return content.filter((part): part is { type: 'text'; text: string } => part.type === 'text').map((part) => part.text).join('\n');
 }
 
 function toResponsesToolDefinition(tool: ModelToolDefinition): Record<string, unknown> {

@@ -319,7 +319,7 @@ export class XianyuImService {
       createdAt: effectiveEvent.occurredAt,
       traceId: `xianyu:push:${effectiveEvent.externalMessageRef}`,
     });
-    if (effectiveEvent.direction !== 'inbound' || effectiveEvent.bodyType !== 'text' || !this.autoReply) return { created: imported.created };
+    if (effectiveEvent.direction !== 'inbound' || !['text', 'image'].includes(effectiveEvent.bodyType) || !this.autoReply) return { created: imported.created };
     const autoReply = await this.autoReply.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: imported.message.messageId, senderName: effectiveEvent.senderName, requestId: `xianyu:auto-reply:${effectiveEvent.externalMessageRef}`, traceId: `xianyu:auto-reply:${effectiveEvent.externalMessageRef}` });
     return { created: imported.created, autoReply };
   }

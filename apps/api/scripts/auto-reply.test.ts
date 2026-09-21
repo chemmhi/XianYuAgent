@@ -37,7 +37,7 @@ test('model generator sends bounded structured context to the shared model clien
   const generator = new ModelAutoReplyGenerator({
     complete: async (input) => {
       request = input;
-      return { content: '可以的，我来帮你确认。', model: 'test-model' };
+      return { content: JSON.stringify({ decision: 'reply', text: '可以的，我来帮你确认。' }), model: 'test-model' };
     },
   });
   const context = {
@@ -49,7 +49,7 @@ test('model generator sends bounded structured context to the shared model clien
   } as unknown as AutoReplyContext;
 
   const reply = await generator.generate({ context, classification: { intent: 'general', confidence: 0.9, decision: 'replied', riskFlags: [] } });
-  assert.equal(reply, '可以的，我来帮你确认。');
+  assert.deepEqual(reply, { text: '可以的，我来帮你确认。', segments: undefined });
   assert.equal(request?.messages[0]?.role, 'system');
   assert.equal(request?.messages[1]?.role, 'user');
   const prompt = request?.messages[1]?.content ?? '';
@@ -64,7 +64,7 @@ test('configured model provider generates the persisted auto-reply', async () =>
   const calls: Array<{ url: string; body: { model: string; messages: Array<{ role: string; content: string }> } }> = [];
   globalThis.fetch = (async (input, init) => {
     calls.push({ url: String(input), body: JSON.parse(String(init?.body)) as typeof calls[number]['body'] });
-    return new Response(JSON.stringify({ model: 'test-model', choices: [{ message: { content: 'AI 生成的准确回复' } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    return new Response(JSON.stringify({ model: 'test-model', choices: [{ message: { content: JSON.stringify({ decision: 'reply', text: 'AI 生成的准确回复' }) } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
   }) as typeof fetch;
 
   const runtime = createApp(loadConfig({
@@ -93,6 +93,37 @@ test('configured model provider generates the persisted auto-reply', async () =>
   }
 });
 
+test('multimodal inbound image reaches the model Agent and persists a structured reply', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ body: { messages: Array<{ role: string; content: unknown }> } }> = [];
+  globalThis.fetch = (async (_input, init) => {
+    calls.push({ body: JSON.parse(String(init?.body)) as typeof calls[number]['body'] });
+    return new Response(JSON.stringify({ model: 'vision-model', choices: [{ message: { content: JSON.stringify({ decision: 'reply', text: '我看到了你发来的图片。' }) } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+
+  const runtime = createApp(loadConfig({
+    HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
+    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'vision-model', WIRE_API: 'chat', MODEL_TIMEOUT_MS: '1000', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["Vision Buyer"]',
+  }));
+  const admin = await runtime.store.createAdmin({ email: 'vision@example.com', passwordHash: 'hash', displayName: 'Vision' });
+  const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'vision-seller' });
+  const conversation = await runtime.store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'vision-buyer', buyerDisplayName: 'Vision Buyer', itemRef: 'vision-item', itemTitle: '图片商品', itemImageUrl: 'https://img.example/product.png', externalConversationRef: 'vision-conversation' });
+  await runtime.listen();
+  try {
+    const result = await runtime.xianyuIm.handleExternalEvent(admin.id, {
+      accountId: account.id, externalConversationRef: conversation.externalConversationRef, externalMessageRef: 'vision-message-1.PNM', senderRef: 'vision-buyer', senderName: 'Vision Buyer', direction: 'inbound', bodyType: 'image', assetRef: 'https://img.example/buyer.png', occurredAt: new Date().toISOString(),
+    });
+    assert.equal(result.autoReply?.run.status, 'persisted');
+    assert.equal(result.autoReply?.outboundMessage?.bodyText, '我看到了你发来的图片。');
+    const userMessage = calls[0]?.body.messages.find((message) => message.role === 'user');
+    assert.ok(Array.isArray(userMessage?.content));
+    assert.deepEqual((userMessage?.content as Array<{ type: string; image_url?: { url: string } }>).filter((part) => part.type === 'image_url').map((part) => part.image_url?.url), ['https://img.example/buyer.png', 'https://img.example/product.png']);
+  } finally {
+    await runtime.close();
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('configured Responses provider generates the persisted auto-reply', async () => {
   const originalFetch = globalThis.fetch;
   const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
@@ -101,8 +132,8 @@ test('configured Responses provider generates the persisted auto-reply', async (
     return new Response(JSON.stringify({
       id: 'resp-auto-reply-1',
       model: 'responses-model',
-      output_text: 'Responses 生成的准确回复',
-      output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Responses 生成的准确回复' }] }],
+      output_text: JSON.stringify({ decision: 'reply', text: 'Responses 生成的准确回复' }),
+      output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: JSON.stringify({ decision: 'reply', text: 'Responses 生成的准确回复' }) }] }],
     }), { status: 200, headers: { 'content-type': 'application/json' } });
   }) as typeof fetch;
 

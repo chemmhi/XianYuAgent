@@ -21,6 +21,14 @@ function context(overrides: Record<string, unknown> = {}): AutoReplyContext {
 
 const classification: AutoReplyClassification = { intent: 'general', confidence: 0.9, decision: 'replied', riskFlags: [] };
 
+function replyPayload(text: string, segments?: string[]): string {
+  return JSON.stringify({ decision: 'reply', text, ...(segments ? { segments } : {}) });
+}
+
+function contentText(value: ModelMessage['content'] | undefined): string {
+  return typeof value === 'string' ? value : '';
+}
+
 test('buyer Agent configuration resolves independently from Workspace settings', () => {
   const config = resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_MAX_LOOPS: '9', AUTO_REPLY_AGENT_MAX_TOOL_CALLS: '2', AUTO_REPLY_AGENT_DEBOUNCE_MS: '1500', AUTO_REPLY_AGENT_SYSTEM_PROMPT: '买家专用提示词' });
   assert.equal(config.maxLoops, 8);
@@ -40,13 +48,14 @@ test('buyer Agent enforces a 30-character minimum max reply length', () => {
 test('buyer Agent can resolve the latest persisted configuration per message', async () => {
   const seenPrompts: string[] = [];
   const providerArgs: Array<[string, string]> = [];
-  const client: ModelClient = { complete: async (request) => { seenPrompts.push(request.messages[0]?.content ?? ''); return { content: '已按最新配置处理。', model: 'test' }; } };
+  const client: ModelClient = { complete: async (request) => { seenPrompts.push(typeof request.messages[0]?.content === 'string' ? request.messages[0].content : ''); return { content: replyPayload('已按最新配置处理。'), model: 'test' }; } };
   const store = {} as Store;
   const updated = resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_SYSTEM_PROMPT: '设置页最新提示词', AUTO_REPLY_AGENT_CONFIG_VERSION: 'settings-v2' });
   const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}), { configProvider: async (adminId, accountId) => { providerArgs.push([adminId, accountId]); return updated; } });
   const reply = await agent.generate({ adminId: 'admin-1', context: context(), classification });
-  assert.equal(reply, '已按最新配置处理。');
-  assert.deepEqual(seenPrompts, ['设置页最新提示词']);
+  assert.deepEqual(reply, { text: '已按最新配置处理。', segments: undefined });
+  assert.equal(seenPrompts.length, 1);
+  assert.match(seenPrompts[0] ?? '', /^设置页最新提示词/);
   assert.deepEqual(providerArgs, [['admin-1', 'account-1']]);
 });
 
@@ -58,18 +67,18 @@ test('agent chooses product tool then returns final answer', async () => {
       requests.push(request);
       call += 1;
       if (call === 1) return { content: '', model: 'test', toolCalls: [{ id: 'tool-1', type: 'function', function: { name: 'get_product_info', arguments: '{}' } }] };
-      return { content: '这是一个数字资料包，页面显示价格为 19.99 元。', model: 'test' };
+      return { content: replyPayload('这是一个数字资料包，页面显示价格为 19.99 元。'), model: 'test' };
     },
   };
   const product = { id: 'product-1', accountId: 'account-1', externalProductRef: 'item-1', title: '资料包', description: '数字资料', defaultReplyTemplate: undefined, aiPrompt: undefined, priceMinor: 1_999, status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' };
   const store = { getProduct: async () => product, listProducts: async () => ({ items: [product], page: 1, pageSize: 100, total: 1, totalPages: 1 }) } as unknown as Store;
   const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}));
   const reply = await agent.generate({ adminId: 'admin-1', context: context(), classification });
-  assert.equal(reply, '这是一个数字资料包，页面显示价格为 19.99 元。');
+  assert.deepEqual(reply, { text: '这是一个数字资料包，页面显示价格为 19.99 元。', segments: undefined });
   assert.equal(requests.length, 2);
   assert.equal(requests[0]?.tools?.length, AUTO_REPLY_AGENT_TOOLS.length);
   assert.equal(requests[1]?.messages.at(-1)?.role, 'tool');
-  assert.match(requests[1]?.messages.at(-1)?.content ?? '', /资料包/);
+  assert.match(contentText(requests[1]?.messages.at(-1)?.content), /资料包/);
 });
 
 test('agent preserves model-provided semantic segments and supports a segmentation retry', async () => {
@@ -77,7 +86,7 @@ test('agent preserves model-provided semantic segments and supports a segmentati
   const client: ModelClient = {
     complete: async () => {
       calls += 1;
-      if (calls === 1) return { content: JSON.stringify({ text: '先说明商品是什么。再说明使用方式。', segments: ['先说明商品是什么。', '再说明使用方式。'] }), model: 'test' };
+      if (calls === 1) return { content: replyPayload('先说明商品是什么。再说明使用方式。', ['先说明商品是什么。', '再说明使用方式。']), model: 'test' };
       return { content: JSON.stringify({ segments: ['第一句。', '第二句。'] }), model: 'test' };
     },
   };
@@ -107,6 +116,61 @@ test('OpenAI-compatible transport preserves native tool calls', async () => {
   }
 });
 
+test('agent rejects unstructured final output instead of sending raw model text', async () => {
+  const agent = new ToolCallingAutoReplyAgent({} as Store, { complete: async () => ({ content: '可以的，我来帮你确认。', model: 'test' }) }, resolveAutoReplyAgentConfig({}));
+  await assert.rejects(() => agent.generate({ adminId: 'admin-1', context: context(), classification }), (error: unknown) => (error as { code?: string }).code === 'AGENT_INVALID_OUTPUT');
+});
+
+test('agent routes structured handoff output without returning reply text', async () => {
+  const agent = new ToolCallingAutoReplyAgent({} as Store, { complete: async () => ({ content: JSON.stringify({ decision: 'handoff', reason: '需要人工确认售后状态' }), model: 'test' }) }, resolveAutoReplyAgentConfig({}));
+  await assert.rejects(() => agent.generate({ adminId: 'admin-1', context: context(), classification }), (error: unknown) => (error as { code?: string; message?: string }).code === 'AGENT_HANDOFF' && (error as { message?: string }).message === '需要人工确认售后状态');
+});
+
+test('OpenAI-compatible transport maps image content for Chat and Responses APIs', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<Record<string, unknown>> = [];
+  globalThis.fetch = (async (_input, init) => {
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    requests.push(body);
+    return new Response(JSON.stringify('messages' in body
+      ? { model: 'test', choices: [{ message: { content: JSON.stringify({ decision: 'reply', text: '看到了图片。' }) } }] }
+      : { model: 'test', output_text: JSON.stringify({ decision: 'reply', text: '看到了图片。' }), output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: JSON.stringify({ decision: 'reply', text: '看到了图片。' }) }] }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+  try {
+    const content = [{ type: 'text', text: '请识别图片' }, { type: 'image_url', image_url: { url: 'https://img.example/item.png', detail: 'auto' } }] as const;
+    const chat = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl: 'https://model.example/v1', model: 'chat-model', wireApi: 'chat' });
+    await chat.complete({ messages: [{ role: 'user', content }] });
+    const responses = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl: 'https://model.example/v1', model: 'responses-model', wireApi: 'responses' });
+    await responses.complete({ messages: [{ role: 'user', content }] });
+    const chatContent = ((requests[0]?.messages as Array<Record<string, unknown>>)[0]?.content) as Array<Record<string, unknown>>;
+    assert.equal(chatContent[1]?.type, 'image_url');
+    const responseInput = requests[1]?.input as Array<Record<string, unknown>>;
+    assert.deepEqual(responseInput[0]?.content, [
+      { type: 'input_text', text: '请识别图片' },
+      { type: 'input_image', image_url: 'https://img.example/item.png', detail: 'auto' },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('agent includes inbound image and product image in multimodal content', async () => {
+  let request: ModelMessage | undefined;
+  const client: ModelClient = { complete: async (input) => { request = input.messages[1]; return { content: replyPayload('已看到了图片。'), model: 'test' }; } };
+  const agent = new ToolCallingAutoReplyAgent({} as Store, client, resolveAutoReplyAgentConfig({}));
+  await agent.generate({
+    adminId: 'admin-1',
+    context: context({
+      inboundMessage: { ...context().inboundMessage, bodyType: 'image', bodyText: undefined, bodyRef: 'https://img.example/buyer.png' },
+      conversation: { ...context().conversation, itemImageUrl: 'https://img.example/product.png' },
+    }),
+    classification,
+  });
+  assert.ok(Array.isArray(request?.content));
+  const content = request?.content as Array<{ type: string; image_url?: { url: string } }>;
+  assert.deepEqual(content.filter((part) => part.type === 'image_url').map((part) => part.image_url?.url), ['https://img.example/buyer.png', 'https://img.example/product.png']);
+});
+
 test('buyer conversation tool filters same buyer across products and orders', async () => {
   const conversations = [
     { id: 'conversation-1', accountId: 'account-1', buyerRef: 'buyer-1', itemRef: 'item-1', itemTitle: '商品一', unreadCount: 0, handlingMode: 'ai', version: 1 },
@@ -118,9 +182,9 @@ test('buyer conversation tool filters same buyer across products and orders', as
   const conversationQueries: Array<{ accountId?: string; limit?: number; cursor?: string }> = [];
   const client: ModelClient = {
     complete: async (request) => {
-      calls.push(request.messages.at(-1)?.content ?? '');
+      calls.push(contentText(request.messages.at(-1)?.content));
       if (calls.length === 1) return { content: '', model: 'test', toolCalls: [{ id: 'tool-conversations', type: 'function', function: { name: 'get_buyer_conversations', arguments: '{}' } }] };
-      return { content: '我已结合你之前咨询的商品信息说明。', model: 'test' };
+      return { content: replyPayload('我已结合你之前咨询的商品信息说明。'), model: 'test' };
     },
   };
   const store = {
@@ -146,8 +210,8 @@ test('buyer orders tool reads all pages and filters buyer/account scope', async 
   const client: ModelClient = {
     complete: async (request) => {
       if (request.messages.at(-1)?.role === 'tool') {
-        orderToolPayload = request.messages.at(-1)?.content;
-        return { content: '订单信息已确认。', model: 'test' };
+        orderToolPayload = contentText(request.messages.at(-1)?.content);
+        return { content: replyPayload('订单信息已确认。'), model: 'test' };
       }
       return { content: '', model: 'test', toolCalls: [{ id: 'tool-orders', type: 'function', function: { name: 'get_buyer_orders', arguments: '{}' } }] };
     },
@@ -155,7 +219,7 @@ test('buyer orders tool reads all pages and filters buyer/account scope', async 
   const store = { listOrders: async (_adminId: string, query: { page?: number; accountId?: string }) => { requestedPages.push(query.page ?? 0); requestedAccountIds.push(query.accountId); return pages[(query.page ?? 1) - 1] as never; } } as unknown as Store;
   const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}));
   const reply = await agent.generate({ adminId: 'admin-1', context: context(), classification });
-  assert.equal(reply, '订单信息已确认。');
+  assert.deepEqual(reply, { text: '订单信息已确认。', segments: undefined });
   assert.deepEqual(requestedPages, [1, 2]);
   assert.deepEqual(requestedAccountIds, ['account-1', 'account-1']);
   const orderPayload = JSON.parse(orderToolPayload ?? '{}') as { orders: Array<{ orderNo: string }> };
@@ -171,8 +235,8 @@ test('product tool resolves external numeric refs without UUID lookup and stays 
   const client: ModelClient = {
     complete: async (request) => {
       if (request.messages.at(-1)?.role === 'tool') {
-        toolPayload = request.messages.at(-1)?.content;
-        return { content: '这是数字资料包。', model: 'test' };
+        toolPayload = contentText(request.messages.at(-1)?.content);
+        return { content: replyPayload('这是数字资料包。'), model: 'test' };
       }
       return { content: '', model: 'test', toolCalls: [{ id: 'tool-product-external', type: 'function', function: { name: 'get_product_info', arguments: JSON.stringify({ productRef: '1078553391460' }) } }] };
     },
@@ -183,7 +247,7 @@ test('product tool resolves external numeric refs without UUID lookup and stays 
   } as unknown as Store;
   const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}));
   const reply = await agent.generate({ adminId: 'admin-1', context: { ...context(), conversation: { ...context().conversation, itemRef: '1078553391460' } }, classification });
-  assert.equal(reply, '这是数字资料包。');
+  assert.deepEqual(reply, { text: '这是数字资料包。', segments: undefined });
   assert.equal(getProductCalls, 0);
   assert.deepEqual(productQuery, { accountId: 'account-1', keyword: '1078553391460', page: 1, pageSize: 100 });
   const payload = JSON.parse(toolPayload ?? '{}') as { ok: boolean; product?: { externalProductRef?: string; title?: string } };
@@ -217,8 +281,8 @@ test('shop product tool searches keyword, paginates, limits results, and exclude
   const client: ModelClient = {
     complete: async (request) => {
       if (request.messages.at(-1)?.role === 'tool') {
-        toolPayload = request.messages.at(-1)?.content;
-        return { content: '有两款相关耳机可以选择。', model: 'test' };
+        toolPayload = typeof request.messages.at(-1)?.content === 'string' ? request.messages.at(-1)?.content : undefined;
+        return { content: replyPayload('有两款相关耳机可以选择。'), model: 'test' };
       }
       return { content: '', model: 'test', toolCalls: [{ id: 'tool-shop-products', type: 'function', function: { name: 'list_shop_products', arguments: JSON.stringify({ keyword: '耳机', limit: 2 }) } }] };
     },
@@ -228,7 +292,7 @@ test('shop product tool searches keyword, paginates, limits results, and exclude
   } as unknown as Store;
   const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}));
   const reply = await agent.generate({ adminId: 'admin-1', context: context(), classification });
-  assert.equal(reply, '有两款相关耳机可以选择。');
+  assert.deepEqual(reply, { text: '有两款相关耳机可以选择。', segments: undefined });
   assert.deepEqual(queries, [
     { accountId: 'account-1', keyword: '耳机', page: 1, pageSize: 100 },
     { accountId: 'account-1', keyword: '耳机', page: 2, pageSize: 100 },
@@ -246,7 +310,7 @@ test('insufficient product facts return not-found and hand off instead of guessi
   const client: ModelClient = {
     complete: async (request) => {
       if (request.messages.at(-1)?.role === 'tool') {
-        toolPayload = request.messages.at(-1)?.content;
+        toolPayload = contentText(request.messages.at(-1)?.content);
         return { content: JSON.stringify({ decision: 'handoff', reason: '商品事实不足' }), model: 'test' };
       }
       return { content: '', model: 'test', toolCalls: [{ id: 'tool-product-missing', type: 'function', function: { name: 'get_product_info', arguments: JSON.stringify({ productRef: 'missing-item' }) } }] };
