@@ -71,6 +71,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `root` | `docs-multi-agent-collaboration` | `docs/multi-agent-collaboration` | `F:\ChenHai\Project\XianYuAgent-multi-agent-docs` | Codex `/root` | `2026-09-19 00:00:00 +08:00` | `CLEANED` | `e9aaf782` | `2026-09-19 04:15:00 +08:00` | 分支提交 `b278617` 已在全局 merge lock 内以 `--no-ff` 合入 `master`；worktree 已删除，分支已删除 |
 | `root` | `coupons-modal-polish` | `fix/coupons-modal-polish` | `F:\ChenHai\Project\XianYuAgent-coupons-modal-polish` | Codex `/root` | `2026-09-21 11:02:19 +08:00` | `READY_FOR_MERGE` | `-` | `-` | master 已恢复干净；独立 review 无阻塞问题；feature 提交 `5e7f19c` 待在 merge lock 内以 `--no-ff` 合入 |
+| `root` | `coupons-create-list-e2e` | `fix/coupons-create-list-e2e` | `F:\ChenHai\Project\XianYuAgent-coupons-create-list-e2e` | Codex `/root` | `2026-09-21 11:49:25 +08:00` | `READY_FOR_MERGE` | `-` | `-` | 独立复核已关闭账号 scope 与上下文竞态问题；当前账号筛选、UI 创建、列表回读与编辑/复制/启停/库存/绑定/作废管理已通过 `npm run verify` |
 
 ## 登记维护规则
 

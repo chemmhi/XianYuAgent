@@ -9,7 +9,7 @@ const types: Array<{ value: CouponBatchVM['purpose'] | 'all'; label: string }> =
   { value: 'image', label: '图片' },
 ];
 
-export function CouponToolbar({ filters, phase, onKeywordChange, onPurposeChange, onCreate, onRefresh, bulkActions }: { filters: CouponBatchFilters; phase: CouponsLoadPhase; onKeywordChange: (value: string) => void; onPurposeChange: (value: CouponBatchVM['purpose'] | 'all') => void; onCreate: () => void; onRefresh: () => void; bulkActions?: ReactNode }) {
+export function CouponToolbar({ filters, phase, onKeywordChange, onPurposeChange, onCreate, onRefresh, bulkActions, createDisabled = false }: { filters: CouponBatchFilters; phase: CouponsLoadPhase; onKeywordChange: (value: string) => void; onPurposeChange: (value: CouponBatchVM['purpose'] | 'all') => void; onCreate: () => void; onRefresh: () => void; bulkActions?: ReactNode; createDisabled?: boolean }) {
   return <div className="coupons-toolbar">
     <div><h2>卡券列表</h2><p>按卡券名称、描述和类型筛选配置；列表操作与参考卡券页保持一致。</p></div>
     <div className="coupons-toolbar-actions">
@@ -17,7 +17,7 @@ export function CouponToolbar({ filters, phase, onKeywordChange, onPurposeChange
       <label><span className="sr-only">卡券类型</span><select aria-label="卡券类型" value={filters.purpose ?? 'all'} onChange={(event) => onPurposeChange(event.target.value as CouponBatchVM['purpose'] | 'all')}>{types.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></label>
       <button className="btn ghost" type="button" onClick={onRefresh} disabled={phase === 'loading'}>刷新</button>
       {bulkActions}
-      <button className="btn primary" type="button" onClick={onCreate}>新建卡券</button>
+      <button className="btn primary" type="button" onClick={onCreate} disabled={createDisabled}>新建卡券</button>
     </div>
   </div>;
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
 import type { CouponBatchVM, CouponMetadataVM, CreateCouponBatchRequest, UpdateCouponBatchRequest } from '../types';
 import { SelectField } from '../../../shared/ui/SelectField';
@@ -20,9 +20,9 @@ export type CouponCreateFormState = {
   quarkUrl: string; extractionCode: string; textContent: string; dataContent: string; apiUrl: string; apiMethod: 'GET' | 'POST'; apiTimeout: number; apiHeaders: string; apiParams: string; apiResponseField: string; imageUrls: string[]; delaySeconds: number; useNoLogisticsForm: boolean; deliveryCount: number; description: string; feePayer: '' | 'distributor' | 'dealer'; minPrice: string; dockVisibility: 'public' | 'dealer_only'; multiSpec: boolean; specName: string; specValue: string;
 };
 
-function fromBatch(batch?: CouponBatchVM): CouponCreateFormState {
+function fromBatch(batch?: CouponBatchVM, accountId?: string): CouponCreateFormState {
   const metadata = batch?.metadata;
-  return { accountId: batch?.accountId ?? 'account-001', label: batch?.label ?? '', purpose: batch?.purpose ?? 'text', deliveryScope: batch?.deliveryScope ?? 'operator_only', quarkUrl: batch?.quarkUrl ?? '', extractionCode: batch?.extractCode ?? '', textContent: metadata?.textContent ?? '', dataContent: metadata?.dataContent ?? '', apiUrl: metadata?.apiConfig?.url ?? '', apiMethod: metadata?.apiConfig?.method ?? 'GET', apiTimeout: metadata?.apiConfig?.timeout ?? 60, apiHeaders: metadata?.apiConfig?.headers ?? '', apiParams: metadata?.apiConfig?.params ?? '', apiResponseField: metadata?.apiConfig?.responseField ?? '', imageUrls: metadata?.imageUrls ?? [], delaySeconds: metadata?.delaySeconds ?? 0, useNoLogisticsForm: metadata?.useNoLogisticsForm ?? false, deliveryCount: metadata?.deliveryCount ?? batch?.consumedCount ?? 0, description: metadata?.description ?? '', feePayer: metadata?.feePayer ?? '', minPrice: metadata?.minPrice ?? '', dockVisibility: metadata?.dockVisibility ?? 'public', multiSpec: metadata?.multiSpec ?? false, specName: metadata?.specName ?? '', specValue: metadata?.specValue ?? '' };
+  return { accountId: batch?.accountId ?? accountId ?? '', label: batch?.label ?? '', purpose: batch?.purpose ?? 'text', deliveryScope: batch?.deliveryScope ?? 'operator_only', quarkUrl: batch?.quarkUrl ?? '', extractionCode: batch?.extractCode ?? '', textContent: metadata?.textContent ?? '', dataContent: metadata?.dataContent ?? '', apiUrl: metadata?.apiConfig?.url ?? '', apiMethod: metadata?.apiConfig?.method ?? 'GET', apiTimeout: metadata?.apiConfig?.timeout ?? 60, apiHeaders: metadata?.apiConfig?.headers ?? '', apiParams: metadata?.apiConfig?.params ?? '', apiResponseField: metadata?.apiConfig?.responseField ?? '', imageUrls: metadata?.imageUrls ?? [], delaySeconds: metadata?.delaySeconds ?? 0, useNoLogisticsForm: metadata?.useNoLogisticsForm ?? false, deliveryCount: metadata?.deliveryCount ?? batch?.consumedCount ?? 0, description: metadata?.description ?? '', feePayer: metadata?.feePayer ?? '', minPrice: metadata?.minPrice ?? '', dockVisibility: metadata?.dockVisibility ?? 'public', multiSpec: metadata?.multiSpec ?? false, specName: metadata?.specName ?? '', specValue: metadata?.specValue ?? '' };
 }
 
 function parseJson(value: string): boolean { if (!value.trim()) return true; try { JSON.parse(value); return true; } catch { return false; } }
@@ -30,6 +30,7 @@ function readImageAsDataUrl(file: File): Promise<string> { return new Promise((r
 
 export function validateCouponForm(form: CouponCreateFormState, mode: 'create' | 'edit' | 'copy' = 'create'): string {
   if (!form.label.trim()) return '请输入卡券名称。';
+  if (!form.accountId.trim()) return '当前没有可用账号，请先选择或创建一个账号。';
   if (!form.purpose) return '请选择卡券类型。';
   if (form.purpose === 'api' && !form.apiUrl.trim()) return '请输入API地址。';
   if (mode === 'create' && form.purpose === 'text' && !form.textContent.trim()) return '请输入固定文字内容。';
@@ -47,12 +48,16 @@ export function buildCouponPayload(form: CouponCreateFormState, baseMetadata?: C
   return { accountId: form.accountId.trim(), label: form.label.trim(), purpose: form.purpose, deliveryScope: form.deliveryScope, quarkUrl: form.quarkUrl.trim() || undefined, extractionCode: form.extractionCode.trim() || undefined, metadata };
 }
 
-export function CouponCreateModal({ submitting, mode = 'create', batch, onClose, onSubmit }: { submitting: boolean; mode?: 'create' | 'edit' | 'copy'; batch?: CouponBatchVM; onClose: () => void; onSubmit: (input: CreateCouponBatchRequest | UpdateCouponBatchRequest) => Promise<void> }) {
-  const [form, setForm] = useState<CouponCreateFormState>(() => fromBatch(batch));
+export function CouponCreateModal({ submitting, mode = 'create', batch, accountId, onClose, onSubmit }: { submitting: boolean; mode?: 'create' | 'edit' | 'copy'; batch?: CouponBatchVM; accountId?: string; onClose: () => void; onSubmit: (input: CreateCouponBatchRequest | UpdateCouponBatchRequest) => Promise<void> }) {
+  const [form, setForm] = useState<CouponCreateFormState>(() => fromBatch(batch, accountId));
   const [error, setError] = useState('');
   const title = mode === 'edit' ? '编辑卡券' : mode === 'copy' ? '复制卡券' : '新建卡券';
   const set = <K extends keyof CouponCreateFormState>(key: K, value: CouponCreateFormState[K]) => setForm((previous) => ({ ...previous, [key]: value }));
   const payload = useMemo(() => buildCouponPayload(form, batch?.metadata), [batch?.metadata, form]);
+
+  useEffect(() => {
+    if (mode === 'create' && !form.accountId && accountId) set('accountId', accountId);
+  }, [accountId, form.accountId, mode]);
 
   function insertParam(paramName: string) {
     let json: Record<string, string> = {};
@@ -75,8 +80,12 @@ export function CouponCreateModal({ submitting, mode = 'create', batch, onClose,
     if (validationError) { setError(validationError); return; }
     setError('');
     const next = mode === 'edit' ? { ...payload, items: undefined } : payload;
-    await onSubmit(next);
-    onClose();
+    try {
+      await onSubmit(next);
+      onClose();
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : '保存失败，请稍后重试。');
+    }
   }
 
   return <div className="coupons-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
