@@ -11,6 +11,9 @@
 
 - [`design.md`](./design.md)：自动回复 Agent 的边界、工作流、工具、状态机、配置和测试契约。
 - [`activity.md`](./activity.md)：Agent 动态 Tab 的运行、事件落库、查询 API、前端 adapter 和真实端到端验收契约。
+- [`risk-register.md`](./risk-register.md)：当前实现的风险登记、证据、影响、依赖和需要人工裁决的决策项。
+- [`repair-checklist.md`](./repair-checklist.md)：按依赖顺序执行的修复 checklist、验收标准、测试层级和回滚要求。
+- [`modification-plan.md`](./modification-plan.md)：待审核的修改批次、范围、前置决策和每批验收门禁；审核通过前不改业务代码。
 
 ## 核心结论
 
