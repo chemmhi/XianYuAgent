@@ -4,37 +4,52 @@ import type { AgentDynamicsFilters } from './types';
 
 const filters: AgentDynamicsFilters = { accountId: 'acct_1', range: '24h', status: 'failed', stage: 'generation', keyword: '买家B', page: 2, pageSize: 10 };
 
+const rawRun = {
+  id: 'run-1', accountId: 'acct_1', conversationId: 'conversation-1', inboundMessageId: 'message-1', intent: '商品咨询', decision: 'failed', status: 'failed', productId: 'product-1', senderOutcome: undefined, failureCode: 'RESPONSES_API_TIMEOUT', createdAt: '2026-09-21T00:00:00.000Z', updatedAt: '2026-09-21T00:00:03.200Z', stage: 'failed', durationMs: 3200, buyerDisplayName: '买家B', productTitle: '资料包', inboundMessagePreview: '请问购买后怎么使用？',
+} as const;
+
+const rawSummary = {
+  from: '2026-09-20T00:00:00.000Z', to: '2026-09-21T00:00:00.000Z', asOf: '2026-09-21T00:00:00.000Z', inboundCount: 1, processingCount: 0, persistedCount: 0, handoffCount: 0, failedCount: 1, skippedCount: 0, completionRate: 1, throughputPerSecond: 0.01, p95DurationMs: 3200,
+  byStatus: [{ status: 'failed', count: 1 }], byStage: [{ stage: 'failed', count: 1, averageDurationMs: 3200 }], exceptions: [{ code: 'RESPONSES_API_TIMEOUT', count: 1, status: 'failed' }], health: [],
+} as const;
+
 describe('agent dynamics API adapter', () => {
-  it('builds contract query parameters for summary, list, and detail', async () => {
+  it('maps raw summary/list/detail DTOs into the canonical VM and sends range windows', async () => {
     const calls: string[] = [];
-    const rawSummary = { from: '2026-09-20T00:00:00.000Z', to: '2026-09-21T00:00:00.000Z', asOf: '2026-09-21T00:00:00.000Z', inboundCount: 1, processingCount: 0, persistedCount: 1, handoffCount: 0, failedCount: 0, skippedCount: 0, completionRate: 1, throughputPerSecond: 0.1, p95DurationMs: 3200, byStatus: [{ status: 'persisted', count: 1 }], byStage: [{ stage: 'persisted', count: 1, averageDurationMs: 3200 }], exceptions: [], health: [] };
-    const rawRun = { id: 'run_1', accountId: 'acct_1', conversationId: 'conversation_1', intent: '商品咨询', decision: 'replied', status: 'persisted', stage: 'persisted', senderOutcome: 'simulated', createdAt: '2026-09-21T00:00:00.000Z', updatedAt: '2026-09-21T00:00:03.200Z', durationMs: 3200, buyerDisplayName: '买家一', productTitle: '资料包', inboundMessagePreview: '有货吗' };
-    const rawDetail = { run: rawRun, events: [{ id: 'event_1', eventType: 'run.created', stage: 'persisted', status: 'persisted', occurredAt: '2026-09-21T00:00:03.200Z' }], conversation: { buyerDisplayName: '买家一' }, inboundMessage: { bodyText: '有货吗' }, outboundMessages: [{ bodyText: '有货', createdAt: '2026-09-21T00:00:03.200Z' }] };
-    const transport = { get: async <T>(path: string) => { calls.push(path); return { success: true, data: path.includes('/summary') ? rawSummary : path.includes('/runs/') ? rawDetail : { items: [rawRun], total: 1, page: 2, pageSize: 10, totalPages: 1 } } as T; } };
-    const api = createAgentDynamicsApi(transport);
-
-    await api.getSummary({ accountId: 'acct_1', range: '7d' });
-    await api.listRuns(filters);
-    await api.getRunDetail('run/1', 'acct_1');
-
-    expect(calls[0]).toMatch(/^\/api\/v1\/auto-reply\/activity\/summary\?accountId=acct_1&from=.*&to=.*$/);
-    expect(calls[1]).toMatch(/^\/api\/v1\/auto-reply\/runs\?accountId=acct_1&from=.*&to=.*&decision=failed&stage=reply_generation&keyword=%E4%B9%B0%E5%AE%B6B&page=2&pageSize=10$/);
-    expect(calls[2]).toBe('/api/v1/auto-reply/runs/run%2F1?accountId=acct_1');
-  });
-
-  it('maps raw summary, run list, and detail payloads into the page view model', async () => {
     const transport = { get: async <T>(path: string) => {
-      if (path.includes('/summary')) return { success: true, data: { from: '2026-09-20T00:00:00.000Z', to: '2026-09-21T00:00:00.000Z', asOf: '2026-09-21T00:00:00.000Z', inboundCount: 2, processingCount: 1, persistedCount: 1, handoffCount: 0, failedCount: 0, skippedCount: 0, completionRate: 0.5, throughputPerSecond: 0.2, p95DurationMs: 4200, byStatus: [{ status: 'persisted', count: 1 }, { status: 'generated', count: 1 }], byStage: [{ stage: 'persisted', count: 1, averageDurationMs: 3000 }], exceptions: [], health: [] } } as T;
-      if (path.includes('/runs/')) return { success: true, data: { run: { id: 'run_1', accountId: 'acct_1', conversationId: 'conversation_1', intent: '商品咨询', decision: 'replied', status: 'persisted', stage: 'persisted', senderOutcome: 'simulated', createdAt: '2026-09-21T00:00:00.000Z', updatedAt: '2026-09-21T00:00:03.000Z', durationMs: 3000 }, events: [{ id: 'event_1', eventType: 'run.persisted', stage: 'persisted', status: 'persisted', occurredAt: '2026-09-21T00:00:03.000Z' }], conversation: { buyerDisplayName: '买家一' }, inboundMessage: { bodyText: '有货吗' }, outboundMessages: [{ bodyText: '有货' }] } } as T;
-      return { success: true, data: { items: [{ id: 'run_1', accountId: 'acct_1', conversationId: 'conversation_1', intent: '商品咨询', decision: 'replied', status: 'persisted', stage: 'persisted', senderOutcome: 'simulated', createdAt: '2026-09-21T00:00:00.000Z', updatedAt: '2026-09-21T00:00:03.000Z', durationMs: 3000, buyerDisplayName: '买家一', productTitle: '资料包', inboundMessagePreview: '有货吗' }], total: 1, page: 1, pageSize: 20, totalPages: 1 } } as T;
+      calls.push(path);
+      if (path.includes('/summary')) return { success: true, data: rawSummary } as T;
+      if (path.includes('/runs/run%2F1')) return { success: true, data: { run: rawRun, events: [{ id: 'event-1', runId: 'run-1', eventType: 'run.failed', stage: 'failed', status: 'failed', occurredAt: rawRun.updatedAt, durationMs: 3200 }], inboundMessage: { bodyText: '请问购买后怎么使用？' }, outboundMessages: [], product: { id: 'product-1', title: '资料包' } } } as T;
+      return { success: true, data: { items: [rawRun], total: 1, page: 1, pageSize: 20, totalPages: 1 } } as T;
     } };
     const api = createAgentDynamicsApi(transport);
+
+    const summary = await api.getSummary({ accountId: 'acct_1', range: '7d' });
+    const runs = await api.listRuns({ ...filters, page: 1 });
+    const detail = await api.getRunDetail('run/1', 'acct_1');
+
+    expect(calls[0]).toMatch(/^\/api\/v1\/auto-reply\/activity\/summary\?accountId=acct_1&from=.*&to=.*$/);
+    expect(calls.some((path) => path.includes('status=failed'))).toBe(true);
+    expect(calls.some((path) => path.includes('stage=failed'))).toBe(true);
+    expect(calls.find((path) => path.includes('/runs/run%2F1'))).toBe('/api/v1/auto-reply/runs/run%2F1?accountId=acct_1');
+    expect(summary.kpis.find((item) => item.key === 'inbound')?.value).toBe('1');
+    expect(summary.pipeline.find((item) => item.key === 'generation')?.count).toBe(1);
+    expect(summary.exceptions[0]).toMatchObject({ key: 'RESPONSES_API_TIMEOUT', count: 1 });
+    expect(summary.events[0]).toMatchObject({ runId: 'run-1', label: '失败' });
+    expect(runs.items[0]).toMatchObject({ runId: 'run-1', buyer: { name: '买家B' }, stage: { key: 'generation' }, decision: { key: 'failed' }, persisted: true });
+    expect(detail.timeline[0]).toMatchObject({ title: '买家B 的回复生成失败', tone: 'danger' });
+    expect(detail.message).toBe('请问购买后怎么使用？');
+  });
+
+  it('short-circuits live calls when no account context is selected', async () => {
+    let calls = 0;
+    const api = createAgentDynamicsApi({ get: async <T>() => { calls += 1; return {} as T; } });
     const summary = await api.getSummary({ range: '24h' });
-    const runs = await api.listRuns({ ...filters, status: 'all', stage: 'all', page: 1 });
-    const detail = await api.getRunDetail('run_1');
-    expect(summary.kpis.find((item) => item.key === 'persisted')?.value).toBe('1');
-    expect(runs.items[0]).toMatchObject({ runId: 'run_1', buyer: { name: '买家一' }, product: { name: '资料包' }, persisted: true });
-    expect(detail).toMatchObject({ runId: 'run_1', message: '有货吗', reply: '有货', timeline: [{ title: 'run.persisted' }] });
+    const runs = await api.listRuns({ ...filters, accountId: undefined });
+    expect(calls).toBe(0);
+    expect(summary.kpis.find((item) => item.key === 'inbound')?.value).toBe('0');
+    expect(runs.total).toBe(0);
+    await expect(api.getRunDetail('run-1')).rejects.toMatchObject({ status: 422 });
   });
 
   it('filters mock runs by status, stage, and keyword', async () => {

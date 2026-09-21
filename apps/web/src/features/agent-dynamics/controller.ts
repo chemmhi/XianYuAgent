@@ -1,22 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../api/http';
 import { defaultAgentDynamicsApi, type AgentDynamicsApi } from './api';
-import type { AgentDynamicsEventVM, AgentDynamicsFilters, AgentDynamicsLoadError, AgentDynamicsRunRowVM, AgentDynamicsRunsState, AgentDynamicsDetailState, AgentDynamicsSummaryState } from './types';
+import type { AgentDynamicsFilters, AgentDynamicsLoadError, AgentDynamicsRunsState, AgentDynamicsDetailState, AgentDynamicsSummaryState } from './types';
 
 export const defaultAgentDynamicsFilters: AgentDynamicsFilters = { range: '24h', status: 'all', stage: 'all', keyword: '', page: 1, pageSize: 20 };
-
-function eventsFromRuns(items: AgentDynamicsRunRowVM[]): AgentDynamicsEventVM[] {
-  return items.slice(0, 5)
-    .map((row) => ({
-      id: `run:${row.runId}`,
-      runId: row.runId,
-      time: row.timeLabel,
-      title: `${row.buyer.name} 的消息${row.decision.key === 'processing' ? '正在处理' : row.decision.key === 'handoff' ? '已转人工' : row.decision.key === 'failed' ? '处理失败' : '已完成自动回复'}`,
-      meta: `${row.intent} · ${row.senderOutcome.label}`,
-      label: row.decision.label,
-      tone: row.decision.tone,
-    }));
-}
 
 export function toAgentDynamicsLoadError(error: unknown): AgentDynamicsLoadError {
   if (error instanceof ApiError && error.status === 403) return { code: 'FORBIDDEN', message: '当前管理员没有读取 Agent 动态的权限，请检查账号范围。', retryable: false };
@@ -40,8 +27,9 @@ export interface AgentDynamicsController {
   detail: AgentDynamicsDetailState;
 }
 
-export function useAgentDynamicsController(options: { api?: AgentDynamicsApi; accountId?: string; pollIntervalMs?: number } = {}): AgentDynamicsController {
+export function useAgentDynamicsController(options: { api?: AgentDynamicsApi; accountId?: string; pollIntervalMs?: number; enabled?: boolean } = {}): AgentDynamicsController {
   const api = options.api ?? defaultAgentDynamicsApi;
+  const enabled = options.enabled ?? true;
   const [filters, setFilters] = useState<AgentDynamicsFilters>({ ...defaultAgentDynamicsFilters, accountId: options.accountId });
   const [summary, setSummary] = useState<AgentDynamicsSummaryState>({ phase: 'idle', data: null, error: null, refreshing: false });
   const [runs, setRuns] = useState<AgentDynamicsRunsState>({ phase: 'idle', data: null, error: null, refreshing: false });
@@ -53,10 +41,7 @@ export function useAgentDynamicsController(options: { api?: AgentDynamicsApi; ac
   const accountId = options.accountId;
 
   const reloadSummary = useCallback(async () => {
-    if (!accountId) {
-      setSummary({ phase: 'idle', data: null, error: null, refreshing: false });
-      return;
-    }
+    if (!enabled || !accountId) return;
     const requestId = ++summaryRequestId.current;
     setSummary((previous) => ({ ...previous, phase: previous.data ? previous.phase : 'loading', error: null, refreshing: Boolean(previous.data) }));
     try {
@@ -68,42 +53,49 @@ export function useAgentDynamicsController(options: { api?: AgentDynamicsApi; ac
       const mapped = toAgentDynamicsLoadError(error);
       setSummary((previous) => ({ phase: mapped.code === 'FORBIDDEN' ? 'forbidden' : mapped.code === 'TIMEOUT' ? 'timeout' : 'error', data: previous.data, error: mapped, refreshing: false, lastLoadedAt: previous.lastLoadedAt }));
     }
-  }, [accountId, api, filters.range]);
+  }, [accountId, api, enabled, filters.range]);
 
   const reloadRuns = useCallback(async () => {
-    if (!accountId) {
-      setRuns({ phase: 'idle', data: null, error: null, refreshing: false });
-      return;
-    }
+    if (!enabled || !accountId) return;
     const requestId = ++runsRequestId.current;
     setRuns((previous) => ({ ...previous, phase: previous.data ? previous.phase : 'loading', error: null, refreshing: Boolean(previous.data) }));
     try {
       const data = await api.listRuns({ ...filters, accountId });
       if (requestId !== runsRequestId.current) return;
       setRuns({ phase: data.items.length === 0 ? 'empty' : 'success', data, error: null, refreshing: false });
-      setSummary((previous) => previous.data && previous.data.events.length === 0 ? { ...previous, data: { ...previous.data, events: eventsFromRuns(data.items) } } : previous);
     } catch (error) {
       if (requestId !== runsRequestId.current) return;
       const mapped = toAgentDynamicsLoadError(error);
       setRuns({ phase: mapped.code === 'FORBIDDEN' ? 'forbidden' : mapped.code === 'TIMEOUT' ? 'timeout' : 'error', data: null, error: mapped, refreshing: false });
     }
-  }, [accountId, api, filters]);
+  }, [accountId, api, enabled, filters]);
 
   const reload = useCallback(async () => {
     await Promise.all([reloadSummary(), reloadRuns()]);
   }, [reloadRuns, reloadSummary]);
 
-  useEffect(() => { if (accountId) void reload(); }, [accountId, filtersKey, reload]);
+  useEffect(() => {
+    if (!enabled || !accountId) {
+      summaryRequestId.current += 1;
+      runsRequestId.current += 1;
+      detailRequestId.current += 1;
+      setSummary({ phase: 'idle', data: null, error: null, refreshing: false });
+      setRuns({ phase: 'idle', data: null, error: null, refreshing: false });
+      setDetail({ phase: 'idle', data: null, error: null });
+      return;
+    }
+    void reload();
+  }, [accountId, enabled, filtersKey, reload]);
 
   useEffect(() => {
+    if (!enabled || !accountId) return;
     const interval = options.pollIntervalMs ?? 5000;
-    if (!accountId) return undefined;
     const timer = window.setInterval(() => { void reload(); }, interval);
     return () => window.clearInterval(timer);
-  }, [accountId, options.pollIntervalMs, reload]);
+  }, [accountId, enabled, options.pollIntervalMs, reload]);
 
   const openRun = useCallback(async (runId: string) => {
-    if (!accountId) return;
+    if (!enabled || !accountId) return;
     const requestId = ++detailRequestId.current;
     setDetail({ phase: 'loading', runId, data: null, error: null });
     try {
@@ -115,7 +107,7 @@ export function useAgentDynamicsController(options: { api?: AgentDynamicsApi; ac
       const mapped = toAgentDynamicsLoadError(error);
       setDetail({ phase: mapped.code === 'FORBIDDEN' ? 'forbidden' : 'error', runId, data: null, error: mapped });
     }
-  }, [accountId, api]);
+  }, [accountId, api, enabled]);
 
   const closeRun = useCallback(() => {
     detailRequestId.current += 1;

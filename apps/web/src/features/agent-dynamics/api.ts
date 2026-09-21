@@ -1,6 +1,14 @@
 import { ApiError } from '../../api/http';
+import {
+  formatDuration,
+  formatTime,
+  runStageFromStatus,
+  stageLabel,
+  toneForDecision,
+} from './types';
 import type {
   AgentDynamicsDecision,
+  AgentDynamicsEventVM,
   AgentDynamicsFilters,
   AgentDynamicsRange,
   AgentDynamicsRunDetailVM,
@@ -9,14 +17,6 @@ import type {
   AgentDynamicsStage,
   AgentDynamicsSummaryVM,
   AgentDynamicsTimelineItemVM,
-  AgentDynamicsTone,
-} from './types';
-import {
-  formatTime,
-  runStageFromStatus,
-  stageLabel,
-  toneForDecision,
-  type AgentDynamicsRunStatus,
 } from './types';
 
 export interface AgentDynamicsApiTransport {
@@ -30,26 +30,68 @@ interface ApiEnvelope<T> {
   error?: { code?: string };
 }
 
-type BackendRun = {
+function unwrap<T>(payload: T | ApiEnvelope<T>): T {
+  if (payload && typeof payload === 'object' && 'success' in payload && 'data' in payload) {
+    const envelope = payload as ApiEnvelope<T>;
+    if (!envelope.success || envelope.data === null) throw new Error(envelope.message ?? envelope.error?.code ?? 'AGENT_DYNAMICS_REQUEST_FAILED');
+    return envelope.data;
+  }
+  return payload as T;
+}
+
+type RawAutoReplyRunStatus = 'received' | 'classified' | 'context_loaded' | 'generated' | 'simulated' | 'persisted' | 'handoff' | 'skipped' | 'failed';
+type RawAutoReplyRunStage = 'gateway_received' | 'intent_recognition' | 'context_read' | 'reply_generation' | 'sending' | 'persisted' | 'handoff' | 'skipped' | 'failed';
+
+interface RawAutoReplyRunListItem {
   id: string;
-  accountId?: string;
-  conversationId?: string;
-  intent?: string;
-  decision?: AgentDynamicsDecision;
-  status?: AgentDynamicsRunStatus;
-  stage?: string;
+  accountId: string;
+  conversationId: string;
+  inboundMessageId: string;
+  intent: string;
+  decision: AgentDynamicsDecision;
+  status: RawAutoReplyRunStatus;
+  productId?: string;
   senderOutcome?: 'simulated' | 'known_success' | 'known_failure' | 'unknown';
+  outboundMessageId?: string;
   failureCode?: string;
   createdAt: string;
-  updatedAt?: string;
-  durationMs?: number;
+  updatedAt: string;
+  stage: RawAutoReplyRunStage;
+  durationMs: number;
   buyerDisplayName?: string;
   productTitle?: string;
-  productId?: string;
   inboundMessagePreview?: string;
-};
+}
 
-type BackendSummary = {
+interface RawAutoReplyRunEvent {
+  id: string;
+  runId: string;
+  eventType: string;
+  stage: RawAutoReplyRunStage;
+  status: RawAutoReplyRunStatus;
+  occurredAt: string;
+  durationMs?: number;
+  payload?: Record<string, unknown>;
+}
+
+interface RawAutoReplyRunListResult {
+  items: RawAutoReplyRunListItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+interface RawAutoReplyRunDetail {
+  run: RawAutoReplyRunListItem;
+  events: RawAutoReplyRunEvent[];
+  conversation?: { id: string; buyerDisplayName?: string };
+  inboundMessage?: { bodyText?: string };
+  outboundMessages: Array<{ bodyText?: string }>;
+  product?: { id: string; title?: string };
+}
+
+interface RawActivitySummary {
   from: string;
   to: string;
   asOf: string;
@@ -62,145 +104,209 @@ type BackendSummary = {
   completionRate: number;
   throughputPerSecond: number;
   p95DurationMs: number;
-  byStatus: Array<{ status: AgentDynamicsRunStatus; count: number }>;
-  byStage: Array<{ stage: string; count: number; averageDurationMs: number }>;
-  exceptions: Array<{ code: string; count: number; status: AgentDynamicsRunStatus }>;
-  health: Array<{ component: string; status: string; observedAt: string; details: Record<string, unknown> }>;
+  byStatus: Array<{ status: RawAutoReplyRunStatus; count: number }>;
+  byStage: Array<{ stage: RawAutoReplyRunStage; count: number; averageDurationMs: number }>;
+  exceptions: Array<{ code: string; count: number; status: RawAutoReplyRunStatus }>;
+  health: Array<{ component: string; status: string; observedAt: string; details?: Record<string, unknown> }>;
+  events?: RawAutoReplyRunEvent[];
+}
+
+const PROCESSING_STATUSES: RawAutoReplyRunStatus[] = ['received', 'classified', 'context_loaded', 'generated', 'simulated'];
+const TERMINAL_STATUSES = new Set<RawAutoReplyRunStatus>(['persisted', 'handoff', 'skipped', 'failed']);
+
+const RAW_STAGE_GROUPS: Record<'all' | AgentDynamicsStage, RawAutoReplyRunStage[]> = {
+  all: [],
+  gateway: ['gateway_received'],
+  intent: ['intent_recognition'],
+  context: ['context_read'],
+  generation: ['reply_generation', 'handoff', 'failed'],
+  persistence: ['sending', 'persisted', 'skipped'],
 };
 
-type BackendRunDetail = {
-  run: BackendRun;
-  events?: Array<{ id: string; eventType: string; stage: string; status: AgentDynamicsRunStatus; occurredAt: string }>;
-  conversation?: { buyerDisplayName?: string; buyerAvatarUrl?: string };
-  inboundMessage?: { bodyText?: string };
-  outboundMessages?: Array<{ bodyText?: string }>;
-  product?: { id?: string; title?: string };
+const RAW_STATUS_GROUPS: Record<AgentDynamicsFilters['status'], RawAutoReplyRunStatus[]> = {
+  all: [],
+  replied: ['persisted'],
+  handoff: ['handoff'],
+  failed: ['failed'],
+  processing: PROCESSING_STATUSES,
+  skipped: ['skipped'],
 };
 
-const PROCESSING_STATUSES = new Set<AgentDynamicsRunStatus>(['received', 'classified', 'context_loaded', 'generated', 'simulated']);
+const RAW_STAGE_TO_VM: Record<RawAutoReplyRunStage, AgentDynamicsStage> = {
+  gateway_received: 'gateway',
+  intent_recognition: 'intent',
+  context_read: 'context',
+  reply_generation: 'generation',
+  sending: 'persistence',
+  persisted: 'persistence',
+  handoff: 'generation',
+  failed: 'generation',
+  skipped: 'persistence',
+};
 
-function rangeParams(range: AgentDynamicsRange): { from: string; to: string } {
-  const to = Date.now();
-  const days = range === '7d' ? 7 : 1;
-  return { from: new Date(to - days * 24 * 60 * 60 * 1000).toISOString(), to: new Date(to).toISOString() };
+const SUMMARY_STAGE_GROUPS: Array<{ key: AgentDynamicsStage; stages: RawAutoReplyRunStage[] }> = [
+  { key: 'gateway', stages: ['gateway_received'] },
+  { key: 'intent', stages: ['intent_recognition'] },
+  { key: 'context', stages: ['context_read'] },
+  { key: 'generation', stages: ['reply_generation', 'handoff', 'failed'] },
+  { key: 'persistence', stages: ['sending', 'persisted', 'skipped'] },
+];
+
+function rangeWindow(range: AgentDynamicsRange, now = Date.now()): { from: string; to: string } {
+  const durationMs = range === '7d' ? 7 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  return { from: new Date(now - durationMs).toISOString(), to: new Date(now).toISOString() };
 }
 
-function stageKey(stageOrStatus: string | undefined, status: AgentDynamicsRunStatus | undefined): AgentDynamicsStage {
-  if (stageOrStatus === 'gateway_received') return 'gateway';
-  if (stageOrStatus === 'intent_recognition') return 'intent';
-  if (stageOrStatus === 'context_read') return 'context';
-  if (stageOrStatus === 'reply_generation') return 'generation';
-  if (stageOrStatus === 'sending' || stageOrStatus === 'persisted') return 'persistence';
-  if (stageOrStatus === 'handoff' || stageOrStatus === 'failed' || stageOrStatus === 'skipped') return 'generation';
-  return status ? runStageFromStatus(status) : 'gateway';
+function rawStageToVm(stage: RawAutoReplyRunStage, status: RawAutoReplyRunStatus): AgentDynamicsStage {
+  return RAW_STAGE_TO_VM[stage] ?? runStageFromStatus(status);
 }
 
-function stageTone(stage: AgentDynamicsStage): AgentDynamicsTone {
-  return stage === 'generation' ? 'warn' : stage === 'persistence' ? 'info' : 'success';
+function stageTone(status: RawAutoReplyRunStatus): AgentDynamicsRunRowVM['stage']['tone'] {
+  if (status === 'failed') return 'danger';
+  if (status === 'handoff') return 'warn';
+  if (PROCESSING_STATUSES.includes(status)) return 'info';
+  if (status === 'skipped') return 'gray';
+  return 'success';
 }
 
-function statusLabel(status: AgentDynamicsRunStatus | undefined, decision: AgentDynamicsDecision | undefined): string {
-  if (PROCESSING_STATUSES.has(status ?? 'received')) return '处理中';
-  if (decision === 'replied' || status === 'persisted') return '自动回复';
-  if (decision === 'handoff' || status === 'handoff') return '待人工';
-  if (decision === 'failed' || status === 'failed') return '执行失败';
-  return '已跳过';
+function decisionLabel(decision: AgentDynamicsDecision | 'processing'): string {
+  return decision === 'replied' ? '自动回复' : decision === 'handoff' ? '待人工' : decision === 'failed' ? '执行失败' : decision === 'skipped' ? '已跳过' : '处理中';
 }
 
-function senderOutcomeVM(run: BackendRun): { label: string; tone: AgentDynamicsTone } {
-  if (run.status === 'persisted' || run.senderOutcome === 'known_success') return { label: '已发送 / 已落库', tone: 'success' };
-  if (run.senderOutcome === 'simulated') return { label: '模拟 / 已落库', tone: 'success' };
-  if (run.senderOutcome === 'known_failure') return { label: '发送失败 / 已落库', tone: 'danger' };
-  if (run.status && PROCESSING_STATUSES.has(run.status)) return { label: '未发送 / 未落库', tone: 'gray' };
-  return { label: '未发送 / 已落库', tone: 'gray' };
+function senderOutcomeVm(raw: RawAutoReplyRunListItem): AgentDynamicsRunRowVM['senderOutcome'] {
+  if (raw.senderOutcome === 'simulated') return { label: '模拟 / 已落库', tone: 'success' };
+  if (raw.senderOutcome === 'known_success') return { label: '已发送 / 已落库', tone: 'success' };
+  if (raw.senderOutcome === 'known_failure') return { label: '发送失败 / 已落库', tone: 'danger' };
+  if (raw.senderOutcome === 'unknown') return { label: '发送状态未知 / 已落库', tone: 'warn' };
+  return { label: TERMINAL_STATUSES.has(raw.status) ? '未发送 / 已落库' : '未发送 / 未落库', tone: 'gray' };
 }
 
-export function mapBackendRunToViewModel(run: BackendRun, context?: BackendRunDetail): AgentDynamicsRunRowVM {
-  const status = run.status ?? 'received';
-  const decision = run.decision ?? (PROCESSING_STATUSES.has(status) ? 'replied' : 'skipped');
-  const stage = stageKey(run.stage, status);
-  const buyerName = run.buyerDisplayName ?? context?.conversation?.buyerDisplayName ?? '未知买家';
-  const productName = run.productTitle ?? context?.product?.title ?? '未关联商品';
+function mapRun(raw: RawAutoReplyRunListItem): AgentDynamicsRunRowVM {
+  const processing = PROCESSING_STATUSES.includes(raw.status);
+  const stage = rawStageToVm(raw.stage, raw.status);
+  const decision = processing ? 'processing' : raw.decision;
+  const buyerName = raw.buyerDisplayName?.trim() || '未知买家';
+  const productName = raw.productTitle?.trim() || '未关联商品';
   return {
-    runId: run.id,
-    createdAt: run.createdAt,
-    timeLabel: formatTime(run.createdAt),
-    buyer: { name: buyerName, avatar: context?.conversation?.buyerAvatarUrl ?? buyerName.slice(0, 1), conversationId: run.conversationId },
-    inboundPreview: run.inboundMessagePreview ?? context?.inboundMessage?.bodyText ?? '暂无买家消息预览',
-    product: { name: productName, productId: run.productId ?? context?.product?.id },
-    intent: run.intent ?? '未识别',
-    stage: { key: stage, label: stageLabel(stage), tone: stageTone(stage) },
-    decision: { key: PROCESSING_STATUSES.has(status) ? 'processing' : decision, label: statusLabel(status, decision), tone: PROCESSING_STATUSES.has(status) ? 'info' : toneForDecision(decision) },
-    senderOutcome: senderOutcomeVM(run),
-    durationMs: Number.isFinite(run.durationMs) ? Math.max(0, Number(run.durationMs)) : Math.max(0, Date.parse(run.updatedAt ?? run.createdAt) - Date.parse(run.createdAt)),
-    failureCode: run.failureCode,
-    persisted: status === 'persisted' || run.senderOutcome === 'known_success' || run.senderOutcome === 'simulated',
-    accountId: run.accountId,
+    runId: raw.id,
+    createdAt: raw.createdAt,
+    timeLabel: formatTime(raw.createdAt),
+    buyer: { name: buyerName, avatar: buyerName.slice(0, 1), conversationId: raw.conversationId },
+    inboundPreview: raw.inboundMessagePreview?.trim() || '买家消息已脱敏',
+    product: { name: productName, productId: raw.productId },
+    intent: raw.intent || '未识别',
+    stage: { key: stage, label: stageLabel(stage), tone: stageTone(raw.status) },
+    decision: { key: decision, label: decisionLabel(decision), tone: toneForDecision(decision) },
+    senderOutcome: senderOutcomeVm(raw),
+    durationMs: Number.isFinite(raw.durationMs) ? Math.max(0, raw.durationMs) : 0,
+    failureCode: raw.failureCode,
+    persisted: TERMINAL_STATUSES.has(raw.status),
+    accountId: raw.accountId,
   };
 }
 
-function mapHealthTone(status: string): AgentDynamicsTone {
-  const normalized = status.toLowerCase();
-  if (['online', 'healthy', 'ok', 'ready', 'normal', 'connected'].includes(normalized)) return 'success';
-  if (['degraded', 'warning', 'unknown'].includes(normalized)) return 'warn';
-  if (['offline', 'error', 'failed', 'down'].includes(normalized)) return 'danger';
-  return 'info';
+function eventTitle(event: RawAutoReplyRunEvent, run: AgentDynamicsRunRowVM): string {
+  if (event.status === 'failed') return `${run.buyer.name} 的回复生成失败`;
+  if (event.status === 'handoff') return `${run.buyer.name} 已转人工处理`;
+  if (event.status === 'persisted') return `${run.buyer.name} 的消息已完成自动回复`;
+  if (event.stage === 'gateway_received') return `${run.buyer.name} 的消息已接收`;
+  return `${run.buyer.name} 正在处理${run.intent}`;
 }
 
-function mapBackendSummary(summary: BackendSummary): AgentDynamicsSummaryVM {
-  const stageRows = new Map(summary.byStage.map((row) => [row.stage, row]));
-  const stages: Array<{ key: AgentDynamicsStage; backend: string; label: string }> = [
-    { key: 'gateway', backend: 'gateway_received', label: '网关接收' },
-    { key: 'intent', backend: 'intent_recognition', label: '意图识别' },
-    { key: 'context', backend: 'context_read', label: '上下文读取' },
-    { key: 'generation', backend: 'reply_generation', label: '回复生成' },
-    { key: 'persistence', backend: 'persisted', label: '提交并落库' },
+function eventTone(status: RawAutoReplyRunStatus): AgentDynamicsRunRowVM['stage']['tone'] {
+  if (status === 'failed') return 'danger';
+  if (status === 'handoff') return 'warn';
+  if (PROCESSING_STATUSES.includes(status)) return 'info';
+  return 'success';
+}
+
+function mapEvents(events: RawAutoReplyRunEvent[], runs: Map<string, AgentDynamicsRunRowVM>): AgentDynamicsEventVM[] {
+  return events.map((event) => {
+    const run = runs.get(event.runId);
+    const tone = eventTone(event.status);
+    const detail = event.durationMs === undefined ? event.eventType : `${event.eventType} · ${formatDuration(event.durationMs)}`;
+    return { id: event.id, runId: event.runId, time: formatTime(event.occurredAt), title: run ? eventTitle(event, run) : event.eventType, meta: detail, label: event.status === 'persisted' ? '完成' : event.status === 'handoff' ? '转人工' : event.status === 'failed' ? '失败' : PROCESSING_STATUSES.includes(event.status) ? '处理中' : '已记录', tone };
+  });
+}
+
+function mapRunToSummaryEvent(row: AgentDynamicsRunRowVM): AgentDynamicsEventVM {
+  const tone = row.decision.tone;
+  return { id: `${row.runId}:summary`, runId: row.runId, time: row.timeLabel, title: row.decision.key === 'failed' ? `${row.buyer.name} 的回复生成失败` : row.decision.key === 'handoff' ? `${row.buyer.name} 已转人工处理` : row.decision.key === 'processing' ? `${row.buyer.name} 正在处理${row.intent}` : `${row.buyer.name} 的消息已完成自动回复`, meta: `${row.intent} · ${row.senderOutcome.label}`, label: row.decision.key === 'failed' ? '失败' : row.decision.key === 'handoff' ? '转人工' : row.decision.key === 'processing' ? '处理中' : '完成', tone };
+}
+
+function healthTone(status: string): AgentDynamicsSummaryVM['health'][number]['tone'] {
+  const normalized = status.toLowerCase();
+  if (['online', 'healthy', 'ok', 'ready', 'normal', 'connected'].includes(normalized)) return 'success';
+  if (['offline', 'error', 'failed', 'degraded', 'down'].includes(normalized)) return 'danger';
+  return 'warn';
+}
+
+function healthLabel(status: string): string {
+  const normalized = status.toLowerCase();
+  if (['online', 'connected'].includes(normalized)) return '在线';
+  if (['healthy', 'ok', 'ready', 'normal'].includes(normalized)) return '正常';
+  if (['offline', 'down'].includes(normalized)) return '离线';
+  if (['error', 'failed', 'degraded'].includes(normalized)) return '异常';
+  return '未知';
+}
+
+function mapSummaryHealth(raw: RawActivitySummary): AgentDynamicsSummaryVM['health'] {
+  if (raw.health.length === 0) return [{ key: 'health-snapshot', name: '健康快照', meta: '服务端未提供健康快照', value: '未知', tone: 'warn' }];
+  return raw.health.map((item) => ({ key: item.component, name: item.component, meta: `最近观测 ${formatTime(item.observedAt)}`, value: healthLabel(item.status), tone: healthTone(item.status) }));
+}
+
+function mapSummary(raw: RawActivitySummary, events: AgentDynamicsEventVM[] = []): AgentDynamicsSummaryVM {
+  const byStage = Array.isArray(raw.byStage) ? raw.byStage : [];
+  const byStatus = Array.isArray(raw.byStatus) ? raw.byStatus : [];
+  const exceptionsRaw = Array.isArray(raw.exceptions) ? raw.exceptions : [];
+  const healthRaw = Array.isArray(raw.health) ? raw.health : [];
+  const total = Math.max(0, Number(raw.inboundCount ?? 0));
+  const stageRows = SUMMARY_STAGE_GROUPS.map(({ key, stages }, index) => {
+    const rows = byStage.filter((item) => stages.includes(item.stage));
+    const count = rows.reduce((sum, item) => sum + item.count, 0);
+    const avg = rows.length ? Math.round(rows.reduce((sum, item) => sum + item.averageDurationMs, 0) / rows.length) : 0;
+    return { key, index: String(index + 1).padStart(2, '0'), label: stageLabel(key), count, meta: avg > 0 ? `平均 ${formatDuration(avg)}` : '暂无阶段数据', status: count > 0 ? 'online' : 'warning' } as const;
+  });
+  const health = mapSummaryHealth({ ...raw, health: healthRaw });
+  const gatewayHealth = health.find((item) => item.key.toLowerCase().includes('gateway') || item.name.includes('网关'));
+  const gatewayStatus = gatewayHealth?.tone === 'danger' ? 'offline' : 'online';
+  const completionPercent = `${(Math.max(0, Math.min(1, Number(raw.completionRate ?? 0))) * 100).toFixed(1)}%`;
+  const statusCounts = new Map<AgentDynamicsDecision | 'processing' | 'unknown', number>();
+  for (const item of byStatus) {
+    const key: AgentDynamicsDecision | 'processing' | 'unknown' = PROCESSING_STATUSES.includes(item.status) ? 'processing' : item.status === 'persisted' ? 'replied' : item.status === 'handoff' || item.status === 'failed' || item.status === 'skipped' ? item.status : 'unknown';
+    statusCounts.set(key, (statusCounts.get(key) ?? 0) + item.count);
+  }
+  const statusRows: Array<{ key: AgentDynamicsDecision | 'processing'; label: string; tone: AgentDynamicsSummaryVM['statusDistribution'][number]['tone'] }> = [
+    { key: 'replied', label: '自动回复完成', tone: 'success' as const },
+    { key: 'handoff', label: '转人工', tone: 'warn' as const },
+    { key: 'failed', label: '执行失败', tone: 'danger' as const },
+    { key: 'processing', label: '处理中', tone: 'info' as const },
   ];
-  const health = summary.health.map((item) => ({ key: item.component, name: item.component, meta: item.details?.description ? String(item.details.description) : `最近检查 ${formatTime(item.observedAt)}`, value: item.status, tone: mapHealthTone(item.status) }));
-  const healthy = health.length === 0 || health.every((item) => item.tone === 'success');
-  const total = Math.max(1, summary.inboundCount);
-  const statusDistribution = [
-    { key: 'replied', label: '自动回复完成', percent: (summary.persistedCount / total) * 100, tone: 'success' as const },
-    { key: 'handoff', label: '转人工', percent: (summary.handoffCount / total) * 100, tone: 'warn' as const },
-    { key: 'failed', label: '执行失败', percent: (summary.failedCount / total) * 100, tone: 'danger' as const },
-    { key: 'processing', label: '处理中', percent: (summary.processingCount / total) * 100, tone: 'info' as const },
-  ];
+  const statusDistribution = statusRows.map((item) => ({ ...item, percent: total ? ((statusCounts.get(item.key) ?? 0) / total) * 100 : 0 }));
+  const exceptions = exceptionsRaw.map((item) => ({ key: item.code, title: item.code, meta: `${item.count} 条 · ${item.status}`, count: item.count, tone: item.status === 'failed' ? 'danger' as const : item.status === 'handoff' ? 'warn' as const : 'info' as const }));
   return {
-    gateway: { status: healthy ? 'online' : 'offline', heartbeatLabel: health[0]?.meta ?? `最近刷新 ${formatTime(summary.asOf)}`, queueLabel: `${summary.processingCount.toLocaleString('zh-CN')} 条处理中` },
+    gateway: { status: gatewayStatus, heartbeatLabel: gatewayHealth?.meta ?? '暂无心跳快照', queueLabel: Number(raw.processingCount ?? 0) > 0 ? `当前处理中 ${raw.processingCount} 条` : '消息队列空闲' },
     kpis: [
-      { key: 'gateway', label: '网关连接', value: healthy ? '在线' : '异常', foot: healthy ? '● 稳定 · 最近刷新' : '● 异常 · 请检查链路', tone: healthy ? 'success' : 'danger' },
-      { key: 'inbound', label: '今日入站消息', value: summary.inboundCount.toLocaleString('zh-CN'), foot: `↑ ${summary.throughputPerSecond.toFixed(1)}/s · 当前窗口`, tone: 'success' },
-      { key: 'processing', label: '当前处理中', value: summary.processingCount.toLocaleString('zh-CN'), foot: `p95 ${(summary.p95DurationMs / 1000).toFixed(1)}s · 当前窗口`, tone: summary.processingCount > 0 ? 'info' : 'success' },
-      { key: 'persisted', label: '今日已落库', value: summary.persistedCount.toLocaleString('zh-CN'), foot: `${(summary.completionRate * 100).toFixed(1)}% · 当前窗口完成闭环`, tone: 'success' },
+      { key: 'gateway', label: '网关连接', value: gatewayStatus === 'online' ? '在线' : '离线', foot: `${gatewayStatus === 'online' ? '● 稳定' : '● 需关注'} · ${gatewayHealth?.meta ?? '暂无健康快照'}`, tone: gatewayStatus === 'online' ? 'success' : 'danger' },
+      { key: 'inbound', label: '当前范围入站消息', value: total.toLocaleString('zh-CN'), foot: `范围 ${formatTime(raw.from)} - ${formatTime(raw.to)}`, tone: 'info' },
+      { key: 'processing', label: '当前处理中', value: Number(raw.processingCount ?? 0).toLocaleString('zh-CN'), foot: `端到端 p95 ${formatDuration(Number(raw.p95DurationMs ?? 0))}`, tone: Number(raw.processingCount ?? 0) > 0 ? 'info' : 'success' },
+      { key: 'persisted', label: '已完成闭环', value: Number(raw.persistedCount ?? 0).toLocaleString('zh-CN'), foot: `${completionPercent} · 入站消息完成闭环`, tone: 'success' },
     ],
-    pipeline: stages.map((stage, index) => { const row = stageRows.get(stage.backend); return { key: stage.key, index: String(index + 1).padStart(2, '0'), label: stage.label, count: row?.count ?? (stage.key === 'persistence' ? summary.persistedCount : 0), meta: row?.averageDurationMs ? `平均 ${(row.averageDurationMs / 1000).toFixed(1)}s` : '暂无数据', status: 'online' as const }; }),
-    events: [],
+    pipeline: stageRows,
+    events,
     health,
-    healthSummary: [
-      { label: '当前吞吐', value: `${summary.throughputPerSecond.toFixed(1)}/s`, note: '当前查询窗口' },
-      { label: '端到端 p95', value: `${(summary.p95DurationMs / 1000).toFixed(1)}s`, note: '从接收至落库' },
-    ],
-    statusDistribution: statusDistribution.filter((item) => item.percent > 0 || summary.inboundCount === 0),
-    exceptions: summary.exceptions.map((item) => ({ key: item.code, title: item.code, meta: `${item.count} 条 · ${item.status}`, count: item.count, tone: item.status === 'failed' ? 'danger' : item.status === 'handoff' ? 'warn' : 'info' })),
-    asOf: summary.asOf,
+    healthSummary: [{ label: '当前吞吐', value: `${Number(raw.throughputPerSecond ?? 0).toFixed(1)}/s`, note: '所选时间范围' }, { label: '端到端 p95', value: formatDuration(Number(raw.p95DurationMs ?? 0)), note: '从接收至落库' }],
+    statusDistribution,
+    exceptions,
+    asOf: raw.asOf,
     refreshIntervalMs: 5000,
   };
 }
 
-function mapBackendDetail(detail: BackendRunDetail): AgentDynamicsRunDetailVM {
-  const row = mapBackendRunToViewModel(detail.run, detail);
-  const timeline = (detail.events ?? []).map((event) => ({ id: event.id, title: event.eventType, meta: `${formatTime(event.occurredAt)} · ${event.stage}`, tone: event.status === 'failed' ? 'danger' : event.status === 'handoff' ? 'warn' : 'success' as AgentDynamicsTone }));
-  const reply = detail.outboundMessages?.[detail.outboundMessages.length - 1]?.bodyText;
-  return { ...row, message: detail.inboundMessage?.bodyText ?? row.inboundPreview, reply, outcomeLabel: row.senderOutcome.label, timeline, chatPath: row.buyer.conversationId ? `/messages?conversationId=${encodeURIComponent(row.buyer.conversationId)}` : '/messages' };
-}
-
-function unwrap<T>(payload: T | ApiEnvelope<T>): T {
-  if (payload && typeof payload === 'object' && 'success' in payload && 'data' in payload) {
-    const envelope = payload as ApiEnvelope<T>;
-    if (!envelope.success || envelope.data === null) throw new Error(envelope.message ?? envelope.error?.code ?? 'AGENT_DYNAMICS_REQUEST_FAILED');
-    return envelope.data;
-  }
-  return payload as T;
+function mapDetail(raw: RawAutoReplyRunDetail): AgentDynamicsRunDetailVM {
+  const row = mapRun(raw.run);
+  const timeline: AgentDynamicsTimelineItemVM[] = raw.events.length > 0 ? raw.events.map((event) => ({ id: event.id, title: eventTitle(event, row), meta: `${formatTime(event.occurredAt)} · ${event.eventType}${event.durationMs === undefined ? '' : ` · ${formatDuration(event.durationMs)}`}`, tone: eventTone(event.status) })) : [{ id: `${row.runId}:status`, title: decisionLabel(row.decision.key), meta: `${row.timeLabel} · 当前状态 ${raw.run.status}`, tone: row.decision.tone }];
+  return { ...row, message: raw.inboundMessage?.bodyText ?? row.inboundPreview, reply: raw.outboundMessages[0]?.bodyText, outcomeLabel: row.senderOutcome.label, timeline, chatPath: row.buyer.conversationId ? `/messages?conversationId=${encodeURIComponent(row.buyer.conversationId)}` : '/messages' };
 }
 
 export interface AgentDynamicsApi {
@@ -219,24 +325,50 @@ function query(input: Record<string, string | number | undefined>): string {
 }
 
 export function createAgentDynamicsApi(transport: AgentDynamicsApiTransport): AgentDynamicsApi {
+  async function fetchRawList(input: { accountId?: string; range: AgentDynamicsRange; status: AgentDynamicsFilters['status']; stage: AgentDynamicsFilters['stage']; keyword: string; page: number; pageSize: number }): Promise<AgentDynamicsRunsPageVM> {
+    if (!input.accountId) return { items: [], page: Math.max(1, input.page), pageSize: Math.max(1, input.pageSize), total: 0, totalPages: 1 };
+    const window = rangeWindow(input.range);
+    const statuses = RAW_STATUS_GROUPS[input.status];
+    const stages = RAW_STAGE_GROUPS[input.stage];
+    const rawStatuses = statuses.length ? statuses : [undefined];
+    const rawStages = stages.length ? stages : [undefined];
+    const expanded = rawStatuses.length > 1 || rawStages.length > 1;
+    const requests = rawStatuses.flatMap((status) => rawStages.map((stage) => transport.get<RawAutoReplyRunListResult | ApiEnvelope<RawAutoReplyRunListResult>>(`/api/v1/auto-reply/runs${query({ accountId: input.accountId, from: window.from, to: window.to, status, stage, keyword: input.keyword.trim() || undefined, page: expanded ? 1 : input.page, pageSize: expanded ? 100 : input.pageSize })}`)));
+    const responses = await Promise.all(requests);
+    const pages = responses.map((response) => unwrap(response));
+    if (!expanded) {
+      const page = pages[0];
+      return { items: page.items.map(mapRun), page: page.page, pageSize: page.pageSize, total: page.total, totalPages: page.totalPages };
+    }
+    const seen = new Set<string>();
+    const merged = pages.flatMap((page) => page.items).filter((item) => { if (seen.has(item.id)) return false; seen.add(item.id); return true; }).sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt) || right.id.localeCompare(left.id));
+    const page = Math.max(1, input.page);
+    const pageSize = Math.max(1, input.pageSize);
+    const items = merged.slice((page - 1) * pageSize, page * pageSize);
+    return { items: items.map(mapRun), page, pageSize, total: merged.length, totalPages: Math.max(1, Math.ceil(merged.length / pageSize)) };
+  }
+
   return {
     async getSummary(input) {
-      const range = rangeParams(input.range);
-      const payload = unwrap(await transport.get<BackendSummary | ApiEnvelope<BackendSummary>>(`/api/v1/auto-reply/activity/summary${query({ accountId: input.accountId, ...range })}`));
-      return mapBackendSummary(payload);
+      if (!input.accountId) return mapSummary({ from: new Date(0).toISOString(), to: new Date(0).toISOString(), asOf: new Date().toISOString(), inboundCount: 0, processingCount: 0, persistedCount: 0, handoffCount: 0, failedCount: 0, skippedCount: 0, completionRate: 0, throughputPerSecond: 0, p95DurationMs: 0, byStatus: [], byStage: [], exceptions: [], health: [] });
+      const window = rangeWindow(input.range);
+      const raw = unwrap(await transport.get<RawActivitySummary | ApiEnvelope<RawActivitySummary>>(`/api/v1/auto-reply/activity/summary${query({ accountId: input.accountId, from: window.from, to: window.to })}`));
+      let runs: RawAutoReplyRunListResult | undefined;
+      if (!raw.events?.length) {
+        runs = await transport.get<RawAutoReplyRunListResult | ApiEnvelope<RawAutoReplyRunListResult>>(`/api/v1/auto-reply/runs${query({ accountId: input.accountId, from: window.from, to: window.to, page: 1, pageSize: 20 })}`).then(unwrap).catch(() => undefined);
+      }
+      const runRows = runs?.items.map(mapRun) ?? [];
+      const runMap = new Map(runRows.map((row) => [row.runId, row]));
+      const events = raw.events ? mapEvents(raw.events, runMap) : runRows.slice(0, 6).map(mapRunToSummaryEvent);
+      return mapSummary(raw, events);
     },
     async listRuns(filters) {
-      const range = rangeParams(filters.range);
-      const decision = filters.status === 'all' || filters.status === 'processing' ? undefined : filters.status;
-      const processing = filters.status === 'processing' ? 'true' : undefined;
-      const stage = filters.stage === 'all' ? undefined : ({ gateway: 'gateway_received', intent: 'intent_recognition', context: 'context_read', generation: 'reply_generation', persistence: 'persisted' } as const)[filters.stage];
-      const payload = unwrap(await transport.get<{ items: BackendRun[]; total: number; page: number; pageSize: number; totalPages: number } | ApiEnvelope<{ items: BackendRun[]; total: number; page: number; pageSize: number; totalPages: number }>>(`/api/v1/auto-reply/runs${query({ accountId: filters.accountId, ...range, decision, processing, stage, keyword: filters.keyword || undefined, page: filters.page, pageSize: filters.pageSize })}`));
-      const mapped = payload.items.map((item) => mapBackendRunToViewModel(item));
-      return { ...payload, items: mapped };
+      return fetchRawList(filters);
     },
     async getRunDetail(runId, accountId) {
-      const payload = unwrap(await transport.get<BackendRunDetail | ApiEnvelope<BackendRunDetail>>(`/api/v1/auto-reply/runs/${encodeURIComponent(runId)}${query({ accountId })}`));
-      return mapBackendDetail(payload);
+      if (!accountId) throw new ApiError('ACCOUNT_CONTEXT_REQUIRED', 422);
+      const raw = unwrap(await transport.get<RawAutoReplyRunDetail | ApiEnvelope<RawAutoReplyRunDetail>>(`/api/v1/auto-reply/runs/${encodeURIComponent(runId)}${query({ accountId })}`));
+      return mapDetail(raw);
     },
   };
 }
