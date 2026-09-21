@@ -26,8 +26,7 @@
 }
 
 .ui-select-control select:focus-visible,
-.ui-select-control.is-focus select,
-.ui-select-control.is-open select {
+.ui-select-control.is-focus select {
   border-color: var(--link);
   outline: 2px solid rgba(36, 90, 141, .35);
   outline-offset: 2px;
@@ -37,6 +36,11 @@
 .ui-select-control select:disabled {
   cursor: not-allowed;
   opacity: .65;
+}
+
+.ui-select-control.is-open select {
+  border-color: var(--link);
+  background: #fff;
 }
 
 .ui-select-chevron {

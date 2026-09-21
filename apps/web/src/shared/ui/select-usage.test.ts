@@ -44,6 +44,8 @@ describe('select usage architecture', () => {
     expect(css).toContain('appearance: none');
     expect(css).toContain('.ui-select-control.is-focus select');
     expect(css).toContain('.ui-select-control.is-open select');
+    expect(css).not.toMatch(/select:focus-visible,\s*\.ui-select-control\.is-focus select,\s*\.ui-select-control\.is-open select/);
+    expect(css).toMatch(/\.ui-select-control\.is-open select\s*\{\s*border-color: var\(--link\);\s*background: #fff;/);
     expect(css).toContain('stroke-width: 1.5');
   });
 });
