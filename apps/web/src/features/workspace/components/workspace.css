@@ -23,7 +23,6 @@
 .workspace-session-select small { overflow: hidden; color: var(--sub); text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .workspace-session-action { display: grid; place-items: center; align-self: center; width: 32px; height: 30px; margin-right: 5px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--sub); }
 .workspace-session-action:hover:not(:disabled) { background: #fff; color: var(--danger); }
-.workspace-session-action:focus-visible { outline: 2px solid rgba(36,90,141,.35); outline-offset: 2px; }
 .workspace-session-action-icon { width: 16px; height: 16px; }
 .workspace-list-state { padding: 26px 12px; color: var(--sub); font-size: 11px; text-align: center; }
 .workspace-main-column { display: grid; align-content: start; gap: 16px; min-width: 0; }

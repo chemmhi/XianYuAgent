@@ -32,6 +32,6 @@ describe('Workspace SessionRow', () => {
     expect(html).toContain('aria-label="归档 检查当前 Workspace 状态"');
     expect(html).toContain('class="workspace-session-action-icon"');
     expect(html).not.toContain('>•••</button>');
-    expect(workspaceCss).toContain('.workspace-session-action:focus-visible');
+    expect(workspaceCss).not.toContain('.workspace-session-action:focus-visible');
   });
 });
