@@ -474,7 +474,7 @@ export class PostgresStore implements Store {
     const result = await this.pool.query(`update messages.auto_reply_runs set ${fields.join(', ')} where id=$1 returning *`, values);
     if (!result.rows[0]) return undefined;
     const run = this.toAutoReplyRun(result.rows[0]);
-    await this.appendAutoReplyRunEvent({ runId: run.id, accountId: run.accountId, eventType: patch.status ? `run.${patch.status}` : 'run.updated', status: run.status, stage: autoReplyStageForStatus(run.status), payload: { decision: run.decision, intent: run.intent, failureCode: run.failureCode } });
+    if (patch.status !== undefined) await this.appendAutoReplyRunEvent({ runId: run.id, accountId: run.accountId, eventType: `run.${patch.status}`, status: run.status, stage: autoReplyStageForStatus(run.status), payload: { decision: run.decision, intent: run.intent, failureCode: run.failureCode } });
     return run;
   }
 

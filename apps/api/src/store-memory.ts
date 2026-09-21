@@ -513,7 +513,7 @@ export class MemoryStore implements Store {
     if (!run) return undefined;
     if (Object.keys(patch).length === 0) return { ...run, riskFlags: [...run.riskFlags], orderRefs: [...run.orderRefs] };
     Object.assign(run, patch, { updatedAt: new Date().toISOString() });
-    await this.appendAutoReplyRunEvent({ runId: run.id, accountId: run.accountId, eventType: patch.status ? `run.${patch.status}` : 'run.updated', status: run.status, stage: autoReplyStageForStatus(run.status), payload: { decision: run.decision, intent: run.intent, failureCode: run.failureCode } });
+    if (patch.status !== undefined) await this.appendAutoReplyRunEvent({ runId: run.id, accountId: run.accountId, eventType: `run.${patch.status}`, status: run.status, stage: autoReplyStageForStatus(run.status), payload: { decision: run.decision, intent: run.intent, failureCode: run.failureCode } });
     return { ...run, riskFlags: [...run.riskFlags], orderRefs: [...run.orderRefs] };
   }
 

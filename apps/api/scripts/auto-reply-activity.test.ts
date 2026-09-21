@@ -15,6 +15,7 @@ test('auto reply activity persists events and exposes summary/list/detail', asyn
   const run = await store.createAutoReplyRun({ adminId: admin.id, accountId: account.id, conversationId: conversation.id, inboundMessageId: inbound.message.id, intent: 'availability', decision: 'replied', status: 'received', inputDigest: 'sha256:in' });
   await store.updateAutoReplyRun(run.id, { status: 'generated' });
   await store.updateAutoReplyRun(run.id, { status: 'persisted', senderOutcome: 'known_success' });
+  await store.updateAutoReplyRun(run.id, { replyDigest: 'sha256:reply' });
   const activity = new AutoReplyActivityService(store);
   const from = new Date(Date.now() - 60_000).toISOString();
   const to = new Date(Date.now() + 60_000).toISOString();
