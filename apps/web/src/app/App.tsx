@@ -22,6 +22,8 @@ import { navItems, pathForPage, type PageKey } from './navigation';
 import { createDashboardApi } from '../features/dashboard/api';
 import { createMockDashboardApi } from '../features/dashboard/api.mock';
 import { DashboardPage } from '../features/dashboard/components/DashboardPage';
+import { createAgentDynamicsApi, createMockAgentDynamicsApi, type AgentDynamicsApi } from '../features/agent-dynamics/api';
+import { AgentDynamicsPage } from '../features/agent-dynamics/components/AgentDynamicsPage';
 
 function pageFromPath(pathname: string): PageKey {
   const page = pathname.replace(/^\//, '') as PageKey;
@@ -41,6 +43,7 @@ function iconFor(name: string) {
     box: 'm12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Zm0 9 8-4.5M12 12v9M4 7.5 12 12',
     ticket: 'M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3a2 2 0 1 0 0 4v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3a2 2 0 1 0 0-4V7Zm8-2v14',
     cart: 'M4 5h2l1.5 10h9.5l2-7H7m2 12h.01M17 20h.01',
+    activity: 'M3 12h4l2.2-7L13 19l2.4-7H21',
     gear: 'M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm0-5v2m0 13v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M3 12h2m14 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42',
   };
   return <svg aria-hidden="true" viewBox="0 0 24 24" className="nav-icon"><path d={paths[name] ?? paths.grid} /></svg>;
@@ -62,6 +65,7 @@ export default function App() {
   const ordersApi = useMemo(() => createOrdersApi({ get: transport.get, post: transport.post }), [transport]);
   const settingsApi = useMemo(() => createCredentialApi({ get: transport.get, post: transport.post, patch: transport.patch }), [transport]);
   const autoReplyAgentSettingsApi = useMemo(() => createAutoReplyAgentSettingsApi({ get: transport.get, patch: transport.patch }), [transport]);
+  const agentDynamicsApi = useMemo<AgentDynamicsApi>(() => apiMode === 'live' ? createAgentDynamicsApi({ get: transport.get }) : createMockAgentDynamicsApi(), [transport]);
   const dashboardApi = useMemo(() => dashboardMode === 'live' ? createDashboardApi({ get: transport.get }) : createMockDashboardApi(), [dashboardMode, transport]);
 
   useEffect(() => {
@@ -78,13 +82,14 @@ export default function App() {
 
   return <AuthGate api={authApi}>
     <AccountContextProvider api={accountsApi}>
-      <AuthenticatedShell page={page} accountsApi={accountsApi} productsApi={productsApi} couponsApi={couponsApi} messagesApi={messagesApi} workspaceApi={workspaceApi} ordersApi={ordersApi} settingsApi={settingsApi} autoReplyAgentSettingsApi={autoReplyAgentSettingsApi} dashboardApi={dashboardApi} navigate={navigate} />
+      <AuthenticatedShell page={page} accountsApi={accountsApi} productsApi={productsApi} couponsApi={couponsApi} messagesApi={messagesApi} workspaceApi={workspaceApi} ordersApi={ordersApi} settingsApi={settingsApi} autoReplyAgentSettingsApi={autoReplyAgentSettingsApi} agentDynamicsApi={agentDynamicsApi} dashboardApi={dashboardApi} navigate={navigate} />
     </AccountContextProvider>
   </AuthGate>;
 }
 
-function AuthenticatedShell({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, dashboardApi, navigate }: { page: PageKey; accountsApi: ReturnType<typeof createAccountsApi>; productsApi: ReturnType<typeof createProductsApi>; couponsApi: ReturnType<typeof createCouponsApi>; messagesApi: ReturnType<typeof createMessagesApi>; workspaceApi: ReturnType<typeof createWorkspaceApi>; ordersApi: ReturnType<typeof createOrdersApi>; settingsApi: ReturnType<typeof createCredentialApi>; autoReplyAgentSettingsApi: ReturnType<typeof createAutoReplyAgentSettingsApi>; dashboardApi: ReturnType<typeof createDashboardApi>; navigate: (next: PageKey) => void }) {
+function AuthenticatedShell({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, agentDynamicsApi, dashboardApi, navigate }: { page: PageKey; accountsApi: ReturnType<typeof createAccountsApi>; productsApi: ReturnType<typeof createProductsApi>; couponsApi: ReturnType<typeof createCouponsApi>; messagesApi: ReturnType<typeof createMessagesApi>; workspaceApi: ReturnType<typeof createWorkspaceApi>; ordersApi: ReturnType<typeof createOrdersApi>; settingsApi: ReturnType<typeof createCredentialApi>; autoReplyAgentSettingsApi: ReturnType<typeof createAutoReplyAgentSettingsApi>; agentDynamicsApi: AgentDynamicsApi; dashboardApi: ReturnType<typeof createDashboardApi>; navigate: (next: PageKey) => void }) {
   if (page === 'dashboard') return <DashboardPage api={dashboardApi} apiMode={resolveDashboardMode(apiMode, import.meta.env.VITE_DASHBOARD_MODE)} onNavigate={navigate} />;
+  if (page === 'agent-dynamics') return <AgentDynamicsPage api={agentDynamicsApi} onNavigate={navigate} />;
   return (
     <div className="app-viewport">
       <div className={`desktop-shell${page === 'products' ? ' products-shell' : page === 'accounts' ? ' accounts-shell' : page === 'orders' ? ' orders-shell' : page === 'settings' ? ' settings-shell' : ''}`}>
