@@ -584,7 +584,10 @@ export class PostgresStore implements Store {
       where r.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=r.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))`, [credentialId, adminId]);
     const row = result.rows[0] as Row | undefined;
     if (!row) return undefined;
-    return { ref: this.toCredentialRef(row), secretCiphertext: Buffer.from(row.ciphertext as Buffer).toString('utf8') };
+    const ref = this.toCredentialRef(row);
+    const ciphertext = Buffer.isBuffer(row.ciphertext) ? row.ciphertext.toString('utf8') : String(row.ciphertext ?? '');
+    if (!ciphertext) return undefined;
+    return { ref, secretCiphertext: ciphertext };
   }
   async createCredentialRef(input: { adminId: string; accountId: string; provider: string; alias: string; label?: string; secretCiphertext: string; fingerprint: string; metadata?: Record<string, string> }): Promise<CredentialRefRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');

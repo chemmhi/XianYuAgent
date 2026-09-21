@@ -64,6 +64,7 @@
 | `root/buyer_agent_impl` | `auto-reply-buyer-agent` | `codex/buyer-agent-impl` | `F:\ChenHai\Project\XianYuAgent-buyer-agent` | Codex `/root` delegated agent | `2026-09-21 13:00:00 +08:00` | `MERGED` | `05bba98` | `-` | 买家侧四工具 Agent、tool-call loop、动态配置、simulate 出站与落库 E2E 已合入 master；原 worktree 保留供审计。 |
 
 | `root/responses_wire_support` | `responses-wire-support` | `codex/responses-wire-support` | `F:\ChenHai\Project\XianYuAgent-responses-wire-support` | Codex `/root` delegated agent | `2026-09-21 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 支持可配置 wire_api=responses；保持 chat/completions 默认兼容；API build、自动回复单测 34/34、Pi runtime smoke 已通过。 |
+| `root/dynamic_models` | `settings-dynamic-models` | `feat/settings-dynamic-models` | `F:\ChenHai\Project\XianYuAgent-dynamic-models` | Codex `/root` delegated agent | `2026-09-21 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 动态模型 endpoint、密文 resolver、SSRF 防护、前端 lazy controller/API 与定向测试已完成；未改 SettingsPage 主视觉和主配置保存链路。 |
 
 ## 主工作区
 
