@@ -17,6 +17,8 @@ describe('AgentDynamicsViews', () => {
     expect(html.match(/<select /g)).toHaveLength(2);
     expect(html).toContain('aria-label="运行状态"');
     expect(html).toContain('aria-label="运行阶段"');
+    expect(html).toContain('data-agent-dynamics-dropdown="运行状态"');
+    expect(html).toContain('data-agent-dynamics-dropdown="运行阶段"');
     expect(html).toContain('class="ui-select-control agent-dynamics-filter"');
   });
 

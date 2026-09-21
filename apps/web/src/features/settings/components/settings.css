@@ -8,6 +8,7 @@
 
 /* OpenAI ModelClient parity with SellerAgent's editable dual-provider panel. */
 .openai-settings-content,.openai-settings-hero,.openai-model-box{min-width:0}
+.openai-settings-hero,.openai-model-box{overflow:visible}
 .timeline{display:grid;gap:10px}
 .timeline-row{display:grid;grid-template-columns:64px minmax(0,1fr) auto;gap:10px;align-items:center;padding:12px;border:1px solid var(--border);border-radius:10px;background:#fff;font-size:12px}
 .timeline-row strong{font-size:11px;color:var(--muted)}
@@ -23,6 +24,9 @@
 .openai-form-rows .ui-field{grid-template-columns:92px minmax(0,1fr);gap:10px;align-items:center}
 
 .openai-form-rows .ui-input-control,.openai-form-rows .ui-select-control{width:100%;min-width:0}
+.openai-model-field,.openai-reasoning-field{min-width:0}
+.openai-model-field .ui-select-control,.openai-reasoning-field .ui-select-control{width:100%;min-width:0}
+.openai-model-field .ui-select-control select,.openai-reasoning-field .ui-select-control select{width:100%;min-width:0}
 
 
 .openai-inline-error{grid-column:1/-1;padding:8px 10px;border:1px solid rgba(180,35,24,.18);border-radius:8px;background:var(--danger-bg);color:var(--danger);font-size:10px;line-height:1.45}

@@ -54,7 +54,7 @@
 .agent-dynamics-btn:hover { border-color: #cbd5e1; background: var(--agent-bg); }
 .agent-dynamics-btn.primary { border-color: var(--agent-link); background: var(--agent-link); color: #fff; }
 .agent-dynamics-btn.primary:hover { background: #1f4e79; }
-.agent-dynamics-head-range { min-width: 102px; flex: 0 0 auto; }
+.agent-dynamics-head-range { min-width: 112px; flex: 0 0 auto; }
 
 .agent-dynamics-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
 .agent-dynamics-kpi { min-height: 112px; padding: 16px 20px; }
@@ -145,8 +145,8 @@
 .agent-dynamics-runs { margin-top: 14px; overflow: hidden; }
 .agent-dynamics-runs-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--agent-border); }
 .agent-dynamics-filters { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-.agent-dynamics-filter { min-width: 96px; flex: 0 0 auto; }
-.agent-dynamics-search { width: 220px; max-width: 220px; flex: 0 0 auto; }
+.agent-dynamics-filter { min-width: 112px; flex: 0 0 auto; }
+.agent-dynamics-search { width: 220px; max-width: 220px; flex: 0 0 auto; font-size: 11px; }
 .agent-dynamics-app button:focus-visible { outline: 2px solid rgba(36, 90, 141, 0.28); outline-offset: 2px; }
 .agent-dynamics-table-scroll { overflow-x: auto; }
 .agent-dynamics-run-table { width: 100%; border-collapse: collapse; }

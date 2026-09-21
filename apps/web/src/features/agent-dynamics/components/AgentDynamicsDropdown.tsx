@@ -22,6 +22,7 @@ export function AgentDynamicsDropdown<T extends string>({
 }: AgentDynamicsDropdownProps<T>) {
   return <SelectField
     aria-label={ariaLabel}
+    data-agent-dynamics-dropdown={ariaLabel}
     className={triggerClassName}
     value={value}
     onChange={(event) => onChange(event.target.value as T)}

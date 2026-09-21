@@ -17,13 +17,17 @@ describe('CouponToolbar', () => {
     }));
 
     expect(html).toContain('搜索卡券名称或描述');
+    expect(html).toContain('data-coupons-search="true"');
+    expect(html).not.toContain('搜索卡券名称或描述...');
     expect(html).toContain('卡券类型');
+    expect(html).toContain('全部类型');
     expect(html).toContain('卡券状态');
     expect(html).toContain('库存预警');
     expect(html).toContain('全部状态');
     expect(html).toContain('全部库存');
     expect(html).toContain('刷新');
     expect(html).toContain('新建卡券');
+    expect(html).toContain('coupons-create-button');
     expect(html.indexOf('刷新')).toBeLessThan(html.indexOf('新建卡券'));
     expect(html).not.toContain('coupons-total');
     expect(html).not.toContain('共 2 张');

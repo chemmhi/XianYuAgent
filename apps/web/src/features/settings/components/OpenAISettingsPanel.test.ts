@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { connectivityLabel, connectivitySummary, normalizeModelOptions, reasoningOptionsFor } from './OpenAISettingsPanel';
+
+const settingsDir = dirname(fileURLToPath(import.meta.url));
 
 describe('OpenAI settings model controls', () => {
   it('preserves provider-owned model metadata without embedding model ids', () => {
@@ -29,5 +34,14 @@ describe('OpenAI settings model controls', () => {
     expect(connectivityLabel('primary', 'unknown', false)).toBe('待配置');
     expect(connectivitySummary('backup', { id: 'backup-1', connectivity: 'unknown', model: 'provider-model' })).toBe('provider-model · 待测试');
     expect(connectivitySummary('backup', { connectivity: 'unknown', model: '' })).toBe('未配置 · 待配置');
+  });
+
+  it('anchors the OpenAI model select to the shared field geometry', () => {
+    const source = readFileSync(join(settingsDir, 'OpenAISettingsPanel.tsx'), 'utf8');
+    const css = readFileSync(join(settingsDir, 'settings.css'), 'utf8');
+    expect(source).toContain('className="openai-model-field"');
+    expect(source).toContain('data-openai-model-select="true"');
+    expect(css).toMatch(/\.openai-model-field\s*\.ui-select-control/);
+    expect(css).toMatch(/\.openai-model-field\s+\.ui-select-control\s+select/);
   });
 });

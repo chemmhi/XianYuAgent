@@ -33,6 +33,8 @@ describe('CouponCreateModal', () => {
     expect(html).not.toContain('对接消息');
     expect(html).toContain('ui-select-control');
     expect((html.match(/ui-select-control/g) ?? []).length).toBe(1);
+    expect(html).toContain('data-coupons-purpose-select="true"');
+    expect(html).toContain('coupons-purpose-field');
     expect(html).toContain('coupons-field-label');
     expect(html).toContain('coupons-checkbox-row');
   });

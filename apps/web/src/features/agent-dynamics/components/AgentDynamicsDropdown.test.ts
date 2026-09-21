@@ -15,6 +15,7 @@ describe('AgentDynamicsDropdown', () => {
 
     expect(html.match(/<select /g)).toHaveLength(1);
     expect(html).toContain('aria-label="时间范围"');
+    expect(html).toContain('data-agent-dynamics-dropdown="时间范围"');
     expect(html).toContain('class="ui-select-control agent-dynamics-head-range"');
     expect(html).toContain('class="ui-select-chevron"');
     expect(html).not.toContain('<button');
