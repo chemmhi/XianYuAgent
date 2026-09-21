@@ -1,4 +1,5 @@
 import type { AccountVM } from '../../accounts/types';
+import { SelectField } from '../../../shared/ui/SelectField';
 import type { ProductFilters, ProductStatus, ProductsLoadPhase } from '../types';
 
 const statuses: Array<{ value: ProductStatus | 'all'; label: string }> = [
@@ -33,7 +34,7 @@ export function ProductToolbar({ currentAccount, contextLoading, contextError, c
       {contextMissing && <button className="btn ghost" type="button" data-testid="choose-account" onClick={onChooseAccount}>去选择账号</button>}
       {contextError && <span className="products-account-error" role="alert">账号上下文加载失败</span>}
       <label className="products-search"><span className="sr-only">搜索商品</span><input aria-label="搜索商品" value={filters.keyword ?? ''} onChange={(event) => onKeywordChange(event.target.value)} placeholder="搜索商品名称或外部编号" /></label>
-      <label><span className="sr-only">商品状态</span><select aria-label="商品状态" value={filters.status ?? 'all'} onChange={(event) => onStatusChange(event.target.value as ProductStatus | 'all')}>{statuses.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}</select></label>
+      <SelectField aria-label="商品状态" className="products-status-select" value={filters.status ?? 'all'} onChange={(event) => onStatusChange(event.target.value as ProductStatus | 'all')} options={statuses} />
       <button className="btn ghost" type="button" data-testid="refresh-products" onClick={onRefresh} disabled={phase === 'loading' || actionDisabled}>刷新本地</button>
       <button className="btn ghost" type="button" data-testid="sync-products" onClick={onSync} disabled={syncing || actionDisabled}>{syncing ? '同步中…' : '同步闲鱼'}</button>
       <button className="btn primary" type="button" data-testid="publish-product" onClick={onCreate} disabled={actionDisabled}>发布商品</button>

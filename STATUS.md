@@ -1,5 +1,13 @@
 # XianyuSellerAgent 项目状态
 
+## 2026-09-21 Agent 动态控件与轮询视觉修复
+
+- 修复控件级高保真问题：移除原生 `select` 作为可视触发器，改为按钮 + 自定义菜单；修正 `.agent-dynamics-app` 字体级联优先级，恢复原型 10–11px 字号、600/400 字重、字体颜色、圆角和背景 token。
+- 修复 `<a class="agent-dynamics-btn">` 空态 CTA 的按钮化布局，分页省略号恢复为 24×24 page button；按钮保留键盘 focus-visible 可见焦点。
+- 修复 5 秒轮询时的视觉闪烁：KPI 不再在后台刷新时替换为 skeleton；运行列表刷新失败保留最近一次成功数据、分页和筛选，只显示 inline error。
+- Chrome/CDP computed-style 复核：无 Agent 区域原生 select；时间范围 11px/600/102.30px，主按钮 11px/600/103px，筛选 10px/74.09px，搜索框 11px/220px；颜色、背景和圆角断言通过。
+- 验证：`npm --workspace apps/web run typecheck`、`npm --workspace apps/web run test -- --run`（44 files / 133 tests）、`npm run build`、`npm --workspace apps/web run test:e2e:chrome:agent-dynamics`、`git diff --check` 均通过；视觉记录见 `docs/agent/agent-dynamics/evidence/visual-diff.md`。
+
 ## 2026-09-21 Agent 动态壳层与视觉复验增量
 
 - 按最新产品约束，Agent 动态复用现有 `AuthenticatedShell` 左侧导航，`Agent 动态` 保持在“订单管理”和“设置”之间；移除原型内置 Agent Console 左栏。

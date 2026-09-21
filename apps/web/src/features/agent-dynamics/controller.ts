@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../api/http';
 import { defaultAgentDynamicsApi, type AgentDynamicsApi } from './api';
-import type { AgentDynamicsFilters, AgentDynamicsLoadError, AgentDynamicsRunsState, AgentDynamicsDetailState, AgentDynamicsSummaryState } from './types';
+import type { AgentDynamicsFilters, AgentDynamicsLoadError, AgentDynamicsRunsState, AgentDynamicsDetailState, AgentDynamicsSummaryState, AgentDynamicsLoadPhase } from './types';
 
 export const defaultAgentDynamicsFilters: AgentDynamicsFilters = { range: '24h', status: 'all', stage: 'all', keyword: '', page: 1, pageSize: 20 };
 
@@ -11,6 +11,23 @@ export function toAgentDynamicsLoadError(error: unknown): AgentDynamicsLoadError
   if (error instanceof ApiError && error.status === 504) return { code: 'TIMEOUT', message: 'Agent 动态查询超时，请稍后重试。', retryable: true };
   if (error instanceof TypeError) return { code: 'NETWORK_ERROR', message: 'Agent 动态服务暂时不可用，请检查连接后重试。', retryable: true };
   return { code: 'UNKNOWN', message: error instanceof Error ? error.message : 'Agent 动态加载失败，请重试。', retryable: true };
+}
+
+function phaseForRunsError(error: AgentDynamicsLoadError): AgentDynamicsLoadPhase {
+  return error.code === 'FORBIDDEN' ? 'forbidden' : error.code === 'TIMEOUT' ? 'timeout' : 'error';
+}
+
+/**
+ * Keep the last successful run page visible while a background refresh fails.
+ * Polling should surface an inline error, not blank the whole table.
+ */
+export function agentDynamicsRunsErrorState(previous: AgentDynamicsRunsState, error: AgentDynamicsLoadError): AgentDynamicsRunsState {
+  return {
+    phase: previous.data ? previous.phase : phaseForRunsError(error),
+    data: previous.data,
+    error,
+    refreshing: false,
+  };
 }
 
 export interface AgentDynamicsController {
@@ -66,7 +83,7 @@ export function useAgentDynamicsController(options: { api?: AgentDynamicsApi; ac
     } catch (error) {
       if (requestId !== runsRequestId.current) return;
       const mapped = toAgentDynamicsLoadError(error);
-      setRuns({ phase: mapped.code === 'FORBIDDEN' ? 'forbidden' : mapped.code === 'TIMEOUT' ? 'timeout' : 'error', data: null, error: mapped, refreshing: false });
+      setRuns((previous) => agentDynamicsRunsErrorState(previous, mapped));
     }
   }, [accountId, api, enabled, filters]);
 

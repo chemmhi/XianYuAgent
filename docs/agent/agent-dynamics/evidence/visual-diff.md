@@ -20,7 +20,7 @@
 
 ## 样式 token 对比
 
-原型 HTML 已从 Git blob `620429f9d073011d6d88d7be87fc3ef49f227152` 恢复并与实现 CSS 做了逐项比对，不只检查布局和文案。实现使用 `.agent-dynamics-app` 局部 token，避免污染宿主页面；以下核心 token 与原型语义完全一致：
+原型 HTML 已从 Git blob `620429f9d073011d6d88d7be87fc3ef49f227152` 恢复并与实现 CSS 做了逐项比对，不只检查布局和文案。实现使用 `.agent-dynamics-app` 局部 token，避免污染宿主页面；以下核心 token 与原型语义一致：
 
 | Token 类别 | 原型值 | 实现值 | 结果 |
 | --- | --- | --- | --- |
@@ -34,7 +34,34 @@
 | 核心间距 / 字号 | 8/9/10/12/14/16/18/20px，10–24px 字号层级 | 对应选择器逐项一致 | PASS |
 | 字体栈 / 数字格式 | Inter、Noto Sans SC、PingFang SC、Microsoft YaHei；tabular-nums | 页面 token 与现有宿主字体策略兼容 | PASS |
 
-Token 比对命令：从原型 HTML blob 提取 `:root` token，再与 `agent-dynamics.css` 的 `--agent-*` token 做映射比较；结果为 18/18 核心 token 语义匹配。
+Token 比对命令：从原型 HTML blob 提取 `:root` token，再与 `agent-dynamics.css` 的 `--agent-*` token 做映射比较；结果为 18/18 核心 token 语义匹配。此前仅凭这组 token 不能代表控件高保真，因为控件元素类型、级联优先级和 UA 外观不会被这类静态 token 比对覆盖。
+
+## 控件级视觉复核（2026-09-21）
+
+本轮用户反馈聚焦输入框、下拉框、筛选框、按钮和字体细节。复核发现并修复了两个导致截图级失真的根因：
+
+1. 原型使用 `<button class="btn">` / `<button class="filter">`，实现曾使用原生 `<select>`；原生箭头、UA padding、line-height 和 option 字体导致宽度与字形明显偏离。
+2. `.agent-dynamics-app button, input, select { font: inherit; }` 的特异性高于控件单类规则，把原型的 10–11px、600 字重重置成宿主的 16px/400，导致所有控件视觉被放大。
+
+修复后，时间范围和状态/阶段筛选改为可访问的按钮触发自定义菜单；同时把通用字体规则改为仅继承 `font-family`，保留每个控件自己的字号和字重。Chrome/CDP computed-style 证据（1440×900）如下：
+
+| 控件 | 元素 | 字号 | 字重 | 字色 | 背景 | 圆角 | 宽度 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 时间范围 | `BUTTON` | `11px` | `600` | `rgb(71, 85, 105)` | `rgb(255, 255, 255)` | `7px` | `102.30px` |
+| 主按钮 | `BUTTON` | `11px` | `600` | `#fff` | `rgb(36, 90, 141)` | `7px` | `103px` |
+| 状态筛选 | `BUTTON` | `10px` | `400` | `rgb(71, 85, 105)` | `#fff` | `6px` | `74.09px` |
+| 搜索框 | `INPUT` | `11px` | 宿主 normal | `rgb(17, 24, 39)` | `rgb(246, 247, 249)` | `7px` | `220px` |
+
+原型截图中右上时间按钮外框约 94px、主按钮约 103px；修复后主按钮实测 103px，时间按钮因自定义箭头与实际文本宽度实测 102.30px，已移除原生 select 的额外 UA 宽度和双箭头。E2E 同时断言 `.agent-dynamics-app select` 数量为 0，避免浏览器默认 select 外观回归。
+
+## 动态刷新验收（2026-09-21）
+
+页面仍按 `refreshIntervalMs=5000` 每 5 秒轮询摘要和运行记录，但轮询不再用 skeleton 覆盖已加载内容：
+
+- KPI 在后台刷新期间继续展示上一版值，不再因为 `refreshing=true` 闪烁成骨架块；
+- 运行列表刷新失败时保留上一次成功的行、分页和筛选条件，仅展示 inline error；
+- 轮询不会修改 `filters`，也不会触发浏览器级页面重载；
+- 回归测试覆盖旧数据、筛选关键词和刷新错误同时可见。
 
 ## 逐项结论
 

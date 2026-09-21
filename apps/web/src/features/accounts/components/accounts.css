@@ -14,6 +14,7 @@
 .accounts-domain-toolbar p { margin: 0; font-size: 11px; }
 .accounts-domain-toolbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .accounts-domain-toolbar select, .accounts-domain-search input { height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font-size: 12px; }
+.accounts-domain-status-select { min-width: 138px; }
 .accounts-domain-search input { width: 210px; }
 .accounts-domain-table-region { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .accounts-domain-table-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }

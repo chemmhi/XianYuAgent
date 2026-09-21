@@ -7,6 +7,7 @@
 .coupons-toolbar p { margin: 0; font-size: 11px; color: var(--sub); }
 .coupons-toolbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .coupons-toolbar-actions select, .coupons-search input, .coupons-drawer textarea, .coupons-inline-form input, .coupons-form-grid input, .coupons-form-grid select, .coupons-form-grid textarea { min-height: 34px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font-size: 12px; }
+.coupons-purpose-select { min-width: 112px; }
 .coupons-search input { width: 230px; }
 .coupons-total, .coupons-inline-note { color: var(--sub); font-size: 11px; white-space: nowrap; }
 .coupons-table { display: grid; min-width: 1240px; overflow-x: auto; }

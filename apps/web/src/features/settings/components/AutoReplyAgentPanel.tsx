@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { SelectField } from '../../../shared/ui/SelectField';
 import type { AutoReplyAgentSettingsController } from '../agent-settings-controller';
 import type { AutoReplyAgentConfigVM } from '../types';
 
@@ -49,7 +50,7 @@ export function AutoReplyAgentPanel({ controller, accountName, accountId }: { co
           <label>最大回复长度<input type="number" min={30} max={4000} value={draft.maxReplyLength} onChange={(event) => setField('maxReplyLength', Number(event.target.value))} required /></label>
           <label>分段发送间隔（毫秒）<input type="number" min={0} max={30000} value={draft.replySegmentDelayMs} onChange={(event) => setField('replySegmentDelayMs', Number(event.target.value))} required /></label>
           <label>防抖窗口（毫秒）<input type="number" min={0} max={30000} value={draft.debounceMs} onChange={(event) => setField('debounceMs', Number(event.target.value))} required /></label>
-          <label>发送模式<select value={draft.sendMode} onChange={(event) => setField('sendMode', event.target.value as EditableConfig['sendMode'])}><option value="simulate">模拟发送</option><option value="live">真实发送（受白名单约束）</option></select></label>
+          <label>发送模式<SelectField value={draft.sendMode} onChange={(event) => setField('sendMode', event.target.value as EditableConfig['sendMode'])} options={[{ value: 'simulate', label: '模拟发送' }, { value: 'live', label: '真实发送（受白名单约束）' }]} /></label>
         </fieldset>
       </div>
       <div className="settings-editor-note"><strong>配置审计</strong><span>当前版本 v{state.data.configVersion} · 摘要 {state.data.configDigest} · Prompt 原文不会写入审计日志。</span></div>
