@@ -78,6 +78,7 @@
 | `root/migration_checklist` | `common-controls-migration-checklist` | `codex/migration-checklist` | `F:\ChenHai\Project\XianYuAgent-migration-checklist` | Codex `/root` delegated agent | `2026-09-21 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | Auth/Settings 最小控件迁移、Products 空值格、全局 checklist 与 guardrail 测试已完成；依赖 common-controls shared UI 文件，严格排除 MessagesPage 在线聊天 composer 与 SellerAgent。 |
 
 | `root/inbound_tests` | `auto-reply-inbound-tests` | `codex/auto-reply-inbound-tests` | `F:\ChenHai\Project\XianYuAgent-auto-reply-inbound-tests` | Codex `/root` delegated agent | `2026-09-21 22:27:54 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 补充第1节点 inbound inbox/解析/幂等/顺序/租约回收定向测试；先记录现有测试基础设施阻塞，不改主线。 |
+| `root/frontend_e2e` | `chat-frontend-live-fix` | `codex/chat-frontend-fix` | `F:\ChenHai\Project\XianYuAgent-chat-frontend-fix` | Codex `/root` delegated agent | `2026-09-22 00:16:41 +08:00` | `IN_PROGRESS` | `-` | `-` | 排查在线聊天消息实时渲染/订阅及自动回复触发链路；补充前端回归与真实浏览器 E2E 证据。 |
 
 ## 主工作区
 

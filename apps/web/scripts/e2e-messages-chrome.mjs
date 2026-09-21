@@ -168,6 +168,13 @@ async function run() {
   testAdminId = admin.id;
   const cookie = `session_id=${login.session.id}; csrf_token=${encodeURIComponent(login.csrfToken)}`;
   const account = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `messages-chrome-${process.pid}`, displayName: '在线聊天 E2E 账号' });
+  const secondConversation = await apiRuntime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'buyer-search-e2e', buyerDisplayName: '搜索用户 E2E', buyerAvatarUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2240%22 height=%2240%22%3E%3Crect width=%2240%22 height=%2240%22 rx=%2220%22 fill=%22%23f97316%22/%3E%3Ctext x=%2220%22 y=%2226%22 text-anchor=%22middle%22 font-size=%2220%22 fill=%22white%22%3ES%3C/text%3E%3C/svg%3E', itemTitle: '搜索商品缩略图', itemImageUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2244%22 height=%2236%22%3E%3Crect width=%2244%22 height=%2236%22 rx=%226%22 fill=%22%23fed7aa%22/%3E%3C/svg%3E', externalConversationRef: `messages-search-${process.pid}` });
+  await apiRuntime.store.createMessage({ adminId, conversationId: secondConversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '搜索商品还有库存吗？', source: 'system', traceId: 'messages-chrome-search-seed', createdAt: '2026-09-20T22:00:01.000Z' });
+  await apiRuntime.store.createMessage({ adminId, conversationId: secondConversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'image', bodyRef: 'https://cdn.example.com/chat/messages-e2e-image.png', source: 'system', traceId: 'messages-chrome-image-seed', createdAt: '2026-09-20T22:00:02.000Z' });
+
+  // Create the primary conversation last so the browser deterministically
+  // opens it first while the secondary conversation remains unread for the
+  // unread-filter assertions below.
   const conversation = await apiRuntime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'buyer-messages-e2e', buyerDisplayName: '买家 E2E', buyerAvatarUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2240%22 height=%2240%22%3E%3Crect width=%2240%22 height=%2240%22 rx=%2220%22 fill=%22%232563eb%22/%3E%3Ctext x=%2220%22 y=%2226%22 text-anchor=%22middle%22 font-size=%2220%22 fill=%22white%22%3EE%3C/text%3E%3C/svg%3E', itemTitle: '实时消息验证商品', itemImageUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2244%22 height=%2236%22%3E%3Crect width=%2244%22 height=%2236%22 rx=%226%22 fill=%22%23bfdbfe%22/%3E%3C/svg%3E', externalConversationRef: `messages-chrome-${process.pid}` });
   const seedMessage = await apiRuntime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '历史消息 001：请问什么时候发货？', source: 'system', traceId: 'messages-chrome-seed', createdAt: '2026-09-20T23:00:01.000Z' });
   assert.equal(seedMessage.event.cursor, 1);
@@ -185,9 +192,6 @@ async function run() {
       createdAt: new Date(Date.UTC(2026, 8, 20, 23, 0, index)).toISOString(),
     });
   }
-  const secondConversation = await apiRuntime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'buyer-search-e2e', buyerDisplayName: '搜索用户 E2E', buyerAvatarUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2240%22 height=%2240%22%3E%3Crect width=%2240%22 height=%2240%22 rx=%2220%22 fill=%22%23f97316%22/%3E%3Ctext x=%2220%22 y=%2226%22 text-anchor=%22middle%22 font-size=%2220%22 fill=%22white%22%3ES%3C/text%3E%3C/svg%3E', itemTitle: '搜索商品缩略图', itemImageUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2244%22 height=%2236%22%3E%3Crect width=%2244%22 height=%2236%22 rx=%226%22 fill=%22%23fed7aa%22/%3E%3C/svg%3E', externalConversationRef: `messages-search-${process.pid}` });
-  await apiRuntime.store.createMessage({ adminId, conversationId: secondConversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '搜索商品还有库存吗？', source: 'system', traceId: 'messages-chrome-search-seed' });
-  await apiRuntime.store.createMessage({ adminId, conversationId: secondConversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'image', bodyRef: 'https://cdn.example.com/chat/messages-e2e-image.png', source: 'system', traceId: 'messages-chrome-image-seed' });
 
   testAccountId = account.id;
   spawnProcess(npm, npmArgs(['--workspace', 'apps/web', 'run', 'dev', '--', '--host', '127.0.0.1', '--port', String(webPort)]), {
@@ -272,6 +276,11 @@ async function run() {
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-connection-status.connecting"))'), 'compact realtime connecting indicator');
   assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-connection-banner"))'), false, 'initial realtime loading must not render the legacy full-width banner');
   await evaluate(cdp, 'window.__xianyuReleaseTimelineFetch?.();');
+  // Conversation ordering is driven by latest activity, so the fixture's
+  // secondary conversation may be selected first. Explicitly select the
+  // primary conversation before asserting its seeded history.
+  await waitFor(async () => await evaluate(cdp, `Boolean(document.querySelector('[data-conversation-id="${conversation.id}"]'))`), 'primary conversation row');
+  await evaluate(cdp, `document.querySelector('[data-conversation-id="${conversation.id}"]')?.click()`);
   await waitFor(async () => (await messageBodies(cdp)).includes('历史消息 205'), 'latest history page');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-connection-dot.connected"))'), 'realtime connected');
   assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-account-tabs"))'), false, 'messages page must not render an account selector');
