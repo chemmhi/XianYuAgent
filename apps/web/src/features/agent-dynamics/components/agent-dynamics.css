@@ -29,7 +29,6 @@
 }
 
 .agent-dynamics-app *, .agent-dynamics-app *::before, .agent-dynamics-app *::after { box-sizing: border-box; }
-.agent-dynamics-app button, .agent-dynamics-app input, .agent-dynamics-app select { font-family: inherit; }
 .agent-dynamics-app button { cursor: pointer; }
 
 .agent-dynamics-shell { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; }
@@ -149,7 +148,6 @@
 .agent-dynamics-filter { min-width: 96px; flex: 0 0 auto; }
 .agent-dynamics-search { width: 220px; max-width: 220px; flex: 0 0 auto; }
 .agent-dynamics-app button:focus-visible { outline: 2px solid rgba(36, 90, 141, 0.28); outline-offset: 2px; }
-.agent-dynamics-app input:focus-visible { outline: 0; outline-offset: 0; }
 .agent-dynamics-table-scroll { overflow-x: auto; }
 .agent-dynamics-run-table { width: 100%; border-collapse: collapse; }
 .agent-dynamics-run-table th { padding: 10px 16px; background: #fbfcfd; border-bottom: 1px solid var(--agent-border); color: var(--agent-sub); font-size: 10px; font-weight: 600; text-align: left; white-space: nowrap; }

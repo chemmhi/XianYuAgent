@@ -31,4 +31,31 @@ describe('common controls migration guardrails', () => {
     expect(productTable).toContain('未关联卡券');
     expect(productTable).toContain('<PlaceholderCell');
   });
+
+  it('keeps page CSS from overriding shared control tokens', () => {
+    const forbiddenSelectors: Array<[string, RegExp[]]> = [
+      ['features/auth/auth.css', [/\.auth-form\s+label\s*\{/, /\.auth-form\s+input\b/]],
+      ['features/accounts/components/accounts.css', [/\.account-login-form\s+label\b/, /\.account-login-form\s+input\b/, /\.account-login-form\s+textarea\b/]],
+      ['features/products/components/products.css', [/\.product-basic-form\s+label\b/, /\.product-basic-form\s+input\b/, /\.product-basic-form\s+textarea\b/]],
+      ['features/coupons/components/coupons.css', [/\.coupons-drawer-section\s+textarea\b/, /\.coupons-inline-form\s+input\b/, /\.coupons-form-grid\s+(?:label|input|textarea)\b/]],
+      ['features/workspace/components/workspace.css', [/\.workspace-search\s+input\b/]],
+      ['features/messages/components/messages.css', [/\.messages-search\s+input\b/]],
+      ['features/agent-dynamics/components/agent-dynamics.css', [/\.agent-dynamics-app\s+(?:button,\s*)?input\b/, /\.agent-dynamics-app\s+input:focus-visible\b/]],
+      ['features/settings/components/settings.css', [
+        /\.settings-form-grid\s+(?:label|input|textarea)\b/,
+        /\.openai-form-rows\s+label\b/,
+        /\.openai-form-rows\s+input\b/,
+      ]],
+    ];
+
+    for (const [relativePath, selectors] of forbiddenSelectors) {
+      const css = source(relativePath);
+      for (const selector of selectors) expect(css).not.toMatch(selector);
+    }
+  });
+
+  it('keeps the two approved page-specific textarea exceptions explicit', () => {
+    expect(source('features/messages/components/messages.css')).toContain('.messages-composer textarea');
+    expect(source('features/workspace/components/workspace.css')).toContain('.workspace-composer textarea');
+  });
 });

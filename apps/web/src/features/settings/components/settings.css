@@ -37,7 +37,7 @@
   .openai-config-grid,.openai-compare-summary{grid-template-columns:1fr}
   .openai-model-box{padding:13px}
   .openai-model-head{display:grid;gap:8px}
-  .openai-form-rows label{grid-template-columns:1fr;gap:6px}
+  .openai-form-rows .ui-field{grid-template-columns:1fr;gap:6px}
   .openai-model-box .card-actions{justify-content:stretch}
   .openai-model-box .card-actions .btn{flex:1 1 0;min-height:38px}
   .openai-timeline .timeline-row{grid-template-columns:1fr;gap:6px}
