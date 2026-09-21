@@ -75,6 +75,8 @@
 | `root/visual_diff_helper` | `common-controls-visual-diff` | `codex/common-controls-visual-diff` | `F:\ChenHai\Project\XianYuAgent-common-controls-visual-diff` | Codex `/root` delegated agent | `2026-09-21 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 独立实现共享控件设计稿与实现页的 Chrome/CDP 截图、像素差异统计及 visual-diff 证据；不改组件实现；PNG 比较单测与设计稿自检已通过 |
 | `root/migration_checklist` | `common-controls-migration-checklist` | `codex/migration-checklist` | `F:\ChenHai\Project\XianYuAgent-migration-checklist` | Codex `/root` delegated agent | `2026-09-21 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | Auth/Settings 最小控件迁移、Products 空值格、全局 checklist 与 guardrail 测试已完成；依赖 common-controls shared UI 文件，严格排除 MessagesPage 在线聊天 composer 与 SellerAgent。 |
 
+| `root/inbound_tests` | `auto-reply-inbound-tests` | `codex/auto-reply-inbound-tests` | `F:\ChenHai\Project\XianYuAgent-auto-reply-inbound-tests` | Codex `/root` delegated agent | `2026-09-21 22:27:54 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 补充第1节点 inbound inbox/解析/幂等/顺序/租约回收定向测试；先记录现有测试基础设施阻塞，不改主线。 |
+
 ## 主工作区
 
 | 类型 | branch | worktree | 规则 |
