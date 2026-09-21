@@ -457,7 +457,19 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     const accountId = String(ctx.query.accountId ?? '').trim();
     const configId = String(ctx.query.configId ?? '').trim() || undefined;
     if (!accountId) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
-    return { statusCode: 200, body: success(ctx, { models: await runtime.openaiSettings.listModels({ adminId: authContext.admin.id, accountId, configId }) }).body };
+    const resolved = configId
+      ? await runtime.openaiSettings.resolveById(authContext.admin.id, configId, accountId)
+      : (await runtime.openaiSettings.resolveForRuntime(authContext.admin.id, accountId))[0];
+    const models = await runtime.openaiSettings.listModels({ adminId: authContext.admin.id, accountId, configId });
+    return {
+      statusCode: 200,
+      body: success(ctx, {
+        accountId,
+        configId: resolved?.id ?? configId ?? '',
+        provider: resolved?.provider ?? '',
+        models,
+      }).body,
+    };
   }
   const openAiConfigMatch = ctx.path.match(/^\/api\/v1\/settings\/openai(?:\/([^/]+))?$/);
   if (openAiConfigMatch && (ctx.method === 'POST' || ctx.method === 'PATCH')) {

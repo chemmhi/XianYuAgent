@@ -64,7 +64,7 @@ test('persists primary and backup configs with redacted views and provider-owned
   assert.equal(listed.some((item) => JSON.stringify(item).includes('secret-key')), false);
 
   const models = await service.listModels({ adminId: admin.id, accountId: account.id, configId: primary.id });
-  assert.deepEqual(models, ['provider-model-a', 'provider-model-b']);
+  assert.deepEqual(models, [{ id: 'provider-model-a' }, { id: 'provider-model-b' }]);
   assert.deepEqual(calls, [`https://primary.example/v1/models|Bearer primary-secret-key`]);
 
   const stored = await store.getCredentialRefSecret(admin.id, primary.id!);
@@ -151,6 +151,29 @@ test('agent resolves latest persisted config and falls back without restart', as
     assert.ok(backup.id);
   } finally {
     await runtime.close();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('runtime client forwards persisted reasoning effort to the Responses request', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ body: Record<string, unknown> }> = [];
+  globalThis.fetch = (async (input, init) => {
+    void input;
+    const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+    requests.push({ body });
+    return new Response(JSON.stringify({ model: 'reasoning-model', output_text: 'ok' }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+
+  try {
+    const { admin, account, service } = await fixture();
+    const saved = await service.save(input(admin.id, account.id, 'primary'));
+    const resolved = await service.resolveById(admin.id, saved.id!, account.id);
+    assert.ok(resolved);
+    const client = await service.createRuntimeClient({ ...resolved!, reasoningEffort: 'high' } as Awaited<NonNullable<typeof resolved>> & { reasoningEffort: string });
+    await client.complete({ messages: [{ role: 'user', content: 'think carefully' }] });
+    assert.deepEqual(requests[0]?.body.reasoning, { effort: 'high' });
+  } finally {
     globalThis.fetch = originalFetch;
   }
 });

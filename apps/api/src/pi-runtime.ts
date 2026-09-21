@@ -40,6 +40,8 @@ export interface ModelCompletionRequest {
   messages: ModelMessage[];
   tools?: ModelToolDefinition[];
   toolChoice?: 'auto' | 'none' | { type: 'function'; function: { name: string } };
+  /** Provider-declared reasoning level, when supported by the selected model. */
+  reasoningEffort?: string;
   signal?: AbortSignal;
 }
 
@@ -60,6 +62,7 @@ export interface PiRuntimeConfig {
   model: string;
   timeoutMs: number;
   wireApi: ModelWireApi;
+  reasoningEffort?: string;
 }
 
 export interface OpenAICompatibleModelClientOptions {
@@ -68,6 +71,7 @@ export interface OpenAICompatibleModelClientOptions {
   model: string;
   timeoutMs?: number;
   wireApi?: ModelWireApi;
+  reasoningEffort?: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -121,7 +125,9 @@ export class OpenAICompatibleModelClient implements ModelClient {
           authorization: `Bearer ${this.options.apiKey}`,
           'content-type': 'application/json',
         },
-        body: JSON.stringify(this.wireApi === 'responses' ? toResponsesRequestBody(this.options.model, input) : toChatCompletionsRequestBody(this.options.model, input)),
+        body: JSON.stringify(this.wireApi === 'responses'
+          ? toResponsesRequestBody(this.options.model, input, input.reasoningEffort ?? this.options.reasoningEffort)
+          : toChatCompletionsRequestBody(this.options.model, input, input.reasoningEffort ?? this.options.reasoningEffort)),
         signal: controller.signal,
       });
 
@@ -350,6 +356,9 @@ export function loadPiRuntimeConfig(env: NodeJS.ProcessEnv = process.env): PiRun
     model: firstNonEmpty(env.MODEL, env.OPENAI_MODEL, env.PI_MODEL) ?? DEFAULT_PI_MODEL,
     timeoutMs: positiveInteger(env.PI_RUNTIME_TIMEOUT_MS ?? env.MODEL_TIMEOUT_MS, DEFAULT_PI_TIMEOUT_MS),
     wireApi: normalizeWireApi(firstNonEmpty(env.WIRE_API, env.MODEL_WIRE_API)),
+    ...(firstNonEmpty(env.REASONING_EFFORT, env.OPENAI_REASONING_EFFORT, env.PI_REASONING_EFFORT)
+      ? { reasoningEffort: firstNonEmpty(env.REASONING_EFFORT, env.OPENAI_REASONING_EFFORT, env.PI_REASONING_EFFORT) }
+      : {}),
   };
 }
 
@@ -382,7 +391,7 @@ function normalizeWireApi(value: string | undefined): ModelWireApi {
   return DEFAULT_PI_WIRE_API;
 }
 
-function toChatCompletionsRequestBody(model: string, input: ModelCompletionRequest): Record<string, unknown> {
+function toChatCompletionsRequestBody(model: string, input: ModelCompletionRequest, reasoningEffort?: string): Record<string, unknown> {
   return {
     model,
     messages: input.messages.map((message) => ({
@@ -394,16 +403,23 @@ function toChatCompletionsRequestBody(model: string, input: ModelCompletionReque
     })),
     ...(input.tools?.length ? { tools: input.tools } : {}),
     ...(input.toolChoice ? { tool_choice: input.toolChoice } : {}),
+    ...(normalizeReasoningEffort(reasoningEffort) ? { reasoning_effort: normalizeReasoningEffort(reasoningEffort) } : {}),
   };
 }
 
-function toResponsesRequestBody(model: string, input: ModelCompletionRequest): Record<string, unknown> {
+function toResponsesRequestBody(model: string, input: ModelCompletionRequest, reasoningEffort?: string): Record<string, unknown> {
   return {
     model,
     input: input.messages.flatMap(toResponsesInputItems),
     ...(input.tools?.length ? { tools: input.tools.map(toResponsesToolDefinition) } : {}),
     ...(input.toolChoice ? { tool_choice: toResponsesToolChoice(input.toolChoice) } : {}),
+    ...(normalizeReasoningEffort(reasoningEffort) ? { reasoning: { effort: normalizeReasoningEffort(reasoningEffort) } } : {}),
   };
+}
+
+function normalizeReasoningEffort(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized || undefined;
 }
 
 function toResponsesInputItems(message: ModelMessage): Array<Record<string, unknown>> {

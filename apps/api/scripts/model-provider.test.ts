@@ -9,10 +9,17 @@ test('lists provider-owned models without embedding model ids', async () => {
     baseUrl: 'https://provider.example/v1',
     fetchImpl: (async (input, init) => {
       calls.push({ url: String(input), authorization: new Headers(init?.headers).get('authorization') ?? undefined });
-      return new Response(JSON.stringify({ data: [{ id: 'provider-model-a' }, { id: 'provider-model-a' }, { id: 'provider-model-b', owned_by: 'provider' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify({ data: [
+        { id: 'provider-model-a' },
+        { id: 'provider-model-a' },
+        { id: 'provider-model-b', owned_by: 'provider', reasoning_efforts: ['low', 'high', 'low'], thinking_levels: ['balanced'] },
+      ] }), { status: 200, headers: { 'content-type': 'application/json' } });
     }) as typeof fetch,
   });
-  assert.deepEqual(models, [{ id: 'provider-model-a' }, { id: 'provider-model-b', ownedBy: 'provider' }]);
+  assert.deepEqual(models, [
+    { id: 'provider-model-a' },
+    { id: 'provider-model-b', ownedBy: 'provider', reasoningEfforts: ['low', 'high'], thinkingLevels: ['balanced'] },
+  ]);
   assert.deepEqual(calls, [{ url: 'https://provider.example/v1/models', authorization: 'Bearer test-secret' }]);
 });
 

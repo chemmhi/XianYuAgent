@@ -2,6 +2,9 @@ export interface ProviderModel {
   id: string;
   object?: string;
   ownedBy?: string;
+  /** Provider-declared reasoning controls; never populated from a local allowlist. */
+  reasoningEfforts?: string[];
+  thinkingLevels?: string[];
 }
 
 export interface ListProviderModelsInput {
@@ -102,12 +105,26 @@ function extractModelCandidates(payload: unknown): ProviderModel[] {
   return source.flatMap((candidate): ProviderModel[] => {
     if (typeof candidate === 'string' && candidate.trim()) return [{ id: candidate.trim() }];
     if (!isRecord(candidate) || typeof candidate.id !== 'string' || !candidate.id.trim()) return [];
+    const reasoningEfforts = readStringArray(candidate, ['reasoningEfforts', 'reasoning_efforts']);
+    const thinkingLevels = readStringArray(candidate, ['thinkingLevels', 'thinking_levels']);
     return [{
       id: candidate.id.trim(),
       ...(typeof candidate.object === 'string' ? { object: candidate.object } : {}),
       ...(typeof candidate.owned_by === 'string' ? { ownedBy: candidate.owned_by } : typeof candidate.ownedBy === 'string' ? { ownedBy: candidate.ownedBy } : {}),
+      ...(reasoningEfforts ? { reasoningEfforts } : {}),
+      ...(thinkingLevels ? { thinkingLevels } : {}),
     }];
   });
+}
+
+function readStringArray(record: Record<string, unknown>, keys: string[]): string[] | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (!Array.isArray(value)) continue;
+    const values = [...new Set(value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean))];
+    return values.length > 0 ? values : undefined;
+  }
+  return undefined;
 }
 
 function dedupeModels(models: ProviderModel[]): ProviderModel[] {

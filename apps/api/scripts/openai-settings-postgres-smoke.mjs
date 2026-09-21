@@ -72,7 +72,7 @@ try {
 
   const models = await request(`/api/v1/settings/openai/models?accountId=${encodeURIComponent(accountId)}&configId=${encodeURIComponent(primary.body.data.id)}`, { headers: { cookie } });
   assert.equal(models.response.status, 200);
-  assert.deepEqual(models.body.data.models, ['pg-provider-model']);
+  assert.deepEqual(models.body.data.models, [{ id: 'pg-provider-model' }]);
 
   const rows = await pool.query(`select r.id, r.role, r.version, r.provider, r.alias, v.metadata_json, v.ciphertext
     from (select id, account_id, version, provider, alias, coalesce(metadata_json->>'role', 'primary') as role

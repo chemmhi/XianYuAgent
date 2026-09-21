@@ -3,7 +3,7 @@ import type { CredentialRefRecord, Store } from './domain.js';
 import { ServiceError } from './services.js';
 import type { ApiKeyCredentialService } from './credential-store.js';
 import { OpenAICompatibleModelClient, type ModelClient, type ModelWireApi } from './pi-runtime.js';
-import { listProviderModels } from './model-provider.js';
+import { listProviderModels, ModelProviderError, type ProviderModel } from './model-provider.js';
 
 export type OpenAIConfigRole = 'primary' | 'backup';
 
@@ -122,7 +122,7 @@ export class OpenAISettingsService {
     return toView(saved);
   }
 
-  async test(input: OpenAIConfigInput): Promise<{ ok: true; provider: string; model: string; latencyMs: number; models: string[] }> {
+  async test(input: OpenAIConfigInput): Promise<{ ok: true; provider: string; model: string; latencyMs: number; models: ProviderModel[] }> {
     const normalized = normalizeInput(input);
     if (input.configId) {
       const current = await this.store.getCredentialRef(input.adminId, input.configId);
@@ -134,7 +134,7 @@ export class OpenAISettingsService {
     return { ok: true, provider: normalized.provider, model: normalized.model, latencyMs: Date.now() - started, models };
   }
 
-  async listModels(input: { adminId: string; accountId: string; configId?: string }): Promise<string[]> {
+  async listModels(input: { adminId: string; accountId: string; configId?: string }): Promise<ProviderModel[]> {
     const resolved = input.configId
       ? await this.resolveById(input.adminId, input.configId, input.accountId)
       : (await this.resolveForRuntime(input.adminId, input.accountId))[0];
@@ -155,7 +155,15 @@ export class OpenAISettingsService {
   }
 
   async createRuntimeClient(config: OpenAIResolvedConfig): Promise<ModelClient> {
-    return new OpenAICompatibleModelClient({ apiKey: config.apiKey, baseUrl: config.baseUrl, model: config.model, timeoutMs: config.timeoutMs, wireApi: config.wireApi });
+    const reasoningEffort = (config as OpenAIResolvedConfig & { reasoningEffort?: string }).reasoningEffort?.trim() || undefined;
+    return new OpenAICompatibleModelClient({
+      apiKey: config.apiKey,
+      baseUrl: config.baseUrl,
+      model: config.model,
+      timeoutMs: config.timeoutMs,
+      wireApi: config.wireApi,
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+    });
   }
 
   async resolveById(adminId: string, configId: string, accountId: string): Promise<OpenAIResolvedConfig | undefined> {
@@ -174,12 +182,15 @@ export class OpenAISettingsService {
     return decryptCredentialValue(secret.secretCiphertext, this.encryptionKey);
   }
 
-  private async fetchModels(input: { baseUrl: string; apiKey: string; timeoutMs: number }): Promise<string[]> {
+  private async fetchModels(input: { baseUrl: string; apiKey: string; timeoutMs: number }): Promise<ProviderModel[]> {
     try {
-      const models = await listProviderModels({ baseUrl: input.baseUrl, apiKey: input.apiKey, timeoutMs: input.timeoutMs, fetchImpl: this.fetchImpl });
-      return models.map((model) => model.id);
+      return await listProviderModels({ baseUrl: input.baseUrl, apiKey: input.apiKey, timeoutMs: input.timeoutMs, fetchImpl: this.fetchImpl });
     } catch (error) {
       if (error instanceof ServiceError) throw error;
+      if (error instanceof ModelProviderError) {
+        const statusCode = error.code === 'MODEL_PROVIDER_BASE_URL_REQUIRED' || error.code === 'MODEL_PROVIDER_INVALID_URL' ? 422 : 502;
+        throw new ServiceError(statusCode, error.code, error.message);
+      }
       throw new ServiceError(502, 'EXTERNAL_TIMEOUT', error instanceof Error ? error.message : '模型供应商连接失败，请检查 Base URL、API Key 或网络');
     }
   }

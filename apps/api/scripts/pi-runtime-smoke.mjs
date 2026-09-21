@@ -85,14 +85,15 @@ try {
   assert.equal(loadPiRuntimeConfig({ API_KEY: 'test-key', MODEL_WIRE_API: 'responses' })?.wireApi, 'responses');
   assert.equal(loadPiRuntimeConfig({}), undefined);
 
-  const client = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl, model: 'test-model', wireApi: 'chat', timeoutMs: 500 });
+  const client = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl, model: 'test-model', wireApi: 'chat', reasoningEffort: 'high', timeoutMs: 500 });
   const result = await client.complete({ messages: [{ role: 'user', content: 'hello' }] });
   assert.equal(result.content, 'Pi answer with sk-test-secret-value');
   assert.equal(result.model, 'test-model');
   assert.equal(requests[0].headers.authorization, 'Bearer test-key');
   assert.equal(requests[0].body.messages[0].content, 'hello');
+  assert.equal(requests[0].body.reasoning_effort, 'high');
 
-  const responsesClient = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl, model: 'responses-model', wireApi: 'responses', timeoutMs: 500 });
+  const responsesClient = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl, model: 'responses-model', wireApi: 'responses', reasoningEffort: 'low', timeoutMs: 500 });
   const responsesResult = await responsesClient.complete({
     messages: [{ role: 'system', content: 'system instructions' }, { role: 'user', content: 'hello responses' }],
     tools: [{ type: 'function', function: { name: 'get_product_info', description: 'read product', parameters: { type: 'object' } } }],
@@ -107,6 +108,7 @@ try {
   assert.equal(responsesRequest?.body.input[1].content, 'hello responses');
   assert.equal(responsesRequest?.body.tools[0].name, 'get_product_info');
   assert.equal(responsesRequest?.body.tools[0].function, undefined);
+  assert.deepEqual(responsesRequest?.body.reasoning, { effort: 'low' });
 
   const responsesToolClient = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl, model: 'responses-tool-model', wireApi: 'responses', timeoutMs: 500 });
   const responsesToolResult = await responsesToolClient.complete({ messages: [{ role: 'user', content: 'lookup' }] });
