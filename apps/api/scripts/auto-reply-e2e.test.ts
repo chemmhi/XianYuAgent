@@ -2,11 +2,72 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
+import { InboundInboxWorker } from '../src/inbound-inbox-worker.js';
 import { XianyuImClient } from '../src/xianyu-im.js';
 
 function replyPayload(text: string): string {
   return JSON.stringify({ decision: 'reply', text });
 }
+
+test('production listener callback defers to the inbox worker and publishes both message events', async () => {
+  const runtime = createApp(loadConfig({
+    ...process.env,
+    HOST: '127.0.0.1',
+    PORT: '0',
+    DATABASE_URL: '',
+    REDIS_URL: '',
+    ALLOW_IN_MEMORY: 'true',
+    COOKIE_SECURE: 'false',
+    XIANYU_QR_MODE: 'stub',
+    AGENT_RUNTIME: 'in-process',
+    AUTO_REPLY_MODEL_ENABLED: 'false',
+    AUTO_REPLY_SEND_MODE: 'simulate',
+    AUTO_REPLY_TEST_BUYER_NAMES: 'Buyer',
+    AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
+  }));
+  await runtime.listen();
+  const events: Array<{ type: string; direction?: string; source?: string }> = [];
+
+  try {
+    const boot = await runtime.auth.bootstrap({ email: 'listener-worker@example.com', password: 'password-123', displayName: 'Listener Worker' });
+    const adminId = boot.admin.id;
+    const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: 'listener-worker-seller' });
+    const conversation = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'buyer-1', buyerDisplayName: 'Buyer', externalConversationRef: 'listener-worker-conversation' });
+    const unsubscribe = runtime.messages.realtime.subscribe(conversation.id, (event) => {
+      const message = event.payload.message as { direction?: string; source?: string } | undefined;
+      events.push({ type: event.type, direction: message?.direction, source: message?.source });
+    });
+
+    const inbound = await runtime.xianyuIm.handleExternalEvent(adminId, {
+      accountId: account.id,
+      externalConversationRef: conversation.externalConversationRef!,
+      externalMessageRef: 'listener-worker-inbound.PNM',
+      senderRef: conversation.buyerRef,
+      senderName: conversation.buyerDisplayName,
+      direction: 'inbound',
+      bodyType: 'text',
+      bodyText: '有货吗',
+      occurredAt: new Date().toISOString(),
+    }, { deferAutoReply: true });
+
+    assert.equal(inbound.created, true);
+    assert.equal(inbound.autoReply, undefined);
+    assert.deepEqual(events, [{ type: 'chat.message.created', direction: 'inbound', source: 'system' }]);
+
+    const worker = new InboundInboxWorker(runtime.store, runtime.xianyuIm, { workerId: 'listener-worker-test', leaseMs: 5_000, maxAttempts: 2 });
+    assert.equal(await worker.pollOnce(), 1);
+
+    const messages = await runtime.messages.listMessages(adminId, conversation.id, { limit: 20 });
+    assert.equal(messages.items.filter((message) => message.direction === 'inbound').length, 1);
+    assert.equal(messages.items.filter((message) => message.direction === 'outbound' && message.source === 'ai').length, 1);
+    const runs = await runtime.store.listAutoReplyRuns(adminId, { accountId: account.id, page: 1, pageSize: 20 });
+    assert.equal(runs.items[0]?.status, 'persisted');
+    assert.equal(events.filter((event) => event.type === 'chat.message.created' && event.direction === 'outbound' && event.source === 'ai').length, 1);
+    unsubscribe();
+  } finally {
+    await runtime.close();
+  }
+});
 
 test('xianyu listener drives product and general auto-reply chains without real send', async () => {
   const runtime = createApp(loadConfig({
