@@ -3,6 +3,7 @@ import type { CredentialRefRecord, Store } from './domain.js';
 import { ServiceError } from './services.js';
 import type { ApiKeyCredentialService } from './credential-store.js';
 import { OpenAICompatibleModelClient, type ModelClient, type ModelWireApi } from './pi-runtime.js';
+import { listProviderModels } from './model-provider.js';
 
 export type OpenAIConfigRole = 'primary' | 'backup';
 
@@ -47,7 +48,7 @@ export interface OpenAIConfigInput {
   traceId: string;
 }
 
-export type OpenAIConfigBody = Pick<OpenAIConfigInput, 'role' | 'provider' | 'alias' | 'label' | 'baseUrl' | 'model' | 'wireApi' | 'timeoutMs' | 'apiKey' | 'expectedVersion'>;
+export type OpenAIConfigBody = Pick<OpenAIConfigInput, 'configId' | 'role' | 'provider' | 'alias' | 'label' | 'baseUrl' | 'model' | 'wireApi' | 'timeoutMs' | 'apiKey' | 'expectedVersion'>;
 
 export interface OpenAIResolvedConfig extends OpenAIConfigView {
   apiKey: string;
@@ -77,6 +78,7 @@ export class OpenAISettingsService {
     const normalized = normalizeInput(input);
     const current = input.configId ? await this.store.getCredentialRef(input.adminId, input.configId) : undefined;
     if (input.configId && (!current || current.accountId !== input.accountId)) throw new ServiceError(404, 'NOT_FOUND', '模型配置不存在');
+    if (current && roleFrom(current) !== normalized.role) throw new ServiceError(409, 'CONFLICT', '配置角色不可变，请分别编辑主配置或备用配置');
     const existing = await this.list({ adminId: input.adminId, accountId: input.accountId });
     const duplicateRole = existing.find((item) => item.role === normalized.role && item.id !== input.configId && item.status !== 'revoked');
     if (duplicateRole) throw new ServiceError(409, 'CONFLICT', `${normalized.role === 'primary' ? '主配置' : '备用配置'}已存在`);
@@ -119,7 +121,11 @@ export class OpenAISettingsService {
 
   async test(input: OpenAIConfigInput): Promise<{ ok: true; provider: string; model: string; latencyMs: number; models: string[] }> {
     const normalized = normalizeInput(input);
-    const secret = await this.resolveSecret(input.adminId, input.configId, normalized.apiKey);
+    if (input.configId) {
+      const current = await this.store.getCredentialRef(input.adminId, input.configId);
+      if (!current || current.accountId !== input.accountId || current.status === 'revoked') throw new ServiceError(404, 'NOT_FOUND', '模型配置不存在');
+    }
+    const secret = await this.resolveSecret(input.adminId, input.accountId, input.configId, normalized.apiKey);
     const started = Date.now();
     const models = await this.fetchModels({ baseUrl: normalized.baseUrl, apiKey: secret, timeoutMs: normalized.timeoutMs });
     return { ok: true, provider: normalized.provider, model: normalized.model, latencyMs: Date.now() - started, models };
@@ -157,27 +163,22 @@ export class OpenAISettingsService {
     return { ...toView(ref), apiKey: decryptCredentialValue(secret.secretCiphertext, this.encryptionKey) };
   }
 
-  private async resolveSecret(adminId: string, configId: string | undefined, provided: string | undefined): Promise<string> {
+  private async resolveSecret(adminId: string, accountId: string, configId: string | undefined, provided: string | undefined): Promise<string> {
     if (provided?.trim()) return provided.trim();
     if (!configId) throw new ServiceError(422, 'VALIDATION_FAILED', 'apiKey is required');
     const secret = await this.store.getCredentialRefSecret(adminId, configId);
-    if (!secret) throw new ServiceError(404, 'NOT_FOUND', '模型配置不存在');
+    if (!secret || secret.ref.accountId !== accountId || secret.ref.status === 'revoked') throw new ServiceError(404, 'NOT_FOUND', '模型配置不存在');
     return decryptCredentialValue(secret.secretCiphertext, this.encryptionKey);
   }
 
   private async fetchModels(input: { baseUrl: string; apiKey: string; timeoutMs: number }): Promise<string[]> {
-    const url = modelsUrl(input.baseUrl);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), Math.min(Math.max(input.timeoutMs, 1_000), 120_000));
     try {
-      const response = await this.fetchImpl(url, { method: 'GET', headers: { accept: 'application/json', authorization: `Bearer ${input.apiKey}` }, signal: controller.signal });
-      if (!response.ok) throw new ServiceError(502, 'EXTERNAL_TIMEOUT', `模型供应商返回 HTTP ${response.status}`);
-      const payload = await response.json() as unknown;
-      return parseModelIds(payload);
+      const models = await listProviderModels({ baseUrl: input.baseUrl, apiKey: input.apiKey, timeoutMs: input.timeoutMs, fetchImpl: this.fetchImpl });
+      return models.map((model) => model.id);
     } catch (error) {
       if (error instanceof ServiceError) throw error;
-      throw new ServiceError(502, 'EXTERNAL_TIMEOUT', '模型供应商连接失败，请检查 Base URL、API Key 或网络');
-    } finally { clearTimeout(timeout); }
+      throw new ServiceError(502, 'EXTERNAL_TIMEOUT', error instanceof Error ? error.message : '模型供应商连接失败，请检查 Base URL、API Key 或网络');
+    }
   }
 }
 
@@ -208,8 +209,6 @@ function normalizeBaseUrl(value: string): string {
   if (!['http:', 'https:'].includes(parsed.protocol)) throw new ServiceError(422, 'VALIDATION_FAILED', 'baseUrl must use http or https');
   return parsed.toString().replace(/\/+$/, '');
 }
-
-function modelsUrl(baseUrl: string): string { return `${normalizeBaseUrl(baseUrl)}/models`; }
 
 function metadataFor(input: { role: OpenAIConfigRole; baseUrl: string; model: string; wireApi: ModelWireApi; timeoutMs: number }): Record<string, string> {
   return { role: input.role, baseUrl: input.baseUrl, model: input.model, wireApi: input.wireApi, timeoutMs: String(input.timeoutMs) };
@@ -243,13 +242,6 @@ function toView(ref: CredentialRefRecord): OpenAIConfigView {
     updatedAt: ref.updatedAt,
     canReveal: false,
   };
-}
-
-function parseModelIds(payload: unknown): string[] {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return [];
-  const data = (payload as { data?: unknown }).data;
-  if (!Array.isArray(data)) return [];
-  return [...new Set(data.map((item) => item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string' ? String((item as { id: string }).id).trim() : '').filter(Boolean))].slice(0, 200);
 }
 
 export function redactedRuntimeConfigs(configs: OpenAIResolvedConfig[]): OpenAIConfigView[] {

@@ -1255,6 +1255,7 @@ function readOpenAiConfigInput(body: Record<string, unknown>): import('./openai-
   const role = body.role === 'backup' ? 'backup' : 'primary';
   const wireApi = body.wireApi === 'chat' ? 'chat' : 'responses';
   return {
+    configId: typeof body.configId === 'string' && body.configId.trim() ? body.configId.trim() : undefined,
     role,
     provider: String(body.provider ?? ''),
     alias: String(body.alias ?? (role === 'primary' ? 'primary' : 'backup')),

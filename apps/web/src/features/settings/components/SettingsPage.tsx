@@ -1,10 +1,13 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { useAccountContext } from '../../../app/account-context';
-import { createCredentialApi, createMockAutoReplyAgentSettingsApi, createMockCredentialApi, type AutoReplyAgentSettingsApi, type CredentialApi } from '../api';
+import { createCredentialApi, createMockAutoReplyAgentSettingsApi, createMockCredentialApi, createMockOpenAISettingsApi, type AutoReplyAgentSettingsApi, type CredentialApi, type OpenAISettingsApi } from '../api';
 import { useAutoReplyAgentSettingsController } from '../agent-settings-controller';
 import { AutoReplyAgentPanel } from './AutoReplyAgentPanel';
 import { useCredentialController } from '../controller';
 import type { CredentialRefVM } from '../types';
+import { OpenAISettingsPanel } from './OpenAISettingsPanel';
+import type { ModelProviderApi } from '../model-provider-api';
+import type { ProviderModelsVM } from '../model-provider-api';
 import './settings.css';
 
 type TabKey = 'autoReply' | 'model' | 'credentials' | 'safety' | 'outbox' | 'plugins';
@@ -18,10 +21,12 @@ const tabs: Array<{ id: TabKey; label: string; mobileLabel: string; meta: string
   { id: 'plugins', label: '插件配置', mobileLabel: '插件', meta: 'Skill / Plugin' },
 ];
 
-export function SettingsPage({ api: providedApi, agentApi: providedAgentApi }: { api?: CredentialApi; agentApi?: AutoReplyAgentSettingsApi }) {
+export function SettingsPage({ api: providedApi, agentApi: providedAgentApi, openaiApi: providedOpenaiApi, modelApi: providedModelApi }: { api?: CredentialApi; agentApi?: AutoReplyAgentSettingsApi; openaiApi?: OpenAISettingsApi; modelApi?: ModelProviderApi }) {
   const { accounts, accountsLoading, accountsError, currentAccountId } = useAccountContext();
   const api = useMemo(() => providedApi ?? createCredentialApiFromRuntime(), [providedApi]);
   const agentApi = useMemo(() => providedAgentApi ?? createMockAutoReplyAgentSettingsApi(), [providedAgentApi]);
+  const openaiApi = useMemo(() => providedOpenaiApi ?? createMockOpenAISettingsApi(), [providedOpenaiApi]);
+  const modelApi = useMemo(() => providedModelApi ?? createEmptyModelProviderApi(), [providedModelApi]);
   const [activeTab, setActiveTab] = useState<TabKey>('credentials');
   const [editor, setEditor] = useState<'create' | 'edit' | 'rotate' | null>(null);
   const [selectedCredential, setSelectedCredential] = useState<CredentialRefVM | undefined>();
@@ -47,13 +52,21 @@ export function SettingsPage({ api: providedApi, agentApi: providedAgentApi }: {
           {tabs.map((tab) => <button key={tab.id} type="button" className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)}><span className="settings-tab-label">{tab.label}</span><span className="settings-tab-mobile-label">{tab.mobileLabel}</span><small>{tab.meta}</small></button>)}
         </aside>
         <div className="settings-active">
-          {activeTab === 'credentials' ? <CredentialStorePanel accountName={selectedAccount?.displayName} accountId={currentAccountId ?? ''} accountsLoading={accountsLoading} accountsError={accountsError} state={controller.state} items={items} onCreate={() => openEditor('create')} onEdit={(item) => openEditor('edit', item)} onRotate={(item) => openEditor('rotate', item)} onStatus={(item, status) => { void controller.setStatus({ credentialId: item.id, expectedVersion: item.version, status }); }} onRetry={controller.reload} /> : activeTab === 'autoReply' ? <AutoReplyAgentPanel controller={agentController} accountName={selectedAccount?.displayName} accountId={currentAccountId} /> : <ReferencePanel tab={activeTab} onOpenCredentials={() => setActiveTab('credentials')} />}
+          {activeTab === 'credentials' ? <CredentialStorePanel accountName={selectedAccount?.displayName} accountId={currentAccountId ?? ''} accountsLoading={accountsLoading} accountsError={accountsError} state={controller.state} items={items} onCreate={() => openEditor('create')} onEdit={(item) => openEditor('edit', item)} onRotate={(item) => openEditor('rotate', item)} onStatus={(item, status) => { void controller.setStatus({ credentialId: item.id, expectedVersion: item.version, status }); }} onRetry={controller.reload} /> : activeTab === 'autoReply' ? <AutoReplyAgentPanel controller={agentController} accountName={selectedAccount?.displayName} accountId={currentAccountId} /> : activeTab === 'model' ? <OpenAISettingsPanel accountId={currentAccountId ?? ''} accountName={selectedAccount?.displayName} api={openaiApi} modelApi={modelApi} accountsLoading={accountsLoading} accountsError={accountsError} /> : <ReferencePanel tab={activeTab} onOpenCredentials={() => setActiveTab('credentials')} />}
         </div>
       </div>
       {editor && <CredentialEditor mode={editor} accountId={currentAccountId ?? ''} credential={selectedCredential} onClose={() => { setEditor(null); setSelectedCredential(undefined); }} onCreate={controller.create} onUpdate={controller.update} onRotate={controller.rotate} />}
       <nav className="settings-mobile-bottom" aria-label="移动端设置导航">{tabs.slice(0, 4).map((tab) => <button key={tab.id} type="button" className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)}><span>{tab.id === 'credentials' ? '◇' : tab.id === 'model' ? '◌' : tab.id === 'safety' ? '✓' : '≡'}</span><small>{tab.mobileLabel}</small></button>)}</nav>
     </section>
   );
+}
+
+function createEmptyModelProviderApi(): ModelProviderApi {
+  return {
+    async list(input): Promise<ProviderModelsVM> {
+      return { accountId: input.accountId, configId: input.configId, provider: '', models: [] };
+    },
+  };
 }
 
 function createCredentialApiFromRuntime(): CredentialApi {
