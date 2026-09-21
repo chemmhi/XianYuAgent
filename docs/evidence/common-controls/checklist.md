@@ -45,12 +45,12 @@
 
 ## 合并前检查
 
-- [ ] common-controls shared UI 文件已先合入目标分支，再合入本切片的页面改动。
-- [ ] `rg -n "MessagesPage|workspace-composer|SellerAgent"` 确认在线聊天 composer 与 SellerAgent 未被本切片改动。
-- [ ] `npm run typecheck --workspace apps/web`。
-- [ ] `npm run test --workspace apps/web -- --run`（至少覆盖 Auth/Settings/Products 相关回归）。
-- [ ] `npm run build --workspace apps/web`。
-- [ ] `git diff --check`。
+- [x] common-controls shared UI 文件已先合入目标分支，再合入本切片的页面改动。
+- [x] `rg -n "MessagesPage|workspace-composer|SellerAgent"` 确认在线聊天 composer 与 SellerAgent 未被本切片改动。
+- [x] `npm run typecheck --workspace apps/web`。
+- [x] `npm run test --workspace apps/web -- --run`（53 个测试文件、165 个测试全部通过）。
+- [x] `npm run build --workspace apps/web`。
+- [x] `git diff --check`。
 - [ ] 在 `1440×900` 与 `390×844` 复核 Auth、Settings、Products 空值格；common-controls 视觉证据继续使用 `apps/web/scripts/common-controls-visual-diff.mjs`。
 - [ ] 补充 Accounts 登录表单、Coupons 创建/抽屉、Orders 筛选和 Agent Dynamics 筛选的固定 viewport 复核；记录组件 token 与整页像素差异，不将非零像素差异自动判定为通过。
 
