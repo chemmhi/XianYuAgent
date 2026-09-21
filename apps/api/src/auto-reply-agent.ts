@@ -1,6 +1,6 @@
 import type { ConversationRecord, MessageRecord, OrderRecord, ProductRecord, Store } from './domain.js';
 import type { AutoReplyAgentConfig } from './auto-reply-agent-config.js';
-import type { AutoReplyClassification, AutoReplyContext, AutoReplyGenerator } from './auto-reply.js';
+import type { AutoReplyClassification, AutoReplyContext, AutoReplyGeneratedReply, AutoReplyGenerator } from './auto-reply.js';
 import { digestJson } from './security.js';
 import type { ModelClient, ModelCompletionResult, ModelMessage, ModelToolCall, ModelToolDefinition } from './pi-runtime.js';
 
@@ -89,12 +89,12 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
     this.config = config;
   }
 
-  async generate(input: { adminId?: string; context: AutoReplyContext; classification: AutoReplyClassification }): Promise<string | undefined> {
+  async generate(input: { adminId?: string; context: AutoReplyContext; classification: AutoReplyClassification }): Promise<string | AutoReplyGeneratedReply | undefined> {
     if (!input.adminId) throw new AutoReplyAgentError('AGENT_ADMIN_REQUIRED');
     const config = await this.options.configProvider?.(input.adminId, input.context.conversation.accountId) ?? this.config;
     const messages: ModelMessage[] = [
       { role: 'system', content: config.systemPrompt },
-      { role: 'user', content: renderUserPrompt(config.userPromptTemplate, this.toInitialContext(input.context, input.classification)) },
+      { role: 'user', content: `${renderUserPrompt(config.userPromptTemplate, this.toInitialContext(input.context, input.classification))}\n\n输出要求：最终回复请优先返回 JSON 对象 {"text":"完整回复","segments":["按语义拆分的消息段"]}。完整回复不超过 ${config.maxReplyLength} 个字符；segments 只按自然语义组织，保持原文信息完整、顺序不变，不设置固定段落长度或段落数量；如果无需拆分，segments 返回单元素数组。` },
     ];
     const trace: AutoReplyAgentTrace = { loops: 0, toolCalls: 0, tools: [], configDigest: config.digest };
     const seenCalls = new Set<string>();
@@ -123,10 +123,20 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
       if (!content) throw new AutoReplyAgentError('AGENT_EMPTY_RESPONSE');
       if (isHandoffPayload(content)) throw new AutoReplyAgentHandoffError('模型判断当前问题无法安全自动处理');
       await this.options.onTrace?.(trace);
-      return content;
+      return parseGeneratedReply(content) ?? content;
     }
 
     throw new AutoReplyAgentError('AGENT_MAX_LOOPS');
+  }
+
+  async segmentReply(input: { reply: string }): Promise<string[] | undefined> {
+    const result = await this.client.complete({
+      messages: [
+        { role: 'system', content: '你是消息分段器。只允许按语义边界拆分文本，不得改写、总结、增删事实。' },
+        { role: 'user', content: JSON.stringify({ instruction: '将 reply 按语义分成聊天消息段，保持拼接后与原文一致，不设置固定段落长度或段落数量。', reply: input.reply }) },
+      ],
+    });
+    return parseSegments(result.content);
   }
 
   private toInitialContext(context: AutoReplyContext, classification: AutoReplyClassification): Record<string, unknown> {
@@ -272,6 +282,33 @@ function safeProduct(product: Pick<ProductRecord, 'id' | 'accountId' | 'external
 
 function safeOrder(order: OrderRecord): Record<string, unknown> {
   return { orderNo: order.orderNo, itemId: order.itemId, itemTitle: trimField(order.itemTitle, 500), paymentStatus: order.paymentStatus, orderStatus: order.orderStatus, deliveryStatus: order.deliveryStatus, afterSalesStatus: order.afterSalesStatus, createdAt: order.createdAt, updatedAt: order.updatedAt };
+}
+
+function parseGeneratedReply(content: string): AutoReplyGeneratedReply | undefined {
+  const parsed = parseJsonObject(content);
+  if (!parsed) return undefined;
+  const text = typeof parsed.text === 'string' ? parsed.text : typeof parsed.reply === 'string' ? parsed.reply : undefined;
+  if (!text) return undefined;
+  if (parsed.segments !== undefined && (!Array.isArray(parsed.segments) || parsed.segments.some((segment) => typeof segment !== 'string'))) return undefined;
+  return { text, segments: Array.isArray(parsed.segments) ? parsed.segments as string[] : undefined };
+}
+
+function parseSegments(content: string): string[] | undefined {
+  const parsed = parseJsonObject(content);
+  if (!parsed) return undefined;
+  const segments = Array.isArray(parsed.segments) ? parsed.segments : Array.isArray(parsed.messages) ? parsed.messages : undefined;
+  if (!segments || segments.some((segment) => typeof segment !== 'string')) return undefined;
+  return segments as string[];
+}
+
+function parseJsonObject(content: string): Record<string, unknown> | undefined {
+  const normalized = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+  try {
+    const parsed = JSON.parse(normalized) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function isHandoffPayload(content: string): boolean {

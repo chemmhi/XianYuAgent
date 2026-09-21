@@ -44,11 +44,8 @@ export interface AutoReplyAgentConfigVM {
   totalTimeoutMs: number;
   maxHistory: number;
   maxReplyLength: number;
-  maxReplySegmentChars: number;
-  maxReplySegments: number;
   replySegmentDelayMs: number;
   debounceMs: number;
-  allowPaidOrderReply: boolean;
   sendMode: AutoReplyAgentSendMode;
   accountId: string;
   updatedByAdminId?: string;

@@ -10,8 +10,6 @@ export interface AutoReplyAgentRuntimeConfig {
   toolTimeoutMs: number;
   maxHistory: number;
   maxReplyLength: number;
-  maxReplySegmentChars: number;
-  maxReplySegments: number;
   replySegmentDelayMs: number;
   debounceMs: number;
   version: string;
@@ -46,9 +44,7 @@ export function resolveAutoReplyAgentConfig(env: NodeJS.ProcessEnv = process.env
     maxToolResultChars: boundedInt(env.AUTO_REPLY_AGENT_MAX_TOOL_RESULT_CHARS, 12_000, 500, 40_000),
     toolTimeoutMs: boundedInt(env.AUTO_REPLY_AGENT_TOOL_TIMEOUT_MS, 10_000, 500, 60_000),
     maxHistory: boundedInt(env.AUTO_REPLY_AGENT_MAX_HISTORY, 12, 1, 50),
-    maxReplyLength: boundedInt(env.AUTO_REPLY_AGENT_MAX_REPLY_LENGTH, 500, 20, 2_000),
-    maxReplySegmentChars: boundedInt(env.AUTO_REPLY_AGENT_MAX_REPLY_SEGMENT_CHARS, 180, 40, 500),
-    maxReplySegments: boundedInt(env.AUTO_REPLY_AGENT_MAX_REPLY_SEGMENTS, 4, 1, 8),
+    maxReplyLength: boundedInt(env.AUTO_REPLY_AGENT_MAX_REPLY_LENGTH, 500, 30, 2_000),
     replySegmentDelayMs: boundedInt(env.AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS, 350, 0, 5_000),
     debounceMs: boundedInt(env.AUTO_REPLY_AGENT_DEBOUNCE_MS, 2_000, 0, 30_000),
     version: env.AUTO_REPLY_AGENT_CONFIG_VERSION?.trim() || 'env-v1',
@@ -69,8 +65,6 @@ export function mergeAutoReplyAgentRuntimeConfig(
     toolTimeoutMs: settings.toolTimeoutMs,
     maxHistory: settings.maxHistory,
     maxReplyLength: settings.maxReplyLength,
-    maxReplySegmentChars: settings.maxReplySegmentChars,
-    maxReplySegments: settings.maxReplySegments,
     replySegmentDelayMs: settings.replySegmentDelayMs,
     debounceMs: settings.debounceMs,
     version: `settings-v${settings.configVersion ?? 0}`,

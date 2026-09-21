@@ -472,11 +472,8 @@ export interface AutoReplyAgentConfig {
   totalTimeoutMs: number;
   maxHistory: number;
   maxReplyLength: number;
-  maxReplySegmentChars: number;
-  maxReplySegments: number;
   replySegmentDelayMs: number;
   debounceMs: number;
-  allowPaidOrderReply: boolean;
   sendMode: AutoReplyAgentSendMode;
 }
 

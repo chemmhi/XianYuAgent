@@ -30,6 +30,13 @@ test('buyer Agent configuration resolves independently from Workspace settings',
   assert.notEqual(config.digest, '');
 });
 
+test('buyer Agent enforces a 30-character minimum max reply length', () => {
+  const config = resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_MAX_REPLY_LENGTH: '20' });
+  assert.equal(config.maxReplyLength, 30);
+  const accepted = resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_MAX_REPLY_LENGTH: '30' });
+  assert.equal(accepted.maxReplyLength, 30);
+});
+
 test('buyer Agent can resolve the latest persisted configuration per message', async () => {
   const seenPrompts: string[] = [];
   const providerArgs: Array<[string, string]> = [];
@@ -63,6 +70,22 @@ test('agent chooses product tool then returns final answer', async () => {
   assert.equal(requests[0]?.tools?.length, AUTO_REPLY_AGENT_TOOLS.length);
   assert.equal(requests[1]?.messages.at(-1)?.role, 'tool');
   assert.match(requests[1]?.messages.at(-1)?.content ?? '', /资料包/);
+});
+
+test('agent preserves model-provided semantic segments and supports a segmentation retry', async () => {
+  let calls = 0;
+  const client: ModelClient = {
+    complete: async () => {
+      calls += 1;
+      if (calls === 1) return { content: JSON.stringify({ text: '先说明商品是什么。再说明使用方式。', segments: ['先说明商品是什么。', '再说明使用方式。'] }), model: 'test' };
+      return { content: JSON.stringify({ segments: ['第一句。', '第二句。'] }), model: 'test' };
+    },
+  };
+  const agent = new ToolCallingAutoReplyAgent({} as Store, client, resolveAutoReplyAgentConfig({}));
+  const generated = await agent.generate({ adminId: 'admin-1', context: context(), classification });
+  assert.deepEqual(generated, { text: '先说明商品是什么。再说明使用方式。', segments: ['先说明商品是什么。', '再说明使用方式。'] });
+  const retried = await agent.segmentReply({ reply: '第一句。第二句。' });
+  assert.deepEqual(retried, ['第一句。', '第二句。']);
 });
 
 test('OpenAI-compatible transport preserves native tool calls', async () => {
@@ -275,7 +298,7 @@ test('agent rejects unknown tools and out-of-contract arguments', async () => {
 });
 
 test('auto-reply service debounces same-conversation messages and splits long replies', async () => {
-  const runtime = createApp(loadConfig({ HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["买家"]', AUTO_REPLY_AGENT_DEBOUNCE_MS: '1000', AUTO_REPLY_AGENT_REPLY_SEGMENT_CHARS: '8', AUTO_REPLY_AGENT_MAX_REPLY_SEGMENTS: '4', AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS: '0' }));
+  const runtime = createApp(loadConfig({ HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["买家"]', AUTO_REPLY_AGENT_DEBOUNCE_MS: '1000', AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS: '0' }));
   const admin = await runtime.store.createAdmin({ email: 'agent-debounce@example.com', passwordHash: 'hash', displayName: 'Agent Debounce' });
   const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'agent-debounce-seller' });
   const conversation = await runtime.store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'buyer-1', buyerDisplayName: '买家', externalConversationRef: 'agent-debounce-conversation' });
@@ -295,9 +318,10 @@ test('auto-reply service debounces same-conversation messages and splits long re
     assert.equal(firstResult.run.status, 'persisted');
     assert.equal(secondResult.run.failureCode, 'AUTO_REPLY_DEBOUNCED');
     const longSender = new NoopAutoReplySender();
+    const semanticSegments = ['这是商品的第一部分说明。', '这是商品的第二部分说明。', '如果你需要，我还可以继续补充。'];
     const longReply = new AutoReplyService(runtime.store, runtime.messages, async () => 'audit-agent-segments', {
-      sendMode: 'simulate', testBuyerNames: ['买家'], debounceMs: 0, maxReplyLength: 500, maxReplySegmentChars: 40, maxReplySegments: 4, replySegmentDelayMs: 0,
-      generator: { generate: async () => '这是第一段很长的内容，用于模拟人工分段发送。'.repeat(4) },
+      sendMode: 'simulate', testBuyerNames: ['买家'], debounceMs: 0, maxReplyLength: 500, replySegmentDelayMs: 0,
+      generator: { generate: async () => ({ text: semanticSegments.join(''), segments: semanticSegments }) },
       sender: longSender,
     });
     const third = await runtime.store.createMessage({ adminId: admin.id, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '请详细介绍', externalMessageRef: 'agent-debounce-3.PNM', source: 'system', traceId: 'agent-debounce-3' });
@@ -305,8 +329,26 @@ test('auto-reply service debounces same-conversation messages and splits long re
     assert.equal(thirdResult.run.status, 'persisted');
     const messages = await runtime.messages.listMessages(admin.id, conversation.id, { limit: 20 });
     outboundTexts.push(...messages.items.filter((message) => message.direction === 'outbound').map((message) => message.bodyText ?? ''));
-    assert.ok(outboundTexts.length > 1);
-    assert.equal(longSender.calls.length, outboundTexts.length - 1);
+    assert.equal(longSender.calls.length, semanticSegments.length);
+    assert.deepEqual(longSender.calls.map((call) => call.text), semanticSegments);
+    assert.deepEqual(outboundTexts.filter((text) => semanticSegments.includes(text)).sort(), [...semanticSegments].sort());
+
+    const retrySender = new NoopAutoReplySender();
+    const retrySegments = ['第一段说明商品内容，包含商品适用范围、交付形式和注意事项，方便买家先了解整体内容。', '第二段说明使用方式，包含查看步骤、使用限制和后续支持方式，买家可以按步骤操作。'];
+    let retryCalls = 0;
+    const retryReply = new AutoReplyService(runtime.store, runtime.messages, async () => 'audit-agent-segmentation-retry', {
+      sendMode: 'simulate', testBuyerNames: ['买家'], debounceMs: 0, maxReplyLength: 500, replySegmentDelayMs: 0,
+      generator: {
+        generate: async () => retrySegments.join('\n'),
+        segmentReply: async ({ reply }) => { retryCalls += 1; assert.equal(reply, retrySegments.join('\n')); return retrySegments; },
+      },
+      sender: retrySender,
+    });
+    const fourth = await runtime.store.createMessage({ adminId: admin.id, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '请再说明一下', externalMessageRef: 'agent-debounce-4.PNM', source: 'system', traceId: 'agent-debounce-4' });
+    const fourthResult = await retryReply.processInbound({ adminId: admin.id, conversationId: conversation.id, inboundMessageId: fourth.message.id, senderName: '买家' });
+    assert.equal(fourthResult.run.status, 'persisted');
+    assert.equal(retryCalls, 1);
+    assert.deepEqual(retrySender.calls.map((call) => call.text), retrySegments);
   } finally {
     await runtime.close();
   }

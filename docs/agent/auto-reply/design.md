@@ -206,19 +206,18 @@ Agent 初始输入只包含必要 ID/元数据和当前消息，不预加载全�
 
 ## 7. 回复与发送
 
-### 7.1 一条逻辑回复，多段物理消息
+### 7.1 一条逻辑回复，多段语义消息
 
-每条买家消息最多生成一个逻辑回复。若回复较长，Agent 输出一个完整草稿，再由发送层按人工阅读习惯拆分：
+每条买家消息最多生成一个逻辑回复。若回复较长，Agent 在生成阶段优先输出完整草稿和按语义组织的 `segments[]`；只有模型未提供合法分段时，才额外调用一次仅分段模型。发送层不按字符窗口硬切，也不截断尾部内容：
 
-- 优先按段落和句号切分，不在词语或数字中间切断；
-- 每段不超过 `maxReplySegmentChars`；
-- 总段数不超过 `maxReplySegments`；
+- 分段必须保持事实、顺序和全文内容完整；
+- 不设置固定单段长度或总段数上限，段落由 Agent 按买家阅读习惯决定；
 - 段间延迟使用 `replySegmentDelayMs`，可配置；
 - 多段共享 `replyGroupId`，每段记录 `segmentIndex` / `segmentCount`；
 - 发送按顺序执行，任一段失败或结果未知时停止后续段发送并记录 `partial_send` / `send_unknown`；
 - 每段使用独立幂等键，禁止重试导致重复段落。
 
-拆段属于发送层行为，不改变 Agent 的一次逻辑决策，也不把多段消息视为多次用户问题。
+分段属于 Agent 回复编排的一部分，不改变一次逻辑决策，也不把多段消息视为多次用户问题。
 
 ### 7.2 发送模式
 
@@ -273,13 +272,12 @@ skipped | handoff | failed | send_unknown | partial_send
 - `totalTimeoutMs`；
 - `maxHistory`；
 - `maxReplyLength`；
-- `maxReplySegmentChars`；
-- `maxReplySegments`；
 - `replySegmentDelayMs`；
 - `debounceMs`；
-- `allowPaidOrderReply`；
 - `sendMode` 和白名单策略引用；
 - `configVersion` / `configDigest`。
+
+已支付订单不再作为自动回复 Agent 的独立开关或统一拦截条件；订单相关高风险意图继续由安全预检和人工转接策略处理。
 
 当前模型 Provider 可以读取本地已有的环境变量，但不得复用 Workspace Agent 的配置对象、Prompt 或运行时状态。后续设置页使用独立的自动回复 Agent 配置区，并保留版本化、审计化和可回滚能力。
 

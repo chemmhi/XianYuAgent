@@ -101,11 +101,8 @@ export function createMockAutoReplyAgentSettingsApi(): AutoReplyAgentSettingsApi
     totalTimeoutMs: 60_000,
     maxHistory: 20,
     maxReplyLength: 1_000,
-    maxReplySegmentChars: 300,
-    maxReplySegments: 4,
     replySegmentDelayMs: 800,
     debounceMs: 2_000,
-    allowPaidOrderReply: false,
     sendMode: 'simulate',
   };
   return {

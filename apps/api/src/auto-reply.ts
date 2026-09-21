@@ -19,8 +19,14 @@ export interface AutoReplyContext {
   orders: Array<Pick<OrderRecord, 'id' | 'orderNo' | 'buyerId' | 'itemId' | 'itemTitle' | 'paymentStatus' | 'orderStatus' | 'deliveryStatus' | 'afterSalesStatus'>>;
 }
 
+export interface AutoReplyGeneratedReply {
+  text: string;
+  segments?: string[];
+}
+
 export interface AutoReplyGenerator {
-  generate(input: { adminId?: string; context: AutoReplyContext; classification: AutoReplyClassification }): Promise<string | undefined>;
+  generate(input: { adminId?: string; context: AutoReplyContext; classification: AutoReplyClassification }): Promise<string | AutoReplyGeneratedReply | undefined>;
+  segmentReply?(input: { reply: string }): Promise<string[] | undefined>;
 }
 
 export interface AutoReplySendInput {
@@ -107,13 +113,10 @@ export interface AutoReplyServiceOptions {
   enabled?: boolean;
   sendMode?: 'simulate' | 'live';
   testBuyerNames?: string[];
-  allowPaidOrderReply?: boolean;
   totalTimeoutMs?: number;
   debounceMs?: number;
   maxHistory?: number;
   maxReplyLength?: number;
-  maxReplySegmentChars?: number;
-  maxReplySegments?: number;
   replySegmentDelayMs?: number;
   classifier?: RuleBasedIntentClassifier;
   generator?: AutoReplyGenerator;
@@ -125,13 +128,10 @@ export interface AutoReplyServiceRuntimeOptions {
   enabled?: boolean;
   sendMode?: 'simulate' | 'live';
   testBuyerNames?: string[];
-  allowPaidOrderReply?: boolean;
   totalTimeoutMs?: number;
   debounceMs?: number;
   maxHistory?: number;
   maxReplyLength?: number;
-  maxReplySegmentChars?: number;
-  maxReplySegments?: number;
   replySegmentDelayMs?: number;
   generator?: AutoReplyGenerator;
 }
@@ -140,13 +140,10 @@ export class AutoReplyService {
   private readonly enabled: boolean;
   private readonly sendMode: 'simulate' | 'live';
   private readonly testBuyerNames: string[];
-  private readonly allowPaidOrderReply: boolean;
   private readonly totalTimeoutMs: number;
   private readonly debounceMs: number;
   private readonly maxHistory: number;
   private readonly maxReplyLength: number;
-  private readonly maxReplySegmentChars: number;
-  private readonly maxReplySegments: number;
   private readonly replySegmentDelayMs: number;
   private readonly classifier: RuleBasedIntentClassifier;
   private readonly generator: AutoReplyGenerator;
@@ -163,13 +160,10 @@ export class AutoReplyService {
     this.enabled = options.enabled ?? true;
     this.sendMode = options.sendMode ?? 'simulate';
     this.testBuyerNames = [...new Set((options.testBuyerNames ?? []).map(normalizeBuyerName).filter((value): value is string => Boolean(value)))];
-    this.allowPaidOrderReply = options.allowPaidOrderReply ?? false;
     this.totalTimeoutMs = Math.max(1_000, Math.min(options.totalTimeoutMs ?? 60_000, 300_000));
     this.debounceMs = Math.max(0, Math.min(options.debounceMs ?? 2_000, 30_000));
     this.maxHistory = Math.max(1, Math.min(options.maxHistory ?? 20, 50));
-    this.maxReplyLength = Math.max(20, Math.min(options.maxReplyLength ?? 500, 2_000));
-    this.maxReplySegmentChars = Math.max(40, Math.min(options.maxReplySegmentChars ?? 180, 500));
-    this.maxReplySegments = Math.max(1, Math.min(options.maxReplySegments ?? 4, 8));
+    this.maxReplyLength = Math.max(30, Math.min(options.maxReplyLength ?? 500, 2_000));
     this.replySegmentDelayMs = Math.max(0, Math.min(options.replySegmentDelayMs ?? 350, 5_000));
     this.classifier = options.classifier ?? new RuleBasedIntentClassifier();
     this.generator = options.generator ?? new TemplateAutoReplyGenerator();
@@ -231,15 +225,16 @@ export class AutoReplyService {
       const contextDigest = digestJson({ conversationId: conversation.id, productId: context.product?.id, orderRefs: context.orders.map((order) => order.orderNo), history: context.recentMessages.map((message) => ({ direction: message.direction, senderRole: message.senderRole, createdAt: message.createdAt, bodyText: message.bodyText ?? '' })) });
       await this.store.updateAutoReplyRun(run.id, { status: 'context_loaded', contextDigest, productId: context.product?.id, orderRefs: context.orders.map((order) => order.orderNo) });
 
-      const paidOrderBlocked = !runtime.allowPaidOrderReply && context.orders.some((order) => order.paymentStatus === 'paid' && order.afterSalesStatus !== 'refunded');
-      if (conversation.handlingMode === 'human' || classification.decision === 'handoff' || paidOrderBlocked) {
-        const riskFlags = [...classification.riskFlags, ...(conversation.handlingMode === 'human' ? ['human_mode'] : []), ...(paidOrderBlocked ? ['paid_order_ai_disabled'] : [])];
+      if (conversation.handlingMode === 'human' || classification.decision === 'handoff') {
+        const riskFlags = [...classification.riskFlags, ...(conversation.handlingMode === 'human' ? ['human_mode'] : [])];
         const updated = await this.store.updateAutoReplyRun(run.id, { status: 'handoff', decision: 'handoff', riskFlags });
         await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'handoff', intent: classification.intent, riskFlags });
         return { run: updated ?? run, inboundMessage, classification, context };
       }
 
-      const reply = normalizeReply(await withTimeout(runtime.generator.generate({ adminId: input.adminId, context, classification }), runtime.totalTimeoutMs), runtime.maxReplyLength);
+      const generated = await withTimeout(runtime.generator.generate({ adminId: input.adminId, context, classification }), runtime.totalTimeoutMs);
+      const generatedReply = normalizeGeneratedReply(generated);
+      const reply = generatedReply ? normalizeReply(generatedReply.text) : undefined;
       if (!reply) {
         const updated = await this.store.updateAutoReplyRun(run.id, { status: 'failed', decision: 'failed', failureCode: 'REPLY_EMPTY' });
         await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'failed', intent: classification.intent, failureCode: 'REPLY_EMPTY' });
@@ -253,7 +248,7 @@ export class AutoReplyService {
 
       const replyDigest = digestJson({ reply });
       await this.store.updateAutoReplyRun(run.id, { status: 'generated', replyDigest });
-      const segments = splitReplyIntoSegments(reply, runtime.maxReplySegmentChars, runtime.maxReplySegments);
+      const segments = await this.resolveReplySegments(runtime.generator, generatedReply?.segments, reply, runtime);
       let lastOutboundMessageId: string | undefined;
       let lastOutcome: Awaited<ReturnType<AutoReplySender['send']>>['outcome'] = 'simulated';
       for (let index = 0; index < segments.length; index += 1) {
@@ -297,16 +292,26 @@ export class AutoReplyService {
       enabled: provided.enabled ?? this.enabled,
       sendMode: provided.sendMode ?? this.sendMode,
       testBuyerNames,
-      allowPaidOrderReply: provided.allowPaidOrderReply ?? this.allowPaidOrderReply,
       totalTimeoutMs: Math.max(1_000, Math.min(provided.totalTimeoutMs ?? this.totalTimeoutMs, 300_000)),
       debounceMs: Math.max(0, Math.min(provided.debounceMs ?? this.debounceMs, 30_000)),
       maxHistory: Math.max(1, Math.min(provided.maxHistory ?? this.maxHistory, 50)),
-      maxReplyLength: Math.max(20, Math.min(provided.maxReplyLength ?? this.maxReplyLength, 2_000)),
-      maxReplySegmentChars: Math.max(40, Math.min(provided.maxReplySegmentChars ?? this.maxReplySegmentChars, 500)),
-      maxReplySegments: Math.max(1, Math.min(provided.maxReplySegments ?? this.maxReplySegments, 8)),
+      maxReplyLength: Math.max(30, Math.min(provided.maxReplyLength ?? this.maxReplyLength, 2_000)),
       replySegmentDelayMs: Math.max(0, Math.min(provided.replySegmentDelayMs ?? this.replySegmentDelayMs, 5_000)),
       generator: provided.generator ?? this.generator,
     };
+  }
+
+  private async resolveReplySegments(generator: AutoReplyGenerator, proposed: string[] | undefined, reply: string, runtime: Required<AutoReplyServiceRuntimeOptions>): Promise<string[]> {
+    if (reply.length > runtime.maxReplyLength) throw new Error('AUTO_REPLY_REPLY_TOO_LONG');
+    const validated = validateSemanticSegments(proposed, reply);
+    if (validated) return validated;
+    const needsSemanticSplit = reply.length > 120 || /\n/.test(reply);
+    if (generator.segmentReply && needsSemanticSplit) {
+      const segmented = await withTimeout(generator.segmentReply({ reply }), runtime.totalTimeoutMs);
+      const retried = validateSemanticSegments(segmented, reply);
+      if (retried) return retried;
+    }
+    return [reply];
   }
 
   private async findProduct(adminId: string, conversation: ConversationRecord): Promise<AutoReplyContext['product']> {
@@ -343,11 +348,20 @@ export class AutoReplyService {
   }
 }
 
-function normalizeReply(value: string | undefined, maxLength: number): string | undefined {
+function normalizeGeneratedReply(value: string | AutoReplyGeneratedReply | undefined): AutoReplyGeneratedReply | undefined {
+  if (typeof value === 'string') return { text: value };
+  if (!value || typeof value.text !== 'string') return undefined;
+  return { text: value.text, segments: Array.isArray(value.segments) ? value.segments : undefined };
+}
+
+function normalizeReply(value: string | undefined): string | undefined {
   if (!value) return undefined;
-  const normalized = value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
-  if (!normalized) return undefined;
-  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1).trim()}…` : normalized;
+  const normalized = value
+    .replace(/[\u0000\u0001-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .trim();
+  return normalized || undefined;
 }
 
 function containsSensitiveInstruction(value: string): boolean {
@@ -361,23 +375,14 @@ function toFailureCode(error: unknown): string {
   return 'AUTO_REPLY_FAILED';
 }
 
-function splitReplyIntoSegments(value: string, maxChars: number, maxSegments: number): string[] {
-  if (value.length <= maxChars) return [value];
-  const segments: string[] = [];
-  let remaining = value.trim();
-  while (remaining && segments.length < maxSegments) {
-    if (remaining.length <= maxChars) { segments.push(remaining); break; }
-    const window = remaining.slice(0, maxChars + 1);
-    const breakAt = Math.max(window.lastIndexOf('\n'), window.lastIndexOf('。'), window.lastIndexOf('！'), window.lastIndexOf('？'), window.lastIndexOf('!'), window.lastIndexOf('?'), window.lastIndexOf('；'), window.lastIndexOf(';'), window.lastIndexOf('，'), window.lastIndexOf(','), window.lastIndexOf(' '));
-    const cut = breakAt >= Math.floor(maxChars * 0.55) ? breakAt + 1 : maxChars;
-    segments.push(remaining.slice(0, cut).trim());
-    remaining = remaining.slice(cut).trim();
-  }
-  if (remaining) {
-    const last = segments.length - 1;
-    if (last >= 0) segments[last] = `${segments[last]!.slice(0, Math.max(1, maxChars - 1)).trim()}…`;
-  }
-  return segments.filter(Boolean);
+function validateSemanticSegments(proposed: string[] | undefined, reply: string): string[] | undefined {
+  if (!proposed || proposed.length === 0) return undefined;
+  const segments = proposed.map((segment) => normalizeReply(segment)).filter((segment): segment is string => Boolean(segment));
+  if (segments.length !== proposed.length) return undefined;
+  const joined = segments.join('');
+  const normalizedReply = reply.replace(/\s+/g, '');
+  if (joined.replace(/\s+/g, '') !== normalizedReply) return undefined;
+  return segments;
 }
 
 function delay(ms: number): Promise<void> {

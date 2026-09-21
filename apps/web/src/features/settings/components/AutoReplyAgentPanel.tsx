@@ -46,12 +46,9 @@ export function AutoReplyAgentPanel({ controller, accountName, accountId }: { co
           <label>工具超时（毫秒）<input type="number" min={100} max={120000} value={draft.toolTimeoutMs} onChange={(event) => setField('toolTimeoutMs', Number(event.target.value))} required /></label>
           <label>总超时（毫秒）<input type="number" min={1000} max={300000} value={draft.totalTimeoutMs} onChange={(event) => setField('totalTimeoutMs', Number(event.target.value))} required /></label>
           <label>上下文历史条数<input type="number" min={0} max={100} value={draft.maxHistory} onChange={(event) => setField('maxHistory', Number(event.target.value))} required /></label>
-          <label>最大回复长度<input type="number" min={50} max={4000} value={draft.maxReplyLength} onChange={(event) => setField('maxReplyLength', Number(event.target.value))} required /></label>
-          <label>分段长度上限<input type="number" min={50} max={1000} value={draft.maxReplySegmentChars} onChange={(event) => setField('maxReplySegmentChars', Number(event.target.value))} required /></label>
-          <label>最大分段数<input type="number" min={1} max={12} value={draft.maxReplySegments} onChange={(event) => setField('maxReplySegments', Number(event.target.value))} required /></label>
+          <label>最大回复长度<input type="number" min={30} max={4000} value={draft.maxReplyLength} onChange={(event) => setField('maxReplyLength', Number(event.target.value))} required /></label>
           <label>分段发送间隔（毫秒）<input type="number" min={0} max={30000} value={draft.replySegmentDelayMs} onChange={(event) => setField('replySegmentDelayMs', Number(event.target.value))} required /></label>
           <label>防抖窗口（毫秒）<input type="number" min={0} max={30000} value={draft.debounceMs} onChange={(event) => setField('debounceMs', Number(event.target.value))} required /></label>
-          <label className="settings-checkbox"><input type="checkbox" checked={draft.allowPaidOrderReply} onChange={(event) => setField('allowPaidOrderReply', event.target.checked)} />允许已支付订单自动回复</label>
           <label>发送模式<select value={draft.sendMode} onChange={(event) => setField('sendMode', event.target.value as EditableConfig['sendMode'])}><option value="simulate">模拟发送</option><option value="live">真实发送（受白名单约束）</option></select></label>
         </fieldset>
       </div>

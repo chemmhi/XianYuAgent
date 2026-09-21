@@ -13,11 +13,8 @@ export const DEFAULT_AUTO_REPLY_AGENT_CONFIG: AutoReplyAgentConfig = {
   totalTimeoutMs: 60_000,
   maxHistory: 20,
   maxReplyLength: 1_000,
-  maxReplySegmentChars: 300,
-  maxReplySegments: 4,
   replySegmentDelayMs: 800,
   debounceMs: 2_000,
-  allowPaidOrderReply: false,
   sendMode: 'simulate',
 };
 
@@ -31,12 +28,9 @@ export function autoReplyAgentConfigFromEnv(env: NodeJS.ProcessEnv = process.env
     toolTimeoutMs: parseBoundedInteger(env.AUTO_REPLY_AGENT_TOOL_TIMEOUT_MS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.toolTimeoutMs, 100, 120_000),
     totalTimeoutMs: parseBoundedInteger(env.AUTO_REPLY_AGENT_TOTAL_TIMEOUT_MS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.totalTimeoutMs, 1_000, 300_000),
     maxHistory: parseBoundedInteger(env.AUTO_REPLY_AGENT_MAX_HISTORY, DEFAULT_AUTO_REPLY_AGENT_CONFIG.maxHistory, 0, 100),
-    maxReplyLength: parseBoundedInteger(env.AUTO_REPLY_AGENT_MAX_REPLY_LENGTH, DEFAULT_AUTO_REPLY_AGENT_CONFIG.maxReplyLength, 50, 4_000),
-    maxReplySegmentChars: parseBoundedInteger(env.AUTO_REPLY_AGENT_MAX_REPLY_SEGMENT_CHARS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.maxReplySegmentChars, 50, 1_000),
-    maxReplySegments: parseBoundedInteger(env.AUTO_REPLY_AGENT_MAX_REPLY_SEGMENTS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.maxReplySegments, 1, 12),
+    maxReplyLength: parseBoundedInteger(env.AUTO_REPLY_AGENT_MAX_REPLY_LENGTH, DEFAULT_AUTO_REPLY_AGENT_CONFIG.maxReplyLength, 30, 4_000),
     replySegmentDelayMs: parseBoundedInteger(env.AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.replySegmentDelayMs, 0, 30_000),
     debounceMs: parseBoundedInteger(env.AUTO_REPLY_AGENT_DEBOUNCE_MS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.debounceMs, 0, 30_000),
-    allowPaidOrderReply: parseBoolean(env.AUTO_REPLY_AGENT_ALLOW_PAID_ORDER_REPLY, DEFAULT_AUTO_REPLY_AGENT_CONFIG.allowPaidOrderReply),
     sendMode: env.AUTO_REPLY_SEND_MODE?.trim().toLowerCase() === 'live' ? 'live' : DEFAULT_AUTO_REPLY_AGENT_CONFIG.sendMode,
   };
 }
@@ -86,12 +80,9 @@ function validateConfig(config: AutoReplyAgentConfig): AutoReplyAgentConfig {
     toolTimeoutMs: boundedNumber(config.toolTimeoutMs, 'toolTimeoutMs', 100, 120_000),
     totalTimeoutMs: boundedNumber(config.totalTimeoutMs, 'totalTimeoutMs', 1_000, 300_000),
     maxHistory: boundedNumber(config.maxHistory, 'maxHistory', 0, 100),
-    maxReplyLength: boundedNumber(config.maxReplyLength, 'maxReplyLength', 50, 4_000),
-    maxReplySegmentChars: boundedNumber(config.maxReplySegmentChars, 'maxReplySegmentChars', 50, 1_000),
-    maxReplySegments: boundedNumber(config.maxReplySegments, 'maxReplySegments', 1, 12),
+    maxReplyLength: boundedNumber(config.maxReplyLength, 'maxReplyLength', 30, 4_000),
     replySegmentDelayMs: boundedNumber(config.replySegmentDelayMs, 'replySegmentDelayMs', 0, 30_000),
     debounceMs: boundedNumber(config.debounceMs, 'debounceMs', 0, 30_000),
-    allowPaidOrderReply: Boolean(config.allowPaidOrderReply),
     sendMode: config.sendMode === 'live' ? 'live' : 'simulate',
   };
 }
