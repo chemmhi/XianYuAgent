@@ -77,7 +77,9 @@ try {
     occurredAt: '2026-09-20T10:00:00.000Z',
   });
   assert.equal(duplicate.created, false);
-  assert.equal(duplicate.autoReply, undefined);
+  assert.equal(duplicate.autoReply?.run.id, inbound.autoReply?.run.id);
+  const duplicateHistory = await runtime.messages.listMessages(adminId, conversation.id, { limit: 20 });
+  assert.equal(duplicateHistory.items.filter((message) => message.direction === 'outbound' && message.source === 'ai').length, 1);
   assert.equal(realSendCalls, 0);
 
   const risky = await runtime.xianyuIm.handleExternalEvent(adminId, {
