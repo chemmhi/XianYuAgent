@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useAccountContext } from '../../../app/account-context';
-import { createCredentialApi, createMockCredentialApi, type CredentialApi } from '../api';
+import { createCredentialApi, createMockAutoReplyAgentSettingsApi, createMockCredentialApi, type AutoReplyAgentSettingsApi, type CredentialApi } from '../api';
+import { useAutoReplyAgentSettingsController } from '../agent-settings-controller';
+import { AutoReplyAgentPanel } from './AutoReplyAgentPanel';
 import { useCredentialController } from '../controller';
 import type { CredentialRefVM } from '../types';
 import './settings.css';
@@ -8,7 +10,7 @@ import './settings.css';
 type TabKey = 'autoReply' | 'model' | 'credentials' | 'safety' | 'outbox' | 'plugins';
 
 const tabs: Array<{ id: TabKey; label: string; mobileLabel: string; meta: string }> = [
-  { id: 'autoReply', label: '自动回复策略', mobileLabel: '策略', meta: 'Policy' },
+  { id: 'autoReply', label: '自动回复 Agent', mobileLabel: 'Agent', meta: 'Buyer Agent' },
   { id: 'model', label: 'OpenAI API', mobileLabel: '模型', meta: 'ModelClient' },
   { id: 'credentials', label: '凭证管理', mobileLabel: '凭证', meta: 'CredentialStore' },
   { id: 'safety', label: '安全输出校验', mobileLabel: '安全', meta: 'Gateway' },
@@ -16,14 +18,16 @@ const tabs: Array<{ id: TabKey; label: string; mobileLabel: string; meta: string
   { id: 'plugins', label: '插件配置', mobileLabel: '插件', meta: 'Skill / Plugin' },
 ];
 
-export function SettingsPage({ api: providedApi }: { api?: CredentialApi }) {
+export function SettingsPage({ api: providedApi, agentApi: providedAgentApi }: { api?: CredentialApi; agentApi?: AutoReplyAgentSettingsApi }) {
   const { accounts, accountsLoading, accountsError, currentAccountId, setCurrentAccountId } = useAccountContext();
   const api = useMemo(() => providedApi ?? createCredentialApiFromRuntime(), [providedApi]);
+  const agentApi = useMemo(() => providedAgentApi ?? createMockAutoReplyAgentSettingsApi(), [providedAgentApi]);
   const [selectedAccountId, setSelectedAccountId] = useState(currentAccountId ?? '');
   const [activeTab, setActiveTab] = useState<TabKey>('credentials');
   const [editor, setEditor] = useState<'create' | 'edit' | 'rotate' | null>(null);
   const [selectedCredential, setSelectedCredential] = useState<CredentialRefVM | undefined>();
   const controller = useCredentialController({ api, accountId: selectedAccountId || undefined });
+  const agentController = useAutoReplyAgentSettingsController(agentApi);
 
   const selectedAccount = accounts.find((account) => account.id === selectedAccountId);
   const items = controller.state.data?.items ?? [];
@@ -53,7 +57,7 @@ export function SettingsPage({ api: providedApi }: { api?: CredentialApi }) {
           {tabs.map((tab) => <button key={tab.id} type="button" className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)}><span className="settings-tab-label">{tab.label}</span><span className="settings-tab-mobile-label">{tab.mobileLabel}</span><small>{tab.meta}</small></button>)}
         </aside>
         <div className="settings-active">
-          {activeTab === 'credentials' ? <CredentialStorePanel accountName={selectedAccount?.displayName} accountId={selectedAccountId} accountsLoading={accountsLoading} accountsError={accountsError} state={controller.state} items={items} onCreate={() => openEditor('create')} onEdit={(item) => openEditor('edit', item)} onRotate={(item) => openEditor('rotate', item)} onStatus={(item, status) => { void controller.setStatus({ credentialId: item.id, expectedVersion: item.version, status }); }} onRetry={controller.reload} /> : <ReferencePanel tab={activeTab} onOpenCredentials={() => setActiveTab('credentials')} />}
+          {activeTab === 'credentials' ? <CredentialStorePanel accountName={selectedAccount?.displayName} accountId={selectedAccountId} accountsLoading={accountsLoading} accountsError={accountsError} state={controller.state} items={items} onCreate={() => openEditor('create')} onEdit={(item) => openEditor('edit', item)} onRotate={(item) => openEditor('rotate', item)} onStatus={(item, status) => { void controller.setStatus({ credentialId: item.id, expectedVersion: item.version, status }); }} onRetry={controller.reload} /> : activeTab === 'autoReply' ? <AutoReplyAgentPanel controller={agentController} /> : <ReferencePanel tab={activeTab} onOpenCredentials={() => setActiveTab('credentials')} />}
         </div>
       </div>
       {editor && <CredentialEditor mode={editor} accountId={selectedAccountId} credential={selectedCredential} onClose={() => { setEditor(null); setSelectedCredential(undefined); }} onCreate={controller.create} onUpdate={controller.update} onRotate={controller.rotate} />}
@@ -112,7 +116,7 @@ function CredentialEditor({ mode, accountId, credential, onClose, onCreate, onUp
 
 function ReferencePanel({ tab, onOpenCredentials }: { tab: Exclude<TabKey, 'credentials'>; onOpenCredentials: () => void }) {
   const content: Record<Exclude<TabKey, 'credentials'>, { title: string; description: string; rows: Array<[string, string, string]> }> = {
-    autoReply: { title: '自动回复策略', description: '当前切片先展示策略边界，策略保存将在后续 Settings 分片接入。', rows: [['默认超时', '180 秒', '策略'], ['人工介入', '重新计时', '已启用'], ['高风险拦截', '退款、投诉、凭证异常', '网关'] ] },
+    autoReply: { title: '自动回复 Agent', description: '买家侧 Agent 配置已独立保存，保存后下一条消息读取最新配置。', rows: [['配置范围', '买家侧自动回复', '独立'], ['工具权限', '四个只读工具', '受控'], ['发送模式', '模拟发送 / 白名单真实发送', '策略'] ] },
     model: { title: 'OpenAI API 兼容模型配置', description: 'ModelClient 只消费 CredentialRef，不在页面回显明文 API Key。', rows: [['当前配置', 'openai-compatible / primary', '已脱敏'], ['Secret', 'secret_store_ref:model_api_key_primary', '不可查看'], ['生效规则', '保存后由运行时读取引用', '受控'] ] },
     safety: { title: '安全输出校验', description: '买家输入按不可信内容处理，凭证、Cookie 和内部配置永不进入买家链路。', rows: [['Prompt Injection', '拦截', '高优先级'], ['凭证泄露', '拦截', '高优先级'], ['非订单交付', '校验 buyer_deliverable', '策略'] ] },
     outbox: { title: 'Outbox Worker / Execution Runtime', description: '执行队列和运行时恢复属于后续切片，本页只保留高保真状态入口。', rows: [['Worker', 'online · 最近心跳 14:24:08', '正常'], ['队列深度', '7 pending / 128 succeeded today', '运行中'], ['人工确认', '高风险动作确认后才执行', '已开启'] ] },

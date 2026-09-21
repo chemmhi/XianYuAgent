@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyRunRecord, AutoReplyDecision, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunRecord, AutoReplyDecision, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor } from './conversation-cursor.js';
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
@@ -629,6 +629,21 @@ export class PostgresStore implements Store {
     if (!result.rows[0]) throw new Error('CREDENTIAL_VERSION_CONFLICT');
     return this.getCredentialRef(input.adminId, input.credentialId);
   }
+  async getAutoReplyAgentConfig(adminId: string): Promise<AutoReplyAgentConfigRecord | undefined> {
+    const result = await this.pool.query('select * from settings.auto_reply_agent_configs where admin_id=$1', [adminId]);
+    return result.rows[0] ? this.toAutoReplyAgentConfig(result.rows[0]) : undefined;
+  }
+  async upsertAutoReplyAgentConfig(input: { adminId: string; expectedVersion: number; patch: AutoReplyAgentConfigPatch; config: AutoReplyAgentConfig; configDigest: string }): Promise<AutoReplyAgentConfigRecord | undefined> {
+    const current = await this.getAutoReplyAgentConfig(input.adminId);
+    if (current && current.configVersion !== input.expectedVersion) throw new Error('AUTO_REPLY_AGENT_CONFIG_VERSION_CONFLICT');
+    const version = current ? current.configVersion + 1 : 1;
+    const result = await this.pool.query(`
+      insert into settings.auto_reply_agent_configs (admin_id, config_version, config_json, config_digest)
+      values ($1,$2,$3::jsonb,$4)
+      on conflict (admin_id) do update set config_version=excluded.config_version, config_json=excluded.config_json, config_digest=excluded.config_digest, updated_at=now()
+      returning *`, [input.adminId, version, JSON.stringify(input.config), input.configDigest]);
+    return result.rows[0] ? this.toAutoReplyAgentConfig(result.rows[0]) : undefined;
+  }
   async getIdempotency(scope: string, key: string): Promise<IdempotencyRecord | undefined> { const result = await this.pool.query('select * from execution.idempotency_records where scope=$1 and key=$2 and expires_at>now()', [scope, key]); return result.rows[0] ? this.toIdempotency(result.rows[0]) : undefined; }
   async beginIdempotency(record: IdempotencyRecord): Promise<void> { await this.pool.query('insert into execution.idempotency_records (id,scope,key,request_fingerprint,status,expires_at) values ($1,$2,$3,$4,$5,$6)', [createId(), record.scope, record.key, record.requestFingerprint, record.status, record.expiresAt]); }
   async abortIdempotency(scope: string, key: string): Promise<void> { await this.pool.query('delete from execution.idempotency_records where scope=$1 and key=$2 and status=\'processing\'', [scope, key]); }
@@ -844,6 +859,33 @@ export class PostgresStore implements Store {
       createdAt: new Date(String(row.created_at)).toISOString(),
       updatedAt: new Date(String(row.updated_at)).toISOString(),
       canReveal: false,
+    };
+  }
+  private toAutoReplyAgentConfig(row: Row): AutoReplyAgentConfigRecord {
+    const config = row.config_json && typeof row.config_json === 'object' && !Array.isArray(row.config_json)
+      ? row.config_json as Record<string, unknown>
+      : {};
+    return {
+      adminId: String(row.admin_id),
+      enabled: Boolean(config.enabled),
+      systemPrompt: String(config.systemPrompt ?? ''),
+      userPromptTemplate: String(config.userPromptTemplate ?? ''),
+      maxLoops: Number(config.maxLoops ?? 4),
+      maxToolCalls: Number(config.maxToolCalls ?? 8),
+      toolTimeoutMs: Number(config.toolTimeoutMs ?? 10_000),
+      totalTimeoutMs: Number(config.totalTimeoutMs ?? 60_000),
+      maxHistory: Number(config.maxHistory ?? 20),
+      maxReplyLength: Number(config.maxReplyLength ?? 1_000),
+      maxReplySegmentChars: Number(config.maxReplySegmentChars ?? 300),
+      maxReplySegments: Number(config.maxReplySegments ?? 4),
+      replySegmentDelayMs: Number(config.replySegmentDelayMs ?? 800),
+      debounceMs: Number(config.debounceMs ?? 2_000),
+      allowPaidOrderReply: Boolean(config.allowPaidOrderReply),
+      sendMode: config.sendMode === 'live' ? 'live' : 'simulate',
+      configVersion: Number(row.config_version ?? 1),
+      configDigest: String(row.config_digest ?? ''),
+      createdAt: new Date(String(row.created_at)).toISOString(),
+      updatedAt: new Date(String(row.updated_at)).toISOString(),
     };
   }
 }

@@ -1,4 +1,4 @@
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyRunRecord, AutoReplyDecision, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunRecord, AutoReplyDecision, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor, isAfterConversationCursor } from './conversation-cursor.js';
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
@@ -32,6 +32,7 @@ export class MemoryStore implements Store {
   private readonly credentials = new Map<string, CredentialRecord>();
   private readonly credentialRefs = new Map<string, CredentialRefRecord>();
   private readonly credentialRefSecrets = new Map<string, string>();
+  private readonly autoReplyAgentConfigs = new Map<string, AutoReplyAgentConfigRecord>();
   private readonly products = new Map<string, ProductRecord>();
   private readonly orders = new Map<string, OrderRecord>();
   private readonly couponBatches = new Map<string, CouponBatchRecord>();
@@ -698,6 +699,25 @@ export class MemoryStore implements Store {
     row.version += 1;
     row.updatedAt = new Date().toISOString();
     return { ...row, metadata: { ...row.metadata }, canReveal: false };
+  }
+  async getAutoReplyAgentConfig(adminId: string): Promise<AutoReplyAgentConfigRecord | undefined> {
+    const row = this.autoReplyAgentConfigs.get(adminId);
+    return row ? { ...row } : undefined;
+  }
+  async upsertAutoReplyAgentConfig(input: { adminId: string; expectedVersion: number; patch: AutoReplyAgentConfigPatch; config: AutoReplyAgentConfig; configDigest: string }): Promise<AutoReplyAgentConfigRecord | undefined> {
+    const now = new Date().toISOString();
+    const current = this.autoReplyAgentConfigs.get(input.adminId);
+    if (current && current.configVersion !== input.expectedVersion) throw new Error('AUTO_REPLY_AGENT_CONFIG_VERSION_CONFLICT');
+    const row: AutoReplyAgentConfigRecord = {
+      ...input.config,
+      adminId: input.adminId,
+      configVersion: current ? current.configVersion + 1 : 1,
+      configDigest: input.configDigest,
+      createdAt: current?.createdAt ?? now,
+      updatedAt: now,
+    };
+    this.autoReplyAgentConfigs.set(input.adminId, row);
+    return { ...row };
   }
   async getIdempotency(scope: string, key: string): Promise<IdempotencyRecord | undefined> { const row = this.idempotency.get(`${scope}:${key}`); if (row && Date.parse(row.expiresAt) <= Date.now()) { this.idempotency.delete(`${scope}:${key}`); return undefined; } return row; }
   async beginIdempotency(record: IdempotencyRecord): Promise<void> { this.idempotency.set(`${record.scope}:${record.key}`, record); }

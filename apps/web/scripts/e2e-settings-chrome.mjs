@@ -106,6 +106,11 @@ async function clickText(cdp, text, selector = 'button') {
   return evaluate(cdp, expression);
 }
 
+async function clickContainingText(cdp, text, selector = 'button') {
+  const expression = `(() => { const node = Array.from(document.querySelectorAll(${JSON.stringify(selector)})).find((item) => item.textContent?.includes(${JSON.stringify(text)})); if (!node) throw new Error('missing containing button: ' + ${JSON.stringify(text)}); node.click(); return true; })()`;
+  return evaluate(cdp, expression);
+}
+
 async function captureViewport(cdp, width, height, filename) {
   await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
   const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true });
@@ -179,6 +184,27 @@ async function run() {
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('当前账号'), 'Settings account context');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('当前账号还没有模型 API Key'), 'empty credential state');
 
+  const agentDefaults = await requestJson(apiUrl, '/api/v1/settings/agent', { headers: { cookie } });
+  if (!agentDefaults.response.ok || agentDefaults.body.data?.configVersion !== 0) throw new Error(`agent settings default readback failed: ${agentDefaults.response.status} ${JSON.stringify(agentDefaults.body)}`);
+  await clickContainingText(cdp, '自动回复 Agent');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-auto-reply-agent-panel]"))'), 'Auto Reply Agent panel');
+  await setLabelInput(cdp, '最大循环次数', '6');
+  await setLabelInput(cdp, '防抖窗口（毫秒）', '1500');
+  await clickText(cdp, '保存自动回复 Agent 配置');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('自动回复 Agent 配置已保存'), 'agent settings saved');
+  const agentSaved = await requestJson(apiUrl, '/api/v1/settings/agent', { headers: { cookie } });
+  if (!agentSaved.response.ok || agentSaved.body.data?.configVersion !== 1 || agentSaved.body.data?.maxLoops !== 6 || agentSaved.body.data?.debounceMs !== 1500) throw new Error(`agent settings persistence failed: ${agentSaved.response.status} ${JSON.stringify(agentSaved.body)}`);
+  const agentStale = await requestJson(apiUrl, '/api/v1/settings/agent', {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': `agent-settings-stale-${process.pid}` },
+    body: JSON.stringify({ expectedVersion: 0, maxLoops: 4 }),
+  });
+  if (agentStale.response.status !== 409) throw new Error(`expected 409 for stale agent settings, got ${agentStale.response.status}`);
+
+  await clickContainingText(cdp, '凭证管理');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-credential-panel]"))'), 'credential panel after Agent settings');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('当前账号还没有模型 API Key'), 'empty credential state after Agent settings');
+
   const selectedAccount = await evaluate(cdp, 'document.querySelector("#settings-account")?.value ?? ""');
   if (selectedAccount !== accountId) {
     await evaluate(cdp, `(() => { const select = document.querySelector('#settings-account'); if (!select) throw new Error('settings account select missing'); select.value = ${JSON.stringify(accountId)}; select.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
@@ -229,7 +255,7 @@ async function run() {
   if (JSON.stringify(final.body).includes('sk-settings-rotated-987654')) throw new Error('rotated secret leaked in API readback');
 
   await cdp.send('Emulation.clearDeviceMetricsOverride');
-  console.log(JSON.stringify({ apiStorage: 'memory', accountId, credentialId: credential.id, forbiddenStatus: forbidden.response.status, staleStatus: stale.response.status, finalStatus: final.body.data.items[0].status, secretRedaction: browserSecretLeak, screenshots: { desktopPath, mobilePath } }, null, 2));
+  console.log(JSON.stringify({ apiStorage: 'memory', accountId, agentSettings: { defaultVersion: agentDefaults.body.data.configVersion, savedVersion: agentSaved.body.data.configVersion, staleStatus: agentStale.response.status }, credentialId: credential.id, forbiddenStatus: forbidden.response.status, staleStatus: stale.response.status, finalStatus: final.body.data.items[0].status, secretRedaction: browserSecretLeak, screenshots: { desktopPath, mobilePath } }, null, 2));
   cdp.socket.close();
 }
 
