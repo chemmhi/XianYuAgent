@@ -93,7 +93,7 @@ export function createMockAutoReplyAgentSettingsApi(): AutoReplyAgentSettingsApi
     adminId: 'mock-admin', configVersion: 0, configDigest: 'mock-default', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString(),
     enabled: true,
     systemPrompt: '你是闲鱼卖家面向买家的自动回复 Agent。只根据工具事实回答，不确定时转人工。',
-    userPromptTemplate: '{{buyerMessage}}',
+    userPromptTemplate: '请处理这条买家消息。\n<buyer_context>\n{{context}}\n</buyer_context>',
     maxLoops: 4,
     maxToolCalls: 8,
     toolTimeoutMs: 10_000,

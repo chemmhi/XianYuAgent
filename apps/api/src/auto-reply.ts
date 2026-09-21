@@ -259,7 +259,7 @@ export class AutoReplyService {
       for (let index = 0; index < segments.length; index += 1) {
         if (index > 0 && runtime.replySegmentDelayMs > 0) await delay(runtime.replySegmentDelayMs);
         const segment = segments[index]!;
-        const sent = await this.sender.send({ adminId: input.adminId, accountId: conversation.accountId, requestId, conversation, recipientRef: conversation.buyerRef, text: segment, mode: this.sendMode, traceId });
+        const sent = await this.sender.send({ adminId: input.adminId, accountId: conversation.accountId, requestId, conversation, recipientRef: conversation.buyerRef, text: segment, mode: runtime.sendMode, traceId });
         lastOutcome = sent.outcome;
         if (sent.outcome === 'known_failure' || sent.outcome === 'unknown') throw new Error(sent.outcome === 'unknown' ? 'AUTO_REPLY_SEND_UNKNOWN' : 'AUTO_REPLY_SEND_FAILED');
         const simulatedRef = sent.outcome === 'simulated' ? `${sent.externalMessageRef ?? `simulated:auto-reply:${inboundMessage.id}`}:${index + 1}` : sent.externalMessageRef;
