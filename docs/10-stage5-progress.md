@@ -126,5 +126,6 @@
 - Model 下拉只在展开时调用 provider `/models`；主、备按 configId 隔离模型列表，provider 返回空列表、请求中、失败和重复展开均有明确状态。
 - `npm --workspace apps/api run test:postgres:openai` 已在真实 PostgreSQL 通过；`npm --workspace apps/web run test:e2e:chrome:settings:openai` 使用真实 Chrome/CDP + PostgreSQL 通过 UI → API → DB → Agent、更新无重启生效、主失败切备用和重启复读。
 - Agent 输出证据：`PRIMARY_V1_REPLY` → 更新后 `PRIMARY_V2_REPLY` → 主配置 401 后 `BACKUP_REPLY`；E2E 同时确认密钥不进入 API 响应、URL、DOM 输入或 localStorage。
+- `.env` 中第二套 DeepSeek 真实配置保持注释态；测试进程仅临时加载该配置完成 `/models` 与文本生成 HTTP 200 验证，未改写 `.env`，因此主/备位置互换时两套真实配置均有连接证据。
 - 视觉证据已更新至 `docs/evidence/stage5/S4-VS7A/screenshots/`，逐项偏差记录见 `docs/evidence/stage5/S4-VS7A/visual-diff.md`。
 - 当前结论仍为 `READY_FOR_REVIEW`：发布级 migration rollback、旧凭证兼容迁移、fallback 专用审计事件和 merge lock 后独立签核未关闭。

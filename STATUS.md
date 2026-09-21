@@ -2,7 +2,7 @@
 
 ## 2026-09-21 增量修复
 
-- OpenAI API 主备配置切片：`/settings` 正式 OpenAI API 面板已严格对齐 SellerAgent 双卡片视觉；每张卡片支持测试连通性与保存，Model 下拉按展开时 provider `/models` 动态读取。真实 PostgreSQL smoke 与 Chrome/CDP E2E 已通过 UI → API → 数据库 → Agent；Agent 输出验证为 `PRIMARY_V1_REPLY` → `PRIMARY_V2_REPLY` → `BACKUP_REPLY`，PostgreSQL 重启后仍命中备用。视觉证据和逐项偏差记录见 `docs/evidence/stage5/S4-VS7A/`；切片仍保持 `READY_FOR_REVIEW`。
+- OpenAI API 主备配置切片：`/settings` 正式 OpenAI API 面板已严格对齐 SellerAgent 双卡片视觉；每张卡片支持测试连通性与保存，Model 下拉按展开时 provider `/models` 动态读取。真实 PostgreSQL smoke 与 Chrome/CDP E2E 已通过 UI → API → 数据库 → Agent；Agent 输出验证为 `PRIMARY_V1_REPLY` → `PRIMARY_V2_REPLY` → `BACKUP_REPLY`，PostgreSQL 重启后仍命中备用。`.env` 中第二套 DeepSeek 真实配置保持注释态，仅由测试进程临时加载并完成真实 `/models` 与文本生成验证，未修改配置文件。视觉证据和逐项偏差记录见 `docs/evidence/stage5/S4-VS7A/`；切片仍保持 `READY_FOR_REVIEW`。
 - 自动回复 Agent 设置与动态联调：设置页 Tab 已改为“自动回复 Agent”，配置通过独立 `AutoReplyAgentSettingsService` 持久化；买家 Agent 使用四个只读工具并在每条入站消息前读取最新管理员配置，支持 Prompt、循环/工具上限、上下文、回复长度、分段、防抖、已支付订单策略和 simulate/live（live 仍受环境变量买家白名单约束）。真实 push→tool call→生成→模拟出站→消息/`auto_reply_runs` 落库 E2E 3/3 通过；Chrome/CDP 设置页 E2E 通过；当前仍为 simulate 验证，真实闲鱼发送与发布级恢复未关闭。
 - 自动回复模型接入：复用 Workspace 的 `API_KEY/BASE_URL/MODEL/MODEL_TIMEOUT_MS` 环境变量和同一个 OpenAI-compatible `ModelClient`；配置完整时走 `ModelAutoReplyGenerator`，缺少配置时保留模板生成，Provider 失败安全落库为失败且不创建 outbound；新增模型上下文裁剪、成功装配和 503 失败回归测试。
 - 在线聊天 CSRF：API 重启后旧页面的 token 失效时，前端刷新 `/api/v1/auth/session` 后仅重试原 mutation 一次并保留 `Idempotency-Key`；Web 38 个测试文件 / 117 个用例、类型检查、构建通过。

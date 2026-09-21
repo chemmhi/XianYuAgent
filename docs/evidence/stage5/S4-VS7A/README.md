@@ -64,7 +64,7 @@ npm --workspace apps/web run test:e2e:chrome:settings:openai
 
 ### 外部真实 provider 检查
 
-仓库当前可读取的 `.env` 只包含一套真实 OpenAI-compatible 配置（`https://api.nightyu.com/v1` / `gpt-5.6-sol`，密钥不记录）。该配置已在本地进程中完成 `/models` 与 `/responses` 实测，均返回 HTTP 200，模型列表包含所选模型。第二套真实配置不在当前仓库可见文件中，因此本证据不把本地 fake provider 结果冒充第二套真实密钥验证。
+仓库 `.env` 当前启用的是主配置（`https://api.nightyu.com/v1` / `gpt-5.6-sol`，密钥不记录）；第二套真实配置（`https://api.deepseek.com` / `deepseek-flash`，密钥不记录）保持为注释态。为验证“注释配置也可作为备用配置使用”，测试进程仅临时加载第二套注释配置，不改写 `.env`，分别完成 `/models` 与文本生成实测，均返回 HTTP 200 且模型列表包含所选模型。两套真实 provider 均已验证，密钥未写入证据、日志或截图。
 
 ## 视觉证据
 
