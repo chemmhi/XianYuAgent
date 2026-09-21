@@ -631,6 +631,7 @@ export interface Store {
   kind: 'memory' | 'postgres';
   health(): Promise<{ kind: string; reachable: boolean }>;
   countAdmins(): Promise<number>;
+  listAdminIds(): Promise<string[]>;
   findAdminById(id: string): Promise<AdminRecord | undefined>;
   findAdminByEmail(email: string): Promise<AdminRecord | undefined>;
   createAdmin(input: { email: string; passwordHash: string; displayName: string }): Promise<AdminRecord>;

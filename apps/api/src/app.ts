@@ -176,7 +176,10 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
   const runtime: AppRuntime = {
     config, store, auth, accounts, coupons, orders, products, productSync, credentials, apiKeyCredentials, dashboard, messages, autoReply, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuIm,
     server,
-    async listen() { await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve)); },
+    async listen() {
+      await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));
+      if (config.xianyuQrMode === 'real') void startAllConnectedListenersBestEffort(runtime);
+    },
     async close() {
       for (const client of wsServer.clients) client.close(1001, 'server shutdown');
       await new Promise<void>((resolve) => wsServer.close(() => resolve()));
@@ -223,6 +226,16 @@ async function startConnectedListenersBestEffort(runtime: AppRuntime, adminId: s
   } catch {
     // Session bootstrap must remain available even when the external IM
     // service is temporarily unavailable; each account can retry later.
+  }
+}
+
+async function startAllConnectedListenersBestEffort(runtime: AppRuntime): Promise<void> {
+  try {
+    const adminIds = await runtime.store.listAdminIds();
+    await Promise.all(adminIds.map((adminId) => startConnectedListenersBestEffort(runtime, adminId)));
+  } catch {
+    // Startup remains available when the database or external IM is briefly
+    // unavailable; the next process restart or credential/session action retries.
   }
 }
 

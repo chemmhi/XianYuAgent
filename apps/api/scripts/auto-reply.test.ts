@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ExternalAutoReplySender, RuleBasedIntentClassifier, TemplateAutoReplyGenerator, type AutoReplyContext } from '../src/auto-reply.js';
+import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { XianyuImService } from '../src/xianyu-im-service.js';
 
@@ -71,4 +72,27 @@ test('live auto-reply requires an explicit buyer allowlist', () => {
   assert.deepEqual(config.autoReplyTestBuyerNames, ['一只橘喵喵亮晶晶', '另一位买家']);
   const legacy = loadConfig({ AUTO_REPLY_SEND_MODE: 'live', AUTO_REPLY_TEST_BUYER_NAMES: '一只橘喵喵亮晶晶, 另一位买家' });
   assert.deepEqual(legacy.autoReplyTestBuyerNames, ['一只橘喵喵亮晶晶', '另一位买家']);
+});
+
+test('app startup scans connected accounts without an auth page request', async () => {
+  const runtime = createApp(loadConfig({
+    HOST: '127.0.0.1',
+    PORT: '0',
+    DATABASE_URL: '',
+    REDIS_URL: '',
+    ALLOW_IN_MEMORY: 'true',
+    COOKIE_SECURE: 'false',
+    XIANYU_QR_MODE: 'real',
+    AGENT_RUNTIME: 'in-process',
+    AUTO_REPLY_SEND_MODE: 'simulate',
+  }));
+  const calls: string[] = [];
+  runtime.xianyuIm.startListener = async (adminId, accountId) => { calls.push(`${adminId}:${accountId}`); };
+  const admin = await runtime.store.createAdmin({ email: 'startup-listener@example.com', passwordHash: 'hash', displayName: 'Startup Listener' });
+  const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'startup-seller' });
+  await runtime.store.updateAccount(admin.id, account.id, { status: 'connected' });
+  await runtime.listen();
+  for (let attempt = 0; attempt < 50 && calls.length === 0; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(calls, [`${admin.id}:${account.id}`]);
+  await runtime.close();
 });

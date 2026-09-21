@@ -54,6 +54,7 @@ export class MemoryStore implements Store {
 
   async health(): Promise<{ kind: string; reachable: boolean }> { return { kind: this.kind, reachable: true }; }
   async countAdmins(): Promise<number> { return this.admins.size; }
+  async listAdminIds(): Promise<string[]> { return [...this.admins.keys()]; }
   async findAdminById(id: string): Promise<AdminRecord | undefined> { return this.admins.get(id); }
   async findAdminByEmail(email: string): Promise<AdminRecord | undefined> { return [...this.admins.values()].find((admin) => admin.email === email.toLowerCase()); }
   async createAdmin(input: { email: string; passwordHash: string; displayName: string }): Promise<AdminRecord> {
