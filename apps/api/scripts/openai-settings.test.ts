@@ -53,6 +53,11 @@ test('persists primary and backup configs with redacted views and provider-owned
   assert.equal(primary.apiKeyHint?.startsWith('prim'), true);
   assert.equal(primary.apiKeyHint?.endsWith('-key'), true);
   assert.match(primary.apiKeyHint ?? '', /\*/);
+  assert.equal(primary.apiKeyHint?.includes('primary-secret-key'), false);
+  assert.equal(backup.apiKeyHint?.length, 'backup-secret-key'.length);
+  assert.equal(backup.apiKeyHint?.slice(0, 4), 'back');
+  assert.equal(backup.apiKeyHint?.slice(-4), '-key');
+  assert.equal(backup.apiKeyHint?.includes('backup-secret-key'), false);
 
   const listed = await service.list({ adminId: admin.id, accountId: account.id });
   assert.deepEqual(listed.map((item) => item.role).sort(), ['backup', 'primary']);
@@ -65,6 +70,18 @@ test('persists primary and backup configs with redacted views and provider-owned
   const stored = await store.getCredentialRefSecret(admin.id, primary.id!);
   assert.ok(stored);
   assert.equal(stored?.secretCiphertext.includes('primary-secret-key'), false);
+});
+
+test('keeps connectivity probes ephemeral so a fresh process requires an explicit retest', async () => {
+  const { admin, account, service } = await fixture();
+  const saved = await service.save(input(admin.id, account.id, 'primary'));
+  const result = await service.test(input(admin.id, account.id, 'primary', { configId: saved.id, apiKey: undefined }));
+
+  assert.equal(result.ok, true);
+  const listed = await service.list({ adminId: admin.id, accountId: account.id });
+  const reloaded = listed.find((item) => item.role === 'primary');
+  assert.equal(reloaded?.id, saved.id);
+  assert.equal(reloaded?.lastConnectivity ?? 'unknown', 'unknown');
 });
 
 test('enforces role uniqueness and optimistic version checks', async () => {

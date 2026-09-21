@@ -57,9 +57,9 @@ npm --workspace apps/web run test:e2e:chrome:settings:openai
 
 - Agent 输出：`PRIMARY_V1_REPLY` → `PRIMARY_V2_REPLY` → `BACKUP_REPLY`。
 - 更新主配置后版本从 1 → 2，无需重启命中新 Provider。
-- PostgreSQL 重启复读后仍命中备用配置。
+- PostgreSQL 重启复读后仍命中备用配置；浏览器重载后主/备卡片回到“待测试”，主动测试主配置后正确回显“测试通过，已生效”。
 - 密钥不进入 URL、页面正文、输入框或 localStorage。
-- 已保存 API Key 以末四位 + `••••` 脱敏回显；聚焦编辑时不会把密文或明文写回页面。
+- 已保存 API Key 按真实长度以开头四位 + 中间 `*` + 结尾四位脱敏回显；聚焦编辑时不会把密文或明文写回页面。
 - `fallbackAudit=false`：当前 runtime store 没有可查询的 fallback 专用审计事件，主备切换行为本身已通过；该项保留为开放风险，不能宣称完整 fallback 审计闭环。
 
 ### 外部真实 provider 检查

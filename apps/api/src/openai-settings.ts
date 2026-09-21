@@ -261,8 +261,10 @@ function toView(ref: CredentialRefRecord): OpenAIConfigView {
 function maskApiKey(value: string): string {
   const key = value.trim();
   if (!key) return '';
+  if (key.length === 1) return '*';
+  if (key.length === 2) return key;
   const visibleEach = Math.min(4, Math.max(1, Math.floor((key.length - 1) / 2)));
-  const middleLength = Math.max(1, key.length - visibleEach * 2);
+  const middleLength = key.length - visibleEach * 2;
   return `${key.slice(0, visibleEach)}${'*'.repeat(middleLength)}${key.slice(-visibleEach)}`;
 }
 

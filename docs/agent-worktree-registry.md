@@ -86,6 +86,8 @@
 | `root` | `coupons-modal-polish` | `fix/coupons-modal-polish` | `F:\ChenHai\Project\XianYuAgent-coupons-modal-polish` | Codex `/root` | `2026-09-21 11:02:19 +08:00` | `READY_FOR_MERGE` | `-` | `-` | master 已恢复干净；独立 review 无阻塞问题；feature 提交 `5e7f19c` 待在 merge lock 内以 `--no-ff` 合入 |
 | `root` | `coupons-create-list-e2e` | `fix/coupons-create-list-e2e` | `F:\ChenHai\Project\XianYuAgent-coupons-create-list-e2e` | Codex `/root` | `2026-09-21 11:49:25 +08:00` | `CLEANED` | `cb128110e53c62266a3ed47f236d959c72aecc37` | `2026-09-21 12:25:40 +08:00` | 已在 merge lock 内以 `--no-ff` 合入 master；合并后 `npm run verify` 全部通过，包含真实 UI 创建→列表回读→管理→刷新 E2E；Git worktree 元数据与分支已清理，目录因保留 node_modules/非 Git 内容未删除 |
 
+| `root/settings_persistence_e2e` | `settings-persistence-e2e` | `codex/settings-persistence-e2e` | `F:\ChenHai\Project\XianYuAgent-settings-persistence` | Codex `/root` delegated agent | `2026-09-21 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 补强 OpenAI 设置保存后 Agent 实际消费、PostgreSQL 重启复读与 UI 主动测试后状态回显；新增 API Key 等长首尾脱敏回显；不改 master。 |
+
 ## 登记维护规则
 
 1. 创建 worktree 后立即新增一行，至少填完 `agent_id`、`slice_id`、`branch`、`worktree`、`owner`、`created_at` 和 `REGISTERED`。

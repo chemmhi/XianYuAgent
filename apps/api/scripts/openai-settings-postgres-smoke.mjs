@@ -90,8 +90,12 @@ try {
   assert.equal(listed.response.status, 200);
   assert.equal(listed.body.data.items.length, 2);
   assert.equal(JSON.stringify(listed.body).includes('sk-pg-'), false);
+  for (const item of listed.body.data.items) {
+    assert.equal(item.apiKeyHint.length, item.role === 'primary' ? 'sk-pg-primary-secret-123456'.length : 'sk-pg-backup-secret-123456'.length);
+    assert.match(item.apiKeyHint, /^.{4}\*+.{4}$/);
+  }
 
-  console.log(JSON.stringify({ database: 'postgres', accountId, configIds: listed.body.data.items.map((item) => item.id), roles: listed.body.data.items.map((item) => item.role).sort(), providerModels: models.body.data.models, ciphertextStored: true, plaintextAbsent: true }, null, 2));
+  console.log(JSON.stringify({ database: 'postgres', accountId, configIds: listed.body.data.items.map((item) => item.id), roles: listed.body.data.items.map((item) => item.role).sort(), providerModels: models.body.data.models, ciphertextStored: true, plaintextAbsent: true, apiKeyHintShapeValid: true }, null, 2));
 } finally {
   await pool.end();
   await runtime.close();
