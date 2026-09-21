@@ -15,11 +15,13 @@
 | 页面/组件 | Search | Select | Input | TextArea | Button | Placeholder | 状态 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Auth (`AdminLoginForm` / `AdminBootstrapForm` / `AuthGate`) | 不适用 | 不适用 | 本切片迁移 | 不适用 | 本切片迁移 | 不适用 | 已改，待与 common-controls 组件提交合并 |
-| Accounts (`AccountToolbar`) | common-controls worktree 已迁移 | 已由 `SelectField` 承载 | 不适用 | 不适用 | 工具栏主操作已迁移 | 表格状态保持专用 Badge | 已改/已审计 |
-| Products (`ProductToolbar` / `ProductTable`) | 工具栏已迁移 | 已由 `SelectField` 承载 | `ProductTable` 空值不写入输入控件 | 不适用 | 工具栏主操作已迁移 | 价格、关联卡券、AI 提示词空值本切片迁移 | 已改/待视觉复核 |
+| Accounts (`AccountToolbar` / `PasswordLoginForm` / `CookieLoginForm`) | common-controls worktree 已迁移 | 已由 `SelectField` 承载 | 密码登录字段已迁移 | Cookie 登录文本框已迁移 | 工具栏与登录提交已迁移 | 表格状态保持专用 Badge | 已改/已审计 |
+| Products (`ProductToolbar` / `ProductTable` / `ProductBasicForm`) | 工具栏已迁移 | 已由 `SelectField` 承载 | 基础表单字段已迁移；`ProductTable` 空值不写入输入控件 | 基础表单商品描述已迁移 | 工具栏主操作已迁移 | 价格、关联卡券、AI 提示词空值本切片迁移 | 已改/待视觉复核 |
 | Settings (`SettingsPage` / `OpenAISettingsPanel` / `AutoReplyAgentPanel`) | 不适用 | 已由 `SelectField` 承载 | API Key、Provider、Alias、URL、数值字段本切片迁移 | Agent Prompt 字段本切片迁移 | 状态、凭证、模型测试/保存、Agent 操作本切片迁移 | 状态卡/审计文案不是空值格，暂不替换 | 已改，待视觉复核 |
-| Coupons (`CouponToolbar`) | common-controls worktree 已迁移 | 已由 `SelectField` 承载 | 创建/编辑表单另按字段语义复核 | 文本型卡券字段另按表单语义复核 | 工具栏主操作已迁移 | 表格预览/关联价格保留专用文案，避免误标空值 | 已改/已审计 |
-| Workspace (`WorkspacePage`) | 会话搜索已迁移 | 不适用 | 不适用 | 在线 Run composer 仍为页面专用 textarea | 左栏主操作已迁移；消息折叠/会话操作保持原生 | 空会话状态保持 `WorkspaceState` | 已改/已审计 |
+| Coupons (`CouponToolbar` / `CouponCreateModal` / `CouponDrawer`) | 工具栏与关联商品搜索已迁移 | 创建/编辑与工具栏已由 `SelectField` 承载 | 创建表单、抽屉绑定商品字段已迁移 | 创建表单与抽屉导入库存/备注字段已迁移 | 工具栏、创建、抽屉操作已迁移 | 表格预览/关联价格保留专用文案，避免误标空值 | 已改/已审计 |
+| Orders (`OrderFilters`) | 订单筛选已迁移 | 已由 `SelectField` 承载 | 不适用 | 不适用 | 筛选区无共享按钮改动 | 订单状态文案保持领域语义 | 已改/待视觉复核 |
+| Agent Dynamics (`AgentDynamicsViews` / `AgentDynamicsDropdown`) | 运行记录搜索已迁移 | 下拉筛选已由 `SelectField` 承载 | 不适用 | 不适用 | 页面操作按钮保持领域语义 | 空状态保持领域文案 | 已改/待视觉复核 |
+| Workspace (`WorkspacePage`) | 会话搜索已迁移 | 不适用 | 不适用 | **在线 Run composer 仍为页面专用 textarea，明确豁免共享替换** | 左栏主操作已迁移；消息折叠/会话操作保持原生 | 空会话状态保持 `WorkspaceState` | 已改/已审计 |
 
 ## 明确排除项
 
@@ -31,10 +33,15 @@
 ## 本切片改动
 
 - `AuthGate`、`AdminLoginForm`、`AdminBootstrapForm`：接入 `Button` 与 `InputField`，保留原有认证提交契约。
+- `PasswordLoginForm`、`CookieLoginForm`：接入 `InputField` / `TextAreaField` 与 `Button`，保留账号登录方式切换、提交状态和错误边界。
 - `SettingsPage`：凭证状态动作、凭证编辑器和 Reference panel 的通用按钮/短文本字段接入 shared controls。
 - `OpenAISettingsPanel`：Provider、Base URL、API Key 接入 `InputField`；测试/保存/重试接入 `Button`。
 - `AutoReplyAgentPanel`：Prompt 接入 `TextAreaField`，数值配置接入 `InputField`，重试/保存接入 `Button`。
+- `ProductBasicForm`：商品账号、标题、分类、价格和描述字段接入 `InputField` / `TextAreaField`，保留校验提示和保存契约。
 - `ProductTable`：价格、关联卡券、AI 提示词的明确空值接入 `PlaceholderCell`；不改真实商品标题、价格、时间和排序逻辑。
+- `CouponCreateModal`、`CouponDrawer`：创建/编辑、导入库存、绑定商品和受控正文预览字段接入 shared controls；保留卡券类型分支、权限提示和危险操作确认。
+- `OrderFilters`、`AgentDynamicsViews` / `AgentDynamicsDropdown`：筛选搜索与原生选择统一接入 shared controls；不改分页、状态机和领域文案。
+- `WorkspacePage`：仅迁移会话搜索和左栏主操作；在线 Run composer 继续保留页面特调 textarea，作为明确豁免项。
 
 ## 合并前检查
 
@@ -45,10 +52,11 @@
 - [ ] `npm run build --workspace apps/web`。
 - [ ] `git diff --check`。
 - [ ] 在 `1440×900` 与 `390×844` 复核 Auth、Settings、Products 空值格；common-controls 视觉证据继续使用 `apps/web/scripts/common-controls-visual-diff.mjs`。
+- [ ] 补充 Accounts 登录表单、Coupons 创建/抽屉、Orders 筛选和 Agent Dynamics 筛选的固定 viewport 复核；记录组件 token 与整页像素差异，不将非零像素差异自动判定为通过。
 
 ## 剩余审计清单
 
-1. Accounts/Products/Coupons/Workspace 的当前迁移改动仍位于 `codex/common-controls` worktree，合入前需确认共享组件版本一致。
-2. Auth/Settings 页面尚未完成固定 viewport 截图与视觉 diff；当前只完成结构化迁移和类型/测试准备。
-3. Orders、Dashboard、Messages 的领域按钮和空值格不在本次页面范围；其中 Messages composer 属于明确禁改项。
+1. Accounts/Products/Coupons/Orders/Agent Dynamics/Workspace 的当前迁移改动仍位于 `codex/common-controls` worktree，合入前需确认共享组件版本一致。
+2. Auth/Settings/Accounts/Products/Coupons/Orders/Agent Dynamics 页面尚未全部完成固定 viewport 截图与视觉 diff；当前只完成结构化迁移和类型/测试准备，整页像素差异仍需人工复核。
+3. Dashboard、Messages 的领域按钮和空值格不在本次页面范围；其中 Messages 在线聊天 composer 与 Workspace Run composer 都属于明确禁改项。
 4. `SelectField` 的全局使用约束继续由 `apps/web/src/shared/ui/select-usage.test.ts` 维护；本切片不重复实现 native select。
