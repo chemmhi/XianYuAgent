@@ -404,6 +404,20 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     return { statusCode: 200, body: success(ctx, await dashboard.getSnapshot(authContext.admin.id)).body };
   }
 
+  if (ctx.path === '/api/v1/auto-reply/activity/summary' && ctx.method === 'GET') {
+    const summary = await runtime.autoReplyActivity.summary({ adminId: authContext.admin.id, accountId: optionalString(ctx.query.accountId), from: optionalString(ctx.query.from), to: optionalString(ctx.query.to) });
+    return { statusCode: 200, body: success(ctx, summary).body };
+  }
+  if (ctx.path === '/api/v1/auto-reply/runs' && ctx.method === 'GET') {
+    const runs = await runtime.autoReplyActivity.list({ adminId: authContext.admin.id, query: parseAutoReplyRunListQuery(ctx.query) });
+    return { statusCode: 200, body: success(ctx, runs).body };
+  }
+  const autoReplyRunDetailMatch = ctx.path.match(/^\/api\/v1\/auto-reply\/runs\/([^/]+)$/);
+  if (autoReplyRunDetailMatch && ctx.method === 'GET') {
+    const detail = await runtime.autoReplyActivity.detail({ adminId: authContext.admin.id, runId: decodeURIComponent(autoReplyRunDetailMatch[1]) });
+    return { statusCode: 200, body: success(ctx, detail).body };
+  }
+
   if (ctx.path === '/api/v1/settings/agent' && ctx.method === 'GET') {
     const accountId = String(ctx.query.accountId ?? '').trim();
     if (!accountId) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
@@ -1098,6 +1112,23 @@ function parseMessageListQuery(query: Record<string, string>): import('./domain.
   const beforeCursor = query.beforeCursor === undefined ? undefined : query.beforeCursor;
   const limit = query.limit === undefined ? undefined : Number(query.limit);
   return { cursor: cursor === undefined || Number.isNaN(cursor) ? cursor : Math.trunc(cursor), beforeCursor, limit: limit === undefined || Number.isNaN(limit) ? limit : Math.trunc(limit) };
+}
+
+function parseAutoReplyRunListQuery(query: Record<string, string>): import('./domain.js').AutoReplyRunListQuery {
+  const page = query.page === undefined ? undefined : Number(query.page);
+  const pageSize = query.pageSize === undefined ? undefined : Number(query.pageSize);
+  return {
+    accountId: optionalString(query.accountId),
+    from: optionalString(query.from),
+    to: optionalString(query.to),
+    status: optionalString(query.status) as import('./domain.js').AutoReplyRunListQuery['status'],
+    decision: optionalString(query.decision) as import('./domain.js').AutoReplyRunListQuery['decision'],
+    processing: query.processing === 'true',
+    stage: optionalString(query.stage) as import('./domain.js').AutoReplyRunListQuery['stage'],
+    keyword: optionalString(query.keyword),
+    page: page === undefined || Number.isNaN(page) ? page : Math.trunc(page),
+    pageSize: pageSize === undefined || Number.isNaN(pageSize) ? pageSize : Math.trunc(pageSize),
+  };
 }
 
 async function handleConversationUpgrade(runtime: AppRuntime, wsServer: WebSocketServer, request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
