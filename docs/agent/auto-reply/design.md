@@ -257,6 +257,16 @@ skipped | handoff | failed | send_unknown | partial_send
 
 不保存 Prompt 原文、Cookie、Token、完整敏感正文或模型 Chain-of-Thought。
 
+### 8.1 Agent 动态活动查询
+
+运行主表和状态事件表的字段、索引、查询接口、页面映射和验收门禁统一见 [`activity.md`](./activity.md)。这里补充状态机与活动页的关系：
+
+- `auto_reply_runs.status` 是 run 当前状态；`decision` 是最终业务决定；二者不能互换；
+- 创建 run 写 `run.created`，调用方只在状态迁移时传 `patch.status` 并写入 `run.<status>`；metadata-only 更新不追加活动事件；
+- 活动摘要的 `byStatus/byStage` 基于 run 当前快照，不是事件表完整迁移漏斗；完整阶段吞吐必须另行聚合 `auto_reply_run_events`；
+- 活动页详情只能展示脱敏摘要、消息/商品引用和可见正文，不能从事件 payload 旁路获取 Prompt、Token、Cookie 或 Chain-of-Thought；
+- PostgreSQL run mutation 与事件写入当前存在独立事务窗口，发布前必须使用同事务或补偿重建方案，并在真实数据库回归中验证事件缺失恢复。
+
 ## 9. 配置
 
 配置属于自动回复 Agent 自己的配置命名空间。当前使用环境变量解析器，后续替换为 Settings resolver，但不改变 Agent、工具或发送器契约。

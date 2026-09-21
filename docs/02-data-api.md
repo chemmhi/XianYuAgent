@@ -357,6 +357,20 @@ Workspace 的 `Run/Step` 结果可以引用商品、卡券、订单，但只能�
 
 API Key 配置不新增第二套凭证表；`CredentialStore` 继续作为唯一数据 owner。当前统一采用 `scope=account`：API Key 必须绑定 `accountId`，沿用 `credential_refs(accountId, kind, purpose)` 唯一约束和账号 scope queryKey；若未来需要全局 provider key，另立 schema/权限切片，不在 `S4-VS7A` 隐含扩展。Settings 只提供页面入口和脱敏配置编辑，Workspace/Chat 只能消费 capability/ref，不得读取 CredentialValue。
 
+### 13.4 Agent 动态 / 自动回复运行活动
+
+Agent 动态只读查询契约已冻结于 [`docs/agent/auto-reply/activity.md`](./agent/auto-reply/activity.md)。后端 raw DTO 与高保真页面 VM 必须通过前端 adapter 分层，不能让页面直接依赖数据库字段或原始枚举。
+
+| 切片 | API / 数据 | 核心状态与账号边界 | 完成门禁 |
+| --- | --- | --- | --- |
+| `S4-VS8A` Agent 动态摘要 | `GET /api/v1/auto-reply/activity/summary`；查询 `accountId?`、`from?`、`to?`；返回 `AutoReplyActivitySummary` | 默认最近 24 小时，最大 31 天；省略 `accountId` 时聚合管理员 active scope 可见账号；`byStage` 是每个 run 的当前阶段分布，不是事件漏斗 | PostgreSQL 真实摘要、health 最新快照、403/422、空数据/刷新失败状态 |
+| `S4-VS8B` Agent 运行记录 | `GET /api/v1/auto-reply/runs`；支持 `accountId/from/to/status/stage/keyword/page/pageSize`；返回 `items/page/pageSize/total/totalPages` | `status` / `stage` 只接受后端 raw enum；页面的 `replied`、`processing` 和五段 stage 由 adapter 派生，不能原样传给后端 | 真实 run 落库、分页/过滤、重复 push 幂等、账号越权、Memory/PG 口径一致 |
+| `S4-VS8C` Agent 运行详情 | `GET /api/v1/auto-reply/runs/{runId}`；返回 run、events、conversation、inboundMessage、outboundMessages、product | 详情以 `runId` 所属 admin 与 active account scope 授权；客户端 `accountId` 不是授权依据；越权/不存在统一 404 | 事件 sequence、脱敏 payload、消息/商品引用、详情抽屉和消息页跳转 |
+
+自动回复运行与活动事件使用 `messages.auto_reply_runs` / `messages.auto_reply_run_events`，不复用 Workspace `runs/steps`。创建 run 写入 `run.created`；只有带 `patch.status` 的状态迁移追加 `run.<status>` 事件，metadata-only 更新不写事件。Postgres 当前 run mutation 与事件追加不是同一事务，发布门禁必须补齐同事务或可重试补偿机制，详见活动契约 §3.3。
+
+页面账号上下文必须处理 loading、error 和未选择状态；不能在 `accountId=undefined` 时显示固定“当前账号”并误报为单账号数据。真实完成证据必须覆盖“实时 Agent 触发 → run/event 表 → 三条 API → 页面列表/详情可见”以及 `1440×900` / `390×844` 视觉截图。
+
 阶段 2 通过后，允许进入阶段 3 前端信息架构与 API 映射设计；仍不得提前创建真实后端实现。
 # Agent 动态 API 增量契约（2026-09-21）
 

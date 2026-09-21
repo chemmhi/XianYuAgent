@@ -10,6 +10,7 @@
 ## 文档索引
 
 - [`design.md`](./design.md)：自动回复 Agent 的边界、工作流、工具、状态机、配置和测试契约。
+- [`activity.md`](./activity.md)：Agent 动态 Tab 的运行、事件落库、查询 API、前端 adapter 和真实端到端验收契约。
 
 ## 核心结论
 
@@ -20,6 +21,8 @@
 5. 开发和测试默认使用 `simulate`；`live` 发送继续受环境变量数组白名单约束。
 6. 同一条买家消息只产生一个逻辑回复；长回复可以拆成多段物理消息顺序发送。
 7. Agent 可以在有业务相关性的情况下主动推荐店铺内其他商品，但必须基于店铺商品工具返回的事实。
+
+8. Agent 动态只读消费 `messages.auto_reply_runs` / `messages.auto_reply_run_events`，不复用 Workspace Run/Step；页面必须经过 raw DTO → canonical VM adapter，并以真实数据库回读作为完成证据。
 
 ## 非目标
 
