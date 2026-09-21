@@ -214,7 +214,7 @@ export class AutoReplyService {
       await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'replied', intent: classification.intent, senderOutcome: sent.outcome, outboundMessageId: outbound.message.messageId, contextDigest, replyDigest });
       return { run: updated ?? run, inboundMessage, outboundMessage: await this.findMessage(input.adminId, input.conversationId, outbound.message.messageId), classification, context };
     } catch (error) {
-      const failureCode = error instanceof Error ? error.message : 'AUTO_REPLY_FAILED';
+      const failureCode = toFailureCode(error);
       const updated = await this.store.updateAutoReplyRun(run.id, { status: 'failed', decision: 'failed', failureCode });
       await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'failed', failureCode });
       return { run: updated ?? run, inboundMessage };
@@ -238,11 +238,18 @@ export class AutoReplyService {
 
   private async findOrders(adminId: string, conversation: ConversationRecord): Promise<OrderRecord[]> {
     // The order list contract intentionally does not search by buyer id. Load
-    // the scoped account page, then retain only orders owned by this buyer or
-    // explicitly linked to this conversation. Item-only matches belong to
-    // other buyers and must never block or influence an AI reply.
-    const result = await this.store.listOrders(adminId, { accountId: conversation.accountId, page: 1, pageSize: 100 });
-    return result.items.filter((order) => order.buyerId === conversation.buyerRef || order.conversationId === conversation.id);
+    // every page in the scoped account, then retain only orders owned by this
+    // buyer or explicitly linked to this conversation. Item-only matches
+    // belong to other buyers and must never block or influence an AI reply.
+    const items: OrderRecord[] = [];
+    const pageSize = 100;
+    for (let page = 1; page <= 1_000; page += 1) {
+      const result = await this.store.listOrders(adminId, { accountId: conversation.accountId, page, pageSize });
+      items.push(...result.items);
+      if (page >= result.totalPages || result.items.length === 0) break;
+      if (page === 1_000) throw new Error('ORDER_CONTEXT_INCOMPLETE');
+    }
+    return items.filter((order) => order.buyerId === conversation.buyerRef || order.conversationId === conversation.id);
   }
 
   private async findMessage(adminId: string, conversationId: string, messageId: string): Promise<MessageRecord | undefined> {
@@ -264,6 +271,13 @@ function normalizeReply(value: string | undefined, maxLength: number): string | 
 
 function containsSensitiveInstruction(value: string): boolean {
   return /(cookie|token|api\s*key|password|密码|验证码|系统提示|system\s*prompt)/i.test(value);
+}
+
+function toFailureCode(error: unknown): string {
+  const candidate = error as { code?: unknown } | null;
+  if (typeof candidate?.code === 'string' && /^[A-Z0-9_:-]{1,64}$/.test(candidate.code)) return candidate.code;
+  if (error instanceof Error && /^[A-Z0-9_:-]{1,64}$/.test(error.message)) return error.message;
+  return 'AUTO_REPLY_FAILED';
 }
 
 function normalizeBuyerName(value: string | undefined): string | undefined {

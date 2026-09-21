@@ -2,6 +2,7 @@
 
 ## 2026-09-21 增量修复
 
+- 自动回复模型接入：复用 Workspace 的 `API_KEY/BASE_URL/MODEL/MODEL_TIMEOUT_MS` 环境变量和同一个 OpenAI-compatible `ModelClient`；配置完整时走 `ModelAutoReplyGenerator`，缺少配置时保留模板生成，Provider 失败安全落库为失败且不创建 outbound；新增模型上下文裁剪、成功装配和 503 失败回归测试。
 - 在线聊天 CSRF：API 重启后旧页面的 token 失效时，前端刷新 `/api/v1/auth/session` 后仅重试原 mutation 一次并保留 `Idempotency-Key`；Web 38 个测试文件 / 117 个用例、类型检查、构建通过。
 - 自动回复白名单：真实 push 缺少 `senderName` 且本地会话尚无昵称时，先按 `externalConversationRef` 补全闲鱼买家身份并持久化，再进入白名单门禁；新增回归测试覆盖 allowlist 通过与 `auto_reply_runs.status=persisted`。真实买家 push 仍待外部触发，不能用历史同步替代。
 - 历史/push 竞态：若页面历史同步先按 external ref 落库，后续真实 push 即使消息已存在也会继续进入幂等自动回复处理；新增回归覆盖 `history import → same push → persisted` 与重复 push 单次出站。
@@ -20,6 +21,7 @@
 
 ## 当前证据
 - `2026-09-20 自动回复链路切片`：按设计文档收敛为“入站规范化/事实先落库 → 幂等回放 → 风险优先意图 → 商品/订单/会话分层上下文 → 可回答性与策略门禁 → 受事实约束的生成 → 输出安全校验 → Noop 模拟投递 → AI 出站消息与 `auto_reply_runs` 落库 → 脱敏审计回读”；`npm --workspace apps/api run test:auto-reply:e2e`、`npm --workspace apps/api run test:auto-reply:postgres`、`npm run db:migrate`、`npm run typecheck`、`npm test`、`npm run build`、`npm run compose:config`、`git diff --check` 均通过。真实闲鱼发送调用次数为 0；本切片仅验证 dry-run，不关闭在线聊天发送/附件/撤回、真实模型 Provider、Outbox Worker 或发布级回滚风险。
+- `2026-09-21 自动回复模型 Provider 接入`：`npm --workspace apps/api run test:auto-reply:unit` 16/16、`npm --workspace apps/api run test:auto-reply:e2e`、`npm --workspace apps/api run test:auto-reply`、`npm --workspace apps/api run build`、`npm run typecheck:api` 通过；受控 fetch 证明模型请求使用共享环境配置并将 AI 回复落库，503 仅落失败 run 且不产生 outbound。真实 Provider、live 发送、Outbox/unknown 恢复和离线评测仍未完成。
 - `2026-09-19 S4-VS2 商品同步入口修复`：商品页从普通 `/products` 入口加载管理员可见账号，默认选择可用账号并将 `accountId` 写回列表查询与同步请求；Chrome/CDP fixture 验证 29 件同步商品可落库，列表总数由 1 增至 30。
 
 - `SellerAgent/npm test`：已通过，`mock API contract flow passed`；

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ExternalAutoReplySender, RuleBasedIntentClassifier, TemplateAutoReplyGenerator, type AutoReplyContext } from '../src/auto-reply.js';
+import { ModelAutoReplyGenerator } from '../src/auto-reply-model.js';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { XianyuImClient, parsePushPayload } from '../src/xianyu-im.js';
@@ -29,6 +30,92 @@ test('template generator only uses redacted product fields', async () => {
   const context = { conversation: { id: 'c1', accountId: 'a1', buyerRef: 'b1', buyerDisplayName: '买家', unreadCount: 0, handlingMode: 'ai', version: 1, createdAt: '2026-09-20T00:00:00.000Z', updatedAt: '2026-09-20T00:00:00.000Z' }, inboundMessage: { id: 'm1', conversationId: 'c1', accountId: 'a1', direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '有货吗', redactionState: 'visible', status: 'created', readStatus: 0, riskFlags: [], handlingMode: 'ai', createdAt: '2026-09-20T00:00:00.000Z' }, recentMessages: [], product: { id: 'p1', accountId: 'a1', title: '资料包', defaultReplyTemplate: '你好，{{buyerName}}，{{productTitle}}可拍。' }, orders: [] } as unknown as AutoReplyContext;
   const reply = await generator.generate({ context, classification: { intent: 'availability', confidence: 0.9, decision: 'replied', riskFlags: [] } });
   assert.equal(reply, '你好，买家，资料包可拍。');
+});
+
+test('model generator sends bounded structured context to the shared model client', async () => {
+  let request: { messages: Array<{ role: string; content: string }> } | undefined;
+  const generator = new ModelAutoReplyGenerator({
+    complete: async (input) => {
+      request = input;
+      return { content: '可以的，我来帮你确认。', model: 'test-model' };
+    },
+  });
+  const context = {
+    conversation: { buyerDisplayName: '买家', itemTitle: '资料包', handlingMode: 'ai' },
+    inboundMessage: { bodyType: 'text', bodyText: '请问这个是什么东西？', createdAt: '2026-09-20T00:00:00.000Z' },
+    recentMessages: Array.from({ length: 20 }, (_, index) => ({ direction: 'inbound', senderRole: 'buyer', bodyText: `消息-${index}`, createdAt: `2026-09-20T00:00:${String(index).padStart(2, '0')}.000Z` })),
+    product: { title: '资料包', description: 'x'.repeat(5_000), priceMinor: 1_999, defaultReplyTemplate: '可拍', aiPrompt: '只作为商家补充说明' },
+    orders: Array.from({ length: 20 }, (_, index) => ({ orderNo: `ORDER-${index}`, itemTitle: '资料包', paymentStatus: 'unpaid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none' })),
+  } as unknown as AutoReplyContext;
+
+  const reply = await generator.generate({ context, classification: { intent: 'general', confidence: 0.9, decision: 'replied', riskFlags: [] } });
+  assert.equal(reply, '可以的，我来帮你确认。');
+  assert.equal(request?.messages[0]?.role, 'system');
+  assert.equal(request?.messages[1]?.role, 'user');
+  const prompt = request?.messages[1]?.content ?? '';
+  const facts = JSON.parse(prompt.slice(prompt.indexOf('{'), prompt.lastIndexOf('</facts>')).trim()) as { recentMessages: unknown[]; product: { description: string }; orders: unknown[] };
+  assert.equal(facts.recentMessages.length, 12);
+  assert.ok(facts.product.description.length <= 1_200);
+  assert.equal(facts.orders.length, 10);
+});
+
+test('configured model provider generates the persisted auto-reply', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; body: { model: string; messages: Array<{ role: string; content: string }> } }> = [];
+  globalThis.fetch = (async (input, init) => {
+    calls.push({ url: String(input), body: JSON.parse(String(init?.body)) as typeof calls[number]['body'] });
+    return new Response(JSON.stringify({ model: 'test-model', choices: [{ message: { content: 'AI 生成的准确回复' } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+
+  const runtime = createApp(loadConfig({
+    HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
+    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'test-model', MODEL_TIMEOUT_MS: '1000', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["Allowlisted Buyer"]',
+  }));
+  const admin = await runtime.store.createAdmin({ email: 'model-provider@example.com', passwordHash: 'hash', displayName: 'Model Provider' });
+  const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'model-provider-seller' });
+  const product = await runtime.store.createProduct({ adminId: admin.id, accountId: account.id, externalProductRef: 'model-item-1', title: '资料包', description: '数字资料', priceMinor: 1_999, status: 'published' });
+  const conversation = await runtime.store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'buyer-1', buyerDisplayName: 'Allowlisted Buyer', itemRef: product.externalProductRef, itemTitle: product.title, externalConversationRef: 'model-conversation-1' });
+  await runtime.listen();
+
+  try {
+    const result = await runtime.xianyuIm.handleExternalEvent(admin.id, {
+      accountId: account.id, externalConversationRef: conversation.externalConversationRef, externalMessageRef: 'model-message-1.PNM', senderRef: 'buyer-1', senderName: 'Allowlisted Buyer', direction: 'inbound', bodyType: 'text', bodyText: '请问这个是什么东西？', occurredAt: new Date().toISOString(),
+    });
+    assert.equal(result.autoReply?.run.status, 'persisted');
+    assert.equal(result.autoReply?.outboundMessage?.bodyText, 'AI 生成的准确回复');
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.url, 'https://model.example/v1/chat/completions');
+    assert.equal(calls[0]?.body.model, 'test-model');
+    assert.equal(calls[0]?.body.messages[0]?.role, 'system');
+  } finally {
+    await runtime.close();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('model provider failure fails the run without creating an outbound message', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response('{"error":"unavailable"}', { status: 503 })) as typeof fetch;
+  const runtime = createApp(loadConfig({
+    HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
+    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'test-model', MODEL_TIMEOUT_MS: '1000', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["Allowlisted Buyer"]',
+  }));
+  const admin = await runtime.store.createAdmin({ email: 'model-failure@example.com', passwordHash: 'hash', displayName: 'Model Failure' });
+  const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'model-failure-seller' });
+  const conversation = await runtime.store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'buyer-1', buyerDisplayName: 'Allowlisted Buyer', externalConversationRef: 'model-failure-conversation' });
+  await runtime.listen();
+  try {
+    const result = await runtime.xianyuIm.handleExternalEvent(admin.id, {
+      accountId: account.id, externalConversationRef: conversation.externalConversationRef, externalMessageRef: 'model-failure-message-1.PNM', senderRef: 'buyer-1', senderName: 'Allowlisted Buyer', direction: 'inbound', bodyType: 'text', bodyText: '你好', occurredAt: new Date().toISOString(),
+    });
+    assert.equal(result.autoReply?.run.status, 'failed');
+    assert.equal(result.autoReply?.run.failureCode, 'MODEL_HTTP_ERROR');
+    const messages = await runtime.messages.listMessages(admin.id, conversation.id, { limit: 20 });
+    assert.equal(messages.items.filter((message) => message.direction === 'outbound').length, 0);
+  } finally {
+    await runtime.close();
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('external sender simulates by default and delegates only in live mode', async () => {
@@ -292,6 +379,12 @@ test('live auto-reply requires an explicit buyer allowlist', () => {
   assert.deepEqual(config.autoReplyTestBuyerNames, ['一只橘喵喵亮晶晶', '另一位买家']);
   const legacy = loadConfig({ AUTO_REPLY_SEND_MODE: 'live', AUTO_REPLY_TEST_BUYER_NAMES: '一只橘喵喵亮晶晶, 另一位买家' });
   assert.deepEqual(legacy.autoReplyTestBuyerNames, ['一只橘喵喵亮晶晶', '另一位买家']);
+});
+
+test('auto-reply model can be disabled without disabling Workspace model configuration', () => {
+  const config = loadConfig({ API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'test-model', AUTO_REPLY_MODEL_ENABLED: 'false' });
+  assert.equal(config.agentRuntime, 'pi');
+  assert.equal(config.autoReplyModelEnabled, false);
 });
 
 test('app startup scans connected accounts without an auth page request', async () => {

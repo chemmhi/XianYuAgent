@@ -17,10 +17,11 @@ import { MessageRealtimeHub, MessageService } from './messages.js';
 import { RedisConversationEventBridge } from './messages-realtime.js';
 import { decodeMessageHistoryCursor, encodeMessageHistoryCursor } from './message-history-cursor.js';
 import { InProcessAgentRuntime, isTerminalRunStatus, WorkspaceService, type WorkspaceRuntime } from './workspace.js';
-import { OpenAICompatibleModelClient, PiRuntimeAdapter } from './pi-runtime.js';
+import { OpenAICompatibleModelClient, PiRuntimeAdapter, type ModelClient } from './pi-runtime.js';
 import { ApiKeyCredentialService } from './credential-store.js';
 import { DashboardService } from './dashboard.js';
 import { AutoReplyService, ExternalAutoReplySender } from './auto-reply.js';
+import { ModelAutoReplyGenerator } from './auto-reply-model.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -52,6 +53,8 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     throw new Error('AUTO_REPLY_LIVE_REQUIRES_BUYER_ALLOWLIST');
   }
   const store = createStore(config);
+  const modelClient = createConfiguredModelClient(config);
+  const autoReplyModelClient = config.autoReplyModelEnabled === false ? undefined : modelClient;
   const auth = new AuthService(store, config);
   const accounts = new AccountService(store, async (input) => {
     const auditId = createId();
@@ -97,6 +100,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
   }, {
     sendMode: config.autoReplySendMode ?? 'simulate',
     testBuyerNames: config.autoReplyTestBuyerNames,
+    generator: autoReplyModelClient ? new ModelAutoReplyGenerator(autoReplyModelClient) : undefined,
     sender: new ExternalAutoReplySender(async (input) => {
       if (!xianyuIm) throw new Error('XIANYU_IM_NOT_READY');
       return xianyuIm.sendExternalText(input.adminId, input.accountId, input.conversation.id, input.text, input.requestId, input.traceId);
@@ -164,7 +168,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
 
   const wsServer = new WebSocketServer({ noServer: true });
   const workspaceRuntime: WorkspaceRuntime = config.agentRuntime === 'pi'
-    ? createPiWorkspaceRuntime(config, store)
+    ? createPiWorkspaceRuntime(config, store, modelClient)
     : new InProcessAgentRuntime(store);
   const workspace = new WorkspaceService(store, workspaceRuntime, async (input) => {
     const auditId = createId();
@@ -253,9 +257,15 @@ function listenerErrorCode(error: unknown): string {
   if (error instanceof Error && error.name) return error.name;
   return 'UNKNOWN_ERROR';
 }
-function createPiWorkspaceRuntime(config: AppConfig, store: Store): WorkspaceRuntime {
+function createConfiguredModelClient(config: AppConfig): ModelClient | undefined {
+  if (!config.modelApiKey || !config.modelBaseUrl || !config.modelName) return undefined;
+  return new OpenAICompatibleModelClient({ apiKey: config.modelApiKey, baseUrl: config.modelBaseUrl, model: config.modelName, timeoutMs: config.modelTimeoutMs });
+}
+
+function createPiWorkspaceRuntime(config: AppConfig, store: Store, sharedModelClient?: ModelClient): WorkspaceRuntime {
   if (!config.modelApiKey || !config.modelBaseUrl || !config.modelName) throw new Error('PI_RUNTIME_CONFIG_MISSING');
-  const modelClient = new OpenAICompatibleModelClient({ apiKey: config.modelApiKey, baseUrl: config.modelBaseUrl, model: config.modelName, timeoutMs: config.modelTimeoutMs });
+  const modelClient = sharedModelClient ?? createConfiguredModelClient(config);
+  if (!modelClient) throw new Error('PI_RUNTIME_CONFIG_MISSING');
   return new PiRuntimeAdapter(store, modelClient, {
     model: config.modelName,
     redactSecrets: [config.modelApiKey],

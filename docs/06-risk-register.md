@@ -161,13 +161,13 @@
 
 ### 2026-09-20 自动回复链路风险复核
 
-- 新增 `S5-RISK-029`：自动回复目前为 dry-run / Noop 投递，未接入真实模型 Provider、Outbox Worker、超时/unknown 恢复和人工接管 API；不影响本轮监听到落库的受控验证，但不能把 `auto_reply_runs.status=persisted` 解释为买家已收到真实消息。状态：开放，承接 `S4-VS5B/C` 与发布级执行门禁。
-- 新增 `S5-RISK-030`：当前意图识别与模板生成是可解释的规则首片，尚未覆盖多轮指代消解、商品事实缺失时的澄清策略、真实模型评测和离线回放集。状态：开放；在接入模型前补离线评测集、置信度阈值、事实引用和人工抽检。
+- `S5-RISK-029`：自动回复已接入与 Workspace 共享的 OpenAI-compatible Provider，但仍为 dry-run / Noop 投递，未完成 Outbox Worker、超时/unknown 恢复和人工接管 API；不能把 `auto_reply_runs.status=persisted` 解释为买家已收到真实消息。状态：部分缓解，继续承接 `S4-VS5B/C` 与发布级执行门禁。
+- `S5-RISK-030`：模型生成器已接入，但尚未覆盖多轮指代消解、商品事实缺失时的澄清策略、真实模型评测和离线回放集。状态：开放；后续补离线评测集、置信度阈值、事实引用和人工抽检。
 - 已关闭本轮专项风险：入站重复消息导致重复自动回复、跨账号商品查询、敏感内容进入运行记录、模拟发送误触发闲鱼发送。证据为 `auto_reply_runs` 唯一约束、账号范围商品/订单查询、digest-only 审计以及 E2E 的真实发送调用数为 0。
 
 ### 2026-09-21 自动回复网关 push 排查
 
 - `S5-RISK-021`：已补充账号级 listener 单飞、启动串行扫描、有限退避重试、网关非 200 响应拒绝、同帧 `syncPushPackage` 继续解析、断线自动重连和 push handler 隔离；相关单测与真实 PostgreSQL 凭证只读探针通过。风险仍开放，因为探针期间没有新的真实买家消息，尚未形成“闲鱼买家 push → 自动回复 → 真实发送 → 落库”的完整证据。
-- `S5-RISK-029`：继续保持 `PARTIALLY_VERIFIED / DRY-RUN ONLY`。现有 live 白名单配置可用，但仓库没有可复现的真实 live 发送归档；不得把历史同步导入、FakeSocket 或直接调用 `handleExternalEvent` 解释为真实买家网关 E2E。
+- `S5-RISK-029`：继续保持 `PARTIALLY_VERIFIED / DRY-RUN ONLY`。共享模型 Provider 的单测和受控自动回复 E2E 已通过；现有 live 白名单配置可用，但仓库没有可复现的真实 live 发送归档；不得把历史同步导入、FakeSocket 或直接调用 `handleExternalEvent` 解释为真实买家网关 E2E。
 - 买家身份缺失门禁已修复：真实 push 无 `senderName` 且本地会话无昵称时，监听器会先按稳定会话引用调用闲鱼资料接口补全昵称；资料接口失败仍安全跳过并留下 `TEST_BUYER_NOT_ALLOWLISTED`，真实买家 push 仍需单独验收。
 - 历史/push 竞态已修复：历史导入不会自动回复，但后续同 external ref 的真实 push 不再因去重而提前返回；仍需用下一条真实买家消息确认网关 parser 能产生 push 事件。

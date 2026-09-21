@@ -4,7 +4,9 @@
 
 本切片验证闲鱼入站消息从平台适配器进入当前项目后，经过安全决策和上下文组装，生成一条可解释的 AI 回复，并在受控 `simulate` 模式下把入站消息、出站 AI 消息和脱敏运行证据写入项目存储。代码保留白名单限定的 `live` 投递路径，但该路径不属于当前自动化验收门禁。
 
-默认配置仍为 `simulate`，测试和回归不会调用真实闲鱼发送接口。`live` 只能通过环境变量显式开启，且必须同时配置非空 `AUTO_REPLY_TEST_BUYER_NAMES` 白名单；本切片不承担设置页策略保存、真实模型 Provider 接入、Outbox Worker 执行、人工接管 API 或前端自动回复 UI。
+默认配置仍为 `simulate`，测试和回归不会调用真实闲鱼发送接口。`live` 只能通过环境变量显式开启，且必须同时配置非空 `AUTO_REPLY_TEST_BUYER_NAMES` 白名单；本切片不承担设置页策略保存、Outbox Worker 执行、人工接管 API 或前端自动回复 UI。
+
+模型配置暂时复用 Workspace 的服务端环境变量：`API_KEY`/`OPENAI_API_KEY`/`PI_API_KEY`、`BASE_URL`/`OPENAI_BASE_URL`/`PI_BASE_URL`、`MODEL`/`OPENAI_MODEL`/`PI_MODEL` 和 `MODEL_TIMEOUT_MS`。应用启动时只要三项必需值齐全，就创建一个共享的 OpenAI-compatible `ModelClient`，同时供 Workspace Runtime 和 AutoReply Generator 使用；`AUTO_REPLY_MODEL_ENABLED=false` 可在保留 Workspace 模型配置的同时关闭自动回复模型，缺少模型配置时也继续使用模板生成器。后续设置页接入时，只需替换启动装配中的配置解析器，不改变 `AutoReplyGenerator`、发送器或落库边界。
 
 ## 设计链路
 
@@ -21,7 +23,7 @@ XianyuImClient push event
        -> 风险优先意图识别（intent + confidence + risk flags）
        -> 分层上下文构建（会话历史 + 当前商品事实 + 订单状态 + 处理模式）
        -> 可回答性与策略门禁（human mode / 高风险 / 已支付订单 / 缺少事实）
-       -> 回复计划与生成（当前为可替换模板生成器，禁止越权事实）
+       -> 回复计划与生成（规则门禁后调用可替换模型生成器；未配置模型时回退模板）
        -> 输出安全校验（控制字符 / 长度 / 凭证与系统提示词泄露）
        -> AutoReplySender（默认 simulate；live 仅对环境变量白名单买家调用闲鱼发送）
        -> 出站 AI 消息事实落库（source=ai，合成 external ref）
@@ -55,7 +57,7 @@ XianyuImClient push event
 | 监听 | `XianyuImService.handleExternalEvent` 接收入站适配器事件并幂等导入消息 |
 | 意图 | 安全问题识别为 price/availability/delivery/general；退款、投诉、凭证请求、Prompt Injection、跨商品请求转人工 |
 | 上下文 | 读取最近对话；按账号和商品引用加载商品；按账号/买家加载订单摘要 |
-| 生成 | 模板生成器使用商品安全字段；输出做控制字符、长度和敏感内容校验 |
+| 生成 | 已配置模型时发送 system + 结构化 user facts；字段和历史做长度裁剪；模型未配置时使用模板；输出做控制字符、长度和敏感内容校验 |
 | 回复投递 | simulate 只记录调用并返回 `simulated`；live 发送器仅有 callback 委托单测，尚无真实闲鱼发送或应用级 live E2E 证据 |
 | 落库 | AI 出站消息 `source=ai`、合成 external ref、`auto_reply_runs.status=persisted`；重复事件不产生重复消息 |
 
@@ -80,7 +82,7 @@ git diff --check
 
 - `test:auto-reply:e2e` 使用 `FakeSocket`、stub credential、`MemoryStore` 和 `AUTO_REPLY_SEND_MODE=simulate`，覆盖 push 事件解析、入站幂等、意图/上下文/订单隔离、AI 出站落库和重复事件不重复发送；断言闲鱼发送 endpoint 调用数为 `0`。
 - `test:auto-reply:postgres` 使用真实 PostgreSQL 和 `021_auto_reply_runs.sql`，但直接调用 `handleExternalEvent`，发送器仍为 `simulate`；它只证明消息与运行记录在 API 重启后可回读。
-- `test:auto-reply:unit` 覆盖分类器、模板生成器、白名单配置和 `ExternalAutoReplySender` 的 callback 委托；没有覆盖真实 `sendByReceiverScope` 响应、外部消息回执或发送失败/unknown 恢复。
+- `test:auto-reply:unit` 覆盖分类器、模板与模型生成器、共享环境配置装配、Provider 失败不发送、白名单配置和 `ExternalAutoReplySender` 的 callback 委托；没有覆盖真实 `sendByReceiverScope` 响应、外部消息回执或发送失败/unknown 恢复。
 - `test:xianyu-im-gateway` 覆盖历史响应不触发 `onEvent`，以及“响应 + 同帧 `syncPushPackage`”仍能 ACK 并触发 `onEvent`；`probe:xianyu-im-gateway` 可用真实凭证只读监听网关，永不调用 `handleExternalEvent` 或发送消息。
 - WebSocket listener 已按官方同步协议处理 `syncExtraType`：收到同步状态提示后请求 `/r/SyncStatus/getState`，再用返回的 `body` 调 `/r/SyncStatus/ackDiff`；连接建立时不再伪造初始 `ackDiff`。
 - 2026-09-21 的 PostgreSQL 凭证只读探针已连上 `wss://wss-goofish.dingtalk.com/`，完成 `/reg`、`/r/SyncStatus/ackDiff` 和 `/r/MessageManager/listUserMessages`，回读 20 条历史消息并观察到 `/s/vulcan` 同步帧；探针期间没有新的买家消息，因此 `onEventCount=0`，这不是完整真实买家 push E2E 证据。
