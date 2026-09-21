@@ -30,7 +30,7 @@ export function createHttpClient(options: HttpClientOptions = {}) {
     return raw ? decodeURIComponent(raw.slice(prefix.length)) : null;
   }
 
-  async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  async function request<T>(path: string, init: RequestInit = {}, allowCsrfRetry = true, preferCookieCsrf = false): Promise<T> {
     const headers = new Headers(init.headers);
     if (!headers.has('Accept')) headers.set('Accept', 'application/json');
     if (init.body && typeof init.body === 'string' && !headers.has('Content-Type')) {
@@ -42,7 +42,9 @@ export function createHttpClient(options: HttpClientOptions = {}) {
 
     const method = (init.method ?? 'GET').toUpperCase();
     if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS' && !headers.has('X-CSRF-Token')) {
-      const csrfToken = options.getCsrfToken?.() ?? readCookie('csrf_token');
+      const csrfToken = preferCookieCsrf
+        ? (readCookie('csrf_token') ?? options.getCsrfToken?.())
+        : (options.getCsrfToken?.() ?? readCookie('csrf_token'));
       if (csrfToken) headers.set('X-CSRF-Token', csrfToken);
     }
 
@@ -56,10 +58,32 @@ export function createHttpClient(options: HttpClientOptions = {}) {
       const message = typeof payload === 'object' && payload && 'message' in payload
         ? String((payload as { message?: unknown }).message ?? '请求失败')
         : `请求失败（${response.status}）`;
-      throw new ApiError(message, response.status, payload);
+      const error = new ApiError(message, response.status, payload);
+      if (allowCsrfRetry && response.status === 403 && isCsrfInvalidPayload(payload) && await refreshCsrfCookie()) {
+        const retryHeaders = new Headers(init.headers);
+        retryHeaders.delete('X-CSRF-Token');
+        return request<T>(path, { ...init, headers: retryHeaders }, false, true);
+      }
+      throw error;
     }
 
     return payload as T;
+  }
+
+  async function refreshCsrfCookie(): Promise<boolean> {
+    try {
+      const response = await fetch(joinUrl(baseUrl, '/api/v1/auth/session'), {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        credentials: options.credentials ?? 'include',
+      });
+      if (!response.ok) return false;
+      const payload = await response.json() as unknown;
+      if (isRecord(payload) && isRecord(payload.data)) return payload.data.authenticated === true;
+      return isRecord(payload) && payload.authenticated === true;
+    } catch {
+      return false;
+    }
   }
 
   function encodeBody(body: unknown): BodyInit | undefined {
@@ -87,4 +111,14 @@ export function createHttpClient(options: HttpClientOptions = {}) {
     }),
     delete: <T>(path: string, init: RequestInit = {}) => request<T>(path, { ...init, method: 'DELETE' }),
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function isCsrfInvalidPayload(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const error = value.error;
+  return isRecord(error) && error.code === 'CSRF_INVALID';
 }
