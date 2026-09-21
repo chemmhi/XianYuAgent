@@ -79,12 +79,13 @@ async function waitFor(predicate, timeoutMs = 1_000) {
 
 try {
   const envConfig = loadPiRuntimeConfig({ API_KEY: 'test-key', BASE_URL: `${baseUrl}/`, MODEL: 'test-model', MODEL_TIMEOUT_MS: '123' });
-  assert.deepEqual(envConfig, { apiKey: 'test-key', baseUrl: `${baseUrl}/`, model: 'test-model', timeoutMs: 123, wireApi: 'chat' });
+  assert.deepEqual(envConfig, { apiKey: 'test-key', baseUrl: `${baseUrl}/`, model: 'test-model', timeoutMs: 123, wireApi: 'responses' });
+  assert.equal(loadPiRuntimeConfig({ API_KEY: 'test-key', WIRE_API: 'chat' })?.wireApi, 'chat');
   assert.equal(loadPiRuntimeConfig({ API_KEY: 'test-key', WIRE_API: 'responses' })?.wireApi, 'responses');
   assert.equal(loadPiRuntimeConfig({ API_KEY: 'test-key', MODEL_WIRE_API: 'responses' })?.wireApi, 'responses');
   assert.equal(loadPiRuntimeConfig({}), undefined);
 
-  const client = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl, model: 'test-model', timeoutMs: 500 });
+  const client = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl, model: 'test-model', wireApi: 'chat', timeoutMs: 500 });
   const result = await client.complete({ messages: [{ role: 'user', content: 'hello' }] });
   assert.equal(result.content, 'Pi answer with sk-test-secret-value');
   assert.equal(result.model, 'test-model');

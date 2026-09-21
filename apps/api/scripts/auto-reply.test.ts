@@ -69,7 +69,7 @@ test('configured model provider generates the persisted auto-reply', async () =>
 
   const runtime = createApp(loadConfig({
     HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
-    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'test-model', MODEL_TIMEOUT_MS: '1000', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["Allowlisted Buyer"]',
+    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'test-model', WIRE_API: 'chat', MODEL_TIMEOUT_MS: '1000', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["Allowlisted Buyer"]',
   }));
   const admin = await runtime.store.createAdmin({ email: 'model-provider@example.com', passwordHash: 'hash', displayName: 'Model Provider' });
   const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'model-provider-seller' });

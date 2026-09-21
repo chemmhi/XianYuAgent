@@ -4,7 +4,7 @@ import type { WorkspaceRuntime } from './workspace.js';
 export const DEFAULT_PI_BASE_URL = 'https://api.openai.com/v1';
 export const DEFAULT_PI_MODEL = 'gpt-4o-mini';
 export const DEFAULT_PI_TIMEOUT_MS = 30_000;
-export const DEFAULT_PI_WIRE_API: ModelWireApi = 'chat';
+export const DEFAULT_PI_WIRE_API: ModelWireApi = 'responses';
 
 export type ModelWireApi = 'chat' | 'responses';
 
@@ -376,7 +376,10 @@ export function toResponsesEndpoint(baseUrl: string): string {
 }
 
 function normalizeWireApi(value: string | undefined): ModelWireApi {
-  return value?.trim().toLowerCase() === 'responses' ? 'responses' : DEFAULT_PI_WIRE_API;
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === 'chat') return 'chat';
+  if (normalized === 'responses') return 'responses';
+  return DEFAULT_PI_WIRE_API;
 }
 
 function toChatCompletionsRequestBody(model: string, input: ModelCompletionRequest): Record<string, unknown> {

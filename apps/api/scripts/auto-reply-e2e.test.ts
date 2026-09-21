@@ -124,7 +124,7 @@ test('real push enters buyer Agent tool loop, simulates reply, and persists run 
   const runtime = createApp(loadConfig({
     ...process.env,
     HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
-    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'buyer-agent-test', AUTO_REPLY_MODEL_ENABLED: 'true', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["买家"]', AUTO_REPLY_AGENT_DEBOUNCE_MS: '0', AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS: '0',
+    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'buyer-agent-test', WIRE_API: 'chat', AUTO_REPLY_MODEL_ENABLED: 'true', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["买家"]', AUTO_REPLY_AGENT_DEBOUNCE_MS: '0', AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS: '0',
   }));
   await runtime.listen();
   let client: XianyuImClient | undefined;
@@ -177,7 +177,7 @@ test('persisted Agent settings apply to the next buyer push without restart', as
   const runtime = createApp(loadConfig({
     ...process.env,
     HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
-    API_KEY: 'settings-e2e-key', BASE_URL: 'https://model.example/v1', MODEL: 'settings-e2e', AUTO_REPLY_MODEL_ENABLED: 'true', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["设置买家"]', AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
+    API_KEY: 'settings-e2e-key', BASE_URL: 'https://model.example/v1', MODEL: 'settings-e2e', WIRE_API: 'chat', AUTO_REPLY_MODEL_ENABLED: 'true', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["设置买家"]', AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
     AUTO_REPLY_AGENT_SYSTEM_PROMPT: '初始系统提示',
   }));
   await runtime.listen();

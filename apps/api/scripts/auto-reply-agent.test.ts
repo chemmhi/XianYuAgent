@@ -96,7 +96,7 @@ test('OpenAI-compatible transport preserves native tool calls', async () => {
     return new Response(JSON.stringify({ model: 'test', choices: [{ message: { content: '', tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'get_product_info', arguments: '{}' } }] } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
   }) as typeof fetch;
   try {
-    const client = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl: 'https://model.example/v1', model: 'test-model' });
+    const client = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl: 'https://model.example/v1', model: 'test-model', wireApi: 'chat' });
     const result = await client.complete({ messages: [{ role: 'user', content: '查询商品' }], tools: AUTO_REPLY_AGENT_TOOLS, toolChoice: 'auto' });
     assert.equal((requestBody?.tools as unknown[]).length, AUTO_REPLY_AGENT_TOOLS.length);
     assert.equal(requestBody?.tool_choice, 'auto');

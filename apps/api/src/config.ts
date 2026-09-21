@@ -83,7 +83,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 }
 
 function normalizeWireApi(value: string | undefined): ModelWireApi {
-  return value?.trim().toLowerCase() === 'responses' ? 'responses' : DEFAULT_PI_WIRE_API;
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === 'chat') return 'chat';
+  if (normalized === 'responses') return 'responses';
+  return DEFAULT_PI_WIRE_API;
 }
 
 function firstDefined(...values: Array<string | undefined>): string | undefined {
