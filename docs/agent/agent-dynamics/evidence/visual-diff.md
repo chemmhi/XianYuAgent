@@ -20,7 +20,7 @@
 
 ## 样式 token 对比
 
-原型 HTML 已从 Git blob `620429f9d073011d6d88d7be87fc3ef49f227152` 恢复并与实现 CSS 做了逐项比对，不只检查布局和文案。实现使用 `.agent-dynamics-app` 局部 token，避免污染宿主页面；以下核心 token 与原型语义完全一致：
+原型 HTML 已从 Git blob `620429f9d073011d6d88d7be87fc3ef49f227152` 恢复并与实现 CSS 做了逐项比对，不只检查布局和文案。实现使用 `.agent-dynamics-app` 局部 token，避免污染宿主页面；以下核心 token 与原型语义一致：
 
 | Token 类别 | 原型值 | 实现值 | 结果 |
 | --- | --- | --- | --- |
@@ -34,7 +34,34 @@
 | 核心间距 / 字号 | 8/9/10/12/14/16/18/20px，10–24px 字号层级 | 对应选择器逐项一致 | PASS |
 | 字体栈 / 数字格式 | Inter、Noto Sans SC、PingFang SC、Microsoft YaHei；tabular-nums | 页面 token 与现有宿主字体策略兼容 | PASS |
 
-Token 比对命令：从原型 HTML blob 提取 `:root` token，再与 `agent-dynamics.css` 的 `--agent-*` token 做映射比较；结果为 18/18 核心 token 语义匹配。
+Token 比对命令：从原型 HTML blob 提取 `:root` token，再与 `agent-dynamics.css` 的 `--agent-*` token 做映射比较；结果为 18/18 核心 token 语义匹配。此前仅凭这组 token 不能代表控件高保真，因为控件元素类型、级联优先级和 UA 外观不会被这类静态 token 比对覆盖。
+
+## 控件级视觉复核（2026-09-21）
+
+本轮用户反馈聚焦输入框、下拉框、筛选框、按钮和字体细节。复核发现并修复了两个导致截图级失真的根因：
+
+1. 业务页曾各自定义原生 `<select>` 外观，原生箭头、UA padding、line-height 和 option 字体造成跨页面漂移。
+2. `.agent-dynamics-app button, input, select { font: inherit; }` 的特异性高于控件单类规则，把控件字号和字重重置成宿主值，导致视觉被放大。
+
+修复后，所有业务下拉（包括 Agent 动态的时间范围、运行状态、运行阶段）都通过共享 `SelectField` 渲染；Agent 动态仅保留领域适配组件，不再渲染按钮式菜单。共享组件按 `xianyu-admin-design-style` token 统一处理 12px 正文、400 字重、`#F6F7F9` 填充、`#E5E7EB` 边框、7px 圆角、SVG chevron、hover/focus/disabled 状态。Chrome/CDP computed-style 证据（1440×900）如下：
+
+| 控件 | 元素 | 字号 | 字重 | 字色 | 背景 | 圆角 | 宽度 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 时间范围 | `SELECT` | `12px` | `400` | `rgb(17, 24, 39)` | `rgb(246, 247, 249)` | `7px` | `113px` |
+| 主按钮 | `BUTTON` | `11px` | `600` | `#fff` | `rgb(36, 90, 141)` | `7px` | `103px` |
+| 状态筛选 | `SELECT` | `12px` | `400` | `rgb(17, 24, 39)` | `rgb(246, 247, 249)` | `7px` | `96px` |
+| 搜索框 | `INPUT` | `11px` | 宿主 normal | `rgb(17, 24, 39)` | `rgb(246, 247, 249)` | `7px` | `220px` |
+
+本轮截图已与 Git 固定原型桌面基线并排复核：宿主左侧栏、顶部栏仍按产品约束移除；右侧业务区的卡片、密度、颜色、字体层级与共享下拉 token 保持一致。E2E 断言 Agent 动态区域恰好包含 3 个 `.ui-select-control select`，并校验 aria label、元素类型和 computed style，避免回退为按钮菜单或浏览器默认箭头。
+
+## 动态刷新验收（2026-09-21）
+
+页面仍按 `refreshIntervalMs=5000` 每 5 秒轮询摘要和运行记录，但轮询不再用 skeleton 覆盖已加载内容：
+
+- KPI 在后台刷新期间继续展示上一版值，不再因为 `refreshing=true` 闪烁成骨架块；
+- 运行列表刷新失败时保留上一次成功的行、分页和筛选条件，仅展示 inline error；
+- 轮询不会修改 `filters`，也不会触发浏览器级页面重载；
+- 回归测试覆盖旧数据、筛选关键词和刷新错误同时可见。
 
 ## 逐项结论
 

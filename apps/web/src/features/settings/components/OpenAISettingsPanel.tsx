@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { SelectField } from '../../../shared/ui/SelectField';
 import type { OpenAISettingsApi } from '../api';
 import { useOpenAISettingsController } from '../openai-controller';
 import type { ModelProviderApi } from '../model-provider-api';
@@ -194,7 +195,7 @@ function OpenAIConfigCard(props: { form: ConfigForm; role: OpenAIConfigRole; bus
       <label><span>Provider</span><input value={props.form.provider} onChange={(event) => props.onChange({ provider: event.target.value })} placeholder="OpenAI Compatible" /></label>
       <label><span>Base URL</span><input value={props.form.baseUrl} onChange={(event) => props.onChange({ baseUrl: event.target.value })} placeholder="https://api.example.com/v1" /></label>
       <label><span>API Key</span><input type={props.form.apiKeyMasked ? 'text' : 'password'} value={props.form.apiKeyMasked ? (props.form.apiKeyHint ?? '') : props.form.apiKey} onFocus={() => { if (props.form.apiKeyMasked) props.onChange({ apiKey: '', apiKeyMasked: false }); }} onChange={(event) => props.onChange({ apiKey: event.target.value, apiKeyMasked: false })} placeholder={props.form.id ? '留空保持当前密钥' : '输入新的 API Key'} autoComplete="new-password" /></label>
-      <label><span>Model</span><select value={props.form.model} onFocus={props.onLoadModels} onClick={props.onLoadModels} onChange={(event) => props.onChange({ model: event.target.value })}><option value="">{modelPlaceholder}</option>{props.form.model && !props.providerModels.includes(props.form.model) && <option value={props.form.model}>{props.form.model}</option>}{props.providerModels.map((model) => <option value={model} key={model}>{model}</option>)}</select></label>
+      <label><span>Model</span><SelectField value={props.form.model} onFocus={props.onLoadModels} onClick={props.onLoadModels} onChange={(event) => props.onChange({ model: event.target.value })} options={[{ value: '', label: modelPlaceholder }, ...(props.form.model && !props.providerModels.includes(props.form.model) ? [{ value: props.form.model, label: props.form.model }] : []), ...props.providerModels.map((model) => ({ value: model, label: model }))]} /></label>
       <div className="openai-status-row"><span>连通性</span><span className="openai-status-copy">{status}{props.error ? ` · ${props.error}` : ''}</span></div>
     </div>
     <div className="openai-audit-row"><span>secret_store_ref: {props.form.id ? `${props.form.alias}` : `${props.role}_pending`}</span><span>policy_ref: settings.model.update</span></div>

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { AgentDynamicsDropdown } from './AgentDynamicsDropdown';
 import type {
   AgentDynamicsExceptionVM,
   AgentDynamicsDetailState,
@@ -90,13 +91,28 @@ export function ExceptionPanel({ exceptions, onOpenFirst }: { exceptions: AgentD
   </Panel>;
 }
 
-export function RunsTable({ filters, data, onFilterChange, onOpenRun, onRetry, loading, error, onRangeChange }: { filters: AgentDynamicsFilters; data: AgentDynamicsRunsPageVM | null; onFilterChange: (patch: Partial<AgentDynamicsFilters>) => void; onOpenRun: (runId: string) => void; onRetry: () => void; loading: boolean; error: AgentDynamicsLoadError | null; onRangeChange: (range: AgentDynamicsFilters['range']) => void }) {
+export function RunsTable({ filters, data, onFilterChange, onOpenRun, onRetry, loading, error }: { filters: AgentDynamicsFilters; data: AgentDynamicsRunsPageVM | null; onFilterChange: (patch: Partial<AgentDynamicsFilters>) => void; onOpenRun: (runId: string) => void; onRetry: () => void; loading: boolean; error: AgentDynamicsLoadError | null }) {
+  const statusOptions = [
+    { value: 'all' as const, label: '全部状态' },
+    { value: 'replied' as const, label: '自动回复' },
+    { value: 'handoff' as const, label: '待人工' },
+    { value: 'failed' as const, label: '执行失败' },
+    { value: 'processing' as const, label: '处理中' },
+  ];
+  const stageOptions = [
+    { value: 'all' as const, label: '全部阶段' },
+    { value: 'gateway' as const, label: '网关接收' },
+    { value: 'intent' as const, label: '意图识别' },
+    { value: 'context' as const, label: '上下文读取' },
+    { value: 'generation' as const, label: '回复生成' },
+    { value: 'persistence' as const, label: '提交并落库' },
+  ];
   return <section className="agent-dynamics-card agent-dynamics-runs">
-    <div className="agent-dynamics-runs-toolbar"><div><div className="agent-dynamics-panel-title">运行记录</div><div className="agent-dynamics-panel-desc">每条买家消息对应一条 Agent Run；点击记录查看完整输入、阶段和结果。</div></div><div className="agent-dynamics-filters"><select aria-label="时间范围" className="agent-dynamics-range" value={filters.range} onChange={(event) => onRangeChange(event.target.value as AgentDynamicsFilters['range'])}><option value="24h">最近 24 小时</option><option value="7d">最近 7 天</option></select><select aria-label="运行状态" className="agent-dynamics-filter" value={filters.status} onChange={(event) => onFilterChange({ status: event.target.value as AgentDynamicsFilters['status'], page: 1 })}><option value="all">全部状态</option><option value="replied">自动回复</option><option value="handoff">待人工</option><option value="failed">执行失败</option><option value="processing">处理中</option></select><select aria-label="运行阶段" className="agent-dynamics-filter" value={filters.stage} onChange={(event) => onFilterChange({ stage: event.target.value as AgentDynamicsFilters['stage'], page: 1 })}><option value="all">全部阶段</option><option value="gateway">网关接收</option><option value="intent">意图识别</option><option value="context">上下文读取</option><option value="generation">回复生成</option><option value="persistence">提交并落库</option></select><input className="agent-dynamics-search" value={filters.keyword} onChange={(event) => onFilterChange({ keyword: event.target.value, page: 1 })} placeholder="搜索买家、商品或消息" /></div></div>
+    <div className="agent-dynamics-runs-toolbar"><div><div className="agent-dynamics-panel-title">运行记录</div><div className="agent-dynamics-panel-desc">每条买家消息对应一条 Agent Run；点击记录查看完整输入、阶段和结果。</div></div><div className="agent-dynamics-filters"><AgentDynamicsDropdown value={filters.status} options={statusOptions} ariaLabel="运行状态" triggerClassName="agent-dynamics-filter" onChange={(status) => onFilterChange({ status, page: 1 })} /><AgentDynamicsDropdown value={filters.stage} options={stageOptions} ariaLabel="运行阶段" triggerClassName="agent-dynamics-filter" onChange={(stage) => onFilterChange({ stage, page: 1 })} /><input aria-label="搜索买家、商品或消息" className="agent-dynamics-search" value={filters.keyword} onChange={(event) => onFilterChange({ keyword: event.target.value, page: 1 })} placeholder="搜索买家、商品或消息" /></div></div>
     {error && <div className="agent-dynamics-inline-error" role="alert"><span>{error.message}</span>{error.retryable && <button type="button" className="agent-dynamics-link-btn" onClick={onRetry}>重试</button>}</div>}
     {loading && !data ? <div className="agent-dynamics-table-state"><span className="agent-dynamics-spinner" />正在读取运行记录…</div> : data && data.items.length > 0 ? <>
       <div className="agent-dynamics-table-scroll"><table className="agent-dynamics-run-table"><thead><tr><th>时间 / 买家</th><th>商品</th><th>意图</th><th>当前阶段</th><th>执行状态</th><th>发送 / 落库</th><th>耗时</th></tr></thead><tbody>{data.items.map((row) => <RunTableRow row={row} key={row.runId} onOpen={() => onOpenRun(row.runId)} />)}</tbody></table></div>
-      <div className="agent-dynamics-run-footer"><span>显示 {data.total === 0 ? 0 : (data.page - 1) * data.pageSize + 1}-{Math.min(data.page * data.pageSize, data.total)} 条，共 {data.total.toLocaleString('zh-CN')} 条运行记录</span><div className="agent-dynamics-pagination"><button type="button" className="agent-dynamics-page-btn" disabled={data.page <= 1} onClick={() => onFilterChange({ page: Math.max(1, data.page - 1) })}>‹</button>{[1, 2, 3].map((page) => <button type="button" key={page} className={`agent-dynamics-page-btn ${data.page === page ? 'active' : ''}`} onClick={() => onFilterChange({ page })}>{page}</button>)}<span className="agent-dynamics-page-ellipsis">…</span><button type="button" className={`agent-dynamics-page-btn ${data.page === data.totalPages ? 'active' : ''}`} onClick={() => onFilterChange({ page: data.totalPages })}>{data.totalPages}</button><button type="button" className="agent-dynamics-page-btn" disabled={data.page >= data.totalPages} onClick={() => onFilterChange({ page: Math.min(data.totalPages, data.page + 1) })}>›</button></div></div>
+      <div className="agent-dynamics-run-footer"><span>显示 {data.total === 0 ? 0 : (data.page - 1) * data.pageSize + 1}-{Math.min(data.page * data.pageSize, data.total)} 条，共 {data.total.toLocaleString('zh-CN')} 条运行记录</span><div className="agent-dynamics-pagination">{[1, 2, 3].filter((page) => page <= data.totalPages).map((page) => <button type="button" key={page} className={`agent-dynamics-page-btn ${data.page === page ? 'active' : ''}`} onClick={() => onFilterChange({ page })}>{page}</button>)}{data.totalPages > 3 && <><button type="button" className="agent-dynamics-page-btn agent-dynamics-page-ellipsis" disabled>…</button><button type="button" className={`agent-dynamics-page-btn ${data.page === data.totalPages ? 'active' : ''}`} onClick={() => onFilterChange({ page: data.totalPages })}>{data.totalPages}</button></>}</div></div>
     </> : <div className="agent-dynamics-table-state"><strong>暂无运行记录</strong><span>当前筛选范围没有可展示的 Agent Run。</span></div>}
   </section>;
 }

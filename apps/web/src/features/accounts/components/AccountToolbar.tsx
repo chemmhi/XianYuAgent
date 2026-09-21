@@ -1,4 +1,5 @@
 import type { AccountListFilters, AccountsLoadPhase } from '../types';
+import { SelectField } from '../../../shared/ui/SelectField';
 
 interface AccountToolbarProps {
   filters: AccountListFilters;
@@ -10,6 +11,15 @@ interface AccountToolbarProps {
 }
 
 export function AccountToolbar({ filters, phase, onSearchChange, onStatusChange, onRefresh, onAddAccount }: AccountToolbarProps) {
+  const statusOptions = [
+    { value: 'all', label: '全部状态' },
+    { value: 'connected', label: '已连接' },
+    { value: 'degraded', label: '降级' },
+    { value: 'disconnected', label: '已断开' },
+    { value: 'expired', label: '已过期' },
+    { value: 'disabled', label: '已停用' },
+    { value: 'pending', label: '待连接' },
+  ] satisfies Array<{ value: AccountListFilters['status']; label: string }>;
   return (
     <div className="accounts-domain-toolbar">
       <div>
@@ -21,15 +31,7 @@ export function AccountToolbar({ filters, phase, onSearchChange, onStatusChange,
           <span className="sr-only">搜索账号</span>
           <input value={filters.search ?? ''} onChange={(event) => onSearchChange(event.target.value)} placeholder="搜索账号名称或备注" />
         </label>
-        <select aria-label="账号状态筛选" value={filters.status ?? 'all'} onChange={(event) => onStatusChange(event.target.value as AccountListFilters['status'])}>
-          <option value="all">全部状态</option>
-          <option value="connected">已连接</option>
-          <option value="degraded">降级</option>
-          <option value="disconnected">已断开</option>
-          <option value="expired">已过期</option>
-          <option value="disabled">已停用</option>
-          <option value="pending">待连接</option>
-        </select>
+        <SelectField aria-label="账号状态筛选" className="accounts-domain-status-select" value={filters.status ?? 'all'} onChange={(event) => onStatusChange(event.target.value as AccountListFilters['status'])} options={statusOptions} />
         <button className="btn ghost" type="button" onClick={onRefresh} disabled={phase === 'loading'}>
           {phase === 'loading' ? '刷新中…' : '刷新'}
         </button>

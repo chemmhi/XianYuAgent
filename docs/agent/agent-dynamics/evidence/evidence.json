@@ -1,6 +1,6 @@
 {
   "capturedAt": "2026-09-21",
-  "branch": "codex/agent-dynamics",
+  "branch": "codex/select-global",
   "route": "/agent-dynamics",
   "viewports": [
     { "name": "desktop", "width": 1440, "height": 900, "screenshot": "screenshots/agent-dynamics-desktop-1440x900.png" },
@@ -22,7 +22,39 @@
     "realPostgresRunAndEvents": true,
     "styleTokensCompared": true,
     "styleTokenSemanticMatches": 18,
-    "styleTokenSemanticTotal": 18
+    "styleTokenSemanticTotal": 18,
+    "controlSemanticsExact": true,
+    "controlTypographyExact": true,
+    "controlColorsExact": true,
+    "sharedSelectCount": 3,
+    "usesSharedSelectField": true,
+    "noButtonDropdownMenus": true,
+    "controlComputedStyles": {
+      "headFontSize": "12px",
+      "headFontWeight": "400",
+      "primaryFontSize": "11px",
+      "primaryFontWeight": "600",
+      "filterFontSize": "12px",
+      "searchFontSize": "11px",
+      "headColor": "rgb(17, 24, 39)",
+      "filterColor": "rgb(17, 24, 39)",
+      "searchColor": "rgb(17, 24, 39)",
+      "headBackground": "rgb(246, 247, 249)",
+      "filterBackground": "rgb(246, 247, 249)",
+      "headRadius": "7px",
+      "filterRadius": "7px",
+      "headWidth": 113,
+      "primaryWidth": 103,
+      "filterWidth": 96,
+      "searchWidth": 220
+    },
+    "polling": {
+      "intervalMs": 5000,
+      "preservesLoadedKpis": true,
+      "preservesRunRowsOnRefreshError": true,
+      "preservesFilters": true,
+      "noBrowserReload": true
+    }
   },
   "command": "npm --workspace apps/web run test:e2e:chrome:agent-dynamics"
 }

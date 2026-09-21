@@ -1,9 +1,10 @@
-.ui-field { display: grid; gap: 6px; min-width: 0; color: var(--muted); font-size: 11px; font-weight: 700; }
+.ui-field { display: grid; gap: 6px; min-width: 0; color: var(--muted); font-size: 11px; font-weight: 600; }
 .ui-field-label { display: inline-flex; align-items: baseline; gap: 3px; min-height: 14px; line-height: 1.25; }
 .ui-field-required { color: var(--danger); }
 .ui-field-hint { margin: 0; color: var(--sub); font-size: 10px; font-weight: 400; line-height: 1.5; }
 .ui-select-control { position: relative; display: block; min-width: 0; }
-.ui-select-control select { width: 100%; min-height: 34px; padding: 7px 34px 7px 10px; border: 1px solid var(--border); border-radius: 8px; appearance: none; background: var(--bg); color: var(--text); font-size: 12px; font-weight: 400; line-height: 1.35; }
+.ui-select-control select { box-sizing: border-box; width: 100%; min-height: 34px; padding: 7px 34px 7px 10px; border: 1px solid var(--border); border-radius: 7px; appearance: none; background: var(--bg); color: var(--text); font-family: 'Inter', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif; font-size: 12px; font-weight: 400; line-height: 1.35; }
 .ui-select-control select:hover { border-color: #B9C8D9; }
 .ui-select-control select:focus-visible { outline: 2px solid rgba(36,90,141,.35); outline-offset: 2px; border-color: var(--link); }
+.ui-select-control select:disabled { cursor: not-allowed; opacity: .65; }
 .ui-select-chevron { position: absolute; top: 50%; right: 11px; width: 15px; height: 15px; transform: translateY(-50%); pointer-events: none; fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }

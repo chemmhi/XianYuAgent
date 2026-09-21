@@ -11,13 +11,17 @@ const detail: AgentDynamicsRunDetailVM = {
 
 describe('AgentDynamicsViews', () => {
   it('renders the empty state without synthetic rows', () => {
-    const html = renderToStaticMarkup(<RunsTable filters={filters} data={{ items: [], total: 0, page: 1, pageSize: 20, totalPages: 1 }} onFilterChange={() => undefined} onRangeChange={() => undefined} onOpenRun={() => undefined} onRetry={() => undefined} loading={false} error={null} />);
+    const html = renderToStaticMarkup(<RunsTable filters={filters} data={{ items: [], total: 0, page: 1, pageSize: 20, totalPages: 1 }} onFilterChange={() => undefined} onOpenRun={() => undefined} onRetry={() => undefined} loading={false} error={null} />);
     expect(html).toContain('暂无运行记录');
     expect(html).not.toContain('一只橘喵喵亮晶晶');
+    expect(html.match(/<select /g)).toHaveLength(2);
+    expect(html).toContain('aria-label="运行状态"');
+    expect(html).toContain('aria-label="运行阶段"');
+    expect(html).toContain('class="ui-select-control agent-dynamics-filter"');
   });
 
   it('renders the inline error and retry affordance', () => {
-    const html = renderToStaticMarkup(<RunsTable filters={filters} data={null} onFilterChange={() => undefined} onRangeChange={() => undefined} onOpenRun={() => undefined} onRetry={() => undefined} loading={false} error={error} />);
+    const html = renderToStaticMarkup(<RunsTable filters={filters} data={null} onFilterChange={() => undefined} onOpenRun={() => undefined} onRetry={() => undefined} loading={false} error={error} />);
     expect(html).toContain('服务不可用');
     expect(html).toContain('重试');
   });

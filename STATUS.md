@@ -1,5 +1,21 @@
 # XianyuSellerAgent 项目状态
 
+## 2026-09-21 全局 SelectField 统一
+
+- 全局盘点确认项目已有共享 `apps/web/src/shared/ui/SelectField.tsx`；账号、商品、卡券、订单、设置及 Agent 动态的业务下拉全部统一复用，业务层不再直接渲染原生 `<select>`。
+- Agent 动态保留 `AgentDynamicsDropdown` 领域适配层，但内部改为委托共享 `SelectField`，不再使用按钮式自定义菜单；时间范围、运行状态、运行阶段共 3 个下拉均受统一 aria、chevron、focus、disabled 和设计 token 约束。
+- `select-field.css` 按 `xianyu-admin-design-style` 收敛到 `#F6F7F9` 填充、`#E5E7EB` 边框、7px 圆角、12px/400 正文、统一 SVG chevron；各业务 CSS 仅保留布局宽度，不再覆盖控件外观。
+- 新增 `select-usage.test.ts` 架构扫描、`SelectField.test.ts` 透传/disabled 回归、`AgentDynamicsDropdown.test.ts` 共享委托回归；当前 Web 测试为 45 个文件 / 135 个用例。
+- 验证：`npm --workspace apps/web run typecheck`、`npm --workspace apps/web run test -- --run`（45 files / 135 tests）、`npm --workspace apps/web run build`、`npm run build:api`、`npm --workspace apps/web run test:e2e:chrome:agent-dynamics`、`git diff --check` 均通过；E2E 真实 PostgreSQL → API → Chrome/CDP 链路重新生成四张截图，视觉对比记录见 `docs/agent/agent-dynamics/evidence/visual-diff.md`。
+
+## 2026-09-21 Agent 动态控件与轮询视觉修复（历史方案，已由全局 Select 统一取代）
+
+- 修复控件级高保真问题：该阶段曾移除原生 `select` 作为可视触发器并改为按钮 + 自定义菜单；后续全局 SelectField 统一已将 Agent 动态三个筛选恢复为共享下拉组件，当前实现与证据以本文件上一节为准。
+- 修复 `<a class="agent-dynamics-btn">` 空态 CTA 的按钮化布局，分页省略号恢复为 24×24 page button；按钮保留键盘 focus-visible 可见焦点。
+- 修复 5 秒轮询时的视觉闪烁：KPI 不再在后台刷新时替换为 skeleton；运行列表刷新失败保留最近一次成功数据、分页和筛选，只显示 inline error。
+- Chrome/CDP computed-style 复核：该历史按钮方案曾验证无 Agent 区域原生 select；当前共享 SelectField 的最新 computed-style、元素语义和 3 个下拉计数以本文件上一节及 `evidence.json` 为准。
+- 验证：`npm --workspace apps/web run typecheck`、`npm --workspace apps/web run test -- --run`（44 files / 133 tests）、`npm run build`、`npm --workspace apps/web run test:e2e:chrome:agent-dynamics`、`git diff --check` 均通过；视觉记录见 `docs/agent/agent-dynamics/evidence/visual-diff.md`。
+
 ## 2026-09-21 Agent 动态壳层与视觉复验增量
 
 - 按最新产品约束，Agent 动态复用现有 `AuthenticatedShell` 左侧导航，`Agent 动态` 保持在“订单管理”和“设置”之间；移除原型内置 Agent Console 左栏。

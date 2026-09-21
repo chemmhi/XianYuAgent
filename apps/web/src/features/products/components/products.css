@@ -5,7 +5,8 @@
 .products-toolbar h2 { margin: 0 0 3px; }
 .products-toolbar p { margin: 0; font-size: 11px; color: var(--sub); }
 .products-toolbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-.products-toolbar-actions select, .products-search input { height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font-size: 12px; }
+.products-toolbar-actions .ui-select-control { min-width: 0; }
+.products-status-select { min-width: 126px; }
 .products-search input { width: 230px; }
 .products-table-region { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .products-table-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
@@ -74,8 +75,8 @@
 .product-form-state details { color: var(--muted); font-size: 10px; }
 .product-form-state pre { max-height: 180px; margin: 6px 0 0; padding: 8px; overflow: auto; border-radius: 6px; background: rgba(255,255,255,.72); color: var(--text); font-size: 10px; line-height: 1.4; white-space: pre-wrap; }
 .product-drawer-note { margin-top: 18px; padding: 10px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--sub); font-size: 10px; line-height: 1.5; }
-.products-account-select select { min-width: 160px; }
+.products-account-select .ui-select-control { min-width: 160px; }
 .products-account-error { color: var(--danger); font-size: 11px; font-weight: 600; }
 @media (min-width: 901px) { .desktop-body main.products-main { display: flex; min-height: 0; overflow: hidden; } .desktop-body main.products-main > .products-domain { flex: 1; } }
-@media (max-width: 900px) { .desktop-shell.products-shell { height: 100vh; min-height: 0; overflow: hidden; } .desktop-shell.products-shell .sidebar { height: 122px; overflow: hidden; } .desktop-shell.products-shell .desktop-body { height: calc(100vh - 122px); min-height: 0; overflow: hidden; } .desktop-body main.products-main { display: flex; min-height: 0; height: 100%; overflow: hidden; } .products-domain { height: 100%; } .products-toolbar { align-items: stretch; flex-direction: column; } .products-toolbar-actions { justify-content: stretch; } .products-search { flex: 1; } .products-search input { width: 100%; } .products-row { min-width: 900px; } .products-table-scroll { max-height: none; } .products-pagination { justify-content: center; } }
+@media (max-width: 900px) { .desktop-shell.products-shell { height: 100vh; min-height: 0; overflow: hidden; } .desktop-shell.products-shell .sidebar { height: 122px; overflow: hidden; } .desktop-shell.products-shell .desktop-body { height: calc(100vh - 122px); min-height: 0; overflow: hidden; } .desktop-body main.products-main { display: flex; min-height: 0; height: 100%; overflow: hidden; } .products-domain { height: 100%; } .products-toolbar { align-items: stretch; flex-direction: column; } .products-toolbar-actions { justify-content: stretch; } .products-toolbar-actions .ui-select-control { flex: 1 1 0; min-width: 0; width: 100%; } .products-search { flex: 1; } .products-search input { width: 100%; } .products-row { min-width: 900px; } .products-table-scroll { max-height: none; } .products-pagination { justify-content: center; } }
 @media (max-width: 600px) { .product-basic-form { grid-template-columns: 1fr; } .product-basic-form-wide { grid-column: auto; } }
