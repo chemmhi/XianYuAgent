@@ -120,6 +120,53 @@ test('history synchronization imports messages without entering auto-reply', asy
   await service.close();
 });
 
+test('push without senderName enriches buyer identity before the allowlist gate', async () => {
+  const runtime = createApp(loadConfig({
+    HOST: '127.0.0.1',
+    PORT: '0',
+    DATABASE_URL: '',
+    REDIS_URL: '',
+    ALLOW_IN_MEMORY: 'true',
+    COOKIE_SECURE: 'false',
+    XIANYU_QR_MODE: 'stub',
+    AGENT_RUNTIME: 'in-process',
+    AUTO_REPLY_SEND_MODE: 'simulate',
+    AUTO_REPLY_TEST_BUYER_NAMES: '["Allowlisted Buyer"]',
+  }));
+  const admin = await runtime.store.createAdmin({ email: 'push-identity@example.com', passwordHash: 'hash', displayName: 'Push Identity' });
+  const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'push-identity-seller' });
+  await runtime.listen();
+  let profileCalls = 0;
+  const unsafeIm = runtime.xianyuIm as unknown as { mtop: { fetchChatUserInfo: () => Promise<unknown> } };
+  unsafeIm.mtop = {
+    fetchChatUserInfo: async () => {
+      profileCalls += 1;
+      return { success: true, accountInvalid: false, buyerDisplayName: 'Allowlisted Buyer' };
+    },
+  };
+
+  try {
+    const result = await runtime.xianyuIm.handleExternalEvent(admin.id, {
+      accountId: account.id,
+      externalConversationRef: 'push-identity-conversation',
+      externalMessageRef: 'push-identity-1.PNM',
+      senderRef: 'buyer-identity-1',
+      direction: 'inbound',
+      bodyType: 'text',
+      bodyText: '你好',
+      occurredAt: new Date().toISOString(),
+    });
+    assert.equal(profileCalls, 1);
+    assert.equal(result.created, true);
+    assert.equal(result.autoReply?.run.status, 'persisted');
+    assert.equal(result.autoReply?.run.failureCode, undefined);
+    const conversation = await runtime.store.findConversationByExternalRef(admin.id, account.id, 'push-identity-conversation');
+    assert.equal(conversation?.buyerDisplayName, 'Allowlisted Buyer');
+  } finally {
+    await runtime.close();
+  }
+});
+
 test('live auto-reply requires an explicit buyer allowlist', () => {
   assert.throws(
     () => loadConfig({ AUTO_REPLY_SEND_MODE: 'live' }),
