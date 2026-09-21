@@ -511,6 +511,7 @@ export class MemoryStore implements Store {
   async updateAutoReplyRun(id: string, patch: { intent?: string; decision?: AutoReplyDecision; status?: AutoReplyRunStatus; riskFlags?: string[]; productId?: string; orderRefs?: string[]; contextDigest?: string; replyDigest?: string; senderOutcome?: AutoReplyRunRecord['senderOutcome']; outboundMessageId?: string; failureCode?: string }): Promise<AutoReplyRunRecord | undefined> {
     const run = this.autoReplyRuns.get(id);
     if (!run) return undefined;
+    if (Object.keys(patch).length === 0) return { ...run, riskFlags: [...run.riskFlags], orderRefs: [...run.orderRefs] };
     Object.assign(run, patch, { updatedAt: new Date().toISOString() });
     await this.appendAutoReplyRunEvent({ runId: run.id, accountId: run.accountId, eventType: patch.status ? `run.${patch.status}` : 'run.updated', status: run.status, stage: autoReplyStageForStatus(run.status), payload: { decision: run.decision, intent: run.intent, failureCode: run.failureCode } });
     return { ...run, riskFlags: [...run.riskFlags], orderRefs: [...run.orderRefs] };
