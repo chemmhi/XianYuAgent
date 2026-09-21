@@ -6,7 +6,7 @@ import { AccountToolbar } from './AccountToolbar';
 describe('AccountToolbar', () => {
   it('exposes both account status and connection status filters', () => {
     const html = renderToStaticMarkup(createElement(AccountToolbar, {
-      filters: { page: 1, pageSize: 20, status: 'all', connectionStatus: 'all' },
+      filters: { page: 1, pageSize: 20, search: '主账号', status: 'all', connectionStatus: 'all' },
       phase: 'success',
       onSearchChange: vi.fn(),
       onStatusChange: vi.fn(),
@@ -21,5 +21,6 @@ describe('AccountToolbar', () => {
     expect(html).toContain('全部连接');
     expect(html).toContain('连接中');
     expect(html).toContain('已过期');
+    expect(html).toContain('aria-label="清空搜索"');
   });
 });
