@@ -29,6 +29,12 @@ describe('CouponCreateModal', () => {
     expect(html).not.toContain('首批库存');
     expect(html).not.toContain('对接价格');
     expect(html).not.toContain('是否可对接');
+    expect(html).not.toContain('对接信息');
+    expect(html).not.toContain('对接消息');
+    expect(html).toContain('ui-select-control');
+    expect((html.match(/ui-select-control/g) ?? []).length).toBe(1);
+    expect(html).toContain('coupons-field-label');
+    expect(html).toContain('coupons-checkbox-row');
   });
 
   it('keeps API and data fields conditional on card type', () => {
@@ -36,6 +42,7 @@ describe('CouponCreateModal', () => {
     expect(apiHtml).toContain('type=\"url\"');
     expect(apiHtml).toContain('POST请求可用参数（点击添加）：');
     expect(apiHtml).toContain('接口返回纯文本时若填写本字段，会因无法解析而取值失败，请务必留空。');
+    expect((apiHtml.match(/ui-select-control/g) ?? []).length).toBe(2);
     const dataHtml = renderToStaticMarkup(createElement(CouponCreateModal, { submitting: false, batch: batch('data'), onClose: vi.fn(), onSubmit: vi.fn(async () => {}) }));
     expect(dataHtml).toContain('批量数据配置');
     expect(dataHtml).toContain('支持格式：卡号:密码 或 单独的兑换码');
