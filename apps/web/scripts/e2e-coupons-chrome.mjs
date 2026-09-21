@@ -114,27 +114,9 @@ async function run() {
   const adminId = bootstrapPayload.data.profile.id;
   const account = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `coupons-e2e-${process.pid}` });
   const product = await apiRuntime.store.createProduct({ adminId, accountId: account.id, externalProductRef: `COUPON-ITEM-${process.pid}`, title: '卡券 E2E 商品', description: '受控绑定商品', categoryCode: 'digital', attributes: { source: 'coupons-e2e' }, priceMinor: 1990, status: 'published' });
-  const batch = await apiRuntime.store.createCouponBatch({
-    adminId,
-    accountId: account.id,
-    label: 'Chrome E2E 卡券批次',
-    purpose: 'text',
-    deliveryScope: 'operator_only',
-    metadata: {
-      description: 'E2E 列表元数据',
-      delaySeconds: 15,
-      deliveryCount: 3,
-      dockable: true,
-      price: '9.90',
-      minPrice: '5.00',
-      feePayer: 'dealer',
-      multiSpec: true,
-      specName: '套餐',
-      specValue: '标准',
-    },
-  });
-  await apiRuntime.store.importCouponItems({ adminId, batchId: batch.id, contents: ['E2E-COUPON-001', 'E2E-COUPON-002'] });
-  await apiRuntime.store.bindCouponBatch({ adminId, batchId: batch.id, productId: product.id });
+  const createdLabel = `Chrome UI 创建卡券 ${process.pid}`;
+  const editedLabel = `Chrome UI 编辑卡券 ${process.pid}`;
+  const copiedLabel = `Chrome UI 复制卡券 ${process.pid}`;
 
   const cookie = cookiesFrom(bootstrap);
   spawnProcess(npm, npmArgs(['--workspace', 'apps/web', 'run', 'dev', '--', '--host', '127.0.0.1', '--port', String(webPort)]), { env: { ...process.env, VITE_API_MODE: 'live', VITE_API_BASE_URL: '', VITE_API_PROXY_TARGET: apiUrl } });
@@ -147,7 +129,8 @@ async function run() {
   for (const pair of cookie.split('; ')) { const [name, ...valueParts] = pair.split('='); await cdp.send('Network.setCookie', { name, value: valueParts.join('='), url: `${webUrl}/` }); }
   await cdp.send('Page.navigate', { url: `${webUrl}/coupons` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'coupons page');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 卡券批次'), 'coupon list');
+  await waitFor(async () => await evaluate(cdp, `window.localStorage.getItem('xianyu.activeAccountId') === ${JSON.stringify(account.id)}`), 'coupon account context');
+  await waitFor(async () => Boolean(await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent?.trim() === "新建卡券"); return Boolean(button && !button.disabled); })()')), 'coupon page');
   await assertText(cdp, '卡券列表');
   await assertText(cdp, '新建卡券');
   await assertText(cdp, '刷新');
@@ -162,9 +145,7 @@ async function run() {
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('暂无卡券批次'), 'coupon empty state');
   await assertText(cdp, '当前账号范围内没有匹配的批次，可调整筛选或创建新批次。');
   await setSearchValue(cdp, '');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 卡券批次'), 'coupon list reset');
-  await assertText(cdp, 'E2E 列表元数据');
-  await assertText(cdp, '对接价：¥9.90');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('暂无卡券批次'), 'coupon list reset');
   await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "新建卡券")?.click()');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('固定文字配置'), 'coupon create modal');
   await assertText(cdp, '填写到无需邮寄凭证');
@@ -191,7 +172,14 @@ async function run() {
   await assertText(cdp, '数据内容 (一行一个)');
   await assertText(cdp, '图片配置（可选，最多3张）');
   await evaluate(cdp, '(() => { const modal = document.querySelector(".coupons-editor-modal"); const select = Array.from(modal?.querySelectorAll("select") ?? []).find((candidate) => Array.from(candidate.options).some((option) => option.value === "text")); if (!select) return false; const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set; setter?.call(select, "text"); select.dispatchEvent(new Event("input", { bubbles: true })); select.dispatchEvent(new Event("change", { bubbles: true })); return true; })()');
-  await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "取消")?.click()');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('固定文字内容'), 'coupon text fields');
+  const createReady = await evaluate(cdp, `(() => { const modal = document.querySelector(".coupons-editor-modal"); if (!modal) return false; const setValue = (selector, value, proto) => { const input = modal.querySelector(selector); if (!input) return false; const setter = Object.getOwnPropertyDescriptor(proto.prototype, "value")?.set; setter?.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); return true; }; return setValue('input[placeholder="例如：游戏点卡、会员卡等"]', ${JSON.stringify(createdLabel)}, HTMLInputElement) && setValue('textarea[placeholder="请输入要发送的固定文字内容..."]', ${JSON.stringify(`E2E UI 固定文字内容 ${process.pid}`)}, HTMLTextAreaElement); })()`);
+  if (!createReady) throw new Error('coupon create form fields missing');
+  await evaluate(cdp, 'document.querySelector(".coupons-editor-modal button[type=submit]")?.click()');
+  await waitFor(async () => !(await evaluate(cdp, 'Boolean(document.querySelector(".coupons-editor-modal"))')) && String(await evaluate(cdp, 'document.body.innerText')).includes(createdLabel), 'coupon created from UI');
+  const persistedInStore = await waitFor(async () => { const page = await apiRuntime.store.listCouponBatches(adminId, { accountId: account.id, page: 1, pageSize: 100 }); return page.items.some((item) => item.label === createdLabel); }, 'coupon API persistence');
+  if (!persistedInStore) throw new Error('UI-created coupon was not persisted by the API store');
+  await assertText(cdp, `E2E UI 固定文字内容 ${process.pid}`);
   await captureViewport(cdp, 1440, 900, 'coupons-desktop-1440x900.png');
 
   const selected = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("[data-coupons-table] button")).find((candidate) => candidate.getAttribute("aria-label")?.startsWith("选择 ")); if (!button) return false; button.click(); return true; })()');
@@ -203,37 +191,41 @@ async function run() {
   await assertText(cdp, '已选商品');
   await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "取消")?.click()');
 
-  await evaluate(cdp, 'Array.from(document.querySelectorAll("[data-coupons-table] button")).find((button) => button.getAttribute("aria-label") === "编辑")?.click()');
+  const selectedRow = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(createdLabel)})); const button = row?.querySelector('button[aria-label="编辑"]'); if (!button) return false; button.click(); return true; })()`);
+  if (!selectedRow) throw new Error('created coupon edit button missing');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('编辑卡券'), 'coupon edit modal');
-  const edited = await evaluate(cdp, '(() => { const input = Array.from(document.querySelectorAll("input")).find((item) => item.value === "Chrome E2E 卡券批次"); if (!input) return false; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set; setter?.call(input, "Chrome E2E 卡券编辑"); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); return true; })()');
+  const edited = await evaluate(cdp, `(() => { const input = Array.from(document.querySelectorAll(".coupons-editor-modal input")).find((item) => item.value === ${JSON.stringify(createdLabel)}); if (!input) return false; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set; setter?.call(input, ${JSON.stringify(editedLabel)}); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
   if (!edited) throw new Error('coupon edit name input missing');
-  await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "保存")?.click()');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 卡券编辑'), 'coupon edit persisted');
+  await evaluate(cdp, 'document.querySelector(".coupons-editor-modal button[type=submit]")?.click()');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes(editedLabel), 'coupon edit persisted');
 
-  await evaluate(cdp, 'Array.from(document.querySelectorAll("[data-coupons-table] button")).find((button) => button.getAttribute("aria-label") === "复制")?.click()');
+  const copyReady = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(editedLabel)})); const button = row?.querySelector('button[aria-label="复制"]'); if (!button) return false; button.click(); return true; })()`);
+  if (!copyReady) throw new Error('created coupon copy button missing');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('复制卡券'), 'coupon copy modal');
-  const copied = await evaluate(cdp, '(() => { const input = Array.from(document.querySelectorAll("input")).find((item) => item.value === "Chrome E2E 卡券编辑"); if (!input) return false; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set; setter?.call(input, "Chrome E2E 卡券复制"); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); return true; })()');
+  const copied = await evaluate(cdp, `(() => { const input = Array.from(document.querySelectorAll(".coupons-editor-modal input")).find((item) => item.value === ${JSON.stringify(editedLabel)}); if (!input) return false; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set; setter?.call(input, ${JSON.stringify(copiedLabel)}); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
   if (!copied) throw new Error('coupon copy name input missing');
-  await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "保存")?.click()');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 卡券复制'), 'coupon copy persisted');
+  await evaluate(cdp, 'document.querySelector(".coupons-editor-modal button[type=submit]")?.click()');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes(copiedLabel), 'coupon copy persisted');
 
-  await evaluate(cdp, 'Array.from(document.querySelectorAll("[data-coupons-table] button")).find((button) => button.getAttribute("aria-label") === "禁用")?.click()');
+  const toggleDisabled = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(editedLabel)})); const button = row?.querySelector('button[aria-label="禁用"]'); if (!button) return false; button.click(); return true; })()`);
+  if (!toggleDisabled) throw new Error('created coupon disable button missing');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('禁用'), 'coupon toggle disabled');
-  await evaluate(cdp, 'Array.from(document.querySelectorAll("[data-coupons-table] button")).find((button) => button.getAttribute("aria-label") === "启用")?.click()');
+  const toggleEnabled = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(editedLabel)})); const button = row?.querySelector('button[aria-label="启用"]'); if (!button) return false; button.click(); return true; })()`);
+  if (!toggleEnabled) throw new Error('created coupon enable button missing');
   await waitFor(async () => !String(await evaluate(cdp, 'document.body.innerText')).includes('禁用'), 'coupon toggle enabled');
 
-  const opened = await evaluate(cdp, '(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes("Chrome E2E 卡券编辑")); const button = row ? Array.from(row.querySelectorAll("button")).find((candidate) => ["查看", "查看明细"].includes(candidate.getAttribute("aria-label") ?? "")) : undefined; if (!button) return false; button.click(); return true; })()');
+  const opened = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(editedLabel)})); const button = row?.querySelector('button[aria-label="查看明细"]'); if (!button) return false; button.click(); return true; })()`);
   if (!opened) throw new Error('coupon detail button missing');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('导入库存'), 'coupon drawer');
-  const previewButton = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent?.includes("查看首条可用正文")); if (!button) return false; button.click(); return true; })()');
-  if (!previewButton) throw new Error('coupon preview button missing');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('E2E-COUPON-001'), 'controlled coupon preview');
-  await assertText(cdp, '复制正文');
-
   const importReady = await evaluate(cdp, '(() => { const area = Array.from(document.querySelectorAll("textarea")).find((item) => item.getAttribute("placeholder")?.includes("每行一个卡券正文")); if (!area) return false; const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set; setter?.call(area, "E2E-COUPON-003"); area.dispatchEvent(new Event("input", { bubbles: true })); area.dispatchEvent(new Event("change", { bubbles: true })); return true; })()');
   if (!importReady) throw new Error('coupon import textarea missing');
   await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.includes("导入库存"))?.click()');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('可用库存'), 'coupon import completed');
+  await waitFor(async () => Boolean(await evaluate(cdp, 'Array.from(document.querySelectorAll("[data-coupon-drawer] button")).some((button) => button.textContent?.includes("查看首条可用正文"))')), 'coupon import completed');
+
+  const previewButton = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent?.includes("查看首条可用正文")); if (!button) return false; button.click(); return true; })()');
+  if (!previewButton) throw new Error('coupon preview button missing');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('E2E-COUPON-003'), 'controlled coupon preview');
+  await assertText(cdp, '复制正文');
 
   const bindReady = await evaluate(cdp, `(() => { const input = document.querySelector('input[placeholder="product UUID"]'); if (!input) return false; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set; setter?.call(input, "${product.id}"); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
   if (!bindReady) throw new Error('coupon binding input missing');
@@ -243,10 +235,10 @@ async function run() {
   await evaluate(cdp, 'window.confirm = () => true; Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.includes("作废批次"))?.click()');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('voided'), 'coupon void completed');
   await cdp.send('Page.reload', { ignoreCache: true });
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 卡券编辑'), 'coupon reload persistence');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes(editedLabel), 'coupon reload persistence');
   await captureViewport(cdp, 390, 844, 'coupons-mobile-390x844.png');
   await cdp.send('Emulation.clearDeviceMetricsOverride');
-  console.log('local Chrome E2E passed: coupons list -> detail -> preview/copy -> import -> bind -> void -> reload');
+  console.log('local Chrome E2E passed: UI create -> list -> edit/copy/toggle -> import/bind/void -> reload');
   cdp.socket.close();
 }
 

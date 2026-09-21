@@ -44,6 +44,9 @@
 .coupons-state { display: grid; place-items: center; gap: 6px; min-height: 220px; padding: 28px; color: var(--sub); text-align: center; }
 .coupons-state strong, .coupons-detail-state strong { color: var(--text); font-size: 13px; }
 .coupons-state span, .coupons-detail-state span { font-size: 11px; }
+.coupons-inline-error, .coupons-context-note { margin: 12px 18px 0; padding: 9px 11px; border-radius: 8px; font-size: 11px; }
+.coupons-inline-error { color: #9f1239; background: #fff1f2; border: 1px solid #fecdd3; }
+.coupons-context-note { color: var(--sub); background: var(--bg); border: 1px solid var(--border); }
 .coupons-error { color: var(--danger); }
 .coupons-error span { color: var(--sub); }
 .coupons-skeleton { width: 92%; height: 38px; border-radius: 8px; background: linear-gradient(90deg, var(--bg), #fff, var(--bg)); background-size: 200% 100%; animation: coupons-shimmer 1.4s ease-in-out infinite; }

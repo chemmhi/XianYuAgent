@@ -60,6 +60,7 @@ describe('CouponCreateModal', () => {
   });
 
   it('validates reference-specific content and JSON rules', () => {
+    expect(validateCouponForm({ ...baseForm, accountId: '', label: '缺少账号', textContent: '内容' })).toContain('可用账号');
     expect(validateCouponForm({ ...baseForm, label: 'API 卡券', purpose: 'api' })).toContain('API地址');
     expect(validateCouponForm({ ...baseForm, label: '文本卡券', textContent: '内容', description: '普通备注' })).toContain('{DELIVERY_CONTENT}');
     expect(validateCouponForm({ ...baseForm, label: '接口卡券', purpose: 'api', apiUrl: 'https://example.com', apiHeaders: '{bad' })).toContain('请求头');
