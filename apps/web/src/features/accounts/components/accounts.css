@@ -15,6 +15,7 @@
 .accounts-domain-toolbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .accounts-domain-toolbar .ui-select-control { min-width: 0; }
 .accounts-domain-status-select { min-width: 138px; }
+.accounts-domain-connection-select { min-width: 128px; }
 .accounts-domain-search { width: 210px; max-width: 260px; }
 .accounts-domain-table-region { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .accounts-domain-table-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }

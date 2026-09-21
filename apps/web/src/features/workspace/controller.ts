@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createWorkspaceApi, type WorkspaceApi } from './api';
-import type { WorkspaceRunEventVM, WorkspaceRunVM, WorkspaceState } from './types';
+import type { WorkspaceRunEventVM, WorkspaceRunVM, WorkspaceSessionVM, WorkspaceState } from './types';
 
 const defaultApi = createWorkspaceApi({ get: async () => { throw new Error('WORKSPACE_API_UNAVAILABLE'); } });
 
@@ -9,9 +9,14 @@ function normalizeError(error: unknown): { message: string; forbidden: boolean }
   return { message: error instanceof Error ? error.message : 'Workspace 请求失败', forbidden: status === 403 };
 }
 
+export function listWorkspaceSessions(api: WorkspaceApi, accountId: string, search: string): Promise<WorkspaceSessionVM[]> {
+  return api.listSessions(accountId, search);
+}
+
 export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?: string }): WorkspaceController {
   const api = options.api ?? defaultApi;
   const [state, setState] = useState<WorkspaceState>({ phase: 'idle', sessions: [], run: null, messages: [], events: [], connection: 'idle', error: null, submitting: false });
+  const [search, setSearchState] = useState('');
   const socketRef = useRef<WebSocket | null>(null);
   const runRef = useRef<WorkspaceRunVM | null>(null);
   const eventCursorRef = useRef(0);
@@ -30,7 +35,7 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     }
     setState((previous) => ({ ...previous, phase: 'loading', error: null }));
     try {
-      const sessions = await api.listSessions(options.accountId);
+      const sessions = await listWorkspaceSessions(api, options.accountId, search);
       if (requestId !== requestRef.current) return;
       const firstActive = sessions.find((session) => session.status === 'active');
       const activeSessionId = activeSessionIdRef.current && sessions.some((session) => session.id === activeSessionIdRef.current && session.status === 'active') ? activeSessionIdRef.current : firstActive?.id;
@@ -43,9 +48,18 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
       const normalized = normalizeError(error);
       setState((previous) => ({ ...previous, phase: normalized.forbidden ? 'forbidden' : 'error', error: normalized.message }));
     }
-  }, [api, options.accountId]);
+  }, [api, options.accountId, search]);
 
-  useEffect(() => { void reload(); return () => { socketRef.current?.close(); }; }, [reload]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void reload(); }, search.trim() ? 220 : 0);
+    return () => window.clearTimeout(timer);
+  }, [reload, search]);
+
+  useEffect(() => () => { socketRef.current?.close(); }, []);
+
+  const setSearch = useCallback((value: string) => {
+    setSearchState(value);
+  }, []);
 
   const createSession = useCallback(async (title: string) => {
     if (!options.accountId) throw new Error('ACCOUNT_CONTEXT_REQUIRED');
@@ -121,11 +135,13 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     if (currentRun) void connectRun(currentRun.runId, eventCursorRef.current);
   }, [connectRun]);
 
-  return { state, reload, createSession, switchSession, archiveSession, startRun, reconnectRun };
+  return { state, search, setSearch, reload, createSession, switchSession, archiveSession, startRun, reconnectRun };
 }
 
 export interface WorkspaceController {
   state: WorkspaceState;
+  search: string;
+  setSearch: (value: string) => void;
   reload: () => Promise<void>;
   createSession: (title: string) => Promise<WorkspaceState['sessions'][number] | null>;
   switchSession: (sessionId: string) => Promise<WorkspaceState['sessions'][number] | null>;
