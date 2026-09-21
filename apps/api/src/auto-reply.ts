@@ -23,16 +23,37 @@ export interface AutoReplyGenerator {
   generate(input: { context: AutoReplyContext; classification: AutoReplyClassification }): Promise<string | undefined>;
 }
 
+export interface AutoReplySendInput {
+  adminId: string;
+  accountId: string;
+  requestId: string;
+  conversation: ConversationRecord;
+  recipientRef: string;
+  text: string;
+  mode: 'simulate' | 'live';
+  traceId: string;
+}
+
 export interface AutoReplySender {
-  send(input: { conversation: ConversationRecord; recipientRef: string; text: string; mode: 'simulate' | 'live'; traceId: string }): Promise<{ outcome: 'simulated' | 'known_success' | 'known_failure' | 'unknown'; externalMessageRef?: string }>;
+  send(input: AutoReplySendInput): Promise<{ outcome: 'simulated' | 'known_success' | 'known_failure' | 'unknown'; externalMessageRef?: string }>;
 }
 
 export class NoopAutoReplySender implements AutoReplySender {
   readonly calls: Array<{ conversationId: string; recipientRef: string; text: string; mode: 'simulate' | 'live'; traceId: string }> = [];
 
-  async send(input: { conversation: ConversationRecord; recipientRef: string; text: string; mode: 'simulate' | 'live'; traceId: string }): Promise<{ outcome: 'simulated' | 'known_success' | 'known_failure' | 'unknown'; externalMessageRef?: string }> {
+  async send(input: AutoReplySendInput): Promise<{ outcome: 'simulated' | 'known_success' | 'known_failure' | 'unknown'; externalMessageRef?: string }> {
     this.calls.push({ conversationId: input.conversation.id, recipientRef: input.recipientRef, text: input.text, mode: input.mode, traceId: input.traceId });
     return { outcome: 'simulated', externalMessageRef: `simulated:auto-reply:${input.traceId}` };
+  }
+}
+
+export class ExternalAutoReplySender implements AutoReplySender {
+  constructor(private readonly sendExternal: (input: AutoReplySendInput) => Promise<{ externalMessageRef?: string }>) {}
+
+  async send(input: AutoReplySendInput): Promise<{ outcome: 'simulated' | 'known_success' | 'known_failure' | 'unknown'; externalMessageRef?: string }> {
+    if (input.mode === 'simulate') return { outcome: 'simulated', externalMessageRef: `simulated:auto-reply:${input.traceId}` };
+    const sent = await this.sendExternal(input);
+    return { outcome: 'known_success', externalMessageRef: sent.externalMessageRef };
   }
 }
 
@@ -85,6 +106,7 @@ export interface AutoReplyProcessResult {
 export interface AutoReplyServiceOptions {
   enabled?: boolean;
   sendMode?: 'simulate' | 'live';
+  testBuyerNames?: string[];
   allowPaidOrderReply?: boolean;
   maxHistory?: number;
   maxReplyLength?: number;
@@ -96,6 +118,7 @@ export interface AutoReplyServiceOptions {
 export class AutoReplyService {
   private readonly enabled: boolean;
   private readonly sendMode: 'simulate' | 'live';
+  private readonly testBuyerNames: string[];
   private readonly allowPaidOrderReply: boolean;
   private readonly maxHistory: number;
   private readonly maxReplyLength: number;
@@ -111,6 +134,7 @@ export class AutoReplyService {
   ) {
     this.enabled = options.enabled ?? true;
     this.sendMode = options.sendMode ?? 'simulate';
+    this.testBuyerNames = [...new Set((options.testBuyerNames ?? []).map(normalizeBuyerName).filter((value): value is string => Boolean(value)))];
     this.allowPaidOrderReply = options.allowPaidOrderReply ?? false;
     this.maxHistory = Math.max(1, Math.min(options.maxHistory ?? 20, 50));
     this.maxReplyLength = Math.max(20, Math.min(options.maxReplyLength ?? 500, 2_000));
@@ -119,7 +143,7 @@ export class AutoReplyService {
     this.sender = options.sender ?? new NoopAutoReplySender();
   }
 
-  async processInbound(input: { adminId: string; conversationId: string; inboundMessageId: string; requestId?: string; traceId?: string }): Promise<AutoReplyProcessResult> {
+  async processInbound(input: { adminId: string; conversationId: string; inboundMessageId: string; senderName?: string; requestId?: string; traceId?: string }): Promise<AutoReplyProcessResult> {
     const traceId = input.traceId ?? `auto-reply:${input.inboundMessageId}`;
     const requestId = input.requestId ?? traceId;
     const conversation = await this.store.getConversation(input.adminId, input.conversationId);
@@ -145,6 +169,13 @@ export class AutoReplyService {
     try {
       if (!this.enabled || inboundMessage.direction !== 'inbound' || inboundMessage.bodyType !== 'text' || !inboundMessage.bodyText?.trim()) {
         const updated = await this.store.updateAutoReplyRun(run.id, { status: 'skipped', decision: 'skipped', failureCode: !this.enabled ? 'AUTO_REPLY_DISABLED' : 'UNSUPPORTED_MESSAGE' });
+        return { run: updated ?? run, inboundMessage };
+      }
+
+      const buyerName = normalizeBuyerName(input.senderName) ?? normalizeBuyerName(conversation.buyerDisplayName);
+      if (this.testBuyerNames.length > 0 && (!buyerName || !this.testBuyerNames.includes(buyerName))) {
+        const updated = await this.store.updateAutoReplyRun(run.id, { status: 'skipped', decision: 'skipped', failureCode: 'TEST_BUYER_NOT_ALLOWLISTED', riskFlags: ['test_buyer_not_allowlisted'] });
+        await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'skipped', reason: 'TEST_BUYER_NOT_ALLOWLISTED' });
         return { run: updated ?? run, inboundMessage };
       }
 
@@ -176,9 +207,9 @@ export class AutoReplyService {
 
       const replyDigest = digestJson({ reply });
       await this.store.updateAutoReplyRun(run.id, { status: 'generated', replyDigest });
-      const sent = await this.sender.send({ conversation, recipientRef: conversation.buyerRef, text: reply, mode: this.sendMode, traceId });
+      const sent = await this.sender.send({ adminId: input.adminId, accountId: conversation.accountId, requestId, conversation, recipientRef: conversation.buyerRef, text: reply, mode: this.sendMode, traceId });
       await this.store.updateAutoReplyRun(run.id, { status: 'simulated', senderOutcome: sent.outcome });
-      const outbound = await this.messages.createMessage({ adminId: input.adminId, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: reply, externalMessageRef: sent.externalMessageRef ?? `simulated:auto-reply:${inboundMessage.id}`, source: 'ai', productRef: context.product?.id, riskFlags: [...classification.riskFlags, ...(sent.outcome === 'simulated' ? ['simulated_send'] : [])], requestId, traceId });
+      const outbound = await this.messages.createMessage({ adminId: input.adminId, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: reply, externalMessageRef: sent.externalMessageRef ?? (sent.outcome === 'simulated' ? `simulated:auto-reply:${inboundMessage.id}` : undefined), source: 'ai', productRef: context.product?.id, riskFlags: [...classification.riskFlags, ...(sent.outcome === 'simulated' ? ['simulated_send'] : [])], requestId, traceId });
       const updated = await this.store.updateAutoReplyRun(run.id, { status: 'persisted', decision: 'replied', senderOutcome: sent.outcome, outboundMessageId: outbound.message.messageId });
       await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'replied', intent: classification.intent, senderOutcome: sent.outcome, outboundMessageId: outbound.message.messageId, contextDigest, replyDigest });
       return { run: updated ?? run, inboundMessage, outboundMessage: await this.findMessage(input.adminId, input.conversationId, outbound.message.messageId), classification, context };
@@ -207,9 +238,11 @@ export class AutoReplyService {
 
   private async findOrders(adminId: string, conversation: ConversationRecord): Promise<OrderRecord[]> {
     // The order list contract intentionally does not search by buyer id. Load
-    // the scoped account page, then apply exact ownership/context matching.
+    // the scoped account page, then retain only orders owned by this buyer or
+    // explicitly linked to this conversation. Item-only matches belong to
+    // other buyers and must never block or influence an AI reply.
     const result = await this.store.listOrders(adminId, { accountId: conversation.accountId, page: 1, pageSize: 100 });
-    return result.items.filter((order) => order.buyerId === conversation.buyerRef || order.conversationId === conversation.id || (conversation.itemRef !== undefined && order.itemId === conversation.itemRef));
+    return result.items.filter((order) => order.buyerId === conversation.buyerRef || order.conversationId === conversation.id);
   }
 
   private async findMessage(adminId: string, conversationId: string, messageId: string): Promise<MessageRecord | undefined> {
@@ -231,4 +264,9 @@ function normalizeReply(value: string | undefined, maxLength: number): string | 
 
 function containsSensitiveInstruction(value: string): boolean {
   return /(cookie|token|api\s*key|password|密码|验证码|系统提示|system\s*prompt)/i.test(value);
+}
+
+function normalizeBuyerName(value: string | undefined): string | undefined {
+  const normalized = value?.replace(/\s+/g, ' ').trim();
+  return normalized || undefined;
 }

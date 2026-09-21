@@ -50,6 +50,8 @@ services:
       REDIS_URL: redis://redis:6379
       COOKIE_SECURE: "false"
       ALLOW_IN_MEMORY: "false"
+      AUTO_REPLY_SEND_MODE: ${AUTO_REPLY_SEND_MODE:-simulate}
+      AUTO_REPLY_TEST_BUYER_NAMES: ${AUTO_REPLY_TEST_BUYER_NAMES:-[]}
     ports:
       - "8080:8080"
     depends_on:

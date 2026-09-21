@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 export type AgentRuntimeMode = 'pi' | 'in-process';
+export type AutoReplySendMode = 'simulate' | 'live';
 
 export interface AppConfig {
   host: string;
@@ -20,6 +21,8 @@ export interface AppConfig {
   modelName?: string;
   modelTimeoutMs: number;
   credentialEncryptionKey: string;
+  autoReplySendMode?: AutoReplySendMode;
+  autoReplyTestBuyerNames?: string[];
 }
 
 export const DEFAULT_DATABASE_URL = 'postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/xianyu_agent';
@@ -35,6 +38,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const modelApiKey = firstDefined(env.API_KEY, env.OPENAI_API_KEY, env.PI_API_KEY);
   const modelBaseUrl = firstDefined(env.BASE_URL, env.OPENAI_BASE_URL, env.PI_BASE_URL);
   const modelName = firstDefined(env.MODEL, env.OPENAI_MODEL, env.PI_MODEL);
+  const autoReplySendMode: AutoReplySendMode = env.AUTO_REPLY_SEND_MODE?.trim().toLowerCase() === 'live' ? 'live' : 'simulate';
+  const autoReplyTestBuyerNames = parseBuyerNames(env.AUTO_REPLY_TEST_BUYER_NAMES);
+  if (autoReplySendMode === 'live' && autoReplyTestBuyerNames.length === 0) {
+    throw new Error('AUTO_REPLY_LIVE_REQUIRES_BUYER_ALLOWLIST');
+  }
   const configuredRuntime = env.AGENT_RUNTIME?.trim().toLowerCase();
   const agentRuntime: AgentRuntimeMode = configuredRuntime === 'in-process'
     ? 'in-process'
@@ -58,6 +66,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     modelName,
     modelTimeoutMs: positiveNumber(env.MODEL_TIMEOUT_MS, 60_000),
     credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY?.trim() || 'development-only-credential-key-change-me',
+    autoReplySendMode,
+    autoReplyTestBuyerNames,
   };
 }
 
@@ -68,6 +78,30 @@ function firstDefined(...values: Array<string | undefined>): string | undefined 
 function positiveNumber(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function normalizeBuyerName(value: string): string | undefined {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  return normalized || undefined;
+}
+
+function parseBuyerNames(value: string | undefined): string[] {
+  const raw = value?.trim();
+  if (!raw) return [];
+  const candidates: unknown[] = raw.startsWith('[')
+    ? (() => {
+      try {
+        const parsed = JSON.parse(raw) as unknown;
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    })()
+    : raw.split(',');
+  return [...new Set(candidates
+    .filter((candidate): candidate is string => typeof candidate === 'string')
+    .map(normalizeBuyerName)
+    .filter((candidate): candidate is string => Boolean(candidate)))];
 }
 
 function loadLocalEnvFile(): void {

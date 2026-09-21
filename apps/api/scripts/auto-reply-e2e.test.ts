@@ -15,6 +15,8 @@ test('xianyu listener drives product and general auto-reply chains without real 
     COOKIE_SECURE: 'false',
     XIANYU_QR_MODE: 'stub',
     AGENT_RUNTIME: 'in-process',
+    AUTO_REPLY_SEND_MODE: 'simulate',
+    AUTO_REPLY_TEST_BUYER_NAMES: '一只橘喵喵亮晶晶',
   }));
   await runtime.listen();
   let client: XianyuImClient | undefined;
@@ -25,12 +27,13 @@ test('xianyu listener drives product and general auto-reply chains without real 
     const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: 'seller-1', displayName: '测试店铺' });
     await runtime.store.upsertCredential({ adminId, accountId: account.id, platform: 'xianyu', cookieHeader: 'unb=seller-1', accessToken: 'access-token', deviceId: 'device-1' });
     const product = await runtime.store.createProduct({ adminId, accountId: account.id, externalProductRef: 'item-1', title: '资料包', description: '数字资料', priceMinor: 1_999, status: 'draft' });
-    const productConversation = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'buyer-1', buyerDisplayName: '买家一号', itemRef: 'item-1', itemTitle: '资料包', externalConversationRef: 'conv-product' });
-    const generalConversation = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'buyer-2', buyerDisplayName: '买家二号', externalConversationRef: 'conv-general' });
-    const order = await runtime.store.createOrder({ adminId, order: { orderNo: 'ORDER-AUTO-1', accountId: account.id, buyerId: 'buyer-1', buyerName: '买家一号', conversationId: productConversation.id, itemId: 'item-1', itemTitle: '资料包', amountMinor: 1_999, paymentStatus: 'unpaid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'manual' } });
+    const productConversation = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'buyer-1', buyerDisplayName: '一只橘喵喵亮晶晶', itemRef: 'item-1', itemTitle: '资料包', externalConversationRef: 'conv-product' });
+    const blockedConversation = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'buyer-3', buyerDisplayName: '其他买家', externalConversationRef: 'conv-blocked' });
+    const order = await runtime.store.createOrder({ adminId, order: { orderNo: 'ORDER-AUTO-1', accountId: account.id, buyerId: 'buyer-1', buyerName: '一只橘喵喵亮晶晶', conversationId: productConversation.id, itemId: 'item-1', itemTitle: '资料包', amountMinor: 1_999, paymentStatus: 'unpaid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'manual' } });
+    await runtime.store.createOrder({ adminId, order: { orderNo: 'ORDER-AUTO-OTHER-PAID', accountId: account.id, buyerId: 'buyer-other', itemId: 'item-1', itemTitle: '资料包', amountMinor: 1_999, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'manual' } });
 
     const socket = new FakeSocket();
-    const completed: Array<{ created: boolean; autoReply?: { run: { status: string; decision: string; intent: string; senderOutcome?: string; productId?: string; outboundMessageId?: string }; inboundMessage: { id: string }; outboundMessage?: { bodyText?: string } } }> = [];
+    const completed: Array<{ created: boolean; autoReply?: { run: { status: string; decision: string; intent: string; senderOutcome?: string; failureCode?: string; productId?: string; outboundMessageId?: string }; inboundMessage: { id: string }; outboundMessage?: { bodyText?: string } } }> = [];
     client = new XianyuImClient({
       accountId: account.id,
       credential: { cookieHeader: 'unb=seller-1', accessToken: 'access-token', deviceId: 'device-1' },
@@ -47,7 +50,7 @@ test('xianyu listener drives product and general auto-reply chains without real 
     await connectPromise;
     assert.equal(client.connected, true);
 
-    socket.emit('message', pushFrame('push-product-1', 'conv-product', 'inbound-product-1.PNM', 'buyer-1', '请问多少钱？'));
+    socket.emit('message', pushFrame('push-product-1', 'conv-product', 'inbound-product-1.PNM', 'buyer-1', '请问多少钱？', '一只橘喵喵亮晶晶'));
     await waitFor(() => completed.length >= 1);
     const productResult = completed[0]!;
     assert.equal(productResult.created, true);
@@ -57,6 +60,7 @@ test('xianyu listener drives product and general auto-reply chains without real 
     assert.equal(productResult.autoReply?.run.senderOutcome, 'simulated');
     assert.equal(productResult.autoReply?.run.productId, product.id);
     assert.equal(productResult.autoReply?.context?.orders.some((candidate) => candidate.orderNo === order.orderNo), true);
+    assert.equal(productResult.autoReply?.context?.orders.some((candidate) => candidate.orderNo === 'ORDER-AUTO-OTHER-PAID'), false);
     assert.match(productResult.autoReply?.outboundMessage?.bodyText ?? '', /资料包当前价格是19\.99元/);
 
     const productMessages = await runtime.messages.listMessages(adminId, productConversation.id, { limit: 20 });
@@ -65,7 +69,7 @@ test('xianyu listener drives product and general auto-reply chains without real 
     assert.equal(productMessages.items.find((message) => message.direction === 'outbound')?.source, 'ai');
     assert.equal((await runtime.store.findAutoReplyRunByInboundMessage(adminId, productResult.autoReply!.inboundMessage.id))?.outboundMessageId, productResult.autoReply?.run.outboundMessageId);
 
-    socket.emit('message', pushFrame('push-general-1', 'conv-general', 'inbound-general-1.PNM', 'buyer-2', '你好'));
+    socket.emit('message', pushFrame('push-general-1', 'conv-general', 'inbound-general-1.PNM', 'buyer-2', '你好', '一只橘喵喵亮晶晶'));
     await waitFor(() => completed.length >= 2);
     const generalResult = completed[1]!;
     assert.equal(generalResult.created, true);
@@ -73,12 +77,21 @@ test('xianyu listener drives product and general auto-reply chains without real 
     assert.equal(generalResult.autoReply?.run.status, 'persisted');
     assert.equal(generalResult.autoReply?.run.productId, undefined);
     assert.match(generalResult.autoReply?.outboundMessage?.bodyText ?? '', /已收到你的消息/);
+    const generalConversation = await runtime.store.findConversationByExternalRef(adminId, account.id, 'conv-general');
+    assert.ok(generalConversation);
     const generalMessages = await runtime.messages.listMessages(adminId, generalConversation.id, { limit: 20 });
     assert.equal(generalMessages.items.filter((message) => message.direction === 'outbound').length, 1);
 
-    socket.emit('message', pushFrame('push-product-duplicate', 'conv-product', 'inbound-product-1.PNM', 'buyer-1', '请问多少钱？'));
+    socket.emit('message', pushFrame('push-blocked-1', 'conv-blocked', 'inbound-blocked-1.PNM', 'buyer-3', '你好', '其他买家'));
     await waitFor(() => completed.length >= 3);
-    assert.equal(completed[2]?.created, false);
+    assert.equal(completed[2]?.created, true);
+    assert.equal(completed[2]?.autoReply?.run.status, 'skipped');
+    assert.equal(completed[2]?.autoReply?.run.failureCode, 'TEST_BUYER_NOT_ALLOWLISTED');
+    assert.equal((await runtime.messages.listMessages(adminId, blockedConversation.id, { limit: 20 })).items.filter((message) => message.direction === 'outbound').length, 0);
+
+    socket.emit('message', pushFrame('push-product-duplicate', 'conv-product', 'inbound-product-1.PNM', 'buyer-1', '请问多少钱？', '一只橘喵喵亮晶晶'));
+    await waitFor(() => completed.length >= 4);
+    assert.equal(completed[3]?.created, false);
     assert.equal((await runtime.messages.listMessages(adminId, productConversation.id, { limit: 20 })).items.filter((message) => message.direction === 'outbound').length, 1);
 
     const sendRequests = socket.sent.filter((message) => message.lwp === '/r/MessageSend/sendByReceiverScope');
@@ -95,7 +108,7 @@ test('xianyu listener drives product and general auto-reply chains without real 
   }
 });
 
-function pushFrame(mid: string, conversationRef: string, messageRef: string, senderRef: string, text: string): string {
+function pushFrame(mid: string, conversationRef: string, messageRef: string, senderRef: string, text: string, senderName: string): string {
   const content = Buffer.from(JSON.stringify({ contentType: 1, text: { text } }), 'utf8').toString('base64');
   const payload = {
     '1': {
@@ -103,7 +116,7 @@ function pushFrame(mid: string, conversationRef: string, messageRef: string, sen
       '3': messageRef,
       '5': Date.now(),
       '6': { '3': { '5': content } },
-      '10': { senderUserId: senderRef, extJson: JSON.stringify({ messageId: messageRef }) },
+      '10': { senderUserId: senderRef, senderNick: senderName, extJson: JSON.stringify({ messageId: messageRef }) },
     },
   };
   const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');

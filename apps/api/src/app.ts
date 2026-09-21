@@ -20,7 +20,7 @@ import { InProcessAgentRuntime, isTerminalRunStatus, WorkspaceService, type Work
 import { OpenAICompatibleModelClient, PiRuntimeAdapter } from './pi-runtime.js';
 import { ApiKeyCredentialService } from './credential-store.js';
 import { DashboardService } from './dashboard.js';
-import { AutoReplyService } from './auto-reply.js';
+import { AutoReplyService, ExternalAutoReplySender } from './auto-reply.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -48,6 +48,9 @@ export interface AppRuntime {
 }
 
 export function createApp(config: AppConfig = loadConfig()): AppRuntime {
+  if (config.autoReplySendMode === 'live' && !(config.autoReplyTestBuyerNames?.length)) {
+    throw new Error('AUTO_REPLY_LIVE_REQUIRES_BUYER_ALLOWLIST');
+  }
   const store = createStore(config);
   const auth = new AuthService(store, config);
   const accounts = new AccountService(store, async (input) => {
@@ -86,11 +89,19 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   }, realtime, (event) => redisRealtime?.publish(event));
+  let xianyuIm!: XianyuImService;
   const autoReply = new AutoReplyService(store, messages, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
-  }, { sendMode: 'simulate' });
+  }, {
+    sendMode: config.autoReplySendMode ?? 'simulate',
+    testBuyerNames: config.autoReplyTestBuyerNames,
+    sender: new ExternalAutoReplySender(async (input) => {
+      if (!xianyuIm) throw new Error('XIANYU_IM_NOT_READY');
+      return xianyuIm.sendExternalText(input.adminId, input.accountId, input.conversation.id, input.text, input.requestId, input.traceId);
+    }),
+  });
   let xianyu: XianyuMtopClient;
   let productSync: ProductSyncService;
   const qrLogin = new XianyuQrLoginAdapter({
@@ -125,6 +136,10 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       await credentials.verify({ adminId, accountId: resolvedAccountId, status: 'active', requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
       await hydrateAccountProfile({ accounts, xianyu, adminId, accountId: resolvedAccountId, fallbackSellerRef: unb, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
       await accounts.updateLoginSession({ adminId, accountId: resolvedAccountId, sessionId, patch: { status: 'succeeded', completedAt: new Date().toISOString(), failureCode: undefined }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+      // Start the push listener as soon as QR login is fully verified. Keep
+      // listener failure best-effort so a transient WebSocket outage does not
+      // roll back an otherwise successful login.
+      void xianyuIm.startListener(adminId, resolvedAccountId).catch(() => undefined);
     },
   });
   xianyu = new XianyuMtopClient({
@@ -145,7 +160,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   });
-  const xianyuIm = new XianyuImService(store, xianyu, messages, autoReply);
+  xianyuIm = new XianyuImService(store, xianyu, messages, autoReply);
 
   const wsServer = new WebSocketServer({ noServer: true });
   const workspaceRuntime: WorkspaceRuntime = config.agentRuntime === 'pi'
@@ -190,6 +205,25 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     if (context) void attachConversationSocket(runtime, socket, request, context);
   });
   return runtime;
+}
+
+async function startXianyuListenerBestEffort(runtime: AppRuntime, adminId: string, accountId: string): Promise<void> {
+  try {
+    await runtime.xianyuIm.startListener(adminId, accountId);
+  } catch {
+    // Login/credential writes remain authoritative. The next conversation
+    // operation can retry listener startup if the external WebSocket is down.
+  }
+}
+
+async function startConnectedListenersBestEffort(runtime: AppRuntime, adminId: string): Promise<void> {
+  try {
+    const connected = await runtime.accounts.list(adminId, { status: 'connected', page: 1, pageSize: 100 });
+    await Promise.all(connected.items.map((account) => startXianyuListenerBestEffort(runtime, adminId, account.id)));
+  } catch {
+    // Session bootstrap must remain available even when the external IM
+    // service is temporarily unavailable; each account can retry later.
+  }
 }
 
 function createPiWorkspaceRuntime(config: AppConfig, store: Store): WorkspaceRuntime {
@@ -244,6 +278,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     const authContext = await auth.contextFromSession(ctx.cookies.session_id);
     if (!authContext) return { statusCode: 200, body: success(ctx, { authenticated: false, bootstrapRequired: await auth.getBootstrapRequired() }).body };
     setSessionCookies(response, authContext.csrfToken, authContext.session.id, config.cookieSecure);
+    if (config.xianyuQrMode === 'real') void startConnectedListenersBestEffort(runtime, authContext.admin.id);
     return { statusCode: 200, body: success(ctx, { authenticated: true, bootstrapRequired: false, session: { id: authContext.session.id, expiresAt: authContext.session.expiresAt }, ...(await auth.sessionView(authContext)) }).body };
   }
   if (ctx.path === '/api/v1/auth/bootstrap' && ctx.method === 'POST') {
@@ -477,6 +512,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
         await credentials.verify({ adminId: authContext.admin.id, accountId: account.id, status: 'active', requestId: ctx.requestId, traceId: ctx.traceId });
         await hydrateAccountProfile({ accounts, xianyu: runtime.xianyu, adminId: authContext.admin.id, accountId: account.id, fallbackSellerRef: unb, requestId: ctx.requestId, traceId: ctx.traceId });
         const completed = await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId: account.id, sessionId: loginSession.id, patch: { status: 'succeeded', completedAt: new Date().toISOString(), failureCode: undefined }, requestId: ctx.requestId, traceId: ctx.traceId });
+        void startXianyuListenerBestEffort(runtime, authContext.admin.id, account.id);
         return success(ctx, { account: await accounts.get(authContext.admin.id, account.id), session: completed }, 201);
       } catch (error) {
         if (error instanceof ServiceError) throw error;
@@ -509,12 +545,17 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
           requestId: ctx.requestId,
           traceId: ctx.traceId,
         });
+        void startXianyuListenerBestEffort(runtime, authContext.admin.id, accountId);
         return success(ctx, credentialMutationView(credential));
       });
       return result;
     }
     if (action === 'revoke' && (ctx.method === 'POST' || ctx.method === 'DELETE')) return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, credentialMutationView(await credentials.revoke({ adminId: authContext.admin.id, accountId, requestId: ctx.requestId, traceId: ctx.traceId }))));
-    if (action === 'verify' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, credentialMutationView(await credentials.verify({ adminId: authContext.admin.id, accountId, status: (typeof ctx.body.status === 'string' ? ctx.body.status : 'active') as never, expiresAt: typeof ctx.body.expiresAt === 'string' ? ctx.body.expiresAt : undefined, requestId: ctx.requestId, traceId: ctx.traceId }))));
+    if (action === 'verify' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, accountId, async () => {
+      const credential = await credentials.verify({ adminId: authContext.admin.id, accountId, status: (typeof ctx.body.status === 'string' ? ctx.body.status : 'active') as never, expiresAt: typeof ctx.body.expiresAt === 'string' ? ctx.body.expiresAt : undefined, requestId: ctx.requestId, traceId: ctx.traceId });
+      if (credential.status === 'active') void startXianyuListenerBestEffort(runtime, authContext.admin.id, accountId);
+      return success(ctx, credentialMutationView(credential));
+    });
   }
   if (loginSessionMatch) {
     const accountId = decodeURIComponent(loginSessionMatch[1]);
@@ -560,6 +601,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
         requestId: ctx.requestId,
         traceId: ctx.traceId,
       });
+      if (result.credential.status === 'active') void startXianyuListenerBestEffort(runtime, authContext.admin.id, accountId);
       return success(ctx, { session: result.session, credential: credentialMutationView(result.credential) });
     });
   }
@@ -587,6 +629,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
         const verification = await runtime.xianyu.verifyLogin(authContext.admin.id, accountId);
         if (verification.success) {
           await credentials.verify({ adminId: authContext.admin.id, accountId, status: 'active', requestId: ctx.requestId, traceId: ctx.traceId });
+          void startXianyuListenerBestEffort(runtime, authContext.admin.id, accountId);
         } else if (verification.accountInvalid) {
           const status = verification.errorCode === 'SESSION_EXPIRED' ? 'expired' : 'revoked';
           try { await credentials.verify({ adminId: authContext.admin.id, accountId, status, requestId: ctx.requestId, traceId: ctx.traceId }); } catch { /* missing credential remains a verification failure */ }

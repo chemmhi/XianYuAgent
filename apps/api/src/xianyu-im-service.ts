@@ -96,14 +96,21 @@ export class XianyuImService {
     return this.messages.markConversationRead(adminId, conversationId, requestId, traceId);
   }
 
-  async sendText(adminId: string, accountId: string, conversationId: string, text: string, requestId: string, traceId: string): Promise<unknown> {
+  async sendExternalText(adminId: string, accountId: string, conversationId: string, text: string, requestId: string, traceId: string): Promise<{ externalMessageRef?: string }> {
     const normalizedText = text.trim();
     if (!normalizedText) throw new ServiceError(422, 'VALIDATION_FAILED', 'text is required');
     const conversation = await this.getConversation(adminId, accountId, conversationId);
     const externalRef = conversation.externalConversationRef;
     if (!externalRef) throw new ServiceError(409, 'EXTERNAL_CONVERSATION_MISSING', 'conversation is not linked to xianyu');
     const client = await this.ensureClient(adminId, accountId);
-    const sent = await client.sendText(externalRef, conversation.buyerRef, normalizedText);
+    return client.sendText(externalRef, conversation.buyerRef, normalizedText);
+  }
+
+  async sendText(adminId: string, accountId: string, conversationId: string, text: string, requestId: string, traceId: string): Promise<unknown> {
+    const normalizedText = text.trim();
+    if (!normalizedText) throw new ServiceError(422, 'VALIDATION_FAILED', 'text is required');
+    const conversation = await this.getConversation(adminId, accountId, conversationId);
+    const sent = await this.sendExternalText(adminId, accountId, conversationId, normalizedText, requestId, traceId);
     const created = await this.messages.createMessage({
       adminId,
       conversationId,
@@ -150,6 +157,20 @@ export class XianyuImService {
     this.clients.clear();
     this.identityCache.clear();
     await Promise.all(clients.map((client) => client.disconnect()));
+  }
+
+  /**
+   * Start (or re-use) the account-scoped IM listener.
+   *
+   * The listener used to be created only as a side effect of a conversation
+   * query/send operation. That meant a freshly connected account could sit
+   * idle until an operator opened the chat page, so push events (and the
+   * automatic-reply pipeline) were never observed. Keep the lifecycle entry
+   * point explicit so the application can start it immediately after a
+   * credential becomes active without duplicating client construction.
+   */
+  async startListener(adminId: string, accountId: string): Promise<void> {
+    await this.ensureClient(adminId, accountId);
   }
 
   private async getConversation(adminId: string, accountId: string, conversationId: string): Promise<ConversationRecord> {
@@ -230,7 +251,19 @@ export class XianyuImService {
       });
       return { created: false };
     }
-    const conversation = await this.store.findConversationByExternalRef(adminId, event.accountId, event.externalConversationRef);
+    let conversation = await this.store.findConversationByExternalRef(adminId, event.accountId, event.externalConversationRef);
+    if (!conversation && event.direction === 'inbound') {
+      conversation = await this.store.upsertExternalConversation({
+        adminId,
+        accountId: event.accountId,
+        externalConversationRef: event.externalConversationRef,
+        buyerRef: event.senderRef,
+        buyerDisplayName: event.senderName,
+        unreadCount: 0,
+        lastMessagePreview: event.bodyText,
+        lastMessageAt: event.occurredAt,
+      });
+    }
     if (!conversation) return { created: false };
     const imported = await this.messages.importExternalMessage({
       adminId,
@@ -246,7 +279,7 @@ export class XianyuImService {
       traceId: `xianyu:push:${event.externalMessageRef}`,
     });
     if (!imported.created || event.direction !== 'inbound' || event.bodyType !== 'text' || !this.autoReply) return { created: imported.created };
-    const autoReply = await this.autoReply.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: imported.message.messageId, requestId: `xianyu:auto-reply:${event.externalMessageRef}`, traceId: `xianyu:auto-reply:${event.externalMessageRef}` });
+    const autoReply = await this.autoReply.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: imported.message.messageId, senderName: event.senderName, requestId: `xianyu:auto-reply:${event.externalMessageRef}`, traceId: `xianyu:auto-reply:${event.externalMessageRef}` });
     return { created: imported.created, autoReply };
   }
 }
