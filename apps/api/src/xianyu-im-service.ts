@@ -12,6 +12,7 @@ interface ExternalPage {
 
 export class XianyuImService {
   private readonly clients = new Map<string, XianyuImClient>();
+  private readonly clientInFlight = new Map<string, Promise<XianyuImClient>>();
   private readonly identityCache = new Map<string, { buyerDisplayName?: string; buyerAvatarUrl?: string }>();
 
   constructor(private readonly store: Store, private readonly mtop: XianyuMtopClient, private readonly messages: MessageService, private readonly autoReply?: AutoReplyService) {}
@@ -153,10 +154,15 @@ export class XianyuImService {
   }
 
   async close(): Promise<void> {
-    const clients = [...this.clients.values()];
+    const inFlight = [...this.clientInFlight.values()];
+    this.clientInFlight.clear();
+    const clients = new Set(this.clients.values());
     this.clients.clear();
     this.identityCache.clear();
-    await Promise.all(clients.map((client) => client.disconnect()));
+    await Promise.allSettled(inFlight);
+    for (const client of this.clients.values()) clients.add(client);
+    this.clients.clear();
+    await Promise.all([...clients].map((client) => client.disconnect()));
   }
 
   /**
@@ -183,25 +189,38 @@ export class XianyuImService {
     const key = `${adminId}:${accountId}`;
     const existing = this.clients.get(key);
     if (existing) {
-      try { await existing.connect(); return existing; } catch { this.clients.delete(key); }
+      try { await existing.connect(); return existing; } catch {
+        if (this.clients.get(key) === existing) this.clients.delete(key);
+      }
     }
-    const account = await this.store.getAccount(adminId, accountId);
-    if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found');
-    let credential = await this.store.getCredential(adminId, accountId);
-    if (!credential?.cookieHeader) throw new ServiceError(409, 'CREDENTIAL_MISSING', 'account credential is missing');
-    if (!credential.accessToken) credential = await this.refreshCredential(adminId, account, credential);
-    const client = new XianyuImClient({
-      accountId,
-      credential: toImCredential(credential),
-      onEvent: async (event) => { await this.handleExternalEvent(adminId, event); },
-      saveCredential: async (next) => { await this.saveCredential(adminId, account, next); },
-    });
-    try { await client.connect(); } catch (error) {
-      this.clients.delete(key);
-      throw error;
+    const inFlight = this.clientInFlight.get(key);
+    if (inFlight) return inFlight;
+
+    const connectPromise = (async () => {
+      const account = await this.store.getAccount(adminId, accountId);
+      if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found');
+      let credential = await this.store.getCredential(adminId, accountId);
+      if (!credential?.cookieHeader) throw new ServiceError(409, 'CREDENTIAL_MISSING', 'account credential is missing');
+      if (!credential.accessToken) credential = await this.refreshCredential(adminId, account, credential);
+      const client = new XianyuImClient({
+        accountId,
+        credential: toImCredential(credential),
+        onEvent: async (event) => { await this.handleExternalEvent(adminId, event); },
+        saveCredential: async (next) => { await this.saveCredential(adminId, account, next); },
+      });
+      try { await client.connect(); } catch (error) {
+        if (this.clients.get(key) === client) this.clients.delete(key);
+        throw error;
+      }
+      this.clients.set(key, client);
+      return client;
+    })();
+    this.clientInFlight.set(key, connectPromise);
+    try {
+      return await connectPromise;
+    } finally {
+      if (this.clientInFlight.get(key) === connectPromise) this.clientInFlight.delete(key);
     }
-    this.clients.set(key, client);
-    return client;
   }
 
   private async refreshCredential(adminId: string, account: AccountRecord, credential: CredentialRecord): Promise<CredentialRecord> {

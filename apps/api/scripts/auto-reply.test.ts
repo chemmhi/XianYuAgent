@@ -3,6 +3,7 @@ import test from 'node:test';
 import { ExternalAutoReplySender, RuleBasedIntentClassifier, TemplateAutoReplyGenerator, type AutoReplyContext } from '../src/auto-reply.js';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
+import { XianyuImClient } from '../src/xianyu-im.js';
 import { XianyuImService } from '../src/xianyu-im-service.js';
 
 test('classifies safe commerce questions before generic fallback', () => {
@@ -62,6 +63,63 @@ test('listener startup delegates to the account-scoped client bootstrap', async 
   assert.deepEqual(calls, ['admin-1:account-1']);
 });
 
+test('concurrent listener startup shares one account-scoped client connection', async () => {
+  const account = { id: 'account-1', platform: 'xianyu', sellerRef: 'seller-1', status: 'connected', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  const credential = { id: 'credential-1', accountId: account.id, platform: 'xianyu', status: 'active', cookieHeader: 'unb=seller-1', accessToken: 'token-1', metadata: {}, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  const store = {
+    getAccount: async () => account,
+    getCredential: async () => credential,
+  } as never;
+  const service = new XianyuImService(store, {} as never, {} as never);
+  const originalConnect = XianyuImClient.prototype.connect;
+  let connectCalls = 0;
+  let releaseConnect!: () => void;
+  const connectReleased = new Promise<void>((resolve) => { releaseConnect = resolve; });
+  XianyuImClient.prototype.connect = async function connectForTest() {
+    connectCalls += 1;
+    await connectReleased;
+  };
+  try {
+    const first = service.startListener('admin-1', account.id);
+    const second = service.startListener('admin-1', account.id);
+    for (let attempt = 0; attempt < 20 && connectCalls === 0; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(connectCalls, 1);
+    releaseConnect();
+    await Promise.all([first, second]);
+  } finally {
+    releaseConnect();
+    XianyuImClient.prototype.connect = originalConnect;
+    await service.close();
+  }
+});
+
+test('history synchronization imports messages without entering auto-reply', async () => {
+  const imported: string[] = [];
+  const autoReplyCalls: string[] = [];
+  const service = new XianyuImService({} as never, {} as never, {
+    importExternalMessage: async (input: { externalMessageRef: string }) => {
+      imported.push(input.externalMessageRef);
+      return { created: true, message: { id: 'message-1' } } as never;
+    },
+  } as never, {
+    processInbound: async () => { autoReplyCalls.push('called'); return undefined; },
+  } as never);
+  const unsafe = service as unknown as {
+    getConversation: () => Promise<{ id: string; accountId: string; externalConversationRef: string }>;
+    ensureClient: () => Promise<{ listMessages: () => Promise<{ userMessageModels: unknown[]; hasMore: boolean }> }>;
+  };
+  unsafe.getConversation = async () => ({ id: 'conversation-1', accountId: 'account-1', externalConversationRef: 'conv-1' });
+  unsafe.ensureClient = async () => ({ listMessages: async () => ({
+    userMessageModels: [{ message: { messageId: 'history-1.PNM', senderUserId: 'buyer-1', createAt: Date.now(), content: { custom: { data: Buffer.from(JSON.stringify({ contentType: 1, text: { text: '历史消息' } }), 'utf8').toString('base64') } } } }],
+    hasMore: false,
+  }) });
+
+  await service.listMessages('admin-1', 'account-1', 'conversation-1');
+  assert.deepEqual(imported, ['history-1.PNM']);
+  assert.deepEqual(autoReplyCalls, []);
+  await service.close();
+});
+
 test('live auto-reply requires an explicit buyer allowlist', () => {
   assert.throws(
     () => loadConfig({ AUTO_REPLY_SEND_MODE: 'live' }),
@@ -95,4 +153,39 @@ test('app startup scans connected accounts without an auth page request', async 
   for (let attempt = 0; attempt < 50 && calls.length === 0; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
   assert.deepEqual(calls, [`${admin.id}:${account.id}`]);
   await runtime.close();
+});
+
+test('app startup retries a failed connected listener with bounded backoff', async () => {
+  const runtime = createApp(loadConfig({
+    HOST: '127.0.0.1',
+    PORT: '0',
+    DATABASE_URL: '',
+    REDIS_URL: '',
+    ALLOW_IN_MEMORY: 'true',
+    COOKIE_SECURE: 'false',
+    XIANYU_QR_MODE: 'real',
+    AGENT_RUNTIME: 'in-process',
+    AUTO_REPLY_SEND_MODE: 'simulate',
+  }));
+  const calls: string[] = [];
+  const warnings: unknown[] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => { warnings.push(args); };
+  runtime.xianyuIm.startListener = async (adminId, accountId) => {
+    calls.push(`${adminId}:${accountId}`);
+    if (calls.length < 3) throw new Error('credential=must-not-be-logged');
+  };
+  try {
+    const admin = await runtime.store.createAdmin({ email: 'startup-listener-retry@example.com', passwordHash: 'hash', displayName: 'Startup Listener Retry' });
+    const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'startup-retry-seller' });
+    await runtime.store.updateAccount(admin.id, account.id, { status: 'connected' });
+    await runtime.listen();
+    for (let attempt = 0; attempt < 80 && calls.length < 3; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(calls, [`${admin.id}:${account.id}`, `${admin.id}:${account.id}`, `${admin.id}:${account.id}`]);
+    assert.equal(warnings.length, 2);
+    assert.doesNotMatch(JSON.stringify(warnings), /must-not-be-logged/);
+  } finally {
+    console.warn = originalWarn;
+    await runtime.close();
+  }
 });

@@ -404,3 +404,13 @@
 | S5-R72 | 质量 / 安全 / 运维 | 是否禁止真实闲鱼发送，敏感正文是否不进入运行记录，重复事件是否不重复出站，完整门禁是否通过 | root + postgres_verify | PASS（受控验证） | E2E 断言 `/r/MessageSend/sendByReceiverScope` 调用为 0；PostgreSQL 关闭/重启后回读 `messages.messages` 与 `messages.auto_reply_runs`；`npm run typecheck`、`npm test`、`npm run build`、`npm run compose:config`、`git diff --check` |
 
 本轮结论：自动回复 dry-run 纵向切片通过。其科学链路不是无条件直通，而是“事实先落库、风险先门禁、上下文分层、生成受事实约束、Noop 投递、审计回读”；真实发送、模型 Provider、Outbox Worker、人工接管 API 和发布级恢复继续保持后置范围。
+
+### 2026-09-21：真实闲鱼网关 push 路径复核
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R73 | 外部平台 / 数据流 | 历史同步是否与买家网关 push 分离；响应与同帧 `syncPushPackage` 是否都被处理；非 200 响应是否不会被误当成功 | root + gateway_path | PASS（适配器层） | `apps/api/src/xianyu-im.ts`、`apps/api/scripts/xianyu-im-gateway.test.ts`：5/5；真实 DB 凭证 probe 连接、历史读取、`/s/vulcan` 同步帧与 ACK 证据 |
+| S5-R74 | 运行时 / 可恢复性 | 应用启动是否自动恢复 listener，多个账号是否串行、单飞且有限重试；连接关闭后是否自动重连 | root + listener_fix | PASS（受控验证） | `apps/api/src/app.ts`、`apps/api/src/xianyu-im-service.ts`、`apps/api/scripts/auto-reply.test.ts`：11/11；`xianyu-im-gateway.test.ts`：断线重连通过 |
+| S5-R75 | 业务 / 真实验收 | 是否已有真实买家 WebSocket push 驱动自动回复和 live 发送的完整证据 | root | BLOCKED / PARTIALLY_VERIFIED | 当前 `4310178918003.PNM` 仅存在历史导入消息，`auto_reply_runs` 为空；DB probe 未收到新的买家消息，禁止用合成事件代替 |
+
+本轮结论：已修复网关混合帧丢失、错误响应误判、并发启动和断线恢复问题；当前应用会在启动后自动监听，不依赖管理员打开页面。真实买家 push→自动回复→真实发送仍需在 probe 等待窗口内由闲鱼外部买家产生新消息后单独归档。

@@ -211,34 +211,48 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
 }
 
 async function startXianyuListenerBestEffort(runtime: AppRuntime, adminId: string, accountId: string): Promise<void> {
-  try {
-    await runtime.xianyuIm.startListener(adminId, accountId);
-  } catch {
-    // Login/credential writes remain authoritative. The next conversation
-    // operation can retry listener startup if the external WebSocket is down.
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await runtime.xianyuIm.startListener(adminId, accountId);
+      return;
+    } catch (error) {
+      const retryInMs = attempt < maxAttempts ? 100 * 2 ** (attempt - 1) : 0;
+      console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'start_failed', adminId, accountId, attempt, maxAttempts, retryInMs, errorCode: listenerErrorCode(error) }));
+      if (retryInMs > 0) await delay(retryInMs);
+    }
   }
 }
 
 async function startConnectedListenersBestEffort(runtime: AppRuntime, adminId: string): Promise<void> {
   try {
     const connected = await runtime.accounts.list(adminId, { status: 'connected', page: 1, pageSize: 100 });
-    await Promise.all(connected.items.map((account) => startXianyuListenerBestEffort(runtime, adminId, account.id)));
-  } catch {
-    // Session bootstrap must remain available even when the external IM
-    // service is temporarily unavailable; each account can retry later.
+    for (const account of connected.items) await startXianyuListenerBestEffort(runtime, adminId, account.id);
+  } catch (error) {
+    console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'account_scan_failed', adminId, errorCode: listenerErrorCode(error) }));
   }
 }
 
 async function startAllConnectedListenersBestEffort(runtime: AppRuntime): Promise<void> {
   try {
     const adminIds = await runtime.store.listAdminIds();
-    await Promise.all(adminIds.map((adminId) => startConnectedListenersBestEffort(runtime, adminId)));
-  } catch {
-    // Startup remains available when the database or external IM is briefly
-    // unavailable; the next process restart or credential/session action retries.
+    for (const adminId of adminIds) await startConnectedListenersBestEffort(runtime, adminId);
+  } catch (error) {
+    console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'admin_scan_failed', errorCode: listenerErrorCode(error) }));
   }
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function listenerErrorCode(error: unknown): string {
+  const candidate = error as { code?: unknown } | null;
+  if (typeof candidate?.code === 'string' && /^[A-Z0-9_:-]{1,64}$/.test(candidate.code)) return candidate.code;
+  if (typeof candidate?.code === 'number' && Number.isFinite(candidate.code)) return `REMOTE_${candidate.code}`;
+  if (error instanceof Error && error.name) return error.name;
+  return 'UNKNOWN_ERROR';
+}
 function createPiWorkspaceRuntime(config: AppConfig, store: Store): WorkspaceRuntime {
   if (!config.modelApiKey || !config.modelBaseUrl || !config.modelName) throw new Error('PI_RUNTIME_CONFIG_MISSING');
   const modelClient = new OpenAICompatibleModelClient({ apiKey: config.modelApiKey, baseUrl: config.modelBaseUrl, model: config.modelName, timeoutMs: config.modelTimeoutMs });

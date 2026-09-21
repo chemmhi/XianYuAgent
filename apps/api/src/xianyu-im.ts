@@ -108,6 +108,9 @@ export class XianyuImClient {
   private readonly pending = new Map<string, PendingRequest>();
   private socket?: ImWebSocket;
   private heartbeatTimer?: ReturnType<typeof setInterval>;
+  private reconnectTimer?: ReturnType<typeof setTimeout>;
+  private reconnectAttempt = 0;
+  private reconnectEnabled = true;
   private connectionGeneration = 0;
   private connectPromise?: Promise<void>;
   private myId: string;
@@ -132,6 +135,11 @@ export class XianyuImClient {
   get userId(): string { return this.myId; }
 
   async connect(): Promise<void> {
+    this.reconnectEnabled = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
     if (this.connected) return;
     if (this.connectPromise) return this.connectPromise;
     this.connectPromise = this.connectInternal();
@@ -143,17 +151,11 @@ export class XianyuImClient {
   }
 
   async disconnect(): Promise<void> {
+    this.reconnectEnabled = false;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
     this._status = 'disconnected';
-    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
-    this.heartbeatTimer = undefined;
-    for (const [mid, pending] of this.pending) {
-      clearTimeout(pending.timer);
-      pending.reject(new Error('xianyu IM connection closed'));
-      this.pending.delete(mid);
-    }
-    const socket = this.socket;
-    this.socket = undefined;
-    if (socket && socket.readyState !== 3) socket.close();
+    await this.cleanupSocket();
   }
 
   async listConversations(startCursor?: number, limit = 20): Promise<XianyuImConversationPage> {
@@ -242,7 +244,13 @@ export class XianyuImClient {
       this.socket = socket;
       socket.on('message', (raw: unknown) => { void this.handleIncoming(raw); });
       socket.on('close', () => {
-        if (this.socket === socket && this._status === 'connected') this._status = 'disconnected';
+        if (this.socket !== socket) return;
+        this.socket = undefined;
+        if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+        this.heartbeatTimer = undefined;
+        this.rejectPending('xianyu IM connection closed');
+        if (this._status !== 'failed') this._status = 'disconnected';
+        this.scheduleReconnect();
       });
       socket.on('error', () => {
         if (this.socket === socket && this._status === 'connecting') this._status = 'failed';
@@ -264,6 +272,7 @@ export class XianyuImClient {
         },
       }, 5_000);
       this._status = 'connected';
+      this.reconnectAttempt = 0;
       this.connectionGeneration += 1;
       const ackMid = createMid();
       this.sendRaw({
@@ -277,10 +286,38 @@ export class XianyuImClient {
       }, this.heartbeatIntervalMs);
     } catch (error) {
       this._status = 'failed';
-      await this.disconnect();
+      await this.cleanupSocket();
       this._status = 'failed';
+      this.scheduleReconnect();
       throw error;
     }
+  }
+
+  private async cleanupSocket(): Promise<void> {
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = undefined;
+    this.rejectPending('xianyu IM connection closed');
+    const socket = this.socket;
+    this.socket = undefined;
+    if (socket && socket.readyState !== 3) socket.close();
+  }
+
+  private rejectPending(message: string): void {
+    for (const [mid, pending] of this.pending) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(message));
+      this.pending.delete(mid);
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (!this.reconnectEnabled || this.reconnectTimer || this.connectPromise) return;
+    const delayMs = Math.min(30_000, 500 * 2 ** Math.min(this.reconnectAttempt, 6));
+    this.reconnectAttempt += 1;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      void this.connect().catch(() => undefined);
+    }, delayMs);
   }
 
   private async refreshToken(): Promise<void> {
@@ -362,9 +399,8 @@ export class XianyuImClient {
       this.pending.delete(mid);
       clearTimeout(pending.timer);
       const code = typeof message.code === 'number' ? message.code : 200;
-      if (code !== 200 && !Object.prototype.hasOwnProperty.call(message, 'body')) pending.reject(new XianyuImRequestRejected(`XIANYU_IM_REQUEST_REJECTED:${code}`, code));
+      if (code !== 200) pending.reject(new XianyuImRequestRejected(`XIANYU_IM_REQUEST_REJECTED:${code}`, code));
       else pending.resolve(message);
-      return;
     }
     const body = asRecord(message.body);
     const sync = asRecord(body.syncPushPackage);
@@ -374,11 +410,21 @@ export class XianyuImClient {
       if (typeof encoded !== 'string') continue;
       const readReceipt = parseReadReceiptPayload(decodePushData(encoded));
       if (readReceipt) {
-        await this.onEvent?.({ ...readReceipt, accountId: this.accountId, kind: 'read' });
+        try {
+          await this.onEvent?.({ ...readReceipt, accountId: this.accountId, kind: 'read' });
+        } catch (error) {
+          console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'push_handler_failed', accountId: this.accountId, errorCode: eventErrorCode(error) }));
+        }
         continue;
       }
       const parsed = parsePushPayload(encoded, this.accountId, this.myId);
-      if (parsed) await this.onEvent?.(parsed);
+      if (parsed) {
+        try {
+          await this.onEvent?.(parsed);
+        } catch (error) {
+          console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'push_handler_failed', accountId: this.accountId, errorCode: eventErrorCode(error) }));
+        }
+      }
     }
   }
 }
@@ -689,6 +735,13 @@ function extractMessageRef(body: Record<string, unknown>): string | undefined {
 
 function createMid(): string { return `${Math.floor(Math.random() * 1000)}${Date.now()} 0`; }
 function md5(value: string): string { return crypto.createHash('md5').update(value).digest('hex'); }
+function eventErrorCode(error: unknown): string {
+  const candidate = error as { code?: unknown } | null;
+  if (typeof candidate?.code === 'string' && /^[A-Z0-9_:-]{1,64}$/.test(candidate.code)) return candidate.code;
+  if (typeof candidate?.code === 'number' && Number.isFinite(candidate.code)) return `REMOTE_${candidate.code}`;
+  if (error instanceof Error && error.name) return error.name;
+  return 'UNKNOWN_ERROR';
+}
 function cookieValue(header: string, name: string): string { return header.split(';').map((part) => part.trim()).find((part) => part.startsWith(`${name}=`))?.slice(name.length + 1) ?? ''; }
 function mergeCookies(header: string, setCookies: string[]): string {
   const cookies = new Map<string, string>();
