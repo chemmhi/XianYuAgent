@@ -93,7 +93,11 @@ export class XianyuMtopClient {
   async uploadChatImage(adminId: string, accountId: string, filename: string, contentType: string, data: Buffer): Promise<XianyuChatImageUploadResult> {
     const credential = await this.loadCredential(adminId, accountId);
     const initialCookieHeader = credential?.cookieHeader?.trim() ?? '';
-    if (!initialCookieHeader) return { success: false, accountInvalid: true, errorCode: 'CREDENTIAL_MISSING', message: 'account credential is missing', cookieHeader: initialCookieHeader };
+    let cookieHeader = initialCookieHeader;
+    let cookieSnapshot: XianyuCookieSnapshot | undefined = cookieSnapshotFromMetadata(credential?.metadata);
+    const initialMetadata = credential?.metadata;
+    if (!cookieHeader && cookieSnapshot) cookieHeader = cookieHeaderFromSnapshot(cookieSnapshot);
+    if (!cookieHeader) return { success: false, accountInvalid: true, errorCode: 'CREDENTIAL_MISSING', message: 'account credential is missing', cookieHeader };
     const form = new FormData();
     form.append('file', new Blob([new Uint8Array(data)], { type: contentType || 'application/octet-stream' }), filename || 'image');
     const endpoint = new URL('https://stream-upload.goofish.com/api/upload.api');
@@ -101,6 +105,13 @@ export class XianyuMtopClient {
     endpoint.searchParams.set('appkey', 'xy_chat');
     endpoint.searchParams.set('_input_charset', 'utf-8');
     try {
+      // The upload host is a different subdomain from the MTOP host. When a
+      // browser cookie snapshot is available, apply the same domain/path and
+      // expiry filtering used by MTOP instead of replaying the legacy flat
+      // header (which can contain stale or wrong-domain values).
+      const requestCookieHeader = cookieSnapshot
+        ? cookieHeaderForUrl(cookieSnapshot, endpoint.toString(), Date.now(), XIANYU_TOP_SITE)
+        : cookieHeader;
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
@@ -109,27 +120,40 @@ export class XianyuMtopClient {
           referer: 'https://www.goofish.com/',
           'user-agent': USER_AGENT,
           'x-requested-with': 'XMLHttpRequest',
-          cookie: initialCookieHeader,
+          cookie: requestCookieHeader,
         },
         body: form,
         signal: AbortSignal.timeout(this.timeoutMs),
       });
-      const cookieHeader = mergeCookies(initialCookieHeader, getSetCookies(response.headers));
-      if (cookieHeader !== initialCookieHeader) await this.saveCookie(adminId, accountId, cookieHeader);
+      const setCookies = getSetCookies(response.headers);
+      if (cookieSnapshot) {
+        if (setCookies.length > 0) cookieSnapshot = applySetCookies(cookieSnapshot, endpoint.toString(), setCookies, Date.now(), XIANYU_TOP_SITE);
+        cookieHeader = cookieHeaderFromSnapshot(cookieSnapshot);
+      } else if (setCookies.length > 0) {
+        cookieHeader = mergeCookies(cookieHeader, setCookies);
+      }
+      const nextMetadata = cookieSnapshot ? metadataWithCookieSnapshot(initialMetadata, cookieSnapshot) : initialMetadata;
+      if (cookieHeader !== initialCookieHeader || (cookieSnapshot && JSON.stringify(nextMetadata) !== JSON.stringify(initialMetadata))) {
+        await this.saveCookie(adminId, accountId, cookieHeader, nextMetadata);
+      }
       const raw = await response.text();
-      if (response.status < 200 || response.status >= 300) return { success: false, accountInvalid: false, errorCode: 'IMAGE_UPLOAD_HTTP_ERROR', message: `image upload failed: http=${response.status}`, cookieHeader };
+      if (response.status < 200 || response.status >= 300) {
+        const accountInvalid = isSessionExpiredText(raw);
+        return { success: false, accountInvalid, errorCode: accountInvalid ? 'SESSION_EXPIRED' : 'IMAGE_UPLOAD_HTTP_ERROR', message: accountInvalid ? 'xianyu session expired' : `image upload failed: http=${response.status}`, cookieHeader };
+      }
       let payload: Record<string, any>;
       try { payload = JSON.parse(raw) as Record<string, any>; } catch {
-        const accountInvalid = /<html|<!doctype/i.test(raw);
+        const accountInvalid = /<html|<!doctype/i.test(raw) || isSessionExpiredText(raw);
         return { success: false, accountInvalid, errorCode: accountInvalid ? 'SESSION_EXPIRED' : 'IMAGE_UPLOAD_INVALID_RESPONSE', message: accountInvalid ? 'xianyu session expired' : 'image upload response is not valid JSON', cookieHeader };
       }
+      if (isSessionExpiredText(raw)) return { success: false, accountInvalid: true, errorCode: 'SESSION_EXPIRED', message: 'xianyu session expired', cookieHeader };
       const object = record(payload.object ?? payload.data ?? payload);
       const url = stringAt(object, ['url', 'imageUrl', 'imageURL']) ?? stringAt(payload, ['url', 'imageUrl', 'imageURL']);
       const [width, height] = parsePix(stringAt(object, ['pix', 'size']) ?? stringAt(payload, ['pix', 'size']));
       if (!url) return { success: false, accountInvalid: false, errorCode: 'IMAGE_UPLOAD_URL_MISSING', message: 'image upload response missing url', cookieHeader };
       return { success: true, accountInvalid: false, url, width: width || 800, height: height || 600, cookieHeader };
     } catch (error) {
-      return { success: false, accountInvalid: false, errorCode: 'IMAGE_UPLOAD_FAILED', message: error instanceof Error ? error.message : 'image upload failed', cookieHeader: initialCookieHeader };
+      return { success: false, accountInvalid: false, errorCode: 'IMAGE_UPLOAD_FAILED', message: error instanceof Error ? error.message : 'image upload failed', cookieHeader };
     }
   }
 
@@ -324,7 +348,11 @@ function mergeCookies(cookieHeader: string, setCookies: string[]): string {
 function getSetCookies(headers: Headers): string[] { return (headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ?? []; }
 function md5(value: string): string { return crypto.createHash('md5').update(value).digest('hex'); }
 function isTokenExpired(value: string): boolean { return ['FAIL_SYS_TOKEN_EXOIRED', 'FAIL_SYS_TOKEN_EXPIRED', 'FAIL_SYS_TOKEN_EMPTY', '浠ょ墝杩囨湡', '浠ょ墝涓虹┖'].some((marker) => value.includes(marker)); }
-function isSessionExpired(ret: string[]): boolean { return ret.some((value) => { const normalized = value.toLowerCase(); return normalized.includes('fail_sys_session_expired') || normalized.includes('session_expired') || normalized.includes('session杩囨湡'); }); }
+function isSessionExpired(ret: string[]): boolean { return ret.some(isSessionExpiredText); }
+function isSessionExpiredText(value: string): boolean {
+  const normalized = value.toLowerCase();
+  return normalized.includes('fail_sys_session_expired') || normalized.includes('session_expired') || normalized.includes('session expired') || normalized.includes('session杩囨湡') || normalized.includes('会话已过期') || normalized.includes('登录已失效');
+}
 function isValidationFailure(value: string): boolean { const normalized = value.toLowerCase(); return ['fail_sys_user_validate', 'rgv587', 'fail_sys_illegal_access', 'fail_biz_wua_is_machine', 'wua_is_machine', 'captcha', 'validate', 'punish', 'x5sec'].some((marker) => normalized.includes(marker)); }
 function isPermissionFailure(value: string): boolean { const normalized = value.toLowerCase(); return normalized.includes('permission_exception') || normalized.includes('permission denied') || value.includes('无权限访问'); }
 function refererFor(api: string): string { if (api.includes('merchant.sold') || api.includes('order')) return 'https://seller.goofish.com/'; if (api.includes('loginuser')) return 'https://www.goofish.com/im'; return 'https://www.goofish.com/'; }
