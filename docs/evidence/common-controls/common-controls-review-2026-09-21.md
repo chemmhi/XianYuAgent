@@ -16,7 +16,8 @@
 - 合入提交：`fe9358c merge: fix shared search select controls`。
 - 共享控件证据：`docs/evidence/common-controls/shared-search-select-fix-v3/visual-diff.md`；已包含 `1440×900` 与 `390×844` 的基线、实现、差异热图和 DOM 样式指标。
 - SelectField Open preview 已在 `/controls` 实现；该静态菜单仅用于视觉审计，不进入业务实例，真实业务路由仍需继续做页面级复核。
-- 页面 CSS 隔离、Accounts/Coupons/Workspace 功能遗漏和真实业务路由截图仍为 `OPEN`。
+- 页面 CSS 隔离已合入并通过 selector 守门；Accounts `connectionStatus`、Coupons `status/stockAlert/分页`、Workspace server-side search 已合入并通过 Web 全量回归。
+- Coupons Chrome/CDP 全链路仍在“创建后启用”步骤失败，真实业务视觉截图与该失败根因复核仍为 `OPEN`；见 `page-functional-gaps-2026-09-21.md`。
 
 ## 2. 已确认的范围决策
 
@@ -101,15 +102,15 @@
 - 更新 `ControlsPreview`：补 Open preview、移动端 Search + 双 Select、默认/focus/disabled/open/selected 状态。
 - 执行 Chrome/CDP `1440×900`、`390×844` 截图、DOM computed style、像素 diff；Phase 1 未通过不得进入页面级修复。
 
-### Phase 2 — Page CSS isolation and exceptions
+### Phase 2 — Page CSS isolation and exceptions（已完成，待真实路由视觉复核）
 
-- 扫描并清理 Auth/Workspace/Messages/Settings/Products/Coupons 等页面 CSS 对 shared token 的命中。
+- 扫描并清理 Auth/Workspace/Messages/Settings/Products/Coupons/Agent Dynamics 等页面 CSS 对 shared token 的命中。
 - 建立 exception allowlist：Messages composer、Workspace Run composer、checkbox/file/QR/password visibility 等明确例外。
-- 清理死 CSS selector，并把 Tabs、menus、multi-select、session selector 从 SelectField 清单中单列。
+- 清理死 CSS selector，并把 Tabs、menus、multi-select、session selector 从 SelectField 清单中单列；selector 守门见 `page-css-isolation-2026-09-21.md`。
 
-### Phase 3 — Functional omissions
+### Phase 3 — Functional omissions（主体修复已完成，Coupons E2E 开放）
 
-- Accounts `connectionStatus`；Coupons `status`、`stockAlert`、分页；Orders sort UI/schema；Workspace server-side search。
+- Accounts `connectionStatus`；Coupons `status`、`stockAlert`、分页；Workspace server-side search 已合入；Orders sort UI/schema 仍按用户范围决策单列，不在本次筛选/搜索切片中擅自扩展。
 - 保留 Orders 单一聚合状态下拉，不扩展为四状态下拉。
 - 不在本轮统一 Dashboard、排序、分页、Tabs、菜单等普通按钮样式；只保证相关功能和证据不再被误报为已统一。
 
@@ -124,5 +125,5 @@
 - 共享 Search/Select/Input/TextArea/Button/PlaceholderCell 的 token 与设计稿逐项一致，Select open 视觉有真实证据。
 - 页面 CSS 不再直接覆盖共享控件 token；任何例外均在 allowlist 中。
 - expected-control manifest 与实际 JSX/API schema 一致，不能只扫描现存控件。
-- 所有 P0/P1 项均有修复提交、测试命令和浏览器截图证据；`SellerAgent/` 保持零 diff。
+- 已修复项均有提交、测试命令和证据文档；Coupons 启用步骤 E2E 失败、真实业务路由双 viewport 视觉复核和全局壳层旧文档清理仍未关闭；`SellerAgent/` 保持零 diff。
 

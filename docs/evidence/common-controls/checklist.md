@@ -70,9 +70,9 @@
 ## 剩余审计清单
 
 1. 共享 SearchField/SelectField 尚未完成按专有设计稿的 1:1 视觉复核；Select 展开项的真实截图、键盘行为和跨浏览器边界仍缺失。
-2. 页面 CSS 对 shared inner input/select/textarea 的覆盖尚未全部隔离；至少 Workspace、Messages、Auth、Settings、Products、Coupons 仍需 selector 级审计。
-3. Accounts/Coupons 的 schema→UI 映射仍不完整：`connectionStatus`、`status`、`stockAlert` 和 Coupons 分页尚未关闭。
-4. Workspace 搜索词尚未从 controller 传入 API；Workspace Run composer 例外已批准但尚未写入统一 allowlist。
+2. 页面 CSS 对 shared inner input/select/textarea 的 selector 覆盖已隔离并有守门测试；真实业务路由视觉复核仍未关闭。
+3. Accounts/Coupons 的 schema→UI 映射已补齐 `connectionStatus`、`status`、`stockAlert` 和 Coupons 分页；Coupons Chrome/CDP 的启用步骤仍失败，保持 OPEN。
+4. Workspace 搜索词已从 controller 传入 API 并补 220ms debounce；Workspace Run composer 例外继续保留。
 5. Auth/Settings/Accounts/Products/Coupons/Orders/Agent Dynamics/Workspace 尚未全部完成真实路由固定 viewport 截图与视觉 diff；`/controls` 预览页不能替代页面证据。
 6. Dashboard、表格排序、分页、Tabs、菜单等普通/领域按钮明确不纳入本轮 `Button` 统一，但相关自定义语义仍需单列登记，避免被误判为 SelectField 或 shared Button 已覆盖。
 7. `SelectField` 的全局使用约束继续由 `apps/web/src/shared/ui/select-usage.test.ts` 维护；本轮仍不得以现存 native select 扫描结果替代 expected-control manifest。
