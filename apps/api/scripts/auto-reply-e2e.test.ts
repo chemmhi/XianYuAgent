@@ -163,6 +163,69 @@ test('real push enters buyer Agent tool loop, simulates reply, and persists run 
   }
 });
 
+test('persisted Agent settings apply to the next buyer push without restart', async () => {
+  const originalFetch = globalThis.fetch;
+  const modelRequests: Array<Record<string, unknown>> = [];
+  let modelCall = 0;
+  globalThis.fetch = (async (_input, init) => {
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    modelRequests.push(body);
+    modelCall += 1;
+    const content = modelCall === 1 ? '初始配置回复。' : '更新配置后的回复，这是一段用于验证设置即时生效的较长文本。';
+    return new Response(JSON.stringify({ model: 'settings-e2e', choices: [{ message: { content } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+  const runtime = createApp(loadConfig({
+    ...process.env,
+    HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
+    API_KEY: 'settings-e2e-key', BASE_URL: 'https://model.example/v1', MODEL: 'settings-e2e', AUTO_REPLY_MODEL_ENABLED: 'true', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["设置买家"]', AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
+    AUTO_REPLY_AGENT_SYSTEM_PROMPT: '初始系统提示',
+  }));
+  await runtime.listen();
+  let client: XianyuImClient | undefined;
+  try {
+    const boot = await runtime.auth.bootstrap({ email: 'settings-agent-e2e@example.com', password: 'password-123', displayName: 'Settings Agent E2E' });
+    const adminId = boot.admin.id;
+    const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: 'settings-agent-seller', displayName: '设置测试店铺' });
+    const product = await runtime.store.createProduct({ adminId, accountId: account.id, externalProductRef: 'settings-agent-item', title: '设置测试商品', description: '设置测试商品描述', priceMinor: 3_000, status: 'published' });
+    const conversation = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'settings-agent-buyer', buyerDisplayName: '设置买家', itemRef: product.externalProductRef, itemTitle: product.title, externalConversationRef: 'settings-agent-conversation' });
+    const socket = new FakeSocket();
+    const results: any[] = [];
+    client = new XianyuImClient({ accountId: account.id, credential: { cookieHeader: 'unb=settings-agent-seller', accessToken: 'settings-access', deviceId: 'settings-device' }, heartbeatIntervalMs: 60_000, webSocketFactory: () => socket, onEvent: async (event) => { results.push(await runtime.xianyuIm.handleExternalEvent(adminId, event)); } });
+    const connectPromise = client.connect();
+    queueMicrotask(() => socket.emit('open'));
+    await connectPromise;
+
+    socket.emit('message', pushFrame('settings-push-1', 'settings-agent-conversation', 'settings-message-1.PNM', 'settings-agent-buyer', '你好', '设置买家'));
+    await waitFor(() => results.length >= 1);
+    assert.equal(results[0]?.autoReply?.run.status, 'persisted');
+    assert.equal((modelRequests[0]?.messages as Array<{ role: string; content: string }>)[0]?.content, '初始系统提示');
+
+    const current = await runtime.autoReplyAgentSettings.get(adminId);
+    const updated = await runtime.autoReplyAgentSettings.update({
+      adminId,
+      expectedVersion: current.configVersion,
+      patch: { systemPrompt: '设置页更新后的系统提示', maxReplyLength: 50, debounceMs: 0 },
+      requestId: 'settings-agent-update',
+      traceId: 'settings-agent-update',
+    });
+    assert.equal(updated.systemPrompt, '设置页更新后的系统提示');
+
+    socket.emit('message', pushFrame('settings-push-2', 'settings-agent-conversation', 'settings-message-2.PNM', 'settings-agent-buyer', '请继续介绍', '设置买家'));
+    await waitFor(() => results.length >= 2);
+    assert.equal(results[1]?.autoReply?.run.status, 'persisted');
+    assert.equal((modelRequests[1]?.messages as Array<{ role: string; content: string }>)[0]?.content, '设置页更新后的系统提示');
+    assert.ok((results[1]?.autoReply?.outboundMessage?.bodyText ?? '').length <= 50);
+    assert.equal(socket.sent.filter((message) => message.lwp === '/r/MessageSend/sendByReceiverScope').length, 0);
+    assert.equal((await runtime.messages.listMessages(adminId, conversation.id, { limit: 20 })).items.filter((message) => message.direction === 'outbound').length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await client?.disconnect();
+    runtime.server.closeAllConnections?.();
+    runtime.server.closeIdleConnections?.();
+    await runtime.close();
+  }
+});
+
 function pushFrame(mid: string, conversationRef: string, messageRef: string, senderRef: string, text: string, senderName: string): string {
   const content = Buffer.from(JSON.stringify({ contentType: 1, text: { text } }), 'utf8').toString('base64');
   const payload = {
