@@ -90,4 +90,30 @@ describe('SelectField', () => {
     expect(html).toContain('value="all"');
     expect(html).toContain('class="ui-select-chevron"');
   });
+
+  it('keeps preview menu opt-in and gated behind the explicit open state', () => {
+    const closed = renderToStaticMarkup(createElement(SelectField, {
+      className: 'orders-status-select',
+      value: 'risk',
+      onChange: vi.fn(),
+      options: [{ value: 'risk', label: '风险待确认' }],
+      previewMenuOptions: [{ value: 'risk', label: '风险待确认' }],
+      previewSelectedValue: 'risk',
+    }));
+    const open = renderToStaticMarkup(createElement(SelectField, {
+      className: 'is-open',
+      value: 'risk',
+      onChange: vi.fn(),
+      options: [{ value: 'risk', label: '风险待确认' }, { value: 'manual', label: '待人工' }],
+      previewMenuOptions: [{ value: 'risk', label: '风险待确认' }, { value: 'manual', label: '待人工' }],
+      previewSelectedValue: 'risk',
+    }));
+
+    expect(closed).not.toContain('ui-select-menu');
+    expect(open).toContain('class="ui-select-menu"');
+    expect(open).toContain('aria-hidden="true"');
+    expect(open).toContain('data-preview-only="true"');
+    expect(open).toContain('class="ui-select-menu-option is-selected"');
+    expect(open).not.toContain('<button');
+  });
 });

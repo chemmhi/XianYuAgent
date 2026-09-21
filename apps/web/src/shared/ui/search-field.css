@@ -3,7 +3,7 @@
 .ui-search-control:focus-within,
 .ui-search-control.is-focus { border-color: var(--link); background: #fff; box-shadow: 0 0 0 3px rgba(36,90,141,.09); }
 .ui-search-icon { flex: 0 0 auto; width: 14px; height: 14px; fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
-.ui-search-control input { box-sizing: border-box; min-width: 0; width: 100%; padding: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-family: 'Inter', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif; font-size: 12px; font-weight: 400; line-height: 1.35; }
+.ui-search-control input { box-sizing: border-box; min-width: 0; width: 100%; padding: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 12px; font-weight: 400; }
 .ui-search-control input::placeholder { color: #9CA3AF; }
 .ui-search-control input::-webkit-search-cancel-button { display: none; }
 .ui-search-clear { display: grid; place-items: center; flex: 0 0 auto; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--axis); }
