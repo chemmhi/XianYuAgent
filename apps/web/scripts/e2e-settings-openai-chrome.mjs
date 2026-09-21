@@ -318,8 +318,7 @@ async function run() {
   await cdp.send('Page.navigate', { url: `${webUrl}/settings` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'settings route');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-settings-page]"))'), 'Settings page');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('设置'), 'Settings account context');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('当前账号：OpenAI Settings Demo'), 'Settings account selection');
+  await waitFor(async () => await evaluate(cdp, `localStorage.getItem('xianyu.activeAccountId') === ${JSON.stringify(accountId)}`), 'Settings first account selection');
   await evaluate(cdp, `(() => { const tab = Array.from(document.querySelectorAll('.settings-tabs button')).find((button) => button.textContent?.includes('OpenAI API')); tab?.click(); return true; })()`);
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-openai-panel]"))'), 'OpenAI settings panel');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('尚未配置主/备模型'), 'OpenAI empty state');

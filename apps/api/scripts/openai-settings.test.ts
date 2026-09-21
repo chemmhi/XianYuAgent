@@ -49,6 +49,10 @@ test('persists primary and backup configs with redacted views and provider-owned
   assert.notEqual(primary.id, backup.id);
   assert.equal('apiKey' in primary, false);
   assert.equal('secret' in primary, false);
+  assert.equal(primary.apiKeyHint?.length, 'primary-secret-key'.length);
+  assert.equal(primary.apiKeyHint?.startsWith('prim'), true);
+  assert.equal(primary.apiKeyHint?.endsWith('-key'), true);
+  assert.match(primary.apiKeyHint ?? '', /\*/);
 
   const listed = await service.list({ adminId: admin.id, accountId: account.id });
   assert.deepEqual(listed.map((item) => item.role).sort(), ['backup', 'primary']);

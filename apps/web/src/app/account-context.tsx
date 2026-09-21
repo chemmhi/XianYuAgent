@@ -46,6 +46,13 @@ export function chooseInitialAccountId(accounts: AccountVM[], preferredAccountId
   return available.length === 1 ? available[0]?.id : undefined;
 }
 
+/** Settings has an explicit account scope and should open on the first usable account. */
+export function chooseFirstAvailableAccountId(accounts: AccountVM[], preferredAccountId?: string): string | undefined {
+  const available = accounts.filter((account) => account.status !== 'disabled' && account.enabled !== false);
+  if (preferredAccountId && available.some((account) => account.id === preferredAccountId)) return preferredAccountId;
+  return available[0]?.id;
+}
+
 export function AccountContextProvider({ api, children }: { api: AccountsApi; children: ReactNode }) {
   const [accounts, setAccounts] = useState<AccountVM[]>([]);
   const [accountsLoading, setAccountsLoading] = useState(true);

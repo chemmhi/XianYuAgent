@@ -1296,6 +1296,7 @@ function readOpenAiConfigInput(body: Record<string, unknown>): import('./openai-
     label: typeof body.label === 'string' ? body.label : undefined,
     baseUrl: String(body.baseUrl ?? ''),
     model: String(body.model ?? ''),
+    reasoningEffort: typeof body.reasoningEffort === 'string' ? body.reasoningEffort : undefined,
     wireApi,
     timeoutMs: typeof body.timeoutMs === 'number' ? body.timeoutMs : Number(body.timeoutMs ?? NaN),
     apiKey: typeof body.apiKey === 'string' ? body.apiKey : undefined,
