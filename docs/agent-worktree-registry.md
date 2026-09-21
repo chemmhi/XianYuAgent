@@ -79,6 +79,8 @@
 
 | `root/inbound_tests` | `auto-reply-inbound-tests` | `codex/auto-reply-inbound-tests` | `F:\ChenHai\Project\XianYuAgent-auto-reply-inbound-tests` | Codex `/root` delegated agent | `2026-09-21 22:27:54 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 补充第1节点 inbound inbox/解析/幂等/顺序/租约回收定向测试；先记录现有测试基础设施阻塞，不改主线。 |
 
+| `root/backend_chat` | `chat-live-auto-reply` | `codex/chat-live-auto-reply` | `F:\ChenHai\Project\XianYuAgent-chat-live-fix` | Codex `/root` delegated agent | `2026-09-21 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 补充 deferAutoReply→inbox worker→realtime 双消息事件回归；API typecheck、auto-reply E2E 4/4、auto-reply unit 46/46、真实 PostgreSQL/Redis 组合脚本均通过，未复现后端丢消息。 |
+
 ## 主工作区
 
 | 类型 | branch | worktree | 规则 |
