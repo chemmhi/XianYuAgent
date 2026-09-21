@@ -33,10 +33,17 @@ describe('select usage architecture', () => {
 
   it('uses the Xianyu admin design tokens for the shared control surface', () => {
     const css = readFileSync(join(sharedUiRoot, 'select-field.css'), 'utf8');
+    expect(css).not.toMatch(/^\.ui-field\s*\{/m);
+    expect(css).toContain('min-width: 150px');
+    expect(css).toContain('min-height: 34px');
+    expect(css).toContain('padding: 7px 34px 7px 10px');
     expect(css).toContain('border-radius: 7px');
     expect(css).toContain('background: var(--bg)');
     expect(css).toContain('color: var(--text)');
     expect(css).toContain('font-size: 12px');
     expect(css).toContain('appearance: none');
+    expect(css).toContain('.ui-select-control.is-focus select');
+    expect(css).toContain('.ui-select-control.is-open select');
+    expect(css).toContain('stroke-width: 1.5');
   });
 });

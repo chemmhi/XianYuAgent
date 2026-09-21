@@ -24,6 +24,23 @@ describe('SelectField', () => {
     expect(html).toContain('value="image"');
   });
 
+  it('renders option disabled state and preserves field hint content', () => {
+    const html = renderToStaticMarkup(createElement(SelectField, {
+      label: '状态',
+      hint: '请选择当前同步状态',
+      value: 'pending',
+      onChange: vi.fn(),
+      options: [
+        { value: 'pending', label: '待人工' },
+        { value: 'disabled', label: '不可用', disabled: true },
+      ],
+    }));
+
+    expect(html).toContain('请选择当前同步状态');
+    expect(html).toContain('value="disabled" disabled');
+    expect(html).toContain('class="ui-field-hint"');
+  });
+
   it('keeps field classes on the documented wrapper and passes native attributes through', () => {
     const html = renderToStaticMarkup(createElement(SelectField, {
       id: 'account-status',
@@ -58,5 +75,19 @@ describe('SelectField', () => {
 
     expect(html).toContain('class="ui-select-control orders-status-select"');
     expect(html).not.toContain('class="ui-field orders-status-select"');
+  });
+
+  it('supports design-state classes without replacing native select semantics', () => {
+    const html = renderToStaticMarkup(createElement(SelectField, {
+      className: 'is-focus is-open',
+      value: 'all',
+      onChange: vi.fn(),
+      options: [{ value: 'all', label: '全部' }],
+    }));
+
+    expect(html).toContain('class="ui-select-control is-focus is-open"');
+    expect(html).toContain('<select');
+    expect(html).toContain('value="all"');
+    expect(html).toContain('class="ui-select-chevron"');
   });
 });
