@@ -451,3 +451,13 @@
 | S5-R85 | 质量 / 安全 / 运维 | fallback 专用审计、发布级 rollback、旧凭证兼容迁移是否完整 | root | PARTIALLY_VERIFIED | E2E 已证明切换行为；`fallbackAudit=false`，rollback/兼容迁移未执行 |
 
 本轮结论：OpenAI API 主备配置纵向链路已实现并完成真实 PostgreSQL + Chrome/CDP 受控验证；视觉 P2（timeline 基类缺失、保存后成功态重置）已修复并重新截图。切片保持 `READY_FOR_REVIEW`，不得升级为发布级 `PASS`，直到 S5-R85 项开放项完成或经人工签核接受。
+
+### 2026-09-21：Agent 动态壳层与视觉复验
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R86 | 业务 / 验收 | Agent 动态是否沿用现有左侧导航，且位于“订单管理”和“设置”之间；右侧是否只保留业务内容区 | root + prototype_visual_analysis | PASS | `apps/web/src/app/App.tsx`、`apps/web/src/app/navigation.ts`、Chrome/CDP shell assertions；`docs/agent/agent-dynamics/evidence/visual-diff.md` |
+| S5-R87 | 架构 / 数据流 | 页面是否复用全局 `AccountContext`，前端职责是否拆分为 API/controller/types/views，后端是否拆分为 activity/domain/store 模块；迁移文档是否与 DDL 一致 | root + requirements_architecture | PASS（受控环境） | `apps/web/src/features/agent-dynamics/`、`apps/api/src/auto-reply-activity.ts`、`apps/api/src/store-memory.ts`、`apps/api/src/store-postgres.ts`、`docs/agent/agent-dynamics/design.md`、`apps/api/migrations/024_auto_reply_run_events.sql` |
+| S5-R88 | 质量 / 视觉 / 端到端 | 是否先对比原型 HTML/截图与样式 token，再用真实 PostgreSQL + Chrome/CDP 生成桌面、抽屉、移动主页面和移动抽屉证据；是否移除原型 sidebar/topbar 且无双重滚动 | root + prototype_visual_analysis | PASS（受控环境） | `npm run verify:agent-dynamics`；`docs/agent/agent-dynamics/evidence/visual-diff.md`；`docs/agent/agent-dynamics/evidence/evidence.json`；18/18 核心样式 token 语义匹配 |
+
+本轮结论：Agent 动态已完成设计、模块化实现、真实 PostgreSQL → API → Chrome/CDP → 截图闭环；当前主线合入后保持受控环境 PASS，真实闲鱼外部 push/live 发送仍不属于本轮验收范围。

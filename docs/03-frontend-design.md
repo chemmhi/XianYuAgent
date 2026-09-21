@@ -317,3 +317,10 @@ S3-I005 至 S3-I008 属于后续实现阶段的落地风险，不作为当前阶
 ## 12. 阶段 3 下一步
 
 阶段 3 设计门禁已通过。`docs/03-component-contract.md` §9 的设计 DoD、独立评审、数据流和路由/API 契约均已完成；可进入阶段 4 迭代计划与纵向切片编排，本阶段不进行具体编码。
+# Agent 动态页面增量设计（2026-09-21）
+
+新增第 9 个一级页面 `Agent 动态`，路由 `/agent-dynamics`，位于 `订单管理` 与 `设置` 之间。页面采用原型 `artifacts/auto-reply-agent-ui.html` 的独立视觉壳（224px sidebar、56px topbar、浅灰画布、右侧 drawer），避免通用占位页稀释高保真验收。页面数据只来自真实 Auto Reply Activity API，首版以 5 秒轮询实现“实时刷新”并展示 `asOf`。
+
+组件映射：`AgentDynamicsPage -> AgentDynamicsViews (KpiStrip/RuntimePanel/HealthPanel/StatusPanel/ExceptionPanel/RunsTable/RunDrawer)`；状态由 `AgentDynamicsController` 管理，覆盖 loading、success、empty、error、forbidden、drawer loading/error、polling stale。
+
+固定验收视口：桌面 `1440×900`、移动 `390×844`；视觉 token 继续沿用本文件 §2，原型偏差记录写入 `docs/agent/agent-dynamics/evidence/`。

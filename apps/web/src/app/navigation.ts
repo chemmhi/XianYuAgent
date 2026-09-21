@@ -6,6 +6,7 @@ export type PageKey =
   | 'products'
   | 'coupons'
   | 'orders'
+  | 'agent-dynamics'
   | 'settings';
 
 export interface NavItem {
@@ -24,6 +25,7 @@ export const navItems: NavItem[] = [
   { key: 'products', label: '商品管理', sub: '商品与发布', icon: 'box' },
   { key: 'coupons', label: '卡券管理', sub: '库存与生成', icon: 'ticket' },
   { key: 'orders', label: '订单管理', sub: '交易与发货', icon: 'cart' },
+  { key: 'agent-dynamics', label: 'Agent 动态', sub: '运行监控', icon: 'activity' },
   { key: 'settings', label: '设置', sub: '策略与凭证', icon: 'gear' },
 ];
 

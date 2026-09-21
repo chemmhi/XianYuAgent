@@ -1,5 +1,13 @@
 # XianyuSellerAgent 项目状态
 
+## 2026-09-21 Agent 动态壳层与视觉复验增量
+
+- 按最新产品约束，Agent 动态复用现有 `AuthenticatedShell` 左侧导航，`Agent 动态` 保持在“订单管理”和“设置”之间；移除原型内置 Agent Console 左栏。
+- 移除右侧内容区顶部“智能运营 / 运行记录”整栏及重复账号 chip / 通知入口；页面查询继续使用全局 `AccountContext.currentAccountId`。
+- 新增 host CSS，消除全局 `main` 与 Agent 动态内部双重 padding、嵌套滚动和桌面/移动高度冲突。
+- 视觉证据先对比 Git 原型截图，再由真实 PostgreSQL + Chrome/CDP 重新生成桌面、抽屉、移动主页面和移动抽屉截图；记录见 `docs/agent/agent-dynamics/evidence/visual-diff.md` 与 `evidence.json`。
+- 验证：`npm --workspace apps/web run typecheck`、`npm --workspace apps/web run test -- --run`（42 files / 126 tests）、`npm --workspace apps/web run build`、`npm --workspace apps/api run build`、`npm --workspace apps/web run test:e2e:chrome:agent-dynamics` 均通过；真实链路包含 PostgreSQL `auto_reply_runs` / `auto_reply_run_events` 落库与页面回读。
+
 ## 2026-09-21 增量修复
 
 - OpenAI API 主备配置切片：`/settings` 正式 OpenAI API 面板已严格对齐 SellerAgent 双卡片视觉；每张卡片支持测试连通性与保存，Model 下拉按展开时 provider `/models` 动态读取。真实 PostgreSQL smoke 与 Chrome/CDP E2E 已通过 UI → API → 数据库 → Agent；Agent 输出验证为 `PRIMARY_V1_REPLY` → `PRIMARY_V2_REPLY` → `BACKUP_REPLY`，PostgreSQL 重启后仍命中备用。`.env` 中第二套 DeepSeek 真实配置保持注释态，仅由测试进程临时加载并完成真实 `/models` 与文本生成验证，未修改配置文件。视觉证据和逐项偏差记录见 `docs/evidence/stage5/S4-VS7A/`；切片仍保持 `READY_FOR_REVIEW`。

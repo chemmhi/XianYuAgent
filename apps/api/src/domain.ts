@@ -429,6 +429,7 @@ export interface MessageRecord {
 
 export type AutoReplyDecision = 'replied' | 'handoff' | 'skipped' | 'failed';
 export type AutoReplyRunStatus = 'received' | 'classified' | 'context_loaded' | 'generated' | 'simulated' | 'persisted' | 'handoff' | 'skipped' | 'failed';
+export type AutoReplyRunStage = 'gateway_received' | 'intent_recognition' | 'context_read' | 'reply_generation' | 'sending' | 'persisted' | 'handoff' | 'skipped' | 'failed';
 
 /**
  * Persisted, redacted evidence for one automatic-reply attempt.
@@ -454,6 +455,91 @@ export interface AutoReplyRunRecord {
   failureCode?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AutoReplyRunEventRecord {
+  id: string;
+  runId: string;
+  accountId: string;
+  sequence: number;
+  eventType: string;
+  stage: AutoReplyRunStage;
+  status: AutoReplyRunStatus;
+  occurredAt: string;
+  durationMs?: number;
+  traceId?: string;
+  payload: Record<string, unknown>;
+}
+
+export interface AutoReplyRunListQuery {
+  accountId?: string;
+  from?: string;
+  to?: string;
+  status?: AutoReplyRunStatus;
+  decision?: AutoReplyDecision;
+  processing?: boolean;
+  stage?: AutoReplyRunStage;
+  keyword?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface AutoReplyRunListItem extends AutoReplyRunRecord {
+  stage: AutoReplyRunStage;
+  durationMs: number;
+  buyerDisplayName?: string;
+  productTitle?: string;
+  inboundMessagePreview?: string;
+}
+
+export interface AutoReplyRunListResult {
+  items: AutoReplyRunListItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface AutoReplyRunDetailRecord {
+  run: AutoReplyRunListItem;
+  events: AutoReplyRunEventRecord[];
+  conversation?: ConversationRecord;
+  inboundMessage?: MessageRecord;
+  outboundMessages: MessageRecord[];
+  product?: ProductRecord;
+}
+
+export interface AutoReplyActivitySummary {
+  from: string;
+  to: string;
+  asOf: string;
+  inboundCount: number;
+  processingCount: number;
+  persistedCount: number;
+  handoffCount: number;
+  failedCount: number;
+  skippedCount: number;
+  completionRate: number;
+  throughputPerSecond: number;
+  p95DurationMs: number;
+  byStatus: Array<{ status: AutoReplyRunStatus; count: number }>;
+  byStage: Array<{ stage: AutoReplyRunStage; count: number; averageDurationMs: number }>;
+  exceptions: Array<{ code: string; count: number; status: AutoReplyRunStatus }>;
+  health: Array<{ component: string; status: string; observedAt: string; details: Record<string, unknown> }>;
+}
+
+export function autoReplyStageForStatus(status: AutoReplyRunStatus): AutoReplyRunStage {
+  switch (status) {
+    case 'received': return 'gateway_received';
+    case 'classified': return 'intent_recognition';
+    case 'context_loaded': return 'context_read';
+    case 'generated': return 'reply_generation';
+    case 'simulated': return 'sending';
+    case 'persisted': return 'persisted';
+    case 'handoff': return 'handoff';
+    case 'skipped': return 'skipped';
+    case 'failed': return 'failed';
+  }
 }
 
 /**
@@ -775,6 +861,11 @@ export interface Store {
   updateAutoReplyRun(id: string, patch: { intent?: string; decision?: AutoReplyDecision; status?: AutoReplyRunStatus; riskFlags?: string[]; productId?: string; orderRefs?: string[]; contextDigest?: string; replyDigest?: string; senderOutcome?: AutoReplyRunRecord['senderOutcome']; outboundMessageId?: string; failureCode?: string }): Promise<AutoReplyRunRecord | undefined>;
   getAutoReplyRun(adminId: string, id: string): Promise<AutoReplyRunRecord | undefined>;
   findAutoReplyRunByInboundMessage(adminId: string, inboundMessageId: string): Promise<AutoReplyRunRecord | undefined>;
+  appendAutoReplyRunEvent(input: { runId: string; eventType: string; status: AutoReplyRunStatus; stage: AutoReplyRunStage; accountId: string; payload?: Record<string, unknown>; durationMs?: number; traceId?: string }): Promise<AutoReplyRunEventRecord>;
+  listAutoReplyRunEvents(adminId: string, runId: string): Promise<AutoReplyRunEventRecord[]>;
+  listAutoReplyRuns(adminId: string, query: AutoReplyRunListQuery): Promise<AutoReplyRunListResult>;
+  getAutoReplyRunDetail(adminId: string, runId: string): Promise<AutoReplyRunDetailRecord | undefined>;
+  getAutoReplyActivitySummary(adminId: string, query: { accountId?: string; from: string; to: string }): Promise<AutoReplyActivitySummary>;
   markMessagesReadByExternalRef(input: { adminId: string; conversationId: string; externalMessageRef: string; readAt?: string }): Promise<{ messages: MessageRecord[]; events: ConversationEventRecord[] }>;
   markLatestOutgoingRead(input: { adminId: string; conversationId: string; readAt?: string }): Promise<{ messages: MessageRecord[]; events: ConversationEventRecord[] }>;
 }

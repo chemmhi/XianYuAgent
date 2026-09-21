@@ -25,7 +25,8 @@
 | `products` | `products`、`product_skus`、`asset_refs` | products | 商品、SKU、商品素材 |
 | `coupons` | `coupon_batches`、`coupon_items`、`coupon_asset_refs`、`coupon_bindings` | coupons | 卡券批次、库存、素材和商品绑定 |
 | `orders` | `orders`、`delivery_records` | orders | 订单状态与交付尝试 |
-| `messages` | `conversations`、`messages` | messages | 会话与消息，包含撤回结果 |
+| `messages` | `conversations`、`messages`、`auto_reply_runs`、`auto_reply_run_events` | messages / auto-reply activity | 会话、消息、自动回复运行与脱敏活动事件 |
+| `settings` | `auto_reply_agent_configs`、`auto_reply_agent_account_configs` | auto-reply settings | 管理员默认配置与账号级自动回复配置 |
 | `workspace` | `agent_sessions`、`runs`、`steps`、`task_contexts`、`confirmations` | workspace | Agent 会话、运行、步骤与人工确认 |
 | `execution` | `idempotency_records`、`outbox_jobs` | execution | 幂等和可靠外部动作 |
 | `observability` | `audit_events`、`trace_spans`、`health_snapshots` | observability | 审计、追踪和健康快照 |
@@ -79,13 +80,22 @@
 | --- | --- | --- | --- | --- |
 | `messages.conversations` | `id uuid`；`account_id uuid`；`external_conversation_ref text`；`buyer_ref text null`；`status text` | PK；FK account | UQ `(account_id, external_conversation_ref)` | 关闭后仍可读历史 |
 | `messages.messages` | `id uuid`；`conversation_id uuid`；`direction text`；`body_type text`；`body_text text null`；`asset_ref text null`；`external_message_ref text null`；`status text`；`recalled_at null`；`recall_reason null`；`external_outcome text null` | PK；FK conversation | UQ partial `(conversation_id, external_message_ref)`；IDX `(conversation_id, created_at)` | `pending|sent|failed|recalled`；撤回写幂等记录 |
+| `messages.auto_reply_runs` | `id uuid`；`admin_id uuid`；`account_id uuid`；`conversation_id uuid`；`inbound_message_id uuid`；`intent text`；`decision text`；`status text`；`risk_flags jsonb`；`product_id uuid null`；`order_refs jsonb`；`input_digest text`；`context_digest text null`；`reply_digest text null`；`sender_outcome text null`；`outbound_message_id uuid null`；`failure_code text null`；`created_at`；`updated_at` | PK；FK admin/account/conversation/inbound/product/outbound | UQ `(admin_id, inbound_message_id)`；IDX `(conversation_id, created_at desc)`、`(account_id, created_at desc)` | `decision in ('replied','handoff','skipped','failed')`；`status` 使用自动回复 raw 状态枚举；重复 push 复用既有 run |
+| `messages.auto_reply_run_events` | `id uuid`；`run_id uuid`；`account_id uuid`；`sequence int`；`event_type text`；`stage text`；`status text`；`occurred_at`；`duration_ms int null`；`trace_id text null`；`payload_json jsonb` | PK；FK run/account；run FK `ON DELETE RESTRICT` | UQ `(run_id, sequence)`；IDX `(account_id, occurred_at desc, id desc)`、`(run_id, sequence)` | sequence 从 1 递增；payload 只允许脱敏摘要/引用，不存 Prompt、Token、Cookie 或完整正文 |
 | `workspace.agent_sessions` | `id uuid`；`account_id uuid`；`title text`；`status text default 'active'`；`summary text null`；`last_active_at`；`archived_at null` | PK；FK account | IDX `(account_id, status, last_active_at)` | `active -> archived`；归档后只读 |
 | `workspace.runs` | `id uuid`；`account_id uuid`；`route text`；`status text`；`requested_by uuid`；`client_run_ref text null`；`completed_at null`；`failure_code null` | PK；FK account/admin | UQ partial `(account_id, client_run_ref)`；IDX `(account_id, status, created_at)` | 仅状态机迁移 |
 | `workspace.steps` | `id uuid`；`run_id uuid`；`step_no int`；`kind text`；`status text`；`attempt int default 1`；`parent_step_id uuid null`；`external_outcome text null` | PK；FK run/self | UQ `(run_id, step_no, attempt)`；IDX `(run_id, status)` | `expired` 不属于 StepStatus，确认过期由 confirmations 记录 |
 | `workspace.task_contexts` | `id uuid`；`run_id uuid`；`schema_version int`；`context_json jsonb`；`redacted_summary text null` | PK/FK run | UQ `run_id` | 只允许兼容 schema 迁移 |
 | `workspace.confirmations` | `id uuid`；`run_id uuid`；`step_id uuid`；`status text`；`expires_at`；`requested_by uuid`；`confirmed_at null`；`confirmed_by null`；`reason null` | PK；FK run/step/admin | partial UQ active `(step_id)` | `active -> confirmed|expired|rejected|cancelled` |
 
-### 3.7 执行、审计与观测
+### 3.7 自动回复配置
+
+| 表 | 关键列 | 主键与外键 | 唯一索引 / 普通索引 | 关键检查 |
+| --- | --- | --- | --- | --- |
+| `settings.auto_reply_agent_configs` | `admin_id uuid`；`config_version int`；`config_json jsonb`；`config_digest text`；`created_at`；`updated_at` | PK/FK `admin_id -> auth.admins.id` | IDX `(updated_at desc)` | `config_version > 0`；管理员默认配置，不替代账号 scope |
+| `settings.auto_reply_agent_account_configs` | `account_id uuid`；`updated_by_admin_id uuid null`；`config_version int`；`config_json jsonb`；`config_digest text`；`created_at`；`updated_at` | PK/FK account；可选 FK updated admin | IDX `(updated_at desc)` | `config_version > 0`；账号级配置优先于管理员默认配置 |
+
+### 3.8 执行、审计与观测
 
 | 表 | 关键列 | 主键与外键 | 唯一索引 / 普通索引 | 关键检查 |
 | --- | --- | --- | --- | --- |
@@ -115,6 +125,10 @@
 | `006_workspace_execution` | agent_sessions、runs、steps、task_contexts、confirmations、idempotency_records、outbox_jobs | 001/005 | 停止新任务，等待租约过期后回退应用 |
 | `007_observability` | audit_events、trace_spans、health_snapshots、索引与约束加固 | 全部 | 审计/追踪表只追加，回滚只撤销非关键索引 |
 | `018_orders` | orders.orders 订单只读事实、四态约束、账号唯一键、列表索引 | 001_auth_accounts、003_catalog | 回退应用读取后保留订单表；禁止物理删除历史订单，交付表按后续独立迁移追加 |
+| `021_auto_reply_runs` | messages.auto_reply_runs 运行主表、状态检查、run 去重索引 | 005_orders_messages | 停止自动回复写入，保留历史 run；回滚应用读取旧路径，不物理删除运行记录 |
+| `022_auto_reply_agent_settings` | settings.auto_reply_agent_configs 管理员默认配置 | 001_auth_accounts | 回退应用继续读取环境配置；保留已写配置等待向前迁移 |
+| `023_auto_reply_agent_account_scope` | settings.auto_reply_agent_account_configs 账号级配置，并从 active account scope 回填 | 022_auto_reply_agent_settings、account_scopes | 先停止配置写入，保留管理员默认配置；回滚应用读取 fallback |
+| `024_auto_reply_run_events` | messages.auto_reply_run_events 事件表、run sequence 唯一约束和查询索引 | 021_auto_reply_runs、001_auth_accounts | 停止事件写入并保留 run；若回退，详情暂不展示事件时间线，不删除历史事件 |
 
 迁移采用 expand → backfill → verify → switch → contract；每次迁移必须可重复执行或具备可靠回滚说明。不可逆变更前必须完成数据库备份、读写验证和恢复演练。
 
@@ -135,3 +149,6 @@
 - 迁移覆盖：编号、依赖顺序、expand/backfill/switch/contract、备份、验证和回滚边界；
 - 与 `docs/02-data-api.md` 的字段、状态、路由和敏感边界保持一致；
 - 本文是设计契约，不代表已经执行真实 DDL 或迁移；真实 DDL、容器数据库和集成测试属于阶段 5/6 纵向切片。
+# Agent 动态数据增量（2026-09-21）
+
+迁移 024 新增 `messages.auto_reply_run_events`，记录运行阶段变化的脱敏事件。事件表以 `run_id` 反查管理员，不重复保存 `admin_id`；脱敏内容字段实际名为 `payload_json`。字段、约束、索引与回滚策略详见 `docs/agent/agent-dynamics/design.md` §4.2。既有 `messages.auto_reply_runs` 保持向后兼容；旧记录没有事件时由查询服务生成兼容时间线，不回填原始正文。

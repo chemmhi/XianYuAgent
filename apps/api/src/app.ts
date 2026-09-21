@@ -25,6 +25,7 @@ import { AutoReplyService, ExternalAutoReplySender } from './auto-reply.js';
 import { AutoReplyAgentSettingsService, resolveAutoReplyAgentDefaults } from './auto-reply-agent-settings.js';
 import { ToolCallingAutoReplyAgent } from './auto-reply-agent.js';
 import { OpenAISettingsService, createFallbackModelClient } from './openai-settings.js';
+import { AutoReplyActivityService } from './auto-reply-activity.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -42,6 +43,7 @@ export interface AppRuntime {
   messages: MessageService;
   autoReply: AutoReplyService;
   autoReplyAgentSettings: AutoReplyAgentSettingsService;
+  autoReplyActivity: AutoReplyActivityService;
   redisRealtime?: RedisConversationEventBridge;
   workspace: WorkspaceService;
   workspaceRuntime: WorkspaceRuntime;
@@ -108,6 +110,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), createdAt: new Date().toISOString() });
     return auditId;
   });
+  const autoReplyActivity = new AutoReplyActivityService(store);
   let xianyuIm!: XianyuImService;
   const autoReply = new AutoReplyService(store, messages, async (input) => {
     const auditId = createId();
@@ -225,7 +228,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, orders, products, productSync, credentials, apiKeyCredentials, openaiSettings, dashboard, messages, autoReply, autoReplyAgentSettings, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuIm,
+    config, store, auth, accounts, coupons, orders, products, productSync, credentials, apiKeyCredentials, openaiSettings, dashboard, messages, autoReply, autoReplyAgentSettings, autoReplyActivity, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuIm,
     server,
     async listen() {
       await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));

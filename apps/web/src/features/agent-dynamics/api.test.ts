@@ -1,0 +1,61 @@
+import { describe, expect, it } from 'vitest';
+import { createAgentDynamicsApi, createMockAgentDynamicsApi } from './api';
+import type { AgentDynamicsFilters } from './types';
+
+const filters: AgentDynamicsFilters = { accountId: 'acct_1', range: '24h', status: 'failed', stage: 'generation', keyword: '买家B', page: 2, pageSize: 10 };
+
+const rawRun = {
+  id: 'run-1', accountId: 'acct_1', conversationId: 'conversation-1', inboundMessageId: 'message-1', intent: '商品咨询', decision: 'failed', status: 'failed', productId: 'product-1', senderOutcome: undefined, failureCode: 'RESPONSES_API_TIMEOUT', createdAt: '2026-09-21T00:00:00.000Z', updatedAt: '2026-09-21T00:00:03.200Z', stage: 'failed', durationMs: 3200, buyerDisplayName: '买家B', productTitle: '资料包', inboundMessagePreview: '请问购买后怎么使用？',
+} as const;
+
+const rawSummary = {
+  from: '2026-09-20T00:00:00.000Z', to: '2026-09-21T00:00:00.000Z', asOf: '2026-09-21T00:00:00.000Z', inboundCount: 1, processingCount: 0, persistedCount: 0, handoffCount: 0, failedCount: 1, skippedCount: 0, completionRate: 1, throughputPerSecond: 0.01, p95DurationMs: 3200,
+  byStatus: [{ status: 'failed', count: 1 }], byStage: [{ stage: 'failed', count: 1, averageDurationMs: 3200 }], exceptions: [{ code: 'RESPONSES_API_TIMEOUT', count: 1, status: 'failed' }], health: [],
+} as const;
+
+describe('agent dynamics API adapter', () => {
+  it('maps raw summary/list/detail DTOs into the canonical VM and sends range windows', async () => {
+    const calls: string[] = [];
+    const transport = { get: async <T>(path: string) => {
+      calls.push(path);
+      if (path.includes('/summary')) return { success: true, data: rawSummary } as T;
+      if (path.includes('/runs/run%2F1')) return { success: true, data: { run: rawRun, events: [{ id: 'event-1', runId: 'run-1', eventType: 'run.failed', stage: 'failed', status: 'failed', occurredAt: rawRun.updatedAt, durationMs: 3200 }], inboundMessage: { bodyText: '请问购买后怎么使用？' }, outboundMessages: [], product: { id: 'product-1', title: '资料包' } } } as T;
+      return { success: true, data: { items: [rawRun], total: 1, page: 1, pageSize: 20, totalPages: 1 } } as T;
+    } };
+    const api = createAgentDynamicsApi(transport);
+
+    const summary = await api.getSummary({ accountId: 'acct_1', range: '7d' });
+    const runs = await api.listRuns({ ...filters, page: 1 });
+    const detail = await api.getRunDetail('run/1', 'acct_1');
+
+    expect(calls[0]).toMatch(/^\/api\/v1\/auto-reply\/activity\/summary\?accountId=acct_1&from=.*&to=.*$/);
+    expect(calls.some((path) => path.includes('status=failed'))).toBe(true);
+    expect(calls.some((path) => path.includes('stage=failed'))).toBe(true);
+    expect(calls.find((path) => path.includes('/runs/run%2F1'))).toBe('/api/v1/auto-reply/runs/run%2F1?accountId=acct_1');
+    expect(summary.kpis.find((item) => item.key === 'inbound')?.value).toBe('1');
+    expect(summary.pipeline.find((item) => item.key === 'generation')?.count).toBe(1);
+    expect(summary.exceptions[0]).toMatchObject({ key: 'RESPONSES_API_TIMEOUT', count: 1 });
+    expect(summary.events[0]).toMatchObject({ runId: 'run-1', label: '失败' });
+    expect(runs.items[0]).toMatchObject({ runId: 'run-1', buyer: { name: '买家B' }, stage: { key: 'generation' }, decision: { key: 'failed' }, persisted: true });
+    expect(detail.timeline[0]).toMatchObject({ title: '买家B 的回复生成失败', tone: 'danger' });
+    expect(detail.message).toBe('请问购买后怎么使用？');
+  });
+
+  it('short-circuits live calls when no account context is selected', async () => {
+    let calls = 0;
+    const api = createAgentDynamicsApi({ get: async <T>() => { calls += 1; return {} as T; } });
+    const summary = await api.getSummary({ range: '24h' });
+    const runs = await api.listRuns({ ...filters, accountId: undefined });
+    expect(calls).toBe(0);
+    expect(summary.kpis.find((item) => item.key === 'inbound')?.value).toBe('0');
+    expect(runs.total).toBe(0);
+    await expect(api.getRunDetail('run-1')).rejects.toMatchObject({ status: 422 });
+  });
+
+  it('filters mock runs by status, stage, and keyword', async () => {
+    const api = createMockAgentDynamicsApi();
+    const result = await api.listRuns({ ...filters, page: 1 });
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.runId).toBe('run_failed');
+  });
+});
