@@ -196,7 +196,11 @@ export class AutoReplyService {
       }
       throw error;
     }
-    const updateRun = (patch: AutoReplyRunUpdate) => this.store.updateAutoReplyRun(run.id, { ...patch, eventTraceId: traceId });
+    const updateRun = async (patch: AutoReplyRunUpdate) => {
+      const updated = await this.store.updateAutoReplyRun(run.id, { ...patch, eventTraceId: traceId });
+      if (updated) run = updated;
+      return updated;
+    };
     try {
       const runtime = await this.resolveRuntimeOptions(input.adminId, conversation.accountId);
       const modelDecidesRouting = runtime.generator.supportsStructuredDecision === true;

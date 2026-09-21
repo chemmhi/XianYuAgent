@@ -211,6 +211,11 @@ test('model provider failure fails the run without creating an outbound message'
     });
     assert.equal(result.autoReply?.run.status, 'failed');
     assert.equal(result.autoReply?.run.failureCode, 'MODEL_HTTP_ERROR');
+    const detail = await runtime.store.getAutoReplyRunDetail(admin.id, result.autoReply!.run.id);
+    const failedEvent = detail?.events.find((event) => event.status === 'failed');
+    const failedInput = failedEvent?.payload.input && typeof failedEvent.payload.input === 'object' ? failedEvent.payload.input as Record<string, unknown> : undefined;
+    assert.equal(failedInput?.status, 'context_loaded');
+    assert.equal(failedInput?.intent, 'general');
     const messages = await runtime.messages.listMessages(admin.id, conversation.id, { limit: 20 });
     assert.equal(messages.items.filter((message) => message.direction === 'outbound').length, 0);
   } finally {
