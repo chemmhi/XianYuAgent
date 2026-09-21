@@ -15,9 +15,9 @@ export function AdminBootstrapForm({ busy, error, onSubmit }: { busy: boolean; e
   return (
     <form className="auth-form" onSubmit={submit}>
       <div className="auth-form-heading"><p className="eyebrow">First Run</p><h1>初始化管理员</h1><p>当前环境还没有管理员，请先创建一个管理员账号。</p></div>
-      <label>显示名称<InputField autoComplete="name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} required /></label>
-      <label>管理员邮箱<InputField type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
-      <label>设置密码<InputField type="password" autoComplete="new-password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
+      <InputField label="显示名称" autoComplete="name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} required />
+      <InputField label="管理员邮箱" type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required />
+      <InputField label="设置密码" type="password" autoComplete="new-password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} required />
       {error && <p className="auth-form-error" role="alert">{error}</p>}
       <Button variant="primary" className="auth-submit" type="submit" disabled={busy}>{busy ? '初始化中…' : '创建管理员并继续'}</Button>
     </form>

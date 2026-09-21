@@ -15,7 +15,7 @@
 .accounts-domain-toolbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .accounts-domain-toolbar .ui-select-control { min-width: 0; }
 .accounts-domain-status-select { min-width: 138px; }
-.accounts-domain-search input { width: 210px; }
+.accounts-domain-search { width: 210px; max-width: 260px; }
 .accounts-domain-table-region { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .accounts-domain-table-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .accounts-domain-table { display: grid; min-width: 940px; }
@@ -89,8 +89,7 @@
   .accounts-domain-toolbar { align-items: stretch; flex-direction: column; }
   .accounts-domain-toolbar-actions { justify-content: stretch; }
   .accounts-domain-toolbar-actions .ui-select-control { flex: 1 1 0; min-width: 0; width: 100%; }
-  .accounts-domain-search { flex: 1; }
-  .accounts-domain-search input { width: 100%; }
+  .accounts-domain-search { flex: 1; width: 100%; max-width: none; }
   .accounts-domain-kpis { grid-template-columns: 1fr; }
   .accounts-domain-row { grid-template-columns: minmax(190px, 1.7fr) .8fr .9fr .8fr .9fr 1fr auto; min-width: 940px; }
   .accounts-domain-table { min-width: 940px; }

@@ -1,0 +1,7 @@
+.ui-input-control { box-sizing: border-box; width: 100%; min-height: 34px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--text); font-family: 'Inter', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif; font-size: 12px; font-weight: 400; line-height: 1.35; transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; }
+.ui-input-control:hover { border-color: #B9C8D9; }
+.ui-input-control:focus,
+.ui-input-control.is-focus { border-color: var(--link); outline: 0; background: #fff; box-shadow: 0 0 0 3px rgba(36,90,141,.09); }
+.ui-input-control::placeholder { color: #9CA3AF; }
+.ui-input-control:disabled { cursor: not-allowed; opacity: .65; }
+.ui-field-error { color: var(--danger); font-size: 10px; font-weight: 400; line-height: 1.5; }

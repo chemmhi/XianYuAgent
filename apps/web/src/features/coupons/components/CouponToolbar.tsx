@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import { SelectField } from '../../../shared/ui/SelectField';
+import { SearchField } from '../../../shared/ui/SearchField';
+import { Button } from '../../../shared/ui/Button';
 import type { CouponBatchFilters, CouponBatchVM, CouponsLoadPhase } from '../types';
 
 const types: Array<{ value: CouponBatchVM['purpose'] | 'all'; label: string }> = [
@@ -14,11 +16,11 @@ export function CouponToolbar({ filters, phase, onKeywordChange, onPurposeChange
   return <div className="coupons-toolbar">
     <div><h2>卡券列表</h2><p>按卡券名称、描述和类型筛选配置；列表操作与参考卡券页保持一致。</p></div>
     <div className="coupons-toolbar-actions">
-      <label className="coupons-search"><span className="sr-only">搜索卡券</span><input aria-label="搜索卡券名称或描述" value={filters.keyword ?? ''} onChange={(event) => onKeywordChange(event.target.value)} placeholder="搜索卡券名称或描述..." /></label>
+      <SearchField className="coupons-search" aria-label="搜索卡券名称或描述" value={filters.keyword ?? ''} onChange={(event) => onKeywordChange(event.target.value)} placeholder="搜索卡券名称或描述..." />
       <SelectField aria-label="卡券类型" className="coupons-purpose-select" value={filters.purpose ?? 'all'} onChange={(event) => onPurposeChange(event.target.value as CouponBatchVM['purpose'] | 'all')} options={types} />
-      <button className="btn ghost" type="button" onClick={onRefresh} disabled={phase === 'loading'}>刷新</button>
+      <Button variant="ghost" type="button" onClick={onRefresh} disabled={phase === 'loading'}>刷新</Button>
       {bulkActions}
-      <button className="btn primary" type="button" onClick={onCreate} disabled={createDisabled}>新建卡券</button>
+      <Button variant="primary" type="button" onClick={onCreate} disabled={createDisabled}>新建卡券</Button>
     </div>
   </div>;
 }

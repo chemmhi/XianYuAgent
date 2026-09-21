@@ -6,6 +6,10 @@ import { describe, expect, it } from 'vitest';
 const sharedUiRoot = dirname(fileURLToPath(import.meta.url));
 const featuresRoot = join(sharedUiRoot, '..', '..', 'features');
 
+function source(relativePath: string) {
+  return readFileSync(join(featuresRoot, relativePath), 'utf8');
+}
+
 function listSourceFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
@@ -46,8 +50,9 @@ describe('shared control usage architecture', () => {
       }
 
       for (const snippet of sourceWindows(source, 'textarea')) {
-        // The online-chat composer has selection/emoji behavior that requires its bespoke textarea.
-        if (/messages-composer-input/.test(snippet)) continue;
+        // The online-chat composer and Workspace Run composer have page-specific
+        // selection/focus behavior that requires their bespoke textareas.
+        if (/messages-composer-input|workspace-composer|instructionRef/.test(snippet)) continue;
         fileViolations.push(`${relativePath}: textarea`);
       }
 
@@ -57,14 +62,20 @@ describe('shared control usage architecture', () => {
     expect(violations).toEqual([]);
   });
 
-  it('documents the online-chat composer as the only textarea exemption', () => {
+  it('documents the online-chat composer as an explicit textarea exemption', () => {
     const messagesPath = join(featuresRoot, 'messages', 'components', 'MessagesPage.tsx');
-    const source = readFileSync(messagesPath, 'utf8');
-    const composerMatches = source.match(/<textarea\b[\s\S]*?messages-composer-input[\s\S]*?>/g) ?? [];
+    const messagesSource = readFileSync(messagesPath, 'utf8');
+    const composerMatches = messagesSource.match(/<textarea\b[\s\S]*?messages-composer-input[\s\S]*?>/g) ?? [];
 
     expect(composerMatches).toHaveLength(1);
     expect(composerMatches[0]).toContain('aria-label="消息内容"');
-    expect(composerMatches[0]).toContain('MESSAGES_COMPOSER_PLACEHOLDER');
+    expect(source('messages/components/MessagesPage.tsx')).toContain('MESSAGES_COMPOSER_PLACEHOLDER');
+  });
+
+  it('documents the Workspace Run composer as a separate page-specific exemption', () => {
+    const workspacePage = source('workspace/components/WorkspacePage.tsx');
+    expect(workspacePage).toContain('workspace-composer');
+    expect(workspacePage).toContain('placeholder="给 Agent 发消息…"');
   });
 
   it('keeps the shared SelectField as the only native-select owner', () => {

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { AgentDynamicsDropdown } from './AgentDynamicsDropdown';
+import { SearchField } from '../../../shared/ui/SearchField';
 import type {
   AgentDynamicsExceptionVM,
   AgentDynamicsDetailState,
@@ -108,7 +109,7 @@ export function RunsTable({ filters, data, onFilterChange, onOpenRun, onRetry, l
     { value: 'persistence' as const, label: '提交并落库' },
   ];
   return <section className="agent-dynamics-card agent-dynamics-runs">
-    <div className="agent-dynamics-runs-toolbar"><div><div className="agent-dynamics-panel-title">运行记录</div><div className="agent-dynamics-panel-desc">每条买家消息对应一条 Agent Run；点击记录查看完整输入、阶段和结果。</div></div><div className="agent-dynamics-filters"><AgentDynamicsDropdown value={filters.status} options={statusOptions} ariaLabel="运行状态" triggerClassName="agent-dynamics-filter" onChange={(status) => onFilterChange({ status, page: 1 })} /><AgentDynamicsDropdown value={filters.stage} options={stageOptions} ariaLabel="运行阶段" triggerClassName="agent-dynamics-filter" onChange={(stage) => onFilterChange({ stage, page: 1 })} /><input aria-label="搜索买家、商品或消息" className="agent-dynamics-search" value={filters.keyword} onChange={(event) => onFilterChange({ keyword: event.target.value, page: 1 })} placeholder="搜索买家、商品或消息" /></div></div>
+    <div className="agent-dynamics-runs-toolbar"><div><div className="agent-dynamics-panel-title">运行记录</div><div className="agent-dynamics-panel-desc">每条买家消息对应一条 Agent Run；点击记录查看完整输入、阶段和结果。</div></div><div className="agent-dynamics-filters"><AgentDynamicsDropdown value={filters.status} options={statusOptions} ariaLabel="运行状态" triggerClassName="agent-dynamics-filter" onChange={(status) => onFilterChange({ status, page: 1 })} /><AgentDynamicsDropdown value={filters.stage} options={stageOptions} ariaLabel="运行阶段" triggerClassName="agent-dynamics-filter" onChange={(stage) => onFilterChange({ stage, page: 1 })} /><SearchField aria-label="搜索买家、商品或消息" className="agent-dynamics-search" value={filters.keyword} onChange={(event) => onFilterChange({ keyword: event.target.value, page: 1 })} placeholder="搜索买家、商品或消息" /></div></div>
     {error && <div className="agent-dynamics-inline-error" role="alert"><span>{error.message}</span>{error.retryable && <button type="button" className="agent-dynamics-link-btn" onClick={onRetry}>重试</button>}</div>}
     {loading && !data ? <div className="agent-dynamics-table-state"><span className="agent-dynamics-spinner" />正在读取运行记录…</div> : data && data.items.length > 0 ? <>
       <div className="agent-dynamics-table-scroll"><table className="agent-dynamics-run-table"><thead><tr><th>时间 / 买家</th><th>商品</th><th>意图</th><th>当前阶段</th><th>执行状态</th><th>发送 / 落库</th><th>耗时</th></tr></thead><tbody>{data.items.map((row) => <RunTableRow row={row} key={row.runId} onOpen={() => onOpenRun(row.runId)} />)}</tbody></table></div>

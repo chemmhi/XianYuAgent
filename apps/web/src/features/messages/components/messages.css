@@ -9,8 +9,7 @@
 .messages-sidebar-header > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .messages-sidebar-header small { color: #94a3b8; font-size: 12px; }
 .messages-sidebar-tools { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-bottom: 1px solid #e2e8f0; background: #fff; }
-.messages-search { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 10px; border: 1px solid #cbd5e1; border-radius: 10px; background: #f8fafc; color: #94a3b8; }
-.messages-search input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: #0f172a; font: inherit; font-size: 13px; }
+.messages-search { width: 100%; max-width: none; }
 .messages-filter-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .messages-filter-tabs button { border: 0; border-radius: 8px; padding: 8px 6px; background: transparent; color: #64748b; font-size: 12px; cursor: pointer; }
 .messages-filter-tabs button.active { background: #eff6ff; color: #1d4ed8; font-weight: 700; }

@@ -1,4 +1,5 @@
 import type { ReactNode, SelectHTMLAttributes } from 'react';
+import './field.css';
 import './select-field.css';
 
 export type SelectFieldOption = {

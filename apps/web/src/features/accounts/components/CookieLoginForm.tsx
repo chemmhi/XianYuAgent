@@ -1,5 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import type { AccountsApi } from '../api';
+import { TextAreaField } from '../../../shared/ui/TextAreaField';
+import { Button } from '../../../shared/ui/Button';
 
 export function CookieLoginForm({ api, onCompleted }: { api: AccountsApi; onCompleted: () => void }) {
   const [cookieHeader, setCookieHeader] = useState('');
@@ -26,10 +28,10 @@ export function CookieLoginForm({ api, onCompleted }: { api: AccountsApi; onComp
 
   return (
     <form className="account-login-form" onSubmit={submit}>
-      <label><span>完整 Cookie</span><textarea value={cookieHeader} onChange={(event) => setCookieHeader(event.target.value)} placeholder="粘贴浏览器开发者工具中复制的完整 Cookie" rows={6} autoFocus /></label>
+      <TextAreaField label="完整 Cookie" value={cookieHeader} onChange={(event) => setCookieHeader(event.target.value)} placeholder="粘贴浏览器开发者工具中复制的完整 Cookie" rows={6} autoFocus />
       <p className="account-login-hint">Cookie 只提交到服务端验证，不会回显给买家；登录成功后昵称、备注和头像由闲鱼资料接口返回。</p>
       {error && <div className="inline-error" role="alert">{error}</div>}
-      <div className="modal-actions"><button className="btn primary" type="submit" disabled={phase === 'submitting'}>{phase === 'submitting' ? '验证中…' : '验证 Cookie 并添加账号'}</button></div>
+      <div className="modal-actions"><Button variant="primary" type="submit" disabled={phase === 'submitting'}>{phase === 'submitting' ? '验证中…' : '验证 Cookie 并添加账号'}</Button></div>
     </form>
   );
 }

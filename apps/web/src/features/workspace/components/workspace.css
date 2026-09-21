@@ -13,8 +13,7 @@
 .workspace-create-row { display: flex; gap: 7px; }
 .workspace-create-row input, .workspace-search input { min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--text); font-size: 12px; outline: none; }
 .workspace-create-row input { flex: 1; }
-.workspace-search { display: flex; align-items: center; gap: 7px; margin: 12px 14px 8px; padding: 0 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--sub); }
-.workspace-search input { width: 100%; border: 0; padding: 0; background: transparent; }
+.workspace-search { width: auto; max-width: none; margin: 12px 14px 8px; }
 .workspace-session-list { display: grid; align-content: start; width: 100%; box-sizing: border-box; overflow-x: hidden; overflow-y: auto; padding: 0 8px 10px; }
 .workspace-session-row { display: flex; align-items: stretch; width: 100%; min-width: 0; box-sizing: border-box; gap: 4px; margin: 2px 0; border: 1px solid transparent; border-radius: 9px; }
 .workspace-session-row:hover { border-color: var(--border); background: var(--bg); }
@@ -31,7 +30,7 @@
 .workspace-composer-panel, .workspace-run-panel { padding: 0; }
 .workspace-composer { display: grid; gap: 10px; padding: 16px 18px 18px; }
 .workspace-composer textarea { width: 100%; min-height: 110px; box-sizing: border-box; padding: 12px; resize: vertical; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); color: var(--text); font: inherit; font-size: 12px; line-height: 1.6; outline: none; }
-.workspace-composer textarea:focus, .workspace-create-row input:focus, .workspace-search:focus-within { border-color: #9DB8D3; box-shadow: 0 0 0 3px rgba(36,90,141,.09); }
+.workspace-composer textarea:focus, .workspace-create-row input:focus { border-color: #9DB8D3; box-shadow: 0 0 0 3px rgba(36,90,141,.09); }
 .workspace-composer textarea:disabled { cursor: not-allowed; opacity: .65; }
 .workspace-composer-foot { display: flex; justify-content: space-between; align-items: center; color: var(--sub); font-size: 10px; }
 .workspace-run-body { padding: 16px 18px 20px; }

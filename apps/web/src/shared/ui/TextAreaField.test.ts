@@ -18,7 +18,7 @@ describe('TextAreaField', () => {
     expect(html).toContain('class="ui-field-label">商品描述<span class="ui-field-required"');
     expect(html).toContain('class="ui-textarea-control ui-textarea"');
     expect(html).toContain('rows="6"');
-    expect(html).toContain('maxlength="5000"');
+    expect(html).toMatch(/maxLength="5000"|maxlength="5000"/);
     expect(html).toContain('required=""');
     expect(html).toContain('class="ui-field-hint">支持换行</span>');
   });

@@ -72,6 +72,7 @@
 
 | `root/responses_wire_support` | `responses-wire-support` | `codex/responses-wire-support` | `F:\ChenHai\Project\XianYuAgent-responses-wire-support` | Codex `/root` delegated agent | `2026-09-21 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 支持可配置 wire_api=responses；保持 chat/completions 默认兼容；API build、自动回复单测 34/34、Pi runtime smoke 已通过。 |
 | `root/dynamic_models` | `settings-dynamic-models` | `feat/settings-dynamic-models` | `F:\ChenHai\Project\XianYuAgent-dynamic-models` | Codex `/root` delegated agent | `2026-09-21 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 动态模型 endpoint、密文 resolver、SSRF 防护、前端 lazy controller/API 与定向测试已完成；未改 SettingsPage 主视觉和主配置保存链路。 |
+| `root/visual_diff_helper` | `common-controls-visual-diff` | `codex/common-controls-visual-diff` | `F:\ChenHai\Project\XianYuAgent-common-controls-visual-diff` | Codex `/root` delegated agent | `2026-09-21 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 独立实现共享控件设计稿与实现页的 Chrome/CDP 截图、像素差异统计及 visual-diff 证据；不改组件实现；PNG 比较单测与设计稿自检已通过 |
 | `root/migration_checklist` | `common-controls-migration-checklist` | `codex/migration-checklist` | `F:\ChenHai\Project\XianYuAgent-migration-checklist` | Codex `/root` delegated agent | `2026-09-21 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | Auth/Settings 最小控件迁移、Products 空值格、全局 checklist 与 guardrail 测试已完成；依赖 common-controls shared UI 文件，严格排除 MessagesPage 在线聊天 composer 与 SellerAgent。 |
 
 ## 主工作区

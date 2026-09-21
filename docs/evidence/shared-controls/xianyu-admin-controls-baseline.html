@@ -1,0 +1,769 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>闲鱼智能运营后台 · 控件设计稿</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
+
+    :root {
+      --bg: #f6f7f9;
+      --preview-bg: #eceef2;
+      --card: #ffffff;
+      --sidebar: #1d2638;
+      --sidebar-hover: #253348;
+      --brand: #1f3a5f;
+      --link: #245a8d;
+      --text: #111827;
+      --sub: #6b7280;
+      --muted: #475569;
+      --border: #e5e7eb;
+      --success: #2e7d5b;
+      --success-bg: #eaf4ef;
+      --warn: #b7791f;
+      --warn-bg: #fef3e2;
+      --danger: #b42318;
+      --danger-bg: #fef0ef;
+      --info: #2f6f8f;
+      --soft-blue: #ebf3fa;
+      --axis: #9ca3af;
+      --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04);
+      --shadow-float: 0 18px 40px rgba(17, 24, 39, 0.12);
+      --focus-ring: 0 0 0 3px rgba(36, 90, 141, 0.09);
+      --font: 'Inter', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body {
+      margin: 0;
+      color: var(--text);
+      background: var(--preview-bg);
+      font-family: var(--font);
+      font-size: 12px;
+      text-rendering: optimizeLegibility;
+    }
+
+    button, input, textarea, select { font: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+      outline: 2px solid rgba(36, 90, 141, .35);
+      outline-offset: 2px;
+    }
+
+    .page {
+      max-width: 1440px;
+      min-height: 100vh;
+      margin: 0 auto;
+      padding: 28px;
+    }
+
+    .page-header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 18px;
+    }
+
+    .eyebrow {
+      margin: 0 0 6px;
+      color: var(--info);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+    h1 {
+      margin-bottom: 6px;
+      font-size: 24px;
+      line-height: 1.15;
+      letter-spacing: -.02em;
+    }
+    h2 {
+      margin-bottom: 5px;
+      font-size: 15px;
+      line-height: 1.3;
+      font-weight: 700;
+    }
+    h3 {
+      margin-bottom: 4px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .lede {
+      max-width: 700px;
+      margin-bottom: 0;
+      color: var(--sub);
+      line-height: 1.65;
+    }
+
+    .header-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 7px 10px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--card);
+      color: var(--muted);
+      box-shadow: var(--shadow-card);
+      white-space: nowrap;
+    }
+    .header-badge .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--success);
+    }
+
+    .shell {
+      display: grid;
+      grid-template-columns: 224px minmax(0, 1fr);
+      min-height: 720px;
+      overflow: hidden;
+      border: 1px solid rgba(17, 24, 39, .04);
+      border-radius: 14px;
+      background: var(--bg);
+      box-shadow: 0 20px 80px rgba(17, 24, 39, .12);
+    }
+
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      padding: 18px 14px;
+      background: var(--sidebar);
+      color: #fff;
+    }
+    .brand-block {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      height: 46px;
+      margin-bottom: 22px;
+    }
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      background: var(--link);
+      color: #fff;
+    }
+    .brand-mark svg { width: 16px; height: 16px; }
+    .brand-copy strong { display: block; font-size: 13px; }
+    .brand-copy span {
+      display: block;
+      margin-top: 3px;
+      color: rgba(255, 255, 255, .35);
+      font-size: 10px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .side-section {
+      margin: 4px 10px 8px;
+      color: rgba(255, 255, 255, .25);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .side-nav { display: grid; gap: 4px; }
+    .side-nav button {
+      display: grid;
+      grid-template-columns: 18px 1fr;
+      align-items: center;
+      gap: 9px;
+      min-height: 36px;
+      padding: 8px 10px;
+      border: 0;
+      border-left: 2px solid transparent;
+      border-radius: 6px;
+      background: transparent;
+      color: rgba(255, 255, 255, .45);
+      text-align: left;
+      font-size: 13px;
+    }
+    .side-nav button svg {
+      width: 16px;
+      height: 16px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .side-nav button:hover { background: var(--sidebar-hover); color: #fff; }
+    .side-nav button.active {
+      border-left-color: var(--link);
+      background: rgba(36, 90, 141, .5);
+      color: #fff;
+    }
+
+    .sidebar-note {
+      margin-top: auto;
+      padding: 12px;
+      border: 1px solid rgba(255, 255, 255, .06);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, .06);
+      color: rgba(255, 255, 255, .74);
+      line-height: 1.6;
+    }
+    .sidebar-note small { color: rgba(255, 255, 255, .42); }
+
+    .workbench { min-width: 0; background: var(--bg); }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 56px;
+      padding: 0 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--card);
+    }
+    .topbar-title { color: var(--sub); font-size: 12px; }
+    .topbar-actions { display: flex; align-items: center; gap: 10px; }
+    .topbar-actions .chip {
+      padding: 5px 8px;
+      border-radius: 4px;
+      background: var(--success-bg);
+      color: var(--success);
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .avatar {
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--brand);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .content { padding: 22px 24px 30px; }
+    .section-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--card);
+      box-shadow: var(--shadow-card);
+    }
+    .card.full { grid-column: 1 / -1; }
+    .card-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px 18px 0;
+    }
+    .card-head p { margin-bottom: 0; color: var(--sub); line-height: 1.6; }
+    .card-body { padding: 16px 18px 18px; }
+    .token-note {
+      color: var(--sub);
+      font-size: 10px;
+      line-height: 1.5;
+    }
+    .token-note code {
+      padding: 2px 4px;
+      border-radius: 4px;
+      background: var(--bg);
+      color: var(--link);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10px;
+    }
+
+    .demo-stack { display: grid; gap: 14px; }
+    .demo-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .demo-column { display: grid; gap: 8px; min-width: 0; }
+    .demo-column.wide { flex: 1 1 260px; }
+    .demo-column.medium { flex: 0 1 220px; }
+    .demo-column.small { flex: 0 1 150px; }
+    .state-label {
+      color: var(--sub);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .03em;
+      text-transform: uppercase;
+    }
+
+    .ui-label {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 3px;
+      min-height: 14px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1.25;
+    }
+    .ui-required { color: var(--danger); }
+    .ui-hint { color: var(--sub); font-size: 10px; line-height: 1.5; }
+
+    .ui-search-control {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      width: 100%;
+      max-width: 260px;
+      min-height: 34px;
+      padding: 0 10px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--bg);
+      transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+    }
+    .ui-search-control:hover { border-color: #b9c8d9; }
+    .ui-search-control:focus-within,
+    .ui-search-control.is-focus {
+      border-color: var(--link);
+      background: #fff;
+      box-shadow: var(--focus-ring);
+    }
+    .ui-search-control svg {
+      flex: 0 0 auto;
+      width: 14px;
+      height: 14px;
+      fill: none;
+      stroke: var(--muted);
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .ui-search-control input {
+      min-width: 0;
+      width: 100%;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text);
+      font-size: 12px;
+    }
+    .ui-search-control input::placeholder { color: #9ca3af; }
+    .ui-search-control .clear-button {
+      display: grid;
+      place-items: center;
+      width: 20px;
+      height: 20px;
+      padding: 0;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--axis);
+    }
+    .ui-search-control .clear-button:hover { background: var(--soft-blue); color: var(--link); }
+    .ui-search-control .clear-button svg { width: 12px; height: 12px; }
+
+    .ui-select-control { position: relative; display: block; min-width: 150px; }
+    .ui-select-control select {
+      width: 100%;
+      min-height: 34px;
+      padding: 7px 34px 7px 10px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      appearance: none;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 400;
+      line-height: 1.35;
+    }
+    .ui-select-control select:hover { border-color: #b9c8d9; }
+    .ui-select-control select:focus-visible,
+    .ui-select-control.is-focus select {
+      border-color: var(--link);
+      outline: 2px solid rgba(36, 90, 141, .35);
+      outline-offset: 2px;
+      background: #fff;
+    }
+    .ui-select-control select:disabled { cursor: not-allowed; opacity: .65; }
+    .ui-select-chevron {
+      position: absolute;
+      top: 50%;
+      right: 11px;
+      width: 15px;
+      height: 15px;
+      transform: translateY(-50%);
+      pointer-events: none;
+      fill: none;
+      stroke: var(--muted);
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .ui-select-control.is-open select { border-color: var(--link); background: #fff; }
+    .ui-select-control.is-open .ui-select-chevron { transform: translateY(-50%) rotate(180deg); }
+    .ui-select-menu {
+      display: grid;
+      gap: 2px;
+      margin-top: 5px;
+      padding: 5px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--card);
+      box-shadow: var(--shadow-float);
+    }
+    .ui-select-menu button {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 31px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--text);
+      text-align: left;
+      font-size: 12px;
+    }
+    .ui-select-menu button:hover,
+    .ui-select-menu button[aria-selected='true'] { background: var(--soft-blue); color: var(--link); }
+    .ui-select-menu svg {
+      width: 13px;
+      height: 13px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.6;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .field-stack { display: grid; gap: 7px; }
+    .ui-input,
+    .ui-textarea {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 12px;
+      transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+    }
+    .ui-input {
+      min-height: 34px;
+      padding: 7px 10px;
+    }
+    .ui-textarea {
+      min-height: 84px;
+      padding: 9px 10px;
+      resize: vertical;
+      line-height: 1.55;
+    }
+    .ui-input:hover, .ui-textarea:hover { border-color: #b9c8d9; }
+    .ui-input:focus, .ui-textarea:focus {
+      border-color: var(--link);
+      outline: 0;
+      background: #fff;
+      box-shadow: var(--focus-ring);
+    }
+    .ui-input::placeholder, .ui-textarea::placeholder { color: #9ca3af; }
+    .ui-input:disabled, .ui-textarea:disabled { cursor: not-allowed; opacity: .65; }
+
+    .button-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .ui-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      min-height: 32px;
+      padding: 0 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--card);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      transition: background .15s ease, border-color .15s ease, color .15s ease, transform .15s ease;
+    }
+    .ui-button:hover { border-color: #b9c8d9; background: #f8fafc; }
+    .ui-button:active { transform: translateY(1px); }
+    .ui-button.primary { border-color: var(--link); background: var(--link); color: #fff; }
+    .ui-button.primary:hover { border-color: #1f4c78; background: #1f4c78; }
+    .ui-button.ghost { background: transparent; }
+    .ui-button.danger { border-color: rgba(180, 35, 24, .2); background: #fff; color: var(--danger); }
+    .ui-button:disabled { cursor: not-allowed; opacity: .55; }
+    .ui-button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+    .placeholder-grid {
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--card);
+    }
+    .placeholder-grid .grid-head,
+    .placeholder-grid .grid-row {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr 1fr 1.2fr;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 14px;
+    }
+    .placeholder-grid .grid-head {
+      border-bottom: 1px solid var(--border);
+      background: #fbfcfd;
+      color: var(--sub);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .03em;
+    }
+    .placeholder-grid .grid-row { min-height: 56px; border-bottom: 1px solid var(--border); }
+    .placeholder-grid .grid-row:last-child { border-bottom: 0; }
+    .placeholder-cell {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 0 9px;
+      border: 1px dashed #cbd5e1;
+      border-radius: 6px;
+      color: var(--axis);
+      font-size: 11px;
+      font-style: italic;
+    }
+    .placeholder-cell.center { justify-content: center; }
+    .placeholder-cell.wide { width: 100%; }
+    .placeholder-cell.tinted { border-style: solid; border-color: #d8e4ef; background: #f7fafc; color: #8aa1b5; }
+    .cell-value { color: var(--text); font-size: 12px; font-weight: 600; }
+    .cell-sub { margin-top: 3px; color: var(--sub); font-size: 10px; }
+
+    .mobile-preview-wrap { display: grid; place-items: center; padding: 14px; background: var(--preview-bg); }
+    .mobile-frame {
+      width: min(390px, 100%);
+      min-height: 620px;
+      overflow: hidden;
+      border: 8px solid #1a2230;
+      border-radius: 26px;
+      background: var(--bg);
+      box-shadow: 0 20px 80px rgba(0, 0, 0, .18);
+    }
+    .mobile-status {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 34px;
+      padding: 0 16px;
+      background: var(--card);
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .mobile-head { padding: 11px 16px 14px; border-bottom: 1px solid var(--border); background: var(--card); }
+    .mobile-head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .mobile-head h3 { margin: 0; font-size: 16px; }
+    .mobile-head small { color: var(--sub); font-size: 10px; }
+    .mobile-content { display: grid; gap: 12px; padding: 14px 14px 80px; }
+    .mobile-card { padding: 14px; }
+    .mobile-filter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .mobile-filter-grid .ui-search-control { grid-column: 1 / -1; max-width: none; }
+    .mobile-filter-grid .ui-select-control { min-width: 0; }
+    .mobile-placeholder-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .mobile-nav {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      padding: 8px 0 14px;
+      border-top: 1px solid var(--border);
+      background: var(--card);
+    }
+    .mobile-nav button {
+      display: grid;
+      justify-items: center;
+      gap: 4px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: var(--sub);
+      font-size: 10px;
+    }
+    .mobile-nav button.active { color: var(--link); }
+    .mobile-nav svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px 12px;
+      margin-top: 4px;
+      color: var(--sub);
+      font-size: 10px;
+    }
+    .legend-item { display: inline-flex; align-items: center; gap: 6px; }
+    .legend-swatch { width: 18px; height: 8px; border-radius: 4px; background: var(--bg); border: 1px solid var(--border); }
+    .legend-swatch.focus { border-color: var(--link); box-shadow: var(--focus-ring); background: #fff; }
+    .legend-swatch.open { border-color: var(--link); background: var(--soft-blue); }
+    .legend-swatch.disabled { background: #f1f5f9; opacity: .65; }
+    .legend-swatch.placeholder { border-style: dashed; background: #fff; }
+
+    @media (max-width: 980px) {
+      .page { padding: 18px; }
+      .shell { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
+      .section-grid { grid-template-columns: 1fr; }
+      .card.full { grid-column: auto; }
+    }
+    @media (max-width: 640px) {
+      .page { padding: 12px; }
+      .page-header { align-items: flex-start; flex-direction: column; gap: 12px; }
+      h1 { font-size: 21px; }
+      .topbar { padding: 0 14px; }
+      .topbar-title { font-size: 11px; }
+      .content { padding: 14px 12px 20px; }
+      .card-head { padding: 14px 14px 0; }
+      .card-body { padding: 14px; }
+      .placeholder-grid .grid-head, .placeholder-grid .grid-row { grid-template-columns: 1fr 1fr; gap: 8px; }
+      .placeholder-grid .grid-head > :nth-child(n+3), .placeholder-grid .grid-row > :nth-child(n+3) { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">xianyu admin · component preview</p>
+        <h1>搜索与表单控件设计稿</h1>
+        <p class="lede">按照 <code>xianyu-admin-design-style</code> 统一搜索框、下拉框、输入框、文本框、按钮与表格占位单元格。这个页面只展示设计，不改正式业务代码。</p>
+      </div>
+      <div class="header-badge"><span class="dot"></span> Token aligned · 1440 / 390</div>
+    </header>
+
+    <section class="shell" aria-label="控件设计稿预览">
+      <aside class="sidebar">
+        <div class="brand-block">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="5" rx="1" fill="currentColor"/><rect x="9" y="2" width="5" height="5" rx="1" fill="currentColor" opacity=".75"/><rect x="2" y="9" width="5" height="5" rx="1" fill="currentColor" opacity=".75"/><rect x="9" y="9" width="5" height="5" rx="1" fill="currentColor"/></svg>
+          </div>
+          <div class="brand-copy"><strong>闲鱼智能运营</strong><span>seller console</span></div>
+        </div>
+        <div class="side-section">Preview</div>
+        <nav class="side-nav" aria-label="预览导航">
+          <button type="button" class="active"><svg viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg><span>控件总览</span></button>
+          <button type="button"><svg viewBox="0 0 16 16"><path d="M3 4h10M3 8h7M3 12h5"/></svg><span>筛选工具栏</span></button>
+          <button type="button"><svg viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="10" rx="2"/><path d="M5 6h6M5 9h4"/></svg><span>表单状态</span></button>
+        </nav>
+        <div class="sidebar-note"><strong>风格基线</strong><br /><small>#1D2638 shell · #245A8D action · 7px input radius</small></div>
+      </aside>
+
+      <div class="workbench">
+        <header class="topbar">
+          <div class="topbar-title">设计稿 / Search · Select · Form</div>
+          <div class="topbar-actions"><span class="chip">视觉 token 已对齐</span><div class="avatar">M</div></div>
+        </header>
+
+        <div class="content">
+          <div class="section-grid">
+            <section class="card">
+              <div class="card-head"><div><h2>搜索框 · Search field</h2><p>默认、聚焦、已输入、禁用四种状态。</p></div><span class="token-note"><code>34px</code> · <code>7px</code> · <code>#F6F7F9</code></span></div>
+              <div class="card-body demo-stack">
+                <div class="demo-row">
+                  <div class="demo-column medium"><span class="state-label">Default</span><label class="ui-search-control"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="m10.3 10.3 3 3"/></svg><input type="search" placeholder="搜索账号名称或备注" aria-label="默认搜索" /></label></div>
+                  <div class="demo-column medium"><span class="state-label">Focus</span><label class="ui-search-control is-focus"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="m10.3 10.3 3 3"/></svg><input type="search" value="订单号 20260921" aria-label="聚焦搜索" /></label></div>
+                </div>
+                <div class="demo-row">
+                  <div class="demo-column medium"><span class="state-label">With value</span><label class="ui-search-control"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="m10.3 10.3 3 3"/></svg><input type="search" value="买家昵称 / 商品标题" aria-label="已输入搜索" /><button type="button" class="clear-button" aria-label="清空"><svg viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"/></svg></button></label></div>
+                  <div class="demo-column medium"><span class="state-label">Disabled</span><label class="ui-search-control" style="opacity:.65"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="m10.3 10.3 3 3"/></svg><input type="search" placeholder="暂不可搜索" disabled aria-label="禁用搜索" /></label></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="card-head"><div><h2>下拉框 · Select field</h2><p>保留原生语义，视觉统一为浅灰底 + SVG chevron。</p></div><span class="token-note"><code>34px</code> · <code>7px</code> · <code>native</code></span></div>
+              <div class="card-body demo-stack">
+                <div class="demo-row">
+                  <div class="demo-column small"><span class="state-label">Default</span><span class="ui-select-control"><select aria-label="默认下拉"><option>全部状态</option><option>已连接</option><option>已停用</option></select><svg class="ui-select-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></span></div>
+                  <div class="demo-column small"><span class="state-label">Focus</span><span class="ui-select-control is-focus"><select aria-label="聚焦下拉"><option>已连接</option><option>全部状态</option></select><svg class="ui-select-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></span></div>
+                  <div class="demo-column small"><span class="state-label">Disabled</span><span class="ui-select-control"><select disabled aria-label="禁用下拉"><option>暂无选项</option></select><svg class="ui-select-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></span></div>
+                </div>
+                <div class="demo-row">
+                  <div class="demo-column medium"><span class="state-label">Open preview</span><span class="ui-select-control is-open"><select aria-label="展开态下拉"><option>风险待确认</option><option>全部状态</option></select><svg class="ui-select-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></span><div class="ui-select-menu" role="listbox" aria-label="展开态菜单"><button type="button" aria-selected="true">风险待确认 <svg viewBox="0 0 16 16"><path d="m3 8 3 3 7-7"/></svg></button><button type="button">待人工</button><button type="button">AI 已回复</button></div></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="card-head"><div><h2>输入框 · Text input</h2><p>适合名称、关键词、URL、短文本字段。</p></div><span class="token-note"><code>12px</code> body · <code>1px</code> border</span></div>
+              <div class="card-body demo-stack">
+                <div class="demo-row">
+                  <div class="demo-column wide field-stack"><span class="ui-label">商品标题 <span class="ui-required">*</span></span><input class="ui-input" type="text" placeholder="请输入商品标题" /><span class="ui-hint">建议控制在 30 个字以内，便于列表扫描。</span></div>
+                  <div class="demo-column wide field-stack"><span class="ui-label">商品链接</span><input class="ui-input" type="url" value="https://2.taobao.com/item.htm?id=..." /><span class="ui-hint">浅灰底表示可编辑输入，聚焦后切换为白底并显示蓝色光环。</span></div>
+                </div>
+                <div class="demo-row">
+                  <div class="demo-column wide field-stack"><span class="state-label">Focus</span><input class="ui-input" type="text" value="聚焦中的字段" style="border-color:var(--link);background:#fff;box-shadow:var(--focus-ring)" /></div>
+                  <div class="demo-column wide field-stack"><span class="state-label">Disabled</span><input class="ui-input" type="text" placeholder="不可编辑" disabled /></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="card-head"><div><h2>文本框 · Textarea</h2><p>适合客服备注、AI 指令、风控说明等多行内容。</p></div><span class="token-note"><code>84px</code> min-height · resize vertical</span></div>
+              <div class="card-body demo-stack">
+                <div class="field-stack"><span class="ui-label">处理备注</span><textarea class="ui-textarea" placeholder="输入本次操作的补充说明，支持换行…"></textarea><span class="ui-hint">提示文案使用 10px #6B7280，不抢主内容注意力。</span></div>
+                <div class="field-stack"><span class="ui-label">AI 回复策略</span><textarea class="ui-textarea" style="background:#fff;border-color:var(--link);box-shadow:var(--focus-ring)">先识别买家意图，再给出简洁、可执行的回复。</textarea></div>
+              </div>
+            </section>
+
+            <section class="card full">
+              <div class="card-head"><div><h2>按钮 · Button states</h2><p>默认操作、主操作、轻量次操作、危险操作和禁用态。</p></div><span class="token-note"><code>32px</code> height · <code>8px</code> radius</span></div>
+              <div class="card-body">
+                <div class="button-row">
+                  <button type="button" class="ui-button"><svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>新建卡券</button>
+                  <button type="button" class="ui-button primary"><svg viewBox="0 0 16 16"><path d="m3 8 3 3 7-7"/></svg>保存设置</button>
+                  <button type="button" class="ui-button ghost">刷新列表</button>
+                  <button type="button" class="ui-button danger">删除选中</button>
+                  <button type="button" class="ui-button" disabled>暂不可用</button>
+                </div>
+                <div class="legend"><span class="legend-item"><i class="legend-swatch"></i>默认</span><span class="legend-item"><i class="legend-swatch focus"></i>聚焦</span><span class="legend-item"><i class="legend-swatch open"></i>展开/选中</span><span class="legend-item"><i class="legend-swatch disabled"></i>禁用</span></div>
+              </div>
+            </section>
+
+            <section class="card full">
+              <div class="card-head"><div><h2>格子 Placeholder · Table cell empty states</h2><p>格子内部不再留大块空白，用细虚线占位 + 弱化提示维持表格节奏。</p></div><span class="token-note"><code>6px</code> radius · dashed border</span></div>
+              <div class="card-body">
+                <div class="placeholder-grid" role="table" aria-label="占位单元格示例">
+                  <div class="grid-head" role="row"><span>商品名称</span><span>库存</span><span>状态</span><span>最近更新</span></div>
+                  <div class="grid-row" role="row"><div><div class="cell-value">轻奢帆布托特包</div><div class="cell-sub">SKU · TB-240921</div></div><span class="cell-value">28</span><span class="placeholder-cell tinted">未同步</span><span class="placeholder-cell wide">等待闲鱼返回时间</span></div>
+                  <div class="grid-row" role="row"><div class="placeholder-cell wide">暂无商品标题</div><span class="placeholder-cell center">—</span><span class="placeholder-cell center">—</span><span class="placeholder-cell wide">暂无更新时间</span></div>
+                  <div class="grid-row" role="row"><div><div class="cell-value">手作手机挂绳</div><div class="cell-sub">SKU · HG-1107</div></div><span class="cell-value">12</span><span class="placeholder-cell tinted">待人工确认</span><span class="cell-value">2026-09-21 14:32</span></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="card full">
+              <div class="card-head"><div><h2>移动端 390px 预览</h2><p>搜索跨整行，下拉两列折行；底部导航保持独立构图，不是简单缩放桌面。</p></div><span class="token-note"><code>390 × 844</code> mental frame</span></div>
+              <div class="card-body mobile-preview-wrap">
+                <div class="mobile-frame">
+                  <div class="mobile-status"><span>9:41</span><span>● ● ●</span></div>
+                  <div class="mobile-head"><div class="mobile-head-row"><div><h3>订单管理</h3><small>筛选与批量处理</small></div><div class="avatar">M</div></div></div>
+                  <div class="mobile-content">
+                    <div class="card mobile-card">
+                      <div class="mobile-filter-grid">
+                        <label class="ui-search-control"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="m10.3 10.3 3 3"/></svg><input type="search" placeholder="搜索订单号、买家或商品" aria-label="移动端搜索" /></label>
+                        <span class="ui-select-control"><select aria-label="移动端订单状态"><option>全部状态</option><option>待发货</option><option>已完成</option></select><svg class="ui-select-chevron" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"/></svg></span>
+                        <span class="ui-select-control"><select aria-label="移动端时间范围"><option>近 7 天</option><option>近 30 天</option></select><svg class="ui-select-chevron" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"/></svg></span>
+                      </div>
+                    </div>
+                    <div class="card mobile-card"><div class="ui-label">当前筛选结果</div><div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px"><strong style="font-size:22px;letter-spacing:-.02em">24</strong><span class="placeholder-cell tinted">待人工 3</span></div></div>
+                    <div class="card mobile-card"><div class="ui-label">列表预览</div><div class="mobile-placeholder-row" style="margin-top:10px"><span class="placeholder-cell wide">暂无买家昵称</span><span class="placeholder-cell wide">等待同步时间</span></div></div>
+                  </div>
+                  <nav class="mobile-nav" aria-label="移动端导航"><button type="button" class="active"><svg viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg><span>首页</span></button><button type="button"><svg viewBox="0 0 16 16"><path d="M3 4h10M3 8h7M3 12h5"/></svg><span>订单</span></button><button type="button"><svg viewBox="0 0 16 16"><path d="M2.5 4.5h11v8h-11zM5 4.5V3h6v1.5"/></svg><span>商品</span></button><button type="button"><svg viewBox="0 0 16 16"><circle cx="8" cy="5" r="2.5"/><path d="M3 13c.8-2.2 2.5-3.5 5-3.5s4.2 1.3 5 3.5"/></svg><span>我的</span></button></nav>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

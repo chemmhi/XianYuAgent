@@ -25,6 +25,7 @@ import { createMockDashboardApi } from '../features/dashboard/api.mock';
 import { DashboardPage } from '../features/dashboard/components/DashboardPage';
 import { createAgentDynamicsApi, createMockAgentDynamicsApi, type AgentDynamicsApi } from '../features/agent-dynamics/api';
 import { AgentDynamicsPage } from '../features/agent-dynamics/components/AgentDynamicsPage';
+import { ControlsPreview } from '../shared/ui/ControlsPreview';
 
 function pageFromPath(pathname: string): PageKey {
   const page = pathname.replace(/^\//, '') as PageKey;
@@ -50,6 +51,7 @@ function iconFor(name: string) {
 }
 
 export default function App() {
+  if (window.location.pathname === '/controls') return <ControlsPreview />;
   const [page, setPage] = useState<PageKey>(() => pageFromPath(window.location.pathname));
   const dashboardMode = resolveDashboardMode(apiMode, import.meta.env.VITE_DASHBOARD_MODE);
   const transport = useMemo(() => {

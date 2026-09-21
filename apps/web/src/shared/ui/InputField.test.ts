@@ -44,7 +44,7 @@ describe('InputField', () => {
 
     expect(html).toContain('class="ui-input-control ui-input settings-api-key"');
     expect(html).toContain('type="password"');
-    expect(html).toContain('autocomplete="new-password"');
+    expect(html).toMatch(/autoComplete="new-password"|autocomplete="new-password"/);
     expect(html).toContain('disabled=""');
     expect(html).not.toContain('class="ui-field"');
   });

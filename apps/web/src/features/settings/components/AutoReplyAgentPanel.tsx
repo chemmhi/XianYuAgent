@@ -43,17 +43,17 @@ export function AutoReplyAgentPanel({ controller, accountName, accountId }: { co
       <div className="settings-form-grid">
         <label className="settings-checkbox full"><input type="checkbox" checked={draft.enabled} onChange={(event) => setField('enabled', event.target.checked)} />启用自动回复 Agent</label>
         <fieldset className="auto-reply-agent-fields" disabled={!draft.enabled} aria-label="自动回复 Agent 配置项">
-          <label className="full">系统提示词<TextAreaField value={draft.systemPrompt} onChange={(event) => setField('systemPrompt', event.target.value)} rows={5} maxLength={20000} required /></label>
-          <label className="full">用户提示词模板<TextAreaField value={draft.userPromptTemplate} onChange={(event) => setField('userPromptTemplate', event.target.value)} rows={4} maxLength={20000} required /></label>
-          <label>最大循环次数<InputField type="number" min={1} max={12} value={draft.maxLoops} onChange={(event) => setField('maxLoops', Number(event.target.value))} required /></label>
-          <label>工具调用上限<InputField type="number" min={1} max={32} value={draft.maxToolCalls} onChange={(event) => setField('maxToolCalls', Number(event.target.value))} required /></label>
-          <label>工具超时（毫秒）<InputField type="number" min={100} max={120000} value={draft.toolTimeoutMs} onChange={(event) => setField('toolTimeoutMs', Number(event.target.value))} required /></label>
-          <label>总超时（毫秒）<InputField type="number" min={1000} max={300000} value={draft.totalTimeoutMs} onChange={(event) => setField('totalTimeoutMs', Number(event.target.value))} required /></label>
-          <label>上下文历史条数<InputField type="number" min={0} max={100} value={draft.maxHistory} onChange={(event) => setField('maxHistory', Number(event.target.value))} required /></label>
-          <label>最大回复长度<InputField type="number" min={30} max={4000} value={draft.maxReplyLength} onChange={(event) => setField('maxReplyLength', Number(event.target.value))} required /></label>
-          <label>分段发送间隔（毫秒）<InputField type="number" min={0} max={30000} value={draft.replySegmentDelayMs} onChange={(event) => setField('replySegmentDelayMs', Number(event.target.value))} required /></label>
-          <label>防抖窗口（毫秒）<InputField type="number" min={0} max={30000} value={draft.debounceMs} onChange={(event) => setField('debounceMs', Number(event.target.value))} required /></label>
-          <label>发送模式<SelectField value={draft.sendMode} onChange={(event) => setField('sendMode', event.target.value as EditableConfig['sendMode'])} options={[{ value: 'simulate', label: '模拟发送' }, { value: 'live', label: '真实发送（受白名单约束）' }]} /></label>
+          <TextAreaField fieldClassName="full" label="系统提示词" value={draft.systemPrompt} onChange={(event) => setField('systemPrompt', event.target.value)} rows={5} maxLength={20000} required />
+          <TextAreaField fieldClassName="full" label="用户提示词模板" value={draft.userPromptTemplate} onChange={(event) => setField('userPromptTemplate', event.target.value)} rows={4} maxLength={20000} required />
+          <InputField label="最大循环次数" type="number" min={1} max={12} value={draft.maxLoops} onChange={(event) => setField('maxLoops', Number(event.target.value))} required />
+          <InputField label="工具调用上限" type="number" min={1} max={32} value={draft.maxToolCalls} onChange={(event) => setField('maxToolCalls', Number(event.target.value))} required />
+          <InputField label="工具超时（毫秒）" type="number" min={100} max={120000} value={draft.toolTimeoutMs} onChange={(event) => setField('toolTimeoutMs', Number(event.target.value))} required />
+          <InputField label="总超时（毫秒）" type="number" min={1000} max={300000} value={draft.totalTimeoutMs} onChange={(event) => setField('totalTimeoutMs', Number(event.target.value))} required />
+          <InputField label="上下文历史条数" type="number" min={0} max={100} value={draft.maxHistory} onChange={(event) => setField('maxHistory', Number(event.target.value))} required />
+          <InputField label="最大回复长度" type="number" min={30} max={4000} value={draft.maxReplyLength} onChange={(event) => setField('maxReplyLength', Number(event.target.value))} required />
+          <InputField label="分段发送间隔（毫秒）" type="number" min={0} max={30000} value={draft.replySegmentDelayMs} onChange={(event) => setField('replySegmentDelayMs', Number(event.target.value))} required />
+          <InputField label="防抖窗口（毫秒）" type="number" min={0} max={30000} value={draft.debounceMs} onChange={(event) => setField('debounceMs', Number(event.target.value))} required />
+          <SelectField label="发送模式" value={draft.sendMode} onChange={(event) => setField('sendMode', event.target.value as EditableConfig['sendMode'])} options={[{ value: 'simulate', label: '模拟发送' }, { value: 'live', label: '真实发送（受白名单约束）' }]} />
         </fieldset>
       </div>
       <div className="settings-editor-note"><strong>配置审计</strong><span>当前版本 v{state.data.configVersion} · 摘要 {state.data.configDigest} · Prompt 原文不会写入审计日志。</span></div>
