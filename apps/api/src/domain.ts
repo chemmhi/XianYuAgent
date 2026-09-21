@@ -476,6 +476,8 @@ export interface AutoReplyRunListQuery {
   from?: string;
   to?: string;
   status?: AutoReplyRunStatus;
+  decision?: AutoReplyDecision;
+  processing?: boolean;
   stage?: AutoReplyRunStage;
   keyword?: string;
   page?: number;

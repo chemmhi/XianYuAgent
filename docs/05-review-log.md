@@ -438,3 +438,13 @@
 | S5-R81 | 质量 / 失败恢复 | Provider 成功、配置缺失、HTTP 失败是否分别落到模型回复、模板回复和失败不发送 | root + listener_ready | PASS（受控环境） | `apps/api/scripts/auto-reply.test.ts`：模型生成持久化、模型上下文裁剪、显式关闭后的模板回退、503 失败 run、不产生 outbound；`npm --workspace apps/api run test:auto-reply:unit` 18/18 |
 
 本轮结论：自动回复已接入与 Workspace 一致的本地环境变量模型配置；配置完整时使用共享模型客户端，配置缺失时保留模板生成，Provider 失败时不回退错误模板、不发送买家消息，仅将安全错误码落库。Settings 页面凭证解析、真实 live 自动化归档、Outbox/unknown 恢复和离线模型评测仍保持后续门禁。
+
+### 2026-09-21：Agent 动态壳层与视觉复验
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R82 | 业务 / 验收 | Agent 动态是否沿用现有左侧导航，且位于“订单管理”和“设置”之间；右侧是否只保留业务内容区 | root + prototype_visual_analysis | PASS | `apps/web/src/app/App.tsx`、`apps/web/src/app/navigation.ts`、Chrome/CDP shell assertions；`visual-diff.md` |
+| S5-R83 | 架构 / 数据流 | 页面是否复用全局 `AccountContext`，前端职责是否拆分为 API/controller/types/views，后端是否拆分为 activity/domain/store 模块；迁移文档是否与 DDL 一致 | root + requirements_architecture | READY_FOR_REVIEW | `apps/web/src/features/agent-dynamics/`、`apps/api/src/auto-reply-activity.ts`、`apps/api/src/store-memory.ts`、`apps/api/src/store-postgres.ts`、`docs/agent/agent-dynamics/design.md`、`apps/api/migrations/024_auto_reply_run_events.sql` |
+| S5-R84 | 质量 / 视觉 / 端到端 | 是否先对比原型截图，再用真实 PostgreSQL + Chrome/CDP 生成桌面、抽屉、移动主页面和移动抽屉证据；是否移除原型 sidebar/topbar 且无双重滚动 | root + prototype_visual_analysis | PASS（受控环境） | `npm --workspace apps/web run test:e2e:chrome:agent-dynamics`；`docs/agent/agent-dynamics/evidence/visual-diff.md`；`docs/agent/agent-dynamics/evidence/evidence.json` |
+
+本轮结论：产品壳层约束已落地，视觉证据已重拍；架构复审在独立 reviewer 回传前保持 `READY_FOR_REVIEW`，不得提前标记整体发布级 PASS。

@@ -16,6 +16,7 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
   const { accounts, currentAccountId, currentAccount, accountsLoading, accountsError } = useAccountContext();
   const api = useMemo(() => providedApi ?? createMessagesApi({ get: async () => { throw new Error('messages api unavailable'); } }), [providedApi]);
   const controller = useMessagesController({ api, accountId: currentAccountId });
+  const initialConversationId = useMemo(() => new URLSearchParams(window.location.search).get('conversationId') ?? undefined, []);
   const [draft, setDraft] = useState('');
   const [search, setSearch] = useState('');
   const [unreadOnly, setUnreadOnly] = useState(false);
@@ -34,6 +35,11 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
   const conversationsLoading = controller.state.listPhase === 'loading';
 
   useEffect(() => { pendingImagesRef.current = pendingImages; }, [pendingImages]);
+
+  useEffect(() => {
+    if (!initialConversationId || controller.state.listPhase !== 'success' || controller.state.activeConversationId === initialConversationId) return;
+    if (controller.state.conversations.some((conversation) => conversation.conversationId === initialConversationId)) controller.setActiveConversation(initialConversationId);
+  }, [controller, initialConversationId, controller.state.activeConversationId, controller.state.conversations, controller.state.listPhase]);
 
   useEffect(() => () => {
     pendingImagesRef.current.forEach((item) => URL.revokeObjectURL(item.url));

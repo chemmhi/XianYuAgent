@@ -1069,6 +1069,8 @@ function parseAutoReplyRunListQuery(query: Record<string, string>): import('./do
     from: optionalString(query.from),
     to: optionalString(query.to),
     status: optionalString(query.status) as import('./domain.js').AutoReplyRunListQuery['status'],
+    decision: optionalString(query.decision) as import('./domain.js').AutoReplyRunListQuery['decision'],
+    processing: query.processing === 'true',
     stage: optionalString(query.stage) as import('./domain.js').AutoReplyRunListQuery['stage'],
     keyword: optionalString(query.keyword),
     page: page === undefined || Number.isNaN(page) ? page : Math.trunc(page),

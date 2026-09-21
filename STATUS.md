@@ -1,5 +1,13 @@
 # XianyuSellerAgent 项目状态
 
+## 2026-09-21 Agent 动态壳层与视觉复验增量
+
+- 按最新产品约束，Agent 动态复用现有 `AuthenticatedShell` 左侧导航，`Agent 动态` 保持在“订单管理”和“设置”之间；移除原型内置 Agent Console 左栏。
+- 移除右侧内容区顶部“智能运营 / 运行记录”整栏及重复账号 chip / 通知入口；页面查询继续使用全局 `AccountContext.currentAccountId`。
+- 新增 host CSS，消除全局 `main` 与 Agent 动态内部双重 padding、嵌套滚动和桌面/移动高度冲突。
+- 视觉证据先对比 Git 原型截图，再由真实 PostgreSQL + Chrome/CDP 重新生成桌面、抽屉、移动主页面和移动抽屉截图；记录见 `docs/agent/agent-dynamics/evidence/visual-diff.md` 与 `evidence.json`。
+- 验证：`npm --workspace apps/web run typecheck`、`npm --workspace apps/web run test -- --run`（42 files / 126 tests）、`npm --workspace apps/web run build`、`npm --workspace apps/api run build`、`npm --workspace apps/web run test:e2e:chrome:agent-dynamics` 均通过；真实链路包含 PostgreSQL `auto_reply_runs` / `auto_reply_run_events` 落库与页面回读。
+
 ## 2026-09-21 增量修复
 
 - 自动回复 Agent 设置与动态联调：设置页 Tab 已改为“自动回复 Agent”，配置通过独立 `AutoReplyAgentSettingsService` 持久化；买家 Agent 使用四个只读工具并在每条入站消息前读取最新管理员配置，支持 Prompt、循环/工具上限、上下文、回复长度、分段、防抖、已支付订单策略和 simulate/live（live 仍受环境变量买家白名单约束）。真实 push→tool call→生成→模拟出站→消息/`auto_reply_runs` 落库 E2E 3/3 通过；Chrome/CDP 设置页 E2E 通过；当前仍为 simulate 验证，真实闲鱼发送与发布级恢复未关闭。

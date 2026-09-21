@@ -89,10 +89,9 @@ export default function App() {
 
 function AuthenticatedShell({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, agentDynamicsApi, dashboardApi, navigate }: { page: PageKey; accountsApi: ReturnType<typeof createAccountsApi>; productsApi: ReturnType<typeof createProductsApi>; couponsApi: ReturnType<typeof createCouponsApi>; messagesApi: ReturnType<typeof createMessagesApi>; workspaceApi: ReturnType<typeof createWorkspaceApi>; ordersApi: ReturnType<typeof createOrdersApi>; settingsApi: ReturnType<typeof createCredentialApi>; autoReplyAgentSettingsApi: ReturnType<typeof createAutoReplyAgentSettingsApi>; agentDynamicsApi: AgentDynamicsApi; dashboardApi: ReturnType<typeof createDashboardApi>; navigate: (next: PageKey) => void }) {
   if (page === 'dashboard') return <DashboardPage api={dashboardApi} apiMode={resolveDashboardMode(apiMode, import.meta.env.VITE_DASHBOARD_MODE)} onNavigate={navigate} />;
-  if (page === 'agent-dynamics') return <AgentDynamicsPage api={agentDynamicsApi} onNavigate={navigate} />;
   return (
     <div className="app-viewport">
-      <div className={`desktop-shell${page === 'products' ? ' products-shell' : page === 'accounts' ? ' accounts-shell' : page === 'orders' ? ' orders-shell' : page === 'settings' ? ' settings-shell' : ''}`}>
+      <div className={`desktop-shell${page === 'products' ? ' products-shell' : page === 'accounts' ? ' accounts-shell' : page === 'orders' ? ' orders-shell' : page === 'settings' ? ' settings-shell' : page === 'agent-dynamics' ? ' agent-dynamics-shell-host' : ''}`}>
         <aside className="sidebar">
           <div className="brand-block"><div className="brand-mark">Y</div><div className="brand-copy"><strong>XianyuSellerAgent</strong><span>运营控制台</span></div></div>
           <div className="side-section">运营台</div>
@@ -102,7 +101,7 @@ function AuthenticatedShell({ page, accountsApi, productsApi, couponsApi, messag
           <div className="sidebar-bottom"><div className="agent-card"><span className="online-dot" /> <strong>Agent Runtime</strong><small>独立服务 · 正常</small></div><div className="sidebar-user"><div className="avatar">管</div><div><strong>运营管理员</strong><span>admin@example.com</span></div></div></div>
         </aside>
         <div className="desktop-body">
-          <main className={page === 'products' ? 'products-main' : page === 'accounts' ? 'accounts-main' : page === 'orders' ? 'orders-main' : page === 'settings' ? 'settings-main' : undefined}>{renderAuthenticatedPage({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi })}</main>
+          <main className={page === 'products' ? 'products-main' : page === 'accounts' ? 'accounts-main' : page === 'orders' ? 'orders-main' : page === 'settings' ? 'settings-main' : page === 'agent-dynamics' ? 'agent-dynamics-main-host' : undefined}>{renderAuthenticatedPage({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, agentDynamicsApi, onNavigate: navigate })}</main>
         </div>
       </div>
     </div>
@@ -119,9 +118,11 @@ type AuthenticatedPageProps = {
   ordersApi: ReturnType<typeof createOrdersApi>;
   settingsApi: ReturnType<typeof createCredentialApi>;
   autoReplyAgentSettingsApi: ReturnType<typeof createAutoReplyAgentSettingsApi>;
+  agentDynamicsApi: AgentDynamicsApi;
+  onNavigate: (page: PageKey) => void;
 };
 
-export function renderAuthenticatedPage({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi }: AuthenticatedPageProps) {
+export function renderAuthenticatedPage({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, agentDynamicsApi, onNavigate }: AuthenticatedPageProps) {
   switch (page) {
     case 'accounts':
       return <AccountsPage api={accountsApi} />;
@@ -137,6 +138,8 @@ export function renderAuthenticatedPage({ page, accountsApi, productsApi, coupon
       return <OrdersPage api={ordersApi} />;
     case 'settings':
       return <SettingsPage api={settingsApi} agentApi={autoReplyAgentSettingsApi} />;
+    case 'agent-dynamics':
+      return <AgentDynamicsPage api={agentDynamicsApi} onNavigate={onNavigate} />;
     default:
       return <PlaceholderPage page={page} />;
   }

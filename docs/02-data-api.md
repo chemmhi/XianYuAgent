@@ -367,3 +367,5 @@ API Key 配置不新增第二套凭证表；`CredentialStore` 继续作为唯一
 - `GET /api/v1/auto-reply/runs/{runId}?accountId=`：受控运行详情与阶段时间线。
 
 所有请求必须走 Session + 服务端 account scope；错误码沿用 `VALIDATION_FAILED`、`NOT_FOUND`、`FORBIDDEN`、`RETRYABLE_TIMEOUT`。页面不提供异常写确认接口，首版只读。
+
+前端 adapter 负责契约归一化：页面的 `range=24h|7d` 转换为 API 的 `from/to`；列表状态 `replied|handoff|failed|processing` 分别映射为 API 的 `decision` 或 `processing=true`；API 的阶段短键映射为页面 canonical stage。这样 raw DTO 与页面 ViewModel 保持边界，不把数据库枚举直接散落到组件。

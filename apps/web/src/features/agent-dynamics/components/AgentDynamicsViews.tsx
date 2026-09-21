@@ -60,7 +60,7 @@ export function RuntimePanel({ summary, onOpenRun }: { summary: AgentDynamicsSum
       <div className="agent-dynamics-event-stream">
         {summary.events.map((event) => <button type="button" className="agent-dynamics-event-row" key={event.id} onClick={() => event.runId && onOpenRun(event.runId)}>
           <span className="agent-dynamics-event-time">{event.time}</span><span className={`agent-dynamics-event-dot ${classTone(event.tone)}`} />
-          <span className="agent-dynamics-event-title"><strong>{event.title}</strong><span className="agent-dynamics-event-meta">{event.meta}</span></span>
+          <span className="agent-dynamics-event-title"><span>{event.title}</span><span className="agent-dynamics-event-meta">{event.meta}</span></span>
           <StatusTag tone={event.tone}>{event.label}</StatusTag>
         </button>)}
       </div>

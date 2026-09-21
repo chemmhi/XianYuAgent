@@ -524,6 +524,8 @@ export class PostgresStore implements Store {
     if (query.from) conditions.push(`r.created_at >= ${add(query.from)}`);
     if (query.to) conditions.push(`r.created_at <= ${add(query.to)}`);
     if (query.status) conditions.push(`r.status = ${add(query.status)}`);
+    if (query.decision) conditions.push(`r.decision = ${add(query.decision)}`);
+    if (query.processing) conditions.push(`r.status in ('received','classified','context_loaded','generated','simulated')`);
     if (query.stage) conditions.push(`r.status = ${add(this.statusForAutoReplyStage(query.stage))}`);
     if (query.keyword?.trim()) { const param = add(`%${query.keyword.trim()}%`); conditions.push(`(r.id::text ilike ${param} or r.intent ilike ${param} or coalesce(r.failure_code,'') ilike ${param} or coalesce(c.buyer_display_name,'') ilike ${param} or coalesce(p.title,'') ilike ${param})`); }
     const where = conditions.join(' and ');

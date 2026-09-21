@@ -1,0 +1,28 @@
+{
+  "capturedAt": "2026-09-21",
+  "branch": "codex/agent-dynamics",
+  "route": "/agent-dynamics",
+  "viewports": [
+    { "name": "desktop", "width": 1440, "height": 900, "screenshot": "screenshots/agent-dynamics-desktop-1440x900.png" },
+    { "name": "desktop-drawer", "width": 1440, "height": 900, "screenshot": "screenshots/agent-dynamics-drawer-desktop-1440x900.png" },
+    { "name": "mobile", "width": 390, "height": 844, "screenshot": "screenshots/agent-dynamics-mobile-390x844.png" },
+    { "name": "mobile-drawer", "width": 390, "height": 844, "screenshot": "screenshots/agent-dynamics-mobile-drawer-390x844.png" }
+  ],
+  "referenceBlobs": {
+    "prototypeHtml": "620429f9d073011d6d88d7be87fc3ef49f227152",
+    "prototypeDesktop": "94643a1a04439906cccac8b59cbb96991ecb33d8",
+    "prototypeDrawer": "d1f9bb9eeb042219bd95f415f03bb00c0cad8271",
+    "prototypeMobile": "f7321cc1275412f444b62adf0b908ec8c11c8952"
+  },
+  "assertions": {
+    "usesExistingSidebarOnly": true,
+    "prototypeSidebarRemoved": true,
+    "topbarRemoved": true,
+    "accountContextScoped": true,
+    "realPostgresRunAndEvents": true,
+    "styleTokensCompared": true,
+    "styleTokenSemanticMatches": 18,
+    "styleTokenSemanticTotal": 18
+  },
+  "command": "npm --workspace apps/web run test:e2e:chrome:agent-dynamics"
+}

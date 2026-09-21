@@ -58,7 +58,7 @@
 - `features/agent-dynamics/components/AgentDynamicsViews.tsx`：KPI、pipeline、health、table、drawer 视图；
 - `features/agent-dynamics/components/agent-dynamics.css`：原型 token 和响应式规则。
 
-页面不保存业务事实，只保存筛选、当前页、选中 runId、刷新状态和错误信息。
+页面不保存业务事实，只保存筛选、当前页、选中 runId、刷新状态和错误信息。页面复用现有 `AuthenticatedShell` 的 `.sidebar` 与全局 `AccountContext`，不渲染原型内置 Agent Console 左栏，也不渲染原型顶部“智能运营 / 运行记录”栏。
 
 ## 4. 数据模型与状态
 
@@ -79,9 +79,9 @@
 
 ### 4.2 新增表：`messages.auto_reply_run_events`
 
-字段：`id uuid PK`、`run_id uuid FK`、`admin_id uuid FK`、`account_id uuid FK`、`sequence integer`、`event_type text`、`stage text`、`status text`、`occurred_at timestamptz`、`duration_ms integer nullable`、`metadata_redacted_json jsonb`、`trace_id text`。
+字段：`id uuid PK`、`run_id uuid FK`、`account_id uuid FK`、`sequence integer`、`event_type text`、`stage text`、`status text`、`occurred_at timestamptz`、`duration_ms integer nullable`、`payload_json jsonb`、`trace_id text`。管理员身份通过 `run_id -> auto_reply_runs.admin_id` 受控反查，不在事件表重复存储。
 
-约束与索引：`unique(run_id, sequence)`；索引 `(account_id, occurred_at desc)`、`(run_id, sequence)`、`(admin_id, occurred_at desc)`；删除策略 `ON DELETE RESTRICT`。元数据只能写脱敏摘要和 digest。
+约束与索引：`unique(run_id, sequence)`；索引 `(account_id, occurred_at desc)`、`(run_id, sequence)`；删除策略 `ON DELETE RESTRICT`。`payload_json` 只能写脱敏摘要和 digest。
 
 事件写入：`createAutoReplyRun` 写入 `run.received`；每次 `updateAutoReplyRun` 状态发生变化时追加一条事件；重复状态更新不追加重复事件。Memory Store 使用同样的事件语义。
 
@@ -120,8 +120,8 @@ Query：`accountId?`、`range`、`status?`、`stage?`、`keyword?`、`page?`、`
 | 未授权 | 由 AuthGate 重新登录 |
 | 抽屉加载 | 抽屉显示 loading；列表不清空 |
 | 抽屉失败 | 抽屉显示错误与重试 |
-| 轮询刷新 | 顶部显示“实时刷新 · 最近 X 秒”或“刷新失败” |
-| 移动端 | 隐藏外层 sidebar，pipeline 纵向，table 横向滚动，抽屉改为底部 sheet |
+| 轮询刷新 | 右侧业务区保留“实时刷新”标记；刷新失败时展示错误条并允许重试，不新增顶部栏 |
+| 移动端 | 沿用项目侧栏的横向主导航，pipeline 纵向，table 横向滚动，抽屉改为底部 sheet |
 
 ## 7. 测试与证据
 

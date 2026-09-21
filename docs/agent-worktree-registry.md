@@ -86,5 +86,5 @@
 3. 人工审核通过后改为 `READY_FOR_MERGE`；未通过保持 `READY_FOR_REVIEW` 或改为 `BLOCKED`。
 4. 只有持有 merge lock 的 agent 能写入 `MERGING`、`MERGED`、`CLEANED`、`merge_commit` 和 `cleaned_at`。
 5. 每次更新登记表后运行 `git worktree list --porcelain`，确保表格与 Git 实际状态一致。
-| `root` | `agent-dynamics` | `codex/agent-dynamics` | `F:\\ChenHai\\Project\\XianYuAgent-agent-dynamics` | Codex `/root` | `2026-09-21 15:00:00 +08:00` | `REGISTERED` | `-` | `-` | Agent 动态复杂模块：设计、实现、真实端到端与视觉验收进行中。 |
+| `root` | `agent-dynamics` | `codex/agent-dynamics` | `F:\\ChenHai\\Project\\XianYuAgent-agent-dynamics` | Codex `/root` | `2026-09-21 15:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | Agent 动态复杂模块已完成设计、前后端模块拆分、真实 PostgreSQL/Chrome/CDP 链路与新壳层视觉证据；等待独立架构复审后进入 READY_FOR_MERGE。 |
 | `root/prototype_visual_analysis` | `agent-dynamics-web` | `codex/agent-dynamics-web` | `F:\\ChenHai\\Project\\XianYuAgent-agent-dynamics-web` | Codex `/root` delegated agent | `2026-09-21 17:30:53 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | Agent 动态正式前端切片：导航、API adapter、controller、原型高保真页面、状态与视觉测试。 |

@@ -551,11 +551,14 @@ export class MemoryStore implements Store {
     const from = query.from ? Date.parse(query.from) : Number.NEGATIVE_INFINITY;
     const to = query.to ? Date.parse(query.to) : Number.POSITIVE_INFINITY;
     const keyword = query.keyword?.trim().toLowerCase();
+    const processing = new Set<AutoReplyRunStatus>(['received', 'classified', 'context_loaded', 'generated', 'simulated']);
     const filtered = [...this.autoReplyRuns.values()]
       .filter((run) => run.adminId === adminId && scoped.has(run.accountId))
       .filter((run) => !query.accountId || run.accountId === query.accountId)
       .filter((run) => Date.parse(run.createdAt) >= from && Date.parse(run.createdAt) <= to)
       .filter((run) => !query.status || run.status === query.status)
+      .filter((run) => !query.decision || run.decision === query.decision)
+      .filter((run) => !query.processing || processing.has(run.status))
       .filter((run) => !query.stage || autoReplyStageForStatus(run.status) === query.stage)
       .filter((run) => !keyword || `${run.id} ${run.intent} ${run.failureCode ?? ''} ${run.inputDigest}`.toLowerCase().includes(keyword))
       .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt) || right.id.localeCompare(left.id));

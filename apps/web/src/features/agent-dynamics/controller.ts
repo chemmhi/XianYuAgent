@@ -1,9 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../api/http';
 import { defaultAgentDynamicsApi, type AgentDynamicsApi } from './api';
-import type { AgentDynamicsFilters, AgentDynamicsLoadError, AgentDynamicsRunsState, AgentDynamicsDetailState, AgentDynamicsSummaryState } from './types';
+import type { AgentDynamicsEventVM, AgentDynamicsFilters, AgentDynamicsLoadError, AgentDynamicsRunRowVM, AgentDynamicsRunsState, AgentDynamicsDetailState, AgentDynamicsSummaryState } from './types';
 
 export const defaultAgentDynamicsFilters: AgentDynamicsFilters = { range: '24h', status: 'all', stage: 'all', keyword: '', page: 1, pageSize: 20 };
+
+function eventsFromRuns(items: AgentDynamicsRunRowVM[]): AgentDynamicsEventVM[] {
+  return items.slice(0, 5)
+    .map((row) => ({
+      id: `run:${row.runId}`,
+      runId: row.runId,
+      time: row.timeLabel,
+      title: `${row.buyer.name} 的消息${row.decision.key === 'processing' ? '正在处理' : row.decision.key === 'handoff' ? '已转人工' : row.decision.key === 'failed' ? '处理失败' : '已完成自动回复'}`,
+      meta: `${row.intent} · ${row.senderOutcome.label}`,
+      label: row.decision.label,
+      tone: row.decision.tone,
+    }));
+}
 
 export function toAgentDynamicsLoadError(error: unknown): AgentDynamicsLoadError {
   if (error instanceof ApiError && error.status === 403) return { code: 'FORBIDDEN', message: '当前管理员没有读取 Agent 动态的权限，请检查账号范围。', retryable: false };
@@ -40,6 +53,10 @@ export function useAgentDynamicsController(options: { api?: AgentDynamicsApi; ac
   const accountId = options.accountId;
 
   const reloadSummary = useCallback(async () => {
+    if (!accountId) {
+      setSummary({ phase: 'idle', data: null, error: null, refreshing: false });
+      return;
+    }
     const requestId = ++summaryRequestId.current;
     setSummary((previous) => ({ ...previous, phase: previous.data ? previous.phase : 'loading', error: null, refreshing: Boolean(previous.data) }));
     try {
@@ -54,12 +71,17 @@ export function useAgentDynamicsController(options: { api?: AgentDynamicsApi; ac
   }, [accountId, api, filters.range]);
 
   const reloadRuns = useCallback(async () => {
+    if (!accountId) {
+      setRuns({ phase: 'idle', data: null, error: null, refreshing: false });
+      return;
+    }
     const requestId = ++runsRequestId.current;
     setRuns((previous) => ({ ...previous, phase: previous.data ? previous.phase : 'loading', error: null, refreshing: Boolean(previous.data) }));
     try {
       const data = await api.listRuns({ ...filters, accountId });
       if (requestId !== runsRequestId.current) return;
       setRuns({ phase: data.items.length === 0 ? 'empty' : 'success', data, error: null, refreshing: false });
+      setSummary((previous) => previous.data && previous.data.events.length === 0 ? { ...previous, data: { ...previous.data, events: eventsFromRuns(data.items) } } : previous);
     } catch (error) {
       if (requestId !== runsRequestId.current) return;
       const mapped = toAgentDynamicsLoadError(error);
@@ -71,15 +93,17 @@ export function useAgentDynamicsController(options: { api?: AgentDynamicsApi; ac
     await Promise.all([reloadSummary(), reloadRuns()]);
   }, [reloadRuns, reloadSummary]);
 
-  useEffect(() => { void reload(); }, [filtersKey, reload]);
+  useEffect(() => { if (accountId) void reload(); }, [accountId, filtersKey, reload]);
 
   useEffect(() => {
     const interval = options.pollIntervalMs ?? 5000;
+    if (!accountId) return undefined;
     const timer = window.setInterval(() => { void reload(); }, interval);
     return () => window.clearInterval(timer);
-  }, [options.pollIntervalMs, reload]);
+  }, [accountId, options.pollIntervalMs, reload]);
 
   const openRun = useCallback(async (runId: string) => {
+    if (!accountId) return;
     const requestId = ++detailRequestId.current;
     setDetail({ phase: 'loading', runId, data: null, error: null });
     try {

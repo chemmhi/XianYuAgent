@@ -17,7 +17,7 @@ globalThis.fetch = (async (_input, init) => {
   assert.equal(body.model, 'auto-reply-postgres-smoke');
   return new Response(JSON.stringify({ model: 'auto-reply-postgres-smoke', choices: [{ message }] }), { status: 200, headers: { 'content-type': 'application/json' } });
 });
-const config = { host: '127.0.0.1', port: 0, databaseUrl, cookieSecure: false, allowInMemory: false, sessionIdleMs: 1_800_000, sessionAbsoluteMs: 28_800_000, xianyuQrMode: 'stub', modelApiKey: 'auto-reply-postgres-smoke-key', modelBaseUrl: 'https://model.example/v1', modelName: 'auto-reply-postgres-smoke', modelTimeoutMs: 5_000, autoReplyModelEnabled: true, autoReplySendMode: 'simulate', autoReplyTestBuyerNames: [`Auto Reply PostgreSQL Buyer`] };
+const config = { host: '127.0.0.1', port: 0, databaseUrl, cookieSecure: false, allowInMemory: false, sessionIdleMs: 1_800_000, sessionAbsoluteMs: 28_800_000, xianyuQrMode: 'stub', modelApiKey: 'auto-reply-postgres-smoke-key', modelBaseUrl: 'https://model.example/v1', modelName: 'auto-reply-postgres-smoke', modelWireApi: 'chat', modelTimeoutMs: 5_000, autoReplyModelEnabled: true, autoReplySendMode: 'simulate', autoReplyTestBuyerNames: [`Auto Reply PostgreSQL Buyer`] };
 let runtime;
 let adminId;
 let accountId;
@@ -71,6 +71,7 @@ try {
 } finally {
   const active = runtime;
   if (active?.store?.pool) {
+    if (accountId) await active.store.pool.query('delete from messages.auto_reply_run_events where account_id=$1', [accountId]);
     if (conversationId) await active.store.pool.query('delete from messages.auto_reply_runs where conversation_id=$1', [conversationId]);
     if (accountId) await active.store.pool.query('delete from messages.messages where account_id=$1', [accountId]);
     if (accountId) await active.store.pool.query('delete from messages.events where account_id=$1', [accountId]);
