@@ -145,10 +145,11 @@ function RunDrawerContent({ detail, onClose, onOpenChat }: { detail: AgentDynami
 }
 
 function Timeline({ items }: { items: AgentDynamicsTimelineItemVM[] }) {
-  return <div className="agent-dynamics-timeline">{items.map((item) => <details className="agent-dynamics-timeline-item" key={item.id} open={Boolean(item.details)}>
+  return <div className="agent-dynamics-timeline">{items.map((item) => <details className="agent-dynamics-timeline-item" key={item.id}>
     <summary className="agent-dynamics-timeline-summary">
       <span className={`agent-dynamics-timeline-dot ${classTone(item.tone)}`} />
       <span><span className="agent-dynamics-timeline-title">{item.title}</span><span className="agent-dynamics-timeline-meta">{item.meta}{item.traceId ? ` · trace ${item.traceId}` : ''}</span></span>
+      <span className="agent-dynamics-timeline-hint">{item.details?.input || item.details?.output ? '查看输入 / 输出' : item.details?.error ? '查看异常' : '暂无安全摘要'}</span>
     </summary>
     {item.details ? <div className="agent-dynamics-timeline-details">
       <TimelineDetailGroup label="输入" items={item.details.input} />

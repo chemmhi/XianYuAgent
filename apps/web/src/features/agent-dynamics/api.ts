@@ -210,9 +210,14 @@ function mapRun(raw: RawAutoReplyRunListItem): AgentDynamicsRunRowVM {
 function eventTitle(event: RawAutoReplyRunEvent, run: AgentDynamicsRunRowVM): string {
   if (event.status === 'failed') return `${run.buyer.name} 的回复生成失败`;
   if (event.status === 'handoff') return `${run.buyer.name} 已转人工处理`;
+  if (event.status === 'skipped') return `${run.buyer.name} 已跳过自动回复`;
   if (event.status === 'persisted') return `${run.buyer.name} 的消息已完成自动回复`;
   if (event.stage === 'gateway_received') return `${run.buyer.name} 的消息已接收`;
-  return `${run.buyer.name} 正在处理${run.intent}`;
+  if (event.stage === 'intent_recognition') return `${run.buyer.name} 已完成意图识别`;
+  if (event.stage === 'context_read') return `${run.buyer.name} 已完成上下文读取`;
+  if (event.stage === 'reply_generation') return `${run.buyer.name} 已完成回复生成`;
+  if (event.stage === 'sending') return `${run.buyer.name} 已完成发送提交`;
+  return `${run.buyer.name} 已完成${run.intent}处理`;
 }
 
 function eventTone(status: RawAutoReplyRunStatus): AgentDynamicsRunRowVM['stage']['tone'] {
