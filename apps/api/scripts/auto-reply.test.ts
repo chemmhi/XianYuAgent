@@ -93,6 +93,46 @@ test('configured model provider generates the persisted auto-reply', async () =>
   }
 });
 
+test('configured Responses provider generates the persisted auto-reply', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+  globalThis.fetch = (async (input, init) => {
+    calls.push({ url: String(input), body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+    return new Response(JSON.stringify({
+      id: 'resp-auto-reply-1',
+      model: 'responses-model',
+      output_text: 'Responses 生成的准确回复',
+      output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Responses 生成的准确回复' }] }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+
+  const runtime = createApp(loadConfig({
+    HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
+    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'responses-model', WIRE_API: 'responses', MODEL_TIMEOUT_MS: '1000', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["Responses Buyer"]',
+  }));
+  const admin = await runtime.store.createAdmin({ email: 'responses-provider@example.com', passwordHash: 'hash', displayName: 'Responses Provider' });
+  const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'responses-provider-seller' });
+  const product = await runtime.store.createProduct({ adminId: admin.id, accountId: account.id, externalProductRef: 'responses-item-1', title: '资料包', description: '数字资料', priceMinor: 1_999, status: 'published' });
+  const conversation = await runtime.store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'responses-buyer-1', buyerDisplayName: 'Responses Buyer', itemRef: product.externalProductRef, itemTitle: product.title, externalConversationRef: 'responses-conversation-1' });
+  await runtime.listen();
+
+  try {
+    const result = await runtime.xianyuIm.handleExternalEvent(admin.id, {
+      accountId: account.id, externalConversationRef: conversation.externalConversationRef, externalMessageRef: 'responses-message-1.PNM', senderRef: 'responses-buyer-1', senderName: 'Responses Buyer', direction: 'inbound', bodyType: 'text', bodyText: '请问这个是什么东西？', occurredAt: new Date().toISOString(),
+    });
+    assert.equal(result.autoReply?.run.status, 'persisted');
+    assert.equal(result.autoReply?.outboundMessage?.bodyText, 'Responses 生成的准确回复');
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.url, 'https://model.example/v1/responses');
+    assert.equal(calls[0]?.body.model, 'responses-model');
+    assert.ok(Array.isArray(calls[0]?.body.input));
+    assert.equal((calls[0]?.body.input as Array<Record<string, unknown>>)[0]?.type, 'message');
+  } finally {
+    await runtime.close();
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('disabling the auto-reply model keeps the template generator active', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => { throw new Error('auto-reply model must be disabled'); }) as typeof fetch;

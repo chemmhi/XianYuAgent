@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { resolveAutoReplyAgentConfig, type AutoReplyAgentRuntimeConfig } from './auto-reply-agent-config.js';
+import { DEFAULT_PI_WIRE_API, type ModelWireApi } from './pi-runtime.js';
 
 export type AgentRuntimeMode = 'pi' | 'in-process';
 export type AutoReplySendMode = 'simulate' | 'live';
@@ -20,6 +21,7 @@ export interface AppConfig {
   modelApiKey?: string;
   modelBaseUrl?: string;
   modelName?: string;
+  modelWireApi?: ModelWireApi;
   modelTimeoutMs: number;
   autoReplyModelEnabled?: boolean;
   /** Buyer-facing Auto Reply Agent config; kept separate from Workspace Agent config. */
@@ -42,6 +44,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const modelApiKey = firstDefined(env.API_KEY, env.OPENAI_API_KEY, env.PI_API_KEY);
   const modelBaseUrl = firstDefined(env.BASE_URL, env.OPENAI_BASE_URL, env.PI_BASE_URL);
   const modelName = firstDefined(env.MODEL, env.OPENAI_MODEL, env.PI_MODEL);
+  const modelWireApi = normalizeWireApi(firstDefined(env.WIRE_API, env.MODEL_WIRE_API));
   const autoReplySendMode: AutoReplySendMode = env.AUTO_REPLY_SEND_MODE?.trim().toLowerCase() === 'live' ? 'live' : 'simulate';
   const autoReplyTestBuyerNames = parseBuyerNames(env.AUTO_REPLY_TEST_BUYER_NAMES);
   const autoReplyAgent = resolveAutoReplyAgentConfig(env);
@@ -69,6 +72,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     modelApiKey,
     modelBaseUrl,
     modelName,
+    modelWireApi,
     modelTimeoutMs: positiveNumber(env.MODEL_TIMEOUT_MS, 60_000),
     autoReplyModelEnabled: asBoolean(env.AUTO_REPLY_MODEL_ENABLED, Boolean(modelApiKey && modelBaseUrl && modelName)),
     credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY?.trim() || 'development-only-credential-key-change-me',
@@ -76,6 +80,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     autoReplyTestBuyerNames,
     autoReplyAgent,
   };
+}
+
+function normalizeWireApi(value: string | undefined): ModelWireApi {
+  return value?.trim().toLowerCase() === 'responses' ? 'responses' : DEFAULT_PI_WIRE_API;
 }
 
 function firstDefined(...values: Array<string | undefined>): string | undefined {

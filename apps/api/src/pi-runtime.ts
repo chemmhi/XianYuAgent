@@ -4,6 +4,9 @@ import type { WorkspaceRuntime } from './workspace.js';
 export const DEFAULT_PI_BASE_URL = 'https://api.openai.com/v1';
 export const DEFAULT_PI_MODEL = 'gpt-4o-mini';
 export const DEFAULT_PI_TIMEOUT_MS = 30_000;
+export const DEFAULT_PI_WIRE_API: ModelWireApi = 'chat';
+
+export type ModelWireApi = 'chat' | 'responses';
 
 export type ModelMessageRole = 'system' | 'user' | 'assistant' | 'tool';
 
@@ -56,6 +59,7 @@ export interface PiRuntimeConfig {
   baseUrl: string;
   model: string;
   timeoutMs: number;
+  wireApi: ModelWireApi;
 }
 
 export interface OpenAICompatibleModelClientOptions {
@@ -63,6 +67,7 @@ export interface OpenAICompatibleModelClientOptions {
   baseUrl: string;
   model: string;
   timeoutMs?: number;
+  wireApi?: ModelWireApi;
   fetchImpl?: typeof fetch;
 }
 
@@ -88,12 +93,14 @@ export class PiModelClientError extends Error {
 export class OpenAICompatibleModelClient implements ModelClient {
   private readonly endpoint: string;
   private readonly timeoutMs: number;
+  private readonly wireApi: ModelWireApi;
   private readonly fetchImpl: typeof fetch;
 
   constructor(private readonly options: OpenAICompatibleModelClientOptions) {
     if (!options.apiKey.trim()) throw new Error('PI_RUNTIME_API_KEY_REQUIRED');
     if (!options.model.trim()) throw new Error('PI_RUNTIME_MODEL_REQUIRED');
-    this.endpoint = toChatCompletionsEndpoint(options.baseUrl);
+    this.wireApi = normalizeWireApi(options.wireApi);
+    this.endpoint = this.wireApi === 'responses' ? toResponsesEndpoint(options.baseUrl) : toChatCompletionsEndpoint(options.baseUrl);
     this.timeoutMs = positiveInteger(options.timeoutMs, DEFAULT_PI_TIMEOUT_MS);
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
@@ -114,18 +121,7 @@ export class OpenAICompatibleModelClient implements ModelClient {
           authorization: `Bearer ${this.options.apiKey}`,
           'content-type': 'application/json',
         },
-        body: JSON.stringify({
-          model: this.options.model,
-          messages: input.messages.map((message) => ({
-            role: message.role,
-            content: message.content,
-            ...(message.name ? { name: message.name } : {}),
-            ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
-            ...(message.toolCalls ? { tool_calls: message.toolCalls } : {}),
-          })),
-          ...(input.tools?.length ? { tools: input.tools } : {}),
-          ...(input.toolChoice ? { tool_choice: input.toolChoice } : {}),
-        }),
+        body: JSON.stringify(this.wireApi === 'responses' ? toResponsesRequestBody(this.options.model, input) : toChatCompletionsRequestBody(this.options.model, input)),
         signal: controller.signal,
       });
 
@@ -140,8 +136,8 @@ export class OpenAICompatibleModelClient implements ModelClient {
         throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model provider returned invalid JSON');
       }
 
-      const toolCalls = extractCompletionToolCalls(payload);
-      const content = extractCompletionContent(payload);
+      const toolCalls = this.wireApi === 'responses' ? extractResponsesToolCalls(payload) : extractCompletionToolCalls(payload);
+      const content = this.wireApi === 'responses' ? extractResponsesContent(payload) : extractCompletionContent(payload);
       if (!content && toolCalls.length === 0) throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model provider returned empty content');
       const record = isRecord(payload) ? payload : undefined;
       return {
@@ -353,6 +349,7 @@ export function loadPiRuntimeConfig(env: NodeJS.ProcessEnv = process.env): PiRun
     baseUrl: firstNonEmpty(env.BASE_URL, env.OPENAI_BASE_URL, env.PI_BASE_URL) ?? DEFAULT_PI_BASE_URL,
     model: firstNonEmpty(env.MODEL, env.OPENAI_MODEL, env.PI_MODEL) ?? DEFAULT_PI_MODEL,
     timeoutMs: positiveInteger(env.PI_RUNTIME_TIMEOUT_MS ?? env.MODEL_TIMEOUT_MS, DEFAULT_PI_TIMEOUT_MS),
+    wireApi: normalizeWireApi(firstNonEmpty(env.WIRE_API, env.MODEL_WIRE_API)),
   };
 }
 
@@ -366,7 +363,80 @@ export function toChatCompletionsEndpoint(baseUrl: string): string {
   const normalized = baseUrl.trim().replace(/\/+$/, '');
   if (!normalized) throw new Error('PI_RUNTIME_BASE_URL_REQUIRED');
   if (normalized.endsWith('/chat/completions')) return normalized;
+  if (normalized.endsWith('/responses')) return `${normalized.slice(0, -'/responses'.length)}/chat/completions`;
   return normalized.endsWith('/v1') ? `${normalized}/chat/completions` : `${normalized}/v1/chat/completions`;
+}
+
+export function toResponsesEndpoint(baseUrl: string): string {
+  const normalized = baseUrl.trim().replace(/\/+$/, '');
+  if (!normalized) throw new Error('PI_RUNTIME_BASE_URL_REQUIRED');
+  if (normalized.endsWith('/responses')) return normalized;
+  if (normalized.endsWith('/chat/completions')) return `${normalized.slice(0, -'/chat/completions'.length)}/responses`;
+  return normalized.endsWith('/v1') ? `${normalized}/responses` : `${normalized}/v1/responses`;
+}
+
+function normalizeWireApi(value: string | undefined): ModelWireApi {
+  return value?.trim().toLowerCase() === 'responses' ? 'responses' : DEFAULT_PI_WIRE_API;
+}
+
+function toChatCompletionsRequestBody(model: string, input: ModelCompletionRequest): Record<string, unknown> {
+  return {
+    model,
+    messages: input.messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+      ...(message.name ? { name: message.name } : {}),
+      ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
+      ...(message.toolCalls ? { tool_calls: message.toolCalls } : {}),
+    })),
+    ...(input.tools?.length ? { tools: input.tools } : {}),
+    ...(input.toolChoice ? { tool_choice: input.toolChoice } : {}),
+  };
+}
+
+function toResponsesRequestBody(model: string, input: ModelCompletionRequest): Record<string, unknown> {
+  return {
+    model,
+    input: input.messages.flatMap(toResponsesInputItems),
+    ...(input.tools?.length ? { tools: input.tools.map(toResponsesToolDefinition) } : {}),
+    ...(input.toolChoice ? { tool_choice: toResponsesToolChoice(input.toolChoice) } : {}),
+  };
+}
+
+function toResponsesInputItems(message: ModelMessage): Array<Record<string, unknown>> {
+  const items: Array<Record<string, unknown>> = [];
+  if (message.content) {
+    items.push({
+      type: 'message',
+      role: message.role === 'tool' ? 'user' : message.role,
+      content: message.content,
+      ...(message.name ? { name: message.name } : {}),
+    });
+  }
+  if (message.toolCalls?.length) {
+    for (const call of message.toolCalls) {
+      items.push({ type: 'function_call', call_id: call.id, name: call.function.name, arguments: call.function.arguments });
+    }
+  }
+  if (message.role === 'tool') {
+    items.length = 0;
+    items.push({ type: 'function_call_output', call_id: message.toolCallId ?? 'unknown', output: message.content });
+  }
+  return items;
+}
+
+function toResponsesToolDefinition(tool: ModelToolDefinition): Record<string, unknown> {
+  return {
+    type: 'function',
+    name: tool.function.name,
+    description: tool.function.description,
+    parameters: tool.function.parameters,
+  };
+}
+
+function toResponsesToolChoice(toolChoice: NonNullable<ModelCompletionRequest['toolChoice']>): unknown {
+  if (typeof toolChoice === 'string') return toolChoice;
+  return { type: 'function', name: toolChoice.function.name };
 }
 
 function extractCompletionContent(payload: unknown): string {
@@ -393,6 +463,34 @@ function extractCompletionToolCalls(payload: unknown): ModelToolCall[] {
     const fn = isRecord(candidate.function) ? candidate.function : undefined;
     if (!fn || typeof fn.name !== 'string' || typeof fn.arguments !== 'string') return [];
     return [{ id: candidate.id, type: 'function', function: { name: fn.name, arguments: fn.arguments } }];
+  });
+}
+
+function extractResponsesContent(payload: unknown): string {
+  if (!isRecord(payload)) return '';
+  if (typeof payload.output_text === 'string') return payload.output_text.trim();
+  if (!Array.isArray(payload.output)) return '';
+  return payload.output.flatMap((item): string[] => {
+    if (!isRecord(item)) return [];
+    if (item.type === 'message' && Array.isArray(item.content)) {
+      return item.content.flatMap((part): string[] => {
+        if (!isRecord(part)) return [];
+        return typeof part.text === 'string' && (part.type === 'output_text' || part.type === 'text') ? [part.text] : [];
+      });
+    }
+    return item.type === 'output_text' && typeof item.text === 'string' ? [item.text] : [];
+  }).join('').trim();
+}
+
+function extractResponsesToolCalls(payload: unknown): ModelToolCall[] {
+  if (!isRecord(payload) || !Array.isArray(payload.output)) return [];
+  return payload.output.flatMap((item): ModelToolCall[] => {
+    if (!isRecord(item) || item.type !== 'function_call') return [];
+    const id = typeof item.call_id === 'string' ? item.call_id : typeof item.id === 'string' ? item.id : undefined;
+    const name = typeof item.name === 'string' ? item.name : undefined;
+    const args = typeof item.arguments === 'string' ? item.arguments : item.arguments === undefined ? undefined : JSON.stringify(item.arguments);
+    if (!id || !name || args === undefined) return [];
+    return [{ id, type: 'function', function: { name, arguments: args } }];
   });
 }
 

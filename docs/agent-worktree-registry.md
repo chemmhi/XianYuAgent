@@ -62,6 +62,8 @@
 | `root/auto_reply_settings` | `auto-reply-agent-settings` | `codex/auto-reply-settings` | `F:\\ChenHai\\Project\\XianYuAgent-auto-reply-settings` | Codex `/root` delegated agent | `2026-09-21 13:05:00 +08:00` | `MERGED` | `6ae118b` | `-` | Settings API/迁移、中文配置面板与 Chrome/CDP E2E 已合入 master；动态 configProvider 联调已补齐。 |
 | `root/buyer_agent_impl` | `auto-reply-buyer-agent` | `codex/buyer-agent-impl` | `F:\ChenHai\Project\XianYuAgent-buyer-agent` | Codex `/root` delegated agent | `2026-09-21 13:00:00 +08:00` | `MERGED` | `05bba98` | `-` | 买家侧四工具 Agent、tool-call loop、动态配置、simulate 出站与落库 E2E 已合入 master；原 worktree 保留供审计。 |
 
+| `root/responses_wire_support` | `responses-wire-support` | `codex/responses-wire-support` | `F:\ChenHai\Project\XianYuAgent-responses-wire-support` | Codex `/root` delegated agent | `2026-09-21 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 支持可配置 wire_api=responses；保持 chat/completions 默认兼容；API build、自动回复单测 34/34、Pi runtime smoke 已通过。 |
+
 ## 主工作区
 
 | 类型 | branch | worktree | 规则 |

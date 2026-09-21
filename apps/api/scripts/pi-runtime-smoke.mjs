@@ -18,6 +18,25 @@ const server = createServer(async (request, response) => {
     response.end(JSON.stringify({ error: { message: 'invalid key test-key-should-not-leak' } }));
     return;
   }
+  if (Array.isArray(body.input)) {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    if (body.model === 'responses-tool-model' && !body.input.some((item) => item?.type === 'function_call_output')) {
+      response.end(JSON.stringify({
+        id: 'resp_test_tool',
+        model: body.model,
+        output: [{ type: 'function_call', call_id: 'call_responses_1', name: 'get_product_info', arguments: '{"productRef":"item-1"}' }],
+      }));
+    } else {
+      response.end(JSON.stringify({
+        id: 'resp_test_message',
+        model: body.model,
+        output_text: 'Responses answer',
+        output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Responses answer' }] }],
+        usage: { input_tokens: 3, output_tokens: 2 },
+      }));
+    }
+    return;
+  }
   response.writeHead(200, { 'content-type': 'application/json' });
   response.end(JSON.stringify({
     model: body.model,
@@ -60,7 +79,9 @@ async function waitFor(predicate, timeoutMs = 1_000) {
 
 try {
   const envConfig = loadPiRuntimeConfig({ API_KEY: 'test-key', BASE_URL: `${baseUrl}/`, MODEL: 'test-model', MODEL_TIMEOUT_MS: '123' });
-  assert.deepEqual(envConfig, { apiKey: 'test-key', baseUrl: `${baseUrl}/`, model: 'test-model', timeoutMs: 123 });
+  assert.deepEqual(envConfig, { apiKey: 'test-key', baseUrl: `${baseUrl}/`, model: 'test-model', timeoutMs: 123, wireApi: 'chat' });
+  assert.equal(loadPiRuntimeConfig({ API_KEY: 'test-key', WIRE_API: 'responses' })?.wireApi, 'responses');
+  assert.equal(loadPiRuntimeConfig({ API_KEY: 'test-key', MODEL_WIRE_API: 'responses' })?.wireApi, 'responses');
   assert.equal(loadPiRuntimeConfig({}), undefined);
 
   const client = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl, model: 'test-model', timeoutMs: 500 });
@@ -69,6 +90,37 @@ try {
   assert.equal(result.model, 'test-model');
   assert.equal(requests[0].headers.authorization, 'Bearer test-key');
   assert.equal(requests[0].body.messages[0].content, 'hello');
+
+  const responsesClient = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl, model: 'responses-model', wireApi: 'responses', timeoutMs: 500 });
+  const responsesResult = await responsesClient.complete({
+    messages: [{ role: 'system', content: 'system instructions' }, { role: 'user', content: 'hello responses' }],
+    tools: [{ type: 'function', function: { name: 'get_product_info', description: 'read product', parameters: { type: 'object' } } }],
+    toolChoice: 'auto',
+  });
+  assert.equal(responsesResult.content, 'Responses answer');
+  assert.equal(responsesResult.model, 'responses-model');
+  assert.deepEqual(responsesResult.usage, { input_tokens: 3, output_tokens: 2 });
+  const responsesRequest = requests.find((request) => request.body.model === 'responses-model');
+  assert.equal(responsesRequest?.url, '/v1/responses');
+  assert.equal(responsesRequest?.body.input[0].type, 'message');
+  assert.equal(responsesRequest?.body.input[1].content, 'hello responses');
+  assert.equal(responsesRequest?.body.tools[0].name, 'get_product_info');
+  assert.equal(responsesRequest?.body.tools[0].function, undefined);
+
+  const responsesToolClient = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl, model: 'responses-tool-model', wireApi: 'responses', timeoutMs: 500 });
+  const responsesToolResult = await responsesToolClient.complete({ messages: [{ role: 'user', content: 'lookup' }] });
+  assert.equal(responsesToolResult.toolCalls?.[0]?.id, 'call_responses_1');
+  assert.equal(responsesToolResult.toolCalls?.[0]?.function.name, 'get_product_info');
+  assert.equal(responsesToolResult.toolCalls?.[0]?.function.arguments, '{"productRef":"item-1"}');
+  const responsesToolFollowup = await responsesToolClient.complete({ messages: [
+    { role: 'assistant', content: '', toolCalls: responsesToolResult.toolCalls },
+    { role: 'tool', name: 'get_product_info', toolCallId: 'call_responses_1', content: '{"ok":true}' },
+  ] });
+  assert.equal(responsesToolFollowup.content, 'Responses answer');
+  const followupRequest = requests.filter((request) => request.body.model === 'responses-tool-model').at(-1);
+  assert.equal(followupRequest?.body.input[0].type, 'function_call');
+  assert.equal(followupRequest?.body.input[1].type, 'function_call_output');
+  assert.equal(followupRequest?.body.input[1].call_id, 'call_responses_1');
 
   const failedClient = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl, model: 'fail-model', timeoutMs: 500 });
   await assert.rejects(() => failedClient.complete({ messages: [{ role: 'user', content: 'hello' }] }), (error) => {

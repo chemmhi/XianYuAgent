@@ -289,7 +289,7 @@ function listenerErrorCode(error: unknown): string {
 }
 function createConfiguredModelClient(config: AppConfig): ModelClient | undefined {
   if (!config.modelApiKey || !config.modelBaseUrl || !config.modelName) return undefined;
-  return new OpenAICompatibleModelClient({ apiKey: config.modelApiKey, baseUrl: config.modelBaseUrl, model: config.modelName, timeoutMs: config.modelTimeoutMs });
+  return new OpenAICompatibleModelClient({ apiKey: config.modelApiKey, baseUrl: config.modelBaseUrl, model: config.modelName, timeoutMs: config.modelTimeoutMs, wireApi: config.modelWireApi });
 }
 
 function createPiWorkspaceRuntime(config: AppConfig, store: Store, sharedModelClient?: ModelClient): WorkspaceRuntime {
