@@ -10,12 +10,12 @@ import './settings.css';
 type TabKey = 'autoReply' | 'model' | 'credentials' | 'safety' | 'outbox' | 'plugins';
 
 const tabs: Array<{ id: TabKey; label: string; mobileLabel: string; meta: string }> = [
-  { id: 'autoReply', label: '自动回复 Agent', mobileLabel: 'Agent', meta: 'Buyer Agent' },
-  { id: 'model', label: 'OpenAI API', mobileLabel: '模型', meta: 'ModelClient' },
-  { id: 'credentials', label: '凭证管理', mobileLabel: '凭证', meta: 'CredentialStore' },
-  { id: 'safety', label: '安全输出校验', mobileLabel: '安全', meta: 'Gateway' },
-  { id: 'outbox', label: 'Outbox Worker', mobileLabel: '队列', meta: 'Runtime' },
-  { id: 'plugins', label: '插件配置', mobileLabel: '插件', meta: 'Skill / Plugin' },
+  { id: 'autoReply', label: '自动回复 Agent', mobileLabel: '自动回复', meta: '买家 Agent' },
+  { id: 'model', label: 'OpenAI API', mobileLabel: '模型', meta: '模型客户端' },
+  { id: 'credentials', label: '凭证管理', mobileLabel: '凭证', meta: '凭证存储' },
+  { id: 'safety', label: '安全输出校验', mobileLabel: '安全', meta: '策略网关' },
+  { id: 'outbox', label: 'Outbox Worker', mobileLabel: '队列', meta: '运行时' },
+  { id: 'plugins', label: '插件配置', mobileLabel: '插件', meta: '技能 / 插件' },
 ];
 
 export function SettingsPage({ api: providedApi, agentApi: providedAgentApi }: { api?: CredentialApi; agentApi?: AutoReplyAgentSettingsApi }) {

@@ -201,6 +201,9 @@ async function run() {
   });
   if (agentStale.response.status !== 409) throw new Error(`expected 409 for stale agent settings, got ${agentStale.response.status}`);
 
+  const agentDesktopPath = await captureViewport(cdp, 1440, 900, 'settings-agent-desktop-1440x900.png');
+  const agentMobilePath = await captureViewport(cdp, 390, 844, 'settings-agent-mobile-390x844.png');
+
   await clickContainingText(cdp, '凭证管理');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-credential-panel]"))'), 'credential panel after Agent settings');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('当前账号还没有模型 API Key'), 'empty credential state after Agent settings');
@@ -255,7 +258,7 @@ async function run() {
   if (JSON.stringify(final.body).includes('sk-settings-rotated-987654')) throw new Error('rotated secret leaked in API readback');
 
   await cdp.send('Emulation.clearDeviceMetricsOverride');
-  console.log(JSON.stringify({ apiStorage: 'memory', accountId, agentSettings: { defaultVersion: agentDefaults.body.data.configVersion, savedVersion: agentSaved.body.data.configVersion, staleStatus: agentStale.response.status }, credentialId: credential.id, forbiddenStatus: forbidden.response.status, staleStatus: stale.response.status, finalStatus: final.body.data.items[0].status, secretRedaction: browserSecretLeak, screenshots: { desktopPath, mobilePath } }, null, 2));
+  console.log(JSON.stringify({ apiStorage: 'memory', accountId, agentSettings: { defaultVersion: agentDefaults.body.data.configVersion, savedVersion: agentSaved.body.data.configVersion, staleStatus: agentStale.response.status }, credentialId: credential.id, forbiddenStatus: forbidden.response.status, staleStatus: stale.response.status, finalStatus: final.body.data.items[0].status, secretRedaction: browserSecretLeak, screenshots: { agentDesktopPath, agentMobilePath, desktopPath, mobilePath } }, null, 2));
   cdp.socket.close();
 }
 
