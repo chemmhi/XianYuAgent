@@ -656,6 +656,13 @@ export class MemoryStore implements Store {
     if (!row || !(await this.hasAccountScope(adminId, row.accountId))) return undefined;
     return { ...row, metadata: { ...row.metadata }, canReveal: false as const };
   }
+  async getCredentialRefSecret(adminId: string, credentialId: string): Promise<import('./domain.js').CredentialRefSecretRecord | undefined> {
+    const ref = await this.getCredentialRef(adminId, credentialId);
+    if (!ref) return undefined;
+    const secretCiphertext = this.credentialRefSecrets.get(credentialId);
+    if (!secretCiphertext) return undefined;
+    return { ref, secretCiphertext };
+  }
   async createCredentialRef(input: { adminId: string; accountId: string; provider: string; alias: string; label?: string; secretCiphertext: string; fingerprint: string; metadata?: Record<string, string> }): Promise<CredentialRefRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const duplicate = [...this.credentialRefs.values()].find((row) => row.accountId === input.accountId && row.kind === 'api_key' && row.purpose === 'model_client');

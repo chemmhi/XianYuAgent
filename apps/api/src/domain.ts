@@ -563,6 +563,11 @@ export interface CredentialRefRecord {
   canReveal: false;
 }
 
+export interface CredentialRefSecretRecord {
+  ref: CredentialRefRecord;
+  secretCiphertext: string;
+}
+
 export interface IdempotencyRecord {
   scope: string;
   key: string;
@@ -692,6 +697,7 @@ export interface Store {
   markCredentialVerified(input: { adminId: string; accountId: string; status: CredentialStatus; expiresAt?: string }): Promise<CredentialRecord | undefined>;
   listCredentialRefs(adminId: string, accountId: string): Promise<CredentialRefRecord[]>;
   getCredentialRef(adminId: string, credentialId: string): Promise<CredentialRefRecord | undefined>;
+  getCredentialRefSecret(adminId: string, credentialId: string): Promise<CredentialRefSecretRecord | undefined>;
   createCredentialRef(input: { adminId: string; accountId: string; provider: string; alias: string; label?: string; secretCiphertext: string; fingerprint: string; metadata?: Record<string, string> }): Promise<CredentialRefRecord>;
   updateCredentialRef(input: { adminId: string; credentialId: string; expectedVersion: number; provider?: string; alias?: string; label?: string; metadata?: Record<string, string> }): Promise<CredentialRefRecord | undefined>;
   rotateCredentialRef(input: { adminId: string; credentialId: string; expectedVersion: number; secretCiphertext: string; fingerprint: string }): Promise<CredentialRefRecord | undefined>;

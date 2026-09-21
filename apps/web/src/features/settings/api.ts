@@ -1,4 +1,4 @@
-import type { AutoReplyAgentConfigVM, CredentialListVM, CredentialRefVM, CredentialStatus } from './types';
+import type { AutoReplyAgentConfigVM, CredentialListVM, CredentialRefVM, CredentialStatus, OpenAIConfigListVM, OpenAIConfigVM } from './types';
 
 interface Transport {
   get<T>(path: string): Promise<T>;
@@ -32,6 +32,13 @@ export interface CredentialApi {
 export interface AutoReplyAgentSettingsApi {
   get(accountId: string): Promise<AutoReplyAgentConfigVM>;
   update(input: { accountId: string; expectedVersion: number; patch: Partial<Omit<AutoReplyAgentConfigVM, 'accountId' | 'updatedByAdminId' | 'configVersion' | 'configDigest' | 'createdAt' | 'updatedAt'>> }): Promise<AutoReplyAgentConfigVM>;
+}
+
+export interface OpenAISettingsApi {
+  list(accountId: string): Promise<OpenAIConfigListVM>;
+  save(input: { accountId: string; configId?: string; role: 'primary' | 'backup'; provider: string; alias: string; label?: string; baseUrl: string; model: string; wireApi: 'responses' | 'chat'; timeoutMs: number; apiKey?: string; expectedVersion?: number }): Promise<OpenAIConfigVM>;
+  test(input: { accountId: string; configId?: string; role: 'primary' | 'backup'; provider: string; alias: string; baseUrl: string; model: string; wireApi: 'responses' | 'chat'; timeoutMs: number; apiKey?: string }): Promise<{ ok: true; provider: string; model: string; latencyMs: number; models: string[] }>;
+  listModels(input: { accountId: string; configId?: string }): Promise<string[]>;
 }
 
 export function createCredentialApi(transport: Transport): CredentialApi {
@@ -69,6 +76,30 @@ export function createAutoReplyAgentSettingsApi(transport: Transport): AutoReply
     async update(input) {
       const patch = requirePatch(transport);
       return unwrap(await patch<AutoReplyAgentConfigVM | ApiEnvelope<AutoReplyAgentConfigVM>>('/api/v1/settings/agent', { accountId: input.accountId, expectedVersion: input.expectedVersion, ...input.patch }, { headers: { 'Idempotency-Key': idempotency('auto-reply-agent-settings') } }));
+    },
+  };
+}
+
+export function createOpenAISettingsApi(transport: Transport): OpenAISettingsApi {
+  return {
+    async list(accountId) {
+      const params = new URLSearchParams({ accountId });
+      return unwrap(await transport.get<OpenAIConfigListVM | ApiEnvelope<OpenAIConfigListVM>>(`/api/v1/settings/openai?${params.toString()}`));
+    },
+    async save(input) {
+      const method = input.configId ? requirePatch(transport) : requirePost(transport);
+      const path = input.configId ? `/api/v1/settings/openai/${encodeURIComponent(input.configId)}` : '/api/v1/settings/openai';
+      return unwrap(await method<OpenAIConfigVM | ApiEnvelope<OpenAIConfigVM>>(path, input, { headers: { 'Idempotency-Key': idempotency(`openai-settings-${input.role}`) } }));
+    },
+    async test(input) {
+      const post = requirePost(transport);
+      return unwrap(await post<{ ok: true; provider: string; model: string; latencyMs: number; models: string[] } | ApiEnvelope<{ ok: true; provider: string; model: string; latencyMs: number; models: string[] }>>('/api/v1/settings/openai/test', input));
+    },
+    async listModels(input) {
+      const params = new URLSearchParams({ accountId: input.accountId });
+      if (input.configId) params.set('configId', input.configId);
+      const result = unwrap(await transport.get<{ models: string[] } | ApiEnvelope<{ models: string[] }>>(`/api/v1/settings/openai/models?${params.toString()}`));
+      return result.models;
     },
   };
 }
@@ -112,5 +143,25 @@ export function createMockAutoReplyAgentSettingsApi(): AutoReplyAgentSettingsApi
       value = { ...value, accountId: input.accountId, ...input.patch, configVersion: value.configVersion + 1, configDigest: `mock-${value.configVersion + 1}`, updatedAt: new Date().toISOString() };
       return { ...value };
     },
+  };
+}
+
+export function createMockOpenAISettingsApi(): OpenAISettingsApi {
+  const now = () => new Date().toISOString();
+  const rows = new Map<string, OpenAIConfigVM>();
+  const models = ['gpt-4o-mini', 'gpt-4.1-mini'];
+  return {
+    async list(accountId) { return { accountId, items: [...rows.values()].filter((item) => item.accountId === accountId) }; },
+    async save(input) {
+      const current = input.configId ? rows.get(input.configId) : undefined;
+      if (current && current.version !== input.expectedVersion) throw new Error('版本冲突');
+      if (!current && [...rows.values()].some((item) => item.accountId === input.accountId && item.role === input.role)) throw new Error('该账号已有相同角色配置');
+      const timestamp = now();
+      const value: OpenAIConfigVM = { id: current?.id ?? `openai_${Date.now()}_${input.role}`, accountId: input.accountId, role: input.role, provider: input.provider, alias: input.alias, label: input.label, baseUrl: input.baseUrl, model: input.model, wireApi: input.wireApi, timeoutMs: input.timeoutMs, status: 'active', version: current ? current.version + 1 : 1, fingerprint: current?.fingerprint ?? 'mock-fingerprint', apiKeyConfigured: true, apiKeyHint: '••••A91F', lastConnectivity: 'passed', lastConnectivityAt: timestamp, createdAt: current?.createdAt ?? timestamp, updatedAt: timestamp, canReveal: false };
+      rows.set(value.id!, value);
+      return value;
+    },
+    async test(input) { return { ok: true, provider: input.provider, model: input.model, latencyMs: 12, models }; },
+    async listModels() { return models; },
   };
 }

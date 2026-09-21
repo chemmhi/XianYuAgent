@@ -24,6 +24,7 @@ import { DashboardService } from './dashboard.js';
 import { AutoReplyService, ExternalAutoReplySender } from './auto-reply.js';
 import { AutoReplyAgentSettingsService, resolveAutoReplyAgentDefaults } from './auto-reply-agent-settings.js';
 import { ToolCallingAutoReplyAgent } from './auto-reply-agent.js';
+import { OpenAISettingsService, createFallbackModelClient } from './openai-settings.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -36,6 +37,7 @@ export interface AppRuntime {
   productSync: ProductSyncService;
   credentials: CredentialService;
   apiKeyCredentials: ApiKeyCredentialService;
+  openaiSettings: OpenAISettingsService;
   dashboard: DashboardService;
   messages: MessageService;
   autoReply: AutoReplyService;
@@ -85,6 +87,11 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   });
+  const openaiSettings = new OpenAISettingsService(store, apiKeyCredentials, config.credentialEncryptionKey || 'development-only-credential-key-change-me', async (input) => {
+    const auditId = createId();
+    await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
+    return auditId;
+  });
   const dashboard = new DashboardService(store);
   const realtime = new MessageRealtimeHub();
   const redisRealtime = config.redisUrl && !config.allowInMemory
@@ -118,6 +125,16 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     configProvider: async (adminId, accountId) => {
       const settings = await autoReplyAgentSettings.get(adminId, accountId);
       const runtimeConfig = mergeAutoReplyAgentRuntimeConfig(autoReplyAgentConfig, settings);
+      let runtimeModelClient: ModelClient | undefined = autoReplyModelClient;
+      try {
+        const configured = await openaiSettings.resolveForRuntime(adminId, accountId);
+        if (configured.length > 0) {
+          const clients = await Promise.all(configured.slice(0, 2).map((item) => openaiSettings.createRuntimeClient(item)));
+          runtimeModelClient = createFallbackModelClient(clients[0]!, clients[1]);
+        }
+      } catch {
+        runtimeModelClient = autoReplyModelClient;
+      }
       const envLiveEnabled = config.autoReplySendMode === 'live';
       return {
         enabled: settings.enabled,
@@ -128,7 +145,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
         maxHistory: settings.maxHistory,
         maxReplyLength: settings.maxReplyLength,
         replySegmentDelayMs: settings.replySegmentDelayMs,
-        generator: autoReplyModelClient ? new ToolCallingAutoReplyAgent(store, autoReplyModelClient, runtimeConfig) : undefined,
+        generator: runtimeModelClient ? new ToolCallingAutoReplyAgent(store, runtimeModelClient, runtimeConfig) : undefined,
       };
     },
     sender: new ExternalAutoReplySender(async (input) => {
@@ -208,7 +225,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, orders, products, productSync, credentials, apiKeyCredentials, dashboard, messages, autoReply, autoReplyAgentSettings, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuIm,
+    config, store, auth, accounts, coupons, orders, products, productSync, credentials, apiKeyCredentials, openaiSettings, dashboard, messages, autoReply, autoReplyAgentSettings, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuIm,
     server,
     async listen() {
       await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));
@@ -403,6 +420,42 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
         const patch = readAutoReplyAgentPatch(ctx.body);
         const updated = await runtime.autoReplyAgentSettings.update({ adminId: authContext.admin.id, accountId, expectedVersion, patch, requestId: ctx.requestId, traceId: ctx.traceId });
         return success(ctx, updated);
+      },
+    });
+    return { statusCode: result.statusCode, body: result.body };
+  }
+
+  if (ctx.path === '/api/v1/settings/openai' && ctx.method === 'GET') {
+    const accountId = String(ctx.query.accountId ?? '').trim();
+    if (!accountId) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
+    return { statusCode: 200, body: success(ctx, { accountId, items: await runtime.openaiSettings.list({ adminId: authContext.admin.id, accountId }) }).body };
+  }
+  if (ctx.path === '/api/v1/settings/openai/test' && ctx.method === 'POST') {
+    const accountId = String(ctx.body.accountId ?? '').trim();
+    if (!accountId) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
+    const result = await runtime.openaiSettings.test({ ...readOpenAiConfigInput(ctx.body), adminId: authContext.admin.id, accountId, requestId: ctx.requestId, traceId: ctx.traceId });
+    return { statusCode: 200, body: success(ctx, result).body };
+  }
+  if (ctx.path === '/api/v1/settings/openai/models' && ctx.method === 'GET') {
+    const accountId = String(ctx.query.accountId ?? '').trim();
+    const configId = String(ctx.query.configId ?? '').trim() || undefined;
+    if (!accountId) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
+    return { statusCode: 200, body: success(ctx, { models: await runtime.openaiSettings.listModels({ adminId: authContext.admin.id, accountId, configId }) }).body };
+  }
+  const openAiConfigMatch = ctx.path.match(/^\/api\/v1\/settings\/openai(?:\/([^/]+))?$/);
+  if (openAiConfigMatch && (ctx.method === 'POST' || ctx.method === 'PATCH')) {
+    const configId = decodeURIComponent(openAiConfigMatch[1] ?? '') || undefined;
+    const key = requireIdempotencyKey(ctx);
+    const result = await idempotent(store, {
+      scope: `settings:openai:${configId ?? 'create'}:${String(ctx.body.accountId ?? '').trim()}`,
+      key,
+      fingerprint: fingerprint(ctx.method, ctx.path, ctx.body),
+      traceId: ctx.traceId,
+      handler: async () => {
+        const accountId = String(ctx.body.accountId ?? '').trim();
+        if (!accountId) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
+        const saved = await runtime.openaiSettings.save({ ...readOpenAiConfigInput(ctx.body), adminId: authContext.admin.id, accountId, configId, requestId: ctx.requestId, traceId: ctx.traceId });
+        return success(ctx, saved, configId ? 200 : 201);
       },
     });
     return { statusCode: result.statusCode, body: result.body };
@@ -1196,6 +1249,23 @@ function readAutoReplyAgentPatch(body: Record<string, unknown>): import('./domai
   for (const field of stringFields) if (typeof body[field] === 'string') patch[field] = body[field] as never;
   for (const field of numberFields) if (typeof body[field] === 'number') patch[field] = body[field] as never;
   return patch;
+}
+
+function readOpenAiConfigInput(body: Record<string, unknown>): import('./openai-settings.js').OpenAIConfigBody {
+  const role = body.role === 'backup' ? 'backup' : 'primary';
+  const wireApi = body.wireApi === 'chat' ? 'chat' : 'responses';
+  return {
+    role,
+    provider: String(body.provider ?? ''),
+    alias: String(body.alias ?? (role === 'primary' ? 'primary' : 'backup')),
+    label: typeof body.label === 'string' ? body.label : undefined,
+    baseUrl: String(body.baseUrl ?? ''),
+    model: String(body.model ?? ''),
+    wireApi,
+    timeoutMs: typeof body.timeoutMs === 'number' ? body.timeoutMs : Number(body.timeoutMs ?? NaN),
+    apiKey: typeof body.apiKey === 'string' ? body.apiKey : undefined,
+    expectedVersion: typeof body.expectedVersion === 'number' ? body.expectedVersion : Number(body.expectedVersion ?? NaN),
+  };
 }
 
 function readCouponMetadata(value: unknown): import('./domain.js').CouponBatchMetadata | undefined {

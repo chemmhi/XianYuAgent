@@ -577,6 +577,15 @@ export class PostgresStore implements Store {
       where r.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=r.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))`, [credentialId, adminId]);
     return result.rows[0] ? this.toCredentialRef(result.rows[0]) : undefined;
   }
+  async getCredentialRefSecret(adminId: string, credentialId: string): Promise<import('./domain.js').CredentialRefSecretRecord | undefined> {
+    const result = await this.pool.query(`select r.*, v.metadata_json, v.ciphertext
+      from accounts.credential_refs r
+      join accounts.credential_values v on v.credential_ref_id=r.id
+      where r.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=r.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))`, [credentialId, adminId]);
+    const row = result.rows[0] as Row | undefined;
+    if (!row) return undefined;
+    return { ref: this.toCredentialRef(row), secretCiphertext: Buffer.from(row.ciphertext as Buffer).toString('utf8') };
+  }
   async createCredentialRef(input: { adminId: string; accountId: string; provider: string; alias: string; label?: string; secretCiphertext: string; fingerprint: string; metadata?: Record<string, string> }): Promise<CredentialRefRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const client = await this.pool.connect();

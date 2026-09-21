@@ -61,3 +61,48 @@ export interface AutoReplyAgentSettingsState {
   error: string | null;
   lastAction?: string;
 }
+
+export type OpenAIConfigRole = 'primary' | 'backup';
+export type OpenAIWireApi = 'responses' | 'chat';
+export type OpenAIConnectivityState = 'unknown' | 'passed' | 'failed';
+
+export interface OpenAIConfigVM {
+  id?: string;
+  accountId: string;
+  role: OpenAIConfigRole;
+  provider: string;
+  alias: string;
+  label?: string;
+  baseUrl: string;
+  model: string;
+  wireApi: OpenAIWireApi;
+  timeoutMs: number;
+  status: CredentialStatus;
+  version: number;
+  fingerprint?: string;
+  apiKeyConfigured: boolean;
+  apiKeyHint?: string;
+  lastConnectivity?: OpenAIConnectivityState;
+  lastConnectivityAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  canReveal: false;
+}
+
+export interface OpenAIConfigListVM {
+  accountId: string;
+  items: OpenAIConfigVM[];
+}
+
+export interface OpenAIModelsState {
+  phase: 'idle' | 'loading' | 'success' | 'empty' | 'error';
+  items: string[];
+  error: string | null;
+}
+
+export interface OpenAISettingsState {
+  phase: SettingsLoadPhase;
+  data: OpenAIConfigListVM | null;
+  error: string | null;
+  lastAction?: string;
+}
