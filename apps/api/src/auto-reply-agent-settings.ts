@@ -2,11 +2,12 @@ import type { AppConfig } from './config.js';
 import type { AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, Store } from './domain.js';
 import { digestJson } from './security.js';
 import { ServiceError } from './services.js';
+import { DEFAULT_AUTO_REPLY_AGENT_SYSTEM_PROMPT, DEFAULT_AUTO_REPLY_AGENT_USER_PROMPT } from './auto-reply-agent-config.js';
 
 export const DEFAULT_AUTO_REPLY_AGENT_CONFIG: AutoReplyAgentConfig = {
   enabled: true,
-  systemPrompt: '你是闲鱼卖家面向买家的自动回复 Agent。只根据工具事实回答，不确定时转人工。',
-  userPromptTemplate: '{{buyerMessage}}',
+  systemPrompt: DEFAULT_AUTO_REPLY_AGENT_SYSTEM_PROMPT,
+  userPromptTemplate: DEFAULT_AUTO_REPLY_AGENT_USER_PROMPT,
   maxLoops: 4,
   maxToolCalls: 8,
   toolTimeoutMs: 10_000,
@@ -113,5 +114,21 @@ function parseBoundedInteger(value: string | undefined, fallback: number, min: n
 }
 
 export function resolveAutoReplyAgentDefaults(config: AppConfig): AutoReplyAgentConfig {
-  return validateConfig({ ...autoReplyAgentConfigFromEnv(), ...(config.autoReplyAgent ?? {}) });
+  const envDefaults = autoReplyAgentConfigFromEnv();
+  const runtime = config.autoReplyAgent;
+  if (!runtime) return validateConfig(envDefaults);
+  return validateConfig({
+    ...envDefaults,
+    systemPrompt: runtime.systemPrompt,
+    userPromptTemplate: runtime.userPromptTemplate,
+    maxLoops: runtime.maxLoops,
+    maxToolCalls: runtime.maxToolCalls,
+    toolTimeoutMs: runtime.toolTimeoutMs,
+    maxHistory: runtime.maxHistory,
+    maxReplyLength: runtime.maxReplyLength,
+    maxReplySegmentChars: runtime.maxReplySegmentChars,
+    maxReplySegments: runtime.maxReplySegments,
+    replySegmentDelayMs: runtime.replySegmentDelayMs,
+    debounceMs: runtime.debounceMs,
+  });
 }
