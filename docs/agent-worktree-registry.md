@@ -103,7 +103,7 @@
 | `root/fix_page_function_gaps` | `page-function-gaps` | `codex/page-function-gaps` | `F:\ChenHai\Project\XianYuAgent-page-function-gaps` | Codex `/root` delegated agent | `2026-09-21 23:14:00 +08:00` | `MERGED` | `7c3d55a` / `d7925c5` | `-` | 已修复 Accounts connectionStatus、Coupons status/stockAlert/分页入口、Workspace 搜索词传参；主线 56 files/172 tests、typecheck、build、Accounts/Workspace Chrome CDP E2E 通过；Coupons Chrome E2E 仍在既有 toggle 启用断言处失败，已登记为开放复核项；不改 Workspace composer 与 SellerAgent |
 
 | `root/settings_persistence_e2e` | `settings-persistence-e2e` | `codex/settings-persistence-e2e` | `F:\ChenHai\Project\XianYuAgent-settings-persistence` | Codex `/root` delegated agent | `2026-09-21 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 补强 OpenAI 设置保存后 Agent 实际消费、PostgreSQL 重启复读与 UI 主动测试后状态回显；新增 API Key 等长首尾脱敏回显；不改 master。 |
-| `root` | `agent-trace-input-output` | `codex/agent-trace-input-output` | `F:\ChenHai\Project\XianYuAgent-agent-trace-input-output` | Codex `/root` | `2026-09-21 23:20:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 补齐自动回复时间线事件的安全输入/输出摘要、前端展开详情与回归测试；API/Web 定向与全量相关测试、类型检查和构建通过。 |
+| `root` | `agent-trace-input-output` | `codex/agent-trace-input-output` | `F:\ChenHai\Project\XianYuAgent-agent-trace-input-output` | Codex `/root` | `2026-09-21 23:20:00 +08:00` | `READY_FOR_MERGE` | `-` | `-` | 独立复核通过；API auto-reply unit 46/46、activity 3/3、Web 176/176、API/Web 类型检查、Web build、diff check 通过；PostgreSQL E2E 已补充 input/output 与脱敏断言，待真实数据库环境执行。 |
 
 ## 登记维护规则
 
