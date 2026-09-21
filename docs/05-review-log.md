@@ -4,6 +4,16 @@
 - 更新日期：2026-09-19
 - 评审规则：问题先修复，再复验，再由独立评审关闭；未关闭的 P0-P2 不得进入下一阶段。
 
+## 2026-09-21 消息重复落库修复复审
+
+| 评审编号 | 类型 | 结论 | 证据 |
+| --- | --- | --- | --- |
+| S5-R-CHAT-DEDUPE-01 | 业务 / 验收 | PASS | 历史同步与实时 push 对同一闲鱼消息统一使用稳定 `.PNM` 外部消息号，避免同一买家消息生成两条本地记录和两次 AI 出站 |
+| S5-R-CHAT-DEDUPE-02 | 架构 / 数据流 | PASS | `parsePushPayload`、`normalizeHistoryMessage` 和既有 `(conversation_id, external_message_ref)` 唯一约束形成同一幂等键；前端无需按正文强行合并 |
+| S5-R-CHAT-DEDUPE-03 | 质量 / 运维 | PASS | `npm --workspace apps/api run test:xianyu-im-gateway`、`npm --workspace apps/api run test:auto-reply:unit`、`npm test`、`npm run typecheck`、`npm run build`、`git diff --check` 均通过 |
+
+复审结论：本轮消息重复落库缺陷已修复；历史上已存在的重复数据未自动删除，避免破坏 `auto_reply_runs.inbound_message_id` 外键和审计链路。
+
 ## 1. 阶段 0 评审结论
 
 | 评审编号 | 类型 | 结论 | 证据 |

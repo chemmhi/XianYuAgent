@@ -397,7 +397,14 @@ function normalizeHistoryMessage(value: unknown, myId: string): { externalMessag
   const model = record(value);
   const message = record(model.message ?? model);
   const extension = record(message.extension);
-  const externalMessageRef = string(message.messageId ?? extension.messageId ?? parseQueryParam(string(extension.reminderUrl), 'messageId'));
+  // History and live push may expose the same platform message under both a
+  // stable `.PNM` id and an internal transport id. Keep the stable id when it
+  // is present so the store's external-message uniqueness remains effective.
+  const externalMessageRef = selectCanonicalMessageRef(
+    message.messageId,
+    extension.messageId,
+    parseQueryParam(string(extension.reminderUrl), 'messageId'),
+  );
   if (!externalMessageRef) return undefined;
   const senderRef = strip(extension.senderUserId ?? message.senderUserId);
   const direction = senderRef && senderRef === myId ? 'outbound' : 'inbound';
@@ -425,6 +432,10 @@ function decodeCustom(value: unknown): { text?: string; images: string[] } {
 
 function record(value: unknown): Record<string, any> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}; }
 function string(value: unknown): string | undefined { return typeof value === 'string' && value.trim() && value !== '<nil>' ? value.trim() : undefined; }
+function selectCanonicalMessageRef(...values: unknown[]): string | undefined {
+  const candidates = values.map(string).filter((value): value is string => Boolean(value));
+  return candidates.find((value) => value.toUpperCase().endsWith('.PNM')) ?? candidates[0];
+}
 function parseJsonObject(value: unknown): Record<string, any> {
   if (typeof value !== 'string' || !value.trim()) return {};
   try { return record(JSON.parse(value)); } catch { return {}; }
