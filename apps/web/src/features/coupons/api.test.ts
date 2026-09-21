@@ -70,8 +70,8 @@ describe('coupons api adapter', () => {
       patch: patch as unknown as CouponsApiTransport['patch'],
       delete: vi.fn() as unknown as CouponsApiTransport['delete'],
     });
-    const page = await api.list({ purpose: 'text', keyword: '备注' });
-    expect(get).toHaveBeenCalledWith('/api/v1/coupons/batches?keyword=%E5%A4%87%E6%B3%A8&purpose=text&page=1&pageSize=20');
+    const page = await api.list({ purpose: 'text', keyword: '备注', status: 'active', stockAlert: 'normal' });
+    expect(get).toHaveBeenCalledWith('/api/v1/coupons/batches?keyword=%E5%A4%87%E6%B3%A8&status=active&stockAlert=normal&purpose=text&page=1&pageSize=20');
     expect(page.items[0].contentPreview?.text).toBe('正文预览');
     await api.updateBatch('batch-001', { status: 'paused', metadata: { description: 'updated' } });
     expect(patch).toHaveBeenCalledWith('/api/v1/coupons/batches/batch-001', { status: 'paused', metadata: { description: 'updated' } }, expect.objectContaining({ headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }) }));

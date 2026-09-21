@@ -8,6 +8,7 @@
 .coupons-toolbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .coupons-drawer textarea, .coupons-inline-form input, .coupons-form-grid input, .coupons-form-grid textarea { min-height: 34px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--text); font-size: 12px; }
 .coupons-purpose-select { min-width: 112px; }
+.coupons-status-select, .coupons-stock-alert-select { min-width: 112px; }
 .coupons-search { width: 230px; max-width: 260px; }
 .coupons-total, .coupons-inline-note { color: var(--sub); font-size: 11px; white-space: nowrap; }
 .coupons-table { display: grid; min-width: 1240px; overflow-x: auto; }
@@ -37,6 +38,14 @@
 .coupons-alert-exhausted, .coupons-status-exhausted, .coupons-status-voided { color: var(--danger); background: var(--danger-bg); }
 .coupons-status-closed { color: var(--muted); background: #F1F5F9; }
 .coupons-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.coupons-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 11px 18px; border-top: 1px solid var(--border); background: #fff; color: var(--sub); font-size: 11px; }
+.coupons-pagination-controls { display: flex; align-items: center; gap: 6px; }
+.coupons-page-button { min-width: 32px; height: 30px; padding: 0 9px; border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--muted); font-size: 11px; font-weight: 700; cursor: pointer; }
+.coupons-page-button:hover:not(:disabled) { border-color: #B9C8D9; background: #F8FAFC; }
+.coupons-page-button.active { border-color: var(--link); background: var(--link); color: #fff; }
+.coupons-page-button:disabled { cursor: not-allowed; opacity: .48; }
+.coupons-pagination-ellipsis { min-width: 16px; text-align: center; color: var(--sub); }
+.coupons-pagination-status { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .coupons-action-icon { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--link); }
 .coupons-action-icon:hover { background: var(--soft-blue-bg); }
 .coupons-action-icon.danger { color: var(--danger); }
@@ -155,4 +164,4 @@
 .coupons-image-preview { position: relative; max-width: min(92vw, 900px); max-height: 92vh; padding: 12px; }
 .coupons-image-preview .icon-button { position: absolute; top: 8px; right: 8px; z-index: 1; }
 .coupons-image-preview img { display: block; max-width: 86vw; max-height: 84vh; object-fit: contain; border-radius: 8px; }
-@media (max-width: 900px) { .coupons-toolbar { align-items: stretch; flex-direction: column; } .coupons-toolbar-actions { justify-content: stretch; } .coupons-toolbar-actions .ui-select-control { flex: 1 1 0; min-width: 0; width: 100%; } .coupons-search { flex: 1; width: 100%; max-width: none; } .coupons-row { min-width: 1440px; } .coupons-table { min-width: 0; overflow-x: auto; } .coupons-bulk-actions { justify-content: flex-start; flex-wrap: wrap; } .coupons-form-grid { grid-template-columns: 1fr; } .coupons-form-full { grid-column: auto; } .coupons-modal-backdrop { align-items: end; padding: 0; } .coupons-modal { width: 100%; border-radius: 14px 14px 0 0; max-height: 92vh; overflow: hidden; } .coupons-relation-grid { grid-template-columns: 1fr; max-height: 62vh; overflow-y: auto; } .coupons-relation-pane { min-height: 280px; border-right: 0; border-bottom: 1px solid var(--border); } }
+@media (max-width: 900px) { .coupons-toolbar { align-items: stretch; flex-direction: column; } .coupons-toolbar-actions { justify-content: stretch; } .coupons-toolbar-actions .ui-select-control { flex: 1 1 0; min-width: 0; width: 100%; } .coupons-search { flex: 1; width: 100%; max-width: none; } .coupons-row { min-width: 1440px; } .coupons-table { min-width: 0; overflow-x: auto; } .coupons-bulk-actions { justify-content: flex-start; flex-wrap: wrap; } .coupons-pagination { justify-content: center; } .coupons-form-grid { grid-template-columns: 1fr; } .coupons-form-full { grid-column: auto; } .coupons-modal-backdrop { align-items: end; padding: 0; } .coupons-modal { width: 100%; border-radius: 14px 14px 0 0; max-height: 92vh; overflow: hidden; } .coupons-relation-grid { grid-template-columns: 1fr; max-height: 62vh; overflow-y: auto; } .coupons-relation-pane { min-height: 280px; border-right: 0; border-bottom: 1px solid var(--border); } }
