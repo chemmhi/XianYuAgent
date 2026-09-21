@@ -1,6 +1,8 @@
 # Common Controls Visual Diff
 
 - 生成时间：2026-09-21T13:10:20.941Z
+- 源设计稿：`F:\ChenHai\Project\XianYuAgent-search-select-preview\docs\design-preview\xianyu-admin-controls-review.html`
+- 基线副本与源设计稿 SHA-256：`85882CAE536AA2B1B2A11344EFF4178DC3744EE35F5C41BD42ABFDE2038A6040`
 - 基线：`http://127.0.0.1:56265/xianyu-admin-controls-baseline.html`
 - 实现：`http://127.0.0.1:5173/controls`
 - 浏览器：Chrome/CDP，deviceScaleFactor=1
@@ -233,4 +235,3 @@
 ```powershell
 node apps/web/scripts/common-controls-visual-diff.mjs --baseline <design.html> --target-url <implementation-url> --out-dir F:\ChenHai\Project\XianYuAgent-common-controls\docs\evidence\common-controls
 ```
-

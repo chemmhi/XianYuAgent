@@ -2,6 +2,8 @@
 
 `apps/web/scripts/common-controls-visual-diff.mjs` is the repeatable browser-evidence helper for the shared Search / Select / Input / TextArea / Button / PlaceholderCell controls.
 
+The canonical design source for this evidence is `F:\ChenHai\Project\XianYuAgent-search-select-preview\docs\design-preview\xianyu-admin-controls-review.html`. The checked-in baseline copy is byte-identical to that review design.
+
 It launches a clean headless Chrome through CDP, captures both the design baseline and the implementation page at exactly `1440×900` and `390×844`, then emits:
 
 - `controls-baseline-*.png` — design baseline screenshots;
