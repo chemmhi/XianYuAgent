@@ -19,6 +19,7 @@ export type MessageStatus = 'created';
 export type MessageReadStatus = 0 | 2;
 export type MessageRedactionState = 'visible' | 'redacted';
 export type ConversationEventType = 'chat.message.created' | 'chat.message.updated' | 'chat.conversation.updated' | 'chat.connection.changed';
+export type InboundInboxStatus = 'pending' | 'processing' | 'succeeded' | 'retryable' | 'dead_lettered';
 
 export interface CouponApiConfig {
   url: string;
@@ -424,6 +425,40 @@ export interface MessageRecord {
   productRef?: string;
   riskFlags: string[];
   handlingMode: ConversationHandlingMode;
+  createdAt: string;
+}
+
+export interface InboundInboxRecord {
+  id: string;
+  adminId: string;
+  accountId: string;
+  conversationId: string;
+  inboundMessageId: string;
+  externalConversationRef: string;
+  externalMessageRef: string;
+  status: InboundInboxStatus;
+  attempt: number;
+  availableAt: string;
+  lockedAt?: string;
+  leaseExpiresAt?: string;
+  leaseOwner?: string;
+  lastErrorCode?: string;
+  lastErrorDigest?: string;
+  lastErrorAt?: string;
+  processedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InboundQuarantineRecord {
+  id: string;
+  accountId: string;
+  reasonCode: string;
+  payloadDigest: string;
+  payloadPreview?: string;
+  payloadSize: number;
+  receivedAt: string;
+  resolvedAt?: string;
   createdAt: string;
 }
 
@@ -856,7 +891,7 @@ export interface Store {
   listConversationEvents(adminId: string, conversationId: string, afterCursor: number, limit: number): Promise<ConversationEventRecord[]>;
   findMessageByExternalRef(adminId: string, conversationId: string, externalMessageRef: string): Promise<MessageRecord | undefined>;
   createConversation(input: { adminId: string; accountId: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; externalConversationRef?: string }): Promise<ConversationRecord>;
-  createMessage(input: { adminId: string; conversationId: string; direction: MessageDirection; senderRole: MessageSenderRole; bodyType: MessageBodyType; bodyText?: string; bodyRef?: string; externalMessageRef?: string; source?: MessageRecord['source']; orderRef?: string; productRef?: string; riskFlags?: string[]; createdAt?: string; traceId?: string }): Promise<{ message: MessageRecord; event: ConversationEventRecord }>;
+  createMessage(input: { adminId: string; conversationId: string; direction: MessageDirection; senderRole: MessageSenderRole; bodyType: MessageBodyType; bodyText?: string; bodyRef?: string; externalMessageRef?: string; externalMessageRefAliases?: string[]; source?: MessageRecord['source']; orderRef?: string; productRef?: string; riskFlags?: string[]; createdAt?: string; traceId?: string }): Promise<{ message: MessageRecord; event: ConversationEventRecord }>;
   createAutoReplyRun(input: { adminId: string; accountId: string; conversationId: string; inboundMessageId: string; intent: string; decision: AutoReplyDecision; status: AutoReplyRunStatus; riskFlags?: string[]; productId?: string; orderRefs?: string[]; inputDigest: string; contextDigest?: string; replyDigest?: string; senderOutcome?: AutoReplyRunRecord['senderOutcome']; outboundMessageId?: string; failureCode?: string }): Promise<AutoReplyRunRecord>;
   updateAutoReplyRun(id: string, patch: { intent?: string; decision?: AutoReplyDecision; status?: AutoReplyRunStatus; riskFlags?: string[]; productId?: string; orderRefs?: string[]; contextDigest?: string; replyDigest?: string; senderOutcome?: AutoReplyRunRecord['senderOutcome']; outboundMessageId?: string; failureCode?: string }): Promise<AutoReplyRunRecord | undefined>;
   getAutoReplyRun(adminId: string, id: string): Promise<AutoReplyRunRecord | undefined>;
@@ -868,4 +903,12 @@ export interface Store {
   getAutoReplyActivitySummary(adminId: string, query: { accountId?: string; from: string; to: string }): Promise<AutoReplyActivitySummary>;
   markMessagesReadByExternalRef(input: { adminId: string; conversationId: string; externalMessageRef: string; readAt?: string }): Promise<{ messages: MessageRecord[]; events: ConversationEventRecord[] }>;
   markLatestOutgoingRead(input: { adminId: string; conversationId: string; readAt?: string }): Promise<{ messages: MessageRecord[]; events: ConversationEventRecord[] }>;
+  enqueueInboundInbox(input: { adminId: string; accountId: string; conversationId: string; inboundMessageId: string; externalConversationRef: string; externalMessageRef: string; availableAt?: string }): Promise<{ record: InboundInboxRecord; created: boolean }>;
+  claimInboundInbox(input: { workerId: string; limit: number; leaseMs: number }): Promise<InboundInboxRecord[]>;
+  heartbeatInboundInbox(input: { id: string; workerId: string; leaseMs: number }): Promise<boolean>;
+  ackInboundInbox(input: { id: string; workerId: string }): Promise<boolean>;
+  retryInboundInbox(input: { id: string; workerId: string; errorCode: string; errorDigest: string; availableAt: string }): Promise<boolean>;
+  deadLetterInboundInbox(input: { id: string; workerId: string; errorCode: string; errorDigest: string }): Promise<boolean>;
+  reapExpiredInboundInbox(now?: string): Promise<number>;
+  recordInboundQuarantine(input: { accountId: string; reasonCode: string; payloadDigest: string; payloadPreview?: string; payloadSize: number; receivedAt?: string }): Promise<InboundQuarantineRecord>;
 }

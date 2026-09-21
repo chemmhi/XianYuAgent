@@ -40,7 +40,20 @@ export interface XianyuImMessageEvent {
   bodyText?: string;
   assetRef?: string;
   occurredAt: string;
+  receivedAt?: string;
+  timestampQuality?: 'platform' | 'received';
+  externalMessageRefAliases?: string[];
+  riskFlags?: string[];
   raw?: Record<string, unknown>;
+}
+
+export interface XianyuImQuarantineEvent {
+  accountId: string;
+  reasonCode: string;
+  payloadDigest: string;
+  payloadPreview?: string;
+  payloadSize: number;
+  receivedAt: string;
 }
 
 /**
@@ -78,6 +91,7 @@ export interface XianyuImClientOptions {
   webSocketFactory?: (url: string, options: { headers: Record<string, string> }) => ImWebSocket;
   saveCredential?: (credential: XianyuImCredential) => Promise<void>;
   onEvent?: (event: XianyuImEvent) => Promise<void> | void;
+  onQuarantine?: (event: XianyuImQuarantineEvent) => Promise<void> | void;
 }
 
 export class XianyuImRequestRejected extends Error {
@@ -105,6 +119,7 @@ export class XianyuImClient {
   private readonly webSocketFactory: NonNullable<XianyuImClientOptions['webSocketFactory']>;
   private readonly saveCredential?: XianyuImClientOptions['saveCredential'];
   private readonly onEvent?: XianyuImClientOptions['onEvent'];
+  private readonly onQuarantine?: XianyuImClientOptions['onQuarantine'];
   private readonly pending = new Map<string, PendingRequest>();
   private socket?: ImWebSocket;
   private heartbeatTimer?: ReturnType<typeof setInterval>;
@@ -114,6 +129,7 @@ export class XianyuImClient {
   private connectionGeneration = 0;
   private connectPromise?: Promise<void>;
   private syncStatePromise?: Promise<void>;
+  private incomingChain: Promise<void> = Promise.resolve();
   private myId: string;
   private _status: XianyuImConnectionStatus = 'idle';
 
@@ -126,6 +142,7 @@ export class XianyuImClient {
     this.webSocketFactory = options.webSocketFactory ?? ((url, wsOptions) => new WebSocket(url, wsOptions) as unknown as ImWebSocket);
     this.saveCredential = options.saveCredential;
     this.onEvent = options.onEvent;
+    this.onQuarantine = options.onQuarantine;
     this.myId = cookieValue(this.credential.cookieHeader, 'unb') || cookieValue(this.credential.cookieHeader, 'munb') || '';
     if (!this.credential.deviceId) this.credential.deviceId = createDeviceId(this.myId);
   }
@@ -243,7 +260,11 @@ export class XianyuImClient {
         },
       });
       this.socket = socket;
-      socket.on('message', (raw: unknown) => { void this.handleIncoming(raw); });
+      socket.on('message', (raw: unknown) => {
+        this.incomingChain = this.incomingChain.then(() => this.handleIncoming(raw)).catch((error) => {
+          console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'frame_processing_failed', accountId: this.accountId, errorCode: eventErrorCode(error) }));
+        });
+      });
       socket.on('close', () => {
         if (this.socket !== socket) return;
         this.socket = undefined;
@@ -384,7 +405,10 @@ export class XianyuImClient {
   private async handleIncoming(raw: unknown): Promise<void> {
     const text = raw instanceof Uint8Array ? Buffer.from(raw).toString('utf8') : String(raw);
     let message: Record<string, unknown>;
-    try { message = JSON.parse(text) as Record<string, unknown>; } catch { return; }
+    try { message = JSON.parse(text) as Record<string, unknown>; } catch {
+      await this.emitQuarantine('INVALID_FRAME_JSON', text, new Date().toISOString());
+      return;
+    }
     const headers = asRecord(message.headers);
     const mid = typeof headers.mid === 'string' ? headers.mid : undefined;
     if (mid) {
@@ -418,14 +442,25 @@ export class XianyuImClient {
         }
         continue;
       }
-      const parsed = parsePushPayload(encoded, this.accountId, this.myId);
-      if (parsed) {
+      const parsed = parsePushPayloadDetailed(encoded, this.accountId, this.myId);
+      if (parsed.quarantine) {
+        await this.emitQuarantine(parsed.quarantine.reasonCode, encoded, parsed.quarantine.receivedAt);
+      } else if (parsed.event) {
         try {
-          await this.onEvent?.(parsed);
+          await this.onEvent?.(parsed.event);
         } catch (error) {
           console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'push_handler_failed', accountId: this.accountId, errorCode: eventErrorCode(error) }));
         }
       }
+    }
+  }
+
+  private async emitQuarantine(reasonCode: string, payload: string, receivedAt: string): Promise<void> {
+    const payloadDigest = crypto.createHash('sha256').update(payload).digest('hex');
+    try {
+      await this.onQuarantine?.({ accountId: this.accountId, reasonCode, payloadDigest, payloadPreview: payload.slice(0, 500), payloadSize: Buffer.byteLength(payload, 'utf8'), receivedAt });
+    } catch (error) {
+      console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'quarantine_persist_failed', accountId: this.accountId, reasonCode, errorCode: eventErrorCode(error) }));
     }
   }
 
@@ -485,8 +520,12 @@ export class XianyuImSessionManager {
 }
 
 export function parsePushPayload(encoded: string, accountId: string, myId: string): XianyuImMessageEvent | undefined {
+  return parsePushPayloadDetailed(encoded, accountId, myId).event;
+}
+
+export function parsePushPayloadDetailed(encoded: string, accountId: string, myId: string, receivedAt = new Date().toISOString()): { event?: XianyuImMessageEvent; quarantine?: { reasonCode: string; receivedAt: string } } {
   const parsed = decodePushData(encoded);
-  if (!parsed || typeof parsed !== 'object') return undefined;
+  if (!parsed || typeof parsed !== 'object') return { quarantine: { reasonCode: 'PUSH_PAYLOAD_DECODE_FAILED', receivedAt } };
   const message = asRecord(parsed);
   const msg1 = asRecord(message['1']);
   const msg10 = asRecord(msg1['10']);
@@ -499,18 +538,21 @@ export function parsePushPayload(encoded: string, accountId: string, myId: strin
   // message number in the compact envelope and a short-lived internal UUID
   // in extJson. Prefer the stable platform id so history sync and live push
   // resolve to the same local message and database uniqueness key.
-  const externalMessageRef = selectCanonicalMessageRef(
+  const externalMessageRefCandidates = uniqueStrings([
     msg1['3'],
     message['3'],
     parseQueryParam(reminderUrl, 'messageId'),
     extension.messageId,
-  );
-  if (!conversationRef || !externalMessageRef || !senderRef) return undefined;
+  ]);
+  const externalMessageRef = selectCanonicalMessageRef(...externalMessageRefCandidates);
+  if (!conversationRef) return { quarantine: { reasonCode: 'PUSH_CONVERSATION_REF_MISSING', receivedAt } };
+  if (!externalMessageRef) return { quarantine: { reasonCode: 'PUSH_MESSAGE_REF_MISSING', receivedAt } };
+  if (!senderRef) return { quarantine: { reasonCode: 'PUSH_SENDER_REF_MISSING', receivedAt } };
   const decoded = decodeContent(msg1);
   const fallbackText = optionalString(msg10.reminderContent);
   const bodyType = decoded.images.length > 0 ? 'image' : decoded.text || fallbackText ? 'text' : 'system';
-  const occurredAt = normalizeTimestamp(msg1['5'] ?? message['5']);
-  return {
+  const timestamp = normalizeTimestamp(msg1['5'] ?? message['5'], receivedAt);
+  return { event: {
     accountId,
     externalConversationRef: conversationRef,
     externalMessageRef,
@@ -520,9 +562,11 @@ export function parsePushPayload(encoded: string, accountId: string, myId: strin
     bodyType,
     bodyText: decoded.text || fallbackText,
     assetRef: decoded.images[0],
-    occurredAt,
+    occurredAt: timestamp.value,
+    ...(timestamp.quality === 'received' ? { receivedAt, timestampQuality: timestamp.quality, riskFlags: ['source_timestamp_invalid'] } : {}),
+    ...(externalMessageRefCandidates.filter((value) => value !== externalMessageRef).length > 0 ? { externalMessageRefAliases: externalMessageRefCandidates.filter((value) => value !== externalMessageRef) } : {}),
     raw: message,
-  };
+  } };
 }
 
 /**
@@ -796,7 +840,14 @@ function clampLimit(value: number): number { return Math.min(100, Math.max(1, Ma
 function asRecord(value: unknown): Record<string, any> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}; }
 function optionalString(value: unknown): string | undefined { return typeof value === 'string' && value.trim() ? value.trim() : undefined; }
 function stripGoofish(value: string): string { return value.replace(/@goofish$/, ''); }
-function normalizeTimestamp(value: unknown): string { const numeric = typeof value === 'number' ? value : Number(value); const millis = Number.isFinite(numeric) ? (numeric > 10_000_000_000 ? numeric : numeric * 1000) : Date.now(); return new Date(millis).toISOString(); }
+function uniqueStrings(values: unknown[]): string[] { return [...new Set(values.map((value) => optionalString(typeof value === 'number' || typeof value === 'bigint' ? String(value) : value)).filter((value): value is string => Boolean(value)))]; }
+function normalizeTimestamp(value: unknown, receivedAt: string): { value: string; quality: 'platform' | 'received' } {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return { value: receivedAt, quality: 'received' };
+  const millis = numeric > 10_000_000_000 ? numeric : numeric * 1000;
+  const parsed = new Date(millis);
+  return Number.isNaN(parsed.getTime()) ? { value: receivedAt, quality: 'received' } : { value: parsed.toISOString(), quality: 'platform' };
+}
 
 function numericValue(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value;

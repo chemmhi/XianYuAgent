@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor } from './conversation-cursor.js';
@@ -400,7 +400,7 @@ export class PostgresStore implements Store {
   async findMessageByExternalRef(adminId: string, conversationId: string, externalMessageRef: string): Promise<MessageRecord | undefined> {
     const conversation = await this.getConversation(adminId, conversationId);
     if (!conversation) return undefined;
-    const result = await this.pool.query('select * from messages.messages where conversation_id=$1 and external_message_ref=$2 limit 1', [conversationId, externalMessageRef]);
+    const result = await this.pool.query('select m.* from messages.messages m left join messages.message_external_ref_aliases a on a.message_id=m.id where m.conversation_id=$1 and (m.external_message_ref=$2 or a.external_message_ref=$2) limit 1', [conversationId, externalMessageRef]);
     return result.rows[0] ? this.toMessage(result.rows[0]) : undefined;
   }
 
@@ -410,11 +410,12 @@ export class PostgresStore implements Store {
     return this.toConversation(result.rows[0]);
   }
 
-  async createMessage(input: { adminId: string; conversationId: string; direction: MessageRecord['direction']; senderRole: MessageRecord['senderRole']; bodyType: MessageRecord['bodyType']; bodyText?: string; bodyRef?: string; externalMessageRef?: string; source?: MessageRecord['source']; orderRef?: string; productRef?: string; riskFlags?: string[]; createdAt?: string; traceId?: string }): Promise<{ message: MessageRecord; event: ConversationEventRecord }> {
+  async createMessage(input: { adminId: string; conversationId: string; direction: MessageRecord['direction']; senderRole: MessageRecord['senderRole']; bodyType: MessageRecord['bodyType']; bodyText?: string; bodyRef?: string; externalMessageRef?: string; externalMessageRefAliases?: string[]; source?: MessageRecord['source']; orderRef?: string; productRef?: string; riskFlags?: string[]; createdAt?: string; traceId?: string }): Promise<{ message: MessageRecord; event: ConversationEventRecord }> {
     const conversation = await this.getConversation(input.adminId, input.conversationId);
     if (!conversation) throw new Error('CONVERSATION_NOT_FOUND');
-    if (input.externalMessageRef) {
-      const existing = await this.pool.query('select * from messages.messages where conversation_id=$1 and external_message_ref=$2 limit 1', [input.conversationId, input.externalMessageRef]);
+    if (input.externalMessageRef || (input.externalMessageRefAliases?.length ?? 0) > 0) {
+      const refs = [input.externalMessageRef, ...(input.externalMessageRefAliases ?? [])].filter((value): value is string => Boolean(value));
+      const existing = await this.pool.query('select m.* from messages.messages m left join messages.message_external_ref_aliases a on a.message_id=m.id where m.conversation_id=$1 and (m.external_message_ref = any($2::text[]) or a.external_message_ref = any($2::text[])) limit 1', [input.conversationId, refs]);
       if (existing.rows[0]) {
         const message = this.toMessage(existing.rows[0]);
         const eventResult = await this.pool.query("select * from messages.events where conversation_id=$1 and payload_json->'message'->>'id'=$2 order by cursor desc limit 1", [input.conversationId, message.id]);
@@ -427,6 +428,10 @@ export class PostgresStore implements Store {
       const id = createId();
       const createdAt = input.createdAt ?? new Date().toISOString();
       const messageResult = await client.query('insert into messages.messages (id,conversation_id,account_id,direction,sender_role,body_type,body_text,body_ref,external_message_ref,source,order_ref,product_ref,risk_flags,handling_mode,created_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15) returning *', [id, conversation.id, conversation.accountId, input.direction, input.senderRole, input.bodyType, input.bodyText ?? null, input.bodyRef ?? null, input.externalMessageRef ?? null, input.source ?? null, input.orderRef ?? null, input.productRef ?? null, JSON.stringify(input.riskFlags ?? []), conversation.handlingMode, createdAt]);
+      for (const alias of input.externalMessageRefAliases ?? []) {
+        if (!alias || alias === input.externalMessageRef) continue;
+        await client.query('insert into messages.message_external_ref_aliases (account_id,conversation_id,message_id,external_message_ref) values ($1,$2,$3,$4) on conflict (account_id,external_message_ref) do nothing', [conversation.accountId, conversation.id, id, alias]);
+      }
       const updated = await client.query("update messages.conversations set unread_count=unread_count + case when $2='inbound' then 1 else 0 end, last_message_preview=case when last_message_at is null or $4::timestamptz>=last_message_at then $3 else last_message_preview end, last_message_at=greatest(coalesce(last_message_at,$4::timestamptz),$4::timestamptz), version=version+1, updated_at=greatest(updated_at, $4::timestamptz) where id=$1 returning *", [conversation.id, input.direction, input.bodyText?.slice(0, 180) ?? null, createdAt]);
       // Serialize cursor allocation per conversation. PostgreSQL does not allow
       // FOR UPDATE on an aggregate result, so use a transaction-scoped advisory
@@ -440,7 +445,19 @@ export class PostgresStore implements Store {
       const eventResult = await client.query('insert into messages.events (event_id,conversation_id,account_id,cursor,type,occurred_at,trace_id,payload_json) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb) returning *', [event.eventId, event.conversationId, event.accountId, event.cursor, event.type, event.occurredAt, event.traceId, JSON.stringify(event.payload)]);
       await client.query('commit');
       return { message, event: this.toConversationEvent(eventResult.rows[0]) };
-    } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
+    } catch (error) {
+      await client.query('rollback');
+      if ((error as { code?: string }).code === '23505' && (input.externalMessageRef || (input.externalMessageRefAliases?.length ?? 0) > 0)) {
+        const refs = [input.externalMessageRef, ...(input.externalMessageRefAliases ?? [])].filter((value): value is string => Boolean(value));
+        const existing = await this.pool.query('select m.* from messages.messages m left join messages.message_external_ref_aliases a on a.message_id=m.id where m.conversation_id=$1 and (m.external_message_ref = any($2::text[]) or a.external_message_ref = any($2::text[])) limit 1', [input.conversationId, refs]);
+        if (existing.rows[0]) {
+          const message = this.toMessage(existing.rows[0]);
+          const eventResult = await this.pool.query("select * from messages.events where conversation_id=$1 and payload_json->'message'->>'id'=$2 order by cursor desc limit 1", [input.conversationId, message.id]);
+          if (eventResult.rows[0]) return { message, event: this.toConversationEvent(eventResult.rows[0]) };
+        }
+      }
+      throw error;
+    } finally { client.release(); }
   }
 
   async createAutoReplyRun(input: { adminId: string; accountId: string; conversationId: string; inboundMessageId: string; intent: string; decision: AutoReplyDecision; status: AutoReplyRunStatus; riskFlags?: string[]; productId?: string; orderRefs?: string[]; inputDigest: string; contextDigest?: string; replyDigest?: string; senderOutcome?: AutoReplyRunRecord['senderOutcome']; outboundMessageId?: string; failureCode?: string }): Promise<AutoReplyRunRecord> {
@@ -549,6 +566,102 @@ export class PostgresStore implements Store {
       run.productId ? this.getProduct(adminId, run.productId) : Promise.resolve(undefined),
     ]);
     return { run, events, conversation, inboundMessage: inboundResult.rows[0] ? this.toMessage(inboundResult.rows[0]) : undefined, outboundMessages: outboundResult.rows.map((row) => this.toMessage(row)), product };
+  }
+
+  async enqueueInboundInbox(input: { adminId: string; accountId: string; conversationId: string; inboundMessageId: string; externalConversationRef: string; externalMessageRef: string; availableAt?: string }): Promise<{ record: InboundInboxRecord; created: boolean }> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    let inserted;
+    try {
+      inserted = await this.pool.query(`insert into messages.auto_reply_inbound_inbox (id,admin_id,account_id,conversation_id,inbound_message_id,external_conversation_ref,external_message_ref,available_at)
+        values ($1,$2,$3,$4,$5,$6,$7,coalesce($8::timestamptz,now()))
+        on conflict (account_id,external_message_ref) do nothing returning *`, [createId(), input.adminId, input.accountId, input.conversationId, input.inboundMessageId, input.externalConversationRef, input.externalMessageRef, input.availableAt ?? null]);
+    } catch (error) {
+      if ((error as { code?: string }).code !== '23505') throw error;
+      inserted = { rows: [] } as { rows: Row[] };
+    }
+    if (inserted.rows[0]) return { record: this.toInboundInbox(inserted.rows[0]), created: true };
+    const existing = await this.pool.query('select * from messages.auto_reply_inbound_inbox where account_id=$1 and (external_message_ref=$2 or inbound_message_id=$3) limit 1', [input.accountId, input.externalMessageRef, input.inboundMessageId]);
+    if (!existing.rows[0]) throw new Error('INBOUND_INBOX_ENQUEUE_RACE');
+    return { record: this.toInboundInbox(existing.rows[0]), created: false };
+  }
+
+  async claimInboundInbox(input: { workerId: string; limit: number; leaseMs: number }): Promise<InboundInboxRecord[]> {
+    const limit = Math.max(1, Math.min(100, Math.trunc(input.limit)));
+    const leaseMs = Math.max(5_000, Math.min(300_000, Math.trunc(input.leaseMs)));
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const result = await client.query(`with candidate_conversations as (
+        select c.id
+        from messages.conversations c
+        where exists (
+          select 1 from messages.auto_reply_inbound_inbox i
+          where i.conversation_id=c.id
+            and ((i.status in ('pending','retryable') and i.available_at<=now()) or (i.status='processing' and i.lease_expires_at <= now()))
+        )
+          and not exists (
+            select 1 from messages.auto_reply_inbound_inbox active
+            where active.conversation_id=c.id and active.status='processing' and active.lease_expires_at > now()
+          )
+        order by c.updated_at asc, c.id asc
+        for update skip locked
+        limit $1
+      ), candidates as (
+        select distinct on (i.conversation_id) i.id
+        from messages.auto_reply_inbound_inbox i
+        join candidate_conversations c on c.id=i.conversation_id
+        where ((i.status in ('pending','retryable') and i.available_at<=now()) or (i.status='processing' and i.lease_expires_at <= now()))
+        order by i.conversation_id, i.created_at asc, i.id asc
+      )
+      update messages.auto_reply_inbound_inbox inbox
+      set status='processing', attempt=inbox.attempt+1, locked_at=now(), lease_expires_at=now() + ($2::int * interval '1 millisecond'), lease_owner=$3, updated_at=now()
+      from candidates
+      where inbox.id=candidates.id
+      returning inbox.*`, [limit, leaseMs, input.workerId]);
+      await client.query('commit');
+      return result.rows.map((row) => this.toInboundInbox(row));
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async heartbeatInboundInbox(input: { id: string; workerId: string; leaseMs: number }): Promise<boolean> {
+    const result = await this.pool.query(`update messages.auto_reply_inbound_inbox set locked_at=now(), lease_expires_at=now() + ($3::int * interval '1 millisecond'), updated_at=now()
+      where id=$1 and status='processing' and lease_owner=$2 and lease_expires_at > now()`, [input.id, input.workerId, Math.max(5_000, Math.min(300_000, Math.trunc(input.leaseMs)))]);
+    return result.rowCount === 1;
+  }
+
+  async ackInboundInbox(input: { id: string; workerId: string }): Promise<boolean> {
+    const result = await this.pool.query(`update messages.auto_reply_inbound_inbox set status='succeeded', processed_at=now(), locked_at=null, lease_expires_at=null, lease_owner=null, updated_at=now()
+      where id=$1 and status='processing' and lease_owner=$2`, [input.id, input.workerId]);
+    return result.rowCount === 1;
+  }
+
+  async retryInboundInbox(input: { id: string; workerId: string; errorCode: string; errorDigest: string; availableAt: string }): Promise<boolean> {
+    const result = await this.pool.query(`update messages.auto_reply_inbound_inbox set status='retryable', available_at=$3, locked_at=null, lease_expires_at=null, lease_owner=null, last_error_code=$4, last_error_digest=$5, last_error_at=now(), updated_at=now()
+      where id=$1 and status='processing' and lease_owner=$2`, [input.id, input.workerId, input.availableAt, input.errorCode, input.errorDigest]);
+    return result.rowCount === 1;
+  }
+
+  async deadLetterInboundInbox(input: { id: string; workerId: string; errorCode: string; errorDigest: string }): Promise<boolean> {
+    const result = await this.pool.query(`update messages.auto_reply_inbound_inbox set status='dead_lettered', locked_at=null, lease_expires_at=null, lease_owner=null, last_error_code=$3, last_error_digest=$4, last_error_at=now(), updated_at=now()
+      where id=$1 and status='processing' and lease_owner=$2`, [input.id, input.workerId, input.errorCode, input.errorDigest]);
+    return result.rowCount === 1;
+  }
+
+  async reapExpiredInboundInbox(now?: string): Promise<number> {
+    const result = await this.pool.query(`update messages.auto_reply_inbound_inbox set status='retryable', locked_at=null, lease_expires_at=null, lease_owner=null, available_at=coalesce($1::timestamptz,now()), last_error_code='INBOX_LEASE_EXPIRED', last_error_at=now(), updated_at=now()
+      where status='processing' and lease_expires_at <= now()`, [now ?? null]);
+    return Number(result.rowCount ?? 0);
+  }
+
+  async recordInboundQuarantine(input: { accountId: string; reasonCode: string; payloadDigest: string; payloadPreview?: string; payloadSize: number; receivedAt?: string }): Promise<InboundQuarantineRecord> {
+    const result = await this.pool.query('insert into messages.auto_reply_inbound_quarantine (account_id,reason_code,payload_digest,payload_preview,payload_size,received_at) values ($1,$2,$3,$4,$5,coalesce($6::timestamptz,now())) returning *', [input.accountId, input.reasonCode, input.payloadDigest, input.payloadPreview?.slice(0, 500) ?? null, Math.max(0, Math.trunc(input.payloadSize)), input.receivedAt ?? null]);
+    const row = result.rows[0];
+    return { id: String(row.id), accountId: String(row.account_id), reasonCode: String(row.reason_code), payloadDigest: String(row.payload_digest), payloadPreview: row.payload_preview ? String(row.payload_preview) : undefined, payloadSize: Number(row.payload_size ?? 0), receivedAt: dateIso(row.received_at), resolvedAt: iso(row.resolved_at), createdAt: dateIso(row.created_at) };
   }
 
   async getAutoReplyActivitySummary(adminId: string, query: { accountId?: string; from: string; to: string }): Promise<AutoReplyActivitySummary> {
@@ -877,6 +990,7 @@ export class PostgresStore implements Store {
     return { id: String(row.id), adminId: String(row.admin_id), accountId: String(row.account_id), conversationId: String(row.conversation_id), inboundMessageId: String(row.inbound_message_id), intent: String(row.intent), decision: row.decision as AutoReplyRunRecord['decision'], status: row.status as AutoReplyRunRecord['status'], riskFlags, productId: row.product_id ? String(row.product_id) : undefined, orderRefs, inputDigest: String(row.input_digest), contextDigest: row.context_digest ? String(row.context_digest) : undefined, replyDigest: row.reply_digest ? String(row.reply_digest) : undefined, senderOutcome: row.sender_outcome as AutoReplyRunRecord['senderOutcome'], outboundMessageId: row.outbound_message_id ? String(row.outbound_message_id) : undefined, failureCode: row.failure_code ? String(row.failure_code) : undefined, createdAt: dateIso(row.created_at), updatedAt: dateIso(row.updated_at) };
   }
   private toAutoReplyRunEvent(row: Row): AutoReplyRunEventRecord { const payload = row.payload_json && typeof row.payload_json === 'object' && !Array.isArray(row.payload_json) ? row.payload_json as Record<string, unknown> : {}; return { id: String(row.id), runId: String(row.run_id), accountId: String(row.account_id), sequence: Number(row.sequence), eventType: String(row.event_type), stage: row.stage as AutoReplyRunStage, status: row.status as AutoReplyRunStatus, occurredAt: dateIso(row.occurred_at), durationMs: row.duration_ms === null || row.duration_ms === undefined ? undefined : Number(row.duration_ms), traceId: row.trace_id ? String(row.trace_id) : undefined, payload: { ...payload } }; }
+  private toInboundInbox(row: Row): InboundInboxRecord { return { id: String(row.id), adminId: String(row.admin_id), accountId: String(row.account_id), conversationId: String(row.conversation_id), inboundMessageId: String(row.inbound_message_id), externalConversationRef: String(row.external_conversation_ref), externalMessageRef: String(row.external_message_ref), status: row.status as InboundInboxRecord['status'], attempt: Number(row.attempt ?? 0), availableAt: dateIso(row.available_at), lockedAt: iso(row.locked_at), leaseExpiresAt: iso(row.lease_expires_at), leaseOwner: row.lease_owner ? String(row.lease_owner) : undefined, lastErrorCode: row.last_error_code ? String(row.last_error_code) : undefined, lastErrorDigest: row.last_error_digest ? String(row.last_error_digest) : undefined, lastErrorAt: iso(row.last_error_at), processedAt: iso(row.processed_at), createdAt: dateIso(row.created_at), updatedAt: dateIso(row.updated_at) }; }
   private toAutoReplyRunListItem(row: Row): AutoReplyRunListItem { const run = this.toAutoReplyRun(row); return { ...run, stage: autoReplyStageForStatus(run.status), durationMs: Math.max(0, Number(row.duration_ms ?? (Date.parse(run.updatedAt) - Date.parse(run.createdAt)))), buyerDisplayName: row.buyer_display_name ? String(row.buyer_display_name) : undefined, productTitle: row.product_title ? String(row.product_title) : undefined, inboundMessagePreview: row.inbound_message_preview ? String(row.inbound_message_preview).slice(0, 180) : undefined }; }
   private statusForAutoReplyStage(stage: AutoReplyRunStage): AutoReplyRunStatus { const map: Record<AutoReplyRunStage, AutoReplyRunStatus> = { gateway_received: 'received', intent_recognition: 'classified', context_read: 'context_loaded', reply_generation: 'generated', sending: 'simulated', persisted: 'persisted', handoff: 'handoff', skipped: 'skipped', failed: 'failed' }; return map[stage]; }
   private toConversationEvent(row: Row): ConversationEventRecord { const payload = row.payload_json && typeof row.payload_json === 'object' && !Array.isArray(row.payload_json) ? row.payload_json as Record<string, unknown> : {}; return { eventId: String(row.event_id), conversationId: String(row.conversation_id), accountId: String(row.account_id), cursor: Number(row.cursor), type: row.type as ConversationEventRecord['type'], occurredAt: new Date(String(row.occurred_at)).toISOString(), traceId: String(row.trace_id), payload }; }

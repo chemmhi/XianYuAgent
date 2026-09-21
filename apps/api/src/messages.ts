@@ -170,7 +170,7 @@ export class MessageService {
     return { message: this.toMessageView(created.message), event };
   }
 
-  async importExternalMessage(input: { adminId: string; conversationId: string; direction: MessageRecord['direction']; senderRole: MessageRecord['senderRole']; bodyType: MessageRecord['bodyType']; bodyText?: string; bodyRef?: string; externalMessageRef: string; source?: MessageRecord['source']; createdAt?: string; traceId: string }): Promise<{ message: MessageVM; event?: RealtimeEventVM; created: boolean }> {
+  async importExternalMessage(input: { adminId: string; conversationId: string; direction: MessageRecord['direction']; senderRole: MessageRecord['senderRole']; bodyType: MessageRecord['bodyType']; bodyText?: string; bodyRef?: string; externalMessageRef: string; externalMessageRefAliases?: string[]; source?: MessageRecord['source']; riskFlags?: string[]; createdAt?: string; traceId: string }): Promise<{ message: MessageVM; event?: RealtimeEventVM; created: boolean }> {
     const existing = await this.store.findMessageByExternalRef(input.adminId, input.conversationId, input.externalMessageRef);
     if (existing) return { message: this.toMessageView(existing), created: false };
     const created = await this.store.createMessage({ ...input, createdAt: input.createdAt });

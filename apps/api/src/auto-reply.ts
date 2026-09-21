@@ -208,7 +208,8 @@ export class AutoReplyService {
       }
 
       const buyerName = normalizeBuyerName(input.senderName) ?? normalizeBuyerName(conversation.buyerDisplayName);
-      if (runtime.testBuyerNames.length > 0 && (!buyerName || !runtime.testBuyerNames.includes(buyerName))) {
+      const buyerIdentityKeys = [buyerName, normalizeBuyerName(conversation.buyerRef), normalizeBuyerName(conversation.externalConversationRef)].filter((value): value is string => Boolean(value));
+      if (runtime.testBuyerNames.length > 0 && !buyerIdentityKeys.some((key) => runtime.testBuyerNames.includes(key))) {
         const updated = await this.store.updateAutoReplyRun(run.id, { status: 'skipped', decision: 'skipped', failureCode: 'TEST_BUYER_NOT_ALLOWLISTED', riskFlags: ['test_buyer_not_allowlisted'] });
         await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'skipped', reason: 'TEST_BUYER_NOT_ALLOWLISTED' });
         return { run: updated ?? run, inboundMessage };

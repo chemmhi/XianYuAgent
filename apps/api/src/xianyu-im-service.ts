@@ -1,4 +1,4 @@
-import type { AccountRecord, ConversationRecord, CredentialRecord, Store } from './domain.js';
+import type { AccountRecord, ConversationRecord, CredentialRecord, InboundInboxRecord, Store } from './domain.js';
 import { ServiceError } from './services.js';
 import type { MessageService } from './messages.js';
 import type { AutoReplyProcessResult, AutoReplyService } from './auto-reply.js';
@@ -69,7 +69,9 @@ export class XianyuImService {
         bodyText: parsed.bodyText,
         bodyRef: parsed.bodyRef,
         externalMessageRef: parsed.externalMessageRef,
+        externalMessageRefAliases: parsed.externalMessageRefAliases,
         source: parsed.direction === 'outbound' ? 'human' : 'system',
+        riskFlags: parsed.riskFlags,
         createdAt: parsed.createdAt,
         traceId: `xianyu:history:${parsed.externalMessageRef}`,
       });
@@ -205,7 +207,8 @@ export class XianyuImService {
       const client = new XianyuImClient({
         accountId,
         credential: toImCredential(credential),
-        onEvent: async (event) => { await this.handleExternalEvent(adminId, event); },
+        onEvent: async (event) => { await this.handleExternalEvent(adminId, event, { deferAutoReply: true }); },
+        onQuarantine: async (event) => { await this.store.recordInboundQuarantine(event); },
         saveCredential: async (next) => { await this.saveCredential(adminId, account, next); },
       });
       try { await client.connect(); } catch (error) {
@@ -253,7 +256,7 @@ export class XianyuImService {
     }
   }
 
-  async handleExternalEvent(adminId: string, event: XianyuImMessageEvent | XianyuImReadReceiptEvent): Promise<{ created: boolean; autoReply?: AutoReplyProcessResult }> {
+  async handleExternalEvent(adminId: string, event: XianyuImMessageEvent | XianyuImReadReceiptEvent, options: { deferAutoReply?: boolean } = {}): Promise<{ created: boolean; autoReply?: AutoReplyProcessResult }> {
     if (isReadReceiptEvent(event)) {
       const externalConversationRef = event.externalConversationRef;
       if (!externalConversationRef) return { created: false };
@@ -315,13 +318,28 @@ export class XianyuImService {
       bodyText: effectiveEvent.bodyText,
       bodyRef: effectiveEvent.assetRef,
       externalMessageRef: effectiveEvent.externalMessageRef,
+      externalMessageRefAliases: effectiveEvent.externalMessageRefAliases,
       source: effectiveEvent.direction === 'outbound' ? 'human' : 'system',
+      riskFlags: effectiveEvent.riskFlags,
       createdAt: effectiveEvent.occurredAt,
       traceId: `xianyu:push:${effectiveEvent.externalMessageRef}`,
     });
     if (effectiveEvent.direction !== 'inbound' || !['text', 'image'].includes(effectiveEvent.bodyType) || !this.autoReply) return { created: imported.created };
+    if (options.deferAutoReply) {
+      await this.store.enqueueInboundInbox({ adminId, accountId: effectiveEvent.accountId, conversationId: conversation.id, inboundMessageId: imported.message.messageId, externalConversationRef: effectiveEvent.externalConversationRef, externalMessageRef: effectiveEvent.externalMessageRef });
+      return { created: imported.created };
+    }
     const autoReply = await this.autoReply.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: imported.message.messageId, senderName: effectiveEvent.senderName, requestId: `xianyu:auto-reply:${effectiveEvent.externalMessageRef}`, traceId: `xianyu:auto-reply:${effectiveEvent.externalMessageRef}` });
     return { created: imported.created, autoReply };
+  }
+
+  async processInboundInbox(record: InboundInboxRecord): Promise<AutoReplyProcessResult | undefined> {
+    if (!this.autoReply) return undefined;
+    const conversation = await this.store.getConversation(record.adminId, record.conversationId);
+    if (!conversation) throw new Error('CONVERSATION_NOT_FOUND');
+    const inbound = await this.store.findMessageByExternalRef(record.adminId, record.conversationId, record.externalMessageRef);
+    if (!inbound) throw new Error('INBOUND_MESSAGE_NOT_FOUND');
+    return this.autoReply.processInbound({ adminId: record.adminId, conversationId: record.conversationId, inboundMessageId: inbound.id, senderName: conversation.buyerDisplayName, requestId: `xianyu:auto-reply:${record.externalMessageRef}`, traceId: `xianyu:auto-reply:${record.externalMessageRef}` });
   }
 }
 
@@ -393,18 +411,19 @@ function normalizeConversation(value: unknown, myId: string): { externalConversa
   return { externalConversationRef, buyerRef, buyerDisplayName, buyerAvatarUrl, itemRef, itemTitle, itemImageUrl, unreadCount: numberValue(conv.redPoint), lastMessagePreview: preview, lastMessageAt: timestamp };
 }
 
-function normalizeHistoryMessage(value: unknown, myId: string): { externalMessageRef: string; direction: 'inbound' | 'outbound'; bodyType: 'text' | 'image' | 'system'; bodyText?: string; bodyRef?: string; createdAt: string } | undefined {
+function normalizeHistoryMessage(value: unknown, myId: string): { externalMessageRef: string; externalMessageRefAliases?: string[]; direction: 'inbound' | 'outbound'; bodyType: 'text' | 'image' | 'system'; bodyText?: string; bodyRef?: string; riskFlags?: string[]; createdAt: string } | undefined {
   const model = record(value);
   const message = record(model.message ?? model);
   const extension = record(message.extension);
   // History and live push may expose the same platform message under both a
   // stable `.PNM` id and an internal transport id. Keep the stable id when it
   // is present so the store's external-message uniqueness remains effective.
-  const externalMessageRef = selectCanonicalMessageRef(
+  const externalMessageRefCandidates = uniqueStrings([
     message.messageId,
     extension.messageId,
     parseQueryParam(string(extension.reminderUrl), 'messageId'),
-  );
+  ]);
+  const externalMessageRef = selectCanonicalMessageRef(...externalMessageRefCandidates);
   if (!externalMessageRef) return undefined;
   const senderRef = strip(extension.senderUserId ?? message.senderUserId);
   const direction = senderRef && senderRef === myId ? 'outbound' : 'inbound';
@@ -414,7 +433,9 @@ function normalizeHistoryMessage(value: unknown, myId: string): { externalMessag
   const bodyText = content.text ?? fallback;
   const bodyRef = content.images[0];
   const bodyType = bodyRef ? 'image' : bodyText ? 'text' : 'system';
-  return { externalMessageRef, direction, bodyType, bodyText, bodyRef, createdAt: normalizeTimestamp(message.createAt) ?? new Date().toISOString() };
+  const receivedAt = new Date().toISOString();
+  const createdAt = normalizeTimestamp(message.createAt);
+  return { externalMessageRef, externalMessageRefAliases: externalMessageRefCandidates.filter((value) => value !== externalMessageRef), direction, bodyType, bodyText, bodyRef, riskFlags: createdAt ? undefined : ['source_timestamp_invalid'], createdAt: createdAt ?? receivedAt };
 }
 
 function decodeCustom(value: unknown): { text?: string; images: string[] } {
@@ -436,6 +457,7 @@ function selectCanonicalMessageRef(...values: unknown[]): string | undefined {
   const candidates = values.map(string).filter((value): value is string => Boolean(value));
   return candidates.find((value) => value.toUpperCase().endsWith('.PNM')) ?? candidates[0];
 }
+function uniqueStrings(values: unknown[]): string[] { return [...new Set(values.map((value) => string(typeof value === 'number' || typeof value === 'bigint' ? String(value) : value)).filter((value): value is string => Boolean(value)))]; }
 function parseJsonObject(value: unknown): Record<string, any> {
   if (typeof value !== 'string' || !value.trim()) return {};
   try { return record(JSON.parse(value)); } catch { return {}; }
@@ -458,7 +480,7 @@ function normalizeAssetUrl(value: string | undefined): string | undefined {
 function strip(value: unknown): string { return String(value ?? '').replace(/@goofish$/, '').trim(); }
 function numberValue(value: unknown): number | undefined { const number = Number(value); return Number.isFinite(number) ? Math.max(0, Math.trunc(number)) : undefined; }
 function numeric(value: unknown): number | undefined { const number = Number(value); return Number.isSafeInteger(number) ? number : undefined; }
-function normalizeTimestamp(value: unknown): string | undefined { const number = Number(value); if (!Number.isFinite(number) || number <= 0) return undefined; const millis = number > 10_000_000_000 ? number : number * 1000; return new Date(millis).toISOString(); }
+function normalizeTimestamp(value: unknown): string | undefined { const number = Number(value); if (!Number.isFinite(number) || number <= 0) return undefined; const millis = number > 10_000_000_000 ? number : number * 1000; const parsed = new Date(millis); return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString(); }
 function parseQueryParam(value: string | undefined, key: string): string | undefined { if (!value) return undefined; try { return new URL(value.replace(/^fleamarket:\/\//, 'https://placeholder/')).searchParams.get(key) ?? undefined; } catch { return undefined; } }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | undefined> {

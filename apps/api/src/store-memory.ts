@@ -1,4 +1,4 @@
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor, isAfterConversationCursor } from './conversation-cursor.js';
@@ -44,6 +44,9 @@ export class MemoryStore implements Store {
   private readonly autoReplyRuns = new Map<string, AutoReplyRunRecord>();
   private readonly autoReplyRunEvents = new Map<string, AutoReplyRunEventRecord[]>();
   private readonly autoReplyRunEventSequences = new Map<string, number>();
+  private readonly inboundInbox = new Map<string, InboundInboxRecord>();
+  private readonly inboundMessageAliases = new Map<string, string>();
+  private readonly inboundQuarantine = new Map<string, InboundQuarantineRecord>();
   private readonly conversationEvents = new Map<string, ConversationEventRecord[]>();
   private readonly conversationCursors = new Map<string, number>();
   private readonly scopes = new Map<string, AccountScopeRecord>();
@@ -457,7 +460,8 @@ export class MemoryStore implements Store {
   async findMessageByExternalRef(adminId: string, conversationId: string, externalMessageRef: string): Promise<MessageRecord | undefined> {
     const conversation = await this.getConversation(adminId, conversationId);
     if (!conversation) return undefined;
-    const message = [...this.messages.values()].find((item) => item.conversationId === conversationId && item.externalMessageRef === externalMessageRef);
+    const aliasMessageId = this.inboundMessageAliases.get(`${conversation.accountId}:${conversationId}:${externalMessageRef}`);
+    const message = [...this.messages.values()].find((item) => item.conversationId === conversationId && (item.externalMessageRef === externalMessageRef || item.id === aliasMessageId));
     return message ? { ...message, riskFlags: [...message.riskFlags] } : undefined;
   }
 
@@ -471,11 +475,12 @@ export class MemoryStore implements Store {
     return { ...conversation };
   }
 
-  async createMessage(input: { adminId: string; conversationId: string; direction: MessageRecord['direction']; senderRole: MessageRecord['senderRole']; bodyType: MessageRecord['bodyType']; bodyText?: string; bodyRef?: string; externalMessageRef?: string; source?: MessageRecord['source']; orderRef?: string; productRef?: string; riskFlags?: string[]; createdAt?: string; traceId?: string }): Promise<{ message: MessageRecord; event: ConversationEventRecord }> {
+  async createMessage(input: { adminId: string; conversationId: string; direction: MessageRecord['direction']; senderRole: MessageRecord['senderRole']; bodyType: MessageRecord['bodyType']; bodyText?: string; bodyRef?: string; externalMessageRef?: string; externalMessageRefAliases?: string[]; source?: MessageRecord['source']; orderRef?: string; productRef?: string; riskFlags?: string[]; createdAt?: string; traceId?: string }): Promise<{ message: MessageRecord; event: ConversationEventRecord }> {
     const conversation = this.conversations.get(input.conversationId);
     if (!conversation || !(await this.hasAccountScope(input.adminId, conversation.accountId))) throw new Error('CONVERSATION_NOT_FOUND');
     if (input.externalMessageRef) {
-      const existing = [...this.messages.values()].find((item) => item.conversationId === input.conversationId && item.externalMessageRef === input.externalMessageRef);
+      const refs = new Set([input.externalMessageRef, ...(input.externalMessageRefAliases ?? [])].filter((value): value is string => Boolean(value)));
+      const existing = [...this.messages.values()].find((item) => item.conversationId === input.conversationId && (refs.has(item.externalMessageRef ?? '') || [...refs].some((ref) => this.inboundMessageAliases.get(`${conversation.accountId}:${input.conversationId}:${ref}`) === item.id)));
       if (existing) {
         const event = this.eventForMessage(input.conversationId, existing.id);
         if (event) return { message: { ...existing, riskFlags: [...existing.riskFlags] }, event: { ...event, payload: { ...event.payload } } };
@@ -484,6 +489,9 @@ export class MemoryStore implements Store {
     const now = input.createdAt ?? new Date().toISOString();
     const message: MessageRecord = { id: createId(), conversationId: conversation.id, accountId: conversation.accountId, direction: input.direction, senderRole: input.senderRole, bodyType: input.bodyType, bodyText: input.bodyText, bodyRef: input.bodyRef, redactionState: 'visible', status: 'created', readStatus: 0, externalMessageRef: input.externalMessageRef, source: input.source, orderRef: input.orderRef, productRef: input.productRef, riskFlags: [...(input.riskFlags ?? [])], handlingMode: conversation.handlingMode, createdAt: now };
     this.messages.set(message.id, message);
+    for (const alias of input.externalMessageRefAliases ?? []) {
+      if (alias && alias !== input.externalMessageRef) this.inboundMessageAliases.set(`${conversation.accountId}:${conversation.id}:${alias}`, message.id);
+    }
     if (!conversation.lastMessageAt || now >= conversation.lastMessageAt) {
       conversation.lastMessagePreview = message.bodyText?.slice(0, 180);
       conversation.lastMessageAt = now;
@@ -628,6 +636,102 @@ export class MemoryStore implements Store {
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id))[0];
     if (!target) return { messages: [], events: [] };
     return this.markOutgoingReadUntil(conversation, target.createdAt, input.readAt);
+  }
+
+  async enqueueInboundInbox(input: { adminId: string; accountId: string; conversationId: string; inboundMessageId: string; externalConversationRef: string; externalMessageRef: string; availableAt?: string }): Promise<{ record: InboundInboxRecord; created: boolean }> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const existing = [...this.inboundInbox.values()].find((item) => item.accountId === input.accountId && (item.externalMessageRef === input.externalMessageRef || item.inboundMessageId === input.inboundMessageId));
+    if (existing) return { record: { ...existing }, created: false };
+    const now = new Date().toISOString();
+    const record: InboundInboxRecord = {
+      id: createId(), adminId: input.adminId, accountId: input.accountId, conversationId: input.conversationId,
+      inboundMessageId: input.inboundMessageId, externalConversationRef: input.externalConversationRef, externalMessageRef: input.externalMessageRef,
+      status: 'pending', attempt: 0, availableAt: input.availableAt ?? now, createdAt: now, updatedAt: now,
+    };
+    this.inboundInbox.set(record.id, record);
+    return { record: { ...record }, created: true };
+  }
+
+  async claimInboundInbox(input: { workerId: string; limit: number; leaseMs: number }): Promise<InboundInboxRecord[]> {
+    const limit = Math.max(1, Math.min(100, Math.trunc(input.limit)));
+    const now = Date.now();
+    const activeProcessing = (conversationId: string, excludeId: string): boolean => [...this.inboundInbox.values()].some((other) => other.id !== excludeId && other.conversationId === conversationId && other.status === 'processing' && Boolean(other.leaseExpiresAt) && Date.parse(other.leaseExpiresAt!) > now);
+    const candidates = [...this.inboundInbox.values()]
+      .filter((item) => {
+        const available = Date.parse(item.availableAt) <= now;
+        const stale = item.status === 'processing' && Boolean(item.leaseExpiresAt) && Date.parse(item.leaseExpiresAt!) <= now;
+        return ((item.status === 'pending' || item.status === 'retryable') && available) || stale;
+      })
+      .filter((item) => !activeProcessing(item.conversationId, item.id))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+    const claimed: InboundInboxRecord[] = [];
+    const conversations = new Set<string>();
+    for (const item of candidates) {
+      if (claimed.length >= limit || conversations.has(item.conversationId)) continue;
+      const nowIso = new Date().toISOString();
+      item.status = 'processing';
+      item.attempt += 1;
+      item.lockedAt = nowIso;
+      item.leaseExpiresAt = new Date(now + Math.max(5_000, Math.min(300_000, Math.trunc(input.leaseMs)))).toISOString();
+      item.leaseOwner = input.workerId;
+      item.updatedAt = nowIso;
+      claimed.push({ ...item });
+      conversations.add(item.conversationId);
+    }
+    return claimed;
+  }
+
+  async heartbeatInboundInbox(input: { id: string; workerId: string; leaseMs: number }): Promise<boolean> {
+    const item = this.inboundInbox.get(input.id);
+    if (!item || item.status !== 'processing' || item.leaseOwner !== input.workerId || !item.leaseExpiresAt || Date.parse(item.leaseExpiresAt) <= Date.now()) return false;
+    item.lockedAt = new Date().toISOString();
+    item.leaseExpiresAt = new Date(Date.now() + Math.max(5_000, Math.min(300_000, Math.trunc(input.leaseMs)))).toISOString();
+    item.updatedAt = item.lockedAt;
+    return true;
+  }
+
+  async ackInboundInbox(input: { id: string; workerId: string }): Promise<boolean> {
+    const item = this.inboundInbox.get(input.id);
+    if (!item || item.status !== 'processing' || item.leaseOwner !== input.workerId) return false;
+    const now = new Date().toISOString();
+    item.status = 'succeeded'; item.processedAt = now; item.lockedAt = undefined; item.leaseExpiresAt = undefined; item.leaseOwner = undefined; item.updatedAt = now;
+    return true;
+  }
+
+  async retryInboundInbox(input: { id: string; workerId: string; errorCode: string; errorDigest: string; availableAt: string }): Promise<boolean> {
+    const item = this.inboundInbox.get(input.id);
+    if (!item || item.status !== 'processing' || item.leaseOwner !== input.workerId) return false;
+    const now = new Date().toISOString();
+    Object.assign(item, { status: 'retryable' as const, availableAt: input.availableAt, lockedAt: undefined, leaseExpiresAt: undefined, leaseOwner: undefined, lastErrorCode: input.errorCode, lastErrorDigest: input.errorDigest, lastErrorAt: now, updatedAt: now });
+    return true;
+  }
+
+  async deadLetterInboundInbox(input: { id: string; workerId: string; errorCode: string; errorDigest: string }): Promise<boolean> {
+    const item = this.inboundInbox.get(input.id);
+    if (!item || item.status !== 'processing' || item.leaseOwner !== input.workerId) return false;
+    const now = new Date().toISOString();
+    Object.assign(item, { status: 'dead_lettered' as const, lockedAt: undefined, leaseExpiresAt: undefined, leaseOwner: undefined, lastErrorCode: input.errorCode, lastErrorDigest: input.errorDigest, lastErrorAt: now, updatedAt: now });
+    return true;
+  }
+
+  async reapExpiredInboundInbox(now?: string): Promise<number> {
+    const availableAt = now ?? new Date().toISOString();
+    let count = 0;
+    for (const item of this.inboundInbox.values()) {
+      if (item.status === 'processing' && item.leaseExpiresAt && Date.parse(item.leaseExpiresAt) <= Date.now()) {
+        const updatedAt = new Date().toISOString();
+        Object.assign(item, { status: 'retryable' as const, availableAt, lockedAt: undefined, leaseExpiresAt: undefined, leaseOwner: undefined, lastErrorCode: 'INBOX_LEASE_EXPIRED', lastErrorAt: updatedAt, updatedAt });
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  async recordInboundQuarantine(input: { accountId: string; reasonCode: string; payloadDigest: string; payloadPreview?: string; payloadSize: number; receivedAt?: string }): Promise<InboundQuarantineRecord> {
+    const now = new Date().toISOString();
+    const record: InboundQuarantineRecord = { id: createId(), accountId: input.accountId, reasonCode: input.reasonCode, payloadDigest: input.payloadDigest, payloadPreview: input.payloadPreview?.slice(0, 500), payloadSize: Math.max(0, Math.trunc(input.payloadSize)), receivedAt: input.receivedAt ?? now, createdAt: now };
+    this.inboundQuarantine.set(record.id, record);
+    return { ...record };
   }
 
   private markOutgoingReadUntil(conversation: ConversationRecord, createdAt: string, readAt?: string): { messages: MessageRecord[]; events: ConversationEventRecord[] } {
