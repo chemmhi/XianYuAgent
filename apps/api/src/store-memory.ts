@@ -656,9 +656,17 @@ export class MemoryStore implements Store {
     if (!row || !(await this.hasAccountScope(adminId, row.accountId))) return undefined;
     return { ...row, metadata: { ...row.metadata }, canReveal: false as const };
   }
+  async getCredentialRefSecret(adminId: string, credentialId: string): Promise<import('./domain.js').CredentialRefSecretRecord | undefined> {
+    const ref = await this.getCredentialRef(adminId, credentialId);
+    if (!ref) return undefined;
+    const secretCiphertext = this.credentialRefSecrets.get(credentialId);
+    if (!secretCiphertext) return undefined;
+    return { ref, secretCiphertext };
+  }
   async createCredentialRef(input: { adminId: string; accountId: string; provider: string; alias: string; label?: string; secretCiphertext: string; fingerprint: string; metadata?: Record<string, string> }): Promise<CredentialRefRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
-    const duplicate = [...this.credentialRefs.values()].find((row) => row.accountId === input.accountId && row.kind === 'api_key' && row.purpose === 'model_client');
+    const role = input.metadata?.role === 'backup' ? 'backup' : 'primary';
+    const duplicate = [...this.credentialRefs.values()].find((row) => row.accountId === input.accountId && row.kind === 'api_key' && row.purpose === 'model_client' && row.status !== 'revoked' && (row.metadata.role === role || (!row.metadata.role && role === 'primary')));
     if (duplicate) throw new Error('CREDENTIAL_ALREADY_EXISTS');
     const now = new Date().toISOString();
     const row: CredentialRefRecord = { id: createId(), accountId: input.accountId, kind: 'api_key', purpose: 'model_client', label: input.label?.trim() || undefined, status: 'active', version: 1, provider: input.provider.trim(), alias: input.alias.trim(), fingerprint: input.fingerprint, metadata: { ...(input.metadata ?? {}) }, createdAt: now, updatedAt: now, lastRotatedAt: now, canReveal: false };

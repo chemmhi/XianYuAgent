@@ -438,3 +438,16 @@
 | S5-R81 | 质量 / 失败恢复 | Provider 成功、配置缺失、HTTP 失败是否分别落到模型回复、模板回复和失败不发送 | root + listener_ready | PASS（受控环境） | `apps/api/scripts/auto-reply.test.ts`：模型生成持久化、模型上下文裁剪、显式关闭后的模板回退、503 失败 run、不产生 outbound；`npm --workspace apps/api run test:auto-reply:unit` 18/18 |
 
 本轮结论：自动回复已接入与 Workspace 一致的本地环境变量模型配置；配置完整时使用共享模型客户端，配置缺失时保留模板生成，Provider 失败时不回退错误模板、不发送买家消息，仅将安全错误码落库。Settings 页面凭证解析、真实 live 自动化归档、Outbox/unknown 恢复和离线模型评测仍保持后续门禁。
+
+### 2026-09-21：S4-VS7A OpenAI API 主备配置复审
+
+本轮在已有首片基础上复核真实主备配置、动态模型列表、PostgreSQL 复读、Agent 消费与视觉差异。
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R82 | 业务 / 验收 | 主配置与备用配置是否可分别测试、保存，更新后 Agent 是否无重启命中新配置，主失败是否自动切备用 | root + e2e_audit | PASS（真实受控链路） | `apps/web/scripts/e2e-settings-openai-chrome.mjs`；Agent 输出 `PRIMARY_V1_REPLY` / `PRIMARY_V2_REPLY` / `BACKUP_REPLY` |
+| S5-R83 | 架构 / 数据流 | UI → API → CredentialStore → PostgreSQL → Agent 是否按账号隔离、角色隔离并保持密钥脱敏 | root + repo_recon | PASS（临时 PostgreSQL） | `apps/api/scripts/openai-settings-postgres-smoke.mjs`；`apps/api/src/store-postgres.ts` 指纹投影修复；迁移 024 |
+| S5-R84 | 前端 / 视觉 | SellerAgent 高保真结构、动态 Model 下拉、双 viewport、成功态保持和时间线规则行是否对齐 | root + dynamic_models + e2e_audit | PASS（截图证据） | `settings-openai-*.png`；`docs/evidence/stage5/S4-VS7A/visual-diff.md` |
+| S5-R85 | 质量 / 安全 / 运维 | fallback 专用审计、发布级 rollback、旧凭证兼容迁移是否完整 | root | PARTIALLY_VERIFIED | E2E 已证明切换行为；`fallbackAudit=false`，rollback/兼容迁移未执行 |
+
+本轮结论：OpenAI API 主备配置纵向链路已实现并完成真实 PostgreSQL + Chrome/CDP 受控验证；视觉 P2（timeline 基类缺失、保存后成功态重置）已修复并重新截图。切片保持 `READY_FOR_REVIEW`，不得升级为发布级 `PASS`，直到 S5-R85 项开放项完成或经人工签核接受。

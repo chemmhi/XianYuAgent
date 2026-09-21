@@ -16,7 +16,8 @@
     "test:e2e:chrome:messages": "node scripts/e2e-messages-chrome.mjs",
     "test:e2e:chrome:workspace": "node scripts/e2e-workspace-real.mjs",
     "test:e2e:chrome:orders": "node scripts/e2e-orders-chrome.mjs",
-    "test:e2e:chrome:settings": "node scripts/e2e-settings-chrome.mjs"
+    "test:e2e:chrome:settings": "node scripts/e2e-settings-chrome.mjs",
+    "test:e2e:chrome:settings:openai": "node scripts/e2e-settings-openai-chrome.mjs"
   },
   "dependencies": {
     "react": "19.2.8",

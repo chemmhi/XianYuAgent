@@ -1,29 +1,92 @@
-# S4-VS7A Settings API Key 证据
+# S4-VS7A OpenAI API 主备配置证据
 
-日期：2026-09-20
+日期：2026-09-21
+切片：`S4-VS7A`  受控范围：Settings → OpenAI API
 
-## 真实浏览器 / 跨层
+## 用户路径
 
-- 命令：`npm run test:e2e:chrome:settings`
-- 环境：Chrome headless + CDP、Vite live API proxy、API harness、MemoryStore/stub adapter。
-- 通过项：`/settings` 真实入口、账号选择、empty → create → saved、secret 不进入 URL/body/localStorage/input、403 未授权账号、409 stale version、rotate、disable、revoke、撤销后不可恢复。
-- 输出：`screenshots/settings-desktop-1440x900.png`、`screenshots/settings-mobile-390x844.png`。
+真实 Chrome/CDP 入口为 `/settings` → `OpenAI API`：
 
-## PostgreSQL 持久化
+1. 明确选择闲鱼账号；
+2. 主配置、备用配置分别填写 Provider / Base URL / API Key；
+3. 展开 Model 下拉时调用 provider `/models`，不在正式 UI 中内置模型 id；
+4. 每张卡片分别点击“测试连通性”和“保存”；
+5. 浏览器回读 API 脱敏配置；
+6. Agent 首次使用主配置，更新主配置后无需重启即使用新配置，主配置返回 401 后自动切备用；
+7. PostgreSQL 重启后再次执行 Agent，仍命中持久化的备用配置。
 
-- 迁移：临时 PostgreSQL 数据库执行 `001`–`018`，包含 `018_credential_store.sql`。
-- 命令：`npm --workspace apps/api run test:postgres:credentials`。
-- 通过项：`credential_refs` / `credential_values` 真实写入；`ciphertext` 以 `v1.` AES-256-GCM 载荷保存；ciphertext 不等于明文；checksum 与 fingerprint 一致；API list 不返回明文。
-- 证据脚本：`apps/api/scripts/credential-store-postgres-smoke.mjs`。
+## 代码边界
 
-## 视觉复核
+- API：`apps/api/src/openai-settings.ts`、`apps/api/src/app.ts`、`apps/api/src/store-postgres.ts`。
+- 数据：`apps/api/migrations/024_openai_model_configs.sql` 解除单凭证唯一约束；角色写入 `credential_values.metadata_json`，密钥继续由 CredentialStore 加密保存。
+- 前端：`apps/web/src/features/settings/components/OpenAISettingsPanel.tsx`、`settings.css`、`openai-controller.ts`。
+- E2E：`apps/web/scripts/e2e-settings-openai-chrome.mjs`。
 
-- 桌面：保留原型的左侧设置分类、右侧内容卡片、账号范围 chip、CredentialStore 列表与操作按钮。
-- 移动：隐藏主侧栏，设置分类切换改为短标签横向导航，保留底部四项设置导航；390px 视口无横向页面溢出。
-- 当前偏差：新建/轮换弹窗与列表操作为本切片真实交互，原型中的其他设置分区仍是后续切片参考面板，不宣称全部设置后台能力已完成。
+## 实际验证
+
+### API / 单测
+
+- `npm --workspace apps/api run build`
+- `node --import tsx --test apps/api/scripts/openai-settings.test.ts`
+- `node --import tsx --test apps/api/scripts/model-provider.test.ts`
+
+覆盖主/备角色唯一性、版本冲突、跨账号拒绝、密钥不回显、provider-owned 模型列表、Agent 动态读取、更新后无重启生效和主失败切备用。
+
+### PostgreSQL
+
+命令：
+
+```powershell
+$env:DATABASE_URL="postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/xianyu_agent"
+npm --workspace apps/api run migrate
+npm --workspace apps/api run test:postgres:openai
+```
+
+结果：PASS。真实 `accounts.credential_refs` / `accounts.credential_values` 写入并复读；密文以 `v1.` 形式保存，明文不出现在数据库或 API；主、备两行和 provider `/models` 均通过。
+
+### Chrome/CDP 跨层 E2E
+
+命令：
+
+```powershell
+$env:E2E_DATABASE_URL="postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/xianyu_agent"
+npm --workspace apps/web run test:e2e:chrome:settings:openai
+```
+
+结果：PASS（真实 Chrome/CDP → Vite → API → PostgreSQL → Agent）。
+
+- Agent 输出：`PRIMARY_V1_REPLY` → `PRIMARY_V2_REPLY` → `BACKUP_REPLY`。
+- 更新主配置后版本从 1 → 2，无需重启命中新 Provider。
+- PostgreSQL 重启复读后仍命中备用配置。
+- 密钥不进入 URL、页面正文、输入框或 localStorage。
+- 已保存 API Key 以末四位 + `••••` 脱敏回显；聚焦编辑时不会把密文或明文写回页面。
+- `fallbackAudit=false`：当前 runtime store 没有可查询的 fallback 专用审计事件，主备切换行为本身已通过；该项保留为开放风险，不能宣称完整 fallback 审计闭环。
+
+### 外部真实 provider 检查
+
+仓库 `.env` 当前启用的是主配置（`https://api.nightyu.com/v1` / `gpt-5.6-sol`，密钥不记录）；第二套真实配置（`https://api.deepseek.com` / `deepseek-flash`，密钥不记录）保持为注释态。为验证“注释配置也可作为备用配置使用”，测试进程仅临时加载第二套注释配置，不改写 `.env`，分别完成 `/models` 与文本生成实测，均返回 HTTP 200 且模型列表包含所选模型。两套真实 provider 均已验证，密钥未写入证据、日志或截图。
+
+## 视觉证据
+
+固定 viewport：
+
+- 桌面：`1440×900`
+- 移动：`390×844`
+
+截图：
+
+- `screenshots/settings-openai-primary-success-desktop-1440x900.png`
+- `screenshots/settings-openai-primary-success-mobile-390x844.png`
+- `screenshots/settings-openai-fallback-desktop-1440x900.png`
+- `screenshots/settings-openai-fallback-mobile-390x844.png`
+
+视觉复核结论：SellerAgent 的深色侧栏、设置分类列表、白色面板、双列主备卡、浅蓝比较摘要、时间线规则行、绿色成功态、移动端单列卡片和底部四项导航已对齐。移动截图滚动到主配置动作区，能看到“测试连通性”“保存”和备用卡顶部。
+
+逐项偏差记录见 `visual-diff.md`。
 
 ## 尚未关闭
 
-- 018 的发布级 rollback / 已有生产 volume 回退演练尚未执行。
-- 旧 `auth.account_credentials` 明文凭证的双读单写迁移与兼容窗口仍需独立设计；本切片只保证新 API Key CredentialStore 不回显明文。
-- 因此切片状态保持 `READY_FOR_REVIEW`，不标记 `PASS`。
+- 发布级 migration rollback / 已有 volume 回退演练尚未执行；
+- 旧 `auth.account_credentials` 明文凭证的双读单写兼容窗口仍需独立设计；
+- fallback 专用审计事件尚未暴露为可查询记录；
+- 当前状态保持 `READY_FOR_REVIEW`，不标记为发布级 `PASS`。

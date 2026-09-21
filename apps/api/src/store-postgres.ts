@@ -563,7 +563,7 @@ export class PostgresStore implements Store {
     return result.rows[0] ? this.toCredential(result.rows[0]) : current;
   }
   async listCredentialRefs(adminId: string, accountId: string): Promise<CredentialRefRecord[]> {
-    const result = await this.pool.query(`select r.*, v.metadata_json
+    const result = await this.pool.query(`select r.*, v.metadata_json, v.checksum
       from accounts.credential_refs r
       join accounts.credential_values v on v.credential_ref_id=r.id
       where r.account_id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=r.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))
@@ -571,11 +571,23 @@ export class PostgresStore implements Store {
     return result.rows.map((row) => this.toCredentialRef(row));
   }
   async getCredentialRef(adminId: string, credentialId: string): Promise<CredentialRefRecord | undefined> {
-    const result = await this.pool.query(`select r.*, v.metadata_json
+    const result = await this.pool.query(`select r.*, v.metadata_json, v.checksum
       from accounts.credential_refs r
       join accounts.credential_values v on v.credential_ref_id=r.id
       where r.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=r.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))`, [credentialId, adminId]);
     return result.rows[0] ? this.toCredentialRef(result.rows[0]) : undefined;
+  }
+  async getCredentialRefSecret(adminId: string, credentialId: string): Promise<import('./domain.js').CredentialRefSecretRecord | undefined> {
+    const result = await this.pool.query(`select r.*, v.metadata_json, v.checksum, v.ciphertext
+      from accounts.credential_refs r
+      join accounts.credential_values v on v.credential_ref_id=r.id
+      where r.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=r.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))`, [credentialId, adminId]);
+    const row = result.rows[0] as Row | undefined;
+    if (!row) return undefined;
+    const ref = this.toCredentialRef(row);
+    const ciphertext = Buffer.isBuffer(row.ciphertext) ? row.ciphertext.toString('utf8') : String(row.ciphertext ?? '');
+    if (!ciphertext) return undefined;
+    return { ref, secretCiphertext: ciphertext };
   }
   async createCredentialRef(input: { adminId: string; accountId: string; provider: string; alias: string; label?: string; secretCiphertext: string; fingerprint: string; metadata?: Record<string, string> }): Promise<CredentialRefRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');

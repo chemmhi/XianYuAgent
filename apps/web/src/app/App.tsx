@@ -15,7 +15,8 @@ import { createWorkspaceApi } from '../features/workspace/api';
 import { WorkspacePage } from '../features/workspace/components/WorkspacePage';
 import { createOrdersApi } from '../features/orders/api';
 import { OrdersPage } from '../features/orders/components/OrdersPage';
-import { createAutoReplyAgentSettingsApi, createCredentialApi } from '../features/settings/api';
+import { createAutoReplyAgentSettingsApi, createCredentialApi, createOpenAISettingsApi } from '../features/settings/api';
+import { createModelProviderApi } from '../features/settings/model-provider-api';
 import { SettingsPage } from '../features/settings/components/SettingsPage';
 import { AccountContextProvider } from './account-context';
 import { navItems, pathForPage, type PageKey } from './navigation';
@@ -62,6 +63,8 @@ export default function App() {
   const ordersApi = useMemo(() => createOrdersApi({ get: transport.get, post: transport.post }), [transport]);
   const settingsApi = useMemo(() => createCredentialApi({ get: transport.get, post: transport.post, patch: transport.patch }), [transport]);
   const autoReplyAgentSettingsApi = useMemo(() => createAutoReplyAgentSettingsApi({ get: transport.get, patch: transport.patch }), [transport]);
+  const openaiSettingsApi = useMemo(() => createOpenAISettingsApi({ get: transport.get, post: transport.post, patch: transport.patch }), [transport]);
+  const modelProviderApi = useMemo(() => createModelProviderApi({ get: transport.get }), [transport]);
   const dashboardApi = useMemo(() => dashboardMode === 'live' ? createDashboardApi({ get: transport.get }) : createMockDashboardApi(), [dashboardMode, transport]);
 
   useEffect(() => {
@@ -78,12 +81,12 @@ export default function App() {
 
   return <AuthGate api={authApi}>
     <AccountContextProvider api={accountsApi}>
-      <AuthenticatedShell page={page} accountsApi={accountsApi} productsApi={productsApi} couponsApi={couponsApi} messagesApi={messagesApi} workspaceApi={workspaceApi} ordersApi={ordersApi} settingsApi={settingsApi} autoReplyAgentSettingsApi={autoReplyAgentSettingsApi} dashboardApi={dashboardApi} navigate={navigate} />
+      <AuthenticatedShell page={page} accountsApi={accountsApi} productsApi={productsApi} couponsApi={couponsApi} messagesApi={messagesApi} workspaceApi={workspaceApi} ordersApi={ordersApi} settingsApi={settingsApi} autoReplyAgentSettingsApi={autoReplyAgentSettingsApi} openaiSettingsApi={openaiSettingsApi} modelProviderApi={modelProviderApi} dashboardApi={dashboardApi} navigate={navigate} />
     </AccountContextProvider>
   </AuthGate>;
 }
 
-function AuthenticatedShell({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, dashboardApi, navigate }: { page: PageKey; accountsApi: ReturnType<typeof createAccountsApi>; productsApi: ReturnType<typeof createProductsApi>; couponsApi: ReturnType<typeof createCouponsApi>; messagesApi: ReturnType<typeof createMessagesApi>; workspaceApi: ReturnType<typeof createWorkspaceApi>; ordersApi: ReturnType<typeof createOrdersApi>; settingsApi: ReturnType<typeof createCredentialApi>; autoReplyAgentSettingsApi: ReturnType<typeof createAutoReplyAgentSettingsApi>; dashboardApi: ReturnType<typeof createDashboardApi>; navigate: (next: PageKey) => void }) {
+function AuthenticatedShell({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi, dashboardApi, navigate }: { page: PageKey; accountsApi: ReturnType<typeof createAccountsApi>; productsApi: ReturnType<typeof createProductsApi>; couponsApi: ReturnType<typeof createCouponsApi>; messagesApi: ReturnType<typeof createMessagesApi>; workspaceApi: ReturnType<typeof createWorkspaceApi>; ordersApi: ReturnType<typeof createOrdersApi>; settingsApi: ReturnType<typeof createCredentialApi>; autoReplyAgentSettingsApi: ReturnType<typeof createAutoReplyAgentSettingsApi>; openaiSettingsApi: ReturnType<typeof createOpenAISettingsApi>; modelProviderApi: ReturnType<typeof createModelProviderApi>; dashboardApi: ReturnType<typeof createDashboardApi>; navigate: (next: PageKey) => void }) {
   if (page === 'dashboard') return <DashboardPage api={dashboardApi} apiMode={resolveDashboardMode(apiMode, import.meta.env.VITE_DASHBOARD_MODE)} onNavigate={navigate} />;
   return (
     <div className="app-viewport">
@@ -97,7 +100,7 @@ function AuthenticatedShell({ page, accountsApi, productsApi, couponsApi, messag
           <div className="sidebar-bottom"><div className="agent-card"><span className="online-dot" /> <strong>Agent Runtime</strong><small>独立服务 · 正常</small></div><div className="sidebar-user"><div className="avatar">管</div><div><strong>运营管理员</strong><span>admin@example.com</span></div></div></div>
         </aside>
         <div className="desktop-body">
-          <main className={page === 'products' ? 'products-main' : page === 'accounts' ? 'accounts-main' : page === 'orders' ? 'orders-main' : page === 'settings' ? 'settings-main' : undefined}>{renderAuthenticatedPage({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi })}</main>
+          <main className={page === 'products' ? 'products-main' : page === 'accounts' ? 'accounts-main' : page === 'orders' ? 'orders-main' : page === 'settings' ? 'settings-main' : undefined}>{renderAuthenticatedPage({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi })}</main>
         </div>
       </div>
     </div>
@@ -114,9 +117,11 @@ type AuthenticatedPageProps = {
   ordersApi: ReturnType<typeof createOrdersApi>;
   settingsApi: ReturnType<typeof createCredentialApi>;
   autoReplyAgentSettingsApi: ReturnType<typeof createAutoReplyAgentSettingsApi>;
+  openaiSettingsApi: ReturnType<typeof createOpenAISettingsApi>;
+  modelProviderApi: ReturnType<typeof createModelProviderApi>;
 };
 
-export function renderAuthenticatedPage({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi }: AuthenticatedPageProps) {
+export function renderAuthenticatedPage({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi }: AuthenticatedPageProps) {
   switch (page) {
     case 'accounts':
       return <AccountsPage api={accountsApi} />;
@@ -131,7 +136,7 @@ export function renderAuthenticatedPage({ page, accountsApi, productsApi, coupon
     case 'orders':
       return <OrdersPage api={ordersApi} />;
     case 'settings':
-      return <SettingsPage api={settingsApi} agentApi={autoReplyAgentSettingsApi} />;
+      return <SettingsPage api={settingsApi} agentApi={autoReplyAgentSettingsApi} openaiApi={openaiSettingsApi} modelApi={modelProviderApi} />;
     default:
       return <PlaceholderPage page={page} />;
   }

@@ -1,5 +1,5 @@
 import type { CredentialRefRecord, CredentialRefStatus, Store } from './domain.js';
-import { credentialFingerprint, encryptCredentialValue } from './credential-crypto.js';
+import { credentialFingerprint, decryptCredentialValue, encryptCredentialValue } from './credential-crypto.js';
 import { ServiceError } from './services.js';
 
 type Audit = (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => Promise<string>;
@@ -16,6 +16,18 @@ export class ApiKeyCredentialService {
     } catch (error) {
       if (error instanceof Error && error.message === 'ACCOUNT_SCOPE_FORBIDDEN') throw new ServiceError(403, 'FORBIDDEN', '当前管理员没有该账号的凭证权限');
       throw error;
+    }
+  }
+
+  async getSecret(input: { adminId: string; accountId: string; credentialId: string }): Promise<{ ref: CredentialRefView; apiKey: string }> {
+    this.requireAccountId(input.accountId);
+    const stored = await this.store.getCredentialRefSecret(input.adminId, input.credentialId);
+    if (!stored || stored.ref.accountId !== input.accountId) throw new ServiceError(404, 'NOT_FOUND', 'credential not found');
+    if (stored.ref.status !== 'active') throw new ServiceError(409, 'CREDENTIAL_NOT_ACTIVE', '该凭证未启用，无法读取模型列表');
+    try {
+      return { ref: stored.ref, apiKey: decryptCredentialValue(stored.secretCiphertext, this.encryptionKey) };
+    } catch {
+      throw new ServiceError(500, 'CREDENTIAL_SECRET_INVALID', '凭证密文无法解密');
     }
   }
 
