@@ -52,6 +52,18 @@ export function reasoningOptionsFor(model: string, options: OpenAIModelOption[])
   return [...new Set([...(selected.reasoningEfforts ?? []), ...(selected.thinkingLevels ?? [])].map((item) => item.trim()).filter(Boolean))];
 }
 
+export function connectivityLabel(role: OpenAIConfigRole, state: ConfigForm['connectivity'], configured: boolean, testing = false): string {
+  if (testing) return '测试中…';
+  if (state === 'passed') return role === 'primary' ? '测试通过，已生效' : '备用可用';
+  if (state === 'failed') return '连接失败';
+  return configured ? '待测试' : '待配置';
+}
+
+export function connectivitySummary(role: OpenAIConfigRole, form: Pick<ConfigForm, 'id' | 'connectivity' | 'model'>): string {
+  const state = form.connectivity === 'passed' ? (role === 'primary' ? '测试通过' : '可故障切换') : form.connectivity === 'failed' ? '连接失败' : form.id ? '待测试' : '待配置';
+  return `${form.model || '未配置'} · ${state}`;
+}
+
 function cleanOptions(values: string[] | undefined): string[] | undefined {
   if (!Array.isArray(values)) return undefined;
   const cleaned = [...new Set(values.map((item) => String(item).trim()).filter(Boolean))];
@@ -203,7 +215,7 @@ export function OpenAISettingsPanel(props: { accountId: string; accountName?: st
         <div className="two-grid nested openai-config-grid">
           {(['primary', 'backup'] as const).map((role) => <OpenAIConfigCard key={role} form={forms[role]} role={role} busy={busyRole === role} testing={testRole === role} error={testError[role]} providerModels={forms[role].id ? modelOptions[role] : localModels[role]} providerPhase={forms[role].id ? modelPhase[role] : modelPhase[role]} onChange={(patch) => update(role, patch)} onTest={() => void test(forms[role])} onSave={() => void save(forms[role])} onLoadModels={() => void loadModels(forms[role])} />)}
         </div>
-        <div className="openai-compare-summary"><span><strong>当前配置</strong>{forms.primary.model || '未配置'} · {forms.primary.connectivity === 'passed' ? '测试通过' : '待测试'}</span><span><strong>备用配置</strong>{forms.backup.model || '未配置'} · {forms.backup.connectivity === 'passed' ? '可故障切换' : '待配置'}</span></div>
+        <div className="openai-compare-summary"><span><strong>当前配置</strong>{connectivitySummary('primary', forms.primary)}</span><span><strong>备用配置</strong>{connectivitySummary('backup', forms.backup)}</span></div>
         <div className="timeline openai-timeline">
           <div className="timeline-row"><strong>生效规则</strong><span>Base URL、API Key、Model 填写完整且连接测试通过后才生效。</span><span className="status-pill ok">强校验</span></div>
           <div className="timeline-row"><strong>故障切换</strong><span>当前 Provider 失败、超时、认证失败或限流时尝试备用配置。</span><span className="status-pill warn">Fallback</span></div>
@@ -218,7 +230,7 @@ export function OpenAISettingsPanel(props: { accountId: string; accountName?: st
 
 function OpenAIConfigCard(props: { form: ConfigForm; role: OpenAIConfigRole; busy: boolean; testing: boolean; error: string | null; providerModels: OpenAIModelOption[]; providerPhase: ModelLoadPhase; onChange: (patch: Partial<ConfigForm>) => void; onTest: () => void; onSave: () => void; onLoadModels: () => void }) {
   const title = props.role === 'primary' ? '当前配置' : '备用配置';
-  const status = props.testing ? '测试中…' : props.form.connectivity === 'passed' ? props.role === 'primary' ? '测试通过，已生效' : '备用可用' : props.form.connectivity === 'failed' ? '连接失败' : '待配置';
+  const status = connectivityLabel(props.role, props.form.connectivity, Boolean(props.form.id), props.testing);
   const statusTone = props.form.connectivity === 'passed' ? 'ok' : props.form.connectivity === 'failed' ? 'danger' : 'warn';
   const modelPlaceholder = props.providerPhase === 'loading' ? '正在读取提供商模型…' : props.providerPhase === 'empty' ? '提供商未返回可用模型' : props.providerPhase === 'error' ? '模型读取失败，请重试' : props.providerModels.length > 0 ? '选择提供商模型' : '展开以读取模型';
   const reasoningOptions = reasoningOptionsFor(props.form.model, props.providerModels);
