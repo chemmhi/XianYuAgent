@@ -1,7 +1,11 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { SearchField } from './SearchField';
+
+const searchFieldCss = readFileSync(fileURLToPath(new URL('./search-field.css', import.meta.url)), 'utf8');
 
 describe('SearchField', () => {
   it('renders an accessible native search input with the shared control classes', () => {
@@ -60,5 +64,12 @@ describe('SearchField', () => {
 
     expect(html).toContain('class="ui-search-control orders-search is-focus"');
     expect(html).toContain('disabled=""');
+  });
+
+  it('keeps the design focus-within ring and placeholder token in the shared stylesheet', () => {
+    expect(searchFieldCss).toContain('.ui-search-control:focus-within');
+    expect(searchFieldCss).toContain('box-shadow: 0 0 0 3px rgba(36,90,141,.09)');
+    expect(searchFieldCss).toContain('border-radius: 7px');
+    expect(searchFieldCss).toContain('input::placeholder { color: #9CA3AF; }');
   });
 });

@@ -9,7 +9,7 @@ describe('ProductToolbar', () => {
       contextLoading: false,
       contextError: null,
       contextMissing: false,
-      filters: { page: 1, pageSize: 20, accountId: 'account-1', status: 'all' },
+      filters: { page: 1, pageSize: 20, accountId: 'account-1', keyword: '商品', status: 'all' },
       phase: 'empty',
       syncing: false,
       onKeywordChange: vi.fn(),
@@ -23,5 +23,6 @@ describe('ProductToolbar', () => {
     expect(html).not.toContain('products-total');
     expect(html).not.toContain('共 0 件');
     expect(html).toContain('刷新本地');
+    expect(html).toContain('aria-label="清空搜索"');
   });
 });

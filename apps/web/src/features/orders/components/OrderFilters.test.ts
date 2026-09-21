@@ -13,7 +13,7 @@ describe('OrderFilters', () => {
     expect(html.match(/<select /g)).toHaveLength(1);
     expect(html).toContain('class="ui-select-control orders-status-select"');
     expect(html).toContain('class="ui-select-chevron"');
-    expect(html).toContain('placeholder="订单号、买家昵称或商品名称"');
+    expect(html).toContain('placeholder="搜索订单号、买家或商品"');
     expect(html).toContain('>全部</option>');
     expect(html).toContain('>待付款</option>');
     expect(html).toContain('>待发货</option>');

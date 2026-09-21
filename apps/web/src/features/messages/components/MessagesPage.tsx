@@ -180,7 +180,7 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
       <aside className="messages-sidebar">
         <div className="messages-sidebar-header"><div><strong>会话</strong>{conversationsLoading ? <small className="messages-header-loading" role="status" aria-label="正在加载会话"><span className="messages-header-loading-line" aria-hidden="true" /></small> : <small>{controller.state.conversations.length} 个已加载{controller.state.hasMore ? '，还有更多' : ''}</small>}</div><button className="btn ghost" type="button" onClick={() => void controller.reload()} aria-label="刷新会话">刷新</button></div>
         <div className="messages-sidebar-tools">
-          <SearchField className="messages-search" aria-label="搜索会话" placeholder="搜索用户、商品或消息" value={search} onChange={(event) => setSearch(event.target.value)} />
+          <SearchField className="messages-search" aria-label="搜索会话" placeholder="搜索用户、商品或消息" value={search} onChange={(event) => setSearch(event.target.value)} onClear={() => setSearch('')} clearable />
           <div className="messages-filter-tabs" aria-label="会话筛选"><button type="button" aria-pressed={!unreadOnly} className={!unreadOnly ? 'active' : ''} onClick={() => setUnreadOnly(false)}>全部会话</button><button type="button" aria-pressed={unreadOnly} className={unreadOnly ? 'active' : ''} onClick={() => setUnreadOnly(true)}>未读{controller.state.conversations.filter((item) => item.unreadCount > 0).length ? ` (${controller.state.conversations.filter((item) => item.unreadCount > 0).length})` : ''}</button></div>
         </div>
         {controller.state.listPhase === 'loading' && <ConversationListSkeleton />}

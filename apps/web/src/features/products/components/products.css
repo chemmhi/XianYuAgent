@@ -5,9 +5,8 @@
 .products-toolbar h2 { margin: 0 0 3px; }
 .products-toolbar p { margin: 0; font-size: 11px; color: var(--sub); }
 .products-toolbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-.products-toolbar-actions .ui-select-control { min-width: 0; }
 .products-status-select { min-width: 126px; }
-.products-search { width: 230px; max-width: 260px; }
+.products-search { width: 260px; max-width: 260px; }
 .products-table-region { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .products-table-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .products-table { display: grid; min-width: 980px; }

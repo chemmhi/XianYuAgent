@@ -1,7 +1,11 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { SelectField } from './SelectField';
+
+const selectFieldCss = readFileSync(fileURLToPath(new URL('./select-field.css', import.meta.url)), 'utf8');
 
 describe('SelectField', () => {
   it('renders a reusable styled native select with an inline required marker', () => {
@@ -115,5 +119,9 @@ describe('SelectField', () => {
     expect(open).toContain('data-preview-only="true"');
     expect(open).toContain('class="ui-select-menu-option is-selected"');
     expect(open).not.toContain('<button');
+    expect(selectFieldCss).toContain('.ui-select-menu');
+    expect(selectFieldCss).toContain('box-shadow: var(--shadow-float, 0 18px 40px rgba(17, 24, 39, .12));');
+    expect(selectFieldCss).toContain('min-height: 31px;');
+    expect(selectFieldCss).toContain('.ui-select-menu-option.is-selected');
   });
 });

@@ -7,8 +7,7 @@
 .orders-toolbar-actions .orders-filter-row{flex:0 1 auto}
 .orders-filters-wrap{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--border);background:#fff}
 .orders-filter-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
-.orders-filter-row .ui-select-control{min-width:0}
-.orders-search{width:228px;max-width:260px}
+.orders-search{width:260px;max-width:260px}
 .orders-status-select{min-width:132px}
 .orders-context-error{color:var(--danger);font-size:10px;font-weight:700;white-space:nowrap}
 .orders-table-region{display:flex;flex:1;min-height:0;flex-direction:column}
@@ -92,7 +91,7 @@
   .orders-toolbar-actions .orders-context-error{grid-column:1/-1}
   .orders-toolbar-actions .btn{width:100%}
   .orders-search{grid-column:1/-1;width:100%}
-  .orders-filter-row .ui-select-control{width:100%}
+  .orders-filter-row .ui-select-control{width:100%;min-width:0}
   .orders-context-error{align-self:flex-start}
   .orders-table-scroll{max-height:none;min-height:140px;overflow:auto}
   .orders-table{min-width:0}

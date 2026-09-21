@@ -38,7 +38,7 @@ export function AccountToolbar({ filters, phase, onSearchChange, onStatusChange,
         <p>按账号范围查看连接状态与可用能力，凭证正文不在列表中展示。</p>
       </div>
       <div className="accounts-domain-toolbar-actions">
-        <SearchField className="accounts-domain-search" aria-label="搜索账号" value={filters.search ?? ''} onChange={(event) => onSearchChange(event.target.value)} placeholder="搜索账号名称或备注" />
+        <SearchField className="accounts-domain-search" aria-label="搜索账号" value={filters.search ?? ''} onChange={(event) => onSearchChange(event.target.value)} onClear={() => onSearchChange('')} clearable placeholder="搜索账号名称或备注" />
         <SelectField aria-label="账号状态筛选" className="accounts-domain-status-select" value={filters.status ?? 'all'} onChange={(event) => onStatusChange(event.target.value as AccountListFilters['status'])} options={statusOptions} />
         <SelectField aria-label="连接状态筛选" className="accounts-domain-connection-select" value={filters.connectionStatus ?? 'all'} onChange={(event) => onConnectionStatusChange(event.target.value as AccountListFilters['connectionStatus'])} options={connectionStatusOptions} />
         <Button variant="ghost" type="button" onClick={onRefresh} disabled={phase === 'loading'}>
