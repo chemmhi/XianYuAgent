@@ -83,6 +83,12 @@ test('configured model provider generates the persisted auto-reply', async () =>
     });
     assert.equal(result.autoReply?.run.status, 'persisted');
     assert.equal(result.autoReply?.outboundMessage?.bodyText, 'AI 生成的准确回复');
+    const detail = await runtime.store.getAutoReplyRunDetail(admin.id, result.autoReply!.run.id);
+    const classifiedEvent = detail?.events.find((event) => event.status === 'classified');
+    const persistedEvent = detail?.events.find((event) => event.status === 'persisted');
+    assert.equal(classifiedEvent?.payload.input && typeof classifiedEvent.payload.input === 'object' ? (classifiedEvent.payload.input as Record<string, unknown>).kind : undefined, 'intent_classification');
+    assert.equal(persistedEvent?.payload.output && typeof persistedEvent.payload.output === 'object' ? (persistedEvent.payload.output as Record<string, unknown>).persisted : undefined, true);
+    assert.doesNotMatch(JSON.stringify(detail?.events ?? []), /请问这个是什么东西/);
     assert.equal(calls.length, 1);
     assert.equal(calls[0]?.url, 'https://model.example/v1/chat/completions');
     assert.equal(calls[0]?.body.model, 'test-model');

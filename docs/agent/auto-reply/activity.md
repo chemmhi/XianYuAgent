@@ -64,7 +64,7 @@
 
 ### 2.3 脱敏边界
 
-`payload_json` 只允许保存决策、意图、错误码、摘要哈希、计数和资源 ID 等最小证据。禁止写入 Prompt 原文、模型 Chain-of-Thought、Cookie、Token、API Key、完整买家正文或完整订单/商品敏感字段。详情接口如需展示入站/出站正文，必须通过已校验的 `messages` 领域读取并遵守管理员账号 scope；事件 payload 本身不能成为正文旁路。
+`payload_json` 只允许保存决策、意图、错误码、摘要哈希、计数和资源 ID 等最小证据。运行阶段可按白名单写入三组结构化摘要：`input`（步骤输入的类型、digest、资源引用和计数）、`output`（状态、决策、结果 digest、结果引用和计数）以及 `error`（错误码和脱敏原因）。禁止写入 Prompt 原文、模型 Chain-of-Thought、Cookie、Token、API Key、完整买家正文或完整订单/商品敏感字段。详情接口如需展示入站/出站正文，必须通过已校验的 `messages` 领域读取并遵守管理员账号 scope；事件 payload 本身不能成为正文旁路。
 
 ## 3. 状态机与事件语义
 

@@ -66,11 +66,13 @@ interface RawAutoReplyRunListItem {
 interface RawAutoReplyRunEvent {
   id: string;
   runId: string;
+  sequence?: number;
   eventType: string;
   stage: RawAutoReplyRunStage;
   status: RawAutoReplyRunStatus;
   occurredAt: string;
   durationMs?: number;
+  traceId?: string;
   payload?: Record<string, unknown>;
 }
 
@@ -303,9 +305,77 @@ function mapSummary(raw: RawActivitySummary, events: AgentDynamicsEventVM[] = []
   };
 }
 
+const EVENT_DETAIL_LABELS: Record<string, string> = {
+  kind: '类型',
+  messageId: '消息',
+  inboundMessageId: '入站消息',
+  digest: '摘要',
+  inputDigest: '输入摘要',
+  contextDigest: '上下文摘要',
+  replyDigest: '回复摘要',
+  bodyType: '消息类型',
+  direction: '方向',
+  textLength: '正文长度',
+  outputLength: '输出长度',
+  supportedMessage: '可处理',
+  enabled: '自动回复开关',
+  allowlistConfigured: '白名单已配置',
+  buyerIdentityMatched: '买家命中',
+  identityKeyCount: '身份候选数',
+  intent: '意图',
+  confidence: '置信度',
+  decision: '决策',
+  riskFlags: '风险标记',
+  conversationId: '会话',
+  maxHistory: '历史上限',
+  historyCount: '历史条数',
+  productId: '商品',
+  orderRefs: '订单引用',
+  orderRefsCount: '订单数',
+  reason: '原因',
+  debounceMs: '防抖窗口',
+  elapsedMs: '已等待',
+  senderOutcome: '发送结果',
+  segmentCount: '回复段数',
+  mode: '发送模式',
+  outboundMessageId: '出站消息',
+  persisted: '已落库',
+  status: '状态',
+  code: '错误码',
+};
+
+function formatEventDetailValue(value: unknown): string {
+  if (value === undefined) return '—';
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return value.map((item) => formatEventDetailValue(item)).join('、');
+  if (typeof value === 'boolean') return value ? '是' : '否';
+  if (typeof value === 'object') {
+    try { return JSON.stringify(value); } catch { return '[不可展示]'; }
+  }
+  return String(value);
+}
+
+function mapEventDetailFields(value: unknown): Array<{ label: string; value: string }> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const fields = Object.entries(value as Record<string, unknown>)
+    .filter(([key, fieldValue]) => Boolean(EVENT_DETAIL_LABELS[key]) && fieldValue !== undefined)
+    .map(([key, fieldValue]) => ({ label: EVENT_DETAIL_LABELS[key]!, value: formatEventDetailValue(fieldValue) }));
+  return fields.length > 0 ? fields : undefined;
+}
+
+function mapEventDetails(event: RawAutoReplyRunEvent): AgentDynamicsTimelineItemVM['details'] {
+  const payload = event.payload ?? {};
+  const input = mapEventDetailFields(payload.input);
+  const output = mapEventDetailFields(payload.output) ?? mapEventDetailFields({ status: event.status, decision: payload.decision, intent: payload.intent });
+  const error = mapEventDetailFields(payload.error) ?? (payload.failureCode ? [{ label: '错误码', value: formatEventDetailValue(payload.failureCode) }] : undefined);
+  if (!input && !output && !error) return undefined;
+  return { input, output, error };
+}
+
 function mapDetail(raw: RawAutoReplyRunDetail): AgentDynamicsRunDetailVM {
   const row = mapRun(raw.run);
-  const timeline: AgentDynamicsTimelineItemVM[] = raw.events.length > 0 ? raw.events.map((event) => ({ id: event.id, title: eventTitle(event, row), meta: `${formatTime(event.occurredAt)} · ${event.eventType}${event.durationMs === undefined ? '' : ` · ${formatDuration(event.durationMs)}`}`, tone: eventTone(event.status) })) : [{ id: `${row.runId}:status`, title: decisionLabel(row.decision.key), meta: `${row.timeLabel} · 当前状态 ${raw.run.status}`, tone: row.decision.tone }];
+  const events = [...raw.events].sort((left, right) => (left.sequence ?? Number.MAX_SAFE_INTEGER) - (right.sequence ?? Number.MAX_SAFE_INTEGER));
+  const timeline: AgentDynamicsTimelineItemVM[] = events.length > 0 ? events.map((event) => ({ id: event.id, sequence: event.sequence, stage: event.stage, status: event.status, eventType: event.eventType, traceId: event.traceId, title: eventTitle(event, row), meta: `${formatTime(event.occurredAt)} · ${event.eventType}${event.durationMs === undefined ? '' : ` · ${formatDuration(event.durationMs)}`}`, tone: eventTone(event.status), details: mapEventDetails(event) })) : [{ id: `${row.runId}:status`, title: decisionLabel(row.decision.key), meta: `${row.timeLabel} · 当前状态 ${raw.run.status}`, tone: row.decision.tone }];
   return { ...row, message: raw.inboundMessage?.bodyText ?? row.inboundPreview, reply: raw.outboundMessages[0]?.bodyText, outcomeLabel: row.senderOutcome.label, timeline, chatPath: row.buyer.conversationId ? `/messages?conversationId=${encodeURIComponent(row.buyer.conversationId)}` : '/messages' };
 }
 

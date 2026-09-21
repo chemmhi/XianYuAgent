@@ -130,6 +130,16 @@ export interface AgentDynamicsTimelineItemVM {
   title: string;
   meta: string;
   tone: AgentDynamicsTone;
+  sequence?: number;
+  stage?: string;
+  status?: string;
+  eventType?: string;
+  traceId?: string;
+  details?: {
+    input?: Array<{ label: string; value: string }>;
+    output?: Array<{ label: string; value: string }>;
+    error?: Array<{ label: string; value: string }>;
+  };
 }
 
 export interface AgentDynamicsRunDetailVM extends AgentDynamicsRunRowVM {

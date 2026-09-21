@@ -1,4 +1,4 @@
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor, isAfterConversationCursor } from './conversation-cursor.js';
@@ -512,16 +512,23 @@ export class MemoryStore implements Store {
     const now = new Date().toISOString();
     const run: AutoReplyRunRecord = { id: createId(), adminId: input.adminId, accountId: input.accountId, conversationId: input.conversationId, inboundMessageId: input.inboundMessageId, intent: input.intent, decision: input.decision, status: input.status, riskFlags: [...(input.riskFlags ?? [])], productId: input.productId, orderRefs: [...(input.orderRefs ?? [])], inputDigest: input.inputDigest, contextDigest: input.contextDigest, replyDigest: input.replyDigest, senderOutcome: input.senderOutcome, outboundMessageId: input.outboundMessageId, failureCode: input.failureCode, createdAt: now, updatedAt: now };
     this.autoReplyRuns.set(run.id, run);
-    await this.appendAutoReplyRunEvent({ runId: run.id, accountId: run.accountId, eventType: 'run.created', status: run.status, stage: autoReplyStageForStatus(run.status), payload: { decision: run.decision, intent: run.intent, failureCode: run.failureCode } });
+    await this.appendAutoReplyRunEvent({ runId: run.id, accountId: run.accountId, eventType: 'run.created', status: run.status, stage: autoReplyStageForStatus(run.status), payload: {
+      decision: run.decision,
+      intent: run.intent,
+      failureCode: run.failureCode,
+      input: { kind: 'inbound_message', messageId: run.inboundMessageId, digest: run.inputDigest },
+      output: { status: run.status, decision: run.decision, intent: run.intent },
+    } });
     return { ...run, riskFlags: [...run.riskFlags], orderRefs: [...run.orderRefs] };
   }
 
-  async updateAutoReplyRun(id: string, patch: { intent?: string; decision?: AutoReplyDecision; status?: AutoReplyRunStatus; riskFlags?: string[]; productId?: string; orderRefs?: string[]; contextDigest?: string; replyDigest?: string; senderOutcome?: AutoReplyRunRecord['senderOutcome']; outboundMessageId?: string; failureCode?: string }): Promise<AutoReplyRunRecord | undefined> {
+  async updateAutoReplyRun(id: string, patch: AutoReplyRunUpdate): Promise<AutoReplyRunRecord | undefined> {
     const run = this.autoReplyRuns.get(id);
     if (!run) return undefined;
     if (Object.keys(patch).length === 0) return { ...run, riskFlags: [...run.riskFlags], orderRefs: [...run.orderRefs] };
-    Object.assign(run, patch, { updatedAt: new Date().toISOString() });
-    if (patch.status !== undefined) await this.appendAutoReplyRunEvent({ runId: run.id, accountId: run.accountId, eventType: `run.${patch.status}`, status: run.status, stage: autoReplyStageForStatus(run.status), payload: { decision: run.decision, intent: run.intent, failureCode: run.failureCode } });
+    const { eventPayload, eventTraceId, eventDurationMs, ...runPatch } = patch;
+    Object.assign(run, runPatch, { updatedAt: new Date().toISOString() });
+    if (patch.status !== undefined) await this.appendAutoReplyRunEvent({ runId: run.id, accountId: run.accountId, eventType: `run.${patch.status}`, status: run.status, stage: autoReplyStageForStatus(run.status), durationMs: eventDurationMs, traceId: eventTraceId, payload: { decision: run.decision, intent: run.intent, failureCode: run.failureCode, ...(eventPayload ?? {}), output: { status: run.status, decision: run.decision, intent: run.intent, ...(eventPayload?.output && typeof eventPayload.output === 'object' && !Array.isArray(eventPayload.output) ? eventPayload.output as Record<string, unknown> : {}) } } });
     return { ...run, riskFlags: [...run.riskFlags], orderRefs: [...run.orderRefs] };
   }
 

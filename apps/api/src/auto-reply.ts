@@ -1,4 +1,4 @@
-import type { AutoReplyDecision, AutoReplyRunRecord, ConversationRecord, MessageRecord, OrderRecord, ProductRecord, Store } from './domain.js';
+import type { AutoReplyDecision, AutoReplyRunRecord, AutoReplyRunUpdate, ConversationRecord, MessageRecord, OrderRecord, ProductRecord, Store } from './domain.js';
 import type { MessageService } from './messages.js';
 import { digestJson } from './security.js';
 
@@ -196,6 +196,7 @@ export class AutoReplyService {
       }
       throw error;
     }
+    const updateRun = (patch: AutoReplyRunUpdate) => this.store.updateAutoReplyRun(run.id, { ...patch, eventTraceId: traceId });
     try {
       const runtime = await this.resolveRuntimeOptions(input.adminId, conversation.accountId);
       const modelDecidesRouting = runtime.generator.supportsStructuredDecision === true;
@@ -203,14 +204,23 @@ export class AutoReplyService {
         ? Boolean(inboundMessage.bodyText?.trim())
         : inboundMessage.bodyType === 'image' && runtime.generator.supportsMultimodal === true && Boolean(inboundMessage.bodyRef?.trim());
       if (!runtime.enabled || inboundMessage.direction !== 'inbound' || !supportedMessage) {
-        const updated = await this.store.updateAutoReplyRun(run.id, { status: 'skipped', decision: 'skipped', failureCode: !runtime.enabled ? 'AUTO_REPLY_DISABLED' : 'UNSUPPORTED_MESSAGE' });
+        const failureCode = !runtime.enabled ? 'AUTO_REPLY_DISABLED' : 'UNSUPPORTED_MESSAGE';
+        const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode, eventPayload: {
+          input: { kind: 'inbound_message', messageId: inboundMessage.id, digest: inputDigest, bodyType: inboundMessage.bodyType, direction: inboundMessage.direction, supportedMessage, enabled: runtime.enabled, textLength: inboundMessage.bodyText?.length ?? 0 },
+          output: { decision: 'skipped', reason: failureCode },
+          error: { code: failureCode },
+        } });
         return { run: updated ?? run, inboundMessage };
       }
 
       const buyerName = normalizeBuyerName(input.senderName) ?? normalizeBuyerName(conversation.buyerDisplayName);
       const buyerIdentityKeys = [buyerName, normalizeBuyerName(conversation.buyerRef), normalizeBuyerName(conversation.externalConversationRef)].filter((value): value is string => Boolean(value));
       if (runtime.testBuyerNames.length > 0 && !buyerIdentityKeys.some((key) => runtime.testBuyerNames.includes(key))) {
-        const updated = await this.store.updateAutoReplyRun(run.id, { status: 'skipped', decision: 'skipped', failureCode: 'TEST_BUYER_NOT_ALLOWLISTED', riskFlags: ['test_buyer_not_allowlisted'] });
+        const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode: 'TEST_BUYER_NOT_ALLOWLISTED', riskFlags: ['test_buyer_not_allowlisted'], eventPayload: {
+          input: { kind: 'buyer_gate', buyerIdentityMatched: false, allowlistConfigured: true, identityKeyCount: buyerIdentityKeys.length },
+          output: { decision: 'skipped', reason: 'TEST_BUYER_NOT_ALLOWLISTED' },
+          error: { code: 'TEST_BUYER_NOT_ALLOWLISTED' },
+        } });
         await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'skipped', reason: 'TEST_BUYER_NOT_ALLOWLISTED' });
         return { run: updated ?? run, inboundMessage };
       }
@@ -228,13 +238,20 @@ export class AutoReplyService {
             ],
           }
         : ruleClassification;
-      await this.store.updateAutoReplyRun(run.id, { intent: classification.intent, decision: classification.decision, status: 'classified', riskFlags: classification.riskFlags });
+      await updateRun({ intent: classification.intent, decision: classification.decision, status: 'classified', riskFlags: classification.riskFlags, eventPayload: {
+        input: { kind: 'intent_classification', messageId: inboundMessage.id, digest: inputDigest, bodyType: inboundMessage.bodyType, textLength: inboundMessage.bodyText?.length ?? 0 },
+        output: { intent: classification.intent, confidence: classification.confidence, decision: classification.decision, riskFlags: classification.riskFlags },
+      } });
       if (classification.decision === 'replied') {
         const debounceKey = `${input.adminId}:${conversation.id}`;
         const now = Date.now();
         const lastAcceptedAt = this.lastAcceptedAt.get(debounceKey);
         if (runtime.debounceMs > 0 && lastAcceptedAt !== undefined && now - lastAcceptedAt < runtime.debounceMs) {
-          const updated = await this.store.updateAutoReplyRun(run.id, { status: 'skipped', decision: 'skipped', failureCode: 'AUTO_REPLY_DEBOUNCED', riskFlags: ['debounced'] });
+          const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode: 'AUTO_REPLY_DEBOUNCED', riskFlags: ['debounced'], eventPayload: {
+            input: { kind: 'debounce_gate', debounceMs: runtime.debounceMs, elapsedMs: Math.max(0, now - lastAcceptedAt) },
+            output: { decision: 'skipped', reason: 'AUTO_REPLY_DEBOUNCED' },
+            error: { code: 'AUTO_REPLY_DEBOUNCED' },
+          } });
           await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'skipped', reason: 'AUTO_REPLY_DEBOUNCED', debounceMs: runtime.debounceMs });
           return { run: updated ?? run, inboundMessage };
         }
@@ -242,11 +259,18 @@ export class AutoReplyService {
       }
       const context = await this.buildContext(input.adminId, conversation, inboundMessage, runtime.maxHistory);
       const contextDigest = digestJson({ conversationId: conversation.id, productId: context.product?.id, orderRefs: context.orders.map((order) => order.orderNo), history: context.recentMessages.map((message) => ({ direction: message.direction, senderRole: message.senderRole, createdAt: message.createdAt, bodyText: message.bodyText ?? '' })) });
-      await this.store.updateAutoReplyRun(run.id, { status: 'context_loaded', contextDigest, productId: context.product?.id, orderRefs: context.orders.map((order) => order.orderNo) });
+      await updateRun({ status: 'context_loaded', contextDigest, productId: context.product?.id, orderRefs: context.orders.map((order) => order.orderNo), eventPayload: {
+        input: { kind: 'context_lookup', conversationId: conversation.id, maxHistory: runtime.maxHistory },
+        output: { contextDigest, historyCount: context.recentMessages.length, productId: context.product?.id, orderRefs: context.orders.map((order) => order.orderNo), orderRefsCount: context.orders.length },
+      } });
 
       if (conversation.handlingMode === 'human' || (modelDecidesRouting && hardSafety) || (!modelDecidesRouting && classification.decision === 'handoff')) {
         const riskFlags = [...classification.riskFlags, ...(conversation.handlingMode === 'human' ? ['human_mode'] : [])];
-        const updated = await this.store.updateAutoReplyRun(run.id, { status: 'handoff', decision: 'handoff', riskFlags });
+        const reason = conversation.handlingMode === 'human' ? 'human_mode' : hardSafety ? 'safety_gate' : 'classifier_handoff';
+        const updated = await updateRun({ status: 'handoff', decision: 'handoff', riskFlags, eventPayload: {
+          input: { kind: 'reply_gate', intent: classification.intent, decision: classification.decision, reason },
+          output: { decision: 'handoff', riskFlags },
+        } });
         await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'handoff', intent: classification.intent, riskFlags });
         return { run: updated ?? run, inboundMessage, classification, context };
       }
@@ -255,18 +279,30 @@ export class AutoReplyService {
       const generatedReply = normalizeGeneratedReply(generated);
       const reply = generatedReply ? normalizeReply(generatedReply.text) : undefined;
       if (!reply) {
-        const updated = await this.store.updateAutoReplyRun(run.id, { status: 'failed', decision: 'failed', failureCode: 'REPLY_EMPTY' });
+        const updated = await updateRun({ status: 'failed', decision: 'failed', failureCode: 'REPLY_EMPTY', eventPayload: {
+          input: { kind: 'reply_generation', intent: classification.intent, contextDigest },
+          output: { decision: 'failed', outputLength: 0 },
+          error: { code: 'REPLY_EMPTY' },
+        } });
         await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'failed', intent: classification.intent, failureCode: 'REPLY_EMPTY' });
         return { run: updated ?? run, inboundMessage, classification, context };
       }
       if (containsSensitiveInstruction(reply)) {
-        const updated = await this.store.updateAutoReplyRun(run.id, { status: 'handoff', decision: 'handoff', riskFlags: [...classification.riskFlags, 'generated_sensitive_content'], failureCode: 'GENERATED_CONTENT_BLOCKED' });
+        const replyDigest = digestJson({ reply });
+        const updated = await updateRun({ status: 'handoff', decision: 'handoff', riskFlags: [...classification.riskFlags, 'generated_sensitive_content'], failureCode: 'GENERATED_CONTENT_BLOCKED', eventPayload: {
+          input: { kind: 'reply_safety_check', replyDigest, outputLength: reply.length },
+          output: { decision: 'handoff', reason: 'generated_sensitive_content' },
+          error: { code: 'GENERATED_CONTENT_BLOCKED' },
+        } });
         await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'handoff', intent: classification.intent, failureCode: 'GENERATED_CONTENT_BLOCKED' });
         return { run: updated ?? run, inboundMessage, classification, context };
       }
 
       const replyDigest = digestJson({ reply });
-      await this.store.updateAutoReplyRun(run.id, { status: 'generated', replyDigest });
+      await updateRun({ status: 'generated', replyDigest, eventPayload: {
+        input: { kind: 'reply_generation', intent: classification.intent, contextDigest },
+        output: { replyDigest, outputLength: reply.length },
+      } });
       const segments = await this.resolveReplySegments(runtime.generator, generatedReply?.segments, reply, runtime);
       let lastOutboundMessageId: string | undefined;
       let lastOutcome: Awaited<ReturnType<AutoReplySender['send']>>['outcome'] = 'simulated';
@@ -280,19 +316,34 @@ export class AutoReplyService {
         const outbound = await this.messages.createMessage({ adminId: input.adminId, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: segment, externalMessageRef: simulatedRef, source: 'ai', productRef: context.product?.id, riskFlags: [...classification.riskFlags, ...(sent.outcome === 'simulated' ? ['simulated_send'] : []), ...(segments.length > 1 ? [`reply_segment_${index + 1}_of_${segments.length}`] : [])], requestId, traceId });
         lastOutboundMessageId = outbound.message.messageId;
       }
-      await this.store.updateAutoReplyRun(run.id, { status: 'simulated', senderOutcome: lastOutcome });
-      const updated = await this.store.updateAutoReplyRun(run.id, { status: 'persisted', decision: 'replied', senderOutcome: lastOutcome, outboundMessageId: lastOutboundMessageId });
+      await updateRun({ status: 'simulated', senderOutcome: lastOutcome, eventPayload: {
+        input: { kind: 'send', replyDigest, segmentCount: segments.length, mode: runtime.sendMode },
+        output: { senderOutcome: lastOutcome, segmentCount: segments.length },
+      } });
+      const updated = await updateRun({ status: 'persisted', decision: 'replied', senderOutcome: lastOutcome, outboundMessageId: lastOutboundMessageId, eventPayload: {
+        input: { kind: 'persistence', replyDigest, segmentCount: segments.length, senderOutcome: lastOutcome },
+        output: { decision: 'replied', senderOutcome: lastOutcome, outboundMessageId: lastOutboundMessageId, persisted: true, segmentCount: segments.length },
+      } });
       await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'replied', intent: classification.intent, senderOutcome: lastOutcome, outboundMessageId: lastOutboundMessageId, segmentCount: segments.length, contextDigest, replyDigest });
       return { run: updated ?? run, inboundMessage, outboundMessage: lastOutboundMessageId ? await this.findMessage(input.adminId, input.conversationId, lastOutboundMessageId) : undefined, classification, context };
     } catch (error) {
       const failureCode = toFailureCode(error);
       if (failureCode === 'AGENT_HANDOFF') {
-        const updated = await this.store.updateAutoReplyRun(run.id, { status: 'handoff', decision: 'handoff', failureCode });
-        const reason = error instanceof Error && error.message.trim() ? error.message.trim().slice(0, 500) : undefined;
+        const reason = safeEventReason(error);
+        const updated = await updateRun({ status: 'handoff', decision: 'handoff', failureCode, eventPayload: {
+          input: { kind: 'exception_recovery', status: run.status, intent: run.intent },
+          output: { decision: 'handoff', failureCode },
+          error: { code: failureCode, ...(reason ? { reason } : {}) },
+        } });
         await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'handoff', intent: run.intent, failureCode, ...(reason ? { reason } : {}) });
         return { run: updated ?? run, inboundMessage };
       }
-      const updated = await this.store.updateAutoReplyRun(run.id, { status: 'failed', decision: 'failed', failureCode });
+      const reason = safeEventReason(error);
+      const updated = await updateRun({ status: 'failed', decision: 'failed', failureCode, eventPayload: {
+        input: { kind: 'exception', status: run.status, intent: run.intent },
+        output: { decision: 'failed', failureCode },
+        error: { code: failureCode, ...(reason ? { reason } : {}) },
+      } });
       await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'failed', failureCode });
       return { run: updated ?? run, inboundMessage };
     }
@@ -393,6 +444,11 @@ function toFailureCode(error: unknown): string {
   if (typeof candidate?.code === 'string' && /^[A-Z0-9_:-]{1,64}$/.test(candidate.code)) return candidate.code;
   if (error instanceof Error && /^[A-Z0-9_:-]{1,64}$/.test(error.message)) return error.message;
   return 'AUTO_REPLY_FAILED';
+}
+
+function safeEventReason(error: unknown): string | undefined {
+  const message = error instanceof Error ? error.message.trim() : '';
+  return /^[A-Z0-9_:-]{1,64}$/.test(message) ? message : undefined;
 }
 
 function validateSemanticSegments(proposed: string[] | undefined, reply: string): string[] | undefined {

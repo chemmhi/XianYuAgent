@@ -68,9 +68,13 @@ try {
   assert.equal(summary.persistedCount, 1);
   assert.equal(runsInDb.rows[0]?.sender_outcome, 'simulated');
   assert.equal(eventsInDb.rows.length, detail.events.length);
+  assert.ok(eventsInDb.rows.some((event) => event.payload_json?.input));
+  assert.ok(eventsInDb.rows.some((event) => event.payload_json?.output));
+  assert.ok(eventsInDb.rows.some((event) => event.payload_json?.output?.senderOutcome === 'simulated'));
   assert.ok(detail.inboundMessage?.bodyText?.includes('资料包'));
   assert.ok(detail.outboundMessages[0]?.bodyText?.includes('PostgreSQL'));
   assert.doesNotMatch(JSON.stringify(detail.events), /cookie|token|prompt|chain.?of.?thought|api.?key/i);
+  assert.doesNotMatch(JSON.stringify(eventsInDb.rows), /请介绍一下这个资料包/);
   await assert.rejects(() => runtime.autoReplyActivity.list({ adminId, query: { accountId: '00000000-0000-0000-0000-000000000000', from, to, page: 1, pageSize: 20 } }), /account scope required/);
   assert.equal(modelCall, 2);
   console.log(JSON.stringify({ runId, listTotal: list.total, detailEvents: detail.events.length, dbEvents: eventsInDb.rows.length, persistedCount: summary.persistedCount }));

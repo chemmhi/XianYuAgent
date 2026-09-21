@@ -506,6 +506,26 @@ export interface AutoReplyRunEventRecord {
   payload: Record<string, unknown>;
 }
 
+export interface AutoReplyRunUpdate {
+  intent?: string;
+  decision?: AutoReplyDecision;
+  status?: AutoReplyRunStatus;
+  riskFlags?: string[];
+  productId?: string;
+  orderRefs?: string[];
+  contextDigest?: string;
+  replyDigest?: string;
+  senderOutcome?: AutoReplyRunRecord['senderOutcome'];
+  outboundMessageId?: string;
+  failureCode?: string;
+  /** Redacted event evidence written only when status changes. */
+  eventPayload?: Record<string, unknown>;
+  /** Correlation id for the status transition event. */
+  eventTraceId?: string;
+  /** Optional duration for the status transition itself. */
+  eventDurationMs?: number;
+}
+
 export interface AutoReplyRunListQuery {
   accountId?: string;
   from?: string;
@@ -895,7 +915,7 @@ export interface Store {
   createConversation(input: { adminId: string; accountId: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; externalConversationRef?: string }): Promise<ConversationRecord>;
   createMessage(input: { adminId: string; conversationId: string; direction: MessageDirection; senderRole: MessageSenderRole; bodyType: MessageBodyType; bodyText?: string; bodyRef?: string; externalMessageRef?: string; externalMessageRefAliases?: string[]; source?: MessageRecord['source']; orderRef?: string; productRef?: string; riskFlags?: string[]; createdAt?: string; traceId?: string }): Promise<{ message: MessageRecord; event: ConversationEventRecord }>;
   createAutoReplyRun(input: { adminId: string; accountId: string; conversationId: string; inboundMessageId: string; intent: string; decision: AutoReplyDecision; status: AutoReplyRunStatus; riskFlags?: string[]; productId?: string; orderRefs?: string[]; inputDigest: string; contextDigest?: string; replyDigest?: string; senderOutcome?: AutoReplyRunRecord['senderOutcome']; outboundMessageId?: string; failureCode?: string }): Promise<AutoReplyRunRecord>;
-  updateAutoReplyRun(id: string, patch: { intent?: string; decision?: AutoReplyDecision; status?: AutoReplyRunStatus; riskFlags?: string[]; productId?: string; orderRefs?: string[]; contextDigest?: string; replyDigest?: string; senderOutcome?: AutoReplyRunRecord['senderOutcome']; outboundMessageId?: string; failureCode?: string }): Promise<AutoReplyRunRecord | undefined>;
+  updateAutoReplyRun(id: string, patch: AutoReplyRunUpdate): Promise<AutoReplyRunRecord | undefined>;
   getAutoReplyRun(adminId: string, id: string): Promise<AutoReplyRunRecord | undefined>;
   findAutoReplyRunByInboundMessage(adminId: string, inboundMessageId: string): Promise<AutoReplyRunRecord | undefined>;
   appendAutoReplyRunEvent(input: { runId: string; eventType: string; status: AutoReplyRunStatus; stage: AutoReplyRunStage; accountId: string; payload?: Record<string, unknown>; durationMs?: number; traceId?: string }): Promise<AutoReplyRunEventRecord>;

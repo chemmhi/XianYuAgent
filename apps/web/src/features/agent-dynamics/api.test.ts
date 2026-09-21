@@ -19,7 +19,7 @@ describe('agent dynamics API adapter', () => {
     const transport = { get: async <T>(path: string) => {
       calls.push(path);
       if (path.includes('/summary')) return { success: true, data: rawSummary } as T;
-      if (path.includes('/runs/run%2F1')) return { success: true, data: { run: rawRun, events: [{ id: 'event-1', runId: 'run-1', eventType: 'run.failed', stage: 'failed', status: 'failed', occurredAt: rawRun.updatedAt, durationMs: 3200 }], inboundMessage: { bodyText: '请问购买后怎么使用？' }, outboundMessages: [], product: { id: 'product-1', title: '资料包' } } } as T;
+      if (path.includes('/runs/run%2F1')) return { success: true, data: { run: rawRun, events: [{ id: 'event-1', runId: 'run-1', sequence: 2, eventType: 'run.failed', stage: 'failed', status: 'failed', occurredAt: rawRun.updatedAt, durationMs: 3200, traceId: 'trace-run-1', payload: { input: { kind: 'reply_generation', contextDigest: 'sha256:ctx', outputLength: 0 }, output: { decision: 'failed' }, error: { code: 'RESPONSES_API_TIMEOUT' } } }], inboundMessage: { bodyText: '请问购买后怎么使用？' }, outboundMessages: [], product: { id: 'product-1', title: '资料包' } } } as T;
       return { success: true, data: { items: [rawRun], total: 1, page: 1, pageSize: 20, totalPages: 1 } } as T;
     } };
     const api = createAgentDynamicsApi(transport);
@@ -37,7 +37,10 @@ describe('agent dynamics API adapter', () => {
     expect(summary.exceptions[0]).toMatchObject({ key: 'RESPONSES_API_TIMEOUT', count: 1 });
     expect(summary.events[0]).toMatchObject({ runId: 'run-1', label: '失败' });
     expect(runs.items[0]).toMatchObject({ runId: 'run-1', buyer: { name: '买家B' }, stage: { key: 'generation' }, decision: { key: 'failed' }, persisted: true });
-    expect(detail.timeline[0]).toMatchObject({ title: '买家B 的回复生成失败', tone: 'danger' });
+    expect(detail.timeline[0]).toMatchObject({ title: '买家B 的回复生成失败', tone: 'danger', sequence: 2, traceId: 'trace-run-1' });
+    expect(detail.timeline[0]?.details?.input).toEqual(expect.arrayContaining([{ label: '类型', value: 'reply_generation' }, { label: '上下文摘要', value: 'sha256:ctx' }, { label: '输出长度', value: '0' }]));
+    expect(detail.timeline[0]?.details?.output).toEqual(expect.arrayContaining([{ label: '决策', value: 'failed' }]));
+    expect(detail.timeline[0]?.details?.error).toEqual([{ label: '错误码', value: 'RESPONSES_API_TIMEOUT' }]);
     expect(detail.message).toBe('请问购买后怎么使用？');
   });
 
