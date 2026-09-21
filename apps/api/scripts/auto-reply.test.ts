@@ -120,6 +120,89 @@ test('history synchronization imports messages without entering auto-reply', asy
   await service.close();
 });
 
+test('history import followed by the same push still runs one idempotent auto-reply', async () => {
+  const runtime = createApp(loadConfig({
+    HOST: '127.0.0.1',
+    PORT: '0',
+    DATABASE_URL: '',
+    REDIS_URL: '',
+    ALLOW_IN_MEMORY: 'true',
+    COOKIE_SECURE: 'false',
+    XIANYU_QR_MODE: 'stub',
+    AGENT_RUNTIME: 'in-process',
+    AUTO_REPLY_SEND_MODE: 'simulate',
+    AUTO_REPLY_TEST_BUYER_NAMES: '["Allowlisted Buyer"]',
+  }));
+  const admin = await runtime.store.createAdmin({ email: 'history-push-race@example.com', passwordHash: 'hash', displayName: 'History Push Race' });
+  const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'history-push-race-seller' });
+  const conversation = await runtime.store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'buyer-history-1', buyerDisplayName: 'Allowlisted Buyer', externalConversationRef: 'history-push-conversation' });
+  await runtime.listen();
+
+  const historyMessageRef = 'history-push-race-1.PNM';
+  const encodedHistoryText = Buffer.from(JSON.stringify({ contentType: 1, text: { text: '历史导入消息' } }), 'utf8').toString('base64');
+  const unsafeIm = runtime.xianyuIm as unknown as { ensureClient: () => Promise<unknown> };
+  unsafeIm.ensureClient = async () => ({
+    listMessages: async () => ({
+      userMessageModels: [{
+        message: {
+          messageId: historyMessageRef,
+          senderUserId: 'buyer-history-1',
+          createAt: Date.now(),
+          content: { custom: { data: encodedHistoryText } },
+        },
+      }],
+      hasMore: false,
+    }),
+  });
+
+  try {
+    const history = await runtime.xianyuIm.listMessages(admin.id, account.id, conversation.id);
+    assert.equal(history.hasMore, false);
+    const beforePush = await runtime.messages.listMessages(admin.id, conversation.id, { limit: 20 });
+    assert.equal(beforePush.items.filter((message) => message.externalMessageRef === historyMessageRef).length, 1);
+
+    const pushed = await runtime.xianyuIm.handleExternalEvent(admin.id, {
+      accountId: account.id,
+      externalConversationRef: 'history-push-conversation',
+      externalMessageRef: historyMessageRef,
+      senderRef: 'buyer-history-1',
+      senderName: 'Allowlisted Buyer',
+      direction: 'inbound',
+      bodyType: 'text',
+      bodyText: '历史导入消息',
+      occurredAt: new Date().toISOString(),
+    });
+    assert.equal(pushed.created, false);
+    assert.equal(pushed.autoReply?.run.status, 'persisted');
+    assert.equal(pushed.autoReply?.run.decision, 'replied');
+
+    const afterPush = await runtime.messages.listMessages(admin.id, conversation.id, { limit: 20 });
+    assert.equal(afterPush.items.filter((message) => message.externalMessageRef === historyMessageRef).length, 1);
+    assert.equal(afterPush.items.filter((message) => message.direction === 'outbound').length, 1);
+    const runs = await runtime.store.findAutoReplyRunByInboundMessage(admin.id, pushed.autoReply!.inboundMessage.id);
+    assert.equal(runs?.status, 'persisted');
+
+    const duplicatePush = await runtime.xianyuIm.handleExternalEvent(admin.id, {
+      accountId: account.id,
+      externalConversationRef: 'history-push-conversation',
+      externalMessageRef: historyMessageRef,
+      senderRef: 'buyer-history-1',
+      senderName: 'Allowlisted Buyer',
+      direction: 'inbound',
+      bodyType: 'text',
+      bodyText: '历史导入消息',
+      occurredAt: new Date().toISOString(),
+    });
+    assert.equal(duplicatePush.created, false);
+    assert.equal(duplicatePush.autoReply?.run.status, 'persisted');
+    const afterDuplicatePush = await runtime.messages.listMessages(admin.id, conversation.id, { limit: 20 });
+    assert.equal(afterDuplicatePush.items.filter((message) => message.externalMessageRef === historyMessageRef).length, 1);
+    assert.equal(afterDuplicatePush.items.filter((message) => message.direction === 'outbound').length, 1);
+  } finally {
+    await runtime.close();
+  }
+});
+
 test('push without senderName enriches buyer identity before the allowlist gate', async () => {
   const runtime = createApp(loadConfig({
     HOST: '127.0.0.1',
