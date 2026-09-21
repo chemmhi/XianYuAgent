@@ -135,3 +135,6 @@
 - 迁移覆盖：编号、依赖顺序、expand/backfill/switch/contract、备份、验证和回滚边界；
 - 与 `docs/02-data-api.md` 的字段、状态、路由和敏感边界保持一致；
 - 本文是设计契约，不代表已经执行真实 DDL 或迁移；真实 DDL、容器数据库和集成测试属于阶段 5/6 纵向切片。
+# Agent 动态数据增量（2026-09-21）
+
+迁移 024 新增 `messages.auto_reply_run_events`，记录运行阶段变化的脱敏事件。字段、约束、索引与回滚策略详见 `docs/agent/agent-dynamics/design.md` §4.2。既有 `messages.auto_reply_runs` 保持向后兼容；旧记录没有事件时由查询服务生成兼容时间线，不回填原始正文。

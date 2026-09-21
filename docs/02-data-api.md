@@ -358,3 +358,12 @@ Workspace 的 `Run/Step` 结果可以引用商品、卡券、订单，但只能�
 API Key 配置不新增第二套凭证表；`CredentialStore` 继续作为唯一数据 owner。当前统一采用 `scope=account`：API Key 必须绑定 `accountId`，沿用 `credential_refs(accountId, kind, purpose)` 唯一约束和账号 scope queryKey；若未来需要全局 provider key，另立 schema/权限切片，不在 `S4-VS7A` 隐含扩展。Settings 只提供页面入口和脱敏配置编辑，Workspace/Chat 只能消费 capability/ref，不得读取 CredentialValue。
 
 阶段 2 通过后，允许进入阶段 3 前端信息架构与 API 映射设计；仍不得提前创建真实后端实现。
+# Agent 动态 API 增量契约（2026-09-21）
+
+新增只读领域接口，数据所有权归 `messages.auto_reply_runs`、`messages.auto_reply_run_events`、`messages.messages`、`messages.conversations`；不复用 Workspace Run，不暴露原始闲鱼字段或模型内部对象。
+
+- `GET /api/v1/auto-reply/activity/summary?accountId=&range=24h|7d`：KPI、五阶段流水线、健康、状态分布、异常聚合、`asOf` 与 `refreshIntervalMs`。
+- `GET /api/v1/auto-reply/runs?accountId=&range=&status=&stage=&keyword=&page=&pageSize=`：分页运行记录。
+- `GET /api/v1/auto-reply/runs/{runId}?accountId=`：受控运行详情与阶段时间线。
+
+所有请求必须走 Session + 服务端 account scope；错误码沿用 `VALIDATION_FAILED`、`NOT_FOUND`、`FORBIDDEN`、`RETRYABLE_TIMEOUT`。页面不提供异常写确认接口，首版只读。

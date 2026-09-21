@@ -49,3 +49,11 @@ knowledge、review 不属于本轮正式一级页面，已决定直接删除原�
 | 视觉回归截图 | S4-VS1 已由本机 Chrome + CDP 生成 1440×900 与 390×844 截图 | 阶段 5/6 继续逐切片记录与 SellerAgent/design token 的偏差 |
 
 阶段 3 只冻结视觉与交互契约，不把原型可打开、源码结构或当前交互实现等同于组件设计通过，也不等同于真实 API、E2E 或最终视觉回归通过。截图、浏览器交互和逐项偏差记录在阶段 5/6 的纵向切片中执行。
+# Agent 动态视觉验收增量（2026-09-21）
+
+- 基线：`artifacts/auto-reply-agent-ui.html`；
+- 目标视口：`1440×900`、`390×844`；
+- 必测状态：loading、success、empty、error、forbidden、drawer loading/error、handoff、failed、processing；
+- 证据目录：`docs/agent/agent-dynamics/evidence/`；
+- 逐项偏差字段：布局/间距、字号/行高、颜色、圆角/阴影、图标、表格密度、抽屉与响应式；
+- 页面打开、API 200、构建成功不能单独作为视觉通过证据。

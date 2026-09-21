@@ -85,3 +85,4 @@
 3. 人工审核通过后改为 `READY_FOR_MERGE`；未通过保持 `READY_FOR_REVIEW` 或改为 `BLOCKED`。
 4. 只有持有 merge lock 的 agent 能写入 `MERGING`、`MERGED`、`CLEANED`、`merge_commit` 和 `cleaned_at`。
 5. 每次更新登记表后运行 `git worktree list --porcelain`，确保表格与 Git 实际状态一致。
+| `root` | `agent-dynamics` | `codex/agent-dynamics` | `F:\\ChenHai\\Project\\XianYuAgent-agent-dynamics` | Codex `/root` | `2026-09-21 15:00:00 +08:00` | `REGISTERED` | `-` | `-` | Agent 动态复杂模块：设计、实现、真实端到端与视觉验收进行中。 |
