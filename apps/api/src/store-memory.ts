@@ -576,8 +576,14 @@ export class MemoryStore implements Store {
   }
 
   async getAutoReplyActivitySummary(adminId: string, query: { accountId?: string; from: string; to: string }): Promise<AutoReplyActivitySummary> {
-    const result = await this.listAutoReplyRuns(adminId, { accountId: query.accountId, from: query.from, to: query.to, page: 1, pageSize: 100000 });
-    const runs = result.items;
+    const scoped = new Set((await this.listScopes(adminId)).map((scope) => scope.accountId));
+    const from = Date.parse(query.from);
+    const to = Date.parse(query.to);
+    const runs = [...this.autoReplyRuns.values()]
+      .filter((run) => run.adminId === adminId && scoped.has(run.accountId))
+      .filter((run) => !query.accountId || run.accountId === query.accountId)
+      .filter((run) => Date.parse(run.createdAt) >= from && Date.parse(run.createdAt) <= to)
+      .map((run) => this.autoReplyRunListItem(run));
     const terminal = new Set<AutoReplyRunStatus>(['persisted', 'handoff', 'skipped', 'failed']);
     const processing = new Set<AutoReplyRunStatus>(['received', 'classified', 'context_loaded', 'generated', 'simulated']);
     const counts = new Map<AutoReplyRunStatus, number>();
