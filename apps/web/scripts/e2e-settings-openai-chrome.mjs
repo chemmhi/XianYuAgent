@@ -318,8 +318,7 @@ async function run() {
   await cdp.send('Page.navigate', { url: `${webUrl}/settings` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'settings route');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-settings-page]"))'), 'Settings page');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('设置'), 'Settings account context');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('当前账号：OpenAI Settings Demo'), 'Settings account selection');
+  await waitFor(async () => await evaluate(cdp, `localStorage.getItem('xianyu.activeAccountId') === ${JSON.stringify(accountId)}`), 'Settings first account selection');
   await evaluate(cdp, `(() => { const tab = Array.from(document.querySelectorAll('.settings-tabs button')).find((button) => button.textContent?.includes('OpenAI API')); tab?.click(); return true; })()`);
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-openai-panel]"))'), 'OpenAI settings panel');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('尚未配置主/备模型'), 'OpenAI empty state');
@@ -473,12 +472,64 @@ async function run() {
     runtime = createApp(runtimeConfig);
     resources.runtime = runtime;
     await runtime.listen();
+
+    // A service restart must keep the encrypted config rows and let the
+    // browser rehydrate the cards from PostgreSQL. Connectivity is an
+    // ephemeral probe result, so the fresh UI must ask the operator to test
+    // again before showing a healthy state.
+    primaryV2.state.failing = false;
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+    await cdp.send('Page.navigate', { url: `${webUrl}/settings` });
+    await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'settings route after API restart');
+    await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-settings-page]"))'), 'Settings page after API restart');
+    await evaluate(cdp, `(() => { const tab = Array.from(document.querySelectorAll('.settings-tabs button')).find((button) => button.textContent?.includes('OpenAI API')); tab?.click(); return true; })()`);
+    await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-openai-panel]"))'), 'OpenAI settings panel after API restart');
+    await waitFor(async () => await evaluate(cdp, `(() => { const card = document.querySelector('[data-openai-config="primary"]'); const fields = Array.from(card?.querySelectorAll('input,select') ?? []).map((input) => input.value); return fields[0] === 'primary-v1' && fields[1] === ${JSON.stringify(primaryV2.baseUrl)} && fields[3] === ${JSON.stringify(primary.model)}; })()`), 'persisted primary fields after API restart');
+    await waitFor(async () => await evaluate(cdp, `(() => { const card = document.querySelector('[data-openai-config="backup"]'); const fields = Array.from(card?.querySelectorAll('input,select') ?? []).map((input) => input.value); return fields[0] === 'backup' && fields[1] === ${JSON.stringify(backup.baseUrl)} && fields[3] === ${JSON.stringify(backup.model)}; })()`), 'persisted backup fields after API restart');
+    const requiresConnectivityRetest = async (role) => {
+      const text = String(await evaluate(cdp, `document.querySelector('[data-openai-config="${role}"]')?.innerText ?? ''`));
+      return !text.includes('测试通过') && !text.includes('备用可用') && (text.includes('待测试') || text.includes('待配置'));
+    };
+    try {
+      await waitFor(() => requiresConnectivityRetest('primary'), 'primary requires connectivity retest after API restart');
+      await waitFor(() => requiresConnectivityRetest('backup'), 'backup requires connectivity retest after API restart');
+    } catch (error) {
+      const diagnostics = await evaluate(cdp, `({ primary: document.querySelector('[data-openai-config="primary"]')?.innerText ?? '', backup: document.querySelector('[data-openai-config="backup"]')?.innerText ?? '', body: document.body.innerText.slice(0, 1200) })`);
+      throw new Error(`${error.message}; diagnostics=${JSON.stringify(diagnostics)}`);
+    }
+
+    const restartConfigs = await requestJson(actualApiUrl, `/api/v1/settings/openai?accountId=${encodeURIComponent(accountId)}`, { headers: { cookie } });
+    assert.equal(restartConfigs.response.status, 200, JSON.stringify(restartConfigs.body));
+    const restartPrimary = apiViewByRole(restartConfigs.body, 'primary');
+    const restartBackup = apiViewByRole(restartConfigs.body, 'backup');
+    assert.equal(restartPrimary?.id, savedPrimary.id, 'primary config id changed after service restart');
+    assert.equal(restartBackup?.id, savedBackup.id, 'backup config id changed after service restart');
+    assert.equal(restartPrimary?.baseUrl, primaryV2.baseUrl, 'updated primary config was not reloaded after service restart');
+    assert.equal(restartPrimary?.lastConnectivity ?? 'unknown', 'unknown', 'connectivity must require a fresh probe after service restart');
+    assert.equal(restartBackup?.lastConnectivity ?? 'unknown', 'unknown', 'backup connectivity must require a fresh probe after service restart');
+
+    const statusBeforeConnectivityTest = await evaluate(cdp, `document.querySelector('[data-openai-config="primary"]')?.innerText ?? ''`);
+    const primaryControlsAfterRestart = await evaluate(cdp, `(() => { const card = document.querySelector('[data-openai-config="primary"]'); return { fields: Array.from(card?.querySelectorAll('input,select') ?? []).map((input) => ({ value: input.value, type: input.type, disabled: input.disabled })), buttons: Array.from(card?.querySelectorAll('button') ?? []).map((button) => ({ text: button.textContent?.trim(), disabled: button.disabled })) }; })()`);
+    assert.equal(primaryControlsAfterRestart.buttons.find((button) => button.text === '测试连通性')?.disabled, false, JSON.stringify(primaryControlsAfterRestart));
+    await clickCardButton(cdp, 'primary', '测试连通性');
+    try {
+      await waitFor(async () => String(await evaluate(cdp, `document.querySelector('[data-openai-config="primary"]')?.innerText ?? ''`)).includes('测试通过'), 'primary connectivity retest after API restart');
+    } catch (error) {
+      const diagnostics = await evaluate(cdp, `({ card: document.querySelector('[data-openai-config="primary"]')?.innerText ?? '', body: document.body.innerText.slice(0, 1600) })`);
+      throw new Error(`${error.message}; diagnostics=${JSON.stringify(diagnostics)}`);
+    }
+    const statusAfterConnectivityTest = await evaluate(cdp, `document.querySelector('[data-openai-config="primary"]')?.innerText ?? ''`);
+
+    // Keep the post-restart Agent assertion deterministic: the persisted
+    // primary remains configured, but this fixture forces it down so the
+    // already-persisted backup must be consumed.
+    primaryV2.state.failing = true;
     const restartConversation = await runtime.store.createConversation({ adminId, accountId, buyerRef: 'buyer-openai-restart', buyerDisplayName: 'Buyer E2E', itemRef: 'item-openai-e2e', itemTitle: 'OpenAI E2E 商品', externalConversationRef: `openai-restart-${process.pid}` });
     const restartInbound = await runtime.store.createMessage({ adminId, conversationId: restartConversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '重启后验证备用配置', source: 'system', externalMessageRef: `openai-restart-${Date.now()}.PNM`, traceId: 'openai-restart' });
     const restartRun = await runtime.autoReply.processInbound({ adminId, conversationId: restartConversation.id, inboundMessageId: restartInbound.message.id, senderName: 'Buyer E2E', requestId: 'openai-restart', traceId: 'openai-restart' });
     assert.equal(restartRun.run.status, 'persisted', JSON.stringify(restartRun.run));
     assert.match(restartRun.outboundMessage?.bodyText ?? '', /BACKUP_REPLY/);
-    restart = { status: 'passed', provider: 'backup', output: restartRun.outboundMessage?.bodyText };
+    restart = { status: 'passed', provider: 'backup', output: restartRun.outboundMessage?.bodyText, uiBeforeConnectivityTest: statusBeforeConnectivityTest, uiAfterConnectivityTest: statusAfterConnectivityTest };
   }
 
   console.log(JSON.stringify({

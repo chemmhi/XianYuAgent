@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chooseInitialAccountId } from './account-context';
+import { chooseFirstAvailableAccountId, chooseInitialAccountId } from './account-context';
 import type { AccountVM } from '../features/accounts/types';
 
 function account(id: string, status: AccountVM['status'], connection: AccountVM['connection']['status'] = 'offline'): AccountVM {
@@ -29,5 +29,15 @@ describe('chooseInitialAccountId', () => {
 
   it('returns undefined when no usable account exists', () => {
     expect(chooseInitialAccountId([account('disabled', 'disabled')])).toBeUndefined();
+  });
+});
+
+describe('chooseFirstAvailableAccountId', () => {
+  it('selects the first usable account for settings scope', () => {
+    expect(chooseFirstAvailableAccountId([account('disabled', 'disabled'), account('a', 'connected'), account('b', 'connected')])).toBe('a');
+  });
+
+  it('keeps a valid preferred account when settings already has one', () => {
+    expect(chooseFirstAvailableAccountId([account('a', 'connected'), account('b', 'connected')], 'b')).toBe('b');
   });
 });

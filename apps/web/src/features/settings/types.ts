@@ -75,6 +75,7 @@ export interface OpenAIConfigVM {
   label?: string;
   baseUrl: string;
   model: string;
+  reasoningEffort?: string;
   wireApi: OpenAIWireApi;
   timeoutMs: number;
   status: CredentialStatus;

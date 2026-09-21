@@ -1,5 +1,5 @@
-import { useMemo, useState, type FormEvent } from 'react';
-import { useAccountContext } from '../../../app/account-context';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { chooseFirstAvailableAccountId, useAccountContext } from '../../../app/account-context';
 import { createCredentialApi, createMockAutoReplyAgentSettingsApi, createMockCredentialApi, createMockOpenAISettingsApi, type AutoReplyAgentSettingsApi, type CredentialApi, type OpenAISettingsApi } from '../api';
 import { useAutoReplyAgentSettingsController } from '../agent-settings-controller';
 import { AutoReplyAgentPanel } from './AutoReplyAgentPanel';
@@ -22,7 +22,7 @@ const tabs: Array<{ id: TabKey; label: string; mobileLabel: string; meta: string
 ];
 
 export function SettingsPage({ api: providedApi, agentApi: providedAgentApi, openaiApi: providedOpenaiApi, modelApi: providedModelApi }: { api?: CredentialApi; agentApi?: AutoReplyAgentSettingsApi; openaiApi?: OpenAISettingsApi; modelApi?: ModelProviderApi }) {
-  const { accounts, accountsLoading, accountsError, currentAccountId } = useAccountContext();
+  const { accounts, accountsLoading, accountsError, currentAccountId, setCurrentAccountId } = useAccountContext();
   const api = useMemo(() => providedApi ?? createCredentialApiFromRuntime(), [providedApi]);
   const agentApi = useMemo(() => providedAgentApi ?? createMockAutoReplyAgentSettingsApi(), [providedAgentApi]);
   const openaiApi = useMemo(() => providedOpenaiApi ?? createMockOpenAISettingsApi(), [providedOpenaiApi]);
@@ -32,6 +32,12 @@ export function SettingsPage({ api: providedApi, agentApi: providedAgentApi, ope
   const [selectedCredential, setSelectedCredential] = useState<CredentialRefVM | undefined>();
   const controller = useCredentialController({ api, accountId: currentAccountId });
   const agentController = useAutoReplyAgentSettingsController(agentApi, currentAccountId);
+
+  useEffect(() => {
+    if (accountsLoading || accountsError || currentAccountId) return;
+    const firstAvailableId = chooseFirstAvailableAccountId(accounts);
+    if (firstAvailableId) void setCurrentAccountId(firstAvailableId);
+  }, [accounts, accountsError, accountsLoading, currentAccountId, setCurrentAccountId]);
 
   const selectedAccount = accounts.find((account) => account.id === currentAccountId);
   const items = controller.state.data?.items ?? [];
@@ -43,10 +49,6 @@ export function SettingsPage({ api: providedApi, agentApi: providedAgentApi, ope
 
   return (
     <section className="page-stack settings-page" data-settings-page>
-      <header className="settings-toolbar">
-        <div><p className="eyebrow">System Settings</p><h1>设置</h1><p>管理 Agent 策略与受控凭证引用。</p></div>
-        {selectedAccount && <span className="settings-scope-chip">当前账号：{selectedAccount.displayName}</span>}
-      </header>
       <div className="settings-grid">
         <aside className="card settings-tabs" aria-label="设置分类">
           {tabs.map((tab) => <button key={tab.id} type="button" className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)}><span className="settings-tab-label">{tab.label}</span><span className="settings-tab-mobile-label">{tab.mobileLabel}</span><small>{tab.meta}</small></button>)}

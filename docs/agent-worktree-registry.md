@@ -38,6 +38,8 @@
 | `root/requirements_architecture` | `agent-dynamics-docs` | `codex/agent-dynamics-docs` | `F:\ChenHai\Project\XianYuAgent-agent-dynamics-docs` | Codex `/root` delegated agent | `2026-09-21 17:30:00 +08:00` | `MERGING` | `-` | `-` | API/数据库/活动跨层契约与风险登记已通过独立复审，已纳入 Agent 动态合并。 |
 | `root/prototype_visual_analysis` | `agent-dynamics-web` | `codex/agent-dynamics-web` | `F:\ChenHai\Project\XianYuAgent-agent-dynamics-web` | Codex `/root` delegated agent | `2026-09-21 17:30:53 +08:00` | `MERGING` | `-` | `-` | Web adapter、账号上下文门禁、状态映射与视觉验收修复已通过独立复审，已纳入 Agent 动态合并。 |
 | `root` | `agent-dynamics` | `codex/agent-dynamics` | `F:\ChenHai\Project\XianYuAgent-agent-dynamics` | Codex `/root` | `2026-09-21 15:00:00 +08:00` | `MERGING` | `-` | `-` | Agent 动态复杂模块已完成设计、模块化实现、真实 PostgreSQL/Chrome/CDP 链路、HTML/截图与样式 token 级视觉验收；正在合入 master。 |
+| `root/settings_ui_fix` | `settings-openai-ui-fix-20260921` | `fix/settings-openai-ui-20260921` | `F:\ChenHai\Project\XianYuAgent-settings-ui-fix` | Codex `/root/settings_ui_fix` | `2026-09-21 00:00:00 +08:00` | `IN_PROGRESS` | `-` | `-` | 修复设置页默认账号、API Key 脱敏回显、冗余状态/审计行、动态思考程度与无作用工具栏；补充前端回归和视觉证据。 |
+| `root/settings_ui_fix` | `settings-openai-ui-fix-20260921` | `fix/settings-openai-ui-20260921` | `F:\ChenHai\Project\XianYuAgent-settings-ui-fix` | Codex `/root/settings_ui_fix` | `2026-09-21 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 修复设置页默认账号、API Key 脱敏回显、冗余状态/审计行、动态思考程度、无作用工具栏与已保存待测试状态；补充前端回归和视觉证据。 |
 | - | - | - | - | - | - | - | - | - | 主工作区 `master` 受保护；活动 agent 见上表 |
 
 | `root` | `products-pagination` | `fix/products-pagination` | `F:\ChenHai\Project\XianYuAgent-products-pagination` | Codex `/root` | `2026-09-20 00:00:00 +08:00` | `CLEANED` | `3219f85f10cc151dd2761afa066a2ee60be8580f` | `2026-09-20 18:04:00 +08:00` | 已在 merge lock 内合入并完成主线 typecheck、Web 79 项测试、构建与商品 Chrome E2E；API smoke 仍受 127.0.0.1:18872 端口占用阻塞。Git worktree 元数据与分支已清理，目录因含非 Git 内容保留。 |
@@ -83,6 +85,8 @@
 | `root` | `docs-multi-agent-collaboration` | `docs/multi-agent-collaboration` | `F:\ChenHai\Project\XianYuAgent-multi-agent-docs` | Codex `/root` | `2026-09-19 00:00:00 +08:00` | `CLEANED` | `e9aaf782` | `2026-09-19 04:15:00 +08:00` | 分支提交 `b278617` 已在全局 merge lock 内以 `--no-ff` 合入 `master`；worktree 已删除，分支已删除 |
 | `root` | `coupons-modal-polish` | `fix/coupons-modal-polish` | `F:\ChenHai\Project\XianYuAgent-coupons-modal-polish` | Codex `/root` | `2026-09-21 11:02:19 +08:00` | `READY_FOR_MERGE` | `-` | `-` | master 已恢复干净；独立 review 无阻塞问题；feature 提交 `5e7f19c` 待在 merge lock 内以 `--no-ff` 合入 |
 | `root` | `coupons-create-list-e2e` | `fix/coupons-create-list-e2e` | `F:\ChenHai\Project\XianYuAgent-coupons-create-list-e2e` | Codex `/root` | `2026-09-21 11:49:25 +08:00` | `CLEANED` | `cb128110e53c62266a3ed47f236d959c72aecc37` | `2026-09-21 12:25:40 +08:00` | 已在 merge lock 内以 `--no-ff` 合入 master；合并后 `npm run verify` 全部通过，包含真实 UI 创建→列表回读→管理→刷新 E2E；Git worktree 元数据与分支已清理，目录因保留 node_modules/非 Git 内容未删除 |
+
+| `root/settings_persistence_e2e` | `settings-persistence-e2e` | `codex/settings-persistence-e2e` | `F:\ChenHai\Project\XianYuAgent-settings-persistence` | Codex `/root` delegated agent | `2026-09-21 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 补强 OpenAI 设置保存后 Agent 实际消费、PostgreSQL 重启复读与 UI 主动测试后状态回显；新增 API Key 等长首尾脱敏回显；不改 master。 |
 
 ## 登记维护规则
 

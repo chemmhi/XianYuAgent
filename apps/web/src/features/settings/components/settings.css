@@ -3,8 +3,8 @@
 @media(max-width:900px){.settings-shell .sidebar{display:none}.settings-shell .desktop-body{border-left:0}.settings-shell .desktop-body main.settings-main{padding:14px 16px}}
 @media(max-width:900px){.settings-page{padding-bottom:84px}.settings-mobile-header{display:grid;gap:14px;padding:14px;border-radius:12px}.settings-mobile-header h1{font-size:18px}.settings-account-picker{min-width:0}.settings-grid{display:block}.settings-tabs{display:flex;overflow-x:auto;scrollbar-width:none;gap:7px;padding:0 0 2px;border:0;box-shadow:none;background:transparent}.settings-tabs::-webkit-scrollbar{display:none}.settings-tabs button{min-width:58px;min-height:46px;display:grid;place-items:center;gap:2px;padding:6px 8px;border:1px solid var(--border);background:#fff;border-radius:8px;text-align:center}.settings-tab-label{display:none}.settings-tab-mobile-label{display:block}.settings-tabs button small{font-size:9px}.settings-tabs button.active{box-shadow:inset 0 -2px 0 var(--link);border-color:#D4E4F1}.settings-content{gap:12px}.panel{padding:14px}.settings-hero{display:grid;gap:10px}.credential-list-card .panel-head{align-items:center}.credential-row{grid-template-columns:32px minmax(0,1fr);align-items:start;padding:13px 0}.credential-actions{grid-column:2;justify-content:flex-start}.credential-meta{gap:6px}.credential-meta span+span{padding-left:6px}.settings-reference-list>div{grid-template-columns:1fr auto;gap:6px}.settings-reference-list>div span{grid-column:1/-1}.settings-editor{padding:16px;border-radius:14px}.settings-form-grid{grid-template-columns:1fr}.settings-form-grid label.full{grid-column:auto}.settings-mobile-bottom{position:fixed;left:0;right:0;bottom:0;z-index:30;display:grid;grid-template-columns:repeat(4,1fr);padding:8px 0 24px;border-top:1px solid var(--border);background:#fff}.settings-mobile-bottom button{display:grid;justify-items:center;gap:4px;border:0;background:transparent;color:var(--sub);font-size:18px}.settings-mobile-bottom button small{font-size:9px;font-weight:700}.settings-mobile-bottom button.active{color:var(--link)}}
 .settings-form-grid select{height:38px;padding:0 11px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:12px}.settings-form-grid textarea{padding:10px 11px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:12px;line-height:1.5;resize:vertical}.settings-checkbox{display:flex!important;align-items:center;gap:8px;height:38px}.settings-checkbox input{width:16px;height:16px}.auto-reply-agent-editor{padding:20px}
-.settings-page{height:100%;display:flex;flex-direction:column}.settings-toolbar{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.settings-grid{flex:1;min-height:0;align-items:stretch}.settings-active{min-height:0}.settings-content{min-height:0}.auto-reply-agent-fields{display:grid;grid-column:1/-1;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;min-inline-size:0;margin:0;padding:0;border:0}.auto-reply-agent-fields:disabled{opacity:.5}
-@media(max-width:900px){.settings-page{height:auto;min-height:calc(100dvh - 30px);padding-bottom:84px}.settings-toolbar{display:grid;gap:10px}.settings-toolbar h1{font-size:18px}.settings-grid{display:block}.auto-reply-agent-fields{grid-template-columns:1fr}.auto-reply-agent-fields label.full{grid-column:auto}}
+.settings-page{height:100%;display:flex;flex-direction:column}.settings-grid{flex:1;min-height:0;align-items:stretch}.settings-active{min-height:0}.settings-content{min-height:0}.auto-reply-agent-fields{display:grid;grid-column:1/-1;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;min-inline-size:0;margin:0;padding:0;border:0}.auto-reply-agent-fields:disabled{opacity:.5}
+@media(max-width:900px){.settings-page{height:auto;min-height:calc(100dvh - 30px);padding-bottom:84px}.settings-grid{display:block}.auto-reply-agent-fields{grid-template-columns:1fr}.auto-reply-agent-fields label.full{grid-column:auto}}
 
 /* OpenAI ModelClient parity with SellerAgent's editable dual-provider panel. */
 .openai-settings-content,.openai-settings-hero,.openai-model-box{min-width:0}
@@ -25,10 +25,7 @@
 .openai-form-rows input,.openai-form-rows select{width:100%;height:38px;min-width:0;padding:0 11px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:12px}
 .openai-form-rows input[type=password]{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.03em}
 .openai-form-rows input::placeholder{color:#9CA3AF}
-.openai-status-row{display:grid;grid-template-columns:92px minmax(0,1fr);gap:10px;align-items:center;padding-top:10px;border-top:1px solid var(--border);font-size:11px}
-.openai-status-row>span:first-child{color:var(--muted);font-weight:700}
-.openai-status-copy{min-width:0;color:var(--sub);line-height:1.45}
-.openai-audit-row{display:flex;flex-wrap:wrap;gap:6px 10px;margin-top:10px;padding:8px 9px;border-radius:8px;background:var(--bg);color:var(--sub);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px;line-height:1.4}
+.openai-inline-error{grid-column:1/-1;padding:8px 10px;border:1px solid rgba(180,35,24,.18);border-radius:8px;background:var(--danger-bg);color:var(--danger);font-size:10px;line-height:1.45}
 .openai-compare-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:14px}
 .openai-compare-summary>span{display:block;min-width:0;padding:10px 12px;border:1px solid #D6E5F2;border-radius:10px;background:var(--soft-blue-bg);color:var(--muted);font-size:11px;line-height:1.45}
 .openai-compare-summary strong{display:block;margin-bottom:3px;color:var(--link);font-size:11px}
@@ -41,8 +38,6 @@
   .openai-model-box{padding:13px}
   .openai-model-head{display:grid;gap:8px}
   .openai-form-rows label{grid-template-columns:1fr;gap:6px}
-  .openai-status-row{grid-template-columns:1fr;gap:4px}
-  .openai-audit-row{font-size:9px;overflow-wrap:anywhere}
   .openai-model-box .card-actions{justify-content:stretch}
   .openai-model-box .card-actions .btn{flex:1 1 0;min-height:38px}
   .openai-timeline .timeline-row{grid-template-columns:1fr;gap:6px}

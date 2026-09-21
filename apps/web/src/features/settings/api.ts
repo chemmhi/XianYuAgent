@@ -36,8 +36,8 @@ export interface AutoReplyAgentSettingsApi {
 
 export interface OpenAISettingsApi {
   list(accountId: string): Promise<OpenAIConfigListVM>;
-  save(input: { accountId: string; configId?: string; role: 'primary' | 'backup'; provider: string; alias: string; label?: string; baseUrl: string; model: string; wireApi: 'responses' | 'chat'; timeoutMs: number; apiKey?: string; expectedVersion?: number }): Promise<OpenAIConfigVM>;
-  test(input: { accountId: string; configId?: string; role: 'primary' | 'backup'; provider: string; alias: string; baseUrl: string; model: string; wireApi: 'responses' | 'chat'; timeoutMs: number; apiKey?: string }): Promise<{ ok: true; provider: string; model: string; latencyMs: number; models: string[] }>;
+  save(input: { accountId: string; configId?: string; role: 'primary' | 'backup'; provider: string; alias: string; label?: string; baseUrl: string; model: string; reasoningEffort?: string; wireApi: 'responses' | 'chat'; timeoutMs: number; apiKey?: string; expectedVersion?: number }): Promise<OpenAIConfigVM>;
+  test(input: { accountId: string; configId?: string; role: 'primary' | 'backup'; provider: string; alias: string; baseUrl: string; model: string; reasoningEffort?: string; wireApi: 'responses' | 'chat'; timeoutMs: number; apiKey?: string }): Promise<{ ok: true; provider: string; model: string; latencyMs: number; models: string[] }>;
   listModels(input: { accountId: string; configId?: string }): Promise<string[]>;
 }
 
@@ -159,11 +159,19 @@ export function createMockOpenAISettingsApi(): OpenAISettingsApi {
       if (current && current.version !== input.expectedVersion) throw new Error('版本冲突');
       if (!current && [...rows.values()].some((item) => item.accountId === input.accountId && item.role === input.role)) throw new Error('该账号已有相同角色配置');
       const timestamp = now();
-      const value: OpenAIConfigVM = { id: current?.id ?? `openai_${Date.now()}_${input.role}`, accountId: input.accountId, role: input.role, provider: input.provider, alias: input.alias, label: input.label, baseUrl: input.baseUrl, model: input.model, wireApi: input.wireApi, timeoutMs: input.timeoutMs, status: 'active', version: current ? current.version + 1 : 1, fingerprint: current?.fingerprint ?? 'mock-fingerprint', apiKeyConfigured: true, apiKeyHint: '••••A91F', lastConnectivity: 'passed', lastConnectivityAt: timestamp, createdAt: current?.createdAt ?? timestamp, updatedAt: timestamp, canReveal: false };
+      const value: OpenAIConfigVM = { id: current?.id ?? `openai_${Date.now()}_${input.role}`, accountId: input.accountId, role: input.role, provider: input.provider, alias: input.alias, label: input.label, baseUrl: input.baseUrl, model: input.model, reasoningEffort: input.reasoningEffort, wireApi: input.wireApi, timeoutMs: input.timeoutMs, status: 'active', version: current ? current.version + 1 : 1, fingerprint: current?.fingerprint ?? 'mock-fingerprint', apiKeyConfigured: true, apiKeyHint: input.apiKey ? maskApiKey(input.apiKey) : current?.apiKeyHint ?? maskApiKey('mock-api-key'), lastConnectivity: 'passed', lastConnectivityAt: timestamp, createdAt: current?.createdAt ?? timestamp, updatedAt: timestamp, canReveal: false };
       rows.set(value.id!, value);
       return value;
     },
     async test(input) { return { ok: true, provider: input.provider, model: input.model, latencyMs: 12, models }; },
     async listModels() { return models; },
   };
+}
+
+function maskApiKey(value: string): string {
+  const key = value.trim();
+  if (!key) return '';
+  const visibleEach = Math.min(4, Math.max(1, Math.floor((key.length - 1) / 2)));
+  const middleLength = Math.max(1, key.length - visibleEach * 2);
+  return `${key.slice(0, visibleEach)}${'*'.repeat(middleLength)}${key.slice(-visibleEach)}`;
 }

@@ -49,18 +49,39 @@ test('persists primary and backup configs with redacted views and provider-owned
   assert.notEqual(primary.id, backup.id);
   assert.equal('apiKey' in primary, false);
   assert.equal('secret' in primary, false);
+  assert.equal(primary.apiKeyHint?.length, 'primary-secret-key'.length);
+  assert.equal(primary.apiKeyHint?.startsWith('prim'), true);
+  assert.equal(primary.apiKeyHint?.endsWith('-key'), true);
+  assert.match(primary.apiKeyHint ?? '', /\*/);
+  assert.equal(primary.apiKeyHint?.includes('primary-secret-key'), false);
+  assert.equal(backup.apiKeyHint?.length, 'backup-secret-key'.length);
+  assert.equal(backup.apiKeyHint?.slice(0, 4), 'back');
+  assert.equal(backup.apiKeyHint?.slice(-4), '-key');
+  assert.equal(backup.apiKeyHint?.includes('backup-secret-key'), false);
 
   const listed = await service.list({ adminId: admin.id, accountId: account.id });
   assert.deepEqual(listed.map((item) => item.role).sort(), ['backup', 'primary']);
   assert.equal(listed.some((item) => JSON.stringify(item).includes('secret-key')), false);
 
   const models = await service.listModels({ adminId: admin.id, accountId: account.id, configId: primary.id });
-  assert.deepEqual(models, ['provider-model-a', 'provider-model-b']);
+  assert.deepEqual(models, [{ id: 'provider-model-a' }, { id: 'provider-model-b' }]);
   assert.deepEqual(calls, [`https://primary.example/v1/models|Bearer primary-secret-key`]);
 
   const stored = await store.getCredentialRefSecret(admin.id, primary.id!);
   assert.ok(stored);
   assert.equal(stored?.secretCiphertext.includes('primary-secret-key'), false);
+});
+
+test('keeps connectivity probes ephemeral so a fresh process requires an explicit retest', async () => {
+  const { admin, account, service } = await fixture();
+  const saved = await service.save(input(admin.id, account.id, 'primary'));
+  const result = await service.test(input(admin.id, account.id, 'primary', { configId: saved.id, apiKey: undefined }));
+
+  assert.equal(result.ok, true);
+  const listed = await service.list({ adminId: admin.id, accountId: account.id });
+  const reloaded = listed.find((item) => item.role === 'primary');
+  assert.equal(reloaded?.id, saved.id);
+  assert.equal(reloaded?.lastConnectivity ?? 'unknown', 'unknown');
 });
 
 test('enforces role uniqueness and optimistic version checks', async () => {
@@ -130,6 +151,29 @@ test('agent resolves latest persisted config and falls back without restart', as
     assert.ok(backup.id);
   } finally {
     await runtime.close();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('runtime client forwards persisted reasoning effort to the Responses request', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ body: Record<string, unknown> }> = [];
+  globalThis.fetch = (async (input, init) => {
+    void input;
+    const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+    requests.push({ body });
+    return new Response(JSON.stringify({ model: 'reasoning-model', output_text: 'ok' }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+
+  try {
+    const { admin, account, service } = await fixture();
+    const saved = await service.save(input(admin.id, account.id, 'primary'));
+    const resolved = await service.resolveById(admin.id, saved.id!, account.id);
+    assert.ok(resolved);
+    const client = await service.createRuntimeClient({ ...resolved!, reasoningEffort: 'high' } as Awaited<NonNullable<typeof resolved>> & { reasoningEffort: string });
+    await client.complete({ messages: [{ role: 'user', content: 'think carefully' }] });
+    assert.deepEqual(requests[0]?.body.reasoning, { effort: 'high' });
+  } finally {
     globalThis.fetch = originalFetch;
   }
 });

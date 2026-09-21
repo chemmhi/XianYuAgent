@@ -3,7 +3,7 @@ import type { CredentialRefRecord, Store } from './domain.js';
 import { ServiceError } from './services.js';
 import type { ApiKeyCredentialService } from './credential-store.js';
 import { OpenAICompatibleModelClient, type ModelClient, type ModelWireApi } from './pi-runtime.js';
-import { listProviderModels } from './model-provider.js';
+import { listProviderModels, ModelProviderError, type ProviderModel } from './model-provider.js';
 
 export type OpenAIConfigRole = 'primary' | 'backup';
 
@@ -16,6 +16,7 @@ export interface OpenAIConfigView {
   label?: string;
   baseUrl: string;
   model: string;
+  reasoningEffort?: string;
   wireApi: ModelWireApi;
   timeoutMs: number;
   status: CredentialRefRecord['status'];
@@ -40,6 +41,7 @@ export interface OpenAIConfigInput {
   label?: string;
   baseUrl: string;
   model: string;
+  reasoningEffort?: string;
   wireApi?: ModelWireApi;
   timeoutMs?: number;
   apiKey?: string;
@@ -48,7 +50,7 @@ export interface OpenAIConfigInput {
   traceId: string;
 }
 
-export type OpenAIConfigBody = Pick<OpenAIConfigInput, 'configId' | 'role' | 'provider' | 'alias' | 'label' | 'baseUrl' | 'model' | 'wireApi' | 'timeoutMs' | 'apiKey' | 'expectedVersion'>;
+export type OpenAIConfigBody = Pick<OpenAIConfigInput, 'configId' | 'role' | 'provider' | 'alias' | 'label' | 'baseUrl' | 'model' | 'reasoningEffort' | 'wireApi' | 'timeoutMs' | 'apiKey' | 'expectedVersion'>;
 
 export interface OpenAIResolvedConfig extends OpenAIConfigView {
   apiKey: string;
@@ -83,6 +85,7 @@ export class OpenAISettingsService {
     const duplicateRole = existing.find((item) => item.role === normalized.role && item.id !== input.configId && item.status !== 'revoked');
     if (duplicateRole) throw new ServiceError(409, 'CONFLICT', `${normalized.role === 'primary' ? '主配置' : '备用配置'}已存在`);
 
+    const metadata = metadataFor(normalized, current?.metadata);
     let saved: CredentialRefRecord;
     if (!current) {
       if (!normalized.apiKey) throw new ServiceError(422, 'VALIDATION_FAILED', 'apiKey is required for a new model configuration');
@@ -93,7 +96,7 @@ export class OpenAISettingsService {
         alias: normalized.alias,
         label: normalized.label,
         apiKey: normalized.apiKey,
-        metadata: metadataFor(normalized),
+        metadata,
         requestId: input.requestId,
         traceId: input.traceId,
       });
@@ -106,7 +109,7 @@ export class OpenAISettingsService {
         provider: normalized.provider,
         alias: normalized.alias,
         label: normalized.label,
-        metadata: metadataFor(normalized),
+        metadata,
         requestId: input.requestId,
         traceId: input.traceId,
       });
@@ -119,7 +122,7 @@ export class OpenAISettingsService {
     return toView(saved);
   }
 
-  async test(input: OpenAIConfigInput): Promise<{ ok: true; provider: string; model: string; latencyMs: number; models: string[] }> {
+  async test(input: OpenAIConfigInput): Promise<{ ok: true; provider: string; model: string; latencyMs: number; models: ProviderModel[] }> {
     const normalized = normalizeInput(input);
     if (input.configId) {
       const current = await this.store.getCredentialRef(input.adminId, input.configId);
@@ -131,7 +134,7 @@ export class OpenAISettingsService {
     return { ok: true, provider: normalized.provider, model: normalized.model, latencyMs: Date.now() - started, models };
   }
 
-  async listModels(input: { adminId: string; accountId: string; configId?: string }): Promise<string[]> {
+  async listModels(input: { adminId: string; accountId: string; configId?: string }): Promise<ProviderModel[]> {
     const resolved = input.configId
       ? await this.resolveById(input.adminId, input.configId, input.accountId)
       : (await this.resolveForRuntime(input.adminId, input.accountId))[0];
@@ -152,7 +155,15 @@ export class OpenAISettingsService {
   }
 
   async createRuntimeClient(config: OpenAIResolvedConfig): Promise<ModelClient> {
-    return new OpenAICompatibleModelClient({ apiKey: config.apiKey, baseUrl: config.baseUrl, model: config.model, timeoutMs: config.timeoutMs, wireApi: config.wireApi });
+    const reasoningEffort = (config as OpenAIResolvedConfig & { reasoningEffort?: string }).reasoningEffort?.trim() || undefined;
+    return new OpenAICompatibleModelClient({
+      apiKey: config.apiKey,
+      baseUrl: config.baseUrl,
+      model: config.model,
+      timeoutMs: config.timeoutMs,
+      wireApi: config.wireApi,
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+    });
   }
 
   async resolveById(adminId: string, configId: string, accountId: string): Promise<OpenAIResolvedConfig | undefined> {
@@ -171,12 +182,15 @@ export class OpenAISettingsService {
     return decryptCredentialValue(secret.secretCiphertext, this.encryptionKey);
   }
 
-  private async fetchModels(input: { baseUrl: string; apiKey: string; timeoutMs: number }): Promise<string[]> {
+  private async fetchModels(input: { baseUrl: string; apiKey: string; timeoutMs: number }): Promise<ProviderModel[]> {
     try {
-      const models = await listProviderModels({ baseUrl: input.baseUrl, apiKey: input.apiKey, timeoutMs: input.timeoutMs, fetchImpl: this.fetchImpl });
-      return models.map((model) => model.id);
+      return await listProviderModels({ baseUrl: input.baseUrl, apiKey: input.apiKey, timeoutMs: input.timeoutMs, fetchImpl: this.fetchImpl });
     } catch (error) {
       if (error instanceof ServiceError) throw error;
+      if (error instanceof ModelProviderError) {
+        const statusCode = error.code === 'MODEL_PROVIDER_BASE_URL_REQUIRED' || error.code === 'MODEL_PROVIDER_INVALID_URL' ? 422 : 502;
+        throw new ServiceError(statusCode, error.code, error.message);
+      }
       throw new ServiceError(502, 'EXTERNAL_TIMEOUT', error instanceof Error ? error.message : '模型供应商连接失败，请检查 Base URL、API Key 或网络');
     }
   }
@@ -196,10 +210,11 @@ function normalizeInput(input: OpenAIConfigInput) {
   const alias = input.alias.trim() || (input.role === 'primary' ? 'primary' : 'backup');
   const baseUrl = normalizeBaseUrl(input.baseUrl);
   const model = input.model.trim();
+  const reasoningEffort = input.reasoningEffort?.trim() || undefined;
   const wireApi: ModelWireApi = input.wireApi === 'chat' ? 'chat' : 'responses';
   const timeoutMs = Number.isFinite(input.timeoutMs) && (input.timeoutMs ?? 0) > 0 ? Math.min(Math.max(Math.trunc(input.timeoutMs!), 1_000), 120_000) : DEFAULT_TIMEOUT_MS;
   if (!provider || !model) throw new ServiceError(422, 'VALIDATION_FAILED', 'provider and model are required');
-  return { ...input, provider, alias, baseUrl, model, wireApi, timeoutMs, apiKey: input.apiKey?.trim() || undefined };
+  return { ...input, provider, alias, baseUrl, model, reasoningEffort, wireApi, timeoutMs, apiKey: input.apiKey?.trim() || undefined };
 }
 
 function normalizeBaseUrl(value: string): string {
@@ -210,8 +225,17 @@ function normalizeBaseUrl(value: string): string {
   return parsed.toString().replace(/\/+$/, '');
 }
 
-function metadataFor(input: { role: OpenAIConfigRole; baseUrl: string; model: string; wireApi: ModelWireApi; timeoutMs: number }): Record<string, string> {
-  return { role: input.role, baseUrl: input.baseUrl, model: input.model, wireApi: input.wireApi, timeoutMs: String(input.timeoutMs) };
+function metadataFor(input: { role: OpenAIConfigRole; baseUrl: string; model: string; reasoningEffort?: string; wireApi: ModelWireApi; timeoutMs: number; apiKey?: string }, previous: Record<string, string> = {}): Record<string, string> {
+  return {
+    ...previous,
+    role: input.role,
+    baseUrl: input.baseUrl,
+    model: input.model,
+    reasoningEffort: input.reasoningEffort ?? '',
+    wireApi: input.wireApi,
+    timeoutMs: String(input.timeoutMs),
+    ...(input.apiKey ? { apiKeyHint: maskApiKey(input.apiKey) } : {}),
+  };
 }
 
 function roleFrom(ref: CredentialRefRecord): OpenAIConfigRole {
@@ -229,19 +253,30 @@ function toView(ref: CredentialRefRecord): OpenAIConfigView {
     label: ref.label,
     baseUrl: ref.metadata.baseUrl ?? '',
     model: ref.metadata.model ?? '',
+    reasoningEffort: ref.metadata.reasoningEffort?.trim() || undefined,
     wireApi: ref.metadata.wireApi === 'chat' ? 'chat' : 'responses',
     timeoutMs: Number(ref.metadata.timeoutMs ?? DEFAULT_TIMEOUT_MS),
     status: ref.status,
     version: ref.version,
     fingerprint: ref.fingerprint,
     apiKeyConfigured: true,
-    apiKeyHint: `••••${ref.fingerprint.slice(-4)}`,
+    apiKeyHint: ref.metadata.apiKeyHint || `••••${ref.fingerprint.slice(-4)}`,
     lastConnectivity: ref.metadata.lastConnectivity === 'passed' ? 'passed' : ref.metadata.lastConnectivity === 'failed' ? 'failed' : 'unknown',
     lastConnectivityAt: ref.metadata.lastConnectivityAt,
     createdAt: ref.createdAt,
     updatedAt: ref.updatedAt,
     canReveal: false,
   };
+}
+
+function maskApiKey(value: string): string {
+  const key = value.trim();
+  if (!key) return '';
+  if (key.length === 1) return '*';
+  if (key.length === 2) return key;
+  const visibleEach = Math.min(4, Math.max(1, Math.floor((key.length - 1) / 2)));
+  const middleLength = key.length - visibleEach * 2;
+  return `${key.slice(0, visibleEach)}${'*'.repeat(middleLength)}${key.slice(-visibleEach)}`;
 }
 
 export function redactedRuntimeConfigs(configs: OpenAIResolvedConfig[]): OpenAIConfigView[] {

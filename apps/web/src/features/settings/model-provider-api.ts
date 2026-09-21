@@ -2,6 +2,9 @@ export interface ProviderModelVM {
   id: string;
   object?: string;
   ownedBy?: string;
+  /** Optional provider-owned reasoning/thinking controls. Empty means unsupported. */
+  reasoningEfforts?: string[];
+  thinkingLevels?: string[];
 }
 
 export interface ProviderModelsVM {
