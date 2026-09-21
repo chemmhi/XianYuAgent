@@ -52,6 +52,7 @@
 | `root` | `settings-feature-slice` | `feature/settings-feature-slice` | `F:\ChenHai\Project\XianYuAgent-settings-feature-slice` | Codex `/root` | `2026-09-20 20:45:00 +08:00` | `CLEANED` | `6d99306` | `2026-09-20 21:52:18 +08:00` | Settings API Key 首片已合入 `master`；已通过 typecheck、API/Web 测试、构建、Chrome/CDP E2E、隔离 PostgreSQL 018 密文复读、Compose 配置和 diff 检查；发布级 rollback、旧明文凭证兼容迁移仍开放。Git worktree 元数据与分支已清理，残留非 Git 内容已移至 `F:\ChenHai\Project\XianYuAgent-settings-feature-slice.cleaned-20260920`。 |
 | `root` | `settings-route-restore` | `fix/settings-route-restore` | `F:\ChenHai\Project\XianYuAgent-settings-route-fix` | Codex `/root` | `2026-09-20 23:59:00 +08:00` | `CLEANED` | `397e437` | `2026-09-20 00:35:00 +08:00` | 独立复审通过；已在 merge lock 内以 `--no-ff` 合入 `master`；主线 typecheck、Web Vitest、build 与 Settings Chrome/CDP E2E 均通过；worktree 与分支已清理。 |
 | `root/prototype_audit` | `settings-docs-evidence` | `docs/settings-slice-evidence` | `F:\ChenHai\Project\XianYuAgent-settings-docs` | Codex `/root` | `2026-09-20 20:59:57 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 已同步 STATUS、stage5 progress、review log、risk register 与 migrations README；已完成 API/Web 定向验证，真实 PostgreSQL/视觉/独立三轮评审仍开放。 |
+| `root/csrf_send_fix` | `chat-csrf-recovery` | `codex/csrf-send-fix` | `F:\ChenHai\Project\XianYuAgent-csrf-send-fix` | Codex `/root` delegated agent | `2026-09-21 10:35:00 +08:00` | `MERGED` | `91b0e87` | `-` | 修复 API 重启后前端旧 CSRF token 导致在线聊天发送 403：刷新 `/api/v1/auth/session` 后仅重试一次并保留幂等键；Web 回归测试通过。 |
 
 ## 主工作区
 
