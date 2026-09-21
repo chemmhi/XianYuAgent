@@ -27,7 +27,6 @@ export interface AppConfig {
   credentialEncryptionKey: string;
   autoReplySendMode?: AutoReplySendMode;
   autoReplyTestBuyerNames?: string[];
-  autoReplyAgent?: AutoReplyAgentConfig;
 }
 
 export const DEFAULT_DATABASE_URL = 'postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/xianyu_agent';
