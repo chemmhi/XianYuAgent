@@ -3,7 +3,7 @@ import type { ConversationVM, MessageVM, RealtimeEvent } from './types';
 interface Envelope<T> { data?: T; }
 
 export interface MessagesApi {
-  listConversations(input: { accountId: string; cursor?: string; limit?: number }): Promise<{ items: ConversationVM[]; nextCursor?: string; hasMore: boolean }>;
+  listConversations(input: { accountId: string; cursor?: string; limit?: number; refreshExternal?: boolean }): Promise<{ items: ConversationVM[]; nextCursor?: string; hasMore: boolean }>;
   listMessages(input: { accountId: string; conversationId: string; cursor?: number; beforeCursor?: string; limit?: number }): Promise<{ items: MessageVM[]; nextCursor?: number; hasMore: boolean; latestCursor: number; hasMoreHistory: boolean; historyCursor?: string }>;
   markConversationRead?(input: { accountId: string; conversationId: string }): Promise<ConversationVM>;
   sendMessage(input: { accountId: string; conversationId: string; text: string; idempotencyKey: string }): Promise<MessageVM>;
@@ -16,6 +16,7 @@ export function createMessagesApi(input: { get: <T>(path: string) => Promise<T>;
     async listConversations(query) {
       const params = new URLSearchParams({ accountId: query.accountId, limit: String(query.limit ?? 50) });
       if (query.cursor !== undefined) params.set('cursor', String(query.cursor));
+      if (query.refreshExternal !== undefined) params.set('refreshExternal', String(query.refreshExternal));
       const payload = await input.get<Envelope<{ items: ConversationVM[]; nextCursor?: string; hasMore: boolean }>>(`/api/v1/conversations?${params.toString()}`);
       return payload.data ?? { items: [], hasMore: false };
     },

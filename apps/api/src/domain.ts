@@ -624,6 +624,8 @@ export interface ConversationListQuery {
   accountId?: string;
   cursor?: string;
   limit?: number;
+  /** Skip the external Xianyu refresh when reconciling an already-running UI. */
+  refreshExternal?: boolean;
 }
 
 export interface ConversationListResult {

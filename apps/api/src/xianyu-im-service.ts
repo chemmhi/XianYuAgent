@@ -234,7 +234,21 @@ export class XianyuImService {
   }
 
   private async saveCredential(adminId: string, account: AccountRecord, credential: XianyuImCredential): Promise<void> {
-    await this.store.upsertCredential({ adminId, accountId: account.id, platform: account.platform, cookieHeader: credential.cookieHeader, accessToken: credential.accessToken, deviceId: credential.deviceId });
+    // IM token refresh callbacks only carry the refreshed transport fields.
+    // Preserve the browser cookie snapshot and expiry metadata already stored
+    // by QR/cookie login; dropping them forces image uploads back to a stale
+    // flat Cookie header and causes SESSION_EXPIRED on the upload host.
+    const current = await this.store.getCredential(adminId, account.id);
+    await this.store.upsertCredential({
+      adminId,
+      accountId: account.id,
+      platform: account.platform,
+      cookieHeader: credential.cookieHeader,
+      accessToken: credential.accessToken,
+      deviceId: credential.deviceId,
+      metadata: current?.metadata,
+      expiresAt: current?.expiresAt,
+    });
   }
 
   private async enrichConversationIdentity(adminId: string, accountId: string, parsed: { externalConversationRef: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; unreadCount?: number; lastMessagePreview?: string; lastMessageAt?: string }): Promise<typeof parsed> {

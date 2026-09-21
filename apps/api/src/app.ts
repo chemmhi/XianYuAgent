@@ -559,7 +559,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
 
   if (ctx.path === '/api/v1/conversations' && ctx.method === 'GET') {
     const query = parseConversationListQuery(ctx.query);
-    if (query.accountId && query.cursor === undefined) {
+    if (query.accountId && query.cursor === undefined && query.refreshExternal !== false) {
       // The local API cursor is opaque and must never be forwarded to the
       // numeric cursor used by the Xianyu IM protocol. Refresh from the
       // external head only for the first page; the local store owns
@@ -1116,7 +1116,8 @@ function parseCouponBatchListQuery(query: Record<string, string>): import('./dom
 function parseConversationListQuery(query: Record<string, string>): import('./domain.js').ConversationListQuery {
   const cursor = query.cursor === undefined ? undefined : query.cursor;
   const limit = query.limit === undefined ? undefined : Number(query.limit);
-  return { accountId: optionalString(query.accountId), cursor, limit: limit === undefined || Number.isNaN(limit) ? limit : Math.trunc(limit) };
+  const refreshExternal = query.refreshExternal === undefined ? undefined : query.refreshExternal !== 'false';
+  return { accountId: optionalString(query.accountId), cursor, limit: limit === undefined || Number.isNaN(limit) ? limit : Math.trunc(limit), refreshExternal };
 }
 
 function parseMessageListQuery(query: Record<string, string>): import('./domain.js').MessageListQuery {

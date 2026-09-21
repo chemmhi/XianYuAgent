@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createMessagesApi, type MessagesApi } from './api';
-import { applyRealtimeEvent, markConversationRead, mergeConversation, mergeTimelineMessages } from './model';
+import { applyRealtimeEvent, markConversationRead, mergeConversation, mergeTimelineMessages, reconcileConversations } from './model';
 import type { MessagesError, MessagesState, RealtimeEvent } from './types';
 
 const defaultApi = createMessagesApi({ get: async () => { throw new Error('messages api unavailable'); } });
@@ -238,6 +238,38 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
       if (timer) clearTimeout(timer);
     };
   }, [accountId, api, state.activeConversationId, state.timelinePhase]);
+
+  // The realtime socket is scoped to the selected conversation. Reconcile the
+  // local conversation index separately so a buyer message in another thread
+  // updates preview/unread/order without requiring the operator to open it.
+  useEffect(() => {
+    if (!accountId || state.listPhase !== 'success') return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const reconcile = async () => {
+      const currentRequest = requestId.current;
+      try {
+        const result = await api.listConversations({ accountId, limit: 50, refreshExternal: false });
+        if (!cancelled && currentRequest === requestId.current) {
+          setState((previous) => ({
+            ...previous,
+            conversations: reconcileConversations(previous.conversations, result.items, previous.activeConversationId),
+            hasMore: previous.hasMore || result.hasMore,
+            nextCursor: result.nextCursor ?? previous.nextCursor,
+            error: null,
+          }));
+        }
+      } catch {
+        // Keep the last known list visible; the next cycle retries.
+      }
+      if (!cancelled) timer = setTimeout(reconcile, 2500);
+    };
+    timer = setTimeout(reconcile, 2500);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [accountId, api, state.activeConversationId, state.listPhase]);
 
   useEffect(() => { activeIdRef.current = undefined; reconnectAttempt.current = 0; void reload(); return closeRealtime; }, [accountKey, reload, closeRealtime]);
 

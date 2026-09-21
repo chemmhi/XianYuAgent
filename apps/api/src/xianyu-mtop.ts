@@ -91,6 +91,18 @@ export class XianyuMtopClient {
   }
 
   async uploadChatImage(adminId: string, accountId: string, filename: string, contentType: string, data: Buffer): Promise<XianyuChatImageUploadResult> {
+    const firstAttempt = await this.uploadChatImageOnce(adminId, accountId, filename, contentType, data);
+    if (firstAttempt.success || firstAttempt.errorCode !== 'SESSION_EXPIRED') return firstAttempt;
+
+    // The IM WebSocket can remain connected after the browser-side MTOP
+    // session expires. Refresh the MTOP login cookie once, then retry the
+    // upload with the newly persisted scoped cookie snapshot.
+    const refreshed = await this.call(adminId, accountId, 'mtop.taobao.idlemessage.pc.loginuser.get', '1.0', {}, { spm_cnt: 'a21ybx.im.0.0', needLogin: 'false' });
+    if (!refreshed.success) return firstAttempt;
+    return this.uploadChatImageOnce(adminId, accountId, filename, contentType, data);
+  }
+
+  private async uploadChatImageOnce(adminId: string, accountId: string, filename: string, contentType: string, data: Buffer): Promise<XianyuChatImageUploadResult> {
     const credential = await this.loadCredential(adminId, accountId);
     const initialCookieHeader = credential?.cookieHeader?.trim() ?? '';
     let cookieHeader = initialCookieHeader;

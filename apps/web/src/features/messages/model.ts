@@ -15,7 +15,8 @@ export function mergeTimelineMessages(existing: MessageVM[], incoming: MessageVM
 
 export function mergeConversation(existing: ConversationVM[], incoming: ConversationVM): ConversationVM[] {
   const byId = new Map(existing.map((conversation) => [conversation.conversationId, conversation]));
-  byId.set(incoming.conversationId, incoming);
+  const previous = byId.get(incoming.conversationId);
+  if (!previous || !isStaleConversation(incoming, previous)) byId.set(incoming.conversationId, incoming);
   return [...byId.values()].sort((left, right) => conversationSortKey(right).localeCompare(conversationSortKey(left)) || left.conversationId.localeCompare(right.conversationId));
 }
 
@@ -25,8 +26,21 @@ export function markConversationRead(conversations: ConversationVM[], conversati
     : conversation);
 }
 
+export function reconcileConversations(existing: ConversationVM[], incoming: ConversationVM[], activeConversationId?: string): ConversationVM[] {
+  const merged = incoming.reduce((items, conversation) => mergeConversation(items, conversation), existing);
+  return activeConversationId ? markConversationRead(merged, activeConversationId) : merged;
+}
+
 function conversationSortKey(conversation: ConversationVM): string {
   return conversation.lastMessageAt ?? conversation.updatedAt;
+}
+
+function isStaleConversation(incoming: ConversationVM, previous: ConversationVM): boolean {
+  if (incoming.version !== previous.version) return incoming.version < previous.version;
+  const incomingMessageAt = incoming.lastMessageAt ?? '';
+  const previousMessageAt = previous.lastMessageAt ?? '';
+  if (incomingMessageAt !== previousMessageAt) return incomingMessageAt < previousMessageAt;
+  return incoming.updatedAt < previous.updatedAt;
 }
 
 export function filterConversations(conversations: ConversationVM[], search: string, unreadOnly: boolean): ConversationVM[] {

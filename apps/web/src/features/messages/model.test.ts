@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createSocketGenerationGuard } from './controller';
-import { applyRealtimeEvent, filterConversations, markConversationRead, mergeConversation, mergeTimelineMessages } from './model';
+import { applyRealtimeEvent, filterConversations, markConversationRead, mergeConversation, mergeTimelineMessages, reconcileConversations } from './model';
 import type { ConversationVM, MessageVM, RealtimeEvent } from './types';
 
 const conversation: ConversationVM = { conversationId: 'c1', accountId: 'a1', buyerRef: 'b1', buyerDisplayName: '买家', unreadCount: 0, handlingMode: 'ai', version: 1, createdAt: '2026-09-19T00:00:00.000Z', updatedAt: '2026-09-19T00:00:00.000Z' };
@@ -38,6 +38,23 @@ describe('messages realtime model', () => {
   it('updates conversation ordering when a newer event arrives', () => {
     const newer = { ...conversation, version: 2, updatedAt: '2026-09-19T00:00:02.000Z', unreadCount: 1 };
     expect(mergeConversation([conversation], newer)[0]?.version).toBe(2);
+  });
+
+  it('reconciles an unselected buyer thread while preserving the selected thread as read', () => {
+    const selected = { ...conversation, unreadCount: 0 };
+    const other = { ...conversation, conversationId: 'c2', buyerRef: 'b2', unreadCount: 0, lastMessageAt: '2026-09-19T00:00:00.000Z' };
+    const updatedOther = { ...other, unreadCount: 1, lastMessagePreview: '买家新消息', lastMessageAt: '2026-09-21T00:00:02.000Z', updatedAt: '2026-09-21T00:00:02.000Z', version: 2 };
+    const result = reconcileConversations([selected, other], [updatedOther], selected.conversationId);
+    expect(result.map((item) => item.conversationId)).toEqual(['c2', 'c1']);
+    expect(result[0]?.lastMessagePreview).toBe('买家新消息');
+    expect(result[0]?.unreadCount).toBe(1);
+    expect(result[1]?.unreadCount).toBe(0);
+  });
+
+  it('does not let a stale local poll overwrite a newer realtime conversation update', () => {
+    const newer = { ...conversation, version: 4, unreadCount: 1, lastMessagePreview: '实时新消息', lastMessageAt: '2026-09-21T00:00:04.000Z', updatedAt: '2026-09-21T00:00:04.000Z' };
+    const stale = { ...conversation, version: 3, unreadCount: 0, lastMessagePreview: '旧快照', lastMessageAt: '2026-09-21T00:00:03.000Z', updatedAt: '2026-09-21T00:00:03.000Z' };
+    expect(reconcileConversations([newer], [stale])[0]?.lastMessagePreview).toBe('实时新消息');
   });
 
   it('orders conversations by latest message time before metadata refresh time', () => {

@@ -103,7 +103,11 @@ export function applySetCookies(snapshot: XianyuCookieSnapshot, requestUrl: stri
   if (!hostname) return normalizeCookieSnapshot(snapshot) ?? [];
   const state = normalizeCookieSnapshot(snapshot) ?? [];
   for (const raw of setCookies) {
-    const parts = splitSetCookie(raw);
+    // `set-cookie` values are already separated into individual headers by
+    // setCookieValues/getSetCookie. Split each header into its cookie pair and
+    // semicolon-delimited attributes; treating the whole header as the value
+    // silently leaves stale cookies in the snapshot.
+    const parts = raw.split(/;\s*/).map((part) => part.trim()).filter(Boolean);
     const first = parts.shift() ?? '';
     const separator = first.indexOf('=');
     if (separator <= 0) continue;

@@ -18,6 +18,16 @@ const sentImage: MessageVM = {
 };
 
 describe('messages API media contract', () => {
+  it('can read the local conversation index without refreshing Xianyu', async () => {
+    let capturedPath = '';
+    const api = createMessagesApi({
+      get: async <T>(path: string) => { capturedPath = path; return { data: { items: [], hasMore: false } } as unknown as T; },
+    });
+    await api.listConversations({ accountId: 'a-1', limit: 50, refreshExternal: false });
+    expect(capturedPath).toContain('/api/v1/conversations?');
+    expect(capturedPath).toContain('refreshExternal=false');
+  });
+
   it('posts a conversation read receipt after opening the timeline', async () => {
     let capturedPath = '';
     const api = createMessagesApi({

@@ -24,6 +24,8 @@ const updated = applySetCookies(snapshot, 'https://h5api.m.goofish.com/h5/orders
 ]);
 assert.match(cookieHeaderForUrl(updated, 'https://h5api.m.goofish.com/h5/orders'), /root=2/);
 assert.doesNotMatch(cookieHeaderForUrl(updated, 'https://h5api.m.goofish.com/h5/orders'), /partitioned=1/);
+assert.equal(updated.find((cookie) => cookie.name === 'root')?.value, '2');
+assert.doesNotMatch(cookieHeaderForUrl(updated, 'https://h5api.m.goofish.com/h5/orders'), /Domain=|Path=|Secure=/);
 
 const partitioned = applySetCookies(snapshot, 'https://h5api.m.goofish.com/h5/orders', [
   'partitioned=1; Domain=.goofish.com; Path=/; Secure; SameSite=None; Partitioned',
