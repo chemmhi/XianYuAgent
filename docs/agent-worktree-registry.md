@@ -53,6 +53,7 @@
 | `root` | `settings-route-restore` | `fix/settings-route-restore` | `F:\ChenHai\Project\XianYuAgent-settings-route-fix` | Codex `/root` | `2026-09-20 23:59:00 +08:00` | `CLEANED` | `397e437` | `2026-09-20 00:35:00 +08:00` | 独立复审通过；已在 merge lock 内以 `--no-ff` 合入 `master`；主线 typecheck、Web Vitest、build 与 Settings Chrome/CDP E2E 均通过；worktree 与分支已清理。 |
 | `root/prototype_audit` | `settings-docs-evidence` | `docs/settings-slice-evidence` | `F:\ChenHai\Project\XianYuAgent-settings-docs` | Codex `/root` | `2026-09-20 20:59:57 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 已同步 STATUS、stage5 progress、review log、risk register 与 migrations README；已完成 API/Web 定向验证，真实 PostgreSQL/视觉/独立三轮评审仍开放。 |
 | `root/csrf_send_fix` | `chat-csrf-recovery` | `codex/csrf-send-fix` | `F:\ChenHai\Project\XianYuAgent-csrf-send-fix` | Codex `/root` delegated agent | `2026-09-21 10:35:00 +08:00` | `MERGED` | `91b0e87` | `-` | 修复 API 重启后前端旧 CSRF token 导致在线聊天发送 403：刷新 `/api/v1/auth/session` 后仅重试一次并保留幂等键；Web 回归测试通过。 |
+| `root/listener_ready` | `auto-reply-buyer-identity` | `codex/listener-allowlist` | `F:\ChenHai\Project\XianYuAgent-listener-allowlist` | Codex `/root` delegated agent | `2026-09-21 10:43:00 +08:00` | `MERGED` | `e86af0f` | `-` | 修复真实 push 缺少 senderName 且本地会话无昵称时白名单误跳过：按稳定 externalConversationRef 补全闲鱼买家身份并持久化；新增回归测试通过。 |
 
 ## 主工作区
 

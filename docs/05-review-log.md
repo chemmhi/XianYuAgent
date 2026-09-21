@@ -414,3 +414,6 @@
 | S5-R75 | 业务 / 真实验收 | 是否已有真实买家 WebSocket push 驱动自动回复和 live 发送的完整证据 | root | BLOCKED / PARTIALLY_VERIFIED | 当前 `4310178918003.PNM` 仅存在历史导入消息，`auto_reply_runs` 为空；DB probe 未收到新的买家消息，禁止用合成事件代替 |
 
 本轮结论：已修复网关混合帧丢失、错误响应误判、并发启动和断线恢复问题；当前应用会在启动后自动监听，不依赖管理员打开页面。真实买家 push→自动回复→真实发送仍需在 probe 等待窗口内由闲鱼外部买家产生新消息后单独归档。
+
+| S5-R76 | 前端 / 鉴权 | 在线聊天页面在 API 重启后是否能恢复旧 CSRF token 并安全重放发送请求 | root + csrf_send_fix | PASS | `apps/web/src/api/http.ts`、`apps/web/src/api/http.test.ts`；403 `CSRF_INVALID` → session refresh → 单次重试，保留幂等键；Web 38 files / 117 tests、typecheck、build |
+| S5-R77 | 业务 / 白名单 | 真实 push 缺少买家昵称时是否会因身份缺失而被错误跳过 | root + listener_ready | PASS（受控回归） | `apps/api/src/xianyu-im-service.ts`、`apps/api/scripts/auto-reply.test.ts`；按 external conversation ref 补全身份后 allowlist 通过，run persisted |
