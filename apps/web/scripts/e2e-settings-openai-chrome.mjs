@@ -168,6 +168,10 @@ async function openModelOptions(cdp, role) {
   return evaluate(cdp, `(() => { const select = document.querySelector('[data-openai-config="${role}"] select'); if (!select) throw new Error('missing model select'); select.focus(); select.click(); return true; })()`);
 }
 
+async function modelOptionValues(cdp, role) {
+  return evaluate(cdp, `Array.from(document.querySelector('[data-openai-config="${role}"] select')?.options ?? []).map((option) => option.value).filter(Boolean)`);
+}
+
 async function clickCardButton(cdp, role, text) {
   return evaluate(cdp, `(() => { const card = document.querySelector('[data-openai-config="${role}"]'); const button = Array.from(card?.querySelectorAll('button') ?? []).find((node) => node.textContent?.trim() === ${JSON.stringify(text)}); if (!button) throw new Error('missing card button: ' + ${JSON.stringify(role)} + '/' + ${JSON.stringify(text)}); button.click(); return true; })()`);
 }
@@ -341,6 +345,26 @@ async function run() {
   assert.ok(savedPrimary.fingerprint && savedPrimary.fingerprint !== primarySecret, 'primary fingerprint missing');
   assert.ok(savedBackup.fingerprint && savedBackup.fingerprint !== backupSecret, 'backup fingerprint missing');
 
+  // Each persisted config must query its own provider. Opening the backup
+  // dropdown must not replace the primary card's provider-owned options.
+  const primaryModelCallsBefore = primary.state.requests.filter((request) => request.path === '/v1/models').length;
+  await openModelOptions(cdp, 'primary');
+  await waitFor(async () => (await modelOptionValues(cdp, 'primary')).includes(primary.model), 'primary provider models');
+  const primaryModelCallsAfter = primary.state.requests.filter((request) => request.path === '/v1/models').length;
+  assert.equal(primaryModelCallsAfter - primaryModelCallsBefore, 1, 'primary dropdown triggered duplicate provider probes');
+  const primaryOptions = await modelOptionValues(cdp, 'primary');
+  assert.ok(primaryOptions.includes(primary.model), `primary model missing from primary card: ${JSON.stringify(primaryOptions)}`);
+  assert.equal(primaryOptions.includes(backup.model), false, 'primary card exposed backup provider model');
+  const backupModelCallsBefore = backup.state.requests.filter((request) => request.path === '/v1/models').length;
+  await openModelOptions(cdp, 'backup');
+  await waitFor(async () => (await modelOptionValues(cdp, 'backup')).includes(backup.model), 'backup provider models');
+  const backupModelCallsAfter = backup.state.requests.filter((request) => request.path === '/v1/models').length;
+  assert.equal(backupModelCallsAfter - backupModelCallsBefore, 1, 'backup dropdown triggered duplicate provider probes');
+  const backupOptions = await modelOptionValues(cdp, 'backup');
+  assert.ok(backupOptions.includes(backup.model), `backup model missing from backup card: ${JSON.stringify(backupOptions)}`);
+  assert.equal(backupOptions.includes(primary.model), false, 'backup card exposed primary provider model');
+  assert.deepEqual(await modelOptionValues(cdp, 'primary'), primaryOptions, 'opening backup changed primary model options');
+
   const browserSecretLeak = await evaluate(cdp, `(() => {
     const text = document.body.innerText;
     const values = Array.from(document.querySelectorAll('input,textarea')).map((input) => input.value);
@@ -356,6 +380,19 @@ async function run() {
 
   const primarySuccessDesktop = await captureViewport(cdp, 1440, 900, 'settings-openai-primary-success-desktop-1440x900.png');
   const primarySuccessMobile = await captureViewport(cdp, 390, 844, 'settings-openai-primary-success-mobile-390x844.png', 320);
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
+  const mobileBottomReachability = await evaluate(cdp, `(() => {
+    const main = document.querySelector('main.settings-main');
+    const target = main && main.scrollHeight > main.clientHeight ? main : document.scrollingElement;
+    target?.scrollTo(0, target?.scrollHeight ?? 0);
+    const nav = document.querySelector('.settings-mobile-bottom');
+    const backup = document.querySelector('[data-openai-config="backup"]');
+    const actions = backup?.querySelector('.card-actions');
+    const navHeight = nav?.getBoundingClientRect().height ?? 0;
+    const actionsRect = actions?.getBoundingClientRect();
+    return { actionsBottom: actionsRect?.bottom ?? 0, viewportBottom: window.innerHeight - navHeight, navHeight };
+  })()`);
+  assert.ok(mobileBottomReachability.actionsBottom <= mobileBottomReachability.viewportBottom, `mobile backup actions are hidden behind bottom nav: ${JSON.stringify(mobileBottomReachability)}`);
 
   const conversation = await runtime.store.createConversation({ adminId, accountId, buyerRef: 'buyer-openai-e2e', buyerDisplayName: 'Buyer E2E', itemRef: 'item-openai-e2e', itemTitle: 'OpenAI E2E 商品', externalConversationRef: `openai-e2e-${process.pid}` });
   async function runAgent(label) {
