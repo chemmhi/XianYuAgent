@@ -23,4 +23,40 @@ describe('SelectField', () => {
     expect(html).toContain('value="text"');
     expect(html).toContain('value="image"');
   });
+
+  it('keeps field classes on the documented wrapper and passes native attributes through', () => {
+    const html = renderToStaticMarkup(createElement(SelectField, {
+      id: 'account-status',
+      label: '账号状态',
+      className: 'accounts-domain-status-select',
+      'aria-label': '账号状态筛选',
+      value: 'active',
+      disabled: true,
+      onChange: vi.fn(),
+      options: [
+        { value: 'all', label: '全部状态' },
+        { value: 'active', label: '已连接' },
+        { value: 'disabled', label: '已停用', disabled: true },
+      ],
+    }));
+
+    expect(html).toContain('class="ui-field accounts-domain-status-select"');
+    expect(html).toContain('id="account-status"');
+    expect(html).toContain('aria-label="账号状态筛选"');
+    expect(html).toContain('disabled');
+    expect(html).toContain('value="disabled" disabled');
+    expect(html).toContain('class="ui-select-chevron"');
+  });
+
+  it('applies a standalone class to the control wrapper when no label is provided', () => {
+    const html = renderToStaticMarkup(createElement(SelectField, {
+      className: 'orders-status-select',
+      value: 'all',
+      onChange: vi.fn(),
+      options: [{ value: 'all', label: '全部' }],
+    }));
+
+    expect(html).toContain('class="ui-select-control orders-status-select"');
+    expect(html).not.toContain('class="ui-field orders-status-select"');
+  });
 });

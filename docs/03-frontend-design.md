@@ -98,6 +98,7 @@ App
 - `ConfirmationCard`、`BeforeAfterRows`、`AuditStrip`：用于高风险外部写动作，必须显示风险、差异、幂等键摘要和审计引用。
 - `LoadingState`、`EmptyState`、`ErrorState`、`ForbiddenState`、`DisabledState`：统一页面状态，不允许各页自行创造互相冲突的文案和颜色。
 - `ModalHost`、`ToastHost`：只管理交互反馈，不直接执行 API；API 调用由页面 controller 发起。
+- `SelectField`：所有业务域原生下拉统一通过共享组件渲染，组件负责统一 chevron、字号、边框、圆角、焦点和 disabled option；页面只传入 `options` 与受控事件。高保真按钮式下拉（例如 Agent 动态筛选）属于明确的视觉特例，不回退为原生 `<select>`。
 
 页面组件只拥有页面布局和 controller，不拥有数据库字段映射、平台原始字段或凭证明文。
 

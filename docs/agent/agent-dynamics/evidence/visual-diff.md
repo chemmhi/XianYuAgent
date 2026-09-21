@@ -40,19 +40,19 @@ Token 比对命令：从原型 HTML blob 提取 `:root` token，再与 `agent-dy
 
 本轮用户反馈聚焦输入框、下拉框、筛选框、按钮和字体细节。复核发现并修复了两个导致截图级失真的根因：
 
-1. 原型使用 `<button class="btn">` / `<button class="filter">`，实现曾使用原生 `<select>`；原生箭头、UA padding、line-height 和 option 字体导致宽度与字形明显偏离。
-2. `.agent-dynamics-app button, input, select { font: inherit; }` 的特异性高于控件单类规则，把原型的 10–11px、600 字重重置成宿主的 16px/400，导致所有控件视觉被放大。
+1. 业务页曾各自定义原生 `<select>` 外观，原生箭头、UA padding、line-height 和 option 字体造成跨页面漂移。
+2. `.agent-dynamics-app button, input, select { font: inherit; }` 的特异性高于控件单类规则，把控件字号和字重重置成宿主值，导致视觉被放大。
 
-修复后，时间范围和状态/阶段筛选改为可访问的按钮触发自定义菜单；同时把通用字体规则改为仅继承 `font-family`，保留每个控件自己的字号和字重。Chrome/CDP computed-style 证据（1440×900）如下：
+修复后，所有业务下拉（包括 Agent 动态的时间范围、运行状态、运行阶段）都通过共享 `SelectField` 渲染；Agent 动态仅保留领域适配组件，不再渲染按钮式菜单。共享组件按 `xianyu-admin-design-style` token 统一处理 12px 正文、400 字重、`#F6F7F9` 填充、`#E5E7EB` 边框、7px 圆角、SVG chevron、hover/focus/disabled 状态。Chrome/CDP computed-style 证据（1440×900）如下：
 
 | 控件 | 元素 | 字号 | 字重 | 字色 | 背景 | 圆角 | 宽度 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 时间范围 | `BUTTON` | `11px` | `600` | `rgb(71, 85, 105)` | `rgb(255, 255, 255)` | `7px` | `102.30px` |
+| 时间范围 | `SELECT` | `12px` | `400` | `rgb(17, 24, 39)` | `rgb(246, 247, 249)` | `7px` | `113px` |
 | 主按钮 | `BUTTON` | `11px` | `600` | `#fff` | `rgb(36, 90, 141)` | `7px` | `103px` |
-| 状态筛选 | `BUTTON` | `10px` | `400` | `rgb(71, 85, 105)` | `#fff` | `6px` | `74.09px` |
+| 状态筛选 | `SELECT` | `12px` | `400` | `rgb(17, 24, 39)` | `rgb(246, 247, 249)` | `7px` | `96px` |
 | 搜索框 | `INPUT` | `11px` | 宿主 normal | `rgb(17, 24, 39)` | `rgb(246, 247, 249)` | `7px` | `220px` |
 
-原型截图中右上时间按钮外框约 94px、主按钮约 103px；修复后主按钮实测 103px，时间按钮因自定义箭头与实际文本宽度实测 102.30px，已移除原生 select 的额外 UA 宽度和双箭头。E2E 同时断言 `.agent-dynamics-app select` 数量为 0，避免浏览器默认 select 外观回归。
+本轮截图已与 Git 固定原型桌面基线并排复核：宿主左侧栏、顶部栏仍按产品约束移除；右侧业务区的卡片、密度、颜色、字体层级与共享下拉 token 保持一致。E2E 断言 Agent 动态区域恰好包含 3 个 `.ui-select-control select`，并校验 aria label、元素类型和 computed style，避免回退为按钮菜单或浏览器默认箭头。
 
 ## 动态刷新验收（2026-09-21）
 

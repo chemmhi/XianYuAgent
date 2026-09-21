@@ -1,11 +1,19 @@
 # XianyuSellerAgent 项目状态
 
-## 2026-09-21 Agent 动态控件与轮询视觉修复
+## 2026-09-21 全局 SelectField 统一
 
-- 修复控件级高保真问题：移除原生 `select` 作为可视触发器，改为按钮 + 自定义菜单；修正 `.agent-dynamics-app` 字体级联优先级，恢复原型 10–11px 字号、600/400 字重、字体颜色、圆角和背景 token。
+- 全局盘点确认项目已有共享 `apps/web/src/shared/ui/SelectField.tsx`；账号、商品、卡券、订单、设置及 Agent 动态的业务下拉全部统一复用，业务层不再直接渲染原生 `<select>`。
+- Agent 动态保留 `AgentDynamicsDropdown` 领域适配层，但内部改为委托共享 `SelectField`，不再使用按钮式自定义菜单；时间范围、运行状态、运行阶段共 3 个下拉均受统一 aria、chevron、focus、disabled 和设计 token 约束。
+- `select-field.css` 按 `xianyu-admin-design-style` 收敛到 `#F6F7F9` 填充、`#E5E7EB` 边框、7px 圆角、12px/400 正文、统一 SVG chevron；各业务 CSS 仅保留布局宽度，不再覆盖控件外观。
+- 新增 `select-usage.test.ts` 架构扫描、`SelectField.test.ts` 透传/disabled 回归、`AgentDynamicsDropdown.test.ts` 共享委托回归；当前 Web 测试为 45 个文件 / 135 个用例。
+- 验证：`npm --workspace apps/web run typecheck`、`npm --workspace apps/web run test -- --run`（45 files / 135 tests）、`npm --workspace apps/web run build`、`npm run build:api`、`npm --workspace apps/web run test:e2e:chrome:agent-dynamics`、`git diff --check` 均通过；E2E 真实 PostgreSQL → API → Chrome/CDP 链路重新生成四张截图，视觉对比记录见 `docs/agent/agent-dynamics/evidence/visual-diff.md`。
+
+## 2026-09-21 Agent 动态控件与轮询视觉修复（历史方案，已由全局 Select 统一取代）
+
+- 修复控件级高保真问题：该阶段曾移除原生 `select` 作为可视触发器并改为按钮 + 自定义菜单；后续全局 SelectField 统一已将 Agent 动态三个筛选恢复为共享下拉组件，当前实现与证据以本文件上一节为准。
 - 修复 `<a class="agent-dynamics-btn">` 空态 CTA 的按钮化布局，分页省略号恢复为 24×24 page button；按钮保留键盘 focus-visible 可见焦点。
 - 修复 5 秒轮询时的视觉闪烁：KPI 不再在后台刷新时替换为 skeleton；运行列表刷新失败保留最近一次成功数据、分页和筛选，只显示 inline error。
-- Chrome/CDP computed-style 复核：无 Agent 区域原生 select；时间范围 11px/600/102.30px，主按钮 11px/600/103px，筛选 10px/74.09px，搜索框 11px/220px；颜色、背景和圆角断言通过。
+- Chrome/CDP computed-style 复核：该历史按钮方案曾验证无 Agent 区域原生 select；当前共享 SelectField 的最新 computed-style、元素语义和 3 个下拉计数以本文件上一节及 `evidence.json` 为准。
 - 验证：`npm --workspace apps/web run typecheck`、`npm --workspace apps/web run test -- --run`（44 files / 133 tests）、`npm run build`、`npm --workspace apps/web run test:e2e:chrome:agent-dynamics`、`git diff --check` 均通过；视觉记录见 `docs/agent/agent-dynamics/evidence/visual-diff.md`。
 
 ## 2026-09-21 Agent 动态壳层与视觉复验增量
@@ -19,7 +27,7 @@
 ## 2026-09-21 增量修复
 
 - OpenAI API 主备配置切片：`/settings` 正式 OpenAI API 面板已严格对齐 SellerAgent 双卡片视觉；每张卡片支持测试连通性与保存，Model 下拉按展开时 provider `/models` 动态读取。真实 PostgreSQL smoke 与 Chrome/CDP E2E 已通过 UI → API → 数据库 → Agent；Agent 输出验证为 `PRIMARY_V1_REPLY` → `PRIMARY_V2_REPLY` → `BACKUP_REPLY`，PostgreSQL 重启后仍命中备用。`.env` 中第二套 DeepSeek 真实配置保持注释态，仅由测试进程临时加载并完成真实 `/models` 与文本生成验证，未修改配置文件。视觉证据和逐项偏差记录见 `docs/evidence/stage5/S4-VS7A/`；切片仍保持 `READY_FOR_REVIEW`。
-- 合并后门禁：`9be12d8` 已将 `b21e531`、`0283936`、`b6a7539`、`562833b` 以 merge commit 合入 `master`；后续 `f8ad6f3` 补齐共享模型下拉控件视觉与固定 viewport 截图。真实 PostgreSQL E2E exit code 0，截图已在固定 `1440×900` / `390×844` viewport 复核。切片仍保持 `READY_FOR_REVIEW`，fallback 专用审计和发布级 migration rollback 继续开放。
+- 合并后门禁：`db1ea70` 已以 `--no-ff` 合入 `master`，`56a54aa` 修复 OpenAI Chrome/CDP E2E 资源清理；真实 PostgreSQL E2E exit code 0，截图已在固定 `1440×900` / `390×844` viewport 复核。切片仍保持 `READY_FOR_REVIEW`，fallback 专用审计和发布级 migration rollback 继续开放。
 - 自动回复 Agent 设置与动态联调：设置页 Tab 已改为“自动回复 Agent”，配置通过独立 `AutoReplyAgentSettingsService` 持久化；买家 Agent 使用四个只读工具并在每条入站消息前读取最新管理员配置，支持 Prompt、循环/工具上限、上下文、回复长度、分段、防抖、已支付订单策略和 simulate/live（live 仍受环境变量买家白名单约束）。真实 push→tool call→生成→模拟出站→消息/`auto_reply_runs` 落库 E2E 3/3 通过；Chrome/CDP 设置页 E2E 通过；当前仍为 simulate 验证，真实闲鱼发送与发布级恢复未关闭。
 - 自动回复模型接入：复用 Workspace 的 `API_KEY/BASE_URL/MODEL/MODEL_TIMEOUT_MS` 环境变量和同一个 OpenAI-compatible `ModelClient`；配置完整时走 `ModelAutoReplyGenerator`，缺少配置时保留模板生成，Provider 失败安全落库为失败且不创建 outbound；新增模型上下文裁剪、成功装配和 503 失败回归测试。
 - 在线聊天 CSRF：API 重启后旧页面的 token 失效时，前端刷新 `/api/v1/auth/session` 后仅重试原 mutation 一次并保留 `Idempotency-Key`；Web 38 个测试文件 / 117 个用例、类型检查、构建通过。
@@ -30,13 +38,13 @@
 - 项目阶段：5
 - 阶段状态：进行中（账号管理、商品、卡券已具备主体链路；S4-VS3 仍待真实环境人工复核；下一批优先切片调整为在线聊天、Workspace 工作台和 Settings API Key 配置）
 - 最近一次通过门禁：S4-VS-DASHBOARD 全链路复核 / 2026-09-20（PASS；项目整体仍处于阶段 5 进行中）
-- 当前目标：完成 `S4-VS5A` 独立复审后推进 `S4-VS5B/C`；并行收尾 `S4-VS6B`，以及 `S4-VS7A` 的 fallback 审计可查询化、迁移 024 发布级 rollback/兼容窗口和独立评审，不再把受控证据冒充发布级完成
+- 当前目标：完成 `S4-VS5A` 独立复审后推进 `S4-VS5B/C`；并行收尾 `S4-VS6B`、`S4-VS7A` 的真实 PostgreSQL、浏览器视觉和独立评审门禁，以及既有账号/商品/卡券真实环境门禁，不再把受控证据冒充发布级完成
 - 多 Agent 协作状态：已启用独立 worktree、登记表和全局 merge lock 强制规则；当前活动登记见 `docs/agent-worktree-registry.md`，主工作区禁止直接开发
 - 已完成范围：阶段 0 范围门禁；阶段 1 架构与模块边界；阶段 2 数据模型、数据库表设计、关系基数、状态机、API envelope、幂等、鉴权、敏感交付、迁移边界；阶段 5 账号登录方法选择、真实 QR 适配器、Cookie 登录、账号资料同步、登录会话持久化、AuthGate 会话门禁、Vite 默认代理、账号列表真实读取和 Chrome/CDP 控制环境 E2E；S4-VS2 商品列表/详情只读首片、003_catalog 迁移、Memory/Postgres scope-aware 查询、真实 PostgreSQL smoke 和 Chrome/CDP 商品 E2E
 - 未完成范围：在线聊天 `S4-VS5B/C`、Workspace `S4-VS6B`、Settings API Key `S4-VS7A` 已完成首片并保持 `READY_FOR_REVIEW`；订单交付 `S4-VS4B/C`；订单只读列表 `S4-VS4A` 的真实闲鱼读取与 PostgreSQL 落库已通过，交付动作仍后置；Dashboard 全状态截图、独立视觉签核与 rollback 仍开放；VS5A 保持 `PARTIALLY_VERIFIED`，待独立复审确认生产部署拓扑后关闭 `S5-RISK-021`；`S4-VS6A` 已完成真实 PostgreSQL、WS 和 Chrome/CDP 首链路复核并保持 `PARTIALLY_VERIFIED`，尚未满足独立 Worker/Pi Runtime、发布级恢复和人工视觉签核；商品/卡券剩余写入与库存门禁；`S4-ENV-RECOVERY`、`S4-EXT-ACCOUNT`、`S4-ENV-RUNTIME`；完整迁移/回滚/Testcontainers、Redis/MinIO 恢复和逐状态视觉回归。账号密码登录依赖独立浏览器运行时，当前明确不可用。
-- 未解决风险：除既有项目风险外，OpenAI 主备切换的 `S5-RISK-033/P2`（fallback 专用审计未暴露）与 `S5-RISK-034/P1`（迁移 024 的发布级 rollback/兼容窗口）保持开放；`S5-RISK-028/P2` 已部分缓解但仍待独立视觉签核。
+- 未解决风险：除既有项目风险外，OpenAI 主备切换的 `S5-RISK-031/P2`（fallback 专用审计未暴露）与 `S5-RISK-032/P1`（迁移 024 的发布级 rollback/兼容窗口）保持开放；`S5-RISK-028/P2` 已部分缓解但仍待独立视觉签核。
 - 待复审问题：S3-R5 为超出当前范围的实现审计；S3-R6 设计范围已澄清；S1-I004 保持 P2 跟进项；阶段 4 计划门禁已通过
-- 下一步：推进 `S4-VS5B/C`、`S4-VS6B`；`S4-VS7A` 仅剩 fallback 审计可查询化、迁移 024 发布级 rollback/兼容窗口和三轮独立复审。VS5A 的真实 Redis/PostgreSQL、跨进程广播、重启恢复和 Chrome/CDP 断线证据已归档，待独立复审确认生产部署拓扑。商品同步、卡券首页等既有首片证据继续保留，但不替代真实外部账号、持久化和人工视觉门禁
+- 下一步：推进 `S4-VS5B/C`、`S4-VS6B`；并完成 `S4-VS7A` 的真实 PostgreSQL、Chrome/CDP 双 viewport、403/409 跨层 E2E、迁移回滚和三轮独立复审。VS5A 的真实 Redis/PostgreSQL、跨进程广播、重启恢复和 Chrome/CDP 断线证据已归档，待独立复审确认生产部署拓扑。商品同步、卡券首页等既有首片证据继续保留，但不替代真实外部账号、持久化和人工视觉门禁
 
 ## 当前证据
 - `2026-09-20 自动回复链路切片`：按设计文档收敛为“入站规范化/事实先落库 → 幂等回放 → 风险优先意图 → 商品/订单/会话分层上下文 → 可回答性与策略门禁 → 受事实约束的生成 → 输出安全校验 → Noop 模拟投递 → AI 出站消息与 `auto_reply_runs` 落库 → 脱敏审计回读”；`npm --workspace apps/api run test:auto-reply:e2e`、`npm --workspace apps/api run test:auto-reply:postgres`、`npm run db:migrate`、`npm run typecheck`、`npm test`、`npm run build`、`npm run compose:config`、`git diff --check` 均通过。真实闲鱼发送调用次数为 0；本切片仅验证 dry-run，不关闭在线聊天发送/附件/撤回、真实模型 Provider、Outbox Worker 或发布级回滚风险。

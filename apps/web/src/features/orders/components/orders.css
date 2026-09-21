@@ -7,8 +7,8 @@
 .orders-toolbar-actions .orders-filter-row{flex:0 1 auto}
 .orders-filters-wrap{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--border);background:#fff}
 .orders-filter-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
-.orders-filter-row select,.orders-search{height:34px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--muted);font-size:11px}
-.orders-filter-row select{padding:0 34px 0 10px}
+.orders-filter-row .ui-select-control{min-width:0}
+.orders-search{height:34px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--muted);font-size:11px}
 .orders-status-select{min-width:132px}
 .orders-search{display:flex;align-items:center;gap:7px;width:228px;padding:0 10px}
 .orders-search svg{width:14px;height:14px;fill:none;stroke:#9CA3AF;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
@@ -96,7 +96,7 @@
   .orders-toolbar-actions .orders-context-error{grid-column:1/-1}
   .orders-toolbar-actions .btn{width:100%}
   .orders-search{grid-column:1/-1;width:100%}
-  .orders-filter-row select{width:100%}
+  .orders-filter-row .ui-select-control{width:100%}
   .orders-context-error{align-self:flex-start}
   .orders-table-scroll{max-height:none;min-height:140px;overflow:auto}
   .orders-table{min-width:0}

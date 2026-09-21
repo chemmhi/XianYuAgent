@@ -180,9 +180,9 @@ async function run() {
     })()`);
     for (const [key, passed] of Object.entries(shellAssertions)) if (!passed) throw new Error(`Agent dynamics shell assertion failed: ${key}`);
     const controlAssertions = await evaluate(cdp, `(() => {
-      const head = document.querySelector('.agent-dynamics-head-range');
+      const head = document.querySelector('.agent-dynamics-head-range select');
       const primary = document.querySelector('.agent-dynamics-head-actions .agent-dynamics-btn.primary');
-      const filter = document.querySelector('.agent-dynamics-filter');
+      const filter = document.querySelector('.agent-dynamics-filter select');
       const search = document.querySelector('.agent-dynamics-search');
       const style = (node) => node ? getComputedStyle(node) : null;
       const headStyle = style(head);
@@ -190,7 +190,9 @@ async function run() {
       const filterStyle = style(filter);
       const searchStyle = style(search);
       return {
-        noNativeSelects: document.querySelectorAll('.agent-dynamics-app select').length === 0,
+        sharedSelectCount: document.querySelectorAll('.agent-dynamics-app .ui-select-control select').length,
+        headAriaLabel: head?.getAttribute('aria-label') ?? '',
+        filterAriaLabel: filter?.getAttribute('aria-label') ?? '',
         headTag: head?.tagName ?? '',
         filterTag: filter?.tagName ?? '',
         headFontSize: headStyle?.fontSize ?? '',
@@ -214,9 +216,9 @@ async function run() {
         searchWidth: search?.getBoundingClientRect().width ?? 0,
       };
     })()`);
-    if (!controlAssertions.noNativeSelects || controlAssertions.headTag !== 'BUTTON' || controlAssertions.filterTag !== 'BUTTON') throw new Error(`Agent dynamics control semantics failed: ${JSON.stringify(controlAssertions)}`);
-    if (controlAssertions.headFontSize !== '11px' || controlAssertions.headFontWeight !== '600' || controlAssertions.primaryFontSize !== '11px' || controlAssertions.primaryFontWeight !== '600' || controlAssertions.filterFontSize !== '10px' || controlAssertions.searchFontSize !== '11px') throw new Error(`Agent dynamics control typography failed: ${JSON.stringify(controlAssertions)}`);
-    if (controlAssertions.headColor !== 'rgb(71, 85, 105)' || controlAssertions.filterColor !== 'rgb(71, 85, 105)' || controlAssertions.searchColor !== 'rgb(17, 24, 39)' || controlAssertions.headBackground !== 'rgb(255, 255, 255)' || controlAssertions.searchBackground !== 'rgb(246, 247, 249)' || controlAssertions.primaryBackground !== 'rgb(36, 90, 141)' || controlAssertions.headRadius !== '7px' || controlAssertions.filterRadius !== '6px' || controlAssertions.searchRadius !== '7px') throw new Error(`Agent dynamics control color/token failed: ${JSON.stringify(controlAssertions)}`);
+    if (controlAssertions.sharedSelectCount !== 3 || controlAssertions.headTag !== 'SELECT' || controlAssertions.filterTag !== 'SELECT' || controlAssertions.headAriaLabel !== '时间范围' || controlAssertions.filterAriaLabel !== '运行状态') throw new Error(`Agent dynamics control semantics failed: ${JSON.stringify(controlAssertions)}`);
+    if (controlAssertions.headFontSize !== '12px' || controlAssertions.headFontWeight !== '400' || controlAssertions.primaryFontSize !== '11px' || controlAssertions.primaryFontWeight !== '600' || controlAssertions.filterFontSize !== '12px' || controlAssertions.searchFontSize !== '11px') throw new Error(`Agent dynamics control typography failed: ${JSON.stringify(controlAssertions)}`);
+    if (controlAssertions.headColor !== 'rgb(17, 24, 39)' || controlAssertions.filterColor !== 'rgb(17, 24, 39)' || controlAssertions.searchColor !== 'rgb(17, 24, 39)' || controlAssertions.headBackground !== 'rgb(246, 247, 249)' || controlAssertions.searchBackground !== 'rgb(246, 247, 249)' || controlAssertions.primaryBackground !== 'rgb(36, 90, 141)' || controlAssertions.headRadius !== '7px' || controlAssertions.filterRadius !== '7px' || controlAssertions.searchRadius !== '7px') throw new Error(`Agent dynamics control color/token failed: ${JSON.stringify(controlAssertions)}`);
     if (controlAssertions.headWidth > 120 || controlAssertions.primaryWidth > 130 || controlAssertions.filterWidth > 120 || Math.abs(controlAssertions.searchWidth - 220) > 2) throw new Error(`Agent dynamics control geometry failed: ${JSON.stringify(controlAssertions)}`);
     console.log(JSON.stringify({ controlAssertions }));
     const desktopPath = await captureViewport(cdp, 1440, 900, 'agent-dynamics-desktop-1440x900.png');

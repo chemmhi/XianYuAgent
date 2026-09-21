@@ -48,7 +48,7 @@ export function AgentDynamicsPage({ api: providedApi, onNavigate }: AgentDynamic
   return <div className="agent-dynamics-app">
     <section className="agent-dynamics-shell">
       <main className="agent-dynamics-main">
-        <div className="agent-dynamics-page-head"><div><div className="agent-dynamics-eyebrow">Buyer-facing automation</div><h1>自动回复 Agent</h1><div className="agent-dynamics-page-sub">只关注买家消息进入后的实时处理状态、链路动态和可追溯运行记录。</div></div><div className="agent-dynamics-head-actions"><AgentDynamicsDropdown value={controller.filters.range} options={rangeOptions} ariaLabel="时间范围" triggerClassName="agent-dynamics-btn agent-dynamics-head-range" onChange={(range) => controller.setFilters((previous) => ({ ...previous, range, page: 1 }))} /><button type="button" className="agent-dynamics-btn primary" onClick={openFirstException}>查看待处理异常</button></div></div>
+        <div className="agent-dynamics-page-head"><div><div className="agent-dynamics-eyebrow">Buyer-facing automation</div><h1>自动回复 Agent</h1><div className="agent-dynamics-page-sub">只关注买家消息进入后的实时处理状态、链路动态和可追溯运行记录。</div></div><div className="agent-dynamics-head-actions"><AgentDynamicsDropdown value={controller.filters.range} options={rangeOptions} ariaLabel="时间范围" triggerClassName="agent-dynamics-head-range" onChange={(range) => controller.setFilters((previous) => ({ ...previous, range, page: 1 }))} /><button type="button" className="agent-dynamics-btn primary" onClick={openFirstException}>查看待处理异常</button></div></div>
         {summaryError && <ErrorBanner error={summaryError} onRetry={() => void controller.reloadSummary()} />}
         {controller.summary.phase === 'loading' && !summary ? <SkeletonBlocks /> : summary ? <>
           <KpiStrip items={summary.kpis} />
