@@ -495,7 +495,16 @@ export function parsePushPayload(encoded: string, accountId: string, myId: strin
   const senderName = optionalString(msg10.senderNick ?? msg10.reminderTitle);
   const extension = parseJsonObject(msg10.extJson);
   const reminderUrl = optionalString(msg10.reminderUrl);
-  const externalMessageRef = String(extension.messageId ?? parseQueryParam(reminderUrl, 'messageId') ?? msg1['3'] ?? message['3'] ?? '');
+  // The gateway can expose two ids for one chat message: a stable `.PNM`
+  // message number in the compact envelope and a short-lived internal UUID
+  // in extJson. Prefer the stable platform id so history sync and live push
+  // resolve to the same local message and database uniqueness key.
+  const externalMessageRef = selectCanonicalMessageRef(
+    msg1['3'],
+    message['3'],
+    parseQueryParam(reminderUrl, 'messageId'),
+    extension.messageId,
+  );
   if (!conversationRef || !externalMessageRef || !senderRef) return undefined;
   const decoded = decodeContent(msg1);
   const fallbackText = optionalString(msg10.reminderContent);
@@ -636,6 +645,17 @@ function readReceiptString(value: unknown): string | undefined {
 }
 
 function isPnmMessageId(value: string): boolean { return value.toUpperCase().endsWith('.PNM'); }
+
+function selectCanonicalMessageRef(...values: unknown[]): string {
+  const candidates = values
+    .map((value) => {
+      if (typeof value === 'string') return value.trim();
+      if (typeof value === 'number' || typeof value === 'bigint') return String(value);
+      return '';
+    })
+    .filter(Boolean);
+  return candidates.find(isPnmMessageId) ?? candidates[0] ?? '';
+}
 
 function decodePushData(encoded: string): unknown {
   const bytes = Buffer.from(encoded, 'base64');

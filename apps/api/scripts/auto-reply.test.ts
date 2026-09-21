@@ -3,7 +3,7 @@ import test from 'node:test';
 import { ExternalAutoReplySender, RuleBasedIntentClassifier, TemplateAutoReplyGenerator, type AutoReplyContext } from '../src/auto-reply.js';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
-import { XianyuImClient } from '../src/xianyu-im.js';
+import { XianyuImClient, parsePushPayload } from '../src/xianyu-im.js';
 import { XianyuImService } from '../src/xianyu-im-service.js';
 
 test('classifies safe commerce questions before generic fallback', () => {
@@ -120,6 +120,37 @@ test('history synchronization imports messages without entering auto-reply', asy
   await service.close();
 });
 
+test('history synchronization also prefers a stable PNM id over a transport id', async () => {
+  const imported: string[] = [];
+  const service = new XianyuImService({} as never, {} as never, {
+    importExternalMessage: async (input: { externalMessageRef: string }) => {
+      imported.push(input.externalMessageRef);
+      return { created: true, message: { id: 'message-1' } } as never;
+    },
+  } as never);
+  const unsafe = service as unknown as {
+    getConversation: () => Promise<{ id: string; accountId: string; externalConversationRef: string }>;
+    ensureClient: () => Promise<{ listMessages: () => Promise<{ userMessageModels: unknown[]; hasMore: boolean }> }>;
+  };
+  unsafe.getConversation = async () => ({ id: 'conversation-1', accountId: 'account-1', externalConversationRef: 'conv-1' });
+  unsafe.ensureClient = async () => ({ listMessages: async () => ({
+    userMessageModels: [{
+      message: {
+        messageId: 'internal-history-id',
+        senderUserId: 'buyer-1',
+        createAt: Date.now(),
+        extension: { messageId: 'canonical-history-1.PNM' },
+        content: { custom: { data: Buffer.from(JSON.stringify({ contentType: 1, text: { text: '历史消息' } }), 'utf8').toString('base64') } },
+      },
+    }],
+    hasMore: false,
+  }) });
+
+  await service.listMessages('admin-1', 'account-1', 'conversation-1');
+  assert.deepEqual(imported, ['canonical-history-1.PNM']);
+  await service.close();
+});
+
 test('history import followed by the same push still runs one idempotent auto-reply', async () => {
   const runtime = createApp(loadConfig({
     HOST: '127.0.0.1',
@@ -161,17 +192,18 @@ test('history import followed by the same push still runs one idempotent auto-re
     const beforePush = await runtime.messages.listMessages(admin.id, conversation.id, { limit: 20 });
     assert.equal(beforePush.items.filter((message) => message.externalMessageRef === historyMessageRef).length, 1);
 
-    const pushed = await runtime.xianyuIm.handleExternalEvent(admin.id, {
-      accountId: account.id,
-      externalConversationRef: 'history-push-conversation',
-      externalMessageRef: historyMessageRef,
-      senderRef: 'buyer-history-1',
-      senderName: 'Allowlisted Buyer',
-      direction: 'inbound',
-      bodyType: 'text',
-      bodyText: '历史导入消息',
-      occurredAt: new Date().toISOString(),
-    });
+    const pushContent = Buffer.from(JSON.stringify({ contentType: 1, text: { text: '历史导入消息' } }), 'utf8').toString('base64');
+    const pushedEvent = parsePushPayload(Buffer.from(JSON.stringify({
+      '1': {
+        '2': 'history-push-conversation@goofish',
+        '3': historyMessageRef,
+        '5': Date.now(),
+        '6': { '3': { '5': pushContent } },
+        '10': { senderUserId: 'buyer-history-1', senderNick: 'Allowlisted Buyer', extJson: JSON.stringify({ messageId: 'internal-push-transport-id' }) },
+      },
+    }), 'utf8').toString('base64'), account.id, 'seller-history-race');
+    assert.ok(pushedEvent);
+    const pushed = await runtime.xianyuIm.handleExternalEvent(admin.id, pushedEvent);
     assert.equal(pushed.created, false);
     assert.equal(pushed.autoReply?.run.status, 'persisted');
     assert.equal(pushed.autoReply?.run.decision, 'replied');

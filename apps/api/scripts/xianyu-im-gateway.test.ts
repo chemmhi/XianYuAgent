@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { XianyuImClient } from '../src/xianyu-im.js';
+import { XianyuImClient, parsePushPayload } from '../src/xianyu-im.js';
 
 test('history request response does not emit an event by itself', async () => {
   const socket = new FakeSocket(false);
@@ -105,6 +105,11 @@ test('mixed gateway response still dispatches syncPushPackage through onEvent', 
   }
 });
 
+test('push parser prefers the stable PNM id over an internal transport id', () => {
+  const parsed = parsePushPayload(pushPayload('canonical-1.PNM', 'same message', 'internal-32-char-id'), 'account-1', 'seller-1');
+  assert.equal(parsed?.externalMessageRef, 'canonical-1.PNM');
+});
+
 test('non-200 gateway response rejects pending request even when a body is present', async () => {
   const socket = new RejectingSocket();
   const client = new XianyuImClient({
@@ -174,7 +179,7 @@ test('one push handler failure does not stop later gateway events in the frame',
   }
 });
 
-function pushPayload(messageRef = '4263141580162.PNM', text = 'hello from push'): string {
+function pushPayload(messageRef = '4263141580162.PNM', text = 'hello from push', transportMessageRef = messageRef): string {
   const content = Buffer.from(JSON.stringify({ contentType: 1, text: { text } }), 'utf8').toString('base64');
   return Buffer.from(JSON.stringify({
     '1': {
@@ -182,7 +187,7 @@ function pushPayload(messageRef = '4263141580162.PNM', text = 'hello from push')
       '3': messageRef,
       '5': 1767225600000,
       '6': { '3': { '5': content } },
-      '10': { senderUserId: 'buyer-1', senderNick: 'Buyer', extJson: JSON.stringify({ messageId: messageRef }) },
+      '10': { senderUserId: 'buyer-1', senderNick: 'Buyer', extJson: JSON.stringify({ messageId: transportMessageRef }) },
     },
   }), 'utf8').toString('base64');
 }
