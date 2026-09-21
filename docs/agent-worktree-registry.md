@@ -55,6 +55,7 @@
 | `root/csrf_send_fix` | `chat-csrf-recovery` | `codex/csrf-send-fix` | `F:\ChenHai\Project\XianYuAgent-csrf-send-fix` | Codex `/root` delegated agent | `2026-09-21 10:35:00 +08:00` | `MERGED` | `91b0e87` | `-` | 修复 API 重启后前端旧 CSRF token 导致在线聊天发送 403：刷新 `/api/v1/auth/session` 后仅重试一次并保留幂等键；Web 回归测试通过。 |
 | `root/listener_ready` | `auto-reply-buyer-identity` | `codex/listener-allowlist` | `F:\ChenHai\Project\XianYuAgent-listener-allowlist` | Codex `/root` delegated agent | `2026-09-21 10:43:00 +08:00` | `MERGED` | `e86af0f` | `-` | 修复真实 push 缺少 senderName 且本地会话无昵称时白名单误跳过：按稳定 externalConversationRef 补全闲鱼买家身份并持久化；新增回归测试通过。 |
 | `root/listener_ready` | `auto-reply-push-history-race` | `codex/push-history-race` | `F:\ChenHai\Project\XianYuAgent-push-race` | Codex `/root` delegated agent | `2026-09-21 10:55:00 +08:00` | `MERGED` | `bb1e47e` | `-` | 修复历史同步先落库后真实 push 被重复判定而跳过自动回复；push 即使 `created=false` 也进入幂等 `AutoReplyService.processInbound`，新增重复 push 不重复出站回归。 |
+| `root/listener_ready` | `auto-reply-smoke-race` | `codex/auto-reply-smoke-race` | `F:\ChenHai\Project\XianYuAgent-auto-reply-smoke-race` | Codex `/root` delegated agent | `2026-09-21 10:59:00 +08:00` | `MERGED` | `b59f026` | `-` | 更新自动回复 smoke 断言以匹配新的幂等语义：重复 push 返回同一 run、AI 出站保持单条、无真实发送；完整 API/Web 测试、构建和 Compose 配置通过。 |
 
 ## 主工作区
 
