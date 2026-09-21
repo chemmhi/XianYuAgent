@@ -176,7 +176,13 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
   private async getProductInfo(adminId: string, context: AutoReplyContext, requestedRef?: string): Promise<Record<string, unknown>> {
     const productRef = requestedRef?.trim() || context.conversation.itemRef;
     if (!productRef) return { ok: false, code: 'PRODUCT_REF_REQUIRED' };
-    const byId = await this.store.getProduct(adminId, productRef);
+    // External Xianyu item refs are commonly numeric (for example
+    // `1078553391460`) while the local PostgreSQL product primary key is a
+    // UUID. Calling getProduct with an external ref makes PostgreSQL attempt
+    // to cast the value to uuid and abort the whole Agent run with 22P02.
+    // Only issue the primary-key lookup for UUID-shaped refs; external refs
+    // and titles are resolved through the scoped list query below.
+    const byId = isUuid(productRef) ? await this.store.getProduct(adminId, productRef) : undefined;
     if (byId && byId.accountId === context.conversation.accountId) return { ok: true, product: safeProduct(byId) };
     const result = await this.store.listProducts(adminId, { accountId: context.conversation.accountId, keyword: productRef, page: 1, pageSize: 100 });
     const product = result.items.find((item) => item.id === productRef || item.externalProductRef === productRef || item.title === productRef);
@@ -239,6 +245,10 @@ function renderUserPrompt(template: string, context: Record<string, unknown>): s
 
 function stringArg(value: unknown): string | undefined {
   return typeof value === 'string' ? value.slice(0, 120) : undefined;
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function numberArg(value: unknown, fallback: number): number {

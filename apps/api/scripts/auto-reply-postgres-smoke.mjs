@@ -6,7 +6,18 @@ const databaseUrl = process.env.DATABASE_URL ?? 'postgres://xianyu:xianyu_dev_on
 const suffix = `${process.pid}-${Date.now()}`;
 const email = `auto-reply-pg-${suffix}@example.com`;
 const sellerRef = `auto-reply-pg-${suffix}`;
-const config = { host: '127.0.0.1', port: 0, databaseUrl, cookieSecure: false, allowInMemory: false, sessionIdleMs: 1_800_000, sessionAbsoluteMs: 28_800_000, xianyuQrMode: 'stub' };
+const originalFetch = globalThis.fetch;
+let modelCall = 0;
+globalThis.fetch = (async (_input, init) => {
+  modelCall += 1;
+  const body = JSON.parse(String(init?.body));
+  const message = modelCall === 1
+    ? { content: '', tool_calls: [{ id: 'pg-product-1', type: 'function', function: { name: 'get_product_info', arguments: '{}' } }] }
+    : { content: '这是一个 PostgreSQL 回归测试商品，已确认可以正常回复。' };
+  assert.equal(body.model, 'auto-reply-postgres-smoke');
+  return new Response(JSON.stringify({ model: 'auto-reply-postgres-smoke', choices: [{ message }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+});
+const config = { host: '127.0.0.1', port: 0, databaseUrl, cookieSecure: false, allowInMemory: false, sessionIdleMs: 1_800_000, sessionAbsoluteMs: 28_800_000, xianyuQrMode: 'stub', modelApiKey: 'auto-reply-postgres-smoke-key', modelBaseUrl: 'https://model.example/v1', modelName: 'auto-reply-postgres-smoke', modelTimeoutMs: 5_000, autoReplyModelEnabled: true, autoReplySendMode: 'simulate', autoReplyTestBuyerNames: [`Auto Reply PostgreSQL Buyer`] };
 let runtime;
 let adminId;
 let accountId;
@@ -20,8 +31,8 @@ try {
   adminId = admin.id;
   const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef });
   accountId = account.id;
-  const product = await runtime.store.createProduct({ adminId, accountId, externalProductRef: `pg-item-${suffix}`, title: 'Postgres 资料包', priceMinor: 2_590, status: 'published' });
-  const conversation = await runtime.store.createConversation({ adminId, accountId, buyerRef: `pg-buyer-${suffix}`, itemRef: product.externalProductRef, itemTitle: product.title, externalConversationRef: `pg-conv-${suffix}` });
+  const product = await runtime.store.createProduct({ adminId, accountId, externalProductRef: `1078553391460-${suffix}`, title: 'Postgres 资料包', priceMinor: 2_590, status: 'published' });
+  const conversation = await runtime.store.createConversation({ adminId, accountId, buyerRef: `pg-buyer-${suffix}`, buyerDisplayName: 'Auto Reply PostgreSQL Buyer', itemRef: product.externalProductRef, itemTitle: product.title, externalConversationRef: `pg-conv-${suffix}` });
   conversationId = conversation.id;
 
   const result = await runtime.xianyuIm.handleExternalEvent(adminId, {
@@ -31,7 +42,7 @@ try {
     senderRef: conversation.buyerRef,
     direction: 'inbound',
     bodyType: 'text',
-    bodyText: '多少钱？',
+    bodyText: '请问这个是什么东西？',
     occurredAt: new Date().toISOString(),
   });
   assert.equal(result.created, true);
@@ -39,6 +50,7 @@ try {
   assert.equal(result.autoReply?.run.senderOutcome, 'simulated');
   assert.equal(result.autoReply?.context?.product?.id, product.id);
   assert.equal(result.autoReply?.outboundMessage?.source, 'ai');
+  assert.equal(modelCall, 2);
   inboundMessageId = result.autoReply?.inboundMessage.id;
 
   const storedRun = await runtime.store.getAutoReplyRun(adminId, result.autoReply.run.id);
@@ -72,4 +84,5 @@ try {
     if (adminId) await active.store.pool.query('delete from auth.admins where id=$1', [adminId]);
   }
   if (runtime) await runtime.close();
+  globalThis.fetch = originalFetch;
 }

@@ -113,6 +113,10 @@ async function clickContainingText(cdp, text, selector = 'button') {
 
 async function captureViewport(cdp, width, height, filename) {
   await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+  return captureCurrentViewport(cdp, filename);
+}
+
+async function captureCurrentViewport(cdp, filename) {
   const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true });
   mkdirSync(screenshotDir, { recursive: true });
   const destination = join(screenshotDir, filename);
@@ -188,6 +192,19 @@ async function run() {
   if (!agentDefaults.response.ok || agentDefaults.body.data?.configVersion !== 0) throw new Error(`agent settings default readback failed: ${agentDefaults.response.status} ${JSON.stringify(agentDefaults.body)}`);
   await clickContainingText(cdp, '自动回复 Agent');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-auto-reply-agent-panel]"))'), 'Auto Reply Agent panel');
+  const disabledState = await evaluate(cdp, `(() => {
+    const panel = document.querySelector('[data-auto-reply-agent-panel]');
+    const enabled = panel?.querySelector('input[type="checkbox"]');
+    if (!enabled) throw new Error('auto-reply enabled checkbox missing');
+    enabled.click();
+    const fields = panel?.querySelector('fieldset.auto-reply-agent-fields');
+    const editable = Array.from(fields?.querySelectorAll('input,textarea,select') ?? []);
+    return { disabled: fields?.disabled === true, allControlsDisabled: editable.length > 0 && editable.every((control) => control.matches(':disabled')), opacity: fields ? Number(getComputedStyle(fields).opacity) : 1 };
+  })()`);
+  if (!disabledState.disabled || !disabledState.allControlsDisabled || disabledState.opacity >= 1) throw new Error(`disabling Agent did not gray configuration: ${JSON.stringify(disabledState)}`);
+  const agentDisabledMobilePath = await captureViewport(cdp, 390, 844, 'settings-agent-disabled-mobile-390x844.png');
+  await evaluate(cdp, `(() => { const enabled = document.querySelector('[data-auto-reply-agent-panel] input[type="checkbox"]'); enabled?.click(); return true; })()`);
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-auto-reply-agent-panel] fieldset.auto-reply-agent-fields:not([disabled])"))'), 'Auto Reply Agent re-enabled');
   await setLabelInput(cdp, '最大循环次数', '6');
   await setLabelInput(cdp, '防抖窗口（毫秒）', '1500');
   await clickText(cdp, '保存自动回复 Agent 配置');
@@ -203,6 +220,13 @@ async function run() {
 
   const agentDesktopPath = await captureViewport(cdp, 1440, 900, 'settings-agent-desktop-1440x900.png');
   const agentMobilePath = await captureViewport(cdp, 390, 844, 'settings-agent-mobile-390x844.png');
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await evaluate(cdp, '(() => { const main = document.querySelector("main.settings-main"); const target = main && main.scrollHeight > main.clientHeight ? main : document.scrollingElement; target?.scrollTo(0, target.scrollHeight); return { top: target?.scrollTop ?? 0, height: target?.scrollHeight ?? 0, client: target?.clientHeight ?? 0 }; })()');
+  const agentDesktopBottomPath = await captureCurrentViewport(cdp, 'settings-agent-desktop-bottom-1440x900.png');
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
+  await evaluate(cdp, '(() => { const main = document.querySelector("main.settings-main"); const target = main && main.scrollHeight > main.clientHeight ? main : document.scrollingElement; target?.scrollTo(0, target.scrollHeight); return { top: target?.scrollTop ?? 0, height: target?.scrollHeight ?? 0, client: target?.clientHeight ?? 0 }; })()');
+  const agentMobileBottomPath = await captureCurrentViewport(cdp, 'settings-agent-mobile-bottom-390x844.png');
+  await evaluate(cdp, '(() => { const main = document.querySelector("main.settings-main"); const target = main && main.scrollHeight > main.clientHeight ? main : document.scrollingElement; target?.scrollTo(0, 0); return target?.scrollTop ?? 0; })()');
 
   await clickContainingText(cdp, '凭证管理');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-credential-panel]"))'), 'credential panel after Agent settings');
@@ -258,7 +282,7 @@ async function run() {
   if (JSON.stringify(final.body).includes('sk-settings-rotated-987654')) throw new Error('rotated secret leaked in API readback');
 
   await cdp.send('Emulation.clearDeviceMetricsOverride');
-  console.log(JSON.stringify({ apiStorage: 'memory', accountId, agentSettings: { defaultVersion: agentDefaults.body.data.configVersion, savedVersion: agentSaved.body.data.configVersion, staleStatus: agentStale.response.status }, credentialId: credential.id, forbiddenStatus: forbidden.response.status, staleStatus: stale.response.status, finalStatus: final.body.data.items[0].status, secretRedaction: browserSecretLeak, screenshots: { agentDesktopPath, agentMobilePath, desktopPath, mobilePath } }, null, 2));
+  console.log(JSON.stringify({ apiStorage: 'memory', accountId, agentSettings: { defaultVersion: agentDefaults.body.data.configVersion, savedVersion: agentSaved.body.data.configVersion, staleStatus: agentStale.response.status }, credentialId: credential.id, forbiddenStatus: forbidden.response.status, staleStatus: stale.response.status, finalStatus: final.body.data.items[0].status, secretRedaction: browserSecretLeak, screenshots: { agentDesktopPath, agentMobilePath, agentDisabledMobilePath, agentDesktopBottomPath, agentMobileBottomPath, desktopPath, mobilePath } }, null, 2));
   cdp.socket.close();
 }
 

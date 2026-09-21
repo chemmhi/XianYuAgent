@@ -2,6 +2,7 @@
 
 ## 2026-09-21 增量修复
 
+- 自动回复 Agent 设置与动态联调：设置页 Tab 已改为“自动回复 Agent”，配置通过独立 `AutoReplyAgentSettingsService` 持久化；买家 Agent 使用四个只读工具并在每条入站消息前读取最新管理员配置，支持 Prompt、循环/工具上限、上下文、回复长度、分段、防抖、已支付订单策略和 simulate/live（live 仍受环境变量买家白名单约束）。真实 push→tool call→生成→模拟出站→消息/`auto_reply_runs` 落库 E2E 3/3 通过；Chrome/CDP 设置页 E2E 通过；当前仍为 simulate 验证，真实闲鱼发送与发布级恢复未关闭。
 - 自动回复模型接入：复用 Workspace 的 `API_KEY/BASE_URL/MODEL/MODEL_TIMEOUT_MS` 环境变量和同一个 OpenAI-compatible `ModelClient`；配置完整时走 `ModelAutoReplyGenerator`，缺少配置时保留模板生成，Provider 失败安全落库为失败且不创建 outbound；新增模型上下文裁剪、成功装配和 503 失败回归测试。
 - 在线聊天 CSRF：API 重启后旧页面的 token 失效时，前端刷新 `/api/v1/auth/session` 后仅重试原 mutation 一次并保留 `Idempotency-Key`；Web 38 个测试文件 / 117 个用例、类型检查、构建通过。
 - 自动回复白名单：真实 push 缺少 `senderName` 且本地会话尚无昵称时，先按 `externalConversationRef` 补全闲鱼买家身份并持久化，再进入白名单门禁；新增回归测试覆盖 allowlist 通过与 `auto_reply_runs.status=persisted`。真实买家 push 仍待外部触发，不能用历史同步替代。

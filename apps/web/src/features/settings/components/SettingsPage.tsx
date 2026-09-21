@@ -48,10 +48,10 @@ export function SettingsPage({ api: providedApi, agentApi: providedAgentApi }: {
 
   return (
     <section className="page-stack settings-page" data-settings-page>
-      <div className="settings-mobile-header card">
+      <header className="settings-toolbar">
         <div><p className="eyebrow">System Settings</p><h1>设置</h1><p>管理 Agent 策略与受控凭证引用。</p></div>
         <div className="settings-account-picker"><label htmlFor="settings-account">当前账号</label><select id="settings-account" value={selectedAccountId} onChange={(event) => chooseAccount(event.target.value)} disabled={accountsLoading || accounts.length === 0}><option value="">请选择账号</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.displayName}</option>)}</select></div>
-      </div>
+      </header>
       <div className="settings-grid">
         <aside className="card settings-tabs" aria-label="设置分类">
           {tabs.map((tab) => <button key={tab.id} type="button" className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)}><span className="settings-tab-label">{tab.label}</span><span className="settings-tab-mobile-label">{tab.mobileLabel}</span><small>{tab.meta}</small></button>)}
