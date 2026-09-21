@@ -271,34 +271,56 @@ export class XianyuImService {
       return { created: false };
     }
     let conversation = await this.store.findConversationByExternalRef(adminId, event.accountId, event.externalConversationRef);
-    if (!conversation && event.direction === 'inbound') {
-      conversation = await this.store.upsertExternalConversation({
-        adminId,
-        accountId: event.accountId,
+    let effectiveEvent = event;
+    if (event.direction === 'inbound' && !event.senderName && !conversation?.buyerDisplayName) {
+      // Gateway pushes can omit the nickname even though the conversation
+      // itself is addressable by a stable external ref. Resolve the profile
+      // before the allowlist gate so a missing display name does not turn a
+      // valid buyer into an unconditional TEST_BUYER_NOT_ALLOWLISTED skip.
+      const enriched = await this.enrichConversationIdentity(adminId, event.accountId, {
         externalConversationRef: event.externalConversationRef,
         buyerRef: event.senderRef,
-        buyerDisplayName: event.senderName,
+      });
+      if (enriched.buyerDisplayName) effectiveEvent = { ...event, senderName: enriched.buyerDisplayName };
+    }
+    if (!conversation && effectiveEvent.direction === 'inbound') {
+      conversation = await this.store.upsertExternalConversation({
+        adminId,
+        accountId: effectiveEvent.accountId,
+        externalConversationRef: effectiveEvent.externalConversationRef,
+        buyerRef: effectiveEvent.senderRef,
+        buyerDisplayName: effectiveEvent.senderName,
         unreadCount: 0,
-        lastMessagePreview: event.bodyText,
-        lastMessageAt: event.occurredAt,
+        lastMessagePreview: effectiveEvent.bodyText,
+        lastMessageAt: effectiveEvent.occurredAt,
+      });
+    } else if (conversation && effectiveEvent.direction === 'inbound' && !conversation.buyerDisplayName && effectiveEvent.senderName) {
+      // Persist a recovered nickname so later events can use the local
+      // conversation identity even if profile lookup is temporarily down.
+      conversation = await this.store.upsertExternalConversation({
+        adminId,
+        accountId: effectiveEvent.accountId,
+        externalConversationRef: effectiveEvent.externalConversationRef,
+        buyerRef: effectiveEvent.senderRef,
+        buyerDisplayName: effectiveEvent.senderName,
       });
     }
     if (!conversation) return { created: false };
     const imported = await this.messages.importExternalMessage({
       adminId,
       conversationId: conversation.id,
-      direction: event.direction,
-      senderRole: event.direction === 'outbound' ? 'agent' : event.bodyType === 'system' ? 'system' : 'buyer',
-      bodyType: event.bodyType,
-      bodyText: event.bodyText,
-      bodyRef: event.assetRef,
-      externalMessageRef: event.externalMessageRef,
-      source: event.direction === 'outbound' ? 'human' : 'system',
-      createdAt: event.occurredAt,
-      traceId: `xianyu:push:${event.externalMessageRef}`,
+      direction: effectiveEvent.direction,
+      senderRole: effectiveEvent.direction === 'outbound' ? 'agent' : effectiveEvent.bodyType === 'system' ? 'system' : 'buyer',
+      bodyType: effectiveEvent.bodyType,
+      bodyText: effectiveEvent.bodyText,
+      bodyRef: effectiveEvent.assetRef,
+      externalMessageRef: effectiveEvent.externalMessageRef,
+      source: effectiveEvent.direction === 'outbound' ? 'human' : 'system',
+      createdAt: effectiveEvent.occurredAt,
+      traceId: `xianyu:push:${effectiveEvent.externalMessageRef}`,
     });
-    if (!imported.created || event.direction !== 'inbound' || event.bodyType !== 'text' || !this.autoReply) return { created: imported.created };
-    const autoReply = await this.autoReply.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: imported.message.messageId, senderName: event.senderName, requestId: `xianyu:auto-reply:${event.externalMessageRef}`, traceId: `xianyu:auto-reply:${event.externalMessageRef}` });
+    if (!imported.created || effectiveEvent.direction !== 'inbound' || effectiveEvent.bodyType !== 'text' || !this.autoReply) return { created: imported.created };
+    const autoReply = await this.autoReply.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: imported.message.messageId, senderName: effectiveEvent.senderName, requestId: `xianyu:auto-reply:${effectiveEvent.externalMessageRef}`, traceId: `xianyu:auto-reply:${effectiveEvent.externalMessageRef}` });
     return { created: imported.created, autoReply };
   }
 }
