@@ -24,6 +24,7 @@ import { DashboardService } from './dashboard.js';
 import { AutoReplyService, ExternalAutoReplySender } from './auto-reply.js';
 import { AutoReplyAgentSettingsService, resolveAutoReplyAgentDefaults } from './auto-reply-agent-settings.js';
 import { ToolCallingAutoReplyAgent } from './auto-reply-agent.js';
+import { AutoReplyActivityService } from './auto-reply-activity.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -40,6 +41,7 @@ export interface AppRuntime {
   messages: MessageService;
   autoReply: AutoReplyService;
   autoReplyAgentSettings: AutoReplyAgentSettingsService;
+  autoReplyActivity: AutoReplyActivityService;
   redisRealtime?: RedisConversationEventBridge;
   workspace: WorkspaceService;
   workspaceRuntime: WorkspaceRuntime;
@@ -101,6 +103,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), createdAt: new Date().toISOString() });
     return auditId;
   });
+  const autoReplyActivity = new AutoReplyActivityService(store);
   let xianyuIm!: XianyuImService;
   const autoReply = new AutoReplyService(store, messages, async (input) => {
     const auditId = createId();
@@ -208,7 +211,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, orders, products, productSync, credentials, apiKeyCredentials, dashboard, messages, autoReply, autoReplyAgentSettings, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuIm,
+    config, store, auth, accounts, coupons, orders, products, productSync, credentials, apiKeyCredentials, dashboard, messages, autoReply, autoReplyAgentSettings, autoReplyActivity, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuIm,
     server,
     async listen() {
       await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));
@@ -382,6 +385,20 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
 
   if (ctx.path === '/api/v1/dashboard/snapshot' && ctx.method === 'GET') {
     return { statusCode: 200, body: success(ctx, await dashboard.getSnapshot(authContext.admin.id)).body };
+  }
+
+  if (ctx.path === '/api/v1/auto-reply/activity/summary' && ctx.method === 'GET') {
+    const summary = await runtime.autoReplyActivity.summary({ adminId: authContext.admin.id, accountId: optionalString(ctx.query.accountId), from: optionalString(ctx.query.from), to: optionalString(ctx.query.to) });
+    return { statusCode: 200, body: success(ctx, summary).body };
+  }
+  if (ctx.path === '/api/v1/auto-reply/runs' && ctx.method === 'GET') {
+    const runs = await runtime.autoReplyActivity.list({ adminId: authContext.admin.id, query: parseAutoReplyRunListQuery(ctx.query) });
+    return { statusCode: 200, body: success(ctx, runs).body };
+  }
+  const autoReplyRunDetailMatch = ctx.path.match(/^\/api\/v1\/auto-reply\/runs\/([^/]+)$/);
+  if (autoReplyRunDetailMatch && ctx.method === 'GET') {
+    const detail = await runtime.autoReplyActivity.detail({ adminId: authContext.admin.id, runId: decodeURIComponent(autoReplyRunDetailMatch[1]) });
+    return { statusCode: 200, body: success(ctx, detail).body };
   }
 
   if (ctx.path === '/api/v1/settings/agent' && ctx.method === 'GET') {
@@ -1042,6 +1059,21 @@ function parseMessageListQuery(query: Record<string, string>): import('./domain.
   const beforeCursor = query.beforeCursor === undefined ? undefined : query.beforeCursor;
   const limit = query.limit === undefined ? undefined : Number(query.limit);
   return { cursor: cursor === undefined || Number.isNaN(cursor) ? cursor : Math.trunc(cursor), beforeCursor, limit: limit === undefined || Number.isNaN(limit) ? limit : Math.trunc(limit) };
+}
+
+function parseAutoReplyRunListQuery(query: Record<string, string>): import('./domain.js').AutoReplyRunListQuery {
+  const page = query.page === undefined ? undefined : Number(query.page);
+  const pageSize = query.pageSize === undefined ? undefined : Number(query.pageSize);
+  return {
+    accountId: optionalString(query.accountId),
+    from: optionalString(query.from),
+    to: optionalString(query.to),
+    status: optionalString(query.status) as import('./domain.js').AutoReplyRunListQuery['status'],
+    stage: optionalString(query.stage) as import('./domain.js').AutoReplyRunListQuery['stage'],
+    keyword: optionalString(query.keyword),
+    page: page === undefined || Number.isNaN(page) ? page : Math.trunc(page),
+    pageSize: pageSize === undefined || Number.isNaN(pageSize) ? pageSize : Math.trunc(pageSize),
+  };
 }
 
 async function handleConversationUpgrade(runtime: AppRuntime, wsServer: WebSocketServer, request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {

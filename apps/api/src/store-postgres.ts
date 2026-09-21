@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunRecord, AutoReplyDecision, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import { autoReplyStageForStatus } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor } from './conversation-cursor.js';
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
@@ -448,7 +449,9 @@ export class PostgresStore implements Store {
     const id = createId();
     const result = await this.pool.query(`insert into messages.auto_reply_runs (id,admin_id,account_id,conversation_id,inbound_message_id,intent,decision,status,risk_flags,product_id,order_refs,input_digest,context_digest,reply_digest,sender_outcome,outbound_message_id,failure_code)
       values ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11::jsonb,$12,$13,$14,$15,$16,$17) returning *`, [id, input.adminId, input.accountId, input.conversationId, input.inboundMessageId, input.intent, input.decision, input.status, JSON.stringify(input.riskFlags ?? []), input.productId ?? null, JSON.stringify(input.orderRefs ?? []), input.inputDigest, input.contextDigest ?? null, input.replyDigest ?? null, input.senderOutcome ?? null, input.outboundMessageId ?? null, input.failureCode ?? null]);
-    return this.toAutoReplyRun(result.rows[0]);
+    const run = this.toAutoReplyRun(result.rows[0]);
+    await this.appendAutoReplyRunEvent({ runId: run.id, accountId: run.accountId, eventType: 'run.created', status: run.status, stage: autoReplyStageForStatus(run.status), payload: { decision: run.decision, intent: run.intent, failureCode: run.failureCode } });
+    return run;
   }
 
   async updateAutoReplyRun(id: string, patch: { intent?: string; decision?: AutoReplyDecision; status?: AutoReplyRunStatus; riskFlags?: string[]; productId?: string; orderRefs?: string[]; contextDigest?: string; replyDigest?: string; senderOutcome?: AutoReplyRunRecord['senderOutcome']; outboundMessageId?: string; failureCode?: string }): Promise<AutoReplyRunRecord | undefined> {
@@ -469,7 +472,10 @@ export class PostgresStore implements Store {
     if (fields.length === 0) return this.getAutoReplyRunById(id);
     fields.push('updated_at=now()');
     const result = await this.pool.query(`update messages.auto_reply_runs set ${fields.join(', ')} where id=$1 returning *`, values);
-    return result.rows[0] ? this.toAutoReplyRun(result.rows[0]) : undefined;
+    if (!result.rows[0]) return undefined;
+    const run = this.toAutoReplyRun(result.rows[0]);
+    await this.appendAutoReplyRunEvent({ runId: run.id, accountId: run.accountId, eventType: patch.status ? `run.${patch.status}` : 'run.updated', status: run.status, stage: autoReplyStageForStatus(run.status), payload: { decision: run.decision, intent: run.intent, failureCode: run.failureCode } });
+    return run;
   }
 
   async getAutoReplyRun(adminId: string, id: string): Promise<AutoReplyRunRecord | undefined> {
@@ -485,6 +491,81 @@ export class PostgresStore implements Store {
   private async getAutoReplyRunById(id: string): Promise<AutoReplyRunRecord | undefined> {
     const result = await this.pool.query('select * from messages.auto_reply_runs where id=$1 limit 1', [id]);
     return result.rows[0] ? this.toAutoReplyRun(result.rows[0]) : undefined;
+  }
+
+  async appendAutoReplyRunEvent(input: { runId: string; eventType: string; status: AutoReplyRunStatus; stage: AutoReplyRunStage; accountId: string; payload?: Record<string, unknown>; durationMs?: number; traceId?: string }): Promise<AutoReplyRunEventRecord> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const run = await client.query('select id, account_id from messages.auto_reply_runs where id=$1 and account_id=$2 for update', [input.runId, input.accountId]);
+      if (!run.rows[0]) throw new Error('AUTO_REPLY_RUN_NOT_FOUND');
+      const sequenceResult = await client.query('select coalesce(max(sequence),0)::int + 1 as sequence from messages.auto_reply_run_events where run_id=$1', [input.runId]);
+      const sequence = Number(sequenceResult.rows[0]?.sequence ?? 1);
+      const result = await client.query('insert into messages.auto_reply_run_events (run_id,account_id,sequence,event_type,stage,status,occurred_at,duration_ms,trace_id,payload_json) values ($1,$2,$3,$4,$5,$6,now(),$7,$8,$9::jsonb) returning *', [input.runId, input.accountId, sequence, input.eventType, input.stage, input.status, input.durationMs ?? null, input.traceId ?? null, JSON.stringify(input.payload ?? {})]);
+      await client.query('commit');
+      return this.toAutoReplyRunEvent(result.rows[0]);
+    } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
+  }
+
+  async listAutoReplyRunEvents(adminId: string, runId: string): Promise<AutoReplyRunEventRecord[]> {
+    const run = await this.getAutoReplyRun(adminId, runId);
+    if (!run || !(await this.hasAccountScope(adminId, run.accountId))) return [];
+    const result = await this.pool.query('select * from messages.auto_reply_run_events where run_id=$1 order by sequence asc', [runId]);
+    return result.rows.map((row) => this.toAutoReplyRunEvent(row));
+  }
+
+  async listAutoReplyRuns(adminId: string, query: AutoReplyRunListQuery): Promise<AutoReplyRunListResult> {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    const params: unknown[] = [adminId];
+    const conditions = ["exists (select 1 from auth.account_scopes scope where scope.admin_id=$1 and scope.account_id=r.account_id and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))"];
+    const add = (value: unknown) => { params.push(value); return `$${params.length}`; };
+    if (query.accountId) conditions.push(`r.account_id=${add(query.accountId)}`);
+    if (query.from) conditions.push(`r.created_at >= ${add(query.from)}`);
+    if (query.to) conditions.push(`r.created_at <= ${add(query.to)}`);
+    if (query.status) conditions.push(`r.status = ${add(query.status)}`);
+    if (query.stage) conditions.push(`r.status = ${add(this.statusForAutoReplyStage(query.stage))}`);
+    if (query.keyword?.trim()) { const param = add(`%${query.keyword.trim()}%`); conditions.push(`(r.id::text ilike ${param} or r.intent ilike ${param} or coalesce(r.failure_code,'') ilike ${param} or coalesce(c.buyer_display_name,'') ilike ${param} or coalesce(p.title,'') ilike ${param})`); }
+    const where = conditions.join(' and ');
+    const count = await this.pool.query(`select count(*)::int as count from messages.auto_reply_runs r left join messages.conversations c on c.id=r.conversation_id left join products.products p on p.id=r.product_id where ${where}`, params);
+    const total = Number(count.rows[0]?.count ?? 0);
+    const limitIndex = params.length + 1;
+    const offsetIndex = params.length + 2;
+    const rows = await this.pool.query(`select r.*, c.buyer_display_name, p.title as product_title, m.body_text as inbound_message_preview, extract(epoch from (r.updated_at-r.created_at))*1000 as duration_ms from messages.auto_reply_runs r left join messages.conversations c on c.id=r.conversation_id left join products.products p on p.id=r.product_id left join messages.messages m on m.id=r.inbound_message_id where ${where} order by r.created_at desc, r.id desc limit $${limitIndex} offset $${offsetIndex}`, [...params, pageSize, (page - 1) * pageSize]);
+    return { items: rows.rows.map((row) => this.toAutoReplyRunListItem(row)), page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
+  }
+
+  async getAutoReplyRunDetail(adminId: string, runId: string): Promise<AutoReplyRunDetailRecord | undefined> {
+    const result = await this.pool.query(`select r.*, c.buyer_display_name, p.title as product_title, m.body_text as inbound_message_preview, extract(epoch from (r.updated_at-r.created_at))*1000 as duration_ms from messages.auto_reply_runs r left join messages.conversations c on c.id=r.conversation_id left join products.products p on p.id=r.product_id left join messages.messages m on m.id=r.inbound_message_id where r.id=$1 and r.admin_id=$2 and exists (select 1 from auth.account_scopes scope where scope.admin_id=$2 and scope.account_id=r.account_id and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))`, [runId, adminId]);
+    if (!result.rows[0]) return undefined;
+    const run = this.toAutoReplyRunListItem(result.rows[0]);
+    const [events, conversation, inboundResult, outboundResult, product] = await Promise.all([
+      this.listAutoReplyRunEvents(adminId, runId),
+      this.getConversation(adminId, run.conversationId),
+      this.pool.query('select * from messages.messages where id=$1 and conversation_id=$2 limit 1', [run.inboundMessageId, run.conversationId]),
+      this.pool.query(`select * from messages.messages where conversation_id=$1 and direction='outbound' and ($2::uuid is null or id=$2) order by created_at asc`, [run.conversationId, run.outboundMessageId ?? null]),
+      run.productId ? this.getProduct(adminId, run.productId) : Promise.resolve(undefined),
+    ]);
+    return { run, events, conversation, inboundMessage: inboundResult.rows[0] ? this.toMessage(inboundResult.rows[0]) : undefined, outboundMessages: outboundResult.rows.map((row) => this.toMessage(row)), product };
+  }
+
+  async getAutoReplyActivitySummary(adminId: string, query: { accountId?: string; from: string; to: string }): Promise<AutoReplyActivitySummary> {
+    const params: unknown[] = [adminId, query.from, query.to];
+    const accountClause = query.accountId ? 'and r.account_id=$4' : '';
+    if (query.accountId) params.push(query.accountId);
+    const where = `r.created_at >= $2 and r.created_at <= $3 ${accountClause} and exists (select 1 from auth.account_scopes scope where scope.admin_id=$1 and scope.account_id=r.account_id and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))`;
+    const rows = await this.pool.query(`select r.*, extract(epoch from (r.updated_at-r.created_at))*1000 as duration_ms from messages.auto_reply_runs r where ${where} order by r.created_at asc`, params);
+    const runs = rows.rows.map((row) => this.toAutoReplyRunListItem(row));
+    const counts = new Map<AutoReplyRunStatus, number>();
+    const stageCounts = new Map<AutoReplyRunStage, { count: number; duration: number }>();
+    const exceptions = new Map<string, { count: number; status: AutoReplyRunStatus }>();
+    for (const item of runs) { counts.set(item.status, (counts.get(item.status) ?? 0) + 1); const stage = stageCounts.get(item.stage) ?? { count: 0, duration: 0 }; stage.count += 1; stage.duration += item.durationMs; stageCounts.set(item.stage, stage); if (item.failureCode) { const exception = exceptions.get(item.failureCode) ?? { count: 0, status: item.status }; exception.count += 1; exception.status = item.status; exceptions.set(item.failureCode, exception); } }
+    const durations = runs.map((item) => item.durationMs).sort((a, b) => a - b);
+    const p95 = durations.length ? durations[Math.min(durations.length - 1, Math.ceil(durations.length * 0.95) - 1)] : 0;
+    const seconds = Math.max(1, (Date.parse(query.to) - Date.parse(query.from)) / 1000);
+    const terminal = new Set<AutoReplyRunStatus>(['persisted', 'handoff', 'skipped', 'failed']);
+    const processing = new Set<AutoReplyRunStatus>(['received', 'classified', 'context_loaded', 'generated', 'simulated']);
+    return { from: query.from, to: query.to, asOf: new Date().toISOString(), inboundCount: runs.length, processingCount: runs.filter((run) => processing.has(run.status)).length, persistedCount: counts.get('persisted') ?? 0, handoffCount: counts.get('handoff') ?? 0, failedCount: counts.get('failed') ?? 0, skippedCount: counts.get('skipped') ?? 0, completionRate: runs.length ? runs.filter((run) => terminal.has(run.status)).length / runs.length : 0, throughputPerSecond: runs.length / seconds, p95DurationMs: p95, byStatus: [...counts.entries()].map(([status, count]) => ({ status, count })), byStage: [...stageCounts.entries()].map(([stage, value]) => ({ stage, count: value.count, averageDurationMs: value.count ? Math.round(value.duration / value.count) : 0 })), exceptions: [...exceptions.entries()].map(([code, value]) => ({ code, count: value.count, status: value.status })), health: (await this.pool.query("select component,status,observed_at,details_json from observability.health_snapshots order by observed_at desc limit 20")).rows.map((row) => ({ component: String(row.component), status: String(row.status), observedAt: dateIso(row.observed_at), details: row.details_json && typeof row.details_json === 'object' && !Array.isArray(row.details_json) ? row.details_json as Record<string, unknown> : {} })), };
   }
 
   async markMessagesReadByExternalRef(input: { adminId: string; conversationId: string; externalMessageRef: string; readAt?: string }): Promise<{ messages: MessageRecord[]; events: ConversationEventRecord[] }> {
@@ -781,6 +862,9 @@ export class PostgresStore implements Store {
     const orderRefs = Array.isArray(row.order_refs) ? row.order_refs.map(String) : [];
     return { id: String(row.id), adminId: String(row.admin_id), accountId: String(row.account_id), conversationId: String(row.conversation_id), inboundMessageId: String(row.inbound_message_id), intent: String(row.intent), decision: row.decision as AutoReplyRunRecord['decision'], status: row.status as AutoReplyRunRecord['status'], riskFlags, productId: row.product_id ? String(row.product_id) : undefined, orderRefs, inputDigest: String(row.input_digest), contextDigest: row.context_digest ? String(row.context_digest) : undefined, replyDigest: row.reply_digest ? String(row.reply_digest) : undefined, senderOutcome: row.sender_outcome as AutoReplyRunRecord['senderOutcome'], outboundMessageId: row.outbound_message_id ? String(row.outbound_message_id) : undefined, failureCode: row.failure_code ? String(row.failure_code) : undefined, createdAt: dateIso(row.created_at), updatedAt: dateIso(row.updated_at) };
   }
+  private toAutoReplyRunEvent(row: Row): AutoReplyRunEventRecord { const payload = row.payload_json && typeof row.payload_json === 'object' && !Array.isArray(row.payload_json) ? row.payload_json as Record<string, unknown> : {}; return { id: String(row.id), runId: String(row.run_id), accountId: String(row.account_id), sequence: Number(row.sequence), eventType: String(row.event_type), stage: row.stage as AutoReplyRunStage, status: row.status as AutoReplyRunStatus, occurredAt: dateIso(row.occurred_at), durationMs: row.duration_ms === null || row.duration_ms === undefined ? undefined : Number(row.duration_ms), traceId: row.trace_id ? String(row.trace_id) : undefined, payload: { ...payload } }; }
+  private toAutoReplyRunListItem(row: Row): AutoReplyRunListItem { const run = this.toAutoReplyRun(row); return { ...run, stage: autoReplyStageForStatus(run.status), durationMs: Math.max(0, Number(row.duration_ms ?? (Date.parse(run.updatedAt) - Date.parse(run.createdAt)))), buyerDisplayName: row.buyer_display_name ? String(row.buyer_display_name) : undefined, productTitle: row.product_title ? String(row.product_title) : undefined, inboundMessagePreview: row.inbound_message_preview ? String(row.inbound_message_preview).slice(0, 180) : undefined }; }
+  private statusForAutoReplyStage(stage: AutoReplyRunStage): AutoReplyRunStatus { const map: Record<AutoReplyRunStage, AutoReplyRunStatus> = { gateway_received: 'received', intent_recognition: 'classified', context_read: 'context_loaded', reply_generation: 'generated', sending: 'simulated', persisted: 'persisted', handoff: 'handoff', skipped: 'skipped', failed: 'failed' }; return map[stage]; }
   private toConversationEvent(row: Row): ConversationEventRecord { const payload = row.payload_json && typeof row.payload_json === 'object' && !Array.isArray(row.payload_json) ? row.payload_json as Record<string, unknown> : {}; return { eventId: String(row.event_id), conversationId: String(row.conversation_id), accountId: String(row.account_id), cursor: Number(row.cursor), type: row.type as ConversationEventRecord['type'], occurredAt: new Date(String(row.occurred_at)).toISOString(), traceId: String(row.trace_id), payload }; }
 
   private toAdmin(row: Row): AdminRecord { return { id: String(row.id), email: String(row.email), passwordHash: String(row.password_hash), displayName: String(row.display_name ?? ''), role: String(row.role), status: row.status as AdminRecord['status'], createdAt: new Date(String(row.created_at)).toISOString(), lastLoginAt: iso(row.last_login_at) }; }
