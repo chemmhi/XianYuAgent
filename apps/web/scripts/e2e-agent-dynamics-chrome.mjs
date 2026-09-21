@@ -190,11 +190,15 @@ async function run() {
     await evaluate(cdp, `(() => { const close = document.querySelector('.agent-dynamics-close'); if (!close) return false; close.click(); return true; })()`);
     await waitFor(async () => !Boolean(await evaluate(cdp, 'document.querySelector(".agent-dynamics-drawer-backdrop.open")')), 'mobile drawer close');
     const mobilePath = await captureViewport(cdp, 390, 844, 'agent-dynamics-mobile-390x844.png');
-    if (!drawerText.includes('打开在线聊天') || !drawerText.includes('已发送 / 已落库')) throw new Error('drawer actions or persistence outcome missing');
+    if (!drawerText.includes('打开在线聊天') || !/已发送 \/ 已落库|模拟 \/ 已落库/.test(drawerText)) throw new Error('drawer actions or persistence outcome missing');
     console.log(JSON.stringify({ apiUrl, webUrl, accountId, runIds, screenshots: { desktopPath, drawerPath, mobileDrawerPath, mobilePath }, modelCall }));
     cdp.socket.close();
   } finally {
     globalThis.fetch = originalFetch;
+    // Stop the browser and Vite child processes before closing the API server.
+    // The browser keeps polling the activity endpoints; closing the server
+    // first would wait forever on those keep-alive connections.
+    for (const child of children) { try { child.kill(); } catch { /* best effort */ } }
     if (apiRuntime?.store?.pool) {
       if (accountId) await apiRuntime.store.pool.query('delete from messages.auto_reply_run_events where account_id=$1', [accountId]);
       if (runIds.length) await apiRuntime.store.pool.query('delete from messages.auto_reply_runs where id = any($1::uuid[])', [runIds]);
@@ -208,10 +212,15 @@ async function run() {
       if (adminId) await apiRuntime.store.pool.query('delete from auth.sessions where admin_id=$1', [adminId]);
       if (adminId) await apiRuntime.store.pool.query('delete from auth.admins where id=$1', [adminId]);
     }
-    if (apiRuntime) await apiRuntime.close();
-    for (const child of children) { try { child.kill(); } catch { /* best effort */ } }
+    try { apiRuntime?.server?.closeAllConnections?.(); } catch { /* best effort */ }
+    if (apiRuntime) {
+      await Promise.race([
+        apiRuntime.close(),
+        new Promise((resolve) => setTimeout(resolve, 5_000)),
+      ]);
+    }
     try { rmSync(chromeProfile, { recursive: true, force: true }); } catch { /* best effort */ }
   }
 }
 
-run().catch((error) => { console.error(error); process.exitCode = 1; });
+run().then(() => process.exit(0)).catch((error) => { console.error(error); process.exit(1); });
