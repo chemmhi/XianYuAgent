@@ -450,7 +450,7 @@
 | S5-R84 | 前端 / 视觉 | SellerAgent 高保真结构、动态 Model 下拉、双 viewport、成功态保持和时间线规则行是否对齐 | root + dynamic_models + e2e_audit | PASS（截图证据） | `settings-openai-*.png`；`docs/evidence/stage5/S4-VS7A/visual-diff.md` |
 | S5-R85 | 质量 / 安全 / 运维 | fallback 专用审计、发布级 rollback、旧凭证兼容迁移是否完整 | root | PARTIALLY_VERIFIED | E2E 已证明切换行为；`fallbackAudit=false`，rollback/兼容迁移未执行 |
 
-本轮结论：OpenAI API 主备配置纵向链路已实现并完成真实 PostgreSQL + Chrome/CDP 受控验证；视觉 P2（timeline 基类缺失、保存后成功态重置）已修复并重新截图。切片保持 `READY_FOR_REVIEW`，不得升级为发布级 `PASS`，直到 S5-R85 项开放项完成或经人工签核接受。
+本轮结论：OpenAI API 主备配置纵向链路已实现并完成真实 PostgreSQL + Chrome/CDP 受控验证；视觉 P2（timeline 基类缺失、保存后成功态重置）已修复并重新截图。实现通过 `9be12d8` 合入 `master`，共享模型下拉控件和最终截图由 `f8ad6f3` 补齐。切片保持 `READY_FOR_REVIEW`，不得升级为发布级 `PASS`，直到 S5-R85 项开放项完成或经人工签核接受。
 
 ### 2026-09-21：Agent 动态壳层与视觉复验
 

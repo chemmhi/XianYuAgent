@@ -3,6 +3,8 @@
 日期：2026-09-21
 切片：`S4-VS7A`  受控范围：Settings → OpenAI API
 
+合并提交：`9be12d8`（设置修复与动态模型链路）；补丁提交：`f8ad6f3`（共享模型下拉控件视觉与最终截图）。
+
 ## 用户路径
 
 真实 Chrome/CDP 入口为 `/settings` → `OpenAI API`：

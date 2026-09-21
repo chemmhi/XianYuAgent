@@ -1,7 +1,7 @@
 # XianyuSellerAgent 风险登记册
 
 - 文档版本：v0.2
-- 更新日期：2026-09-20
+- 更新日期：2026-09-21
 - 当前阶段：阶段 5——优先推进 S4-VS5 在线聊天、S4-VS6 Workspace、S4-VS7A Settings API Key
 - 风险状态：开放风险已登记；当前无 P0
 - 阶段门禁规则：阶段 5 允许受控 adapter、内存 store 和本机 Chrome/CDP 先形成证据，但不得把受控验证冒充真实闲鱼 APP 扫码、外部 Cookie 验证或 PostgreSQL/Redis 持久化；未关闭的 P1 外部登录和容器门禁不得扩展到商品、卡券、订单写入。
@@ -106,10 +106,10 @@
 | S5-RISK-024 | Workspace Run/Step/Confirmation/Outbox 状态可能被页面或 Runtime 直接改写 | P1 | 高 | 高风险动作不可审计、重复执行或无法人工恢复 | Workspace / 执行负责人 | 独立 controller、状态机、Policy→Confirmation→Outbox、worker lease 和 recover E2E | `S4-VS6A`、`S4-VS6B` | 开放，承接 R-006/R-009 |
 | S5-RISK-025 | Workspace 实时事件、unknown、cancel、retry 尚未在真实 Runtime 中形成可恢复证据 | P1 | 中 | Run 卡死、误重试或外部结果未知时无法判断最终状态 | Runtime / QA 负责人 | 真实 Worker/Runtime、超时/取消/重试、事件游标、人工恢复和日志指标通过 | `S4-VS6A`、`S4-VS6B` | 开放，承接 R-006 |
 | S5-RISK-026 | Settings API Key 配置若复用通用设置保存入口，可能泄露明文或覆盖其他凭证 | P1 | 高 | 凭证泄露、轮换失败覆盖旧密钥或跨域读取 | 安全 / 凭证负责人 | CredentialStore 唯一 owner、加密复读、脱敏 UI、轮换/启停/撤销审计和 403/409 E2E | `S4-VS7A` | 开放，承接 R-004/S3-I004 |
-| S5-RISK-027 | `018_credential_store.sql` 已实现但尚未在真实 PostgreSQL volume 完成 apply/verify/rollback 与密文复读 | P1 | 高 | schema 漂移、密文不可读或回滚破坏旧凭证引用，无法证明发布级持久化安全 | 架构 / 数据 / 运维负责人 | 真实 PostgreSQL 执行 018、加密字段复读、重复执行、旧数据兼容、回滚演练和清理证据 | `S4-VS7A`、`S4-ENV-RECOVERY` | 开放，承接 R-001/S5-I001 |
+| S5-RISK-035 | `018_credential_store.sql` 已实现但尚未在真实 PostgreSQL volume 完成 apply/verify/rollback 与密文复读 | P1 | 高 | schema 漂移、密文不可读或回滚破坏旧凭证引用，无法证明发布级持久化安全 | 架构 / 数据 / 运维负责人 | 真实 PostgreSQL 执行 018、加密字段复读、重复执行、旧数据兼容、回滚演练和清理证据 | `S4-VS7A`、`S4-ENV-RECOVERY` | 开放，承接 R-001/S5-I001 |
 | S5-RISK-028 | Settings 首片尚无 Chrome/CDP 1440×900 与 390×844 截图、逐状态视觉偏差和真实跨层 403/409 E2E | P2 | 中 | 页面可能仅在单元/MemoryStore 下可用，移动端或真实权限冲突被遗漏 | 前端 / QA / 安全负责人 | 固定双 viewport 覆盖 loading/empty/error/forbidden/submitting/saved，真实 API + PostgreSQL + 浏览器回写证据并完成独立复审 | `S4-VS7A` | 开放，承接 S4-I007/S5-RISK-026 |
-| S5-RISK-031 | 主配置失败后已能切换备用，但 fallback 专用审计事件尚未形成可查询记录 | P2 | 中 | 故障原因、主备切换和 trace 关联无法在运维侧直接复核 | Agent / 可观测性负责人 | 在 fallback wrapper 中写入脱敏 AuditEvent，补 Memory/PostgreSQL 查询和 E2E 断言 | `S4-VS7A` | 开放；当前 E2E `fallbackAudit=false`，不得宣称完整审计闭环 |
-| S5-RISK-032 | OpenAI 主备配置新增迁移 024，尚未完成既有生产 volume 的发布级 rollback / 兼容窗口演练 | P1 | 高 | 旧唯一约束、历史 credential refs 或回滚时的主备角色数据可能不兼容 | 架构 / 数据 / 运维负责人 | 在隔离 volume 执行 apply、重复 apply、旧数据读取、回滚和恢复，并记录数据兼容策略 | `S4-VS7A`、`S4-ENV-RECOVERY` | 开放 |
+| S5-RISK-033 | 主配置失败后已能切换备用，但 fallback 专用审计事件尚未形成可查询记录 | P2 | 中 | 故障原因、主备切换和 trace 关联无法在运维侧直接复核 | Agent / 可观测性负责人 | 在 fallback wrapper 中写入脱敏 AuditEvent，补 Memory/PostgreSQL 查询和 E2E 断言 | `S4-VS7A` | 开放；当前 E2E `fallbackAudit=false`，不得宣称完整审计闭环 |
+| S5-RISK-034 | OpenAI 主备配置新增迁移 024，尚未完成既有生产 volume 的发布级 rollback / 兼容窗口演练 | P1 | 高 | 旧唯一约束、历史 credential refs 或回滚时的主备角色数据可能不兼容 | 架构 / 数据 / 运维负责人 | 在隔离 volume 执行 apply、重复 apply、旧数据读取、回滚和恢复，并记录数据兼容策略 | `S4-VS7A`、`S4-ENV-RECOVERY` | 开放 |
 
 ### 2026-09-19 S4-VS6A 风险复核
 
@@ -131,8 +131,8 @@
 
 - `S5-RISK-026` 已部分缓解：主/备配置分角色保存，CredentialStore 继续负责密文，API 只返回脱敏视图；真实 Chrome/CDP + PostgreSQL 已覆盖账号 scope、更新版本、密钥不回显和 Agent 消费。
 - `S5-RISK-028` 已部分缓解：双 viewport 截图、视觉偏差记录、Model provider 动态下拉和保存成功态已补齐；独立人工视觉签核仍未关闭。
-- `S5-RISK-031` 保持开放：主失败切备用行为通过，但 fallback 专用 audit record 未暴露为可查询结果。
-- `S5-RISK-032` 保持开放：迁移 024 已在当前 PostgreSQL 执行并通过复读，发布级 rollback / 旧凭证兼容窗口尚未演练。
+- `S5-RISK-033` 保持开放：主失败切备用行为通过，但 fallback 专用 audit record 未暴露为可查询结果。
+- `S5-RISK-034` 保持开放：迁移 024 已在当前 PostgreSQL 执行并通过复读，发布级 rollback / 旧凭证兼容窗口尚未演练。
 - 本轮未重复 Cookie 登录、未发送真实闲鱼消息；发送/附件/撤回的外部 unknown/timeout 与幂等风险继续由 `S5-RISK-022` 和 `S4-VS5B` 承接。
 
 ### 2026-09-20 商品表格空态修订风险复核
@@ -165,7 +165,7 @@
 ### 2026-09-20 S4-VS7A Settings API Key 风险复核
 
 - `S5-RISK-026` 已部分缓解但保持开放：CredentialStore 已独立于通用设置保存入口，API 只返回 `CredentialRef` 脱敏 metadata，明文仅在 create/rotate 请求边界出现；`Idempotency-Key`、`expectedVersion`、账号 scope、轮换/启停/撤销审计、403/409 与撤销后禁止启用均已由 smoke/Chrome/CDP 覆盖。旧 `auth.account_credentials` 兼容迁移仍需独立方案与签核。
-- `S5-RISK-027` 已部分缓解但保持开放：临时 PostgreSQL 已执行 `001`–`018`，并复读 `credential_values.ciphertext/key_version/checksum/metadata_json`；发布级 rollback、已有 volume 回退与重复迁移后的恢复演练仍未覆盖。
+- `S5-RISK-035` 已部分缓解但保持开放：临时 PostgreSQL 已执行 `001`–`018`，并复读 `credential_values.ciphertext/key_version/checksum/metadata_json`；发布级 rollback、已有 volume 回退与重复迁移后的恢复演练仍未覆盖。
 - `S5-RISK-028` 已部分缓解但保持开放：Settings 已生成 `1440×900`、`390×844` 固定 viewport 截图并完成桌面/移动偏差记录；loading/empty/error/submitting/saved 与移动短标签导航均有浏览器路径，正式人工视觉签核仍待 merge lock 后完成。
 
 ### 2026-09-20 自动回复链路风险复核
