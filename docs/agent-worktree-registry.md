@@ -57,7 +57,7 @@
 | `root/listener_ready` | `auto-reply-push-history-race` | `codex/push-history-race` | `F:\ChenHai\Project\XianYuAgent-push-race` | Codex `/root` delegated agent | `2026-09-21 10:55:00 +08:00` | `MERGED` | `bb1e47e` | `-` | 修复历史同步先落库后真实 push 被重复判定而跳过自动回复；push 即使 `created=false` 也进入幂等 `AutoReplyService.processInbound`，新增重复 push 不重复出站回归。 |
 | `root/listener_ready` | `auto-reply-smoke-race` | `codex/auto-reply-smoke-race` | `F:\ChenHai\Project\XianYuAgent-auto-reply-smoke-race` | Codex `/root` delegated agent | `2026-09-21 10:59:00 +08:00` | `MERGED` | `b59f026` | `-` | 更新自动回复 smoke 断言以匹配新的幂等语义：重复 push 返回同一 run、AI 出站保持单条、无真实发送；完整 API/Web 测试、构建和 Compose 配置通过。 |
 | `root` | `message-dedupe-fix` | `fix/message-dedupe` | `F:\ChenHai\Project\XianYuAgent-message-dedupe-fix` | Codex `/root` | `2026-09-21 12:00:00 +08:00` | `CLEANED` | `1b459a4` | `2026-09-21 11:45:00 +08:00` | 统一历史同步与实时 push 的规范消息号，补 parser、历史导入和原始 push 幂等回归；独立根因/UI 复核通过，定向与全量测试通过；worktree 与分支已清理。 |
-| `root` | `auto-reply-ai` | `feat/auto-reply-ai` | `F:\ChenHai\Project\XianYuAgent-auto-reply-ai` | Codex `/root` | `2026-09-21 12:10:00 +08:00` | `READY_FOR_MERGE` | `-` | `-` | 独立复审已确认 facts 解析、最新订单截取、订单分页、显式关闭开关均通过；模型成功/失败、模板回退、上下文裁剪和全量门禁已验证，准备在 merge lock 内合入。 |
+| `root` | `auto-reply-ai` | `feat/auto-reply-ai` | `F:\ChenHai\Project\XianYuAgent-auto-reply-ai` | Codex `/root` | `2026-09-21 12:10:00 +08:00` | `MERGED` | `baf7e4d78327d52ba11fe8c73fd40cf8b13836d1` | `-` | 独立复审通过并在 merge lock 内合入；master 上模型单测 18/18、自动回复 E2E 1/1、API 全量 19/19、Web 39/39、构建、Compose 配置和 diff check 均通过。 |
 
 ## 主工作区
 
