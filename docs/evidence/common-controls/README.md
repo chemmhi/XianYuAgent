@@ -1,5 +1,7 @@
 # Common Controls Visual Evidence
 
+当前复盘登记（状态：FAIL / OPEN）：[`common-controls-review-2026-09-21.md`](./common-controls-review-2026-09-21.md)。该文档先记录 SearchField/SelectField 视觉差异、页面遗漏、例外边界和分阶段修复计划；在共享组件修复与证据复核前，不得将本目录视为通过。
+
 `apps/web/scripts/common-controls-visual-diff.mjs` is the repeatable browser-evidence helper for the shared Search / Select / Input / TextArea / Button / PlaceholderCell controls.
 
 The canonical design source for this evidence is `F:\ChenHai\Project\XianYuAgent-search-select-preview\docs\design-preview\xianyu-admin-controls-review.html`. The checked-in baseline copy is byte-identical to that review design.
