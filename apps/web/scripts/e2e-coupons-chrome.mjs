@@ -209,10 +209,10 @@ async function run() {
 
   const toggleDisabled = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(editedLabel)})); const button = row?.querySelector('button[aria-label="禁用"]'); if (!button) return false; button.click(); return true; })()`);
   if (!toggleDisabled) throw new Error('created coupon disable button missing');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('禁用'), 'coupon toggle disabled');
+  await waitFor(async () => await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(editedLabel)})); return Boolean(row?.querySelector('button[aria-label="启用"]')); })()`), 'coupon toggle disabled');
   const toggleEnabled = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(editedLabel)})); const button = row?.querySelector('button[aria-label="启用"]'); if (!button) return false; button.click(); return true; })()`);
   if (!toggleEnabled) throw new Error('created coupon enable button missing');
-  await waitFor(async () => !String(await evaluate(cdp, 'document.body.innerText')).includes('禁用'), 'coupon toggle enabled');
+  await waitFor(async () => await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(editedLabel)})); return Boolean(row?.querySelector('button[aria-label="禁用"]')); })()`), 'coupon toggle enabled');
 
   const opened = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(editedLabel)})); const button = row?.querySelector('button[aria-label="查看明细"]'); if (!button) return false; button.click(); return true; })()`);
   if (!opened) throw new Error('coupon detail button missing');
