@@ -6,7 +6,6 @@
 .coupons-toolbar h2 { margin: 0 0 3px; }
 .coupons-toolbar p { margin: 0; font-size: 11px; color: var(--sub); }
 .coupons-toolbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-.coupons-drawer textarea, .coupons-inline-form input, .coupons-form-grid input, .coupons-form-grid textarea { min-height: 34px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--text); font-size: 12px; }
 .coupons-purpose-select { min-width: 112px; }
 .coupons-search { width: 230px; max-width: 260px; }
 .coupons-total, .coupons-inline-note { color: var(--sub); font-size: 11px; white-space: nowrap; }
@@ -66,14 +65,13 @@
 .coupons-drawer-summary small { display: inline-block; margin-left: 3px; }
 .coupons-drawer-section { display: grid; gap: 9px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; }
 .coupons-drawer-section h3, .coupons-danger-zone h3 { margin: 0; font-size: 12px; }
-.coupons-drawer-section textarea { width: 100%; resize: vertical; }
 .coupons-section-title { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .coupons-drawer-section dl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0; }
 .coupons-drawer-section dl div { padding: 10px; border-radius: 8px; background: var(--bg); }
 .coupons-drawer-section dt { color: var(--sub); font-size: 10px; }
 .coupons-drawer-section dd { margin: 4px 0 0; color: var(--text); font-size: 11px; font-weight: 700; word-break: break-word; }
 .coupons-inline-form { display: flex; gap: 8px; }
-.coupons-inline-form input { flex: 1; min-width: 0; }
+.coupons-inline-form .ui-input-control { flex: 1; min-width: 0; }
 .coupons-empty-note { color: var(--sub); font-size: 11px; }
 .coupons-binding-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
 .coupons-binding-list li { display: flex; justify-content: space-between; gap: 8px; padding: 8px 9px; border-radius: 7px; background: var(--bg); font-size: 11px; }
@@ -93,11 +91,9 @@
 .coupons-modal h2 { margin: 4px 0 3px; font-size: 20px; }
 .coupons-modal footer { align-items: center; justify-content: flex-end; padding-top: 16px; }
 .coupons-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 18px 0; }
-.coupons-form-grid label { display: grid; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 700; }
-.coupons-form-grid input, .coupons-form-grid textarea { width: 100%; font-weight: 400; }
+.coupons-form-grid .ui-input-control, .coupons-form-grid .ui-textarea-control { width: 100%; }
 .coupons-form-grid .ui-select-control { width: 100%; }
 .coupons-form-full { grid-column: 1 / -1; }
-.coupons-form-grid textarea { resize: vertical; }
 .coupons-form-error { margin: 0; color: var(--danger); font-size: 11px; }
 .coupons-editor-modal { width: min(760px, 100%); max-height: 92vh; overflow: hidden; display: flex; flex-direction: column; }
 .coupons-modal-header, .coupons-modal-footer { flex: 0 0 auto; background: var(--card); }

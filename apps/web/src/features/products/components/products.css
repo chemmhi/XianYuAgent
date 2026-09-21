@@ -61,12 +61,6 @@
 .products-detail-body p { margin: 0; color: var(--sub); font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
 .product-drawer { width: min(560px, 100vw); }
 .product-basic-form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding-top: 20px; }
-.product-basic-form label { display: grid; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 700; }
-.product-basic-form label span { color: var(--muted); }
-.product-basic-form input, .product-basic-form textarea { width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font-size: 12px; padding: 9px 10px; }
-.product-basic-form input { height: 36px; }
-.product-basic-form textarea { resize: vertical; min-height: 110px; line-height: 1.5; }
-.product-basic-form input:disabled, .product-basic-form textarea:disabled { opacity: .7; }
 .product-basic-form small { color: var(--sub); font-size: 10px; font-weight: 400; line-height: 1.4; }
 .product-basic-form em { color: var(--danger); font-size: 10px; font-style: normal; font-weight: 600; }
 .product-basic-form-wide { grid-column: 1 / -1; }

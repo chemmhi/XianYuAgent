@@ -179,19 +179,6 @@
   border-bottom-color: var(--border);
 }
 
-.messages-search {
-  height: 34px;
-  border-color: var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-  color: var(--axis);
-}
-
-.messages-search input {
-  color: var(--text);
-  font-size: 12px;
-}
-
 .messages-filter-tabs {
   gap: 4px;
 }
