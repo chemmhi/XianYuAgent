@@ -3,6 +3,18 @@
 更新时间：2026-09-21  
 范围：`apps/web` 正式前端；仅迁移通用搜索、输入、文本框、按钮和空值格。共享组件来源为 `apps/web/src/shared/ui/` 的 `SearchField`、`SelectField`、`InputField`、`TextAreaField`、`Button`、`PlaceholderCell`。
 
+## 当前审核门禁
+
+**状态：FAIL / OPEN。** 本 checklist 不能作为本轮通过证据；它记录了已存在的迁移结果，但此前没有覆盖“设计要求但缺失的控件”、真实业务路由的共享控件样式覆盖、Select 展开态和 schema→UI 完整映射。详细问题、范围决策和分阶段修复计划见 [`common-controls-review-2026-09-21.md`](./common-controls-review-2026-09-21.md)。
+
+### 已确认的范围决策
+
+- 全局搜索正式移除，不恢复 `TopBar + SearchField`；旧证据中的全局搜索要求需清理。
+- Orders 保留单一聚合状态下拉，不拆分为四个独立状态下拉。
+- Workspace Run composer 保留页面特调 textarea，作为明确例外。
+- Dashboard、表格排序、分页、Tabs、菜单等普通/领域按钮不纳入本轮 `Button` 统一。
+- 前述复盘中的全部 P0/P1 项纳入下一轮修复；共享组件必须先于页面级遗漏修复。
+
 ## 迁移原则
 
 - 保留现有受控值、`onChange`、`disabled`、`required`、`aria-*`、`data-testid` 和提交边界；共享控件只负责外观与原生语义封装。
@@ -56,7 +68,10 @@
 
 ## 剩余审计清单
 
-1. Accounts/Products/Coupons/Orders/Agent Dynamics/Workspace 的当前迁移改动仍位于 `codex/common-controls` worktree，合入前需确认共享组件版本一致。
-2. Auth/Settings/Accounts/Products/Coupons/Orders/Agent Dynamics 页面尚未全部完成固定 viewport 截图与视觉 diff；当前只完成结构化迁移和类型/测试准备，整页像素差异仍需人工复核。
-3. Dashboard、Messages 的领域按钮和空值格不在本次页面范围；其中 Messages 在线聊天 composer 与 Workspace Run composer 都属于明确禁改项。
-4. `SelectField` 的全局使用约束继续由 `apps/web/src/shared/ui/select-usage.test.ts` 维护；本切片不重复实现 native select。
+1. 共享 SearchField/SelectField 尚未完成按专有设计稿的 1:1 视觉复核；Select 展开项的真实截图、键盘行为和跨浏览器边界仍缺失。
+2. 页面 CSS 对 shared inner input/select/textarea 的覆盖尚未全部隔离；至少 Workspace、Messages、Auth、Settings、Products、Coupons 仍需 selector 级审计。
+3. Accounts/Coupons 的 schema→UI 映射仍不完整：`connectionStatus`、`status`、`stockAlert` 和 Coupons 分页尚未关闭。
+4. Workspace 搜索词尚未从 controller 传入 API；Workspace Run composer 例外已批准但尚未写入统一 allowlist。
+5. Auth/Settings/Accounts/Products/Coupons/Orders/Agent Dynamics/Workspace 尚未全部完成真实路由固定 viewport 截图与视觉 diff；`/controls` 预览页不能替代页面证据。
+6. Dashboard、表格排序、分页、Tabs、菜单等普通/领域按钮明确不纳入本轮 `Button` 统一，但相关自定义语义仍需单列登记，避免被误判为 SelectField 或 shared Button 已覆盖。
+7. `SelectField` 的全局使用约束继续由 `apps/web/src/shared/ui/select-usage.test.ts` 维护；本轮仍不得以现存 native select 扫描结果替代 expected-control manifest。
