@@ -21,7 +21,7 @@
 
 ## 当前证据
 - `2026-09-20 自动回复链路切片`：按设计文档收敛为“入站规范化/事实先落库 → 幂等回放 → 风险优先意图 → 商品/订单/会话分层上下文 → 可回答性与策略门禁 → 受事实约束的生成 → 输出安全校验 → Noop 模拟投递 → AI 出站消息与 `auto_reply_runs` 落库 → 脱敏审计回读”；`npm --workspace apps/api run test:auto-reply:e2e`、`npm --workspace apps/api run test:auto-reply:postgres`、`npm run db:migrate`、`npm run typecheck`、`npm test`、`npm run build`、`npm run compose:config`、`git diff --check` 均通过。真实闲鱼发送调用次数为 0；本切片仅验证 dry-run，不关闭在线聊天发送/附件/撤回、真实模型 Provider、Outbox Worker 或发布级回滚风险。
-- `2026-09-21 自动回复模型 Provider 接入`：`npm --workspace apps/api run test:auto-reply:unit` 16/16、`npm --workspace apps/api run test:auto-reply:e2e`、`npm --workspace apps/api run test:auto-reply`、`npm --workspace apps/api run build`、`npm run typecheck:api` 通过；受控 fetch 证明模型请求使用共享环境配置并将 AI 回复落库，503 仅落失败 run 且不产生 outbound。真实 Provider、live 发送、Outbox/unknown 恢复和离线评测仍未完成。
+- `2026-09-21 自动回复模型 Provider 接入`：`npm --workspace apps/api run test:auto-reply:unit` 18/18、`npm --workspace apps/api run test:auto-reply:e2e`、`npm --workspace apps/api run test:auto-reply`、`npm --workspace apps/api run build`、`npm run typecheck:api` 通过；受控 fetch 证明模型请求使用共享环境配置并将 AI 回复落库，显式关闭后仍走模板，503 仅落失败 run 且不产生 outbound。真实 Provider、live 发送、Outbox/unknown 恢复和离线评测仍未完成。
 - `2026-09-19 S4-VS2 商品同步入口修复`：商品页从普通 `/products` 入口加载管理员可见账号，默认选择可用账号并将 `accountId` 写回列表查询与同步请求；Chrome/CDP fixture 验证 29 件同步商品可落库，列表总数由 1 增至 30。
 
 - `SellerAgent/npm test`：已通过，`mock API contract flow passed`；
