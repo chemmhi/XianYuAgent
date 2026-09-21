@@ -56,7 +56,7 @@
 | `root/listener_ready` | `auto-reply-buyer-identity` | `codex/listener-allowlist` | `F:\ChenHai\Project\XianYuAgent-listener-allowlist` | Codex `/root` delegated agent | `2026-09-21 10:43:00 +08:00` | `MERGED` | `e86af0f` | `-` | 修复真实 push 缺少 senderName 且本地会话无昵称时白名单误跳过：按稳定 externalConversationRef 补全闲鱼买家身份并持久化；新增回归测试通过。 |
 | `root/listener_ready` | `auto-reply-push-history-race` | `codex/push-history-race` | `F:\ChenHai\Project\XianYuAgent-push-race` | Codex `/root` delegated agent | `2026-09-21 10:55:00 +08:00` | `MERGED` | `bb1e47e` | `-` | 修复历史同步先落库后真实 push 被重复判定而跳过自动回复；push 即使 `created=false` 也进入幂等 `AutoReplyService.processInbound`，新增重复 push 不重复出站回归。 |
 | `root/listener_ready` | `auto-reply-smoke-race` | `codex/auto-reply-smoke-race` | `F:\ChenHai\Project\XianYuAgent-auto-reply-smoke-race` | Codex `/root` delegated agent | `2026-09-21 10:59:00 +08:00` | `MERGED` | `b59f026` | `-` | 更新自动回复 smoke 断言以匹配新的幂等语义：重复 push 返回同一 run、AI 出站保持单条、无真实发送；完整 API/Web 测试、构建和 Compose 配置通过。 |
-| `root` | `message-dedupe-fix` | `fix/message-dedupe` | `F:\ChenHai\Project\XianYuAgent-message-dedupe-fix` | Codex `/root` | `2026-09-21 12:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 统一历史同步与实时 push 的规范消息号，补 parser、历史导入和原始 push 幂等回归；定向与全量测试通过，待合入 master。 |
+| `root` | `message-dedupe-fix` | `fix/message-dedupe` | `F:\ChenHai\Project\XianYuAgent-message-dedupe-fix` | Codex `/root` | `2026-09-21 12:00:00 +08:00` | `CLEANED` | `1b459a4` | `2026-09-21 11:45:00 +08:00` | 统一历史同步与实时 push 的规范消息号，补 parser、历史导入和原始 push 幂等回归；独立根因/UI 复核通过，定向与全量测试通过；worktree 与分支已清理。 |
 
 ## 主工作区
 
