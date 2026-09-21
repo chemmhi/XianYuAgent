@@ -30,7 +30,7 @@
 - 项目阶段：5
 - 阶段状态：进行中（账号管理、商品、卡券已具备主体链路；S4-VS3 仍待真实环境人工复核；下一批优先切片调整为在线聊天、Workspace 工作台和 Settings API Key 配置）
 - 最近一次通过门禁：S4-VS-DASHBOARD 全链路复核 / 2026-09-20（PASS；项目整体仍处于阶段 5 进行中）
-- 当前目标：完成 `S4-VS5A` 独立复审后推进 `S4-VS5B/C`；并行收尾 `S4-VS6B`、`S4-VS7A` 的真实 PostgreSQL、浏览器视觉和独立评审门禁，以及既有账号/商品/卡券真实环境门禁，不再把受控证据冒充发布级完成
+- 当前目标：完成 `S4-VS5A` 独立复审后推进 `S4-VS5B/C`；并行收尾 `S4-VS6B`，以及 `S4-VS7A` 的 fallback 审计可查询化、迁移 024 发布级 rollback/兼容窗口和独立评审，不再把受控证据冒充发布级完成
 - 多 Agent 协作状态：已启用独立 worktree、登记表和全局 merge lock 强制规则；当前活动登记见 `docs/agent-worktree-registry.md`，主工作区禁止直接开发
 - 已完成范围：阶段 0 范围门禁；阶段 1 架构与模块边界；阶段 2 数据模型、数据库表设计、关系基数、状态机、API envelope、幂等、鉴权、敏感交付、迁移边界；阶段 5 账号登录方法选择、真实 QR 适配器、Cookie 登录、账号资料同步、登录会话持久化、AuthGate 会话门禁、Vite 默认代理、账号列表真实读取和 Chrome/CDP 控制环境 E2E；S4-VS2 商品列表/详情只读首片、003_catalog 迁移、Memory/Postgres scope-aware 查询、真实 PostgreSQL smoke 和 Chrome/CDP 商品 E2E
 - 未完成范围：在线聊天 `S4-VS5B/C`、Workspace `S4-VS6B`、Settings API Key `S4-VS7A` 已完成首片并保持 `READY_FOR_REVIEW`；订单交付 `S4-VS4B/C`；订单只读列表 `S4-VS4A` 的真实闲鱼读取与 PostgreSQL 落库已通过，交付动作仍后置；Dashboard 全状态截图、独立视觉签核与 rollback 仍开放；VS5A 保持 `PARTIALLY_VERIFIED`，待独立复审确认生产部署拓扑后关闭 `S5-RISK-021`；`S4-VS6A` 已完成真实 PostgreSQL、WS 和 Chrome/CDP 首链路复核并保持 `PARTIALLY_VERIFIED`，尚未满足独立 Worker/Pi Runtime、发布级恢复和人工视觉签核；商品/卡券剩余写入与库存门禁；`S4-ENV-RECOVERY`、`S4-EXT-ACCOUNT`、`S4-ENV-RUNTIME`；完整迁移/回滚/Testcontainers、Redis/MinIO 恢复和逐状态视觉回归。账号密码登录依赖独立浏览器运行时，当前明确不可用。
