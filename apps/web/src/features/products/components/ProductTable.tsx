@@ -1,4 +1,5 @@
 import type { ProductVM } from '../types';
+import { PlaceholderCell } from '../../../shared/ui/PlaceholderCell';
 
 export function ProductTable({ products, page, totalPages, total, sortBy, sortOrder, onSortChange, onPageChange, onOpen }: {
   products: ProductVM[];
@@ -21,7 +22,7 @@ export function ProductTable({ products, page, totalPages, total, sortBy, sortOr
     <div className="products-table-scroll">
       <div className="products-table" role="table" aria-label="商品列表">
         <div className="products-row products-head" role="row"><span>商品标题</span><span>价格</span><span>关联卡券</span><span>AI提示词</span><span>{sortButton('createdAt', '创建时间')}</span><span>{sortButton('updatedAt', '更新时间')}</span></div>
-        {products.map((product) => <div className="products-row" role="row" key={product.id}><div className="products-title"><button className="products-title-link" type="button" onClick={() => onOpen(product.id)}><strong>{product.title}</strong></button><small>{product.externalProductRef ?? product.id}</small></div><span>{formatPrice(product.priceMinor)}</span><span className="products-muted products-coupons">{product.couponBatches?.length ? product.couponBatches.map((coupon) => coupon.label || coupon.id).join('、') : '未关联卡券'}</span><span className="products-muted products-ai-prompt" title={product.aiPrompt ?? undefined}>{product.aiPrompt || '—'}</span><time className="products-muted">{formatDate(product.createdAt)}</time><time className="products-muted">{formatDate(product.updatedAt)}</time></div>)}
+        {products.map((product) => <div className="products-row" role="row" key={product.id}><div className="products-title"><button className="products-title-link" type="button" onClick={() => onOpen(product.id)}><strong>{product.title}</strong></button><small>{product.externalProductRef ?? product.id}</small></div><span>{product.priceMinor === undefined ? <PlaceholderCell className="products-muted">—</PlaceholderCell> : formatPrice(product.priceMinor)}</span><span className="products-muted products-coupons">{product.couponBatches?.length ? product.couponBatches.map((coupon) => coupon.label || coupon.id).join('、') : <PlaceholderCell className="products-muted">未关联卡券</PlaceholderCell>}</span><span className="products-muted products-ai-prompt" title={product.aiPrompt ?? undefined}>{product.aiPrompt || <PlaceholderCell className="products-muted">—</PlaceholderCell>}</span><time className="products-muted">{formatDate(product.createdAt)}</time><time className="products-muted">{formatDate(product.updatedAt)}</time></div>)}
       </div>
     </div>
     <nav className="products-pagination" aria-label="商品列表分页" data-testid="products-pagination">

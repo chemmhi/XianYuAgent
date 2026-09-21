@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { SelectField } from '../../../shared/ui/SelectField';
+import { Button } from '../../../shared/ui/Button';
+import { InputField } from '../../../shared/ui/InputField';
 import type { OpenAISettingsApi } from '../api';
 import { useOpenAISettingsController } from '../openai-controller';
 import type { ModelProviderApi, ProviderModelVM } from '../model-provider-api';
@@ -211,7 +213,7 @@ export function OpenAISettingsPanel(props: { accountId: string; accountName?: st
       {props.accountsError && <div className="settings-state error" role="alert">{props.accountsError}</div>}
       {!props.accountId && !props.accountsLoading && <div className="settings-state empty"><strong>请选择明确的闲鱼账号</strong><span>模型配置按账号隔离，未选择账号时不会读取或编辑任何配置。</span></div>}
       {props.accountId && controller.state.phase === 'loading' && <div className="settings-state loading"><span className="settings-spinner" />正在读取 OpenAI API 配置…</div>}
-      {props.accountId && controller.state.phase === 'error' && <div className="settings-state error" role="alert"><strong>{controller.state.error}</strong><button type="button" className="btn ghost" onClick={() => void controller.reload()}>重试</button></div>}
+      {props.accountId && controller.state.phase === 'error' && <div className="settings-state error" role="alert"><strong>{controller.state.error}</strong><Button variant="ghost" type="button" onClick={() => void controller.reload()}>重试</Button></div>}
       {props.accountId && <>
         <div className="two-grid nested openai-config-grid">
           {(['primary', 'backup'] as const).map((role) => <OpenAIConfigCard key={role} form={forms[role]} role={role} busy={busyRole === role} testing={testRole === role} error={testError[role]} providerModels={forms[role].id ? modelOptions[role] : localModels[role]} providerPhase={forms[role].id ? modelPhase[role] : modelPhase[role]} onChange={(patch) => update(role, patch)} onTest={() => void test(forms[role])} onSave={() => void save(forms[role])} onLoadModels={() => void loadModels(forms[role])} />)}
@@ -239,14 +241,14 @@ function OpenAIConfigCard(props: { form: ConfigForm; role: OpenAIConfigRole; bus
   return <section className="model-box openai-model-box" data-openai-config={props.role}>
     <div className="openai-model-head"><div><h3>{title}</h3><p>{props.role === 'primary' ? '优先使用，失败时自动切换备用 Provider。' : '主配置异常时自动接管请求。'}</p></div><span className={`status-pill ${statusTone}`}>{status}</span></div>
     <div className="openai-form-rows">
-      <label><span>Provider</span><input value={props.form.provider} onChange={(event) => props.onChange({ provider: event.target.value })} placeholder="OpenAI Compatible" /></label>
-      <label><span>Base URL</span><input value={props.form.baseUrl} onChange={(event) => props.onChange({ baseUrl: event.target.value })} placeholder="https://api.example.com/v1" /></label>
-      <label><span>API Key</span><input type={props.form.apiKeyMasked ? 'text' : 'password'} value={props.form.apiKeyMasked ? (props.form.apiKeyHint ?? '') : props.form.apiKey} onFocus={() => { if (props.form.apiKeyMasked) props.onChange({ apiKey: '', apiKeyMasked: false }); }} onChange={(event) => props.onChange({ apiKey: event.target.value, apiKeyMasked: false })} placeholder={props.form.id ? '留空保持当前密钥' : '输入新的 API Key'} autoComplete="new-password" /></label>
+      <label><span>Provider</span><InputField value={props.form.provider} onChange={(event) => props.onChange({ provider: event.target.value })} placeholder="OpenAI Compatible" /></label>
+      <label><span>Base URL</span><InputField value={props.form.baseUrl} onChange={(event) => props.onChange({ baseUrl: event.target.value })} placeholder="https://api.example.com/v1" /></label>
+      <label><span>API Key</span><InputField type={props.form.apiKeyMasked ? 'text' : 'password'} value={props.form.apiKeyMasked ? (props.form.apiKeyHint ?? '') : props.form.apiKey} onFocus={() => { if (props.form.apiKeyMasked) props.onChange({ apiKey: '', apiKeyMasked: false }); }} onChange={(event) => props.onChange({ apiKey: event.target.value, apiKeyMasked: false })} placeholder={props.form.id ? '留空保持当前密钥' : '输入新的 API Key'} autoComplete="new-password" /></label>
       <label><span>Model</span><SelectField value={props.form.model} onFocus={props.onLoadModels} onClick={props.onLoadModels} onChange={(event) => { const model = event.target.value; props.onChange({ model, reasoningEffort: reasoningOptionsFor(model, props.providerModels).includes(props.form.reasoningEffort ?? '') ? props.form.reasoningEffort : '' }); }} options={[{ value: '', label: modelPlaceholder }, ...(props.form.model && !modelIds.includes(props.form.model) ? [{ value: props.form.model, label: props.form.model }] : []), ...props.providerModels.map((model) => ({ value: model.id, label: model.id }))]} /></label>
       {reasoningOptions.length > 0 && <label data-openai-reasoning="true"><span>思考程度</span><SelectField value={props.form.reasoningEffort ?? ''} onChange={(event) => props.onChange({ reasoningEffort: event.target.value })} options={[{ value: '', label: '使用提供商默认' }, ...reasoningOptions.map((option) => ({ value: option, label: option }))]} /></label>}
       {props.error && <div className="openai-inline-error" role="alert">{props.error}</div>}
     </div>
-    <div className="card-actions"><button type="button" className="btn ghost" onClick={props.onTest} disabled={props.busy || !props.form.provider || !props.form.baseUrl || !props.form.model || (!props.form.id && !props.form.apiKey)}>{props.testing ? '测试中…' : '测试连通性'}</button><button type="button" className="btn primary" onClick={props.onSave} disabled={props.busy || !props.form.provider || !props.form.baseUrl || !props.form.model || (!props.form.id && !props.form.apiKey)}>{props.busy ? '保存中…' : '保存'}</button></div>
+    <div className="card-actions"><Button variant="ghost" type="button" onClick={props.onTest} disabled={props.busy || !props.form.provider || !props.form.baseUrl || !props.form.model || (!props.form.id && !props.form.apiKey)}>{props.testing ? '测试中…' : '测试连通性'}</Button><Button variant="primary" type="button" onClick={props.onSave} disabled={props.busy || !props.form.provider || !props.form.baseUrl || !props.form.model || (!props.form.id && !props.form.apiKey)}>{props.busy ? '保存中…' : '保存'}</Button></div>
   </section>;
 }
 
