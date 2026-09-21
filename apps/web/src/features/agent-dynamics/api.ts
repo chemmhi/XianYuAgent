@@ -220,6 +220,21 @@ function eventTitle(event: RawAutoReplyRunEvent, run: AgentDynamicsRunRowVM): st
   return `${run.buyer.name} 已完成${run.intent}处理`;
 }
 
+function eventDescription(event: RawAutoReplyRunEvent): string {
+  switch (event.eventType) {
+    case 'run.created': return '网关接入：读取买家消息并创建本次自动回复运行';
+    case 'run.classified': return '意图识别：判断消息类型与是否允许自动回复';
+    case 'run.context_loaded': return '上下文读取：加载历史消息、商品和订单信息';
+    case 'run.generated': return '回复生成：根据意图与上下文产出回复草稿';
+    case 'run.simulated': return '发送提交：按当前发送模式写入出站消息';
+    case 'run.persisted': return '结果落库：保存出站消息并完成处理闭环';
+    case 'run.handoff': return '路由决策：自动回复被安全策略或人工模式拦截';
+    case 'run.skipped': return '门禁判断：当前消息或运行条件不满足';
+    case 'run.failed': return '异常终止：该节点返回失败，后续步骤停止';
+    default: return '运行节点：记录本步状态变化';
+  }
+}
+
 function eventTone(status: RawAutoReplyRunStatus): AgentDynamicsRunRowVM['stage']['tone'] {
   if (status === 'failed') return 'danger';
   if (status === 'handoff') return 'warn';
@@ -311,8 +326,10 @@ function mapSummary(raw: RawActivitySummary, events: AgentDynamicsEventVM[] = []
 }
 
 const EVENT_DETAIL_LABELS: Record<string, string> = {
-  kind: '类型',
-  messageId: '消息',
+  kind: '步骤类型',
+  source: '来源',
+  nextStep: '下一步',
+  messageId: '消息 ID',
   inboundMessageId: '入站消息',
   digest: '摘要',
   inputDigest: '输入摘要',
@@ -329,7 +346,7 @@ const EVENT_DETAIL_LABELS: Record<string, string> = {
   identityKeyCount: '身份候选数',
   intent: '意图',
   confidence: '置信度',
-  decision: '决策',
+  decision: '决策结果',
   riskFlags: '风险标记',
   conversationId: '会话',
   maxHistory: '历史上限',
@@ -345,7 +362,7 @@ const EVENT_DETAIL_LABELS: Record<string, string> = {
   mode: '发送模式',
   outboundMessageId: '出站消息',
   persisted: '已落库',
-  status: '状态',
+  status: '状态变化',
   code: '错误码',
 };
 
@@ -368,19 +385,56 @@ function mapEventDetailFields(value: unknown): Array<{ label: string; value: str
   return fields.length > 0 ? fields : undefined;
 }
 
-function mapEventDetails(event: RawAutoReplyRunEvent): AgentDynamicsTimelineItemVM['details'] {
+function legacyEventDetails(event: RawAutoReplyRunEvent, run: AgentDynamicsRunRowVM): NonNullable<AgentDynamicsTimelineItemVM['details']> | undefined {
+  const payload = event.payload ?? {};
+  const intent = formatEventDetailValue(payload.intent ?? run.intent);
+  const decision = formatEventDetailValue(payload.decision ?? run.decision.key);
+  const senderOutcome = formatEventDetailValue(payload.senderOutcome ?? run.senderOutcome.label);
+  switch (event.eventType) {
+    case 'run.created':
+      return { input: [{ label: '来源', value: '闲鱼网关' }, { label: '步骤类型', value: 'inbound_message' }], output: [{ label: '状态变化', value: 'received' }, { label: '下一步', value: '意图识别' }] };
+    case 'run.classified':
+      return { input: [{ label: '步骤类型', value: 'intent_classification' }, { label: '来源', value: '入站消息' }], output: [{ label: '意图', value: intent }, { label: '决策结果', value: decision }, { label: '下一步', value: decision === 'replied' ? '读取上下文' : '转人工 / 跳过' }] };
+    case 'run.context_loaded':
+      return { input: [{ label: '步骤类型', value: 'context_lookup' }, { label: '来源', value: '会话、商品和订单' }], output: [{ label: '状态变化', value: 'context_loaded' }, { label: '下一步', value: '生成回复' }] };
+    case 'run.generated':
+      return { input: [{ label: '步骤类型', value: 'reply_generation' }, { label: '意图', value: intent }], output: [{ label: '状态变化', value: 'generated' }, { label: '下一步', value: '发送回复' }] };
+    case 'run.simulated':
+      return { input: [{ label: '步骤类型', value: 'send' }, { label: '发送模式', value: 'simulate' }], output: [{ label: '发送结果', value: senderOutcome }, { label: '下一步', value: '落库' }] };
+    case 'run.persisted':
+      return { input: [{ label: '步骤类型', value: 'persistence' }, { label: '发送结果', value: senderOutcome }], output: [{ label: '状态变化', value: 'persisted' }, { label: '下一步', value: '闭环完成' }] };
+    case 'run.handoff':
+      return { input: [{ label: '步骤类型', value: 'reply_gate' }, { label: '意图', value: intent }], output: [{ label: '决策结果', value: 'handoff' }, { label: '下一步', value: '人工处理' }] };
+    case 'run.skipped':
+      return { input: [{ label: '步骤类型', value: 'gate' }, { label: '意图', value: intent }], output: [{ label: '决策结果', value: 'skipped' }, { label: '下一步', value: '不再发送' }] };
+    case 'run.failed':
+      return { input: [{ label: '步骤类型', value: String(event.stage) }, { label: '意图', value: intent }], output: [{ label: '决策结果', value: 'failed' }, { label: '下一步', value: '停止自动回复' }] };
+    default:
+      return undefined;
+  }
+}
+
+function mapEventDetails(event: RawAutoReplyRunEvent, run: AgentDynamicsRunRowVM): AgentDynamicsTimelineItemVM['details'] {
   const payload = event.payload ?? {};
   const input = mapEventDetailFields(payload.input);
-  const output = mapEventDetailFields(payload.output) ?? mapEventDetailFields({ status: event.status, decision: payload.decision, intent: payload.intent });
+  const output = mapEventDetailFields(payload.output);
   const error = mapEventDetailFields(payload.error) ?? (payload.failureCode ? [{ label: '错误码', value: formatEventDetailValue(payload.failureCode) }] : undefined);
-  if (!input && !output && !error) return undefined;
-  return { input, output, error };
+  const fallback = legacyEventDetails(event, run);
+  const inferred = !input || !output;
+  if (!input && !output && !error && !fallback) return undefined;
+  return {
+    input: input ?? fallback?.input,
+    output: output ?? fallback?.output,
+    error,
+    inferred: inferred && Boolean(fallback),
+    note: inferred && fallback ? '该事件没有保存完整的结构化输入 / 输出；下方内容按事件类型和状态推断，仅用于兼容历史记录。' : undefined,
+  };
 }
 
 function mapDetail(raw: RawAutoReplyRunDetail): AgentDynamicsRunDetailVM {
   const row = mapRun(raw.run);
   const events = [...raw.events].sort((left, right) => (left.sequence ?? Number.MAX_SAFE_INTEGER) - (right.sequence ?? Number.MAX_SAFE_INTEGER));
-  const timeline: AgentDynamicsTimelineItemVM[] = events.length > 0 ? events.map((event) => ({ id: event.id, sequence: event.sequence, stage: event.stage, status: event.status, eventType: event.eventType, traceId: event.traceId, title: eventTitle(event, row), meta: `${formatTime(event.occurredAt)} · ${event.eventType}${event.durationMs === undefined ? '' : ` · ${formatDuration(event.durationMs)}`}`, tone: eventTone(event.status), details: mapEventDetails(event) })) : [{ id: `${row.runId}:status`, title: decisionLabel(row.decision.key), meta: `${row.timeLabel} · 当前状态 ${raw.run.status}`, tone: row.decision.tone }];
+  const timeline: AgentDynamicsTimelineItemVM[] = events.length > 0 ? events.map((event) => ({ id: event.id, sequence: event.sequence, stage: event.stage, status: event.status, eventType: event.eventType, traceId: event.traceId, title: eventTitle(event, row), description: eventDescription(event), meta: `${formatTime(event.occurredAt)} · ${event.eventType}${event.durationMs === undefined ? '' : ` · ${formatDuration(event.durationMs)}`}`, tone: eventTone(event.status), details: mapEventDetails(event, row) })) : [{ id: `${row.runId}:status`, title: decisionLabel(row.decision.key), description: '当前运行状态', meta: `${row.timeLabel} · 当前状态 ${raw.run.status}`, tone: row.decision.tone }];
   return { ...row, message: raw.inboundMessage?.bodyText ?? row.inboundPreview, reply: raw.outboundMessages[0]?.bodyText, outcomeLabel: row.senderOutcome.label, timeline, chatPath: row.buyer.conversationId ? `/messages?conversationId=${encodeURIComponent(row.buyer.conversationId)}` : '/messages' };
 }
 

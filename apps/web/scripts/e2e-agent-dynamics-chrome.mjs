@@ -164,8 +164,10 @@ async function run() {
     await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Agent Dynamics Buyer'), 'persisted buyer row');
     await waitFor(async () => apiEvent(cdp.events, 'GET', '/api/v1/auto-reply/activity/summary'), 'summary API request');
     await waitFor(async () => apiEvent(cdp.events, 'GET', '/api/v1/auto-reply/runs'), 'runs API request');
+    for (const label of ['运行记录', '链路健康', '异常与待处理', 'Agent Dynamics Failed', 'Agent Dynamics Handoff']) {
+      await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes(label), `Agent dynamics text: ${label}`);
+    }
     const bodyText = String(await evaluate(cdp, 'document.body.innerText'));
-    for (const label of ['运行记录', '链路健康', '异常与待处理', 'Agent Dynamics Failed', 'Agent Dynamics Handoff']) if (!bodyText.includes(label)) throw new Error(`Agent dynamics text missing: ${label}`);
     const shellAssertions = await evaluate(cdp, `(() => {
       const nav = Array.from(document.querySelectorAll('.side-nav button')).map((item) => item.textContent?.replace(/\\s+/g, ' ').trim() ?? '');
       const ordersIndex = nav.findIndex((item) => item.includes('订单管理'));
@@ -181,13 +183,15 @@ async function run() {
     for (const [key, passed] of Object.entries(shellAssertions)) if (!passed) throw new Error(`Agent dynamics shell assertion failed: ${key}`);
     const controlAssertions = await evaluate(cdp, `(() => {
       const head = document.querySelector('.agent-dynamics-head-range select');
+      const headTrigger = document.querySelector('.agent-dynamics-head-range .ui-select-trigger');
       const primary = document.querySelector('.agent-dynamics-head-actions .agent-dynamics-btn.primary');
       const filter = document.querySelector('.agent-dynamics-filter select');
+      const filterTrigger = document.querySelector('.agent-dynamics-filter .ui-select-trigger');
       const search = document.querySelector('.agent-dynamics-search');
       const style = (node) => node ? getComputedStyle(node) : null;
-      const headStyle = style(head);
+      const headStyle = style(headTrigger);
       const primaryStyle = style(primary);
-      const filterStyle = style(filter);
+      const filterStyle = style(filterTrigger);
       const searchStyle = style(search);
       return {
         sharedSelectCount: document.querySelectorAll('.agent-dynamics-app .ui-select-control select').length,
@@ -210,9 +214,9 @@ async function run() {
         headRadius: headStyle?.borderRadius ?? '',
         filterRadius: filterStyle?.borderRadius ?? '',
         searchRadius: searchStyle?.borderRadius ?? '',
-        headWidth: head?.getBoundingClientRect().width ?? 0,
+        headWidth: headTrigger?.getBoundingClientRect().width ?? 0,
         primaryWidth: primary?.getBoundingClientRect().width ?? 0,
-        filterWidth: filter?.getBoundingClientRect().width ?? 0,
+        filterWidth: filterTrigger?.getBoundingClientRect().width ?? 0,
         searchWidth: search?.getBoundingClientRect().width ?? 0,
       };
     })()`);
@@ -247,14 +251,22 @@ async function run() {
       throw new Error(`timeline semantics failed: ${JSON.stringify(timelineAssertions)}`);
     }
     await evaluate(cdp, `(() => { const first = document.querySelector('.agent-dynamics-timeline-item .agent-dynamics-timeline-summary'); if (!first) return false; first.click(); return true; })()`);
-    await waitFor(async () => Boolean(await evaluate(cdp, 'document.querySelector(".agent-dynamics-timeline-item[open] .agent-dynamics-timeline-details")')), 'timeline input/output details');
+    await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".agent-dynamics-timeline-item[open] .agent-dynamics-timeline-details"))'), 'timeline input/output details');
     const timelineDetailsText = String(await evaluate(cdp, 'document.querySelector(".agent-dynamics-timeline-item[open] .agent-dynamics-timeline-details")?.textContent ?? ""'));
     if (!timelineDetailsText.includes('输入') || !timelineDetailsText.includes('输出')) throw new Error(`timeline input/output groups missing: ${timelineDetailsText}`);
+    const firstNodeIo = await evaluate(cdp, `(() => {
+      const root = document.querySelector('.agent-dynamics-timeline-item[open]');
+      const groups = Array.from(root?.querySelectorAll('.agent-dynamics-timeline-group') ?? []);
+      const input = groups.find((group) => group.textContent?.includes('本步输入'))?.textContent?.trim() ?? '';
+      const output = groups.find((group) => group.textContent?.includes('本步输出'))?.textContent?.trim() ?? '';
+      return { hasInput: Boolean(input), hasOutput: Boolean(output), distinct: Boolean(input && output && input !== output), input, output };
+    })()`);
+    if (!firstNodeIo.hasInput || !firstNodeIo.hasOutput || !firstNodeIo.distinct) throw new Error(`timeline input/output are not distinct: ${JSON.stringify(firstNodeIo)}`);
     const drawerText = String(await evaluate(cdp, 'document.body.innerText'));
     const drawerPath = await captureViewport(cdp, 1440, 900, 'agent-dynamics-drawer-desktop-1440x900.png');
     const mobileDrawerPath = await captureViewport(cdp, 390, 844, 'agent-dynamics-mobile-drawer-390x844.png');
     await evaluate(cdp, `(() => { const close = document.querySelector('.agent-dynamics-close'); if (!close) return false; close.click(); return true; })()`);
-    await waitFor(async () => !Boolean(await evaluate(cdp, 'document.querySelector(".agent-dynamics-drawer-backdrop.open")')), 'mobile drawer close');
+    await waitFor(async () => await evaluate(cdp, '!Boolean(document.querySelector(".agent-dynamics-drawer-backdrop.open"))'), 'mobile drawer close');
     const mobilePath = await captureViewport(cdp, 390, 844, 'agent-dynamics-mobile-390x844.png');
     if (!drawerText.includes('打开在线聊天') || !/已发送 \/ 已落库|模拟 \/ 已落库/.test(drawerText)) throw new Error('drawer actions or persistence outcome missing');
     console.log(JSON.stringify({ apiUrl, webUrl, accountId, runIds, screenshots: { desktopPath, drawerPath, mobileDrawerPath, mobilePath }, modelCall }));

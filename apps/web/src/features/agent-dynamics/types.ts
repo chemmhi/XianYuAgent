@@ -128,6 +128,7 @@ export interface AgentDynamicsRunsPageVM {
 export interface AgentDynamicsTimelineItemVM {
   id: string;
   title: string;
+  description?: string;
   meta: string;
   tone: AgentDynamicsTone;
   sequence?: number;
@@ -139,6 +140,8 @@ export interface AgentDynamicsTimelineItemVM {
     input?: Array<{ label: string; value: string }>;
     output?: Array<{ label: string; value: string }>;
     error?: Array<{ label: string; value: string }>;
+    note?: string;
+    inferred?: boolean;
   };
 }
 

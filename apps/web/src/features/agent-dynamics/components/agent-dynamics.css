@@ -202,6 +202,7 @@
 .agent-dynamics-timeline-dot.danger { background: var(--agent-danger); box-shadow: 0 0 0 1px #f2c3bd; }
 .agent-dynamics-timeline-dot.info { background: var(--agent-info); box-shadow: 0 0 0 1px #bfd8e5; }
 .agent-dynamics-timeline-title { display: block; font-size: 11px; font-weight: 600; }
+.agent-dynamics-timeline-description { display: block; margin-top: 2px; color: var(--agent-text); font-size: 10px; line-height: 1.45; }
 .agent-dynamics-timeline-meta { display: block; margin-top: 2px; color: var(--agent-sub); font-size: 10px; line-height: 1.4; }
 .agent-dynamics-timeline-hint { align-self: center; color: var(--agent-link); font-size: 9px; white-space: nowrap; }
 .agent-dynamics-timeline-item[open] .agent-dynamics-timeline-hint { color: var(--agent-sub); }
@@ -213,6 +214,8 @@
 .agent-dynamics-timeline-fields > div { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 8px; align-items: start; }
 .agent-dynamics-timeline-fields dt { color: var(--agent-sub); font-size: 10px; }
 .agent-dynamics-timeline-fields dd { margin: 0; color: var(--agent-text); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+.agent-dynamics-timeline-note { padding-top: 2px; color: var(--agent-sub); font-size: 9px; line-height: 1.45; }
+.agent-dynamics-timeline-note.inferred { color: var(--agent-warn); }
 .agent-dynamics-timeline-empty { margin: 0 0 10px 27px; color: var(--agent-sub); font-size: 10px; }
 .agent-dynamics-reply-box { padding: 12px; border: 1px solid var(--agent-border); border-radius: 8px; background: #fbfcfd; color: var(--agent-text); font-size: 12px; line-height: 1.65; }
 .agent-dynamics-message-box { padding: 11px 12px; border-left: 3px solid var(--agent-link); border-radius: 0 8px 8px 0; background: var(--agent-soft-blue); color: var(--agent-text); font-size: 12px; line-height: 1.6; }

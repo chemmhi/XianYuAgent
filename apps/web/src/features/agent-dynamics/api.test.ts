@@ -38,10 +38,25 @@ describe('agent dynamics API adapter', () => {
     expect(summary.events[0]).toMatchObject({ runId: 'run-1', label: '失败' });
     expect(runs.items[0]).toMatchObject({ runId: 'run-1', buyer: { name: '买家B' }, stage: { key: 'generation' }, decision: { key: 'failed' }, persisted: true });
     expect(detail.timeline[0]).toMatchObject({ title: '买家B 的回复生成失败', tone: 'danger', sequence: 2, traceId: 'trace-run-1' });
-    expect(detail.timeline[0]?.details?.input).toEqual(expect.arrayContaining([{ label: '类型', value: 'reply_generation' }, { label: '上下文摘要', value: 'sha256:ctx' }, { label: '输出长度', value: '0' }]));
-    expect(detail.timeline[0]?.details?.output).toEqual(expect.arrayContaining([{ label: '决策', value: 'failed' }]));
+    expect(detail.timeline[0]?.description).toBe('异常终止：该节点返回失败，后续步骤停止');
+    expect(detail.timeline[0]?.details?.input).toEqual(expect.arrayContaining([{ label: '步骤类型', value: 'reply_generation' }, { label: '上下文摘要', value: 'sha256:ctx' }, { label: '输出长度', value: '0' }]));
+    expect(detail.timeline[0]?.details?.output).toEqual(expect.arrayContaining([{ label: '决策结果', value: 'failed' }]));
     expect(detail.timeline[0]?.details?.error).toEqual([{ label: '错误码', value: 'RESPONSES_API_TIMEOUT' }]);
     expect(detail.message).toBe('请问购买后怎么使用？');
+  });
+
+  it('keeps legacy events understandable without repeating status as fake output', async () => {
+    const transport = { get: async <T>(path: string) => {
+      if (path.includes('/runs/run%2Fold')) return { success: true, data: { run: { ...rawRun, id: 'run-old', status: 'persisted', decision: 'replied', intent: 'general' }, events: [{ id: 'event-old', runId: 'run-old', sequence: 2, eventType: 'run.classified', stage: 'intent_recognition', status: 'classified', occurredAt: rawRun.updatedAt, payload: { decision: 'replied', intent: 'general' } }], inboundMessage: { bodyText: '你好' }, outboundMessages: [], product: { id: 'product-1', title: '资料包' } } } as T;
+      return { success: true, data: { items: [], total: 0, page: 1, pageSize: 20, totalPages: 1 } } as T;
+    } };
+    const detail = await createAgentDynamicsApi(transport).getRunDetail('run/old', 'acct_1');
+    expect(detail.timeline[0]).toMatchObject({ title: '买家B 已完成意图识别', description: '意图识别：判断消息类型与是否允许自动回复' });
+    expect(detail.timeline[0]?.details?.inferred).toBe(true);
+    expect(detail.timeline[0]?.details?.input).toEqual(expect.arrayContaining([{ label: '步骤类型', value: 'intent_classification' }]));
+    expect(detail.timeline[0]?.details?.output).toEqual(expect.arrayContaining([{ label: '意图', value: 'general' }, { label: '下一步', value: '读取上下文' }]));
+    expect(detail.timeline[0]?.details?.note).toContain('历史记录');
+    expect(detail.timeline[0]?.details?.output).not.toEqual(expect.arrayContaining([{ label: '状态变化', value: 'classified' }]));
   });
 
   it('short-circuits live calls when no account context is selected', async () => {
