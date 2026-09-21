@@ -82,10 +82,12 @@ git diff --check
 - `test:auto-reply:postgres` 使用真实 PostgreSQL 和 `021_auto_reply_runs.sql`，但直接调用 `handleExternalEvent`，发送器仍为 `simulate`；它只证明消息与运行记录在 API 重启后可回读。
 - `test:auto-reply:unit` 覆盖分类器、模板生成器、白名单配置和 `ExternalAutoReplySender` 的 callback 委托；没有覆盖真实 `sendByReceiverScope` 响应、外部消息回执或发送失败/unknown 恢复。
 - `test:xianyu-im-gateway` 覆盖历史响应不触发 `onEvent`，以及“响应 + 同帧 `syncPushPackage`”仍能 ACK 并触发 `onEvent`；`probe:xianyu-im-gateway` 可用真实凭证只读监听网关，永不调用 `handleExternalEvent` 或发送消息。
+- WebSocket listener 已按官方同步协议处理 `syncExtraType`：收到同步状态提示后请求 `/r/SyncStatus/getState`，再用返回的 `body` 调 `/r/SyncStatus/ackDiff`；连接建立时不再伪造初始 `ackDiff`。
 - 2026-09-21 的 PostgreSQL 凭证只读探针已连上 `wss://wss-goofish.dingtalk.com/`，完成 `/reg`、`/r/SyncStatus/ackDiff` 和 `/r/MessageManager/listUserMessages`，回读 20 条历史消息并观察到 `/s/vulcan` 同步帧；探针期间没有新的买家消息，因此 `onEventCount=0`，这不是完整真实买家 push E2E 证据。
+- 2026-09-21 已完成一次人工真实链路验证：买家“一只橘喵喵亮晶晶”发送文本后，卖家账号产生 `xianyu:push:*` 入站事件，`auto_reply_runs` 为 `decision=replied/status=persisted/sender_outcome=known_success`，并落库一条 `source=ai` 的出站消息；同一消息在买家账号上的回显被 `TEST_BUYER_NOT_ALLOWLISTED` 正确跳过。该证据证明真实 push→自动回复→live 发送→落库闭环，但仍不是可重复的自动化 live smoke。
 - 当前没有浏览器入口驱动的真实买家 push→自动回复闭环、真实 live 发送、跨进程 Worker 或发布级恢复的自动化证据；已有的真实 WebSocket/凭证探针只证明连接与历史读取，不足以把上述命令标记为“完整 E2E”或生产级验收。
 
-截至 2026-09-21，仓库也没有可复现命令、固定输出或归档文件证明 `AUTO_REPLY_SEND_MODE=live` 已完成真实发送 smoke。任何人工 live 复核都必须单独归档：脱敏输入与账号范围、外部消息引用、`auto_reply_runs`/`messages`/`audit_events` 回读、失败或 unknown 处理，以及清理结果；未归档前保持 `PARTIALLY_VERIFIED / DRY-RUN ONLY`。
+截至 2026-09-21，仓库已有一次人工 live 证据，但仍没有可重复命令、固定输出或归档文件证明 `AUTO_REPLY_SEND_MODE=live` 已完成自动化真实发送 smoke。后续人工 live 复核仍需单独归档：脱敏输入与账号范围、外部消息引用、`auto_reply_runs`/`messages`/`audit_events` 回读、失败或 unknown 处理，以及清理结果。
 
 未纳入自动化门禁的受控真实发送配置：
 

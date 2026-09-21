@@ -113,6 +113,7 @@ export class XianyuImClient {
   private reconnectEnabled = true;
   private connectionGeneration = 0;
   private connectPromise?: Promise<void>;
+  private syncStatePromise?: Promise<void>;
   private myId: string;
   private _status: XianyuImConnectionStatus = 'idle';
 
@@ -274,12 +275,6 @@ export class XianyuImClient {
       this._status = 'connected';
       this.reconnectAttempt = 0;
       this.connectionGeneration += 1;
-      const ackMid = createMid();
-      this.sendRaw({
-        lwp: '/r/SyncStatus/ackDiff',
-        headers: { mid: ackMid },
-        body: [{ pipeline: 'sync', tooLong2Tag: 'PNM,1', channel: 'sync', topic: 'sync', highPts: 0, pts: Date.now() * 1_000_000, seq: 0, timestamp: Date.now() }],
-      });
       this.heartbeatTimer = setInterval(() => {
         if (!this.connected) return;
         try { this.sendRaw({ lwp: '/!', headers: { mid: createMid() } }); } catch { /* close handler exposes status */ }
@@ -296,6 +291,7 @@ export class XianyuImClient {
   private async cleanupSocket(): Promise<void> {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     this.heartbeatTimer = undefined;
+    this.syncStatePromise = undefined;
     this.rejectPending('xianyu IM connection closed');
     const socket = this.socket;
     this.socket = undefined;
@@ -402,6 +398,11 @@ export class XianyuImClient {
       if (code !== 200) pending.reject(new XianyuImRequestRejected(`XIANYU_IM_REQUEST_REJECTED:${code}`, code));
       else pending.resolve(message);
     }
+    void this.handleSyncExtra(message).catch((error) => {
+      if (this._status !== 'disconnected' && this._status !== 'failed') {
+        console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'sync_state_recovery_failed', accountId: this.accountId, errorCode: eventErrorCode(error) }));
+      }
+    });
     const body = asRecord(message.body);
     const sync = asRecord(body.syncPushPackage);
     const entries = Array.isArray(sync.data) ? sync.data : [];
@@ -426,6 +427,27 @@ export class XianyuImClient {
         }
       }
     }
+  }
+
+  private async handleSyncExtra(message: Record<string, unknown>): Promise<void> {
+    const body = asRecord(message.body);
+    const syncExtraType = asRecord(body.syncExtraType);
+    const type = numericValue(syncExtraType.type);
+    if (type !== 1 && type !== 2) return;
+    if (this.syncStatePromise) return this.syncStatePromise;
+
+    const promise = (async () => {
+      const generation = this.connectionGeneration;
+      const state = await this.sendLwp('/r/SyncStatus/getState', [{ topic: 'sync' }], { retryAfterReconnect: false });
+      if (this.connectionGeneration !== generation) return;
+      if (state.body === undefined || state.body === null) throw new Error('XIANYU_IM_SYNC_STATE_MISSING');
+      await this.sendLwp('/r/SyncStatus/ackDiff', [state.body], { retryAfterReconnect: false });
+    })();
+    const wrapped = promise.finally(() => {
+      if (this.syncStatePromise === wrapped) this.syncStatePromise = undefined;
+    });
+    this.syncStatePromise = wrapped;
+    return wrapped;
   }
 }
 
@@ -755,3 +777,12 @@ function asRecord(value: unknown): Record<string, any> { return value && typeof 
 function optionalString(value: unknown): string | undefined { return typeof value === 'string' && value.trim() ? value.trim() : undefined; }
 function stripGoofish(value: string): string { return value.replace(/@goofish$/, ''); }
 function normalizeTimestamp(value: unknown): string { const numeric = typeof value === 'number' ? value : Number(value); const millis = Number.isFinite(numeric) ? (numeric > 10_000_000_000 ? numeric : numeric * 1000) : Date.now(); return new Date(millis).toISOString(); }
+
+function numericValue(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}

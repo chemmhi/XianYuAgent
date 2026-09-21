@@ -29,6 +29,33 @@ test('history request response does not emit an event by itself', async () => {
   }
 });
 
+test('sync extra state recovery requests getState then acknowledges returned state', async () => {
+  const socket = new SyncStateSocket();
+  const client = new XianyuImClient({
+    accountId: 'account-1',
+    credential: { cookieHeader: 'unb=seller-1', accessToken: 'token', deviceId: 'device-1' },
+    heartbeatIntervalMs: 60_000,
+    webSocketFactory: () => socket,
+  });
+
+  const connectPromise = client.connect();
+  queueMicrotask(() => socket.emit('open'));
+  await connectPromise;
+  try {
+    socket.emit('message', JSON.stringify({ headers: { mid: 'sync-extra' }, body: { syncExtraType: { type: 1 } } }));
+    for (let attempt = 0; attempt < 20 && !socket.sent.some((message) => message.lwp === '/r/SyncStatus/ackDiff'); attempt += 1) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    const lwps = socket.sent.map((message) => message.lwp).filter(Boolean);
+    assert.deepEqual(lwps.slice(-2), ['/r/SyncStatus/getState', '/r/SyncStatus/ackDiff']);
+    const ack = [...socket.sent].reverse().find((message) => message.lwp === '/r/SyncStatus/ackDiff');
+    assert.deepEqual(ack?.body, [socket.stateBody]);
+  } finally {
+    await client.disconnect();
+  }
+});
+
 test('mixed gateway response still dispatches syncPushPackage through onEvent', async () => {
   const socket = new FakeSocket(true);
   const events: unknown[] = [];
@@ -198,5 +225,20 @@ class RejectingSocket extends FakeSocket {
     const message = JSON.parse(data) as Record<string, any>;
     this.sent.push(message);
     if (message.lwp === '/reg') queueMicrotask(() => this.emit('message', JSON.stringify({ code: 400, headers: { mid: message.headers?.mid }, body: { reason: 'SESSION_EXPIRED' } })));
+  }
+}
+
+class SyncStateSocket extends FakeSocket {
+  readonly stateBody = [{ topic: 'sync', highPts: 42, pts: 99, seq: 7, timestamp: 1_787_000_000_000 }];
+
+  override send(data: string): void {
+    super.send(data);
+    const message = JSON.parse(data) as Record<string, any>;
+    if (message.lwp === '/r/SyncStatus/getState') {
+      queueMicrotask(() => this.emit('message', JSON.stringify({ code: 200, headers: { mid: message.headers?.mid }, body: this.stateBody })));
+    }
+    if (message.lwp === '/r/SyncStatus/ackDiff') {
+      queueMicrotask(() => this.emit('message', JSON.stringify({ code: 200, headers: { mid: message.headers?.mid }, body: {} })));
+    }
   }
 }
