@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { AgentDynamicsDropdown } from './AgentDynamicsDropdown';
 
 describe('AgentDynamicsDropdown', () => {
-  it('delegates to the shared SelectField instead of rendering a button menu', () => {
+  it('delegates to the shared SelectField with native compatibility and a visual trigger', () => {
     const html = renderToStaticMarkup(createElement(AgentDynamicsDropdown, {
       value: '24h',
       options: [{ value: '24h', label: '最近 24 小时' }, { value: '7d', label: '最近 7 天' }],
@@ -18,7 +18,9 @@ describe('AgentDynamicsDropdown', () => {
     expect(html).toContain('data-agent-dynamics-dropdown="时间范围"');
     expect(html).toContain('class="ui-select-control agent-dynamics-head-range"');
     expect(html).toContain('class="ui-select-chevron"');
-    expect(html).not.toContain('<button');
+    expect(html).toContain('class="ui-select-trigger"');
+    expect(html).toContain('role="combobox"');
+    expect(html).toContain('aria-expanded="false"');
     expect(html).not.toContain('role="listbox"');
   });
 });

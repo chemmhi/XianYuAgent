@@ -48,6 +48,7 @@ describe('select usage architecture', () => {
     expect(css).toMatch(/\.ui-select-control\.is-open select\s*\{\s*border-color: var\(--link\);\s*background: #fff;/);
     expect(css).toContain('.ui-select-menu');
     expect(css).toContain('.ui-select-menu-option.is-selected');
+    expect(css).toContain('.ui-select-menu-option:hover:not(:disabled)');
     expect(css).toContain('stroke-width: 1.5');
   });
 

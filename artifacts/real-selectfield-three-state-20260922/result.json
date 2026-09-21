@@ -1,0 +1,54 @@
+{
+  "generatedAt": "2026-09-21T16:50:24.491Z",
+  "targetUrl": "http://127.0.0.1:4173/controls",
+  "viewport": "1440x900",
+  "states": {
+    "default": {
+      "expanded": "false",
+      "menu": false,
+      "rect": {
+        "x": 850.5,
+        "y": 299.078125,
+        "width": 150,
+        "height": 34,
+        "top": 299.078125,
+        "right": 1000.5,
+        "bottom": 333.078125,
+        "left": 850.5
+      },
+      "style": {
+        "background": "rgb(246, 247, 249)",
+        "border": "rgb(229, 231, 235)",
+        "radius": "7px"
+      }
+    },
+    "focus": {
+      "active": true,
+      "expanded": "false",
+      "background": "rgb(255, 255, 255)",
+      "border": "rgb(36, 90, 141)",
+      "outline": "2px"
+    },
+    "open": {
+      "expanded": "true",
+      "menu": true,
+      "role": "listbox",
+      "optionCount": 3,
+      "selectedCount": 1,
+      "menuStyle": {
+        "background": "rgb(255, 255, 255)",
+        "radius": "8px",
+        "shadow": "rgba(17, 24, 39, 0.12) 0px 18px 40px 0px"
+      }
+    },
+    "closedByOutsideClick": {
+      "expanded": "false",
+      "menu": false
+    }
+  },
+  "screenshots": {
+    "default": "F:\\ChenHai\\Project\\XianYuAgent\\artifacts\\real-selectfield-three-state-20260922\\select-default-1440x900.png",
+    "focus": "F:\\ChenHai\\Project\\XianYuAgent\\artifacts\\real-selectfield-three-state-20260922\\select-focus-1440x900.png",
+    "open": "F:\\ChenHai\\Project\\XianYuAgent\\artifacts\\real-selectfield-three-state-20260922\\select-open-1440x900.png"
+  }
+}

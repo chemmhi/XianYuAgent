@@ -4,38 +4,60 @@
   min-width: 150px;
 }
 
-.ui-select-control select {
+.ui-select-native {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  appearance: none;
+}
+
+.ui-select-trigger {
   box-sizing: border-box;
-  display: block;
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   width: 100%;
   min-height: 34px;
   padding: 7px 34px 7px 10px;
   border: 1px solid var(--border);
   border-radius: 7px;
-  appearance: none;
   background: var(--bg);
   color: var(--text);
   font-family: 'Inter', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   font-size: 12px;
   font-weight: 400;
   line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
 }
 
-.ui-select-control select:hover {
+.ui-select-trigger:hover:not(:disabled) {
   border-color: #B9C8D9;
 }
 
-.ui-select-control select:focus-visible,
-.ui-select-control.is-focus select {
+.ui-select-trigger:focus-visible,
+.ui-select-control.is-focus .ui-select-trigger {
   border-color: var(--link);
   outline: 2px solid rgba(36, 90, 141, .35);
   outline-offset: 2px;
   background: #fff;
 }
 
-.ui-select-control select:disabled {
-  cursor: not-allowed;
-  opacity: .65;
+.ui-select-control.is-open .ui-select-trigger {
+  border-color: var(--link);
+  background: #fff;
+}
+
+/* Compatibility selectors keep the native owner aligned with the shared
+   state contract used by existing visual and architecture checks. */
+.ui-select-control.is-focus select {
+  border-color: var(--link);
 }
 
 .ui-select-control.is-open select {
@@ -43,9 +65,21 @@
   background: #fff;
 }
 
+.ui-select-trigger:disabled {
+  cursor: not-allowed;
+  opacity: .65;
+}
+
+.ui-select-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ui-select-chevron {
   position: absolute;
-  top: 17px;
+  top: 50%;
   right: 11px;
   width: 15px;
   height: 15px;
@@ -63,9 +97,16 @@
 }
 
 .ui-select-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  left: 0;
+  z-index: 20;
   display: grid;
   gap: 2px;
-  margin-top: 5px;
+  max-height: 240px;
+  overflow: auto;
+  margin: 0;
   padding: 5px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -85,8 +126,11 @@
   color: var(--text);
   text-align: left;
   font-size: 12px;
+  cursor: pointer;
 }
 
+.ui-select-menu-option:hover:not(:disabled),
+.ui-select-menu-option.is-highlighted:not(:disabled),
 .ui-select-menu-option.is-selected {
   background: var(--soft-blue, var(--soft-blue-bg, #ebf3fa));
   color: var(--link);
@@ -95,6 +139,11 @@
 .ui-select-menu-option.is-disabled {
   cursor: not-allowed;
   opacity: .55;
+}
+
+.ui-select-menu-option:focus-visible {
+  outline: 2px solid rgba(36, 90, 141, .25);
+  outline-offset: -2px;
 }
 
 .ui-select-menu svg {

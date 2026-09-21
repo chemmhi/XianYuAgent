@@ -20,6 +20,10 @@ describe('SelectField', () => {
 
     expect(html).toContain('class="ui-field"');
     expect(html).toContain('class="ui-select-control"');
+    expect(html).toContain('class="ui-select-native"');
+    expect(html).toContain('class="ui-select-trigger"');
+    expect(html).toContain('role="combobox"');
+    expect(html).toContain('aria-expanded="false"');
     expect(html).toContain('class="ui-select-chevron"');
     expect(html).toContain('class="ui-field-required"');
     expect(html).toContain('required');
@@ -115,10 +119,13 @@ describe('SelectField', () => {
 
     expect(closed).not.toContain('ui-select-menu');
     expect(open).toContain('class="ui-select-menu"');
-    expect(open).toContain('aria-hidden="true"');
+    expect(open).toContain('aria-expanded="true"');
+    expect(open).toContain('role="listbox"');
     expect(open).toContain('data-preview-only="true"');
     expect(open).toContain('class="ui-select-menu-option is-selected"');
-    expect(open).not.toContain('<button');
+    expect(open).toContain('role="option"');
+    expect(open).toContain('aria-selected="true"');
+    expect(open).toContain('<button');
     expect(selectFieldCss).toContain('.ui-select-menu');
     expect(selectFieldCss).toContain('box-shadow: var(--shadow-float, 0 18px 40px rgba(17, 24, 39, .12));');
     expect(selectFieldCss).toContain('min-height: 31px;');
