@@ -264,6 +264,7 @@ skipped | handoff | failed | send_unknown | partial_send
 至少支持：
 
 - `enabled`；
+- `WIRE_API` / `MODEL_WIRE_API`：模型传输协议，支持 `chat` 和 `responses`；需要 OpenAI Responses 协议的供应商使用 `responses`；
 - `systemPrompt`；
 - `userPromptTemplate`；
 - `maxLoops`；
