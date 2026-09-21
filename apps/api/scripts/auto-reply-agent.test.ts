@@ -30,6 +30,17 @@ test('buyer Agent configuration resolves independently from Workspace settings',
   assert.notEqual(config.digest, '');
 });
 
+test('buyer Agent can resolve the latest persisted configuration per message', async () => {
+  const seenPrompts: string[] = [];
+  const client: ModelClient = { complete: async (request) => { seenPrompts.push(request.messages[0]?.content ?? ''); return { content: '已按最新配置处理。', model: 'test' }; } };
+  const store = {} as Store;
+  const updated = resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_SYSTEM_PROMPT: '设置页最新提示词', AUTO_REPLY_AGENT_CONFIG_VERSION: 'settings-v2' });
+  const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}), { configProvider: async () => updated });
+  const reply = await agent.generate({ adminId: 'admin-1', context: context(), classification });
+  assert.equal(reply, '已按最新配置处理。');
+  assert.deepEqual(seenPrompts, ['设置页最新提示词']);
+});
+
 test('agent chooses product tool then returns final answer', async () => {
   const requests: Array<{ messages: ModelMessage[]; tools?: unknown[] }> = [];
   let call = 0;

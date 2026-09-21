@@ -38,6 +38,7 @@ export interface AutoReplyAgentTrace {
 }
 
 export interface ToolCallingAutoReplyAgentOptions {
+  configProvider?: (adminId: string) => Promise<AutoReplyAgentConfig | undefined>;
   onTrace?: (trace: AutoReplyAgentTrace) => void | Promise<void>;
 }
 
@@ -90,29 +91,30 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
 
   async generate(input: { adminId?: string; context: AutoReplyContext; classification: AutoReplyClassification }): Promise<string | undefined> {
     if (!input.adminId) throw new AutoReplyAgentError('AGENT_ADMIN_REQUIRED');
+    const config = await this.options.configProvider?.(input.adminId) ?? this.config;
     const messages: ModelMessage[] = [
-      { role: 'system', content: this.config.systemPrompt },
-      { role: 'user', content: renderUserPrompt(this.config.userPromptTemplate, this.toInitialContext(input.context, input.classification)) },
+      { role: 'system', content: config.systemPrompt },
+      { role: 'user', content: renderUserPrompt(config.userPromptTemplate, this.toInitialContext(input.context, input.classification)) },
     ];
-    const trace: AutoReplyAgentTrace = { loops: 0, toolCalls: 0, tools: [], configDigest: this.config.digest };
+    const trace: AutoReplyAgentTrace = { loops: 0, toolCalls: 0, tools: [], configDigest: config.digest };
     const seenCalls = new Set<string>();
 
-    for (let loop = 1; loop <= this.config.maxLoops; loop += 1) {
+    for (let loop = 1; loop <= config.maxLoops; loop += 1) {
       trace.loops = loop;
       const result = await this.client.complete({ messages, tools: AUTO_REPLY_AGENT_TOOLS, toolChoice: 'auto' });
       const toolCalls = result.toolCalls ?? [];
       if (toolCalls.length > 0) {
         messages.push({ role: 'assistant', content: result.content ?? '', toolCalls });
         for (const call of toolCalls) {
-          if (trace.toolCalls >= this.config.maxToolCalls) throw new AutoReplyAgentError('AGENT_TOOL_CALL_LIMIT');
+          if (trace.toolCalls >= config.maxToolCalls) throw new AutoReplyAgentError('AGENT_TOOL_CALL_LIMIT');
           const parsed = parseToolCall(call);
           const signature = `${parsed.name}:${digestJson(parsed.arguments)}`;
           if (seenCalls.has(signature)) throw new AutoReplyAgentError('AGENT_DUPLICATE_TOOL_CALL');
           seenCalls.add(signature);
           trace.toolCalls += 1;
           trace.tools.push(parsed.name);
-          const toolResult = await withTimeout(this.executeTool(parsed.name, parsed.arguments, input.adminId, input.context), this.config.toolTimeoutMs);
-          messages.push({ role: 'tool', name: parsed.name, toolCallId: call.id, content: limitText(JSON.stringify(toolResult), this.config.maxToolResultChars) });
+          const toolResult = await withTimeout(this.executeTool(parsed.name, parsed.arguments, input.adminId, input.context, config), config.toolTimeoutMs);
+          messages.push({ role: 'tool', name: parsed.name, toolCallId: call.id, content: limitText(JSON.stringify(toolResult), config.maxToolResultChars) });
         }
         continue;
       }
@@ -140,9 +142,9 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
     };
   }
 
-  private async executeTool(name: AutoReplyToolName, args: Record<string, unknown>, adminId: string, context: AutoReplyContext): Promise<Record<string, unknown>> {
+  private async executeTool(name: AutoReplyToolName, args: Record<string, unknown>, adminId: string, context: AutoReplyContext, config: AutoReplyAgentConfig): Promise<Record<string, unknown>> {
     switch (name) {
-      case 'get_buyer_conversations': return this.getBuyerConversations(adminId, context, numberArg(args.maxMessagesPerConversation, this.config.maxHistory));
+      case 'get_buyer_conversations': return this.getBuyerConversations(adminId, context, numberArg(args.maxMessagesPerConversation, config.maxHistory));
       case 'get_product_info': return this.getProductInfo(adminId, context, stringArg(args.productRef));
       case 'get_buyer_orders': return this.getBuyerOrders(adminId, context, numberArg(args.maxOrders, 20));
       case 'list_shop_products': return this.listShopProducts(adminId, context, stringArg(args.keyword), numberArg(args.limit, 10));
