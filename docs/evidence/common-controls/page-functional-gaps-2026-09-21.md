@@ -21,6 +21,7 @@
 - `npm --workspace apps/web run test:e2e:chrome:workspace`：通过（真实 PostgreSQL/Chrome/CDP，切片 worktree 证据）。
 - `npm --workspace apps/web run test:e2e:chrome:coupons`：**开放复核**；在既有 `created coupon enable button missing` 断言处失败，失败发生于创建/编辑/复制/禁用之后的启用步骤，尚未证明由本切片筛选/分页逻辑直接引起。
 - Coupons E2E 在失败前已生成真实路由截图：`docs/evidence/stage5/S4-VS3/screenshots/coupons-desktop-1440x900.png`、`coupons-create-modal-desktop-1440x900.png`、`coupons-create-modal-mobile-390x844.png`；截图中可见新增状态/库存下拉与分页区域。
+- Accounts 与 Workspace 主线 E2E 通过并刷新了真实路由截图：`docs/evidence/stage5/S4-VS1/screenshots/accounts-desktop-1440x900.png`、`accounts-mobile-390x844.png`、`artifacts/real-verify/S4-VS6A/screenshots/workspace-desktop-1440x900.png`、`workspace-mobile-390x844.png`。
 - `git diff --check`：通过。
 - `git diff -- SellerAgent`：无输出，确认 `SellerAgent/` 零 diff。
 
