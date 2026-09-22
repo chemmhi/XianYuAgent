@@ -191,6 +191,25 @@ async function run() {
   const tableHeaders = String(await evaluate(cdp, 'document.querySelector("[data-testid=orders-table]")?.textContent ?? ""'));
   for (const header of ['订单号', '买家昵称', '商品名称', '金额', '下单时间', '当前状态', '操作']) if (!tableHeaders.includes(header)) throw new Error(`orders table header missing: ${header}`);
   for (const removed of ['支付状态', '订单状态', '发货状态', '售后', '账号']) if (tableHeaders.includes(removed)) throw new Error(`legacy orders column remains: ${removed}`);
+  const tableTypography = await evaluate(cdp, `(() => {
+    const read = (selector) => {
+      const element = document.querySelector(selector);
+      if (!element) return null;
+      const style = getComputedStyle(element);
+      return { fontSize: style.fontSize, lineHeight: style.lineHeight };
+    };
+    return {
+      row: read('[data-testid="orders-table"] .orders-row:not(.orders-head)'),
+      head: read('[data-testid="orders-table"] .orders-head'),
+      orderLink: read('[data-testid="orders-table"] .orders-order-link'),
+      time: read('[data-testid="orders-table"] .orders-time'),
+      status: read('[data-testid="orders-table"] .orders-status'),
+      action: read('[data-testid="orders-table"] .btn-small'),
+    };
+  })()`);
+  if (tableTypography.row?.fontSize !== '14px' || tableTypography.head?.fontSize !== '13px' || tableTypography.orderLink?.fontSize !== '14px' || tableTypography.time?.fontSize !== '12px' || tableTypography.status?.fontSize !== '12px' || tableTypography.action?.fontSize !== '13px') {
+    throw new Error(`order table typography mismatch: ${JSON.stringify(tableTypography)}`);
+  }
   if (!await evaluate(cdp, 'Boolean(document.querySelector("[data-order-no] [title^=\\"买家姓名：\\"]"))')) throw new Error('buyer nickname tooltip missing');
   const initialPagination = String(await evaluate(cdp, 'document.querySelector("[data-testid=orders-pagination]")?.textContent ?? ""'));
   if (!initialPagination.includes('第 1 / 2 页')) throw new Error('orders pagination missing');
@@ -230,6 +249,29 @@ async function run() {
   if (!detailOpened) throw new Error('order detail link missing');
   await waitFor(async () => String(await evaluate(cdp, 'document.querySelector("[role=dialog]")?.textContent ?? ""')).includes('订单验收商品'), 'order detail drawer');
   if (await evaluate(cdp, 'String(document.querySelector("[role=dialog]")?.textContent ?? "").includes("卡券正文")')) throw new Error('order detail leaked sensitive delivery content');
+  const drawerTypography = await evaluate(cdp, `(() => {
+    const read = (selector) => {
+      const element = document.querySelector(selector);
+      if (!element) return null;
+      const style = getComputedStyle(element);
+      return { fontSize: style.fontSize, lineHeight: style.lineHeight };
+    };
+    return {
+      title: read('.orders-drawer-head h2'),
+      subtitle: read('.orders-drawer-head > div > p:last-child'),
+      sectionTitle: read('.orders-drawer-body h3'),
+      detailRow: read('.orders-detail-list > div'),
+      detailLabel: read('.orders-detail-list dt'),
+      detailValue: read('.orders-detail-list dd'),
+      detailMeta: read('.orders-detail-muted'),
+    };
+  })()`);
+  if (drawerTypography.title?.fontSize !== '20px' || drawerTypography.subtitle?.fontSize !== '12px' || drawerTypography.sectionTitle?.fontSize !== '16px' || drawerTypography.detailRow?.fontSize !== '14px' || drawerTypography.detailLabel?.fontSize !== '12px' || drawerTypography.detailValue?.fontSize !== '14px' || drawerTypography.detailMeta?.fontSize !== '12px') {
+    throw new Error(`order detail drawer typography mismatch: ${JSON.stringify(drawerTypography)}`);
+  }
+  await captureViewport(cdp, 1440, 900, 'orders-detail-drawer-desktop-1440x900.png');
+  await captureViewport(cdp, 390, 844, 'orders-detail-drawer-mobile-390x844.png');
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await evaluate(cdp, 'document.querySelector("[aria-label=关闭订单详情]")?.click()');
   await waitFor(async () => !(await evaluate(cdp, 'document.querySelector("[role=dialog]") !== null')), 'detail drawer close');
 
