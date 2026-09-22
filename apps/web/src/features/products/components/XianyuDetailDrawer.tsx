@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { XianyuDetailState, XianyuItemDetailVM, XianyuItemImageVM } from '../types';
 
 export function XianyuDetailDrawer({ state, onClose, onRetry, onSync }: { state: XianyuDetailState; onClose: () => void; onRetry: () => void; onSync: () => void }) {
@@ -10,10 +11,11 @@ export function XianyuDetailDrawer({ state, onClose, onRetry, onSync }: { state:
           <p className="eyebrow">Xianyu Item Detail</p>
           <h2>{detail?.title ?? '闲鱼商品详情'}</h2>
           {detail?.itemId && <p className="xianyu-detail-subtitle">闲鱼商品 ID：{detail.itemId}</p>}
+          {detail && <p className="xianyu-detail-source-note">{detail.cached ? '已读取数据库中的已保存详情' : '已从闲鱼同步并保存详情'}</p>}
         </div>
         <div className="products-detail-header-actions"><button className="btn ghost btn-small" type="button" onClick={onSync} disabled={state.phase === 'loading' || !detail}>同步闲鱼</button><button className="icon-button" type="button" aria-label="关闭闲鱼商品详情" onClick={onClose}>×</button></div>
       </header>
-      {state.phase === 'loading' && <div className="products-detail-state" aria-live="polite"><span className="xianyu-detail-spinner" />正在读取并保存闲鱼商品详情…</div>}
+      {state.phase === 'loading' && <div className="products-detail-state" aria-live="polite"><span className="xianyu-detail-spinner" />{state.loadingMode === 'sync' ? '正在同步并保存闲鱼商品详情…' : '正在读取闲鱼商品详情（优先使用已保存缓存）…'}</div>}
       {(state.phase === 'error' || state.phase === 'forbidden') && <div className="products-detail-state products-error" role="alert"><strong>{state.phase === 'forbidden' ? '无权查看闲鱼商品详情' : '闲鱼商品详情加载失败'}</strong><span>{state.error?.message ?? '商品详情不存在或暂时不可用。'}</span>{state.phase === 'error' && state.error?.retryable && <button className="btn ghost" type="button" onClick={onRetry}>重新加载</button>}</div>}
       {state.phase === 'success' && detail && <XianyuDetailContent detail={detail} />}
     </aside>
@@ -70,7 +72,13 @@ function XianyuDetailContent({ detail }: { detail: XianyuItemDetailVM }) {
 
 function ImageTile({ image, index }: { image: XianyuItemImageVM; index: number }) {
   const previewUrl = [image.thumbnailUrl, image.url].find((value) => isRenderableImageUrl(value));
-  return <figure className="xianyu-detail-image">{previewUrl ? <img src={previewUrl} alt={image.alt ?? `商品图片 ${index + 1}`} loading="lazy" /> : <div className="xianyu-detail-image-placeholder">对象存储图片<br /><small>{image.storageKey ?? '等待访问地址'}</small></div>}<figcaption>{image.storageKey ? `对象存储 · ${image.storageKey}` : `图片 ${index + 1}`}</figcaption></figure>;
+  const [status, setStatus] = useState<'loading' | 'loaded' | 'failed'>(previewUrl ? 'loading' : 'failed');
+  const showImage = Boolean(previewUrl && status === 'loaded');
+  return <figure className="xianyu-detail-image">
+    {!showImage && <div className="xianyu-detail-image-placeholder">对象存储图片<br /><small>{image.storageKey ?? '等待访问地址'}</small></div>}
+    {previewUrl && <img src={previewUrl} alt={image.alt ?? `商品图片 ${index + 1}`} loading="lazy" style={{ display: showImage ? 'block' : 'none' }} onLoad={() => setStatus('loaded')} onError={() => setStatus('failed')} />}
+    <figcaption>{image.storageKey ? `对象存储 · ${image.storageKey}` : `图片 ${index + 1}`}</figcaption>
+  </figure>;
 }
 
 function isRenderableImageUrl(value?: string): value is string {

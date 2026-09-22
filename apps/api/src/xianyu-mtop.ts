@@ -287,9 +287,17 @@ export class XianyuMtopClient {
       const isSellerOrders = api === SOLD_ORDERS_API;
       const documentUrl = requestOptions.referer ?? (isSellerOrders ? SOLD_ORDERS_REFERER : 'https://www.goofish.com/im');
       const requestUrl = `${BASE_URL}/${api}/${version}/`;
-      const signingCookieHeader = cookieSnapshot ? cookieHeaderForSigning(cookieSnapshot, documentUrl, XIANYU_TOP_SITE) : cookieHeader;
-      const requestCookieHeader = cookieSnapshot ? cookieHeaderForUrl(cookieSnapshot, requestUrl, Date.now(), XIANYU_TOP_SITE) : cookieHeader;
-      const token = (cookieSnapshot ? cookieValue(signingCookieHeader, '_m_h5_tk') : cookieValue(cookieHeader, '_m_h5_tk')).split('_', 1)[0] ?? '';
+      const snapshotSigningCookieHeader = cookieSnapshot ? cookieHeaderForSigning(cookieSnapshot, documentUrl, XIANYU_TOP_SITE) : '';
+      const snapshotRequestCookieHeader = cookieSnapshot ? cookieHeaderForUrl(cookieSnapshot, requestUrl, Date.now(), XIANYU_TOP_SITE) : '';
+      const snapshotToken = cookieValue(snapshotSigningCookieHeader, '_m_h5_tk');
+      // A persisted browser snapshot can outlive its in-memory expiry metadata.
+      // If the raw saved cookie still contains _m_h5_tk, replay it and let MTOP
+      // return the authoritative session-expired response instead of failing
+      // locally with MTOP_TOKEN_MISSING.
+      const useSnapshot = Boolean(snapshotToken);
+      const signingCookieHeader = useSnapshot ? snapshotSigningCookieHeader : cookieHeader;
+      const requestCookieHeader = useSnapshot ? snapshotRequestCookieHeader : cookieHeader;
+      const token = (useSnapshot ? snapshotToken : cookieValue(cookieHeader, '_m_h5_tk')).split('_', 1)[0] ?? '';
       if (!token) return { success: false, accountInvalid: true, errorCode: 'MTOP_TOKEN_MISSING', message: 'credential does not contain _m_h5_tk', cookieHeader };
       const timestamp = String(Date.now());
       const params = new URLSearchParams({
@@ -328,9 +336,10 @@ export class XianyuMtopClient {
           signal: AbortSignal.timeout(this.timeoutMs),
         });
         const setCookies = setCookieValues(response.headers);
-        if (cookieSnapshot) {
-          if (setCookies.length > 0) cookieSnapshot = applySetCookies(cookieSnapshot, requestUrl, setCookies, Date.now(), XIANYU_TOP_SITE);
-          cookieHeader = cookieHeaderFromSnapshot(cookieSnapshot);
+        if (cookieSnapshot && setCookies.length > 0) {
+          cookieSnapshot = applySetCookies(cookieSnapshot, requestUrl, setCookies, Date.now(), XIANYU_TOP_SITE);
+          const snapshotCookieHeader = cookieHeaderFromSnapshot(cookieSnapshot);
+          if (cookieValue(snapshotCookieHeader, '_m_h5_tk')) cookieHeader = snapshotCookieHeader;
         } else if (setCookies.length > 0) {
           cookieHeader = mergeCookies(cookieHeader, setCookies);
         }

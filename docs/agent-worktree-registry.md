@@ -84,6 +84,7 @@
 | `root/backend_chat` | `chat-live-auto-reply` | `codex/chat-live-auto-reply` | `F:\ChenHai\Project\XianYuAgent-chat-live-fix` | Codex `/root` delegated agent | `2026-09-21 00:00:00 +08:00` | `MERGED` | `4001dd6` | `-` | 补充 deferAutoReply→inbox worker→realtime 双消息事件回归已合入主线；API typecheck、auto-reply E2E 4/4、auto-reply unit 46/46、真实 PostgreSQL/Redis 组合脚本均通过，未复现后端丢消息。 |
 
 | `root` | `xianyu-item-detail` | `codex/xianyu-item-detail` | `F:\ChenHai\Project\XianYuAgent-item-detail` | Codex `/root` | `2026-09-22 11:08:00 +08:00` | `REGISTERED` | `-` | `-` | 复用当前已登录 Chrome 商品页抓取真实 MTOP 详情请求；补齐详情参数、原始响应保留与价格/浏览/想要/描述字段映射。 |
+| `root` | `xianyu-item-detail-integration` | `codex/xianyu-item-detail-integration` | `F:\ChenHai\Project\XianYuAgent-item-detail-integration` | Codex `/root` | `2026-09-22 11:20:00 +08:00` | `READY_FOR_MERGE` | `-` | `-` | 商品详情 DB-first、显式闲鱼同步、对象存储图片、系统数据库登录态 live E2E 与截图审核已通过；待锁内合入 main。 |
 
 ## 主工作区
 

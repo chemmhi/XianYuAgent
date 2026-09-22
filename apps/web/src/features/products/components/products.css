@@ -61,6 +61,7 @@
 .products-detail-body p { margin: 0; color: var(--sub); font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
 .xianyu-detail-drawer { width: min(620px, 100vw); }
 .xianyu-detail-subtitle { margin: 5px 0 0; color: var(--sub); font-size: 10px; }
+.xianyu-detail-source-note { margin: 3px 0 0; color: var(--success); font-size: 10px; font-weight: 700; }
 .xianyu-detail-body { display: grid; gap: 20px; padding-top: 20px; padding-bottom: 30px; }
 .xianyu-detail-body section { display: grid; gap: 10px; }
 .xianyu-detail-body h3 { margin: 0; font-size: 12px; }

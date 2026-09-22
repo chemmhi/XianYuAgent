@@ -187,7 +187,7 @@ function imageValue(value: unknown, index: number): XianyuItemImageVM | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const candidate = value as Record<string, unknown>;
   const metadata = candidate.metadata && typeof candidate.metadata === 'object' && !Array.isArray(candidate.metadata) ? candidate.metadata as Record<string, unknown> : {};
-  const url = stringValue(candidate.url, candidate.imageUrl, candidate.image_url, candidate.objectUrl, candidate.object_url, candidate.publicUrl, candidate.public_url, metadata.url, metadata.publicUrl, metadata.public_url, candidate.sourceUrl, candidate.source_url, candidate.src);
+  const url = stringValue(candidate.url, candidate.imageUrl, candidate.image_url, candidate.sourceUrl, candidate.source_url, candidate.objectUrl, candidate.object_url, candidate.publicUrl, candidate.public_url, metadata.url, metadata.publicUrl, metadata.public_url, candidate.src);
   const storageKey = stringValue(candidate.storageKey, candidate.storage_key, candidate.key);
   if (!url && !storageKey) return null;
   return {

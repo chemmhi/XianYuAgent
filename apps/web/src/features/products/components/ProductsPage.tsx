@@ -39,7 +39,7 @@ export function ProductsPage({ api: providedApi }: ProductsPageProps) {
         <ProductListStateView phase={controller.state.phase} error={controller.state.error} onRetry={controller.reload} accountSelectionRequired={contextMissing} />
       </article>
       <ProductDetailPanel state={controller.detail} onClose={controller.closeProduct} onRetry={() => controller.detail.productId && controller.openProduct(controller.detail.productId)} onEdit={(product) => { controller.closeProduct(); controller.clearMutation(); setDrawer({ mode: 'edit', product }); }} />
-      <XianyuDetailDrawer state={controller.xianyuDetail} onClose={controller.closeXianyuDetail} onRetry={() => controller.xianyuDetail.productId && controller.openXianyuDetail(controller.xianyuDetail.productId)} />
+      <XianyuDetailDrawer state={controller.xianyuDetail} onClose={controller.closeXianyuDetail} onRetry={() => controller.xianyuDetail.productId && controller.openXianyuDetail(controller.xianyuDetail.productId)} onSync={() => controller.xianyuDetail.productId && controller.syncXianyuDetail(controller.xianyuDetail.productId)} />
       {drawer && <ProductDrawer mode={drawer.mode} accountId={currentAccountId} product={drawer.product} error={controller.mutation.error} saving={controller.mutation.phase === 'saving'} onClose={() => setDrawer(null)} onCreate={async (values) => Boolean(await controller.createDraft(values))} onUpdate={async (productId, patch, configVersion) => Boolean(await controller.updateDraft(productId, patch, configVersion))} />}
       {accountsError && <div className="products-inline-error" role="alert">账号上下文加载失败：{accountsError}</div>}
     </section>

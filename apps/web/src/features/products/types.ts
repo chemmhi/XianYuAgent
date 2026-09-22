@@ -175,6 +175,7 @@ export interface XianyuItemDetailVM {
 
 export interface XianyuDetailState {
   phase: 'idle' | 'loading' | 'success' | 'error' | 'forbidden';
+  loadingMode?: 'read' | 'sync';
   productId?: string;
   data: XianyuItemDetailVM | null;
   error: ProductsLoadError | null;

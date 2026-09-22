@@ -174,11 +174,21 @@ async function run() {
   await waitFor(async () => cdp.events.slice(detailMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'GET' && event.params?.request?.url?.match(/\/api\/v1\/products\/[^/]+\/detail(?:\?|$)/)), 'xianyu product detail read request');
   await waitFor(async () => { const text = String(await evaluate(cdp, 'document.body.innerText')); return text.includes('Chrome E2E 闲鱼详情') && text.includes('315') && text.includes('对象存储'); }, 'xianyu detail drawer');
   await captureViewport(cdp, 1440, 900, 'products-detail-drawer-desktop-1440x900.png');
+  await captureViewport(cdp, 390, 844, 'products-detail-drawer-mobile-390x844.png');
+  await cdp.send('Emulation.clearDeviceMetricsOverride');
   const detailRefreshMark = cdp.events.length;
   if (!await evaluate(cdp, '(() => { const button = document.querySelector(".xianyu-detail-drawer button.btn-small"); if (!button || button.disabled) return false; button.click(); return true; })()')) throw new Error('xianyu detail refresh button missing');
   await waitFor(async () => cdp.events.slice(detailRefreshMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'POST' && event.params?.request?.url?.match(/\/api\/v1\/products\/[^/]+\/detail\/refresh(?:\?|$)/)), 'xianyu product detail refresh request');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 闲鱼详情'), 'xianyu detail after refresh');
   if (!await evaluate(cdp, '(() => { const button = document.querySelector("[aria-label=\\"关闭闲鱼商品详情\\"]"); if (!button) return false; button.click(); return true; })()')) throw new Error('xianyu detail drawer close button missing');
+  const cachedDetailMark = cdp.events.length;
+  if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid^=product-detail-]"); if (!button) return false; button.click(); return true; })()')) throw new Error('cached product detail action button missing');
+  await waitFor(async () => cdp.events.slice(cachedDetailMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'GET' && event.params?.request?.url?.match(/\/api\/v1\/products\/[^/]+\/detail(?:\?|$)/)), 'cached xianyu product detail read request');
+  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector(".xianyu-detail-drawer")?.innerText ?? ""')).includes('已读取数据库中的已保存详情'), 'cached xianyu detail drawer');
+  await captureViewport(cdp, 1440, 900, 'products-detail-drawer-cached-desktop-1440x900.png');
+  await cdp.send('Emulation.clearDeviceMetricsOverride');
+  if (cdp.events.slice(cachedDetailMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'POST' && event.params?.request?.url?.match(/\/api\/v1\/products\/[^/]+\/detail\/refresh(?:\?|$)/))) throw new Error('cached detail read unexpectedly refreshed Xianyu');
+  if (!await evaluate(cdp, '(() => { const button = document.querySelector("[aria-label=\\"关闭闲鱼商品详情\\"]"); if (!button) return false; button.click(); return true; })()')) throw new Error('cached xianyu detail drawer close button missing');
   const searchEmptyMark = cdp.events.length;
   if (!await evaluate(cdp, '(() => { const input = document.querySelector("[aria-label=\\"搜索商品\\"]"); if (!input) return false; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set; setter?.call(input, "no-product-match"); input.dispatchEvent(new Event("input", { bubbles: true })); return true; })()')) throw new Error('product search input missing');
   await waitFor(async () => cdp.events.slice(searchEmptyMark).some((event) => { if (event.method !== 'Network.requestWillBeSent' || event.params?.request?.method !== 'GET') return false; const url = new URL(event.params.request.url); return url.pathname === '/api/v1/products' && url.searchParams.get('keyword') === 'no-product-match'; }), 'empty product search request');
@@ -235,7 +245,7 @@ async function run() {
   if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=publish-product]"); if (!button || button.disabled) return false; button.click(); return true; })()')) throw new Error('publish product button missing or disabled');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('新建商品草稿'), 'create draft drawer');
   if (cdp.events.slice(publishMark).some((event) => event.method === 'Network.requestWillBeSent' && /publish|bulk-publish|mtop/i.test(event.params?.request?.url ?? ''))) throw new Error('publish draft entry must not call a real publish endpoint');
-  await evaluate(cdp, '(() => { const set = (label, value) => { const input = document.querySelector(`[aria-label="${label}"]`); if (!input) throw new Error(`missing ${label}`); const setter = Object.getOwnPropertyDescriptor(input.__proto__, "value")?.set; setter?.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); }; set("商品标题", "Chrome 创建草稿"); set("分类编码", "digital"); set("价格（分）", "2990"); set("商品描述", "来自 Chrome E2E 的草稿"); })()');
+  await evaluate(cdp, '(() => { const set = (label, value) => { const field = Array.from(document.querySelectorAll(".product-basic-form label")).find((candidate) => candidate.textContent?.includes(label)); const input = field?.querySelector("input,textarea"); if (!input) throw new Error(`missing ${label}`); const setter = Object.getOwnPropertyDescriptor(input.__proto__, "value")?.set; setter?.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); }; set("商品标题", "Chrome 创建草稿"); set("分类编码", "digital"); set("价格（分）", "2990"); set("商品描述", "来自 Chrome E2E 的草稿"); })()');
   const savedCreate = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((item) => item.textContent?.includes("保存草稿")); if (!button || button.disabled) return false; button.click(); return true; })()');
   if (!savedCreate) throw new Error('save draft button disabled');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome 创建草稿'), 'created draft row');
@@ -245,7 +255,7 @@ async function run() {
   const openedEdit = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((item) => item.textContent?.includes("编辑草稿")); if (!button) return false; button.click(); return true; })()');
   if (!openedEdit) throw new Error('edit draft button missing');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('编辑商品草稿'), 'edit draft drawer');
-  await evaluate(cdp, '(() => { const input = document.querySelector(`[aria-label="商品标题"]`); if (!input) throw new Error("missing title"); const setter = Object.getOwnPropertyDescriptor(input.__proto__, "value")?.set; setter?.call(input, "Chrome 编辑草稿"); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); })()');
+  await evaluate(cdp, '(() => { const field = Array.from(document.querySelectorAll(".product-basic-form label")).find((candidate) => candidate.textContent?.includes("商品标题")); const input = field?.querySelector("input"); if (!input) throw new Error("missing title"); const setter = Object.getOwnPropertyDescriptor(input.__proto__, "value")?.set; setter?.call(input, "Chrome 编辑草稿"); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); })()');
   const savedEdit = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((item) => item.textContent?.includes("保存草稿")); if (!button || button.disabled) return false; button.click(); return true; })()');
   if (!savedEdit) throw new Error('edit save button disabled');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome 编辑草稿'), 'updated draft row');
@@ -256,6 +266,7 @@ async function run() {
   await cdp.send('Page.navigate', { url: `${webUrl}/accounts` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'accounts page after product flow');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('账号列表'), 'accounts list for UI switch');
+  await waitFor(async () => Boolean(await evaluate(cdp, `document.body.innerText.includes(${JSON.stringify(secondaryAccount.displayName)})`)), 'secondary account row for UI switch');
   const switched = await evaluate(cdp, `(() => { const rows = Array.from(document.querySelectorAll('[role="row"]')); const row = rows.find((candidate) => candidate.textContent?.includes(${JSON.stringify(secondaryAccount.displayName)}) && candidate.querySelector('[data-testid="account-switch"]')?.textContent?.includes('切换账号')); const button = row?.querySelector('[data-testid="account-switch"]'); if (!button) return false; button.click(); return true; })()`);
   if (!switched) throw new Error('secondary account switch button missing or disabled');
   await waitFor(async () => String(await evaluate(cdp, 'localStorage.getItem("xianyu.activeAccountId") ?? ""')) === secondaryAccount.id, 'ui account switch persisted');

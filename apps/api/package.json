@@ -21,7 +21,7 @@
     "probe:xianyu-im-gateway:db": "npm run build && node scripts/xianyu-im-gateway-db-probe.mjs",
     "test:pi:live": "npm run build && node scripts/pi-runtime-live-smoke.mjs",
     "test:xianyu-im-read": "node --import tsx --test scripts/xianyu-im-read.test.ts",
-    "test:xianyu-item-detail": "node --import tsx --test scripts/xianyu-item-detail-mapper.test.ts scripts/xianyu-item-detail-service.test.ts scripts/object-storage.test.ts",
+    "test:xianyu-item-detail": "node --import tsx --test scripts/xianyu-item-detail-mapper.test.ts scripts/xianyu-item-detail-service.test.ts scripts/object-storage.test.ts scripts/xianyu-mtop-cookie-fallback.test.ts",
     "test:xianyu-image-upload": "npm run build && node scripts/xianyu-image-upload-smoke.mjs && node --import tsx --test scripts/xianyu-im-credential.test.ts",
     "test:auto-reply": "npm run build && node scripts/auto-reply-smoke.mjs",
     "test:auto-reply:e2e": "node --import tsx --test scripts/auto-reply-e2e.test.ts",

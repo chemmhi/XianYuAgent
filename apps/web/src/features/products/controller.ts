@@ -40,6 +40,7 @@ export interface ProductsController {
   openProduct: (productId: string) => Promise<void>;
   closeProduct: () => void;
   openXianyuDetail: (productId: string) => Promise<void>;
+  syncXianyuDetail: (productId: string) => Promise<void>;
   closeXianyuDetail: () => void;
   createDraft: (input: ProductDraftInput) => Promise<ProductVM | null>;
   updateDraft: (productId: string, patch: ProductDraftPatch, configVersion: number) => Promise<ProductVM | null>;
@@ -96,10 +97,23 @@ export function useProductsController(options: { api?: ProductsApi; initialFilte
   const closeProduct = useCallback(() => { detailRequestId.current += 1; setDetail({ phase: 'idle', data: null, error: null }); }, []);
   const openXianyuDetail = useCallback(async (productId: string) => {
     const currentRequest = ++xianyuDetailRequestId.current;
-    setXianyuDetail({ phase: 'loading', productId, data: null, error: null });
+    setXianyuDetail({ phase: 'loading', loadingMode: 'read', productId, data: null, error: null });
     try {
-      // The POST endpoint performs the real MTOP fetch and persists normalized detail
-      // plus object-storage image references. A later GET can rehydrate the same data.
+      // GET reads the persisted snapshot; the backend only fetches live data when
+      // no snapshot exists yet.
+      const data = await productsApi.getXianyuDetail(productId);
+      if (currentRequest !== xianyuDetailRequestId.current) return;
+      setXianyuDetail({ phase: 'success', productId, data, error: null });
+    } catch (error) {
+      if (currentRequest !== xianyuDetailRequestId.current) return;
+      const normalized = toProductsLoadError(error);
+      setXianyuDetail({ phase: normalized.code === 'FORBIDDEN' ? 'forbidden' : 'error', productId, data: null, error: normalized });
+    }
+  }, [productsApi]);
+  const syncXianyuDetail = useCallback(async (productId: string) => {
+    const currentRequest = ++xianyuDetailRequestId.current;
+    setXianyuDetail({ phase: 'loading', loadingMode: 'sync', productId, data: null, error: null });
+    try {
       const data = await productsApi.syncXianyuDetail(productId);
       if (currentRequest !== xianyuDetailRequestId.current) return;
       setXianyuDetail({ phase: 'success', productId, data, error: null });
@@ -156,5 +170,5 @@ export function useProductsController(options: { api?: ProductsApi; initialFilte
   }, [productsApi, reload]);
   const clearMutation = useCallback(() => setMutation({ phase: 'idle', error: null }), []);
 
-  return { filters, setFilters, setKeyword, reload, openProduct, closeProduct, openXianyuDetail, closeXianyuDetail, createDraft, updateDraft, syncFromXianyu, clearMutation, state, detail, xianyuDetail, mutation };
+  return { filters, setFilters, setKeyword, reload, openProduct, closeProduct, openXianyuDetail, syncXianyuDetail, closeXianyuDetail, createDraft, updateDraft, syncFromXianyu, clearMutation, state, detail, xianyuDetail, mutation };
 }
