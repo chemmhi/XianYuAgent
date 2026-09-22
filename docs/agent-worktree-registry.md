@@ -119,7 +119,7 @@
 
 ## 登记维护规则
 
-| `root` | `dashboard-home-refresh` | `codex/dashboard-home-refresh` | `F:\ChenHai\Project\XianYuAgent-dashboard-home-refresh` | Codex `/root` | `2026-09-22 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 仪表盘首页布局、趋势时间筛选与指标卡片调整；Web 203 项、API dashboard 单测/PostgreSQL smoke、构建与 Chrome/CDP E2E 已通过。 |
+| `root` | `dashboard-home-refresh` | `codex/dashboard-home-refresh` | `F:\ChenHai\Project\XianYuAgent-dashboard-home-refresh` | Codex `/root` | `2026-09-22 00:00:00 +08:00` | `MERGED` | `c86ee9e` / `5d8bba9` | `-` | 仪表盘首页布局、趋势时间筛选与指标卡片调整；已在 merge lock 内以 `--no-ff` 合入 main。主线 Dashboard API 单测、Web 定向回归、typecheck、构建与 Chrome/CDP E2E 均通过；保留 worktree 供审计。 |
 | `root` | `dashboard-sidebar-fix-20260922` | `codex/dashboard-sidebar-fix` | `F:\ChenHai\Project\XianYuAgent-dashboard-sidebar-fix` | Codex `/root` | `2026-09-22 00:00:00 +08:00` | `CLEANED` | `12cb549` | `2026-09-22 15:05:00 +08:00` | 独立复核通过并已在 merge lock 内合入主线；删除旧 DashboardSidebar、Logo、独立 desktop/mobile shell 及死样式；主线 Web 63 files/207 tests、typecheck、Chrome/CDP dashboard E2E、diff-check 通过。worktree 元数据已清理，目录因本地依赖 junction 残留未删除。 |
 
 1. 创建 worktree 后立即新增一行，至少填完 `agent_id`、`slice_id`、`branch`、`worktree`、`owner`、`created_at` 和 `REGISTERED`。
