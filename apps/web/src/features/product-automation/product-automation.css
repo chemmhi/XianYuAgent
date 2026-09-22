@@ -1,5 +1,7 @@
 .automation-drawer-backdrop{z-index:24}
 .automation-drawer{width:min(760px,100vw);padding:0;display:flex;flex-direction:column}
+.products-detail-panel.automation-drawer{height:100%;box-sizing:border-box;overflow:hidden}
+.products-detail-panel.automation-drawer .automation-drawer-head{display:block;align-items:initial;justify-content:initial;gap:0;padding:18px 20px 14px}
 .automation-drawer-head{padding:18px 20px 14px;border-bottom:1px solid var(--border)}
 .automation-drawer-top{display:flex;justify-content:space-between;gap:14px}
 .automation-kicker{margin:0 0 5px;color:var(--info);font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
@@ -28,6 +30,7 @@
 .automation-config-card h4{margin:0 0 11px;font-size:13px;line-height:1.5}
 .automation-selected-coupon{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 11px;border:1px solid #CFE0EE;border-radius:8px;background:var(--soft-blue-bg)}
 .automation-selected-coupon>div{min-width:0;display:grid;gap:4px}
+.automation-selected-coupon-item{min-width:0;display:grid;gap:4px}
 .automation-selected-coupon strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
 .automation-selected-coupon small{color:var(--muted);font-size:12px;line-height:1.5}
 .automation-card-link{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;color:var(--sub);font-size:11px;line-height:1.5}
@@ -62,6 +65,7 @@
 .coupon-list{height:322px;overflow:auto;padding:0 5px 8px}
 .coupon-item{display:flex;align-items:center;gap:9px;margin:0 5px;padding:11px 9px;border-bottom:1px solid var(--border);background:#fff;cursor:pointer}
 .coupon-item:hover{background:#EEF5FA}
+.coupon-item.selected{background:#EEF5FA}
 .coupon-item input{width:14px;height:14px;accent-color:var(--link)}
 .coupon-item-main{min-width:0;display:grid;gap:4px}
 .coupon-item-main strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
@@ -70,6 +74,7 @@
 .coupon-empty{display:grid;place-items:center;height:100%;padding:34px 20px;color:var(--sub);font-size:12px;line-height:1.6;text-align:center}
 .coupon-transfer-actions{display:flex;flex-direction:column;justify-content:center;gap:8px;background:#F8FAFC}
 .coupon-transfer-arrow{width:32px;height:32px;margin:auto;border:1px solid #B7CEE4;border-radius:7px;background:#fff;color:var(--link);font-size:16px;font-weight:700}
+.coupon-transfer-arrow:disabled{cursor:not-allowed;opacity:.45}
 .automation-modal-footer{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:13px 20px;border-top:1px solid var(--border);background:#fff;color:var(--sub);font-size:11px;line-height:1.5}
 .automation-modal-footer .btn.primary{min-width:110px}
 .batch-automation-body{padding:16px 20px;background:#FBFCFD}
