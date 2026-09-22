@@ -145,7 +145,7 @@ export interface PreSendReviewResult {
 export class PreSendReviewError extends Error {
   readonly code: string;
 
-  constructor(code: string, message = code) {
+  constructor(code: string, message: string = code) {
     super(message);
     this.name = 'PreSendReviewError';
     this.code = code;
@@ -274,6 +274,9 @@ function validateInput(input: PreSendReviewInput): void {
     throw new PreSendReviewError('PRESEND_INPUT_INVALID', 'action plan policyVersion must match review policyVersion');
   }
   if (!input.actionPlan.actionPlanId || !isActionKind(input.actionPlan.primaryAction)) throw new PreSendReviewError('PRESEND_INPUT_INVALID', 'action plan must contain one canonical primaryAction');
+  if (input.actionPlan.primaryGoal.objectiveId !== input.goalId) {
+    throw new PreSendReviewError('PRESEND_INPUT_INVALID', 'action plan goal objectiveId does not match review goalId');
+  }
   if (input.actionPlan.primaryGoal.accountId !== input.scope.accountId || input.actionPlan.primaryGoal.conversationId !== input.scope.conversationId) {
     throw new PreSendReviewError('PRESEND_INPUT_INVALID', 'action plan goal scope does not match review scope');
   }
@@ -286,6 +289,7 @@ function collectReasons(input: PreSendReviewInput, policy: PreSendReviewPolicy, 
   const reasons: PreSendReviewReasonCode[] = [];
   if (!policy.allowedActionKinds.includes(input.actionPlan.primaryAction)) reasons.push('ACTION_NOT_ALLOWED');
   if (input.actionPlan.primaryAction === 'HANDOFF') {
+    if (input.actionPlan.handoffAllowed !== true) reasons.push('ACTION_PLAN_INVALID');
     if (!input.handoffReasonCode?.trim()) reasons.push('HANDOFF_REASON_MISSING');
     else if (!policy.allowedHandoffReasonCodes.includes(input.handoffReasonCode)) reasons.push('HANDOFF_REASON_NOT_ALLOWED');
     if (!input.handoffEvidenceRefs || input.handoffEvidenceRefs.length === 0) reasons.push('HANDOFF_EVIDENCE_MISSING');
@@ -299,6 +303,9 @@ function collectReasons(input: PreSendReviewInput, policy: PreSendReviewPolicy, 
     if (!factsByRef.has(ref)) reasons.push('REQUIRED_FACT_MISSING');
     if (planEvidenceRefs.size > 0 && !planEvidenceRefs.has(ref)) reasons.push('FACT_REF_UNDECLARED');
   }
+  for (const ref of input.actionPlan.evidenceRefs) {
+    if (!declaredFactRefs.has(ref)) reasons.push('FACT_REF_UNDECLARED');
+  }
   for (const requiredKey of input.actionPlan.requiredFacts) {
     if (!input.verifiedFacts.some((fact) => fact.key === requiredKey && declaredFactRefs.has(fact.factRef))) reasons.push('REQUIRED_FACT_MISSING');
   }
@@ -306,7 +313,10 @@ function collectReasons(input: PreSendReviewInput, policy: PreSendReviewPolicy, 
     if (fact.accountId !== input.scope.accountId || (fact.conversationId && fact.conversationId !== input.scope.conversationId) || (input.scope.productId && fact.productId && fact.productId !== input.scope.productId) || !sameOrderRefs(input.scope.orderRefs, fact.orderRefs)) reasons.push('FACT_SCOPE_MISMATCH');
     const verifiedAt = Date.parse(fact.verifiedAt);
     const expiresAt = fact.expiresAt ? Date.parse(fact.expiresAt) : Number.NaN;
-    if (!Number.isFinite(verifiedAt) || (Number.isFinite(expiresAt) ? expiresAt <= nowMs : nowMs - verifiedAt > policy.maxFactAgeSeconds * 1_000)) reasons.push('FACT_STALE');
+    const invalidVerifiedAt = !Number.isFinite(verifiedAt) || verifiedAt > nowMs;
+    const invalidExpiresAt = fact.expiresAt !== undefined && (!Number.isFinite(expiresAt) || expiresAt <= verifiedAt || expiresAt <= nowMs);
+    const ageExceeded = fact.expiresAt === undefined && Number.isFinite(verifiedAt) && nowMs - verifiedAt > policy.maxFactAgeSeconds * 1_000;
+    if (invalidVerifiedAt || invalidExpiresAt || ageExceeded) reasons.push('FACT_STALE');
   }
   for (const claim of input.draftClaims) {
     if (claim.claimType === 'FACTUAL' && claim.factRefs.length === 0) reasons.push('CLAIM_FACT_MISSING');

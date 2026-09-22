@@ -111,6 +111,32 @@ test('goal coverage and undeclared evidence cannot be hidden by the draft', () =
   assert.ok(result.reasonCodes.includes('FACT_REF_UNDECLARED'));
 });
 
+test('extra action-plan evidence refs are rejected unless explicitly bound to verified facts', () => {
+  const engine = new PreSendReviewEngine(() => 'review-4-extra');
+  const result = engine.review(input({
+    actionPlan: plan({ evidenceRefs: ['fact-price-1', 'fact-not-bound'] }),
+  }));
+  assert.equal(result.decision, 'REVISE');
+  assert.ok(result.reasonCodes.includes('FACT_REF_UNDECLARED'));
+});
+
+test('objective identity must match the goal being reviewed', () => {
+  const engine = new PreSendReviewEngine();
+  assert.throws(() => engine.review(input({ actionPlan: plan({ primaryGoal: { ...plan().primaryGoal, objectiveId: 'other-goal' } }) })), (error: unknown) => error instanceof PreSendReviewError && error.code === 'PRESEND_INPUT_INVALID');
+});
+
+test('invalid or future fact timestamps fail freshness validation', () => {
+  const engine = new PreSendReviewEngine(() => 'review-4-time');
+  const invalid = engine.review(input({
+    verifiedFacts: [{ factRef: 'fact-price-1', key: 'price', accountId: 'account-1', conversationId: 'conversation-1', productId: 'product-1', verifiedAt: 'not-a-date' }],
+  }));
+  assert.ok(invalid.reasonCodes.includes('FACT_STALE'));
+  const future = engine.review(input({
+    verifiedFacts: [{ factRef: 'fact-price-1', key: 'price', accountId: 'account-1', conversationId: 'conversation-1', productId: 'product-1', verifiedAt: '2026-09-22T01:00:01.000Z' }],
+  }));
+  assert.ok(future.reasonCodes.includes('FACT_STALE'));
+});
+
 test('sensitive outbound uncertainty fails closed after the revision budget', () => {
   const engine = new PreSendReviewEngine(() => 'review-5');
   const result = engine.review(input({
@@ -136,6 +162,20 @@ test('handoff requires a policy-allowed reason and structured evidence', () => {
   assert.equal(result.decision, 'REVISE');
   assert.ok(result.reasonCodes.includes('HANDOFF_REASON_NOT_ALLOWED'));
   assert.ok(result.reasonCodes.includes('HANDOFF_EVIDENCE_MISSING'));
+});
+
+test('handoff cannot bypass an action plan that disallows handoff', () => {
+  const engine = new PreSendReviewEngine(() => 'review-6-invalid');
+  const result = engine.review(input({
+    actionPlan: plan({ primaryAction: 'HANDOFF', handoffAllowed: false, requiredFacts: [], evidenceRefs: [] }),
+    factRefs: [],
+    verifiedFacts: [],
+    draftClaims: [{ claimId: 'claim-1', claimType: 'NON_FACTUAL', factRefs: [] }],
+    handoffReasonCode: 'USER_REQUESTED_HUMAN',
+    handoffEvidenceRefs: ['buyer-request-1'],
+  }));
+  assert.equal(result.decision, 'REVISE');
+  assert.ok(result.reasonCodes.includes('ACTION_PLAN_INVALID'));
 });
 
 test('missing pre-send policy fails closed instead of guessing a route', () => {
