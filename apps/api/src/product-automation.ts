@@ -151,15 +151,15 @@ export interface AutomationExecutionPort {
 export interface ExecutionLedgerEntry { fingerprint: string; result: AutomationExecutionResult; retryable: boolean; attemptCount: number; updatedAt: string; }
 
 export interface AutomationExecutionLedger {
-  get(key: string): Promise<ExecutionLedgerEntry | undefined>;
-  claim(input: { key: string; fingerprint: string; ownerToken: string; leaseUntil: string }): Promise<{ claimed: boolean; entry?: ExecutionLedgerEntry; running?: boolean }>;
-  complete(input: { key: string; ownerToken: string; result: AutomationExecutionResult; retryable: boolean }): Promise<void>;
+  get(key: string): ExecutionLedgerEntry | undefined | Promise<ExecutionLedgerEntry | undefined>;
+  claim(input: { key: string; fingerprint: string; ownerToken: string; leaseUntil: string }): { claimed: boolean; entry?: ExecutionLedgerEntry; running?: boolean } | Promise<{ claimed: boolean; entry?: ExecutionLedgerEntry; running?: boolean }>;
+  complete(input: { key: string; ownerToken: string; result: AutomationExecutionResult; retryable: boolean }): void | Promise<void>;
 }
 
 export class InMemoryAutomationExecutionLedger implements AutomationExecutionLedger {
   private readonly entries = new Map<string, { entry: ExecutionLedgerEntry; ownerToken?: string; status: 'running' | 'completed'; leaseUntil?: string }>();
-  async get(key: string): Promise<ExecutionLedgerEntry | undefined> { return this.entries.get(key)?.status === 'completed' ? structuredClone(this.entries.get(key)!.entry) : undefined; }
-  async claim(input: { key: string; fingerprint: string; ownerToken: string; leaseUntil: string }): Promise<{ claimed: boolean; entry?: ExecutionLedgerEntry; running?: boolean }> {
+  get(key: string): ExecutionLedgerEntry | undefined { return this.entries.get(key)?.status === 'completed' ? structuredClone(this.entries.get(key)!.entry) : undefined; }
+  claim(input: { key: string; fingerprint: string; ownerToken: string; leaseUntil: string }): { claimed: boolean; entry?: ExecutionLedgerEntry; running?: boolean } {
     const current = this.entries.get(input.key);
     if (!current) {
       this.entries.set(input.key, { status: 'running', ownerToken: input.ownerToken, leaseUntil: input.leaseUntil, entry: { fingerprint: input.fingerprint, result: skipped(input.key, 'running'), retryable: false, attemptCount: 1, updatedAt: new Date().toISOString() } });
@@ -178,7 +178,7 @@ export class InMemoryAutomationExecutionLedger implements AutomationExecutionLed
     if (current.status === 'completed') return { claimed: false, entry: structuredClone(current.entry) };
     return { claimed: false, running: true };
   }
-  async complete(input: { key: string; ownerToken: string; result: AutomationExecutionResult; retryable: boolean }): Promise<void> {
+  complete(input: { key: string; ownerToken: string; result: AutomationExecutionResult; retryable: boolean }): void {
     const current = this.entries.get(input.key);
     if (!current || current.ownerToken !== input.ownerToken) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution owner changed');
     current.status = 'completed';
