@@ -23,7 +23,7 @@ export function DashboardPage({ api, apiMode, onNavigate }: { api?: DashboardApi
   return <div className="dashboard-experience">
     <div className="dashboard-desktop-shell">
       <DashboardSidebar page="dashboard" onNavigate={onNavigate}/>
-      <div className="dashboard-desktop-body"><main><DashboardDesktopContent state={controller.state} apiMode={apiMode} onOpenSettings={() => onNavigate('settings')} onOpenTodo={openTodo} onRefresh={controller.reload}/></main></div>
+      <div className="dashboard-desktop-body"><main><DashboardDesktopContent state={controller.state} query={controller.query} apiMode={apiMode} onOpenTodo={openTodo} onRefresh={controller.reload} onTrendQueryChange={controller.setQuery}/></main></div>
     </div>
     <div className="dashboard-mobile-frame">
       <div className="dashboard-mobile-status"><span>9:41</span><span>5G 100%</span></div>

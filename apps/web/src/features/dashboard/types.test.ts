@@ -4,6 +4,7 @@ import { toDashboardVM } from './types';
 describe('dashboard view model', () => {
   it('formats the four KPI cards and maps risk severity to semantic tones', () => {
     const vm = toDashboardVM({
+      totalSales: 78420,
       todayOrderAmount: 18640,
       autoProcessRate: 96.8,
       pendingManualCount: 3,
@@ -16,7 +17,7 @@ describe('dashboard view model', () => {
       ],
     });
 
-    expect(vm.kpis.map((item) => item.value)).toEqual(['¥18,640', '96.8%', '3', '1,286']);
+    expect(vm.kpis.map((item) => item.value)).toEqual(['¥78,420', '¥18,640', '96.8%', '3']);
     expect(vm.riskTodos.map((item) => item.tone)).toEqual(['danger', 'warn', 'info']);
     expect(vm.trend[0]).toEqual({ label: '周一', primary: 58, secondary: 82 });
   });

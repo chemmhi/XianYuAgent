@@ -1,4 +1,5 @@
 import type { DashboardSnapshot } from '../../api/contracts';
+import type { DashboardQuery } from './types';
 
 export interface DashboardApiTransport {
   get<T>(path: string): Promise<T>;
@@ -21,13 +22,21 @@ function unwrap<T>(payload: T | ApiEnvelope<T>): T {
 }
 
 export interface DashboardApi {
-  getSnapshot(): Promise<DashboardSnapshot>;
+  getSnapshot(query?: DashboardQuery): Promise<DashboardSnapshot>;
+}
+
+function toQueryString(query?: DashboardQuery): string {
+  if (!query) return '';
+  const params = new URLSearchParams({ range: query.range });
+  if (query.range === 'custom' && query.from) params.set('from', query.from);
+  if (query.range === 'custom' && query.to) params.set('to', query.to);
+  return `?${params.toString()}`;
 }
 
 export function createDashboardApi(transport: DashboardApiTransport): DashboardApi {
   return {
-    async getSnapshot() {
-      return unwrap(await transport.get<DashboardSnapshot | ApiEnvelope<DashboardSnapshot>>('/api/v1/dashboard/snapshot'));
+    async getSnapshot(query) {
+      return unwrap(await transport.get<DashboardSnapshot | ApiEnvelope<DashboardSnapshot>>(`/api/v1/dashboard/snapshot${toQueryString(query)}`));
     },
   };
 }

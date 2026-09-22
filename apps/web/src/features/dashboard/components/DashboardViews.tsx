@@ -1,5 +1,7 @@
-import type { ReactNode } from 'react';
-import type { DashboardState } from '../types';
+import { useState, type MouseEvent, type ReactNode } from 'react';
+import type { DashboardQuery, DashboardRange, DashboardState } from '../types';
+import { InputField } from '../../../shared/ui/InputField';
+import { SelectField } from '../../../shared/ui/SelectField';
 
 function Icon({ name }: { name: string }) {
   const paths: Record<string, ReactNode> = {
@@ -34,9 +36,23 @@ export function MiniAreaChart({ state, compact = false }: { state: DashboardStat
   const primary = makePath(points.map((point) => point.primary));
   const secondary = makePath(points.map((point) => point.secondary));
   const labels = points.map((point) => point.label);
+  const labelStep = Math.max(1, Math.ceil(labels.length / 6));
   const gradientSuffix = compact ? 'mobile' : 'desktop';
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const activeIndex = hoveredIndex === null ? null : Math.min(hoveredIndex, Math.max(0, points.length - 1));
+  const hoverX = activeIndex === null ? 0 : 18 + (activeIndex * (520 - 36)) / Math.max(1, points.length - 1);
+  const tooltipLeft = Math.min(86, Math.max(14, (hoverX / 520) * 100));
+  const handleMouseMove = (event: MouseEvent<SVGSVGElement>) => {
+    if (points.length < 2) {
+      setHoveredIndex(0);
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / Math.max(1, rect.width)));
+    setHoveredIndex(Math.round(ratio * (points.length - 1)));
+  };
   return <div className={`dashboard-chart-wrap${compact ? ' dashboard-chart-compact' : ''}`} role="img" aria-label="订单金额与自动处理趋势图">
-    <svg viewBox="0 0 520 188" preserveAspectRatio="none">
+    <svg viewBox="0 0 520 188" preserveAspectRatio="none" onMouseMove={handleMouseMove} onMouseLeave={() => setHoveredIndex(null)}>
       <defs>
         <linearGradient id={`dashboard-primary-${gradientSuffix}`} x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#245A8D" stopOpacity="0.12"/><stop offset="100%" stopColor="#245A8D" stopOpacity="0.01"/></linearGradient>
         <linearGradient id={`dashboard-secondary-${gradientSuffix}`} x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#2E7D5B" stopOpacity="0.10"/><stop offset="100%" stopColor="#2E7D5B" stopOpacity="0.01"/></linearGradient>
@@ -46,26 +62,59 @@ export function MiniAreaChart({ state, compact = false }: { state: DashboardStat
       <path d={`${primary} L 502 176 L 18 176 Z`} fill={`url(#dashboard-primary-${gradientSuffix})`}/>
       <path d={secondary} className="dashboard-chart-line dashboard-chart-line-secondary"/>
       <path d={primary} className="dashboard-chart-line"/>
-      {labels.map((label, index) => <text key={`${label}-${index}`} x={28 + index * (464 / Math.max(1, labels.length - 1))} y="184" className="dashboard-axis-text">{label}</text>)}
+      {activeIndex !== null ? <line x1={hoverX} x2={hoverX} y1="14" y2="176" className="dashboard-chart-hover-line"/> : null}
+      {activeIndex !== null ? <circle cx={hoverX} cy={14 + (170 - 34) * (1 - (points[activeIndex]!.primary - Math.min(...points.map((point) => point.primary))) / Math.max(1, Math.max(...points.map((point) => point.primary)) - Math.min(...points.map((point) => point.primary))))} r="3.5" className="dashboard-chart-dot dashboard-chart-dot-primary"/> : null}
+      {activeIndex !== null ? <circle cx={hoverX} cy={14 + (170 - 34) * (1 - (points[activeIndex]!.secondary - Math.min(...points.map((point) => point.secondary))) / Math.max(1, Math.max(...points.map((point) => point.secondary)) - Math.min(...points.map((point) => point.secondary))))} r="3.5" className="dashboard-chart-dot dashboard-chart-dot-secondary"/> : null}
     </svg>
+    <div className="dashboard-chart-axis" aria-hidden="true">{labels.map((label, index) => <span key={`${label}-${index}`}>{labels.length <= 7 || index === 0 || index === labels.length - 1 || index % labelStep === 0 ? label : ''}</span>)}</div>
+    {activeIndex !== null ? <div className="dashboard-chart-tooltip" style={{ left: `${tooltipLeft}%` }}><strong>{points[activeIndex]!.label}</strong><span>订单金额 ¥{points[activeIndex]!.primary.toLocaleString('zh-CN')}</span><span>AI 闭环率 {points[activeIndex]!.secondary}%</span></div> : null}
     <div className="dashboard-chart-legend"><span><i className="dashboard-legend-line primary"/>订单金额</span><span><i className="dashboard-legend-line secondary"/>AI 闭环率</span></div>
   </div>;
 }
 
-export function DashboardDesktopContent({ state, apiMode, onOpenSettings, onOpenTodo, onRefresh }: { state: DashboardState; apiMode: 'live' | 'mock'; onOpenSettings: () => void; onOpenTodo: (id: string) => void; onRefresh: () => void }) {
+const trendRangeOptions: Array<{ value: DashboardRange; label: string }> = [
+  { value: 'today', label: '今天' },
+  { value: '3d', label: '3天内' },
+  { value: '7d', label: '7天内' },
+  { value: '1m', label: '1个月内' },
+  { value: 'custom', label: '自定义' },
+];
+
+function TrendRangeControl({ query, onChange }: { query: DashboardQuery; onChange: (query: DashboardQuery) => void }) {
+  const [customFrom, setCustomFrom] = useState(query.from ?? '');
+  const [customTo, setCustomTo] = useState(query.to ?? '');
+  const isCustom = query.range === 'custom';
+  return <div className="dashboard-trend-controls" aria-label="趋势时间范围">
+    <SelectField className="dashboard-trend-select" aria-label="选择趋势时间范围" value={query.range} options={trendRangeOptions} onChange={(event) => {
+      const range = event.target.value as DashboardRange;
+      if (range === 'custom') {
+        onChange({ range, from: customFrom || undefined, to: customTo || undefined });
+      } else {
+        onChange({ range });
+      }
+    }}/>
+    {isCustom ? <>
+      <InputField className="dashboard-trend-date" aria-label="趋势开始日期" type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)}/>
+      <span className="dashboard-trend-date-separator">至</span>
+      <InputField className="dashboard-trend-date" aria-label="趋势结束日期" type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)}/>
+      <button type="button" className="dashboard-btn dashboard-btn-ghost dashboard-trend-apply" disabled={!customFrom || !customTo} onClick={() => onChange({ range: 'custom', from: customFrom, to: customTo })}>应用</button>
+    </> : null}
+  </div>;
+}
+
+export function DashboardDesktopContent({ state, query, apiMode, onOpenTodo, onRefresh, onTrendQueryChange }: { state: DashboardState; query: DashboardQuery; apiMode: 'live' | 'mock'; onOpenTodo: (id: string) => void; onRefresh: () => void; onTrendQueryChange: (query: DashboardQuery) => void }) {
   const data = state.data;
   if (!data || state.phase !== 'success') return <DashboardStateViewBlock state={state} onRefresh={onRefresh}/>;
   return <section className="dashboard-page-stack" data-dashboard-surface="desktop">
-    <div className="dashboard-page-title"><div><p className="dashboard-eyebrow">Dashboard Plugin</p><h1>仪表盘</h1><p>承接旧项目订单统计、有效订单、商品库存和趋势图；后续由 Dashboard Plugin Manifest 版本化维护。</p></div><div className="dashboard-button-row"><Badge tone={apiMode === 'live' ? 'ok' : 'info'}>{apiMode === 'live' ? 'Live API' : 'Mock API'}</Badge><button className="dashboard-btn dashboard-btn-ghost" type="button" onClick={onRefresh} disabled={state.refreshing}><Icon name="refresh"/>{state.refreshing ? '刷新中' : '刷新'}</button><button className="dashboard-btn dashboard-btn-primary" type="button" onClick={onOpenSettings}>打开插件配置</button></div></div>
     <div className="dashboard-kpi-grid">{data.kpis.map((kpi) => <article className="dashboard-card dashboard-kpi-card" key={kpi.key}><div className="dashboard-kpi-label">{kpi.label}</div><div className="dashboard-kpi-value">{kpi.value}</div><div className="dashboard-kpi-delta"><span className={toneClass(kpi.tone)}>{kpi.delta}</span><small>{kpi.context}</small></div></article>)}</div>
-    <div className="dashboard-main-grid"><article className="dashboard-card dashboard-panel"><div className="dashboard-panel-head"><div><h2>订单与 AI 闭环趋势</h2><p>最近 7 天订单金额、自动回复成功率和人工接管变化。</p></div><Badge tone="ok">实时更新</Badge></div><MiniAreaChart state={state}/></article><article className="dashboard-card dashboard-panel dashboard-compact-panel"><h2>当前账号健康度</h2><div className="dashboard-health-list">{data.health.map((item) => <div key={item.label}><span>{item.label}</span><Badge tone={item.tone}>{item.value}</Badge></div>)}</div><div className="dashboard-deep-card"><strong>Action Policy Gateway</strong><p>3 个高风险动作等待人工确认；所有发送动作写入 Outbox、幂等键和审计。</p></div></article></div>
+    <div className="dashboard-main-grid"><article className="dashboard-card dashboard-panel"><div className="dashboard-panel-head"><div><h2>订单与 AI 闭环趋势</h2><p>按所选时间范围查看订单金额、自动回复成功率和人工接管变化。</p></div><div className="dashboard-trend-head-actions"><TrendRangeControl query={query} onChange={onTrendQueryChange}/><Badge tone={apiMode === 'live' ? 'ok' : 'info'}>{apiMode === 'live' ? 'Live API' : 'Mock API'}</Badge></div></div><MiniAreaChart state={state}/></article></div>
     <div className="dashboard-two-grid"><article className="dashboard-card dashboard-panel"><div className="dashboard-panel-head"><div><h2>商品排行</h2><p>按当前账号订单与库存表现排序。</p></div><Badge tone="info">4 个商品</Badge></div><div className="dashboard-data-table dashboard-products-table"><div className="dashboard-table-head"><span>商品</span><span>订单</span><span>库存</span><span>状态</span></div>{data.productRank.length ? data.productRank.map((row) => <div className="dashboard-table-row" key={row.title}><span><b>{row.title}</b><small>{row.subtitle}</small></span><span>{row.orders}</span><span>{row.stock}</span><Badge tone={row.tone}>{row.status}</Badge></div>) : <div className="dashboard-empty-row">暂无商品排行</div>}</div></article><article className="dashboard-card dashboard-panel"><div className="dashboard-panel-head"><div><h2>最近处理记录</h2><p>最近 24 小时的 AI、订单与风险动作。</p></div><Badge tone="ok">自动刷新</Badge></div><div className="dashboard-timeline">{data.recentActivity.length ? data.recentActivity.map((item) => <button className="dashboard-timeline-row" key={`${item.time}-${item.text}`} type="button" onClick={() => item.href && onOpenTodo(item.href)}><strong>{item.time}</strong><span>{item.text}</span><Badge tone={item.tone}>{item.status}</Badge></button>) : <div className="dashboard-empty-row">暂无最近处理记录</div>}</div></article></div>
     <div className="dashboard-risk-strip"><div><strong>待处理风险</strong><span>{data.riskTodos.length} 个动作需要关注</span></div><div className="dashboard-risk-inline-list">{data.riskTodos.slice(0, 3).map((todo) => <button type="button" key={todo.id} className={`dashboard-risk-chip dashboard-risk-${todo.severity}`} onClick={() => onOpenTodo(todo.id)}><span>{todo.title}</span><small>查看</small></button>)}</div></div>
   </section>;
 }
 
 function DashboardStateViewBlock({ state, onRefresh }: { state: DashboardState; onRefresh: () => void }) {
-  return <section className="dashboard-page-stack dashboard-state-stack" data-dashboard-surface="desktop"><div className="dashboard-page-title"><div><p className="dashboard-eyebrow">Dashboard Plugin</p><h1>仪表盘</h1><p>承接旧项目订单统计、有效订单、商品库存和趋势图；后续由 Dashboard Plugin Manifest 版本化维护。</p></div></div><DashboardStateView state={state} onRetry={onRefresh}/></section>;
+  return <section className="dashboard-page-stack dashboard-state-stack" data-dashboard-surface="desktop"><DashboardStateView state={state} onRetry={onRefresh}/></section>;
 }
 
 function DashboardStateView({ state, onRetry }: { state: DashboardState; onRetry: () => void }) {
