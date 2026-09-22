@@ -1,5 +1,5 @@
 import type { AppConfig } from './config.js';
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CouponBatchListQuery, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, OrderListQuery, OrderListResult, OrderRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSyncResult, SessionRecord, Store } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CouponBatchListQuery, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, OrderListQuery, OrderListResult, OrderRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSyncResult, SessionRecord, Store, XianyuProductItem } from './domain.js';
 import { createId, createToken, digestJson, hashPassword, isSessionFresh, sha256, verifyPassword } from './security.js';
 import type { XianyuMtopClient } from './xianyu-mtop.js';
 
@@ -385,8 +385,13 @@ export class ProductSyncService {
     let skippedLocalDraftCount = 0;
     const products: ProductRecord[] = [];
     const syncedAt = new Date().toISOString();
-    for (const item of fetched.items) {
-      const upserted = await this.store.upsertExternalProduct({ adminId: input.adminId, accountId: input.accountId, item, syncedAt });
+    const syncedItems: XianyuProductItem[] = [];
+    for (let offset = 0; offset < fetched.items.length; offset += 4) {
+      const batch = fetched.items.slice(offset, offset + 4);
+      syncedItems.push(...await Promise.all(batch.map((item) => this.enrichRemoteUpdatedAt(input.adminId, input.accountId, item))));
+    }
+    for (const syncedItem of syncedItems) {
+      const upserted = await this.store.upsertExternalProduct({ adminId: input.adminId, accountId: input.accountId, item: syncedItem, syncedAt });
       products.push(upserted.product);
       if (upserted.action === 'created') createdCount += 1;
       else if (upserted.action === 'updated') updatedCount += 1;
@@ -394,6 +399,17 @@ export class ProductSyncService {
     }
     await this.audit({ actorId: input.adminId, action: 'product.sync.completed', targetRef: syncRunId, requestId: input.requestId, traceId: input.traceId, accountId: input.accountId, payload: { pagesFetched: fetched.pages.length, fetchedCount: fetched.items.length, createdCount, updatedCount, skippedLocalDraftCount, hasMore: fetched.hasMore } });
     return { syncRunId, accountId: input.accountId, pageNumber: 1, pageSize, pagesFetched: fetched.pages.length, fetchedCount: fetched.items.length, createdCount, updatedCount, skippedLocalDraftCount, items: products, hasMore: fetched.hasMore, nextPageNumber: fetched.hasMore ? fetched.pages.length + 1 : undefined };
+  }
+
+  private async enrichRemoteUpdatedAt(adminId: string, accountId: string, item: XianyuProductItem): Promise<XianyuProductItem> {
+    if (item.xianyuUpdatedAt) return item;
+    try {
+      const detail = await this.xianyu.fetchItemDetail(adminId, accountId, item.externalProductRef);
+      if (detail.success && detail.summary.xianyuUpdatedAt) return { ...item, xianyuUpdatedAt: detail.summary.xianyuUpdatedAt };
+    } catch {
+      // Product list sync remains usable when an individual detail request is unavailable.
+    }
+    return item;
   }
 }
 

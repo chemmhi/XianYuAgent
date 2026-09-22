@@ -63,6 +63,30 @@ test('returns an empty summary when the envelope is absent', () => {
   assert.deepEqual(mapXianyuItemDetail(undefined, '1078553391460'), { itemId: '1078553391460' });
 });
 
+test('maps the Xianyu-side shelf time from the detail envelope', () => {
+  const summary = mapXianyuItemDetail({
+    data: {
+      itemDO: { itemId: 'ITEM-UPDATED', gmtCreate: 1_750_000_000_000 },
+      sellerDO: {
+        sellerItems: [
+          { itemId: 'OTHER', attributeMap: { gmtShelf: 1_760_000_000_000 } },
+          { itemId: 'ITEM-UPDATED', attributeMap: { gmtShelf: 1_760_000_000_000, proPolishTime: 1_770_000_000_000 } },
+        ],
+      },
+    },
+  });
+
+  assert.equal(summary.xianyuUpdatedAt, new Date(1_760_000_000_000).toISOString());
+});
+
+test('does not use Xianyu creation time as the update time', () => {
+  const summary = mapXianyuItemDetail({
+    data: { itemDO: { itemId: 'ITEM-CREATED', gmtCreate: 1_750_000_000_000, GMT_CREATE_DATE_KEY: '2025-06-15T00:00:00.000Z' } },
+  });
+
+  assert.equal(summary.xianyuUpdatedAt, undefined);
+});
+
 test('replays the observed MTOP detail contract with item-page tracking params', async () => {
   const originalFetch = globalThis.fetch;
   let capturedUrl = '';

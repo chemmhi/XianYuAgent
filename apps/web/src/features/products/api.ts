@@ -39,6 +39,7 @@ interface ProductPayload {
   status: ProductStatus;
   source?: 'local' | 'xianyu';
   lastSyncedAt?: string;
+  xianyuUpdatedAt?: string;
   sourcePayloadDigest?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -64,6 +65,8 @@ interface XianyuItemDetailPayload {
   item_id?: string;
   categoryId?: string;
   category_id?: string;
+  xianyuUpdatedAt?: string;
+  xianyu_updated_at?: string;
   title?: string;
   description?: string;
   desc?: string;
@@ -140,6 +143,7 @@ function toProductVM(product: ProductPayload): ProductVM {
     status: product.status,
     source: product.source,
     lastSyncedAt: product.lastSyncedAt,
+    xianyuUpdatedAt: product.xianyuUpdatedAt,
     sourcePayloadDigest: product.sourcePayloadDigest,
     createdAt: product.createdAt ?? product.updatedAt ?? new Date(0).toISOString(),
     updatedAt: product.updatedAt ?? new Date(0).toISOString(),
@@ -237,6 +241,7 @@ function toXianyuItemDetail(payload: XianyuItemDetailPayload, fallbackProductId:
     productId: stringValue(merged.productId, merged.product_id, product.id) ?? fallbackProductId,
     itemId: stringValue(merged.itemId, merged.item_id, persistedDetail.itemId),
     categoryId: stringValue(merged.categoryId, merged.category_id),
+    xianyuUpdatedAt: stringValue(merged.xianyuUpdatedAt, merged.xianyu_updated_at, persistedXianyu.updatedAt),
     title: stringValue(merged.title, product.title),
     description: stringValue(merged.description, merged.desc, product.description),
     richTextDescription: stringValue(merged.richTextDescription, merged.rich_text_description),
@@ -337,7 +342,7 @@ export function createProductsApi(transport: ProductsApiTransport): ProductsApi 
 }
 
 export function createMockProductsApi(seed: ProductVM[] = [
-  { id: 'product-001', accountId: 'account-001', externalProductRef: 'xy-1001', title: 'Python 全栈资料包', description: '课程资料与配套源码。', categoryCode: 'digital', attributesJson: {}, configVersion: 3, priceMinor: 3990, status: 'published', createdAt: '2026-09-18T09:30:00.000Z', updatedAt: '2026-09-20T09:30:00.000Z', couponBatches: [{ id: 'batch-001', label: 'Python 全栈资料包' }], aiPrompt: '用简洁中文回答买家问题。', skuCount: 1, assetCount: 3 },
+  { id: 'product-001', accountId: 'account-001', externalProductRef: 'xy-1001', title: 'Python 全栈资料包', description: '课程资料与配套源码。', categoryCode: 'digital', attributesJson: {}, configVersion: 3, priceMinor: 3990, status: 'published', createdAt: '2026-09-18T09:30:00.000Z', updatedAt: '2026-09-20T09:30:00.000Z', xianyuUpdatedAt: '2026-09-20T08:30:00.000Z', couponBatches: [{ id: 'batch-001', label: 'Python 全栈资料包' }], aiPrompt: '用简洁中文回答买家问题。', skuCount: 1, assetCount: 3 },
   { id: 'product-002', accountId: 'account-001', title: 'GitHub 源码下载', categoryCode: 'digital', attributesJson: {}, configVersion: 1, priceMinor: 1990, status: 'draft', createdAt: '2026-09-19T10:20:00.000Z', updatedAt: '2026-09-19T16:20:00.000Z', skuCount: 0, assetCount: 1 },
 ]): ProductsApi {
   return {
@@ -347,8 +352,14 @@ export function createMockProductsApi(seed: ProductVM[] = [
       const sortBy = filters.sortBy ?? 'updatedAt';
       const sortOrder = filters.sortOrder === 'asc' ? 1 : -1;
       filtered.sort((left, right) => {
-        const leftValue = sortBy === 'createdAt' ? left.createdAt : left.updatedAt;
-        const rightValue = sortBy === 'createdAt' ? right.createdAt : right.updatedAt;
+        if (sortBy === 'updatedAt') {
+          if (!left.xianyuUpdatedAt && !right.xianyuUpdatedAt) return 0;
+          if (!left.xianyuUpdatedAt) return 1;
+          if (!right.xianyuUpdatedAt) return -1;
+          return (left.xianyuUpdatedAt < right.xianyuUpdatedAt ? -1 : left.xianyuUpdatedAt > right.xianyuUpdatedAt ? 1 : 0) * sortOrder;
+        }
+        const leftValue = left.createdAt;
+        const rightValue = right.createdAt;
         return (leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0) * sortOrder;
       });
       const page = filters.page ?? 1;

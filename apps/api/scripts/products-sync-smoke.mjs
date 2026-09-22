@@ -29,6 +29,7 @@ try {
     { externalProductRef: 'ITEM-REMOTE', title: '远端商品', description: '从闲鱼同步', priceMinor: 2990, categoryCode: 'digital', detailUrl: 'https://www.goofish.com/item?id=ITEM-REMOTE', imageUrls: ['https://img.example/2.jpg'], attributes: { itemStatus: 1 }, sourcePayloadDigest: 'digest-remote' },
   ];
   runtime.xianyu.fetchItemsAll = async () => ({ pages: [{ success: true, accountInvalid: false, cookieHeader: '', items: remoteItems, pageNumber: 1, pageSize: 20, totalCount: 2, totalPages: 1, hasMore: false }], items: remoteItems, hasMore: false });
+  runtime.xianyu.fetchItemDetail = async (_adminId, _accountId, itemId) => ({ success: true, accountInvalid: false, cookieHeader: '', summary: { itemId: String(itemId), xianyuUpdatedAt: itemId === 'ITEM-REMOTE' ? '2026-09-21T12:30:00.000Z' : undefined } });
 
   const synced = await request('/api/v1/products/sync', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'product-sync-1' }, body: JSON.stringify({ accountId: account.id, pageSize: 20, maxPages: 2 }) });
   assert.equal(synced.response.status, 200);
@@ -40,6 +41,7 @@ try {
   assert.ok(remote);
   assert.equal(remote.source, 'xianyu');
   assert.equal(remote.priceMinor, 2990);
+  assert.equal(remote.xianyuUpdatedAt, '2026-09-21T12:30:00.000Z');
   await runtime.store.persistXianyuItemDetail({
     adminId,
     productId: remote.id,

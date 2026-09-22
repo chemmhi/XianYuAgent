@@ -19,6 +19,7 @@
 - `025_auto_reply_inbound_inbox.sql`：建立自动回复入站 inbox，提供持久化队列状态、重试/死信字段与账号/消息幂等约束。
 - `026_auto_reply_inbound_alias_quarantine.sql`：建立 history/live 外部消息引用别名表与解析失败隔离表。
 - `027_auto_reply_inbound_lease_expiry.sql`：为入站 inbox 补充显式租约过期时间和索引，支持多 worker 竞争 claim 与旧 worker fencing。
+- `029_product_xianyu_updated_at.sql`：为商品保存闲鱼侧更新时间，并支持商品目录按闲鱼更新时间排序；无远端时间的本地商品回退本地 `updated_at`。
 
 VS5A 回滚边界：先关闭 `/api/v1/conversations/{id}/events` 实时订阅入口，保留历史会话、消息与事件游标；若迁移需要回退，按 expand/backfill/verify/switch/contract 顺序先停止新读流量，再保留表结构用于审计和离线恢复，不直接删除消息历史。
 

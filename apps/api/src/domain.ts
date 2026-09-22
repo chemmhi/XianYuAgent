@@ -111,6 +111,7 @@ export interface ProductRecord {
   status: ProductStatus;
   source: ProductSource;
   lastSyncedAt?: string;
+  xianyuUpdatedAt?: string;
   sourcePayloadDigest?: string;
   createdAt: string;
   updatedAt: string;
@@ -128,6 +129,7 @@ export interface XianyuProductItem {
   categoryCode?: string;
   priceMinor?: number;
   externalStatus?: string;
+  xianyuUpdatedAt?: string;
   detailUrl?: string;
   imageUrls: string[];
   attributes: Record<string, unknown>;
