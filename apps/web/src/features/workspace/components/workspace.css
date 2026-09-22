@@ -93,9 +93,6 @@
 .workspace-message-list { display: grid; gap: 16px; width: min(100%, 820px); box-sizing: border-box; margin: 0 auto; padding: 24px 24px 30px; }
 .workspace-message { display: flex; gap: 11px; max-width: 780px; color: var(--text); }
 .workspace-message-user { align-self: flex-end; flex-direction: row-reverse; max-width: min(82%, 680px); }
-.workspace-message-avatar, .workspace-message-icon { display: grid; place-items: center; flex: 0 0 auto; width: 28px; height: 28px; border-radius: 50%; font-size: 9px; font-weight: 800; }
-.workspace-message-avatar { background: var(--link); color: #fff; }
-.workspace-message-icon { width: 25px; height: 25px; border-radius: 8px; background: var(--soft-blue-bg); color: var(--info); font-size: 14px; }
 .workspace-message-content { min-width: 0; padding-top: 1px; }
 .workspace-message-meta { display: flex; align-items: baseline; gap: 9px; margin-bottom: 5px; }
 .workspace-message-meta strong { color: var(--text); font-size: 11px; }
@@ -103,18 +100,7 @@
 .workspace-message p { margin: 0; color: var(--text); font-size: 12px; line-height: 1.65; white-space: pre-wrap; }
 .workspace-message-user .workspace-message-content { padding: 10px 12px; border-radius: 12px 3px 12px 12px; background: var(--link); color: #fff; }
 .workspace-message-user .workspace-message-meta strong, .workspace-message-user .workspace-message-meta time, .workspace-message-user p { color: #fff; }
-.workspace-message-reasoning { display: block; max-width: 720px; padding: 10px 12px; border: 1px solid #DCE5EF; border-radius: 10px; background: rgba(255,255,255,.78); }
-.workspace-tool-group { display: block; max-width: 720px; padding: 10px 12px; border: 1px solid #DCE5EF; border-radius: 10px; background: rgba(255,255,255,.78); }
-.workspace-tool-group-items { display: grid; gap: 10px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
-.workspace-message-toggle { display: flex; align-items: center; gap: 10px; width: 100%; padding: 0; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
-.workspace-message-toggle > span:nth-child(2) { display: grid; gap: 3px; min-width: 0; }
-.workspace-message-toggle strong { font-size: 11px; }
-.workspace-message-toggle small { overflow: hidden; color: var(--sub); text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .workspace-message-chevron { margin-left: auto; color: var(--sub); font-size: 14px; }
-.workspace-reasoning-body { margin: 10px 0 0 35px; padding: 9px 11px; border-left: 2px solid #B9C8D9; background: var(--bg); }
-.workspace-message-tool { max-width: 720px; padding-left: 36px; }
-.workspace-message-tool .workspace-message-content { padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; background: #fff; }
-.workspace-message-code { display: block; margin-top: 7px; color: var(--sub); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; }
 .workspace-message-final { max-width: 720px; padding: 12px 13px; border: 1px solid rgba(36,90,141,.2); border-radius: 10px; background: var(--soft-blue-bg); }
 .workspace-message-final.is-error { border-color: rgba(180,35,24,.2); background: var(--danger-bg); }
 .workspace-composer-docked { flex: 0 0 auto; gap: 9px; padding: 14px 18px 16px; border-top: 1px solid var(--border); background: #fff; }
@@ -127,4 +113,59 @@
   .workspace-thread-meta { width: 100%; justify-content: space-between; }
   .workspace-message-list { padding: 18px 14px 24px; }
   .workspace-message-user { max-width: 90%; }
+}
+
+/* ChatGPT-style conversation surface: one readable stream, one collapsed trace. */
+.workspace-message-list { gap: 22px; width: min(100%, 760px); padding: 28px 28px 36px; }
+.workspace-message { display: block; max-width: min(100%, 720px); }
+.workspace-message-user { align-self: flex-end; max-width: min(78%, 620px); }
+.workspace-message-avatar, .workspace-message-icon { display: none; }
+.workspace-message-content { padding: 0; }
+.workspace-message-meta { display: none; }
+.workspace-message p { font-size: 13px; line-height: 1.75; }
+.workspace-message-user .workspace-message-content { padding: 10px 14px; border-radius: 16px 4px 16px 16px; background: #EEF1F5; color: var(--text); }
+.workspace-message-user .workspace-message-content p { color: var(--text); }
+.workspace-message-assistant { max-width: 720px; }
+.workspace-message-assistant .workspace-message-content { padding: 0 2px; }
+.workspace-message-final { max-width: 720px; padding: 0; border: 0; background: transparent; }
+.workspace-message-final .workspace-message-content { padding: 0 2px; }
+.workspace-message-final p { font-size: 13px; line-height: 1.8; }
+.workspace-agent-trace { max-width: 720px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: transparent; }
+.workspace-trace-toggle { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 46px; padding: 9px 2px; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.workspace-trace-mark, .workspace-trace-row-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: #94A3B8; }
+.workspace-trace-copy { display: grid; gap: 2px; min-width: 0; }
+.workspace-trace-copy strong { font-size: 12px; font-weight: 700; }
+.workspace-trace-copy small { overflow: hidden; color: var(--sub); text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.workspace-trace-toggle .workspace-message-chevron { margin-left: auto; color: var(--sub); font-size: 14px; }
+.workspace-trace-details { display: grid; gap: 12px; padding: 2px 4px 14px 17px; }
+.workspace-trace-row { display: grid; grid-template-columns: 7px minmax(0,1fr); gap: 10px; align-items: start; }
+.workspace-trace-row-dot { margin-top: 6px; background: #CBD5E1; }
+.workspace-trace-row strong { display: block; color: var(--text); font-size: 11px; font-weight: 700; }
+.workspace-trace-row p { margin: 3px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; white-space: pre-wrap; }
+.workspace-trace-row small { display: block; margin-top: 4px; color: var(--sub); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; }
+@media (max-width: 900px) {
+  .workspace-message-list { gap: 18px; padding: 20px 16px 28px; }
+  .workspace-message-user { max-width: 92%; }
+  .workspace-message p, .workspace-message-final p { font-size: 12px; }
+  .workspace-trace-copy small { white-space: normal; }
+}
+
+/* Final conversation surface: keep the thread visually continuous and quiet. */
+.workspace-thread.card { border: 0; border-radius: 0; box-shadow: none; background: #fff; }
+.workspace-thread-header { padding: 18px 24px 10px; border-bottom: 0; }
+.workspace-message-stream { background: #fff; }
+.workspace-message-list { padding: 24px 24px 32px; }
+.workspace-message-user .workspace-message-content { background: #F1F1F1; }
+.workspace-agent-trace { border-top: 0; border-bottom: 1px solid var(--border); }
+.workspace-trace-toggle { min-height: 40px; padding: 7px 0; }
+.workspace-trace-mark { display: none; }
+.workspace-trace-copy strong { color: var(--sub); font-size: 13px; font-weight: 400; }
+.workspace-trace-copy small { display: none; }
+.workspace-trace-action { margin-left: auto; color: #E4572E; font-size: 13px; font-weight: 600; }
+.workspace-trace-toggle .workspace-message-chevron { display: none; }
+.workspace-trace-details { padding: 10px 0 14px 14px; }
+@media (max-width: 900px) {
+  .workspace-thread-header { padding: 16px 16px 8px; }
+  .workspace-message-list { padding: 20px 16px 28px; }
+  .workspace-trace-action { font-size: 12px; }
 }

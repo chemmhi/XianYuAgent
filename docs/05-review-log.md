@@ -4,6 +4,17 @@
 - 更新日期：2026-09-19
 - 评审规则：问题先修复，再复验，再由独立评审关闭；未关闭的 P0-P2 不得进入下一阶段。
 
+## 2026-09-22 Workspace ChatGPT 式对话改造复审
+
+| 评审编号 | 类型 | 结论 | 证据 |
+| --- | --- | --- | --- |
+| S5-R-WORKSPACE-UI-01 | 业务 / 验收 | PASS | `WorkspacePage.tsx` 保留会话、Run、确认卡承载；用户消息保留灰色气泡，Agent 思考与工具事件合并为单条默认折叠执行摘要，最终回复保持连续正文 |
+| S5-R-WORKSPACE-UI-02 | 架构 / 数据流 | PASS | `messages.ts` 仅调整消息投影与语义排序；API、状态机和 PostgreSQL schema 未改；Pi terminal reasoning 重复事件在投影层过滤 |
+| S5-R-WORKSPACE-UI-03 | 质量 / 端到端 | PASS | Workspace 定向单测 4 files / 13 tests；真实 Chrome/CDP → Pi Runtime → PostgreSQL E2E 连续两次通过，`workspace.messages` 含 user/reasoning/final，Run/事件落库可复读 |
+| S5-R-WORKSPACE-UI-04 | 全量回归 | PARTIAL | 全量 Web 单测 72 files / 242 tests 中 1 个既有 Dashboard provider 测试失败；未发现与本次 Workspace 改动相关的失败 |
+
+复审结论：Workspace UI 与跨层验收已通过；全量回归保留一个既有、非本切片失败项，当前切片状态为 `PARTIALLY_VERIFIED`。
+
 ## 2026-09-21 消息重复落库修复复审
 
 | 评审编号 | 类型 | 结论 | 证据 |
