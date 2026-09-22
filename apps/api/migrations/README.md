@@ -19,6 +19,13 @@
 - `025_auto_reply_inbound_inbox.sql`：建立自动回复入站 inbox，提供持久化队列状态、重试/死信字段与账号/消息幂等约束。
 - `026_auto_reply_inbound_alias_quarantine.sql`：建立 history/live 外部消息引用别名表与解析失败隔离表。
 - `027_auto_reply_inbound_lease_expiry.sql`：为入站 inbox 补充显式租约过期时间和索引，支持多 worker 竞争 claim 与旧 worker fencing。
+- `029_coupon_batch_sequence.sql`：为卡券批次增加从 1 开始的业务编号；UUID `id` 继续作为内部主键和外键，API `batchId`/`id` 对外返回该序号，作废/删除后的序号可被新批次回收。
+
+## 029 coupon batch sequence 迁移纪律
+
+- Apply：先执行 `029_coupon_batch_sequence.sql`，再发布读取 `sequence_id` 的 API；迁移会创建全局 sequence、回填旧批次、校准下一值并建立唯一约束。
+- Verify：确认非作废批次的 `sequence_id` 全部非空且唯一，空表首条为 `1`，新建批次按最小可用序号分配，删除/作废后下一批次可回收该序号；通过卡券 API smoke 覆盖数字 URL、旧 UUID URL 兼容、明细/商品关联映射和创建时间倒序。
+- Rollback：保留 UUID 主键、外键和 `sequence_id` 列，先回退 API 到 UUID 输出/解析，再停用序号读写；不要删除审计历史或重建 UUID 外键。序号回收只影响作废记录的对外编号，不改变内部 UUID。
 
 VS5A 回滚边界：先关闭 `/api/v1/conversations/{id}/events` 实时订阅入口，保留历史会话、消息与事件游标；若迁移需要回退，按 expand/backfill/verify/switch/contract 顺序先停止新读流量，再保留表结构用于审计和离线恢复，不直接删除消息历史。
 

@@ -308,8 +308,9 @@ export class MemoryStore implements Store {
       if (!scopedAccounts.has(batch.accountId)) return false;
       if (query.accountId && batch.accountId !== query.accountId) return false;
       if (query.status && batch.status !== query.status) return false;
+      if (!query.status && batch.status === 'voided') return false;
       if (query.purpose && batch.purpose !== query.purpose) return false;
-      if (normalizedKeyword && !`${batch.id} ${batch.label ?? ''} ${batch.purpose}`.toLowerCase().includes(normalizedKeyword)) return false;
+      if (normalizedKeyword && !`${batch.sequenceId ?? ''} ${batch.id} ${batch.label ?? ''} ${batch.purpose}`.toLowerCase().includes(normalizedKeyword)) return false;
       if (query.stockAlert) {
         const items = [...this.couponItems.values()].filter((item) => item.batchId === batch.id);
         const available = items.filter((item) => item.status === 'available').length;
@@ -317,28 +318,31 @@ export class MemoryStore implements Store {
         if (stockAlert !== query.stockAlert) return false;
       }
       return true;
-    }).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    }).sort((left, right) => {
+      const sortDirection = query.sortOrder === 'asc' ? 1 : -1;
+      return (left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)) * sortDirection;
+    });
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
     const start = (page - 1) * pageSize;
     return { items: filtered.slice(start, start + pageSize).map((batch) => this.couponSummary(batch)), page, pageSize, total: filtered.length, totalPages: Math.max(1, Math.ceil(filtered.length / pageSize)) };
   }
   async getCouponBatch(adminId: string, batchId: string): Promise<CouponBatchRecord | undefined> {
-    const batch = this.couponBatches.get(batchId);
+    const batch = this.findCouponBatch(batchId);
     if (!batch || !(await this.hasAccountScope(adminId, batch.accountId))) return undefined;
-    const items = [...this.couponItems.values()].filter((item) => item.batchId === batchId).map((item) => ({ ...item }));
-    const bindings = [...this.couponBindings.values()].filter((binding) => binding.batchId === batchId).map((binding) => ({ ...binding }));
+    const items = [...this.couponItems.values()].filter((item) => item.batchId === batch.id).map((item) => ({ ...item }));
+    const bindings = [...this.couponBindings.values()].filter((binding) => binding.batchId === batch.id).map((binding) => ({ ...binding }));
     return { ...batch, items, bindings };
   }
   async createCouponBatch(input: { adminId: string; accountId: string; label?: string; purpose: string; deliveryScope: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; metadata?: CouponBatchMetadata }): Promise<CouponBatchRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const now = new Date().toISOString();
-    const batch: CouponBatchRecord = { id: createId(), accountId: input.accountId, label: input.label, purpose: input.purpose, deliveryScope: input.deliveryScope, quarkUrl: input.quarkUrl, extractionCode: input.extractionCode, metadata: input.metadata ?? {}, totalCount: 0, status: 'active', version: 1, createdAt: now, updatedAt: now };
+    const batch: CouponBatchRecord = { id: createId(), sequenceId: this.nextCouponBatchSequence(), accountId: input.accountId, label: input.label, purpose: input.purpose, deliveryScope: input.deliveryScope, quarkUrl: input.quarkUrl, extractionCode: input.extractionCode, metadata: input.metadata ?? {}, totalCount: 0, status: 'active', version: 1, createdAt: now, updatedAt: now };
     this.couponBatches.set(batch.id, batch);
     return { ...batch };
   }
   async updateCouponBatch(input: { adminId: string; batchId: string; patch: { label?: string; purpose?: string; deliveryScope?: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; status?: CouponBatchStatus; metadata?: CouponBatchMetadata } }): Promise<CouponBatchRecord | undefined> {
-    const batch = this.couponBatches.get(input.batchId);
+    const batch = this.findCouponBatch(input.batchId);
     if (!batch || !(await this.hasAccountScope(input.adminId, batch.accountId))) return undefined;
     if (input.patch.label !== undefined) batch.label = input.patch.label;
     if (input.patch.purpose !== undefined) batch.purpose = input.patch.purpose;
@@ -352,7 +356,7 @@ export class MemoryStore implements Store {
     return { ...batch };
   }
   async importCouponItems(input: { adminId: string; batchId: string; contents: string[] }): Promise<{ batch: CouponBatchRecord; items: CouponItemRecord[]; rejected: Array<{ index: number; code: string; message: string }> }> {
-    const batch = this.couponBatches.get(input.batchId);
+    const batch = this.findCouponBatch(input.batchId);
     if (!batch || !(await this.hasAccountScope(input.adminId, batch.accountId))) throw new Error('COUPON_NOT_FOUND');
     if (batch.status === 'voided' || batch.status === 'closed') throw new Error('COUPON_BATCH_VOIDED');
     const existingContent = new Set([...this.couponItems.values()].filter((item) => item.batchId === batch.id).map((item) => item.content));
@@ -374,7 +378,7 @@ export class MemoryStore implements Store {
     return { batch: { ...batch }, items: created, rejected };
   }
   async bindCouponBatch(input: { adminId: string; batchId: string; productId: string }): Promise<CouponBindingRecord> {
-    const batch = this.couponBatches.get(input.batchId);
+    const batch = this.findCouponBatch(input.batchId);
     if (!batch || !(await this.hasAccountScope(input.adminId, batch.accountId))) throw new Error('COUPON_NOT_FOUND');
     if (batch.status === 'voided' || batch.status === 'closed') throw new Error('COUPON_BATCH_VOIDED');
     const product = await this.getProduct(input.adminId, input.productId);
@@ -390,7 +394,7 @@ export class MemoryStore implements Store {
     return { ...binding };
   }
   async unbindCouponBatch(input: { adminId: string; batchId: string; productId: string }): Promise<CouponBindingRecord | undefined> {
-    const batch = this.couponBatches.get(input.batchId);
+    const batch = this.findCouponBatch(input.batchId);
     if (!batch || !(await this.hasAccountScope(input.adminId, batch.accountId))) throw new Error('COUPON_NOT_FOUND');
     const binding = [...this.couponBindings.values()].find((row) => row.batchId === batch.id && row.productId === input.productId);
     if (!binding) return undefined;
@@ -401,7 +405,7 @@ export class MemoryStore implements Store {
     return { ...binding };
   }
   async voidCouponBatch(input: { adminId: string; batchId: string }): Promise<CouponBatchRecord | undefined> {
-    const batch = this.couponBatches.get(input.batchId);
+    const batch = this.findCouponBatch(input.batchId);
     if (!batch || !(await this.hasAccountScope(input.adminId, batch.accountId))) return undefined;
     if (batch.status === 'voided') return { ...batch };
     batch.status = 'voided';
@@ -1143,12 +1147,30 @@ export class MemoryStore implements Store {
       .sort((left, right) => right.priority - left.priority || left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
       .flatMap((binding) => {
         const batch = this.couponBatches.get(binding.batchId);
-        return batch ? [{ id: batch.id, label: batch.label }] : [];
+        return batch && batch.status !== 'voided' ? [{ id: batch.sequenceId ?? batch.id, label: batch.label }] : [];
       });
   }
 
   private couponSummary(batch: CouponBatchRecord): CouponBatchRecord {
     const items = [...this.couponItems.values()].filter((item) => item.batchId === batch.id);
     return { ...batch, items: undefined, bindings: undefined, totalCount: items.length, availableCount: items.filter((item) => item.status === 'available').length, reservedCount: items.filter((item) => item.status === 'reserved').length, consumedCount: items.filter((item) => item.status === 'consumed').length };
+  }
+
+  private findCouponBatch(batchId: string): CouponBatchRecord | undefined {
+    const direct = this.couponBatches.get(batchId);
+    if (direct) return direct;
+    if (!/^\d+$/.test(batchId)) return undefined;
+    const matches = [...this.couponBatches.values()].filter((batch) => batch.sequenceId === batchId);
+    return matches.find((batch) => batch.status !== 'voided') ?? matches.sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+  }
+
+  private nextCouponBatchSequence(): string {
+    const used = new Set([...this.couponBatches.values()]
+      .filter((batch) => batch.status !== 'voided')
+      .map((batch) => Number(batch.sequenceId))
+      .filter((value) => Number.isSafeInteger(value) && value > 0));
+    let candidate = 1;
+    while (used.has(candidate)) candidate += 1;
+    return String(candidate);
   }
 }
