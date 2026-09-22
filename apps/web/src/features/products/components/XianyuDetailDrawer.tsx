@@ -69,7 +69,12 @@ function XianyuDetailContent({ detail }: { detail: XianyuItemDetailVM }) {
 }
 
 function ImageTile({ image, index }: { image: XianyuItemImageVM; index: number }) {
-  return <figure className="xianyu-detail-image">{(image.thumbnailUrl ?? image.url) ? <img src={image.thumbnailUrl ?? image.url} alt={image.alt ?? `商品图片 ${index + 1}`} loading="lazy" /> : <div className="xianyu-detail-image-placeholder">对象存储图片<br /><small>{image.storageKey ?? '等待访问地址'}</small></div>}<figcaption>{image.storageKey ? `对象存储 · ${image.storageKey}` : `图片 ${index + 1}`}</figcaption></figure>;
+  const previewUrl = [image.thumbnailUrl, image.url].find((value) => isRenderableImageUrl(value));
+  return <figure className="xianyu-detail-image">{previewUrl ? <img src={previewUrl} alt={image.alt ?? `商品图片 ${index + 1}`} loading="lazy" /> : <div className="xianyu-detail-image-placeholder">对象存储图片<br /><small>{image.storageKey ?? '等待访问地址'}</small></div>}<figcaption>{image.storageKey ? `对象存储 · ${image.storageKey}` : `图片 ${index + 1}`}</figcaption></figure>;
+}
+
+function isRenderableImageUrl(value?: string): value is string {
+  return Boolean(value && /^(https?:|data:image\/|blob:)/i.test(value));
 }
 
 function DetailField({ label, value }: { label: string; value?: string }) { return <div><dt>{label}</dt><dd>{value || '—'}</dd></div>; }
