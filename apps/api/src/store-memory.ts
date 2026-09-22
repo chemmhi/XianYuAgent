@@ -300,13 +300,14 @@ export class MemoryStore implements Store {
   }
   async upsertExternalOrder(input: { adminId: string; accountId: string; item: XianyuOrderItem; syncedAt: string; accountName?: string }): Promise<OrderUpsertResult> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const linkedProductId = input.item.productId ?? [...this.products.values()].find((product) => product.accountId === input.accountId && product.externalProductRef === input.item.itemId)?.id;
     const existing = [...this.orders.values()].find((order) => order.accountId === input.accountId && order.orderNo === input.item.orderNo);
     const now = input.syncedAt;
     if (existing) {
-      Object.assign(existing, { ...input.item, accountId: input.accountId, accountName: input.accountName ?? existing.accountName, updatedAt: now, source: 'xianyu' as const, sourcePayloadDigest: input.item.sourcePayloadDigest, configVersion: existing.configVersion + 1 });
+      Object.assign(existing, { ...input.item, productId: linkedProductId ?? existing.productId, accountId: input.accountId, accountName: input.accountName ?? existing.accountName, updatedAt: now, source: 'xianyu' as const, sourcePayloadDigest: input.item.sourcePayloadDigest, configVersion: existing.configVersion + 1 });
       return { action: 'updated', order: this.enrichOrder(existing) };
     }
-    const order: OrderRecord = { ...input.item, id: createId(), accountId: input.accountId, accountName: input.accountName, updatedAt: input.item.updatedAt ?? now, configVersion: 1, source: 'xianyu' };
+    const order: OrderRecord = { ...input.item, productId: linkedProductId, id: createId(), accountId: input.accountId, accountName: input.accountName, updatedAt: input.item.updatedAt ?? now, configVersion: 1, source: 'xianyu' };
     this.orders.set(order.id, order);
     return { action: 'created', order: this.enrichOrder(order) };
   }
@@ -1217,7 +1218,7 @@ export class MemoryStore implements Store {
       || productImageUrl(matchedProduct);
     const buyerNickname = order.buyerNickname?.trim() || matchedConversation?.buyerDisplayName?.trim() || undefined;
     const buyerAvatarUrl = order.buyerAvatarUrl?.trim() || matchedConversation?.buyerAvatarUrl?.trim() || undefined;
-    return { ...order, buyerNickname, buyerAvatarUrl, itemTitle, itemImageUrl };
+    return { ...order, productId: order.productId ?? matchedProduct?.id, buyerNickname, buyerAvatarUrl, itemTitle, itemImageUrl };
   }
 
   private productDetail(product: ProductRecord): ProductRecord {

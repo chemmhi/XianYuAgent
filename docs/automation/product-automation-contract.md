@@ -95,4 +95,14 @@
 
 所有流程执行键均按账号+订单+规则生成并做输入指纹校验；同键同输入返回原结果，同键不同输入返回 `409 IDEMPOTENCY_CONFLICT`。同一执行键的并发调用共享 in-flight Promise，避免两个 Worker 同时发卡或改价。
 
-当前仓库尚未接入付款、评价和卖家等待付款的真实事件入口；本切片提供的是可注入的 `AutomationExecutionPort` 和 `AutomationWorkflowService`，以及配置 API/持久化。将 `BUYER_RATE_SELLER`、付款成功、待付款改价和分钟级提醒调度接入真实 WS/Worker 时，必须复用执行键、外部结果和库存释放契约，不能把本地 FakePort 测试当作已上线的闲鱼写入验收。
+## 事件入口与默认阻断
+
+本切片已提供真实应用装配边界，但没有伪造闲鱼写接口：
+
+- `OrderService.refresh` 完成订单 upsert 后调用 `ProductAutomationWorker.processOrderRefresh`；已付款订单进入付款后发货触发点，未付款订单进入自动改价触发点。
+- 外部订单 upsert 会在同账号范围内用 `item.productId` 或 `products.external_product_ref = item.itemId` 回填 `order.productId`；无法关联商品时才会返回 `PRODUCT_LINK_MISSING` 并跳过自动化，禁止跨账号猜测商品。
+- `XianyuImService.handleExternalEvent` 在消息落库后调用 `ProductAutomationTrigger.onImEvent`。IM 传输本身不是订单/评价协议，只有上游适配器显式写入 `raw.productAutomation={kind:'review_created',orderNo,eventId}` 才会触发评价赠品；普通聊天文本永远不会被当作评价事实。
+- `ProductAutomationWorker.pollReviewReminders` 提供按账号扫描已发货订单的调度入口，调用方负责分钟级 cron/worker 周期。
+- 生产默认注入 `NotConfiguredAutomationExecutionAdapter`。在发卡、确认发货、改价、发消息和评价事实落库的 MTOP 写适配器完成前，入口统一返回 `blocked/AUTOMATION_EXECUTION_NOT_CONFIGURED`，不报告成功、不扣库存、不发卡。
+
+当前仍未接入付款、评价和卖家等待付款的真实闲鱼事件字段解析，也未接入闲鱼写入 MTOP。接入时必须复用执行键、外部结果和库存释放契约，不能把本地 FakePort 测试当作已上线的闲鱼写入验收。

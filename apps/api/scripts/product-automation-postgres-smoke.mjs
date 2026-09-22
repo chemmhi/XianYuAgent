@@ -11,7 +11,7 @@ try {
   assert.equal(healthy.reachable, true, 'PostgreSQL must be reachable; apply migrations before running this smoke');
   const admin = await runtime.store.createAdmin({ email: `automation-pg-${suffix}@example.com`, passwordHash: 'hash', displayName: 'Automation PG' });
   const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: `automation-pg-${suffix}` });
-  const product = await runtime.store.createProduct({ adminId: admin.id, accountId: account.id, title: '自动化 PG 商品', status: 'published' });
+  const product = await runtime.store.createProduct({ adminId: admin.id, accountId: account.id, externalProductRef: `pg-item-${suffix}`, title: '自动化 PG 商品', status: 'published' });
   const second = await runtime.store.createProduct({ adminId: admin.id, accountId: account.id, title: '自动化 PG 商品 2', status: 'published' });
   const coupon = await runtime.store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'PG 自动化卡券', purpose: 'text', deliveryScope: 'buyer_deliverable' });
   await runtime.store.importCouponItems({ adminId: admin.id, batchId: coupon.id, contents: [`pg-coupon-${suffix}`] });
@@ -19,6 +19,8 @@ try {
   const configValue = { ...defaultConfig.config, paidAutoDelivery: { ...defaultConfig.config.paidAutoDelivery, enabled: true, couponBatchIds: [coupon.id], autoConfirm: true } };
   const saved = await runtime.productAutomation.update({ adminId: admin.id, productId: product.id, expectedConfigVersion: 1, config: configValue, requestId: `pg-save-${suffix}`, traceId: `pg-save-${suffix}` });
   assert.equal(saved.configVersion, 1);
+  const linkedOrder = await runtime.store.upsertExternalOrder({ adminId: admin.id, accountId: account.id, syncedAt: new Date().toISOString(), item: { orderNo: `PG-LINK-${suffix}`, buyerId: 'pg-link-buyer', buyerName: 'PG 关联买家', itemId: `pg-item-${suffix}`, itemTitle: `pg-item-${suffix}`, amountMinor: 1000, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'coupon_only', createdAt: new Date().toISOString(), sourcePayloadDigest: `pg-link-${suffix}` } });
+  assert.equal(linkedOrder.order.productId, product.id, 'externalProductRef must resolve productId on external order upsert');
 } finally {
   await runtime.close();
 }

@@ -18,6 +18,13 @@
 
 ## 当前证据状态
 
-- 已实现：MemoryStore/PostgresStore 契约、迁移、配置服务、四流程可注入执行服务。
-- 待执行：上述定向单测、API smoke、PostgreSQL 重启复读和真实闲鱼外部写入验收。
+4. `product-automation-trigger.test.ts`：订单刷新触发、IM 显式评价信封、提醒 Worker、幂等、账号边界、审计故障隔离、事实持久化失败阻断、`externalProductRef → productId` 关联。
+5. `product-automation-entry-smoke.mjs`：真实 `createApp` 装配链路，订单刷新 API → 自动化触发结果、IM 事件 → 评价入口、提醒 Worker；默认未配置外部 MTOP 时断言 `blocked/AUTOMATION_EXECUTION_NOT_CONFIGURED`。
+6. `product-automation-postgres-smoke.mjs`：应用 `031_product_automation.sql`，验证事务回滚、重启后配置复读、账号隔离和版本冲突。
+
+## 当前证据状态
+
+- 已实现：MemoryStore/PostgresStore 契约、迁移、配置服务、四流程可注入执行服务、订单刷新/IM/提醒 Worker 入口。
+- 已验证：配置/工作流/入口/商品关联 13 项定向测试、API smoke、真实应用装配跨层 smoke、PostgreSQL migration/重启复读及商品关联 smoke、TypeScript build。
+- 未完成：闲鱼真实支付/评价事件字段解析与发卡、确认发货、改价、消息发送 MTOP 写适配器；生产默认明确阻断，不得将入口 smoke 当作真实外部写入验收。
 - 未通过这些命令前，不得将本切片标记为 READY_FOR_MERGE；外部闲鱼真实账号写入仍需人工批准和受控环境。
