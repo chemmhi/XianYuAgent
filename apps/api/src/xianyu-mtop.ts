@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type { ProductSyncPageResult, XianyuOrderItem } from './domain.js';
 import { mapXianyuProductPage } from './xianyu-product-mapper.js';
 import { mapXianyuOrderPage, type XianyuOrderPageResult } from './xianyu-order-mapper.js';
+import { mapXianyuItemDetail, type XianyuItemDetailSummary } from './xianyu-item-detail-mapper.js';
 import {
   applySetCookies,
   cookieHeaderForSigning,
@@ -35,6 +36,16 @@ export interface MtopResult {
 
 export interface XianyuItemsPageResult extends MtopResult, ProductSyncPageResult {}
 export interface XianyuOrdersPageResult extends MtopResult, XianyuOrderPageResult {}
+export interface XianyuItemDetailResult extends MtopResult { summary: XianyuItemDetailSummary; }
+
+export interface XianyuItemDetailOptions {
+  categoryId?: string | number;
+  spmPre?: string;
+  logId?: string;
+  referer?: string;
+}
+
+interface MtopRequestOptions { referer?: string; }
 
 export interface XianyuChatImageUploadResult {
   success: boolean;
@@ -207,6 +218,17 @@ export class XianyuMtopClient {
     return { pages, items, hasMore };
   }
 
+  async fetchItemDetail(adminId: string, accountId: string, itemId: string | number, options: XianyuItemDetailOptions = {}): Promise<XianyuItemDetailResult> {
+    const normalizedItemId = String(itemId).trim();
+    if (!normalizedItemId) return { success: false, accountInvalid: false, errorCode: 'ITEM_ID_MISSING', message: 'item id is required', cookieHeader: '', summary: {} };
+    const referer = options.referer ?? buildItemReferer(normalizedItemId, options.categoryId);
+    const extraParams: Record<string, string> = { spm_cnt: 'a21ybx.item.0.0' };
+    if (options.spmPre) extraParams.spm_pre = options.spmPre;
+    if (options.logId) extraParams.log_id = options.logId;
+    const response = await this.call(adminId, accountId, 'mtop.taobao.idle.pc.detail', '1.0', { itemId: normalizedItemId }, extraParams, { referer });
+    return { ...response, summary: mapXianyuItemDetail(response.response, normalizedItemId) };
+  }
+
   async fetchSoldOrders(adminId: string, accountId: string, data: Record<string, unknown> = {}): Promise<MtopResult> {
     const requestedPageNumber = Number(data.pageNumber);
     const requestedPageSize = Number(data.rowsPerPage ?? data.pageSize);
@@ -251,7 +273,7 @@ export class XianyuMtopClient {
     return { pages, items, hasMore };
   }
 
-  async call(adminId: string, accountId: string, api: string, version: string, data: Record<string, unknown>, extraParams: Record<string, string> = {}): Promise<MtopResult> {
+  async call(adminId: string, accountId: string, api: string, version: string, data: Record<string, unknown>, extraParams: Record<string, string> = {}, requestOptions: MtopRequestOptions = {}): Promise<MtopResult> {
     const credential = await this.loadCredential(adminId, accountId);
     const initialCookieHeader = credential?.cookieHeader?.trim() ?? '';
     let cookieHeader = initialCookieHeader;
@@ -263,7 +285,7 @@ export class XianyuMtopClient {
     let lastError = 'MTOP_REQUEST_FAILED';
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const isSellerOrders = api === SOLD_ORDERS_API;
-      const documentUrl = isSellerOrders ? SOLD_ORDERS_REFERER : 'https://www.goofish.com/im';
+      const documentUrl = requestOptions.referer ?? (isSellerOrders ? SOLD_ORDERS_REFERER : 'https://www.goofish.com/im');
       const requestUrl = `${BASE_URL}/${api}/${version}/`;
       const signingCookieHeader = cookieSnapshot ? cookieHeaderForSigning(cookieSnapshot, documentUrl, XIANYU_TOP_SITE) : cookieHeader;
       const requestCookieHeader = cookieSnapshot ? cookieHeaderForUrl(cookieSnapshot, requestUrl, Date.now(), XIANYU_TOP_SITE) : cookieHeader;
@@ -289,7 +311,7 @@ export class XianyuMtopClient {
           origin: isSellerOrders ? 'https://seller.goofish.com' : 'https://www.goofish.com',
           pragma: 'no-cache',
           priority: 'u=1, i',
-          referer: isSellerOrders ? SOLD_ORDERS_REFERER : refererFor(api),
+          referer: requestOptions.referer ?? (isSellerOrders ? SOLD_ORDERS_REFERER : refererFor(api)),
           'sec-fetch-dest': 'empty',
           'sec-fetch-mode': 'cors',
           'sec-fetch-site': 'same-site',
@@ -368,6 +390,13 @@ function isSessionExpiredText(value: string): boolean {
 function isValidationFailure(value: string): boolean { const normalized = value.toLowerCase(); return ['fail_sys_user_validate', 'rgv587', 'fail_sys_illegal_access', 'fail_biz_wua_is_machine', 'wua_is_machine', 'captcha', 'validate', 'punish', 'x5sec'].some((marker) => normalized.includes(marker)); }
 function isPermissionFailure(value: string): boolean { const normalized = value.toLowerCase(); return normalized.includes('permission_exception') || normalized.includes('permission denied') || value.includes('无权限访问'); }
 function refererFor(api: string): string { if (api.includes('merchant.sold') || api.includes('order')) return 'https://seller.goofish.com/'; if (api.includes('loginuser')) return 'https://www.goofish.com/im'; return 'https://www.goofish.com/'; }
+
+function buildItemReferer(itemId: string, categoryId?: string | number): string {
+  const url = new URL('https://www.goofish.com/item');
+  url.searchParams.set('id', itemId);
+  if (categoryId !== undefined && String(categoryId).trim()) url.searchParams.set('categoryId', String(categoryId));
+  return url.toString();
+}
 
 function nestedString(root: unknown, path: string[]): string | undefined {
   let current: unknown = root;
