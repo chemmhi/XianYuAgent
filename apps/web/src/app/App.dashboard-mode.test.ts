@@ -18,6 +18,7 @@ describe('dashboard API mode resolution', () => {
 
   it('keeps the dashboard inside the shared application shell', () => {
     const props = {
+      admin: { id: 'admin-chen', email: 'chenchen@example.com', displayName: '陈晨', role: 'admin' },
       page: 'dashboard',
       accountsApi: {},
       productsApi: {},
@@ -40,6 +41,10 @@ describe('dashboard API mode resolution', () => {
     expect(html).toContain('XianyuSellerAgent');
     expect(html).toContain('运营控制台');
     expect(html).toContain('Agent Runtime');
+    expect(html).toContain('陈晨');
+    expect(html).toContain('chenchen@example.com');
+    expect(html).not.toContain('运营管理员');
+    expect(html).not.toContain('admin@example.com');
     expect(html).not.toContain('dashboard-sidebar');
     expect(html).not.toContain('dashboard-desktop-shell');
     expect(html).not.toContain('dashboard-mobile-frame');
