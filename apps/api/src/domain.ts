@@ -185,6 +185,63 @@ export interface ProductListResult {
   totalPages: number;
 }
 
+export type AutomationRuleType = 'paid_auto_delivery' | 'unpaid_auto_reprice' | 'review_gift' | 'review_reminder';
+
+export interface PaidAutoDeliveryRule {
+  enabled: boolean;
+  couponBatchIds: string[];
+  autoConfirm: boolean;
+  maxAttempts: number;
+  retryBackoffSeconds: number;
+}
+
+export interface UnpaidAutoRepriceRule {
+  enabled: boolean;
+  mode: 'fixed';
+  targetPriceMinor: number;
+  message?: string;
+  maxAttempts: number;
+  retryBackoffSeconds: number;
+}
+
+export interface ReviewGiftRule {
+  enabled: boolean;
+  couponBatchIds: string[];
+  maxAttempts: number;
+  retryBackoffSeconds: number;
+}
+
+export interface ReviewReminderRule {
+  enabled: boolean;
+  firstDelayHours: number;
+  repeatIntervalHours: number;
+  maxReminders: number;
+  message: string;
+}
+
+export interface ProductAutomationConfig {
+  paidAutoDelivery: PaidAutoDeliveryRule;
+  unpaidAutoReprice: UnpaidAutoRepriceRule;
+  reviewGift: ReviewGiftRule;
+  reviewReminder: ReviewReminderRule;
+}
+
+export interface ProductAutomationConfigRecord {
+  id: string;
+  productId: string;
+  accountId: string;
+  configVersion: number;
+  config: ProductAutomationConfig;
+  configDigest: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProductAutomationBatchResult {
+  items: ProductAutomationConfigRecord[];
+  updatedProductIds: string[];
+}
+
 export type PaymentStatus = 'unpaid' | 'paid' | 'closed' | 'unknown';
 export type OrderStatus = 'open' | 'cancelling' | 'cancelled' | 'completed' | 'closed' | 'failed';
 export type DeliveryStatus = 'pending' | 'reserving' | 'delivered' | 'partially_delivered' | 'failed' | 'cancelled';
@@ -899,6 +956,9 @@ export interface Store {
   listWorkspaceMessages(adminId: string, sessionId: string, limit?: number): Promise<WorkspaceMessageRecord[]>;
   listProducts(adminId: string, query: ProductListQuery): Promise<ProductListResult>;
   getProduct(adminId: string, productId: string): Promise<ProductRecord | undefined>;
+  getProductAutomation(adminId: string, productId: string): Promise<ProductAutomationConfigRecord | undefined>;
+  updateProductAutomation(input: { adminId: string; productId: string; expectedConfigVersion: number; config: ProductAutomationConfig; configDigest: string }): Promise<ProductAutomationConfigRecord | undefined>;
+  updateProductAutomationsBatch(input: { adminId: string; productIds: string[]; expectedConfigVersions: Record<string, number>; config: ProductAutomationConfig; configDigest: string }): Promise<ProductAutomationBatchResult>;
   persistXianyuItemDetail(input: XianyuItemDetailPersistenceInput): Promise<ProductRecord | undefined>;
   listOrders(adminId: string, query: OrderListQuery): Promise<OrderListResult>;
   getOrder(adminId: string, orderNo: string, accountId?: string): Promise<OrderRecord | undefined>;
