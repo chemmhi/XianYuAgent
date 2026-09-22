@@ -520,3 +520,13 @@
 | S5-R102 | 前端 / 可读性 | 搜索框是否与侧栏内容对齐，外发气泡链接是否与背景形成足够对比 | root | PASS | `apps/web/scripts/e2e-messages-chrome.mjs`；Chrome/CDP messages E2E；桌面/移动截图证据 |
 
 本轮结论：用户已确认当前平台设计并明确要求合入 `main`。在线聊天字体层级、会话标签、搜索框对齐、composer 控件与外发链接对比度均通过人工审核和自动化验证，切片进入 `READY_FOR_MERGE`。
+
+### 2026-09-22：商品自动化四流程实现复审
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R103 | 业务 / 验收 | 商品级四条自动化规则、卡券选择入口、批量配置和保存/版本冲突是否按已确认交互稿落地 | root + design_baseline_alignment | PASS（受控前端链路） | `apps/web/src/features/products/components/ProductsPage.tsx`、`apps/web/src/features/product-automation/components/AutomationDrawer.tsx`、`apps/web/scripts/e2e-product-automation-chrome.mjs` |
+| S5-R104 | 架构 / 数据流 | 触发器、工作流、持久化账本、租约、重试、评价事实、求评状态和账号/会话/商品归属是否分层且可恢复 | root + backend_persistence_reliability | PASS（外部执行适配器除外） | `apps/api/src/product-automation.ts`、`apps/api/src/product-automation-trigger.ts`、`automation.execution_ledger`、`npm --workspace apps/api run test:product-automation` 21/21 |
+| S5-R105 | 质量 / 视觉 / 端到端 | API、PostgreSQL、跨层 entry、Chrome/CDP 和 12 张双 viewport 截图是否真实执行；严格像素 diff 是否通过 | root + verification_audit + visual_pixel_tuning | PARTIALLY_VERIFIED | `npm run typecheck`、`npm --workspace apps/api run test:product-automation:postgres`、`npm --workspace apps/api run test:product-automation:entry`、`npm --workspace apps/web run test:e2e:chrome:product-automation`、`docs/evidence/product-automation/pixel-diff-report.json` |
+
+本轮结论：商品自动化切片已完成受控实现与可靠性验证，但严格视觉 diff 仍有 14.39%–25.57% 不同像素，且真实闲鱼 MTOP/IM 执行适配器尚未接入；因此保持 `PARTIALLY_VERIFIED / BLOCKED`，不得宣称真实自动发货、改价、赠品或求评已生产验收。

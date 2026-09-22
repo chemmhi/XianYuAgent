@@ -1,5 +1,15 @@
 # XianyuSellerAgent 项目状态
 
+## 2026-09-22 商品自动化四流程实现与验收
+
+- 独立集成 worktree：`F:\ChenHai\Project\XianYuAgent-product-automation`，分支 `codex/product-automation`；前端与后端分别在独立 worktree 开发后合入。
+- 本轮实现：商品列表自动化摘要、付款后自动发货、拍下未付款自动改价、评价后发送赠品、超时未评价求评价、卡券穿梭框选择、批量配置入口，以及配置版本校验、账号隔离、持久化执行账本、租约接管、重试退避、评价事实和求评状态持久化。
+- 后端可靠性：`automation.execution_ledger`、owner/lease/attemptCount/fingerprint、跨实例幂等、失败补偿、最大尝试次数、改价前二次读、IM 评价事件来源/买家/会话/商品归属校验均已落地；四条流程在外部执行适配器未配置时明确返回 blocked/failed，不伪造成功。
+- 已验证：`npm run typecheck`、商品自动化 API 21/21、PostgreSQL smoke、entry cross-layer smoke、商品自动化 Web 6/6、真实 Chrome/CDP 商品自动化 E2E、生产构建、Compose 配置、`git diff --check` 均通过。
+- 视觉验收：已按设计稿逐一生成商品列表、四个自动化抽屉和卡券穿梭框的桌面/移动截图；严格 diff 仍未达到 0 差异，当前不同像素比例为 14.39%–25.57%，因此不能标记像素级 PASS。
+- 当前状态：`PARTIALLY_VERIFIED / BLOCKED`。真实闲鱼 MTOP/IM 发卡、确认发货、改价和发消息执行适配器仍未接入；当前 Chrome/CDP 商品自动化脚本使用 mock automation API，不宣称真实外部动作已验收。
+- 版本：`4dbf672`（视觉与穿梭框）、`7c38e99`（执行账本与恢复状态）、`ff50024`（账本接口同步兼容）。
+
 ## 2026-09-22 账号弹窗视觉修订
 
 - 登录弹窗按设计稿固定为桌面 680×540，移除“刷新二维码”“取消登录”，仅保留右上角关闭按钮；二维码区域固定 292px，生成中提示在区域内居中。

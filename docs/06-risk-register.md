@@ -207,3 +207,11 @@
 | 编号 | 风险 | 等级 | 应对 | 状态 |
 | --- | --- | --- | --- | --- |
 | S5-RISK-037 | Web 全量单测中既有 `App.dashboard-mode.test.ts` 直接渲染 `DashboardPage`，缺少 `AccountContextProvider`，导致 1 个测试失败；本切片目标测试、类型检查、构建与 Dashboard Chrome/CDP E2E 均通过 | P2 | 补齐既有测试夹具后重新执行 Web 全量单测；本切片不修改无关测试，不以窄范围测试替代全量结果 | OPEN |
+
+### 2026-09-22 商品自动化切片风险
+
+| 编号 | 风险 | 等级 | 应对 | 状态 |
+| --- | --- | --- | --- | --- |
+| S5-RISK-038 | 真实闲鱼 MTOP/IM 发卡、确认发货、改价和发消息执行适配器尚未接入；生产运行时始终保持 `readiness=blocked`，核心外部动作不会执行 | P1 | 复用旧项目已验证的 MTOP/IM 请求契约，先补真实适配器、凭证恢复、unknown/timeout 恢复和外部沙箱证据，再将 readiness 从 blocked 切为 ready | OPEN |
+| S5-RISK-039 | 设计稿与实现截图的严格 pixel diff 仍有 14.39%–25.57% 不同像素，主要集中在字体抗锯齿、表格列宽和文案基线 | P2 | 继续以固定 1440×900 / 390×844 运行 Chrome/CDP，对每个状态单独修复几何和字体偏差；未达到批准阈值前保持视觉验收失败 | OPEN |
+| S5-RISK-040 | `npm --workspace apps/api run test` 的既有订单 Cookie smoke，以及 Web 全量测试中的 Workspace/Dashboard 契约测试仍有失败，未归因于商品自动化切片 | P2 | 保留失败原文和影响范围，单独修复后再做全仓门禁；本切片不通过缩小测试范围掩盖失败 | OPEN |
