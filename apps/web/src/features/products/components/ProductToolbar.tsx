@@ -14,7 +14,7 @@ const statuses: Array<{ value: ProductStatus | 'all'; label: string }> = [
   { value: 'archived', label: '已归档' },
 ];
 
-export function ProductToolbar({ currentAccount, contextLoading, contextError, contextMissing, filters, phase, syncing, onKeywordChange, onStatusChange, onRefresh, onSync, onCreate, onChooseAccount }: {
+export function ProductToolbar({ currentAccount, contextLoading, contextError, contextMissing, filters, phase, syncing, selectedCount = 0, onKeywordChange, onStatusChange, onRefresh, onSync, onCreate, onChooseAccount, onBatchConfigure }: {
   currentAccount?: AccountVM;
   contextLoading: boolean;
   contextError: string | null;
@@ -22,12 +22,14 @@ export function ProductToolbar({ currentAccount, contextLoading, contextError, c
   filters: ProductFilters;
   phase: ProductsLoadPhase;
   syncing: boolean;
+  selectedCount?: number;
   onKeywordChange: (value: string) => void;
   onStatusChange: (value: ProductStatus | 'all') => void;
   onRefresh: () => void;
   onSync: () => void;
   onCreate: () => void;
   onChooseAccount: () => void;
+  onBatchConfigure?: () => void;
 }) {
   const actionDisabled = contextLoading || contextMissing;
   return <div className="products-toolbar">
@@ -39,6 +41,7 @@ export function ProductToolbar({ currentAccount, contextLoading, contextError, c
       <SelectField aria-label="商品状态" className="products-status-select" value={filters.status ?? 'all'} onChange={(event) => onStatusChange(event.target.value as ProductStatus | 'all')} options={statuses} />
       <Button variant="ghost" type="button" data-testid="refresh-products" onClick={onRefresh} disabled={phase === 'loading' || actionDisabled}>刷新本地</Button>
       <Button variant="ghost" type="button" data-testid="sync-products" onClick={onSync} disabled={syncing || actionDisabled}>{syncing ? '同步中…' : '同步闲鱼'}</Button>
+      {onBatchConfigure && <Button variant="ghost" className="products-batch-button" type="button" data-testid="batch-automation" onClick={onBatchConfigure} disabled={actionDisabled || selectedCount === 0}>批量配置自动化{selectedCount > 0 ? `（${selectedCount}件）` : ''}</Button>}
       <Button variant="primary" type="button" data-testid="publish-product" onClick={onCreate} disabled={actionDisabled}>发布商品</Button>
     </div>
   </div>;

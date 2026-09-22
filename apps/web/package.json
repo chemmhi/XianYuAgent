@@ -12,6 +12,7 @@
     "test:e2e:chrome:dashboard": "node scripts/e2e-dashboard-chrome.mjs",
     "test:e2e:chrome:dashboard:fullchain": "node scripts/e2e-dashboard-fullchain.mjs",
     "test:e2e:chrome:products": "node scripts/e2e-products-chrome.mjs",
+    "test:e2e:chrome:product-automation": "node scripts/e2e-product-automation-chrome.mjs",
     "test:e2e:chrome:coupons": "node scripts/e2e-coupons-chrome.mjs",
     "test:e2e:chrome:messages": "node scripts/e2e-messages-chrome.mjs",
     "test:e2e:chrome:workspace": "node scripts/e2e-workspace-real.mjs",
