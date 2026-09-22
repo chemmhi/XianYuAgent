@@ -32,19 +32,18 @@ export function AccountLoginModal({ api, account, initialMethod = 'qr', onClose,
   }, [onCompleted, qrController.model.phase]);
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="modal-backdrop account-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="modal-card account-login-modal" role="dialog" aria-modal="true" aria-labelledby="account-login-title">
         <header className="modal-head">
-          <div><p className="eyebrow">Xianyu Account</p><h2 id="account-login-title">{account ? '重新授权闲鱼账号' : '添加闲鱼账号'}</h2><p>直接选择登录方式。账号创建、凭证保存和资料同步均由服务端完成。</p></div>
+          <div><p className="eyebrow">Xianyu Account</p><h2 id="account-login-title">{account ? '重新授权闲鱼账号' : '添加闲鱼账号'}</h2><p>使用以下任一方式登录，登录后会自动同步账号资料。</p></div>
           <button className="icon-button" type="button" aria-label="关闭登录弹窗" onClick={onClose}>×</button>
         </header>
         <LoginMethodSelector value={method} onChange={setMethod} />
         <div className="account-login-body">
-          {method === 'qr' && <QrLoginView model={qrController.model} onStart={qrController.start} onRefresh={qrController.refresh} onRetry={qrController.retry} onCancel={qrController.cancel} />}
+          {method === 'qr' && <QrLoginView model={qrController.model} />}
           {method === 'cookie' && <CookieLoginForm api={api} existingAccountId={account?.id} onCompleted={onCompleted} />}
           {method === 'password' && <PasswordLoginForm api={api} onCompleted={onCompleted} />}
         </div>
-        <div className="card-actions"><button className="btn ghost" type="button" onClick={onClose}>关闭</button></div>
       </section>
     </div>
   );

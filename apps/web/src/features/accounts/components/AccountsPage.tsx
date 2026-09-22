@@ -7,6 +7,7 @@ import { AccountTable } from './AccountTable';
 import { AccountStateView } from './AccountStateView';
 import { AccountToolbar } from './AccountToolbar';
 import { AccountLoginModal } from './AccountLoginModal';
+import { AccountDeleteModal } from './AccountDeleteModal';
 import type { AccountLoginMethod } from './LoginMethodSelector';
 import { findReauthorizeAccount, readReauthorizeAccountId } from '../reauthorize-intent';
 import './accounts.css';
@@ -22,6 +23,9 @@ export function AccountsPage({ api: providedApi }: AccountsPageProps) {
   const [loginOpen, setLoginOpen] = useState(false);
   const [handledReauthorizeAccountId, setHandledReauthorizeAccountId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [deleteAccountTarget, setDeleteAccountTarget] = useState<AccountVM | null>(null);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const accounts = controller.state.data?.items ?? [];
   const total = controller.state.data?.total ?? 0;
   const page = controller.state.data?.page ?? controller.filters.page ?? 1;
@@ -64,14 +68,30 @@ export function AccountsPage({ api: providedApi }: AccountsPageProps) {
     }
   }
 
-  async function deleteAccount(account: AccountVM) {
-    if (!window.confirm(`确认删除账号“${account.displayName}”？删除后会撤销登录凭证，但会保留历史商品记录。`)) return;
-    setActionError(null);
+  function requestDeleteAccount(account: AccountVM) {
+    setDeleteError(null);
+    setDeleteAccountTarget(account);
+  }
+
+  function closeDeleteAccount() {
+    if (deleteSubmitting) return;
+    setDeleteError(null);
+    setDeleteAccountTarget(null);
+  }
+
+  async function confirmDeleteAccount() {
+    if (!deleteAccountTarget || deleteSubmitting) return;
+    const account = deleteAccountTarget;
+    setDeleteSubmitting(true);
+    setDeleteError(null);
     try {
       await removeAccount(account.id);
+      setDeleteAccountTarget(null);
       await controller.reload();
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : '账号删除失败');
+      setDeleteError(error instanceof Error ? error.message : '账号删除失败');
+    } finally {
+      setDeleteSubmitting(false);
     }
   }
 
@@ -85,10 +105,11 @@ export function AccountsPage({ api: providedApi }: AccountsPageProps) {
       <article className="card panel accounts-domain-panel">
         <AccountToolbar filters={controller.filters} phase={controller.state.phase} onSearchChange={controller.setSearch} onStatusChange={(status) => controller.setFilters((previous) => ({ ...previous, status, page: 1 }))} onConnectionStatusChange={(connectionStatus) => controller.setFilters((previous) => ({ ...previous, connectionStatus, page: 1 }))} onRefresh={controller.reload} onAddAccount={() => openLogin()} />
         {actionError && <div className="accounts-inline-error" role="alert">{actionError}</div>}
-        {controller.state.phase === 'success' && <AccountTable accounts={accounts} activeAccountId={currentAccountId} page={page} total={total} totalPages={totalPages} onPageChange={(nextPage) => controller.setFilters((previous) => ({ ...previous, page: Math.max(1, Math.min(nextPage, totalPages)) }))} onReauthorize={openLogin} onSwitch={switchAccount} onDelete={deleteAccount} />}
+        {controller.state.phase === 'success' && <AccountTable accounts={accounts} activeAccountId={currentAccountId} page={page} total={total} totalPages={totalPages} onPageChange={(nextPage) => controller.setFilters((previous) => ({ ...previous, page: Math.max(1, Math.min(nextPage, totalPages)) }))} onReauthorize={openLogin} onSwitch={switchAccount} onDelete={requestDeleteAccount} />}
         <AccountStateView phase={controller.state.phase} error={controller.state.error} onRetry={controller.reload} />
       </article>
       {loginOpen && <AccountLoginModal api={api} account={loginAccount} initialMethod={loginMethod} onClose={closeLogin} onCompleted={() => { void controller.reload(); void refreshAccounts(); closeLogin(); }} />}
+      {deleteAccountTarget && <AccountDeleteModal account={deleteAccountTarget} submitting={deleteSubmitting} error={deleteError} onClose={closeDeleteAccount} onConfirm={() => { void confirmDeleteAccount(); }} />}
     </section>
   );
 }

@@ -482,3 +482,13 @@
 | S5-R95 | 前端 / 视觉 / 可访问性 | 右列移动卡片定位、Escape/外部点击关闭、动态 aria 文案、固定 1440×900/390×844 截图与构建回归 | root + dashboard_risk_card_audit | PASS（受控环境） | `dashboard.css`；`npm --workspace apps/web run typecheck`；`npm --workspace apps/web run build`；`npm --workspace apps/web run test:e2e:chrome:dashboard`；`docs/evidence/stage5/S4-VS-DASHBOARD/screenshots/` |
 
 本轮结论：铃铛已按最新产品约束嵌入“待人工处理”小卡片，不新增顶部标题栏。目标切片达到 `READY_FOR_REVIEW`；全量 Web 单测仍有一个既有 `AccountContextProvider` 测试夹具失败，未将其误报为本切片通过。
+### 2026-09-22：S4-VS1 登录 / 删除弹窗视觉复核
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R97 | 业务 / 验收 | 登录弹窗是否只保留右上角关闭按钮，删除账号是否改为产品内确认弹窗 | root + visual_compare | PASS | `AccountLoginModal.tsx`、`AccountDeleteModal.tsx`；Chrome/CDP 删除确认链路 |
+| S5-R98 | 前端 / 视觉 | 680×540 登录尺寸、430px 删除尺寸、遮罩、白卡片背景、16px 圆角、阴影和移动端收窄 | root + visual_compare | PASS | `docs/design/account-login-dialog-design.html`；`account-dialog-design-1440x900.png` / `account-dialog-design-390x844.png`；对应实现截图 |
+| S5-R99 | 交互 / 状态 | 二维码区域固定 292px，生成中提示居中，桌面端无内部滚动条，提交中删除按钮禁用 | root + component_tests | PASS | `QrLoginView.test.tsx`、`AccountDeleteModal.test.tsx`、`AccountLoginModal.test.tsx`；`npm --workspace apps/web run test -- --run ...` |
+| S5-R100 | 质量 / 浏览器 | 真实 Vite + API + Chrome/CDP 是否完成登录 → 搜索 → 切换 → 删除 → 退出，并验证生成中/展示后扫码区不跳动 | root | PASS（受控 harness） | `npm --workspace apps/web run test:e2e:chrome`；同一 1440×900 视口下布局偏差 ≤1.5px；`docs/evidence/stage5/S4-VS1/screenshots/` |
+
+本轮结论：账号登录和删除弹窗的视觉 P2 已修复并通过设计稿对比、组件回归和 Chrome/CDP 实拍复验；生成中与二维码展示后共用固定状态行和扫码区几何，消除灰色区域跳动。全量 Web 测试仍有既有 `App.dashboard-mode.test.ts` 失败（`useAccountContext` 缺少 Provider），与本轮账号弹窗改动无关；不因该既有失败扩大本次提交范围。

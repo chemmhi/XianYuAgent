@@ -134,10 +134,43 @@ async function run() {
   qrCreateCount = 0;
   await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "添加闲鱼账号")?.click()');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('扫码登录'), 'login method selector');
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".qr-login-code-loading"))'), 'QR creating state');
+  const creatingQrLayout = await evaluate(cdp, `(() => {
+    const modal = document.querySelector('.account-login-modal')?.getBoundingClientRect();
+    const view = document.querySelector('.qr-login-view')?.getBoundingClientRect();
+    const status = document.querySelector('.qr-login-status-row')?.getBoundingClientRect();
+    const code = document.querySelector('.qr-login-code')?.getBoundingClientRect();
+    if (!modal || !view || !status || !code) return null;
+    return { modal: { width: modal.width, height: modal.height }, view: { top: view.top, height: view.height }, status: { top: status.top, height: status.height, bottom: status.bottom }, code: { top: code.top, height: code.height, bottom: code.bottom } };
+  })()`);
+  await captureViewport(cdp, 1440, 900, 'accounts-login-modal-creating-desktop-1440x900.png');
+  await captureViewport(cdp, 390, 844, 'accounts-login-modal-creating-mobile-390x844.png');
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await waitFor(async () => qrCreateCount >= 1, 'initial QR create request');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".qr-login-code"))'), 'initial QR session rendered');
+  const renderedQrLayout = await evaluate(cdp, `(() => {
+    const modal = document.querySelector('.account-login-modal')?.getBoundingClientRect();
+    const view = document.querySelector('.qr-login-view')?.getBoundingClientRect();
+    const status = document.querySelector('.qr-login-status-row')?.getBoundingClientRect();
+    const code = document.querySelector('.qr-login-code')?.getBoundingClientRect();
+    if (!modal || !view || !status || !code) return null;
+    return { modal: { width: modal.width, height: modal.height }, view: { top: view.top, height: view.height }, status: { top: status.top, height: status.height, bottom: status.bottom }, code: { top: code.top, height: code.height, bottom: code.bottom } };
+  })()`);
+  if (!creatingQrLayout || !renderedQrLayout) throw new Error('QR layout metrics missing');
+  const layoutDelta = Math.max(
+    Math.abs(creatingQrLayout.modal.width - renderedQrLayout.modal.width),
+    Math.abs(creatingQrLayout.modal.height - renderedQrLayout.modal.height),
+    Math.abs(creatingQrLayout.code.top - renderedQrLayout.code.top),
+    Math.abs(creatingQrLayout.code.height - renderedQrLayout.code.height),
+    Math.abs(creatingQrLayout.code.bottom - renderedQrLayout.code.bottom),
+  );
+  if (layoutDelta > 1.5) throw new Error(`QR layout shifted between creating and rendered states: ${JSON.stringify({ creatingQrLayout, renderedQrLayout, layoutDelta })}`);
   await new Promise((resolve) => setTimeout(resolve, 500));
   if (qrCreateCount !== 1) throw new Error(`initial QR open issued ${qrCreateCount} create requests`);
+  await captureViewport(cdp, 1440, 900, 'accounts-login-modal-desktop-1440x900.png');
+  await captureViewport(cdp, 390, 844, 'accounts-login-modal-mobile-390x844.png');
+  await cdp.send('Emulation.clearDeviceMetricsOverride');
   const hasLegacyForm = await evaluate(cdp, 'Boolean(document.querySelector(".create-account-form"))');
   if (hasLegacyForm) throw new Error('legacy create-account modal is still mounted');
   const hasFakeQr = await evaluate(cdp, 'document.body.innerText.includes("模拟二维码") || Array.from(document.images).some((image) => image.src.startsWith("data:image/svg+xml"))');
@@ -205,7 +238,6 @@ async function run() {
   await captureViewport(cdp, 390, 844, 'accounts-mobile-390x844.png');
   await cdp.send('Emulation.clearDeviceMetricsOverride');
 
-  await evaluate(cdp, 'window.confirm = () => true;');
   const deletedViaUi = await evaluate(cdp, `(() => {
     const row = Array.from(document.querySelectorAll('[role="row"]')).find((candidate) => candidate.textContent?.includes(${JSON.stringify(secondaryAccount.displayName)}));
     const button = row?.querySelector('[data-testid="account-delete"]');
@@ -214,6 +246,12 @@ async function run() {
     return true;
   })()`);
   if (!deletedViaUi) throw new Error('account delete action did not trigger');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[role=\\"dialog\\"] [data-testid=\\"account-delete-confirm\\"]"))'), 'account delete confirmation modal');
+  await captureViewport(cdp, 1440, 900, 'accounts-delete-modal-desktop-1440x900.png');
+  await captureViewport(cdp, 390, 844, 'accounts-delete-modal-mobile-390x844.png');
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  const confirmedDelete = await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=\\"account-delete-confirm\\"]"); if (!button) return false; button.click(); return true; })()');
+  if (!confirmedDelete) throw new Error('account delete confirmation did not trigger');
   await waitFor(async () => !(await evaluate(cdp, `document.body.innerText.includes(${JSON.stringify(secondaryAccount.displayName)})`)), 'account delete result');
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   const accountMenuOpened = await evaluate(cdp, `(() => {
