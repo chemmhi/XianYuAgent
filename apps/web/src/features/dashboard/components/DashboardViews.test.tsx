@@ -50,11 +50,17 @@ describe('dashboard views', () => {
 
   it('renders the independent mobile composition', () => {
     const html = renderToStaticMarkup(createElement(DashboardMobileContent, { state, onOpenTodo: vi.fn() }));
-    expect(html).toContain('Agent 在线 · 闲鱼账号 A');
+    expect(html).toContain('Agent 在线 · 当前账号');
     expect(html).toContain('补交付凭证');
     expect(html).toContain('今天优先处理');
     expect(html).toContain('经营快照');
     expect(html).toContain('data-dashboard-surface="mobile"');
+  });
+
+  it('renders the selected account label instead of a hard-coded account name', () => {
+    const html = renderToStaticMarkup(createElement(DashboardMobileContent, { state, accountLabel: '小店账号 B', onOpenTodo: vi.fn() }));
+    expect(html).toContain('Agent 在线 · 小店账号 B');
+    expect(html).not.toContain('闲鱼账号 A');
   });
 
   it('renders custom trend date inputs when the custom range is selected', () => {

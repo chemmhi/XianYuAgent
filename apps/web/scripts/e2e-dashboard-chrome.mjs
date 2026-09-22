@@ -42,6 +42,8 @@ async function waitFor(check, label, timeoutMs = 20000) {
 
 function cookiesFrom(response) { return (response.headers.getSetCookie?.() ?? []).map((value) => value.split(';', 1)[0]).join('; '); }
 
+function csrfFrom(cookie) { return decodeURIComponent(cookie.match(/(?:^|; )csrf_token=([^;]+)/)?.[1] ?? ''); }
+
 async function createCdpClient(debugPort) {
   const target = await waitFor(async () => {
     const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`);
@@ -103,6 +105,16 @@ async function run() {
   const bootstrap = await fetch(`${apiUrl}/api/v1/auth/bootstrap`, { method: 'POST', headers: { 'content-type': 'application/json', 'Idempotency-Key': `dashboard-bootstrap-${process.pid}` }, body: JSON.stringify({ email: 'dashboard-e2e@example.com', password: 'password-123', displayName: 'Dashboard E2E' }) });
   if (!bootstrap.ok) throw new Error(`bootstrap failed: ${bootstrap.status}`);
   const cookie = cookiesFrom(bootstrap);
+  const csrf = csrfFrom(cookie);
+  const accountResponse = await fetch(`${apiUrl}/api/v1/accounts`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie, 'x-csrf-token': csrf, 'Idempotency-Key': `dashboard-account-${process.pid}` },
+    body: JSON.stringify({ platform: 'xianyu', sellerRef: `dashboard-e2e-${process.pid}`, displayName: '仪表盘账号 A' }),
+  });
+  if (!accountResponse.ok) throw new Error(`account seed failed: ${accountResponse.status} ${await accountResponse.text()}`);
+  const accountPayload = await accountResponse.json();
+  const accountId = accountPayload?.data?.id;
+  if (!accountId) throw new Error('dashboard account seed did not return an id');
   spawnProcess(npm, npmArgs(['--workspace', 'apps/web', 'run', 'dev', '--', '--host', '127.0.0.1', '--port', String(webPort)]), { env: { ...process.env, VITE_API_MODE: 'live', VITE_DASHBOARD_MODE: 'mock', VITE_API_BASE_URL: '', VITE_API_PROXY_TARGET: apiUrl } });
   await waitFor(async () => (await fetch(`${webUrl}/dashboard`)).ok, 'Vite frontend');
   const chrome = spawnProcess(chromePath, ['--headless=new', '--disable-gpu', '--disable-extensions', '--no-first-run', '--no-default-browser-check', '--remote-allow-origins=*', `--remote-debugging-port=${debugPort}`, `--user-data-dir=${chromeProfile}`, '--window-size=1440,900', 'about:blank']);
@@ -112,6 +124,9 @@ async function run() {
   await cdp.send('Runtime.enable');
   await cdp.send('Network.enable');
   for (const pair of cookie.split('; ')) { const [name, ...valueParts] = pair.split('='); await cdp.send('Network.setCookie', { name, value: valueParts.join('='), url: `${webUrl}/` }); }
+  await cdp.send('Page.navigate', { url: `${webUrl}/` });
+  await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'frontend shell before account context seed');
+  await evaluate(cdp, `localStorage.setItem('xianyu.activeAccountId', ${JSON.stringify(accountId)})`);
   await cdp.send('Page.navigate', { url: `${webUrl}/dashboard` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'dashboard page');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('订单与 AI 闭环趋势'), 'dashboard content');
@@ -148,7 +163,7 @@ async function run() {
   await captureViewport(cdp, 1440, 900, 'dashboard-desktop-1440x900.png');
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
   await waitFor(async () => String(await evaluate(cdp, 'getComputedStyle(document.querySelector(".dashboard-mobile-content")).display')) !== 'none', 'mobile dashboard content');
-  await assertText(cdp, 'Agent 在线 · 闲鱼账号 A');
+  await assertText(cdp, 'Agent 在线 · 仪表盘账号 A');
   await assertText(cdp, '今天优先处理');
   await assertText(cdp, '经营快照');
   await captureViewport(cdp, 390, 844, 'dashboard-mobile-390x844.png');

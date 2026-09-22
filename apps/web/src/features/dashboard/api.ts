@@ -28,6 +28,7 @@ export interface DashboardApi {
 function toQueryString(query?: DashboardQuery): string {
   if (!query) return '';
   const params = new URLSearchParams({ range: query.range });
+  if (query.accountId) params.set('accountId', query.accountId);
   if (query.range === 'custom' && query.from) params.set('from', query.from);
   if (query.range === 'custom' && query.to) params.set('to', query.to);
   return `?${params.toString()}`;

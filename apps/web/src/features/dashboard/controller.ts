@@ -20,31 +20,52 @@ export interface DashboardController {
   reload: () => Promise<void>;
 }
 
-export function useDashboardController(options: { api?: DashboardApi } = {}): DashboardController {
+/** Do not expose a prior account's snapshot while a new account is loading. */
+export function getVisibleDashboardState(state: DashboardState, loadedAccountId: string | undefined, accountId: string | undefined): DashboardState {
+  if (loadedAccountId === accountId) return state;
+  return { phase: accountId ? 'loading' : 'idle', data: null, error: null, refreshing: false };
+}
+
+export function useDashboardController(options: { api?: DashboardApi; accountId?: string } = {}): DashboardController {
   const dashboardApi = options.api ?? defaultMockDashboardApi;
+  const accountId = options.accountId?.trim() || undefined;
   const [state, setState] = useState<DashboardState>({ phase: 'idle', data: null, error: null, refreshing: false });
+  const [loadedAccountId, setLoadedAccountId] = useState<string | undefined>(accountId);
+  const loadedAccountIdRef = useRef(loadedAccountId);
   const [query, setQueryState] = useState<DashboardQuery>({ range: '1m' });
   const requestId = useRef(0);
 
+  const markLoadedAccount = useCallback((nextAccountId: string | undefined) => {
+    loadedAccountIdRef.current = nextAccountId;
+    setLoadedAccountId(nextAccountId);
+  }, []);
+
   const reload = useCallback(async () => {
     const currentRequest = ++requestId.current;
-    setState((previous) => ({ ...previous, phase: previous.data ? previous.phase : 'loading', error: null, refreshing: Boolean(previous.data) }));
+    if (!accountId) {
+      markLoadedAccount(undefined);
+      setState({ phase: 'idle', data: null, error: null, refreshing: false });
+      return;
+    }
+    setState((previous) => ({ phase: 'loading', data: previous.data && loadedAccountIdRef.current === accountId ? previous.data : null, error: null, refreshing: Boolean(previous.data && loadedAccountIdRef.current === accountId) }));
     try {
-      const snapshot = await dashboardApi.getSnapshot(query);
+      const snapshot = await dashboardApi.getSnapshot({ ...query, accountId });
       if (currentRequest !== requestId.current) return;
       const data = toDashboardVM(snapshot);
+      markLoadedAccount(accountId);
       setState({ phase: data.kpis.every((item) => item.value === '0' || item.value === '¥0') ? 'empty' : 'success', data, error: null, refreshing: false });
     } catch (error) {
       if (currentRequest !== requestId.current) return;
       const loadError = toLoadError(error);
+      markLoadedAccount(accountId);
       setState((previous) => ({ phase: loadError.code === 'FORBIDDEN' ? 'forbidden' : loadError.code === 'TIMEOUT' ? 'timeout' : 'error', data: previous.data, error: loadError, refreshing: false }));
     }
-  }, [dashboardApi, query]);
+  }, [accountId, dashboardApi, markLoadedAccount, query]);
 
   const setQuery = useCallback((nextQuery: DashboardQuery) => {
     setQueryState(nextQuery);
   }, []);
 
   useEffect(() => { void reload(); }, [reload]);
-  return { state, query, setQuery, reload };
+  return { state: getVisibleDashboardState(state, loadedAccountId, accountId), query, setQuery, reload };
 }

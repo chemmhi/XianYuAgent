@@ -379,6 +379,7 @@ export interface AccountRecord {
 }
 
 export interface AccountListQuery {
+  accountId?: string;
   search?: string;
   status?: AccountStatus;
   connectionStatus?: 'online' | 'offline' | 'connecting' | 'expired' | 'unknown';

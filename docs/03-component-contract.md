@@ -324,7 +324,7 @@ type BusinessLinkVM = {
 | --- | --- | --- | --- | --- |
 | `/login` | `LoginPage` | `GET /api/v1/auth/session` | `POST /api/v1/auth/login`、`POST /api/v1/auth/password-login` | Session、账号上下文 |
 | `/first-run` | `FirstRunPage` | `GET /api/v1/auth/session`（读取 `bootstrapRequired`） | `POST /api/v1/auth/bootstrap` | Session、Profile、Bootstrap status |
-| `/dashboard` | `DashboardPage` | `GET /api/v1/dashboard/snapshot`、`GET /api/v1/dashboard/order-trend` | 无业务写命令 | dashboard query |
+| `/dashboard` | `DashboardPage` | `GET /api/v1/dashboard/snapshot?accountId=...`、`GET /api/v1/dashboard/order-trend` | 无业务写命令 | dashboard query；账号加载中、失败或未选择时禁止请求 snapshot |
 | `/workspace` | `WorkspacePage` | Agent sessions、Run、Confirmation、`WS /api/v1/workspace/runs/{id}/events` | session create/switch/archive、run start/confirm/cancel/retry | 当前 session、run、受影响订单/商品/卡券 |
 | `/accounts` | `AccountsPage` | accounts、connection、login-session、QR login-session、scopes | account create/update/refresh、QR session create/poll、login-session cancel/renew/reauthorize/cleanup、scope patch | account context、相关 domain queries |
 | `/messages` | `MessagesPage` | conversations、messages、`WS /api/v1/conversations/{id}/events` | send text/image、recall、handoff、release | conversation、order link、unread count、handoff risk todo |
@@ -414,7 +414,7 @@ type ConversationHandlingOutput = {
 | `useAuthController` | `POST /api/v1/auth/sessions/{id}/revoke` | 空 → `MutationViewModel` | admin only；Idempotency-Key | 失效 `['auth','global','sessions']` | `NOT_FOUND` 视为已撤销并刷新 |
 | `useAuthController` | `POST /api/v1/auth/sessions/revoke-all` | `{exceptCurrent?: boolean}` → `MutationViewModel` | admin only；Idempotency-Key | 失效所有 `['auth','global','sessions']` | 不自动重放；按服务端结果提示 |
 | `useAuthController` | `POST /api/v1/auth/bootstrap` | `BootstrapAdminInput` → `BootstrapAdminOutput` | bootstrap capability；专用 Idempotency-Key | 写入 auth/session、profile、account context | 已完成 bootstrap 返回 `CONFLICT` 并跳 `/login` |
-| `useDashboardController` | `GET /api/v1/dashboard/snapshot` | `DashboardFilters` → `DashboardSnapshotVM` | account scope；只读 | `['dashboard',accountId,'snapshot',filters]` | 空数据走 EmptyState；网络错误可刷新 |
+| `useDashboardController` | `GET /api/v1/dashboard/snapshot?accountId=...` | `DashboardFilters` → `DashboardSnapshotVM` | account scope；只读；`accountId` 必填 | `['dashboard',accountId,'snapshot',filters]` | 空数据走 EmptyState；网络错误可刷新；切换账号先清空旧快照 |
 | `useDashboardController` | `GET /api/v1/dashboard/order-trend` | `TrendFilters` → `DashboardTrendVM` | account scope；只读 | `['dashboard',accountId,'trend',filters]` | 同上 |
 | `useWorkspaceController` | `GET /api/v1/workspace/agent-sessions` | `SessionListFilters` → `WorkspaceSessionVM[]` | admin + account scope；只读 | `['workspace',accountId,'sessions',filters]` | 只读重试；禁止跨账号回退 |
 | `useWorkspaceController` | `POST /api/v1/workspace/agent-sessions` | `CreateSessionRequest` → `WorkspaceSessionVM` | admin + account scope；Idempotency-Key | 失效 workspace sessions | `IDEMPOTENCY_IN_PROGRESS` 轮询同 key |

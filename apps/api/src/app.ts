@@ -413,6 +413,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   }
 
   if (ctx.path === '/api/v1/dashboard/snapshot' && ctx.method === 'GET') {
+    const accountId = optionalString(ctx.query.accountId);
     const range = optionalString(ctx.query.range);
     const from = optionalString(ctx.query.from);
     const to = optionalString(ctx.query.to);
@@ -424,7 +425,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
       if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) throw new ServiceError(422, 'VALIDATION_FAILED', 'dashboard from/to must be valid and ordered');
       if (toMs - fromMs > 366 * 24 * 60 * 60 * 1000) throw new ServiceError(422, 'VALIDATION_FAILED', 'dashboard date range cannot exceed 366 days');
     }
-    return { statusCode: 200, body: success(ctx, await dashboard.getSnapshot(authContext.admin.id, new Date(), { range: range as DashboardRange | undefined, from, to })).body };
+    return { statusCode: 200, body: success(ctx, await dashboard.getSnapshot(authContext.admin.id, new Date(), { accountId, range: range as DashboardRange | undefined, from, to })).body };
   }
 
   if (ctx.path === '/api/v1/auto-reply/activity/summary' && ctx.method === 'GET') {

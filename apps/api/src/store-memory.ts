@@ -96,6 +96,7 @@ export class MemoryStore implements Store {
     const search = query.search?.trim().toLowerCase();
     const connectionStatus = (status: AccountRecord['status']): AccountListQuery['connectionStatus'] => status === 'connected' ? 'online' : status === 'pending' ? 'connecting' : status === 'expired' ? 'expired' : status === 'degraded' ? 'unknown' : 'offline';
     const filtered = [...this.accounts.values()].filter((account) => ids.has(account.id) && account.status !== 'disabled')
+      .filter((account) => !query.accountId || account.id === query.accountId)
       .filter((account) => !search || [account.id, account.sellerRef, account.displayName ?? '', account.remark ?? ''].some((value) => value.toLowerCase().includes(search)))
       .filter((account) => !query.status || account.status === query.status)
       .filter((account) => !query.connectionStatus || connectionStatus(account.status) === query.connectionStatus);

@@ -6,6 +6,7 @@ import type {
   ProductRecord,
   Store,
 } from './domain.js';
+import { ServiceError } from './services.js';
 
 export interface DashboardTrendPoint {
   label: string;
@@ -16,6 +17,7 @@ export interface DashboardTrendPoint {
 export type DashboardRange = 'today' | '3d' | '7d' | '1m' | 'custom';
 
 export interface DashboardQuery {
+  accountId?: string;
   range?: DashboardRange;
   from?: string;
   to?: string;
@@ -54,12 +56,15 @@ export class DashboardService {
   async getSnapshot(adminId: string, nowOrQuery: Date | DashboardQuery = new Date(), query: DashboardQuery = {}): Promise<DashboardSnapshot> {
     const now = nowOrQuery instanceof Date ? nowOrQuery : new Date();
     const resolvedQuery = nowOrQuery instanceof Date ? query : nowOrQuery;
+    const accountId = resolvedQuery.accountId?.trim();
+    if (!accountId) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required for dashboard snapshot');
+    if (!(await this.store.hasAccountScope(adminId, accountId))) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
     const [accountsResult, productsResult, ordersResult, couponsResult, conversationsResult] = await Promise.all([
-      this.store.listAccounts(adminId, { page: 1, pageSize: DASHBOARD_PAGE_SIZE }),
-      this.store.listProducts(adminId, { page: 1, pageSize: DASHBOARD_PAGE_SIZE, sortBy: 'updatedAt', sortOrder: 'desc' }),
-      this.store.listOrders(adminId, { page: 1, pageSize: DASHBOARD_PAGE_SIZE, sortBy: 'createdAt', sortOrder: 'desc' }),
-      this.store.listCouponBatches(adminId, { page: 1, pageSize: DASHBOARD_PAGE_SIZE }),
-      this.store.listConversations(adminId, { limit: DASHBOARD_PAGE_SIZE }),
+      this.store.listAccounts(adminId, { accountId, page: 1, pageSize: DASHBOARD_PAGE_SIZE }),
+      this.store.listProducts(adminId, { accountId, page: 1, pageSize: DASHBOARD_PAGE_SIZE, sortBy: 'updatedAt', sortOrder: 'desc' }),
+      this.store.listOrders(adminId, { accountId, page: 1, pageSize: DASHBOARD_PAGE_SIZE, sortBy: 'createdAt', sortOrder: 'desc' }),
+      this.store.listCouponBatches(adminId, { accountId, page: 1, pageSize: DASHBOARD_PAGE_SIZE }),
+      this.store.listConversations(adminId, { accountId, limit: DASHBOARD_PAGE_SIZE }),
     ]);
 
     const accounts = accountsResult.items;

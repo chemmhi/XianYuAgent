@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useAccountContext } from '../../../app/account-context';
 import type { PageKey } from '../../../app/navigation';
 import type { DashboardApi } from '../api';
 import { useDashboardController } from '../controller';
@@ -6,8 +7,20 @@ import { DashboardDesktopContent, DashboardMobileContent, Icon } from './Dashboa
 import './dashboard.css';
 
 export function DashboardPage({ api, onNavigate }: { api?: DashboardApi; apiMode: 'live' | 'mock'; onNavigate: (page: PageKey) => void }) {
-  const controller = useDashboardController({ api });
+  const { currentAccountId, currentAccount, accountsLoading, accountsError, refreshAccounts } = useAccountContext();
+  const controller = useDashboardController({ api, accountId: accountsLoading || Boolean(accountsError) ? undefined : currentAccountId });
   const [riskDrawer, setRiskDrawer] = useState<string | null>(null);
+
+  const accountContextMissing = !accountsLoading && !accountsError && !currentAccountId;
+  const viewState = accountsLoading
+    ? { phase: 'loading' as const, data: null, error: null, refreshing: false }
+    : accountsError
+      ? { phase: 'error' as const, data: null, error: { code: 'UNKNOWN' as const, message: '账号上下文加载失败，请重试。', retryable: true }, refreshing: false }
+      : accountContextMissing
+        ? { phase: 'empty' as const, data: null, error: { code: 'ACCOUNT_CONTEXT_REQUIRED' as const, message: '请先在账号管理中选择当前账号。', retryable: false }, refreshing: false }
+        : controller.state;
+  const refresh = accountsError ? () => void refreshAccounts() : accountContextMissing ? () => onNavigate('accounts') : controller.reload;
+  const accountLabel = currentAccount?.displayName || currentAccount?.sellerRef || '当前账号';
 
   function openTodo(target: string) {
     const todo = controller.state.data?.riskTodos.find((item) => item.id === target);
@@ -20,11 +33,11 @@ export function DashboardPage({ api, onNavigate }: { api?: DashboardApi; apiMode
 
   const activeTodo = controller.state.data?.riskTodos.find((item) => item.id === riskDrawer);
   return <div className="dashboard-experience">
-    <div className="dashboard-desktop-content"><DashboardDesktopContent state={controller.state} query={controller.query} onOpenTodo={openTodo} onRefresh={controller.reload} onTrendQueryChange={controller.setQuery}/></div>
+    <div className="dashboard-desktop-content"><DashboardDesktopContent state={viewState} query={controller.query} onOpenTodo={openTodo} onRefresh={refresh} onTrendQueryChange={controller.setQuery}/></div>
     <div className="dashboard-mobile-content">
       <div className="dashboard-mobile-status"><span>9:41</span><span>5G 100%</span></div>
-      <header className="dashboard-mobile-head"><div><strong>今日总览</strong></div><div className="dashboard-mobile-head-actions"><button type="button" className="dashboard-mobile-account-chip" onClick={() => onNavigate('accounts')}>账号 A</button><button type="button" className="dashboard-icon-button" aria-label="通知" onClick={() => openTodo('todo_001')}><Icon name="bell"/><b>3</b></button></div></header>
-      <main className="dashboard-mobile-main"><DashboardMobileContent state={controller.state} onOpenTodo={openTodo}/></main>
+      <header className="dashboard-mobile-head"><div><strong>今日总览</strong></div><div className="dashboard-mobile-head-actions"><button type="button" className="dashboard-mobile-account-chip" onClick={() => onNavigate('accounts')}>{accountLabel}</button><button type="button" className="dashboard-icon-button" aria-label="通知" onClick={() => openTodo('todo_001')}><Icon name="bell"/><b>3</b></button></div></header>
+      <main className="dashboard-mobile-main"><DashboardMobileContent state={viewState} accountLabel={accountLabel} onOpenTodo={openTodo} onRefresh={refresh}/></main>
     </div>
     {activeTodo ? <aside className="dashboard-risk-drawer" role="dialog" aria-modal="true" aria-label="风险待办详情"><div className="dashboard-risk-drawer-card"><div className="dashboard-risk-drawer-head"><div><p className="dashboard-eyebrow">Risk Todo</p><h2>{activeTodo.title}</h2></div><button type="button" className="dashboard-icon-button" aria-label="关闭" onClick={() => setRiskDrawer(null)}>×</button></div><p>{activeTodo.detail}</p><div className="dashboard-risk-drawer-meta"><span>严重级别</span><strong className={`tone-${activeTodo.tone}`}>{activeTodo.severity}</strong></div><div className="dashboard-risk-drawer-actions"><button type="button" className="dashboard-btn dashboard-btn-ghost" onClick={() => setRiskDrawer(null)}>稍后处理</button><button type="button" className="dashboard-btn dashboard-btn-primary" onClick={() => { setRiskDrawer(null); onNavigate(activeTodo.href.slice(1) as PageKey); }}>去处理</button></div></div></aside> : null}
   </div>;

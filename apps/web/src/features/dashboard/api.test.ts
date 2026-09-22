@@ -21,10 +21,12 @@ describe('dashboard api query contract', () => {
 
     await api.getSnapshot({ range: '3d' });
     await api.getSnapshot({ range: 'custom', from: '2026-09-01', to: '2026-09-15' });
+    await api.getSnapshot({ range: '7d', accountId: 'account-a' });
 
     expect(paths).toEqual([
       '/api/v1/dashboard/snapshot?range=3d',
       '/api/v1/dashboard/snapshot?range=custom&from=2026-09-01&to=2026-09-15',
+      '/api/v1/dashboard/snapshot?range=7d&accountId=account-a',
     ]);
   });
 });

@@ -8,6 +8,7 @@ export interface DashboardQuery {
   range: DashboardRange;
   from?: string;
   to?: string;
+  accountId?: string;
 }
 
 export interface DashboardKpiVM {
@@ -64,7 +65,7 @@ export interface DashboardVM {
 export type DashboardLoadPhase = 'idle' | 'loading' | 'success' | 'empty' | 'error' | 'forbidden' | 'timeout';
 
 export interface DashboardLoadError {
-  code: 'NETWORK_ERROR' | 'FORBIDDEN' | 'TIMEOUT' | 'UNKNOWN';
+  code: 'NETWORK_ERROR' | 'FORBIDDEN' | 'TIMEOUT' | 'UNKNOWN' | 'ACCOUNT_CONTEXT_REQUIRED';
   message: string;
   retryable: boolean;
 }

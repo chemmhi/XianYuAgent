@@ -10,6 +10,7 @@ const runtimeConfig = { host: '127.0.0.1', port: 0, databaseUrl, redisUrl: undef
 let runtime;
 let adminId;
 let accountId;
+let otherAccountId;
 let productId;
 let couponBatchId;
 
@@ -32,6 +33,9 @@ async function seed(store) {
   const account = await store.createAccount({ adminId, platform: 'xianyu', sellerRef: `dashboard-pg-${suffix}`, displayName: 'Dashboard PostgreSQL 账号' });
   accountId = account.id;
   await store.updateAccount(adminId, accountId, { status: 'connected' });
+  const otherAccount = await store.createAccount({ adminId, platform: 'xianyu', sellerRef: `dashboard-pg-other-${suffix}`, displayName: 'Dashboard PostgreSQL 第二账号' });
+  otherAccountId = otherAccount.id;
+  await store.updateAccount(adminId, otherAccountId, { status: 'connected' });
   const product = await store.createProduct({ adminId, accountId, title: 'Dashboard PostgreSQL 商品', status: 'published' });
   productId = product.id;
   const batch = await store.createCouponBatch({ adminId, accountId, label: 'Dashboard PostgreSQL 库存', purpose: 'data', deliveryScope: 'buyer_deliverable' });
@@ -45,6 +49,10 @@ async function seed(store) {
     orderNo: `DASH-PG-${suffix}-PENDING`, accountId, buyerId: 'pg-buyer-2', buyerName: 'PG 买家二', itemId: 'pg-item', itemTitle: product.title,
     productId, amountMinor: 5_000, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'coupon_only', createdAt: now.toISOString(), updatedAt: now.toISOString(),
   } });
+  await store.createOrder({ adminId, order: {
+    orderNo: `DASH-PG-${suffix}-OTHER-ACCOUNT`, accountId: otherAccountId, buyerId: 'pg-buyer-other', buyerName: 'PG 第二账号买家', itemId: 'pg-other-item', itemTitle: '不应跨账号出现',
+    amountMinor: 99_900, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'delivered', afterSalesStatus: 'none', deliveryType: 'manual', createdAt: now.toISOString(), updatedAt: now.toISOString(),
+  } });
   await store.upsertExternalConversation({ adminId, accountId, externalConversationRef: `dashboard-pg-conversation-${suffix}`, buyerRef: 'pg-buyer-2', buyerDisplayName: 'PG 买家二', unreadCount: 2, lastMessagePreview: '请尽快发货', lastMessageAt: now.toISOString() });
 }
 
@@ -52,21 +60,21 @@ async function cleanup(store) {
   const pool = store.pool;
   await pool.query('begin');
   try {
-    if (accountId) {
-      await pool.query('delete from messages.events where account_id=$1', [accountId]);
-      await pool.query('delete from messages.messages where account_id=$1', [accountId]);
-      await pool.query('delete from messages.conversations where account_id=$1', [accountId]);
-      await pool.query('delete from orders.orders where account_id=$1', [accountId]);
-      await pool.query('delete from coupons.coupon_items where batch_id in (select id from coupons.coupon_batches where account_id=$1)', [accountId]);
-      await pool.query('delete from coupons.coupon_bindings where coupon_batch_id in (select id from coupons.coupon_batches where account_id=$1)', [accountId]);
-      await pool.query('delete from coupons.coupon_batches where account_id=$1', [accountId]);
-      await pool.query('delete from products.asset_refs where product_id in (select id from products.products where account_id=$1)', [accountId]);
-      await pool.query('delete from products.product_skus where product_id in (select id from products.products where account_id=$1)', [accountId]);
-      await pool.query('delete from products.products where account_id=$1', [accountId]);
-      await pool.query('delete from observability.audit_events where account_id=$1', [accountId]);
-      await pool.query('delete from auth.account_credentials where account_id=$1', [accountId]);
-      await pool.query('delete from auth.account_scopes where account_id=$1', [accountId]);
-      await pool.query('delete from accounts.accounts where id=$1', [accountId]);
+    for (const scopedAccountId of [accountId, otherAccountId].filter(Boolean)) {
+      await pool.query('delete from messages.events where account_id=$1', [scopedAccountId]);
+      await pool.query('delete from messages.messages where account_id=$1', [scopedAccountId]);
+      await pool.query('delete from messages.conversations where account_id=$1', [scopedAccountId]);
+      await pool.query('delete from orders.orders where account_id=$1', [scopedAccountId]);
+      await pool.query('delete from coupons.coupon_items where batch_id in (select id from coupons.coupon_batches where account_id=$1)', [scopedAccountId]);
+      await pool.query('delete from coupons.coupon_bindings where coupon_batch_id in (select id from coupons.coupon_batches where account_id=$1)', [scopedAccountId]);
+      await pool.query('delete from coupons.coupon_batches where account_id=$1', [scopedAccountId]);
+      await pool.query('delete from products.asset_refs where product_id in (select id from products.products where account_id=$1)', [scopedAccountId]);
+      await pool.query('delete from products.product_skus where product_id in (select id from products.products where account_id=$1)', [scopedAccountId]);
+      await pool.query('delete from products.products where account_id=$1', [scopedAccountId]);
+      await pool.query('delete from observability.audit_events where account_id=$1', [scopedAccountId]);
+      await pool.query('delete from auth.account_credentials where account_id=$1', [scopedAccountId]);
+      await pool.query('delete from auth.account_scopes where account_id=$1', [scopedAccountId]);
+      await pool.query('delete from accounts.accounts where id=$1', [scopedAccountId]);
     }
     if (adminId) {
       await pool.query('delete from auth.sessions where admin_id=$1', [adminId]);
@@ -96,7 +104,10 @@ try {
   const unauthenticated = await request(port, '/api/v1/dashboard/snapshot');
   assert.equal(unauthenticated.response.status, 401);
 
-  const snapshot = await request(port, '/api/v1/dashboard/snapshot', { headers: { cookie } });
+  const missingAccount = await request(port, '/api/v1/dashboard/snapshot', { headers: { cookie } });
+  assert.equal(missingAccount.response.status, 422);
+
+  const snapshot = await request(port, `/api/v1/dashboard/snapshot?accountId=${encodeURIComponent(accountId)}`, { headers: { cookie } });
   assert.equal(snapshot.response.status, 200);
   assert.equal(snapshot.body.data.totalSales, 179);
   assert.equal(snapshot.body.data.todayOrderAmount, 179);
@@ -106,12 +117,13 @@ try {
   assert.equal(snapshot.body.data.productRank[0].title, 'Dashboard PostgreSQL 商品');
   assert.ok(snapshot.body.data.recentActivity.some((item) => item.text.includes('PENDING')));
   assert.ok(snapshot.body.data.riskTodos.some((item) => item.id.startsWith('order-')));
+  assert.ok(!JSON.stringify(snapshot.body.data).includes('OTHER-ACCOUNT'));
 
-  const todayTrend = await request(port, '/api/v1/dashboard/snapshot?range=today', { headers: { cookie } });
+  const todayTrend = await request(port, `/api/v1/dashboard/snapshot?accountId=${encodeURIComponent(accountId)}&range=today`, { headers: { cookie } });
   assert.equal(todayTrend.response.status, 200);
   assert.equal(todayTrend.body.data.trend.length, 24);
 
-  const invalidRange = await request(port, '/api/v1/dashboard/snapshot?range=invalid', { headers: { cookie } });
+  const invalidRange = await request(port, `/api/v1/dashboard/snapshot?accountId=${encodeURIComponent(accountId)}&range=invalid`, { headers: { cookie } });
   assert.equal(invalidRange.response.status, 422);
 
   await runtime.close();
@@ -119,7 +131,7 @@ try {
   await runtime.listen();
   const restartedPort = runtime.server.address().port;
   const restartedLogin = await runtime.auth.login({ email, password: 'password-123' });
-  const reread = await request(restartedPort, '/api/v1/dashboard/snapshot', { headers: { cookie: cookieHeader(restartedLogin) } });
+  const reread = await request(restartedPort, `/api/v1/dashboard/snapshot?accountId=${encodeURIComponent(accountId)}`, { headers: { cookie: cookieHeader(restartedLogin) } });
   assert.equal(reread.response.status, 200);
   assert.equal(reread.body.data.totalSales, 179);
   assert.equal(reread.body.data.todayOrderAmount, 179);

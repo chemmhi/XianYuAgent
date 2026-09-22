@@ -45,6 +45,7 @@ export class PostgresStore implements Store {
     const conditions = ["EXISTS (SELECT 1 FROM auth.account_scopes scope WHERE scope.account_id=a.id AND scope.admin_id=$1 AND scope.status='active' AND (scope.expires_at IS NULL OR scope.expires_at>now()))", "a.status <> 'disabled'"];
     const addParam = (value: unknown) => { params.push(value); return `$${params.length}`; };
     const search = query.search?.trim();
+    if (query.accountId) conditions.push(`a.id = ${addParam(query.accountId)}`);
     if (search) { const param = addParam(`%${search}%`); conditions.push(`(a.id ILIKE ${param} OR a.seller_ref ILIKE ${param} OR a.display_name ILIKE ${param} OR a.remark ILIKE ${param})`); }
     if (query.status) conditions.push(`a.status = ${addParam(query.status)}`);
     if (query.connectionStatus) {
