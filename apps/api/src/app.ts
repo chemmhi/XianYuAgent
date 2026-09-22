@@ -29,6 +29,8 @@ import { AutoReplyActivityService } from './auto-reply-activity.js';
 import { MemoryObjectStorage, S3CompatibleObjectStorage, type ObjectStorage } from './object-storage.js';
 import { XianyuItemDetailService } from './xianyu-item-detail-service.js';
 import { ProductAutomationService } from './product-automation.js';
+import { AutomationWorkflowService } from './product-automation.js';
+import { NotConfiguredAutomationExecutionAdapter, ProductAutomationTrigger, ProductAutomationWorker } from './product-automation-trigger.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -39,6 +41,8 @@ export interface AppRuntime {
   orders: OrderService;
   products: ProductService;
   productAutomation: ProductAutomationService;
+  productAutomationTrigger: ProductAutomationTrigger;
+  productAutomationWorker: ProductAutomationWorker;
   productSync: ProductSyncService;
   credentials: CredentialService;
   apiKeyCredentials: ApiKeyCredentialService;
@@ -90,6 +94,14 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   });
+  const productAutomationExecution = new NotConfiguredAutomationExecutionAdapter();
+  const productAutomationWorkflow = new AutomationWorkflowService(productAutomationExecution);
+  const productAutomationTrigger = new ProductAutomationTrigger(store, productAutomation, productAutomationWorkflow, productAutomationExecution, async (input) => {
+    const auditId = createId();
+    await store.recordAudit({ id: auditId, actorType: 'system', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
+    return auditId;
+  });
+  const productAutomationWorker = new ProductAutomationWorker(store, productAutomationTrigger);
   const credentials = new CredentialService(store, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
@@ -251,8 +263,8 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
-  });
-  xianyuIm = new XianyuImService(store, xianyu, messages, autoReply);
+  }, async (input) => productAutomationWorker.processOrderRefresh(input));
+  xianyuIm = new XianyuImService(store, xianyu, messages, autoReply, productAutomationTrigger);
 
   const wsServer = new WebSocketServer({ noServer: true });
   const workspaceRuntime: WorkspaceRuntime = config.agentRuntime === 'pi'
@@ -266,7 +278,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, orders, products, productAutomation, productSync, credentials, apiKeyCredentials, openaiSettings, dashboard, messages, autoReply, autoReplyAgentSettings, autoReplyActivity, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
+    config, store, auth, accounts, coupons, orders, products, productAutomation, productAutomationTrigger, productAutomationWorker, productSync, credentials, apiKeyCredentials, openaiSettings, dashboard, messages, autoReply, autoReplyAgentSettings, autoReplyActivity, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
     server,
     async listen() {
       await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));
