@@ -37,7 +37,7 @@ export function createMockDashboardApi(): DashboardApi {
         { label: '06/21', orderAmount: 176, autoProcessRate: 99 },
         { label: '06/22', orderAmount: 182, autoProcessRate: 99 },
       ];
-      const visibleTrend = query?.range === 'today' ? trend.slice(-1) : query?.range === '3d' ? trend.slice(-3) : query?.range === '1m' || query?.range === 'custom' ? trend : trend.slice(-7);
+      const visibleTrend = query?.range === 'today' ? trend.slice(-1) : query?.range === '3d' ? trend.slice(-3) : query?.range === '7d' ? trend.slice(-7) : trend;
       return {
         totalSales: 78420,
         todayOrderAmount: 18640,

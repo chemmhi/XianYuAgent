@@ -23,7 +23,7 @@ export interface DashboardController {
 export function useDashboardController(options: { api?: DashboardApi } = {}): DashboardController {
   const dashboardApi = options.api ?? defaultMockDashboardApi;
   const [state, setState] = useState<DashboardState>({ phase: 'idle', data: null, error: null, refreshing: false });
-  const [query, setQueryState] = useState<DashboardQuery>({ range: '7d' });
+  const [query, setQueryState] = useState<DashboardQuery>({ range: '1m' });
   const requestId = useRef(0);
 
   const reload = useCallback(async () => {

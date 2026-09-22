@@ -26,14 +26,16 @@ const state: DashboardState = {
 
 describe('dashboard views', () => {
   it('renders the high-fidelity desktop hierarchy', () => {
-    const html = renderToStaticMarkup(createElement(DashboardDesktopContent, { state, query: { range: '7d' }, apiMode: 'mock', onOpenTodo: vi.fn(), onRefresh: vi.fn(), onTrendQueryChange: vi.fn() }));
+    const html = renderToStaticMarkup(createElement(DashboardDesktopContent, { state, query: { range: '1m' }, apiMode: 'mock', onOpenTodo: vi.fn(), onRefresh: vi.fn(), onTrendQueryChange: vi.fn() }));
     expect(html).toContain('订单与 AI 闭环趋势');
     expect(html).not.toContain('当前账号健康度');
     expect(html).not.toContain('可售卡密库存');
     expect(html).toContain('总销售额');
     expect(html).toContain('今天');
-    expect(html).toContain('3天内');
-    expect(html).toContain('1个月内');
+    expect(html).toContain('三天');
+    expect(html).toContain('一个月内');
+    expect(html).toContain('月份选择');
+    expect(html).toContain('自定义时间区间');
     expect(html).toContain('商品排行');
     expect(html).toContain('最近处理记录');
     expect(html).toContain('data-dashboard-surface="desktop"');
@@ -65,7 +67,7 @@ describe('dashboard views', () => {
   it('keeps loading and forbidden states inside the dashboard surface', () => {
     const loadingHtml = renderToStaticMarkup(createElement(DashboardDesktopContent, {
       state: { phase: 'loading', data: null, error: null, refreshing: false },
-      query: { range: '7d' },
+      query: { range: '1m' },
       apiMode: 'mock',
       onOpenTodo: vi.fn(),
       onRefresh: vi.fn(),
@@ -73,7 +75,7 @@ describe('dashboard views', () => {
     }));
     const forbiddenHtml = renderToStaticMarkup(createElement(DashboardDesktopContent, {
       state: { phase: 'forbidden', data: null, error: { code: 'FORBIDDEN', message: '无权限', retryable: false }, refreshing: false },
-      query: { range: '7d' },
+      query: { range: '1m' },
       apiMode: 'live',
       onOpenTodo: vi.fn(),
       onRefresh: vi.fn(),

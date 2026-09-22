@@ -1,5 +1,6 @@
 import { useState, type MouseEvent, type ReactNode } from 'react';
 import type { DashboardQuery, DashboardRange, DashboardState } from '../types';
+import { Button } from '../../../shared/ui/Button';
 import { InputField } from '../../../shared/ui/InputField';
 import { SelectField } from '../../../shared/ui/SelectField';
 
@@ -72,35 +73,51 @@ export function MiniAreaChart({ state, compact = false }: { state: DashboardStat
   </div>;
 }
 
-const trendRangeOptions: Array<{ value: DashboardRange; label: string }> = [
-  { value: 'today', label: '今天' },
-  { value: '3d', label: '3天内' },
-  { value: '7d', label: '7天内' },
-  { value: '1m', label: '1个月内' },
-  { value: 'custom', label: '自定义' },
-];
-
 function TrendRangeControl({ query, onChange }: { query: DashboardQuery; onChange: (query: DashboardQuery) => void }) {
-  const [draftRange, setDraftRange] = useState<DashboardRange>(query.range);
   const [customFrom, setCustomFrom] = useState(query.from ?? '');
   const [customTo, setCustomTo] = useState(query.to ?? '');
-  const isCustom = draftRange === 'custom';
+  const [customOpen, setCustomOpen] = useState(query.range === 'custom');
+  const [monthValue, setMonthValue] = useState('');
+  const quickRanges: Array<{ value: Exclude<DashboardRange, 'custom'>; label: string }> = [
+    { value: 'today', label: '今天' },
+    { value: '3d', label: '三天' },
+    { value: '7d', label: '7天内' },
+    { value: '1m', label: '一个月内' },
+  ];
+  const currentDate = new Date();
+  const currentYear = currentDate.getFullYear();
+  const currentMonth = currentDate.getMonth() + 1;
+  const monthOptions = Array.from({ length: currentMonth }, (_, index) => {
+    const month = currentMonth - index;
+    return { value: `${currentYear}-${String(month).padStart(2, '0')}`, label: `${month}月` };
+  });
+  const setQuickRange = (range: Exclude<DashboardRange, 'custom'>) => {
+    setCustomOpen(false);
+    setMonthValue('');
+    onChange({ range });
+  };
+  const selectMonth = (value: string) => {
+    if (!value) return;
+    const [yearText, monthText] = value.split('-');
+    const year = Number(yearText);
+    const month = Number(monthText);
+    const from = `${yearText}-${monthText}-01`;
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const to = `${yearText}-${monthText}-${String(lastDay).padStart(2, '0')}`;
+    setMonthValue(value);
+    setCustomOpen(false);
+    onChange({ range: 'custom', from, to });
+  };
   return <div className="dashboard-trend-controls" aria-label="趋势时间范围">
-    <SelectField className="dashboard-trend-select" aria-label="选择趋势时间范围" value={draftRange} options={trendRangeOptions} onChange={(event) => {
-      const range = event.target.value as DashboardRange;
-      setDraftRange(range);
-      if (range === 'custom') {
-        return;
-      } else {
-        onChange({ range });
-      }
-    }}/>
-    {isCustom ? <>
+    <div className="dashboard-trend-quick-ranges">{quickRanges.map((option) => <Button key={option.value} type="button" size="small" variant={query.range === option.value ? 'primary' : 'default'} className="dashboard-trend-range-btn" onClick={() => setQuickRange(option.value)}>{option.label}</Button>)}</div>
+    <SelectField className="dashboard-trend-month-select" aria-label="月份选择" value={monthValue} options={[{ value: '', label: '月份选择' }, ...monthOptions]} onChange={(event) => selectMonth(event.target.value)}/>
+    <Button type="button" size="small" variant={customOpen ? 'primary' : 'default'} className="dashboard-trend-custom-toggle" onClick={() => { setCustomOpen(true); setMonthValue(''); }}>自定义时间区间</Button>
+    {customOpen ? <div className="dashboard-trend-custom-panel">
       <InputField className="dashboard-trend-date" aria-label="趋势开始日期" type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)}/>
       <span className="dashboard-trend-date-separator">至</span>
       <InputField className="dashboard-trend-date" aria-label="趋势结束日期" type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)}/>
-      <button type="button" className="dashboard-btn dashboard-btn-ghost dashboard-trend-apply" disabled={!customFrom || !customTo} onClick={() => onChange({ range: 'custom', from: customFrom, to: customTo })}>应用</button>
-    </> : null}
+      <Button type="button" size="small" variant="ghost" className="dashboard-trend-apply" disabled={!customFrom || !customTo} onClick={() => onChange({ range: 'custom', from: customFrom, to: customTo })}>应用</Button>
+    </div> : null}
   </div>;
 }
 
