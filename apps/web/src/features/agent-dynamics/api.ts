@@ -622,7 +622,7 @@ export function createAgentDynamicsApi(transport: AgentDynamicsApiTransport): Ag
       const raw = unwrap(await transport.get<RawActivitySummary | ApiEnvelope<RawActivitySummary>>(`/api/v1/auto-reply/activity/summary${query({ accountId: input.accountId, from: window.from, to: window.to })}`));
       let runs: RawAutoReplyRunListResult | undefined;
       if (!raw.events?.length) {
-        runs = await transport.get<RawAutoReplyRunListResult | ApiEnvelope<RawAutoReplyRunListResult>>(`/api/v1/auto-reply/runs${query({ accountId: input.accountId, from: window.from, to: window.to, page: 1, pageSize: 20 })}`).then(unwrap).catch(() => undefined);
+        runs = await transport.get<RawAutoReplyRunListResult | ApiEnvelope<RawAutoReplyRunListResult>>(`/api/v1/auto-reply/runs${query({ accountId: input.accountId, from: window.from, to: window.to, page: 1, pageSize: 10 })}`).then(unwrap).catch(() => undefined);
       }
       const runRows = runs?.items.map(mapRun) ?? [];
       const runMap = new Map(runRows.map((row) => [row.runId, row]));
@@ -730,7 +730,7 @@ export function createMockAgentDynamicsApi(): AgentDynamicsApi {
         const stageMatch = filters.stage === 'all' || row.stage.key === filters.stage;
         return keywordMatch && statusMatch && stageMatch;
       });
-      const pageSize = filters.pageSize || 20;
+      const pageSize = filters.pageSize || 10;
       const page = Math.max(1, filters.page || 1);
       const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
       const hasFilters = Boolean(keyword || filters.status !== 'all' || filters.stage !== 'all');

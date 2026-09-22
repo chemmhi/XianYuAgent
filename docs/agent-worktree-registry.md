@@ -134,6 +134,7 @@
 ## 登记维护规则
 
 | `root` | `dashboard-home-refresh` | `codex/dashboard-home-refresh` | `F:\ChenHai\Project\XianYuAgent-dashboard-home-refresh` | Codex `/root` | `2026-09-22 00:00:00 +08:00` | `MERGED` | `c86ee9e` / `5d8bba9` | `-` | 仪表盘首页布局、趋势时间筛选与指标卡片调整；已在 merge lock 内以 `--no-ff` 合入 main。主线 Dashboard API 单测、Web 定向回归、typecheck、构建与 Chrome/CDP E2E 均通过；保留 worktree 供审计。 |
+| `root` | `auto-reply-agent-ui-fix-20260923` | `codex/auto-reply-agent-ui-fix-20260923` | `F:\ChenHai\Project\XianYuAgent-auto-reply-agent-fix-20260923` | Codex `/root` | `2026-09-22 01:10:48 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 已完成实时动态单行、链路健康/执行状态字号放大、异常内容列防溢出、运行记录固定 10 行视口与订单式分页/默认 10 条；定向 Vitest 14/14、Web/API typecheck/build、API auto-reply 47/47、Chrome/CDP E2E 与桌面/移动截图通过。全量 Web 仍有 2 个无关存量失败，PostgreSQL Agent Dynamics E2E 因既有 FK 清理失败未通过。 |
 | `root` | `dashboard-sidebar-fix-20260922` | `codex/dashboard-sidebar-fix` | `F:\ChenHai\Project\XianYuAgent-dashboard-sidebar-fix` | Codex `/root` | `2026-09-22 00:00:00 +08:00` | `CLEANED` | `12cb549` | `2026-09-22 15:05:00 +08:00` | 独立复核通过并已在 merge lock 内合入主线；删除旧 DashboardSidebar、Logo、独立 desktop/mobile shell 及死样式；主线 Web 63 files/207 tests、typecheck、Chrome/CDP dashboard E2E、diff-check 通过。worktree 元数据已清理，目录因本地依赖 junction 残留未删除。 |
 
 1. 创建 worktree 后立即新增一行，至少填完 `agent_id`、`slice_id`、`branch`、`worktree`、`owner`、`created_at` 和 `REGISTERED`。
