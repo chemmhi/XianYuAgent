@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createMockProductsApi, type ProductsApi } from './api';
-import type { ProductDetailState, ProductDraftInput, ProductDraftPatch, ProductFilters, ProductMutationError, ProductsLoadError, ProductsQueryState, ProductVM } from './types';
+import type { ProductDetailState, ProductDraftInput, ProductDraftPatch, ProductFilters, ProductMutationError, ProductsLoadError, ProductsQueryState, ProductVM, XianyuDetailState } from './types';
 
 const defaultProductsApi = createMockProductsApi();
 
@@ -39,12 +39,15 @@ export interface ProductsController {
   reload: () => Promise<void>;
   openProduct: (productId: string) => Promise<void>;
   closeProduct: () => void;
+  openXianyuDetail: (productId: string) => Promise<void>;
+  closeXianyuDetail: () => void;
   createDraft: (input: ProductDraftInput) => Promise<ProductVM | null>;
   updateDraft: (productId: string, patch: ProductDraftPatch, configVersion: number) => Promise<ProductVM | null>;
   syncFromXianyu: (accountId: string) => Promise<boolean>;
   clearMutation: () => void;
   state: ProductsQueryState;
   detail: ProductDetailState;
+  xianyuDetail: XianyuDetailState;
   mutation: ProductsMutationState;
 }
 
@@ -53,9 +56,11 @@ export function useProductsController(options: { api?: ProductsApi; initialFilte
   const [filters, setFilters] = useState<ProductFilters>({ page: 1, pageSize: 20, ...options.initialFilters });
   const [state, setState] = useState<ProductsQueryState>({ phase: 'idle', data: null, error: null });
   const [detail, setDetail] = useState<ProductDetailState>({ phase: 'idle', data: null, error: null });
+  const [xianyuDetail, setXianyuDetail] = useState<XianyuDetailState>({ phase: 'idle', data: null, error: null });
   const [mutation, setMutation] = useState<ProductsMutationState>({ phase: 'idle', error: null });
   const requestId = useRef(0);
   const detailRequestId = useRef(0);
+  const xianyuDetailRequestId = useRef(0);
   const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);
 
   const reload = useCallback(async () => {
@@ -89,6 +94,22 @@ export function useProductsController(options: { api?: ProductsApi; initialFilte
   }, [productsApi]);
 
   const closeProduct = useCallback(() => { detailRequestId.current += 1; setDetail({ phase: 'idle', data: null, error: null }); }, []);
+  const openXianyuDetail = useCallback(async (productId: string) => {
+    const currentRequest = ++xianyuDetailRequestId.current;
+    setXianyuDetail({ phase: 'loading', productId, data: null, error: null });
+    try {
+      // The POST endpoint performs the real MTOP fetch and persists normalized detail
+      // plus object-storage image references. A later GET can rehydrate the same data.
+      const data = await productsApi.syncXianyuDetail(productId);
+      if (currentRequest !== xianyuDetailRequestId.current) return;
+      setXianyuDetail({ phase: 'success', productId, data, error: null });
+    } catch (error) {
+      if (currentRequest !== xianyuDetailRequestId.current) return;
+      const normalized = toProductsLoadError(error);
+      setXianyuDetail({ phase: normalized.code === 'FORBIDDEN' ? 'forbidden' : 'error', productId, data: null, error: normalized });
+    }
+  }, [productsApi]);
+  const closeXianyuDetail = useCallback(() => { xianyuDetailRequestId.current += 1; setXianyuDetail({ phase: 'idle', data: null, error: null }); }, []);
   const setKeyword = useCallback((keyword: string) => { setFilters((previous) => ({ ...previous, keyword, page: 1 })); }, []);
 
   const createDraft = useCallback(async (input: ProductDraftInput) => {
@@ -135,5 +156,5 @@ export function useProductsController(options: { api?: ProductsApi; initialFilte
   }, [productsApi, reload]);
   const clearMutation = useCallback(() => setMutation({ phase: 'idle', error: null }), []);
 
-  return { filters, setFilters, setKeyword, reload, openProduct, closeProduct, createDraft, updateDraft, syncFromXianyu, clearMutation, state, detail, mutation };
+  return { filters, setFilters, setKeyword, reload, openProduct, closeProduct, openXianyuDetail, closeXianyuDetail, createDraft, updateDraft, syncFromXianyu, clearMutation, state, detail, xianyuDetail, mutation };
 }
