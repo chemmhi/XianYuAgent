@@ -1,6 +1,6 @@
 .automation-drawer-backdrop{z-index:24}
 .automation-drawer{width:min(760px,100vw);padding:0;display:flex;flex-direction:column}
-.automation-drawer-head{padding:18px 20px 14px;border-bottom:1px solid var(--border)}
+.products-detail-panel .automation-drawer-head{display:block;padding:18px 20px 14px;border-bottom:1px solid var(--border)}
 .automation-drawer-top{display:flex;justify-content:space-between;gap:14px}
 .automation-kicker{margin:0 0 5px;color:var(--info);font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
 .automation-drawer h2{margin:0 0 5px;font-size:20px;line-height:1.4}

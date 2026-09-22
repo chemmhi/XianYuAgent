@@ -30,6 +30,7 @@ export function ProductsPage({ api: providedApi, automationApi: providedAutomati
   const [automationProductId, setAutomationProductId] = useState<string | undefined>();
   const [batchOpen, setBatchOpen] = useState(false);
   const [automationNotice, setAutomationNotice] = useState<string | null>(null);
+  const [automationSummaries, setAutomationSummaries] = useState<Record<string, { label: string; detail: string; tone: 'ok' | 'warn' | 'muted' }>>({});
   const { setFilters } = controller;
   const automationController = useProductAutomationController({ api: automationApi, accountId: currentAccountId ?? undefined, productId: automationProductId });
 
@@ -44,12 +45,28 @@ export function ProductsPage({ api: providedApi, automationApi: providedAutomati
   const pageData = controller.state.data;
   const contextMissing = !accountsLoading && !accountsError && !currentAccountId;
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!currentAccountId || products.length === 0) { setAutomationSummaries({}); return () => { cancelled = true; }; }
+    void Promise.all(products.map(async (product) => {
+      try {
+        const config = await automationApi.getConfig(product.id);
+        const enabled = [config.delivery, config.reprice, config.gift, config.review].filter((rule) => rule.enabled).length;
+        const detail = `${config.delivery.enabled ? '发货 ✓' : '发货 —'}　${config.reprice.enabled ? '改价 ✓' : '改价 —'}　${config.gift.enabled ? '赠品 ✓' : '赠品 —'}　${config.review.enabled ? `求评 ${config.review.reviewInitialHours ?? 72}h/${config.review.reviewMaxCount ?? 1}次` : '求评 —'}`;
+        return [product.id, { label: enabled ? `${enabled}/4 已启用` : '未配置', detail, tone: enabled === 4 ? 'ok' : enabled > 0 ? 'ok' : 'muted' }] as const;
+      } catch {
+        return [product.id, { label: '读取失败', detail: '自动化配置暂不可用', tone: 'warn' }] as const;
+      }
+    })).then((entries) => { if (!cancelled) setAutomationSummaries(Object.fromEntries(entries)); });
+    return () => { cancelled = true; };
+  }, [automationApi, currentAccountId, products]);
+
   return (
     <section className="page-stack products-domain" data-products-domain>
       <article className="card panel products-panel">
         <ProductToolbar currentAccount={currentAccount} contextLoading={accountsLoading} contextError={accountsError} contextMissing={contextMissing} filters={controller.filters} phase={controller.state.phase} syncing={controller.mutation.phase === 'saving'} selectedCount={selectedProductIds.length} onKeywordChange={controller.setKeyword} onStatusChange={(status) => controller.setFilters((previous) => ({ ...previous, status, page: 1 }))} onRefresh={controller.reload} onSync={() => { if (currentAccountId) void controller.syncFromXianyu(currentAccountId); }} onCreate={() => { if (!currentAccountId) return; controller.clearMutation(); setDrawer({ mode: 'create' }); }} onChooseAccount={() => { window.history.pushState({}, '', buildAccountsReauthorizePath()); window.dispatchEvent(new PopStateEvent('popstate')); }} onBatchConfigure={() => setBatchOpen(true)} />
         {controller.mutation.error && <div className="products-inline-error" role="alert">{controller.mutation.error.message}</div>}
-        {controller.state.phase === 'success' && pageData && <ProductTable products={products} page={pageData.page} totalPages={pageData.totalPages} total={pageData.total} sortBy={controller.filters.sortBy ?? 'xianyuOrder'} sortOrder={controller.filters.sortOrder ?? 'asc'} onSortChange={(sortBy, sortOrder) => controller.setFilters((previous) => ({ ...previous, sortBy, sortOrder, page: 1 }))} onPageChange={(page) => controller.setFilters((previous) => ({ ...previous, page }))} onOpen={controller.openProduct} onOpenXianyuDetail={controller.openXianyuDetail} selectedIds={selectedProductIds} onToggleSelected={(productId) => setSelectedProductIds((previous) => previous.includes(productId) ? previous.filter((id) => id !== productId) : [...previous, productId])} onToggleAll={(checked) => setSelectedProductIds(checked ? products.map((product) => product.id) : [])} onOpenAutomation={(productId) => { setAutomationNotice(null); setAutomationProductId(productId); }} automationSummary={() => ({ label: '未配置', detail: '点击自动化进行配置', tone: 'muted' })} />}
+        {controller.state.phase === 'success' && pageData && <ProductTable products={products} page={pageData.page} totalPages={pageData.totalPages} total={pageData.total} sortBy={controller.filters.sortBy ?? 'xianyuOrder'} sortOrder={controller.filters.sortOrder ?? 'asc'} onSortChange={(sortBy, sortOrder) => controller.setFilters((previous) => ({ ...previous, sortBy, sortOrder, page: 1 }))} onPageChange={(page) => controller.setFilters((previous) => ({ ...previous, page }))} onOpen={controller.openProduct} onOpenXianyuDetail={controller.openXianyuDetail} selectedIds={selectedProductIds} onToggleSelected={(productId) => setSelectedProductIds((previous) => previous.includes(productId) ? previous.filter((id) => id !== productId) : [...previous, productId])} onToggleAll={(checked) => setSelectedProductIds(checked ? products.map((product) => product.id) : [])} onOpenAutomation={(productId) => { setAutomationNotice(null); setAutomationProductId(productId); }} automationSummary={(product) => automationSummaries[product.id] ?? { label: '读取中…', detail: '正在读取规则', tone: 'muted' }} />}
         <ProductListStateView phase={controller.state.phase} error={controller.state.error} onRetry={controller.reload} accountSelectionRequired={contextMissing} />
       </article>
       <ProductDetailPanel state={controller.detail} onClose={controller.closeProduct} onRetry={() => controller.detail.productId && controller.openProduct(controller.detail.productId)} onEdit={(product) => { controller.closeProduct(); controller.clearMutation(); setDrawer({ mode: 'edit', product }); }} />
