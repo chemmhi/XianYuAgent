@@ -5,7 +5,7 @@ import { CouponBatchTable } from './CouponBatchTable';
 import type { CouponBatchVM } from '../types';
 
 const batch: CouponBatchVM = {
-  batchId: '1',
+  batchId: '88',
   accountId: 'account-001',
   label: '资料包',
   purpose: 'text',
@@ -77,7 +77,7 @@ describe('CouponBatchTable', () => {
       onImagePreview: vi.fn(),
     }));
 
-    expect(html).toContain('<span class="coupons-muted coupons-row-number">1</span>');
+    expect(html).toContain('<span class="coupons-muted coupons-row-number">88</span>');
     expect(html).toContain('<span>备注信息</span>');
     expect(html).toContain('<span class="coupons-note" title="备注内容">备注内容</span>');
     expect(html).toContain('<div class="coupons-title"><strong>资料包</strong></div>');

@@ -22,14 +22,14 @@ const accounts: AccountSummary[] = [
 ];
 
 const products: ProductSummary[] = [
-  { accountId: 'A', itemId: 'ITEM-93821', title: 'Python 全栈资料包', price: 39.9, stock: 368, status: 'on_sale', updatedAt: '2026-09-18 14:10', cardBatchRef: 'CP-20260918-001' },
-  { accountId: 'A', itemId: 'ITEM-93817', title: 'GitHub 源码下载', price: 19.9, stock: 129, status: 'on_sale', updatedAt: '2026-09-18 13:42', cardBatchRef: 'CP-20260917-004' },
-  { accountId: 'B', itemId: 'ITEM-93688', title: 'ComfyUI 基础训练营', price: 129, stock: 0, status: 'out_of_stock', updatedAt: '2026-09-16 10:18', cardBatchRef: 'CP-20260916-012' },
+  { accountId: 'A', itemId: 'ITEM-93821', title: 'Python 全栈资料包', price: 39.9, stock: 368, status: 'on_sale', updatedAt: '2026-09-18 14:10', cardBatchRef: '1' },
+  { accountId: 'A', itemId: 'ITEM-93817', title: 'GitHub 源码下载', price: 19.9, stock: 129, status: 'on_sale', updatedAt: '2026-09-18 13:42', cardBatchRef: '2' },
+  { accountId: 'B', itemId: 'ITEM-93688', title: 'ComfyUI 基础训练营', price: 129, stock: 0, status: 'out_of_stock', updatedAt: '2026-09-16 10:18', cardBatchRef: '3' },
 ];
 
 const coupons: CouponBatchSummary[] = [
-  { batchId: 'CP-20260918-001', itemId: 'ITEM-93821', itemTitle: 'Python 全栈资料包', total: 400, available: 368, status: 'available', createdAt: '2026-09-18 14:02', accountId: 'A' },
-  { batchId: 'CP-20260916-012', itemId: 'ITEM-93688', itemTitle: 'ComfyUI 基础训练营', total: 100, available: 12, status: 'low_stock', createdAt: '2026-09-16 09:18', accountId: 'B' },
+  { batchId: '1', itemId: 'ITEM-93821', itemTitle: 'Python 全栈资料包', total: 400, available: 368, status: 'available', createdAt: '2026-09-18 14:02', accountId: 'A' },
+  { batchId: '3', itemId: 'ITEM-93688', itemTitle: 'ComfyUI 基础训练营', total: 100, available: 12, status: 'low_stock', createdAt: '2026-09-16 09:18', accountId: 'B' },
 ];
 
 const orders: OrderSummary[] = [
@@ -122,8 +122,8 @@ export function createMockApi(): XianyuApi {
       async refresh() {},
     },
     coupons: {
-      async list(query) { return page(query?.itemId ? coupons.filter((item) => item.itemId === query.itemId) : coupons, query); },
-      async create(input) { coupons.unshift({ batchId: `CP-${Date.now()}`, itemTitle: input.name, total: 0, available: 0, status: 'available', createdAt: new Date().toISOString(), accountId: 'A' }); },
+      async list(query) { const scoped = query?.itemId ? coupons.filter((item) => item.itemId === query.itemId) : coupons; return page([...scoped].sort((left, right) => right.createdAt.localeCompare(left.createdAt)), query); },
+      async create(input) { const used = new Set(coupons.map((coupon) => Number(coupon.batchId)).filter((value) => Number.isSafeInteger(value) && value > 0)); let next = 1; while (used.has(next)) next += 1; coupons.unshift({ batchId: String(next), itemTitle: input.name, total: 0, available: 0, status: 'available', createdAt: new Date().toISOString(), accountId: 'A' }); },
     },
     orders: {
       async list(query) {

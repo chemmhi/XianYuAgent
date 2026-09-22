@@ -91,16 +91,20 @@ try {
   assert.equal(bound.response.status, 200);
   assert.equal(bound.body.data.binding.productId, product.id);
 
-  const voided = await request(`/api/v1/coupons/batches/${batchId}/void`, { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-void-1' }, body: JSON.stringify({}) });
-  assert.equal(voided.response.status, 200);
-  assert.equal(voided.body.data.batch.status, 'voided');
-  assert.equal(voided.body.data.batch.stockAlert, 'exhausted');
+  const deleted = await request(`/api/v1/coupons/batches/${batchId}`, { method: 'DELETE', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-delete-1' } });
+  assert.equal(deleted.response.status, 200);
+  assert.equal(deleted.body.data.batch.status, 'voided');
+  assert.equal(deleted.body.data.batch.stockAlert, 'exhausted');
   const defaultAfterVoid = await request(`/api/v1/coupons/batches?accountId=${account.id}`, { headers: { cookie } });
   assert.equal(defaultAfterVoid.response.status, 200);
   assert.equal(defaultAfterVoid.body.data.items.some((item) => item.batchId === batchId), false);
   const voidedHistory = await request(`/api/v1/coupons/batches?accountId=${account.id}&status=voided`, { headers: { cookie } });
   assert.equal(voidedHistory.response.status, 200);
   assert.equal(voidedHistory.body.data.items.some((item) => item.batchId === batchId && item.status === 'voided'), true);
+
+  const forbiddenReactivate = await request(`/api/v1/coupons/batches/${batchId}`, { method: 'PATCH', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-reactivate-voided' }, body: JSON.stringify({ status: 'active' }) });
+  assert.equal(forbiddenReactivate.response.status, 409);
+  assert.equal(forbiddenReactivate.body.error.code, 'CONFLICT');
 
   const forbiddenImport = await request(`/api/v1/coupons/batches/${batchId}/items/import`, { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-import-2' }, body: JSON.stringify({ items: ['code-c'] }) });
   assert.equal(forbiddenImport.response.status, 409);

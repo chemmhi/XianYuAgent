@@ -304,11 +304,14 @@ export class MemoryStore implements Store {
   async listCouponBatches(adminId: string, query: CouponBatchListQuery): Promise<CouponBatchListResult> {
     const scopedAccounts = new Set((await this.listScopes(adminId)).map((scope) => scope.accountId));
     const normalizedKeyword = query.keyword?.trim().toLowerCase();
+    const sortDirection = query.sortOrder === 'asc' ? 1 : -1;
+    const activeSequenceIds = new Set([...this.couponBatches.values()].filter((batch) => batch.status !== 'voided' && batch.sequenceId).map((batch) => batch.sequenceId!));
     const filtered = [...this.couponBatches.values()].filter((batch) => {
       if (!scopedAccounts.has(batch.accountId)) return false;
       if (query.accountId && batch.accountId !== query.accountId) return false;
-      if (query.status && batch.status !== query.status) return false;
       if (!query.status && batch.status === 'voided') return false;
+      if (query.status && batch.status !== query.status) return false;
+      if (query.status === 'voided' && batch.sequenceId && activeSequenceIds.has(batch.sequenceId)) return false;
       if (query.purpose && batch.purpose !== query.purpose) return false;
       if (normalizedKeyword && !`${batch.sequenceId ?? ''} ${batch.id} ${batch.label ?? ''} ${batch.purpose}`.toLowerCase().includes(normalizedKeyword)) return false;
       if (query.stockAlert) {
@@ -318,10 +321,7 @@ export class MemoryStore implements Store {
         if (stockAlert !== query.stockAlert) return false;
       }
       return true;
-    }).sort((left, right) => {
-      const sortDirection = query.sortOrder === 'asc' ? 1 : -1;
-      return (left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)) * sortDirection;
-    });
+    }).sort((left, right) => (left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)) * sortDirection);
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
     const start = (page - 1) * pageSize;
@@ -344,6 +344,7 @@ export class MemoryStore implements Store {
   async updateCouponBatch(input: { adminId: string; batchId: string; patch: { label?: string; purpose?: string; deliveryScope?: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; status?: CouponBatchStatus; metadata?: CouponBatchMetadata } }): Promise<CouponBatchRecord | undefined> {
     const batch = this.findCouponBatch(input.batchId);
     if (!batch || !(await this.hasAccountScope(input.adminId, batch.accountId))) return undefined;
+    if (batch.status === 'voided') throw new Error('COUPON_BATCH_VOIDED');
     if (input.patch.label !== undefined) batch.label = input.patch.label;
     if (input.patch.purpose !== undefined) batch.purpose = input.patch.purpose;
     if (input.patch.deliveryScope !== undefined) batch.deliveryScope = input.patch.deliveryScope;

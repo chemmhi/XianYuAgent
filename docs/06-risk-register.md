@@ -195,3 +195,9 @@
 | R-AD-004 | 页面壳与现有全局壳重复 | P2 | 已修复：复用 `AuthenticatedShell`，移除原型内置侧栏与顶部栏；host CSS 消除双重 padding / 嵌套滚动 |
 | R-AD-005 | 原型 HTML 不在当前 worktree，人工逐像素复核入口不稳定 | P2 | 已从 Git 固定截图 blob 恢复基线并记录对象 ID；后续补回原型文件以便人工复核 |
 | R-AD-006 | PostgreSQL 运行记录与首个阶段事件当前由相邻事务写入，极短窗口内可能出现运行已落库但事件暂缺 | P2 | 当前列表/详情兼容无事件时间线；后续将 create/update + event append 收敛为同一事务并补故障注入集成测试 |
+
+### 2026-09-22 卡券批次序号迁移复核
+
+| 编号 | 风险 | 级别 | 应对 | 状态 |
+| --- | --- | --- | --- | --- |
+| S5-RISK-036 | `029_coupon_batch_sequence.sql` 已新增 `sequence_id`、序号回收逻辑和非作废唯一索引，但当前环境没有 `DATABASE_URL` 且未运行 PostgreSQL 容器，尚未执行真实 apply/rollback/复读 | P1 | 保留旧 UUID 读写兼容；在隔离 PostgreSQL volume 执行迁移、重复执行、删除后复用、旧 UUID URL 读取、作废历史查询和回滚演练，再回写证据 | OPEN |

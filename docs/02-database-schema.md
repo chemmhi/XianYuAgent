@@ -62,7 +62,7 @@
 
 | 表 | 关键列 | 主键与外键 | 唯一索引 / 普通索引 | 关键检查 |
 | --- | --- | --- | --- | --- |
-| `coupons.coupon_batches` | `id uuid`；`account_id uuid`；`purpose text`；`delivery_scope text`；`quark_url text null`；`extract_code_ciphertext bytea null`；`total_count int`；`status text` | PK；FK account | IDX `(account_id, status)` | `delivery_scope in ('system_only','operator_only','buyer_deliverable')` |
+| `coupons.coupon_batches` | `id uuid`；`sequence_id bigint`；`account_id uuid`；`purpose text`；`delivery_scope text`；`quark_url text null`；`extract_code_ciphertext bytea null`；`total_count int`；`status text` | PK `id`；FK account | UQ partial `(sequence_id) where status <> 'voided'`；IDX `(account_id, status)` | `sequence_id` 从 1 开始，对外作为 `batchId`/`id`；作废/删除后可回收；`delivery_scope in ('system_only','operator_only','buyer_deliverable')` |
 | `coupons.coupon_items` | `id uuid`；`batch_id uuid`；`content_ciphertext bytea`；`status text`；`reserved_until timestamptz null`；`consumed_at timestamptz null` | PK；FK batch | IDX `(batch_id, status)`；partial UQ consumed allocation | `available -> reserved -> consumed`；reserved 超时才可释放 |
 | `coupons.coupon_asset_refs` | `id uuid`；`coupon_batch_id uuid`；`storage_key text`；`mime_type text`；`checksum text null`；`caption text null`；`status text` | PK；FK batch | UQ `(coupon_batch_id, storage_key)` | 素材与正文分离 |
 | `coupons.coupon_bindings` | `id uuid`；`coupon_batch_id uuid`；`product_id uuid`；`priority int default 0`；`status text`；`expires_at null` | PK；FK batch/product | UQ `(coupon_batch_id, product_id)`；IDX `(product_id, status)` | 解绑只改状态，不删交付历史 |
@@ -121,6 +121,7 @@
 | `002_credentials` | credential_refs、credential_values | 001 | 先禁写，再回滚应用；密文不逆向解密 |
 | `003_catalog` | products、product_skus、asset_refs | 001 | 保留旧列，回滚应用读取旧列 |
 | `004_coupons` | coupon_batches、coupon_items、coupon_asset_refs、coupon_bindings | 001/003 | 先停止库存写入，保留已交付记录 |
+| `029_coupon_batch_sequence` | coupon_batches.sequence_id、全局序列和非作废批次唯一索引 | 004_coupons | 先回退 API 到 UUID 读写；保留 sequence_id、审计和外键，不物理删除历史 |
 | `005_orders_messages` | orders、delivery_records、conversations、messages | 001/003/004 | 向前修复优先，禁止物理删除订单和消息 |
 | `006_workspace_execution` | agent_sessions、runs、steps、task_contexts、confirmations、idempotency_records、outbox_jobs | 001/005 | 停止新任务，等待租约过期后回退应用 |
 | `007_observability` | audit_events、trace_spans、health_snapshots、索引与约束加固 | 全部 | 审计/追踪表只追加，回滚只撤销非关键索引 |
