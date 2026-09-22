@@ -1,5 +1,13 @@
 # XianyuSellerAgent 项目状态
 
+## 2026-09-22 自动回复 Agent 修复方案纵向切片规划
+
+- 新增 docs/agent/auto-reply/repair-plan.md 的阶段门禁与 AR-VS-00 至 AR-VS-09 纵向切片规划。
+- 规划覆盖：无硬编码路由、低拒绝/低 handoff、澄清与 awaiting_user、生命周期引导、跑题拉回、情绪门控、店内推荐、发送前 Review、发送后 Outcome Review、真实链路与回滚。
+- 本切片仅修改文档和登记信息，不修改业务代码、数据库迁移或发送行为；状态：READY_FOR_REVIEW。
+- 已执行：git diff --check、Markdown 代码块配对检查、切片编号与阶段门禁契约检查。
+- 下一步：完成文档业务/验收评审和架构/数据流复审后，按 AR-VS-00 → AR-VS-09 严格串行推进。
+
 ## 2026-09-21 全局 SelectField 统一
 
 - 全局盘点确认项目已有共享 `apps/web/src/shared/ui/SelectField.tsx`；账号、商品、卡券、订单、设置及 Agent 动态的业务下拉全部统一复用，业务层不再直接渲染原生 `<select>`。

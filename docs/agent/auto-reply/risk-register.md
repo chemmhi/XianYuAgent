@@ -341,6 +341,48 @@
 - **验证**：定向单测、集成、真实 PostgreSQL、Chrome/CDP 和 `git diff --check`。
 - **是否需讨论**：不需要，但必须在交付中保留阻塞原因。
 
+## I. 编排、澄清、生命周期与结果闭环
+
+### AR-ORCH-001（S0）业务路由散落在硬编码分支和 Prompt 中
+
+- **问题**：当前分类器和流程分支可能将某些 intent 直接映射为 replied 或 handoff，无法按版本化策略、生命周期和事实动态调整。
+- **影响**：策略变更需要改代码；容易误拒绝、误转人工或误推荐，且无法审计实际命中规则。
+- **目标**：由 SignalExtractor 提出候选信号，PolicyEngine 根据版本化策略、领域事实和 ConversationState 产出 ActionPlan；代码不保留业务路由分支。
+- **修复切片**：AR-VS-00、AR-VS-01、AR-VS-03。
+- **验证**：策略版本切换、规则命中审计、无散落路由扫描、跨账号/跨订单边界测试。
+
+### AR-ORCH-002（S0）信息不完整时缺少澄清和等待状态
+
+- **问题**：未命中规则的非空消息可能被当作 general + replied，模型输出协议也没有 clarify/awaiting_user。
+- **影响**：Agent 可能生成泛化回复，无法恢复原目标，也无法量化澄清率和重开率。
+- **目标**：增加 clarification plan、pendingQuestions、awaiting_user、目标恢复和有限澄清轮数；普通不确定问题优先澄清，不默认 handoff。
+- **修复切片**：AR-VS-02。
+- **验证**：模糊消息、买家补充、明确新目标、重复消息、超时、并发和真实 E2E。
+
+### AR-ORCH-003（S1）缺少生命周期目标和下一步动作状态
+
+- **问题**：当前 Agent 主要识别问题类型，未持久化 discovery、未付款、已付款待发货、待收货、待评价等阶段，也没有 targetStage/observedStage 区分。
+- **影响**：Agent 只能回答当前问题，无法稳定引导下单、付款、收货和评价；模型可能把建议误当成已完成。
+- **目标**：订单事实投影 observedStage，PolicyEngine 生成 targetStage、primaryGoal、successCriteria 和 nextAction。
+- **修复切片**：AR-VS-01、AR-VS-04。
+- **验证**：订单状态组合、阶段推进/回退、多订单歧义、状态回读和跨层 E2E。
+
+### AR-ORCH-004（S1）情绪、跑题和推荐缺少统一门控
+
+- **问题**：当前实现没有结构化 topicRelation、emotionSnapshot、recommendationEligible；cross_product 还可能被直接视为高风险 handoff。
+- **影响**：负面情绪下继续推荐或催评价，跑题无法拉回，相关替代商品也可能被错误拒绝。
+- **目标**：情绪只调整语气和升级阈值；售后未解决、澄清等待和负面情绪禁止推荐；相关替代商品由推荐资格策略决定。
+- **修复切片**：AR-VS-05、AR-VS-06。
+- **验证**：跑题拉回、新目标切换、负面情绪拦截、推荐冷却、跨账号候选隔离和推荐理由回读。
+
+### AR-ORCH-005（S1）发送后没有业务结果审核
+
+- **问题**：persisted 只表示本地记录已保存，当前没有 Outcome Review、resolutionStatus、follow-up 或问题重开机制。
+- **影响**：发送完成率被误读为问题解决率，无法判断买家是否真正进入下一阶段或是否需要继续跟进。
+- **目标**：异步观察发送结果、买家后续消息和领域事实，区分 transportStatus、goalProgress、resolutionStatus；无证据不自动 resolved。
+- **修复切片**：AR-VS-03、AR-VS-07、AR-VS-08。
+- **验证**：明确确认、重复追问、否定、无后续消息、事实变化、审核超时、人工覆盖、进程重启和真实数据库回读。
+
 ## 已关闭但必须保留回归门禁
 
 以下问题已有专项修复，但不能因为“已关闭”就从后续测试中移除：
