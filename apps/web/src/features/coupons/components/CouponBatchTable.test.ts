@@ -1,8 +1,12 @@
 import { createElement } from 'react';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { CouponBatchTable } from './CouponBatchTable';
 import type { CouponBatchVM } from '../types';
+
+const couponsCss = readFileSync(fileURLToPath(new URL('./coupons.css', import.meta.url)), 'utf8');
 
 const batch: CouponBatchVM = {
   batchId: '88',
@@ -19,7 +23,7 @@ const batch: CouponBatchVM = {
   version: 1,
   updatedAt: '2026-09-21T00:00:00.000Z',
   bindings: [],
-  metadata: { description: '备注内容', multiSpec: true, specName: '版本', specValue: '标准版' },
+  metadata: { description: '备注内容', textContent: '正文预览', multiSpec: true, specName: '版本', specValue: '标准版' },
 };
 
 describe('CouponBatchTable', () => {
@@ -37,13 +41,11 @@ describe('CouponBatchTable', () => {
       onPageChange: vi.fn(),
       onSelect: vi.fn(),
       onSelectAll: vi.fn(),
-      onOpen: vi.fn(),
       onEdit: vi.fn(),
       onCopy: vi.fn(),
       onBind: vi.fn(),
       onToggle: vi.fn(),
       onDelete: vi.fn(),
-      onImagePreview: vi.fn(),
     }));
 
     expect(html).toContain('data-testid="coupons-pagination"');
@@ -68,19 +70,23 @@ describe('CouponBatchTable', () => {
       onPageChange: vi.fn(),
       onSelect: vi.fn(),
       onSelectAll: vi.fn(),
-      onOpen: vi.fn(),
       onEdit: vi.fn(),
       onCopy: vi.fn(),
       onBind: vi.fn(),
       onToggle: vi.fn(),
       onDelete: vi.fn(),
-      onImagePreview: vi.fn(),
     }));
 
     expect(html).toContain('<span class="coupons-muted coupons-row-number">88</span>');
-    expect(html).toContain('<span>备注信息</span>');
+    expect(html).toContain('<span>名称</span><span>类型</span><span>内容预览</span><span>备注信息</span>');
     expect(html).toContain('<span class="coupons-note" title="备注内容">备注内容</span>');
+    expect(html).toContain('<span class="coupons-preview-cell" title="正文预览">正文预览</span>');
     expect(html).toContain('<div class="coupons-title"><strong>资料包</strong></div>');
+    expect(html).not.toContain('对接信息');
+    expect(html).not.toContain('库存 2');
+    expect(html).not.toContain('查看明细');
+    expect(html).toContain('aria-label="更多"');
+    expect(html).not.toContain('coupons-action-icon');
     expect(html).not.toContain('规格：版本 = 标准版');
   });
 
@@ -98,13 +104,11 @@ describe('CouponBatchTable', () => {
       onPageChange: vi.fn(),
       onSelect: vi.fn(),
       onSelectAll: vi.fn(),
-      onOpen: vi.fn(),
       onEdit: vi.fn(),
       onCopy: vi.fn(),
       onBind: vi.fn(),
       onToggle: vi.fn(),
       onDelete: vi.fn(),
-      onImagePreview: vi.fn(),
     }));
 
     expect(html).toContain('<div class="coupons-table-region"><div class="coupons-table-scroll"><div class="coupons-table"');
@@ -125,17 +129,27 @@ describe('CouponBatchTable', () => {
       onPageChange: vi.fn(),
       onSelect: vi.fn(),
       onSelectAll: vi.fn(),
-      onOpen: vi.fn(),
       onEdit: vi.fn(),
       onCopy: vi.fn(),
       onBind: vi.fn(),
       onToggle: vi.fn(),
       onDelete: vi.fn(),
-      onImagePreview: vi.fn(),
     }));
 
     expect(html).toContain('data-testid="coupon-sort-createdAt"');
     expect(html).toContain('aria-sort="descending"');
     expect(html).toContain('当前降序');
+  });
+
+  it('uses the shared table typography and text-button action treatment', () => {
+    expect(couponsCss).toContain('.coupons-row { display: grid;');
+    expect(couponsCss).toContain('font-size: 14px; line-height: 1.6;');
+    expect(couponsCss).toContain('.coupons-head { position: sticky;');
+    expect(couponsCss).toContain('font-size: 13px; line-height: 1.5;');
+    expect(couponsCss).toContain('.coupons-preview-cell {');
+    expect(couponsCss).toContain('text-overflow: ellipsis; white-space: nowrap;');
+    expect(couponsCss).toContain('.coupons-more-menu {');
+    expect(couponsCss).not.toContain('.coupons-action-icon');
+    expect(couponsCss).not.toContain('.coupons-drawer');
   });
 });

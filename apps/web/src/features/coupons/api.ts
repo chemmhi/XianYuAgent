@@ -1,4 +1,4 @@
-import type { CouponBatchFilters, CouponBatchVM, CouponBindingVM, CouponContentPreviewVM, CouponItemVM, CreateCouponBatchRequest, CouponsPageVM, DeliveryScope, InventoryLockVM, StockAlert, UpdateCouponBatchRequest, CouponMetadataVM } from './types';
+import type { CouponBatchFilters, CouponBatchVM, CouponBindingVM, CouponItemVM, CreateCouponBatchRequest, CouponsPageVM, DeliveryScope, InventoryLockVM, StockAlert, UpdateCouponBatchRequest, CouponMetadataVM } from './types';
 
 export interface CouponsApiTransport {
   get<T>(path: string): Promise<T>;
@@ -18,7 +18,6 @@ export interface CouponsApi {
   voidBatch(batchId: string): Promise<InventoryLockVM>;
   deleteBatch(batchId: string): Promise<InventoryLockVM>;
   batchDelete(batchIds: string[]): Promise<InventoryLockVM[]>;
-  getContent(couponId: string, options?: { purpose?: 'delivery' | 'preview' | 'audit'; deliveryScope?: DeliveryScope }): Promise<CouponContentPreviewVM>;
 }
 
 interface ApiEnvelope<T> { success: boolean; data: T | null; message?: string | null; error?: { code?: string }; }
@@ -184,18 +183,13 @@ export function createCouponsApi(transport: CouponsApiTransport): CouponsApi {
       for (const batchId of batchIds) results.push(await this.deleteBatch(batchId));
       return results;
     },
-    async getContent(couponId, options = {}) {
-      const params = new URLSearchParams({ purpose: options.purpose ?? 'preview', deliveryScope: options.deliveryScope ?? 'operator_only' });
-      const payload = await transport.get<CouponContentPreviewVM | ApiEnvelope<CouponContentPreviewVM>>(`/api/v1/coupons/${encodeURIComponent(couponId)}/content?${params.toString()}`);
-      return unwrapEnvelope(payload);
-    },
   };
 }
 
 export function createMockCouponsApi(seed: CouponBatchVM[] = [
-  { batchId: '1', accountId: 'account-001', label: 'Python 全栈资料包', purpose: 'text', deliveryScope: 'buyer_deliverable', status: 'active', totalCount: 480, availableCount: 368, reservedCount: 12, consumedCount: 100, stockAlert: 'normal', version: 4, createdAt: '2026-09-19T15:20:00.000Z', updatedAt: '2026-09-19T16:20:00.000Z', bindings: [{ bindingId: 'binding-001', batchId: '1', productId: 'product-001', productTitle: 'Python 全栈资料包', priority: 0, status: 'active' }], items: [{ id: 'coupon-001', batchId: '1', maskedLabel: 'PY-••••-0001', status: 'available' }] },
-  { batchId: '2', accountId: 'account-001', label: 'GitHub 源码下载', purpose: 'data', deliveryScope: 'operator_only', status: 'active', totalCount: 40, availableCount: 3, reservedCount: 0, consumedCount: 37, stockAlert: 'low_stock', version: 2, createdAt: '2026-09-18T10:40:00.000Z', updatedAt: '2026-09-18T11:40:00.000Z', bindings: [], items: [{ id: 'coupon-002', batchId: '2', maskedLabel: 'GH-••••-0021', status: 'available' }] },
-  { batchId: '3', accountId: 'account-002', label: '设计素材合集', purpose: 'image', deliveryScope: 'operator_only', status: 'paused', totalCount: 0, availableCount: 0, reservedCount: 0, consumedCount: 0, stockAlert: 'exhausted', version: 1, createdAt: '2026-09-17T08:05:00.000Z', updatedAt: '2026-09-17T09:05:00.000Z', bindings: [], items: [] },
+  { batchId: '1', accountId: 'account-001', label: 'Python 全栈资料包', purpose: 'text', deliveryScope: 'buyer_deliverable', status: 'active', totalCount: 480, availableCount: 368, reservedCount: 12, consumedCount: 100, stockAlert: 'normal', version: 4, createdAt: '2026-09-19T15:20:00.000Z', updatedAt: '2026-09-19T16:20:00.000Z', bindings: [{ bindingId: 'binding-001', batchId: '1', productId: 'product-001', productTitle: 'Python 全栈资料包', priority: 0, status: 'active' }], items: [{ id: 'coupon-001', batchId: '1', maskedLabel: 'PY-••••-0001', status: 'available' }], contentPreview: { text: '购买后自动发放 Python 全栈资料包下载说明' } },
+  { batchId: '2', accountId: 'account-001', label: 'GitHub 源码下载', purpose: 'data', deliveryScope: 'operator_only', status: 'active', totalCount: 40, availableCount: 3, reservedCount: 0, consumedCount: 37, stockAlert: 'low_stock', version: 2, createdAt: '2026-09-18T10:40:00.000Z', updatedAt: '2026-09-18T11:40:00.000Z', bindings: [], items: [{ id: 'coupon-002', batchId: '2', maskedLabel: 'GH-••••-0021', status: 'available' }], contentPreview: { dataRemaining: 3 } },
+  { batchId: '3', accountId: 'account-002', label: '设计素材合集', purpose: 'image', deliveryScope: 'operator_only', status: 'paused', totalCount: 0, availableCount: 0, reservedCount: 0, consumedCount: 0, stockAlert: 'exhausted', version: 1, createdAt: '2026-09-17T08:05:00.000Z', updatedAt: '2026-09-17T09:05:00.000Z', bindings: [], items: [], contentPreview: { imageUrls: ['暂无图片'] } },
 ]): CouponsApi {
   let batches: CouponBatchVM[] = seed.map((batch) => ({ ...batch, bindings: [...batch.bindings], items: batch.items?.map((item) => ({ ...item })) }));
   const nextBatchId = () => {
@@ -247,7 +241,6 @@ export function createMockCouponsApi(seed: CouponBatchVM[] = [
     async voidBatch(batchId) { const batch = batches.find((item) => item.batchId === batchId); if (!batch) throw Object.assign(new Error('BATCH_NOT_FOUND'), { status: 404 }); batch.status = 'voided'; batch.availableCount = 0; batch.stockAlert = 'exhausted'; batch.version += 1; batch.updatedAt = new Date().toISOString(); return batch; },
     async deleteBatch(batchId) { const batch = batches.find((item) => item.batchId === batchId); if (!batch) throw Object.assign(new Error('BATCH_NOT_FOUND'), { status: 404 }); batch.status = 'voided'; batch.availableCount = 0; batch.stockAlert = 'exhausted'; batch.version += 1; batch.updatedAt = new Date().toISOString(); return batch; },
     async batchDelete(batchIds) { return Promise.all(batchIds.map((batchId) => this.deleteBatch(batchId))); },
-    async getContent(couponId, options = {}) { const item = batches.flatMap((batch) => batch.items ?? []).find((candidate) => candidate.id === couponId); const batch = item ? batches.find((candidate) => candidate.batchId === item.batchId) : undefined; return { couponId, batchId: batch?.batchId ?? '1', purpose: options.purpose ?? 'preview', deliveryScope: options.deliveryScope ?? 'operator_only', accountIds: [batch?.accountId ?? 'account-001'], content: { body: 'preview-only coupon content', quarkUrl: 'https://pan.quark.cn/s/example', extractionCode: 'AB12' }, access: { allowed: true, purpose: options.purpose ?? 'preview', auditRef: `AUD-${Date.now()}` }, inventoryStatus: 'available' }; },
   };
 }
 

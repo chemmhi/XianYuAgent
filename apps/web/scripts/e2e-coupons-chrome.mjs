@@ -190,8 +190,9 @@ async function run() {
   const persistedInStore = await waitFor(async () => { const page = await apiRuntime.store.listCouponBatches(adminId, { accountId: account.id, page: 1, pageSize: 100 }); return page.items.some((item) => item.label === createdLabel); }, 'coupon API persistence');
   if (!persistedInStore) throw new Error('UI-created coupon was not persisted by the API store');
   await assertText(cdp, `E2E UI 固定文字内容 ${process.pid}`);
-  const tableLayoutAudit = await evaluate(cdp, `(() => { const scroll = document.querySelector('.coupons-table-scroll'); const table = document.querySelector('[data-coupons-table]'); const firstRow = document.querySelector('[data-coupons-table] .coupons-row:not(.coupons-head)'); const layoutRow = Array.from(document.querySelectorAll('[data-batch-id]')).find((row) => row.querySelector('.coupons-title')?.textContent?.trim() === ${JSON.stringify(layoutCouponLabel)}); const style = scroll ? getComputedStyle(scroll) : null; const title = layoutRow?.querySelector('.coupons-title')?.textContent?.trim() ?? ''; const note = layoutRow?.querySelector('.coupons-note')?.textContent?.trim() ?? ''; return { hasHeader: (table?.querySelector('.coupons-head')?.textContent ?? '').includes('备注信息'), firstNumber: firstRow?.querySelector('.coupons-row-number')?.textContent?.trim() ?? '', overflowY: style?.overflowY ?? '', clientHeight: scroll?.clientHeight ?? 0, scrollHeight: scroll?.scrollHeight ?? 0, title, note }; })()`);
-  if (!tableLayoutAudit || !tableLayoutAudit.hasHeader || !/^[1-9]\d*$/.test(String(tableLayoutAudit.firstNumber)) || !['auto', 'scroll'].includes(tableLayoutAudit.overflowY) || tableLayoutAudit.scrollHeight <= tableLayoutAudit.clientHeight) throw new Error('coupon table does not expose the expected numeric ID and internal scroll region');
+  const tableLayoutAudit = await evaluate(cdp, `(() => { const scroll = document.querySelector('.coupons-table-scroll'); const table = document.querySelector('[data-coupons-table]'); const firstRow = document.querySelector('[data-coupons-table] .coupons-row:not(.coupons-head)'); const layoutRow = Array.from(document.querySelectorAll('[data-batch-id]')).find((row) => row.querySelector('.coupons-title')?.textContent?.trim() === ${JSON.stringify(layoutCouponLabel)}); const style = scroll ? getComputedStyle(scroll) : null; const title = layoutRow?.querySelector('.coupons-title')?.textContent?.trim() ?? ''; const note = layoutRow?.querySelector('.coupons-note')?.textContent?.trim() ?? ''; const headers = Array.from(table?.querySelectorAll('.coupons-head > span') ?? []).map((item) => (item.textContent?.trim() ?? '').replace(/[↕↑↓]/g, '').trim()); const preview = layoutRow?.querySelector('.coupons-preview-cell'); const actionButtons = layoutRow?.querySelectorAll('.coupons-row-actions > button, .coupons-row-actions > .coupons-more-actions > button')?.length ?? 0; return { hasHeader: (table?.querySelector('.coupons-head')?.textContent ?? '').includes('备注信息'), firstNumber: firstRow?.querySelector('.coupons-row-number')?.textContent?.trim() ?? '', overflowY: style?.overflowY ?? '', clientHeight: scroll?.clientHeight ?? 0, scrollHeight: scroll?.scrollHeight ?? 0, title, note, headers, previewTag: preview?.tagName ?? '', previewClass: preview?.className ?? '', actionButtons }; })()`);
+  const expectedHeaders = ['ID', '名称', '类型', '内容预览', '备注信息', '发货设置', '状态', '时间', '操作'];
+  if (!tableLayoutAudit || !tableLayoutAudit.hasHeader || JSON.stringify(tableLayoutAudit.headers) !== JSON.stringify(expectedHeaders) || !/^[1-9]\d*$/.test(String(tableLayoutAudit.firstNumber)) || !['auto', 'scroll'].includes(tableLayoutAudit.overflowY) || tableLayoutAudit.scrollHeight <= tableLayoutAudit.clientHeight || tableLayoutAudit.actionButtons !== 3 || tableLayoutAudit.previewTag !== 'SPAN' || !String(tableLayoutAudit.previewClass).includes('coupons-preview-cell')) throw new Error('coupon table does not expose the expected columns, typography cells, actions, and internal scroll region');
   if (tableLayoutAudit.title !== layoutCouponLabel || tableLayoutAudit.note !== `布局备注 ${process.pid}`) throw new Error('coupon name and remark columns are not separated');
   const sortButtonState = await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=coupon-sort-createdAt]"); return button ? { ariaSort: button.getAttribute("aria-sort"), text: button.textContent?.trim() ?? "" } : null; })()');
   if (!sortButtonState || sortButtonState.ariaSort !== 'descending' || !sortButtonState.text.includes('时间')) throw new Error('coupon created-time sort control missing default descending state');
@@ -230,38 +231,31 @@ async function run() {
   await evaluate(cdp, 'document.querySelector(".coupons-editor-modal button[type=submit]")?.click()');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes(copiedLabel), 'coupon copy persisted');
 
-  const toggleDisabled = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(editedLabel)})); const button = row?.querySelector('button[aria-label="禁用"]'); if (!button) return false; button.click(); return true; })()`);
-  if (!toggleDisabled) throw new Error('created coupon disable button missing');
-  await waitFor(async () => await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(editedLabel)})); return Boolean(row?.querySelector('button[aria-label="启用"]')); })()`), 'coupon toggle disabled');
-  const toggleEnabled = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(editedLabel)})); const button = row?.querySelector('button[aria-label="启用"]'); if (!button) return false; button.click(); return true; })()`);
-  if (!toggleEnabled) throw new Error('created coupon enable button missing');
-  await waitFor(async () => await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(editedLabel)})); return Boolean(row?.querySelector('button[aria-label="禁用"]')); })()`), 'coupon toggle enabled');
-
-  const opened = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(editedLabel)})); const button = row?.querySelector('button[aria-label="查看明细"]'); if (!button) return false; button.click(); return true; })()`);
-  if (!opened) throw new Error('coupon detail button missing');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('导入库存'), 'coupon drawer');
-  const importReady = await evaluate(cdp, '(() => { const area = Array.from(document.querySelectorAll("textarea")).find((item) => item.getAttribute("placeholder")?.includes("每行一个卡券正文")); if (!area) return false; const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set; setter?.call(area, "E2E-COUPON-003"); area.dispatchEvent(new Event("input", { bubbles: true })); area.dispatchEvent(new Event("change", { bubbles: true })); return true; })()');
-  if (!importReady) throw new Error('coupon import textarea missing');
-  await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.includes("导入库存"))?.click()');
-  await waitFor(async () => Boolean(await evaluate(cdp, 'Array.from(document.querySelectorAll("[data-coupon-drawer] button")).some((button) => button.textContent?.includes("查看首条可用正文"))')), 'coupon import completed');
-
-  const previewButton = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent?.includes("查看首条可用正文")); if (!button) return false; button.click(); return true; })()');
-  if (!previewButton) throw new Error('coupon preview button missing');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('E2E-COUPON-003'), 'controlled coupon preview');
-  await assertText(cdp, '复制正文');
-
-  const bindReady = await evaluate(cdp, `(() => { const input = document.querySelector('input[placeholder="product UUID"]'); if (!input) return false; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set; setter?.call(input, "${product.id}"); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
-  if (!bindReady) throw new Error('coupon binding input missing');
-  await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "绑定")?.click()');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes(`${product.id}`), 'coupon binding completed');
-
-  await evaluate(cdp, 'window.confirm = () => true; Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.includes("作废批次"))?.click()');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('voided'), 'coupon void completed');
+  const openMore = async () => {
+    const opened = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(editedLabel)})); const button = row?.querySelector('button[aria-label="更多"]'); if (!button) return false; button.click(); return true; })()`);
+    if (!opened) throw new Error('coupon more button missing');
+    await waitFor(async () => await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(editedLabel)})); return Boolean(row?.querySelector('[role="menu"]')); })()`), 'coupon more menu');
+  };
+  await openMore();
+  const toggleDisabled = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(editedLabel)})); const button = Array.from(row?.querySelectorAll('[role="menuitem"]') ?? []).find((candidate) => candidate.textContent?.trim() === '禁用'); if (!button) return false; button.click(); return true; })()`);
+  if (!toggleDisabled) throw new Error('created coupon disable menu item missing');
+  await waitFor(async () => await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(editedLabel)})); return row?.textContent?.includes('禁用') ?? false; })()`), 'coupon toggle disabled');
+  await openMore();
+  const toggleEnabled = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(editedLabel)})); const button = Array.from(row?.querySelectorAll('[role="menuitem"]') ?? []).find((candidate) => candidate.textContent?.trim() === '启用'); if (!button) return false; button.click(); return true; })()`);
+  if (!toggleEnabled) throw new Error('created coupon enable menu item missing');
+  await waitFor(async () => await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(editedLabel)})); return row?.textContent?.includes('启用') ?? false; })()`), 'coupon toggle enabled');
+  const drawerCount = await evaluate(cdp, 'document.querySelectorAll(".coupons-drawer, [data-coupon-drawer]").length');
+  if (drawerCount !== 0) throw new Error('coupon detail drawer still renders');
+  await openMore();
+  await evaluate(cdp, 'window.confirm = () => true');
+  const deleteReady = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(editedLabel)})); const button = Array.from(row?.querySelectorAll('[role="menuitem"]') ?? []).find((candidate) => candidate.textContent?.trim() === '删除'); if (!button) return false; button.click(); return true; })()`);
+  if (!deleteReady) throw new Error('created coupon delete menu item missing');
+  await waitFor(async () => !String(await evaluate(cdp, 'document.body.innerText')).includes(editedLabel), 'coupon delete completed');
   await cdp.send('Page.reload', { ignoreCache: true });
-  await waitFor(async () => { const body = String(await evaluate(cdp, 'document.body.innerText')); return body.includes(copiedLabel) && !body.includes(editedLabel); }, 'coupon reload persistence and voided hidden');
+  await waitFor(async () => { const body = String(await evaluate(cdp, 'document.body.innerText')); return body.includes(copiedLabel) && !body.includes(editedLabel); }, 'coupon reload persistence and deleted hidden');
   await captureViewport(cdp, 390, 844, 'coupons-mobile-390x844.png');
   await cdp.send('Emulation.clearDeviceMetricsOverride');
-  console.log('local Chrome E2E passed: UI create -> list -> edit/copy/toggle -> import/bind/void -> reload with hidden history');
+  console.log('local Chrome E2E passed: UI create -> list -> edit/copy/toggle/more/delete -> reload');
   cdp.socket.close();
 }
 

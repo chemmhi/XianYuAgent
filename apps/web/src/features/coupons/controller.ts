@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createMockCouponsApi, type CouponsApi } from './api';
-import type { CouponBatchFilters, CouponContentPreviewVM, CouponDetailState, CouponMutationState, CouponsLoadError, CouponsQueryState, CreateCouponBatchRequest, InventoryLockVM, UpdateCouponBatchRequest } from './types';
+import type { CouponBatchFilters, CouponMutationState, CouponsLoadError, CouponsQueryState, CreateCouponBatchRequest, UpdateCouponBatchRequest } from './types';
 
 const defaultCouponsApi = createMockCouponsApi();
 
@@ -18,20 +18,13 @@ export interface CouponsController {
   setFilters: (filters: CouponBatchFilters | ((previous: CouponBatchFilters) => CouponBatchFilters)) => void;
   setKeyword: (keyword: string) => void;
   reload: () => Promise<void>;
-  openBatch: (batchId: string) => Promise<void>;
-  closeBatch: () => void;
   createBatch: (input: CreateCouponBatchRequest) => Promise<void>;
   updateBatch: (batchId: string, input: UpdateCouponBatchRequest) => Promise<void>;
-  importItems: (batchId: string, items: string[]) => Promise<void>;
   bindBatch: (batchId: string, productId: string) => Promise<void>;
   unbindBatch: (batchId: string, productId: string) => Promise<void>;
-  voidBatch: (batchId: string) => Promise<void>;
   deleteBatch: (batchId: string) => Promise<void>;
   batchDelete: (batchIds: string[]) => Promise<void>;
-  previewContent: (couponId: string) => Promise<void>;
   state: CouponsQueryState;
-  detail: CouponDetailState;
-  content: CouponContentPreviewVM | null;
   mutation: CouponMutationState;
 }
 
@@ -39,8 +32,6 @@ export function useCouponsController(options: { api?: CouponsApi; initialFilters
   const api = options.api ?? defaultCouponsApi;
   const [filters, setFilters] = useState<CouponBatchFilters>({ page: 1, pageSize: 20, ...options.initialFilters });
   const [state, setState] = useState<CouponsQueryState>({ phase: 'idle', data: null, error: null });
-  const [detail, setDetail] = useState<CouponDetailState>({ phase: 'idle', data: null, error: null });
-  const [content, setContent] = useState<CouponContentPreviewVM | null>(null);
   const [mutation, setMutation] = useState<CouponMutationState>({ phase: 'idle', error: null });
   const requestId = useRef(0);
 
@@ -60,46 +51,25 @@ export function useCouponsController(options: { api?: CouponsApi; initialFilters
 
   useEffect(() => { void reload(); }, [reload]);
 
-  const openBatch = useCallback(async (batchId: string) => {
-    setDetail({ phase: 'loading', batchId, data: null, error: null });
-    setContent(null);
-    try { setDetail({ phase: 'success', batchId, data: await api.getDetail(batchId), error: null }); }
-    catch (error) { const mapped = toCouponsLoadError(error); setDetail({ phase: mapped.code === 'FORBIDDEN' ? 'forbidden' : 'error', batchId, data: null, error: mapped }); }
-  }, [api]);
-
-  const closeBatch = useCallback(() => { setDetail({ phase: 'idle', data: null, error: null }); setContent(null); }, []);
   const setKeyword = useCallback((keyword: string) => setFilters((previous) => ({ ...previous, keyword, page: 1 })), []);
-
-  const runMutation = useCallback(async (action: () => Promise<InventoryLockVM | unknown>, batchId?: string) => {
+  const runMutation = useCallback(async (action: () => Promise<unknown>) => {
     setMutation({ phase: 'submitting', error: null });
     try {
       await action();
       setMutation({ phase: 'success', error: null });
       await reload();
-      if (batchId) await openBatch(batchId);
     } catch (error) {
       setMutation({ phase: 'error', error: toCouponsLoadError(error) });
       throw error;
     }
-  }, [openBatch, reload]);
+  }, [reload]);
 
   const createBatch = useCallback(async (input: CreateCouponBatchRequest) => { await runMutation(() => api.createBatch(input)); }, [api, runMutation]);
-  const updateBatch = useCallback(async (batchId: string, input: UpdateCouponBatchRequest) => { await runMutation(() => api.updateBatch(batchId, input), batchId); }, [api, runMutation]);
-  const importItems = useCallback(async (batchId: string, items: string[]) => { await runMutation(() => api.importItems(batchId, items), batchId); }, [api, runMutation]);
-  const bindBatch = useCallback(async (batchId: string, productId: string) => { await runMutation(() => api.bindBatch(batchId, productId), batchId); }, [api, runMutation]);
-  const unbindBatch = useCallback(async (batchId: string, productId: string) => { await runMutation(() => api.unbindBatch(batchId, productId), batchId); }, [api, runMutation]);
-  const voidBatch = useCallback(async (batchId: string) => { await runMutation(() => api.voidBatch(batchId), batchId); }, [api, runMutation]);
+  const updateBatch = useCallback(async (batchId: string, input: UpdateCouponBatchRequest) => { await runMutation(() => api.updateBatch(batchId, input)); }, [api, runMutation]);
+  const bindBatch = useCallback(async (batchId: string, productId: string) => { await runMutation(() => api.bindBatch(batchId, productId)); }, [api, runMutation]);
+  const unbindBatch = useCallback(async (batchId: string, productId: string) => { await runMutation(() => api.unbindBatch(batchId, productId)); }, [api, runMutation]);
   const deleteBatch = useCallback(async (batchId: string) => { await runMutation(() => api.deleteBatch(batchId)); }, [api, runMutation]);
   const batchDelete = useCallback(async (batchIds: string[]) => { await runMutation(() => api.batchDelete(batchIds)); }, [api, runMutation]);
-  const previewContent = useCallback(async (couponId: string) => {
-    setContent(null);
-    try {
-      const scope = detail.data?.deliveryScope ?? 'operator_only';
-      setContent(await api.getContent(couponId, { purpose: 'preview', deliveryScope: scope }));
-    } catch (error) {
-      setMutation({ phase: 'error', error: toCouponsLoadError(error) });
-    }
-  }, [api, detail.data?.deliveryScope]);
 
-  return useMemo(() => ({ filters, setFilters, setKeyword, reload, openBatch, closeBatch, createBatch, updateBatch, importItems, bindBatch, unbindBatch, voidBatch, deleteBatch, batchDelete, previewContent, state, detail, content, mutation }), [batchDelete, bindBatch, closeBatch, content, createBatch, deleteBatch, detail, filters, importItems, mutation, openBatch, previewContent, reload, setKeyword, state, unbindBatch, updateBatch, voidBatch]);
+  return useMemo(() => ({ filters, setFilters, setKeyword, reload, createBatch, updateBatch, bindBatch, unbindBatch, deleteBatch, batchDelete, state, mutation }), [batchDelete, bindBatch, createBatch, deleteBatch, filters, mutation, reload, setKeyword, state, unbindBatch, updateBatch]);
 }
