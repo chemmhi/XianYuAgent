@@ -65,3 +65,20 @@ knowledge、review 不属于本轮正式一级页面，已决定直接删除原�
 - 账号展示与查询沿用全局 `AccountContext`，页面不新增账号选择器或重复账号 chip。
 - 最新证据：桌面、桌面抽屉、移动主页面、移动抽屉四张截图及 `evidence.json`；截图由 `npm --workspace apps/web run test:e2e:chrome:agent-dynamics` 生成。
 - 视觉验收不只看布局和文案：已从原型 HTML Git blob `620429f9d073011d6d88d7be87fc3ef49f227152` 提取并比对 18 个核心样式 token（颜色、阴影、圆角、间距、字号、字体栈），18/18 语义匹配；详细记录见 `docs/agent/agent-dynamics/evidence/visual-diff.md`。
+
+## 账号弹窗视觉复核（2026-09-22）
+
+- 设计稿源文件：`docs/design/account-login-dialog-design.html`；设计稿截图：`account-dialog-design-1440x900.png`、`account-dialog-design-390x844.png`。
+- 实现截图：`accounts-login-modal-creating-desktop-1440x900.png`、`accounts-login-modal-creating-mobile-390x844.png`、`accounts-login-modal-desktop-1440x900.png`、`accounts-login-modal-mobile-390x844.png`、`accounts-delete-modal-desktop-1440x900.png`、`accounts-delete-modal-mobile-390x844.png`。
+
+| 对比项 | 设计稿基线 | 实现复核结果 | 结论 |
+| --- | --- | --- | --- |
+| 登录弹窗尺寸 | 桌面固定 680×540；移动端受视口约束 | Chrome/CDP 实拍桌面 680×540；移动端无横向溢出 | PASS |
+| 删除弹窗尺寸 | 桌面约 430px；移动端全宽收窄 | Chrome/CDP 实拍桌面 430px；移动端保留双按钮和安全边距 | PASS |
+| 遮罩与背景 | `rgba(17,24,39,.54)` + `blur(7px)`；白色 16px 圆角卡片 | 账号专用遮罩和卡片样式已隔离于全局 modal；实拍背景层级、圆角和阴影一致 | PASS |
+| 登录操作 | 仅右上角关闭按钮；移除“刷新二维码”“取消登录” | 实拍仅保留右上角关闭按钮 | PASS |
+| 二维码区域 | 固定 292px；二维码/生成提示垂直居中；辅助文案完整 | 实拍固定扫码区无内部滚动条；生成中居中由 `QrLoginView` 回归测试覆盖 | PASS |
+| 状态切换稳定性 | 生成中与二维码展示后共享同一扫码区高度和纵向位置 | Chrome/CDP 在同一 1440×900 视口下比较两态 DOM 几何，扫码区 top/height/bottom 偏差 ≤1.5px | PASS |
+| 删除确认 | 产品内风险提示、脱敏账号摘要、取消/删除动作 | 实拍已替换浏览器 `window.confirm`，失败和提交中状态保留 | PASS |
+
+本轮对比前发现的 P2 偏差为账号弹窗被全局 `.modal-card` 注入顺序覆盖内边距、溢出和删除宽度；以及 QR 视图在生成中与展示后子节点数量不同导致 Grid 拉伸、扫码区发生跳动。已通过提高 specificity、固定状态行占位、`align-content:start` 和桌面端间距修正关闭。登录截图中的“二维码暂不可用”属于受控 harness 未返回图像时的业务占位态，不影响固定扫码区和居中布局验收；Chrome/CDP 已对两态几何位置做回归断言。

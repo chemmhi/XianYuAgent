@@ -472,3 +472,14 @@
 | S5-R92 | 质量 / 发布 | 全量类型检查、构建、API/Web 测试、smoke、Compose 配置和差异卫生是否通过 | root | PARTIALLY_VERIFIED | `npm run typecheck`、`npm test`、`npm run build`、`node apps/api/scripts/coupons-smoke.mjs`、`node apps/api/scripts/products-smoke.mjs`、`docker compose config --quiet`、`git diff --check`；真实 PostgreSQL 迁移/rollback 因环境缺失未执行 |
 
 本轮结论：用户提出的全部卡券列表与批次序号需求已在代码和受控跨层路径中覆盖；真实 PostgreSQL 迁移 apply/rollback/复读仍待具备 `DATABASE_URL` 与运行中数据库后复审，当前切片保持 `READY_FOR_REVIEW`。
+
+### 2026-09-22：S4-VS1 登录 / 删除弹窗视觉复核
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R93 | 业务 / 验收 | 登录弹窗是否只保留右上角关闭按钮，删除账号是否改为产品内确认弹窗 | root + visual_compare | PASS | `AccountLoginModal.tsx`、`AccountDeleteModal.tsx`；Chrome/CDP 删除确认链路 |
+| S5-R94 | 前端 / 视觉 | 680×540 登录尺寸、430px 删除尺寸、遮罩、白卡片背景、16px 圆角、阴影和移动端收窄 | root + visual_compare | PASS | `docs/design/account-login-dialog-design.html`；`account-dialog-design-1440x900.png` / `account-dialog-design-390x844.png`；对应实现截图 |
+| S5-R95 | 交互 / 状态 | 二维码区域固定 292px，生成中提示居中，桌面端无内部滚动条，提交中删除按钮禁用 | root + component_tests | PASS | `QrLoginView.test.tsx`、`AccountDeleteModal.test.tsx`、`AccountLoginModal.test.tsx`；`npm --workspace apps/web run test -- --run ...` |
+| S5-R96 | 质量 / 浏览器 | 真实 Vite + API + Chrome/CDP 是否完成登录 → 搜索 → 切换 → 删除 → 退出，并验证生成中/展示后扫码区不跳动 | root | PASS（受控 harness） | `npm --workspace apps/web run test:e2e:chrome`；同一 1440×900 视口下布局偏差 ≤1.5px；`docs/evidence/stage5/S4-VS1/screenshots/` |
+
+本轮结论：账号登录和删除弹窗的视觉 P2 已修复并通过设计稿对比、组件回归和 Chrome/CDP 实拍复验；生成中与二维码展示后共用固定状态行和扫码区几何，消除灰色区域跳动。全量 Web 测试仍有既有 `App.dashboard-mode.test.ts` 失败（`useAccountContext` 缺少 Provider），与本轮账号弹窗改动无关；不因该既有失败扩大本次提交范围。

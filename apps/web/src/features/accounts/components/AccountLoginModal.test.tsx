@@ -32,5 +32,6 @@ describe('AccountLoginModal', () => {
     expect(html).toContain('data-login-method="cookie" class="account-login-method active"');
     expect(html).toContain('验证 Cookie 并更新账号');
     expect(html).not.toContain('data-login-method="qr" class="account-login-method active"');
+    expect(html).not.toContain('class="card-actions"');
   });
 });

@@ -1,5 +1,14 @@
 # XianyuSellerAgent 项目状态
 
+## 2026-09-22 账号弹窗视觉修订
+
+- 登录弹窗按设计稿固定为桌面 680×540，移除“刷新二维码”“取消登录”，仅保留右上角关闭按钮；二维码区域固定 292px，生成中提示在区域内居中。
+- 生成中与二维码展示后复用固定状态行占位，QR Grid 改为顶部对齐；同一 1440×900 视口下 Chrome/CDP 几何偏差 ≤1.5px，避免灰色扫码区高度变化造成闪动。
+- 账号弹窗使用独立 `account-modal-backdrop`（`rgba(17,24,39,.54)` + `blur(7px)`）和白色 16px 圆角卡片；删除账号由浏览器 `window.confirm` 改为产品内 `AccountDeleteModal`，桌面宽度约 430px。
+- 设计稿与实现截图对比已归档：`docs/design/account-login-dialog-design.html`、`docs/evidence/stage5/S4-VS1/screenshots/account-dialog-design-1440x900.png`、`account-dialog-design-390x844.png`、`accounts-login-modal-creating-*.png`、`accounts-login-modal-*.png`、`accounts-delete-modal-*.png`；逐项记录见 `docs/07-visual-acceptance.md` 与 `docs/05-review-log.md`。
+- 已验证：账号组件 3 个测试文件 / 7 个用例、`npm --workspace apps/web run typecheck`、`npm --workspace apps/web run build`、`node --check apps/web/scripts/e2e-chrome.mjs`、`npm --workspace apps/web run test:e2e:chrome` 均通过。
+- 已知未关闭项：Web 全量测试仍有既有 `src/app/App.dashboard-mode.test.ts` 失败（缺少 `AccountContextProvider`）；全仓 `git diff --check` 仍被既有 `.gitignore` 第 8 行尾随空格阻断，本次相关文件定向 diff 检查通过。
+
 ## 2026-09-21 全局 SelectField 统一
 
 - 全局盘点确认项目已有共享 `apps/web/src/shared/ui/SelectField.tsx`；账号、商品、卡券、订单、设置及 Agent 动态的业务下拉全部统一复用，业务层不再直接渲染原生 `<select>`。
