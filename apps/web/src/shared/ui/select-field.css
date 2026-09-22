@@ -30,9 +30,9 @@
   background: var(--bg);
   color: var(--text);
   font-family: 'Inter', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 400;
-  line-height: 1.35;
+  line-height: 1.4;
   text-align: left;
   cursor: pointer;
 }
@@ -123,7 +123,8 @@
   background: transparent;
   color: var(--text);
   text-align: left;
-  font-size: 12px;
+  font-size: 14px;
+  line-height: 1.4;
   cursor: pointer;
 }
 

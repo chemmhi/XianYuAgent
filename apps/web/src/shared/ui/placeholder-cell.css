@@ -1,2 +1,2 @@
-.ui-placeholder-cell { display: inline-flex; align-items: center; min-height: 28px; padding: 0 9px; border: 1px dashed #CBD5E1; border-radius: 6px; color: var(--axis); font-size: 11px; font-style: italic; line-height: 1.4; }
+.ui-placeholder-cell { display: inline-flex; align-items: center; min-height: 28px; padding: 0 9px; border: 1px dashed #CBD5E1; border-radius: 6px; color: var(--axis); font-size: 12px; font-style: italic; line-height: 1.5; }
 .ui-placeholder-cell-tinted { border-style: solid; border-color: #D8E4EF; background: #F7FAFC; color: #8AA1B5; font-style: normal; }

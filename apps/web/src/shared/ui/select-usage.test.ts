@@ -40,7 +40,7 @@ describe('select usage architecture', () => {
     expect(css).toContain('border-radius: 7px');
     expect(css).toContain('background: var(--bg)');
     expect(css).toContain('color: var(--text)');
-    expect(css).toContain('font-size: 12px');
+    expect(css).toContain('font-size: 14px');
     expect(css).toContain('appearance: none');
     expect(css).toContain('.ui-select-control.is-focus select');
     expect(css).toContain('.ui-select-control.is-open select');

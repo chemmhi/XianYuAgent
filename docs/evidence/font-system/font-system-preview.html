@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>全平台字体规范 · HTML 预览</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
+    :root {
+      --font: Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+      --bg: #ECEEF2;
+      --canvas: #F6F7F9;
+      --card: #FFFFFF;
+      --sidebar: #1D2638;
+      --sidebar-hover: #253348;
+      --brand: #1F3A5F;
+      --link: #245A8D;
+      --text: #111827;
+      --sub: #475569;
+      --muted: #6B7280;
+      --border: #E5E7EB;
+      --success: #2E7D5B;
+      --success-bg: #EAF4EF;
+      --warn: #B7791F;
+      --warn-bg: #FEF3E2;
+      --danger: #B42318;
+      --danger-bg: #FEF0EF;
+      --shadow: 0 1px 3px rgba(17,24,39,.06);
+      --shadow-lg: 0 20px 70px rgba(17,24,39,.16);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); line-height: 1.55; }
+    button { font: inherit; }
+    .page { max-width: 1460px; margin: 0 auto; padding: 24px; }
+    .hero { padding: 28px 32px; border-radius: 18px; color: white; background: linear-gradient(135deg, #1D2638, #1F3A5F); box-shadow: var(--shadow-lg); }
+    .hero-kicker { margin-bottom: 10px; color: rgba(255,255,255,.72); font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    h1 { margin: 0 0 10px; font-size: 32px; line-height: 1.25; letter-spacing: -.02em; }
+    .hero p { max-width: 900px; margin: 0; color: rgba(255,255,255,.82); font-size: 16px; line-height: 1.65; }
+    .hero-meta { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+    .pill { display: inline-flex; align-items: center; min-height: 28px; padding: 0 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+    .pill-light { color: white; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.18); }
+    .pill-green { color: #14532D; background: #DCFCE7; }
+    .section { margin-top: 20px; padding: 22px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); box-shadow: var(--shadow); }
+    .section-head { display: flex; gap: 16px; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
+    h2 { margin: 0; font-size: 22px; line-height: 1.35; }
+    h3 { margin: 0; font-size: 16px; line-height: 1.5; }
+    .section-head p, .muted { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+    .rule { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; }
+    .rule-card { padding: 16px; border-radius: 10px; background: var(--canvas); border: 1px solid var(--border); }
+    .rule-card strong { display: block; margin-bottom: 6px; font-size: 16px; }
+    .rule-card span { display: block; color: var(--sub); font-size: 14px; line-height: 1.55; }
+    .rule-card.good { border-color: #BBE0D0; background: var(--success-bg); }
+    .rule-card.warn { border-color: #F3D8A8; background: var(--warn-bg); }
+    .type-grid { display: grid; gap: 10px; }
+    .type-row { display: grid; grid-template-columns: 180px 1fr 150px; gap: 14px; align-items: center; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+    .type-name { color: var(--sub); font-size: 13px; font-weight: 600; }
+    .type-sample { overflow-wrap: anywhere; }
+    .type-spec { color: var(--muted); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+    .display { font-size: 32px; line-height: 1.25; font-weight: 700; }
+    .page-title { font-size: 24px; line-height: 1.35; font-weight: 700; }
+    .section-title { font-size: 18px; line-height: 1.45; font-weight: 600; }
+    .card-title { font-size: 16px; line-height: 1.5; font-weight: 600; }
+    .body { font-size: 14px; line-height: 1.6; }
+    .secondary { font-size: 13px; line-height: 1.55; color: var(--sub); }
+    .helper { font-size: 12px; line-height: 1.5; color: var(--muted); }
+    .kpi { font-size: 28px; line-height: 1.2; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .badge-text { display: inline-block; padding: 3px 8px; border-radius: 4px; color: var(--success); background: var(--success-bg); font-size: 12px; line-height: 18px; font-weight: 600; }
+    .table-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
+    table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 14px; }
+    th, td { padding: 14px 16px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    th { color: var(--sub); background: #F8FAFC; font-size: 13px; font-weight: 600; }
+    td { line-height: 1.55; }
+    tr:last-child td { border-bottom: 0; }
+    .comparison { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
+    .compare-card { min-height: 220px; padding: 18px; border: 1px solid var(--border); border-radius: 12px; }
+    .compare-card h3 { margin-bottom: 12px; }
+    .compare-card.bad { border-color: #F4C7C3; background: #FFF8F7; }
+    .compare-card.good { border-color: #BBE0D0; background: #F8FFFB; }
+    .tiny-demo { color: var(--muted); font-size: 10px; line-height: 1.2; }
+    .small-demo { color: var(--sub); font-size: 12px; line-height: 1.45; }
+    .good-demo { color: var(--text); font-size: 14px; line-height: 1.6; }
+    .demo-line { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
+    .demo-line label { width: 64px; color: var(--muted); font-size: 12px; }
+    .demo-line code { padding: 3px 6px; border-radius: 4px; background: rgba(17,24,39,.06); color: var(--sub); font-size: 12px; }
+    .fake-app { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 540px; overflow: hidden; border: 1px solid rgba(17,24,39,.1); border-radius: 14px; background: var(--canvas); box-shadow: var(--shadow-lg); }
+    .fake-sidebar { padding: 20px 14px; color: white; background: var(--sidebar); }
+    .fake-brand { display: flex; gap: 10px; align-items: center; margin-bottom: 30px; }
+    .fake-mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; color: white; background: var(--link); font-size: 14px; font-weight: 700; }
+    .fake-brand strong { display: block; font-size: 14px; }
+    .fake-brand span { display: block; margin-top: 2px; color: rgba(255,255,255,.62); font-size: 12px; }
+    .fake-nav-title { margin: 0 10px 8px; color: rgba(255,255,255,.46); font-size: 12px; font-weight: 700; letter-spacing: .05em; }
+    .fake-nav { display: grid; gap: 5px; }
+    .fake-nav div { min-height: 38px; padding: 8px 10px; border-radius: 7px; color: rgba(255,255,255,.74); font-size: 14px; }
+    .fake-nav div.active { color: white; background: rgba(36,90,141,.58); }
+    .fake-main { min-width: 0; }
+    .fake-topbar { display: flex; justify-content: space-between; align-items: center; min-height: 60px; padding: 0 24px; border-bottom: 1px solid var(--border); background: white; }
+    .fake-topbar strong { font-size: 16px; }
+    .fake-topbar span { color: var(--muted); font-size: 13px; }
+    .fake-content { padding: 22px 24px 28px; }
+    .fake-page-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 18px; }
+    .fake-page-title h3 { font-size: 24px; line-height: 1.35; }
+    .fake-page-title p { margin: 5px 0 0; color: var(--sub); font-size: 14px; }
+    .fake-btn { min-height: 38px; padding: 0 14px; border: 0; border-radius: 8px; color: white; background: var(--link); font-size: 14px; font-weight: 600; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; margin-bottom: 14px; }
+    .kpi-card { padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: white; }
+    .kpi-card span { display: block; color: var(--sub); font-size: 14px; }
+    .kpi-card strong { display: block; margin: 8px 0 4px; font-size: 28px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+    .kpi-card small { color: var(--success); font-size: 12px; font-weight: 600; }
+    .dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(240px, .65fr); gap: 14px; }
+    .fake-card { padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: white; }
+    .fake-card h4 { margin: 0 0 12px; font-size: 16px; }
+    .fake-card p { margin: 0; color: var(--sub); font-size: 14px; line-height: 1.65; }
+    .fake-list { display: grid; gap: 8px; margin-top: 14px; }
+    .fake-list div { display: flex; justify-content: space-between; gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+    .fake-list div:last-child { border-bottom: 0; }
+    .fake-list span { color: var(--sub); }
+    .status { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 4px; color: var(--success); background: var(--success-bg); font-size: 12px; font-weight: 600; }
+    .mobile-wrap { display: grid; grid-template-columns: minmax(0, 390px) minmax(0, 1fr); gap: 18px; align-items: start; }
+    .mobile-frame { width: 390px; overflow: hidden; border: 8px solid #172033; border-radius: 28px; background: var(--canvas); box-shadow: var(--shadow-lg); }
+    .mobile-status { display: flex; justify-content: space-between; padding: 10px 18px 6px; color: var(--sub); background: white; font-size: 12px; }
+    .mobile-head { padding: 14px 16px; border-bottom: 1px solid var(--border); background: white; }
+    .mobile-head h3 { margin: 0; font-size: 20px; line-height: 1.4; }
+    .mobile-head p { margin: 4px 0 0; color: var(--sub); font-size: 14px; }
+    .mobile-body { display: grid; gap: 12px; padding: 14px 16px 20px; }
+    .mobile-card { padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: white; }
+    .mobile-card h4 { margin: 0 0 6px; font-size: 16px; }
+    .mobile-card p { margin: 0; color: var(--sub); font-size: 14px; line-height: 1.6; }
+    .mobile-kpi { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
+    .mobile-kpi div { padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: white; }
+    .mobile-kpi span { display: block; color: var(--sub); font-size: 13px; }
+    .mobile-kpi strong { display: block; margin-top: 5px; font-size: 24px; line-height: 1.25; }
+    .mobile-nav { display: grid; grid-template-columns: repeat(4,1fr); padding: 8px 0 12px; border-top: 1px solid var(--border); background: white; }
+    .mobile-nav div { color: var(--muted); text-align: center; font-size: 12px; }
+    .mobile-nav div.active { color: var(--link); font-weight: 600; }
+    .mobile-notes { padding: 18px; border: 1px dashed #C8D8EA; border-radius: 12px; background: #F8FAFC; }
+    .mobile-notes h3 { margin-bottom: 8px; }
+    .mobile-notes ul { margin: 0; padding-left: 20px; color: var(--sub); font-size: 14px; line-height: 1.7; }
+    .footer-note { margin: 18px 0 0; color: var(--muted); font-size: 13px; }
+    @media (max-width: 980px) {
+      .rule, .comparison, .mobile-wrap { grid-template-columns: 1fr; }
+      .mobile-frame { max-width: 390px; width: 100%; margin: 0 auto; }
+      .dashboard-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 720px) {
+      .page { padding: 12px; }
+      .hero, .section { padding: 18px; border-radius: 12px; }
+      h1 { font-size: 26px; }
+      .type-row { grid-template-columns: 1fr; gap: 8px; }
+      .type-spec { text-align: left; }
+      .fake-app { grid-template-columns: 1fr; }
+      .fake-sidebar { display: none; }
+      .fake-content { padding: 16px; }
+      .kpi-grid { grid-template-columns: 1fr; }
+      .fake-page-title { display: block; }
+      .fake-btn { margin-top: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div class="hero-kicker">XianyuSellerAgent · Typography Review Draft</div>
+      <h1>全平台字体规范</h1>
+      <p>目标很简单：不再让用户盯着 9–11px 的文字工作。默认正文统一为 14px，正文 / 表格 / 导航 / 按钮不低于 13px，桌面和移动端使用同一套层级语言。</p>
+      <div class="hero-meta">
+        <span class="pill pill-green">正文基线 14px</span>
+        <span class="pill pill-light">正文类最小 13px</span>
+        <span class="pill pill-light">辅助信息最小 12px</span>
+        <span class="pill pill-light">移动端不缩小正文</span>
+        <span class="pill pill-light">评审稿 v0.1</span>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>一眼能执行的规则</h2>
+          <p>先解决“累眼”，再谈信息密度。</p>
+        </div>
+      </div>
+      <div class="rule">
+        <div class="rule-card good"><strong>默认正文 14px</strong><span>列表、表单、消息、表格内容都以此为起点。</span></div>
+        <div class="rule-card good"><strong>正文类最小 13px</strong><span>正文、表格、导航、按钮不低于 13px。</span></div>
+        <div class="rule-card good"><strong>行高 1.55–1.65</strong><span>中文不挤成一团，长文案优先换行。</span></div>
+        <div class="rule-card warn"><strong>拒绝 9–11px 业务字</strong><span>需要更紧凑时，优先删字段、折叠或分页。</span></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>字阶预览</h2>
+          <p>同一页面最多使用 5 个文字层级，避免字号过多造成噪音。</p>
+        </div>
+      </div>
+      <div class="type-grid">
+        <div class="type-row"><div class="type-name">Display</div><div class="type-sample display">智能运营工作台</div><div class="type-spec">32 / 40 · 700</div></div>
+        <div class="type-row"><div class="type-name">Page title</div><div class="type-sample page-title">账号与运行状态</div><div class="type-spec">24 / 32 · 700</div></div>
+        <div class="type-row"><div class="type-name">Section title</div><div class="type-sample section-title">待处理事项</div><div class="type-spec">18 / 26 · 600</div></div>
+        <div class="type-row"><div class="type-name">Card title</div><div class="type-sample card-title">自动回复策略</div><div class="type-spec">16 / 24 · 600</div></div>
+        <div class="type-row"><div class="type-name">Body</div><div class="type-sample body">系统已为你整理 24 条待处理消息，建议先查看高风险会话。</div><div class="type-spec">14 / 22 · 400</div></div>
+        <div class="type-row"><div class="type-name">Secondary</div><div class="type-sample secondary">最近同步：2026-09-22 16:24 · 数据来自当前工作区</div><div class="type-spec">13 / 20 · 400/500</div></div>
+        <div class="type-row"><div class="type-name">Helper</div><div class="type-sample helper">字段说明、来源、时间戳等辅助信息</div><div class="type-spec">12 / 18 · 400/500</div></div>
+        <div class="type-row"><div class="type-name">Numeric KPI</div><div class="type-sample kpi">¥128,640</div><div class="type-spec">28 / 34 · 700</div></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>旧问题 vs 建议规范</h2>
+          <p>下面的差异就是这次治理要消除的阅读疲劳。</p>
+        </div>
+      </div>
+      <div class="comparison">
+        <div class="compare-card bad">
+          <h3>不建议：信息被压得太小</h3>
+          <div class="demo-line"><label>标签</label><span class="tiny-demo">待人工确认 · 9px</span><code>font-size: 9px</code></div>
+          <div class="demo-line"><label>正文</label><span class="small-demo">这是一段 12px 的辅助文字，长时间阅读会明显疲劳。</span><code>12px</code></div>
+          <div class="demo-line"><label>问题</label><span class="tiny-demo">颜色浅 + 字号小 + 行高紧</span><code>难识别</code></div>
+        </div>
+        <div class="compare-card good">
+          <h3>建议：信息有层级、可连续阅读</h3>
+          <div class="demo-line"><label>标签</label><span class="badge-text">待人工确认</span><code>12 / 18</code></div>
+          <div class="demo-line"><label>正文</label><span class="good-demo">这是一段 14px 正文，保留足够行高，让用户可以持续阅读。</span><code>14 / 22</code></div>
+          <div class="demo-line"><label>原则</label><span class="good-demo">先删冗余，再折叠，最后才考虑紧凑模式。</span><code>可读优先</code></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>桌面工作台预览</h2>
+          <p>沿用现有深色侧栏与浅色卡片风格，只把文字恢复到可阅读尺度。</p>
+        </div>
+      </div>
+      <div class="fake-app">
+        <aside class="fake-sidebar">
+          <div class="fake-brand"><div class="fake-mark">闲</div><div><strong>SellerAgent</strong><span>运营控制台</span></div></div>
+          <div class="fake-nav-title">工作区</div>
+          <div class="fake-nav"><div class="active">总览</div><div>消息工作台</div><div>商品管理</div><div>订单与售后</div><div>自动回复</div></div>
+        </aside>
+        <div class="fake-main">
+          <div class="fake-topbar"><strong>运营总览</strong><span>2026-09-22 16:24 · 工作区正常</span></div>
+          <div class="fake-content">
+            <div class="fake-page-title"><div><h3>今天的经营情况</h3><p>重要指标、风险状态和下一步动作都在这里。</p></div><button class="fake-btn">查看详细报告</button></div>
+            <div class="kpi-grid"><div class="kpi-card"><span>今日成交额</span><strong>¥128,640</strong><small>较昨日 +12.4%</small></div><div class="kpi-card"><span>待处理消息</span><strong>24</strong><small>3 条高优先级</small></div><div class="kpi-card"><span>Agent 运行状态</span><strong>稳定</strong><small>最近心跳 28 秒前</small></div></div>
+            <div class="dashboard-grid"><div class="fake-card"><h4>待处理事项</h4><p>建议先处理风险确认，再查看普通咨询。</p><div class="fake-list"><div><span>高风险会话需要人工确认</span><b class="status">优先</b></div><div><span>3 个商品库存低于阈值</span><b class="status">处理中</b></div><div><span>自动回复策略待发布</span><b class="status">待发布</b></div></div></div><div class="fake-card"><h4>今日提醒</h4><p>数据每 5 分钟同步一次。重要动作会保留操作记录。</p><div style="height:14px"></div><span class="badge-text">系统运行正常</span></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>表格与数据密集场景</h2>
+          <p>紧凑不等于缩小到 10px；这里用 14px 正文 + 12px 辅助信息。</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>商品 / 会话</th><th>当前状态</th><th>最近更新时间</th><th>下一步动作</th></tr></thead>
+          <tbody>
+            <tr><td><strong>夏季轻薄防晒衣</strong><br><span class="helper">SKU 100293 · 还有 18 件</span></td><td><span class="badge-text">在线销售</span></td><td>2026-09-22 16:18</td><td>查看详情</td></tr>
+            <tr><td><strong>买家咨询：发货时效</strong><br><span class="helper">会话 ID CHAT-2038</span></td><td><span class="badge-text" style="color:var(--warn);background:var(--warn-bg)">待人工</span></td><td>2026-09-22 16:20</td><td>打开工作台</td></tr>
+            <tr><td><strong>自动回复策略 v3</strong><br><span class="helper">修改人：运营管理员</span></td><td><span class="badge-text" style="color:var(--danger);background:var(--danger-bg)">待确认</span></td><td>2026-09-22 16:24</td><td>确认发布</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>移动端预览</h2>
+          <p>移动端保持 14px 正文和 44px 触控目标，不把桌面压缩成“蚂蚁字”。</p>
+        </div>
+      </div>
+      <div class="mobile-wrap">
+        <div class="mobile-frame">
+          <div class="mobile-status"><span>9:41</span><span>● ● ●</span></div>
+          <div class="mobile-head"><h3>运营总览</h3><p>今天的关键状态</p></div>
+          <div class="mobile-body">
+            <div class="mobile-kpi"><div><span>成交额</span><strong>¥12.8万</strong></div><div><span>待处理</span><strong>24</strong></div></div>
+            <div class="mobile-card"><h4>风险确认</h4><p>有 3 条消息需要人工确认，建议先处理高优先级会话。</p><div style="height:10px"></div><span class="badge-text">立即查看</span></div>
+            <div class="mobile-card"><h4>Agent 状态</h4><p>自动回复正在运行，最近心跳 28 秒前。</p><div style="height:10px"></div><span class="status">运行正常</span></div>
+          </div>
+          <div class="mobile-nav"><div class="active">总览</div><div>消息</div><div>商品</div><div>我的</div></div>
+        </div>
+        <div class="mobile-notes"><h3>移动端执行口径</h3><ul><li>正文、按钮、消息内容统一 14px。</li><li>页面标题 20px，卡片标题 16px。</li><li>辅助信息可用 12–13px，但不得低于 12px。</li><li>密度问题用折叠、分页、分组解决。</li></ul></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div><h2>建议评审结论</h2><p>如果这套基线通过，下一步再进入组件级改造。</p></div>
+      </div>
+      <div class="rule">
+        <div class="rule-card good"><strong>通过条件 01</strong><span>业务可读文本无 12px 以下字号。</span></div>
+        <div class="rule-card good"><strong>通过条件 02</strong><span>默认正文统一 14px，移动端同样成立。</span></div>
+        <div class="rule-card good"><strong>通过条件 03</strong><span>标题、正文、辅助信息能快速区分。</span></div>
+        <div class="rule-card good"><strong>通过条件 04</strong><span>1440×900 与 390×844 均可轻松识别。</span></div>
+      </div>
+      <p class="footer-note">预览说明：本页是独立静态评审稿，只展示规范，不会修改现有业务页面。执行口径：正文类最低 13px，辅助信息最低 12px。</p>
+    </section>
+  </main>
+</body>
+</html>

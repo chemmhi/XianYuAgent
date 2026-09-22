@@ -1,0 +1,234 @@
+:root {
+  --font-family-ui: 'Inter', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-size-display: 32px;
+  --font-size-page-title: 24px;
+  --font-size-section-title: 18px;
+  --font-size-card-title: 16px;
+  --font-size-body: 14px;
+  --font-size-body-compact: 13px;
+  --font-size-meta: 12px;
+  --font-size-kpi: 28px;
+  --font-line-body: 1.6;
+  --font-line-meta: 1.5;
+}
+
+html,
+body,
+button,
+input,
+select,
+textarea {
+  font-family: var(--font-family-ui);
+}
+
+body {
+  font-size: var(--font-size-body);
+  line-height: var(--font-line-body);
+}
+
+body .app-viewport,
+body .auth-gate {
+  font-size: var(--font-size-body);
+  line-height: var(--font-line-body);
+}
+
+body .app-viewport p,
+body .app-viewport li,
+body .app-viewport td,
+body .app-viewport th,
+body .app-viewport label,
+body .app-viewport input,
+body .app-viewport select,
+body .app-viewport textarea,
+body .app-viewport button,
+body .auth-gate p,
+body .auth-gate label,
+body .auth-gate input,
+body .auth-gate button {
+  font-size: var(--font-size-body);
+  line-height: var(--font-line-body);
+}
+
+body .app-viewport small,
+body .app-viewport time,
+body .app-viewport [class*='-meta'],
+body .app-viewport [class*='-hint'],
+body .app-viewport [class*='-caption'],
+body .app-viewport [class*='-description'],
+body .app-viewport [class*='-eyebrow'],
+body .app-viewport [class*='-updated'],
+body .app-viewport [class*='-timestamp'],
+body .app-viewport [class*='-subline'],
+body .app-viewport [class*='-pagination'] {
+  font-size: var(--font-size-meta);
+  line-height: var(--font-line-meta);
+}
+
+body .app-viewport h1,
+body .auth-gate h1 {
+  font-size: var(--font-size-page-title);
+  line-height: 1.35;
+}
+
+body .app-viewport h2,
+body .auth-gate h2,
+body .app-viewport [class*='section-title'],
+body .app-viewport [class*='panel-title'] {
+  font-size: var(--font-size-section-title);
+  line-height: 1.45;
+}
+
+body .app-viewport h3,
+body .app-viewport h4,
+body .auth-gate h3,
+body .auth-gate h4,
+body .app-viewport [class*='card-title'] {
+  font-size: var(--font-size-card-title);
+  line-height: 1.5;
+}
+
+body .app-viewport .page-title p,
+body .app-viewport .page-placeholder p,
+body .app-viewport .panel p,
+body .app-viewport [class*='page-sub'],
+body .app-viewport [class*='panel-desc'] {
+  font-size: var(--font-size-body);
+  line-height: var(--font-line-body);
+}
+
+body .app-viewport .side-section,
+body .app-viewport .brand-copy span,
+body .app-viewport .side-nav button small,
+body .app-viewport .agent-card small,
+body .app-viewport .sidebar-user span,
+body .app-viewport .dashboard-side-section,
+body .app-viewport .dashboard-brand-copy span,
+body .app-viewport .dashboard-side-nav button small,
+body .app-viewport .dashboard-sidebar-user span {
+  font-size: var(--font-size-meta);
+  line-height: var(--font-line-meta);
+}
+
+body .app-viewport .kpi-label,
+body .app-viewport [class*='-kpi-label'],
+body .app-viewport [class*='-table-head'],
+body .app-viewport [class*='-row-label'] {
+  font-size: var(--font-size-body-compact);
+  line-height: 1.5;
+}
+
+body .app-viewport .kpi-value,
+body .app-viewport [class*='-kpi-value'],
+body .app-viewport [class*='-metric-value'] {
+  font-size: var(--font-size-kpi);
+  line-height: 1.2;
+}
+
+/* Business content classes use the readable baseline even when legacy page CSS
+   still contains compact values. Pure chart axes remain explicit exceptions. */
+body .app-viewport [class*='-row'],
+body .app-viewport [class*='-item'],
+body .app-viewport [class*='-cell'],
+body .app-viewport [class*='-name'],
+body .app-viewport [class*='-title'],
+body .app-viewport [class*='-value'],
+body .app-viewport [class*='-text'],
+body .app-viewport [class*='-copy'],
+body .app-viewport [class*='-content'],
+body .app-viewport [class*='-message'],
+body .app-viewport [class*='-bubble'] {
+  font-size: var(--font-size-body);
+  line-height: var(--font-line-body);
+}
+
+body .app-viewport [class*='-meta'],
+body .app-viewport [class*='-time'],
+body .app-viewport [class*='-hint'],
+body .app-viewport [class*='-note'],
+body .app-viewport [class*='-description'],
+body .app-viewport [class*='-subline'],
+body .app-viewport [class*='-timestamp'],
+body .app-viewport [class*='-footer'],
+body .app-viewport [class*='-legend'] {
+  font-size: var(--font-size-meta);
+  line-height: var(--font-line-meta);
+}
+
+body .app-viewport [class*='section-title'],
+body .app-viewport [class*='panel-title'] {
+  font-size: var(--font-size-section-title);
+  line-height: 1.45;
+}
+
+body .app-viewport [class*='card-title'] {
+  font-size: var(--font-size-card-title);
+  line-height: 1.5;
+}
+
+body .app-viewport .kpi-value,
+body .app-viewport [class*='-kpi-value'],
+body .app-viewport [class*='-metric-value'] {
+  font-size: var(--font-size-kpi);
+  line-height: 1.2;
+}
+
+body .app-viewport .badge,
+body .app-viewport .status-pill,
+body .app-viewport [class*='-badge'],
+body .app-viewport [class*='-pill'],
+body .app-viewport [class*='-tag'],
+body .app-viewport [class*='-chip'] {
+  font-size: var(--font-size-meta);
+  line-height: 1.5;
+}
+
+body .app-viewport .btn,
+body .app-viewport .ui-button,
+body .app-viewport .dashboard-btn,
+body .app-viewport .agent-dynamics-btn,
+body .app-viewport .btn-small,
+body .app-viewport [class*='page-button'] {
+  font-size: var(--font-size-body-compact);
+  line-height: 1.45;
+}
+
+body .app-viewport .icon-button b,
+body .app-viewport .dashboard-icon-button b,
+body .app-viewport .notification-badge {
+  font-size: var(--font-size-meta);
+  line-height: 14px;
+}
+
+body .app-viewport .dashboard-chart-axis,
+body .app-viewport .dashboard-chart-y-axis,
+body .app-viewport .chart-axis,
+body .app-viewport .chart-y-axis {
+  font-size: 10px;
+  line-height: 1;
+}
+
+@media (max-width: 900px) {
+  body .app-viewport h1,
+  body .auth-gate h1 {
+    font-size: 20px;
+    line-height: 1.4;
+  }
+
+  body .app-viewport h2,
+  body .auth-gate h2 {
+    font-size: var(--font-size-card-title);
+  }
+
+  body .app-viewport .dashboard-mobile-tabs button,
+  body .app-viewport .settings-mobile-bottom button,
+  body .app-viewport .mobile-bottom-nav button {
+    font-size: var(--font-size-meta);
+    line-height: 1.45;
+  }
+
+  body .app-viewport .dashboard-mobile-kpis .dashboard-kpi-value,
+  body .app-viewport [class*='mobile'] [class*='kpi-value'] {
+    font-size: 24px;
+    line-height: 1.25;
+  }
+}

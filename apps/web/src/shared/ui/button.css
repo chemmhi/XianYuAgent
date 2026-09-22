@@ -1,4 +1,4 @@
-.ui-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 32px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--muted); font-size: 11px; font-weight: 700; line-height: 1; transition: border-color .15s ease, background .15s ease, color .15s ease, transform .15s ease; }
+.ui-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 32px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--muted); font-size: 14px; font-weight: 700; line-height: 1.4; transition: border-color .15s ease, background .15s ease, color .15s ease, transform .15s ease; }
 .ui-button:hover { border-color: #B9C8D9; background: #F8FAFC; }
 .ui-button:active { transform: translateY(1px); }
 .ui-button.ui-button-primary { border-color: var(--link); background: var(--link); color: #fff; }
@@ -6,4 +6,4 @@
 .ui-button-ghost { background: #fff; }
 .ui-button-danger { border-color: rgba(180,35,24,.2); background: #fff; color: var(--danger); }
 .ui-button:disabled { cursor: not-allowed; opacity: .55; }
-.ui-button-small { min-height: 28px; padding: 0 10px; border-radius: 6px; font-size: 11px; }
+.ui-button-small { min-height: 28px; padding: 0 10px; border-radius: 6px; font-size: 13px; line-height: 1.4; }
