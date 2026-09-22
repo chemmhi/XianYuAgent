@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>XianyuSellerAgent · 在线聊天字体预览</title>
+  <link rel="stylesheet" href="../../apps/web/src/styles.css" />
+  <link rel="stylesheet" href="../../apps/web/src/typography.css" />
+  <link rel="stylesheet" href="../../apps/web/src/shared/ui/field.css" />
+  <link rel="stylesheet" href="../../apps/web/src/shared/ui/search-field.css" />
+  <link rel="stylesheet" href="../../apps/web/src/features/messages/components/messages.css" />
+  <style>
+    /* Preview-only overrides. The underlying shell and message surface are the current apps/web styles. */
+    .preview-note { margin: 0 0 10px; color: var(--sub); font-size: 12px; }
+    .messages-sidebar-header strong { font-size: 16px; line-height: 1.35; }
+    .messages-sidebar-header small,
+    .messages-main-header small { font-size: 12px; line-height: 1.5; }
+    .messages-search { max-width: none; align-self: stretch; }
+    .messages-filter-tabs button { font-size: 13px; line-height: 1.45; }
+    .messages-conversation-list button { grid-template-columns: 44px minmax(0, 1fr) 64px; gap: 10px; padding: 14px 14px; }
+    .messages-conversation-avatar { width: 44px; height: 44px; font-size: 14px; }
+    .messages-conversation-copy strong { font-size: 14px; line-height: 1.4; }
+    .messages-conversation-copy small,
+    .messages-conversation-copy em,
+    .messages-conversation-meta small { font-size: 12px; line-height: 1.45; }
+    .messages-conversation-item.fake-thumb { display: block; width: 44px; height: 36px; border-radius: 6px; }
+    .messages-bubble { font-size: 14px; line-height: 1.6; }
+    .messages-message-author { font-size: 12px; line-height: 1.45; }
+    .messages-message-author strong { font-size: 13px; }
+    .messages-message-foot { font-size: 11px; line-height: 1.45; }
+    .messages-message-foot .source-human,
+    .messages-message-foot .source-ai { font-size: 13px; font-weight: 700; }
+    .messages-message-foot .source-human { color: var(--link); }
+    .messages-message-foot .source-ai { color: #7c3aed; }
+    .messages-read-state { font-size: 12px; font-weight: 800; }
+    .messages-bubble.outbound .messages-link { color: #fff; text-decoration-color: rgba(255,255,255,.9); font-weight: 700; }
+    .messages-bubble.inbound .messages-link { color: var(--link); text-decoration-color: currentColor; font-weight: 700; }
+    .messages-composer-assist-row { min-height: 36px; }
+    .messages-composer-tools { gap: 6px; }
+    .messages-tool-button { width: 34px; height: 34px; font-size: 22px; }
+    .messages-emoji-button { font-size: 22px; }
+    .messages-ai-assist-label { font-size: 12px; line-height: 1.5; }
+    .messages-composer textarea,
+    .messages-composer-visual { font-size: 14px; line-height: 1.6; }
+    .messages-composer-shortcuts { font-size: 12px; line-height: 1.5; }
+    .messages-send-button { min-width: 74px; height: 36px; font-size: 13px; }
+    .fake-thumb { background: linear-gradient(150deg, #0f172a 10%, #facc15 48%, #111827 70%); box-shadow: inset 0 0 0 1px rgba(255,255,255,.24); }
+    .messages-main-header-meta { font-size: 12px; }
+    .messages-main-identity strong { font-size: 15px; }
+    @media (max-width: 900px) {
+      .messages-conversation-list button { grid-template-columns: 44px minmax(0, 1fr) 56px; }
+      .messages-composer { padding-inline: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-viewport">
+    <div class="desktop-shell">
+      <aside class="sidebar">
+        <div class="brand-block">
+          <img class="brand-mark" src="../../apps/web/dist/brand/agent-fish.svg" alt="XianyuSellerAgent" />
+          <div class="brand-copy"><strong>XianyuSellerAgent</strong><span>运营控制台</span></div>
+        </div>
+        <div class="side-section">运营台</div>
+        <nav class="side-nav" aria-label="主导航">
+          <button type="button"><span class="nav-icon">▦</span><span>仪表盘</span></button>
+          <button type="button"><span class="nav-icon">◌</span><span>Workspace</span></button>
+          <button type="button"><span class="nav-icon">♙</span><span>账号管理</span></button>
+          <button type="button" class="active" aria-current="page"><span class="nav-icon">▤</span><span>在线聊天</span></button>
+          <button type="button"><span class="nav-icon">◇</span><span>商品管理</span></button>
+          <button type="button"><span class="nav-icon">◇</span><span>卡券管理</span></button>
+          <button type="button"><span class="nav-icon">🛒</span><span>订单管理</span></button>
+          <button type="button"><span class="nav-icon">◒</span><span>Agent 动态</span></button>
+          <button type="button"><span class="nav-icon">⚙</span><span>设置</span></button>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="agent-card"><span class="online-dot"></span><strong>Agent Runtime</strong><small>独立服务 · 正常</small></div>
+          <div class="sidebar-user"><div class="avatar">管</div><div><strong>管理员</strong><span>admin@example.com</span></div></div>
+        </div>
+      </aside>
+
+      <div class="desktop-body">
+        <main>
+          <p class="preview-note">基于当前 apps/web 消息页壳层，仅预览字体层级、搜索框对齐、控件尺寸和链接对比度。</p>
+          <section class="page-stack messages-domain">
+            <div class="messages-layout card panel">
+              <h1 class="messages-visually-hidden">在线聊天</h1>
+              <aside class="messages-sidebar">
+                <div class="messages-sidebar-header"><div><strong>会话</strong><small>50 个已加载，还有更多</small></div><button class="icon-button messages-refresh-button" type="button" aria-label="刷新会话">↻</button></div>
+                <div class="messages-sidebar-tools">
+                  <label class="ui-search-control messages-search"><svg class="ui-search-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"></circle><path d="m10.3 10.3 3 3"></path></svg><input type="search" placeholder="搜索用户、商品或消息" aria-label="搜索会话" /></label>
+                  <div class="messages-filter-tabs" aria-label="会话筛选"><button class="active" type="button">全部会话</button><button type="button">未读 (3)</button></div>
+                </div>
+                <div class="messages-conversation-scroll"><div class="messages-conversation-list">
+                  <button class="active" type="button"><span class="messages-conversation-avatar">X</span><span class="messages-conversation-copy"><strong>x****6</strong><small>麻烦您子帮忙点一下收货…</small><em>PPT Master pptmaster</em></span><span class="messages-conversation-meta"><small>12:48</small><b>2</b><span class="messages-conversation-item fake-thumb"></span></span></button>
+                  <button type="button"><span class="messages-conversation-avatar">一</span><span class="messages-conversation-copy"><strong>一只橘喵喵亮晶晶</strong><small>这是什么</small><em>PPT Master pptmaster</em></span><span class="messages-conversation-meta"><small>12:44</small><span class="messages-conversation-item fake-thumb"></span></span></button>
+                  <button type="button"><span class="messages-conversation-avatar">没</span><span class="messages-conversation-copy"><strong>没有心灵价</strong><small>okk加了</small><em>PPT Master pptmaster</em></span><span class="messages-conversation-meta"><small>11:13</small><span class="messages-conversation-item fake-thumb"></span></span></button>
+                  <button type="button"><span class="messages-conversation-avatar">大</span><span class="messages-conversation-copy"><strong>大洋娃娃</strong><small>没事没事</small><em>超级个体AI实测项目</em></span><span class="messages-conversation-meta"><small>09:35</small><span class="messages-conversation-item fake-thumb"></span></span></button>
+                  <button type="button"><span class="messages-conversation-avatar">三</span><span class="messages-conversation-copy"><strong>三秒123456789</strong><small>test</small><em>K大连祝贺成色彩三合一课程</em></span><span class="messages-conversation-meta"><small>01:41</small><span class="messages-conversation-item fake-thumb"></span></span></button>
+                  <button type="button"><span class="messages-conversation-avatar">张</span><span class="messages-conversation-copy"><strong>张帅旦子昊</strong><small>我完成了评价</small><em>PPT Master pptmaster</em></span><span class="messages-conversation-meta"><small>9/21</small><span class="messages-conversation-item fake-thumb"></span></span></button>
+                </div></div>
+              </aside>
+
+              <main class="messages-main">
+                <header class="messages-main-header"><div class="messages-main-identity"><span class="messages-main-avatar">X</span><div><strong>x****6</strong><small>用户 ID：buyer-0006</small></div></div><div class="messages-main-header-meta"><span>PPT Master pptmaster</span><span class="messages-live-badge">真实连接</span><span class="messages-connection-dot connected"></span></div></header>
+                <div class="messages-timeline" aria-live="polite">
+                  <button class="messages-history-load-more" type="button">加载更早消息</button>
+                  <div class="messages-bubble-row inbound"><div class="messages-message-avatar">X</div><div class="messages-message-stack"><div class="messages-bubble inbound"><span>麻烦您子帮忙点一下收货，可以吗？<br /><a class="messages-link" href="https://example.com/order/0006">查看订单详情</a></span></div><div class="messages-message-foot"><time>12:47</time><span class="source-human">人工</span></div></div></div>
+                  <div class="messages-bubble-row outbound"><div class="messages-message-avatar self">我</div><div class="messages-message-stack"><div class="messages-bubble outbound"><span>好的，已经帮您处理了。<br /><a class="messages-link" href="https://example.com/help">打开售后说明</a></span></div><div class="messages-message-foot"><time>12:48</time><span class="source-ai">AI</span><span class="messages-read-state read">已读</span></div></div></div>
+                  <div class="messages-system-row"><span class="messages-system-dot"></span><span>订单已付款，Outbox 已创建自动发货任务 · XY202609180012</span></div>
+                  <div class="messages-bubble-row inbound"><div class="messages-message-avatar">一</div><div class="messages-message-stack"><div class="messages-bubble inbound"><span>收到，谢谢！</span></div><div class="messages-message-foot"><time>12:49</time><span class="source-human">人工</span><span class="messages-read-state unread">未读</span></div></div></div>
+                </div>
+                <form class="messages-composer" onsubmit="return false"><div class="messages-composer-inner"><div class="messages-composer-shell"><div class="messages-composer-assist-row"><div class="messages-composer-tools"><button class="messages-tool-button" type="button" aria-label="添加图片附件">+</button><button class="messages-tool-button messages-emoji-button" type="button" aria-label="插入闲鱼表情">☺</button><span class="messages-ai-assist-label">AI 建议回复已开启</span></div></div><div class="messages-composer-editor"><textarea class="messages-composer-input" aria-label="消息内容" placeholder="输入回复，Enter 发送，Shift + Enter 换行，Ctrl + V 粘贴图片。"></textarea></div><div class="messages-composer-footer"><div class="messages-composer-shortcuts"><span>按 Enter 发送 · Shift + Enter 换行</span></div><button class="messages-send-button" type="button"><svg class="messages-send-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 16 8-16 8 3.5-8L4 4Z"></path><path d="M7.5 12H20"></path></svg><span>发送</span></button></div></div></div></form>
+              </main>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+  </div>
+  <script>
+    const search = document.querySelector('.messages-search input');
+    const conversations = [...document.querySelectorAll('.messages-conversation-list button')];
+    const tabs = [...document.querySelectorAll('.messages-filter-tabs button')];
+    search?.addEventListener('input', () => { const q = search.value.trim().toLocaleLowerCase(); conversations.forEach((item) => { item.hidden = q.length > 0 && !item.textContent.toLocaleLowerCase().includes(q); }); });
+    conversations.forEach((item) => item.addEventListener('click', () => { conversations.forEach((entry) => entry.classList.remove('active')); item.classList.add('active'); }));
+    tabs.forEach((tab) => tab.addEventListener('click', () => { tabs.forEach((entry) => entry.classList.remove('active')); tab.classList.add('active'); }));
+  </script>
+</body>
+</html>
