@@ -607,6 +607,8 @@ export interface ConversationState {
   topicRelation?: string;
   pendingQuestions: Array<Record<string, unknown>>;
   clarificationRound: number;
+  clarificationAttemptId?: string;
+  lastQuestionFingerprint?: string;
   recommendationState?: Record<string, unknown>;
   awaitingUser: boolean;
   awaitingUserSince?: string;
