@@ -130,7 +130,7 @@ async function run() {
   for (const pair of auth.cookie.split('; ')) { const [name, ...valueParts] = pair.split('='); await cdp.send('Network.setCookie', { name, value: valueParts.join('='), url: `${webUrl}/` }); }
   await cdp.send('Page.navigate', { url: `${webUrl}/accounts` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'accounts page');
-  await assertText(cdp, '添加闲鱼账号');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('添加闲鱼账号'), 'accounts business page');
   qrCreateCount = 0;
   await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "添加闲鱼账号")?.click()');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('扫码登录'), 'login method selector');

@@ -5,7 +5,8 @@ import { AccountContextProvider } from './account-context';
 import { AccountMenu, AuthenticatedShell, resolveDashboardMode } from './App';
 
 function renderShell(props: Parameters<typeof AuthenticatedShell>[0]) {
-  return renderToStaticMarkup(createElement(AccountContextProvider, { api: { list: vi.fn() } as never }, createElement(AuthenticatedShell, props)));
+  const child = createElement(AuthenticatedShell, props);
+  return renderToStaticMarkup(createElement(AccountContextProvider, { api: { list: vi.fn() } as never, children: child }));
 }
 
 describe('dashboard API mode resolution', () => {
