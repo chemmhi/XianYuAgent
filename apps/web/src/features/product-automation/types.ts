@@ -14,17 +14,8 @@ export interface AutomationCoupon {
 export interface AutomationRuleState {
   enabled: boolean;
   couponIds?: string[];
-  couponBatchIds?: string[];
   targetPriceMinor?: number;
   repriceMessage?: string;
-  message?: string;
-  mode?: 'fixed';
-  autoConfirm?: boolean;
-  maxAttempts?: number;
-  retryBackoffSeconds?: number;
-  firstDelayHours?: number;
-  repeatIntervalHours?: number;
-  maxReminders?: number;
   reviewInitialHours?: number;
   reviewRepeatHours?: number;
   reviewMaxCount?: number;
@@ -47,16 +38,10 @@ export interface ProductAutomationConfigWire {
   productId: string;
   accountId: string;
   configVersion: number;
-  config?: {
-    paidAutoDelivery: AutomationRuleState;
-    unpaidAutoReprice: AutomationRuleState;
-    reviewGift: AutomationRuleState;
-    reviewReminder: AutomationRuleState;
-  };
-  paidAutoDelivery?: AutomationRuleState;
-  unpaidAutoReprice?: AutomationRuleState;
-  reviewGift?: AutomationRuleState;
-  reviewReminder?: AutomationRuleState;
+  paidAutoDelivery: AutomationRuleState;
+  unpaidAutoReprice: AutomationRuleState;
+  reviewGift: AutomationRuleState;
+  reviewReminder: AutomationRuleState;
   updatedAt?: string;
 }
 
