@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Agent Fish</title>
+  <desc id="desc">抽象闲鱼轮廓结合智能闪光，表达闲鱼卖家场景与 Agent 能力。</desc>
+  <rect width="64" height="64" rx="16" fill="#245A8D"/>
+  <path d="M14 32c8-11 21-17 35-11l-5 11 5 11c-14 6-27 0-35-11Z" fill="#fff"/>
+  <path d="M15 32 7 24v16l8-8Z" fill="#fff"/>
+  <circle cx="40" cy="28" r="2.5" fill="#245A8D"/>
+  <path d="m48 13 1.8 4.2L54 19l-4.2 1.8L48 25l-1.8-4.2L42 19l4.2-1.8L48 13Z" fill="#6EE7B7"/>
+</svg>

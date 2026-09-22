@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Orbit Box</title>
+  <desc id="desc">中心业务对象被 Agent 轨道包围，表达统一工作上下文和可审计执行。</desc>
+  <rect width="64" height="64" rx="16" fill="#1F3A5F"/>
+  <rect x="22" y="22" width="20" height="20" rx="5" fill="#fff"/>
+  <path d="M12 32c0-10 9-18 20-18s20 8 20 18-9 18-20 18-20-8-20-18Z" fill="none" stroke="#fff" stroke-width="3.2" stroke-dasharray="11 6" stroke-linecap="round"/>
+  <circle cx="48" cy="22" r="4" fill="#6EE7B7"/>
+</svg>
