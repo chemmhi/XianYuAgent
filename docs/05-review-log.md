@@ -472,3 +472,13 @@
 | S5-R92 | 质量 / 发布 | 全量类型检查、构建、API/Web 测试、smoke、Compose 配置和差异卫生是否通过 | root | PARTIALLY_VERIFIED | `npm run typecheck`、`npm test`、`npm run build`、`node apps/api/scripts/coupons-smoke.mjs`、`node apps/api/scripts/products-smoke.mjs`、`docker compose config --quiet`、`git diff --check`；真实 PostgreSQL 迁移/rollback 因环境缺失未执行 |
 
 本轮结论：用户提出的全部卡券列表与批次序号需求已在代码和受控跨层路径中覆盖；真实 PostgreSQL 迁移 apply/rollback/复读仍待具备 `DATABASE_URL` 与运行中数据库后复审，当前切片保持 `READY_FOR_REVIEW`。
+
+### 2026-09-22：Dashboard 待人工处理铃铛卡片复审
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R93 | 业务 / 验收 | 铃铛是否位于“待人工处理”卡片内，风险项点击是否复用既有详情抽屉，桌面底部风险条和移动顶部重复入口是否移除 | root + dashboard_risk_card_audit | PASS | `DashboardViews.tsx`、`DashboardPage.tsx`；DashboardViews 单测 6/6；桌面 Chrome/CDP 气泡断言 |
+| S5-R94 | 架构 / 数据流 | 弹层是否作为 KPI 卡片内局部状态实现，是否复用 `riskTodos` 与 `onOpenTodo`，未引入新的导航或 API 状态 | root + dashboard_risk_card_audit | PASS | `PendingManualKpiCard`；现有 `openTodo()` 与风险 drawer；桌面/移动共用组件 |
+| S5-R95 | 前端 / 视觉 / 可访问性 | 右列移动卡片定位、Escape/外部点击关闭、动态 aria 文案、固定 1440×900/390×844 截图与构建回归 | root + dashboard_risk_card_audit | PASS（受控环境） | `dashboard.css`；`npm --workspace apps/web run typecheck`；`npm --workspace apps/web run build`；`npm --workspace apps/web run test:e2e:chrome:dashboard`；`docs/evidence/stage5/S4-VS-DASHBOARD/screenshots/` |
+
+本轮结论：铃铛已按最新产品约束嵌入“待人工处理”小卡片，不新增顶部标题栏。目标切片达到 `READY_FOR_REVIEW`；全量 Web 单测仍有一个既有 `AccountContextProvider` 测试夹具失败，未将其误报为本切片通过。

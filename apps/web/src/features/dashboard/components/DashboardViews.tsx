@@ -1,5 +1,5 @@
-import { useState, type MouseEvent, type ReactNode } from 'react';
-import type { DashboardQuery, DashboardRange, DashboardState } from '../types';
+import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import type { DashboardKpiVM, DashboardQuery, DashboardRange, DashboardRiskTodoVM, DashboardState } from '../types';
 import { Button } from '../../../shared/ui/Button';
 import { InputField } from '../../../shared/ui/InputField';
 import { SelectField } from '../../../shared/ui/SelectField';
@@ -151,14 +151,52 @@ function TrendRangeControl({ query, onChange }: { query: DashboardQuery; onChang
   </div>;
 }
 
+function PendingManualKpiCard({ kpi, riskTodos, onOpenTodo, surface }: { kpi: DashboardKpiVM; riskTodos: DashboardRiskTodoVM[]; onOpenTodo: (id: string) => void; surface: 'desktop' | 'mobile' }) {
+  const [open, setOpen] = useState(false);
+  const cardRef = useRef<HTMLElement | null>(null);
+  const popoverId = `dashboard-risk-popover-${useId()}`;
+  const visibleTodos = riskTodos.slice(0, 3);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    const handleOutsidePointer = (event: PointerEvent) => {
+      if (cardRef.current && !cardRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('keydown', handleEscape);
+    document.addEventListener('pointerdown', handleOutsidePointer);
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+      document.removeEventListener('pointerdown', handleOutsidePointer);
+    };
+  }, [open]);
+
+  return <article ref={cardRef} className="dashboard-card dashboard-kpi-card dashboard-pending-manual-card" data-testid={`pending-manual-card-${surface}`}>
+    <div className="dashboard-kpi-card-head">
+      <div className="dashboard-kpi-label">{kpi.label}</div>
+      <button type="button" className="dashboard-icon-button dashboard-kpi-bell" data-testid={`pending-manual-bell-${surface}`} aria-label={open ? '收起待人工处理' : '展开待人工处理'} aria-haspopup="dialog" aria-controls={popoverId} aria-expanded={open} onClick={() => setOpen((current) => !current)}>
+        <Icon name="bell"/>
+        <b>{riskTodos.length}</b>
+      </button>
+    </div>
+    <div className="dashboard-kpi-value">{kpi.value}</div>
+    <div className="dashboard-kpi-delta"><span className={toneClass(kpi.tone)}>{kpi.delta}</span><small>{kpi.context}</small></div>
+    {open ? <div id={popoverId} className="dashboard-risk-popover" data-testid="risk-popover" role="dialog" aria-modal="false" aria-label="待人工处理风险待办">
+      <div className="dashboard-risk-popover-head"><div><strong>待处理风险</strong><span>{riskTodos.length} 个动作需要关注</span></div><span className="dashboard-risk-popover-count">{riskTodos.length}</span></div>
+      {visibleTodos.length ? <div className="dashboard-risk-popover-list">{visibleTodos.map((todo) => <button type="button" key={todo.id} className={`dashboard-risk-popover-item dashboard-risk-${todo.severity}`} onClick={() => { setOpen(false); onOpenTodo(todo.id); }}><span className="dashboard-risk-popover-dot"/><span className="dashboard-risk-popover-copy"><strong>{todo.title}</strong><small>{todo.detail}</small></span><span className="dashboard-risk-popover-action">查看</span></button>)}</div> : <p className="dashboard-risk-popover-empty">当前没有待人工处理事项</p>}
+    </div> : null}
+  </article>;
+}
+
 export function DashboardDesktopContent({ state, query, onOpenTodo, onRefresh, onTrendQueryChange }: { state: DashboardState; query: DashboardQuery; onOpenTodo: (id: string) => void; onRefresh: () => void; onTrendQueryChange: (query: DashboardQuery) => void }) {
   const data = state.data;
   if (!data || state.phase !== 'success') return <DashboardStateViewBlock state={state} onRefresh={onRefresh}/>;
   return <section className="dashboard-page-stack" data-dashboard-surface="desktop">
-    <div className="dashboard-kpi-grid">{data.kpis.map((kpi) => <article className="dashboard-card dashboard-kpi-card" key={kpi.key}><div className="dashboard-kpi-label">{kpi.label}</div><div className="dashboard-kpi-value">{kpi.value}</div><div className="dashboard-kpi-delta"><span className={toneClass(kpi.tone)}>{kpi.delta}</span><small>{kpi.context}</small></div></article>)}</div>
+    <div className="dashboard-kpi-grid">{data.kpis.map((kpi) => kpi.key === 'pendingManual' ? <PendingManualKpiCard key={kpi.key} kpi={kpi} riskTodos={data.riskTodos} onOpenTodo={onOpenTodo} surface="desktop"/> : <article className="dashboard-card dashboard-kpi-card" key={kpi.key}><div className="dashboard-kpi-label">{kpi.label}</div><div className="dashboard-kpi-value">{kpi.value}</div><div className="dashboard-kpi-delta"><span className={toneClass(kpi.tone)}>{kpi.delta}</span><small>{kpi.context}</small></div></article>)}</div>
     <div className="dashboard-main-grid"><article className="dashboard-card dashboard-panel"><div className="dashboard-panel-head"><div><h2>订单与 AI 闭环趋势</h2><p>按所选时间范围查看订单金额、自动回复成功率和人工接管变化。</p></div><div className="dashboard-trend-head-actions"><TrendRangeControl query={query} onChange={onTrendQueryChange}/></div></div><MiniAreaChart state={state}/></article></div>
     <div className="dashboard-two-grid"><article className="dashboard-card dashboard-panel"><div className="dashboard-panel-head"><div><h2>商品排行</h2><p>按当前账号订单与库存表现排序。</p></div><Badge tone="info">4 个商品</Badge></div><div className="dashboard-data-table dashboard-products-table"><div className="dashboard-table-head"><span>商品</span><span>订单</span><span>库存</span><span>状态</span></div>{data.productRank.length ? data.productRank.map((row) => <div className="dashboard-table-row" key={row.title}><span><b>{row.title}</b><small>{row.subtitle}</small></span><span>{row.orders}</span><span>{row.stock}</span><Badge tone={row.tone}>{row.status}</Badge></div>) : <div className="dashboard-empty-row">暂无商品排行</div>}</div></article><article className="dashboard-card dashboard-panel"><div className="dashboard-panel-head"><div><h2>最近处理记录</h2><p>最近 24 小时的 AI、订单与风险动作。</p></div><Badge tone="ok">自动刷新</Badge></div><div className="dashboard-timeline">{data.recentActivity.length ? data.recentActivity.map((item) => <button className="dashboard-timeline-row" key={`${item.time}-${item.text}`} type="button" onClick={() => item.href && onOpenTodo(item.href)}><strong>{item.time}</strong><span>{item.text}</span><Badge tone={item.tone}>{item.status}</Badge></button>) : <div className="dashboard-empty-row">暂无最近处理记录</div>}</div></article></div>
-    <div className="dashboard-risk-strip"><div><strong>待处理风险</strong><span>{data.riskTodos.length} 个动作需要关注</span></div><div className="dashboard-risk-inline-list">{data.riskTodos.slice(0, 3).map((todo) => <button type="button" key={todo.id} className={`dashboard-risk-chip dashboard-risk-${todo.severity}`} onClick={() => onOpenTodo(todo.id)}><span>{todo.title}</span><small>查看</small></button>)}</div></div>
   </section>;
 }
 
@@ -183,7 +221,7 @@ export function DashboardMobileContent({ state, accountLabel = '当前账号', o
   return <div className="dashboard-mobile-page" data-dashboard-surface="mobile">
     <section className="dashboard-mobile-status-summary dashboard-card"><div className="dashboard-mobile-section-head"><div><h2>Agent 在线 · {accountLabel}</h2><p>180 秒托管策略 · 立即发货已启用 · 心跳 14:24:08</p></div><Badge tone="ok">正常</Badge></div><div className="dashboard-mobile-health-grid"><span><b>凭证边界</b><small>仅 buyer_deliverable</small></span><span><b>Outbox</b><small>7 pending / 128 done</small></span></div></section>
     <section className="dashboard-mobile-quick-grid" aria-label="移动端快捷动作">{[['补交付凭证', '考研英语资料', 'warn'], ['确认风险', '跨商品资源请求', 'danger'], ['查看发货', '7 单已执行', 'ok'], ['补充知识', '2 条新问题', 'info']].map(([title, meta, tone]) => <button type="button" className={`dashboard-mobile-quick-card dashboard-tone-card-${tone}`} key={title} onClick={() => onOpenTodo(title)}><span>{title}</span><small>{meta}</small></button>)}</section>
-    <div className="dashboard-mobile-kpis">{data.kpis.map((kpi) => <article className="dashboard-card dashboard-kpi-card" key={kpi.key}><div className="dashboard-kpi-label">{kpi.label}</div><div className="dashboard-kpi-value">{kpi.value}</div><div className="dashboard-kpi-delta"><span className={toneClass(kpi.tone)}>{kpi.delta}</span><small>{kpi.context}</small></div></article>)}</div>
+    <div className="dashboard-mobile-kpis">{data.kpis.map((kpi) => kpi.key === 'pendingManual' ? <PendingManualKpiCard key={kpi.key} kpi={kpi} riskTodos={data.riskTodos} onOpenTodo={onOpenTodo} surface="mobile"/> : <article className="dashboard-card dashboard-kpi-card" key={kpi.key}><div className="dashboard-kpi-label">{kpi.label}</div><div className="dashboard-kpi-value">{kpi.value}</div><div className="dashboard-kpi-delta"><span className={toneClass(kpi.tone)}>{kpi.delta}</span><small>{kpi.context}</small></div></article>)}</div>
     <section className="dashboard-card dashboard-mobile-task-card"><div className="dashboard-mobile-section-head"><div><h2>今天优先处理</h2><p>按风险和时效排序，不展示桌面大表格。</p></div><Badge tone="warn">{data.riskTodos.length} 待办</Badge></div><div className="dashboard-mobile-task-list">{data.riskTodos.slice(0, 3).map((todo) => <button type="button" className={`dashboard-mobile-task-row ${todo.severity === 'high' ? 'urgent' : ''}`} key={todo.id} onClick={() => onOpenTodo(todo.id)}><i/><div><strong>{todo.title}</strong><span>{todo.detail}</span></div><Badge tone={todo.tone}>{todo.severity === 'high' ? '补凭证' : todo.severity === 'medium' ? '确认' : '补知识'}</Badge></button>)}</div></section>
     <section className="dashboard-card dashboard-mobile-pulse-card"><div className="dashboard-mobile-section-head"><div><h2>经营快照</h2><p>只保留移动端可扫读指标。</p></div><button type="button" className="dashboard-text-button">详情</button></div><MiniAreaChart state={state} compact/></section>
   </div>;

@@ -65,3 +65,11 @@ knowledge、review 不属于本轮正式一级页面，已决定直接删除原�
 - 账号展示与查询沿用全局 `AccountContext`，页面不新增账号选择器或重复账号 chip。
 - 最新证据：桌面、桌面抽屉、移动主页面、移动抽屉四张截图及 `evidence.json`；截图由 `npm --workspace apps/web run test:e2e:chrome:agent-dynamics` 生成。
 - 视觉验收不只看布局和文案：已从原型 HTML Git blob `620429f9d073011d6d88d7be87fc3ef49f227152` 提取并比对 18 个核心样式 token（颜色、阴影、圆角、间距、字号、字体栈），18/18 语义匹配；详细记录见 `docs/agent/agent-dynamics/evidence/visual-diff.md`。
+
+## Dashboard 待人工处理铃铛切片（2026-09-22）
+
+- 目标视口：桌面 `1440×900`、移动 `390×844`。
+- 视觉变更：铃铛与未读数放入“待人工处理”KPI 卡片；点击后在卡片下方展开风险气泡；移除桌面底部独立风险条与移动顶部重复通知入口。
+- 交互状态：默认收起、展开、风险项进入既有详情抽屉、Escape/外部点击关闭；移动右列卡片采用右对齐弹层，避免 390px 视口横向溢出。
+- 证据：`docs/evidence/stage5/S4-VS-DASHBOARD/screenshots/dashboard-desktop-1440x900.png`、`dashboard-mobile-390x844.png`；由 `npm --workspace apps/web run test:e2e:chrome:dashboard` 生成。
+- 当前结论：受控视觉与交互验证 PASS，等待用户人工审核后再合入 `main`。

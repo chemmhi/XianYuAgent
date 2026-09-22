@@ -45,6 +45,10 @@ describe('dashboard views', () => {
     expect(html.indexOf('dashboard-chart-axis')).toBeLessThan(html.indexOf('dashboard-chart-legend'));
     expect(html).toContain('商品排行');
     expect(html).toContain('最近处理记录');
+    expect(html).toContain('dashboard-pending-manual-card');
+    expect(html).toContain('data-testid="pending-manual-bell-desktop"');
+    expect(html).toContain('aria-haspopup="dialog"');
+    expect(html).not.toContain('dashboard-risk-strip');
     expect(html).toContain('data-dashboard-surface="desktop"');
   });
 
@@ -54,6 +58,7 @@ describe('dashboard views', () => {
     expect(html).toContain('补交付凭证');
     expect(html).toContain('今天优先处理');
     expect(html).toContain('经营快照');
+    expect(html).toContain('dashboard-pending-manual-card');
     expect(html).toContain('data-dashboard-surface="mobile"');
   });
 

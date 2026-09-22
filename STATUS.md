@@ -205,3 +205,12 @@
 - 兼容与边界：旧 UUID URL 继续可读；默认列表隐藏作废批次；显式 `status=voided` 查询保留未被新活动批次占用的历史；作废批次禁止通过 PATCH 或库存导入复活。
 - 已验证：`npm run typecheck`、`npm test`（API 全套 smoke + Web 63 files / 204 tests）、`npm run build`、`node apps/api/scripts/coupons-smoke.mjs`、`node apps/api/scripts/products-smoke.mjs`、`npm run test:e2e:chrome:coupons`、`docker compose config --quiet`、`git diff --check` 均通过。
 - 未关闭门禁：本环境无 `DATABASE_URL` 且未运行 Docker PostgreSQL，迁移 `029_coupon_batch_sequence.sql` 的真实 PostgreSQL apply/rollback/复读尚未执行；因此本切片保持 `READY_FOR_MERGE`，不宣称发布级 PASS。
+
+## 2026-09-22 Dashboard 待人工处理铃铛切片
+
+- 当前 worktree：`F:\ChenHai\Project\XianYuAgent-dashboard-risk-bell-20260922`；分支：`codex/dashboard-risk-bell-20260922`；状态：`READY_FOR_REVIEW`。
+- 完成范围：将铃铛与风险气泡嵌入“待人工处理”KPI 卡片，桌面/移动复用同一组件；移除桌面底部独立风险条和移动顶部重复通知入口；保留现有风险详情抽屉。
+- 交互边界：卡片内 bell 支持展开/收起、风险项点击打开既有抽屉、Escape 与外部点击关闭；通过 `aria-haspopup`、动态 `aria-label`、`aria-controls` 与非模态 dialog 语义补齐可访问性。
+- 已验证：`npm --workspace apps/web run test -- --run src/features/dashboard/components/DashboardViews.test.tsx`（6/6）、`npm --workspace apps/web run typecheck`、`npm --workspace apps/web run build`、`npm --workspace apps/web run test:e2e:chrome:dashboard`、`git diff --check`；桌面/移动截图已更新至 `docs/evidence/stage5/S4-VS-DASHBOARD/screenshots/`。
+- 部分验证：`npm --workspace apps/web run test` 为 72/73 文件、240/241 用例通过；唯一失败是既有 `App.dashboard-mode.test.ts` 在未包裹 `AccountContextProvider` 时直接渲染 `DashboardPage`，与本切片无关，已登记为开放风险，未修改无关测试。
+- 人工审核后：确认视觉与交互后再由维护者将本分支合入 `main`；本 worktree 不执行合并。

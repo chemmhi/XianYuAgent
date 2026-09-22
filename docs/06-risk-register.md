@@ -201,3 +201,9 @@
 | 编号 | 风险 | 级别 | 应对 | 状态 |
 | --- | --- | --- | --- | --- |
 | S5-RISK-036 | `029_coupon_batch_sequence.sql` 已新增 `sequence_id`、序号回收逻辑和非作废唯一索引，但当前环境没有 `DATABASE_URL` 且未运行 PostgreSQL 容器，尚未执行真实 apply/rollback/复读 | P1 | 保留旧 UUID 读写兼容；在隔离 PostgreSQL volume 执行迁移、重复执行、删除后复用、旧 UUID URL 读取、作废历史查询和回滚演练，再回写证据 | OPEN |
+
+### 2026-09-22 Dashboard 待人工处理铃铛切片
+
+| 编号 | 风险 | 等级 | 应对 | 状态 |
+| --- | --- | --- | --- | --- |
+| S5-RISK-037 | Web 全量单测中既有 `App.dashboard-mode.test.ts` 直接渲染 `DashboardPage`，缺少 `AccountContextProvider`，导致 1 个测试失败；本切片目标测试、类型检查、构建与 Dashboard Chrome/CDP E2E 均通过 | P2 | 补齐既有测试夹具后重新执行 Web 全量单测；本切片不修改无关测试，不以窄范围测试替代全量结果 | OPEN |

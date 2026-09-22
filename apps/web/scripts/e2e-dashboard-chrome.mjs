@@ -152,6 +152,12 @@ async function run() {
   await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector(".dashboard-chart-tooltip"))')), 'dashboard trend tooltip');
   await assertText(cdp, '商品排行');
   await assertText(cdp, '最近处理记录');
+  const pendingManualBell = await evaluate(cdp, 'Boolean(document.querySelector(".dashboard-desktop-content .dashboard-pending-manual-card .dashboard-icon-button"))');
+  if (!pendingManualBell) throw new Error('pending manual KPI bell is missing from the desktop card');
+  await evaluate(cdp, 'document.querySelector(".dashboard-desktop-content .dashboard-pending-manual-card .dashboard-icon-button").click()');
+  await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector(".dashboard-desktop-content .dashboard-risk-popover"))')), 'pending manual risk popover');
+  await assertText(cdp, '待处理风险');
+  await assertText(cdp, '考研英语资料缺少发货凭证');
   const sharedSidebarCount = await evaluate(cdp, 'document.querySelectorAll(".sidebar").length');
   if (sharedSidebarCount !== 1) throw new Error(`expected one shared sidebar, found ${sharedSidebarCount}`);
   const legacyDashboardSidebarCount = await evaluate(cdp, 'document.querySelectorAll(".dashboard-sidebar").length');
@@ -167,6 +173,13 @@ async function run() {
   await assertText(cdp, '今天优先处理');
   await assertText(cdp, '经营快照');
   await captureViewport(cdp, 390, 844, 'dashboard-mobile-390x844.png');
+  const mobilePendingManualBell = await evaluate(cdp, 'Boolean(document.querySelector(".dashboard-mobile-content .dashboard-pending-manual-card .dashboard-icon-button"))');
+  if (!mobilePendingManualBell) throw new Error('pending manual KPI bell is missing from the mobile card');
+  await evaluate(cdp, 'document.querySelector(".dashboard-mobile-content .dashboard-pending-manual-card .dashboard-icon-button").click()');
+  await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector(".dashboard-mobile-content .dashboard-risk-popover"))')), 'mobile pending manual risk popover');
+  await assertText(cdp, '待处理风险');
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await waitFor(async () => Boolean(await evaluate(cdp, '!document.querySelector(".dashboard-mobile-content .dashboard-risk-popover")')), 'mobile pending manual risk popover close');
   const drawerTrigger = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent?.includes("考研英语资料缺少发货凭证")); if (!button) return false; button.click(); return true; })()');
   if (!drawerTrigger) throw new Error('risk todo trigger missing');
   await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector(".dashboard-risk-drawer"))')), 'risk todo drawer');
