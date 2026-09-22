@@ -73,3 +73,10 @@ knowledge、review 不属于本轮正式一级页面，已决定直接删除原�
 - 交互状态：默认收起、展开、风险项进入既有详情抽屉、Escape/外部点击关闭；移动右列卡片采用右对齐弹层，避免 390px 视口横向溢出。
 - 证据：`docs/evidence/stage5/S4-VS-DASHBOARD/screenshots/dashboard-desktop-1440x900.png`、`dashboard-mobile-390x844.png`；由 `npm --workspace apps/web run test:e2e:chrome:dashboard` 生成。
 - 当前结论：受控视觉与交互验证 PASS，等待用户人工审核后再合入 `main`。
+
+### Dashboard 铃铛气泡视觉修正（2026-09-22）
+
+- 气泡定位：以铃铛外层为锚点，垂直间距不超过 10px，右边缘与铃铛对齐。
+- 触发器样式：白色实心背景、深色铃铛图标、可见边框、轻阴影和高对比未读徽标。
+- 响应式：移动端右列卡片展开时，气泡右边缘不超过 390px 视口。
+- 验收：Chrome/CDP E2E 已加入桌面/移动几何断言，截图已重新生成。

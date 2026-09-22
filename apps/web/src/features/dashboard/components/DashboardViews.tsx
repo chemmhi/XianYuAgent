@@ -176,17 +176,19 @@ function PendingManualKpiCard({ kpi, riskTodos, onOpenTodo, surface }: { kpi: Da
   return <article ref={cardRef} className="dashboard-card dashboard-kpi-card dashboard-pending-manual-card" data-testid={`pending-manual-card-${surface}`}>
     <div className="dashboard-kpi-card-head">
       <div className="dashboard-kpi-label">{kpi.label}</div>
-      <button type="button" className="dashboard-icon-button dashboard-kpi-bell" data-testid={`pending-manual-bell-${surface}`} aria-label={open ? '收起待人工处理' : '展开待人工处理'} aria-haspopup="dialog" aria-controls={popoverId} aria-expanded={open} onClick={() => setOpen((current) => !current)}>
-        <Icon name="bell"/>
-        <b>{riskTodos.length}</b>
-      </button>
+      <div className="dashboard-kpi-bell-wrap">
+        <button type="button" className="dashboard-icon-button dashboard-kpi-bell" data-testid={`pending-manual-bell-${surface}`} aria-label={open ? '收起待人工处理' : '展开待人工处理'} aria-haspopup="dialog" aria-controls={popoverId} aria-expanded={open} onClick={() => setOpen((current) => !current)}>
+          <Icon name="bell"/>
+          <b>{riskTodos.length}</b>
+        </button>
+        {open ? <div id={popoverId} className="dashboard-risk-popover" data-testid="risk-popover" role="dialog" aria-modal="false" aria-label="待人工处理风险待办">
+          <div className="dashboard-risk-popover-head"><div><strong>待处理风险</strong><span>{riskTodos.length} 个动作需要关注</span></div><span className="dashboard-risk-popover-count">{riskTodos.length}</span></div>
+          {visibleTodos.length ? <div className="dashboard-risk-popover-list">{visibleTodos.map((todo) => <button type="button" key={todo.id} className={`dashboard-risk-popover-item dashboard-risk-${todo.severity}`} onClick={() => { setOpen(false); onOpenTodo(todo.id); }}><span className="dashboard-risk-popover-dot"/><span className="dashboard-risk-popover-copy"><strong>{todo.title}</strong><small>{todo.detail}</small></span><span className="dashboard-risk-popover-action">查看</span></button>)}</div> : <p className="dashboard-risk-popover-empty">当前没有待人工处理事项</p>}
+        </div> : null}
+      </div>
     </div>
     <div className="dashboard-kpi-value">{kpi.value}</div>
     <div className="dashboard-kpi-delta"><span className={toneClass(kpi.tone)}>{kpi.delta}</span><small>{kpi.context}</small></div>
-    {open ? <div id={popoverId} className="dashboard-risk-popover" data-testid="risk-popover" role="dialog" aria-modal="false" aria-label="待人工处理风险待办">
-      <div className="dashboard-risk-popover-head"><div><strong>待处理风险</strong><span>{riskTodos.length} 个动作需要关注</span></div><span className="dashboard-risk-popover-count">{riskTodos.length}</span></div>
-      {visibleTodos.length ? <div className="dashboard-risk-popover-list">{visibleTodos.map((todo) => <button type="button" key={todo.id} className={`dashboard-risk-popover-item dashboard-risk-${todo.severity}`} onClick={() => { setOpen(false); onOpenTodo(todo.id); }}><span className="dashboard-risk-popover-dot"/><span className="dashboard-risk-popover-copy"><strong>{todo.title}</strong><small>{todo.detail}</small></span><span className="dashboard-risk-popover-action">查看</span></button>)}</div> : <p className="dashboard-risk-popover-empty">当前没有待人工处理事项</p>}
-    </div> : null}
   </article>;
 }
 

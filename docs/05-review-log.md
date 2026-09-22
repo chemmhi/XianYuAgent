@@ -482,3 +482,11 @@
 | S5-R95 | 前端 / 视觉 / 可访问性 | 右列移动卡片定位、Escape/外部点击关闭、动态 aria 文案、固定 1440×900/390×844 截图与构建回归 | root + dashboard_risk_card_audit | PASS（受控环境） | `dashboard.css`；`npm --workspace apps/web run typecheck`；`npm --workspace apps/web run build`；`npm --workspace apps/web run test:e2e:chrome:dashboard`；`docs/evidence/stage5/S4-VS-DASHBOARD/screenshots/` |
 
 本轮结论：铃铛已按最新产品约束嵌入“待人工处理”小卡片，不新增顶部标题栏。目标切片达到 `READY_FOR_REVIEW`；全量 Web 单测仍有一个既有 `AccountContextProvider` 测试夹具失败，未将其误报为本切片通过。
+
+### 2026-09-22：Dashboard 铃铛气泡视觉修正复审
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R96 | 前端 / 视觉 / 端到端 | 气泡是否贴近铃铛、铃铛是否具备足够对比度、移动右列是否不溢出 | root + dashboard_risk_card_audit | PASS（受控环境） | `DashboardViews.tsx`、`dashboard.css`；桌面/移动截图；E2E 几何断言 |
+
+本轮结论：气泡从卡片底部定位改为铃铛触发器定位，铃铛改为实心高对比样式；当前修正分支等待人工审核后再合入 `main`。
