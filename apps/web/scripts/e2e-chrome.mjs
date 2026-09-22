@@ -215,7 +215,32 @@ async function run() {
   })()`);
   if (!deletedViaUi) throw new Error('account delete action did not trigger');
   await waitFor(async () => !(await evaluate(cdp, `document.body.innerText.includes(${JSON.stringify(secondaryAccount.displayName)})`)), 'account delete result');
-  console.log('local Chrome E2E passed: login -> persisted profile -> account search -> switch -> delete');
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  const accountMenuOpened = await evaluate(cdp, `(() => {
+    const visible = (node) => { const rect = node.getBoundingClientRect(); return rect.width > 0 && rect.height > 0; };
+    const trigger = Array.from(document.querySelectorAll('[data-testid="account-menu-trigger"]')).find(visible);
+    if (!trigger) return false;
+    trigger.click();
+    return true;
+  })()`);
+  if (!accountMenuOpened) throw new Error('account menu trigger is not visible');
+  await waitFor(async () => await evaluate(cdp, `(() => {
+    const visible = (node) => { const rect = node.getBoundingClientRect(); return rect.width > 0 && rect.height > 0; };
+    return Array.from(document.querySelectorAll('[data-testid="account-logout"]')).some(visible);
+  })()`), 'account menu');
+  const logoutClicked = await evaluate(cdp, `(() => {
+    const visible = (node) => { const rect = node.getBoundingClientRect(); return rect.width > 0 && rect.height > 0; };
+    const button = Array.from(document.querySelectorAll('[data-testid="account-logout"]')).find(visible);
+    if (!button || button.disabled) return false;
+    button.click();
+    return true;
+  })()`);
+  if (!logoutClicked) throw new Error('account menu logout action did not trigger');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('登录管理控制台'), 'login gate after logout');
+  const sessionAfterLogout = await evaluate(cdp, 'fetch("/api/v1/auth/session", { credentials: "include" }).then((response) => response.json())');
+  const sessionView = sessionAfterLogout?.data ?? sessionAfterLogout;
+  if (sessionView?.authenticated !== false) throw new Error(`logout did not clear the authenticated session: ${JSON.stringify(sessionAfterLogout)}`);
+  console.log('local Chrome E2E passed: login -> persisted profile -> account search -> switch -> delete -> logout');
   cdp.socket.close();
 }
 

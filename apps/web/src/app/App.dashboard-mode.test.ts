@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { AuthenticatedShell, resolveDashboardMode } from './App';
+import { AccountMenu, AuthenticatedShell, resolveDashboardMode } from './App';
 
 describe('dashboard API mode resolution', () => {
   it('inherits live mode when the dashboard override is unset', () => {
@@ -32,6 +32,8 @@ describe('dashboard API mode resolution', () => {
       modelProviderApi: {},
       agentDynamicsApi: {},
       dashboardApi: { getSnapshot: vi.fn() },
+      onLogout: vi.fn().mockResolvedValue(undefined),
+      logoutBusy: false,
       navigate: vi.fn(),
     } as unknown as Parameters<typeof AuthenticatedShell>[0];
 
@@ -43,6 +45,12 @@ describe('dashboard API mode resolution', () => {
     expect(html).toContain('Agent Runtime');
     expect(html).toContain('陈晨');
     expect(html).toContain('chenchen@example.com');
+    expect(html).toContain('data-testid="account-menu-trigger"');
+    expect(html).toContain('aria-haspopup="menu"');
+    const menuHtml = renderToStaticMarkup(createElement(AccountMenu, { adminName: '陈晨', adminEmail: 'chenchen@example.com', adminInitial: '陈', logoutBusy: false, onLogout: vi.fn().mockResolvedValue(undefined) }));
+    expect(menuHtml).toContain('退出登录');
+    const pendingMenuHtml = renderToStaticMarkup(createElement(AccountMenu, { adminName: '陈晨', adminEmail: 'chenchen@example.com', adminInitial: '陈', logoutBusy: true, onLogout: vi.fn().mockResolvedValue(undefined) }));
+    expect(pendingMenuHtml).toContain('退出中…');
     expect(html).not.toContain('运营管理员');
     expect(html).not.toContain('admin@example.com');
     expect(html).not.toContain('dashboard-sidebar');

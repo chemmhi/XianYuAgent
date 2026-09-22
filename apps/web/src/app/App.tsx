@@ -99,28 +99,37 @@ export default function App() {
   }
 
   return <AuthGate api={authApi}>
-    {(admin) => <AccountContextProvider api={accountsApi}>
-      <AuthenticatedShell admin={admin} page={page} accountsApi={accountsApi} productsApi={productsApi} couponsApi={couponsApi} messagesApi={messagesApi} workspaceApi={workspaceApi} ordersApi={ordersApi} settingsApi={settingsApi} autoReplyAgentSettingsApi={autoReplyAgentSettingsApi} openaiSettingsApi={openaiSettingsApi} modelProviderApi={modelProviderApi} agentDynamicsApi={agentDynamicsApi} dashboardApi={dashboardApi} navigate={navigate} />
+    {(admin, auth) => <AccountContextProvider api={accountsApi}>
+      <AuthenticatedShell admin={admin} onLogout={auth.logout} logoutBusy={auth.busy} page={page} accountsApi={accountsApi} productsApi={productsApi} couponsApi={couponsApi} messagesApi={messagesApi} workspaceApi={workspaceApi} ordersApi={ordersApi} settingsApi={settingsApi} autoReplyAgentSettingsApi={autoReplyAgentSettingsApi} openaiSettingsApi={openaiSettingsApi} modelProviderApi={modelProviderApi} agentDynamicsApi={agentDynamicsApi} dashboardApi={dashboardApi} navigate={navigate} />
     </AccountContextProvider>}
   </AuthGate>;
 }
 
-export function AuthenticatedShell({ admin, page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi, agentDynamicsApi, dashboardApi, navigate }: { admin?: AdminProfile | null; page: PageKey; accountsApi: ReturnType<typeof createAccountsApi>; productsApi: ReturnType<typeof createProductsApi>; couponsApi: ReturnType<typeof createCouponsApi>; messagesApi: ReturnType<typeof createMessagesApi>; workspaceApi: ReturnType<typeof createWorkspaceApi>; ordersApi: ReturnType<typeof createOrdersApi>; settingsApi: ReturnType<typeof createCredentialApi>; autoReplyAgentSettingsApi: ReturnType<typeof createAutoReplyAgentSettingsApi>; openaiSettingsApi: ReturnType<typeof createOpenAISettingsApi>; modelProviderApi: ReturnType<typeof createModelProviderApi>; agentDynamicsApi: AgentDynamicsApi; dashboardApi: ReturnType<typeof createDashboardApi>; navigate: (next: PageKey) => void }) {
+export function AuthenticatedShell({ admin, onLogout = async () => undefined, logoutBusy = false, page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi, agentDynamicsApi, dashboardApi, navigate }: { admin?: AdminProfile | null; onLogout?: () => Promise<void>; logoutBusy?: boolean; page: PageKey; accountsApi: ReturnType<typeof createAccountsApi>; productsApi: ReturnType<typeof createProductsApi>; couponsApi: ReturnType<typeof createCouponsApi>; messagesApi: ReturnType<typeof createMessagesApi>; workspaceApi: ReturnType<typeof createWorkspaceApi>; ordersApi: ReturnType<typeof createOrdersApi>; settingsApi: ReturnType<typeof createCredentialApi>; autoReplyAgentSettingsApi: ReturnType<typeof createAutoReplyAgentSettingsApi>; openaiSettingsApi: ReturnType<typeof createOpenAISettingsApi>; modelProviderApi: ReturnType<typeof createModelProviderApi>; agentDynamicsApi: AgentDynamicsApi; dashboardApi: ReturnType<typeof createDashboardApi>; navigate: (next: PageKey) => void }) {
   const dashboardApiMode = resolveDashboardMode(apiMode, import.meta.env.VITE_DASHBOARD_MODE);
   const candidateAdminName = admin?.displayName?.trim() ?? '';
   const adminName = candidateAdminName && !/^[?？]+$/.test(candidateAdminName) ? candidateAdminName : '管理员';
   const adminEmail = admin?.email ?? '—';
   const adminInitial = Array.from(adminName)[0] ?? '管';
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+
+  async function handleLogout() {
+    setAccountMenuOpen(false);
+    await onLogout();
+  }
+
+  const accountMenu = accountMenuOpen ? <AccountMenu adminName={adminName} adminEmail={adminEmail} adminInitial={adminInitial} logoutBusy={logoutBusy} onLogout={handleLogout} /> : null;
+
   return (
     <div className="app-viewport">
       <div className={`desktop-shell${page === 'products' ? ' products-shell' : page === 'accounts' ? ' accounts-shell' : page === 'orders' ? ' orders-shell' : page === 'coupons' ? ' coupons-shell' : page === 'settings' ? ' settings-shell' : page === 'agent-dynamics' ? ' agent-dynamics-shell-host' : ''}`}>
         <aside className="sidebar">
-          <div className="brand-block"><Logo className="brand-mark" variant={activeLogoVariant} label="XianyuSellerAgent Logo" /><div className="brand-copy"><strong>XianyuSellerAgent</strong><span>运营控制台</span></div></div>
+          <div className="brand-block"><Logo className="brand-mark" variant={activeLogoVariant} label="XianyuSellerAgent Logo" /><div className="brand-copy"><strong>XianyuSellerAgent</strong><span>运营控制台</span></div><div className="mobile-account-anchor"><button className="mobile-account-trigger" type="button" data-testid="account-menu-trigger" aria-label="打开账户菜单" aria-expanded={accountMenuOpen} aria-haspopup="menu" onClick={() => setAccountMenuOpen((open) => !open)}><span className="avatar">{adminInitial}</span><span className="mobile-account-name">{adminName}</span><ChevronIcon open={accountMenuOpen} /></button>{accountMenu}</div></div>
           <div className="side-section">运营台</div>
           <nav className="side-nav" aria-label="主导航">
             {navItems.map((item) => <button key={item.key} type="button" className={page === item.key ? 'active' : ''} aria-current={page === item.key ? 'page' : undefined} onClick={() => navigate(item.key)}>{iconFor(item.icon)}<span>{item.label}</span><small>{item.sub}</small></button>)}
           </nav>
-          <div className="sidebar-bottom"><div className="agent-card"><span className="online-dot" /> <strong>Agent Runtime</strong><small>独立服务 · 正常</small></div><div className="sidebar-user"><div className="avatar">{adminInitial}</div><div><strong>{adminName}</strong><span>{adminEmail}</span></div></div></div>
+          <div className="sidebar-bottom"><div className="agent-card"><span className="online-dot" /> <strong>Agent Runtime</strong><small>独立服务 · 正常</small></div><div className="desktop-account-anchor"><button className="sidebar-user sidebar-account-trigger" type="button" data-testid="account-menu-trigger" aria-label="打开账户菜单" aria-expanded={accountMenuOpen} aria-haspopup="menu" onClick={() => setAccountMenuOpen((open) => !open)}><div className="avatar">{adminInitial}</div><div><strong>{adminName}</strong><span>{adminEmail}</span></div><ChevronIcon open={accountMenuOpen} /></button>{accountMenu}</div></div>
         </aside>
         <div className="desktop-body">
           <main className={page === 'products' ? 'products-main' : page === 'accounts' ? 'accounts-main' : page === 'orders' ? 'orders-main' : page === 'settings' ? 'settings-main' : page === 'agent-dynamics' ? 'agent-dynamics-main-host' : undefined}>{renderAuthenticatedPage({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi, agentDynamicsApi, dashboardApi, dashboardApiMode, onNavigate: navigate })}</main>
@@ -128,6 +137,14 @@ export function AuthenticatedShell({ admin, page, accountsApi, productsApi, coup
       </div>
     </div>
   );
+}
+
+function ChevronIcon({ open }: { open: boolean }) {
+  return <svg className={`account-menu-chevron${open ? ' open' : ''}`} aria-hidden="true" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></svg>;
+}
+
+export function AccountMenu({ adminName, adminEmail, adminInitial, logoutBusy, onLogout }: { adminName: string; adminEmail: string; adminInitial: string; logoutBusy: boolean; onLogout: () => Promise<void> }) {
+  return <div className="account-menu" role="menu" aria-label="账户操作"><div className="account-menu-head"><div className="avatar">{adminInitial}</div><div><strong>{adminName}</strong><span>{adminEmail}</span></div></div><div className="account-menu-divider" /><button className="account-menu-logout" type="button" data-testid="account-logout" role="menuitem" onClick={() => void onLogout()} disabled={logoutBusy}><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10 5H7a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3m4-4 4-3-4-3m4 3H9" /></svg><span>{logoutBusy ? '退出中…' : '退出登录'}</span></button></div>;
 }
 
 type AuthenticatedPageProps = {

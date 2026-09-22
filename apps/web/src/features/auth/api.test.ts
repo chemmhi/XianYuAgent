@@ -20,6 +20,14 @@ describe('auth api', () => {
     expect(post).toHaveBeenNthCalledWith(2, '/api/v1/auth/bootstrap', { email: 'first@example.com', password: 'password-123', displayName: 'First Admin' }, expect.objectContaining({ headers: expect.objectContaining({ 'Idempotency-Key': expect.stringContaining('auth-bootstrap-') }) }));
   });
 
+  it('revokes the current admin session through the canonical logout endpoint', async () => {
+    const post = vi.fn().mockResolvedValue({ success: true, data: { loggedOut: true } });
+    const api = createAuthApi({ get: vi.fn(), post });
+
+    await expect(api.logout()).resolves.toBeUndefined();
+    expect(post).toHaveBeenCalledWith('/api/v1/auth/logout');
+  });
+
   it('surfaces canonical auth errors instead of treating them as success', async () => {
     const post = vi.fn().mockResolvedValue({ success: false, data: null, message: 'session required', error: { code: 'UNAUTHENTICATED' } });
     const api = createAuthApi({ get: vi.fn(), post });

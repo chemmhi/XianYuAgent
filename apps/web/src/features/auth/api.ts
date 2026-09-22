@@ -21,6 +21,7 @@ export interface AuthApi {
   getSession(): Promise<AuthSessionView>;
   login(input: { email: string; password: string }): Promise<AuthSessionView>;
   bootstrap(input: { email: string; password: string; displayName: string }): Promise<AuthSessionView>;
+  logout(): Promise<void>;
 }
 
 interface ApiEnvelope<T> {
@@ -65,6 +66,10 @@ export function createAuthApi(transport: AuthApiTransport): AuthApi {
       return normalizeMutation(unwrap(await post<AuthMutationOutput | ApiEnvelope<AuthMutationOutput>>('/api/v1/auth/bootstrap', input, {
         headers: { 'Idempotency-Key': `auth-bootstrap-${Date.now()}` },
       })));
+    },
+    async logout() {
+      const post = requirePost(transport);
+      unwrap(await post<{ loggedOut: boolean } | ApiEnvelope<{ loggedOut: boolean }>>('/api/v1/auth/logout'));
     },
   };
 }

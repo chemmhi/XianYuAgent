@@ -15,10 +15,21 @@ export interface AuthController extends AuthState {
   refresh: () => Promise<void>;
   login: (input: { email: string; password: string }) => Promise<void>;
   bootstrap: (input: { email: string; password: string; displayName: string }) => Promise<void>;
+  logout: () => Promise<void>;
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : '管理员会话请求失败，请重试。';
+}
+
+export function loggedOutState(error?: unknown): Pick<AuthState, 'phase' | 'session' | 'admin' | 'error' | 'busy'> {
+  return {
+    phase: 'login-required',
+    session: { authenticated: false, bootstrapRequired: false },
+    admin: null,
+    error: error ? errorMessage(error) : null,
+    busy: false,
+  };
 }
 
 function stateFromSession(session: AuthSessionView): Pick<AuthState, 'phase' | 'session' | 'admin' | 'error' | 'busy'> {
@@ -62,7 +73,18 @@ export function useAuthController(api: AuthApi): AuthController {
     }
   }, [api]);
 
+  const logout = useCallback(async () => {
+    setState((previous) => ({ ...previous, error: null, busy: true }));
+    try {
+      await api.logout();
+      setState(loggedOutState());
+    } catch (error) {
+      // The local shell must disappear even if the server revoke fails.
+      setState(loggedOutState(error));
+    }
+  }, [api]);
+
   useEffect(() => { void refresh(); }, [refresh]);
 
-  return { ...state, refresh, login, bootstrap };
+  return { ...state, refresh, login, bootstrap, logout };
 }
