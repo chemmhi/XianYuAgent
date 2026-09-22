@@ -250,3 +250,11 @@ Dashboard 不先于账号、商品、卡券、订单四个核心域；Settings �
 3. 前端纵向切片：导航、正式路由、原型高保真页面、轮询、筛选和详情抽屉；
 4. 验证切片：单元/集成、真实 PostgreSQL + Chrome/CDP E2E、1440×900/390×844 截图与偏差记录；
 5. 合并门禁：独立评审、中文提交、merge lock 内合入 master。
+
+## 商品自动化四流程切片（2026-09-22）
+
+1. 设计门禁：冻结商品列表、四个规则抽屉、卡券穿梭框和批量配置交互；
+2. 后端纵向切片：配置 API、执行工作流、`automation.execution_ledger`、评价事实与求评状态；
+3. 前端纵向切片：商品级规则摘要、卡券选择入口、批量配置、版本冲突和成功/失败反馈；
+4. 验证切片：API 单测、PostgreSQL smoke、跨层 entry、Chrome/CDP 双 viewport 和严格视觉 diff；
+5. 门禁结论：本轮为 `PARTIALLY_VERIFIED / BLOCKED`；真实闲鱼 MTOP/IM 执行适配器与像素级视觉验收仍需单独关闭。
