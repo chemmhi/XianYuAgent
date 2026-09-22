@@ -81,14 +81,16 @@ const trendRangeOptions: Array<{ value: DashboardRange; label: string }> = [
 ];
 
 function TrendRangeControl({ query, onChange }: { query: DashboardQuery; onChange: (query: DashboardQuery) => void }) {
+  const [draftRange, setDraftRange] = useState<DashboardRange>(query.range);
   const [customFrom, setCustomFrom] = useState(query.from ?? '');
   const [customTo, setCustomTo] = useState(query.to ?? '');
-  const isCustom = query.range === 'custom';
+  const isCustom = draftRange === 'custom';
   return <div className="dashboard-trend-controls" aria-label="趋势时间范围">
-    <SelectField className="dashboard-trend-select" aria-label="选择趋势时间范围" value={query.range} options={trendRangeOptions} onChange={(event) => {
+    <SelectField className="dashboard-trend-select" aria-label="选择趋势时间范围" value={draftRange} options={trendRangeOptions} onChange={(event) => {
       const range = event.target.value as DashboardRange;
+      setDraftRange(range);
       if (range === 'custom') {
-        onChange({ range, from: customFrom || undefined, to: customTo || undefined });
+        return;
       } else {
         onChange({ range });
       }
