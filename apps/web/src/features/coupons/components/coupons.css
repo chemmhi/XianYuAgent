@@ -9,7 +9,6 @@
 .coupons-toolbar-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; max-width: 100%; flex-wrap: nowrap; justify-content: flex-end; }
 .coupons-toolbar-actions .ui-search-control { font-size: 11px; }
 .coupons-purpose-select { min-width: 118px; }
-.coupons-status-select, .coupons-stock-alert-select { min-width: 118px; }
 .coupons-search { width: 260px; max-width: 260px; }
 .coupons-create-button { flex: 0 0 auto; white-space: nowrap; }
 .coupons-toolbar-actions .ui-button-primary { border-color: var(--link); background: var(--link); color: #fff; }

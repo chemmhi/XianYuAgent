@@ -86,6 +86,10 @@ describe('CouponBatchTable', () => {
     expect(html).not.toContain('库存 2');
     expect(html).not.toContain('查看明细');
     expect(html).toContain('aria-label="更多"');
+    expect(html).toContain('aria-label="关联商品"');
+    expect(html.indexOf('aria-label="编辑"')).toBeLessThan(html.indexOf('aria-label="关联商品"'));
+    expect(html.indexOf('aria-label="关联商品"')).toBeLessThan(html.indexOf('aria-label="更多"'));
+    expect(html).not.toContain('aria-label="复制"');
     expect(html).not.toContain('coupons-action-icon');
     expect(html).not.toContain('规格：版本 = 标准版');
   });

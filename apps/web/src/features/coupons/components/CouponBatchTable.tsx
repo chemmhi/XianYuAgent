@@ -34,11 +34,11 @@ export function CouponBatchTable({ batches, selectedIds, page, pageSize, total, 
             <time className="coupons-muted">创建 {formatDate(batch.createdAt)}<br />更新 {formatDate(batch.updatedAt)}</time>
             <span className="coupons-row-actions" aria-label={`${batch.label} 操作`}>
               <button className="btn ghost btn-small coupons-action-button" type="button" aria-label="编辑" onClick={() => onEdit(batch)}>编辑</button>
-              <button className="btn ghost btn-small coupons-action-button" type="button" aria-label="复制" onClick={() => onCopy(batch)}>复制</button>
+              <button className="btn ghost btn-small coupons-action-button" type="button" aria-label="关联商品" onClick={() => onBind(batch.batchId)}>关联商品</button>
               <span className="coupons-more-actions" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpenMenuId(null); }}>
                 <button className="btn ghost btn-small coupons-action-button" type="button" aria-label="更多" aria-expanded={menuOpen} onClick={() => setOpenMenuId(menuOpen ? null : batch.batchId)}>更多</button>
                 {menuOpen && <span className="coupons-more-menu" role="menu">
-                  <button className="btn ghost btn-small" type="button" role="menuitem" onClick={() => { setOpenMenuId(null); onBind(batch.batchId); }}>关联商品</button>
+                  <button className="btn ghost btn-small" type="button" role="menuitem" onClick={() => { setOpenMenuId(null); onCopy(batch); }}>复制</button>
                   <button className="btn ghost btn-small" type="button" role="menuitem" onClick={() => { setOpenMenuId(null); onToggle(batch); }}>{batch.status === 'active' ? '禁用' : '启用'}</button>
                   <button className="btn danger btn-small" type="button" role="menuitem" onClick={() => { setOpenMenuId(null); onDelete(batch.batchId); }}>删除</button>
                 </span>}

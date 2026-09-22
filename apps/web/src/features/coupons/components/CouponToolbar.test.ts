@@ -10,8 +10,6 @@ describe('CouponToolbar', () => {
       phase: 'success',
       onKeywordChange: vi.fn(),
       onPurposeChange: vi.fn(),
-      onStatusChange: vi.fn(),
-      onStockAlertChange: vi.fn(),
       onCreate: vi.fn(),
       onRefresh: vi.fn(),
     }));
@@ -21,10 +19,10 @@ describe('CouponToolbar', () => {
     expect(html).not.toContain('搜索卡券名称或描述...');
     expect(html).toContain('卡券类型');
     expect(html).toContain('全部类型');
-    expect(html).toContain('卡券状态');
-    expect(html).toContain('库存预警');
-    expect(html).toContain('全部状态');
-    expect(html).toContain('全部库存');
+    expect(html).not.toContain('卡券状态');
+    expect(html).not.toContain('库存预警');
+    expect(html).not.toContain('data-coupons-status-filter');
+    expect(html).not.toContain('data-coupons-stock-filter');
     expect(html).toContain('刷新');
     expect(html).toContain('新建卡券');
     expect(html).toContain('coupons-create-button');
