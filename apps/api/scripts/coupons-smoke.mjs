@@ -90,6 +90,12 @@ try {
   const bound = await request(`/api/v1/coupons/batches/${batchId}/bind`, { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-bind-1' }, body: JSON.stringify({ productId: product.id }) });
   assert.equal(bound.response.status, 200);
   assert.equal(bound.body.data.binding.productId, product.id);
+  const boundDetail = await request(`/api/v1/coupons/batches/${batchId}`, { headers: { cookie } });
+  assert.equal(boundDetail.response.status, 200);
+  assert.equal(boundDetail.body.data.bindings.find((binding) => binding.productId === product.id)?.status, 'active');
+  const boundProduct = await request(`/api/v1/products/${encodeURIComponent(product.id)}`, { headers: { cookie } });
+  assert.equal(boundProduct.response.status, 200);
+  assert.deepEqual(boundProduct.body.data.couponBatches, [{ id: internalBatch.sequenceId, label: 'Demo cards edited' }]);
 
   const deleted = await request(`/api/v1/coupons/batches/${batchId}`, { method: 'DELETE', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-delete-1' } });
   assert.equal(deleted.response.status, 200);
