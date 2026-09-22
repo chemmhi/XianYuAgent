@@ -281,6 +281,10 @@ export class XianyuMtopClient {
     const initialMetadata = credential?.metadata;
     if (!cookieHeader && cookieSnapshot) cookieHeader = cookieHeaderFromSnapshot(cookieSnapshot);
     if (!cookieHeader) return { success: false, accountInvalid: true, errorCode: 'CREDENTIAL_MISSING', message: 'account credential is missing', cookieHeader };
+    // A manually refreshed raw Cookie is authoritative. Once it diverges from
+    // the persisted browser snapshot, discard the stale snapshot for the whole
+    // request so a response Set-Cookie cannot rehydrate old validation tokens.
+    if (cookieSnapshot && !cookieHeadersMatch(cookieSnapshot, cookieHeader)) cookieSnapshot = [];
     const dataValue = JSON.stringify(data);
     let lastError = 'MTOP_REQUEST_FAILED';
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -341,7 +345,7 @@ export class XianyuMtopClient {
         if (cookieSnapshot && setCookies.length > 0) {
           cookieSnapshot = applySetCookies(cookieSnapshot, requestUrl, setCookies, Date.now(), XIANYU_TOP_SITE);
           const snapshotCookieHeader = cookieHeaderFromSnapshot(cookieSnapshot);
-          if (cookieValue(snapshotCookieHeader, '_m_h5_tk')) cookieHeader = snapshotCookieHeader;
+          cookieHeader = cookieValue(snapshotCookieHeader, '_m_h5_tk') ? snapshotCookieHeader : mergeCookies(cookieHeader, setCookies);
         } else if (setCookies.length > 0) {
           cookieHeader = mergeCookies(cookieHeader, setCookies);
         }
@@ -410,7 +414,7 @@ function mergeCookies(cookieHeader: string, setCookies: string[]): string {
   return [...values.entries()].map(([key, value]) => `${key}=${value}`).join('; ');
 }
 
-function getSetCookies(headers: Headers): string[] { return (headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ?? []; }
+function getSetCookies(headers: Headers): string[] { return setCookieValues(headers); }
 function md5(value: string): string { return crypto.createHash('md5').update(value).digest('hex'); }
 function isTokenExpired(value: string): boolean { return ['FAIL_SYS_TOKEN_EXOIRED', 'FAIL_SYS_TOKEN_EXPIRED', 'FAIL_SYS_TOKEN_EMPTY', '浠ょ墝杩囨湡', '浠ょ墝涓虹┖'].some((marker) => value.includes(marker)); }
 function isSessionExpired(ret: string[]): boolean { return ret.some(isSessionExpiredText); }

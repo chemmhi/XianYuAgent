@@ -3,7 +3,8 @@ import type { AccountsApi } from '../api';
 import { TextAreaField } from '../../../shared/ui/TextAreaField';
 import { Button } from '../../../shared/ui/Button';
 
-export function CookieLoginForm({ api, existingAccount = false, onCompleted }: { api: AccountsApi; existingAccount?: boolean; onCompleted: () => void }) {
+export function CookieLoginForm({ api, existingAccountId, onCompleted }: { api: AccountsApi; existingAccountId?: string; onCompleted: () => void }) {
+  const existingAccount = Boolean(existingAccountId);
   const [cookieHeader, setCookieHeader] = useState('');
   const [phase, setPhase] = useState<'idle' | 'submitting' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -18,7 +19,7 @@ export function CookieLoginForm({ api, existingAccount = false, onCompleted }: {
     setPhase('submitting');
     setError(null);
     try {
-      await api.loginWithCookie({ cookieHeader: cookieHeader.trim() });
+      await api.loginWithCookie({ cookieHeader: cookieHeader.trim(), ...(existingAccountId ? { accountId: existingAccountId } : {}) });
       onCompleted();
     } catch (cause) {
       setPhase('error');

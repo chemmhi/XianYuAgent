@@ -41,7 +41,7 @@ export class XianyuItemDetailService {
         // Keep remote slider/anti-bot validation distinct from actual account
         // re-authentication so the UI can guide the operator to the right fix.
         if (response.errorCode === 'ACCOUNT_VALIDATION_REQUIRED') {
-          throw new ServiceError(409, 'ACCOUNT_REAUTH_REQUIRED', '闲鱼详情请求触发风控验证，请先在闲鱼商品详情页完成滑块验证后再重试。', { errorCode: response.errorCode });
+          throw new ServiceError(409, 'ACCOUNT_REAUTH_REQUIRED', '请先在闲鱼商品详情页完成滑块验证，再把验证后的最新完整 Cookie 回写到账号管理，最后重新同步详情。', { errorCode: response.errorCode });
         }
         throw new ServiceError(409, 'ACCOUNT_REAUTH_REQUIRED', response.message ?? 'xianyu credential requires re-authentication', { errorCode: response.errorCode });
       }

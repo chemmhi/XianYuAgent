@@ -17,7 +17,7 @@ export function toProductsLoadError(error: unknown): ProductsLoadError {
     : '';
   const sliderValidation = detailCode === 'ACCOUNT_VALIDATION_REQUIRED' || remoteCode === 'ACCOUNT_VALIDATION_REQUIRED' || /FAIL_SYS_USER_VALIDATE|RGV587|X5SEC|CAPTCHA/i.test(remoteMessage);
   if (sliderValidation) {
-    return { code: 'ACCOUNT_REAUTH_REQUIRED', reason: 'SLIDER_VALIDATION', message: '闲鱼触发安全验证，请打开闲鱼商品详情页完成滑块验证，验证完成后再回到这里重新同步。', retryable: false };
+    return { code: 'ACCOUNT_REAUTH_REQUIRED', reason: 'SLIDER_VALIDATION', message: '请先在闲鱼商品详情页完成滑块验证，再到账号管理回写验证后的最新完整 Cookie，最后重新同步详情。', retryable: false };
   }
   if (remoteCode === 'ACCOUNT_REAUTH_REQUIRED') {
     return { code: 'ACCOUNT_REAUTH_REQUIRED', reason: 'REAUTH', message: '闲鱼账号登录态已失效，请先到账号管理重新登录后再同步商品详情。', retryable: false };
@@ -38,7 +38,7 @@ export function toProductsMutationError(error: unknown): ProductMutationError {
   const detailCode = payloadError?.details && typeof payloadError.details === 'object' && !Array.isArray(payloadError.details) && typeof (payloadError.details as { errorCode?: unknown }).errorCode === 'string'
     ? String((payloadError.details as { errorCode: string }).errorCode)
     : '';
-  if (status === 409 && code === 'ACCOUNT_REAUTH_REQUIRED' && detailCode === 'ACCOUNT_VALIDATION_REQUIRED') return { code: 'ACCOUNT_REAUTH_REQUIRED', reason: 'SLIDER_VALIDATION', message: '闲鱼触发安全验证，请打开闲鱼商品详情页完成滑块验证，验证完成后再回到这里重新同步。', retryable: false };
+  if (status === 409 && code === 'ACCOUNT_REAUTH_REQUIRED' && detailCode === 'ACCOUNT_VALIDATION_REQUIRED') return { code: 'ACCOUNT_REAUTH_REQUIRED', reason: 'SLIDER_VALIDATION', message: '请先在闲鱼商品详情页完成滑块验证，再到账号管理回写验证后的最新完整 Cookie，最后重新同步详情。', retryable: false };
   if (status === 409 && code === 'ACCOUNT_REAUTH_REQUIRED') return { code: 'ACCOUNT_REAUTH_REQUIRED', reason: 'REAUTH', message: '闲鱼账号登录态已失效，请先重新登录账号。', retryable: false };
   if (status === 502 || code === 'XIANYU_SYNC_FAILED') return { code: 'SYNC_FAILED', message: '闲鱼商品同步失败，请稍后重试。', retryable: true };
   if (status === 403) return { code: 'FORBIDDEN', message: '当前管理员没有写入商品的权限。', retryable: false };

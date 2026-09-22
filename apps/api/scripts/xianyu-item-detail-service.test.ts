@@ -88,7 +88,7 @@ test('maps remote account validation failures to the shared slider-validation co
       assert.equal((error as { statusCode?: number }).statusCode, 409);
       assert.equal((error as { code?: string }).code, 'ACCOUNT_REAUTH_REQUIRED');
       assert.equal((error as { details?: { errorCode?: string } }).details?.errorCode, 'ACCOUNT_VALIDATION_REQUIRED');
-      assert.equal((error as { message?: string }).message, '闲鱼详情请求触发风控验证，请先在闲鱼商品详情页完成滑块验证后再重试。');
+      assert.equal((error as { message?: string }).message, '请先在闲鱼商品详情页完成滑块验证，再把验证后的最新完整 Cookie 回写到账号管理，最后重新同步详情。');
       return true;
     },
   );

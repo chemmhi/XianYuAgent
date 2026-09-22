@@ -692,11 +692,12 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   if (ctx.path === '/api/v1/auth/cookie-login' && ctx.method === 'POST') {
     const cookieHeader = String(ctx.body.cookieHeader ?? '').trim();
     if (!cookieHeader) throw new ServiceError(422, 'VALIDATION_FAILED', 'cookieHeader is required');
+    const requestedAccountId = optionalString(ctx.body.accountId);
     const result = await mutation(runtime, ctx, authContext, undefined, async () => {
       const loginSession = await accounts.createLoginSession({ adminId: authContext.admin.id, loginMethod: 'cookie', requestId: ctx.requestId, traceId: ctx.traceId });
       try {
         const unb = readCookieValue(cookieHeader, 'unb') || `cookie_${createId()}`;
-        const account = await ensureAccountForLogin({ accounts, adminId: authContext.admin.id, accountId: undefined, sellerRef: unb, requestId: ctx.requestId, traceId: ctx.traceId });
+        const account = await ensureAccountForLogin({ accounts, adminId: authContext.admin.id, accountId: requestedAccountId, sellerRef: unb, requestId: ctx.requestId, traceId: ctx.traceId });
         await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId: undefined, sessionId: loginSession.id, patch: { accountId: account.id }, requestId: ctx.requestId, traceId: ctx.traceId });
         await credentials.save({ adminId: authContext.admin.id, accountId: account.id, cookieHeader, metadata: { unb, loginMethod: 'cookie' }, requestId: ctx.requestId, traceId: ctx.traceId });
         const verification = await runtime.xianyu.verifyLogin(authContext.admin.id, account.id);

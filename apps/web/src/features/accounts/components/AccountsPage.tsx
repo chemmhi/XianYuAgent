@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAccountContext } from '../../../app/account-context';
 import { createAccountsApi, createMockAccountsApi, type AccountsApi } from '../api';
 import { useAccountsController } from '../controller';
@@ -7,6 +7,8 @@ import { AccountTable } from './AccountTable';
 import { AccountStateView } from './AccountStateView';
 import { AccountToolbar } from './AccountToolbar';
 import { AccountLoginModal } from './AccountLoginModal';
+import type { AccountLoginMethod } from './LoginMethodSelector';
+import { findReauthorizeAccount, readReauthorizeAccountId } from '../reauthorize-intent';
 import './accounts.css';
 
 export interface AccountsPageProps { api?: AccountsApi; }
@@ -14,25 +16,43 @@ export interface AccountsPageProps { api?: AccountsApi; }
 export function AccountsPage({ api: providedApi }: AccountsPageProps) {
   const api = useMemo(() => providedApi ?? createMockAccountsApi(), [providedApi]);
   const controller = useAccountsController({ api });
-  const { currentAccountId, currentAccount, setCurrentAccountId, removeAccount, refreshAccounts } = useAccountContext();
+  const { accounts: contextAccounts, accountsLoading, currentAccountId, currentAccount, setCurrentAccountId, removeAccount, refreshAccounts } = useAccountContext();
   const [loginAccountId, setLoginAccountId] = useState<string | null>(null);
+  const [loginMethod, setLoginMethod] = useState<AccountLoginMethod>('qr');
   const [loginOpen, setLoginOpen] = useState(false);
+  const [handledReauthorizeAccountId, setHandledReauthorizeAccountId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const accounts = controller.state.data?.items ?? [];
   const total = controller.state.data?.total ?? 0;
   const page = controller.state.data?.page ?? controller.filters.page ?? 1;
   const totalPages = controller.state.data?.totalPages ?? 1;
   const metrics = summarize(accounts);
-  const loginAccount = loginAccountId ? accounts.find((account) => account.id === loginAccountId) : undefined;
+  const loginAccount = loginAccountId ? accounts.find((account) => account.id === loginAccountId) ?? contextAccounts.find((account) => account.id === loginAccountId) : undefined;
+  const requestedReauthorizeAccountId = useMemo(() => readReauthorizeAccountId(typeof window === 'undefined' ? '' : window.location.search), []);
 
-  function openLogin(account?: AccountVM) {
+  useEffect(() => {
+    if (!requestedReauthorizeAccountId || handledReauthorizeAccountId === requestedReauthorizeAccountId || accountsLoading) return;
+    const account = findReauthorizeAccount(contextAccounts, requestedReauthorizeAccountId) ?? findReauthorizeAccount(accounts, requestedReauthorizeAccountId);
+    if (!account) return;
+    setLoginAccountId(account.id);
+    setLoginMethod('cookie');
+    setLoginOpen(true);
+    setHandledReauthorizeAccountId(requestedReauthorizeAccountId);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('reauthorize');
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [accounts, accountsLoading, contextAccounts, handledReauthorizeAccountId, requestedReauthorizeAccountId]);
+
+  function openLogin(account?: AccountVM, method: AccountLoginMethod = 'qr') {
     setLoginAccountId(account?.id ?? null);
+    setLoginMethod(method);
     setLoginOpen(true);
   }
 
   function closeLogin() {
     setLoginOpen(false);
     setLoginAccountId(null);
+    setLoginMethod('qr');
   }
 
   async function switchAccount(account: AccountVM) {
@@ -68,7 +88,7 @@ export function AccountsPage({ api: providedApi }: AccountsPageProps) {
         {controller.state.phase === 'success' && <AccountTable accounts={accounts} activeAccountId={currentAccountId} page={page} total={total} totalPages={totalPages} onPageChange={(nextPage) => controller.setFilters((previous) => ({ ...previous, page: Math.max(1, Math.min(nextPage, totalPages)) }))} onReauthorize={openLogin} onSwitch={switchAccount} onDelete={deleteAccount} />}
         <AccountStateView phase={controller.state.phase} error={controller.state.error} onRetry={controller.reload} />
       </article>
-      {loginOpen && <AccountLoginModal api={api} account={loginAccount} onClose={closeLogin} onCompleted={() => { void controller.reload(); void refreshAccounts(); closeLogin(); }} />}
+      {loginOpen && <AccountLoginModal api={api} account={loginAccount} initialMethod={loginMethod} onClose={closeLogin} onCompleted={() => { void controller.reload(); void refreshAccounts(); closeLogin(); }} />}
     </section>
   );
 }

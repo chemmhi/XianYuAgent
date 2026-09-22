@@ -19,7 +19,7 @@ describe('XianyuDetailDrawer states', () => {
 
   it('guides slider verification from a centered validation error', () => {
     const html = renderToStaticMarkup(createElement(XianyuDetailDrawer, {
-      state: { phase: 'error', productId: 'product-1', data: null, error: { code: 'ACCOUNT_REAUTH_REQUIRED', reason: 'SLIDER_VALIDATION', message: '闲鱼触发安全验证，请打开闲鱼商品详情页完成滑块验证，验证完成后再回到这里重新同步。', retryable: false } },
+      state: { phase: 'error', productId: 'product-1', data: null, error: { code: 'ACCOUNT_REAUTH_REQUIRED', reason: 'SLIDER_VALIDATION', message: '请先在闲鱼商品详情页完成滑块验证，再到账号管理回写验证后的最新完整 Cookie，最后重新同步详情。', retryable: false } },
       onClose: vi.fn(),
       onRetry: vi.fn(),
       onSync: vi.fn(),
@@ -28,7 +28,7 @@ describe('XianyuDetailDrawer states', () => {
 
     expect(html).toContain('class="products-detail-state products-error"');
     expect(html).toContain('请先完成闲鱼滑块验证');
-    expect(html).toContain('打开闲鱼商品详情页完成滑块验证');
+    expect(html).toContain('商品详情页完成滑块验证');
     expect(html).toContain('验证后重新同步');
     expect(html).toContain('去账号管理更新 Cookie');
   });

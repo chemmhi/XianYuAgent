@@ -26,7 +26,7 @@ export interface AccountsApi {
   getQrSession(accountId: string | undefined, qrSessionId: string): Promise<QrLoginSessionVM>;
   renewQrSession?(accountId: string | undefined, qrSessionId: string): Promise<QrLoginSessionVM>;
   cancelQrSession?(accountId: string | undefined, qrSessionId: string): Promise<void>;
-  loginWithCookie(input: { cookieHeader: string }): Promise<AccountVM>;
+  loginWithCookie(input: { cookieHeader: string; accountId?: string }): Promise<AccountVM>;
   loginWithPassword(input: { account: string; password: string }): Promise<AccountVM>;
 }
 

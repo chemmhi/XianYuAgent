@@ -7,8 +7,8 @@ import { LoginMethodSelector, type AccountLoginMethod } from './LoginMethodSelec
 import { CookieLoginForm } from './CookieLoginForm';
 import { PasswordLoginForm } from './PasswordLoginForm';
 
-export function AccountLoginModal({ api, account, onClose, onCompleted }: { api: AccountsApi; account?: AccountVM; onClose: () => void; onCompleted: () => void }) {
-  const [method, setMethod] = useState<AccountLoginMethod>('qr');
+export function AccountLoginModal({ api, account, initialMethod = 'qr', onClose, onCompleted }: { api: AccountsApi; account?: AccountVM; initialMethod?: AccountLoginMethod; onClose: () => void; onCompleted: () => void }) {
+  const [method, setMethod] = useState<AccountLoginMethod>(initialMethod);
   const qrController = useQrLoginController({ api, accountId: account?.id, enabled: method === 'qr' });
   const autoStartedRef = useRef(false);
 
@@ -41,7 +41,7 @@ export function AccountLoginModal({ api, account, onClose, onCompleted }: { api:
         <LoginMethodSelector value={method} onChange={setMethod} />
         <div className="account-login-body">
           {method === 'qr' && <QrLoginView model={qrController.model} onStart={qrController.start} onRefresh={qrController.refresh} onRetry={qrController.retry} onCancel={qrController.cancel} />}
-          {method === 'cookie' && <CookieLoginForm api={api} existingAccount={Boolean(account)} onCompleted={onCompleted} />}
+          {method === 'cookie' && <CookieLoginForm api={api} existingAccountId={account?.id} onCompleted={onCompleted} />}
           {method === 'password' && <PasswordLoginForm api={api} onCompleted={onCompleted} />}
         </div>
         <div className="card-actions"><button className="btn ghost" type="button" onClick={onClose}>关闭</button></div>

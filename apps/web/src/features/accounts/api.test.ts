@@ -105,6 +105,21 @@ describe('accounts canonical API adapter', () => {
     expect(calls[0]).toMatchObject({ path: '/api/v1/auth/cookie-login', body: { cookieHeader: 'unb=seller-cookie; _m_h5_tk=token_1' } });
   });
 
+  it('targets the existing account when refreshing Cookie credentials', async () => {
+    const calls: Array<{ path: string; body?: unknown }> = [];
+    const api = createAccountsApi({
+      async get<T>() { throw new Error('unexpected GET'); },
+      async post<T>(path: string, body?: unknown) {
+        calls.push({ path, body });
+        return { success: true, data: { account: { id: 'account-existing', sellerRef: 'seller-cookie', displayName: '闲鱼昵称', status: 'connected', connection: { status: 'online' }, credentialState: 'configured' } } } as T;
+      },
+    });
+
+    const account = await api.loginWithCookie({ accountId: 'account-existing', cookieHeader: 'unb=seller-cookie; _m_h5_tk=fresh-token' });
+    expect(account).toMatchObject({ id: 'account-existing', credentialState: 'configured' });
+    expect(calls[0]).toMatchObject({ path: '/api/v1/auth/cookie-login', body: { accountId: 'account-existing', cookieHeader: 'unb=seller-cookie; _m_h5_tk=fresh-token' } });
+  });
+
   it('creates an account through the canonical mutation and maps the response', async () => {
     const calls: Array<{ path: string; body?: unknown; headers?: HeadersInit }> = [];
     const api = createAccountsApi({
