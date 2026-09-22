@@ -99,6 +99,7 @@ function readStoredDetail(product: ProductRecord): StoredDetail | undefined {
 
 function detailView(product: ProductRecord, detail: StoredDetail, cached: boolean, assetUploadErrors: Array<{ sourceUrl: string; message: string }> = detail.assetUploadErrors): XianyuItemDetailView {
   const assets = (product.assets ?? []).filter((asset) => asset.status !== 'archived');
+  const detailProduct = product.assets ? { ...product, assets, assetCount: assets.length } : product;
   const images = assets.map((asset) => {
     const publicUrl = asset.metadata && typeof asset.metadata.publicUrl === 'string' ? asset.metadata.publicUrl : undefined;
     // Keep the original source URL as the browser preview fallback. The
@@ -106,7 +107,7 @@ function detailView(product: ProductRecord, detail: StoredDetail, cached: boolea
     // private MinIO buckets may not be directly readable from the browser.
     return { ...asset, url: asset.sourceUrl ?? publicUrl, publicUrl };
   });
-  return { ...detail.summary, product, itemId: detail.summary.itemId ?? product.externalProductRef ?? '', summary: detail.summary, rawResponse: detail.rawResponse, imageUrls: detail.imageUrls, images, assets, syncedAt: detail.syncedAt, cached, assetUploadErrors };
+  return { ...detail.summary, product: detailProduct, itemId: detail.summary.itemId ?? product.externalProductRef ?? '', summary: detail.summary, rawResponse: detail.rawResponse, imageUrls: detail.imageUrls, images, assets, syncedAt: detail.syncedAt, cached, assetUploadErrors };
 }
 
 async function downloadImage(sourceUrl: string): Promise<{ body: Buffer; contentType: string; checksum: string }> {

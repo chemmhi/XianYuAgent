@@ -118,6 +118,7 @@ test('archives stale detail assets after a refresh and exposes only current imag
     assert.equal(persisted?.assets?.filter((asset) => asset.status === 'archived').length, 1);
     assert.equal(persisted?.assets?.filter((asset) => asset.status === 'active').length, 1);
     assert.equal(refreshed.images.length, 1);
+    assert.equal(refreshed.product.assets?.length, 1);
     assert.equal(refreshed.images[0]?.sourceUrl, 'https://img.example/new.jpg');
   } finally {
     globalThis.fetch = originalFetch;
