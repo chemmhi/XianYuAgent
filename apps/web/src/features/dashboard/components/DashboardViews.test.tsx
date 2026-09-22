@@ -41,6 +41,8 @@ describe('dashboard views', () => {
     expect(html).toContain('dashboard-y-axis-primary');
     expect(html).toContain('dashboard-y-axis-secondary');
     expect(html).toContain('dashboard-chart-legend');
+    expect(html).toContain('viewBox="0 0 520 232"');
+    expect(html.indexOf('dashboard-chart-axis')).toBeLessThan(html.indexOf('dashboard-chart-legend'));
     expect(html).toContain('商品排行');
     expect(html).toContain('最近处理记录');
     expect(html).toContain('data-dashboard-surface="desktop"');

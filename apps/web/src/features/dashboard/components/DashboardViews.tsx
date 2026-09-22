@@ -18,8 +18,8 @@ function toneClass(tone: string) { return `tone-${tone}`; }
 
 const CHART_LEFT = 20;
 const CHART_RIGHT = 500;
-const CHART_TOP = 14;
-const CHART_BOTTOM = 176;
+const CHART_TOP = 16;
+const CHART_BOTTOM = 214;
 
 type ChartScale = { min: number; max: number; ticks: number[] };
 
@@ -81,7 +81,7 @@ export function MiniAreaChart({ state, compact = false }: { state: DashboardStat
     setHoveredIndex(Math.round(ratio * (points.length - 1)));
   };
   return <div className={`dashboard-chart-wrap${compact ? ' dashboard-chart-compact' : ''}`} role="img" aria-label="订单金额与自动处理趋势图">
-    <svg viewBox="0 0 520 188" preserveAspectRatio="none" onMouseMove={handleMouseMove} onMouseLeave={() => setHoveredIndex(null)}>
+    <svg viewBox="0 0 520 232" preserveAspectRatio="none" onMouseMove={handleMouseMove} onMouseLeave={() => setHoveredIndex(null)}>
       <defs>
         <linearGradient id={`dashboard-primary-${gradientSuffix}`} x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#245A8D" stopOpacity="0.12"/><stop offset="100%" stopColor="#245A8D" stopOpacity="0.01"/></linearGradient>
         <linearGradient id={`dashboard-secondary-${gradientSuffix}`} x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#2E7D5B" stopOpacity="0.10"/><stop offset="100%" stopColor="#2E7D5B" stopOpacity="0.01"/></linearGradient>
@@ -91,12 +91,12 @@ export function MiniAreaChart({ state, compact = false }: { state: DashboardStat
       <path d={`${primary} L ${CHART_RIGHT} ${CHART_BOTTOM} L ${CHART_LEFT} ${CHART_BOTTOM} Z`} fill={`url(#dashboard-primary-${gradientSuffix})`}/>
       <path d={secondary} className="dashboard-chart-line dashboard-chart-line-secondary"/>
       <path d={primary} className="dashboard-chart-line"/>
-      <g className="dashboard-chart-y-axis dashboard-y-axis-primary" aria-hidden="true">{primaryScale.ticks.map((tick) => <text key={tick} x={CHART_LEFT - 4} y={chartY(tick, primaryScale) + 3} textAnchor="end">{formatAxisTick(tick, 'currency')}</text>)}</g>
-      <g className="dashboard-chart-y-axis dashboard-y-axis-secondary" aria-hidden="true">{secondaryScale.ticks.map((tick) => <text key={tick} x={CHART_RIGHT + 4} y={chartY(tick, secondaryScale) + 3}>{formatAxisTick(tick, 'percent')}</text>)}</g>
       {activeIndex !== null ? <line x1={hoverX} x2={hoverX} y1={CHART_TOP} y2={CHART_BOTTOM} className="dashboard-chart-hover-line"/> : null}
       {activeIndex !== null ? <circle cx={hoverX} cy={chartY(points[activeIndex]!.primary, primaryScale)} r="3.5" className="dashboard-chart-dot dashboard-chart-dot-primary"/> : null}
       {activeIndex !== null ? <circle cx={hoverX} cy={chartY(points[activeIndex]!.secondary, secondaryScale)} r="3.5" className="dashboard-chart-dot dashboard-chart-dot-secondary"/> : null}
     </svg>
+    <div className="dashboard-chart-y-axis dashboard-y-axis-primary" aria-hidden="true">{primaryScale.ticks.slice().reverse().map((tick) => <span key={tick}>{formatAxisTick(tick, 'currency')}</span>)}</div>
+    <div className="dashboard-chart-y-axis dashboard-y-axis-secondary" aria-hidden="true">{secondaryScale.ticks.slice().reverse().map((tick) => <span key={tick}>{formatAxisTick(tick, 'percent')}</span>)}</div>
     <div className="dashboard-chart-axis" aria-hidden="true">{labels.map((label, index) => <span key={`${label}-${index}`}>{labels.length <= 7 || index === 0 || index === labels.length - 1 || index % labelStep === 0 ? label : ''}</span>)}</div>
     {activeIndex !== null ? <div className="dashboard-chart-tooltip" style={{ left: `${tooltipLeft}%` }}><strong>{points[activeIndex]!.label}</strong><span>订单金额 ¥{points[activeIndex]!.primary.toLocaleString('zh-CN')}</span><span>AI 闭环率 {points[activeIndex]!.secondary}%</span></div> : null}
     <div className="dashboard-chart-legend"><span><i className="dashboard-legend-line primary"/>订单金额</span><span><i className="dashboard-legend-line secondary"/>AI 闭环率</span></div>
