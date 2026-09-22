@@ -24,14 +24,26 @@ describe('saveCouponRelation', () => {
     const calls: string[] = [];
     const onSaved = vi.fn(() => calls.push('close'));
     const result = await saveCouponRelation('batch-1', ['product-1', 'product-2'], ['product-1'], {
-      bindBatch: async (batchId, productId) => { calls.push(`bind:${batchId}:${productId}`); },
-      unbindBatch: async (batchId, productId) => { calls.push(`unbind:${batchId}:${productId}`); },
+      bindBatch: async (batchId, productId, options) => { calls.push(`bind:${batchId}:${productId}:${String(options?.reload)}`); },
+      unbindBatch: async (batchId, productId, options) => { calls.push(`unbind:${batchId}:${productId}:${String(options?.reload)}`); },
       getDetail: async (batchId) => { calls.push(`detail:${batchId}`); return detail; },
     }, onSaved);
 
     expect(result).toBe(detail);
-    expect(calls).toEqual(['bind:batch-1:product-2', 'detail:batch-1', 'close']);
+    expect(calls).toEqual(['bind:batch-1:product-2:false', 'detail:batch-1', 'close']);
     expect(onSaved).toHaveBeenCalledWith(detail);
+  });
+
+  it('suppresses list reloads for every binding change', async () => {
+    const reloads: boolean[] = [];
+
+    await saveCouponRelation('batch-1', ['product-2', 'product-3'], ['product-1'], {
+      bindBatch: async (_batchId, _productId, options) => { reloads.push(options?.reload !== false); },
+      unbindBatch: async (_batchId, _productId, options) => { reloads.push(options?.reload !== false); },
+      getDetail: async () => detail,
+    }, vi.fn());
+
+    expect(reloads).toEqual([false, false, false]);
   });
 
   it('does not signal close when a binding write fails', async () => {

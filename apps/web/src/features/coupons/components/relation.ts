@@ -1,8 +1,8 @@
 import type { CouponBatchVM } from '../types';
 
 export interface CouponRelationPersistence {
-  bindBatch: (batchId: string, productId: string) => Promise<unknown>;
-  unbindBatch: (batchId: string, productId: string) => Promise<unknown>;
+  bindBatch: (batchId: string, productId: string, options?: { reload?: boolean }) => Promise<unknown>;
+  unbindBatch: (batchId: string, productId: string, options?: { reload?: boolean }) => Promise<unknown>;
   getDetail: (batchId: string) => Promise<CouponBatchVM>;
 }
 
@@ -20,10 +20,10 @@ export async function saveCouponRelation(
 ): Promise<CouponBatchVM> {
   const nextIds = new Set(productIds);
   for (const productId of initialIds) {
-    if (!nextIds.has(productId)) await persistence.unbindBatch(batchId, productId);
+    if (!nextIds.has(productId)) await persistence.unbindBatch(batchId, productId, { reload: false });
   }
   for (const productId of productIds) {
-    if (!initialIds.includes(productId)) await persistence.bindBatch(batchId, productId);
+    if (!initialIds.includes(productId)) await persistence.bindBatch(batchId, productId, { reload: false });
   }
   const detail = await persistence.getDetail(batchId);
   onSaved(detail);
