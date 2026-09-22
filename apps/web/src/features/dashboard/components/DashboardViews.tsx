@@ -3,21 +3,11 @@ import type { DashboardState } from '../types';
 
 function Icon({ name }: { name: string }) {
   const paths: Record<string, ReactNode> = {
-    grid: <><rect x="4" y="4" width="6" height="6" rx="1.5"/><rect x="14" y="4" width="6" height="6" rx="1.5"/><rect x="4" y="14" width="6" height="6" rx="1.5"/><rect x="14" y="14" width="6" height="6" rx="1.5"/></>,
-    message: <><path d="M5 6.5h14M5 11.5h10M5 16.5h7"/><path d="M4 4h16v13H9l-4 3v-3H4z"/></>,
-    user: <><circle cx="12" cy="8" r="3.5"/><path d="M5.5 20c1.1-3.6 3.2-5.4 6.5-5.4s5.4 1.8 6.5 5.4"/></>,
-    inbox: <><path d="M4.5 13 7 5h10l2.5 8"/><path d="M4.5 13h4l1.5 3h4l1.5-3h4v6H4.5z"/></>,
-    box: <><path d="m12 4 8 4-8 4-8-4 8-4Z"/><path d="m4 8v8l8 4 8-4V8M12 12v8"/></>,
-    ticket: <><path d="M4 7.5A2.5 2.5 0 0 0 6.5 5h11A2.5 2.5 0 0 0 20 7.5V9a2 2 0 0 0 0 4v1.5A2.5 2.5 0 0 0 17.5 17h-11A2.5 2.5 0 0 0 4 14.5V13a2 2 0 0 0 0-4V7.5Z"/><path d="M12 7v10"/></>,
-    cart: <><path d="M4 5h2l2.1 10.2a2 2 0 0 0 2 1.6h6.8a2 2 0 0 0 1.9-1.4L20 9H7"/><circle cx="10" cy="19" r="1.2"/><circle cx="17" cy="19" r="1.2"/></>,
-    gear: <><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M4.2 7.5l2.6 1.5M17.2 15l2.6 1.5M19.8 7.5 17.2 9M6.8 15l-2.6 1.5"/></>,
     bell: <><path d="M7 10a5 5 0 0 1 10 0v4l2 3H5l2-3z"/><path d="M10 19a2 2 0 0 0 4 0"/></>,
     refresh: <><path d="M20 11a8 8 0 0 0-14.7-3L4 10"/><path d="M4 5v5h5"/><path d="M4 13a8 8 0 0 0 14.7 3L20 14"/><path d="M20 19v-5h-5"/></>,
   };
   return <svg aria-hidden="true" viewBox="0 0 24 24" className="dashboard-icon"><g>{paths[name] ?? paths.grid}</g></svg>;
 }
-
-export function Logo() { return <div className="dashboard-logo" aria-label="XianyuSellerAgent"><span/><span/><span/><span/></div>; }
 
 export function Badge({ tone = 'gray', children }: { tone?: string; children: ReactNode }) { return <span className={`dashboard-badge dashboard-badge-${tone}`}>{children}</span>; }
 

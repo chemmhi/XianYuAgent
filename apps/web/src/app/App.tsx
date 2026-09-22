@@ -91,8 +91,8 @@ export default function App() {
   </AuthGate>;
 }
 
-function AuthenticatedShell({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi, agentDynamicsApi, dashboardApi, navigate }: { page: PageKey; accountsApi: ReturnType<typeof createAccountsApi>; productsApi: ReturnType<typeof createProductsApi>; couponsApi: ReturnType<typeof createCouponsApi>; messagesApi: ReturnType<typeof createMessagesApi>; workspaceApi: ReturnType<typeof createWorkspaceApi>; ordersApi: ReturnType<typeof createOrdersApi>; settingsApi: ReturnType<typeof createCredentialApi>; autoReplyAgentSettingsApi: ReturnType<typeof createAutoReplyAgentSettingsApi>; openaiSettingsApi: ReturnType<typeof createOpenAISettingsApi>; modelProviderApi: ReturnType<typeof createModelProviderApi>; agentDynamicsApi: AgentDynamicsApi; dashboardApi: ReturnType<typeof createDashboardApi>; navigate: (next: PageKey) => void }) {
-  if (page === 'dashboard') return <DashboardPage api={dashboardApi} apiMode={resolveDashboardMode(apiMode, import.meta.env.VITE_DASHBOARD_MODE)} onNavigate={navigate} />;
+export function AuthenticatedShell({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi, agentDynamicsApi, dashboardApi, navigate }: { page: PageKey; accountsApi: ReturnType<typeof createAccountsApi>; productsApi: ReturnType<typeof createProductsApi>; couponsApi: ReturnType<typeof createCouponsApi>; messagesApi: ReturnType<typeof createMessagesApi>; workspaceApi: ReturnType<typeof createWorkspaceApi>; ordersApi: ReturnType<typeof createOrdersApi>; settingsApi: ReturnType<typeof createCredentialApi>; autoReplyAgentSettingsApi: ReturnType<typeof createAutoReplyAgentSettingsApi>; openaiSettingsApi: ReturnType<typeof createOpenAISettingsApi>; modelProviderApi: ReturnType<typeof createModelProviderApi>; agentDynamicsApi: AgentDynamicsApi; dashboardApi: ReturnType<typeof createDashboardApi>; navigate: (next: PageKey) => void }) {
+  const dashboardApiMode = resolveDashboardMode(apiMode, import.meta.env.VITE_DASHBOARD_MODE);
   return (
     <div className="app-viewport">
       <div className={`desktop-shell${page === 'products' ? ' products-shell' : page === 'accounts' ? ' accounts-shell' : page === 'orders' ? ' orders-shell' : page === 'coupons' ? ' coupons-shell' : page === 'settings' ? ' settings-shell' : page === 'agent-dynamics' ? ' agent-dynamics-shell-host' : ''}`}>
@@ -105,7 +105,7 @@ function AuthenticatedShell({ page, accountsApi, productsApi, couponsApi, messag
           <div className="sidebar-bottom"><div className="agent-card"><span className="online-dot" /> <strong>Agent Runtime</strong><small>独立服务 · 正常</small></div><div className="sidebar-user"><div className="avatar">管</div><div><strong>运营管理员</strong><span>admin@example.com</span></div></div></div>
         </aside>
         <div className="desktop-body">
-          <main className={page === 'products' ? 'products-main' : page === 'accounts' ? 'accounts-main' : page === 'orders' ? 'orders-main' : page === 'coupons' ? 'coupons-main' : page === 'settings' ? 'settings-main' : page === 'agent-dynamics' ? 'agent-dynamics-main-host' : undefined}>{renderAuthenticatedPage({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi, agentDynamicsApi, onNavigate: navigate })}</main>
+          <main className={page === 'products' ? 'products-main' : page === 'accounts' ? 'accounts-main' : page === 'orders' ? 'orders-main' : page === 'settings' ? 'settings-main' : page === 'agent-dynamics' ? 'agent-dynamics-main-host' : undefined}>{renderAuthenticatedPage({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi, agentDynamicsApi, dashboardApi, dashboardApiMode, onNavigate: navigate })}</main>
         </div>
       </div>
     </div>
@@ -125,11 +125,15 @@ type AuthenticatedPageProps = {
   openaiSettingsApi: ReturnType<typeof createOpenAISettingsApi>;
   modelProviderApi: ReturnType<typeof createModelProviderApi>;
   agentDynamicsApi: AgentDynamicsApi;
+  dashboardApi: ReturnType<typeof createDashboardApi>;
+  dashboardApiMode: 'live' | 'mock';
   onNavigate: (page: PageKey) => void;
 };
 
-export function renderAuthenticatedPage({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi, agentDynamicsApi, onNavigate }: AuthenticatedPageProps) {
+export function renderAuthenticatedPage({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi, agentDynamicsApi, dashboardApi, dashboardApiMode, onNavigate }: AuthenticatedPageProps) {
   switch (page) {
+    case 'dashboard':
+      return <DashboardPage api={dashboardApi} apiMode={dashboardApiMode} onNavigate={onNavigate} />;
     case 'accounts':
       return <AccountsPage api={accountsApi} />;
     case 'products':
