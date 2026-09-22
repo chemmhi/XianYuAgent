@@ -28,7 +28,7 @@
     "test:auto-reply:settings": "node --import tsx --test scripts/auto-reply-agent-settings.test.ts",
     "test:auto-reply:postgres": "npm run build && node scripts/auto-reply-postgres-smoke.mjs",
     "test:agent-dynamics:postgres": "npm run build && node scripts/agent-dynamics-postgres-e2e.mjs",
-    "test:auto-reply:unit": "node --import tsx --test scripts/auto-reply.test.ts scripts/auto-reply-agent.test.ts scripts/auto-reply-inbound-inbox.test.ts scripts/auto-reply-inbound-node.test.ts scripts/auto-reply-policy.test.ts scripts/auto-reply-state.test.ts scripts/auto-reply-clarification.test.ts scripts/auto-reply-pre-send-review.test.ts scripts/auto-reply-lifecycle.test.ts scripts/auto-reply-recommendation.test.ts scripts/auto-reply-topic-emotion.test.ts scripts/auto-reply-outcome-review.test.ts",
+    "test:auto-reply:unit": "node --import tsx --test scripts/auto-reply.test.ts scripts/auto-reply-agent.test.ts scripts/auto-reply-inbound-inbox.test.ts scripts/auto-reply-inbound-node.test.ts scripts/auto-reply-policy.test.ts scripts/auto-reply-state.test.ts scripts/auto-reply-clarification.test.ts scripts/auto-reply-pre-send-review.test.ts scripts/auto-reply-lifecycle.test.ts scripts/auto-reply-recommendation.test.ts scripts/auto-reply-topic-emotion.test.ts scripts/auto-reply-outcome-review.test.ts scripts/auto-reply-repair-orchestrator.test.ts",
     "test:auto-reply:inbound": "node --import tsx --test scripts/auto-reply-inbound-inbox.test.ts scripts/auto-reply-inbound-node.test.ts",
     "extract:seller-persona": "node --import tsx scripts/extract-seller-persona.ts",
     "test:extract:seller-persona": "node --import tsx --test scripts/extract-seller-persona.test.ts",
