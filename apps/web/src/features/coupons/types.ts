@@ -65,17 +65,6 @@ export interface CouponBatchVM {
   contentPreview?: { text?: string; dataRemaining?: number; apiUrl?: string; imageUrls?: string[] };
 }
 
-export interface CouponContentPreviewVM {
-  couponId: string;
-  batchId: string;
-  purpose: 'delivery' | 'preview' | 'audit';
-  deliveryScope: DeliveryScope;
-  accountIds: string[];
-  content?: { body: string; quarkUrl?: string; extractionCode?: string };
-  access: { allowed: boolean; purpose: 'delivery' | 'preview' | 'audit'; denialReason?: string; auditRef: string };
-  inventoryStatus: CouponItemStatus;
-}
-
 export interface InventoryLockVM {
   batchId: string;
   version: number;
@@ -110,7 +99,6 @@ export interface CouponsPageVM {
 export type CouponsLoadPhase = 'idle' | 'loading' | 'success' | 'empty' | 'error' | 'forbidden';
 export interface CouponsLoadError { code: 'FORBIDDEN' | 'NOT_FOUND' | 'NETWORK_ERROR' | 'CONFLICT' | 'UNKNOWN'; message: string; retryable: boolean; }
 export interface CouponsQueryState { phase: CouponsLoadPhase; data: CouponsPageVM | null; error: CouponsLoadError | null; }
-export interface CouponDetailState { phase: 'idle' | 'loading' | 'success' | 'error' | 'forbidden'; batchId?: string; data: CouponBatchVM | null; error: CouponsLoadError | null; }
 export interface CouponMutationState { phase: 'idle' | 'submitting' | 'success' | 'error'; error: CouponsLoadError | null; }
 
 export interface CreateCouponBatchRequest {
