@@ -1,4 +1,4 @@
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor, isAfterConversationCursor } from './conversation-cursor.js';
@@ -144,6 +144,47 @@ export class MemoryStore implements Store {
     if (!product || !(await this.hasAccountScope(adminId, product.accountId))) return undefined;
     return this.productDetail(product);
   }
+
+  async persistXianyuItemDetail(input: XianyuItemDetailPersistenceInput): Promise<ProductRecord | undefined> {
+    const product = this.products.get(input.productId);
+    if (!product) return undefined;
+    if (!(await this.hasAccountScope(input.adminId, product.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const existingXianyu = product.attributes.xianyu && typeof product.attributes.xianyu === 'object' && !Array.isArray(product.attributes.xianyu)
+      ? product.attributes.xianyu as Record<string, unknown>
+      : {};
+    const detail = { itemId: input.itemId, summary: { ...input.summary }, rawResponse: { ...input.rawResponse }, imageUrls: [...input.imageUrls], assetUploadErrors: input.assetUploadErrors ? input.assetUploadErrors.map((entry) => ({ ...entry })) : [], syncedAt: input.syncedAt };
+    product.attributes = { ...product.attributes, xianyu: { ...existingXianyu, imageUrls: [...input.imageUrls], detail } };
+    const summary = input.summary;
+    if (typeof summary.title === 'string' && summary.title.trim()) product.title = summary.title.trim();
+    if (typeof summary.description === 'string') product.description = summary.description;
+    if (typeof summary.priceMinor === 'number' && Number.isSafeInteger(summary.priceMinor)) product.priceMinor = summary.priceMinor;
+    product.externalProductRef = product.externalProductRef ?? input.itemId;
+    product.source = 'xianyu';
+    product.lastSyncedAt = input.syncedAt;
+    product.sourcePayloadDigest = input.sourcePayloadDigest;
+    product.configVersion += 1;
+    product.updatedAt = input.syncedAt;
+    const assets = product.assets ?? [];
+    const currentStorageKeys = new Set(input.assets.map((asset) => asset.storageKey));
+    const previousImageUrls = Array.isArray((existingXianyu.detail as Record<string, unknown> | undefined)?.imageUrls)
+      ? ((existingXianyu.detail as Record<string, unknown>).imageUrls as unknown[]).filter((value): value is string => typeof value === 'string')
+      : [];
+    for (const existing of assets) {
+      const metadata = existing.metadata ?? {};
+      const isDetailAsset = metadata.source === 'xianyu-detail'
+        || existing.storageKey.startsWith(`products/${product.id}/xianyu/${input.itemId}/images/`)
+        || Boolean(existing.sourceUrl && previousImageUrls.includes(existing.sourceUrl));
+      if (isDetailAsset && !currentStorageKeys.has(existing.storageKey)) existing.status = 'archived';
+    }
+    for (const inputAsset of input.assets) {
+      const existing = assets.find((asset) => asset.storageKey === inputAsset.storageKey);
+      const next = { id: existing?.id ?? createId(), productId: product.id, storageKey: inputAsset.storageKey, mimeType: inputAsset.mimeType, checksum: inputAsset.checksum, sourceUrl: inputAsset.sourceUrl, metadata: inputAsset.metadata ? { ...inputAsset.metadata } : undefined, status: inputAsset.status ?? 'active' as const };
+      if (existing) Object.assign(existing, next);
+      else assets.push(next);
+    }
+    product.assets = assets;
+    return this.productDetail(product);
+  }
   async listOrders(adminId: string, query: OrderListQuery): Promise<OrderListResult> {
     const scopedAccountIds = new Set((await this.listScopes(adminId)).map((scope) => scope.accountId));
     const normalizedKeyword = query.keyword?.trim().toLowerCase();
@@ -211,7 +252,21 @@ export class MemoryStore implements Store {
     const existing = [...this.products.values()].find((product) => product.accountId === input.accountId && product.externalProductRef === input.item.externalProductRef);
     if (existing?.source === 'local' && existing.status === 'draft') return { action: 'skipped_local_draft', product: this.productDetail(existing) };
     const now = new Date().toISOString();
-    const attributes = { ...input.item.attributes, xianyu: { detailUrl: input.item.detailUrl, externalStatus: input.item.externalStatus, imageUrls: input.item.imageUrls } };
+    const existingAttributes = existing?.attributes && typeof existing.attributes === 'object' ? existing.attributes : {};
+    const existingXianyu = existingAttributes.xianyu && typeof existingAttributes.xianyu === 'object' && !Array.isArray(existingAttributes.xianyu) ? existingAttributes.xianyu as Record<string, unknown> : {};
+    const incomingXianyu = input.item.attributes?.xianyu && typeof input.item.attributes.xianyu === 'object' && !Array.isArray(input.item.attributes.xianyu) ? input.item.attributes.xianyu as Record<string, unknown> : {};
+    const attributes = {
+      ...existingAttributes,
+      ...input.item.attributes,
+      xianyu: {
+        ...existingXianyu,
+        ...incomingXianyu,
+        detailUrl: input.item.detailUrl,
+        externalStatus: input.item.externalStatus,
+        imageUrls: input.item.imageUrls,
+        ...(existingXianyu.detail !== undefined ? { detail: existingXianyu.detail } : incomingXianyu.detail !== undefined ? { detail: incomingXianyu.detail } : {}),
+      },
+    };
     if (existing) {
       existing.title = input.item.title;
       existing.description = input.item.description;

@@ -40,6 +40,17 @@ try {
   assert.ok(remote);
   assert.equal(remote.source, 'xianyu');
   assert.equal(remote.priceMinor, 2990);
+  await runtime.store.persistXianyuItemDetail({
+    adminId,
+    productId: remote.id,
+    itemId: 'ITEM-REMOTE',
+    summary: { itemId: 'ITEM-REMOTE', title: '详情标题', description: '详情正文' },
+    rawResponse: { data: { itemDO: { itemId: 'ITEM-REMOTE', title: '详情标题' } } },
+    imageUrls: [],
+    syncedAt: '2026-09-22T03:00:00.000Z',
+    sourcePayloadDigest: 'detail-digest',
+    assets: [],
+  });
   const localAfter = await runtime.store.getProduct(adminId, localDraft.id);
   assert.equal(localAfter?.title, '本地草稿');
   assert.equal(localAfter?.source, 'local');
@@ -48,7 +59,10 @@ try {
   const replayed = await request('/api/v1/products/sync', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'product-sync-2' }, body: JSON.stringify({ accountId: account.id }) });
   assert.equal(replayed.response.status, 200);
   assert.equal(replayed.body.data.updatedCount, 1);
-  assert.equal((await runtime.store.getProduct(adminId, remote.id)).title, '远端商品已更新');
+  const remoteAfterReplay = await runtime.store.getProduct(adminId, remote.id);
+  assert.equal(remoteAfterReplay?.title, '远端商品已更新');
+  assert.equal(remoteAfterReplay?.attributes.xianyu?.detail?.summary?.title, '详情标题');
+  assert.equal(remoteAfterReplay?.attributes.xianyu?.detail?.rawResponse?.data?.itemDO?.itemId, 'ITEM-REMOTE');
 
   const replayedIdempotency = await request('/api/v1/products/sync', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'product-sync-2' }, body: JSON.stringify({ accountId: account.id }) });
   assert.equal(replayedIdempotency.response.status, 200);

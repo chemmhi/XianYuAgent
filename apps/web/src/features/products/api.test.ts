@@ -62,4 +62,37 @@ describe('products canonical API adapter', () => {
     expect(calls[1]?.headers?.get('Idempotency-Key')).toBe('update-key');
     expect(calls[1]?.headers?.get('If-Match-Version')).toBe('1');
   });
+
+  it('reads and persists Xianyu detail through the dedicated route', async () => {
+    const calls: Array<{ method: string; path: string; body?: unknown; headers?: Headers }> = [];
+    const api = createProductsApi({
+      async get<T>(path: string) {
+        calls.push({ method: 'GET', path });
+        return { success: true, data: { productId: 'product-1', itemId: '1078553391460', title: 'PPT Master', priceText: '8.50', browseCount: 315, wantCount: 33, images: [{ storageKey: 'products/1/hero.jpg', url: 'https://cdn.example/hero.jpg', width: 640, height: 640 }], seller: { nickname: '陈陈cc' } } } as T;
+      },
+      async post<T>(path: string, body?: unknown, init?: RequestInit) {
+        calls.push({ method: 'POST', path, body, headers: new Headers(init?.headers) });
+        return { success: true, data: { productId: 'product-1', itemId: '1078553391460', title: 'PPT Master', images: ['https://cdn.example/hero.jpg'] } } as T;
+      },
+    });
+
+    const persisted = await api.syncXianyuDetail('product-1');
+    const read = await api.getXianyuDetail('product-1');
+
+    expect(calls[0]).toMatchObject({ method: 'POST', path: '/api/v1/products/product-1/detail/refresh' });
+    expect(calls[0]?.headers?.get('Idempotency-Key')).toMatch(/^product-detail-/);
+    expect(calls[1]).toMatchObject({ method: 'GET', path: '/api/v1/products/product-1/detail' });
+    expect(persisted).toMatchObject({ productId: 'product-1', itemId: '1078553391460', title: 'PPT Master', images: [{ url: 'https://cdn.example/hero.jpg' }] });
+    expect(read).toMatchObject({ browseCount: 315, wantCount: 33, images: [{ storageKey: 'products/1/hero.jpg', width: 640, height: 640 }], seller: { nickname: '陈陈cc' } });
+  });
+
+  it('rehydrates persisted summary and object-storage assets from a nested product payload', async () => {
+    const api = createProductsApi({
+      async get<T>() {
+        return { success: true, data: { product: { id: 'product-2', title: '已保存商品', attributesJson: { xianyu: { imageUrls: ['https://cdn.example/fallback.jpg'], detail: { itemId: 'item-2', summary: { browseCount: 18, wantCount: 2 }, syncedAt: '2026-09-22T02:00:00.000Z' } } } }, assets: [{ storageKey: 'products/2/hero.webp', sourceUrl: 'https://cdn.example/hero.webp', mimeType: 'image/webp', metadata: { width: 800, height: 600 } }] } } as T;
+      },
+    });
+    const detail = await api.getXianyuDetail('product-2');
+    expect(detail).toMatchObject({ productId: 'product-2', itemId: 'item-2', title: '已保存商品', browseCount: 18, wantCount: 2, detailSyncedAt: '2026-09-22T02:00:00.000Z', images: [{ storageKey: 'products/2/hero.webp', url: 'https://cdn.example/hero.webp', width: 800, height: 600 }] });
+  });
 });

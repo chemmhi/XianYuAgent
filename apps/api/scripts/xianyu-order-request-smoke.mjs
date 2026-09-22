@@ -76,7 +76,7 @@ try {
   assert.equal(denied.items.length, 0);
   assert.equal(denied.pages[0].errorCode, 'MTOP_PERMISSION_DENIED');
   const emptySnapshotClient = new XianyuMtopClient({
-    loadCredential: async () => ({ cookieHeader: 'unb=legacy; _m_h5_tk=legacy_token', metadata: { cookies_refresh_snapshot: '[]' } }),
+    loadCredential: async () => ({ cookieHeader: 'unb=legacy', metadata: { cookies_refresh_snapshot: '[]' } }),
     saveCookie: async () => {},
   });
   const emptySnapshot = await emptySnapshotClient.fetchOrdersAll('admin-1', 'account-1', 30, 1);

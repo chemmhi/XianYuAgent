@@ -123,3 +123,60 @@ export interface ProductDetailState {
   data: ProductVM | null;
   error: ProductsLoadError | null;
 }
+
+/** A reference to an image persisted in object storage, never the binary payload. */
+export interface XianyuItemImageVM {
+  id?: string;
+  url: string;
+  thumbnailUrl?: string;
+  storageKey?: string;
+  mimeType?: string;
+  width?: number;
+  height?: number;
+  alt?: string;
+}
+
+export interface XianyuItemSellerVM {
+  sellerId?: string;
+  nickname?: string;
+  city?: string;
+  avatarUrl?: string;
+  soldCount?: number;
+  itemCount?: number;
+  goodRemarkCount?: number;
+  badRemarkCount?: number;
+}
+
+export interface XianyuItemDetailVM {
+  productId: string;
+  itemId?: string;
+  categoryId?: string;
+  title?: string;
+  description?: string;
+  richTextDescription?: string;
+  priceText?: string;
+  priceMinor?: number;
+  browseCount?: number;
+  wantCount?: number;
+  collectCount?: number;
+  favoriteCount?: number;
+  interactFavoriteCount?: number;
+  soldCount?: number;
+  quantity?: number;
+  seller?: XianyuItemSellerVM;
+  images: XianyuItemImageVM[];
+  detailSyncedAt?: string;
+  sourcePayloadDigest?: string;
+  cached?: boolean;
+  assetUploadErrors?: Array<{ sourceUrl: string; message: string }>;
+  /** Optional redacted/normalized source payload for audit inspection. */
+  rawPayload?: Record<string, unknown>;
+}
+
+export interface XianyuDetailState {
+  phase: 'idle' | 'loading' | 'success' | 'error' | 'forbidden';
+  loadingMode?: 'read' | 'sync';
+  productId?: string;
+  data: XianyuItemDetailVM | null;
+  error: ProductsLoadError | null;
+}

@@ -27,6 +27,12 @@ export interface AppConfig {
   /** Buyer-facing Auto Reply Agent config; kept separate from Workspace Agent config. */
   autoReplyAgent?: AutoReplyAgentRuntimeConfig;
   credentialEncryptionKey: string;
+  objectStorageEndpoint: string;
+  objectStoragePublicEndpoint?: string;
+  objectStorageAccessKey: string;
+  objectStorageSecretKey: string;
+  objectStorageBucket: string;
+  objectStorageRegion: string;
   autoReplySendMode?: AutoReplySendMode;
   autoReplyTestBuyerNames?: string[];
 }
@@ -76,6 +82,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     modelTimeoutMs: positiveNumber(env.MODEL_TIMEOUT_MS, 60_000),
     autoReplyModelEnabled: asBoolean(env.AUTO_REPLY_MODEL_ENABLED, Boolean(modelApiKey && modelBaseUrl && modelName)),
     credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY?.trim() || 'development-only-credential-key-change-me',
+    objectStorageEndpoint: env.OBJECT_STORAGE_ENDPOINT?.trim() || 'http://127.0.0.1:19000',
+    objectStoragePublicEndpoint: env.OBJECT_STORAGE_PUBLIC_ENDPOINT?.trim() || undefined,
+    objectStorageAccessKey: env.OBJECT_STORAGE_ACCESS_KEY?.trim() || 'xianyu',
+    objectStorageSecretKey: env.OBJECT_STORAGE_SECRET_KEY?.trim() || 'xianyu_dev_only',
+    objectStorageBucket: env.OBJECT_STORAGE_BUCKET?.trim() || 'xianyu-assets',
+    objectStorageRegion: env.OBJECT_STORAGE_REGION?.trim() || 'us-east-1',
     autoReplySendMode,
     autoReplyTestBuyerNames,
     autoReplyAgent,

@@ -1,4 +1,4 @@
-import type { ProductAssetVM, ProductCouponVM, ProductDraftInput, ProductDraftPatch, ProductFilters, ProductSkuVM, ProductStatus, ProductSyncResultVM, ProductVM, ProductsPageVM } from './types';
+import type { ProductAssetVM, ProductCouponVM, ProductDraftInput, ProductDraftPatch, ProductFilters, ProductSkuVM, ProductStatus, ProductSyncResultVM, ProductVM, ProductsPageVM, XianyuItemDetailVM, XianyuItemImageVM, XianyuItemSellerVM } from './types';
 
 export interface ProductsApiTransport {
   get<T>(path: string): Promise<T>;
@@ -9,6 +9,8 @@ export interface ProductsApiTransport {
 export interface ProductsApi {
   list(filters?: ProductFilters): Promise<ProductsPageVM>;
   getDetail(productId: string): Promise<ProductVM>;
+  getXianyuDetail(productId: string): Promise<XianyuItemDetailVM>;
+  syncXianyuDetail(productId: string): Promise<XianyuItemDetailVM>;
   createDraft(input: ProductDraftInput, options?: { idempotencyKey?: string }): Promise<ProductVM>;
   updateDraft(productId: string, patch: ProductDraftPatch, options: { configVersion: number; idempotencyKey?: string }): Promise<ProductVM>;
   syncFromXianyu(accountId: string, options?: { pageSize?: number; maxPages?: number; idempotencyKey?: string }): Promise<ProductSyncResultVM>;
@@ -53,6 +55,62 @@ interface ProductsPayload {
   page?: number;
   pageSize?: number;
   totalPages?: number;
+}
+
+interface XianyuItemDetailPayload {
+  productId?: string;
+  product_id?: string;
+  itemId?: string;
+  item_id?: string;
+  categoryId?: string;
+  category_id?: string;
+  title?: string;
+  description?: string;
+  desc?: string;
+  richTextDescription?: string;
+  rich_text_description?: string;
+  priceText?: string;
+  price_text?: string;
+  priceMinor?: number;
+  price_minor?: number;
+  browseCount?: number;
+  browse_count?: number;
+  wantCount?: number;
+  want_count?: number;
+  collectCount?: number;
+  collect_count?: number;
+  favoriteCount?: number;
+  favorite_count?: number;
+  interactFavoriteCount?: number;
+  interact_favorite_count?: number;
+  soldCount?: number;
+  sold_count?: number;
+  quantity?: number;
+  seller?: XianyuItemSellerVM;
+  sellerInfo?: XianyuItemSellerVM;
+  images?: unknown[];
+  imageUrls?: unknown[];
+  image_urls?: unknown[];
+  detailSyncedAt?: string;
+  detail_synced_at?: string;
+  sourcePayloadDigest?: string;
+  source_payload_digest?: string;
+  rawPayload?: Record<string, unknown>;
+  raw_payload?: Record<string, unknown>;
+  response?: Record<string, unknown>;
+  cached?: boolean;
+  assetUploadErrors?: unknown[];
+  summary?: Record<string, unknown>;
+  rawResponse?: Record<string, unknown>;
+  assets?: unknown[];
+  imageStorage?: unknown[];
+  detail?: {
+    summary?: Record<string, unknown>;
+    rawResponse?: Record<string, unknown>;
+    imageUrls?: unknown[];
+    syncedAt?: string;
+  };
+  product?: Record<string, unknown>;
 }
 
 function unwrapEnvelope<T>(payload: T | ApiEnvelope<T>): T {
@@ -101,6 +159,106 @@ function toPage(payload: ProductsPayload): ProductsPageVM {
   return { items, total, page, pageSize, totalPages: payload.totalPages ?? Math.max(1, Math.ceil(total / pageSize)) };
 }
 
+function numberValue(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const numeric = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : Number.NaN;
+    if (Number.isFinite(numeric)) return numeric;
+  }
+  return undefined;
+}
+
+function stringValue(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return undefined;
+}
+
+function recordValue(...values: unknown[]): Record<string, unknown> | undefined {
+  for (const value of values) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+  }
+  return undefined;
+}
+
+function imageValue(value: unknown, index: number): XianyuItemImageVM | null {
+  if (typeof value === 'string' && value.trim()) return { id: `image-${index + 1}`, url: value.trim() };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  const metadata = candidate.metadata && typeof candidate.metadata === 'object' && !Array.isArray(candidate.metadata) ? candidate.metadata as Record<string, unknown> : {};
+  const url = stringValue(candidate.url, candidate.imageUrl, candidate.image_url, candidate.sourceUrl, candidate.source_url, candidate.objectUrl, candidate.object_url, candidate.publicUrl, candidate.public_url, metadata.url, metadata.publicUrl, metadata.public_url, candidate.src);
+  const storageKey = stringValue(candidate.storageKey, candidate.storage_key, candidate.key);
+  if (!url && !storageKey) return null;
+  return {
+    id: stringValue(candidate.id, candidate.imageId, candidate.image_id) ?? `image-${index + 1}`,
+    url: url ?? '',
+    thumbnailUrl: stringValue(candidate.thumbnailUrl, candidate.thumbnail_url, candidate.thumbUrl, candidate.thumb_url),
+    storageKey,
+    mimeType: stringValue(candidate.mimeType, candidate.mime_type, candidate.contentType, candidate.content_type),
+    width: numberValue(candidate.width, metadata.width),
+    height: numberValue(candidate.height, metadata.height),
+    alt: stringValue(candidate.alt, candidate.name, metadata.alt),
+  };
+}
+
+function toXianyuItemDetail(payload: XianyuItemDetailPayload, fallbackProductId: string): XianyuItemDetailVM {
+  const product = payload.product && typeof payload.product === 'object' ? payload.product : {};
+  const productAttributes = product.attributesJson && typeof product.attributesJson === 'object' && !Array.isArray(product.attributesJson)
+    ? product.attributesJson as Record<string, unknown>
+    : product.attributes && typeof product.attributes === 'object' && !Array.isArray(product.attributes)
+      ? product.attributes as Record<string, unknown>
+      : {};
+  const persistedXianyu = productAttributes.xianyu && typeof productAttributes.xianyu === 'object' && !Array.isArray(productAttributes.xianyu)
+    ? productAttributes.xianyu as Record<string, unknown>
+    : {};
+  const persistedDetail = persistedXianyu.detail && typeof persistedXianyu.detail === 'object' && !Array.isArray(persistedXianyu.detail)
+    ? persistedXianyu.detail as Record<string, unknown>
+    : {};
+  const nestedSummary = payload.summary ?? payload.detail?.summary ?? {};
+  const persistedSummary = recordValue(persistedDetail.summary) ?? {};
+  const merged = { ...persistedSummary, ...nestedSummary, ...payload } as XianyuItemDetailPayload;
+  const rawImages = Array.isArray(merged.images)
+    ? merged.images
+    : Array.isArray(merged.imageUrls)
+      ? merged.imageUrls
+      : Array.isArray(merged.image_urls)
+        ? merged.image_urls
+        : Array.isArray(payload.detail?.imageUrls)
+          ? payload.detail.imageUrls
+          : Array.isArray(payload.assets)
+            ? payload.assets
+            : Array.isArray(persistedXianyu.imageUrls)
+              ? persistedXianyu.imageUrls
+              : [];
+  const images = rawImages.map(imageValue).filter((image): image is XianyuItemImageVM => Boolean(image));
+  const seller = merged.seller ?? merged.sellerInfo;
+  return {
+    productId: stringValue(merged.productId, merged.product_id, product.id) ?? fallbackProductId,
+    itemId: stringValue(merged.itemId, merged.item_id, persistedDetail.itemId),
+    categoryId: stringValue(merged.categoryId, merged.category_id),
+    title: stringValue(merged.title, product.title),
+    description: stringValue(merged.description, merged.desc, product.description),
+    richTextDescription: stringValue(merged.richTextDescription, merged.rich_text_description),
+    priceText: stringValue(merged.priceText, merged.price_text),
+    priceMinor: numberValue(merged.priceMinor, merged.price_minor, product.priceMinor),
+    browseCount: numberValue(merged.browseCount, merged.browse_count),
+    wantCount: numberValue(merged.wantCount, merged.want_count),
+    collectCount: numberValue(merged.collectCount, merged.collect_count),
+    favoriteCount: numberValue(merged.favoriteCount, merged.favorite_count),
+    interactFavoriteCount: numberValue(merged.interactFavoriteCount, merged.interact_favorite_count),
+    soldCount: numberValue(merged.soldCount, merged.sold_count),
+    quantity: numberValue(merged.quantity),
+    seller,
+    images,
+    detailSyncedAt: stringValue(merged.detailSyncedAt, merged.detail_synced_at, payload.detail?.syncedAt, persistedDetail.syncedAt),
+    sourcePayloadDigest: stringValue(merged.sourcePayloadDigest, merged.source_payload_digest, product.sourcePayloadDigest),
+    cached: typeof merged.cached === 'boolean' ? merged.cached : undefined,
+    assetUploadErrors: Array.isArray(merged.assetUploadErrors) ? merged.assetUploadErrors.filter((entry): entry is { sourceUrl: string; message: string } => Boolean(entry && typeof entry === 'object' && typeof (entry as { sourceUrl?: unknown }).sourceUrl === 'string' && typeof (entry as { message?: unknown }).message === 'string')) : undefined,
+    rawPayload: recordValue(merged.rawPayload, merged.raw_payload, merged.rawResponse, payload.detail?.rawResponse, persistedDetail.rawResponse, merged.response),
+  };
+}
+
 function queryString(filters: ProductFilters = {}): string {
   const params = new URLSearchParams();
   if (filters.keyword?.trim()) params.set('keyword', filters.keyword.trim());
@@ -134,6 +292,15 @@ export function createProductsApi(transport: ProductsApiTransport): ProductsApi 
     async getDetail(productId) {
       const payload = await transport.get<ProductPayload | ApiEnvelope<ProductPayload>>(`/api/v1/products/${encodeURIComponent(productId)}`);
       return toProductVM(unwrapEnvelope(payload));
+    },
+    async getXianyuDetail(productId) {
+      const payload = await transport.get<XianyuItemDetailPayload | ApiEnvelope<XianyuItemDetailPayload>>(`/api/v1/products/${encodeURIComponent(productId)}/detail`);
+      return toXianyuItemDetail(unwrapEnvelope(payload), productId);
+    },
+    async syncXianyuDetail(productId) {
+      const post = requireTransportMethod(transport, 'post');
+      const payload = await post<XianyuItemDetailPayload | ApiEnvelope<XianyuItemDetailPayload>>(`/api/v1/products/${encodeURIComponent(productId)}/detail/refresh`, undefined, { headers: { 'Idempotency-Key': idempotencyKey('product-detail') } });
+      return toXianyuItemDetail(unwrapEnvelope(payload), productId);
     },
     async createDraft(input, options = {}) {
       const post = requireTransportMethod(transport, 'post');
@@ -194,6 +361,16 @@ export function createMockProductsApi(seed: ProductVM[] = [
       if (!product) throw new Error('PRODUCT_NOT_FOUND');
       return product;
     },
+    async getXianyuDetail(productId) {
+      const product = seed.find((item) => item.id === productId);
+      if (!product) throw new Error('PRODUCT_NOT_FOUND');
+      return mockXianyuItemDetail(product);
+    },
+    async syncXianyuDetail(productId) {
+      const product = seed.find((item) => item.id === productId);
+      if (!product) throw new Error('PRODUCT_NOT_FOUND');
+      return mockXianyuItemDetail(product);
+    },
     async createDraft(input) {
       const product: ProductVM = {
         id: `draft-${seed.length + 1}`,
@@ -232,3 +409,20 @@ export function createMockProductsApi(seed: ProductVM[] = [
 }
 
 export { toProductVM, unwrapEnvelope };
+
+function mockXianyuItemDetail(product: ProductVM): XianyuItemDetailVM {
+  const xianyu = product.attributesJson?.xianyu;
+  const imageUrls = xianyu && typeof xianyu === 'object' && !Array.isArray(xianyu) && Array.isArray((xianyu as Record<string, unknown>).imageUrls)
+    ? ((xianyu as Record<string, unknown>).imageUrls as unknown[])
+    : [];
+  return {
+    productId: product.id,
+    itemId: product.externalProductRef,
+    title: product.title,
+    description: product.description,
+    priceMinor: product.priceMinor,
+    images: imageUrls.map(imageValue).filter((image): image is XianyuItemImageVM => Boolean(image)),
+    detailSyncedAt: product.lastSyncedAt,
+    sourcePayloadDigest: product.sourcePayloadDigest,
+  };
+}

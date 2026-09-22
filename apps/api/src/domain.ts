@@ -64,7 +64,31 @@ export interface ProductAssetRecord {
   storageKey: string;
   mimeType: string;
   checksum?: string;
+  sourceUrl?: string;
+  metadata?: Record<string, unknown>;
   status: ProductAssetStatus;
+}
+
+export interface XianyuItemDetailAssetInput {
+  storageKey: string;
+  mimeType: string;
+  checksum?: string;
+  sourceUrl?: string;
+  metadata?: Record<string, unknown>;
+  status?: ProductAssetStatus;
+}
+
+export interface XianyuItemDetailPersistenceInput {
+  adminId: string;
+  productId: string;
+  itemId: string;
+  summary: Record<string, unknown>;
+  rawResponse: Record<string, unknown>;
+  imageUrls: string[];
+  assetUploadErrors?: Array<{ sourceUrl: string; message: string }>;
+  syncedAt: string;
+  sourcePayloadDigest: string;
+  assets: XianyuItemDetailAssetInput[];
 }
 
 export interface ProductCouponBatchSummary {
@@ -867,6 +891,7 @@ export interface Store {
   listWorkspaceMessages(adminId: string, sessionId: string, limit?: number): Promise<WorkspaceMessageRecord[]>;
   listProducts(adminId: string, query: ProductListQuery): Promise<ProductListResult>;
   getProduct(adminId: string, productId: string): Promise<ProductRecord | undefined>;
+  persistXianyuItemDetail(input: XianyuItemDetailPersistenceInput): Promise<ProductRecord | undefined>;
   listOrders(adminId: string, query: OrderListQuery): Promise<OrderListResult>;
   getOrder(adminId: string, orderNo: string, accountId?: string): Promise<OrderRecord | undefined>;
   createOrder(input: { adminId: string; order: Omit<OrderRecord, 'id' | 'createdAt' | 'updatedAt' | 'configVersion' | 'source'> & { id?: string; createdAt?: string; updatedAt?: string; configVersion?: number; source?: OrderSource } }): Promise<OrderRecord>;
