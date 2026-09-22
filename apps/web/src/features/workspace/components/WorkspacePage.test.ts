@@ -3,10 +3,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { MessageStream, SessionRow } from './WorkspacePage';
+import { getComposerTextareaMetrics, MessageStream, SessionRow } from './WorkspacePage';
 import type { WorkspaceMessageVM, WorkspaceSessionVM } from '../types';
 
 const workspaceCss = readFileSync(fileURLToPath(new URL('./workspace.css', import.meta.url)), 'utf8');
+const workspacePageSource = readFileSync(fileURLToPath(new URL('./WorkspacePage.tsx', import.meta.url)), 'utf8');
 
 const session: WorkspaceSessionVM = {
   id: 'session-1',
@@ -31,8 +32,9 @@ describe('Workspace SessionRow', () => {
     expect(html).toContain('data-testid="workspace-session-archive"');
     expect(html).toContain('aria-label="归档 检查当前 Workspace 状态"');
     expect(html).toContain('class="workspace-session-action-icon"');
+    expect(html).toContain('class="workspace-session-time"');
     expect(html).not.toContain('>•••</button>');
-    expect(workspaceCss).not.toContain('.workspace-session-action:focus-visible');
+    expect(workspaceCss).toContain('.workspace-session-action-icon { fill: none; stroke: currentColor;');
   });
 });
 
@@ -49,9 +51,46 @@ describe('Workspace MessageStream', () => {
 
     expect(html).toContain('class="workspace-agent-trace"');
     expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('已完成 1 个步骤 · 1 次工具调用');
     expect(html).toContain('class="workspace-trace-action">可展开</span>');
     expect(html).toContain('workspace-message workspace-message-final');
     expect(html).not.toContain('workspace-message-avatar');
     expect(html).not.toContain('workspace-message-tool');
+  });
+});
+
+describe('Workspace Composer styling contract', () => {
+  it('keeps the design-grade transparent field and outline-free focus state', () => {
+    expect(workspaceCss).toContain('.workspace-composer-docked textarea { min-height: 48px;');
+    expect(workspaceCss).toContain('border: 0; border-radius: 0; background: transparent;');
+    expect(workspaceCss).toContain('.workspace-composer-docked textarea:focus { border: 0; outline: none; box-shadow: none; }');
+    expect(workspaceCss).toContain('.workspace-send-round { display: grid; place-items: center; width: 28px; height: 28px;');
+    expect(workspaceCss).toContain('max-height: 120px; height: auto; overflow-y: hidden;');
+    expect(workspaceCss).toContain('font-size: var(--font-size-body);');
+    expect(workspaceCss).toContain('font-size: var(--font-size-body-compact);');
+    expect(workspaceCss).toContain('font-size: var(--font-size-meta);');
+    expect(workspaceCss).toContain('.workspace-context-head h3 {\n  font-size: var(--font-size-card-title);');
+    expect(workspaceCss).toContain('.workspace-context-list b,\nbody .app-viewport .workspace-domain .workspace-context-list span {\n  font-size: var(--font-size-body-compact);');
+  });
+
+  it('grows with content until the maximum, then scrolls internally', () => {
+    expect(getComposerTextareaMetrics(92)).toEqual({ height: 92, overflowY: 'hidden' });
+    expect(getComposerTextareaMetrics(240)).toEqual({ height: 120, overflowY: 'auto' });
+    expect(getComposerTextareaMetrics(0)).toEqual({ height: 48, overflowY: 'hidden' });
+  });
+});
+
+describe('Workspace empty state layout contract', () => {
+  it('centers the new-conversation prompt in the available message stream', () => {
+    expect(workspacePageSource).toContain('workspace-message-stream${messages.length ? \'\' : \' is-empty\'}');
+    expect(workspaceCss).toContain('.workspace-message-stream.is-empty { display: grid; flex: 1 1 auto; min-height: 0; place-items: center; overflow: auto; }');
+    expect(workspaceCss).toContain('.workspace-message-stream.is-empty .workspace-state { width: 100%; min-height: 0;');
+  });
+});
+
+describe('Workspace session search alignment contract', () => {
+  it('uses the same horizontal inset as the session rows below', () => {
+    expect(workspaceCss).toContain('.workspace-search { width: calc(100% - 16px); max-width: none; margin: 12px 8px 8px; }');
+    expect(workspaceCss).toContain('.workspace-session-list { display: grid; align-content: start; width: 100%; box-sizing: border-box; overflow-x: hidden; overflow-y: auto; padding: 0 8px 10px; }');
   });
 });
