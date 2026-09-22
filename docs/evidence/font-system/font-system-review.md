@@ -9,6 +9,7 @@ Worktree：`F:\ChenHai\Project\XianYuAgent-font-system-20260922`
 - 在 `apps/web/src/typography.css` 增加统一字体栈、字号令牌、行高和页面域级覆盖。
 - 将公共按钮、字段、输入框、搜索框、下拉框、文本域和占位组件统一到可读字号。
 - 将 Dashboard、账号、商品、订单、卡券、消息、工作台、设置、Agent Dynamics 的业务文本提升到正文 / 表头 / 元数据三档。
+- 侧边栏导航只保留图标和主标题，移除右侧辅助副标题（如“数据概览”）。
 - 同步 SellerAgent 视觉基线的字号令牌，避免原型与正式前端分叉。
 - 保留图表坐标轴等纯数据标记的 10px 受控例外。
 
@@ -60,4 +61,3 @@ Worktree：`F:\ChenHai\Project\XianYuAgent-font-system-20260922`
 ## 合入前
 
 人工审核通过后，再将本分支合入 `main`。在审核完成前不做 merge、不改写 `main`。
-

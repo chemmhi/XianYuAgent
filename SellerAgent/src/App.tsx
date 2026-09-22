@@ -54,7 +54,7 @@ function Sidebar({ page, onPage, collapsed, onToggle }: { page: PageKey; onPage:
     </div>
     <div className="side-section">Operations</div>
     <nav className="side-nav" aria-label="主导航">
-      {navItems.map(item => <button key={item.key} className={page === item.key ? 'active' : ''} onClick={() => onPage(item.key)} title={item.label}><Icon name={item.icon}/><span>{item.label}</span><small>{item.sub}</small></button>)}
+      {navItems.map(item => <button key={item.key} className={page === item.key ? 'active' : ''} onClick={() => onPage(item.key)} title={item.label}><Icon name={item.icon}/><span>{item.label}</span></button>)}
     </nav>
     <div className="sidebar-bottom">
       <div className="side-card agent-card"><span className="online-dot"/><b>Agent 运行中</b><small>当前账号：闲鱼账号 A<br/>外部写动作经 Policy Gateway 与 Outbox。</small></div>

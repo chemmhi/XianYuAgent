@@ -305,6 +305,10 @@ body .app-viewport .coupons-domain .coupons-status {
   line-height: 1.5;
 }
 
+body .app-viewport .side-nav button {
+  grid-template-columns: 18px 1fr;
+}
+
 @media (max-width: 900px) {
   body .app-viewport h1,
   body .auth-gate h1 {

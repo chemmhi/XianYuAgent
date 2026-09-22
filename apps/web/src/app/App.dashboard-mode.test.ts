@@ -66,6 +66,33 @@ describe('dashboard API mode resolution', () => {
     expect(html).toContain('dashboard-mobile-content');
   });
 
+  it('keeps the sidebar navigation focused on primary labels', () => {
+    const props = {
+      admin: { id: 'admin-nav', email: 'nav@example.com', displayName: '导航测试', role: 'admin' },
+      page: 'dashboard',
+      accountsApi: {},
+      productsApi: {},
+      couponsApi: {},
+      messagesApi: {},
+      workspaceApi: {},
+      ordersApi: {},
+      settingsApi: {},
+      autoReplyAgentSettingsApi: {},
+      openaiSettingsApi: {},
+      modelProviderApi: {},
+      agentDynamicsApi: {},
+      dashboardApi: { getSnapshot: vi.fn() },
+      navigate: vi.fn(),
+    } as unknown as Parameters<typeof AuthenticatedShell>[0];
+
+    const html = renderToStaticMarkup(createElement(AuthenticatedShell, props));
+    const sidebarNav = html.match(/<nav class="side-nav"[\s\S]*?<\/nav>/)?.[0] ?? '';
+
+    expect(sidebarNav).toContain('仪表盘');
+    expect(sidebarNav).not.toContain('数据概览');
+    expect(sidebarNav).not.toContain('<small>');
+  });
+
   it('falls back to 管理员 when displayName is empty', () => {
     const props = {
       admin: { id: 'admin-empty-name', email: 'empty-name@example.com', displayName: '  ', role: 'admin' },

@@ -97,6 +97,10 @@ body .prototype-root [class*='-chip'] {
   line-height: 1.5;
 }
 
+body .prototype-root .side-nav button {
+  grid-template-columns: 18px 1fr;
+}
+
 body .prototype-root .axis-text,
 body .prototype-root .chart-axis,
 body .prototype-root .chart-y-axis {
