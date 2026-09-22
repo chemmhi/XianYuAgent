@@ -21,7 +21,7 @@ describe('agent dynamics controller mappings', () => {
   });
 
   it('keeps filter defaults stable for empty/list reloads', () => {
-    expect(defaultAgentDynamicsFilters).toEqual({ range: '24h', status: 'all', stage: 'all', keyword: '', page: 1, pageSize: 20 });
+    expect(defaultAgentDynamicsFilters).toEqual({ range: '24h', status: 'all', stage: 'all', keyword: '', page: 1, pageSize: 10 });
   });
 
   it('maps forbidden, timeout, network, and unknown errors', () => {

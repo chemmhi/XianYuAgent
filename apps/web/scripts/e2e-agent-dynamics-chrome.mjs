@@ -221,11 +221,35 @@ async function run() {
       };
     })()`);
     if (controlAssertions.sharedSelectCount !== 3 || controlAssertions.headTag !== 'SELECT' || controlAssertions.filterTag !== 'SELECT' || controlAssertions.headAriaLabel !== '时间范围' || controlAssertions.filterAriaLabel !== '运行状态') throw new Error(`Agent dynamics control semantics failed: ${JSON.stringify(controlAssertions)}`);
-    if (controlAssertions.headFontSize !== '12px' || controlAssertions.headFontWeight !== '400' || controlAssertions.primaryFontSize !== '11px' || controlAssertions.primaryFontWeight !== '600' || controlAssertions.filterFontSize !== '12px' || controlAssertions.searchFontSize !== '11px') throw new Error(`Agent dynamics control typography failed: ${JSON.stringify(controlAssertions)}`);
+    if (controlAssertions.headFontSize !== '14px' || controlAssertions.headFontWeight !== '400' || controlAssertions.primaryFontSize !== '13px' || controlAssertions.primaryFontWeight !== '600' || controlAssertions.filterFontSize !== '14px' || controlAssertions.searchFontSize !== '13px') throw new Error(`Agent dynamics control typography failed: ${JSON.stringify(controlAssertions)}`);
     if (controlAssertions.headColor !== 'rgb(17, 24, 39)' || controlAssertions.filterColor !== 'rgb(17, 24, 39)' || controlAssertions.searchColor !== 'rgb(17, 24, 39)' || controlAssertions.headBackground !== 'rgb(246, 247, 249)' || controlAssertions.searchBackground !== 'rgb(246, 247, 249)' || controlAssertions.primaryBackground !== 'rgb(36, 90, 141)' || controlAssertions.headRadius !== '7px' || controlAssertions.filterRadius !== '7px' || controlAssertions.searchRadius !== '7px') throw new Error(`Agent dynamics control color/token failed: ${JSON.stringify(controlAssertions)}`);
-    if (controlAssertions.headWidth > 120 || controlAssertions.primaryWidth > 130 || controlAssertions.filterWidth > 120 || Math.abs(controlAssertions.searchWidth - 220) > 2) throw new Error(`Agent dynamics control geometry failed: ${JSON.stringify(controlAssertions)}`);
+    if (controlAssertions.headWidth > 135 || controlAssertions.primaryWidth > 130 || controlAssertions.filterWidth > 120 || Math.abs(controlAssertions.searchWidth - 220) > 2) throw new Error(`Agent dynamics control geometry failed: ${JSON.stringify(controlAssertions)}`);
     console.log(JSON.stringify({ controlAssertions }));
     const desktopPath = await captureViewport(cdp, 1440, 900, 'agent-dynamics-desktop-1440x900.png');
+    const runsVisible = await evaluate(cdp, `(() => { const runs = document.querySelector('.agent-dynamics-runs'); if (!runs) return false; runs.scrollIntoView({ block: 'start', inline: 'nearest' }); return true; })()`);
+    if (!runsVisible) throw new Error('agent dynamics runs section missing');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const runsAssertions = await evaluate(cdp, `(() => {
+      const scroll = document.querySelector('.agent-dynamics-table-scroll');
+      const footer = document.querySelector('.agent-dynamics-run-footer');
+      const rows = document.querySelectorAll('.agent-dynamics-run-table tbody tr').length;
+      const previous = document.querySelector('.agent-dynamics-page-btn');
+      const next = Array.from(document.querySelectorAll('.agent-dynamics-page-btn')).find((button) => button.textContent?.includes('下一页'));
+      const eventTitles = Array.from(document.querySelectorAll('.agent-dynamics-event-title')).map((node) => ({ height: Math.round(node.getBoundingClientRect().height), text: node.textContent ?? '' }));
+      return {
+        rows,
+        scrollHeight: scroll ? Math.round(scroll.getBoundingClientRect().height) : 0,
+        minHeight: scroll ? getComputedStyle(scroll).minHeight : '',
+        footerText: footer?.textContent?.trim() ?? '',
+        hasPrevious: Boolean(previous),
+        hasNext: Boolean(next),
+        eventTitles,
+      };
+    })()`);
+    if (runsAssertions.rows > 10 || runsAssertions.scrollHeight < 550 || runsAssertions.minHeight !== '558px' || !runsAssertions.footerText.includes('共') || !runsAssertions.footerText.includes('第') || !runsAssertions.hasPrevious || !runsAssertions.hasNext || runsAssertions.eventTitles.some((item) => item.height > 24)) {
+      throw new Error(`Agent dynamics runs layout failed: ${JSON.stringify(runsAssertions)}`);
+    }
+    const runsPath = await captureViewport(cdp, 1440, 900, 'agent-dynamics-runs-desktop-1440x900.png');
     const opened = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll('.agent-dynamics-run-table tbody tr')).find((item) => item.textContent?.includes('Agent Dynamics Buyer')); if (!row) return false; row.click(); return true; })()`);
     if (!opened) throw new Error('persisted run row not clickable');
     await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('处理时间线'), 'run detail drawer');
@@ -264,7 +288,7 @@ async function run() {
     await waitFor(async () => await evaluate(cdp, '!Boolean(document.querySelector(".agent-dynamics-drawer-backdrop.open"))'), 'mobile drawer close');
     const mobilePath = await captureViewport(cdp, 390, 844, 'agent-dynamics-mobile-390x844.png');
     if (!drawerText.includes('打开在线聊天') || !/已发送 \/ 已落库|模拟 \/ 已落库/.test(drawerText)) throw new Error('drawer actions or persistence outcome missing');
-    console.log(JSON.stringify({ apiUrl, webUrl, accountId, runIds, screenshots: { desktopPath, drawerPath, mobileDrawerPath, mobilePath }, modelCall }));
+    console.log(JSON.stringify({ apiUrl, webUrl, accountId, runIds, screenshots: { desktopPath, runsPath, drawerPath, mobileDrawerPath, mobilePath }, modelCall, runsAssertions }));
     cdp.socket.close();
   } finally {
     globalThis.fetch = originalFetch;

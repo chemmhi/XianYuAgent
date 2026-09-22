@@ -87,7 +87,7 @@ export function StatusPanel({ statusDistribution }: { statusDistribution: AgentD
 
 export function ExceptionPanel({ exceptions, onOpenFirst }: { exceptions: AgentDynamicsExceptionVM[]; onOpenFirst: () => void }) {
   return <Panel title="异常与待处理" description="只展示当前需要管理员动作的问题。" action={<StatusTag tone="danger">{exceptions.reduce((total, item) => total + item.count, 0)} 条待处理</StatusTag>}>
-    <div className="agent-dynamics-exception-list">{exceptions.map((item) => <div className="agent-dynamics-exception" key={item.key}><span className={`agent-dynamics-exception-mark ${classTone(item.tone)}`} /><div><div className="agent-dynamics-exception-title">{item.title}</div><div className="agent-dynamics-exception-meta">{item.meta}</div></div><div className="agent-dynamics-exception-count">{item.count}</div></div>)}</div>
+    <div className="agent-dynamics-exception-list">{exceptions.map((item) => <div className="agent-dynamics-exception" key={item.key}><span className={`agent-dynamics-exception-mark ${classTone(item.tone)}`} /><div className="agent-dynamics-exception-main"><div className="agent-dynamics-exception-title">{item.title}</div><div className="agent-dynamics-exception-meta">{item.meta}</div></div><div className="agent-dynamics-exception-count">{item.count}</div></div>)}</div>
     <div className="agent-dynamics-exception-link"><button type="button" className="agent-dynamics-link-btn" onClick={onOpenFirst}>查看全部异常 →</button></div>
   </Panel>;
 }
@@ -113,9 +113,16 @@ export function RunsTable({ filters, data, onFilterChange, onOpenRun, onRetry, l
     {error && <div className="agent-dynamics-inline-error" role="alert"><span>{error.message}</span>{error.retryable && <button type="button" className="agent-dynamics-link-btn" onClick={onRetry}>重试</button>}</div>}
     {loading && !data ? <div className="agent-dynamics-table-state"><span className="agent-dynamics-spinner" />正在读取运行记录…</div> : data && data.items.length > 0 ? <>
       <div className="agent-dynamics-table-scroll"><table className="agent-dynamics-run-table"><thead><tr><th>时间 / 买家</th><th>商品</th><th>意图</th><th>当前阶段</th><th>执行状态</th><th>发送 / 落库</th><th>耗时</th></tr></thead><tbody>{data.items.map((row) => <RunTableRow row={row} key={row.runId} onOpen={() => onOpenRun(row.runId)} />)}</tbody></table></div>
-      <div className="agent-dynamics-run-footer"><span>显示 {data.total === 0 ? 0 : (data.page - 1) * data.pageSize + 1}-{Math.min(data.page * data.pageSize, data.total)} 条，共 {data.total.toLocaleString('zh-CN')} 条运行记录</span><div className="agent-dynamics-pagination">{[1, 2, 3].filter((page) => page <= data.totalPages).map((page) => <button type="button" key={page} className={`agent-dynamics-page-btn ${data.page === page ? 'active' : ''}`} onClick={() => onFilterChange({ page })}>{page}</button>)}{data.totalPages > 3 && <><button type="button" className="agent-dynamics-page-btn agent-dynamics-page-ellipsis" disabled>…</button><button type="button" className={`agent-dynamics-page-btn ${data.page === data.totalPages ? 'active' : ''}`} onClick={() => onFilterChange({ page: data.totalPages })}>{data.totalPages}</button></>}</div></div>
+      <nav className="agent-dynamics-run-footer" aria-label="运行记录分页" data-testid="agent-dynamics-pagination"><span>共 {data.total.toLocaleString('zh-CN')} 条</span><div className="agent-dynamics-pagination"><button className="agent-dynamics-page-btn" type="button" onClick={() => onFilterChange({ page: data.page - 1 })} disabled={data.page <= 1}>上一页</button>{getPageItems(data.page, data.totalPages).map((item, index) => item === 'ellipsis' ? <span className="agent-dynamics-page-ellipsis" key={`ellipsis-${index}`}>…</span> : <button type="button" key={item} aria-current={item === data.page ? 'page' : undefined} className={`agent-dynamics-page-btn${item === data.page ? ' active' : ''}`} onClick={() => onFilterChange({ page: item })}>{item}</button>)}<button className="agent-dynamics-page-btn" type="button" onClick={() => onFilterChange({ page: data.page + 1 })} disabled={data.page >= data.totalPages}>下一页</button></div><span>第 {data.page} / {data.totalPages} 页</span></nav>
     </> : <div className="agent-dynamics-table-state"><strong>暂无运行记录</strong><span>当前筛选范围没有可展示的 Agent Run。</span></div>}
   </section>;
+}
+
+function getPageItems(page: number, totalPages: number): Array<number | 'ellipsis'> {
+  if (totalPages <= 5) return Array.from({ length: totalPages }, (_, index) => index + 1);
+  if (page <= 3) return [1, 2, 3, 4, 'ellipsis', totalPages];
+  if (page >= totalPages - 2) return [1, 'ellipsis', totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+  return [1, 'ellipsis', page - 1, page, page + 1, 'ellipsis', totalPages];
 }
 
 function RunTableRow({ row, onOpen }: { row: AgentDynamicsRunRowVM; onOpen: () => void }) {

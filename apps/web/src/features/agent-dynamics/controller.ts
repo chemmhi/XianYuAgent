@@ -3,7 +3,7 @@ import { ApiError } from '../../api/http';
 import { defaultAgentDynamicsApi, type AgentDynamicsApi } from './api';
 import type { AgentDynamicsFilters, AgentDynamicsLoadError, AgentDynamicsRunsState, AgentDynamicsDetailState, AgentDynamicsSummaryState, AgentDynamicsLoadPhase } from './types';
 
-export const defaultAgentDynamicsFilters: AgentDynamicsFilters = { range: '24h', status: 'all', stage: 'all', keyword: '', page: 1, pageSize: 20 };
+export const defaultAgentDynamicsFilters: AgentDynamicsFilters = { range: '24h', status: 'all', stage: 'all', keyword: '', page: 1, pageSize: 10 };
 
 export function toAgentDynamicsLoadError(error: unknown): AgentDynamicsLoadError {
   if (error instanceof ApiError && error.status === 403) return { code: 'FORBIDDEN', message: '当前管理员没有读取 Agent 动态的权限，请检查账号范围。', retryable: false };
