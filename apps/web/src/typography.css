@@ -207,6 +207,104 @@ body .app-viewport .chart-y-axis {
   line-height: 1;
 }
 
+/* Domain-level normalization for the dense operational surfaces. */
+body .app-viewport .accounts-domain [class*='-row'],
+body .app-viewport .products-domain [class*='-row'],
+body .app-viewport .orders-domain [class*='-row'],
+body .app-viewport .coupons-domain [class*='-row'],
+body .app-viewport .messages-domain [class*='-row'],
+body .app-viewport .workspace-domain [class*='-row'],
+body .app-viewport .settings-page [class*='-row'],
+body .app-viewport .agent-dynamics-app [class*='-row'],
+body .app-viewport .dashboard-experience [class*='-row'] {
+  font-size: var(--font-size-body);
+  line-height: var(--font-line-body);
+}
+
+body .app-viewport .accounts-domain [class*='-head'],
+body .app-viewport .products-domain [class*='-head'],
+body .app-viewport .orders-domain [class*='-head'],
+body .app-viewport .coupons-domain [class*='-head'],
+body .app-viewport .messages-domain [class*='-head'],
+body .app-viewport .workspace-domain [class*='-head'],
+body .app-viewport .settings-page [class*='-head'],
+body .app-viewport .agent-dynamics-app [class*='-head'],
+body .app-viewport .dashboard-experience [class*='-head'] {
+  font-size: var(--font-size-body-compact);
+  line-height: 1.5;
+}
+
+body .app-viewport .accounts-domain [class*='-small'],
+body .app-viewport .accounts-domain [class*='-meta'],
+body .app-viewport .accounts-domain [class*='-updated'],
+body .app-viewport .accounts-domain [class*='-hint'],
+body .app-viewport .products-domain [class*='-small'],
+body .app-viewport .products-domain [class*='-meta'],
+body .app-viewport .products-domain [class*='-updated'],
+body .app-viewport .products-domain [class*='-hint'],
+body .app-viewport .orders-domain [class*='-small'],
+body .app-viewport .orders-domain [class*='-meta'],
+body .app-viewport .orders-domain [class*='-updated'],
+body .app-viewport .orders-domain [class*='-hint'],
+body .app-viewport .coupons-domain [class*='-small'],
+body .app-viewport .coupons-domain [class*='-meta'],
+body .app-viewport .coupons-domain [class*='-updated'],
+body .app-viewport .coupons-domain [class*='-hint'],
+body .app-viewport .messages-domain [class*='-small'],
+body .app-viewport .messages-domain [class*='-meta'],
+body .app-viewport .messages-domain [class*='-time'],
+body .app-viewport .messages-domain [class*='-hint'],
+body .app-viewport .workspace-domain [class*='-small'],
+body .app-viewport .workspace-domain [class*='-meta'],
+body .app-viewport .workspace-domain [class*='-time'],
+body .app-viewport .workspace-domain [class*='-hint'],
+body .app-viewport .settings-page [class*='-small'],
+body .app-viewport .settings-page [class*='-meta'],
+body .app-viewport .settings-page [class*='-time'],
+body .app-viewport .settings-page [class*='-hint'],
+body .app-viewport .agent-dynamics-app [class*='-small'],
+body .app-viewport .agent-dynamics-app [class*='-meta'],
+body .app-viewport .agent-dynamics-app [class*='-time'],
+body .app-viewport .agent-dynamics-app [class*='-hint'],
+body .app-viewport .dashboard-experience [class*='-small'],
+body .app-viewport .dashboard-experience [class*='-meta'],
+body .app-viewport .dashboard-experience [class*='-time'],
+body .app-viewport .dashboard-experience [class*='-hint'] {
+  font-size: var(--font-size-meta);
+  line-height: var(--font-line-meta);
+}
+
+body .app-viewport .dashboard-experience .dashboard-btn,
+body .app-viewport .dashboard-experience .dashboard-trend-select,
+body .app-viewport .dashboard-experience .dashboard-trend-date,
+body .app-viewport .dashboard-experience .dashboard-trend-apply,
+body .app-viewport .dashboard-experience .dashboard-text-button,
+body .app-viewport .agent-dynamics-app .agent-dynamics-filter,
+body .app-viewport .agent-dynamics-app .agent-dynamics-search,
+body .app-viewport .agent-dynamics-app .agent-dynamics-page-btn,
+body .app-viewport .agent-dynamics-app .agent-dynamics-btn,
+body .app-viewport .messages-domain .messages-send-button,
+body .app-viewport .workspace-domain .workspace-send-button {
+  font-size: var(--font-size-body-compact);
+  line-height: 1.45;
+}
+
+body .app-viewport .dashboard-experience .dashboard-badge,
+body .app-viewport .dashboard-experience .dashboard-risk-chip,
+body .app-viewport .agent-dynamics-app .agent-dynamics-status,
+body .app-viewport .agent-dynamics-app .agent-dynamics-chip,
+body .app-viewport .messages-domain .messages-live-badge,
+body .app-viewport .messages-domain .messages-status,
+body .app-viewport .workspace-domain .workspace-status,
+body .app-viewport .settings-page .status-pill,
+body .app-viewport .accounts-domain .badge,
+body .app-viewport .products-domain .products-status,
+body .app-viewport .orders-domain .orders-status,
+body .app-viewport .coupons-domain .coupons-status {
+  font-size: var(--font-size-meta);
+  line-height: 1.5;
+}
+
 @media (max-width: 900px) {
   body .app-viewport h1,
   body .auth-gate h1 {

@@ -1,0 +1,118 @@
+:root {
+  --font-family-ui: 'Inter', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-size-page-title: 24px;
+  --font-size-section-title: 18px;
+  --font-size-card-title: 16px;
+  --font-size-body: 14px;
+  --font-size-body-compact: 13px;
+  --font-size-meta: 12px;
+  --font-size-kpi: 28px;
+  --font-line-body: 1.6;
+  --font-line-meta: 1.5;
+}
+
+html,
+body,
+button,
+input,
+select,
+textarea {
+  font-family: var(--font-family-ui);
+}
+
+body .prototype-root {
+  font-size: var(--font-size-body);
+  line-height: var(--font-line-body);
+}
+
+body .prototype-root p,
+body .prototype-root li,
+body .prototype-root td,
+body .prototype-root th,
+body .prototype-root label,
+body .prototype-root input,
+body .prototype-root select,
+body .prototype-root textarea,
+body .prototype-root button {
+  font-size: var(--font-size-body);
+  line-height: var(--font-line-body);
+}
+
+body .prototype-root small,
+body .prototype-root time,
+body .prototype-root [class*='-meta'],
+body .prototype-root [class*='-sub'],
+body .prototype-root [class*='-hint'],
+body .prototype-root [class*='-audit'],
+body .prototype-root [class*='-footer'],
+body .prototype-root [class*='-timestamp'] {
+  font-size: var(--font-size-meta);
+  line-height: var(--font-line-meta);
+}
+
+body .prototype-root h1,
+body .prototype-root .page-title {
+  font-size: var(--font-size-page-title);
+  line-height: 1.35;
+}
+
+body .prototype-root h2,
+body .prototype-root .section-title,
+body .prototype-root .panel-title {
+  font-size: var(--font-size-section-title);
+  line-height: 1.45;
+}
+
+body .prototype-root h3,
+body .prototype-root h4,
+body .prototype-root .card-title {
+  font-size: var(--font-size-card-title);
+  line-height: 1.5;
+}
+
+body .prototype-root [class*='-row'],
+body .prototype-root [class*='-item'],
+body .prototype-root [class*='-cell'],
+body .prototype-root [class*='-bubble'],
+body .prototype-root [class*='-message'],
+body .prototype-root [class*='-copy'],
+body .prototype-root [class*='-content'] {
+  font-size: var(--font-size-body);
+  line-height: var(--font-line-body);
+}
+
+body .prototype-root .kpi-value,
+body .prototype-root [class*='-kpi-value'],
+body .prototype-root [class*='-metric-value'] {
+  font-size: var(--font-size-kpi);
+  line-height: 1.2;
+}
+
+body .prototype-root .badge,
+body .prototype-root [class*='-badge'],
+body .prototype-root [class*='-pill'],
+body .prototype-root [class*='-tag'],
+body .prototype-root [class*='-chip'] {
+  font-size: var(--font-size-meta);
+  line-height: 1.5;
+}
+
+body .prototype-root .axis-text,
+body .prototype-root .chart-axis,
+body .prototype-root .chart-y-axis {
+  font-size: 10px;
+  line-height: 1;
+}
+
+@media (max-width: 900px) {
+  body .prototype-root h1,
+  body .prototype-root .page-title {
+    font-size: 20px;
+  }
+
+  body .prototype-root .mobile-tabs button,
+  body .prototype-root .bottom-tabs button,
+  body .prototype-root .mobile-nav button {
+    font-size: var(--font-size-meta);
+  }
+}
