@@ -3,7 +3,230 @@
     scrollbar-width: none;
   }
 
-  .side-nav::-webkit-scrollbar {
+.side-nav::-webkit-scrollbar {
     display: none;
+  }
+}
+
+.desktop-account-anchor,
+.mobile-account-anchor {
+  position: relative;
+}
+
+.desktop-account-anchor {
+  display: block;
+}
+
+.mobile-account-anchor {
+  display: none;
+}
+
+.sidebar-account-trigger,
+.mobile-account-trigger {
+  position: relative;
+  width: 100%;
+  color: #fff;
+  text-align: left;
+}
+
+.sidebar-account-trigger {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .05);
+}
+
+.sidebar-account-trigger:hover,
+.sidebar-account-trigger[aria-expanded="true"] {
+  border-color: rgba(255, 255, 255, .16);
+  background: rgba(255, 255, 255, .1);
+}
+
+.mobile-account-trigger {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 3px 7px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .06);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.mobile-account-trigger:hover,
+.mobile-account-trigger[aria-expanded="true"] {
+  background: rgba(255, 255, 255, .12);
+}
+
+.mobile-account-name {
+  max-width: 74px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-menu-chevron {
+  width: 14px;
+  height: 14px;
+  margin-left: auto;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform .16s ease;
+}
+
+.account-menu-chevron.open {
+  transform: rotate(180deg);
+}
+
+.sidebar-account-trigger:focus-visible,
+.mobile-account-trigger:focus-visible,
+.account-menu-logout:focus-visible {
+  outline: 2px solid #245A8D;
+  outline-offset: 2px;
+}
+
+.account-menu {
+  position: absolute;
+  z-index: 60;
+  width: 196px;
+  padding: 10px;
+  border: 1px solid #E5E7EB;
+  border-radius: 10px;
+  background: #fff;
+  color: #111827;
+  box-shadow: 0 16px 36px rgba(17, 24, 39, .16);
+}
+
+.desktop-account-anchor .account-menu {
+  right: 0;
+  bottom: calc(100% + 8px);
+}
+
+.desktop-account-anchor .account-menu::after {
+  content: '';
+  position: absolute;
+  right: 20px;
+  bottom: -7px;
+  width: 12px;
+  height: 12px;
+  border-right: 1px solid #E5E7EB;
+  border-bottom: 1px solid #E5E7EB;
+  background: #fff;
+  transform: rotate(45deg);
+}
+
+.mobile-account-anchor .account-menu {
+  top: calc(100% + 8px);
+  right: 0;
+}
+
+.mobile-account-anchor .account-menu::before {
+  content: '';
+  position: absolute;
+  top: -7px;
+  right: 14px;
+  width: 12px;
+  height: 12px;
+  border-top: 1px solid #E5E7EB;
+  border-left: 1px solid #E5E7EB;
+  background: #fff;
+  transform: rotate(45deg);
+}
+
+.account-menu-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 4px 10px;
+}
+
+.account-menu-head strong,
+.account-menu-head span {
+  display: block;
+}
+
+.account-menu-head strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.account-menu-head span {
+  margin-top: 3px;
+  color: #6B7280;
+  font-size: 10px;
+}
+
+.account-menu-divider {
+  height: 1px;
+  margin: 0 4px 8px;
+  background: #E5E7EB;
+}
+
+.account-menu-logout {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  gap: 8px;
+  padding: 0 9px;
+  border: 1px solid rgba(180, 35, 24, .18);
+  border-radius: 8px;
+  background: #fff;
+  color: #B42318;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.account-menu-logout:hover {
+  background: #FEF0EF;
+}
+
+.account-menu-logout:disabled {
+  cursor: wait;
+  opacity: .62;
+}
+
+.account-menu-logout svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (min-width: 901px) {
+  .mobile-account-anchor {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .mobile-account-anchor {
+    display: block;
+    margin-left: auto;
+  }
+
+  .mobile-account-trigger {
+    display: flex;
+  }
+
+  .desktop-account-anchor {
+    display: none;
+  }
+
+  .mobile-account-anchor .account-menu {
+    width: min(246px, calc(100vw - 24px));
   }
 }
