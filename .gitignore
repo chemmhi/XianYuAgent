@@ -14,3 +14,5 @@ apps/*/package-lock.json
 # Local environment files
 .env
 **/.env
+
+artifacts/

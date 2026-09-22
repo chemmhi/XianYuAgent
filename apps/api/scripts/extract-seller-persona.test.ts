@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {
   buildHeuristicPersona,
   cleanConversationRows,
+  isShareDeliveryText,
   redactText,
+  validatePersonaDocuments,
   type RawMessageRow,
 } from './extract-seller-persona.ts';
 
@@ -31,8 +33,8 @@ function row(overrides: Partial<RawMessageRow> = {}): RawMessageRow {
 }
 
 test('redactText masks personal contact data while preserving Chinese text', () => {
-  const value = redactText('加我微信 abc_def，手机号 13812345678，链接 https://example.com/a');
-  assert.equal(value, '加我[联系方式],手机号 [手机号],链接 [链接]');
+  const value = redactText('加我微信 abc_def，邮箱 test@example.com，手机号 13812345678，链接 https://example.com/a');
+  assert.equal(value, '加我[联系方式],邮箱 [邮箱],手机号 [手机号],链接 [链接]');
 });
 
 test('cleanConversationRows keeps buyer source=system messages but removes AI/system boilerplate', () => {
@@ -48,8 +50,33 @@ test('cleanConversationRows keeps buyer source=system messages but removes AI/sy
   assert.equal(result.conversations.length, 1);
   assert.deepEqual(result.conversations[0].messages.map((message) => message.text), ['这个资料怎么安装?', '我可以远程帮你安装。']);
   assert.equal(result.report.removedByReason.ai_reply, 1);
-  assert.equal(result.report.removedByReason.system_sender, 1);
+  assert.equal(result.report.removedByReason.non_text, 1);
   assert.equal(result.report.excludedBuyers.includes('一只橘喵喵亮晶晶'), true);
+});
+
+test('share-delivery messages are excluded from persona corpus', () => {
+  assert.equal(isShareDeliveryText('我用夸克网盘给你分享了文件，提取码: ABCD'), true);
+  assert.equal(isShareDeliveryText('可以让 AI 直接接管网盘'), true);
+  assert.equal(isShareDeliveryText('这个课程安装后可以远程指导'), false);
+  assert.equal(isShareDeliveryText('可以远程帮你安装这个软件'), false);
+  const rows: RawMessageRow[] = [
+    row({ message_id: 'buyer-1', body_text: '发链接' }),
+    row({ message_id: 'seller-1', direction: 'outbound', sender_role: 'agent', source: 'human', body_text: '我用夸克网盘给你分享了「课程」,点击链接或复制整段内容,打开夸克APP即可获取。' }),
+    row({ message_id: 'buyer-2', body_text: '这个课程怎么安装？' }),
+    row({ message_id: 'seller-2', direction: 'outbound', sender_role: 'agent', source: 'human', body_text: '我可以远程帮你安装。' }),
+  ];
+  const result = cleanConversationRows(rows);
+  assert.deepEqual(result.conversations[0].messages.map((message) => message.text), ['这个课程怎么安装?', '我可以远程帮你安装。']);
+  assert.equal(result.report.removedByReason.share_delivery, 2);
+});
+
+test('share-related item titles are not copied into cleaned metadata', () => {
+  const rows: RawMessageRow[] = [
+    row({ item_title: '夸克网盘自动转存', body_text: '可以远程安装吗？' }),
+    row({ message_id: 'seller-1', direction: 'outbound', sender_role: 'agent', source: 'human', body_text: '可以，我来帮你看一下。' }),
+  ];
+  const result = cleanConversationRows(rows);
+  assert.equal(result.conversations[0].itemTitle, undefined);
 });
 
 test('repeated short seller replies are reported as boilerplate and excluded from persona examples', () => {
@@ -65,14 +92,43 @@ test('repeated short seller replies are reported as boilerplate and excluded fro
   assert.equal(result.conversations.every((conversation) => !conversation.messages.some((message) => message.text === '没问题宝')), true);
 });
 
-test('heuristic persona includes seller identity and dataset signals', () => {
+test('heuristic persona keeps report and runtime prompt independent', () => {
   const rows = [
     row({ message_id: 'buyer-1', body_text: '可以远程安装吗？' }),
     row({ message_id: 'seller-1', direction: 'outbound', sender_role: 'agent', source: 'human', body_text: '可以，我可以远程帮你处理环境问题。' }),
   ];
   const { conversations, report } = cleanConversationRows(rows);
   const persona = buildHeuristicPersona(conversations, report);
-  assert.match(persona.description, /天津大学硕士研究生毕业/u);
-  assert.match(persona.description, /大厂前端开发工程师/u);
-  assert.match(persona.systemPrompt, /reply\/handoff JSON/u);
+  assert.match(persona.reportMarkdown, /天津大学硕士研究生毕业/u);
+  assert.match(persona.reportMarkdown, /表达风格|服务方式/u);
+  assert.match(persona.systemPromptText, /大厂前端开发工程师/u);
+  assert.match(persona.systemPromptText, /reply\/handoff/u);
+  assert.match(persona.systemPromptText, /情绪/u);
+  assert.match(persona.systemPromptText, /未下单/u);
+  assert.match(persona.systemPromptText, /小红花/u);
+  assert.match(persona.systemPromptText, /关键对话示例|建议回复|模仿重点/u);
+  assert.equal(persona.keyExamples?.length, 4);
+  assert.doesNotMatch(persona.systemPromptText, /清洗后保留|常见人工回复示例|卖家：|买家：|"decision"/u);
+  assert.doesNotMatch(persona.reportMarkdown, /清洗范围|上一版|失败原因|关键对话示例|常见人工回复示例|清洗后保留\s*\d+/u);
+  validatePersonaDocuments(persona);
+});
+
+test('persona document validation rejects report leakage in runtime prompt', () => {
+  assert.throws(
+    () => validatePersonaDocuments({
+      reportMarkdown: '# 卖家分身报告\n\n## 身份与能力\n- 技术背景。\n\n## 表达风格\n- 直接。\n\n## 服务边界\n- 先核实。',
+      systemPromptText: '这是附加 persona。\n## 历史统计\n清洗后保留 23 个会话。',
+    }),
+    /运行时提示词包含报告、原始示例或交易事实/u,
+  );
+});
+
+test('persona document validation requires additive protocol and identity', () => {
+  assert.throws(
+    () => validatePersonaDocuments({
+      reportMarkdown: '# 卖家分身报告\n\n## 身份与能力\n- 技术背景。\n\n## 表达风格\n- 直接。\n\n## 服务边界\n- 先核实。',
+      systemPromptText: '请保持自然。',
+    }),
+    /运行时提示词未声明 additive persona 语义/u,
+  );
 });
