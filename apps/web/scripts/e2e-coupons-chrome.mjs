@@ -7,6 +7,9 @@ import { pathToFileURL } from 'node:url';
 
 const root = join(import.meta.dirname, '..', '..', '..');
 const { createApp } = await import(pathToFileURL(join(root, 'apps', 'api', 'dist', 'app.js')).href);
+const { loadConfig } = await import(pathToFileURL(join(root, 'apps', 'api', 'dist', 'config.js')).href);
+const { hashPassword } = await import(pathToFileURL(join(root, 'apps', 'api', 'dist', 'security.js')).href);
+const usePostgres = process.env.COUPONS_E2E_STORAGE === 'postgres';
 const children = [];
 const chromeProfile = join(tmpdir(), `xianyu-agent-coupons-chrome-${process.pid}`);
 const chromePath = process.env.CHROME_PATH ?? join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe');
@@ -107,13 +110,21 @@ async function run() {
   const buildExit = await new Promise((resolve) => apiBuild.once('exit', resolve));
   if (buildExit !== 0) throw new Error(`API build failed with ${buildExit}`);
 
-  apiRuntime = createApp({ host: '127.0.0.1', port: apiPort, cookieSecure: false, allowInMemory: true, sessionIdleMs: 1_800_000, sessionAbsoluteMs: 28_800_000, xianyuQrMode: 'stub' });
+  apiRuntime = createApp(usePostgres
+    ? { ...loadConfig(), host: '127.0.0.1', port: apiPort, cookieSecure: false, allowInMemory: false, xianyuQrMode: 'stub' }
+    : { host: '127.0.0.1', port: apiPort, cookieSecure: false, allowInMemory: true, sessionIdleMs: 1_800_000, sessionAbsoluteMs: 28_800_000, xianyuQrMode: 'stub' });
   await apiRuntime.listen();
   await waitFor(async () => (await fetch(`${apiUrl}/healthz`)).ok, 'API');
-  const bootstrap = await fetch(`${apiUrl}/api/v1/auth/bootstrap`, { method: 'POST', headers: { 'content-type': 'application/json', 'Idempotency-Key': `coupons-bootstrap-${process.pid}` }, body: JSON.stringify({ email: 'coupons-e2e@example.com', password: 'password-123', displayName: 'Coupons E2E' }) });
-  if (!bootstrap.ok) throw new Error(`bootstrap failed: ${bootstrap.status}`);
-  const bootstrapPayload = await bootstrap.json();
-  const adminId = bootstrapPayload.data.profile.id;
+  const authResponse = usePostgres
+    ? await (async () => {
+      const email = `coupons-pg-${process.pid}@example.com`;
+      await apiRuntime.store.createAdmin({ email, passwordHash: await hashPassword('password-123'), displayName: 'Coupons PostgreSQL E2E' });
+      return fetch(`${apiUrl}/api/v1/auth/password-login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password: 'password-123' }) });
+    })()
+    : await fetch(`${apiUrl}/api/v1/auth/bootstrap`, { method: 'POST', headers: { 'content-type': 'application/json', 'Idempotency-Key': `coupons-bootstrap-${process.pid}` }, body: JSON.stringify({ email: 'coupons-e2e@example.com', password: 'password-123', displayName: 'Coupons E2E' }) });
+  if (!authResponse.ok) throw new Error(`auth setup failed: ${authResponse.status}`);
+  const authPayload = await authResponse.json();
+  const adminId = authPayload.data.profile.id;
   const account = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `coupons-e2e-${process.pid}` });
   const product = await apiRuntime.store.createProduct({ adminId, accountId: account.id, externalProductRef: `COUPON-ITEM-${process.pid}`, title: '卡券 E2E 商品', description: '受控绑定商品', categoryCode: 'digital', attributes: { source: 'coupons-e2e' }, priceMinor: 1990, status: 'published' });
   const layoutCouponLabel = `Chrome UI 布局卡券 ${process.pid}`;
@@ -125,7 +136,7 @@ async function run() {
   const editedLabel = `Chrome UI 编辑卡券 ${process.pid}`;
   const copiedLabel = `Chrome UI 复制卡券 ${process.pid}`;
 
-  const cookie = cookiesFrom(bootstrap);
+  const cookie = cookiesFrom(authResponse);
   spawnProcess(npm, npmArgs(['--workspace', 'apps/web', 'run', 'dev', '--', '--host', '127.0.0.1', '--port', String(webPort)]), { env: { ...process.env, VITE_API_MODE: 'live', VITE_API_BASE_URL: '', VITE_API_PROXY_TARGET: apiUrl } });
   await waitFor(async () => (await fetch(`${webUrl}/coupons`)).ok, 'Vite frontend');
   const chrome = spawnProcess(chromePath, ['--headless=new', '--disable-gpu', '--disable-extensions', '--no-first-run', '--no-default-browser-check', '--remote-allow-origins=*', `--remote-debugging-port=${debugPort}`, `--user-data-dir=${chromeProfile}`, '--window-size=1440,900', 'about:blank']);
@@ -239,6 +250,7 @@ async function run() {
     return activeBinding && productBinding ? { batchId: batch.id, bindingId: activeBinding.id, productBatchId: productBinding.id } : false;
   }, 'coupon relation persistence and product binding');
   if (!relationPersisted || relationPersisted.productBatchId !== persistedBatch.sequenceId) throw new Error('coupon relation was not persisted on both batch and product records');
+  console.log(`${usePostgres ? 'postgres' : 'memory'} relation persistence verified: ${JSON.stringify(relationPersisted)}`);
 
   const selectedRow = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(createdLabel)})); const button = row?.querySelector('button[aria-label="编辑"]'); if (!button) return false; button.click(); return true; })()`);
   if (!selectedRow) throw new Error('created coupon edit button missing');
