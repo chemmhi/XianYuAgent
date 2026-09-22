@@ -5,7 +5,7 @@ import { useDashboardController } from '../controller';
 import { DashboardDesktopContent, DashboardMobileContent, Icon } from './DashboardViews';
 import './dashboard.css';
 
-export function DashboardPage({ api, apiMode, onNavigate }: { api?: DashboardApi; apiMode: 'live' | 'mock'; onNavigate: (page: PageKey) => void }) {
+export function DashboardPage({ api, onNavigate }: { api?: DashboardApi; apiMode: 'live' | 'mock'; onNavigate: (page: PageKey) => void }) {
   const controller = useDashboardController({ api });
   const [riskDrawer, setRiskDrawer] = useState<string | null>(null);
 
@@ -20,7 +20,7 @@ export function DashboardPage({ api, apiMode, onNavigate }: { api?: DashboardApi
 
   const activeTodo = controller.state.data?.riskTodos.find((item) => item.id === riskDrawer);
   return <div className="dashboard-experience">
-    <div className="dashboard-desktop-content"><DashboardDesktopContent state={controller.state} query={controller.query} apiMode={apiMode} onOpenTodo={openTodo} onRefresh={controller.reload} onTrendQueryChange={controller.setQuery}/></div>
+    <div className="dashboard-desktop-content"><DashboardDesktopContent state={controller.state} query={controller.query} onOpenTodo={openTodo} onRefresh={controller.reload} onTrendQueryChange={controller.setQuery}/></div>
     <div className="dashboard-mobile-content">
       <div className="dashboard-mobile-status"><span>9:41</span><span>5G 100%</span></div>
       <header className="dashboard-mobile-head"><div><strong>今日总览</strong></div><div className="dashboard-mobile-head-actions"><button type="button" className="dashboard-mobile-account-chip" onClick={() => onNavigate('accounts')}>账号 A</button><button type="button" className="dashboard-icon-button" aria-label="通知" onClick={() => openTodo('todo_001')}><Icon name="bell"/><b>3</b></button></div></header>

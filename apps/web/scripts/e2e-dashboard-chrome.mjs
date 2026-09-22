@@ -116,8 +116,6 @@ async function run() {
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'dashboard page');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('订单与 AI 闭环趋势'), 'dashboard content');
   const dashboardBody = String(await evaluate(cdp, 'document.body.innerText'));
-  if (!dashboardBody.includes('Mock API')) throw new Error('dashboard mock override did not render Mock API mode');
-  if (dashboardBody.includes('Live API')) throw new Error('dashboard unexpectedly rendered live mode under explicit mock override');
   const dashboardRequests = cdp.events.filter((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.url?.includes('/api/v1/dashboard/snapshot'));
   if (dashboardRequests.length > 0) throw new Error('dashboard unexpectedly requested live snapshot API under explicit mock override');
   await assertText(cdp, '总销售额');

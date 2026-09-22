@@ -194,8 +194,7 @@ async function run() {
   const dashboardRequests = cdp.events.filter((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.url?.includes('/api/v1/dashboard/snapshot'));
   if (dashboardRequests.length === 0) throw new Error('browser did not request the live dashboard API');
   const dashboardBody = String(await evaluate(cdp, 'document.body.innerText'));
-  if (!dashboardBody.includes('Live API')) throw new Error('dashboard is not running in live API mode');
-  if (dashboardBody.includes('Mock API')) throw new Error('dashboard unexpectedly rendered mock mode');
+  if (dashboardBody.includes('Live API') || dashboardBody.includes('Mock API')) throw new Error('dashboard rendered a removed API mode label');
   await captureViewport(cdp, 1440, 900, 'dashboard-fullchain-desktop-1440x900.png');
 
   await evaluate(cdp, `localStorage.setItem('xianyu.activeAccountId', ${JSON.stringify(accountId)})`);
@@ -246,7 +245,7 @@ async function run() {
       conversations: { externalHasMore: externalConversations.hasMore, localPersisted: localConversations.items.length },
       orders: { success: externalOrders.pages[0]?.success ?? false, errorCode: externalOrders.pages[0]?.errorCode ?? null, permissionDenied: externalOrderPermissionDenied, externalCount: externalOrders.items.length, persistedCount: persistedXianyuOrders.length, browserRequestedRefresh: cdp.events.slice(orderSyncMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'POST' && event.params?.request?.url?.includes('/api/v1/orders/refresh')) },
     },
-    dashboard: { browserRequestedLiveApi: dashboardRequests.length > 0, liveBadge: dashboardBody.includes('Live API'), persistedProductCount: persistedExternalProducts.length, beforeProductCount: beforeProducts.total, afterProductCount: afterProducts.total },
+    dashboard: { browserRequestedLiveApi: dashboardRequests.length > 0, uiModeLabelRemoved: !dashboardBody.includes('Live API') && !dashboardBody.includes('Mock API'), persistedProductCount: persistedExternalProducts.length, beforeProductCount: beforeProducts.total, afterProductCount: afterProducts.total },
   };
   mkdirSync(evidenceDir, { recursive: true });
   writeFileSync(join(evidenceDir, 'fullchain-evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`);

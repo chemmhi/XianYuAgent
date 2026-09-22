@@ -16,22 +16,60 @@ export function Badge({ tone = 'gray', children }: { tone?: string; children: Re
 
 function toneClass(tone: string) { return `tone-${tone}`; }
 
+const CHART_LEFT = 20;
+const CHART_RIGHT = 500;
+const CHART_TOP = 14;
+const CHART_BOTTOM = 176;
+
+type ChartScale = { min: number; max: number; ticks: number[] };
+
+function niceStep(rawStep: number) {
+  if (!Number.isFinite(rawStep) || rawStep <= 0) return 1;
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+  const normalized = rawStep / magnitude;
+  const factor = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return factor * magnitude;
+}
+
+function createChartScale(values: number[], kind: 'currency' | 'percent'): ChartScale {
+  const safeValues = values.filter((value) => Number.isFinite(value));
+  if (kind === 'percent') return { min: 0, max: 100, ticks: [0, 25, 50, 75, 100] };
+  const maxValue = Math.max(0, ...(safeValues.length ? safeValues : [0]));
+  const step = niceStep(maxValue / 4 || 1);
+  const max = Math.max(step * 4, Math.ceil(maxValue / step) * step);
+  return { min: 0, max, ticks: Array.from({ length: 5 }, (_, index) => index * (max / 4)) };
+}
+
+function chartY(value: number, scale: ChartScale) {
+  return CHART_TOP + (CHART_BOTTOM - CHART_TOP) * (1 - (value - scale.min) / Math.max(1, scale.max - scale.min));
+}
+
+function formatAxisTick(value: number, kind: 'currency' | 'percent') {
+  if (kind === 'percent') return `${Math.round(value)}%`;
+  if (value >= 10000) return `¥${(value / 10000).toFixed(value % 10000 === 0 ? 0 : 1)}万`;
+  return `¥${Math.round(value).toLocaleString('zh-CN')}`;
+}
+
 export function MiniAreaChart({ state, compact = false }: { state: DashboardState; compact?: boolean }) {
   const points = state.data?.trend.length ? state.data.trend : [
     { label: '周一', primary: 58, secondary: 82 }, { label: '周二', primary: 64, secondary: 85 }, { label: '周三', primary: 61, secondary: 84 }, { label: '周四', primary: 75, secondary: 88 }, { label: '周五', primary: 72, secondary: 90 }, { label: '周六', primary: 84, secondary: 93 },
   ];
-  const makePath = (values: number[]) => {
-    const max = Math.max(...values); const min = Math.min(...values); const w = 520; const h = 170;
-    return values.map((value, index) => { const x = 18 + (index * (w - 36)) / Math.max(1, values.length - 1); const y = 14 + (h - 34) * (1 - (value - min) / Math.max(1, max - min)); return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`; }).join(' ');
-  };
-  const primary = makePath(points.map((point) => point.primary));
-  const secondary = makePath(points.map((point) => point.secondary));
+  const primaryScale = createChartScale(points.map((point) => point.primary), 'currency');
+  const secondaryScale = createChartScale(points.map((point) => point.secondary), 'percent');
+  const makePath = (values: number[], scale: ChartScale) => values.map((value, index) => {
+    const x = CHART_LEFT + (index * (CHART_RIGHT - CHART_LEFT)) / Math.max(1, values.length - 1);
+    return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)} ${chartY(value, scale).toFixed(1)}`;
+  }).join(' ');
+  const primaryValues = points.map((point) => point.primary);
+  const secondaryValues = points.map((point) => point.secondary);
+  const primary = makePath(primaryValues, primaryScale);
+  const secondary = makePath(secondaryValues, secondaryScale);
   const labels = points.map((point) => point.label);
   const labelStep = Math.max(1, Math.ceil(labels.length / 6));
   const gradientSuffix = compact ? 'mobile' : 'desktop';
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const activeIndex = hoveredIndex === null ? null : Math.min(hoveredIndex, Math.max(0, points.length - 1));
-  const hoverX = activeIndex === null ? 0 : 18 + (activeIndex * (520 - 36)) / Math.max(1, points.length - 1);
+  const hoverX = activeIndex === null ? 0 : CHART_LEFT + (activeIndex * (CHART_RIGHT - CHART_LEFT)) / Math.max(1, points.length - 1);
   const tooltipLeft = Math.min(86, Math.max(14, (hoverX / 520) * 100));
   const handleMouseMove = (event: MouseEvent<SVGSVGElement>) => {
     if (points.length < 2) {
@@ -48,14 +86,16 @@ export function MiniAreaChart({ state, compact = false }: { state: DashboardStat
         <linearGradient id={`dashboard-primary-${gradientSuffix}`} x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#245A8D" stopOpacity="0.12"/><stop offset="100%" stopColor="#245A8D" stopOpacity="0.01"/></linearGradient>
         <linearGradient id={`dashboard-secondary-${gradientSuffix}`} x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#2E7D5B" stopOpacity="0.10"/><stop offset="100%" stopColor="#2E7D5B" stopOpacity="0.01"/></linearGradient>
       </defs>
-      {[40, 78, 116, 154].map((y) => <line key={y} x1="20" x2="500" y1={y} y2={y} className="dashboard-chart-grid"/>)}
-      <path d={`${secondary} L 502 176 L 18 176 Z`} fill={`url(#dashboard-secondary-${gradientSuffix})`}/>
-      <path d={`${primary} L 502 176 L 18 176 Z`} fill={`url(#dashboard-primary-${gradientSuffix})`}/>
+      {primaryScale.ticks.map((tick) => <line key={tick} x1={CHART_LEFT} x2={CHART_RIGHT} y1={chartY(tick, primaryScale)} y2={chartY(tick, primaryScale)} className="dashboard-chart-grid"/>)}
+      <path d={`${secondary} L ${CHART_RIGHT} ${CHART_BOTTOM} L ${CHART_LEFT} ${CHART_BOTTOM} Z`} fill={`url(#dashboard-secondary-${gradientSuffix})`}/>
+      <path d={`${primary} L ${CHART_RIGHT} ${CHART_BOTTOM} L ${CHART_LEFT} ${CHART_BOTTOM} Z`} fill={`url(#dashboard-primary-${gradientSuffix})`}/>
       <path d={secondary} className="dashboard-chart-line dashboard-chart-line-secondary"/>
       <path d={primary} className="dashboard-chart-line"/>
-      {activeIndex !== null ? <line x1={hoverX} x2={hoverX} y1="14" y2="176" className="dashboard-chart-hover-line"/> : null}
-      {activeIndex !== null ? <circle cx={hoverX} cy={14 + (170 - 34) * (1 - (points[activeIndex]!.primary - Math.min(...points.map((point) => point.primary))) / Math.max(1, Math.max(...points.map((point) => point.primary)) - Math.min(...points.map((point) => point.primary))))} r="3.5" className="dashboard-chart-dot dashboard-chart-dot-primary"/> : null}
-      {activeIndex !== null ? <circle cx={hoverX} cy={14 + (170 - 34) * (1 - (points[activeIndex]!.secondary - Math.min(...points.map((point) => point.secondary))) / Math.max(1, Math.max(...points.map((point) => point.secondary)) - Math.min(...points.map((point) => point.secondary))))} r="3.5" className="dashboard-chart-dot dashboard-chart-dot-secondary"/> : null}
+      <g className="dashboard-chart-y-axis dashboard-y-axis-primary" aria-hidden="true">{primaryScale.ticks.map((tick) => <text key={tick} x={CHART_LEFT - 4} y={chartY(tick, primaryScale) + 3} textAnchor="end">{formatAxisTick(tick, 'currency')}</text>)}</g>
+      <g className="dashboard-chart-y-axis dashboard-y-axis-secondary" aria-hidden="true">{secondaryScale.ticks.map((tick) => <text key={tick} x={CHART_RIGHT + 4} y={chartY(tick, secondaryScale) + 3}>{formatAxisTick(tick, 'percent')}</text>)}</g>
+      {activeIndex !== null ? <line x1={hoverX} x2={hoverX} y1={CHART_TOP} y2={CHART_BOTTOM} className="dashboard-chart-hover-line"/> : null}
+      {activeIndex !== null ? <circle cx={hoverX} cy={chartY(points[activeIndex]!.primary, primaryScale)} r="3.5" className="dashboard-chart-dot dashboard-chart-dot-primary"/> : null}
+      {activeIndex !== null ? <circle cx={hoverX} cy={chartY(points[activeIndex]!.secondary, secondaryScale)} r="3.5" className="dashboard-chart-dot dashboard-chart-dot-secondary"/> : null}
     </svg>
     <div className="dashboard-chart-axis" aria-hidden="true">{labels.map((label, index) => <span key={`${label}-${index}`}>{labels.length <= 7 || index === 0 || index === labels.length - 1 || index % labelStep === 0 ? label : ''}</span>)}</div>
     {activeIndex !== null ? <div className="dashboard-chart-tooltip" style={{ left: `${tooltipLeft}%` }}><strong>{points[activeIndex]!.label}</strong><span>订单金额 ¥{points[activeIndex]!.primary.toLocaleString('zh-CN')}</span><span>AI 闭环率 {points[activeIndex]!.secondary}%</span></div> : null}
@@ -111,12 +151,12 @@ function TrendRangeControl({ query, onChange }: { query: DashboardQuery; onChang
   </div>;
 }
 
-export function DashboardDesktopContent({ state, query, apiMode, onOpenTodo, onRefresh, onTrendQueryChange }: { state: DashboardState; query: DashboardQuery; apiMode: 'live' | 'mock'; onOpenTodo: (id: string) => void; onRefresh: () => void; onTrendQueryChange: (query: DashboardQuery) => void }) {
+export function DashboardDesktopContent({ state, query, onOpenTodo, onRefresh, onTrendQueryChange }: { state: DashboardState; query: DashboardQuery; onOpenTodo: (id: string) => void; onRefresh: () => void; onTrendQueryChange: (query: DashboardQuery) => void }) {
   const data = state.data;
   if (!data || state.phase !== 'success') return <DashboardStateViewBlock state={state} onRefresh={onRefresh}/>;
   return <section className="dashboard-page-stack" data-dashboard-surface="desktop">
     <div className="dashboard-kpi-grid">{data.kpis.map((kpi) => <article className="dashboard-card dashboard-kpi-card" key={kpi.key}><div className="dashboard-kpi-label">{kpi.label}</div><div className="dashboard-kpi-value">{kpi.value}</div><div className="dashboard-kpi-delta"><span className={toneClass(kpi.tone)}>{kpi.delta}</span><small>{kpi.context}</small></div></article>)}</div>
-    <div className="dashboard-main-grid"><article className="dashboard-card dashboard-panel"><div className="dashboard-panel-head"><div><h2>订单与 AI 闭环趋势</h2><p>按所选时间范围查看订单金额、自动回复成功率和人工接管变化。</p></div><div className="dashboard-trend-head-actions"><TrendRangeControl query={query} onChange={onTrendQueryChange}/><Badge tone={apiMode === 'live' ? 'ok' : 'info'}>{apiMode === 'live' ? 'Live API' : 'Mock API'}</Badge></div></div><MiniAreaChart state={state}/></article></div>
+    <div className="dashboard-main-grid"><article className="dashboard-card dashboard-panel"><div className="dashboard-panel-head"><div><h2>订单与 AI 闭环趋势</h2><p>按所选时间范围查看订单金额、自动回复成功率和人工接管变化。</p></div><div className="dashboard-trend-head-actions"><TrendRangeControl query={query} onChange={onTrendQueryChange}/></div></div><MiniAreaChart state={state}/></article></div>
     <div className="dashboard-two-grid"><article className="dashboard-card dashboard-panel"><div className="dashboard-panel-head"><div><h2>商品排行</h2><p>按当前账号订单与库存表现排序。</p></div><Badge tone="info">4 个商品</Badge></div><div className="dashboard-data-table dashboard-products-table"><div className="dashboard-table-head"><span>商品</span><span>订单</span><span>库存</span><span>状态</span></div>{data.productRank.length ? data.productRank.map((row) => <div className="dashboard-table-row" key={row.title}><span><b>{row.title}</b><small>{row.subtitle}</small></span><span>{row.orders}</span><span>{row.stock}</span><Badge tone={row.tone}>{row.status}</Badge></div>) : <div className="dashboard-empty-row">暂无商品排行</div>}</div></article><article className="dashboard-card dashboard-panel"><div className="dashboard-panel-head"><div><h2>最近处理记录</h2><p>最近 24 小时的 AI、订单与风险动作。</p></div><Badge tone="ok">自动刷新</Badge></div><div className="dashboard-timeline">{data.recentActivity.length ? data.recentActivity.map((item) => <button className="dashboard-timeline-row" key={`${item.time}-${item.text}`} type="button" onClick={() => item.href && onOpenTodo(item.href)}><strong>{item.time}</strong><span>{item.text}</span><Badge tone={item.tone}>{item.status}</Badge></button>) : <div className="dashboard-empty-row">暂无最近处理记录</div>}</div></article></div>
     <div className="dashboard-risk-strip"><div><strong>待处理风险</strong><span>{data.riskTodos.length} 个动作需要关注</span></div><div className="dashboard-risk-inline-list">{data.riskTodos.slice(0, 3).map((todo) => <button type="button" key={todo.id} className={`dashboard-risk-chip dashboard-risk-${todo.severity}`} onClick={() => onOpenTodo(todo.id)}><span>{todo.title}</span><small>查看</small></button>)}</div></div>
   </section>;

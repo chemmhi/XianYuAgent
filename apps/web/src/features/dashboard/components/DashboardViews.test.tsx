@@ -26,7 +26,7 @@ const state: DashboardState = {
 
 describe('dashboard views', () => {
   it('renders the high-fidelity desktop hierarchy', () => {
-    const html = renderToStaticMarkup(createElement(DashboardDesktopContent, { state, query: { range: '1m' }, apiMode: 'mock', onOpenTodo: vi.fn(), onRefresh: vi.fn(), onTrendQueryChange: vi.fn() }));
+    const html = renderToStaticMarkup(createElement(DashboardDesktopContent, { state, query: { range: '1m' }, onOpenTodo: vi.fn(), onRefresh: vi.fn(), onTrendQueryChange: vi.fn() }));
     expect(html).toContain('订单与 AI 闭环趋势');
     expect(html).not.toContain('当前账号健康度');
     expect(html).not.toContain('可售卡密库存');
@@ -36,6 +36,11 @@ describe('dashboard views', () => {
     expect(html).toContain('一个月内');
     expect(html).toContain('月份选择');
     expect(html).toContain('自定义时间区间');
+    expect(html).not.toContain('Live API');
+    expect(html).not.toContain('Mock API');
+    expect(html).toContain('dashboard-y-axis-primary');
+    expect(html).toContain('dashboard-y-axis-secondary');
+    expect(html).toContain('dashboard-chart-legend');
     expect(html).toContain('商品排行');
     expect(html).toContain('最近处理记录');
     expect(html).toContain('data-dashboard-surface="desktop"');
@@ -54,7 +59,6 @@ describe('dashboard views', () => {
     const html = renderToStaticMarkup(createElement(DashboardDesktopContent, {
       state,
       query: { range: 'custom', from: '2026-09-01', to: '2026-09-07' },
-      apiMode: 'live',
       onOpenTodo: vi.fn(),
       onRefresh: vi.fn(),
       onTrendQueryChange: vi.fn(),
@@ -68,7 +72,6 @@ describe('dashboard views', () => {
     const loadingHtml = renderToStaticMarkup(createElement(DashboardDesktopContent, {
       state: { phase: 'loading', data: null, error: null, refreshing: false },
       query: { range: '1m' },
-      apiMode: 'mock',
       onOpenTodo: vi.fn(),
       onRefresh: vi.fn(),
       onTrendQueryChange: vi.fn(),
@@ -76,7 +79,6 @@ describe('dashboard views', () => {
     const forbiddenHtml = renderToStaticMarkup(createElement(DashboardDesktopContent, {
       state: { phase: 'forbidden', data: null, error: { code: 'FORBIDDEN', message: '无权限', retryable: false }, refreshing: false },
       query: { range: '1m' },
-      apiMode: 'live',
       onOpenTodo: vi.fn(),
       onRefresh: vi.fn(),
       onTrendQueryChange: vi.fn(),
@@ -84,5 +86,18 @@ describe('dashboard views', () => {
     expect(loadingHtml).toContain('dashboard-skeleton-grid');
     expect(forbiddenHtml).toContain('暂无仪表盘权限');
     expect(forbiddenHtml).toContain('无权限');
+  });
+
+  it('adapts the primary vertical axis to the visible order range', () => {
+    const html = renderToStaticMarkup(createElement(DashboardDesktopContent, {
+      state: { ...state, data: { ...state.data!, trend: [{ label: 'A', primary: 10, secondary: 80 }, { label: 'B', primary: 1000, secondary: 90 }] } },
+      query: { range: '1m' },
+      onOpenTodo: vi.fn(),
+      onRefresh: vi.fn(),
+      onTrendQueryChange: vi.fn(),
+    }));
+    expect(html).toContain('¥1,000');
+    expect(html).toContain('100%');
+    expect(html).not.toContain('¥150');
   });
 });
