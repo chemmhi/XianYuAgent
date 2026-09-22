@@ -240,8 +240,15 @@ async function run() {
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('卡券 E2E 商品'), 'coupon relation product list');
   const relationProductSelected = await evaluate(cdp, `(() => { const product = Array.from(document.querySelectorAll('.coupons-relation-pane:not(.selected-pane) button.coupons-relation-item')).find((button) => button.textContent?.includes('卡券 E2E 商品')); if (!product) return false; product.click(); return true; })()`);
   if (!relationProductSelected) throw new Error('coupon relation product option missing');
+  const relationSaveEventMark = cdp.events.length;
   await evaluate(cdp, 'Array.from(document.querySelectorAll(".coupons-relation-modal footer button")).find((button) => button.classList.contains("primary"))?.click()');
   await waitFor(async () => await evaluate(cdp, '!document.querySelector(".coupons-relation-modal")'), 'coupon relation save closes modal');
+  const relationListReloads = cdp.events.slice(relationSaveEventMark).filter((event) => {
+    if (event.method !== 'Network.requestWillBeSent' || event.params?.request?.method !== 'GET') return false;
+    const url = new URL(event.params.request.url);
+    return url.pathname === '/api/v1/coupons/batches';
+  });
+  if (relationListReloads.length !== 1) throw new Error(`coupon relation save triggered ${relationListReloads.length} list reloads; expected exactly one after modal close`);
   const relationPersisted = await waitFor(async () => {
     const batch = await apiRuntime.store.getCouponBatch(adminId, persistedBatch.id);
     const productRecord = await apiRuntime.store.getProduct(adminId, product.id);
