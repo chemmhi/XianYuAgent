@@ -1,7 +1,7 @@
 import type { ProductVM } from '../types';
 import { PlaceholderCell } from '../../../shared/ui/PlaceholderCell';
 
-export function ProductTable({ products, page, totalPages, total, sortBy, sortOrder, onSortChange, onPageChange, onOpen, onOpenXianyuDetail }: {
+export function ProductTable({ products, page, totalPages, total, sortBy, sortOrder, onSortChange, onPageChange, onOpen, onOpenXianyuDetail, selectedIds = [], onToggleSelected, onToggleAll, onOpenAutomation, automationSummary }: {
   products: ProductVM[];
   page: number;
   totalPages: number;
@@ -12,7 +12,13 @@ export function ProductTable({ products, page, totalPages, total, sortBy, sortOr
   onPageChange: (page: number) => void;
   onOpen: (productId: string) => void;
   onOpenXianyuDetail: (productId: string) => void;
+  selectedIds?: string[];
+  onToggleSelected?: (productId: string) => void;
+  onToggleAll?: (checked: boolean) => void;
+  onOpenAutomation?: (productId: string) => void;
+  automationSummary?: (product: ProductVM) => { label: string; detail: string; tone: 'ok' | 'warn' | 'muted' };
 }) {
+  const automationEnabled = Boolean(onToggleSelected && onOpenAutomation);
   const pageItems = getPageItems(page, totalPages);
   const sortButton = (key: 'createdAt' | 'updatedAt', label: string) => {
     const active = sortBy === key;
@@ -21,9 +27,9 @@ export function ProductTable({ products, page, totalPages, total, sortBy, sortOr
   };
   return <div className="products-table-region">
     <div className="products-table-scroll">
-      <div className="products-table" role="table" aria-label="商品列表">
-        <div className="products-row products-head" role="row"><span>商品标题</span><span>价格</span><span>关联卡券</span><span>AI提示词</span><span>{sortButton('createdAt', '创建时间')}</span><span>{sortButton('updatedAt', '闲鱼更新时间')}</span><span>详情</span></div>
-        {products.map((product) => <div className="products-row" role="row" key={product.id}><div className="products-title"><button className="products-title-link" type="button" onClick={() => onOpen(product.id)}><strong>{product.title}</strong></button><small>{product.externalProductRef ?? product.id}</small></div><span>{product.priceMinor === undefined ? <PlaceholderCell className="products-placeholder">—</PlaceholderCell> : formatPrice(product.priceMinor)}</span><span className="products-coupons">{product.couponBatches?.length ? product.couponBatches.map((coupon) => coupon.label || coupon.id).join('、') : <PlaceholderCell className="products-placeholder">未关联卡券</PlaceholderCell>}</span><span className="products-ai-prompt" title={product.aiPrompt ?? undefined}>{product.aiPrompt || <PlaceholderCell className="products-placeholder">—</PlaceholderCell>}</span><time className="products-meta">{formatDate(product.createdAt)}</time><time className="products-meta">{product.xianyuUpdatedAt ? formatDate(product.xianyuUpdatedAt) : '未获取'}</time><span className="products-row-actions"><button className="btn ghost btn-small" type="button" data-testid={`product-detail-${product.id}`} onClick={() => onOpenXianyuDetail(product.id)}>详情</button></span></div>)}
+      <div className={`products-table${automationEnabled ? ' products-table-automation' : ''}`} role="table" aria-label="商品列表">
+        <div className="products-row products-head" role="row">{automationEnabled && <span className="products-check-cell"><input type="checkbox" aria-label="选择全部商品" checked={products.length > 0 && products.every((product) => selectedIds.includes(product.id))} onChange={(event) => onToggleAll?.(event.target.checked)} /></span>}<span>商品标题</span><span>价格</span><span>关联卡券</span>{automationEnabled && <span>自动化</span>}<span>AI提示词</span><span>{sortButton('createdAt', '创建时间')}</span><span>{automationEnabled ? '操作' : sortButton('updatedAt', '闲鱼更新时间')}</span>{!automationEnabled && <span>详情</span>}</div>
+        {products.map((product) => <div className="products-row" role="row" key={product.id}>{automationEnabled && <span className="products-check-cell"><input type="checkbox" aria-label={`选择${product.title}`} checked={selectedIds.includes(product.id)} onChange={() => onToggleSelected?.(product.id)} /></span>}<div className="products-title"><button className="products-title-link" type="button" onClick={() => onOpen(product.id)}><strong>{product.title}</strong></button><small>{product.externalProductRef ?? product.id}</small></div><span>{product.priceMinor === undefined ? <PlaceholderCell className="products-placeholder">—</PlaceholderCell> : formatPrice(product.priceMinor)}</span><span className="products-coupons">{product.couponBatches?.length ? product.couponBatches.map((coupon) => coupon.label || coupon.id).join('、') : <PlaceholderCell className="products-placeholder">未关联卡券</PlaceholderCell>}</span>{automationEnabled && (() => { const summary = automationSummary?.(product) ?? { label: '未配置', detail: '暂无规则', tone: 'muted' as const }; return <span className="products-automation-status"><em className={`products-status products-status-${summary.tone}`}>{summary.label}</em><small>{summary.detail}</small></span>; })()}<span className="products-ai-prompt" title={product.aiPrompt ?? undefined}>{product.aiPrompt || <PlaceholderCell className="products-placeholder">—</PlaceholderCell>}</span><time className="products-meta">{formatDate(product.createdAt)}</time>{automationEnabled ? <span className="products-row-actions"><button className="btn primary btn-small" type="button" data-testid={`product-automation-${product.id}`} onClick={() => onOpenAutomation?.(product.id)}>自动化</button><button className="btn ghost btn-small" type="button" data-testid={`product-detail-${product.id}`} onClick={() => onOpenXianyuDetail(product.id)}>详情</button></span> : <time className="products-meta">{product.xianyuUpdatedAt ? formatDate(product.xianyuUpdatedAt) : '未获取'}</time>}{!automationEnabled && <span className="products-row-actions"><button className="btn ghost btn-small" type="button" data-testid={`product-detail-${product.id}`} onClick={() => onOpenXianyuDetail(product.id)}>详情</button></span>}</div>)}
       </div>
     </div>
     <nav className="products-pagination" aria-label="商品列表分页" data-testid="products-pagination">
