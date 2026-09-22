@@ -294,7 +294,9 @@ export class XianyuMtopClient {
       // If the raw saved cookie still contains _m_h5_tk, replay it and let MTOP
       // return the authoritative session-expired response instead of failing
       // locally with MTOP_TOKEN_MISSING.
-      const useSnapshot = Boolean(snapshotToken);
+      // If a user refreshed the raw Cookie after completing a slider challenge,
+      // prefer that newer flat header over an older persisted browser snapshot.
+      const useSnapshot = Boolean(snapshotToken && cookieHeadersMatch(cookieSnapshot, cookieHeader));
       const signingCookieHeader = useSnapshot ? snapshotSigningCookieHeader : cookieHeader;
       const requestCookieHeader = useSnapshot ? snapshotRequestCookieHeader : cookieHeader;
       const token = (useSnapshot ? snapshotToken : cookieValue(cookieHeader, '_m_h5_tk')).split('_', 1)[0] ?? '';
@@ -372,6 +374,26 @@ function cookieValue(cookieHeader: string, name: string): string {
     if (key === name) return rest.join('=');
   }
   return '';
+}
+
+function cookieHeadersMatch(snapshot: XianyuCookieSnapshot | undefined, rawCookieHeader: string): boolean {
+  if (!snapshot || !rawCookieHeader.trim()) return true;
+  const snapshotValues = parseCookieHeader(cookieHeaderFromSnapshot(snapshot));
+  const rawValues = parseCookieHeader(rawCookieHeader);
+  const volatile = new Set(['_m_h5_tk', '_m_h5_tk_enc', 'x5sec', 'x5secdata', 'wua', 'umid', 'cna', 'cookie2', 'unb', 'munb', 'tfstk']);
+  for (const [name, value] of rawValues) {
+    if (volatile.has(name) && snapshotValues.get(name) !== value) return false;
+  }
+  return true;
+}
+
+function parseCookieHeader(cookieHeader: string): Map<string, string> {
+  const values = new Map<string, string>();
+  for (const part of cookieHeader.split(';')) {
+    const [name, ...rest] = part.trim().split('=');
+    if (name) values.set(name, rest.join('='));
+  }
+  return values;
 }
 
 function mergeCookies(cookieHeader: string, setCookies: string[]): string {

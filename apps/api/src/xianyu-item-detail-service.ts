@@ -37,8 +37,15 @@ export class XianyuItemDetailService {
     if (!itemId) throw new ServiceError(422, 'VALIDATION_FAILED', 'product externalProductRef is required for xianyu detail');
     const response = await this.xianyu.fetchItemDetail(input.adminId, product.accountId, itemId, { categoryId: input.categoryId, referer: input.referer, spmPre: input.spmPre, logId: input.logId });
     if (!response.success) {
-      const status = response.accountInvalid ? 401 : 502;
-      throw new ServiceError(status, response.errorCode ?? 'XIANYU_ITEM_DETAIL_FAILED', response.message ?? 'xianyu item detail request failed');
+      if (response.accountInvalid) {
+        // Keep remote slider/anti-bot validation distinct from actual account
+        // re-authentication so the UI can guide the operator to the right fix.
+        if (response.errorCode === 'ACCOUNT_VALIDATION_REQUIRED') {
+          throw new ServiceError(409, 'ACCOUNT_REAUTH_REQUIRED', '闲鱼详情请求触发风控验证，请先在闲鱼商品详情页完成滑块验证后再重试。', { errorCode: response.errorCode });
+        }
+        throw new ServiceError(409, 'ACCOUNT_REAUTH_REQUIRED', response.message ?? 'xianyu credential requires re-authentication', { errorCode: response.errorCode });
+      }
+      throw new ServiceError(502, response.errorCode ?? 'XIANYU_ITEM_DETAIL_FAILED', response.message ?? 'xianyu item detail request failed');
     }
     const summary = response.summary;
     const imageUrls = uniqueStrings(summary.imageUrls ?? []);

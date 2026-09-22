@@ -38,10 +38,10 @@ export function AccountLoginModal({ api, account, onClose, onCompleted }: { api:
           <div><p className="eyebrow">Xianyu Account</p><h2 id="account-login-title">{account ? '重新授权闲鱼账号' : '添加闲鱼账号'}</h2><p>直接选择登录方式。账号创建、凭证保存和资料同步均由服务端完成。</p></div>
           <button className="icon-button" type="button" aria-label="关闭登录弹窗" onClick={onClose}>×</button>
         </header>
-        {!account && <LoginMethodSelector value={method} onChange={setMethod} />}
+        <LoginMethodSelector value={method} onChange={setMethod} />
         <div className="account-login-body">
           {method === 'qr' && <QrLoginView model={qrController.model} onStart={qrController.start} onRefresh={qrController.refresh} onRetry={qrController.retry} onCancel={qrController.cancel} />}
-          {method === 'cookie' && <CookieLoginForm api={api} onCompleted={onCompleted} />}
+          {method === 'cookie' && <CookieLoginForm api={api} existingAccount={Boolean(account)} onCompleted={onCompleted} />}
           {method === 'password' && <PasswordLoginForm api={api} onCompleted={onCompleted} />}
         </div>
         <div className="card-actions"><button className="btn ghost" type="button" onClick={onClose}>关闭</button></div>

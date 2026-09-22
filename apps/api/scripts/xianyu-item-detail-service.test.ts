@@ -72,6 +72,28 @@ test('records source URL and failed asset metadata without storing binary in att
   }
 });
 
+test('maps remote account validation failures to the shared slider-validation contract', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'validation-detail@example.com', passwordHash: 'hash', displayName: 'Detail Admin' });
+  const account = await store.createAccount({ platform: 'xianyu', sellerRef: 'seller-validation', adminId: admin.id });
+  const product = await store.createProduct({ adminId: admin.id, accountId: account.id, externalProductRef: 'item-validation', title: '商品' });
+  const xianyu = {
+    fetchItemDetail: async () => ({ success: false, accountInvalid: true, errorCode: 'ACCOUNT_VALIDATION_REQUIRED', message: 'FAIL_SYS_USER_VALIDATE', cookieHeader: '', summary: {} }),
+  } as never;
+  const service = new XianyuItemDetailService(store, xianyu, new MemoryObjectStorage(), async () => 'audit-validation');
+
+  await assert.rejects(
+    () => service.get({ adminId: admin.id, productId: product.id, refresh: true, requestId: 'req-validation', traceId: 'trace-validation' }),
+    (error: unknown) => {
+      assert.equal((error as { statusCode?: number }).statusCode, 409);
+      assert.equal((error as { code?: string }).code, 'ACCOUNT_REAUTH_REQUIRED');
+      assert.equal((error as { details?: { errorCode?: string } }).details?.errorCode, 'ACCOUNT_VALIDATION_REQUIRED');
+      assert.equal((error as { message?: string }).message, '闲鱼详情请求触发风控验证，请先在闲鱼商品详情页完成滑块验证后再重试。');
+      return true;
+    },
+  );
+});
+
 test('rejects localhost, private, and metadata image targets before download', async () => {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: 'ssrf-detail@example.com', passwordHash: 'hash', displayName: 'Detail Admin' });

@@ -6,6 +6,22 @@ const defaultProductsApi = createMockProductsApi();
 
 export function toProductsLoadError(error: unknown): ProductsLoadError {
   const status = typeof error === 'object' && error && 'status' in error ? Number((error as { status?: unknown }).status) : undefined;
+  const payload = typeof error === 'object' && error && 'payload' in error ? (error as { payload?: unknown }).payload : undefined;
+  const payloadError = payload && typeof payload === 'object' && 'error' in payload && (payload as { error?: unknown }).error && typeof (payload as { error?: unknown }).error === 'object'
+    ? (payload as { error: { code?: unknown; details?: unknown } }).error
+    : undefined;
+  const remoteMessage = error instanceof Error ? error.message : '';
+  const remoteCode = typeof payloadError?.code === 'string' ? payloadError.code : '';
+  const detailCode = payloadError?.details && typeof payloadError.details === 'object' && !Array.isArray(payloadError.details) && typeof (payloadError.details as { errorCode?: unknown }).errorCode === 'string'
+    ? String((payloadError.details as { errorCode: string }).errorCode)
+    : '';
+  const sliderValidation = detailCode === 'ACCOUNT_VALIDATION_REQUIRED' || remoteCode === 'ACCOUNT_VALIDATION_REQUIRED' || /FAIL_SYS_USER_VALIDATE|RGV587|X5SEC|CAPTCHA/i.test(remoteMessage);
+  if (sliderValidation) {
+    return { code: 'ACCOUNT_REAUTH_REQUIRED', reason: 'SLIDER_VALIDATION', message: '闲鱼触发安全验证，请打开闲鱼商品详情页完成滑块验证，验证完成后再回到这里重新同步。', retryable: false };
+  }
+  if (remoteCode === 'ACCOUNT_REAUTH_REQUIRED') {
+    return { code: 'ACCOUNT_REAUTH_REQUIRED', reason: 'REAUTH', message: '闲鱼账号登录态已失效，请先到账号管理重新登录后再同步商品详情。', retryable: false };
+  }
   if (status === 403) return { code: 'FORBIDDEN', message: '当前管理员没有读取商品的权限。', retryable: false };
   if (status === 404) return { code: 'NOT_FOUND', message: '商品接口暂不可用，请确认后端商品切片已部署。', retryable: false };
   if (error instanceof TypeError) return { code: 'NETWORK_ERROR', message: '商品服务暂时不可用，请检查连接后重试。', retryable: true };
@@ -15,10 +31,15 @@ export function toProductsLoadError(error: unknown): ProductsLoadError {
 export function toProductsMutationError(error: unknown): ProductMutationError {
   const status = typeof error === 'object' && error && 'status' in error ? Number((error as { status?: unknown }).status) : undefined;
   const payload = typeof error === 'object' && error && 'payload' in error ? (error as { payload?: unknown }).payload : undefined;
-  const code = typeof payload === 'object' && payload && 'error' in payload && typeof (payload as { error?: unknown }).error === 'object'
-    ? String(((payload as { error?: { code?: string } }).error?.code) ?? '')
+  const payloadError = typeof payload === 'object' && payload && 'error' in payload && typeof (payload as { error?: unknown }).error === 'object'
+    ? (payload as { error: { code?: unknown; details?: unknown } }).error
+    : undefined;
+  const code = typeof payloadError?.code === 'string' ? payloadError.code : '';
+  const detailCode = payloadError?.details && typeof payloadError.details === 'object' && !Array.isArray(payloadError.details) && typeof (payloadError.details as { errorCode?: unknown }).errorCode === 'string'
+    ? String((payloadError.details as { errorCode: string }).errorCode)
     : '';
-  if (status === 409 && code === 'ACCOUNT_REAUTH_REQUIRED') return { code: 'ACCOUNT_REAUTH_REQUIRED', message: '闲鱼账号登录态已失效，请先重新登录账号。', retryable: false };
+  if (status === 409 && code === 'ACCOUNT_REAUTH_REQUIRED' && detailCode === 'ACCOUNT_VALIDATION_REQUIRED') return { code: 'ACCOUNT_REAUTH_REQUIRED', reason: 'SLIDER_VALIDATION', message: '闲鱼触发安全验证，请打开闲鱼商品详情页完成滑块验证，验证完成后再回到这里重新同步。', retryable: false };
+  if (status === 409 && code === 'ACCOUNT_REAUTH_REQUIRED') return { code: 'ACCOUNT_REAUTH_REQUIRED', reason: 'REAUTH', message: '闲鱼账号登录态已失效，请先重新登录账号。', retryable: false };
   if (status === 502 || code === 'XIANYU_SYNC_FAILED') return { code: 'SYNC_FAILED', message: '闲鱼商品同步失败，请稍后重试。', retryable: true };
   if (status === 403) return { code: 'FORBIDDEN', message: '当前管理员没有写入商品的权限。', retryable: false };
   if (status === 409 || code === 'PRODUCT_VERSION_CONFLICT') return { code: 'VERSION_CONFLICT', message: '商品已被其他操作更新，请保留本地草稿后重新加载。', retryable: false };

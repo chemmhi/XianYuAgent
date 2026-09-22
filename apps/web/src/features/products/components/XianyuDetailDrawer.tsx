@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import type { XianyuDetailState, XianyuItemDetailVM, XianyuItemImageVM } from '../types';
 
-export function XianyuDetailDrawer({ state, onClose, onRetry, onSync }: { state: XianyuDetailState; onClose: () => void; onRetry: () => void; onSync: () => void }) {
+export function XianyuDetailDrawer({ state, onClose, onRetry, onSync, onChooseAccount }: { state: XianyuDetailState; onClose: () => void; onRetry: () => void; onSync: () => void; onChooseAccount?: () => void }) {
   if (state.phase === 'idle') return null;
   const detail = state.data;
+  const sliderValidation = state.error?.reason === 'SLIDER_VALIDATION';
   return <div className="products-detail-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <aside className="products-detail-panel xianyu-detail-drawer" role="dialog" aria-modal="true" aria-label="闲鱼商品详情">
       <header>
@@ -13,10 +14,10 @@ export function XianyuDetailDrawer({ state, onClose, onRetry, onSync }: { state:
           {detail?.itemId && <p className="xianyu-detail-subtitle">闲鱼商品 ID：{detail.itemId}</p>}
           {detail && <p className="xianyu-detail-source-note">{detail.cached ? '已读取数据库中的已保存详情' : '已从闲鱼同步并保存详情'}</p>}
         </div>
-        <div className="products-detail-header-actions"><button className="btn ghost btn-small" type="button" onClick={onSync} disabled={state.phase === 'loading' || !detail}>同步闲鱼</button><button className="icon-button" type="button" aria-label="关闭闲鱼商品详情" onClick={onClose}>×</button></div>
+        <div className="products-detail-header-actions"><button className="btn ghost btn-small" type="button" onClick={onSync} disabled={state.phase === 'loading' || !state.productId}>同步闲鱼</button><button className="icon-button" type="button" aria-label="关闭闲鱼商品详情" onClick={onClose}>×</button></div>
       </header>
       {state.phase === 'loading' && <div className="products-detail-state" aria-live="polite"><span className="xianyu-detail-spinner" />{state.loadingMode === 'sync' ? '正在同步并保存闲鱼商品详情…' : '正在读取闲鱼商品详情（优先使用已保存缓存）…'}</div>}
-      {(state.phase === 'error' || state.phase === 'forbidden') && <div className="products-detail-state products-error" role="alert"><strong>{state.phase === 'forbidden' ? '无权查看闲鱼商品详情' : '闲鱼商品详情加载失败'}</strong><span>{state.error?.message ?? '商品详情不存在或暂时不可用。'}</span>{state.phase === 'error' && state.error?.retryable && <button className="btn ghost" type="button" onClick={onRetry}>重新加载</button>}</div>}
+      {(state.phase === 'error' || state.phase === 'forbidden') && <div className="products-detail-state products-error" role="alert"><strong>{state.phase === 'forbidden' ? '无权查看闲鱼商品详情' : sliderValidation ? '请先完成闲鱼滑块验证' : state.error?.code === 'ACCOUNT_REAUTH_REQUIRED' ? '闲鱼账号需要重新登录' : '闲鱼商品详情加载失败'}</strong><span>{state.error?.message ?? '商品详情不存在或暂时不可用。'}</span>{state.phase === 'error' && sliderValidation && <><button className="btn primary" type="button" onClick={onSync}>验证后重新同步</button>{onChooseAccount && <button className="btn ghost" type="button" onClick={onChooseAccount}>去账号管理更新 Cookie</button>}</>}{state.phase === 'error' && !sliderValidation && state.error?.code === 'ACCOUNT_REAUTH_REQUIRED' && onChooseAccount && <button className="btn primary" type="button" onClick={onChooseAccount}>去账号管理重新登录</button>}{state.phase === 'error' && state.error?.retryable && <button className="btn ghost" type="button" onClick={onRetry}>重新加载</button>}</div>}
       {state.phase === 'success' && detail && <XianyuDetailContent detail={detail} />}
     </aside>
   </div>;

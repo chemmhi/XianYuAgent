@@ -82,6 +82,7 @@ export interface ProductMutationError {
   code: 'FORBIDDEN' | 'VERSION_CONFLICT' | 'VALIDATION_FAILED' | 'NETWORK_ERROR' | 'ACCOUNT_REAUTH_REQUIRED' | 'SYNC_FAILED' | 'UNKNOWN';
   message: string;
   retryable: boolean;
+  reason?: 'SLIDER_VALIDATION' | 'REAUTH';
   conflict?: {
     server?: ProductVM;
     local: ProductDraftPatch;
@@ -109,9 +110,10 @@ export interface ProductsPageVM {
 export type ProductsLoadPhase = 'idle' | 'loading' | 'success' | 'empty' | 'error' | 'forbidden';
 
 export interface ProductsLoadError {
-  code: 'FORBIDDEN' | 'NOT_FOUND' | 'NETWORK_ERROR' | 'UNKNOWN';
+  code: 'FORBIDDEN' | 'NOT_FOUND' | 'NETWORK_ERROR' | 'ACCOUNT_REAUTH_REQUIRED' | 'UNKNOWN';
   message: string;
   retryable: boolean;
+  reason?: 'SLIDER_VALIDATION' | 'REAUTH';
 }
 
 export interface ProductsQueryState {
