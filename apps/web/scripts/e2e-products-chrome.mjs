@@ -165,11 +165,11 @@ async function run() {
   if (await evaluate(cdp, 'document.querySelectorAll(".products-kpis").length !== 0')) throw new Error('product KPI cards should be removed');
   if (await evaluate(cdp, 'document.querySelector("[data-testid=products-total]") !== null')) throw new Error('redundant toolbar total should be removed');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 商品'), 'product row');
-  const tableTypography = await evaluate(cdp, '(() => { const size = (selector) => { const node = document.querySelector(selector); return node ? getComputedStyle(node).fontSize : null; }; return { row: size(".products-row:not(.products-head)"), head: size(".products-head"), title: size(".products-title strong"), titleMeta: size(".products-title small"), muted: size(".products-muted"), pagination: size(".products-pagination"), pageButton: size(".products-page-button") }; })()');
-  const expectedTypography = { row: '14px', head: '13px', title: '14px', titleMeta: '12px', muted: '12px', pagination: '12px', pageButton: '13px' };
+  const tableTypography = await evaluate(cdp, '(() => { const size = (selector) => { const node = document.querySelector(selector); return node ? getComputedStyle(node).fontSize : null; }; return { row: size(".products-row:not(.products-head)"), head: size(".products-head"), title: size(".products-title strong"), titleMeta: size(".products-title small"), coupons: size(".products-coupons"), aiPrompt: size(".products-ai-prompt"), meta: size(".products-meta"), pagination: size(".products-pagination"), pageButton: size(".products-page-button") }; })()');
+  const expectedTypography = { row: '14px', head: '13px', title: '14px', titleMeta: '12px', coupons: '14px', aiPrompt: '14px', meta: '12px', pagination: '12px', pageButton: '13px' };
   if (JSON.stringify(tableTypography) !== JSON.stringify(expectedTypography)) throw new Error(`product table typography mismatch: ${JSON.stringify(tableTypography)}`);
   const columns = await evaluate(cdp, 'Array.from(document.querySelectorAll(".products-head > span")).map((item) => item.textContent?.trim() ?? "").map((text) => text.replace(/\\s*[↑↓↕]$/, ""))');
-  if (JSON.stringify(columns) !== JSON.stringify(['商品标题', '价格', '关联卡券', 'AI提示词', '创建时间', '更新时间', '详情'])) throw new Error(`product columns mismatch: ${JSON.stringify(columns)}`);
+  if (JSON.stringify(columns) !== JSON.stringify(['商品标题', '价格', '关联卡券', 'AI提示词', '创建时间', '闲鱼更新时间', '详情'])) throw new Error(`product columns mismatch: ${JSON.stringify(columns)}`);
   const productText = String(await evaluate(cdp, 'document.body.innerText'));
   if (!productText.includes('Chrome E2E 卡券') || !productText.includes('请用简洁中文回答买家问题。')) throw new Error('coupon or AI prompt column content missing');
   const detailMark = cdp.events.length;

@@ -21,7 +21,8 @@
 .products-title-link:hover strong { color: var(--link); }
 .products-coupons, .products-ai-prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .products-title strong { font-size: 14px; line-height: 1.5; }
-.products-title small, .products-muted, .products-account { color: var(--sub); font-size: 12px; line-height: 1.5; }
+.products-title small, .products-meta, .products-account { color: var(--sub); font-size: 12px; line-height: 1.5; }
+.products-coupons, .products-ai-prompt, .products-placeholder { color: var(--sub); font-size: 14px; line-height: 1.6; }
 .products-status { display: inline-flex; padding: 4px 8px; border-radius: 999px; font-size: 10px; }
 .products-status-published { color: var(--success); background: var(--success-bg); }
 .products-status-ready { color: var(--info); background: var(--soft-blue-bg); }

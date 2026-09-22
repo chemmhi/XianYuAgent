@@ -9,9 +9,10 @@ describe('product table typography', () => {
     expect(productsCss).toMatch(/\.products-row\s*\{[^}]*font-size:\s*14px;[^}]*line-height:\s*1\.6;/s);
     expect(productsCss).toMatch(/\.products-head\s*\{[^}]*font-size:\s*13px;[^}]*line-height:\s*1\.5;/s);
     expect(productsCss).toMatch(/\.products-title strong\s*\{[^}]*font-size:\s*14px;[^}]*line-height:\s*1\.5;/s);
-    expect(productsCss).toMatch(/\.products-title small, \.products-muted, \.products-account\s*\{[^}]*font-size:\s*12px;[^}]*line-height:\s*1\.5;/s);
+    expect(productsCss).toMatch(/\.products-title small, \.products-meta, \.products-account\s*\{[^}]*font-size:\s*12px;[^}]*line-height:\s*1\.5;/s);
+    expect(productsCss).toMatch(/\.products-coupons, \.products-ai-prompt, \.products-placeholder\s*\{[^}]*font-size:\s*14px;[^}]*line-height:\s*1\.6;/s);
     expect(productsCss).toMatch(/\.products-pagination\s*\{[^}]*font-size:\s*12px;[^}]*line-height:\s*1\.5;/s);
     expect(productsCss).toMatch(/\.products-page-button\s*\{[^}]*font-size:\s*13px;[^}]*line-height:\s*1\.45;/s);
-    expect(productsCss).not.toMatch(/\.products-title small, \.products-muted, \.products-account\s*\{[^}]*font-size:\s*10px;/s);
+    expect(productsCss).not.toMatch(/\.products-title small, \.products-meta, \.products-account\s*\{[^}]*font-size:\s*10px;/s);
   });
 });
