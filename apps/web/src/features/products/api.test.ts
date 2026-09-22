@@ -8,9 +8,9 @@ describe('products canonical API adapter', () => {
       async get<T>(path: string) {
         calls.push(path);
         if (path.endsWith('/product-1')) {
-          return { success: true, data: { id: 'product-1', accountId: 'account-1', title: '商品一', status: 'published', configVersion: 2, priceMinor: 3990, createdAt: '2026-09-19T00:00:00.000Z', updatedAt: '2026-09-20T00:00:00.000Z', skuCount: 1, assetCount: 2, couponBatches: [{ id: 'batch-1', label: '卡券一' }] } } as T;
+          return { success: true, data: { id: 'product-1', accountId: 'account-1', title: '商品一', status: 'published', configVersion: 2, priceMinor: 3990, createdAt: '2026-09-19T00:00:00.000Z', updatedAt: '2026-09-20T00:00:00.000Z', xianyuUpdatedAt: '2026-09-20T01:00:00.000Z', skuCount: 1, assetCount: 2, couponBatches: [{ id: 'batch-1', label: '卡券一' }] } } as T;
         }
-          return { success: true, data: { items: [{ id: 'product-1', accountId: 'account-1', title: '商品一', status: 'published', configVersion: 2, priceMinor: 3990, createdAt: '2026-09-19T00:00:00.000Z', updatedAt: '2026-09-20T00:00:00.000Z', skuCount: 1, assetCount: 2, couponBatches: [{ id: 'batch-1', label: '卡券一' }] }], total: 1, page: 1, pageSize: 20, totalPages: 1 } } as T;
+          return { success: true, data: { items: [{ id: 'product-1', accountId: 'account-1', title: '商品一', status: 'published', configVersion: 2, priceMinor: 3990, createdAt: '2026-09-19T00:00:00.000Z', updatedAt: '2026-09-20T00:00:00.000Z', xianyuUpdatedAt: '2026-09-20T01:00:00.000Z', skuCount: 1, assetCount: 2, couponBatches: [{ id: 'batch-1', label: '卡券一' }] }], total: 1, page: 1, pageSize: 20, totalPages: 1 } } as T;
       },
     });
 
@@ -19,7 +19,7 @@ describe('products canonical API adapter', () => {
 
     expect(calls[0]).toBe('/api/v1/products?keyword=%E5%95%86%E5%93%81&accountId=account-1&status=published&sortBy=updatedAt&sortOrder=desc&page=1&pageSize=20');
     expect(calls[1]).toBe('/api/v1/products/product-1');
-    expect(page.items[0]).toMatchObject({ id: 'product-1', priceMinor: 3990, configVersion: 2, attributesJson: {}, createdAt: '2026-09-19T00:00:00.000Z', couponBatches: [{ id: 'batch-1', label: '卡券一' }] });
+    expect(page.items[0]).toMatchObject({ id: 'product-1', priceMinor: 3990, configVersion: 2, attributesJson: {}, createdAt: '2026-09-19T00:00:00.000Z', xianyuUpdatedAt: '2026-09-20T01:00:00.000Z', couponBatches: [{ id: 'batch-1', label: '卡券一' }] });
     expect(detail.id).toBe('product-1');
   });
 
@@ -48,8 +48,8 @@ describe('products canonical API adapter', () => {
 
   it('sorts the local adapter by creation and update timestamps', async () => {
     const api = createMockProductsApi([
-      { id: 'older', accountId: 'account-1', title: '旧商品', attributesJson: {}, configVersion: 1, status: 'published', createdAt: '2026-09-18T00:00:00.000Z', updatedAt: '2026-09-20T01:00:00.000Z', skuCount: 0, assetCount: 0 },
-      { id: 'newer', accountId: 'account-1', title: '新商品', attributesJson: {}, configVersion: 1, status: 'published', createdAt: '2026-09-19T00:00:00.000Z', updatedAt: '2026-09-20T02:00:00.000Z', skuCount: 0, assetCount: 0 },
+      { id: 'older', accountId: 'account-1', title: '旧商品', attributesJson: {}, configVersion: 1, status: 'published', createdAt: '2026-09-18T00:00:00.000Z', updatedAt: '2026-09-20T01:00:00.000Z', xianyuUpdatedAt: '2026-09-20T01:00:00.000Z', skuCount: 0, assetCount: 0 },
+      { id: 'newer', accountId: 'account-1', title: '新商品', attributesJson: {}, configVersion: 1, status: 'published', createdAt: '2026-09-19T00:00:00.000Z', updatedAt: '2026-09-20T02:00:00.000Z', xianyuUpdatedAt: '2026-09-20T02:00:00.000Z', skuCount: 0, assetCount: 0 },
     ]);
     expect((await api.list({ sortBy: 'createdAt', sortOrder: 'desc' })).items.map((item) => item.id)).toEqual(['newer', 'older']);
     expect((await api.list({ sortBy: 'updatedAt', sortOrder: 'asc' })).items.map((item) => item.id)).toEqual(['older', 'newer']);
@@ -57,11 +57,29 @@ describe('products canonical API adapter', () => {
 
   it('defaults the local adapter to newest updates first', async () => {
     const api = createMockProductsApi([
-      { id: 'older', accountId: 'account-1', title: '旧商品', attributesJson: {}, configVersion: 1, status: 'published', createdAt: '2026-09-18T00:00:00.000Z', updatedAt: '2026-09-20T01:00:00.000Z', skuCount: 0, assetCount: 0 },
-      { id: 'newer', accountId: 'account-1', title: '新商品', attributesJson: {}, configVersion: 1, status: 'published', createdAt: '2026-09-19T00:00:00.000Z', updatedAt: '2026-09-20T02:00:00.000Z', skuCount: 0, assetCount: 0 },
+      { id: 'older', accountId: 'account-1', title: '旧商品', attributesJson: {}, configVersion: 1, status: 'published', createdAt: '2026-09-18T00:00:00.000Z', updatedAt: '2026-09-20T01:00:00.000Z', xianyuUpdatedAt: '2026-09-20T01:00:00.000Z', skuCount: 0, assetCount: 0 },
+      { id: 'newer', accountId: 'account-1', title: '新商品', attributesJson: {}, configVersion: 1, status: 'published', createdAt: '2026-09-19T00:00:00.000Z', updatedAt: '2026-09-20T02:00:00.000Z', xianyuUpdatedAt: '2026-09-20T02:00:00.000Z', skuCount: 0, assetCount: 0 },
     ]);
 
     expect((await api.list()).items.map((item) => item.id)).toEqual(['newer', 'older']);
+  });
+
+  it('sorts synced products by Xianyu update time when available', async () => {
+    const api = createMockProductsApi([
+      { id: 'local-newer', accountId: 'account-1', title: '远端旧商品', attributesJson: {}, configVersion: 1, status: 'published', createdAt: '2026-09-18T00:00:00.000Z', updatedAt: '2026-09-22T12:01:00.000Z', xianyuUpdatedAt: '2026-09-20T10:00:00.000Z', skuCount: 0, assetCount: 0 },
+      { id: 'remote-newer', accountId: 'account-1', title: '远端新商品', attributesJson: {}, configVersion: 1, status: 'published', createdAt: '2026-09-19T00:00:00.000Z', updatedAt: '2026-09-22T12:00:00.000Z', xianyuUpdatedAt: '2026-09-22T10:00:00.000Z', skuCount: 0, assetCount: 0 },
+    ]);
+
+    expect((await api.list()).items.map((item) => item.id)).toEqual(['remote-newer', 'local-newer']);
+  });
+
+  it('keeps products without Xianyu time after products with remote time', async () => {
+    const api = createMockProductsApi([
+      { id: 'missing-remote-time', accountId: 'account-1', title: '未获取时间', attributesJson: {}, configVersion: 1, status: 'published', createdAt: '2026-09-18T00:00:00.000Z', updatedAt: '2026-09-22T13:00:00.000Z', skuCount: 0, assetCount: 0 },
+      { id: 'remote-time', accountId: 'account-1', title: '已获取时间', attributesJson: {}, configVersion: 1, status: 'published', createdAt: '2026-09-19T00:00:00.000Z', updatedAt: '2026-09-22T12:00:00.000Z', xianyuUpdatedAt: '2026-09-22T10:00:00.000Z', skuCount: 0, assetCount: 0 },
+    ]);
+
+    expect((await api.list()).items.map((item) => item.id)).toEqual(['remote-time', 'missing-remote-time']);
   });
 
   it('sends canonical create and patch headers for draft writes', async () => {

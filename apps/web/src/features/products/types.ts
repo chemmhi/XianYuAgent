@@ -38,6 +38,7 @@ export interface ProductVM {
   status: ProductStatus;
   source?: 'local' | 'xianyu';
   lastSyncedAt?: string;
+  xianyuUpdatedAt?: string;
   sourcePayloadDigest?: string;
   createdAt: string;
   updatedAt: string;
@@ -151,6 +152,7 @@ export interface XianyuItemDetailVM {
   productId: string;
   itemId?: string;
   categoryId?: string;
+  xianyuUpdatedAt?: string;
   title?: string;
   description?: string;
   richTextDescription?: string;

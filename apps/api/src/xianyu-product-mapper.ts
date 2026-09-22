@@ -9,6 +9,8 @@ export function mapXianyuProductPage(response: Record<string, unknown> | undefin
     const card = asRecord(rawCard);
     const cardData = asRecord(card.cardData);
     const detailParams = asRecord(cardData.detailParams);
+    const itemInfo = asRecord(cardData.itemDO ?? cardData.itemInfo ?? cardData.item);
+    const attributeMap = asRecord(cardData.attributeMap);
     const externalProductRef = firstString(detailParams.itemId, cardData.id, cardData.itemId);
     if (!externalProductRef || externalProductRef.startsWith('auto_')) continue;
     const priceInfo = asRecord(cardData.priceInfo);
@@ -16,6 +18,50 @@ export function mapXianyuProductPage(response: Record<string, unknown> | undefin
     const title = firstString(cardData.title, cardData.itemTitle) ?? externalProductRef;
     const description = firstString(cardData.description, cardData.desc, cardData.itemDesc);
     const categoryCode = firstString(cardData.categoryId, cardData.categoryID);
+    const xianyuUpdatedAt = parseDate(
+      detailParams.updatedAt,
+      detailParams.updated_at,
+      detailParams.updateTime,
+      detailParams.update_time,
+      detailParams.modifyTime,
+      detailParams.modify_time,
+      detailParams.gmtModified,
+      detailParams.gmt_modified,
+      detailParams.lastUpdateTime,
+      detailParams.last_update_time,
+      detailParams.itemShelfTime,
+      detailParams.item_shelf_time,
+      detailParams.gmtShelf,
+      detailParams.gmt_shelf,
+      cardData.updatedAt,
+      cardData.updated_at,
+      cardData.updateTime,
+      cardData.update_time,
+      cardData.modifyTime,
+      cardData.modify_time,
+      cardData.gmtModified,
+      cardData.gmt_modified,
+      cardData.lastUpdateTime,
+      cardData.last_update_time,
+      cardData.lastModified,
+      cardData.last_modified,
+      cardData.itemShelfTime,
+      cardData.item_shelf_time,
+      cardData.gmtShelf,
+      cardData.gmt_shelf,
+      attributeMap.updatedAt,
+      attributeMap.updateTime,
+      attributeMap.gmtShelf,
+      attributeMap.gmt_shelf,
+      itemInfo.updatedAt,
+      itemInfo.updated_at,
+      itemInfo.updateTime,
+      itemInfo.update_time,
+      itemInfo.gmtModified,
+      itemInfo.gmt_modified,
+      itemInfo.gmtShelf,
+      itemInfo.gmt_shelf,
+    );
     const imageUrls = collectImageUrls(picInfo, cardData);
     const itemStatus = cardData.itemStatus;
     const item: XianyuProductItem = {
@@ -25,6 +71,7 @@ export function mapXianyuProductPage(response: Record<string, unknown> | undefin
       categoryCode,
       priceMinor: parsePriceMinor(firstString(priceInfo.price, cardData.price)),
       externalStatus: itemStatus === undefined || itemStatus === null ? undefined : String(itemStatus),
+      xianyuUpdatedAt,
       detailUrl: firstString(cardData.detailUrl, cardData.webUrl) ?? `https://www.goofish.com/item?id=${encodeURIComponent(externalProductRef)}`,
       imageUrls,
       attributes: {
@@ -62,6 +109,25 @@ function parsePriceMinor(value: string | undefined): number | undefined {
   const normalized = value.replace(/[^0-9.\-]/g, '');
   const parsed = Number(normalized);
   return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed * 100) : undefined;
+}
+
+function parseDate(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (value === undefined || value === null || value === '') continue;
+    const raw = typeof value === 'string' ? value.trim() : value;
+    if (raw === '') continue;
+    if (typeof raw === 'number' || (typeof raw === 'string' && /^\d{10,13}$/.test(raw))) {
+      const numeric = Number(raw);
+      if (!Number.isFinite(numeric) || numeric <= 0) continue;
+      const milliseconds = numeric < 2_000_000_000 ? numeric * 1000 : numeric;
+      const date = new Date(milliseconds);
+      if (!Number.isNaN(date.getTime())) return date.toISOString();
+      continue;
+    }
+    const date = new Date(String(raw));
+    if (!Number.isNaN(date.getTime())) return date.toISOString();
+  }
+  return undefined;
 }
 
 function collectImageUrls(picInfo: Record<string, unknown>, cardData: Record<string, unknown>): string[] {

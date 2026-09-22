@@ -1,6 +1,7 @@
 export interface XianyuItemDetailSummary {
   itemId?: string;
   categoryId?: string;
+  xianyuUpdatedAt?: string;
   title?: string;
   description?: string;
   richTextDescription?: string;
@@ -30,6 +31,30 @@ export function mapXianyuItemDetail(response: Record<string, unknown> | undefine
   const data = asRecord(response?.data);
   const item = asRecord(data.itemDO);
   const seller = asRecord(data.sellerDO);
+  const itemId = firstString(item.itemId, fallbackItemId);
+  const sellerItems = arrayRecords(seller.sellerItems);
+  const currentSellerItem = sellerItems.find((candidate) => {
+    const candidateItem = asRecord(candidate.itemDO);
+    return firstString(candidate.itemId, candidate.itemID, candidate.id, candidateItem.itemId, candidateItem.itemID) === itemId;
+  });
+  const sellerItemAttributes = asRecord(currentSellerItem?.attributeMap);
+  const xianyuUpdatedAt = parseDate(
+    item.updatedAt,
+    item.updated_at,
+    item.updateTime,
+    item.update_time,
+    item.modifyTime,
+    item.modify_time,
+    item.gmtModified,
+    item.gmt_modified,
+    sellerItemAttributes.gmtShelf,
+    sellerItemAttributes.gmt_shelf,
+    currentSellerItem?.gmtShelf,
+    currentSellerItem?.gmt_shelf,
+    currentSellerItem?.updatedAt,
+    currentSellerItem?.updated_at,
+    item.GMT_UPDATE_DATE_KEY,
+  );
   const remarks = asRecord(seller.remarkDO);
   const priceText = firstString(item.soldPrice, item.price, item.priceText, item.originalPrice);
   const imageUrls = uniqueStrings([
@@ -47,8 +72,9 @@ export function mapXianyuItemDetail(response: Record<string, unknown> | undefine
     badRemarkCount: firstNumber(remarks.sellerBadRemarkCnt),
   }) as Record<string, unknown>;
   return compact({
-    itemId: firstString(item.itemId, fallbackItemId),
+    itemId,
     categoryId: firstString(item.categoryId, data.categoryId),
+    xianyuUpdatedAt,
     title: firstString(item.title),
     description: firstString(item.desc),
     richTextDescription: firstString(item.richTextDesc),
@@ -95,6 +121,25 @@ function parsePriceMinor(value: string | undefined): number | undefined {
   const normalized = value.replace(/[^0-9.\-]/g, '');
   const parsed = Number(normalized);
   return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed * 100) : undefined;
+}
+
+function parseDate(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (value === undefined || value === null || value === '') continue;
+    const raw = typeof value === 'string' ? value.trim() : value;
+    if (raw === '') continue;
+    if (typeof raw === 'number' || (typeof raw === 'string' && /^\d{10,13}$/.test(raw))) {
+      const numeric = Number(raw);
+      if (!Number.isFinite(numeric) || numeric <= 0) continue;
+      const milliseconds = numeric < 2_000_000_000 ? numeric * 1000 : numeric;
+      const date = new Date(milliseconds);
+      if (!Number.isNaN(date.getTime())) return date.toISOString();
+      continue;
+    }
+    const date = new Date(String(raw));
+    if (!Number.isNaN(date.getTime())) return date.toISOString();
+  }
+  return undefined;
 }
 
 function compact(value: unknown): unknown {

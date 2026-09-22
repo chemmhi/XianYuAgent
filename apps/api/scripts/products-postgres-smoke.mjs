@@ -23,6 +23,7 @@ async function request(path, options = {}) {
 
 await runtime.store.pool.query(await readFile(new URL('../migrations/003_catalog.sql', import.meta.url), 'utf8'));
 await runtime.store.pool.query(await readFile(new URL('../migrations/013_product_sync.sql', import.meta.url), 'utf8'));
+await runtime.store.pool.query(await readFile(new URL('../migrations/029_product_xianyu_updated_at.sql', import.meta.url), 'utf8'));
 await runtime.listen();
 port = runtime.server.address().port;
 
@@ -99,19 +100,26 @@ try {
   runtime.xianyu.fetchItemsAll = async () => {
     const items = [
       { externalProductRef: `SYNC-${process.pid}-1`, title: 'Postgres 同步商品一', categoryCode: 'digital', priceMinor: 1990, sourcePayloadDigest: 'pg-sync-1' },
-      { externalProductRef: `SYNC-${process.pid}-2`, title: 'Postgres 同步商品二', categoryCode: 'digital', priceMinor: 2990, sourcePayloadDigest: 'pg-sync-2' },
+      { externalProductRef: `SYNC-${process.pid}-2`, title: 'Postgres 同步商品二', categoryCode: 'digital', priceMinor: 2990, xianyuUpdatedAt: '2026-09-21T12:30:00.000Z', sourcePayloadDigest: 'pg-sync-2' },
+      { externalProductRef: `SYNC-${process.pid}-3`, title: 'Postgres 同步商品三', categoryCode: 'digital', priceMinor: 3990, sourcePayloadDigest: 'pg-sync-3' },
     ];
     return { pages: [{ success: true, accountInvalid: false, cookieHeader: '', items, pageNumber: 1, pageSize: 20, totalCount: items.length, totalPages: 1, hasMore: false }], items, hasMore: false };
   };
+  runtime.xianyu.fetchItemDetail = async (_adminId, _accountId, itemId) => ({ success: true, accountInvalid: false, cookieHeader: '', summary: { itemId: String(itemId), xianyuUpdatedAt: itemId.endsWith('-1') ? '2026-09-20T12:30:00.000Z' : undefined } });
   const synced = await request('/api/v1/products/sync', {
     method: 'POST',
     headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': `products-postgres-sync-${process.pid}` },
     body: JSON.stringify({ accountId }),
   });
   assert.equal(synced.response.status, 200);
-  assert.equal(synced.body.data.fetchedCount, 2);
-  assert.equal(synced.body.data.createdCount, 2);
-  assert.equal((await runtime.store.listProducts(adminId, { accountId })).items.filter((item) => item.source === 'xianyu').length, 2);
+  assert.equal(synced.body.data.fetchedCount, 3);
+  assert.equal(synced.body.data.createdCount, 3);
+  const syncedProducts = (await runtime.store.listProducts(adminId, { accountId })).items.filter((item) => item.source === 'xianyu');
+  assert.equal(syncedProducts.length, 3);
+  assert.deepEqual(syncedProducts.map((item) => item.externalProductRef), [`SYNC-${process.pid}-2`, `SYNC-${process.pid}-1`, `SYNC-${process.pid}-3`]);
+  assert.equal(syncedProducts.find((item) => item.externalProductRef.endsWith('-1'))?.xianyuUpdatedAt, '2026-09-20T12:30:00.000Z');
+  assert.equal(syncedProducts.find((item) => item.externalProductRef.endsWith('-2'))?.xianyuUpdatedAt, '2026-09-21T12:30:00.000Z');
+  assert.equal(syncedProducts.find((item) => item.externalProductRef.endsWith('-3'))?.xianyuUpdatedAt, undefined);
   await runtime.store.upsertCredential({ adminId, accountId, platform: 'xianyu', cookieHeader: 'unb=postgres-delete-smoke' });
 
   const deleted = await request(`/api/v1/accounts/${encodeURIComponent(accountId)}`, {

@@ -129,8 +129,14 @@ export class MemoryStore implements Store {
     const sortBy = query.sortBy ?? 'updatedAt';
     const sortOrder = query.sortOrder === 'asc' ? 1 : -1;
     filtered.sort((left, right) => {
-      const leftValue = sortBy === 'title' ? left.title.toLowerCase() : sortBy === 'priceMinor' ? (left.priceMinor ?? 0) : sortBy === 'createdAt' ? left.createdAt : left.updatedAt;
-      const rightValue = sortBy === 'title' ? right.title.toLowerCase() : sortBy === 'priceMinor' ? (right.priceMinor ?? 0) : sortBy === 'createdAt' ? right.createdAt : right.updatedAt;
+      if (sortBy === 'updatedAt') {
+        if (!left.xianyuUpdatedAt && !right.xianyuUpdatedAt) return 0;
+        if (!left.xianyuUpdatedAt) return 1;
+        if (!right.xianyuUpdatedAt) return -1;
+        return (left.xianyuUpdatedAt < right.xianyuUpdatedAt ? -1 : left.xianyuUpdatedAt > right.xianyuUpdatedAt ? 1 : 0) * sortOrder;
+      }
+      const leftValue = sortBy === 'title' ? left.title.toLowerCase() : sortBy === 'priceMinor' ? (left.priceMinor ?? 0) : left.createdAt;
+      const rightValue = sortBy === 'title' ? right.title.toLowerCase() : sortBy === 'priceMinor' ? (right.priceMinor ?? 0) : right.createdAt;
       return (leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0) * sortOrder;
     });
     const page = query.page ?? 1;
@@ -158,6 +164,7 @@ export class MemoryStore implements Store {
     if (typeof summary.title === 'string' && summary.title.trim()) product.title = summary.title.trim();
     if (typeof summary.description === 'string') product.description = summary.description;
     if (typeof summary.priceMinor === 'number' && Number.isSafeInteger(summary.priceMinor)) product.priceMinor = summary.priceMinor;
+    if (typeof summary.xianyuUpdatedAt === 'string' && summary.xianyuUpdatedAt.trim()) product.xianyuUpdatedAt = summary.xianyuUpdatedAt;
     product.externalProductRef = product.externalProductRef ?? input.itemId;
     product.source = 'xianyu';
     product.lastSyncedAt = input.syncedAt;
@@ -264,6 +271,7 @@ export class MemoryStore implements Store {
         detailUrl: input.item.detailUrl,
         externalStatus: input.item.externalStatus,
         imageUrls: input.item.imageUrls,
+        ...(input.item.xianyuUpdatedAt ? { updatedAt: input.item.xianyuUpdatedAt } : {}),
         ...(existingXianyu.detail !== undefined ? { detail: existingXianyu.detail } : incomingXianyu.detail !== undefined ? { detail: incomingXianyu.detail } : {}),
       },
     };
@@ -276,12 +284,13 @@ export class MemoryStore implements Store {
       existing.source = 'xianyu';
       existing.sourcePayloadDigest = input.item.sourcePayloadDigest;
       existing.lastSyncedAt = input.syncedAt;
+      existing.xianyuUpdatedAt = input.item.xianyuUpdatedAt ?? existing.xianyuUpdatedAt;
       existing.status = 'published';
       existing.configVersion += 1;
       existing.updatedAt = now;
       return { action: 'updated', product: this.productDetail(existing) };
     }
-    const product: ProductRecord = { id: createId(), accountId: input.accountId, externalProductRef: input.item.externalProductRef, title: input.item.title, description: input.item.description, categoryCode: input.item.categoryCode, attributes, configVersion: 1, priceMinor: input.item.priceMinor, status: 'published', source: 'xianyu', lastSyncedAt: input.syncedAt, sourcePayloadDigest: input.item.sourcePayloadDigest, createdAt: now, updatedAt: now, skuCount: 0, assetCount: 0, skus: [], assets: [] };
+    const product: ProductRecord = { id: createId(), accountId: input.accountId, externalProductRef: input.item.externalProductRef, title: input.item.title, description: input.item.description, categoryCode: input.item.categoryCode, attributes, configVersion: 1, priceMinor: input.item.priceMinor, status: 'published', source: 'xianyu', lastSyncedAt: input.syncedAt, xianyuUpdatedAt: input.item.xianyuUpdatedAt, sourcePayloadDigest: input.item.sourcePayloadDigest, createdAt: now, updatedAt: now, skuCount: 0, assetCount: 0, skus: [], assets: [] };
     this.products.set(product.id, product);
     return { action: 'created', product: this.productDetail(product) };
   }
