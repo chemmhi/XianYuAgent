@@ -5,7 +5,7 @@
 - 切片：AR-VS-05
 - 实现状态：`READY_FOR_REVIEW`
 - 实现范围：纯策略模块与单元回归，不接入 AutoReplyService、持久化或发送链路
-- 日期：2026-09-23
+- 日期：2026-09-22
 
 ## 目标与边界
 
@@ -43,5 +43,5 @@
 
 ## 后续接入
 
-- AR-VS-04/06 接入 `nextStatePatch.recommendationAllowed` 与 `reviewRequestAllowed` 门控。
+- AR-VS-04/06 接入决策输出中的 `recommendationAllowed` 与 `reviewRequestAllowed` 门控。
 - AR-VS-08 再补真实 StateReducer、Activity API、指标、并发和人工接管竞态验证。

@@ -165,6 +165,7 @@ export function validateTopicEmotionPolicy(config: TopicEmotionPolicy): TopicEmo
   for (const rule of config.actionRules) {
     validateCommonRule(rule, ruleIds, 'action');
     if (!AUTO_REPLY_ACTION_KINDS.includes(rule.primaryAction)) throw new TopicEmotionPolicyValidationError(`action rule ${rule.ruleId} has an unknown ActionKind`);
+    if (!Array.isArray(rule.successCriteria) || rule.successCriteria.some((value) => typeof value !== 'string')) throw new TopicEmotionPolicyValidationError(`action rule ${rule.ruleId} successCriteria must be string[]`);
     if (rule.primaryAction === 'HANDOFF' || rule.primaryAction === 'REFUSE_SENSITIVE') {
       throw new TopicEmotionPolicyValidationError(`action rule ${rule.ruleId} cannot escalate or refuse sensitive data`);
     }
