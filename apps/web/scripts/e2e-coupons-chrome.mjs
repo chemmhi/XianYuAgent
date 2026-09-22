@@ -213,6 +213,16 @@ async function run() {
   await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "关联商品")?.click()');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('待选商品'), 'coupon relation modal');
   await assertText(cdp, '已选商品');
+  const relationLayoutAudit = await evaluate(cdp, `(() => {
+    const panes = Array.from(document.querySelectorAll('.coupons-relation-pane'));
+    const heads = panes.map((pane) => pane.querySelector('.coupons-relation-pane-head')?.getBoundingClientRect().height ?? 0);
+    const scrolls = panes.map((pane) => pane.querySelector('.coupons-relation-scroll')?.getBoundingClientRect().height ?? 0);
+    const searches = panes.map((pane) => pane.querySelector('.coupons-relation-search')?.getBoundingClientRect().top ?? 0);
+    const equalWithinOne = (values) => values.length === 2 && Math.abs(values[0] - values[1]) <= 1;
+    return { paneHeights: panes.map((pane) => pane.getBoundingClientRect().height), heads, scrolls, searches, equalPaneHeights: equalWithinOne(panes.map((pane) => pane.getBoundingClientRect().height)), equalHeadHeights: equalWithinOne(heads), equalScrollHeights: equalWithinOne(scrolls), equalSearchTops: equalWithinOne(searches) };
+  })()`);
+  if (!relationLayoutAudit || !relationLayoutAudit.equalPaneHeights || !relationLayoutAudit.equalHeadHeights || !relationLayoutAudit.equalScrollHeights || !relationLayoutAudit.equalSearchTops) throw new Error(`coupon relation panes are not aligned: ${JSON.stringify(relationLayoutAudit)}`);
+  await captureViewport(cdp, 1440, 900, 'coupons-relation-modal-desktop-1440x900.png');
   await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "取消")?.click()');
 
   const selectedRow = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(createdLabel)})); const button = row?.querySelector('button[aria-label="编辑"]'); if (!button) return false; button.click(); return true; })()`);
