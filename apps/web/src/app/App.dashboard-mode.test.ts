@@ -1,7 +1,12 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
+import { AccountContextProvider } from './account-context';
 import { AccountMenu, AuthenticatedShell, resolveDashboardMode } from './App';
+
+function renderShell(props: Parameters<typeof AuthenticatedShell>[0]) {
+  return renderToStaticMarkup(createElement(AccountContextProvider, { api: { list: vi.fn() } as never }, createElement(AuthenticatedShell, props)));
+}
 
 describe('dashboard API mode resolution', () => {
   it('inherits live mode when the dashboard override is unset', () => {
@@ -37,7 +42,7 @@ describe('dashboard API mode resolution', () => {
       navigate: vi.fn(),
     } as unknown as Parameters<typeof AuthenticatedShell>[0];
 
-    const html = renderToStaticMarkup(createElement(AuthenticatedShell, props));
+    const html = renderShell(props);
 
     expect(html).toContain('class="sidebar"');
     expect(html).toContain('XianyuSellerAgent');
@@ -79,7 +84,7 @@ describe('dashboard API mode resolution', () => {
       navigate: vi.fn(),
     } as unknown as Parameters<typeof AuthenticatedShell>[0];
 
-    const html = renderToStaticMarkup(createElement(AuthenticatedShell, props));
+    const html = renderShell(props);
 
     expect(html).toContain('>管理员</strong>');
     expect(html).toContain('empty-name@example.com');
@@ -104,7 +109,7 @@ describe('dashboard API mode resolution', () => {
       navigate: vi.fn(),
     } as unknown as Parameters<typeof AuthenticatedShell>[0];
 
-    const html = renderToStaticMarkup(createElement(AuthenticatedShell, props));
+    const html = renderShell(props);
 
     expect(html).toContain('>管理员</strong>');
     expect(html).not.toContain('>?????</strong>');
