@@ -7,7 +7,7 @@ import { useMessagesController } from '../controller';
 import { filterConversations } from '../model';
 import { emojiURL, renderXianyuTextWithCaret, xianyuEmojis } from '../xianyu-emojis';
 import { ConnectionBanner } from './ConnectionBanner';
-import { ConversationList } from './ConversationList';
+import { ConversationList, ConversationListState } from './ConversationList';
 import { MessageTimeline } from './MessageTimeline';
 import { ConversationListSkeleton, TimelineSkeleton } from './MessagesSkeletons';
 import { SearchField } from '../../../shared/ui/SearchField';
@@ -178,16 +178,16 @@ export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
     <div className="messages-layout card panel">
       <h1 className="messages-visually-hidden">在线聊天</h1>
       <aside className="messages-sidebar">
-        <div className="messages-sidebar-header"><div><strong>会话</strong>{conversationsLoading ? <small className="messages-header-loading" role="status" aria-label="正在加载会话"><span className="messages-header-loading-line" aria-hidden="true" /></small> : <small>{controller.state.conversations.length} 个已加载{controller.state.hasMore ? '，还有更多' : ''}</small>}</div><button className="btn ghost" type="button" onClick={() => void controller.reload()} aria-label="刷新会话">刷新</button></div>
+        <div className="messages-sidebar-header"><div><strong>会话</strong>{conversationsLoading ? <small className="messages-header-loading" role="status" aria-label="正在加载会话"><span className="messages-header-loading-line" aria-hidden="true" /></small> : <small>{controller.state.conversations.length} 个已加载{controller.state.hasMore ? '，还有更多' : ''}</small>}</div><button className="icon-button messages-refresh-button" type="button" onClick={() => void controller.reload()} aria-label="刷新会话" title="刷新会话"><svg className="messages-refresh-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.7-3L4 10" /><path d="M4 5v5h5" /><path d="M4 13a8 8 0 0 0 14.7 3L20 14" /><path d="M20 19v-5h-5" /></svg></button></div>
         <div className="messages-sidebar-tools">
           <SearchField className="messages-search" aria-label="搜索会话" placeholder="搜索用户、商品或消息" value={search} onChange={(event) => setSearch(event.target.value)} onClear={() => setSearch('')} clearable />
           <div className="messages-filter-tabs" aria-label="会话筛选"><button type="button" aria-pressed={!unreadOnly} className={!unreadOnly ? 'active' : ''} onClick={() => setUnreadOnly(false)}>全部会话</button><button type="button" aria-pressed={unreadOnly} className={unreadOnly ? 'active' : ''} onClick={() => setUnreadOnly(true)}>未读{controller.state.conversations.filter((item) => item.unreadCount > 0).length ? ` (${controller.state.conversations.filter((item) => item.unreadCount > 0).length})` : ''}</button></div>
         </div>
         {controller.state.listPhase === 'loading' && <ConversationListSkeleton />}
-        {controller.state.listPhase === 'empty' && <div className="messages-state">当前账号暂无会话。</div>}
-        {controller.state.listPhase === 'forbidden' && <div className="messages-state messages-error" role="alert">无权读取该账号会话。</div>}
-        {controller.state.listPhase === 'error' && <div className="messages-state messages-error" role="alert">{controller.state.error?.message}<button className="btn ghost" type="button" onClick={() => void controller.reload()}>重试</button></div>}
-        {controller.state.listPhase === 'success' && visibleConversations.length === 0 && <div className="messages-state"><strong>没有匹配的会话</strong><span>试试用户昵称、商品标题或最后一条消息。</span></div>}
+        {controller.state.listPhase === 'empty' && <ConversationListState>当前账号暂无会话。</ConversationListState>}
+        {controller.state.listPhase === 'forbidden' && <ConversationListState error role="alert">无权读取该账号会话。</ConversationListState>}
+        {controller.state.listPhase === 'error' && <ConversationListState error role="alert">{controller.state.error?.message}<button className="btn ghost" type="button" onClick={() => void controller.reload()}>重试</button></ConversationListState>}
+        {controller.state.listPhase === 'success' && visibleConversations.length === 0 && <ConversationListState><strong>没有匹配的会话</strong><span>试试用户昵称、商品标题或最后一条消息。</span></ConversationListState>}
         {controller.state.listPhase === 'success' && visibleConversations.length > 0 && <ConversationList conversations={visibleConversations} activeConversationId={controller.state.activeConversationId} onSelect={controller.setActiveConversation} hasMore={Boolean(search.trim() === '' && !unreadOnly && controller.state.hasMore)} loadingMore={controller.state.loadingMore} onLoadMore={() => void controller.loadMoreConversations()} />}
       </aside>
       <main className="messages-main">

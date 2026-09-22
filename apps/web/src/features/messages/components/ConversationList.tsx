@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { ConversationVM } from '../types';
 
 export function conversationDisplayName(conversation: Pick<ConversationVM, 'buyerDisplayName' | 'buyerRef'>): string {
@@ -7,6 +7,10 @@ export function conversationDisplayName(conversation: Pick<ConversationVM, 'buye
 
 export function conversationInitial(conversation: Pick<ConversationVM, 'buyerDisplayName' | 'buyerRef'>): string {
   return conversationDisplayName(conversation).slice(0, 1).toUpperCase();
+}
+
+export function ConversationListState({ children, error = false, role }: { children: ReactNode; error?: boolean; role?: 'alert' }) {
+  return <div className={`messages-state messages-sidebar-state${error ? ' messages-error' : ''}`} role={role}>{children}</div>;
 }
 
 function ConversationAvatar({ conversation }: { conversation: ConversationVM }) {

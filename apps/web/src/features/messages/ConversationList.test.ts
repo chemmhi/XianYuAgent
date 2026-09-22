@@ -1,5 +1,7 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { conversationDisplayName, conversationInitial } from './components/ConversationList';
+import { ConversationListState, conversationDisplayName, conversationInitial } from './components/ConversationList';
 
 describe('conversation identity fallbacks', () => {
   it('trims a loaded nickname before rendering it', () => {
@@ -14,5 +16,14 @@ describe('conversation identity fallbacks', () => {
   it('uses an explicit placeholder when both identity fields are absent', () => {
     expect(conversationDisplayName({ buyerDisplayName: undefined, buyerRef: '' })).toBe('未知买家');
     expect(conversationInitial({ buyerDisplayName: undefined, buyerRef: '' })).toBe('未');
+  });
+
+  it('renders sidebar empty states with the shared centered state class', () => {
+    const html = renderToStaticMarkup(createElement(ConversationListState, {
+      children: createElement('span', null, '试试用户昵称、商品标题或最后一条消息。'),
+    }));
+
+    expect(html).toContain('class="messages-state messages-sidebar-state"');
+    expect(html).toContain('试试用户昵称、商品标题或最后一条消息。');
   });
 });
