@@ -4,12 +4,22 @@
 - 更新日期：2026-09-19
 - 评审规则：问题先修复，再复验，再由独立评审关闭；未关闭的 P0-P2 不得进入下一阶段。
 
+## 2026-09-22：repair-agent 文档域重组
+
+| 评审编号 | 类型 | 结论 | 证据 |
+| --- | --- | --- | --- |
+| AR-REPAIR-R1 | 业务 / 验收 | READY_FOR_REVIEW | `docs/agent/auto-replay/repair-agent/00-scope.md`、`03-domain-policy-contract.md`：明确无硬编码路由、低拒绝/低 handoff 和终极敏感信息拒绝矩阵 |
+| AR-REPAIR-R2 | 架构 / 数据流 | READY_FOR_REVIEW | `02-target-architecture.md`、`04-data-api-contract.md`、`05-vertical-slices.md`：明确 PolicyEngine、双层状态、Pre-send Review、Outcome Review 与 AR-VS-00 至 AR-VS-09 |
+| AR-REPAIR-R3 | 质量 / 安全 / 运维 | READY_FOR_REVIEW | `06-stage-gates.md`、`07-risk-register.md`、`11-release-rollback.md`：明确三轮评审、风险闭环、灰度与回滚；业务代码未修改 |
+
+重组结论：`docs/agent/auto-replay/repair-agent/` 成为当前修复治理唯一入口；旧 `docs/agent/auto-reply/` 仅保留运行契约和历史兼容快照。
+
 ## 2026-09-22 自动回复 Agent 修复方案文档切片
 
 | 评审编号 | 类型 | 结论 | 证据 |
 | --- | --- | --- | --- |
-| AR-PLAN-R1 | 业务 / 验收 | READY_FOR_REVIEW | docs/agent/auto-reply/repair-plan.md：已明确终极敏感信息拒绝矩阵、低 handoff 规则、生命周期目标、澄清、推荐与结果审核验收 |
-| AR-PLAN-R2 | 架构 / 数据流 | READY_FOR_REVIEW | docs/agent/auto-reply/repair-plan.md：已拆分 SignalExtractor、StateReducer、PolicyEngine、ResponseComposer、Pre-send Review、Outcome Review，并定义 AR-VS-00 至 AR-VS-09 |
+| AR-PLAN-R1 | 业务 / 验收 | READY_FOR_REVIEW | `docs/agent/auto-replay/repair-agent/03-domain-policy-contract.md`：已明确终极敏感信息拒绝矩阵、低 handoff 规则、生命周期目标、澄清、推荐与结果审核验收 |
+| AR-PLAN-R2 | 架构 / 数据流 | READY_FOR_REVIEW | `docs/agent/auto-replay/repair-agent/02-target-architecture.md`、`05-vertical-slices.md`：已拆分 SignalExtractor、StateReducer、PolicyEngine、ResponseComposer、Pre-send Review、Outcome Review，并定义 AR-VS-00 至 AR-VS-09 |
 | AR-PLAN-R3 | 质量 / 安全 / 运维 | READY_FOR_REVIEW | git diff --check、Markdown 结构检查、阶段状态与切片编号检查通过；业务代码和发送行为未修改 |
 
 复审要求：文档进入下一轮前必须由独立评审确认：策略不依赖硬编码路由、普通不确定/售后场景不默认 handoff、所有纵向切片具备真实验收与回滚证据。

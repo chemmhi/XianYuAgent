@@ -1,4 +1,6 @@
-# 自动回复 Agent 风险登记
+# 自动回复 Agent 风险登记（历史兼容快照）
+
+> 当前修复域风险以 [`../auto-replay/repair-agent/07-risk-register.md`](../auto-replay/repair-agent/07-risk-register.md) 为准；本文保留既有 AR-* 编号和历史证据，供兼容引用。
 
 > 版本：`2026-09-21`
 > 范围：闲鱼实时买家消息 → 自动回复资格检查 → 意图识别 → 上下文/工具 → 模型生成 → 发送 → 落库 → Agent 动态查询。

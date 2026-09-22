@@ -3,6 +3,7 @@
 自动回复 Agent 的设计文档已统一归档到：
 
 - [`docs/agent/auto-reply/README.md`](./agent/auto-reply/README.md)
+- [`docs/agent/auto-replay/repair-agent/README.md`](./agent/auto-replay/repair-agent/README.md)：修复治理 canonical 入口
 - [`docs/agent/auto-reply/design.md`](./agent/auto-reply/design.md)
 - [`docs/agent/auto-reply/activity.md`](./agent/auto-reply/activity.md)
 

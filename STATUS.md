@@ -1,8 +1,16 @@
 # XianyuSellerAgent 项目状态
 
+## 2026-09-22 自动回复 Agent repair-agent 文档域重组
+
+- 新建 canonical 文档域 `docs/agent/auto-replay/repair-agent/`，统一管理范围、基线、目标架构、策略、数据/API、AR-VS-00 至 AR-VS-09、阶段门禁、风险、评审、状态、迁移和回滚。
+- 旧 `docs/agent/auto-reply/` 保留为运行契约与兼容入口；其 repair-plan/checklist/risk-register/modification-plan 已标记为历史快照，不再作为当前修复源文档。
+- 本切片仅整理文档和索引，不修改业务代码、数据库迁移或发送行为；状态：`READY_FOR_REVIEW`。
+- 已识别旧设计中的默认 handoff 语义与当前“低拒绝/低 handoff”约束冲突，已在 canonical policy 和风险映射中显式登记。
+- 下一步：完成 repair-agent 三轮独立评审后，按 `AR-VS-00 → AR-VS-09` 严格串行推进。
+
 ## 2026-09-22 自动回复 Agent 修复方案纵向切片规划
 
-- 新增 docs/agent/auto-reply/repair-plan.md 的阶段门禁与 AR-VS-00 至 AR-VS-09 纵向切片规划。
+- 新增 docs/agent/auto-reply/repair-plan.md 的阶段门禁与 AR-VS-00 至 AR-VS-09 纵向切片规划；该文档现作为历史兼容快照，canonical 版本位于 `docs/agent/auto-replay/repair-agent/`。
 - 规划覆盖：无硬编码路由、低拒绝/低 handoff、澄清与 awaiting_user、生命周期引导、跑题拉回、情绪门控、店内推荐、发送前 Review、发送后 Outcome Review、真实链路与回滚。
 - 本切片仅修改文档和登记信息，不修改业务代码、数据库迁移或发送行为；状态：READY_FOR_REVIEW。
 - 已执行：git diff --check、Markdown 代码块配对检查、切片编号与阶段门禁契约检查。

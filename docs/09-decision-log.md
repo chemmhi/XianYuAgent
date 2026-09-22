@@ -16,7 +16,7 @@
 7. Agent 可以在与买家意图相关时主动推荐店铺内其他商品，但必须基于当前账号范围内的商品工具事实，不能默认扫描全店。
 8. 工具结果不足或模型无法确认事实时，不猜测，转人工或按策略返回待核实结果。
 
-详细设计见 [`docs/agent/auto-reply/design.md`](./agent/auto-reply/design.md)。
+详细运行设计见 [`docs/agent/auto-reply/design.md`](./agent/auto-reply/design.md)；修复治理、切片与回滚以 [`docs/agent/auto-replay/repair-agent/README.md`](./agent/auto-replay/repair-agent/README.md) 为准。
 
 1. 阶段 0 只锁定产品范围、非目标、角色、交付边界和验收标准，不提前开发真实后端、数据库、API 或 Docker Compose。
 2. SellerAgent 原型与 design token 作为阶段 3 前的临时视觉基线，不要求补正式 Figma 文件作为当前前置条件。

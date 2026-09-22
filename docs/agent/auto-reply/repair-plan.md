@@ -1,4 +1,6 @@
-# 自动回复 Agent 修复方案
+# 自动回复 Agent 修复方案（历史兼容快照）
+
+> 当前修复治理请以 [`../auto-replay/repair-agent/README.md`](../auto-replay/repair-agent/README.md) 及其子文档为准；本文保留 2026-09-22 的规划快照，供历史追溯，不再继续扩展。
 
 ## 文档状态
 

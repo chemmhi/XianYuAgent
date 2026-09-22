@@ -1,4 +1,6 @@
-# 自动回复 Agent
+# 自动回复 Agent（运行契约 / 兼容入口）
+
+> 修复治理的 canonical 文档已迁移到 [`../auto-replay/repair-agent/README.md`](../auto-replay/repair-agent/README.md)。本目录继续保留运行设计、Agent Dynamics 活动契约和历史兼容文档；新的修复范围、策略、切片、风险、评审、发布与回滚说明不得继续分散写入本目录。
 
 ## 文档状态
 
@@ -15,9 +17,14 @@
 - [`repair-checklist.md`](./repair-checklist.md)：按依赖顺序执行的修复 checklist、验收标准、测试层级和回滚要求。
 - [`modification-plan.md`](./modification-plan.md)：待审核的修改批次、范围、前置决策和每批验收门禁；审核通过前不改业务代码。
 
-## 修复方案
+## 历史修复快照
 
-- repair-plan.md：本轮修复方案，覆盖无硬编码路由、低拒绝/低 handoff、澄清、生命周期引导、情绪、跑题拉回、推荐、发送后结果审核，以及 AR-VS-00 至 AR-VS-09 纵向切片和阶段门禁。
+- repair-plan.md：2026-09-22 规划快照；当前修复方案、纵向切片和阶段门禁以 canonical repair-agent 文档域为准。
+
+## 修复治理入口
+
+- [`../auto-replay/repair-agent/README.md`](../auto-replay/repair-agent/README.md)：唯一 canonical 修复文档入口。
+- `repair-plan.md`、`repair-checklist.md`、`risk-register.md`、`modification-plan.md`：历史兼容快照，不再作为当前修复源文档。
 
 ## 核心结论
 
