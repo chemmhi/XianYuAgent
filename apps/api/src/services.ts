@@ -490,12 +490,12 @@ export class CredentialService {
     return credential;
   }
 
-  async save(input: { adminId: string; accountId: string; cookieHeader?: string; accessToken?: string; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string; requestId: string; traceId: string }): Promise<CredentialRecord> {
+  async save(input: { adminId: string; accountId: string; cookieHeader?: string; accessToken?: string; clearAccessToken?: boolean; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string; requestId: string; traceId: string }): Promise<CredentialRecord> {
     const account = await this.store.getAccount(input.adminId, input.accountId);
     if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found');
     const current = await this.store.getCredential(input.adminId, input.accountId);
     const cookieHeader = input.cookieHeader?.trim() || current?.cookieHeader;
-    const accessToken = input.accessToken?.trim() || current?.accessToken;
+    const accessToken = input.accessToken?.trim() || (input.clearAccessToken ? undefined : current?.accessToken);
     const deviceId = input.deviceId?.trim() || current?.deviceId;
     const metadata = { ...(current?.metadata ?? {}), ...(input.metadata ?? {}) };
     if (!cookieHeader && !accessToken && !deviceId && Object.keys(metadata).length === 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'at least one credential field is required');

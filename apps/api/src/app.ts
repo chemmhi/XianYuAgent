@@ -170,9 +170,12 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
         const current = await accounts.getLoginSessionById({ adminId: status.adminId, sessionId: status.sessionId });
         if (current.status === 'succeeded' && localStatus !== 'succeeded') return;
         await accounts.updateLoginSession({ adminId: status.adminId, accountId: status.accountId, sessionId: status.sessionId, patch: { status: localStatus, failureCode: status.errorCode, completedAt: ['succeeded', 'expired', 'failed', 'cancelled'].includes(localStatus) ? new Date().toISOString() : undefined }, requestId: `qr:${status.sessionId}`, traceId: `qr:${status.sessionId}` });
-      } catch { /* QR 状态回写失败不影响外部轮询；下一次 GET 会重试 */ }
+      } catch (error) {
+        console.warn(JSON.stringify({ component: 'xianyu-qr', event: 'status_persist_failed', sessionId: status.sessionId, adminId: status.adminId, accountId: status.accountId, errorCode: listenerErrorCode(error) }));
+      }
     },
     onSuccess: async ({ sessionId, adminId, accountId, cookieHeader, cookieSnapshot, unb }) => {
+      console.info(JSON.stringify({ component: 'xianyu-qr', event: 'on_success_start', sessionId, adminId, accountId, sellerRefSuffix: unb.slice(-6) }));
       if (accountId) {
         const existing = await accounts.get(adminId, accountId);
         if (existing.sellerRef && !existing.sellerRef.startsWith('pending_') && existing.sellerRef !== unb) {
@@ -183,22 +186,32 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       const resolvedAccount = await ensureAccountForLogin({ accounts, adminId, accountId, sellerRef: unb, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
       const resolvedAccountId = resolvedAccount.id;
       if (resolvedAccountId !== accountId) await accounts.updateLoginSession({ adminId, accountId, sessionId, patch: { accountId: resolvedAccountId }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
-      await credentials.save({ adminId, accountId: resolvedAccountId, cookieHeader, metadata: metadataWithCookieSnapshot({ unb, loginMethod: 'qr_http' }, cookieSnapshot), requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+      await credentials.save({ adminId, accountId: resolvedAccountId, cookieHeader, clearAccessToken: true, metadata: metadataWithCookieSnapshot({ unb, loginMethod: 'qr_http' }, cookieSnapshot), requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+      console.info(JSON.stringify({ component: 'xianyu-qr', event: 'credential_saved', sessionId, adminId, accountId: resolvedAccountId }));
       await xianyuIm.resetClient(adminId, resolvedAccountId);
+      console.info(JSON.stringify({ component: 'xianyu-qr', event: 'im_client_reset', sessionId, adminId, accountId: resolvedAccountId }));
       const verification = await xianyu.verifyLogin(adminId, resolvedAccountId);
+      console.info(JSON.stringify({ component: 'xianyu-qr', event: 'verify_result', sessionId, adminId, accountId: resolvedAccountId, success: verification.success, accountInvalid: verification.accountInvalid, errorCode: verification.errorCode }));
       if (!verification.success) {
         const status = 'expired' as const;
         try { await credentials.verify({ adminId, accountId: resolvedAccountId, status, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` }); } catch { /* preserve original verification error */ }
+        console.warn(JSON.stringify({ component: 'xianyu-qr', event: 'verify_failed_account_expired', sessionId, adminId, accountId: resolvedAccountId, errorCode: verification.errorCode }));
         await accounts.updateLoginSession({ adminId, accountId: resolvedAccountId, sessionId, patch: { status: 'failed', failureCode: verification.errorCode ?? 'LOGIN_STATE_VERIFY_FAILED', completedAt: new Date().toISOString() }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
         throw new Error(verification.errorCode ?? 'LOGIN_STATE_VERIFY_FAILED');
       }
       await credentials.verify({ adminId, accountId: resolvedAccountId, status: 'active', requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+      console.info(JSON.stringify({ component: 'xianyu-qr', event: 'credential_verified_active', sessionId, adminId, accountId: resolvedAccountId }));
       await hydrateAccountProfile({ accounts, xianyu, adminId, accountId: resolvedAccountId, fallbackSellerRef: unb, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+      // Listener bootstrap is part of the user-visible login outcome. Await it
+      // before persisting QR success so IM token / slider failures are surfaced
+      // as a failed login and the account is not briefly shown as healthy.
+      try {
+        await xianyuIm.startListener(adminId, resolvedAccountId);
+      } catch (error) {
+        console.warn(JSON.stringify({ component: 'xianyu-qr', event: 'listener_start_failed', sessionId, adminId, accountId: resolvedAccountId, errorCode: listenerErrorCode(error) }));
+        throw error;
+      }
       await accounts.updateLoginSession({ adminId, accountId: resolvedAccountId, sessionId, patch: { status: 'succeeded', completedAt: new Date().toISOString(), failureCode: undefined }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
-      // Start the push listener as soon as QR login is fully verified. Keep
-      // listener failure best-effort so a transient WebSocket outage does not
-      // roll back an otherwise successful login.
-      void xianyuIm.startListener(adminId, resolvedAccountId).catch(() => undefined);
     },
   });
   xianyu = new XianyuMtopClient({
@@ -206,9 +219,11 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     saveCookie: async (adminId, accountId, cookieHeader, metadata) => {
       const account = await store.getAccount(adminId, accountId);
       if (!account) return;
+      console.info(JSON.stringify({ component: 'xianyu-mtop', event: 'cookie_saved', adminId, accountId, hasMetadata: Boolean(metadata) }));
       await credentials.save({ adminId, accountId, cookieHeader, metadata, requestId: 'xianyu-mtop', traceId: 'xianyu-mtop' });
     },
-    onFailure: async ({ adminId, accountId, errorCode, message, accountInvalid }) => {
+    onFailure: async ({ adminId, accountId, api, errorCode, message, accountInvalid }) => {
+      console.warn(JSON.stringify({ component: 'xianyu-mtop', event: 'external_failure', adminId, accountId, api, errorCode, accountInvalid, message: message?.slice(0, 160) }));
       await markXianyuAccountFailure(store, adminId, accountId, { errorCode, message, accountInvalid });
     },
   });
@@ -302,6 +317,9 @@ async function markXianyuAccountFailure(store: Store, adminId: string, accountId
     const text = `${input.errorCode ?? ''} ${input.message ?? ''}`;
     const requiresReauth = input.accountInvalid || /CREDENTIAL_MISSING|ACCOUNT_VALIDATION_REQUIRED|SESSION_EXPIRED|MTOP_TOKEN_(MISSING|EXPIRED)|IM_TOKEN_FAILED|XIANYU_IM_TOKEN_FAILED|REQUEST_REJECTED:401|USER_VALIDATE|LOGIN.*INVALID/i.test(text);
     const status = requiresReauth ? 'expired' : 'degraded';
+    if (requiresReauth) {
+      try { await store.markCredentialVerified({ adminId, accountId, status: 'expired' }); } catch { /* account status remains the primary signal */ }
+    }
     if (account.status === 'expired' && status === 'degraded') return;
     if (account.status !== status) await store.updateAccount(adminId, accountId, { status });
   } catch {
@@ -719,7 +737,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
         const unb = readCookieValue(cookieHeader, 'unb') || `cookie_${createId()}`;
         const account = await ensureAccountForLogin({ accounts, adminId: authContext.admin.id, accountId: requestedAccountId, sellerRef: unb, requestId: ctx.requestId, traceId: ctx.traceId });
         await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId: undefined, sessionId: loginSession.id, patch: { accountId: account.id }, requestId: ctx.requestId, traceId: ctx.traceId });
-        await credentials.save({ adminId: authContext.admin.id, accountId: account.id, cookieHeader, metadata: { unb, loginMethod: 'cookie' }, requestId: ctx.requestId, traceId: ctx.traceId });
+        await credentials.save({ adminId: authContext.admin.id, accountId: account.id, cookieHeader, clearAccessToken: true, metadata: { unb, loginMethod: 'cookie' }, requestId: ctx.requestId, traceId: ctx.traceId });
         await runtime.xianyuIm.resetClient(authContext.admin.id, account.id);
         const verification = await runtime.xianyu.verifyLogin(authContext.admin.id, account.id);
         if (!verification.success) {
@@ -757,6 +775,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
           accountId,
           cookieHeader: typeof ctx.body.cookieHeader === 'string' ? ctx.body.cookieHeader : undefined,
           accessToken: typeof ctx.body.accessToken === 'string' ? ctx.body.accessToken : undefined,
+          clearAccessToken: typeof ctx.body.cookieHeader === 'string' && typeof ctx.body.accessToken !== 'string',
           deviceId: typeof ctx.body.deviceId === 'string' ? ctx.body.deviceId : undefined,
           metadata: readCredentialMetadata(ctx.body.metadata),
           expiresAt: typeof ctx.body.expiresAt === 'string' ? ctx.body.expiresAt : undefined,

@@ -29,6 +29,7 @@ test('Cookie reauthorization updates the explicitly selected account', async () 
     const csrfToken = decodeURIComponent(sessionCookie.match(/(?:^|; )csrf_token=([^;]+)/)?.[1] ?? '');
     const adminId = String(bootstrap.body.data.profile.id);
     const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: 'old-seller', displayName: '旧账号' });
+    await runtime.store.upsertCredential({ adminId, accountId: account.id, platform: 'xianyu', cookieHeader: 'unb=old-seller; _m_h5_tk=old_token', accessToken: 'old-im-token', deviceId: 'device-old', metadata: {} });
 
     runtime.xianyu.verifyLogin = async () => ({ success: true, accountInvalid: false, cookieHeader: 'unb=new-seller; _m_h5_tk=fresh_token' });
     runtime.xianyu.fetchProfile = async () => ({ success: true, accountInvalid: false, cookieHeader: 'unb=new-seller; _m_h5_tk=fresh_token', response: { data: { userNick: '更新后的账号', userId: 'new-seller' } } });
@@ -51,6 +52,7 @@ test('Cookie reauthorization updates the explicitly selected account', async () 
     assert.equal(accounts.items[0]?.sellerRef, 'new-seller');
     const credential = await runtime.store.getCredential(adminId, account.id);
     assert.equal(credential?.cookieHeader, 'unb=new-seller; _m_h5_tk=fresh_token');
+    assert.equal(credential?.accessToken, undefined);
   } finally {
     await runtime.close();
   }
