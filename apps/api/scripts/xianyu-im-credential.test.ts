@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { XianyuImService } from '../src/xianyu-im-service.js';
+import { ServiceError } from '../src/services.js';
 
 describe('xianyu IM credential refresh', () => {
   it('preserves the browser cookie snapshot while saving refreshed IM credentials', async () => {
@@ -20,5 +21,42 @@ describe('xianyu IM credential refresh', () => {
     assert.deepEqual(captured?.metadata, previousMetadata);
     assert.equal(captured?.expiresAt, '2026-10-01T00:00:00.000Z');
     assert.equal(captured?.accessToken, 'access-2');
+  });
+
+  it('maps remote slider validation to a recoverable account re-auth error', async () => {
+    const store = {
+      upsertCredential: async () => { throw new Error('should not persist invalid token'); },
+    };
+    const mtop = {
+      fetchImToken: async () => ({ success: false, accountInvalid: true, errorCode: 'ACCOUNT_VALIDATION_REQUIRED', message: 'FAIL_SYS_USER_VALIDATE', cookieHeader: '' }),
+    };
+    const service = new XianyuImService(store as never, mtop as never, {} as never);
+    await assert.rejects(
+      () => (service as unknown as { refreshCredential: (adminId: string, account: { id: string; platform: string }, credential: { deviceId?: string; metadata?: Record<string, string>; expiresAt?: string }) => Promise<unknown> }).refreshCredential(
+        'admin-1',
+        { id: 'account-1', platform: 'xianyu' },
+        { deviceId: 'device-1' },
+      ),
+      (error: unknown) => error instanceof ServiceError
+        && error.statusCode === 409
+        && error.code === 'ACCOUNT_VALIDATION_REQUIRED'
+        && error.message.includes('滑块验证'),
+    );
+  });
+
+  it('persists an expired account when listener bootstrap finds missing credentials', async () => {
+    let account = { id: 'account-1', platform: 'xianyu', status: 'connected' as const };
+    const store = {
+      getAccount: async () => account,
+      getCredential: async () => undefined,
+      updateAccount: async (_adminId: string, _accountId: string, patch: { status?: string }) => {
+        account = { ...account, status: patch.status as typeof account.status };
+        return account;
+      },
+    };
+    const service = new XianyuImService(store as never, {} as never, {} as never);
+
+    await assert.rejects(() => service.startListener('admin-1', 'account-1'), (error: unknown) => error instanceof ServiceError && error.code === 'CREDENTIAL_MISSING');
+    assert.equal(account.status, 'expired');
   });
 });

@@ -108,16 +108,16 @@ export function AccountsPage({ api: providedApi }: AccountsPageProps) {
         {controller.state.phase === 'success' && <AccountTable accounts={accounts} activeAccountId={currentAccountId} page={page} total={total} totalPages={totalPages} onPageChange={(nextPage) => controller.setFilters((previous) => ({ ...previous, page: Math.max(1, Math.min(nextPage, totalPages)) }))} onReauthorize={openLogin} onSwitch={switchAccount} onDelete={requestDeleteAccount} />}
         <AccountStateView phase={controller.state.phase} error={controller.state.error} onRetry={controller.reload} />
       </article>
-      {loginOpen && <AccountLoginModal api={api} account={loginAccount} initialMethod={loginMethod} onClose={closeLogin} onCompleted={() => { void controller.reload(); void refreshAccounts(); closeLogin(); }} />}
+      {loginOpen && <AccountLoginModal api={api} account={loginAccount} initialMethod={loginMethod} onClose={closeLogin} onStatusChanged={() => { void controller.reload(); void refreshAccounts(); }} onCompleted={() => { void controller.reload(); void refreshAccounts(); closeLogin(); }} />}
       {deleteAccountTarget && <AccountDeleteModal account={deleteAccountTarget} submitting={deleteSubmitting} error={deleteError} onClose={closeDeleteAccount} onConfirm={() => { void confirmDeleteAccount(); }} />}
     </section>
   );
 }
 
-function summarize(accounts: AccountVM[]) {
+export function summarize(accounts: AccountVM[]) {
   return {
-    online: accounts.filter((account) => account.connection.status === 'online').length,
-    needsAttention: accounts.filter((account) => ['expired', 'unknown'].includes(account.connection.status) || ['refresh_required', 'missing'].includes(account.credentialState)).length,
+    online: accounts.filter((account) => account.status === 'connected' && account.connection.status === 'online').length,
+    needsAttention: accounts.filter((account) => (account.status !== 'connected' && account.status !== 'disabled') || ['expired', 'unknown'].includes(account.connection.status) || ['refresh_required', 'missing'].includes(account.credentialState)).length,
   };
 }
 

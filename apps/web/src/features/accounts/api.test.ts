@@ -55,6 +55,31 @@ describe('accounts canonical API adapter', () => {
     expect(result).toMatchObject({ page: 2, pageSize: 10, totalPages: 1 });
   });
 
+  it('does not default degraded or disconnected accounts to a healthy connection', async () => {
+    const api = createAccountsApi({
+      async get<T>() {
+        return {
+          success: true,
+          data: {
+            items: [
+              { id: 'account-degraded', displayName: '降级账号', status: 'degraded' },
+              { id: 'account-disconnected', displayName: '断开账号', status: 'disconnected' },
+            ],
+            total: 2,
+            page: 1,
+            pageSize: 20,
+            totalPages: 1,
+          },
+        } as T;
+      },
+    });
+
+    const result = await api.list();
+
+    expect(result.items[0]).toMatchObject({ status: 'degraded', connection: { status: 'unknown' }, credentialState: 'unknown' });
+    expect(result.items[1]).toMatchObject({ status: 'disconnected', connection: { status: 'offline' }, credentialState: 'unknown' });
+  });
+
   it('creates and polls QR sessions through canonical account-scoped routes', async () => {
     const calls: Array<{ path: string; body?: unknown; headers?: HeadersInit }> = [];
     const qrPayload = {

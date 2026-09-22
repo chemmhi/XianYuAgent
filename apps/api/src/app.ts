@@ -184,9 +184,10 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       const resolvedAccountId = resolvedAccount.id;
       if (resolvedAccountId !== accountId) await accounts.updateLoginSession({ adminId, accountId, sessionId, patch: { accountId: resolvedAccountId }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
       await credentials.save({ adminId, accountId: resolvedAccountId, cookieHeader, metadata: metadataWithCookieSnapshot({ unb, loginMethod: 'qr_http' }, cookieSnapshot), requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+      await xianyuIm.resetClient(adminId, resolvedAccountId);
       const verification = await xianyu.verifyLogin(adminId, resolvedAccountId);
       if (!verification.success) {
-        const status = verification.accountInvalid ? (verification.errorCode === 'SESSION_EXPIRED' ? 'expired' : 'revoked') : 'expired';
+        const status = 'expired' as const;
         try { await credentials.verify({ adminId, accountId: resolvedAccountId, status, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` }); } catch { /* preserve original verification error */ }
         await accounts.updateLoginSession({ adminId, accountId: resolvedAccountId, sessionId, patch: { status: 'failed', failureCode: verification.errorCode ?? 'LOGIN_STATE_VERIFY_FAILED', completedAt: new Date().toISOString() }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
         throw new Error(verification.errorCode ?? 'LOGIN_STATE_VERIFY_FAILED');
@@ -206,6 +207,9 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       const account = await store.getAccount(adminId, accountId);
       if (!account) return;
       await credentials.save({ adminId, accountId, cookieHeader, metadata, requestId: 'xianyu-mtop', traceId: 'xianyu-mtop' });
+    },
+    onFailure: async ({ adminId, accountId, errorCode, message, accountInvalid }) => {
+      await markXianyuAccountFailure(store, adminId, accountId, { errorCode, message, accountInvalid });
     },
   });
   const objectStorage: ObjectStorage = config.allowInMemory
@@ -283,10 +287,25 @@ async function startXianyuListenerBestEffort(runtime: AppRuntime, adminId: strin
       await runtime.xianyuIm.startListener(adminId, accountId);
       return;
     } catch (error) {
+      await markXianyuAccountFailure(runtime.store, adminId, accountId, { errorCode: listenerErrorCode(error), message: error instanceof Error ? error.message : String(error), accountInvalid: false });
       const retryInMs = attempt < maxAttempts ? 100 * 2 ** (attempt - 1) : 0;
       console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'start_failed', adminId, accountId, attempt, maxAttempts, retryInMs, errorCode: listenerErrorCode(error) }));
       if (retryInMs > 0) await delay(retryInMs);
     }
+  }
+}
+
+async function markXianyuAccountFailure(store: Store, adminId: string, accountId: string, input: { errorCode?: string; message?: string; accountInvalid: boolean }): Promise<void> {
+  try {
+    const account = await store.getAccount(adminId, accountId);
+    if (!account || account.status === 'disabled') return;
+    const text = `${input.errorCode ?? ''} ${input.message ?? ''}`;
+    const requiresReauth = input.accountInvalid || /CREDENTIAL_MISSING|ACCOUNT_VALIDATION_REQUIRED|SESSION_EXPIRED|MTOP_TOKEN_(MISSING|EXPIRED)|IM_TOKEN_FAILED|XIANYU_IM_TOKEN_FAILED|REQUEST_REJECTED:401|USER_VALIDATE|LOGIN.*INVALID/i.test(text);
+    const status = requiresReauth ? 'expired' : 'degraded';
+    if (account.status === 'expired' && status === 'degraded') return;
+    if (account.status !== status) await store.updateAccount(adminId, accountId, { status });
+  } catch {
+    // Status reporting is best-effort and must not mask the original Xianyu error.
   }
 }
 
@@ -701,9 +720,10 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
         const account = await ensureAccountForLogin({ accounts, adminId: authContext.admin.id, accountId: requestedAccountId, sellerRef: unb, requestId: ctx.requestId, traceId: ctx.traceId });
         await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId: undefined, sessionId: loginSession.id, patch: { accountId: account.id }, requestId: ctx.requestId, traceId: ctx.traceId });
         await credentials.save({ adminId: authContext.admin.id, accountId: account.id, cookieHeader, metadata: { unb, loginMethod: 'cookie' }, requestId: ctx.requestId, traceId: ctx.traceId });
+        await runtime.xianyuIm.resetClient(authContext.admin.id, account.id);
         const verification = await runtime.xianyu.verifyLogin(authContext.admin.id, account.id);
         if (!verification.success) {
-          await credentials.verify({ adminId: authContext.admin.id, accountId: account.id, status: verification.accountInvalid ? 'revoked' : 'expired', requestId: ctx.requestId, traceId: ctx.traceId });
+          await credentials.verify({ adminId: authContext.admin.id, accountId: account.id, status: 'expired', requestId: ctx.requestId, traceId: ctx.traceId });
           await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId: account.id, sessionId: loginSession.id, patch: { status: 'failed', failureCode: verification.errorCode ?? 'COOKIE_VERIFY_FAILED', completedAt: new Date().toISOString() }, requestId: ctx.requestId, traceId: ctx.traceId });
           throw new ServiceError(422, 'COOKIE_VERIFY_FAILED', verification.message ?? '闲鱼 Cookie 校验失败');
         }
@@ -743,6 +763,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
           requestId: ctx.requestId,
           traceId: ctx.traceId,
         });
+        await runtime.xianyuIm.resetClient(authContext.admin.id, accountId);
         void startXianyuListenerBestEffort(runtime, authContext.admin.id, accountId);
         return success(ctx, credentialMutationView(credential));
       });
@@ -829,7 +850,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
           await credentials.verify({ adminId: authContext.admin.id, accountId, status: 'active', requestId: ctx.requestId, traceId: ctx.traceId });
           void startXianyuListenerBestEffort(runtime, authContext.admin.id, accountId);
         } else if (verification.accountInvalid) {
-          const status = verification.errorCode === 'SESSION_EXPIRED' ? 'expired' : 'revoked';
+          const status = 'expired' as const;
           try { await credentials.verify({ adminId: authContext.admin.id, accountId, status, requestId: ctx.requestId, traceId: ctx.traceId }); } catch { /* missing credential remains a verification failure */ }
         }
         return success(ctx, { success: verification.success, accountInvalid: verification.accountInvalid, errorCode: verification.errorCode, message: verification.message, response: verification.response });

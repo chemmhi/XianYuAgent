@@ -24,7 +24,7 @@ export class XianyuImService {
     let nextCursor: number | undefined;
     const maxPages = startCursor === undefined ? 20 : 1;
     for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
-      const page = await client.listConversations(cursor, limit);
+      const page = await this.withAccountFailure(adminId, accountId, () => client.listConversations(cursor, limit));
       const items = Array.isArray(page.userConvs) ? page.userConvs : [];
       const parsedItems = items.map((item) => normalizeConversation(item, client.userId)).filter((item): item is NonNullable<ReturnType<typeof normalizeConversation>> => Boolean(item));
       // The conversation payload is not consistent across account/session
@@ -55,7 +55,7 @@ export class XianyuImService {
     const externalRef = conversation.externalConversationRef;
     if (!externalRef) throw new ServiceError(409, 'EXTERNAL_CONVERSATION_MISSING', 'conversation is not linked to xianyu');
     const client = await this.ensureClient(adminId, accountId);
-    const page = await client.listMessages(externalRef, startCursor, limit);
+    const page = await this.withAccountFailure(adminId, accountId, () => client.listMessages(externalRef, startCursor, limit));
     const models = Array.isArray(page.userMessageModels) ? page.userMessageModels : [];
     for (const item of [...models].reverse()) {
       const parsed = normalizeHistoryMessage(item, client.userId);
@@ -90,8 +90,9 @@ export class XianyuImService {
           .filter((message) => message.direction === 'inbound' && message.externalMessageRef)
           .map((message) => message.externalMessageRef!)
           .filter(Boolean);
-        await client.markRead(refs);
-      } catch {
+        await this.withAccountFailure(adminId, accountId, () => client.markRead(refs));
+      } catch (error) {
+        await this.markAccountFailure(adminId, accountId, error);
         // Local unread state is authoritative for the UI. A transient Xianyu
         // receipt failure must not leave the conversation badge stuck.
       }
@@ -106,7 +107,7 @@ export class XianyuImService {
     const externalRef = conversation.externalConversationRef;
     if (!externalRef) throw new ServiceError(409, 'EXTERNAL_CONVERSATION_MISSING', 'conversation is not linked to xianyu');
     const client = await this.ensureClient(adminId, accountId);
-    return client.sendText(externalRef, conversation.buyerRef, normalizedText);
+    return this.withAccountFailure(adminId, accountId, () => client.sendText(externalRef, conversation.buyerRef, normalizedText));
   }
 
   async sendText(adminId: string, accountId: string, conversationId: string, text: string, requestId: string, traceId: string): Promise<unknown> {
@@ -139,7 +140,7 @@ export class XianyuImService {
     const upload = await this.mtop.uploadChatImage(adminId, accountId, file.filename, file.contentType, file.data);
     if (!upload.success || !upload.url) throw new ServiceError(upload.accountInvalid ? 401 : 502, upload.errorCode ?? 'IMAGE_UPLOAD_FAILED', upload.message ?? 'unable to upload image');
     const client = await this.ensureClient(adminId, accountId);
-    const sent = await client.sendImage(externalRef, conversation.buyerRef, upload.url, upload.width, upload.height);
+    const sent = await this.withAccountFailure(adminId, accountId, () => client.sendImage(externalRef, conversation.buyerRef, upload.url!, upload.width, upload.height));
     const created = await this.messages.createMessage({
       adminId,
       conversationId,
@@ -181,6 +182,14 @@ export class XianyuImService {
     await this.ensureClient(adminId, accountId);
   }
 
+  async resetClient(adminId: string, accountId: string): Promise<void> {
+    const key = `${adminId}:${accountId}`;
+    const client = this.clients.get(key);
+    if (!client) return;
+    this.clients.delete(key);
+    await client.disconnect();
+  }
+
   private async getConversation(adminId: string, accountId: string, conversationId: string): Promise<ConversationRecord> {
     const conversation = await this.store.getConversation(adminId, conversationId);
     if (!conversation || conversation.accountId !== accountId) throw new ServiceError(404, 'NOT_FOUND', 'conversation not found');
@@ -191,7 +200,8 @@ export class XianyuImService {
     const key = `${adminId}:${accountId}`;
     const existing = this.clients.get(key);
     if (existing) {
-      try { await existing.connect(); return existing; } catch {
+      try { await existing.connect(); return existing; } catch (error) {
+        await this.markAccountFailure(adminId, accountId, error);
         if (this.clients.get(key) === existing) this.clients.delete(key);
       }
     }
@@ -199,24 +209,40 @@ export class XianyuImService {
     if (inFlight) return inFlight;
 
     const connectPromise = (async () => {
-      const account = await this.store.getAccount(adminId, accountId);
-      if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found');
-      let credential = await this.store.getCredential(adminId, accountId);
-      if (!credential?.cookieHeader) throw new ServiceError(409, 'CREDENTIAL_MISSING', 'account credential is missing');
-      if (!credential.accessToken) credential = await this.refreshCredential(adminId, account, credential);
-      const client = new XianyuImClient({
-        accountId,
-        credential: toImCredential(credential),
-        onEvent: async (event) => { await this.handleExternalEvent(adminId, event, { deferAutoReply: true }); },
-        onQuarantine: async (event) => { await this.store.recordInboundQuarantine(event); },
-        saveCredential: async (next) => { await this.saveCredential(adminId, account, next); },
-      });
-      try { await client.connect(); } catch (error) {
-        if (this.clients.get(key) === client) this.clients.delete(key);
+      try {
+        const account = await this.store.getAccount(adminId, accountId);
+        if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found');
+        let credential = await this.store.getCredential(adminId, accountId);
+        if (!credential?.cookieHeader) throw new ServiceError(409, 'CREDENTIAL_MISSING', 'account credential is missing');
+        if (!credential.accessToken) credential = await this.refreshCredential(adminId, account, credential);
+        const client = new XianyuImClient({
+          accountId,
+          credential: toImCredential(credential),
+          refreshCredential: async () => {
+            const current = await this.store.getCredential(adminId, accountId);
+            if (!current?.cookieHeader) throw new ServiceError(409, 'CREDENTIAL_MISSING', 'account credential is missing');
+            return toImCredential(await this.refreshCredential(adminId, account, current));
+          },
+          onStatusChange: async (status) => {
+            if (status === 'connected') {
+              await this.store.updateAccount(adminId, accountId, { status: 'connected', lastConnectedAt: new Date().toISOString() });
+            }
+          },
+          onFailure: async (error) => { await this.markAccountFailure(adminId, accountId, error); },
+          onEvent: async (event) => { await this.handleExternalEvent(adminId, event, { deferAutoReply: true }); },
+          onQuarantine: async (event) => { await this.store.recordInboundQuarantine(event); },
+          saveCredential: async (next) => { await this.saveCredential(adminId, account, next); },
+        });
+        try { await client.connect(); } catch (error) {
+          if (this.clients.get(key) === client) this.clients.delete(key);
+          throw error;
+        }
+        this.clients.set(key, client);
+        return client;
+      } catch (error) {
+        await this.markAccountFailure(adminId, accountId, error);
         throw error;
       }
-      this.clients.set(key, client);
-      return client;
     })();
     this.clientInFlight.set(key, connectPromise);
     try {
@@ -229,8 +255,38 @@ export class XianyuImService {
   private async refreshCredential(adminId: string, account: AccountRecord, credential: CredentialRecord): Promise<CredentialRecord> {
     const deviceId = credential.deviceId ?? `xianyu-${account.id}`;
     const token = await this.mtop.fetchImToken(adminId, account.id, deviceId);
-    if (!token.success || !token.accessToken) throw new ServiceError(token.accountInvalid ? 401 : 502, token.errorCode ?? 'IM_TOKEN_FAILED', token.message ?? 'unable to obtain xianyu im token');
+    if (!token.success || !token.accessToken) {
+      const statusCode = token.errorCode === 'ACCOUNT_VALIDATION_REQUIRED' ? 409 : token.accountInvalid ? 401 : 502;
+      const message = token.errorCode === 'ACCOUNT_VALIDATION_REQUIRED'
+        ? '请先在闲鱼页面完成滑块验证，再把验证后的最新完整 Cookie 回写到账号管理。'
+        : token.message ?? 'unable to obtain xianyu im token';
+      throw new ServiceError(statusCode, token.errorCode ?? 'IM_TOKEN_FAILED', message);
+    }
     return this.store.upsertCredential({ adminId, accountId: account.id, platform: account.platform, cookieHeader: token.cookieHeader, accessToken: token.accessToken, deviceId, metadata: credential.metadata, expiresAt: credential.expiresAt });
+  }
+
+  private async markAccountFailure(adminId: string, accountId: string, error: unknown): Promise<void> {
+    try {
+      const account = await this.store.getAccount(adminId, accountId);
+      if (!account || account.status === 'disabled') return;
+      const code = error instanceof ServiceError ? error.code : (error as { code?: unknown } | null)?.code;
+      const normalizedCode = typeof code === 'string' ? code : error instanceof Error ? error.message : String(error);
+      const requiresReauth = /CREDENTIAL_MISSING|ACCOUNT_VALIDATION_REQUIRED|SESSION_EXPIRED|MTOP_TOKEN_(MISSING|EXPIRED)|IM_TOKEN_FAILED|XIANYU_IM_TOKEN_FAILED|REQUEST_REJECTED:401|USER_VALIDATE|LOGIN.*INVALID/i.test(normalizedCode);
+      const status = requiresReauth ? 'expired' : 'degraded';
+      if (account.status === 'expired' && status === 'degraded') return;
+      if (account.status !== status) await this.store.updateAccount(adminId, accountId, { status });
+    } catch {
+      // Account-state persistence must never hide the original Xianyu failure.
+    }
+  }
+
+  private async withAccountFailure<T>(adminId: string, accountId: string, operation: () => Promise<T>): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      await this.markAccountFailure(adminId, accountId, error);
+      throw error;
+    }
   }
 
   private async saveCredential(adminId: string, account: AccountRecord, credential: XianyuImCredential): Promise<void> {

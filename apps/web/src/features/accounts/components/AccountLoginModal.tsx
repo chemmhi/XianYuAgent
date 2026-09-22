@@ -7,7 +7,7 @@ import { LoginMethodSelector, type AccountLoginMethod } from './LoginMethodSelec
 import { CookieLoginForm } from './CookieLoginForm';
 import { PasswordLoginForm } from './PasswordLoginForm';
 
-export function AccountLoginModal({ api, account, initialMethod = 'qr', onClose, onCompleted }: { api: AccountsApi; account?: AccountVM; initialMethod?: AccountLoginMethod; onClose: () => void; onCompleted: () => void }) {
+export function AccountLoginModal({ api, account, initialMethod = 'qr', onClose, onCompleted, onStatusChanged }: { api: AccountsApi; account?: AccountVM; initialMethod?: AccountLoginMethod; onClose: () => void; onCompleted: () => void; onStatusChanged?: () => void }) {
   const [method, setMethod] = useState<AccountLoginMethod>(initialMethod);
   const qrController = useQrLoginController({ api, accountId: account?.id, enabled: method === 'qr' });
   const autoStartedRef = useRef(false);
@@ -30,6 +30,14 @@ export function AccountLoginModal({ api, account, initialMethod = 'qr', onClose,
     }
     return undefined;
   }, [onCompleted, qrController.model.phase]);
+
+  const lastNotifiedPhaseRef = useRef<string | null>(null);
+  useEffect(() => {
+    const phase = qrController.model.phase;
+    if (!['failed', 'expired', 'verification_required'].includes(phase) || lastNotifiedPhaseRef.current === phase) return;
+    lastNotifiedPhaseRef.current = phase;
+    onStatusChanged?.();
+  }, [onStatusChanged, qrController.model.phase]);
 
   return (
     <div className="modal-backdrop account-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>

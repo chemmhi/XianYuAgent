@@ -112,21 +112,148 @@ test('push parser prefers the stable PNM id over an internal transport id', () =
 
 test('non-200 gateway response rejects pending request even when a body is present', async () => {
   const socket = new RejectingSocket();
+  const statuses: string[] = [];
   const client = new XianyuImClient({
     accountId: 'account-1',
     credential: { cookieHeader: 'unb=seller-1', accessToken: 'token', deviceId: 'device-1' },
     heartbeatIntervalMs: 60_000,
     webSocketFactory: () => socket,
+    onStatusChange: (status) => { statuses.push(status); },
   });
   const connectPromise = client.connect();
   queueMicrotask(() => socket.emit('open'));
   await assert.rejects(connectPromise, /XIANYU_IM_REQUEST_REJECTED:400/);
   assert.equal(client.status, 'failed');
+  assert.ok(statuses.includes('failed'));
   await client.disconnect();
+});
+
+test('expired persisted access token refreshes before websocket registration', async () => {
+  const sockets: AuthRefreshSocket[] = [];
+  let tokenRefreshes = 0;
+  const client = new XianyuImClient({
+    accountId: 'account-1',
+    credential: { cookieHeader: 'unb=seller-1; _m_h5_tk=cookie-token_1', accessToken: 'stale-token', deviceId: 'device-1' },
+    heartbeatIntervalMs: 60_000,
+    fetch: async () => {
+      tokenRefreshes += 1;
+      return new Response(JSON.stringify({ ret: ['SUCCESS::调用成功'], data: { accessToken: 'fresh-token' } }), { status: 200 });
+    },
+    webSocketFactory: () => {
+      const socket = new AuthRefreshSocket(sockets.length === 0);
+      sockets.push(socket);
+      queueMicrotask(() => socket.emit('open'));
+      return socket;
+    },
+  });
+
+  try {
+    await client.connect();
+    assert.equal(client.connected, true);
+    assert.equal(tokenRefreshes, 1);
+    assert.equal(sockets.length, 2);
+    assert.equal(sockets[0]?.registrationToken, 'stale-token');
+    assert.equal(sockets[1]?.registrationToken, 'fresh-token');
+  } finally {
+    await client.disconnect();
+  }
+});
+
+test('uses the service credential refresh callback after a 401', async () => {
+  const sockets: AuthRefreshSocket[] = [];
+  let refreshes = 0;
+  let directFetches = 0;
+  const client = new XianyuImClient({
+    accountId: 'account-1',
+    credential: { cookieHeader: 'unb=seller-1; _m_h5_tk=cookie-token_1', accessToken: 'stale-token', deviceId: 'device-1' },
+    heartbeatIntervalMs: 60_000,
+    fetch: async () => {
+      directFetches += 1;
+      throw new Error('direct IM token refresh should not run when the service callback is present');
+    },
+    refreshCredential: async () => {
+      refreshes += 1;
+      return { cookieHeader: 'unb=seller-1; _m_h5_tk=browser-cookie_2', accessToken: 'fresh-token', deviceId: 'device-1' };
+    },
+    webSocketFactory: () => {
+      const socket = new AuthRefreshSocket(sockets.length === 0);
+      sockets.push(socket);
+      queueMicrotask(() => socket.emit('open'));
+      return socket;
+    },
+  });
+
+  try {
+    await client.connect();
+    assert.equal(refreshes, 1);
+    assert.equal(directFetches, 0);
+    assert.equal(sockets[1]?.registrationToken, 'fresh-token');
+  } finally {
+    await client.disconnect();
+  }
+});
+
+test('message send 401 refreshes the IM token and retries once on a new socket', async () => {
+  const sockets: AuthRefreshSocket[] = [];
+  let tokenRefreshes = 0;
+  const client = new XianyuImClient({
+    accountId: 'account-1',
+    credential: { cookieHeader: 'unb=seller-1; _m_h5_tk=cookie-token_1', accessToken: 'stale-token', deviceId: 'device-1' },
+    heartbeatIntervalMs: 60_000,
+    fetch: async () => {
+      tokenRefreshes += 1;
+      return new Response(JSON.stringify({ ret: ['SUCCESS::调用成功'], data: { accessToken: 'fresh-token' } }), { status: 200 });
+    },
+    webSocketFactory: () => {
+      const socket = new AuthRefreshSocket(false, sockets.length === 0);
+      sockets.push(socket);
+      queueMicrotask(() => socket.emit('open'));
+      return socket;
+    },
+  });
+
+  try {
+    const sent = await (async () => {
+      await client.connect();
+      return client.sendText('conversation-1', 'buyer-1', 'hello');
+    })();
+    assert.equal(typeof sent, 'object');
+    assert.equal(tokenRefreshes, 1);
+    assert.equal(sockets.length, 2);
+    assert.equal(sockets[0]?.sendAttempts, 1);
+    assert.equal(sockets[1]?.sendAttempts, 1);
+    assert.equal(sockets[1]?.registrationToken, 'fresh-token');
+  } finally {
+    await client.disconnect();
+  }
+});
+
+test('message business rejection marks the IM client failed', async () => {
+  const socket = new BusinessRejectSocket();
+  const statuses: string[] = [];
+  const client = new XianyuImClient({
+    accountId: 'account-1',
+    credential: { cookieHeader: 'unb=seller-1', accessToken: 'token', deviceId: 'device-1' },
+    heartbeatIntervalMs: 60_000,
+    webSocketFactory: () => socket,
+    onStatusChange: (status) => { statuses.push(status); },
+  });
+
+  const connectPromise = client.connect();
+  queueMicrotask(() => socket.emit('open'));
+  await connectPromise;
+  try {
+    await assert.rejects(() => client.sendText('conversation-1', 'buyer-1', 'hello'), /FAIL_SYS_USER_VALIDATE/);
+    assert.equal(client.status, 'failed');
+    assert.ok(statuses.includes('failed'));
+  } finally {
+    await client.disconnect();
+  }
 });
 
 test('unexpected gateway close schedules a reconnect for the listener', async () => {
   const sockets: FakeSocket[] = [];
+  const statuses: string[] = [];
   const client = new XianyuImClient({
     accountId: 'account-1',
     credential: { cookieHeader: 'unb=seller-1', accessToken: 'token', deviceId: 'device-1' },
@@ -137,6 +264,7 @@ test('unexpected gateway close schedules a reconnect for the listener', async ()
       queueMicrotask(() => socket.emit('open'));
       return socket;
     },
+    onStatusChange: (status) => { statuses.push(status); },
   });
 
   await client.connect();
@@ -145,6 +273,7 @@ test('unexpected gateway close schedules a reconnect for the listener', async ()
   for (let attempt = 0; attempt < 40 && sockets.length < 2; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(sockets.length, 2);
   assert.equal(client.connected, true);
+  assert.ok(statuses.includes('connected'));
   await client.disconnect();
 });
 
@@ -230,6 +359,38 @@ class RejectingSocket extends FakeSocket {
     const message = JSON.parse(data) as Record<string, any>;
     this.sent.push(message);
     if (message.lwp === '/reg') queueMicrotask(() => this.emit('message', JSON.stringify({ code: 400, headers: { mid: message.headers?.mid }, body: { reason: 'SESSION_EXPIRED' } })));
+  }
+}
+
+class AuthRefreshSocket extends FakeSocket {
+  registrationToken = '';
+  sendAttempts = 0;
+
+  constructor(private readonly rejectRegistration = false, private readonly rejectSend = false) {
+    super(false);
+  }
+
+  override send(data: string): void {
+    const message = JSON.parse(data) as Record<string, any>;
+    this.sent.push(message);
+    if (message.lwp === '/reg') {
+      this.registrationToken = String(message.headers?.token ?? '');
+      queueMicrotask(() => this.emit('message', JSON.stringify({ code: this.rejectRegistration ? 401 : 200, headers: { mid: message.headers.mid }, body: {} })));
+      return;
+    }
+    if (message.lwp === '/r/MessageSend/sendByReceiverScope') {
+      this.sendAttempts += 1;
+      queueMicrotask(() => this.emit('message', JSON.stringify({ code: this.rejectSend ? 401 : 200, headers: { mid: message.headers.mid }, body: { messageId: 'sent-message.PNM' } })));
+    }
+  }
+}
+
+class BusinessRejectSocket extends FakeSocket {
+  override send(data: string): void {
+    const message = JSON.parse(data) as Record<string, any>;
+    this.sent.push(message);
+    if (message.lwp === '/reg') queueMicrotask(() => this.emit('message', JSON.stringify({ code: 200, headers: { mid: message.headers?.mid }, body: {} })));
+    if (message.lwp === '/r/MessageSend/sendByReceiverScope') queueMicrotask(() => this.emit('message', JSON.stringify({ code: 200, headers: { mid: message.headers?.mid }, body: { reason: 'FAIL_SYS_USER_VALIDATE' } })));
   }
 }
 

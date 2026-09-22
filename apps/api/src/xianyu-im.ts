@@ -89,6 +89,9 @@ export interface XianyuImClientOptions {
   heartbeatIntervalMs?: number;
   fetch?: typeof fetch;
   webSocketFactory?: (url: string, options: { headers: Record<string, string> }) => ImWebSocket;
+  refreshCredential?: () => Promise<XianyuImCredential>;
+  onStatusChange?: (status: XianyuImConnectionStatus) => Promise<void> | void;
+  onFailure?: (error: unknown) => Promise<void> | void;
   saveCredential?: (credential: XianyuImCredential) => Promise<void>;
   onEvent?: (event: XianyuImEvent) => Promise<void> | void;
   onQuarantine?: (event: XianyuImQuarantineEvent) => Promise<void> | void;
@@ -117,6 +120,9 @@ export class XianyuImClient {
   private readonly heartbeatIntervalMs: number;
   private readonly fetchImpl: typeof fetch;
   private readonly webSocketFactory: NonNullable<XianyuImClientOptions['webSocketFactory']>;
+  private readonly refreshCredential?: XianyuImClientOptions['refreshCredential'];
+  private readonly onStatusChange?: XianyuImClientOptions['onStatusChange'];
+  private readonly onFailure?: XianyuImClientOptions['onFailure'];
   private readonly saveCredential?: XianyuImClientOptions['saveCredential'];
   private readonly onEvent?: XianyuImClientOptions['onEvent'];
   private readonly onQuarantine?: XianyuImClientOptions['onQuarantine'];
@@ -140,6 +146,9 @@ export class XianyuImClient {
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? 15_000;
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.webSocketFactory = options.webSocketFactory ?? ((url, wsOptions) => new WebSocket(url, wsOptions) as unknown as ImWebSocket);
+    this.refreshCredential = options.refreshCredential;
+    this.onStatusChange = options.onStatusChange;
+    this.onFailure = options.onFailure;
     this.saveCredential = options.saveCredential;
     this.onEvent = options.onEvent;
     this.onQuarantine = options.onQuarantine;
@@ -151,6 +160,34 @@ export class XianyuImClient {
   get connected(): boolean { return this._status === 'connected' && this.socket?.readyState === 1; }
   get deviceId(): string { return this.credential.deviceId ?? ''; }
   get userId(): string { return this.myId; }
+
+  private setStatus(status: XianyuImConnectionStatus): void {
+    if (this._status === status) return;
+    this._status = status;
+    try {
+      const result = this.onStatusChange?.(status);
+      if (result && typeof (result as PromiseLike<void>).then === 'function') {
+        void Promise.resolve(result).catch((error) => {
+          console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'status_callback_failed', accountId: this.accountId, status, errorCode: eventErrorCode(error) }));
+        });
+      }
+    } catch (error) {
+      console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'status_callback_failed', accountId: this.accountId, status, errorCode: eventErrorCode(error) }));
+    }
+  }
+
+  private notifyFailure(error: unknown): void {
+    try {
+      const result = this.onFailure?.(error);
+      if (result && typeof (result as PromiseLike<void>).then === 'function') {
+        void Promise.resolve(result).catch((callbackError) => {
+          console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'failure_callback_failed', accountId: this.accountId, errorCode: eventErrorCode(callbackError) }));
+        });
+      }
+    } catch (callbackError) {
+      console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'failure_callback_failed', accountId: this.accountId, errorCode: eventErrorCode(callbackError) }));
+    }
+  }
 
   async connect(): Promise<void> {
     this.reconnectEnabled = true;
@@ -172,7 +209,7 @@ export class XianyuImClient {
     this.reconnectEnabled = false;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = undefined;
-    this._status = 'disconnected';
+    this.setStatus('disconnected');
     await this.cleanupSocket();
   }
 
@@ -216,7 +253,11 @@ export class XianyuImClient {
       },
       { actualReceivers: [`${toId}@goofish`, `${this.myId}@goofish`] },
     ], { retryAfterReconnect: false });
-    assertSendAccepted(response);
+    try { assertSendAccepted(response); } catch (error) {
+      this.notifyFailure(error);
+      this.setStatus('failed');
+      throw error;
+    }
     const body = asRecord(response.body);
     const externalMessageRef = extractMessageRef(body);
     return { externalMessageRef };
@@ -243,57 +284,52 @@ export class XianyuImClient {
       },
       { actualReceivers: [`${toId}@goofish`, `${this.myId}@goofish`] },
     ], { retryAfterReconnect: false });
-    assertSendAccepted(response);
+    try { assertSendAccepted(response); } catch (error) {
+      this.notifyFailure(error);
+      this.setStatus('failed');
+      throw error;
+    }
     const body = asRecord(response.body);
     return { externalMessageRef: extractMessageRef(body) };
   }
 
   private async connectInternal(): Promise<void> {
-    this._status = this._status === 'disconnected' ? 'reconnecting' : 'connecting';
+    this.setStatus(this._status === 'disconnected' ? 'reconnecting' : 'connecting');
+    let refreshedAfter401 = false;
     try {
       if (!this.credential.accessToken) await this.refreshToken();
-      const socket = this.webSocketFactory(XIANYU_IM_WS_URL, {
-        headers: {
-          Cookie: this.credential.cookieHeader,
-          Origin: 'https://www.goofish.com',
-          'User-Agent': USER_AGENT,
-        },
-      });
-      this.socket = socket;
-      socket.on('message', (raw: unknown) => {
-        this.incomingChain = this.incomingChain.then(() => this.handleIncoming(raw)).catch((error) => {
-          console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'frame_processing_failed', accountId: this.accountId, errorCode: eventErrorCode(error) }));
-        });
-      });
-      socket.on('close', () => {
-        if (this.socket !== socket) return;
-        this.socket = undefined;
-        if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
-        this.heartbeatTimer = undefined;
-        this.rejectPending('xianyu IM connection closed');
-        if (this._status !== 'failed') this._status = 'disconnected';
-        this.scheduleReconnect();
-      });
-      socket.on('error', () => {
-        if (this.socket === socket && this._status === 'connecting') this._status = 'failed';
-      });
-      await waitForSocketOpen(socket, this.timeoutMs);
-      const registrationMid = createMid();
-      await this.sendAndWait(registrationMid, {
-        lwp: '/reg',
-        headers: {
-          'cache-header': 'app-key token ua wv',
-          'app-key': XIANYU_IM_APP_ID,
-          token: decodeURIComponent(this.credential.accessToken ?? ''),
-          ua: `${USER_AGENT} DingTalk(2.1.5) OS(Windows/10) Browser(Chrome/139.0.0.0) DingWeb/2.1.5`,
-          dt: 'j',
-          wv: 'im:3,au:3,sy:6',
-          sync: '0,0;0;0;',
-          did: this.deviceId,
-          mid: registrationMid,
-        },
-      }, 5_000);
-      this._status = 'connected';
+      while (true) {
+        const socket = this.setupSocket();
+        try {
+          await waitForSocketOpen(socket, this.timeoutMs);
+          const registrationMid = createMid();
+          await this.sendAndWait(registrationMid, {
+            lwp: '/reg',
+            headers: {
+              'cache-header': 'app-key token ua wv',
+              'app-key': XIANYU_IM_APP_ID,
+              token: decodeURIComponent(this.credential.accessToken ?? ''),
+              ua: `${USER_AGENT} DingTalk(2.1.5) OS(Windows/10) Browser(Chrome/139.0.0.0) DingWeb/2.1.5`,
+              dt: 'j',
+              wv: 'im:3,au:3,sy:6',
+              sync: '0,0;0;0;',
+              did: this.deviceId,
+              mid: registrationMid,
+            },
+          }, 5_000);
+          break;
+        } catch (error) {
+          // A persisted IM access token can expire while the browser cookie is
+          // still valid. Refresh once and retry registration on a fresh socket
+          // instead of surfacing a misleading 401 to the caller.
+          if (!(error instanceof XianyuImRequestRejected) || error.code !== 401 || refreshedAfter401) throw error;
+          refreshedAfter401 = true;
+          await this.cleanupSocket();
+          this.credential.accessToken = undefined;
+          await this.refreshToken();
+        }
+      }
+      this.setStatus('connected');
       this.reconnectAttempt = 0;
       this.connectionGeneration += 1;
       this.heartbeatTimer = setInterval(() => {
@@ -301,12 +337,44 @@ export class XianyuImClient {
         try { this.sendRaw({ lwp: '/!', headers: { mid: createMid() } }); } catch { /* close handler exposes status */ }
       }, this.heartbeatIntervalMs);
     } catch (error) {
-      this._status = 'failed';
+      this.notifyFailure(error);
+      this.setStatus('failed');
       await this.cleanupSocket();
-      this._status = 'failed';
       this.scheduleReconnect();
       throw error;
     }
+  }
+
+  private setupSocket(): ImWebSocket {
+    const socket = this.webSocketFactory(XIANYU_IM_WS_URL, {
+      headers: {
+        Cookie: this.credential.cookieHeader,
+        Origin: 'https://www.goofish.com',
+        'User-Agent': USER_AGENT,
+      },
+    });
+    this.socket = socket;
+    socket.on('message', (raw: unknown) => {
+      this.incomingChain = this.incomingChain.then(() => this.handleIncoming(raw)).catch((error) => {
+        console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'frame_processing_failed', accountId: this.accountId, errorCode: eventErrorCode(error) }));
+      });
+    });
+    socket.on('close', () => {
+      if (this.socket !== socket) return;
+      this.socket = undefined;
+      if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = undefined;
+      this.rejectPending('xianyu IM connection closed');
+      if (this._status !== 'failed') this.setStatus('disconnected');
+      this.scheduleReconnect();
+    });
+    socket.on('error', (error: unknown) => {
+      if (this.socket === socket && this._status === 'connecting') {
+        this.notifyFailure(error);
+        this.setStatus('failed');
+      }
+    });
+    return socket;
   }
 
   private async cleanupSocket(): Promise<void> {
@@ -338,6 +406,14 @@ export class XianyuImClient {
   }
 
   private async refreshToken(): Promise<void> {
+    if (this.refreshCredential) {
+      const refreshed = await this.refreshCredential();
+      this.credential = { ...refreshed };
+      const refreshedUserId = cookieValue(this.credential.cookieHeader, 'unb') || cookieValue(this.credential.cookieHeader, 'munb');
+      if (refreshedUserId) this.myId = refreshedUserId;
+      if (!this.credential.deviceId) this.credential.deviceId = createDeviceId(this.myId);
+      return;
+    }
     const token = cookieValue(this.credential.cookieHeader, '_m_h5_tk').split('_', 1)[0] ?? '';
     if (!token) throw new Error('XIANYU_IM_TOKEN_MISSING');
     const timestamp = String(Date.now());
@@ -373,15 +449,31 @@ export class XianyuImClient {
     try {
       return await this.sendAndWait(mid, { lwp, headers: { mid }, body });
     } catch (error) {
-      if (!retryAfterReconnect || !(error instanceof XianyuImRequestRejected) || error.code !== 400) throw error;
-      if (this.connectionGeneration === generation) {
-        await this.disconnect();
-        this.credential.accessToken = undefined;
-        await this.connect();
+      const authRejected = error instanceof XianyuImRequestRejected && error.code === 401;
+      const transientRejected = retryAfterReconnect && error instanceof XianyuImRequestRejected && error.code === 400;
+      if (!authRejected && !transientRejected) {
+        this.notifyFailure(error);
+        this.setStatus('failed');
+        throw error;
       }
-      const retryMid = createMid();
-      return this.sendAndWait(retryMid, { lwp, headers: { mid: retryMid }, body });
+      try {
+        if (this.connectionGeneration === generation) {
+          await this.reconnectWithFreshToken();
+        }
+        const retryMid = createMid();
+        return await this.sendAndWait(retryMid, { lwp, headers: { mid: retryMid }, body });
+      } catch (retryError) {
+        this.notifyFailure(retryError);
+        this.setStatus('failed');
+        throw retryError;
+      }
     }
+  }
+
+  private async reconnectWithFreshToken(): Promise<void> {
+    await this.disconnect();
+    this.credential.accessToken = undefined;
+    await this.connect();
   }
 
   private sendRaw(message: Record<string, unknown>): void {

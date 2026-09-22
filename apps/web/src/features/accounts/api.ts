@@ -71,7 +71,7 @@ function toAccountVM(account: CanonicalAccountResponse): AccountVM {
     avatarUrl: account.avatarUrl,
     platformUserId: account.platformUserId,
     status: normalizedStatus,
-    connection: { status: account.connection?.status ?? (normalizedStatus === 'connected' ? 'online' : normalizedStatus === 'expired' ? 'expired' : 'unknown'), lastConnectedAt: account.connection?.lastConnectedAt, latencyMs: account.connection?.latencyMs, failureCode: account.connection?.failureCode, failureMessage: account.connection?.failureMessage },
+    connection: { status: account.connection?.status ?? (normalizedStatus === 'connected' ? 'online' : normalizedStatus === 'expired' ? 'expired' : normalizedStatus === 'disconnected' ? 'offline' : normalizedStatus === 'pending' ? 'connecting' : 'unknown'), lastConnectedAt: account.connection?.lastConnectedAt, latencyMs: account.connection?.latencyMs, failureCode: account.connection?.failureCode, failureMessage: account.connection?.failureMessage },
     enabled: account.enabled ?? true,
     aiEnabled: account.aiEnabled ?? false,
     credentialState: account.credentialState ?? (normalizedStatus === 'connected' ? 'configured' : 'unknown'),

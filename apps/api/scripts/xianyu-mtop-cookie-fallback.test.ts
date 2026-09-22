@@ -89,3 +89,31 @@ test('does not let a stale snapshot overwrite a refreshed raw Cookie when MTOP r
     globalThis.fetch = originalFetch;
   }
 });
+
+test('reports final MTOP validation failures to the account health callback', async () => {
+  const originalFetch = globalThis.fetch;
+  const failures: Array<Record<string, unknown>> = [];
+  globalThis.fetch = async () => new Response(JSON.stringify({ ret: ['FAIL_SYS_USER_VALIDATE::请完成验证'] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  try {
+    const client = new XianyuMtopClient({
+      loadCredential: async () => ({ cookieHeader: '_m_h5_tk=token_value_1; unb=seller-1' }),
+      saveCookie: async () => undefined,
+      onFailure: (input) => { failures.push(input); },
+    });
+    const result = await client.fetchItems('admin-1', 'account-1');
+    assert.equal(result.success, false);
+    assert.equal(result.errorCode, 'ACCOUNT_VALIDATION_REQUIRED');
+    assert.deepEqual(failures, [
+      {
+        adminId: 'admin-1',
+        accountId: 'account-1',
+        api: 'mtop.idle.web.xyh.item.list',
+        errorCode: 'ACCOUNT_VALIDATION_REQUIRED',
+        message: 'FAIL_SYS_USER_VALIDATE::请完成验证',
+        accountInvalid: true,
+      },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
