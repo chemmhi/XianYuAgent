@@ -74,9 +74,10 @@ export class PostgresStore implements Store {
     const where = conditions.join(' AND ');
     const count = await this.pool.query(`select count(*)::int as count from products.products p where ${where}`, params);
     const total = Number(count.rows[0]?.count ?? 0);
-    const sortColumn = query.sortBy === 'title' ? 'p.title' : query.sortBy === 'priceMinor' ? 'p.price_minor' : query.sortBy === 'createdAt' ? 'p.created_at' : 'p.xianyu_updated_at';
-    const sortOrder = query.sortOrder === 'asc' ? 'ASC' : 'DESC';
-    const sortNulls = query.sortBy === 'updatedAt' || !query.sortBy ? ' NULLS LAST' : '';
+    const sortBy = query.sortBy ?? 'xianyuOrder';
+    const sortColumn = sortBy === 'title' ? 'p.title' : sortBy === 'priceMinor' ? 'p.price_minor' : sortBy === 'createdAt' ? 'p.created_at' : sortBy === 'xianyuOrder' ? 'p.xianyu_list_rank' : 'p.xianyu_updated_at';
+    const sortOrder = query.sortOrder === 'desc' ? 'DESC' : sortBy === 'xianyuOrder' ? 'ASC' : 'DESC';
+    const sortNulls = sortBy === 'updatedAt' || sortBy === 'xianyuOrder' || !query.sortBy ? ' NULLS LAST' : '';
     const limitIndex = params.length + 1;
     const offsetIndex = params.length + 2;
     const rows = await this.pool.query(`select p.*, (select count(*)::int from products.product_skus sku where sku.product_id=p.id and sku.status <> 'archived') as sku_count, (select count(*)::int from products.asset_refs asset where asset.product_id=p.id and asset.status <> 'archived') as asset_count, ${PRODUCT_COUPON_BATCHES_SELECT} from products.products p where ${where} order by ${sortColumn} ${sortOrder}${sortNulls}, p.id limit $${limitIndex} offset $${offsetIndex}`, [...params, pageSize, (page - 1) * pageSize]);
@@ -255,13 +256,17 @@ export class PostgresStore implements Store {
       },
     };
     const id = existing ? String(existing.id) : createId();
-    await this.pool.query(`insert into products.products (id,account_id,external_product_ref,title,description,category_code,attributes_json,price_minor,status,source,last_synced_at,xianyu_updated_at,source_payload_digest)
-      values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'published','xianyu',$9,$10,$11)
-      on conflict (account_id,external_product_ref) where external_product_ref is not null do update set title=excluded.title,description=excluded.description,category_code=excluded.category_code,attributes_json=excluded.attributes_json,price_minor=excluded.price_minor,status='published',source='xianyu',last_synced_at=excluded.last_synced_at,xianyu_updated_at=coalesce(excluded.xianyu_updated_at,products.products.xianyu_updated_at),source_payload_digest=excluded.source_payload_digest,config_version=products.products.config_version+1,updated_at=now()
-      returning id`, [id, input.accountId, input.item.externalProductRef, input.item.title, input.item.description ?? null, input.item.categoryCode ?? null, JSON.stringify(attributes), input.item.priceMinor ?? null, input.syncedAt, input.item.xianyuUpdatedAt ?? null, input.item.sourcePayloadDigest]);
+    await this.pool.query(`insert into products.products (id,account_id,external_product_ref,title,description,category_code,attributes_json,price_minor,status,source,last_synced_at,xianyu_updated_at,xianyu_list_rank,source_payload_digest)
+      values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'published','xianyu',$9,$10,$11,$12)
+      on conflict (account_id,external_product_ref) where external_product_ref is not null do update set title=excluded.title,description=excluded.description,category_code=excluded.category_code,attributes_json=excluded.attributes_json,price_minor=excluded.price_minor,status='published',source='xianyu',last_synced_at=excluded.last_synced_at,xianyu_updated_at=coalesce(excluded.xianyu_updated_at,products.products.xianyu_updated_at),xianyu_list_rank=coalesce(excluded.xianyu_list_rank,products.products.xianyu_list_rank),source_payload_digest=excluded.source_payload_digest,config_version=products.products.config_version+1,updated_at=now()
+      returning id`, [id, input.accountId, input.item.externalProductRef, input.item.title, input.item.description ?? null, input.item.categoryCode ?? null, JSON.stringify(attributes), input.item.priceMinor ?? null, input.syncedAt, input.item.xianyuUpdatedAt ?? null, input.item.xianyuListRank ?? null, input.item.sourcePayloadDigest]);
     const product = await this.getProduct(input.adminId, id);
     if (!product) throw new Error('PRODUCT_SYNC_READBACK_FAILED');
     return { action: existing ? 'updated' : 'created', product };
+  }
+  async resetXianyuListRanks(adminId: string, accountId: string): Promise<void> {
+    if (!(await this.hasAccountScope(adminId, accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    await this.pool.query("update products.products set xianyu_list_rank=null where account_id=$1 and source='xianyu'", [accountId]);
   }
   async listCouponBatches(adminId: string, query: CouponBatchListQuery): Promise<CouponBatchListResult> {
     const page = query.page ?? 1;
@@ -1070,7 +1075,7 @@ export class PostgresStore implements Store {
   private toAccount(row: Row): AccountRecord { return { id: String(row.id), platform: String(row.platform), sellerRef: String(row.seller_ref), displayName: row.display_name ? String(row.display_name) : undefined, remark: row.remark ? String(row.remark) : undefined, avatarUrl: row.avatar_url ? String(row.avatar_url) : undefined, platformUserId: row.platform_user_id ? String(row.platform_user_id) : undefined, status: row.status as AccountRecord['status'], createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString(), lastConnectedAt: iso(row.last_connected_at) }; }
   private toProduct(row: Row): ProductRecord {
     const attributes = row.attributes_json && typeof row.attributes_json === 'object' && !Array.isArray(row.attributes_json) ? row.attributes_json as Record<string, unknown> : {};
-    return { id: String(row.id), accountId: String(row.account_id), externalProductRef: row.external_product_ref ? String(row.external_product_ref) : undefined, title: String(row.title), description: row.description ? String(row.description) : undefined, categoryCode: row.category_code ? String(row.category_code) : undefined, attributes: { ...attributes }, defaultReplyTemplate: row.default_reply_template ? String(row.default_reply_template) : undefined, aiPrompt: row.ai_prompt ? String(row.ai_prompt) : undefined, configVersion: Number(row.config_version ?? 1), priceMinor: row.price_minor === null || row.price_minor === undefined ? undefined : Number(row.price_minor), status: row.status as ProductRecord['status'], source: (row.source ?? 'local') as ProductRecord['source'], lastSyncedAt: iso(row.last_synced_at), xianyuUpdatedAt: iso(row.xianyu_updated_at), sourcePayloadDigest: row.source_payload_digest ? String(row.source_payload_digest) : undefined, createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString(), skuCount: Number(row.sku_count ?? 0), assetCount: Number(row.asset_count ?? 0), couponBatches: this.toProductCouponBatches(row.coupon_batches) };
+    return { id: String(row.id), accountId: String(row.account_id), externalProductRef: row.external_product_ref ? String(row.external_product_ref) : undefined, title: String(row.title), description: row.description ? String(row.description) : undefined, categoryCode: row.category_code ? String(row.category_code) : undefined, attributes: { ...attributes }, defaultReplyTemplate: row.default_reply_template ? String(row.default_reply_template) : undefined, aiPrompt: row.ai_prompt ? String(row.ai_prompt) : undefined, configVersion: Number(row.config_version ?? 1), priceMinor: row.price_minor === null || row.price_minor === undefined ? undefined : Number(row.price_minor), status: row.status as ProductRecord['status'], source: (row.source ?? 'local') as ProductRecord['source'], lastSyncedAt: iso(row.last_synced_at), xianyuUpdatedAt: iso(row.xianyu_updated_at), xianyuListRank: row.xianyu_list_rank === null || row.xianyu_list_rank === undefined ? undefined : Number(row.xianyu_list_rank), sourcePayloadDigest: row.source_payload_digest ? String(row.source_payload_digest) : undefined, createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString(), skuCount: Number(row.sku_count ?? 0), assetCount: Number(row.asset_count ?? 0), couponBatches: this.toProductCouponBatches(row.coupon_batches) };
   }
   private toOrder(row: Row): OrderRecord {
     return {

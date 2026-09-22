@@ -39,6 +39,8 @@ export interface ProductVM {
   source?: 'local' | 'xianyu';
   lastSyncedAt?: string;
   xianyuUpdatedAt?: string;
+  /** Position returned by the Xianyu seller page; lower ranks appear first. */
+  xianyuListRank?: number;
   sourcePayloadDigest?: string;
   createdAt: string;
   updatedAt: string;
@@ -90,7 +92,7 @@ export interface ProductFilters {
   accountId?: string;
   keyword?: string;
   status?: ProductStatus | 'all';
-  sortBy?: 'createdAt' | 'updatedAt';
+  sortBy?: 'createdAt' | 'updatedAt' | 'xianyuOrder';
   sortOrder?: 'asc' | 'desc';
   page?: number;
   pageSize?: number;

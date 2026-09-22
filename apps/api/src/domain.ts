@@ -112,6 +112,7 @@ export interface ProductRecord {
   source: ProductSource;
   lastSyncedAt?: string;
   xianyuUpdatedAt?: string;
+  xianyuListRank?: number;
   sourcePayloadDigest?: string;
   createdAt: string;
   updatedAt: string;
@@ -130,6 +131,7 @@ export interface XianyuProductItem {
   priceMinor?: number;
   externalStatus?: string;
   xianyuUpdatedAt?: string;
+  xianyuListRank?: number;
   detailUrl?: string;
   imageUrls: string[];
   attributes: Record<string, unknown>;
@@ -169,7 +171,7 @@ export interface ProductListQuery {
   keyword?: string;
   accountId?: string;
   status?: ProductStatus;
-  sortBy?: 'createdAt' | 'updatedAt' | 'title' | 'priceMinor';
+  sortBy?: 'createdAt' | 'updatedAt' | 'xianyuOrder' | 'title' | 'priceMinor';
   sortOrder?: 'asc' | 'desc';
   page?: number;
   pageSize?: number;
@@ -913,6 +915,7 @@ export interface Store {
   }): Promise<ProductRecord>;
   updateProduct(input: { adminId: string; productId: string; expectedConfigVersion: number; patch: ProductPatch }): Promise<ProductRecord | undefined>;
   upsertExternalProduct(input: { adminId: string; accountId: string; item: XianyuProductItem; syncedAt: string }): Promise<ProductUpsertResult>;
+  resetXianyuListRanks(adminId: string, accountId: string): Promise<void>;
   listCouponBatches(adminId: string, query: CouponBatchListQuery): Promise<CouponBatchListResult>;
   getCouponBatch(adminId: string, batchId: string): Promise<CouponBatchRecord | undefined>;
   createCouponBatch(input: {

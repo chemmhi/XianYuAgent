@@ -24,6 +24,7 @@ async function request(path, options = {}) {
 await runtime.store.pool.query(await readFile(new URL('../migrations/003_catalog.sql', import.meta.url), 'utf8'));
 await runtime.store.pool.query(await readFile(new URL('../migrations/013_product_sync.sql', import.meta.url), 'utf8'));
 await runtime.store.pool.query(await readFile(new URL('../migrations/029_product_xianyu_updated_at.sql', import.meta.url), 'utf8'));
+await runtime.store.pool.query(await readFile(new URL('../migrations/030_product_xianyu_list_rank.sql', import.meta.url), 'utf8'));
 await runtime.listen();
 port = runtime.server.address().port;
 
@@ -99,9 +100,9 @@ try {
 
   runtime.xianyu.fetchItemsAll = async () => {
     const items = [
-      { externalProductRef: `SYNC-${process.pid}-1`, title: 'Postgres 同步商品一', categoryCode: 'digital', priceMinor: 1990, sourcePayloadDigest: 'pg-sync-1' },
-      { externalProductRef: `SYNC-${process.pid}-2`, title: 'Postgres 同步商品二', categoryCode: 'digital', priceMinor: 2990, xianyuUpdatedAt: '2026-09-21T12:30:00.000Z', sourcePayloadDigest: 'pg-sync-2' },
-      { externalProductRef: `SYNC-${process.pid}-3`, title: 'Postgres 同步商品三', categoryCode: 'digital', priceMinor: 3990, sourcePayloadDigest: 'pg-sync-3' },
+      { externalProductRef: `SYNC-${process.pid}-1`, title: 'Postgres 同步商品一', categoryCode: 'digital', priceMinor: 1990, xianyuListRank: 1, sourcePayloadDigest: 'pg-sync-1' },
+      { externalProductRef: `SYNC-${process.pid}-2`, title: 'Postgres 同步商品二', categoryCode: 'digital', priceMinor: 2990, xianyuListRank: 2, xianyuUpdatedAt: '2026-09-21T12:30:00.000Z', sourcePayloadDigest: 'pg-sync-2' },
+      { externalProductRef: `SYNC-${process.pid}-3`, title: 'Postgres 同步商品三', categoryCode: 'digital', priceMinor: 3990, xianyuListRank: 3, sourcePayloadDigest: 'pg-sync-3' },
     ];
     return { pages: [{ success: true, accountInvalid: false, cookieHeader: '', items, pageNumber: 1, pageSize: 20, totalCount: items.length, totalPages: 1, hasMore: false }], items, hasMore: false };
   };
@@ -116,7 +117,8 @@ try {
   assert.equal(synced.body.data.createdCount, 3);
   const syncedProducts = (await runtime.store.listProducts(adminId, { accountId })).items.filter((item) => item.source === 'xianyu');
   assert.equal(syncedProducts.length, 3);
-  assert.deepEqual(syncedProducts.map((item) => item.externalProductRef), [`SYNC-${process.pid}-2`, `SYNC-${process.pid}-1`, `SYNC-${process.pid}-3`]);
+  assert.deepEqual(syncedProducts.map((item) => item.externalProductRef), [`SYNC-${process.pid}-1`, `SYNC-${process.pid}-2`, `SYNC-${process.pid}-3`]);
+  assert.deepEqual(syncedProducts.map((item) => item.xianyuListRank), [1, 2, 3]);
   assert.equal(syncedProducts.find((item) => item.externalProductRef.endsWith('-1'))?.xianyuUpdatedAt, '2026-09-20T12:30:00.000Z');
   assert.equal(syncedProducts.find((item) => item.externalProductRef.endsWith('-2'))?.xianyuUpdatedAt, '2026-09-21T12:30:00.000Z');
   assert.equal(syncedProducts.find((item) => item.externalProductRef.endsWith('-3'))?.xianyuUpdatedAt, undefined);

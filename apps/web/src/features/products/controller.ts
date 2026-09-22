@@ -54,7 +54,7 @@ export interface ProductsController {
 
 export function useProductsController(options: { api?: ProductsApi; initialFilters?: ProductFilters } = {}): ProductsController {
   const productsApi = options.api ?? defaultProductsApi;
-  const [filters, setFilters] = useState<ProductFilters>({ page: 1, pageSize: 20, sortBy: 'updatedAt', sortOrder: 'desc', ...options.initialFilters });
+  const [filters, setFilters] = useState<ProductFilters>({ page: 1, pageSize: 20, sortBy: 'xianyuOrder', sortOrder: 'asc', ...options.initialFilters });
   const [state, setState] = useState<ProductsQueryState>({ phase: 'idle', data: null, error: null });
   const [detail, setDetail] = useState<ProductDetailState>({ phase: 'idle', data: null, error: null });
   const [xianyuDetail, setXianyuDetail] = useState<XianyuDetailState>({ phase: 'idle', data: null, error: null });

@@ -85,7 +85,6 @@ interface LegacyItem {
   item_quantity?: string | number;
   item_status_desc?: string;
   updated_at?: string;
-  item_shelf_time?: string;
   has_card?: boolean;
 }
 
@@ -144,7 +143,7 @@ function productSummary(item: LegacyItem): ProductSummary {
     price: Number(item.price ?? item.item_price ?? 0),
     stock,
     status,
-    updatedAt: item.updated_at ?? item.item_shelf_time ?? '',
+    updatedAt: item.updated_at ?? '',
   };
 }
 

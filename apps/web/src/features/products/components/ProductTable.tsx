@@ -6,9 +6,9 @@ export function ProductTable({ products, page, totalPages, total, sortBy, sortOr
   page: number;
   totalPages: number;
   total: number;
-  sortBy: 'createdAt' | 'updatedAt';
+  sortBy: 'createdAt' | 'updatedAt' | 'xianyuOrder';
   sortOrder: 'asc' | 'desc';
-  onSortChange: (sortBy: 'createdAt' | 'updatedAt', sortOrder: 'asc' | 'desc') => void;
+  onSortChange: (sortBy: 'createdAt' | 'updatedAt' | 'xianyuOrder', sortOrder: 'asc' | 'desc') => void;
   onPageChange: (page: number) => void;
   onOpen: (productId: string) => void;
   onOpenXianyuDetail: (productId: string) => void;

@@ -60,6 +60,7 @@ export function mapXianyuProductPage(response: Record<string, unknown> | undefin
       priceMinor: parsePriceMinor(firstString(priceInfo.price, cardData.price)),
       externalStatus: itemStatus === undefined || itemStatus === null ? undefined : String(itemStatus),
       xianyuUpdatedAt,
+      xianyuListRank: Math.max(0, (pageNumber - 1) * pageSize) + items.length + 1,
       detailUrl: firstString(cardData.detailUrl, cardData.webUrl) ?? `https://www.goofish.com/item?id=${encodeURIComponent(externalProductRef)}`,
       imageUrls,
       attributes: {
