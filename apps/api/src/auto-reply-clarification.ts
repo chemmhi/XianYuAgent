@@ -30,7 +30,7 @@ export interface ClarificationRequestResult {
   action: 'CLARIFY' | 'WAIT_FOR_USER' | 'UNRESOLVED';
   state: ConversationState;
   question?: ClarificationQuestion;
-  reasonCode?: 'QUESTION_DUPLICATE' | 'MAX_ROUNDS_REACHED' | 'ALREADY_AWAITING_USER';
+  reasonCode?: 'QUESTION_DUPLICATE' | 'MAX_ROUNDS_REACHED' | 'ALREADY_AWAITING_USER' | 'CLARIFICATION_EXHAUSTED';
   event: {
     type: 'clarification.requested' | 'clarification.awaiting_user' | 'clarification.exhausted';
     goalId: string;
@@ -117,6 +117,7 @@ export class ClarificationEngine {
 
     const currentQuestions = readQuestions(input.state);
     const fingerprint = input.questionFingerprint?.trim() || questionFingerprint(text, input.expectedAnswerType);
+    if (input.state.goalStatus === 'unresolved' && !input.state.awaitingUser) return unresolvedResult(input.state, input.goalId, 'CLARIFICATION_EXHAUSTED');
     const duplicate = input.state.awaitingUser && !input.newFactsAvailable && (input.state.lastQuestionFingerprint === fingerprint || currentQuestions.some((item) => item.questionFingerprint === fingerprint));
     if (duplicate) return awaitingResult(input.state, input.goalId, 'QUESTION_DUPLICATE', 'questionFingerprint');
     if (input.state.awaitingUser && currentQuestions.length > 0 && !input.newFactsAvailable) return awaitingResult(input.state, input.goalId, 'ALREADY_AWAITING_USER', 'awaiting');
