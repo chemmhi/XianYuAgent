@@ -17,7 +17,7 @@ describe('products canonical API adapter', () => {
     const page = await api.list({ accountId: 'account-1', keyword: '商品', status: 'published' });
     const detail = await api.getDetail('product-1');
 
-    expect(calls[0]).toBe('/api/v1/products?keyword=%E5%95%86%E5%93%81&accountId=account-1&status=published&page=1&pageSize=20');
+    expect(calls[0]).toBe('/api/v1/products?keyword=%E5%95%86%E5%93%81&accountId=account-1&status=published&sortBy=updatedAt&sortOrder=desc&page=1&pageSize=20');
     expect(calls[1]).toBe('/api/v1/products/product-1');
     expect(page.items[0]).toMatchObject({ id: 'product-1', priceMinor: 3990, configVersion: 2, attributesJson: {}, createdAt: '2026-09-19T00:00:00.000Z', couponBatches: [{ id: 'batch-1', label: '卡券一' }] });
     expect(detail.id).toBe('product-1');
@@ -27,6 +27,15 @@ describe('products canonical API adapter', () => {
     const calls: string[] = [];
     const api = createProductsApi({ async get<T>(path: string) { calls.push(path); return { success: true, data: { items: [], total: 0, page: 1, pageSize: 20, totalPages: 1 } } as T; } });
     await api.list({ sortBy: 'updatedAt', sortOrder: 'desc' });
+    expect(calls[0]).toBe('/api/v1/products?sortBy=updatedAt&sortOrder=desc&page=1&pageSize=20');
+  });
+
+  it('defaults list requests to newest updates first when sorting is omitted', async () => {
+    const calls: string[] = [];
+    const api = createProductsApi({ async get<T>(path: string) { calls.push(path); return { success: true, data: { items: [], total: 0, page: 1, pageSize: 20, totalPages: 1 } } as T; } });
+
+    await api.list();
+
     expect(calls[0]).toBe('/api/v1/products?sortBy=updatedAt&sortOrder=desc&page=1&pageSize=20');
   });
 
@@ -44,6 +53,15 @@ describe('products canonical API adapter', () => {
     ]);
     expect((await api.list({ sortBy: 'createdAt', sortOrder: 'desc' })).items.map((item) => item.id)).toEqual(['newer', 'older']);
     expect((await api.list({ sortBy: 'updatedAt', sortOrder: 'asc' })).items.map((item) => item.id)).toEqual(['older', 'newer']);
+  });
+
+  it('defaults the local adapter to newest updates first', async () => {
+    const api = createMockProductsApi([
+      { id: 'older', accountId: 'account-1', title: '旧商品', attributesJson: {}, configVersion: 1, status: 'published', createdAt: '2026-09-18T00:00:00.000Z', updatedAt: '2026-09-20T01:00:00.000Z', skuCount: 0, assetCount: 0 },
+      { id: 'newer', accountId: 'account-1', title: '新商品', attributesJson: {}, configVersion: 1, status: 'published', createdAt: '2026-09-19T00:00:00.000Z', updatedAt: '2026-09-20T02:00:00.000Z', skuCount: 0, assetCount: 0 },
+    ]);
+
+    expect((await api.list()).items.map((item) => item.id)).toEqual(['newer', 'older']);
   });
 
   it('sends canonical create and patch headers for draft writes', async () => {

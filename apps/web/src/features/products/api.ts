@@ -264,8 +264,8 @@ function queryString(filters: ProductFilters = {}): string {
   if (filters.keyword?.trim()) params.set('keyword', filters.keyword.trim());
   if (filters.accountId) params.set('accountId', filters.accountId);
   if (filters.status && filters.status !== 'all') params.set('status', filters.status);
-  if (filters.sortBy) params.set('sortBy', filters.sortBy);
-  if (filters.sortOrder) params.set('sortOrder', filters.sortOrder);
+  params.set('sortBy', filters.sortBy ?? 'updatedAt');
+  params.set('sortOrder', filters.sortOrder ?? 'desc');
   params.set('page', String(filters.page ?? 1));
   params.set('pageSize', String(filters.pageSize ?? 20));
   const value = params.toString();
