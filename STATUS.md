@@ -223,3 +223,11 @@
 - 已验证：`npm --workspace apps/web run test -- --run src/features/dashboard/components/DashboardViews.test.tsx`（6/6）、`npm --workspace apps/web run typecheck`、`npm --workspace apps/web run build`、`npm --workspace apps/web run test:e2e:chrome:dashboard`、`git diff --check`；桌面/移动截图已更新至 `docs/evidence/stage5/S4-VS-DASHBOARD/screenshots/`。
 - 部分验证：`npm --workspace apps/web run test` 为 72/73 文件、240/241 用例通过；唯一失败是既有 `App.dashboard-mode.test.ts` 在未包裹 `AccountContextProvider` 时直接渲染 `DashboardPage`，与本切片无关，已登记为开放风险，未修改无关测试。
 - 人工审核后：确认视觉与交互后再由维护者将本分支合入 `main`；本 worktree 不执行合并。
+
+## 2026-09-22 Dashboard 铃铛气泡视觉修正
+
+- 当前 worktree：`F:\ChenHai\Project\XianYuAgent-dashboard-risk-bell-adjust-20260922`；分支：`codex/dashboard-risk-bell-adjust-20260922`；状态：`READY_FOR_REVIEW`。
+- 修正范围：气泡改为以铃铛外层为定位锚点，紧贴铃铛右下方展开；铃铛改为白底、深色图标、明确边框和轻阴影，避免透明感。
+- 回归约束：桌面/移动 E2E 增加气泡与铃铛的间距、右边缘对齐及移动视口不溢出断言。
+- 已验证：`npm --workspace apps/web run test:e2e:chrome:dashboard`、`npm --workspace apps/web run test -- --run src/features/dashboard/components/DashboardViews.test.tsx`（6/6）、`npm --workspace apps/web run typecheck`、`git diff --check`；截图已重新生成。
+- 后续：等待人工审核后，再将本修正分支合入 `main`。

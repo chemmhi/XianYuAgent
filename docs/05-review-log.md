@@ -492,3 +492,11 @@
 | S5-R100 | 质量 / 浏览器 | 真实 Vite + API + Chrome/CDP 是否完成登录 → 搜索 → 切换 → 删除 → 退出，并验证生成中/展示后扫码区不跳动 | root | PASS（受控 harness） | `npm --workspace apps/web run test:e2e:chrome`；同一 1440×900 视口下布局偏差 ≤1.5px；`docs/evidence/stage5/S4-VS1/screenshots/` |
 
 本轮结论：账号登录和删除弹窗的视觉 P2 已修复并通过设计稿对比、组件回归和 Chrome/CDP 实拍复验；生成中与二维码展示后共用固定状态行和扫码区几何，消除灰色区域跳动。全量 Web 测试仍有既有 `App.dashboard-mode.test.ts` 失败（`useAccountContext` 缺少 Provider），与本轮账号弹窗改动无关；不因该既有失败扩大本次提交范围。
+
+### 2026-09-22：Dashboard 铃铛气泡视觉修正复审
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R96 | 前端 / 视觉 / 端到端 | 气泡是否贴近铃铛、铃铛是否具备足够对比度、移动右列是否不溢出 | root + dashboard_risk_card_audit | PASS（受控环境） | `DashboardViews.tsx`、`dashboard.css`；桌面/移动截图；E2E 几何断言 |
+
+本轮结论：气泡从卡片底部定位改为铃铛触发器定位，铃铛改为实心高对比样式；当前修正分支等待人工审核后再合入 `main`。

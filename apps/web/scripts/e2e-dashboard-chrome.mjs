@@ -158,6 +158,8 @@ async function run() {
   await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector(".dashboard-desktop-content .dashboard-risk-popover"))')), 'pending manual risk popover');
   await assertText(cdp, '待处理风险');
   await assertText(cdp, '考研英语资料缺少发货凭证');
+  const desktopPopoverGeometry = await evaluate(cdp, '(() => { const bell = document.querySelector(".dashboard-desktop-content .dashboard-pending-manual-card .dashboard-icon-button"); const popover = document.querySelector(".dashboard-desktop-content .dashboard-risk-popover"); if (!bell || !popover) return null; const bellRect = bell.getBoundingClientRect(); const popoverRect = popover.getBoundingClientRect(); return { gap: popoverRect.top - bellRect.bottom, rightDelta: Math.abs(popoverRect.right - bellRect.right) }; })()');
+  if (!desktopPopoverGeometry || desktopPopoverGeometry.gap > 10 || desktopPopoverGeometry.rightDelta > 12) throw new Error(`desktop risk popover is not anchored to bell: ${JSON.stringify(desktopPopoverGeometry)}`);
   const sharedSidebarCount = await evaluate(cdp, 'document.querySelectorAll(".sidebar").length');
   if (sharedSidebarCount !== 1) throw new Error(`expected one shared sidebar, found ${sharedSidebarCount}`);
   const legacyDashboardSidebarCount = await evaluate(cdp, 'document.querySelectorAll(".dashboard-sidebar").length');
@@ -178,6 +180,8 @@ async function run() {
   await evaluate(cdp, 'document.querySelector(".dashboard-mobile-content .dashboard-pending-manual-card .dashboard-icon-button").click()');
   await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector(".dashboard-mobile-content .dashboard-risk-popover"))')), 'mobile pending manual risk popover');
   await assertText(cdp, '待处理风险');
+  const mobilePopoverGeometry = await evaluate(cdp, '(() => { const bell = document.querySelector(".dashboard-mobile-content .dashboard-pending-manual-card .dashboard-icon-button"); const popover = document.querySelector(".dashboard-mobile-content .dashboard-risk-popover"); if (!bell || !popover) return null; const bellRect = bell.getBoundingClientRect(); const popoverRect = popover.getBoundingClientRect(); return { gap: popoverRect.top - bellRect.bottom, rightDelta: Math.abs(popoverRect.right - bellRect.right), viewportRight: popoverRect.right }; })()');
+  if (!mobilePopoverGeometry || mobilePopoverGeometry.gap > 10 || mobilePopoverGeometry.rightDelta > 12 || mobilePopoverGeometry.viewportRight > 390) throw new Error(`mobile risk popover is not anchored to bell: ${JSON.stringify(mobilePopoverGeometry)}`);
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   await waitFor(async () => Boolean(await evaluate(cdp, '!document.querySelector(".dashboard-mobile-content .dashboard-risk-popover")')), 'mobile pending manual risk popover close');
   const drawerTrigger = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent?.includes("考研英语资料缺少发货凭证")); if (!button) return false; button.click(); return true; })()');
