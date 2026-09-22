@@ -84,9 +84,12 @@
 | `root/backend_chat` | `chat-live-auto-reply` | `codex/chat-live-auto-reply` | `F:\ChenHai\Project\XianYuAgent-chat-live-fix` | Codex `/root` delegated agent | `2026-09-21 00:00:00 +08:00` | `MERGED` | `4001dd6` | `-` | 补充 deferAutoReply→inbox worker→realtime 双消息事件回归已合入主线；API typecheck、auto-reply E2E 4/4、auto-reply unit 46/46、真实 PostgreSQL/Redis 组合脚本均通过，未复现后端丢消息。 |
 
 | `root` | `xianyu-item-detail` | `codex/xianyu-item-detail` | `F:\ChenHai\Project\XianYuAgent-item-detail` | Codex `/root` | `2026-09-22 11:08:00 +08:00` | `REGISTERED` | `-` | `-` | 复用当前已登录 Chrome 商品页抓取真实 MTOP 详情请求；补齐详情参数、原始响应保留与价格/浏览/想要/描述字段映射。 |
-| `root` | `xianyu-item-detail-integration` | `codex/xianyu-item-detail-integration` | `F:\ChenHai\Project\XianYuAgent-item-detail-integration` | Codex `/root` | `2026-09-22 11:20:00 +08:00` | `READY_FOR_MERGE` | `-` | `-` | 商品详情 DB-first、显式闲鱼同步、对象存储图片、系统数据库登录态 live E2E 与截图审核已通过；待锁内合入 main。 |
+| `root` | `xianyu-item-detail-integration` | `codex/xianyu-item-detail-integration` | `F:\ChenHai\Project\XianYuAgent-item-detail-integration` | Codex `/root` | `2026-09-22 11:20:00 +08:00` | `MERGED` | `c2e34e9` | `-` | 商品详情 DB-first、显式闲鱼同步、对象存储图片、系统数据库登录态 live E2E 与截图审核已通过；功能链路已合入 main，缓存态截图证据追加于 `df54c51`。 |
+| `root` | `xianyu-item-detail` | `codex/xianyu-item-detail` | `F:\ChenHai\Project\XianYuAgent-item-detail` | Codex `/root` | `2026-09-22 11:08:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 提交 `2da2d1a`：复用当前已登录 Chrome 商品页抓取真实 MTOP 详情请求；补齐详情参数、原始响应保留与价格/浏览/想要/描述字段映射；定向测试与 API typecheck 通过。 |
+| `root` | `product-default-updated-sort` | `fix/product-default-updated-sort` | `F:\ChenHai\Project\XianYuAgent-product-default-sort` | Codex `/root` | `2026-09-22 13:00:29 +08:00` | `CLEANED` | `850aaaf` | `2026-09-22 13:03:40 +08:00` | `提交 94423ae` 已在锁内以 `--no-ff` 合入；主线商品 API 回归 9/9、Web typecheck 和 diff-check 通过；worktree 与分支已清理。 |
+| `root` | `product-xianyu-updated-at` | `fix/product-xianyu-updated-at` | `F:\ChenHai\Project\XianYuAgent-xianyu-updated-at` | Codex `/root` | `2026-09-22 13:07:44 +08:00` | `MERGED` | `870087f` | `2026-09-22 13:27:10 +08:00` | 中文提交 `0af6257` 已在 merge lock 内以 `--no-ff` 合入 `main`；详情接口抽取闲鱼货架更新时间并回填同步，列表排序/展示只使用 `xianyuUpdatedAt`，无远端时间显示“未获取”；合并后 typecheck、Web 商品 25 项与 PostgreSQL smoke 通过。 |
 | `root` | `coupons-table-fixes-20260922` | `codex/coupons-table-fixes-20260922` | `F:\ChenHai\Project\XianYuAgent-coupons-table-fixes` | Codex `/root` | `2026-09-22 13:12:29 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 修复卡券列表 ID、空状态、表格高度、备注列和卡券名称展示；Web 201 项单测、全量 typecheck/build、Coupons Chrome/CDP E2E 与双 viewport 截图已通过。 |
-| `root` | `coupons-batch-id-sequence-20260922` | `codex/coupons-batch-id-sequence-20260922` | `F:\ChenHai\Project\XianYuAgent-coupons-batch-id` | Codex `/root` | `2026-09-22 14:00:00 +08:00` | `READY_FOR_MERGE` | `-` | `-` | 在前一切片基础上补充可回收数字序号、默认创建时间倒序、时间列双向排序、旧 UUID 兼容与删除后序号复用；类型检查、全量测试、构建、API/Web smoke、Chrome/CDP E2E 与 diff check 已通过，待合入。 |
+| `root` | `coupons-batch-id-sequence-20260922` | `codex/coupons-batch-id-sequence-20260922` | `F:\ChenHai\Project\XianYuAgent-coupons-batch-id` | Codex `/root` | `2026-09-22 14:00:00 +08:00` | `MERGED` | `f7fd2f7` | `-` | 已以 `f7fd2f7` 合入 main；包含可回收数字序号、默认创建时间倒序、时间列双向排序、旧 UUID 兼容与删除后序号复用；合并后保留 main 原有本地改动。 |
 
 ## 主工作区
 
@@ -112,6 +115,9 @@
 | `root` | `agent-trace-input-output` | `codex/agent-trace-input-output` | `F:\ChenHai\Project\XianYuAgent-agent-trace-input-output` | Codex `/root` | `2026-09-21 23:20:00 +08:00` | `CLEANED` | `24b1e6eaaee1bce051c574525029e537a6b15fe4` | `2026-09-21 23:59:00 +08:00` | 独立复核通过并在 merge lock 内以 `--no-ff` 合入 main；合并后 API auto-reply unit 46/46、activity 3/3、Web 179/179、typecheck 与 diff check 通过；PostgreSQL E2E 已补充 input/output 与脱敏断言，待真实数据库环境执行。worktree 元数据已清理，主工作区原有用户修改已保留。 |
 
 ## 登记维护规则
+
+| `root` | `dashboard-home-refresh` | `codex/dashboard-home-refresh` | `F:\ChenHai\Project\XianYuAgent-dashboard-home-refresh` | Codex `/root` | `2026-09-22 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 仪表盘首页布局、趋势时间筛选与指标卡片调整；Web 203 项、API dashboard 单测/PostgreSQL smoke、构建与 Chrome/CDP E2E 已通过。 |
+| `root` | `dashboard-sidebar-fix-20260922` | `codex/dashboard-sidebar-fix` | `F:\ChenHai\Project\XianYuAgent-dashboard-sidebar-fix` | Codex `/root` | `2026-09-22 00:00:00 +08:00` | `CLEANED` | `12cb549` | `2026-09-22 15:05:00 +08:00` | 独立复核通过并已在 merge lock 内合入主线；删除旧 DashboardSidebar、Logo、独立 desktop/mobile shell 及死样式；主线 Web 63 files/207 tests、typecheck、Chrome/CDP dashboard E2E、diff-check 通过。worktree 元数据已清理，目录因本地依赖 junction 残留未删除。 |
 
 1. 创建 worktree 后立即新增一行，至少填完 `agent_id`、`slice_id`、`branch`、`worktree`、`owner`、`created_at` 和 `REGISTERED`。
 2. 开始写入代码或文档后改为 `READY_FOR_REVIEW`。
