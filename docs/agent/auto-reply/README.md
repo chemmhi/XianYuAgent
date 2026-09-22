@@ -15,15 +15,20 @@
 - [`repair-checklist.md`](./repair-checklist.md)：按依赖顺序执行的修复 checklist、验收标准、测试层级和回滚要求。
 - [`modification-plan.md`](./modification-plan.md)：待审核的修改批次、范围、前置决策和每批验收门禁；审核通过前不改业务代码。
 
+## 修复方案
+
+- repair-plan.md：本轮修复方案，覆盖无硬编码路由、低拒绝/低 handoff、澄清、生命周期引导、情绪、跑题拉回、推荐和发送后结果审核。
+
 ## 核心结论
 
 1. 应用启动后自动监听闲鱼网关，不依赖管理员打开页面。
 2. 自动回复 Agent 与 Workspace Agent 完全分离，只共享底层基础设施。
-3. 高风险问题默认转人工，不自动发送解释性消息。
+3. 只有终极敏感信息明确拒绝；普通售后、投诉、发货异常和不确定问题默认优先澄清、继续帮助或引导，不轻易转人工。
 4. Agent 只能选择性调用四个只读工具，不能通过工具修改商品、订单或直接发送消息。
 5. 开发和测试默认使用 `simulate`；`live` 发送继续受环境变量数组白名单约束。
 6. 同一条买家消息只产生一个逻辑回复；长回复可以拆成多段物理消息顺序发送。
 7. Agent 可以在有业务相关性的情况下主动推荐店铺内其他商品，但必须基于店铺商品工具返回的事实。
+8. 本轮修复以结构化状态与版本化策略为核心，禁止业务路由散落在硬编码分支或 Prompt 中。
 
 8. Agent 动态只读消费 `messages.auto_reply_runs` / `messages.auto_reply_run_events`，不复用 Workspace Run/Step；页面必须经过 raw DTO → canonical VM adapter，并以真实数据库回读作为完成证据。
 
