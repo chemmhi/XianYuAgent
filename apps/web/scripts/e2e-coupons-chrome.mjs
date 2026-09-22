@@ -114,6 +114,11 @@ async function run() {
   const adminId = bootstrapPayload.data.profile.id;
   const account = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `coupons-e2e-${process.pid}` });
   const product = await apiRuntime.store.createProduct({ adminId, accountId: account.id, externalProductRef: `COUPON-ITEM-${process.pid}`, title: '卡券 E2E 商品', description: '受控绑定商品', categoryCode: 'digital', attributes: { source: 'coupons-e2e' }, priceMinor: 1990, status: 'published' });
+  const layoutCouponLabel = `Chrome UI 布局卡券 ${process.pid}`;
+  await apiRuntime.store.createCouponBatch({ adminId, accountId: account.id, label: layoutCouponLabel, purpose: 'text', deliveryScope: 'operator_only', metadata: { description: `布局备注 ${process.pid}`, multiSpec: true, specName: '版本', specValue: '标准版' } });
+  for (let index = 1; index < 12; index += 1) {
+    await apiRuntime.store.createCouponBatch({ adminId, accountId: account.id, label: `Chrome UI 布局卡券 ${process.pid} ${index}`, purpose: 'text', deliveryScope: 'operator_only', metadata: { description: `布局备注 ${process.pid} ${index}` } });
+  }
   const createdLabel = `Chrome UI 创建卡券 ${process.pid}`;
   const editedLabel = `Chrome UI 编辑卡券 ${process.pid}`;
   const copiedLabel = `Chrome UI 复制卡券 ${process.pid}`;
@@ -144,8 +149,10 @@ async function run() {
   if (!await setSearchValue(cdp, '__coupon_empty_state__')) throw new Error('coupon search input missing');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('暂无卡券批次'), 'coupon empty state');
   await assertText(cdp, '当前账号范围内没有匹配的批次，可调整筛选或创建新批次。');
+  const emptyStateAudit = await evaluate(cdp, '(() => { const state = document.querySelector(".coupons-panel > .coupons-state"); const panel = document.querySelector(".coupons-panel"); if (!state || !panel) return null; const style = getComputedStyle(state); return { display: style.display, alignItems: style.alignItems, justifyContent: style.justifyContent, flex: style.flex, stateHeight: state.getBoundingClientRect().height, panelHeight: panel.getBoundingClientRect().height }; })()');
+  if (!emptyStateAudit || emptyStateAudit.display !== 'flex' || emptyStateAudit.alignItems !== 'center' || emptyStateAudit.justifyContent !== 'center' || emptyStateAudit.stateHeight <= 0 || emptyStateAudit.panelHeight <= emptyStateAudit.stateHeight) throw new Error('coupon empty state is not centered in the panel remainder');
   await setSearchValue(cdp, '');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('暂无卡券批次'), 'coupon list reset');
+  await waitFor(async () => { const body = String(await evaluate(cdp, 'document.body.innerText')); return !body.includes('暂无卡券批次') && body.includes(layoutCouponLabel); }, 'coupon list reset');
   await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "新建卡券")?.click()');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('固定文字配置'), 'coupon create modal');
   await assertText(cdp, '填写到无需邮寄凭证');
@@ -180,6 +187,9 @@ async function run() {
   const persistedInStore = await waitFor(async () => { const page = await apiRuntime.store.listCouponBatches(adminId, { accountId: account.id, page: 1, pageSize: 100 }); return page.items.some((item) => item.label === createdLabel); }, 'coupon API persistence');
   if (!persistedInStore) throw new Error('UI-created coupon was not persisted by the API store');
   await assertText(cdp, `E2E UI 固定文字内容 ${process.pid}`);
+  const tableLayoutAudit = await evaluate(cdp, `(() => { const scroll = document.querySelector('.coupons-table-scroll'); const table = document.querySelector('[data-coupons-table]'); const firstRow = document.querySelector('[data-coupons-table] .coupons-row:not(.coupons-head)'); const layoutRow = Array.from(document.querySelectorAll('[data-batch-id]')).find((row) => row.textContent?.includes(${JSON.stringify(layoutCouponLabel)})); const style = scroll ? getComputedStyle(scroll) : null; const title = layoutRow?.querySelector('.coupons-title')?.textContent?.trim() ?? ''; const note = layoutRow?.querySelector('.coupons-note')?.textContent?.trim() ?? ''; return { hasHeader: (table?.querySelector('.coupons-head')?.textContent ?? '').includes('备注信息'), firstNumber: firstRow?.querySelector('.coupons-row-number')?.textContent?.trim() ?? '', overflowY: style?.overflowY ?? '', clientHeight: scroll?.clientHeight ?? 0, scrollHeight: scroll?.scrollHeight ?? 0, title, note }; })()`);
+  if (!tableLayoutAudit || !tableLayoutAudit.hasHeader || tableLayoutAudit.firstNumber !== '1' || !['auto', 'scroll'].includes(tableLayoutAudit.overflowY) || tableLayoutAudit.scrollHeight <= tableLayoutAudit.clientHeight) throw new Error('coupon table does not expose the expected sequential ID and internal scroll region');
+  if (tableLayoutAudit.title !== layoutCouponLabel || tableLayoutAudit.note !== `布局备注 ${process.pid}`) throw new Error('coupon name and remark columns are not separated');
   await captureViewport(cdp, 1440, 900, 'coupons-desktop-1440x900.png');
 
   const selected = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("[data-coupons-table] button")).find((candidate) => candidate.getAttribute("aria-label")?.startsWith("选择 ")); if (!button) return false; button.click(); return true; })()');

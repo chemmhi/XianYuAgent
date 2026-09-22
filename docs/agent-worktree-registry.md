@@ -85,6 +85,7 @@
 
 | `root` | `xianyu-item-detail` | `codex/xianyu-item-detail` | `F:\ChenHai\Project\XianYuAgent-item-detail` | Codex `/root` | `2026-09-22 11:08:00 +08:00` | `REGISTERED` | `-` | `-` | 复用当前已登录 Chrome 商品页抓取真实 MTOP 详情请求；补齐详情参数、原始响应保留与价格/浏览/想要/描述字段映射。 |
 | `root` | `xianyu-item-detail-integration` | `codex/xianyu-item-detail-integration` | `F:\ChenHai\Project\XianYuAgent-item-detail-integration` | Codex `/root` | `2026-09-22 11:20:00 +08:00` | `READY_FOR_MERGE` | `-` | `-` | 商品详情 DB-first、显式闲鱼同步、对象存储图片、系统数据库登录态 live E2E 与截图审核已通过；待锁内合入 main。 |
+| `root` | `coupons-table-fixes-20260922` | `codex/coupons-table-fixes-20260922` | `F:\ChenHai\Project\XianYuAgent-coupons-table-fixes` | Codex `/root` | `2026-09-22 13:12:29 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 修复卡券列表 ID、空状态、表格高度、备注列和卡券名称展示；Web 201 项单测、全量 typecheck/build、Coupons Chrome/CDP E2E 与双 viewport 截图已通过。 |
 
 ## 主工作区
 
