@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Chat Spark</title>
+  <desc id="desc">对话气泡与智能闪光结合，突出自然语言工作台。</desc>
+  <rect width="64" height="64" rx="16" fill="#1F3A5F"/>
+  <path d="M13 18.5A7.5 7.5 0 0 1 20.5 11h23A7.5 7.5 0 0 1 51 18.5v14A7.5 7.5 0 0 1 43.5 40H29l-11 10v-10h-.5A7.5 7.5 0 0 1 10 32.5v-14" fill="#fff"/>
+  <path d="m40 16 2 4.6 4.6 2-4.6 2L40 29.2l-2-4.6-4.6-2 4.6-2L40 16Z" fill="#245A8D"/>
+  <circle cx="21" cy="26" r="2" fill="#245A8D"/>
+  <circle cx="27" cy="26" r="2" fill="#245A8D"/>
+</svg>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Negative Y</title>
+  <desc id="desc">以三块圆角方片构成 Y 形负空间，延续现有方块品牌母题。</desc>
+  <rect width="64" height="64" rx="16" fill="#1F3A5F"/>
+  <rect x="13" y="13" width="15" height="15" rx="4.5" fill="#fff"/>
+  <rect x="36" y="13" width="15" height="15" rx="4.5" fill="#fff"/>
+  <rect x="24.5" y="35" width="15" height="16" rx="4.5" fill="#fff"/>
+  <path d="M31 27.5v7.5" fill="none" stroke="#1F3A5F" stroke-width="4.5" stroke-linecap="round"/>
+</svg>
