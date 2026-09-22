@@ -52,7 +52,7 @@ export function MessageTimeline({ messages, phase, hasMoreHistory = false, loadi
           <div className={`messages-bubble ${isOutbound ? 'outbound' : 'inbound'}`}>
             {imageUrl ? <button className="messages-image-button" type="button" aria-label="查看聊天图片" onClick={() => onOpenImage?.(imageUrl)}><img className="messages-image" src={imageUrl} alt="聊天图片" loading="lazy" /></button> : <span>{renderMessageText(message.bodyText || (message.bodyType === 'image' ? '[图片]' : '[系统消息]'))}</span>}
           </div>
-          <div className="messages-message-foot"><time>{formatTime(message.createdAt)}</time>{message.source === 'ai' && <span>AI</span>}{message.source === 'human' && <span>人工</span>}{isOutbound && renderReadState(message)}</div>
+          <div className="messages-message-foot"><time>{formatTime(message.createdAt)}</time>{message.source === 'ai' && <span className="messages-source-label ai">AI</span>}{message.source === 'human' && <span className="messages-source-label human">人工</span>}{isOutbound && renderReadState(message)}</div>
         </div>
       </div>;
     })}

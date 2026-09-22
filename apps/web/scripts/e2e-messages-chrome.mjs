@@ -294,6 +294,18 @@ async function run() {
   assert.equal(await evaluate(cdp, 'document.querySelectorAll(".messages-conversation-item").length'), 2);
   assert.equal(await evaluate(cdp, 'getComputedStyle(document.querySelector(".messages-conversation-scroll")).overflowY'), 'auto');
   assert.equal(await evaluate(cdp, 'getComputedStyle(document.querySelector(".messages-timeline")).overflowY'), 'auto');
+  const typographySnapshot = await evaluate(cdp, '(() => {\n    const first = (selector) => document.querySelector(selector);\n    const fontSize = (selector) => { const node = first(selector); return node ? getComputedStyle(node).fontSize : null; };\n    const tools = first(".messages-sidebar-tools");\n    const search = first(".messages-search");\n    const toolButton = first(".messages-tool-button");\n    const readState = first(".messages-read-state");\n    const sourceLabel = first(".messages-source-label");\n    const toolsStyle = tools ? getComputedStyle(tools) : null;\n    const toolsRect = tools?.getBoundingClientRect();\n    const searchRect = search?.getBoundingClientRect();\n    const paddingLeft = toolsStyle ? Number.parseFloat(toolsStyle.paddingLeft) : 0;\n    const paddingRight = toolsStyle ? Number.parseFloat(toolsStyle.paddingRight) : 0;\n    return {\n      conversationName: fontSize(".messages-conversation-copy strong"),\n      conversationMeta: fontSize(".messages-conversation-copy small"),\n      bubble: fontSize(".messages-bubble"),\n      sourceLabel: sourceLabel ? getComputedStyle(sourceLabel).fontSize : null,\n      readState: readState ? getComputedStyle(readState).fontSize : null,\n      textarea: fontSize("textarea[aria-label=\\"消息内容\\"]"),\n      shortcuts: fontSize(".messages-composer-shortcuts"),\n      assist: fontSize(".messages-ai-assist-label"),\n      toolButton: toolButton ? { width: getComputedStyle(toolButton).width, height: getComputedStyle(toolButton).height } : null,\n      searchAligned: Boolean(toolsRect && searchRect && Math.abs(searchRect.left - (toolsRect.left + paddingLeft)) <= 1 && Math.abs((toolsRect.right - paddingRight) - searchRect.right) <= 1),\n    };\n  })()');
+  const { sourceLabel: _sourceLabel, readState: _readState, ...checkedTypographySnapshot } = typographySnapshot;
+  assert.deepEqual(checkedTypographySnapshot, {
+    conversationName: '14px',
+    conversationMeta: '12px',
+    bubble: '14px',
+    textarea: '14px',
+    shortcuts: '12px',
+    assist: '12px',
+    toolButton: { width: '34px', height: '34px' },
+    searchAligned: true,
+  }, 'messages typography hierarchy must match the current platform preview');
   await evaluate(cdp, `(() => { const input = document.querySelector('input[aria-label="搜索会话"]'); const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set; setter?.call(input, '搜索商品'); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await waitFor(async () => await evaluate(cdp, 'document.querySelectorAll(".messages-conversation-list button").length === 1'), 'search filtering');
   await evaluate(cdp, `(() => { const input = document.querySelector('input[aria-label="搜索会话"]'); const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set; setter?.call(input, ''); input.dispatchEvent(new Event('input', { bubbles: true })); document.querySelectorAll('.messages-filter-tabs button')[1]?.click(); })()`);
@@ -351,6 +363,7 @@ async function run() {
     traceId: 'messages-chrome-read-receipt',
   });
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-read-state.read"))'), 'platform 40103 read receipt');
+  assert.equal(await evaluate(cdp, 'getComputedStyle(document.querySelector(".messages-read-state.read")).fontSize'), '12px', 'read state must stay legible after the platform receipt');
   const outboundAlignment = await evaluate(cdp, '(() => { const row = document.querySelector(".messages-bubble-row.outbound"); const stack = row?.querySelector(".messages-message-stack"); if (!row || !stack) return null; const rowStyle = getComputedStyle(row); const stackStyle = getComputedStyle(stack); return { flexDirection: rowStyle.flexDirection, justifyContent: rowStyle.justifyContent, textAlign: stackStyle.textAlign }; })()');
   assert.deepEqual(outboundAlignment, { flexDirection: 'row-reverse', justifyContent: 'flex-start', textAlign: 'left' }, 'seller messages stay right-positioned while bubble text aligns left');
 

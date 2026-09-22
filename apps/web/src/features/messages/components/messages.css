@@ -154,13 +154,15 @@
 
 .messages-sidebar-header strong {
   color: var(--text);
-  font-size: 13px;
+  font-size: 16px;
+  line-height: 1.35;
 }
 
 .messages-sidebar-header small,
 .messages-main-header small {
   color: var(--sub);
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .messages-header-loading {
@@ -185,6 +187,11 @@
   border-bottom-color: var(--border);
 }
 
+.messages-search {
+  max-width: none;
+  align-self: stretch;
+}
+
 .messages-filter-tabs {
   gap: 4px;
 }
@@ -193,7 +200,7 @@
   border-radius: 8px;
   padding: 8px 6px;
   color: var(--sub);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .messages-filter-tabs button.active {
@@ -202,9 +209,9 @@
 }
 
 .messages-conversation-list button {
-  grid-template-columns: 40px minmax(0, 1fr) 64px;
+  grid-template-columns: 44px minmax(0, 1fr) 64px;
   gap: 10px;
-  padding: 12px 14px;
+  padding: 14px 14px;
   border-bottom-color: var(--border);
 }
 
@@ -220,18 +227,23 @@
 .messages-conversation-avatar {
   background: var(--soft-blue-bg);
   color: var(--link);
+  width: 44px;
+  height: 44px;
+  font-size: 14px;
 }
 
 .messages-conversation-copy strong {
   color: var(--text);
-  font-size: 12px;
+  font-size: 14px;
+  line-height: 1.4;
 }
 
 .messages-conversation-copy small,
 .messages-conversation-copy em,
 .messages-conversation-meta small {
   color: var(--sub);
-  font-size: 10px;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .messages-conversation-item {
@@ -252,11 +264,15 @@
   color: #fff;
 }
 
+.messages-main-identity strong {
+  font-size: 15px;
+}
+
 .messages-main-header-meta {
   min-width: 0;
   gap: 12px;
   color: var(--sub);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .messages-main-header-meta > span:first-child {
@@ -304,7 +320,7 @@
   padding: 10px 12px;
   background: #fff;
   color: var(--text);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
@@ -433,7 +449,7 @@
   width: fit-content;
   margin-top: 3px;
   color: var(--axis);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .messages-bubble-row.outbound .messages-message-foot {
@@ -442,15 +458,35 @@
 
 .messages-read-state {
   color: var(--link);
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .messages-read-state.unread {
   color: #d97706;
 }
 
+.messages-source-label {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.messages-source-label.human {
+  color: var(--link);
+}
+
+.messages-source-label.ai {
+  color: #7c3aed;
+}
+
 .messages-link {
   color: var(--link);
+}
+
+.messages-bubble.outbound .messages-link {
+  color: #fff;
+  font-weight: 700;
+  text-decoration-color: rgba(255, 255, 255, .88);
 }
 
 .messages-composer {
@@ -479,27 +515,39 @@
 }
 
 .messages-composer-assist-row {
-  min-height: 28px;
+  min-height: 36px;
   display: flex;
   align-items: center;
   border-bottom: 0;
 }
 
 .messages-composer-tools {
-  gap: 4px;
+  gap: 6px;
+}
+
+.messages-tool-button {
+  width: 34px;
+  height: 34px;
+  font-size: 22px;
+}
+
+.messages-emoji-button {
+  font-size: 22px;
 }
 
 .messages-ai-assist-label {
   margin-left: 4px;
   color: var(--axis);
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .messages-composer textarea {
   min-height: 56px;
   padding: 7px 0 10px;
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
+  line-height: 1.6;
 }
 
 .messages-composer-editor {
@@ -536,8 +584,8 @@
   overflow: hidden;
   padding: 7px 0 10px;
   color: var(--text);
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 14px;
+  line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   pointer-events: none;
@@ -579,7 +627,8 @@
   align-items: center;
   gap: 10px;
   color: var(--axis);
-  font-size: 10px;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .messages-composer-shortcuts > span:first-child {
@@ -591,8 +640,8 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-width: 70px;
-  height: 32px;
+  min-width: 74px;
+  height: 36px;
   border-radius: 8px;
   background: var(--link);
 }
@@ -616,7 +665,7 @@
   border: 1px solid var(--success-border);
   background: var(--success-bg);
   color: var(--success);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 @media (max-width: 900px) {

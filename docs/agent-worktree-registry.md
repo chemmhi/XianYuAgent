@@ -93,7 +93,7 @@
 | `root` | `coupons-batch-id-sequence-20260922` | `codex/coupons-batch-id-sequence-20260922` | `F:\ChenHai\Project\XianYuAgent-coupons-batch-id` | Codex `/root` | `2026-09-22 14:00:00 +08:00` | `MERGED` | `f7fd2f7` | `-` | 已以 `f7fd2f7` 合入 main；包含可回收数字序号、默认创建时间倒序、时间列双向排序、旧 UUID 兼容与删除后序号复用；合并后保留 main 原有本地改动。 |
 | `root` | `coupons-relation-modal-20260922` | `fix/coupons-relation-modal-20260922` | `F:\ChenHai\Project\XianYuAgent-coupons-relation-modal-20260922` | Codex `/root` | `2026-09-22 15:04:00 +08:00` | `CLEANED` | `8d81000` | `2026-09-22 15:10:00 +08:00` | 提交 `21f8cfa` 已在 stale lock 恢复后以 `--no-ff` 合入 main；空态四向居中、弹窗视口约束/内部滚动、商品标题字号与隐藏 ID 已修复；Web 210 项、typecheck、build、Coupons Chrome/CDP 与 diff-check 通过；worktree 与分支已清理。 |
 | `root` | `main-logo-candidates-20260922` | `codex/main-logo-candidates` | `F:\ChenHai\Project\XianYuAgent-main-logo-candidates` | Codex `/root` | `2026-09-22 16:20:00 +08:00` | `CLEANED` | `da7aa68` | `2026-09-22 16:35:41 +08:00` | 保留 5 套主 Logo；默认 Agent Fish；VITE_LOGO_VARIANT 驱动侧栏与 favicon；主线 Web typecheck、brand/App 定向测试、build 与 diff check 已通过；主工作区原有未提交改动已保留。 |
-| `root` | `chat-typography-fix-20260922` | `fix/chat-typography-20260922` | `F:\ChenHai\Project\XianYuAgent-chat-typography-fix` | Codex `/root` | `2026-09-22 18:58:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 在线聊天字体层级 HTML 预览；待用户确认后再修改正式组件样式。 |
+| `root` | `chat-typography-fix-20260922` | `fix/chat-typography-20260922` | `F:\ChenHai\Project\XianYuAgent-chat-typography-fix` | Codex `/root` | `2026-09-22 18:58:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 已按确认预览落地在线聊天字体层级、会话标签、搜索框对齐、composer 控件和外发链接对比度；定向 Vitest、Web typecheck/build、Chrome/CDP messages E2E 通过。 |
 
 ## 主工作区
 
