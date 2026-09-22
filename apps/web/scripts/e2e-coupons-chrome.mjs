@@ -187,8 +187,11 @@ async function run() {
   if (!createReady) throw new Error('coupon create form fields missing');
   await evaluate(cdp, 'document.querySelector(".coupons-editor-modal button[type=submit]")?.click()');
   await waitFor(async () => !(await evaluate(cdp, 'Boolean(document.querySelector(".coupons-editor-modal"))')) && String(await evaluate(cdp, 'document.body.innerText')).includes(createdLabel), 'coupon created from UI');
-  const persistedInStore = await waitFor(async () => { const page = await apiRuntime.store.listCouponBatches(adminId, { accountId: account.id, page: 1, pageSize: 100 }); return page.items.some((item) => item.label === createdLabel); }, 'coupon API persistence');
-  if (!persistedInStore) throw new Error('UI-created coupon was not persisted by the API store');
+  const persistedBatch = await waitFor(async () => {
+    const page = await apiRuntime.store.listCouponBatches(adminId, { accountId: account.id, page: 1, pageSize: 100 });
+    return page.items.find((item) => item.label === createdLabel) ?? false;
+  }, 'coupon API persistence');
+  if (!persistedBatch) throw new Error('UI-created coupon was not persisted by the API store');
   await assertText(cdp, `E2E UI 固定文字内容 ${process.pid}`);
   const tableLayoutAudit = await evaluate(cdp, `(() => { const scroll = document.querySelector('.coupons-table-scroll'); const table = document.querySelector('[data-coupons-table]'); const firstRow = document.querySelector('[data-coupons-table] .coupons-row:not(.coupons-head)'); const layoutRow = Array.from(document.querySelectorAll('[data-batch-id]')).find((row) => row.querySelector('.coupons-title')?.textContent?.trim() === ${JSON.stringify(layoutCouponLabel)}); const style = scroll ? getComputedStyle(scroll) : null; const title = layoutRow?.querySelector('.coupons-title')?.textContent?.trim() ?? ''; const note = layoutRow?.querySelector('.coupons-note')?.textContent?.trim() ?? ''; const headers = Array.from(table?.querySelectorAll('.coupons-head > span') ?? []).map((item) => (item.textContent?.trim() ?? '').replace(/[↕↑↓]/g, '').trim()); const preview = layoutRow?.querySelector('.coupons-preview-cell'); const actionSelector = '.coupons-row-actions > button, .coupons-row-actions > .coupons-more-actions > button'; const actionButtons = layoutRow?.querySelectorAll(actionSelector)?.length ?? 0; const toolbar = document.querySelector('.coupons-toolbar'); return { hasHeader: (table?.querySelector('.coupons-head')?.textContent ?? '').includes('备注信息'), firstNumber: firstRow?.querySelector('.coupons-row-number')?.textContent?.trim() ?? '', overflowY: style?.overflowY ?? '', clientHeight: scroll?.clientHeight ?? 0, scrollHeight: scroll?.scrollHeight ?? 0, title, note, headers, previewTag: preview?.tagName ?? '', previewClass: preview?.className ?? '', actionButtons, hasStatusFilter: Boolean(toolbar?.querySelector('[data-coupons-status-filter]')), hasStockFilter: Boolean(toolbar?.querySelector('[data-coupons-stock-filter]')), actionLabels: Array.from(layoutRow?.querySelectorAll(actionSelector) ?? []).map((button) => button.getAttribute('aria-label') ?? '') }; })()`);
   const expectedHeaders = ['ID', '名称', '类型', '内容预览', '备注信息', '发货设置', '状态', '时间', '操作'];
@@ -213,7 +216,19 @@ async function run() {
   await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "关联商品")?.click()');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('待选商品'), 'coupon relation modal');
   await assertText(cdp, '已选商品');
-  await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "取消")?.click()');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('卡券 E2E 商品'), 'coupon relation product list');
+  const relationProductSelected = await evaluate(cdp, `(() => { const product = Array.from(document.querySelectorAll('.coupons-relation-pane:not(.selected-pane) button.coupons-relation-item')).find((button) => button.textContent?.includes('卡券 E2E 商品')); if (!product) return false; product.click(); return true; })()`);
+  if (!relationProductSelected) throw new Error('coupon relation product option missing');
+  await evaluate(cdp, 'Array.from(document.querySelectorAll(".coupons-relation-modal footer button")).find((button) => button.classList.contains("primary"))?.click()');
+  await waitFor(async () => await evaluate(cdp, '!document.querySelector(".coupons-relation-modal")'), 'coupon relation save closes modal');
+  const relationPersisted = await waitFor(async () => {
+    const batch = await apiRuntime.store.getCouponBatch(adminId, persistedBatch.id);
+    const productRecord = await apiRuntime.store.getProduct(adminId, product.id);
+    const activeBinding = batch?.bindings?.find((binding) => binding.productId === product.id && binding.status === 'active');
+    const productBinding = productRecord?.couponBatches?.find((binding) => binding.id === batch?.sequenceId && binding.label === createdLabel);
+    return activeBinding && productBinding ? { batchId: batch.id, bindingId: activeBinding.id, productBatchId: productBinding.id } : false;
+  }, 'coupon relation persistence and product binding');
+  if (!relationPersisted || relationPersisted.productBatchId !== persistedBatch.sequenceId) throw new Error('coupon relation was not persisted on both batch and product records');
 
   const selectedRow = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(createdLabel)})); const button = row?.querySelector('button[aria-label="编辑"]'); if (!button) return false; button.click(); return true; })()`);
   if (!selectedRow) throw new Error('created coupon edit button missing');
