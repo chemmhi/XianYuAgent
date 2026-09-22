@@ -38,7 +38,8 @@
 .products-page-button:disabled { cursor: not-allowed; opacity: .48; }
 .products-pagination-ellipsis { min-width: 16px; text-align: center; color: var(--sub); }
 .products-pagination-status { white-space: nowrap; font-variant-numeric: tabular-nums; }
-.products-state { display: grid; flex: 1; place-items: center; gap: 6px; width: 100%; min-height: 0; box-sizing: border-box; padding: 28px; color: var(--sub); text-align: center; }
+.products-state { display: grid; flex: 1 1 auto; align-content: center; justify-content: center; justify-items: center; gap: 6px; align-self: stretch; width: 100%; min-height: 0; box-sizing: border-box; padding: 28px; color: var(--sub); text-align: center; }
+.products-state span { max-width: 420px; line-height: 1.6; }
 .products-state strong, .products-detail-state strong { color: var(--text); font-size: 13px; }
 .products-state span, .products-detail-state span { font-size: 11px; }
 .products-error { color: var(--danger); }

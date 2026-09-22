@@ -22,6 +22,13 @@ function message(overrides: Partial<MessageVM>): MessageVM {
 }
 
 describe('MessageTimeline', () => {
+  it('renders the empty history state in the shared timeline container', () => {
+    const html = renderToStaticMarkup(createElement(MessageTimeline, { phase: 'empty', messages: [] }));
+
+    expect(html).toContain('class="messages-timeline-state"');
+    expect(html).toContain('>暂无历史消息</div>');
+  });
+
   it('renders http links as safe clickable anchors and preserves punctuation', () => {
     const html = renderToStaticMarkup(createElement(MessageTimeline, { phase: 'success', messages: [message({ bodyText: '请查看 https://example.com/item?id=1。' })] }));
     expect(html).toContain('class="messages-link"');

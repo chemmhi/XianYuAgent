@@ -76,4 +76,30 @@ describe('dashboard API mode resolution', () => {
     expect(html).toContain('>管理员</strong>');
     expect(html).toContain('empty-name@example.com');
   });
+
+  it('falls back to 管理员 for placeholder display names', () => {
+    const props = {
+      admin: { id: 'admin-placeholder-name', email: 'placeholder-name@example.com', displayName: '?????', role: 'admin' },
+      page: 'dashboard',
+      accountsApi: {},
+      productsApi: {},
+      couponsApi: {},
+      messagesApi: {},
+      workspaceApi: {},
+      ordersApi: {},
+      settingsApi: {},
+      autoReplyAgentSettingsApi: {},
+      openaiSettingsApi: {},
+      modelProviderApi: {},
+      agentDynamicsApi: {},
+      dashboardApi: { getSnapshot: vi.fn() },
+      navigate: vi.fn(),
+    } as unknown as Parameters<typeof AuthenticatedShell>[0];
+
+    const html = renderToStaticMarkup(createElement(AuthenticatedShell, props));
+
+    expect(html).toContain('>管理员</strong>');
+    expect(html).not.toContain('>?????</strong>');
+    expect(html).toContain('placeholder-name@example.com');
+  });
 });

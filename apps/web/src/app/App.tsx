@@ -93,7 +93,8 @@ export default function App() {
 
 export function AuthenticatedShell({ admin, page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi, agentDynamicsApi, dashboardApi, navigate }: { admin?: AdminProfile | null; page: PageKey; accountsApi: ReturnType<typeof createAccountsApi>; productsApi: ReturnType<typeof createProductsApi>; couponsApi: ReturnType<typeof createCouponsApi>; messagesApi: ReturnType<typeof createMessagesApi>; workspaceApi: ReturnType<typeof createWorkspaceApi>; ordersApi: ReturnType<typeof createOrdersApi>; settingsApi: ReturnType<typeof createCredentialApi>; autoReplyAgentSettingsApi: ReturnType<typeof createAutoReplyAgentSettingsApi>; openaiSettingsApi: ReturnType<typeof createOpenAISettingsApi>; modelProviderApi: ReturnType<typeof createModelProviderApi>; agentDynamicsApi: AgentDynamicsApi; dashboardApi: ReturnType<typeof createDashboardApi>; navigate: (next: PageKey) => void }) {
   const dashboardApiMode = resolveDashboardMode(apiMode, import.meta.env.VITE_DASHBOARD_MODE);
-  const adminName = admin?.displayName?.trim() || '管理员';
+  const candidateAdminName = admin?.displayName?.trim() ?? '';
+  const adminName = candidateAdminName && !/^[?？]+$/.test(candidateAdminName) ? candidateAdminName : '管理员';
   const adminEmail = admin?.email ?? '—';
   const adminInitial = Array.from(adminName)[0] ?? '管';
   return (
