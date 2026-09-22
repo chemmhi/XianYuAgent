@@ -20,6 +20,13 @@
 | AR-RA-007 | P2 | 旧文档继续传播默认 handoff 语义 | OPEN | 旧文档加兼容横幅，canonical policy 迁移映射 |
 | AR-RA-008 | P2 | 指标把传输完成当成业务成功 | OPEN | KPI 拆分并保留 resolution evidence |
 | AR-RA-009 | P1 | AR-VS-00 策略已文档化但尚未通过独立评审和代码回归 | OPEN | 完成三轮复审，随后在 AR-VS-01 至 AR-VS-07 中以测试和真实回读验证 |
+| AR-RA-010 | P1 | canonical ActionKind、优先级和互斥规则未统一，导致路由不可唯一复现 | OPEN | 冻结动作枚举、优先级、互斥矩阵和 PolicyDecisionTrace |
+| AR-RA-011 | P1 | clarify/awaiting_user 的不回复、重复澄清和目标切换闭环缺失 | OPEN | 定义澄清预算、等待状态、重试和切换不变量并补回归 |
+| AR-RA-012 | P1 | handoff 白名单、reason code 和证据阈值过于开放 | OPEN | 定义可枚举 handoff 原因、证据门槛和版本化策略 |
+| AR-RA-013 | P1 | “等价秘密”及混合消息的部分拒绝和全链路拦截不可执行 | OPEN | 冻结敏感分类边界、fail-closed、变体样本、脱敏和出站/日志/备份拦截测试 |
+| AR-RA-014 | P1 | 状态字段命名与迁移不变量不统一，无法保证生命周期和并发安全 | OPEN | 统一 canonical state 字段、映射、租户主键、CAS、乱序和陈旧回放语义 |
+| AR-RA-015 | P1 | PolicyDecisionTrace、Outcome Review 和 ConversationState 持久化契约不完整 | OPEN | 补 schema、证据窗口、lease、幂等、重试、超时、CAS 和回放契约 |
+| AR-RA-016 | P1 | 新策略缺少可采信的测试、阈值告警、灰度和回滚演练证据 | OPEN | 修复依赖并执行安全回归、指标告警、canary、kill switch、迁移回滚和 reconcile 演练 |
 
 ## 旧风险映射
 

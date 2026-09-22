@@ -27,3 +27,47 @@
 ## 复审规则
 
 评审问题必须先修复，再重新执行受影响门禁和测试，最后由独立评审关闭。未关闭的 P0–P2 不得进入下一阶段。
+
+## 2026-09-23：AR-VS-00 三轮独立复审
+
+| 评审编号 | 类型 | 结论 | 关键证据 |
+| --- | --- | --- | --- |
+| AR-VS00-R1 | 业务 / 验收 | 有条件通过，保持 READY_FOR_REVIEW | `slices/AR-VS-00-policy-matrix.md`、`slices/AR-VS-00-traceability.md`、`decisions/ADR-AR-0001-route-and-refusal-policy.md` |
+| AR-VS00-R2 | 架构 / 数据流 | FAIL / 阻断 | `02-target-architecture.md`、`03-domain-policy-contract.md`、`04-data-api-contract.md`、现有 `apps/api/src/*` 基线代码 |
+| AR-VS00-R3 | 质量 / 安全 / 运维 | FAIL / BLOCKED_BY_EVIDENCE | `06-stage-gates.md`、`07-risk-register.md`、`11-release-rollback.md`、自动回复测试与发布证据 |
+
+### R1 业务 / 验收阻断项
+
+- canonical `ActionKind`、优先级和互斥规则未冻结；现有 `answer_fact`、`guide_next_step`、`continue_help`、`acknowledge_and_continue` 等命名不一致。
+- `clarify → awaiting_user` 的不回复、重复澄清和目标切换规则未闭环。
+- handoff 白名单、reason code 和事实/权限证据阈值未枚举。
+- “等价秘密”、混合消息的部分拒绝、出站拦截和脱敏验收未具体化。
+- `resolved/closed` 的业务证据优先级、否定证据和重开窗口未冻结。
+
+### R2 架构 / 数据流阻断项
+
+- `buyerJourneyStage`、`journeyStage`、`observedStage`、`targetStage`、`orderPhase` 并存，缺少 canonical 字段、映射和迁移不变量。
+- PolicyEngine 缺少可持久化的 `PolicyConfig`、规则优先级/冲突处理、`policyDecisionId`、`ruleId`、facts/signals 摘要和 reason codes。
+- Outcome Review 缺少 resolutionStatus、证据类型/阈值、claim/lease、幂等、重试/超时、CAS 和旧版本拒绝语义。
+- ConversationState 缺少主键/租户唯一约束、stateVersion/CAS、乱序事件、重复消息和陈旧回放处理。
+- 现有代码仍存在正则/hardSafety 直连 handoff，模型协议仍只有 `reply/handoff`，与目标架构存在已确认偏离。
+
+### R3 质量 / 安全 / 运维阻断项
+
+- AR-VS-00 仅完成文档，当前没有新策略的实现和回归证据；`npm --workspace apps/api run test:auto-reply:unit` 因缺少 `tsx` 依赖未启动。
+- 敏感检测尚无分类器版本、混淆/变体覆盖、fail-closed、红队样本集和日志/trace/metrics/备份/重试链路的完整泄漏验证。
+- 指标未定义阈值、时间窗口、样本量、告警路由、Owner、保留期和 runbook。
+- 灰度/回滚缺少 feature flag、canary 样本、停止条件、kill switch、迁移回滚命令、外部发送 reconcile、RTO/RPO 和演练证据。
+- 旧测试仍把混合敏感消息和模型直接 handoff 当作合法行为，需在后续切片改写。
+
+### 用户必须确认的裁决项
+
+1. canonical `ActionKind` 枚举、优先级和互斥规则；
+2. 澄清与 `awaiting_user` 的持续、重试和目标切换策略；
+3. handoff 白名单、reason code 和证据阈值；
+4. 敏感信息边界是否严格限定为用户列举项，是否保留“等价秘密”；
+5. 买家确认、领域事实、人工覆盖对 `resolved/closed` 的判定优先级与重开窗口。
+
+### 总体结论
+
+AR-VS-00 三轮复审已执行，但阶段 0 门禁为 `BLOCKED`，不能标记 `PASS`，不能进入 AR-VS-01。必须先完成上述裁决、修订受影响文档、补齐验证证据，再重新执行受影响的复审轮次。
