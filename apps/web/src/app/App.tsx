@@ -26,6 +26,10 @@ import { DashboardPage } from '../features/dashboard/components/DashboardPage';
 import { createAgentDynamicsApi, createMockAgentDynamicsApi, type AgentDynamicsApi } from '../features/agent-dynamics/api';
 import { AgentDynamicsPage } from '../features/agent-dynamics/components/AgentDynamicsPage';
 import { ControlsPreview } from '../shared/ui/ControlsPreview';
+import { Logo } from '../shared/ui/Logo';
+import { logoAssetPath, resolveLogoVariant } from '../shared/ui/brand';
+
+const activeLogoVariant = resolveLogoVariant(import.meta.env.VITE_LOGO_VARIANT);
 
 function pageFromPath(pathname: string): PageKey {
   const page = pathname.replace(/^\//, '') as PageKey;
@@ -51,6 +55,16 @@ function iconFor(name: string) {
 }
 
 export default function App() {
+  useEffect(() => {
+    document.title = 'XianyuSellerAgent · 运营控制台';
+    const icon = document.querySelector<HTMLLinkElement>('link[data-xianyu-brand-icon]') ?? document.createElement('link');
+    icon.rel = 'icon';
+    icon.type = 'image/svg+xml';
+    icon.href = logoAssetPath(activeLogoVariant);
+    icon.dataset.xianyuBrandIcon = 'true';
+    if (!icon.isConnected) document.head.appendChild(icon);
+  }, []);
+
   if (window.location.pathname === '/controls') return <ControlsPreview />;
   const [page, setPage] = useState<PageKey>(() => pageFromPath(window.location.pathname));
   const dashboardMode = resolveDashboardMode(apiMode, import.meta.env.VITE_DASHBOARD_MODE);
@@ -101,7 +115,7 @@ export function AuthenticatedShell({ admin, page, accountsApi, productsApi, coup
     <div className="app-viewport">
       <div className={`desktop-shell${page === 'products' ? ' products-shell' : page === 'accounts' ? ' accounts-shell' : page === 'orders' ? ' orders-shell' : page === 'coupons' ? ' coupons-shell' : page === 'settings' ? ' settings-shell' : page === 'agent-dynamics' ? ' agent-dynamics-shell-host' : ''}`}>
         <aside className="sidebar">
-          <div className="brand-block"><div className="brand-mark">Y</div><div className="brand-copy"><strong>XianyuSellerAgent</strong><span>运营控制台</span></div></div>
+          <div className="brand-block"><Logo className="brand-mark" variant={activeLogoVariant} label="XianyuSellerAgent Logo" /><div className="brand-copy"><strong>XianyuSellerAgent</strong><span>运营控制台</span></div></div>
           <div className="side-section">运营台</div>
           <nav className="side-nav" aria-label="主导航">
             {navItems.map((item) => <button key={item.key} type="button" className={page === item.key ? 'active' : ''} aria-current={page === item.key ? 'page' : undefined} onClick={() => navigate(item.key)}>{iconFor(item.icon)}<span>{item.label}</span><small>{item.sub}</small></button>)}

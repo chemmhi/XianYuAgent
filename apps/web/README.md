@@ -6,3 +6,4 @@
 - 正式前端按阶段 3 组件契约组织路由、页面、领域模块、状态和 API adapter。
 - 当前迁移范围是阶段 5 S4-VS1 账号管理切片；其他主体功能按阶段 4 计划逐片实现。
 - 不复制 `SellerAgent/src/App.tsx` 或 `SellerAgent/src/styles.css` 作为正式前端宿主。
+- 主 Logo 由 `VITE_LOGO_VARIANT` 控制，可选 `signal-grid`、`agent-fish`、`chat-spark`、`gateway-check`、`orbit-box`；未设置或填写非法值时默认使用 `agent-fish`。
