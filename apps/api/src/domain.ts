@@ -498,6 +498,165 @@ export type AutoReplyDecision = 'replied' | 'handoff' | 'skipped' | 'failed';
 export type AutoReplyRunStatus = 'received' | 'classified' | 'context_loaded' | 'generated' | 'simulated' | 'persisted' | 'handoff' | 'skipped' | 'failed';
 export type AutoReplyRunStage = 'gateway_received' | 'intent_recognition' | 'context_read' | 'reply_generation' | 'sending' | 'persisted' | 'handoff' | 'skipped' | 'failed';
 
+/** Canonical business actions used by the policy kernel. */
+export const AUTO_REPLY_ACTION_KINDS = [
+  'ANSWER_FACT',
+  'GUIDE_NEXT_STEP',
+  'CLARIFY',
+  'ACKNOWLEDGE_CONTINUE',
+  'REDIRECT',
+  'SWITCH_GOAL',
+  'RECOMMEND',
+  'WAIT_FOR_USER',
+  'HANDOFF',
+  'REFUSE_SENSITIVE',
+] as const;
+
+export type ActionKind = (typeof AUTO_REPLY_ACTION_KINDS)[number];
+export type SafetyHandling = 'NONE' | 'PARTIAL_REFUSAL' | 'FULL_REFUSAL';
+export type AutoReplyGoalStatus = 'active' | 'awaiting_user' | 'resolved' | 'needs_followup' | 'unresolved' | 'handoff';
+export type AutoReplyPolicyStatus = 'DRAFT' | 'ACTIVE' | 'RETIRED' | 'ROLLBACK_TARGET';
+
+export interface AutoReplyQuestionBudget {
+  maxQuestionsPerTurn: 1;
+  maxRounds: number;
+}
+
+export interface AutoReplyPolicyPredicate {
+  [key: string]: boolean | number | string | readonly (boolean | number | string)[];
+}
+
+export interface AutoReplyPolicyRule {
+  ruleId: string;
+  predicate: AutoReplyPolicyPredicate;
+  primaryAction: ActionKind;
+  safetyHandling: SafetyHandling;
+  nextState: Record<string, unknown>;
+  priority: number;
+  specificity: number;
+  requiredEvidenceCount: number;
+  successCriteria: string[];
+  reasonCodes: string[];
+}
+
+export interface AutoReplyHandoffPolicy {
+  allowedReasonCodes: string[];
+  factUnavailable: {
+    minAttempts: number;
+    windowSeconds: number;
+    deadlineSeconds: number;
+    requiredSourceIds: string[];
+    requiredErrorCodes: string[];
+  };
+}
+
+export interface AutoReplyResolutionPolicy {
+  reopenWindowSeconds: number;
+  reopenEvidenceTypes: string[];
+  closeRequiresWindow: true;
+}
+
+export interface AutoReplyReviewPolicy {
+  leaseSeconds: number;
+  maxAttempts: number;
+  backoffSeconds: number[];
+}
+
+export interface PolicyConfig {
+  policyVersion: string;
+  policyHash: string;
+  status: AutoReplyPolicyStatus;
+  accountScope: string;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  publishedAt?: string;
+  activatedAt?: string;
+  previousPolicyVersion?: string;
+  immutable: true;
+  actionPriority: Record<ActionKind, number>;
+  actionMutex: Array<{ left: ActionKind; right: ActionKind }>;
+  precedenceRules: AutoReplyPolicyRule[];
+  clarification: AutoReplyQuestionBudget & { awaitingUserTtlSeconds: number };
+  handoff: AutoReplyHandoffPolicy;
+  resolution: AutoReplyResolutionPolicy;
+  review: AutoReplyReviewPolicy;
+}
+
+export interface Objective {
+  objectiveId: string;
+  accountId: string;
+  conversationId: string;
+  goalType: string;
+  status: AutoReplyGoalStatus;
+  successCriteria: string[];
+  sourceMessageId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConversationState {
+  stateId: string;
+  accountId: string;
+  conversationId: string;
+  stateVersion: number;
+  activeGoalId?: string;
+  goalStatus: AutoReplyGoalStatus;
+  observedStage?: string;
+  targetStage?: string;
+  emotionSnapshot?: Record<string, unknown>;
+  topicRelation?: string;
+  pendingQuestions: Array<Record<string, unknown>>;
+  clarificationRound: number;
+  recommendationState?: Record<string, unknown>;
+  awaitingUser: boolean;
+  awaitingUserSince?: string;
+  awaitingUserTtl?: string;
+  lastMessageId?: string;
+  transitionAt: string;
+  policyVersion?: string;
+  lastSourceEventId?: string;
+  lastSourceSequence: number;
+  processedEventIds: string[];
+  processedIdempotencyKeys: string[];
+}
+
+export interface ActionPlan {
+  actionPlanId: string;
+  primaryAction: ActionKind;
+  primaryGoal: Objective;
+  requiredFacts: string[];
+  successCriteria: string[];
+  allowedTools: string[];
+  questionBudget: AutoReplyQuestionBudget;
+  recommendationAllowed: boolean;
+  handoffAllowed: boolean;
+  nextState: Record<string, unknown>;
+  safetyHandling: SafetyHandling;
+  policyDecisionId: string;
+  policyVersion: string;
+  reasonCodes: string[];
+  evidenceRefs: string[];
+  supersedesActionPlanId?: string;
+}
+
+export interface PolicyDecisionTrace {
+  policyDecisionId: string;
+  policyVersion: string;
+  ruleId: string;
+  precedenceRule: string;
+  primaryAction: ActionKind;
+  safetyHandling: SafetyHandling;
+  nextState: Record<string, unknown>;
+  reasonCodes: string[];
+  signalDigest: string;
+  factDigest: string;
+  accountScope: string;
+  stateVersionBefore: number;
+  stateVersionAfter: number;
+  actionPlanId: string;
+  createdAt: string;
+}
+
 /**
  * Persisted, redacted evidence for one automatic-reply attempt.
  * Raw buyer text and prompt/context bodies are intentionally not stored here.
