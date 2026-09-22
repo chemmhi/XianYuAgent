@@ -7,7 +7,7 @@
 
 设计依据来自 `docs/PRD.md` 与 `xianyu-admin-design-style`：闲鱼数字商品卖家、Agent 工作台、Policy Gateway、Confirmation Card、Outbox、Audit，以及当前项目的深蓝 + 方块母题。
 
-## 六个方向
+## 五个方向
 
 | 文件 | 主要隐喻 | 适合度 |
 | --- | --- | --- |

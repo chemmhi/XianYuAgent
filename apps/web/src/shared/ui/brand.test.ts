@@ -10,7 +10,7 @@ describe('brand logo selection', () => {
   it('accepts only the five shipped logo variants', () => {
     expect(resolveLogoVariant('signal-grid')).toBe('signal-grid');
     expect(resolveLogoVariant('gateway_check')).toBe('gateway-check');
-    expect(resolveLogoVariant('negative-y')).toBe('agent-fish');
+    expect(resolveLogoVariant('legacy-logo')).toBe('agent-fish');
     expect(resolveLogoVariant('unknown')).toBe('agent-fish');
   });
 
