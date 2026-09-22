@@ -5,8 +5,8 @@ import { InputField } from '../../../shared/ui/InputField';
 import { SelectField } from '../../../shared/ui/SelectField';
 
 function Icon({ name }: { name: string }) {
+  if (name === 'bell') return <svg aria-hidden="true" viewBox="0 0 24 24" className="dashboard-icon" fill="currentColor"><path d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22ZM20 16.5l-1.5-2.25V10a6.5 6.5 0 0 0-5.5-6.43V2h-2v1.57A6.5 6.5 0 0 0 5.5 10v4.25L4 16.5c-.44.66.03 1.5.83 1.5h14.34c.8 0 1.27-.84.83-1.5Z"/></svg>;
   const paths: Record<string, ReactNode> = {
-    bell: <><path d="M7 10a5 5 0 0 1 10 0v4l2 3H5l2-3z"/><path d="M10 19a2 2 0 0 0 4 0"/></>,
     refresh: <><path d="M20 11a8 8 0 0 0-14.7-3L4 10"/><path d="M4 5v5h5"/><path d="M4 13a8 8 0 0 0 14.7 3L20 14"/><path d="M20 19v-5h-5"/></>,
   };
   return <svg aria-hidden="true" viewBox="0 0 24 24" className="dashboard-icon"><g>{paths[name] ?? paths.grid}</g></svg>;
