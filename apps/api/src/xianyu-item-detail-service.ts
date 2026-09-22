@@ -1,0 +1,132 @@
+import { createHash } from 'node:crypto';
+import type { ProductAssetRecord, ProductRecord, Store } from './domain.js';
+import { ServiceError } from './services.js';
+import { digestJson } from './security.js';
+import type { ObjectStorage } from './object-storage.js';
+import { XianyuMtopClient } from './xianyu-mtop.js';
+import type { XianyuItemDetailSummary } from './xianyu-item-detail-mapper.js';
+
+export interface XianyuItemDetailView extends XianyuItemDetailSummary {
+  product: ProductRecord;
+  itemId: string;
+  summary: XianyuItemDetailSummary;
+  rawResponse: Record<string, unknown>;
+  imageUrls: string[];
+  images: Array<ProductAssetRecord & { url?: string; publicUrl?: string }>;
+  assets: ProductAssetRecord[];
+  syncedAt?: string;
+  cached: boolean;
+  assetUploadErrors: Array<{ sourceUrl: string; message: string }>;
+}
+
+export class XianyuItemDetailService {
+  constructor(
+    private readonly store: Store,
+    private readonly xianyu: XianyuMtopClient,
+    private readonly objectStorage: ObjectStorage,
+    private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => Promise<string>,
+  ) {}
+
+  async get(input: { adminId: string; productId: string; refresh?: boolean; categoryId?: string; referer?: string; spmPre?: string; logId?: string; requestId: string; traceId: string }): Promise<XianyuItemDetailView> {
+    const product = await this.store.getProduct(input.adminId, input.productId);
+    if (!product) throw new ServiceError(404, 'NOT_FOUND', 'product not found');
+    const cached = readStoredDetail(product);
+    if (cached && !input.refresh) return detailView(product, cached, true);
+    const itemId = product.externalProductRef?.trim();
+    if (!itemId) throw new ServiceError(422, 'VALIDATION_FAILED', 'product externalProductRef is required for xianyu detail');
+    const response = await this.xianyu.fetchItemDetail(input.adminId, product.accountId, itemId, { categoryId: input.categoryId, referer: input.referer, spmPre: input.spmPre, logId: input.logId });
+    if (!response.success) {
+      const status = response.accountInvalid ? 401 : 502;
+      throw new ServiceError(status, response.errorCode ?? 'XIANYU_ITEM_DETAIL_FAILED', response.message ?? 'xianyu item detail request failed');
+    }
+    const summary = response.summary;
+    const imageUrls = uniqueStrings(summary.imageUrls ?? []);
+    const assetResult = await this.persistImages(product.id, itemId, imageUrls);
+    const syncedAt = new Date().toISOString();
+    const persisted = await this.store.persistXianyuItemDetail({
+      adminId: input.adminId,
+      productId: product.id,
+      itemId,
+      summary: summary as Record<string, unknown>,
+      rawResponse: response.response ?? {},
+      imageUrls,
+      assetUploadErrors: assetResult.errors,
+      syncedAt,
+      sourcePayloadDigest: digestJson(response.response ?? {}),
+      assets: assetResult.assets,
+    });
+    if (!persisted) throw new ServiceError(404, 'NOT_FOUND', 'product not found');
+    await this.audit({ actorId: input.adminId, action: 'product.detail.synced', targetRef: product.id, requestId: input.requestId, traceId: input.traceId, accountId: product.accountId, payload: { itemId, imageCount: imageUrls.length, assetCount: assetResult.assets.length, assetUploadErrorCount: assetResult.errors.length } });
+    return detailView(persisted, { summary, rawResponse: response.response ?? {}, imageUrls, assetUploadErrors: assetResult.errors, syncedAt }, false, assetResult.errors);
+  }
+
+  private async persistImages(productId: string, itemId: string, imageUrls: string[]): Promise<{ assets: Array<{ storageKey: string; mimeType: string; checksum?: string; sourceUrl: string; metadata?: Record<string, unknown>; status: 'active' | 'failed' }>; errors: Array<{ sourceUrl: string; message: string }> }> {
+    const assets: Array<{ storageKey: string; mimeType: string; checksum?: string; sourceUrl: string; metadata?: Record<string, unknown>; status: 'active' | 'failed' }> = [];
+    const errors: Array<{ sourceUrl: string; message: string }> = [];
+    for (const [index, sourceUrl] of imageUrls.slice(0, 30).entries()) {
+      const baseKey = `products/${productId}/xianyu/${itemId}/images/${sha256(sourceUrl).slice(0, 32)}`;
+      try {
+        const downloaded = await downloadImage(sourceUrl);
+        const extension = extensionForMime(downloaded.contentType);
+        const key = `${baseKey}${extension}`;
+        const uploaded = await this.objectStorage.putObject({ key, body: downloaded.body, contentType: downloaded.contentType });
+        assets.push({ storageKey: uploaded.key, mimeType: downloaded.contentType, checksum: downloaded.checksum, sourceUrl, metadata: { ordinal: index, publicUrl: uploaded.publicUrl ?? this.objectStorage.publicUrl(uploaded.key) }, status: 'active' });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'image upload failed';
+        errors.push({ sourceUrl, message });
+        assets.push({ storageKey: `${baseKey}.external`, mimeType: guessMime(sourceUrl), sourceUrl, metadata: { ordinal: index, uploadError: message }, status: 'failed' });
+      }
+    }
+    return { assets, errors };
+  }
+}
+
+interface StoredDetail { summary: XianyuItemDetailSummary; rawResponse: Record<string, unknown>; imageUrls: string[]; assetUploadErrors: Array<{ sourceUrl: string; message: string }>; syncedAt?: string }
+
+function readStoredDetail(product: ProductRecord): StoredDetail | undefined {
+  const xianyu = product.attributes.xianyu;
+  if (!xianyu || typeof xianyu !== 'object' || Array.isArray(xianyu)) return undefined;
+  const detail = (xianyu as Record<string, unknown>).detail;
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return undefined;
+  const value = detail as Record<string, unknown>;
+  const summary = value.summary;
+  const rawResponse = value.rawResponse;
+  if (!summary || typeof summary !== 'object' || Array.isArray(summary) || !rawResponse || typeof rawResponse !== 'object' || Array.isArray(rawResponse)) return undefined;
+  const assetUploadErrors = Array.isArray(value.assetUploadErrors) ? value.assetUploadErrors.filter((entry): entry is { sourceUrl: string; message: string } => Boolean(entry && typeof entry === 'object' && typeof (entry as { sourceUrl?: unknown }).sourceUrl === 'string' && typeof (entry as { message?: unknown }).message === 'string')) : [];
+  return { summary: summary as XianyuItemDetailSummary, rawResponse: rawResponse as Record<string, unknown>, imageUrls: Array.isArray(value.imageUrls) ? value.imageUrls.filter((entry): entry is string => typeof entry === 'string') : [], assetUploadErrors, syncedAt: typeof value.syncedAt === 'string' ? value.syncedAt : undefined };
+}
+
+function detailView(product: ProductRecord, detail: StoredDetail, cached: boolean, assetUploadErrors: Array<{ sourceUrl: string; message: string }> = detail.assetUploadErrors): XianyuItemDetailView {
+  const assets = product.assets ?? [];
+  const images = assets.map((asset) => {
+    const publicUrl = asset.metadata && typeof asset.metadata.publicUrl === 'string' ? asset.metadata.publicUrl : undefined;
+    // Keep the original source URL as the browser preview fallback. The
+    // object-storage reference is still persisted and exposed separately;
+    // private MinIO buckets may not be directly readable from the browser.
+    return { ...asset, url: asset.sourceUrl ?? publicUrl, publicUrl };
+  });
+  return { ...detail.summary, product, itemId: detail.summary.itemId ?? product.externalProductRef ?? '', summary: detail.summary, rawResponse: detail.rawResponse, imageUrls: detail.imageUrls, images, assets, syncedAt: detail.syncedAt, cached, assetUploadErrors };
+}
+
+async function downloadImage(sourceUrl: string): Promise<{ body: Buffer; contentType: string; checksum: string }> {
+  const parsed = new URL(sourceUrl);
+  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('IMAGE_URL_PROTOCOL_UNSUPPORTED');
+  const response = await fetch(parsed, { signal: AbortSignal.timeout(20_000), headers: { accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8' } });
+  if (!response.ok) throw new Error(`IMAGE_DOWNLOAD_FAILED:${response.status}`);
+  const contentType = (response.headers.get('content-type') ?? '').split(';', 1)[0]?.trim().toLowerCase() || guessMime(sourceUrl);
+  if (!contentType.startsWith('image/')) throw new Error('IMAGE_CONTENT_TYPE_INVALID');
+  const body = Buffer.from(await response.arrayBuffer());
+  if (body.length === 0 || body.length > 20 * 1024 * 1024) throw new Error('IMAGE_SIZE_UNSUPPORTED');
+  return { body, contentType, checksum: sha256(body) };
+}
+
+function extensionForMime(mimeType: string): string {
+  const extension = mimeType.split('/')[1]?.split('+', 1)[0] || 'bin';
+  return `.${extension === 'jpeg' ? 'jpg' : extension}`;
+}
+function guessMime(sourceUrl: string): string {
+  const extension = sourceUrl.split('?')[0]?.split('.').pop()?.toLowerCase();
+  return extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : extension === 'gif' ? 'image/gif' : 'image/jpeg';
+}
+function sha256(value: Buffer | string): string { return createHash('sha256').update(value).digest('hex'); }
+function uniqueStrings(values: string[]): string[] { return [...new Set(values.map((value) => value.trim()).filter(Boolean))]; }

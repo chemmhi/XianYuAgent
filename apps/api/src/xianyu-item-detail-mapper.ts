@@ -4,6 +4,7 @@ export interface XianyuItemDetailSummary {
   title?: string;
   description?: string;
   richTextDescription?: string;
+  imageUrls?: string[];
   priceText?: string;
   priceMinor?: number;
   browseCount?: number;
@@ -31,6 +32,10 @@ export function mapXianyuItemDetail(response: Record<string, unknown> | undefine
   const seller = asRecord(data.sellerDO);
   const remarks = asRecord(seller.remarkDO);
   const priceText = firstString(item.soldPrice, item.price, item.priceText, item.originalPrice);
+  const imageUrls = uniqueStrings([
+    ...arrayRecords(item.imageInfos).map((image) => firstString(image.url, image.image)),
+    ...arrayRecords(asRecord(item.shareData).images).map((image) => firstString(image.image, image.url)),
+  ]);
   const sellerSummary = compact({
     sellerId: firstString(seller.sellerId),
     nickname: firstString(seller.nick, seller.uniqueName),
@@ -47,6 +52,7 @@ export function mapXianyuItemDetail(response: Record<string, unknown> | undefine
     title: firstString(item.title),
     description: firstString(item.desc),
     richTextDescription: firstString(item.richTextDesc),
+    imageUrls: imageUrls.length > 0 ? imageUrls : undefined,
     priceText,
     priceMinor: parsePriceMinor(priceText),
     browseCount: firstNumber(item.browseCnt, asRecord(data.b2cItemDO).browseCnt),
@@ -58,6 +64,10 @@ export function mapXianyuItemDetail(response: Record<string, unknown> | undefine
     quantity: firstNumber(item.quantity),
     seller: Object.keys(sellerSummary).length > 0 ? sellerSummary : undefined,
   }) as XianyuItemDetailSummary;
+}
+
+function arrayRecords(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value) ? value.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object' && !Array.isArray(entry))) : [];
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -95,4 +105,8 @@ function compact(value: unknown): unknown {
       .map(([key, entry]) => [key, compact(entry)]));
   }
   return value;
+}
+
+function uniqueStrings(values: Array<string | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value && value.trim())).map((value) => value.trim()))];
 }

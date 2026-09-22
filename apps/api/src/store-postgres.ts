@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor } from './conversation-cursor.js';
@@ -92,6 +92,41 @@ export class PostgresStore implements Store {
     product.skus = skuRows.rows.map((row) => this.toProductSku(row));
     product.assets = assetRows.rows.map((row) => this.toProductAsset(row));
     return product;
+  }
+
+  async persistXianyuItemDetail(input: XianyuItemDetailPersistenceInput): Promise<ProductRecord | undefined> {
+    const current = await this.pool.query('select account_id from products.products where id=$1', [input.productId]);
+    if (!current.rows[0]) return undefined;
+    const accountId = String(current.rows[0].account_id);
+    if (!(await this.hasAccountScope(input.adminId, accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const existing = await client.query('select attributes_json from products.products where id=$1 for update', [input.productId]);
+      if (!existing.rows[0]) { await client.query('rollback'); return undefined; }
+      const attributes = existing.rows[0].attributes_json && typeof existing.rows[0].attributes_json === 'object' && !Array.isArray(existing.rows[0].attributes_json)
+        ? existing.rows[0].attributes_json as Record<string, unknown>
+        : {};
+      const existingXianyu = attributes.xianyu && typeof attributes.xianyu === 'object' && !Array.isArray(attributes.xianyu) ? attributes.xianyu as Record<string, unknown> : {};
+      const detail = { itemId: input.itemId, summary: { ...input.summary }, rawResponse: { ...input.rawResponse }, imageUrls: [...input.imageUrls], assetUploadErrors: input.assetUploadErrors ? input.assetUploadErrors.map((entry) => ({ ...entry })) : [], syncedAt: input.syncedAt };
+      const nextAttributes = { ...attributes, xianyu: { ...existingXianyu, imageUrls: [...input.imageUrls], detail } };
+      const title = typeof input.summary.title === 'string' && input.summary.title.trim() ? input.summary.title.trim() : undefined;
+      const description = typeof input.summary.description === 'string' ? input.summary.description : undefined;
+      const priceMinor = typeof input.summary.priceMinor === 'number' && Number.isSafeInteger(input.summary.priceMinor) ? input.summary.priceMinor : undefined;
+      await client.query(`update products.products set external_product_ref=coalesce(external_product_ref,$2), title=coalesce($3,title), description=coalesce($4,description), price_minor=coalesce($5,price_minor), attributes_json=$6::jsonb, source='xianyu', last_synced_at=$7, source_payload_digest=$8, config_version=config_version+1, updated_at=$7 where id=$1`, [input.productId, input.itemId, title ?? null, description ?? null, priceMinor ?? null, JSON.stringify(nextAttributes), input.syncedAt, input.sourcePayloadDigest]);
+      for (const asset of input.assets) {
+        await client.query(`insert into products.asset_refs (id,product_id,storage_key,mime_type,checksum,source_url,metadata_json,status)
+          values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)
+          on conflict (product_id,storage_key) do update set mime_type=excluded.mime_type,checksum=excluded.checksum,source_url=excluded.source_url,metadata_json=excluded.metadata_json,status=excluded.status`, [createId(), input.productId, asset.storageKey, asset.mimeType, asset.checksum ?? null, asset.sourceUrl ?? null, JSON.stringify(asset.metadata ?? {}), asset.status ?? 'active']);
+      }
+      await client.query('commit');
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally {
+      client.release();
+    }
+    return this.getProduct(input.adminId, input.productId);
   }
   async listOrders(adminId: string, query: OrderListQuery): Promise<OrderListResult> {
     const page = query.page ?? 1;
@@ -1050,7 +1085,10 @@ export class PostgresStore implements Store {
     });
   }
   private toProductSku(row: Row): ProductSkuRecord { return { id: String(row.id), productId: String(row.product_id), skuCode: String(row.sku_code), externalSkuRef: row.external_sku_ref ? String(row.external_sku_ref) : undefined, priceMinor: Number(row.price_minor), status: row.status as ProductSkuRecord['status'] }; }
-  private toProductAsset(row: Row): ProductAssetRecord { return { id: String(row.id), productId: String(row.product_id), storageKey: String(row.storage_key), mimeType: String(row.mime_type), checksum: row.checksum ? String(row.checksum) : undefined, status: row.status as ProductAssetRecord['status'] }; }
+  private toProductAsset(row: Row): ProductAssetRecord {
+    const metadata = row.metadata_json && typeof row.metadata_json === 'object' && !Array.isArray(row.metadata_json) ? row.metadata_json as Record<string, unknown> : undefined;
+    return { id: String(row.id), productId: String(row.product_id), storageKey: String(row.storage_key), mimeType: String(row.mime_type), checksum: row.checksum ? String(row.checksum) : undefined, sourceUrl: row.source_url ? String(row.source_url) : undefined, metadata, status: row.status as ProductAssetRecord['status'] };
+  }
   private toIdempotency(row: Row): IdempotencyRecord { return { scope: String(row.scope), key: String(row.key), requestFingerprint: String(row.request_fingerprint), status: row.status as IdempotencyRecord['status'], responseEnvelope: row.response_envelope, statusCode: row.status_code ? Number(row.status_code) : undefined, traceId: row.trace_id ? String(row.trace_id) : undefined, expiresAt: new Date(String(row.expires_at)).toISOString() }; }
   private toAgentSession(row: Row): AgentSessionRecord { return { id: String(row.id), accountId: String(row.account_id), title: String(row.title), status: row.status as AgentSessionRecord['status'], summary: row.summary ? String(row.summary) : undefined, lastActiveAt: new Date(String(row.last_active_at)).toISOString(), archivedAt: iso(row.archived_at), createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString() }; }
   private toRun(row: Row): RunRecord { return { id: String(row.id), accountId: String(row.account_id), sessionId: String(row.session_id), route: String(row.route), instruction: String(row.instruction), status: row.status as RunRecord['status'], requestedBy: String(row.requested_by), clientRunRef: row.client_run_ref ? String(row.client_run_ref) : undefined, resultSummary: row.result_summary ? String(row.result_summary) : undefined, errorCode: row.error_code ? String(row.error_code) : undefined, createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString(), startedAt: iso(row.started_at), finishedAt: iso(row.finished_at) }; }

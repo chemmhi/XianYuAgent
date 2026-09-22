@@ -173,6 +173,7 @@ async function run() {
   if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid^=product-detail-]"); if (!button) return false; button.click(); return true; })()')) throw new Error('product detail action button missing');
   await waitFor(async () => cdp.events.slice(detailMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'GET' && event.params?.request?.url?.match(/\/api\/v1\/products\/[^/]+\/detail(?:\?|$)/)), 'xianyu product detail read request');
   await waitFor(async () => { const text = String(await evaluate(cdp, 'document.body.innerText')); return text.includes('Chrome E2E 闲鱼详情') && text.includes('315') && text.includes('对象存储'); }, 'xianyu detail drawer');
+  await captureViewport(cdp, 1440, 900, 'products-detail-drawer-desktop-1440x900.png');
   const detailRefreshMark = cdp.events.length;
   if (!await evaluate(cdp, '(() => { const button = document.querySelector(".xianyu-detail-drawer button.btn-small"); if (!button || button.disabled) return false; button.click(); return true; })()')) throw new Error('xianyu detail refresh button missing');
   await waitFor(async () => cdp.events.slice(detailRefreshMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'POST' && event.params?.request?.url?.match(/\/api\/v1\/products\/[^/]+\/detail\/refresh(?:\?|$)/)), 'xianyu product detail refresh request');
@@ -184,8 +185,10 @@ async function run() {
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('暂无商品'), 'empty product state');
   const emptyStateLayout = await evaluate(cdp, '(() => { const state = document.querySelector(".products-state"); if (!state) return null; const style = getComputedStyle(state); return { flexGrow: style.flexGrow, minHeight: style.minHeight, alignItems: style.alignItems, justifyItems: style.justifyItems, textAlign: style.textAlign }; })()');
   if (!emptyStateLayout || emptyStateLayout.flexGrow !== '1' || emptyStateLayout.minHeight !== '0px' || emptyStateLayout.alignItems !== 'center' || emptyStateLayout.justifyItems !== 'center' || emptyStateLayout.textAlign !== 'center') throw new Error(`empty product state layout mismatch: ${JSON.stringify(emptyStateLayout)}`);
-  if (!await evaluate(cdp, '(() => { const input = document.querySelector("[aria-label=\\"搜索商品\\"]"); if (!input) return false; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set; setter?.call(input, ""); input.dispatchEvent(new Event("input", { bubbles: true })); return true; })()')) throw new Error('product search reset failed');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 商品'), 'product row after empty search');
+  const searchResetMark = cdp.events.length;
+  if (!await evaluate(cdp, '(() => { const input = document.querySelector("[aria-label=\\"搜索商品\\"]"); if (!input) return false; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set; setter?.call(input, ""); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); return true; })()')) throw new Error('product search reset failed');
+  await waitFor(async () => cdp.events.slice(searchResetMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'GET' && event.params?.request?.url?.match(/\/api\/v1\/products(?:\?|$)/)), 'product search reset request');
+  await waitFor(async () => { const text = String(await evaluate(cdp, 'document.body.innerText')); return text.includes('Chrome E2E 闲鱼详情') || text.includes('Chrome E2E 商品'); }, 'product row after empty search');
   await cdp.send('Network.setBlockedURLs', { urls: [`${webUrl}/api/v1/products*`] });
   if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=refresh-products]"); if (!button || button.disabled) return false; button.click(); return true; })()')) throw new Error('product refresh button missing or disabled');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('商品列表加载失败'), 'product error state');
@@ -193,7 +196,7 @@ async function run() {
   if (!errorStateLayout || errorStateLayout.flexGrow !== '1' || errorStateLayout.minHeight !== '0px' || errorStateLayout.alignItems !== 'center' || errorStateLayout.justifyItems !== 'center' || errorStateLayout.textAlign !== 'center') throw new Error(`error product state layout mismatch: ${JSON.stringify(errorStateLayout)}`);
   await cdp.send('Network.setBlockedURLs', { urls: [] });
   if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=refresh-products]"); if (!button || button.disabled) return false; button.click(); return true; })()')) throw new Error('product refresh retry missing or disabled');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 商品'), 'product row after error retry');
+  await waitFor(async () => { const text = String(await evaluate(cdp, 'document.body.innerText')); return text.includes('Chrome E2E 闲鱼详情') || text.includes('Chrome E2E 商品'); }, 'product row after error retry');
   if (!cdp.events.some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'GET' && (() => { const url = new URL(event.params.request.url); return url.pathname === '/api/v1/products' && url.searchParams.get('sortBy') === 'updatedAt' && url.searchParams.get('sortOrder') === 'desc'; })())) throw new Error('default updatedAt desc sort request missing');
   const createdSortMark = cdp.events.length;
   if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=product-sort-createdAt]"); if (!button) return false; button.click(); return true; })()')) throw new Error('createdAt sort button missing');

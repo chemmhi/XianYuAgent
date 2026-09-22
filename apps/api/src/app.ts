@@ -26,6 +26,8 @@ import { AutoReplyAgentSettingsService, resolveAutoReplyAgentDefaults } from './
 import { ToolCallingAutoReplyAgent } from './auto-reply-agent.js';
 import { OpenAISettingsService, createFallbackModelClient } from './openai-settings.js';
 import { AutoReplyActivityService } from './auto-reply-activity.js';
+import { MemoryObjectStorage, S3CompatibleObjectStorage, type ObjectStorage } from './object-storage.js';
+import { XianyuItemDetailService } from './xianyu-item-detail-service.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -49,6 +51,8 @@ export interface AppRuntime {
   workspaceRuntime: WorkspaceRuntime;
   qrLogin: XianyuQrLoginAdapter;
   xianyu: XianyuMtopClient;
+  xianyuItemDetail: XianyuItemDetailService;
+  objectStorage: ObjectStorage;
   xianyuIm: XianyuImService;
   server: Server;
   listen(): Promise<void>;
@@ -204,6 +208,14 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       await credentials.save({ adminId, accountId, cookieHeader, metadata, requestId: 'xianyu-mtop', traceId: 'xianyu-mtop' });
     },
   });
+  const objectStorage: ObjectStorage = config.allowInMemory
+    ? new MemoryObjectStorage()
+    : new S3CompatibleObjectStorage({ endpoint: config.objectStorageEndpoint, publicEndpoint: config.objectStoragePublicEndpoint, accessKey: config.objectStorageAccessKey, secretKey: config.objectStorageSecretKey, bucket: config.objectStorageBucket, region: config.objectStorageRegion });
+  const xianyuItemDetail = new XianyuItemDetailService(store, xianyu, objectStorage, async (input) => {
+    const auditId = createId();
+    await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
+    return auditId;
+  });
   productSync = new ProductSyncService(store, xianyu, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
@@ -228,7 +240,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, orders, products, productSync, credentials, apiKeyCredentials, openaiSettings, dashboard, messages, autoReply, autoReplyAgentSettings, autoReplyActivity, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuIm,
+    config, store, auth, accounts, coupons, orders, products, productSync, credentials, apiKeyCredentials, openaiSettings, dashboard, messages, autoReply, autoReplyAgentSettings, autoReplyActivity, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
     server,
     async listen() {
       await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));
@@ -915,6 +927,24 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     return { statusCode: 200, body: success(ctx, preview).body };
   }
 
+  const productDetailMatch = ctx.path.match(/^\/api\/v1\/products\/([^/]+)\/(?:xianyu-detail|detail)(?:\/refresh)?$/);
+  if (productDetailMatch && (ctx.method === 'GET' || ctx.method === 'POST')) {
+    const productId = decodeURIComponent(productDetailMatch[1]);
+    const refresh = ctx.path.endsWith('/refresh') || ctx.query.refresh === '1' || ctx.query.refresh === 'true' || ctx.method === 'POST';
+    const read = () => runtime.xianyuItemDetail.get({
+      adminId: authContext.admin.id,
+      productId,
+      refresh,
+      categoryId: optionalString(ctx.query.categoryId),
+      referer: optionalString(ctx.query.referer),
+      spmPre: optionalString(ctx.query.spmPre),
+      logId: optionalString(ctx.query.logId),
+      requestId: ctx.requestId,
+      traceId: ctx.traceId,
+    });
+    if (ctx.method === 'POST') return mutation(runtime, ctx, authContext, undefined, async () => success(ctx, await read()));
+    return { statusCode: 200, body: success(ctx, await read()).body };
+  }
   const productMatch = ctx.path.match(/^\/api\/v1\/products\/([^/]+)$/);
   if (ctx.path === '/api/v1/products/sync' && ctx.method === 'POST') {
     const accountId = optionalString(ctx.body.accountId);
