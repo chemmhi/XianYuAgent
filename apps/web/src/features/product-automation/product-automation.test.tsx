@@ -13,19 +13,21 @@ describe('product automation API', () => {
   it('maps the live adapter to the canonical automation and coupon contracts', async () => {
     const calls: Array<{ method: string; path: string; body?: unknown; options?: unknown }> = [];
     const api = createProductAutomationApi({
-      async get<T>(path: string) { calls.push({ method: 'GET', path }); return (path.includes('/automation') ? { data: { productId: 'product-1', accountId: 'account-1', configVersion: 7, paidAutoDelivery: { enabled: true, couponIds: ['coupon-1'] }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true } } } : { data: { items: MOCK_AUTOMATION_COUPONS } }) as T; },
+      async get<T>(path: string) { calls.push({ method: 'GET', path }); return (path.includes('/automation') ? { data: { productId: 'product-1', accountId: 'account-1', configVersion: 7, config: { paidAutoDelivery: { enabled: true, couponBatchIds: ['1'] }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true, firstDelayHours: 72, repeatIntervalHours: 24, maxReminders: 1, message: '请评价' } } } } : { data: { items: MOCK_AUTOMATION_COUPONS } }) as T; },
       async patch<T>(path: string, body?: unknown, options?: unknown) { calls.push({ method: 'PATCH', path, body, options }); return { data: { productId: 'product-1', accountId: 'account-1', configVersion: 8, paidAutoDelivery: { enabled: false }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true } } } as T; },
+      async post<T>(path: string, body?: unknown, options?: unknown) { calls.push({ method: 'POST', path, body, options }); return { data: { updatedCount: 1 } } as T; },
     });
     const config = await api.getConfig('product-1');
     expect(config.version).toBe(7);
-    expect(config.delivery.couponIds).toEqual(['coupon-1']);
+    expect(config.delivery.couponIds).toEqual(['1']);
     await api.listCoupons('account-1', 'delivery');
     await api.saveConfig('product-1', { version: 7, delivery: { enabled: false }, reprice: { enabled: false }, gift: { enabled: false }, review: { enabled: true } });
     await api.saveBatch({ productIds: ['product-1'], expectedConfigVersions: { 'product-1': 8 }, apply: { delivery: true, reprice: false, gift: false, review: false }, rules: { delivery: { enabled: false }, reprice: { enabled: false }, gift: { enabled: false }, review: { enabled: true } } });
     expect(calls[0].path).toBe('/api/v1/products/product-1/automation');
     expect(calls[1].path).toContain('/api/v1/coupons/batches?accountId=account-1&purpose=delivery');
     const saveCall = calls.find((call) => call.method === 'PATCH' && call.path.includes('/automation'));
-    expect(saveCall?.body).toMatchObject({ configVersion: 7, paidAutoDelivery: { enabled: false }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true } });
+    expect(saveCall?.body).toMatchObject({ config: { paidAutoDelivery: { enabled: false, couponBatchIds: [], autoConfirm: false }, unpaidAutoReprice: { enabled: false, targetPriceMinor: 0 }, reviewGift: { enabled: false, couponBatchIds: [] }, reviewReminder: { enabled: true, firstDelayHours: 72 } } });
+    expect((saveCall?.body as { config?: { paidAutoDelivery?: { autoConfirm?: boolean } } }).config?.paidAutoDelivery?.autoConfirm).toBe(false);
     expect(saveCall?.options).toMatchObject({ headers: expect.objectContaining({ 'If-Match-Version': '7', 'Idempotency-Key': expect.any(String) }) });
     const batchCall = calls.find((call) => call.path.endsWith('/automation/batch'));
     expect(batchCall?.body).toMatchObject({ productIds: ['product-1'], expectedConfigVersions: { 'product-1': 8 }, config: { paidAutoDelivery: { enabled: false } } });
@@ -62,6 +64,8 @@ describe('product automation components', () => {
     expect(html).toContain('选择卡券');
     expect(html).not.toContain('当前可用库存');
     expect(html).not.toContain('库存关系');
+    expect(html).not.toContain('查看卡券设置');
+    expect(html).not.toContain('规格、数量、库存');
   });
 
   it('renders transfer picker with available and selected panes and save count', () => {
@@ -70,6 +74,8 @@ describe('product automation components', () => {
     expect(html).toContain('已选卡券');
     expect(html).toContain('保存（1个）');
     expect(html).toContain('API 卡券');
+    expect(html).not.toContain('库存 120');
+    expect(html).not.toContain('2 条规格');
   });
 
   it('renders batch configuration with explicit apply checkboxes and disabled empty save', () => {

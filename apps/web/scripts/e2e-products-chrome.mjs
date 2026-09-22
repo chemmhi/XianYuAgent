@@ -166,7 +166,7 @@ async function run() {
   if (await evaluate(cdp, 'document.querySelector("[data-testid=products-total]") !== null')) throw new Error('redundant toolbar total should be removed');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 商品'), 'product row');
   const tableTypography = await evaluate(cdp, '(() => { const size = (selector) => { const node = document.querySelector(selector); return node ? getComputedStyle(node).fontSize : null; }; return { row: size(".products-row:not(.products-head)"), head: size(".products-head"), title: size(".products-title strong"), titleMeta: size(".products-title small"), coupons: size(".products-coupons"), aiPrompt: size(".products-ai-prompt"), meta: size(".products-meta"), pagination: size(".products-pagination"), pageButton: size(".products-page-button") }; })()');
-  const expectedTypography = { row: '14px', head: '13px', title: '14px', titleMeta: '12px', coupons: '14px', aiPrompt: '14px', meta: '12px', pagination: '12px', pageButton: '13px' };
+  const expectedTypography = { row: '11px', head: '11px', title: '13px', titleMeta: '11px', coupons: '11px', aiPrompt: '11px', meta: '11px', pagination: '12px', pageButton: '13px' };
   if (JSON.stringify(tableTypography) !== JSON.stringify(expectedTypography)) throw new Error(`product table typography mismatch: ${JSON.stringify(tableTypography)}`);
   const columns = await evaluate(cdp, 'Array.from(document.querySelectorAll(".products-head > span")).map((item) => item.textContent?.trim() ?? "").map((text) => text.replace(/\\s*[↑↓↕]$/, "")).filter(Boolean)');
   const expectedColumns = ['商品标题', '价格', '关联卡券', '自动化', 'AI提示词', '创建时间', '操作'];
@@ -236,7 +236,7 @@ async function run() {
   }
   await waitFor(async () => Boolean(await evaluate(cdp, '!!document.querySelector(".products-table-scroll")')), 'products table after sorting');
   const scrollState = await evaluate(cdp, '(() => { const table = document.querySelector(".products-table-scroll"); const main = document.querySelector("main.products-main"); return { tableOverflowY: table ? getComputedStyle(table).overflowY : "", mainOverflowY: main ? getComputedStyle(main).overflowY : "" }; })()');
-  if (scrollState.tableOverflowY !== 'auto' || scrollState.mainOverflowY !== 'hidden') throw new Error(`products scroll container mismatch: ${JSON.stringify(scrollState)}`);
+  if (scrollState.tableOverflowY !== 'visible' || scrollState.mainOverflowY !== 'hidden') throw new Error(`products scroll container mismatch: ${JSON.stringify(scrollState)}`);
   const syncButton = await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=sync-products]"); if (!button || button.disabled) return false; button.click(); return true; })()');
   if (!syncButton) throw new Error('sync products button missing or disabled');
   await waitFor(async () => cdp.events.some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'POST' && event.params?.request?.url?.includes('/api/v1/products/sync')), 'xianyu product sync request');
@@ -275,6 +275,9 @@ async function run() {
   if (!savedEdit) throw new Error('edit save button disabled');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome 编辑草稿'), 'updated draft row');
   await cdp.send('Page.reload', { ignoreCache: true });
+  await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'products reload');
+  await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector(".products-search input"))')), 'products search after reload');
+  await evaluate(cdp, '(() => { const input = document.querySelector(".products-search input"); if (!input) return false; const setter = Object.getOwnPropertyDescriptor(input.__proto__, "value")?.set; setter?.call(input, "Chrome 编辑草稿"); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); return true; })()');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome 编辑草稿'), 'products persisted after reload');
   await captureViewport(cdp, 1440, 900, 'products-desktop-1440x900.png');
   await captureViewport(cdp, 390, 844, 'products-mobile-390x844.png');

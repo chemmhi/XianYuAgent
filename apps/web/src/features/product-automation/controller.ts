@@ -58,6 +58,10 @@ export function useProductAutomationController(options: { api?: ProductAutomatio
     setSavePhase('saving');
     setError(null);
     try {
+      if (!Object.values(input.apply).some(Boolean)) {
+        setSavePhase('success');
+        return { updatedCount: 0 };
+      }
       const result = await api.saveBatch(input);
       setSavePhase('success');
       return result;
@@ -75,4 +79,3 @@ export function useProductAutomationController(options: { api?: ProductAutomatio
 
   return { config, setConfig, coupons, loadPhase, savePhase, error, load, save, saveBatch, selectedCoupon };
 }
-

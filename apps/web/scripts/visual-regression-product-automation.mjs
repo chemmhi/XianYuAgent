@@ -75,8 +75,8 @@ async function waitDocument(cdp) {
   await waitFor(async () => Boolean(await evaluate(cdp, 'document.querySelector(".frame")')), 'design frame');
 }
 
-async function normalizeDesignViewport(cdp) {
-  await evaluate(cdp, '(() => { if (document.querySelector("#codex-visual-baseline-normalize")) return; const style = document.createElement("style"); style.id = "codex-visual-baseline-normalize"; style.textContent = ".note{display:none!important}html,body{overflow:hidden!important}body{margin:0!important}.frame{max-width:none!important;min-height:100vh!important;margin:0!important;border:0!important;border-radius:0!important;box-shadow:none!important}.app{min-height:100vh!important}"; document.head.appendChild(style); })()');
+async function normalizeDesignViewport(cdp, width, height) {
+  await evaluate(cdp, `(() => { const style = document.querySelector("#codex-visual-baseline-normalize") ?? document.createElement("style"); style.id = "codex-visual-baseline-normalize"; style.textContent = ".note{display:none!important}html,body{overflow:hidden!important}body{margin:0!important}.frame{max-width:none!important;width:${width}px!important;height:${height}px!important;min-height:${height}px!important;margin:0!important;border:0!important;border-radius:0!important;box-shadow:none!important}.app{height:${height}px!important;min-height:${height}px!important}"; document.head.appendChild(style); })()`);
 }
 
 async function captureFrame(cdp, outputFile, width, height) {
@@ -86,15 +86,15 @@ async function captureFrame(cdp, outputFile, width, height) {
   writeFileSync(outputFile, Buffer.from(image.data, 'base64'));
 }
 
-async function resetDesign(cdp) {
+async function resetDesign(cdp, width, height) {
   await cdp.send('Page.reload', { ignoreCache: true });
   await waitDocument(cdp);
-  await normalizeDesignViewport(cdp);
+  await normalizeDesignViewport(cdp, width, height);
 }
 
 async function captureState(cdp, state, width, height) {
   await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
-  await resetDesign(cdp);
+  await resetDesign(cdp, width, height);
   if (state === 'list') await evaluate(cdp, 'document.querySelector("#closeDrawer")?.click()');
   if (state === 'reprice') await evaluate(cdp, 'document.querySelector("[data-tab=reprice]")?.click()');
   if (state === 'gift') await evaluate(cdp, 'document.querySelector("[data-tab=gift]")?.click()');

@@ -14,6 +14,8 @@ export interface AutomationCoupon {
 export interface AutomationRuleState {
   enabled: boolean;
   couponIds?: string[];
+  /** Preserved from the backend when present; hidden in the simplified UI and defaults to false. */
+  autoConfirm?: boolean;
   targetPriceMinor?: number;
   repriceMessage?: string;
   reviewInitialHours?: number;
