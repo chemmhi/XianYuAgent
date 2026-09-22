@@ -52,7 +52,7 @@ export class S3CompatibleObjectStorage implements ObjectStorage {
     const bodyHash = sha256(input.body);
     const path = `/${encodePathSegment(this.options.bucket)}/${encodeKey(key)}`;
     const response = await this.request('PUT', path, input.body, input.contentType, bodyHash);
-    if (!response.ok) throw new Error(`OBJECT_STORAGE_PUT_FAILED:${response.status}`);
+    if (!response.ok) throw new Error(`OBJECT_STORAGE_PUT_FAILED:${response.status}:${await response.text()}`);
     const etag = response.headers.get('etag')?.replace(/^"|"$/g, '') || undefined;
     return { key, etag, publicUrl: this.publicUrl(key) };
   }
@@ -86,7 +86,9 @@ export class S3CompatibleObjectStorage implements ObjectStorage {
     const dateStamp = amzDate.slice(0, 8);
     const region = this.options.region ?? 'us-east-1';
     const host = endpoint.host;
-    const canonicalHeaders = `host:${host}\n${contentType ? `content-type:${contentType}\n` : ''}x-amz-content-sha256:${bodyHash}\nx-amz-date:${amzDate}\n`;
+    // Canonical headers must be emitted in lexicographic order, matching the
+    // signedHeaders list and the headers MinIO/S3 canonicalizes server-side.
+    const canonicalHeaders = `${contentType ? `content-type:${contentType}\n` : ''}host:${host}\nx-amz-content-sha256:${bodyHash}\nx-amz-date:${amzDate}\n`;
     const signedHeaders = contentType ? 'content-type;host;x-amz-content-sha256;x-amz-date' : 'host;x-amz-content-sha256;x-amz-date';
     const canonicalRequest = [method, path, '', canonicalHeaders, signedHeaders, bodyHash].join('\n');
     const scope = `${dateStamp}/${region}/s3/aws4_request`;

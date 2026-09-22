@@ -165,6 +165,17 @@ export class MemoryStore implements Store {
     product.configVersion += 1;
     product.updatedAt = input.syncedAt;
     const assets = product.assets ?? [];
+    const currentStorageKeys = new Set(input.assets.map((asset) => asset.storageKey));
+    const previousImageUrls = Array.isArray((existingXianyu.detail as Record<string, unknown> | undefined)?.imageUrls)
+      ? ((existingXianyu.detail as Record<string, unknown>).imageUrls as unknown[]).filter((value): value is string => typeof value === 'string')
+      : [];
+    for (const existing of assets) {
+      const metadata = existing.metadata ?? {};
+      const isDetailAsset = metadata.source === 'xianyu-detail'
+        || existing.storageKey.startsWith(`products/${product.id}/xianyu/${input.itemId}/images/`)
+        || Boolean(existing.sourceUrl && previousImageUrls.includes(existing.sourceUrl));
+      if (isDetailAsset && !currentStorageKeys.has(existing.storageKey)) existing.status = 'archived';
+    }
     for (const inputAsset of input.assets) {
       const existing = assets.find((asset) => asset.storageKey === inputAsset.storageKey);
       const next = { id: existing?.id ?? createId(), productId: product.id, storageKey: inputAsset.storageKey, mimeType: inputAsset.mimeType, checksum: inputAsset.checksum, sourceUrl: inputAsset.sourceUrl, metadata: inputAsset.metadata ? { ...inputAsset.metadata } : undefined, status: inputAsset.status ?? 'active' as const };
@@ -241,7 +252,21 @@ export class MemoryStore implements Store {
     const existing = [...this.products.values()].find((product) => product.accountId === input.accountId && product.externalProductRef === input.item.externalProductRef);
     if (existing?.source === 'local' && existing.status === 'draft') return { action: 'skipped_local_draft', product: this.productDetail(existing) };
     const now = new Date().toISOString();
-    const attributes = { ...input.item.attributes, xianyu: { detailUrl: input.item.detailUrl, externalStatus: input.item.externalStatus, imageUrls: input.item.imageUrls } };
+    const existingAttributes = existing?.attributes && typeof existing.attributes === 'object' ? existing.attributes : {};
+    const existingXianyu = existingAttributes.xianyu && typeof existingAttributes.xianyu === 'object' && !Array.isArray(existingAttributes.xianyu) ? existingAttributes.xianyu as Record<string, unknown> : {};
+    const incomingXianyu = input.item.attributes?.xianyu && typeof input.item.attributes.xianyu === 'object' && !Array.isArray(input.item.attributes.xianyu) ? input.item.attributes.xianyu as Record<string, unknown> : {};
+    const attributes = {
+      ...existingAttributes,
+      ...input.item.attributes,
+      xianyu: {
+        ...existingXianyu,
+        ...incomingXianyu,
+        detailUrl: input.item.detailUrl,
+        externalStatus: input.item.externalStatus,
+        imageUrls: input.item.imageUrls,
+        ...(existingXianyu.detail !== undefined ? { detail: existingXianyu.detail } : incomingXianyu.detail !== undefined ? { detail: incomingXianyu.detail } : {}),
+      },
+    };
     if (existing) {
       existing.title = input.item.title;
       existing.description = input.item.description;

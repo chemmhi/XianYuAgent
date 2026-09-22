@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isIP } from 'node:net';
 import type { ProductAssetRecord, ProductRecord, Store } from './domain.js';
 import { ServiceError } from './services.js';
 import { digestJson } from './security.js';
@@ -70,11 +71,11 @@ export class XianyuItemDetailService {
         const extension = extensionForMime(downloaded.contentType);
         const key = `${baseKey}${extension}`;
         const uploaded = await this.objectStorage.putObject({ key, body: downloaded.body, contentType: downloaded.contentType });
-        assets.push({ storageKey: uploaded.key, mimeType: downloaded.contentType, checksum: downloaded.checksum, sourceUrl, metadata: { ordinal: index, publicUrl: uploaded.publicUrl ?? this.objectStorage.publicUrl(uploaded.key) }, status: 'active' });
+        assets.push({ storageKey: uploaded.key, mimeType: downloaded.contentType, checksum: downloaded.checksum, sourceUrl, metadata: { source: 'xianyu-detail', itemId, ordinal: index, publicUrl: uploaded.publicUrl ?? this.objectStorage.publicUrl(uploaded.key) }, status: 'active' });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'image upload failed';
         errors.push({ sourceUrl, message });
-        assets.push({ storageKey: `${baseKey}.external`, mimeType: guessMime(sourceUrl), sourceUrl, metadata: { ordinal: index, uploadError: message }, status: 'failed' });
+        assets.push({ storageKey: `${baseKey}.external`, mimeType: guessMime(sourceUrl), sourceUrl, metadata: { source: 'xianyu-detail', itemId, ordinal: index, uploadError: message }, status: 'failed' });
       }
     }
     return { assets, errors };
@@ -97,7 +98,7 @@ function readStoredDetail(product: ProductRecord): StoredDetail | undefined {
 }
 
 function detailView(product: ProductRecord, detail: StoredDetail, cached: boolean, assetUploadErrors: Array<{ sourceUrl: string; message: string }> = detail.assetUploadErrors): XianyuItemDetailView {
-  const assets = product.assets ?? [];
+  const assets = (product.assets ?? []).filter((asset) => asset.status !== 'archived');
   const images = assets.map((asset) => {
     const publicUrl = asset.metadata && typeof asset.metadata.publicUrl === 'string' ? asset.metadata.publicUrl : undefined;
     // Keep the original source URL as the browser preview fallback. The
@@ -111,6 +112,7 @@ function detailView(product: ProductRecord, detail: StoredDetail, cached: boolea
 async function downloadImage(sourceUrl: string): Promise<{ body: Buffer; contentType: string; checksum: string }> {
   const parsed = new URL(sourceUrl);
   if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('IMAGE_URL_PROTOCOL_UNSUPPORTED');
+  assertSafeRemoteImageHost(parsed.hostname);
   const response = await fetch(parsed, { signal: AbortSignal.timeout(20_000), headers: { accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8' } });
   if (!response.ok) throw new Error(`IMAGE_DOWNLOAD_FAILED:${response.status}`);
   const contentType = (response.headers.get('content-type') ?? '').split(';', 1)[0]?.trim().toLowerCase() || guessMime(sourceUrl);
@@ -118,6 +120,28 @@ async function downloadImage(sourceUrl: string): Promise<{ body: Buffer; content
   const body = Buffer.from(await response.arrayBuffer());
   if (body.length === 0 || body.length > 20 * 1024 * 1024) throw new Error('IMAGE_SIZE_UNSUPPORTED');
   return { body, contentType, checksum: sha256(body) };
+}
+
+function assertSafeRemoteImageHost(rawHostname: string): void {
+  const hostname = rawHostname.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  if (!hostname || hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local') || hostname.endsWith('.internal') || hostname.endsWith('.lan') || hostname === 'metadata.google.internal' || hostname === 'metadata.google.com') throw new Error('IMAGE_URL_HOST_UNSAFE');
+  const version = isIP(hostname);
+  if (version === 4 && isPrivateIpv4(hostname)) throw new Error('IMAGE_URL_HOST_UNSAFE');
+  if (version === 6 && isPrivateIpv6(hostname)) throw new Error('IMAGE_URL_HOST_UNSAFE');
+}
+
+function isPrivateIpv4(hostname: string): boolean {
+  const parts = hostname.split('.').map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
+  const [a, b] = parts;
+  return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 0) || (a === 192 && b === 168) || (a === 198 && b >= 18 && b <= 19) || (a === 198 && b === 51) || (a === 203 && b === 0) || a >= 224;
+}
+
+function isPrivateIpv6(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  if (normalized === '::' || normalized === '::1' || normalized.startsWith('fc') || normalized.startsWith('fd') || normalized.startsWith('fe8') || normalized.startsWith('fe9') || normalized.startsWith('fea') || normalized.startsWith('feb')) return true;
+  const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  return Boolean(mapped && isPrivateIpv4(mapped[1]));
 }
 
 function extensionForMime(mimeType: string): string {

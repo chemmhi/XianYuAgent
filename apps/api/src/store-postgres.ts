@@ -108,12 +108,22 @@ export class PostgresStore implements Store {
         ? existing.rows[0].attributes_json as Record<string, unknown>
         : {};
       const existingXianyu = attributes.xianyu && typeof attributes.xianyu === 'object' && !Array.isArray(attributes.xianyu) ? attributes.xianyu as Record<string, unknown> : {};
+      const previousDetail = existingXianyu.detail && typeof existingXianyu.detail === 'object' && !Array.isArray(existingXianyu.detail) ? existingXianyu.detail as Record<string, unknown> : {};
+      const previousImageUrls = Array.isArray(previousDetail.imageUrls) ? previousDetail.imageUrls.filter((value): value is string => typeof value === 'string') : [];
       const detail = { itemId: input.itemId, summary: { ...input.summary }, rawResponse: { ...input.rawResponse }, imageUrls: [...input.imageUrls], assetUploadErrors: input.assetUploadErrors ? input.assetUploadErrors.map((entry) => ({ ...entry })) : [], syncedAt: input.syncedAt };
       const nextAttributes = { ...attributes, xianyu: { ...existingXianyu, imageUrls: [...input.imageUrls], detail } };
       const title = typeof input.summary.title === 'string' && input.summary.title.trim() ? input.summary.title.trim() : undefined;
       const description = typeof input.summary.description === 'string' ? input.summary.description : undefined;
       const priceMinor = typeof input.summary.priceMinor === 'number' && Number.isSafeInteger(input.summary.priceMinor) ? input.summary.priceMinor : undefined;
       await client.query(`update products.products set external_product_ref=coalesce(external_product_ref,$2), title=coalesce($3,title), description=coalesce($4,description), price_minor=coalesce($5,price_minor), attributes_json=$6::jsonb, source='xianyu', last_synced_at=$7, source_payload_digest=$8, config_version=config_version+1, updated_at=$7 where id=$1`, [input.productId, input.itemId, title ?? null, description ?? null, priceMinor ?? null, JSON.stringify(nextAttributes), input.syncedAt, input.sourcePayloadDigest]);
+      const currentStorageKeys = input.assets.map((asset) => asset.storageKey);
+      const detailPrefix = `products/${input.productId}/xianyu/${input.itemId}/images/`;
+      await client.query(`update products.asset_refs
+        set status='archived'
+        where product_id=$1
+          and status <> 'archived'
+          and (metadata_json->>'source'='xianyu-detail' or storage_key like $2 or source_url = any($3::text[]))
+          and not (storage_key = any($4::text[]))`, [input.productId, `${detailPrefix}%`, previousImageUrls, currentStorageKeys]);
       for (const asset of input.assets) {
         await client.query(`insert into products.asset_refs (id,product_id,storage_key,mime_type,checksum,source_url,metadata_json,status)
           values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)
@@ -219,14 +229,28 @@ export class PostgresStore implements Store {
 
   async upsertExternalProduct(input: { adminId: string; accountId: string; item: XianyuProductItem; syncedAt: string }): Promise<ProductUpsertResult> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
-    const existingResult = await this.pool.query('select id,source,status from products.products where account_id=$1 and external_product_ref=$2 limit 1', [input.accountId, input.item.externalProductRef]);
+    const existingResult = await this.pool.query('select id,source,status,attributes_json from products.products where account_id=$1 and external_product_ref=$2 limit 1', [input.accountId, input.item.externalProductRef]);
     const existing = existingResult.rows[0] as Row | undefined;
     if (existing && String(existing.source ?? 'local') === 'local' && String(existing.status) === 'draft') {
       const product = await this.getProduct(input.adminId, String(existing.id));
       if (!product) throw new Error('PRODUCT_SYNC_READBACK_FAILED');
       return { action: 'skipped_local_draft', product };
     }
-    const attributes = { ...input.item.attributes, xianyu: { detailUrl: input.item.detailUrl, externalStatus: input.item.externalStatus, imageUrls: input.item.imageUrls } };
+    const existingAttributes = existing?.attributes_json && typeof existing.attributes_json === 'object' && !Array.isArray(existing.attributes_json) ? existing.attributes_json as Record<string, unknown> : {};
+    const existingXianyu = existingAttributes.xianyu && typeof existingAttributes.xianyu === 'object' && !Array.isArray(existingAttributes.xianyu) ? existingAttributes.xianyu as Record<string, unknown> : {};
+    const incomingXianyu = input.item.attributes?.xianyu && typeof input.item.attributes.xianyu === 'object' && !Array.isArray(input.item.attributes.xianyu) ? input.item.attributes.xianyu as Record<string, unknown> : {};
+    const attributes = {
+      ...existingAttributes,
+      ...input.item.attributes,
+      xianyu: {
+        ...existingXianyu,
+        ...incomingXianyu,
+        detailUrl: input.item.detailUrl,
+        externalStatus: input.item.externalStatus,
+        imageUrls: input.item.imageUrls,
+        ...(existingXianyu.detail !== undefined ? { detail: existingXianyu.detail } : incomingXianyu.detail !== undefined ? { detail: incomingXianyu.detail } : {}),
+      },
+    };
     const id = existing ? String(existing.id) : createId();
     await this.pool.query(`insert into products.products (id,account_id,external_product_ref,title,description,category_code,attributes_json,price_minor,status,source,last_synced_at,source_payload_digest)
       values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'published','xianyu',$9,$10)

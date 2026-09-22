@@ -71,3 +71,55 @@ test('records source URL and failed asset metadata without storing binary in att
     globalThis.fetch = originalFetch;
   }
 });
+
+test('rejects localhost, private, and metadata image targets before download', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'ssrf-detail@example.com', passwordHash: 'hash', displayName: 'Detail Admin' });
+  const account = await store.createAccount({ platform: 'xianyu', sellerRef: 'seller-ssrf', adminId: admin.id });
+  const product = await store.createProduct({ adminId: admin.id, accountId: account.id, externalProductRef: 'item-ssrf', title: '商品' });
+  const storage = new MemoryObjectStorage();
+  const xianyu = { fetchItemDetail: async () => ({ success: true, accountInvalid: false, cookieHeader: '', response: { data: {} }, summary: { itemId: 'item-ssrf', imageUrls: ['http://127.0.0.1/secret', 'http://169.254.169.254/latest/meta-data', 'http://localhost/private'] } }) } as never;
+  const originalFetch = globalThis.fetch;
+  let fetchCount = 0;
+  globalThis.fetch = async () => { fetchCount += 1; return new Response(Buffer.from([1]), { status: 200, headers: { 'content-type': 'image/jpeg' } }); };
+  try {
+    const service = new XianyuItemDetailService(store, xianyu, storage, async () => 'audit-ssrf');
+    const result = await service.get({ adminId: admin.id, productId: product.id, refresh: true, requestId: 'req-ssrf', traceId: 'trace-ssrf' });
+    assert.equal(fetchCount, 0);
+    assert.equal(storage.objects.size, 0);
+    assert.equal(result.assetUploadErrors.length, 3);
+    assert.ok(result.assetUploadErrors.every((entry) => entry.message === 'IMAGE_URL_HOST_UNSAFE'));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('archives stale detail assets after a refresh and exposes only current images', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'archive-detail@example.com', passwordHash: 'hash', displayName: 'Detail Admin' });
+  const account = await store.createAccount({ platform: 'xianyu', sellerRef: 'seller-archive', adminId: admin.id });
+  const product = await store.createProduct({ adminId: admin.id, accountId: account.id, externalProductRef: 'item-archive', title: '商品' });
+  const storage = new MemoryObjectStorage();
+  let fetchCount = 0;
+  const xianyu = {
+    fetchItemDetail: async () => {
+      fetchCount += 1;
+      const imageUrl = fetchCount === 1 ? 'https://img.example/old.jpg' : 'https://img.example/new.jpg';
+      return { success: true, accountInvalid: false, cookieHeader: '', response: { data: {} }, summary: { itemId: 'item-archive', imageUrls: [imageUrl] } };
+    },
+  } as never;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(Buffer.from([1, 2, 3]), { status: 200, headers: { 'content-type': 'image/jpeg' } });
+  try {
+    const service = new XianyuItemDetailService(store, xianyu, storage, async () => 'audit-archive');
+    await service.get({ adminId: admin.id, productId: product.id, refresh: true, requestId: 'req-archive-1', traceId: 'trace-archive-1' });
+    const refreshed = await service.get({ adminId: admin.id, productId: product.id, refresh: true, requestId: 'req-archive-2', traceId: 'trace-archive-2' });
+    const persisted = await store.getProduct(admin.id, product.id);
+    assert.equal(persisted?.assets?.filter((asset) => asset.status === 'archived').length, 1);
+    assert.equal(persisted?.assets?.filter((asset) => asset.status === 'active').length, 1);
+    assert.equal(refreshed.images.length, 1);
+    assert.equal(refreshed.images[0]?.sourceUrl, 'https://img.example/new.jpg');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
