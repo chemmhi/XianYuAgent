@@ -6,7 +6,7 @@ import type {
   ProductRecord,
   Store,
 } from './domain.js';
-import { digestJson } from './security.js';
+import { createId, digestJson } from './security.js';
 import { ServiceError } from './services.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -148,17 +148,69 @@ export interface AutomationExecutionPort {
   markManualReview(input: { accountId: string; orderNo: string; executionKey: string; reason: string }): Promise<void>;
 }
 
-interface ExecutionLedgerEntry { fingerprint: string; result: AutomationExecutionResult; }
+export interface ExecutionLedgerEntry { fingerprint: string; result: AutomationExecutionResult; retryable: boolean; attemptCount: number; updatedAt: string; }
 
-export class InMemoryAutomationExecutionLedger {
-  private readonly entries = new Map<string, ExecutionLedgerEntry>();
-  get(key: string): ExecutionLedgerEntry | undefined { return this.entries.get(key); }
-  set(key: string, entry: ExecutionLedgerEntry): void { this.entries.set(key, entry); }
+export interface AutomationExecutionLedger {
+  get(key: string): Promise<ExecutionLedgerEntry | undefined>;
+  claim(input: { key: string; fingerprint: string; ownerToken: string; leaseUntil: string }): Promise<{ claimed: boolean; entry?: ExecutionLedgerEntry; running?: boolean }>;
+  complete(input: { key: string; ownerToken: string; result: AutomationExecutionResult; retryable: boolean }): Promise<void>;
+}
+
+export class InMemoryAutomationExecutionLedger implements AutomationExecutionLedger {
+  private readonly entries = new Map<string, { entry: ExecutionLedgerEntry; ownerToken?: string; status: 'running' | 'completed'; leaseUntil?: string }>();
+  async get(key: string): Promise<ExecutionLedgerEntry | undefined> { return this.entries.get(key)?.status === 'completed' ? structuredClone(this.entries.get(key)!.entry) : undefined; }
+  async claim(input: { key: string; fingerprint: string; ownerToken: string; leaseUntil: string }): Promise<{ claimed: boolean; entry?: ExecutionLedgerEntry; running?: boolean }> {
+    const current = this.entries.get(input.key);
+    if (!current) {
+      this.entries.set(input.key, { status: 'running', ownerToken: input.ownerToken, leaseUntil: input.leaseUntil, entry: { fingerprint: input.fingerprint, result: skipped(input.key, 'running'), retryable: false, attemptCount: 1, updatedAt: new Date().toISOString() } });
+      return { claimed: true };
+    }
+    if (current.entry.fingerprint !== input.fingerprint) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution key reused with different input');
+    const expired = current.status === 'running' && (!current.leaseUntil || Date.parse(current.leaseUntil) <= Date.now());
+    if ((current.status === 'completed' && current.entry.retryable) || expired) {
+      current.status = 'running';
+      current.ownerToken = input.ownerToken;
+      current.leaseUntil = input.leaseUntil;
+      current.entry.attemptCount += 1;
+      current.entry.updatedAt = new Date().toISOString();
+      return { claimed: true };
+    }
+    if (current.status === 'completed') return { claimed: false, entry: structuredClone(current.entry) };
+    return { claimed: false, running: true };
+  }
+  async complete(input: { key: string; ownerToken: string; result: AutomationExecutionResult; retryable: boolean }): Promise<void> {
+    const current = this.entries.get(input.key);
+    if (!current || current.ownerToken !== input.ownerToken) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution owner changed');
+    current.status = 'completed';
+    current.entry = { fingerprint: current.entry.fingerprint, result: structuredClone(input.result), retryable: input.retryable, attemptCount: current.entry.attemptCount, updatedAt: new Date().toISOString() };
+    current.ownerToken = undefined;
+    current.leaseUntil = undefined;
+  }
+}
+
+export class PersistentAutomationExecutionLedger implements AutomationExecutionLedger {
+  constructor(private readonly store: Store, private readonly leaseMs = 120_000) {}
+  async get(key: string): Promise<ExecutionLedgerEntry | undefined> {
+    const record = await this.store.getAutomationExecution(key);
+    if (!record || record.status !== 'completed' || !record.result) return undefined;
+    return { fingerprint: record.fingerprint, result: record.result as AutomationExecutionResult, retryable: record.retryable, attemptCount: record.attemptCount, updatedAt: record.updatedAt };
+  }
+  async claim(input: { key: string; fingerprint: string; ownerToken: string; leaseUntil: string }): Promise<{ claimed: boolean; entry?: ExecutionLedgerEntry; running?: boolean }> {
+    const result = await this.store.claimAutomationExecution({ executionKey: input.key, fingerprint: input.fingerprint, ownerToken: input.ownerToken, leaseUntil: input.leaseUntil });
+    if (result.claimed) return { claimed: true };
+    const record = result.record;
+    if (record.status === 'completed' && record.result) return { claimed: false, entry: { fingerprint: record.fingerprint, result: record.result as AutomationExecutionResult, retryable: record.retryable, attemptCount: record.attemptCount, updatedAt: record.updatedAt } };
+    return { claimed: false, running: true };
+  }
+  async complete(input: { key: string; ownerToken: string; result: AutomationExecutionResult; retryable: boolean }): Promise<void> {
+    await this.store.completeAutomationExecution({ executionKey: input.key, ownerToken: input.ownerToken, result: input.result, retryable: input.retryable });
+  }
+  leaseUntil(): string { return new Date(Date.now() + this.leaseMs).toISOString(); }
 }
 
 export class AutomationWorkflowService {
   private readonly inFlight = new Map<string, { fingerprint: string; promise: Promise<AutomationExecutionResult> }>();
-  constructor(private readonly port: AutomationExecutionPort, private readonly ledger = new InMemoryAutomationExecutionLedger()) {}
+  constructor(private readonly port: AutomationExecutionPort, private readonly ledger: AutomationExecutionLedger = new InMemoryAutomationExecutionLedger()) {}
 
   async handlePaymentPaid(input: { config: ProductAutomationConfig; order: AutomationOrderSnapshot; eventId: string }): Promise<AutomationExecutionResult> {
     const rule = input.config.paidAutoDelivery;
@@ -190,7 +242,7 @@ export class AutomationWorkflowService {
         return { status: 'manual_review', executionKey: key, reason: confirmed.errorCode ?? 'shipment_confirmation_failed', externalRef: sent.externalRef, sentQuantity: reservation.quantity };
       }
       return { status: 'succeeded', executionKey: key, externalRef: confirmed.externalRef ?? sent.externalRef, sentQuantity: reservation.quantity };
-    });
+    }, { maxAttempts: rule.maxAttempts, retryBackoffSeconds: rule.retryBackoffSeconds });
   }
 
   async handleUnpaidReprice(input: { config: ProductAutomationConfig; order: AutomationOrderSnapshot; eventId: string }): Promise<AutomationExecutionResult> {
@@ -199,6 +251,9 @@ export class AutomationWorkflowService {
     return this.once(key, { eventId: input.eventId, orderNo: input.order.orderNo, rule }, async () => {
       if (!rule.enabled) return skipped(key, 'rule_disabled');
       if (input.order.paymentStatus !== 'unpaid') return skipped(key, 'order_not_unpaid');
+      const before = await this.port.readOrder({ accountId: input.order.accountId, orderNo: input.order.orderNo });
+      if (!before) return { status: 'manual_review', executionKey: key, reason: 'reprice_state_unavailable' };
+      if (before.paymentStatus !== 'unpaid') return skipped(key, 'order_paid_before_reprice');
       const changed = await this.port.repriceOrder({ accountId: input.order.accountId, orderNo: input.order.orderNo, targetPriceMinor: rule.targetPriceMinor, executionKey: key });
       if (changed.status === 'unknown') return unknown(key, changed.errorCode ?? 'reprice_result_unknown');
       if (changed.status === 'failed') return failed(key, changed.errorCode ?? 'reprice_failed');
@@ -208,16 +263,16 @@ export class AutomationWorkflowService {
         if (sent.status === 'failed') return { status: 'succeeded', executionKey: key, reason: 'reprice_succeeded_message_failed', externalRef: changed.externalRef };
       }
       return { status: 'succeeded', executionKey: key, externalRef: changed.externalRef };
-    });
+    }, { maxAttempts: rule.maxAttempts, retryBackoffSeconds: rule.retryBackoffSeconds });
   }
 
   async handleReviewGift(input: { config: ProductAutomationConfig; order: AutomationOrderSnapshot; eventId: string }): Promise<AutomationExecutionResult> {
     const rule = input.config.reviewGift;
     const key = `review_gift:${input.order.accountId}:${input.order.orderNo}`;
-    return this.once(key, { eventId: input.eventId, orderNo: input.order.orderNo, rule }, async () => {
+    return this.once(key, { orderNo: input.order.orderNo, rule }, async (isRetry) => {
       if (!rule.enabled) return skipped(key, 'rule_disabled');
       const fact = await this.port.persistReviewFact({ accountId: input.order.accountId, orderNo: input.order.orderNo, eventId: input.eventId, executionKey: key });
-      if (!fact.created) return skipped(key, 'review_already_recorded');
+      if (!fact.created && !isRetry) return skipped(key, 'review_already_recorded');
       const quantity = Math.max(1, Math.trunc(input.order.quantity ?? 1));
       const reservation = await this.port.reserveCoupon({ accountId: input.order.accountId, batchIds: rule.couponBatchIds, quantity, executionKey: key, purpose: 'gift' });
       if (reservation.quantity < quantity) {
@@ -231,7 +286,7 @@ export class AutomationWorkflowService {
       }
       await this.port.commitCoupon({ reservationId: reservation.reservationId, executionKey: key });
       return { status: 'succeeded', executionKey: key, externalRef: sent.externalRef, sentQuantity: reservation.quantity };
-    });
+    }, { maxAttempts: rule.maxAttempts, retryBackoffSeconds: rule.retryBackoffSeconds });
   }
 
   async handleReviewReminder(input: { config: ProductAutomationConfig; order: AutomationOrderSnapshot; now?: string }): Promise<AutomationExecutionResult> {
@@ -255,22 +310,45 @@ export class AutomationWorkflowService {
     });
   }
 
-  private async once(key: string, value: unknown, handler: () => Promise<AutomationExecutionResult>): Promise<AutomationExecutionResult> {
+  private async once(key: string, value: unknown, handler: (isRetry: boolean) => Promise<AutomationExecutionResult>, policy: { maxAttempts?: number; retryBackoffSeconds?: number } = {}): Promise<AutomationExecutionResult> {
     const fingerprint = digestJson(value);
-    const existing = this.ledger.get(key);
-    if (existing) {
-      if (existing.fingerprint !== fingerprint) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution key reused with different input');
-      return existing.result;
-    }
     const running = this.inFlight.get(key);
     if (running) {
       if (running.fingerprint !== fingerprint) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution key reused with different input');
       return running.promise;
     }
+    const existing = await this.ledger.get(key);
+    const isRetry = Boolean(existing?.retryable);
+    if (existing) {
+      if (existing.fingerprint !== fingerprint) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution key reused with different input');
+      if (!existing.retryable) return existing.result;
+      if ((policy.maxAttempts ?? 5) <= existing.attemptCount) return { status: 'manual_review', executionKey: key, reason: 'retry_exhausted' };
+      const backoffMs = Math.max(0, policy.retryBackoffSeconds ?? 0) * 1000;
+      if (backoffMs > 0 && Date.parse(existing.updatedAt) + backoffMs > Date.now()) return existing.result;
+    }
+    const ownerToken = createId();
     const promise = (async () => {
-      const result = await handler();
-      this.ledger.set(key, { fingerprint, result });
-      return result;
+      let claim = await this.ledger.claim({ key, fingerprint, ownerToken, leaseUntil: new Date(Date.now() + 120_000).toISOString() });
+      if (!claim.claimed) {
+        if (claim.entry) return claim.entry.result;
+        const deadline = Date.now() + 125_000;
+        while (Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          claim = await this.ledger.claim({ key, fingerprint, ownerToken, leaseUntil: new Date(Date.now() + 120_000).toISOString() });
+          if (claim.claimed) break;
+          if (claim.entry) return claim.entry.result;
+        }
+        if (!claim.claimed) return unknown(key, 'execution_lease_timeout');
+      }
+      try {
+        const result = await handler(isRetry);
+        await this.ledger.complete({ key, ownerToken, result, retryable: result.status === 'failed' || result.status === 'unknown' });
+        return result;
+      } catch (error) {
+        const result = failed(key, error instanceof Error ? error.message.slice(0, 160) : 'automation_execution_failed');
+        try { await this.ledger.complete({ key, ownerToken, result, retryable: true }); } catch { /* preserve original failure */ }
+        throw error;
+      }
     })();
     this.inFlight.set(key, { fingerprint, promise });
     try { return await promise; }

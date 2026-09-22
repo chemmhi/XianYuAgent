@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor } from './conversation-cursor.js';
@@ -270,13 +270,54 @@ export class PostgresStore implements Store {
     const result = await this.pool.query(`select o.*, coalesce(nullif(btrim(o.buyer_nickname), ''), nullif(btrim(buyer_identity.buyer_display_name), '')) as display_buyer_nickname, coalesce(nullif(btrim(o.buyer_avatar_url), ''), nullif(btrim(buyer_identity.buyer_avatar_url), '')) as display_buyer_avatar_url, case when o.item_title is not null and btrim(o.item_title)<>'' and btrim(o.item_title)<>btrim(o.item_id) then o.item_title when product.title is not null and btrim(product.title)<>'' and btrim(product.title)<>btrim(o.item_id) then product.title when item_identity.item_title is not null and btrim(item_identity.item_title)<>'' and btrim(item_identity.item_title)<>btrim(o.item_id) and (item_identity.item_ref is null or btrim(item_identity.item_title)<>btrim(item_identity.item_ref)) then item_identity.item_title when buyer_item_identity.item_title is not null and btrim(buyer_item_identity.item_title)<>'' and btrim(buyer_item_identity.item_title)<>btrim(o.item_id) and (buyer_item_identity.item_ref is null or btrim(buyer_item_identity.item_title)<>btrim(buyer_item_identity.item_ref)) then buyer_item_identity.item_title else null end as display_item_title, coalesce(nullif(btrim(item_identity.item_image_url), ''), nullif(btrim(buyer_item_identity.item_image_url), ''), nullif(product.attributes_json #>> '{xianyu,imageUrls,0}', ''), nullif(product.attributes_json #>> '{imageUrls,0}', '')) as display_item_image_url from orders.orders o left join lateral (select p.title, p.attributes_json from products.products p where p.account_id=o.account_id and (p.id::text=o.product_id or p.external_product_ref=o.item_id) order by (p.id::text=o.product_id) desc limit 1) product on true left join lateral (select c.buyer_display_name, c.buyer_avatar_url from messages.conversations c where c.account_id=o.account_id and ((o.conversation_id is not null and c.id::text=o.conversation_id) or c.buyer_ref=o.buyer_id) order by (c.id::text=o.conversation_id) desc, c.updated_at desc nulls last limit 1) buyer_identity on true left join lateral (select c.item_ref, c.item_title, c.item_image_url from messages.conversations c where c.account_id=o.account_id and ((o.conversation_id is not null and c.id::text=o.conversation_id) or c.item_ref=o.item_id) order by (c.item_title is not null and btrim(c.item_title)<>'') desc, (c.id::text=o.conversation_id) desc, (c.item_ref=o.item_id) desc, c.updated_at desc nulls last limit 1) item_identity on true left join lateral (select c.item_ref, c.item_title, c.item_image_url from messages.conversations c where c.account_id=o.account_id and c.buyer_ref=o.buyer_id order by (c.item_title is not null and btrim(c.item_title)<>'') desc, c.updated_at desc nulls last limit 1) buyer_item_identity on true where o.order_no=$1${accountClause} and exists (select 1 from auth.account_scopes scope where scope.account_id=o.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now())) limit 1`, params);
     return result.rows[0] ? this.toOrder(result.rows[0]) : undefined;
   }
+  async getAutomationExecution(executionKey: string): Promise<AutomationExecutionLedgerRecord | undefined> {
+    const result = await this.pool.query('select * from automation.execution_ledger where execution_key=$1 limit 1', [executionKey]);
+    return result.rows[0] ? this.toAutomationExecution(result.rows[0]) : undefined;
+  }
+  async claimAutomationExecution(input: { executionKey: string; fingerprint: string; ownerToken: string; leaseUntil: string }): Promise<{ claimed: boolean; record: AutomationExecutionLedgerRecord }> {
+    const inserted = await this.pool.query(`insert into automation.execution_ledger (execution_key,fingerprint,status,owner_token,lease_until,attempt_count)
+      values ($1,$2,'running',$3,$4,1) on conflict (execution_key) do nothing returning *`, [input.executionKey, input.fingerprint, input.ownerToken, input.leaseUntil]);
+    if (inserted.rows[0]) return { claimed: true, record: this.toAutomationExecution(inserted.rows[0]) };
+    const existing = await this.pool.query('select * from automation.execution_ledger where execution_key=$1 limit 1', [input.executionKey]);
+    if (!existing.rows[0]) throw new Error('AUTOMATION_EXECUTION_CLAIM_LOST');
+    const current = this.toAutomationExecution(existing.rows[0]);
+    if (current.fingerprint !== input.fingerprint) throw new Error('AUTOMATION_EXECUTION_FINGERPRINT_CONFLICT');
+    const takeover = await this.pool.query(`update automation.execution_ledger
+      set status='running', result_json=null, retryable=false, owner_token=$3, lease_until=$4, attempt_count=attempt_count+1, updated_at=now()
+      where execution_key=$1 and fingerprint=$2 and ((status='completed' and retryable=true) or (status='running' and lease_until < now())) returning *`, [input.executionKey, input.fingerprint, input.ownerToken, input.leaseUntil]);
+    if (takeover.rows[0]) return { claimed: true, record: this.toAutomationExecution(takeover.rows[0]) };
+    const latest = await this.pool.query('select * from automation.execution_ledger where execution_key=$1 limit 1', [input.executionKey]);
+    return { claimed: false, record: this.toAutomationExecution(latest.rows[0]) };
+  }
+  async completeAutomationExecution(input: { executionKey: string; ownerToken: string; result: unknown; retryable: boolean }): Promise<void> {
+    const result = await this.pool.query(`update automation.execution_ledger
+      set status='completed', result_json=$3::jsonb, retryable=$4, lease_until=null, updated_at=now()
+      where execution_key=$1 and owner_token=$2`, [input.executionKey, input.ownerToken, JSON.stringify(input.result), input.retryable]);
+    if ((result.rowCount ?? 0) !== 1) throw new Error('AUTOMATION_EXECUTION_OWNER_CONFLICT');
+  }
+  async recordReviewFact(input: { accountId: string; orderNo: string; eventId: string; reviewedAt?: string }): Promise<{ created: boolean }> {
+    const reviewedAt = input.reviewedAt ?? new Date().toISOString();
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const inserted = await client.query(`insert into automation.review_facts (account_id,order_no,event_id,reviewed_at)
+        values ($1,$2,$3,$4) on conflict (account_id,order_no) do nothing returning event_id`, [input.accountId, input.orderNo, input.eventId, reviewedAt]);
+      if (inserted.rows[0]) await client.query(`update orders.orders set reviewed_at=$3, updated_at=$3, config_version=config_version+1 where account_id=$1 and order_no=$2`, [input.accountId, input.orderNo, reviewedAt]);
+      await client.query('commit');
+      return { created: Boolean(inserted.rows[0]) };
+    } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
+  }
+  async recordReviewReminderSent(input: { accountId: string; orderNo: string; sentAt: string }): Promise<OrderRecord | undefined> {
+    const result = await this.pool.query(`update orders.orders set review_reminder_count=review_reminder_count+1, last_review_reminder_at=$3, updated_at=$3, config_version=config_version+1 where account_id=$1 and order_no=$2 returning *`, [input.accountId, input.orderNo, input.sentAt]);
+    return result.rows[0] ? this.toOrder(result.rows[0]) : undefined;
+  }
   async createOrder(input: { adminId: string; order: Omit<OrderRecord, 'id' | 'createdAt' | 'updatedAt' | 'configVersion' | 'source'> & { id?: string; createdAt?: string; updatedAt?: string; configVersion?: number; source?: OrderSource } }): Promise<OrderRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.order.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const order = input.order;
     const id = order.id ?? createId();
     try {
-      await this.pool.query(`insert into orders.orders (id,order_no,account_id,account_name,buyer_id,buyer_name,buyer_nickname,buyer_avatar_url,item_id,item_title,amount_minor,payment_status,order_status,delivery_status,after_sales_status,delivery_type,created_at,updated_at,delivery_fail_reason,conversation_id,product_id,config_version,source,source_payload_digest)
-        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,coalesce($17,now()),coalesce($18,now()),$19,$20,$21,coalesce($22,1),coalesce($23,'local'),$24)`, [id, order.orderNo, order.accountId, order.accountName ?? null, order.buyerId, order.buyerName, order.buyerNickname ?? null, order.buyerAvatarUrl ?? null, order.itemId, order.itemTitle, order.amountMinor, order.paymentStatus, order.orderStatus, order.deliveryStatus, order.afterSalesStatus, order.deliveryType, order.createdAt ?? null, order.updatedAt ?? null, order.deliveryFailReason ?? null, order.conversationId ?? null, order.productId ?? null, order.configVersion ?? 1, order.source ?? 'local', order.sourcePayloadDigest ?? null]);
+      await this.pool.query(`insert into orders.orders (id,order_no,account_id,account_name,buyer_id,buyer_name,buyer_nickname,buyer_avatar_url,item_id,item_title,amount_minor,payment_status,order_status,delivery_status,after_sales_status,delivery_type,created_at,updated_at,delivery_fail_reason,conversation_id,product_id,config_version,source,source_payload_digest,reviewed_at,review_reminder_count,last_review_reminder_at)
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,coalesce($17,now()),coalesce($18,now()),$19,$20,$21,coalesce($22,1),coalesce($23,'local'),$24,$25,coalesce($26,0),$27)`, [id, order.orderNo, order.accountId, order.accountName ?? null, order.buyerId, order.buyerName, order.buyerNickname ?? null, order.buyerAvatarUrl ?? null, order.itemId, order.itemTitle, order.amountMinor, order.paymentStatus, order.orderStatus, order.deliveryStatus, order.afterSalesStatus, order.deliveryType, order.createdAt ?? null, order.updatedAt ?? null, order.deliveryFailReason ?? null, order.conversationId ?? null, order.productId ?? null, order.configVersion ?? 1, order.source ?? 'local', order.sourcePayloadDigest ?? null, order.reviewedAt ?? null, order.reminderCount ?? 0, order.lastReminderAt ?? null]);
     } catch (error) { if ((error as { code?: string }).code === '23505') throw new Error('ORDER_DUPLICATE'); throw error; }
     const created = await this.getOrder(input.adminId, order.orderNo, order.accountId);
     if (!created) throw new Error('ORDER_CREATE_READBACK_FAILED');
@@ -1220,6 +1261,23 @@ export class PostgresStore implements Store {
       configVersion: Number(row.config_version ?? 1),
       source: (row.source ?? 'local') as OrderRecord['source'],
       sourcePayloadDigest: row.source_payload_digest ? String(row.source_payload_digest) : undefined,
+      reviewedAt: iso(row.reviewed_at),
+      reminderCount: Number(row.review_reminder_count ?? 0),
+      lastReminderAt: iso(row.last_review_reminder_at),
+    };
+  }
+  private toAutomationExecution(row: Row): AutomationExecutionLedgerRecord {
+    return {
+      executionKey: String(row.execution_key),
+      fingerprint: String(row.fingerprint),
+      status: row.status as AutomationExecutionLedgerRecord['status'],
+      result: row.result_json === null || row.result_json === undefined ? undefined : row.result_json,
+      retryable: Boolean(row.retryable),
+      ownerToken: row.owner_token ? String(row.owner_token) : undefined,
+      leaseUntil: iso(row.lease_until),
+      attemptCount: Number(row.attempt_count ?? 0),
+      createdAt: dateIso(row.created_at),
+      updatedAt: dateIso(row.updated_at),
     };
   }
   private toProductCouponBatches(value: unknown): Array<{ id: string; label?: string }> | undefined {

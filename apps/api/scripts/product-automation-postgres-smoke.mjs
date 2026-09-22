@@ -21,6 +21,15 @@ try {
   assert.equal(saved.configVersion, 1);
   const linkedOrder = await runtime.store.upsertExternalOrder({ adminId: admin.id, accountId: account.id, syncedAt: new Date().toISOString(), item: { orderNo: `PG-LINK-${suffix}`, buyerId: 'pg-link-buyer', buyerName: 'PG 关联买家', itemId: `pg-item-${suffix}`, itemTitle: `pg-item-${suffix}`, amountMinor: 1000, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'coupon_only', createdAt: new Date().toISOString(), sourcePayloadDigest: `pg-link-${suffix}` } });
   assert.equal(linkedOrder.order.productId, product.id, 'externalProductRef must resolve productId on external order upsert');
+  const reminderOrder = await runtime.store.createOrder({ adminId: admin.id, order: { id: `00000000-0000-4000-8000-${suffix.slice(-12).padStart(12, '0')}`, orderNo: `PG-REMINDER-${suffix}`, accountId: account.id, buyerId: 'pg-reminder-buyer', buyerName: 'PG 提醒买家', itemId: product.externalProductRef, itemTitle: '自动化 PG 商品', amountMinor: 1000, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'delivered', afterSalesStatus: 'none', deliveryType: 'coupon_only', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), productId: product.id, conversationId: 'pg-reminder-conversation', source: 'local' } });
+  const reviewFact = await runtime.store.recordReviewFact({ accountId: account.id, orderNo: reminderOrder.orderNo, eventId: `pg-review-${suffix}`, reviewedAt: '2026-09-22T01:00:00.000Z' });
+  assert.equal(reviewFact.created, true);
+  assert.equal((await runtime.store.recordReviewFact({ accountId: account.id, orderNo: reminderOrder.orderNo, eventId: `pg-review-${suffix}` })).created, false);
+  const reminded = await runtime.store.recordReviewReminderSent({ accountId: account.id, orderNo: reminderOrder.orderNo, sentAt: '2026-09-22T02:00:00.000Z' });
+  assert.equal(reminded.reminderCount, 1);
+  const ledgerClaim = await runtime.store.claimAutomationExecution({ executionKey: `pg-ledger-${suffix}`, fingerprint: 'pg-fp', ownerToken: 'pg-owner-1', leaseUntil: new Date(Date.now() + 30_000).toISOString() });
+  assert.equal(ledgerClaim.claimed, true);
+  await runtime.store.completeAutomationExecution({ executionKey: `pg-ledger-${suffix}`, ownerToken: 'pg-owner-1', result: { status: 'succeeded', executionKey: `pg-ledger-${suffix}` }, retryable: false });
 } finally {
   await runtime.close();
 }
@@ -40,6 +49,15 @@ try {
   const persisted = await reopened.productAutomation.get(admin.id, product.id);
   assert.equal(persisted.configVersion, 1);
   assert.equal(persisted.config.paidAutoDelivery.enabled, true);
+  const reminderOrder = await reopened.store.getOrder(admin.id, `PG-REMINDER-${suffix}`, account.id);
+  assert.equal(reminderOrder?.reviewedAt, '2026-09-22T01:00:00.000Z');
+  assert.equal(reminderOrder?.reminderCount, 1);
+  assert.equal(reminderOrder?.lastReminderAt, '2026-09-22T02:00:00.000Z');
+  const ledger = await reopened.store.getAutomationExecution(`pg-ledger-${suffix}`);
+  assert.equal(ledger?.status, 'completed');
+  assert.equal(ledger?.retryable, false);
+  assert.equal(ledger?.attemptCount, 1);
+  assert.equal(ledger?.result?.status, 'succeeded');
   await assert.rejects(() => reopened.productAutomation.updateBatch({ adminId: admin.id, productIds: [product.id, second.id], expectedConfigVersions: { [product.id]: 2, [second.id]: 1 }, config: persisted.config, requestId: `pg-batch-${suffix}`, traceId: `pg-batch-${suffix}` }), (error) => error?.code === 'AUTOMATION_VERSION_CONFLICT');
   assert.equal((await reopened.productAutomation.get(admin.id, product.id)).configVersion, 1, 'batch conflict must not partially update product one');
   console.log('product automation PostgreSQL smoke passed');

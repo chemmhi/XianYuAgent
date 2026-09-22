@@ -53,9 +53,10 @@ test('order refresh trigger dispatches paid and unpaid workflows through a ready
   const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(port), Object.assign(port, { readiness: 'ready' as const }));
   const paid = order({ id: 'paid', orderNo: 'PAID-1', accountId: account.id, productId: product.id });
   const unpaid = order({ id: 'unpaid', orderNo: 'UNPAID-1', accountId: account.id, productId: product.id, paymentStatus: 'unpaid' });
+  port.readOrderResult = unpaid;
   const result = await trigger.onOrderRefresh({ adminId: admin.id, accountId: account.id, items: [paid, unpaid], requestId: 'refresh', traceId: 'refresh' });
   assert.deepEqual(result.results.map((item) => item.status), ['succeeded', 'succeeded']);
-  assert.deepEqual(port.calls, ['reserve:delivery', 'send:delivery', 'commit', 'reprice:880']);
+  assert.deepEqual(port.calls, ['reserve:delivery', 'send:delivery', 'commit', 'read-order', 'reprice:880']);
 });
 
 test('default adapter blocks without fabricating shipment/reprice success and worker polls reminders', async () => {
@@ -76,6 +77,48 @@ test('default adapter blocks without fabricating shipment/reprice success and wo
   assert.equal(reminders.results[0]?.status, 'blocked');
 });
 
+test('blocked adapter never fabricates success for all four automation flows', async () => {
+  const { store, admin, account, product, coupon, configs } = await setup();
+  const config = defaultProductAutomationConfig();
+  config.paidAutoDelivery = { ...config.paidAutoDelivery, enabled: true, couponBatchIds: [coupon.id] };
+  config.unpaidAutoReprice = { ...config.unpaidAutoReprice, enabled: true, targetPriceMinor: 880 };
+  config.reviewGift = { ...config.reviewGift, enabled: true, couponBatchIds: [coupon.id] };
+  config.reviewReminder = { ...config.reviewReminder, enabled: true, firstDelayHours: 1 };
+  await configs.update({ adminId: admin.id, productId: product.id, expectedConfigVersion: 1, config, requestId: 'blocked-config', traceId: 'blocked-config' });
+  const blocked = new NotConfiguredAutomationExecutionAdapter();
+  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(blocked), blocked);
+  const paid = order({ id: 'blocked-paid', orderNo: 'BLOCKED-PAID', accountId: account.id, productId: product.id, paymentStatus: 'paid' });
+  const unpaid = order({ id: 'blocked-unpaid', orderNo: 'BLOCKED-UNPAID', accountId: account.id, productId: product.id, paymentStatus: 'unpaid' });
+  await store.createOrder({ adminId: admin.id, order: { ...paid, source: 'local' } });
+  await store.createOrder({ adminId: admin.id, order: { ...unpaid, source: 'local' } });
+  const refresh = await trigger.onOrderRefresh({ adminId: admin.id, accountId: account.id, items: [paid, unpaid], requestId: 'blocked-refresh', traceId: 'blocked-refresh' });
+  assert.deepEqual(refresh.results.map((item) => item.status), ['blocked', 'blocked']);
+  const gift = await trigger.onReviewEvent({ adminId: admin.id, accountId: account.id, orderNo: paid.orderNo, eventId: 'blocked-review' });
+  assert.equal(gift.status, 'blocked');
+  const reminder = await trigger.onReviewReminder({ adminId: admin.id, order: { ...paid, deliveryStatus: 'delivered' }, now: '2026-09-22T00:00:00.000Z' });
+  assert.equal(reminder.status, 'blocked');
+});
+
+test('successful reminder persists count and next polling pass does not resend', async () => {
+  const { store, admin, account, product, configs } = await setup();
+  const config = defaultProductAutomationConfig();
+  config.reviewReminder = { ...config.reviewReminder, enabled: true, firstDelayHours: 1, maxReminders: 1, message: '请评价' };
+  await configs.update({ adminId: admin.id, productId: product.id, expectedConfigVersion: 1, config, requestId: 'reminder-config', traceId: 'reminder-config' });
+  const created = await store.createOrder({ adminId: admin.id, order: { ...order({ id: 'reminder-persist', orderNo: 'REMINDER-PERSIST', accountId: account.id, productId: product.id, deliveryStatus: 'delivered', paymentStatus: 'paid', createdAt: '2026-09-20T00:00:00.000Z', conversationId: 'conversation-1' }), source: 'local' } });
+  const port = new ReadyPort();
+  port.readOrderResult = { ...created, deliveryStatus: 'delivered', reviewedAt: undefined, reminderCount: 0 };
+  const adapter = Object.assign(port, { readiness: 'ready' as const });
+  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(port), adapter);
+  const first = await trigger.onReviewReminder({ adminId: admin.id, order: created, now: '2026-09-21T00:00:00.000Z' });
+  assert.equal(first.status, 'succeeded');
+  assert.equal((await store.getOrder(admin.id, created.orderNo, account.id))?.reminderCount, 1);
+  const sendsAfterFirst = port.calls.filter((call) => call === 'text:请评价').length;
+  const worker = new ProductAutomationWorker(store, trigger);
+  const secondPass = await worker.pollReviewReminders({ adminId: admin.id, accountId: account.id, now: '2026-09-21T00:00:00.000Z' });
+  assert.equal(secondPass.results.find((item) => item.orderNo === created.orderNo)?.reason, 'not_due_or_capped');
+  assert.equal(port.calls.filter((call) => call === 'text:请评价').length, sendsAfterFirst);
+});
+
 test('IM adapter envelope accepts only explicit review signals', async () => {
   const { store, admin, account, product, configs } = await setup();
   const config = defaultProductAutomationConfig();
@@ -85,6 +128,18 @@ test('IM adapter envelope accepts only explicit review signals', async () => {
   const accepted = await trigger.onImEvent(admin.id, { accountId: account.id, externalConversationRef: 'c', externalMessageRef: 'm-2', senderRef: 'buyer', direction: 'inbound', bodyType: 'system', occurredAt: '2026-09-23T00:00:00.000Z', raw: { productAutomation: { kind: 'review_created', orderNo: 'MISSING', eventId: 'review-1' } } });
   assert.equal(accepted.accepted, true);
   assert.equal(accepted.result?.reason, 'ORDER_NOT_FOUND');
+  assert.equal(product.accountId, account.id);
+});
+
+test('IM review signal validates buyer and conversation ownership before execution', async () => {
+  const { store, admin, account, product, configs } = await setup();
+  const created = await store.createOrder({ adminId: admin.id, order: { ...order({ id: 'review-owner', orderNo: 'REVIEW-OWNER', accountId: account.id, productId: product.id, buyerId: 'buyer-owner', conversationId: 'conversation-owner' }), source: 'local' } });
+  const adapter = new NotConfiguredAutomationExecutionAdapter();
+  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(adapter), adapter);
+  const mismatchedBuyer = await trigger.onImEvent(admin.id, { accountId: account.id, externalConversationRef: created.conversationId!, externalMessageRef: 'm-owner-1', senderRef: 'attacker', direction: 'inbound', bodyType: 'system', occurredAt: '2026-09-22T00:00:00.000Z', raw: { productAutomation: { kind: 'review_created', orderNo: created.orderNo, eventId: 'review-owner-1' } } });
+  assert.deepEqual(mismatchedBuyer, { accepted: false, reason: 'AUTOMATION_SIGNAL_BUYER_MISMATCH' });
+  const mismatchedConversation = await trigger.onImEvent(admin.id, { accountId: account.id, externalConversationRef: 'conversation-other', externalMessageRef: 'm-owner-2', senderRef: created.buyerId, direction: 'inbound', bodyType: 'system', occurredAt: '2026-09-22T00:00:00.000Z', raw: { productAutomation: { kind: 'review_created', orderNo: created.orderNo, eventId: 'review-owner-2' } } });
+  assert.deepEqual(mismatchedConversation, { accepted: false, reason: 'AUTOMATION_SIGNAL_CONVERSATION_MISMATCH' });
   assert.equal(product.accountId, account.id);
 });
 

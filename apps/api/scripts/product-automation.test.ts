@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MemoryStore } from '../src/store-memory.js';
-import { ProductAutomationService, AutomationWorkflowService, type AutomationExecutionPort, type AutomationExternalResult, type AutomationOrderSnapshot, defaultProductAutomationConfig } from '../src/product-automation.js';
+import { ProductAutomationService, AutomationWorkflowService, PersistentAutomationExecutionLedger, type AutomationExecutionPort, type AutomationExternalResult, type AutomationOrderSnapshot, defaultProductAutomationConfig } from '../src/product-automation.js';
 import type { ProductAutomationConfig } from '../src/domain.js';
 
 function result(status: AutomationExternalResult['status'], errorCode?: string): AutomationExternalResult { return { status, errorCode, externalRef: status === 'succeeded' ? `ext-${Math.random().toString(16).slice(2)}` : undefined }; }
@@ -128,7 +128,7 @@ test('concurrent duplicate event shares one in-flight execution', async () => {
   port.sendStarted = { resolve: startedResolve };
   const workflow = new AutomationWorkflowService(port);
   const config = defaultProductAutomationConfig();
-  config.paidAutoDelivery = { ...config.paidAutoDelivery, enabled: true, couponBatchIds: ['batch-1'] };
+  config.paidAutoDelivery = { ...config.paidAutoDelivery, enabled: true, couponBatchIds: ['batch-1'], retryBackoffSeconds: 0 };
   const order = baseOrder();
   const firstPromise = workflow.handlePaymentPaid({ config, order, eventId: 'paid-concurrent' });
   await started;
@@ -139,22 +139,99 @@ test('concurrent duplicate event shares one in-flight execution', async () => {
   assert.equal(port.calls.filter((call) => call === 'send:delivery').length, 1);
 });
 
+test('persistent ledger deduplicates across workflow instances and survives retryable failure', async () => {
+  const store = new MemoryStore();
+  const config = defaultProductAutomationConfig();
+  config.paidAutoDelivery = { ...config.paidAutoDelivery, enabled: true, couponBatchIds: ['batch-1'], retryBackoffSeconds: 0 };
+  const firstPort = new FakePort();
+  const secondPort = new FakePort();
+  let release!: () => void;
+  firstPort.sendWaitFor = new Promise<void>((resolve) => { release = resolve; });
+  const first = new AutomationWorkflowService(firstPort, new PersistentAutomationExecutionLedger(store));
+  const second = new AutomationWorkflowService(secondPort, new PersistentAutomationExecutionLedger(store));
+  const order = baseOrder();
+  const firstPromise = first.handlePaymentPaid({ config, order, eventId: 'persistent-concurrent' });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const secondPromise = second.handlePaymentPaid({ config, order, eventId: 'persistent-concurrent' });
+  release();
+  const [left, right] = await Promise.all([firstPromise, secondPromise]);
+  assert.deepEqual(right, left);
+  assert.equal(firstPort.calls.filter((call) => call === 'send:delivery').length, 1);
+  assert.equal(secondPort.calls.filter((call) => call === 'send:delivery').length, 0);
+
+  const retryPort = new FakePort();
+  retryPort.couponSend = result('failed', 'TEMPORARY_SEND_FAILURE');
+  const retryWorkflow = new AutomationWorkflowService(retryPort, new PersistentAutomationExecutionLedger(store));
+  const retryOrder = baseOrder({ orderNo: 'ORDER-RETRY' });
+  const failed = await retryWorkflow.handlePaymentPaid({ config, order: retryOrder, eventId: 'persistent-retry' });
+  assert.equal(failed.status, 'failed');
+  retryPort.couponSend = result('succeeded');
+  const recovered = await retryWorkflow.handlePaymentPaid({ config, order: retryOrder, eventId: 'persistent-retry' });
+  assert.equal(recovered.status, 'succeeded');
+  assert.equal(retryPort.calls.filter((call) => call === 'send:delivery').length, 2);
+});
+
+test('persistent ledger rejects completion by a different owner', async () => {
+  const store = new MemoryStore();
+  const ledger = new PersistentAutomationExecutionLedger(store);
+  const claimed = await store.claimAutomationExecution({ executionKey: 'owner-conflict', fingerprint: 'fp', ownerToken: 'owner-1', leaseUntil: new Date(Date.now() + 10_000).toISOString() });
+  assert.equal(claimed.claimed, true);
+  await assert.rejects(() => ledger.complete({ key: 'owner-conflict', ownerToken: 'owner-2', result: { status: 'succeeded', executionKey: 'owner-conflict' }, retryable: false }), /OWNER_CONFLICT/);
+  await ledger.complete({ key: 'owner-conflict', ownerToken: 'owner-1', result: { status: 'succeeded', executionKey: 'owner-conflict' }, retryable: false });
+  const persisted = await store.getAutomationExecution('owner-conflict');
+  assert.equal(persisted?.status, 'completed');
+  assert.equal((persisted?.result as { status: string }).status, 'succeeded');
+});
+
+test('retry policy honors backoff window and max attempts', async () => {
+  const port = new FakePort();
+  port.couponSend = result('failed', 'TEMPORARY_SEND_FAILURE');
+  const workflow = new AutomationWorkflowService(port);
+  const config = defaultProductAutomationConfig();
+  config.paidAutoDelivery = { ...config.paidAutoDelivery, enabled: true, couponBatchIds: ['batch-1'], maxAttempts: 2, retryBackoffSeconds: 60 };
+  const order = baseOrder({ orderNo: 'ORDER-BACKOFF' });
+  const first = await workflow.handlePaymentPaid({ config, order, eventId: 'backoff-1' });
+  assert.equal(first.status, 'failed');
+  const immediate = await workflow.handlePaymentPaid({ config, order, eventId: 'backoff-1' });
+  assert.equal(immediate.status, 'failed');
+  assert.equal(port.calls.filter((call) => call === 'send:delivery').length, 1);
+
+  const cappedPort = new FakePort();
+  cappedPort.couponSend = result('failed', 'PERMANENT_FAILURE');
+  const capped = new AutomationWorkflowService(cappedPort);
+  const cappedConfig = { ...config, paidAutoDelivery: { ...config.paidAutoDelivery, maxAttempts: 1, retryBackoffSeconds: 0 } };
+  const cappedOrder = baseOrder({ orderNo: 'ORDER-CAPPED' });
+  await capped.handlePaymentPaid({ config: cappedConfig, order: cappedOrder, eventId: 'capped-1' });
+  const exhausted = await capped.handlePaymentPaid({ config: cappedConfig, order: cappedOrder, eventId: 'capped-1' });
+  assert.equal(exhausted.status, 'manual_review');
+  assert.equal(exhausted.reason, 'retry_exhausted');
+  assert.equal(cappedPort.calls.filter((call) => call === 'send:delivery').length, 1);
+});
+
 test('unpaid reprice does not fabricate success and does not reprice twice', async () => {
   const port = new FakePort();
   const workflow = new AutomationWorkflowService(port);
   const config = defaultProductAutomationConfig();
   config.unpaidAutoReprice = { ...config.unpaidAutoReprice, enabled: true, targetPriceMinor: 1_290, message: '已为你调整价格' };
   const order = baseOrder({ paymentStatus: 'unpaid' });
+  port.readOrderResult = order;
   const success = await workflow.handleUnpaidReprice({ config, order, eventId: 'unpaid-1' });
   assert.equal(success.status, 'succeeded');
-  assert.deepEqual(port.calls, ['reprice:1290', 'text:已为你调整价格']);
+  assert.deepEqual(port.calls, ['read-order', 'reprice:1290', 'text:已为你调整价格']);
   await workflow.handleUnpaidReprice({ config, order, eventId: 'unpaid-1' });
-  assert.equal(port.calls.length, 2);
+  assert.equal(port.calls.length, 3);
   const unknownPort = new FakePort();
   unknownPort.reprice = result('unknown', 'REMOTE_TIMEOUT');
+  unknownPort.readOrderResult = order;
   const unknown = await new AutomationWorkflowService(unknownPort).handleUnpaidReprice({ config, order, eventId: 'unpaid-2' });
   assert.equal(unknown.status, 'unknown');
-  assert.equal(unknownPort.calls.length, 1);
+  assert.equal(unknownPort.calls.length, 2);
+  const paidBeforeAction = new FakePort();
+  paidBeforeAction.readOrderResult = baseOrder({ paymentStatus: 'paid' });
+  const skipped = await new AutomationWorkflowService(paidBeforeAction).handleUnpaidReprice({ config, order, eventId: 'unpaid-paid-before-action' });
+  assert.equal(skipped.status, 'skipped');
+  assert.equal(skipped.reason, 'order_paid_before_reprice');
+  assert.equal(paidBeforeAction.calls.filter((call) => call.startsWith('reprice:')).length, 0);
 });
 
 test('review gift persists fact first, isolates failure and does not re-enter reminder', async () => {
@@ -162,12 +239,18 @@ test('review gift persists fact first, isolates failure and does not re-enter re
   port.couponSend = result('failed', 'SEND_FAILED');
   const workflow = new AutomationWorkflowService(port);
   const config = defaultProductAutomationConfig();
-  config.reviewGift = { ...config.reviewGift, enabled: true, couponBatchIds: ['gift-batch'] };
+  config.reviewGift = { ...config.reviewGift, enabled: true, couponBatchIds: ['gift-batch'], retryBackoffSeconds: 0 };
   const failed = await workflow.handleReviewGift({ config, order: baseOrder(), eventId: 'BUYER_RATE_SELLER-1' });
   assert.equal(failed.status, 'failed');
   assert.deepEqual(port.calls, ['review-fact', 'reserve:gift', 'send:gift', 'release:SEND_FAILED']);
-  await workflow.handleReviewGift({ config, order: baseOrder(), eventId: 'BUYER_RATE_SELLER-1' });
-  assert.equal(port.calls.length, 4);
+  port.reviewCreated = false;
+  port.couponSend = result('succeeded');
+  const recovered = await workflow.handleReviewGift({ config, order: baseOrder(), eventId: 'BUYER_RATE_SELLER-1' });
+  assert.equal(recovered.status, 'succeeded');
+  assert.deepEqual(port.calls.slice(4), ['review-fact', 'reserve:gift', 'send:gift', 'commit']);
+  const repeatedDifferentEvent = await workflow.handleReviewGift({ config, order: baseOrder(), eventId: 'BUYER_RATE_SELLER-2' });
+  assert.equal(repeatedDifferentEvent.status, 'succeeded');
+  assert.equal(port.calls.length, 8, 'same order review events must not send a second gift');
   const alreadyRecorded = new FakePort();
   alreadyRecorded.reviewCreated = false;
   const skipped = await new AutomationWorkflowService(alreadyRecorded).handleReviewGift({ config, order: baseOrder(), eventId: 'BUYER_RATE_SELLER-2' });
@@ -191,4 +274,18 @@ test('review reminder re-checks order state before sending and caps repeat count
   assert.deepEqual(port.calls, ['read-order']);
   const capped = await new AutomationWorkflowService(new FakePort()).handleReviewReminder({ config, order: baseOrder({ deliveryStatus: 'delivered', reminderCount: 1 }), now: '2026-09-22T00:00:00.000Z' });
   assert.equal(capped.status, 'skipped');
+});
+
+test('reminder state is persisted and increments exactly once per successful send', async () => {
+  const { store, admin, account, product } = await setup();
+  const created = await store.createOrder({ adminId: admin.id, order: { ...baseOrder({ id: 'reminder-state', orderNo: 'REMINDER-STATE', accountId: account.id, productId: product.id, deliveryStatus: 'delivered', paymentStatus: 'paid' }), source: 'local' } });
+  assert.equal(created.reminderCount ?? 0, 0);
+  const first = await store.recordReviewReminderSent({ accountId: account.id, orderNo: created.orderNo, sentAt: '2026-09-22T01:00:00.000Z' });
+  assert.equal(first?.reminderCount, 1);
+  assert.equal(first?.lastReminderAt, '2026-09-22T01:00:00.000Z');
+  const second = await store.recordReviewReminderSent({ accountId: account.id, orderNo: created.orderNo, sentAt: '2026-09-22T02:00:00.000Z' });
+  assert.equal(second?.reminderCount, 2);
+  const reread = await store.getOrder(admin.id, created.orderNo, account.id);
+  assert.equal(reread?.reminderCount, 2);
+  assert.equal(reread?.lastReminderAt, '2026-09-22T02:00:00.000Z');
 });

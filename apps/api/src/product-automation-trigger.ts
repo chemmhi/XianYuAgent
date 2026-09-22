@@ -28,6 +28,8 @@ export interface ProductAutomationReviewSignal {
   kind: 'review_created';
   orderNo: string;
   eventId: string;
+  accountId?: string;
+  productId?: string;
 }
 
 export interface ProductAutomationImEventResult {
@@ -118,6 +120,22 @@ export class ProductAutomationTrigger {
   async onImEvent(adminId: string, event: XianyuImMessageEvent): Promise<ProductAutomationImEventResult> {
     const signal = extractReviewSignal(event.raw);
     if (!signal) return { accepted: false, reason: 'AUTOMATION_SIGNAL_NOT_PRESENT' };
+    if (event.direction !== 'inbound' || event.bodyType !== 'system') return { accepted: false, reason: 'AUTOMATION_SIGNAL_SOURCE_INVALID' };
+    if (signal.accountId && signal.accountId !== event.accountId) return { accepted: false, reason: 'AUTOMATION_SIGNAL_ACCOUNT_MISMATCH' };
+    const order = await this.store.getOrder(adminId, signal.orderNo, event.accountId);
+    if (order) {
+      if (order.buyerId !== event.senderRef) return { accepted: false, reason: 'AUTOMATION_SIGNAL_BUYER_MISMATCH' };
+      if (order.conversationId) {
+        const conversation = await this.store.getConversation(adminId, order.conversationId);
+        if (!conversation || conversation.accountId !== event.accountId || conversation.externalConversationRef !== event.externalConversationRef) {
+          return { accepted: false, reason: 'AUTOMATION_SIGNAL_CONVERSATION_MISMATCH' };
+        }
+      } else {
+        const conversation = await this.store.findConversationByExternalRef(adminId, event.accountId, event.externalConversationRef);
+        if (!conversation || conversation.buyerRef !== event.senderRef) return { accepted: false, reason: 'AUTOMATION_SIGNAL_CONVERSATION_MISMATCH' };
+      }
+      if (signal.productId && signal.productId !== order.productId && signal.productId !== order.itemId) return { accepted: false, reason: 'AUTOMATION_SIGNAL_PRODUCT_MISMATCH' };
+    }
     const result = await this.onReviewEvent({ adminId, accountId: event.accountId, orderNo: signal.orderNo, eventId: signal.eventId, requestId: `xianyu:review:${signal.eventId}`, traceId: `xianyu:review:${signal.eventId}` });
     return { accepted: true, result };
   }
@@ -136,6 +154,9 @@ export class ProductAutomationTrigger {
           : trigger === 'review_gift'
             ? await this.workflow.handleReviewGift({ config, order, eventId: eventId ?? `review:${order.orderNo}:${order.updatedAt}` })
             : await this.workflow.handleReviewReminder({ config, order, now });
+      if (trigger === 'review_reminder' && result.status === 'succeeded') {
+        await this.store.recordReviewReminderSent({ accountId: order.accountId, orderNo: order.orderNo, sentAt: now ?? new Date().toISOString() });
+      }
       return this.finish(trigger, order.orderNo, { trigger, orderNo: order.orderNo, status: result.status, executionKey: result.executionKey, reason: result.reason }, adminId, order.accountId, requestId, traceId);
     } catch (error) {
       const reason = errorCode(error);
@@ -195,7 +216,9 @@ function extractReviewSignal(raw: Record<string, unknown> | undefined): ProductA
   if (value.kind !== 'review_created' || typeof value.orderNo !== 'string' || !value.orderNo.trim()) return undefined;
   const eventId = typeof value.eventId === 'string' && value.eventId.trim() ? value.eventId.trim() : undefined;
   if (!eventId) return undefined;
-  return { kind: 'review_created', orderNo: value.orderNo.trim(), eventId };
+  const accountId = typeof value.accountId === 'string' && value.accountId.trim() ? value.accountId.trim() : undefined;
+  const productId = typeof value.productId === 'string' && value.productId.trim() ? value.productId.trim() : undefined;
+  return { kind: 'review_created', orderNo: value.orderNo.trim(), eventId, accountId, productId };
 }
 
 function errorCode(error: unknown): string {

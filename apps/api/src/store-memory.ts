@@ -1,4 +1,4 @@
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor, isAfterConversationCursor } from './conversation-cursor.js';
@@ -37,6 +37,8 @@ export class MemoryStore implements Store {
   private readonly products = new Map<string, ProductRecord>();
   private readonly productAutomations = new Map<string, ProductAutomationConfigRecord>();
   private readonly orders = new Map<string, OrderRecord>();
+  private readonly automationExecutions = new Map<string, AutomationExecutionLedgerRecord>();
+  private readonly reviewFacts = new Map<string, { accountId: string; orderNo: string; eventId: string; reviewedAt: string }>();
   private readonly couponBatches = new Map<string, CouponBatchRecord>();
   private readonly couponItems = new Map<string, CouponItemRecord>();
   private readonly couponBindings = new Map<string, CouponBindingRecord>();
@@ -1219,6 +1221,59 @@ export class MemoryStore implements Store {
     const buyerNickname = order.buyerNickname?.trim() || matchedConversation?.buyerDisplayName?.trim() || undefined;
     const buyerAvatarUrl = order.buyerAvatarUrl?.trim() || matchedConversation?.buyerAvatarUrl?.trim() || undefined;
     return { ...order, productId: order.productId ?? matchedProduct?.id, buyerNickname, buyerAvatarUrl, itemTitle, itemImageUrl };
+  }
+  async getAutomationExecution(executionKey: string): Promise<AutomationExecutionLedgerRecord | undefined> {
+    const record = this.automationExecutions.get(executionKey);
+    return record ? structuredClone(record) : undefined;
+  }
+  async claimAutomationExecution(input: { executionKey: string; fingerprint: string; ownerToken: string; leaseUntil: string }): Promise<{ claimed: boolean; record: AutomationExecutionLedgerRecord }> {
+    const now = new Date().toISOString();
+    const existing = this.automationExecutions.get(input.executionKey);
+    if (!existing) {
+      const record: AutomationExecutionLedgerRecord = { executionKey: input.executionKey, fingerprint: input.fingerprint, status: 'running', retryable: false, ownerToken: input.ownerToken, leaseUntil: input.leaseUntil, attemptCount: 1, createdAt: now, updatedAt: now };
+      this.automationExecutions.set(input.executionKey, record);
+      return { claimed: true, record: structuredClone(record) };
+    }
+    if (existing.fingerprint !== input.fingerprint) throw new Error('AUTOMATION_EXECUTION_FINGERPRINT_CONFLICT');
+    const expired = existing.status === 'running' && (!existing.leaseUntil || Date.parse(existing.leaseUntil) <= Date.now());
+    if ((existing.status === 'completed' && existing.retryable) || expired) {
+      existing.status = 'running';
+      existing.result = undefined;
+      existing.retryable = false;
+      existing.ownerToken = input.ownerToken;
+      existing.leaseUntil = input.leaseUntil;
+      existing.attemptCount += 1;
+      existing.updatedAt = now;
+      return { claimed: true, record: structuredClone(existing) };
+    }
+    return { claimed: false, record: structuredClone(existing) };
+  }
+  async completeAutomationExecution(input: { executionKey: string; ownerToken: string; result: unknown; retryable: boolean }): Promise<void> {
+    const record = this.automationExecutions.get(input.executionKey);
+    if (!record || record.ownerToken !== input.ownerToken) throw new Error('AUTOMATION_EXECUTION_OWNER_CONFLICT');
+    record.status = 'completed';
+    record.result = structuredClone(input.result);
+    record.retryable = input.retryable;
+    record.leaseUntil = undefined;
+    record.updatedAt = new Date().toISOString();
+  }
+  async recordReviewFact(input: { accountId: string; orderNo: string; eventId: string; reviewedAt?: string }): Promise<{ created: boolean }> {
+    const key = `${input.accountId}:${input.orderNo}`;
+    if (this.reviewFacts.has(key)) return { created: false };
+    const reviewedAt = input.reviewedAt ?? new Date().toISOString();
+    this.reviewFacts.set(key, { accountId: input.accountId, orderNo: input.orderNo, eventId: input.eventId, reviewedAt });
+    const order = [...this.orders.values()].find((candidate) => candidate.accountId === input.accountId && candidate.orderNo === input.orderNo);
+    if (order) { order.reviewedAt = reviewedAt; order.updatedAt = reviewedAt; order.configVersion += 1; }
+    return { created: true };
+  }
+  async recordReviewReminderSent(input: { accountId: string; orderNo: string; sentAt: string }): Promise<OrderRecord | undefined> {
+    const order = [...this.orders.values()].find((candidate) => candidate.accountId === input.accountId && candidate.orderNo === input.orderNo);
+    if (!order) return undefined;
+    order.reminderCount = (order.reminderCount ?? 0) + 1;
+    order.lastReminderAt = input.sentAt;
+    order.updatedAt = input.sentAt;
+    order.configVersion += 1;
+    return this.enrichOrder(order);
   }
 
   private productDetail(product: ProductRecord): ProductRecord {

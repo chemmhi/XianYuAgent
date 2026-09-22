@@ -275,6 +275,24 @@ export interface OrderRecord {
   configVersion: number;
   source: OrderSource;
   sourcePayloadDigest?: string;
+  reviewedAt?: string;
+  reminderCount?: number;
+  lastReminderAt?: string;
+}
+
+export type AutomationExecutionLedgerStatus = 'running' | 'completed';
+
+export interface AutomationExecutionLedgerRecord {
+  executionKey: string;
+  fingerprint: string;
+  status: AutomationExecutionLedgerStatus;
+  result?: unknown;
+  retryable: boolean;
+  ownerToken?: string;
+  leaseUntil?: string;
+  attemptCount: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface XianyuOrderItem {
@@ -962,6 +980,11 @@ export interface Store {
   persistXianyuItemDetail(input: XianyuItemDetailPersistenceInput): Promise<ProductRecord | undefined>;
   listOrders(adminId: string, query: OrderListQuery): Promise<OrderListResult>;
   getOrder(adminId: string, orderNo: string, accountId?: string): Promise<OrderRecord | undefined>;
+  getAutomationExecution(executionKey: string): Promise<AutomationExecutionLedgerRecord | undefined>;
+  claimAutomationExecution(input: { executionKey: string; fingerprint: string; ownerToken: string; leaseUntil: string }): Promise<{ claimed: boolean; record: AutomationExecutionLedgerRecord }>;
+  completeAutomationExecution(input: { executionKey: string; ownerToken: string; result: unknown; retryable: boolean }): Promise<void>;
+  recordReviewFact(input: { accountId: string; orderNo: string; eventId: string; reviewedAt?: string }): Promise<{ created: boolean }>;
+  recordReviewReminderSent(input: { accountId: string; orderNo: string; sentAt: string }): Promise<OrderRecord | undefined>;
   createOrder(input: { adminId: string; order: Omit<OrderRecord, 'id' | 'createdAt' | 'updatedAt' | 'configVersion' | 'source'> & { id?: string; createdAt?: string; updatedAt?: string; configVersion?: number; source?: OrderSource } }): Promise<OrderRecord>;
   upsertExternalOrder(input: { adminId: string; accountId: string; item: XianyuOrderItem; syncedAt: string; accountName?: string }): Promise<OrderUpsertResult>;
   createProduct(input: {

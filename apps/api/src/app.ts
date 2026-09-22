@@ -29,7 +29,7 @@ import { AutoReplyActivityService } from './auto-reply-activity.js';
 import { MemoryObjectStorage, S3CompatibleObjectStorage, type ObjectStorage } from './object-storage.js';
 import { XianyuItemDetailService } from './xianyu-item-detail-service.js';
 import { ProductAutomationService } from './product-automation.js';
-import { AutomationWorkflowService } from './product-automation.js';
+import { AutomationWorkflowService, PersistentAutomationExecutionLedger } from './product-automation.js';
 import { NotConfiguredAutomationExecutionAdapter, ProductAutomationTrigger, ProductAutomationWorker } from './product-automation-trigger.js';
 
 export interface AppRuntime {
@@ -95,7 +95,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     return auditId;
   });
   const productAutomationExecution = new NotConfiguredAutomationExecutionAdapter();
-  const productAutomationWorkflow = new AutomationWorkflowService(productAutomationExecution);
+  const productAutomationWorkflow = new AutomationWorkflowService(productAutomationExecution, new PersistentAutomationExecutionLedger(store));
   const productAutomationTrigger = new ProductAutomationTrigger(store, productAutomation, productAutomationWorkflow, productAutomationExecution, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'system', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
