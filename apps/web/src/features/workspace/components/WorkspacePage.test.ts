@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { getComposerTextareaMetrics, MessageStream, SessionRow } from './WorkspacePage';
 import type { WorkspaceMessageVM, WorkspaceSessionVM } from '../types';
 
-const workspaceCss = readFileSync(fileURLToPath(new URL('./workspace.css', import.meta.url)), 'utf8');
+const workspaceCss = readFileSync(fileURLToPath(new URL('./workspace.css', import.meta.url)), 'utf8').replace(/\r\n/g, '\n').replace(/\s+/g, ' ').trim();
 const workspacePageSource = readFileSync(fileURLToPath(new URL('./WorkspacePage.tsx', import.meta.url)), 'utf8');
 
 const session: WorkspaceSessionVM = {
@@ -69,8 +69,8 @@ describe('Workspace Composer styling contract', () => {
     expect(workspaceCss).toContain('font-size: var(--font-size-body);');
     expect(workspaceCss).toContain('font-size: var(--font-size-body-compact);');
     expect(workspaceCss).toContain('font-size: var(--font-size-meta);');
-    expect(workspaceCss).toContain('.workspace-context-head h3 {\n  font-size: var(--font-size-card-title);');
-    expect(workspaceCss).toContain('.workspace-context-list b,\nbody .app-viewport .workspace-domain .workspace-context-list span {\n  font-size: var(--font-size-body-compact);');
+    expect(workspaceCss).toContain('.workspace-context-head h3 { font-size: var(--font-size-card-title);');
+    expect(workspaceCss).toContain('.workspace-context-list b, body .app-viewport .workspace-domain .workspace-context-list span { font-size: var(--font-size-body-compact);');
   });
 
   it('grows with content until the maximum, then scrolls internally', () => {

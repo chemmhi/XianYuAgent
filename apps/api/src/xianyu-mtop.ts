@@ -438,7 +438,14 @@ function cookieHeadersMatch(snapshot: XianyuCookieSnapshot | undefined, rawCooki
   const rawValues = parseCookieHeader(rawCookieHeader);
   const volatile = new Set(['_m_h5_tk', '_m_h5_tk_enc', 'x5sec', 'x5secdata', 'wua', 'umid', 'cna', 'cookie2', 'unb', 'munb', 'tfstk']);
   for (const [name, value] of rawValues) {
-    if (volatile.has(name) && snapshotValues.get(name) !== value) return false;
+    if (!volatile.has(name)) continue;
+    const snapshotValue = snapshotValues.get(name);
+    // Some persisted flat cookies contain only the token prefix while the
+    // browser snapshot still has the authoritative `_m_h5_tk=<token>_<suffix>`
+    // value. Treat that incomplete prefix as compatible, but keep strict
+    // equality for complete values and all other volatile cookies.
+    if (name === '_m_h5_tk' && value && snapshotValue?.startsWith(`${value}_`)) continue;
+    if (snapshotValue !== value) return false;
   }
   return true;
 }

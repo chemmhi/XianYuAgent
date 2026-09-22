@@ -530,3 +530,11 @@
 | S5-R105 | 质量 / 视觉 / 端到端 | API、PostgreSQL、跨层 entry、Chrome/CDP 和 12 张双 viewport 截图是否真实执行；严格像素 diff 是否通过 | root + verification_audit + visual_pixel_tuning | PARTIALLY_VERIFIED | `npm run typecheck`、`npm --workspace apps/api run test:product-automation:postgres`、`npm --workspace apps/api run test:product-automation:entry`、`npm --workspace apps/web run test:e2e:chrome:product-automation`、`docs/evidence/product-automation/pixel-diff-report.json` |
 
 本轮结论：商品自动化切片已完成受控实现与可靠性验证，但严格视觉 diff 仍有 14.39%–25.57% 不同像素，且真实闲鱼 MTOP/IM 执行适配器尚未接入；因此保持 `PARTIALLY_VERIFIED / BLOCKED`，不得宣称真实自动发货、改价、赠品或求评已生产验收。
+
+### 2026-09-22：全量回归收口复审
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R106 | 质量 / 回归 | API 全量 smoke、Web 全量单测以及商品自动化定向门禁是否在修复既有回归后重新通过 | root + verification_audit | PASS | `npm --workspace apps/api run test`；`npm --workspace apps/web run test`（83 files / 279 tests）；`npm run typecheck`；`git diff --check` |
+
+本轮结论：订单 Cookie snapshot 兼容、Dashboard provider 夹具和 Workspace CSS 断言的既有回归已修复并重新验证；商品自动化切片的唯一未关闭阻塞仍是真实闲鱼外部执行适配器和严格像素级视觉验收。
