@@ -137,7 +137,7 @@ async function run() {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    if (url === 'https://img.example/xianyu-detail.jpg') return new Response(new Uint8Array([255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 255, 217]), { status: 200, headers: { 'content-type': 'image/jpeg' } });
+    if (url === 'https://img.example/xianyu-detail.jpg') return new Response(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'), { status: 200, headers: { 'content-type': 'image/png' } });
     return originalFetch(input, init);
   };
   const cookie = cookiesFrom(bootstrap);
@@ -173,6 +173,11 @@ async function run() {
   if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid^=product-detail-]"); if (!button) return false; button.click(); return true; })()')) throw new Error('product detail action button missing');
   await waitFor(async () => cdp.events.slice(detailMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'GET' && event.params?.request?.url?.match(/\/api\/v1\/products\/[^/]+\/detail(?:\?|$)/)), 'xianyu product detail read request');
   await waitFor(async () => { const text = String(await evaluate(cdp, 'document.body.innerText')); return text.includes('Chrome E2E 闲鱼详情') && text.includes('315') && text.includes('对象存储'); }, 'xianyu detail drawer');
+  await waitFor(async () => {
+    const state = await evaluate(cdp, '(() => Array.from(document.querySelectorAll(".xianyu-detail-image img")).map((image) => ({ src: image.currentSrc || image.src, complete: image.complete, naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight, opacity: getComputedStyle(image).opacity })))()');
+    if (Array.isArray(state) && state.length === 1 && state.every((image) => image.complete && image.naturalWidth > 0)) return true;
+    throw new Error(JSON.stringify(state));
+  }, 'xianyu detail image preview');
   await captureViewport(cdp, 1440, 900, 'products-detail-drawer-desktop-1440x900.png');
   await captureViewport(cdp, 390, 844, 'products-detail-drawer-mobile-390x844.png');
   await cdp.send('Emulation.clearDeviceMetricsOverride');

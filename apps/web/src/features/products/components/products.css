@@ -85,8 +85,9 @@
 .xianyu-seller-metrics span { padding: 4px 6px; border-radius: 6px; background: #F8FAFC; }
 .xianyu-detail-gallery { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
 .xianyu-detail-image { min-width: 0; margin: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: #F8FAFC; }
-.xianyu-detail-image img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: #F1F5F9; }
-.xianyu-detail-image-placeholder { display: grid; place-items: center; width: 100%; aspect-ratio: 1; box-sizing: border-box; padding: 10px; background: #F1F5F9; color: var(--sub); font-size: 10px; text-align: center; }
+.xianyu-detail-image-frame { position: relative; width: 100%; aspect-ratio: 1; background: #F1F5F9; }
+.xianyu-detail-image img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; background: #F1F5F9; transition: opacity .16s ease; }
+.xianyu-detail-image-placeholder { position: absolute; inset: 0; display: grid; place-items: center; box-sizing: border-box; padding: 10px; background: #F1F5F9; color: var(--sub); font-size: 10px; text-align: center; }
 .xianyu-detail-image-placeholder small { max-width: 100%; overflow: hidden; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .xianyu-detail-image figcaption { padding: 6px 7px; overflow: hidden; color: var(--sub); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .xianyu-detail-description { padding: 12px; border: 1px solid var(--border); border-radius: 9px; color: var(--sub); font-size: 12px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }

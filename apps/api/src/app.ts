@@ -927,6 +927,25 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     return { statusCode: 200, body: success(ctx, preview).body };
   }
 
+  const productDetailAssetMatch = ctx.path.match(/^\/api\/v1\/products\/([^/]+)\/detail\/assets\/([^/]+)$/);
+  if (productDetailAssetMatch && (ctx.method === 'GET' || ctx.method === 'HEAD')) {
+    const productId = decodeURIComponent(productDetailAssetMatch[1]);
+    const assetId = decodeURIComponent(productDetailAssetMatch[2]);
+    const resolved = await runtime.xianyuItemDetail.getAsset({ adminId: authContext.admin.id, productId, assetId });
+    if (!resolved) return { statusCode: 404, body: failure(ctx, 404, 'NOT_FOUND', 'product image not found').body };
+    const { asset, object } = resolved;
+    response.statusCode = 200;
+    response.setHeader('Content-Type', object.contentType || asset.mimeType);
+    response.setHeader('Content-Length', String(object.body.length));
+    response.setHeader('Cache-Control', 'private, max-age=300');
+    response.setHeader('Content-Disposition', 'inline');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.setHeader('ETag', `"${asset.checksum ?? object.etag ?? asset.id}"`);
+    if (ctx.method === 'HEAD') response.end();
+    else response.end(object.body);
+    return undefined;
+  }
+
   const productDetailMatch = ctx.path.match(/^\/api\/v1\/products\/([^/]+)\/(?:xianyu-detail|detail)(?:\/refresh)?$/);
   if (productDetailMatch && (ctx.method === 'GET' || ctx.method === 'POST')) {
     const productId = decodeURIComponent(productDetailMatch[1]);

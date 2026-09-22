@@ -75,14 +75,16 @@ function ImageTile({ image, index }: { image: XianyuItemImageVM; index: number }
   const [status, setStatus] = useState<'loading' | 'loaded' | 'failed'>(previewUrl ? 'loading' : 'failed');
   const showImage = Boolean(previewUrl && status === 'loaded');
   return <figure className="xianyu-detail-image">
-    {!showImage && <div className="xianyu-detail-image-placeholder">对象存储图片<br /><small>{image.storageKey ?? '等待访问地址'}</small></div>}
-    {previewUrl && <img src={previewUrl} alt={image.alt ?? `商品图片 ${index + 1}`} loading="lazy" style={{ display: showImage ? 'block' : 'none' }} onLoad={() => setStatus('loaded')} onError={() => setStatus('failed')} />}
+    <div className="xianyu-detail-image-frame">
+      {!showImage && <div className="xianyu-detail-image-placeholder">对象存储图片<br /><small>{image.storageKey ?? '等待访问地址'}</small></div>}
+      {previewUrl && <img src={previewUrl} alt={image.alt ?? `商品图片 ${index + 1}`} loading="eager" style={{ opacity: showImage ? 1 : 0 }} onLoad={() => setStatus('loaded')} onError={() => setStatus('failed')} />}
+    </div>
     <figcaption>{image.storageKey ? `对象存储 · ${image.storageKey}` : `图片 ${index + 1}`}</figcaption>
   </figure>;
 }
 
 function isRenderableImageUrl(value?: string): value is string {
-  return Boolean(value && /^(https?:|data:image\/|blob:)/i.test(value));
+  return Boolean(value && (/^\//.test(value) || /^(https?:|data:image\/|blob:)/i.test(value)));
 }
 
 function DetailField({ label, value }: { label: string; value?: string }) { return <div><dt>{label}</dt><dd>{value || '—'}</dd></div>; }
