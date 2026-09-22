@@ -7,6 +7,7 @@ const productsCss = readFileSync(fileURLToPath(new URL('./products.css', import.
 describe('product detail drawer typography', () => {
   it('keeps drawer body text readable while preserving title and metadata hierarchy', () => {
     expect(productsCss).toMatch(/\.products-detail-panel \.eyebrow\s*\{[^}]*font-size:\s*12px;[^}]*line-height:\s*1\.5;/s);
+    expect(productsCss).toMatch(/body \.app-viewport \.products-detail-panel h2\s*\{[^}]*font-size:\s*20px;/s);
     expect(productsCss).toMatch(/\.products-detail-state\s*\{[^}]*font-size:\s*14px;[^}]*line-height:\s*1\.6;/s);
     expect(productsCss).toMatch(/\.products-detail-body h3\s*\{[^}]*font-size:\s*16px;[^}]*line-height:\s*1\.5;/s);
     expect(productsCss).toMatch(/\.products-detail-body dt\s*\{[^}]*font-size:\s*12px;[^}]*line-height:\s*1\.5;/s);

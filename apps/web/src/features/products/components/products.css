@@ -53,7 +53,7 @@
 .products-detail-panel .eyebrow { font-size: 12px; line-height: 1.5; }
 .products-detail-panel header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
 .products-detail-header-actions { display: flex; align-items: center; gap: 8px; }
-.products-detail-panel h2 { margin: 4px 0 0; font-size: 20px; }
+body .app-viewport .products-detail-panel h2 { margin: 4px 0 0; font-size: 20px; }
 .products-detail-state { display: grid; place-items: center; gap: 8px; min-height: 180px; padding: 22px 0; color: var(--sub); font-size: 14px; line-height: 1.6; text-align: center; }
 .products-detail-state strong { font-size: 15px; line-height: 1.5; }
 .products-detail-state > span:not(.xianyu-detail-spinner) { font-size: 14px; line-height: 1.6; }
