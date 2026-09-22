@@ -122,10 +122,10 @@
 .coupons-image-add span { font-size: 25px; line-height: 1; }
 .coupons-image-add small { font-size: 10px; }
 .coupons-relation-modal { width: min(960px, 100%); height: min(680px, calc(100vh - 48px)); max-height: calc(100vh - 48px); overflow: hidden; display: flex; flex-direction: column; }
-.coupons-relation-grid { display: grid; grid-template-columns: 1fr 1fr; flex: 1 1 auto; min-height: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin: 18px 0; }
+.coupons-relation-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr); flex: 1 1 auto; min-height: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin: 18px 0; }
 .coupons-relation-pane { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; border-right: 1px solid var(--border); }
 .coupons-relation-pane:last-child { border-right: 0; }
-.coupons-relation-pane-head { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; padding: 12px; background: var(--bg); border-bottom: 1px solid var(--border); }
+.coupons-relation-pane-head { display: grid; grid-template-columns: 1fr auto auto; grid-template-rows: 32px 34px; gap: 8px; align-items: center; padding: 12px; background: var(--bg); border-bottom: 1px solid var(--border); }
 .coupons-relation-pane-head strong { font-size: 12px; }
 .coupons-relation-pane-head span { color: var(--sub); font-size: 10px; }
 .coupons-relation-search { grid-column: 1 / -1; min-width: 0; max-width: none; }

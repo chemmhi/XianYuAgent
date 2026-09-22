@@ -216,6 +216,16 @@ async function run() {
   await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "关联商品")?.click()');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('待选商品'), 'coupon relation modal');
   await assertText(cdp, '已选商品');
+  const relationLayoutAudit = await evaluate(cdp, `(() => {
+    const panes = Array.from(document.querySelectorAll('.coupons-relation-pane'));
+    const heads = panes.map((pane) => pane.querySelector('.coupons-relation-pane-head')?.getBoundingClientRect().height ?? 0);
+    const scrolls = panes.map((pane) => pane.querySelector('.coupons-relation-scroll')?.getBoundingClientRect().height ?? 0);
+    const searches = panes.map((pane) => pane.querySelector('.coupons-relation-search')?.getBoundingClientRect().top ?? 0);
+    const equalWithinOne = (values) => values.length === 2 && Math.abs(values[0] - values[1]) <= 1;
+    return { paneHeights: panes.map((pane) => pane.getBoundingClientRect().height), heads, scrolls, searches, equalPaneHeights: equalWithinOne(panes.map((pane) => pane.getBoundingClientRect().height)), equalHeadHeights: equalWithinOne(heads), equalScrollHeights: equalWithinOne(scrolls), equalSearchTops: equalWithinOne(searches) };
+  })()`);
+  if (!relationLayoutAudit || !relationLayoutAudit.equalPaneHeights || !relationLayoutAudit.equalHeadHeights || !relationLayoutAudit.equalScrollHeights || !relationLayoutAudit.equalSearchTops) throw new Error(`coupon relation panes are not aligned: ${JSON.stringify(relationLayoutAudit)}`);
+  await captureViewport(cdp, 1440, 900, 'coupons-relation-modal-desktop-1440x900.png');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('卡券 E2E 商品'), 'coupon relation product list');
   const relationProductSelected = await evaluate(cdp, `(() => { const product = Array.from(document.querySelectorAll('.coupons-relation-pane:not(.selected-pane) button.coupons-relation-item')).find((button) => button.textContent?.includes('卡券 E2E 商品')); if (!product) return false; product.click(); return true; })()`);
   if (!relationProductSelected) throw new Error('coupon relation product option missing');

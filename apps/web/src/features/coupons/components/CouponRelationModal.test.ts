@@ -39,6 +39,8 @@ describe('CouponRelationModal', () => {
     const css = readFileSync(fileURLToPath(new URL('./coupons.css', import.meta.url)), 'utf8');
 
     expect(css).toContain('height: min(680px, calc(100vh - 48px));');
+    expect(css).toMatch(/\.coupons-relation-grid\s*\{[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\);/s);
+    expect(css).toMatch(/\.coupons-relation-pane-head\s*\{[^}]*grid-template-rows:\s*32px 34px;/s);
     expect(css).toContain('.coupons-relation-state { min-height: 100%; display: grid; place-items: center;');
     expect(css).toContain('.coupons-relation-scroll { min-height: 0; overflow-y: auto;');
   });

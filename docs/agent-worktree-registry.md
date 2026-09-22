@@ -106,6 +106,7 @@
 | `root` | `dashboard-account-context` | `fix/dashboard-account-context` | `F:\ChenHai\Project\XianYuAgent-dashboard-account-context` | Codex `/root` | `2026-09-22 17:00:00 +08:00` | `REGISTERED` | `-` | `-` | 仪表盘按当前账号上下文隔离；补前后端回归与未选择账号状态。 |
 | `root/backend_audit` | `dashboard-account-isolation` | `codex/dashboard-account-isolation` | `F:\ChenHai\Project\XianYuAgent-dashboard-account-isolation` | Codex `/root` delegated agent | `2026-09-22 16:37:08 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | DashboardService 强制 accountId；Memory/Postgres 聚合按账号过滤；补充缺失 422、越权 403、同管理员双账号隔离与 PostgreSQL 重启复读验证。 |
 | `root/frontend_audit` | `dashboard-frontend-isolation` | `codex/dashboard-frontend-isolation` | `F:\ChenHai\Project\XianYuAgent-dashboard-frontend-isolation` | Codex `/root` delegated agent | `2026-09-22 16:45:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | Dashboard API 请求绑定当前账号；无账号/加载失败不请求；切换账号时先清空旧快照；Web 定向测试、typecheck、build、Chrome/CDP dashboard E2E 通过。 |
+| `root/frontend_coupon_relation_height` | `coupons-relation-height-20260923` | `codex/coupons-relation-height-20260923` | `F:\ChenHai\Project\XianYuAgent-coupons-relation-height-20260923` | Codex `/root` delegated agent | `2026-09-22 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 修复关联商品穿梭框左右 pane 高度对齐；CSS 回归断言、Web typecheck、API build、真实 Coupons Chrome/CDP E2E（含高度审计与桌面截图）通过。 |
 
 | 类型 | branch | worktree | 规则 |
 | --- | --- | --- | --- |
