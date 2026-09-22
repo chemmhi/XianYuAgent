@@ -86,8 +86,11 @@ test('configured model provider generates the persisted auto-reply', async () =>
     const detail = await runtime.store.getAutoReplyRunDetail(admin.id, result.autoReply!.run.id);
     const classifiedEvent = detail?.events.find((event) => event.status === 'classified');
     const persistedEvent = detail?.events.find((event) => event.status === 'persisted');
+    const agentLogEvents = detail?.events.filter((event) => event.payload.log && typeof event.payload.log === 'object');
     assert.equal(classifiedEvent?.payload.input && typeof classifiedEvent.payload.input === 'object' ? (classifiedEvent.payload.input as Record<string, unknown>).kind : undefined, 'intent_classification');
     assert.equal(persistedEvent?.payload.output && typeof persistedEvent.payload.output === 'object' ? (persistedEvent.payload.output as Record<string, unknown>).persisted : undefined, true);
+    assert.ok(agentLogEvents?.some((event) => (event.payload.log as Record<string, unknown>).phase === 'model'));
+    assert.ok(agentLogEvents?.some((event) => (event.payload.log as Record<string, unknown>).phase === 'agent' && (event.payload.log as Record<string, unknown>).decision === 'reply'));
     assert.doesNotMatch(JSON.stringify(detail?.events ?? []), /请问这个是什么东西/);
     assert.equal(calls.length, 1);
     assert.equal(calls[0]?.url, 'https://model.example/v1/chat/completions');
@@ -212,7 +215,7 @@ test('model provider failure fails the run without creating an outbound message'
     assert.equal(result.autoReply?.run.status, 'failed');
     assert.equal(result.autoReply?.run.failureCode, 'MODEL_HTTP_ERROR');
     const detail = await runtime.store.getAutoReplyRunDetail(admin.id, result.autoReply!.run.id);
-    const failedEvent = detail?.events.find((event) => event.status === 'failed');
+    const failedEvent = detail?.events.find((event) => event.eventType === 'run.failed');
     const failedInput = failedEvent?.payload.input && typeof failedEvent.payload.input === 'object' ? failedEvent.payload.input as Record<string, unknown> : undefined;
     assert.equal(failedInput?.status, 'context_loaded');
     assert.equal(failedInput?.intent, 'general');

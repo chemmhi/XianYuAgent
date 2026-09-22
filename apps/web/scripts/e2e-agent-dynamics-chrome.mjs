@@ -243,27 +243,20 @@ async function run() {
         hasContextStage: titles.some((title) => title.includes('上下文读取')),
         hasGenerationStage: titles.some((title) => title.includes('回复生成')),
         hasSendingStage: titles.some((title) => title.includes('发送提交')),
-        hasPersistedStage: titles.some((title) => title.includes('消息已完成自动回复')),
-        hasInputOutputHint: hints.some((hint) => hint.includes('输入') && hint.includes('输出')),
+        hasPersistedStage: titles.some((title) => title.includes('结果落库')),
+        hasNodeLogHint: hints.some((hint) => hint.includes('节点日志')),
+        timelineTitlesDoNotRepeatBuyer: titles.every((title) => !title.includes('Agent Dynamics Buyer')),
       };
     })()`);
-    if (timelineAssertions.count < 5 || !timelineAssertions.closedByDefault || !timelineAssertions.hasIntentStage || !timelineAssertions.hasContextStage || !timelineAssertions.hasGenerationStage || !timelineAssertions.hasSendingStage || !timelineAssertions.hasPersistedStage || !timelineAssertions.hasInputOutputHint) {
+    if (timelineAssertions.count < 5 || !timelineAssertions.closedByDefault || !timelineAssertions.hasIntentStage || !timelineAssertions.hasContextStage || !timelineAssertions.hasGenerationStage || !timelineAssertions.hasSendingStage || !timelineAssertions.hasPersistedStage || !timelineAssertions.hasNodeLogHint || !timelineAssertions.timelineTitlesDoNotRepeatBuyer) {
       throw new Error(`timeline semantics failed: ${JSON.stringify(timelineAssertions)}`);
     }
     await evaluate(cdp, `(() => { const first = document.querySelector('.agent-dynamics-timeline-item .agent-dynamics-timeline-summary'); if (!first) return false; first.click(); return true; })()`);
-    await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".agent-dynamics-timeline-item[open] .agent-dynamics-timeline-details"))'), 'timeline input/output details');
+    await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".agent-dynamics-timeline-item[open] .agent-dynamics-timeline-details"))'), 'timeline node log details');
     const timelineDetailsText = String(await evaluate(cdp, 'document.querySelector(".agent-dynamics-timeline-item[open] .agent-dynamics-timeline-details")?.textContent ?? ""'));
-    if (!timelineDetailsText.includes('输入') || !timelineDetailsText.includes('输出')) throw new Error(`timeline input/output groups missing: ${timelineDetailsText}`);
+    if (!timelineDetailsText.includes('节点日志') || !timelineDetailsText.includes('工作状态')) throw new Error(`timeline node log missing: ${timelineDetailsText}`);
     const technicalCollapsed = await evaluate(cdp, 'Boolean(document.querySelector(".agent-dynamics-timeline-item[open] .agent-dynamics-timeline-technical") && !document.querySelector(".agent-dynamics-timeline-item[open] .agent-dynamics-timeline-technical")?.hasAttribute("open"))');
     if (!technicalCollapsed) throw new Error('technical trace should stay collapsed by default');
-    const firstNodeIo = await evaluate(cdp, `(() => {
-      const root = document.querySelector('.agent-dynamics-timeline-item[open]');
-      const groups = Array.from(root?.querySelectorAll('.agent-dynamics-timeline-group') ?? []);
-      const input = groups.find((group) => group.textContent?.includes('本步输入'))?.textContent?.trim() ?? '';
-      const output = groups.find((group) => group.textContent?.includes('本步输出'))?.textContent?.trim() ?? '';
-      return { hasInput: Boolean(input), hasOutput: Boolean(output), distinct: Boolean(input && output && input !== output), input, output };
-    })()`);
-    if (!firstNodeIo.hasInput || !firstNodeIo.hasOutput || !firstNodeIo.distinct) throw new Error(`timeline input/output are not distinct: ${JSON.stringify(firstNodeIo)}`);
     const drawerText = String(await evaluate(cdp, 'document.body.innerText'));
     const drawerPath = await captureViewport(cdp, 1440, 900, 'agent-dynamics-drawer-desktop-1440x900.png');
     const mobileDrawerPath = await captureViewport(cdp, 390, 844, 'agent-dynamics-mobile-drawer-390x844.png');

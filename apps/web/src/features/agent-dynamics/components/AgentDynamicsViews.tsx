@@ -145,20 +145,21 @@ function RunDrawerContent({ detail, onClose, onOpenChat }: { detail: AgentDynami
 }
 
 function Timeline({ items }: { items: AgentDynamicsTimelineItemVM[] }) {
-  return <div className="agent-dynamics-timeline">{items.map((item) => <details className="agent-dynamics-timeline-item" key={item.id}>
+  return <div className="agent-dynamics-timeline">{items.map((item) => {
+    const logItems = item.details?.log?.length ? item.details.log : [{ label: '工作状态', value: item.status ?? '已记录' }];
+    return <details className="agent-dynamics-timeline-item" key={item.id}>
     <summary className="agent-dynamics-timeline-summary">
       <span className={`agent-dynamics-timeline-dot ${classTone(item.tone)}`} />
-      <span><span className="agent-dynamics-timeline-title">{item.title}</span>{item.description && <span className="agent-dynamics-timeline-description">{item.description}</span>}<span className="agent-dynamics-timeline-meta">{item.meta}{item.traceId ? ` · trace ${item.traceId}` : ''}</span></span>
-      <span className="agent-dynamics-timeline-hint">{item.details?.error?.length ? '查看异常' : item.details?.input?.length || item.details?.output?.length ? '查看本步输入 / 输出' : '暂无安全摘要'}</span>
+      <span><span className="agent-dynamics-timeline-title">{item.title}</span>{item.description && <span className="agent-dynamics-timeline-description">{item.description}</span>}<span className="agent-dynamics-timeline-meta">{item.meta}</span></span>
+      <span className="agent-dynamics-timeline-hint">{item.details?.error?.length ? '查看异常' : '查看节点日志'}</span>
     </summary>
-    {item.details ? <div className="agent-dynamics-timeline-details">
-      <TimelineDetailGroup label="本步输入（读取）" items={item.details.input} />
-      <TimelineDetailGroup label="本步输出（产出）" items={item.details.output} />
-      <TimelineDetailGroup label="异常 / 拦截" items={item.details.error} tone="danger" />
-      {item.details.technical && <TimelineTechnicalDetails items={item.details.technical} />}
-      {item.details.note && <div className={`agent-dynamics-timeline-note${item.details.inferred ? ' inferred' : ''}`}>{item.details.note}</div>}
-    </div> : <div className="agent-dynamics-timeline-empty">暂无该步骤的安全摘要</div>}
-  </details>)}</div>;
+    <div className="agent-dynamics-timeline-details">
+      <TimelineDetailGroup label="节点日志" items={logItems} />
+      <TimelineDetailGroup label="异常 / 拦截" items={item.details?.error} tone="danger" />
+      {item.details?.technical && <TimelineTechnicalDetails items={item.details.technical} />}
+      {item.details?.note && <div className={`agent-dynamics-timeline-note${item.details.inferred ? ' inferred' : ''}`}>{item.details.note}</div>}
+    </div>
+  </details>})}</div>;
 }
 
 function TimelineDetailGroup({ label, items, tone = 'default' }: { label: string; items?: Array<{ label: string; value: string }>; tone?: 'default' | 'danger' }) {

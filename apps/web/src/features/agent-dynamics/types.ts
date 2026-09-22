@@ -137,6 +137,7 @@ export interface AgentDynamicsTimelineItemVM {
   eventType?: string;
   traceId?: string;
   details?: {
+    log?: Array<{ label: string; value: string }>;
     input?: Array<{ label: string; value: string }>;
     output?: Array<{ label: string; value: string }>;
     error?: Array<{ label: string; value: string }>;

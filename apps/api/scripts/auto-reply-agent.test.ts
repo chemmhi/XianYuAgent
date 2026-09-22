@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { resolveAutoReplyAgentConfig } from '../src/auto-reply-agent-config.js';
 import { AUTO_REPLY_AGENT_TOOLS, ToolCallingAutoReplyAgent, type AutoReplyAgentTrace } from '../src/auto-reply-agent.js';
-import { AutoReplyService, NoopAutoReplySender, type AutoReplyClassification, type AutoReplyContext } from '../src/auto-reply.js';
+import { AutoReplyService, NoopAutoReplySender, type AutoReplyClassification, type AutoReplyContext, type AutoReplyGeneratorObservation } from '../src/auto-reply.js';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { OpenAICompatibleModelClient, type ModelClient, type ModelMessage } from '../src/pi-runtime.js';
@@ -79,6 +79,44 @@ test('agent chooses product tool then returns final answer', async () => {
   assert.equal(requests[0]?.tools?.length, AUTO_REPLY_AGENT_TOOLS.length);
   assert.equal(requests[1]?.messages.at(-1)?.role, 'tool');
   assert.match(contentText(requests[1]?.messages.at(-1)?.content), /资料包/);
+});
+
+test('agent emits high-level redacted observations for model, tool, and final decision', async () => {
+  const observations: AutoReplyGeneratorObservation[] = [];
+  let call = 0;
+  const client: ModelClient = {
+    complete: async () => {
+      call += 1;
+      if (call === 1) return { content: '', model: 'test-model', toolCalls: [{ id: 'tool-1', type: 'function', function: { name: 'get_product_info', arguments: JSON.stringify({ productRef: 'item-1' }) } }] };
+      return { content: replyPayload('这是一个包含商品描述的最终回复。'), model: 'test-model', usage: { prompt_tokens: 12, completion_tokens: 8, total_tokens: 20 } };
+    },
+  };
+  const product = { id: 'product-1', accountId: 'account-1', externalProductRef: 'item-1', title: '资料包', description: '不应写入观测日志的商品描述', defaultReplyTemplate: undefined, aiPrompt: undefined, priceMinor: 1_999, status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' };
+  const store = { getProduct: async () => product, listProducts: async () => ({ items: [product], page: 1, pageSize: 100, total: 1, totalPages: 1 }) } as unknown as Store;
+  const config = resolveAutoReplyAgentConfig({});
+  const agent = new ToolCallingAutoReplyAgent(store, client, config);
+
+  await agent.generate({ adminId: 'admin-1', context: context(), classification, observe: (observation) => { observations.push(observation); } });
+
+  assert.deepEqual(observations.map((item) => item.eventType), [
+    'agent.model.started',
+    'agent.model.completed',
+    'agent.tool.started',
+    'agent.tool.completed',
+    'agent.model.started',
+    'agent.model.completed',
+    'agent.final.reply',
+  ]);
+  assert.equal(observations[1]?.log.state, 'tool_requested');
+  assert.equal(observations[4]?.log.state, 'started');
+  assert.equal(observations[5]?.log.state, 'completed');
+  const toolStarted = observations[2]?.log ?? {};
+  assert.deepEqual(toolStarted.argumentKeys, ['productRef']);
+  assert.equal(JSON.stringify(observations).includes('不应写入观测日志的商品描述'), false);
+  assert.equal(JSON.stringify(observations).includes('这是一个包含商品描述的最终回复'), false);
+  assert.deepEqual(observations[6]?.log, {
+    phase: 'agent', state: 'completed', message: 'Agent 已完成回复决策', decision: 'reply', loop: 2, toolCalls: 1, tools: ['get_product_info'], configDigest: config.digest, replyLength: 16, segmentCount: 1,
+  });
 });
 
 test('agent preserves model-provided semantic segments and supports a segmentation retry', async () => {

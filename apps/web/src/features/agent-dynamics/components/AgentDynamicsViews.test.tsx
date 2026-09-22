@@ -32,9 +32,10 @@ describe('AgentDynamicsViews', () => {
     const html = renderToStaticMarkup(<RunDrawer detail={{ phase: 'success', data: detail, error: null }} onClose={() => undefined} onRetry={() => undefined} onOpenChat={() => undefined} />);
     expect(html).toContain('运行详情');
     expect(html).toContain('已接收买家消息');
-    expect(html).toContain('输入');
-    expect(html).toContain('inbound_message');
-    expect(html).toContain('输出');
+    expect(html).toContain('节点日志');
+    expect(html).toContain('工作状态');
+    expect(html).not.toContain('查看本步输入 / 输出');
+    expect(html).not.toContain('一只橘喵喵亮晶晶 的消息已接收');
     expect(html).toContain('技术追踪');
     expect(html).toContain('打开在线聊天');
   });

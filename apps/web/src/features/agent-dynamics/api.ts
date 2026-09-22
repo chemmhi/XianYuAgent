@@ -207,20 +207,56 @@ function mapRun(raw: RawAutoReplyRunListItem): AgentDynamicsRunRowVM {
   };
 }
 
-function eventTitle(event: RawAutoReplyRunEvent, run: AgentDynamicsRunRowVM): string {
-  if (event.status === 'failed') return `${run.buyer.name} 的回复生成失败`;
-  if (event.status === 'handoff') return `${run.buyer.name} 已转人工处理`;
-  if (event.status === 'skipped') return `${run.buyer.name} 已跳过自动回复`;
-  if (event.status === 'persisted') return `${run.buyer.name} 的消息已完成自动回复`;
-  if (event.stage === 'gateway_received') return `${run.buyer.name} 的消息已接收`;
-  if (event.stage === 'intent_recognition') return `${run.buyer.name} 已完成意图识别`;
-  if (event.stage === 'context_read') return `${run.buyer.name} 已完成上下文读取`;
-  if (event.stage === 'reply_generation') return `${run.buyer.name} 已完成回复生成`;
-  if (event.stage === 'sending') return `${run.buyer.name} 已完成发送提交`;
-  return `${run.buyer.name} 已完成${run.intent}处理`;
+function stringField(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function eventNodeLabel(event: RawAutoReplyRunEvent): string {
+  const payload = event.payload ?? {};
+  const log = payload.log;
+  if (log && typeof log === 'object' && !Array.isArray(log)) {
+    const logRecord = log as Record<string, unknown>;
+    const nodeLabel = stringField(logRecord.nodeLabel) ?? stringField(logRecord.node);
+    if (nodeLabel) return nodeLabel;
+    const phase = stringField(logRecord.phase);
+    if (phase === 'model') return 'Agent 模型决策';
+    if (phase === 'tool') return 'Agent 工具执行';
+    if (phase === 'agent') return 'Agent 决策';
+  }
+  const nodeLabel = stringField(payload.nodeLabel) ?? stringField(payload.node);
+  if (nodeLabel) return nodeLabel;
+  if (event.status === 'handoff') return '转人工';
+  if (event.status === 'skipped') return '资格检查';
+  if (event.status === 'failed') return '回复生成';
+  if (event.status === 'persisted') return '结果落库';
+  if (event.stage === 'gateway_received') return '消息接收';
+  if (event.stage === 'intent_recognition') return '意图识别';
+  if (event.stage === 'context_read') return '上下文读取';
+  if (event.stage === 'reply_generation') return '回复生成';
+  if (event.stage === 'sending') return '发送提交';
+  return '自动回复节点';
+}
+
+function eventTitle(event: RawAutoReplyRunEvent, _run: AgentDynamicsRunRowVM): string {
+  const node = eventNodeLabel(event);
+  if (event.status === 'failed') return `${node}失败`;
+  if (event.status === 'handoff') return `${node}已拦截`;
+  if (event.status === 'skipped') return `${node}已跳过`;
+  if (event.status === 'persisted') return `${node}完成`;
+  if (event.eventType === 'run.progress' || event.eventType.startsWith('agent.')) return node;
+  return `${node}完成`;
 }
 
 function eventDescription(event: RawAutoReplyRunEvent): string {
+  const log = event.payload?.log;
+  if (Array.isArray(log)) {
+    const message = log.map((item) => typeof item === 'string' ? item : item && typeof item === 'object' ? stringField((item as Record<string, unknown>).message) : undefined).find(Boolean);
+    if (message) return message;
+  }
+  if (log && typeof log === 'object' && !Array.isArray(log)) {
+    const message = stringField((log as Record<string, unknown>).message);
+    if (message) return message;
+  }
   switch (event.eventType) {
     case 'run.created': return '网关接入：读取买家消息并创建本次自动回复运行';
     case 'run.classified': return '意图识别：判断消息类型与是否允许自动回复';
@@ -235,7 +271,98 @@ function eventDescription(event: RawAutoReplyRunEvent): string {
   }
 }
 
-function eventTone(status: RawAutoReplyRunStatus): AgentDynamicsRunRowVM['stage']['tone'] {
+const EVENT_LOG_LABELS: Record<string, string> = {
+  phase: '阶段',
+  state: '执行状态',
+  action: '动作',
+  message: '日志',
+  status: '工作状态',
+  decision: '决策',
+  reason: '原因',
+  result: '结果',
+  model: '模型',
+  tool: '工具',
+  toolName: '工具',
+  toolCallIndex: '工具序号',
+  toolCallCount: '工具调用数',
+  loop: '循环轮次',
+  toolCalls: '工具调用',
+  historyCount: '历史条数',
+  orderRefsCount: '订单数',
+  segmentCount: '回复段数',
+  senderOutcome: '发送结果',
+  outputLength: '输出长度',
+  replyLength: '回复长度',
+  failureCode: '错误码',
+  errorCode: '错误码',
+  reasonCode: '原因码',
+};
+
+function mapEventLogFields(event: RawAutoReplyRunEvent): Array<{ label: string; value: string }> {
+  const payload = event.payload ?? {};
+  const rawLog = payload.log;
+  const sources: Array<Record<string, unknown>> = [];
+  if (Array.isArray(rawLog)) {
+    for (const entry of rawLog) if (entry && typeof entry === 'object' && !Array.isArray(entry)) sources.push(entry as Record<string, unknown>);
+  } else if (rawLog && typeof rawLog === 'object') {
+    sources.push(rawLog as Record<string, unknown>);
+  }
+  const fields: Array<{ label: string; value: string }> = [];
+  for (const source of sources) {
+    for (const [key, value] of Object.entries(source)) {
+      const label = EVENT_LOG_LABELS[key];
+      if (!label || value === undefined || key === 'node' || key === 'nodeLabel' || key === 'state') continue;
+      fields.push({ label, value: formatEventDetailValue(value) });
+    }
+  }
+  const output = payload.output && typeof payload.output === 'object' && !Array.isArray(payload.output) ? payload.output as Record<string, unknown> : undefined;
+  const error = payload.error && typeof payload.error === 'object' && !Array.isArray(payload.error) ? payload.error as Record<string, unknown> : undefined;
+  const logState = sources.map((source) => stringField(source.state)).find(Boolean);
+  const status = stringField(payload.status) ?? event.status;
+  fields.unshift({ label: '工作状态', value: logState ? executionStateLabel(logState) : statusLabel(status) });
+  if (event.durationMs !== undefined) fields.push({ label: '耗时', value: formatDuration(event.durationMs) });
+  if (output) {
+    const outputKeys = event.eventType === 'run.created' || event.status === 'received'
+      ? ['reason', 'senderOutcome', 'segmentCount', 'outputLength', 'historyCount', 'orderRefsCount']
+      : ['decision', 'reason', 'senderOutcome', 'segmentCount', 'outputLength', 'historyCount', 'orderRefsCount'];
+    for (const key of outputKeys) {
+      if (output[key] !== undefined && !fields.some((field) => field.label === EVENT_LOG_LABELS[key])) fields.push({ label: EVENT_LOG_LABELS[key]!, value: formatEventDetailValue(output[key]) });
+    }
+  }
+  if (error) {
+    const code = error.code ?? payload.failureCode;
+    if (code !== undefined) fields.push({ label: '错误码', value: formatEventDetailValue(code) });
+    if (error.reason !== undefined) fields.push({ label: '原因', value: formatEventDetailValue(error.reason) });
+  } else if (payload.failureCode !== undefined) {
+    fields.push({ label: '错误码', value: formatEventDetailValue(payload.failureCode) });
+  }
+  const seen = new Set<string>();
+  return fields.filter((field) => { const key = `${field.label}:${field.value}`; if (seen.has(key)) return false; seen.add(key); return true; });
+}
+
+function statusLabel(status: string): string {
+  return ({ received: '已接收', classified: '已识别', context_loaded: '上下文已就绪', generated: '回复已生成', simulated: '发送结果已记录', persisted: '已落库', handoff: '已转人工', skipped: '已跳过', failed: '失败' } as Record<string, string>)[status] ?? status;
+}
+
+function executionStateLabel(state: string): string {
+  return ({ started: '进行中', completed: '已完成', tool_requested: '等待工具执行', failed: '失败', handoff: '已转人工', skipped: '已跳过', received: '已接收' } as Record<string, string>)[state] ?? state;
+}
+
+function eventMeta(event: RawAutoReplyRunEvent): string {
+  const log = event.payload?.log;
+  const state = log && typeof log === 'object' && !Array.isArray(log) ? stringField((log as Record<string, unknown>).state) : undefined;
+  const status = event.eventType === 'run.progress' || event.eventType.startsWith('agent.')
+    ? (state ? executionStateLabel(state) : statusLabel(event.status))
+    : statusLabel(event.status);
+  return `${formatTime(event.occurredAt)} · ${status}${event.durationMs === undefined ? '' : ` · ${formatDuration(event.durationMs)}`}`;
+}
+
+function eventTone(status: RawAutoReplyRunStatus, event?: RawAutoReplyRunEvent): AgentDynamicsRunRowVM['stage']['tone'] {
+  const log = event?.payload?.log;
+  const state = log && typeof log === 'object' && !Array.isArray(log) ? stringField((log as Record<string, unknown>).state) : undefined;
+  if (state === 'failed') return 'danger';
+  if (state === 'handoff') return 'warn';
+  if (state === 'skipped') return 'gray';
   if (status === 'failed') return 'danger';
   if (status === 'handoff') return 'warn';
   if (PROCESSING_STATUSES.includes(status)) return 'info';
@@ -245,7 +372,7 @@ function eventTone(status: RawAutoReplyRunStatus): AgentDynamicsRunRowVM['stage'
 function mapEvents(events: RawAutoReplyRunEvent[], runs: Map<string, AgentDynamicsRunRowVM>): AgentDynamicsEventVM[] {
   return events.map((event) => {
     const run = runs.get(event.runId);
-    const tone = eventTone(event.status);
+    const tone = eventTone(event.status, event);
     const detail = event.durationMs === undefined ? event.eventType : `${event.eventType} · ${formatDuration(event.durationMs)}`;
     return { id: event.id, runId: event.runId, time: formatTime(event.occurredAt), title: run ? eventTitle(event, run) : event.eventType, meta: detail, label: event.status === 'persisted' ? '完成' : event.status === 'handoff' ? '转人工' : event.status === 'failed' ? '失败' : PROCESSING_STATUSES.includes(event.status) ? '处理中' : '已记录', tone };
   });
@@ -425,11 +552,14 @@ function mapEventDetails(event: RawAutoReplyRunEvent, run: AgentDynamicsRunRowVM
     ...(mapEventDetailFields(payload.input, true) ?? []),
     ...(mapEventDetailFields(payload.output, true) ?? []),
     ...(mapEventDetailFields(payload.error, true) ?? []),
+    ...(event.traceId ? [{ label: '追踪 ID', value: event.traceId }] : []),
   ];
   const fallback = legacyEventDetails(event, run);
   const inferred = !input || !output;
-  if (!input && !output && !error && !fallback) return undefined;
+  const log = mapEventLogFields(event);
+  if (!input && !output && !error && !fallback && log.length === 0) return undefined;
   return {
+    log,
     input: input ?? fallback?.input,
     output: output ?? fallback?.output,
     error,
@@ -442,7 +572,7 @@ function mapEventDetails(event: RawAutoReplyRunEvent, run: AgentDynamicsRunRowVM
 function mapDetail(raw: RawAutoReplyRunDetail): AgentDynamicsRunDetailVM {
   const row = mapRun(raw.run);
   const events = [...raw.events].sort((left, right) => (left.sequence ?? Number.MAX_SAFE_INTEGER) - (right.sequence ?? Number.MAX_SAFE_INTEGER));
-  const timeline: AgentDynamicsTimelineItemVM[] = events.length > 0 ? events.map((event) => ({ id: event.id, sequence: event.sequence, stage: event.stage, status: event.status, eventType: event.eventType, traceId: event.traceId, title: eventTitle(event, row), description: eventDescription(event), meta: `${formatTime(event.occurredAt)} · ${event.eventType}${event.durationMs === undefined ? '' : ` · ${formatDuration(event.durationMs)}`}`, tone: eventTone(event.status), details: mapEventDetails(event, row) })) : [{ id: `${row.runId}:status`, title: decisionLabel(row.decision.key), description: '当前运行状态', meta: `${row.timeLabel} · 当前状态 ${raw.run.status}`, tone: row.decision.tone }];
+  const timeline: AgentDynamicsTimelineItemVM[] = events.length > 0 ? events.map((event) => ({ id: event.id, sequence: event.sequence, stage: event.stage, status: event.status, eventType: event.eventType, traceId: event.traceId, title: eventTitle(event, row), description: eventDescription(event), meta: eventMeta(event), tone: eventTone(event.status, event), details: mapEventDetails(event, row) })) : [{ id: `${row.runId}:status`, title: decisionLabel(row.decision.key), description: '当前运行状态', meta: `${row.timeLabel} · ${statusLabel(raw.run.status)}`, tone: row.decision.tone }];
   return { ...row, message: raw.inboundMessage?.bodyText ?? row.inboundPreview, reply: raw.outboundMessages[0]?.bodyText, outcomeLabel: row.senderOutcome.label, timeline, chatPath: row.buyer.conversationId ? `/messages?conversationId=${encodeURIComponent(row.buyer.conversationId)}` : '/messages' };
 }
 

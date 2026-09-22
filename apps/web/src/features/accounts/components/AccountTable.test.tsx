@@ -18,6 +18,11 @@ const account: AccountVM = {
   updatedAt: new Date(0).toISOString(),
 };
 
+const accountWithAvatar: AccountVM = {
+  ...account,
+  avatarUrl: 'https://img.example.com/avatar.png',
+};
+
 describe('AccountTable', () => {
   it('restores the operation column and row actions', () => {
     const html = renderToStaticMarkup(createElement(AccountTable, {
@@ -56,5 +61,21 @@ describe('AccountTable', () => {
     expect(html).toContain('data-testid="accounts-pagination"');
     expect(html).toContain('第 2 / 2 页');
     expect(html).toContain('accounts-domain-page-button active');
+  });
+
+  it('renders the account avatar when the API provides one', () => {
+    const html = renderToStaticMarkup(createElement(AccountTable, {
+      accounts: [accountWithAvatar],
+      page: 1,
+      total: 1,
+      totalPages: 1,
+      onPageChange: vi.fn(),
+      onReauthorize: vi.fn(),
+      onSwitch: vi.fn(),
+      onDelete: vi.fn(),
+    }));
+
+    expect(html).toContain('src="https://img.example.com/avatar.png"');
+    expect(html).toContain('class="accounts-domain-avatar"');
   });
 });

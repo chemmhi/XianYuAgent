@@ -37,12 +37,14 @@ describe('agent dynamics API adapter', () => {
     expect(summary.exceptions[0]).toMatchObject({ key: 'RESPONSES_API_TIMEOUT', count: 1 });
     expect(summary.events[0]).toMatchObject({ runId: 'run-1', label: '失败' });
     expect(runs.items[0]).toMatchObject({ runId: 'run-1', buyer: { name: '买家B' }, stage: { key: 'generation' }, decision: { key: 'failed' }, persisted: true });
-    expect(detail.timeline[0]).toMatchObject({ title: '买家B 的回复生成失败', tone: 'danger', sequence: 2, traceId: 'trace-run-1' });
+    expect(detail.timeline[0]).toMatchObject({ title: '回复生成失败', tone: 'danger', sequence: 2, traceId: 'trace-run-1' });
+    expect(detail.timeline[0]?.title).not.toContain('买家B');
     expect(detail.timeline[0]?.description).toBe('异常终止：该节点返回失败，后续步骤停止');
     expect(detail.timeline[0]?.details?.input).toEqual(expect.arrayContaining([{ label: '步骤类型', value: 'reply_generation' }, { label: '输出长度', value: '0' }]));
     expect(detail.timeline[0]?.details?.technical).toEqual(expect.arrayContaining([{ label: '上下文摘要', value: 'sha256:ctx' }]));
     expect(detail.timeline[0]?.details?.output).toEqual(expect.arrayContaining([{ label: '决策结果', value: 'failed' }]));
     expect(detail.timeline[0]?.details?.error).toEqual([{ label: '错误码', value: 'RESPONSES_API_TIMEOUT' }]);
+    expect(detail.timeline[0]?.details?.log).toEqual(expect.arrayContaining([{ label: '工作状态', value: '失败' }, { label: '错误码', value: 'RESPONSES_API_TIMEOUT' }]));
     expect(detail.message).toBe('请问购买后怎么使用？');
   });
 
@@ -52,12 +54,32 @@ describe('agent dynamics API adapter', () => {
       return { success: true, data: { items: [], total: 0, page: 1, pageSize: 20, totalPages: 1 } } as T;
     } };
     const detail = await createAgentDynamicsApi(transport).getRunDetail('run/old', 'acct_1');
-    expect(detail.timeline[0]).toMatchObject({ title: '买家B 已完成意图识别', description: '意图识别：判断消息类型与是否允许自动回复' });
+    expect(detail.timeline[0]).toMatchObject({ title: '意图识别完成', description: '意图识别：判断消息类型与是否允许自动回复' });
+    expect(detail.timeline[0]?.title).not.toContain('买家B');
     expect(detail.timeline[0]?.details?.inferred).toBe(true);
     expect(detail.timeline[0]?.details?.input).toEqual(expect.arrayContaining([{ label: '步骤类型', value: 'intent_classification' }]));
     expect(detail.timeline[0]?.details?.output).toEqual(expect.arrayContaining([{ label: '意图', value: 'general' }, { label: '下一步', value: '读取上下文' }]));
     expect(detail.timeline[0]?.details?.note).toContain('历史记录');
     expect(detail.timeline[0]?.details?.output).not.toEqual(expect.arrayContaining([{ label: '状态变化', value: 'classified' }]));
+    expect(detail.timeline[0]?.details?.log).toEqual(expect.arrayContaining([{ label: '工作状态', value: '已识别' }]));
+  });
+
+  it('maps redacted node progress into an execution log', async () => {
+    const transport = { get: async <T>(path: string) => {
+      if (path.includes('/runs/run%2Fprogress')) return { success: true, data: { run: { ...rawRun, id: 'run-progress', status: 'generated', decision: 'replied' }, events: [{ id: 'event-progress', runId: 'run-progress', sequence: 3, eventType: 'agent.tool.completed', stage: 'context_read', status: 'generated', occurredAt: rawRun.updatedAt, durationMs: 420, traceId: 'trace-progress', payload: { log: { node: 'Agent', phase: 'tool', state: 'completed', message: '读取商品信息完成', tool: 'get_product_info', loop: 1, result: { ok: true, productFound: true } } } }], inboundMessage: { bodyText: '请介绍商品' }, outboundMessages: [], product: { id: 'product-1', title: '资料包' } } } as T;
+      return { success: true, data: { items: [], total: 0, page: 1, pageSize: 20, totalPages: 1 } } as T;
+    } };
+    const detail = await createAgentDynamicsApi(transport).getRunDetail('run/progress', 'acct_1');
+    expect(detail.timeline[0]).toMatchObject({ title: 'Agent', description: '读取商品信息完成' });
+    expect(detail.timeline[0]?.title).not.toContain('买家B');
+    expect(detail.timeline[0]?.details?.log).toEqual(expect.arrayContaining([
+      { label: '工作状态', value: '已完成' },
+      { label: '阶段', value: 'tool' },
+      { label: '日志', value: '读取商品信息完成' },
+      { label: '工具', value: 'get_product_info' },
+      { label: '循环轮次', value: '1' },
+      { label: '耗时', value: '0.4s' },
+    ]));
   });
 
   it('short-circuits live calls when no account context is selected', async () => {

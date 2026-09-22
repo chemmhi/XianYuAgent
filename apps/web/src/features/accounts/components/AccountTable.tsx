@@ -28,7 +28,13 @@ export function AccountTable({ accounts, activeAccountId, page, total, totalPage
         {accounts.map((account) => (
           <div className="accounts-domain-row" role="row" key={account.id}>
             <div className="accounts-domain-account-cell" role="cell">
-              <span className="accounts-domain-avatar">{account.displayName.slice(-1)}</span>
+              <span className="accounts-domain-avatar">
+                {account.avatarUrl ? (
+                  <img src={account.avatarUrl} alt="" loading="lazy" />
+                ) : (
+                  account.displayName.slice(-1)
+                )}
+              </span>
               <span>
                 <strong>{account.displayName}</strong>
                 <small>{account.remark || account.sellerRef}</small>

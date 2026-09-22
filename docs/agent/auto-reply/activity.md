@@ -52,7 +52,7 @@
 | `run_id` | `uuid` | FK `messages.auto_reply_runs(id)`，`ON DELETE RESTRICT` |
 | `account_id` | `uuid` | FK `accounts.accounts(id)`，用于账号过滤 |
 | `sequence` | `integer` | run 内从 1 开始递增；`UNIQUE(run_id, sequence)` |
-| `event_type` | `text` | 当前为 `run.created` 或 `run.<status>` |
+| `event_type` | `text` | 状态迁移使用 `run.created` / `run.<status>`；节点执行过程使用 `run.progress` 或 `agent.*` |
 | `stage` | `text` | 当前阶段，见 §3 |
 | `status` | `text` | 事件发生时的 run 状态 |
 | `occurred_at` | `timestamptz` | 事件发生时间 |
@@ -64,7 +64,7 @@
 
 ### 2.3 脱敏边界
 
-`payload_json` 只允许保存决策、意图、错误码、摘要哈希、计数和资源 ID 等最小证据。运行阶段可按白名单写入三组结构化摘要：`input`（步骤输入的类型、digest、资源引用和计数）、`output`（状态、决策、结果 digest、结果引用和计数）以及 `error`（错误码和脱敏原因）。禁止写入 Prompt 原文、模型 Chain-of-Thought、Cookie、Token、API Key、完整买家正文或完整订单/商品敏感字段。详情接口如需展示入站/出站正文，必须通过已校验的 `messages` 领域读取并遵守管理员账号 scope；事件 payload 本身不能成为正文旁路。
+`payload_json` 只允许保存决策、意图、错误码、摘要哈希、计数和资源 ID 等最小证据。运行阶段可按白名单写入三组结构化摘要：`input`（步骤输入的类型、digest、资源引用和计数）、`output`（状态、决策、结果 digest、结果引用和计数）以及 `error`（错误码和脱敏原因）；节点执行过程可额外写入 `log`（阶段、执行状态、动作、工具名、循环次数、计数、耗时和高层结果摘要）。禁止写入 Prompt 原文、模型 Chain-of-Thought、Cookie、Token、API Key、完整买家正文或完整订单/商品敏感字段。详情接口如需展示入站/出站正文，必须通过已校验的 `messages` 领域读取并遵守管理员账号 scope；事件 payload 本身不能成为正文旁路。
 
 ## 3. 状态机与事件语义
 
@@ -88,6 +88,7 @@
 
 - 创建 run 时写入一个 `run.created` 事件；事件的 `status/stage` 是创建时快照。
 - 更新 run 时，仅在调用方传入 `patch.status` 时追加 `run.<status>` 事件；只更新 digest、sender outcome、引用或错误码不得制造 `run.updated` 事件。
+- Agent 模型决策、工具调用和结果回传可追加 `agent.*` 过程事件；这些事件携带当前 `status/stage` 快照，不代表新的业务状态迁移。
 - 调用方应只在状态发生迁移时传入 `patch.status`；当前存储层不主动拒绝“相同状态重复事件”，因此重复迁移应由上层幂等逻辑阻止。
 - MemoryStore 在进程内维护 run 级序号；PostgresStore 在插入事件时对 run 行加锁并重新计算序号。
 - `duration_ms` 当前为可选字段；列表和摘要的运行耗时优先使用 `updated_at - created_at`，事件时间线不得假设每个事件都有阶段耗时。
@@ -225,7 +226,7 @@ type AutoReplyRunDetailRecord = {
 | `buyer` | `buyerDisplayName` + `conversation.id`；缺少昵称时显示脱敏占位，不硬编码当前账号 |
 | `product` | `productTitle` + `product.id`；无商品引用显示“未关联商品” |
 | `senderOutcome` | `senderOutcome` 与 `decision/status` 组合展示；未知发送结果必须保留 `unknown` 提示 |
-| `timeline` | `events` 按 `sequence` 升序转换；缺失 duration 不得补造耗时 |
+| `timeline` | `events` 按 `sequence` 升序转换；时间线主展示为关键节点名、工作状态和节点日志；`input/output` 只作为兼容性的技术详情，不作为主展示；缺失 duration 不得补造耗时 |
 
 页面状态过滤的 `replied` / `processing` 是聚合语义，而后端列表过滤器只接受 raw enum。adapter 在发送请求前必须显式转换或组合查询；禁止把 `replied`、`processing` 直接作为后端 `status`，否则会收到 `422 VALIDATION_FAILED`。
 

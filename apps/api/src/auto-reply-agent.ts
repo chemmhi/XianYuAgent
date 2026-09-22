@@ -1,6 +1,6 @@
 import type { ConversationRecord, MessageRecord, OrderRecord, ProductRecord, Store } from './domain.js';
 import type { AutoReplyAgentConfig } from './auto-reply-agent-config.js';
-import type { AutoReplyClassification, AutoReplyContext, AutoReplyGeneratedReply, AutoReplyGenerator } from './auto-reply.js';
+import type { AutoReplyClassification, AutoReplyContext, AutoReplyGeneratedReply, AutoReplyGenerator, AutoReplyGeneratorObserver, AutoReplyGeneratorObservation } from './auto-reply.js';
 import { buildAutoReplyModelContent } from './auto-reply-multimodal.js';
 import { parseAutoReplyModelDecision, parseJsonObject } from './auto-reply-output.js';
 import { digestJson } from './security.js';
@@ -93,7 +93,7 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
     this.config = config;
   }
 
-  async generate(input: { adminId?: string; context: AutoReplyContext; classification: AutoReplyClassification }): Promise<string | AutoReplyGeneratedReply | undefined> {
+  async generate(input: { adminId?: string; context: AutoReplyContext; classification: AutoReplyClassification; observe?: AutoReplyGeneratorObserver }): Promise<string | AutoReplyGeneratedReply | undefined> {
     if (!input.adminId) throw new AutoReplyAgentError('AGENT_ADMIN_REQUIRED');
     const config = await this.options.configProvider?.(input.adminId, input.context.conversation.accountId) ?? this.config;
     const outputContract = [
@@ -117,8 +117,40 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
 
     for (let loop = 1; loop <= config.maxLoops; loop += 1) {
       trace.loops = loop;
-      const result = await this.client.complete({ messages, tools: AUTO_REPLY_AGENT_TOOLS, toolChoice: 'auto' });
+      const modelStartedAt = Date.now();
+      await observe(input.observe, {
+        eventType: 'agent.model.started',
+        stage: 'reply_generation',
+        log: { phase: 'model', state: 'started', message: `开始第 ${loop} 轮模型决策`, loop },
+      });
+      let result: ModelCompletionResult;
+      try {
+        result = await this.client.complete({ messages, tools: AUTO_REPLY_AGENT_TOOLS, toolChoice: 'auto' });
+      } catch (error) {
+        await observe(input.observe, {
+          eventType: 'agent.model.failed',
+          stage: 'reply_generation',
+          log: { phase: 'model', state: 'failed', message: `第 ${loop} 轮模型调用失败`, loop, errorCode: safeErrorCode(error) },
+          durationMs: Date.now() - modelStartedAt,
+        });
+        throw error;
+      }
       const toolCalls = result.toolCalls ?? [];
+      await observe(input.observe, {
+        eventType: 'agent.model.completed',
+        stage: 'reply_generation',
+        log: {
+          phase: 'model',
+          state: toolCalls.length > 0 ? 'tool_requested' : 'completed',
+          message: toolCalls.length > 0 ? `第 ${loop} 轮模型请求执行工具` : `第 ${loop} 轮模型已返回最终决策`,
+          loop,
+          model: result.model,
+          toolCallCount: toolCalls.length,
+          durationMs: Date.now() - modelStartedAt,
+          ...(summarizeUsage(result.usage) ? { usage: summarizeUsage(result.usage) } : {}),
+        },
+        durationMs: Date.now() - modelStartedAt,
+      });
       if (toolCalls.length > 0) {
         messages.push({ role: 'assistant', content: result.content ?? '', toolCalls });
         for (const call of toolCalls) {
@@ -129,7 +161,30 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
           seenCalls.add(signature);
           trace.toolCalls += 1;
           trace.tools.push(parsed.name);
-          const toolResult = await withTimeout(this.executeTool(parsed.name, parsed.arguments, input.adminId, input.context, config), config.toolTimeoutMs);
+          const toolStartedAt = Date.now();
+          await observe(input.observe, {
+            eventType: 'agent.tool.started',
+            stage: 'context_read',
+            log: { phase: 'tool', state: 'started', message: toolMessage(parsed.name), tool: parsed.name, loop, toolCallIndex: trace.toolCalls, argumentKeys: Object.keys(parsed.arguments).sort() },
+          });
+          let toolResult: Record<string, unknown>;
+          try {
+            toolResult = await withTimeout(this.executeTool(parsed.name, parsed.arguments, input.adminId, input.context, config), config.toolTimeoutMs);
+          } catch (error) {
+            await observe(input.observe, {
+              eventType: 'agent.tool.failed',
+              stage: 'context_read',
+              log: { phase: 'tool', state: 'failed', message: `${toolMessage(parsed.name)}失败`, tool: parsed.name, loop, toolCallIndex: trace.toolCalls, errorCode: safeErrorCode(error) },
+              durationMs: Date.now() - toolStartedAt,
+            });
+            throw error;
+          }
+          await observe(input.observe, {
+            eventType: 'agent.tool.completed',
+            stage: 'context_read',
+            log: { phase: 'tool', state: 'completed', message: `${toolMessage(parsed.name)}完成`, tool: parsed.name, loop, toolCallIndex: trace.toolCalls, result: summarizeToolResult(parsed.name, toolResult) },
+            durationMs: Date.now() - toolStartedAt,
+          });
           messages.push({ role: 'tool', name: parsed.name, toolCallId: call.id, content: limitText(JSON.stringify(toolResult), config.maxToolResultChars) });
         }
         continue;
@@ -139,6 +194,22 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
       if (!content) throw new AutoReplyAgentError('AGENT_EMPTY_RESPONSE');
       const decision = parseAutoReplyModelDecision(content);
       if (!decision) throw new AutoReplyAgentError('AGENT_INVALID_OUTPUT', '模型未返回符合协议的 reply/handoff JSON');
+      await observe(input.observe, {
+        eventType: decision.decision === 'handoff' ? 'agent.final.handoff' : 'agent.final.reply',
+        stage: decision.decision === 'handoff' ? 'handoff' : 'reply_generation',
+        status: decision.decision === 'handoff' ? 'handoff' : 'generated',
+        log: {
+          phase: 'agent',
+          state: decision.decision === 'handoff' ? 'handoff' : 'completed',
+          message: decision.decision === 'handoff' ? 'Agent 判断需要人工处理' : 'Agent 已完成回复决策',
+          decision: decision.decision,
+          loop,
+          toolCalls: trace.toolCalls,
+          tools: [...trace.tools],
+          configDigest: trace.configDigest,
+          ...(decision.decision === 'reply' ? { replyLength: decision.reply.text.length, segmentCount: decision.reply.segments?.length ?? 1 } : { reasonCode: safeReasonCode(decision.reason) }),
+        },
+      });
       if (decision.decision === 'handoff') throw new AutoReplyAgentHandoffError(decision.reason);
       await this.options.onTrace?.(trace);
       return decision.reply;
@@ -292,6 +363,60 @@ function limitText(value: string, limit: number): string {
 
 function safeMessage(message: MessageRecord): Record<string, unknown> {
   return { direction: message.direction, senderRole: message.senderRole, bodyType: message.bodyType, bodyText: trimField(message.bodyText, 1_000), hasMedia: Boolean(message.bodyRef), createdAt: message.createdAt };
+}
+
+async function observe(observer: AutoReplyGeneratorObserver | undefined, observation: AutoReplyGeneratorObservation): Promise<void> {
+  if (!observer) return;
+  await observer(observation);
+}
+
+function safeErrorCode(error: unknown): string {
+  const candidate = error as { code?: unknown } | null;
+  if (typeof candidate?.code === 'string' && /^[A-Z0-9_:-]{1,64}$/.test(candidate.code)) return candidate.code;
+  if (error instanceof Error && /^[A-Z0-9_:-]{1,64}$/.test(error.message)) return error.message;
+  return 'AGENT_STEP_FAILED';
+}
+
+function safeReasonCode(value: string | undefined): string | undefined {
+  return value && /^[A-Z0-9_:-]{1,64}$/.test(value) ? value : undefined;
+}
+
+function summarizeUsage(usage: Record<string, unknown> | undefined): Record<string, number> | undefined {
+  if (!usage) return undefined;
+  const result: Record<string, number> = {};
+  for (const key of ['prompt_tokens', 'completion_tokens', 'total_tokens', 'input_tokens', 'output_tokens']) {
+    const value = usage[key];
+    if (typeof value === 'number' && Number.isFinite(value)) result[key] = value;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function toolMessage(name: AutoReplyToolName): string {
+  switch (name) {
+    case 'get_buyer_conversations': return '读取买家历史会话';
+    case 'get_product_info': return '读取商品信息';
+    case 'get_buyer_orders': return '读取买家订单';
+    case 'list_shop_products': return '搜索店铺商品';
+  }
+}
+
+function summarizeToolResult(name: AutoReplyToolName, result: Record<string, unknown>): Record<string, unknown> {
+  switch (name) {
+    case 'get_buyer_conversations': {
+      const conversations = Array.isArray(result.conversations) ? result.conversations : [];
+      return { ok: result.ok === true, conversationCount: conversations.length };
+    }
+    case 'get_buyer_orders': {
+      const orders = Array.isArray(result.orders) ? result.orders : [];
+      return { ok: result.ok === true, orderCount: orders.length, totalMatched: typeof result.totalMatched === 'number' ? result.totalMatched : orders.length };
+    }
+    case 'list_shop_products': {
+      const products = Array.isArray(result.products) ? result.products : [];
+      return { ok: result.ok === true, productCount: products.length, total: typeof result.total === 'number' ? result.total : products.length };
+    }
+    case 'get_product_info':
+      return { ok: result.ok === true, productFound: Boolean(result.product) };
+  }
 }
 
 function safeProduct(product: Pick<ProductRecord, 'id' | 'accountId' | 'externalProductRef' | 'title' | 'description' | 'defaultReplyTemplate' | 'priceMinor' | 'status' | 'updatedAt'>): Record<string, unknown> {

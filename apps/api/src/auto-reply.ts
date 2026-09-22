@@ -1,4 +1,4 @@
-import type { AutoReplyDecision, AutoReplyRunRecord, AutoReplyRunUpdate, ConversationRecord, MessageRecord, OrderRecord, ProductRecord, Store } from './domain.js';
+import type { AutoReplyDecision, AutoReplyRunRecord, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyRunUpdate, ConversationRecord, MessageRecord, OrderRecord, ProductRecord, Store } from './domain.js';
 import type { MessageService } from './messages.js';
 import { digestJson } from './security.js';
 
@@ -24,10 +24,21 @@ export interface AutoReplyGeneratedReply {
   segments?: string[];
 }
 
+/** High-level, redacted execution evidence for one agent step. */
+export interface AutoReplyGeneratorObservation {
+  eventType: string;
+  stage: AutoReplyRunStage;
+  status?: AutoReplyRunStatus;
+  log: Record<string, unknown>;
+  durationMs?: number;
+}
+
+export type AutoReplyGeneratorObserver = (observation: AutoReplyGeneratorObservation) => Promise<void> | void;
+
 export interface AutoReplyGenerator {
   readonly supportsStructuredDecision?: boolean;
   readonly supportsMultimodal?: boolean;
-  generate(input: { adminId?: string; context: AutoReplyContext; classification: AutoReplyClassification }): Promise<string | AutoReplyGeneratedReply | undefined>;
+  generate(input: { adminId?: string; context: AutoReplyContext; classification: AutoReplyClassification; observe?: AutoReplyGeneratorObserver }): Promise<string | AutoReplyGeneratedReply | undefined>;
   segmentReply?(input: { reply: string }): Promise<string[] | undefined>;
 }
 
@@ -197,9 +208,28 @@ export class AutoReplyService {
       throw error;
     }
     const updateRun = async (patch: AutoReplyRunUpdate) => {
-      const updated = await this.store.updateAutoReplyRun(run.id, { ...patch, eventTraceId: traceId });
+      const normalizedPatch: AutoReplyRunUpdate = patch.status === undefined
+        ? patch
+        : { ...patch, eventPayload: { ...(patch.eventPayload ?? {}), log: patch.eventPayload?.log ?? autoReplyRunLogForStatus(patch.status) } };
+      const updated = await this.store.updateAutoReplyRun(run.id, { ...normalizedPatch, eventTraceId: traceId });
       if (updated) run = updated;
       return updated;
+    };
+    const observeGenerator = async (observation: AutoReplyGeneratorObservation): Promise<void> => {
+      try {
+        await this.store.appendAutoReplyRunEvent({
+          runId: run.id,
+          accountId: conversation.accountId,
+          eventType: observation.eventType,
+          stage: observation.stage,
+          status: observation.status ?? run.status,
+          durationMs: observation.durationMs,
+          traceId,
+          payload: { log: { ...observation.log, traceId } },
+        });
+      } catch {
+        // Observability must not make an otherwise valid reply fail.
+      }
     };
     try {
       const runtime = await this.resolveRuntimeOptions(input.adminId, conversation.accountId);
@@ -279,7 +309,7 @@ export class AutoReplyService {
         return { run: updated ?? run, inboundMessage, classification, context };
       }
 
-      const generated = await withTimeout(runtime.generator.generate({ adminId: input.adminId, context, classification }), runtime.totalTimeoutMs);
+      const generated = await withTimeout(runtime.generator.generate({ adminId: input.adminId, context, classification, observe: observeGenerator }), runtime.totalTimeoutMs);
       const generatedReply = normalizeGeneratedReply(generated);
       const reply = generatedReply ? normalizeReply(generatedReply.text) : undefined;
       if (!reply) {
@@ -486,4 +516,18 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
 function normalizeBuyerName(value: string | undefined): string | undefined {
   const normalized = value?.replace(/\s+/g, ' ').trim();
   return normalized || undefined;
+}
+
+function autoReplyRunLogForStatus(status: AutoReplyRunStatus): Record<string, unknown> {
+  switch (status) {
+    case 'received': return { phase: 'gateway', state: 'received', message: '已接收买家消息，准备开始处理' };
+    case 'classified': return { phase: 'intent', state: 'completed', message: '已完成意图识别与安全判断' };
+    case 'context_loaded': return { phase: 'context', state: 'completed', message: '已加载会话、商品与订单上下文' };
+    case 'generated': return { phase: 'reply', state: 'completed', message: '已生成候选回复' };
+    case 'simulated': return { phase: 'sending', state: 'completed', message: '已完成消息发送动作' };
+    case 'persisted': return { phase: 'persist', state: 'completed', message: '已保存自动回复结果' };
+    case 'handoff': return { phase: 'handoff', state: 'handoff', message: '已转交人工处理' };
+    case 'skipped': return { phase: 'workflow', state: 'skipped', message: '本次自动回复已跳过' };
+    case 'failed': return { phase: 'workflow', state: 'failed', message: '自动回复处理失败' };
+  }
 }

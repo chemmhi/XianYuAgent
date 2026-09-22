@@ -471,6 +471,7 @@ export class PostgresStore implements Store {
       decision: run.decision,
       intent: run.intent,
       failureCode: run.failureCode,
+      log: { phase: 'gateway', state: 'received', message: '已接收买家消息，准备开始处理' },
       input: { kind: 'inbound_message', messageId: run.inboundMessageId, digest: run.inputDigest },
       output: { status: run.status, decision: run.decision, intent: run.intent },
     } });
