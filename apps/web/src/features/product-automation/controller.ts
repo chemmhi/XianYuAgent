@@ -36,7 +36,15 @@ export function useProductAutomationController(options: { api?: ProductAutomatio
     }
   }, [accountId, api, productId]);
 
-  useEffect(() => { if (productId) void load(productId, accountId); else { setConfig(null); setCoupons([]); setLoadPhase('idle'); } }, [accountId, load, productId]);
+  useEffect(() => {
+    if (productId) { void load(productId, accountId); return; }
+    setConfig(null);
+    setLoadPhase('idle');
+    if (!accountId) { setCoupons([]); return; }
+    let cancelled = false;
+    void api.listCoupons(accountId).then((items) => { if (!cancelled) setCoupons(items); }).catch(() => { if (!cancelled) setCoupons([]); });
+    return () => { cancelled = true; };
+  }, [accountId, api, load, productId]);
 
   const save = useCallback(async (input: ProductAutomationUpdate) => {
     if (!productId) return null;
@@ -58,7 +66,12 @@ export function useProductAutomationController(options: { api?: ProductAutomatio
     setSavePhase('saving');
     setError(null);
     try {
-      const result = await api.saveBatch(input);
+      const expectedConfigVersions = { ...(input.expectedConfigVersions ?? {}) };
+      await Promise.all(input.productIds.filter((productId) => expectedConfigVersions[productId] === undefined).map(async (productId) => {
+        const current = await api.getConfig(productId);
+        expectedConfigVersions[productId] = current.version;
+      }));
+      const result = await api.saveBatch({ ...input, expectedConfigVersions });
       setSavePhase('success');
       return result;
     } catch (cause) {

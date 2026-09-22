@@ -188,7 +188,7 @@ export class MemoryStore implements Store {
     return this.cloneProductAutomation(record);
   }
 
-  async updateProductAutomationsBatch(input: { adminId: string; productIds: string[]; expectedConfigVersions: Record<string, number>; config: ProductAutomationConfig; configDigest: string }): Promise<ProductAutomationBatchResult> {
+  async updateProductAutomationsBatch(input: { adminId: string; productIds: string[]; expectedConfigVersions: Record<string, number>; config?: ProductAutomationConfig; configDigest?: string; configByProductId?: Record<string, ProductAutomationConfig>; configDigests?: Record<string, string> }): Promise<ProductAutomationBatchResult> {
     const uniqueProductIds = [...new Set(input.productIds)];
     const products = uniqueProductIds.map((productId) => this.products.get(productId));
     if (products.some((product) => !product)) throw new Error('PRODUCT_NOT_FOUND');
@@ -207,8 +207,8 @@ export class MemoryStore implements Store {
         productId,
         accountId: products.find((product) => product?.id === productId)!.accountId,
         configVersion: current ? current.configVersion + 1 : 1,
-        config: structuredClone(input.config),
-        configDigest: input.configDigest,
+        config: structuredClone(input.configByProductId?.[productId] ?? input.config!),
+        configDigest: input.configDigests?.[productId] ?? input.configDigest ?? '',
         createdAt: current?.createdAt ?? now,
         updatedAt: now,
       } satisfies ProductAutomationConfigRecord;

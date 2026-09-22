@@ -15,6 +15,7 @@ describe('product automation API', () => {
     const api = createProductAutomationApi({
       async get<T>(path: string) { calls.push({ method: 'GET', path }); return (path.includes('/automation') ? { data: { productId: 'product-1', accountId: 'account-1', configVersion: 7, paidAutoDelivery: { enabled: true, couponIds: ['coupon-1'] }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true } } } : { data: { items: MOCK_AUTOMATION_COUPONS } }) as T; },
       async patch<T>(path: string, body?: unknown, options?: unknown) { calls.push({ method: 'PATCH', path, body, options }); return { data: { productId: 'product-1', accountId: 'account-1', configVersion: 8, paidAutoDelivery: { enabled: false }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true } } } as T; },
+      async post<T>(path: string, body?: unknown, options?: unknown) { calls.push({ method: 'POST', path, body, options }); return { data: { updatedCount: 1 } } as T; },
     });
     const config = await api.getConfig('product-1');
     expect(config.version).toBe(7);
@@ -23,11 +24,12 @@ describe('product automation API', () => {
     await api.saveConfig('product-1', { version: 7, delivery: { enabled: false }, reprice: { enabled: false }, gift: { enabled: false }, review: { enabled: true } });
     await api.saveBatch({ productIds: ['product-1'], expectedConfigVersions: { 'product-1': 8 }, apply: { delivery: true, reprice: false, gift: false, review: false }, rules: { delivery: { enabled: false }, reprice: { enabled: false }, gift: { enabled: false }, review: { enabled: true } } });
     expect(calls[0].path).toBe('/api/v1/products/product-1/automation');
-    expect(calls[1].path).toContain('/api/v1/coupons/batches?accountId=account-1&purpose=delivery');
+    expect(calls[1].path).toBe('/api/v1/coupons/batches?accountId=account-1');
     const saveCall = calls.find((call) => call.method === 'PATCH' && call.path.includes('/automation'));
-    expect(saveCall?.body).toMatchObject({ configVersion: 7, paidAutoDelivery: { enabled: false }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true } });
+    expect(saveCall?.body).toMatchObject({ config: { configVersion: 7, paidAutoDelivery: { enabled: false, couponBatchIds: [] }, unpaidAutoReprice: { enabled: false, targetPriceMinor: 0 }, reviewGift: { enabled: false, couponBatchIds: [] }, reviewReminder: { enabled: true, firstDelayHours: 72, repeatIntervalHours: 24, maxReminders: 1 } } });
     expect(saveCall?.options).toMatchObject({ headers: expect.objectContaining({ 'If-Match-Version': '7', 'Idempotency-Key': expect.any(String) }) });
     const batchCall = calls.find((call) => call.path.endsWith('/automation/batch'));
+    expect(batchCall?.method).toBe('POST');
     expect(batchCall?.body).toMatchObject({ productIds: ['product-1'], expectedConfigVersions: { 'product-1': 8 }, config: { paidAutoDelivery: { enabled: false } } });
   });
 

@@ -142,7 +142,7 @@ export class PostgresStore implements Store {
     } finally { client.release(); }
   }
 
-  async updateProductAutomationsBatch(input: { adminId: string; productIds: string[]; expectedConfigVersions: Record<string, number>; config: ProductAutomationConfig; configDigest: string }): Promise<ProductAutomationBatchResult> {
+  async updateProductAutomationsBatch(input: { adminId: string; productIds: string[]; expectedConfigVersions: Record<string, number>; config?: ProductAutomationConfig; configDigest?: string; configByProductId?: Record<string, ProductAutomationConfig>; configDigests?: Record<string, string> }): Promise<ProductAutomationBatchResult> {
     const productIds = [...new Set(input.productIds)];
     if (productIds.length === 0) throw new Error('PRODUCT_NOT_FOUND');
     const client = await this.pool.connect();
@@ -175,10 +175,10 @@ export class PostgresStore implements Store {
         const result = row
           ? await client.query(`update products.automation_configs
               set config_version=$2, config_json=$3::jsonb, config_digest=$4, updated_at=now()
-              where product_id=$1 returning *`, [productId, version, JSON.stringify(input.config), input.configDigest])
+              where product_id=$1 returning *`, [productId, version, JSON.stringify(input.configByProductId?.[productId] ?? input.config), input.configDigests?.[productId] ?? input.configDigest ?? ''])
           : await client.query(`insert into products.automation_configs
               (id,product_id,account_id,config_version,config_json,config_digest)
-              values ($1,$2,$3,$4,$5::jsonb,$6) returning *`, [createId(), productId, products.rows.find((item) => String(item.id) === productId)!.account_id, version, JSON.stringify(input.config), input.configDigest]);
+              values ($1,$2,$3,$4,$5::jsonb,$6) returning *`, [createId(), productId, products.rows.find((item) => String(item.id) === productId)!.account_id, version, JSON.stringify(input.configByProductId?.[productId] ?? input.config), input.configDigests?.[productId] ?? input.configDigest ?? '']);
         saved.push(this.toProductAutomation(result.rows[0]));
       }
       await client.query('commit');

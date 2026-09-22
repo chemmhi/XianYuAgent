@@ -55,6 +55,19 @@ test('batch update is all-or-nothing for version conflict and cross-account prod
   assert.equal((await service.get(admin.id, second.id)).configVersion, 1);
 });
 
+test('batch partial config preserves unselected rules per product', async () => {
+  const { store, admin, account, product, coupon, service } = await setup();
+  const second = await store.createProduct({ adminId: admin.id, accountId: account.id, title: '第二商品', status: 'published' });
+  const secondConfig = { ...defaultProductAutomationConfig(), unpaidAutoReprice: { ...defaultProductAutomationConfig().unpaidAutoReprice, enabled: true, targetPriceMinor: 1_290, message: '第二商品专属价格' } } satisfies ProductAutomationConfig;
+  await service.update({ adminId: admin.id, productId: second.id, expectedConfigVersion: 1, config: secondConfig, requestId: 'partial-seed', traceId: 'partial-seed' });
+  const batch = await service.updateBatch({ adminId: admin.id, productIds: [product.id, second.id], expectedConfigVersions: { [product.id]: 1, [second.id]: 1 }, config: { paidAutoDelivery: { enabled: true, couponBatchIds: [coupon.id] } }, requestId: 'partial-batch', traceId: 'partial-batch' });
+  assert.equal(batch.items.length, 2);
+  const preserved = await service.get(admin.id, second.id);
+  assert.equal(preserved.config.unpaidAutoReprice.enabled, true);
+  assert.equal(preserved.config.unpaidAutoReprice.targetPriceMinor, 1_290);
+  assert.equal(preserved.config.paidAutoDelivery.enabled, true);
+});
+
 class FakePort implements AutomationExecutionPort {
   calls: string[] = [];
   couponSend: AutomationExternalResult = result('succeeded');

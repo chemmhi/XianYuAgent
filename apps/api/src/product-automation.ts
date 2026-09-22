@@ -57,10 +57,18 @@ export class ProductAutomationService {
     const products = await Promise.all(productIds.map((productId) => this.requireProduct(input.adminId, productId)));
     const accountId = products[0]!.accountId;
     if (products.some((product) => product.accountId !== accountId)) throw new ServiceError(422, 'VALIDATION_FAILED', 'batch automation products must belong to the same account');
-    const config = await this.validateConfig(input.adminId, products[0]!, input.config);
+    const configByProductId: Record<string, ProductAutomationConfig> = {};
+    const configDigests: Record<string, string> = {};
+    for (const product of products) {
+      const current = await this.store.getProductAutomation(input.adminId, product.id);
+      const merged = mergeAutomationConfig(current?.config ?? defaultProductAutomationConfig(), input.config);
+      const validated = await this.validateConfig(input.adminId, product, merged);
+      configByProductId[product.id] = validated;
+      configDigests[product.id] = digestJson(validated);
+    }
     try {
-      const result = await this.store.updateProductAutomationsBatch({ adminId: input.adminId, productIds, expectedConfigVersions, config, configDigest: digestJson(config) });
-      await this.audit({ actorId: input.adminId, action: 'product.automation.batch_updated', targetRef: `batch:${productIds.length}`, requestId: input.requestId, traceId: input.traceId, payload: { productIds, configVersion: result.items.map((item) => ({ productId: item.productId, version: item.configVersion })), rules: enabledRules(config) }, accountId });
+      const result = await this.store.updateProductAutomationsBatch({ adminId: input.adminId, productIds, expectedConfigVersions, configByProductId, configDigests });
+      await this.audit({ actorId: input.adminId, action: 'product.automation.batch_updated', targetRef: `batch:${productIds.length}`, requestId: input.requestId, traceId: input.traceId, payload: { productIds, configVersion: result.items.map((item) => ({ productId: item.productId, version: item.configVersion })), rules: Object.fromEntries(productIds.map((productId) => [productId, enabledRules(configByProductId[productId]!)])) }, accountId });
       return result;
     } catch (error) {
       throw mapAutomationStoreError(error);
@@ -290,6 +298,17 @@ function parseExpectedVersions(value: unknown, productIds: string[]): Record<str
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ServiceError(422, 'VALIDATION_FAILED', 'expectedConfigVersions must be an object');
   const source = value as Record<string, unknown>;
   return Object.fromEntries(productIds.map((productId) => [productId, parseVersion(source[productId])]));
+}
+
+function mergeAutomationConfig(base: ProductAutomationConfig, input: unknown): ProductAutomationConfig {
+  const source = asRecord(input);
+  const mergeRule = <T extends object>(current: T, next: unknown): T => next === undefined ? structuredClone(current) : { ...structuredClone(current), ...asRecord(next) } as T;
+  return {
+    paidAutoDelivery: mergeRule(base.paidAutoDelivery, source.paidAutoDelivery),
+    unpaidAutoReprice: mergeRule(base.unpaidAutoReprice, source.unpaidAutoReprice),
+    reviewGift: mergeRule(base.reviewGift, source.reviewGift),
+    reviewReminder: mergeRule(base.reviewReminder, source.reviewReminder),
+  };
 }
 
 function normalizePaidRule(value: unknown, fallback: ProductAutomationConfig['paidAutoDelivery']): ProductAutomationConfig['paidAutoDelivery'] {
