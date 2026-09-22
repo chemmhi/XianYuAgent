@@ -63,10 +63,10 @@ test('returns an empty summary when the envelope is absent', () => {
   assert.deepEqual(mapXianyuItemDetail(undefined, '1078553391460'), { itemId: '1078553391460' });
 });
 
-test('maps the Xianyu-side shelf time from the detail envelope', () => {
+test('uses an explicit Xianyu edit time and ignores shelf/polish timestamps', () => {
   const summary = mapXianyuItemDetail({
     data: {
-      itemDO: { itemId: 'ITEM-UPDATED', gmtCreate: 1_750_000_000_000 },
+      itemDO: { itemId: 'ITEM-UPDATED', modifyTime: 1_780_000_000_000, gmtCreate: 1_750_000_000_000 },
       sellerDO: {
         sellerItems: [
           { itemId: 'OTHER', attributeMap: { gmtShelf: 1_760_000_000_000 } },
@@ -76,7 +76,20 @@ test('maps the Xianyu-side shelf time from the detail envelope', () => {
     },
   });
 
-  assert.equal(summary.xianyuUpdatedAt, new Date(1_760_000_000_000).toISOString());
+  assert.equal(summary.xianyuUpdatedAt, new Date(1_780_000_000_000).toISOString());
+});
+
+test('does not treat shelf or polish time as the Xianyu edit time', () => {
+  const summary = mapXianyuItemDetail({
+    data: {
+      itemDO: { itemId: 'ITEM-SHELF-ONLY' },
+      sellerDO: {
+        sellerItems: [{ itemId: 'ITEM-SHELF-ONLY', attributeMap: { gmtShelf: 1_760_000_000_000, proPolishTime: 1_770_000_000_000 } }],
+      },
+    },
+  });
+
+  assert.equal(summary.xianyuUpdatedAt, undefined);
 });
 
 test('does not use Xianyu creation time as the update time', () => {

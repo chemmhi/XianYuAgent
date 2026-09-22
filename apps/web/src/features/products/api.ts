@@ -40,6 +40,8 @@ interface ProductPayload {
   source?: 'local' | 'xianyu';
   lastSyncedAt?: string;
   xianyuUpdatedAt?: string;
+  xianyuListRank?: number;
+  xianyu_list_rank?: number;
   sourcePayloadDigest?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -144,6 +146,7 @@ function toProductVM(product: ProductPayload): ProductVM {
     source: product.source,
     lastSyncedAt: product.lastSyncedAt,
     xianyuUpdatedAt: product.xianyuUpdatedAt,
+    xianyuListRank: product.xianyuListRank ?? product.xianyu_list_rank,
     sourcePayloadDigest: product.sourcePayloadDigest,
     createdAt: product.createdAt ?? product.updatedAt ?? new Date(0).toISOString(),
     updatedAt: product.updatedAt ?? new Date(0).toISOString(),
@@ -269,8 +272,9 @@ function queryString(filters: ProductFilters = {}): string {
   if (filters.keyword?.trim()) params.set('keyword', filters.keyword.trim());
   if (filters.accountId) params.set('accountId', filters.accountId);
   if (filters.status && filters.status !== 'all') params.set('status', filters.status);
-  params.set('sortBy', filters.sortBy ?? 'updatedAt');
-  params.set('sortOrder', filters.sortOrder ?? 'desc');
+  const sortBy = filters.sortBy ?? 'xianyuOrder';
+  params.set('sortBy', sortBy);
+  params.set('sortOrder', filters.sortOrder ?? (sortBy === 'xianyuOrder' ? 'asc' : 'desc'));
   params.set('page', String(filters.page ?? 1));
   params.set('pageSize', String(filters.pageSize ?? 20));
   const value = params.toString();
@@ -349,9 +353,15 @@ export function createMockProductsApi(seed: ProductVM[] = [
     async list(filters = {}) {
       const keyword = filters.keyword?.trim().toLowerCase();
       const filtered = seed.filter((item) => (!filters.accountId || item.accountId === filters.accountId) && (!filters.status || filters.status === 'all' || item.status === filters.status) && (!keyword || `${item.title} ${item.externalProductRef ?? ''}`.toLowerCase().includes(keyword)));
-      const sortBy = filters.sortBy ?? 'updatedAt';
-      const sortOrder = filters.sortOrder === 'asc' ? 1 : -1;
+      const sortBy = filters.sortBy ?? 'xianyuOrder';
+      const sortOrder = (filters.sortOrder ?? (sortBy === 'xianyuOrder' ? 'asc' : 'desc')) === 'desc' ? -1 : 1;
       filtered.sort((left, right) => {
+        if (sortBy === 'xianyuOrder') {
+          if (left.xianyuListRank === undefined && right.xianyuListRank === undefined) return 0;
+          if (left.xianyuListRank === undefined) return 1;
+          if (right.xianyuListRank === undefined) return -1;
+          return (left.xianyuListRank < right.xianyuListRank ? -1 : left.xianyuListRank > right.xianyuListRank ? 1 : 0) * sortOrder;
+        }
         if (sortBy === 'updatedAt') {
           if (!left.xianyuUpdatedAt && !right.xianyuUpdatedAt) return 0;
           if (!left.xianyuUpdatedAt) return 1;

@@ -126,9 +126,15 @@ export class MemoryStore implements Store {
       if (normalizedKeyword && ![product.title, product.externalProductRef ?? '', product.description ?? ''].some((value) => value.toLowerCase().includes(normalizedKeyword))) return false;
       return true;
     });
-    const sortBy = query.sortBy ?? 'updatedAt';
-    const sortOrder = query.sortOrder === 'asc' ? 1 : -1;
+    const sortBy = query.sortBy ?? 'xianyuOrder';
+    const sortOrder = query.sortOrder === 'desc' ? -1 : sortBy === 'xianyuOrder' ? 1 : -1;
     filtered.sort((left, right) => {
+      if (sortBy === 'xianyuOrder') {
+        if (left.xianyuListRank === undefined && right.xianyuListRank === undefined) return left.id.localeCompare(right.id);
+        if (left.xianyuListRank === undefined) return 1;
+        if (right.xianyuListRank === undefined) return -1;
+        return (left.xianyuListRank - right.xianyuListRank || left.id.localeCompare(right.id)) * sortOrder;
+      }
       if (sortBy === 'updatedAt') {
         if (!left.xianyuUpdatedAt && !right.xianyuUpdatedAt) return 0;
         if (!left.xianyuUpdatedAt) return 1;
@@ -285,14 +291,21 @@ export class MemoryStore implements Store {
       existing.sourcePayloadDigest = input.item.sourcePayloadDigest;
       existing.lastSyncedAt = input.syncedAt;
       existing.xianyuUpdatedAt = input.item.xianyuUpdatedAt ?? existing.xianyuUpdatedAt;
+      existing.xianyuListRank = input.item.xianyuListRank ?? existing.xianyuListRank;
       existing.status = 'published';
       existing.configVersion += 1;
       existing.updatedAt = now;
       return { action: 'updated', product: this.productDetail(existing) };
     }
-    const product: ProductRecord = { id: createId(), accountId: input.accountId, externalProductRef: input.item.externalProductRef, title: input.item.title, description: input.item.description, categoryCode: input.item.categoryCode, attributes, configVersion: 1, priceMinor: input.item.priceMinor, status: 'published', source: 'xianyu', lastSyncedAt: input.syncedAt, xianyuUpdatedAt: input.item.xianyuUpdatedAt, sourcePayloadDigest: input.item.sourcePayloadDigest, createdAt: now, updatedAt: now, skuCount: 0, assetCount: 0, skus: [], assets: [] };
+    const product: ProductRecord = { id: createId(), accountId: input.accountId, externalProductRef: input.item.externalProductRef, title: input.item.title, description: input.item.description, categoryCode: input.item.categoryCode, attributes, configVersion: 1, priceMinor: input.item.priceMinor, status: 'published', source: 'xianyu', lastSyncedAt: input.syncedAt, xianyuUpdatedAt: input.item.xianyuUpdatedAt, xianyuListRank: input.item.xianyuListRank, sourcePayloadDigest: input.item.sourcePayloadDigest, createdAt: now, updatedAt: now, skuCount: 0, assetCount: 0, skus: [], assets: [] };
     this.products.set(product.id, product);
     return { action: 'created', product: this.productDetail(product) };
+  }
+  async resetXianyuListRanks(adminId: string, accountId: string): Promise<void> {
+    if (!(await this.hasAccountScope(adminId, accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    for (const product of this.products.values()) {
+      if (product.accountId === accountId && product.source === 'xianyu') product.xianyuListRank = undefined;
+    }
   }
   async updateProduct(input: { adminId: string; productId: string; expectedConfigVersion: number; patch: ProductPatch }): Promise<ProductRecord | undefined> {
     const product = this.products.get(input.productId);

@@ -319,7 +319,7 @@ export class ProductService {
     if (!Number.isInteger(page) || page < 1) throw new ServiceError(422, 'VALIDATION_FAILED', 'page must be a positive integer');
     if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new ServiceError(422, 'VALIDATION_FAILED', 'pageSize must be between 1 and 100');
     if (query.status && !['draft', 'ready', 'publishing', 'published', 'failed', 'archived'].includes(query.status)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid product status');
-    if (query.sortBy && !['createdAt', 'updatedAt', 'title', 'priceMinor'].includes(query.sortBy)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid product sort field');
+    if (query.sortBy && !['createdAt', 'updatedAt', 'xianyuOrder', 'title', 'priceMinor'].includes(query.sortBy)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid product sort field');
     if (query.sortOrder && !['asc', 'desc'].includes(query.sortOrder)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid product sort order');
     return this.store.listProducts(adminId, { ...query, page, pageSize });
   }
@@ -380,6 +380,7 @@ export class ProductSyncService {
       if (firstFailure.accountInvalid) throw new ServiceError(409, 'ACCOUNT_REAUTH_REQUIRED', firstFailure.message ?? 'xianyu credential is invalid', { errorCode: firstFailure.errorCode });
       throw new ServiceError(502, 'XIANYU_SYNC_FAILED', firstFailure.message ?? 'xianyu product sync failed', { errorCode: firstFailure.errorCode });
     }
+    await this.store.resetXianyuListRanks(input.adminId, input.accountId);
     let createdCount = 0;
     let updatedCount = 0;
     let skippedLocalDraftCount = 0;

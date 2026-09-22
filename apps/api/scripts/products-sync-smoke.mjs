@@ -25,8 +25,8 @@ try {
   const localDraft = await runtime.store.createProduct({ adminId, accountId: account.id, externalProductRef: 'ITEM-LOCAL', title: '本地草稿', status: 'draft' });
 
   const remoteItems = [
-    { externalProductRef: 'ITEM-LOCAL', title: '远端同名商品', priceMinor: 1990, categoryCode: 'digital', imageUrls: ['https://img.example/1.jpg'], attributes: { auctionType: 'fixed' }, sourcePayloadDigest: 'digest-local' },
-    { externalProductRef: 'ITEM-REMOTE', title: '远端商品', description: '从闲鱼同步', priceMinor: 2990, categoryCode: 'digital', detailUrl: 'https://www.goofish.com/item?id=ITEM-REMOTE', imageUrls: ['https://img.example/2.jpg'], attributes: { itemStatus: 1 }, sourcePayloadDigest: 'digest-remote' },
+    { externalProductRef: 'ITEM-LOCAL', title: '远端同名商品', priceMinor: 1990, categoryCode: 'digital', xianyuListRank: 1, imageUrls: ['https://img.example/1.jpg'], attributes: { auctionType: 'fixed' }, sourcePayloadDigest: 'digest-local' },
+    { externalProductRef: 'ITEM-REMOTE', title: '远端商品', description: '从闲鱼同步', priceMinor: 2990, categoryCode: 'digital', xianyuListRank: 2, detailUrl: 'https://www.goofish.com/item?id=ITEM-REMOTE', imageUrls: ['https://img.example/2.jpg'], attributes: { itemStatus: 1 }, sourcePayloadDigest: 'digest-remote' },
   ];
   runtime.xianyu.fetchItemsAll = async () => ({ pages: [{ success: true, accountInvalid: false, cookieHeader: '', items: remoteItems, pageNumber: 1, pageSize: 20, totalCount: 2, totalPages: 1, hasMore: false }], items: remoteItems, hasMore: false });
   runtime.xianyu.fetchItemDetail = async (_adminId, _accountId, itemId) => ({ success: true, accountInvalid: false, cookieHeader: '', summary: { itemId: String(itemId), xianyuUpdatedAt: itemId === 'ITEM-REMOTE' ? '2026-09-21T12:30:00.000Z' : undefined } });
@@ -37,7 +37,10 @@ try {
   assert.equal(synced.body.data.createdCount, 1);
   assert.equal(synced.body.data.updatedCount, 0);
   assert.equal(synced.body.data.skippedLocalDraftCount, 1);
-  const remote = (await runtime.store.listProducts(adminId, { accountId: account.id })).items.find((item) => item.externalProductRef === 'ITEM-REMOTE');
+  const syncedProducts = (await runtime.store.listProducts(adminId, { accountId: account.id })).items;
+  assert.deepEqual(syncedProducts.map((item) => item.externalProductRef), ['ITEM-REMOTE', 'ITEM-LOCAL']);
+  assert.deepEqual(syncedProducts.map((item) => item.xianyuListRank), [2, undefined]);
+  const remote = syncedProducts.find((item) => item.externalProductRef === 'ITEM-REMOTE');
   assert.ok(remote);
   assert.equal(remote.source, 'xianyu');
   assert.equal(remote.priceMinor, 2990);
