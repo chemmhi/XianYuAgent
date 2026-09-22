@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const typographyCss = readFileSync(fileURLToPath(new URL('./typography.css', import.meta.url)), 'utf8');
+const typographyCss = readFileSync(fileURLToPath(new URL('./typography.css', import.meta.url)), 'utf8').replace(/\r\n/g, '\n');
 const mainTsx = readFileSync(fileURLToPath(new URL('./main.tsx', import.meta.url)), 'utf8');
 
 describe('platform typography policy', () => {
@@ -24,5 +24,13 @@ describe('platform typography policy', () => {
     expect(typographyCss).toContain('body .app-viewport button');
     expect(typographyCss).toContain('body .app-viewport .dashboard-chart-axis');
     expect(typographyCss).toContain('font-size: 10px;\n  line-height: 1;');
+  });
+
+  it('keeps the admin account menu readable', () => {
+    expect(typographyCss).toContain('body .app-viewport .sidebar-user strong');
+    expect(typographyCss).toContain('body .app-viewport .account-menu-head strong');
+    expect(typographyCss).toContain('body .app-viewport .account-menu-logout');
+    expect(typographyCss).toContain('body .app-viewport .mobile-account-trigger');
+    expect(typographyCss).toContain('body .app-viewport .account-menu-head span');
   });
 });
