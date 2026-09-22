@@ -55,7 +55,7 @@ export function ProductsPage({ api: providedApi, automationApi: providedAutomati
       try {
         const config = await automationApi.getConfig(product.id);
         const enabled = [config.delivery, config.reprice, config.gift, config.review].filter((rule) => rule.enabled).length;
-        const detail = `${config.delivery.enabled ? '发货 ✓' : '发货 —'}　${config.reprice.enabled ? '改价 ✓' : '改价 —'}　${config.gift.enabled ? '赠品 ✓' : '赠品 —'}　${config.review.enabled ? `求评 ${config.review.reviewInitialHours ?? 72}h/${config.review.reviewMaxCount ?? 1}次` : '求评 —'}`;
+        const detail = enabled ? `${config.delivery.enabled ? '发货 ✓' : '发货 —'}　${config.reprice.enabled ? '改价 ✓' : '改价 —'}　${config.gift.enabled ? '赠品 ✓' : '赠品 —'}　${config.review.enabled ? `求评 ${config.review.reviewInitialHours ?? 72}h/${config.review.reviewMaxCount ?? 1}次` : '求评 —'}` : '';
         return [product.id, { label: enabled ? `${enabled}/4 已启用` : '未配置', detail, tone: enabled > 0 ? 'ok' : 'muted' }] as const;
       } catch {
         return [product.id, { label: '读取失败', detail: '自动化配置暂不可用', tone: 'warn' }] as const;

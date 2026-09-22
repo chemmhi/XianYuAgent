@@ -1,6 +1,6 @@
 .automation-drawer-backdrop{z-index:24}
 .automation-drawer{width:min(760px,100vw);padding:0;display:flex;flex-direction:column}
-.products-detail-panel.automation-drawer{height:100%;box-sizing:border-box;overflow:hidden}
+.products-detail-panel.automation-drawer{height:100%;box-sizing:border-box;overflow:hidden;box-shadow:-18px 0 50px rgba(15,23,42,.16)}
 .products-detail-panel.automation-drawer .automation-drawer-head{display:block;align-items:initial;justify-content:initial;gap:0;padding:18px 20px 14px}
 .automation-drawer-head{padding:18px 20px 14px;border-bottom:1px solid var(--border)}
 .automation-drawer-top{display:flex;justify-content:space-between;gap:14px}
@@ -55,7 +55,7 @@
 .automation-modal-head h3{margin:0 0 6px;font-size:18px;line-height:1.45}
 .automation-modal-head p:not(.automation-kicker){margin:0;color:var(--sub);font-size:12px;line-height:1.5}
 .coupon-picker-body{min-height:0;flex:1;padding:16px 20px;background:#FBFCFD}
-.coupon-transfer-grid{display:grid;grid-template-columns:minmax(0,1fr) 44px minmax(0,1fr);min-height:430px;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff}
+.coupon-transfer-grid{display:grid;grid-template-columns:minmax(0,1fr) 44px minmax(0,1fr);min-height:434px;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff}
 .coupon-transfer-pane{position:relative;min-width:0;background:#fff}
 .coupon-transfer-pane+.coupon-transfer-pane{border-left:1px solid var(--border)}
 .coupon-pane-head{display:flex;align-items:center;justify-content:space-between;padding:12px;border-bottom:1px solid var(--border);font-size:12px;font-weight:700}
@@ -84,4 +84,50 @@
 .batch-rule-row input[type=checkbox]{margin-top:3px;width:14px;height:14px;accent-color:var(--link)}
 .batch-rule-row h4{margin:0 0 4px;font-size:12px;line-height:1.5}
 .batch-rule-row p{margin:0;color:var(--sub);font-size:11px;line-height:1.5}
+@media(min-width:901px){.coupon-pane-head{min-height:54px}}
 @media(max-width:900px){.automation-drawer{width:100%;height:auto;max-height:100vh;border-radius:16px 16px 0 0;align-self:flex-end}.automation-drawer-head{padding:16px}.automation-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.automation-drawer-body{padding:16px}.automation-drawer-footer{align-items:stretch;flex-direction:column;padding:12px 16px}.automation-drawer-footer>div{display:grid;grid-template-columns:1fr 1fr}.automation-drawer-footer>div .primary{grid-column:1 / -1}.product-automation-overlay{padding:10px}.coupon-picker-dialog,.batch-automation-dialog{max-height:calc(100% - 4px)}.coupon-transfer-grid{grid-template-columns:1fr;min-height:0}.coupon-transfer-pane+.coupon-transfer-pane{border-left:0;border-top:1px solid var(--border)}.coupon-transfer-actions{flex-direction:row;padding:8px}.coupon-list{height:210px}.coupon-transfer-arrow{margin:auto}.automation-modal-footer{align-items:stretch;flex-direction:column;padding:12px 16px}.automation-modal-footer>div{display:grid;grid-template-columns:1fr 1fr}.automation-modal-footer>div .primary{grid-column:1 / -1}.automation-field-grid{grid-template-columns:1fr}}
+
+/* The shared app typography intentionally runs larger than this dense
+   automation surface. Keep the interaction design's compact rhythm inside
+   the drawer and picker so desktop and mobile screenshots stay equivalent. */
+body .app-viewport .automation-drawer h2{margin:0 0 5px;font-size:16px;line-height:1.2}
+body .app-viewport .products-domain .automation-drawer .automation-meta{font-size:11px;line-height:1.5}
+body .app-viewport .automation-drawer .automation-kicker{font-size:10px;line-height:1.4}
+body .app-viewport .automation-drawer .automation-summary{font-size:11px;line-height:1.45}
+body .app-viewport .automation-drawer .automation-summary>div{font-size:11px;line-height:1.45}
+body .app-viewport .automation-drawer .automation-summary p{font-size:10px;line-height:1.45}
+body .app-viewport .automation-drawer .automation-summary em{font-size:10px;line-height:1.45}
+body .app-viewport .automation-drawer .automation-section-title h3{font-size:13px;line-height:1.5}
+body .app-viewport .automation-drawer .automation-section-title p{font-size:11px;line-height:1.5}
+body .app-viewport .automation-drawer .automation-config-card h4{font-size:12px;line-height:1.5}
+body .app-viewport .automation-drawer .automation-selected-coupon strong{font-size:12px;line-height:1.5}
+body .app-viewport .automation-drawer .automation-selected-coupon small{font-size:11px;line-height:1.5}
+body .app-viewport .automation-drawer .automation-card-link{font-size:11px;line-height:1.5}
+body .app-viewport .automation-drawer .automation-field-grid label{font-size:11px;line-height:1.5}
+body .app-viewport .automation-drawer .automation-field-grid input,
+body .app-viewport .automation-drawer .automation-field-grid textarea{font-size:12px;line-height:1.5}
+body .app-viewport .automation-drawer .automation-preview{font-size:11px;line-height:1.5}
+body .app-viewport .automation-drawer .automation-preview>div span{font-size:10px;line-height:1.4}
+body .app-viewport .automation-drawer .automation-preview b{font-size:13px;line-height:1.4}
+body .app-viewport .automation-drawer .automation-alert{font-size:11px;line-height:1.5}
+body .app-viewport .automation-drawer .automation-drawer-footer{font-size:10px;line-height:1.5}
+body .app-viewport .automation-drawer .automation-drawer-footer .btn{font-size:11px;line-height:1.45}
+
+body .app-viewport .product-automation-overlay .automation-kicker{font-size:10px;line-height:1.4}
+body .app-viewport .product-automation-overlay .automation-modal-head h3{font-size:18px;line-height:1.45}
+body .app-viewport .product-automation-overlay .automation-modal-head p:not(.automation-kicker){font-size:12px;line-height:1.5}
+body .app-viewport .product-automation-overlay .coupon-search{font-size:12px;line-height:1.4}
+body .app-viewport .product-automation-overlay .coupon-item-main strong{font-size:12px;line-height:1.4}
+body .app-viewport .product-automation-overlay .coupon-item-main small{font-size:10px;line-height:1.5}
+body .app-viewport .product-automation-overlay .coupon-pane-head{font-size:12px;line-height:1.5}
+body .app-viewport .product-automation-overlay .coupon-pane-head span+span{font-size:10px;line-height:1.5}
+body .app-viewport .product-automation-overlay .coupon-select-all{font-size:11px;line-height:1.4}
+body .app-viewport .product-automation-overlay .coupon-empty{font-size:12px;line-height:1.6}
+body .app-viewport .product-automation-overlay .automation-modal-footer{font-size:10px;line-height:1.5}
+body .app-viewport .product-automation-overlay .automation-modal-footer .btn{font-size:11px;line-height:1.45}
+
+@media(max-width:900px){
+  body .app-viewport .automation-drawer .automation-drawer-body{padding:18px 20px}
+  body .app-viewport .automation-drawer .automation-drawer-footer{padding:13px 20px}
+  body .app-viewport .product-automation-overlay .automation-modal-footer{padding:13px 20px}
+}

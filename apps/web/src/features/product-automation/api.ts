@@ -21,7 +21,7 @@ function defaultConfig(productId: string, accountId: string): ProductAutomationC
     version: 1,
     delivery: { enabled: true, couponIds: ['coupon-batch-2'], autoConfirm: false },
     reprice: { enabled: false, targetPriceMinor: 990, repriceMessage: '已为您调整价格，请及时付款' },
-    gift: { enabled: false, couponIds: ['coupon-gift-a'] },
+    gift: { enabled: false, couponIds: [] },
     review: { enabled: true, reviewInitialHours: 72, reviewRepeatHours: 24, reviewMaxCount: 1, reviewMessage: '商品已经发出，如果使用满意，麻烦帮忙点个好评～' },
   };
 }

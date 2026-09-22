@@ -50,6 +50,7 @@ async function run() {
   await apiRuntime.store.importCouponItems({ adminId: adminProfile.id, batchId: fixedBatch.id, contents: ['FIXED-001', 'FIXED-002'] });
   const giftBatch = await apiRuntime.store.createCouponBatch({ adminId: adminProfile.id, accountId: account.id, label: '评价赠品批次 A', purpose: 'data', deliveryScope: 'buyer_deliverable', metadata: { specCount: 1, deliveryCount: 1 } });
   await apiRuntime.store.importCouponItems({ adminId: adminProfile.id, batchId: giftBatch.id, contents: ['GIFT-001'] });
+  await apiRuntime.store.createCouponBatch({ adminId: adminProfile.id, accountId: account.id, label: 'API 卡券 · 会员激活码', purpose: 'api', deliveryScope: 'buyer_deliverable', metadata: { deliveryCount: 1, apiConfig: { url: 'https://api.example.test/member/activate', method: 'POST' } } });
   await apiRuntime.store.bindCouponBatch({ adminId: adminProfile.id, batchId: deliveryBatch.id, productId: product.id });
   await apiRuntime.store.bindCouponBatch({ adminId: adminProfile.id, batchId: deliveryBatch.id, productId: secondProduct.id });
   await apiRuntime.store.bindCouponBatch({ adminId: adminProfile.id, batchId: fixedBatch.id, productId: thirdProduct.id });
