@@ -23,6 +23,14 @@ test('DashboardService aggregates scoped accounts, orders, products, coupons and
     orderNo: 'DASH-PENDING', accountId: account.id, buyerId: 'buyer-2', buyerName: '买家二', itemId: 'item-1', itemTitle: product.title,
     productId: product.id, amountMinor: 5_000, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'coupon_only', createdAt: now, updatedAt: now,
   } });
+  await store.createOrder({ adminId: admin.id, order: {
+    orderNo: 'DASH-OLD', accountId: account.id, buyerId: 'buyer-old', buyerName: '旧买家', itemId: 'item-old', itemTitle: '历史资料包',
+    amountMinor: 8_000, paymentStatus: 'paid', orderStatus: 'completed', deliveryStatus: 'delivered', afterSalesStatus: 'none', deliveryType: 'coupon_only', createdAt: '2026-09-01T12:00:00.000Z', updatedAt: '2026-09-01T12:00:00.000Z',
+  } });
+  await store.createOrder({ adminId: admin.id, order: {
+    orderNo: 'DASH-UNPAID', accountId: account.id, buyerId: 'buyer-unpaid', buyerName: '未付款买家', itemId: 'item-unpaid', itemTitle: '未付款资料包',
+    amountMinor: 7_000, paymentStatus: 'unpaid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'coupon_only', createdAt: '2026-08-20T12:00:00.000Z', updatedAt: '2026-08-20T12:00:00.000Z',
+  } });
   await store.createOrder({ adminId: otherAdmin.id, order: {
     orderNo: 'DASH-OTHER', accountId: otherAccount.id, buyerId: 'buyer-other', buyerName: '其他买家', itemId: 'other-item', itemTitle: '不应出现',
     amountMinor: 99_900, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'delivered', afterSalesStatus: 'none', deliveryType: 'manual', createdAt: now, updatedAt: now,
@@ -30,6 +38,7 @@ test('DashboardService aggregates scoped accounts, orders, products, coupons and
   await store.upsertExternalConversation({ adminId: admin.id, accountId: account.id, externalConversationRef: 'dashboard-conversation', buyerRef: 'buyer-2', buyerDisplayName: '买家二', unreadCount: 2, lastMessagePreview: '请尽快发货', lastMessageAt: now });
 
   const snapshot = await new DashboardService(store).getSnapshot(admin.id, new Date(now));
+  assert.equal(snapshot.totalSales, 259);
   assert.equal(snapshot.todayOrderAmount, 179);
   assert.equal(snapshot.autoProcessRate, 50);
   assert.equal(snapshot.pendingManualCount, 2);
@@ -42,4 +51,16 @@ test('DashboardService aggregates scoped accounts, orders, products, coupons and
   assert.ok(snapshot.riskTodos.some((item) => item.id.startsWith('order-')));
   assert.ok(snapshot.riskTodos.some((item) => item.id.startsWith('conversation-')));
   assert.ok(!JSON.stringify(snapshot).includes('DASH-OTHER'));
+
+  const today = await new DashboardService(store).getSnapshot(admin.id, new Date(now), { range: 'today' });
+  assert.equal(today.trend.length, 24);
+  assert.equal(today.trend[12]?.orderAmount, 179);
+
+  const custom = await new DashboardService(store).getSnapshot(admin.id, new Date(now), { range: 'custom', from: '2026-09-01', to: '2026-09-01' });
+  assert.equal(custom.trend.length, 24);
+  assert.equal(custom.trend[12]?.orderAmount, 80);
+
+  const threeDays = await new DashboardService(store).getSnapshot(admin.id, new Date(now), { range: '3d' });
+  assert.equal(threeDays.trend.length, 3);
+  assert.equal(threeDays.trend.at(-1)?.orderAmount, 179);
 });

@@ -88,6 +88,8 @@
 
 ## 主工作区
 
+| `root/dashboard_backend` | `dashboard-backend` | `codex/dashboard-backend` | `F:\ChenHai\Project\XianYuAgent-dashboard-backend` | Codex `/root` delegated agent | `2026-09-22 14:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | snapshot API 支持 range=today/3d/7d/1m/custom、from/to 校验与 totalSales；API build、dashboard 单测、PostgreSQL 集成（含重启复读/非法 range 422）和 diff-check 已通过。 |
+
 | 类型 | branch | worktree | 规则 |
 | --- | --- | --- | --- |
 | 受保护主工作区 | `master` | `F:\ChenHai\Project\XianYuAgent` | 不登记为 agent 开发 worktree；只允许锁内合并、验证、登记回写和清理 |

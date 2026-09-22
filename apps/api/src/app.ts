@@ -20,7 +20,7 @@ import { decodeMessageHistoryCursor, encodeMessageHistoryCursor } from './messag
 import { InProcessAgentRuntime, isTerminalRunStatus, WorkspaceService, type WorkspaceRuntime } from './workspace.js';
 import { OpenAICompatibleModelClient, PiRuntimeAdapter, type ModelClient } from './pi-runtime.js';
 import { ApiKeyCredentialService } from './credential-store.js';
-import { DashboardService } from './dashboard.js';
+import { DashboardService, type DashboardRange } from './dashboard.js';
 import { AutoReplyService, ExternalAutoReplySender } from './auto-reply.js';
 import { AutoReplyAgentSettingsService, resolveAutoReplyAgentDefaults } from './auto-reply-agent-settings.js';
 import { ToolCallingAutoReplyAgent } from './auto-reply-agent.js';
@@ -413,7 +413,18 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   }
 
   if (ctx.path === '/api/v1/dashboard/snapshot' && ctx.method === 'GET') {
-    return { statusCode: 200, body: success(ctx, await dashboard.getSnapshot(authContext.admin.id)).body };
+    const range = optionalString(ctx.query.range);
+    const from = optionalString(ctx.query.from);
+    const to = optionalString(ctx.query.to);
+    if (range && !['today', '3d', '7d', '1m', 'custom'].includes(range)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid dashboard range');
+    if ((from && !to) || (to && !from) || (range === 'custom' && (!from || !to))) throw new ServiceError(422, 'VALIDATION_FAILED', 'from and to are required for custom dashboard range');
+    if (from && to) {
+      const fromMs = Date.parse(from);
+      const toMs = /^\d{4}-\d{2}-\d{2}$/.test(to) ? Date.parse(to) + 24 * 60 * 60 * 1000 : Date.parse(to);
+      if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) throw new ServiceError(422, 'VALIDATION_FAILED', 'dashboard from/to must be valid and ordered');
+      if (toMs - fromMs > 366 * 24 * 60 * 60 * 1000) throw new ServiceError(422, 'VALIDATION_FAILED', 'dashboard date range cannot exceed 366 days');
+    }
+    return { statusCode: 200, body: success(ctx, await dashboard.getSnapshot(authContext.admin.id, new Date(), { range: range as DashboardRange | undefined, from, to })).body };
   }
 
   if (ctx.path === '/api/v1/auto-reply/activity/summary' && ctx.method === 'GET') {

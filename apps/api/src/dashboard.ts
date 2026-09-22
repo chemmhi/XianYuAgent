@@ -13,7 +13,16 @@ export interface DashboardTrendPoint {
   autoProcessRate: number;
 }
 
+export type DashboardRange = 'today' | '3d' | '7d' | '1m' | 'custom';
+
+export interface DashboardQuery {
+  range?: DashboardRange;
+  from?: string;
+  to?: string;
+}
+
 export interface DashboardSnapshot {
+  totalSales: number;
   todayOrderAmount: number;
   autoProcessRate: number;
   pendingManualCount: number;
@@ -26,10 +35,11 @@ export interface DashboardSnapshot {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
 const DASHBOARD_PAGE_SIZE = 1_000;
-const TREND_DAYS = 7;
 const ACTIVITY_LIMIT = 8;
 const RISK_LIMIT = 8;
+const DASHBOARD_RANGES: readonly DashboardRange[] = ['today', '3d', '7d', '1m', 'custom'];
 
 /**
  * Read-only dashboard projection. The service deliberately composes Store
@@ -39,7 +49,11 @@ const RISK_LIMIT = 8;
 export class DashboardService {
   constructor(private readonly store: Store) {}
 
-  async getSnapshot(adminId: string, now = new Date()): Promise<DashboardSnapshot> {
+  async getSnapshot(adminId: string, query?: DashboardQuery): Promise<DashboardSnapshot>;
+  async getSnapshot(adminId: string, now?: Date, query?: DashboardQuery): Promise<DashboardSnapshot>;
+  async getSnapshot(adminId: string, nowOrQuery: Date | DashboardQuery = new Date(), query: DashboardQuery = {}): Promise<DashboardSnapshot> {
+    const now = nowOrQuery instanceof Date ? nowOrQuery : new Date();
+    const resolvedQuery = nowOrQuery instanceof Date ? query : nowOrQuery;
     const [accountsResult, productsResult, ordersResult, couponsResult, conversationsResult] = await Promise.all([
       this.store.listAccounts(adminId, { page: 1, pageSize: DASHBOARD_PAGE_SIZE }),
       this.store.listProducts(adminId, { page: 1, pageSize: DASHBOARD_PAGE_SIZE, sortBy: 'updatedAt', sortOrder: 'desc' }),
@@ -54,13 +68,15 @@ export class DashboardService {
     const coupons = couponsResult.items;
     const conversations = conversationsResult.items;
 
-    const trend = buildTrend(orders, now);
+    const trend = buildTrend(orders, now, resolvedQuery);
     const todayStart = startOfUtcDay(now);
     const todayOrders = orders.filter((order) => parseTime(order.createdAt) >= todayStart);
+    const paidOrders = orders.filter((order) => order.paymentStatus === 'paid');
     const availableCouponCount = coupons.reduce((sum, batch) => sum + Number(batch.availableCount ?? 0), 0);
     const pendingManualCount = countPendingManual(orders, accounts, coupons, conversations);
 
     return {
+      totalSales: round(sumMajorUnits(paidOrders)),
       todayOrderAmount: round(sumMajorUnits(todayOrders)),
       autoProcessRate: autoProcessRate(todayOrders),
       pendingManualCount,
@@ -74,19 +90,54 @@ export class DashboardService {
   }
 }
 
-function buildTrend(orders: OrderRecord[], now: Date): DashboardTrendPoint[] {
-  const todayStart = startOfUtcDay(now);
+function buildTrend(orders: OrderRecord[], now: Date, query: DashboardQuery): DashboardTrendPoint[] {
+  const window = resolveTrendWindow(now, query);
   const points: DashboardTrendPoint[] = [];
-  for (let offset = TREND_DAYS - 1; offset >= 0; offset -= 1) {
-    const dayStart = new Date(todayStart - offset * DAY_MS);
-    const dayEnd = new Date(dayStart.getTime() + DAY_MS);
-    const dayOrders = orders.filter((order) => {
+  const bucketMs = window.granularity === 'hour' ? HOUR_MS : DAY_MS;
+  for (let bucketStart = window.start; bucketStart < window.end; bucketStart += bucketMs) {
+    const bucketEnd = Math.min(bucketStart + bucketMs, window.end);
+    const bucketOrders = orders.filter((order) => {
       const createdAt = parseTime(order.createdAt);
-      return createdAt >= dayStart.getTime() && createdAt < dayEnd.getTime();
+      return createdAt >= bucketStart && createdAt < bucketEnd;
     });
-    points.push({ label: weekdayLabel(dayStart), orderAmount: round(sumMajorUnits(dayOrders)), autoProcessRate: autoProcessRate(dayOrders) });
+    const date = new Date(bucketStart);
+    points.push({
+      label: window.granularity === 'hour' ? hourLabel(date) : dayLabel(date, window.dayCount),
+      orderAmount: round(sumMajorUnits(bucketOrders)),
+      autoProcessRate: autoProcessRate(bucketOrders),
+    });
   }
   return points;
+}
+
+function resolveTrendWindow(now: Date, query: DashboardQuery): { start: number; end: number; granularity: 'hour' | 'day'; dayCount: number } {
+  const rawRange = query.range ?? (query.from || query.to ? 'custom' : '7d');
+  const range = DASHBOARD_RANGES.includes(rawRange as DashboardRange) ? rawRange as DashboardRange : '7d';
+  const todayStart = startOfUtcDay(now);
+  if (range === 'today') return { start: todayStart, end: todayStart + DAY_MS, granularity: 'hour', dayCount: 1 };
+  if (range === '3d') return { start: todayStart - (3 - 1) * DAY_MS, end: todayStart + DAY_MS, granularity: 'day', dayCount: 3 };
+  if (range === '1m') return { start: todayStart - (30 - 1) * DAY_MS, end: todayStart + DAY_MS, granularity: 'day', dayCount: 30 };
+  if (range === 'custom') {
+    const custom = resolveCustomWindow(query.from, query.to, now);
+    const dayCount = Math.max(1, Math.ceil((custom.end - custom.start) / DAY_MS));
+    return { ...custom, granularity: dayCount === 1 && custom.end - custom.start <= DAY_MS ? 'hour' : 'day', dayCount };
+  }
+  return { start: todayStart - (7 - 1) * DAY_MS, end: todayStart + DAY_MS, granularity: 'day', dayCount: 7 };
+}
+
+function resolveCustomWindow(from: string | undefined, to: string | undefined, now: Date): { start: number; end: number } {
+  if (!from || !to) return { start: startOfUtcDay(now), end: startOfUtcDay(now) + DAY_MS };
+  const start = parseBoundary(from, false);
+  const end = parseBoundary(to, true);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return { start: startOfUtcDay(now), end: startOfUtcDay(now) + DAY_MS };
+  return { start, end };
+}
+
+function parseBoundary(value: string, endOfDate: boolean): number {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return Number.NaN;
+  if (endOfDate && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return startOfUtcDay(new Date(parsed)) + DAY_MS;
+  return parsed;
 }
 
 function buildHealth(accounts: AccountRecord[], availableCouponCount: number): DashboardSnapshot['health'] {
@@ -207,6 +258,14 @@ function formatTime(value: string | undefined): string {
 
 function weekdayLabel(date: Date): string {
   return ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getUTCDay()]!;
+}
+
+function hourLabel(date: Date): string {
+  return `${String(date.getUTCHours()).padStart(2, '0')}:00`;
+}
+
+function dayLabel(date: Date, dayCount: number): string {
+  return dayCount === 7 ? weekdayLabel(date) : `${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
 }
 
 function round(value: number, decimals = 2): number {
