@@ -31,6 +31,8 @@
     "test:agent-dynamics:postgres": "npm run build && node scripts/agent-dynamics-postgres-e2e.mjs",
     "test:auto-reply:unit": "node --import tsx --test scripts/auto-reply.test.ts scripts/auto-reply-agent.test.ts scripts/auto-reply-inbound-inbox.test.ts scripts/auto-reply-inbound-node.test.ts",
     "test:auto-reply:inbound": "node --import tsx --test scripts/auto-reply-inbound-inbox.test.ts scripts/auto-reply-inbound-node.test.ts",
+    "test:product-automation": "npm run build && node scripts/product-automation-api-smoke.mjs && node --import tsx --test scripts/product-automation.test.ts",
+    "test:product-automation:postgres": "npm run build && node scripts/product-automation-postgres-smoke.mjs",
     "extract:seller-persona": "node --import tsx scripts/extract-seller-persona.ts",
     "test:extract:seller-persona": "node --import tsx --test scripts/extract-seller-persona.test.ts",
     "smoke": "npm run build && node scripts/smoke.mjs",

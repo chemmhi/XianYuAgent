@@ -1,4 +1,4 @@
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor, isAfterConversationCursor } from './conversation-cursor.js';
@@ -35,6 +35,7 @@ export class MemoryStore implements Store {
   private readonly credentialRefSecrets = new Map<string, string>();
   private readonly autoReplyAgentConfigs = new Map<string, AutoReplyAgentConfigRecord>();
   private readonly products = new Map<string, ProductRecord>();
+  private readonly productAutomations = new Map<string, ProductAutomationConfigRecord>();
   private readonly orders = new Map<string, OrderRecord>();
   private readonly couponBatches = new Map<string, CouponBatchRecord>();
   private readonly couponItems = new Map<string, CouponItemRecord>();
@@ -156,6 +157,64 @@ export class MemoryStore implements Store {
     const product = this.products.get(productId);
     if (!product || !(await this.hasAccountScope(adminId, product.accountId))) return undefined;
     return this.productDetail(product);
+  }
+
+  async getProductAutomation(adminId: string, productId: string): Promise<ProductAutomationConfigRecord | undefined> {
+    const product = this.products.get(productId);
+    if (!product || !(await this.hasAccountScope(adminId, product.accountId))) return undefined;
+    const record = this.productAutomations.get(productId);
+    return record ? this.cloneProductAutomation(record) : undefined;
+  }
+
+  async updateProductAutomation(input: { adminId: string; productId: string; expectedConfigVersion: number; config: ProductAutomationConfig; configDigest: string }): Promise<ProductAutomationConfigRecord | undefined> {
+    const product = this.products.get(input.productId);
+    if (!product) return undefined;
+    if (!(await this.hasAccountScope(input.adminId, product.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const current = this.productAutomations.get(input.productId);
+    if (current && current.configVersion !== input.expectedConfigVersion) throw new Error('AUTOMATION_VERSION_CONFLICT');
+    if (!current && input.expectedConfigVersion !== 1) throw new Error('AUTOMATION_VERSION_CONFLICT');
+    const now = new Date().toISOString();
+    const record: ProductAutomationConfigRecord = {
+      id: current?.id ?? createId(),
+      productId: input.productId,
+      accountId: product.accountId,
+      configVersion: current ? current.configVersion + 1 : 1,
+      config: structuredClone(input.config),
+      configDigest: input.configDigest,
+      createdAt: current?.createdAt ?? now,
+      updatedAt: now,
+    };
+    this.productAutomations.set(input.productId, record);
+    return this.cloneProductAutomation(record);
+  }
+
+  async updateProductAutomationsBatch(input: { adminId: string; productIds: string[]; expectedConfigVersions: Record<string, number>; config: ProductAutomationConfig; configDigest: string }): Promise<ProductAutomationBatchResult> {
+    const uniqueProductIds = [...new Set(input.productIds)];
+    const products = uniqueProductIds.map((productId) => this.products.get(productId));
+    if (products.some((product) => !product)) throw new Error('PRODUCT_NOT_FOUND');
+    if (products.some((product) => product && product.accountId !== products[0]!.accountId)) throw new Error('AUTOMATION_BATCH_ACCOUNT_MISMATCH');
+    if (!(await this.hasAccountScope(input.adminId, products[0]!.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    for (const productId of uniqueProductIds) {
+      const current = this.productAutomations.get(productId);
+      const expected = input.expectedConfigVersions[productId];
+      if (!Number.isSafeInteger(expected) || (current ? current.configVersion !== expected : expected !== 1)) throw new Error('AUTOMATION_VERSION_CONFLICT');
+    }
+    const now = new Date().toISOString();
+    const staged = uniqueProductIds.map((productId) => {
+      const current = this.productAutomations.get(productId);
+      return {
+        id: current?.id ?? createId(),
+        productId,
+        accountId: products.find((product) => product?.id === productId)!.accountId,
+        configVersion: current ? current.configVersion + 1 : 1,
+        config: structuredClone(input.config),
+        configDigest: input.configDigest,
+        createdAt: current?.createdAt ?? now,
+        updatedAt: now,
+      } satisfies ProductAutomationConfigRecord;
+    });
+    for (const record of staged) this.productAutomations.set(record.productId, record);
+    return { items: staged.map((record) => this.cloneProductAutomation(record)), updatedProductIds: uniqueProductIds };
   }
 
   async persistXianyuItemDetail(input: XianyuItemDetailPersistenceInput): Promise<ProductRecord | undefined> {
@@ -1163,6 +1222,10 @@ export class MemoryStore implements Store {
 
   private productDetail(product: ProductRecord): ProductRecord {
     return { ...product, attributes: { ...product.attributes }, couponBatches: this.productCouponBatches(product.id), skus: product.skus?.map((sku) => ({ ...sku })), assets: product.assets?.map((asset) => ({ ...asset })), skuCount: product.skus?.filter((sku) => sku.status !== 'archived').length ?? product.skuCount ?? 0, assetCount: product.assets?.filter((asset) => asset.status !== 'archived').length ?? product.assetCount ?? 0 };
+  }
+
+  private cloneProductAutomation(record: ProductAutomationConfigRecord): ProductAutomationConfigRecord {
+    return { ...record, config: structuredClone(record.config) };
   }
 
   private productCouponBatches(productId: string): Array<{ id: string; label?: string }> {

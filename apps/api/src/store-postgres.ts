@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor } from './conversation-cursor.js';
@@ -95,6 +95,98 @@ export class PostgresStore implements Store {
     product.skus = skuRows.rows.map((row) => this.toProductSku(row));
     product.assets = assetRows.rows.map((row) => this.toProductAsset(row));
     return product;
+  }
+
+  async getProductAutomation(adminId: string, productId: string): Promise<ProductAutomationConfigRecord | undefined> {
+    const result = await this.pool.query(`select a.*
+      from products.automation_configs a
+      join products.products p on p.id=a.product_id
+      where a.product_id=$1 and exists (
+        select 1 from auth.account_scopes scope
+        where scope.account_id=p.account_id and scope.admin_id=$2 and scope.status='active'
+          and (scope.expires_at is null or scope.expires_at>now())
+      ) limit 1`, [productId, adminId]);
+    return result.rows[0] ? this.toProductAutomation(result.rows[0]) : undefined;
+  }
+
+  async updateProductAutomation(input: { adminId: string; productId: string; expectedConfigVersion: number; config: ProductAutomationConfig; configDigest: string }): Promise<ProductAutomationConfigRecord | undefined> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const product = await client.query(`select p.account_id
+        from products.products p
+        where p.id=$1 and exists (
+          select 1 from auth.account_scopes scope
+          where scope.account_id=p.account_id and scope.admin_id=$2 and scope.status='active'
+            and (scope.expires_at is null or scope.expires_at>now())
+        ) for update`, [input.productId, input.adminId]);
+      if (!product.rows[0]) { await client.query('rollback'); return undefined; }
+      const current = await client.query('select * from products.automation_configs where product_id=$1 for update', [input.productId]);
+      const row = current.rows[0] as Row | undefined;
+      const currentVersion = row ? Number(row.config_version) : 1;
+      if ((row && currentVersion !== input.expectedConfigVersion) || (!row && input.expectedConfigVersion !== 1)) throw new Error('AUTOMATION_VERSION_CONFLICT');
+      const recordId = row ? String(row.id) : createId();
+      const version = row ? currentVersion + 1 : 1;
+      const saved = row
+        ? await client.query(`update products.automation_configs
+            set config_version=$2, config_json=$3::jsonb, config_digest=$4, updated_at=now()
+            where product_id=$1 returning *`, [input.productId, version, JSON.stringify(input.config), input.configDigest])
+        : await client.query(`insert into products.automation_configs
+            (id,product_id,account_id,config_version,config_json,config_digest)
+            values ($1,$2,$3,$4,$5::jsonb,$6) returning *`, [recordId, input.productId, product.rows[0].account_id, version, JSON.stringify(input.config), input.configDigest]);
+      await client.query('commit');
+      return this.toProductAutomation(saved.rows[0]);
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async updateProductAutomationsBatch(input: { adminId: string; productIds: string[]; expectedConfigVersions: Record<string, number>; config: ProductAutomationConfig; configDigest: string }): Promise<ProductAutomationBatchResult> {
+    const productIds = [...new Set(input.productIds)];
+    if (productIds.length === 0) throw new Error('PRODUCT_NOT_FOUND');
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const products = await client.query(`select p.id,p.account_id
+        from products.products p
+        where p.id = any($1::uuid[])
+          and exists (
+            select 1 from auth.account_scopes scope
+            where scope.account_id=p.account_id and scope.admin_id=$2 and scope.status='active'
+              and (scope.expires_at is null or scope.expires_at>now())
+          )
+        order by p.id for update`, [productIds, input.adminId]);
+      if (products.rowCount !== productIds.length) { await client.query('rollback'); throw new Error('PRODUCT_NOT_FOUND'); }
+      const accountIds = new Set(products.rows.map((row) => String(row.account_id)));
+      if (accountIds.size !== 1) { await client.query('rollback'); throw new Error('AUTOMATION_BATCH_ACCOUNT_MISMATCH'); }
+      const current = await client.query('select * from products.automation_configs where product_id = any($1::uuid[]) for update', [productIds]);
+      const byProduct = new Map(current.rows.map((row) => [String(row.product_id), row as Row]));
+      for (const productId of productIds) {
+        const row = byProduct.get(productId);
+        const expected = input.expectedConfigVersions[productId];
+        const version = row ? Number(row.config_version) : 1;
+        if (!Number.isSafeInteger(expected) || expected !== version) { await client.query('rollback'); throw new Error('AUTOMATION_VERSION_CONFLICT'); }
+      }
+      const saved: ProductAutomationConfigRecord[] = [];
+      for (const productId of productIds) {
+        const row = byProduct.get(productId);
+        const version = row ? Number(row.config_version) + 1 : 1;
+        const result = row
+          ? await client.query(`update products.automation_configs
+              set config_version=$2, config_json=$3::jsonb, config_digest=$4, updated_at=now()
+              where product_id=$1 returning *`, [productId, version, JSON.stringify(input.config), input.configDigest])
+          : await client.query(`insert into products.automation_configs
+              (id,product_id,account_id,config_version,config_json,config_digest)
+              values ($1,$2,$3,$4,$5::jsonb,$6) returning *`, [createId(), productId, products.rows.find((item) => String(item.id) === productId)!.account_id, version, JSON.stringify(input.config), input.configDigest]);
+        saved.push(this.toProductAutomation(result.rows[0]));
+      }
+      await client.query('commit');
+      return { items: saved, updatedProductIds: productIds };
+    } catch (error) {
+      try { await client.query('rollback'); } catch { /* preserve original error */ }
+      throw error;
+    } finally { client.release(); }
   }
 
   async persistXianyuItemDetail(input: XianyuItemDetailPersistenceInput): Promise<ProductRecord | undefined> {
@@ -1092,6 +1184,12 @@ export class PostgresStore implements Store {
   private toProduct(row: Row): ProductRecord {
     const attributes = row.attributes_json && typeof row.attributes_json === 'object' && !Array.isArray(row.attributes_json) ? row.attributes_json as Record<string, unknown> : {};
     return { id: String(row.id), accountId: String(row.account_id), externalProductRef: row.external_product_ref ? String(row.external_product_ref) : undefined, title: String(row.title), description: row.description ? String(row.description) : undefined, categoryCode: row.category_code ? String(row.category_code) : undefined, attributes: { ...attributes }, defaultReplyTemplate: row.default_reply_template ? String(row.default_reply_template) : undefined, aiPrompt: row.ai_prompt ? String(row.ai_prompt) : undefined, configVersion: Number(row.config_version ?? 1), priceMinor: row.price_minor === null || row.price_minor === undefined ? undefined : Number(row.price_minor), status: row.status as ProductRecord['status'], source: (row.source ?? 'local') as ProductRecord['source'], lastSyncedAt: iso(row.last_synced_at), xianyuUpdatedAt: iso(row.xianyu_updated_at), xianyuListRank: row.xianyu_list_rank === null || row.xianyu_list_rank === undefined ? undefined : Number(row.xianyu_list_rank), sourcePayloadDigest: row.source_payload_digest ? String(row.source_payload_digest) : undefined, createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString(), skuCount: Number(row.sku_count ?? 0), assetCount: Number(row.asset_count ?? 0), couponBatches: this.toProductCouponBatches(row.coupon_batches) };
+  }
+  private toProductAutomation(row: Row): ProductAutomationConfigRecord {
+    const config: ProductAutomationConfig = row.config_json && typeof row.config_json === 'object' && !Array.isArray(row.config_json)
+      ? row.config_json as ProductAutomationConfig
+      : { paidAutoDelivery: { enabled: false, couponBatchIds: [], autoConfirm: false, maxAttempts: 3, retryBackoffSeconds: 30 }, unpaidAutoReprice: { enabled: false, mode: 'fixed', targetPriceMinor: 0, maxAttempts: 3, retryBackoffSeconds: 30 }, reviewGift: { enabled: false, couponBatchIds: [], maxAttempts: 3, retryBackoffSeconds: 30 }, reviewReminder: { enabled: false, firstDelayHours: 72, repeatIntervalHours: 24, maxReminders: 1, message: '' } };
+    return { id: String(row.id), productId: String(row.product_id), accountId: String(row.account_id), configVersion: Number(row.config_version ?? 1), config: structuredClone(config), configDigest: String(row.config_digest ?? ''), createdAt: dateIso(row.created_at), updatedAt: dateIso(row.updated_at) };
   }
   private toOrder(row: Row): OrderRecord {
     return {
