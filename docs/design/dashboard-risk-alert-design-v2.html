@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>仪表盘风险提醒 · PC 方案 v2</title>
+  <style>
+    :root {
+      --page: #eceef2;
+      --canvas: #f6f7f9;
+      --card: #fff;
+      --text: #111827;
+      --sub: #475569;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --link: #245a8d;
+      --brand: #1f3a5f;
+      --warn: #b7791f;
+      --warn-bg: #fff8e8;
+      --warn-border: #ead5a4;
+      --danger: #b42318;
+      --danger-bg: #fef0ef;
+      --success: #16805b;
+      --shadow: 0 16px 40px rgba(17, 24, 39, .12);
+      font-family: Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--page); color: var(--text); }
+    button { font: inherit; }
+
+    .page { min-height: 100vh; padding: 38px 30px 56px; }
+    .intro { max-width: 1180px; margin: 0 auto 26px; }
+    .eyebrow { margin: 0 0 8px; color: #2f6f8f; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    h1 { margin: 0 0 8px; font-size: 28px; line-height: 1.2; letter-spacing: -.02em; }
+    .intro p { max-width: 820px; margin: 0; color: var(--sub); font-size: 14px; line-height: 1.65; }
+    .decision-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+    .decision { padding: 6px 10px; border: 1px solid var(--border); border-radius: 999px; background: rgba(255,255,255,.72); color: var(--sub); font-size: 12px; }
+    .decision.recommended { border-color: #b7cee4; background: #eef6fc; color: var(--link); font-weight: 700; }
+
+    .boards { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 22px; max-width: 1440px; margin: 0 auto; }
+    .board { padding: 16px; border: 1px solid rgba(17,24,39,.08); border-radius: 16px; background: rgba(255,255,255,.48); box-shadow: 0 10px 30px rgba(17,24,39,.05); }
+    .board-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 11px; color: var(--sub); font-size: 12px; font-weight: 700; }
+    .board-label span:last-child { color: #9ca3af; font-weight: 500; }
+
+    .desktop-frame { position: relative; overflow: hidden; border-radius: 12px; background: var(--canvas); box-shadow: var(--shadow); }
+    .desktop-main { padding: 24px 28px 30px; }
+    .dashboard-head { position: relative; display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 18px; }
+    .dashboard-head h2 { margin: 0 0 5px; font-size: 24px; line-height: 1.3; }
+    .dashboard-head p { margin: 0; color: var(--sub); font-size: 13px; }
+    .head-actions { display: flex; align-items: center; gap: 8px; }
+    .head-pill { display: inline-flex; align-items: center; min-height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--sub); font-size: 12px; }
+    .bell-button { position: relative; display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid #b8cee1; border-radius: 9px; background: #eef6fc; color: var(--link); }
+    .bell-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    .bell-badge { position: absolute; top: -6px; right: -5px; display: grid; place-items: center; width: 18px; height: 18px; border: 2px solid var(--canvas); border-radius: 999px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 800; }
+    .popover { position: absolute; top: 48px; right: 0; z-index: 4; width: 360px; padding: 12px; border: 1px solid #d8e2ed; border-radius: 12px; background: #fff; box-shadow: 0 20px 46px rgba(17,24,39,.18); }
+    .popover::before { content: ''; position: absolute; top: -7px; right: 76px; width: 12px; height: 12px; border-top: 1px solid #d8e2ed; border-left: 1px solid #d8e2ed; background: #fff; transform: rotate(45deg); }
+    .popover-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 3px 3px 10px; border-bottom: 1px solid var(--border); }
+    .popover-head strong { display: block; font-size: 15px; }
+    .popover-head span { display: block; margin-top: 3px; color: var(--sub); font-size: 12px; }
+    .popover-count { color: var(--warn); font-size: 20px; font-weight: 800; }
+    .risk-list { display: grid; gap: 8px; padding: 10px 0; }
+    .risk-row { display: flex; gap: 9px; align-items: center; width: 100%; padding: 9px 8px; border: 1px solid var(--border); border-radius: 9px; background: #fff; text-align: left; }
+    .risk-dot { width: 7px; height: 28px; border-radius: 6px; background: var(--warn); }
+    .risk-dot.high { background: var(--danger); }
+    .risk-copy { min-width: 0; }
+    .risk-copy strong { display: block; margin-bottom: 3px; font-size: 13px; }
+    .risk-copy span { display: block; color: var(--sub); font-size: 12px; line-height: 1.4; }
+    .risk-copy strong, .risk-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .risk-row em { color: var(--link); font-size: 12px; font-style: normal; font-weight: 700; }
+    .popover-foot { display: flex; justify-content: space-between; align-items: center; padding: 9px 3px 1px; border-top: 1px solid var(--border); color: var(--sub); font-size: 12px; }
+    .popover-foot button { border: 0; background: transparent; color: var(--link); font-size: 12px; font-weight: 700; }
+
+    .kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+    .kpi { min-height: 116px; padding: 16px 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); box-shadow: 0 3px 10px rgba(17,24,39,.04); }
+    .kpi-label { margin-bottom: 10px; color: var(--sub); font-size: 13px; font-weight: 700; }
+    .kpi-value { margin-bottom: 7px; font-size: 28px; font-weight: 800; letter-spacing: -.02em; }
+    .kpi-foot { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+    .kpi-foot strong { color: var(--success); font-size: 13px; }
+    .chart-card { margin-top: 14px; padding: 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+    .chart-head { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; }
+    .chart-head h3 { margin: 0 0 5px; font-size: 16px; }
+    .chart-head p { margin: 0; color: var(--sub); font-size: 13px; }
+    .chart { height: 160px; margin-top: 16px; overflow: hidden; border-bottom: 1px solid #dbe3ec; background: repeating-linear-gradient(to bottom, transparent 0, transparent 39px, #eef2f7 40px); }
+    .chart svg { width: 100%; height: 100%; }
+    .chart-line { fill: none; stroke: var(--link); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+    .chart-line.secondary { stroke: var(--success); stroke-width: 2.4; }
+
+    .mobile-frame { width: 390px; max-width: 100%; margin: 0 auto; overflow: hidden; border: 10px solid #111827; border-radius: 30px; background: var(--canvas); box-shadow: var(--shadow); }
+    .mobile-status { display: flex; justify-content: space-between; padding: 11px 17px 8px; background: #fff; color: var(--text); font-size: 12px; font-weight: 700; }
+    .mobile-head { position: relative; display: flex; justify-content: space-between; align-items: center; padding: 11px 16px 13px; border-bottom: 1px solid var(--border); background: #fff; }
+    .mobile-head strong { font-size: 16px; }
+    .mobile-head-actions { display: flex; align-items: center; gap: 7px; }
+    .mobile-account { padding: 6px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--canvas); color: var(--link); font-size: 11px; }
+    .mobile-bell { width: 32px; height: 32px; }
+    .mobile-popover { position: absolute; top: 52px; right: 10px; width: 276px; padding: 10px; border: 1px solid #d8e2ed; border-radius: 11px; background: #fff; box-shadow: 0 18px 38px rgba(17,24,39,.18); }
+    .mobile-popover::before { content: ''; position: absolute; top: -7px; right: 14px; width: 12px; height: 12px; border-top: 1px solid #d8e2ed; border-left: 1px solid #d8e2ed; background: #fff; transform: rotate(45deg); }
+    .mobile-popover .popover-head strong { font-size: 14px; }
+    .mobile-popover .risk-row { padding: 8px 7px; }
+    .mobile-popover .risk-copy strong { font-size: 12px; }
+    .mobile-popover .risk-copy span { font-size: 11px; }
+    .mobile-main { display: grid; gap: 12px; padding: 14px; }
+    .mobile-card { padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: #fff; }
+    .mobile-card h3 { margin: 0 0 4px; font-size: 16px; }
+    .mobile-card p { margin: 0; color: var(--sub); font-size: 12px; line-height: 1.55; }
+    .mobile-kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .mobile-kpi { padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+    .mobile-kpi span { display: block; color: var(--sub); font-size: 12px; }
+    .mobile-kpi strong { display: block; margin-top: 7px; font-size: 22px; }
+    .mobile-chart-placeholder { height: 106px; margin-top: 12px; border-radius: 9px; background: repeating-linear-gradient(to bottom, #f8fafc 0, #f8fafc 25px, #eef2f7 26px); }
+
+    .option-card { margin-top: 16px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: rgba(255,255,255,.78); }
+    .option-card h3 { margin: 0 0 7px; font-size: 16px; }
+    .option-card p { margin: 0; color: var(--sub); font-size: 13px; line-height: 1.6; }
+    .rail-demo { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 9px; border: 1px solid var(--warn-border); border-radius: 9px; background: var(--warn-bg); }
+    .rail-demo strong { margin-right: auto; font-size: 13px; }
+    .rail-demo span { padding: 5px 7px; border: 1px solid var(--warn-border); border-radius: 7px; background: #fff; color: var(--sub); font-size: 11px; }
+
+    .notes { max-width: 1180px; margin: 22px auto 0; padding: 18px; border: 1px solid #d7e4f1; border-radius: 12px; background: #f6fbff; }
+    .notes h3 { margin: 0 0 10px; font-size: 16px; }
+    .notes p { margin: 0; color: var(--sub); font-size: 13px; line-height: 1.6; }
+    .notes ul { display: grid; gap: 8px; margin: 12px 0 0; padding-left: 20px; color: var(--sub); font-size: 13px; line-height: 1.55; }
+    .notes strong { color: var(--text); }
+
+    @media (min-width: 981px) {
+      .boards { grid-template-columns: minmax(0, 1fr); }
+      .boards > .board:nth-child(2) { width: 420px; justify-self: end; }
+    }
+    @media (max-width: 980px) { .boards { grid-template-columns: 1fr; } }
+    @media (max-width: 620px) {
+      .page { padding: 24px 14px 40px; }
+      h1 { font-size: 24px; }
+      .kpi-grid { grid-template-columns: 1fr 1fr; }
+      .dashboard-head { margin-bottom: 14px; }
+      .dashboard-head h2 { font-size: 20px; }
+      .head-actions .head-pill { display: none; }
+      .popover { width: min(340px, calc(100vw - 50px)); }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="intro">
+      <p class="eyebrow">Dashboard · Risk Alert v2</p>
+      <h1>仪表盘风险提醒：横向利用 + 小铃铛气泡</h1>
+      <p>针对 PC 端上下空间局促的问题，风险提示不再占用固定纵向区域。推荐使用右上角通知铃铛，点击后在标题栏下方展开风险气泡；默认状态只保留一个轻量入口。</p>
+      <div class="decision-row">
+        <span class="decision recommended">推荐：小铃铛 + 右上角风险气泡</span>
+        <span class="decision">零固定纵向占用</span>
+        <span class="decision">保留现有风险详情抽屉</span>
+      </div>
+    </section>
+
+    <section class="boards">
+      <div class="board">
+        <div class="board-label"><span>方案 A · 推荐 · PC 展开态</span><span>点击铃铛后出现</span></div>
+        <div class="desktop-frame">
+          <div class="desktop-main">
+            <header class="dashboard-head">
+              <div><h2>今日总览</h2><p>按当前账号查看经营、订单与自动化处理表现。</p></div>
+              <div class="head-actions"><span class="head-pill">当前账号：Chrome E2E</span><span class="head-pill">最近 7 天⌄</span><button class="bell-button" type="button" aria-label="打开风险提醒"><svg viewBox="0 0 24 24"><path d="M7 10a5 5 0 0 1 10 0v4l2 3H5l2-3z"/><path d="M10 19a2 2 0 0 0 4 0"/></svg><span class="bell-badge">3</span></button></div>
+              <section class="popover" aria-label="待处理风险气泡">
+                <div class="popover-head"><div><strong>待处理风险</strong><span>3 个动作需要关注</span></div><span class="popover-count">3</span></div>
+                <div class="risk-list">
+                  <button class="risk-row" type="button"><i class="risk-dot high"></i><span class="risk-copy"><strong>考研英语资料缺少发货凭证</strong><span>付款后未发货 · 高风险</span></span><em>查看</em></button>
+                  <button class="risk-row" type="button"><i class="risk-dot"></i><span class="risk-copy"><strong>闲鱼账号 B 需要重新授权</strong><span>消息监听已暂停 · 中风险</span></span><em>查看</em></button>
+                  <button class="risk-row" type="button"><i class="risk-dot"></i><span class="risk-copy"><strong>跨商品资源请求已拦截</strong><span>等待人工确认 · 低风险</span></span><em>查看</em></button>
+                </div>
+                <div class="popover-foot"><span>点击任一项查看详情</span><button type="button">查看全部风险 →</button></div>
+              </section>
+            </header>
+
+            <div class="kpi-grid">
+              <article class="kpi"><div class="kpi-label">总销售额</div><div class="kpi-value">¥12,480</div><div class="kpi-foot"><strong>+18.6%</strong><span>较上周</span></div></article>
+              <article class="kpi"><div class="kpi-label">订单数</div><div class="kpi-value">86</div><div class="kpi-foot"><strong>+12</strong><span>待发货 7 单</span></div></article>
+              <article class="kpi"><div class="kpi-label">自动回复成功率</div><div class="kpi-value">94.2%</div><div class="kpi-foot"><strong>稳定</strong><span>近 24 小时</span></div></article>
+              <article class="kpi"><div class="kpi-label">待人工处理</div><div class="kpi-value">3</div><div class="kpi-foot"><strong style="color:var(--warn)">风险待办</strong><span>点击铃铛查看</span></div></article>
+            </div>
+
+            <article class="chart-card">
+              <div class="chart-head"><div><h3>订单与 AI 闭环趋势</h3><p>按所选时间范围查看订单金额与自动回复成功率。</p></div><span class="head-pill">自动刷新</span></div>
+              <div class="chart"><svg viewBox="0 0 820 160" preserveAspectRatio="none" aria-hidden="true"><path class="chart-line" d="M0 130 C70 118, 90 124, 145 108 S220 114, 270 88 S340 82, 390 94 S460 74, 510 58 S590 68, 640 42 S730 55, 820 22"/><path class="chart-line secondary" d="M0 144 C80 140, 110 134, 168 138 S246 116, 300 126 S380 106, 432 112 S520 92, 560 100 S650 76, 710 82 S770 68, 820 62"/></svg></div>
+            </article>
+          </div>
+        </div>
+      </div>
+
+      <aside class="board">
+        <div class="board-label"><span>方案 A · Mobile</span><span>复用通知入口</span></div>
+        <div class="mobile-frame">
+          <div class="mobile-status"><span>9:41</span><span>5G　▮▮▮</span></div>
+          <header class="mobile-head"><strong>今日总览</strong><div class="mobile-head-actions"><span class="mobile-account">当前账号</span><button class="bell-button mobile-bell" type="button" aria-label="打开风险提醒"><svg viewBox="0 0 24 24"><path d="M7 10a5 5 0 0 1 10 0v4l2 3H5l2-3z"/><path d="M10 19a2 2 0 0 0 4 0"/></svg><span class="bell-badge">3</span></button></div><section class="mobile-popover"><div class="popover-head"><div><strong>待处理风险</strong><span>3 个动作需要关注</span></div><span class="popover-count">3</span></div><div class="risk-list"><button class="risk-row" type="button"><i class="risk-dot high"></i><span class="risk-copy"><strong>考研英语资料缺凭证</strong><span>高风险 · 待处理</span></span><em>查看</em></button><button class="risk-row" type="button"><i class="risk-dot"></i><span class="risk-copy"><strong>账号 B 重授权</strong><span>中风险 · 待处理</span></span><em>查看</em></button></div><div class="popover-foot"><span>还有 1 项</span><button type="button">全部 →</button></div></section></header>
+          <main class="mobile-main"><div class="mobile-kpi-grid"><article class="mobile-kpi"><span>总销售额</span><strong>¥12,480</strong></article><article class="mobile-kpi"><span>订单数</span><strong>86</strong></article><article class="mobile-kpi"><span>自动回复成功率</span><strong>94.2%</strong></article><article class="mobile-kpi"><span>待发货</span><strong>7</strong></article></div><section class="mobile-card"><h3>订单与 AI 闭环趋势</h3><p>按所选时间范围查看趋势变化。</p><div class="mobile-chart-placeholder" /></section></main>
+        </div>
+      </aside>
+    </section>
+
+    <section class="option-card">
+      <h3>备选方案 B · 标题栏横向风险胶囊</h3>
+      <p>如果不想引入气泡交互，可以在标题栏右侧使用一条短横向提示。它只显示数量和最重要的一项风险，点击后打开现有详情抽屉，但信息承载能力低于方案 A。</p>
+      <div class="rail-demo"><strong>待处理风险 · 3</strong><span>高风险：缺少发货凭证</span><span>查看</span></div>
+    </section>
+
+    <section class="notes">
+      <h3>推荐结论</h3>
+      <p>推荐方案 A：默认只占一个 36px 铃铛按钮，风险内容按需展开，最适合 PC 端垂直空间紧张的场景。</p>
+      <ul>
+        <li><strong>默认态：</strong>铃铛右上角显示未处理数量，页面不增加固定高度。</li>
+        <li><strong>展开态：</strong>气泡固定在标题栏右侧，最多列出 3 条风险，支持“查看全部风险”。</li>
+        <li><strong>交互复用：</strong>点击单条风险继续打开当前风险详情抽屉，不新增业务流程。</li>
+        <li><strong>移动端：</strong>沿用现有移动端铃铛位置，气泡宽度收窄，保持同一信息结构。</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
