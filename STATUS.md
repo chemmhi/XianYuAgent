@@ -1,5 +1,14 @@
 # XianyuSellerAgent 项目状态
 
+## 2026-09-22 Workspace ChatGPT 式对话改造
+
+- 独立 worktree：`F:\ChenHai\Project\XianYuAgent-workspace-chatgpt-ui-e2e-20260922`，分支 `codex/workspace-chatgpt-ui-e2e-20260922`。
+- 保留原始 HTML 设计稿 `docs/design/workspace-redesign-preview.html`，新增 `docs/design/workspace-redesign-preview-v2.html`：PC / Mobile 上下排列、取消头像、保留 Confirmation Card、合并思考与工具细节为默认折叠执行摘要。
+- 正式 Workspace 消息流改为用户灰色气泡 + Agent 连续正文 + 单条折叠 trace；消息投影按语义顺序稳定为用户 → trace → 最终回复，过滤 terminal reasoning 重复事件。
+- 新增真实闭环 E2E：Chrome/CDP 人工输入 → Pi Runtime deterministic model → PostgreSQL；直接断言 `workspace.messages`、`workspace.runs`、`workspace.run_events`，并校验唯一 trace 默认折叠、头像数为 0。
+- 已验证：Workspace 定向单测 4 files / 13 tests、Web/API typecheck、Web production build、`npm run test:e2e:chrome:workspace:pi` 连续两次通过、`git diff --check` 通过。
+- 部分验证：全量 Web 单测 72 files / 242 tests 通过，1 个既有 `App.dashboard-mode.test.ts` 因缺少 `AccountContextProvider` 失败，与本次 Workspace 改动无关，未扩大范围修复。
+
 ## 2026-09-21 全局 SelectField 统一
 
 - 全局盘点确认项目已有共享 `apps/web/src/shared/ui/SelectField.tsx`；账号、商品、卡券、订单、设置及 Agent 动态的业务下拉全部统一复用，业务层不再直接渲染原生 `<select>`。

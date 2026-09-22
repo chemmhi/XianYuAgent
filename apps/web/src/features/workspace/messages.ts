@@ -1,14 +1,13 @@
 import type { WorkspaceMessageVM, WorkspaceRunEventVM, WorkspaceRunVM, WorkspaceStepVM } from './types';
 
-export interface WorkspaceToolEventGroup {
+export interface WorkspaceAgentTraceGroup {
   id: string;
-  type: 'tool_group';
+  type: 'agent_trace';
   createdAt: string;
-  title: string;
   messages: WorkspaceMessageVM[];
 }
 
-export type WorkspaceMessageBlock = WorkspaceMessageVM | WorkspaceToolEventGroup;
+export type WorkspaceMessageBlock = WorkspaceMessageVM | WorkspaceAgentTraceGroup;
 
 /** Derive a compact session title from the first user instruction. */
 export function deriveSessionTitle(instruction: string, maxLength = 28): string {
@@ -18,32 +17,31 @@ export function deriveSessionTitle(instruction: string, maxLength = 28): string 
   return `${normalized.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…`;
 }
 
-/** Collapse adjacent tool events for the primary conversation surface. */
+/** Collapse adjacent reasoning/tool events into one ChatGPT-style execution trace. */
 export function groupWorkspaceMessages(messages: WorkspaceMessageVM[]): WorkspaceMessageBlock[] {
   const blocks: WorkspaceMessageBlock[] = [];
-  let pendingToolEvents: WorkspaceMessageVM[] = [];
+  let pendingTrace: WorkspaceMessageVM[] = [];
 
-  const flushToolEvents = () => {
-    if (!pendingToolEvents.length) return;
+  const flushTrace = () => {
+    if (!pendingTrace.length) return;
     blocks.push({
-      id: `${pendingToolEvents[0].id}:group`,
-      type: 'tool_group',
-      createdAt: pendingToolEvents[0].createdAt,
-      title: `执行过程 · ${pendingToolEvents.length} 条事件`,
-      messages: pendingToolEvents,
+      id: `${pendingTrace[0].id}:trace`,
+      type: 'agent_trace',
+      createdAt: pendingTrace[0].createdAt,
+      messages: pendingTrace,
     });
-    pendingToolEvents = [];
+    pendingTrace = [];
   };
 
   messages.forEach((message) => {
-    if (message.type === 'tool_event') {
-      pendingToolEvents.push(message);
+    if (message.type === 'reasoning_summary' || message.type === 'tool_event') {
+      pendingTrace.push(message);
       return;
     }
-    flushToolEvents();
+    flushTrace();
     blocks.push(message);
   });
-  flushToolEvents();
+  flushTrace();
   return blocks;
 }
 
@@ -133,6 +131,9 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
       if (finalAnswerRendered) return;
       finalAnswerRendered = true;
     }
+    // Pi emits the terminal step.succeeded event after persisting the final answer.
+    // Keep the conversation surface ordered as user → one execution trace → final answer.
+    if (messageKind === 'reasoning_summary' && finalAnswerRendered) return;
     const summary = typeof event.payload.summary === 'string' ? event.payload.summary : undefined;
     const content = typeof event.payload.content === 'string' ? event.payload.content : eventSummary(event);
     if (messageKind === 'reasoning_summary') {
@@ -169,6 +170,9 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
   }
 
   return messages.sort((left, right) => {
+    const semanticOrder: Record<WorkspaceMessageVM['type'], number> = { user_message: 0, reasoning_summary: 1, tool_event: 1, final_answer: 2 };
+    const bySemanticOrder = semanticOrder[left.type] - semanticOrder[right.type];
+    if (bySemanticOrder !== 0) return bySemanticOrder;
     const byTime = new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
     return byTime || (left.sequence ?? 0) - (right.sequence ?? 0);
   });

@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Workspace 重设计 · HTML 预览</title>
+  <style>
+    :root {
+      --page: #eceef2;
+      --canvas: #f6f7f9;
+      --card: #ffffff;
+      --shell: #1d2638;
+      --shell-hover: #253348;
+      --brand: #1f3a5f;
+      --link: #245a8d;
+      --text: #111827;
+      --sub: #6b7280;
+      --muted: #475569;
+      --border: #e5e7eb;
+      --success: #2e7d5b;
+      --success-bg: #eaf4ef;
+      --warn: #b7791f;
+      --warn-bg: #fef3e2;
+      --danger: #b42318;
+      --danger-bg: #fef0ef;
+      --info: #2f6f8f;
+      --soft-blue: #ebf3fa;
+      --shadow: 0 1px 3px rgba(17,24,39,.04);
+      --shadow-preview: 0 20px 80px rgba(17,24,39,.15);
+      font-family: Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { background: var(--page); }
+    body { margin: 0; background: var(--page); color: var(--text); }
+    button, input, textarea { font: inherit; }
+    button { cursor: pointer; }
+    .page { min-height: 100vh; padding: 34px 28px 56px; }
+    .intro { max-width: 1240px; margin: 0 auto 24px; }
+    .eyebrow { margin: 0 0 8px; color: var(--info); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    h1 { margin: 0 0 8px; font-size: 28px; line-height: 1.2; letter-spacing: -.02em; }
+    .intro p { max-width: 880px; margin: 0; color: var(--muted); font-size: 14px; line-height: 1.7; }
+    .decision-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 15px; }
+    .decision { padding: 6px 10px; border: 1px solid var(--border); border-radius: 999px; background: rgba(255,255,255,.72); color: var(--muted); font-size: 12px; }
+    .decision.recommended { border-color: #b7cee4; background: #eef6fc; color: var(--link); font-weight: 700; }
+    .boards { display: flex; flex-direction: column; gap: 22px; max-width: 1460px; margin: 0 auto; }
+    .board { padding: 15px; border: 1px solid rgba(17,24,39,.08); border-radius: 16px; background: rgba(255,255,255,.48); box-shadow: 0 10px 30px rgba(17,24,39,.05); }
+    .mobile-board { width: 100%; max-width: 460px; align-self: center; }
+    .board-label { display: flex; justify-content: space-between; gap: 12px; margin: 0 0 10px; color: var(--muted); font-size: 12px; font-weight: 700; }
+    .board-label span:last-child { color: #9ca3af; font-weight: 500; }
+    .desktop-frame { overflow: hidden; border-radius: 12px; background: var(--canvas); box-shadow: var(--shadow-preview); }
+    .desktop-shell { display: flex; min-height: 900px; background: var(--canvas); }
+    .desktop-sidebar { width: 224px; flex: 0 0 224px; display: flex; flex-direction: column; padding: 18px 14px; background: var(--shell); color: #fff; }
+    .brand-block { display: flex; align-items: center; gap: 10px; margin: 0 2px 23px; }
+    .brand-mark { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; background: var(--link); color: #fff; }
+    .brand-mark svg { width: 17px; height: 17px; }
+    .brand-copy strong { display: block; font-size: 13px; }
+    .brand-copy span { display: block; margin-top: 3px; color: rgba(255,255,255,.35); font-size: 10px; letter-spacing: .05em; text-transform: uppercase; }
+    .side-section { margin: 0 10px 8px; color: rgba(255,255,255,.27); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .side-nav { display: grid; gap: 4px; }
+    .side-nav button { display: grid; grid-template-columns: 18px 1fr auto; gap: 9px; align-items: center; min-height: 36px; padding: 8px 10px; border: 0; border-left: 2px solid transparent; border-radius: 6px; background: transparent; color: rgba(255,255,255,.48); text-align: left; font-size: 13px; }
+    .side-nav button:hover { background: var(--shell-hover); color: #fff; }
+    .side-nav button.active { border-left-color: var(--link); background: rgba(36,90,141,.52); color: #fff; }
+    .side-nav button small { color: rgba(255,255,255,.28); font-size: 10px; }
+    .nav-icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+    .sidebar-spacer { flex: 1; }
+    .agent-health { padding: 12px; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; background: rgba(255,255,255,.05); }
+    .agent-health strong { display: block; font-size: 12px; }
+    .agent-health p { margin: 5px 0 0; color: rgba(255,255,255,.5); font-size: 10px; line-height: 1.45; }
+    .health-row { display: flex; align-items: center; gap: 7px; margin-top: 10px; color: #b8f7d8; font-size: 10px; font-weight: 700; }
+    .online-dot { width: 7px; height: 7px; border-radius: 50%; background: #6ee7b7; box-shadow: 0 0 0 3px rgba(110,231,183,.12); }
+    .desktop-user { display: flex; align-items: center; gap: 9px; margin-top: 10px; padding: 9px 10px; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; background: rgba(255,255,255,.05); }
+    .avatar { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; background: var(--brand); color: #fff; font-size: 11px; font-weight: 800; }
+    .desktop-user strong { display: block; font-size: 12px; }
+    .desktop-user span { display: block; margin-top: 2px; color: rgba(255,255,255,.45); font-size: 10px; }
+    .desktop-body { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+    .topbar { height: 56px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 0 28px; border-bottom: 1px solid var(--border); background: #fff; }
+    .topbar-left, .topbar-right { display: flex; align-items: center; gap: 12px; }
+    .crumb { color: var(--sub); font-size: 12px; }
+    .crumb strong { color: var(--text); font-weight: 700; }
+    .top-search { width: 228px; height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--canvas); color: #9ca3af; font-size: 11px; }
+    .icon-button { position: relative; width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--muted); }
+    .icon-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+    .icon-button b { position: absolute; top: -4px; right: -4px; width: 14px; height: 14px; display: grid; place-items: center; border: 1.5px solid #fff; border-radius: 50%; background: var(--danger); color: #fff; font-size: 8px; }
+    .top-account { display: flex; align-items: center; gap: 8px; }
+    .top-account strong { display: block; font-size: 11px; }
+    .top-account span { display: block; margin-top: 2px; color: var(--sub); font-size: 9px; }
+    .desktop-main { padding: 22px 28px 28px; overflow: hidden; }
+    .page-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
+    .page-title h2 { margin: 0 0 5px; font-size: 24px; line-height: 1.2; letter-spacing: -.02em; }
+    .page-title p { margin: 0; color: var(--sub); font-size: 12px; line-height: 1.55; }
+    .workspace-status { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 999px; background: #fff; color: var(--muted); font-size: 10px; font-weight: 800; white-space: nowrap; }
+    .workspace-status .online-dot { width: 6px; height: 6px; box-shadow: none; }
+    .workspace-layout { display: grid; grid-template-columns: 292px minmax(0,1fr); gap: 14px; min-height: 724px; }
+    .workspace-sidebar { display: grid; grid-template-rows: minmax(0,1fr) auto; gap: 14px; min-width: 0; }
+    .card { border: 1px solid var(--border); border-radius: 10px; background: var(--card); box-shadow: var(--shadow); }
+    .workspace-panel { overflow: hidden; padding: 14px; }
+    .panel-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+    .panel-head h3 { margin: 0 0 4px; font-size: 13px; }
+    .panel-head p { margin: 0; color: var(--sub); font-size: 10px; }
+    .eyebrow-mini { margin: 0 0 4px; color: var(--info); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .btn { height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--muted); font-size: 10px; font-weight: 800; }
+    .btn:hover { border-color: #b9c8d9; background: #f8fafc; }
+    .btn.primary { border-color: var(--link); background: var(--link); color: #fff; }
+    .btn.warn { border-color: rgba(183,121,31,.25); background: var(--warn); color: #fff; }
+    .btn.danger { border-color: rgba(180,35,24,.18); color: var(--danger); }
+    .search-box { height: 32px; display: flex; align-items: center; gap: 8px; margin-top: 13px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--canvas); color: #9ca3af; font-size: 11px; }
+    .session-list { display: grid; gap: 4px; margin-top: 11px; }
+    .session { display: grid; grid-template-columns: 30px 1fr auto; gap: 8px; align-items: start; padding: 9px; border: 1px solid transparent; border-radius: 9px; background: transparent; text-align: left; }
+    .session:hover, .session.active { border-color: #d6e5f2; background: var(--soft-blue); }
+    .session-icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; background: #f1f5f9; color: var(--link); }
+    .session.active .session-icon { background: #dcecf8; }
+    .session-icon svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+    .session-copy { min-width: 0; }
+    .session-copy strong, .session-copy span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-copy strong { font-size: 11px; }
+    .session-copy span { margin-top: 3px; color: var(--sub); font-size: 9px; }
+    .session time { color: #9ca3af; font-size: 9px; white-space: nowrap; }
+    .context-panel { padding: 14px; }
+    .context-account { display: flex; align-items: center; gap: 9px; margin-top: 11px; padding: 10px; border: 1px solid #d6e5f2; border-radius: 9px; background: var(--soft-blue); }
+    .context-account strong { display: block; font-size: 11px; }
+    .context-account span { display: block; margin-top: 3px; color: var(--sub); font-size: 9px; }
+    .context-list { display: grid; gap: 8px; margin-top: 12px; }
+    .context-row { display: grid; grid-template-columns: 72px 1fr; gap: 7px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    .context-row b { color: var(--sub); font-size: 9px; font-weight: 700; }
+    .context-row span { color: var(--text); font-size: 10px; text-align: right; }
+    .capability-grid { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 11px; }
+    .capability { padding: 4px 7px; border: 1px solid var(--border); border-radius: 5px; background: #f8fafc; color: var(--muted); font-size: 9px; }
+    .context-footer { display: flex; gap: 7px; align-items: center; margin-top: 11px; color: var(--sub); font-size: 9px; }
+    .context-footer svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.4; }
+    .workspace-chat { display: flex; min-width: 0; flex-direction: column; overflow: hidden; }
+    .chat-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding: 18px 20px 14px; border-bottom: 1px solid var(--border); background: #fff; }
+    .chat-head h3 { margin: 0 0 4px; font-size: 16px; }
+    .chat-head p { margin: 0; color: var(--sub); font-size: 10px; }
+    .chat-head-actions { display: flex; gap: 8px; align-items: center; }
+    .status-pill { display: inline-flex; align-items: center; padding: 4px 8px; border-radius: 999px; font-size: 9px; font-weight: 800; white-space: nowrap; }
+    .status-pill.warn { background: var(--warn-bg); color: var(--warn); }
+    .status-pill.info { background: var(--soft-blue); color: var(--info); }
+    .status-pill.success { background: var(--success-bg); color: var(--success); }
+    .status-pill.danger { background: var(--danger-bg); color: var(--danger); }
+    .chat-body { display: flex; flex: 1; flex-direction: column; gap: 12px; overflow: hidden; padding: 16px 20px 18px; background: #fbfcfe; }
+    .realtime-banner { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--muted); font-size: 9px; }
+    .realtime-banner .online-dot { width: 6px; height: 6px; box-shadow: none; }
+    .realtime-banner span:last-child { margin-left: auto; color: var(--sub); }
+    .plan-card { padding: 13px; border: 1px solid #d6e5f2; border-radius: 10px; background: #fff; }
+    .plan-head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+    .plan-head h4 { margin: 0 0 3px; font-size: 11px; }
+    .plan-head p { margin: 0; color: var(--sub); font-size: 9px; }
+    .plan-status { color: var(--link); font-size: 9px; font-weight: 800; }
+    .step-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 7px; }
+    .step { position: relative; min-height: 65px; display: grid; grid-template-columns: 22px 1fr; gap: 7px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--canvas); }
+    .step > span { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: #e5e7eb; color: var(--muted); font-size: 10px; font-weight: 800; }
+    .step.done > span { background: var(--success-bg); color: var(--success); }
+    .step.current { border-color: #c8d8ea; background: var(--soft-blue); }
+    .step.current > span { background: var(--link); color: #fff; }
+    .step strong { display: block; font-size: 10px; }
+    .step small { display: block; margin-top: 4px; color: var(--sub); font-size: 8px; line-height: 1.35; }
+    .step em { position: absolute; right: 7px; bottom: 6px; color: #9ca3af; font-size: 8px; font-style: normal; }
+    .step.done em { color: var(--success); }
+    .step.current em { color: var(--link); }
+    .chat-date { color: #9ca3af; text-align: center; font-size: 9px; }
+    .message { display: flex; gap: 8px; align-items: flex-start; }
+    .message.user { justify-content: flex-end; text-align: right; }
+    .message-avatar { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; background: #e7eff7; color: var(--link); font-size: 9px; font-weight: 800; }
+    .message.user .message-avatar { order: 2; background: var(--link); color: #fff; }
+    .message-copy { max-width: 72%; }
+    .message-copy strong { display: block; margin-bottom: 4px; color: var(--text); font-size: 10px; }
+    .message-copy time { margin-left: 7px; color: #9ca3af; font-size: 8px; font-weight: 400; }
+    .message-copy p { margin: 0; padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px 10px 10px 3px; background: #fff; color: var(--text); font-size: 10px; line-height: 1.6; }
+    .message.user .message-copy p { border-color: var(--link); border-radius: 10px 3px 10px 10px; background: var(--link); color: #fff; }
+    .tool-summary { display: flex; gap: 8px; align-items: flex-start; padding: 10px 11px; border: 1px solid var(--border); border-radius: 9px; background: #fff; }
+    .tool-icon { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 7px; background: var(--soft-blue); color: var(--info); }
+    .tool-icon svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+    .tool-summary strong { display: block; font-size: 10px; }
+    .tool-summary p { margin: 3px 0 0; color: var(--sub); font-size: 9px; line-height: 1.5; }
+    .tool-summary code { display: block; margin-top: 5px; color: #64748b; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8px; }
+    .agent-trace { border: 1px solid var(--border); border-radius: 9px; background: rgba(255,255,255,.8); }
+    .agent-trace summary { display: flex; align-items: center; gap: 8px; padding: 9px 11px; color: var(--sub); cursor: pointer; font-size: 9px; list-style: none; }
+    .agent-trace summary::-webkit-details-marker { display: none; }
+    .agent-trace summary::after { margin-left: auto; color: #9ca3af; content: '⌄'; font-size: 14px; transition: transform .16s ease; }
+    .agent-trace[open] summary::after { transform: rotate(180deg); }
+    .trace-icon { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 6px; background: var(--soft-blue); color: var(--info); }
+    .trace-icon svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+    .trace-main { display: grid; gap: 2px; }
+    .trace-main strong { color: var(--text); font-size: 9px; }
+    .trace-main span { color: var(--sub); font-size: 8px; }
+    .trace-content { display: grid; gap: 8px; padding: 0 11px 11px; border-top: 1px solid var(--border); }
+    .trace-content .realtime-banner { margin-top: 8px; }
+    .trace-steps { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 7px; }
+    .trace-step { display: grid; grid-template-columns: 20px 1fr; gap: 6px; align-items: start; min-height: 56px; padding: 7px; border: 1px solid var(--border); border-radius: 7px; background: var(--canvas); }
+    .trace-step > b { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; background: #e5e7eb; color: var(--muted); font-size: 9px; }
+    .trace-step > b svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
+    .trace-step.done > b { background: var(--success-bg); color: var(--success); }
+    .trace-step.current { border-color: #c8d8ea; background: var(--soft-blue); }
+    .trace-step.current > b { background: var(--link); color: #fff; }
+    .trace-step strong { display: block; font-size: 9px; }
+    .trace-step span { display: block; margin-top: 3px; color: var(--sub); font-size: 8px; line-height: 1.35; }
+    .trace-tool { display: flex; align-items: flex-start; gap: 7px; padding: 8px; border: 1px dashed #cbd5e1; border-radius: 7px; background: #fff; }
+    .trace-tool code { display: block; color: #64748b; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8px; line-height: 1.45; }
+    .confirm-card { padding: 13px; border: 1px solid rgba(183,121,31,.28); border-radius: 10px; background: linear-gradient(180deg, #fff 0%, #fffdf8 100%); box-shadow: 0 10px 24px rgba(183,121,31,.07); }
+    .confirm-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+    .confirm-head h4 { margin: 0 0 4px; font-size: 12px; }
+    .confirm-head p { margin: 0; color: var(--sub); font-size: 9px; line-height: 1.45; }
+    .risk-tag { padding: 4px 7px; border-radius: 5px; background: var(--warn-bg); color: var(--warn); font-size: 9px; font-weight: 800; white-space: nowrap; }
+    .diff-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 11px; }
+    .diff-grid > div { padding: 9px; border: 1px solid var(--border); border-radius: 7px; background: #fff; }
+    .diff-grid small { display: block; margin-bottom: 4px; color: var(--sub); font-size: 8px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; }
+    .diff-grid strong { display: block; font-size: 9px; line-height: 1.5; }
+    .audit-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; color: #64748b; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8px; }
+    .audit-row span { padding: 4px 6px; border-radius: 5px; background: #f8fafc; }
+    .confirm-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 11px; }
+    .outbox-result { display: none; padding: 10px 11px; border: 1px solid #bbdfce; border-radius: 8px; background: var(--success-bg); color: var(--success); font-size: 9px; line-height: 1.5; }
+    .outbox-result.show { display: block; }
+    .composer { display: grid; gap: 8px; padding: 12px 14px 13px; border-top: 1px solid var(--border); background: #fff; }
+    .composer textarea { width: 100%; min-height: 48px; resize: none; padding: 7px 0; border: 0; outline: none; background: transparent; color: var(--text); font-size: 10px; line-height: 1.55; }
+    .composer textarea::placeholder { color: #9ca3af; }
+    .composer-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .composer-tools, .composer-meta { display: flex; align-items: center; gap: 9px; color: #9ca3af; font-size: 8px; }
+    .composer-tools button { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 9px; }
+    .composer-tools svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.4; }
+    .send-round { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 50%; background: #87909c; color: #fff; }
+    .send-round:hover { background: var(--link); }
+    .send-round svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
+    .notes { padding: 18px; border: 1px solid #d7e4f1; border-radius: 12px; background: #f6fbff; }
+    .notes h3 { margin: 0 0 10px; font-size: 16px; }
+    .notes p { margin: 0 0 13px; color: var(--sub); font-size: 12px; line-height: 1.6; }
+    .notes ol { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+    .notes li { display: grid; grid-template-columns: 24px 1fr; gap: 9px; align-items: start; color: var(--sub); font-size: 12px; line-height: 1.5; }
+    .notes li b { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 8px; background: #e4f0fa; color: var(--link); font-size: 11px; }
+    .notes .removed { margin-top: 14px; padding: 9px 10px; border: 1px dashed #cbd5e1; border-radius: 8px; background: rgba(255,255,255,.65); color: var(--muted); font-size: 11px; line-height: 1.45; }
+    .mobile-frame { width: 390px; max-width: 100%; margin: 0 auto; overflow: hidden; border: 10px solid #111827; border-radius: 30px; background: var(--canvas); box-shadow: var(--shadow-preview); }
+    .mobile-status { display: flex; justify-content: space-between; padding: 10px 16px 8px; background: #fff; color: var(--text); font-size: 11px; font-weight: 800; }
+    .mobile-head { display: flex; align-items: center; justify-content: space-between; padding: 11px 16px 13px; border-bottom: 1px solid var(--border); background: #fff; }
+    .mobile-head strong { font-size: 16px; }
+    .mobile-head span { color: var(--sub); font-size: 10px; }
+    .mobile-main { display: grid; gap: 11px; padding: 13px 13px 76px; }
+    .mobile-card { padding: 13px; border: 1px solid var(--border); border-radius: 11px; background: #fff; }
+    .mobile-card h3 { margin: 0 0 4px; font-size: 14px; }
+    .mobile-card p { margin: 0; color: var(--sub); font-size: 10px; line-height: 1.5; }
+    .mobile-chat { display: grid; gap: 10px; }
+    .mobile-message { display: flex; gap: 7px; align-items: flex-start; }
+    .mobile-message.user { justify-content: flex-end; text-align: right; }
+    .mobile-message .message-avatar { width: 22px; height: 22px; font-size: 8px; }
+    .mobile-message .message-copy { max-width: 85%; }
+    .mobile-message .message-copy strong { font-size: 9px; }
+    .mobile-message .message-copy p { padding: 8px 9px; font-size: 9px; }
+    .mobile-execution { border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.8); }
+    .mobile-execution summary { display: flex; align-items: center; gap: 7px; padding: 8px 9px; color: var(--sub); cursor: pointer; font-size: 8px; list-style: none; }
+    .mobile-execution summary::-webkit-details-marker { display: none; }
+    .mobile-execution summary::after { margin-left: auto; color: #9ca3af; content: '⌄'; font-size: 12px; }
+    .mobile-execution[open] summary::after { transform: rotate(180deg); }
+    .mobile-execution .trace-icon { width: 18px; height: 18px; }
+    .mobile-execution .trace-icon svg { width: 11px; height: 11px; }
+    .mobile-execution .trace-content { gap: 6px; padding: 0 9px 9px; }
+    .mobile-execution .trace-steps { grid-template-columns: 1fr; }
+    .mobile-kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+    .mobile-kpi { padding: 11px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+    .mobile-kpi span { display: block; color: var(--sub); font-size: 10px; }
+    .mobile-kpi strong { display: block; margin-top: 6px; font-size: 21px; }
+    .mobile-confirm { border-color: rgba(183,121,31,.28); background: linear-gradient(180deg,#fff 0%,#fffdf8 100%); }
+    .mobile-confirm-head { display: flex; justify-content: space-between; gap: 10px; }
+    .mobile-confirm-head strong { font-size: 11px; }
+    .mobile-confirm-head span { padding: 3px 6px; border-radius: 5px; background: var(--warn-bg); color: var(--warn); font-size: 8px; font-weight: 800; }
+    .mobile-confirm p { margin-top: 6px; }
+    .mobile-confirm-actions { display: flex; gap: 7px; margin-top: 11px; }
+    .mobile-confirm-actions .btn { flex: 1; }
+    .mobile-bottom { position: relative; display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; padding: 9px 8px 16px; border-top: 1px solid var(--border); background: #fff; }
+    .mobile-bottom button { display: grid; gap: 4px; place-items: center; border: 0; background: transparent; color: #9ca3af; font-size: 8px; }
+    .mobile-bottom button.active { color: var(--link); }
+    .mobile-bottom svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.4; }
+    /* Reference-inspired conversation layer: quiet, single-column, no avatars. */
+    .workspace-chat { background: #fff; }
+    .chat-head { padding: 18px 30px 10px; }
+    .chat-head p:last-child, .chat-head-actions { display: none; }
+    .chat-body { gap: 18px; padding: 24px 30px 30px; overflow: auto; background: #fff; }
+    .chat-body > .chat-date,
+    .chat-body > .message,
+    .chat-body > .agent-trace,
+    .chat-body > .confirm-card { width: min(100%, 760px); margin-left: auto; margin-right: auto; }
+    .chat-date { display: none; }
+    .message { display: block; }
+    .message-avatar, .mobile-message .message-avatar { display: none; }
+    .message.user { display: flex; justify-content: flex-end; text-align: right; }
+    .message-copy { max-width: 72%; }
+    .message-copy strong, .message-copy time { display: none; }
+    .message-copy p { padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--text); font-size: 14px; line-height: 1.8; }
+    .message.user .message-copy p { display: inline-block; padding: 10px 14px; border: 0; border-radius: 18px 18px 4px 18px; background: #f1f1f1; color: #202124; text-align: left; }
+    .agent-trace { border: 0; border-bottom: 1px solid #e5e7eb; border-radius: 0; background: transparent; }
+    .agent-trace summary { padding: 8px 0 10px; color: #6b7280; font-size: 13px; }
+    .agent-trace summary::after { content: '可展开'; transform: none; color: #e4512e; font-size: 13px; }
+    .agent-trace[open] summary::after { content: '收起'; transform: none; }
+    .trace-icon { display: none; }
+    .trace-main { display: block; }
+    .trace-main strong { color: #6b7280; font-size: 13px; font-weight: 400; }
+    .trace-main span { display: none; }
+    .trace-content { gap: 5px; padding: 10px 0 12px 16px; border-top: 0; color: #6b7280; }
+    .trace-steps { display: block; }
+    .trace-step, .trace-tool, .realtime-banner { min-height: auto; padding: 3px 0; border: 0; border-radius: 0; background: transparent; }
+    .trace-step { display: flex; grid-template-columns: none; gap: 6px; align-items: center; }
+    .trace-step > b { width: 16px; height: 16px; flex: 0 0 16px; background: transparent; color: #6b7280; }
+    .trace-step strong, .trace-step span, .trace-tool code, .realtime-banner { color: #6b7280; font-size: 11px; }
+    .trace-step span { display: inline; margin: 0 0 0 4px; }
+    .trace-tool { display: block; }
+    .confirm-card { margin-top: 4px; padding: 14px 0; border: 0; border-top: 1px solid #e5e7eb; border-radius: 0; background: transparent; box-shadow: none; }
+    .confirm-head h4 { font-size: 14px; }
+    .confirm-head p { font-size: 12px; }
+    .diff-grid { gap: 8px; }
+    .diff-grid > div { padding: 10px; }
+    .audit-row { color: #6b7280; }
+    .confirm-actions { justify-content: flex-start; }
+    .mobile-main { gap: 18px; background: #fff; }
+    .mobile-card.mobile-chat, .mobile-card.mobile-confirm { border: 0; border-radius: 0; background: transparent; box-shadow: none; padding: 0; }
+    .mobile-message { display: block; }
+    .mobile-message.user { display: flex; justify-content: flex-end; }
+    .mobile-message .message-copy { max-width: 86%; }
+    .mobile-message .message-copy strong, .mobile-message .message-copy time { display: none; }
+    .mobile-message .message-copy p { padding: 0; border: 0; border-radius: 0; background: transparent; font-size: 12px; line-height: 1.75; }
+    .mobile-message.user .message-copy p { padding: 9px 12px; border-radius: 17px 17px 4px 17px; background: #f1f1f1; color: #202124; }
+    .mobile-execution { border: 0; border-bottom: 1px solid #e5e7eb; border-radius: 0; background: transparent; }
+    .mobile-execution summary { padding: 8px 0 10px; color: #6b7280; font-size: 12px; }
+    .mobile-execution summary::after { content: '可展开'; transform: none; color: #e4512e; font-size: 12px; }
+    .mobile-execution[open] summary::after { content: '收起'; transform: none; }
+    .mobile-execution .trace-icon { display: none; }
+    .mobile-execution .trace-content { padding: 9px 0 11px 12px; }
+    .mobile-main > .mobile-kpi-grid, .mobile-main > .mobile-card:last-child { display: none; }
+    .mobile-confirm .confirm-actions, .mobile-confirm-actions { flex-direction: column; }
+    .mobile-confirm-actions .btn { width: 100%; }
+    .mobile-bottom { border-top: 1px solid #e5e7eb; }
+    @media (max-width: 1100px) {
+      .boards { grid-template-columns: 1fr; }
+      .notes { max-width: none; }
+    }
+    @media (max-width: 760px) {
+      .page { padding: 24px 14px 40px; }
+      h1 { font-size: 24px; }
+      .desktop-shell { min-height: 860px; }
+      .desktop-sidebar { width: 188px; flex-basis: 188px; }
+      .workspace-layout { grid-template-columns: 1fr; }
+      .workspace-sidebar { grid-template-rows: auto auto; }
+      .step-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    }
+    @media (max-width: 520px) {
+      .desktop-shell { min-height: 780px; }
+      .desktop-sidebar { display: none; }
+      .topbar { padding: 0 16px; }
+      .top-search { display: none; }
+      .desktop-main { padding: 18px 14px 20px; }
+      .page-title { flex-direction: column; }
+      .chat-head { flex-direction: column; }
+      .chat-head-actions { width: 100%; justify-content: space-between; }
+      .step-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="intro">
+      <p class="eyebrow">Workspace · High-fidelity direction</p>
+      <h1>Workspace 重设计 · ChatGPT 式 Agent 对话流</h1>
+      <p>这版把 Workspace 从“后台流水线”改成更接近 ChatGPT 的连续对话：主聊天只保留自然语言消息，Agent 思考、工具调用和 Step 进度合并成默认折叠的执行摘要，确认卡成为唯一需要你操作的主卡。</p>
+      <div class="decision-row">
+        <span class="decision recommended">推荐：ChatGPT 式单列消息流</span>
+        <span class="decision">桌面：1440 × 900</span>
+        <span class="decision">移动：390 × 844 独立编排</span>
+        <span class="decision">执行摘要：默认折叠，点击查看详情</span>
+      </div>
+    </section>
+
+    <section class="boards">
+      <div class="board">
+        <div class="board-label"><span>方案预览 · Desktop 1440</span><span>主状态：等待管理员确认</span></div>
+        <div class="desktop-frame">
+          <div class="desktop-shell">
+            <aside class="desktop-sidebar">
+              <div class="brand-block">
+                <div class="brand-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1" fill="currentColor"/><rect x="14" y="4" width="6" height="6" rx="1" fill="currentColor"/><rect x="4" y="14" width="6" height="6" rx="1" fill="currentColor"/><rect x="14" y="14" width="6" height="6" rx="1" fill="currentColor"/></svg></div>
+                <div class="brand-copy"><strong>XianyuSellerAgent</strong><span>运营控制台</span></div>
+              </div>
+              <div class="side-section">工作台</div>
+              <nav class="side-nav" aria-label="主导航">
+                <button type="button"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg><span>仪表盘</span></button>
+                <button type="button" class="active"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M5 5h14v10H9l-4 4V5Z"/><path d="M8 9h8M8 12h5"/></svg><span>Workspace</span><small>1</small></button>
+                <button type="button"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM5 20a7 7 0 0 1 14 0"/></svg><span>账号管理</span></button>
+                <button type="button"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M4 5h16v14H4zM4 14h4l1.5 2h5L16 14h4"/></svg><span>在线聊天</span><small>3</small></button>
+                <button type="button"><svg class="nav-icon" viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Zm0 9 8-4.5M12 12v9M4 7.5 12 12"/></svg><span>商品管理</span></button>
+                <button type="button"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3a2 2 0 1 0 0 4v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3a2 2 0 1 0 0-4V7Zm8-2v14"/></svg><span>卡券管理</span></button>
+                <button type="button"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M4 5h2l1.5 10h9.5l2-7H7m2 12h.01M17 20h.01"/></svg><span>订单管理</span><small>7</small></button>
+              </nav>
+              <div class="sidebar-spacer"></div>
+              <div class="agent-health"><strong>Agent Runtime</strong><p>Pi Adapter · Policy Gateway 已连接</p><div class="health-row"><span class="online-dot"></span>运行正常 · 42ms</div></div>
+              <div class="desktop-user"><div class="avatar">林</div><div><strong>Linda Brown</strong><span>管理员 · 当前账号 A</span></div></div>
+            </aside>
+
+            <div class="desktop-body">
+              <header class="topbar">
+                <div class="topbar-left"><span class="crumb">工作台 / <strong>Workspace</strong></span></div>
+                <div class="topbar-right"><div class="top-search"><svg class="nav-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><span>搜索业务对象、Run 或订单</span></div><button class="icon-button" type="button" aria-label="通知"><svg viewBox="0 0 24 24"><path d="M6 17h12l-1.5-2v-4a4.5 4.5 0 0 0-9 0v4L6 17Zm4 3h4"/></svg><b>3</b></button><div class="top-account"><div class="avatar">林</div><div><strong>Linda Brown</strong><span>管理员</span></div></div></div>
+              </header>
+
+              <main class="desktop-main">
+                <div class="page-title"><div><p class="eyebrow">Agent Workspace</p><h2>Workspace</h2><p>在同一条对话里调用商品、账号、卡券和订单能力；所有外部写动作先经过策略和确认。</p></div><div class="workspace-status"><span class="online-dot"></span>Agent 在线 · 闲鱼账号 A</div></div>
+
+                <div class="workspace-layout">
+                  <aside class="workspace-sidebar">
+                    <section class="card workspace-panel">
+                      <div class="panel-head"><div><h3>会话</h3><p>最近的 Agent 任务</p></div><button class="btn primary" type="button">新建</button></div>
+                      <div class="search-box"><svg class="nav-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><span>搜索会话</span></div>
+                      <div class="session-list">
+                        <button class="session active" type="button"><span class="session-icon"><svg viewBox="0 0 24 24"><path d="M5 5h14v10H9l-4 4V5Z"/><path d="M8 9h8M8 12h5"/></svg></span><span class="session-copy"><strong>准备发布考研英语资料</strong><span>需要确认 · 3 个步骤</span></span><time>刚刚</time></button>
+                        <button class="session" type="button"><span class="session-icon"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM4 14h4l1.5 2h5L16 14h4"/></svg></span><span class="session-copy"><strong>处理未发货订单</strong><span>已完成 · 6 个订单</span></span><time>12:42</time></button>
+                        <button class="session" type="button"><span class="session-icon"><svg viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3a2 2 0 1 0 0 4v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3a2 2 0 1 0 0-4V7Z"/></svg></span><span class="session-copy"><strong>生成卡券批次</strong><span>已完成 · 库存 120 张</span></span><time>昨天</time></button>
+                        <button class="session" type="button"><span class="session-icon"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span><span class="session-copy"><strong>检查账号登录状态</strong><span>已归档 · 账号 A</span></span><time>周一</time></button>
+                      </div>
+                    </section>
+
+                    <section class="card context-panel">
+                      <div class="panel-head"><div><p class="eyebrow-mini">Current context</p><h3>当前上下文</h3></div><button class="icon-button" type="button" aria-label="编辑上下文"><svg viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4L4 16v4Z"/><path d="m13 7 4 4"/></svg></button></div>
+                      <div class="context-account"><div class="avatar">鱼</div><div><strong>闲鱼账号 A</strong><span>已连接 · 消息监听正常</span></div></div>
+                      <div class="context-list">
+                        <div class="context-row"><b>商品</b><span>考研英语资料包</span></div>
+                        <div class="context-row"><b>订单</b><span>ORD-20260922-018</span></div>
+                        <div class="context-row"><b>权限范围</b><span>商品发布 / 卡券读取</span></div>
+                      </div>
+                      <div class="capability-grid"><span class="capability">read.products</span><span class="capability">write.products</span><span class="capability">read.coupons</span><span class="capability">audit.run</span></div>
+                      <div class="context-footer"><svg viewBox="0 0 24 24"><path d="M7 10h10M7 14h7"/><path d="M5 4h14v16H5z"/></svg><span>Credential ref：cred_xianyu_a_••••</span></div>
+                    </section>
+                  </aside>
+
+                  <section class="card workspace-chat">
+                    <header class="chat-head"><div><p class="eyebrow-mini">连续对话 · Run #1048</p><h3>准备发布考研英语资料</h3><p>3 条消息 · 最近更新 14:36 · 结果由服务端回写</p></div><div class="chat-head-actions"><span class="status-pill warn">需要人工确认</span><span class="status-pill info">实时</span><button class="btn danger" type="button">取消 Run</button><button class="btn" type="button">打开 Audit</button></div></header>
+                    <div class="chat-body">
+                      <div class="chat-date">2026 年 9 月 22 日 · 14:36</div>
+                      <article class="message user"><div class="message-copy"><strong>我 <time>14:36:01</time></strong><p>把“考研英语资料包”发布到闲鱼账号 A，保持现有价格和库存。</p></div><div class="message-avatar">我</div></article>
+                      <article class="message"><div class="message-avatar">AI</div><div class="message-copy"><strong>Agent <time>14:36:04</time></strong><p>我先检查了商品信息和发布策略。商品内容完整，但这是一个外部写动作，需要你的确认后才能发布。</p></div></article>
+                      <details class="agent-trace"><summary><span class="trace-icon"><svg viewBox="0 0 24 24"><path d="M12 4v4M12 16v4M4 12h4M16 12h4M6.3 6.3l2.8 2.8M14.9 14.9l2.8 2.8M17.7 6.3l-2.8 2.8M9.1 14.9l-2.8 2.8"/></svg></span><span class="trace-main"><strong>已完成 2 个步骤 · 1 次工具调用 · 482ms</strong><span>读取商品信息、校验素材 · 点击查看执行详情</span></span></summary><div class="trace-content"><div class="realtime-banner"><span class="online-dot"></span><strong>Realtime connected</strong><span>Run #1048 · waiting_confirmation</span></div><div class="trace-steps"><div class="trace-step done"><b><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg></b><div><strong>读取商品</strong><span>标题、价格、库存</span></div></div><div class="trace-step done"><b><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg></b><div><strong>校验素材</strong><span>图片 5 张 · 无缺失</span></div></div><div class="trace-step current"><b>3</b><div><strong>策略检查</strong><span>写动作需管理员确认</span></div></div><div class="trace-step"><b>4</b><div><strong>进入 Outbox</strong><span>确认后投递发布</span></div></div></div><div class="trace-tool"><div class="tool-icon"><svg viewBox="0 0 24 24"><path d="M12 3v5M12 16v5M3 12h5M16 12h5M5.6 5.6l3.5 3.5M14.9 14.9l3.5 3.5M18.4 5.6l-3.5 3.5M9.1 14.9l-3.5 3.5"/></svg></div><code>products.read → product.publish.policy_check<br/>tool_7d1c · audit_9f2a · idem_1048</code></div></div></details>
+                      <article class="message"><div class="message-avatar">AI</div><div class="message-copy"><strong>Agent <time>14:36:08</time></strong><p>确认后我会将发布请求提交到 Outbox，并继续回传服务端进度。</p></div></article>
+                      <section class="confirm-card"><div class="confirm-head"><div><h4>发布商品 · 需要管理员确认</h4><p>该动作会改变闲鱼账号 A 的对外商品状态，确认后由服务端写入 Outbox。</p></div><span class="risk-tag">中风险 · 外部写入</span></div><div class="diff-grid"><div><small>执行前</small><strong>草稿 · 未对外展示<br/>价格 ¥39.00 · 库存 28</strong></div><div><small>执行后</small><strong>发布中 · 对外可见<br/>沿用当前价格与库存</strong></div></div><div class="audit-row"><span>policy: product.publish.v2</span><span>audit: aud_9f2a</span><span>idem: idem_1048</span></div><div class="confirm-actions"><button class="btn" type="button">取消动作</button><button class="btn warn" type="button" id="confirmPublish">确认发布</button></div><div class="outbox-result" id="outboxResult"><strong>已进入 Outbox · outbox_1048</strong><br/>服务端已接收发布请求，页面会继续显示执行进度；不会在前端直接伪造 succeeded。</div></section>
+                    </div>
+                    <form class="composer" onsubmit="return false"><textarea placeholder="给 Agent 发消息…">补充说明：发布后保留自动回复策略。</textarea><div class="composer-foot"><div class="composer-tools"><button type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>附件</span></button><button type="button"><svg viewBox="0 0 24 24"><path d="M4 6h16v12H4z"/><path d="m7 15 3-3 2 2 2-2 3 3"/></svg><span>素材</span></button><span>Ctrl / ⌘ + Enter 发送</span></div><div class="composer-meta"><span>48 / 4000</span><button class="send-round" type="button" aria-label="发送"><svg viewBox="0 0 24 24"><path d="m5 12 14-7-4 14-3-6-7-1Z"/><path d="m12 13 3-8"/></svg></button></div></div></form>
+                  </section>
+                </div>
+              </main>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="board mobile-board">
+        <div class="board-label"><span>方案预览 · Mobile 390</span><span>上下排列 · 独立移动编排</span></div>
+        <div class="mobile-frame">
+          <div class="mobile-status"><span>9:41</span><span>5G　▮▮▮</span></div>
+          <div class="mobile-head"><strong>Workspace</strong><span>账号 A · 在线</span></div>
+          <div class="mobile-main">
+            <section class="mobile-card mobile-chat"><div class="mobile-message user"><div class="message-copy"><strong>我 <time>14:36</time></strong><p>把“考研英语资料包”发布到账号 A。</p></div><div class="message-avatar">我</div></div><div class="mobile-message"><div class="message-avatar">AI</div><div class="message-copy"><strong>Agent <time>14:36</time></strong><p>我先检查商品和发布策略，确认后再提交外部写动作。</p></div></div><details class="mobile-execution"><summary><span class="trace-icon"><svg viewBox="0 0 24 24"><path d="M12 4v4M12 16v4M4 12h4M16 12h4M6.3 6.3l2.8 2.8M14.9 14.9l2.8 2.8M17.7 6.3l-2.8 2.8M9.1 14.9l-2.8 2.8"/></svg></span><span>已完成 2 步 · 1 次工具调用 · 查看详情</span></summary><div class="trace-content"><div class="trace-steps"><div class="trace-step done"><b><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg></b><div><strong>读取商品</strong><span>已完成</span></div></div><div class="trace-step done"><b><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg></b><div><strong>校验素材</strong><span>已完成</span></div></div><div class="trace-step current"><b>3</b><div><strong>等待确认</strong><span>当前</span></div></div></div><div class="trace-tool"><code>products.read · policy_check · 482ms</code></div></div></details></section>
+            <section class="mobile-card mobile-confirm"><div class="mobile-confirm-head"><strong>Confirmation Card</strong><span>中风险</span></div><p>确认后将把商品发送到闲鱼账号 A。价格与库存保持不变。</p><div class="mobile-confirm-actions"><button class="btn" type="button">取消</button><button class="btn warn" type="button">确认发布</button></div></section>
+            <div class="mobile-kpi-grid"><div class="mobile-kpi"><span>商品库存</span><strong>28</strong></div><div class="mobile-kpi"><span>发布价格</span><strong>¥39</strong></div><div class="mobile-kpi"><span>连接状态</span><strong style="color:var(--success);font-size:16px;margin-top:8px;">实时</strong></div><div class="mobile-kpi"><span>当前账号</span><strong style="font-size:16px;margin-top:8px;">账号 A</strong></div></div>
+            <section class="mobile-card"><h3>当前上下文</h3><p style="margin-top:6px;">商品 PRD-018 · 权限：发布 / 读取卡券</p><p style="margin-top:7px;color:#64748b;font-family:ui-monospace, SFMono-Regular, Menlo, monospace;font-size:8px;">policy:v2 · idem:1048 · audit:9f2a</p></section>
+          </div>
+          <div class="mobile-bottom"><button type="button"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg><span>首页</span></button><button class="active" type="button"><svg viewBox="0 0 24 24"><path d="M5 5h14v10H9l-4 4V5Z"/><path d="M8 9h8M8 12h5"/></svg><span>Workspace</span></button><button type="button"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM4 14h4l1.5 2h5L16 14h4"/></svg><span>消息</span></button><button type="button"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/></svg><span>设置</span></button></div>
+        </div>
+      </div>
+
+      <aside class="notes">
+        <h3>设计决策</h3>
+        <p>先审核结构和信息层级，再把确认后的视觉落到正式 Workspace 路由。当前 HTML 只作为静态设计稿，不会改动现有业务代码。</p>
+        <ol>
+          <li><b>1</b><span>左侧固定 292px：上半区管理会话，下半区固定当前上下文，账号、商品、订单、能力和凭证引用始终可见。</span></li>
+          <li><b>2</b><span>Agent 思考、ToolCall 和 Step 进度合并为一个默认折叠摘要；主聊天只保留自然语言，不让后台细节抢走对话焦点。</span></li>
+          <li><b>3</b><span>确认卡明确风险等级、前后状态、Policy / Audit / Idempotency 引用，确认后只展示服务端 Outbox 结果。</span></li>
+          <li><b>4</b><span>移动端不缩小桌面版：优先显示 Run 进度、待确认动作和上下文摘要，并用底部 Tab 维持导航。</span></li>
+          <li><b>5</b><span>图标全部使用 currentColor 的 inline SVG；状态使用柔和 tinted pills，避免 emoji 和高饱和大色块。</span></li>
+        </ol>
+        <div class="removed"><strong>本稿未改动：</strong>现有 React 组件、API、状态机和路由。点击“确认发布”只用于演示 Outbox 结果显隐。</div>
+      </aside>
+    </section>
+  </main>
+  <script>
+    if (location.hash === '#mobile') {
+      window.addEventListener('load', () => document.querySelector('.mobile-board')?.scrollIntoView({ block: 'start' }));
+    }
+    const confirmButton = document.getElementById('confirmPublish');
+    const outboxResult = document.getElementById('outboxResult');
+    if (confirmButton && outboxResult) {
+      confirmButton.addEventListener('click', () => {
+        confirmButton.disabled = true;
+        confirmButton.textContent = '已提交';
+        outboxResult.classList.add('show');
+      });
+    }
+  </script>
+</body>
+</html>
