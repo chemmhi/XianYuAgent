@@ -511,3 +511,12 @@
 | S5-R96 | 前端 / 视觉 / 端到端 | 气泡是否贴近铃铛、铃铛是否具备足够对比度、移动右列是否不溢出 | root + dashboard_risk_card_audit | PASS（受控环境） | `DashboardViews.tsx`、`dashboard.css`；桌面/移动截图；E2E 几何断言 |
 
 本轮结论：气泡从卡片底部定位改为铃铛触发器定位，铃铛改为实心高对比样式；当前修正分支等待人工审核后再合入 `main`。
+
+### 2026-09-22：在线聊天字体层级与可读性复审
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R101 | 前端 / 视觉 | 会话昵称、消息正文、人工/AI、已读/未读、composer 辅助文案和工具按钮是否建立清晰层级 | root | PASS | `apps/web/src/features/messages/components/messages.css`；`messages-typography.test.ts`；消息目录定向 44/44 |
+| S5-R102 | 前端 / 可读性 | 搜索框是否与侧栏内容对齐，外发气泡链接是否与背景形成足够对比 | root | PASS | `apps/web/scripts/e2e-messages-chrome.mjs`；Chrome/CDP messages E2E；桌面/移动截图证据 |
+
+本轮结论：用户已确认当前平台设计并明确要求合入 `main`。在线聊天字体层级、会话标签、搜索框对齐、composer 控件与外发链接对比度均通过人工审核和自动化验证，切片进入 `READY_FOR_MERGE`。

@@ -73,6 +73,8 @@ describe('MessageTimeline', () => {
     expect(html).not.toContain('Seller');
     expect(html).toContain('AI');
     expect(html).toContain('人工');
+    expect(html).toContain('messages-source-label ai');
+    expect(html).toContain('messages-source-label human');
     expect(html).toContain('messages-read-state');
     expect(html).toContain('>已读</span>');
   });
