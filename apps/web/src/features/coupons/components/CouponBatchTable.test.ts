@@ -5,7 +5,7 @@ import { CouponBatchTable } from './CouponBatchTable';
 import type { CouponBatchVM } from '../types';
 
 const batch: CouponBatchVM = {
-  batchId: 'batch-001',
+  batchId: '1',
   accountId: 'account-001',
   label: '资料包',
   purpose: 'text',
@@ -31,6 +31,9 @@ describe('CouponBatchTable', () => {
       pageSize: 20,
       total: 21,
       totalPages: 3,
+      sortBy: 'createdAt',
+      sortOrder: 'desc',
+      onSortChange: vi.fn(),
       onPageChange: vi.fn(),
       onSelect: vi.fn(),
       onSelectAll: vi.fn(),
@@ -51,7 +54,7 @@ describe('CouponBatchTable', () => {
     expect(html).toContain('coupons-page-button active');
   });
 
-  it('uses a short sequential row number and separates the remark column from the name', () => {
+  it('renders the exposed sequence ID and separates the remark column from the name', () => {
     const html = renderToStaticMarkup(createElement(CouponBatchTable, {
       batches: [batch],
       selectedIds: new Set<string>(),
@@ -59,6 +62,9 @@ describe('CouponBatchTable', () => {
       pageSize: 20,
       total: 21,
       totalPages: 2,
+      sortBy: 'createdAt',
+      sortOrder: 'desc',
+      onSortChange: vi.fn(),
       onPageChange: vi.fn(),
       onSelect: vi.fn(),
       onSelectAll: vi.fn(),
@@ -71,7 +77,7 @@ describe('CouponBatchTable', () => {
       onImagePreview: vi.fn(),
     }));
 
-    expect(html).toContain('<span class="coupons-muted coupons-row-number">21</span>');
+    expect(html).toContain('<span class="coupons-muted coupons-row-number">1</span>');
     expect(html).toContain('<span>备注信息</span>');
     expect(html).toContain('<span class="coupons-note" title="备注内容">备注内容</span>');
     expect(html).toContain('<div class="coupons-title"><strong>资料包</strong></div>');
@@ -86,6 +92,9 @@ describe('CouponBatchTable', () => {
       pageSize: 20,
       total: 1,
       totalPages: 1,
+      sortBy: 'createdAt',
+      sortOrder: 'desc',
+      onSortChange: vi.fn(),
       onPageChange: vi.fn(),
       onSelect: vi.fn(),
       onSelectAll: vi.fn(),
@@ -100,5 +109,33 @@ describe('CouponBatchTable', () => {
 
     expect(html).toContain('<div class="coupons-table-region"><div class="coupons-table-scroll"><div class="coupons-table"');
     expect(html.indexOf('class="coupons-table-scroll"')).toBeLessThan(html.indexOf('data-testid="coupons-pagination"'));
+  });
+
+  it('renders the created-time sort control with descending state by default', () => {
+    const html = renderToStaticMarkup(createElement(CouponBatchTable, {
+      batches: [batch],
+      selectedIds: new Set<string>(),
+      page: 1,
+      pageSize: 20,
+      total: 1,
+      totalPages: 1,
+      sortBy: 'createdAt',
+      sortOrder: 'desc',
+      onSortChange: vi.fn(),
+      onPageChange: vi.fn(),
+      onSelect: vi.fn(),
+      onSelectAll: vi.fn(),
+      onOpen: vi.fn(),
+      onEdit: vi.fn(),
+      onCopy: vi.fn(),
+      onBind: vi.fn(),
+      onToggle: vi.fn(),
+      onDelete: vi.fn(),
+      onImagePreview: vi.fn(),
+    }));
+
+    expect(html).toContain('data-testid="coupon-sort-createdAt"');
+    expect(html).toContain('aria-sort="descending"');
+    expect(html).toContain('当前降序');
   });
 });

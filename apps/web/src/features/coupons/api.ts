@@ -129,6 +129,8 @@ function queryString(filters: CouponBatchFilters = {}): string {
   if (filters.status && filters.status !== 'all') params.set('status', filters.status);
   if (filters.stockAlert && filters.stockAlert !== 'all') params.set('stockAlert', filters.stockAlert);
   if (filters.purpose && filters.purpose !== 'all') params.set('purpose', filters.purpose);
+  params.set('sortBy', filters.sortBy ?? 'createdAt');
+  params.set('sortOrder', filters.sortOrder ?? 'desc');
   params.set('page', String(filters.page ?? 1));
   params.set('pageSize', String(filters.pageSize ?? 20));
   return `?${params.toString()}`;
@@ -199,7 +201,12 @@ export function createMockCouponsApi(seed: CouponBatchVM[] = [
   return {
     async list(filters = {}) {
       const keyword = filters.keyword?.trim().toLowerCase();
-      const filtered = batches.filter((batch) => (!filters.accountId || batch.accountId === filters.accountId) && (!filters.status || filters.status === 'all' || batch.status === filters.status) && (!filters.stockAlert || filters.stockAlert === 'all' || batch.stockAlert === filters.stockAlert) && (!filters.purpose || filters.purpose === 'all' || batch.purpose === filters.purpose) && (!keyword || `${batch.label} ${batch.batchId} ${batch.metadata?.description ?? ''}`.toLowerCase().includes(keyword)));
+      const sortOrder = filters.sortOrder === 'asc' ? 1 : -1;
+      const filtered = batches.filter((batch) => (!filters.accountId || batch.accountId === filters.accountId) && (!filters.status || filters.status === 'all' ? batch.status !== 'voided' : batch.status === filters.status) && (!filters.stockAlert || filters.stockAlert === 'all' || batch.stockAlert === filters.stockAlert) && (!filters.purpose || filters.purpose === 'all' || batch.purpose === filters.purpose) && (!keyword || `${batch.label} ${batch.batchId} ${batch.metadata?.description ?? ''}`.toLowerCase().includes(keyword))).sort((left, right) => {
+        const leftValue = left.createdAt ?? left.updatedAt;
+        const rightValue = right.createdAt ?? right.updatedAt;
+        return (leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0) * sortOrder;
+      });
       const page = filters.page ?? 1;
       const pageSize = filters.pageSize ?? 20;
       const start = (page - 1) * pageSize;

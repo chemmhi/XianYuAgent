@@ -25,6 +25,8 @@
 .coupons-row.selected { background: var(--soft-blue-bg); }
 .coupons-check { border: 0; background: transparent; color: var(--link); font-size: 16px; cursor: pointer; padding: 2px; }
 .coupons-head { position: sticky; top: 0; z-index: 1; min-height: 40px; background: var(--bg); color: var(--sub); font-size: 11px; font-weight: 800; }
+.coupons-sort-button { display: inline-flex; align-items: center; gap: 3px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.coupons-sort-button:hover { color: var(--text); }
 .coupons-title, .coupons-note { min-width: 0; }
 .coupons-title strong, .coupons-note { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .coupons-title strong { font-size: 12px; }

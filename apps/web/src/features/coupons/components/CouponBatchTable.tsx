@@ -3,19 +3,24 @@ import type { CouponBatchVM } from '../types';
 const typeLabels: Record<CouponBatchVM['purpose'], string> = { text: '文本', data: '批量数据', api: 'API', image: '图片' };
 const statusLabels: Record<CouponBatchVM['status'], string> = { draft: '草稿', active: '启用', paused: '禁用', closed: '已关闭', exhausted: '已耗尽', voided: '已删除' };
 
-export function CouponBatchTable({ batches, selectedIds, page, pageSize, total, totalPages, onPageChange, onSelect, onSelectAll, onOpen, onEdit, onCopy, onBind, onToggle, onDelete, onImagePreview }: { batches: CouponBatchVM[]; selectedIds: Set<string>; page: number; pageSize: number; total: number; totalPages: number; onPageChange: (page: number) => void; onSelect: (batchId: string) => void; onSelectAll: () => void; onOpen: (batchId: string) => void; onEdit: (batch: CouponBatchVM) => void; onCopy: (batch: CouponBatchVM) => void; onBind: (batchId: string) => void; onToggle: (batch: CouponBatchVM) => void; onDelete: (batchId: string) => void; onImagePreview: (url: string) => void }) {
+export function CouponBatchTable({ batches, selectedIds, page, pageSize, total, totalPages, sortBy, sortOrder, onSortChange, onPageChange, onSelect, onSelectAll, onOpen, onEdit, onCopy, onBind, onToggle, onDelete, onImagePreview }: { batches: CouponBatchVM[]; selectedIds: Set<string>; page: number; pageSize: number; total: number; totalPages: number; sortBy: 'createdAt'; sortOrder: 'asc' | 'desc'; onSortChange: (sortBy: 'createdAt', sortOrder: 'asc' | 'desc') => void; onPageChange: (page: number) => void; onSelect: (batchId: string) => void; onSelectAll: () => void; onOpen: (batchId: string) => void; onEdit: (batch: CouponBatchVM) => void; onCopy: (batch: CouponBatchVM) => void; onBind: (batchId: string) => void; onToggle: (batch: CouponBatchVM) => void; onDelete: (batchId: string) => void; onImagePreview: (url: string) => void }) {
   const allSelected = batches.length > 0 && batches.every((batch) => selectedIds.has(batch.batchId));
   const pageItems = getPageItems(page, totalPages);
+  const sortButton = (key: 'createdAt', label: string) => {
+    const active = sortBy === key;
+    const nextOrder = active && sortOrder === 'desc' ? 'asc' : 'desc';
+    return <button className="coupons-sort-button" type="button" data-testid="coupon-sort-createdAt" aria-label={`${label}${active ? `，当前${sortOrder === 'desc' ? '降序' : '升序'}` : ''}`} aria-sort={active ? (sortOrder === 'desc' ? 'descending' : 'ascending') : 'none'} onClick={() => onSortChange(key, nextOrder)}>{label}<span aria-hidden="true">{active ? (sortOrder === 'desc' ? ' ↓' : ' ↑') : ' ↕'}</span></button>;
+  };
   return <div className="coupons-table-region">
     <div className="coupons-table-scroll">
       <div className="coupons-table" role="table" aria-label="卡券列表" data-coupons-table>
-        <div className="coupons-row coupons-head" role="row"><button type="button" className="coupons-check" aria-label={allSelected ? '取消全选' : '全选当前页'} onClick={onSelectAll}>{allSelected ? '☑' : '□'}</button><span>ID</span><span>名称</span><span>备注信息</span><span>类型</span><span>内容预览</span><span>发货设置</span><span>对接信息</span><span>状态</span><span>时间</span><span>操作</span></div>
-        {batches.map((batch, index) => {
+        <div className="coupons-row coupons-head" role="row"><button type="button" className="coupons-check" aria-label={allSelected ? '取消全选' : '全选当前页'} onClick={onSelectAll}>{allSelected ? '☑' : '□'}</button><span>ID</span><span>名称</span><span>备注信息</span><span>类型</span><span>内容预览</span><span>发货设置</span><span>对接信息</span><span>状态</span><span>{sortButton('createdAt', '时间')}</span><span>操作</span></div>
+        {batches.map((batch) => {
       const preview = batch.contentPreview;
       const metadata = batch.metadata;
       return <div className={`coupons-row${selectedIds.has(batch.batchId) ? ' selected' : ''}`} role="row" key={batch.batchId} data-batch-id={batch.batchId}>
         <button type="button" className="coupons-check" aria-label={`选择 ${batch.label}`} onClick={() => onSelect(batch.batchId)}>{selectedIds.has(batch.batchId) ? '☑' : '□'}</button>
-        <span className="coupons-muted coupons-row-number">{(page - 1) * pageSize + index + 1}</span>
+        <span className="coupons-muted coupons-row-number">{batch.batchId}</span>
         <div className="coupons-title"><strong>{batch.label || '未命名卡券'}</strong></div>
         <span className="coupons-note" title={metadata?.description || undefined}>{metadata?.description || '—'}</span>
         <span><b className="coupons-type">{typeLabels[batch.purpose]}</b></span>

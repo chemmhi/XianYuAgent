@@ -71,9 +71,30 @@ describe('coupons api adapter', () => {
       delete: vi.fn() as unknown as CouponsApiTransport['delete'],
     });
     const page = await api.list({ purpose: 'text', keyword: '备注', status: 'active', stockAlert: 'normal' });
-    expect(get).toHaveBeenCalledWith('/api/v1/coupons/batches?keyword=%E5%A4%87%E6%B3%A8&status=active&stockAlert=normal&purpose=text&page=1&pageSize=20');
+    expect(get).toHaveBeenCalledWith('/api/v1/coupons/batches?keyword=%E5%A4%87%E6%B3%A8&status=active&stockAlert=normal&purpose=text&sortBy=createdAt&sortOrder=desc&page=1&pageSize=20');
     expect(page.items[0].contentPreview?.text).toBe('正文预览');
     await api.updateBatch('batch-001', { status: 'paused', metadata: { description: 'updated' } });
     expect(patch).toHaveBeenCalledWith('/api/v1/coupons/batches/batch-001', { status: 'paused', metadata: { description: 'updated' } }, expect.objectContaining({ headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }) }));
+  });
+
+  it('passes created-time sorting and applies both directions in the mock API', async () => {
+    const get = vi.fn(async <T>() => ({ success: true, data: { items: [], total: 0, page: 1, pageSize: 20, totalPages: 1 } } as T));
+    const api = createCouponsApi({ get: get as unknown as CouponsApiTransport['get'], post: vi.fn(), patch: vi.fn(), delete: vi.fn() });
+    await api.list({ sortBy: 'createdAt', sortOrder: 'asc' });
+    expect(get).toHaveBeenCalledWith('/api/v1/coupons/batches?sortBy=createdAt&sortOrder=asc&page=1&pageSize=20');
+
+    const mock = createMockCouponsApi([
+      { ...batchPayload, batchId: 'older', label: '更早', createdAt: '2026-09-20T00:00:00.000Z', stockAlert: 'exhausted', bindings: [] },
+      { ...batchPayload, batchId: 'newer', label: '更新', createdAt: '2026-09-21T00:00:00.000Z', stockAlert: 'exhausted', bindings: [] },
+    ]);
+    expect((await mock.list({ sortBy: 'createdAt', sortOrder: 'asc' })).items.map((item) => item.batchId)).toEqual(['older', 'newer']);
+    expect((await mock.list({ sortBy: 'createdAt', sortOrder: 'desc' })).items.map((item) => item.batchId)).toEqual(['newer', 'older']);
+
+    const withVoided = createMockCouponsApi([
+      { ...batchPayload, batchId: 'active', status: 'active', stockAlert: 'normal', bindings: [] },
+      { ...batchPayload, batchId: 'voided', status: 'voided', stockAlert: 'exhausted', bindings: [] },
+    ]);
+    expect((await withVoided.list()).items.map((item) => item.batchId)).toEqual(['active']);
+    expect((await withVoided.list({ status: 'voided' })).items.map((item) => item.batchId)).toEqual(['voided']);
   });
 });

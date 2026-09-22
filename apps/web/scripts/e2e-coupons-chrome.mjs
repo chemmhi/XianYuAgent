@@ -56,15 +56,17 @@ async function createCdpClient(debugPort) {
   await new Promise((resolve, reject) => { socket.addEventListener('open', resolve, { once: true }); socket.addEventListener('error', reject, { once: true }); });
   let nextId = 0;
   const pending = new Map();
+  const events = [];
   socket.addEventListener('message', (event) => {
     const message = JSON.parse(event.data);
+    if (!message.id && message.method) events.push(message);
     if (!message.id || !pending.has(message.id)) return;
     const entry = pending.get(message.id);
     pending.delete(message.id);
     if (message.error) entry.reject(new Error(message.error.message)); else entry.resolve(message.result);
   });
   const send = (method, params = {}) => new Promise((resolve, reject) => { const id = ++nextId; pending.set(id, { resolve, reject }); socket.send(JSON.stringify({ id, method, params })); });
-  return { socket, send };
+  return { socket, send, events };
 }
 
 async function evaluate(cdp, expression) {
@@ -131,6 +133,7 @@ async function run() {
   const cdp = await createCdpClient(debugPort);
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
+  await cdp.send('Network.enable');
   for (const pair of cookie.split('; ')) { const [name, ...valueParts] = pair.split('='); await cdp.send('Network.setCookie', { name, value: valueParts.join('='), url: `${webUrl}/` }); }
   await cdp.send('Page.navigate', { url: `${webUrl}/coupons` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'coupons page');
@@ -190,6 +193,16 @@ async function run() {
   const tableLayoutAudit = await evaluate(cdp, `(() => { const scroll = document.querySelector('.coupons-table-scroll'); const table = document.querySelector('[data-coupons-table]'); const firstRow = document.querySelector('[data-coupons-table] .coupons-row:not(.coupons-head)'); const layoutRow = Array.from(document.querySelectorAll('[data-batch-id]')).find((row) => row.textContent?.includes(${JSON.stringify(layoutCouponLabel)})); const style = scroll ? getComputedStyle(scroll) : null; const title = layoutRow?.querySelector('.coupons-title')?.textContent?.trim() ?? ''; const note = layoutRow?.querySelector('.coupons-note')?.textContent?.trim() ?? ''; return { hasHeader: (table?.querySelector('.coupons-head')?.textContent ?? '').includes('备注信息'), firstNumber: firstRow?.querySelector('.coupons-row-number')?.textContent?.trim() ?? '', overflowY: style?.overflowY ?? '', clientHeight: scroll?.clientHeight ?? 0, scrollHeight: scroll?.scrollHeight ?? 0, title, note }; })()`);
   if (!tableLayoutAudit || !tableLayoutAudit.hasHeader || tableLayoutAudit.firstNumber !== '1' || !['auto', 'scroll'].includes(tableLayoutAudit.overflowY) || tableLayoutAudit.scrollHeight <= tableLayoutAudit.clientHeight) throw new Error('coupon table does not expose the expected sequential ID and internal scroll region');
   if (tableLayoutAudit.title !== layoutCouponLabel || tableLayoutAudit.note !== `布局备注 ${process.pid}`) throw new Error('coupon name and remark columns are not separated');
+  const sortButtonState = await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=coupon-sort-createdAt]"); return button ? { ariaSort: button.getAttribute("aria-sort"), text: button.textContent?.trim() ?? "" } : null; })()');
+  if (!sortButtonState || sortButtonState.ariaSort !== 'descending' || !sortButtonState.text.includes('时间')) throw new Error('coupon created-time sort control missing default descending state');
+  const createdSortAscMark = cdp.events.length;
+  if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=coupon-sort-createdAt]"); if (!button) return false; button.click(); return true; })()')) throw new Error('coupon created-time sort button missing');
+  await waitFor(async () => cdp.events.slice(createdSortAscMark).some((event) => { if (event.method !== 'Network.requestWillBeSent' || event.params?.request?.method !== 'GET') return false; const url = new URL(event.params.request.url); return url.pathname === '/api/v1/coupons/batches' && url.searchParams.get('sortBy') === 'createdAt' && url.searchParams.get('sortOrder') === 'asc' && url.searchParams.get('page') === '1'; }), 'coupon createdAt asc sort request');
+  await waitFor(async () => await evaluate(cdp, 'document.querySelector("[data-testid=coupon-sort-createdAt]")?.getAttribute("aria-sort") === "ascending"'), 'coupon createdAt asc aria state');
+  const createdSortDescMark = cdp.events.length;
+  await evaluate(cdp, 'document.querySelector("[data-testid=coupon-sort-createdAt]")?.click()');
+  await waitFor(async () => cdp.events.slice(createdSortDescMark).some((event) => { if (event.method !== 'Network.requestWillBeSent' || event.params?.request?.method !== 'GET') return false; const url = new URL(event.params.request.url); return url.pathname === '/api/v1/coupons/batches' && url.searchParams.get('sortBy') === 'createdAt' && url.searchParams.get('sortOrder') === 'desc' && url.searchParams.get('page') === '1'; }), 'coupon createdAt desc sort request');
+  await waitFor(async () => await evaluate(cdp, 'document.querySelector("[data-testid=coupon-sort-createdAt]")?.getAttribute("aria-sort") === "descending"'), 'coupon createdAt desc aria state');
   await captureViewport(cdp, 1440, 900, 'coupons-desktop-1440x900.png');
 
   const selected = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("[data-coupons-table] button")).find((candidate) => candidate.getAttribute("aria-label")?.startsWith("选择 ")); if (!button) return false; button.click(); return true; })()');
