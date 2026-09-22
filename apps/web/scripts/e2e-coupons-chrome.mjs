@@ -56,15 +56,17 @@ async function createCdpClient(debugPort) {
   await new Promise((resolve, reject) => { socket.addEventListener('open', resolve, { once: true }); socket.addEventListener('error', reject, { once: true }); });
   let nextId = 0;
   const pending = new Map();
+  const events = [];
   socket.addEventListener('message', (event) => {
     const message = JSON.parse(event.data);
+    if (!message.id && message.method) events.push(message);
     if (!message.id || !pending.has(message.id)) return;
     const entry = pending.get(message.id);
     pending.delete(message.id);
     if (message.error) entry.reject(new Error(message.error.message)); else entry.resolve(message.result);
   });
   const send = (method, params = {}) => new Promise((resolve, reject) => { const id = ++nextId; pending.set(id, { resolve, reject }); socket.send(JSON.stringify({ id, method, params })); });
-  return { socket, send };
+  return { socket, send, events };
 }
 
 async function evaluate(cdp, expression) {
@@ -114,6 +116,11 @@ async function run() {
   const adminId = bootstrapPayload.data.profile.id;
   const account = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `coupons-e2e-${process.pid}` });
   const product = await apiRuntime.store.createProduct({ adminId, accountId: account.id, externalProductRef: `COUPON-ITEM-${process.pid}`, title: '卡券 E2E 商品', description: '受控绑定商品', categoryCode: 'digital', attributes: { source: 'coupons-e2e' }, priceMinor: 1990, status: 'published' });
+  const layoutCouponLabel = `Chrome UI 布局卡券 ${process.pid}`;
+  await apiRuntime.store.createCouponBatch({ adminId, accountId: account.id, label: layoutCouponLabel, purpose: 'text', deliveryScope: 'operator_only', metadata: { description: `布局备注 ${process.pid}`, multiSpec: true, specName: '版本', specValue: '标准版' } });
+  for (let index = 1; index < 12; index += 1) {
+    await apiRuntime.store.createCouponBatch({ adminId, accountId: account.id, label: `Chrome UI 布局卡券 ${process.pid} ${index}`, purpose: 'text', deliveryScope: 'operator_only', metadata: { description: `布局备注 ${process.pid} ${index}` } });
+  }
   const createdLabel = `Chrome UI 创建卡券 ${process.pid}`;
   const editedLabel = `Chrome UI 编辑卡券 ${process.pid}`;
   const copiedLabel = `Chrome UI 复制卡券 ${process.pid}`;
@@ -126,6 +133,7 @@ async function run() {
   const cdp = await createCdpClient(debugPort);
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
+  await cdp.send('Network.enable');
   for (const pair of cookie.split('; ')) { const [name, ...valueParts] = pair.split('='); await cdp.send('Network.setCookie', { name, value: valueParts.join('='), url: `${webUrl}/` }); }
   await cdp.send('Page.navigate', { url: `${webUrl}/coupons` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'coupons page');
@@ -144,8 +152,10 @@ async function run() {
   if (!await setSearchValue(cdp, '__coupon_empty_state__')) throw new Error('coupon search input missing');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('暂无卡券批次'), 'coupon empty state');
   await assertText(cdp, '当前账号范围内没有匹配的批次，可调整筛选或创建新批次。');
+  const emptyStateAudit = await evaluate(cdp, '(() => { const state = document.querySelector(".coupons-panel > .coupons-state"); const panel = document.querySelector(".coupons-panel"); if (!state || !panel) return null; const style = getComputedStyle(state); return { display: style.display, alignItems: style.alignItems, justifyContent: style.justifyContent, flex: style.flex, stateHeight: state.getBoundingClientRect().height, panelHeight: panel.getBoundingClientRect().height }; })()');
+  if (!emptyStateAudit || emptyStateAudit.display !== 'flex' || emptyStateAudit.alignItems !== 'center' || emptyStateAudit.justifyContent !== 'center' || emptyStateAudit.stateHeight <= 0 || emptyStateAudit.panelHeight <= emptyStateAudit.stateHeight) throw new Error('coupon empty state is not centered in the panel remainder');
   await setSearchValue(cdp, '');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('暂无卡券批次'), 'coupon list reset');
+  await waitFor(async () => { const body = String(await evaluate(cdp, 'document.body.innerText')); return !body.includes('暂无卡券批次') && body.includes(layoutCouponLabel); }, 'coupon list reset');
   await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "新建卡券")?.click()');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('固定文字配置'), 'coupon create modal');
   await assertText(cdp, '填写到无需邮寄凭证');
@@ -180,6 +190,19 @@ async function run() {
   const persistedInStore = await waitFor(async () => { const page = await apiRuntime.store.listCouponBatches(adminId, { accountId: account.id, page: 1, pageSize: 100 }); return page.items.some((item) => item.label === createdLabel); }, 'coupon API persistence');
   if (!persistedInStore) throw new Error('UI-created coupon was not persisted by the API store');
   await assertText(cdp, `E2E UI 固定文字内容 ${process.pid}`);
+  const tableLayoutAudit = await evaluate(cdp, `(() => { const scroll = document.querySelector('.coupons-table-scroll'); const table = document.querySelector('[data-coupons-table]'); const firstRow = document.querySelector('[data-coupons-table] .coupons-row:not(.coupons-head)'); const layoutRow = Array.from(document.querySelectorAll('[data-batch-id]')).find((row) => row.querySelector('.coupons-title')?.textContent?.trim() === ${JSON.stringify(layoutCouponLabel)}); const style = scroll ? getComputedStyle(scroll) : null; const title = layoutRow?.querySelector('.coupons-title')?.textContent?.trim() ?? ''; const note = layoutRow?.querySelector('.coupons-note')?.textContent?.trim() ?? ''; return { hasHeader: (table?.querySelector('.coupons-head')?.textContent ?? '').includes('备注信息'), firstNumber: firstRow?.querySelector('.coupons-row-number')?.textContent?.trim() ?? '', overflowY: style?.overflowY ?? '', clientHeight: scroll?.clientHeight ?? 0, scrollHeight: scroll?.scrollHeight ?? 0, title, note }; })()`);
+  if (!tableLayoutAudit || !tableLayoutAudit.hasHeader || !/^[1-9]\d*$/.test(String(tableLayoutAudit.firstNumber)) || !['auto', 'scroll'].includes(tableLayoutAudit.overflowY) || tableLayoutAudit.scrollHeight <= tableLayoutAudit.clientHeight) throw new Error('coupon table does not expose the expected numeric ID and internal scroll region');
+  if (tableLayoutAudit.title !== layoutCouponLabel || tableLayoutAudit.note !== `布局备注 ${process.pid}`) throw new Error('coupon name and remark columns are not separated');
+  const sortButtonState = await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=coupon-sort-createdAt]"); return button ? { ariaSort: button.getAttribute("aria-sort"), text: button.textContent?.trim() ?? "" } : null; })()');
+  if (!sortButtonState || sortButtonState.ariaSort !== 'descending' || !sortButtonState.text.includes('时间')) throw new Error('coupon created-time sort control missing default descending state');
+  const createdSortAscMark = cdp.events.length;
+  if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=coupon-sort-createdAt]"); if (!button) return false; button.click(); return true; })()')) throw new Error('coupon created-time sort button missing');
+  await waitFor(async () => cdp.events.slice(createdSortAscMark).some((event) => { if (event.method !== 'Network.requestWillBeSent' || event.params?.request?.method !== 'GET') return false; const url = new URL(event.params.request.url); return url.pathname === '/api/v1/coupons/batches' && url.searchParams.get('sortBy') === 'createdAt' && url.searchParams.get('sortOrder') === 'asc' && url.searchParams.get('page') === '1'; }), 'coupon createdAt asc sort request');
+  await waitFor(async () => await evaluate(cdp, 'document.querySelector("[data-testid=coupon-sort-createdAt]")?.getAttribute("aria-sort") === "ascending"'), 'coupon createdAt asc aria state');
+  const createdSortDescMark = cdp.events.length;
+  await evaluate(cdp, 'document.querySelector("[data-testid=coupon-sort-createdAt]")?.click()');
+  await waitFor(async () => cdp.events.slice(createdSortDescMark).some((event) => { if (event.method !== 'Network.requestWillBeSent' || event.params?.request?.method !== 'GET') return false; const url = new URL(event.params.request.url); return url.pathname === '/api/v1/coupons/batches' && url.searchParams.get('sortBy') === 'createdAt' && url.searchParams.get('sortOrder') === 'desc' && url.searchParams.get('page') === '1'; }), 'coupon createdAt desc sort request');
+  await waitFor(async () => await evaluate(cdp, 'document.querySelector("[data-testid=coupon-sort-createdAt]")?.getAttribute("aria-sort") === "descending"'), 'coupon createdAt desc aria state');
   await captureViewport(cdp, 1440, 900, 'coupons-desktop-1440x900.png');
 
   const selected = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("[data-coupons-table] button")).find((candidate) => candidate.getAttribute("aria-label")?.startsWith("选择 ")); if (!button) return false; button.click(); return true; })()');
@@ -235,10 +258,10 @@ async function run() {
   await evaluate(cdp, 'window.confirm = () => true; Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.includes("作废批次"))?.click()');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('voided'), 'coupon void completed');
   await cdp.send('Page.reload', { ignoreCache: true });
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes(editedLabel), 'coupon reload persistence');
+  await waitFor(async () => { const body = String(await evaluate(cdp, 'document.body.innerText')); return body.includes(copiedLabel) && !body.includes(editedLabel); }, 'coupon reload persistence and voided hidden');
   await captureViewport(cdp, 390, 844, 'coupons-mobile-390x844.png');
   await cdp.send('Emulation.clearDeviceMetricsOverride');
-  console.log('local Chrome E2E passed: UI create -> list -> edit/copy/toggle -> import/bind/void -> reload');
+  console.log('local Chrome E2E passed: UI create -> list -> edit/copy/toggle -> import/bind/void -> reload with hidden history');
   cdp.socket.close();
 }
 

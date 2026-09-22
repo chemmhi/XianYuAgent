@@ -461,3 +461,14 @@
 | S5-R88 | 质量 / 视觉 / 端到端 | 是否先对比原型 HTML/截图与样式 token，再用真实 PostgreSQL + Chrome/CDP 生成桌面、抽屉、移动主页面和移动抽屉证据；是否移除原型 sidebar/topbar 且无双重滚动 | root + prototype_visual_analysis | PASS（受控环境） | `npm run verify:agent-dynamics`；`docs/agent/agent-dynamics/evidence/visual-diff.md`；`docs/agent/agent-dynamics/evidence/evidence.json`；18/18 核心样式 token 语义匹配 |
 
 本轮结论：Agent 动态已完成设计、模块化实现、真实 PostgreSQL → API → Chrome/CDP → 截图闭环；当前主线合入后保持受控环境 PASS，真实闲鱼外部 push/live 发送仍不属于本轮验收范围。
+
+### 2026-09-22：卡券批次序号、列表布局与创建时间排序复审
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R89 | 业务 / 验收 | 卡券 ID 是否为从 1 开始的可回收序号，删除后新建是否复用最小空缺，默认是否最新创建置顶 | root + final_backend_audit | PASS（MemoryStore/API 受控验证） | `apps/api/scripts/coupons-smoke.mjs`；DELETE 删除、序号复用、默认 `createdAt DESC`、旧 UUID URL 兼容与作废批次不可复活断言 |
+| S5-R90 | 架构 / 数据流 | 内部 UUID、`sequence_id`、部分唯一索引和显式 voided 历史查询是否保持一致 | root + final_backend_audit | PASS（静态 + API 受控验证） | `apps/api/migrations/029_coupon_batch_sequence.sql`、`apps/api/src/store-memory.ts`、`apps/api/src/store-postgres.ts`、`docs/02-data-api.md`、`docs/02-database-schema.md` |
+| S5-R91 | 前端 / 视觉 / 端到端 | 空态居中、表格自适应高度与内部滚动、备注列、名称纯文本展示、时间列升降序交互是否完整 | root + frontend_sorting | PASS（Chrome/CDP + Vitest） | `npm run test:e2e:chrome:coupons`；`apps/web/src/features/coupons/components/CouponBatchTable.test.ts`；63 files / 204 tests；桌面/移动断言 |
+| S5-R92 | 质量 / 发布 | 全量类型检查、构建、API/Web 测试、smoke、Compose 配置和差异卫生是否通过 | root | PARTIALLY_VERIFIED | `npm run typecheck`、`npm test`、`npm run build`、`node apps/api/scripts/coupons-smoke.mjs`、`node apps/api/scripts/products-smoke.mjs`、`docker compose config --quiet`、`git diff --check`；真实 PostgreSQL 迁移/rollback 因环境缺失未执行 |
+
+本轮结论：用户提出的全部卡券列表与批次序号需求已在代码和受控跨层路径中覆盖；真实 PostgreSQL 迁移 apply/rollback/复读仍待具备 `DATABASE_URL` 与运行中数据库后复审，当前切片保持 `READY_FOR_REVIEW`。

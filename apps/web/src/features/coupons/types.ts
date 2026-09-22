@@ -93,6 +93,8 @@ export interface CouponBatchFilters {
   status?: CouponBatchStatus | 'all';
   stockAlert?: StockAlert | 'all';
   purpose?: CouponBatchVM['purpose'] | 'all';
+  sortBy?: 'createdAt';
+  sortOrder?: 'asc' | 'desc';
   page?: number;
   pageSize?: number;
 }

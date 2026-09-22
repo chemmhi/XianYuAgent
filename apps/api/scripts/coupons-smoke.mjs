@@ -28,6 +28,8 @@ try {
   const created = await request('/api/v1/coupons/batches', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-create-1' }, body: JSON.stringify({ accountId: account.id, label: 'Demo cards', purpose: 'text', deliveryScope: 'operator_only', metadata: { description: 'Demo description', textContent: 'Demo content', delaySeconds: 5, dockable: true, price: '9.90' }, quarkUrl: 'https://quark.example/demo', extractionCode: 'extract-123' }) });
   assert.equal(created.response.status, 201);
   const batchId = created.body.data.batchId;
+  assert.match(String(batchId), /^\d+$/);
+  assert.equal(batchId, '1');
   assert.equal(created.body.data.availableCount, 0);
   assert.equal(created.body.data.stockAlert, 'exhausted');
   assert.equal(created.body.data.purpose, 'text');
@@ -43,6 +45,20 @@ try {
   assert.equal(listed.body.data.items[0].metadata.description, 'Edited description');
   assert.equal(listed.body.data.items[0].metadata.textContent, undefined);
 
+  const sortProbe = await request('/api/v1/coupons/batches', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-create-sort-probe' }, body: JSON.stringify({ accountId: account.id, label: 'Sort probe', purpose: 'text', deliveryScope: 'operator_only' }) });
+  assert.equal(sortProbe.response.status, 201);
+  assert.equal(sortProbe.body.data.batchId, '2');
+  const ascending = await request(`/api/v1/coupons/batches?accountId=${account.id}&sortBy=createdAt&sortOrder=asc`, { headers: { cookie } });
+  assert.equal(ascending.response.status, 200);
+  assert.deepEqual(ascending.body.data.items.slice(0, 2).map((item) => item.label), ['Demo cards edited', 'Sort probe']);
+  const descending = await request(`/api/v1/coupons/batches?accountId=${account.id}&sortBy=createdAt&sortOrder=desc`, { headers: { cookie } });
+  assert.equal(descending.response.status, 200);
+  assert.deepEqual(descending.body.data.items.slice(0, 2).map((item) => item.label), ['Sort probe', 'Demo cards edited']);
+  const invalidSortField = await request(`/api/v1/coupons/batches?accountId=${account.id}&sortBy=updatedAt`, { headers: { cookie } });
+  assert.equal(invalidSortField.response.status, 422);
+  const invalidSortOrder = await request(`/api/v1/coupons/batches?accountId=${account.id}&sortBy=createdAt&sortOrder=sideways`, { headers: { cookie } });
+  assert.equal(invalidSortOrder.response.status, 422);
+
   const imported = await request(`/api/v1/coupons/batches/${batchId}/items/import`, { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-import-1' }, body: JSON.stringify({ items: ['code-a', 'code-b', 'code-a', ''] }) });
   assert.equal(imported.response.status, 200);
   assert.equal(imported.body.data.importedCount, 2);
@@ -54,6 +70,11 @@ try {
   assert.equal(detail.body.data.items.length, 2);
   assert.equal(JSON.stringify(detail.body.data).includes('code-a'), false);
   const itemId = detail.body.data.items[0].id;
+  const internalBatch = await runtime.store.getCouponBatch(adminId, batchId);
+  assert.ok(internalBatch?.id);
+  const legacyDetail = await request(`/api/v1/coupons/batches/${internalBatch.id}`, { headers: { cookie } });
+  assert.equal(legacyDetail.response.status, 200);
+  assert.equal(legacyDetail.body.data.batchId, batchId);
 
   const preview = await request(`/api/v1/coupons/${itemId}/content?purpose=preview&deliveryScope=operator_only&couponId=${itemId}`, { headers: { cookie } });
   assert.equal(preview.response.status, 200);
@@ -70,14 +91,31 @@ try {
   assert.equal(bound.response.status, 200);
   assert.equal(bound.body.data.binding.productId, product.id);
 
-  const voided = await request(`/api/v1/coupons/batches/${batchId}/void`, { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-void-1' }, body: JSON.stringify({}) });
-  assert.equal(voided.response.status, 200);
-  assert.equal(voided.body.data.batch.status, 'voided');
-  assert.equal(voided.body.data.batch.stockAlert, 'exhausted');
+  const deleted = await request(`/api/v1/coupons/batches/${batchId}`, { method: 'DELETE', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-delete-1' } });
+  assert.equal(deleted.response.status, 200);
+  assert.equal(deleted.body.data.batch.status, 'voided');
+  assert.equal(deleted.body.data.batch.stockAlert, 'exhausted');
+  const defaultAfterVoid = await request(`/api/v1/coupons/batches?accountId=${account.id}`, { headers: { cookie } });
+  assert.equal(defaultAfterVoid.response.status, 200);
+  assert.equal(defaultAfterVoid.body.data.items.some((item) => item.batchId === batchId), false);
+  const voidedHistory = await request(`/api/v1/coupons/batches?accountId=${account.id}&status=voided`, { headers: { cookie } });
+  assert.equal(voidedHistory.response.status, 200);
+  assert.equal(voidedHistory.body.data.items.some((item) => item.batchId === batchId && item.status === 'voided'), true);
+
+  const forbiddenReactivate = await request(`/api/v1/coupons/batches/${batchId}`, { method: 'PATCH', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-reactivate-voided' }, body: JSON.stringify({ status: 'active' }) });
+  assert.equal(forbiddenReactivate.response.status, 409);
+  assert.equal(forbiddenReactivate.body.error.code, 'CONFLICT');
 
   const forbiddenImport = await request(`/api/v1/coupons/batches/${batchId}/items/import`, { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-import-2' }, body: JSON.stringify({ items: ['code-c'] }) });
   assert.equal(forbiddenImport.response.status, 409);
   assert.equal(forbiddenImport.body.error.code, 'CONFLICT');
+  const secondCreated = await request('/api/v1/coupons/batches', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-create-2' }, body: JSON.stringify({ accountId: account.id, label: 'Second cards', purpose: 'text', deliveryScope: 'operator_only' }) });
+  assert.equal(secondCreated.response.status, 201);
+  assert.equal(secondCreated.body.data.batchId, '1');
+  const newestFirst = await request(`/api/v1/coupons/batches?accountId=${account.id}`, { headers: { cookie } });
+  assert.equal(newestFirst.response.status, 200);
+  assert.equal(newestFirst.body.data.items[0].label, 'Second cards');
+  assert.equal(newestFirst.body.data.items[0].batchId, '1');
   assert.ok(runtime.store.audits.some((event) => event.action === 'coupon.content.previewed'));
   assert.equal(runtime.store.audits.some((event) => event.payloadDigest.includes('code-a')), false);
   console.log('coupons smoke passed');

@@ -95,7 +95,7 @@ function AuthenticatedShell({ page, accountsApi, productsApi, couponsApi, messag
   if (page === 'dashboard') return <DashboardPage api={dashboardApi} apiMode={resolveDashboardMode(apiMode, import.meta.env.VITE_DASHBOARD_MODE)} onNavigate={navigate} />;
   return (
     <div className="app-viewport">
-      <div className={`desktop-shell${page === 'products' ? ' products-shell' : page === 'accounts' ? ' accounts-shell' : page === 'orders' ? ' orders-shell' : page === 'settings' ? ' settings-shell' : page === 'agent-dynamics' ? ' agent-dynamics-shell-host' : ''}`}>
+      <div className={`desktop-shell${page === 'products' ? ' products-shell' : page === 'accounts' ? ' accounts-shell' : page === 'orders' ? ' orders-shell' : page === 'coupons' ? ' coupons-shell' : page === 'settings' ? ' settings-shell' : page === 'agent-dynamics' ? ' agent-dynamics-shell-host' : ''}`}>
         <aside className="sidebar">
           <div className="brand-block"><div className="brand-mark">Y</div><div className="brand-copy"><strong>XianyuSellerAgent</strong><span>运营控制台</span></div></div>
           <div className="side-section">运营台</div>
@@ -105,7 +105,7 @@ function AuthenticatedShell({ page, accountsApi, productsApi, couponsApi, messag
           <div className="sidebar-bottom"><div className="agent-card"><span className="online-dot" /> <strong>Agent Runtime</strong><small>独立服务 · 正常</small></div><div className="sidebar-user"><div className="avatar">管</div><div><strong>运营管理员</strong><span>admin@example.com</span></div></div></div>
         </aside>
         <div className="desktop-body">
-          <main className={page === 'products' ? 'products-main' : page === 'accounts' ? 'accounts-main' : page === 'orders' ? 'orders-main' : page === 'settings' ? 'settings-main' : page === 'agent-dynamics' ? 'agent-dynamics-main-host' : undefined}>{renderAuthenticatedPage({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi, agentDynamicsApi, onNavigate: navigate })}</main>
+          <main className={page === 'products' ? 'products-main' : page === 'accounts' ? 'accounts-main' : page === 'orders' ? 'orders-main' : page === 'coupons' ? 'coupons-main' : page === 'settings' ? 'settings-main' : page === 'agent-dynamics' ? 'agent-dynamics-main-host' : undefined}>{renderAuthenticatedPage({ page, accountsApi, productsApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi, agentDynamicsApi, onNavigate: navigate })}</main>
         </div>
       </div>
     </div>

@@ -346,7 +346,7 @@ export function createProductsApi(transport: ProductsApiTransport): ProductsApi 
 }
 
 export function createMockProductsApi(seed: ProductVM[] = [
-  { id: 'product-001', accountId: 'account-001', externalProductRef: 'xy-1001', title: 'Python 全栈资料包', description: '课程资料与配套源码。', categoryCode: 'digital', attributesJson: {}, configVersion: 3, priceMinor: 3990, status: 'published', createdAt: '2026-09-18T09:30:00.000Z', updatedAt: '2026-09-20T09:30:00.000Z', xianyuUpdatedAt: '2026-09-20T08:30:00.000Z', couponBatches: [{ id: 'batch-001', label: 'Python 全栈资料包' }], aiPrompt: '用简洁中文回答买家问题。', skuCount: 1, assetCount: 3 },
+  { id: 'product-001', accountId: 'account-001', externalProductRef: 'xy-1001', title: 'Python 全栈资料包', description: '课程资料与配套源码。', categoryCode: 'digital', attributesJson: {}, configVersion: 3, priceMinor: 3990, status: 'published', createdAt: '2026-09-18T09:30:00.000Z', updatedAt: '2026-09-20T09:30:00.000Z', xianyuUpdatedAt: '2026-09-20T08:30:00.000Z', couponBatches: [{ id: '1', label: 'Python 全栈资料包' }], aiPrompt: '用简洁中文回答买家问题。', skuCount: 1, assetCount: 3 },
   { id: 'product-002', accountId: 'account-001', title: 'GitHub 源码下载', categoryCode: 'digital', attributesJson: {}, configVersion: 1, priceMinor: 1990, status: 'draft', createdAt: '2026-09-19T10:20:00.000Z', updatedAt: '2026-09-19T16:20:00.000Z', skuCount: 0, assetCount: 1 },
 ]): ProductsApi {
   return {

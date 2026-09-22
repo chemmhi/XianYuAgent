@@ -129,6 +129,8 @@ function queryString(filters: CouponBatchFilters = {}): string {
   if (filters.status && filters.status !== 'all') params.set('status', filters.status);
   if (filters.stockAlert && filters.stockAlert !== 'all') params.set('stockAlert', filters.stockAlert);
   if (filters.purpose && filters.purpose !== 'all') params.set('purpose', filters.purpose);
+  params.set('sortBy', filters.sortBy ?? 'createdAt');
+  params.set('sortOrder', filters.sortOrder ?? 'desc');
   params.set('page', String(filters.page ?? 1));
   params.set('pageSize', String(filters.pageSize ?? 20));
   return `?${params.toString()}`;
@@ -191,15 +193,35 @@ export function createCouponsApi(transport: CouponsApiTransport): CouponsApi {
 }
 
 export function createMockCouponsApi(seed: CouponBatchVM[] = [
-  { batchId: 'batch-001', accountId: 'account-001', label: 'Python 全栈资料包', purpose: 'text', deliveryScope: 'buyer_deliverable', status: 'active', totalCount: 480, availableCount: 368, reservedCount: 12, consumedCount: 100, stockAlert: 'normal', version: 4, updatedAt: '2026-09-19T16:20:00.000Z', bindings: [{ bindingId: 'binding-001', batchId: 'batch-001', productId: 'product-001', productTitle: 'Python 全栈资料包', priority: 0, status: 'active' }], items: [{ id: 'coupon-001', batchId: 'batch-001', maskedLabel: 'PY-••••-0001', status: 'available' }] },
-  { batchId: 'batch-002', accountId: 'account-001', label: 'GitHub 源码下载', purpose: 'data', deliveryScope: 'operator_only', status: 'active', totalCount: 40, availableCount: 3, reservedCount: 0, consumedCount: 37, stockAlert: 'low_stock', version: 2, updatedAt: '2026-09-18T11:40:00.000Z', bindings: [], items: [{ id: 'coupon-002', batchId: 'batch-002', maskedLabel: 'GH-••••-0021', status: 'available' }] },
-  { batchId: 'batch-003', accountId: 'account-002', label: '设计素材合集', purpose: 'image', deliveryScope: 'operator_only', status: 'paused', totalCount: 0, availableCount: 0, reservedCount: 0, consumedCount: 0, stockAlert: 'exhausted', version: 1, updatedAt: '2026-09-17T09:05:00.000Z', bindings: [], items: [] },
+  { batchId: '1', accountId: 'account-001', label: 'Python 全栈资料包', purpose: 'text', deliveryScope: 'buyer_deliverable', status: 'active', totalCount: 480, availableCount: 368, reservedCount: 12, consumedCount: 100, stockAlert: 'normal', version: 4, createdAt: '2026-09-19T15:20:00.000Z', updatedAt: '2026-09-19T16:20:00.000Z', bindings: [{ bindingId: 'binding-001', batchId: '1', productId: 'product-001', productTitle: 'Python 全栈资料包', priority: 0, status: 'active' }], items: [{ id: 'coupon-001', batchId: '1', maskedLabel: 'PY-••••-0001', status: 'available' }] },
+  { batchId: '2', accountId: 'account-001', label: 'GitHub 源码下载', purpose: 'data', deliveryScope: 'operator_only', status: 'active', totalCount: 40, availableCount: 3, reservedCount: 0, consumedCount: 37, stockAlert: 'low_stock', version: 2, createdAt: '2026-09-18T10:40:00.000Z', updatedAt: '2026-09-18T11:40:00.000Z', bindings: [], items: [{ id: 'coupon-002', batchId: '2', maskedLabel: 'GH-••••-0021', status: 'available' }] },
+  { batchId: '3', accountId: 'account-002', label: '设计素材合集', purpose: 'image', deliveryScope: 'operator_only', status: 'paused', totalCount: 0, availableCount: 0, reservedCount: 0, consumedCount: 0, stockAlert: 'exhausted', version: 1, createdAt: '2026-09-17T08:05:00.000Z', updatedAt: '2026-09-17T09:05:00.000Z', bindings: [], items: [] },
 ]): CouponsApi {
   let batches: CouponBatchVM[] = seed.map((batch) => ({ ...batch, bindings: [...batch.bindings], items: batch.items?.map((item) => ({ ...item })) }));
+  const nextBatchId = () => {
+    const used = new Set(batches.filter((batch) => batch.status !== 'voided').map((batch) => Number(batch.batchId)).filter((value) => Number.isSafeInteger(value) && value > 0));
+    let candidate = 1;
+    while (used.has(candidate)) candidate += 1;
+    return String(candidate);
+  };
   return {
     async list(filters = {}) {
       const keyword = filters.keyword?.trim().toLowerCase();
-      const filtered = batches.filter((batch) => (!filters.accountId || batch.accountId === filters.accountId) && (!filters.status || filters.status === 'all' || batch.status === filters.status) && (!filters.stockAlert || filters.stockAlert === 'all' || batch.stockAlert === filters.stockAlert) && (!filters.purpose || filters.purpose === 'all' || batch.purpose === filters.purpose) && (!keyword || `${batch.label} ${batch.batchId} ${batch.metadata?.description ?? ''}`.toLowerCase().includes(keyword)));
+      const sortOrder = filters.sortOrder === 'asc' ? 1 : -1;
+      const activeIds = new Set(batches.filter((batch) => batch.status !== 'voided').map((batch) => batch.batchId));
+      const filtered = batches.filter((batch) => {
+        if (filters.accountId && batch.accountId !== filters.accountId) return false;
+        if (filters.status === 'voided') return batch.status === 'voided' && !activeIds.has(batch.batchId);
+        if (filters.status && filters.status !== 'all') return batch.status === filters.status;
+        if (batch.status === 'voided') return false;
+        if (filters.stockAlert && filters.stockAlert !== 'all' && batch.stockAlert !== filters.stockAlert) return false;
+        if (filters.purpose && filters.purpose !== 'all' && batch.purpose !== filters.purpose) return false;
+        return !keyword || `${batch.label} ${batch.batchId} ${batch.metadata?.description ?? ''}`.toLowerCase().includes(keyword);
+      }).sort((left, right) => {
+        const leftValue = left.createdAt ?? left.updatedAt;
+        const rightValue = right.createdAt ?? right.updatedAt;
+        return (leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0) * sortOrder;
+      });
       const page = filters.page ?? 1;
       const pageSize = filters.pageSize ?? 20;
       const start = (page - 1) * pageSize;
@@ -208,8 +230,8 @@ export function createMockCouponsApi(seed: CouponBatchVM[] = [
     async getDetail(batchId) { const batch = batches.find((item) => item.batchId === batchId); if (!batch) throw Object.assign(new Error('BATCH_NOT_FOUND'), { status: 404 }); return { ...batch, items: batch.items?.map((item) => ({ ...item })) }; },
     async createBatch(input) {
       const now = new Date().toISOString();
-      const items = (input.items ?? []).filter(Boolean).map((body, index) => ({ id: `coupon-${Date.now()}-${index}`, batchId: `batch-${Date.now()}`, maskedLabel: body.length > 6 ? `${body.slice(0, 3)}••••${body.slice(-2)}` : '••••••', status: 'available' as const }));
-      const batchId = items[0]?.batchId ?? `batch-${Date.now()}`;
+      const batchId = nextBatchId();
+      const items = (input.items ?? []).filter(Boolean).map((body, index) => ({ id: `coupon-${Date.now()}-${index}`, batchId, maskedLabel: body.length > 6 ? `${body.slice(0, 3)}••••${body.slice(-2)}` : '••••••', status: 'available' as const }));
       const batch: CouponBatchVM = { batchId, accountId: input.accountId, label: input.label, purpose: input.purpose, deliveryScope: input.deliveryScope, status: 'draft', totalCount: items.length, availableCount: items.length, reservedCount: 0, consumedCount: 0, stockAlert: items.length ? 'normal' : 'exhausted', version: 1, updatedAt: now, createdAt: now, bindings: [], items, metadata: input.metadata, contentPreview: { text: input.metadata?.textContent?.slice(0, 140), dataRemaining: items.length, apiUrl: input.metadata?.apiConfig?.url, imageUrls: input.metadata?.imageUrls ?? [] } };
       batches = [batch, ...batches];
       return batch;
@@ -225,7 +247,7 @@ export function createMockCouponsApi(seed: CouponBatchVM[] = [
     async voidBatch(batchId) { const batch = batches.find((item) => item.batchId === batchId); if (!batch) throw Object.assign(new Error('BATCH_NOT_FOUND'), { status: 404 }); batch.status = 'voided'; batch.availableCount = 0; batch.stockAlert = 'exhausted'; batch.version += 1; batch.updatedAt = new Date().toISOString(); return batch; },
     async deleteBatch(batchId) { const batch = batches.find((item) => item.batchId === batchId); if (!batch) throw Object.assign(new Error('BATCH_NOT_FOUND'), { status: 404 }); batch.status = 'voided'; batch.availableCount = 0; batch.stockAlert = 'exhausted'; batch.version += 1; batch.updatedAt = new Date().toISOString(); return batch; },
     async batchDelete(batchIds) { return Promise.all(batchIds.map((batchId) => this.deleteBatch(batchId))); },
-    async getContent(couponId, options = {}) { return { couponId, batchId: 'batch-001', purpose: options.purpose ?? 'preview', deliveryScope: options.deliveryScope ?? 'operator_only', accountIds: ['account-001'], content: { body: 'preview-only coupon content', quarkUrl: 'https://pan.quark.cn/s/example', extractionCode: 'AB12' }, access: { allowed: true, purpose: options.purpose ?? 'preview', auditRef: `AUD-${Date.now()}` }, inventoryStatus: 'available' }; },
+    async getContent(couponId, options = {}) { const item = batches.flatMap((batch) => batch.items ?? []).find((candidate) => candidate.id === couponId); const batch = item ? batches.find((candidate) => candidate.batchId === item.batchId) : undefined; return { couponId, batchId: batch?.batchId ?? '1', purpose: options.purpose ?? 'preview', deliveryScope: options.deliveryScope ?? 'operator_only', accountIds: [batch?.accountId ?? 'account-001'], content: { body: 'preview-only coupon content', quarkUrl: 'https://pan.quark.cn/s/example', extractionCode: 'AB12' }, access: { allowed: true, purpose: options.purpose ?? 'preview', auditRef: `AUD-${Date.now()}` }, inventoryStatus: 'available' }; },
   };
 }
 

@@ -293,6 +293,7 @@ export interface CouponBindingRecord {
 
 export interface CouponBatchRecord {
   id: string;
+  sequenceId?: string;
   accountId: string;
   label?: string;
   purpose: string;
@@ -318,6 +319,8 @@ export interface CouponBatchListQuery {
   status?: CouponBatchStatus;
   stockAlert?: 'normal' | 'low_stock' | 'exhausted';
   purpose?: 'text' | 'data' | 'api' | 'image';
+  sortBy?: 'createdAt';
+  sortOrder?: 'asc' | 'desc';
   page?: number;
   pageSize?: number;
 }

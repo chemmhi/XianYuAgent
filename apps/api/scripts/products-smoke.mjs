@@ -51,7 +51,7 @@ try {
   assert.equal(list.body.data.items[0].priceMinor, 1990);
   assert.equal(list.body.data.items[0].skuCount, 0);
   assert.equal(list.body.data.items[0].assetCount, 0);
-  assert.deepEqual(list.body.data.items[0].couponBatches, [{ id: activeCouponBatch.id, label: '绑定卡券' }]);
+  assert.deepEqual(list.body.data.items[0].couponBatches, [{ id: activeCouponBatch.sequenceId, label: '绑定卡券' }]);
   assert.equal(list.body.data.total, 1);
   assert.equal(list.body.data.totalPages, 1);
 
@@ -59,7 +59,7 @@ try {
   assert.equal(detail.response.status, 200);
   assert.equal(detail.body.data.externalProductRef, 'ITEM-001');
   assert.deepEqual(detail.body.data.attributesJson, { deliveryType: 'coupon_only' });
-  assert.deepEqual(detail.body.data.couponBatches, [{ id: activeCouponBatch.id, label: '绑定卡券' }]);
+  assert.deepEqual(detail.body.data.couponBatches, [{ id: activeCouponBatch.sequenceId, label: '绑定卡券' }]);
   assert.deepEqual(detail.body.data.skus, []);
   assert.deepEqual(detail.body.data.assets, []);
 

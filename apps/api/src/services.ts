@@ -99,6 +99,8 @@ export class CouponService {
     if (query.status && !['draft', 'active', 'paused', 'closed', 'exhausted', 'voided'].includes(query.status)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon batch status');
     if (query.stockAlert && !['normal', 'low_stock', 'exhausted'].includes(query.stockAlert)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon stock alert');
     if (query.purpose && !['text', 'data', 'api', 'image'].includes(query.purpose)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon purpose');
+    if (query.sortBy && query.sortBy !== 'createdAt') throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon sort field');
+    if (query.sortOrder && !['asc', 'desc'].includes(query.sortOrder)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon sort order');
     const result = await this.store.listCouponBatches(adminId, { ...query, page, pageSize });
     return { ...result, items: result.items.map((batch) => this.toBatchView(batch)) };
   }
@@ -140,7 +142,7 @@ export class CouponService {
       const result = await this.store.importCouponItems({ adminId: input.adminId, batchId: input.batchId, contents: input.contents });
       await this.audit({ actorId: input.adminId, action: 'coupon.items.imported', targetRef: result.batch.id, requestId: input.requestId, traceId: input.traceId, payload: { attempted: input.contents.length, imported: result.items.length, rejected: result.rejected.length }, accountId: result.batch.accountId });
       const hydrated = await this.store.getCouponBatch(input.adminId, input.batchId) ?? result.batch;
-      return { ...this.toBatchView(hydrated, true), importedCount: result.items.length, rejected: result.rejected, items: result.items.map((item) => this.toItemView(item)) };
+      return { ...this.toBatchView(hydrated, true), importedCount: result.items.length, rejected: result.rejected, items: result.items.map((item) => this.toItemView(item, this.publicBatchId(hydrated))) };
     } catch (error) { throw mapCouponStoreError(error); }
   }
 
@@ -149,7 +151,7 @@ export class CouponService {
       const binding = await this.store.bindCouponBatch(input);
       const batch = await this.store.getCouponBatch(input.adminId, input.batchId);
       await this.audit({ actorId: input.adminId, action: 'coupon.batch.bound', targetRef: binding.id, requestId: input.requestId, traceId: input.traceId, payload: { productId: input.productId }, accountId: batch?.accountId });
-      return { binding, batch: batch ? this.toBatchView(batch, true) : undefined };
+      return { binding: this.toBindingView(binding, batch ? this.publicBatchId(batch) : undefined), batch: batch ? this.toBatchView(batch, true) : undefined };
     } catch (error) { throw mapCouponStoreError(error); }
   }
 
@@ -162,7 +164,7 @@ export class CouponService {
       if (product.accountId !== batch.accountId) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
       const binding = await this.store.unbindCouponBatch(input);
       await this.audit({ actorId: input.adminId, action: 'coupon.batch.unbound', targetRef: binding?.id ?? input.batchId, requestId: input.requestId, traceId: input.traceId, payload: { productId: input.productId, found: Boolean(binding) }, accountId: batch?.accountId });
-      return { unbound: Boolean(binding), binding, batch: batch ? this.toBatchView(batch, true) : undefined };
+      return { unbound: Boolean(binding), binding: binding ? this.toBindingView(binding, this.publicBatchId(batch)) : undefined, batch: batch ? this.toBatchView(batch, true) : undefined };
     } catch (error) { throw mapCouponStoreError(error); }
   }
 
@@ -194,7 +196,7 @@ export class CouponService {
     const auditRef = await this.audit({ actorId: input.adminId, action: 'coupon.content.previewed', targetRef: found.item.id, requestId: input.requestId, traceId: input.traceId, payload: { purpose: input.purpose, deliveryScope: input.deliveryScope, allowed, itemStatus: found.item.status }, accountId: found.batch.accountId, reason: denialReason });
     const response: Record<string, unknown> = {
       couponId: found.item.id,
-      batchId: found.batch.id,
+      batchId: this.publicBatchId(found.batch),
       purpose: input.purpose,
       deliveryScope: found.batch.deliveryScope,
       accountIds: [found.batch.accountId],
@@ -214,12 +216,16 @@ export class CouponService {
     const stockAlert = batch.status === 'voided' || availableCount === 0 ? 'exhausted' : availableCount <= 5 ? 'low_stock' : 'normal';
     const metadata = batch.metadata ?? {};
     const listMetadata = { description: metadata.description, delaySeconds: metadata.delaySeconds, deliveryCount: metadata.deliveryCount, useNoLogisticsForm: metadata.useNoLogisticsForm, dockable: metadata.dockable, price: metadata.price, feePayer: metadata.feePayer, minPrice: metadata.minPrice, dockVisibility: metadata.dockVisibility, multiSpec: metadata.multiSpec, specName: metadata.specName, specValue: metadata.specValue };
-    const result: Record<string, unknown> = { batchId: batch.id, id: batch.id, accountId: batch.accountId, label: batch.label, purpose: batch.purpose, deliveryScope: batch.deliveryScope, quarkUrl: batch.quarkUrl, extractCode: batch.extractionCode, totalCount, availableCount, reservedCount, consumedCount, stockAlert, status: batch.status, version: batch.version, updatedAt: batch.updatedAt, createdAt: batch.createdAt, metadata: detail ? metadata : listMetadata, contentPreview: { text: metadata.textContent ? metadata.textContent.slice(0, 140) : undefined, dataRemaining: availableCount, apiUrl: metadata.apiConfig?.url, imageUrls: metadata.imageUrls ?? [] }, productBindings: (batch.bindings ?? []).filter((binding) => binding.status === 'active').map((binding) => ({ id: binding.id, bindingId: binding.id, batchId: binding.batchId, productId: binding.productId, priority: binding.priority, status: binding.status, expiresAt: binding.expiresAt })) };
-    if (detail) result.items = items.map((item) => this.toItemView(item));
-    if (detail) result.bindings = batch.bindings ?? [];
+    const publicBatchId = this.publicBatchId(batch);
+    const bindingViews = (batch.bindings ?? []).map((binding) => this.toBindingView(binding, publicBatchId));
+    const result: Record<string, unknown> = { batchId: publicBatchId, id: publicBatchId, accountId: batch.accountId, label: batch.label, purpose: batch.purpose, deliveryScope: batch.deliveryScope, quarkUrl: batch.quarkUrl, extractCode: batch.extractionCode, totalCount, availableCount, reservedCount, consumedCount, stockAlert, status: batch.status, version: batch.version, updatedAt: batch.updatedAt, createdAt: batch.createdAt, metadata: detail ? metadata : listMetadata, contentPreview: { text: metadata.textContent ? metadata.textContent.slice(0, 140) : undefined, dataRemaining: availableCount, apiUrl: metadata.apiConfig?.url, imageUrls: metadata.imageUrls ?? [] }, productBindings: bindingViews.filter((binding) => binding.status === 'active') };
+    if (detail) result.items = items.map((item) => this.toItemView(item, publicBatchId));
+    if (detail) result.bindings = bindingViews;
     return result;
   }
-  private toItemView(item: CouponItemRecord): Record<string, unknown> { return { id: item.id, batchId: item.batchId, status: item.status, reservedUntil: item.reservedUntil, consumedAt: item.consumedAt, createdAt: item.createdAt }; }
+  private publicBatchId(batch: CouponBatchRecord): string { return batch.sequenceId ?? batch.id; }
+  private toBindingView(binding: CouponBindingRecord, publicBatchId?: string): Record<string, unknown> { return { id: binding.id, bindingId: binding.id, batchId: publicBatchId ?? binding.batchId, productId: binding.productId, priority: binding.priority, status: binding.status, expiresAt: binding.expiresAt, createdAt: binding.createdAt, updatedAt: binding.updatedAt }; }
+  private toItemView(item: CouponItemRecord, publicBatchId?: string): Record<string, unknown> { return { id: item.id, batchId: publicBatchId ?? item.batchId, status: item.status, reservedUntil: item.reservedUntil, consumedAt: item.consumedAt, createdAt: item.createdAt }; }
 }
 
 function mapCouponStoreError(error: unknown): ServiceError {

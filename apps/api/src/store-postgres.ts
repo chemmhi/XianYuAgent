@@ -7,7 +7,7 @@ import { decodeConversationCursor, encodeConversationCursor } from './conversati
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
 
 type Row = Record<string, unknown>;
-const PRODUCT_COUPON_BATCHES_SELECT = `(select coalesce(json_agg(json_build_object('id', cb.id, 'label', cb.label) order by binding.priority desc, binding.created_at, cb.id), '[]'::json) from coupons.coupon_bindings binding join coupons.coupon_batches cb on cb.id=binding.coupon_batch_id where binding.product_id=p.id and binding.status='active') as coupon_batches`;
+const PRODUCT_COUPON_BATCHES_SELECT = `(select coalesce(json_agg(json_build_object('id', cb.sequence_id, 'label', cb.label) order by binding.priority desc, binding.created_at, cb.sequence_id), '[]'::json) from coupons.coupon_bindings binding join coupons.coupon_batches cb on cb.id=binding.coupon_batch_id where binding.product_id=p.id and binding.status='active' and cb.status <> 'voided') as coupon_batches`;
 function dateIso(value: unknown): string {
   // node-postgres returns timestamptz columns as Date objects. Date#toString()
   // drops milliseconds, so never stringify a Date before serializing it.
@@ -275,8 +275,10 @@ export class PostgresStore implements Store {
     const conditions = ["EXISTS (SELECT 1 FROM auth.account_scopes scope WHERE scope.account_id=b.account_id AND scope.admin_id=$1 AND scope.status='active' AND (scope.expires_at IS NULL OR scope.expires_at>now()))"];
     if (query.accountId) { params.push(query.accountId); conditions.push(`b.account_id=$${params.length}`); }
     if (query.status) { params.push(query.status); conditions.push(`b.status=$${params.length}`); }
+    else conditions.push("b.status <> 'voided'");
+    if (query.status === 'voided') conditions.push("not exists (select 1 from coupons.coupon_batches active_batch where active_batch.sequence_id=b.sequence_id and active_batch.status <> 'voided')");
     if (query.purpose) { params.push(query.purpose); conditions.push(`b.purpose=$${params.length}`); }
-    if (query.keyword) { params.push(`%${query.keyword.trim().toLowerCase()}%`); conditions.push(`(lower(b.id) like $${params.length} or lower(coalesce(b.label,'')) like $${params.length} or lower(b.purpose) like $${params.length})`); }
+    if (query.keyword) { params.push(`%${query.keyword.trim().toLowerCase()}%`); conditions.push(`(lower(b.sequence_id::text) like $${params.length} or lower(b.id::text) like $${params.length} or lower(coalesce(b.label,'')) like $${params.length} or lower(b.purpose) like $${params.length})`); }
     if (query.stockAlert) {
       const alertIndex = params.length + 1;
       const availableExpr = `(select count(*) from coupons.coupon_items ci where ci.batch_id=b.id and ci.status='available')`;
@@ -285,19 +287,21 @@ export class PostgresStore implements Store {
       conditions.push(`${alertExpr}=$${alertIndex}`);
     }
     const where = conditions.join(' AND ');
+    const sortDirection = query.sortOrder === 'asc' ? 'ASC' : 'DESC';
     const count = await this.pool.query(`select count(*)::int as count from coupons.coupon_batches b where ${where}`, params);
     const total = Number(count.rows[0]?.count ?? 0);
     const limitIndex = params.length + 1;
     const offsetIndex = params.length + 2;
-    const rows = await this.pool.query(`select b.*, count(i.id)::int as computed_total_count, count(i.id) filter (where i.status='available')::int as computed_available_count, count(i.id) filter (where i.status='reserved')::int as computed_reserved_count, count(i.id) filter (where i.status='consumed')::int as computed_consumed_count from coupons.coupon_batches b left join coupons.coupon_items i on i.batch_id=b.id where ${where} group by b.id order by b.updated_at desc limit $${limitIndex} offset $${offsetIndex}`, [...params, pageSize, (page - 1) * pageSize]);
+    const rows = await this.pool.query(`select b.*, count(i.id)::int as computed_total_count, count(i.id) filter (where i.status='available')::int as computed_available_count, count(i.id) filter (where i.status='reserved')::int as computed_reserved_count, count(i.id) filter (where i.status='consumed')::int as computed_consumed_count from coupons.coupon_batches b left join coupons.coupon_items i on i.batch_id=b.id where ${where} group by b.id order by b.created_at ${sortDirection}, b.id ${sortDirection} limit $${limitIndex} offset $${offsetIndex}`, [...params, pageSize, (page - 1) * pageSize]);
     return { items: rows.rows.map((row) => this.toCouponBatch(row)), page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
   }
   async getCouponBatch(adminId: string, batchId: string): Promise<CouponBatchRecord | undefined> {
-    const result = await this.pool.query("select b.* from coupons.coupon_batches b where b.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=b.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))", [batchId, adminId]);
+    const result = await this.pool.query("select b.* from coupons.coupon_batches b where (b.id::text=$1 or b.sequence_id::text=$1) and exists (select 1 from auth.account_scopes scope where scope.account_id=b.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now())) order by (b.status='voided') asc, b.created_at desc, b.id desc limit 1", [batchId, adminId]);
     if (!result.rows[0]) return undefined;
+    const batchIdInternal = String(result.rows[0].id);
     const [items, bindings] = await Promise.all([
-      this.pool.query('select * from coupons.coupon_items where batch_id=$1 order by created_at,id', [batchId]),
-      this.pool.query('select * from coupons.coupon_bindings where coupon_batch_id=$1 order by priority desc, created_at,id', [batchId]),
+      this.pool.query('select * from coupons.coupon_items where batch_id=$1 order by created_at,id', [batchIdInternal]),
+      this.pool.query('select * from coupons.coupon_bindings where coupon_batch_id=$1 order by priority desc, created_at,id', [batchIdInternal]),
     ]);
     const batch = this.toCouponBatch(result.rows[0]);
     batch.items = items.rows.map((row) => this.toCouponItem(row));
@@ -306,22 +310,33 @@ export class PostgresStore implements Store {
   }
   async createCouponBatch(input: { adminId: string; accountId: string; label?: string; purpose: string; deliveryScope: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; metadata?: CouponBatchMetadata }): Promise<CouponBatchRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
-    const result = await this.pool.query('insert into coupons.coupon_batches (id,account_id,label,purpose,delivery_scope,quark_url,extract_code_ciphertext,total_count,status,version,metadata_json) values ($1,$2,$3,$4,$5,$6,$7,$8,\'active\',1,$9::jsonb) returning *', [createId(), input.accountId, input.label ?? null, input.purpose, input.deliveryScope, input.quarkUrl ?? null, input.extractionCode ? encryptCouponValue(input.extractionCode) : null, 0, JSON.stringify(input.metadata ?? {})]);
-    return this.toCouponBatch(result.rows[0]);
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      await client.query("select pg_advisory_xact_lock(hashtext('coupons.coupon_batch_sequence'))");
+      const sequenceResult = await client.query(`select coalesce(min(candidate), 1)::bigint as sequence_id
+        from generate_series(1, coalesce((select max(sequence_id) from coupons.coupon_batches where status <> 'voided'), 0) + 1) candidate
+        where not exists (select 1 from coupons.coupon_batches b where b.sequence_id=candidate and b.status <> 'voided')`);
+      const sequenceId = String(sequenceResult.rows[0]?.sequence_id ?? '1');
+      const result = await client.query('insert into coupons.coupon_batches (id,sequence_id,account_id,label,purpose,delivery_scope,quark_url,extract_code_ciphertext,total_count,status,version,metadata_json) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,\'active\',1,$10::jsonb) returning *', [createId(), sequenceId, input.accountId, input.label ?? null, input.purpose, input.deliveryScope, input.quarkUrl ?? null, input.extractionCode ? encryptCouponValue(input.extractionCode) : null, 0, JSON.stringify(input.metadata ?? {})]);
+      await client.query('commit');
+      return this.toCouponBatch(result.rows[0]);
+    } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
   }
   async updateCouponBatch(input: { adminId: string; batchId: string; patch: { label?: string; purpose?: string; deliveryScope?: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; status?: CouponBatchStatus; metadata?: CouponBatchMetadata } }): Promise<CouponBatchRecord | undefined> {
     const current = await this.getCouponBatch(input.adminId, input.batchId);
     if (!current) return undefined;
+    if (current.status === 'voided') throw new Error('COUPON_BATCH_VOIDED');
     const nextMetadata = input.patch.metadata ?? current.metadata ?? {};
     const extractionCode = input.patch.extractionCode === undefined ? current.extractionCode : input.patch.extractionCode;
-    const result = await this.pool.query('update coupons.coupon_batches set label=$2,purpose=$3,delivery_scope=$4,quark_url=$5,extract_code_ciphertext=$6,status=$7,metadata_json=$8::jsonb,version=version+1,updated_at=now() where id=$1 returning *', [input.batchId, input.patch.label ?? current.label ?? null, input.patch.purpose ?? current.purpose, input.patch.deliveryScope ?? current.deliveryScope, input.patch.quarkUrl ?? current.quarkUrl ?? null, extractionCode ? encryptCouponValue(extractionCode) : null, input.patch.status ?? current.status, JSON.stringify(nextMetadata)]);
+    const result = await this.pool.query('update coupons.coupon_batches set label=$2,purpose=$3,delivery_scope=$4,quark_url=$5,extract_code_ciphertext=$6,status=$7,metadata_json=$8::jsonb,version=version+1,updated_at=now() where id=$1 returning *', [current.id, input.patch.label ?? current.label ?? null, input.patch.purpose ?? current.purpose, input.patch.deliveryScope ?? current.deliveryScope, input.patch.quarkUrl ?? current.quarkUrl ?? null, extractionCode ? encryptCouponValue(extractionCode) : null, input.patch.status ?? current.status, JSON.stringify(nextMetadata)]);
     return result.rows[0] ? this.toCouponBatch(result.rows[0]) : current;
   }
   async importCouponItems(input: { adminId: string; batchId: string; contents: string[] }): Promise<{ batch: CouponBatchRecord; items: CouponItemRecord[]; rejected: Array<{ index: number; code: string; message: string }> }> {
     const client = await this.pool.connect();
     try {
       await client.query('begin');
-      const batchResult = await client.query("select b.* from coupons.coupon_batches b where b.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=b.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now())) for update", [input.batchId, input.adminId]);
+      const batchResult = await client.query("select b.* from coupons.coupon_batches b where (b.id::text=$1 or b.sequence_id::text=$1) and exists (select 1 from auth.account_scopes scope where scope.account_id=b.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now())) order by (b.status='voided') asc, b.created_at desc, b.id desc limit 1 for update", [input.batchId, input.adminId]);
       if (!batchResult.rows[0]) throw new Error('COUPON_NOT_FOUND');
       const batch = this.toCouponBatch(batchResult.rows[0]);
       if (batch.status === 'voided' || batch.status === 'closed') throw new Error('COUPON_BATCH_VOIDED');
@@ -370,11 +385,11 @@ export class PostgresStore implements Store {
     return result.rows[0] ? this.toCouponBatch(result.rows[0]) : batch;
   }
   async getCouponContent(adminId: string, itemId: string): Promise<{ batch: CouponBatchRecord; item: CouponItemRecord } | undefined> {
-    const result = await this.pool.query("select i.id as item_id, i.batch_id as item_batch_id, i.content_ciphertext, i.status as item_status, i.reserved_until, i.consumed_at, i.created_at as item_created_at, b.id as batch_id, b.account_id, b.label, b.purpose, b.delivery_scope, b.quark_url, b.extract_code_ciphertext, b.total_count, b.status as batch_status, b.version, b.created_at as batch_created_at, b.updated_at as batch_updated_at from coupons.coupon_items i join coupons.coupon_batches b on b.id=i.batch_id where i.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=b.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))", [itemId, adminId]);
+    const result = await this.pool.query("select i.id as item_id, i.batch_id as item_batch_id, i.content_ciphertext, i.status as item_status, i.reserved_until, i.consumed_at, i.created_at as item_created_at, b.id as batch_id, b.sequence_id as batch_sequence_id, b.account_id, b.label, b.purpose, b.delivery_scope, b.quark_url, b.extract_code_ciphertext, b.total_count, b.status as batch_status, b.version, b.created_at as batch_created_at, b.updated_at as batch_updated_at from coupons.coupon_items i join coupons.coupon_batches b on b.id=i.batch_id where i.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=b.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))", [itemId, adminId]);
     if (!result.rows[0]) return undefined;
     const row = result.rows[0];
     const item = this.toCouponItem({ id: row.item_id, batch_id: row.item_batch_id, content_ciphertext: row.content_ciphertext, status: row.item_status, reserved_until: row.reserved_until, consumed_at: row.consumed_at, created_at: row.item_created_at });
-    const batch = this.toCouponBatch({ id: row.batch_id, account_id: row.account_id, label: row.label, purpose: row.purpose, delivery_scope: row.delivery_scope, quark_url: row.quark_url, extract_code_ciphertext: row.extract_code_ciphertext, total_count: row.total_count, status: row.batch_status, version: row.version, created_at: row.batch_created_at, updated_at: row.batch_updated_at });
+    const batch = this.toCouponBatch({ id: row.batch_id, sequence_id: row.batch_sequence_id, account_id: row.account_id, label: row.label, purpose: row.purpose, delivery_scope: row.delivery_scope, quark_url: row.quark_url, extract_code_ciphertext: row.extract_code_ciphertext, total_count: row.total_count, status: row.batch_status, version: row.version, created_at: row.batch_created_at, updated_at: row.batch_updated_at });
     return { batch, item };
   }
 
@@ -1051,7 +1066,7 @@ export class PostgresStore implements Store {
   private toCouponBatch(row: Row): CouponBatchRecord {
     const totalCount = Number(row.computed_total_count ?? row.total_count ?? 0);
     const metadata = row.metadata_json && typeof row.metadata_json === 'object' && !Array.isArray(row.metadata_json) ? row.metadata_json as CouponBatchMetadata : {};
-    return { id: String(row.id), accountId: String(row.account_id), label: row.label ? String(row.label) : undefined, purpose: String(row.purpose), deliveryScope: row.delivery_scope as CouponBatchRecord['deliveryScope'], quarkUrl: row.quark_url ? String(row.quark_url) : undefined, extractionCode: row.extract_code_ciphertext ? decryptCouponValue(row.extract_code_ciphertext) : undefined, metadata, totalCount, availableCount: row.computed_available_count === undefined ? undefined : Number(row.computed_available_count), reservedCount: row.computed_reserved_count === undefined ? undefined : Number(row.computed_reserved_count), consumedCount: row.computed_consumed_count === undefined ? undefined : Number(row.computed_consumed_count), status: row.status as CouponBatchRecord['status'], version: Number(row.version ?? 1), createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString() };
+    return { id: String(row.id), sequenceId: row.sequence_id === null || row.sequence_id === undefined ? undefined : String(row.sequence_id), accountId: String(row.account_id), label: row.label ? String(row.label) : undefined, purpose: String(row.purpose), deliveryScope: row.delivery_scope as CouponBatchRecord['deliveryScope'], quarkUrl: row.quark_url ? String(row.quark_url) : undefined, extractionCode: row.extract_code_ciphertext ? decryptCouponValue(row.extract_code_ciphertext) : undefined, metadata, totalCount, availableCount: row.computed_available_count === undefined ? undefined : Number(row.computed_available_count), reservedCount: row.computed_reserved_count === undefined ? undefined : Number(row.computed_reserved_count), consumedCount: row.computed_consumed_count === undefined ? undefined : Number(row.computed_consumed_count), status: row.status as CouponBatchRecord['status'], version: Number(row.version ?? 1), createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString() };
   }
   private toCouponItem(row: Row): CouponItemRecord { return { id: String(row.id), batchId: String(row.batch_id), content: decryptCouponValue(row.content_ciphertext), status: row.status as CouponItemRecord['status'], reservedUntil: iso(row.reserved_until), consumedAt: iso(row.consumed_at), createdAt: new Date(String(row.created_at)).toISOString() }; }
   private toCouponBinding(row: Row): CouponBindingRecord { return { id: String(row.id), batchId: String(row.coupon_batch_id), productId: String(row.product_id), priority: Number(row.priority ?? 0), status: row.status as CouponBindingRecord['status'], expiresAt: iso(row.expires_at), createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString() }; }

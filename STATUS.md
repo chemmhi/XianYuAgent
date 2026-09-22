@@ -197,3 +197,11 @@
 - 2026-09-19 优先级重排提交：`56b6260`（`docs(阶段5): 重排聊天工作台与凭证切片`）；已将下一批切片调整为 `S4-VS5A/B/C`、`S4-VS6A/B`、`S4-VS7A`，并同步补齐 canonical API、账号级 CredentialStore、BusinessLinkVM、clientRunRef/Idempotency-Key 和风险/评审记录。验证：`git diff --check`、新风险号唯一性、canonical 路径和状态一致性检查通过；未执行代码 E2E（本轮仅文档变更）。
 - 2026-09-19 `S4-VS6A` 首链路实现：新增 `015_workspace_agent.sql`、Workspace Store/Service/受控 Runtime、canonical session/run API、raw WebSocket cursor smoke，以及 `/workspace` 前端页面和 controller。API 全量 smoke 与 Web 单测/构建通过；状态保持 `PARTIALLY_VERIFIED`，未将受控 MemoryStore/Runtime 证据冒充生产级 Worker、Pi Runtime、真实 PostgreSQL 或视觉 E2E。
 - 2026-09-19 多 Agent 协作规范提交：`9e1684c`（`docs(协作): 建立多agent worktree与合并锁规则`）；登记状态回写提交为 `1b39e6c`、`b278617`，已通过人工审核并在 merge lock 内以 `e9aaf782` 合入 `master`，随后完成 worktree/分支清理登记。
+
+## 2026-09-22 卡券批次序号与创建时间排序跟进
+
+- 当前 worktree：`F:\ChenHai\Project\XianYuAgent-coupons-batch-id`；分支：`codex/coupons-batch-id-sequence-20260922`；状态：`READY_FOR_MERGE`。
+- 完成范围：对外 `batchId`/`id` 改为从 1 开始的可回收数字序号；内部 UUID 继续用于主键、外键和审计；DELETE/作废后新建批次回收最小可用序号；默认按 `createdAt DESC`，时间列支持升降序切换；保留空态居中、屏幕高度自适应/内部滚动、备注列和名称仅展示名称。
+- 兼容与边界：旧 UUID URL 继续可读；默认列表隐藏作废批次；显式 `status=voided` 查询保留未被新活动批次占用的历史；作废批次禁止通过 PATCH 或库存导入复活。
+- 已验证：`npm run typecheck`、`npm test`（API 全套 smoke + Web 63 files / 204 tests）、`npm run build`、`node apps/api/scripts/coupons-smoke.mjs`、`node apps/api/scripts/products-smoke.mjs`、`npm run test:e2e:chrome:coupons`、`docker compose config --quiet`、`git diff --check` 均通过。
+- 未关闭门禁：本环境无 `DATABASE_URL` 且未运行 Docker PostgreSQL，迁移 `029_coupon_batch_sequence.sql` 的真实 PostgreSQL apply/rollback/复读尚未执行；因此本切片保持 `READY_FOR_MERGE`，不宣称发布级 PASS。
