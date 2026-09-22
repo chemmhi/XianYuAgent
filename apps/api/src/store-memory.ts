@@ -1,5 +1,6 @@
 import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
+import { projectAutoReplyRun } from './auto-reply-activity-projection.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor, isAfterConversationCursor } from './conversation-cursor.js';
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
@@ -708,7 +709,7 @@ export class MemoryStore implements Store {
     const inbound = this.messages.get(run.inboundMessageId);
     const product = run.productId ? this.products.get(run.productId) : undefined;
     const durationMs = Math.max(0, Date.parse(run.updatedAt) - Date.parse(run.createdAt));
-    return { ...run, riskFlags: [...run.riskFlags], orderRefs: [...run.orderRefs], stage: autoReplyStageForStatus(run.status), durationMs, buyerDisplayName: conversation?.buyerDisplayName, productTitle: product?.title, inboundMessagePreview: inbound?.bodyText?.slice(0, 180) };
+    return { ...run, ...projectAutoReplyRun(run), riskFlags: [...run.riskFlags], orderRefs: [...run.orderRefs], stage: autoReplyStageForStatus(run.status), durationMs, buyerDisplayName: conversation?.buyerDisplayName, productTitle: product?.title, inboundMessagePreview: inbound?.bodyText?.slice(0, 180) };
   }
 
   async markMessagesReadByExternalRef(input: { adminId: string; conversationId: string; externalMessageRef: string; readAt?: string }): Promise<{ messages: MessageRecord[]; events: ConversationEventRecord[] }> {

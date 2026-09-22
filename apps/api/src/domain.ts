@@ -735,6 +735,14 @@ export interface AutoReplyRunListQuery {
 export interface AutoReplyRunListItem extends AutoReplyRunRecord {
   stage: AutoReplyRunStage;
   durationMs: number;
+  transportStatus?: 'generated' | 'simulated' | 'persisted' | 'known_failure' | 'unknown';
+  resolutionStatus?: 'review_pending' | 'resolved' | 'needs_followup' | 'unresolved' | 'unknown';
+  goalProgress?: 'unknown' | 'in_progress' | 'blocked' | 'completed';
+  primaryAction?: ActionKind;
+  nextAction?: ActionKind;
+  legacyActionKind?: string;
+  legacyTransportStatus?: string;
+  legacyHandoffReason?: string;
   buyerDisplayName?: string;
   productTitle?: string;
   inboundMessagePreview?: string;

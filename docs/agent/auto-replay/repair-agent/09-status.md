@@ -18,13 +18,13 @@
 - AR-VS-07：Outcome Review claim/lease、证据优先级、退避、死信、CAS、reopen 和 resolved→closed 门禁已实现。
 - AR-VS-08：Policy→Pre-send→Send→review_pending 编排适配层和增量 SQL 迁移已实现。
 - AR-VS-09：配置化 canary、stop condition、kill switch 回滚和交接门禁已实现。
-- 自动回复单测：112/112 通过；API build、切片定向测试和 `git diff --check` 通过。
+- 自动回复单测：114/114 通过；API build、切片定向测试和 `git diff --check` 通过。
 
 ## 尚未关闭
 
 - AR-VS-01 至 AR-VS-08 仍未完成真实 PostgreSQL 回读、Activity API 投影、真实外部发送和跨进程 worker 演练；当前实现为可验证的纯内核/适配层。
 - AR-VS-00 R3 仍为 `BLOCKED_BY_EVIDENCE`：敏感全链路红队、指标阈值告警 Owner、canary 实测、kill switch 和迁移回滚演练需在目标环境补证据。
-- 需要把新字段投影接入现有 `AutoReplyService`/Activity 查询面，并补真实账号 scope、脱敏日志、备份/恢复和 reconcile 证据。
+- Activity 兼容读模型已补 transport/resolution/legacy 投影；仍需把新字段写入真实 `AutoReplyService`/ReviewRecord，并补真实账号 scope、脱敏日志、备份/恢复和 reconcile 证据。
 
 ## 当前风险
 

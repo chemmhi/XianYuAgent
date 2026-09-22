@@ -104,10 +104,11 @@ AR-VS-00 三轮复审已执行，但阶段 0 门禁为 `BLOCKED`，不能标记 
 | AR-VS-05 | PASS（内核级） | `auto-reply-topic-emotion.ts`、9 项定向回归：话题拉回、目标切换、情绪/评价/推荐门控 |
 | AR-VS-06 | PASS（内核级） | `auto-reply-recommendation.ts`、4 项定向回归：资格、冷却、同账号、新鲜度 |
 | AR-VS-07 | PASS（内核级） | `auto-reply-outcome-review.ts`、7 项定向回归：claim/lease、CAS、退避、死信、reopen、closed |
-| AR-VS-08 | PASS（适配级） | `auto-reply-repair-orchestrator.ts`、3 项编排回归、031 增量迁移 |
+| AR-VS-08 | PASS（适配级） | `auto-reply-repair-orchestrator.ts`、Activity 兼容投影、3 项编排回归、031 增量迁移 |
 | AR-VS-09 | PASS（门禁级） | `auto-reply-release.ts`、4 项发布/阻断/回滚回归 |
 
 ### 仍需独立 R3 / 真实环境复核
 
-- 以上 PASS 仅表示可运行内核/适配层证据，不等同于生产发布通过；真实 PostgreSQL、外部发送、Activity API、跨进程 worker、红队和 canary 证据仍未提交。
+- 以上 PASS 仅表示可运行内核/适配层证据，不等同于生产发布通过；真实 PostgreSQL、外部发送、跨进程 worker、红队和 canary 证据仍未提交。
+- 当前自动回复单测为 114/114；Activity 兼容投影覆盖旧 `persisted + known_success → review_pending`，不把传输成功误报为 resolved。
 - 后续人工审核节点按用户确认默认批准继续，但任何真实环境门禁仍需保留可回读证据和回滚记录。
