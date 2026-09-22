@@ -19,7 +19,7 @@
 5. 生命周期阶段、目标推进和推荐资格必须有领域事实和策略版本支持。
 6. ActionPlan 只能有一个 canonical primaryAction；安全局部拒绝通过 safetyHandling 叠加，不能通过第二个业务路由表达。
 7. 买家不回复澄清不得自动 handoff；handoff 只能使用白名单 reasonCode 和最低证据。
-8. resolved/closed 的证据优先级为领域事实、买家确认、人工覆盖；reopenWindow 必须来自 policyConfig，不允许代码隐含固定值。
+8. resolved/closed 的证据优先级为领域事实、买家确认、人工覆盖；`reopenWindowSeconds` 必须来自 `policyConfig.resolution`，不允许代码隐含固定值。
 
 ## 影响
 

@@ -25,11 +25,12 @@ ANSWER_FACT、GUIDE_NEXT_STEP、CLARIFY、ACKNOWLEDGE_CONTINUE、REDIRECT、SWIT
 
 ## 决策二：优先级与互斥
 
-安全检查优先；关键事实缺失时 CLARIFY 优先；明确新目标时 SWITCH_GOAL 优先；负面情绪时使用 ACKNOWLEDGE_CONTINUE 并关闭推荐；GUIDE_NEXT_STEP 优先于 RECOMMEND；HANDOFF 仅接受白名单 reasonCode；WAIT_FOR_USER 与 HANDOFF 互斥。
+安全检查优先；关键事实缺失时 CLARIFY 优先；明确新目标时 SWITCH_GOAL 优先；仅在强负面情绪且安全事实足够时使用 ACKNOWLEDGE_CONTINUE 并关闭推荐，事实不足仍由 CLARIFY 优先；GUIDE_NEXT_STEP 优先于 RECOMMEND；HANDOFF 仅接受白名单 reasonCode；WAIT_FOR_USER 与 HANDOFF 互斥。
 
 ## 决策三：澄清与 awaiting_user
 
 - 每个 outbound turn 最多一个问题；
+- `clarification.maxRounds` 和 `awaitingUserTtlSeconds` 缺失时不自动澄清、不自动 handoff，并记录 POLICY_CONFIG_UNAVAILABLE；
 - 相同 questionFingerprint 不得重复，除非出现新事实；
 - 买家不回复时保持 awaiting_user；
 - awaitingUserTtl 到期后转 unresolved，不自动 handoff；
@@ -50,7 +51,7 @@ ANSWER_FACT、GUIDE_NEXT_STEP、CLARIFY、ACKNOWLEDGE_CONTINUE、REDIRECT、SWIT
 
 ## 决策五：等价秘密与局部拒绝
 
-等价秘密是能授予访问权、签名权、绕过验证或冒充身份的秘密材料，包括 session cookie、Bearer/Refresh Token、私钥、签名密钥、Webhook Secret、恢复码、一次性验证码和管理员凭证。公开订单号、商品 ID、用户名和商品信息不属于等价秘密。
+等价秘密是能授予访问权、签名权、绕过验证或冒充身份的秘密材料，包括 session cookie、Bearer/Refresh Token、私钥、签名密钥、Webhook Secret、恢复码、一次性验证码、系统提示词和管理员凭证。公开订单号、商品 ID、用户名和商品信息不属于等价秘密。
 
 纯敏感请求使用 REFUSE_SENSITIVE + FULL_REFUSAL；混合消息保留安全业务主动作并使用 PARTIAL_REFUSAL。分类不确定或出站拦截异常时 fail-closed，敏感原文不得进入输出、日志、trace、metrics、备份、导出和重试 payload。
 
@@ -62,7 +63,7 @@ resolved 的证据优先级为：
 2. 买家明确确认问题已解决；
 3. 有审计的人工覆盖。
 
-人工覆盖不得覆盖冲突的已核实领域事实；冲突时记录 overrideRejected。reopenWindow 必须由 policyConfig.resolution.reopenWindow 提供，禁止在代码中隐含固定值；窗口内否定、重复追问或事实回退使 resolved → needs_followup。未配置窗口时不得自动 closed。
+人工覆盖不得覆盖冲突的已核实领域事实；冲突时记录 overrideRejected。`reopenWindowSeconds` 必须由 `policyConfig.resolution.reopenWindowSeconds` 提供，使用 UTC server clock，禁止在代码中隐含固定值；窗口内只有带 canonical evidenceType、evidenceRef、observedAt、evidenceWindowStart、evidenceWindowEnd 和 sourceEventId 的否定、重复追问或事实回退证据才使 resolved → needs_followup。未配置窗口、窗口未结束或证据字段不完整时不得自动 closed；closed 只能由 resolved 进入。
 
 ## 实施约束
 

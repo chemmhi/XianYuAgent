@@ -20,9 +20,9 @@
 ## AR-VS-00：范围、策略与基线锁定
 
 - 目标：固化无硬编码路由和仅终极敏感信息明确拒绝。
-- 输出：拒绝矩阵、继续帮助矩阵、生命周期/目标/指标定义、需求到验收到测试追踪表。
+- 输出：拒绝矩阵、继续帮助矩阵、生命周期/目标/指标定义、PolicyConfig 发布校验、需求到验收到测试追踪表。
 - 禁止：不改业务代码、不开放 live、不把 Prompt 当作已实现行为。
-- 验收：业务、架构、质量三轮评审确认策略可审计、指标可回读、风险可追踪。
+- 验收：业务、架构、质量三轮评审确认策略可审计、ActionKind 可唯一复现、澄清轮次和 Outcome Review 状态转换无歧义、指标可回读、风险可追踪。
 - 回滚：仅回退文档策略版本，代码不受影响。
 
 ## AR-VS-01：ConversationState、Objective 与 Policy Kernel
@@ -38,7 +38,7 @@
 
 - 目标：信息不足时先问最小问题，下一条消息到达后恢复原目标。
 - 数据/API：pendingQuestions、expectedAnswerType、sourceMessageId、questionFingerprint、clarificationRound、awaitingUserSince、awaitingUserTtl 和澄清事件。
-- 策略：一次最多一个问题；不回复保持 awaiting_user；重复问题去重；TTL 后转 unresolved，不自动 handoff；明确新目标才切换。
+- 策略：一次最多一个问题；`maxRounds` 限制 outbound 澄清轮次；最后一轮发送后仍保持 awaiting_user，补齐事实可继续，TTL 后转 unresolved 并发出 `clarification.exhausted`，不自动 handoff；明确新目标才切换。
 - 测试：模糊问题→澄清→补充→继续原目标；重复、并发、超时、目标切换、跨账号隔离。
 - 回滚：关闭 clarify flag，回到安全普通回答，保留历史事件。
 
@@ -80,10 +80,10 @@
 ## AR-VS-07：发送后 Outcome Review
 
 - 目标：区分消息已发送、目标已推进和问题已解决。
-- 数据/API：resolutionStatus、resolution evidence、review lease、重试、人工覆盖、reopenWindow 和拆分指标。
+- 数据/API：resolutionStatus、resolution evidence、review lease、重试、人工覆盖、`policyConfig.resolution.reopenWindowSeconds` 和拆分指标。
 - 策略：领域事实优先、买家确认增强、人工覆盖兜底；无证据保持 pending/awaiting/unknown；重复追问或否定在策略窗口内进入 needs_followup。
 - 前端：详情展示 transport、resolution、nextAction 三层状态，不能把 persisted 当完成。
-- 测试：pending→reviewing→resolved/needs_followup/unresolved、无后续、超时、重启、人工覆盖、真实回读。
+- 测试：pending→reviewing→resolved/needs_followup/unresolved、唯一 `resolved→closed`、无后续、超时、重启、人工覆盖、CAS 冲突、lease 过期抢占、退避、死信和真实回读。
 - 回滚：停止 worker，保留发送结果，resolution 回到 pending，不删事件。
 
 ## AR-VS-08：真实链路集成与发布准备

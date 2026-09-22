@@ -82,3 +82,14 @@ AR-VS-00 三轮复审已执行，但阶段 0 门禁为 `BLOCKED`，不能标记 
 | R3 质量阻断项 | OPEN / BLOCKED_BY_EVIDENCE | 仍需修复测试依赖并补敏感全链路、告警阈值、canary/回滚演练证据；完成后重新 R3 |
 
 本记录不代表 AR-VS-00 已通过；修订期间阶段状态保持 BLOCKED。
+
+## 2026-09-22：AR-VS-00 阻断项第二轮修订与 AR-VS-01 启动
+
+| 复审/事项 | 当前结论 | 证据 |
+| --- | --- | --- |
+| R1 业务 / 验收 | READY_FOR_REVIEW | 03-domain-policy-contract.md、AR-VS-00 policy matrix、traceability：固定 ruleId/predicate/tie-break、澄清耗尽、handoff 证据、敏感边界和 reopen schema |
+| R2 架构 / 数据流 | READY_FOR_REVIEW | 02-target-architecture.md、04-data-api-contract.md、10-compatibility-and-migration.md：PolicyConfig 输出字段、ReviewRecord 外键/权威源、worker retry/CAS、事件和旧枚举映射 |
+| AR-VS-01 代码切片 | PASS（切片级） | apps/api/src/auto-reply-policy.ts、auto-reply-state.ts、domain.ts；`npm --workspace apps/api run build`；`npm --workspace apps/api run test:auto-reply:unit` 57/57 |
+| R3 质量 / 安全 / 运维 | BLOCKED_BY_EVIDENCE | 真实持久化、敏感全链路、指标阈值、canary、kill switch、回滚演练尚未完成 |
+
+用户已明确后续人工审核节点默认批准继续；本记录仍保留独立复审与测试证据，不将默认批准等同于技术验证通过。

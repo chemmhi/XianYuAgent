@@ -40,7 +40,7 @@
 
 ### 结果
 
-发送成功、消息落库、买家已读、目标推进和问题解决是不同状态。没有后续证据时，最多保持 review_pending、awaiting_user 或 unknown，不能自动标记 resolved；reopenWindow 必须来自 policyConfig。
+发送成功、消息落库、买家已读、目标推进和问题解决是不同状态。没有后续证据时，最多保持 review_pending、awaiting_user 或 unknown，不能自动标记 resolved；`reopenWindowSeconds` 必须来自 `policyConfig.resolution`，并使用 UTC server clock。
 
 ## 术语
 

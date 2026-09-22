@@ -12,7 +12,7 @@
 | R-AR00-06 | 情绪和推荐受门控 | 负面情绪、售后未解决、等待澄清期间不推荐/不催评价 | AR-VS-05、AR-VS-06 | 情绪和推荐规则 |
 | R-AR00-07 | 澄清不自动升级人工 | 不回复保持 awaiting_user，重复问题去重，TTL 后不自动 handoff，明确新目标可切换 | AR-VS-02 | 澄清不变量、状态模型 |
 | R-AR00-08 | handoff 可枚举且可证明 | 仅白名单 reasonCode，满足证据门槛，禁止低置信度等替代理由 | AR-VS-01、AR-VS-03、AR-VS-08 | handoff 白名单 |
-| R-AR00-09 | resolved/closed 可审计 | 领域事实优先、买家确认增强、人工覆盖兜底；reopenWindow 由 policyConfig 提供，否定证据可重开 | AR-VS-07、AR-VS-08 | ReviewRecord、解决契约 |
+| R-AR00-09 | resolved/closed 可审计 | 领域事实优先、买家确认增强、人工覆盖兜底；reopenWindowSeconds 由 policyConfig.resolution.reopenWindowSeconds 提供，否定证据可重开 | AR-VS-07、AR-VS-08 | ReviewRecord、解决契约 |
 
 ## 验收场景
 
@@ -32,7 +32,7 @@
 
 - Given：买家未回复澄清问题；
 - When：awaitingUserTtl 到期；
-- Then：保持 awaiting_user，TTL 后转 unresolved，不产生 HANDOFF；相同 questionFingerprint 不重复发送。
+- Then：保持 awaiting_user；最后一轮问题仍可等待买家补充；TTL 到期且关键事实仍缺失时发出 clarification.exhausted 并转 unresolved，不产生 HANDOFF；相同 questionFingerprint 不重复发送。
 
 ### AC-AR00-004 敏感部分明确拒绝
 
@@ -50,7 +50,7 @@
 
 - Given：领域事实满足 successCriteria、买家确认和人工覆盖存在冲突；
 - When：Outcome Review 判定；
-- Then：领域事实优先；冲突人工覆盖记录 overrideRejected；在 policyConfig.resolution.reopenWindow 配置的窗口内，否定证据使 resolved 重开为 needs_followup；未配置时不得自动 closed。
+- Then：领域事实优先；冲突人工覆盖记录 overrideRejected；在 policyConfig.resolution.reopenWindowSeconds 配置的窗口内，带 canonical evidenceType 和 sourceEventId 的否定证据使 resolved 重开为 needs_followup；窗口结束后只有 resolved 才能 closed，未配置时不得自动 closed。
 
 ### AC-AR00-007 handoff 白名单
 

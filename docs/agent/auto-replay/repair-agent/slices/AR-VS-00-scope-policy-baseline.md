@@ -60,7 +60,7 @@ ActionPlan 只允许一个 canonical ActionKind；混合敏感消息通过 safet
 
 ### D-AR-0007：解决证据与重开
 
-resolved/closed 依赖领域事实、买家确认和人工覆盖的固定优先级；否定证据、重复追问或事实回退在 policyConfig.resolution.reopenWindow 内触发 needs_followup。未配置窗口时不得自动 closed。
+resolved/closed 依赖领域事实、买家确认和人工覆盖的固定优先级；带 canonical evidenceType、evidenceRef、observedAt 和 sourceEventId 的否定证据在 `policyConfig.resolution.reopenWindowSeconds` 窗口内触发 needs_followup。未配置窗口、窗口未结束或证据字段不完整时不得自动 closed；closed 只能由 resolved 进入。
 
 ## 禁止范围
 

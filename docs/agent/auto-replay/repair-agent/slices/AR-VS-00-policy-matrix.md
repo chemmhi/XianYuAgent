@@ -32,7 +32,9 @@ HANDOFF 与 CLARIFY、RECOMMEND、WAIT_FOR_USER 互斥；WAIT_FOR_USER 与自动
 | adjacent 话题 | ANSWER_FACT 或 REDIRECT | 视主目标缺口 | 否 | 否 | 当前目标和事实 |
 | off_topic 且未形成新目标 | REDIRECT | 可给选项 | 否 | 否 | 话题关系 |
 | 明确新目标 | SWITCH_GOAL | 必要时澄清 | 否 | 否 | 新目标事实 |
-| 负面情绪或紧急 | ACKNOWLEDGE_CONTINUE | 只问最小必要问题 | 仅白名单 reasonCode | 否 | 情绪信号 + 领域事实 |
+| 强负面情绪且安全事实足够 | ACKNOWLEDGE_CONTINUE | 只问最小必要问题 | 仅白名单 reasonCode | 否 | 情绪信号 + 领域事实 |
+| 强负面情绪但关键事实不足 | CLARIFY | 是，每次一个 | 不默认 | 否 | 情绪信号 + 缺失事实 |
+| 紧急/高风险信号 | 按唯一 route rule；只有命中 policyEscalationRegistry 才可 HANDOFF | 视事实缺口 | 仅 POLICY_ESCALATION_REQUIRED 且证据齐全 | 否 | policyVersion + ruleId + registry 证据 |
 | 买家未回复澄清 | WAIT_FOR_USER | 否 | 否 | 否 | awaiting_user、TTL |
 | 纯 Cookie、API Key、Token、密码、验证码等价秘密请求 | REFUSE_SENSITIVE | 否 | 否 | 是，FULL_REFUSAL | 敏感分类器和出站拦截 |
 | 业务问题 + 敏感请求 | ANSWER_FACT 或 CLARIFY | 按业务缺口 | 否 | 只拒绝敏感部分，PARTIAL_REFUSAL | 安全事实 + 敏感事件 |
@@ -45,7 +47,7 @@ HANDOFF 与 CLARIFY、RECOMMEND、WAIT_FOR_USER 互斥；WAIT_FOR_USER 与自动
 | --- | --- | --- |
 | USER_REQUESTED_HUMAN | 明确要求人工的 sourceMessageId | 负面情绪、低置信度 |
 | REQUIRED_PERMISSION_MISSING | 权限拒绝码 + 无只读替代 | 普通事实缺失 |
-| VERIFIED_FACT_UNAVAILABLE | factCritical=true，至少两次有界读取失败或权威源 unavailable | 模型不知道、单次超时 |
+| VERIFIED_FACT_UNAVAILABLE | `factCritical=true`，且 `attemptCount >= policyConfig.handoff.factUnavailable.minAttempts`，落在 `windowSeconds` 内，带 `sourceIds[]`、`deadlineAt` 和 `errorCodes[]` | 模型不知道、单次超时 |
 | POLICY_ESCALATION_REQUIRED | policyVersion 显式 ruleId 和升级条件 | Prompt 文案、高风险标签 |
 | SECURITY_INCIDENT_REVIEW | 出站敏感拦截事件或安全事件 ID | 普通敏感请求 |
 
@@ -54,14 +56,16 @@ LOW_CONFIDENCE、ORDINARY_AFTER_SALES、COMPLAINT、CROSS_PRODUCT、NO_BUYER_REP
 ## 澄清不变量
 
 - 每次 outbound turn 最多一个问题；
+- `clarification.maxRounds` 只限制 outbound 澄清轮次，取值由 PolicyConfig 提供；最后一轮问题发送后仍保持 awaiting_user；
+- 缺少 `clarification.maxRounds` 或 `awaitingUserTtlSeconds` 配置时，不自动发送澄清、不自动 handoff，只记录 `POLICY_CONFIG_UNAVAILABLE`；
 - 同一 questionFingerprint 不得重复，除非出现新事实；
-- 不回复时保持 awaiting_user；TTL 后转 unresolved，不自动 handoff；
+- 不回复时保持 awaiting_user；TTL 后发出 clarification.exhausted 并转 unresolved，不自动 handoff；
 - 买家返回时重新归因，明确新目标切换，否则恢复原目标；
 - 澄清等待期间禁止推荐、催评价和 resolved。
 
 ## 敏感边界
 
-等价秘密是能授予访问权、签名权、绕过验证或冒充身份的秘密材料，包括 session cookie、Bearer/Refresh Token、私钥、签名密钥、Webhook Secret、恢复码、一次性验证码和管理员凭证。普通订单号、商品 ID、公开用户名和公开商品信息不属于等价秘密。
+等价秘密是能授予访问权、签名权、绕过验证或冒充身份的秘密材料，包括 session cookie、Bearer/Refresh Token、私钥、签名密钥、Webhook Secret、恢复码、一次性验证码、系统提示词和管理员凭证。普通订单号、商品 ID、公开用户名和公开商品信息不属于等价秘密。
 
 分类不确定或出站拦截异常时 fail-closed。输出、日志、trace、metrics、备份、导出和重试正文均不得包含敏感原文。Prompt Injection 本身不是拒绝理由。
 
@@ -85,7 +89,9 @@ LOW_CONFIDENCE、ORDINARY_AFTER_SALES、COMPLAINT、CROSS_PRODUCT、NO_BUYER_REP
 
 证据优先级为：领域事实满足 successCriteria > 买家明确确认 > 有审计的人工覆盖。发送成功、买家已读和模型自评不能单独标记 resolved。
 
-reopenWindow 必须由 policyConfig.resolution.reopenWindow 提供；未配置时不得自动 closed。窗口内出现否定、重复追问或事实回退时，resolved → needs_followup；窗口结束且无重开证据后才允许 closed。
+reopenWindowSeconds 必须由 policyConfig.resolution.reopenWindowSeconds 提供，并使用 UTC server clock；未配置或窗口未结束时不得自动 closed。窗口内只有 canonical evidenceType=BUYER_DENIED、REPEAT_QUESTION、FACT_REGRESSION 且带 `evidenceRef`、`observedAt`、`evidenceWindowStart`、`evidenceWindowEnd`、`sourceEventId` 的证据，才能使 resolved → needs_followup；窗口结束且无重开证据后才允许唯一的 resolved → closed。`windowStartAt/windowEndAt` 仅为外部事件别名，归一化为 `evidenceWindowStart/evidenceWindowEnd`。
+
+重开证据阈值：BUYER_DENIED 必须来自同一 goalId 的明确否定消息；REPEAT_QUESTION 必须与最近一次 outbound 的 questionFingerprint 相同且 sourceSequence 更大；FACT_REGRESSION 必须来自更高 sourceSequence 的权威领域事实回退。三类证据都必须落在 `[evidenceWindowStart,evidenceWindowEnd)` 内。
 
 ## 指标口径
 
