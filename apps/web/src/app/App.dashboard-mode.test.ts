@@ -51,4 +51,29 @@ describe('dashboard API mode resolution', () => {
     expect(html).toContain('dashboard-desktop-content');
     expect(html).toContain('dashboard-mobile-content');
   });
+
+  it('falls back to 管理员 when displayName is empty', () => {
+    const props = {
+      admin: { id: 'admin-empty-name', email: 'empty-name@example.com', displayName: '  ', role: 'admin' },
+      page: 'dashboard',
+      accountsApi: {},
+      productsApi: {},
+      couponsApi: {},
+      messagesApi: {},
+      workspaceApi: {},
+      ordersApi: {},
+      settingsApi: {},
+      autoReplyAgentSettingsApi: {},
+      openaiSettingsApi: {},
+      modelProviderApi: {},
+      agentDynamicsApi: {},
+      dashboardApi: { getSnapshot: vi.fn() },
+      navigate: vi.fn(),
+    } as unknown as Parameters<typeof AuthenticatedShell>[0];
+
+    const html = renderToStaticMarkup(createElement(AuthenticatedShell, props));
+
+    expect(html).toContain('>管理员</strong>');
+    expect(html).toContain('empty-name@example.com');
+  });
 });
