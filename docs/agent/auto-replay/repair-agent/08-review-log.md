@@ -1,5 +1,13 @@
 # 修复域评审记录
 
+## 2026-09-22：AR-VS-00 范围、策略与基线锁定
+
+| 评审编号 | 类型 | 结论 | 证据 |
+| --- | --- | --- | --- |
+| AR-VS00-R1 | 业务 / 验收 | READY_FOR_REVIEW | slices/AR-VS-00-policy-matrix.md、slices/AR-VS-00-traceability.md：拒绝、继续帮助、澄清、生命周期和指标口径已冻结 |
+| AR-VS00-R2 | 架构 / 数据流 | READY_FOR_REVIEW | decisions/ADR-AR-0001-route-and-refusal-policy.md、02-target-architecture.md：路由集中到 PolicyEngine，传输状态与解决状态分离 |
+| AR-VS00-R3 | 质量 / 安全 / 运维 | READY_FOR_REVIEW | slices/AR-VS-00-scope-policy-baseline.md：静态代码证据、禁止范围、验收标准和回滚方式已记录；未修改业务代码 |
+
 ## 2026-09-22：repair-agent 文档域重组
 
 | 评审编号 | 类型 | 结论 | 证据 |

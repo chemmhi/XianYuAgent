@@ -42,6 +42,10 @@ repair-agent 是自动回复 Agent 的修复治理文档域，不是新的买家
 | 10-compatibility-and-migration.md | 旧目录兼容入口、文档迁移映射和防漂移规则 |
 | 11-release-rollback.md | feature flag、灰度、回滚、恢复和交接 |
 | templates/vertical-slice-card.md | 后续新增切片的固定卡片模板 |
+| slices/AR-VS-00-scope-policy-baseline.md | AR-VS-00 切片卡与范围锁定结果 |
+| slices/AR-VS-00-policy-matrix.md | 路由、拒绝、继续帮助、生命周期和指标矩阵 |
+| slices/AR-VS-00-traceability.md | 需求→验收→测试追踪和静态证据 |
+| decisions/ADR-AR-0001-route-and-refusal-policy.md | 路由与拒绝策略决策记录 |
 
 ## 职责边界
 

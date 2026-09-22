@@ -19,6 +19,7 @@
 | AR-RA-006 | P1 | Outcome Review 重试导致状态倒退或重复处理 | OPEN | lease、幂等键、乐观锁、回放和人工覆盖 |
 | AR-RA-007 | P2 | 旧文档继续传播默认 handoff 语义 | OPEN | 旧文档加兼容横幅，canonical policy 迁移映射 |
 | AR-RA-008 | P2 | 指标把传输完成当成业务成功 | OPEN | KPI 拆分并保留 resolution evidence |
+| AR-RA-009 | P1 | AR-VS-00 策略已文档化但尚未通过独立评审和代码回归 | OPEN | 完成三轮复审，随后在 AR-VS-01 至 AR-VS-07 中以测试和真实回读验证 |
 
 ## 旧风险映射
 
