@@ -14,8 +14,9 @@ export interface AuthGateActions {
 export function AuthGate({ api, children }: { api: AuthApi; children: ReactNode | ((admin: AdminProfile | null, actions: AuthGateActions) => ReactNode) }) {
   const controller = useAuthController(api);
 
+  // Resolve the session silently; do not flash a standalone checking card.
+  if (controller.phase === 'checking') return null;
   if (controller.phase === 'authenticated') return <>{typeof children === 'function' ? children(controller.admin, { logout: controller.logout, busy: controller.busy }) : children}</>;
-  if (controller.phase === 'checking') return <AuthState title="正在检查管理员会话" message="正在确认当前浏览器是否已登录项目管理控制台。" />;
   if (controller.phase === 'error') return <AuthState title="无法连接管理会话" message={controller.error ?? '请确认 API 服务已启动。'} action={<Button variant="primary" type="button" onClick={() => void controller.refresh()}>重新检查</Button>} />;
   if (controller.phase === 'bootstrap-required') return <AuthFrame><AdminBootstrapForm busy={controller.busy} error={controller.error} onSubmit={controller.bootstrap} /></AuthFrame>;
   return <AuthFrame><AdminLoginForm busy={controller.busy} error={controller.error} onSubmit={controller.login} /></AuthFrame>;
