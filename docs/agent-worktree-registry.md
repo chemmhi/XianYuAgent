@@ -131,6 +131,8 @@
 | `root/settings_persistence_e2e` | `settings-persistence-e2e` | `codex/settings-persistence-e2e` | `F:\ChenHai\Project\XianYuAgent-settings-persistence` | Codex `/root` delegated agent | `2026-09-21 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 补强 OpenAI 设置保存后 Agent 实际消费、PostgreSQL 重启复读与 UI 主动测试后状态回显；新增 API Key 等长首尾脱敏回显；不改 master。 |
 | `root` | `agent-trace-input-output` | `codex/agent-trace-input-output` | `F:\ChenHai\Project\XianYuAgent-agent-trace-input-output` | Codex `/root` | `2026-09-21 23:20:00 +08:00` | `CLEANED` | `24b1e6eaaee1bce051c574525029e537a6b15fe4` | `2026-09-21 23:59:00 +08:00` | 独立复核通过并在 merge lock 内以 `--no-ff` 合入 main；合并后 API auto-reply unit 46/46、activity 3/3、Web 179/179、typecheck 与 diff check 通过；PostgreSQL E2E 已补充 input/output 与脱敏断言，待真实数据库环境执行。worktree 元数据已清理，主工作区原有用户修改已保留。 |
 
+| `root` | `product-automation` | `codex/product-automation` | `F:\ChenHai\Project\XianYuAgent-product-automation` | Codex `/root` | `2026-09-22 23:00:00 +08:00` | `IN_PROGRESS` | `-` | `-` | 四类商品自动化配置、卡券选择穿梭框、批量配置、可靠性测试与视觉验收；独立 worktree，主线未修改。 |
+
 ## 登记维护规则
 
 | `root` | `dashboard-home-refresh` | `codex/dashboard-home-refresh` | `F:\ChenHai\Project\XianYuAgent-dashboard-home-refresh` | Codex `/root` | `2026-09-22 00:00:00 +08:00` | `MERGED` | `c86ee9e` / `5d8bba9` | `-` | 仪表盘首页布局、趋势时间筛选与指标卡片调整；已在 merge lock 内以 `--no-ff` 合入 main。主线 Dashboard API 单测、Web 定向回归、typecheck、构建与 Chrome/CDP E2E 均通过；保留 worktree 供审计。 |
