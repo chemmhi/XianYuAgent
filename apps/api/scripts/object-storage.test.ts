@@ -28,3 +28,25 @@ test('signs bucket bootstrap and object upload without persisting bytes in the d
     globalThis.fetch = originalFetch;
   }
 });
+
+test('reads an object with a signed GET request and returns the stored bytes', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ method: string; url: string; headers: Headers }> = [];
+  globalThis.fetch = async (input, init) => {
+    requests.push({ method: init?.method ?? 'GET', url: String(input), headers: new Headers(init?.headers) });
+    return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'image/webp', etag: '"etag-2"' } });
+  };
+  try {
+    const storage = new S3CompatibleObjectStorage({ endpoint: 'http://storage.example:9000', accessKey: 'access', secretKey: 'secret', bucket: 'assets' });
+    const result = await storage.getObject('products/p1/image.webp');
+    assert.deepEqual([...result!.body], [1, 2, 3]);
+    assert.equal(result?.contentType, 'image/webp');
+    assert.equal(result?.etag, 'etag-2');
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0]?.method, 'GET');
+    assert.match(requests[0]?.url ?? '', /\/assets\/products\/p1\/image\.webp$/);
+    assert.match(requests[0]?.headers.get('authorization') ?? '', /^AWS4-HMAC-SHA256 Credential=access\//);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

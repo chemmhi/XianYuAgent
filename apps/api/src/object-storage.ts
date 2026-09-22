@@ -12,8 +12,16 @@ export interface ObjectStoragePutResult {
   publicUrl?: string;
 }
 
+export interface ObjectStorageGetResult {
+  key: string;
+  body: Buffer;
+  contentType: string;
+  etag?: string;
+}
+
 export interface ObjectStorage {
   putObject(input: ObjectStoragePutInput): Promise<ObjectStoragePutResult>;
+  getObject(key: string): Promise<ObjectStorageGetResult | undefined>;
   publicUrl(key: string): string | undefined;
 }
 
@@ -24,6 +32,12 @@ export class MemoryObjectStorage implements ObjectStorage {
   async putObject(input: ObjectStoragePutInput): Promise<ObjectStoragePutResult> {
     this.objects.set(input.key, { body: Buffer.from(input.body), contentType: input.contentType });
     return { key: input.key };
+  }
+
+  async getObject(key: string): Promise<ObjectStorageGetResult | undefined> {
+    const object = this.objects.get(key);
+    if (!object) return undefined;
+    return { key, body: Buffer.from(object.body), contentType: object.contentType };
   }
 
   publicUrl(_key: string): string | undefined { return undefined; }
@@ -55,6 +69,20 @@ export class S3CompatibleObjectStorage implements ObjectStorage {
     if (!response.ok) throw new Error(`OBJECT_STORAGE_PUT_FAILED:${response.status}:${await response.text()}`);
     const etag = response.headers.get('etag')?.replace(/^"|"$/g, '') || undefined;
     return { key, etag, publicUrl: this.publicUrl(key) };
+  }
+
+  async getObject(inputKey: string): Promise<ObjectStorageGetResult | undefined> {
+    const key = normalizeKey(inputKey);
+    const path = `/${encodePathSegment(this.options.bucket)}/${encodeKey(key)}`;
+    const response = await this.request('GET', path, Buffer.alloc(0), undefined, sha256(Buffer.alloc(0)));
+    if (response.status === 404) return undefined;
+    if (!response.ok) throw new Error(`OBJECT_STORAGE_GET_FAILED:${response.status}:${await response.text()}`);
+    return {
+      key,
+      body: Buffer.from(await response.arrayBuffer()),
+      contentType: response.headers.get('content-type')?.split(';', 1)[0]?.trim() || 'application/octet-stream',
+      etag: response.headers.get('etag')?.replace(/^"|"$/g, '') || undefined,
+    };
   }
 
   publicUrl(key: string): string | undefined {
@@ -103,7 +131,7 @@ export class S3CompatibleObjectStorage implements ObjectStorage {
       authorization,
     };
     if (contentType) headers['content-type'] = contentType;
-    return fetch(new URL(path, endpoint), { method, headers, body: method === 'HEAD' ? undefined : new Uint8Array(body) });
+    return fetch(new URL(path, endpoint), { method, headers, body: method === 'PUT' ? new Uint8Array(body) : undefined });
   }
 }
 

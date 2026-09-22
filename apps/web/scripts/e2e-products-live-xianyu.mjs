@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -146,9 +146,22 @@ async function run() {
     const body = String(await evaluate(cdp, 'document.querySelector(".xianyu-detail-drawer")?.innerText ?? ""'));
     return !body.includes('正在读取并保存闲鱼商品详情') && (body.includes('闲鱼商品详情加载失败') || body.includes('摘要指纹') || body.includes('商品信息'));
   }, 'PPT Master detail result', 45_000);
+  await waitFor(async () => {
+    const state = await evaluate(cdp, '(() => Array.from(document.querySelectorAll(".xianyu-detail-image img")).map((image) => ({ src: image.currentSrc || image.src, complete: image.complete, naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight, opacity: getComputedStyle(image).opacity })))()');
+    if (Array.isArray(state) && state.length > 0 && state.every((image) => image.complete && image.naturalWidth > 0)) return true;
+    throw new Error(JSON.stringify(state));
+  }, 'PPT Master object-storage image previews', 45_000);
   const detailBody = String(await evaluate(cdp, 'document.querySelector(".xianyu-detail-drawer")?.innerText ?? ""'));
   const detailOk = !detailBody.includes('闲鱼商品详情加载失败') && (detailBody.includes('PPT Master') || detailBody.includes('1078553391460'));
-  console.log(JSON.stringify({ step: 'detail', detailOk, drawerExcerpt: detailBody.slice(0, 800) }));
+  const imageStates = await evaluate(cdp, `Array.from(document.querySelectorAll('.xianyu-detail-drawer .xianyu-detail-image img')).map((image) => ({ src: image.src, complete: image.complete, naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight, opacity: getComputedStyle(image).opacity }))`);
+  if (!Array.isArray(imageStates) || imageStates.length === 0 || imageStates.some((image) => image.complete !== true || image.naturalWidth <= 0 || image.naturalHeight <= 0)) {
+    throw new Error(`LIVE_DETAIL_IMAGES_NOT_RENDERED:${JSON.stringify(imageStates)}`);
+  }
+  await evaluate(cdp, `document.querySelector('.xianyu-detail-gallery')?.scrollIntoView({ block: 'center' })`);
+  const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png' });
+  const screenshotPath = join(root, 'docs', 'evidence', 'stage5', 'S4-VS2', 'screenshots', 'products-detail-drawer-live-object-storage-desktop-1440x900.png');
+  writeFileSync(screenshotPath, Buffer.from(screenshot.data, 'base64'));
+  console.log(JSON.stringify({ step: 'detail', detailOk, imageStates, screenshotPath, drawerExcerpt: detailBody.slice(0, 800) }));
   await evaluate(cdp, 'document.querySelector(".xianyu-detail-drawer .icon-button")?.click()');
 
   const syncStart = cdp.events.length;

@@ -17,9 +17,15 @@ async function request(path, options = {}) {
 
 const originalFetch = globalThis.fetch;
 let liveCalls = 0;
+const expectedImageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 globalThis.fetch = async (input, init) => {
   const url = String(input);
-  if (url.startsWith('https://img.example/')) return new Response(Buffer.from([1, 2, 3]), { status: 200, headers: { 'content-type': 'image/jpeg' } });
+  if (url.startsWith('https://img.example/')) {
+    return new Response(expectedImageBytes, {
+      status: 200,
+      headers: { 'content-type': 'image/png' },
+    });
+  }
   return originalFetch(input, init);
 };
 
@@ -51,6 +57,19 @@ try {
   assert.equal(first.body.data.cached, false);
   assert.equal(first.body.data.summary.title, 'PPT Master pptmaster');
   assert.equal(first.body.data.assets.length, 1);
+  assert.match(first.body.data.images[0].url, new RegExp(`/api/v1/products/${product.id}/detail/assets/`));
+  const imageResponse = await fetch(new URL(first.body.data.images[0].url, `http://127.0.0.1:${port}`), { headers: { cookie } });
+  assert.equal(imageResponse.status, 200);
+  assert.equal(imageResponse.headers.get('content-type'), 'image/png');
+  assert.equal(imageResponse.headers.get('x-content-type-options'), 'nosniff');
+  assert.deepEqual([...new Uint8Array(await imageResponse.arrayBuffer())], [...expectedImageBytes]);
+  const storedAsset = first.body.data.assets[0];
+  if (storedAsset?.storageKey && runtime.objectStorage && 'objects' in runtime.objectStorage) {
+    runtime.objectStorage.objects.delete(storedAsset.storageKey);
+    const repairedImageResponse = await fetch(new URL(first.body.data.images[0].url, `http://127.0.0.1:${port}`), { headers: { cookie } });
+    assert.equal(repairedImageResponse.status, 200);
+    assert.deepEqual([...new Uint8Array(await repairedImageResponse.arrayBuffer())], [...expectedImageBytes]);
+  }
   assert.equal(liveCalls, 1);
 
   const cached = await request(`/api/v1/products/${product.id}/xianyu-detail`, { headers: { cookie } });

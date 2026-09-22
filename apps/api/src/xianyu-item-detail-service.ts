@@ -61,6 +61,30 @@ export class XianyuItemDetailService {
     return detailView(persisted, { summary, rawResponse: response.response ?? {}, imageUrls, assetUploadErrors: assetResult.errors, syncedAt }, false, assetResult.errors);
   }
 
+  /**
+   * Resolve a persisted product image for the authenticated media route.
+   * If an older record points at an object that is no longer present (for
+   * example, after a test bucket was removed), rehydrate that object from the
+   * source URL already stored with the asset. This does not call Xianyu or
+   * read DOM data; it only repairs the persisted object-storage reference.
+   */
+  async getAsset(input: { adminId: string; productId: string; assetId: string }): Promise<{ asset: ProductAssetRecord; object: { key: string; body: Buffer; contentType: string; etag?: string } } | undefined> {
+    const product = await this.store.getProduct(input.adminId, input.productId);
+    const asset = product?.assets?.find((candidate) => candidate.id === input.assetId && candidate.status === 'active' && candidate.mimeType.toLowerCase().startsWith('image/'));
+    if (!asset) return undefined;
+    let object = await this.objectStorage.getObject(asset.storageKey);
+    if (!object && asset.sourceUrl) {
+      try {
+        const downloaded = await downloadImage(asset.sourceUrl);
+        await this.objectStorage.putObject({ key: asset.storageKey, body: downloaded.body, contentType: downloaded.contentType });
+        object = { key: asset.storageKey, body: downloaded.body, contentType: downloaded.contentType, etag: downloaded.checksum };
+      } catch {
+        return undefined;
+      }
+    }
+    return object ? { asset, object } : undefined;
+  }
+
   private async persistImages(productId: string, itemId: string, imageUrls: string[]): Promise<{ assets: Array<{ storageKey: string; mimeType: string; checksum?: string; sourceUrl: string; metadata?: Record<string, unknown>; status: 'active' | 'failed' }>; errors: Array<{ sourceUrl: string; message: string }> }> {
     const assets: Array<{ storageKey: string; mimeType: string; checksum?: string; sourceUrl: string; metadata?: Record<string, unknown>; status: 'active' | 'failed' }> = [];
     const errors: Array<{ sourceUrl: string; message: string }> = [];
@@ -102,10 +126,10 @@ function detailView(product: ProductRecord, detail: StoredDetail, cached: boolea
   const detailProduct = product.assets ? { ...product, assets, assetCount: assets.length } : product;
   const images = assets.map((asset) => {
     const publicUrl = asset.metadata && typeof asset.metadata.publicUrl === 'string' ? asset.metadata.publicUrl : undefined;
-    // Keep the original source URL as the browser preview fallback. The
-    // object-storage reference is still persisted and exposed separately;
-    // private MinIO buckets may not be directly readable from the browser.
-    return { ...asset, url: asset.sourceUrl ?? publicUrl, publicUrl };
+    const url = asset.status === 'active'
+      ? `/api/v1/products/${encodeURIComponent(product.id)}/detail/assets/${encodeURIComponent(asset.id)}`
+      : asset.sourceUrl ?? publicUrl;
+    return { ...asset, url, publicUrl };
   });
   return { ...detail.summary, product: detailProduct, itemId: detail.summary.itemId ?? product.externalProductRef ?? '', summary: detail.summary, rawResponse: detail.rawResponse, imageUrls: detail.imageUrls, images, assets, syncedAt: detail.syncedAt, cached, assetUploadErrors };
 }
