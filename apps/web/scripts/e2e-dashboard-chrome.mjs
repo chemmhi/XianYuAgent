@@ -120,8 +120,23 @@ async function run() {
   if (dashboardBody.includes('Live API')) throw new Error('dashboard unexpectedly rendered live mode under explicit mock override');
   const dashboardRequests = cdp.events.filter((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.url?.includes('/api/v1/dashboard/snapshot'));
   if (dashboardRequests.length > 0) throw new Error('dashboard unexpectedly requested live snapshot API under explicit mock override');
-  await assertText(cdp, '仪表盘');
-  await assertText(cdp, '当前账号健康度');
+  await assertText(cdp, '总销售额');
+  await assertText(cdp, '今天');
+  await assertText(cdp, '三天');
+  await assertText(cdp, '一个月内');
+  await assertText(cdp, '月份选择');
+  await assertText(cdp, '自定义时间区间');
+  const defaultRangeSelected = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent?.trim() === "一个月内"); return Boolean(button?.classList.contains("ui-button-primary")); })()');
+  if (!defaultRangeSelected) throw new Error('dashboard default trend range is not one month');
+  const dashboardBodyAfterLayout = String(await evaluate(cdp, 'document.body.innerText'));
+  if (dashboardBodyAfterLayout.includes('当前账号健康度')) throw new Error('dashboard still renders the removed account health card');
+  if (dashboardBodyAfterLayout.includes('可售卡密库存')) throw new Error('dashboard still renders the removed coupon stock KPI');
+  const rangeChanged = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent?.trim() === "三天"); if (!button) return false; button.click(); return true; })()');
+  if (!rangeChanged) throw new Error('dashboard trend quick range control missing');
+  await waitFor(async () => Boolean(await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).some((candidate) => candidate.textContent?.trim() === "三天" && candidate.classList.contains("ui-button-primary"))')), 'dashboard selected trend range');
+  const tooltipShown = await evaluate(cdp, '(() => { const chart = document.querySelector(".dashboard-chart-wrap svg"); if (!chart) return false; chart.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 320, clientY: 120 })); return true; })()');
+  if (!tooltipShown) throw new Error('dashboard trend chart missing');
+  await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector(".dashboard-chart-tooltip"))')), 'dashboard trend tooltip');
   await assertText(cdp, '商品排行');
   await assertText(cdp, '最近处理记录');
   const sharedSidebarCount = await evaluate(cdp, 'document.querySelectorAll(".sidebar").length');
@@ -143,7 +158,7 @@ async function run() {
   if (!drawerTrigger) throw new Error('risk todo trigger missing');
   await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector(".dashboard-risk-drawer"))')), 'risk todo drawer');
   await assertText(cdp, '付款后未发货');
-  console.log('local Chrome E2E passed: dashboard route -> KPI/trend/health -> mobile shell -> risk drawer');
+  console.log('local Chrome E2E passed: dashboard route -> KPI/trend range/tooltip -> mobile shell -> risk drawer');
   cdp.socket.close();
 }
 

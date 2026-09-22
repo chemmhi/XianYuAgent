@@ -80,6 +80,7 @@ export interface ChatMessage {
 }
 
 export interface DashboardSnapshot {
+  totalSales: number;
   todayOrderAmount: number;
   autoProcessRate: number;
   pendingManualCount: number;

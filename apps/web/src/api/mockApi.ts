@@ -74,6 +74,7 @@ export function createMockApi(): XianyuApi {
     dashboard: {
       async getSnapshot(): Promise<DashboardSnapshot> {
         return {
+          totalSales: 78420,
           todayOrderAmount: 18640,
           autoProcessRate: 96.8,
           pendingManualCount: 3,

@@ -1,22 +1,50 @@
 import type { DashboardSnapshot } from '../../api/contracts';
 import type { DashboardApi } from './api';
+import type { DashboardQuery } from './types';
 
 export function createMockDashboardApi(): DashboardApi {
   return {
-    async getSnapshot(): Promise<DashboardSnapshot> {
+    async getSnapshot(query?: DashboardQuery): Promise<DashboardSnapshot> {
+      const trend = [
+        { label: '05/24', orderAmount: 52, autoProcessRate: 79 },
+        { label: '05/25', orderAmount: 58, autoProcessRate: 82 },
+        { label: '05/26', orderAmount: 64, autoProcessRate: 85 },
+        { label: '05/27', orderAmount: 61, autoProcessRate: 84 },
+        { label: '05/28', orderAmount: 75, autoProcessRate: 88 },
+        { label: '05/29', orderAmount: 72, autoProcessRate: 90 },
+        { label: '05/30', orderAmount: 84, autoProcessRate: 93 },
+        { label: '05/31', orderAmount: 88, autoProcessRate: 94 },
+        { label: '06/01', orderAmount: 92, autoProcessRate: 95 },
+        { label: '06/02', orderAmount: 87, autoProcessRate: 94 },
+        { label: '06/03', orderAmount: 96, autoProcessRate: 96 },
+        { label: '06/04', orderAmount: 101, autoProcessRate: 96 },
+        { label: '06/05', orderAmount: 108, autoProcessRate: 97 },
+        { label: '06/06', orderAmount: 112, autoProcessRate: 97 },
+        { label: '06/07', orderAmount: 118, autoProcessRate: 98 },
+        { label: '06/08', orderAmount: 116, autoProcessRate: 97 },
+        { label: '06/09', orderAmount: 124, autoProcessRate: 98 },
+        { label: '06/10', orderAmount: 128, autoProcessRate: 98 },
+        { label: '06/11', orderAmount: 132, autoProcessRate: 98 },
+        { label: '06/12', orderAmount: 138, autoProcessRate: 99 },
+        { label: '06/13', orderAmount: 142, autoProcessRate: 98 },
+        { label: '06/14', orderAmount: 147, autoProcessRate: 99 },
+        { label: '06/15', orderAmount: 150, autoProcessRate: 99 },
+        { label: '06/16', orderAmount: 156, autoProcessRate: 99 },
+        { label: '06/17', orderAmount: 160, autoProcessRate: 99 },
+        { label: '06/18', orderAmount: 164, autoProcessRate: 99 },
+        { label: '06/19', orderAmount: 168, autoProcessRate: 99 },
+        { label: '06/20', orderAmount: 172, autoProcessRate: 99 },
+        { label: '06/21', orderAmount: 176, autoProcessRate: 99 },
+        { label: '06/22', orderAmount: 182, autoProcessRate: 99 },
+      ];
+      const visibleTrend = query?.range === 'today' ? trend.slice(-1) : query?.range === '3d' ? trend.slice(-3) : query?.range === '7d' ? trend.slice(-7) : trend;
       return {
+        totalSales: 78420,
         todayOrderAmount: 18640,
         autoProcessRate: 96.8,
         pendingManualCount: 3,
         availableCouponCount: 1286,
-        trend: [
-          { label: '周一', orderAmount: 58, autoProcessRate: 82 },
-          { label: '周二', orderAmount: 64, autoProcessRate: 85 },
-          { label: '周三', orderAmount: 61, autoProcessRate: 84 },
-          { label: '周四', orderAmount: 75, autoProcessRate: 88 },
-          { label: '周五', orderAmount: 72, autoProcessRate: 90 },
-          { label: '周六', orderAmount: 84, autoProcessRate: 93 },
-        ],
+        trend: visibleTrend,
         health: [
           { label: '监听心跳', value: '正常', tone: 'ok' },
           { label: '自动回复策略', value: '180 秒', tone: 'info' },

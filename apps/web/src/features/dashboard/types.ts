@@ -2,8 +2,16 @@ import type { DashboardSnapshot } from '../../api/contracts';
 
 export type DashboardTone = 'ok' | 'warn' | 'danger' | 'info' | 'gray';
 
+export type DashboardRange = 'today' | '3d' | '7d' | '1m' | 'custom';
+
+export interface DashboardQuery {
+  range: DashboardRange;
+  from?: string;
+  to?: string;
+}
+
 export interface DashboardKpiVM {
-  key: 'orderAmount' | 'autoProcessRate' | 'pendingManual' | 'couponStock';
+  key: 'totalSales' | 'orderAmount' | 'autoProcessRate' | 'pendingManual';
   label: string;
   value: string;
   delta: string;
@@ -70,10 +78,10 @@ export interface DashboardState {
 
 export function toDashboardVM(snapshot: DashboardSnapshot): DashboardVM {
   const kpis: DashboardKpiVM[] = [
+    { key: 'totalSales', label: '总销售额', value: `¥${snapshot.totalSales.toLocaleString('zh-CN')}`, delta: '累计', context: '全部已付款订单', tone: 'info' },
     { key: 'orderAmount', label: '今日订单金额', value: `¥${snapshot.todayOrderAmount.toLocaleString('zh-CN')}`, delta: '实时', context: '今日汇总', tone: 'ok' },
     { key: 'autoProcessRate', label: '自动处理成功率', value: `${snapshot.autoProcessRate}%`, delta: '实时', context: '当前账号', tone: 'ok' },
     { key: 'pendingManual', label: '待人工处理', value: String(snapshot.pendingManualCount), delta: '待处理', context: '风险待办', tone: 'warn' },
-    { key: 'couponStock', label: '可售卡密库存', value: snapshot.availableCouponCount.toLocaleString('zh-CN'), delta: '健康', context: '虚拟资源', tone: 'info' },
   ];
 
   const health = snapshot.health ?? [

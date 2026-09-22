@@ -5,7 +5,7 @@ import { hashPassword } from '../dist/security.js';
 const databaseUrl = process.env.DATABASE_URL ?? 'postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/xianyu_agent';
 const suffix = `${process.pid}-${Date.now()}`;
 const email = `dashboard-pg-${suffix}@example.com`;
-const now = new Date('2026-09-20T12:00:00.000Z');
+const now = new Date();
 const runtimeConfig = { host: '127.0.0.1', port: 0, databaseUrl, redisUrl: undefined, cookieSecure: false, allowInMemory: false, sessionIdleMs: 1_800_000, sessionAbsoluteMs: 28_800_000, xianyuQrMode: 'stub' };
 let runtime;
 let adminId;
@@ -98,6 +98,7 @@ try {
 
   const snapshot = await request(port, '/api/v1/dashboard/snapshot', { headers: { cookie } });
   assert.equal(snapshot.response.status, 200);
+  assert.equal(snapshot.body.data.totalSales, 179);
   assert.equal(snapshot.body.data.todayOrderAmount, 179);
   assert.equal(snapshot.body.data.autoProcessRate, 50);
   assert.equal(snapshot.body.data.pendingManualCount, 2);
@@ -106,6 +107,13 @@ try {
   assert.ok(snapshot.body.data.recentActivity.some((item) => item.text.includes('PENDING')));
   assert.ok(snapshot.body.data.riskTodos.some((item) => item.id.startsWith('order-')));
 
+  const todayTrend = await request(port, '/api/v1/dashboard/snapshot?range=today', { headers: { cookie } });
+  assert.equal(todayTrend.response.status, 200);
+  assert.equal(todayTrend.body.data.trend.length, 24);
+
+  const invalidRange = await request(port, '/api/v1/dashboard/snapshot?range=invalid', { headers: { cookie } });
+  assert.equal(invalidRange.response.status, 422);
+
   await runtime.close();
   runtime = createApp(runtimeConfig);
   await runtime.listen();
@@ -113,6 +121,7 @@ try {
   const restartedLogin = await runtime.auth.login({ email, password: 'password-123' });
   const reread = await request(restartedPort, '/api/v1/dashboard/snapshot', { headers: { cookie: cookieHeader(restartedLogin) } });
   assert.equal(reread.response.status, 200);
+  assert.equal(reread.body.data.totalSales, 179);
   assert.equal(reread.body.data.todayOrderAmount, 179);
   assert.equal(reread.body.data.availableCouponCount, 3);
   console.log(JSON.stringify({ status: 'PASS', storage: 'postgres', persistedAfterRestart: true, todayOrderAmount: reread.body.data.todayOrderAmount, availableCouponCount: reread.body.data.availableCouponCount, riskTodoCount: reread.body.data.riskTodos.length }, null, 2));
