@@ -32,7 +32,7 @@
 
 ### 拒绝与人工
 
-普通售后、投诉、发货异常、低置信度和跨商品问题默认继续帮助或澄清；只有终极敏感信息、用户明确要求人工、确实缺少必要权限或版本化策略明确禁止继续时，才拒绝或 handoff。
+普通售后、投诉、发货异常、低置信度和跨商品问题默认继续帮助或澄清；只有终极敏感信息、用户明确要求人工、白名单权限/事实证据或版本化策略明确升级时，才拒绝或 handoff。买家不回复澄清不得自动 handoff。
 
 ### 事实
 
@@ -40,7 +40,7 @@
 
 ### 结果
 
-发送成功、消息落库、买家已读、目标推进和问题解决是不同状态。没有后续证据时，最多保持 review_pending、awaiting_user 或 unknown，不能自动标记 resolved。
+发送成功、消息落库、买家已读、目标推进和问题解决是不同状态。没有后续证据时，最多保持 review_pending、awaiting_user 或 unknown，不能自动标记 resolved；reopenWindow 必须来自 policyConfig。
 
 ## 术语
 
@@ -53,3 +53,8 @@
 | Pre-send Review | 发送前检查目标覆盖、事实、权限、情绪和推荐门控 |
 | Outcome Review | 发送后基于后续消息和领域事实判断业务结果 |
 | Handoff | 进入人工处理队列，不等同于错误或默认终点 |
+
+## 关联决策
+
+- decisions/ADR-AR-0001-route-and-refusal-policy.md：路由、拒绝和传输/解决分离的高层决策；
+- decisions/ADR-AR-0002-confirmed-action-and-resolution-contract.md：用户已确认的 ActionKind、澄清、handoff、等价秘密和 resolved/closed 契约。

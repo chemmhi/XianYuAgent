@@ -2,7 +2,7 @@
 
 ## 切片状态
 
-- 状态：READY_FOR_REVIEW
+- 状态：FIXING
 - 阶段：0
 - 变更类型：文档、策略和验收契约；不改业务代码
 - Owner：repair-agent
@@ -28,6 +28,7 @@
 - 本切片策略矩阵：slices/AR-VS-00-policy-matrix.md；
 - 需求到验收到测试追踪：slices/AR-VS-00-traceability.md；
 - 决策记录：decisions/ADR-AR-0001-route-and-refusal-policy.md；
+- 补充决策记录：decisions/ADR-AR-0002-confirmed-action-and-resolution-contract.md；
 - 当前基线证据和剩余实现缺口；
 - 可供 AR-VS-01 使用的策略输入、指标口径和评审清单。
 
@@ -53,6 +54,14 @@ persisted 只表示发送/落库完成。问题解决必须由后续买家确认
 
 targetStage 只能表示计划推进方向，observedStage 必须来自订单、支付、物流、商品和买家确认事实。模型不能单独把“可以拍”“马上付”“已提醒评价”升级为已完成阶段。
 
+### D-AR-0006：唯一动作与澄清不升级人工
+
+ActionPlan 只允许一个 canonical ActionKind；混合敏感消息通过 safetyHandling 局部拒绝。澄清不回复保持 awaiting_user，TTL 后转 unresolved，不自动 handoff；handoff 只接受白名单 reasonCode。
+
+### D-AR-0007：解决证据与重开
+
+resolved/closed 依赖领域事实、买家确认和人工覆盖的固定优先级；否定证据、重复追问或事实回退在 policyConfig.resolution.reopenWindow 内触发 needs_followup。未配置窗口时不得自动 closed。
+
 ## 禁止范围
 
 - 不修改业务代码、数据库迁移、发送行为或 Prompt 实现；
@@ -69,6 +78,7 @@ targetStage 只能表示计划推进方向，observedStage 必须来自订单、
 - AC-AR00-004：transportStatus 与 resolutionStatus 的定义、指标和证据来源分离；
 - AC-AR00-005：生命周期、澄清、情绪、推荐和 Outcome Review 的后续切片依赖关系明确；
 - AC-AR00-006：需求、验收和测试追踪可回读，且风险/决策已登记。
+- AC-AR00-007：ActionKind、handoff reasonCode、澄清不变量、等价秘密和解决证据优先级可由契约直接验收。
 
 ## 证据
 

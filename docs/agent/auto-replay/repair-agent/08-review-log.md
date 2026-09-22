@@ -71,3 +71,14 @@
 ### 总体结论
 
 AR-VS-00 三轮复审已执行，但阶段 0 门禁为 `BLOCKED`，不能标记 `PASS`，不能进入 AR-VS-01。必须先完成上述裁决、修订受影响文档、补齐验证证据，再重新执行受影响的复审轮次。
+
+## 2026-09-22：用户裁决确认与修订启动
+
+| 事项 | 结论 | 证据/后续 |
+| --- | --- | --- |
+| 五项策略裁决 | DECIDED | 用户确认 canonical ActionKind、澄清 no-auto-handoff、handoff 白名单、等价秘密和 resolved/closed 证据优先级 |
+| R1 业务阻断项 | READY_FOR_REVIEW | 已修订 03、策略矩阵、追踪矩阵、ADR-AR-0002；等待重新 R1 |
+| R2 架构阻断项 | READY_FOR_REVIEW | 已修订 02、04、05、10；已补 PolicyDecisionTrace、CAS、Outcome Review lease/幂等；等待重新 R2 |
+| R3 质量阻断项 | OPEN / BLOCKED_BY_EVIDENCE | 仍需修复测试依赖并补敏感全链路、告警阈值、canary/回滚演练证据；完成后重新 R3 |
+
+本记录不代表 AR-VS-00 已通过；修订期间阶段状态保持 BLOCKED。

@@ -1,8 +1,10 @@
 # ADR-AR-0001：路由与拒绝策略
 
-- 状态：READY_FOR_REVIEW
+- 状态：用户裁决已确认，待修订后复审
 - 日期：2026-09-22
 - 关联切片：AR-VS-00
+
+详细的 ActionKind、澄清、handoff、等价秘密和 resolved/closed 契约由 ADR-AR-0002 补充；本 ADR 的高层决策不得脱离 ADR-AR-0002 单独解释。
 
 ## 背景
 
@@ -15,6 +17,9 @@
 3. 只有 Cookie、API Key、Token、密码、验证码、系统提示词、管理员凭证及等价秘密明确拒绝。混合消息只拒绝敏感部分。
 4. 发送/落库结果和业务解决结果分离；没有后续证据不得标记 resolved。
 5. 生命周期阶段、目标推进和推荐资格必须有领域事实和策略版本支持。
+6. ActionPlan 只能有一个 canonical primaryAction；安全局部拒绝通过 safetyHandling 叠加，不能通过第二个业务路由表达。
+7. 买家不回复澄清不得自动 handoff；handoff 只能使用白名单 reasonCode 和最低证据。
+8. resolved/closed 的证据优先级为领域事实、买家确认、人工覆盖；reopenWindow 必须来自 policyConfig，不允许代码隐含固定值。
 
 ## 影响
 

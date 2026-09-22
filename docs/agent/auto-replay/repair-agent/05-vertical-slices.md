@@ -28,8 +28,8 @@
 ## AR-VS-01：ConversationState、Objective 与 Policy Kernel
 
 - 目标：建立跨消息状态和版本化策略的最小可运行内核。
-- 数据/API：新增状态、目标、版本和审计字段，保留旧 run 兼容读写。
-- 后端：实现 StateReducer、PolicyEngine、ActionPlan，路由层不得自行写状态。
+- 数据/API：新增 canonical ConversationState、Objective、ActionKind、PolicyConfig、PolicyDecisionTrace，保留旧 run 兼容读写。
+- 后端：实现 StateReducer、PolicyEngine、ActionPlan；统一优先级/互斥规则，路由层不得自行写状态。
 - 测试：创建/更新、乐观锁、重复消息、跨账号拒绝、迁移复读、策略回滚。
 - 非目标：不实现澄清、生命周期引导和推荐动作。
 - 回滚：停止写新字段，保留旧 run 读路径。
@@ -37,15 +37,15 @@
 ## AR-VS-02：澄清与 awaiting_user 闭环
 
 - 目标：信息不足时先问最小问题，下一条消息到达后恢复原目标。
-- 数据/API：pendingQuestions、expectedAnswerType、sourceMessageId、clarificationRound 和澄清事件。
-- 策略：一次最多一个问题；超时保持等待；超过上限优先可选项或有限帮助，不默认 handoff。
+- 数据/API：pendingQuestions、expectedAnswerType、sourceMessageId、questionFingerprint、clarificationRound、awaitingUserSince、awaitingUserTtl 和澄清事件。
+- 策略：一次最多一个问题；不回复保持 awaiting_user；重复问题去重；TTL 后转 unresolved，不自动 handoff；明确新目标才切换。
 - 测试：模糊问题→澄清→补充→继续原目标；重复、并发、超时、目标切换、跨账号隔离。
 - 回滚：关闭 clarify flag，回到安全普通回答，保留历史事件。
 
 ## AR-VS-03：发送前 Pre-send Review
 
 - 目标：发送前确认目标覆盖、事实引用、允许动作和敏感边界。
-- 数据/API：ReviewRecord、goalCoverage、factRefs、policyVersion、reviewDecision。
+- 数据/API：ReviewRecord、goalCoverage、factRefs、policyVersion、reviewDecision、handoffReasonCode 和敏感 fail-closed 事件。
 - 策略：确定性校验优先；失败最多一次修订，之后优先澄清或安全帮助。
 - 测试：无事实价格/库存/订单断言、事实冲突/过期、错误账号/商品、敏感部分拒绝。
 - 非目标：不判断发送后是否解决。
@@ -80,8 +80,8 @@
 ## AR-VS-07：发送后 Outcome Review
 
 - 目标：区分消息已发送、目标已推进和问题已解决。
-- 数据/API：resolutionStatus、review lease、重试、人工覆盖和拆分指标。
-- 策略：观察发送结果、后续消息和最新领域事实；无证据保持 pending/awaiting；重复追问或否定进入 follow-up/unresolved。
+- 数据/API：resolutionStatus、resolution evidence、review lease、重试、人工覆盖、reopenWindow 和拆分指标。
+- 策略：领域事实优先、买家确认增强、人工覆盖兜底；无证据保持 pending/awaiting/unknown；重复追问或否定在策略窗口内进入 needs_followup。
 - 前端：详情展示 transport、resolution、nextAction 三层状态，不能把 persisted 当完成。
 - 测试：pending→reviewing→resolved/needs_followup/unresolved、无后续、超时、重启、人工覆盖、真实回读。
 - 回滚：停止 worker，保留发送结果，resolution 回到 pending，不删事件。

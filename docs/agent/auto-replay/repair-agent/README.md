@@ -10,11 +10,12 @@ repair-agent 是自动回复 Agent 的修复治理文档域，不是新的买家
 
 ## 当前状态
 
-- 状态：READY_FOR_REVIEW
+- 状态：BLOCKED / 文档修订中
 - 日期：2026-09-22
 - 当前阶段：阶段 0 文档重组与范围锁定
 - 交付边界：仅重组和补充修复文档，不修改业务代码、数据库迁移或发送行为
-- 下一步：完成本目录的业务/验收、架构/数据流、质量/安全/运维三轮独立评审后，按 AR-VS-00 到 AR-VS-09 串行执行
+- 当前进展：三轮独立评审已执行；用户已确认五项策略裁决，正在修订 AR-VS-00 阻断项
+- 下一步：完成文档契约修订、验证证据补齐并重新通过 R1/R2/R3 后，才可按 AR-VS-00 到 AR-VS-09 串行执行
 
 ## 不可妥协约束
 
@@ -46,6 +47,7 @@ repair-agent 是自动回复 Agent 的修复治理文档域，不是新的买家
 | slices/AR-VS-00-policy-matrix.md | 路由、拒绝、继续帮助、生命周期和指标矩阵 |
 | slices/AR-VS-00-traceability.md | 需求→验收→测试追踪和静态证据 |
 | decisions/ADR-AR-0001-route-and-refusal-policy.md | 路由与拒绝策略决策记录 |
+| decisions/ADR-AR-0002-confirmed-action-and-resolution-contract.md | 已确认的动作、澄清与结果契约 |
 
 ## 职责边界
 

@@ -14,7 +14,7 @@
 
 重组结论：`docs/agent/auto-replay/repair-agent/` 成为当前修复治理唯一入口；旧 `docs/agent/auto-reply/` 仅保留运行契约和历史兼容快照。
 
-> 当前修复域评审以 `docs/agent/auto-replay/repair-agent/08-review-log.md` 为准。2026-09-22 完成的 AR-VS-00 三轮独立复审结论为：R1 有条件通过、R2 FAIL、R3 BLOCKED_BY_EVIDENCE；阶段 0 保持 BLOCKED，不能进入 AR-VS-01。本文早先记录的 `READY_FOR_REVIEW` 仅表示复审材料已准备，不是最终通过结论。
+++> 当前修复域评审以 `docs/agent/auto-replay/repair-agent/08-review-log.md` 为准。2026-09-22 完成的 AR-VS-00 三轮独立复审结论为：R1 有条件通过、R2 FAIL、R3 BLOCKED_BY_EVIDENCE；阶段 0 保持 BLOCKED，不能进入 AR-VS-01。本文早先记录的 `READY_FOR_REVIEW` 仅表示复审材料已准备，不是最终通过结论。用户已确认五项裁决，当前进入文档修订与证据补齐阶段。
 
 ## 2026-09-22：AR-VS-00 范围、策略与基线锁定
 
