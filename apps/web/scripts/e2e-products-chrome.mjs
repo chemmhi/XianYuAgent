@@ -110,6 +110,36 @@ async function run() {
     const items = Array.from({ length: 29 }, (_, index) => ({ externalProductRef: `SYNC-${process.pid}-${index + 1}`, title: `Chrome E2E 同步商品 ${index + 1}`, description: '来自闲鱼同步 fixture', categoryCode: 'digital', priceMinor: 1290 + index, detailUrl: `https://www.goofish.com/item?id=SYNC-${process.pid}-${index + 1}`, imageUrls: ['https://img.example/sync.jpg'], attributes: { source: 'chrome-sync-e2e' }, sourcePayloadDigest: `sync-${process.pid}-${index + 1}` }));
     return { pages: [{ success: true, accountInvalid: false, cookieHeader: '', items, pageNumber: 1, pageSize: 20, totalCount: items.length, totalPages: 1, hasMore: false }], items, hasMore: false };
   };
+  apiRuntime.xianyu.fetchItemDetail = async (_adminId, _accountId, itemId) => ({
+    success: true,
+    accountInvalid: false,
+    cookieHeader: '',
+    summary: {
+      itemId: String(itemId),
+      categoryId: '50023914',
+      title: 'Chrome E2E 闲鱼详情',
+      description: '详情接口返回的完整商品描述。',
+      richTextDescription: '详情接口返回的富文本商品描述。',
+      priceText: '¥8.50',
+      priceMinor: 850,
+      browseCount: 315,
+      wantCount: 33,
+      collectCount: 8,
+      favoriteCount: 2,
+      interactFavoriteCount: 1,
+      soldCount: 0,
+      quantity: 10000,
+      seller: { sellerId: 'seller-e2e', nickname: 'E2E 卖家', city: '深圳', soldCount: 59, itemCount: 37, goodRemarkCount: 22, badRemarkCount: 0 },
+      imageUrls: ['https://img.example/xianyu-detail.jpg'],
+    },
+    response: { data: { itemDO: { itemId: String(itemId), title: 'Chrome E2E 闲鱼详情' } } },
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (url === 'https://img.example/xianyu-detail.jpg') return new Response(new Uint8Array([255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 255, 217]), { status: 200, headers: { 'content-type': 'image/jpeg' } });
+    return originalFetch(input, init);
+  };
   const cookie = cookiesFrom(bootstrap);
   spawnProcess(npm, npmArgs(['--workspace', 'apps/web', 'run', 'dev', '--', '--host', '127.0.0.1', '--port', String(webPort)]), { env: { ...process.env, VITE_API_MODE: 'live', VITE_API_BASE_URL: '', VITE_API_PROXY_TARGET: apiUrl } });
   await waitFor(async () => (await fetch(`${webUrl}/products`)).ok, 'Vite frontend');
@@ -136,9 +166,18 @@ async function run() {
   if (await evaluate(cdp, 'document.querySelector("[data-testid=products-total]") !== null')) throw new Error('redundant toolbar total should be removed');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 商品'), 'product row');
   const columns = await evaluate(cdp, 'Array.from(document.querySelectorAll(".products-head > span")).map((item) => item.textContent?.trim() ?? "").map((text) => text.replace(/\\s*[↑↓↕]$/, ""))');
-  if (JSON.stringify(columns) !== JSON.stringify(['商品标题', '价格', '关联卡券', 'AI提示词', '创建时间', '更新时间'])) throw new Error(`product columns mismatch: ${JSON.stringify(columns)}`);
+  if (JSON.stringify(columns) !== JSON.stringify(['商品标题', '价格', '关联卡券', 'AI提示词', '创建时间', '更新时间', '详情'])) throw new Error(`product columns mismatch: ${JSON.stringify(columns)}`);
   const productText = String(await evaluate(cdp, 'document.body.innerText'));
   if (!productText.includes('Chrome E2E 卡券') || !productText.includes('请用简洁中文回答买家问题。')) throw new Error('coupon or AI prompt column content missing');
+  const detailMark = cdp.events.length;
+  if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid^=product-detail-]"); if (!button) return false; button.click(); return true; })()')) throw new Error('product detail action button missing');
+  await waitFor(async () => cdp.events.slice(detailMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'GET' && event.params?.request?.url?.match(/\/api\/v1\/products\/[^/]+\/detail(?:\?|$)/)), 'xianyu product detail read request');
+  await waitFor(async () => { const text = String(await evaluate(cdp, 'document.body.innerText')); return text.includes('Chrome E2E 闲鱼详情') && text.includes('315') && text.includes('对象存储'); }, 'xianyu detail drawer');
+  const detailRefreshMark = cdp.events.length;
+  if (!await evaluate(cdp, '(() => { const button = document.querySelector(".xianyu-detail-drawer button.btn-small"); if (!button || button.disabled) return false; button.click(); return true; })()')) throw new Error('xianyu detail refresh button missing');
+  await waitFor(async () => cdp.events.slice(detailRefreshMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'POST' && event.params?.request?.url?.match(/\/api\/v1\/products\/[^/]+\/detail\/refresh(?:\?|$)/)), 'xianyu product detail refresh request');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 闲鱼详情'), 'xianyu detail after refresh');
+  if (!await evaluate(cdp, '(() => { const button = document.querySelector("[aria-label=\\"关闭闲鱼商品详情\\"]"); if (!button) return false; button.click(); return true; })()')) throw new Error('xianyu detail drawer close button missing');
   const searchEmptyMark = cdp.events.length;
   if (!await evaluate(cdp, '(() => { const input = document.querySelector("[aria-label=\\"搜索商品\\"]"); if (!input) return false; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set; setter?.call(input, "no-product-match"); input.dispatchEvent(new Event("input", { bubbles: true })); return true; })()')) throw new Error('product search input missing');
   await waitFor(async () => cdp.events.slice(searchEmptyMark).some((event) => { if (event.method !== 'Network.requestWillBeSent' || event.params?.request?.method !== 'GET') return false; const url = new URL(event.params.request.url); return url.pathname === '/api/v1/products' && url.searchParams.get('keyword') === 'no-product-match'; }), 'empty product search request');
