@@ -47,6 +47,7 @@ export function CouponsPage({ api: providedApi, productsApi: providedProductsApi
       setRelationBatch(null);
       setRelationReadonly(false);
     });
+    await controller.reload();
   };
   const bulkActions = selectedIds.size > 0 && <div className="coupons-bulk-actions">{<button className="btn danger" type="button" onClick={() => { if (window.confirm(`确认删除选中的 ${selectedIds.size} 张卡券？`)) void controller.batchDelete(Array.from(selectedIds)).then(() => setSelectedIds(new Set())); }}>删除选中 ({selectedIds.size})</button>}{selectedIds.size === 1 && <button className="btn ghost" type="button" onClick={() => { const batchId = Array.from(selectedIds)[0]; if (batchId) void openRelation(batchId); }}>关联商品</button>}</div>;
   return <section className="page-stack coupons-domain" data-coupons-domain>

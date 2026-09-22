@@ -20,12 +20,16 @@ export interface CouponsController {
   reload: () => Promise<void>;
   createBatch: (input: CreateCouponBatchRequest) => Promise<void>;
   updateBatch: (batchId: string, input: UpdateCouponBatchRequest) => Promise<void>;
-  bindBatch: (batchId: string, productId: string) => Promise<void>;
-  unbindBatch: (batchId: string, productId: string) => Promise<void>;
+  bindBatch: (batchId: string, productId: string, options?: CouponMutationOptions) => Promise<void>;
+  unbindBatch: (batchId: string, productId: string, options?: CouponMutationOptions) => Promise<void>;
   deleteBatch: (batchId: string) => Promise<void>;
   batchDelete: (batchIds: string[]) => Promise<void>;
   state: CouponsQueryState;
   mutation: CouponMutationState;
+}
+
+export interface CouponMutationOptions {
+  reload?: boolean;
 }
 
 export function useCouponsController(options: { api?: CouponsApi; initialFilters?: CouponBatchFilters } = {}): CouponsController {
@@ -52,12 +56,12 @@ export function useCouponsController(options: { api?: CouponsApi; initialFilters
   useEffect(() => { void reload(); }, [reload]);
 
   const setKeyword = useCallback((keyword: string) => setFilters((previous) => ({ ...previous, keyword, page: 1 })), []);
-  const runMutation = useCallback(async (action: () => Promise<unknown>) => {
+  const runMutation = useCallback(async (action: () => Promise<unknown>, options: CouponMutationOptions = {}) => {
     setMutation({ phase: 'submitting', error: null });
     try {
       await action();
       setMutation({ phase: 'success', error: null });
-      await reload();
+      if (options.reload !== false) await reload();
     } catch (error) {
       setMutation({ phase: 'error', error: toCouponsLoadError(error) });
       throw error;
@@ -66,8 +70,8 @@ export function useCouponsController(options: { api?: CouponsApi; initialFilters
 
   const createBatch = useCallback(async (input: CreateCouponBatchRequest) => { await runMutation(() => api.createBatch(input)); }, [api, runMutation]);
   const updateBatch = useCallback(async (batchId: string, input: UpdateCouponBatchRequest) => { await runMutation(() => api.updateBatch(batchId, input)); }, [api, runMutation]);
-  const bindBatch = useCallback(async (batchId: string, productId: string) => { await runMutation(() => api.bindBatch(batchId, productId)); }, [api, runMutation]);
-  const unbindBatch = useCallback(async (batchId: string, productId: string) => { await runMutation(() => api.unbindBatch(batchId, productId)); }, [api, runMutation]);
+  const bindBatch = useCallback(async (batchId: string, productId: string, options?: CouponMutationOptions) => { await runMutation(() => api.bindBatch(batchId, productId), options); }, [api, runMutation]);
+  const unbindBatch = useCallback(async (batchId: string, productId: string, options?: CouponMutationOptions) => { await runMutation(() => api.unbindBatch(batchId, productId), options); }, [api, runMutation]);
   const deleteBatch = useCallback(async (batchId: string) => { await runMutation(() => api.deleteBatch(batchId)); }, [api, runMutation]);
   const batchDelete = useCallback(async (batchIds: string[]) => { await runMutation(() => api.batchDelete(batchIds)); }, [api, runMutation]);
 

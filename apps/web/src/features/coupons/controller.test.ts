@@ -18,4 +18,12 @@ describe('coupons controller error mapping', () => {
     expect(source).not.toContain('setDetail');
     expect(source).toContain('runMutation(() => api.updateBatch(batchId, input))');
   });
+
+  it('allows relation writes to suppress their intermediate list reload', () => {
+    const source = readFileSync(fileURLToPath(new URL('./controller.ts', import.meta.url)), 'utf8');
+
+    expect(source).toContain('options.reload !== false');
+    expect(source).toContain('api.bindBatch(batchId, productId), options');
+    expect(source).toContain('api.unbindBatch(batchId, productId), options');
+  });
 });
