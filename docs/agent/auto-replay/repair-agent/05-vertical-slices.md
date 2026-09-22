@@ -4,18 +4,18 @@
 
 ## 总表
 
-| 切片 | 结果 |
-| --- | --- |
-| AR-VS-00 | 范围、策略、验收指标和基线锁定 |
-| AR-VS-01 | ConversationState、Objective、Policy Kernel |
-| AR-VS-02 | 澄清与 awaiting_user 闭环 |
-| AR-VS-03 | 发送前 Pre-send Review |
-| AR-VS-04 | 生命周期引导 |
-| AR-VS-05 | 跑题拉回与情绪门控 |
-| AR-VS-06 | 店内推荐 |
-| AR-VS-07 | 发送后 Outcome Review |
-| AR-VS-08 | 真实链路集成与发布准备 |
-| AR-VS-09 | 发布、回滚与交接 |
+| 切片 | 结果 | 当前状态 |
+| --- | --- | --- |
+| AR-VS-00 | 范围、策略、验收指标和基线锁定 | R1/R2 VERIFIED；R3 BLOCKED_BY_EVIDENCE |
+| AR-VS-01 | ConversationState、Objective、Policy Kernel | PASS（内核级） |
+| AR-VS-02 | 澄清与 awaiting_user 闭环 | PASS（内核级） |
+| AR-VS-03 | 发送前 Pre-send Review | PASS（内核级） |
+| AR-VS-04 | 生命周期引导 | PASS（内核级） |
+| AR-VS-05 | 跑题拉回与情绪门控 | PASS（内核级） |
+| AR-VS-06 | 店内推荐 | PASS（内核级） |
+| AR-VS-07 | 发送后 Outcome Review | PASS（内核级） |
+| AR-VS-08 | 真实链路集成与发布准备 | PASS（适配级） |
+| AR-VS-09 | 发布、回滚与交接 | PASS（门禁级；真实演练待补） |
 
 ## AR-VS-00：范围、策略与基线锁定
 

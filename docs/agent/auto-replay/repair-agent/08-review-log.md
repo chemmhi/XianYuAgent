@@ -93,3 +93,21 @@ AR-VS-00 三轮复审已执行，但阶段 0 门禁为 `BLOCKED`，不能标记 
 | R3 质量 / 安全 / 运维 | BLOCKED_BY_EVIDENCE | 真实持久化、敏感全链路、指标阈值、canary、kill switch、回滚演练尚未完成 |
 
 用户已明确后续人工审核节点默认批准继续；本记录仍保留独立复审与测试证据，不将默认批准等同于技术验证通过。
+
+## 2026-09-22：AR-VS-02 至 AR-VS-09 切片实现复核
+
+| 切片 | 当前结论 | 证据 |
+| --- | --- | --- |
+| AR-VS-02 | PASS（内核级） | `auto-reply-clarification.ts`、定向澄清回归、全自动回复单测 112/112 |
+| AR-VS-03 | PASS（内核级） | `auto-reply-pre-send-review.ts`、12 项定向回归：目标覆盖、事实范围/新鲜度、handoff 证据、敏感 fail-closed |
+| AR-VS-04 | PASS（内核级） | `auto-reply-lifecycle.ts`、5 项定向回归：阶段事实投影、订单消歧、跨账号隔离 |
+| AR-VS-05 | PASS（内核级） | `auto-reply-topic-emotion.ts`、9 项定向回归：话题拉回、目标切换、情绪/评价/推荐门控 |
+| AR-VS-06 | PASS（内核级） | `auto-reply-recommendation.ts`、4 项定向回归：资格、冷却、同账号、新鲜度 |
+| AR-VS-07 | PASS（内核级） | `auto-reply-outcome-review.ts`、7 项定向回归：claim/lease、CAS、退避、死信、reopen、closed |
+| AR-VS-08 | PASS（适配级） | `auto-reply-repair-orchestrator.ts`、3 项编排回归、031 增量迁移 |
+| AR-VS-09 | PASS（门禁级） | `auto-reply-release.ts`、4 项发布/阻断/回滚回归 |
+
+### 仍需独立 R3 / 真实环境复核
+
+- 以上 PASS 仅表示可运行内核/适配层证据，不等同于生产发布通过；真实 PostgreSQL、外部发送、Activity API、跨进程 worker、红队和 canary 证据仍未提交。
+- 后续人工审核节点按用户确认默认批准继续，但任何真实环境门禁仍需保留可回读证据和回滚记录。

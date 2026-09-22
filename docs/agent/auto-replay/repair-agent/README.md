@@ -10,12 +10,12 @@ repair-agent 是自动回复 Agent 的修复治理文档域，不是新的买家
 
 ## 当前状态
 
-- 状态：BLOCKED / 文档修订中
+- 状态：IN_PROGRESS / 切片实现与发布门禁收口
 - 日期：2026-09-22
-- 当前阶段：阶段 0 文档重组与范围锁定
-- 交付边界：仅重组和补充修复文档，不修改业务代码、数据库迁移或发送行为
-- 当前进展：三轮独立评审已执行；用户已确认五项策略裁决，正在修订 AR-VS-00 阻断项
-- 下一步：完成文档契约修订、验证证据补齐并重新通过 R1/R2/R3 后，才可按 AR-VS-00 到 AR-VS-09 串行执行
+- 当前阶段：阶段 8/9，真实链路适配与发布门禁收口
+- 交付边界：修复代码、增量迁移、切片测试和治理文档；真实外部链路与运营演练仍需目标环境证据
+- 当前进展：AR-VS-00 至 AR-VS-09 均已落地可验证内核/适配层；后续人工审核节点默认批准继续
+- 下一步：补真实持久化/外部链路回读、Activity 投影、canary、kill switch、回滚和敏感红队证据
 
 ## 不可妥协约束
 
@@ -46,6 +46,12 @@ repair-agent 是自动回复 Agent 的修复治理文档域，不是新的买家
 | slices/AR-VS-00-scope-policy-baseline.md | AR-VS-00 切片卡与范围锁定结果 |
 | slices/AR-VS-00-policy-matrix.md | 路由、拒绝、继续帮助、生命周期和指标矩阵 |
 | slices/AR-VS-00-traceability.md | 需求→验收→测试追踪和静态证据 |
+| slices/AR-VS-04-lifecycle.md | 生命周期事实投影与引导 |
+| slices/AR-VS-05-topic-emotion.md | 跑题拉回与情绪门控 |
+| slices/AR-VS-06-recommendation.md | 店内推荐资格与冷却 |
+| slices/AR-VS-07-outcome-review.md | 发送后 Outcome Review |
+| slices/AR-VS-08-integration.md | 编排适配与增量迁移 |
+| slices/AR-VS-09-release.md | 发布、回滚与交接门禁 |
 | decisions/ADR-AR-0001-route-and-refusal-policy.md | 路由与拒绝策略决策记录 |
 | decisions/ADR-AR-0002-confirmed-action-and-resolution-contract.md | 已确认的动作、澄清与结果契约 |
 
@@ -53,7 +59,7 @@ repair-agent 是自动回复 Agent 的修复治理文档域，不是新的买家
 
 repair-agent 负责维护修复范围、策略、验收、阶段门禁、纵向切片、风险、决策、评审、发布、回滚和证据归档。
 
-repair-agent 不负责直接修改业务代码或数据库、直接发送买家消息、把文档状态升级为代码已实现，或绕过人工评审、测试、回滚和真实链路证据。
+repair-agent 不负责直接发送买家消息或执行生产切换；切片可以通过受控代码/迁移提交落地，但不能把文档状态升级为发布已通过，也不能绕过测试、回滚和真实链路证据。
 
 ## 使用规则
 
