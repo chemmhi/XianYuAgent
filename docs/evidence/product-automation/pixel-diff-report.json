@@ -1,0 +1,126 @@
+{
+  "designFile": "F:\\ChenHai\\Project\\XianYuAgent-product-automation\\docs\\design\\product-automation-interaction-v1.html",
+  "generatedAt": "2026-09-22T19:51:30.682Z",
+  "comparisons": [
+    {
+      "state": "list",
+      "viewport": "1440x900",
+      "expected": "1440x900",
+      "actual": "1440x900",
+      "differingPixels": 760343,
+      "totalPixels": 1296000,
+      "differingRatio": 0.5866844135802469,
+      "meanAbsoluteError": 7.608157214506173
+    },
+    {
+      "state": "list",
+      "viewport": "390x844",
+      "expected": "390x844",
+      "actual": "390x844",
+      "differingPixels": 217974,
+      "totalPixels": 329160,
+      "differingRatio": 0.6622129055778345,
+      "meanAbsoluteError": 30.184383734354114
+    },
+    {
+      "state": "delivery",
+      "viewport": "1440x900",
+      "expected": "1440x900",
+      "actual": "1440x900",
+      "differingPixels": 795731,
+      "totalPixels": 1296000,
+      "differingRatio": 0.6139899691358025,
+      "meanAbsoluteError": 7.779925540123457
+    },
+    {
+      "state": "delivery",
+      "viewport": "390x844",
+      "expected": "390x844",
+      "actual": "390x844",
+      "differingPixels": 172242,
+      "totalPixels": 329160,
+      "differingRatio": 0.523277433467007,
+      "meanAbsoluteError": 12.938775215700572
+    },
+    {
+      "state": "reprice",
+      "viewport": "1440x900",
+      "expected": "1440x900",
+      "actual": "1440x900",
+      "differingPixels": 755670,
+      "totalPixels": 1296000,
+      "differingRatio": 0.5830787037037037,
+      "meanAbsoluteError": 6.916103587962963
+    },
+    {
+      "state": "reprice",
+      "viewport": "390x844",
+      "expected": "390x844",
+      "actual": "390x844",
+      "differingPixels": 169029,
+      "totalPixels": 329160,
+      "differingRatio": 0.5135162231133795,
+      "meanAbsoluteError": 10.672111587070118
+    },
+    {
+      "state": "gift",
+      "viewport": "1440x900",
+      "expected": "1440x900",
+      "actual": "1440x900",
+      "differingPixels": 779654,
+      "totalPixels": 1296000,
+      "differingRatio": 0.6015848765432099,
+      "meanAbsoluteError": 7.443009452160494
+    },
+    {
+      "state": "gift",
+      "viewport": "390x844",
+      "expected": "390x844",
+      "actual": "390x844",
+      "differingPixels": 167928,
+      "totalPixels": 329160,
+      "differingRatio": 0.5101713452424352,
+      "meanAbsoluteError": 12.534942733017377
+    },
+    {
+      "state": "review",
+      "viewport": "1440x900",
+      "expected": "1440x900",
+      "actual": "1440x900",
+      "differingPixels": 754238,
+      "totalPixels": 1296000,
+      "differingRatio": 0.5819737654320988,
+      "meanAbsoluteError": 7.193244020061728
+    },
+    {
+      "state": "review",
+      "viewport": "390x844",
+      "expected": "390x844",
+      "actual": "390x844",
+      "differingPixels": 127289,
+      "totalPixels": 329160,
+      "differingRatio": 0.38670859156641146,
+      "meanAbsoluteError": 10.484245503706404
+    },
+    {
+      "state": "coupon",
+      "viewport": "1440x900",
+      "expected": "1440x900",
+      "actual": "1440x900",
+      "differingPixels": 822820,
+      "totalPixels": 1296000,
+      "differingRatio": 0.6348919753086419,
+      "meanAbsoluteError": 20.342689429012346
+    },
+    {
+      "state": "coupon",
+      "viewport": "390x844",
+      "expected": "390x844",
+      "actual": "390x844",
+      "differingPixels": 81833,
+      "totalPixels": 329160,
+      "differingRatio": 0.24861161745048002,
+      "meanAbsoluteError": 9.54059196135618
+    }
+  ]
+}

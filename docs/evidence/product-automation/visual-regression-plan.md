@@ -23,5 +23,5 @@
 
 - Vitest: implemented and passing for API state transitions plus drawer/transfer/batch render contracts.
 - Chrome/CDP: mock-mode script passed the ordered desktop/mobile flow and saved 12 implementation screenshots; live persistence remains unverified until backend integration.
-- Pixel diff: **NOT RUN** until the design baseline and implementation screenshots are both captured from fixed viewports.
+- Pixel diff: **RUN / FAILED (strict)** with `npm --workspace apps/web run test:visual:product-automation` using fixed 1440×900 and 390×844 viewports. The report is `docs/evidence/product-automation/pixel-diff-report.json`; current differing-pixel ratios are approximately 58.2%–63.5% on desktop and 24.9%–66.2% on mobile. Do not mark visual acceptance complete until the shell/table geometry and fixture content are aligned with the approved HTML baseline.
 - Live backend API: adapter maps the UI keys to canonical `paidAutoDelivery` / `unpaidAutoReprice` / `reviewGift` / `reviewReminder`, reads `/api/v1/products/:id/automation` and `/api/v1/coupons/batches`, patches automation with `If-Match-Version`, and sends batch `expectedConfigVersions` plus canonical `config`. Current E2E runs with `VITE_AUTOMATION_MODE=mock`, so no persistence claim is made.
