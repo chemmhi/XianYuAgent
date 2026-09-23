@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>自动回复实时监控</title>
+  <style>
+    :root { color-scheme: light; --bg: #f3f6fb; --panel: #fff; --line: #d9e2ef; --text: #162235; --muted: #6c7a90; --accent: #2356d8; --accent-soft: #e8efff; --danger: #b42318; --ok: #14804a; --code: #101827; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; }
+    header { position: sticky; top: 0; z-index: 5; padding: 18px 24px 16px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,.96); backdrop-filter: blur(12px); }
+    .title-row, .toolbar, .summary, .connection, .event-heading { display: flex; align-items: center; }
+    .title-row { justify-content: space-between; gap: 16px; }
+    h1 { margin: 0; font-size: 20px; letter-spacing: .02em; }
+    .subtitle { margin-top: 3px; color: var(--muted); font-size: 12px; }
+    .connection { gap: 7px; color: var(--muted); font-size: 12px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 0 4px #fff4d6; }
+    .dot.connected { background: var(--ok); box-shadow: 0 0 0 4px #dbf4e7; }
+    .dot.disconnected { background: var(--danger); box-shadow: 0 0 0 4px #ffe3e1; }
+    .toolbar { gap: 10px; margin-top: 16px; }
+    input { min-width: 260px; flex: 1; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: #fff; outline: none; }
+    input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    button { padding: 10px 13px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: #fff; cursor: pointer; }
+    button:hover { border-color: var(--accent); color: var(--accent); }
+    .summary { justify-content: space-between; gap: 12px; margin: 12px 0 0; color: var(--muted); font-size: 12px; }
+    main { display: grid; gap: 12px; max-width: 1400px; margin: 0 auto; padding: 20px 24px 44px; }
+    .empty { padding: 48px 20px; border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); text-align: center; background: rgba(255,255,255,.7); }
+    .event-card { overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: 0 4px 18px rgba(30,55,90,.05); }
+    .event-card[open] { border-color: #b9c9e8; }
+    .event-card > summary { list-style: none; cursor: pointer; }
+    .event-card > summary::-webkit-details-marker { display: none; }
+    .event-heading { gap: 12px; padding: 14px 16px; }
+    .event-heading:hover { background: #fbfcff; }
+    .time { flex: 0 0 auto; color: var(--accent); font: 600 12px ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .event-main { min-width: 0; flex: 1; }
+    .event-title { font-weight: 700; }
+    .event-subtitle { margin-top: 2px; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .badge { padding: 3px 7px; border-radius: 999px; color: #36507e; background: #edf2fb; font: 600 11px ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .event-body { display: grid; gap: 12px; padding: 0 16px 16px; border-top: 1px solid var(--line); }
+    .data-block { min-width: 0; }
+    .data-label { display: flex; align-items: center; justify-content: space-between; margin: 12px 0 6px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+    pre { overflow: auto; margin: 0; padding: 13px 14px; border-radius: 8px; color: #d7e3f7; background: var(--code); font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+    .json-key { color: #8fc7ff; }
+    .json-string { color: #b7f0b0; }
+    .json-number { color: #f8c76b; }
+    .json-bool { color: #f4a7ff; }
+    .json-null { color: #a8b7cc; }
+    @media (max-width: 720px) { header { padding: 16px; } main { padding: 14px 12px 30px; } .title-row { align-items: flex-start; flex-direction: column; } .toolbar { align-items: stretch; flex-direction: column; } input { min-width: 0; } .event-heading { align-items: flex-start; flex-wrap: wrap; gap: 8px; } .time { width: 100%; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title-row">
+      <div>
+        <h1>自动回复实时监控</h1>
+        <div class="subtitle">上海时区 · YY-MM-DD-HH-MM-SS · trace 实时推送 · JSON 高亮 · 可折叠</div>
+      </div>
+      <div class="connection"><span id="connection-dot" class="dot"></span><span id="connection-text">连接中</span></div>
+    </div>
+    <div class="toolbar">
+      <input id="search" type="search" autocomplete="off" placeholder="搜索事件、runId、traceId、买家或 payload 关键字" />
+      <button id="clear-search" type="button">清除搜索</button>
+    </div>
+    <div class="summary"><span id="event-count">0 条事件</span><span id="health">API health: UNKNOWN · ready: UNKNOWN</span></div>
+  </header>
+  <main id="events"><div class="empty">等待自动回复事件…</div></main>
+  <script>
+    const state = { events: [], query: '', health: { health: 'UNKNOWN', ready: 'UNKNOWN' } };
+    const eventList = document.getElementById('events');
+    const searchInput = document.getElementById('search');
+    const clearSearch = document.getElementById('clear-search');
+    const eventCount = document.getElementById('event-count');
+    const healthLabel = document.getElementById('health');
+    const connectionDot = document.getElementById('connection-dot');
+    const connectionText = document.getElementById('connection-text');
+
+    function escapeHtml(value) {
+      return String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+    }
+
+    function highlightJson(value) {
+      let json;
+      try { json = JSON.stringify(value ?? null, null, 2); } catch { json = String(value); }
+      const escaped = escapeHtml(json);
+      return escaped.replace(/("(?:\\.|[^"\\])*")(?=\s*:)|("(?:\\.|[^"\\])*")|\b(true|false)\b|\b(null)\b|(-?\d+(?:\.\d+)?(?:e[+-]?\d+)?)/gi, (match, key, string, bool, nil, number) => {
+        if (key) return '<span class="json-key">' + key + '</span>';
+        if (string) return '<span class="json-string">' + string + '</span>';
+        if (bool) return '<span class="json-bool">' + bool + '</span>';
+        if (nil) return '<span class="json-null">' + nil + '</span>';
+        return '<span class="json-number">' + number + '</span>';
+      });
+    }
+
+    function searchText(event) {
+      return JSON.stringify(event).toLocaleLowerCase();
+    }
+
+    function renderEvent(event) {
+      const buyer = event.buyer ?? {};
+      const payload = event.payload ?? {};
+      const subtitle = [event.phase + '/' + event.event, 'run=' + event.runId, 'trace=' + event.traceId].join(' · ');
+      return '<details class="event-card" open>' +
+        '<summary><div class="event-heading"><span class="time">' + escapeHtml(event.time) + '</span>' +
+        '<div class="event-main"><div class="event-title">' + escapeHtml(event.title) + '</div><div class="event-subtitle">' + escapeHtml(subtitle) + '</div></div>' +
+        '<span class="badge">展开 / 收起</span></div></summary>' +
+        '<div class="event-body"><section class="data-block"><div class="data-label">BUYER</div><pre>' + highlightJson(buyer) + '</pre></section>' +
+        '<section class="data-block"><div class="data-label">PAYLOAD</div><pre>' + highlightJson(payload) + '</pre></section></div></details>';
+    }
+
+    function render() {
+      const query = state.query.trim().toLocaleLowerCase();
+      const visible = state.events.filter((event) => !query || searchText(event).includes(query));
+      eventCount.textContent = query ? visible.length + ' / ' + state.events.length + ' 条事件' : state.events.length + ' 条事件';
+      healthLabel.textContent = 'API health: ' + state.health.health + ' · ready: ' + state.health.ready + (state.health.checkedAt ? ' · ' + state.health.checkedAt : '');
+      eventList.innerHTML = visible.length ? visible.map(renderEvent).join('') : '<div class="empty">' + (state.events.length ? '没有匹配的事件。' : '等待自动回复事件…') + '</div>';
+    }
+
+    function setConnection(connected) {
+      connectionDot.className = 'dot ' + (connected ? 'connected' : 'disconnected');
+      connectionText.textContent = connected ? '实时连接已建立' : '实时连接断开，正在重试';
+    }
+
+    searchInput.addEventListener('input', () => { state.query = searchInput.value; render(); });
+    clearSearch.addEventListener('click', () => { searchInput.value = ''; state.query = ''; render(); searchInput.focus(); });
+
+    const source = new EventSource('/events');
+    source.addEventListener('open', () => setConnection(true));
+    source.addEventListener('error', () => setConnection(false));
+    source.addEventListener('snapshot', (event) => { state.events = JSON.parse(event.data); render(); });
+    source.addEventListener('trace', (event) => { state.events.push(JSON.parse(event.data)); if (state.events.length > 500) state.events.shift(); render(); });
+    source.addEventListener('reset', () => { state.events = []; render(); });
+    source.addEventListener('health', (event) => { state.health = JSON.parse(event.data); render(); });
+    source.addEventListener('monitor-error', (event) => { state.events.push({ time: '', title: 'MONITOR ERROR', phase: 'monitor', event: 'error', runId: '-', traceId: '-', buyer: null, payload: JSON.parse(event.data) }); render(); });
+  </script>
+</body>
+</html>
