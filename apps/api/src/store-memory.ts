@@ -60,6 +60,7 @@ function toAutoReplyConversationContext(conversation: ConversationRecord): AutoR
 
 function toAutoReplyMessageContext(message: MessageRecord): AutoReplyMessageContext {
   return {
+    messageId: message.id,
     direction: message.direction,
     senderRole: message.senderRole,
     bodyType: message.bodyType,

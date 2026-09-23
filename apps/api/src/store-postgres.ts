@@ -789,7 +789,7 @@ export class PostgresStore implements Store {
   }
   async listAutoReplyMessages(adminId: string, conversationId: string, query: AutoReplyMessageListQuery): Promise<AutoReplyMessageListResult> {
     const limit = Math.min(50, Math.max(1, query.limit ?? 20));
-    const result = await this.pool.query(`select m.direction,m.sender_role,m.body_type,m.body_text,m.body_ref
+    const result = await this.pool.query(`select m.id,m.direction,m.sender_role,m.body_type,m.body_text,m.body_ref
       from messages.messages m
       where m.conversation_id=$2
         and exists (select 1 from messages.conversations c join auth.account_scopes scope on scope.account_id=c.account_id
@@ -1601,6 +1601,7 @@ export class PostgresStore implements Store {
   }
   private toAutoReplyMessage(row: Row): AutoReplyMessageContext {
     return {
+      messageId: row.id ? String(row.id) : undefined,
       direction: row.direction as AutoReplyMessageContext['direction'],
       senderRole: row.sender_role as AutoReplyMessageContext['senderRole'],
       bodyType: row.body_type as AutoReplyMessageContext['bodyType'],

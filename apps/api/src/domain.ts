@@ -1064,6 +1064,8 @@ export interface MessageListResult {
 
 /** Minimal message context exposed to the auto-reply model. */
 export interface AutoReplyMessageContext {
+  /** Internal deduplication key; never rendered into the model prompt. */
+  messageId?: string;
   direction: MessageDirection;
   senderRole: MessageSenderRole;
   bodyType: MessageBodyType;

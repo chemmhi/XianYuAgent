@@ -9,8 +9,6 @@ export function buildAutoReplyModelContent(text: string, context: AutoReplyConte
 
   addMediaRef(mediaRefs, context.inboundMessage.bodyType, context.inboundMessage.bodyRef);
   for (const message of context.recentMessages) addMediaRef(mediaRefs, message.bodyType, message.bodyRef);
-  addMediaRef(mediaRefs, 'image', context.conversation.itemImageUrl);
-  for (const imageUrl of productImageUrls(context.product?.attributes)) addMediaRef(mediaRefs, 'image', imageUrl);
 
   for (const url of [...mediaRefs].slice(0, MAX_MEDIA_PARTS)) {
     parts.push({ type: 'image_url', image_url: { url, detail: 'auto' } });
@@ -26,8 +24,6 @@ function collectMediaRefs(context: AutoReplyContext): Set<string> {
   const refs = new Set<string>();
   addMediaRef(refs, context.inboundMessage.bodyType, context.inboundMessage.bodyRef);
   for (const message of context.recentMessages) addMediaRef(refs, message.bodyType, message.bodyRef);
-  addMediaRef(refs, 'image', context.conversation.itemImageUrl);
-  for (const imageUrl of productImageUrls(context.product?.attributes)) addMediaRef(refs, 'image', imageUrl);
   return refs;
 }
 
@@ -45,24 +41,4 @@ function addMediaRef(target: Set<string>, bodyType: string | undefined, bodyRef:
   } catch {
     // Invalid media refs are ignored and the caller can fall back to handoff.
   }
-}
-
-function productImageUrls(attributes: Record<string, unknown> | undefined): string[] {
-  if (!attributes) return [];
-  const xianyu = record(attributes.xianyu);
-  return [
-    ...stringArray(xianyu.imageUrls),
-    ...stringArray(xianyu.imageUrl),
-    ...stringArray(attributes.imageUrls),
-    ...stringArray(attributes.imageUrl),
-  ];
-}
-
-function stringArray(value: unknown): string[] {
-  if (typeof value === 'string') return [value];
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-}
-
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }

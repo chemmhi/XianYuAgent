@@ -80,13 +80,68 @@ test('agent chooses product tool then returns final answer', async () => {
   assert.equal(requests[1]?.messages.at(-1)?.role, 'tool');
   const productPayload = contentText(requests[1]?.messages.at(-1)?.content);
   assert.match(productPayload, /^商品信息\n/);
-  assert.match(productPayload, /商品引用：item-1/);
   assert.match(productPayload, /标题：资料包/);
   assert.match(productPayload, /价格：19\.99元/);
   assert.match(productPayload, /卖家知识：知识库：只回答商品适用范围和使用方式。/);
   assert.match(productPayload, /回复模板：付款后发送下载说明。/);
   assert.doesNotMatch(productPayload, /createdAt|updatedAt|attributes|accountId|browseCount|wantCount/);
   assert.throws(() => JSON.parse(productPayload));
+});
+
+test('agent sends document context without internal identifiers and with newest history first', async () => {
+  let request: ModelMessage | undefined;
+  const client: ModelClient = {
+    complete: async (input) => {
+      request = input.messages[1];
+      return { content: replyPayload('已收到，我先结合商品信息说明。'), model: 'test' };
+    },
+  };
+  const agent = new ToolCallingAutoReplyAgent({} as Store, client, resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_MAX_HISTORY: '3' }));
+  await agent.generate({
+    adminId: 'admin-1',
+    context: context({
+      recentMessages: [
+        { direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '最早的问题' },
+        { direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: '中间的回复' },
+        { direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '最近的问题' },
+      ],
+      product: { id: 'product-1', accountId: 'account-1', externalProductRef: 'item-1', title: '资料包', description: '商品说明', priceMinor: 1_999, status: 'published' },
+    }),
+    classification,
+  });
+  const prompt = contentText(request?.content);
+  assert.match(prompt, /当前买家消息：/);
+  assert.match(prompt, /已加载会话消息（最新在前）：/);
+  assert.ok(prompt.indexOf('最近的问题') < prompt.indexOf('中间的回复'));
+  assert.ok(prompt.indexOf('中间的回复') < prompt.indexOf('最早的问题'));
+  assert.match(prompt, /商品事实：/);
+  assert.doesNotMatch(prompt, /account-1|conversation-1|buyer-1|item-1|账号：|会话：|商品引用：/);
+  assert.doesNotMatch(prompt, /"currentMessage"|"recentMessages"|"product"/);
+});
+
+test('shop catalog tool explicitly supports broad inventory questions without a keyword', async () => {
+  const shopTool = AUTO_REPLY_AGENT_TOOLS.find((tool) => tool.function.name === 'list_shop_products');
+  assert.match(shopTool?.function.description ?? '', /店铺有哪些商品/);
+  let requestCount = 0;
+  let receivedKeyword: string | undefined = 'not-called';
+  const client: ModelClient = {
+    complete: async () => {
+      requestCount += 1;
+      if (requestCount === 1) return { content: '', model: 'test', toolCalls: [{ id: 'tool-shop-catalog', type: 'function', function: { name: 'list_shop_products', arguments: '{}' } }] };
+      return { content: replyPayload('店铺里目前有资料包和开发服务。'), model: 'test' };
+    },
+  };
+  const store = {
+    listAutoReplyProducts: async (_adminId: string, query: { keyword?: string }) => {
+      receivedKeyword = query.keyword;
+      return { items: [{ id: 'product-1', accountId: 'account-1', externalProductRef: 'item-1', title: '资料包', description: '数字资料', priceMinor: 1_999, status: 'published' }], total: 1 };
+    },
+  } as unknown as Store;
+  const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}));
+  const reply = await agent.generate({ adminId: 'admin-1', context: context(), classification });
+  assert.deepEqual(reply, { text: '店铺里目前有资料包和开发服务。', segments: undefined });
+  assert.equal(receivedKeyword, undefined);
+  assert.equal(requestCount, 2);
 });
 
 test('agent emits high-level redacted observations for model, tool, and final decision', async () => {
@@ -200,7 +255,7 @@ test('OpenAI-compatible transport maps image content for Chat and Responses APIs
   }
 });
 
-test('agent includes inbound image and product image in multimodal content', async () => {
+test('agent includes buyer images but omits product cover images in multimodal content', async () => {
   let request: ModelMessage | undefined;
   const client: ModelClient = { complete: async (input) => { request = input.messages[1]; return { content: replyPayload('已看到了图片。'), model: 'test' }; } };
   const agent = new ToolCallingAutoReplyAgent({} as Store, client, resolveAutoReplyAgentConfig({}));
@@ -214,7 +269,7 @@ test('agent includes inbound image and product image in multimodal content', asy
   });
   assert.ok(Array.isArray(request?.content));
   const content = request?.content as Array<{ type: string; image_url?: { url: string } }>;
-  assert.deepEqual(content.filter((part) => part.type === 'image_url').map((part) => part.image_url?.url), ['https://img.example/buyer.png', 'https://img.example/product.png']);
+  assert.deepEqual(content.filter((part) => part.type === 'image_url').map((part) => part.image_url?.url), ['https://img.example/buyer.png']);
 });
 
 test('buyer conversation tool filters same buyer across products and orders', async () => {
@@ -236,17 +291,17 @@ test('buyer conversation tool filters same buyer across products and orders', as
       conversationQueries.push(query);
       return { items: conversations };
     },
-    listAutoReplyMessages: async (_adminId: string, conversationId: string) => ({ items: [{ direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: conversationId }], hasMoreHistory: false }),
+    listAutoReplyMessages: async (_adminId: string, conversationId: string) => ({ items: [{ direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: conversationId === 'conversation-1' ? '想了解商品一' : '想了解商品二' }], hasMoreHistory: false }),
   } as unknown as Store;
   const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}));
   await agent.generate({ adminId: 'admin-1', context: context(), classification });
   const toolPayload = calls[1] ?? '';
   assert.deepEqual(conversationQueries, [{ accountId: 'account-1', buyerRef: 'buyer-1', limit: 20 }]);
-  assert.match(toolPayload, /会话ID：conversation-1/);
-  assert.match(toolPayload, /商品：商品一（item-1）/);
-  assert.match(toolPayload, /会话ID：conversation-2/);
-  assert.match(toolPayload, /商品：商品二（item-2）/);
-  assert.doesNotMatch(toolPayload, /createdAt|updatedAt/);
+  assert.match(toolPayload, /商品：商品一/);
+  assert.match(toolPayload, /想了解商品一/);
+  assert.match(toolPayload, /商品：商品二/);
+  assert.match(toolPayload, /想了解商品二/);
+  assert.doesNotMatch(toolPayload, /conversation-1|conversation-2|item-1|item-2|createdAt|updatedAt|会话ID：|商品引用：/);
   assert.throws(() => JSON.parse(toolPayload));
 });
 
@@ -279,7 +334,7 @@ test('buyer orders tool reads scoped facts and filters buyer/account scope', asy
   const orderPayload = orderToolPayload ?? '';
   assert.match(orderPayload, /订单号：buyer-1-order-1/);
   assert.match(orderPayload, /订单号：buyer-1-order-2/);
-  assert.doesNotMatch(orderPayload, /createdAt|updatedAt|accountId|buyerId|conversationId/);
+  assert.doesNotMatch(orderPayload, /item-1|item-2|createdAt|updatedAt|accountId|buyerId|conversationId|商品引用：/);
   assert.throws(() => JSON.parse(orderPayload));
 });
 
@@ -304,9 +359,8 @@ test('product tool resolves external numeric refs without UUID lookup and stays 
   assert.deepEqual(reply, { text: '这是数字资料包。', segments: undefined });
   assert.deepEqual(productQuery, { accountId: 'account-1', keyword: '1078553391460', limit: 50 });
   const payload = toolPayload ?? '';
-  assert.match(payload, /商品引用：1078553391460/);
   assert.match(payload, /标题：数字资料包/);
-  assert.doesNotMatch(payload, /createdAt|updatedAt|accountId/);
+  assert.doesNotMatch(payload, /1078553391460|product-1|createdAt|updatedAt|accountId|商品引用：/);
   assert.throws(() => JSON.parse(payload));
 });
 
@@ -341,11 +395,10 @@ test('shop product tool searches keyword, limits results, and excludes other acc
   const payload = toolPayload ?? '';
   assert.match(payload, /关键词：耳机/);
   assert.match(payload, /匹配总数：2/);
-  assert.match(payload, /商品引用：earbuds-a/);
   assert.match(payload, /标题：蓝牙耳机 A/);
   assert.match(payload, /价格：129\.00元/);
-  assert.match(payload, /商品引用：earbuds-b/);
-  assert.doesNotMatch(payload, /foreign-product|createdAt|updatedAt|attributes|accountId|browseCount|知识库：支持主动降噪问答/);
+  assert.match(payload, /标题：蓝牙耳机 B/);
+  assert.doesNotMatch(payload, /earbuds-a|earbuds-b|foreign-product|createdAt|updatedAt|attributes|accountId|browseCount|知识库：支持主动降噪问答/);
   assert.throws(() => JSON.parse(payload));
 });
 
@@ -366,7 +419,7 @@ test('insufficient product facts return not-found and hand off instead of guessi
   const payload = toolPayload ?? '';
   assert.match(payload, /未找到商品/);
   assert.match(payload, /原因：PRODUCT_NOT_FOUND/);
-  assert.match(payload, /商品引用：missing-item/);
+  assert.doesNotMatch(payload, /missing-item|商品引用：/);
   assert.throws(() => JSON.parse(payload));
 });
 

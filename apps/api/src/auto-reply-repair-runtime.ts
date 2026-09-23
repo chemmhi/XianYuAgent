@@ -345,7 +345,7 @@ function factsFromContext(context: AutoReplyContext, verifiedAt: string): Array<
     facts.push({ factRef: `product:${context.product.id}:title`, key: 'product_title', accountId: context.conversation.accountId, conversationId: context.conversation.id, productId: context.product.id, verifiedAt, value: context.product.title });
     if (context.product.priceMinor !== undefined) facts.push({ factRef: `product:${context.product.id}:price`, key: 'price_minor', accountId: context.conversation.accountId, conversationId: context.conversation.id, productId: context.product.id, verifiedAt, value: context.product.priceMinor });
   }
-  for (const order of context.orders) facts.push({ factRef: `order:${order.id}:status`, key: 'order_status', accountId: context.conversation.accountId, conversationId: context.conversation.id, orderRefs: [order.orderNo], verifiedAt, value: { paymentStatus: order.paymentStatus, orderStatus: order.orderStatus, deliveryStatus: order.deliveryStatus, afterSalesStatus: order.afterSalesStatus } });
+  for (const order of context.orders) facts.push({ factRef: `order:${order.orderNo}:status`, key: 'order_status', accountId: context.conversation.accountId, conversationId: context.conversation.id, orderRefs: [order.orderNo], verifiedAt, value: { paymentStatus: order.paymentStatus, orderStatus: order.orderStatus, deliveryStatus: order.deliveryStatus, afterSalesStatus: order.afterSalesStatus } });
   return facts;
 }
 

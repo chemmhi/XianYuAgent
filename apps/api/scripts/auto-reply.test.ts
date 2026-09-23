@@ -32,7 +32,37 @@ test('template generator only uses redacted product fields', async () => {
   assert.equal(reply, '你好，买家，资料包可拍。');
 });
 
-test('model generator sends bounded structured context to the shared model client', async () => {
+test('auto-reply context loads narrow product, order, and message projections', async () => {
+  const runtime = createApp(loadConfig({
+    HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
+    API_KEY: 'test-key', AUTO_REPLY_MODEL_ENABLED: 'false', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["Projection Buyer"]',
+  }));
+  const admin = await runtime.store.createAdmin({ email: 'projection@example.com', passwordHash: 'hash', displayName: 'Projection' });
+  const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'projection-seller' });
+  const product = await runtime.store.createProduct({ adminId: admin.id, accountId: account.id, externalProductRef: 'projection-item', title: '投影商品', defaultReplyTemplate: '你好，{{productTitle}}可拍。', priceMinor: 1_999, status: 'published', attributes: { raw: '不要进入模型上下文' } });
+  const conversation = await runtime.store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'projection-buyer', buyerDisplayName: 'Projection Buyer', itemRef: product.externalProductRef, itemTitle: product.title, externalConversationRef: 'projection-conversation' });
+  await runtime.store.createOrder({ adminId: admin.id, order: { orderNo: 'PROJECTION-ORDER-1', accountId: account.id, buyerId: 'projection-buyer', conversationId: conversation.id, itemId: product.externalProductRef ?? 'projection-item', itemTitle: product.title, amountMinor: 1_999, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'manual' } });
+  const inbound = (await runtime.messages.createMessage({ adminId: admin.id, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '请问这个是什么？', source: 'system', requestId: 'projection-request', traceId: 'projection-trace' })).message;
+  await runtime.listen();
+  const store = runtime.store as unknown as {
+    listProducts: (...args: unknown[]) => Promise<unknown>;
+    listOrders: (...args: unknown[]) => Promise<unknown>;
+  };
+  store.listProducts = async () => { throw new Error('FULL_PRODUCT_QUERY_USED'); };
+  store.listOrders = async () => { throw new Error('FULL_ORDER_QUERY_USED'); };
+
+  try {
+    const result = await runtime.autoReply.processInbound({ adminId: admin.id, conversationId: conversation.id, inboundMessageId: inbound.messageId, senderName: 'Projection Buyer', requestId: 'projection-process', traceId: 'projection-process-trace' });
+    assert.equal(result.run.status, 'persisted');
+    assert.equal(result.context?.product?.title, '投影商品');
+    assert.deepEqual(result.context?.orders.map((order) => order.orderNo), ['PROJECTION-ORDER-1']);
+    assert.equal(result.context?.product && 'attributes' in result.context.product, false);
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('model generator sends bounded document context to the shared model client', async () => {
   let request: { messages: Array<{ role: string; content: string }> } | undefined;
   const generator = new ModelAutoReplyGenerator({
     complete: async (input) => {
@@ -53,10 +83,15 @@ test('model generator sends bounded structured context to the shared model clien
   assert.equal(request?.messages[0]?.role, 'system');
   assert.equal(request?.messages[1]?.role, 'user');
   const prompt = request?.messages[1]?.content ?? '';
-  const facts = JSON.parse(prompt.slice(prompt.indexOf('{'), prompt.lastIndexOf('</facts>')).trim()) as { recentMessages: unknown[]; product: { description: string }; orders: unknown[] };
-  assert.equal(facts.recentMessages.length, 12);
-  assert.ok(facts.product.description.length <= 1_200);
-  assert.equal(facts.orders.length, 10);
+  assert.match(prompt, /当前买家消息：/);
+  assert.match(prompt, /已加载会话消息（最新在前）：/);
+  assert.match(prompt, /商品事实：/);
+  assert.ok(prompt.indexOf('消息-19') < prompt.indexOf('消息-18'));
+  assert.ok(prompt.indexOf('消息-18') < prompt.indexOf('消息-8'));
+  assert.match(prompt, /说明：x{10,}/);
+  assert.match(prompt, /订单10：/);
+  assert.doesNotMatch(prompt, /accountId|conversationId|buyerName|createdAt|priceMinor|"recentMessages"/);
+  assert.throws(() => JSON.parse(prompt.slice(prompt.indexOf('<facts>') + '<facts>'.length, prompt.indexOf('</facts>')).trim()));
 });
 
 test('configured model provider generates the persisted auto-reply', async () => {
@@ -126,7 +161,7 @@ test('multimodal inbound image reaches the model Agent and persists a structured
     assert.equal(result.autoReply?.outboundMessage?.bodyText, '我看到了你发来的图片。');
     const userMessage = calls[0]?.body.messages.find((message) => message.role === 'user');
     assert.ok(Array.isArray(userMessage?.content));
-    assert.deepEqual((userMessage?.content as Array<{ type: string; image_url?: { url: string } }>).filter((part) => part.type === 'image_url').map((part) => part.image_url?.url), ['https://img.example/buyer.png', 'https://img.example/product.png']);
+    assert.deepEqual((userMessage?.content as Array<{ type: string; image_url?: { url: string } }>).filter((part) => part.type === 'image_url').map((part) => part.image_url?.url), ['https://img.example/buyer.png']);
   } finally {
     await runtime.close();
     globalThis.fetch = originalFetch;

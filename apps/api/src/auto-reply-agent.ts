@@ -1,6 +1,7 @@
 import type { AutoReplyConversationContext, AutoReplyMessageContext, AutoReplyOrderContext, AutoReplyProductContext, Store } from './domain.js';
 import type { AutoReplyAgentConfig } from './auto-reply-agent-config.js';
 import type { AutoReplyClassification, AutoReplyContext, AutoReplyGeneratedReply, AutoReplyGenerator, AutoReplyGeneratorObserver, AutoReplyGeneratorObservation } from './auto-reply.js';
+import { formatAutoReplyContextDocument } from './auto-reply-context-document.js';
 import { buildAutoReplyModelContent } from './auto-reply-multimodal.js';
 import { parseAutoReplyModelDecision, parseJsonObject } from './auto-reply-output.js';
 import { digestJson } from './security.js';
@@ -62,7 +63,7 @@ export const AUTO_REPLY_AGENT_TOOLS: ModelToolDefinition[] = [
     type: 'function',
     function: {
       name: 'get_buyer_conversations',
-      description: '读取当前买家在当前卖家账号下的相关会话（跨订单和跨商品），仅返回最近消息正文、方向和商品引用，不返回时间戳或完整记录。结果为紧凑纯文本。',
+      description: '读取当前买家在当前卖家账号下的相关会话（跨订单和跨商品），仅返回最近消息正文、方向和商品标题，不返回内部标识、时间戳或完整记录。结果为紧凑纯文本。',
       parameters: { type: 'object', properties: { maxMessagesPerConversation: { type: 'integer', minimum: 1, maximum: 20 } }, additionalProperties: false },
     },
   },
@@ -70,7 +71,7 @@ export const AUTO_REPLY_AGENT_TOOLS: ModelToolDefinition[] = [
     type: 'function',
     function: {
       name: 'get_product_info',
-      description: '读取当前卖家账号下指定商品的必要事实（商品引用、标题、说明、价格、卖家知识、回复模板、状态）。不返回完整商品记录；未传商品引用时使用当前会话商品。结果为紧凑纯文本。',
+      description: '读取当前卖家账号下指定商品的必要事实（标题、说明、价格、卖家知识、回复模板、状态）。不返回内部标识或完整商品记录；未传商品标识时使用当前会话商品。结果为紧凑纯文本。',
       parameters: { type: 'object', properties: { productRef: { type: 'string', maxLength: 120 } }, additionalProperties: false },
     },
   },
@@ -78,7 +79,7 @@ export const AUTO_REPLY_AGENT_TOOLS: ModelToolDefinition[] = [
     type: 'function',
     function: {
       name: 'get_buyer_orders',
-      description: '读取当前买家在当前卖家账号下的订单必要事实（订单号、商品引用/标题、支付、订单、发货和售后状态），不返回创建或更新时间。结果为紧凑纯文本。',
+      description: '读取当前买家在当前卖家账号下的订单必要事实（订单号、商品标题、支付、订单、发货和售后状态），不返回商品内部标识、创建或更新时间。结果为紧凑纯文本。',
       parameters: { type: 'object', properties: { maxOrders: { type: 'integer', minimum: 1, maximum: 20 } }, additionalProperties: false },
     },
   },
@@ -86,7 +87,7 @@ export const AUTO_REPLY_AGENT_TOOLS: ModelToolDefinition[] = [
     type: 'function',
     function: {
       name: 'list_shop_products',
-      description: '搜索当前卖家店铺的商品必要事实（商品引用、标题、说明、价格、状态），用于相似商品或替代商品推荐；不返回完整商品记录。结果为紧凑纯文本。',
+      description: '读取当前卖家店铺商品总览，或按关键词搜索商品必要事实（标题、说明、价格、状态）。买家问“店铺有哪些商品”“卖什么”“还有哪些商品”时不传 keyword；不返回完整商品记录。结果为紧凑纯文本。',
       parameters: { type: 'object', properties: { keyword: { type: 'string', maxLength: 120 }, limit: { type: 'integer', minimum: 1, maximum: 20 } }, additionalProperties: false },
     },
   },
@@ -120,7 +121,7 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
       {
         role: 'user',
         content: buildAutoReplyModelContent(
-          `${renderUserPrompt(config.userPromptTemplate, this.toInitialContext(input.context, input.classification))}\n\n完整回复不超过 ${config.maxReplyLength} 个字符；segments 只按自然语义组织，保持原文信息完整、顺序不变；如果无需拆分，segments 返回单元素数组。`,
+          `${renderUserPrompt(config.userPromptTemplate, input.context, input.classification, config)}\n\n完整回复不超过 ${config.maxReplyLength} 个字符；segments 只按自然语义组织，保持原文信息完整、顺序不变；如果无需拆分，segments 返回单元素数组。`,
           input.context,
         ),
       },
@@ -324,22 +325,6 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
     return parseSegments(result.content);
   }
 
-  private toInitialContext(context: AutoReplyContext, classification: AutoReplyClassification): Record<string, unknown> {
-    return {
-      accountId: context.conversation.accountId,
-      conversationId: context.conversation.id,
-      buyerRef: context.conversation.buyerRef,
-      buyerName: context.conversation.buyerDisplayName,
-      itemRef: context.conversation.itemRef,
-      itemTitle: context.conversation.itemTitle,
-      currentMessage: { bodyType: context.inboundMessage.bodyType, bodyText: trimField(context.inboundMessage.bodyText, 2_000), hasMedia: Boolean(context.inboundMessage.bodyRef) },
-      recentMessages: context.recentMessages.slice(-12).map((message) => ({ direction: message.direction, senderRole: message.senderRole, bodyType: message.bodyType, bodyText: trimField(message.bodyText, 600) })),
-      product: context.product ? { productRef: context.product.externalProductRef ?? context.product.id, title: trimField(context.product.title, 300), description: trimField(context.product.description, 800), priceMinor: context.product.priceMinor, aiPrompt: trimField(context.product.aiPrompt, 800), defaultReplyTemplate: trimField(context.product.defaultReplyTemplate, 300) } : undefined,
-      orders: context.orders.slice(0, 20).map((order) => ({ orderNo: order.orderNo, itemId: order.itemId, itemTitle: trimField(order.itemTitle, 300), paymentStatus: order.paymentStatus, orderStatus: order.orderStatus, deliveryStatus: order.deliveryStatus, afterSalesStatus: order.afterSalesStatus })),
-      classification: { intent: classification.intent, confidence: classification.confidence, riskFlags: classification.riskFlags },
-    };
-  }
-
   private async executeTool(name: AutoReplyToolName, args: Record<string, unknown>, adminId: string, context: AutoReplyContext, config: AutoReplyAgentConfig): Promise<AutoReplyToolResult> {
     switch (name) {
       case 'get_buyer_conversations': return this.getBuyerConversations(adminId, context, numberArg(args.maxMessagesPerConversation, config.maxHistory));
@@ -357,7 +342,7 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
         conversationId: conversation.id,
         itemRef: conversation.itemRef,
         itemTitle: conversation.itemTitle,
-        messages: history.items.slice(-maxMessagesPerConversation).map((message) => safeMessage(message)),
+        messages: history.items.slice(-maxMessagesPerConversation).reverse().map((message) => safeMessage(message)),
       };
     }));
     const structured = { ok: true, buyerRef: context.conversation.buyerRef, conversations: items };
@@ -431,47 +416,9 @@ function validateToolArguments(name: AutoReplyToolName, args: Record<string, unk
   }
 }
 
-function renderUserPrompt(template: string, context: Record<string, unknown>): string {
-  return template.replaceAll('{{context}}', formatInitialContext(context));
-}
-
-function formatInitialContext(context: Record<string, unknown>): string {
-  const lines = [
-    `账号：${textValue(context.accountId)}`,
-    `会话：${textValue(context.conversationId)}`,
-    `买家：${textValue(context.buyerName, textValue(context.buyerRef))}`,
-    `商品引用：${textValue(context.itemRef)}`,
-    `商品标题：${textValue(context.itemTitle)}`,
-  ];
-  const current = isRecord(context.currentMessage) ? context.currentMessage : {};
-  lines.push(`当前消息：${textValue(current.bodyText, current.hasMedia === true ? '[图片或附件]' : '[无文本]')}`);
-  if (current.bodyType && current.bodyType !== 'text') lines.push(`当前消息类型：${textValue(current.bodyType)}`);
-  const recentMessages = Array.isArray(context.recentMessages) ? context.recentMessages.filter(isRecord) : [];
-  if (recentMessages.length > 0) {
-    lines.push('已加载会话消息：');
-    for (const message of recentMessages) {
-      const role = message.senderRole === 'buyer' || message.direction === 'inbound' ? '买家' : '卖家';
-      lines.push(`- ${role}：${textValue(message.bodyText, message.bodyType === 'image' ? '[图片或附件]' : '[无文本]')}`);
-    }
-  }
-  const product = isRecord(context.product) ? context.product : undefined;
-  if (product) {
-    lines.push('已加载商品事实：', `- 商品引用：${textValue(product.productRef)}`, `- 标题：${textValue(product.title)}`, `- 价格：${formatPrice(product.priceMinor)}`);
-    appendOptionalLine(lines, '- 说明', product.description);
-    appendOptionalLine(lines, '- 卖家知识', product.aiPrompt);
-    appendOptionalLine(lines, '- 回复模板', product.defaultReplyTemplate);
-  } else {
-    lines.push('已加载商品事实：无');
-  }
-  const orders = Array.isArray(context.orders) ? context.orders.filter(isRecord) : [];
-  lines.push(orders.length > 0 ? `已加载买家订单（${orders.length} 条）：` : '已加载买家订单：无');
-  orders.forEach((order, index) => {
-    lines.push(`- 订单${index + 1} ${textValue(order.orderNo)}｜${textValue(order.itemTitle, textValue(order.itemId))}｜支付${textValue(order.paymentStatus)}｜订单${textValue(order.orderStatus)}｜发货${textValue(order.deliveryStatus)}｜售后${textValue(order.afterSalesStatus)}`);
-  });
-  const classification = isRecord(context.classification) ? context.classification : {};
-  lines.push(`分类：${textValue(classification.intent)}，置信度：${textValue(classification.confidence)}`);
-  if (Array.isArray(classification.riskFlags) && classification.riskFlags.length > 0) lines.push(`风险标记：${classification.riskFlags.join('、')}`);
-  return lines.join('\n');
+function renderUserPrompt(template: string, context: AutoReplyContext, classification: AutoReplyClassification, config: AutoReplyAgentConfig): string {
+  const document = formatAutoReplyContextDocument(context, classification, { maxHistory: config.maxHistory, maxFieldLength: 800, maxOrders: 20 });
+  return template.replaceAll('{{context}}', document);
 }
 
 function stringArg(value: unknown): string | undefined {
@@ -611,10 +558,10 @@ function safeOrder(order: AutoReplyOrderContext): Record<string, unknown> {
 function formatBuyerConversations(result: Record<string, unknown>): string {
   if (result.ok !== true) return formatToolFailure('读取买家历史会话失败', result);
   const conversations = Array.isArray(result.conversations) ? result.conversations.filter(isRecord) : [];
-  const lines = ['买家历史会话', `买家：${textValue(result.buyerRef)}`, `会话数：${conversations.length}`];
+  const lines = ['买家历史会话', `会话数：${conversations.length}`];
   conversations.forEach((conversation, index) => {
-    const item = conversation.itemTitle ? `${textValue(conversation.itemTitle)}${conversation.itemRef ? `（${textValue(conversation.itemRef)}）` : ''}` : textValue(conversation.itemRef, '未关联商品');
-    lines.push('', `会话 ${index + 1}`, `会话ID：${textValue(conversation.conversationId)}`, `商品：${item}`);
+    const item = textValue(conversation.itemTitle, '未关联商品');
+    lines.push('', `会话 ${index + 1}`, `商品：${item}`);
     const messages = Array.isArray(conversation.messages) ? conversation.messages.filter(isRecord) : [];
     if (messages.length === 0) {
       lines.push('消息：无可用文本');
@@ -635,7 +582,6 @@ function formatProductInfo(result: Record<string, unknown>): string {
   const product = isRecord(result.product) ? result.product : {};
   const lines = [
     '商品信息',
-    `商品引用：${textValue(product.productRef)}`,
     `标题：${textValue(product.title)}`,
     `价格：${formatPrice(product.priceMinor)}`,
     `状态：${textValue(product.status)}`,
@@ -655,7 +601,7 @@ function formatBuyerOrders(result: Record<string, unknown>): string {
     return lines.join('\n');
   }
   orders.forEach((order, index) => {
-    lines.push('', `订单 ${index + 1}`, `订单号：${textValue(order.orderNo)}`, `商品：${textValue(order.itemTitle, '未提供')}${order.itemId ? `（${textValue(order.itemId)}）` : ''}`, `支付状态：${textValue(order.paymentStatus)}`, `订单状态：${textValue(order.orderStatus)}`, `发货状态：${textValue(order.deliveryStatus)}`, `售后状态：${textValue(order.afterSalesStatus)}`);
+    lines.push('', `订单 ${index + 1}`, `订单号：${textValue(order.orderNo)}`, `商品：${textValue(order.itemTitle, '未提供')}`, `支付状态：${textValue(order.paymentStatus)}`, `订单状态：${textValue(order.orderStatus)}`, `发货状态：${textValue(order.deliveryStatus)}`, `售后状态：${textValue(order.afterSalesStatus)}`);
   });
   return lines.join('\n');
 }
@@ -670,7 +616,7 @@ function formatShopProducts(result: Record<string, unknown>): string {
     return lines.join('\n');
   }
   products.forEach((product, index) => {
-    lines.push('', `商品 ${index + 1}`, `商品引用：${textValue(product.productRef)}`, `标题：${textValue(product.title)}`, `价格：${formatPrice(product.priceMinor)}`, `状态：${textValue(product.status)}`);
+    lines.push('', `商品 ${index + 1}`, `标题：${textValue(product.title)}`, `价格：${formatPrice(product.priceMinor)}`, `状态：${textValue(product.status)}`);
     appendOptionalLine(lines, '说明', product.description);
   });
   return lines.join('\n');
@@ -678,8 +624,7 @@ function formatShopProducts(result: Record<string, unknown>): string {
 
 function formatToolFailure(title: string, result: Record<string, unknown>): string {
   const code = typeof result.code === 'string' ? result.code : 'TOOL_FAILED';
-  const ref = typeof result.productRef === 'string' ? result.productRef : undefined;
-  return [title, `原因：${code}`, ...(ref ? [`商品引用：${ref}`] : [])].join('\n');
+  return [title, `原因：${code}`].join('\n');
 }
 
 function appendOptionalLine(lines: string[], label: string, value: unknown): void {

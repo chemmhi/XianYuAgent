@@ -1,4 +1,4 @@
-import type { AutoReplyDecision, AutoReplyRunRecord, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyRunUpdate, ConversationRecord, MessageRecord, OrderRecord, ProductRecord, Store } from './domain.js';
+import type { AutoReplyDecision, AutoReplyOrderContext, AutoReplyProductContext, AutoReplyRunRecord, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyRunUpdate, ConversationRecord, MessageRecord, Store } from './domain.js';
 import type { MessageService } from './messages.js';
 import { digestJson } from './security.js';
 import type { AutoReplyRepairCandidateResult, AutoReplyRepairRuntime } from './auto-reply-repair-runtime.js';
@@ -16,9 +16,9 @@ export interface AutoReplyClassification {
 export interface AutoReplyContext {
   conversation: ConversationRecord;
   inboundMessage: MessageRecord;
-  recentMessages: Array<Pick<MessageRecord, 'direction' | 'senderRole' | 'bodyText' | 'createdAt' | 'source'> & Partial<Pick<MessageRecord, 'bodyType' | 'bodyRef'>>>;
-  product?: Pick<ProductRecord, 'id' | 'accountId' | 'externalProductRef' | 'title' | 'description' | 'defaultReplyTemplate' | 'aiPrompt' | 'priceMinor' | 'attributes'>;
-  orders: Array<Pick<OrderRecord, 'id' | 'orderNo' | 'buyerId' | 'itemId' | 'itemTitle' | 'paymentStatus' | 'orderStatus' | 'deliveryStatus' | 'afterSalesStatus'>>;
+  recentMessages: Array<Pick<MessageRecord, 'direction' | 'senderRole' | 'bodyText'> & Partial<Pick<MessageRecord, 'createdAt' | 'source' | 'bodyType' | 'bodyRef'>>>;
+  product?: AutoReplyProductContext;
+  orders: AutoReplyOrderContext[];
 }
 
 export interface AutoReplyGeneratedReply {
@@ -580,10 +580,19 @@ export class AutoReplyService {
   }
 
   private async buildContext(adminId: string, conversation: ConversationRecord, inboundMessage: MessageRecord, maxHistory = this.maxHistory): Promise<AutoReplyContext> {
-    const history = await this.store.listMessages(adminId, conversation.id, { limit: maxHistory });
+    const history = await this.store.listAutoReplyMessages(adminId, conversation.id, { limit: maxHistory + 1 });
     const product = await this.findProduct(adminId, conversation);
     const orders = await this.findOrders(adminId, conversation);
-    return { conversation, inboundMessage, recentMessages: history.items.map((message) => ({ direction: message.direction, senderRole: message.senderRole, bodyType: message.bodyType, bodyText: message.bodyText, bodyRef: message.bodyRef, createdAt: message.createdAt, source: message.source })), product, orders: orders.map((order) => ({ id: order.id, orderNo: order.orderNo, buyerId: order.buyerId, itemId: order.itemId, itemTitle: order.itemTitle, paymentStatus: order.paymentStatus, orderStatus: order.orderStatus, deliveryStatus: order.deliveryStatus, afterSalesStatus: order.afterSalesStatus })) };
+    return {
+      conversation,
+      inboundMessage,
+      recentMessages: history.items
+        .filter((message) => message.messageId !== inboundMessage.id)
+        .slice(-maxHistory)
+        .map((message) => ({ direction: message.direction, senderRole: message.senderRole, bodyType: message.bodyType, bodyText: message.bodyText, bodyRef: message.bodyRef })),
+      product,
+      orders,
+    };
   }
 
   private async resolveRuntimeOptions(adminId: string, accountId: string): Promise<Required<AutoReplyServiceRuntimeOptions>> {
@@ -617,26 +626,19 @@ export class AutoReplyService {
 
   private async findProduct(adminId: string, conversation: ConversationRecord): Promise<AutoReplyContext['product']> {
     if (!conversation.itemRef) return undefined;
-    const result = await this.store.listProducts(adminId, { accountId: conversation.accountId, keyword: conversation.itemRef, page: 1, pageSize: 10 });
+    const result = await this.store.listAutoReplyProducts(adminId, { accountId: conversation.accountId, keyword: conversation.itemRef, limit: 10 });
     const product = result.items.find((item) => item.id === conversation.itemRef || item.externalProductRef === conversation.itemRef) ?? result.items.find((item) => item.title === conversation.itemTitle);
-    if (!product) return undefined;
-    return { id: product.id, accountId: product.accountId, externalProductRef: product.externalProductRef, title: product.title, description: product.description, defaultReplyTemplate: product.defaultReplyTemplate, aiPrompt: product.aiPrompt, priceMinor: product.priceMinor, attributes: product.attributes };
+    return product;
   }
 
-  private async findOrders(adminId: string, conversation: ConversationRecord): Promise<OrderRecord[]> {
-    // The order list contract intentionally does not search by buyer id. Load
-    // every page in the scoped account, then retain only orders owned by this
-    // buyer or explicitly linked to this conversation. Item-only matches
-    // belong to other buyers and must never block or influence an AI reply.
-    const items: OrderRecord[] = [];
-    const pageSize = 100;
-    for (let page = 1; page <= 1_000; page += 1) {
-      const result = await this.store.listOrders(adminId, { accountId: conversation.accountId, page, pageSize });
-      items.push(...result.items);
-      if (page >= result.totalPages || result.items.length === 0) break;
-      if (page === 1_000) throw new Error('ORDER_CONTEXT_INCOMPLETE');
-    }
-    return items.filter((order) => order.buyerId === conversation.buyerRef || order.conversationId === conversation.id);
+  private async findOrders(adminId: string, conversation: ConversationRecord): Promise<AutoReplyOrderContext[]> {
+    const result = await this.store.listAutoReplyOrders(adminId, {
+      accountId: conversation.accountId,
+      buyerId: conversation.buyerRef,
+      conversationId: conversation.id,
+      limit: 50,
+    });
+    return result.items;
   }
 
   private async findMessage(adminId: string, conversationId: string, messageId: string): Promise<MessageRecord | undefined> {
