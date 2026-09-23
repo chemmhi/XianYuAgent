@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createApp } from '../dist/app.js';
 import { hashPassword } from '../dist/security.js';
+import { createDefaultAutoReplyRepairPolicy } from '../dist/auto-reply-repair-config.js';
 
 const databaseUrl = process.env.DATABASE_URL ?? 'postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/xianyu_agent';
 const suffix = `${process.pid}-${Date.now()}`;
@@ -31,6 +32,7 @@ try {
   adminId = admin.id;
   const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef });
   accountId = account.id;
+  await runtime.store.publishAutoReplyRepairPolicy({ accountId, bundle: createDefaultAutoReplyRepairPolicy(accountId) });
   const product = await runtime.store.createProduct({ adminId, accountId, externalProductRef: `1078553391460-${suffix}`, title: 'Postgres 资料包', priceMinor: 2_590, status: 'published' });
   const conversation = await runtime.store.createConversation({ adminId, accountId, buyerRef: `pg-buyer-${suffix}`, buyerDisplayName: 'Auto Reply PostgreSQL Buyer', itemRef: product.externalProductRef, itemTitle: product.title, externalConversationRef: `pg-conv-${suffix}` });
   conversationId = conversation.id;
@@ -52,6 +54,21 @@ try {
   assert.equal(result.autoReply?.outboundMessage?.source, 'ai');
   assert.equal(modelCall, 2);
   inboundMessageId = result.autoReply?.inboundMessage.id;
+
+  const projectedProducts = await runtime.store.listAutoReplyProducts(adminId, { accountId, productId: product.id, limit: 1 });
+  assert.equal(projectedProducts.items.length, 1);
+  assert.deepEqual(Object.keys(projectedProducts.items[0]).sort(), ['aiPrompt', 'defaultReplyTemplate', 'description', 'externalProductRef', 'id', 'priceMinor', 'status', 'title'].sort());
+  assert.equal('createdAt' in projectedProducts.items[0], false);
+  assert.equal('updatedAt' in projectedProducts.items[0], false);
+  assert.equal('attributes' in projectedProducts.items[0], false);
+
+  const projectedConversations = await runtime.store.listAutoReplyConversations(adminId, { accountId, buyerRef: conversation.buyerRef, limit: 10 });
+  assert.deepEqual(Object.keys(projectedConversations.items[0]).sort(), ['id', 'itemRef', 'itemTitle'].sort());
+
+  const projectedMessages = await runtime.store.listAutoReplyMessages(adminId, conversationId, { limit: 20 });
+  assert.ok(projectedMessages.items.length >= 2);
+  assert.deepEqual(Object.keys(projectedMessages.items[0]).sort(), ['bodyRef', 'bodyText', 'bodyType', 'direction', 'senderRole'].sort());
+  assert.equal('createdAt' in projectedMessages.items[0], false);
 
   const storedRun = await runtime.store.getAutoReplyRun(adminId, result.autoReply.run.id);
   assert.equal(storedRun?.outboundMessageId, result.autoReply.outboundMessage?.id);
@@ -78,6 +95,7 @@ try {
     if (accountId) await active.store.pool.query('delete from messages.conversations where account_id=$1', [accountId]);
     if (accountId) await active.store.pool.query('delete from products.products where account_id=$1', [accountId]);
     if (accountId) await active.store.pool.query('delete from observability.audit_events where account_id=$1', [accountId]);
+    if (accountId) await active.store.pool.query('delete from settings.auto_reply_repair_policies where account_id=$1', [accountId]);
     if (accountId) await active.store.pool.query('delete from auth.account_credentials where account_id=$1', [accountId]);
     if (accountId) await active.store.pool.query('delete from auth.account_scopes where account_id=$1', [accountId]);
     if (accountId) await active.store.pool.query('delete from accounts.accounts where id=$1', [accountId]);

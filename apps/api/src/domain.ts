@@ -190,6 +190,33 @@ export interface ProductListResult {
   totalPages: number;
 }
 
+/**
+ * Minimal product context exposed to the auto-reply model.
+ * Deliberately omits attributes, SKUs/assets, sync metadata and timestamps.
+ */
+export interface AutoReplyProductContext {
+  id: string;
+  externalProductRef?: string;
+  title: string;
+  description?: string;
+  defaultReplyTemplate?: string;
+  aiPrompt?: string;
+  priceMinor?: number;
+  status: ProductStatus;
+}
+
+export interface AutoReplyProductListQuery {
+  accountId: string;
+  productId?: string;
+  keyword?: string;
+  limit?: number;
+}
+
+export interface AutoReplyProductListResult {
+  items: AutoReplyProductContext[];
+  total: number;
+}
+
 export type AutomationRuleType = 'paid_auto_delivery' | 'unpaid_auto_reprice' | 'review_gift' | 'review_reminder';
 
 export interface PaidAutoDeliveryRule {
@@ -342,6 +369,29 @@ export interface OrderListResult {
   pageSize: number;
   total: number;
   totalPages: number;
+}
+
+/** Minimal order context exposed to the auto-reply model. */
+export interface AutoReplyOrderContext {
+  orderNo: string;
+  itemId: string;
+  itemTitle: string;
+  paymentStatus: PaymentStatus;
+  orderStatus: OrderStatus;
+  deliveryStatus: DeliveryStatus;
+  afterSalesStatus: AfterSalesStatus;
+}
+
+export interface AutoReplyOrderListQuery {
+  accountId: string;
+  buyerId?: string;
+  conversationId?: string;
+  limit?: number;
+}
+
+export interface AutoReplyOrderListResult {
+  items: AutoReplyOrderContext[];
+  total: number;
 }
 
 export interface OrderUpsertResult {
@@ -979,6 +1029,23 @@ export interface ConversationListResult {
   hasMore: boolean;
 }
 
+/** Minimal conversation context exposed to the auto-reply model. */
+export interface AutoReplyConversationContext {
+  id: string;
+  itemRef?: string;
+  itemTitle?: string;
+}
+
+export interface AutoReplyConversationListQuery {
+  accountId: string;
+  buyerRef: string;
+  limit?: number;
+}
+
+export interface AutoReplyConversationListResult {
+  items: AutoReplyConversationContext[];
+}
+
 export interface MessageListQuery {
   cursor?: number;
   /** Opaque cursor used to load messages older than the current timeline. */
@@ -993,6 +1060,24 @@ export interface MessageListResult {
   latestCursor: number;
   hasMoreHistory: boolean;
   historyCursor?: string;
+}
+
+/** Minimal message context exposed to the auto-reply model. */
+export interface AutoReplyMessageContext {
+  direction: MessageDirection;
+  senderRole: MessageSenderRole;
+  bodyType: MessageBodyType;
+  bodyText?: string;
+  bodyRef?: string;
+}
+
+export interface AutoReplyMessageListQuery {
+  limit?: number;
+}
+
+export interface AutoReplyMessageListResult {
+  items: AutoReplyMessageContext[];
+  hasMoreHistory: boolean;
 }
 
 export interface CredentialRecord {
@@ -1228,12 +1313,14 @@ export interface Store {
   appendWorkspaceMessage(input: { adminId: string; sessionId: string; runId?: string; type: WorkspaceMessageType; content: string; summary?: string }): Promise<WorkspaceMessageRecord>;
   listWorkspaceMessages(adminId: string, sessionId: string, limit?: number): Promise<WorkspaceMessageRecord[]>;
   listProducts(adminId: string, query: ProductListQuery): Promise<ProductListResult>;
+  listAutoReplyProducts(adminId: string, query: AutoReplyProductListQuery): Promise<AutoReplyProductListResult>;
   getProduct(adminId: string, productId: string): Promise<ProductRecord | undefined>;
   getProductAutomation(adminId: string, productId: string): Promise<ProductAutomationConfigRecord | undefined>;
   updateProductAutomation(input: { adminId: string; productId: string; expectedConfigVersion: number; config: ProductAutomationConfig; configDigest: string }): Promise<ProductAutomationConfigRecord | undefined>;
   updateProductAutomationsBatch(input: { adminId: string; productIds: string[]; expectedConfigVersions: Record<string, number>; config?: ProductAutomationConfig; configDigest?: string; configByProductId?: Record<string, ProductAutomationConfig>; configDigests?: Record<string, string> }): Promise<ProductAutomationBatchResult>;
   persistXianyuItemDetail(input: XianyuItemDetailPersistenceInput): Promise<ProductRecord | undefined>;
   listOrders(adminId: string, query: OrderListQuery): Promise<OrderListResult>;
+  listAutoReplyOrders(adminId: string, query: AutoReplyOrderListQuery): Promise<AutoReplyOrderListResult>;
   getOrder(adminId: string, orderNo: string, accountId?: string): Promise<OrderRecord | undefined>;
   getAutomationExecution(executionKey: string): Promise<AutomationExecutionLedgerRecord | undefined>;
   claimAutomationExecution(input: { executionKey: string; fingerprint: string; ownerToken: string; leaseUntil: string }): Promise<{ claimed: boolean; record: AutomationExecutionLedgerRecord }>;
@@ -1281,11 +1368,13 @@ export interface Store {
   commitCouponReservation(input: { adminId: string; reservationId: string; executionKey: string }): Promise<CouponReservationRecord>;
   releaseCouponReservation(input: { adminId: string; reservationId: string; executionKey: string; reason: string }): Promise<CouponReservationRecord>;
   listConversations(adminId: string, query: ConversationListQuery): Promise<ConversationListResult>;
+  listAutoReplyConversations(adminId: string, query: AutoReplyConversationListQuery): Promise<AutoReplyConversationListResult>;
   getConversation(adminId: string, conversationId: string): Promise<ConversationRecord | undefined>;
   markConversationRead(adminId: string, conversationId: string): Promise<ConversationRecord | undefined>;
   findConversationByExternalRef(adminId: string, accountId: string, externalConversationRef: string): Promise<ConversationRecord | undefined>;
   upsertExternalConversation(input: { adminId: string; accountId: string; externalConversationRef: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; unreadCount?: number; lastMessagePreview?: string; lastMessageAt?: string }): Promise<ConversationRecord>;
   listMessages(adminId: string, conversationId: string, query: MessageListQuery): Promise<MessageListResult>;
+  listAutoReplyMessages(adminId: string, conversationId: string, query: AutoReplyMessageListQuery): Promise<AutoReplyMessageListResult>;
   listConversationEvents(adminId: string, conversationId: string, afterCursor: number, limit: number): Promise<ConversationEventRecord[]>;
   findMessageByExternalRef(adminId: string, conversationId: string, externalMessageRef: string): Promise<MessageRecord | undefined>;
   createConversation(input: { adminId: string; accountId: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; externalConversationRef?: string }): Promise<ConversationRecord>;

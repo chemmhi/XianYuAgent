@@ -1,4 +1,4 @@
-import type { ConversationRecord, MessageRecord, OrderRecord, ProductRecord, Store } from './domain.js';
+import type { AutoReplyConversationContext, AutoReplyMessageContext, AutoReplyOrderContext, AutoReplyProductContext, Store } from './domain.js';
 import type { AutoReplyAgentConfig } from './auto-reply-agent-config.js';
 import type { AutoReplyClassification, AutoReplyContext, AutoReplyGeneratedReply, AutoReplyGenerator, AutoReplyGeneratorObserver, AutoReplyGeneratorObservation } from './auto-reply.js';
 import { buildAutoReplyModelContent } from './auto-reply-multimodal.js';
@@ -15,6 +15,17 @@ export const AUTO_REPLY_TOOL_NAMES = [
 ] as const;
 
 type AutoReplyToolName = (typeof AUTO_REPLY_TOOL_NAMES)[number];
+
+/**
+ * Tool execution keeps a compact text payload for the model and a redacted
+ * structured payload for God view/observability. The model must never receive
+ * the structured object serialized as JSON because that adds syntax noise and
+ * makes size limiting prone to cutting a JSON document in half.
+ */
+interface AutoReplyToolResult {
+  text: string;
+  structured: Record<string, unknown>;
+}
 
 export class AutoReplyAgentError extends Error {
   readonly code: string;
@@ -51,7 +62,7 @@ export const AUTO_REPLY_AGENT_TOOLS: ModelToolDefinition[] = [
     type: 'function',
     function: {
       name: 'get_buyer_conversations',
-      description: '读取当前买家在当前卖家账号下的全部相关会话，跨订单和跨商品。',
+      description: '读取当前买家在当前卖家账号下的相关会话（跨订单和跨商品），仅返回最近消息正文、方向和商品引用，不返回时间戳或完整记录。结果为紧凑纯文本。',
       parameters: { type: 'object', properties: { maxMessagesPerConversation: { type: 'integer', minimum: 1, maximum: 20 } }, additionalProperties: false },
     },
   },
@@ -59,7 +70,7 @@ export const AUTO_REPLY_AGENT_TOOLS: ModelToolDefinition[] = [
     type: 'function',
     function: {
       name: 'get_product_info',
-      description: '读取当前卖家账号下指定商品的关键摘要（标题、描述、价格、AI提示词/知识库、回复模板、浏览/想要/收藏等公开指标、状态和更新时间），不返回完整商品记录。未传商品引用时使用当前会话商品。',
+      description: '读取当前卖家账号下指定商品的必要事实（商品引用、标题、说明、价格、卖家知识、回复模板、状态）。不返回完整商品记录；未传商品引用时使用当前会话商品。结果为紧凑纯文本。',
       parameters: { type: 'object', properties: { productRef: { type: 'string', maxLength: 120 } }, additionalProperties: false },
     },
   },
@@ -67,7 +78,7 @@ export const AUTO_REPLY_AGENT_TOOLS: ModelToolDefinition[] = [
     type: 'function',
     function: {
       name: 'get_buyer_orders',
-      description: '分页读取当前买家在当前卖家账号下的订单安全摘要。',
+      description: '读取当前买家在当前卖家账号下的订单必要事实（订单号、商品引用/标题、支付、订单、发货和售后状态），不返回创建或更新时间。结果为紧凑纯文本。',
       parameters: { type: 'object', properties: { maxOrders: { type: 'integer', minimum: 1, maximum: 20 } }, additionalProperties: false },
     },
   },
@@ -75,7 +86,7 @@ export const AUTO_REPLY_AGENT_TOOLS: ModelToolDefinition[] = [
     type: 'function',
     function: {
       name: 'list_shop_products',
-      description: '搜索当前卖家店铺的商品关键摘要（标题、描述、价格、AI提示词/知识库、回复模板、浏览/想要/收藏等公开指标、状态和更新时间），用于相似商品或替代商品推荐；不返回完整商品记录。',
+      description: '搜索当前卖家店铺的商品必要事实（商品引用、标题、说明、价格、状态），用于相似商品或替代商品推荐；不返回完整商品记录。结果为紧凑纯文本。',
       parameters: { type: 'object', properties: { keyword: { type: 'string', maxLength: 120 }, limit: { type: 'integer', minimum: 1, maximum: 20 } }, additionalProperties: false },
     },
   },
@@ -226,7 +237,7 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
             stage: 'context_read',
             log: { phase: 'tool', state: 'started', message: toolMessage(parsed.name), tool: parsed.name, loop, toolCallIndex: trace.toolCalls, argumentKeys: Object.keys(parsed.arguments).sort() },
           });
-          let toolResult: Record<string, unknown>;
+          let toolResult: AutoReplyToolResult;
           try {
             toolResult = await withTimeout(this.executeTool(parsed.name, parsed.arguments, input.adminId, input.context, config), config.toolTimeoutMs);
           } catch (error) {
@@ -249,7 +260,7 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
           await observe(input.observe, {
             eventType: 'agent.tool.completed',
             stage: 'context_read',
-            log: { phase: 'tool', state: 'completed', message: `${toolMessage(parsed.name)}完成`, tool: parsed.name, loop, toolCallIndex: trace.toolCalls, result: summarizeToolResult(parsed.name, toolResult) },
+            log: { phase: 'tool', state: 'completed', message: `${toolMessage(parsed.name)}完成`, tool: parsed.name, loop, toolCallIndex: trace.toolCalls, result: summarizeToolResult(parsed.name, toolResult.structured) },
             durationMs: Date.now() - toolStartedAt,
           });
           await this.options.godView?.emit({
@@ -258,9 +269,11 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
             traceId: input.traceId,
             runId: input.runId,
             buyer: buyerIdentity(input.context),
-            payload: { loop, toolCallIndex: trace.toolCalls, tool: parsed.name, durationMs: Date.now() - toolStartedAt, result: toolResult },
+            // Keep the structured result in God view for debugging. Only the
+            // model-facing message below is converted to compact plain text.
+            payload: { loop, toolCallIndex: trace.toolCalls, tool: parsed.name, durationMs: Date.now() - toolStartedAt, result: toolResult.structured, text: toolResult.text },
           });
-          messages.push({ role: 'tool', name: parsed.name, toolCallId: call.id, content: limitText(JSON.stringify(toolResult), config.maxToolResultChars) });
+          messages.push({ role: 'tool', name: parsed.name, toolCallId: call.id, content: limitToolText(toolResult.text, config.maxToolResultChars) });
         }
         continue;
       }
@@ -319,12 +332,15 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
       buyerName: context.conversation.buyerDisplayName,
       itemRef: context.conversation.itemRef,
       itemTitle: context.conversation.itemTitle,
-      currentMessage: { bodyType: context.inboundMessage.bodyType, bodyText: trimField(context.inboundMessage.bodyText, 2_000), hasMedia: Boolean(context.inboundMessage.bodyRef), createdAt: context.inboundMessage.createdAt },
+      currentMessage: { bodyType: context.inboundMessage.bodyType, bodyText: trimField(context.inboundMessage.bodyText, 2_000), hasMedia: Boolean(context.inboundMessage.bodyRef) },
+      recentMessages: context.recentMessages.slice(-12).map((message) => ({ direction: message.direction, senderRole: message.senderRole, bodyType: message.bodyType, bodyText: trimField(message.bodyText, 600) })),
+      product: context.product ? { productRef: context.product.externalProductRef ?? context.product.id, title: trimField(context.product.title, 300), description: trimField(context.product.description, 800), priceMinor: context.product.priceMinor, aiPrompt: trimField(context.product.aiPrompt, 800), defaultReplyTemplate: trimField(context.product.defaultReplyTemplate, 300) } : undefined,
+      orders: context.orders.slice(0, 20).map((order) => ({ orderNo: order.orderNo, itemId: order.itemId, itemTitle: trimField(order.itemTitle, 300), paymentStatus: order.paymentStatus, orderStatus: order.orderStatus, deliveryStatus: order.deliveryStatus, afterSalesStatus: order.afterSalesStatus })),
       classification: { intent: classification.intent, confidence: classification.confidence, riskFlags: classification.riskFlags },
     };
   }
 
-  private async executeTool(name: AutoReplyToolName, args: Record<string, unknown>, adminId: string, context: AutoReplyContext, config: AutoReplyAgentConfig): Promise<Record<string, unknown>> {
+  private async executeTool(name: AutoReplyToolName, args: Record<string, unknown>, adminId: string, context: AutoReplyContext, config: AutoReplyAgentConfig): Promise<AutoReplyToolResult> {
     switch (name) {
       case 'get_buyer_conversations': return this.getBuyerConversations(adminId, context, numberArg(args.maxMessagesPerConversation, config.maxHistory));
       case 'get_product_info': return this.getProductInfo(adminId, context, stringArg(args.productRef));
@@ -333,65 +349,61 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
     }
   }
 
-  private async getBuyerConversations(adminId: string, context: AutoReplyContext, maxMessagesPerConversation: number): Promise<Record<string, unknown>> {
-    const conversations: ConversationRecord[] = [];
-    let cursor: string | undefined;
-    for (let page = 0; page < 100; page += 1) {
-      const result = await this.store.listConversations(adminId, { accountId: context.conversation.accountId, limit: 100, cursor });
-      conversations.push(...result.items.filter((item) => item.accountId === context.conversation.accountId && item.buyerRef === context.conversation.buyerRef));
-      if (!result.hasMore || !result.nextCursor) break;
-      cursor = result.nextCursor;
-    }
-    const items = await Promise.all(conversations.slice(0, 50).map(async (conversation) => {
-      const history = await this.store.listMessages(adminId, conversation.id, { limit: Math.min(20, maxMessagesPerConversation) });
+  private async getBuyerConversations(adminId: string, context: AutoReplyContext, maxMessagesPerConversation: number): Promise<AutoReplyToolResult> {
+    const conversations = (await this.store.listAutoReplyConversations(adminId, { accountId: context.conversation.accountId, buyerRef: context.conversation.buyerRef, limit: 20 })).items;
+    const items = await Promise.all(conversations.map(async (conversation) => {
+      const history = await this.store.listAutoReplyMessages(adminId, conversation.id, { limit: Math.min(20, maxMessagesPerConversation) });
       return {
         conversationId: conversation.id,
         itemRef: conversation.itemRef,
         itemTitle: conversation.itemTitle,
-        lastMessageAt: conversation.lastMessageAt,
         messages: history.items.slice(-maxMessagesPerConversation).map((message) => safeMessage(message)),
       };
     }));
-    return { ok: true, buyerRef: context.conversation.buyerRef, conversations: items };
+    const structured = { ok: true, buyerRef: context.conversation.buyerRef, conversations: items };
+    return { structured, text: formatBuyerConversations(structured) };
   }
 
-  private async getProductInfo(adminId: string, context: AutoReplyContext, requestedRef?: string): Promise<Record<string, unknown>> {
+  private async getProductInfo(adminId: string, context: AutoReplyContext, requestedRef?: string): Promise<AutoReplyToolResult> {
     const productRef = requestedRef?.trim() || context.conversation.itemRef;
-    if (!productRef) return { ok: false, code: 'PRODUCT_REF_REQUIRED' };
+    if (!productRef) {
+      const structured = { ok: false, code: 'PRODUCT_REF_REQUIRED' };
+      return { structured, text: formatToolFailure('未找到商品信息', structured) };
+    }
     // External Xianyu item refs are commonly numeric while the local product
     // primary key is a UUID. Avoid sending an external ref through the UUID
     // lookup path, which would make PostgreSQL reject the value before the
     // scoped external-ref query gets a chance to resolve it.
-    const byId = isUuid(productRef) ? await this.store.getProduct(adminId, productRef) : undefined;
-    if (byId && byId.accountId === context.conversation.accountId) return { ok: true, product: safeProduct(byId) };
-    const result = await this.store.listProducts(adminId, { accountId: context.conversation.accountId, keyword: productRef, page: 1, pageSize: 100 });
-    const product = result.items.find((item) => item.accountId === context.conversation.accountId && (item.id === productRef || item.externalProductRef === productRef || item.title === productRef));
-    return product ? { ok: true, product: safeProduct(product) } : { ok: false, code: 'PRODUCT_NOT_FOUND', productRef };
-  }
-
-  private async getBuyerOrders(adminId: string, context: AutoReplyContext, maxOrders: number): Promise<Record<string, unknown>> {
-    const orders: OrderRecord[] = [];
-    for (let page = 1; page <= 1_000; page += 1) {
-      const result = await this.store.listOrders(adminId, { accountId: context.conversation.accountId, page, pageSize: 100 });
-      orders.push(...result.items.filter((order) => order.accountId === context.conversation.accountId && (order.buyerId === context.conversation.buyerRef || order.conversationId === context.conversation.id)));
-      if (page >= result.totalPages || result.items.length === 0) break;
-      if (page === 1_000) throw new AutoReplyAgentError('AGENT_ORDER_CONTEXT_INCOMPLETE');
+    const result = await this.store.listAutoReplyProducts(adminId, {
+      accountId: context.conversation.accountId,
+      ...(isUuid(productRef) ? { productId: productRef } : { keyword: productRef }),
+      limit: 50,
+    });
+    const product = result.items.find((item) => item.id === productRef || item.externalProductRef === productRef || item.title === productRef);
+    if (product) {
+      const structured = { ok: true, product: safeProduct(product) };
+      return { structured, text: formatProductInfo(structured) };
     }
-    return { ok: true, orders: orders.slice(0, maxOrders).map(safeOrder), totalMatched: orders.length };
+    const structured = { ok: false, code: 'PRODUCT_NOT_FOUND', productRef };
+    return { structured, text: formatToolFailure('未找到商品', structured) };
   }
 
-  private async listShopProducts(adminId: string, context: AutoReplyContext, keyword: string | undefined, limit: number): Promise<Record<string, unknown>> {
+  private async getBuyerOrders(adminId: string, context: AutoReplyContext, maxOrders: number): Promise<AutoReplyToolResult> {
+    const result = await this.store.listAutoReplyOrders(adminId, {
+      accountId: context.conversation.accountId,
+      buyerId: context.conversation.buyerRef,
+      conversationId: context.conversation.id,
+      limit: maxOrders,
+    });
+    const structured = { ok: true, orders: result.items.map(safeOrder), totalMatched: result.total };
+    return { structured, text: formatBuyerOrders(structured) };
+  }
+
+  private async listShopProducts(adminId: string, context: AutoReplyContext, keyword: string | undefined, limit: number): Promise<AutoReplyToolResult> {
     const normalizedKeyword = keyword?.trim() || undefined;
-    const products: ProductRecord[] = [];
-    let total = 0;
-    for (let page = 1; page <= 1_000; page += 1) {
-      const result = await this.store.listProducts(adminId, { accountId: context.conversation.accountId, keyword: normalizedKeyword, page, pageSize: 100 });
-      products.push(...result.items.filter((product) => product.accountId === context.conversation.accountId));
-      total = result.total;
-      if (page >= result.totalPages || result.items.length === 0) break;
-      if (page === 1_000) throw new AutoReplyAgentError('AGENT_PRODUCT_CONTEXT_INCOMPLETE');
-    }
-    return { ok: true, keyword: normalizedKeyword, products: products.slice(0, limit).map(safeProduct), total };
+    const result = await this.store.listAutoReplyProducts(adminId, { accountId: context.conversation.accountId, keyword: normalizedKeyword, limit });
+    const structured = { ok: true, keyword: normalizedKeyword, products: result.items.map(safeProduct), total: result.total };
+    return { structured, text: formatShopProducts(structured) };
   }
 }
 
@@ -420,7 +432,46 @@ function validateToolArguments(name: AutoReplyToolName, args: Record<string, unk
 }
 
 function renderUserPrompt(template: string, context: Record<string, unknown>): string {
-  return template.replaceAll('{{context}}', JSON.stringify(context, null, 2));
+  return template.replaceAll('{{context}}', formatInitialContext(context));
+}
+
+function formatInitialContext(context: Record<string, unknown>): string {
+  const lines = [
+    `账号：${textValue(context.accountId)}`,
+    `会话：${textValue(context.conversationId)}`,
+    `买家：${textValue(context.buyerName, textValue(context.buyerRef))}`,
+    `商品引用：${textValue(context.itemRef)}`,
+    `商品标题：${textValue(context.itemTitle)}`,
+  ];
+  const current = isRecord(context.currentMessage) ? context.currentMessage : {};
+  lines.push(`当前消息：${textValue(current.bodyText, current.hasMedia === true ? '[图片或附件]' : '[无文本]')}`);
+  if (current.bodyType && current.bodyType !== 'text') lines.push(`当前消息类型：${textValue(current.bodyType)}`);
+  const recentMessages = Array.isArray(context.recentMessages) ? context.recentMessages.filter(isRecord) : [];
+  if (recentMessages.length > 0) {
+    lines.push('已加载会话消息：');
+    for (const message of recentMessages) {
+      const role = message.senderRole === 'buyer' || message.direction === 'inbound' ? '买家' : '卖家';
+      lines.push(`- ${role}：${textValue(message.bodyText, message.bodyType === 'image' ? '[图片或附件]' : '[无文本]')}`);
+    }
+  }
+  const product = isRecord(context.product) ? context.product : undefined;
+  if (product) {
+    lines.push('已加载商品事实：', `- 商品引用：${textValue(product.productRef)}`, `- 标题：${textValue(product.title)}`, `- 价格：${formatPrice(product.priceMinor)}`);
+    appendOptionalLine(lines, '- 说明', product.description);
+    appendOptionalLine(lines, '- 卖家知识', product.aiPrompt);
+    appendOptionalLine(lines, '- 回复模板', product.defaultReplyTemplate);
+  } else {
+    lines.push('已加载商品事实：无');
+  }
+  const orders = Array.isArray(context.orders) ? context.orders.filter(isRecord) : [];
+  lines.push(orders.length > 0 ? `已加载买家订单（${orders.length} 条）：` : '已加载买家订单：无');
+  orders.forEach((order, index) => {
+    lines.push(`- 订单${index + 1} ${textValue(order.orderNo)}｜${textValue(order.itemTitle, textValue(order.itemId))}｜支付${textValue(order.paymentStatus)}｜订单${textValue(order.orderStatus)}｜发货${textValue(order.deliveryStatus)}｜售后${textValue(order.afterSalesStatus)}`);
+  });
+  const classification = isRecord(context.classification) ? context.classification : {};
+  lines.push(`分类：${textValue(classification.intent)}，置信度：${textValue(classification.confidence)}`);
+  if (Array.isArray(classification.riskFlags) && classification.riskFlags.length > 0) lines.push(`风险标记：${classification.riskFlags.join('、')}`);
+  return lines.join('\n');
 }
 
 function stringArg(value: unknown): string | undefined {
@@ -440,12 +491,24 @@ function trimField(value: string | undefined, limit: number): string | undefined
   return normalized ? (normalized.length > limit ? `${normalized.slice(0, limit - 1).trim()}…` : normalized) : undefined;
 }
 
-function limitText(value: string, limit: number): string {
-  return value.length > limit ? `${value.slice(0, limit - 1)}…` : value;
+function limitToolText(value: string, limit: number): string {
+  if (value.length <= limit) return value;
+  // Prefer a line boundary so a clipped tool result remains readable and
+  // never resembles a half-serialized object.
+  const rawLimit = Math.max(1, limit - '内容已截断：后续信息省略'.length - 1);
+  const boundary = value.lastIndexOf('\n', rawLimit);
+  const cutAt = boundary >= Math.floor(rawLimit * 0.6) ? boundary : rawLimit;
+  return `${value.slice(0, cutAt).trimEnd()}\n内容已截断：后续信息省略`;
 }
 
-function safeMessage(message: MessageRecord): Record<string, unknown> {
-  return { direction: message.direction, senderRole: message.senderRole, bodyType: message.bodyType, bodyText: trimField(message.bodyText, 1_000), hasMedia: Boolean(message.bodyRef), createdAt: message.createdAt };
+function safeMessage(message: AutoReplyMessageContext): Record<string, unknown> {
+  return {
+    direction: message.direction,
+    senderRole: message.senderRole,
+    bodyType: message.bodyType,
+    bodyText: trimField(message.bodyText, 600),
+    hasMedia: Boolean(message.bodyRef),
+  };
 }
 
 async function observe(observer: AutoReplyGeneratorObserver | undefined, observation: AutoReplyGeneratorObservation): Promise<void> {
@@ -518,48 +581,125 @@ function summarizeToolResult(name: AutoReplyToolName, result: Record<string, unk
   }
 }
 
-function safeProduct(product: Pick<ProductRecord, 'id' | 'externalProductRef' | 'title' | 'description' | 'defaultReplyTemplate' | 'aiPrompt' | 'priceMinor' | 'status' | 'updatedAt' | 'attributes'>): Record<string, unknown> {
-  // Keep the tool contract intentionally narrow: the model needs customer-facing
-  // facts and seller guidance, not the persisted product row, attributes, assets,
-  // SKU details, or account-scoped implementation metadata.
+function safeProduct(product: AutoReplyProductContext): Record<string, unknown> {
+  // Keep only facts that can change the buyer-facing answer. Persisted
+  // attributes, engagement counters, timestamps, assets, SKUs and account
+  // metadata are intentionally excluded from the model-facing contract.
   return {
-    id: product.id,
-    externalProductRef: product.externalProductRef,
-    title: trimField(product.title, 500),
-    description: trimField(product.description, 2_000),
+    productRef: product.externalProductRef ?? product.id,
+    title: trimField(product.title, 300),
+    description: trimField(product.description, 800),
     priceMinor: product.priceMinor,
-    aiPrompt: trimField(product.aiPrompt, 2_000),
-    defaultReplyTemplate: trimField(product.defaultReplyTemplate, 500),
-    ...safeProductEngagement(product.attributes),
+    aiPrompt: trimField(product.aiPrompt, 800),
+    defaultReplyTemplate: trimField(product.defaultReplyTemplate, 300),
     status: product.status,
-    updatedAt: product.updatedAt,
   };
 }
 
-function safeProductEngagement(attributes: ProductRecord['attributes'] | undefined): Record<string, number> {
-  const xianyu = asRecord(attributes?.xianyu);
-  const detail = asRecord(xianyu.detail);
-  const summary = asRecord(detail.summary);
-  const fields = ['browseCount', 'wantCount', 'collectCount', 'favoriteCount', 'interactFavoriteCount', 'soldCount', 'quantity'] as const;
-  const result: Record<string, number> = {};
-  for (const field of fields) {
-    const value = nonNegativeInteger(summary[field]);
-    if (value !== undefined) result[field] = value;
+function safeOrder(order: AutoReplyOrderContext): Record<string, unknown> {
+  return {
+    orderNo: order.orderNo,
+    itemId: order.itemId,
+    itemTitle: trimField(order.itemTitle, 300),
+    paymentStatus: order.paymentStatus,
+    orderStatus: order.orderStatus,
+    deliveryStatus: order.deliveryStatus,
+    afterSalesStatus: order.afterSalesStatus,
+  };
+}
+
+function formatBuyerConversations(result: Record<string, unknown>): string {
+  if (result.ok !== true) return formatToolFailure('读取买家历史会话失败', result);
+  const conversations = Array.isArray(result.conversations) ? result.conversations.filter(isRecord) : [];
+  const lines = ['买家历史会话', `买家：${textValue(result.buyerRef)}`, `会话数：${conversations.length}`];
+  conversations.forEach((conversation, index) => {
+    const item = conversation.itemTitle ? `${textValue(conversation.itemTitle)}${conversation.itemRef ? `（${textValue(conversation.itemRef)}）` : ''}` : textValue(conversation.itemRef, '未关联商品');
+    lines.push('', `会话 ${index + 1}`, `会话ID：${textValue(conversation.conversationId)}`, `商品：${item}`);
+    const messages = Array.isArray(conversation.messages) ? conversation.messages.filter(isRecord) : [];
+    if (messages.length === 0) {
+      lines.push('消息：无可用文本');
+      return;
+    }
+    lines.push('消息：');
+    for (const message of messages) {
+      const role = message.senderRole === 'buyer' || message.direction === 'inbound' ? '买家' : '卖家';
+      const body = textValue(message.bodyText, message.hasMedia === true ? '[图片或附件]' : '[无文本]');
+      lines.push(`- ${role}：${body}`);
+    }
+  });
+  return lines.join('\n');
+}
+
+function formatProductInfo(result: Record<string, unknown>): string {
+  if (result.ok !== true) return formatToolFailure('未找到商品信息', result);
+  const product = isRecord(result.product) ? result.product : {};
+  const lines = [
+    '商品信息',
+    `商品引用：${textValue(product.productRef)}`,
+    `标题：${textValue(product.title)}`,
+    `价格：${formatPrice(product.priceMinor)}`,
+    `状态：${textValue(product.status)}`,
+  ];
+  appendOptionalLine(lines, '说明', product.description);
+  appendOptionalLine(lines, '卖家知识', product.aiPrompt);
+  appendOptionalLine(lines, '回复模板', product.defaultReplyTemplate);
+  return lines.join('\n');
+}
+
+function formatBuyerOrders(result: Record<string, unknown>): string {
+  if (result.ok !== true) return formatToolFailure('读取买家订单失败', result);
+  const orders = Array.isArray(result.orders) ? result.orders.filter(isRecord) : [];
+  const lines = ['买家订单', `匹配订单数：${textValue(result.totalMatched, String(orders.length))}`];
+  if (orders.length === 0) {
+    lines.push('订单：无');
+    return lines.join('\n');
   }
-  return result;
+  orders.forEach((order, index) => {
+    lines.push('', `订单 ${index + 1}`, `订单号：${textValue(order.orderNo)}`, `商品：${textValue(order.itemTitle, '未提供')}${order.itemId ? `（${textValue(order.itemId)}）` : ''}`, `支付状态：${textValue(order.paymentStatus)}`, `订单状态：${textValue(order.orderStatus)}`, `发货状态：${textValue(order.deliveryStatus)}`, `售后状态：${textValue(order.afterSalesStatus)}`);
+  });
+  return lines.join('\n');
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+function formatShopProducts(result: Record<string, unknown>): string {
+  if (result.ok !== true) return formatToolFailure('搜索店铺商品失败', result);
+  const products = Array.isArray(result.products) ? result.products.filter(isRecord) : [];
+  const keyword = textValue(result.keyword, '全部商品');
+  const lines = ['店铺商品搜索', `关键词：${keyword}`, `返回商品数：${products.length}`, `匹配总数：${textValue(result.total, String(products.length))}`];
+  if (products.length === 0) {
+    lines.push('商品：无');
+    return lines.join('\n');
+  }
+  products.forEach((product, index) => {
+    lines.push('', `商品 ${index + 1}`, `商品引用：${textValue(product.productRef)}`, `标题：${textValue(product.title)}`, `价格：${formatPrice(product.priceMinor)}`, `状态：${textValue(product.status)}`);
+    appendOptionalLine(lines, '说明', product.description);
+  });
+  return lines.join('\n');
 }
 
-function nonNegativeInteger(value: unknown): number | undefined {
-  const numeric = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : Number.NaN;
-  return Number.isFinite(numeric) && numeric >= 0 ? Math.trunc(numeric) : undefined;
+function formatToolFailure(title: string, result: Record<string, unknown>): string {
+  const code = typeof result.code === 'string' ? result.code : 'TOOL_FAILED';
+  const ref = typeof result.productRef === 'string' ? result.productRef : undefined;
+  return [title, `原因：${code}`, ...(ref ? [`商品引用：${ref}`] : [])].join('\n');
 }
 
-function safeOrder(order: OrderRecord): Record<string, unknown> {
-  return { orderNo: order.orderNo, itemId: order.itemId, itemTitle: trimField(order.itemTitle, 500), paymentStatus: order.paymentStatus, orderStatus: order.orderStatus, deliveryStatus: order.deliveryStatus, afterSalesStatus: order.afterSalesStatus, createdAt: order.createdAt, updatedAt: order.updatedAt };
+function appendOptionalLine(lines: string[], label: string, value: unknown): void {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (text) lines.push(`${label}：${text}`);
+}
+
+function formatPrice(value: unknown): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '未提供';
+  return `${(value / 100).toFixed(2)}元`;
+}
+
+function textValue(value: unknown, fallback = '未提供'): string {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return fallback;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function parseSegments(content: string): string[] | undefined {

@@ -1,6 +1,6 @@
 import { Pool, type PoolClient } from 'pg';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { projectAutoReplyRun } from './auto-reply-activity-projection.js';
 import { createId } from './security.js';
@@ -86,6 +86,27 @@ export class PostgresStore implements Store {
     const offsetIndex = params.length + 2;
     const rows = await this.pool.query(`select p.*, (select count(*)::int from products.product_skus sku where sku.product_id=p.id and sku.status <> 'archived') as sku_count, (select count(*)::int from products.asset_refs asset where asset.product_id=p.id and asset.status <> 'archived') as asset_count, ${PRODUCT_COUPON_BATCHES_SELECT} from products.products p where ${where} order by ${sortColumn} ${sortOrder}${sortNulls}, p.id limit $${limitIndex} offset $${offsetIndex}`, [...params, pageSize, (page - 1) * pageSize]);
     return { items: rows.rows.map((row) => this.toProduct(row)), page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
+  }
+  async listAutoReplyProducts(adminId: string, query: AutoReplyProductListQuery): Promise<AutoReplyProductListResult> {
+    const limit = Math.min(50, Math.max(1, query.limit ?? 10));
+    const params: unknown[] = [adminId, query.accountId];
+    const conditions = [
+      'p.account_id=$2',
+      "EXISTS (SELECT 1 FROM auth.account_scopes scope WHERE scope.account_id=p.account_id AND scope.admin_id=$1 AND scope.status='active' AND (scope.expires_at IS NULL OR scope.expires_at>now()))",
+    ];
+    if (query.productId) {
+      params.push(query.productId);
+      conditions.push(`p.id=$${params.length}::uuid`);
+    }
+    if (query.keyword?.trim()) {
+      params.push(`%${query.keyword.trim().toLowerCase()}%`);
+      conditions.push(`(lower(p.title) like $${params.length} or lower(coalesce(p.external_product_ref,'')) like $${params.length} or lower(coalesce(p.description,'')) like $${params.length})`);
+    }
+    const where = conditions.join(' AND ');
+    const count = await this.pool.query(`select count(*)::int as total from products.products p where ${where}`, params);
+    const rows = await this.pool.query(`select p.id,p.external_product_ref,p.title,p.description,p.default_reply_template,p.ai_prompt,p.price_minor,p.status
+      from products.products p where ${where} order by p.title asc, p.id asc limit $${params.length + 1}`, [...params, limit]);
+    return { items: rows.rows.map((row) => this.toAutoReplyProduct(row)), total: Number(count.rows[0]?.total ?? 0) };
   }
   async getProduct(adminId: string, productId: string): Promise<ProductRecord | undefined> {
     const result = await this.pool.query(`select p.*, (select count(*)::int from products.product_skus sku where sku.product_id=p.id and sku.status <> 'archived') as sku_count, (select count(*)::int from products.asset_refs asset where asset.product_id=p.id and asset.status <> 'archived') as asset_count, ${PRODUCT_COUPON_BATCHES_SELECT} from products.products p where p.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=p.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))`, [productId, adminId]);
@@ -265,6 +286,24 @@ export class PostgresStore implements Store {
     const sortOrder = query.sortOrder === 'asc' ? 'ASC' : 'DESC';
     const rows = await this.pool.query(`select o.*, ${displayBuyerNickname}, ${displayBuyerAvatar}, ${displayItemTitle}, ${displayItemImage} from orders.orders o ${productJoin} ${buyerJoin} ${itemJoin} ${buyerItemJoin} where ${where} order by ${sortColumn} ${sortOrder}, o.order_no limit $${params.length + 1} offset $${params.length + 2}`, [...params, pageSize, (page - 1) * pageSize]);
     return { items: rows.rows.map((row) => this.toOrder(row)), page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
+  }
+  async listAutoReplyOrders(adminId: string, query: AutoReplyOrderListQuery): Promise<AutoReplyOrderListResult> {
+    const limit = Math.min(50, Math.max(1, query.limit ?? 20));
+    if (!query.buyerId && !query.conversationId) return { items: [], total: 0 };
+    const params: unknown[] = [adminId, query.accountId];
+    const conditions = [
+      'o.account_id=$2',
+      "EXISTS (SELECT 1 FROM auth.account_scopes scope WHERE scope.account_id=o.account_id AND scope.admin_id=$1 AND scope.status='active' AND (scope.expires_at IS NULL OR scope.expires_at>now()))",
+    ];
+    const identityConditions: string[] = [];
+    if (query.buyerId) { params.push(query.buyerId); identityConditions.push(`o.buyer_id=$${params.length}`); }
+    if (query.conversationId) { params.push(query.conversationId); identityConditions.push(`o.conversation_id=$${params.length}`); }
+    if (identityConditions.length > 0) conditions.push(`(${identityConditions.join(' OR ')})`);
+    const where = conditions.join(' AND ');
+    const count = await this.pool.query(`select count(*)::int as total from orders.orders o where ${where}`, params);
+    const rows = await this.pool.query(`select o.order_no,o.item_id,o.item_title,o.payment_status,o.order_status,o.delivery_status,o.after_sales_status
+      from orders.orders o where ${where} order by o.created_at desc, o.order_no desc limit $${params.length + 1}`, [...params, limit]);
+    return { items: rows.rows.map((row) => this.toAutoReplyOrder(row)), total: Number(count.rows[0]?.total ?? 0) };
   }
   async getOrder(adminId: string, orderNo: string, accountId?: string): Promise<OrderRecord | undefined> {
     const params: unknown[] = [orderNo, adminId];
@@ -681,6 +720,15 @@ export class PostgresStore implements Store {
     const last = items[items.length - 1];
     return { items, nextCursor: hasMore && last ? encodeConversationCursor({ updatedAt: last.lastMessageAt ?? last.updatedAt, id: last.id }) : undefined, hasMore };
   }
+  async listAutoReplyConversations(adminId: string, query: AutoReplyConversationListQuery): Promise<AutoReplyConversationListResult> {
+    const limit = Math.min(50, Math.max(1, query.limit ?? 20));
+    const result = await this.pool.query(`select c.id,c.item_ref,c.item_title
+      from messages.conversations c
+      where c.account_id=$2 and c.buyer_ref=$3
+        and exists (select 1 from auth.account_scopes scope where scope.account_id=c.account_id and scope.admin_id=$1 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))
+      order by coalesce(c.last_message_at,c.updated_at) desc, c.id desc limit $4`, [adminId, query.accountId, query.buyerRef, limit]);
+    return { items: result.rows.map((row) => this.toAutoReplyConversation(row)) };
+  }
 
   async getConversation(adminId: string, conversationId: string): Promise<ConversationRecord | undefined> {
     const result = await this.pool.query("select c.* from messages.conversations c where c.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=c.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))", [conversationId, adminId]);
@@ -738,6 +786,18 @@ export class PostgresStore implements Store {
     const items = pageRows.map((row) => this.toMessage(row));
     const nextCursor = items.length === limit ? Number(pageRows[pageRows.length - 1]?.event_cursor ?? 0) : undefined;
     return { items, nextCursor, hasMore: nextCursor !== undefined, latestCursor, hasMoreHistory };
+  }
+  async listAutoReplyMessages(adminId: string, conversationId: string, query: AutoReplyMessageListQuery): Promise<AutoReplyMessageListResult> {
+    const limit = Math.min(50, Math.max(1, query.limit ?? 20));
+    const result = await this.pool.query(`select m.direction,m.sender_role,m.body_type,m.body_text,m.body_ref
+      from messages.messages m
+      where m.conversation_id=$2
+        and exists (select 1 from messages.conversations c join auth.account_scopes scope on scope.account_id=c.account_id
+          where c.id=m.conversation_id and scope.admin_id=$1 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))
+      order by m.created_at desc, m.id desc limit $3`, [adminId, conversationId, limit + 1]);
+    const hasMoreHistory = result.rows.length > limit;
+    const rows = result.rows.slice(0, limit).reverse();
+    return { items: rows.map((row) => this.toAutoReplyMessage(row)), hasMoreHistory };
   }
 
   async listConversationEvents(adminId: string, conversationId: string, afterCursor: number, limit: number): Promise<ConversationEventRecord[]> {
@@ -1508,6 +1568,45 @@ export class PostgresStore implements Store {
   private toProduct(row: Row): ProductRecord {
     const attributes = row.attributes_json && typeof row.attributes_json === 'object' && !Array.isArray(row.attributes_json) ? row.attributes_json as Record<string, unknown> : {};
     return { id: String(row.id), accountId: String(row.account_id), externalProductRef: row.external_product_ref ? String(row.external_product_ref) : undefined, title: String(row.title), description: row.description ? String(row.description) : undefined, categoryCode: row.category_code ? String(row.category_code) : undefined, attributes: { ...attributes }, defaultReplyTemplate: row.default_reply_template ? String(row.default_reply_template) : undefined, aiPrompt: row.ai_prompt ? String(row.ai_prompt) : undefined, configVersion: Number(row.config_version ?? 1), priceMinor: row.price_minor === null || row.price_minor === undefined ? undefined : Number(row.price_minor), status: row.status as ProductRecord['status'], source: (row.source ?? 'local') as ProductRecord['source'], lastSyncedAt: iso(row.last_synced_at), xianyuUpdatedAt: iso(row.xianyu_updated_at), xianyuListRank: row.xianyu_list_rank === null || row.xianyu_list_rank === undefined ? undefined : Number(row.xianyu_list_rank), sourcePayloadDigest: row.source_payload_digest ? String(row.source_payload_digest) : undefined, createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString(), skuCount: Number(row.sku_count ?? 0), assetCount: Number(row.asset_count ?? 0), couponBatches: this.toProductCouponBatches(row.coupon_batches) };
+  }
+  private toAutoReplyProduct(row: Row): AutoReplyProductContext {
+    return {
+      id: String(row.id),
+      externalProductRef: row.external_product_ref ? String(row.external_product_ref) : undefined,
+      title: String(row.title),
+      description: row.description ? String(row.description) : undefined,
+      defaultReplyTemplate: row.default_reply_template ? String(row.default_reply_template) : undefined,
+      aiPrompt: row.ai_prompt ? String(row.ai_prompt) : undefined,
+      priceMinor: row.price_minor === null || row.price_minor === undefined ? undefined : Number(row.price_minor),
+      status: row.status as AutoReplyProductContext['status'],
+    };
+  }
+  private toAutoReplyOrder(row: Row): AutoReplyOrderContext {
+    return {
+      orderNo: String(row.order_no),
+      itemId: String(row.item_id ?? ''),
+      itemTitle: String(row.item_title ?? row.item_id ?? ''),
+      paymentStatus: row.payment_status as AutoReplyOrderContext['paymentStatus'],
+      orderStatus: row.order_status as AutoReplyOrderContext['orderStatus'],
+      deliveryStatus: row.delivery_status as AutoReplyOrderContext['deliveryStatus'],
+      afterSalesStatus: row.after_sales_status as AutoReplyOrderContext['afterSalesStatus'],
+    };
+  }
+  private toAutoReplyConversation(row: Row): AutoReplyConversationContext {
+    return {
+      id: String(row.id),
+      itemRef: row.item_ref ? String(row.item_ref) : undefined,
+      itemTitle: row.item_title ? String(row.item_title) : undefined,
+    };
+  }
+  private toAutoReplyMessage(row: Row): AutoReplyMessageContext {
+    return {
+      direction: row.direction as AutoReplyMessageContext['direction'],
+      senderRole: row.sender_role as AutoReplyMessageContext['senderRole'],
+      bodyType: row.body_type as AutoReplyMessageContext['bodyType'],
+      bodyText: row.body_text ? String(row.body_text) : undefined,
+      bodyRef: row.body_ref ? String(row.body_ref) : undefined,
+    };
   }
   private toProductAutomation(row: Row): ProductAutomationConfigRecord {
     const config: ProductAutomationConfig = row.config_json && typeof row.config_json === 'object' && !Array.isArray(row.config_json)

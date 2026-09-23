@@ -1,4 +1,4 @@
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CouponReservationItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CouponReservationItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { projectAutoReplyRun } from './auto-reply-activity-projection.js';
 import { createId } from './security.js';
@@ -23,6 +23,49 @@ function productImageUrl(product: ProductRecord | undefined): string | undefined
   const attributes = product?.attributes ?? {};
   const xianyu = attributes.xianyu && typeof attributes.xianyu === 'object' && !Array.isArray(attributes.xianyu) ? attributes.xianyu as Record<string, unknown> : {};
   return firstImageUrl(xianyu.imageUrls) ?? firstImageUrl(xianyu.imageUrl) ?? firstImageUrl(attributes.imageUrls) ?? firstImageUrl(attributes.imageUrl);
+}
+
+function toAutoReplyProductContext(product: ProductRecord): AutoReplyProductContext {
+  return {
+    id: product.id,
+    externalProductRef: product.externalProductRef,
+    title: product.title,
+    description: product.description,
+    defaultReplyTemplate: product.defaultReplyTemplate,
+    aiPrompt: product.aiPrompt,
+    priceMinor: product.priceMinor,
+    status: product.status,
+  };
+}
+
+function toAutoReplyOrderContext(order: OrderRecord): AutoReplyOrderContext {
+  return {
+    orderNo: order.orderNo,
+    itemId: order.itemId,
+    itemTitle: order.itemTitle || order.itemId,
+    paymentStatus: order.paymentStatus,
+    orderStatus: order.orderStatus,
+    deliveryStatus: order.deliveryStatus,
+    afterSalesStatus: order.afterSalesStatus,
+  };
+}
+
+function toAutoReplyConversationContext(conversation: ConversationRecord): AutoReplyConversationContext {
+  return {
+    id: conversation.id,
+    itemRef: conversation.itemRef,
+    itemTitle: conversation.itemTitle,
+  };
+}
+
+function toAutoReplyMessageContext(message: MessageRecord): AutoReplyMessageContext {
+  return {
+    direction: message.direction,
+    senderRole: message.senderRole,
+    bodyType: message.bodyType,
+    bodyText: message.bodyText,
+    bodyRef: message.bodyRef,
+  };
 }
 
 function cloneOutbox(record: AutoReplyOutboxRecord): AutoReplyOutboxRecord {
@@ -180,6 +223,18 @@ export class MemoryStore implements Store {
     const items = filtered.slice(start, start + pageSize).map((product) => this.productSummary(product));
     return { items, page, pageSize, total: filtered.length, totalPages: Math.max(1, Math.ceil(filtered.length / pageSize)) };
   }
+  async listAutoReplyProducts(adminId: string, query: AutoReplyProductListQuery): Promise<AutoReplyProductListResult> {
+    const scopedAccountIds = new Set((await this.listScopes(adminId)).map((scope) => scope.accountId));
+    const normalizedKeyword = query.keyword?.trim().toLowerCase();
+    const filtered = [...this.products.values()].filter((product) => {
+      if (!scopedAccountIds.has(product.accountId) || product.accountId !== query.accountId) return false;
+      if (query.productId && product.id !== query.productId) return false;
+      if (normalizedKeyword && ![product.title, product.externalProductRef ?? '', product.description ?? ''].some((value) => value.toLowerCase().includes(normalizedKeyword))) return false;
+      return true;
+    }).sort((left, right) => left.title.localeCompare(right.title) || left.id.localeCompare(right.id));
+    const limit = Math.min(50, Math.max(1, query.limit ?? 10));
+    return { items: filtered.slice(0, limit).map(toAutoReplyProductContext), total: filtered.length };
+  }
   async getProduct(adminId: string, productId: string): Promise<ProductRecord | undefined> {
     const product = this.products.get(productId);
     if (!product || !(await this.hasAccountScope(adminId, product.accountId))) return undefined;
@@ -310,6 +365,16 @@ export class MemoryStore implements Store {
     const pageSize = query.pageSize ?? 20;
     const start = (page - 1) * pageSize;
     return { items: filtered.slice(start, start + pageSize).map((order) => this.enrichOrder(order)), page, pageSize, total: filtered.length, totalPages: Math.max(1, Math.ceil(filtered.length / pageSize)) };
+  }
+  async listAutoReplyOrders(adminId: string, query: AutoReplyOrderListQuery): Promise<AutoReplyOrderListResult> {
+    if (!query.buyerId && !query.conversationId) return { items: [], total: 0 };
+    const scopedAccountIds = new Set((await this.listScopes(adminId)).map((scope) => scope.accountId));
+    const filtered = [...this.orders.values()]
+      .filter((order) => scopedAccountIds.has(order.accountId) && order.accountId === query.accountId)
+      .filter((order) => Boolean((query.buyerId && order.buyerId === query.buyerId) || (query.conversationId && order.conversationId === query.conversationId)))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.orderNo.localeCompare(left.orderNo));
+    const limit = Math.min(50, Math.max(1, query.limit ?? 20));
+    return { items: filtered.slice(0, limit).map(toAutoReplyOrderContext), total: filtered.length };
   }
   async getOrder(adminId: string, orderNo: string, accountId?: string): Promise<OrderRecord | undefined> {
     const order = [...this.orders.values()].find((item) => item.orderNo === orderNo && (!accountId || item.accountId === accountId));
@@ -677,6 +742,16 @@ export class MemoryStore implements Store {
     const nextCursor = hasMore ? encodeConversationCursor({ updatedAt: conversationSortKey(page[page.length - 1]!), id: page[page.length - 1]!.id }) : undefined;
     return { items: page.map((item) => ({ ...item })), nextCursor, hasMore };
   }
+  async listAutoReplyConversations(adminId: string, query: AutoReplyConversationListQuery): Promise<AutoReplyConversationListResult> {
+    const scopedAccountIds = new Set((await this.listScopes(adminId)).map((scope) => scope.accountId));
+    if (!scopedAccountIds.has(query.accountId)) return { items: [] };
+    const limit = Math.min(50, Math.max(1, query.limit ?? 20));
+    const items = [...this.conversations.values()]
+      .filter((conversation) => conversation.accountId === query.accountId && conversation.buyerRef === query.buyerRef)
+      .sort((left, right) => conversationSortKey(right).localeCompare(conversationSortKey(left)) || right.id.localeCompare(left.id))
+      .slice(0, limit);
+    return { items: items.map(toAutoReplyConversationContext) };
+  }
 
   async getConversation(adminId: string, conversationId: string): Promise<ConversationRecord | undefined> {
     const conversation = this.conversations.get(conversationId);
@@ -750,6 +825,16 @@ export class MemoryStore implements Store {
     const hasMoreHistory = query.beforeCursor !== undefined ? olderItems.length > selected.length : items.length > selected.length;
     const nextCursor = selected.length === limit ? this.eventForMessage(conversationId, selected[selected.length - 1]!.id)?.cursor : undefined;
     return { items: selected.map((item) => ({ ...item, riskFlags: [...item.riskFlags] })), nextCursor, hasMore: nextCursor !== undefined, latestCursor, hasMoreHistory };
+  }
+  async listAutoReplyMessages(adminId: string, conversationId: string, query: AutoReplyMessageListQuery): Promise<AutoReplyMessageListResult> {
+    const conversation = this.conversations.get(conversationId);
+    if (!conversation || !(await this.hasAccountScope(adminId, conversation.accountId))) return { items: [], hasMoreHistory: false };
+    const limit = Math.min(50, Math.max(1, query.limit ?? 20));
+    const items = [...this.messages.values()]
+      .filter((message) => message.conversationId === conversationId)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id));
+    const hasMoreHistory = items.length > limit;
+    return { items: items.slice(0, limit).reverse().map(toAutoReplyMessageContext), hasMoreHistory };
   }
 
   async listConversationEvents(adminId: string, conversationId: string, afterCursor: number, limit: number): Promise<ConversationEventRecord[]> {
