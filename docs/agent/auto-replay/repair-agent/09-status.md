@@ -35,11 +35,22 @@
 - PostgreSQL buyer-push smoke 额外断言：`runtime.autoReplyRepair.listReviews()` 重启前后均返回 PRE_SEND + OUTCOME，Outcome `resolution_status=review_pending`，shadow evidence types 为空，避免伪造真实 sender 成功。
 - PostgreSQL 真实测试使用 `simulate` 发送模式，已断言未调用 `/r/MessageSend/sendByReceiverScope`；不代表真实闲鱼外部发送通过。
 
+## 合并后主线重测（2026-09-23）
+
+- 合并基线：`main@b3fc206`；文档证据更新：`539566c`。
+- 工程级回归：`npm run typecheck`、`npm test`、`npm run build`、`npm run compose:config`、`git diff --check` 均通过。
+- PostgreSQL/API 专项：Products、Orders、Coupons、自动回复、AR-VS-08、Policy Registry、Outcome Review、Activity Review、Agent Dynamics 全部通过，包含适用的迁移、持久化、重启复读和跨层断言。
+- Chrome/CDP 本地安全套件：基础账号、Dashboard、Products、Coupons、Messages、Orders、Settings、Agent Dynamics、Workspace、Workspace Pi、Settings OpenAI、Product Automation live 均通过。
+- Dashboard fullchain：`BLOCKED_BY_EVIDENCE`；需要 `E2E_DATABASE_URL` 或显式 `ALLOW_SHARED_E2E=1`，并需要目标环境真实闲鱼账号授权；当前不以受控 fixture 结果替代 fullchain 通过。
+- Product Automation strict visual diff：仍有 12 组像素差异，视觉门禁保持开放，不标记为 `PASS`。
+- 真实闲鱼 live sender/canary：本轮未验证；合并后重测不代表生产已上线。
+
 ## 尚未关闭
 
 - legacy `messages.messages`、`messages.auto_reply_runs` 和 `messages.auto_reply_run_events` 已完成真实 PostgreSQL 回读；AR-VS-08 runtime 已在主入口读写 `auto_reply_conversation_state`、`auto_reply_review_records`、`auto_reply_review_events`，Activity 已回读 review 状态与动作；enforce PostgreSQL smoke、账号级 ACTIVE PolicyConfig 注册表/回滚 smoke 和 release smoke 均已通过，真实外部 sender/canary 仍是发布前置。
 - AR-VS-00 R3 仍为 `BLOCKED_BY_EVIDENCE`：敏感全链路红队、指标阈值告警 Owner、canary 实测、kill switch 和迁移回滚演练需在目标环境补证据。
 - Activity 兼容读模型已补 transport/resolution/legacy 投影并完成 PostgreSQL 回读；仍需补真实账号 scope、脱敏日志、备份/恢复、live sender outbox/reconcile 和领域解决证据。
+- 合并后主线的 Dashboard fullchain 仍受目标环境数据库/真实闲鱼授权阻断；Product Automation strict visual diff 的 12 组像素差异仍待修复或经独立评审确认。
 
 ## 当前风险
 
@@ -52,6 +63,7 @@
 
 ## 下一步
 
-1. 在目标环境补真实领域 evidence、指标阈值告警 Owner、live sender canary、kill switch 和迁移回滚/备份恢复演练。
-2. 用真实闲鱼账号验证外部发送 known_success/known_failure/unknown、reconcile 与停止阈值；未取得目标环境证据前保持发布门禁 BLOCKED_BY_EVIDENCE。
-3. 完成 AR-VS-00 R3 与 AR-VS-08/09 发布前独立复审，并同步提交哈希、部署和回滚记录；在此之前不得宣称生产已上线。
+1. 在目标环境补 Dashboard fullchain 所需的 `E2E_DATABASE_URL`/真实闲鱼授权，以及真实领域 evidence、指标阈值告警 Owner、live sender canary、kill switch 和迁移回滚/备份恢复演练。
+2. 处理 Product Automation strict visual diff 的 12 组像素差异，并保留修复或独立豁免的可回读证据。
+3. 用真实闲鱼账号验证外部发送 known_success/known_failure/unknown、reconcile 与停止阈值；未取得目标环境证据前保持发布门禁 `BLOCKED_BY_EVIDENCE`。
+4. 完成 AR-VS-00 R3 与 AR-VS-08/09 发布前独立复审，并同步提交哈希、部署和回滚记录；在此之前不得宣称生产已上线。
