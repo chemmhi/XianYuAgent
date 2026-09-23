@@ -150,12 +150,13 @@ export class ProductAutomationTrigger {
   private async runForOrder(trigger: ProductAutomationTriggerKind, adminId: string, order: AutomationOrderSnapshot, requestId: string, traceId: string, eventId?: string, now?: string): Promise<ProductAutomationTriggerResult> {
     if (!order.productId) return { trigger, orderNo: order.orderNo, status: 'skipped', reason: 'PRODUCT_LINK_MISSING' };
     try {
-      const config = (await this.configs.get(adminId, order.productId)).config;
+      const automation = await this.configs.get(adminId, order.productId);
+      const config = automation.config;
       if (this.execution.readiness !== 'ready' && ruleEnabled(config, trigger)) {
         return this.finish(trigger, order.orderNo, { trigger, orderNo: order.orderNo, status: 'blocked', reason: this.execution.readinessCode ?? 'AUTOMATION_EXECUTION_NOT_CONFIGURED' }, adminId, order.accountId, requestId, traceId);
       }
       if (ruleEnabled(config, trigger)) {
-        const liveBlockReason = productAutomationLiveBlockReason(this.liveConfig, order.itemTitle);
+        const liveBlockReason = productAutomationLiveBlockReason(this.liveConfig, automation.product.title);
         if (liveBlockReason) {
           return this.finish(trigger, order.orderNo, { trigger, orderNo: order.orderNo, status: 'blocked', reason: liveBlockReason }, adminId, order.accountId, requestId, traceId);
         }

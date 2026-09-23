@@ -80,7 +80,7 @@ test('non-whitelist product is blocked before any external side effect', async (
   const port = new CountingPort();
   const adapter = Object.assign(port, { readiness: 'ready' as const });
   const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(port), adapter, undefined, liveGate());
-  const result = await trigger.onOrderRefresh({ adminId: admin.id, accountId: account.id, items: [order({ accountId: account.id, productId: product.id, itemTitle: '未授权商品' })], requestId: 'refresh', traceId: 'refresh' });
+  const result = await trigger.onOrderRefresh({ adminId: admin.id, accountId: account.id, items: [order({ accountId: account.id, productId: product.id, itemTitle: DEFAULT_PRODUCT_AUTOMATION_PRODUCT_TITLE })], requestId: 'refresh', traceId: 'refresh' });
 
   assert.equal(result.results[0]?.status, 'blocked');
   assert.equal(result.results[0]?.reason, 'PRODUCT_AUTOMATION_PRODUCT_TITLE_NOT_ALLOWLISTED');
