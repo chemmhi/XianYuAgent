@@ -19,7 +19,7 @@ const noHealth = args.has('--no-health');
 const noOpen = once || args.has('--no-open');
 const keepFlag = args.has('--keep-flag');
 const host = '127.0.0.1';
-const maxEvents = 500;
+const maxEvents = 100;
 
 await mkdir(dirname(tracePath), { recursive: true });
 if (args.has('--clear') && existsSync(tracePath)) await unlink(tracePath);

@@ -53,7 +53,7 @@
     <div class="title-row">
       <div>
         <h1>自动回复实时监控</h1>
-        <div class="subtitle">上海时区 · YY-MM-DD-HH-MM-SS · trace 实时推送 · JSON 高亮 · 可折叠</div>
+        <div class="subtitle">上海时区 · YYYY-MM-DD HH:MM:SS · trace 实时推送 · JSON 高亮 · 可折叠</div>
       </div>
       <div class="connection"><span id="connection-dot" class="dot"></span><span id="connection-text">连接中</span></div>
     </div>
@@ -65,6 +65,7 @@
   </header>
   <main id="events"><div class="empty">等待自动回复事件…</div></main>
   <script>
+    const maxEvents = 100;
     const state = { events: [], query: '', health: { health: 'UNKNOWN', ready: 'UNKNOWN' } };
     const eventList = document.getElementById('events');
     const searchInput = document.getElementById('search');
@@ -126,11 +127,11 @@
     const source = new EventSource('/events');
     source.addEventListener('open', () => setConnection(true));
     source.addEventListener('error', () => setConnection(false));
-    source.addEventListener('snapshot', (event) => { state.events = JSON.parse(event.data); render(); });
-    source.addEventListener('trace', (event) => { state.events.push(JSON.parse(event.data)); if (state.events.length > 500) state.events.shift(); render(); });
+    source.addEventListener('snapshot', (event) => { state.events = JSON.parse(event.data).slice(-maxEvents); render(); });
+    source.addEventListener('trace', (event) => { state.events.push(JSON.parse(event.data)); if (state.events.length > maxEvents) state.events.shift(); render(); });
     source.addEventListener('reset', () => { state.events = []; render(); });
     source.addEventListener('health', (event) => { state.health = JSON.parse(event.data); render(); });
-    source.addEventListener('monitor-error', (event) => { state.events.push({ time: '', title: 'MONITOR ERROR', phase: 'monitor', event: 'error', runId: '-', traceId: '-', buyer: null, payload: JSON.parse(event.data) }); render(); });
+    source.addEventListener('monitor-error', (event) => { state.events.push({ time: '', title: 'MONITOR ERROR', phase: 'monitor', event: 'error', runId: '-', traceId: '-', buyer: null, payload: JSON.parse(event.data) }); if (state.events.length > maxEvents) state.events.shift(); render(); });
   </script>
 </body>
 </html>
