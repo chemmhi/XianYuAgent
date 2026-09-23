@@ -103,7 +103,7 @@ async function run() {
   const adminId = bootstrapPayload.data.profile.id;
   const account = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `products-e2e-${process.pid}`, displayName: 'Chrome 商品账号' });
   const secondaryAccount = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `products-e2e-secondary-${process.pid}`, displayName: 'Secondary 商品账号' });
-  const localProduct = await apiRuntime.store.createProduct({ adminId, accountId: account.id, externalProductRef: `ITEM-${process.pid}`, title: 'Chrome E2E 商品', description: '商品详情来自独立 detail API', categoryCode: 'digital', attributes: { source: 'chrome-e2e' }, aiPrompt: '请用简洁中文回答买家问题。', priceMinor: 3990, status: 'published' });
+  const localProduct = await apiRuntime.store.createProduct({ adminId, accountId: account.id, externalProductRef: `ITEM-${process.pid}`, title: 'Chrome E2E 商品', description: '商品详情来自独立 detail API', categoryCode: 'digital', attributes: { source: 'chrome-e2e' }, knowledgeBase: '请用简洁中文回答买家问题。', priceMinor: 3990, status: 'published' });
   const couponBatch = await apiRuntime.store.createCouponBatch({ adminId, accountId: account.id, label: 'Chrome E2E 卡券', purpose: 'text', deliveryScope: 'operator_only' });
   await apiRuntime.store.bindCouponBatch({ adminId, batchId: couponBatch.id, productId: localProduct.id });
   apiRuntime.xianyu.fetchItemsAll = async () => {
@@ -165,11 +165,11 @@ async function run() {
   if (await evaluate(cdp, 'document.querySelectorAll(".products-kpis").length !== 0')) throw new Error('product KPI cards should be removed');
   if (await evaluate(cdp, 'document.querySelector("[data-testid=products-total]") !== null')) throw new Error('redundant toolbar total should be removed');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 商品'), 'product row');
-  const tableTypography = await evaluate(cdp, '(() => { const size = (selector) => { const node = document.querySelector(selector); return node ? getComputedStyle(node).fontSize : null; }; return { row: size(".products-row:not(.products-head)"), head: size(".products-head"), title: size(".products-title strong"), titleMeta: size(".products-title small"), coupons: size(".products-coupons"), aiPrompt: size(".products-ai-prompt"), meta: size(".products-meta"), pagination: size(".products-pagination"), pageButton: size(".products-page-button") }; })()');
-  const expectedTypography = { row: '14px', head: '13px', title: '16px', titleMeta: '12px', coupons: '12px', aiPrompt: '12px', meta: '12px', pagination: '12px', pageButton: '13px' };
+  const tableTypography = await evaluate(cdp, '(() => { const size = (selector) => { const node = document.querySelector(selector); return node ? getComputedStyle(node).fontSize : null; }; return { row: size(".products-row:not(.products-head)"), head: size(".products-head"), title: size(".products-title strong"), titleMeta: size(".products-title small"), coupons: size(".products-coupons"), knowledgeBase: size(".products-knowledge-base"), meta: size(".products-meta"), pagination: size(".products-pagination"), pageButton: size(".products-page-button") }; })()');
+  const expectedTypography = { row: '14px', head: '13px', title: '16px', titleMeta: '12px', coupons: '12px', knowledgeBase: '12px', meta: '12px', pagination: '12px', pageButton: '13px' };
   if (JSON.stringify(tableTypography) !== JSON.stringify(expectedTypography)) throw new Error(`product table typography mismatch: ${JSON.stringify(tableTypography)}`);
   const columns = await evaluate(cdp, 'Array.from(document.querySelectorAll(".products-head > span")).map((item) => item.textContent?.trim() ?? "").map((text) => text.replace(/\\s*[↑↓↕]$/, "")).filter(Boolean)');
-  const expectedColumns = ['商品标题', '价格', '关联卡券', '自动化', 'AI提示词', '创建时间', '操作'];
+  const expectedColumns = ['商品标题', '价格', '关联卡券', '自动化', '知识库', '创建时间', '操作'];
   if (JSON.stringify(columns) !== JSON.stringify(expectedColumns)) throw new Error(`product columns mismatch: ${JSON.stringify(columns)}`);
   const productText = String(await evaluate(cdp, 'document.body.innerText'));
   if (!productText.includes('Chrome E2E 卡券') || !productText.includes('请用简洁中文回答买家问题。')) throw new Error('coupon or AI prompt column content missing');

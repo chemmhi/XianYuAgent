@@ -345,12 +345,12 @@ export class ProductService {
     return product;
   }
 
-  async create(input: { adminId: string; accountId: string; externalProductRef?: string; title: unknown; description?: unknown; categoryCode?: unknown; attributesJson?: unknown; defaultReplyTemplate?: unknown; aiPrompt?: unknown; priceMinor?: unknown; requestId: string; traceId: string }): Promise<ProductRecord> {
+  async create(input: { adminId: string; accountId: string; externalProductRef?: string; title: unknown; description?: unknown; categoryCode?: unknown; attributesJson?: unknown; defaultReplyTemplate?: unknown; knowledgeBase?: unknown; priceMinor?: unknown; requestId: string; traceId: string }): Promise<ProductRecord> {
     if (!isUuid(input.accountId) || !(await this.store.hasAccountScope(input.adminId, input.accountId))) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
     const normalized = validateProductWrite(input, false);
     if (!normalized.title) throw new ServiceError(422, 'VALIDATION_FAILED', 'title must be between 1 and 200 characters');
     try {
-      const product = await this.store.createProduct({ adminId: input.adminId, accountId: input.accountId, externalProductRef: normalizeOptionalString(input.externalProductRef), title: normalized.title, description: normalized.description ?? undefined, categoryCode: normalized.categoryCode ?? undefined, attributes: normalized.attributes, defaultReplyTemplate: normalized.defaultReplyTemplate ?? undefined, aiPrompt: normalized.aiPrompt ?? undefined, priceMinor: normalized.priceMinor ?? undefined, status: 'draft' });
+      const product = await this.store.createProduct({ adminId: input.adminId, accountId: input.accountId, externalProductRef: normalizeOptionalString(input.externalProductRef), title: normalized.title, description: normalized.description ?? undefined, categoryCode: normalized.categoryCode ?? undefined, attributes: normalized.attributes, defaultReplyTemplate: normalized.defaultReplyTemplate ?? undefined, knowledgeBase: normalized.knowledgeBase ?? undefined, priceMinor: normalized.priceMinor ?? undefined, status: 'draft' });
       await this.audit({ actorId: input.adminId, action: 'product.created', targetRef: product.id, requestId: input.requestId, traceId: input.traceId, payload: { accountId: product.accountId, title: product.title, externalProductRef: product.externalProductRef, status: product.status }, accountId: product.accountId });
       return product;
     } catch (error) {
@@ -465,7 +465,7 @@ function validateProductWrite(input: Record<string, unknown>, patch: boolean): P
     if (!input.attributes || typeof input.attributes !== 'object' || Array.isArray(input.attributes)) throw new ServiceError(422, 'VALIDATION_FAILED', 'attributesJson must be an object');
     result.attributes = { ...(input.attributes as Record<string, unknown>) };
   }
-  for (const key of ['defaultReplyTemplate', 'aiPrompt'] as const) {
+  for (const key of ['defaultReplyTemplate', 'knowledgeBase'] as const) {
     if (!Object.prototype.hasOwnProperty.call(input, key)) continue;
     const value = input[key];
     if (value === undefined) continue;

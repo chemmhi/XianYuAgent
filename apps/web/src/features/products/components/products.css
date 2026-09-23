@@ -36,10 +36,10 @@
 .products-title strong { margin-bottom: 3px; }
 .products-title-link { display: block; max-width: 100%; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .products-title-link:hover strong { color: var(--link); }
-.products-coupons, .products-ai-prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.products-coupons, .products-knowledge-base { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .products-title strong { font-size: 13px; line-height: 1.5; }
 .products-title small, .products-meta, .products-account { color: var(--sub); font-size: 11px; line-height: 1.5; }
-.products-coupons, .products-ai-prompt, .products-placeholder { color: var(--sub); font-size: 11px; line-height: 1.5; }
+.products-coupons, .products-knowledge-base, .products-placeholder { color: var(--sub); font-size: 11px; line-height: 1.5; }
 .products-status { display: inline-flex; padding: 4px 8px; border-radius: 999px; font-size: 10px; }
 .products-status-published { color: var(--success); background: var(--success-bg); }
 .products-status-ready { color: var(--info); background: var(--soft-blue-bg); }
@@ -64,7 +64,7 @@ body .app-viewport .products-domain .products-title small,
 body .app-viewport .products-domain .products-table .products-meta,
 body .app-viewport .products-domain .products-account { font-size: 11px; line-height: 1.5; }
 body .app-viewport .products-domain .products-coupons,
-body .app-viewport .products-domain .products-ai-prompt,
+body .app-viewport .products-domain .products-knowledge-base,
 body .app-viewport .products-domain .products-placeholder { font-size: 11px; line-height: 1.5; }
 body .app-viewport .products-domain .btn,
 body .app-viewport .products-domain .ui-button { font-size: 11px; line-height: 1.45; }
@@ -167,7 +167,7 @@ body .app-viewport .products-domain .products-title small,
 body .app-viewport .products-domain .products-table .products-meta,
 body .app-viewport .products-domain .products-account,
 body .app-viewport .products-domain .products-coupons,
-body .app-viewport .products-domain .products-ai-prompt,
+body .app-viewport .products-domain .products-knowledge-base,
 body .app-viewport .products-domain .products-placeholder { font-size: var(--font-size-meta); line-height: var(--font-line-meta); }
 body .app-viewport .products-domain .products-status { font-size: var(--font-size-meta); line-height: 1.5; }
 body .app-viewport .products-domain .products-automation-status small { font-size: var(--font-size-meta); line-height: var(--font-line-meta); }

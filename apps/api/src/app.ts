@@ -1099,7 +1099,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   if (ctx.path === '/api/v1/products' && ctx.method === 'POST') {
     const accountId = optionalString(ctx.body.accountId);
     return mutation(runtime, ctx, authContext, accountId, async () => {
-      const product = await products.create({ adminId: authContext.admin.id, accountId: accountId ?? '', externalProductRef: optionalString(ctx.body.externalProductRef), title: ctx.body.title, description: ctx.body.description, categoryCode: ctx.body.categoryCode, attributesJson: ctx.body.attributesJson, defaultReplyTemplate: ctx.body.defaultReplyTemplate, aiPrompt: ctx.body.aiPrompt, priceMinor: ctx.body.priceMinor, requestId: ctx.requestId, traceId: ctx.traceId });
+      const product = await products.create({ adminId: authContext.admin.id, accountId: accountId ?? '', externalProductRef: optionalString(ctx.body.externalProductRef), title: ctx.body.title, description: ctx.body.description, categoryCode: ctx.body.categoryCode, attributesJson: ctx.body.attributesJson, defaultReplyTemplate: ctx.body.defaultReplyTemplate, knowledgeBase: ctx.body.knowledgeBase, priceMinor: ctx.body.priceMinor, requestId: ctx.requestId, traceId: ctx.traceId });
       return success(ctx, toProductView(product), 201);
     });
   }

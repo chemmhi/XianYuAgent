@@ -110,7 +110,7 @@ export interface ProductRecord {
   categoryCode?: string;
   attributes: Record<string, unknown>;
   defaultReplyTemplate?: string;
-  aiPrompt?: string;
+  knowledgeBase?: string;
   configVersion: number;
   priceMinor?: number;
   status: ProductStatus;
@@ -204,7 +204,7 @@ export interface AutoReplyProductContext {
   wantCount?: number;
   collectCount?: number;
   defaultReplyTemplate?: string;
-  aiPrompt?: string;
+  knowledgeBase?: string;
   priceMinor?: number;
   status: ProductStatus;
 }
@@ -500,7 +500,7 @@ export interface ProductPatch {
   categoryCode?: string | null;
   attributes?: Record<string, unknown>;
   defaultReplyTemplate?: string | null;
-  aiPrompt?: string | null;
+  knowledgeBase?: string | null;
   priceMinor?: number | null;
 }
 
@@ -1344,7 +1344,7 @@ export interface Store {
     categoryCode?: string;
     attributes?: Record<string, unknown>;
     defaultReplyTemplate?: string;
-    aiPrompt?: string;
+    knowledgeBase?: string;
     priceMinor?: number;
     status?: ProductStatus;
   }): Promise<ProductRecord>;

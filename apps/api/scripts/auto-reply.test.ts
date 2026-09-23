@@ -77,7 +77,7 @@ test('model generator sends bounded document context to the shared model client'
     conversation: { buyerDisplayName: '买家', itemTitle: '资料包', handlingMode: 'ai' },
     inboundMessage: { bodyType: 'text', bodyText: '请问这个是什么东西？', createdAt: '2026-09-20T00:00:00.000Z' },
     recentMessages: Array.from({ length: 20 }, (_, index) => ({ direction: 'inbound', senderRole: 'buyer', bodyText: `消息-${index}`, createdAt: `2026-09-20T00:00:${String(index).padStart(2, '0')}.000Z` })),
-    product: { title: '资料包', description: 'x'.repeat(5_000), priceMinor: 1_999, defaultReplyTemplate: '可拍', aiPrompt: '只作为商家补充说明' },
+    product: { title: '资料包', description: 'x'.repeat(5_000), priceMinor: 1_999, defaultReplyTemplate: '可拍', knowledgeBase: '只作为商家补充说明' },
     orders: Array.from({ length: 20 }, (_, index) => ({ orderNo: `ORDER-${index}`, itemTitle: '资料包', paymentStatus: 'unpaid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none' })),
   } as unknown as AutoReplyContext;
 
@@ -92,6 +92,7 @@ test('model generator sends bounded document context to the shared model client'
   assert.ok(prompt.indexOf('消息-19') < prompt.indexOf('消息-18'));
   assert.ok(prompt.indexOf('消息-18') < prompt.indexOf('消息-8'));
   assert.match(prompt, /说明：x{10,}/);
+  assert.match(prompt, /知识库：只作为商家补充说明/);
   assert.match(prompt, /订单10：/);
   assert.doesNotMatch(prompt, /accountId|conversationId|buyerName|createdAt|priceMinor|"recentMessages"/);
   assert.throws(() => JSON.parse(prompt.slice(prompt.indexOf('<facts>') + '<facts>'.length, prompt.indexOf('</facts>')).trim()));

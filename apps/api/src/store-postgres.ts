@@ -105,7 +105,7 @@ export class PostgresStore implements Store {
     }
     const where = conditions.join(' AND ');
     const count = await this.pool.query(`select count(*)::int as total from products.products p where ${where}`, params);
-    const rows = await this.pool.query(`select p.id,p.external_product_ref,p.title,p.description,p.default_reply_template,p.ai_prompt,p.price_minor,p.status,
+    const rows = await this.pool.query(`select p.id,p.external_product_ref,p.title,p.description,p.default_reply_template,p.knowledge_base,p.price_minor,p.status,
         nullif(p.attributes_json #>> '{xianyu,detail,summary,browseCount}', '')::int as browse_count,
         nullif(p.attributes_json #>> '{xianyu,detail,summary,wantCount}', '')::int as want_count,
         nullif(p.attributes_json #>> '{xianyu,detail,summary,collectCount}', '')::int as collect_count
@@ -382,10 +382,10 @@ export class PostgresStore implements Store {
     const enriched = await this.getOrder(input.adminId, input.item.orderNo, input.accountId);
     return { action: row.inserted ? 'created' : 'updated', order: enriched ?? this.toOrder(row) };
   }
-  async createProduct(input: { adminId: string; accountId: string; externalProductRef?: string; title: string; description?: string; categoryCode?: string; attributes?: Record<string, unknown>; defaultReplyTemplate?: string; aiPrompt?: string; priceMinor?: number; status?: ProductStatus }): Promise<ProductRecord> {
+  async createProduct(input: { adminId: string; accountId: string; externalProductRef?: string; title: string; description?: string; categoryCode?: string; attributes?: Record<string, unknown>; defaultReplyTemplate?: string; knowledgeBase?: string; priceMinor?: number; status?: ProductStatus }): Promise<ProductRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const id = createId();
-    await this.pool.query('insert into products.products (id,account_id,external_product_ref,title,description,category_code,attributes_json,default_reply_template,ai_prompt,price_minor,status,source) values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,\'local\')', [id, input.accountId, input.externalProductRef ?? null, input.title, input.description ?? null, input.categoryCode ?? null, JSON.stringify(input.attributes ?? {}), input.defaultReplyTemplate ?? null, input.aiPrompt ?? null, input.priceMinor ?? null, input.status ?? 'draft']);
+    await this.pool.query('insert into products.products (id,account_id,external_product_ref,title,description,category_code,attributes_json,default_reply_template,knowledge_base,price_minor,status,source) values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,\'local\')', [id, input.accountId, input.externalProductRef ?? null, input.title, input.description ?? null, input.categoryCode ?? null, JSON.stringify(input.attributes ?? {}), input.defaultReplyTemplate ?? null, input.knowledgeBase ?? null, input.priceMinor ?? null, input.status ?? 'draft']);
     const product = await this.getProduct(input.adminId, id);
     if (!product) throw new Error('PRODUCT_CREATE_READBACK_FAILED');
     return product;
@@ -403,7 +403,7 @@ export class PostgresStore implements Store {
     if (input.patch.categoryCode !== undefined) add('category_code', input.patch.categoryCode);
     if (input.patch.attributes !== undefined) { values.push(JSON.stringify(input.patch.attributes)); fields.push(`attributes_json=$${values.length}::jsonb`); }
     if (input.patch.defaultReplyTemplate !== undefined) add('default_reply_template', input.patch.defaultReplyTemplate);
-    if (input.patch.aiPrompt !== undefined) add('ai_prompt', input.patch.aiPrompt);
+    if (input.patch.knowledgeBase !== undefined) add('knowledge_base', input.patch.knowledgeBase);
     if (input.patch.priceMinor !== undefined) add('price_minor', input.patch.priceMinor);
     if (fields.length === 0) throw new Error('PRODUCT_PATCH_EMPTY');
     fields.push('config_version=config_version+1', 'updated_at=now()');
@@ -1571,7 +1571,7 @@ export class PostgresStore implements Store {
   private toAccount(row: Row): AccountRecord { return { id: String(row.id), platform: String(row.platform), sellerRef: String(row.seller_ref), displayName: row.display_name ? String(row.display_name) : undefined, remark: row.remark ? String(row.remark) : undefined, avatarUrl: row.avatar_url ? String(row.avatar_url) : undefined, platformUserId: row.platform_user_id ? String(row.platform_user_id) : undefined, status: row.status as AccountRecord['status'], createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString(), lastConnectedAt: iso(row.last_connected_at) }; }
   private toProduct(row: Row): ProductRecord {
     const attributes = row.attributes_json && typeof row.attributes_json === 'object' && !Array.isArray(row.attributes_json) ? row.attributes_json as Record<string, unknown> : {};
-    return { id: String(row.id), accountId: String(row.account_id), externalProductRef: row.external_product_ref ? String(row.external_product_ref) : undefined, title: String(row.title), description: row.description ? String(row.description) : undefined, categoryCode: row.category_code ? String(row.category_code) : undefined, attributes: { ...attributes }, defaultReplyTemplate: row.default_reply_template ? String(row.default_reply_template) : undefined, aiPrompt: row.ai_prompt ? String(row.ai_prompt) : undefined, configVersion: Number(row.config_version ?? 1), priceMinor: row.price_minor === null || row.price_minor === undefined ? undefined : Number(row.price_minor), status: row.status as ProductRecord['status'], source: (row.source ?? 'local') as ProductRecord['source'], lastSyncedAt: iso(row.last_synced_at), xianyuUpdatedAt: iso(row.xianyu_updated_at), xianyuListRank: row.xianyu_list_rank === null || row.xianyu_list_rank === undefined ? undefined : Number(row.xianyu_list_rank), sourcePayloadDigest: row.source_payload_digest ? String(row.source_payload_digest) : undefined, createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString(), skuCount: Number(row.sku_count ?? 0), assetCount: Number(row.asset_count ?? 0), couponBatches: this.toProductCouponBatches(row.coupon_batches) };
+    return { id: String(row.id), accountId: String(row.account_id), externalProductRef: row.external_product_ref ? String(row.external_product_ref) : undefined, title: String(row.title), description: row.description ? String(row.description) : undefined, categoryCode: row.category_code ? String(row.category_code) : undefined, attributes: { ...attributes }, defaultReplyTemplate: row.default_reply_template ? String(row.default_reply_template) : undefined, knowledgeBase: row.knowledge_base ? String(row.knowledge_base) : undefined, configVersion: Number(row.config_version ?? 1), priceMinor: row.price_minor === null || row.price_minor === undefined ? undefined : Number(row.price_minor), status: row.status as ProductRecord['status'], source: (row.source ?? 'local') as ProductRecord['source'], lastSyncedAt: iso(row.last_synced_at), xianyuUpdatedAt: iso(row.xianyu_updated_at), xianyuListRank: row.xianyu_list_rank === null || row.xianyu_list_rank === undefined ? undefined : Number(row.xianyu_list_rank), sourcePayloadDigest: row.source_payload_digest ? String(row.source_payload_digest) : undefined, createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString(), skuCount: Number(row.sku_count ?? 0), assetCount: Number(row.asset_count ?? 0), couponBatches: this.toProductCouponBatches(row.coupon_batches) };
   }
   private toAutoReplyProduct(row: Row): AutoReplyProductContext {
     return {
@@ -1583,7 +1583,7 @@ export class PostgresStore implements Store {
       wantCount: normalizeAutoReplyProductMetric(row.want_count),
       collectCount: normalizeAutoReplyProductMetric(row.collect_count),
       defaultReplyTemplate: row.default_reply_template ? String(row.default_reply_template) : undefined,
-      aiPrompt: row.ai_prompt ? String(row.ai_prompt) : undefined,
+      knowledgeBase: row.knowledge_base ? String(row.knowledge_base) : undefined,
       priceMinor: row.price_minor === null || row.price_minor === undefined ? undefined : Number(row.price_minor),
       status: row.status as AutoReplyProductContext['status'],
     };

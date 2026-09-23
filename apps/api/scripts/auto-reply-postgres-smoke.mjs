@@ -33,7 +33,7 @@ try {
   const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef });
   accountId = account.id;
   await runtime.store.publishAutoReplyRepairPolicy({ accountId, bundle: createDefaultAutoReplyRepairPolicy(accountId) });
-  const product = await runtime.store.createProduct({ adminId, accountId, externalProductRef: `1078553391460-${suffix}`, title: 'Postgres 资料包', priceMinor: 2_590, status: 'published' });
+  const product = await runtime.store.createProduct({ adminId, accountId, externalProductRef: `1078553391460-${suffix}`, title: 'Postgres 资料包', knowledgeBase: '说明适用范围和交付方式。', priceMinor: 2_590, status: 'published' });
   const conversation = await runtime.store.createConversation({ adminId, accountId, buyerRef: `pg-buyer-${suffix}`, buyerDisplayName: 'Auto Reply PostgreSQL Buyer', itemRef: product.externalProductRef, itemTitle: product.title, externalConversationRef: `pg-conv-${suffix}` });
   conversationId = conversation.id;
 
@@ -51,13 +51,14 @@ try {
   assert.equal(result.autoReply?.run.status, 'persisted');
   assert.equal(result.autoReply?.run.senderOutcome, 'simulated');
   assert.equal(result.autoReply?.context?.product?.id, product.id);
+  assert.equal(result.autoReply?.context?.product?.knowledgeBase, '说明适用范围和交付方式。');
   assert.equal(result.autoReply?.outboundMessage?.source, 'ai');
   assert.equal(modelCall, 2);
   inboundMessageId = result.autoReply?.inboundMessage.id;
 
   const projectedProducts = await runtime.store.listAutoReplyProducts(adminId, { accountId, productId: product.id, limit: 1 });
   assert.equal(projectedProducts.items.length, 1);
-  assert.deepEqual(Object.keys(projectedProducts.items[0]).sort(), ['aiPrompt', 'defaultReplyTemplate', 'description', 'externalProductRef', 'id', 'priceMinor', 'status', 'title'].sort());
+  assert.deepEqual(Object.keys(projectedProducts.items[0]).sort(), ['browseCount', 'collectCount', 'defaultReplyTemplate', 'description', 'externalProductRef', 'id', 'knowledgeBase', 'priceMinor', 'status', 'title', 'wantCount'].sort());
   assert.equal('createdAt' in projectedProducts.items[0], false);
   assert.equal('updatedAt' in projectedProducts.items[0], false);
   assert.equal('attributes' in projectedProducts.items[0], false);
@@ -67,7 +68,7 @@ try {
 
   const projectedMessages = await runtime.store.listAutoReplyMessages(adminId, conversationId, { limit: 20 });
   assert.ok(projectedMessages.items.length >= 2);
-  assert.deepEqual(Object.keys(projectedMessages.items[0]).sort(), ['bodyRef', 'bodyText', 'bodyType', 'direction', 'senderRole'].sort());
+  assert.deepEqual(Object.keys(projectedMessages.items[0]).sort(), ['bodyRef', 'bodyText', 'bodyType', 'direction', 'messageId', 'senderRole'].sort());
   assert.equal('createdAt' in projectedMessages.items[0], false);
 
   const storedRun = await runtime.store.getAutoReplyRun(adminId, result.autoReply.run.id);

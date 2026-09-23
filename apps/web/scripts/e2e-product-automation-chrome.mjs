@@ -31,10 +31,10 @@ async function run() {
   const { profile: adminProfile } = (await bootstrap.json()).data;
   const account = await apiRuntime.store.createAccount({ adminId: adminProfile.id, platform: 'xianyu', sellerRef: `automation-${process.pid}`, displayName: '陈陈cc' });
   const productFixtures = [
-    { externalProductRef: '1078553391460', title: 'PPT Master pptmaster', priceMinor: 850, coupon: 'delivery', aiPrompt: '', rank: 1 },
-    { externalProductRef: '1083390028492', title: '抖音无水印视频下载源码带时间戳的字幕提取', priceMinor: 250, coupon: 'delivery', aiPrompt: '', rank: 2 },
-    { externalProductRef: '1082449333831', title: '视频下载及文案提取源码，包教包会', priceMinor: 22000, coupon: 'fixed', aiPrompt: '', rank: 3 },
-    { externalProductRef: '1085778944019', title: '婚礼视频，AI婚礼视频制作', priceMinor: 880, coupon: 'fixed', aiPrompt: '', rank: 4 },
+    { externalProductRef: '1078553391460', title: 'PPT Master pptmaster', priceMinor: 850, coupon: 'delivery', knowledgeBase: '', rank: 1 },
+    { externalProductRef: '1083390028492', title: '抖音无水印视频下载源码带时间戳的字幕提取', priceMinor: 250, coupon: 'delivery', knowledgeBase: '', rank: 2 },
+    { externalProductRef: '1082449333831', title: '视频下载及文案提取源码，包教包会', priceMinor: 22000, coupon: 'fixed', knowledgeBase: '', rank: 3 },
+    { externalProductRef: '1085778944019', title: '婚礼视频，AI婚礼视频制作', priceMinor: 880, coupon: 'fixed', knowledgeBase: '', rank: 4 },
   ];
   const products = [];
   for (const fixture of productFixtures) {

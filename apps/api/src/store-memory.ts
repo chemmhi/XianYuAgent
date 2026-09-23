@@ -34,7 +34,7 @@ function toAutoReplyProductContext(product: ProductRecord): AutoReplyProductCont
     description: product.description,
     ...readAutoReplyProductMetrics(product.attributes),
     defaultReplyTemplate: product.defaultReplyTemplate,
-    aiPrompt: product.aiPrompt,
+    knowledgeBase: product.knowledgeBase,
     priceMinor: product.priceMinor,
     status: product.status,
   };
@@ -406,12 +406,12 @@ export class MemoryStore implements Store {
     this.orders.set(order.id, order);
     return { action: 'created', order: this.enrichOrder(order) };
   }
-  async createProduct(input: { adminId: string; accountId: string; externalProductRef?: string; title: string; description?: string; categoryCode?: string; attributes?: Record<string, unknown>; defaultReplyTemplate?: string; aiPrompt?: string; priceMinor?: number; status?: ProductStatus }): Promise<ProductRecord> {
+  async createProduct(input: { adminId: string; accountId: string; externalProductRef?: string; title: string; description?: string; categoryCode?: string; attributes?: Record<string, unknown>; defaultReplyTemplate?: string; knowledgeBase?: string; priceMinor?: number; status?: ProductStatus }): Promise<ProductRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const duplicate = [...this.products.values()].find((product) => product.accountId === input.accountId && input.externalProductRef && product.externalProductRef === input.externalProductRef);
     if (duplicate) throw new Error('PRODUCT_DUPLICATE');
     const now = new Date().toISOString();
-    const product: ProductRecord = { id: createId(), accountId: input.accountId, externalProductRef: input.externalProductRef, title: input.title, description: input.description, categoryCode: input.categoryCode, attributes: input.attributes ?? {}, defaultReplyTemplate: input.defaultReplyTemplate, aiPrompt: input.aiPrompt, configVersion: 1, priceMinor: input.priceMinor, status: input.status ?? 'draft', source: 'local', createdAt: now, updatedAt: now, skuCount: 0, assetCount: 0, skus: [], assets: [] };
+    const product: ProductRecord = { id: createId(), accountId: input.accountId, externalProductRef: input.externalProductRef, title: input.title, description: input.description, categoryCode: input.categoryCode, attributes: input.attributes ?? {}, defaultReplyTemplate: input.defaultReplyTemplate, knowledgeBase: input.knowledgeBase, configVersion: 1, priceMinor: input.priceMinor, status: input.status ?? 'draft', source: 'local', createdAt: now, updatedAt: now, skuCount: 0, assetCount: 0, skus: [], assets: [] };
     this.products.set(product.id, product);
     return this.productDetail(product);
   }
@@ -473,7 +473,7 @@ export class MemoryStore implements Store {
     if (input.patch.categoryCode !== undefined) product.categoryCode = input.patch.categoryCode ?? undefined;
     if (input.patch.attributes !== undefined) product.attributes = { ...input.patch.attributes };
     if (input.patch.defaultReplyTemplate !== undefined) product.defaultReplyTemplate = input.patch.defaultReplyTemplate ?? undefined;
-    if (input.patch.aiPrompt !== undefined) product.aiPrompt = input.patch.aiPrompt ?? undefined;
+    if (input.patch.knowledgeBase !== undefined) product.knowledgeBase = input.patch.knowledgeBase ?? undefined;
     if (input.patch.priceMinor !== undefined) product.priceMinor = input.patch.priceMinor ?? undefined;
     product.configVersion += 1;
     product.updatedAt = new Date().toISOString();

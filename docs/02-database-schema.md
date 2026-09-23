@@ -54,7 +54,7 @@
 
 | 表 | 关键列 | 主键与外键 | 唯一索引 / 普通索引 | 关键检查 |
 | --- | --- | --- | --- | --- |
-| `products.products` | `id uuid`；`account_id uuid`；`external_product_ref text null`；`title text`；`description text null`；`category_code text null`；`attributes_json jsonb default '{}'`；`default_reply_template text null`；`ai_prompt text null`；`config_version int default 1`；`price_minor bigint null`；`status text` | PK；FK account | UQ partial `(account_id, external_product_ref)`；IDX `(account_id, status, updated_at)` | `status in ('draft','ready','publishing','published','failed','archived')` |
+| `products.products` | `id uuid`；`account_id uuid`；`external_product_ref text null`；`title text`；`description text null`；`category_code text null`；`attributes_json jsonb default '{}'`；`default_reply_template text null`；`knowledge_base text null`；`config_version int default 1`；`price_minor bigint null`；`status text` | PK；FK account | UQ partial `(account_id, external_product_ref)`；IDX `(account_id, status, updated_at)` | `status in ('draft','ready','publishing','published','failed','archived')` |
 | `products.product_skus` | `id uuid`；`product_id uuid`；`sku_code text`；`external_sku_ref text null`；`price_minor bigint`；`status text` | PK；FK product | UQ `(product_id, sku_code)` | 金额 `>= 0` |
 | `products.asset_refs` | `id uuid`；`product_id uuid`；`storage_key text`；`mime_type text`；`checksum text null`；`status text` | PK；FK product | UQ `(product_id, storage_key)` | 归档不删除历史引用 |
 

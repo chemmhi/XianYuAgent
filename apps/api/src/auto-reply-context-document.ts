@@ -46,7 +46,7 @@ export function formatAutoReplyContextDocument(
   if (product) {
     lines.push('', '商品事实：', `- 标题：${textValue(trimField(product.title, options.maxFieldLength))}`, `- 价格：${formatPrice(product.priceMinor)}`);
     appendOptionalLine(lines, '- 说明', trimField(product.description, options.maxFieldLength));
-    appendOptionalLine(lines, '- 卖家知识', trimField(product.aiPrompt, options.maxFieldLength));
+    appendOptionalLine(lines, '- 知识库', trimField(product.knowledgeBase, options.maxFieldLength));
     appendOptionalLine(lines, '- 回复模板', trimField(product.defaultReplyTemplate, options.maxFieldLength));
   } else {
     lines.push('', '商品事实：无');

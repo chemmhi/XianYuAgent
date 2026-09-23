@@ -94,7 +94,7 @@ test('agent chooses product tool then returns final answer', async () => {
       return { content: replyPayload('这是一个数字资料包，页面显示价格为 19.99 元。'), model: 'test' };
     },
   };
-  const product = { id: 'product-1', accountId: 'account-1', externalProductRef: 'item-1', title: '资料包', description: '数字资料', browseCount: 321, wantCount: 33, collectCount: 8, defaultReplyTemplate: '付款后发送下载说明。', aiPrompt: '知识库：只回答商品适用范围和使用方式。', attributes: { internalOnly: 'do-not-expose', xianyu: { detail: { summary: { browseCount: 321, wantCount: 33, collectCount: 8, favoriteCount: 2, interactFavoriteCount: 1, soldCount: 45, quantity: 9, rawResponse: { shouldNotExpose: true } } } } }, priceMinor: 1_999, status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' };
+  const product = { id: 'product-1', accountId: 'account-1', externalProductRef: 'item-1', title: '资料包', description: '数字资料', browseCount: 321, wantCount: 33, collectCount: 8, defaultReplyTemplate: '付款后发送下载说明。', knowledgeBase: '只回答商品适用范围和使用方式。', attributes: { internalOnly: 'do-not-expose', xianyu: { detail: { summary: { browseCount: 321, wantCount: 33, collectCount: 8, favoriteCount: 2, interactFavoriteCount: 1, soldCount: 45, quantity: 9, rawResponse: { shouldNotExpose: true } } } } }, priceMinor: 1_999, status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' };
   const store = { listAutoReplyProducts: async () => ({ items: [product], total: 1 }) } as unknown as Store;
   const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}));
   const reply = await agent.generate({ adminId: 'admin-1', context: context(), classification });
@@ -110,7 +110,7 @@ test('agent chooses product tool then returns final answer', async () => {
   assert.match(productPayload, /浏览量：321/);
   assert.match(productPayload, /想要人数：33/);
   assert.match(productPayload, /收藏人数：8/);
-  assert.match(productPayload, /卖家知识：知识库：只回答商品适用范围和使用方式。/);
+  assert.match(productPayload, /知识库：只回答商品适用范围和使用方式。/);
   assert.match(productPayload, /回复模板：付款后发送下载说明。/);
   assert.doesNotMatch(productPayload, /createdAt|updatedAt|attributes|accountId|productRef|favoriteCount|rawResponse/);
   assert.throws(() => JSON.parse(productPayload));
@@ -182,7 +182,7 @@ test('agent emits high-level redacted observations for model, tool, and final de
       return { content: replyPayload('这是一个包含商品描述的最终回复。'), model: 'test-model', usage: { prompt_tokens: 12, completion_tokens: 8, total_tokens: 20 } };
     },
   };
-  const product = { id: 'product-1', accountId: 'account-1', externalProductRef: 'item-1', title: '资料包', description: '不应写入观测日志的商品描述', defaultReplyTemplate: undefined, aiPrompt: undefined, priceMinor: 1_999, status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' };
+  const product = { id: 'product-1', accountId: 'account-1', externalProductRef: 'item-1', title: '资料包', description: '不应写入观测日志的商品描述', defaultReplyTemplate: undefined, knowledgeBase: undefined, priceMinor: 1_999, status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' };
   const store = { listAutoReplyProducts: async () => ({ items: [product], total: 1 }) } as unknown as Store;
   const config = resolveAutoReplyAgentConfig({});
   const agent = new ToolCallingAutoReplyAgent(store, client, config);
@@ -409,8 +409,8 @@ test('shop product tool searches keyword, limits results, and excludes other acc
       queries.push(query);
       return {
         items: [
-          { id: 'earbuds-a', accountId: 'account-1', externalProductRef: 'earbuds-a', title: '蓝牙耳机 A', description: '降噪耳机', browseCount: 120, wantCount: 12, collectCount: 8, priceMinor: 12900, aiPrompt: '知识库：支持主动降噪问答。', defaultReplyTemplate: '现货当天发出。', status: 'published' },
-          { id: 'earbuds-b', accountId: 'account-1', externalProductRef: 'earbuds-b', title: '蓝牙耳机 B', description: '开放式耳机', browseCount: 88, wantCount: 9, collectCount: 4, priceMinor: 9900, aiPrompt: '知识库：说明佩戴方式。', defaultReplyTemplate: '下单后自动发货。', status: 'published' },
+          { id: 'earbuds-a', accountId: 'account-1', externalProductRef: 'earbuds-a', title: '蓝牙耳机 A', description: '降噪耳机', browseCount: 120, wantCount: 12, collectCount: 8, priceMinor: 12900, knowledgeBase: '支持主动降噪问答。', defaultReplyTemplate: '现货当天发出。', status: 'published' },
+          { id: 'earbuds-b', accountId: 'account-1', externalProductRef: 'earbuds-b', title: '蓝牙耳机 B', description: '开放式耳机', browseCount: 88, wantCount: 9, collectCount: 4, priceMinor: 9900, knowledgeBase: '说明佩戴方式。', defaultReplyTemplate: '下单后自动发货。', status: 'published' },
         ],
         total: 2,
       };
@@ -429,12 +429,14 @@ test('shop product tool searches keyword, limits results, and excludes other acc
   assert.match(payload, /浏览量：120/);
   assert.match(payload, /想要人数：12/);
   assert.match(payload, /收藏人数：8/);
+  assert.match(payload, /知识库：支持主动降噪问答。/);
   assert.match(payload, /标题：蓝牙耳机 B/);
   assert.match(payload, /描述：开放式耳机/);
   assert.match(payload, /浏览量：88/);
   assert.match(payload, /想要人数：9/);
   assert.match(payload, /收藏人数：4/);
-  assert.doesNotMatch(payload, /earbuds-a|earbuds-b|foreign-product|createdAt|updatedAt|attributes|accountId|productRef|browseCount|wantCount|知识库：支持主动降噪问答/);
+  assert.match(payload, /知识库：说明佩戴方式。/);
+  assert.doesNotMatch(payload, /earbuds-a|earbuds-b|foreign-product|createdAt|updatedAt|attributes|accountId|productRef|browseCount|wantCount/);
   assert.throws(() => JSON.parse(payload));
 });
 

@@ -32,7 +32,7 @@ export interface ProductVM {
   categoryCode?: string;
   attributesJson: Record<string, unknown>;
   defaultReplyTemplate?: string;
-  aiPrompt?: string;
+  knowledgeBase?: string;
   configVersion: number;
   priceMinor?: number;
   status: ProductStatus;

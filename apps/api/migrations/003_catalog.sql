@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS products.products (
   category_code text,
   attributes_json jsonb NOT NULL DEFAULT '{}'::jsonb,
   default_reply_template text,
-  ai_prompt text,
+  knowledge_base text,
   config_version integer NOT NULL DEFAULT 1 CHECK (config_version > 0),
   price_minor bigint CHECK (price_minor IS NULL OR price_minor >= 0),
   status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'ready', 'publishing', 'published', 'failed', 'archived')),
