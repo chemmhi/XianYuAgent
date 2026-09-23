@@ -298,6 +298,17 @@ async function run() {
   await assertText(cdp, '真实连接');
   assert.equal(await evaluate(cdp, 'document.querySelectorAll(".messages-conversation-list button").length'), 2);
   assert.equal(await evaluate(cdp, 'document.querySelectorAll(".messages-conversation-avatar img").length'), 2);
+  await evaluate(cdp, `(() => {
+    const textarea = document.querySelector('textarea[aria-label="消息内容"]');
+    const file = new File([new Uint8Array([137, 80, 78, 71])], 'route-paste.png', { type: 'image/png', lastModified: 3 });
+    const clipboard = new DataTransfer();
+    clipboard.items.add(file);
+    textarea?.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: clipboard }));
+    return Boolean(textarea);
+  })()`);
+  await waitFor(async () => await evaluate(cdp, 'document.querySelectorAll(".messages-inline-attachment").length === 1'), 'image paste after cached route restore');
+  await evaluate(cdp, 'document.querySelector(".messages-attachment-remove")?.click()');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-inline-attachment")) === false'), 'remove route-restored pasted image');
   assert.equal(await evaluate(cdp, 'document.querySelectorAll(".messages-conversation-item").length'), 2);
   assert.equal(await evaluate(cdp, 'getComputedStyle(document.querySelector(".messages-conversation-scroll")).overflowY'), 'auto');
   assert.equal(await evaluate(cdp, 'getComputedStyle(document.querySelector(".messages-timeline")).overflowY'), 'auto');

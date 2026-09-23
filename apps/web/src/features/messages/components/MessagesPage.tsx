@@ -71,23 +71,6 @@ export function MessagesPage({ api: providedApi, active = true }: { api?: Messag
     setAttachmentPreviewUrl(null);
   };
 
-  // React's paste handler receives both ClipboardItem files and the mirrored
-  // FileList in some browsers. Intercept image pastes in capture phase so the
-  // browser-provided payload is normalized once before the JSX fallback runs.
-  useEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-    const onPaste = (event: ClipboardEvent) => {
-      const images = clipboardImageFiles(event.clipboardData);
-      if (images.length === 0) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      addImageFiles(images);
-    };
-    textarea.addEventListener('paste', onPaste, true);
-    return () => textarea.removeEventListener('paste', onPaste, true);
-  }, [controller.state.activeConversationId]);
-
   const removePendingImage = (attachmentId: string) => {
     setPendingImages((previous) => {
       const removed = previous.find((item) => item.id === attachmentId);
@@ -231,7 +214,7 @@ export function MessagesPage({ api: providedApi, active = true }: { api?: Messag
                 </div>
                 <div className="messages-composer-editor">
                   {draft && <div className="messages-composer-visual" aria-hidden="true">{renderXianyuTextWithCaret(draft, composerFocused && composerSelection.start === composerSelection.end ? composerSelection.start : undefined)}</div>}
-                  <textarea ref={textareaRef} className={draft ? 'messages-composer-input messages-composer-input--masked' : 'messages-composer-input'} aria-label="消息内容" value={draft} maxLength={2000} rows={1} onFocus={(event) => { setComposerFocused(true); normalizeComposerSelection(event.currentTarget); }} onBlur={() => setComposerFocused(false)} onSelect={(event) => syncComposerSelection(event.currentTarget)} onMouseUp={(event) => { const textarea = event.currentTarget; requestAnimationFrame(() => normalizeComposerSelection(textarea)); }} onChange={(event) => { setDraft(event.target.value); syncComposerSelection(event.currentTarget); }} onKeyDown={(event) => { if (event.nativeEvent.isComposing) return; const hasModifier = event.shiftKey || event.metaKey || event.ctrlKey || event.altKey; if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && !hasModifier) { const cursor = event.currentTarget.selectionStart ?? 0; const end = event.currentTarget.selectionEnd ?? cursor; if (cursor === end) { const nextCursor = moveXianyuEmojiCursor(event.currentTarget.value, cursor, event.key); if (nextCursor !== cursor) { event.preventDefault(); event.currentTarget.setSelectionRange(nextCursor, nextCursor); syncComposerSelection(event.currentTarget); return; } } } if ((event.key === 'Backspace' || event.key === 'Delete') && !hasModifier) { const result = removeXianyuEmojiMarkerAtCursor(event.currentTarget.value, event.currentTarget.selectionStart ?? 0, event.currentTarget.selectionEnd ?? 0, event.key); if (result.handled) { event.preventDefault(); setDraft(result.value); setComposerSelection({ start: result.cursor, end: result.cursor }); requestAnimationFrame(() => { textareaRef.current?.focus(); textareaRef.current?.setSelectionRange(result.cursor, result.cursor); resizeComposer(); }); return; } } if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={MESSAGES_COMPOSER_PLACEHOLDER} />
+                  <textarea ref={textareaRef} className={draft ? 'messages-composer-input messages-composer-input--masked' : 'messages-composer-input'} aria-label="消息内容" value={draft} maxLength={2000} rows={1} onFocus={(event) => { setComposerFocused(true); normalizeComposerSelection(event.currentTarget); }} onBlur={() => setComposerFocused(false)} onSelect={(event) => syncComposerSelection(event.currentTarget)} onMouseUp={(event) => { const textarea = event.currentTarget; requestAnimationFrame(() => normalizeComposerSelection(textarea)); }} onChange={(event) => { setDraft(event.target.value); syncComposerSelection(event.currentTarget); }} onPaste={(event) => { const images = clipboardImageFiles(event.clipboardData); if (images.length === 0) return; event.preventDefault(); addImageFiles(images); }} onKeyDown={(event) => { if (event.nativeEvent.isComposing) return; const hasModifier = event.shiftKey || event.metaKey || event.ctrlKey || event.altKey; if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && !hasModifier) { const cursor = event.currentTarget.selectionStart ?? 0; const end = event.currentTarget.selectionEnd ?? cursor; if (cursor === end) { const nextCursor = moveXianyuEmojiCursor(event.currentTarget.value, cursor, event.key); if (nextCursor !== cursor) { event.preventDefault(); event.currentTarget.setSelectionRange(nextCursor, nextCursor); syncComposerSelection(event.currentTarget); return; } } } if ((event.key === 'Backspace' || event.key === 'Delete') && !hasModifier) { const result = removeXianyuEmojiMarkerAtCursor(event.currentTarget.value, event.currentTarget.selectionStart ?? 0, event.currentTarget.selectionEnd ?? 0, event.key); if (result.handled) { event.preventDefault(); setDraft(result.value); setComposerSelection({ start: result.cursor, end: result.cursor }); requestAnimationFrame(() => { textareaRef.current?.focus(); textareaRef.current?.setSelectionRange(result.cursor, result.cursor); resizeComposer(); }); return; } } if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={MESSAGES_COMPOSER_PLACEHOLDER} />
                 </div>
                 <div className="messages-composer-footer">
                   <div className="messages-composer-shortcuts">
