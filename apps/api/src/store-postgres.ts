@@ -540,7 +540,8 @@ export class PostgresStore implements Store {
       const batchRows = await client.query(`select b.* from coupons.coupon_batches b
         where (b.id::text = any($1::text[]) or b.sequence_id::text = any($1::text[]))
           and b.account_id=$2
-          and exists (select 1 from auth.account_scopes scope where scope.account_id=b.account_id and scope.admin_id=$3 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))`, [normalized.batchIds, input.accountId, input.adminId]);
+          and exists (select 1 from auth.account_scopes scope where scope.account_id=b.account_id and scope.admin_id=$3 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))
+        order by (b.status='voided') asc, b.created_at desc, b.id desc`, [normalized.batchIds, input.accountId, input.adminId]);
       const byAlias = new Map<string, Row>();
       for (const row of batchRows.rows) { byAlias.set(String(row.id), row); if (row.sequence_id !== undefined && row.sequence_id !== null) byAlias.set(String(row.sequence_id), row); }
       const resolvedRows = normalized.batchIds.map((batchId) => byAlias.get(batchId));
