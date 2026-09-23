@@ -22,6 +22,8 @@
 - `029_product_xianyu_updated_at.sql`：为商品保存闲鱼侧更新时间，并支持显式按闲鱼更新时间排序；不再把本地 `updated_at` 当作闲鱼更新时间。
 - `030_product_xianyu_list_rank.sql`：保存闲鱼商品列表返回顺序，支持商品目录按闲鱼页面顺序展示；未出现在最近一次同步结果中的商品排名置空并排在末尾。
 - `029_coupon_batch_sequence.sql`：为卡券批次增加从 1 开始的业务编号；UUID `id` 继续作为内部主键和外键，API `batchId`/`id` 对外返回该序号，作废/删除后的序号可被新批次回收。
+- `032_auto_reply_inbound_source_ordering.sql`：为入站 inbox 保存 live push 可提取的 source event id/sequence，兼容缺失序列的旧消息并支持 repair runtime 审计回放。
+- `033_auto_reply_review_lifecycle.sql`：为 Outcome Review 补充 resolved/closed 生命周期时间戳，支持 worker/reconcile 审计回读。
 
 ## 029 coupon batch sequence 迁移纪律
 

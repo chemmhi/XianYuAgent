@@ -3,7 +3,7 @@
 - 日期：2026-09-23
 - 当前阶段：阶段 8/9，切片实现与发布门禁收口
 - 阶段状态：IN_PROGRESS
-- 当前门禁：AR-VS-00 R1/R2 已 VERIFIED；AR-VS-08 已在 legacy 主入口内接入 shadow 候选审查旁路并完成 031 三表真实写读，当前为 READY_FOR_REVIEW（shadow plumbing scope）；统一路由、source ordering、live 幂等与动态策略加载等 P1 仍使 enforce/canary 与 R3/发布门禁 BLOCKED
+- 当前门禁：AR-VS-00 R1/R2 已 VERIFIED；AR-VS-08 已在 legacy 主入口内接入 shadow 候选审查旁路，并完成 031 state/review/event、032 source ordering、033 review lifecycle 的真实写读；当前为 READY_FOR_REVIEW（shadow plumbing + 可调用 worker scope）；统一路由、live 幂等、动态策略和真实领域证据仍使 enforce/canary 与 R3/发布门禁 BLOCKED
 - 人工审核策略：后续人工审核节点默认批准继续；该默认不替代自动化测试、真实回读和发布门禁
 
 ## 已完成
@@ -16,7 +16,7 @@
 - AR-VS-05：话题拉回、目标切换、情绪门控和评价/推荐抑制已实现，禁止该切片直接 handoff/refuse。
 - AR-VS-06：推荐资格、同账号/库存/新鲜度、偏好排序、冷却和最多 1–3 个候选已实现。
 - AR-VS-07：Outcome Review claim/lease、证据优先级、退避、死信、CAS、reopen 和 resolved→closed 门禁已实现。
-- AR-VS-08：Policy→Pre-send→Send→review_pending 编排适配层、031 增量迁移、Memory/PostgreSQL repository 和 legacy 主入口内的 shadow 候选审查旁路已接入；legacy 仍保持单次发送，新策略尚未接管 primary route。
+- AR-VS-08：Policy→Pre-send→Send→review_pending 编排适配层、031/032/033 增量迁移、Memory/PostgreSQL repository、Outcome Review worker 可调用闭环、sender reconcile 和 legacy 主入口内的 shadow 候选审查旁路已接入；legacy 仍保持单次发送，新策略尚未接管 primary route。
 - AR-VS-09：配置化 canary、stop condition、kill switch 回滚和交接门禁已实现。
 - 自动回复单测：117/117 通过；API typecheck/build、runtime 主入口回归、031 迁移、PostgreSQL buyer-push 写读与重启回读均通过。
 
@@ -38,7 +38,7 @@
 
 ## 当前风险
 
-- AR-RA-001、AR-RA-002、AR-RA-003、AR-RA-004、AR-RA-005、AR-RA-006、AR-RA-016、AR-RA-017、AR-RA-018、AR-RA-019、AR-RA-020、AR-RA-021、AR-RA-022、AR-RA-023：保持 OPEN/IMPLEMENTED_PENDING_EVIDENCE，原因是统一路由、真实 source ordering、Outcome Review worker、live sender 幂等/outbox、动态 PolicyConfig 与生产运营证据尚未完成。
+- AR-RA-001、AR-RA-002、AR-RA-003、AR-RA-004、AR-RA-005、AR-RA-006、AR-RA-016、AR-RA-017、AR-RA-018、AR-RA-019、AR-RA-020、AR-RA-021、AR-RA-022、AR-RA-023、AR-RA-024：保持 OPEN/READY_FOR_REVIEW/IMPLEMENTED_PENDING_EVIDENCE，原因是统一路由、默认 worker 启动、真实领域 evidence、live sender 幂等/outbox、动态 PolicyConfig 与生产运营证据尚未完成。
 - AR-RA-010、AR-RA-014：VERIFIED；AR-RA-011、AR-RA-012、AR-RA-013：实现级证据已补，待新编排真实接入、独立 R3 与红队回读后关闭。
 - AR-RA-015：READY_FOR_REVIEW；031 三表已由 repair repository/runtime 在主入口写入，重启后可回读；Outcome Review worker 的更新型操作仍未持久化。
 - 旧目录中的历史运行设计仍可能被误当作修复 canonical，继续通过兼容映射和评审日志防漂移。

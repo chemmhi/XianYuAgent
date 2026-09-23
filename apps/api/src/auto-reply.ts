@@ -200,6 +200,7 @@ export class AutoReplyService {
     const replay = await this.store.findAutoReplyRunByInboundMessage(input.adminId, inboundMessage.id);
     if (replay) return { run: replay, inboundMessage };
     let run: AutoReplyRunRecord;
+    let repair: AutoReplyRepairCandidateResult | undefined;
     try {
       run = await this.store.createAutoReplyRun({ adminId: input.adminId, accountId: conversation.accountId, conversationId: conversation.id, inboundMessageId: inboundMessage.id, intent: 'pending', decision: 'skipped', status: 'received', inputDigest });
     } catch (error) {
@@ -343,7 +344,6 @@ export class AutoReplyService {
         output: { replyDigest, outputLength: reply.length },
       } });
       const segments = await this.resolveReplySegments(runtime.generator, generatedReply?.segments, reply, runtime);
-      let repair: AutoReplyRepairCandidateResult | undefined;
       if (this.repairRuntime?.enabled) {
         try {
           repair = await this.repairRuntime.reviewCandidate({
@@ -390,6 +390,9 @@ export class AutoReplyService {
         const outbound = await this.messages.createMessage({ adminId: input.adminId, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: segment, externalMessageRef: simulatedRef, source: 'ai', productRef: context.product?.id, riskFlags: [...classification.riskFlags, ...(sent.outcome === 'simulated' ? ['simulated_send'] : []), ...(segments.length > 1 ? [`reply_segment_${index + 1}_of_${segments.length}`] : [])], requestId, traceId });
         lastOutboundMessageId = outbound.message.messageId;
       }
+      if (repair?.outcomeReviewId && this.repairRuntime) {
+        try { await this.repairRuntime.reconcileSendOutcome({ outcomeReviewId: repair.outcomeReviewId, outcome: lastOutcome }); } catch { /* reconcile must not break legacy success */ }
+      }
       await updateRun({ status: 'simulated', senderOutcome: lastOutcome, eventPayload: {
         input: { kind: 'send', replyDigest, segmentCount: segments.length, mode: runtime.sendMode },
         output: { senderOutcome: lastOutcome, segmentCount: segments.length },
@@ -402,6 +405,13 @@ export class AutoReplyService {
       return { run: updated ?? run, inboundMessage, outboundMessage: lastOutboundMessageId ? await this.findMessage(input.adminId, input.conversationId, lastOutboundMessageId) : undefined, classification, context, repair };
     } catch (error) {
       const failureCode = toFailureCode(error);
+      if (repair?.outcomeReviewId && this.repairRuntime) {
+        try {
+          await this.repairRuntime.reconcileSendOutcome({ outcomeReviewId: repair.outcomeReviewId, outcome: failureCode === 'AUTO_REPLY_SEND_FAILED' ? 'known_failure' : 'unknown' });
+        } catch {
+          // Repair reconciliation is best-effort and must never mask the legacy failure.
+        }
+      }
       if (failureCode === 'AGENT_HANDOFF') {
         const reason = safeEventReason(error);
         const updated = await updateRun({ status: 'handoff', decision: 'handoff', failureCode, eventPayload: {

@@ -730,14 +730,17 @@ export class MemoryStore implements Store {
     return this.markOutgoingReadUntil(conversation, target.createdAt, input.readAt);
   }
 
-  async enqueueInboundInbox(input: { adminId: string; accountId: string; conversationId: string; inboundMessageId: string; externalConversationRef: string; externalMessageRef: string; availableAt?: string }): Promise<{ record: InboundInboxRecord; created: boolean }> {
+  async enqueueInboundInbox(input: { adminId: string; accountId: string; conversationId: string; inboundMessageId: string; externalConversationRef: string; externalMessageRef: string; sourceEventId?: string; sourceSequence?: number; availableAt?: string }): Promise<{ record: InboundInboxRecord; created: boolean }> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const existing = [...this.inboundInbox.values()].find((item) => item.accountId === input.accountId && (item.externalMessageRef === input.externalMessageRef || item.inboundMessageId === input.inboundMessageId));
     if (existing) return { record: { ...existing }, created: false };
     const now = new Date().toISOString();
+    const sourceSequence = input.sourceSequence;
     const record: InboundInboxRecord = {
       id: createId(), adminId: input.adminId, accountId: input.accountId, conversationId: input.conversationId,
       inboundMessageId: input.inboundMessageId, externalConversationRef: input.externalConversationRef, externalMessageRef: input.externalMessageRef,
+      sourceEventId: input.sourceEventId?.trim() || undefined,
+      sourceSequence: typeof sourceSequence === 'number' && Number.isSafeInteger(sourceSequence) && sourceSequence > 0 ? sourceSequence : undefined,
       status: 'pending', attempt: 0, availableAt: input.availableAt ?? now, createdAt: now, updatedAt: now,
     };
     this.inboundInbox.set(record.id, record);

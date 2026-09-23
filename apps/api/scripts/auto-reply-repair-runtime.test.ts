@@ -52,6 +52,11 @@ test('AR-VS-08 shadow runtime is wired into the buyer entry path and is idempote
     const duplicate = await runtime.autoReply.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: inbound.message.id, requestId: 'ar-vs08-runtime-request-replay', traceId: 'ar-vs08-runtime-trace-replay' });
     assert.equal(duplicate.run.id, first.run.id);
     assert.equal((await runtime.autoReplyRepair.listReviews(account.id, conversation.id)).length, 2);
+
+    await runtime.autoReplyRepair.reconcileSendOutcome({ outcomeReviewId: reviews[1]!.reviewId, outcome: 'known_success', externalMessageRef: 'ar-vs08-runtime-outbound.PNM' });
+    const reconciled = await runtime.autoReplyRepair.listReviews(account.id, conversation.id);
+    assert.deepEqual(reconciled[1]?.evidenceTypes, ['SENDER_PERSISTED']);
+    assert.deepEqual(reconciled[1]?.evidenceRefs, ['sender:ar-vs08-runtime-outbound.PNM']);
   } finally {
     await runtime.close();
   }

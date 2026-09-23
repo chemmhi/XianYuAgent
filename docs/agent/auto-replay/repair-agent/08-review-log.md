@@ -175,3 +175,17 @@ AR-VS-00 三轮复审已执行，但阶段 0 门禁为 `BLOCKED`，不能标记 
 - AR-VS-08 现已完成 legacy 主入口内的 shadow 候选审查旁路，三表事务写入、幂等和重启回读证据成立。
 - 本切片状态保持 `READY_FOR_REVIEW`（shadow plumbing scope），不提升为整体 `PASS` 或 `CLOSED`。
 - 进入 enforce/canary 前必须关闭 legacy 路由统一性、source ordering、live sender 幂等/outbox、动态 PolicyConfig 与真实 lifecycle/goal evidence 等 P1 门禁。
+
+## 2026-09-23：AR-VS-08 P1 补强复核
+
+| 补强项 | 结论 | 证据 |
+| --- | --- | --- |
+| deferred source ordering | FIXED_PENDING_REVIEW | `parsePushPayloadDetailed()` 支持从 sync push envelope/decoded payload/extJson 提取显式 sourceEventId/sourceSequence；inbox 032 迁移、Memory/Postgres 写读、defer→worker 透传回归通过；缺失平台序列仍保留 deterministic fallback |
+| Outcome Review lifecycle | READY_FOR_REVIEW | repository 增加 get/listClaimable/listEvents、claim、heartbeat、CAS mutation；worker 覆盖 claim→heartbeat→complete、retry/dead-letter、close/reopen；033 迁移与 PostgreSQL smoke 通过 |
+| sender outcome reconcile | FIXED_PENDING_REVIEW | shadow runtime 增加 known_success/known_failure/unknown 回写；已补 runtime 回归，模拟发送仍不伪造 `SENDER_PERSISTED` |
+| 全量验证 | PASS | `npm run typecheck:api`、`npm run build`、`npm --workspace apps/api run test:auto-reply:unit`：124/124、`npm --workspace apps/api run test:auto-reply:buyer-push:postgres`、`npm --workspace apps/api run test:auto-reply:outcome-review:postgres`、`git diff --check` 均通过 |
+
+### 补强后的边界
+
+- AR-VS-08 仍保持 `READY_FOR_REVIEW`（shadow plumbing + 可调用 review worker）；worker 未接入默认后台启动，不代表审核处理已在生产自动运行。
+- 整体真实链路仍不是 `PASS/CLOSED`：legacy route 统一接管、动态 PolicyConfig、真实 lifecycle/goal evidence、Activity 新字段回读和 live sender outbox/外部幂等仍为后续 P1 门禁。

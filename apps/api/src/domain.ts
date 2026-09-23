@@ -468,6 +468,10 @@ export interface InboundInboxRecord {
   inboundMessageId: string;
   externalConversationRef: string;
   externalMessageRef: string;
+  /** Best-effort platform event identity captured from the live push envelope. */
+  sourceEventId?: string;
+  /** Best-effort platform ordering token; absent when the envelope does not expose one. */
+  sourceSequence?: number;
   status: InboundInboxStatus;
   attempt: number;
   availableAt: string;
@@ -1128,7 +1132,7 @@ export interface Store {
   getAutoReplyActivitySummary(adminId: string, query: { accountId?: string; from: string; to: string }): Promise<AutoReplyActivitySummary>;
   markMessagesReadByExternalRef(input: { adminId: string; conversationId: string; externalMessageRef: string; readAt?: string }): Promise<{ messages: MessageRecord[]; events: ConversationEventRecord[] }>;
   markLatestOutgoingRead(input: { adminId: string; conversationId: string; readAt?: string }): Promise<{ messages: MessageRecord[]; events: ConversationEventRecord[] }>;
-  enqueueInboundInbox(input: { adminId: string; accountId: string; conversationId: string; inboundMessageId: string; externalConversationRef: string; externalMessageRef: string; availableAt?: string }): Promise<{ record: InboundInboxRecord; created: boolean }>;
+  enqueueInboundInbox(input: { adminId: string; accountId: string; conversationId: string; inboundMessageId: string; externalConversationRef: string; externalMessageRef: string; sourceEventId?: string; sourceSequence?: number; availableAt?: string }): Promise<{ record: InboundInboxRecord; created: boolean }>;
   claimInboundInbox(input: { workerId: string; limit: number; leaseMs: number }): Promise<InboundInboxRecord[]>;
   heartbeatInboundInbox(input: { id: string; workerId: string; leaseMs: number }): Promise<boolean>;
   ackInboundInbox(input: { id: string; workerId: string }): Promise<boolean>;

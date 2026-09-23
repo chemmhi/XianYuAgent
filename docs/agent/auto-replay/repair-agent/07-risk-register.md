@@ -28,11 +28,12 @@
 | AR-RA-015 | P1 | PolicyDecisionTrace、Outcome Review 和 ConversationState 持久化契约不完整 | READY_FOR_REVIEW | repair runtime/repository 已接入主入口；031 三表完成 PostgreSQL 写读与重启回读；Outcome Review worker 的更新型操作和 Activity 投影仍待补齐 |
 | AR-RA-016 | P1 | 新策略缺少可采信的测试、阈值告警、灰度和回滚演练证据 | OPEN | 112 项单测已通过；继续执行指标阈值、告警 Owner、canary、kill switch、迁移回滚和 reconcile 演练 |
 | AR-RA-018 | P1 | AR-VS-08 主入口接入缺失导致 state/review 不可审计 | IMPLEMENTED_PENDING_EVIDENCE | `AUTO_REPLY_REPAIR_MODE=shadow` 已接入 `AutoReplyService`/`app.ts`；修复 review 语义排序后 buyer-push PostgreSQL smoke 验证三表事务写入、`review_pending` 与重启回读；shadow 不伪造 `SENDER_PERSISTED`，CAS 冲突有限重试；切片仍受统一路由和真实 source ordering P1 约束 |
-| AR-RA-019 | P1 | Outcome Review 仅能创建 review snapshot，缺少跨进程 claim/complete/retry/dead-letter/close/reopen 持久化更新 | OPEN | 本切片明确保持 shadow-only；后续需补 repository 原子更新、worker、lease/CAS/幂等回归和跨进程演练，不得将 `review_pending` 快照当作审核闭环完成 |
-| AR-RA-020 | P1 | 真实 push parser 与 deferred inbox 未完整保留 source event/sequence，乱序/陈旧回放缺少平台序列证据 | OPEN | 当前仅在缺失平台序列时使用可审计 deterministic fallback；enforce 前需从 envelope 解析并贯穿 inbox/worker |
+| AR-RA-019 | P1 | Outcome Review 仅能创建 review snapshot，缺少跨进程 claim/complete/retry/dead-letter/close/reopen 持久化更新 | READY_FOR_REVIEW | repository/worker/033 迁移已补齐 lease/CAS/幂等更新、retry/dead-letter、close/reopen 与 PostgreSQL smoke；worker 仍未接入默认后台启动，evidenceProvider 仍待真实领域事件 |
+| AR-RA-020 | P1 | 真实 push parser 与 deferred inbox 未完整保留 source event/sequence，乱序/陈旧回放缺少平台序列证据 | FIXED_PENDING_REVIEW | 032 迁移、parser→defer inbox→processInboundInbox 透传和 7 项定向回归已补；平台未提供显式序列时继续使用可审计 deterministic fallback |
 | AR-RA-021 | P1 | repair policy 仍位于 legacy classifier/hardSafety/handoff 之后，无法证明统一无硬编码路由与混合敏感消息局部拒绝 | OPEN | shadow 仅观察候选回复；enforce 前需让 PolicyEngine 成为唯一主路由并保留兼容 fallback 但禁止双路由 |
 | AR-RA-022 | P1 | live sender 与本地落库非 outbox/外部幂等事务，崩溃窗口可能造成重复发送 | OPEN | 当前 buyer-push 仅验证 simulate；enforce/canary 前需补 requestId 外部幂等、outbox、reconcile 与故障演练 |
 | AR-RA-023 | P1 | 默认 PolicyConfig 仍以内置 TypeScript seed 为主，生产规则不可按账号审计加载 | OPEN | 当前 hash 已稳定但规则仍源码内置；enforce 前需改为 ACTIVE PolicyConfig 版本化加载并记录 policyDecisionId |
+| AR-RA-024 | P1 | shadow sender outcome 未回写 repair review，发送失败/unknown 无法进入 reconcile | FIXED_PENDING_REVIEW | `AutoReplyRepairRuntime.reconcileSendOutcome()` 已接入 known_success/known_failure/unknown；runtime 回归覆盖 SENDER_PERSISTED evidence 与幂等回写；live outbox 仍由 AR-RA-022 负责 |
 
 ## 旧风险映射
 

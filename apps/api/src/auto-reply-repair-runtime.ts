@@ -3,6 +3,7 @@ import { AutoReplyRepairOrchestrator } from './auto-reply-repair-orchestrator.js
 import { createDefaultAutoReplyRepairPolicy, type AutoReplyRepairMode } from './auto-reply-repair-config.js';
 import { AutoReplyRepairRepository, type PersistedRepairArtifact, type PersistedRepairReviewEvent, type PersistedRepairReviewRecord } from './auto-reply-repair-repository.js';
 import { ConversationStateReducer } from './auto-reply-state.js';
+import { OutcomeReviewWorker, type OutcomeReviewWorkerOptions } from './auto-reply-outcome-review-worker.js';
 import type { ConversationState, MessageRecord, Store } from './domain.js';
 import { createId, digestJson } from './security.js';
 
@@ -30,6 +31,11 @@ export interface AutoReplyRepairCandidateResult {
   outcomeReviewId?: string;
   resolutionStatus?: string;
 }
+
+type OutcomeReviewWorkerFactoryOptions = Omit<OutcomeReviewWorkerOptions, 'workerId' | 'policyProvider'> & {
+  workerId?: string;
+  policyProvider?: OutcomeReviewWorkerOptions['policyProvider'];
+};
 
 export class AutoReplyRepairRuntime {
   private readonly repository: AutoReplyRepairRepository;
@@ -175,6 +181,59 @@ export class AutoReplyRepairRuntime {
 
   async listReviews(accountId: string, conversationId: string): Promise<PersistedRepairReviewRecord[]> {
     return this.repository.listReviews(accountId, conversationId);
+  }
+
+  createOutcomeReviewWorker(options: OutcomeReviewWorkerFactoryOptions = {}): OutcomeReviewWorker {
+    return new OutcomeReviewWorker(this.repository, {
+      workerId: options.workerId ?? 'auto-reply-outcome-worker',
+      batchSize: options.batchSize,
+      leaseSeconds: options.leaseSeconds,
+      evidenceProvider: options.evidenceProvider,
+      now: options.now,
+      policyProvider: options.policyProvider ?? ((record) => createDefaultAutoReplyRepairPolicy(record.accountId, options.now?.() ?? new Date()).outcomePolicy),
+    });
+  }
+
+  async pollOutcomeReviews(options: OutcomeReviewWorkerFactoryOptions = {}): Promise<Awaited<ReturnType<OutcomeReviewWorker['pollOnce']>>> {
+    return this.createOutcomeReviewWorker(options).pollOnce();
+  }
+
+  async reconcileSendOutcome(input: { outcomeReviewId?: string; outcome: 'simulated' | 'known_success' | 'known_failure' | 'unknown'; externalMessageRef?: string }): Promise<void> {
+    if (!input.outcomeReviewId || this.mode === 'off') return;
+    const current = await this.repository.getReview(input.outcomeReviewId);
+    if (!current || current.reviewType !== 'OUTCOME' || ['resolved', 'closed', 'review_failed'].includes(current.resolutionStatus)) return;
+    const state = await this.repository.getConversationState(current.accountId, current.conversationId);
+    const now = new Date().toISOString();
+    const next: PersistedRepairReviewRecord = { ...current, reasonCodes: [...current.reasonCodes], evidenceRefs: [...current.evidenceRefs], evidenceTypes: [...current.evidenceTypes] };
+    if (input.outcome === 'known_success') {
+      const evidenceId = `sender:${input.externalMessageRef ?? current.runId}`;
+      next.evidenceRefs = [...new Set([...next.evidenceRefs, evidenceId])];
+      next.evidenceTypes = [...new Set([...next.evidenceTypes, 'SENDER_PERSISTED'])];
+    } else if (input.outcome === 'known_failure') {
+      next.reasonCodes = [...new Set([...next.reasonCodes, 'SENDER_KNOWN_FAILURE'])];
+      next.nextAction = 'RECONCILE_SEND';
+    } else if (input.outcome === 'unknown') {
+      next.reasonCodes = [...new Set([...next.reasonCodes, 'SENDER_OUTCOME_UNKNOWN'])];
+      next.nextAction = 'RECONCILE_SEND';
+    } else {
+      return;
+    }
+    const eventType = input.outcome === 'known_success' ? 'sender.outcome_persisted' : 'sender.outcome_uncertain';
+    const event: PersistedRepairReviewEvent = {
+      eventId: createId(),
+      reviewId: next.reviewId,
+      accountId: next.accountId,
+      conversationId: next.conversationId,
+      eventType,
+      sourceEventId: `sender:${next.runId}`,
+      sourceSequence: Math.max(1, next.expectedStateVersion),
+      stateVersion: next.expectedStateVersion,
+      policyVersion: state?.policyVersion ?? 'unknown',
+      idempotencyKey: `repair:sender:${next.reviewId}:${input.outcome}:${input.externalMessageRef ?? 'none'}`,
+      occurredAt: now,
+      payload: { outcome: input.outcome, externalMessageRef: input.externalMessageRef ?? null },
+    };
+    await this.repository.applyOutcomeReviewMutation({ record: next, event });
   }
 
   private reviewArtifacts(args: { input: AutoReplyRepairCandidateInput; state: ConversationState; sourceEventId: string; sourceSequence: number; policyVersion: string; result: Awaited<ReturnType<AutoReplyRepairOrchestrator['execute']>>; now: Date }): PersistedRepairArtifact[] {
