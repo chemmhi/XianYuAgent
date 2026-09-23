@@ -113,6 +113,8 @@
 | `root/frontend_automation_slice` | `product-automation-frontend-20260923` | `codex/product-automation-frontend-20260923` | `F:\ChenHai\Project\XianYuAgent-product-automation-frontend` | Codex `/root` delegated agent | `2026-09-22 23:30:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 商品自动化前端纵向切片已开始编码：商品列表入口、四类规则抽屉、批量配置与卡券选择穿梭框；补 Vitest、Chrome/CDP E2E 和视觉证据。真实 automation API 由可注入 adapter 对齐，当前 E2E 使用 `VITE_AUTOMATION_MODE=mock`，待后端契约接入后复跑 live。 |
 | `root/backend_automation_slice` | `product-automation-backend-20260923` | `codex/product-automation-backend-20260923` | `F:\ChenHai\Project\XianYuAgent-product-automation-backend-20260923` | Codex `/root` delegated agent | `2026-09-22 23:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 商品自动化配置/工作流及订单刷新、IM 显式评价信封、提醒 Worker 入口；默认外部执行器明确返回 blocked/AUTOMATION_EXECUTION_NOT_CONFIGURED；已通过 13 项定向测试、API smoke、真实应用装配跨层 smoke、PostgreSQL migration+持久化及 externalProductRef→productId 关联 smoke、tsc build、git diff --check；提交 `dee17e0` 后增量修复待提交。 |
 
+| `root/implement_xianyu_mtop_writes` | `product-automation-mtop-writes-20260923` | `codex/product-automation-mtop` | `F:\ChenHai\Project\XianYuAgent-product-automation-mtop` | Codex `/root` delegated agent | `2026-09-23 09:22:29 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 实现 XianyuMtopClient 确认发货、订单改价、订单详情读取与结果分类；补充离线契约测试和 fixtures，禁止真实网络。类型检查、MTOP 适配器定向契约、Cookie fallback、订单请求 smoke 已通过。 |
+
 | 类型 | branch | worktree | 规则 |
 | --- | --- | --- | --- |
 | 受保护主工作区 | `master` | `F:\ChenHai\Project\XianYuAgent` | 不登记为 agent 开发 worktree；只允许锁内合并、验证、登记回写和清理 |
