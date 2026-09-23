@@ -1,5 +1,5 @@
 import type { ModelClient } from '../src/pi-runtime.ts';
-import type { CleanedConversation } from './extract-seller-persona.ts';
+import type { CleanedConversation } from './optimize-seller-style-prompt.ts';
 
 export const MIN_REAL_DIALOGUE_ROUNDS = 10;
 export const DEFAULT_STYLE_SIMILARITY_THRESHOLD = 98;
@@ -15,6 +15,19 @@ export const STYLE_DIMENSIONS = [
   'directness',
   'habits',
   'naturalness',
+] as const;
+
+export const STYLE_SCORING_CRITERIA = [
+  { key: 'tone', label: '语气', description: '亲切、直接、克制与人工感是否一致' },
+  { key: 'address', label: '称呼', description: '称呼对象、频率和亲疏边界是否一致' },
+  { key: 'particles', label: '口头语', description: '语气词、口头禅和轻口语标记是否自然' },
+  { key: 'rhythm', label: '节奏', description: '停顿、分段、标点和信息推进节奏是否一致' },
+  { key: 'sentenceLength', label: '句长', description: '短句/长句比例与信息密度是否一致' },
+  { key: 'structure', label: '结构', description: '先回应核心问题、再补充步骤的组织方式是否一致' },
+  { key: 'emotion', label: '情绪', description: '接住焦虑、困惑或不满的方式是否一致' },
+  { key: 'directness', label: '直接度', description: '表达明确度、绕行程度和行动指引是否一致' },
+  { key: 'habits', label: '习惯', description: '重复、收尾、确认和推进等稳定习惯是否一致' },
+  { key: 'naturalness', label: '自然度', description: '整体是否像真实人工聊天而非模板化生成' },
 ] as const;
 
 export type StyleDimension = typeof STYLE_DIMENSIONS[number];
@@ -45,13 +58,44 @@ export interface StyleEvaluation {
 
 export interface StyleOptimizationIteration {
   iteration: number;
+  promptVersion: number;
+  promptText: string;
   sampledCaseIds: string[];
+  sampledCases: StyleOptimizationSample[];
   evaluation: StyleEvaluation;
+  revisionFeedback: string[];
+  passed: boolean;
+  nextPromptVersion?: number;
 }
+
+export interface StyleOptimizationSample {
+  caseId: string;
+  conversationId: string;
+  context: string;
+  question: string;
+  humanAnswer: string;
+  aiAnswer: string;
+  score: StyleCaseScore;
+}
+
+export type StyleOptimizationStatus = 'passed' | 'failed';
+
+export type StyleOptimizationProgressEvent =
+  | { type: 'started'; sampleCount: number; threshold: number; maxIterations: number }
+  | { type: 'prompt-generated'; promptVersion: number; promptText: string; model?: string }
+  | { type: 'iteration-started'; iteration: number; promptVersion: number; cases: StyleEvaluationCase[] }
+  | { type: 'question-scored'; iteration: number; promptVersion: number; index: number; total: number; sample: StyleOptimizationSample }
+  | { type: 'iteration-scored'; iteration: number; promptVersion: number; evaluation: StyleEvaluation; passed: boolean; revisionFeedback: string[] }
+  | { type: 'prompt-revised'; fromVersion: number; toVersion: number; promptText: string; feedback: string[] }
+  | { type: 'completed'; status: StyleOptimizationStatus; finalScore: number; threshold: number; promptVersion: number; iterations: number };
 
 export interface StyleOptimizationResult {
   prompt: string;
   finalScore: number;
+  threshold: number;
+  sampleCount: number;
+  status: StyleOptimizationStatus;
+  promptVersion: number;
   iterations: StyleOptimizationIteration[];
   model?: string;
 }
@@ -61,6 +105,7 @@ export interface StyleOptimizationOptions {
   threshold?: number;
   maxIterations?: number;
   rng?: () => number;
+  onProgress?: (event: StyleOptimizationProgressEvent) => void | Promise<void>;
 }
 
 const DIRECT_PROMPT_SYSTEM = [
@@ -183,21 +228,27 @@ export async function optimizeSellerStylePrompt(
   const threshold = options.threshold ?? DEFAULT_STYLE_SIMILARITY_THRESHOLD;
   const maxIterations = options.maxIterations ?? DEFAULT_STYLE_MAX_ITERATIONS;
   const rng = options.rng ?? Math.random;
+  const onProgress = options.onProgress;
   if (sampleCount < MIN_REAL_DIALOGUE_ROUNDS) throw new Error(`PERSONA_EVALUATION_SAMPLE_COUNT_TOO_LOW: 至少需要 ${MIN_REAL_DIALOGUE_ROUNDS} 轮真实对话`);
   if (threshold < 0 || threshold > 100) throw new Error('PERSONA_SIMILARITY_THRESHOLD_INVALID');
   if (maxIterations < 1) throw new Error('PERSONA_MAX_ITERATIONS_INVALID');
   if (!corpus.trim()) throw new Error('PERSONA_STYLE_CORPUS_EMPTY');
 
+  await emitProgress(onProgress, { type: 'started', sampleCount, threshold, maxIterations });
+
   let modelName: string | undefined;
   const generated = await generateDirectStylePrompt(model, corpus);
   modelName = generated.model;
   let currentPrompt = generated.text;
+  let promptVersion = 1;
   validateStylePrompt(currentPrompt, conversations);
+  await emitProgress(onProgress, { type: 'prompt-generated', promptVersion, promptText: currentPrompt, model: modelName });
   const iterations: StyleOptimizationIteration[] = [];
   let bestScore = -1;
 
   for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
     const cases = buildStyleEvaluationCases(conversations, sampleCount, rng);
+    await emitProgress(onProgress, { type: 'iteration-started', iteration, promptVersion, cases });
     const replies: Array<{ caseId: string; answer: string }> = [];
     for (const item of cases) {
       const reply = await model.complete({
@@ -211,25 +262,53 @@ export async function optimizeSellerStylePrompt(
     }
     const evaluation = await evaluateStyleBatch(model, cases, replies);
     modelName = evaluation.model || modelName;
+    const replyMap = new Map(replies.map((item) => [item.caseId, item.answer]));
+    const scoreMap = new Map(evaluation.evaluation.caseScores.map((item) => [item.caseId, item]));
+    const sampledCases = cases.map((item) => {
+      const score = scoreMap.get(item.caseId);
+      if (!score) throw new Error(`PERSONA_EVALUATION_INCOMPLETE: 缺少 ${item.caseId} 的逐题评分`);
+      return {
+        ...item,
+        aiAnswer: replyMap.get(item.caseId) ?? '',
+        score,
+      };
+    });
+    for (const [index, sample] of sampledCases.entries()) {
+      await emitProgress(onProgress, { type: 'question-scored', iteration, promptVersion, index: index + 1, total: sampledCases.length, sample });
+    }
+    const passed = evaluation.evaluation.overall >= threshold;
+    const revisionFeedback = [...evaluation.evaluation.revisionInstructions, ...evaluation.evaluation.gaps].filter(Boolean).slice(0, 12);
     const iterationResult: StyleOptimizationIteration = {
       iteration,
+      promptVersion,
+      promptText: currentPrompt,
       sampledCaseIds: cases.map((item) => item.caseId),
+      sampledCases,
       evaluation: evaluation.evaluation,
+      revisionFeedback,
+      passed,
     };
     iterations.push(iterationResult);
     bestScore = Math.max(bestScore, evaluation.evaluation.overall);
-    if (evaluation.evaluation.overall >= threshold) {
+    await emitProgress(onProgress, { type: 'iteration-scored', iteration, promptVersion, evaluation: evaluation.evaluation, passed, revisionFeedback });
+    if (passed) {
       validateStylePrompt(currentPrompt, conversations);
-      return { prompt: currentPrompt, finalScore: evaluation.evaluation.overall, iterations, model: modelName };
+      await emitProgress(onProgress, { type: 'completed', status: 'passed', finalScore: evaluation.evaluation.overall, threshold, promptVersion, iterations: iterations.length });
+      return { prompt: currentPrompt, finalScore: evaluation.evaluation.overall, threshold, sampleCount, status: 'passed', promptVersion, iterations, model: modelName };
     }
 
     const revision = await reviseStylePrompt(model, currentPrompt, evaluation.evaluation);
     modelName = revision.model || modelName;
     currentPrompt = revision.text;
     validateStylePrompt(currentPrompt, conversations);
+    const nextPromptVersion = promptVersion + 1;
+    iterationResult.nextPromptVersion = nextPromptVersion;
+    await emitProgress(onProgress, { type: 'prompt-revised', fromVersion: promptVersion, toVersion: nextPromptVersion, promptText: currentPrompt, feedback: revisionFeedback });
+    promptVersion = nextPromptVersion;
   }
 
-  throw new Error(`PERSONA_SIMILARITY_THRESHOLD_NOT_REACHED: ${bestScore.toFixed(2)} < ${threshold}，已完成 ${maxIterations} 轮，每轮至少评估 ${sampleCount} 个真实会话`);
+  await emitProgress(onProgress, { type: 'completed', status: 'failed', finalScore: bestScore, threshold, promptVersion, iterations: iterations.length });
+  return { prompt: currentPrompt, finalScore: bestScore, threshold, sampleCount, status: 'failed', promptVersion, iterations, model: modelName };
 }
 
 export function validateStylePrompt(prompt: string, conversations: CleanedConversation[]): void {
@@ -251,21 +330,60 @@ export function validateStylePrompt(prompt: string, conversations: CleanedConver
 }
 
 export function renderStyleOptimizationReport(result: StyleOptimizationResult, threshold = DEFAULT_STYLE_SIMILARITY_THRESHOLD): string {
+  return renderStyleOptimizationTraceMarkdown({ ...result, threshold });
+}
+
+export function renderStyleOptimizationTraceJson(result: StyleOptimizationResult): string {
+  return JSON.stringify({
+    ...result,
+    scoringCriteria: STYLE_SCORING_CRITERIA,
+  }, null, 2) + '\n';
+}
+
+export function renderStyleOptimizationTraceMarkdown(result: StyleOptimizationResult): string {
   const lines = [
-    '# 直接风格提示词评估报告',
+    '# 卖家说话风格提示词自迭代追踪',
     '',
+    `- 最终状态：${result.status === 'passed' ? '通过' : '未达到阈值'}`,
     `- 最终相似度：${result.finalScore.toFixed(2)}`,
-    `- 通过阈值：${threshold.toFixed(2)}`,
+    `- 通过阈值：${result.threshold.toFixed(2)}`,
+    `- 评估样本数：每轮 ${result.sampleCount} 个不同真实会话（要求至少 ${MIN_REAL_DIALOGUE_ROUNDS} 个）`,
+    `- 最终提示词版本：v${result.promptVersion}`,
     `- 迭代轮数：${result.iterations.length}`,
-    '- 评估方式：每轮随机抽取至少 10 个不同真实会话，逐题生成回答后按 10 个风格维度评分。',
-    '- 提示词约束：只描述说话方式，不写入抽样问题、人工原回答或历史交易事实。',
+    '- 提示词约束：最终提示词只描述说话方式，不写入抽样问题、人工原回答或历史交易事实。',
+    '',
+    '## 评分标准',
   ];
+  for (const criterion of STYLE_SCORING_CRITERIA) lines.push(`- ${criterion.label}（${criterion.key}）：${criterion.description}`);
   for (const item of result.iterations) {
-    lines.push('', `## 第 ${item.iteration} 轮`, `- 评估样本数：${item.sampledCaseIds.length}`, `- 综合相似度：${item.evaluation.overall.toFixed(2)}`);
-    lines.push(`- 维度得分：${STYLE_DIMENSIONS.map((dimension) => `${dimension}=${item.evaluation.dimensions[dimension].toFixed(1)}`).join('，')}`);
-    if (item.evaluation.gaps.length > 0) lines.push(`- 风格差距：${item.evaluation.gaps.slice(0, 5).join('；')}`);
+    lines.push('', `## 第 ${item.iteration} 轮 · 提示词 v${item.promptVersion}`, `- 本轮状态：${item.passed ? '达到阈值' : '继续修订'}`, `- 综合相似度：${item.evaluation.overall.toFixed(2)}`, `- 评估问题集：${item.sampledCases.length} 题`);
+    lines.push('', '### 当前提示词', '', '```text', item.promptText, '```');
+    lines.push('', '### 逐题评分');
+    for (const sample of item.sampledCases) {
+      lines.push(`- ${sample.caseId}`);
+      lines.push(`  - 问题：${sample.question}`);
+      lines.push(`  - 人工回答：${sample.humanAnswer}`);
+      lines.push(`  - AI 回答：${sample.aiAnswer}`);
+      lines.push(`  - 综合得分：${sample.score.overall.toFixed(2)}`);
+      lines.push(`  - 维度：${STYLE_DIMENSIONS.map((dimension) => `${dimension}=${(sample.score.dimensions[dimension] ?? 0).toFixed(1)}`).join('，')}`);
+      if (sample.score.gap) lines.push(`  - 差距：${sample.score.gap}`);
+    }
+    lines.push('', '### 本轮维度汇总', `- ${STYLE_DIMENSIONS.map((dimension) => `${dimension}=${item.evaluation.dimensions[dimension].toFixed(1)}`).join('，')}`);
+    if (item.evaluation.strengths.length) lines.push(`- 已保留优点：${item.evaluation.strengths.join('；')}`);
+    if (item.revisionFeedback.length) lines.push(`- 修订反馈：${item.revisionFeedback.join('；')}`);
+    if (item.nextPromptVersion) lines.push(`- 下一版提示词：v${item.nextPromptVersion}`);
   }
+  lines.push('', '## 最终判定', '', result.status === 'passed'
+    ? `已达到 ${result.threshold.toFixed(2)} 分阈值，可将当前提示词作为最终提示词。`
+    : `未达到 ${result.threshold.toFixed(2)} 分阈值，当前结果只能作为候选，不能标记为最终提示词。`);
   return lines.join('\n') + '\n';
+}
+
+async function emitProgress(
+  onProgress: StyleOptimizationOptions['onProgress'],
+  event: StyleOptimizationProgressEvent,
+): Promise<void> {
+  if (onProgress) await onProgress(event);
 }
 
 async function generateDirectStylePrompt(model: ModelClient, corpus: string): Promise<{ text: string; model: string }> {

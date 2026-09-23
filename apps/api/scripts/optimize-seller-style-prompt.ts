@@ -15,8 +15,11 @@ import {
   DEFAULT_STYLE_SIMILARITY_THRESHOLD,
   MIN_REAL_DIALOGUE_ROUNDS,
   optimizeSellerStylePrompt,
-  renderStyleOptimizationReport,
-} from './seller-persona-style.ts';
+  renderStyleOptimizationTraceJson,
+  renderStyleOptimizationTraceMarkdown,
+  type StyleOptimizationProgressEvent,
+  type StyleOptimizationResult,
+} from './seller-style-prompt-optimizer.ts';
 
 const DEFAULT_EXCLUDED_BUYERS = ['一只橘喵喵亮晶晶', '三秒123456789'];
 const DEFAULT_REPEAT_CONVERSATIONS = 4;
@@ -490,7 +493,7 @@ async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL ?? 'postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/xianyu_agent';
   const outputDir = options.outDir
     ? (isAbsolute(options.outDir) ? options.outDir : resolve(repoRoot, options.outDir))
-    : resolve(repoRoot, 'artifacts', 'seller-persona', timestampDir());
+    : resolve(repoRoot, 'artifacts', 'seller-style-prompt', timestampDir());
   await mkdir(outputDir, { recursive: true });
 
   const pool = new pg.Pool({ connectionString: databaseUrl });
@@ -534,12 +537,13 @@ async function main(): Promise<void> {
     let modelUsed: string | undefined;
     let modelError: string | undefined;
     let optimized = false;
+    let optimizationResult: StyleOptimizationResult | undefined;
 
     if (!options.skipModel) {
       const model = createModelClient();
       if (!model) throw new Error('PERSONA_MODEL_CONFIG_REQUIRED: 请在 .env 中配置 API_KEY（可选 BASE_URL、MODEL），或显式使用 --skip-model');
       try {
-        const optimized = await optimizeSellerStylePrompt(
+        optimizationResult = await optimizeSellerStylePrompt(
           model,
           conversations,
           buildStyleCorpus(conversations, (options.maxChunkChars ?? DEFAULT_MAX_CHUNK_CHARS) * (options.maxChunks ?? DEFAULT_MAX_CHUNKS)),
@@ -547,15 +551,16 @@ async function main(): Promise<void> {
             sampleCount: options.evaluationSamples ?? MIN_REAL_DIALOGUE_ROUNDS,
             threshold: options.similarityThreshold ?? DEFAULT_STYLE_SIMILARITY_THRESHOLD,
             maxIterations: options.maxIterations ?? DEFAULT_STYLE_MAX_ITERATIONS,
+            onProgress: printStyleOptimizationProgress,
           },
         );
         documents = {
-          reportMarkdown: renderStyleOptimizationReport(optimized, options.similarityThreshold ?? DEFAULT_STYLE_SIMILARITY_THRESHOLD),
-          systemPromptText: optimized.prompt,
-          model: optimized.model,
+          reportMarkdown: renderStyleOptimizationTraceMarkdown(optimizationResult),
+          systemPromptText: optimizationResult.prompt,
+          model: optimizationResult.model,
         };
-        modelUsed = optimized.model;
-        optimized = true;
+        modelUsed = optimizationResult.model;
+        optimized = optimizationResult.status === 'passed';
       } catch (error) {
         modelError = error instanceof Error ? error.message : String(error);
         throw new Error(`PERSONA_MODEL_GENERATION_FAILED: ${modelError}`);
@@ -565,9 +570,16 @@ async function main(): Promise<void> {
     report.generatedAt = new Date().toISOString();
     await writeFile(resolve(outputDir, 'cleaned-conversations.jsonl'), conversations.map((conversation) => JSON.stringify(conversation)).join('\n') + (conversations.length ? '\n' : ''), 'utf8');
     await writeFile(resolve(outputDir, 'cleaning-report.json'), JSON.stringify({ ...report, modelUsed, wireApi: process.env.WIRE_API, modelError, evaluationSamples: options.evaluationSamples ?? MIN_REAL_DIALOGUE_ROUNDS, similarityThreshold: options.similarityThreshold ?? DEFAULT_STYLE_SIMILARITY_THRESHOLD, maxIterations: options.maxIterations ?? DEFAULT_STYLE_MAX_ITERATIONS }, null, 2), 'utf8');
-    await writeFile(resolve(outputDir, 'persona-description.md'), documents.reportMarkdown.trim() + '\n', 'utf8');
-    await writeFile(resolve(outputDir, 'seller-persona-system-prompt.txt'), documents.systemPromptText.trim() + '\n', 'utf8');
-    await writeFile(resolve(outputDir, 'run-metadata.json'), JSON.stringify({ generatedAt: report.generatedAt, outputDir, excludedBuyers: report.excludedBuyers, rawRows: report.rawRows, conversations: conversations.length, modelUsed, wireApi: process.env.WIRE_API, modelError, evaluationSamples: options.evaluationSamples ?? MIN_REAL_DIALOGUE_ROUNDS, similarityThreshold: options.similarityThreshold ?? DEFAULT_STYLE_SIMILARITY_THRESHOLD, maxIterations: options.maxIterations ?? DEFAULT_STYLE_MAX_ITERATIONS, optimized }, null, 2), 'utf8');
+    await writeFile(resolve(outputDir, 'style-optimization-trace.md'), documents.reportMarkdown.trim() + '\n', 'utf8');
+    if (optimizationResult) {
+      await writeFile(resolve(outputDir, 'style-optimization-trace.json'), renderStyleOptimizationTraceJson(optimizationResult), 'utf8');
+    }
+    await writeFile(resolve(outputDir, optimized ? 'seller-style-prompt.txt' : 'seller-style-prompt-candidate.txt'), documents.systemPromptText.trim() + '\n', 'utf8');
+    await writeFile(resolve(outputDir, 'run-metadata.json'), JSON.stringify({ generatedAt: report.generatedAt, outputDir, excludedBuyers: report.excludedBuyers, rawRows: report.rawRows, conversations: conversations.length, modelUsed, wireApi: process.env.WIRE_API, modelError, evaluationSamples: options.evaluationSamples ?? MIN_REAL_DIALOGUE_ROUNDS, similarityThreshold: options.similarityThreshold ?? DEFAULT_STYLE_SIMILARITY_THRESHOLD, maxIterations: options.maxIterations ?? DEFAULT_STYLE_MAX_ITERATIONS, optimized, optimizationStatus: optimizationResult?.status ?? 'draft', finalScore: optimizationResult?.finalScore, promptVersion: optimizationResult?.promptVersion }, null, 2), 'utf8');
+
+    if (optimizationResult?.status === 'failed') {
+      throw new Error(`PERSONA_SIMILARITY_THRESHOLD_NOT_REACHED: ${optimizationResult.finalScore.toFixed(2)} < ${optimizationResult.threshold.toFixed(2)}，已完成 ${optimizationResult.iterations.length} 轮，每轮至少评估 ${optimizationResult.sampleCount} 个真实会话；追踪文件已写入 ${outputDir}`);
+    }
 
     console.log(JSON.stringify({ outputDir, rawRows: report.rawRows, conversations: conversations.length, keptMessages: report.keptMessages, removedMessages: report.removedMessages, modelUsed, wireApi: process.env.WIRE_API, modelError }, null, 2));
   } finally {
@@ -697,10 +709,10 @@ function parseArgs(argv: string[]): CliOptions {
 
 function printHelp(): void {
   console.log([
-    '用法：node --import tsx scripts/extract-seller-persona.ts [选项]',
+    '用法：node --import tsx scripts/optimize-seller-style-prompt.ts [选项]',
     '',
     '默认排除买家：一只橘喵喵亮晶晶、三秒123456789',
-    '--out-dir <dir>                 指定输出目录；默认写入 artifacts/seller-persona/<timestamp>',
+    '--out-dir <dir>                 指定输出目录；默认写入 artifacts/seller-style-prompt/<timestamp>',
     '--account-id <uuid>             只导出指定账号',
     '--exclude-buyer <name>         追加排除买家，可重复',
     '--skip-model                   不调用模型，只生成本地风格草稿（不含历史问答案例）',
@@ -712,6 +724,33 @@ function printHelp(): void {
     `--similarity-threshold <n>     通过阈值，默认 ${DEFAULT_STYLE_SIMILARITY_THRESHOLD}`,
     `--max-iterations <n>          未达阈值时最多迭代轮数，默认 ${DEFAULT_STYLE_MAX_ITERATIONS}`,
   ].join('\n'));
+}
+
+function printStyleOptimizationProgress(event: StyleOptimizationProgressEvent): void {
+  switch (event.type) {
+    case 'started':
+      console.log(`[style-optimizer] 开始：每轮 ${event.sampleCount} 个真实会话，阈值 ${event.threshold.toFixed(2)}，最多 ${event.maxIterations} 轮`);
+      break;
+    case 'prompt-generated':
+      console.log(`[style-optimizer] 生成提示词 v${event.promptVersion}`);
+      break;
+    case 'iteration-started':
+      console.log(`[style-optimizer] 第 ${event.iteration} 轮 / 提示词 v${event.promptVersion}：问题集 ${event.cases.length} 题`);
+      break;
+    case 'question-scored':
+      console.log(`[style-optimizer] 第 ${event.iteration} 轮评分 ${event.index}/${event.total}：${event.sample.caseId} = ${event.sample.score.overall.toFixed(2)}`);
+      break;
+    case 'iteration-scored':
+      console.log(`[style-optimizer] 第 ${event.iteration} 轮结果：${event.evaluation.overall.toFixed(2)}，${event.passed ? '达到阈值' : '继续修订'}`);
+      if (event.revisionFeedback.length) console.log(`[style-optimizer] 修订反馈：${event.revisionFeedback.join('；')}`);
+      break;
+    case 'prompt-revised':
+      console.log(`[style-optimizer] 提示词 v${event.fromVersion} -> v${event.toVersion}`);
+      break;
+    case 'completed':
+      console.log(`[style-optimizer] 完成：${event.status === 'passed' ? '通过' : '未通过'}，最终 ${event.finalScore.toFixed(2)}，当前版本 v${event.promptVersion}`);
+      break;
+  }
 }
 
 function loadEnvFile(path: string): void {
