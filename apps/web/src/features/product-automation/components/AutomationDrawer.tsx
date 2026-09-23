@@ -178,7 +178,7 @@ function summaryText(key: AutomationRuleKey, config: ProductAutomationConfig | n
 }
 
 function hydrateDraft(config: ProductAutomationConfig, boundCouponIds: string[]): ProductAutomationConfig {
-  const mergeBound = (ids?: string[]) => ids?.length ? ids : boundCouponIds;
+  const mergeBound = (ids?: string[]) => [...new Set([...(ids ?? []), ...boundCouponIds])];
   return {
     ...config,
     delivery: { ...config.delivery, couponIds: mergeBound(config.delivery.couponIds) },
