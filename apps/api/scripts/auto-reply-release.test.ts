@@ -28,6 +28,12 @@ test('failed checks and configured stop conditions block release', () => {
   assert.deepEqual(result.stopReasons, ['REVIEW_REJECT_RATE_HIGH']);
 });
 
+test('missing stop metrics fail closed instead of allowing release', () => {
+  const result = new ReleaseGateEngine().assess({ policy, checks: [{ checkId: 'unit', status: 'PASS', evidenceRef: 'test:unit' }, { checkId: 'integration', status: 'PASS', evidenceRef: 'test:integration' }, { checkId: 'rollback', status: 'PASS', evidenceRef: 'test:rollback' }], metrics: { reviewRejectRate: 0.05 } });
+  assert.equal(result.status, 'BLOCKED');
+  assert.deepEqual(result.stopReasons, ['METRIC_UNAVAILABLE:sensitiveLeakRate']);
+});
+
 test('rollback returns the previous policy and records kill switch evidence', () => {
   const result = new ReleaseGateEngine().rollback(policy, 'CANARY_STOPPED');
   assert.equal(result.status, 'ROLLED_BACK');

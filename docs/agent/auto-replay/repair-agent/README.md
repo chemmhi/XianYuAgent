@@ -11,11 +11,11 @@ repair-agent 是自动回复 Agent 的修复治理文档域，不是新的买家
 ## 当前状态
 
 - 状态：IN_PROGRESS / 切片实现与发布门禁收口
-- 日期：2026-09-22
+- 日期：2026-09-23
 - 当前阶段：阶段 8/9，真实链路适配与发布门禁收口
 - 交付边界：修复代码、增量迁移、切片测试和治理文档；真实外部链路与运营演练仍需目标环境证据
-- 当前进展：AR-VS-00 至 AR-VS-09 均已落地可验证内核/适配层；后续人工审核节点默认批准继续
-- 下一步：补真实持久化/外部链路回读、Activity 投影、canary、kill switch、回滚和敏感红队证据
+- 当前进展：AR-VS-00 至 AR-VS-09 已落地可验证内核/适配层；enforce 主入口、账号级 ACTIVE PolicyConfig、outbox/reconcile、Outcome Review 和发布前 smoke 已通过
+- 下一步：补目标环境真实外部 sender/canary、领域 evidence、告警 Owner、迁移回滚/备份恢复和敏感红队证据
 
 ## 不可妥协约束
 
@@ -42,6 +42,7 @@ repair-agent 是自动回复 Agent 的修复治理文档域，不是新的买家
 | 09-status.md | 当前阶段、完成/未完成范围、阻塞和下一步 |
 | 10-compatibility-and-migration.md | 旧目录兼容入口、文档迁移映射和防漂移规则 |
 | 11-release-rollback.md | feature flag、灰度、回滚、恢复和交接 |
+| 12-release-smoke-evidence.md | AR-VS-09 发布前 smoke、canary、kill switch、outbox 与策略回滚证据 |
 | templates/vertical-slice-card.md | 后续新增切片的固定卡片模板 |
 | slices/AR-VS-00-scope-policy-baseline.md | AR-VS-00 切片卡与范围锁定结果 |
 | slices/AR-VS-00-policy-matrix.md | 路由、拒绝、继续帮助、生命周期和指标矩阵 |

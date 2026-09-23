@@ -54,7 +54,11 @@ export class ReleaseGateEngine {
     const policy = validatePolicy(input.policy);
     const checksById = new Map(input.checks.map((check) => [check.checkId, check]));
     const failedChecks = policy.requiredCheckIds.filter((checkId) => checksById.get(checkId)?.status !== 'PASS');
-    const stopReasons = policy.stopConditions.filter((condition) => metricBreached(input.metrics[condition.metric], condition)).map((condition) => condition.reasonCode);
+    const missingMetrics = policy.stopConditions.filter((condition) => !Number.isFinite(input.metrics[condition.metric]));
+    const stopReasons = [
+      ...missingMetrics.map((condition) => `METRIC_UNAVAILABLE:${condition.metric}`),
+      ...policy.stopConditions.filter((condition) => metricBreached(input.metrics[condition.metric], condition)).map((condition) => condition.reasonCode),
+    ];
     const status: ReleaseDecisionStatus = failedChecks.length > 0 || stopReasons.length > 0 ? 'BLOCKED' : 'READY';
     return { status, releaseVersion: policy.releaseVersion, previousPolicyVersion: policy.previousPolicyVersion, stopReasons, failedChecks, evidenceRefs: input.checks.map((check) => check.evidenceRef) };
   }

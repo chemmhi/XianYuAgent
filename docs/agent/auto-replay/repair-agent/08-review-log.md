@@ -189,3 +189,48 @@ AR-VS-00 三轮复审已执行，但阶段 0 门禁为 `BLOCKED`，不能标记 
 
 - AR-VS-08 仍保持 `READY_FOR_REVIEW`（shadow plumbing + 可调用 review worker）；worker 未接入默认后台启动，不代表审核处理已在生产自动运行。
 - 整体真实链路仍不是 `PASS/CLOSED`：legacy route 统一接管、动态 PolicyConfig、真实 lifecycle/goal evidence、Activity 新字段回读和 live sender outbox/外部幂等仍为后续 P1 门禁。
+
+## 2026-09-23：AR-VS-08 P1 修复后完整链路复审
+
+| 复核项 | 当前结论 | 证据 |
+| --- | --- | --- |
+| 完整 enforce PostgreSQL 链路 | PASS（切片级） | `npm --workspace apps/api run test:auto-reply:vs08:postgres`：`vs08EnforcePostgres=true`、`runStatus=persisted`、`safeBusinessAnswerPersisted=true`、`policyHashAudited=true`、`outcomeReview=closed`、`activityAfterRestart=true` |
+| Outcome Review worker 生命周期 | PASS（实现/定向回归） | `start/stop`、默认 worker 装配、轮询/批量/租约配置；worker 定向回归通过 |
+| Activity review 读模型 | PASS（适配/定向回归） | Activity list/detail 回读 `resolutionStatus`、`primaryAction`、`nextAction`、`goalProgress`；无 review 时保持 `review_pending` |
+| source ordering / deferred inbox | VERIFIED | 032 迁移、parser→defer inbox→processInboundInbox 透传和定向回归通过；缺少平台序列时保留可审计 deterministic fallback |
+| sender outcome reconcile | VERIFIED | `reconcileSendOutcome()` 覆盖 `known_success`/`known_failure`/`unknown`，并通过幂等回写回归 |
+| runtime policyHash 稳定性 | PASS（稳定性复核） | `auto-reply-repair-runtime.test.ts` 连续 5 次，每次 6/6 通过；未复现 `policyHash=undefined` |
+| 统一 primary route | BLOCKED / P1 | `AutoReplyService.processInbound()` 仍存在 legacy classifier/hardSafety 先行裁决；repair PolicyEngine 尚未完全接管 primary route |
+
+### 本轮复审结论
+
+- AR-VS-08 的 enforce PostgreSQL 完整链路已形成可复核证据，worker、Activity、source ordering 和 sender reconcile 的补强项可标记为已验证。
+- 该证据仍属于切片级门禁，不代表生产 enforce/canary 已通过；统一路由、动态账号级 PolicyConfig、live sender outbox/外部幂等和真实领域解决证据仍未关闭。
+
+## 2026-09-23：enforce primary route 独立审计
+
+| 复核项 | 当前结论 | 证据 |
+| --- | --- | --- |
+| legacy classifier handoff | VERIFIED_FOR_ENFORCE | `AutoReplyService.processInbound()` 在 `repairRuntime.currentMode === 'enforce'` 且存在 `repairRoute` 时不再读取 `legacyHandoff` 作为 reply gate；回归覆盖 classifier 将 `price` 标为 `handoff`，PolicyEngine 仍选择 `ANSWER_FACT` 并完成持久化出站 |
+| hardSafety handoff | VERIFIED_FOR_ENFORCE | structured generator + classifier `prompt_injection` 触发 `hardSafety=true`，PolicyEngine 规则选择 `ACKNOWLEDGE_CONTINUE`；enforce 链路忽略 legacy safety gate，完成安全回复与落库 |
+| primaryAction 唯一来源 | VERIFIED_FOR_ENFORCE | enforce 下 `repairRoute.primaryAction` 仅由 `PolicyEngine.evaluate()` 产生；`classification` 仅作为结构化 signal 输入，`legacyHandoff/hardSafety` 不得覆盖动作。`conversation.handlingMode === 'human'` 与生成后敏感出站拦截仍是独立运行时安全闸，不属于业务 primary route |
+
+### 审计结论
+
+- 本轮未发现 legacy classifier、`hardSafety` 或 `legacyHandoff` 在 enforce 模式下改变 PolicyEngine 的 `primaryAction` 的 P1 缺陷。
+- 已补两条最小回归：分别证明旧 classifier handoff 与 structured hardSafety handoff 均不会覆盖 `ANSWER_FACT` / `ACKNOWLEDGE_CONTINUE`。
+- shadow/off 兼容路径仍允许 legacy handoff；该行为不作为 enforce 统一路由证据。生产 live/canary 仍需独立发布门禁与目标环境证据。
+
+## 2026-09-23：发布候选收口复审（AR-VS-08 / AR-VS-09）
+
+| 评审轮次 | 当前结论 | 证据 |
+| --- | --- | --- |
+| R1 业务 / 验收 | PASS（切片级） | 买家输入 → Agent 分析 → 安全业务回复 → PostgreSQL 消息/run/state/review/event 落库 → Outcome Review → Activity 回读 → 重启复读；`test:auto-reply:vs08:postgres` 全链路通过 |
+| R2 架构 / 数据流 | PASS（切片级） | enforce 下 PolicyEngine 是唯一 primary route；legacy classifier/hardSafety 仅作 signal；账号级 ACTIVE PolicyConfig 使用 hash/account scope 校验、CAS 发布与回滚；outbox 使用 requestId 幂等并支持 targeted recovery |
+| R3 质量 / 安全 / 运维 | READY_FOR_RELEASE_CANDIDATE | 141/141 单测、API typecheck/build、E2E 4/4、PolicyConfig PostgreSQL smoke、release gate smoke 全部通过；真实闲鱼 live/canary、告警 Owner、迁移回滚/备份恢复和红队证据仍未在目标环境执行 |
+
+### 收口裁决
+
+- AR-RA-021、AR-RA-023、AR-RA-018/019/020/022/024 的实现级与 PostgreSQL/定向回归证据已齐，可标记 `VERIFIED_FOR_ENFORCE` 或 `VERIFIED`。
+- 本轮可以进入 release candidate / 目标环境 canary 准备，但不能把本地与测试 PostgreSQL 证据表述为生产已上线。
+- 生产发布前唯一剩余阻断是目标环境证据：真实外部 sender、canary 停止阈值与 Owner、kill switch、迁移回滚/备份恢复及敏感红队回读。

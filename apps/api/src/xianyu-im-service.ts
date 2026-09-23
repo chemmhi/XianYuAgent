@@ -106,7 +106,7 @@ export class XianyuImService {
     const externalRef = conversation.externalConversationRef;
     if (!externalRef) throw new ServiceError(409, 'EXTERNAL_CONVERSATION_MISSING', 'conversation is not linked to xianyu');
     const client = await this.ensureClient(adminId, accountId);
-    return client.sendText(externalRef, conversation.buyerRef, normalizedText);
+    return client.sendText(externalRef, conversation.buyerRef, normalizedText, requestId);
   }
 
   async sendText(adminId: string, accountId: string, conversationId: string, text: string, requestId: string, traceId: string): Promise<unknown> {

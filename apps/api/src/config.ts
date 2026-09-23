@@ -37,6 +37,11 @@ export interface AppConfig {
   autoReplySendMode?: AutoReplySendMode;
   autoReplyTestBuyerNames?: string[];
   autoReplyRepairMode?: AutoReplyRepairMode;
+  autoReplyPolicyJson?: string;
+  autoReplyOutcomeReviewWorkerEnabled: boolean;
+  autoReplyOutcomeReviewWorkerPollMs: number;
+  autoReplyOutcomeReviewWorkerBatchSize: number;
+  autoReplyOutcomeReviewWorkerLeaseSeconds: number;
 }
 
 export const DEFAULT_DATABASE_URL = 'postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/xianyu_agent';
@@ -55,6 +60,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const modelWireApi = normalizeWireApi(firstDefined(env.WIRE_API, env.MODEL_WIRE_API));
   const autoReplySendMode: AutoReplySendMode = env.AUTO_REPLY_SEND_MODE?.trim().toLowerCase() === 'live' ? 'live' : 'simulate';
   const autoReplyRepairMode = resolveAutoReplyRepairMode(env.AUTO_REPLY_REPAIR_MODE);
+  const autoReplyOutcomeReviewWorkerEnabled = asBoolean(env.AUTO_REPLY_OUTCOME_REVIEW_WORKER_ENABLED, autoReplyRepairMode !== 'off');
   const autoReplyTestBuyerNames = parseBuyerNames(env.AUTO_REPLY_TEST_BUYER_NAMES);
   const autoReplyAgent = resolveAutoReplyAgentConfig(env);
   if (autoReplySendMode === 'live' && autoReplyTestBuyerNames.length === 0) {
@@ -94,6 +100,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     autoReplySendMode,
     autoReplyTestBuyerNames,
     autoReplyRepairMode,
+    autoReplyPolicyJson: env.AUTO_REPLY_POLICY_JSON?.trim() || undefined,
+    autoReplyOutcomeReviewWorkerEnabled,
+    autoReplyOutcomeReviewWorkerPollMs: positiveNumber(env.AUTO_REPLY_OUTCOME_REVIEW_WORKER_POLL_MS, 1_000),
+    autoReplyOutcomeReviewWorkerBatchSize: positiveNumber(env.AUTO_REPLY_OUTCOME_REVIEW_WORKER_BATCH_SIZE, 10),
+    autoReplyOutcomeReviewWorkerLeaseSeconds: positiveNumber(env.AUTO_REPLY_OUTCOME_REVIEW_WORKER_LEASE_SECONDS, 60),
     autoReplyAgent,
   };
 }

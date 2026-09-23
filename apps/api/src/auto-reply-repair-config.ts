@@ -1,19 +1,50 @@
-import { AUTO_REPLY_ACTION_KINDS, type ActionKind, type PolicyConfig } from './domain.js';
-import { withComputedPolicyHash } from './auto-reply-policy.js';
-import type { OutcomeReviewPolicy } from './auto-reply-outcome-review.js';
-import type { PreSendReviewPolicyInput } from './auto-reply-pre-send-review.js';
+import { AUTO_REPLY_ACTION_KINDS, type ActionKind, type AutoReplyRepairPolicyBundle, type PolicyConfig } from './domain.js';
+import { validatePolicyConfig, withComputedPolicyHash } from './auto-reply-policy.js';
 
-export type AutoReplyRepairMode = 'off' | 'shadow';
+export type AutoReplyRepairMode = 'off' | 'shadow' | 'enforce';
 export const DEFAULT_AUTO_REPLY_REPAIR_POLICY_EFFECTIVE_FROM = '2026-09-23T00:00:00.000Z';
 
-export interface AutoReplyRepairPolicyBundle {
-  policyConfig: PolicyConfig;
-  preSendPolicy: PreSendReviewPolicyInput;
-  outcomePolicy: OutcomeReviewPolicy;
-}
+export type { AutoReplyRepairPolicyBundle } from './domain.js';
 
 export function resolveAutoReplyRepairMode(value: string | undefined): AutoReplyRepairMode {
-  return value?.trim().toLowerCase() === 'shadow' ? 'shadow' : 'off';
+  const normalized = value?.trim().toLowerCase();
+  return normalized === 'enforce' ? 'enforce' : normalized === 'shadow' ? 'shadow' : 'off';
+}
+
+export function parseAutoReplyRepairPolicyBundle(value: string | undefined, accountScope: string): AutoReplyRepairPolicyBundle | undefined {
+  if (!value?.trim()) return undefined;
+  let parsed: unknown;
+  try { parsed = JSON.parse(value); } catch { throw new Error('AUTO_REPLY_POLICY_JSON_INVALID'); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('AUTO_REPLY_POLICY_JSON_INVALID');
+  const candidate = parsed as Partial<AutoReplyRepairPolicyBundle>;
+  if (!candidate.policyConfig || !candidate.preSendPolicy || !candidate.outcomePolicy) throw new Error('AUTO_REPLY_POLICY_BUNDLE_INVALID');
+  const policyConfig = validatePolicyConfig({ ...candidate.policyConfig, accountScope });
+  if (candidate.preSendPolicy.policyVersion !== policyConfig.policyVersion || candidate.outcomePolicy.policyVersion !== policyConfig.policyVersion) throw new Error('AUTO_REPLY_POLICY_VERSION_MISMATCH');
+  return { policyConfig, preSendPolicy: candidate.preSendPolicy, outcomePolicy: candidate.outcomePolicy };
+}
+
+/**
+ * Validates a bundle read from the account-level policy registry.
+ * Unlike the environment compatibility parser, this path never rewrites the
+ * account scope and only accepts an ACTIVE policy inside its effective window.
+ */
+export function validatePersistedAutoReplyRepairPolicyBundle(
+  bundle: AutoReplyRepairPolicyBundle,
+  accountScope: string,
+  now = new Date(),
+): AutoReplyRepairPolicyBundle {
+  if (!bundle || typeof bundle !== 'object' || !bundle.policyConfig || !bundle.preSendPolicy || !bundle.outcomePolicy) {
+    throw new Error('AUTO_REPLY_POLICY_BUNDLE_INVALID');
+  }
+  const policyConfig = validatePolicyConfig(bundle.policyConfig);
+  if (policyConfig.accountScope !== accountScope) throw new Error('AUTO_REPLY_POLICY_ACCOUNT_SCOPE_MISMATCH');
+  if (policyConfig.status !== 'ACTIVE') throw new Error('AUTO_REPLY_POLICY_NOT_ACTIVE');
+  if (Date.parse(policyConfig.effectiveFrom) > now.getTime()) throw new Error('AUTO_REPLY_POLICY_NOT_EFFECTIVE');
+  if (policyConfig.effectiveTo && Date.parse(policyConfig.effectiveTo) <= now.getTime()) throw new Error('AUTO_REPLY_POLICY_EXPIRED');
+  if (bundle.preSendPolicy.policyVersion !== policyConfig.policyVersion || bundle.outcomePolicy.policyVersion !== policyConfig.policyVersion) {
+    throw new Error('AUTO_REPLY_POLICY_VERSION_MISMATCH');
+  }
+  return { policyConfig, preSendPolicy: bundle.preSendPolicy, outcomePolicy: bundle.outcomePolicy };
 }
 
 export function createDefaultAutoReplyRepairPolicy(accountScope: string, now = new Date()): AutoReplyRepairPolicyBundle {

@@ -24,6 +24,8 @@
 - `029_coupon_batch_sequence.sql`：为卡券批次增加从 1 开始的业务编号；UUID `id` 继续作为内部主键和外键，API `batchId`/`id` 对外返回该序号，作废/删除后的序号可被新批次回收。
 - `032_auto_reply_inbound_source_ordering.sql`：为入站 inbox 保存 live push 可提取的 source event id/sequence，兼容缺失序列的旧消息并支持 repair runtime 审计回放。
 - `033_auto_reply_review_lifecycle.sql`：为 Outcome Review 补充 resolved/closed 生命周期时间戳，支持 worker/reconcile 审计回读。
+- `034_auto_reply_send_outbox.sql`：为自动回复 live sender 补充 payload、外部消息引用、租约与本地出站消息回写字段，支持 requestId 幂等和崩溃恢复。
+- `035_auto_reply_policy_registry.sql`：建立账号级自动回复 repair PolicyConfig 版本注册表；ACTIVE 指针唯一、历史版本可回滚，策略 JSON/hash 保持不可变。
 
 ## 029 coupon batch sequence 迁移纪律
 

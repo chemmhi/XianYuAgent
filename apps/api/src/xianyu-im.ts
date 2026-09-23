@@ -197,7 +197,7 @@ export class XianyuImClient {
     await this.sendLwp('/r/MessageStatus/read', [ids]);
   }
 
-  async sendText(conversationRef: string, recipientRef: string, text: string): Promise<{ externalMessageRef?: string }> {
+  async sendText(conversationRef: string, recipientRef: string, text: string, requestId?: string): Promise<{ externalMessageRef?: string }> {
     const normalizedText = text.trim();
     const cid = stripGoofish(conversationRef);
     const toId = stripGoofish(recipientRef);
@@ -206,7 +206,7 @@ export class XianyuImClient {
     const content = Buffer.from(JSON.stringify({ contentType: 1, text: { text: normalizedText } }), 'utf8').toString('base64');
     const response = await this.sendLwp('/r/MessageSend/sendByReceiverScope', [
       {
-        uuid: crypto.randomUUID(),
+        uuid: requestId ? deterministicUuid(requestId) : crypto.randomUUID(),
         cid: `${cid}@goofish`,
         conversationType: 1,
         content: { contentType: 101, custom: { type: 1, data: content } },
@@ -886,6 +886,13 @@ function extractMessageRef(body: Record<string, unknown>): string | undefined {
 }
 
 function createMid(): string { return `${Math.floor(Math.random() * 1000)}${Date.now()} 0`; }
+function deterministicUuid(value: string): string {
+  const bytes = crypto.createHash('sha256').update(value).digest().subarray(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
 function md5(value: string): string { return crypto.createHash('md5').update(value).digest('hex'); }
 function eventErrorCode(error: unknown): string {
   const candidate = error as { code?: unknown } | null;

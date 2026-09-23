@@ -175,6 +175,22 @@ export class AutoReplyRepairRepository {
     return [...(memoryReviews.get(this.store)?.values() ?? [])].filter((item) => item.accountId === accountId && item.conversationId === conversationId).map(cloneReview);
   }
 
+  async listReviewsByRunIds(runIds: readonly string[]): Promise<PersistedRepairReviewRecord[]> {
+    const normalized = [...new Set(runIds.map((runId) => runId.trim()).filter(Boolean))];
+    if (normalized.length === 0) return [];
+    if (this.pool) {
+      const result = await this.pool.query(`select * from auto_reply_review_records
+        where run_id::text = any($1::text[])
+        order by run_id::text asc, coalesce(reviewed_at, next_review_at, evidence_window_end, evidence_window_start) desc, review_id asc`, [normalized]);
+      return result.rows.map(toReview);
+    }
+    const runSet = new Set(normalized);
+    return [...(memoryReviews.get(this.store)?.values() ?? [])]
+      .filter((item) => runSet.has(item.runId))
+      .sort((left, right) => left.runId.localeCompare(right.runId) || reviewSortTime(right) - reviewSortTime(left) || left.reviewId.localeCompare(right.reviewId))
+      .map(cloneReview);
+  }
+
   async listReviewEvents(accountId: string, conversationId: string): Promise<PersistedRepairReviewEvent[]> {
     if (this.pool) {
       const result = await this.pool.query('select * from auto_reply_review_events where account_id=$1 and conversation_id=$2 order by occurred_at asc, event_id asc', [accountId, conversationId]);
@@ -397,6 +413,13 @@ function toReviewEvent(row: Record<string, unknown>): PersistedRepairReviewEvent
 
 function cloneState(state: ConversationState): ConversationState { return { ...state, pendingQuestions: state.pendingQuestions.map((item) => ({ ...item })), emotionSnapshot: state.emotionSnapshot ? { ...state.emotionSnapshot } : undefined, recommendationState: state.recommendationState ? { ...state.recommendationState } : undefined, processedEventIds: [...state.processedEventIds], processedIdempotencyKeys: [...state.processedIdempotencyKeys] }; }
 function cloneReview(record: PersistedRepairReviewRecord): PersistedRepairReviewRecord { return { ...record, reasonCodes: [...record.reasonCodes], evidenceRefs: [...record.evidenceRefs], evidenceTypes: [...record.evidenceTypes] }; }
+function reviewSortTime(record: PersistedRepairReviewRecord): number {
+  for (const value of [record.reviewedAt, record.nextReviewAt, record.evidenceWindowEnd, record.evidenceWindowStart]) {
+    const parsed = value ? Date.parse(value) : NaN;
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
 function reviewMemoryKey(record: PersistedRepairReviewRecord): string { return `${record.accountId}:${record.idempotencyKey}`; }
 function replaceMemoryReview(store: Store, record: PersistedRepairReviewRecord): void {
   const reviews = memoryReviews.get(store) ?? new Map<string, PersistedRepairReviewRecord>();

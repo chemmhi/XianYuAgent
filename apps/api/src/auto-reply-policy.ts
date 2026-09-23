@@ -1,4 +1,4 @@
-import { createId, digestJson } from './security.js';
+import { createId, digestJson, sha256 } from './security.js';
 import { AUTO_REPLY_ACTION_KINDS, type ActionKind, type ActionPlan, type ConversationState, type Objective, type PolicyConfig, type PolicyDecisionTrace, type SafetyHandling } from './domain.js';
 
 export interface PolicySignalSet {
@@ -45,7 +45,16 @@ export class PolicyEngineError extends Error {
 
 export function computePolicyHash(config: PolicyConfig): string {
   const { policyHash: _ignored, ...payload } = config;
-  return digestJson(payload);
+  // PostgreSQL JSONB does not preserve object insertion order. Hash the
+  // canonical key-sorted representation so persisted policy versions keep
+  // the same SHA-256 after a storage round-trip.
+  return sha256(JSON.stringify(canonicalizePolicyValue(payload)));
+}
+
+function canonicalizePolicyValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => canonicalizePolicyValue(item));
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, canonicalizePolicyValue(item)]));
 }
 
 export function withComputedPolicyHash(config: Omit<PolicyConfig, 'policyHash'> & { policyHash?: string }): PolicyConfig {

@@ -92,3 +92,21 @@ test('close and reopen are persisted through the same CAS/idempotent mutation pa
   assert.equal(result, 'updated');
   assert.equal((await repository.getReview(reopened.reviewId))?.resolutionStatus, 'needs_followup');
 });
+
+test('worker start and stop run scheduled polls without leaving a live timer', async () => {
+  const { repository } = await fixture();
+  let evidenceCalls = 0;
+  const worker = new OutcomeReviewWorker(repository, {
+    workerId: 'worker-scheduler',
+    pollMs: 50,
+    policyProvider: () => policy,
+    evidenceProvider: async () => {
+      evidenceCalls += 1;
+      return [{ evidenceId: `evidence-${evidenceCalls}`, type: 'DOMAIN_FACT_SATISFIED', observedAt: '2026-09-23T00:00:10.000Z', sourceEventId: 'fact-1', summary: 'fact satisfied', authoritative: true }];
+    },
+  });
+  worker.start();
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  await worker.stop();
+  assert.ok(evidenceCalls >= 1);
+});

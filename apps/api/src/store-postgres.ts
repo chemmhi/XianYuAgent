@@ -1,11 +1,12 @@
 import { Pool } from 'pg';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { projectAutoReplyRun } from './auto-reply-activity-projection.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor } from './conversation-cursor.js';
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
+import { validatePersistedAutoReplyRepairPolicyBundle } from './auto-reply-repair-config.js';
 
 type Row = Record<string, unknown>;
 const PRODUCT_COUPON_BATCHES_SELECT = `(select coalesce(json_agg(json_build_object('id', cb.sequence_id, 'label', cb.label) order by binding.priority desc, binding.created_at, cb.sequence_id), '[]'::json) from coupons.coupon_bindings binding join coupons.coupon_batches cb on cb.id=binding.coupon_batch_id where binding.product_id=p.id and binding.status='active' and cb.status <> 'voided') as coupon_batches`;
@@ -678,6 +679,11 @@ export class PostgresStore implements Store {
     return { record: this.toInboundInbox(existing.rows[0]), created: false };
   }
 
+  async getInboundInbox(id: string): Promise<InboundInboxRecord | undefined> {
+    const result = await this.pool.query('select * from messages.auto_reply_inbound_inbox where id=$1 limit 1', [id]);
+    return result.rows[0] ? this.toInboundInbox(result.rows[0]) : undefined;
+  }
+
   async claimInboundInbox(input: { workerId: string; limit: number; leaseMs: number }): Promise<InboundInboxRecord[]> {
     const limit = Math.max(1, Math.min(100, Math.trunc(input.limit)));
     const leaseMs = Math.max(5_000, Math.min(300_000, Math.trunc(input.leaseMs)));
@@ -950,10 +956,106 @@ export class PostgresStore implements Store {
       returning *`, [input.accountId, input.adminId, version, JSON.stringify(input.config), input.configDigest]);
     return result.rows[0] ? this.toAutoReplyAgentConfig(result.rows[0]) : undefined;
   }
+  async getActiveAutoReplyRepairPolicy(accountId: string, now = new Date().toISOString()): Promise<AutoReplyRepairPolicyBundle | undefined> {
+    const result = await this.pool.query(`select policy_json from settings.auto_reply_repair_policies
+      where account_id=$1 and lifecycle_status='ACTIVE'
+        and effective_from <= $2::timestamptz
+        and (effective_to is null or effective_to > $2::timestamptz)
+      order by created_at desc limit 1`, [accountId, now]);
+    if (!result.rows[0]) return undefined;
+    const raw = result.rows[0].policy_json as AutoReplyRepairPolicyBundle;
+    return validatePersistedAutoReplyRepairPolicyBundle(raw, accountId, new Date(now));
+  }
+  async publishAutoReplyRepairPolicy(input: { accountId: string; bundle: AutoReplyRepairPolicyBundle; expectedActiveVersion?: string }): Promise<AutoReplyRepairPolicyBundle> {
+    const now = new Date().toISOString();
+    const bundle = validatePersistedAutoReplyRepairPolicyBundle(input.bundle, input.accountId, new Date(now));
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const active = await client.query(`select policy_version from settings.auto_reply_repair_policies where account_id=$1 and lifecycle_status='ACTIVE' for update`, [input.accountId]);
+      const currentVersion = active.rows[0] ? String(active.rows[0].policy_version) : undefined;
+      if (input.expectedActiveVersion && currentVersion !== input.expectedActiveVersion) throw new Error('AUTO_REPLY_POLICY_VERSION_CONFLICT');
+      const duplicate = await client.query(`select 1 from settings.auto_reply_repair_policies where account_id=$1 and policy_version=$2 limit 1`, [input.accountId, bundle.policyConfig.policyVersion]);
+      if (duplicate.rows[0]) throw new Error('AUTO_REPLY_POLICY_VERSION_EXISTS');
+      await client.query(`update settings.auto_reply_repair_policies set lifecycle_status='RETIRED', retired_at=now(), updated_at=now() where account_id=$1 and lifecycle_status='ACTIVE'`, [input.accountId]);
+      await client.query(`insert into settings.auto_reply_repair_policies (id,account_id,policy_version,policy_hash,lifecycle_status,policy_json,effective_from,effective_to,published_at,activated_at,created_at,updated_at)
+        values ($1,$2,$3,$4,'ACTIVE',$5::jsonb,$6::timestamptz,$7::timestamptz,$8::timestamptz,$9::timestamptz,now(),now())`, [createId(), input.accountId, bundle.policyConfig.policyVersion, bundle.policyConfig.policyHash, JSON.stringify(bundle), bundle.policyConfig.effectiveFrom, bundle.policyConfig.effectiveTo ?? null, bundle.policyConfig.publishedAt ?? now, bundle.policyConfig.activatedAt ?? now]);
+      await client.query('commit');
+      return bundle;
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally { client.release(); }
+  }
+  async rollbackAutoReplyRepairPolicy(input: { accountId: string; targetPolicyVersion: string; expectedActiveVersion?: string }): Promise<AutoReplyRepairPolicyBundle> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const active = await client.query(`select policy_version from settings.auto_reply_repair_policies where account_id=$1 and lifecycle_status='ACTIVE' for update`, [input.accountId]);
+      const currentVersion = active.rows[0] ? String(active.rows[0].policy_version) : undefined;
+      if (input.expectedActiveVersion && currentVersion !== input.expectedActiveVersion) throw new Error('AUTO_REPLY_POLICY_VERSION_CONFLICT');
+      const target = await client.query(`select policy_json from settings.auto_reply_repair_policies where account_id=$1 and policy_version=$2 for update`, [input.accountId, input.targetPolicyVersion]);
+      if (!target.rows[0]) throw new Error('AUTO_REPLY_POLICY_ROLLBACK_TARGET_NOT_FOUND');
+      const bundle = validatePersistedAutoReplyRepairPolicyBundle(target.rows[0].policy_json as AutoReplyRepairPolicyBundle, input.accountId, new Date());
+      await client.query(`update settings.auto_reply_repair_policies set lifecycle_status='RETIRED', retired_at=now(), updated_at=now() where account_id=$1 and lifecycle_status='ACTIVE' and policy_version<>$2`, [input.accountId, input.targetPolicyVersion]);
+      await client.query(`update settings.auto_reply_repair_policies set lifecycle_status='ACTIVE', retired_at=null, updated_at=now() where account_id=$1 and policy_version=$2`, [input.accountId, input.targetPolicyVersion]);
+      await client.query('commit');
+      return bundle;
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally { client.release(); }
+  }
   async getIdempotency(scope: string, key: string): Promise<IdempotencyRecord | undefined> { const result = await this.pool.query('select * from execution.idempotency_records where scope=$1 and key=$2 and expires_at>now()', [scope, key]); return result.rows[0] ? this.toIdempotency(result.rows[0]) : undefined; }
   async beginIdempotency(record: IdempotencyRecord): Promise<void> { await this.pool.query('insert into execution.idempotency_records (id,scope,key,request_fingerprint,status,expires_at) values ($1,$2,$3,$4,$5,$6)', [createId(), record.scope, record.key, record.requestFingerprint, record.status, record.expiresAt]); }
   async abortIdempotency(scope: string, key: string): Promise<void> { await this.pool.query('delete from execution.idempotency_records where scope=$1 and key=$2 and status=\'processing\'', [scope, key]); }
   async completeIdempotency(input: { scope: string; key: string; status: IdempotencyRecord['status']; responseEnvelope: unknown; statusCode: number; traceId: string }): Promise<void> { await this.pool.query('update execution.idempotency_records set status=$3,response_envelope=$4,status_code=$5,trace_id=$6 where scope=$1 and key=$2', [input.scope, input.key, input.status, JSON.stringify(input.responseEnvelope), input.statusCode, input.traceId]); }
+  async enqueueAutoReplyOutbox(input: { scope: string; aggregateType: string; aggregateId: string; operation: string; idempotencyKey: string; payload: Record<string, unknown>; traceId?: string; availableAt?: string }): Promise<{ record: AutoReplyOutboxRecord; created: boolean }> {
+    const inserted = await this.pool.query(`insert into execution.outbox_jobs (id,scope,aggregate_type,aggregate_id,operation,status,available_at,idempotency_key,payload_json,trace_id,updated_at)
+      values ($1,$2,$3,$4,$5,'pending',coalesce($6::timestamptz,now()),$7,$8::jsonb,$9,now())
+      on conflict (scope,idempotency_key) do nothing returning *`, [createId(), input.scope, input.aggregateType, input.aggregateId, input.operation, input.availableAt ?? null, input.idempotencyKey, JSON.stringify(input.payload), input.traceId ?? null]);
+    if (inserted.rows[0]) return { record: this.toAutoReplyOutbox(inserted.rows[0]), created: true };
+    const existing = await this.pool.query('select * from execution.outbox_jobs where scope=$1 and idempotency_key=$2 limit 1', [input.scope, input.idempotencyKey]);
+    if (!existing.rows[0]) throw new Error('AUTO_REPLY_OUTBOX_ENQUEUE_RACE');
+    return { record: this.toAutoReplyOutbox(existing.rows[0]), created: false };
+  }
+  async getAutoReplyOutbox(scope: string, idempotencyKey: string): Promise<AutoReplyOutboxRecord | undefined> { const result = await this.pool.query('select * from execution.outbox_jobs where scope=$1 and idempotency_key=$2 limit 1', [scope, idempotencyKey]); return result.rows[0] ? this.toAutoReplyOutbox(result.rows[0]) : undefined; }
+  async listAutoReplyOutboxByAggregate(scope: string, aggregateId: string): Promise<AutoReplyOutboxRecord[]> { const result = await this.pool.query('select * from execution.outbox_jobs where scope=$1 and aggregate_id=$2 order by created_at asc,id asc', [scope, aggregateId]); return result.rows.map((row) => this.toAutoReplyOutbox(row)); }
+  async claimAutoReplyOutbox(input: { scope: string; workerId: string; limit: number; leaseMs: number; id?: string }): Promise<AutoReplyOutboxRecord[]> {
+    const limit = Math.max(1, Math.min(100, Math.trunc(input.limit)));
+    const leaseMs = Math.max(5_000, Math.min(300_000, Math.trunc(input.leaseMs)));
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const result = await client.query(`with candidates as (
+        select id from execution.outbox_jobs
+        where scope=$1 and ($5::uuid is null or id=$5::uuid) and ((status in ('pending','retryable') and available_at<=now()) or (status='processing' and lease_expires_at<=now()))
+        order by created_at asc,id asc
+        for update skip locked limit $2
+      )
+      update execution.outbox_jobs job
+      set status='processing',attempt=job.attempt+1,locked_at=now(),lease_expires_at=now()+($3::int * interval '1 millisecond'),lease_owner=$4,updated_at=now()
+      from candidates where job.id=candidates.id returning job.*`, [input.scope, limit, leaseMs, input.workerId, input.id ?? null]);
+      await client.query('commit');
+      return result.rows.map((row) => this.toAutoReplyOutbox(row));
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally { client.release(); }
+  }
+  async completeAutoReplyOutbox(input: { id: string; workerId: string; externalOutcome: AutoReplyOutboxRecord['externalOutcome']; externalMessageRef?: string }): Promise<boolean> {
+    const result = await this.pool.query(`update execution.outbox_jobs set status='succeeded',external_outcome=$3,external_message_ref=$4,locked_at=null,lease_expires_at=null,lease_owner=null,updated_at=now() where id=$1 and status='processing' and lease_owner=$2`, [input.id, input.workerId, input.externalOutcome ?? null, input.externalMessageRef ?? null]);
+    return result.rowCount === 1;
+  }
+  async persistAutoReplyOutbox(input: { id: string; outboundMessageId: string }): Promise<boolean> { const result = await this.pool.query(`update execution.outbox_jobs set outbound_message_id=$2,updated_at=now() where id=$1 and status='succeeded'`, [input.id, input.outboundMessageId]); return result.rowCount === 1; }
+  async retryAutoReplyOutbox(input: { id: string; workerId: string; errorCode: string; errorDigest: string; availableAt: string }): Promise<boolean> {
+    const result = await this.pool.query(`update execution.outbox_jobs set status='retryable',available_at=$3,last_error_code=$4,last_error_digest=$5,locked_at=null,lease_expires_at=null,lease_owner=null,updated_at=now() where id=$1 and status='processing' and lease_owner=$2`, [input.id, input.workerId, input.availableAt, input.errorCode, input.errorDigest]);
+    return result.rowCount === 1;
+  }
+  async deadLetterAutoReplyOutbox(input: { id: string; workerId: string; errorCode: string; errorDigest: string }): Promise<boolean> {
+    const result = await this.pool.query(`update execution.outbox_jobs set status='dead_lettered',last_error_code=$3,last_error_digest=$4,locked_at=null,lease_expires_at=null,lease_owner=null,updated_at=now() where id=$1 and status='processing' and lease_owner=$2`, [input.id, input.workerId, input.errorCode, input.errorDigest]);
+    return result.rowCount === 1;
+  }
   async recordAudit(event: AuditEventRecord): Promise<void> { await this.pool.query('insert into observability.audit_events (id,actor_type,actor_id,action,target_ref,request_id,trace_id,payload_digest,account_id,reason) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [event.id, event.actorType, event.actorId ?? null, event.action, event.targetRef ?? null, event.requestId, event.traceId, event.payloadDigest, event.accountId ?? null, event.reason ?? null]); }
 
   async listAgentSessions(adminId: string, query: { accountId?: string; search?: string } = {}): Promise<AgentSessionRecord[]> {
@@ -1197,6 +1299,16 @@ export class PostgresStore implements Store {
       configDigest: String(row.config_digest ?? ''),
       createdAt: new Date(String(row.created_at)).toISOString(),
       updatedAt: new Date(String(row.updated_at)).toISOString(),
+    };
+  }
+  private toAutoReplyOutbox(row: Row): AutoReplyOutboxRecord {
+    const payload = row.payload_json && typeof row.payload_json === 'object' && !Array.isArray(row.payload_json) ? row.payload_json as Record<string, unknown> : {};
+    return {
+      id: String(row.id), scope: String(row.scope), aggregateType: String(row.aggregate_type), aggregateId: String(row.aggregate_id), operation: String(row.operation),
+      status: row.status as AutoReplyOutboxRecord['status'], attempt: Number(row.attempt ?? 0), availableAt: dateIso(row.available_at), lockedAt: iso(row.locked_at), leaseExpiresAt: iso(row.lease_expires_at), leaseOwner: row.lease_owner ? String(row.lease_owner) : undefined,
+      lastErrorCode: row.last_error_code ? String(row.last_error_code) : undefined, lastErrorDigest: row.last_error_digest ? String(row.last_error_digest) : undefined, externalOutcome: row.external_outcome ? row.external_outcome as AutoReplyOutboxRecord['externalOutcome'] : undefined,
+      idempotencyKey: String(row.idempotency_key), payload: { ...payload }, externalMessageRef: row.external_message_ref ? String(row.external_message_ref) : undefined, outboundMessageId: row.outbound_message_id ? String(row.outbound_message_id) : undefined, traceId: row.trace_id ? String(row.trace_id) : undefined,
+      createdAt: dateIso(row.created_at), updatedAt: dateIso(row.updated_at ?? row.created_at),
     };
   }
 }

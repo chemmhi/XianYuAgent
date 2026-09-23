@@ -13,10 +13,22 @@ const worker = new InboundInboxWorker(runtime.store, runtime.xianyuIm, {
   pollMs: Number(process.env.INBOUND_INBOX_POLL_MS ?? 1_000),
   maxAttempts: Number(process.env.INBOUND_INBOX_MAX_ATTEMPTS ?? 5),
 });
-console.log(`xianyu-agent-worker started; redis=${config.redisUrl ?? 'not_configured'} workerId=${workerId}`);
+const outcomeReviewWorkerId = `outcome-review:${process.pid}:${crypto.randomUUID()}`;
+const outcomeReviewWorker = config.autoReplyOutcomeReviewWorkerEnabled && runtime.autoReplyRepair.currentMode !== 'off'
+  ? runtime.autoReplyRepair.createOutcomeReviewWorker({
+      workerId: outcomeReviewWorkerId,
+      batchSize: config.autoReplyOutcomeReviewWorkerBatchSize,
+      leaseSeconds: config.autoReplyOutcomeReviewWorkerLeaseSeconds,
+      pollMs: config.autoReplyOutcomeReviewWorkerPollMs,
+      onError: (error) => console.error('outcome review worker poll failed', error),
+    })
+  : undefined;
+console.log(`xianyu-agent-worker started; redis=${config.redisUrl ?? 'not_configured'} workerId=${workerId} repairMode=${runtime.autoReplyRepair.currentMode} outcomeReviewWorker=${outcomeReviewWorker ? 'enabled' : 'disabled'}`);
 worker.start();
+outcomeReviewWorker?.start();
 const shutdown = (signal: string) => {
   void (async () => {
+    await outcomeReviewWorker?.stop();
     await worker.stop();
     await runtime.xianyuIm.close();
     await runtime.redisRealtime?.close();

@@ -6,7 +6,9 @@ export interface OutcomeReviewWorkerOptions {
   workerId: string;
   batchSize?: number;
   leaseSeconds?: number;
-  policyProvider: (record: PersistedRepairReviewRecord) => OutcomeReviewPolicy | undefined;
+  pollMs?: number;
+  onError?: (error: unknown) => void;
+  policyProvider: (record: PersistedRepairReviewRecord) => Promise<OutcomeReviewPolicy | undefined> | OutcomeReviewPolicy | undefined;
   evidenceProvider?: (record: PersistedRepairReviewRecord) => Promise<readonly OutcomeEvidence[]>;
   now?: () => Date;
 }
@@ -23,14 +25,35 @@ export class OutcomeReviewWorker {
   private readonly engine = new OutcomeReviewEngine();
   private readonly batchSize: number;
   private readonly leaseSeconds: number;
+  private readonly pollMs: number;
   private readonly evidenceProvider: NonNullable<OutcomeReviewWorkerOptions['evidenceProvider']>;
   private readonly now: () => Date;
+  private running = false;
+  private loopPromise?: Promise<void>;
+  private timer?: ReturnType<typeof setTimeout>;
+  private wake?: () => void;
 
   constructor(private readonly repository: AutoReplyRepairRepository, private readonly options: OutcomeReviewWorkerOptions) {
     this.batchSize = Math.max(1, Math.min(100, Math.trunc(options.batchSize ?? 10)));
     this.leaseSeconds = Math.max(1, Math.min(900, Math.trunc(options.leaseSeconds ?? 60)));
+    this.pollMs = Math.max(50, Math.min(60_000, Math.trunc(options.pollMs ?? 1_000)));
     this.evidenceProvider = options.evidenceProvider ?? (async () => []);
     this.now = options.now ?? (() => new Date());
+  }
+
+  start(): void {
+    if (this.running) return;
+    this.running = true;
+    this.loopPromise = this.runLoop();
+  }
+
+  async stop(): Promise<void> {
+    this.running = false;
+    if (this.timer) clearTimeout(this.timer);
+    this.wake?.();
+    this.wake = undefined;
+    await this.loopPromise;
+    this.loopPromise = undefined;
   }
 
   async pollOnce(): Promise<OutcomeReviewPollResult> {
@@ -46,6 +69,25 @@ export class OutcomeReviewWorker {
       result.skipped += outcome.skipped;
     }));
     return result;
+  }
+
+  private async runLoop(): Promise<void> {
+    while (this.running) {
+      try {
+        await this.pollOnce();
+      } catch (error) {
+        this.options.onError?.(error);
+      }
+      if (!this.running) break;
+      await new Promise<void>((resolve) => {
+        this.wake = resolve;
+        this.timer = setTimeout(() => {
+          this.timer = undefined;
+          this.wake = undefined;
+          resolve();
+        }, this.pollMs);
+      });
+    }
   }
 
   async close(input: { record: PersistedRepairReviewRecord; policy: OutcomeReviewPolicy | undefined; now?: Date }): Promise<'updated' | 'idempotent' | 'cas_conflict' | 'not_found' | 'lease_lost' | 'rejected'> {
@@ -66,7 +108,7 @@ export class OutcomeReviewWorker {
 
   private async processOne(candidate: PersistedRepairReviewRecord): Promise<OutcomeReviewPollResult> {
     const result: OutcomeReviewPollResult = { claimed: 0, completed: 0, retried: 0, failed: 0, skipped: 0 };
-    const policy = this.options.policyProvider(candidate);
+    const policy = await this.options.policyProvider(candidate);
     if (!policy) { result.skipped += 1; return result; }
     const now = this.now();
     const claimKey = `${this.options.workerId}:${candidate.reviewId}:${candidate.attempt + 1}`;

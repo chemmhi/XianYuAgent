@@ -21,12 +21,14 @@ import { InProcessAgentRuntime, isTerminalRunStatus, WorkspaceService, type Work
 import { OpenAICompatibleModelClient, PiRuntimeAdapter, type ModelClient } from './pi-runtime.js';
 import { ApiKeyCredentialService } from './credential-store.js';
 import { DashboardService, type DashboardRange } from './dashboard.js';
-import { AutoReplyService, ExternalAutoReplySender } from './auto-reply.js';
+import { AutoReplyService } from './auto-reply.js';
+import { ReliableExternalAutoReplySender } from './auto-reply-outbox.js';
 import { AutoReplyAgentSettingsService, resolveAutoReplyAgentDefaults } from './auto-reply-agent-settings.js';
 import { ToolCallingAutoReplyAgent } from './auto-reply-agent.js';
 import { OpenAISettingsService, createFallbackModelClient } from './openai-settings.js';
 import { AutoReplyActivityService } from './auto-reply-activity.js';
 import { AutoReplyRepairRuntime } from './auto-reply-repair-runtime.js';
+import { parseAutoReplyRepairPolicyBundle } from './auto-reply-repair-config.js';
 import { MemoryObjectStorage, S3CompatibleObjectStorage, type ObjectStorage } from './object-storage.js';
 import { XianyuItemDetailService } from './xianyu-item-detail-service.js';
 
@@ -117,7 +119,15 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     return auditId;
   });
   const autoReplyActivity = new AutoReplyActivityService(store);
-  const autoReplyRepair = new AutoReplyRepairRuntime(store, config.autoReplyRepairMode ?? 'off');
+  const autoReplyRepair = new AutoReplyRepairRuntime(store, config.autoReplyRepairMode ?? 'off', async (accountId, now) => {
+    const persisted = await store.getActiveAutoReplyRepairPolicy(accountId, now.toISOString());
+    if (persisted) return persisted;
+    // Enforce mode is account-registry only. Environment JSON remains a
+    // shadow/dev compatibility path and must never silently become production
+    // routing policy when the account has no ACTIVE registry version.
+    if ((config.autoReplyRepairMode ?? 'off') === 'enforce') return undefined;
+    return parseAutoReplyRepairPolicyBundle(config.autoReplyPolicyJson, accountId);
+  });
   let xianyuIm!: XianyuImService;
   const autoReply = new AutoReplyService(store, messages, async (input) => {
     const auditId = createId();
@@ -158,7 +168,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
         generator: runtimeModelClient ? new ToolCallingAutoReplyAgent(store, runtimeModelClient, runtimeConfig) : undefined,
       };
     },
-    sender: new ExternalAutoReplySender(async (input) => {
+    sender: new ReliableExternalAutoReplySender(store, messages, async (input) => {
       if (!xianyuIm) throw new Error('XIANYU_IM_NOT_READY');
       return xianyuIm.sendExternalText(input.adminId, input.accountId, input.conversation.id, input.text, input.requestId, input.traceId);
     }),

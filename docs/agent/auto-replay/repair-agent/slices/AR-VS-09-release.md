@@ -2,9 +2,9 @@
 
 ## 状态
 
-- 状态：IN_PROGRESS
+- 状态：READY_FOR_RELEASE_CANDIDATE（发布前实现级 smoke 已通过；目标环境演练仍为发布前置）
 - 发布门禁：`apps/api/src/auto-reply-release.ts`
-- 测试：`apps/api/scripts/auto-reply-release.test.ts`
+- 测试：`apps/api/scripts/auto-reply-release.test.ts`、`apps/api/scripts/auto-reply-release-gate-smoke.mjs`
 
 ## 发布门禁
 
@@ -16,8 +16,10 @@
 ## 通过证据
 
 - `npm --workspace apps/api exec -- node --import tsx --test scripts/auto-reply-release.test.ts`
+- `npm --workspace apps/api run test:auto-reply:release:smoke`：通过；READY、canary stop、缺失指标 fail-closed、kill-switch rollback、outbox 幂等恢复均已断言
+- `npm --workspace apps/api run test:auto-reply:policy-registry:postgres`：通过；账号级 ACTIVE PolicyConfig hash/CAS/rollback 已验证
 - `npm --workspace apps/api run build`
-- 迁移、单元、集成和回滚演练证据继续由发布流水线补齐。
+- `npm run db:migrate`：031–035 迁移成功；真实 sender、目标环境 canary、告警和 migration rollback/备份恢复证据继续由发布流水线补齐。
 
 ## 运行手册
 

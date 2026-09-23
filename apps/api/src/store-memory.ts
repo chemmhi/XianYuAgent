@@ -1,10 +1,11 @@
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { projectAutoReplyRun } from './auto-reply-activity-projection.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor, isAfterConversationCursor } from './conversation-cursor.js';
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
 import type { AgentSessionRecord, RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, WorkspaceMessageRecord, WorkspaceMessageType } from './domain.js';
+import { validatePersistedAutoReplyRepairPolicyBundle } from './auto-reply-repair-config.js';
 
 function meaningfulOrderTitle(value: string | undefined, references: Array<string | undefined>): string | undefined {
   const title = value?.trim();
@@ -23,7 +24,24 @@ function productImageUrl(product: ProductRecord | undefined): string | undefined
   return firstImageUrl(xianyu.imageUrls) ?? firstImageUrl(xianyu.imageUrl) ?? firstImageUrl(attributes.imageUrls) ?? firstImageUrl(attributes.imageUrl);
 }
 
+function cloneOutbox(record: AutoReplyOutboxRecord): AutoReplyOutboxRecord {
+  return { ...record, payload: { ...record.payload } };
+}
+
 function conversationSortKey(conversation: ConversationRecord): string { return conversation.lastMessageAt ?? conversation.updatedAt; }
+
+type MemoryRepairPolicyRecord = {
+  accountId: string;
+  policyVersion: string;
+  status: 'ACTIVE' | 'RETIRED' | 'ROLLBACK_TARGET';
+  bundle: AutoReplyRepairPolicyBundle;
+  createdAt: string;
+  updatedAt: string;
+};
+
+function cloneRepairPolicy(bundle: AutoReplyRepairPolicyBundle): AutoReplyRepairPolicyBundle {
+  return JSON.parse(JSON.stringify(bundle)) as AutoReplyRepairPolicyBundle;
+}
 
 export class MemoryStore implements Store {
   readonly kind = 'memory' as const;
@@ -35,6 +53,7 @@ export class MemoryStore implements Store {
   private readonly credentialRefs = new Map<string, CredentialRefRecord>();
   private readonly credentialRefSecrets = new Map<string, string>();
   private readonly autoReplyAgentConfigs = new Map<string, AutoReplyAgentConfigRecord>();
+  private readonly autoReplyRepairPolicies = new Map<string, Map<string, MemoryRepairPolicyRecord>>();
   private readonly products = new Map<string, ProductRecord>();
   private readonly orders = new Map<string, OrderRecord>();
   private readonly couponBatches = new Map<string, CouponBatchRecord>();
@@ -52,6 +71,7 @@ export class MemoryStore implements Store {
   private readonly conversationCursors = new Map<string, number>();
   private readonly scopes = new Map<string, AccountScopeRecord>();
   private readonly idempotency = new Map<string, IdempotencyRecord>();
+  private readonly autoReplyOutbox = new Map<string, AutoReplyOutboxRecord>();
   private readonly agentSessions = new Map<string, AgentSessionRecord>();
   private readonly runs = new Map<string, RunRecord>();
   private readonly steps = new Map<string, StepRecord>();
@@ -747,6 +767,11 @@ export class MemoryStore implements Store {
     return { record: { ...record }, created: true };
   }
 
+  async getInboundInbox(id: string): Promise<InboundInboxRecord | undefined> {
+    const record = this.inboundInbox.get(id);
+    return record ? { ...record } : undefined;
+  }
+
   async claimInboundInbox(input: { workerId: string; limit: number; leaseMs: number }): Promise<InboundInboxRecord[]> {
     const limit = Math.max(1, Math.min(100, Math.trunc(input.limit)));
     const now = Date.now();
@@ -1019,10 +1044,102 @@ export class MemoryStore implements Store {
     this.autoReplyAgentConfigs.set(input.accountId, row);
     return { ...row };
   }
+  async getActiveAutoReplyRepairPolicy(accountId: string, now = new Date().toISOString()): Promise<AutoReplyRepairPolicyBundle | undefined> {
+    const records = this.autoReplyRepairPolicies.get(accountId);
+    const active = [...(records?.values() ?? [])].find((record) => record.status === 'ACTIVE');
+    if (!active) return undefined;
+    try {
+      return cloneRepairPolicy(validatePersistedAutoReplyRepairPolicyBundle(active.bundle, accountId, new Date(now)));
+    } catch {
+      return undefined;
+    }
+  }
+  async publishAutoReplyRepairPolicy(input: { accountId: string; bundle: AutoReplyRepairPolicyBundle; expectedActiveVersion?: string }): Promise<AutoReplyRepairPolicyBundle> {
+    const account = this.accounts.get(input.accountId);
+    if (!account || account.status === 'disabled') throw new Error('AUTO_REPLY_POLICY_ACCOUNT_NOT_FOUND');
+    const now = new Date().toISOString();
+    const bundle = validatePersistedAutoReplyRepairPolicyBundle(input.bundle, input.accountId, new Date(now));
+    const records = this.autoReplyRepairPolicies.get(input.accountId) ?? new Map<string, MemoryRepairPolicyRecord>();
+    const active = [...records.values()].find((record) => record.status === 'ACTIVE');
+    if (input.expectedActiveVersion && active?.policyVersion !== input.expectedActiveVersion) throw new Error('AUTO_REPLY_POLICY_VERSION_CONFLICT');
+    if (records.has(bundle.policyConfig.policyVersion)) throw new Error('AUTO_REPLY_POLICY_VERSION_EXISTS');
+    if (active) active.status = 'RETIRED';
+    const record: MemoryRepairPolicyRecord = { accountId: input.accountId, policyVersion: bundle.policyConfig.policyVersion, status: 'ACTIVE', bundle: cloneRepairPolicy(bundle), createdAt: now, updatedAt: now };
+    records.set(record.policyVersion, record);
+    this.autoReplyRepairPolicies.set(input.accountId, records);
+    return cloneRepairPolicy(bundle);
+  }
+  async rollbackAutoReplyRepairPolicy(input: { accountId: string; targetPolicyVersion: string; expectedActiveVersion?: string }): Promise<AutoReplyRepairPolicyBundle> {
+    const records = this.autoReplyRepairPolicies.get(input.accountId);
+    const target = records?.get(input.targetPolicyVersion);
+    const active = [...(records?.values() ?? [])].find((record) => record.status === 'ACTIVE');
+    if (!target) throw new Error('AUTO_REPLY_POLICY_ROLLBACK_TARGET_NOT_FOUND');
+    if (input.expectedActiveVersion && active?.policyVersion !== input.expectedActiveVersion) throw new Error('AUTO_REPLY_POLICY_VERSION_CONFLICT');
+    const bundle = validatePersistedAutoReplyRepairPolicyBundle(target.bundle, input.accountId, new Date());
+    if (active && active.policyVersion !== target.policyVersion) active.status = 'RETIRED';
+    target.status = 'ACTIVE';
+    target.updatedAt = new Date().toISOString();
+    return cloneRepairPolicy(bundle);
+  }
   async getIdempotency(scope: string, key: string): Promise<IdempotencyRecord | undefined> { const row = this.idempotency.get(`${scope}:${key}`); if (row && Date.parse(row.expiresAt) <= Date.now()) { this.idempotency.delete(`${scope}:${key}`); return undefined; } return row; }
   async beginIdempotency(record: IdempotencyRecord): Promise<void> { this.idempotency.set(`${record.scope}:${record.key}`, record); }
   async abortIdempotency(scope: string, key: string): Promise<void> { this.idempotency.delete(`${scope}:${key}`); }
   async completeIdempotency(input: { scope: string; key: string; status: IdempotencyRecord['status']; responseEnvelope: unknown; statusCode: number; traceId: string }): Promise<void> { const row = this.idempotency.get(`${input.scope}:${input.key}`); if (row) Object.assign(row, input); }
+  async enqueueAutoReplyOutbox(input: { scope: string; aggregateType: string; aggregateId: string; operation: string; idempotencyKey: string; payload: Record<string, unknown>; traceId?: string; availableAt?: string }): Promise<{ record: AutoReplyOutboxRecord; created: boolean }> {
+    const key = `${input.scope}:${input.idempotencyKey}`;
+    const existing = this.autoReplyOutbox.get(key);
+    if (existing) return { record: cloneOutbox(existing), created: false };
+    const now = new Date().toISOString();
+    const record: AutoReplyOutboxRecord = { id: createId(), scope: input.scope, aggregateType: input.aggregateType, aggregateId: input.aggregateId, operation: input.operation, status: 'pending', attempt: 0, availableAt: input.availableAt ?? now, idempotencyKey: input.idempotencyKey, payload: { ...input.payload }, traceId: input.traceId, createdAt: now, updatedAt: now };
+    this.autoReplyOutbox.set(key, record);
+    return { record: cloneOutbox(record), created: true };
+  }
+  async getAutoReplyOutbox(scope: string, idempotencyKey: string): Promise<AutoReplyOutboxRecord | undefined> { const record = this.autoReplyOutbox.get(`${scope}:${idempotencyKey}`); return record ? cloneOutbox(record) : undefined; }
+  async listAutoReplyOutboxByAggregate(scope: string, aggregateId: string): Promise<AutoReplyOutboxRecord[]> { return [...this.autoReplyOutbox.values()].filter((record) => record.scope === scope && record.aggregateId === aggregateId).sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)).map(cloneOutbox); }
+  async claimAutoReplyOutbox(input: { scope: string; workerId: string; limit: number; leaseMs: number; id?: string }): Promise<AutoReplyOutboxRecord[]> {
+    const limit = Math.max(1, Math.min(100, Math.trunc(input.limit)));
+    const leaseMs = Math.max(5_000, Math.min(300_000, Math.trunc(input.leaseMs)));
+    const now = Date.now();
+    const candidates = [...this.autoReplyOutbox.values()]
+      .filter((record) => record.scope === input.scope && (!input.id || record.id === input.id))
+      .filter((record) => ((record.status === 'pending' || record.status === 'retryable') && Date.parse(record.availableAt) <= now) || (record.status === 'processing' && Boolean(record.leaseExpiresAt) && Date.parse(record.leaseExpiresAt!) <= now))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
+      .slice(0, limit);
+    const claimed: AutoReplyOutboxRecord[] = [];
+    for (const record of candidates) {
+      const nowIso = new Date().toISOString();
+      record.status = 'processing';
+      record.attempt += 1;
+      record.lockedAt = nowIso;
+      record.leaseExpiresAt = new Date(Date.now() + leaseMs).toISOString();
+      record.leaseOwner = input.workerId;
+      record.updatedAt = nowIso;
+      claimed.push(cloneOutbox(record));
+    }
+    return claimed;
+  }
+  async completeAutoReplyOutbox(input: { id: string; workerId: string; externalOutcome: AutoReplyOutboxRecord['externalOutcome']; externalMessageRef?: string }): Promise<boolean> {
+    const record = [...this.autoReplyOutbox.values()].find((item) => item.id === input.id);
+    if (!record || record.status !== 'processing' || record.leaseOwner !== input.workerId) return false;
+    const now = new Date().toISOString();
+    Object.assign(record, { status: 'succeeded' as const, externalOutcome: input.externalOutcome, externalMessageRef: input.externalMessageRef, lockedAt: undefined, leaseExpiresAt: undefined, leaseOwner: undefined, updatedAt: now });
+    return true;
+  }
+  async persistAutoReplyOutbox(input: { id: string; outboundMessageId: string }): Promise<boolean> { const record = [...this.autoReplyOutbox.values()].find((item) => item.id === input.id); if (!record || record.status !== 'succeeded') return false; record.outboundMessageId = input.outboundMessageId; record.updatedAt = new Date().toISOString(); return true; }
+  async retryAutoReplyOutbox(input: { id: string; workerId: string; errorCode: string; errorDigest: string; availableAt: string }): Promise<boolean> {
+    const record = [...this.autoReplyOutbox.values()].find((item) => item.id === input.id);
+    if (!record || record.status !== 'processing' || record.leaseOwner !== input.workerId) return false;
+    const now = new Date().toISOString();
+    Object.assign(record, { status: 'retryable' as const, availableAt: input.availableAt, lastErrorCode: input.errorCode, lastErrorDigest: input.errorDigest, lockedAt: undefined, leaseExpiresAt: undefined, leaseOwner: undefined, updatedAt: now });
+    return true;
+  }
+  async deadLetterAutoReplyOutbox(input: { id: string; workerId: string; errorCode: string; errorDigest: string }): Promise<boolean> {
+    const record = [...this.autoReplyOutbox.values()].find((item) => item.id === input.id);
+    if (!record || record.status !== 'processing' || record.leaseOwner !== input.workerId) return false;
+    const now = new Date().toISOString();
+    Object.assign(record, { status: 'dead_lettered' as const, lastErrorCode: input.errorCode, lastErrorDigest: input.errorDigest, lockedAt: undefined, leaseExpiresAt: undefined, leaseOwner: undefined, updatedAt: now });
+    return true;
+  }
   async recordAudit(event: AuditEventRecord): Promise<void> { this.audits.push(event); }
 
   async listAgentSessions(adminId: string, query: { accountId?: string; search?: string } = {}): Promise<AgentSessionRecord[]> {

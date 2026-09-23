@@ -52,16 +52,24 @@ export interface AutoReplySendInput {
   text: string;
   mode: 'simulate' | 'live';
   traceId: string;
+  runId?: string;
+  inboundMessageId?: string;
+  productRef?: string;
+  riskFlags?: string[];
+  segmentIndex?: number;
+  segmentCount?: number;
 }
 
 export interface AutoReplySender {
-  send(input: AutoReplySendInput): Promise<{ outcome: 'simulated' | 'known_success' | 'known_failure' | 'unknown'; externalMessageRef?: string }>;
+  send(input: AutoReplySendInput): Promise<{ outcome: 'simulated' | 'known_success' | 'known_failure' | 'unknown'; externalMessageRef?: string; outboxJobId?: string }>;
+  markPersisted?(input: { outboxJobId?: string; outboundMessageId: string }): Promise<void>;
+  recoverRun?(input: { adminId: string; runId: string }): Promise<{ outboundMessageIds: string[]; senderOutcome?: 'known_success' | 'unknown' }>;
 }
 
 export class NoopAutoReplySender implements AutoReplySender {
   readonly calls: Array<{ conversationId: string; recipientRef: string; text: string; mode: 'simulate' | 'live'; traceId: string }> = [];
 
-  async send(input: AutoReplySendInput): Promise<{ outcome: 'simulated' | 'known_success' | 'known_failure' | 'unknown'; externalMessageRef?: string }> {
+  async send(input: AutoReplySendInput): Promise<{ outcome: 'simulated' | 'known_success' | 'known_failure' | 'unknown'; externalMessageRef?: string; outboxJobId?: string }> {
     this.calls.push({ conversationId: input.conversation.id, recipientRef: input.recipientRef, text: input.text, mode: input.mode, traceId: input.traceId });
     return { outcome: 'simulated', externalMessageRef: `simulated:auto-reply:${input.traceId}` };
   }
@@ -70,7 +78,7 @@ export class NoopAutoReplySender implements AutoReplySender {
 export class ExternalAutoReplySender implements AutoReplySender {
   constructor(private readonly sendExternal: (input: AutoReplySendInput) => Promise<{ externalMessageRef?: string }>) {}
 
-  async send(input: AutoReplySendInput): Promise<{ outcome: 'simulated' | 'known_success' | 'known_failure' | 'unknown'; externalMessageRef?: string }> {
+  async send(input: AutoReplySendInput): Promise<{ outcome: 'simulated' | 'known_success' | 'known_failure' | 'unknown'; externalMessageRef?: string; outboxJobId?: string }> {
     if (input.mode === 'simulate') return { outcome: 'simulated', externalMessageRef: `simulated:auto-reply:${input.traceId}` };
     const sent = await this.sendExternal(input);
     return { outcome: 'known_success', externalMessageRef: sent.externalMessageRef };
@@ -198,9 +206,26 @@ export class AutoReplyService {
     if (!inboundMessage) throw new Error('INBOUND_MESSAGE_NOT_FOUND');
     const inputDigest = digestJson({ inboundMessageId: inboundMessage.id, bodyType: inboundMessage.bodyType, bodyText: inboundMessage.bodyText ?? '' });
     const replay = await this.store.findAutoReplyRunByInboundMessage(input.adminId, inboundMessage.id);
-    if (replay) return { run: replay, inboundMessage };
+    if (replay) {
+      if (this.sender.recoverRun) {
+        try {
+          const recovered = await this.sender.recoverRun({ adminId: input.adminId, runId: replay.id });
+          const recoveredOutboundMessageId = recovered.outboundMessageIds.at(-1);
+          if (recoveredOutboundMessageId) {
+            const updated = replay.status === 'persisted'
+              ? replay
+              : await this.store.updateAutoReplyRun(replay.id, { status: 'persisted', decision: 'replied', senderOutcome: recovered.senderOutcome ?? 'known_success', outboundMessageId: recoveredOutboundMessageId, eventPayload: { input: { kind: 'outbox_recovery' }, output: { recovered: true, outboundMessageId: recoveredOutboundMessageId } } });
+            return { run: updated ?? replay, inboundMessage, outboundMessage: await this.findMessage(input.adminId, input.conversationId, recoveredOutboundMessageId) };
+          }
+        } catch {
+          // A replay must remain idempotent even if recovery is temporarily unavailable.
+        }
+      }
+      return { run: replay, inboundMessage };
+    }
     let run: AutoReplyRunRecord;
     let repair: AutoReplyRepairCandidateResult | undefined;
+    let repairRoute: Awaited<ReturnType<AutoReplyRepairRuntime['routeInbound']>>;
     try {
       run = await this.store.createAutoReplyRun({ adminId: input.adminId, accountId: conversation.accountId, conversationId: conversation.id, inboundMessageId: inboundMessage.id, intent: 'pending', decision: 'skipped', status: 'received', inputDigest });
     } catch (error) {
@@ -267,7 +292,7 @@ export class AutoReplyService {
 
       const ruleClassification = this.classifier.classify(inboundMessage.bodyText ?? '');
       const hardSafety = modelDecidesRouting && ['prompt_injection', 'credential_request'].includes(ruleClassification.intent);
-      const classification = modelDecidesRouting
+      let classification = modelDecidesRouting
         ? {
             intent: hardSafety ? ruleClassification.intent : 'general' as const,
             confidence: hardSafety ? ruleClassification.confidence : 1,
@@ -304,9 +329,31 @@ export class AutoReplyService {
         output: { contextDigest, historyCount: context.recentMessages.length, productId: context.product?.id, orderRefs: context.orders.map((order) => order.orderNo), orderRefsCount: context.orders.length },
       } });
 
-      if (conversation.handlingMode === 'human' || (modelDecidesRouting && hardSafety) || (!modelDecidesRouting && classification.decision === 'handoff')) {
+      if (this.repairRuntime?.enabled) {
+        try {
+          repairRoute = await this.repairRuntime.routeInbound({ conversation, inboundMessage, context, classification });
+          if (repairRoute) {
+            const routePayload = { input: { kind: 'repair_policy_route', contextDigest }, output: { primaryAction: repairRoute.primaryAction, safetyHandling: repairRoute.safetyHandling, policyDecisionId: repairRoute.policyDecisionId, policyVersion: repairRoute.policyVersion, policyHash: repairRoute.policyHash, reasonCodes: repairRoute.reasonCodes } };
+            await this.store.appendAutoReplyRunEvent({ runId: run.id, accountId: conversation.accountId, eventType: 'repair.policy_routed', stage: 'reply_generation', status: run.status, traceId, payload: routePayload });
+          }
+        } catch (error) {
+          if (this.repairRuntime.currentMode === 'enforce') throw error;
+        }
+      }
+
+      const repairOwnsRoute = this.repairRuntime?.currentMode === 'enforce' && Boolean(repairRoute);
+      const repairRefusal = repairOwnsRoute && repairRoute?.primaryAction === 'REFUSE_SENSITIVE';
+      const repairHandoff = repairOwnsRoute && repairRoute?.primaryAction === 'HANDOFF';
+      const legacyHandoff = modelDecidesRouting ? hardSafety : classification.decision === 'handoff';
+      if (repairRoute?.safetyHandling === 'PARTIAL_REFUSAL' && classification.intent === 'credential_request') {
+        const safeClassification = this.classifier.classify(stripSensitiveTerms(inboundMessage.bodyText ?? ''));
+        if (safeClassification.intent !== 'credential_request' && safeClassification.intent !== 'other') {
+          classification = { ...classification, intent: safeClassification.intent, confidence: safeClassification.confidence, decision: 'replied', riskFlags: [...classification.riskFlags, 'sensitive_partial'] };
+        }
+      }
+      if (conversation.handlingMode === 'human' || (!repairOwnsRoute && legacyHandoff) || repairHandoff) {
         const riskFlags = [...classification.riskFlags, ...(conversation.handlingMode === 'human' ? ['human_mode'] : [])];
-        const reason = conversation.handlingMode === 'human' ? 'human_mode' : hardSafety ? 'safety_gate' : 'classifier_handoff';
+        const reason = conversation.handlingMode === 'human' ? 'human_mode' : repairHandoff ? 'repair_policy_handoff' : hardSafety ? 'safety_gate' : 'classifier_handoff';
         const updated = await updateRun({ status: 'handoff', decision: 'handoff', riskFlags, eventPayload: {
           input: { kind: 'reply_gate', intent: classification.intent, decision: classification.decision, reason },
           output: { decision: 'handoff', riskFlags },
@@ -315,9 +362,10 @@ export class AutoReplyService {
         return { run: updated ?? run, inboundMessage, classification, context };
       }
 
-      const generated = await withTimeout(runtime.generator.generate({ adminId: input.adminId, context, classification, observe: observeGenerator }), runtime.totalTimeoutMs);
-      const generatedReply = normalizeGeneratedReply(generated);
-      const reply = generatedReply ? normalizeReply(generatedReply.text) : undefined;
+      const generatedReply = repairRefusal
+        ? { text: '这类敏感信息我无法提供，但我可以继续帮你查询商品、订单、库存或发货信息。' }
+        : normalizeGeneratedReply(await withTimeout(runtime.generator.generate({ adminId: input.adminId, context, classification, observe: observeGenerator }), runtime.totalTimeoutMs));
+      let reply = generatedReply ? normalizeReply(generatedReply.text) : undefined;
       if (!reply) {
         const updated = await updateRun({ status: 'failed', decision: 'failed', failureCode: 'REPLY_EMPTY', eventPayload: {
           input: { kind: 'reply_generation', intent: classification.intent, contextDigest },
@@ -338,6 +386,9 @@ export class AutoReplyService {
         return { run: updated ?? run, inboundMessage, classification, context };
       }
 
+      if (repairRoute?.safetyHandling === 'PARTIAL_REFUSAL' && !/(无法提供|不能提供|不能协助|无法协助)/.test(reply)) {
+        reply = `关于敏感凭证类信息我无法提供；${reply}`;
+      }
       const replyDigest = digestJson({ reply });
       await updateRun({ status: 'generated', replyDigest, eventPayload: {
         input: { kind: 'reply_generation', intent: classification.intent, contextDigest },
@@ -376,22 +427,27 @@ export class AutoReplyService {
           } catch {
             // A repair telemetry failure must never break the legacy send path.
           }
+          if (this.repairRuntime.currentMode === 'enforce') throw error;
         }
       }
       let lastOutboundMessageId: string | undefined;
       let lastOutcome: Awaited<ReturnType<AutoReplySender['send']>>['outcome'] = 'simulated';
+      let lastExternalMessageRef: string | undefined;
       for (let index = 0; index < segments.length; index += 1) {
         if (index > 0 && runtime.replySegmentDelayMs > 0) await delay(runtime.replySegmentDelayMs);
         const segment = segments[index]!;
-        const sent = await this.sender.send({ adminId: input.adminId, accountId: conversation.accountId, requestId, conversation, recipientRef: conversation.buyerRef, text: segment, mode: runtime.sendMode, traceId });
+        const sendRequestId = segments.length > 1 ? `${requestId}:segment:${index + 1}` : requestId;
+        const sent = await this.sender.send({ adminId: input.adminId, accountId: conversation.accountId, requestId: sendRequestId, conversation, recipientRef: conversation.buyerRef, text: segment, mode: runtime.sendMode, traceId, runId: run.id, inboundMessageId: inboundMessage.id, productRef: context.product?.id, riskFlags: classification.riskFlags, segmentIndex: index, segmentCount: segments.length });
         lastOutcome = sent.outcome;
+        lastExternalMessageRef = sent.externalMessageRef;
         if (sent.outcome === 'known_failure' || sent.outcome === 'unknown') throw new Error(sent.outcome === 'unknown' ? 'AUTO_REPLY_SEND_UNKNOWN' : 'AUTO_REPLY_SEND_FAILED');
         const simulatedRef = sent.outcome === 'simulated' ? `${sent.externalMessageRef ?? `simulated:auto-reply:${inboundMessage.id}`}:${index + 1}` : sent.externalMessageRef;
-        const outbound = await this.messages.createMessage({ adminId: input.adminId, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: segment, externalMessageRef: simulatedRef, source: 'ai', productRef: context.product?.id, riskFlags: [...classification.riskFlags, ...(sent.outcome === 'simulated' ? ['simulated_send'] : []), ...(segments.length > 1 ? [`reply_segment_${index + 1}_of_${segments.length}`] : [])], requestId, traceId });
+        const outbound = await this.messages.createMessage({ adminId: input.adminId, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: segment, externalMessageRef: simulatedRef, source: 'ai', productRef: context.product?.id, riskFlags: [...classification.riskFlags, ...(sent.outcome === 'simulated' ? ['simulated_send'] : []), ...(segments.length > 1 ? [`reply_segment_${index + 1}_of_${segments.length}`] : [])], requestId: sendRequestId, traceId });
+        try { await this.sender.markPersisted?.({ outboxJobId: sent.outboxJobId, outboundMessageId: outbound.message.messageId }); } catch { /* local message is authoritative; outbox reconciliation can retry the link */ }
         lastOutboundMessageId = outbound.message.messageId;
       }
       if (repair?.outcomeReviewId && this.repairRuntime) {
-        try { await this.repairRuntime.reconcileSendOutcome({ outcomeReviewId: repair.outcomeReviewId, outcome: lastOutcome }); } catch { /* reconcile must not break legacy success */ }
+        try { await this.repairRuntime.reconcileSendOutcome({ outcomeReviewId: repair.outcomeReviewId, outcome: lastOutcome, externalMessageRef: lastExternalMessageRef }); } catch { /* reconcile must not break legacy success */ }
       }
       await updateRun({ status: 'simulated', senderOutcome: lastOutcome, eventPayload: {
         input: { kind: 'send', replyDigest, segmentCount: segments.length, mode: runtime.sendMode },
@@ -533,6 +589,13 @@ function toFailureCode(error: unknown): string {
 function safeEventReason(error: unknown): string | undefined {
   const message = error instanceof Error ? error.message.trim() : '';
   return /^[A-Z0-9_:-]{1,64}$/.test(message) ? message : undefined;
+}
+
+function stripSensitiveTerms(value: string): string {
+  return value
+    .replace(/cookie|api\s*key|access[_ -]?token|验证码|密码|秘钥|密钥/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function validateSemanticSegments(proposed: string[] | undefined, reply: string): string[] | undefined {

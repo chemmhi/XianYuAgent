@@ -1,12 +1,19 @@
 import type { AutoReplyRunListQuery, AutoReplyRunStage, AutoReplyRunStatus, Store } from './domain.js';
 import { ServiceError } from './services.js';
+import { projectAutoReplyRun } from './auto-reply-activity-projection.js';
+import { AutoReplyRepairRepository, type PersistedRepairReviewRecord } from './auto-reply-repair-repository.js';
+import type { AutoReplyRunEventRecord, AutoReplyRunListItem } from './domain.js';
 
 const STATUSES: AutoReplyRunStatus[] = ['received', 'classified', 'context_loaded', 'generated', 'simulated', 'persisted', 'handoff', 'skipped', 'failed'];
 const STAGES: AutoReplyRunStage[] = ['gateway_received', 'intent_recognition', 'context_read', 'reply_generation', 'sending', 'persisted', 'handoff', 'skipped', 'failed'];
 const DECISIONS = ['replied', 'handoff', 'skipped', 'failed'] as const;
 
 export class AutoReplyActivityService {
-  constructor(private readonly store: Store) {}
+  private readonly repairRepository: AutoReplyRepairRepository;
+
+  constructor(private readonly store: Store, repairRepository?: AutoReplyRepairRepository) {
+    this.repairRepository = repairRepository ?? new AutoReplyRepairRepository(store);
+  }
 
   async summary(input: { adminId: string; accountId?: string; from?: string; to?: string }) {
     const range = this.normalizeRange(input.from, input.to);
@@ -17,14 +24,32 @@ export class AutoReplyActivityService {
   async list(input: { adminId: string; query: AutoReplyRunListQuery }) {
     const query = this.normalizeListQuery(input.query);
     await this.assertScope(input.adminId, query.accountId);
-    return this.store.listAutoReplyRuns(input.adminId, query);
+    const result = await this.store.listAutoReplyRuns(input.adminId, query);
+    return { ...result, items: await this.enrichItems(result.items) };
   }
 
   async detail(input: { adminId: string; runId: string }) {
     if (!input.runId.trim()) throw new ServiceError(422, 'VALIDATION_FAILED', 'runId is required');
     const detail = await this.store.getAutoReplyRunDetail(input.adminId, input.runId);
     if (!detail) throw new ServiceError(404, 'NOT_FOUND', 'auto reply run not found');
-    return detail;
+    const [run] = await this.enrichItems([detail.run], new Map([[detail.run.id, detail.events]]));
+    return { ...detail, run };
+  }
+
+  private async enrichItems(items: AutoReplyRunListItem[], existingEvents = new Map<string, AutoReplyRunEventRecord[]>): Promise<AutoReplyRunListItem[]> {
+    if (items.length === 0) return items;
+    const reviews = await this.repairRepository.listReviewsByRunIds(items.map((item) => item.id));
+    const reviewsByRun = new Map<string, PersistedRepairReviewRecord[]>();
+    for (const review of reviews) {
+      const current = reviewsByRun.get(review.runId) ?? [];
+      current.push(review);
+      reviewsByRun.set(review.runId, current);
+    }
+    return Promise.all(items.map(async (item) => {
+      const events = existingEvents.get(item.id) ?? await this.store.listAutoReplyRunEvents(item.adminId, item.id);
+      const shadowEvent = [...events].reverse().find((event) => event.eventType === 'repair.shadow_reviewed');
+      return { ...item, ...projectAutoReplyRun(item, { reviews: reviewsByRun.get(item.id) ?? [], shadowEventPayload: shadowEvent?.payload }) };
+    }));
   }
 
   private async assertScope(adminId: string, accountId?: string): Promise<void> {
