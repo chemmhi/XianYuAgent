@@ -11,6 +11,8 @@ export type CouponBatchStatus = 'draft' | 'active' | 'paused' | 'closed' | 'exha
 export type CouponDeliveryScope = 'system_only' | 'operator_only' | 'buyer_deliverable';
 export type CouponItemStatus = 'available' | 'reserved' | 'consumed';
 export type CouponBindingStatus = 'active' | 'inactive';
+export type CouponReservationPurpose = 'delivery' | 'gift';
+export type CouponReservationStatus = 'reserved' | 'committed' | 'released' | 'expired';
 export type ConversationHandlingMode = 'ai' | 'human';
 export type MessageDirection = 'inbound' | 'outbound';
 export type MessageSenderRole = 'buyer' | 'agent' | 'system';
@@ -406,6 +408,33 @@ export interface CouponBatchListResult {
   pageSize: number;
   total: number;
   totalPages: number;
+}
+
+export interface CouponReservationItemRecord {
+  itemId: string;
+  content: string;
+  batchId: string;
+  batchLabel?: string;
+  quarkUrl?: string;
+  extractionCode?: string;
+}
+
+export interface CouponReservationRecord {
+  reservationId: string;
+  adminId: string;
+  accountId: string;
+  executionKey: string;
+  purpose: CouponReservationPurpose;
+  batchIds: string[];
+  fingerprint: string;
+  quantity: number;
+  status: CouponReservationStatus;
+  leaseUntil: string;
+  reason?: string;
+  items: CouponReservationItemRecord[];
+  createdAt: string;
+  updatedAt: string;
+  finalizedAt?: string;
 }
 
 export interface ProductPatch {
@@ -1021,6 +1050,10 @@ export interface Store {
   unbindCouponBatch(input: { adminId: string; batchId: string; productId: string }): Promise<CouponBindingRecord | undefined>;
   voidCouponBatch(input: { adminId: string; batchId: string }): Promise<CouponBatchRecord | undefined>;
   getCouponContent(adminId: string, itemId: string): Promise<{ batch: CouponBatchRecord; item: CouponItemRecord } | undefined>;
+  reserveCoupon(input: { adminId: string; accountId: string; batchIds: string[]; quantity: number; executionKey: string; purpose: CouponReservationPurpose; leaseSeconds?: number }): Promise<CouponReservationRecord>;
+  getCouponReservation(input: { adminId: string; reservationId: string; executionKey?: string }): Promise<CouponReservationRecord | undefined>;
+  commitCouponReservation(input: { adminId: string; reservationId: string; executionKey: string }): Promise<CouponReservationRecord>;
+  releaseCouponReservation(input: { adminId: string; reservationId: string; executionKey: string; reason: string }): Promise<CouponReservationRecord>;
   listConversations(adminId: string, query: ConversationListQuery): Promise<ConversationListResult>;
   getConversation(adminId: string, conversationId: string): Promise<ConversationRecord | undefined>;
   markConversationRead(adminId: string, conversationId: string): Promise<ConversationRecord | undefined>;

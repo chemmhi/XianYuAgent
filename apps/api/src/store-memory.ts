@@ -1,9 +1,10 @@
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CouponReservationItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor, isAfterConversationCursor } from './conversation-cursor.js';
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
 import type { AgentSessionRecord, RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, WorkspaceMessageRecord, WorkspaceMessageType } from './domain.js';
+import { cloneCouponReservation, normalizeCouponReservationInput, normalizeLeaseSeconds, reservationFingerprint } from './coupon-reservation.js';
 
 function meaningfulOrderTitle(value: string | undefined, references: Array<string | undefined>): string | undefined {
   const title = value?.trim();
@@ -42,6 +43,9 @@ export class MemoryStore implements Store {
   private readonly couponBatches = new Map<string, CouponBatchRecord>();
   private readonly couponItems = new Map<string, CouponItemRecord>();
   private readonly couponBindings = new Map<string, CouponBindingRecord>();
+  private readonly couponReservations = new Map<string, CouponReservationRecord>();
+  private readonly couponReservationByExecutionKey = new Map<string, string>();
+  private couponReservationMutex: Promise<void> = Promise.resolve();
   private readonly conversations = new Map<string, ConversationRecord>();
   private readonly messages = new Map<string, MessageRecord>();
   private readonly autoReplyRuns = new Map<string, AutoReplyRunRecord>();
@@ -505,6 +509,137 @@ export class MemoryStore implements Store {
     const batch = this.couponBatches.get(item.batchId);
     if (!batch || !(await this.hasAccountScope(adminId, batch.accountId))) return undefined;
     return { batch: { ...batch }, item: { ...item } };
+  }
+
+  async reserveCoupon(input: { adminId: string; accountId: string; batchIds: string[]; quantity: number; executionKey: string; purpose: CouponReservationPurpose; leaseSeconds?: number }): Promise<CouponReservationRecord> {
+    return this.withCouponReservationLock(async () => {
+      const normalized = normalizeCouponReservationInput(input);
+      const leaseSeconds = normalizeLeaseSeconds(input.leaseSeconds);
+      await this.expireCouponReservations();
+      if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+      const batches = normalized.batchIds.map((batchId) => this.findCouponBatch(batchId));
+      if (batches.some((batch) => !batch)) throw new Error('COUPON_BATCH_NOT_FOUND');
+      const resolvedBatches = batches as CouponBatchRecord[];
+      if (resolvedBatches.some((batch) => batch.accountId !== input.accountId)) throw new Error('COUPON_BATCH_ACCOUNT_MISMATCH');
+      const uniqueBatches = [...new Map(resolvedBatches.map((batch) => [batch.id, batch])).values()];
+      if (uniqueBatches.some((batch) => batch.status !== 'active' && batch.status !== 'exhausted')) throw new Error('COUPON_BATCH_UNAVAILABLE');
+      if (uniqueBatches.some((batch) => batch.deliveryScope !== 'buyer_deliverable')) throw new Error('COUPON_BATCH_NOT_DELIVERABLE');
+      const batchIds = uniqueBatches.map((batch) => batch.id);
+      const fingerprint = reservationFingerprint({ adminId: input.adminId, accountId: input.accountId, batchIds, quantity: normalized.quantity, purpose: normalized.purpose });
+      const existingId = this.couponReservationByExecutionKey.get(normalized.executionKey);
+      const existing = existingId ? this.couponReservations.get(existingId) : undefined;
+      if (existing) {
+        if (existing.fingerprint !== fingerprint || existing.adminId !== input.adminId || existing.accountId !== input.accountId) throw new Error('COUPON_RESERVATION_KEY_CONFLICT');
+        if (existing.status === 'committed' || existing.status === 'reserved') return cloneCouponReservation(existing);
+      }
+      const selected = this.selectAvailableCouponItems(uniqueBatches, normalized.quantity);
+      if (selected.length < normalized.quantity) throw new Error('COUPON_INSUFFICIENT_INVENTORY');
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const leaseUntil = new Date(now.getTime() + leaseSeconds * 1000).toISOString();
+      for (const item of selected) { item.status = 'reserved'; item.reservedUntil = leaseUntil; }
+      const reservation: CouponReservationRecord = existing ?? {
+        reservationId: createId(),
+        adminId: input.adminId,
+        accountId: input.accountId,
+        executionKey: normalized.executionKey,
+        purpose: normalized.purpose,
+        batchIds,
+        fingerprint,
+        quantity: normalized.quantity,
+        status: 'reserved',
+        leaseUntil,
+        items: [],
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      reservation.adminId = input.adminId;
+      reservation.accountId = input.accountId;
+      reservation.purpose = normalized.purpose;
+      reservation.batchIds = batchIds;
+      reservation.fingerprint = fingerprint;
+      reservation.quantity = normalized.quantity;
+      reservation.status = 'reserved';
+      reservation.leaseUntil = leaseUntil;
+      reservation.reason = undefined;
+      reservation.finalizedAt = undefined;
+      reservation.updatedAt = nowIso;
+      reservation.items = selected.map((item) => {
+        const batch = this.couponBatches.get(item.batchId)!;
+        return { itemId: item.id, content: item.content, batchId: batch.id, batchLabel: batch.label, quarkUrl: batch.quarkUrl, extractionCode: batch.extractionCode };
+      });
+      this.couponReservations.set(reservation.reservationId, reservation);
+      this.couponReservationByExecutionKey.set(normalized.executionKey, reservation.reservationId);
+      return cloneCouponReservation(reservation);
+    });
+  }
+
+  async getCouponReservation(input: { adminId: string; reservationId: string; executionKey?: string }): Promise<CouponReservationRecord | undefined> {
+    return this.withCouponReservationLock(async () => {
+      await this.expireCouponReservations();
+      const reservation = this.couponReservations.get(input.reservationId);
+      if (!reservation || !(await this.hasAccountScope(input.adminId, reservation.accountId))) return undefined;
+      if (reservation.adminId !== input.adminId) return undefined;
+      if (input.executionKey !== undefined && input.executionKey !== reservation.executionKey) throw new Error('COUPON_RESERVATION_KEY_CONFLICT');
+      return cloneCouponReservation(reservation);
+    });
+  }
+
+  async commitCouponReservation(input: { adminId: string; reservationId: string; executionKey: string }): Promise<CouponReservationRecord> {
+    return this.withCouponReservationLock(async () => {
+      await this.expireCouponReservations();
+      const reservation = this.couponReservations.get(input.reservationId);
+      if (!reservation || !(await this.hasAccountScope(input.adminId, reservation.accountId)) || reservation.adminId !== input.adminId) throw new Error('COUPON_RESERVATION_NOT_FOUND');
+      if (reservation.executionKey !== input.executionKey) throw new Error('COUPON_RESERVATION_KEY_CONFLICT');
+      if (reservation.status === 'committed') return cloneCouponReservation(reservation);
+      if (reservation.status === 'expired') throw new Error('COUPON_RESERVATION_EXPIRED');
+      if (reservation.status !== 'reserved') throw new Error('COUPON_RESERVATION_NOT_ACTIVE');
+      if (Date.parse(reservation.leaseUntil) <= Date.now()) {
+        await this.expireCouponReservations();
+        throw new Error('COUPON_RESERVATION_EXPIRED');
+      }
+      const selected = reservation.items.map((item) => this.couponItems.get(item.itemId));
+      if (selected.some((item) => !item || item.status !== 'reserved')) throw new Error('COUPON_RESERVATION_INCONSISTENT');
+      const nowIso = new Date().toISOString();
+      for (const item of selected as CouponItemRecord[]) { item.status = 'consumed'; item.reservedUntil = undefined; item.consumedAt = nowIso; }
+      reservation.status = 'committed';
+      reservation.updatedAt = nowIso;
+      reservation.finalizedAt = nowIso;
+      reservation.reason = undefined;
+      for (const batchId of reservation.batchIds) {
+        const batch = this.couponBatches.get(batchId);
+        if (!batch) continue;
+        const available = [...this.couponItems.values()].some((item) => item.batchId === batch.id && item.status === 'available');
+        if (!available && batch.status === 'active') { batch.status = 'exhausted'; batch.updatedAt = nowIso; batch.version += 1; }
+      }
+      return cloneCouponReservation(reservation);
+    });
+  }
+
+  async releaseCouponReservation(input: { adminId: string; reservationId: string; executionKey: string; reason: string }): Promise<CouponReservationRecord> {
+    return this.withCouponReservationLock(async () => {
+      await this.expireCouponReservations();
+      const reservation = this.couponReservations.get(input.reservationId);
+      if (!reservation || !(await this.hasAccountScope(input.adminId, reservation.accountId)) || reservation.adminId !== input.adminId) throw new Error('COUPON_RESERVATION_NOT_FOUND');
+      if (reservation.executionKey !== input.executionKey) throw new Error('COUPON_RESERVATION_KEY_CONFLICT');
+      if (reservation.status === 'committed') throw new Error('COUPON_RESERVATION_FINALIZED');
+      if (reservation.status === 'released' || reservation.status === 'expired') return cloneCouponReservation(reservation);
+      const nowIso = new Date().toISOString();
+      for (const itemRef of reservation.items) {
+        const item = this.couponItems.get(itemRef.itemId);
+        if (!item) throw new Error('COUPON_RESERVATION_INCONSISTENT');
+        if (item.status === 'reserved') { item.status = 'available'; item.reservedUntil = undefined; }
+      }
+      reservation.status = 'released';
+      reservation.reason = input.reason.trim() || 'released';
+      reservation.updatedAt = nowIso;
+      reservation.finalizedAt = nowIso;
+      for (const batchId of reservation.batchIds) {
+        const batch = this.couponBatches.get(batchId);
+        if (batch?.status === 'exhausted') { batch.status = 'active'; batch.updatedAt = nowIso; batch.version += 1; }
+      }
+      return cloneCouponReservation(reservation);
+    });
   }
 
   async listConversations(adminId: string, query: ConversationListQuery): Promise<ConversationListResult> {
@@ -1194,6 +1329,46 @@ export class MemoryStore implements Store {
     if (!session) return [];
     const messages = this.workspaceMessages.get(sessionId) ?? [];
     return messages.slice(-Math.max(1, Math.min(limit, 500))).map((message) => ({ ...message }));
+  }
+
+  private async withCouponReservationLock<T>(work: () => Promise<T>): Promise<T> {
+    let release!: () => void;
+    const previous = this.couponReservationMutex;
+    this.couponReservationMutex = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try { return await work(); } finally { release(); }
+  }
+
+  private async expireCouponReservations(): Promise<void> {
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    for (const reservation of this.couponReservations.values()) {
+      if (reservation.status !== 'reserved' || Date.parse(reservation.leaseUntil) > now) continue;
+      for (const itemRef of reservation.items) {
+        const item = this.couponItems.get(itemRef.itemId);
+        if (item?.status === 'reserved') { item.status = 'available'; item.reservedUntil = undefined; }
+      }
+      reservation.status = 'expired';
+      reservation.reason = 'reservation_expired';
+      reservation.updatedAt = nowIso;
+      reservation.finalizedAt = nowIso;
+      for (const batchId of reservation.batchIds) {
+        const batch = this.couponBatches.get(batchId);
+        if (batch?.status === 'exhausted') { batch.status = 'active'; batch.updatedAt = nowIso; batch.version += 1; }
+      }
+    }
+  }
+
+  private selectAvailableCouponItems(batches: CouponBatchRecord[], quantity: number): CouponItemRecord[] {
+    const available: CouponItemRecord[] = [];
+    for (const batch of batches) {
+      const items = [...this.couponItems.values()]
+        .filter((item) => item.batchId === batch.id && item.status === 'available')
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+      available.push(...items);
+      if (available.length >= quantity) break;
+    }
+    return available.slice(0, quantity);
   }
 
   private productSummary(product: ProductRecord): ProductRecord {

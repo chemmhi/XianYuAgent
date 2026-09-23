@@ -138,6 +138,7 @@
 
 | `root` | `product-automation` | `codex/product-automation` | `F:\ChenHai\Project\XianYuAgent-product-automation` | Codex `/root` | `2026-09-22 23:00:00 +08:00` | `IN_PROGRESS` | `-` | `-` | 四类商品自动化配置、卡券选择穿梭框、批量配置、可靠性测试与视觉验收；独立 worktree，主线未修改。 |
 | `root/implement_whitelist_gate` | `product-automation-live-gate` | `codex/product-automation-live-gate` | `F:\ChenHai\Project\XianYuAgent-product-automation-live-gate` | Codex `/root/implement_whitelist_gate` delegated agent | `2026-09-23 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 外部执行器接入前置安全闸门：live 模式、确认开关、商品标题白名单配置与非白名单零副作用测试。 |
+| `root/implement_coupon_reservations` | `product-automation-coupon-reservations` | `codex/product-automation-coupon-reservations` | `F:\ChenHai\Project\XianYuAgent-product-automation-coupon-reservations` | Codex `/root` delegated agent | `2026-09-23 09:23:02 +08:00` | `IN_PROGRESS` | `-` | `-` | 卡券 reservation reserve/commit/release 存储、迁移与并发/幂等/过期测试；基于 4071eea，独立 worktree。 |
 
 ## 登记维护规则
 

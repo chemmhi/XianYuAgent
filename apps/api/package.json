@@ -34,6 +34,8 @@
     "test:product-automation": "npm run build && node scripts/product-automation-api-smoke.mjs && node --import tsx --test scripts/product-automation.test.ts scripts/product-automation-trigger.test.ts scripts/product-automation-live-gate.test.ts",
     "test:product-automation:entry": "npm run build && node scripts/product-automation-entry-smoke.mjs",
     "test:product-automation:postgres": "npm run build && node scripts/product-automation-postgres-smoke.mjs",
+    "test:coupon-reservations": "node --import tsx --test scripts/coupon-reservation.test.ts",
+    "test:coupon-reservations:postgres": "npm run build && node scripts/coupon-reservation-postgres-smoke.mjs",
     "extract:seller-persona": "node --import tsx scripts/extract-seller-persona.ts",
     "test:extract:seller-persona": "node --import tsx --test scripts/extract-seller-persona.test.ts",
     "smoke": "npm run build && node scripts/smoke.mjs",

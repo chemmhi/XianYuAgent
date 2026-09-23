@@ -23,6 +23,7 @@
 - `030_product_xianyu_list_rank.sql`：保存闲鱼商品列表返回顺序，支持商品目录按闲鱼页面顺序展示；未出现在最近一次同步结果中的商品排名置空并排在末尾。
 - `029_coupon_batch_sequence.sql`：为卡券批次增加从 1 开始的业务编号；UUID `id` 继续作为内部主键和外键，API `batchId`/`id` 对外返回该序号，作废/删除后的序号可被新批次回收。
 - `031_product_automation.sql`：建立商品级四类自动化配置表，按商品唯一保存规范化 JSON、账号归属、版本和摘要；批量保存使用应用事务，卡券批次仍通过现有 `coupon_batches` 校验账号与 `buyer_deliverable` 范围。
+- `033_coupon_reservations.sql`：增加卡券 reservation 与 reservation item 审计表；reserve 使用批次/卡券行锁，commit/release/lease expiry 保持幂等并支持失败重试重开。
 
 ## 031 商品自动化迁移纪律
 
