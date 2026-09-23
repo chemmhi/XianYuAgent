@@ -55,7 +55,7 @@
     "compose:up:d": "docker compose --profile full up -d --build",
     "compose:down": "docker compose down",
     "compose:logs": "docker compose --profile full logs -f api worker",
-    "monitor:auto-reply": "node monitor-auto-reply.mjs",
+    "monitor:auto-reply": "node scripts/auto-reply-monitor/monitor-auto-reply.mjs",
     "compose:ps": "docker compose ps",
     "db:migrate": "npm --workspace apps/api run migrate"
   },

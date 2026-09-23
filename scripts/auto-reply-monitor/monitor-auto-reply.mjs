@@ -1,9 +1,10 @@
 import { appendFile, mkdir, readFile, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { acquireMonitorFlag } from './monitor-auto-reply-flag.mjs';
 
-const root = process.cwd();
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const args = new Set(process.argv.slice(2));
 const tracePath = resolve(valueAfter('--trace') ?? resolve(root, 'runtime-live', 'auto-reply-god-view.ndjson'));
 const flagPath = resolve(valueAfter('--flag') ?? resolve(root, 'runtime-live', 'auto-reply-god-view.enable'));
