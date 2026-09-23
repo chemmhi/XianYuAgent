@@ -148,12 +148,12 @@ export class ProductAutomationTrigger {
         return this.finish(trigger, order.orderNo, { trigger, orderNo: order.orderNo, status: 'blocked', reason: this.execution.readinessCode ?? 'AUTOMATION_EXECUTION_NOT_CONFIGURED' }, adminId, order.accountId, requestId, traceId);
       }
       const result = trigger === 'payment_paid'
-        ? await this.workflow.handlePaymentPaid({ config, order, eventId: eventId ?? `order-refresh:${order.orderNo}:${order.updatedAt}` })
+        ? await this.workflow.handlePaymentPaid({ adminId, config, order, eventId: eventId ?? `order-refresh:${order.orderNo}:${order.updatedAt}` })
         : trigger === 'unpaid_reprice'
-          ? await this.workflow.handleUnpaidReprice({ config, order, eventId: eventId ?? `order-refresh:${order.orderNo}:${order.updatedAt}` })
+          ? await this.workflow.handleUnpaidReprice({ adminId, config, order, eventId: eventId ?? `order-refresh:${order.orderNo}:${order.updatedAt}` })
           : trigger === 'review_gift'
-            ? await this.workflow.handleReviewGift({ config, order, eventId: eventId ?? `review:${order.orderNo}:${order.updatedAt}` })
-            : await this.workflow.handleReviewReminder({ config, order, now });
+            ? await this.workflow.handleReviewGift({ adminId, config, order, eventId: eventId ?? `review:${order.orderNo}:${order.updatedAt}` })
+            : await this.workflow.handleReviewReminder({ adminId, config, order, now });
       if (trigger === 'review_reminder' && result.status === 'succeeded') {
         await this.store.recordReviewReminderSent({ accountId: order.accountId, orderNo: order.orderNo, sentAt: now ?? new Date().toISOString() });
       }
