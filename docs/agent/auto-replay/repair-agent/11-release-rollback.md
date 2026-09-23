@@ -21,6 +21,7 @@ simulate → shadow → canary → controlled live
 - 无未接受 P0/P1；
 - 迁移 apply/rollback、旧数据读取、重启复读通过；
 - 真实入口→API→数据库→Agent Dynamics 回读通过；
+- 买家 WebSocket push→Agent→模拟出站→legacy PostgreSQL 回读已通过，但在 AR-VS-08 state/review 三表接入前，不得把该证据视为新编排发布通过；
 - 发送幂等、unknown、review lease、超时、重试和人工覆盖通过；
 - handoff reasonCode、敏感全链路脱敏、澄清不回复、resolved/closed 证据优先级和 `reopenWindowSeconds` 配置通过；
 - 桌面/移动关键状态视觉证据齐全；

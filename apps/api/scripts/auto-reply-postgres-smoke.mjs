@@ -13,7 +13,7 @@ globalThis.fetch = (async (_input, init) => {
   const body = JSON.parse(String(init?.body));
   const message = modelCall === 1
     ? { content: '', tool_calls: [{ id: 'pg-product-1', type: 'function', function: { name: 'get_product_info', arguments: '{}' } }] }
-    : { content: '这是一个 PostgreSQL 回归测试商品，已确认可以正常回复。' };
+    : { content: JSON.stringify({ decision: 'reply', text: '这是一个 PostgreSQL 回归测试商品，已确认可以正常回复。' }) };
   assert.equal(body.model, 'auto-reply-postgres-smoke');
   return new Response(JSON.stringify({ model: 'auto-reply-postgres-smoke', choices: [{ message }] }), { status: 200, headers: { 'content-type': 'application/json' } });
 });

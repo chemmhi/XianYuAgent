@@ -27,6 +27,7 @@
 | AR-RA-014 | P1 | 状态字段命名与迁移不变量不统一，无法保证生命周期和并发安全 | VERIFIED | 已统一 observedStage/targetStage、stateVersion/CAS、乱序、sourceSequence 和陈旧回放语义；AR-VS-01 状态单测已通过 |
 | AR-RA-015 | P1 | PolicyDecisionTrace、Outcome Review 和 ConversationState 持久化契约不完整 | IMPLEMENTED_PENDING_EVIDENCE | 新增 031 迁移、编排适配和 Outcome Review 内核；待 PostgreSQL 回读与 Activity 投影 |
 | AR-RA-016 | P1 | 新策略缺少可采信的测试、阈值告警、灰度和回滚演练证据 | OPEN | 112 项单测已通过；继续执行指标阈值、告警 Owner、canary、kill switch、迁移回滚和 reconcile 演练 |
+| AR-RA-018 | P1 | AR-VS-08 031 state/review 表已迁移但未接入 buyer push 主运行链路，真实测试只证明 legacy run/message 持久化 | OPEN | `test:auto-reply:buyer-push:postgres` 已证明买家 push→Agent→模拟出站→legacy PostgreSQL 回读；必须补主入口编排接入和三表真实写读后复审 |
 
 ## 旧风险映射
 

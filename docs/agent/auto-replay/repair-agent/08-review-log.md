@@ -112,3 +112,24 @@ AR-VS-00 三轮复审已执行，但阶段 0 门禁为 `BLOCKED`，不能标记 
 - 以上 PASS 仅表示可运行内核/适配层证据，不等同于生产发布通过；真实 PostgreSQL、外部发送、跨进程 worker、红队和 canary 证据仍未提交。
 - 当前自动回复单测为 114/114；Activity 兼容投影覆盖旧 `persisted + known_success → review_pending`，不把传输成功误报为 resolved。
 - 后续人工审核节点按用户确认默认批准继续，但任何真实环境门禁仍需保留可回读证据和回滚记录。
+
+## 2026-09-23：买家推送真实持久化复核
+
+| 复核项 | 结论 | 证据 |
+| --- | --- | --- |
+| 模拟买家 WebSocket push → XianyuImClient 解码 → handleExternalEvent | PASS | `npm --workspace apps/api run test:auto-reply:e2e`：4/4；新增 `apps/api/scripts/auto-reply-buyer-push-postgres-smoke.mjs` |
+| Agent 工具循环与结构化回复 | PASS | buyer-push PostgreSQL smoke：`modelCalls=2`，首轮 `get_product_info`，末轮结构化 `decision=reply` |
+| 模拟出站与 legacy PostgreSQL 落库 | PASS | `outboundSimulated=true`、`outboundPersisted=true`，且未调用 `/r/MessageSend/sendByReceiverScope` |
+| runtime 重启后回读 | PASS | `runPersistedAfterRestart=true`、`aiOutboundCountAfterRestart=1` |
+| AR-VS-08 新 state/review 闭环 | BLOCKED / P1 | 031 三张表已由 `npm run db:migrate` 创建，但 `apps/api/src` 当前无其读写引用；本轮不能将适配级 PASS 提升为真实闭环 PASS |
+
+### 复核结论
+
+- 本轮已确认“买家消息输入 → Agent 正常产出消息 → 模拟发送 → legacy PostgreSQL 持久化 → 重启复读”正常运转。
+- 本轮同步确认 AR-VS-08 的真实入口接入仍未完成；后续必须先补三表写读和 Activity 投影，再执行受影响测试与独立复审。
+
+### 独立架构复审
+
+- `apps/api/src/app.ts` 当前只装配旧 `AutoReplyService`，未装配 `PolicyEngine`、`ConversationStateReducer` 或 `AutoReplyRepairOrchestrator`。
+- `apps/api/src/xianyu-im-service.ts` 的实时 push 和 inbox worker 均直接调用旧 `processInbound`；现有 E2E 断言的是 legacy `persisted/replied/simulated`，未断言 `primaryAction`、`policyDecisionId`、`stateVersion`、`ReviewRecord` 或 `resolutionStatus`。
+- 结论：legacy smoke PASS；AR-VS-08 新编排真实入口验收为 **P1 / BLOCKED**。最小后续是以 feature flag/shadow 模式同时接入实时 push 与 inbox worker，明确旧服务仅作兼容 fallback，禁止静默双写。
