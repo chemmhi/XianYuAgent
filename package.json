@@ -48,7 +48,7 @@
     "test:e2e:chrome:agent-dynamics": "npm --workspace apps/web run test:e2e:chrome:agent-dynamics",
     "test:agent-dynamics:postgres": "npm --workspace apps/api run test:agent-dynamics:postgres",
     "extract:seller-persona": "npm --workspace apps/api exec -- node --import tsx scripts/extract-seller-persona.ts",
-    "test:extract:seller-persona": "npm --workspace apps/api exec -- node --import tsx --test scripts/extract-seller-persona.test.ts",
+    "test:extract:seller-persona": "npm --workspace apps/api exec -- node --import tsx --test scripts/extract-seller-persona.test.ts scripts/seller-persona-style.test.ts",
     "test:products:postgres": "npm --workspace apps/api run test:postgres",
     "compose:config": "docker compose config --quiet",
     "compose:up": "docker compose --profile full up --build",

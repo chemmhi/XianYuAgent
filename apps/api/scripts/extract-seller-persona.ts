@@ -8,6 +8,15 @@ import {
   loadPiRuntimeConfig,
   type ModelClient,
 } from '../src/pi-runtime.ts';
+import {
+  buildLocalStylePrompt,
+  buildStyleCorpus,
+  DEFAULT_STYLE_MAX_ITERATIONS,
+  DEFAULT_STYLE_SIMILARITY_THRESHOLD,
+  MIN_REAL_DIALOGUE_ROUNDS,
+  optimizeSellerStylePrompt,
+  renderStyleOptimizationReport,
+} from './seller-persona-style.ts';
 
 const DEFAULT_EXCLUDED_BUYERS = ['一只橘喵喵亮晶晶', '三秒123456789'];
 const DEFAULT_REPEAT_CONVERSATIONS = 4;
@@ -105,14 +114,6 @@ interface PersonaIdentity {
   education: string;
   occupation: string;
   capabilities: string[];
-}
-
-interface PersonaObservation {
-  style?: string[];
-  servicePatterns?: string[];
-  strengths?: string[];
-  responseExamples?: string[];
-  cautions?: string[];
 }
 
 interface PersonaExample {
@@ -521,21 +522,40 @@ async function main(): Promise<void> {
     `, [options.accountId || null, (options.excludedBuyers ?? DEFAULT_EXCLUDED_BUYERS).map((value) => value.toLocaleLowerCase())]);
 
     const { conversations, report } = cleanConversationRows(result.rows, options);
-    const heuristic = buildHeuristicPersona(conversations, report);
     let documents: PersonaDocuments = {
-      reportMarkdown: heuristic.reportMarkdown,
-      systemPromptText: heuristic.systemPromptText,
+      reportMarkdown: [
+        '# 直接风格提示词草稿',
+        '',
+        '- 当前使用 `--skip-model`，仅根据清洗后的人工聊天做本地风格归纳。',
+        '- 该草稿不包含历史问答案例；正式提示词请使用模型优化流程，并通过至少 10 轮真实对话评估。',
+      ].join('\n'),
+      systemPromptText: buildLocalStylePrompt(conversations),
     };
     let modelUsed: string | undefined;
     let modelError: string | undefined;
+    let optimized = false;
 
     if (!options.skipModel) {
       const model = createModelClient();
       if (!model) throw new Error('PERSONA_MODEL_CONFIG_REQUIRED: 请在 .env 中配置 API_KEY（可选 BASE_URL、MODEL），或显式使用 --skip-model');
       try {
-        const generated = await extractWithModel(model, conversations, options);
-        documents = generated;
-        modelUsed = generated.model;
+        const optimized = await optimizeSellerStylePrompt(
+          model,
+          conversations,
+          buildStyleCorpus(conversations, (options.maxChunkChars ?? DEFAULT_MAX_CHUNK_CHARS) * (options.maxChunks ?? DEFAULT_MAX_CHUNKS)),
+          {
+            sampleCount: options.evaluationSamples ?? MIN_REAL_DIALOGUE_ROUNDS,
+            threshold: options.similarityThreshold ?? DEFAULT_STYLE_SIMILARITY_THRESHOLD,
+            maxIterations: options.maxIterations ?? DEFAULT_STYLE_MAX_ITERATIONS,
+          },
+        );
+        documents = {
+          reportMarkdown: renderStyleOptimizationReport(optimized, options.similarityThreshold ?? DEFAULT_STYLE_SIMILARITY_THRESHOLD),
+          systemPromptText: optimized.prompt,
+          model: optimized.model,
+        };
+        modelUsed = optimized.model;
+        optimized = true;
       } catch (error) {
         modelError = error instanceof Error ? error.message : String(error);
         throw new Error(`PERSONA_MODEL_GENERATION_FAILED: ${modelError}`);
@@ -544,123 +564,15 @@ async function main(): Promise<void> {
 
     report.generatedAt = new Date().toISOString();
     await writeFile(resolve(outputDir, 'cleaned-conversations.jsonl'), conversations.map((conversation) => JSON.stringify(conversation)).join('\n') + (conversations.length ? '\n' : ''), 'utf8');
-    await writeFile(resolve(outputDir, 'cleaning-report.json'), JSON.stringify({ ...report, modelUsed, wireApi: process.env.WIRE_API, modelError }, null, 2), 'utf8');
+    await writeFile(resolve(outputDir, 'cleaning-report.json'), JSON.stringify({ ...report, modelUsed, wireApi: process.env.WIRE_API, modelError, evaluationSamples: options.evaluationSamples ?? MIN_REAL_DIALOGUE_ROUNDS, similarityThreshold: options.similarityThreshold ?? DEFAULT_STYLE_SIMILARITY_THRESHOLD, maxIterations: options.maxIterations ?? DEFAULT_STYLE_MAX_ITERATIONS }, null, 2), 'utf8');
     await writeFile(resolve(outputDir, 'persona-description.md'), documents.reportMarkdown.trim() + '\n', 'utf8');
     await writeFile(resolve(outputDir, 'seller-persona-system-prompt.txt'), documents.systemPromptText.trim() + '\n', 'utf8');
-    await writeFile(resolve(outputDir, 'run-metadata.json'), JSON.stringify({ generatedAt: report.generatedAt, outputDir, excludedBuyers: report.excludedBuyers, rawRows: report.rawRows, conversations: conversations.length, modelUsed, wireApi: process.env.WIRE_API, modelError }, null, 2), 'utf8');
+    await writeFile(resolve(outputDir, 'run-metadata.json'), JSON.stringify({ generatedAt: report.generatedAt, outputDir, excludedBuyers: report.excludedBuyers, rawRows: report.rawRows, conversations: conversations.length, modelUsed, wireApi: process.env.WIRE_API, modelError, evaluationSamples: options.evaluationSamples ?? MIN_REAL_DIALOGUE_ROUNDS, similarityThreshold: options.similarityThreshold ?? DEFAULT_STYLE_SIMILARITY_THRESHOLD, maxIterations: options.maxIterations ?? DEFAULT_STYLE_MAX_ITERATIONS, optimized }, null, 2), 'utf8');
 
     console.log(JSON.stringify({ outputDir, rawRows: report.rawRows, conversations: conversations.length, keptMessages: report.keptMessages, removedMessages: report.removedMessages, modelUsed, wireApi: process.env.WIRE_API, modelError }, null, 2));
   } finally {
     await pool.end();
   }
-}
-
-async function extractWithModel(model: ModelClient, conversations: CleanedConversation[], options: CliOptions): Promise<PersonaDocuments> {
-  const chunks = buildConversationChunks(conversations, options.maxChunkChars ?? DEFAULT_MAX_CHUNK_CHARS).slice(0, options.maxChunks ?? DEFAULT_MAX_CHUNKS);
-  const observations: PersonaObservation[] = [];
-  let modelName: string | undefined;
-  for (const chunk of chunks) {
-    const result = await model.complete({
-      messages: [
-        {
-          role: 'system',
-          content: [
-            '你是一个严谨的中文客服风格分析器。',
-            '只从给定的脱敏闲鱼对话中提炼卖家的表达风格、服务习惯、专业能力线索和高质量回复模式。',
-            '不要把一次性事实、旧价格、旧库存、买家隐私或未验证的承诺写成稳定人格。',
-            '不要补充输入中不存在的经历。',
-            '只返回 JSON：{"style":[],"servicePatterns":[],"strengths":[],"responseExamples":[],"cautions":[]}',
-          ].join('\n'),
-        },
-        { role: 'user', content: `<dialogues>\n${chunk}\n</dialogues>` },
-      ],
-    });
-    modelName = result.model;
-    observations.push(parseObservation(result.content));
-  }
-
-  const synthesis = await model.complete({
-    messages: [
-      {
-        role: 'system',
-        content: [
-          '你要为一个闲鱼卖家生成两份互相独立的中文文档，并且只返回 JSON。',
-          '第一份是 reportMarkdown：给人审阅的分身报告；第二份是 systemPromptText：可直接作为现有 Agent 的附加 persona 提示词。',
-          '两份文档都只能提炼稳定身份、表达风格、沟通节奏、服务习惯、专业能力线索、边界和转人工规则。',
-          '身份背景只能使用：天津大学硕士研究生毕业（985高校）；大厂前端开发工程师；擅长寻找资料/影视资源/课程等虚拟资源；擅长软件开发和 AI 应用开发。',
-          'reportMarkdown 必须是纯粹的卖家分身画像，只保留稳定身份、能力领域、表达风格、沟通节奏、服务习惯、软边界和身份呈现方式。',
-          'reportMarkdown 禁止出现清洗范围、数据集统计、会话/消息数量、词频、模型信息、生成过程、上一版失败原因、分析复盘、原始聊天示例、买家身份、订单/价格/库存/链接/联系方式或一次性交易事实。',
-          'reportMarkdown 不要把退款、发货、评价等具体流程写成永久人格；如需提及，只能抽象为耐心、克制、先核实再推进。',
-          'systemPromptText 必须是独立的 additive persona，只补充身份表达、风格、服务方式和交易沟通习惯，不嵌入 reportMarkdown、统计、分析过程、原始例句或历史交易事实。',
-          'systemPromptText 必须包含：情绪识别；识别当前商品/订单阶段；话题跑偏时礼貌接住后引回当前商品或订单；未下单引导下单；已下单待发货引导发货前的下一步；已发货引导收货；已收货且问题解决后可自然引导好评和点亮小红花；售后/争议时先解决问题，不催评价。',
-          'systemPromptText 必须明确实时价格/库存/订单/发货/售后以工具或数据库为准，事实不确定时澄清或 handoff，禁止编造承诺、泄露隐私和内部实现。',
-          'systemPromptText 必须说明使用卖家的口吻和角色交流；不主动讨论内部实现；若被直接询问是否由 AI 或自动化系统回复，遵守主系统和平台披露规则，不虚假否认。',
-          'systemPromptText 必须声明优先级为：主系统安全规则 > 实时事实与工具 > 现行业务规则 > persona 风格；不要重新定义 reply/handoff JSON 字段。',
-          'keyExamples 必须返回 3-6 个脱敏、抽象化的关键对话示例，每个包含 scenario、buyerIntent、reply、styleNotes。示例只用于学习称谓、语气词、句长、情绪处理和服务节奏，不得包含价格、库存、订单号、链接、联系方式、网盘/提取码、具体旧资源或不可复用承诺。',
-          'keyExamples 中的 reply 可以保留自然称谓和语气词，但必须改写成可迁移的通用场景；不要直接复制历史整段对话。',
-          '不要写固定口头禅清单、当前资源交付话术、完整 JSON schema 或任何需要机械复读的模板。',
-          '返回格式严格为：{"reportMarkdown":"...","systemPromptText":"...","keyExamples":[{"scenario":"...","buyerIntent":"...","reply":"...","styleNotes":["..."]}]}',
-        ].join('\n'),
-      },
-      {
-        role: 'user',
-        content: JSON.stringify({
-          identity: IDENTITY,
-          cleaningPrinciples: [
-            '只使用脱敏后的买家问题与人工卖家回复作为风格证据',
-            '排除系统/自动发货消息、AI 回复、固定套话、低价值应答、敏感信息、测试数据和网盘/链接/分享交付内容',
-            '把一次性业务事实视为不可复用证据，不写入最终文档',
-          ],
-          styleEvidence: observations.flatMap((observation) => observation.responseExamples ?? []).map(normalizeExampleEvidence).filter((value): value is string => Boolean(value)).slice(0, 24),
-          observations: observations.map(({ responseExamples: _responseExamples, ...observation }) => observation),
-        }, null, 2),
-      },
-    ],
-  });
-  modelName = synthesis.model || modelName;
-  const parsed = parseJsonObject(synthesis.content);
-  const reportMarkdown = typeof parsed.reportMarkdown === 'string' ? parsed.reportMarkdown.trim() : '';
-  const baseSystemPromptText = typeof parsed.systemPromptText === 'string' ? parsed.systemPromptText.trim() : '';
-  const keyExamples = parsePersonaExamples(parsed.keyExamples);
-  const systemPromptText = `${baseSystemPromptText}\n${renderPersonaExamples(keyExamples)}`.trim();
-  validatePersonaDocuments({ reportMarkdown, systemPromptText });
-  return { reportMarkdown, systemPromptText, keyExamples, model: modelName };
-}
-
-function parseObservation(value: string): PersonaObservation {
-  const parsed = parseJsonObject(value);
-  return {
-    style: stringArray(parsed.style),
-    servicePatterns: stringArray(parsed.servicePatterns),
-    strengths: stringArray(parsed.strengths),
-    responseExamples: stringArray(parsed.responseExamples),
-    cautions: stringArray(parsed.cautions),
-  };
-}
-
-function normalizeExampleEvidence(value: string): string | undefined {
-  const text = redactText(value);
-  if (!text || isShareDeliveryText(text)) return undefined;
-  if (/\d+\s*(?:元|块|元钱)|(?:订单|商品)(?:号|编号|ID)|https?:\/\/|提取码|分享码/iu.test(text)) return undefined;
-  return text.length > 180 ? `${text.slice(0, 177)}...` : text;
-}
-
-function parsePersonaExamples(value: unknown): PersonaExample[] {
-  if (!Array.isArray(value)) throw new Error('PERSONA_SYNTHESIS_INVALID_OUTPUT: 缺少关键对话示例');
-  const examples = value.map((item): PersonaExample | undefined => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
-    const candidate = item as Record<string, unknown>;
-    const scenario = typeof candidate.scenario === 'string' ? candidate.scenario.trim() : '';
-    const buyerIntent = typeof candidate.buyerIntent === 'string' ? candidate.buyerIntent.trim() : '';
-    const reply = typeof candidate.reply === 'string' ? candidate.reply.trim() : '';
-    const styleNotes = stringArray(candidate.styleNotes) ?? [];
-    if (!scenario || !buyerIntent || !reply || styleNotes.length === 0) return undefined;
-    const normalizedReply = normalizeExampleEvidence(reply);
-    if (!normalizedReply) return undefined;
-    return { scenario, buyerIntent, reply: normalizedReply, styleNotes: styleNotes.slice(0, 5) };
-  }).filter((example): example is PersonaExample => Boolean(example));
-  if (examples.length < 3 || examples.length > 6) throw new Error('PERSONA_SYNTHESIS_INVALID_OUTPUT: 关键对话示例数量必须为 3-6 个');
-  return examples;
 }
 
 export function validatePersonaDocuments(input: Pick<PersonaDocuments, 'reportMarkdown' | 'systemPromptText'>): void {
@@ -722,49 +634,9 @@ export function validatePersonaDocuments(input: Pick<PersonaDocuments, 'reportMa
   }
 }
 
-function buildConversationChunks(conversations: CleanedConversation[], maxChars: number): string[] {
-  const chunks: string[] = [];
-  let current = '';
-  for (const conversation of conversations) {
-    const body = conversation.messages.map((message) => `${message.role === 'seller' ? '卖家' : '买家'}：${message.text}`).join('\n');
-    const safeItemTitle = conversation.itemTitle && !isShareDeliveryText(conversation.itemTitle) ? conversation.itemTitle : '未标注';
-    const block = `商品：${safeItemTitle}\n${body}`;
-    if (current && current.length + block.length + 2 > maxChars) {
-      chunks.push(current);
-      current = '';
-    }
-    current += (current ? '\n\n' : '') + block;
-  }
-  if (current) chunks.push(current);
-  return chunks;
-}
-
 function createModelClient(): ModelClient | undefined {
   const config = loadPiRuntimeConfig(process.env);
   return config ? new OpenAICompatibleModelClient(config) : undefined;
-}
-
-function parseJsonObject(value: string): Record<string, unknown> {
-  const cleaned = value.trim().replace(/^```(?:json)?/iu, '').replace(/```$/u, '').trim();
-  try {
-    const parsed = JSON.parse(cleaned);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
-  } catch {
-    const start = cleaned.indexOf('{');
-    const end = cleaned.lastIndexOf('}');
-    if (start < 0 || end <= start) return {};
-    try {
-      const parsed = JSON.parse(cleaned.slice(start, end + 1));
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
-    } catch {
-      return {};
-    }
-  }
-}
-
-function stringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  return value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean).slice(0, 30);
 }
 
 interface CliOptions extends CleaningOptions {
@@ -778,6 +650,9 @@ interface CliOptions extends CleaningOptions {
   skipModel?: boolean;
   maxChunkChars?: number;
   maxChunks?: number;
+  evaluationSamples?: number;
+  similarityThreshold?: number;
+  maxIterations?: number;
 }
 
 function parseArgs(argv: string[]): CliOptions {
@@ -805,6 +680,9 @@ function parseArgs(argv: string[]): CliOptions {
       case 'timeout-ms': options.timeoutMs = Number(value); break;
       case 'max-chunk-chars': options.maxChunkChars = Number(value); break;
       case 'max-chunks': options.maxChunks = Number(value); break;
+      case 'evaluation-samples': options.evaluationSamples = Number(value); break;
+      case 'similarity-threshold': options.similarityThreshold = Number(value); break;
+      case 'max-iterations': options.maxIterations = Number(value); break;
       case 'min-repeat-conversations': options.minRepeatConversations = Number(value); break;
       case 'exclude-buyer':
         if (value) options.excludedBuyers = [...(options.excludedBuyers ?? []), value];
@@ -825,11 +703,14 @@ function printHelp(): void {
     '--out-dir <dir>                 指定输出目录；默认写入 artifacts/seller-persona/<timestamp>',
     '--account-id <uuid>             只导出指定账号',
     '--exclude-buyer <name>         追加排除买家，可重复',
-    '--skip-model                   不调用模型，只生成规则统计草稿',
+    '--skip-model                   不调用模型，只生成本地风格草稿（不含历史问答案例）',
     '--api-key/--base-url/--model   临时覆盖模型配置',
     '--wire-api <responses>         固定使用 Responses API；传入其他协议会失败',
     '--timeout-ms <n>              模型单次请求超时，默认 120000',
     '--max-chunks <n>               最多送模型分析的对话块数，默认 12',
+    `--evaluation-samples <n>       每轮随机抽取的真实会话数，至少 ${MIN_REAL_DIALOGUE_ROUNDS}，默认 ${MIN_REAL_DIALOGUE_ROUNDS}`,
+    `--similarity-threshold <n>     通过阈值，默认 ${DEFAULT_STYLE_SIMILARITY_THRESHOLD}`,
+    `--max-iterations <n>          未达阈值时最多迭代轮数，默认 ${DEFAULT_STYLE_MAX_ITERATIONS}`,
   ].join('\n'));
 }
 
