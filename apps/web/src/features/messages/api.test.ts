@@ -51,6 +51,16 @@ describe('messages API media contract', () => {
     expect(capturedPath).toContain('limit=25');
   });
 
+  it('can request a local-only timeline refresh for realtime reconciliation', async () => {
+    let capturedPath = '';
+    const api = createMessagesApi({
+      get: async <T>(path: string) => { capturedPath = path; return { data: { items: [], hasMore: false, latestCursor: 4, hasMoreHistory: false } } as unknown as T; },
+    });
+    await api.listMessages({ accountId: 'a-1', conversationId: 'c-1', cursor: 4, refreshExternal: false });
+    expect(capturedPath).toContain('cursor=4');
+    expect(capturedPath).toContain('refreshExternal=false');
+  });
+
   it('posts a multipart image payload without forcing JSON headers', async () => {
     let capturedPath = '';
     let capturedBody: unknown;

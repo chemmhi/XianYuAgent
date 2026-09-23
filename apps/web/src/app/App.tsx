@@ -134,7 +134,12 @@ export function AuthenticatedShell({ admin, onLogout = async () => undefined, lo
           <div className="sidebar-bottom"><div className="agent-card"><span className="online-dot" /> <strong>Agent Runtime</strong><small>独立服务 · 正常</small></div><div className="desktop-account-anchor"><button className="sidebar-user sidebar-account-trigger" type="button" data-testid="account-menu-trigger" aria-label="打开账户菜单" aria-expanded={accountMenuOpen} aria-haspopup="menu" onClick={() => setAccountMenuOpen((open) => !open)}><div className="avatar">{adminInitial}</div><div><strong>{adminName}</strong><span>{adminEmail}</span></div><ChevronIcon open={accountMenuOpen} /></button>{accountMenu}</div></div>
         </aside>
         <div className="desktop-body">
-          <main className={page === 'products' ? 'products-main' : page === 'accounts' ? 'accounts-main' : page === 'orders' ? 'orders-main' : page === 'settings' ? 'settings-main' : page === 'agent-dynamics' ? 'agent-dynamics-main-host' : undefined}>{renderAuthenticatedPage({ page, accountsApi, productsApi, productAutomationApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi, agentDynamicsApi, dashboardApi, dashboardApiMode, onNavigate: navigate })}</main>
+          <main className={page === 'products' ? 'products-main' : page === 'accounts' ? 'accounts-main' : page === 'orders' ? 'orders-main' : page === 'settings' ? 'settings-main' : page === 'agent-dynamics' ? 'agent-dynamics-main-host' : undefined}>
+            <div hidden={page !== 'messages'}>
+              <MessagesPage api={messagesApi} active={page === 'messages'} />
+            </div>
+            {page !== 'messages' && renderAuthenticatedPage({ page, accountsApi, productsApi, productAutomationApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi, agentDynamicsApi, dashboardApi, dashboardApiMode, onNavigate: navigate })}
+          </main>
         </div>
       </div>
     </div>

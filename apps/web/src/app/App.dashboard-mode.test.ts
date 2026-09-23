@@ -64,6 +64,7 @@ describe('dashboard API mode resolution', () => {
     expect(html).not.toContain('dashboard-mobile-frame');
     expect(html).toContain('dashboard-desktop-content');
     expect(html).toContain('dashboard-mobile-content');
+    expect(html).toContain('hidden=""');
   });
 
   it('keeps the sidebar navigation focused on primary labels', () => {

@@ -283,6 +283,13 @@ async function run() {
   await evaluate(cdp, `document.querySelector('[data-conversation-id="${conversation.id}"]')?.click()`);
   await waitFor(async () => (await messageBodies(cdp)).includes('历史消息 205'), 'latest history page');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".messages-connection-dot.connected"))'), 'realtime connected');
+  await evaluate(cdp, `Array.from(document.querySelectorAll('nav.side-nav button')).find((button) => button.textContent?.includes('Workspace'))?.click()`);
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-workspace-domain]"))'), 'workspace route');
+  await evaluate(cdp, `Array.from(document.querySelectorAll('nav.side-nav button')).find((button) => button.textContent?.includes('在线聊天'))?.click()`);
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-messages-domain]"))'), 'messages route restored');
+  await waitFor(async () => (await messageBodies(cdp)).includes('历史消息 205'), 'cached chat timeline after route switch');
+  assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-sidebar-skeleton"))'), false, 'route switch must reuse the cached conversation list');
+  assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-timeline-skeleton"))'), false, 'route switch must reuse the cached timeline');
   assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(".messages-account-tabs"))'), false, 'messages page must not render an account selector');
   assert.equal(await evaluate(cdp, 'Boolean(document.querySelector(`[role="tablist"]`))'), false, 'messages page must not render a tablist account selector');
   assert.equal(await evaluate(cdp, 'localStorage.getItem("xianyu.activeAccountId")'), account.id, 'messages page must reuse the account context selected in Accounts');

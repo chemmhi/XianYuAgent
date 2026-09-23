@@ -13,11 +13,11 @@ import { ConversationListSkeleton, TimelineSkeleton } from './MessagesSkeletons'
 import { SearchField } from '../../../shared/ui/SearchField';
 import './messages.css';
 
-export function MessagesPage({ api: providedApi }: { api?: MessagesApi }) {
+export function MessagesPage({ api: providedApi, active = true }: { api?: MessagesApi; active?: boolean }) {
   const { accounts, currentAccountId, currentAccount, accountsLoading, accountsError } = useAccountContext();
   const api = useMemo(() => providedApi ?? createMessagesApi({ get: async () => { throw new Error('messages api unavailable'); } }), [providedApi]);
-  const controller = useMessagesController({ api, accountId: currentAccountId });
-  const initialConversationId = useMemo(() => new URLSearchParams(window.location.search).get('conversationId') ?? undefined, []);
+  const controller = useMessagesController({ api, accountId: currentAccountId, enabled: active });
+  const initialConversationId = useMemo(() => typeof window === 'undefined' ? undefined : new URLSearchParams(window.location.search).get('conversationId') ?? undefined, []);
   const [draft, setDraft] = useState('');
   const [search, setSearch] = useState('');
   const [unreadOnly, setUnreadOnly] = useState(false);

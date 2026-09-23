@@ -36,6 +36,7 @@ import { ProductAutomationService } from './product-automation.js';
 import { AutomationWorkflowService, PersistentAutomationExecutionLedger } from './product-automation.js';
 import { ProductAutomationTrigger, ProductAutomationWorker } from './product-automation-trigger.js';
 import { XianyuProductAutomationExecutionAdapter } from './product-automation-xianyu.js';
+import { conversationRefreshMode, messageRefreshMode } from './messages-loading-policy.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -671,7 +672,8 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
 
   if (ctx.path === '/api/v1/conversations' && ctx.method === 'GET') {
     const query = parseConversationListQuery(ctx.query);
-    if (query.accountId && query.cursor === undefined && query.refreshExternal !== false) {
+    const refreshMode = conversationRefreshMode(query);
+    if (query.accountId && refreshMode === 'await') {
       // The local API cursor is opaque and must never be forwarded to the
       // numeric cursor used by the Xianyu IM protocol. Refresh from the
       // external head only for the first page; the local store owns
@@ -680,6 +682,12 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
       // invalidate the opaque cursor issued by the previous page.
       try { await xianyuIm.listConversations(authContext.admin.id, query.accountId, undefined, query.limit); }
       catch { /* preserve locally persisted conversations when the external session is unavailable */ }
+    } else if (query.accountId && refreshMode === 'background') {
+      // Serve the local index immediately. The external head refresh is
+      // intentionally detached so opening the route is not blocked by IM
+      // login/token/profile latency; the UI's local reconciliation picks up
+      // the upserts on its next cycle.
+      void xianyuIm.listConversations(authContext.admin.id, query.accountId, undefined, query.limit).catch(() => undefined);
     }
     const result = await messages.listConversations(authContext.admin.id, query);
     return { statusCode: 200, body: success(ctx, result).body };
@@ -699,10 +707,19 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     const history = decodeMessageHistoryCursor(query.beforeCursor);
     if (query.beforeCursor !== undefined && !history) throw new ServiceError(422, 'VALIDATION_FAILED', 'beforeCursor is invalid');
     let externalPage: { hasMore: boolean; nextCursor?: number } = { hasMore: false };
-    const shouldReadExternalHistory = query.beforeCursor === undefined || history?.externalCursor !== undefined;
+    const isInitialTimelinePage = query.beforeCursor === undefined && query.cursor === undefined;
+    const refreshMode = messageRefreshMode(query);
+    const shouldReadExternalHistory = refreshMode !== 'local' && (isInitialTimelinePage || history?.externalCursor !== undefined);
     if (shouldReadExternalHistory) {
-      try { externalPage = await xianyuIm.listMessages(authContext.admin.id, local.accountId, conversationId, history?.externalCursor, query.limit); }
-      catch { /* preserve locally persisted history when the external session is unavailable */ }
+      const shouldAwaitExternal = refreshMode === 'await';
+      const refresh = xianyuIm.listMessages(authContext.admin.id, local.accountId, conversationId, history?.externalCursor, query.limit)
+        .then((page) => { externalPage = page; return page; })
+        .catch(() => undefined);
+      if (shouldAwaitExternal) {
+        await refresh;
+      } else {
+        void refresh;
+      }
     }
     const result = await messages.listMessages(authContext.admin.id, conversationId, query);
     const oldest = result.items[0];
@@ -1298,7 +1315,8 @@ function parseMessageListQuery(query: Record<string, string>): import('./domain.
   const cursor = query.cursor === undefined ? undefined : Number(query.cursor);
   const beforeCursor = query.beforeCursor === undefined ? undefined : query.beforeCursor;
   const limit = query.limit === undefined ? undefined : Number(query.limit);
-  return { cursor: cursor === undefined || Number.isNaN(cursor) ? cursor : Math.trunc(cursor), beforeCursor, limit: limit === undefined || Number.isNaN(limit) ? limit : Math.trunc(limit) };
+  const refreshExternal = query.refreshExternal === undefined ? undefined : query.refreshExternal !== 'false';
+  return { cursor: cursor === undefined || Number.isNaN(cursor) ? cursor : Math.trunc(cursor), beforeCursor, limit: limit === undefined || Number.isNaN(limit) ? limit : Math.trunc(limit), refreshExternal };
 }
 
 function parseAutoReplyRunListQuery(query: Record<string, string>): import('./domain.js').AutoReplyRunListQuery {
