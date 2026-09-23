@@ -7,7 +7,7 @@ import {
   redactText,
   validatePersonaDocuments,
   type RawMessageRow,
-} from './extract-seller-persona.ts';
+} from './optimize-seller-style-prompt.ts';
 
 function row(overrides: Partial<RawMessageRow> = {}): RawMessageRow {
   return {

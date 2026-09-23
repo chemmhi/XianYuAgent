@@ -4,11 +4,14 @@ import {
   buildStyleEvaluationCases,
   optimizeSellerStylePrompt,
   parseStyleEvaluation,
+  renderStyleOptimizationTraceJson,
+  renderStyleOptimizationTraceMarkdown,
   validateStylePrompt,
   STYLE_DIMENSIONS,
+  STYLE_SCORING_CRITERIA,
   type StyleEvaluationCase,
-} from './seller-persona-style.ts';
-import type { CleanedConversation } from './extract-seller-persona.ts';
+} from './seller-style-prompt-optimizer.ts';
+import type { CleanedConversation } from './optimize-seller-style-prompt.ts';
 import type { ModelClient } from '../src/pi-runtime.ts';
 
 function conversations(count = 10): CleanedConversation[] {
@@ -116,6 +119,51 @@ test('keeps iterating until the ten-round similarity threshold is reached', asyn
   });
   assert.equal(result.iterations.length, 2);
   assert.equal(result.finalScore, 98.5);
+  assert.equal(result.status, 'passed');
   assert.match(result.prompt, /自然变化/u);
   assert.ok(result.iterations.every((item) => item.sampledCaseIds.length === 10));
+  assert.ok(result.iterations.every((item) => item.promptText.length > 0 && item.sampledCases.length === 10));
+});
+
+test('emits progress events and renders an auditable trace without changing the final prompt contract', async () => {
+  const input = conversations(10);
+  const sampled = buildStyleEvaluationCases(input, 10, () => 0.5);
+  const events: string[] = [];
+  let call = 0;
+  const model: ModelClient = {
+    async complete() {
+      call += 1;
+      if (call === 1) return { content: genericPrompt(), model: 'trace-model' };
+      if (call >= 2 && call <= 11) return { content: '先确认一下你现在的情况，我帮你看。', model: 'trace-model' };
+      return { content: evaluationJson(98.2, sampled), model: 'trace-model' };
+    },
+  };
+
+  const result = await optimizeSellerStylePrompt(model, input, 'buyer：问题\n seller：回答', {
+    sampleCount: 10,
+    threshold: 98,
+    maxIterations: 1,
+    rng: () => 0.5,
+    onProgress: (event) => events.push(event.type),
+  });
+
+  assert.deepEqual(events, [
+    'started',
+    'prompt-generated',
+    'iteration-started',
+    ...Array.from({ length: 10 }, () => 'question-scored'),
+    'iteration-scored',
+    'completed',
+  ]);
+  const markdown = renderStyleOptimizationTraceMarkdown(result);
+  assert.match(markdown, /提示词 v1/u);
+  assert.match(markdown, /评分标准/u);
+  assert.match(markdown, /问题集/u);
+  assert.match(markdown, /人工回答/u);
+  assert.match(markdown, /AI 回答/u);
+  assert.match(markdown, /最终判定/u);
+  for (const criterion of STYLE_SCORING_CRITERIA) assert.match(markdown, new RegExp(criterion.label, 'u'));
+  const trace = JSON.parse(renderStyleOptimizationTraceJson(result)) as { scoringCriteria: unknown[]; iterations: Array<{ sampledCases: unknown[] }> };
+  assert.equal(trace.scoringCriteria.length, 10);
+  assert.equal(trace.iterations[0].sampledCases.length, 10);
 });
