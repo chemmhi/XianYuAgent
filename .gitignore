@@ -16,3 +16,17 @@ apps/*/package-lock.json
 **/.env
 
 artifacts/
+
+# Generated visual evidence
+docs/evidence/**/screenshots/
+docs/agent/**/evidence/**/screenshots/
+*.png
+*.jpg
+*.jpeg
+*.webp
+
+# Local runtime output
+runtime-live/*.log
+runtime-live/*.ndjson
+runtime-live/*.jsonl
+runtime-live/*.enable
