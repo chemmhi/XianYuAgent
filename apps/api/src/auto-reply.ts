@@ -2,6 +2,7 @@ import type { AutoReplyDecision, AutoReplyRunRecord, AutoReplyRunStage, AutoRepl
 import type { MessageService } from './messages.js';
 import { digestJson } from './security.js';
 import type { AutoReplyRepairCandidateResult, AutoReplyRepairRuntime } from './auto-reply-repair-runtime.js';
+import type { AutoReplyGodViewSink } from './auto-reply-god-view.js';
 
 export type AutoReplyIntent = 'price' | 'availability' | 'delivery' | 'general' | 'refund' | 'complaint' | 'cross_product' | 'credential_request' | 'prompt_injection' | 'other';
 
@@ -39,7 +40,7 @@ export type AutoReplyGeneratorObserver = (observation: AutoReplyGeneratorObserva
 export interface AutoReplyGenerator {
   readonly supportsStructuredDecision?: boolean;
   readonly supportsMultimodal?: boolean;
-  generate(input: { adminId?: string; context: AutoReplyContext; classification: AutoReplyClassification; observe?: AutoReplyGeneratorObserver }): Promise<string | AutoReplyGeneratedReply | undefined>;
+  generate(input: { adminId?: string; context: AutoReplyContext; classification: AutoReplyClassification; observe?: AutoReplyGeneratorObserver; runId?: string; traceId?: string }): Promise<string | AutoReplyGeneratedReply | undefined>;
   segmentReply?(input: { reply: string }): Promise<string[] | undefined>;
 }
 
@@ -145,6 +146,7 @@ export interface AutoReplyServiceOptions {
   generator?: AutoReplyGenerator;
   sender?: AutoReplySender;
   repairRuntime?: AutoReplyRepairRuntime;
+  godView?: AutoReplyGodViewSink;
   configProvider?: (adminId: string, accountId: string) => Promise<AutoReplyServiceRuntimeOptions>;
 }
 
@@ -173,6 +175,7 @@ export class AutoReplyService {
   private readonly generator: AutoReplyGenerator;
   private readonly sender: AutoReplySender;
   private readonly repairRuntime?: AutoReplyRepairRuntime;
+  private readonly godView?: AutoReplyGodViewSink;
   private readonly configProvider?: (adminId: string, accountId: string) => Promise<AutoReplyServiceRuntimeOptions>;
   private readonly lastAcceptedAt = new Map<string, number>();
 
@@ -194,6 +197,7 @@ export class AutoReplyService {
     this.generator = options.generator ?? new TemplateAutoReplyGenerator();
     this.sender = options.sender ?? new NoopAutoReplySender();
     this.repairRuntime = options.repairRuntime;
+    this.godView = options.godView;
     this.configProvider = options.configProvider;
   }
 
@@ -246,6 +250,30 @@ export class AutoReplyService {
       if (updated) run = updated;
       return updated;
     };
+    const buyer = {
+      adminId: input.adminId,
+      accountId: conversation.accountId,
+      conversationId: conversation.id,
+      buyerRef: conversation.buyerRef,
+      buyerName: normalizeBuyerName(input.senderName) ?? normalizeBuyerName(conversation.buyerDisplayName),
+      externalConversationRef: conversation.externalConversationRef,
+    };
+    await this.godView?.emit({
+      phase: 'inbound',
+      event: 'inbound.received',
+      traceId,
+      runId: run.id,
+      buyer,
+      payload: {
+        messageId: inboundMessage.id,
+        direction: inboundMessage.direction,
+        bodyType: inboundMessage.bodyType,
+        bodyText: inboundMessage.bodyText ?? '',
+        bodyRef: inboundMessage.bodyRef,
+        createdAt: inboundMessage.createdAt,
+        requestId,
+      },
+    });
     const observeGenerator = async (observation: AutoReplyGeneratorObservation): Promise<void> => {
       try {
         await this.store.appendAutoReplyRunEvent({
@@ -307,6 +335,14 @@ export class AutoReplyService {
         input: { kind: 'intent_classification', messageId: inboundMessage.id, digest: inputDigest, bodyType: inboundMessage.bodyType, textLength: inboundMessage.bodyText?.length ?? 0 },
         output: { intent: classification.intent, confidence: classification.confidence, decision: classification.decision, riskFlags: classification.riskFlags },
       } });
+      await this.godView?.emit({
+        phase: 'route',
+        event: 'route.classified',
+        traceId,
+        runId: run.id,
+        buyer,
+        payload: { ruleClassification, classification, modelDecidesRouting, hardSafety, allowlisted: true },
+      });
       if (classification.decision === 'replied') {
         const debounceKey = `${input.adminId}:${conversation.id}`;
         const now = Date.now();
@@ -328,6 +364,14 @@ export class AutoReplyService {
         input: { kind: 'context_lookup', conversationId: conversation.id, maxHistory: runtime.maxHistory },
         output: { contextDigest, historyCount: context.recentMessages.length, productId: context.product?.id, orderRefs: context.orders.map((order) => order.orderNo), orderRefsCount: context.orders.length },
       } });
+      await this.godView?.emit({
+        phase: 'memory',
+        event: 'memory.loaded',
+        traceId,
+        runId: run.id,
+        buyer,
+        payload: { contextDigest, maxHistory: runtime.maxHistory, context },
+      });
 
       if (this.repairRuntime?.enabled) {
         try {
@@ -335,6 +379,14 @@ export class AutoReplyService {
           if (repairRoute) {
             const routePayload = { input: { kind: 'repair_policy_route', contextDigest }, output: { primaryAction: repairRoute.primaryAction, safetyHandling: repairRoute.safetyHandling, policyDecisionId: repairRoute.policyDecisionId, policyVersion: repairRoute.policyVersion, policyHash: repairRoute.policyHash, reasonCodes: repairRoute.reasonCodes } };
             await this.store.appendAutoReplyRunEvent({ runId: run.id, accountId: conversation.accountId, eventType: 'repair.policy_routed', stage: 'reply_generation', status: run.status, traceId, payload: routePayload });
+            await this.godView?.emit({
+              phase: 'route',
+              event: 'route.policy',
+              traceId,
+              runId: run.id,
+              buyer,
+              payload: routePayload.output,
+            });
           }
         } catch (error) {
           if (this.repairRuntime.currentMode === 'enforce') throw error;
@@ -364,7 +416,7 @@ export class AutoReplyService {
 
       const generatedReply = repairRefusal
         ? { text: '这类敏感信息我无法提供，但我可以继续帮你查询商品、订单、库存或发货信息。' }
-        : normalizeGeneratedReply(await withTimeout(runtime.generator.generate({ adminId: input.adminId, context, classification, observe: observeGenerator }), runtime.totalTimeoutMs));
+        : normalizeGeneratedReply(await withTimeout(runtime.generator.generate({ adminId: input.adminId, context, classification, observe: observeGenerator, runId: run.id, traceId }), runtime.totalTimeoutMs));
       let reply = generatedReply ? normalizeReply(generatedReply.text) : undefined;
       if (!reply) {
         const updated = await updateRun({ status: 'failed', decision: 'failed', failureCode: 'REPLY_EMPTY', eventPayload: {
@@ -438,6 +490,14 @@ export class AutoReplyService {
         const segment = segments[index]!;
         const sendRequestId = segments.length > 1 ? `${requestId}:segment:${index + 1}` : requestId;
         const sent = await this.sender.send({ adminId: input.adminId, accountId: conversation.accountId, requestId: sendRequestId, conversation, recipientRef: conversation.buyerRef, text: segment, mode: runtime.sendMode, traceId, runId: run.id, inboundMessageId: inboundMessage.id, productRef: context.product?.id, riskFlags: classification.riskFlags, segmentIndex: index, segmentCount: segments.length });
+        await this.godView?.emit({
+          phase: 'send',
+          event: 'send.result',
+          traceId,
+          runId: run.id,
+          buyer,
+          payload: { segmentIndex: index, segmentCount: segments.length, text: segment, outcome: sent.outcome, externalMessageRef: sent.externalMessageRef, outboxJobId: sent.outboxJobId, mode: runtime.sendMode },
+        });
         lastOutcome = sent.outcome;
         lastExternalMessageRef = sent.externalMessageRef;
         if (sent.outcome === 'known_failure' || sent.outcome === 'unknown') throw new Error(sent.outcome === 'unknown' ? 'AUTO_REPLY_SEND_UNKNOWN' : 'AUTO_REPLY_SEND_FAILED');
@@ -458,6 +518,14 @@ export class AutoReplyService {
         output: { decision: 'replied', senderOutcome: lastOutcome, outboundMessageId: lastOutboundMessageId, persisted: true, segmentCount: segments.length },
       } });
       await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'replied', intent: classification.intent, senderOutcome: lastOutcome, outboundMessageId: lastOutboundMessageId, segmentCount: segments.length, contextDigest, replyDigest });
+      await this.godView?.emit({
+        phase: 'run',
+        event: 'run.finished',
+        traceId,
+        runId: run.id,
+        buyer,
+        payload: { status: 'persisted', decision: 'replied', intent: classification.intent, senderOutcome: lastOutcome, outboundMessageId: lastOutboundMessageId, segmentCount: segments.length, reply, contextDigest, replyDigest },
+      });
       return { run: updated ?? run, inboundMessage, outboundMessage: lastOutboundMessageId ? await this.findMessage(input.adminId, input.conversationId, lastOutboundMessageId) : undefined, classification, context, repair };
     } catch (error) {
       const failureCode = toFailureCode(error);
@@ -476,6 +544,14 @@ export class AutoReplyService {
           error: { code: failureCode, ...(reason ? { reason } : {}) },
         } });
         await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'handoff', intent: run.intent, failureCode, ...(reason ? { reason } : {}) });
+        await this.godView?.emit({
+          phase: 'run',
+          event: 'run.handoff',
+          traceId,
+          runId: run.id,
+          buyer,
+          payload: { status: 'handoff', decision: 'handoff', failureCode, reason },
+        });
         return { run: updated ?? run, inboundMessage };
       }
       const reason = safeEventReason(error);
@@ -485,6 +561,14 @@ export class AutoReplyService {
         error: { code: failureCode, ...(reason ? { reason } : {}) },
       } });
       await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'failed', failureCode });
+      await this.godView?.emit({
+        phase: 'run',
+        event: 'run.failed',
+        traceId,
+        runId: run.id,
+        buyer,
+        payload: { status: 'failed', decision: 'failed', failureCode, currentStatus: run.status },
+      });
       return { run: updated ?? run, inboundMessage };
     }
   }

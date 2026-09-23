@@ -29,6 +29,7 @@ import { OpenAISettingsService, createFallbackModelClient } from './openai-setti
 import { AutoReplyActivityService } from './auto-reply-activity.js';
 import { AutoReplyRepairRuntime } from './auto-reply-repair-runtime.js';
 import { parseAutoReplyRepairPolicyBundle } from './auto-reply-repair-config.js';
+import { createAutoReplyGodViewSink } from './auto-reply-god-view.js';
 import { MemoryObjectStorage, S3CompatibleObjectStorage, type ObjectStorage } from './object-storage.js';
 import { XianyuItemDetailService } from './xianyu-item-detail-service.js';
 import { ProductAutomationService } from './product-automation.js';
@@ -75,6 +76,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     throw new Error('AUTO_REPLY_LIVE_REQUIRES_BUYER_ALLOWLIST');
   }
   const store = createStore(config);
+  const autoReplyGodView = createAutoReplyGodViewSink();
   const autoReplyAgentConfig = config.autoReplyAgent ?? resolveAutoReplyAgentConfig();
   const modelClient = createConfiguredModelClient(config);
   const autoReplyModelClient = config.autoReplyModelEnabled === false ? undefined : modelClient;
@@ -169,7 +171,8 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     maxHistory: autoReplyAgentConfig.maxHistory,
     maxReplyLength: autoReplyAgentConfig.maxReplyLength,
     replySegmentDelayMs: autoReplyAgentConfig.replySegmentDelayMs,
-    generator: autoReplyModelClient ? new ToolCallingAutoReplyAgent(store, autoReplyModelClient, autoReplyAgentConfig) : undefined,
+    generator: autoReplyModelClient ? new ToolCallingAutoReplyAgent(store, autoReplyModelClient, autoReplyAgentConfig, { godView: autoReplyGodView }) : undefined,
+    godView: autoReplyGodView,
     totalTimeoutMs: 60_000,
     configProvider: async (adminId, accountId) => {
       const settings = await autoReplyAgentSettings.get(adminId, accountId);
@@ -194,7 +197,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
         maxHistory: settings.maxHistory,
         maxReplyLength: settings.maxReplyLength,
         replySegmentDelayMs: settings.replySegmentDelayMs,
-        generator: runtimeModelClient ? new ToolCallingAutoReplyAgent(store, runtimeModelClient, runtimeConfig) : undefined,
+        generator: runtimeModelClient ? new ToolCallingAutoReplyAgent(store, runtimeModelClient, runtimeConfig, { godView: autoReplyGodView }) : undefined,
       };
     },
     sender: new ReliableExternalAutoReplySender(store, messages, async (input) => {
