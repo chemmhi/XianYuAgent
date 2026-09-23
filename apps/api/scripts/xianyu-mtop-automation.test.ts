@@ -57,6 +57,18 @@ test('repriceOrder uses integer fen and classifies data.success=false as a known
   }
 });
 
+test('repriceOrder does not treat a missing business success flag as success', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ ret: ['SUCCESS::调用成功'], data: {} }), { status: 200, headers: { 'content-type': 'application/json' } });
+  try {
+    const result = await createClient().repriceOrder('admin-1', 'account-1', 'ORDER-002B', 1299);
+    assert.equal(result.status, 'failed');
+    assert.equal(result.errorCode, 'MTOP_BUSINESS_ERROR');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('readOrderDetail parses orderInfoVO snapshot and preserves seller role referer', async () => {
   const originalFetch = globalThis.fetch;
   let captured: ReturnType<typeof captureRequest> | undefined;

@@ -377,12 +377,13 @@ export class XianyuMtopClient {
       {},
       { referer: SELLER_ORDER_MANAGE_REFERER },
     );
-    if (result.success && nestedBoolean(result.response, ['data', 'success']) === false) {
+    const businessSuccess = nestedBoolean(result.response, ['data', 'success']);
+    if (result.success && businessSuccess !== true) {
       return {
         status: 'failed',
         externalRef: normalizedOrderNo,
         errorCode: 'MTOP_BUSINESS_ERROR',
-        message: '闲鱼订单改价接口返回 success=false',
+        message: '闲鱼订单改价接口未确认 data.success=true',
         response: result.response,
         cookieHeader: result.cookieHeader,
       };
