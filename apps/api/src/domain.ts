@@ -1,3 +1,6 @@
+import type { OutcomeReviewPolicy } from './auto-reply-outcome-review.js';
+import type { PreSendReviewPolicyInput } from './auto-reply-pre-send-review.js';
+
 export type AdminStatus = 'active' | 'disabled';
 export type AccountStatus = 'pending' | 'connected' | 'degraded' | 'disconnected' | 'expired' | 'disabled';
 export type ScopeStatus = 'active' | 'revoked' | 'expired';
@@ -572,6 +575,10 @@ export interface InboundInboxRecord {
   inboundMessageId: string;
   externalConversationRef: string;
   externalMessageRef: string;
+  /** Best-effort platform event identity captured from the live push envelope. */
+  sourceEventId?: string;
+  /** Best-effort platform ordering token; absent when the envelope does not expose one. */
+  sourceSequence?: number;
   status: InboundInboxStatus;
   attempt: number;
   availableAt: string;
@@ -601,6 +608,180 @@ export interface InboundQuarantineRecord {
 export type AutoReplyDecision = 'replied' | 'handoff' | 'skipped' | 'failed';
 export type AutoReplyRunStatus = 'received' | 'classified' | 'context_loaded' | 'generated' | 'simulated' | 'persisted' | 'handoff' | 'skipped' | 'failed';
 export type AutoReplyRunStage = 'gateway_received' | 'intent_recognition' | 'context_read' | 'reply_generation' | 'sending' | 'persisted' | 'handoff' | 'skipped' | 'failed';
+
+/** Canonical business actions used by the policy kernel. */
+export const AUTO_REPLY_ACTION_KINDS = [
+  'ANSWER_FACT',
+  'GUIDE_NEXT_STEP',
+  'CLARIFY',
+  'ACKNOWLEDGE_CONTINUE',
+  'REDIRECT',
+  'SWITCH_GOAL',
+  'RECOMMEND',
+  'WAIT_FOR_USER',
+  'HANDOFF',
+  'REFUSE_SENSITIVE',
+] as const;
+
+export type ActionKind = (typeof AUTO_REPLY_ACTION_KINDS)[number];
+export const AUTO_REPLY_ACTIVITY_NEXT_ACTIONS = [...AUTO_REPLY_ACTION_KINDS, 'FOLLOW_UP', 'RECONCILE_SEND'] as const;
+export type AutoReplyNextAction = (typeof AUTO_REPLY_ACTIVITY_NEXT_ACTIONS)[number];
+export type SafetyHandling = 'NONE' | 'PARTIAL_REFUSAL' | 'FULL_REFUSAL';
+export type AutoReplyGoalStatus = 'active' | 'awaiting_user' | 'resolved' | 'needs_followup' | 'unresolved' | 'handoff';
+export type AutoReplyPolicyStatus = 'DRAFT' | 'ACTIVE' | 'RETIRED' | 'ROLLBACK_TARGET';
+
+export interface AutoReplyQuestionBudget {
+  maxQuestionsPerTurn: 1;
+  maxRounds: number;
+}
+
+export interface AutoReplyPolicyPredicate {
+  [key: string]: boolean | number | string | readonly (boolean | number | string)[];
+}
+
+export interface AutoReplyPolicyRule {
+  ruleId: string;
+  predicate: AutoReplyPolicyPredicate;
+  primaryAction: ActionKind;
+  safetyHandling: SafetyHandling;
+  nextState: Record<string, unknown>;
+  priority: number;
+  specificity: number;
+  requiredEvidenceCount: number;
+  successCriteria: string[];
+  reasonCodes: string[];
+}
+
+export interface AutoReplyHandoffPolicy {
+  allowedReasonCodes: string[];
+  factUnavailable: {
+    minAttempts: number;
+    windowSeconds: number;
+    deadlineSeconds: number;
+    requiredSourceIds: string[];
+    requiredErrorCodes: string[];
+  };
+}
+
+export interface AutoReplyResolutionPolicy {
+  reopenWindowSeconds: number;
+  reopenEvidenceTypes: string[];
+  closeRequiresWindow: true;
+}
+
+export interface AutoReplyReviewPolicy {
+  leaseSeconds: number;
+  maxAttempts: number;
+  backoffSeconds: number[];
+}
+
+export interface PolicyConfig {
+  policyVersion: string;
+  policyHash: string;
+  status: AutoReplyPolicyStatus;
+  accountScope: string;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  publishedAt?: string;
+  activatedAt?: string;
+  previousPolicyVersion?: string;
+  immutable: true;
+  actionPriority: Record<ActionKind, number>;
+  actionMutex: Array<{ left: ActionKind; right: ActionKind }>;
+  precedenceRules: AutoReplyPolicyRule[];
+  clarification: AutoReplyQuestionBudget & { awaitingUserTtlSeconds: number };
+  handoff: AutoReplyHandoffPolicy;
+  resolution: AutoReplyResolutionPolicy;
+  review: AutoReplyReviewPolicy;
+}
+
+/**
+ * Account-scoped repair policy bundle persisted as an immutable version.
+ * The core PolicyConfig drives routing; the review policies keep the
+ * pre-send and outcome-review gates on the same policy version.
+ */
+export interface AutoReplyRepairPolicyBundle {
+  policyConfig: PolicyConfig;
+  preSendPolicy: PreSendReviewPolicyInput;
+  outcomePolicy: OutcomeReviewPolicy;
+}
+
+export interface Objective {
+  objectiveId: string;
+  accountId: string;
+  conversationId: string;
+  goalType: string;
+  status: AutoReplyGoalStatus;
+  successCriteria: string[];
+  sourceMessageId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConversationState {
+  stateId: string;
+  accountId: string;
+  conversationId: string;
+  stateVersion: number;
+  activeGoalId?: string;
+  goalStatus: AutoReplyGoalStatus;
+  observedStage?: string;
+  targetStage?: string;
+  emotionSnapshot?: Record<string, unknown>;
+  topicRelation?: string;
+  pendingQuestions: Array<Record<string, unknown>>;
+  clarificationRound: number;
+  clarificationAttemptId?: string;
+  lastQuestionFingerprint?: string;
+  recommendationState?: Record<string, unknown>;
+  awaitingUser: boolean;
+  awaitingUserSince?: string;
+  awaitingUserTtl?: string;
+  lastMessageId?: string;
+  transitionAt: string;
+  policyVersion?: string;
+  lastSourceEventId?: string;
+  lastSourceSequence: number;
+  processedEventIds: string[];
+  processedIdempotencyKeys: string[];
+}
+
+export interface ActionPlan {
+  actionPlanId: string;
+  primaryAction: ActionKind;
+  primaryGoal: Objective;
+  requiredFacts: string[];
+  successCriteria: string[];
+  allowedTools: string[];
+  questionBudget: AutoReplyQuestionBudget;
+  recommendationAllowed: boolean;
+  handoffAllowed: boolean;
+  nextState: Record<string, unknown>;
+  safetyHandling: SafetyHandling;
+  policyDecisionId: string;
+  policyVersion: string;
+  reasonCodes: string[];
+  evidenceRefs: string[];
+  supersedesActionPlanId?: string;
+}
+
+export interface PolicyDecisionTrace {
+  policyDecisionId: string;
+  policyVersion: string;
+  ruleId: string;
+  precedenceRule: string;
+  primaryAction: ActionKind;
+  safetyHandling: SafetyHandling;
+  nextState: Record<string, unknown>;
+  reasonCodes: string[];
+  signalDigest: string;
+  factDigest: string;
+  accountScope: string;
+  stateVersionBefore: number;
+  stateVersionAfter: number;
+  actionPlanId: string;
+  createdAt: string;
+}
 
 /**
  * Persisted, redacted evidence for one automatic-reply attempt.
@@ -678,6 +859,14 @@ export interface AutoReplyRunListQuery {
 export interface AutoReplyRunListItem extends AutoReplyRunRecord {
   stage: AutoReplyRunStage;
   durationMs: number;
+  transportStatus?: 'generated' | 'simulated' | 'persisted' | 'known_failure' | 'unknown';
+  resolutionStatus?: 'review_pending' | 'reviewing' | 'resolved' | 'needs_followup' | 'unresolved' | 'unknown' | 'review_failed' | 'closed';
+  goalProgress?: 'unknown' | 'in_progress' | 'blocked' | 'completed';
+  primaryAction?: ActionKind;
+  nextAction?: AutoReplyNextAction;
+  legacyActionKind?: string;
+  legacyTransportStatus?: string;
+  legacyHandoffReason?: string;
   buyerDisplayName?: string;
   productTitle?: string;
   inboundMessagePreview?: string;
@@ -858,6 +1047,32 @@ export interface IdempotencyRecord {
   expiresAt: string;
 }
 
+export type AutoReplyOutboxStatus = 'pending' | 'processing' | 'retryable' | 'succeeded' | 'dead_lettered';
+
+export interface AutoReplyOutboxRecord {
+  id: string;
+  scope: string;
+  aggregateType: string;
+  aggregateId: string;
+  operation: string;
+  status: AutoReplyOutboxStatus;
+  attempt: number;
+  availableAt: string;
+  lockedAt?: string;
+  leaseExpiresAt?: string;
+  leaseOwner?: string;
+  lastErrorCode?: string;
+  lastErrorDigest?: string;
+  externalOutcome?: 'known_success' | 'known_failure' | 'unknown';
+  idempotencyKey: string;
+  payload: Record<string, unknown>;
+  externalMessageRef?: string;
+  outboundMessageId?: string;
+  traceId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AuditEventRecord {
   id: string;
   actorType: string;
@@ -983,10 +1198,21 @@ export interface Store {
   updateCredentialRefStatus(input: { adminId: string; credentialId: string; expectedVersion: number; status: CredentialRefStatus }): Promise<CredentialRefRecord | undefined>;
   getAutoReplyAgentConfig(adminId: string, accountId: string): Promise<AutoReplyAgentConfigRecord | undefined>;
   upsertAutoReplyAgentConfig(input: { adminId: string; accountId: string; expectedVersion: number; patch: AutoReplyAgentConfigPatch; config: AutoReplyAgentConfig; configDigest: string }): Promise<AutoReplyAgentConfigRecord | undefined>;
+  getActiveAutoReplyRepairPolicy(accountId: string, now?: string): Promise<AutoReplyRepairPolicyBundle | undefined>;
+  publishAutoReplyRepairPolicy(input: { accountId: string; bundle: AutoReplyRepairPolicyBundle; expectedActiveVersion?: string }): Promise<AutoReplyRepairPolicyBundle>;
+  rollbackAutoReplyRepairPolicy(input: { accountId: string; targetPolicyVersion: string; expectedActiveVersion?: string }): Promise<AutoReplyRepairPolicyBundle>;
   getIdempotency(scope: string, key: string): Promise<IdempotencyRecord | undefined>;
   beginIdempotency(record: IdempotencyRecord): Promise<void>;
   abortIdempotency(scope: string, key: string): Promise<void>;
   completeIdempotency(input: { scope: string; key: string; status: IdempotencyRecord['status']; responseEnvelope: unknown; statusCode: number; traceId: string }): Promise<void>;
+  enqueueAutoReplyOutbox(input: { scope: string; aggregateType: string; aggregateId: string; operation: string; idempotencyKey: string; payload: Record<string, unknown>; traceId?: string; availableAt?: string }): Promise<{ record: AutoReplyOutboxRecord; created: boolean }>;
+  getAutoReplyOutbox(scope: string, idempotencyKey: string): Promise<AutoReplyOutboxRecord | undefined>;
+  listAutoReplyOutboxByAggregate(scope: string, aggregateId: string): Promise<AutoReplyOutboxRecord[]>;
+  claimAutoReplyOutbox(input: { scope: string; workerId: string; limit: number; leaseMs: number; id?: string }): Promise<AutoReplyOutboxRecord[]>;
+  completeAutoReplyOutbox(input: { id: string; workerId: string; externalOutcome: AutoReplyOutboxRecord['externalOutcome']; externalMessageRef?: string }): Promise<boolean>;
+  persistAutoReplyOutbox(input: { id: string; outboundMessageId: string }): Promise<boolean>;
+  retryAutoReplyOutbox(input: { id: string; workerId: string; errorCode: string; errorDigest: string; availableAt: string }): Promise<boolean>;
+  deadLetterAutoReplyOutbox(input: { id: string; workerId: string; errorCode: string; errorDigest: string }): Promise<boolean>;
   recordAudit(event: AuditEventRecord): Promise<void>;
   listAgentSessions(adminId: string, query?: { accountId?: string; search?: string }): Promise<AgentSessionRecord[]>;
   createAgentSession(input: { adminId: string; accountId: string; title: string; summary?: string }): Promise<AgentSessionRecord>;
@@ -1075,7 +1301,8 @@ export interface Store {
   getAutoReplyActivitySummary(adminId: string, query: { accountId?: string; from: string; to: string }): Promise<AutoReplyActivitySummary>;
   markMessagesReadByExternalRef(input: { adminId: string; conversationId: string; externalMessageRef: string; readAt?: string }): Promise<{ messages: MessageRecord[]; events: ConversationEventRecord[] }>;
   markLatestOutgoingRead(input: { adminId: string; conversationId: string; readAt?: string }): Promise<{ messages: MessageRecord[]; events: ConversationEventRecord[] }>;
-  enqueueInboundInbox(input: { adminId: string; accountId: string; conversationId: string; inboundMessageId: string; externalConversationRef: string; externalMessageRef: string; availableAt?: string }): Promise<{ record: InboundInboxRecord; created: boolean }>;
+  enqueueInboundInbox(input: { adminId: string; accountId: string; conversationId: string; inboundMessageId: string; externalConversationRef: string; externalMessageRef: string; sourceEventId?: string; sourceSequence?: number; availableAt?: string }): Promise<{ record: InboundInboxRecord; created: boolean }>;
+  getInboundInbox(id: string): Promise<InboundInboxRecord | undefined>;
   claimInboundInbox(input: { workerId: string; limit: number; leaseMs: number }): Promise<InboundInboxRecord[]>;
   heartbeatInboundInbox(input: { id: string; workerId: string; leaseMs: number }): Promise<boolean>;
   ackInboundInbox(input: { id: string; workerId: string }): Promise<boolean>;

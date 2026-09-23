@@ -14,6 +14,35 @@
 | S5-R-WORKSPACE-UI-04 | 全量回归 | PARTIAL | 全量 Web 单测 72 files / 242 tests 中 1 个既有 Dashboard provider 测试失败；未发现与本次 Workspace 改动相关的失败 |
 
 复审结论：Workspace UI 与跨层验收已通过；全量回归保留一个既有、非本切片失败项，当前切片状态为 `PARTIALLY_VERIFIED`。
+## 2026-09-22：repair-agent 文档域重组
+
+| 评审编号 | 类型 | 结论 | 证据 |
+| --- | --- | --- | --- |
+| AR-REPAIR-R1 | 业务 / 验收 | READY_FOR_REVIEW | `docs/agent/auto-replay/repair-agent/00-scope.md`、`03-domain-policy-contract.md`：明确无硬编码路由、低拒绝/低 handoff 和终极敏感信息拒绝矩阵 |
+| AR-REPAIR-R2 | 架构 / 数据流 | READY_FOR_REVIEW | `02-target-architecture.md`、`04-data-api-contract.md`、`05-vertical-slices.md`：明确 PolicyEngine、双层状态、Pre-send Review、Outcome Review 与 AR-VS-00 至 AR-VS-09 |
+| AR-REPAIR-R3 | 质量 / 安全 / 运维 | READY_FOR_REVIEW | `06-stage-gates.md`、`07-risk-register.md`、`11-release-rollback.md`：明确三轮评审、风险闭环、灰度与回滚；业务代码未修改 |
+
+重组结论：`docs/agent/auto-replay/repair-agent/` 成为当前修复治理唯一入口；旧 `docs/agent/auto-reply/` 仅保留运行契约和历史兼容快照。
+
+> 当前修复域评审以 `docs/agent/auto-replay/repair-agent/08-review-log.md` 为准。2026-09-22 完成的 AR-VS-00 三轮独立复审结论为：R1 有条件通过、R2 FAIL、R3 BLOCKED_BY_EVIDENCE；阶段 0 保持 BLOCKED，不能进入 AR-VS-01。本文早先记录的 `READY_FOR_REVIEW` 仅表示复审材料已准备，不是最终通过结论。用户已确认五项裁决，当前进入文档修订与证据补齐阶段。
+
+## 2026-09-22：AR-VS-00 范围、策略与基线锁定
+
+| 评审编号 | 类型 | 结论 | 证据 |
+| --- | --- | --- | --- |
+| AR-VS00-R1 | 业务 / 验收 | READY_FOR_REVIEW | `slices/AR-VS-00-policy-matrix.md`、`slices/AR-VS-00-traceability.md`：拒绝、继续帮助、澄清、生命周期和指标口径已冻结 |
+| AR-VS00-R2 | 架构 / 数据流 | READY_FOR_REVIEW | `decisions/ADR-AR-0001-route-and-refusal-policy.md`、`02-target-architecture.md`：路由集中到 PolicyEngine，传输状态与解决状态分离 |
+| AR-VS00-R3 | 质量 / 安全 / 运维 | READY_FOR_REVIEW | `slices/AR-VS-00-scope-policy-baseline.md`：静态代码证据、禁止范围、验收标准和回滚方式已记录；未修改业务代码 |
+
+## 2026-09-22 自动回复 Agent 修复方案文档切片
+
+| 评审编号 | 类型 | 结论 | 证据 |
+| --- | --- | --- | --- |
+| AR-PLAN-R1 | 业务 / 验收 | READY_FOR_REVIEW | `docs/agent/auto-replay/repair-agent/03-domain-policy-contract.md`：已明确终极敏感信息拒绝矩阵、低 handoff 规则、生命周期目标、澄清、推荐与结果审核验收 |
+| AR-PLAN-R2 | 架构 / 数据流 | READY_FOR_REVIEW | `docs/agent/auto-replay/repair-agent/02-target-architecture.md`、`05-vertical-slices.md`：已拆分 SignalExtractor、StateReducer、PolicyEngine、ResponseComposer、Pre-send Review、Outcome Review，并定义 AR-VS-00 至 AR-VS-09 |
+| AR-PLAN-R3 | 质量 / 安全 / 运维 | READY_FOR_REVIEW | git diff --check、Markdown 结构检查、阶段状态与切片编号检查通过；业务代码和发送行为未修改 |
+
+复审要求：文档进入下一轮前必须由独立评审确认：策略不依赖硬编码路由、普通不确定/售后场景不默认 handoff、所有纵向切片具备真实验收与回滚证据。
 
 ## 2026-09-21 消息重复落库修复复审
 

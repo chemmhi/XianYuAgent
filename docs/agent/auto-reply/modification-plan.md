@@ -1,4 +1,6 @@
-# 自动回复 Agent 修改计划（待审核）
+# 自动回复 Agent 修改计划（历史兼容快照）
+
+> 当前修复切片和阶段编排请以 [`../auto-replay/repair-agent/05-vertical-slices.md`](../auto-replay/repair-agent/05-vertical-slices.md) 与 [`../auto-replay/repair-agent/06-stage-gates.md`](../auto-replay/repair-agent/06-stage-gates.md) 为准；本文仅保留原批次计划和历史审核记录。
 
 > 状态：`APPROVED_FOR_BATCH_1_NODE_1 / REMAINING_BATCHES_PENDING_REVIEW`
 > 生成日期：`2026-09-21`

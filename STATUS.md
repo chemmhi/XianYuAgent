@@ -29,6 +29,35 @@
 - 已验证：Workspace 定向单测 4 files / 13 tests、Web/API typecheck、Web production build、`npm run test:e2e:chrome:workspace:pi` 连续两次通过、`git diff --check` 通过。
 - 部分验证：全量 Web 单测 72 files / 242 tests 通过，1 个既有 `App.dashboard-mode.test.ts` 因缺少 `AccountContextProvider` 失败，与本次 Workspace 改动无关，未扩大范围修复。
 
+## 2026-09-22 自动回复 Agent AR-VS-00 至 AR-VS-09 修复链路
+
+- 已将 `docs/agent/auto-replay/repair-agent/` 作为自动回复修复的 canonical 文档域，并把 AR-VS-00 至 AR-VS-09 的策略、数据契约、审核、回滚与发布门禁纳入同一治理入口。
+- AR-VS-08 enforce 主链路已接入统一 PolicyEngine、Pre-send Review、Live sender outbox、Outcome Review、Activity 回读与 PostgreSQL 持久化；账号级 PolicyConfig 缺失时 enforce fail-closed。
+- 已验证：API typecheck、API build、自动回复单测 141/141、自动回复 E2E 4/4、Policy registry / Outcome Review / Activity Review / VS08 PostgreSQL smoke、release gate smoke、`git diff --check`。
+- 当前状态：代码与受控 PostgreSQL 验证达到 `READY_FOR_RELEASE_CANDIDATE`；真实闲鱼账号 live sender、生产 canary、回滚/备份恢复和目标环境三轮独立复审仍需证据，生产上线状态保持 `BLOCKED_BY_EVIDENCE`。
+
+## 2026-09-22 自动回复 Agent AR-VS-00 范围与策略锁定
+
+- 开始执行第一个修复切片 AR-VS-00：补齐拒绝矩阵、继续帮助矩阵、生命周期/目标/指标口径、需求→验收→测试追踪和 ADR-AR-0001。
+- 切片仅修改 repair-agent 文档域、状态、评审、风险和索引，不修改业务代码、数据库迁移或发送行为；状态：READY_FOR_REVIEW。
+- 当前阶段门禁：策略边界已写入文档，独立业务/架构/质量复审尚未完成；不能把本切片宣称为代码已实现。
+
+## 2026-09-22 自动回复 Agent repair-agent 文档域重组
+
+- 新建 canonical 文档域 `docs/agent/auto-replay/repair-agent/`，统一管理范围、基线、目标架构、策略、数据/API、AR-VS-00 至 AR-VS-09、阶段门禁、风险、评审、状态、迁移和回滚。
+- 旧 `docs/agent/auto-reply/` 保留为运行契约与兼容入口；其 repair-plan/checklist/risk-register/modification-plan 已标记为历史快照，不再作为当前修复源文档。
+- 本切片仅整理文档和索引，不修改业务代码、数据库迁移或发送行为；状态：`READY_FOR_REVIEW`。
+- 已识别旧设计中的默认 handoff 语义与当前“低拒绝/低 handoff”约束冲突，已在 canonical policy 和风险映射中显式登记。
+- 下一步：完成 repair-agent 三轮独立评审后，按 `AR-VS-00 → AR-VS-09` 严格串行推进。
+
+## 2026-09-22 自动回复 Agent 修复方案纵向切片规划
+
+- 新增 docs/agent/auto-reply/repair-plan.md 的阶段门禁与 AR-VS-00 至 AR-VS-09 纵向切片规划；该文档现作为历史兼容快照，canonical 版本位于 `docs/agent/auto-replay/repair-agent/`。
+- 规划覆盖：无硬编码路由、低拒绝/低 handoff、澄清与 awaiting_user、生命周期引导、跑题拉回、情绪门控、店内推荐、发送前 Review、发送后 Outcome Review、真实链路与回滚。
+- 本切片仅修改文档和登记信息，不修改业务代码、数据库迁移或发送行为；状态：READY_FOR_REVIEW。
+- 已执行：git diff --check、Markdown 代码块配对检查、切片编号与阶段门禁契约检查。
+- 下一步：完成文档业务/验收评审和架构/数据流复审后，按 AR-VS-00 → AR-VS-09 严格串行推进。
+
 ## 2026-09-21 全局 SelectField 统一
 
 - 全局盘点确认项目已有共享 `apps/web/src/shared/ui/SelectField.tsx`；账号、商品、卡券、订单、设置及 Agent 动态的业务下拉全部统一复用，业务层不再直接渲染原生 `<select>`。

@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { MessageService } from '../src/messages.js';
 import { MemoryStore } from '../src/store-memory.js';
 import { parsePushPayloadDetailed } from '../src/xianyu-im.js';
+import { XianyuImService } from '../src/xianyu-im-service.js';
 import { InboundInboxWorker } from '../src/inbound-inbox-worker.js';
 
 test('malformed push payload returns a structured quarantine result', () => {
@@ -21,6 +23,47 @@ test('invalid source timestamp uses received time and records quality risk', () 
   assert.equal(result.event?.receivedAt, receivedAt);
   assert.equal(result.event?.timestampQuality, 'received');
   assert.deepEqual(result.event?.riskFlags, ['source_timestamp_invalid']);
+});
+
+test('push parser preserves explicit source event id and sequence from the gateway envelope', () => {
+  const encoded = Buffer.from(JSON.stringify({
+    1: { 2: 'conv-source-order@goofish', 3: 'message-source-order.PNM', 5: 1767225600000, 10: { senderUserId: 'buyer-1', senderNick: 'Buyer' } },
+  }), 'utf8').toString('base64');
+  const result = parsePushPayloadDetailed(encoded, 'account-1', 'seller-1', '2026-09-21T14:00:00.000Z', { eventId: 'push-event-17', sequence: 17 });
+  assert.equal(result.quarantine, undefined);
+  assert.equal(result.event?.sourceEventId, 'push-event-17');
+  assert.equal(result.event?.sourceSequence, 17);
+});
+
+test('deferred inbox record carries source ordering into the repair worker input', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'source-order@example.com', passwordHash: 'hash', displayName: 'Source Order' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'seller-source-order' });
+  const conversation = await store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'buyer-source-order', externalConversationRef: 'conv-source-order' });
+  const message = await store.createMessage({ adminId: admin.id, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: 'hello', externalMessageRef: 'message-source-order.PNM', source: 'system', traceId: 'source-order-test' });
+  const queued = await store.enqueueInboundInbox({ adminId: admin.id, accountId: account.id, conversationId: conversation.id, inboundMessageId: message.message.id, externalConversationRef: 'conv-source-order', externalMessageRef: 'message-source-order.PNM', sourceEventId: 'push-event-17', sourceSequence: 17 });
+  assert.equal(queued.record.sourceEventId, 'push-event-17');
+  assert.equal(queued.record.sourceSequence, 17);
+});
+
+test('inbox processing forwards persisted source ordering to AutoReplyService', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'source-forward@example.com', passwordHash: 'hash', displayName: 'Source Forward' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'seller-source-forward' });
+  const conversation = await store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'buyer-source-forward', buyerDisplayName: 'Buyer', externalConversationRef: 'conv-source-forward' });
+  const message = await store.createMessage({ adminId: admin.id, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: 'hello', externalMessageRef: 'message-source-forward.PNM', source: 'system', traceId: 'source-forward-test' });
+  const queued = await store.enqueueInboundInbox({ adminId: admin.id, accountId: account.id, conversationId: conversation.id, inboundMessageId: message.message.id, externalConversationRef: 'conv-source-forward', externalMessageRef: 'message-source-forward.PNM', sourceEventId: 'push-event-forward', sourceSequence: 29 });
+  const claimed = (await store.claimInboundInbox({ workerId: 'source-forward-worker', limit: 1, leaseMs: 5_000 }))[0];
+  assert.equal(claimed?.id, queued.record.id);
+
+  const calls: Array<{ sourceEventId?: string; sourceSequence?: number }> = [];
+  const autoReply = { processInbound: async (input: { sourceEventId?: string; sourceSequence?: number }) => { calls.push(input); return undefined; } };
+  const messages = new MessageService(store, async () => 'audit-source-forward');
+  const service = new XianyuImService(store, {} as never, messages, autoReply as never);
+  await service.processInboundInbox(claimed!);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.sourceEventId, 'push-event-forward');
+  assert.equal(calls[0]?.sourceSequence, 29);
 });
 
 test('history/live alias resolves to the same local message', async () => {

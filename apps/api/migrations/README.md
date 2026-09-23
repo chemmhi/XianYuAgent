@@ -30,6 +30,13 @@
 - Apply：确认 `003_catalog.sql`、账号范围和 `013_coupons.sql` 已应用后执行；SQL 可重复执行，新增表不修改既有商品/卡券数据。
 - Verify：检查每个 `product_id` 至多一条配置、`config_version > 0`、账号与商品一致；执行 API smoke 验证首次读取默认版本 `1`、保存后复读和批量事务回滚。
 - Rollback：先停止自动化配置写入和 Worker 读取，保留配置表与审计；应用回退到默认关闭行为，不删除已产生的订单/卡券交付历史。待确认无旧版本依赖后再按 contract → switch → verify 处理，不直接删除配置表。
+- `031_auto_reply_repair_state.sql`：建立自动回复 repair runtime 的会话状态、审核记录和发送后结果回读基础表；保留旧 `auto_reply_runs` 兼容读取。
+- `032_auto_reply_inbound_source_ordering.sql`：为入站 inbox 保存 live push 可提取的 source event id/sequence，兼容缺失序列的旧消息并支持 repair runtime 审计回放。
+- `033_auto_reply_review_lifecycle.sql`：为 Outcome Review 补充 resolved/closed 生命周期时间戳，支持 worker/reconcile 审计回读。
+- `034_auto_reply_send_outbox.sql`：为自动回复 live sender 补充 payload、外部消息引用、租约与本地出站消息回写字段，支持 requestId 幂等和崩溃恢复。
+- `035_auto_reply_policy_registry.sql`：建立账号级自动回复 repair PolicyConfig 版本注册表；ACTIVE 指针唯一、历史版本可回滚，策略 JSON/hash 保持不可变。
+
+迁移执行顺序以完整文件名的字典序为准，数字前缀在历史目录中允许重复（例如 `031_auto_reply_*` 与 `031_product_automation.sql`）；新增迁移应优先使用唯一前缀，并确保 SQL 幂等且依赖在完整文件名顺序下成立。
 
 ## 029 coupon batch sequence 迁移纪律
 

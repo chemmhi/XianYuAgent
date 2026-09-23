@@ -359,7 +359,7 @@ API Key 配置不新增第二套凭证表；`CredentialStore` 继续作为唯一
 
 ### 13.4 Agent 动态 / 自动回复运行活动
 
-Agent 动态只读查询契约已冻结于 [`docs/agent/auto-reply/activity.md`](./agent/auto-reply/activity.md)。后端 raw DTO 与高保真页面 VM 必须通过前端 adapter 分层，不能让页面直接依赖数据库字段或原始枚举。
+Agent 动态只读查询契约已冻结于 [`docs/agent/auto-reply/activity.md`](./agent/auto-reply/activity.md)。后端 raw DTO 与高保真页面 VM 必须通过前端 adapter 分层，不能让页面直接依赖数据库字段或原始枚举。自动回复修复治理的 canonical 索引见 [`docs/agent/auto-replay/repair-agent/README.md`](./agent/auto-replay/repair-agent/README.md)。
 
 | 切片 | API / 数据 | 核心状态与账号边界 | 完成门禁 |
 | --- | --- | --- | --- |

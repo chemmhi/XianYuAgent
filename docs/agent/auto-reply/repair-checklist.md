@@ -1,4 +1,6 @@
-# 自动回复 Agent 修复 Checklist
+# 自动回复 Agent 修复 Checklist（历史兼容快照）
+
+> 当前阶段门禁与切片卡片请以 [`../auto-replay/repair-agent/06-stage-gates.md`](../auto-replay/repair-agent/06-stage-gates.md) 和 [`../auto-replay/repair-agent/templates/vertical-slice-card.md`](../auto-replay/repair-agent/templates/vertical-slice-card.md) 为准；本文仅保留历史 checklist。
 
 > 目标：按照依赖顺序逐项关闭 [`risk-register.md`](./risk-register.md) 中的开放风险。
 > 当前阶段：`DOCUMENTED / PLAN_PENDING_REVIEW / NOT READY FOR LIVE`

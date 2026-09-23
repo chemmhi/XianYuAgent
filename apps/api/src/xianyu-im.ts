@@ -43,6 +43,8 @@ export interface XianyuImMessageEvent {
   receivedAt?: string;
   timestampQuality?: 'platform' | 'received';
   externalMessageRefAliases?: string[];
+  sourceEventId?: string;
+  sourceSequence?: number;
   riskFlags?: string[];
   raw?: Record<string, unknown>;
 }
@@ -232,7 +234,7 @@ export class XianyuImClient {
     await this.sendLwp('/r/MessageStatus/read', [ids]);
   }
 
-  async sendText(conversationRef: string, recipientRef: string, text: string): Promise<{ externalMessageRef?: string }> {
+  async sendText(conversationRef: string, recipientRef: string, text: string, requestId?: string): Promise<{ externalMessageRef?: string }> {
     const normalizedText = text.trim();
     const cid = stripGoofish(conversationRef);
     const toId = stripGoofish(recipientRef);
@@ -241,7 +243,7 @@ export class XianyuImClient {
     const content = Buffer.from(JSON.stringify({ contentType: 1, text: { text: normalizedText } }), 'utf8').toString('base64');
     const response = await this.sendLwp('/r/MessageSend/sendByReceiverScope', [
       {
-        uuid: crypto.randomUUID(),
+        uuid: requestId ? deterministicUuid(requestId) : crypto.randomUUID(),
         cid: `${cid}@goofish`,
         conversationType: 1,
         content: { contentType: 101, custom: { type: 1, data: content } },
@@ -534,7 +536,7 @@ export class XianyuImClient {
         }
         continue;
       }
-      const parsed = parsePushPayloadDetailed(encoded, this.accountId, this.myId);
+      const parsed = parsePushPayloadDetailed(encoded, this.accountId, this.myId, new Date().toISOString(), asRecord(entry));
       if (parsed.quarantine) {
         await this.emitQuarantine(parsed.quarantine.reasonCode, encoded, parsed.quarantine.receivedAt);
       } else if (parsed.event) {
@@ -615,7 +617,7 @@ export function parsePushPayload(encoded: string, accountId: string, myId: strin
   return parsePushPayloadDetailed(encoded, accountId, myId).event;
 }
 
-export function parsePushPayloadDetailed(encoded: string, accountId: string, myId: string, receivedAt = new Date().toISOString()): { event?: XianyuImMessageEvent; quarantine?: { reasonCode: string; receivedAt: string } } {
+export function parsePushPayloadDetailed(encoded: string, accountId: string, myId: string, receivedAt = new Date().toISOString(), sourceEnvelope?: unknown): { event?: XianyuImMessageEvent; quarantine?: { reasonCode: string; receivedAt: string } } {
   const parsed = decodePushData(encoded);
   if (!parsed || typeof parsed !== 'object') return { quarantine: { reasonCode: 'PUSH_PAYLOAD_DECODE_FAILED', receivedAt } };
   const message = asRecord(parsed);
@@ -640,6 +642,7 @@ export function parsePushPayloadDetailed(encoded: string, accountId: string, myI
   if (!conversationRef) return { quarantine: { reasonCode: 'PUSH_CONVERSATION_REF_MISSING', receivedAt } };
   if (!externalMessageRef) return { quarantine: { reasonCode: 'PUSH_MESSAGE_REF_MISSING', receivedAt } };
   if (!senderRef) return { quarantine: { reasonCode: 'PUSH_SENDER_REF_MISSING', receivedAt } };
+  const sourceOrdering = extractSourceOrdering([sourceEnvelope, message, msg1, msg10, extension]);
   const decoded = decodeContent(msg1);
   const fallbackText = optionalString(msg10.reminderContent);
   const bodyType = decoded.images.length > 0 ? 'image' : decoded.text || fallbackText ? 'text' : 'system';
@@ -657,9 +660,72 @@ export function parsePushPayloadDetailed(encoded: string, accountId: string, myI
     occurredAt: timestamp.value,
     ...(timestamp.quality === 'received' ? { receivedAt, timestampQuality: timestamp.quality, riskFlags: ['source_timestamp_invalid'] } : {}),
     ...(externalMessageRefCandidates.filter((value) => value !== externalMessageRef).length > 0 ? { externalMessageRefAliases: externalMessageRefCandidates.filter((value) => value !== externalMessageRef) } : {}),
+    ...(sourceOrdering.sourceEventId ? { sourceEventId: sourceOrdering.sourceEventId } : {}),
+    ...(sourceOrdering.sourceSequence !== undefined ? { sourceSequence: sourceOrdering.sourceSequence } : {}),
     raw: message,
   } };
 }
+
+const SOURCE_EVENT_ID_KEYS = new Set(['sourceeventid', 'eventid', 'sourceid', 'pushid', 'eventref']);
+const SOURCE_SEQUENCE_KEYS = new Set(['sourcesequence', 'sourceseq', 'eventsequence', 'sequence', 'seq', 'offset', 'cursor']);
+
+/**
+ * Push gateways are not consistent about where transport ordering metadata is
+ * placed. Search only explicitly named fields, keep the walk bounded, and do
+ * not reinterpret arbitrary numeric payload values as ordering evidence.
+ */
+function extractSourceOrdering(values: unknown[]): { sourceEventId?: string; sourceSequence?: number } {
+  const sourceEventId = values.map((value) => findStringByKey(value, SOURCE_EVENT_ID_KEYS)).find((value): value is string => Boolean(value));
+  const sourceSequence = values.map((value) => findPositiveSafeIntegerByKey(value, SOURCE_SEQUENCE_KEYS)).find((value): value is number => value !== undefined);
+  return { sourceEventId, sourceSequence };
+}
+
+function findStringByKey(value: unknown, keys: Set<string>, depth = 0): string | undefined {
+  if (depth > 8 || value === null || value === undefined) return undefined;
+  if (Array.isArray(value)) {
+    for (const child of value) {
+      const found = findStringByKey(child, keys, depth + 1);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  const object = asRecord(value);
+  for (const [key, child] of Object.entries(object)) {
+    if (keys.has(normalizeMetadataKey(key))) {
+      const candidate = optionalString(typeof child === 'number' || typeof child === 'bigint' ? String(child) : child);
+      if (candidate) return candidate;
+    }
+  }
+  for (const child of Object.values(object)) {
+    const found = findStringByKey(child, keys, depth + 1);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function findPositiveSafeIntegerByKey(value: unknown, keys: Set<string>, depth = 0): number | undefined {
+  if (depth > 8 || value === null || value === undefined) return undefined;
+  if (Array.isArray(value)) {
+    for (const child of value) {
+      const found = findPositiveSafeIntegerByKey(child, keys, depth + 1);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  const object = asRecord(value);
+  for (const [key, child] of Object.entries(object)) {
+    if (!keys.has(normalizeMetadataKey(key))) continue;
+    const parsed = numericValue(child);
+    if (parsed !== undefined && Number.isSafeInteger(parsed) && parsed > 0) return parsed;
+  }
+  for (const child of Object.values(object)) {
+    const found = findPositiveSafeIntegerByKey(child, keys, depth + 1);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+function normalizeMetadataKey(value: string): string { return value.replace(/[^a-zA-Z0-9]/g, '').toLowerCase(); }
 
 /**
  * Extract a platform 40103 outbound-message read receipt from a decoded push
@@ -912,6 +978,13 @@ function extractMessageRef(body: Record<string, unknown>): string | undefined {
 }
 
 function createMid(): string { return `${Math.floor(Math.random() * 1000)}${Date.now()} 0`; }
+function deterministicUuid(value: string): string {
+  const bytes = crypto.createHash('sha256').update(value).digest().subarray(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
 function md5(value: string): string { return crypto.createHash('md5').update(value).digest('hex'); }
 function eventErrorCode(error: unknown): string {
   const candidate = error as { code?: unknown } | null;

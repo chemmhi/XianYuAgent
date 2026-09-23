@@ -3,7 +3,7 @@
 - 设计日期：2026-09-21
 - 设计状态：PASS（进入纵向切片实现）
 - 目标路由：`/agent-dynamics`
-- 设计输入：`artifacts/auto-reply-agent-ui.html`、`docs/03-frontend-design.md`、`docs/02-data-api.md`、`docs/agent/auto-reply/design.md`
+- 设计输入：`artifacts/auto-reply-agent-ui.html`、`docs/03-frontend-design.md`、`docs/02-data-api.md`、`docs/agent/auto-reply/design.md`；修复治理入口：`docs/agent/auto-replay/repair-agent/README.md`
 
 ## 1. 用户行为与验收结果
 
