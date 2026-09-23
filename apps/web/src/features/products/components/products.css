@@ -1,9 +1,9 @@
-.products-domain { min-width: 0; min-height: 0; height: auto; }
+.products-domain { min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; }
 .products-domain-scope { align-self: flex-start; padding: 8px 11px; border: 1px solid var(--border); border-radius: 999px; background: #fff; color: var(--muted); font-size: 11px; font-weight: 700; }
-.products-panel { flex: none; min-height: 0; padding: 0; overflow: visible; display: flex; flex-direction: column; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.products-panel { flex: 1 1 auto; min-height: 0; height: 100%; padding: 0; overflow: hidden; display: flex; flex-direction: column; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 /* The products page is a page surface, not a nested card. Keep the shared
    `.card.panel` shell from adding an extra white frame around the design. */
-.card.panel.products-panel { padding: 0; overflow: visible; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.card.panel.products-panel { padding: 0; overflow: hidden; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .products-toolbar { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; padding: 0; margin-bottom: 18px; border: 0; }
 .products-toolbar h2 { margin: 0 0 5px; font-size: 24px; line-height: 1.12; }
 .products-toolbar p { margin: 0; font-size: 12px; line-height: 1.6; color: var(--sub); }
@@ -16,8 +16,8 @@
 .products-domain .ui-select-trigger { min-height: 34px; padding: 7px 30px 7px 10px; font-size: 11px; line-height: 1.4; }
 .products-domain .ui-search-control { max-width: none; min-height: 34px; background: #fff; }
 .products-domain .ui-search-control input { font-size: 12px; line-height: 1.4; }
-.products-table-region { display: flex; flex: none; min-height: 0; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; background: #fff; overflow: hidden; }
-.products-table-scroll { flex: none; min-height: 0; overflow: visible; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.products-table-region { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; background: #fff; overflow: hidden; }
+.products-table-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .products-table-scroll::-webkit-scrollbar { width: 0; height: 0; }
 .products-table-scroll { scrollbar-width: none; }
 .products-table { display: grid; min-width: 0; }
@@ -47,7 +47,7 @@
 .products-status-publishing { color: var(--info); background: var(--soft-blue-bg); }
 .products-status-failed { color: var(--danger); background: var(--danger-bg); }
 .products-status-archived { color: var(--muted); background: #F1F5F9; }
-.products-row-actions { display: flex; justify-content: flex-end; }
+.products-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .products-row-actions .btn-small { min-width: 46px; }
 .products-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 11px 12px; border-top: 1px solid var(--border); background: #fff; color: var(--sub); font-size: 12px; line-height: 1.5; }
 .products-pagination-controls { display: flex; align-items: center; gap: 6px; }
@@ -155,8 +155,8 @@ body .app-viewport .products-shell .desktop-body { border-left: 0; }
 body .app-viewport .products-domain .ui-placeholder-cell.products-placeholder { display: inline; min-height: 0; padding: 0; border: 0; border-radius: 0; color: var(--sub); font-size: 11px; font-style: normal; line-height: 1.5; }
 body .app-viewport .products-domain .products-status { font-size: 10px; line-height: 1.5; }
 body .app-viewport .products-domain .products-automation-status small { font-size: 10px; line-height: 1.4; }
-@media (min-width: 901px) { .desktop-body main.products-main { display: flex; min-height: 0; overflow: hidden; } .desktop-body main.products-main > .products-domain { flex: 1; } }
-@media (max-width: 900px) { .desktop-shell.products-shell { height: 100vh; min-height: 0; overflow: hidden; } .desktop-shell.products-shell .sidebar { display: none !important; width: 0; height: 0; min-height: 0; padding: 0; overflow: hidden; } .desktop-shell.products-shell .mobile-account-anchor { display: none !important; } .desktop-shell.products-shell .desktop-body { height: 100vh; min-height: 100vh; overflow: hidden; border-left: 0; } .desktop-shell.products-shell .desktop-body main.products-main { display: flex; min-height: 0; height: 100%; overflow: auto; padding: 16px; } .products-domain { height: auto; } .products-toolbar { align-items: stretch; flex-direction: column; } .products-toolbar-actions { justify-content: stretch; } .products-toolbar-actions .ui-select-control { flex: 1 1 0; min-width: 0; width: 100%; } .products-search { flex: 1; width: 100%; max-width: none; } .products-row { min-width: 780px; } .products-table-scroll { max-height: none; overflow-x: auto; } .products-pagination { justify-content: center; } .xianyu-detail-drawer { width: 100%; height: auto; max-height: 92vh; border-radius: 16px 16px 0 0; align-self: flex-end; } .xianyu-detail-summary { grid-template-columns: 1fr repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 901px) { .desktop-body main.products-main { display: flex; min-height: 0; overflow: hidden; } .desktop-body main.products-main > .products-domain { flex: 1; min-height: 0; } }
+@media (max-width: 900px) { .desktop-shell.products-shell { height: 100vh; min-height: 0; overflow: hidden; } .desktop-shell.products-shell .sidebar { display: none !important; width: 0; height: 0; min-height: 0; padding: 0; overflow: hidden; } .desktop-shell.products-shell .mobile-account-anchor { display: none !important; } .desktop-shell.products-shell .desktop-body { height: 100vh; min-height: 100vh; overflow: hidden; border-left: 0; } .desktop-shell.products-shell .desktop-body main.products-main { display: flex; min-height: 0; height: 100%; overflow: auto; padding: 16px; } .products-domain { min-height: 100%; height: auto; } .products-panel { height: auto; min-height: 100%; flex: 0 0 auto; } .products-table-region { flex: 0 0 auto; } .products-table-scroll { max-height: none; overflow-x: auto; overflow-y: visible; } .products-toolbar { align-items: stretch; flex-direction: column; } .products-toolbar-actions { justify-content: stretch; } .products-toolbar-actions .ui-select-control { flex: 1 1 0; min-width: 0; width: 100%; } .products-search { flex: 1; width: 100%; max-width: none; } .products-row { min-width: 780px; } .products-pagination { justify-content: center; } .xianyu-detail-drawer { width: 100%; height: auto; max-height: 92vh; border-radius: 16px 16px 0 0; align-self: flex-end; } .xianyu-detail-summary { grid-template-columns: 1fr repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 600px) { .product-basic-form { grid-template-columns: 1fr; } .product-basic-form-wide { grid-column: auto; } }
 
 /* Keep the products table on the shared project typography scale. */

@@ -12,15 +12,11 @@ export function CouponPickerDialog({ open, title, subtitle, coupons, selectedIds
   onSave: (ids: string[]) => void;
 }) {
   const [draftIds, setDraftIds] = useState<string[]>(selectedIds);
-  const [availableCheckedIds, setAvailableCheckedIds] = useState<string[]>([]);
-  const [selectedCheckedIds, setSelectedCheckedIds] = useState<string[]>([]);
   const [availableSearch, setAvailableSearch] = useState('');
   const [selectedSearch, setSelectedSearch] = useState('');
   useEffect(() => {
     if (open) {
       setDraftIds(selectedIds);
-      setAvailableCheckedIds([]);
-      setSelectedCheckedIds([]);
       setAvailableSearch('');
       setSelectedSearch('');
     }
@@ -28,22 +24,16 @@ export function CouponPickerDialog({ open, title, subtitle, coupons, selectedIds
   const selectedSet = useMemo(() => new Set(draftIds), [draftIds]);
   const available = coupons.filter((coupon) => !selectedSet.has(coupon.id) && matches(coupon, availableSearch)).sort(compareCoupons);
   const selected = coupons.filter((coupon) => selectedSet.has(coupon.id) && matches(coupon, selectedSearch)).sort(compareCoupons);
-  const addIds = (ids: string[]) => {
-    setDraftIds((previous) => [...new Set([...previous, ...ids])]);
-    setAvailableCheckedIds((previous) => previous.filter((id) => !ids.includes(id)));
-  };
-  const removeIds = (ids: string[]) => {
-    setDraftIds((previous) => previous.filter((id) => !ids.includes(id)));
-    setSelectedCheckedIds((previous) => previous.filter((id) => !ids.includes(id)));
-  };
+  const toggleDraft = (id: string) => setDraftIds((previous) => previous.includes(id) ? previous.filter((value) => value !== id) : [...previous, id]);
+  const addAll = () => setDraftIds((previous) => [...new Set([...previous, ...available.map((coupon) => coupon.id)])]);
+  const removeIds = (ids: string[]) => setDraftIds((previous) => previous.filter((id) => !ids.includes(id)));
   if (!open) return null;
   return <div className="coupons-modal-backdrop product-automation-coupon-picker-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
     <section className="coupons-modal coupons-relation-modal coupon-picker-modal card" role="dialog" aria-modal="true" aria-label={title} data-testid="coupon-picker-dialog">
       <header><div><p className="eyebrow">Coupon Relation</p><h2>{title}</h2><p>{subtitle}</p></div><button className="icon-button" type="button" aria-label="关闭卡券选择" onClick={onCancel}>×</button></header>
       <div className="coupons-relation-grid coupon-picker-grid">
-        <CouponPane title="待选卡券" count={available.length} search={availableSearch} onSearch={setAvailableSearch} coupons={available} checked={availableCheckedIds} empty="没有符合条件的待选卡券" onToggle={(coupon) => setAvailableCheckedIds((previous) => previous.includes(coupon.id) ? previous.filter((id) => id !== coupon.id) : [...previous, coupon.id])} onSelectAll={() => setAvailableCheckedIds(available.map((coupon) => coupon.id))} selectAllLabel="全选当前结果" placeholder="搜索卡券名称或 ID" />
-        <div className="coupon-picker-transfer-column" aria-label="移动卡券"><button type="button" className="btn ghost btn-small coupon-picker-transfer-button coupon-transfer-arrow" aria-label="加入已选卡券" disabled={!availableCheckedIds.length} onClick={() => addIds(availableCheckedIds)}>→</button><button type="button" className="btn ghost btn-small coupon-picker-transfer-button coupon-transfer-arrow" aria-label="移出已选卡券" disabled={!selectedCheckedIds.length} onClick={() => removeIds(selectedCheckedIds)}>←</button></div>
-        <CouponPane title="已选卡券" count={selected.length} search={selectedSearch} onSearch={setSelectedSearch} coupons={selected} checked={selectedCheckedIds} empty="暂无已选卡券，请从左侧选择" onToggle={(coupon) => setSelectedCheckedIds((previous) => previous.includes(coupon.id) ? previous.filter((id) => id !== coupon.id) : [...previous, coupon.id])} onRemove={(coupon) => removeIds([coupon.id])} placeholder="搜索已选卡券" />
+        <CouponPane title="待选卡券" count={available.length} search={availableSearch} onSearch={setAvailableSearch} coupons={available} checked={[]} empty="没有符合条件的待选卡券" onToggle={(coupon) => toggleDraft(coupon.id)} onSelectAll={addAll} selectAllLabel="全选当前结果" placeholder="搜索卡券名称或 ID" />
+        <CouponPane title="已选卡券" count={selected.length} search={selectedSearch} onSearch={setSelectedSearch} coupons={selected} checked={selected.map((coupon) => coupon.id)} empty="暂无已选卡券，请从左侧选择" onToggle={(coupon) => toggleDraft(coupon.id)} onRemove={(coupon) => removeIds([coupon.id])} placeholder="搜索已选卡券" />
       </div>
       <footer className="coupon-picker-footer"><span className="coupon-picker-footer-note">可多选卡券，保存后将按选择结果执行自动化。</span><div><button className="btn ghost" type="button" onClick={onCancel}>取消</button><button className="btn primary" type="button" data-testid="save-coupon-selection" onClick={() => onSave(draftIds)}>保存（{draftIds.length} 个）</button></div></footer>
     </section>

@@ -158,7 +158,7 @@ export function createProductAutomationApi(transport: ProductAutomationApiTransp
       // Keep the intent parameter for the public contract, but scope by
       // account only and let the picker show all buyer-deliverable batches.
       void purpose;
-      const suffix = '';
+      const suffix = '&page=1&pageSize=100';
       const response = await transport.get<{ data?: { items?: Record<string, unknown>[] } | Record<string, unknown>[] } | { items?: Record<string, unknown>[] } | Record<string, unknown>[]>(`/api/v1/coupons/batches?accountId=${encodeURIComponent(accountId)}${suffix}`);
       const payload = (response as { data?: unknown }).data ?? response;
       const items = Array.isArray(payload) ? payload : ((payload as { items?: Record<string, unknown>[] }).items ?? []);

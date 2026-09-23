@@ -25,19 +25,27 @@ export function AutomationDrawer({ open, product, accountLabel = '当前账号',
   onSave: (input: ProductAutomationUpdate) => Promise<unknown>;
 }) {
   const [activeTab, setActiveTab] = useState<AutomationRuleKey>('delivery');
-  const [draft, setDraft] = useState<ProductAutomationConfig | null>(config);
+  const boundCouponIds = useMemo(() => (product?.couponBatches ?? []).map((coupon) => coupon.id).filter(Boolean), [product]);
+  const pickerCoupons = useMemo(() => {
+    const byId = new Map(coupons.map((coupon) => [coupon.id, coupon]));
+    for (const coupon of product?.couponBatches ?? []) {
+      if (!byId.has(coupon.id)) byId.set(coupon.id, { id: coupon.id, label: coupon.label ?? coupon.id, typeLabel: '已绑定卡券', specSummary: '规格由卡券管理维护', quantitySummary: '按卡券设置', stockSummary: '由卡券管理维护' });
+    }
+    return [...byId.values()];
+  }, [coupons, product]);
+  const [draft, setDraft] = useState<ProductAutomationConfig | null>(() => config ? hydrateDraft(config, boundCouponIds) : config);
   const [couponTarget, setCouponTarget] = useState<AutomationRuleKey | null>(null);
 
   useEffect(() => {
     if (open) {
-      setDraft(config);
+      setDraft(config ? hydrateDraft(config, boundCouponIds) : config);
       setActiveTab('delivery');
     }
-  }, [config, open]);
+  }, [boundCouponIds, config, open]);
 
   const selectedCoupons = useMemo(
-    () => (key: AutomationRuleKey) => coupons.filter((coupon) => draft?.[key].couponIds?.includes(coupon.id)),
-    [coupons, draft],
+    () => (key: AutomationRuleKey) => pickerCoupons.filter((coupon) => draft?.[key].couponIds?.includes(coupon.id)),
+    [draft, pickerCoupons],
   );
 
   if (!open || !product) return null;
@@ -99,7 +107,7 @@ export function AutomationDrawer({ open, product, accountLabel = '当前账号',
         open
         title={couponTarget === 'gift' ? '选择赠品卡券' : '选择发货卡券'}
         subtitle={couponTarget === 'gift' ? '评价后自动发送的赠品卡券' : '付款后自动发货使用的卡券'}
-        coupons={coupons}
+        coupons={pickerCoupons}
         selectedIds={draft?.[couponTarget].couponIds ?? []}
         onCancel={() => setCouponTarget(null)}
         onSave={(ids) => {
@@ -167,6 +175,15 @@ function summaryText(key: AutomationRuleKey, config: ProductAutomationConfig | n
   if (key === 'gift') return selected.length ? `已选${selected[0].label} · 规则在卡券中维护` : '未选择赠品卡券';
   if (key === 'review') return `发货后${config.review.reviewInitialHours ?? 72}小时 · 每${config.review.reviewRepeatHours ?? 24}小时 · ${config.review.reviewMaxCount ?? 1}次`;
   return config.reprice.enabled && config.reprice.targetPriceMinor ? `目标价 ¥${(config.reprice.targetPriceMinor / 100).toFixed(2)}` : '未设置目标价格和话术';
+}
+
+function hydrateDraft(config: ProductAutomationConfig, boundCouponIds: string[]): ProductAutomationConfig {
+  const mergeBound = (ids?: string[]) => ids?.length ? ids : boundCouponIds;
+  return {
+    ...config,
+    delivery: { ...config.delivery, couponIds: mergeBound(config.delivery.couponIds) },
+    gift: { ...config.gift, couponIds: mergeBound(config.gift.couponIds) },
+  };
 }
 
 function formatTime(value: string) {

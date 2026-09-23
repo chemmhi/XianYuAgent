@@ -27,7 +27,7 @@ describe('product automation API', () => {
     await api.saveConfig('product-1', { version: 7, delivery: { enabled: false }, reprice: { enabled: false }, gift: { enabled: false }, review: { enabled: true } });
     await api.saveBatch({ productIds: ['product-1'], expectedConfigVersions: { 'product-1': 8 }, apply: { delivery: true, reprice: false, gift: false, review: false }, rules: { delivery: { enabled: false }, reprice: { enabled: false }, gift: { enabled: false }, review: { enabled: true } } });
     expect(calls[0].path).toBe('/api/v1/products/product-1/automation');
-    expect(calls[1].path).toBe('/api/v1/coupons/batches?accountId=account-1');
+    expect(calls[1].path).toBe('/api/v1/coupons/batches?accountId=account-1&page=1&pageSize=100');
     const saveCall = calls.find((call) => call.method === 'PATCH' && call.path.includes('/automation'));
     expect(saveCall?.body).toMatchObject({ config: { paidAutoDelivery: { enabled: false, couponBatchIds: [], autoConfirm: false }, unpaidAutoReprice: { enabled: false, targetPriceMinor: 0 }, reviewGift: { enabled: false, couponBatchIds: [] }, reviewReminder: { enabled: true, firstDelayHours: 72 } } });
     expect((saveCall?.body as { config?: { paidAutoDelivery?: { autoConfirm?: boolean } } }).config?.paidAutoDelivery?.autoConfirm).toBe(false);
@@ -93,8 +93,20 @@ describe('product automation components', () => {
     expect(html).toContain('已选卡券');
     expect(html).toContain('保存（1 个）');
     expect(html).toContain('API 卡券');
+    expect(html).not.toContain('coupon-picker-transfer-column');
+    expect(html).not.toContain('加入已选卡券');
+    expect(html).not.toContain('移出已选卡券');
     expect(html).not.toContain('库存 120');
     expect(html).not.toContain('2 条规格');
+  });
+
+  it('hydrates automation picker selections from product-level coupon bindings', async () => {
+    const api = createMockProductAutomationApi();
+    const config = await api.getConfig(product.id);
+    const boundProduct = { ...product, couponBatches: [{ id: 'coupon-gift-a', label: '评价赠品批次 A' }] };
+    const html = renderToStaticMarkup(createElement(AutomationDrawer, { open: true, product: boundProduct, config: { ...config, delivery: { ...config.delivery, couponIds: [] }, gift: { ...config.gift, couponIds: [] } }, coupons: MOCK_AUTOMATION_COUPONS, loadPhase: 'success', savePhase: 'idle', error: null, onClose: vi.fn(), onSave: vi.fn(async () => config) }));
+    expect(html).toContain('评价赠品批次 A');
+    expect((html.match(/已选发货卡券/g) ?? []).length).toBeGreaterThan(0);
   });
 
   it('renders the delivery auto-confirm switch and preserves its saved state', () => {

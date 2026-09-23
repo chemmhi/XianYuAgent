@@ -131,10 +131,7 @@ body .app-viewport .product-automation-overlay .automation-modal-footer .btn{fon
    list rows, typography, spacing and footer stay aligned with CouponRelationModal. */
 .product-automation-coupon-picker-backdrop{z-index:60}
 .coupon-picker-modal{width:min(960px,100%);height:min(680px,calc(100vh - 48px));max-height:calc(100vh - 48px)}
-.coupon-picker-grid{grid-template-columns:minmax(0,1fr) 52px minmax(0,1fr)}
-.coupon-picker-transfer-column{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border-right:1px solid var(--border);background:var(--bg)}
-.coupon-picker-transfer-button{min-width:34px;width:34px;height:30px;padding:0;border-color:#B7CEE4;color:var(--link);font-size:15px;line-height:1}
-.coupon-picker-transfer-button:disabled{cursor:not-allowed;opacity:.45}
+.coupon-picker-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
 .coupon-picker-item{width:100%;margin:0;padding:10px;gap:8px;cursor:pointer;font-size:12px;line-height:1.4}
 .coupon-picker-item.active{background:var(--soft-blue-bg)}
 .coupon-picker-item .coupon-item-main{display:grid;gap:2px;min-width:0;overflow:visible;text-overflow:clip;white-space:normal}
@@ -143,12 +140,12 @@ body .app-viewport .product-automation-overlay .automation-modal-footer .btn{fon
 .coupon-picker-item .coupon-remove{width:auto;height:auto;min-width:30px;padding:4px 7px;border-radius:6px;color:var(--danger);font-size:13px;line-height:1.45}
 .coupon-picker-select-all{white-space:nowrap}
 .coupon-picker-footer{align-items:center!important;gap:14px}
+.coupon-picker-footer>div{display:flex;align-items:center;gap:8px}
 .coupon-picker-footer-note{margin-right:auto;color:var(--sub);font-size:11px;line-height:1.5}
 
 @media(max-width:900px){
   .coupon-picker-modal{height:92vh;max-height:92vh}
-  .coupon-picker-grid{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) auto minmax(0,1fr)}
-  .coupon-picker-transfer-column{flex-direction:row;border-right:0;border-bottom:1px solid var(--border);border-top:1px solid var(--border);padding:8px}
+  .coupon-picker-grid{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}
   .coupon-picker-footer{align-items:stretch!important;flex-direction:column;padding-top:12px!important}
   .coupon-picker-footer-note{margin-right:0}
 }
