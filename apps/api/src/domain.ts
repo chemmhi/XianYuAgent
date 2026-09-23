@@ -1055,6 +1055,8 @@ export interface MessageListQuery {
   /** Opaque cursor used to load messages older than the current timeline. */
   beforeCursor?: string;
   limit?: number;
+  /** Controls whether the first page refreshes history from Xianyu. */
+  refreshExternal?: boolean;
 }
 
 export interface MessageListResult {

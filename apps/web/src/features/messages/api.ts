@@ -4,7 +4,7 @@ interface Envelope<T> { data?: T; }
 
 export interface MessagesApi {
   listConversations(input: { accountId: string; cursor?: string; limit?: number; refreshExternal?: boolean }): Promise<{ items: ConversationVM[]; nextCursor?: string; hasMore: boolean }>;
-  listMessages(input: { accountId: string; conversationId: string; cursor?: number; beforeCursor?: string; limit?: number }): Promise<{ items: MessageVM[]; nextCursor?: number; hasMore: boolean; latestCursor: number; hasMoreHistory: boolean; historyCursor?: string }>;
+  listMessages(input: { accountId: string; conversationId: string; cursor?: number; beforeCursor?: string; limit?: number; refreshExternal?: boolean }): Promise<{ items: MessageVM[]; nextCursor?: number; hasMore: boolean; latestCursor: number; hasMoreHistory: boolean; historyCursor?: string }>;
   markConversationRead?(input: { accountId: string; conversationId: string }): Promise<ConversationVM>;
   sendMessage(input: { accountId: string; conversationId: string; text: string; idempotencyKey: string }): Promise<MessageVM>;
   sendImage(input: { accountId: string; conversationId: string; file: File; idempotencyKey: string }): Promise<MessageVM>;
@@ -24,6 +24,7 @@ export function createMessagesApi(input: { get: <T>(path: string) => Promise<T>;
       const params = new URLSearchParams({ limit: String(query.limit ?? 100) });
       if (query.cursor !== undefined) params.set('cursor', String(query.cursor));
       if (query.beforeCursor !== undefined) params.set('beforeCursor', query.beforeCursor);
+      if (query.refreshExternal !== undefined) params.set('refreshExternal', String(query.refreshExternal));
       const payload = await input.get<Envelope<{ items: MessageVM[]; nextCursor?: number; hasMore: boolean; latestCursor: number; hasMoreHistory: boolean; historyCursor?: string }>>(`/api/v1/conversations/${encodeURIComponent(query.conversationId)}/messages?${params.toString()}`);
       return payload.data ?? { items: [], hasMore: false, latestCursor: 0, hasMoreHistory: false };
     },
