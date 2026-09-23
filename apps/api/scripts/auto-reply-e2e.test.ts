@@ -279,7 +279,12 @@ test('persisted Agent settings apply to the next buyer push without restart', as
     socket.emit('message', pushFrame('settings-push-2', 'settings-agent-conversation', 'settings-message-2.PNM', 'settings-agent-buyer', '请继续介绍', '设置买家'));
     await waitFor(() => results.length >= 2);
     assert.equal(results[1]?.autoReply?.run.status, 'persisted');
-    assert.match((modelRequests[1]?.messages as Array<{ role: string; content: string }>)[0]?.content ?? '', /^设置页更新后的系统提示/);
+    const updatedSystemPrompt = (modelRequests[1]?.messages as Array<{ role: string; content: string }>)[0]?.content ?? '';
+    assert.match(updatedSystemPrompt, /^初始系统提示/);
+    assert.match(updatedSystemPrompt, /以下是账号级回复风格提示/);
+    assert.match(updatedSystemPrompt, /设置页更新后的系统提示/);
+    assert.match(updatedSystemPrompt, /账号级提示只影响表达风格/);
+    assert.ok(updatedSystemPrompt.indexOf('初始系统提示') < updatedSystemPrompt.indexOf('设置页更新后的系统提示'));
     assert.ok((results[1]?.autoReply?.outboundMessage?.bodyText ?? '').length <= 50);
     assert.equal(socket.sent.filter((message) => message.lwp === '/r/MessageSend/sendByReceiverScope').length, 0);
     assert.equal((await runtime.messages.listMessages(adminId, conversation.id, { limit: 20 })).items.filter((message) => message.direction === 'outbound').length, 2);

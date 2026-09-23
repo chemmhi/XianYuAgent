@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolveAutoReplyAgentConfig } from '../src/auto-reply-agent-config.js';
+import { composeAutoReplyAgentSystemPrompt, resolveAutoReplyAgentConfig } from '../src/auto-reply-agent-config.js';
 import { AUTO_REPLY_AGENT_TOOLS, ToolCallingAutoReplyAgent, type AutoReplyAgentTrace } from '../src/auto-reply-agent.js';
 import { AutoReplyService, NoopAutoReplySender, type AutoReplyClassification, type AutoReplyContext, type AutoReplyGeneratorObservation } from '../src/auto-reply.js';
 import { createApp } from '../src/app.js';
@@ -57,6 +57,30 @@ test('buyer Agent can resolve the latest persisted configuration per message', a
   assert.equal(seenPrompts.length, 1);
   assert.match(seenPrompts[0] ?? '', /^设置页最新提示词/);
   assert.deepEqual(providerArgs, [['admin-1', 'account-1']]);
+});
+
+test('account persona supplements base system rules instead of replacing them', () => {
+  const base = resolveAutoReplyAgentConfig({});
+  const prompt = composeAutoReplyAgentSystemPrompt(base.systemPrompt, '请使用更自然、更像真人的语气回复。');
+  assert.match(prompt, /你只能根据当前买家消息和只读工具返回的真实事实作答/);
+  assert.match(prompt, /请使用更自然、更像真人的语气回复/);
+  assert.match(prompt, /账号级提示只影响表达风格/);
+  assert.ok(prompt.indexOf('你只能根据当前买家消息') < prompt.indexOf('请使用更自然、更像真人的语气回复'));
+});
+
+test('agent system contract requires relevant tools before handoff', async () => {
+  let systemPrompt = '';
+  const client: ModelClient = {
+    complete: async (request) => {
+      systemPrompt = contentText(request.messages[0]?.content);
+      return { content: replyPayload('我先根据当前事实回复。'), model: 'test' };
+    },
+  };
+  const agent = new ToolCallingAutoReplyAgent({} as Store, client, resolveAutoReplyAgentConfig({}));
+  await agent.generate({ adminId: 'admin-1', context: context(), classification });
+  assert.match(systemPrompt, /上下文不足但相关只读工具可能补足事实时，必须先调用工具/);
+  assert.match(systemPrompt, /handoff 只能作为最后手段/);
+  assert.match(systemPrompt, /工具已经尝试且仍无结果、工具失败/);
 });
 
 test('agent chooses product tool then returns final answer', async () => {
