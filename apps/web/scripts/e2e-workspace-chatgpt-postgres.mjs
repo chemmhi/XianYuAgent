@@ -235,7 +235,8 @@ async function run() {
     setter?.call(area, ${JSON.stringify(instruction)});
     area.dispatchEvent(new Event('input', { bubbles: true }));
   })()`);
-  await evaluate(cdp, 'document.querySelector(".workspace-composer button[type=submit]")?.click()');
+  await evaluate(cdp, 'new Promise((resolve) => setTimeout(resolve, 50))');
+  await evaluate(cdp, 'document.querySelector(".workspace-composer")?.requestSubmit()');
   await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector(".workspace-message-final"))')), 'AI final reply in Workspace', 20_000);
   const browserReply = await evaluate(cdp, 'document.querySelector(".workspace-message-final")?.innerText ?? ""');
   assert.match(String(browserReply), /确定性 AI 回复/);

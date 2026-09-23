@@ -68,8 +68,12 @@ async function run() {
   await cdp.send('Page.navigate', { url: `${webUrl}/accounts` }); await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('账号列表'), 'accounts'); await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('陈陈cc'), 'account row'); await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll('[role="row"]')).find((item) => item.textContent?.includes('陈陈cc')); row?.querySelector('[data-testid="account-switch"]')?.click(); return true; })()`); await waitFor(async () => String(await evaluate(cdp, 'localStorage.getItem("xianyu.activeAccountId") ?? ""')) === account.id, 'account selection');
   await cdp.send('Page.navigate', { url: `${webUrl}/products` }); await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('商品目录'), 'products'); await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('PPT Master pptmaster'), 'product row'); await evaluate(cdp, '(() => { document.querySelector(`[aria-label="选择PPT Master pptmaster"]`)?.click(); document.querySelector(`[aria-label="选择婚礼视频，AI婚礼视频制作"]`)?.click(); return true; })()'); await shot(cdp, 1440, 900, '01-products-list-desktop.png'); await shot(cdp, 390, 844, '01-products-list-mobile.png');
   if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid^=product-automation-]"); if (!button) return false; button.click(); return true; })()')) throw new Error('automation action missing'); await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('自动化配置'), 'automation drawer');
+  await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector("[data-testid=auto-confirm-delivery]"))')), 'automation config load');
   const autoConfirmAudit = await evaluate(cdp, `(() => { const toggle = document.querySelector('[data-testid=auto-confirm-delivery]'); return toggle ? { present: true, pressed: toggle.getAttribute('aria-pressed'), label: toggle.getAttribute('aria-label') } : { present: false }; })()`);
-  if (!autoConfirmAudit?.present || !String(autoConfirmAudit.label).includes('自动确认发货')) throw new Error(`auto-confirm switch missing: ${JSON.stringify(autoConfirmAudit)}`);
+  if (!autoConfirmAudit?.present || !String(autoConfirmAudit.label).includes('自动确认发货')) {
+    const diagnostics = await evaluate(cdp, 'JSON.stringify({ body: document.body.innerText, fetchLog: (window.__automationFetchLog ?? []).filter((entry) => entry.url.includes("automation")) })');
+    throw new Error(`auto-confirm switch missing: ${JSON.stringify(autoConfirmAudit)}; diagnostics=${diagnostics}`);
+  }
   if (autoConfirmAudit.pressed !== 'true') await evaluate(cdp, 'document.querySelector("[data-testid=auto-confirm-delivery]")?.click()');
   const enabledAutoConfirm = await evaluate(cdp, 'document.querySelector("[data-testid=auto-confirm-delivery]")?.getAttribute("aria-pressed") ?? null');
   if (enabledAutoConfirm !== 'true') throw new Error(`auto-confirm switch could not be enabled: ${enabledAutoConfirm}`);
@@ -77,30 +81,26 @@ async function run() {
   await waitFor(async () => !Boolean(await evaluate(cdp, 'document.querySelector("[data-testid=automation-drawer]")')), 'automation save');
   await evaluate(cdp, 'document.querySelector("[data-testid^=product-automation-]")?.click()');
   await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector("[data-testid=automation-drawer]"))')), 'automation drawer reopen');
+  await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector("[data-testid=auto-confirm-delivery]"))')), 'automation config reload');
   const persistedAutoConfirm = await evaluate(cdp, `(() => { const toggle = document.querySelector('[data-testid=auto-confirm-delivery]'); return toggle?.getAttribute('aria-pressed') ?? null; })()`);
-  if (persistedAutoConfirm !== 'true') throw new Error(`auto-confirm state did not persist after save: ${persistedAutoConfirm}`);
+  if (persistedAutoConfirm !== 'true') {
+    const fetchLog = await evaluate(cdp, 'JSON.stringify((window.__automationFetchLog ?? []).filter((entry) => entry.url.includes("automation")))');
+    throw new Error(`auto-confirm state did not persist after save: ${persistedAutoConfirm}; fetchLog=${fetchLog}`);
+  }
   await shot(cdp, 1440, 900, '02-payment-after-delivery-desktop.png'); await shot(cdp, 390, 844, '02-payment-after-delivery-mobile.png');
   for (const [tab, marker, file] of [['拍下未付款改价', '目标价格', '03-unpaid-reprice'], ['评价后发送赠品', '选择卡券', '04-review-gift'], ['超时未评价求评价', '首次提醒', '05-overdue-review']]) { const clicked = await evaluate(cdp, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent?.includes(${JSON.stringify(tab)})); button?.click(); return Boolean(button); })()`); if (!clicked) throw new Error(`automation tab missing: ${tab}`); await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes(marker), `${tab} panel`); await shot(cdp, 1440, 900, `${file}-desktop.png`); await shot(cdp, 390, 844, `${file}-mobile.png`); }
-  await evaluate(cdp, 'Array.from(document.querySelectorAll(".automation-summary")).find((item) => item.textContent?.includes("付款后自动发货"))?.click()'); await evaluate(cdp, 'document.querySelector("[data-testid=choose-delivery-coupon]")?.click()'); await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('待选卡券'), 'coupon picker'); if (automationMode === 'live') await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('批量数据2'), 'live coupon picker list'); await shot(cdp, 1440, 900, '06-delivery-coupon-picker-desktop.png'); await shot(cdp, 390, 844, '06-delivery-coupon-picker-mobile.png');
+  await evaluate(cdp, 'Array.from(document.querySelectorAll(".automation-summary")).find((item) => item.textContent?.includes("付款后自动发货"))?.click()'); await evaluate(cdp, 'document.querySelector("[data-testid=choose-delivery-coupon]")?.click()'); await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('待选卡券'), 'coupon picker'); await waitFor(async () => Number(await evaluate(cdp, 'document.querySelectorAll(".coupon-transfer-pane").length')) >= 2, 'coupon transfer controls'); if (automationMode === 'live') await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('批量数据2'), 'live coupon picker list'); await shot(cdp, 1440, 900, '06-delivery-coupon-picker-desktop.png'); await shot(cdp, 390, 844, '06-delivery-coupon-picker-mobile.png');
   const transferAudit = await evaluate(cdp, `(async () => {
     const panes = document.querySelectorAll('.coupon-transfer-pane');
-    const arrows = document.querySelectorAll('.coupon-transfer-arrow');
     const availableInput = panes[0]?.querySelector('input[type="checkbox"]');
     const before = panes[1]?.querySelectorAll('.coupon-item').length ?? 0;
-    if (!availableInput || arrows.length < 2 || before < 1) return { ok: false, reason: 'transfer controls missing', before };
-    if (!arrows[0].hasAttribute('disabled')) return { ok: false, reason: 'add arrow should start disabled' };
+    if (!availableInput || before < 1) return { ok: false, reason: 'transfer controls missing', before };
     availableInput.click();
-    await new Promise((resolve) => setTimeout(resolve, 40));
-    if (arrows[0].hasAttribute('disabled')) return { ok: false, reason: 'add arrow stayed disabled after checking' };
-    arrows[0].click();
     await new Promise((resolve) => setTimeout(resolve, 40));
     const afterAdd = panes[1]?.querySelectorAll('.coupon-item').length ?? 0;
     const selectedInput = panes[1]?.querySelector('input[type="checkbox"]');
     if (afterAdd !== before + 1 || !selectedInput) return { ok: false, reason: 'checked item did not move right', before, afterAdd };
     selectedInput.click();
-    await new Promise((resolve) => setTimeout(resolve, 40));
-    if (arrows[1].hasAttribute('disabled')) return { ok: false, reason: 'remove arrow stayed disabled after checking right item' };
-    arrows[1].click();
     await new Promise((resolve) => setTimeout(resolve, 40));
     const afterRemove = panes[1]?.querySelectorAll('.coupon-item').length ?? 0;
     return { ok: afterRemove === before, before, afterAdd, afterRemove };

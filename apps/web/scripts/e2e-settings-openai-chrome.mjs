@@ -88,7 +88,7 @@ async function startFakeProvider(name, model, reply) {
         return;
       }
       response.statusCode = 200;
-      response.end(JSON.stringify({ id: `${name}-response-${state.requests.length}`, model, output_text: JSON.stringify({ text: reply, segments: [reply] }) }));
+      response.end(JSON.stringify({ id: `${name}-response-${state.requests.length}`, model, output_text: JSON.stringify({ decision: 'reply', text: reply, segments: [reply] }) }));
       return;
     }
     response.statusCode = 404;

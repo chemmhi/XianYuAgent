@@ -215,7 +215,8 @@ async function run() {
   await cdp.send('Network.setBlockedURLs', { urls: ['*api/v1/workspace/runs/*/events*'] });
   await evaluate(cdp, `window.__workspaceRunSockets = []; (() => { const Original = window.WebSocket; window.WebSocket = class extends Original { constructor(...args) { super(...args); window.__workspaceRunSockets.push(this); } }; })()`);
   await evaluate(cdp, `(() => { const area = document.querySelector('.workspace-composer textarea'); const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set; setter?.call(area, '检查当前 Workspace 状态并返回摘要'); area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-  await evaluate(cdp, 'document.querySelector(".workspace-composer button[type=submit]")?.click()');
+  await evaluate(cdp, 'new Promise((resolve) => setTimeout(resolve, 50))');
+  await evaluate(cdp, 'document.querySelector(".workspace-composer")?.requestSubmit()');
   await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector(".workspace-thread .workspace-reconnect-button"))')), 'reconnect state after blocked event stream', 10_000);
   const sessionCount = await evaluate(cdp, 'document.querySelectorAll(".workspace-session-row").length');
   if (sessionCount !== 1) throw new Error(`expected one session after first message, got ${sessionCount}`);
@@ -225,15 +226,15 @@ async function run() {
   await cdp.send('Network.setBlockedURLs', { urls: [] });
   await evaluate(cdp, 'document.querySelector(".workspace-thread .workspace-reconnect-button")?.click()');
   await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector(".workspace-message-final"))')), 'successful Run result after reconnect', 15_000);
-  const messageTypes = await evaluate(cdp, '({ user: document.querySelectorAll(".workspace-message-user").length, reasoning: document.querySelectorAll(".workspace-message-reasoning").length, toolGroup: document.querySelectorAll(".workspace-tool-group").length, tool: document.querySelectorAll(".workspace-message-tool").length, final: document.querySelectorAll(".workspace-message-final").length })');
+  const messageTypes = await evaluate(cdp, '({ user: document.querySelectorAll(".workspace-message-user").length, reasoning: document.querySelectorAll(".workspace-agent-trace").length, toolGroup: document.querySelectorAll(".workspace-agent-trace").length, tool: document.querySelectorAll(".workspace-trace-row").length, final: document.querySelectorAll(".workspace-message-final").length })');
   if (messageTypes.user < 1 || messageTypes.reasoning < 1 || messageTypes.toolGroup < 1 || messageTypes.final < 1) throw new Error(`workspace message stream missing canonical types: ${JSON.stringify(messageTypes)}`);
-  await evaluate(cdp, 'document.querySelector(".workspace-tool-group button")?.click()');
-  await waitFor(async () => Number(await evaluate(cdp, 'document.querySelectorAll(".workspace-message-tool .workspace-message-code").length')) >= 2, 'expanded tool event group');
+  await evaluate(cdp, 'document.querySelector(".workspace-trace-toggle")?.click()');
+  await waitFor(async () => Number(await evaluate(cdp, 'document.querySelectorAll(".workspace-trace-row").length')) >= 2, 'expanded tool event group');
   const errorNodes = await evaluate(cdp, 'Array.from(document.querySelectorAll(".workspace-inline-error")).map((node) => ({ text: node.textContent, html: node.outerHTML }))');
   const socketStates = await evaluate(cdp, 'Array.from(window.__workspaceRunSockets ?? []).map((socket) => socket.readyState)');
-  await waitFor(async () => Number(await evaluate(cdp, 'document.querySelectorAll(".workspace-message-tool .workspace-message-code").length')) >= 2, 'event replay in message stream');
-  const eventRows = await evaluate(cdp, 'Array.from(document.querySelectorAll(".workspace-message-tool .workspace-message-code")).map((node) => node.textContent?.trim()).filter(Boolean)');
-  const eventSummary = await evaluate(cdp, 'Array.from(document.querySelectorAll(".workspace-message-tool")).map((node) => node.innerText).join(" | ")');
+  await waitFor(async () => Number(await evaluate(cdp, 'document.querySelectorAll(".workspace-trace-row").length')) >= 2, 'event replay in message stream');
+  const eventRows = await evaluate(cdp, 'Array.from(document.querySelectorAll(".workspace-trace-row small")).map((node) => node.textContent?.trim()).filter(Boolean)');
+  const eventSummary = await evaluate(cdp, 'Array.from(document.querySelectorAll(".workspace-trace-details")).map((node) => node.innerText).join(" | ")');
   const wsHandshakes = cdp.events.filter((event) => event.method === 'Network.webSocketHandshakeResponseReceived').length;
   const workspaceNetwork = cdp.events.filter((event) => {
     const request = event.params?.request;
@@ -264,7 +265,7 @@ async function run() {
   const session = sessionPayload.data?.items?.find((item) => String(item.title).includes('检查当前 Workspace 状态并返回摘要'));
   if (!session?.id) throw new Error('session persistence readback missing created session');
 
-  const browserState = await evaluate(cdp, '({ href: location.href, sessionCount: document.querySelectorAll(".workspace-session-row").length, runStatus: document.querySelector(".workspace-thread .workspace-status")?.textContent ?? "", result: document.querySelector(".workspace-message-final")?.innerText ?? "", messageTypes: { user: document.querySelectorAll(".workspace-message-user").length, reasoning: document.querySelectorAll(".workspace-message-reasoning").length, tool: document.querySelectorAll(".workspace-message-tool").length, final: document.querySelectorAll(".workspace-message-final").length }, eventSummary: Array.from(document.querySelectorAll(".workspace-message-tool")).map((node) => node.innerText).join(" | ") })');
+  const browserState = await evaluate(cdp, '({ href: location.href, sessionCount: document.querySelectorAll(".workspace-session-row").length, runStatus: document.querySelector(".workspace-thread .workspace-status")?.textContent ?? "", result: document.querySelector(".workspace-message-final")?.innerText ?? "", messageTypes: { user: document.querySelectorAll(".workspace-message-user").length, trace: document.querySelectorAll(".workspace-agent-trace").length, tool: document.querySelectorAll(".workspace-trace-row").length, final: document.querySelectorAll(".workspace-message-final").length }, eventSummary: Array.from(document.querySelectorAll(".workspace-trace-details")).map((node) => node.innerText).join(" | ") })');
   console.log(JSON.stringify({
     apiStorage: 'postgres', runtime: workspaceE2eRuntime, accountId, sessionId: session.id, runId, sessionPersisted: true, runPersisted: true,
     browserState, blockedBanner, errorNodes, socketStates, messageTypes, eventRows, eventSummary, wsHandshakes, workspaceNetwork,

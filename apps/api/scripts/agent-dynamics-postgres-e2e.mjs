@@ -19,7 +19,7 @@ globalThis.fetch = (async (_input, init) => {
   assert.equal(body.model, 'agent-dynamics-postgres');
   const message = modelCall === 1
     ? { content: '', tool_calls: [{ id: 'agent-dynamics-product-1', type: 'function', function: { name: 'get_product_info', arguments: '{}' } }] }
-    : { content: '这是一个真实 PostgreSQL Agent 动态验收回复。' };
+    : { content: JSON.stringify({ decision: 'reply', text: '这是一个真实 PostgreSQL Agent 动态验收回复。' }) };
   return new Response(JSON.stringify({ model: 'agent-dynamics-postgres', choices: [{ message }] }), { status: 200, headers: { 'content-type': 'application/json' } });
 });
 
@@ -81,7 +81,7 @@ try {
 } finally {
   if (runtime?.store?.pool) {
     if (accountId) await runtime.store.pool.query('delete from messages.auto_reply_run_events where account_id=$1', [accountId]);
-    if (runId) await runtime.store.pool.query('delete from messages.auto_reply_runs where id=$1', [runId]);
+    if (accountId) await runtime.store.pool.query('delete from messages.auto_reply_runs where account_id=$1', [accountId]);
     if (accountId) await runtime.store.pool.query('delete from messages.messages where account_id=$1', [accountId]);
     if (accountId) await runtime.store.pool.query('delete from messages.events where account_id=$1', [accountId]);
     if (conversationId) await runtime.store.pool.query('delete from messages.conversations where id=$1', [conversationId]);
