@@ -135,6 +135,7 @@
 | `root` | `agent-trace-input-output` | `codex/agent-trace-input-output` | `F:\ChenHai\Project\XianYuAgent-agent-trace-input-output` | Codex `/root` | `2026-09-21 23:20:00 +08:00` | `CLEANED` | `24b1e6eaaee1bce051c574525029e537a6b15fe4` | `2026-09-21 23:59:00 +08:00` | 独立复核通过并在 merge lock 内以 `--no-ff` 合入 main；合并后 API auto-reply unit 46/46、activity 3/3、Web 179/179、typecheck 与 diff check 通过；PostgreSQL E2E 已补充 input/output 与脱敏断言，待真实数据库环境执行。worktree 元数据已清理，主工作区原有用户修改已保留。 |
 
 | `root` | `product-automation` | `codex/product-automation` | `F:\ChenHai\Project\XianYuAgent-product-automation` | Codex `/root` | `2026-09-22 23:00:00 +08:00` | `IN_PROGRESS` | `-` | `-` | 四类商品自动化配置、卡券选择穿梭框、批量配置、可靠性测试与视觉验收；独立 worktree，主线未修改。 |
+| `root/implement_whitelist_gate` | `product-automation-live-gate` | `codex/product-automation-live-gate` | `F:\ChenHai\Project\XianYuAgent-product-automation-live-gate` | Codex `/root/implement_whitelist_gate` delegated agent | `2026-09-23 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 外部执行器接入前置安全闸门：live 模式、确认开关、商品标题白名单配置与非白名单零副作用测试。 |
 
 ## 登记维护规则
 

@@ -100,6 +100,10 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'system', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
+  }, {
+    executionMode: config.productAutomationExecutionMode,
+    liveConfirmed: config.productAutomationLiveConfirmed,
+    productTitleAllowlist: config.productAutomationProductTitleAllowlist,
   });
   const productAutomationWorker = new ProductAutomationWorker(store, productAutomationTrigger);
   const credentials = new CredentialService(store, async (input) => {

@@ -5,6 +5,11 @@ import type { AutomationExecutionPort, AutomationExternalResult, AutomationOrder
 import { AutomationWorkflowService, ProductAutomationService, defaultProductAutomationConfig } from '../src/product-automation.js';
 import { NotConfiguredAutomationExecutionAdapter, ProductAutomationTrigger, ProductAutomationWorker } from '../src/product-automation-trigger.js';
 import type { ProductAutomationConfig } from '../src/domain.js';
+import type { ProductAutomationLiveConfig } from '../src/product-automation-live-gate.js';
+
+function testLiveGate(): ProductAutomationLiveConfig {
+  return { executionMode: 'live', liveConfirmed: true, productTitleAllowlist: ['商品'] };
+}
 
 function external(status: AutomationExternalResult['status'], errorCode?: string): AutomationExternalResult { return { status, errorCode, externalRef: status === 'succeeded' ? `ext-${status}` : undefined }; }
 
@@ -50,7 +55,7 @@ test('order refresh trigger dispatches paid and unpaid workflows through a ready
   config.unpaidAutoReprice = { ...config.unpaidAutoReprice, enabled: true, targetPriceMinor: 880 };
   await configs.update({ adminId: admin.id, productId: product.id, expectedConfigVersion: 1, config, requestId: 'config', traceId: 'config' });
   const port = new ReadyPort();
-  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(port), Object.assign(port, { readiness: 'ready' as const }));
+  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(port), Object.assign(port, { readiness: 'ready' as const }), undefined, testLiveGate());
   const paid = order({ id: 'paid', orderNo: 'PAID-1', accountId: account.id, productId: product.id });
   const unpaid = order({ id: 'unpaid', orderNo: 'UNPAID-1', accountId: account.id, productId: product.id, paymentStatus: 'unpaid' });
   port.readOrderResult = unpaid;
@@ -66,7 +71,7 @@ test('default adapter blocks without fabricating shipment/reprice success and wo
   config.reviewReminder = { ...config.reviewReminder, enabled: true, firstDelayHours: 1, message: '请评价' };
   await configs.update({ adminId: admin.id, productId: product.id, expectedConfigVersion: 1, config, requestId: 'config', traceId: 'config' });
   const blocked = new NotConfiguredAutomationExecutionAdapter();
-  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(blocked), blocked);
+  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(blocked), blocked, undefined, testLiveGate());
   const blockedResult = await trigger.onOrderRefresh({ adminId: admin.id, accountId: account.id, items: [order({ accountId: account.id, productId: product.id })], requestId: 'refresh', traceId: 'refresh' });
   assert.equal(blockedResult.results[0]?.status, 'blocked');
   assert.equal(blockedResult.results[0]?.reason, 'AUTOMATION_EXECUTION_NOT_CONFIGURED');
@@ -86,7 +91,7 @@ test('blocked adapter never fabricates success for all four automation flows', a
   config.reviewReminder = { ...config.reviewReminder, enabled: true, firstDelayHours: 1 };
   await configs.update({ adminId: admin.id, productId: product.id, expectedConfigVersion: 1, config, requestId: 'blocked-config', traceId: 'blocked-config' });
   const blocked = new NotConfiguredAutomationExecutionAdapter();
-  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(blocked), blocked);
+  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(blocked), blocked, undefined, testLiveGate());
   const paid = order({ id: 'blocked-paid', orderNo: 'BLOCKED-PAID', accountId: account.id, productId: product.id, paymentStatus: 'paid' });
   const unpaid = order({ id: 'blocked-unpaid', orderNo: 'BLOCKED-UNPAID', accountId: account.id, productId: product.id, paymentStatus: 'unpaid' });
   await store.createOrder({ adminId: admin.id, order: { ...paid, source: 'local' } });
@@ -108,7 +113,7 @@ test('successful reminder persists count and next polling pass does not resend',
   const port = new ReadyPort();
   port.readOrderResult = { ...created, deliveryStatus: 'delivered', reviewedAt: undefined, reminderCount: 0 };
   const adapter = Object.assign(port, { readiness: 'ready' as const });
-  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(port), adapter);
+  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(port), adapter, undefined, testLiveGate());
   const first = await trigger.onReviewReminder({ adminId: admin.id, order: created, now: '2026-09-21T00:00:00.000Z' });
   assert.equal(first.status, 'succeeded');
   assert.equal((await store.getOrder(admin.id, created.orderNo, account.id))?.reminderCount, 1);
@@ -122,7 +127,7 @@ test('successful reminder persists count and next polling pass does not resend',
 test('IM adapter envelope accepts only explicit review signals', async () => {
   const { store, admin, account, product, configs } = await setup();
   const config = defaultProductAutomationConfig();
-  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(new NotConfiguredAutomationExecutionAdapter()), new NotConfiguredAutomationExecutionAdapter());
+  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(new NotConfiguredAutomationExecutionAdapter()), new NotConfiguredAutomationExecutionAdapter(), undefined, testLiveGate());
   const ignored = await trigger.onImEvent(admin.id, { accountId: account.id, externalConversationRef: 'c', externalMessageRef: 'm-1', senderRef: 'buyer', direction: 'inbound', bodyType: 'text', bodyText: '好评', occurredAt: '2026-09-23T00:00:00.000Z', raw: { text: '好评' } });
   assert.deepEqual(ignored, { accepted: false, reason: 'AUTOMATION_SIGNAL_NOT_PRESENT' });
   const accepted = await trigger.onImEvent(admin.id, { accountId: account.id, externalConversationRef: 'c', externalMessageRef: 'm-2', senderRef: 'buyer', direction: 'inbound', bodyType: 'system', occurredAt: '2026-09-23T00:00:00.000Z', raw: { productAutomation: { kind: 'review_created', orderNo: 'MISSING', eventId: 'review-1' } } });
@@ -135,7 +140,7 @@ test('IM review signal validates buyer and conversation ownership before executi
   const { store, admin, account, product, configs } = await setup();
   const created = await store.createOrder({ adminId: admin.id, order: { ...order({ id: 'review-owner', orderNo: 'REVIEW-OWNER', accountId: account.id, productId: product.id, buyerId: 'buyer-owner', conversationId: 'conversation-owner' }), source: 'local' } });
   const adapter = new NotConfiguredAutomationExecutionAdapter();
-  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(adapter), adapter);
+  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(adapter), adapter, undefined, testLiveGate());
   const mismatchedBuyer = await trigger.onImEvent(admin.id, { accountId: account.id, externalConversationRef: created.conversationId!, externalMessageRef: 'm-owner-1', senderRef: 'attacker', direction: 'inbound', bodyType: 'system', occurredAt: '2026-09-22T00:00:00.000Z', raw: { productAutomation: { kind: 'review_created', orderNo: created.orderNo, eventId: 'review-owner-1' } } });
   assert.deepEqual(mismatchedBuyer, { accepted: false, reason: 'AUTOMATION_SIGNAL_BUYER_MISMATCH' });
   const mismatchedConversation = await trigger.onImEvent(admin.id, { accountId: account.id, externalConversationRef: 'conversation-other', externalMessageRef: 'm-owner-2', senderRef: created.buyerId, direction: 'inbound', bodyType: 'system', occurredAt: '2026-09-22T00:00:00.000Z', raw: { productAutomation: { kind: 'review_created', orderNo: created.orderNo, eventId: 'review-owner-2' } } });
@@ -150,7 +155,7 @@ test('review trigger is idempotent, contains persistence failure, and does not s
   await configs.update({ adminId: admin.id, productId: product.id, expectedConfigVersion: 1, config, requestId: 'config', traceId: 'config' });
   await store.createOrder({ adminId: admin.id, order: { ...order({ id: 'review-order', orderNo: 'REVIEW-1', accountId: account.id, productId: product.id }), source: 'local' } });
   const port = new ReadyPort();
-  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(port), Object.assign(port, { readiness: 'ready' as const }));
+  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(port), Object.assign(port, { readiness: 'ready' as const }), undefined, testLiveGate());
   const first = await trigger.onReviewEvent({ adminId: admin.id, accountId: account.id, orderNo: 'REVIEW-1', eventId: 'review-event-1' });
   const duplicate = await trigger.onReviewEvent({ adminId: admin.id, accountId: account.id, orderNo: 'REVIEW-1', eventId: 'review-event-1' });
   assert.equal(first.status, 'succeeded');
@@ -159,7 +164,7 @@ test('review trigger is idempotent, contains persistence failure, and does not s
 
   const failedPort = new ReadyPort();
   failedPort.reviewError = new Error('REVIEW_FACT_PERSIST_FAILED');
-  const failedTrigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(failedPort), Object.assign(failedPort, { readiness: 'ready' as const }));
+  const failedTrigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(failedPort), Object.assign(failedPort, { readiness: 'ready' as const }), undefined, testLiveGate());
   const failed = await failedTrigger.onReviewEvent({ adminId: admin.id, accountId: account.id, orderNo: 'REVIEW-1', eventId: 'review-event-2' });
   assert.equal(failed.status, 'failed');
   assert.equal(failed.reason, 'REVIEW_FACT_PERSIST_FAILED');
@@ -169,7 +174,7 @@ test('review trigger is idempotent, contains persistence failure, and does not s
 test('trigger reports scope mismatch and audit failure without masking the outcome', async () => {
   const { store, admin, account, product, configs } = await setup();
   const port = new ReadyPort();
-  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(port), Object.assign(port, { readiness: 'ready' as const }), async () => { throw new Error('AUDIT_STORE_DOWN'); });
+  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(port), Object.assign(port, { readiness: 'ready' as const }), async () => { throw new Error('AUDIT_STORE_DOWN'); }, testLiveGate());
   const mismatch = await trigger.onOrderRefresh({ adminId: admin.id, accountId: 'different-account', items: [order({ accountId: account.id, productId: product.id })], requestId: 'scope', traceId: 'scope' });
   assert.equal(mismatch.results[0]?.status, 'blocked');
   assert.equal(mismatch.results[0]?.reason, 'ACCOUNT_SCOPE_MISMATCH');

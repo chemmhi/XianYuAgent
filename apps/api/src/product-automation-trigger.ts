@@ -7,6 +7,11 @@ import {
   AutomationWorkflowService,
   ProductAutomationService,
 } from './product-automation.js';
+import {
+  DEFAULT_PRODUCT_AUTOMATION_LIVE_CONFIG,
+  productAutomationLiveBlockReason,
+  type ProductAutomationLiveConfig,
+} from './product-automation-live-gate.js';
 
 export type ProductAutomationTriggerKind = 'payment_paid' | 'unpaid_reprice' | 'review_gift' | 'review_reminder';
 export type ProductAutomationTriggerStatus = AutomationExecutionResult['status'] | 'blocked';
@@ -80,6 +85,8 @@ export class ProductAutomationTrigger {
     private readonly workflow: AutomationWorkflowService,
     private readonly execution: ProductAutomationExecutionAdapter,
     private readonly audit?: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => Promise<string>,
+    /** The safe default is blocked; production assembly injects env config. */
+    private readonly liveConfig: ProductAutomationLiveConfig = DEFAULT_PRODUCT_AUTOMATION_LIVE_CONFIG,
   ) {}
 
   async onOrderRefresh(input: { adminId: string; accountId: string; items: OrderRecord[]; requestId: string; traceId: string }): Promise<ProductAutomationTriggerBatchResult> {
@@ -146,6 +153,12 @@ export class ProductAutomationTrigger {
       const config = (await this.configs.get(adminId, order.productId)).config;
       if (this.execution.readiness !== 'ready' && ruleEnabled(config, trigger)) {
         return this.finish(trigger, order.orderNo, { trigger, orderNo: order.orderNo, status: 'blocked', reason: this.execution.readinessCode ?? 'AUTOMATION_EXECUTION_NOT_CONFIGURED' }, adminId, order.accountId, requestId, traceId);
+      }
+      if (ruleEnabled(config, trigger)) {
+        const liveBlockReason = productAutomationLiveBlockReason(this.liveConfig, order.itemTitle);
+        if (liveBlockReason) {
+          return this.finish(trigger, order.orderNo, { trigger, orderNo: order.orderNo, status: 'blocked', reason: liveBlockReason }, adminId, order.accountId, requestId, traceId);
+        }
       }
       const result = trigger === 'payment_paid'
         ? await this.workflow.handlePaymentPaid({ adminId, config, order, eventId: eventId ?? `order-refresh:${order.orderNo}:${order.updatedAt}` })
