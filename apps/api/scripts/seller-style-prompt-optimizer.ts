@@ -1,9 +1,9 @@
 import type { ModelClient } from '../src/pi-runtime.ts';
 import type { CleanedConversation } from './optimize-seller-style-prompt.ts';
 
-export const MIN_REAL_DIALOGUE_ROUNDS = 10;
-export const DEFAULT_STYLE_SIMILARITY_THRESHOLD = 98;
-export const DEFAULT_STYLE_MAX_ITERATIONS = 20;
+export const MIN_REAL_DIALOGUE_ROUNDS = 5;
+export const DEFAULT_STYLE_SIMILARITY_THRESHOLD = 80;
+export const DEFAULT_STYLE_MAX_ITERATIONS = 30;
 export const STYLE_DIMENSIONS = [
   'tone',
   'address',
