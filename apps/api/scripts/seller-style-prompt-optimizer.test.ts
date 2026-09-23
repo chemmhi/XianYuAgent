@@ -120,6 +120,8 @@ test('keeps iterating until the ten-round similarity threshold is reached', asyn
   assert.equal(result.iterations.length, 2);
   assert.equal(result.finalScore, 98.5);
   assert.equal(result.status, 'passed');
+  assert.deepEqual(result.promptVersions.map((item) => item.version), [1, 2]);
+  assert.ok(result.promptVersions.every((item) => item.prompt.length > 0));
   assert.match(result.prompt, /自然变化/u);
   assert.ok(result.iterations.every((item) => item.sampledCaseIds.length === 10));
   assert.ok(result.iterations.every((item) => item.promptText.length > 0 && item.sampledCases.length === 10));
@@ -166,4 +168,5 @@ test('emits progress events and renders an auditable trace without changing the 
   const trace = JSON.parse(renderStyleOptimizationTraceJson(result)) as { scoringCriteria: unknown[]; iterations: Array<{ sampledCases: unknown[] }> };
   assert.equal(trace.scoringCriteria.length, 10);
   assert.equal(trace.iterations[0].sampledCases.length, 10);
+  assert.equal((trace as unknown as { promptVersions: unknown[] }).promptVersions.length, 1);
 });

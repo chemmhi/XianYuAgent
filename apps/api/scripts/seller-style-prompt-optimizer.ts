@@ -78,6 +78,16 @@ export interface StyleOptimizationSample {
   score: StyleCaseScore;
 }
 
+export interface StylePromptVersion {
+  version: number;
+  prompt: string;
+  source: 'generated' | 'revised';
+  iteration?: number;
+  score?: number;
+  passed?: boolean;
+  revisionFeedback?: string[];
+}
+
 export type StyleOptimizationStatus = 'passed' | 'failed';
 
 export type StyleOptimizationProgressEvent =
@@ -86,7 +96,7 @@ export type StyleOptimizationProgressEvent =
   | { type: 'iteration-started'; iteration: number; promptVersion: number; cases: StyleEvaluationCase[] }
   | { type: 'question-scored'; iteration: number; promptVersion: number; index: number; total: number; sample: StyleOptimizationSample }
   | { type: 'iteration-scored'; iteration: number; promptVersion: number; evaluation: StyleEvaluation; passed: boolean; revisionFeedback: string[] }
-  | { type: 'prompt-revised'; fromVersion: number; toVersion: number; promptText: string; feedback: string[] }
+  | { type: 'prompt-revised'; iteration: number; fromVersion: number; toVersion: number; promptText: string; feedback: string[] }
   | { type: 'completed'; status: StyleOptimizationStatus; finalScore: number; threshold: number; promptVersion: number; iterations: number };
 
 export interface StyleOptimizationResult {
@@ -96,6 +106,7 @@ export interface StyleOptimizationResult {
   sampleCount: number;
   status: StyleOptimizationStatus;
   promptVersion: number;
+  promptVersions: StylePromptVersion[];
   iterations: StyleOptimizationIteration[];
   model?: string;
 }
@@ -241,6 +252,7 @@ export async function optimizeSellerStylePrompt(
   modelName = generated.model;
   let currentPrompt = generated.text;
   let promptVersion = 1;
+  const promptVersions: StylePromptVersion[] = [{ version: promptVersion, prompt: currentPrompt, source: 'generated' }];
   validateStylePrompt(currentPrompt, conversations);
   await emitProgress(onProgress, { type: 'prompt-generated', promptVersion, promptText: currentPrompt, model: modelName });
   const iterations: StyleOptimizationIteration[] = [];
@@ -278,6 +290,13 @@ export async function optimizeSellerStylePrompt(
     }
     const passed = evaluation.evaluation.overall >= threshold;
     const revisionFeedback = [...evaluation.evaluation.revisionInstructions, ...evaluation.evaluation.gaps].filter(Boolean).slice(0, 12);
+    const currentVersion = promptVersions.find((item) => item.version === promptVersion);
+    if (currentVersion) {
+      currentVersion.iteration = iteration;
+      currentVersion.score = evaluation.evaluation.overall;
+      currentVersion.passed = passed;
+      currentVersion.revisionFeedback = revisionFeedback;
+    }
     const iterationResult: StyleOptimizationIteration = {
       iteration,
       promptVersion,
@@ -294,7 +313,7 @@ export async function optimizeSellerStylePrompt(
     if (passed) {
       validateStylePrompt(currentPrompt, conversations);
       await emitProgress(onProgress, { type: 'completed', status: 'passed', finalScore: evaluation.evaluation.overall, threshold, promptVersion, iterations: iterations.length });
-      return { prompt: currentPrompt, finalScore: evaluation.evaluation.overall, threshold, sampleCount, status: 'passed', promptVersion, iterations, model: modelName };
+      return { prompt: currentPrompt, finalScore: evaluation.evaluation.overall, threshold, sampleCount, status: 'passed', promptVersion, promptVersions, iterations, model: modelName };
     }
 
     const revision = await reviseStylePrompt(model, currentPrompt, evaluation.evaluation);
@@ -303,12 +322,13 @@ export async function optimizeSellerStylePrompt(
     validateStylePrompt(currentPrompt, conversations);
     const nextPromptVersion = promptVersion + 1;
     iterationResult.nextPromptVersion = nextPromptVersion;
-    await emitProgress(onProgress, { type: 'prompt-revised', fromVersion: promptVersion, toVersion: nextPromptVersion, promptText: currentPrompt, feedback: revisionFeedback });
+    promptVersions.push({ version: nextPromptVersion, prompt: currentPrompt, source: 'revised', iteration, revisionFeedback });
+    await emitProgress(onProgress, { type: 'prompt-revised', iteration, fromVersion: promptVersion, toVersion: nextPromptVersion, promptText: currentPrompt, feedback: revisionFeedback });
     promptVersion = nextPromptVersion;
   }
 
   await emitProgress(onProgress, { type: 'completed', status: 'failed', finalScore: bestScore, threshold, promptVersion, iterations: iterations.length });
-  return { prompt: currentPrompt, finalScore: bestScore, threshold, sampleCount, status: 'failed', promptVersion, iterations, model: modelName };
+  return { prompt: currentPrompt, finalScore: bestScore, threshold, sampleCount, status: 'failed', promptVersion, promptVersions, iterations, model: modelName };
 }
 
 export function validateStylePrompt(prompt: string, conversations: CleanedConversation[]): void {

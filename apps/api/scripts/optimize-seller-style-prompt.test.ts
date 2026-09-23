@@ -1,13 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   buildHeuristicPersona,
   cleanConversationRows,
   isShareDeliveryText,
   redactText,
   validatePersonaDocuments,
+  writePromptVersionFiles,
   type RawMessageRow,
 } from './optimize-seller-style-prompt.ts';
+import type { StyleOptimizationResult } from './seller-style-prompt-optimizer.ts';
 
 function row(overrides: Partial<RawMessageRow> = {}): RawMessageRow {
   return {
@@ -131,4 +136,32 @@ test('persona document validation requires additive protocol and identity', () =
     }),
     /运行时提示词未声明 additive persona 语义/u,
   );
+});
+
+test('writes every prompt version into the prompt-versions folder with a manifest', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'seller-style-prompt-'));
+  try {
+    const result: StyleOptimizationResult = {
+      prompt: '最终提示词',
+      finalScore: 98.4,
+      threshold: 98,
+      sampleCount: 10,
+      status: 'passed',
+      promptVersion: 2,
+      promptVersions: [
+        { version: 1, prompt: '第一版提示词', source: 'generated', iteration: 1, score: 96, passed: false, revisionFeedback: ['减少模板化'] },
+        { version: 2, prompt: '第二版提示词', source: 'revised', iteration: 2, score: 98.4, passed: true, revisionFeedback: [] },
+      ],
+      iterations: [],
+    };
+    const directory = await writePromptVersionFiles(root, result);
+    assert.equal(await readFile(join(directory, 'prompt-v001.txt'), 'utf8'), '第一版提示词\n');
+    assert.equal(await readFile(join(directory, 'prompt-v002.txt'), 'utf8'), '第二版提示词\n');
+    assert.match(await readFile(join(directory, 'prompt-v002.json'), 'utf8'), /"passed": true/u);
+    const manifest = JSON.parse(await readFile(join(directory, 'manifest.json'), 'utf8')) as { currentVersion: number; versions: Array<{ filename: string }> };
+    assert.equal(manifest.currentVersion, 2);
+    assert.deepEqual(manifest.versions.map((item) => item.filename), ['prompt-v001.txt', 'prompt-v002.txt']);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
