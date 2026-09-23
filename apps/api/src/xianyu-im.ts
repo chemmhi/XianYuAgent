@@ -43,6 +43,8 @@ export interface XianyuImMessageEvent {
   receivedAt?: string;
   timestampQuality?: 'platform' | 'received';
   externalMessageRefAliases?: string[];
+  sourceEventId?: string;
+  sourceSequence?: number;
   riskFlags?: string[];
   raw?: Record<string, unknown>;
 }

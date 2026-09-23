@@ -1,6 +1,7 @@
 import type { AutoReplyDecision, AutoReplyRunRecord, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyRunUpdate, ConversationRecord, MessageRecord, OrderRecord, ProductRecord, Store } from './domain.js';
 import type { MessageService } from './messages.js';
 import { digestJson } from './security.js';
+import type { AutoReplyRepairCandidateResult, AutoReplyRepairRuntime } from './auto-reply-repair-runtime.js';
 
 export type AutoReplyIntent = 'price' | 'availability' | 'delivery' | 'general' | 'refund' | 'complaint' | 'cross_product' | 'credential_request' | 'prompt_injection' | 'other';
 
@@ -120,6 +121,7 @@ export interface AutoReplyProcessResult {
   outboundMessage?: MessageRecord;
   classification?: AutoReplyClassification;
   context?: AutoReplyContext;
+  repair?: AutoReplyRepairCandidateResult;
 }
 
 export interface AutoReplyServiceOptions {
@@ -134,6 +136,7 @@ export interface AutoReplyServiceOptions {
   classifier?: RuleBasedIntentClassifier;
   generator?: AutoReplyGenerator;
   sender?: AutoReplySender;
+  repairRuntime?: AutoReplyRepairRuntime;
   configProvider?: (adminId: string, accountId: string) => Promise<AutoReplyServiceRuntimeOptions>;
 }
 
@@ -161,6 +164,7 @@ export class AutoReplyService {
   private readonly classifier: RuleBasedIntentClassifier;
   private readonly generator: AutoReplyGenerator;
   private readonly sender: AutoReplySender;
+  private readonly repairRuntime?: AutoReplyRepairRuntime;
   private readonly configProvider?: (adminId: string, accountId: string) => Promise<AutoReplyServiceRuntimeOptions>;
   private readonly lastAcceptedAt = new Map<string, number>();
 
@@ -181,10 +185,11 @@ export class AutoReplyService {
     this.classifier = options.classifier ?? new RuleBasedIntentClassifier();
     this.generator = options.generator ?? new TemplateAutoReplyGenerator();
     this.sender = options.sender ?? new NoopAutoReplySender();
+    this.repairRuntime = options.repairRuntime;
     this.configProvider = options.configProvider;
   }
 
-  async processInbound(input: { adminId: string; conversationId: string; inboundMessageId: string; senderName?: string; requestId?: string; traceId?: string }): Promise<AutoReplyProcessResult> {
+  async processInbound(input: { adminId: string; conversationId: string; inboundMessageId: string; senderName?: string; requestId?: string; traceId?: string; sourceEventId?: string; sourceSequence?: number }): Promise<AutoReplyProcessResult> {
     const traceId = input.traceId ?? `auto-reply:${input.inboundMessageId}`;
     const requestId = input.requestId ?? traceId;
     const conversation = await this.store.getConversation(input.adminId, input.conversationId);
@@ -338,6 +343,41 @@ export class AutoReplyService {
         output: { replyDigest, outputLength: reply.length },
       } });
       const segments = await this.resolveReplySegments(runtime.generator, generatedReply?.segments, reply, runtime);
+      let repair: AutoReplyRepairCandidateResult | undefined;
+      if (this.repairRuntime?.enabled) {
+        try {
+          repair = await this.repairRuntime.reviewCandidate({
+            adminId: input.adminId,
+            runId: run.id,
+            conversation,
+            inboundMessage,
+            context,
+            classification,
+            reply: { text: reply, segments },
+            requestId,
+            traceId,
+            sourceEventId: input.sourceEventId,
+            sourceSequence: input.sourceSequence,
+          });
+        } catch (error) {
+          try {
+            await this.store.appendAutoReplyRunEvent({
+              runId: run.id,
+              accountId: conversation.accountId,
+              eventType: 'repair.shadow_failed',
+              stage: 'reply_generation',
+              status: run.status,
+              traceId,
+              payload: {
+                repairMode: this.repairRuntime.currentMode,
+                failureCode: toFailureCode(error),
+              },
+            });
+          } catch {
+            // A repair telemetry failure must never break the legacy send path.
+          }
+        }
+      }
       let lastOutboundMessageId: string | undefined;
       let lastOutcome: Awaited<ReturnType<AutoReplySender['send']>>['outcome'] = 'simulated';
       for (let index = 0; index < segments.length; index += 1) {
@@ -359,7 +399,7 @@ export class AutoReplyService {
         output: { decision: 'replied', senderOutcome: lastOutcome, outboundMessageId: lastOutboundMessageId, persisted: true, segmentCount: segments.length },
       } });
       await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'replied', intent: classification.intent, senderOutcome: lastOutcome, outboundMessageId: lastOutboundMessageId, segmentCount: segments.length, contextDigest, replyDigest });
-      return { run: updated ?? run, inboundMessage, outboundMessage: lastOutboundMessageId ? await this.findMessage(input.adminId, input.conversationId, lastOutboundMessageId) : undefined, classification, context };
+      return { run: updated ?? run, inboundMessage, outboundMessage: lastOutboundMessageId ? await this.findMessage(input.adminId, input.conversationId, lastOutboundMessageId) : undefined, classification, context, repair };
     } catch (error) {
       const failureCode = toFailureCode(error);
       if (failureCode === 'AGENT_HANDOFF') {

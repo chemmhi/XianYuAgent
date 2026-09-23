@@ -21,12 +21,19 @@ simulate → shadow → canary → controlled live
 - 无未接受 P0/P1；
 - 迁移 apply/rollback、旧数据读取、重启复读通过；
 - 真实入口→API→数据库→Agent Dynamics 回读通过；
-- 买家 WebSocket push→Agent→模拟出站→legacy PostgreSQL 回读已通过，但在 AR-VS-08 state/review 三表接入前，不得把该证据视为新编排发布通过；
+- 买家 WebSocket push→Agent→模拟出站→legacy PostgreSQL 回读已通过；AR-VS-08 shadow 主入口已额外验证 031 state/review/event 三表写入与重启回读，但该证据仍不等同于 enforce/canary 发布通过；
 - 发送幂等、unknown、review lease、超时、重试和人工覆盖通过；
 - handoff reasonCode、敏感全链路脱敏、澄清不回复、resolved/closed 证据优先级和 `reopenWindowSeconds` 配置通过；
 - 桌面/移动关键状态视觉证据齐全；
 - 告警、runbook、备份、恢复和停止条件已演练；
 - STATUS、review log、risk register、API/设计文档同步。
+
+## AR-VS-08 shadow 回滚演练说明
+
+- 关闭方式：将 `AUTO_REPLY_REPAIR_MODE` 设为 `off` 并重启 API；legacy `AutoReplyService` 保持原发送与 legacy run/message 持久化，repair 三表保留历史记录供审计。
+- 失败隔离：`repair.shadow_failed` 只追加脱敏 run event；不得把 shadow 异常转换为 legacy 失败或触发第二次发送。
+- 数据处理：不删除 `auto_reply_conversation_state`、`auto_reply_review_records`、`auto_reply_review_events`；回滚后禁止将 `review_pending` 直接改写为 `resolved`，后续由 review worker/reconcile 处理。
+- 当前未完成：尚未演练跨进程 review worker claim/complete/retry/dead-letter/close/reopen、外部发送 reconcile 和 migration rollback；在这些证据补齐前保持发布门禁 BLOCKED。
 
 ## 交接产物
 

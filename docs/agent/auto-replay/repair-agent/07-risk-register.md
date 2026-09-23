@@ -25,9 +25,14 @@
 | AR-RA-012 | P1 | handoff 白名单、reason code 和证据阈值过于开放 | IMPLEMENTED_PENDING_EVIDENCE | Pre-send Review 已强制白名单和结构化证据；待真实出站回读 |
 | AR-RA-013 | P1 | “等价秘密”及混合消息的部分拒绝和全链路拦截不可执行 | IMPLEMENTED_PENDING_EVIDENCE | Policy/Pre-send 敏感 fail-closed 已覆盖；待红队、日志/备份/重试 payload 扫描 |
 | AR-RA-014 | P1 | 状态字段命名与迁移不变量不统一，无法保证生命周期和并发安全 | VERIFIED | 已统一 observedStage/targetStage、stateVersion/CAS、乱序、sourceSequence 和陈旧回放语义；AR-VS-01 状态单测已通过 |
-| AR-RA-015 | P1 | PolicyDecisionTrace、Outcome Review 和 ConversationState 持久化契约不完整 | IMPLEMENTED_PENDING_EVIDENCE | 新增 031 迁移、编排适配和 Outcome Review 内核；待 PostgreSQL 回读与 Activity 投影 |
+| AR-RA-015 | P1 | PolicyDecisionTrace、Outcome Review 和 ConversationState 持久化契约不完整 | READY_FOR_REVIEW | repair runtime/repository 已接入主入口；031 三表完成 PostgreSQL 写读与重启回读；Outcome Review worker 的更新型操作和 Activity 投影仍待补齐 |
 | AR-RA-016 | P1 | 新策略缺少可采信的测试、阈值告警、灰度和回滚演练证据 | OPEN | 112 项单测已通过；继续执行指标阈值、告警 Owner、canary、kill switch、迁移回滚和 reconcile 演练 |
-| AR-RA-018 | P1 | AR-VS-08 031 state/review 表已迁移但未接入 buyer push 主运行链路，真实测试只证明 legacy run/message 持久化 | OPEN | `test:auto-reply:buyer-push:postgres` 已证明买家 push→Agent→模拟出站→legacy PostgreSQL 回读；必须补主入口编排接入和三表真实写读后复审 |
+| AR-RA-018 | P1 | AR-VS-08 主入口接入缺失导致 state/review 不可审计 | IMPLEMENTED_PENDING_EVIDENCE | `AUTO_REPLY_REPAIR_MODE=shadow` 已接入 `AutoReplyService`/`app.ts`；修复 review 语义排序后 buyer-push PostgreSQL smoke 验证三表事务写入、`review_pending` 与重启回读；shadow 不伪造 `SENDER_PERSISTED`，CAS 冲突有限重试；切片仍受统一路由和真实 source ordering P1 约束 |
+| AR-RA-019 | P1 | Outcome Review 仅能创建 review snapshot，缺少跨进程 claim/complete/retry/dead-letter/close/reopen 持久化更新 | OPEN | 本切片明确保持 shadow-only；后续需补 repository 原子更新、worker、lease/CAS/幂等回归和跨进程演练，不得将 `review_pending` 快照当作审核闭环完成 |
+| AR-RA-020 | P1 | 真实 push parser 与 deferred inbox 未完整保留 source event/sequence，乱序/陈旧回放缺少平台序列证据 | OPEN | 当前仅在缺失平台序列时使用可审计 deterministic fallback；enforce 前需从 envelope 解析并贯穿 inbox/worker |
+| AR-RA-021 | P1 | repair policy 仍位于 legacy classifier/hardSafety/handoff 之后，无法证明统一无硬编码路由与混合敏感消息局部拒绝 | OPEN | shadow 仅观察候选回复；enforce 前需让 PolicyEngine 成为唯一主路由并保留兼容 fallback 但禁止双路由 |
+| AR-RA-022 | P1 | live sender 与本地落库非 outbox/外部幂等事务，崩溃窗口可能造成重复发送 | OPEN | 当前 buyer-push 仅验证 simulate；enforce/canary 前需补 requestId 外部幂等、outbox、reconcile 与故障演练 |
+| AR-RA-023 | P1 | 默认 PolicyConfig 仍以内置 TypeScript seed 为主，生产规则不可按账号审计加载 | OPEN | 当前 hash 已稳定但规则仍源码内置；enforce 前需改为 ACTIVE PolicyConfig 版本化加载并记录 policyDecisionId |
 
 ## 旧风险映射
 

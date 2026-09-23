@@ -133,3 +133,45 @@ AR-VS-00 三轮复审已执行，但阶段 0 门禁为 `BLOCKED`，不能标记 
 - `apps/api/src/app.ts` 当前只装配旧 `AutoReplyService`，未装配 `PolicyEngine`、`ConversationStateReducer` 或 `AutoReplyRepairOrchestrator`。
 - `apps/api/src/xianyu-im-service.ts` 的实时 push 和 inbox worker 均直接调用旧 `processInbound`；现有 E2E 断言的是 legacy `persisted/replied/simulated`，未断言 `primaryAction`、`policyDecisionId`、`stateVersion`、`ReviewRecord` 或 `resolutionStatus`。
 - 结论：legacy smoke PASS；AR-VS-08 新编排真实入口验收为 **P1 / BLOCKED**。最小后续是以 feature flag/shadow 模式同时接入实时 push 与 inbox worker，明确旧服务仅作兼容 fallback，禁止静默双写。
+
+## 2026-09-23：AR-VS-08 shadow 主入口接入
+
+| 复核项 | 当前结论 | 证据 |
+| --- | --- | --- |
+| 主入口装配 | READY_FOR_REVIEW | `apps/api/src/app.ts` 创建 `AutoReplyRepairRuntime` 并注入 `AutoReplyService`；这是 legacy 主入口内的 shadow 候选审查旁路，不接管 primary route；`AUTO_REPLY_REPAIR_MODE` 默认 `off`，shadow 显式开启 |
+| legacy 兼容 | READY_FOR_REVIEW | `apps/api/src/auto-reply.ts` 在候选回复生成且通过敏感检查后调用 repair runtime；repair 异常记录 `repair.shadow_failed`，不阻断旧链路、不双发 |
+| state/review/event 写读 | READY_FOR_REVIEW | `auto-reply-repair-runtime.ts` + `auto-reply-repair-repository.ts`；MemoryStore 回归 2/2；PostgreSQL buyer-push smoke 验证事务写入 PRE_SEND + OUTCOME、`review_pending`、重启回读 |
+| UUID/CAS/source sequence | FIXED_PENDING_REVIEW | 首次 state insert 使用 `state.stateId`，更新使用独立 `expectedStateVersion`；CAS 冲突最多有限重试；入口透传 `sourceEventId/sourceSequence`，缺失时记录确定性 fallback |
+| shadow sender evidence | FIXED_PENDING_REVIEW | shadow orchestrator 使用 `unknown` transport，不再把 shadow 模拟结果写成 `SENDER_PERSISTED`；Outcome evidence 保持为空，等待后续真实 sender/review worker 处理 |
+| 质量/安全/运维独立复审 | PENDING | 等待架构/数据流与质量/安全/运维两轮复审，随后关闭 AR-RA-018 或登记新增 P1 |
+
+### 本轮验证命令
+
+- `npm run typecheck:api`：通过。
+- `npm --workspace apps/api run test:auto-reply:unit`：116/116 通过。
+- `npm --workspace apps/api run build`：通过。
+- `npm run migrate`：031 迁移成功。
+- `npm --workspace apps/api run test:auto-reply:buyer-push:postgres`：通过；模拟买家 WebSocket push → 主入口 → Agent → legacy 单次模拟出站 → 031 三表写入 → runtime 重启回读。
+
+### 当前边界
+
+- 本轮只开启 shadow；尚未启用 enforce/canary。
+- `review_pending` 是审核待处理状态，不等价于 `resolved`；跨进程 review worker 的 claim/complete/retry/dead-letter/close/reopen 仍未落库。
+- 本轮 shadow 旁路仍不接管 legacy 路由，真实 sender 的 live 幂等/outbox、混合敏感消息局部拒绝和动态 PolicyConfig 加载仍是后续 P1/P2。
+
+## 2026-09-23：AR-VS-08 修复后复审与证据重跑
+
+| 复核项 | 结论 | 证据 |
+| --- | --- | --- |
+| review 读取顺序 | FIXED | `listReviews()` 按 `PRE_SEND → OUTCOME` 语义顺序读取；修复同事务 UUID 排序导致的非确定性顺序 |
+| 单元与类型检查 | PASS | `npm --workspace apps/api run test:auto-reply:unit`：117/117；`npm run typecheck:api`：通过 |
+| buyer-push PostgreSQL smoke | PASS | `buyerPush=true`、`modelCalls=2`、`outboundSimulated=true`、`outboundPersisted=true`、`runPersistedAfterRestart=true`、`aiOutboundCountAfterRestart=1`；PRE_SEND/OUTCOME 语义顺序断言通过 |
+| E2E 与构建 | PASS | `npm --workspace apps/api run test:auto-reply:e2e`：4/4；`npm run build`：通过；`git diff --check`：通过 |
+| 独立质量/安全/运维复审 | BLOCKED_BY_EVIDENCE / FAIL_WITH_P1_REMEDIATION | shadow plumbing 已接入，但 legacy classifier/hardSafety 仍先于 repair policy；真实 push parser/inbox 未完整保留 source sequence；live sender outbox/idempotency、动态 PolicyConfig 和真实 state/goal 证据仍未完成 |
+| 独立架构/数据流复审 | BLOCKED_BY_EVIDENCE / P1 | defer=true 的生产入口未持久化 source event/sequence；Outcome Review repository 尚无跨进程 claim/heartbeat/complete/retry/dead-letter/close/reopen 更新；shadow state/review 先于 legacy sender，缺少 sender failure/replay reconcile；buyer-push smoke 证明的是 plumbing，不等于生产 inbox worker 闭环 |
+
+### 当前裁决
+
+- AR-VS-08 现已完成 legacy 主入口内的 shadow 候选审查旁路，三表事务写入、幂等和重启回读证据成立。
+- 本切片状态保持 `READY_FOR_REVIEW`（shadow plumbing scope），不提升为整体 `PASS` 或 `CLOSED`。
+- 进入 enforce/canary 前必须关闭 legacy 路由统一性、source ordering、live sender 幂等/outbox、动态 PolicyConfig 与真实 lifecycle/goal evidence 等 P1 门禁。

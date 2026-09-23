@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { resolveAutoReplyAgentConfig, type AutoReplyAgentRuntimeConfig } from './auto-reply-agent-config.js';
 import { DEFAULT_PI_WIRE_API, type ModelWireApi } from './pi-runtime.js';
+import { resolveAutoReplyRepairMode, type AutoReplyRepairMode } from './auto-reply-repair-config.js';
 
 export type AgentRuntimeMode = 'pi' | 'in-process';
 export type AutoReplySendMode = 'simulate' | 'live';
@@ -35,6 +36,7 @@ export interface AppConfig {
   objectStorageRegion: string;
   autoReplySendMode?: AutoReplySendMode;
   autoReplyTestBuyerNames?: string[];
+  autoReplyRepairMode?: AutoReplyRepairMode;
 }
 
 export const DEFAULT_DATABASE_URL = 'postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/xianyu_agent';
@@ -52,6 +54,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const modelName = firstDefined(env.MODEL, env.OPENAI_MODEL, env.PI_MODEL);
   const modelWireApi = normalizeWireApi(firstDefined(env.WIRE_API, env.MODEL_WIRE_API));
   const autoReplySendMode: AutoReplySendMode = env.AUTO_REPLY_SEND_MODE?.trim().toLowerCase() === 'live' ? 'live' : 'simulate';
+  const autoReplyRepairMode = resolveAutoReplyRepairMode(env.AUTO_REPLY_REPAIR_MODE);
   const autoReplyTestBuyerNames = parseBuyerNames(env.AUTO_REPLY_TEST_BUYER_NAMES);
   const autoReplyAgent = resolveAutoReplyAgentConfig(env);
   if (autoReplySendMode === 'live' && autoReplyTestBuyerNames.length === 0) {
@@ -90,6 +93,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     objectStorageRegion: env.OBJECT_STORAGE_REGION?.trim() || 'us-east-1',
     autoReplySendMode,
     autoReplyTestBuyerNames,
+    autoReplyRepairMode,
     autoReplyAgent,
   };
 }

@@ -36,6 +36,7 @@ const config = {
   autoReplyModelEnabled: true,
   autoReplySendMode: 'simulate',
   autoReplyTestBuyerNames: ['Auto Reply PostgreSQL Buyer'],
+  autoReplyRepairMode: 'shadow',
 };
 
 class FakeSocket {
@@ -118,12 +119,26 @@ try {
   assert.equal(result.autoReply?.context?.product?.id, product.id);
   assert.equal(result.autoReply?.outboundMessage?.source, 'ai');
   assert.equal(result.autoReply?.outboundMessage?.bodyText, '这是一个 PostgreSQL 买家推送回归测试商品，已确认可以正常回复。');
+  assert.equal(result.autoReply?.repair?.mode, 'shadow');
+  assert.equal(result.autoReply?.repair?.resolutionStatus, 'review_pending');
+  assert.ok(result.autoReply?.repair?.policyDecisionId);
   assert.equal(modelCall, 2);
   assert.equal(socket.sent.filter((message) => message.lwp === '/r/MessageSend/sendByReceiverScope').length, 0);
   inboundMessageId = result.autoReply?.inboundMessage.id;
 
   const storedRun = await runtime.store.getAutoReplyRun(adminId, result.autoReply.run.id);
   assert.equal(storedRun?.outboundMessageId, result.autoReply.outboundMessage?.id);
+  const repairReviews = await runtime.autoReplyRepair.listReviews(accountId, conversationId);
+  assert.deepEqual(repairReviews.map((review) => review.reviewType), ['PRE_SEND', 'OUTCOME']);
+  assert.equal(repairReviews[1]?.resolutionStatus, 'review_pending');
+  assert.deepEqual(repairReviews[1]?.evidenceTypes, []);
+
+  socket.emit('message', pushFrame('pg-push-mid-1-replay', conversation.externalConversationRef, `pg-push-inbound-${suffix}.PNM`, conversation.buyerRef, '请问这个是什么东西？', conversation.buyerDisplayName));
+  await waitFor(() => results.length >= 2);
+  const duplicate = results[1];
+  assert.equal(duplicate.created, false);
+  assert.equal(duplicate.autoReply?.run.id, result.autoReply.run.id);
+  assert.equal((await runtime.autoReplyRepair.listReviews(accountId, conversationId)).length, 2);
   const storedMessages = await runtime.store.listMessages(adminId, conversationId, { limit: 20 });
   assert.equal(storedMessages.items.filter((message) => message.direction === 'inbound').length, 1);
   assert.equal(storedMessages.items.filter((message) => message.direction === 'outbound' && message.source === 'ai').length, 1);
@@ -138,11 +153,17 @@ try {
   assert.equal(rereadRun?.senderOutcome, 'simulated');
   const rereadMessages = await runtime.store.listMessages(adminId, conversationId, { limit: 20 });
   assert.equal(rereadMessages.items.some((message) => message.source === 'ai' && message.direction === 'outbound'), true);
+  const rereadReviews = await runtime.autoReplyRepair.listReviews(accountId, conversationId);
+  assert.equal(rereadReviews.length, 2);
+  assert.equal(rereadReviews[1]?.resolutionStatus, 'review_pending');
   console.log(JSON.stringify({ buyerPush: true, modelCalls: modelCall, outboundSimulated: true, outboundPersisted: true, runPersistedAfterRestart: true, aiOutboundCountAfterRestart: rereadMessages.items.filter((message) => message.source === 'ai' && message.direction === 'outbound').length }));
 } finally {
   await client?.disconnect();
   const active = runtime;
   if (active?.store?.pool) {
+    if (accountId) await active.store.pool.query('delete from auto_reply_review_events where account_id=$1', [accountId]);
+    if (accountId) await active.store.pool.query('delete from auto_reply_review_records where account_id=$1', [accountId]);
+    if (accountId) await active.store.pool.query('delete from auto_reply_conversation_state where account_id=$1', [accountId]);
     if (accountId) await active.store.pool.query('delete from messages.auto_reply_run_events where account_id=$1', [accountId]);
     if (conversationId) await active.store.pool.query('delete from messages.auto_reply_runs where conversation_id=$1', [conversationId]);
     if (accountId) await active.store.pool.query('delete from messages.messages where account_id=$1', [accountId]);

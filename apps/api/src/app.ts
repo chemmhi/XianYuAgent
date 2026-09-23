@@ -26,6 +26,7 @@ import { AutoReplyAgentSettingsService, resolveAutoReplyAgentDefaults } from './
 import { ToolCallingAutoReplyAgent } from './auto-reply-agent.js';
 import { OpenAISettingsService, createFallbackModelClient } from './openai-settings.js';
 import { AutoReplyActivityService } from './auto-reply-activity.js';
+import { AutoReplyRepairRuntime } from './auto-reply-repair-runtime.js';
 import { MemoryObjectStorage, S3CompatibleObjectStorage, type ObjectStorage } from './object-storage.js';
 import { XianyuItemDetailService } from './xianyu-item-detail-service.js';
 
@@ -44,6 +45,7 @@ export interface AppRuntime {
   dashboard: DashboardService;
   messages: MessageService;
   autoReply: AutoReplyService;
+  autoReplyRepair: AutoReplyRepairRuntime;
   autoReplyAgentSettings: AutoReplyAgentSettingsService;
   autoReplyActivity: AutoReplyActivityService;
   redisRealtime?: RedisConversationEventBridge;
@@ -115,6 +117,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     return auditId;
   });
   const autoReplyActivity = new AutoReplyActivityService(store);
+  const autoReplyRepair = new AutoReplyRepairRuntime(store, config.autoReplyRepairMode ?? 'off');
   let xianyuIm!: XianyuImService;
   const autoReply = new AutoReplyService(store, messages, async (input) => {
     const auditId = createId();
@@ -159,6 +162,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       if (!xianyuIm) throw new Error('XIANYU_IM_NOT_READY');
       return xianyuIm.sendExternalText(input.adminId, input.accountId, input.conversation.id, input.text, input.requestId, input.traceId);
     }),
+    repairRuntime: autoReplyRepair,
   });
   let xianyu: XianyuMtopClient;
   let productSync: ProductSyncService;
@@ -240,7 +244,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, orders, products, productSync, credentials, apiKeyCredentials, openaiSettings, dashboard, messages, autoReply, autoReplyAgentSettings, autoReplyActivity, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
+    config, store, auth, accounts, coupons, orders, products, productSync, credentials, apiKeyCredentials, openaiSettings, dashboard, messages, autoReply, autoReplyRepair, autoReplyAgentSettings, autoReplyActivity, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
     server,
     async listen() {
       await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));
