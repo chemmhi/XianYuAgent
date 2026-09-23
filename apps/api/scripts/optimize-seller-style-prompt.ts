@@ -19,6 +19,7 @@ import {
   renderStyleOptimizationTraceMarkdown,
   type StyleOptimizationProgressEvent,
   type StyleOptimizationResult,
+  type StylePromptVersion,
 } from './seller-style-prompt-optimizer.ts';
 
 const DEFAULT_EXCLUDED_BUYERS = ['一只橘喵喵亮晶晶', '三秒123456789'];
@@ -495,6 +496,8 @@ async function main(): Promise<void> {
     ? (isAbsolute(options.outDir) ? options.outDir : resolve(repoRoot, options.outDir))
     : resolve(repoRoot, 'artifacts', 'seller-style-prompt', timestampDir());
   await mkdir(outputDir, { recursive: true });
+  const livePromptVersionsDir = resolve(outputDir, 'prompt-versions');
+  await mkdir(livePromptVersionsDir, { recursive: true });
 
   const pool = new pg.Pool({ connectionString: databaseUrl });
   try {
@@ -538,6 +541,7 @@ async function main(): Promise<void> {
     let modelError: string | undefined;
     let optimized = false;
     let optimizationResult: StyleOptimizationResult | undefined;
+    let promptVersionsDir: string | undefined;
 
     if (!options.skipModel) {
       const model = createModelClient();
@@ -551,7 +555,24 @@ async function main(): Promise<void> {
             sampleCount: options.evaluationSamples ?? MIN_REAL_DIALOGUE_ROUNDS,
             threshold: options.similarityThreshold ?? DEFAULT_STYLE_SIMILARITY_THRESHOLD,
             maxIterations: options.maxIterations ?? DEFAULT_STYLE_MAX_ITERATIONS,
-            onProgress: printStyleOptimizationProgress,
+            onProgress: async (event) => {
+              printStyleOptimizationProgress(event);
+              if (event.type === 'prompt-generated') {
+                await writePromptVersionSnapshot(livePromptVersionsDir, {
+                  version: event.promptVersion,
+                  prompt: event.promptText,
+                  source: 'generated',
+                });
+              } else if (event.type === 'prompt-revised') {
+                await writePromptVersionSnapshot(livePromptVersionsDir, {
+                  version: event.toVersion,
+                  prompt: event.promptText,
+                  source: 'revised',
+                  iteration: event.iteration,
+                  revisionFeedback: event.feedback,
+                });
+              }
+            },
           },
         );
         documents = {
@@ -573,15 +594,16 @@ async function main(): Promise<void> {
     await writeFile(resolve(outputDir, 'style-optimization-trace.md'), documents.reportMarkdown.trim() + '\n', 'utf8');
     if (optimizationResult) {
       await writeFile(resolve(outputDir, 'style-optimization-trace.json'), renderStyleOptimizationTraceJson(optimizationResult), 'utf8');
+      promptVersionsDir = await writePromptVersionFiles(outputDir, optimizationResult);
     }
     await writeFile(resolve(outputDir, optimized ? 'seller-style-prompt.txt' : 'seller-style-prompt-candidate.txt'), documents.systemPromptText.trim() + '\n', 'utf8');
-    await writeFile(resolve(outputDir, 'run-metadata.json'), JSON.stringify({ generatedAt: report.generatedAt, outputDir, excludedBuyers: report.excludedBuyers, rawRows: report.rawRows, conversations: conversations.length, modelUsed, wireApi: process.env.WIRE_API, modelError, evaluationSamples: options.evaluationSamples ?? MIN_REAL_DIALOGUE_ROUNDS, similarityThreshold: options.similarityThreshold ?? DEFAULT_STYLE_SIMILARITY_THRESHOLD, maxIterations: options.maxIterations ?? DEFAULT_STYLE_MAX_ITERATIONS, optimized, optimizationStatus: optimizationResult?.status ?? 'draft', finalScore: optimizationResult?.finalScore, promptVersion: optimizationResult?.promptVersion }, null, 2), 'utf8');
+    await writeFile(resolve(outputDir, 'run-metadata.json'), JSON.stringify({ generatedAt: report.generatedAt, outputDir, excludedBuyers: report.excludedBuyers, rawRows: report.rawRows, conversations: conversations.length, modelUsed, wireApi: process.env.WIRE_API, modelError, evaluationSamples: options.evaluationSamples ?? MIN_REAL_DIALOGUE_ROUNDS, similarityThreshold: options.similarityThreshold ?? DEFAULT_STYLE_SIMILARITY_THRESHOLD, maxIterations: options.maxIterations ?? DEFAULT_STYLE_MAX_ITERATIONS, optimized, optimizationStatus: optimizationResult?.status ?? 'draft', finalScore: optimizationResult?.finalScore, promptVersion: optimizationResult?.promptVersion, promptVersionsDir }, null, 2), 'utf8');
 
     if (optimizationResult?.status === 'failed') {
       throw new Error(`PERSONA_SIMILARITY_THRESHOLD_NOT_REACHED: ${optimizationResult.finalScore.toFixed(2)} < ${optimizationResult.threshold.toFixed(2)}，已完成 ${optimizationResult.iterations.length} 轮，每轮至少评估 ${optimizationResult.sampleCount} 个真实会话；追踪文件已写入 ${outputDir}`);
     }
 
-    console.log(JSON.stringify({ outputDir, rawRows: report.rawRows, conversations: conversations.length, keptMessages: report.keptMessages, removedMessages: report.removedMessages, modelUsed, wireApi: process.env.WIRE_API, modelError }, null, 2));
+    console.log(JSON.stringify({ outputDir, rawRows: report.rawRows, conversations: conversations.length, keptMessages: report.keptMessages, removedMessages: report.removedMessages, modelUsed, wireApi: process.env.WIRE_API, modelError, promptVersionsDir }, null, 2));
   } finally {
     await pool.end();
   }
@@ -720,6 +742,7 @@ function printHelp(): void {
     '--wire-api <responses>         固定使用 Responses API；传入其他协议会失败',
     '--timeout-ms <n>              模型单次请求超时，默认 120000',
     '--max-chunks <n>               最多送模型分析的对话块数，默认 12',
+    '                                每一版提示词写入输出目录下的 prompt-versions/ 文件夹',
     `--evaluation-samples <n>       每轮随机抽取的真实会话数，至少 ${MIN_REAL_DIALOGUE_ROUNDS}，默认 ${MIN_REAL_DIALOGUE_ROUNDS}`,
     `--similarity-threshold <n>     通过阈值，默认 ${DEFAULT_STYLE_SIMILARITY_THRESHOLD}`,
     `--max-iterations <n>          未达阈值时最多迭代轮数，默认 ${DEFAULT_STYLE_MAX_ITERATIONS}`,
@@ -751,6 +774,36 @@ function printStyleOptimizationProgress(event: StyleOptimizationProgressEvent): 
       console.log(`[style-optimizer] 完成：${event.status === 'passed' ? '通过' : '未通过'}，最终 ${event.finalScore.toFixed(2)}，当前版本 v${event.promptVersion}`);
       break;
   }
+}
+
+export async function writePromptVersionFiles(outputDir: string, result: StyleOptimizationResult): Promise<string> {
+  const promptVersionsDir = resolve(outputDir, 'prompt-versions');
+  await mkdir(promptVersionsDir, { recursive: true });
+  for (const version of result.promptVersions) {
+    await writePromptVersionSnapshot(promptVersionsDir, version);
+  }
+  await writeFile(resolve(promptVersionsDir, 'manifest.json'), JSON.stringify({
+    currentVersion: result.promptVersion,
+    finalScore: result.finalScore,
+    threshold: result.threshold,
+    status: result.status,
+    versions: result.promptVersions.map((version) => ({
+      version: version.version,
+      filename: `prompt-v${String(version.version).padStart(3, '0')}.txt`,
+      source: version.source,
+      iteration: version.iteration,
+      score: version.score,
+      passed: version.passed,
+    })),
+  }, null, 2) + '\n', 'utf8');
+  return promptVersionsDir;
+}
+
+async function writePromptVersionSnapshot(promptVersionsDir: string, version: StylePromptVersion): Promise<void> {
+  const filename = `prompt-v${String(version.version).padStart(3, '0')}`;
+  await mkdir(promptVersionsDir, { recursive: true });
+  await writeFile(resolve(promptVersionsDir, `${filename}.txt`), version.prompt.trim() + '\n', 'utf8');
+  await writeFile(resolve(promptVersionsDir, `${filename}.json`), JSON.stringify(version, null, 2) + '\n', 'utf8');
 }
 
 function loadEnvFile(path: string): void {
