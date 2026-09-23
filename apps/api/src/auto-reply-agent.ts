@@ -71,7 +71,7 @@ export const AUTO_REPLY_AGENT_TOOLS: ModelToolDefinition[] = [
     type: 'function',
     function: {
       name: 'get_product_info',
-      description: '读取当前卖家账号下指定商品的必要事实（标题、说明、价格、卖家知识、回复模板、状态）。不返回内部标识或完整商品记录；未传商品标识时使用当前会话商品。结果为紧凑纯文本。',
+      description: '读取当前卖家账号下指定商品的必要事实（标题、价格、描述、浏览量、想要人数、收藏人数，以及可用的卖家知识、回复模板、状态）。不返回内部标识或完整商品记录；未传商品标识时使用当前会话商品。结果为紧凑纯文本。',
       parameters: { type: 'object', properties: { productRef: { type: 'string', maxLength: 120 } }, additionalProperties: false },
     },
   },
@@ -87,7 +87,7 @@ export const AUTO_REPLY_AGENT_TOOLS: ModelToolDefinition[] = [
     type: 'function',
     function: {
       name: 'list_shop_products',
-      description: '读取当前卖家店铺商品总览，或按关键词搜索商品必要事实（标题、说明、价格、状态）。买家问“店铺有哪些商品”“卖什么”“还有哪些商品”时不传 keyword；不返回完整商品记录。结果为紧凑纯文本。',
+      description: '读取当前卖家店铺商品总览，或按关键词搜索商品必要事实集合（标题、价格、描述、浏览量、想要人数、收藏人数，以及状态）。买家问“店铺有哪些商品”“卖什么”“还有哪些商品”时不传 keyword；不返回完整商品记录。结果为紧凑纯文本。',
       parameters: { type: 'object', properties: { keyword: { type: 'string', maxLength: 120 }, limit: { type: 'integer', minimum: 1, maximum: 20 } }, additionalProperties: false },
     },
   },
@@ -531,12 +531,15 @@ function summarizeToolResult(name: AutoReplyToolName, result: Record<string, unk
 
 function safeProduct(product: AutoReplyProductContext): Record<string, unknown> {
   // Keep only facts that can change the buyer-facing answer. Persisted
-  // attributes, engagement counters, timestamps, assets, SKUs and account
-  // metadata are intentionally excluded from the model-facing contract.
+  // attributes, timestamps, assets, SKUs and account metadata are excluded;
+  // public engagement metrics are retained because buyers may ask about them.
   return {
     productRef: product.externalProductRef ?? product.id,
     title: trimField(product.title, 300),
     description: trimField(product.description, 800),
+    browseCount: product.browseCount,
+    wantCount: product.wantCount,
+    collectCount: product.collectCount,
     priceMinor: product.priceMinor,
     aiPrompt: trimField(product.aiPrompt, 800),
     defaultReplyTemplate: trimField(product.defaultReplyTemplate, 300),
@@ -585,9 +588,12 @@ function formatProductInfo(result: Record<string, unknown>): string {
     '商品信息',
     `标题：${textValue(product.title)}`,
     `价格：${formatPrice(product.priceMinor)}`,
+    `描述：${textValue(product.description)}`,
+    `浏览量：${formatCount(product.browseCount)}`,
+    `想要人数：${formatCount(product.wantCount)}`,
+    `收藏人数：${formatCount(product.collectCount)}`,
     `状态：${textValue(product.status)}`,
   ];
-  appendOptionalLine(lines, '说明', product.description);
   appendOptionalLine(lines, '卖家知识', product.aiPrompt);
   appendOptionalLine(lines, '回复模板', product.defaultReplyTemplate);
   return lines.join('\n');
@@ -617,8 +623,17 @@ function formatShopProducts(result: Record<string, unknown>): string {
     return lines.join('\n');
   }
   products.forEach((product, index) => {
-    lines.push('', `商品 ${index + 1}`, `标题：${textValue(product.title)}`, `价格：${formatPrice(product.priceMinor)}`, `状态：${textValue(product.status)}`);
-    appendOptionalLine(lines, '说明', product.description);
+    lines.push(
+      '',
+      `商品 ${index + 1}`,
+      `标题：${textValue(product.title)}`,
+      `价格：${formatPrice(product.priceMinor)}`,
+      `描述：${textValue(product.description)}`,
+      `浏览量：${formatCount(product.browseCount)}`,
+      `想要人数：${formatCount(product.wantCount)}`,
+      `收藏人数：${formatCount(product.collectCount)}`,
+      `状态：${textValue(product.status)}`,
+    );
   });
   return lines.join('\n');
 }
@@ -636,6 +651,10 @@ function appendOptionalLine(lines: string[], label: string, value: unknown): voi
 function formatPrice(value: unknown): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '未提供';
   return `${(value / 100).toFixed(2)}元`;
+}
+
+function formatCount(value: unknown): string {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? String(Math.trunc(value)) : '未提供';
 }
 
 function textValue(value: unknown, fallback = '未提供'): string {

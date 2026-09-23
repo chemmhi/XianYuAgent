@@ -192,13 +192,17 @@ export interface ProductListResult {
 
 /**
  * Minimal product context exposed to the auto-reply model.
- * Deliberately omits attributes, SKUs/assets, sync metadata and timestamps.
+ * Deliberately omits raw attributes, SKUs/assets, sync metadata and timestamps,
+ * while retaining public engagement metrics that buyers may ask about.
  */
 export interface AutoReplyProductContext {
   id: string;
   externalProductRef?: string;
   title: string;
   description?: string;
+  browseCount?: number;
+  wantCount?: number;
+  collectCount?: number;
   defaultReplyTemplate?: string;
   aiPrompt?: string;
   priceMinor?: number;

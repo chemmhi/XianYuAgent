@@ -7,6 +7,7 @@ import { decodeMessageHistoryCursor } from './message-history-cursor.js';
 import type { AgentSessionRecord, RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, WorkspaceMessageRecord, WorkspaceMessageType } from './domain.js';
 import { cloneCouponReservation, normalizeCouponReservationInput, normalizeLeaseSeconds, reservationFingerprint } from './coupon-reservation.js';
 import { validatePersistedAutoReplyRepairPolicyBundle } from './auto-reply-repair-config.js';
+import { readAutoReplyProductMetrics } from './auto-reply-product-metrics.js';
 
 function meaningfulOrderTitle(value: string | undefined, references: Array<string | undefined>): string | undefined {
   const title = value?.trim();
@@ -31,6 +32,7 @@ function toAutoReplyProductContext(product: ProductRecord): AutoReplyProductCont
     externalProductRef: product.externalProductRef,
     title: product.title,
     description: product.description,
+    ...readAutoReplyProductMetrics(product.attributes),
     defaultReplyTemplate: product.defaultReplyTemplate,
     aiPrompt: product.aiPrompt,
     priceMinor: product.priceMinor,

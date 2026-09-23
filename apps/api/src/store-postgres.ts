@@ -6,6 +6,7 @@ import { projectAutoReplyRun } from './auto-reply-activity-projection.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor } from './conversation-cursor.js';
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
+import { normalizeAutoReplyProductMetric } from './auto-reply-product-metrics.js';
 import { cloneCouponReservation, normalizeCouponReservationInput, normalizeLeaseSeconds, reservationFingerprint } from './coupon-reservation.js';
 import { validatePersistedAutoReplyRepairPolicyBundle } from './auto-reply-repair-config.js';
 
@@ -104,7 +105,10 @@ export class PostgresStore implements Store {
     }
     const where = conditions.join(' AND ');
     const count = await this.pool.query(`select count(*)::int as total from products.products p where ${where}`, params);
-    const rows = await this.pool.query(`select p.id,p.external_product_ref,p.title,p.description,p.default_reply_template,p.ai_prompt,p.price_minor,p.status
+    const rows = await this.pool.query(`select p.id,p.external_product_ref,p.title,p.description,p.default_reply_template,p.ai_prompt,p.price_minor,p.status,
+        nullif(p.attributes_json #>> '{xianyu,detail,summary,browseCount}', '')::int as browse_count,
+        nullif(p.attributes_json #>> '{xianyu,detail,summary,wantCount}', '')::int as want_count,
+        nullif(p.attributes_json #>> '{xianyu,detail,summary,collectCount}', '')::int as collect_count
       from products.products p where ${where} order by p.title asc, p.id asc limit $${params.length + 1}`, [...params, limit]);
     return { items: rows.rows.map((row) => this.toAutoReplyProduct(row)), total: Number(count.rows[0]?.total ?? 0) };
   }
@@ -1575,6 +1579,9 @@ export class PostgresStore implements Store {
       externalProductRef: row.external_product_ref ? String(row.external_product_ref) : undefined,
       title: String(row.title),
       description: row.description ? String(row.description) : undefined,
+      browseCount: normalizeAutoReplyProductMetric(row.browse_count),
+      wantCount: normalizeAutoReplyProductMetric(row.want_count),
+      collectCount: normalizeAutoReplyProductMetric(row.collect_count),
       defaultReplyTemplate: row.default_reply_template ? String(row.default_reply_template) : undefined,
       aiPrompt: row.ai_prompt ? String(row.ai_prompt) : undefined,
       priceMinor: row.price_minor === null || row.price_minor === undefined ? undefined : Number(row.price_minor),

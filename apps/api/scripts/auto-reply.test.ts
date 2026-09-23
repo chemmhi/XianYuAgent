@@ -39,7 +39,7 @@ test('auto-reply context loads narrow product, order, and message projections', 
   }));
   const admin = await runtime.store.createAdmin({ email: 'projection@example.com', passwordHash: 'hash', displayName: 'Projection' });
   const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'projection-seller' });
-  const product = await runtime.store.createProduct({ adminId: admin.id, accountId: account.id, externalProductRef: 'projection-item', title: '投影商品', defaultReplyTemplate: '你好，{{productTitle}}可拍。', priceMinor: 1_999, status: 'published', attributes: { raw: '不要进入模型上下文' } });
+  const product = await runtime.store.createProduct({ adminId: admin.id, accountId: account.id, externalProductRef: 'projection-item', title: '投影商品', defaultReplyTemplate: '你好，{{productTitle}}可拍。', priceMinor: 1_999, status: 'published', attributes: { raw: '不要进入模型上下文', xianyu: { detail: { summary: { browseCount: 321, wantCount: 33, collectCount: 8 } } } } });
   const conversation = await runtime.store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'projection-buyer', buyerDisplayName: 'Projection Buyer', itemRef: product.externalProductRef, itemTitle: product.title, externalConversationRef: 'projection-conversation' });
   await runtime.store.createOrder({ adminId: admin.id, order: { orderNo: 'PROJECTION-ORDER-1', accountId: account.id, buyerId: 'projection-buyer', conversationId: conversation.id, itemId: product.externalProductRef ?? 'projection-item', itemTitle: product.title, amountMinor: 1_999, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'manual' } });
   const inbound = (await runtime.messages.createMessage({ adminId: admin.id, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '请问这个是什么？', source: 'system', requestId: 'projection-request', traceId: 'projection-trace' })).message;
@@ -55,6 +55,9 @@ test('auto-reply context loads narrow product, order, and message projections', 
     const result = await runtime.autoReply.processInbound({ adminId: admin.id, conversationId: conversation.id, inboundMessageId: inbound.messageId, senderName: 'Projection Buyer', requestId: 'projection-process', traceId: 'projection-process-trace' });
     assert.equal(result.run.status, 'persisted');
     assert.equal(result.context?.product?.title, '投影商品');
+    assert.equal(result.context?.product?.browseCount, 321);
+    assert.equal(result.context?.product?.wantCount, 33);
+    assert.equal(result.context?.product?.collectCount, 8);
     assert.deepEqual(result.context?.orders.map((order) => order.orderNo), ['PROJECTION-ORDER-1']);
     assert.equal(result.context?.product && 'attributes' in result.context.product, false);
   } finally {
