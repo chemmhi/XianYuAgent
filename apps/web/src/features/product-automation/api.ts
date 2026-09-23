@@ -1,5 +1,7 @@
 import type { AutomationCoupon, ProductAutomationBatchUpdate, ProductAutomationBatchUpdateWire, ProductAutomationConfig, ProductAutomationConfigWire, ProductAutomationUpdate, ProductAutomationUpdateWire } from './types';
 
+const DEFAULT_REVIEW_MESSAGE = '如果使用满意，欢迎给个好评，谢谢支持～';
+
 export interface ProductAutomationApiTransport {
   get<T>(path: string): Promise<T>;
   post?<T>(path: string, body?: unknown, options?: { headers?: Record<string, string> }): Promise<T>;
@@ -42,19 +44,21 @@ export function toAutomationConfig(value: ProductAutomationConfigWire | ProductA
       reviewInitialHours: (canonical.reviewReminder as { firstDelayHours?: number } | undefined)?.firstDelayHours ?? 72,
       reviewRepeatHours: (canonical.reviewReminder as { repeatIntervalHours?: number } | undefined)?.repeatIntervalHours ?? 24,
       reviewMaxCount: (canonical.reviewReminder as { maxReminders?: number } | undefined)?.maxReminders ?? 1,
-      reviewMessage: (canonical.reviewReminder as { message?: string; reviewMessage?: string } | undefined)?.message ?? (canonical.reviewReminder as { message?: string; reviewMessage?: string } | undefined)?.reviewMessage ?? '',
+      reviewMessage: (canonical.reviewReminder as { message?: string; reviewMessage?: string } | undefined)?.message ?? (canonical.reviewReminder as { message?: string; reviewMessage?: string } | undefined)?.reviewMessage ?? DEFAULT_REVIEW_MESSAGE,
     },
     updatedAt: record.updatedAt,
   };
 }
 
 export function toAutomationConfigWire(value: ProductAutomationUpdate): ProductAutomationUpdateWire {
+  const reviewReminder = { enabled: value.review.enabled, firstDelayHours: value.review.reviewInitialHours ?? 72, repeatIntervalHours: value.review.reviewRepeatHours ?? 24, maxReminders: value.review.reviewMaxCount ?? 1 } as Record<string, unknown>;
+  if (value.review.reviewMessage !== undefined) reviewReminder.message = value.review.reviewMessage;
   return {
     configVersion: value.version,
     paidAutoDelivery: { enabled: value.delivery.enabled, couponBatchIds: value.delivery.couponIds ?? [], autoConfirm: value.delivery.autoConfirm ?? false, maxAttempts: 3, retryBackoffSeconds: 30 } as ProductAutomationUpdateWire['paidAutoDelivery'],
     unpaidAutoReprice: { enabled: value.reprice.enabled, mode: 'fixed', targetPriceMinor: value.reprice.targetPriceMinor ?? 0, message: value.reprice.repriceMessage ?? '', maxAttempts: 3, retryBackoffSeconds: 30 } as ProductAutomationUpdateWire['unpaidAutoReprice'],
     reviewGift: { enabled: value.gift.enabled, couponBatchIds: value.gift.couponIds ?? [], maxAttempts: 3, retryBackoffSeconds: 30 } as ProductAutomationUpdateWire['reviewGift'],
-    reviewReminder: { enabled: value.review.enabled, firstDelayHours: value.review.reviewInitialHours ?? 72, repeatIntervalHours: value.review.reviewRepeatHours ?? 24, maxReminders: value.review.reviewMaxCount ?? 1, message: value.review.reviewMessage ?? '' } as ProductAutomationUpdateWire['reviewReminder'],
+    reviewReminder: reviewReminder as unknown as ProductAutomationUpdateWire['reviewReminder'],
   };
 }
 
@@ -82,6 +86,7 @@ function toAutomationCoupon(value: Record<string, unknown>): AutomationCoupon {
     specSummary,
     quantitySummary: `每件 ${quantity} 份`,
     stockSummary: purpose === 'api' ? '动态' : `库存 ${Number.isFinite(availableCount) ? availableCount : 0}`,
+    deliveryScope: value.deliveryScope === 'system_only' || value.deliveryScope === 'operator_only' || value.deliveryScope === 'buyer_deliverable' ? value.deliveryScope : undefined,
     accountId: value.accountId ? String(value.accountId) : undefined,
     apiManaged: purpose === 'api',
   };
@@ -146,11 +151,18 @@ export function createProductAutomationApi(transport: ProductAutomationApiTransp
       return readConfig(productId);
     },
     async listCoupons(accountId, purpose) {
-      const suffix = purpose ? `&purpose=${encodeURIComponent(purpose)}` : '';
+      // `delivery` and `gift` are automation rule intents, not coupon batch
+      // purpose values. The backend coupon API only accepts concrete batch
+      // purposes (`text`, `data`, `api`, `image`), so forwarding these rule
+      // keys makes the live picker fail with a 422 before the drawer can save.
+      // Keep the intent parameter for the public contract, but scope by
+      // account only and let the picker show all buyer-deliverable batches.
+      void purpose;
+      const suffix = '';
       const response = await transport.get<{ data?: { items?: Record<string, unknown>[] } | Record<string, unknown>[] } | { items?: Record<string, unknown>[] } | Record<string, unknown>[]>(`/api/v1/coupons/batches?accountId=${encodeURIComponent(accountId)}${suffix}`);
       const payload = (response as { data?: unknown }).data ?? response;
       const items = Array.isArray(payload) ? payload : ((payload as { items?: Record<string, unknown>[] }).items ?? []);
-      return items.map(toAutomationCoupon);
+      return items.map(toAutomationCoupon).filter((coupon) => !coupon.deliveryScope || coupon.deliveryScope === 'buyer_deliverable');
     },
     async saveConfig(productId, input) {
       const wire = toAutomationConfigWire(input);

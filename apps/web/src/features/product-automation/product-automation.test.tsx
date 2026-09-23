@@ -5,6 +5,8 @@ import { createMockProductAutomationApi, createProductAutomationApi, MOCK_AUTOMA
 import { AutomationDrawer } from './components/AutomationDrawer';
 import { BatchAutomationDialog } from './components/BatchAutomationDialog';
 import { CouponPickerDialog } from './components/CouponPickerDialog';
+import { toProductAutomationSaveError } from './controller';
+import { ApiError } from '../../api/http';
 import type { ProductVM } from '../products/types';
 
 const product: ProductVM = { id: 'product-1', accountId: 'account-1', title: 'PPT Master', externalProductRef: 'item-1', attributesJson: {}, configVersion: 1, priceMinor: 850, status: 'published', createdAt: '2026-09-20T10:00:00.000Z', updatedAt: '2026-09-20T10:00:00.000Z', skuCount: 1, assetCount: 0 };
@@ -13,18 +15,19 @@ describe('product automation API', () => {
   it('maps the live adapter to the canonical automation and coupon contracts', async () => {
     const calls: Array<{ method: string; path: string; body?: unknown; options?: unknown }> = [];
     const api = createProductAutomationApi({
-      async get<T>(path: string) { calls.push({ method: 'GET', path }); return (path.includes('/automation') ? { data: { productId: 'product-1', accountId: 'account-1', configVersion: 7, config: { paidAutoDelivery: { enabled: true, couponBatchIds: ['1'] }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true, firstDelayHours: 72, repeatIntervalHours: 24, maxReminders: 1, message: '请评价' } } } } : { data: { items: MOCK_AUTOMATION_COUPONS } }) as T; },
+      async get<T>(path: string) { calls.push({ method: 'GET', path }); return (path.includes('/automation') ? { data: { productId: 'product-1', accountId: 'account-1', configVersion: 7, config: { paidAutoDelivery: { enabled: true, couponBatchIds: ['1'] }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true, firstDelayHours: 72, repeatIntervalHours: 24, maxReminders: 1, message: '请评价' } } } } : { data: { items: [...MOCK_AUTOMATION_COUPONS, { id: 'operator-only', label: '仅运营可见', purpose: 'text', deliveryScope: 'operator_only' }] } }) as T; },
       async patch<T>(path: string, body?: unknown, options?: unknown) { calls.push({ method: 'PATCH', path, body, options }); return { data: { productId: 'product-1', accountId: 'account-1', configVersion: 8, paidAutoDelivery: { enabled: false }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true } } } as T; },
       async post<T>(path: string, body?: unknown, options?: unknown) { calls.push({ method: 'POST', path, body, options }); return { data: { updatedCount: 1 } } as T; },
     });
     const config = await api.getConfig('product-1');
     expect(config.version).toBe(7);
     expect(config.delivery.couponIds).toEqual(['1']);
-    await api.listCoupons('account-1', 'delivery');
+    const availableCoupons = await api.listCoupons('account-1', 'delivery');
+    expect(availableCoupons.some((coupon) => coupon.id === 'operator-only')).toBe(false);
     await api.saveConfig('product-1', { version: 7, delivery: { enabled: false }, reprice: { enabled: false }, gift: { enabled: false }, review: { enabled: true } });
     await api.saveBatch({ productIds: ['product-1'], expectedConfigVersions: { 'product-1': 8 }, apply: { delivery: true, reprice: false, gift: false, review: false }, rules: { delivery: { enabled: false }, reprice: { enabled: false }, gift: { enabled: false }, review: { enabled: true } } });
     expect(calls[0].path).toBe('/api/v1/products/product-1/automation');
-    expect(calls[1].path).toContain('/api/v1/coupons/batches?accountId=account-1&purpose=delivery');
+    expect(calls[1].path).toBe('/api/v1/coupons/batches?accountId=account-1');
     const saveCall = calls.find((call) => call.method === 'PATCH' && call.path.includes('/automation'));
     expect(saveCall?.body).toMatchObject({ config: { paidAutoDelivery: { enabled: false, couponBatchIds: [], autoConfirm: false }, unpaidAutoReprice: { enabled: false, targetPriceMinor: 0 }, reviewGift: { enabled: false, couponBatchIds: [] }, reviewReminder: { enabled: true, firstDelayHours: 72 } } });
     expect((saveCall?.body as { config?: { paidAutoDelivery?: { autoConfirm?: boolean } } }).config?.paidAutoDelivery?.autoConfirm).toBe(false);
@@ -68,14 +71,47 @@ describe('product automation components', () => {
     expect(html).not.toContain('规格、数量、库存');
   });
 
+  it('preserves backend defaults when the legacy response omits review message', async () => {
+    const calls: Array<{ body?: unknown }> = [];
+    const api = createProductAutomationApi({
+      async get<T>() { return { data: { productId: 'product-1', accountId: 'account-1', configVersion: 1, config: { paidAutoDelivery: { enabled: false }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true } } } } as T; },
+      async patch<T>(_path: string, body?: unknown) { calls.push({ body }); return { data: { productId: 'product-1', accountId: 'account-1', configVersion: 1, config: { paidAutoDelivery: { enabled: false }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true, message: '默认文案' } } } } as T; },
+    });
+    const initial = await api.getConfig('product-1');
+    await api.saveConfig('product-1', { version: initial.version, delivery: initial.delivery, reprice: initial.reprice, gift: initial.gift, review: initial.review });
+    expect((calls[0]?.body as { config?: { reviewReminder?: { message?: string } } }).config?.reviewReminder?.message).toBeTruthy();
+  });
+
   it('renders transfer picker with available and selected panes and save count', () => {
     const html = renderToStaticMarkup(createElement(CouponPickerDialog, { open: true, title: '选择发货卡券', subtitle: '付款后自动发货使用的卡券', coupons: MOCK_AUTOMATION_COUPONS, selectedIds: ['coupon-batch-2'], onCancel: vi.fn(), onSave: vi.fn() }));
+    expect(html).toContain('coupons-modal-backdrop');
+    expect(html).toContain('coupons-relation-modal');
+    expect(html).toContain('coupons-relation-grid coupon-picker-grid');
+    expect((html.match(/class="coupons-relation-pane coupon-picker-pane coupon-transfer-pane"/g) ?? []).length).toBe(2);
+    expect((html.match(/coupons-relation-search/g) ?? []).length).toBe(2);
     expect(html).toContain('待选卡券');
     expect(html).toContain('已选卡券');
-    expect(html).toContain('保存（1个）');
+    expect(html).toContain('保存（1 个）');
     expect(html).toContain('API 卡券');
     expect(html).not.toContain('库存 120');
     expect(html).not.toContain('2 条规格');
+  });
+
+  it('renders the delivery auto-confirm switch and preserves its saved state', () => {
+    const savedConfig = {
+      productId: product.id,
+      accountId: product.accountId,
+      version: 4,
+      delivery: { enabled: true, couponIds: ['coupon-batch-2'], autoConfirm: true },
+      reprice: { enabled: false },
+      gift: { enabled: false, couponIds: [] },
+      review: { enabled: false },
+    };
+    const html = renderToStaticMarkup(createElement(AutomationDrawer, { open: true, product, config: savedConfig, coupons: MOCK_AUTOMATION_COUPONS, loadPhase: 'success', savePhase: 'idle', error: null, onClose: vi.fn(), onSave: vi.fn(async () => savedConfig) }));
+    expect(html).toContain('自动确认发货');
+    expect(html).toContain('发卡成功后执行');
+    expect(html).toContain('data-testid="auto-confirm-delivery"');
+    expect(html).toContain('aria-pressed="true"');
   });
 
   it('renders batch configuration with explicit apply checkboxes and disabled empty save', () => {
@@ -84,5 +120,19 @@ describe('product automation components', () => {
     expect(html).toContain('应用付款后自动发货');
     expect(html).toContain('保存并启用');
     expect(html).toMatch(/disabled=""/);
+  });
+});
+
+describe('product automation save error mapping', () => {
+  it('maps optimistic-lock conflicts to a recoverable user message', () => {
+    expect(toProductAutomationSaveError(new ApiError('automation config version conflict', 409, { error: { code: 'AUTOMATION_VERSION_CONFLICT' } }))).toBe('自动化配置已被其他操作更新，请关闭抽屉后重新打开再保存。');
+  });
+
+  it('maps coupon state conflicts to card reselection guidance', () => {
+    expect(toProductAutomationSaveError(new ApiError('coupon batch is closed', 409, { error: { code: 'CONFLICT' } }))).toContain('重新选择可发货卡券');
+  });
+
+  it('maps validation failures to actionable card configuration guidance', () => {
+    expect(toProductAutomationSaveError(new ApiError('paidAutoDelivery requires at least one coupon batch', 422, { error: { code: 'VALIDATION_FAILED' } }))).toContain('已选择可发货卡券');
   });
 });

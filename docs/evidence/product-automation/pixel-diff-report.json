@@ -1,126 +1,126 @@
 {
-  "designFile": "F:\\ChenHai\\Project\\XianYuAgent-product-automation\\docs\\design\\product-automation-interaction-v1.html",
-  "generatedAt": "2026-09-22T22:25:59.051Z",
+  "designFile": "F:\\ChenHai\\Project\\XianYuAgent\\docs\\design\\product-automation-interaction-v1.html",
+  "generatedAt": "2026-09-23T03:15:19.423Z",
   "comparisons": [
     {
       "state": "list",
       "viewport": "1440x900",
       "expected": "1440x900",
       "actual": "1440x900",
-      "differingPixels": 197867,
+      "differingPixels": 232523,
       "totalPixels": 1296000,
-      "differingRatio": 0.15267515432098766,
-      "meanAbsoluteError": 4.8970244984567906
+      "differingRatio": 0.1794158950617284,
+      "meanAbsoluteError": 6.105250771604938
     },
     {
       "state": "list",
       "viewport": "390x844",
       "expected": "390x844",
       "actual": "390x844",
-      "differingPixels": 80918,
+      "differingPixels": 97366,
       "totalPixels": 329160,
-      "differingRatio": 0.24583181431522663,
-      "meanAbsoluteError": 9.501981559120185
+      "differingRatio": 0.2958014339530927,
+      "meanAbsoluteError": 12.475326588892939
     },
     {
       "state": "delivery",
       "viewport": "1440x900",
       "expected": "1440x900",
       "actual": "1440x900",
-      "differingPixels": 320717,
+      "differingPixels": 320997,
       "totalPixels": 1296000,
-      "differingRatio": 0.24746682098765432,
-      "meanAbsoluteError": 4.208213734567901
+      "differingRatio": 0.24768287037037037,
+      "meanAbsoluteError": 4.6878622685185185
     },
     {
       "state": "delivery",
       "viewport": "390x844",
       "expected": "390x844",
       "actual": "390x844",
-      "differingPixels": 68202,
+      "differingPixels": 53000,
       "totalPixels": 329160,
-      "differingRatio": 0.20720014582573823,
-      "meanAbsoluteError": 8.070436110098433
+      "differingRatio": 0.16101591930975817,
+      "meanAbsoluteError": 7.450443553287156
     },
     {
       "state": "reprice",
       "viewport": "1440x900",
       "expected": "1440x900",
       "actual": "1440x900",
-      "differingPixels": 285247,
+      "differingPixels": 303528,
       "totalPixels": 1296000,
-      "differingRatio": 0.2200979938271605,
-      "meanAbsoluteError": 3.618616898148148
+      "differingRatio": 0.2342037037037037,
+      "meanAbsoluteError": 4.155754629629629
     },
     {
       "state": "reprice",
       "viewport": "390x844",
       "expected": "390x844",
       "actual": "390x844",
-      "differingPixels": 47357,
+      "differingPixels": 55893,
       "totalPixels": 329160,
-      "differingRatio": 0.14387228095758903,
-      "meanAbsoluteError": 6.196602716004374
+      "differingRatio": 0.16980495807510027,
+      "meanAbsoluteError": 7.153724632397618
     },
     {
       "state": "gift",
       "viewport": "1440x900",
       "expected": "1440x900",
       "actual": "1440x900",
-      "differingPixels": 303917,
+      "differingPixels": 313079,
       "totalPixels": 1296000,
-      "differingRatio": 0.23450385802469137,
-      "meanAbsoluteError": 3.8532106481481483
+      "differingRatio": 0.2415733024691358,
+      "meanAbsoluteError": 4.2940279706790125
     },
     {
       "state": "gift",
       "viewport": "390x844",
       "expected": "390x844",
       "actual": "390x844",
-      "differingPixels": 57075,
+      "differingPixels": 58447,
       "totalPixels": 329160,
-      "differingRatio": 0.1733959168793292,
-      "meanAbsoluteError": 6.860827561064528
+      "differingRatio": 0.17756410256410257,
+      "meanAbsoluteError": 7.298529590472718
     },
     {
       "state": "review",
       "viewport": "1440x900",
       "expected": "1440x900",
       "actual": "1440x900",
-      "differingPixels": 331354,
+      "differingPixels": 332391,
       "totalPixels": 1296000,
-      "differingRatio": 0.25567438271604936,
-      "meanAbsoluteError": 4.036141782407407
+      "differingRatio": 0.25647453703703704,
+      "meanAbsoluteError": 4.54772762345679
     },
     {
       "state": "review",
       "viewport": "390x844",
       "expected": "390x844",
       "actual": "390x844",
-      "differingPixels": 51555,
+      "differingPixels": 59259,
       "totalPixels": 329160,
-      "differingRatio": 0.15662595698140722,
-      "meanAbsoluteError": 7.337573672378174
+      "differingRatio": 0.18003098796937658,
+      "meanAbsoluteError": 7.940895005468465
     },
     {
       "state": "coupon",
       "viewport": "1440x900",
       "expected": "1440x900",
       "actual": "1440x900",
-      "differingPixels": 299405,
+      "differingPixels": 744439,
       "totalPixels": 1296000,
-      "differingRatio": 0.23102237654320987,
-      "meanAbsoluteError": 2.546546875
+      "differingRatio": 0.5744128086419753,
+      "meanAbsoluteError": 5.353686921296296
     },
     {
       "state": "coupon",
       "viewport": "390x844",
       "expected": "390x844",
       "actual": "390x844",
-      "differingPixels": 56912,
+      "differingPixels": 168671,
       "totalPixels": 329160,
-      "differingRatio": 0.17290071697654635,
-      "meanAbsoluteError": 6.581196074857212
+      "differingRatio": 0.5124286061489853,
+      "meanAbsoluteError": 8.473613136468586
     }
   ]
 }

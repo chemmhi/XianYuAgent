@@ -135,7 +135,11 @@ async function run() {
   await evaluate(cdp, 'Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "添加闲鱼账号")?.click()');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('扫码登录'), 'login method selector');
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
-  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".qr-login-code-loading"))'), 'QR creating state');
+  // The stub QR endpoint can resolve before the 120ms polling interval sees
+  // the transient loading class. Wait for the real QR container in either
+  // loading or rendered state, then keep the layout and request assertions
+  // below as the behavioral gate.
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".qr-login-code"))'), 'QR code shell');
   const creatingQrLayout = await evaluate(cdp, `(() => {
     const modal = document.querySelector('.account-login-modal')?.getBoundingClientRect();
     const view = document.querySelector('.qr-login-view')?.getBoundingClientRect();

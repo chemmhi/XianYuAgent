@@ -15,6 +15,7 @@ import { useProductAutomationController } from '../../product-automation/control
 import { AutomationDrawer } from '../../product-automation/components/AutomationDrawer';
 import { BatchAutomationDialog } from '../../product-automation/components/BatchAutomationDialog';
 import './products.css';
+import '../../coupons/components/coupons.css';
 import '../../product-automation/product-automation.css';
 
 export interface ProductsPageProps { api?: ProductsApi; accountsApi?: AccountsApi; automationApi?: ProductAutomationApi; }

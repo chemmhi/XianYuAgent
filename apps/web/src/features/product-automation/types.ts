@@ -7,6 +7,7 @@ export interface AutomationCoupon {
   specSummary: string;
   quantitySummary: string;
   stockSummary: string;
+  deliveryScope?: 'system_only' | 'operator_only' | 'buyer_deliverable';
   accountId?: string;
   apiManaged?: boolean;
 }
@@ -14,7 +15,7 @@ export interface AutomationCoupon {
 export interface AutomationRuleState {
   enabled: boolean;
   couponIds?: string[];
-  /** Preserved from the backend when present; hidden in the simplified UI and defaults to false. */
+  /** Whether delivery should be confirmed after the card is sent; defaults to false. */
   autoConfirm?: boolean;
   targetPriceMinor?: number;
   repriceMessage?: string;
