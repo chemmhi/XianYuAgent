@@ -1,6 +1,7 @@
-import { appendFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { acquireMonitorFlag } from './monitor-auto-reply-flag.mjs';
 
 const root = process.cwd();
 const args = new Set(process.argv.slice(2));
@@ -13,7 +14,7 @@ const keepFlag = args.has('--keep-flag');
 
 await mkdir(dirname(tracePath), { recursive: true });
 if (args.has('--clear') && existsSync(tracePath)) await unlink(tracePath);
-await writeFile(flagPath, '', 'utf8');
+const flagLease = await acquireMonitorFlag(flagPath, { keepFlag });
 
 let offset = 0;
 let pending = '';
@@ -173,7 +174,7 @@ async function writeHealth() {
 }
 
 async function cleanup() {
-  if (!keepFlag && existsSync(flagPath)) await unlink(flagPath).catch(() => {});
+  await flagLease.release();
   if (!stopped) {
     stopped = true;
     console.log(`AUTO_REPLY_GOD_VIEW_STOPPED ${new Date().toISOString()}`);

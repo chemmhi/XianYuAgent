@@ -30,3 +30,5 @@ runtime-live/*.log
 runtime-live/*.ndjson
 runtime-live/*.jsonl
 runtime-live/*.enable
+runtime-live/*.enable.owners/
+runtime-live/*.enable.owners.lock

@@ -519,6 +519,42 @@ test('app startup scans connected accounts without an auth page request', async 
   await runtime.close();
 });
 
+test('app startup recovers degraded and disconnected listeners but skips non-recoverable accounts', async () => {
+  const runtime = createApp(loadConfig({
+    HOST: '127.0.0.1',
+    PORT: '0',
+    DATABASE_URL: '',
+    REDIS_URL: '',
+    ALLOW_IN_MEMORY: 'true',
+    COOKIE_SECURE: 'false',
+    XIANYU_QR_MODE: 'real',
+    AGENT_RUNTIME: 'in-process',
+    AUTO_REPLY_SEND_MODE: 'simulate',
+  }));
+  const calls: string[] = [];
+  runtime.xianyuIm.startListener = async (_adminId, accountId) => { calls.push(accountId); };
+  try {
+    const admin = await runtime.store.createAdmin({ email: 'startup-listener-statuses@example.com', passwordHash: 'hash', displayName: 'Startup Listener Statuses' });
+    const accounts = await Promise.all([
+      runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'startup-connected' }),
+      runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'startup-degraded' }),
+      runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'startup-disconnected' }),
+      runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'startup-expired' }),
+      runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'startup-pending' }),
+      runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'startup-disabled' }),
+    ]);
+    for (const [index, status] of (['connected', 'degraded', 'disconnected', 'expired', 'pending', 'disabled'] as const).entries()) {
+      await runtime.store.updateAccount(admin.id, accounts[index].id, { status });
+    }
+    await runtime.listen();
+    for (let attempt = 0; attempt < 80 && calls.length < 3; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(new Set(calls), new Set([accounts[0].id, accounts[1].id, accounts[2].id]));
+    assert.equal(calls.length, 3);
+  } finally {
+    await runtime.close();
+  }
+});
+
 test('app startup retries a failed connected listener with bounded backoff', async () => {
   const runtime = createApp(loadConfig({
     HOST: '127.0.0.1',

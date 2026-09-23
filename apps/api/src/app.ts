@@ -308,7 +308,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     server,
     async listen() {
       await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));
-      if (config.xianyuQrMode === 'real') void startAllConnectedListenersBestEffort(runtime);
+      if (config.xianyuQrMode === 'real') void startAllRecoverableListenersBestEffort(runtime);
     },
     async close() {
       for (const client of wsServer.clients) client.close(1001, 'server shutdown');
@@ -372,19 +372,22 @@ async function markXianyuAccountFailure(store: Store, adminId: string, accountId
   }
 }
 
-async function startConnectedListenersBestEffort(runtime: AppRuntime, adminId: string): Promise<void> {
+async function startRecoverableListenersBestEffort(runtime: AppRuntime, adminId: string): Promise<void> {
   try {
-    const connected = await runtime.accounts.list(adminId, { status: 'connected', page: 1, pageSize: 100 });
-    for (const account of connected.items) await startXianyuListenerBestEffort(runtime, adminId, account.id);
+    const accounts = await runtime.accounts.list(adminId, { page: 1, pageSize: 100 });
+    for (const account of accounts.items) {
+      if (account.status !== 'connected' && account.status !== 'degraded' && account.status !== 'disconnected') continue;
+      await startXianyuListenerBestEffort(runtime, adminId, account.id);
+    }
   } catch (error) {
     console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'account_scan_failed', adminId, errorCode: listenerErrorCode(error) }));
   }
 }
 
-async function startAllConnectedListenersBestEffort(runtime: AppRuntime): Promise<void> {
+async function startAllRecoverableListenersBestEffort(runtime: AppRuntime): Promise<void> {
   try {
     const adminIds = await runtime.store.listAdminIds();
-    for (const adminId of adminIds) await startConnectedListenersBestEffort(runtime, adminId);
+    for (const adminId of adminIds) await startRecoverableListenersBestEffort(runtime, adminId);
   } catch (error) {
     console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'admin_scan_failed', errorCode: listenerErrorCode(error) }));
   }
@@ -459,7 +462,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     const authContext = await auth.contextFromSession(ctx.cookies.session_id);
     if (!authContext) return { statusCode: 200, body: success(ctx, { authenticated: false, bootstrapRequired: await auth.getBootstrapRequired() }).body };
     setSessionCookies(response, authContext.csrfToken, authContext.session.id, config.cookieSecure);
-    if (config.xianyuQrMode === 'real') void startConnectedListenersBestEffort(runtime, authContext.admin.id);
+    if (config.xianyuQrMode === 'real') void startRecoverableListenersBestEffort(runtime, authContext.admin.id);
     return { statusCode: 200, body: success(ctx, { authenticated: true, bootstrapRequired: false, session: { id: authContext.session.id, expiresAt: authContext.session.expiresAt }, ...(await auth.sessionView(authContext)) }).body };
   }
   if (ctx.path === '/api/v1/auth/bootstrap' && ctx.method === 'POST') {
