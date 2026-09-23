@@ -93,8 +93,9 @@ try {
     occurredAt: '2026-09-20T10:00:03.000Z',
   });
   assert.equal(risky.created, true);
-  assert.equal(risky.autoReply?.run.decision, 'handoff');
-  assert.equal(risky.autoReply?.run.status, 'handoff');
+  assert.equal(risky.autoReply?.run.decision, 'replied');
+  assert.equal(risky.autoReply?.run.status, 'persisted');
+  assert.match(risky.autoReply?.outboundMessage?.bodyText ?? '', /无法提供/);
   assert.equal(realSendCalls, 0);
 
   console.log('auto reply smoke passed');

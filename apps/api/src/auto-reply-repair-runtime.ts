@@ -1,6 +1,6 @@
 import type { AutoReplyClassification, AutoReplyContext, AutoReplyGeneratedReply } from './auto-reply.js';
 import { AutoReplyRepairOrchestrator } from './auto-reply-repair-orchestrator.js';
-import { createDefaultAutoReplyRepairPolicy, type AutoReplyRepairMode, type AutoReplyRepairPolicyBundle } from './auto-reply-repair-config.js';
+import type { AutoReplyRepairMode, AutoReplyRepairPolicyBundle } from './auto-reply-repair-config.js';
 import { AutoReplyRepairRepository, type PersistedRepairArtifact, type PersistedRepairReviewEvent, type PersistedRepairReviewRecord } from './auto-reply-repair-repository.js';
 import { ConversationStateReducer } from './auto-reply-state.js';
 import { OutcomeReviewWorker, type OutcomeReviewWorkerOptions } from './auto-reply-outcome-review-worker.js';
@@ -58,11 +58,10 @@ export class AutoReplyRepairRuntime {
     this.repository = new AutoReplyRepairRepository(store);
   }
 
-  get enabled(): boolean { return this.mode !== 'off'; }
+  get enabled(): boolean { return true; }
   get currentMode(): AutoReplyRepairMode { return this.mode; }
 
   async routeInbound(input: Pick<AutoReplyRepairCandidateInput, 'conversation' | 'inboundMessage' | 'context' | 'classification'>): Promise<AutoReplyRepairRouteResult | undefined> {
-    if (this.mode === 'off') return undefined;
     const now = new Date();
     const bundle = await this.resolvePolicyBundle(input.conversation.accountId, now);
     if (!bundle) throw new Error('POLICY_CONFIG_UNAVAILABLE');
@@ -79,7 +78,6 @@ export class AutoReplyRepairRuntime {
   }
 
   async reviewCandidate(input: AutoReplyRepairCandidateInput): Promise<AutoReplyRepairCandidateResult | undefined> {
-    if (this.mode === 'off') return undefined;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         return await this.reviewCandidateOnce(input);
@@ -179,7 +177,7 @@ export class AutoReplyRepairRuntime {
       await this.store.appendAutoReplyRunEvent({
         runId: input.runId,
         accountId: input.conversation.accountId,
-        eventType: 'repair.shadow_reviewed',
+        eventType: 'repair.reviewed',
         stage: 'reply_generation',
         status: 'generated',
         traceId: input.traceId,
@@ -200,7 +198,7 @@ export class AutoReplyRepairRuntime {
         },
       });
     } catch {
-      // Shadow telemetry cannot break the legacy response path.
+      // Repair telemetry cannot break the response path.
     }
     return {
       mode: this.mode,
@@ -238,7 +236,7 @@ export class AutoReplyRepairRuntime {
   }
 
   async reconcileSendOutcome(input: { outcomeReviewId?: string; outcome: 'simulated' | 'known_success' | 'known_failure' | 'unknown'; externalMessageRef?: string }): Promise<void> {
-    if (!input.outcomeReviewId || this.mode === 'off') return;
+    if (!input.outcomeReviewId) return;
     const current = await this.repository.getReview(input.outcomeReviewId);
     if (!current || current.reviewType !== 'OUTCOME' || ['resolved', 'closed', 'review_failed'].includes(current.resolutionStatus)) return;
     const state = await this.repository.getConversationState(current.accountId, current.conversationId);
@@ -278,8 +276,7 @@ export class AutoReplyRepairRuntime {
   private async resolvePolicyBundle(accountId: string, now: Date): Promise<AutoReplyRepairPolicyBundle | undefined> {
     const provided = this.policyProvider ? await this.policyProvider(accountId, now) : undefined;
     if (provided) return provided;
-    if (this.mode === 'enforce') return undefined;
-    return createDefaultAutoReplyRepairPolicy(accountId, now);
+    return undefined;
   }
 
   private reviewArtifacts(args: { input: AutoReplyRepairCandidateInput; state: ConversationState; sourceEventId: string; sourceSequence: number; policyVersion: string; policyHash: string; result: Awaited<ReturnType<AutoReplyRepairOrchestrator['execute']>>; now: Date }): PersistedRepairArtifact[] {

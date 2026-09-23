@@ -234,3 +234,17 @@ AR-VS-00 三轮复审已执行，但阶段 0 门禁为 `BLOCKED`，不能标记 
 - AR-RA-021、AR-RA-023、AR-RA-018/019/020/022/024 的实现级与 PostgreSQL/定向回归证据已齐，可标记 `VERIFIED_FOR_ENFORCE` 或 `VERIFIED`。
 - 本轮可以进入 release candidate / 目标环境 canary 准备，但不能把本地与测试 PostgreSQL 证据表述为生产已上线。
 - 生产发布前唯一剩余阻断是目标环境证据：真实外部 sender、canary 停止阈值与 Owner、kill switch、迁移回滚/备份恢复及敏感红队回读。
+
+## 2026-09-23：删除旧主链路复审
+
+| 复核项 | 当前结论 | 证据 |
+| --- | --- | --- |
+| 默认开发装配 | PASS | `package.json` 的 `dev:api/dev:worker` 固定 `AUTO_REPLY_REPAIR_MODE=enforce`，启动日志输出 `repairMode=enforce`、`primaryRoute=repair` |
+| 旧模式入口 | PASS | `resolveAutoReplyRepairMode()` 拒绝 `off/shadow`；新增回归覆盖 `AUTO_REPLY_REPAIR_LEGACY_MODE_REMOVED` |
+| 旧主路由接管 | PASS | 非 repair runtime 不允许装配生产 `AutoReplyService`；enforce 下不再执行 legacy classifier/hardSafety handoff gate |
+| 全量验证 | PASS | `npm run typecheck`、`npm run build`、`npm test`、`git diff --check` 均通过 |
+
+### 复审结论
+
+- `off/shadow` 已从可运行配置和默认发布通道删除，旧主链路不再可启动。
+- 仅保留旧数据兼容读取与历史审计事件投影，不再保留旧链路作为回退执行路径。

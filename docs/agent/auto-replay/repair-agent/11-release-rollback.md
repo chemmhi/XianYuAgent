@@ -2,7 +2,7 @@
 
 ## 发布通道
 
-simulate → shadow → canary → controlled live
+simulate → canary → controlled live
 
 每一级都必须有停止条件、指标窗口、审计和回滚动作；未完成 Outcome Review、unknown/reconcile、澄清恢复和人工接管验证，不得开放 controlled live。
 
@@ -38,10 +38,10 @@ npm --workspace apps/api run test:auto-reply:release:smoke
 
 该 smoke 必须同时证明：required checks 全通过时 `READY`；canary stop condition 命中时 `BLOCKED`；stop metric 缺失时 fail-closed；kill switch 回滚到 `previousPolicyVersion`；sender outbox 以同一 `requestId` 幂等重放并通过 `recoverRun` 补齐本地 outbound message。该命令不能替代真实外部发送、生产 canary、线上告警或 migration rollback 演练。
 
-## AR-VS-08 shadow 回滚演练说明
+## AR-VS-08 enforce 回滚演练说明
 
-- 关闭方式：将 `AUTO_REPLY_REPAIR_MODE` 设为 `off` 并重启 API；legacy `AutoReplyService` 保持原发送与 legacy run/message 持久化，repair 三表保留历史记录供审计。
-- 失败隔离：`repair.shadow_failed` 只追加脱敏 run event；不得把 shadow 异常转换为 legacy 失败或触发第二次发送。
+- 关闭方式：保持 `AUTO_REPLY_REPAIR_MODE=enforce`，通过 PolicyConfig kill switch 或将 `AUTO_REPLY_SEND_MODE` 切换为 `simulate` 停止外部发送；不恢复旧主链路。
+- 失败隔离：`repair.failed` 只追加脱敏 run event；不得触发第二次发送。
 - 数据处理：不删除 `auto_reply_conversation_state`、`auto_reply_review_records`、`auto_reply_review_events`；回滚后禁止将 `review_pending` 直接改写为 `resolved`，后续由 review worker/reconcile 处理。
 - 当前已补：Outcome Review worker、外部 sender reconcile、outbox requestId 幂等和策略 kill switch smoke；仍未完成真实外部账号发送、目标环境 canary、线上告警 Owner、备份恢复和 migration rollback，因此发布门禁仍需目标环境证据。
 

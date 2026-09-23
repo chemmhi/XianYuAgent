@@ -36,7 +36,7 @@ const config = {
   autoReplyModelEnabled: true,
   autoReplySendMode: 'simulate',
   autoReplyTestBuyerNames: ['Auto Reply PostgreSQL Buyer'],
-  autoReplyRepairMode: 'shadow',
+  autoReplyRepairMode: 'enforce',
 };
 
 class FakeSocket {
@@ -119,7 +119,7 @@ try {
   assert.equal(result.autoReply?.context?.product?.id, product.id);
   assert.equal(result.autoReply?.outboundMessage?.source, 'ai');
   assert.equal(result.autoReply?.outboundMessage?.bodyText, '这是一个 PostgreSQL 买家推送回归测试商品，已确认可以正常回复。');
-  assert.equal(result.autoReply?.repair?.mode, 'shadow');
+  assert.equal(result.autoReply?.repair?.mode, 'enforce');
   assert.equal(result.autoReply?.repair?.resolutionStatus, 'review_pending');
   assert.ok(result.autoReply?.repair?.policyDecisionId);
   assert.equal(modelCall, 2);

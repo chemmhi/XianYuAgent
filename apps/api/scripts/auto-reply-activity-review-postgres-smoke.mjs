@@ -14,7 +14,7 @@ try {
     host: '127.0.0.1', port: 0, databaseUrl, redisUrl: '', cookieSecure: false, allowInMemory: false,
     sessionIdleMs: 1_800_000, sessionAbsoluteMs: 28_800_000, xianyuQrMode: 'stub',
     agentRuntime: 'in-process', modelTimeoutMs: 5_000, autoReplyModelEnabled: false,
-    autoReplySendMode: 'simulate', autoReplyTestBuyerNames: [], autoReplyRepairMode: 'shadow',
+    autoReplySendMode: 'simulate', autoReplyTestBuyerNames: [], autoReplyRepairMode: 'enforce',
     autoReplyOutcomeReviewWorkerEnabled: false, autoReplyOutcomeReviewWorkerPollMs: 1_000,
     autoReplyOutcomeReviewWorkerBatchSize: 10, autoReplyOutcomeReviewWorkerLeaseSeconds: 60,
     credentialEncryptionKey: 'activity-review-postgres-smoke', objectStorageEndpoint: 'http://127.0.0.1:19000',

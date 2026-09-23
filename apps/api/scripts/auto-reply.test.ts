@@ -505,6 +505,11 @@ test('auto-reply defaults to the repaired enforce chain', () => {
   assert.equal(config.autoReplyOutcomeReviewWorkerEnabled, true);
 });
 
+test('legacy repair modes are removed from app configuration', () => {
+  assert.throws(() => loadConfig({ AUTO_REPLY_REPAIR_MODE: 'shadow' }), /AUTO_REPLY_REPAIR_LEGACY_MODE_REMOVED/);
+  assert.throws(() => loadConfig({ AUTO_REPLY_REPAIR_MODE: 'off' }), /AUTO_REPLY_REPAIR_LEGACY_MODE_REMOVED/);
+});
+
 test('auto-reply model can be disabled without disabling Workspace model configuration', () => {
   const config = loadConfig({ API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'test-model', AUTO_REPLY_MODEL_ENABLED: 'false' });
   assert.equal(config.agentRuntime, 'pi');

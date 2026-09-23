@@ -47,8 +47,8 @@ export class AutoReplyActivityService {
     }
     return Promise.all(items.map(async (item) => {
       const events = existingEvents.get(item.id) ?? await this.store.listAutoReplyRunEvents(item.adminId, item.id);
-      const shadowEvent = [...events].reverse().find((event) => event.eventType === 'repair.shadow_reviewed');
-      return { ...item, ...projectAutoReplyRun(item, { reviews: reviewsByRun.get(item.id) ?? [], shadowEventPayload: shadowEvent?.payload }) };
+      const repairEvent = [...events].reverse().find((event) => event.eventType === 'repair.reviewed' || event.eventType === 'repair.shadow_reviewed');
+      return { ...item, ...projectAutoReplyRun(item, { reviews: reviewsByRun.get(item.id) ?? [], shadowEventPayload: repairEvent?.payload }) };
     }));
   }
 

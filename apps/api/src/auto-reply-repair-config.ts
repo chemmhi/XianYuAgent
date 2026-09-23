@@ -1,14 +1,15 @@
 import { AUTO_REPLY_ACTION_KINDS, type ActionKind, type AutoReplyRepairPolicyBundle, type PolicyConfig } from './domain.js';
 import { validatePolicyConfig, withComputedPolicyHash } from './auto-reply-policy.js';
 
-export type AutoReplyRepairMode = 'off' | 'shadow' | 'enforce';
+export type AutoReplyRepairMode = 'enforce';
 export const DEFAULT_AUTO_REPLY_REPAIR_POLICY_EFFECTIVE_FROM = '2026-09-23T00:00:00.000Z';
 
 export type { AutoReplyRepairPolicyBundle } from './domain.js';
 
 export function resolveAutoReplyRepairMode(value: string | undefined): AutoReplyRepairMode {
   const normalized = value?.trim().toLowerCase();
-  return normalized === 'enforce' ? 'enforce' : normalized === 'shadow' ? 'shadow' : 'off';
+  if (normalized && normalized !== 'enforce') throw new Error('AUTO_REPLY_REPAIR_LEGACY_MODE_REMOVED');
+  return 'enforce';
 }
 
 export function parseAutoReplyRepairPolicyBundle(value: string | undefined, accountScope: string): AutoReplyRepairPolicyBundle | undefined {

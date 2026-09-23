@@ -24,12 +24,12 @@ function testConfig() {
     AGENT_RUNTIME: 'in-process',
     AUTO_REPLY_MODEL_ENABLED: 'false',
     AUTO_REPLY_SEND_MODE: 'simulate',
-    AUTO_REPLY_REPAIR_MODE: 'shadow',
+    AUTO_REPLY_REPAIR_MODE: 'enforce',
     AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
   });
 }
 
-test('AR-VS-08 shadow runtime is wired into the buyer entry path and is idempotent', async () => {
+test('AR-VS-08 repaired runtime is wired into the buyer entry path and is idempotent', async () => {
   const runtime = createApp(testConfig());
   await runtime.listen();
   try {
@@ -42,12 +42,12 @@ test('AR-VS-08 shadow runtime is wired into the buyer entry path and is idempote
 
     const first = await runtime.autoReply.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: inbound.message.id, requestId: 'ar-vs08-runtime-request', traceId: 'ar-vs08-runtime-trace' });
     assert.equal(first.run.status, 'persisted');
-    assert.equal(first.repair?.mode, 'shadow');
+    assert.equal(first.repair?.mode, 'enforce');
     assert.ok(first.repair?.policyDecisionId);
     assert.equal(first.repair?.primaryAction, 'ANSWER_FACT');
     assert.equal(first.repair?.stateVersion, 1);
     assert.equal(first.repair?.resolutionStatus, 'review_pending');
-    assert.equal(runtime.autoReplyRepair.currentMode, 'shadow');
+    assert.equal(runtime.autoReplyRepair.currentMode, 'enforce');
 
     const reviews = await runtime.autoReplyRepair.listReviews(account.id, conversation.id);
     assert.deepEqual(reviews.map((item) => item.reviewType), ['PRE_SEND', 'OUTCOME']);

@@ -14,7 +14,7 @@ const worker = new InboundInboxWorker(runtime.store, runtime.xianyuIm, {
   maxAttempts: Number(process.env.INBOUND_INBOX_MAX_ATTEMPTS ?? 5),
 });
 const outcomeReviewWorkerId = `outcome-review:${process.pid}:${crypto.randomUUID()}`;
-const outcomeReviewWorker = config.autoReplyOutcomeReviewWorkerEnabled && runtime.autoReplyRepair.currentMode !== 'off'
+const outcomeReviewWorker = config.autoReplyOutcomeReviewWorkerEnabled
   ? runtime.autoReplyRepair.createOutcomeReviewWorker({
       workerId: outcomeReviewWorkerId,
       batchSize: config.autoReplyOutcomeReviewWorkerBatchSize,

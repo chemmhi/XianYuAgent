@@ -151,15 +151,11 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     return auditId;
   });
   const autoReplyActivity = new AutoReplyActivityService(store);
-  const autoReplyRepairMode = config.autoReplyRepairMode ?? 'enforce';
-  if (!config.allowInMemory && autoReplyRepairMode !== 'enforce') {
-    throw new Error('AUTO_REPLY_REPAIR_ENFORCE_REQUIRED');
-  }
+  const autoReplyRepairMode = 'enforce' as const;
   const autoReplyRepair = new AutoReplyRepairRuntime(store, autoReplyRepairMode, async (accountId, now) => {
     const persisted = await store.getActiveAutoReplyRepairPolicy(accountId, now.toISOString());
     if (persisted) return persisted;
-    if (autoReplyRepairMode === 'enforce' && !config.allowInMemory) return undefined;
-    if (autoReplyRepairMode === 'enforce') return createDefaultAutoReplyRepairPolicy(accountId, now);
+    if (config.allowInMemory) return createDefaultAutoReplyRepairPolicy(accountId, now);
     return parseAutoReplyRepairPolicyBundle(config.autoReplyPolicyJson, accountId);
   });
   const autoReply = new AutoReplyService(store, messages, async (input) => {
@@ -207,6 +203,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       return xianyuIm.sendExternalText(input.adminId, input.accountId, input.conversation.id, input.text, input.requestId, input.traceId);
     }),
     repairRuntime: autoReplyRepair,
+    requireRepairRuntime: true,
   });
   let productSync: ProductSyncService;
   const qrLogin = new XianyuQrLoginAdapter({

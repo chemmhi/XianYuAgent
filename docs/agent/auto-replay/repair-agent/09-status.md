@@ -5,6 +5,7 @@
 - 阶段状态：IN_PROGRESS
 - 当前门禁：AR-VS-08 enforce 主入口、统一 primary route、账号级 ACTIVE PolicyConfig、Outcome Review、Activity 回读和 sender outbox/reconcile 均已完成切片级验证；当前为 READY_FOR_RELEASE_CANDIDATE。生产 live/canary、真实领域 evidence、线上告警 Owner、迁移回滚与备份恢复仍为目标环境发布前置，不能据此宣称生产已上线
 - 人工审核策略：后续人工审核节点默认批准继续；该默认不替代自动化测试、真实回读和发布门禁
+- 开发环境默认：`npm run dev` 强制使用 `AUTO_REPLY_REPAIR_MODE=enforce` 与 Outcome Review worker；`off/shadow` 已从可运行配置删除，旧主链路不再可装配，仅保留历史数据兼容读取。
 
 ## 已完成
 
@@ -16,7 +17,7 @@
 - AR-VS-05：话题拉回、目标切换、情绪门控和评价/推荐抑制已实现，禁止该切片直接 handoff/refuse。
 - AR-VS-06：推荐资格、同账号/库存/新鲜度、偏好排序、冷却和最多 1–3 个候选已实现。
 - AR-VS-07：Outcome Review claim/lease、证据优先级、退避、死信、CAS、reopen 和 resolved→closed 门禁已实现。
-- AR-VS-08：Policy→Pre-send→Send→review_pending→Outcome Review 编排、031/032/033 增量迁移、Memory/PostgreSQL repository、默认 worker 生命周期、Activity review 读模型、sender outbox/reconcile、enforce PostgreSQL 完整链路和统一 primary route 已接入；legacy 仅保留 shadow/off 兼容路径，不参与 enforce primary route。
+- AR-VS-08：Policy→Pre-send→Send→review_pending→Outcome Review 编排、031/032/033 增量迁移、Memory/PostgreSQL repository、默认 worker 生命周期、Activity review 读模型、sender outbox/reconcile、enforce PostgreSQL 完整链路和统一 primary route 已接入；旧主链路已从运行时装配移除。
 - AR-VS-09：配置化 canary、stop condition、缺失指标 fail-closed、kill switch 回滚、outbox 幂等恢复和交接门禁已实现，并有发布前 smoke 证据。
 - AR-RA-023：账号级 ACTIVE PolicyConfig 注册表、hash/account scope 校验、CAS 发布与历史回滚已实现；enforce 缺失 ACTIVE 时 fail-closed。
 - 自动回复单测：141/141 通过；API typecheck/build、E2E、PostgreSQL 主链路、PolicyConfig registry smoke 和 release smoke 均通过。

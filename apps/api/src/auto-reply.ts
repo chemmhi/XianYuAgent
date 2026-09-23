@@ -146,6 +146,8 @@ export interface AutoReplyServiceOptions {
   generator?: AutoReplyGenerator;
   sender?: AutoReplySender;
   repairRuntime?: AutoReplyRepairRuntime;
+  /** Production/runtime wiring must provide the repaired route explicitly. */
+  requireRepairRuntime?: boolean;
   godView?: AutoReplyGodViewSink;
   configProvider?: (adminId: string, accountId: string) => Promise<AutoReplyServiceRuntimeOptions>;
 }
@@ -175,6 +177,7 @@ export class AutoReplyService {
   private readonly generator: AutoReplyGenerator;
   private readonly sender: AutoReplySender;
   private readonly repairRuntime?: AutoReplyRepairRuntime;
+  private readonly requireRepairRuntime: boolean;
   private readonly godView?: AutoReplyGodViewSink;
   private readonly configProvider?: (adminId: string, accountId: string) => Promise<AutoReplyServiceRuntimeOptions>;
   private readonly lastAcceptedAt = new Map<string, number>();
@@ -197,6 +200,10 @@ export class AutoReplyService {
     this.generator = options.generator ?? new TemplateAutoReplyGenerator();
     this.sender = options.sender ?? new NoopAutoReplySender();
     this.repairRuntime = options.repairRuntime;
+    this.requireRepairRuntime = options.requireRepairRuntime === true;
+    if (this.requireRepairRuntime && (!this.repairRuntime || this.repairRuntime.currentMode !== 'enforce')) {
+      throw new Error('AUTO_REPLY_REPAIR_RUNTIME_REQUIRED');
+    }
     this.godView = options.godView;
     this.configProvider = options.configProvider;
   }
@@ -393,17 +400,16 @@ export class AutoReplyService {
         }
       }
 
-      const repairOwnsRoute = this.repairRuntime?.currentMode === 'enforce' && Boolean(repairRoute);
+      const repairOwnsRoute = Boolean(repairRoute);
       const repairRefusal = repairOwnsRoute && repairRoute?.primaryAction === 'REFUSE_SENSITIVE';
       const repairHandoff = repairOwnsRoute && repairRoute?.primaryAction === 'HANDOFF';
-      const legacyHandoff = modelDecidesRouting ? hardSafety : classification.decision === 'handoff';
       if (repairRoute?.safetyHandling === 'PARTIAL_REFUSAL' && classification.intent === 'credential_request') {
         const safeClassification = this.classifier.classify(stripSensitiveTerms(inboundMessage.bodyText ?? ''));
         if (safeClassification.intent !== 'credential_request' && safeClassification.intent !== 'other') {
           classification = { ...classification, intent: safeClassification.intent, confidence: safeClassification.confidence, decision: 'replied', riskFlags: [...classification.riskFlags, 'sensitive_partial'] };
         }
       }
-      if (conversation.handlingMode === 'human' || (!repairOwnsRoute && legacyHandoff) || repairHandoff) {
+      if (conversation.handlingMode === 'human' || repairHandoff) {
         const riskFlags = [...classification.riskFlags, ...(conversation.handlingMode === 'human' ? ['human_mode'] : [])];
         const reason = conversation.handlingMode === 'human' ? 'human_mode' : repairHandoff ? 'repair_policy_handoff' : hardSafety ? 'safety_gate' : 'classifier_handoff';
         const updated = await updateRun({ status: 'handoff', decision: 'handoff', riskFlags, eventPayload: {
@@ -467,7 +473,7 @@ export class AutoReplyService {
             await this.store.appendAutoReplyRunEvent({
               runId: run.id,
               accountId: conversation.accountId,
-              eventType: 'repair.shadow_failed',
+              eventType: 'repair.failed',
               stage: 'reply_generation',
               status: run.status,
               traceId,
@@ -477,7 +483,7 @@ export class AutoReplyService {
               },
             });
           } catch {
-            // A repair telemetry failure must never break the legacy send path.
+            // A repair telemetry failure must never break the response path.
           }
           if (this.repairRuntime.currentMode === 'enforce') throw error;
         }

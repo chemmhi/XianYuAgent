@@ -65,7 +65,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const modelWireApi = normalizeWireApi(firstDefined(env.WIRE_API, env.MODEL_WIRE_API));
   const autoReplySendMode: AutoReplySendMode = env.AUTO_REPLY_SEND_MODE?.trim().toLowerCase() === 'live' ? 'live' : 'simulate';
   const autoReplyRepairMode = resolveAutoReplyRepairMode(env.AUTO_REPLY_REPAIR_MODE);
-  const autoReplyOutcomeReviewWorkerEnabled = asBoolean(env.AUTO_REPLY_OUTCOME_REVIEW_WORKER_ENABLED, autoReplyRepairMode !== 'off');
+  const autoReplyOutcomeReviewWorkerEnabled = asBoolean(env.AUTO_REPLY_OUTCOME_REVIEW_WORKER_ENABLED, true);
   const autoReplyTestBuyerNames = parseBuyerNames(env.AUTO_REPLY_TEST_BUYER_NAMES);
   const autoReplyAgent = resolveAutoReplyAgentConfig(env);
   const productAutomationLive = resolveProductAutomationLiveConfig(env);
