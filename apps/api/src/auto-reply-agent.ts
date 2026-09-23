@@ -5,6 +5,7 @@ import { buildAutoReplyModelContent } from './auto-reply-multimodal.js';
 import { parseAutoReplyModelDecision, parseJsonObject } from './auto-reply-output.js';
 import { digestJson } from './security.js';
 import type { ModelClient, ModelCompletionResult, ModelMessage, ModelToolCall, ModelToolDefinition } from './pi-runtime.js';
+import type { AutoReplyGodViewSink } from './auto-reply-god-view.js';
 
 export const AUTO_REPLY_TOOL_NAMES = [
   'get_buyer_conversations',
@@ -42,6 +43,7 @@ export interface AutoReplyAgentTrace {
 export interface ToolCallingAutoReplyAgentOptions {
   configProvider?: (adminId: string, accountId: string) => Promise<AutoReplyAgentConfig | undefined>;
   onTrace?: (trace: AutoReplyAgentTrace) => void | Promise<void>;
+  godView?: AutoReplyGodViewSink;
 }
 
 export const AUTO_REPLY_AGENT_TOOLS: ModelToolDefinition[] = [
@@ -93,7 +95,7 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
     this.config = config;
   }
 
-  async generate(input: { adminId?: string; context: AutoReplyContext; classification: AutoReplyClassification; observe?: AutoReplyGeneratorObserver }): Promise<string | AutoReplyGeneratedReply | undefined> {
+  async generate(input: { adminId?: string; context: AutoReplyContext; classification: AutoReplyClassification; observe?: AutoReplyGeneratorObserver; runId?: string; traceId?: string }): Promise<string | AutoReplyGeneratedReply | undefined> {
     if (!input.adminId) throw new AutoReplyAgentError('AGENT_ADMIN_REQUIRED');
     const config = await this.options.configProvider?.(input.adminId, input.context.conversation.accountId) ?? this.config;
     const outputContract = [
@@ -112,6 +114,24 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
         ),
       },
     ];
+    await this.options.godView?.emit({
+      phase: 'run',
+      event: 'agent.started',
+      traceId: input.traceId,
+      runId: input.runId,
+      buyer: buyerIdentity(input.context),
+      payload: {
+        classification: input.classification,
+        config: {
+          digest: config.digest,
+          maxLoops: config.maxLoops,
+          maxToolCalls: config.maxToolCalls,
+          maxToolResultChars: config.maxToolResultChars,
+          toolTimeoutMs: config.toolTimeoutMs,
+          maxReplyLength: config.maxReplyLength,
+        },
+      },
+    });
     const trace: AutoReplyAgentTrace = { loops: 0, toolCalls: 0, tools: [], configDigest: config.digest };
     const seenCalls = new Set<string>();
 
@@ -124,9 +144,25 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
         log: { phase: 'model', state: 'started', message: `开始第 ${loop} 轮模型决策`, loop },
       });
       let result: ModelCompletionResult;
+      await this.options.godView?.emit({
+        phase: 'model',
+        event: 'model.request',
+        traceId: input.traceId,
+        runId: input.runId,
+        buyer: buyerIdentity(input.context),
+        payload: { loop, messages, tools: AUTO_REPLY_AGENT_TOOLS, toolChoice: 'auto' },
+      });
       try {
         result = await this.client.complete({ messages, tools: AUTO_REPLY_AGENT_TOOLS, toolChoice: 'auto' });
       } catch (error) {
+        await this.options.godView?.emit({
+          phase: 'model',
+          event: 'model.error',
+          traceId: input.traceId,
+          runId: input.runId,
+          buyer: buyerIdentity(input.context),
+          payload: { loop, durationMs: Date.now() - modelStartedAt, errorCode: safeErrorCode(error) },
+        });
         await observe(input.observe, {
           eventType: 'agent.model.failed',
           stage: 'reply_generation',
@@ -136,6 +172,21 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
         throw error;
       }
       const toolCalls = result.toolCalls ?? [];
+      await this.options.godView?.emit({
+        phase: 'model',
+        event: 'model.response',
+        traceId: input.traceId,
+        runId: input.runId,
+        buyer: buyerIdentity(input.context),
+        payload: {
+          loop,
+          model: result.model,
+          durationMs: Date.now() - modelStartedAt,
+          content: result.content ?? '',
+          toolCalls,
+          usage: result.usage,
+        },
+      });
       await observe(input.observe, {
         eventType: 'agent.model.completed',
         stage: 'reply_generation',
@@ -162,6 +213,14 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
           trace.toolCalls += 1;
           trace.tools.push(parsed.name);
           const toolStartedAt = Date.now();
+          await this.options.godView?.emit({
+            phase: 'tool',
+            event: 'tool.request',
+            traceId: input.traceId,
+            runId: input.runId,
+            buyer: buyerIdentity(input.context),
+            payload: { loop, toolCallIndex: trace.toolCalls, tool: parsed.name, arguments: parsed.arguments },
+          });
           await observe(input.observe, {
             eventType: 'agent.tool.started',
             stage: 'context_read',
@@ -171,6 +230,14 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
           try {
             toolResult = await withTimeout(this.executeTool(parsed.name, parsed.arguments, input.adminId, input.context, config), config.toolTimeoutMs);
           } catch (error) {
+            await this.options.godView?.emit({
+              phase: 'tool',
+              event: 'tool.error',
+              traceId: input.traceId,
+              runId: input.runId,
+              buyer: buyerIdentity(input.context),
+              payload: { loop, toolCallIndex: trace.toolCalls, tool: parsed.name, durationMs: Date.now() - toolStartedAt, errorCode: safeErrorCode(error) },
+            });
             await observe(input.observe, {
               eventType: 'agent.tool.failed',
               stage: 'context_read',
@@ -184,6 +251,14 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
             stage: 'context_read',
             log: { phase: 'tool', state: 'completed', message: `${toolMessage(parsed.name)}完成`, tool: parsed.name, loop, toolCallIndex: trace.toolCalls, result: summarizeToolResult(parsed.name, toolResult) },
             durationMs: Date.now() - toolStartedAt,
+          });
+          await this.options.godView?.emit({
+            phase: 'tool',
+            event: 'tool.response',
+            traceId: input.traceId,
+            runId: input.runId,
+            buyer: buyerIdentity(input.context),
+            payload: { loop, toolCallIndex: trace.toolCalls, tool: parsed.name, durationMs: Date.now() - toolStartedAt, result: toolResult },
           });
           messages.push({ role: 'tool', name: parsed.name, toolCallId: call.id, content: limitText(JSON.stringify(toolResult), config.maxToolResultChars) });
         }
@@ -209,6 +284,14 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
           configDigest: trace.configDigest,
           ...(decision.decision === 'reply' ? { replyLength: decision.reply.text.length, segmentCount: decision.reply.segments?.length ?? 1 } : { reasonCode: safeReasonCode(decision.reason) }),
         },
+      });
+      await this.options.godView?.emit({
+        phase: 'run',
+        event: 'agent.decision',
+        traceId: input.traceId,
+        runId: input.runId,
+        buyer: buyerIdentity(input.context),
+        payload: { loop, rawOutput: content, decision },
       });
       if (decision.decision === 'handoff') throw new AutoReplyAgentHandoffError(decision.reason);
       await this.options.onTrace?.(trace);
@@ -368,6 +451,22 @@ function safeMessage(message: MessageRecord): Record<string, unknown> {
 async function observe(observer: AutoReplyGeneratorObserver | undefined, observation: AutoReplyGeneratorObservation): Promise<void> {
   if (!observer) return;
   await observer(observation);
+}
+
+function buyerIdentity(context: AutoReplyContext): {
+  accountId: string;
+  conversationId: string;
+  buyerRef: string;
+  buyerName?: string;
+  externalConversationRef?: string;
+} {
+  return {
+    accountId: context.conversation.accountId,
+    conversationId: context.conversation.id,
+    buyerRef: context.conversation.buyerRef,
+    buyerName: context.conversation.buyerDisplayName,
+    externalConversationRef: context.conversation.externalConversationRef,
+  };
 }
 
 function safeErrorCode(error: unknown): string {

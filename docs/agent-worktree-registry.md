@@ -142,6 +142,8 @@
 | `root/implement_whitelist_gate` | `product-automation-live-gate` | `codex/product-automation-live-gate` | `F:\ChenHai\Project\XianYuAgent-product-automation-live-gate` | Codex `/root/implement_whitelist_gate` delegated agent | `2026-09-23 00:00:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 外部执行器接入前置安全闸门：live 模式、确认开关、商品标题白名单配置与非白名单零副作用测试。 |
 | `root/implement_coupon_reservations` | `product-automation-coupon-reservations` | `codex/product-automation-coupon-reservations` | `F:\ChenHai\Project\XianYuAgent-product-automation-coupon-reservations` | Codex `/root` delegated agent | `2026-09-23 09:23:02 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 卡券 reservation reserve/commit/release 存储、迁移与并发/幂等/过期测试；基于 4071eea，独立 worktree。 |
 
+| `root` | `auto-reply-monitor-20260923` | `codex/auto-reply-monitor-20260923` | `F:\ChenHai\Project\XianYuAgent-auto-reply-monitor-20260923` | Codex `/root` | `2026-09-23 13:28:47 +08:00` | `READY_FOR_MERGE` | `-` | `-` | 新增根目录自动回复上帝视角监控命令、运行时 trace tap 与真实验证；API build、自动回复 unit 144/144、god-view 定向测试、Node CLI smoke、diff-check 通过。 |
+
 ## 登记维护规则
 
 | `root` | `dashboard-home-refresh` | `codex/dashboard-home-refresh` | `F:\ChenHai\Project\XianYuAgent-dashboard-home-refresh` | Codex `/root` | `2026-09-22 00:00:00 +08:00` | `MERGED` | `c86ee9e` / `5d8bba9` | `-` | 仪表盘首页布局、趋势时间筛选与指标卡片调整；已在 merge lock 内以 `--no-ff` 合入 main。主线 Dashboard API 单测、Web 定向回归、typecheck、构建与 Chrome/CDP E2E 均通过；保留 worktree 供审计。 |
