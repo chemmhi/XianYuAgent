@@ -59,7 +59,7 @@ export const AUTO_REPLY_AGENT_TOOLS: ModelToolDefinition[] = [
     type: 'function',
     function: {
       name: 'get_product_info',
-      description: '读取当前卖家账号下指定商品的公开信息。未传商品引用时使用当前会话商品。',
+      description: '读取当前卖家账号下指定商品的关键摘要（标题、描述、价格、AI提示词/知识库、回复模板、浏览/想要/收藏等公开指标、状态和更新时间），不返回完整商品记录。未传商品引用时使用当前会话商品。',
       parameters: { type: 'object', properties: { productRef: { type: 'string', maxLength: 120 } }, additionalProperties: false },
     },
   },
@@ -75,7 +75,7 @@ export const AUTO_REPLY_AGENT_TOOLS: ModelToolDefinition[] = [
     type: 'function',
     function: {
       name: 'list_shop_products',
-      description: '搜索当前卖家店铺的商品摘要，用于相似商品或替代商品推荐。',
+      description: '搜索当前卖家店铺的商品关键摘要（标题、描述、价格、AI提示词/知识库、回复模板、浏览/想要/收藏等公开指标、状态和更新时间），用于相似商品或替代商品推荐；不返回完整商品记录。',
       parameters: { type: 'object', properties: { keyword: { type: 'string', maxLength: 120 }, limit: { type: 'integer', minimum: 1, maximum: 20 } }, additionalProperties: false },
     },
   },
@@ -518,8 +518,44 @@ function summarizeToolResult(name: AutoReplyToolName, result: Record<string, unk
   }
 }
 
-function safeProduct(product: Pick<ProductRecord, 'id' | 'accountId' | 'externalProductRef' | 'title' | 'description' | 'defaultReplyTemplate' | 'priceMinor' | 'status' | 'updatedAt'>): Record<string, unknown> {
-  return { id: product.id, externalProductRef: product.externalProductRef, title: trimField(product.title, 500), description: trimField(product.description, 2_000), priceMinor: product.priceMinor, status: product.status, updatedAt: product.updatedAt, defaultReplyTemplate: trimField(product.defaultReplyTemplate, 500) };
+function safeProduct(product: Pick<ProductRecord, 'id' | 'externalProductRef' | 'title' | 'description' | 'defaultReplyTemplate' | 'aiPrompt' | 'priceMinor' | 'status' | 'updatedAt' | 'attributes'>): Record<string, unknown> {
+  // Keep the tool contract intentionally narrow: the model needs customer-facing
+  // facts and seller guidance, not the persisted product row, attributes, assets,
+  // SKU details, or account-scoped implementation metadata.
+  return {
+    id: product.id,
+    externalProductRef: product.externalProductRef,
+    title: trimField(product.title, 500),
+    description: trimField(product.description, 2_000),
+    priceMinor: product.priceMinor,
+    aiPrompt: trimField(product.aiPrompt, 2_000),
+    defaultReplyTemplate: trimField(product.defaultReplyTemplate, 500),
+    ...safeProductEngagement(product.attributes),
+    status: product.status,
+    updatedAt: product.updatedAt,
+  };
+}
+
+function safeProductEngagement(attributes: ProductRecord['attributes'] | undefined): Record<string, number> {
+  const xianyu = asRecord(attributes?.xianyu);
+  const detail = asRecord(xianyu.detail);
+  const summary = asRecord(detail.summary);
+  const fields = ['browseCount', 'wantCount', 'collectCount', 'favoriteCount', 'interactFavoriteCount', 'soldCount', 'quantity'] as const;
+  const result: Record<string, number> = {};
+  for (const field of fields) {
+    const value = nonNegativeInteger(summary[field]);
+    if (value !== undefined) result[field] = value;
+  }
+  return result;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function nonNegativeInteger(value: unknown): number | undefined {
+  const numeric = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : Number.NaN;
+  return Number.isFinite(numeric) && numeric >= 0 ? Math.trunc(numeric) : undefined;
 }
 
 function safeOrder(order: OrderRecord): Record<string, unknown> {

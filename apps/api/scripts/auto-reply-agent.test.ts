@@ -70,7 +70,7 @@ test('agent chooses product tool then returns final answer', async () => {
       return { content: replyPayload('这是一个数字资料包，页面显示价格为 19.99 元。'), model: 'test' };
     },
   };
-  const product = { id: 'product-1', accountId: 'account-1', externalProductRef: 'item-1', title: '资料包', description: '数字资料', defaultReplyTemplate: undefined, aiPrompt: undefined, priceMinor: 1_999, status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' };
+  const product = { id: 'product-1', accountId: 'account-1', externalProductRef: 'item-1', title: '资料包', description: '数字资料', defaultReplyTemplate: '付款后发送下载说明。', aiPrompt: '知识库：只回答商品适用范围和使用方式。', attributes: { internalOnly: 'do-not-expose', xianyu: { detail: { summary: { browseCount: 321, wantCount: 33, collectCount: 8, favoriteCount: 2, interactFavoriteCount: 1, soldCount: 45, quantity: 9, rawResponse: { shouldNotExpose: true } } } } }, priceMinor: 1_999, status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' };
   const store = { getProduct: async () => product, listProducts: async () => ({ items: [product], page: 1, pageSize: 100, total: 1, totalPages: 1 }) } as unknown as Store;
   const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}));
   const reply = await agent.generate({ adminId: 'admin-1', context: context(), classification });
@@ -78,7 +78,27 @@ test('agent chooses product tool then returns final answer', async () => {
   assert.equal(requests.length, 2);
   assert.equal(requests[0]?.tools?.length, AUTO_REPLY_AGENT_TOOLS.length);
   assert.equal(requests[1]?.messages.at(-1)?.role, 'tool');
-  assert.match(contentText(requests[1]?.messages.at(-1)?.content), /资料包/);
+  const productPayload = JSON.parse(contentText(requests[1]?.messages.at(-1)?.content)) as { product?: Record<string, unknown> };
+  assert.deepEqual(productPayload.product, {
+    id: 'product-1',
+    externalProductRef: 'item-1',
+    title: '资料包',
+    description: '数字资料',
+    priceMinor: 1_999,
+    aiPrompt: '知识库：只回答商品适用范围和使用方式。',
+    defaultReplyTemplate: '付款后发送下载说明。',
+    browseCount: 321,
+    wantCount: 33,
+    collectCount: 8,
+    favoriteCount: 2,
+    interactFavoriteCount: 1,
+    soldCount: 45,
+    quantity: 9,
+    status: 'published',
+    updatedAt: '2026-09-21T00:00:00.000Z',
+  });
+  assert.equal('attributes' in (productPayload.product ?? {}), false);
+  assert.equal('accountId' in (productPayload.product ?? {}), false);
 });
 
 test('agent emits high-level redacted observations for model, tool, and final decision', async () => {
@@ -299,7 +319,7 @@ test('shop product tool searches keyword, paginates, limits results, and exclude
     {
       items: [
         { id: 'foreign-product', accountId: 'account-2', externalProductRef: 'foreign-earbuds', title: '其他账号耳机', status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' },
-        { id: 'earbuds-a', accountId: 'account-1', externalProductRef: 'earbuds-a', title: '蓝牙耳机 A', status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' },
+        { id: 'earbuds-a', accountId: 'account-1', externalProductRef: 'earbuds-a', title: '蓝牙耳机 A', description: '降噪耳机', priceMinor: 12900, aiPrompt: '知识库：支持主动降噪问答。', defaultReplyTemplate: '现货当天发出。', attributes: { internalOnly: 'do-not-expose', xianyu: { detail: { summary: { browseCount: 888, wantCount: 66, collectCount: 12, favoriteCount: 4 } } } }, status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' },
       ],
       page: 1,
       pageSize: 100,
@@ -307,7 +327,7 @@ test('shop product tool searches keyword, paginates, limits results, and exclude
       totalPages: 2,
     },
     {
-      items: [{ id: 'earbuds-b', accountId: 'account-1', externalProductRef: 'earbuds-b', title: '蓝牙耳机 B', status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' }],
+      items: [{ id: 'earbuds-b', accountId: 'account-1', externalProductRef: 'earbuds-b', title: '蓝牙耳机 B', description: '开放式耳机', priceMinor: 9900, aiPrompt: '知识库：说明佩戴方式。', defaultReplyTemplate: '下单后自动发货。', status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' }],
       page: 2,
       pageSize: 100,
       total: 2,
@@ -341,6 +361,23 @@ test('shop product tool searches keyword, paginates, limits results, and exclude
   assert.equal(payload.total, 2);
   assert.deepEqual(payload.products.map((product) => product.id), ['earbuds-a', 'earbuds-b']);
   assert.equal(payload.products.some((product) => product.id === 'foreign-product'), false);
+  assert.deepEqual(payload.products[0], {
+    id: 'earbuds-a',
+    externalProductRef: 'earbuds-a',
+    title: '蓝牙耳机 A',
+    description: '降噪耳机',
+    priceMinor: 12900,
+    aiPrompt: '知识库：支持主动降噪问答。',
+    defaultReplyTemplate: '现货当天发出。',
+    browseCount: 888,
+    wantCount: 66,
+    collectCount: 12,
+    favoriteCount: 4,
+    status: 'published',
+    updatedAt: '2026-09-21T00:00:00.000Z',
+  });
+  assert.equal('attributes' in (payload.products[0] ?? {}), false);
+  assert.equal('accountId' in (payload.products[0] ?? {}), false);
 });
 
 test('insufficient product facts return not-found and hand off instead of guessing', async () => {
