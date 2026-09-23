@@ -215,3 +215,4 @@
 | S5-RISK-038 | 真实闲鱼 MTOP/IM 发卡、确认发货、改价和发消息执行适配器尚未接入；生产运行时始终保持 `readiness=blocked`，核心外部动作不会执行 | P1 | 复用旧项目已验证的 MTOP/IM 请求契约，先补真实适配器、凭证恢复、unknown/timeout 恢复和外部沙箱证据，再将 readiness 从 blocked 切为 ready | OPEN |
 | S5-RISK-039 | 设计稿与实现截图的严格 pixel diff 仍有 14.39%–25.57% 不同像素，主要集中在字体抗锯齿、表格列宽和文案基线 | P2 | 继续以固定 1440×900 / 390×844 运行 Chrome/CDP，对每个状态单独修复几何和字体偏差；未达到批准阈值前保持视觉验收失败 | OPEN |
 | S5-RISK-040 | `npm --workspace apps/api run test` 的订单 Cookie smoke，以及 Web 全量测试中的 Workspace/Dashboard 契约测试曾失败 | P2 | 已补 `_m_h5_tk` 前缀兼容、Dashboard provider 测试夹具和 Workspace CSS 断言归一化；API 全量与 Web 83 files / 279 tests 已复跑通过 | CLOSED |
+| S5-RISK-041 | 卖家风格提示词优化的真实 PostgreSQL + 模型 provider 端到端尚未在带凭证环境执行 | P2 | 使用隔离测试数据库和可控模型 provider 执行完整清洗 → 抽样 → 逐题生成 → 评分 → 修订 → 追踪落盘链路，并保留 98 分门禁证据 | OPEN |

@@ -211,6 +211,14 @@
 2. `VITE_DASHBOARD_MODE=mock` 仅用于受控 fixture / 视觉测试；mock E2E 必须断言 `Mock API` 且不发起 Dashboard snapshot 请求，避免把 fixture 结果误认为真实链路。
 3. 修复已通过独立 worktree `fix/dashboard-live-default` 提交 `4d634ed`，并在 merge lock 内以 `6522286` 合入 `master`；默认 live fullchain 与显式 mock E2E 均通过。
 
+## 2026-09-23 卖家风格提示词优化命令与追踪决策
+
+1. canonical CLI 命令统一为 `optimize:seller-style-prompt`，旧 `extract:seller-persona` 命令及对应脚本文件名不再保留，避免继续暗示“抽象为分身”的旧流程。
+2. 优化器直接从脱敏聊天记录生成风格提示词；每轮随机抽取至少 10 个不同真实会话，调用模型生成回答并按 tone、address、particles、rhythm、sentenceLength、structure、emotion、directness、habits、naturalness 十个维度评分。
+3. 每轮追踪必须落盘提示词版本、问题集、AI/人工回答、逐题评分、维度汇总、修订反馈和最终状态；历史问题/回答只能出现在审计追踪中，禁止进入最终提示词正文。
+4. 只有综合相似度达到 98 分才生成 `seller-style-prompt.txt`；未达阈值时只生成 `seller-style-prompt-candidate.txt` 并以失败状态退出。
+5. 合并提交：`58473ff`；主线定向测试 15/15、API build、CLI help、diff-check 通过；真实 provider 端到端留作环境具备凭证后的复验。
+
 ## Git 提交记录
 
 - 阶段 0：`38862e5`（`feat: 阶段0文档产出`）

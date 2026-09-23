@@ -1,5 +1,12 @@
 # XianyuSellerAgent 项目状态
 
+## 2026-09-23 卖家说话风格提示词优化追踪
+
+- 命令统一重命名为 `optimize:seller-style-prompt`，对应脚本文件改为 `apps/api/scripts/optimize-seller-style-prompt.ts` 与 `apps/api/scripts/seller-style-prompt-optimizer.ts`；不保留旧命令别名。
+- 每轮记录提示词版本、至少 10 个不同真实会话的问题集、AI/人工回答、10 个风格维度评分、修订反馈和最终通过/未通过状态；追踪输出为 `style-optimization-trace.md/json`。
+- 最终提示词只写可迁移的说话方式，不写入抽样问题、人工原回答或交易事实；未达到 98 分时只输出候选提示词，不标记为最终提示词。
+- 已验证：定向测试 15/15、API build、CLI `--help`、`git diff --check`；真实 PostgreSQL/模型 provider 端到端因当前环境无凭证未执行，状态保持 `PARTIALLY_VERIFIED / BLOCKED_BY_ENVIRONMENT`。
+
 ## 2026-09-23 商品自动化真实执行器接入与白名单门禁
 
 - 独立集成 worktree：`F:\ChenHai\Project\XianYuAgent-product-automation`，分支 `codex/product-automation`；前端与后端分别在独立 worktree 开发后合入。

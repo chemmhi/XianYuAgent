@@ -567,3 +567,13 @@
 | S5-R106 | 质量 / 回归 | API 全量 smoke、Web 全量单测以及商品自动化定向门禁是否在修复既有回归后重新通过 | root + verification_audit | PASS | `npm --workspace apps/api run test`；`npm --workspace apps/web run test`（83 files / 279 tests）；`npm run typecheck`；`git diff --check` |
 
 本轮结论：订单 Cookie snapshot 兼容、Dashboard provider 夹具和 Workspace CSS 断言的既有回归已修复并重新验证；商品自动化切片的唯一未关闭阻塞仍是真实闲鱼外部执行适配器和严格像素级视觉验收。
+
+### 2026-09-23：卖家说话风格提示词优化追踪复审
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R107 | 质量 / CLI | 命令与脚本文件是否统一改名且不保留旧命令，至少 10 轮真实会话与 98 分阈值是否仍受约束 | root | PASS | `package.json`、`apps/api/package.json`；CLI `--help`；`seller-style-prompt-optimizer.test.ts` |
+| S5-R108 | 可观测性 | 是否展示提示词版本、问题集、10 维评分、逐题结果、修订反馈与最终状态，且不把历史问答写入最终提示词 | root | PASS | `style-optimization-trace.md/json` 渲染测试；历史回答泄漏回归测试；定向测试 15/15 |
+| S5-R109 | 构建 / 主线 | 合并后 API build、diff 检查和主线文件清理是否通过 | root | PASS | merge `58473ff`；API build；`git diff --check`；登记表 `CLEANED` |
+
+本轮结论：卖家风格提示词优化已改为可审计的自迭代流程并合入 `main`；真实 PostgreSQL/模型 provider 端到端仍待具备凭证的环境复验。
