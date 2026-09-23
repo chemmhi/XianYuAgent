@@ -622,6 +622,13 @@ export function parsePushPayloadDetailed(encoded: string, accountId: string, myI
   if (!parsed || typeof parsed !== 'object') return { quarantine: { reasonCode: 'PUSH_PAYLOAD_DECODE_FAILED', receivedAt } };
   const message = asRecord(parsed);
   const msg1 = asRecord(message['1']);
+  const operation = asRecord(message.operation);
+  // Recent gateway pushes use a named `operation.sessionInfo` envelope instead
+  // of the legacy numeric-key `1/10` envelope. Keep the two parsers separate so
+  // system/session-arouse notifications cannot be mistaken for buyer messages.
+  if (Object.keys(msg1).length === 0 && Object.keys(operation).length > 0) {
+    return parseOperationPushPayload(message, operation, accountId, myId, receivedAt);
+  }
   const msg10 = asRecord(msg1['10']);
   const conversationRef = stripGoofish(typeof msg1['2'] === 'string' ? msg1['2'] : typeof message['2'] === 'string' ? message['2'] : '');
   const senderRef = stripGoofish(String(msg10.senderUserId ?? asRecord(msg1['1'])?.['1'] ?? ''));
@@ -664,6 +671,156 @@ export function parsePushPayloadDetailed(encoded: string, accountId: string, myI
     ...(sourceOrdering.sourceSequence !== undefined ? { sourceSequence: sourceOrdering.sourceSequence } : {}),
     raw: message,
   } };
+}
+
+function parseOperationPushPayload(message: Record<string, unknown>, operation: Record<string, any>, accountId: string, myId: string, receivedAt: string): { event?: XianyuImMessageEvent; quarantine?: { reasonCode: string; receivedAt: string } } {
+  const sessionInfo = asRecord(operation.sessionInfo);
+  const content = asRecord(operation.content);
+  const extensions = {
+    ...asRecord(sessionInfo.extensions),
+    ...asRecord(operation.extensions),
+    ...asRecord(content.extensions),
+  };
+  const contentType = numericValue(content.contentType ?? operation.contentType);
+  if (contentType === 8) return { quarantine: { reasonCode: 'PUSH_SYSTEM_CONTENT_IGNORED', receivedAt } };
+
+  const conversationRef = stripGoofish(
+    optionalString(sessionInfo.sessionId)
+      ?? optionalString(message.sessionId)
+      ?? optionalString(extensions.conversationId)
+      ?? optionalString(extensions.extConversationId)
+      ?? optionalString(extensions.cid)
+      ?? findStringByKey(operation, new Set(['conversationid', 'chatid', 'cid', 'sessionid']))
+      ?? '',
+  );
+  const senderRef = stripGoofish(
+    optionalString(content.senderUserId)
+      ?? optionalString(content.senderId)
+      ?? optionalString(content.userId)
+      ?? optionalString(asRecord(content.sender).userId)
+      ?? optionalString(extensions.extUserId)
+      ?? optionalString(extensions.buyerId)
+      ?? optionalString(extensions.peerUserId)
+      ?? optionalString(extensions.senderUserId)
+      ?? optionalString(extensions.userId)
+      ?? findStringByKey(operation, new Set(['senderuserid', 'senderid', 'userid', 'extuserid']))
+      ?? '',
+  );
+  const senderName = optionalString(content.senderName)
+    ?? optionalString(content.senderNick)
+    ?? optionalString(content.userNick)
+    ?? optionalString(asRecord(content.sender).nick)
+    ?? optionalString(asRecord(content.sender).name)
+    ?? optionalString(extensions.extUserNick)
+    ?? optionalString(extensions.senderName)
+    ?? optionalString(extensions.senderNick)
+    ?? optionalString(extensions.buyerName)
+    ?? optionalString(extensions.buyerNick)
+    ?? optionalString(extensions.peerNick)
+    ?? optionalString(extensions.userNick)
+    ?? findStringByKey(operation, new Set(['sendername', 'sendernick', 'usernick', 'nickname']));
+  const externalMessageRefCandidates = uniqueStrings([
+    content.messageId,
+    content.msgId,
+    content.externalMessageRef,
+    content.messageRef,
+    content.uuid,
+    asRecord(content.message).messageId,
+    asRecord(content.message).msgId,
+    operation.messageId,
+    operation.msgId,
+    operation.messageRef,
+    operation.externalMessageRef,
+    operation.uuid,
+    operation.id,
+    sessionInfo.messageId,
+    sessionInfo.msgId,
+    sessionInfo.id,
+    extensions.messageId,
+    extensions.msgId,
+    extensions.messageRef,
+    extensions.externalMessageRef,
+    message.messageId,
+    findStringByKey(operation, new Set(['messageid', 'msgid', 'externalmessageref'])),
+  ]);
+  const externalMessageRef = selectCanonicalMessageRef(...externalMessageRefCandidates);
+  if (!conversationRef) return { quarantine: { reasonCode: 'PUSH_CONVERSATION_REF_MISSING', receivedAt } };
+  if (!externalMessageRef) return { quarantine: { reasonCode: 'PUSH_MESSAGE_REF_MISSING', receivedAt } };
+  if (!senderRef) return { quarantine: { reasonCode: 'PUSH_SENDER_REF_MISSING', receivedAt } };
+
+  const decoded = decodeOperationContent(content, extensions);
+  const bodyType = decoded.images.length > 0 ? 'image' : decoded.text ? 'text' : 'system';
+  if (bodyType === 'system') return { quarantine: { reasonCode: 'PUSH_SYSTEM_CONTENT_IGNORED', receivedAt } };
+  const timestamp = normalizeTimestamp(
+    content.createAt ?? content.createTime ?? content.createdAt ?? content.timestamp ?? operation.createAt ?? operation.createTime ?? operation.createdAt ?? operation.timestamp ?? sessionInfo.modifyTime ?? message.createTime ?? message.timestamp,
+    receivedAt,
+  );
+  const sourceOrdering = extractSourceOrdering([message, operation, sessionInfo, content, extensions]);
+  return { event: {
+    accountId,
+    externalConversationRef: conversationRef,
+    externalMessageRef,
+    senderRef,
+    senderName,
+    direction: senderRef === myId ? 'outbound' : 'inbound',
+    bodyType,
+    bodyText: decoded.text,
+    assetRef: decoded.images[0],
+    occurredAt: timestamp.value,
+    ...(timestamp.quality === 'received' ? { receivedAt, timestampQuality: timestamp.quality, riskFlags: ['source_timestamp_invalid'] } : {}),
+    ...(externalMessageRefCandidates.filter((value) => value !== externalMessageRef).length > 0 ? { externalMessageRefAliases: externalMessageRefCandidates.filter((value) => value !== externalMessageRef) } : {}),
+    ...(sourceOrdering.sourceEventId ? { sourceEventId: sourceOrdering.sourceEventId } : {}),
+    ...(sourceOrdering.sourceSequence !== undefined ? { sourceSequence: sourceOrdering.sourceSequence } : {}),
+    raw: message,
+  } };
+}
+
+function decodeOperationContent(content: Record<string, any>, extensions: Record<string, any> = {}): { text?: string; images: string[] } {
+  const message = asRecord(content.message);
+  const contentExtensions = asRecord(content.extensions);
+  const text = optionalString(content.text)
+    ?? optionalString(asRecord(content.text).text)
+    ?? optionalString(content.bodyText)
+    ?? optionalString(content.messageText)
+    ?? optionalString(content.message)
+    ?? optionalString(content.body)
+    ?? optionalString(message.text)
+    ?? optionalString(message.bodyText)
+    ?? optionalString(message.content)
+    ?? optionalString(content.value)
+    ?? optionalString(contentExtensions.text)
+    ?? optionalString(asRecord(contentExtensions.text).text)
+    ?? optionalString(contentExtensions.bodyText)
+    ?? optionalString(contentExtensions.messageText)
+    ?? optionalString(contentExtensions.message)
+    ?? optionalString(extensions.text)
+    ?? optionalString(asRecord(extensions.text).text)
+    ?? optionalString(extensions.bodyText)
+    ?? optionalString(extensions.messageText)
+    ?? optionalString(extensions.message);
+  const imageCandidates = [content.imageUrl, content.image, content.images, content.pics, message.imageUrl, message.images, message.pics, contentExtensions.imageUrl, contentExtensions.images, contentExtensions.pics, extensions.imageUrl, extensions.images, extensions.pics];
+  const images: string[] = [];
+  for (const candidate of imageCandidates) {
+    if (typeof candidate === 'string' && candidate.trim()) images.push(candidate.trim());
+    else if (Array.isArray(candidate)) {
+      for (const item of candidate) {
+        const url = typeof item === 'string' ? item : optionalString(asRecord(item).url ?? asRecord(item).imageUrl);
+        if (url) images.push(url);
+      }
+    } else if (candidate && typeof candidate === 'object') {
+      const record = asRecord(candidate);
+      const url = optionalString(record.url ?? record.imageUrl);
+      if (url) images.push(url);
+      const nested = record.pics ?? record.images ?? record.urls;
+      if (Array.isArray(nested)) {
+        for (const item of nested) {
+          const nestedUrl = typeof item === 'string' ? item : optionalString(asRecord(item).url ?? asRecord(item).src ?? asRecord(item).imageUrl);
+          if (nestedUrl) images.push(nestedUrl);
+        }
+      }
+    }
+  }
+  return { text, images: [...new Set(images)] };
 }
 
 const SOURCE_EVENT_ID_KEYS = new Set(['sourceeventid', 'eventid', 'sourceid', 'pushid', 'eventref']);

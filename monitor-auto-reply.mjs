@@ -186,6 +186,7 @@ process.once('SIGTERM', async () => { await cleanup(); process.exit(0); });
 
 console.log(`AUTO_REPLY_GOD_VIEW_STARTED ${new Date().toISOString()}`);
 console.log('正在等待自动回复事件；Ctrl+C 退出。已启用本地 trace 开关。');
+console.log('提示：本命令只监控 trace，不启动 API、worker 或闲鱼网关监听；请先运行 npm run dev。');
 do {
   await readTrace();
   await writeHealth();

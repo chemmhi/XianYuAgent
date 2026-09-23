@@ -490,6 +490,21 @@ test('live auto-reply requires an explicit buyer allowlist', () => {
   assert.deepEqual(legacy.autoReplyTestBuyerNames, ['一只橘喵喵亮晶晶', '另一位买家']);
 });
 
+test('auto-reply defaults to the repaired enforce chain', () => {
+  const config = loadConfig({
+    HOST: '127.0.0.1',
+    PORT: '0',
+    DATABASE_URL: '',
+    REDIS_URL: '',
+    ALLOW_IN_MEMORY: 'true',
+    COOKIE_SECURE: 'false',
+    XIANYU_QR_MODE: 'stub',
+    AGENT_RUNTIME: 'in-process',
+  });
+  assert.equal(config.autoReplyRepairMode, 'enforce');
+  assert.equal(config.autoReplyOutcomeReviewWorkerEnabled, true);
+});
+
 test('auto-reply model can be disabled without disabling Workspace model configuration', () => {
   const config = loadConfig({ API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'test-model', AUTO_REPLY_MODEL_ENABLED: 'false' });
   assert.equal(config.agentRuntime, 'pi');
@@ -519,7 +534,7 @@ test('app startup scans connected accounts without an auth page request', async 
   await runtime.close();
 });
 
-test('app startup recovers degraded and disconnected listeners but skips non-recoverable accounts', async () => {
+test('app startup recovers active degraded and disconnected listeners but skips non-recoverable accounts', async () => {
   const runtime = createApp(loadConfig({
     HOST: '127.0.0.1',
     PORT: '0',
@@ -542,10 +557,14 @@ test('app startup recovers degraded and disconnected listeners but skips non-rec
       runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'startup-expired' }),
       runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'startup-pending' }),
       runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'startup-disabled' }),
+      runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'startup-revoked' }),
     ]);
-    for (const [index, status] of (['connected', 'degraded', 'disconnected', 'expired', 'pending', 'disabled'] as const).entries()) {
+    for (const [index, status] of (['connected', 'degraded', 'disconnected', 'expired', 'pending', 'disabled', 'disconnected'] as const).entries()) {
       await runtime.store.updateAccount(admin.id, accounts[index].id, { status });
     }
+    await runtime.store.upsertCredential({ adminId: admin.id, accountId: accounts[2].id, platform: 'xianyu', cookieHeader: 'unb=active-disconnected', accessToken: 'token', deviceId: 'device' });
+    await runtime.store.upsertCredential({ adminId: admin.id, accountId: accounts[6].id, platform: 'xianyu', cookieHeader: 'unb=revoked-disconnected', accessToken: 'token', deviceId: 'device' });
+    await runtime.store.revokeCredential(admin.id, accounts[6].id);
     await runtime.listen();
     for (let attempt = 0; attempt < 80 && calls.length < 3; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
     assert.deepEqual(new Set(calls), new Set([accounts[0].id, accounts[1].id, accounts[2].id]));

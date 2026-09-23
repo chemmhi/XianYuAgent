@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { XianyuImClient, parsePushPayload } from '../src/xianyu-im.js';
+import { XianyuImClient, parsePushPayload, parsePushPayloadDetailed } from '../src/xianyu-im.js';
 
 test('history request response does not emit an event by itself', async () => {
   const socket = new FakeSocket(false);
@@ -108,6 +108,37 @@ test('mixed gateway response still dispatches syncPushPackage through onEvent', 
 test('push parser prefers the stable PNM id over an internal transport id', () => {
   const parsed = parsePushPayload(pushPayload('canonical-1.PNM', 'same message', 'internal-32-char-id'), 'account-1', 'seller-1');
   assert.equal(parsed?.externalMessageRef, 'canonical-1.PNM');
+});
+
+test('push parser accepts the named operation.sessionInfo buyer message envelope', () => {
+  const parsed = parsePushPayload(operationPayload({ contentType: 1, messageId: 'operation-message-1.PNM', text: { text: '来自新 envelope 的买家消息' } }), 'account-1', 'seller-1');
+  assert.deepEqual(parsed, {
+    accountId: 'account-1',
+    externalConversationRef: 'operation-conversation-1',
+    externalMessageRef: 'operation-message-1.PNM',
+    senderRef: 'buyer-operation-1',
+    senderName: 'Operation Buyer',
+    direction: 'inbound',
+    bodyType: 'text',
+    bodyText: '来自新 envelope 的买家消息',
+    assetRef: undefined,
+    occurredAt: '2026-01-01T00:00:00.000Z',
+    raw: {
+      chatType: 1,
+      incrementType: 1,
+      sessionId: 'operation-conversation-1',
+      operation: {
+        sessionInfo: { sessionId: 'operation-conversation-1', extensions: { extUserId: 'buyer-operation-1', itemId: 'item-1' } },
+        content: { contentType: 1, messageId: 'operation-message-1.PNM', text: { text: '来自新 envelope 的买家消息' }, senderNick: 'Operation Buyer', createAt: 1767225600000 },
+      },
+    },
+  });
+});
+
+test('sessionArouse system operation is quarantined instead of treated as buyer text', () => {
+  const result = parsePushPayloadDetailed(operationPayload({ contentType: 8, messageId: 'session-arouse-1.PNM', text: '系统提醒' }), 'account-1', 'seller-1');
+  assert.equal(result.event, undefined);
+  assert.equal(result.quarantine?.reasonCode, 'PUSH_SYSTEM_CONTENT_IGNORED');
 });
 
 test('non-200 gateway response rejects pending request even when a body is present', async () => {
@@ -360,6 +391,18 @@ class RejectingSocket extends FakeSocket {
     this.sent.push(message);
     if (message.lwp === '/reg') queueMicrotask(() => this.emit('message', JSON.stringify({ code: 400, headers: { mid: message.headers?.mid }, body: { reason: 'SESSION_EXPIRED' } })));
   }
+}
+
+function operationPayload(content: { contentType: number; messageId: string; text: unknown }): string {
+  return Buffer.from(JSON.stringify({
+    chatType: 1,
+    incrementType: 1,
+    sessionId: 'operation-conversation-1',
+    operation: {
+      sessionInfo: { sessionId: 'operation-conversation-1', extensions: { extUserId: 'buyer-operation-1', itemId: 'item-1' } },
+      content: { contentType: content.contentType, messageId: content.messageId, text: content.text, senderNick: 'Operation Buyer', createAt: 1767225600000 },
+    },
+  }), 'utf8').toString('base64');
 }
 
 class AuthRefreshSocket extends FakeSocket {

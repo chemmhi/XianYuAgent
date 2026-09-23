@@ -28,7 +28,7 @@ import { ToolCallingAutoReplyAgent } from './auto-reply-agent.js';
 import { OpenAISettingsService, createFallbackModelClient } from './openai-settings.js';
 import { AutoReplyActivityService } from './auto-reply-activity.js';
 import { AutoReplyRepairRuntime } from './auto-reply-repair-runtime.js';
-import { parseAutoReplyRepairPolicyBundle } from './auto-reply-repair-config.js';
+import { createDefaultAutoReplyRepairPolicy, parseAutoReplyRepairPolicyBundle } from './auto-reply-repair-config.js';
 import { createAutoReplyGodViewSink } from './auto-reply-god-view.js';
 import { MemoryObjectStorage, S3CompatibleObjectStorage, type ObjectStorage } from './object-storage.js';
 import { XianyuItemDetailService } from './xianyu-item-detail-service.js';
@@ -151,13 +151,15 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     return auditId;
   });
   const autoReplyActivity = new AutoReplyActivityService(store);
-  const autoReplyRepair = new AutoReplyRepairRuntime(store, config.autoReplyRepairMode ?? 'off', async (accountId, now) => {
+  const autoReplyRepairMode = config.autoReplyRepairMode ?? 'enforce';
+  if (!config.allowInMemory && autoReplyRepairMode !== 'enforce') {
+    throw new Error('AUTO_REPLY_REPAIR_ENFORCE_REQUIRED');
+  }
+  const autoReplyRepair = new AutoReplyRepairRuntime(store, autoReplyRepairMode, async (accountId, now) => {
     const persisted = await store.getActiveAutoReplyRepairPolicy(accountId, now.toISOString());
     if (persisted) return persisted;
-    // Enforce mode is account-registry only. Environment JSON remains a
-    // shadow/dev compatibility path and must never silently become production
-    // routing policy when the account has no ACTIVE registry version.
-    if ((config.autoReplyRepairMode ?? 'off') === 'enforce') return undefined;
+    if (autoReplyRepairMode === 'enforce' && !config.allowInMemory) return undefined;
+    if (autoReplyRepairMode === 'enforce') return createDefaultAutoReplyRepairPolicy(accountId, now);
     return parseAutoReplyRepairPolicyBundle(config.autoReplyPolicyJson, accountId);
   });
   const autoReply = new AutoReplyService(store, messages, async (input) => {
@@ -377,6 +379,10 @@ async function startRecoverableListenersBestEffort(runtime: AppRuntime, adminId:
     const accounts = await runtime.accounts.list(adminId, { page: 1, pageSize: 100 });
     for (const account of accounts.items) {
       if (account.status !== 'connected' && account.status !== 'degraded' && account.status !== 'disconnected') continue;
+      if (account.status === 'disconnected') {
+        const credential = await runtime.store.getCredential(adminId, account.id);
+        if (credential?.status !== 'active') continue;
+      }
       await startXianyuListenerBestEffort(runtime, adminId, account.id);
     }
   } catch (error) {
