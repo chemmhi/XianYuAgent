@@ -213,7 +213,7 @@
 
 ## 2026-09-23 卖家风格提示词优化命令与追踪决策
 
-1. canonical CLI 命令统一为 `optimize:seller-style-prompt`，旧 `extract:seller-persona` 命令及对应脚本文件名不再保留，避免继续暗示“抽象为分身”的旧流程。
+1. canonical CLI 命令统一为 `optimize:seller-style-prompt`，旧的 persona 抽取命令及对应脚本文件名不再保留，避免继续暗示“抽象为分身”的旧流程。
 2. 优化器直接从脱敏聊天记录生成风格提示词；每轮随机抽取至少 10 个不同真实会话，调用模型生成回答并按 tone、address、particles、rhythm、sentenceLength、structure、emotion、directness、habits、naturalness 十个维度评分。
 3. 每轮追踪必须落盘提示词版本、问题集、AI/人工回答、逐题评分、维度汇总、修订反馈和最终状态；历史问题/回答只能出现在审计追踪中，禁止进入最终提示词正文。
 4. 只有综合相似度达到 98 分才生成 `seller-style-prompt.txt`；未达阈值时只生成 `seller-style-prompt-candidate.txt` 并以失败状态退出。
