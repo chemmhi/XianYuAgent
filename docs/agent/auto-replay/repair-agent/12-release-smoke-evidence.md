@@ -26,7 +26,7 @@ npm --workspace apps/api run test:auto-reply:release:smoke
 ## 当前证据边界
 
 - 2026-09-23 直接执行 `node apps/api/scripts/auto-reply-release-gate-smoke.mjs` 已通过，输出：`releaseGateReady=true`、`canaryStopConditionBlocked=true`、`missingMetricFailClosed=true`、`killSwitchRollback=true`、`outboxIdempotent=true`、`outboxRecovered=true`、`outboxPersisted=true`、`externalAccountRequired=false`。
-- 包装命令 `npm --workspace apps/api run test:auto-reply:release:smoke` 当前被并行的账号级 PolicyConfig 持久化改动阻塞在 API build（`MemoryStore`/`PostgresStore` 尚未实现 `getActiveAutoReplyRepairPolicy`、`publishAutoReplyRepairPolicy`、`rollbackAutoReplyRepairPolicy`）；这不是本 smoke 的失败，待该 P1 依赖合入后必须重新执行包装命令。
+- 包装命令 `npm --workspace apps/api run test:auto-reply:release:smoke` 已在账号级 PolicyConfig 持久化实现合入后重新执行并通过；API build 与 release-gate smoke 均成功，`MemoryStore`/`PostgresStore` 的 `getActiveAutoReplyRepairPolicy`、`publishAutoReplyRepairPolicy`、`rollbackAutoReplyRepairPolicy` 已可用。对应合并提交为 `b3fc206`。
 - 已覆盖：发布门禁核心逻辑、配置化 canary stop condition、缺失指标 fail-closed、kill switch 策略回滚、sender outbox requestId 幂等和本地消息恢复。
 - 未覆盖：真实闲鱼账号 live 外发、生产 canary、线上告警系统/Owner、数据库 migration rollback、目标环境备份恢复和真实外部发送故障注入。
 - 因此本演练只能把 AR-VS-09 提升到“发布前实现级 smoke 通过”，不能单独宣称生产已上线。
