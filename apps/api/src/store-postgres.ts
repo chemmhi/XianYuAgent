@@ -1,10 +1,11 @@
-import { Pool } from 'pg';
+import { Pool, type PoolClient } from 'pg';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor } from './conversation-cursor.js';
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
+import { cloneCouponReservation, normalizeCouponReservationInput, normalizeLeaseSeconds, reservationFingerprint } from './coupon-reservation.js';
 
 type Row = Record<string, unknown>;
 const PRODUCT_COUPON_BATCHES_SELECT = `(select coalesce(json_agg(json_build_object('id', cb.sequence_id, 'label', cb.label) order by binding.priority desc, binding.created_at, cb.sequence_id), '[]'::json) from coupons.coupon_bindings binding join coupons.coupon_batches cb on cb.id=binding.coupon_batch_id where binding.product_id=p.id and binding.status='active' and cb.status <> 'voided') as coupon_batches`;
@@ -97,6 +98,98 @@ export class PostgresStore implements Store {
     return product;
   }
 
+  async getProductAutomation(adminId: string, productId: string): Promise<ProductAutomationConfigRecord | undefined> {
+    const result = await this.pool.query(`select a.*
+      from products.automation_configs a
+      join products.products p on p.id=a.product_id
+      where a.product_id=$1 and exists (
+        select 1 from auth.account_scopes scope
+        where scope.account_id=p.account_id and scope.admin_id=$2 and scope.status='active'
+          and (scope.expires_at is null or scope.expires_at>now())
+      ) limit 1`, [productId, adminId]);
+    return result.rows[0] ? this.toProductAutomation(result.rows[0]) : undefined;
+  }
+
+  async updateProductAutomation(input: { adminId: string; productId: string; expectedConfigVersion: number; config: ProductAutomationConfig; configDigest: string }): Promise<ProductAutomationConfigRecord | undefined> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const product = await client.query(`select p.account_id
+        from products.products p
+        where p.id=$1 and exists (
+          select 1 from auth.account_scopes scope
+          where scope.account_id=p.account_id and scope.admin_id=$2 and scope.status='active'
+            and (scope.expires_at is null or scope.expires_at>now())
+        ) for update`, [input.productId, input.adminId]);
+      if (!product.rows[0]) { await client.query('rollback'); return undefined; }
+      const current = await client.query('select * from products.automation_configs where product_id=$1 for update', [input.productId]);
+      const row = current.rows[0] as Row | undefined;
+      const currentVersion = row ? Number(row.config_version) : 1;
+      if ((row && currentVersion !== input.expectedConfigVersion) || (!row && input.expectedConfigVersion !== 1)) throw new Error('AUTOMATION_VERSION_CONFLICT');
+      const recordId = row ? String(row.id) : createId();
+      const version = row ? currentVersion + 1 : 1;
+      const saved = row
+        ? await client.query(`update products.automation_configs
+            set config_version=$2, config_json=$3::jsonb, config_digest=$4, updated_at=now()
+            where product_id=$1 returning *`, [input.productId, version, JSON.stringify(input.config), input.configDigest])
+        : await client.query(`insert into products.automation_configs
+            (id,product_id,account_id,config_version,config_json,config_digest)
+            values ($1,$2,$3,$4,$5::jsonb,$6) returning *`, [recordId, input.productId, product.rows[0].account_id, version, JSON.stringify(input.config), input.configDigest]);
+      await client.query('commit');
+      return this.toProductAutomation(saved.rows[0]);
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async updateProductAutomationsBatch(input: { adminId: string; productIds: string[]; expectedConfigVersions: Record<string, number>; config?: ProductAutomationConfig; configDigest?: string; configByProductId?: Record<string, ProductAutomationConfig>; configDigests?: Record<string, string> }): Promise<ProductAutomationBatchResult> {
+    const productIds = [...new Set(input.productIds)];
+    if (productIds.length === 0) throw new Error('PRODUCT_NOT_FOUND');
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const products = await client.query(`select p.id,p.account_id
+        from products.products p
+        where p.id = any($1::uuid[])
+          and exists (
+            select 1 from auth.account_scopes scope
+            where scope.account_id=p.account_id and scope.admin_id=$2 and scope.status='active'
+              and (scope.expires_at is null or scope.expires_at>now())
+          )
+        order by p.id for update`, [productIds, input.adminId]);
+      if (products.rowCount !== productIds.length) { await client.query('rollback'); throw new Error('PRODUCT_NOT_FOUND'); }
+      const accountIds = new Set(products.rows.map((row) => String(row.account_id)));
+      if (accountIds.size !== 1) { await client.query('rollback'); throw new Error('AUTOMATION_BATCH_ACCOUNT_MISMATCH'); }
+      const current = await client.query('select * from products.automation_configs where product_id = any($1::uuid[]) for update', [productIds]);
+      const byProduct = new Map(current.rows.map((row) => [String(row.product_id), row as Row]));
+      for (const productId of productIds) {
+        const row = byProduct.get(productId);
+        const expected = input.expectedConfigVersions[productId];
+        const version = row ? Number(row.config_version) : 1;
+        if (!Number.isSafeInteger(expected) || expected !== version) { await client.query('rollback'); throw new Error('AUTOMATION_VERSION_CONFLICT'); }
+      }
+      const saved: ProductAutomationConfigRecord[] = [];
+      for (const productId of productIds) {
+        const row = byProduct.get(productId);
+        const version = row ? Number(row.config_version) + 1 : 1;
+        const result = row
+          ? await client.query(`update products.automation_configs
+              set config_version=$2, config_json=$3::jsonb, config_digest=$4, updated_at=now()
+              where product_id=$1 returning *`, [productId, version, JSON.stringify(input.configByProductId?.[productId] ?? input.config), input.configDigests?.[productId] ?? input.configDigest ?? ''])
+          : await client.query(`insert into products.automation_configs
+              (id,product_id,account_id,config_version,config_json,config_digest)
+              values ($1,$2,$3,$4,$5::jsonb,$6) returning *`, [createId(), productId, products.rows.find((item) => String(item.id) === productId)!.account_id, version, JSON.stringify(input.configByProductId?.[productId] ?? input.config), input.configDigests?.[productId] ?? input.configDigest ?? '']);
+        saved.push(this.toProductAutomation(result.rows[0]));
+      }
+      await client.query('commit');
+      return { items: saved, updatedProductIds: productIds };
+    } catch (error) {
+      try { await client.query('rollback'); } catch { /* preserve original error */ }
+      throw error;
+    } finally { client.release(); }
+  }
+
   async persistXianyuItemDetail(input: XianyuItemDetailPersistenceInput): Promise<ProductRecord | undefined> {
     const current = await this.pool.query('select account_id from products.products where id=$1', [input.productId]);
     if (!current.rows[0]) return undefined;
@@ -178,13 +271,54 @@ export class PostgresStore implements Store {
     const result = await this.pool.query(`select o.*, coalesce(nullif(btrim(o.buyer_nickname), ''), nullif(btrim(buyer_identity.buyer_display_name), '')) as display_buyer_nickname, coalesce(nullif(btrim(o.buyer_avatar_url), ''), nullif(btrim(buyer_identity.buyer_avatar_url), '')) as display_buyer_avatar_url, case when o.item_title is not null and btrim(o.item_title)<>'' and btrim(o.item_title)<>btrim(o.item_id) then o.item_title when product.title is not null and btrim(product.title)<>'' and btrim(product.title)<>btrim(o.item_id) then product.title when item_identity.item_title is not null and btrim(item_identity.item_title)<>'' and btrim(item_identity.item_title)<>btrim(o.item_id) and (item_identity.item_ref is null or btrim(item_identity.item_title)<>btrim(item_identity.item_ref)) then item_identity.item_title when buyer_item_identity.item_title is not null and btrim(buyer_item_identity.item_title)<>'' and btrim(buyer_item_identity.item_title)<>btrim(o.item_id) and (buyer_item_identity.item_ref is null or btrim(buyer_item_identity.item_title)<>btrim(buyer_item_identity.item_ref)) then buyer_item_identity.item_title else null end as display_item_title, coalesce(nullif(btrim(item_identity.item_image_url), ''), nullif(btrim(buyer_item_identity.item_image_url), ''), nullif(product.attributes_json #>> '{xianyu,imageUrls,0}', ''), nullif(product.attributes_json #>> '{imageUrls,0}', '')) as display_item_image_url from orders.orders o left join lateral (select p.title, p.attributes_json from products.products p where p.account_id=o.account_id and (p.id::text=o.product_id or p.external_product_ref=o.item_id) order by (p.id::text=o.product_id) desc limit 1) product on true left join lateral (select c.buyer_display_name, c.buyer_avatar_url from messages.conversations c where c.account_id=o.account_id and ((o.conversation_id is not null and c.id::text=o.conversation_id) or c.buyer_ref=o.buyer_id) order by (c.id::text=o.conversation_id) desc, c.updated_at desc nulls last limit 1) buyer_identity on true left join lateral (select c.item_ref, c.item_title, c.item_image_url from messages.conversations c where c.account_id=o.account_id and ((o.conversation_id is not null and c.id::text=o.conversation_id) or c.item_ref=o.item_id) order by (c.item_title is not null and btrim(c.item_title)<>'') desc, (c.id::text=o.conversation_id) desc, (c.item_ref=o.item_id) desc, c.updated_at desc nulls last limit 1) item_identity on true left join lateral (select c.item_ref, c.item_title, c.item_image_url from messages.conversations c where c.account_id=o.account_id and c.buyer_ref=o.buyer_id order by (c.item_title is not null and btrim(c.item_title)<>'') desc, c.updated_at desc nulls last limit 1) buyer_item_identity on true where o.order_no=$1${accountClause} and exists (select 1 from auth.account_scopes scope where scope.account_id=o.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now())) limit 1`, params);
     return result.rows[0] ? this.toOrder(result.rows[0]) : undefined;
   }
+  async getAutomationExecution(executionKey: string): Promise<AutomationExecutionLedgerRecord | undefined> {
+    const result = await this.pool.query('select * from automation.execution_ledger where execution_key=$1 limit 1', [executionKey]);
+    return result.rows[0] ? this.toAutomationExecution(result.rows[0]) : undefined;
+  }
+  async claimAutomationExecution(input: { executionKey: string; fingerprint: string; ownerToken: string; leaseUntil: string }): Promise<{ claimed: boolean; record: AutomationExecutionLedgerRecord }> {
+    const inserted = await this.pool.query(`insert into automation.execution_ledger (execution_key,fingerprint,status,owner_token,lease_until,attempt_count)
+      values ($1,$2,'running',$3,$4,1) on conflict (execution_key) do nothing returning *`, [input.executionKey, input.fingerprint, input.ownerToken, input.leaseUntil]);
+    if (inserted.rows[0]) return { claimed: true, record: this.toAutomationExecution(inserted.rows[0]) };
+    const existing = await this.pool.query('select * from automation.execution_ledger where execution_key=$1 limit 1', [input.executionKey]);
+    if (!existing.rows[0]) throw new Error('AUTOMATION_EXECUTION_CLAIM_LOST');
+    const current = this.toAutomationExecution(existing.rows[0]);
+    if (current.fingerprint !== input.fingerprint) throw new Error('AUTOMATION_EXECUTION_FINGERPRINT_CONFLICT');
+    const takeover = await this.pool.query(`update automation.execution_ledger
+      set status='running', result_json=null, retryable=false, owner_token=$3, lease_until=$4, attempt_count=attempt_count+1, updated_at=now()
+      where execution_key=$1 and fingerprint=$2 and ((status='completed' and retryable=true) or (status='running' and lease_until < now())) returning *`, [input.executionKey, input.fingerprint, input.ownerToken, input.leaseUntil]);
+    if (takeover.rows[0]) return { claimed: true, record: this.toAutomationExecution(takeover.rows[0]) };
+    const latest = await this.pool.query('select * from automation.execution_ledger where execution_key=$1 limit 1', [input.executionKey]);
+    return { claimed: false, record: this.toAutomationExecution(latest.rows[0]) };
+  }
+  async completeAutomationExecution(input: { executionKey: string; ownerToken: string; result: unknown; retryable: boolean }): Promise<void> {
+    const result = await this.pool.query(`update automation.execution_ledger
+      set status='completed', result_json=$3::jsonb, retryable=$4, lease_until=null, updated_at=now()
+      where execution_key=$1 and owner_token=$2`, [input.executionKey, input.ownerToken, JSON.stringify(input.result), input.retryable]);
+    if ((result.rowCount ?? 0) !== 1) throw new Error('AUTOMATION_EXECUTION_OWNER_CONFLICT');
+  }
+  async recordReviewFact(input: { accountId: string; orderNo: string; eventId: string; reviewedAt?: string }): Promise<{ created: boolean }> {
+    const reviewedAt = input.reviewedAt ?? new Date().toISOString();
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const inserted = await client.query(`insert into automation.review_facts (account_id,order_no,event_id,reviewed_at)
+        values ($1,$2,$3,$4) on conflict (account_id,order_no) do nothing returning event_id`, [input.accountId, input.orderNo, input.eventId, reviewedAt]);
+      if (inserted.rows[0]) await client.query(`update orders.orders set reviewed_at=$3, updated_at=$3, config_version=config_version+1 where account_id=$1 and order_no=$2`, [input.accountId, input.orderNo, reviewedAt]);
+      await client.query('commit');
+      return { created: Boolean(inserted.rows[0]) };
+    } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
+  }
+  async recordReviewReminderSent(input: { accountId: string; orderNo: string; sentAt: string }): Promise<OrderRecord | undefined> {
+    const result = await this.pool.query(`update orders.orders set review_reminder_count=review_reminder_count+1, last_review_reminder_at=$3, updated_at=$3, config_version=config_version+1 where account_id=$1 and order_no=$2 returning *`, [input.accountId, input.orderNo, input.sentAt]);
+    return result.rows[0] ? this.toOrder(result.rows[0]) : undefined;
+  }
   async createOrder(input: { adminId: string; order: Omit<OrderRecord, 'id' | 'createdAt' | 'updatedAt' | 'configVersion' | 'source'> & { id?: string; createdAt?: string; updatedAt?: string; configVersion?: number; source?: OrderSource } }): Promise<OrderRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.order.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const order = input.order;
     const id = order.id ?? createId();
     try {
-      await this.pool.query(`insert into orders.orders (id,order_no,account_id,account_name,buyer_id,buyer_name,buyer_nickname,buyer_avatar_url,item_id,item_title,amount_minor,payment_status,order_status,delivery_status,after_sales_status,delivery_type,created_at,updated_at,delivery_fail_reason,conversation_id,product_id,config_version,source,source_payload_digest)
-        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,coalesce($17,now()),coalesce($18,now()),$19,$20,$21,coalesce($22,1),coalesce($23,'local'),$24)`, [id, order.orderNo, order.accountId, order.accountName ?? null, order.buyerId, order.buyerName, order.buyerNickname ?? null, order.buyerAvatarUrl ?? null, order.itemId, order.itemTitle, order.amountMinor, order.paymentStatus, order.orderStatus, order.deliveryStatus, order.afterSalesStatus, order.deliveryType, order.createdAt ?? null, order.updatedAt ?? null, order.deliveryFailReason ?? null, order.conversationId ?? null, order.productId ?? null, order.configVersion ?? 1, order.source ?? 'local', order.sourcePayloadDigest ?? null]);
+      await this.pool.query(`insert into orders.orders (id,order_no,account_id,account_name,buyer_id,buyer_name,buyer_nickname,buyer_avatar_url,item_id,item_title,amount_minor,payment_status,order_status,delivery_status,after_sales_status,delivery_type,created_at,updated_at,delivery_fail_reason,conversation_id,product_id,config_version,source,source_payload_digest,reviewed_at,review_reminder_count,last_review_reminder_at)
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,coalesce($17,now()),coalesce($18,now()),$19,$20,$21,coalesce($22,1),coalesce($23,'local'),$24,$25,coalesce($26,0),$27)`, [id, order.orderNo, order.accountId, order.accountName ?? null, order.buyerId, order.buyerName, order.buyerNickname ?? null, order.buyerAvatarUrl ?? null, order.itemId, order.itemTitle, order.amountMinor, order.paymentStatus, order.orderStatus, order.deliveryStatus, order.afterSalesStatus, order.deliveryType, order.createdAt ?? null, order.updatedAt ?? null, order.deliveryFailReason ?? null, order.conversationId ?? null, order.productId ?? null, order.configVersion ?? 1, order.source ?? 'local', order.sourcePayloadDigest ?? null, order.reviewedAt ?? null, order.reminderCount ?? 0, order.lastReminderAt ?? null]);
     } catch (error) { if ((error as { code?: string }).code === '23505') throw new Error('ORDER_DUPLICATE'); throw error; }
     const created = await this.getOrder(input.adminId, order.orderNo, order.accountId);
     if (!created) throw new Error('ORDER_CREATE_READBACK_FAILED');
@@ -192,11 +326,13 @@ export class PostgresStore implements Store {
   }
   async upsertExternalOrder(input: { adminId: string; accountId: string; item: XianyuOrderItem; syncedAt: string; accountName?: string }): Promise<OrderUpsertResult> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const linkedProduct = await this.pool.query('select id from products.products where account_id=$1 and (id::text=$2 or external_product_ref=$3) order by (id::text=$2) desc limit 1', [input.accountId, input.item.productId ?? '', input.item.itemId]);
+    const linkedProductId = input.item.productId ?? (linkedProduct.rows[0]?.id ? String(linkedProduct.rows[0].id) : undefined);
     const id = createId();
     const result = await this.pool.query(`insert into orders.orders (id,order_no,account_id,account_name,buyer_id,buyer_name,buyer_nickname,buyer_avatar_url,item_id,item_title,amount_minor,payment_status,order_status,delivery_status,after_sales_status,delivery_type,created_at,updated_at,delivery_fail_reason,conversation_id,product_id,config_version,source,source_payload_digest)
       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,1,'xianyu',$22)
       on conflict (account_id,order_no) do update set account_name=coalesce(excluded.account_name,orders.orders.account_name),buyer_id=excluded.buyer_id,buyer_name=excluded.buyer_name,buyer_nickname=excluded.buyer_nickname,buyer_avatar_url=excluded.buyer_avatar_url,item_id=excluded.item_id,item_title=excluded.item_title,amount_minor=excluded.amount_minor,payment_status=excluded.payment_status,order_status=excluded.order_status,delivery_status=excluded.delivery_status,after_sales_status=excluded.after_sales_status,delivery_type=excluded.delivery_type,created_at=excluded.created_at,updated_at=$18,delivery_fail_reason=excluded.delivery_fail_reason,conversation_id=excluded.conversation_id,product_id=excluded.product_id,config_version=orders.orders.config_version+1,source='xianyu',source_payload_digest=excluded.source_payload_digest
-      returning *, (xmax = 0) as inserted`, [id, input.item.orderNo, input.accountId, input.accountName ?? null, input.item.buyerId, input.item.buyerName, input.item.buyerNickname ?? null, input.item.buyerAvatarUrl ?? null, input.item.itemId, input.item.itemTitle, input.item.amountMinor, input.item.paymentStatus, input.item.orderStatus, input.item.deliveryStatus, input.item.afterSalesStatus, input.item.deliveryType, input.item.createdAt, input.syncedAt, input.item.deliveryFailReason ?? null, input.item.conversationId ?? null, input.item.productId ?? null, input.item.sourcePayloadDigest]);
+      returning *, (xmax = 0) as inserted`, [id, input.item.orderNo, input.accountId, input.accountName ?? null, input.item.buyerId, input.item.buyerName, input.item.buyerNickname ?? null, input.item.buyerAvatarUrl ?? null, input.item.itemId, input.item.itemTitle, input.item.amountMinor, input.item.paymentStatus, input.item.orderStatus, input.item.deliveryStatus, input.item.afterSalesStatus, input.item.deliveryType, input.item.createdAt, input.syncedAt, input.item.deliveryFailReason ?? null, input.item.conversationId ?? null, linkedProductId ?? null, input.item.sourcePayloadDigest]);
     const row = result.rows[0];
     const enriched = await this.getOrder(input.adminId, input.item.orderNo, input.accountId);
     return { action: row.inserted ? 'created' : 'updated', order: enriched ?? this.toOrder(row) };
@@ -392,6 +528,135 @@ export class PostgresStore implements Store {
     const item = this.toCouponItem({ id: row.item_id, batch_id: row.item_batch_id, content_ciphertext: row.content_ciphertext, status: row.item_status, reserved_until: row.reserved_until, consumed_at: row.consumed_at, created_at: row.item_created_at });
     const batch = this.toCouponBatch({ id: row.batch_id, sequence_id: row.batch_sequence_id, account_id: row.account_id, label: row.label, purpose: row.purpose, delivery_scope: row.delivery_scope, quark_url: row.quark_url, extract_code_ciphertext: row.extract_code_ciphertext, total_count: row.total_count, status: row.batch_status, version: row.version, created_at: row.batch_created_at, updated_at: row.batch_updated_at });
     return { batch, item };
+  }
+
+  async reserveCoupon(input: { adminId: string; accountId: string; batchIds: string[]; quantity: number; executionKey: string; purpose: CouponReservationPurpose; leaseSeconds?: number }): Promise<CouponReservationRecord> {
+    const normalized = normalizeCouponReservationInput(input);
+    const leaseSeconds = normalizeLeaseSeconds(input.leaseSeconds);
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      await this.expireCouponReservations(client);
+      const batchRows = await client.query(`select b.* from coupons.coupon_batches b
+        where (b.id::text = any($1::text[]) or b.sequence_id::text = any($1::text[]))
+          and b.account_id=$2
+          and exists (select 1 from auth.account_scopes scope where scope.account_id=b.account_id and scope.admin_id=$3 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))
+        order by (b.status='voided') asc, b.created_at desc, b.id desc`, [normalized.batchIds, input.accountId, input.adminId]);
+      const byAlias = new Map<string, Row>();
+      for (const row of batchRows.rows) { byAlias.set(String(row.id), row); if (row.sequence_id !== undefined && row.sequence_id !== null) byAlias.set(String(row.sequence_id), row); }
+      const resolvedRows = normalized.batchIds.map((batchId) => byAlias.get(batchId));
+      if (resolvedRows.some((row) => !row)) throw new Error('COUPON_BATCH_NOT_FOUND');
+      const uniqueRows = [...new Map((resolvedRows as Row[]).map((row) => [String(row.id), row])).values()];
+      const batchIds = uniqueRows.map((row) => String(row.id));
+      const lockRows = await client.query('select * from coupons.coupon_batches where id=any($1::uuid[]) order by id for update', [batchIds]);
+      if (lockRows.rowCount !== batchIds.length) throw new Error('COUPON_BATCH_NOT_FOUND');
+      if (lockRows.rows.some((row) => row.status !== 'active' && row.status !== 'exhausted')) throw new Error('COUPON_BATCH_UNAVAILABLE');
+      if (lockRows.rows.some((row) => row.delivery_scope !== 'buyer_deliverable')) throw new Error('COUPON_BATCH_NOT_DELIVERABLE');
+      const fingerprint = reservationFingerprint({ adminId: input.adminId, accountId: input.accountId, batchIds, quantity: normalized.quantity, purpose: normalized.purpose });
+      const existingResult = await client.query('select * from coupons.coupon_reservations where execution_key=$1 for update', [normalized.executionKey]);
+      const existing = existingResult.rows[0];
+      if (existing) {
+        if (String(existing.admin_id) !== input.adminId || String(existing.account_id) !== input.accountId || String(existing.fingerprint) !== fingerprint) throw new Error('COUPON_RESERVATION_KEY_CONFLICT');
+        if (existing.status === 'committed' || existing.status === 'reserved') {
+          const record = await this.loadCouponReservation(client, existing);
+          await client.query('commit');
+          return record;
+        }
+      }
+      const selected = await client.query(`select i.*, b.label as batch_label, b.quark_url as batch_quark_url, b.extract_code_ciphertext as batch_extract_code_ciphertext
+        from coupons.coupon_items i join coupons.coupon_batches b on b.id=i.batch_id
+        where i.batch_id=any($1::uuid[]) and i.status='available'
+        order by array_position($1::uuid[], i.batch_id), i.created_at, i.id
+        for update skip locked limit $2`, [batchIds, normalized.quantity]);
+      if ((selected.rowCount ?? 0) < normalized.quantity) throw new Error('COUPON_INSUFFICIENT_INVENTORY');
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const leaseUntil = new Date(now.getTime() + leaseSeconds * 1000).toISOString();
+      const reservationId = existing ? String(existing.id) : createId();
+      await client.query('update coupons.coupon_items set status=\'reserved\',reserved_until=$2 where id=any($1::uuid[])', [selected.rows.map((row) => String(row.id)), leaseUntil]);
+      if (existing) {
+        await client.query(`update coupons.coupon_reservations set admin_id=$2,account_id=$3,purpose=$4,batch_ids=$5::uuid[],fingerprint=$6,quantity=$7,status='reserved',lease_until=$8,reason=null,finalized_at=null,updated_at=now() where id=$1`, [reservationId, input.adminId, input.accountId, normalized.purpose, batchIds, fingerprint, normalized.quantity, leaseUntil]);
+        await client.query('delete from coupons.coupon_reservation_items where reservation_id=$1', [reservationId]);
+      } else {
+        await client.query(`insert into coupons.coupon_reservations (id,admin_id,account_id,execution_key,purpose,batch_ids,fingerprint,quantity,status,lease_until) values ($1,$2,$3,$4,$5,$6::uuid[],$7,$8,'reserved',$9)`, [reservationId, input.adminId, input.accountId, normalized.executionKey, normalized.purpose, batchIds, fingerprint, normalized.quantity, leaseUntil]);
+      }
+      const itemIds = selected.rows.map((row) => String(row.id));
+      const itemPlaceholders = itemIds.map((_, index) => `($1,$${index + 2})`).join(',');
+      await client.query(`insert into coupons.coupon_reservation_items (reservation_id,item_id) values ${itemPlaceholders}`, [reservationId, ...itemIds]);
+      await client.query(`update coupons.coupon_batches b set status='exhausted',version=version+1,updated_at=now()
+        where b.id=any($1::uuid[]) and b.status='active' and not exists (select 1 from coupons.coupon_items i where i.batch_id=b.id and i.status='available')`, [batchIds]);
+      const record = await this.loadCouponReservation(client, { id: reservationId, admin_id: input.adminId, account_id: input.accountId, execution_key: normalized.executionKey, purpose: normalized.purpose, batch_ids: batchIds, fingerprint, quantity: normalized.quantity, status: 'reserved', lease_until: leaseUntil, reason: null, created_at: existing?.created_at ?? nowIso, updated_at: nowIso, finalized_at: null });
+      await client.query('commit');
+      return record;
+    } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
+  }
+
+  async getCouponReservation(input: { adminId: string; reservationId: string; executionKey?: string }): Promise<CouponReservationRecord | undefined> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      await this.expireCouponReservations(client);
+      const result = await client.query(`select r.* from coupons.coupon_reservations r
+        where r.id=$1 and r.admin_id=$2 and exists (select 1 from auth.account_scopes scope where scope.account_id=r.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now())) for update`, [input.reservationId, input.adminId]);
+      if (!result.rows[0]) { await client.query('commit'); return undefined; }
+      if (input.executionKey !== undefined && String(result.rows[0].execution_key) !== input.executionKey) throw new Error('COUPON_RESERVATION_KEY_CONFLICT');
+      const record = await this.loadCouponReservation(client, result.rows[0]);
+      await client.query('commit');
+      return record;
+    } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
+  }
+
+  async commitCouponReservation(input: { adminId: string; reservationId: string; executionKey: string }): Promise<CouponReservationRecord> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      await this.expireCouponReservations(client);
+      const result = await client.query(`select r.* from coupons.coupon_reservations r
+        where r.id=$1 and r.admin_id=$2 and exists (select 1 from auth.account_scopes scope where scope.account_id=r.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now())) for update`, [input.reservationId, input.adminId]);
+      if (!result.rows[0]) throw new Error('COUPON_RESERVATION_NOT_FOUND');
+      const row = result.rows[0];
+      if (String(row.execution_key) !== input.executionKey) throw new Error('COUPON_RESERVATION_KEY_CONFLICT');
+      if (row.status === 'committed') { const record = await this.loadCouponReservation(client, row); await client.query('commit'); return record; }
+      if (row.status === 'expired') { await client.query('commit'); throw new Error('COUPON_RESERVATION_EXPIRED'); }
+      if (row.status !== 'reserved') throw new Error('COUPON_RESERVATION_NOT_ACTIVE');
+      if (new Date(String(row.lease_until)).getTime() <= Date.now()) { await this.expireCouponReservations(client); throw new Error('COUPON_RESERVATION_EXPIRED'); }
+      const consumed = await client.query(`update coupons.coupon_items i set status='consumed',reserved_until=null,consumed_at=now()
+        where i.status='reserved' and i.id in (select ri.item_id from coupons.coupon_reservation_items ri where ri.reservation_id=$1) returning i.id`, [input.reservationId]);
+      if ((consumed.rowCount ?? 0) !== Number(row.quantity)) throw new Error('COUPON_RESERVATION_INCONSISTENT');
+      await client.query("update coupons.coupon_reservations set status='committed',reason=null,finalized_at=now(),updated_at=now() where id=$1", [input.reservationId]);
+      await client.query(`update coupons.coupon_batches b set status='exhausted',version=version+1,updated_at=now()
+        where b.id=any($1::uuid[]) and b.status='active' and not exists (select 1 from coupons.coupon_items i where i.batch_id=b.id and i.status='available')`, [row.batch_ids]);
+      const committed = await client.query('select * from coupons.coupon_reservations where id=$1', [input.reservationId]);
+      const record = await this.loadCouponReservation(client, committed.rows[0]);
+      await client.query('commit');
+      return record;
+    } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
+  }
+
+  async releaseCouponReservation(input: { adminId: string; reservationId: string; executionKey: string; reason: string }): Promise<CouponReservationRecord> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      await this.expireCouponReservations(client);
+      const result = await client.query(`select r.* from coupons.coupon_reservations r
+        where r.id=$1 and r.admin_id=$2 and exists (select 1 from auth.account_scopes scope where scope.account_id=r.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now())) for update`, [input.reservationId, input.adminId]);
+      if (!result.rows[0]) throw new Error('COUPON_RESERVATION_NOT_FOUND');
+      const row = result.rows[0];
+      if (String(row.execution_key) !== input.executionKey) throw new Error('COUPON_RESERVATION_KEY_CONFLICT');
+      if (row.status === 'committed') throw new Error('COUPON_RESERVATION_FINALIZED');
+      if (row.status === 'released' || row.status === 'expired') { const record = await this.loadCouponReservation(client, row); await client.query('commit'); return record; }
+      if (row.status !== 'reserved') throw new Error('COUPON_RESERVATION_NOT_ACTIVE');
+      if (new Date(String(row.lease_until)).getTime() <= Date.now()) { await this.expireCouponReservations(client); const expired = await client.query('select * from coupons.coupon_reservations where id=$1', [input.reservationId]); const record = await this.loadCouponReservation(client, expired.rows[0]); await client.query('commit'); return record; }
+      await client.query(`update coupons.coupon_items i set status='available',reserved_until=null
+        where i.status='reserved' and i.id in (select ri.item_id from coupons.coupon_reservation_items ri where ri.reservation_id=$1)`, [input.reservationId]);
+      await client.query("update coupons.coupon_reservations set status='released',reason=$2,finalized_at=now(),updated_at=now() where id=$1", [input.reservationId, input.reason.trim() || 'released']);
+      await client.query(`update coupons.coupon_batches b set status='active',version=version+1,updated_at=now()
+        where b.id=any($1::uuid[]) and b.status='exhausted' and exists (select 1 from coupons.coupon_items i where i.batch_id=b.id and i.status='available')`, [row.batch_ids]);
+      const released = await client.query('select * from coupons.coupon_reservations where id=$1', [input.reservationId]);
+      const record = await this.loadCouponReservation(client, released.rows[0]);
+      await client.query('commit');
+      return record;
+    } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
   }
 
   async listConversations(adminId: string, query: ConversationListQuery): Promise<ConversationListResult> {
@@ -1064,6 +1329,32 @@ export class PostgresStore implements Store {
   }
   async close(): Promise<void> { await this.pool.end(); }
 
+  private async expireCouponReservations(client: PoolClient): Promise<void> {
+    await client.query(`with expired as (
+      update coupons.coupon_reservations
+      set status='expired',reason='reservation_expired',finalized_at=now(),updated_at=now()
+      where status='reserved' and lease_until<=now()
+      returning id
+    )
+    update coupons.coupon_items i
+    set status='available',reserved_until=null
+    from coupons.coupon_reservation_items ri
+    join expired e on e.id=ri.reservation_id
+    where i.id=ri.item_id and i.status='reserved'`);
+    await client.query(`update coupons.coupon_batches b set status='active',version=version+1,updated_at=now()
+      where b.status='exhausted' and exists (select 1 from coupons.coupon_items i where i.batch_id=b.id and i.status='available')`);
+  }
+
+  private async loadCouponReservation(client: PoolClient, row: Row): Promise<CouponReservationRecord> {
+    const items = await client.query(`select ri.item_id, i.batch_id, i.content_ciphertext, b.label as batch_label, b.quark_url as batch_quark_url, b.extract_code_ciphertext as batch_extract_code_ciphertext
+      from coupons.coupon_reservation_items ri
+      join coupons.coupon_items i on i.id=ri.item_id
+      join coupons.coupon_batches b on b.id=i.batch_id
+      where ri.reservation_id=$1
+      order by ri.item_id`, [row.id]);
+    return this.toCouponReservation(row, items.rows);
+  }
+
   private toCouponBatch(row: Row): CouponBatchRecord {
     const totalCount = Number(row.computed_total_count ?? row.total_count ?? 0);
     const metadata = row.metadata_json && typeof row.metadata_json === 'object' && !Array.isArray(row.metadata_json) ? row.metadata_json as CouponBatchMetadata : {};
@@ -1071,6 +1362,26 @@ export class PostgresStore implements Store {
   }
   private toCouponItem(row: Row): CouponItemRecord { return { id: String(row.id), batchId: String(row.batch_id), content: decryptCouponValue(row.content_ciphertext), status: row.status as CouponItemRecord['status'], reservedUntil: iso(row.reserved_until), consumedAt: iso(row.consumed_at), createdAt: new Date(String(row.created_at)).toISOString() }; }
   private toCouponBinding(row: Row): CouponBindingRecord { return { id: String(row.id), batchId: String(row.coupon_batch_id), productId: String(row.product_id), priority: Number(row.priority ?? 0), status: row.status as CouponBindingRecord['status'], expiresAt: iso(row.expires_at), createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString() }; }
+  private toCouponReservation(row: Row, itemRows: Row[]): CouponReservationRecord {
+    const batchIds = Array.isArray(row.batch_ids) ? row.batch_ids.map(String) : typeof row.batch_ids === 'string' ? (() => { try { return (JSON.parse(row.batch_ids) as unknown[]).map(String); } catch { return []; } })() : [];
+    return {
+      reservationId: String(row.id),
+      adminId: String(row.admin_id),
+      accountId: String(row.account_id),
+      executionKey: String(row.execution_key),
+      purpose: row.purpose as CouponReservationPurpose,
+      batchIds,
+      fingerprint: String(row.fingerprint),
+      quantity: Number(row.quantity),
+      status: row.status as CouponReservationRecord['status'],
+      leaseUntil: dateIso(row.lease_until),
+      reason: row.reason ? String(row.reason) : undefined,
+      items: itemRows.map((item) => ({ itemId: String(item.item_id), content: decryptCouponValue(item.content_ciphertext), batchId: String(item.batch_id), batchLabel: item.batch_label ? String(item.batch_label) : undefined, quarkUrl: item.batch_quark_url ? String(item.batch_quark_url) : undefined, extractionCode: item.batch_extract_code_ciphertext ? decryptCouponValue(item.batch_extract_code_ciphertext) : undefined })),
+      createdAt: dateIso(row.created_at),
+      updatedAt: dateIso(row.updated_at),
+      finalizedAt: iso(row.finalized_at),
+    };
+  }
 
   private toConversation(row: Row): ConversationRecord { return { id: String(row.id), accountId: String(row.account_id), externalConversationRef: row.external_conversation_ref ? String(row.external_conversation_ref) : undefined, buyerRef: String(row.buyer_ref), buyerDisplayName: row.buyer_display_name ? String(row.buyer_display_name) : undefined, buyerAvatarUrl: row.buyer_avatar_url ? String(row.buyer_avatar_url) : undefined, itemRef: row.item_ref ? String(row.item_ref) : undefined, itemTitle: row.item_title ? String(row.item_title) : undefined, itemImageUrl: row.item_image_url ? String(row.item_image_url) : undefined, unreadCount: Number(row.unread_count ?? 0), lastMessagePreview: row.last_message_preview ? String(row.last_message_preview) : undefined, lastMessageAt: iso(row.last_message_at), handlingMode: row.handling_mode as ConversationRecord['handlingMode'], version: Number(row.version ?? 1), createdAt: dateIso(row.created_at), updatedAt: dateIso(row.updated_at) }; }
   private toMessage(row: Row): MessageRecord { const riskFlags = Array.isArray(row.risk_flags) ? row.risk_flags.map(String) : []; return { id: String(row.id), conversationId: String(row.conversation_id), accountId: String(row.account_id), direction: row.direction as MessageRecord['direction'], senderRole: row.sender_role as MessageRecord['senderRole'], bodyType: row.body_type as MessageRecord['bodyType'], bodyText: row.body_text ? String(row.body_text) : undefined, bodyRef: row.body_ref ? String(row.body_ref) : undefined, redactionState: row.redaction_state as MessageRecord['redactionState'], status: row.status as MessageRecord['status'], readStatus: Number(row.read_status ?? 0) === 2 ? 2 : 0, readAt: iso(row.read_at), externalMessageRef: row.external_message_ref ? String(row.external_message_ref) : undefined, source: row.source as MessageRecord['source'], orderRef: row.order_ref ? String(row.order_ref) : undefined, productRef: row.product_ref ? String(row.product_ref) : undefined, riskFlags, handlingMode: row.handling_mode as MessageRecord['handlingMode'], createdAt: new Date(String(row.created_at)).toISOString() }; }
@@ -1092,6 +1403,12 @@ export class PostgresStore implements Store {
   private toProduct(row: Row): ProductRecord {
     const attributes = row.attributes_json && typeof row.attributes_json === 'object' && !Array.isArray(row.attributes_json) ? row.attributes_json as Record<string, unknown> : {};
     return { id: String(row.id), accountId: String(row.account_id), externalProductRef: row.external_product_ref ? String(row.external_product_ref) : undefined, title: String(row.title), description: row.description ? String(row.description) : undefined, categoryCode: row.category_code ? String(row.category_code) : undefined, attributes: { ...attributes }, defaultReplyTemplate: row.default_reply_template ? String(row.default_reply_template) : undefined, aiPrompt: row.ai_prompt ? String(row.ai_prompt) : undefined, configVersion: Number(row.config_version ?? 1), priceMinor: row.price_minor === null || row.price_minor === undefined ? undefined : Number(row.price_minor), status: row.status as ProductRecord['status'], source: (row.source ?? 'local') as ProductRecord['source'], lastSyncedAt: iso(row.last_synced_at), xianyuUpdatedAt: iso(row.xianyu_updated_at), xianyuListRank: row.xianyu_list_rank === null || row.xianyu_list_rank === undefined ? undefined : Number(row.xianyu_list_rank), sourcePayloadDigest: row.source_payload_digest ? String(row.source_payload_digest) : undefined, createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString(), skuCount: Number(row.sku_count ?? 0), assetCount: Number(row.asset_count ?? 0), couponBatches: this.toProductCouponBatches(row.coupon_batches) };
+  }
+  private toProductAutomation(row: Row): ProductAutomationConfigRecord {
+    const config: ProductAutomationConfig = row.config_json && typeof row.config_json === 'object' && !Array.isArray(row.config_json)
+      ? row.config_json as ProductAutomationConfig
+      : { paidAutoDelivery: { enabled: false, couponBatchIds: [], autoConfirm: false, maxAttempts: 3, retryBackoffSeconds: 30 }, unpaidAutoReprice: { enabled: false, mode: 'fixed', targetPriceMinor: 0, maxAttempts: 3, retryBackoffSeconds: 30 }, reviewGift: { enabled: false, couponBatchIds: [], maxAttempts: 3, retryBackoffSeconds: 30 }, reviewReminder: { enabled: false, firstDelayHours: 72, repeatIntervalHours: 24, maxReminders: 1, message: '' } };
+    return { id: String(row.id), productId: String(row.product_id), accountId: String(row.account_id), configVersion: Number(row.config_version ?? 1), config: structuredClone(config), configDigest: String(row.config_digest ?? ''), createdAt: dateIso(row.created_at), updatedAt: dateIso(row.updated_at) };
   }
   private toOrder(row: Row): OrderRecord {
     return {
@@ -1120,6 +1437,23 @@ export class PostgresStore implements Store {
       configVersion: Number(row.config_version ?? 1),
       source: (row.source ?? 'local') as OrderRecord['source'],
       sourcePayloadDigest: row.source_payload_digest ? String(row.source_payload_digest) : undefined,
+      reviewedAt: iso(row.reviewed_at),
+      reminderCount: Number(row.review_reminder_count ?? 0),
+      lastReminderAt: iso(row.last_review_reminder_at),
+    };
+  }
+  private toAutomationExecution(row: Row): AutomationExecutionLedgerRecord {
+    return {
+      executionKey: String(row.execution_key),
+      fingerprint: String(row.fingerprint),
+      status: row.status as AutomationExecutionLedgerRecord['status'],
+      result: row.result_json === null || row.result_json === undefined ? undefined : row.result_json,
+      retryable: Boolean(row.retryable),
+      ownerToken: row.owner_token ? String(row.owner_token) : undefined,
+      leaseUntil: iso(row.lease_until),
+      attemptCount: Number(row.attempt_count ?? 0),
+      createdAt: dateIso(row.created_at),
+      updatedAt: dateIso(row.updated_at),
     };
   }
   private toProductCouponBatches(value: unknown): Array<{ id: string; label?: string }> | undefined {

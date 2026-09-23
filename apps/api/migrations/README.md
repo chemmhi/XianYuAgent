@@ -22,6 +22,14 @@
 - `029_product_xianyu_updated_at.sql`：为商品保存闲鱼侧更新时间，并支持显式按闲鱼更新时间排序；不再把本地 `updated_at` 当作闲鱼更新时间。
 - `030_product_xianyu_list_rank.sql`：保存闲鱼商品列表返回顺序，支持商品目录按闲鱼页面顺序展示；未出现在最近一次同步结果中的商品排名置空并排在末尾。
 - `029_coupon_batch_sequence.sql`：为卡券批次增加从 1 开始的业务编号；UUID `id` 继续作为内部主键和外键，API `batchId`/`id` 对外返回该序号，作废/删除后的序号可被新批次回收。
+- `031_product_automation.sql`：建立商品级四类自动化配置表，按商品唯一保存规范化 JSON、账号归属、版本和摘要；批量保存使用应用事务，卡券批次仍通过现有 `coupon_batches` 校验账号与 `buyer_deliverable` 范围。
+- `033_coupon_reservations.sql`：增加卡券 reservation 与 reservation item 审计表；reserve 使用批次/卡券行锁，commit/release/lease expiry 保持幂等并支持失败重试重开。
+
+## 031 商品自动化迁移纪律
+
+- Apply：确认 `003_catalog.sql`、账号范围和 `013_coupons.sql` 已应用后执行；SQL 可重复执行，新增表不修改既有商品/卡券数据。
+- Verify：检查每个 `product_id` 至多一条配置、`config_version > 0`、账号与商品一致；执行 API smoke 验证首次读取默认版本 `1`、保存后复读和批量事务回滚。
+- Rollback：先停止自动化配置写入和 Worker 读取，保留配置表与审计；应用回退到默认关闭行为，不删除已产生的订单/卡券交付历史。待确认无旧版本依赖后再按 contract → switch → verify 处理，不直接删除配置表。
 
 ## 029 coupon batch sequence 迁移纪律
 

@@ -21,6 +21,10 @@ const BASE_URL = 'https://h5api.m.goofish.com/h5';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36';
 const SOLD_ORDERS_API = 'mtop.taobao.idle.trade.merchant.sold.get';
 const SOLD_ORDERS_REFERER = 'https://seller.goofish.com/?site=COMMONPRO#/seller-trade/order-manage';
+const SELLER_ORDER_MANAGE_REFERER = SOLD_ORDERS_REFERER;
+const CONSIGN_API = 'mtop.taobao.idle.logistic.consign.dummy';
+const ADJUST_PRICE_API = 'mtop.taobao.idle.trade.user.adjust.price';
+const ORDER_DETAIL_API = 'mtop.idle.web.trade.order.detail';
 const DEFAULT_SOLD_ORDER_PAGE_SIZE = 30;
 
 export interface MtopCredential { cookieHeader?: string; metadata?: Record<string, string>; }
@@ -37,6 +41,36 @@ export interface MtopResult {
 export interface XianyuItemsPageResult extends MtopResult, ProductSyncPageResult {}
 export interface XianyuOrdersPageResult extends MtopResult, XianyuOrderPageResult {}
 export interface XianyuItemDetailResult extends MtopResult { summary: XianyuItemDetailSummary; }
+
+export type XianyuExternalMutationStatus = 'succeeded' | 'failed' | 'unknown';
+
+export interface XianyuExternalMutationResult {
+  status: XianyuExternalMutationStatus;
+  externalRef?: string;
+  errorCode?: string;
+  message?: string;
+  response?: Record<string, unknown>;
+  cookieHeader: string;
+}
+
+export interface XianyuOrderDetailSummary {
+  orderNo: string;
+  quantity?: number;
+  skuSpec?: string;
+  amountMinor?: number;
+  orderStatus?: string;
+  paymentStatus?: string;
+  deliveryStatus?: string;
+  buyerId?: string;
+  conversationId?: string;
+  itemId?: string;
+  itemTitle?: string;
+  reviewedAt?: string;
+}
+
+export interface XianyuOrderDetailResult extends MtopResult {
+  detail?: XianyuOrderDetailSummary;
+}
 
 export interface XianyuItemDetailOptions {
   categoryId?: string | number;
@@ -299,6 +333,97 @@ export class XianyuMtopClient {
     return { pages, items, hasMore };
   }
 
+  /**
+   * Confirm virtual shipment for an order.
+   *
+   * This is intentionally a thin mutation wrapper around the shared MTOP
+   * request path so cookie rotation, token retry and account health reporting
+   * remain identical to the existing read APIs. A transport retry exhaustion
+   * is classified as unknown because the remote side may have committed the
+   * shipment even though the HTTP response was not observed.
+   */
+  async confirmShipment(adminId: string, accountId: string, orderNo: string): Promise<XianyuExternalMutationResult> {
+    const normalizedOrderNo = String(orderNo ?? '').trim();
+    if (!normalizedOrderNo) return { status: 'failed', errorCode: 'ORDER_NO_MISSING', message: 'orderNo is required', cookieHeader: '' };
+    const result = await this.call(
+      adminId,
+      accountId,
+      CONSIGN_API,
+      '1.0',
+      { orderId: normalizedOrderNo, tradeText: '', picList: [], newUnconsign: true },
+      {},
+      { referer: SELLER_ORDER_MANAGE_REFERER },
+    );
+    return classifyMutationResult(result, normalizedOrderNo);
+  }
+
+  /**
+   * Adjust the total price of an unpaid order. targetPriceMinor is integer fen.
+   * The MTOP endpoint returns ret=SUCCESS even when data.success=false, so the
+   * response body is checked before reporting a successful mutation.
+   */
+  async repriceOrder(adminId: string, accountId: string, orderNo: string, targetPriceMinor: number): Promise<XianyuExternalMutationResult> {
+    const normalizedOrderNo = String(orderNo ?? '').trim();
+    if (!normalizedOrderNo) return { status: 'failed', errorCode: 'ORDER_NO_MISSING', message: 'orderNo is required', cookieHeader: '' };
+    if (!Number.isSafeInteger(targetPriceMinor) || targetPriceMinor < 0) {
+      return { status: 'failed', errorCode: 'TARGET_PRICE_INVALID', message: 'targetPriceMinor must be a non-negative integer', cookieHeader: '' };
+    }
+    const result = await this.call(
+      adminId,
+      accountId,
+      ADJUST_PRICE_API,
+      '1.0',
+      { modifyFee: targetPriceMinor, newTransportFee: '0', orderId: normalizedOrderNo },
+      {},
+      { referer: SELLER_ORDER_MANAGE_REFERER },
+    );
+    const businessSuccess = nestedBoolean(result.response, ['data', 'success']);
+    if (result.success && businessSuccess !== true) {
+      return {
+        status: 'failed',
+        externalRef: normalizedOrderNo,
+        errorCode: 'MTOP_BUSINESS_ERROR',
+        message: '闲鱼订单改价接口未确认 data.success=true',
+        response: result.response,
+        cookieHeader: result.cookieHeader,
+      };
+    }
+    return classifyMutationResult(result, normalizedOrderNo);
+  }
+
+  /**
+   * Read an authoritative order detail snapshot for state re-checks before a
+   * destructive automation action. The endpoint is read-only; malformed or
+   * structurally empty successful responses are surfaced as known failures so
+   * callers never treat an incomplete order as eligible.
+   */
+  async readOrderDetail(adminId: string, accountId: string, orderNo: string): Promise<XianyuOrderDetailResult> {
+    const normalizedOrderNo = String(orderNo ?? '').trim();
+    if (!normalizedOrderNo) return { success: false, accountInvalid: false, errorCode: 'ORDER_NO_MISSING', message: 'orderNo is required', cookieHeader: '' };
+    const result = await this.call(
+      adminId,
+      accountId,
+      ORDER_DETAIL_API,
+      '1.0',
+      { tid: normalizedOrderNo },
+      { valueType: 'string' },
+      { referer: buildOrderDetailReferer(normalizedOrderNo) },
+    );
+    if (!result.success) return { ...result };
+    const detail = mapXianyuOrderDetail(result.response, normalizedOrderNo);
+    if (!detail) {
+      const failure = {
+        ...result,
+        success: false,
+        errorCode: 'ORDER_DETAIL_EMPTY',
+        message: 'order detail response did not contain an orderInfoVO snapshot',
+      } satisfies XianyuOrderDetailResult;
+      this.reportFailure({ adminId, accountId, api: ORDER_DETAIL_API, errorCode: failure.errorCode, message: failure.message, accountInvalid: false });
+      return failure;
+    }
+    return { ...result, detail };
+  }
+
   async call(adminId: string, accountId: string, api: string, version: string, data: Record<string, unknown>, extraParams: Record<string, string> = {}, requestOptions: MtopRequestOptions = {}): Promise<MtopResult> {
     const credential = await this.loadCredential(adminId, accountId);
     const initialCookieHeader = credential?.cookieHeader?.trim() ?? '';
@@ -318,8 +443,9 @@ export class XianyuMtopClient {
     const dataValue = JSON.stringify(data);
     let lastError = 'MTOP_REQUEST_FAILED';
     for (let attempt = 0; attempt < 3; attempt += 1) {
+      const isSellerRequest = isSellerApi(api);
       const isSellerOrders = api === SOLD_ORDERS_API;
-      const documentUrl = requestOptions.referer ?? (isSellerOrders ? SOLD_ORDERS_REFERER : 'https://www.goofish.com/im');
+      const documentUrl = requestOptions.referer ?? (isSellerRequest ? SELLER_ORDER_MANAGE_REFERER : 'https://www.goofish.com/im');
       const requestUrl = `${BASE_URL}/${api}/${version}/`;
       const snapshotSigningCookieHeader = cookieSnapshot ? cookieHeaderForSigning(cookieSnapshot, documentUrl, XIANYU_TOP_SITE) : '';
       const snapshotRequestCookieHeader = cookieSnapshot ? cookieHeaderForUrl(cookieSnapshot, requestUrl, Date.now(), XIANYU_TOP_SITE) : '';
@@ -356,10 +482,10 @@ export class XianyuMtopClient {
           'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
           'cache-control': 'no-cache',
           'content-type': 'application/x-www-form-urlencoded',
-          origin: isSellerOrders ? 'https://seller.goofish.com' : 'https://www.goofish.com',
+          origin: originForReferer(requestOptions.referer ?? (isSellerRequest ? SELLER_ORDER_MANAGE_REFERER : refererFor(api))),
           pragma: 'no-cache',
           priority: 'u=1, i',
-          referer: requestOptions.referer ?? (isSellerOrders ? SOLD_ORDERS_REFERER : refererFor(api)),
+          referer: requestOptions.referer ?? (isSellerRequest ? SELLER_ORDER_MANAGE_REFERER : refererFor(api)),
           'sec-fetch-dest': 'empty',
           'sec-fetch-mode': 'cors',
           'sec-fetch-site': 'same-site',
@@ -424,6 +550,125 @@ export class XianyuMtopClient {
   }
 }
 
+function isSellerApi(api: string): boolean {
+  return api === SOLD_ORDERS_API || api === CONSIGN_API || api === ADJUST_PRICE_API;
+}
+
+function originForReferer(referer: string): string {
+  try {
+    const parsed = new URL(referer);
+    return parsed.origin;
+  } catch {
+    return 'https://www.goofish.com';
+  }
+}
+
+function classifyMutationResult(result: MtopResult, externalRef: string): XianyuExternalMutationResult {
+  if (result.success) return { status: 'succeeded', externalRef, response: result.response, cookieHeader: result.cookieHeader };
+  const unknown = result.errorCode === 'MTOP_RETRY_EXHAUSTED' || result.errorCode === 'MTOP_REQUEST_FAILED';
+  return {
+    status: unknown ? 'unknown' : 'failed',
+    externalRef,
+    errorCode: result.errorCode,
+    message: result.message,
+    response: result.response,
+    cookieHeader: result.cookieHeader,
+  };
+}
+
+function buildOrderDetailReferer(orderNo: string): string {
+  const url = new URL('https://www.goofish.com/order-detail');
+  url.searchParams.set('orderId', orderNo);
+  url.searchParams.set('role', 'seller');
+  return url.toString();
+}
+
+function nestedBoolean(root: unknown, path: string[]): boolean | undefined {
+  let current: unknown = root;
+  for (const key of path) {
+    if (!current || typeof current !== 'object' || Array.isArray(current)) return undefined;
+    current = (current as Record<string, unknown>)[key];
+  }
+  if (typeof current === 'boolean') return current;
+  if (typeof current === 'number') return current !== 0;
+  if (typeof current === 'string' && current.trim()) return /^(true|1|yes)$/i.test(current.trim());
+  return undefined;
+}
+
+function mapXianyuOrderDetail(response: Record<string, unknown> | undefined, orderNo: string): XianyuOrderDetailSummary | undefined {
+  const data = record(response?.data);
+  const utArgs = record(data.utArgs);
+  const components = Array.isArray(data.components) ? data.components : [];
+  const orderInfo = components
+    .map((value) => record(value))
+    .find((value) => value.render === 'orderInfoVO');
+  const componentData = record(orderInfo?.data);
+  const itemInfo = record(componentData.itemInfo ?? componentData.itemVO ?? componentData.item);
+  const priceInfo = record(componentData.priceInfo ?? componentData.price);
+  const amountInfo = record(priceInfo.amount);
+  const rootOrder = findFirstRecord(response, ['orderInfo', 'order', 'trade', 'orderDetail']);
+  const item = record(rootOrder?.item ?? rootOrder?.itemInfo ?? rootOrder?.goods);
+  const buyer = record(rootOrder?.buyer ?? rootOrder?.buyerInfo);
+  const quantityValue = firstScalar(itemInfo.buyAmount, itemInfo.quantity, rootOrder?.quantity, rootOrder?.buyAmount);
+  const amountValue = firstScalar(amountInfo.value, priceInfo.totalPrice, priceInfo.amount, rootOrder?.amount, rootOrder?.totalPrice);
+  const orderStatus = firstScalar(utArgs.orderStatus, rootOrder?.orderStatus, rootOrder?.status);
+  const detail: XianyuOrderDetailSummary = {
+    orderNo,
+    quantity: parsePositiveInt(quantityValue),
+    skuSpec: joinSpec(firstScalar(itemInfo.specName, rootOrder?.specName), firstScalar(itemInfo.specValue, rootOrder?.specValue)),
+    amountMinor: parseAmountMinor(amountValue),
+    orderStatus,
+    paymentStatus: firstScalar(rootOrder?.paymentStatus, rootOrder?.payStatus),
+    deliveryStatus: firstScalar(rootOrder?.deliveryStatus, rootOrder?.shipStatus, orderStatus),
+    buyerId: firstScalar(rootOrder?.buyerId, buyer.id, buyer.userId),
+    conversationId: firstScalar(rootOrder?.conversationId, rootOrder?.sessionId, rootOrder?.cid),
+    itemId: firstScalar(rootOrder?.itemId, item.itemId, item.id, itemInfo.itemId, itemInfo.id),
+    itemTitle: firstScalar(rootOrder?.itemTitle, item.title, item.itemTitle, itemInfo.title, itemInfo.itemTitle, itemInfo.name),
+    reviewedAt: firstScalar(rootOrder?.reviewedAt, rootOrder?.rateTime, rootOrder?.reviewTime),
+  };
+  const hasSnapshot = Object.entries(detail).some(([key, value]) => key !== 'orderNo' && value !== undefined);
+  return hasSnapshot ? detail : undefined;
+}
+
+function findFirstRecord(root: unknown, keys: string[]): Record<string, unknown> {
+  const value = record(root);
+  for (const key of keys) {
+    const candidate = record(value[key]);
+    if (Object.keys(candidate).length > 0) return candidate;
+  }
+  return {};
+}
+
+function firstScalar(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    if (typeof value === 'boolean') return value ? 'true' : 'false';
+  }
+  return undefined;
+}
+
+function joinSpec(name?: string, value?: string): string | undefined {
+  if (!name && !value) return undefined;
+  if (!name) return value;
+  if (!value) return name;
+  return `${name}:${value}`;
+}
+
+function parsePositiveInt(value?: string): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : undefined;
+}
+
+function parseAmountMinor(value?: string): number | undefined {
+  if (!value) return undefined;
+  const normalized = value.replace(/[^0-9.-]/g, '');
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || parsed < 0) return undefined;
+  return normalized.includes('.') ? Math.round(parsed * 100) : Math.round(parsed);
+}
+
 function cookieValue(cookieHeader: string, name: string): string {
   for (const part of cookieHeader.split(';')) {
     const [key, ...rest] = part.trim().split('=');
@@ -438,7 +683,14 @@ function cookieHeadersMatch(snapshot: XianyuCookieSnapshot | undefined, rawCooki
   const rawValues = parseCookieHeader(rawCookieHeader);
   const volatile = new Set(['_m_h5_tk', '_m_h5_tk_enc', 'x5sec', 'x5secdata', 'wua', 'umid', 'cna', 'cookie2', 'unb', 'munb', 'tfstk']);
   for (const [name, value] of rawValues) {
-    if (volatile.has(name) && snapshotValues.get(name) !== value) return false;
+    if (!volatile.has(name)) continue;
+    const snapshotValue = snapshotValues.get(name);
+    // Some persisted flat cookies contain only the token prefix while the
+    // browser snapshot still has the authoritative `_m_h5_tk=<token>_<suffix>`
+    // value. Treat that incomplete prefix as compatible, but keep strict
+    // equality for complete values and all other volatile cookies.
+    if (name === '_m_h5_tk' && value && snapshotValue?.startsWith(`${value}_`)) continue;
+    if (snapshotValue !== value) return false;
   }
   return true;
 }

@@ -11,6 +11,8 @@ export type CouponBatchStatus = 'draft' | 'active' | 'paused' | 'closed' | 'exha
 export type CouponDeliveryScope = 'system_only' | 'operator_only' | 'buyer_deliverable';
 export type CouponItemStatus = 'available' | 'reserved' | 'consumed';
 export type CouponBindingStatus = 'active' | 'inactive';
+export type CouponReservationPurpose = 'delivery' | 'gift';
+export type CouponReservationStatus = 'reserved' | 'committed' | 'released' | 'expired';
 export type ConversationHandlingMode = 'ai' | 'human';
 export type MessageDirection = 'inbound' | 'outbound';
 export type MessageSenderRole = 'buyer' | 'agent' | 'system';
@@ -185,6 +187,63 @@ export interface ProductListResult {
   totalPages: number;
 }
 
+export type AutomationRuleType = 'paid_auto_delivery' | 'unpaid_auto_reprice' | 'review_gift' | 'review_reminder';
+
+export interface PaidAutoDeliveryRule {
+  enabled: boolean;
+  couponBatchIds: string[];
+  autoConfirm: boolean;
+  maxAttempts: number;
+  retryBackoffSeconds: number;
+}
+
+export interface UnpaidAutoRepriceRule {
+  enabled: boolean;
+  mode: 'fixed';
+  targetPriceMinor: number;
+  message?: string;
+  maxAttempts: number;
+  retryBackoffSeconds: number;
+}
+
+export interface ReviewGiftRule {
+  enabled: boolean;
+  couponBatchIds: string[];
+  maxAttempts: number;
+  retryBackoffSeconds: number;
+}
+
+export interface ReviewReminderRule {
+  enabled: boolean;
+  firstDelayHours: number;
+  repeatIntervalHours: number;
+  maxReminders: number;
+  message: string;
+}
+
+export interface ProductAutomationConfig {
+  paidAutoDelivery: PaidAutoDeliveryRule;
+  unpaidAutoReprice: UnpaidAutoRepriceRule;
+  reviewGift: ReviewGiftRule;
+  reviewReminder: ReviewReminderRule;
+}
+
+export interface ProductAutomationConfigRecord {
+  id: string;
+  productId: string;
+  accountId: string;
+  configVersion: number;
+  config: ProductAutomationConfig;
+  configDigest: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProductAutomationBatchResult {
+  items: ProductAutomationConfigRecord[];
+  updatedProductIds: string[];
+}
+
 export type PaymentStatus = 'unpaid' | 'paid' | 'closed' | 'unknown';
 export type OrderStatus = 'open' | 'cancelling' | 'cancelled' | 'completed' | 'closed' | 'failed';
 export type DeliveryStatus = 'pending' | 'reserving' | 'delivered' | 'partially_delivered' | 'failed' | 'cancelled';
@@ -218,6 +277,24 @@ export interface OrderRecord {
   configVersion: number;
   source: OrderSource;
   sourcePayloadDigest?: string;
+  reviewedAt?: string;
+  reminderCount?: number;
+  lastReminderAt?: string;
+}
+
+export type AutomationExecutionLedgerStatus = 'running' | 'completed';
+
+export interface AutomationExecutionLedgerRecord {
+  executionKey: string;
+  fingerprint: string;
+  status: AutomationExecutionLedgerStatus;
+  result?: unknown;
+  retryable: boolean;
+  ownerToken?: string;
+  leaseUntil?: string;
+  attemptCount: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface XianyuOrderItem {
@@ -331,6 +408,33 @@ export interface CouponBatchListResult {
   pageSize: number;
   total: number;
   totalPages: number;
+}
+
+export interface CouponReservationItemRecord {
+  itemId: string;
+  content: string;
+  batchId: string;
+  batchLabel?: string;
+  quarkUrl?: string;
+  extractionCode?: string;
+}
+
+export interface CouponReservationRecord {
+  reservationId: string;
+  adminId: string;
+  accountId: string;
+  executionKey: string;
+  purpose: CouponReservationPurpose;
+  batchIds: string[];
+  fingerprint: string;
+  quantity: number;
+  status: CouponReservationStatus;
+  leaseUntil: string;
+  reason?: string;
+  items: CouponReservationItemRecord[];
+  createdAt: string;
+  updatedAt: string;
+  finalizedAt?: string;
 }
 
 export interface ProductPatch {
@@ -899,9 +1003,17 @@ export interface Store {
   listWorkspaceMessages(adminId: string, sessionId: string, limit?: number): Promise<WorkspaceMessageRecord[]>;
   listProducts(adminId: string, query: ProductListQuery): Promise<ProductListResult>;
   getProduct(adminId: string, productId: string): Promise<ProductRecord | undefined>;
+  getProductAutomation(adminId: string, productId: string): Promise<ProductAutomationConfigRecord | undefined>;
+  updateProductAutomation(input: { adminId: string; productId: string; expectedConfigVersion: number; config: ProductAutomationConfig; configDigest: string }): Promise<ProductAutomationConfigRecord | undefined>;
+  updateProductAutomationsBatch(input: { adminId: string; productIds: string[]; expectedConfigVersions: Record<string, number>; config?: ProductAutomationConfig; configDigest?: string; configByProductId?: Record<string, ProductAutomationConfig>; configDigests?: Record<string, string> }): Promise<ProductAutomationBatchResult>;
   persistXianyuItemDetail(input: XianyuItemDetailPersistenceInput): Promise<ProductRecord | undefined>;
   listOrders(adminId: string, query: OrderListQuery): Promise<OrderListResult>;
   getOrder(adminId: string, orderNo: string, accountId?: string): Promise<OrderRecord | undefined>;
+  getAutomationExecution(executionKey: string): Promise<AutomationExecutionLedgerRecord | undefined>;
+  claimAutomationExecution(input: { executionKey: string; fingerprint: string; ownerToken: string; leaseUntil: string }): Promise<{ claimed: boolean; record: AutomationExecutionLedgerRecord }>;
+  completeAutomationExecution(input: { executionKey: string; ownerToken: string; result: unknown; retryable: boolean }): Promise<void>;
+  recordReviewFact(input: { accountId: string; orderNo: string; eventId: string; reviewedAt?: string }): Promise<{ created: boolean }>;
+  recordReviewReminderSent(input: { accountId: string; orderNo: string; sentAt: string }): Promise<OrderRecord | undefined>;
   createOrder(input: { adminId: string; order: Omit<OrderRecord, 'id' | 'createdAt' | 'updatedAt' | 'configVersion' | 'source'> & { id?: string; createdAt?: string; updatedAt?: string; configVersion?: number; source?: OrderSource } }): Promise<OrderRecord>;
   upsertExternalOrder(input: { adminId: string; accountId: string; item: XianyuOrderItem; syncedAt: string; accountName?: string }): Promise<OrderUpsertResult>;
   createProduct(input: {
@@ -938,6 +1050,10 @@ export interface Store {
   unbindCouponBatch(input: { adminId: string; batchId: string; productId: string }): Promise<CouponBindingRecord | undefined>;
   voidCouponBatch(input: { adminId: string; batchId: string }): Promise<CouponBatchRecord | undefined>;
   getCouponContent(adminId: string, itemId: string): Promise<{ batch: CouponBatchRecord; item: CouponItemRecord } | undefined>;
+  reserveCoupon(input: { adminId: string; accountId: string; batchIds: string[]; quantity: number; executionKey: string; purpose: CouponReservationPurpose; leaseSeconds?: number }): Promise<CouponReservationRecord>;
+  getCouponReservation(input: { adminId: string; reservationId: string; executionKey?: string }): Promise<CouponReservationRecord | undefined>;
+  commitCouponReservation(input: { adminId: string; reservationId: string; executionKey: string }): Promise<CouponReservationRecord>;
+  releaseCouponReservation(input: { adminId: string; reservationId: string; executionKey: string; reason: string }): Promise<CouponReservationRecord>;
   listConversations(adminId: string, query: ConversationListQuery): Promise<ConversationListResult>;
   getConversation(adminId: string, conversationId: string): Promise<ConversationRecord | undefined>;
   markConversationRead(adminId: string, conversationId: string): Promise<ConversationRecord | undefined>;

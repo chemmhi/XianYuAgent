@@ -371,6 +371,17 @@ Agent 动态只读查询契约已冻结于 [`docs/agent/auto-reply/activity.md`]
 
 页面账号上下文必须处理 loading、error 和未选择状态；不能在 `accountId=undefined` 时显示固定“当前账号”并误报为单账号数据。真实完成证据必须覆盖“实时 Agent 触发 → run/event 表 → 三条 API → 页面列表/详情可见”以及 `1440×900` / `390×844` 视觉截图。
 
+### 13.5 商品自动化四流程（2026-09-22）
+
+| 触发器 | 配置字段 | 核心执行链 | 关键状态与安全边界 |
+| --- | --- | --- | --- |
+| `payment_paid` | `paidAutoDelivery.enabled`、`couponBatchIds[]`、`autoConfirm` | 订单已付款 → 预留卡券 → 发卡 → 提交库存 → 可选确认发货 | 发卡失败/结果未知不确认发货；执行账本按账号+订单幂等；外部适配器未 ready 时返回 blocked |
+| `unpaid_reprice` | `unpaidAutoReprice.enabled`、`targetPriceMinor`、`message` | 二次读取订单 → 确认仍未付款 → 改价 → 可选发消息 | 二次读取失败或已付款时不改价；未知结果不盲重放 |
+| `review_gift` | `reviewGift.enabled`、`couponBatchIds[]` | 评价事实落库 → 预留卡券 → 发卡 → 提交库存 | `(accountId, orderNo)` 评价事实唯一；重复评价事件不重复发放；失败后可补发 |
+| `review_reminder` | `reviewReminder.enabled`、首次延迟、重复间隔、最大次数、文案 | 已发货且未评价且有会话 → 读取订单 → 发消息 → 持久化次数 | `reminderCount/lastReminderAt` 持久化；成功提醒后下一轮不重复发送 |
+
+跨实例幂等由 `automation.execution_ledger` 提供 `fingerprint/ownerToken/leaseUntil/attemptCount/retryable`；租约过期可接管，达到最大尝试次数转人工复核。真实闲鱼 MTOP/IM 执行适配器仍是独立门禁，未接入前不得把受控测试结果解释为真实发货成功。
+
 阶段 2 通过后，允许进入阶段 3 前端信息架构与 API 映射设计；仍不得提前创建真实后端实现。
 # Agent 动态 API 增量契约（2026-09-21）
 

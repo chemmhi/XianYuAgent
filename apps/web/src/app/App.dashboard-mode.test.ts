@@ -85,7 +85,7 @@ describe('dashboard API mode resolution', () => {
       navigate: vi.fn(),
     } as unknown as Parameters<typeof AuthenticatedShell>[0];
 
-    const html = renderToStaticMarkup(createElement(AuthenticatedShell, props));
+    const html = renderShell(props);
     const sidebarNav = html.match(/<nav class="side-nav"[\s\S]*?<\/nav>/)?.[0] ?? '';
 
     expect(sidebarNav).toContain('仪表盘');

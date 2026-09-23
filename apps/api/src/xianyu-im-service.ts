@@ -4,6 +4,7 @@ import type { MessageService } from './messages.js';
 import type { AutoReplyProcessResult, AutoReplyService } from './auto-reply.js';
 import { XianyuImClient, XianyuImMessageEvent, XianyuImReadReceiptEvent, XianyuImCredential } from './xianyu-im.js';
 import { XianyuMtopClient } from './xianyu-mtop.js';
+import type { ProductAutomationImEventResult, ProductAutomationTrigger } from './product-automation-trigger.js';
 
 interface ExternalPage {
   hasMore: boolean;
@@ -15,7 +16,7 @@ export class XianyuImService {
   private readonly clientInFlight = new Map<string, Promise<XianyuImClient>>();
   private readonly identityCache = new Map<string, { buyerDisplayName?: string; buyerAvatarUrl?: string }>();
 
-  constructor(private readonly store: Store, private readonly mtop: XianyuMtopClient, private readonly messages: MessageService, private readonly autoReply?: AutoReplyService) {}
+  constructor(private readonly store: Store, private readonly mtop: XianyuMtopClient, private readonly messages: MessageService, private readonly autoReply?: AutoReplyService, private readonly productAutomation?: ProductAutomationTrigger) {}
 
   async listConversations(adminId: string, accountId: string, startCursor?: number, limit = 50): Promise<ExternalPage> {
     const client = await this.ensureClient(adminId, accountId);
@@ -326,7 +327,7 @@ export class XianyuImService {
     }
   }
 
-  async handleExternalEvent(adminId: string, event: XianyuImMessageEvent | XianyuImReadReceiptEvent, options: { deferAutoReply?: boolean } = {}): Promise<{ created: boolean; autoReply?: AutoReplyProcessResult }> {
+  async handleExternalEvent(adminId: string, event: XianyuImMessageEvent | XianyuImReadReceiptEvent, options: { deferAutoReply?: boolean } = {}): Promise<{ created: boolean; autoReply?: AutoReplyProcessResult; automation?: ProductAutomationImEventResult }> {
     if (isReadReceiptEvent(event)) {
       const externalConversationRef = event.externalConversationRef;
       if (!externalConversationRef) return { created: false };
@@ -394,13 +395,14 @@ export class XianyuImService {
       createdAt: effectiveEvent.occurredAt,
       traceId: `xianyu:push:${effectiveEvent.externalMessageRef}`,
     });
-    if (effectiveEvent.direction !== 'inbound' || !['text', 'image'].includes(effectiveEvent.bodyType) || !this.autoReply) return { created: imported.created };
+    const automation = this.productAutomation ? await this.productAutomation.onImEvent(adminId, effectiveEvent) : undefined;
+    if (effectiveEvent.direction !== 'inbound' || !['text', 'image'].includes(effectiveEvent.bodyType) || !this.autoReply) return { created: imported.created, ...(automation ? { automation } : {}) };
     if (options.deferAutoReply) {
       await this.store.enqueueInboundInbox({ adminId, accountId: effectiveEvent.accountId, conversationId: conversation.id, inboundMessageId: imported.message.messageId, externalConversationRef: effectiveEvent.externalConversationRef, externalMessageRef: effectiveEvent.externalMessageRef });
-      return { created: imported.created };
+      return { created: imported.created, ...(automation ? { automation } : {}) };
     }
     const autoReply = await this.autoReply.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: imported.message.messageId, senderName: effectiveEvent.senderName, requestId: `xianyu:auto-reply:${effectiveEvent.externalMessageRef}`, traceId: `xianyu:auto-reply:${effectiveEvent.externalMessageRef}` });
-    return { created: imported.created, autoReply };
+    return { created: imported.created, autoReply, ...(automation ? { automation } : {}) };
   }
 
   async processInboundInbox(record: InboundInboxRecord): Promise<AutoReplyProcessResult | undefined> {

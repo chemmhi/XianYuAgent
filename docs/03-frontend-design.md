@@ -288,6 +288,19 @@ App
 
 阶段 3 只冻结映射，不宣称上述真实 API、WebSocket 或截图回归已经完成。真实高保真截图、浏览器交互、端到端数据和视觉偏差记录属于阶段 5/6 验证证据。
 
+## 13. 商品自动化页面映射（2026-09-22）
+
+| 设计状态 | 实现组件 | 交互边界 | 验收证据 |
+| --- | --- | --- | --- |
+| 商品列表 / 批量入口 | `ProductsPage`、`BatchAutomationDialog` | 勾选商品后批量配置；未配置商品不展示自动化明细 | `01-products-list-*.png`、Chrome/CDP E2E |
+| 付款后自动发货 | `AutomationDrawer` | 只提供发货卡券选择入口；卡券规则与库存细节在卡券管理维护 | `02-payment-after-delivery-*.png` |
+| 拍下未付款自动改价 | `AutomationDrawer` | 配置目标价格与改价后文本；保存时带版本校验 | `03-unpaid-reprice-*.png` |
+| 评价后发送赠品 | `AutomationDrawer` | 只提供赠品卡券选择入口；评价事实与赠品库存由后端执行链维护 | `04-review-gift-*.png` |
+| 超时未评价求评价 | `AutomationDrawer` | 配置首次等待、重复间隔、最大次数和文案 | `05-overdue-review-*.png` |
+| 选择发货卡券 | `CouponPickerDialog` | 复用卡券创建/编辑穿梭框语义；支持搜索、全选、移入/移出、多选与保存计数 | `06-delivery-coupon-picker-*.png` |
+
+桌面与移动固定视口为 `1440×900` / `390×844`。视觉脚本按 6 个状态各生成两张截图，并与 `docs/design/product-automation-interaction-v1.html` 同尺寸比较；当前 strict diff 已执行但尚未达到像素级 PASS。
+
 ## 11. 阶段 3 门禁与遗留风险
 
 ### 11.1 门禁自检

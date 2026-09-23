@@ -28,6 +28,10 @@ import { OpenAISettingsService, createFallbackModelClient } from './openai-setti
 import { AutoReplyActivityService } from './auto-reply-activity.js';
 import { MemoryObjectStorage, S3CompatibleObjectStorage, type ObjectStorage } from './object-storage.js';
 import { XianyuItemDetailService } from './xianyu-item-detail-service.js';
+import { ProductAutomationService } from './product-automation.js';
+import { AutomationWorkflowService, PersistentAutomationExecutionLedger } from './product-automation.js';
+import { ProductAutomationTrigger, ProductAutomationWorker } from './product-automation-trigger.js';
+import { XianyuProductAutomationExecutionAdapter } from './product-automation-xianyu.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -37,6 +41,9 @@ export interface AppRuntime {
   coupons: CouponService;
   orders: OrderService;
   products: ProductService;
+  productAutomation: ProductAutomationService;
+  productAutomationTrigger: ProductAutomationTrigger;
+  productAutomationWorker: ProductAutomationWorker;
   productSync: ProductSyncService;
   credentials: CredentialService;
   apiKeyCredentials: ApiKeyCredentialService;
@@ -83,6 +90,29 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   });
+  const productAutomation = new ProductAutomationService(store, async (input) => {
+    const auditId = createId();
+    await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
+    return auditId;
+  });
+  let xianyu: XianyuMtopClient;
+  let xianyuIm!: XianyuImService;
+  const productAutomationExecution = new XianyuProductAutomationExecutionAdapter(store, () => xianyu, () => xianyuIm, async (input) => {
+    const auditId = createId();
+    await store.recordAudit({ id: auditId, actorType: 'system', actorId: input.adminId, action: input.action, targetRef: input.orderNo ?? input.executionKey, requestId: `automation:${input.executionKey ?? auditId}`, traceId: `automation:${input.executionKey ?? auditId}`, payloadDigest: digestJson(input.payload ?? {}), accountId: input.accountId, createdAt: new Date().toISOString() });
+    return auditId;
+  });
+  const productAutomationWorkflow = new AutomationWorkflowService(productAutomationExecution, new PersistentAutomationExecutionLedger(store));
+  const productAutomationTrigger = new ProductAutomationTrigger(store, productAutomation, productAutomationWorkflow, productAutomationExecution, async (input) => {
+    const auditId = createId();
+    await store.recordAudit({ id: auditId, actorType: 'system', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
+    return auditId;
+  }, {
+    executionMode: config.productAutomationExecutionMode,
+    liveConfirmed: config.productAutomationLiveConfirmed,
+    productTitleAllowlist: config.productAutomationProductTitleAllowlist,
+  });
+  const productAutomationWorker = new ProductAutomationWorker(store, productAutomationTrigger);
   const credentials = new CredentialService(store, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
@@ -115,7 +145,6 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     return auditId;
   });
   const autoReplyActivity = new AutoReplyActivityService(store);
-  let xianyuIm!: XianyuImService;
   const autoReply = new AutoReplyService(store, messages, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
@@ -160,7 +189,6 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       return xianyuIm.sendExternalText(input.adminId, input.accountId, input.conversation.id, input.text, input.requestId, input.traceId);
     }),
   });
-  let xianyu: XianyuMtopClient;
   let productSync: ProductSyncService;
   const qrLogin = new XianyuQrLoginAdapter({
     onStatus: async (status) => {
@@ -244,8 +272,8 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
-  });
-  xianyuIm = new XianyuImService(store, xianyu, messages, autoReply);
+  }, async (input) => productAutomationWorker.processOrderRefresh(input));
+  xianyuIm = new XianyuImService(store, xianyu, messages, autoReply, productAutomationTrigger);
 
   const wsServer = new WebSocketServer({ noServer: true });
   const workspaceRuntime: WorkspaceRuntime = config.agentRuntime === 'pi'
@@ -259,7 +287,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, orders, products, productSync, credentials, apiKeyCredentials, openaiSettings, dashboard, messages, autoReply, autoReplyAgentSettings, autoReplyActivity, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
+    config, store, auth, accounts, coupons, orders, products, productAutomation, productAutomationTrigger, productAutomationWorker, productSync, credentials, apiKeyCredentials, openaiSettings, dashboard, messages, autoReply, autoReplyAgentSettings, autoReplyActivity, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
     server,
     async listen() {
       await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));
@@ -396,7 +424,7 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
 }
 
 async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: ServerResponse): Promise<{ statusCode: number; body: unknown } | undefined> {
-  const { auth, accounts, coupons, orders, products, productSync, credentials, apiKeyCredentials, dashboard, messages, workspace, store, config, xianyuIm } = runtime;
+  const { auth, accounts, coupons, orders, products, productAutomation, productSync, credentials, apiKeyCredentials, dashboard, messages, workspace, store, config, xianyuIm } = runtime;
   if (ctx.path === '/healthz' && ctx.method === 'GET') {
     const health = await store.health();
     const redis = !config.redisUrl || !runtime.redisRealtime
@@ -1016,6 +1044,25 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     });
     if (ctx.method === 'POST') return mutation(runtime, ctx, authContext, undefined, async () => success(ctx, await read()));
     return { statusCode: 200, body: success(ctx, await read()).body };
+  }
+  const productAutomationMatch = ctx.path.match(/^\/api\/v1\/products\/([^/]+)\/automation$/);
+  if (ctx.path === '/api/v1/products/automation/batch' && ctx.method === 'POST') {
+    return mutation(runtime, ctx, authContext, undefined, async () => {
+      const result = await productAutomation.updateBatch({ adminId: authContext.admin.id, productIds: ctx.body.productIds, expectedConfigVersions: ctx.body.expectedConfigVersions, config: ctx.body.config, requestId: ctx.requestId, traceId: ctx.traceId });
+      return success(ctx, result);
+    });
+  }
+  if (productAutomationMatch && ctx.method === 'GET') {
+    const productId = decodeURIComponent(productAutomationMatch[1]);
+    return { statusCode: 200, body: success(ctx, await productAutomation.get(authContext.admin.id, productId)).body };
+  }
+  if (productAutomationMatch && (ctx.method === 'PUT' || ctx.method === 'PATCH')) {
+    const productId = decodeURIComponent(productAutomationMatch[1]);
+    const expectedConfigVersion = parseExpectedProductVersion(ctx);
+    return mutation(runtime, ctx, authContext, undefined, async () => {
+      const saved = await productAutomation.update({ adminId: authContext.admin.id, productId, expectedConfigVersion, config: ctx.body.config, requestId: ctx.requestId, traceId: ctx.traceId });
+      return success(ctx, saved);
+    });
   }
   const productMatch = ctx.path.match(/^\/api\/v1\/products\/([^/]+)$/);
   if (ctx.path === '/api/v1/products/sync' && ctx.method === 'POST') {

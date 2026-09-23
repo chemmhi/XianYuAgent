@@ -2,6 +2,7 @@ import type { AppConfig } from './config.js';
 import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CouponBatchListQuery, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, OrderListQuery, OrderListResult, OrderRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSyncResult, SessionRecord, Store, XianyuProductItem } from './domain.js';
 import { createId, createToken, digestJson, hashPassword, isSessionFresh, sha256, verifyPassword } from './security.js';
 import type { XianyuMtopClient } from './xianyu-mtop.js';
+import type { ProductAutomationTriggerBatchResult } from './product-automation-trigger.js';
 
 export interface AuthContext {
   admin: AdminRecord;
@@ -247,10 +248,16 @@ export interface OrderRefreshResult {
   updatedCount: number;
   hasMore: boolean;
   items: OrderRecord[];
+  automation?: ProductAutomationTriggerBatchResult;
 }
 
 export class OrderService {
-  constructor(private readonly store: Store, private readonly xianyu: XianyuMtopClient, private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => Promise<string>) {}
+  constructor(
+    private readonly store: Store,
+    private readonly xianyu: XianyuMtopClient,
+    private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => Promise<string>,
+    private readonly afterRefresh?: (input: { adminId: string; accountId: string; items: OrderRecord[]; requestId: string; traceId: string }) => Promise<ProductAutomationTriggerBatchResult>,
+  ) {}
 
   async list(adminId: string, query: OrderListQuery): Promise<OrderListResult> {
     if (query.accountId && (!isUuid(query.accountId) || !(await this.store.hasAccountScope(adminId, query.accountId)))) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
@@ -299,7 +306,8 @@ export class OrderService {
     }
     const syncRunId = createId();
     await this.audit({ actorId: input.adminId, action: 'order.refresh.completed', targetRef: syncRunId, requestId: input.requestId, traceId: input.traceId, accountId: account.id, payload: { pagesFetched: fetched.pages.length, fetchedCount: fetched.items.length, createdCount, updatedCount, hasMore: fetched.hasMore } });
-    return { syncRunId, accountId: account.id, pagesFetched: fetched.pages.length, fetchedCount: fetched.items.length, createdCount, updatedCount, hasMore: fetched.hasMore, items };
+    const automation = this.afterRefresh ? await this.afterRefresh({ adminId: input.adminId, accountId: account.id, items, requestId: input.requestId, traceId: input.traceId }) : undefined;
+    return { syncRunId, accountId: account.id, pagesFetched: fetched.pages.length, fetchedCount: fetched.items.length, createdCount, updatedCount, hasMore: fetched.hasMore, items, ...(automation ? { automation } : {}) };
   }
 
   private async resolveAccount(adminId: string, accountId?: string): Promise<AccountRecord> {

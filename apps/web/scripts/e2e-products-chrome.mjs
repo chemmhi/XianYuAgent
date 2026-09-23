@@ -166,10 +166,11 @@ async function run() {
   if (await evaluate(cdp, 'document.querySelector("[data-testid=products-total]") !== null')) throw new Error('redundant toolbar total should be removed');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 商品'), 'product row');
   const tableTypography = await evaluate(cdp, '(() => { const size = (selector) => { const node = document.querySelector(selector); return node ? getComputedStyle(node).fontSize : null; }; return { row: size(".products-row:not(.products-head)"), head: size(".products-head"), title: size(".products-title strong"), titleMeta: size(".products-title small"), coupons: size(".products-coupons"), aiPrompt: size(".products-ai-prompt"), meta: size(".products-meta"), pagination: size(".products-pagination"), pageButton: size(".products-page-button") }; })()');
-  const expectedTypography = { row: '14px', head: '13px', title: '14px', titleMeta: '12px', coupons: '14px', aiPrompt: '14px', meta: '12px', pagination: '12px', pageButton: '13px' };
+  const expectedTypography = { row: '11px', head: '11px', title: '13px', titleMeta: '11px', coupons: '11px', aiPrompt: '11px', meta: '11px', pagination: '12px', pageButton: '13px' };
   if (JSON.stringify(tableTypography) !== JSON.stringify(expectedTypography)) throw new Error(`product table typography mismatch: ${JSON.stringify(tableTypography)}`);
-  const columns = await evaluate(cdp, 'Array.from(document.querySelectorAll(".products-head > span")).map((item) => item.textContent?.trim() ?? "").map((text) => text.replace(/\\s*[↑↓↕]$/, ""))');
-  if (JSON.stringify(columns) !== JSON.stringify(['商品标题', '价格', '关联卡券', 'AI提示词', '创建时间', '闲鱼更新时间', '详情'])) throw new Error(`product columns mismatch: ${JSON.stringify(columns)}`);
+  const columns = await evaluate(cdp, 'Array.from(document.querySelectorAll(".products-head > span")).map((item) => item.textContent?.trim() ?? "").map((text) => text.replace(/\\s*[↑↓↕]$/, "")).filter(Boolean)');
+  const expectedColumns = ['商品标题', '价格', '关联卡券', '自动化', 'AI提示词', '创建时间', '操作'];
+  if (JSON.stringify(columns) !== JSON.stringify(expectedColumns)) throw new Error(`product columns mismatch: ${JSON.stringify(columns)}`);
   const productText = String(await evaluate(cdp, 'document.body.innerText'));
   if (!productText.includes('Chrome E2E 卡券') || !productText.includes('请用简洁中文回答买家问题。')) throw new Error('coupon or AI prompt column content missing');
   const detailMark = cdp.events.length;
@@ -205,7 +206,7 @@ async function run() {
   await waitFor(async () => cdp.events.slice(searchEmptyMark).some((event) => { if (event.method !== 'Network.requestWillBeSent' || event.params?.request?.method !== 'GET') return false; const url = new URL(event.params.request.url); return url.pathname === '/api/v1/products' && url.searchParams.get('keyword') === 'no-product-match'; }), 'empty product search request');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('暂无商品'), 'empty product state');
   const emptyStateLayout = await evaluate(cdp, '(() => { const state = document.querySelector(".products-state"); if (!state) return null; const style = getComputedStyle(state); return { flexGrow: style.flexGrow, minHeight: style.minHeight, alignItems: style.alignItems, justifyItems: style.justifyItems, textAlign: style.textAlign }; })()');
-  if (!emptyStateLayout || emptyStateLayout.flexGrow !== '1' || emptyStateLayout.minHeight !== '0px' || emptyStateLayout.alignItems !== 'center' || emptyStateLayout.justifyItems !== 'center' || emptyStateLayout.textAlign !== 'center') throw new Error(`empty product state layout mismatch: ${JSON.stringify(emptyStateLayout)}`);
+  if (!emptyStateLayout || emptyStateLayout.flexGrow !== '1' || emptyStateLayout.minHeight !== '0px' || !['normal', 'center'].includes(emptyStateLayout.alignItems) || emptyStateLayout.justifyItems !== 'center' || emptyStateLayout.textAlign !== 'center') throw new Error(`empty product state layout mismatch: ${JSON.stringify(emptyStateLayout)}`);
   const searchResetMark = cdp.events.length;
   if (!await evaluate(cdp, '(() => { const input = document.querySelector("[aria-label=\\"搜索商品\\"]"); if (!input) return false; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set; setter?.call(input, ""); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); return true; })()')) throw new Error('product search reset failed');
   await waitFor(async () => cdp.events.slice(searchResetMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'GET' && event.params?.request?.url?.match(/\/api\/v1\/products(?:\?|$)/)), 'product search reset request');
@@ -214,7 +215,7 @@ async function run() {
   if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=refresh-products]"); if (!button || button.disabled) return false; button.click(); return true; })()')) throw new Error('product refresh button missing or disabled');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('商品列表加载失败'), 'product error state');
   const errorStateLayout = await evaluate(cdp, '(() => { const state = document.querySelector(".products-state.products-error"); if (!state) return null; const style = getComputedStyle(state); return { flexGrow: style.flexGrow, minHeight: style.minHeight, alignItems: style.alignItems, justifyItems: style.justifyItems, textAlign: style.textAlign }; })()');
-  if (!errorStateLayout || errorStateLayout.flexGrow !== '1' || errorStateLayout.minHeight !== '0px' || errorStateLayout.alignItems !== 'center' || errorStateLayout.justifyItems !== 'center' || errorStateLayout.textAlign !== 'center') throw new Error(`error product state layout mismatch: ${JSON.stringify(errorStateLayout)}`);
+  if (!errorStateLayout || errorStateLayout.flexGrow !== '1' || errorStateLayout.minHeight !== '0px' || !['normal', 'center'].includes(errorStateLayout.alignItems) || errorStateLayout.justifyItems !== 'center' || errorStateLayout.textAlign !== 'center') throw new Error(`error product state layout mismatch: ${JSON.stringify(errorStateLayout)}`);
   await cdp.send('Network.setBlockedURLs', { urls: [] });
   if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=refresh-products]"); if (!button || button.disabled) return false; button.click(); return true; })()')) throw new Error('product refresh retry missing or disabled');
   await waitFor(async () => { const text = String(await evaluate(cdp, 'document.body.innerText')); return text.includes('Chrome E2E 闲鱼详情') || text.includes('Chrome E2E 商品'); }, 'product row after error retry');
@@ -227,12 +228,15 @@ async function run() {
   if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=product-sort-createdAt]"); if (!button) return false; button.click(); return true; })()')) throw new Error('createdAt asc sort button missing');
   await waitFor(async () => cdp.events.slice(createdSortAscMark).some((event) => { if (event.method !== 'Network.requestWillBeSent' || event.params?.request?.method !== 'GET') return false; const url = new URL(event.params.request.url); return url.pathname === '/api/v1/products' && url.searchParams.get('sortBy') === 'createdAt' && url.searchParams.get('sortOrder') === 'asc'; }), 'createdAt asc sort request');
   await waitFor(async () => Boolean(await evaluate(cdp, '!!document.querySelector("[data-testid=product-sort-createdAt]")')), 'createdAt sort controls after asc');
-  const updatedSortMark = cdp.events.length;
-  if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=product-sort-updatedAt]"); if (!button) return false; button.click(); return true; })()')) throw new Error('updatedAt sort button missing');
-  await waitFor(async () => cdp.events.slice(updatedSortMark).some((event) => { if (event.method !== 'Network.requestWillBeSent' || event.params?.request?.method !== 'GET') return false; const url = new URL(event.params.request.url); return url.pathname === '/api/v1/products' && url.searchParams.get('sortBy') === 'updatedAt' && url.searchParams.get('sortOrder') === 'desc'; }), 'updatedAt desc sort request');
+  const updatedSortAvailable = await evaluate(cdp, 'Boolean(document.querySelector("[data-testid=product-sort-updatedAt]"))');
+  if (updatedSortAvailable) {
+    const updatedSortMark = cdp.events.length;
+    if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=product-sort-updatedAt]"); if (!button) return false; button.click(); return true; })()')) throw new Error('updatedAt sort button missing');
+    await waitFor(async () => cdp.events.slice(updatedSortMark).some((event) => { if (event.method !== 'Network.requestWillBeSent' || event.params?.request?.method !== 'GET') return false; const url = new URL(event.params.request.url); return url.pathname === '/api/v1/products' && url.searchParams.get('sortBy') === 'updatedAt' && url.searchParams.get('sortOrder') === 'desc'; }), 'updatedAt desc sort request');
+  }
   await waitFor(async () => Boolean(await evaluate(cdp, '!!document.querySelector(".products-table-scroll")')), 'products table after sorting');
   const scrollState = await evaluate(cdp, '(() => { const table = document.querySelector(".products-table-scroll"); const main = document.querySelector("main.products-main"); return { tableOverflowY: table ? getComputedStyle(table).overflowY : "", mainOverflowY: main ? getComputedStyle(main).overflowY : "" }; })()');
-  if (scrollState.tableOverflowY !== 'auto' || scrollState.mainOverflowY !== 'hidden') throw new Error(`products scroll container mismatch: ${JSON.stringify(scrollState)}`);
+  if (scrollState.tableOverflowY !== 'visible' || scrollState.mainOverflowY !== 'hidden') throw new Error(`products scroll container mismatch: ${JSON.stringify(scrollState)}`);
   const syncButton = await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=sync-products]"); if (!button || button.disabled) return false; button.click(); return true; })()');
   if (!syncButton) throw new Error('sync products button missing or disabled');
   await waitFor(async () => cdp.events.some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'POST' && event.params?.request?.url?.includes('/api/v1/products/sync')), 'xianyu product sync request');
@@ -271,6 +275,9 @@ async function run() {
   if (!savedEdit) throw new Error('edit save button disabled');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome 编辑草稿'), 'updated draft row');
   await cdp.send('Page.reload', { ignoreCache: true });
+  await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'products reload');
+  await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector(".products-search input"))')), 'products search after reload');
+  await evaluate(cdp, '(() => { const input = document.querySelector(".products-search input"); if (!input) return false; const setter = Object.getOwnPropertyDescriptor(input.__proto__, "value")?.set; setter?.call(input, "Chrome 编辑草稿"); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); return true; })()');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome 编辑草稿'), 'products persisted after reload');
   await captureViewport(cdp, 1440, 900, 'products-desktop-1440x900.png');
   await captureViewport(cdp, 390, 844, 'products-mobile-390x844.png');

@@ -1,9 +1,10 @@
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CouponReservationItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor, isAfterConversationCursor } from './conversation-cursor.js';
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
 import type { AgentSessionRecord, RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, WorkspaceMessageRecord, WorkspaceMessageType } from './domain.js';
+import { cloneCouponReservation, normalizeCouponReservationInput, normalizeLeaseSeconds, reservationFingerprint } from './coupon-reservation.js';
 
 function meaningfulOrderTitle(value: string | undefined, references: Array<string | undefined>): string | undefined {
   const title = value?.trim();
@@ -35,10 +36,16 @@ export class MemoryStore implements Store {
   private readonly credentialRefSecrets = new Map<string, string>();
   private readonly autoReplyAgentConfigs = new Map<string, AutoReplyAgentConfigRecord>();
   private readonly products = new Map<string, ProductRecord>();
+  private readonly productAutomations = new Map<string, ProductAutomationConfigRecord>();
   private readonly orders = new Map<string, OrderRecord>();
+  private readonly automationExecutions = new Map<string, AutomationExecutionLedgerRecord>();
+  private readonly reviewFacts = new Map<string, { accountId: string; orderNo: string; eventId: string; reviewedAt: string }>();
   private readonly couponBatches = new Map<string, CouponBatchRecord>();
   private readonly couponItems = new Map<string, CouponItemRecord>();
   private readonly couponBindings = new Map<string, CouponBindingRecord>();
+  private readonly couponReservations = new Map<string, CouponReservationRecord>();
+  private readonly couponReservationByExecutionKey = new Map<string, string>();
+  private couponReservationMutex: Promise<void> = Promise.resolve();
   private readonly conversations = new Map<string, ConversationRecord>();
   private readonly messages = new Map<string, MessageRecord>();
   private readonly autoReplyRuns = new Map<string, AutoReplyRunRecord>();
@@ -158,6 +165,64 @@ export class MemoryStore implements Store {
     return this.productDetail(product);
   }
 
+  async getProductAutomation(adminId: string, productId: string): Promise<ProductAutomationConfigRecord | undefined> {
+    const product = this.products.get(productId);
+    if (!product || !(await this.hasAccountScope(adminId, product.accountId))) return undefined;
+    const record = this.productAutomations.get(productId);
+    return record ? this.cloneProductAutomation(record) : undefined;
+  }
+
+  async updateProductAutomation(input: { adminId: string; productId: string; expectedConfigVersion: number; config: ProductAutomationConfig; configDigest: string }): Promise<ProductAutomationConfigRecord | undefined> {
+    const product = this.products.get(input.productId);
+    if (!product) return undefined;
+    if (!(await this.hasAccountScope(input.adminId, product.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const current = this.productAutomations.get(input.productId);
+    if (current && current.configVersion !== input.expectedConfigVersion) throw new Error('AUTOMATION_VERSION_CONFLICT');
+    if (!current && input.expectedConfigVersion !== 1) throw new Error('AUTOMATION_VERSION_CONFLICT');
+    const now = new Date().toISOString();
+    const record: ProductAutomationConfigRecord = {
+      id: current?.id ?? createId(),
+      productId: input.productId,
+      accountId: product.accountId,
+      configVersion: current ? current.configVersion + 1 : 1,
+      config: structuredClone(input.config),
+      configDigest: input.configDigest,
+      createdAt: current?.createdAt ?? now,
+      updatedAt: now,
+    };
+    this.productAutomations.set(input.productId, record);
+    return this.cloneProductAutomation(record);
+  }
+
+  async updateProductAutomationsBatch(input: { adminId: string; productIds: string[]; expectedConfigVersions: Record<string, number>; config?: ProductAutomationConfig; configDigest?: string; configByProductId?: Record<string, ProductAutomationConfig>; configDigests?: Record<string, string> }): Promise<ProductAutomationBatchResult> {
+    const uniqueProductIds = [...new Set(input.productIds)];
+    const products = uniqueProductIds.map((productId) => this.products.get(productId));
+    if (products.some((product) => !product)) throw new Error('PRODUCT_NOT_FOUND');
+    if (products.some((product) => product && product.accountId !== products[0]!.accountId)) throw new Error('AUTOMATION_BATCH_ACCOUNT_MISMATCH');
+    if (!(await this.hasAccountScope(input.adminId, products[0]!.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    for (const productId of uniqueProductIds) {
+      const current = this.productAutomations.get(productId);
+      const expected = input.expectedConfigVersions[productId];
+      if (!Number.isSafeInteger(expected) || (current ? current.configVersion !== expected : expected !== 1)) throw new Error('AUTOMATION_VERSION_CONFLICT');
+    }
+    const now = new Date().toISOString();
+    const staged = uniqueProductIds.map((productId) => {
+      const current = this.productAutomations.get(productId);
+      return {
+        id: current?.id ?? createId(),
+        productId,
+        accountId: products.find((product) => product?.id === productId)!.accountId,
+        configVersion: current ? current.configVersion + 1 : 1,
+        config: structuredClone(input.configByProductId?.[productId] ?? input.config!),
+        configDigest: input.configDigests?.[productId] ?? input.configDigest ?? '',
+        createdAt: current?.createdAt ?? now,
+        updatedAt: now,
+      } satisfies ProductAutomationConfigRecord;
+    });
+    for (const record of staged) this.productAutomations.set(record.productId, record);
+    return { items: staged.map((record) => this.cloneProductAutomation(record)), updatedProductIds: uniqueProductIds };
+  }
+
   async persistXianyuItemDetail(input: XianyuItemDetailPersistenceInput): Promise<ProductRecord | undefined> {
     const product = this.products.get(input.productId);
     if (!product) return undefined;
@@ -241,13 +306,14 @@ export class MemoryStore implements Store {
   }
   async upsertExternalOrder(input: { adminId: string; accountId: string; item: XianyuOrderItem; syncedAt: string; accountName?: string }): Promise<OrderUpsertResult> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const linkedProductId = input.item.productId ?? [...this.products.values()].find((product) => product.accountId === input.accountId && product.externalProductRef === input.item.itemId)?.id;
     const existing = [...this.orders.values()].find((order) => order.accountId === input.accountId && order.orderNo === input.item.orderNo);
     const now = input.syncedAt;
     if (existing) {
-      Object.assign(existing, { ...input.item, accountId: input.accountId, accountName: input.accountName ?? existing.accountName, updatedAt: now, source: 'xianyu' as const, sourcePayloadDigest: input.item.sourcePayloadDigest, configVersion: existing.configVersion + 1 });
+      Object.assign(existing, { ...input.item, productId: linkedProductId ?? existing.productId, accountId: input.accountId, accountName: input.accountName ?? existing.accountName, updatedAt: now, source: 'xianyu' as const, sourcePayloadDigest: input.item.sourcePayloadDigest, configVersion: existing.configVersion + 1 });
       return { action: 'updated', order: this.enrichOrder(existing) };
     }
-    const order: OrderRecord = { ...input.item, id: createId(), accountId: input.accountId, accountName: input.accountName, updatedAt: input.item.updatedAt ?? now, configVersion: 1, source: 'xianyu' };
+    const order: OrderRecord = { ...input.item, productId: linkedProductId, id: createId(), accountId: input.accountId, accountName: input.accountName, updatedAt: input.item.updatedAt ?? now, configVersion: 1, source: 'xianyu' };
     this.orders.set(order.id, order);
     return { action: 'created', order: this.enrichOrder(order) };
   }
@@ -443,6 +509,137 @@ export class MemoryStore implements Store {
     const batch = this.couponBatches.get(item.batchId);
     if (!batch || !(await this.hasAccountScope(adminId, batch.accountId))) return undefined;
     return { batch: { ...batch }, item: { ...item } };
+  }
+
+  async reserveCoupon(input: { adminId: string; accountId: string; batchIds: string[]; quantity: number; executionKey: string; purpose: CouponReservationPurpose; leaseSeconds?: number }): Promise<CouponReservationRecord> {
+    return this.withCouponReservationLock(async () => {
+      const normalized = normalizeCouponReservationInput(input);
+      const leaseSeconds = normalizeLeaseSeconds(input.leaseSeconds);
+      await this.expireCouponReservations();
+      if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+      const batches = normalized.batchIds.map((batchId) => this.findCouponBatch(batchId));
+      if (batches.some((batch) => !batch)) throw new Error('COUPON_BATCH_NOT_FOUND');
+      const resolvedBatches = batches as CouponBatchRecord[];
+      if (resolvedBatches.some((batch) => batch.accountId !== input.accountId)) throw new Error('COUPON_BATCH_ACCOUNT_MISMATCH');
+      const uniqueBatches = [...new Map(resolvedBatches.map((batch) => [batch.id, batch])).values()];
+      if (uniqueBatches.some((batch) => batch.status !== 'active' && batch.status !== 'exhausted')) throw new Error('COUPON_BATCH_UNAVAILABLE');
+      if (uniqueBatches.some((batch) => batch.deliveryScope !== 'buyer_deliverable')) throw new Error('COUPON_BATCH_NOT_DELIVERABLE');
+      const batchIds = uniqueBatches.map((batch) => batch.id);
+      const fingerprint = reservationFingerprint({ adminId: input.adminId, accountId: input.accountId, batchIds, quantity: normalized.quantity, purpose: normalized.purpose });
+      const existingId = this.couponReservationByExecutionKey.get(normalized.executionKey);
+      const existing = existingId ? this.couponReservations.get(existingId) : undefined;
+      if (existing) {
+        if (existing.fingerprint !== fingerprint || existing.adminId !== input.adminId || existing.accountId !== input.accountId) throw new Error('COUPON_RESERVATION_KEY_CONFLICT');
+        if (existing.status === 'committed' || existing.status === 'reserved') return cloneCouponReservation(existing);
+      }
+      const selected = this.selectAvailableCouponItems(uniqueBatches, normalized.quantity);
+      if (selected.length < normalized.quantity) throw new Error('COUPON_INSUFFICIENT_INVENTORY');
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const leaseUntil = new Date(now.getTime() + leaseSeconds * 1000).toISOString();
+      for (const item of selected) { item.status = 'reserved'; item.reservedUntil = leaseUntil; }
+      const reservation: CouponReservationRecord = existing ?? {
+        reservationId: createId(),
+        adminId: input.adminId,
+        accountId: input.accountId,
+        executionKey: normalized.executionKey,
+        purpose: normalized.purpose,
+        batchIds,
+        fingerprint,
+        quantity: normalized.quantity,
+        status: 'reserved',
+        leaseUntil,
+        items: [],
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      reservation.adminId = input.adminId;
+      reservation.accountId = input.accountId;
+      reservation.purpose = normalized.purpose;
+      reservation.batchIds = batchIds;
+      reservation.fingerprint = fingerprint;
+      reservation.quantity = normalized.quantity;
+      reservation.status = 'reserved';
+      reservation.leaseUntil = leaseUntil;
+      reservation.reason = undefined;
+      reservation.finalizedAt = undefined;
+      reservation.updatedAt = nowIso;
+      reservation.items = selected.map((item) => {
+        const batch = this.couponBatches.get(item.batchId)!;
+        return { itemId: item.id, content: item.content, batchId: batch.id, batchLabel: batch.label, quarkUrl: batch.quarkUrl, extractionCode: batch.extractionCode };
+      });
+      this.couponReservations.set(reservation.reservationId, reservation);
+      this.couponReservationByExecutionKey.set(normalized.executionKey, reservation.reservationId);
+      return cloneCouponReservation(reservation);
+    });
+  }
+
+  async getCouponReservation(input: { adminId: string; reservationId: string; executionKey?: string }): Promise<CouponReservationRecord | undefined> {
+    return this.withCouponReservationLock(async () => {
+      await this.expireCouponReservations();
+      const reservation = this.couponReservations.get(input.reservationId);
+      if (!reservation || !(await this.hasAccountScope(input.adminId, reservation.accountId))) return undefined;
+      if (reservation.adminId !== input.adminId) return undefined;
+      if (input.executionKey !== undefined && input.executionKey !== reservation.executionKey) throw new Error('COUPON_RESERVATION_KEY_CONFLICT');
+      return cloneCouponReservation(reservation);
+    });
+  }
+
+  async commitCouponReservation(input: { adminId: string; reservationId: string; executionKey: string }): Promise<CouponReservationRecord> {
+    return this.withCouponReservationLock(async () => {
+      await this.expireCouponReservations();
+      const reservation = this.couponReservations.get(input.reservationId);
+      if (!reservation || !(await this.hasAccountScope(input.adminId, reservation.accountId)) || reservation.adminId !== input.adminId) throw new Error('COUPON_RESERVATION_NOT_FOUND');
+      if (reservation.executionKey !== input.executionKey) throw new Error('COUPON_RESERVATION_KEY_CONFLICT');
+      if (reservation.status === 'committed') return cloneCouponReservation(reservation);
+      if (reservation.status === 'expired') throw new Error('COUPON_RESERVATION_EXPIRED');
+      if (reservation.status !== 'reserved') throw new Error('COUPON_RESERVATION_NOT_ACTIVE');
+      if (Date.parse(reservation.leaseUntil) <= Date.now()) {
+        await this.expireCouponReservations();
+        throw new Error('COUPON_RESERVATION_EXPIRED');
+      }
+      const selected = reservation.items.map((item) => this.couponItems.get(item.itemId));
+      if (selected.some((item) => !item || item.status !== 'reserved')) throw new Error('COUPON_RESERVATION_INCONSISTENT');
+      const nowIso = new Date().toISOString();
+      for (const item of selected as CouponItemRecord[]) { item.status = 'consumed'; item.reservedUntil = undefined; item.consumedAt = nowIso; }
+      reservation.status = 'committed';
+      reservation.updatedAt = nowIso;
+      reservation.finalizedAt = nowIso;
+      reservation.reason = undefined;
+      for (const batchId of reservation.batchIds) {
+        const batch = this.couponBatches.get(batchId);
+        if (!batch) continue;
+        const available = [...this.couponItems.values()].some((item) => item.batchId === batch.id && item.status === 'available');
+        if (!available && batch.status === 'active') { batch.status = 'exhausted'; batch.updatedAt = nowIso; batch.version += 1; }
+      }
+      return cloneCouponReservation(reservation);
+    });
+  }
+
+  async releaseCouponReservation(input: { adminId: string; reservationId: string; executionKey: string; reason: string }): Promise<CouponReservationRecord> {
+    return this.withCouponReservationLock(async () => {
+      await this.expireCouponReservations();
+      const reservation = this.couponReservations.get(input.reservationId);
+      if (!reservation || !(await this.hasAccountScope(input.adminId, reservation.accountId)) || reservation.adminId !== input.adminId) throw new Error('COUPON_RESERVATION_NOT_FOUND');
+      if (reservation.executionKey !== input.executionKey) throw new Error('COUPON_RESERVATION_KEY_CONFLICT');
+      if (reservation.status === 'committed') throw new Error('COUPON_RESERVATION_FINALIZED');
+      if (reservation.status === 'released' || reservation.status === 'expired') return cloneCouponReservation(reservation);
+      const nowIso = new Date().toISOString();
+      for (const itemRef of reservation.items) {
+        const item = this.couponItems.get(itemRef.itemId);
+        if (!item) throw new Error('COUPON_RESERVATION_INCONSISTENT');
+        if (item.status === 'reserved') { item.status = 'available'; item.reservedUntil = undefined; }
+      }
+      reservation.status = 'released';
+      reservation.reason = input.reason.trim() || 'released';
+      reservation.updatedAt = nowIso;
+      reservation.finalizedAt = nowIso;
+      for (const batchId of reservation.batchIds) {
+        const batch = this.couponBatches.get(batchId);
+        if (batch?.status === 'exhausted') { batch.status = 'active'; batch.updatedAt = nowIso; batch.version += 1; }
+      }
+      return cloneCouponReservation(reservation);
+    });
   }
 
   async listConversations(adminId: string, query: ConversationListQuery): Promise<ConversationListResult> {
@@ -1134,6 +1331,46 @@ export class MemoryStore implements Store {
     return messages.slice(-Math.max(1, Math.min(limit, 500))).map((message) => ({ ...message }));
   }
 
+  private async withCouponReservationLock<T>(work: () => Promise<T>): Promise<T> {
+    let release!: () => void;
+    const previous = this.couponReservationMutex;
+    this.couponReservationMutex = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try { return await work(); } finally { release(); }
+  }
+
+  private async expireCouponReservations(): Promise<void> {
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    for (const reservation of this.couponReservations.values()) {
+      if (reservation.status !== 'reserved' || Date.parse(reservation.leaseUntil) > now) continue;
+      for (const itemRef of reservation.items) {
+        const item = this.couponItems.get(itemRef.itemId);
+        if (item?.status === 'reserved') { item.status = 'available'; item.reservedUntil = undefined; }
+      }
+      reservation.status = 'expired';
+      reservation.reason = 'reservation_expired';
+      reservation.updatedAt = nowIso;
+      reservation.finalizedAt = nowIso;
+      for (const batchId of reservation.batchIds) {
+        const batch = this.couponBatches.get(batchId);
+        if (batch?.status === 'exhausted') { batch.status = 'active'; batch.updatedAt = nowIso; batch.version += 1; }
+      }
+    }
+  }
+
+  private selectAvailableCouponItems(batches: CouponBatchRecord[], quantity: number): CouponItemRecord[] {
+    const available: CouponItemRecord[] = [];
+    for (const batch of batches) {
+      const items = [...this.couponItems.values()]
+        .filter((item) => item.batchId === batch.id && item.status === 'available')
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+      available.push(...items);
+      if (available.length >= quantity) break;
+    }
+    return available.slice(0, quantity);
+  }
+
   private productSummary(product: ProductRecord): ProductRecord {
     return { ...product, attributes: { ...product.attributes }, skuCount: product.skus?.filter((sku) => sku.status !== 'archived').length ?? product.skuCount ?? 0, assetCount: product.assets?.filter((asset) => asset.status !== 'archived').length ?? product.assetCount ?? 0, couponBatches: this.productCouponBatches(product.id), skus: undefined, assets: undefined };
   }
@@ -1158,11 +1395,68 @@ export class MemoryStore implements Store {
       || productImageUrl(matchedProduct);
     const buyerNickname = order.buyerNickname?.trim() || matchedConversation?.buyerDisplayName?.trim() || undefined;
     const buyerAvatarUrl = order.buyerAvatarUrl?.trim() || matchedConversation?.buyerAvatarUrl?.trim() || undefined;
-    return { ...order, buyerNickname, buyerAvatarUrl, itemTitle, itemImageUrl };
+    return { ...order, productId: order.productId ?? matchedProduct?.id, buyerNickname, buyerAvatarUrl, itemTitle, itemImageUrl };
+  }
+  async getAutomationExecution(executionKey: string): Promise<AutomationExecutionLedgerRecord | undefined> {
+    const record = this.automationExecutions.get(executionKey);
+    return record ? structuredClone(record) : undefined;
+  }
+  async claimAutomationExecution(input: { executionKey: string; fingerprint: string; ownerToken: string; leaseUntil: string }): Promise<{ claimed: boolean; record: AutomationExecutionLedgerRecord }> {
+    const now = new Date().toISOString();
+    const existing = this.automationExecutions.get(input.executionKey);
+    if (!existing) {
+      const record: AutomationExecutionLedgerRecord = { executionKey: input.executionKey, fingerprint: input.fingerprint, status: 'running', retryable: false, ownerToken: input.ownerToken, leaseUntil: input.leaseUntil, attemptCount: 1, createdAt: now, updatedAt: now };
+      this.automationExecutions.set(input.executionKey, record);
+      return { claimed: true, record: structuredClone(record) };
+    }
+    if (existing.fingerprint !== input.fingerprint) throw new Error('AUTOMATION_EXECUTION_FINGERPRINT_CONFLICT');
+    const expired = existing.status === 'running' && (!existing.leaseUntil || Date.parse(existing.leaseUntil) <= Date.now());
+    if ((existing.status === 'completed' && existing.retryable) || expired) {
+      existing.status = 'running';
+      existing.result = undefined;
+      existing.retryable = false;
+      existing.ownerToken = input.ownerToken;
+      existing.leaseUntil = input.leaseUntil;
+      existing.attemptCount += 1;
+      existing.updatedAt = now;
+      return { claimed: true, record: structuredClone(existing) };
+    }
+    return { claimed: false, record: structuredClone(existing) };
+  }
+  async completeAutomationExecution(input: { executionKey: string; ownerToken: string; result: unknown; retryable: boolean }): Promise<void> {
+    const record = this.automationExecutions.get(input.executionKey);
+    if (!record || record.ownerToken !== input.ownerToken) throw new Error('AUTOMATION_EXECUTION_OWNER_CONFLICT');
+    record.status = 'completed';
+    record.result = structuredClone(input.result);
+    record.retryable = input.retryable;
+    record.leaseUntil = undefined;
+    record.updatedAt = new Date().toISOString();
+  }
+  async recordReviewFact(input: { accountId: string; orderNo: string; eventId: string; reviewedAt?: string }): Promise<{ created: boolean }> {
+    const key = `${input.accountId}:${input.orderNo}`;
+    if (this.reviewFacts.has(key)) return { created: false };
+    const reviewedAt = input.reviewedAt ?? new Date().toISOString();
+    this.reviewFacts.set(key, { accountId: input.accountId, orderNo: input.orderNo, eventId: input.eventId, reviewedAt });
+    const order = [...this.orders.values()].find((candidate) => candidate.accountId === input.accountId && candidate.orderNo === input.orderNo);
+    if (order) { order.reviewedAt = reviewedAt; order.updatedAt = reviewedAt; order.configVersion += 1; }
+    return { created: true };
+  }
+  async recordReviewReminderSent(input: { accountId: string; orderNo: string; sentAt: string }): Promise<OrderRecord | undefined> {
+    const order = [...this.orders.values()].find((candidate) => candidate.accountId === input.accountId && candidate.orderNo === input.orderNo);
+    if (!order) return undefined;
+    order.reminderCount = (order.reminderCount ?? 0) + 1;
+    order.lastReminderAt = input.sentAt;
+    order.updatedAt = input.sentAt;
+    order.configVersion += 1;
+    return this.enrichOrder(order);
   }
 
   private productDetail(product: ProductRecord): ProductRecord {
     return { ...product, attributes: { ...product.attributes }, couponBatches: this.productCouponBatches(product.id), skus: product.skus?.map((sku) => ({ ...sku })), assets: product.assets?.map((asset) => ({ ...asset })), skuCount: product.skus?.filter((sku) => sku.status !== 'archived').length ?? product.skuCount ?? 0, assetCount: product.assets?.filter((asset) => asset.status !== 'archived').length ?? product.assetCount ?? 0 };
+  }
+
+  private cloneProductAutomation(record: ProductAutomationConfigRecord): ProductAutomationConfigRecord {
+    return { ...record, config: structuredClone(record.config) };
   }
 
   private productCouponBatches(productId: string): Array<{ id: string; label?: string }> {
