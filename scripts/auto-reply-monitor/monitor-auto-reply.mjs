@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acquireMonitorFlag } from './monitor-auto-reply-flag.mjs';
+import { formatShanghaiTimestamp } from './monitor-auto-reply-time.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const args = new Set(process.argv.slice(2));
@@ -39,7 +40,7 @@ function block(label, value) {
 }
 
 function formatEvent(event) {
-  const time = Number.isNaN(Date.parse(event.ts ?? '')) ? new Date().toISOString() : new Date(event.ts).toISOString();
+  const time = formatShanghaiTimestamp(event.ts);
   const run = event.runId ?? '-';
   const trace = event.traceId ?? '-';
   const label = `${time} [${run}] [${event.phase ?? 'unknown'}/${event.event ?? 'unknown'}]`;
@@ -178,14 +179,14 @@ async function cleanup() {
   await flagLease.release();
   if (!stopped) {
     stopped = true;
-    console.log(`AUTO_REPLY_GOD_VIEW_STOPPED ${new Date().toISOString()}`);
+    console.log(`AUTO_REPLY_GOD_VIEW_STOPPED ${formatShanghaiTimestamp()}`);
   }
 }
 
 process.once('SIGINT', async () => { await cleanup(); process.exit(0); });
 process.once('SIGTERM', async () => { await cleanup(); process.exit(0); });
 
-console.log(`AUTO_REPLY_GOD_VIEW_STARTED ${new Date().toISOString()}`);
+console.log(`AUTO_REPLY_GOD_VIEW_STARTED ${formatShanghaiTimestamp()}`);
 console.log('正在等待自动回复事件；Ctrl+C 退出。已启用本地 trace 开关。');
 console.log('提示：本命令只监控 trace，不启动 API、worker 或闲鱼网关监听；请先运行 npm run dev。');
 do {

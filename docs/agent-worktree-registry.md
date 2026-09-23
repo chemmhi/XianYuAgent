@@ -143,6 +143,7 @@
 | `root/implement_coupon_reservations` | `product-automation-coupon-reservations` | `codex/product-automation-coupon-reservations` | `F:\ChenHai\Project\XianYuAgent-product-automation-coupon-reservations` | Codex `/root` delegated agent | `2026-09-23 09:23:02 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 卡券 reservation reserve/commit/release 存储、迁移与并发/幂等/过期测试；基于 4071eea，独立 worktree。 |
 
 | `root` | `auto-reply-monitor-20260923` | `codex/auto-reply-monitor-20260923` | `F:\ChenHai\Project\XianYuAgent-auto-reply-monitor-20260923` | Codex `/root` | `2026-09-23 13:28:47 +08:00` | `MERGED` | `f03cc6e7e5bbe8de9aa403fbf152dc5bdd05f1b3` | `-` | 新增根目录自动回复上帝视角监控命令、运行时 trace tap 与真实验证；API typecheck/build、自动回复 unit 144/144、god-view 定向测试、Node CLI smoke、diff-check 通过。 |
+| `root` | `auto-reply-monitor-timezone-20260923` | `codex/auto-reply-monitor-timezone-20260923` | `F:\ChenHai\Project\XianYuAgent-auto-reply-monitor-timezone-20260923` | Codex `/root` | `2026-09-23 16:12:00 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 修复 `monitor:auto-reply` 事件、启动和停止日志的时区，统一输出上海时区并补充 5 个回归测试；Node 测试、CLI smoke、git diff --check 通过；仓库 typecheck 因 worktree 缺少 `tsc` 被阻塞。 |
 
 ## 登记维护规则
 
