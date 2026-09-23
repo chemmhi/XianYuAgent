@@ -35,7 +35,14 @@ globalThis.fetch = async (input, init = {}) => {
     });
   }
   if (url.hostname === 'h5api.m.goofish.com') {
-    return new Response(JSON.stringify({ ret: ['SUCCESS::调用成功'], data: {} }), {
+    const api = url.searchParams.get('api');
+    if (api === 'mtop.taobao.idlemessage.pc.loginuser.get') {
+      return new Response(JSON.stringify({ ret: ['FAIL_SYS_SESSION_EXPIRED::登录态已过期'], data: {} }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return new Response(JSON.stringify({ ret: ['SUCCESS::调用成功'], data: { accessToken: 'refreshed-im-token' } }), {
       status: 200,
       headers: {
         'content-type': 'application/json',

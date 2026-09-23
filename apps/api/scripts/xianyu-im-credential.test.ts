@@ -59,4 +59,30 @@ describe('xianyu IM credential refresh', () => {
     await assert.rejects(() => service.startListener('admin-1', 'account-1'), (error: unknown) => error instanceof ServiceError && error.code === 'CREDENTIAL_MISSING');
     assert.equal(account.status, 'expired');
   });
+
+  it('waits for the IM session before uploading an image', async () => {
+    const order: string[] = [];
+    const store = {
+      getConversation: async () => ({ id: 'conversation-1', accountId: 'account-1', externalConversationRef: 'conversation-external', buyerRef: 'buyer-1' }),
+    };
+    const mtop = {
+      uploadChatImage: async () => {
+        order.push('upload');
+        return { success: true, accountInvalid: false, url: 'https://img.example/image.png', width: 1, height: 1, cookieHeader: '' };
+      },
+    };
+    const messages = {
+      createMessage: async () => ({ message: { messageId: 'message-1', bodyType: 'image' } }),
+    };
+    const service = new XianyuImService(store as never, mtop as never, messages as never);
+    const fakeClient = {
+      connect: async () => { order.push('connect'); },
+      sendImage: async () => { order.push('sendImage'); return { externalMessageRef: 'external-message-1' }; },
+    };
+    (service as unknown as { clients: Map<string, unknown> }).clients.set('admin-1:account-1', fakeClient);
+
+    await service.sendImage('admin-1', 'account-1', 'conversation-1', { filename: 'image.png', contentType: 'image/png', data: Buffer.from([1]) }, 'request-1', 'trace-1');
+
+    assert.deepEqual(order, ['connect', 'upload', 'sendImage']);
+  });
 });

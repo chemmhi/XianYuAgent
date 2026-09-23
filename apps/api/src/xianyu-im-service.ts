@@ -138,9 +138,13 @@ export class XianyuImService {
     const conversation = await this.getConversation(adminId, accountId, conversationId);
     const externalRef = conversation.externalConversationRef;
     if (!externalRef) throw new ServiceError(409, 'EXTERNAL_CONVERSATION_MISSING', 'conversation is not linked to xianyu');
+    // Image uploads use the MTOP/browser cookie session while text messages
+    // use the already-connected IM socket. Wait for the account-scoped IM
+    // session first so a background reconnect/token refresh cannot race the
+    // upload and make it read a stale cookie snapshot.
+    const client = await this.ensureClient(adminId, accountId);
     const upload = await this.mtop.uploadChatImage(adminId, accountId, file.filename, file.contentType, file.data);
     if (!upload.success || !upload.url) throw new ServiceError(upload.accountInvalid ? 401 : 502, upload.errorCode ?? 'IMAGE_UPLOAD_FAILED', upload.message ?? 'unable to upload image');
-    const client = await this.ensureClient(adminId, accountId);
     const sent = await this.withAccountFailure(adminId, accountId, () => client.sendImage(externalRef, conversation.buyerRef, upload.url!, upload.width, upload.height));
     const created = await this.messages.createMessage({
       adminId,

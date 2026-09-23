@@ -27,7 +27,7 @@ const ADJUST_PRICE_API = 'mtop.taobao.idle.trade.user.adjust.price';
 const ORDER_DETAIL_API = 'mtop.idle.web.trade.order.detail';
 const DEFAULT_SOLD_ORDER_PAGE_SIZE = 30;
 
-export interface MtopCredential { cookieHeader?: string; metadata?: Record<string, string>; }
+export interface MtopCredential { cookieHeader?: string; deviceId?: string; metadata?: Record<string, string>; }
 
 export interface MtopResult {
   success: boolean;
@@ -161,9 +161,10 @@ export class XianyuMtopClient {
     }
 
     // The IM WebSocket can remain connected after the browser-side MTOP
-    // session expires. Refresh the MTOP login cookie once, then retry the
-    // upload with the newly persisted scoped cookie snapshot.
-    const refreshed = await this.call(adminId, accountId, 'mtop.taobao.idlemessage.pc.loginuser.get', '1.0', {}, { spm_cnt: 'a21ybx.im.0.0', needLogin: 'false' });
+    // session expires. Re-run the IM token flow so MTOP can rotate the
+    // persisted Cookie snapshot, then retry the upload with that cookie.
+    const credential = await this.loadCredential(adminId, accountId);
+    const refreshed = await this.fetchImToken(adminId, accountId, credential?.deviceId ?? `xianyu-${accountId}`);
     if (!refreshed.success) return firstAttempt;
     const finalAttempt = await this.uploadChatImageOnce(adminId, accountId, filename, contentType, data);
     if (!finalAttempt.success) this.reportFailure({ adminId, accountId, api: 'stream-upload.goofish.com/api/upload.api', ...finalAttempt });
