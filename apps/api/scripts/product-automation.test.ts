@@ -107,8 +107,9 @@ test('payment automation is ordered, idempotent, quantity-aware and never confir
   unknownPort.couponSend = result('unknown', 'TIMEOUT');
   const unknownWorkflow = new AutomationWorkflowService(unknownPort);
   const unknown = await unknownWorkflow.handlePaymentPaid({ config, order: baseOrder(), eventId: 'paid-unknown' });
-  assert.equal(unknown.status, 'unknown');
-  assert.ok(unknownPort.calls.includes('release:TIMEOUT'));
+  assert.equal(unknown.status, 'manual_review');
+  assert.ok(!unknownPort.calls.includes('release:TIMEOUT'), 'uncertain coupon delivery must keep the reservation held');
+  assert.ok(unknownPort.calls.includes('manual:TIMEOUT'));
   assert.ok(!unknownPort.calls.includes('confirm'));
 
   const confirmationUnknownPort = new FakePort();

@@ -226,19 +226,28 @@ export class AutomationWorkflowService {
         return failed(key, 'insufficient_inventory');
       }
       const sent = await this.port.sendCoupon({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, reservationId: reservation.reservationId, executionKey: key, purpose: 'delivery' });
-      if (sent.status !== 'succeeded') {
-        await this.port.releaseCoupon({ adminId: input.adminId, reservationId: reservation.reservationId, executionKey: key, reason: sent.errorCode ?? sent.status });
-        return sent.status === 'unknown' ? unknown(key, sent.errorCode ?? 'external_result_unknown') : failed(key, sent.errorCode ?? 'coupon_send_failed');
+      if (sent.status === 'unknown') {
+        await this.port.markManualReview({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key, reason: sent.errorCode ?? 'coupon_send_result_unknown' });
+        return { status: 'manual_review', executionKey: key, reason: sent.errorCode ?? 'coupon_send_result_unknown', sentQuantity: reservation.quantity };
       }
-      await this.port.commitCoupon({ adminId: input.adminId, reservationId: reservation.reservationId, executionKey: key });
+      if (sent.status === 'failed') {
+        await this.port.releaseCoupon({ adminId: input.adminId, reservationId: reservation.reservationId, executionKey: key, reason: sent.errorCode ?? sent.status });
+        return failed(key, sent.errorCode ?? 'coupon_send_failed');
+      }
+      try {
+        await this.port.commitCoupon({ adminId: input.adminId, reservationId: reservation.reservationId, executionKey: key });
+      } catch (error) {
+        await this.port.markManualReview({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key, reason: 'coupon_commit_unknown' });
+        return { status: 'manual_review', executionKey: key, reason: failureReason(error, 'coupon_commit_unknown'), externalRef: sent.externalRef, sentQuantity: reservation.quantity };
+      }
       if (!rule.autoConfirm) return { status: 'succeeded', executionKey: key, externalRef: sent.externalRef, sentQuantity: reservation.quantity };
       const confirmed = await this.port.confirmShipment({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key });
       if (confirmed.status === 'unknown') {
-        await this.port.markManualReview({ accountId: input.order.accountId, orderNo: input.order.orderNo, executionKey: key, reason: 'shipment_confirmation_unknown' });
+        await this.port.markManualReview({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key, reason: 'shipment_confirmation_unknown' });
         return { status: 'manual_review', executionKey: key, reason: confirmed.errorCode ?? 'shipment_confirmation_unknown', externalRef: sent.externalRef, sentQuantity: reservation.quantity };
       }
       if (confirmed.status === 'failed') {
-        await this.port.markManualReview({ accountId: input.order.accountId, orderNo: input.order.orderNo, executionKey: key, reason: confirmed.errorCode ?? 'shipment_confirmation_failed' });
+        await this.port.markManualReview({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key, reason: confirmed.errorCode ?? 'shipment_confirmation_failed' });
         return { status: 'manual_review', executionKey: key, reason: confirmed.errorCode ?? 'shipment_confirmation_failed', externalRef: sent.externalRef, sentQuantity: reservation.quantity };
       }
       return { status: 'succeeded', executionKey: key, externalRef: confirmed.externalRef ?? sent.externalRef, sentQuantity: reservation.quantity };
@@ -280,11 +289,20 @@ export class AutomationWorkflowService {
         return failed(key, 'insufficient_inventory');
       }
       const sent = await this.port.sendCoupon({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, reservationId: reservation.reservationId, executionKey: key, purpose: 'gift' });
-      if (sent.status !== 'succeeded') {
-        await this.port.releaseCoupon({ adminId: input.adminId, reservationId: reservation.reservationId, executionKey: key, reason: sent.errorCode ?? sent.status });
-        return sent.status === 'unknown' ? unknown(key, sent.errorCode ?? 'external_result_unknown') : failed(key, sent.errorCode ?? 'gift_send_failed');
+      if (sent.status === 'unknown') {
+        await this.port.markManualReview({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key, reason: sent.errorCode ?? 'gift_send_result_unknown' });
+        return { status: 'manual_review', executionKey: key, reason: sent.errorCode ?? 'gift_send_result_unknown', sentQuantity: reservation.quantity };
       }
-      await this.port.commitCoupon({ adminId: input.adminId, reservationId: reservation.reservationId, executionKey: key });
+      if (sent.status === 'failed') {
+        await this.port.releaseCoupon({ adminId: input.adminId, reservationId: reservation.reservationId, executionKey: key, reason: sent.errorCode ?? sent.status });
+        return failed(key, sent.errorCode ?? 'gift_send_failed');
+      }
+      try {
+        await this.port.commitCoupon({ adminId: input.adminId, reservationId: reservation.reservationId, executionKey: key });
+      } catch (error) {
+        await this.port.markManualReview({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key, reason: 'coupon_commit_unknown' });
+        return { status: 'manual_review', executionKey: key, reason: failureReason(error, 'coupon_commit_unknown'), externalRef: sent.externalRef, sentQuantity: reservation.quantity };
+      }
       return { status: 'succeeded', executionKey: key, externalRef: sent.externalRef, sentQuantity: reservation.quantity };
     }, { maxAttempts: rule.maxAttempts, retryBackoffSeconds: rule.retryBackoffSeconds });
   }
@@ -430,3 +448,7 @@ function mapAutomationStoreError(error: unknown): ServiceError {
 function skipped(executionKey: string, reason: string): AutomationExecutionResult { return { status: 'skipped', executionKey, reason }; }
 function failed(executionKey: string, reason: string): AutomationExecutionResult { return { status: 'failed', executionKey, reason }; }
 function unknown(executionKey: string, reason: string): AutomationExecutionResult { return { status: 'unknown', executionKey, reason }; }
+function failureReason(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) return error.message.slice(0, 160);
+  return fallback;
+}

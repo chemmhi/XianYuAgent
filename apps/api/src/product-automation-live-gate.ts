@@ -51,7 +51,9 @@ export function productAutomationLiveBlockReason(config: ProductAutomationLiveCo
   if (config.executionMode !== 'live') return 'PRODUCT_AUTOMATION_LIVE_MODE_REQUIRED';
   if (!config.liveConfirmed) return 'PRODUCT_AUTOMATION_LIVE_CONFIRMATION_REQUIRED';
   const normalizedTitle = typeof itemTitle === 'string' ? normalizeAutomationProductTitle(itemTitle) : '';
-  const normalizedAllowlist = config.productTitleAllowlist.map(normalizeAutomationProductTitle).filter(Boolean);
+  const normalizedAllowlist = (Array.isArray(config.productTitleAllowlist) ? config.productTitleAllowlist : [])
+    .map(normalizeAutomationProductTitle)
+    .filter(Boolean);
   if (!normalizedTitle || !normalizedAllowlist.includes(normalizedTitle)) return 'PRODUCT_AUTOMATION_PRODUCT_TITLE_NOT_ALLOWLISTED';
   return undefined;
 }

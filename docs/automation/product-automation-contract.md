@@ -88,21 +88,23 @@
 
 `AutomationWorkflowService` 通过 `AutomationExecutionPort` 注入外部副作用，禁止路由直接调用闲鱼写接口。
 
-- 付款后自动发货：先 `reserveCoupon`，再 `sendCoupon`，成功后 `commitCoupon`，仅当 `autoConfirm=true` 才调用 `confirmShipment`。发卡失败/未知均 `releaseCoupon`；确认发货未知或失败进入 `manual_review`，不得再次发卡。
+- 付款后自动发货：先 `reserveCoupon`，再 `sendCoupon`，成功后 `commitCoupon`，仅当 `autoConfirm=true` 才调用 `confirmShipment`。明确发卡失败才 `releaseCoupon`；网络超时/结果不确定时保留 reservation 并转入 `manual_review`，避免未知结果后重复发卡。确认发货未知或失败同样进入 `manual_review`，不得再次发卡。
 - 拍下未付款自动改价：只处理 `paymentStatus=unpaid`；价格使用分；外部返回 `unknown` 时结果为 `unknown`，绝不伪造成功。改价成功后文本发送失败不回滚改价，文本未知进入 `manual_review`。
-- 评价后发送赠品：先 `persistReviewFact` 再申请赠品库存；评价事实已存在时跳过。赠品发送失败/未知释放预留库存，评价事实不会被清除，避免重复提醒。
+- 评价后发送赠品：先 `persistReviewFact` 再申请赠品库存；评价事实已存在时跳过。明确赠品发送失败才释放预留库存；网络超时/结果不确定时保留 reservation 并转入 `manual_review`，评价事实不会被清除，避免未知结果后的重复赠品。
 - 超时未评价求评价：执行前读取订单，必须满足已发货、未评价、有会话；达到首次/重复间隔且未超最大次数。消息发送前再次 `readOrder`，若期间已评价或不再满足条件则跳过。
 
 所有流程执行键均按账号+订单+规则生成并做输入指纹校验；同键同输入返回原结果，同键不同输入返回 `409 IDEMPOTENCY_CONFLICT`。同一执行键的并发调用共享 in-flight Promise，避免两个 Worker 同时发卡或改价。
 
 ## 事件入口与默认阻断
 
-本切片已提供真实应用装配边界，但没有伪造闲鱼写接口：
+本切片已提供真实应用装配边界，并将真实闲鱼写操作收敛到独立适配器：
 
 - `OrderService.refresh` 完成订单 upsert 后调用 `ProductAutomationWorker.processOrderRefresh`；已付款订单进入付款后发货触发点，未付款订单进入自动改价触发点。
 - 外部订单 upsert 会在同账号范围内用 `item.productId` 或 `products.external_product_ref = item.itemId` 回填 `order.productId`；无法关联商品时才会返回 `PRODUCT_LINK_MISSING` 并跳过自动化，禁止跨账号猜测商品。
 - `XianyuImService.handleExternalEvent` 在消息落库后调用 `ProductAutomationTrigger.onImEvent`。IM 传输本身不是订单/评价协议，只有上游适配器显式写入 `raw.productAutomation={kind:'review_created',orderNo,eventId}` 才会触发评价赠品；普通聊天文本永远不会被当作评价事实。
 - `ProductAutomationWorker.pollReviewReminders` 提供按账号扫描已发货订单的调度入口，调用方负责分钟级 cron/worker 周期。
-- 生产默认注入 `NotConfiguredAutomationExecutionAdapter`。在发卡、确认发货、改价、发消息和评价事实落库的 MTOP 写适配器完成前，入口统一返回 `blocked/AUTOMATION_EXECUTION_NOT_CONFIGURED`，不报告成功、不扣库存、不发卡。
+- 生产装配已接入 `XianyuProductAutomationExecutionAdapter`，复用闲鱼 MTOP、IM 和卡券 reservation 存储；但默认仍为 `simulate + 未确认`，入口统一返回 `blocked/PRODUCT_AUTOMATION_LIVE_MODE_REQUIRED`，不调用外部写操作。只有显式 live 模式、人工确认和持久化商品标题白名单同时满足时，才允许真实执行；当前白名单初始仅包含 `2026年奥维高清地图骗局`。
 
-当前仍未接入付款、评价和卖家等待付款的真实闲鱼事件字段解析，也未接入闲鱼写入 MTOP。接入时必须复用执行键、外部结果和库存释放契约，不能把本地 FakePort 测试当作已上线的闲鱼写入验收。
+当前仍未完成真实账号、订单和 IM 会话的 live mutation 验收；MTOP/IM 契约测试、白名单零副作用测试、Memory/Postgres reservation 并发/过期测试已通过。没有明确的测试账号、订单号和人工确认前，不执行真实发货、改价或发消息。
+
+受控真实测试入口为 `npm --workspace apps/api run test:product-automation:live-order`，必须同时提供 `PRODUCT_AUTOMATION_LIVE_TEST=1`、`PRODUCT_AUTOMATION_LIVE_CONFIRM_TEXT="I UNDERSTAND REAL XIANYU MUTATION"`、`PRODUCT_AUTOMATION_EXECUTION_MODE=live`、`PRODUCT_AUTOMATION_LIVE_CONFIRMED=true`、`ADMIN_ID`、`ACCOUNT_ID`、`ORDER_NO` 和 `PRODUCT_AUTOMATION_LIVE_ACTION`；脚本会再次读取本地商品主数据并确认标题精确等于白名单值。

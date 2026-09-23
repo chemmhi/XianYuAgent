@@ -1,13 +1,14 @@
 # XianyuSellerAgent 项目状态
 
-## 2026-09-22 商品自动化四流程实现与验收
+## 2026-09-23 商品自动化真实执行器接入与白名单门禁
 
 - 独立集成 worktree：`F:\ChenHai\Project\XianYuAgent-product-automation`，分支 `codex/product-automation`；前端与后端分别在独立 worktree 开发后合入。
 - 本轮实现：商品列表自动化摘要、付款后自动发货、拍下未付款自动改价、评价后发送赠品、超时未评价求评价、卡券穿梭框选择、批量配置入口，以及配置版本校验、账号隔离、持久化执行账本、租约接管、重试退避、评价事实和求评状态持久化。
-- 后端可靠性：`automation.execution_ledger`、owner/lease/attemptCount/fingerprint、跨实例幂等、失败补偿、最大尝试次数、改价前二次读、IM 评价事件来源/买家/会话/商品归属校验均已落地；四条流程在外部执行适配器未配置时明确返回 blocked/failed，不伪造成功。
-- 已验证：`npm run typecheck`、商品自动化 API 21/21、PostgreSQL smoke、entry cross-layer smoke、商品自动化 Web 6/6、真实 Chrome/CDP 商品自动化 E2E、API 全量测试、Web 全量 83 files / 279 tests、生产构建、Compose 配置、`git diff --check` 均通过。
+- 后端可靠性：`automation.execution_ledger`、owner/lease/attemptCount/fingerprint、跨实例幂等、失败补偿、最大尝试次数、改价前二次读、IM 评价事件来源/买家/会话/商品归属校验均已落地；新增卡券 reservation 的 Memory/Postgres 原子 reserve/commit/release、并发、幂等、过期恢复；未知发卡结果不释放 reservation，避免重复发卡。
+- 真实执行接入：新增 `XianyuProductAutomationExecutionAdapter`，接入闲鱼确认发货、未付款改价、订单详情权威读取、IM 文本发送、评价事实落库和卡券 reservation；默认仍为 simulate，live 仅对持久化商品标题 `2026年奥维高清地图骗局` 开放。
+- 已验证：API build、商品自动化回归 29/29、MTOP 交易契约 8/8、Cookie fallback 4/4、reservation Memory 6/6、Postgres reservation smoke、adapter 3/3、`git diff --check` 均通过。
 - 视觉验收：已按设计稿逐一生成商品列表、四个自动化抽屉和卡券穿梭框的桌面/移动截图；严格 diff 仍未达到 0 差异，当前不同像素比例为 14.39%–25.57%，因此不能标记像素级 PASS。
-- 当前状态：`PARTIALLY_VERIFIED / BLOCKED`。真实闲鱼 MTOP/IM 发卡、确认发货、改价和发消息执行适配器仍未接入；当前 Chrome/CDP 商品自动化脚本使用 mock automation API，不宣称真实外部动作已验收。
+- 当前状态：`PARTIALLY_VERIFIED / BLOCKED`。真实闲鱼执行适配器已接入，但尚未在明确测试账号、订单号、会话和人工确认下执行真实 mutation；因此不宣称真实发货、改价、评价赠品和求评价已生产验收。
 - 版本：`4dbf672`（视觉与穿梭框）、`7c38e99`（执行账本与恢复状态）、`ff50024`（账本接口同步兼容）、后续提交补齐全量回归夹具与 Cookie snapshot 兼容。
 
 ## 2026-09-22 账号弹窗视觉修订

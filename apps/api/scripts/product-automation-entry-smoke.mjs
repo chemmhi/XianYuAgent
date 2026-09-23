@@ -37,7 +37,7 @@ try {
   assert.equal(refreshed.response.status, 200);
   assert.equal(refreshed.body.data.automation.results[0].trigger, 'unpaid_reprice');
   assert.equal(refreshed.body.data.automation.results[0].status, 'blocked');
-  assert.equal(refreshed.body.data.automation.results[0].reason, 'AUTOMATION_EXECUTION_NOT_CONFIGURED');
+  assert.equal(refreshed.body.data.automation.results[0].reason, 'PRODUCT_AUTOMATION_LIVE_MODE_REQUIRED');
 
   await runtime.store.createOrder({ adminId, order: { id: 'entry-review-order', orderNo: 'ENTRY-REVIEW', accountId: account.id, buyerId: 'entry-buyer', buyerName: '入口买家', itemId: product.externalProductRef ?? 'automation-entry-item', itemTitle: product.title, amountMinor: 1000, paymentStatus: 'paid', orderStatus: 'completed', deliveryStatus: 'delivered', afterSalesStatus: 'none', deliveryType: 'coupon_only', createdAt: '2026-09-20T00:00:00.000Z', updatedAt: '2026-09-22T00:00:00.000Z', configVersion: 1, source: 'local', productId: product.id, conversationId: conversation.id } });
   const imResult = await runtime.xianyuIm.handleExternalEvent(adminId, { accountId: account.id, externalConversationRef: conversation.externalConversationRef, externalMessageRef: 'entry-review-message', senderRef: 'entry-buyer', direction: 'inbound', bodyType: 'system', bodyText: '评价完成', occurredAt: '2026-09-23T00:00:00.000Z', raw: { productAutomation: { kind: 'review_created', orderNo: 'ENTRY-REVIEW', eventId: 'entry-review-event' } } }, { deferAutoReply: true });
