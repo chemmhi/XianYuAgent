@@ -6,6 +6,13 @@
 - 风险状态：开放风险已登记；当前无 P0
 - 阶段门禁规则：阶段 5 允许受控 adapter、内存 store 和本机 Chrome/CDP 先形成证据，但不得把受控验证冒充真实闲鱼 APP 扫码、外部 Cookie 验证或 PostgreSQL/Redis 持久化；未关闭的 P1 外部登录和容器门禁不得扩展到商品、卡券、订单写入。
 
+### 2026-09-25 QR 登录后置验证修复
+
+| 编号 | 风险 | 级别 | 缓解措施 | 状态 |
+| --- | --- | --- | --- | --- |
+| S5-RISK-052 | 闲鱼在 IM token bootstrap 阶段可能要求滑块/人工验证；若把该错误当成 Cookie 失效，会撤销刚完成的扫码登录并误报失败 | P1 | QR 成功边界改为 Cookie 校验 + 资料同步；listener 后台有限重试；`ACCOUNT_VALIDATION_REQUIRED`、`FAIL_SYS_USER_VALIDATE`、`X5SEC`、`CAPTCHA`、`SLIDER` 仅降级账号并保留有效 Cookie | MITIGATED；待真实账号完成滑块挑战后复核 |
+| S5-RISK-053 | `onSuccess` 后置回调异常可能只更新内存状态，持久化会话停在 `scanned` | P1 | QR adapter 在失败终态立即回调 `onStatus`，保存原始错误码；新增失败回调回归 | CLOSED |
+
 ### 2026-09-21 缺陷关闭
 
 | 编号 | 风险 | 级别 | 缓解措施 | 状态 |

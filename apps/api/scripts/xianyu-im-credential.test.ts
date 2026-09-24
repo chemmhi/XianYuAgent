@@ -60,6 +60,27 @@ describe('xianyu IM credential refresh', () => {
     assert.equal(account.status, 'expired');
   });
 
+  it('keeps a freshly logged-in account degraded, not expired, when IM bootstrap hits slider validation', async () => {
+    let account = { id: 'account-1', platform: 'xianyu', status: 'connected' as const };
+    let updatedCredentialStatus: string | undefined;
+    const store = {
+      getAccount: async () => account,
+      getCredential: async () => ({ cookieHeader: 'unb=seller-1; _m_h5_tk=token-1', deviceId: 'device-1', status: 'active' as const }),
+      updateAccount: async (_adminId: string, _accountId: string, patch: { status?: string }) => {
+        account = { ...account, status: patch.status as typeof account.status };
+        return account;
+      },
+      markCredentialVerified: async (input: { status: string }) => { updatedCredentialStatus = input.status; return { status: input.status }; },
+    };
+    const service = new XianyuImService(store as never, {
+      fetchImToken: async () => ({ success: false, accountInvalid: true, errorCode: 'ACCOUNT_VALIDATION_REQUIRED', message: 'FAIL_SYS_USER_VALIDATE', cookieHeader: '' }),
+    } as never, {} as never);
+
+    await assert.rejects(() => service.startListener('admin-1', 'account-1'), (error: unknown) => error instanceof ServiceError && error.code === 'ACCOUNT_VALIDATION_REQUIRED');
+    assert.equal(account.status, 'degraded');
+    assert.equal(updatedCredentialStatus, undefined);
+  });
+
   it('waits for the IM session before uploading an image', async () => {
     const order: string[] = [];
     const store = {

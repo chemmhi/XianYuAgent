@@ -175,6 +175,13 @@ export class XianyuQrLoginAdapter {
       } catch (error) {
         if (!this.isCurrent(session)) return;
         session.errorCode = classifyError(error);
+        // A post-confirmation callback can fail after setting the in-memory
+        // session to failed. Persist that terminal state immediately instead
+        // of leaving the durable login session stuck at scanned forever.
+        if (session.status === 'failed') {
+          await this.emitStatus(session);
+          return;
+        }
         // 网络抖动不立即失败，继续等待到二维码超时。
       }
       if (!this.isCurrent(session)) return;
@@ -325,7 +332,12 @@ function absorbSetCookies(jar: CookieJar, requestUrl: string, headers: Headers):
 function cookieHeader(jar: CookieJar, requestUrl: string): string { return cookieHeaderForUrl(jar, requestUrl, Date.now(), XIANYU_TOP_SITE); }
 function md5(value: string): string { return crypto.createHash('md5').update(value).digest('hex'); }
 function sleep(ms: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, ms)); }
-function classifyError(error: unknown): string { const message = error instanceof Error ? error.message : String(error); return message.startsWith('QR_') ? message : 'QR_NETWORK_ERROR'; }
+function classifyError(error: unknown): string {
+  const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code ?? '') : '';
+  if (/^[A-Z][A-Z0-9_:-]*$/.test(code)) return code;
+  const message = error instanceof Error ? error.message : String(error);
+  return message.startsWith('QR_') ? message : 'QR_NETWORK_ERROR';
+}
 function normalizeUrl(raw: string): string | undefined { const value = String(raw ?? '').replaceAll('\\/', '/').trim(); if (!value) return undefined; return value.startsWith('//') ? `https:${value}` : new URL(value, PASSPORT_HOST).toString(); }
 
 function extractJsonAssignment(html: string, marker: string): Record<string, unknown> {

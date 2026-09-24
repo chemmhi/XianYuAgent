@@ -359,7 +359,8 @@ export class XianyuImService {
       if (!account || account.status === 'disabled') return;
       const code = error instanceof ServiceError ? error.code : (error as { code?: unknown } | null)?.code;
       const normalizedCode = typeof code === 'string' ? code : error instanceof Error ? error.message : String(error);
-      const requiresReauth = /CREDENTIAL_MISSING|ACCOUNT_VALIDATION_REQUIRED|SESSION_EXPIRED|MTOP_TOKEN_(MISSING|EXPIRED)|IM_TOKEN_FAILED|XIANYU_IM_TOKEN_FAILED|REQUEST_REJECTED:401|USER_VALIDATE|LOGIN.*INVALID/i.test(normalizedCode);
+      const requiresVerification = /ACCOUNT_VALIDATION_REQUIRED|FAIL_SYS_USER_VALIDATE|X5SEC|CAPTCHA|SLIDER/i.test(normalizedCode);
+      const requiresReauth = !requiresVerification && /CREDENTIAL_MISSING|SESSION_EXPIRED|MTOP_TOKEN_(MISSING|EXPIRED)|IM_TOKEN_FAILED|XIANYU_IM_TOKEN_FAILED|REQUEST_REJECTED:401|USER_VALIDATE|LOGIN.*INVALID/i.test(normalizedCode);
       const status = requiresReauth ? 'expired' : 'degraded';
       if (account.status === 'expired' && status === 'degraded') return;
       if (account.status !== status) await this.store.updateAccount(adminId, accountId, { status });

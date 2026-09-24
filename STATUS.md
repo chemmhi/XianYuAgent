@@ -1,5 +1,13 @@
 # XianyuSellerAgent 项目状态
 
+## 2026-09-25 QR 扫码登录失败根因修复
+
+- 根因：二维码确认后的 Cookie 已通过 `verifyLogin`，但后置 IM token bootstrap 返回 `ACCOUNT_VALIDATION_REQUIRED` / `FAIL_SYS_USER_VALIDATE`，触发滑块验证；原流程把该错误当成账号失效并阻断 QR 成功落库，且 `onSuccess` 异常后的内存 `failed` 状态没有再次持久化，数据库会永久停在 `scanned`。
+- 修复：QR 会话以外部 Cookie 校验和资料同步为成功标准，成功后立即持久化 `succeeded`；IM listener 改为后台 best-effort、有限重试；滑块/人工验证错误只把账号标为 `degraded`，保留刚保存的有效 Cookie；QR 后置回调失败立即发出终态并保留原始错误码。
+- 受影响模块：`apps/api/src/xianyu-qr-login.ts`（终态持久化/错误码）、`apps/api/src/app.ts`（成功边界/监听器降级）、`apps/api/src/xianyu-im-service.ts`（验证类错误映射）；新增 QR/IM 回归覆盖。
+- 已验证：API 编译；API 全量 51 个测试文件 / 327 项通过；15 个 API smoke 全部通过；隔离 PostgreSQL 迁移与 credential store smoke 通过；`git diff --check` 通过。
+- 状态：`READY_FOR_MERGE`；真实闲鱼账号的滑块挑战仍需人工完成，系统会在挑战前保持账号 `degraded` 而非撤销有效 Cookie。
+
 ## 2026-09-24 卡券删除弹窗与启用状态 follow-up
 
 - 目标行为：删除卡券弹窗复用创建卡券弹窗的颜色与结构，内容区和操作区有明确间距；名称列通过悬停查看完整名称；图片内容以缩略图展示并支持点击大图预览。
