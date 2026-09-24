@@ -12,7 +12,6 @@ describe('dashboard api query contract', () => {
           todayOrderAmount: 18640,
           autoProcessRate: 96.8,
           pendingManualCount: 3,
-          availableCouponCount: 1286,
           trend: [],
           riskTodos: [],
         } as T;

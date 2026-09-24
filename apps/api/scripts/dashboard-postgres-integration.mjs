@@ -38,7 +38,7 @@ async function seed(store) {
   await store.updateAccount(adminId, otherAccountId, { status: 'connected' });
   const product = await store.createProduct({ adminId, accountId, title: 'Dashboard PostgreSQL 商品', status: 'published' });
   productId = product.id;
-  const batch = await store.createCouponBatch({ adminId, accountId, label: 'Dashboard PostgreSQL 库存', purpose: 'data', deliveryScope: 'buyer_deliverable' });
+  const batch = await store.createCouponBatch({ adminId, accountId, label: 'Dashboard PostgreSQL 交付配置', purpose: 'data', deliveryScope: 'buyer_deliverable' });
   couponBatchId = batch.id;
   await store.importCouponItems({ adminId, batchId: couponBatchId, contents: [`PG-${suffix}-A`, `PG-${suffix}-B`, `PG-${suffix}-C`] });
   await store.createOrder({ adminId, order: {
@@ -113,7 +113,7 @@ try {
   assert.equal(snapshot.body.data.todayOrderAmount, 179);
   assert.equal(snapshot.body.data.autoProcessRate, 50);
   assert.equal(snapshot.body.data.pendingManualCount, 2);
-  assert.equal(snapshot.body.data.availableCouponCount, 3);
+  assert.equal('availableCouponCount' in snapshot.body.data, false);
   assert.equal(snapshot.body.data.productRank[0].title, 'Dashboard PostgreSQL 商品');
   assert.ok(snapshot.body.data.recentActivity.some((item) => item.text.includes('PENDING')));
   assert.ok(snapshot.body.data.riskTodos.some((item) => item.id.startsWith('order-')));
@@ -135,8 +135,8 @@ try {
   assert.equal(reread.response.status, 200);
   assert.equal(reread.body.data.totalSales, 179);
   assert.equal(reread.body.data.todayOrderAmount, 179);
-  assert.equal(reread.body.data.availableCouponCount, 3);
-  console.log(JSON.stringify({ status: 'PASS', storage: 'postgres', persistedAfterRestart: true, todayOrderAmount: reread.body.data.todayOrderAmount, availableCouponCount: reread.body.data.availableCouponCount, riskTodoCount: reread.body.data.riskTodos.length }, null, 2));
+  assert.equal('availableCouponCount' in reread.body.data, false);
+  console.log(JSON.stringify({ status: 'PASS', storage: 'postgres', persistedAfterRestart: true, todayOrderAmount: reread.body.data.todayOrderAmount, riskTodoCount: reread.body.data.riskTodos.length }, null, 2));
 } finally {
   if (runtime?.store?.pool) {
     try { await cleanup(runtime.store); } catch (error) { console.error(`dashboard cleanup failed: ${error instanceof Error ? error.message : String(error)}`); }

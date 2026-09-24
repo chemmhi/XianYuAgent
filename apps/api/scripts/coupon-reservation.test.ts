@@ -6,7 +6,7 @@ async function fixture(itemCount = 2) {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: `coupon-reservation-${Date.now()}-${Math.random()}@example.com`, passwordHash: 'hash', displayName: 'Coupon Reservation Test' });
   const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: `coupon-reservation-${Date.now()}-${Math.random()}` });
-  const batch = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'Reservation Batch', purpose: 'text', deliveryScope: 'buyer_deliverable', quarkUrl: 'https://quark.example/reservation', extractionCode: '2468' });
+  const batch = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'Reservation Batch', purpose: 'text', deliveryScope: 'buyer_deliverable' });
   await store.importCouponItems({ adminId: admin.id, batchId: batch.id, contents: Array.from({ length: itemCount }, (_, index) => `coupon-${index + 1}`) });
   return { store, admin, account, batch };
 }
@@ -22,8 +22,6 @@ test('coupon reservation is idempotent under concurrent same-key calls and retur
   assert.equal(first.reservationId, second.reservationId);
   assert.deepEqual(first.items, second.items);
   assert.equal(first.items[0]?.batchLabel, 'Reservation Batch');
-  assert.equal('quarkUrl' in (first.items[0] ?? {}), false);
-  assert.equal('extractionCode' in (first.items[0] ?? {}), false);
   const batch = await value.store.getCouponBatch(value.admin.id, value.batch.id);
   assert.equal(batch?.items?.filter((item) => item.status === 'available').length, 1);
   assert.equal(batch?.items?.filter((item) => item.status === 'reserved').length, 1);
@@ -37,7 +35,7 @@ test('coupon reservation prevents concurrent oversell across different execution
   ]);
   assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
   const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
-  assert.match(String(rejected?.reason?.message), /COUPON_INSUFFICIENT_INVENTORY/);
+  assert.match(String(rejected?.reason?.message), /COUPON_DELIVERY_ITEM_UNAVAILABLE/);
 });
 
 test('release makes inventory available and the same execution key can reopen a retry reservation', async () => {

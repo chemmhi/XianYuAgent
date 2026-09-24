@@ -189,10 +189,7 @@ type CouponBatchVM = {
   batchId: string;
   accountId: string;
   status: 'draft' | 'active' | 'paused' | 'closed';
-  availableCount: number;
-  reservedCount: number;
   deliveryScope: 'system_only' | 'operator_only' | 'buyer_deliverable';
-  stockAlert: 'normal' | 'low_stock' | 'exhausted';
   version: number;
   updatedAt: string;
 };
@@ -224,8 +221,6 @@ type CouponContentPreviewVM = {
   accountIds: string[];
   content: {
     body: string;
-    quarkUrl?: string;
-    extractionCode?: string;
   };
   access: {
     allowed: boolean;
@@ -233,7 +228,7 @@ type CouponContentPreviewVM = {
     denialReason?: 'purpose_not_allowed' | 'scope_mismatch' | 'order_not_eligible' | 'policy_rejected';
     auditRef: string;
   };
-  inventoryStatus: 'available' | 'reserved' | 'delivered' | 'void' | 'exhausted';
+  contentStatus: 'configured' | 'reserved' | 'delivered' | 'void';
 };
 
 type SettingsSectionVM = {
@@ -314,7 +309,7 @@ type BusinessLinkVM = {
 | Accounts | `AccountVM`、`AccountConnectionVM`、`LoginSessionVM`、`QrLoginSessionVM`、`AccountScopeVM` | accountId、connection、login status、QR 状态、scope、过期时间；不得包含凭证值 |
 | Messages | `ConversationVM`、`MessageVM`、`BuyerContextVM`、`RealtimeVM` | conversationId、direction、bodyType、order/product link、risk flags、handlingMode、cursor |
 | Products | `ProductVM`、`ProductAssetVM`、`SkuVM`、`PublishResultVM` | productId、accountId、status、version、asset status、逐项发布结果 |
-| Coupons | `CouponBatchVM`、`CouponItemVM`、`CouponContentPreviewVM`、`InventoryLockVM` | batchId、status、available count、reserved count、deliveryScope、`stockAlert`（批次级派生告警）、controlled content、lock state |
+| Coupons | `CouponBatchVM`、`CouponItemVM`、`CouponContentPreviewVM`、`CouponMutationVM` | batchId、status、deliveryScope、controlled content、mutation state |
 | Orders | `OrderVM`、`DeliveryPreviewVM`、`DeliveryRecordVM`、`AfterSalesVM` | 四套状态、deliveryType、preview state、attempt、externalOutcome |
 | Settings/Auth | `SettingsSectionVM`、`CredentialRefVM`、`RuntimeHealthVM`、`AdminProfileVM`、`SessionVM` | section version、secret reference、health、profile、session state |
 
@@ -329,7 +324,7 @@ type BusinessLinkVM = {
 | `/accounts` | `AccountsPage` | accounts、connection、login-session、QR login-session、scopes | account create/update/refresh、QR session create/poll、login-session cancel/renew/reauthorize/cleanup、scope patch | account context、相关 domain queries |
 | `/messages` | `MessagesPage` | conversations、messages、`WS /api/v1/conversations/{id}/events` | send text/image、recall、handoff、release | conversation、order link、unread count、handoff risk todo |
 | `/products` | `ProductsPage` | products、product detail/assets | create/update/sync/pull/assets/publish/bulk-publish | product list/detail、coupon bindings、workspace links |
-| `/coupons` | `CouponsPage` | batches、batch detail、content preview | create/update/delete/bind/unbind/items/assets/void | batch inventory、product bindings、order delivery preview |
+| `/coupons` | `CouponsPage` | batches、batch detail、content preview | create/update/delete/bind/unbind/items/assets/void | batch configuration、product bindings、order delivery preview |
 | `/orders` | `OrdersPage` | orders、order detail、refresh | delivery-preview/deliver/cancel/retry | order、delivery record、conversation、coupon inventory |
 | `/settings` | `SettingsPage` | agent/reply-policy/delivery-policy/policy-gateway/external-services/runtime/outbox/account-scopes/credentials/profile/sessions | settings PATCH、credential CRUD/rotate/revoke/enable/disable、password/session revoke | only affected settings/domain query; credentials 必须带明确 accountId |
 
@@ -526,7 +521,7 @@ type ConversationHandlingOutput = {
 | `messages.handoff` | conversation detail/list、unread count、dashboard risk todo | 保留 reason，刷新 conversation version | 查询 handling 状态，等待人工确认 |
 | `messages.release` | conversation detail/list、unread count、dashboard risk todo | 刷新 conversation version，不覆盖当前人工状态 | 查询 handling 状态，等待人工确认 |
 | `products.publish` | product detail/list、dashboard snapshot、关联 coupon bindings | 刷新 product configVersion，保留发布草稿 | 查询 outbox/逐项结果 |
-| `coupons.items.bulk-save` | batch detail、inventory、delivery preview | 刷新库存版本，保留未保存行 | 查询 inventory lock，不盲目重放 |
+| `coupons.items.bulk-save` | batch detail、batch items、delivery preview | 刷新批次项版本，保留未保存行 | 查询 reservation 状态，不盲目重放 |
 | `orders.delivery-preview` | delivery preview only；不失效 order until deliver | 重新计算 preview | 查询 preview/outbox，不创建重复交付 |
 | `orders.deliver` | order detail/list、delivery record、coupon inventory、conversation link、risk todo | 重新加载订单与 preview | 查询 outbox 和外部订单状态 |
 | `credentials.rotate/revoke` | credential detail/list、account connection、health | 刷新 credential version | 查询连接/凭证状态，管理员人工恢复 |
@@ -582,7 +577,7 @@ type StartRunOutput = {
 | `/accounts` | `accountId`、`view=login-session|scopes` | qr token、cookie、credential value |
 | `/messages` | `accountId`、`conversationId` | 买家正文、图片内容、token |
 | `/products` | `accountId`、`productId`、`mode=edit|view` | AI prompt 原文、素材签名 URL |
-| `/coupons` | `accountId`、`batchId`、`mode=items|content` | 卡券正文、提取码、夸克链接 |
+| `/coupons` | `accountId`、`batchId`、`mode=items|content` | 卡券正文、图片和配置参数 |
 | `/orders` | `accountId`、`orderNo`、四套状态筛选 | 买家敏感备注、交付正文 |
 | `/settings/:section` | `agent|reply-policy|delivery-policy|policy-gateway|external-services|runtime|outbox|account-scopes|credentials|profile|sessions` | API Key、Cookie、Session ID |
 
@@ -594,7 +589,7 @@ Controller 接收已解析的 `RouteContext`，View 不感知 query string；敏
 
 `DashboardPage` 只组合 `DashboardController` 和以下 View：
 
-- `KpiGrid`：订单金额、订单数、自动处理率、待人工数、可售卡券库存；只接受已格式化 KPI。
+- `KpiGrid`：订单金额、订单数、自动处理率、待人工数；只接受已格式化 KPI。
 - `TrendCard`：订单金额、订单数、自动处理率、发货失败趋势；不读取 API。
 - `HealthCard`：账号连接、策略、Runtime、凭证边界健康状态。
 - `ProductRankCard`：带 `productId/accountId` 深链。
@@ -902,15 +897,15 @@ Controller 只返回阶段 2 canonical error code；断网属于 transport 状�
 
 | 切片 | 页面 / owner | 允许承担 | 明确禁止 |
 | --- | --- | --- | --- |
-| `S4-VS2A` | `ProductDrawer` / `useProductsController` | 草稿基础信息、版本校验、字段错误、保存后刷新 | 直接发布、直接上传对象存储、修改 SKU 或卡券库存 |
+| `S4-VS2A` | `ProductDrawer` / `useProductsController` | 草稿基础信息、版本校验、字段错误、保存后刷新 | 直接发布、直接上传对象存储、修改 SKU 或卡券交付配置 |
 | `S4-VS2B` | `SkuVariantEditor` / `useProductsController` | SKU 变体编辑、价格/库存校验、逐项结果 | 在列表组件中拼装 SKU 状态；绕过商品版本或库存约束 |
 | `S4-VS2C` | `AssetPanel` / `useProductsController` | AssetRef 上传/替换/删除、上传状态和单项重试 | 直接调用 MinIO SDK；把临时 URL 写入 ProductVM 作为永久事实 |
 | `S4-VS2D` | `PublishConfirmation` / `useProductsController` | Policy 预检、Confirmation、发布结果和恢复入口 | 页面直接调用外部闲鱼发布 adapter；unknown 自动重放 |
 | `S4-VS2E` | `SyncPullToolbar` / `useProductsController` | 账号选择、分页同步、结果摘要、外部错误展示 | 用 fixture 数量冒充真实账号结果；改写本地草稿或静默切换账号 |
-| `S4-VS3A` | `CouponItemEditor`、`AssetPanel` / `useCouponsController` | CouponItem bulk-save/delete、素材状态、批量部分成功 | 直接扣减库存；在列表返回正文或敏感链接 |
-| `S4-VS3B` | `InventoryLockBanner` / `useCouponsController` + execution adapter | 仅展示锁定/消耗/释放结果和恢复状态 | CouponsPage 直接执行订单交付或买家可见发送 |
+| `S4-VS3A` | `CouponItemEditor`、`AssetPanel` / `useCouponsController` | CouponItem bulk-save/delete、素材状态、批量部分成功 | 直接消费批量数据；在列表返回正文或敏感链接 |
+| `S4-VS3B` | `CouponMutationBanner` / `useCouponsController` + execution adapter | 仅展示幂等消费与恢复结果 | CouponsPage 直接执行订单交付或买家可见发送 |
 | `S4-VS4A` | `OrdersPage` / `useOrdersController` | 订单只读、筛选、四套状态、详情关联 | 读取卡券正文；从列表按钮直接发货 |
-| `S4-VS4B` | `DeliveryPreview` / `useOrdersController` | 预览校验、策略结果、库存预锁提示 | 预览阶段创建 DeliveryRecord 或提交外部动作 |
+| `S4-VS4B` | `DeliveryPreview` / `useOrdersController` | 预览校验、策略结果、交付配置检查 | 预览阶段创建 DeliveryRecord 或提交外部动作 |
 | `S4-VS4C` | `OrderActionBar` / `useOrdersController` | Confirmation、deliver/cancel/retry、unknown 人工恢复入口 | 直接调用外部 adapter；跳过 Outbox、审计或幂等 |
 
 ### 11.1 跨切片状态边界

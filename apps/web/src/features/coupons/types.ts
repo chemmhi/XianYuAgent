@@ -1,13 +1,11 @@
 export type CouponBatchStatus = 'draft' | 'active' | 'paused' | 'closed' | 'exhausted' | 'voided';
 export type DeliveryScope = 'system_only' | 'operator_only' | 'buyer_deliverable';
 export type CouponItemStatus = 'available' | 'reserved' | 'consumed' | 'delivered' | 'void' | 'exhausted';
-export type StockAlert = 'normal' | 'low_stock' | 'exhausted';
 
 export interface CouponApiConfigVM { url: string; method: 'GET' | 'POST'; timeout?: number; headers?: string; params?: string; responseField?: string; }
 export interface CouponMetadataVM {
   description?: string;
   delaySeconds?: number;
-  deliveryCount?: number;
   useNoLogisticsForm?: boolean;
   dockable?: boolean;
   price?: string;
@@ -49,28 +47,18 @@ export interface CouponBatchVM {
   purpose: 'text' | 'data' | 'image' | 'api';
   deliveryScope: DeliveryScope;
   status: CouponBatchStatus;
-  totalCount: number;
-  availableCount: number;
-  reservedCount: number;
-  consumedCount: number;
-  stockAlert: StockAlert;
   version: number;
   updatedAt: string;
   bindings: CouponBindingVM[];
   items?: CouponItemVM[];
   createdAt?: string;
   metadata?: CouponMetadataVM;
-  contentPreview?: { text?: string; dataRemaining?: number; apiUrl?: string; imageUrls?: string[] };
+  contentPreview?: { text?: string; apiUrl?: string; imageUrls?: string[] };
 }
 
-export interface InventoryLockVM {
+export interface CouponMutationVM {
   batchId: string;
   version: number;
-  totalCount: number;
-  availableCount: number;
-  reservedCount: number;
-  consumedCount: number;
-  stockAlert: StockAlert;
   results?: Array<{ itemId?: string; ok: boolean; errorCode?: string }>;
 }
 
@@ -78,7 +66,6 @@ export interface CouponBatchFilters {
   accountId?: string;
   keyword?: string;
   status?: CouponBatchStatus | 'all';
-  stockAlert?: StockAlert | 'all';
   purpose?: CouponBatchVM['purpose'] | 'all';
   sortBy?: 'createdAt';
   sortOrder?: 'asc' | 'desc';

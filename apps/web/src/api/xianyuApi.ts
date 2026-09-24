@@ -216,22 +216,19 @@ export function createLiveApi(options: { baseUrl?: string; getToken?: () => stri
   return {
     dashboard: {
       async getSnapshot() {
-        const [adminStats, todayStats, accountStats, trend] = await Promise.all([
+        const [adminStats, todayStats, trend] = await Promise.all([
           http.get<Record<string, unknown>>('/api/v1/admin/stats'),
           http.get<Record<string, unknown>>('/api/v1/admin/stats/today'),
-          http.get<Record<string, unknown>>('/api/v1/cookies/stats'),
           http.get<{ trend?: Array<{ date: string; amount: number; count: number }> }>('/api/v1/cookies/stats/order-trend'),
         ]);
         const admin = (adminStats as { data?: Record<string, unknown> }).data ?? adminStats;
         const today = (todayStats as { data?: Record<string, unknown> }).data ?? todayStats;
-        const accounts = (accountStats as { data?: Record<string, unknown> }).data ?? accountStats;
         const rows = trend.trend ?? [];
         return {
           totalSales: Number(admin.total_sales ?? admin.totalSales ?? today.total_order_amount ?? today.order_amount ?? 0),
           todayOrderAmount: Number(today.today_order_amount ?? today.order_amount ?? 0),
           autoProcessRate: Number(admin.auto_process_rate ?? admin.ai_reply_success_rate ?? 0),
           pendingManualCount: Number(admin.pending_manual_count ?? admin.risk_count ?? 0),
-          availableCouponCount: Number(accounts.available_card_count ?? accounts.available_coupon_count ?? 0),
           trend: rows.map((row) => ({ label: row.date, orderAmount: row.amount, autoProcessRate: row.count })),
           riskTodos: [],
         };

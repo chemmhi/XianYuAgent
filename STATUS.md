@@ -3,8 +3,8 @@
 ## 2026-09-24 卡券配置驱动发货链路迁移与耦合清理
 
 - 目标行为：固定文字、批量数据、API、图片四类卡券都由配置直接驱动真实发货链路；备注变量、延迟、多规格和图片资源可被消费；评价赠品永远不执行“填写到无需邮寄凭证”。
-- 实现边界：新增 `apps/api/src/coupon-delivery.ts` 统一解析配置；商品自动化适配器消费配置并发送 IM/图片；固定文字仅在真实发货且开启自动确认时传入无需邮寄凭证；reservation 不再把夸克链接/提取码暴露给交付对象，历史存储字段仅保留兼容读取。
-- 已验证：固定文字/批量数据/API GET/API POST/图片/多规格/无需邮寄与评价赠品隔离真实 E2E 7/7；reservation Memory 6/6；自动化定向 31/31；PostgreSQL reservation smoke；API/Web typecheck、API/Web build、Web 84 files / 291 tests、`git diff --check`。
+- 实现边界：新增 `apps/api/src/coupon-delivery.ts` 统一解析配置；商品自动化适配器消费配置并发送 IM/图片；固定文字仅在真实发货且开启自动确认时传入无需邮寄凭证；reservation、MemoryStore、PostgreSQL Store 和 schema 均不再包含历史无关字段；配置型卡券无需手工导入条目。
+- 已验证：固定文字/批量数据/API GET/API POST/图片/备注变量/延迟/多规格/API headers/timeout/5xx/408/timestamp/无需邮寄与评价赠品隔离真实 E2E 11/11；reservation Memory 6/6；自动化定向 31/31；PostgreSQL reservation smoke；API/Web typecheck、API/Web build、Web 84 files / 291 tests、`git diff --check`。
 - 状态：`READY_FOR_REVIEW`；真实闲鱼账号的外部 mutation、发布级回滚和人工视觉签核仍不在本切片证据范围内。
 
 ## 2026-09-24 商品自动化单流程配置与局部校验修复
@@ -145,7 +145,7 @@
 - `docs/02-data-api.md`：v0.4，状态 PASS，覆盖字段级 schema、PK/FK、唯一约束、关系基数、状态机、P0 API、FirstRun bootstrap、消息 handoff、幂等、安全和迁移；
 - `docs/02-database-schema.md`：v0.1，状态 PASS，覆盖 PostgreSQL 表清单、列类型、默认值、PK/FK、唯一/部分唯一索引、跨表约束、迁移顺序和回滚边界；
 - `docs/05-review-log.md`：S2-R1、S2-R2、S2-R3 均 PASS，S2-I001 至 S2-I005 已关闭；
-- `docs/03-frontend-design.md`：v0.1，阶段 3 组件树、状态边界与 stockAlert/inventoryStatus 契约已同步；
+- `docs/03-frontend-design.md`：v0.1，阶段 3 组件树、状态边界与交付配置契约已同步；
 - `docs/03-component-contract.md`：v0.1，补充模块树、组件职责矩阵、canonical ViewModel、路由/API、数据流、移动端对等性和 DoD；独立设计复审 PASS；
 - `docs/04-plan.md`：v0.1，阶段 4 主体功能优先的 ENV-0 与 S4-VS1 至 S4-VS4 纵向切片计划、依赖、DoD、测试、视觉基线和回滚边界；计划门禁 PASS；
 - `npm --workspace apps/api run test`：已通过，`env0 smoke passed`、`onboarding cookie login smoke passed`；覆盖 health、bootstrap、Session/CSRF、幂等重放/冲突、账号创建、Cookie 登录、资料同步、登录状态和账号列表读取；
@@ -189,7 +189,7 @@
 ## S4-VS3 卡券首页（已合入 master，待人工复核）
 
 - 原独立 worktree：`F:\ChenHai\Project\XianYuAgent-s4-vs3`，分支 `feature/s4-vs3-coupons`；本次以 merge commit 合入 `master`，临时 worktree 与分支随后删除。
-- 实现：批次列表、搜索/类型筛选（变更即生效）、当前页全选、批量删除、创建/编辑/复制、启用/禁用、库存/`stockAlert`、首批库存、导入库存、绑定/解绑、双栏商品关联、图片原图预览、作废、DELETE 软作废、管理员受控正文预览/复制、403/404/409/网络错误状态。
+- 实现：批次列表、搜索/类型筛选（变更即生效）、当前页全选、批量删除、创建/编辑/复制、启用/禁用、四类交付配置、绑定/解绑、双栏商品关联、图片原图预览、作废、DELETE 软作废、管理员受控正文预览/复制、403/404/409/网络错误状态。
 - 后端：`apps/api/migrations/013_coupons.sql` + `014_coupon_card_metadata.sql`、Memory/Postgres store、`purpose=text/data/api/image` 校验、列表安全元数据摘要、PATCH/PUT 编辑、scope 校验、加密正文存储、审计摘要。
 - 前端：`apps/web/src/features/coupons/`，通过 `/coupons` 正式路由接入，表格视觉保持平台样式，仅参考旧项目字段和操作。
 - 验证：已完成类型检查、单测、构建、API smoke、Chrome/CDP E2E、桌面/移动截图；Chrome/CDP 使用 MemoryStore/stub，真实 PostgreSQL/Redis/MinIO 仍需人工浏览器复核。
@@ -217,9 +217,9 @@
 | `S4-VS2C` 商品素材与对象存储 | `PLANNED` | AssetRef、上传/替换/删除、失败重试、MinIO | MinIO 持久化/重启复读、过期/403/失败截图 |
 | `S4-VS2D` 受控发布 | `PLANNED` | Policy → Confirmation → Idempotency → Outbox | worker/unknown/timeout/人工恢复与真实页面状态 |
 | `S4-VS2E` 商品外部同步真实验收 | `PARTIALLY_VERIFIED` | 真实账号、Cookie、分页、字段映射和数量口径 | 当前已登录 Chrome + 真实闲鱼账号人工复核 |
-| `S4-VS3A/B` 卡券明细、素材、库存锁定消耗 | `PLANNED` | CouponItem bulk 操作、素材、reserve/consume/release | PostgreSQL/Redis/MinIO 并发集成、敏感字段裁剪 |
-| `S4-VS4A` 订单列表只读 | `PASS` | 订单列表/详情/refresh、四套状态（含待发货/待评价边界）、账号 scope、关键词、分页、桌面/移动；昵称/商品标题与缩略图聚合、缺失商品提示、真实 seller 订单读取与 PostgreSQL refresh 落库 | 交付预览、库存锁、发货/取消/重试转入 `S4-VS4B/C` |
-| `S4-VS4B/C` 订单交付 | `PLANNED` | delivery-preview、发货/取消/重试/unknown 恢复 | 四套状态、库存锁、Outbox、DeliveryRecord |
+| `S4-VS3A/B` 卡券明细、素材、批量数据消费 | `PLANNED` | CouponItem bulk 操作、素材、reserve/consume/release | PostgreSQL/Redis/MinIO 并发集成、敏感字段裁剪 |
+| `S4-VS4A` 订单列表只读 | `PASS` | 订单列表/详情/refresh、四套状态（含待发货/待评价边界）、账号 scope、关键词、分页、桌面/移动；昵称/商品标题与缩略图聚合、缺失商品提示、真实 seller 订单读取与 PostgreSQL refresh 落库 | 交付预览、配置检查、发货/取消/重试转入 `S4-VS4B/C` |
+| `S4-VS4B/C` 订单交付 | `PLANNED` | delivery-preview、发货/取消/重试/unknown 恢复 | 四套状态、配置检查、Outbox、DeliveryRecord |
 | `S4-VS5A` 在线聊天读取与实时连接 | `PARTIALLY_VERIFIED` | 会话列表、消息时间线、MemoryStore/PostgreSQL HTTP/WS、Redis 跨进程广播与重启恢复、cursor 重连去重、Chrome/CDP 双 viewport 断线视觉证据；本轮补齐搜索、全部/未读筛选、独立滚动、整行选择、头像/商品缩略图和 `016_conversation_media.sql` | 独立复审、生产部署拓扑确认；发送/附件/撤回仍属 `S4-VS5B` |
 | `S4-VS5B` 在线聊天发送/附件/撤回 | `PLANNED` | 文本发送、图片上传、失败重试、撤回 | PostgreSQL/对象存储、幂等、unknown/timeout、脱敏 |
 | `S4-VS5C` 人工接管与 AI 恢复 | `PLANNED` | handoff/release、版本冲突、审计 | 非法转换、403/409、桌面/移动状态 |
@@ -243,7 +243,7 @@
 - `unknown` 作为 `externalOutcome`，不作为 OutboxStatus；
 - 幂等作用域为 `adminId + accountId + route + Idempotency-Key`，默认保留 30 天；
 - 鉴权基线为 SameSite=Lax、CSRF 双提交、WebSocket Origin allowlist、Session 空闲 30 分钟/绝对 8 小时、登录和密码变更后轮换；
-- 卡券正文、夸克链接、提取码仅按 `buyer_deliverable`、订单已支付、商品与账号匹配、策略通过和审计完成后交付。
+- 卡券正文和图片仅按 `buyer_deliverable`、订单已支付、商品与账号匹配、策略通过和审计完成后交付。
 
 ## 阶段边界
 

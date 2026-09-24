@@ -38,7 +38,6 @@ export interface CouponApiConfig {
 export interface CouponBatchMetadata {
   description?: string;
   delaySeconds?: number;
-  deliveryCount?: number;
   useNoLogisticsForm?: boolean;
   dockable?: boolean;
   price?: string;
@@ -457,8 +456,6 @@ export interface CouponBatchRecord {
   label?: string;
   purpose: string;
   deliveryScope: CouponDeliveryScope;
-  quarkUrl?: string;
-  extractionCode?: string;
   totalCount: number;
   status: CouponBatchStatus;
   version: number;
@@ -477,7 +474,6 @@ export interface CouponBatchListQuery {
   accountId?: string;
   keyword?: string;
   status?: CouponBatchStatus;
-  stockAlert?: 'normal' | 'low_stock' | 'exhausted';
   purpose?: 'text' | 'data' | 'api' | 'image';
   sortBy?: 'createdAt';
   sortOrder?: 'asc' | 'desc';
@@ -1388,11 +1384,9 @@ export interface Store {
     label?: string;
     purpose: string;
     deliveryScope: CouponDeliveryScope;
-    quarkUrl?: string;
-    extractionCode?: string;
     metadata?: CouponBatchMetadata;
   }): Promise<CouponBatchRecord>;
-  updateCouponBatch(input: { adminId: string; batchId: string; patch: { label?: string; purpose?: string; deliveryScope?: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; status?: CouponBatchStatus; metadata?: CouponBatchMetadata } }): Promise<CouponBatchRecord | undefined>;
+  updateCouponBatch(input: { adminId: string; batchId: string; patch: { label?: string; purpose?: string; deliveryScope?: CouponDeliveryScope; status?: CouponBatchStatus; metadata?: CouponBatchMetadata } }): Promise<CouponBatchRecord | undefined>;
   importCouponItems(input: { adminId: string; batchId: string; contents: string[] }): Promise<{ batch: CouponBatchRecord; items: CouponItemRecord[]; rejected: Array<{ index: number; code: string; message: string }> }>;
   bindCouponBatch(input: { adminId: string; batchId: string; productId: string }): Promise<CouponBindingRecord>;
   unbindCouponBatch(input: { adminId: string; batchId: string; productId: string }): Promise<CouponBindingRecord | undefined>;

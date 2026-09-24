@@ -8,8 +8,7 @@ import type { CouponBatchVM } from '../types';
 import { CouponRelationModal, CouponRelationProductLabel } from './CouponRelationModal';
 
 const batch: CouponBatchVM = {
-  batchId: '4', accountId: 'account-001', label: '测试卡券', purpose: 'text', deliveryScope: 'operator_only', status: 'draft', totalCount: 0,
-  availableCount: 0, reservedCount: 0, consumedCount: 0, version: 1, updatedAt: '2026-09-20T00:00:00.000Z', bindings: [], metadata: {}, stockAlert: 'exhausted',
+  batchId: '4', accountId: 'account-001', label: '测试卡券', purpose: 'text', deliveryScope: 'operator_only', status: 'draft', version: 1, updatedAt: '2026-09-20T00:00:00.000Z', bindings: [], metadata: {},
 };
 
 describe('CouponRelationModal', () => {

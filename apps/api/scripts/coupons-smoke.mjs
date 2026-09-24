@@ -36,11 +36,9 @@ try {
   const batchId = created.body.data.batchId;
   assert.match(String(batchId), /^\d+$/);
   assert.equal(batchId, '1');
-  assert.equal(created.body.data.availableCount, 0);
-  assert.equal(created.body.data.stockAlert, 'exhausted');
+  assert.equal('availableCount' in created.body.data, false);
+  assert.equal('stockAlert' in created.body.data, false);
   assert.equal(created.body.data.purpose, 'text');
-  assert.equal('quarkUrl' in created.body.data, false);
-  assert.equal('extractCode' in created.body.data, false);
   assert.equal(created.body.data.metadata.imageUrls.length, 1);
   assert.match(created.body.data.metadata.imageUrls[0], /^\/api\/v1\/coupons\/batches\/\d+\/assets\//);
   assert.equal(created.body.data.metadata.imageUrls[0].startsWith('data:image/'), false);
@@ -102,7 +100,8 @@ try {
   assert.equal(imported.response.status, 200);
   assert.equal(imported.body.data.importedCount, 2);
   assert.equal(imported.body.data.rejected.length, 2);
-  assert.equal(imported.body.data.stockAlert, 'low_stock');
+  assert.equal('availableCount' in imported.body.data, false);
+  assert.equal('stockAlert' in imported.body.data, false);
 
   const detail = await request(`/api/v1/coupons/batches/${batchId}`, { headers: { cookie } });
   assert.equal(detail.response.status, 200);
@@ -139,7 +138,8 @@ try {
   const deleted = await request(`/api/v1/coupons/batches/${batchId}`, { method: 'DELETE', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-delete-1' } });
   assert.equal(deleted.response.status, 200);
   assert.equal(deleted.body.data.batch.status, 'voided');
-  assert.equal(deleted.body.data.batch.stockAlert, 'exhausted');
+  assert.equal('availableCount' in deleted.body.data.batch, false);
+  assert.equal('stockAlert' in deleted.body.data.batch, false);
   const defaultAfterVoid = await request(`/api/v1/coupons/batches?accountId=${account.id}`, { headers: { cookie } });
   assert.equal(defaultAfterVoid.response.status, 200);
   assert.equal(defaultAfterVoid.body.data.items.some((item) => item.batchId === batchId), false);

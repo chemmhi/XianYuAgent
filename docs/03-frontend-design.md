@@ -19,7 +19,7 @@
 3. SellerAgent 原型与 `xianyu-admin-design-style/assets/design-tokens.json` 作为当前视觉基线；没有正式 Figma 时，不宣称已完成 Figma 高保真验收。
 4. 桌面目标 viewport 固定为 **1440 × 900**；移动目标 viewport 固定为 **390 × 844**。
 5. 前端只调用领域 API 契约，不直接调用 Pi Runtime、闲鱼原始 MTOP/WebSocket、旧项目 API wrapper 或数据库。
-6. 系统凭证只显示受控引用和元数据；卡券正文、夸克链接和提取码只有在阶段 2 定义的 `buyer_deliverable` 交付条件满足后，才允许进入买家交付预览或发送链路。
+6. 系统凭证只显示受控引用和元数据；卡券配置生成的正文或图片只有在阶段 2 定义的 `buyer_deliverable` 交付条件满足后，才允许进入买家交付预览或发送链路。
 
 ## 2. 视觉与布局基线
 
@@ -212,8 +212,8 @@ App
 - 组件树：`BatchToolbar + CouponBatchTable + BatchDrawer (BatchMetadataForm + CouponItemEditor + AssetPanel + BindingPanel + ContentPreview) + DeliveryActionBar + InventoryLockBanner`。
 - 读取 API：`GET /api/v1/coupons/batches`、`GET /api/v1/coupons/batches/{id}`、`GET /api/v1/coupons/{id}/content`（显式用途与审计前置）。
 - 写 API：`POST /api/v1/coupons/batches`、`PATCH /api/v1/coupons/batches/{id}`、`DELETE /api/v1/coupons/batches/{id}`、`POST /api/v1/coupons/batches/{id}/bind`、`POST /api/v1/coupons/batches/{id}/unbind`、`POST /api/v1/coupons/batches/{id}/items/import`、`POST /api/v1/coupons/batches/{id}/void`；`items/bulk-save`、`items/bulk-delete`、`assets` 为后续切片契约，当前页面使用批次级批量删除和 metadata.imageUrls 原图预览。
-- 状态：批次 loading/empty/error；批次库存生命周期使用 `inventoryStatus`（available/reserved/delivered/void/exhausted），批次列表另使用由 `availableCount` 与阈值派生的 `stockAlert`（normal/low_stock/exhausted）；批量保存/删除显示逐项结果；绑定账号不匹配时阻断；管理员正文预览/编辑直接由受控领域接口提供，买家可见交付在不满足 `buyer_deliverable`、订单已支付、商品与账号匹配、策略通过和审计完成时显示 forbidden；作废提交中禁用重复操作。
-- 安全：系统凭证与买家可交付卡券分离；管理员查看正文、夸克链接、提取码时保留 purpose、账号范围和 auditRef；买家交付仍必须满足全部策略条件。
+- 状态：批次 loading/empty/error；列表只展示类型、交付配置摘要、绑定关系和生命周期状态，不展示卡券库存数量或库存预警；批量保存/删除显示逐项结果；绑定账号不匹配时阻断；管理员正文预览/编辑直接由受控领域接口提供，买家可见交付在不满足 `buyer_deliverable`、订单已支付、商品与账号匹配、策略通过和审计完成时显示 forbidden；作废提交中禁用重复操作。
+- 安全：系统凭证与买家可交付卡券分离；管理员查看卡券正文或图片时保留 purpose、账号范围和 auditRef；买家交付仍必须满足全部策略条件。
 
 ### 7.7 Orders `/orders`
 
@@ -222,7 +222,7 @@ App
 - 读取 API：`GET /api/v1/orders`、`GET /api/v1/orders/{orderNo}`、`POST /api/v1/orders/refresh`。
 - 写 API：`POST /api/v1/orders/{orderNo}/delivery-preview`、`POST /api/v1/orders/{orderNo}/deliver`、`POST /api/v1/orders/{orderNo}/cancel`、`POST /api/v1/orders/{orderNo}/retry`。
 - 状态：列表 loading/success/empty/error/403；`paymentStatus` unpaid/paid/closed/unknown；`orderStatus` open/cancelling/cancelled/completed/closed/failed；`deliveryStatus` pending/reserving/delivered/partially_delivered/failed/cancelled；`afterSalesStatus` none/requested/refunding/refunded/rejected/closed；预览 ready/blocked；发货/重试 submitting/succeeded/failed/unknown；结果未知时只能查询外部状态或恢复 Outbox，不直接再次发货。
-- 安全：只有订单已支付、商品和账号匹配、deliveryScope 允许、库存成功锁定、Policy 通过且 Audit 完成时，才显示买家交付内容和可执行 CTA。
+- 安全：只有订单已支付、商品和账号匹配、deliveryScope 允许、交付配置成功解析、Policy 通过且 Audit 完成时，才显示买家交付内容和可执行 CTA。
 
 ### 7.8 Settings `/settings`
 
@@ -293,9 +293,9 @@ App
 | 设计状态 | 实现组件 | 交互边界 | 验收证据 |
 | --- | --- | --- | --- |
 | 商品列表 / 批量入口 | `ProductsPage`、`BatchAutomationDialog` | 勾选商品后批量配置；未配置商品不展示自动化明细 | `01-products-list-*.png`、Chrome/CDP E2E |
-| 付款后自动发货 | `AutomationDrawer` | 只提供发货卡券选择入口；卡券规则与库存细节在卡券管理维护 | `02-payment-after-delivery-*.png` |
+| 付款后自动发货 | `AutomationDrawer` | 只提供发货卡券选择入口；卡券规则与交付配置在卡券管理维护 | `02-payment-after-delivery-*.png` |
 | 拍下未付款自动改价 | `AutomationDrawer` | 配置目标价格与改价后文本；保存时带版本校验 | `03-unpaid-reprice-*.png` |
-| 评价后发送赠品 | `AutomationDrawer` | 只提供赠品卡券选择入口；评价事实与赠品库存由后端执行链维护 | `04-review-gift-*.png` |
+| 评价后发送赠品 | `AutomationDrawer` | 只提供赠品卡券选择入口；评价事实与赠品交付配置由后端执行链维护 | `04-review-gift-*.png` |
 | 超时未评价求评价 | `AutomationDrawer` | 配置首次等待、重复间隔、最大次数和文案 | `05-overdue-review-*.png` |
 | 选择发货卡券 | `CouponPickerDialog` | 复用卡券创建/编辑穿梭框语义；支持搜索、全选、移入/移出、多选与保存计数 | `06-delivery-coupon-picker-*.png` |
 

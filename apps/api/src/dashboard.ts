@@ -28,10 +28,9 @@ export interface DashboardSnapshot {
   todayOrderAmount: number;
   autoProcessRate: number;
   pendingManualCount: number;
-  availableCouponCount: number;
   trend: DashboardTrendPoint[];
   health: Array<{ label: string; value: string; tone: 'ok' | 'warn' | 'danger' | 'info' | 'gray' }>;
-  productRank: Array<{ title: string; subtitle: string; orders: string; stock: string; status: string; tone: 'ok' | 'warn' | 'danger' | 'info' | 'gray' }>;
+  productRank: Array<{ title: string; subtitle: string; orders: string; deliveryConfig: '已就绪' | '待配置'; status: string; tone: 'ok' | 'warn' | 'danger' | 'info' | 'gray' }>;
   recentActivity: Array<{ time: string; text: string; status: string; tone: 'ok' | 'warn' | 'danger' | 'info' | 'gray'; href?: string }>;
   riskTodos: Array<{ id: string; title: string; detail?: string; severity: 'high' | 'medium' | 'low'; href: string }>;
 }
@@ -77,20 +76,18 @@ export class DashboardService {
     const todayStart = startOfUtcDay(now);
     const todayOrders = orders.filter((order) => parseTime(order.createdAt) >= todayStart);
     const paidOrders = orders.filter((order) => order.paymentStatus === 'paid');
-    const availableCouponCount = coupons.reduce((sum, batch) => sum + Number(batch.availableCount ?? 0), 0);
-    const pendingManualCount = countPendingManual(orders, accounts, coupons, conversations);
+    const pendingManualCount = countPendingManual(orders, accounts, conversations);
 
     return {
       totalSales: round(sumMajorUnits(paidOrders)),
       todayOrderAmount: round(sumMajorUnits(todayOrders)),
       autoProcessRate: autoProcessRate(todayOrders),
       pendingManualCount,
-      availableCouponCount,
       trend,
-      health: buildHealth(accounts, availableCouponCount),
-      productRank: buildProductRank(products, orders, coupons),
+      health: buildHealth(accounts, coupons),
+      productRank: buildProductRank(products, orders),
       recentActivity: buildRecentActivity(orders, conversations, now),
-      riskTodos: buildRiskTodos(accounts, orders, coupons, conversations),
+      riskTodos: buildRiskTodos(accounts, orders, conversations),
     };
   }
 }
@@ -145,18 +142,19 @@ function parseBoundary(value: string, endOfDate: boolean): number {
   return parsed;
 }
 
-function buildHealth(accounts: AccountRecord[], availableCouponCount: number): DashboardSnapshot['health'] {
+function buildHealth(accounts: AccountRecord[], coupons: CouponBatchRecord[]): DashboardSnapshot['health'] {
   const connected = accounts.filter((account) => account.status === 'connected').length;
   const degraded = accounts.filter((account) => account.status === 'degraded' || account.status === 'expired' || account.status === 'disconnected').length;
+  const configured = coupons.some((batch) => batch.status === 'active');
   return [
     { label: '监听心跳', value: connected > 0 ? '正常' : degraded > 0 ? '需授权' : '待连接', tone: connected > 0 ? 'ok' : degraded > 0 ? 'warn' : 'gray' },
     { label: '自动回复策略', value: '已配置', tone: 'info' },
-    { label: '虚拟发货', value: availableCouponCount > 0 ? '库存正常' : '库存告警', tone: availableCouponCount > 0 ? 'ok' : 'warn' },
+    { label: '虚拟发货', value: configured ? '配置已就绪' : '待配置', tone: configured ? 'ok' : 'warn' },
     { label: '凭证边界', value: '管理员可管理', tone: 'warn' },
   ];
 }
 
-function buildProductRank(products: ProductRecord[], orders: OrderRecord[], coupons: CouponBatchRecord[]): DashboardSnapshot['productRank'] {
+function buildProductRank(products: ProductRecord[], orders: OrderRecord[]): DashboardSnapshot['productRank'] {
   const ordersByProduct = new Map<string, number>();
   const ordersByTitle = new Map<string, number>();
   for (const order of orders) {
@@ -164,25 +162,22 @@ function buildProductRank(products: ProductRecord[], orders: OrderRecord[], coup
     ordersByTitle.set(order.itemTitle, (ordersByTitle.get(order.itemTitle) ?? 0) + 1);
   }
 
-  const stockByAccount = new Map<string, number>();
-  for (const batch of coupons) stockByAccount.set(batch.accountId, (stockByAccount.get(batch.accountId) ?? 0) + Number(batch.availableCount ?? 0));
-
   return [...products]
     .map((product) => {
       const orderCount = ordersByProduct.get(product.id) ?? ordersByTitle.get(product.title) ?? 0;
-      const stock = stockByAccount.get(product.accountId) ?? 0;
       const published = product.status === 'published' || product.status === 'ready';
-      const available = published && stock > 0;
+      const hasDeliveryConfig = (product.couponBatches?.length ?? 0) > 0;
+      const ready = published && hasDeliveryConfig;
       return {
         orderCount,
         updatedAt: product.updatedAt,
         row: {
           title: product.title,
-          subtitle: `虚拟资源 · ${stock > 0 ? '库存正常' : '缺库存'}`,
+          subtitle: `虚拟资源 · ${hasDeliveryConfig ? '交付配置已就绪' : '待配置交付内容'}`,
           orders: String(orderCount),
-          stock: String(stock),
-          status: available ? '可售' : stock === 0 ? '缺库存' : '待配置',
-          tone: available ? 'ok' as const : stock === 0 ? 'warn' as const : 'gray' as const,
+          deliveryConfig: hasDeliveryConfig ? '已就绪' as const : '待配置' as const,
+          status: ready ? '可交付' : published ? '待配置' : '未发布',
+          tone: ready ? 'ok' as const : published ? 'warn' as const : 'gray' as const,
         },
       };
     })
@@ -211,7 +206,7 @@ function buildRecentActivity(orders: OrderRecord[], conversations: ConversationR
   return activity.filter((item) => item.at >= cutoff).sort((left, right) => right.at - left.at).slice(0, ACTIVITY_LIMIT).map(({ at: _at, ...item }) => item);
 }
 
-function buildRiskTodos(accounts: AccountRecord[], orders: OrderRecord[], coupons: CouponBatchRecord[], conversations: ConversationRecord[]): DashboardSnapshot['riskTodos'] {
+function buildRiskTodos(accounts: AccountRecord[], orders: OrderRecord[], conversations: ConversationRecord[]): DashboardSnapshot['riskTodos'] {
   const todos: DashboardSnapshot['riskTodos'] = [];
   for (const account of accounts.filter((item) => ['expired', 'disconnected', 'degraded'].includes(item.status))) {
     todos.push({ id: `account-${account.id}`, title: `${account.displayName || account.sellerRef} 需要重新授权`, detail: '登录态不可用，消息监听与自动处理可能已暂停。', severity: account.status === 'expired' ? 'high' : 'medium', href: '/accounts' });
@@ -220,19 +215,15 @@ function buildRiskTodos(accounts: AccountRecord[], orders: OrderRecord[], coupon
     const failed = order.deliveryStatus === 'failed';
     todos.push({ id: `order-${order.id}`, title: `${order.itemTitle} ${failed ? '发货失败' : '待人工处理'}`, detail: failed ? (order.deliveryFailReason || '外部发货未成功，需要复核。') : '订单已付款但还没有完成交付。', severity: failed ? 'high' : 'medium', href: '/orders' });
   }
-  for (const coupon of coupons.filter((item) => item.status === 'active' && Number(item.availableCount ?? 0) === 0)) {
-    todos.push({ id: `coupon-${coupon.id}`, title: `${coupon.label || coupon.purpose} 缺少可售库存`, detail: '请补充卡密库存后再继续自动发货。', severity: 'high', href: '/coupons' });
-  }
   for (const conversation of conversations.filter((item) => item.unreadCount > 0)) {
     todos.push({ id: `conversation-${conversation.id}`, title: `${conversation.buyerDisplayName || conversation.buyerRef} 有待回复消息`, detail: `${conversation.unreadCount} 条消息等待处理。`, severity: 'low', href: '/messages' });
   }
   return todos.slice(0, RISK_LIMIT);
 }
 
-function countPendingManual(orders: OrderRecord[], accounts: AccountRecord[], coupons: CouponBatchRecord[], conversations: ConversationRecord[]): number {
+function countPendingManual(orders: OrderRecord[], accounts: AccountRecord[], conversations: ConversationRecord[]): number {
   return orders.filter((order) => order.paymentStatus === 'paid' && order.deliveryStatus !== 'delivered' && order.deliveryStatus !== 'cancelled').length
     + accounts.filter((account) => ['expired', 'disconnected', 'degraded'].includes(account.status)).length
-    + coupons.filter((batch) => batch.status === 'active' && Number(batch.availableCount ?? 0) === 0).length
     + conversations.filter((conversation) => conversation.unreadCount > 0).length;
 }
 

@@ -8,7 +8,6 @@ describe('dashboard view model', () => {
       todayOrderAmount: 18640,
       autoProcessRate: 96.8,
       pendingManualCount: 3,
-      availableCouponCount: 1286,
       trend: [{ label: '周一', orderAmount: 58, autoProcessRate: 82 }],
       riskTodos: [
         { id: 'todo-high', title: '高风险', severity: 'high', href: '/orders' },

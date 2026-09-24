@@ -99,7 +99,6 @@ export class CouponService {
     if (!Number.isInteger(page) || page < 1) throw new ServiceError(422, 'VALIDATION_FAILED', 'page must be a positive integer');
     if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new ServiceError(422, 'VALIDATION_FAILED', 'pageSize must be between 1 and 100');
     if (query.status && !['draft', 'active', 'paused', 'closed', 'exhausted', 'voided'].includes(query.status)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon batch status');
-    if (query.stockAlert && !['normal', 'low_stock', 'exhausted'].includes(query.stockAlert)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon stock alert');
     if (query.purpose && !['text', 'data', 'api', 'image'].includes(query.purpose)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon purpose');
     if (query.sortBy && query.sortBy !== 'createdAt') throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon sort field');
     if (query.sortOrder && !['asc', 'desc'].includes(query.sortOrder)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon sort order');
@@ -115,14 +114,14 @@ export class CouponService {
     return this.toBatchView(batch, true);
   }
 
-  async create(input: { adminId: string; accountId: string; label?: string; purpose: string; deliveryScope: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; metadata?: CouponBatchMetadata; requestId: string; traceId: string }): Promise<ReturnType<CouponService['toBatchView']>> {
+  async create(input: { adminId: string; accountId: string; label?: string; purpose: string; deliveryScope: CouponDeliveryScope; metadata?: CouponBatchMetadata; requestId: string; traceId: string }): Promise<ReturnType<CouponService['toBatchView']>> {
     if (!input.accountId.trim()) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
     if (!input.purpose.trim()) throw new ServiceError(422, 'VALIDATION_FAILED', 'purpose is required');
     if (!['text', 'data', 'api', 'image'].includes(input.purpose)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon purpose');
     if (!['system_only', 'operator_only', 'buyer_deliverable'].includes(input.deliveryScope)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid deliveryScope');
     try {
       const imageUrls = input.metadata?.imageUrls ?? [];
-      const { quarkUrl: _quarkUrl, extractionCode: _extractionCode, requestId: _requestId, traceId: _traceId, ...batchInput } = input;
+      const { requestId: _requestId, traceId: _traceId, ...batchInput } = input;
       const batch = await this.store.createCouponBatch({ ...batchInput, metadata: this.couponAssets.withoutImages(input.metadata) });
       if (imageUrls.length > 0) await this.couponAssets.replaceImages({ adminId: input.adminId, batch, imageUrls });
       const hydrated = await this.store.getCouponBatch(input.adminId, batch.id) ?? batch;
@@ -131,14 +130,13 @@ export class CouponService {
     } catch (error) { throw mapCouponStoreError(error); }
   }
 
-  async update(input: { adminId: string; batchId: string; patch: { label?: string; purpose?: string; deliveryScope?: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; status?: CouponBatchStatus; metadata?: CouponBatchMetadata }; requestId: string; traceId: string }): Promise<ReturnType<CouponService['toBatchView']>> {
+  async update(input: { adminId: string; batchId: string; patch: { label?: string; purpose?: string; deliveryScope?: CouponDeliveryScope; status?: CouponBatchStatus; metadata?: CouponBatchMetadata }; requestId: string; traceId: string }): Promise<ReturnType<CouponService['toBatchView']>> {
     if (input.patch.purpose && !['text', 'data', 'api', 'image'].includes(input.patch.purpose)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon purpose');
     if (input.patch.deliveryScope && !['system_only', 'operator_only', 'buyer_deliverable'].includes(input.patch.deliveryScope)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid deliveryScope');
     if (input.patch.status && !['draft', 'active', 'paused', 'closed', 'exhausted', 'voided'].includes(input.patch.status)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon batch status');
     try {
       const imageUrls = input.patch.metadata?.imageUrls;
-      const { quarkUrl: _quarkUrl, extractionCode: _extractionCode, ...safePatch } = input.patch;
-      const patch = safePatch.metadata === undefined ? safePatch : { ...safePatch, metadata: this.couponAssets.withoutImages(safePatch.metadata) };
+      const patch = input.patch.metadata === undefined ? input.patch : { ...input.patch, metadata: this.couponAssets.withoutImages(input.patch.metadata) };
       const batch = await this.store.updateCouponBatch({ ...input, patch });
       if (!batch) throw new ServiceError(404, 'NOT_FOUND', 'coupon batch not found');
       if (imageUrls !== undefined) {
@@ -222,27 +220,22 @@ export class CouponService {
       accountIds: [found.batch.accountId],
       content: allowed ? { body: found.item.content } : undefined,
       access: { allowed, purpose: input.purpose, auditRef, ...(denialReason ? { denialReason } : {}) },
-      inventoryStatus: found.batch.status === 'voided' ? 'void' : found.item.status === 'consumed' ? 'delivered' : found.item.status,
+      contentStatus: found.batch.status === 'voided' ? 'void' : found.item.status === 'consumed' ? 'delivered' : found.item.status,
     };
     return response;
   }
 
   private toBatchView(batch: CouponBatchRecord, detail = false): Record<string, unknown> {
     const items = batch.items ?? [];
-    const availableCount = items.length > 0 ? items.filter((item) => item.status === 'available').length : batch.availableCount ?? 0;
-    const reservedCount = items.length > 0 ? items.filter((item) => item.status === 'reserved').length : batch.reservedCount ?? 0;
-    const consumedCount = items.length > 0 ? items.filter((item) => item.status === 'consumed').length : batch.consumedCount ?? 0;
-    const totalCount = batch.totalCount || items.length;
-    const stockAlert = batch.status === 'voided' || availableCount === 0 ? 'exhausted' : availableCount <= 5 ? 'low_stock' : 'normal';
     const metadata = batch.metadata ?? {};
     const storedImageUrls = this.couponAssets.imageUrls(batch);
     const legacyImageUrls = (metadata.imageUrls ?? []).filter((url) => !this.couponAssets.isDataImage(url));
     const imageUrls = storedImageUrls.length > 0 ? storedImageUrls : legacyImageUrls;
     const detailMetadata = imageUrls.length > 0 ? { ...metadata, imageUrls } : metadata;
-    const listMetadata = { description: metadata.description, delaySeconds: metadata.delaySeconds, deliveryCount: metadata.deliveryCount, useNoLogisticsForm: metadata.useNoLogisticsForm, dockable: metadata.dockable, price: metadata.price, feePayer: metadata.feePayer, minPrice: metadata.minPrice, dockVisibility: metadata.dockVisibility, multiSpec: metadata.multiSpec, specName: metadata.specName, specValue: metadata.specValue };
+    const listMetadata = { description: metadata.description, delaySeconds: metadata.delaySeconds, useNoLogisticsForm: metadata.useNoLogisticsForm, dockable: metadata.dockable, price: metadata.price, feePayer: metadata.feePayer, minPrice: metadata.minPrice, dockVisibility: metadata.dockVisibility, multiSpec: metadata.multiSpec, specName: metadata.specName, specValue: metadata.specValue };
     const publicBatchId = this.publicBatchId(batch);
     const bindingViews = (batch.bindings ?? []).map((binding) => this.toBindingView(binding, publicBatchId));
-    const result: Record<string, unknown> = { batchId: publicBatchId, id: publicBatchId, accountId: batch.accountId, label: batch.label, purpose: batch.purpose, deliveryScope: batch.deliveryScope, totalCount, availableCount, reservedCount, consumedCount, stockAlert, status: batch.status, version: batch.version, updatedAt: batch.updatedAt, createdAt: batch.createdAt, metadata: detail ? detailMetadata : listMetadata, contentPreview: { text: metadata.textContent ? metadata.textContent.slice(0, 140) : undefined, dataRemaining: availableCount, apiUrl: metadata.apiConfig?.url, imageUrls }, productBindings: bindingViews.filter((binding) => binding.status === 'active') };
+    const result: Record<string, unknown> = { batchId: publicBatchId, id: publicBatchId, accountId: batch.accountId, label: batch.label, purpose: batch.purpose, deliveryScope: batch.deliveryScope, status: batch.status, version: batch.version, updatedAt: batch.updatedAt, createdAt: batch.createdAt, metadata: detail ? detailMetadata : listMetadata, contentPreview: { text: metadata.textContent ? metadata.textContent.slice(0, 140) : undefined, apiUrl: metadata.apiConfig?.url, imageUrls }, productBindings: bindingViews.filter((binding) => binding.status === 'active') };
     if (detail) result.items = items.map((item) => this.toItemView(item, publicBatchId));
     if (detail) result.bindings = bindingViews;
     return result;

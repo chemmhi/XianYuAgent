@@ -43,7 +43,6 @@ export function createMockDashboardApi(): DashboardApi {
         todayOrderAmount: 18640,
         autoProcessRate: 96.8,
         pendingManualCount: 3,
-        availableCouponCount: 1286,
         trend: visibleTrend,
         health: [
           { label: '监听心跳', value: '正常', tone: 'ok' },
@@ -52,10 +51,10 @@ export function createMockDashboardApi(): DashboardApi {
           { label: '凭证边界', value: '管理员可管理', tone: 'warn' },
         ],
         productRank: [
-          { title: 'Python 全栈资料包', subtitle: '虚拟资源 · 凭证完整', orders: '42', stock: '368', status: '可售', tone: 'ok' },
-          { title: 'AI 绘画教程合集', subtitle: '虚拟资源 · 凭证完整', orders: '31', stock: '220', status: '可售', tone: 'ok' },
-          { title: '考研英语资料', subtitle: '知识待补充', orders: '18', stock: '0', status: '缺凭证', tone: 'warn' },
-          { title: '自动化办公模板', subtitle: '知识待补充', orders: '12', stock: '90', status: '可售', tone: 'ok' },
+          { title: 'Python 全栈资料包', subtitle: '虚拟资源 · 交付配置已就绪', orders: '42', deliveryConfig: '已就绪', status: '可交付', tone: 'ok' },
+          { title: 'AI 绘画教程合集', subtitle: '虚拟资源 · 交付配置已就绪', orders: '31', deliveryConfig: '已就绪', status: '可交付', tone: 'ok' },
+          { title: '考研英语资料', subtitle: '虚拟资源 · 待配置交付内容', orders: '18', deliveryConfig: '待配置', status: '待配置', tone: 'warn' },
+          { title: '自动化办公模板', subtitle: '虚拟资源 · 交付配置已就绪', orders: '12', deliveryConfig: '已就绪', status: '可交付', tone: 'ok' },
         ],
         recentActivity: [
           { time: '14:22', text: '小橙子询问付款后发货时间，AI 已引用商品知识 v12 回复。', status: 'AI 已回复', tone: 'ok', href: '/messages' },

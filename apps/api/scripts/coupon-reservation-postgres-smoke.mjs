@@ -16,7 +16,7 @@ try {
   assert.equal((await runtime.store.health()).reachable, true, 'PostgreSQL must be reachable and base migrations must be applied');
   admin = await runtime.store.createAdmin({ email: `coupon-reservation-pg-${suffix}@example.com`, passwordHash: 'hash', displayName: 'Coupon Reservation PG' });
   account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: `coupon-reservation-pg-${suffix}` });
-  batch = await runtime.store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'PG Reservation Batch', purpose: 'text', deliveryScope: 'buyer_deliverable', quarkUrl: 'https://quark.example/pg', extractionCode: '1357' });
+  batch = await runtime.store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'PG Reservation Batch', purpose: 'text', deliveryScope: 'buyer_deliverable' });
   await runtime.store.importCouponItems({ adminId: admin.id, batchId: batch.id, contents: [`pg-coupon-1-${suffix}`, `pg-coupon-2-${suffix}`] });
 
   const reserveInput = { adminId: admin.id, accountId: account.id, batchIds: [batch.id], quantity: 1, executionKey: `pg-same-${suffix}`, purpose: 'delivery' };
@@ -24,8 +24,6 @@ try {
   reservationIds.push(first.reservationId);
   assert.equal(first.reservationId, second.reservationId);
   assert.equal(first.items.length, 1);
-  assert.equal('quarkUrl' in first.items[0], false);
-  assert.equal('extractionCode' in first.items[0], false);
 
   const oversell = await Promise.allSettled([
     runtime.store.reserveCoupon({ ...reserveInput, executionKey: `pg-a-${suffix}` }),
@@ -34,7 +32,7 @@ try {
   const fulfilled = oversell.filter((result) => result.status === 'fulfilled');
   assert.equal(fulfilled.length, 1);
   const rejected = oversell.find((result) => result.status === 'rejected');
-  assert.match(String(rejected?.reason?.message), /COUPON_INSUFFICIENT_INVENTORY/);
+  assert.match(String(rejected?.reason?.message), /COUPON_DELIVERY_ITEM_UNAVAILABLE/);
   for (const result of fulfilled) reservationIds.push(result.value.reservationId);
 
   const released = await runtime.store.releaseCouponReservation({ adminId: admin.id, reservationId: first.reservationId, executionKey: reserveInput.executionKey, reason: 'pg_send_failed' });

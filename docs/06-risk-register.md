@@ -21,8 +21,8 @@
 | R-005 | 对象存储实现尚未在 S3 / MinIO / 现有服务中定案 | P2 | 中 | 影响媒体上传和部署 | 后端负责人 | 统一 S3 兼容接口，先用 MinIO 做本地验证 | 阶段 2 数据 / API 评审前 | 开放 |
 | R-006 | Pi Runtime 已确认采用独立服务，ADR 已通过但最小运行验证尚未完成 | P2 | 中 | 影响 Agent 故障隔离和发布拓扑 | 架构负责人 | 在真实运行时接入前完成健康、超时、不可用、重试和取消验证 | 阶段 5 首切片前 | 已决策，待运行验证 |
 | R-007 | 首期生产允许 Docker Compose，但发布演练尚未完成 | P2 | 中 | 影响发布、回滚和运维成本 | 安全 / 运维负责人 | 阶段 7 完成健康检查、备份和回滚演练 | 阶段 7 前 | 已决策，待演练 |
-| R-008 | 卡券正文、夸克链接和提取码属于可交付敏感业务数据 | P1 | 中 | 可能造成越权或日志泄露 | 安全负责人 | 已确认：系统凭证永不交付；仅在 `deliveryScope=buyer_deliverable`、订单已支付、商品与账号匹配、策略校验通过并记录审计后交付买家；仍需实现接口隔离、权限校验、日志 / Trace / Replay / Prompt 脱敏和审计 | 阶段 2 安全评审前 | 范围已确认，工程待落实 |
-| R-009 | 外部动作可能超时但结果未知，重试会导致重复发布 / 发货 / 扣库存 | P1 | 中 | 造成业务重复执行和数据不一致 | 后端负责人 | 事务内记录 Idempotency + Outbox + Audit；重试前先查外部状态 | 阶段 2 契约评审前 | 开放 |
+| R-008 | 卡券正文和图片属于可交付敏感业务数据 | P1 | 中 | 可能造成越权或日志泄露 | 安全负责人 | 已确认：系统凭证永不交付；仅在 `deliveryScope=buyer_deliverable`、订单已支付、商品与账号匹配、策略校验通过并记录审计后交付买家；仍需实现接口隔离、权限校验、日志 / Trace / Replay / Prompt 脱敏和审计 | 阶段 2 安全评审前 | 范围已确认，工程待落实 |
+| R-009 | 外部动作可能超时但结果未知，重试会导致重复发布 / 发货 / 批量数据消费 | P1 | 中 | 造成业务重复执行和数据不一致 | 后端负责人 | 事务内记录 Idempotency + Outbox + Audit；重试前先查外部状态 | 阶段 2 契约评审前 | 开放 |
 | R-010 | 原型导航包含非本轮正式页面，后续实现可能发生视觉和范围漂移 | P2 | 中 | 造成产品范围和验收不一致 | 前端负责人 | 已决定直接删除 knowledge、review 原型入口及其页面分支 | 当前迭代 | 已关闭，代码扫描、测试和构建已通过 |
 | R-011 | 原型 liveApi 使用 `localStorage.auth_token`，与生产 HttpOnly Cookie 会话基线不一致 | P1 | 中 | 真实鉴权可能出现会话泄露、生命周期和退出语义不一致 | 安全 / 后端负责人 | 阶段 0 仅登记为原型例外；阶段 1/2 改为服务端会话、HttpOnly Cookie、Secure、SameSite，并补真实鉴权集成与 E2E | 阶段 1/2 鉴权实现前 | 开放 |
 
@@ -38,8 +38,8 @@
 | S3-I010 | ControllerResult、canonical ViewModel 和错误码映射已冻结并通过独立设计复审 | P1 | 高 | 页面若绕过 controller 仍可能重现超级组件 | 前端 / API 负责人 | `docs/03-component-contract.md` 已补齐字段级类型、逐条 API、queryKey/invalidation、恢复矩阵、Runtime/Outbox 拆分和反超级组件规则 | 2026-09-19 独立设计复审 | VERIFIED / CLOSED |
 | S4-I001 | ENV-0 的 Session/CSRF、幂等、账号范围、最小审计和 Execution foundation 尚未完成发布级恢复演练 | P1 | 高 | 首个账号切片无法形成可审计、可回滚闭环 | 架构 / 后端负责人 | 已完成 Memory/Postgres store、API、Worker、Session/CSRF、幂等、账号 scope 与最小审计；Compose 容器健康、账号持久化与 API 重启复读已通过，迁移回滚/Testcontainers 待补 | S4-VS1 关闭前 | 部分缓解，发布级证据开放 |
 | S4-I002 | 闲鱼登录、QR/login-session、连接刷新协议与可复现凭证仍依赖外部平台 | P1 | 高 | 账号、商品同步和订单查询无法稳定验收 | 后端负责人 | 已接通真实 QR 生成/轮询/取消与 Cookie 登录；真实 APP 扫码、外部 Cookie 与资料接口仍需人工验收 | S4-VS1/S4-VS2 前 | 部分缓解，外部验收开放 |
-| S4-I003 | 卡券正文、夸克链接、提取码和库存状态进入真实链路后存在越权或日志泄露风险 | P1 | 中 | 可能造成敏感交付泄露或错误交付 | 安全 / 后端负责人 | 受控 content API、deliveryScope、账号/商品/订单匹配、库存锁、AuditEvent 和脱敏验证 | S4-VS3/S4-VS4 前 | 开放 |
-| S4-I004 | 订单交付、商品发布和外部动作可能出现 unknown/timeout，重复写会造成重复发货或扣库存 | P1 | 中 | 外部状态与本地订单/库存不一致 | 后端 / QA 负责人 | 所有高风险写入使用 Idempotency + Confirmation + Outbox；unknown 只查询/人工恢复 | S4-VS2/S4-VS4 前 | 开放 |
+| S4-I003 | 卡券正文、图片和配置状态进入真实链路后存在越权或日志泄露风险 | P1 | 中 | 可能造成敏感交付泄露或错误交付 | 安全 / 后端负责人 | 受控 content API、deliveryScope、账号/商品/订单匹配、消费锁、AuditEvent 和脱敏验证 | S4-VS3/S4-VS4 前 | 开放 |
+| S4-I004 | 订单交付、商品发布和外部动作可能出现 unknown/timeout，重复写会造成重复发货或批量数据重复消费 | P1 | 中 | 外部状态与本地订单/交付配置不一致 | 后端 / QA 负责人 | 所有高风险写入使用 Idempotency + Confirmation + Outbox；unknown 只查询/人工恢复 | S4-VS2/S4-VS4 前 | 开放 |
 | S4-I005 | 迁移顺序、执行基础和业务表之间存在耦合，回滚可能影响历史订单或审计 | P1 | 中 | 无法安全回退首片 | 架构 / 数据负责人 | 为每片冻结迁移编号、expand/backfill/verify/switch/rollback、fixture 和兼容读路径 | 各切片实现前 | 开放 |
 | S4-I006 | 实现阶段可能因赶主体功能重新形成超级组件或跨域保存入口 | P1 | 中 | 组件不可独立测试，后续功能扩展失控 | 前端负责人 | 严格复用阶段 3 owner/VM/API 矩阵；每片复审组件边界和 forbidden dependencies | S4-VS1 至 S4-VS4 | 开放 |
 | S4-I007 | 移动端对等、视觉回归和真实验收证据可能后置，导致主体功能只在桌面可用 | P2 | 中 | 影响正式页面承载和验收完整性 | 前端 / QA 负责人 | 每片固定 1440×900、390×844、代表性数据、状态截图和回归记录 | 各切片验收前 | 开放 |
@@ -95,8 +95,8 @@
 | S5-RISK-013 | 商品草稿、SKU、素材和发布若未按 ProductEditor 子域拆分，可能重新形成跨域保存入口和版本覆盖 | P1 | 中 | 商品写入不可独立测试，冲突时覆盖用户草稿 | 前端 / API 负责人 | `S4-VS2A/B/C/D` 分别具备独立 controller、API、版本校验、真实 E2E 和复审记录 | `S4-VS2A`–`S4-VS2D` | 开放，已拆分待实现 |
 | S5-RISK-014 | 商品 SKU/库存与发布命令的并发、幂等和部分成功语义尚未落到真实持久化 | P1 | 高 | 可能出现重复发布、库存覆盖或部分成功被误报为整体成功 | 后端 / QA 负责人 | PostgreSQL 并发集成、Idempotency/Outbox worker、逐项结果和 unknown 人工恢复均通过 | `S4-VS2B`、`S4-VS2D` | 开放 |
 | S5-RISK-015 | AssetRef 与 MinIO contract 尚未完成，上传失败、过期 URL、删除和重启恢复可能污染草稿 | P1 | 中 | 图片不可见、对象泄漏或草稿引用悬空 | 后端 / 运维负责人 | MinIO 持久化/重启复读、失败重试、403/过期、checksum/status 和回滚验证通过 | `S4-VS2C` | 开放，承接 R-005 |
-| S5-RISK-016 | CouponItem 批量操作、卡券素材和库存锁仍停留在后续契约，真实订单交付前没有原子 reserve/consume/release 证据 | P1 | 高 | 重复发券、库存负数、正文越权或失败无法恢复 | 后端 / 安全负责人 | PostgreSQL/Redis/MinIO 真实集成、并发锁、敏感字段裁剪和订单联调通过 | `S4-VS3A`、`S4-VS3B` | 开放，承接 S4-I003/R-009 |
-| S5-RISK-017 | 订单只读、交付预览和商品/卡券状态尚未拆成独立门禁，可能混用支付、交付、售后状态 | P1 | 中 | 预览误扣库存、退款订单重复交付或页面状态误导 | API / 前端负责人 | `OrderStatusMatrix` 四态独立、预览不写入、交付动作单独走 Confirmation/Outbox | `S4-VS4A`、`S4-VS4B` | 开放 |
+| S5-RISK-016 | CouponItem 批量操作、卡券素材和批量数据消费仍停留在后续契约，真实订单交付前没有原子 reserve/consume/release 证据 | P1 | 高 | 重复发券、同一行重复消费、正文越权或失败无法恢复 | 后端 / 安全负责人 | PostgreSQL/Redis/MinIO 真实集成、并发锁、敏感字段裁剪和订单联调通过 | `S4-VS3A`、`S4-VS3B` | 开放，承接 S4-I003/R-009 |
+| S5-RISK-017 | 订单只读、交付预览和商品/卡券状态尚未拆成独立门禁，可能混用支付、交付、售后状态 | P1 | 中 | 预览误消费批量数据、退款订单重复交付或页面状态误导 | API / 前端负责人 | `OrderStatusMatrix` 四态独立、预览不写入、交付动作单独走 Confirmation/Outbox | `S4-VS4A`、`S4-VS4B` | 开放 |
 | S5-RISK-018 | 发货 unknown/timeout/cancel/retry 的恢复语义未在外部 adapter、worker 和 UI 中闭环 | P1 | 高 | 重试导致重复发货或人工无法判断最终结果 | 后端 / QA 负责人 | 外部状态查询、租约、人工 recover、DeliveryRecord 和审计在真实 E2E 中可复核 | `S4-VS4C` | 开放，承接 S4-I004/R-009 |
 | S5-RISK-019 | 迁移编号并行、已有 PostgreSQL volume、回滚与 Testcontainers 证据未形成发布级闭环 | P1 | 高 | 应用与 schema 漂移，无法安全回退或恢复 | 架构 / 运维负责人 | 迁移清单、apply/rollback、旧数据兼容、容器重启复读和恢复演练全部有证据 | `S4-ENV-RECOVERY` | BLOCKED，承接 R-001/S5-I001 |
 | S5-RISK-020 | Pi Runtime 的健康、超时、重试、取消、不可用与可观测性仍未真实运行验证 | P1 | 中 | Agent/Worker 异常可能卡死或无法恢复 | 架构 / 运维负责人 | Runtime 独立服务健康探针、超时/取消/重试和日志指标通过；不把页面 200 当作证据 | `S4-ENV-RUNTIME` | PLANNED，承接 R-006 |
@@ -222,5 +222,5 @@
 | 编号 | 风险 | 等级 | 应对 | 状态 |
 | --- | --- | --- | --- | --- |
 | S5-RISK-042 | 真实闲鱼账号的确认发货、IM 发图和外部 API 组合仍未在生产账号执行 | P1 | 继续使用受控 adapter/E2E 证明业务结果；上线前在隔离账号补齐 MTOP/IM mutation、超时/unknown、回滚和人工复核证据 | OPEN |
-| S5-RISK-043 | 历史 `coupon_batches.quark_url` / `extract_code_ciphertext` 字段仍存在于存储 schema，可能被旧调用方误读 | P2 | 公开创建/更新、reservation 交付对象和消息格式已移除这些字段；后续单独做兼容窗口清理和迁移，不在本切片扩大破坏性 schema 变更 | MITIGATED |
+| S5-RISK-043 | 历史 `coupon_batches.quark_url` / `extract_code_ciphertext` 字段曾与卡券模型耦合 | P2 | 已通过 `038_remove_coupon_quark_fields.sql` 删除列，并同步移除 domain、MemoryStore、PostgreSQL Store、公开创建/更新和 reservation 交付对象中的字段；不保留兼容读取 | CLOSED |
 | S5-RISK-044 | 配置型卡券内部仍借用 `coupon_items` 做 reservation/幂等承载，名称上保留库存语义 | P2 | 配置型卡券自动生成可消费占位条目且不要求手工导入；前端配置和自动化摘要不展示库存要求；后续可独立拆分配置消费与批量数据条目模型 | MITIGATED |

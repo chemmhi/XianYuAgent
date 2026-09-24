@@ -553,12 +553,6 @@ export class MemoryStore implements Store {
       if (query.status === 'voided' && batch.sequenceId && activeSequenceIds.has(batch.sequenceId)) return false;
       if (query.purpose && batch.purpose !== query.purpose) return false;
       if (normalizedKeyword && !`${batch.sequenceId ?? ''} ${batch.id} ${batch.label ?? ''} ${batch.purpose}`.toLowerCase().includes(normalizedKeyword)) return false;
-      if (query.stockAlert) {
-        const items = [...this.couponItems.values()].filter((item) => item.batchId === batch.id);
-        const available = items.filter((item) => item.status === 'available').length;
-        const stockAlert = batch.status === 'voided' || available === 0 ? 'exhausted' : available <= 5 ? 'low_stock' : 'normal';
-        if (stockAlert !== query.stockAlert) return false;
-      }
       return true;
     }).sort((left, right) => (left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)) * sortDirection);
     const page = query.page ?? 1;
@@ -596,22 +590,20 @@ export class MemoryStore implements Store {
     batch.updatedAt = now;
     return this.activeCouponAssets(batch.id);
   }
-  async createCouponBatch(input: { adminId: string; accountId: string; label?: string; purpose: string; deliveryScope: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; metadata?: CouponBatchMetadata }): Promise<CouponBatchRecord> {
+  async createCouponBatch(input: { adminId: string; accountId: string; label?: string; purpose: string; deliveryScope: CouponDeliveryScope; metadata?: CouponBatchMetadata }): Promise<CouponBatchRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const now = new Date().toISOString();
-    const batch: CouponBatchRecord = { id: createId(), sequenceId: this.nextCouponBatchSequence(), accountId: input.accountId, label: input.label, purpose: input.purpose, deliveryScope: input.deliveryScope, quarkUrl: input.quarkUrl, extractionCode: input.extractionCode, metadata: input.metadata ?? {}, totalCount: 0, status: 'active', version: 1, createdAt: now, updatedAt: now };
+    const batch: CouponBatchRecord = { id: createId(), sequenceId: this.nextCouponBatchSequence(), accountId: input.accountId, label: input.label, purpose: input.purpose, deliveryScope: input.deliveryScope, metadata: input.metadata ?? {}, totalCount: 0, status: 'active', version: 1, createdAt: now, updatedAt: now };
     this.couponBatches.set(batch.id, batch);
     return { ...batch };
   }
-  async updateCouponBatch(input: { adminId: string; batchId: string; patch: { label?: string; purpose?: string; deliveryScope?: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; status?: CouponBatchStatus; metadata?: CouponBatchMetadata } }): Promise<CouponBatchRecord | undefined> {
+  async updateCouponBatch(input: { adminId: string; batchId: string; patch: { label?: string; purpose?: string; deliveryScope?: CouponDeliveryScope; status?: CouponBatchStatus; metadata?: CouponBatchMetadata } }): Promise<CouponBatchRecord | undefined> {
     const batch = this.findCouponBatch(input.batchId);
     if (!batch || !(await this.hasAccountScope(input.adminId, batch.accountId))) return undefined;
     if (batch.status === 'voided') throw new Error('COUPON_BATCH_VOIDED');
     if (input.patch.label !== undefined) batch.label = input.patch.label;
     if (input.patch.purpose !== undefined) batch.purpose = input.patch.purpose;
     if (input.patch.deliveryScope !== undefined) batch.deliveryScope = input.patch.deliveryScope;
-    if (input.patch.quarkUrl !== undefined) batch.quarkUrl = input.patch.quarkUrl || undefined;
-    if (input.patch.extractionCode !== undefined) batch.extractionCode = input.patch.extractionCode || undefined;
     if (input.patch.status !== undefined) batch.status = input.patch.status;
     if (input.patch.metadata !== undefined) batch.metadata = input.patch.metadata;
     batch.version += 1;
@@ -707,7 +699,7 @@ export class MemoryStore implements Store {
       }
       for (const batch of uniqueBatches) this.ensureConfiguredCouponItems(batch, normalized.quantity);
       const selected = this.selectAvailableCouponItems(uniqueBatches, normalized.quantity);
-      if (selected.length < normalized.quantity) throw new Error('COUPON_INSUFFICIENT_INVENTORY');
+      if (selected.length < normalized.quantity) throw new Error('COUPON_DELIVERY_ITEM_UNAVAILABLE');
       const now = new Date();
       const nowIso = now.toISOString();
       const leaseUntil = new Date(now.getTime() + leaseSeconds * 1000).toISOString();

@@ -5,9 +5,11 @@ export type CouponDeliveryPurpose = 'delivery' | 'gift';
 export interface CouponDeliveryContext {
   orderId: string;
   itemId: string;
+  itemDetail: string;
   itemTitle: string;
   buyerName: string;
   buyerId: string;
+  cookieId: string;
   sellerName: string;
   specName: string;
   specValue: string;
@@ -69,9 +71,11 @@ export function buildCouponContext(input: Partial<CouponDeliveryContext> = {}): 
   return {
     orderId: input.orderId ?? '',
     itemId: input.itemId ?? '',
+    itemDetail: input.itemDetail ?? '',
     itemTitle: input.itemTitle ?? '',
     buyerName: input.buyerName ?? '',
     buyerId: input.buyerId ?? '',
+    cookieId: input.cookieId ?? '',
     sellerName: input.sellerName ?? '',
     specName: input.specName ?? '',
     specValue: input.specValue ?? '',
@@ -93,7 +97,7 @@ export function splitDataContent(value?: string): string[] {
 }
 
 function composeDescription(content: string, description: string, context: CouponDeliveryContext): string {
-  const hasVariable = /\{(?:DELIVERY_CONTENT|order_id|item_id|item_title|buyer_name|buyer_id|seller_name|spec_name|spec_value|order_amount|order_quantity)\}/u.test(description);
+  const hasVariable = /\{(?:DELIVERY_CONTENT|order_id|item_id|item_detail|item_title|buyer_name|buyer_id|cookie_id|seller_name|spec_name|spec_value|order_amount|order_quantity)\}/u.test(description);
   const processed = replaceOrderVariables(description.replaceAll('{DELIVERY_CONTENT}', content), context).trim();
   return hasVariable ? processed : [processed, content].filter(Boolean).join('\n\n');
 }
@@ -102,9 +106,11 @@ export function replaceOrderVariables(value: string, context: CouponDeliveryCont
   const values: Record<string, string> = {
     order_id: context.orderId,
     item_id: context.itemId,
+    item_detail: context.itemDetail,
     item_title: context.itemTitle,
     buyer_name: context.buyerName,
     buyer_id: context.buyerId,
+    cookie_id: context.cookieId,
     seller_name: context.sellerName,
     spec_name: context.specName,
     spec_value: context.specValue,

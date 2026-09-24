@@ -1315,7 +1315,6 @@ function parseCouponBatchListQuery(query: Record<string, string>): import('./dom
     accountId: optionalString(query.accountId),
     keyword: optionalString(query.keyword),
     status: optionalString(query.status) as import('./domain.js').CouponBatchListQuery['status'],
-    stockAlert: optionalString(query.stockAlert) as import('./domain.js').CouponBatchListQuery['stockAlert'],
     purpose: optionalString(query.purpose) as import('./domain.js').CouponBatchListQuery['purpose'],
     sortBy: optionalString(query.sortBy) as import('./domain.js').CouponBatchListQuery['sortBy'],
     sortOrder: optionalString(query.sortOrder) as import('./domain.js').CouponBatchListQuery['sortOrder'],
@@ -1535,7 +1534,6 @@ function readCouponMetadata(value: unknown): import('./domain.js').CouponBatchMe
   const metadata: import('./domain.js').CouponBatchMetadata = {};
   if (typeof source.description === 'string') metadata.description = source.description;
   if (typeof source.delaySeconds === 'number' && Number.isFinite(source.delaySeconds)) metadata.delaySeconds = Math.max(0, Math.trunc(source.delaySeconds));
-  if (typeof source.deliveryCount === 'number' && Number.isFinite(source.deliveryCount)) metadata.deliveryCount = Math.max(0, Math.trunc(source.deliveryCount));
   if (typeof source.useNoLogisticsForm === 'boolean') metadata.useNoLogisticsForm = source.useNoLogisticsForm;
   if (typeof source.dockable === 'boolean') metadata.dockable = source.dockable;
   if (typeof source.price === 'string') metadata.price = source.price;

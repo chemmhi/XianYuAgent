@@ -46,7 +46,7 @@ function fixtureOrder({ processId, index, accountId, accountName, suffix = '' })
     deliveryType: deliveryTypes[statusIndex],
     createdAt,
     updatedAt: new Date(Date.parse(createdAt) + 60 * 1000).toISOString(),
-    deliveryFailReason: deliveryStatuses[statusIndex] === 'failed' ? 'E2E fixture：卡券库存不足' : undefined,
+    deliveryFailReason: deliveryStatuses[statusIndex] === 'failed' ? 'E2E fixture：未找到可交付配置' : undefined,
     conversationId: `conversation-${processId}-${index + 1}`,
     productId: `product-${processId}-${index + 1}`,
     configVersion: 1,

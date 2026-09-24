@@ -36,7 +36,7 @@ Knowledge、Review、Trace / Replay / Eval 不作为本轮页面和正式领域�
 | API | REST /api/v1 | 面向页面和 Agent 提供稳定领域接口 |
 | 实时通信 | WebSocket | 聊天、Agent Run、账号状态和 Outbox 事件 |
 | 主数据库 | PostgreSQL 17+ | 事务、行级锁、唯一约束和 JSONB |
-| 数据访问 | Drizzle ORM + 显式 SQL | 普通 CRUD 使用 ORM，库存、幂等和 Outbox 使用事务 SQL |
+| 数据访问 | Drizzle ORM + 显式 SQL | 普通 CRUD 使用 ORM，批量数据消费、幂等和 Outbox 使用事务 SQL |
 | 异步执行 | PostgreSQL Outbox + Worker | 保证业务事务和异步任务记录一致 |
 | 缓存 | Redis | 会话、缓存、限流、在线状态和临时事件 |
 | 文件存储 | S3 兼容对象存储 | 商品图片、视频和上传素材，开发环境可使用 MinIO |
@@ -89,7 +89,7 @@ Knowledge、Review、Trace / Replay / Eval 不作为本轮页面和正式领域�
 选择模块化单体的原因：
 
 - 当前角色和业务边界集中；
-- 库存、幂等、确认和 Outbox 需要强事务；
+- 批量数据消费、幂等、确认和 Outbox 需要强事务；
 - 早期更关注领域契约和执行正确性；
 - 保留未来拆分 Worker、聊天接入或 Agent Runtime 的空间。
 
@@ -157,7 +157,7 @@ modules/
 - accounts：闲鱼账号、登录会话、在线状态、账号策略和当前工作账号。
 - xianyu：当前项目自己的闲鱼平台客户端，不承载页面业务规则。
 - products：商品、素材、规格、草稿、发布状态和商品配置。
-- coupons：卡券批次、库存、绑定关系、交付范围和交付记录。
+- coupons：卡券批次、交付配置、绑定关系、交付范围和交付记录。
 - orders：订单、支付状态、发货状态、售后状态和发货尝试。
 - conversations：会话、消息、人工接管和聊天事件。
 - agent：Session、Run、Step、ToolCall、SkillResult 和 Run Event。
@@ -261,7 +261,7 @@ PostgreSQL 负责保存：
 
 - 账号和授权会话摘要；
 - 商品和素材引用；
-- 卡券批次和库存；
+- 卡券批次和交付配置；
 - 订单和交付记录；
 - 会话和消息；
 - Agent Session、Run、Step；
@@ -282,12 +282,12 @@ Redis 只负责短期和高频状态：
 - 热点查询缓存；
 - WebSocket 连接索引。
 
-Redis 不作为订单、库存、确认和 Outbox 的唯一事实来源。
+Redis 不作为订单、批量数据消费、确认和 Outbox 的唯一事实来源。
 
 ### 7.3 Drizzle 与显式 SQL
 
 - 普通列表和详情：Drizzle Repository；
-- 库存扣减：事务 + 行级锁；
+- 批量数据消费：事务 + 行级锁；
 - 幂等写入：唯一索引 + 事务；
 - Outbox 领取：显式 SQL + 行级锁；
 - 状态迁移：条件更新，避免并发覆盖。
@@ -395,7 +395,7 @@ interface CredentialStore {
 }
 ~~~
 
-CredentialStore 只负责 Cookie、Token、API Key、密码等系统凭证，直接落在项目数据库。卡券正文、夸克链接和提取码属于受控业务数据，由 `coupons` / 交付领域及其存储负责，不作为系统凭证写入 CredentialStore。
+CredentialStore 只负责 Cookie、Token、API Key、密码等系统凭证，直接落在项目数据库。卡券正文和图片属于受控业务数据，由 `coupons` / 交付领域及其存储负责，不作为系统凭证写入 CredentialStore。
 
 管理员拥有系统凭证的绝对管理权限，可以通过管理界面查看、编辑、替换、启停和操作。唯一硬边界是系统凭证不得进入闲鱼买家可见的消息、订单交付内容或外部买家可见响应。受控业务数据仍通过领域接口按 `deliveryScope` 和用途读取或交付。
 
@@ -435,7 +435,7 @@ CredentialStore 只负责 Cookie、Token、API Key、密码等系统凭证，直
 - Policy 决策；
 - Run / Step 状态机；
 - 幂等键生成；
-- 卡券库存扣减；
+- 批量数据行的幂等消费；
 - 平台错误映射；
 - DTO 和领域模型转换；
 - Agent Capability 输入校验。
@@ -471,7 +471,7 @@ CredentialStore 只负责 Cookie、Token、API Key、密码等系统凭证，直
 - 失败重试；
 - 部分成功；
 - 外部结果未知；
-- 库存不足；
+- 交付配置缺失；
 - 账号登录失效。
 
 ## 13. 部署建议

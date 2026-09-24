@@ -7,11 +7,11 @@ import type { CouponBatchVM } from '../types';
 const baseForm: CouponCreateFormState = {
   accountId: 'account-001', label: '', purpose: 'text', deliveryScope: 'operator_only', textContent: '', dataContent: '',
   apiUrl: '', apiMethod: 'GET', apiTimeout: 60, apiHeaders: '', apiParams: '', apiResponseField: '', imageUrls: [], delaySeconds: 0, useNoLogisticsForm: false,
-  deliveryCount: 0, description: '', feePayer: '', minPrice: '', dockVisibility: 'public', multiSpec: false, specName: '', specValue: '',
+  description: '', feePayer: '', minPrice: '', dockVisibility: 'public', multiSpec: false, specName: '', specValue: '',
 };
 
 function batch(purpose: CouponBatchVM['purpose'], metadata: CouponBatchVM['metadata'] = {}): CouponBatchVM {
-  return { batchId: '4', accountId: 'account-001', label: '测试卡券', purpose, deliveryScope: 'operator_only', status: 'draft', totalCount: 0, availableCount: 0, reservedCount: 0, consumedCount: 0, stockAlert: 'exhausted', version: 1, updatedAt: '2026-09-20T00:00:00.000Z', bindings: [], metadata };
+  return { batchId: '4', accountId: 'account-001', label: '测试卡券', purpose, deliveryScope: 'operator_only', status: 'draft', version: 1, updatedAt: '2026-09-20T00:00:00.000Z', bindings: [], metadata };
 }
 
 describe('CouponCreateModal', () => {

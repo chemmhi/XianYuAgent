@@ -72,13 +72,16 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
       const im = this.getIm();
       if (!im) return unknownExternal('XIANYU_IM_NOT_READY', 'xianyu im service is not ready');
       const account = await this.store.getAccount(adminId, input.accountId);
+      const product = order.productId ? await this.store.getProduct(adminId, order.productId) : undefined;
       const orderSpec = parseSkuSpec(order.skuSpec);
       const context = buildCouponContext({
         orderId: order.orderNo,
         itemId: order.itemId,
+        itemDetail: product?.description ?? '',
         itemTitle: order.itemTitle,
         buyerName: order.buyerName,
         buyerId: order.buyerId,
+        cookieId: input.accountId,
         sellerName: account?.remark || account?.displayName || account?.sellerRef || '',
         specName: orderSpec.specName,
         specValue: orderSpec.specValue,

@@ -242,8 +242,8 @@ export class AutomationWorkflowService {
         return failed(key, failureReason(error, 'coupon_reservation_failed'));
       }
       if (reservation.quantity < quantity) {
-        await this.port.releaseCoupon({ adminId: input.adminId, reservationId: reservation.reservationId, executionKey: key, reason: 'insufficient_inventory' });
-        return failed(key, 'insufficient_inventory');
+        await this.port.releaseCoupon({ adminId: input.adminId, reservationId: reservation.reservationId, executionKey: key, reason: 'coupon_delivery_item_unavailable' });
+        return failed(key, 'coupon_delivery_item_unavailable');
       }
       if (reservation.noLogisticsForm && !rule.autoConfirm) {
         await this.port.releaseCoupon({ adminId: input.adminId, reservationId: reservation.reservationId, executionKey: key, reason: 'no_logistics_requires_auto_confirm' });
@@ -314,8 +314,8 @@ export class AutomationWorkflowService {
         return failed(key, failureReason(error, 'coupon_reservation_failed'));
       }
       if (reservation.quantity < quantity) {
-        await this.port.releaseCoupon({ adminId: input.adminId, reservationId: reservation.reservationId, executionKey: key, reason: 'insufficient_inventory' });
-        return failed(key, 'insufficient_inventory');
+        await this.port.releaseCoupon({ adminId: input.adminId, reservationId: reservation.reservationId, executionKey: key, reason: 'coupon_delivery_item_unavailable' });
+        return failed(key, 'coupon_delivery_item_unavailable');
       }
       const sent = await this.port.sendCoupon({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, reservationId: reservation.reservationId, executionKey: key, purpose: 'gift' });
       if (sent.status === 'unknown') {

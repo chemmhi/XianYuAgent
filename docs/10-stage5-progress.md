@@ -16,9 +16,9 @@
 | `S4-VS2D` 受控发布 | `PLANNED` | Policy/Confirmation/Outbox 设计已存在 | worker、幂等、unknown/timeout、人工恢复、审计 |
 | `S4-VS2E` 商品外部同步真实验收 | `PARTIALLY_VERIFIED` | 受控 MTOP mapper、Memory/Postgres、fixture E2E | 当前已登录 Chrome + 真实闲鱼账号、分页和数量口径复核 |
 | `S4-VS3` 卡券首页 | `READY_FOR_REVIEW` | API smoke、Chrome/CDP、桌面/移动截图、代码已合入 master | 真实 PostgreSQL/Redis/MinIO、逐状态人工浏览器审核、迁移整理 |
-| `S4-VS3A/B` 卡券明细/素材/库存锁 | `PLANNED` | `CouponItem`、`CouponAssetRef`、`InventoryLockVM` 契约已冻结 | bulk-save/delete、MinIO、reserve/consume/release、敏感交付边界 |
-| `S4-VS4A` 订单列表只读 | `PASS` | 订单 API、四态（含待发货/待评价边界）、账号 scope、关键词搜索、单状态筛选、六列 + 操作列、详情抽屉、分页、内部滚动、昵称/商品标题与缩略图聚合、桌面/移动截图、真实 seller 订单读取与 PostgreSQL refresh 落库 | 交付预览、库存锁、发货/取消/重试转入 `S4-VS4B/C` |
-| `S4-VS4B/C` 订单交付 | `PLANNED` | delivery mode 契约已冻结 | 交付预览、库存锁、发货/取消/重试、unknown/Outbox/DeliveryRecord |
+| `S4-VS3A/B` 卡券明细/素材/批量数据消费 | `PLANNED` | `CouponItem`、`CouponAssetRef`、`CouponMutationVM` 契约已冻结 | bulk-save/delete、MinIO、reserve/consume/release、敏感交付边界 |
+| `S4-VS4A` 订单列表只读 | `PASS` | 订单 API、四态（含待发货/待评价边界）、账号 scope、关键词搜索、单状态筛选、六列 + 操作列、详情抽屉、分页、内部滚动、昵称/商品标题与缩略图聚合、桌面/移动截图、真实 seller 订单读取与 PostgreSQL refresh 落库 | 交付预览、配置检查、发货/取消/重试转入 `S4-VS4B/C` |
+| `S4-VS4B/C` 订单交付 | `PLANNED` | delivery mode 契约已冻结 | 交付预览、配置检查、发货/取消/重试、unknown/Outbox/DeliveryRecord |
 | `S4-VS5A` 在线聊天读取与实时连接 | `PARTIALLY_VERIFIED` | canonical HTTP/WS、MemoryStore/PostgreSQL + `015_messages.sql` + `016_conversation_media.sql`、双 API 实例 Redis 跨进程广播、Redis/PostgreSQL 重启恢复、cursor 去重、Chrome/CDP 双 viewport 断线视觉证据、搜索/未读/独立滚动/选择/头像/商品缩略图交互 | 独立复审、生产部署拓扑确认；发送/附件/撤回进入 `S4-VS5B` |
 | `S4-VS5B` 在线聊天发送/附件/撤回 | `PLANNED` | Message 状态机和发送/图片/撤回 API 已冻结 | 持久化、对象存储、幂等、unknown/timeout、脱敏 |
 | `S4-VS5C` 人工接管与 AI 恢复 | `PLANNED` | handoff/release、版本和审计契约已冻结 | 非法转换、403/409、页面禁用、移动端 |
