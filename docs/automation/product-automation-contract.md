@@ -20,7 +20,7 @@
   "paidAutoDelivery": {
     "enabled": false,
     "couponBatchIds": [],
-    "autoConfirm": false,
+    "autoConfirm": true,
     "maxAttempts": 3,
     "retryBackoffSeconds": 30
   },

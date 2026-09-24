@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { createMockProductAutomationApi, createProductAutomationApi, MOCK_AUTOMATION_COUPONS } from './api';
+import { createMockProductAutomationApi, createProductAutomationApi, MOCK_AUTOMATION_COUPONS, toAutomationConfig, toAutomationConfigWire } from './api';
 import { AutomationDrawer } from './components/AutomationDrawer';
 import { BatchAutomationDialog } from './components/BatchAutomationDialog';
 import { CouponPickerDialog } from './components/CouponPickerDialog';
@@ -29,8 +29,8 @@ describe('product automation API', () => {
     expect(calls[0].path).toBe('/api/v1/products/product-1/automation');
     expect(calls[1].path).toBe('/api/v1/coupons/batches?accountId=account-1&page=1&pageSize=100');
     const saveCall = calls.find((call) => call.method === 'PATCH' && call.path.includes('/automation'));
-    expect(saveCall?.body).toMatchObject({ config: { paidAutoDelivery: { enabled: false, couponBatchIds: [], autoConfirm: false }, unpaidAutoReprice: { enabled: false, targetPriceMinor: 0 }, reviewGift: { enabled: false, couponBatchIds: [] }, reviewReminder: { enabled: true, firstDelayHours: 72 } } });
-    expect((saveCall?.body as { config?: { paidAutoDelivery?: { autoConfirm?: boolean } } }).config?.paidAutoDelivery?.autoConfirm).toBe(false);
+    expect(saveCall?.body).toMatchObject({ config: { paidAutoDelivery: { enabled: false, couponBatchIds: [], autoConfirm: true }, unpaidAutoReprice: { enabled: false, targetPriceMinor: 0 }, reviewGift: { enabled: false, couponBatchIds: [] }, reviewReminder: { enabled: true, firstDelayHours: 72 } } });
+    expect((saveCall?.body as { config?: { paidAutoDelivery?: { autoConfirm?: boolean } } }).config?.paidAutoDelivery?.autoConfirm).toBe(true);
     expect(saveCall?.options).toMatchObject({ headers: expect.objectContaining({ 'If-Match-Version': '7', 'Idempotency-Key': expect.any(String) }) });
     const batchCall = calls.find((call) => call.path.endsWith('/automation/batch'));
     expect(batchCall?.body).toMatchObject({ productIds: ['product-1'], expectedConfigVersions: { 'product-1': 8 }, config: { paidAutoDelivery: { enabled: false } } });
@@ -69,6 +69,14 @@ describe('product automation components', () => {
     expect(html).not.toContain('库存关系');
     expect(html).not.toContain('查看卡券设置');
     expect(html).not.toContain('规格、数量、库存');
+  });
+
+  it('defaults automatic shipment confirmation to enabled for legacy and partial payloads', () => {
+    const mapped = toAutomationConfig({ productId: 'product-1', accountId: 'account-1', configVersion: 1, paidAutoDelivery: { enabled: false }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: false } });
+    expect(mapped.delivery.autoConfirm).toBe(true);
+    const wire = toAutomationConfigWire({ version: 1, delivery: { enabled: false }, reprice: { enabled: false }, gift: { enabled: false }, review: { enabled: false } });
+    expect(wire.paidAutoDelivery?.autoConfirm).toBe(true);
+    expect(toAutomationConfig({ productId: 'product-1', accountId: 'account-1', version: 1, delivery: { enabled: false }, reprice: { enabled: false }, gift: { enabled: false }, review: { enabled: false } }).delivery.autoConfirm).toBe(true);
   });
 
   it('preserves backend defaults when the legacy response omits review message', async () => {

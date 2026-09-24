@@ -21,7 +21,7 @@ function defaultConfig(productId: string, accountId: string): ProductAutomationC
     productId,
     accountId,
     version: 1,
-    delivery: { enabled: true, couponIds: ['coupon-batch-2'], autoConfirm: false },
+    delivery: { enabled: true, couponIds: ['coupon-batch-2'], autoConfirm: true },
     reprice: { enabled: false, targetPriceMinor: 990, repriceMessage: '已为您调整价格，请及时付款' },
     gift: { enabled: false, couponIds: [] },
     review: { enabled: true, reviewInitialHours: 72, reviewRepeatHours: 24, reviewMaxCount: 1, reviewMessage: '商品已经发出，如果使用满意，麻烦帮忙点个好评～' },
@@ -29,14 +29,19 @@ function defaultConfig(productId: string, accountId: string): ProductAutomationC
 }
 
 export function toAutomationConfig(value: ProductAutomationConfigWire | ProductAutomationConfig): ProductAutomationConfig {
-  if ('version' in value) return value;
+  if ('version' in value) {
+    return {
+      ...value,
+      delivery: { ...value.delivery, autoConfirm: value.delivery.autoConfirm ?? true },
+    };
+  }
   const record = value as ProductAutomationConfigWire & { config?: ProductAutomationConfigWire };
   const canonical = record.config ?? record;
   return {
     productId: record.productId,
     accountId: record.accountId,
     version: record.configVersion,
-    delivery: { enabled: canonical.paidAutoDelivery?.enabled ?? false, couponIds: ((canonical.paidAutoDelivery as { couponBatchIds?: string[]; couponIds?: string[] } | undefined)?.couponBatchIds ?? (canonical.paidAutoDelivery as { couponBatchIds?: string[]; couponIds?: string[] } | undefined)?.couponIds ?? []), autoConfirm: Boolean((canonical.paidAutoDelivery as { autoConfirm?: boolean } | undefined)?.autoConfirm ?? false) },
+    delivery: { enabled: canonical.paidAutoDelivery?.enabled ?? false, couponIds: ((canonical.paidAutoDelivery as { couponBatchIds?: string[]; couponIds?: string[] } | undefined)?.couponBatchIds ?? (canonical.paidAutoDelivery as { couponBatchIds?: string[]; couponIds?: string[] } | undefined)?.couponIds ?? []), autoConfirm: Boolean((canonical.paidAutoDelivery as { autoConfirm?: boolean } | undefined)?.autoConfirm ?? true) },
     reprice: { enabled: canonical.unpaidAutoReprice?.enabled ?? false, targetPriceMinor: canonical.unpaidAutoReprice?.targetPriceMinor ?? 0, repriceMessage: (canonical.unpaidAutoReprice as { message?: string; repriceMessage?: string } | undefined)?.message ?? (canonical.unpaidAutoReprice as { message?: string; repriceMessage?: string } | undefined)?.repriceMessage ?? '' },
     gift: { enabled: canonical.reviewGift?.enabled ?? false, couponIds: ((canonical.reviewGift as { couponBatchIds?: string[]; couponIds?: string[] } | undefined)?.couponBatchIds ?? (canonical.reviewGift as { couponBatchIds?: string[]; couponIds?: string[] } | undefined)?.couponIds ?? []) },
     review: {
@@ -55,7 +60,7 @@ export function toAutomationConfigWire(value: ProductAutomationUpdate): ProductA
   if (value.review.reviewMessage !== undefined) reviewReminder.message = value.review.reviewMessage;
   return {
     configVersion: value.version,
-    paidAutoDelivery: { enabled: value.delivery.enabled, couponBatchIds: value.delivery.couponIds ?? [], autoConfirm: value.delivery.autoConfirm ?? false, maxAttempts: 3, retryBackoffSeconds: 30 } as ProductAutomationUpdateWire['paidAutoDelivery'],
+    paidAutoDelivery: { enabled: value.delivery.enabled, couponBatchIds: value.delivery.couponIds ?? [], autoConfirm: value.delivery.autoConfirm ?? true, maxAttempts: 3, retryBackoffSeconds: 30 } as ProductAutomationUpdateWire['paidAutoDelivery'],
     unpaidAutoReprice: { enabled: value.reprice.enabled, mode: 'fixed', targetPriceMinor: value.reprice.targetPriceMinor ?? 0, message: value.reprice.repriceMessage ?? '', maxAttempts: 3, retryBackoffSeconds: 30 } as ProductAutomationUpdateWire['unpaidAutoReprice'],
     reviewGift: { enabled: value.gift.enabled, couponBatchIds: value.gift.couponIds ?? [], maxAttempts: 3, retryBackoffSeconds: 30 } as ProductAutomationUpdateWire['reviewGift'],
     reviewReminder: reviewReminder as unknown as ProductAutomationUpdateWire['reviewReminder'],

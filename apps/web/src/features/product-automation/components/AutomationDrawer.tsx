@@ -181,7 +181,7 @@ function hydrateDraft(config: ProductAutomationConfig, boundCouponIds: string[])
   const mergeBound = (ids?: string[]) => [...new Set([...(ids ?? []), ...boundCouponIds])];
   return {
     ...config,
-    delivery: { ...config.delivery, couponIds: mergeBound(config.delivery.couponIds) },
+    delivery: { ...config.delivery, autoConfirm: config.delivery.autoConfirm ?? true, couponIds: mergeBound(config.delivery.couponIds) },
     gift: { ...config.gift, couponIds: mergeBound(config.gift.couponIds) },
   };
 }

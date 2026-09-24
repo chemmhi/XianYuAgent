@@ -13,7 +13,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 
 export function defaultProductAutomationConfig(): ProductAutomationConfig {
   return {
-    paidAutoDelivery: { enabled: false, couponBatchIds: [], autoConfirm: false, maxAttempts: 3, retryBackoffSeconds: 30 },
+    paidAutoDelivery: { enabled: false, couponBatchIds: [], autoConfirm: true, maxAttempts: 3, retryBackoffSeconds: 30 },
     unpaidAutoReprice: { enabled: false, mode: 'fixed', targetPriceMinor: 0, maxAttempts: 3, retryBackoffSeconds: 30 },
     reviewGift: { enabled: false, couponBatchIds: [], maxAttempts: 3, retryBackoffSeconds: 30 },
     reviewReminder: { enabled: false, firstDelayHours: 72, repeatIntervalHours: 24, maxReminders: 1, message: '如果使用满意，欢迎给个好评，谢谢支持～' },
@@ -92,19 +92,25 @@ export class ProductAutomationService {
     const reminder = normalizeReminderRule(source.reviewReminder, defaults.reviewReminder);
     if (paid.enabled && paid.couponBatchIds.length === 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'paidAutoDelivery requires at least one coupon batch');
     if (gift.enabled && gift.couponBatchIds.length === 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'reviewGift requires at least one coupon batch');
-    await this.validateCouponBatches(adminId, product, [...paid.couponBatchIds, ...gift.couponBatchIds]);
+    await this.validateCouponBatches(adminId, product, [
+      { batchIds: paid.couponBatchIds, requireBuyerDeliverable: paid.enabled },
+      { batchIds: gift.couponBatchIds, requireBuyerDeliverable: gift.enabled },
+    ]);
     return { paidAutoDelivery: paid, unpaidAutoReprice: reprice, reviewGift: gift, reviewReminder: reminder };
   }
 
-  private async validateCouponBatches(adminId: string, product: ProductRecord, batchIds: string[]): Promise<void> {
-    const unique = [...new Set(batchIds)];
-    for (const batchId of unique) {
+  private async validateCouponBatches(adminId: string, product: ProductRecord, rules: Array<{ batchIds: string[]; requireBuyerDeliverable: boolean }>): Promise<void> {
+    const requirements = new Map<string, boolean>();
+    for (const rule of rules) {
+      for (const batchId of rule.batchIds) requirements.set(batchId, Boolean(requirements.get(batchId) || rule.requireBuyerDeliverable));
+    }
+    for (const [batchId, requireBuyerDeliverable] of requirements) {
       if (!batchId.trim()) throw new ServiceError(422, 'VALIDATION_FAILED', 'couponBatchIds cannot contain empty values');
       const batch = await this.store.getCouponBatch(adminId, batchId);
       if (!batch) throw new ServiceError(404, 'NOT_FOUND', `coupon batch not found: ${batchId}`);
       if (batch.accountId !== product.accountId) throw new ServiceError(403, 'FORBIDDEN', 'coupon batch account scope mismatch');
       if (batch.status === 'voided' || batch.status === 'closed') throw new ServiceError(409, 'CONFLICT', `coupon batch is ${batch.status}`);
-      if (batch.deliveryScope !== 'buyer_deliverable') throw new ServiceError(422, 'VALIDATION_FAILED', 'automation requires buyer_deliverable coupon batches');
+      if (requireBuyerDeliverable && batch.deliveryScope !== 'buyer_deliverable') throw new ServiceError(422, 'VALIDATION_FAILED', 'automation requires buyer_deliverable coupon batches');
     }
   }
 }

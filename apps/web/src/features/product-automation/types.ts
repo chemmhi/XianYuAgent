@@ -15,7 +15,7 @@ export interface AutomationCoupon {
 export interface AutomationRuleState {
   enabled: boolean;
   couponIds?: string[];
-  /** Whether delivery should be confirmed after the card is sent; defaults to false. */
+  /** Whether delivery should be confirmed after the card is sent; defaults to true. */
   autoConfirm?: boolean;
   targetPriceMinor?: number;
   repriceMessage?: string;

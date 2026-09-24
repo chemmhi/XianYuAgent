@@ -61,7 +61,7 @@ test('order refresh trigger dispatches paid and unpaid workflows through a ready
   port.readOrderResult = unpaid;
   const result = await trigger.onOrderRefresh({ adminId: admin.id, accountId: account.id, items: [paid, unpaid], requestId: 'refresh', traceId: 'refresh' });
   assert.deepEqual(result.results.map((item) => item.status), ['succeeded', 'succeeded']);
-  assert.deepEqual(port.calls, ['reserve:delivery', 'send:delivery', 'commit', 'read-order', 'reprice:880']);
+  assert.deepEqual(port.calls, ['reserve:delivery', 'send:delivery', 'commit', 'confirm', 'read-order', 'reprice:880']);
 });
 
 test('default adapter blocks without fabricating shipment/reprice success and worker polls reminders', async () => {

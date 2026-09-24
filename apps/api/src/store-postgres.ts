@@ -1619,7 +1619,7 @@ export class PostgresStore implements Store {
   private toProductAutomation(row: Row): ProductAutomationConfigRecord {
     const config: ProductAutomationConfig = row.config_json && typeof row.config_json === 'object' && !Array.isArray(row.config_json)
       ? row.config_json as ProductAutomationConfig
-      : { paidAutoDelivery: { enabled: false, couponBatchIds: [], autoConfirm: false, maxAttempts: 3, retryBackoffSeconds: 30 }, unpaidAutoReprice: { enabled: false, mode: 'fixed', targetPriceMinor: 0, maxAttempts: 3, retryBackoffSeconds: 30 }, reviewGift: { enabled: false, couponBatchIds: [], maxAttempts: 3, retryBackoffSeconds: 30 }, reviewReminder: { enabled: false, firstDelayHours: 72, repeatIntervalHours: 24, maxReminders: 1, message: '' } };
+      : { paidAutoDelivery: { enabled: false, couponBatchIds: [], autoConfirm: true, maxAttempts: 3, retryBackoffSeconds: 30 }, unpaidAutoReprice: { enabled: false, mode: 'fixed', targetPriceMinor: 0, maxAttempts: 3, retryBackoffSeconds: 30 }, reviewGift: { enabled: false, couponBatchIds: [], maxAttempts: 3, retryBackoffSeconds: 30 }, reviewReminder: { enabled: false, firstDelayHours: 72, repeatIntervalHours: 24, maxReminders: 1, message: '' } };
     return { id: String(row.id), productId: String(row.product_id), accountId: String(row.account_id), configVersion: Number(row.config_version ?? 1), config: structuredClone(config), configDigest: String(row.config_digest ?? ''), createdAt: dateIso(row.created_at), updatedAt: dateIso(row.updated_at) };
   }
   private toOrder(row: Row): OrderRecord {

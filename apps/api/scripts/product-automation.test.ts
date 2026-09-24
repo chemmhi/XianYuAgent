@@ -44,6 +44,51 @@ test('automation config defaults, validation, optimistic locking and account iso
   assert.equal(account.id, product.accountId);
 });
 
+test('defaults auto-confirm on and allows disabled coupon-only associations', async () => {
+  const { admin, product, coupon, service, store, account } = await setup();
+  assert.equal(defaultProductAutomationConfig().paidAutoDelivery.autoConfirm, true);
+
+  const operatorOnly = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: '仅关联卡券', purpose: 'text', deliveryScope: 'operator_only' });
+  const associated = await service.update({
+    adminId: admin.id,
+    productId: product.id,
+    expectedConfigVersion: 1,
+    config: {
+      ...defaultProductAutomationConfig(),
+      paidAutoDelivery: { enabled: false, couponBatchIds: [operatorOnly.id] },
+    },
+    requestId: 'req-association-only',
+    traceId: 'trace-association-only',
+  });
+  assert.deepEqual(associated.config.paidAutoDelivery.couponBatchIds, [operatorOnly.id]);
+  assert.equal(associated.config.paidAutoDelivery.autoConfirm, true);
+
+  await assert.rejects(() => service.update({
+    adminId: admin.id,
+    productId: product.id,
+    expectedConfigVersion: 1,
+    config: {
+      ...defaultProductAutomationConfig(),
+      paidAutoDelivery: { enabled: true, couponBatchIds: [operatorOnly.id] },
+    },
+    requestId: 'req-nondeliverable-enabled',
+    traceId: 'trace-nondeliverable-enabled',
+  }), (error: unknown) => (error as { code?: string }).code === 'VALIDATION_FAILED');
+
+  const partial = await service.update({
+    adminId: admin.id,
+    productId: product.id,
+    expectedConfigVersion: 1,
+    config: {
+      ...defaultProductAutomationConfig(),
+      paidAutoDelivery: { enabled: true, couponBatchIds: [coupon.id] },
+    },
+    requestId: 'req-default-confirm',
+    traceId: 'trace-default-confirm',
+  });
+  assert.equal(partial.config.paidAutoDelivery.autoConfirm, true);
+});
+
 test('batch update is all-or-nothing for version conflict and cross-account products', async () => {
   const { store, admin, account, product, coupon, service } = await setup();
   const second = await store.createProduct({ adminId: admin.id, accountId: account.id, title: '第二商品', status: 'published' });
