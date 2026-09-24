@@ -54,6 +54,20 @@ export interface CouponBatchMetadata {
   imageUrls?: string[];
 }
 
+export type CouponAssetStatus = 'active' | 'archived';
+
+export interface CouponAssetRecord {
+  id: string;
+  batchId: string;
+  storageKey: string;
+  mimeType: string;
+  checksum?: string;
+  caption?: string;
+  status: CouponAssetStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ProductSkuRecord {
   id: string;
   productId: string;
@@ -444,6 +458,7 @@ export interface CouponBatchRecord {
   consumedCount?: number;
   items?: CouponItemRecord[];
   bindings?: CouponBindingRecord[];
+  assets?: CouponAssetRecord[];
   metadata?: CouponBatchMetadata;
 }
 
@@ -1355,6 +1370,8 @@ export interface Store {
   resetXianyuListRanks(adminId: string, accountId: string): Promise<void>;
   listCouponBatches(adminId: string, query: CouponBatchListQuery): Promise<CouponBatchListResult>;
   getCouponBatch(adminId: string, batchId: string): Promise<CouponBatchRecord | undefined>;
+  getCouponAsset(adminId: string, batchId: string, assetId: string): Promise<CouponAssetRecord | undefined>;
+  replaceCouponAssets(input: { adminId: string; batchId: string; assets: Array<{ id: string; storageKey: string; mimeType: string; checksum?: string; caption?: string }> }): Promise<CouponAssetRecord[]>;
   createCouponBatch(input: {
     adminId: string;
     accountId: string;

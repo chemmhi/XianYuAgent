@@ -1,4 +1,4 @@
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CouponReservationItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponAssetRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponDeliveryScope, CouponItemRecord, CouponReservationItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { projectAutoReplyRun } from './auto-reply-activity-projection.js';
 import { createId } from './security.js';
@@ -108,6 +108,7 @@ export class MemoryStore implements Store {
   private readonly reviewFacts = new Map<string, { accountId: string; orderNo: string; eventId: string; reviewedAt: string }>();
   private readonly couponBatches = new Map<string, CouponBatchRecord>();
   private readonly couponItems = new Map<string, CouponItemRecord>();
+  private readonly couponAssets = new Map<string, CouponAssetRecord>();
   private readonly couponBindings = new Map<string, CouponBindingRecord>();
   private readonly couponReservations = new Map<string, CouponReservationRecord>();
   private readonly couponReservationByExecutionKey = new Map<string, string>();
@@ -510,7 +511,30 @@ export class MemoryStore implements Store {
     if (!batch || !(await this.hasAccountScope(adminId, batch.accountId))) return undefined;
     const items = [...this.couponItems.values()].filter((item) => item.batchId === batch.id).map((item) => ({ ...item }));
     const bindings = [...this.couponBindings.values()].filter((binding) => binding.batchId === batch.id).map((binding) => ({ ...binding }));
-    return { ...batch, items, bindings };
+    return { ...batch, items, bindings, assets: this.activeCouponAssets(batch.id) };
+  }
+  async getCouponAsset(adminId: string, batchId: string, assetId: string): Promise<CouponAssetRecord | undefined> {
+    const batch = this.findCouponBatch(batchId);
+    if (!batch || !(await this.hasAccountScope(adminId, batch.accountId))) return undefined;
+    const asset = this.couponAssets.get(assetId);
+    return asset && asset.batchId === batch.id && asset.status === 'active' ? { ...asset } : undefined;
+  }
+  async replaceCouponAssets(input: { adminId: string; batchId: string; assets: Array<{ id: string; storageKey: string; mimeType: string; checksum?: string; caption?: string }> }): Promise<CouponAssetRecord[]> {
+    const batch = this.findCouponBatch(input.batchId);
+    if (!batch || !(await this.hasAccountScope(input.adminId, batch.accountId))) throw new Error('COUPON_NOT_FOUND');
+    const keepIds = new Set(input.assets.map((asset) => asset.id));
+    const now = new Date().toISOString();
+    for (const asset of this.couponAssets.values()) {
+      if (asset.batchId === batch.id && asset.status === 'active' && !keepIds.has(asset.id)) asset.status = 'archived', asset.updatedAt = now;
+    }
+    for (const inputAsset of input.assets) {
+      const existing = this.couponAssets.get(inputAsset.id);
+      const record: CouponAssetRecord = { id: inputAsset.id, batchId: batch.id, storageKey: inputAsset.storageKey, mimeType: inputAsset.mimeType, checksum: inputAsset.checksum, caption: inputAsset.caption, status: 'active', createdAt: existing?.createdAt ?? now, updatedAt: now };
+      this.couponAssets.set(record.id, record);
+    }
+    batch.version += 1;
+    batch.updatedAt = now;
+    return this.activeCouponAssets(batch.id);
   }
   async createCouponBatch(input: { adminId: string; accountId: string; label?: string; purpose: string; deliveryScope: CouponDeliveryScope; quarkUrl?: string; extractionCode?: string; metadata?: CouponBatchMetadata }): Promise<CouponBatchRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
@@ -1680,7 +1704,11 @@ export class MemoryStore implements Store {
 
   private couponSummary(batch: CouponBatchRecord): CouponBatchRecord {
     const items = [...this.couponItems.values()].filter((item) => item.batchId === batch.id);
-    return { ...batch, items: undefined, bindings: undefined, totalCount: items.length, availableCount: items.filter((item) => item.status === 'available').length, reservedCount: items.filter((item) => item.status === 'reserved').length, consumedCount: items.filter((item) => item.status === 'consumed').length };
+    return { ...batch, items: undefined, bindings: undefined, assets: this.activeCouponAssets(batch.id), totalCount: items.length, availableCount: items.filter((item) => item.status === 'available').length, reservedCount: items.filter((item) => item.status === 'reserved').length, consumedCount: items.filter((item) => item.status === 'consumed').length };
+  }
+
+  private activeCouponAssets(batchId: string): CouponAssetRecord[] {
+    return [...this.couponAssets.values()].filter((asset) => asset.batchId === batchId && asset.status === 'active').sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)).map((asset) => ({ ...asset }));
   }
 
   private findCouponBatch(batchId: string): CouponBatchRecord | undefined {
