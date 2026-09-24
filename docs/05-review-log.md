@@ -11,8 +11,9 @@
 | S5-R131 | 业务 / 状态机 | PASS | `xianyu-qr-login.ts`、`app.ts`；Cookie 校验/资料同步成功后 QR session 先落 `succeeded`，IM listener 不再阻断成功结果 |
 | S5-R132 | 失败恢复 / 可观测性 | PASS | `xianyu-im-service.ts`、`app.ts`；`ACCOUNT_VALIDATION_REQUIRED` / `FAIL_SYS_USER_VALIDATE` 映射为 `degraded`，保留错误码与有限重试 |
 | S5-R133 | 回归 / 持久化 | PASS（受控环境） | API 327/327；QR renewal smoke；IM credential 回归；15 个 API smoke；隔离 PostgreSQL credential smoke；`git diff --check` |
+| S5-R134 | 前端状态映射 | PASS | `apps/web/src/features/accounts/api.ts`、`api.test.ts`；服务端 `verification_required` 保留为人工验证态，不再显示为“登录失败” |
 
-复审结论：本次“扫码后登录失败”由 IM 后置滑块验证与 QR 成功边界耦合引起，已拆分为“登录成功 + 监听器降级”。真实闲鱼滑块挑战仍属于外部人工验收，不把受控测试等同于外部平台通过。
+复审结论：本次“扫码后登录失败”由两处耦合共同造成：IM 后置滑块验证阻断 QR 成功边界，以及前端把 `verification_required` 误映射为 `failed`。现已拆分为“登录成功 + 监听器降级”，并保留人工验证态。真实闲鱼滑块挑战仍属于外部人工验收，不把受控测试等同于外部平台通过。
 
 ## 2026-09-22 Workspace ChatGPT 式对话改造复审
 

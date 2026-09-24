@@ -115,6 +115,34 @@ describe('accounts canonical API adapter', () => {
     expect(calls[1]?.path).toBe('/api/v1/auth/qr-sessions/qr-session-1');
   });
 
+  it('preserves verification_required instead of showing a QR login failure', async () => {
+    const api = createAccountsApi({
+      async get<T>() {
+        return {
+          success: true,
+          data: {
+            id: 'login-session-verification',
+            qrSessionId: 'qr-session-verification',
+            accountId: 'account-1',
+            status: 'verification_required',
+            verificationUrl: 'https://passport.goofish.com/verify/challenge',
+            errorCode: 'VERIFICATION_REQUIRED',
+            expiresAt: '2026-09-24T00:05:00.000Z',
+            pollAfterMs: 1200,
+          },
+        } as T;
+      },
+    });
+
+    const session = await api.getQrSession('account-1', 'qr-session-verification');
+
+    expect(session).toMatchObject({
+      status: 'verification_required',
+      verificationUrl: 'https://passport.goofish.com/verify/challenge',
+      errorCode: 'VERIFICATION_REQUIRED',
+    });
+  });
+
   it('submits Cookie login without asking the UI for a placeholder account id', async () => {
     const calls: Array<{ path: string; body?: unknown }> = [];
     const api = createAccountsApi({
