@@ -1,5 +1,12 @@
 # XianyuSellerAgent 项目状态
 
+## 2026-09-24 商品自动化单流程配置与局部校验修复
+
+- 目标行为：商品自动化抽屉保存当前流程时，只下发当前规则；后端按出现的规则做参数/卡券校验，未出现规则保留已有配置且不参与本次校验。
+- 实现边界：`apps/web/src/features/product-automation/` 规则级 patch；`apps/api/src/product-automation.ts` 规则级合并与局部校验；Memory/PostgreSQL 保存时仅在发货/赠品规则提交时同步卡券绑定。
+- 已验证：API 商品自动化定向 31/31、Web 商品自动化 14/14、API/Web typecheck、API build、Chrome/CDP live 商品自动化 E2E、`git diff --check`。
+- 状态：`READY_FOR_REVIEW`；真实闲鱼外部 mutation 和严格视觉像素 diff 仍保持既有 `PARTIALLY_VERIFIED / BLOCKED` 边界。
+
 ## 2026-09-24 自动回复商品事实与统一模型协议修复
 
 - 商品读取改为账号范围内的 ID / external ref / 标题单条精确查询；`get_product_info` 优先复用完整 `context.product`，列表查询仅保留给 `list_shop_products`，PostgreSQL 精确查询不再执行 `count(*)`。

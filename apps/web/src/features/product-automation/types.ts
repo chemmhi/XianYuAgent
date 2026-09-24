@@ -50,10 +50,10 @@ export interface ProductAutomationConfigWire {
 
 export interface ProductAutomationUpdate {
   version?: number;
-  delivery: AutomationRuleState;
-  reprice: AutomationRuleState;
-  gift: AutomationRuleState;
-  review: AutomationRuleState;
+  delivery?: AutomationRuleState;
+  reprice?: AutomationRuleState;
+  gift?: AutomationRuleState;
+  review?: AutomationRuleState;
 }
 
 export interface ProductAutomationUpdateWire {

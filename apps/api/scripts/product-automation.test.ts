@@ -111,6 +111,26 @@ test('defaults auto-confirm on and allows disabled coupon-only associations', as
   assert.equal(partial.config.paidAutoDelivery.autoConfirm, true);
 });
 
+test('single-rule updates preserve untouched rules without validating them', async () => {
+  const { admin, product, service, store, coupon } = await setup();
+  const seeded = defaultProductAutomationConfig();
+  seeded.reviewReminder = { ...seeded.reviewReminder, enabled: true, message: '' };
+  await store.updateProductAutomation({ adminId: admin.id, productId: product.id, expectedConfigVersion: 1, config: seeded, configDigest: 'seed-invalid-unconfigured', syncCouponBindings: false });
+
+  const saved = await service.update({
+    adminId: admin.id,
+    productId: product.id,
+    expectedConfigVersion: 1,
+    config: { paidAutoDelivery: { enabled: true, couponBatchIds: [coupon.id] } },
+    requestId: 'partial-rule-update',
+    traceId: 'partial-rule-update',
+  });
+
+  assert.equal(saved.config.paidAutoDelivery.enabled, true);
+  assert.deepEqual(saved.config.paidAutoDelivery.couponBatchIds, [coupon.id]);
+  assert.equal(saved.config.reviewReminder.message, '');
+});
+
 test('batch update is all-or-nothing for version conflict and cross-account products', async () => {
   const { store, admin, account, product, coupon, service } = await setup();
   const second = await store.createProduct({ adminId: admin.id, accountId: account.id, title: '第二商品', status: 'published' });

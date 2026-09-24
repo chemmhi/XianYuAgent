@@ -63,6 +63,8 @@
 
 请求头：`If-Match-Version: <configVersion>`；请求体必须为 `{ "config": { ... } }`。
 
+`config` 支持按规则提交 patch：`paidAutoDelivery`、`unpaidAutoReprice`、`reviewGift`、`reviewReminder` 只处理请求中出现的字段。服务端会把本次 patch 合并到已有配置；未出现的规则保持原值，不参与本次参数和卡券校验。前端单流程配置时只下发当前流程，`GET` 仍返回四条规则的完整规范化配置。
+
 - 版本冲突：`409 AUTOMATION_VERSION_CONFLICT`。
 - 商品不存在或不在当前管理员账号范围：`404 NOT_FOUND`。
 - 卡券批次不存在、跨账号、已作废/关闭、或 `deliveryScope` 不是 `buyer_deliverable`：分别返回 `404`、`403`、`409`、`422`。

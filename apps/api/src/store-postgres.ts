@@ -187,7 +187,7 @@ export class PostgresStore implements Store {
     return result.rows[0] ? this.toProductAutomation(result.rows[0]) : undefined;
   }
 
-  async updateProductAutomation(input: { adminId: string; productId: string; expectedConfigVersion: number; config: ProductAutomationConfig; configDigest: string }): Promise<ProductAutomationConfigRecord | undefined> {
+  async updateProductAutomation(input: { adminId: string; productId: string; expectedConfigVersion: number; config: ProductAutomationConfig; configDigest: string; syncCouponBindings?: boolean }): Promise<ProductAutomationConfigRecord | undefined> {
     const client = await this.pool.connect();
     try {
       await client.query('begin');
@@ -203,7 +203,7 @@ export class PostgresStore implements Store {
       const row = current.rows[0] as Row | undefined;
       const currentVersion = row ? Number(row.config_version) : 1;
       if ((row && currentVersion !== input.expectedConfigVersion) || (!row && input.expectedConfigVersion !== 1)) throw new Error('AUTOMATION_VERSION_CONFLICT');
-      await this.syncProductCouponBindings(client, { productId: input.productId, accountId: String(product.rows[0].account_id), config: input.config });
+      if (input.syncCouponBindings !== false) await this.syncProductCouponBindings(client, { productId: input.productId, accountId: String(product.rows[0].account_id), config: input.config });
       const recordId = row ? String(row.id) : createId();
       const version = row ? currentVersion + 1 : 1;
       const saved = row

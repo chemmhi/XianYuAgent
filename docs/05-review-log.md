@@ -577,3 +577,13 @@
 | S5-R109 | 构建 / 主线 | 合并后 API build、diff 检查和主线文件清理是否通过 | root | PASS | merge `58473ff`；API build；`git diff --check`；登记表 `CLEANED` |
 
 本轮结论：卖家风格提示词优化已改为可审计的自迭代流程并合入 `main`；真实 PostgreSQL/模型 provider 端到端仍待具备凭证的环境复验。
+
+### 2026-09-24：商品自动化单流程配置与局部校验修复
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R110 | 业务 / 契约 | 单商品保存是否只下发当前流程，未配置流程是否保留原值并跳过本次校验 | root | PASS | `AutomationDrawer.tsx`、`api.ts`；Web 商品自动化 14/14；`product-automation.test.ts` 单流程 patch 回归 |
+| S5-R111 | 架构 / 数据流 | 单商品与批量保存是否共享规则级 patch 逻辑，卡券绑定是否仅在卡券规则提交时同步 | root | PASS | `product-automation.ts`、`store-memory.ts`、`store-postgres.ts`；API 商品自动化 31/31 |
+| S5-R112 | 质量 / 端到端 | 真实 API 模式下，商品列表→自动化抽屉→卡券选择→保存→重开是否通过 | root | PASS（受控环境） | `npm --workspace apps/web run test:e2e:chrome:product-automation`；Chrome/CDP live E2E |
+
+本轮结论：商品自动化保存契约已改为按规则 patch；单流程保存只校验当前规则并保留其余配置，受控 API/Web/Chrome/CDP 门禁通过。真实闲鱼外部 mutation 和严格视觉像素 diff 仍沿用既有开放边界。

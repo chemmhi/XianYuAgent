@@ -24,12 +24,13 @@ describe('product automation API', () => {
     expect(config.delivery.couponIds).toEqual(['1']);
     const availableCoupons = await api.listCoupons('account-1', 'delivery');
     expect(availableCoupons.some((coupon) => coupon.id === 'operator-only')).toBe(true);
-    await api.saveConfig('product-1', { version: 7, delivery: { enabled: false }, reprice: { enabled: false }, gift: { enabled: false }, review: { enabled: true } });
+    await api.saveConfig('product-1', { version: 7, delivery: { enabled: false } });
     await api.saveBatch({ productIds: ['product-1'], expectedConfigVersions: { 'product-1': 8 }, apply: { delivery: true, reprice: false, gift: false, review: false }, rules: { delivery: { enabled: false }, reprice: { enabled: false }, gift: { enabled: false }, review: { enabled: true } } });
     expect(calls[0].path).toBe('/api/v1/products/product-1/automation');
     expect(calls[1].path).toBe('/api/v1/coupons/batches?accountId=account-1&page=1&pageSize=100');
     const saveCall = calls.find((call) => call.method === 'PATCH' && call.path.includes('/automation'));
-    expect(saveCall?.body).toMatchObject({ config: { paidAutoDelivery: { enabled: false, couponBatchIds: [], autoConfirm: true }, unpaidAutoReprice: { enabled: false, targetPriceMinor: 0 }, reviewGift: { enabled: false, couponBatchIds: [] }, reviewReminder: { enabled: true, firstDelayHours: 72 } } });
+    expect(saveCall?.body).toMatchObject({ config: { paidAutoDelivery: { enabled: false, couponBatchIds: [], autoConfirm: true } } });
+    expect(Object.keys(((saveCall?.body as { config?: Record<string, unknown> }).config ?? {}))).toEqual(['paidAutoDelivery']);
     expect((saveCall?.body as { config?: { paidAutoDelivery?: { autoConfirm?: boolean } } }).config?.paidAutoDelivery?.autoConfirm).toBe(true);
     expect(saveCall?.options).toMatchObject({ headers: expect.objectContaining({ 'If-Match-Version': '7', 'Idempotency-Key': expect.any(String) }) });
     const batchCall = calls.find((call) => call.path.endsWith('/automation/batch'));
