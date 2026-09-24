@@ -5,6 +5,13 @@
 
 ## 已确认决策
 
+### 2026-09-25 QR 登录成功边界与 IM listener 解耦
+
+1. 二维码登录的成功条件是闲鱼确认后的 Cookie 校验和账号资料同步；IM WebSocket/token bootstrap 属于后置能力，不得阻断 QR 会话成功落库。
+2. `ACCOUNT_VALIDATION_REQUIRED`、`FAIL_SYS_USER_VALIDATE`、`X5SEC`、`CAPTCHA`、`SLIDER` 等外部风控错误表示需要人工验证，不等同于凭证失效；账号标为 `degraded`，保留有效 Cookie 并进行有限后台重试。
+3. QR adapter 的 `onSuccess` 异常必须立即持久化 `failed` 终态并保留原始错误码，禁止 durable session 永久停留在 `scanned`。
+4. 真实滑块挑战和外部账号扫码仍需人工验收；受控 smoke 只能证明状态机、错误映射和持久化边界正确。
+
 ### 2026-09-21 自动回复 Agent 设计确认
 
 1. 应用启动后自动监听闲鱼网关，不需要管理员打开消息页面。

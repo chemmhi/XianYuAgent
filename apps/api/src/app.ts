@@ -254,16 +254,12 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       await credentials.verify({ adminId, accountId: resolvedAccountId, status: 'active', requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
       console.info(JSON.stringify({ component: 'xianyu-qr', event: 'credential_verified_active', sessionId, adminId, accountId: resolvedAccountId }));
       await hydrateAccountProfile({ accounts, xianyu, adminId, accountId: resolvedAccountId, fallbackSellerRef: unb, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
-      // Listener bootstrap is part of the user-visible login outcome. Await it
-      // before persisting QR success so IM token / slider failures are surfaced
-      // as a failed login and the account is not briefly shown as healthy.
-      try {
-        await xianyuIm.startListener(adminId, resolvedAccountId);
-      } catch (error) {
-        console.warn(JSON.stringify({ component: 'xianyu-qr', event: 'listener_start_failed', sessionId, adminId, accountId: resolvedAccountId, errorCode: listenerErrorCode(error) }));
-        throw error;
-      }
       await accounts.updateLoginSession({ adminId, accountId: resolvedAccountId, sessionId, patch: { status: 'succeeded', completedAt: new Date().toISOString(), failureCode: undefined }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+      // QR login success is determined by the external login cookie and the
+      // account verification above. IM listener bootstrap may require a
+      // separate slider challenge, so retry it in the background without
+      // rolling back an otherwise valid QR login session.
+      void startXianyuListenerBestEffort(runtime, adminId, resolvedAccountId);
     },
   });
   xianyu = new XianyuMtopClient({
@@ -374,7 +370,8 @@ async function markXianyuAccountFailure(store: Store, adminId: string, accountId
     const account = await store.getAccount(adminId, accountId);
     if (!account || account.status === 'disabled') return;
     const text = `${input.errorCode ?? ''} ${input.message ?? ''}`;
-    const requiresReauth = input.accountInvalid || /CREDENTIAL_MISSING|ACCOUNT_VALIDATION_REQUIRED|SESSION_EXPIRED|MTOP_TOKEN_(MISSING|EXPIRED)|IM_TOKEN_FAILED|XIANYU_IM_TOKEN_FAILED|REQUEST_REJECTED:401|USER_VALIDATE|LOGIN.*INVALID/i.test(text);
+    const requiresVerification = /ACCOUNT_VALIDATION_REQUIRED|FAIL_SYS_USER_VALIDATE|X5SEC|CAPTCHA|SLIDER/i.test(text);
+    const requiresReauth = !requiresVerification && (input.accountInvalid || /CREDENTIAL_MISSING|SESSION_EXPIRED|MTOP_TOKEN_(MISSING|EXPIRED)|IM_TOKEN_FAILED|XIANYU_IM_TOKEN_FAILED|REQUEST_REJECTED:401|USER_VALIDATE|LOGIN.*INVALID/i.test(text));
     const status = requiresReauth ? 'expired' : 'degraded';
     if (requiresReauth) {
       try { await store.markCredentialVerified({ adminId, accountId, status: 'expired' }); } catch { /* account status remains the primary signal */ }
