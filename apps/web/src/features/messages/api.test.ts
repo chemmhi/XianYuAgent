@@ -18,6 +18,15 @@ const sentImage: MessageVM = {
 };
 
 describe('messages API media contract', () => {
+  it('leaves first-page conversation refresh mode to the server background policy', async () => {
+    let capturedPath = '';
+    const api = createMessagesApi({
+      get: async <T>(path: string) => { capturedPath = path; return { data: { items: [], hasMore: false } } as unknown as T; },
+    });
+    await api.listConversations({ accountId: 'a-1', limit: 50 });
+    expect(capturedPath).not.toContain('refreshExternal=');
+  });
+
   it('can read the local conversation index without refreshing Xianyu', async () => {
     let capturedPath = '';
     const api = createMessagesApi({
