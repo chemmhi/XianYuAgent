@@ -351,3 +351,9 @@
 - AI 文案优化：前端按钮调用配置页当前账号的 Provider，后端拒绝未配置 Provider，不再使用硬编码文案。
 - 已验证：Web typecheck；API build；商品发布 Web 定向测试 3 files / 22 tests；API 发布测试 3/3；商品发布视觉回归桌面/移动与发布后持久化断言通过；`git diff --check` 通过。
 - 验收边界：当前未在真实闲鱼账号上执行一次受控外部发布，因此状态保持 `READY_FOR_REVIEW`，不能把 stub 视觉回归或脱敏 fixture 解释为真实外部发布已验收。
+
+## 2026-09-25 QR 登录历史账号恢复
+
+- 扫码成功回调与 Cookie 更新统一复用登录专用账号解析路径；对已软删除、scope 已撤销但仍占用唯一键的闲鱼账号恢复 `manage` scope 并将 `disabled` 置回 `pending`，避免成功后误报 `account already exists / CONFLICT`。
+- 提交 `425382d` 已以 `--no-ff` 合入 `main`，merge commit 为 `b21be57`；API 全量测试、PostgreSQL 恢复 smoke、QR renewal smoke 与 `git diff --check` 通过。
+- 真实 APP 扫码、外部 Cookie 与资料同步仍保留原有人工验收门禁。

@@ -638,3 +638,12 @@
 | S5-R128 | 质量 / 外部验收 | 是否已在真实闲鱼账号完成一次受控外部发布并核对商品详情页 | root | PARTIALLY_VERIFIED | 真实外部浏览器/账号发布本轮未执行；已保留脱敏回放 fixture，禁止将 stub/fixture 证据升级为真实外部发布通过 |
 
 本轮结论：本地前端、API、持久化与脱敏回放链路已按官方主流程完成并通过受控验证；地址流程按用户要求暂时跳过。真实闲鱼外部发布仍需在隔离账号/当前登录态下补做一次人工或可审计 E2E 复核。
+
+### 10.9 QR 登录成功回调账号恢复冲突修复（2026-09-25）
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R129 | 后端 / 账号归属 | 已扫码成功但历史禁用账号和撤销 scope 仍占用 `(platform, seller_ref)` 唯一键时，QR 回调是否复用并恢复原账号而非误报 `CONFLICT` | root | PASS | `apps/api/src/services.ts`、`apps/api/src/store-memory.ts`、`apps/api/src/store-postgres.ts`、`apps/api/src/app.ts`；内存回归、PostgreSQL 恢复 smoke |
+| S5-R130 | 质量 / 回归 | Cookie 更新、QR renewal、API 全量测试与合并后主线验证是否通过 | root | PASS | `account-login-recovery.test.ts`、`account-login-recovery-postgres-smoke.mjs`、`xianyu-cookie-login-update.test.ts`、`xianyu-qr-login-smoke.mjs`；API 58/58 + 详情 17/17 |
+
+本轮结论：QR 成功回调与 Cookie 登录统一使用登录专用账号解析/恢复路径；软删除账号可在同一管理员历史归属下恢复 scope 并重新进入 `pending`，避免唯一键冲突导致二维码成功后被误判失败。提交 `425382d` 已以 `--no-ff` 合入 `main`，merge commit 为 `b21be57`。真实闲鱼 APP 扫码、外部 Cookie 与资料同步仍由既有人工验收门禁承接。
