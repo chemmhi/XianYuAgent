@@ -26,6 +26,7 @@ export function AutomationDrawer({ open, product, accountLabel = '当前账号',
 }) {
   const [activeTab, setActiveTab] = useState<AutomationRuleKey>('delivery');
   const boundCouponIds = useMemo(() => (product?.couponBatches ?? []).map((coupon) => coupon.id).filter(Boolean), [product]);
+  const hasProductCouponBindings = Array.isArray(product?.couponBatches);
   const pickerCoupons = useMemo(() => {
     const byId = new Map(coupons.map((coupon) => [coupon.id, coupon]));
     for (const coupon of product?.couponBatches ?? []) {
@@ -33,15 +34,15 @@ export function AutomationDrawer({ open, product, accountLabel = '当前账号',
     }
     return [...byId.values()];
   }, [coupons, product]);
-  const [draft, setDraft] = useState<ProductAutomationConfig | null>(() => config ? hydrateDraft(config, boundCouponIds) : config);
+  const [draft, setDraft] = useState<ProductAutomationConfig | null>(() => config ? hydrateDraft(config, boundCouponIds, hasProductCouponBindings) : config);
   const [couponTarget, setCouponTarget] = useState<AutomationRuleKey | null>(null);
 
   useEffect(() => {
     if (open) {
-      setDraft(config ? hydrateDraft(config, boundCouponIds) : config);
+      setDraft(config ? hydrateDraft(config, boundCouponIds, hasProductCouponBindings) : config);
       setActiveTab('delivery');
     }
-  }, [boundCouponIds, config, open]);
+  }, [boundCouponIds, config, hasProductCouponBindings, open]);
 
   const selectedCoupons = useMemo(
     () => (key: AutomationRuleKey) => pickerCoupons.filter((coupon) => draft?.[key].couponIds?.includes(coupon.id)),
@@ -78,7 +79,7 @@ export function AutomationDrawer({ open, product, accountLabel = '当前账号',
           </div>
           <div className="automation-summary-grid">
             {tabs.map((tab) => (
-              <button key={tab.key} type="button" className={`automation-summary${activeTab === tab.key ? ' active' : ''}`} onClick={() => setActiveTab(tab.key)}>
+              <button key={tab.key} type="button" className={`automation-summary${activeTab === tab.key ? ' active' : ''}`} data-testid={`automation-tab-${tab.key}`} onClick={() => setActiveTab(tab.key)}>
                 <div><strong>{tab.title}</strong><span>{draft?.[tab.key].enabled ? '✓' : '—'}</span></div>
                 <p>{summaryText(tab.key, draft, selectedCoupons(tab.key))}</p>
                 <em className={draft?.[tab.key].enabled ? 'on' : ''}>{draft?.[tab.key].enabled ? '已启用' : '未配置'}</em>
@@ -149,7 +150,7 @@ function RulePanel({ tab, rule, selectedCoupons, onToggle, onCouponChoose, onCha
                 <strong>{coupon.label}</strong>
                 <small>{coupon.typeLabel} · 已选{tab === 'gift' ? '赠品' : '发货'}卡券</small>
               </div>
-            )) : <div className="automation-selected-coupon-item"><strong>未选择卡券</strong><small>请先选择可用卡券</small></div>}
+            )) : <div className="automation-selected-coupon-item"><strong>未选择{tab === 'gift' ? '赠品' : '发货'}卡券</strong><small>请先选择可用卡券</small></div>}
           </div>
           <button className="btn" type="button" data-testid={`choose-${tab}-coupon`} onClick={onCouponChoose}>选择卡券</button>
         </div>
@@ -177,12 +178,12 @@ function summaryText(key: AutomationRuleKey, config: ProductAutomationConfig | n
   return config.reprice.enabled && config.reprice.targetPriceMinor ? `目标价 ¥${(config.reprice.targetPriceMinor / 100).toFixed(2)}` : '未设置目标价格和话术';
 }
 
-function hydrateDraft(config: ProductAutomationConfig, boundCouponIds: string[]): ProductAutomationConfig {
-  const mergeBound = (ids?: string[]) => [...new Set([...(ids ?? []), ...boundCouponIds])];
+function hydrateDraft(config: ProductAutomationConfig, boundCouponIds: string[], hasProductCouponBindings: boolean): ProductAutomationConfig {
+  const deliveryCouponIds = hasProductCouponBindings ? [...new Set(boundCouponIds)] : [...(config.delivery.couponIds ?? [])];
   return {
     ...config,
-    delivery: { ...config.delivery, autoConfirm: config.delivery.autoConfirm ?? true, couponIds: mergeBound(config.delivery.couponIds) },
-    gift: { ...config.gift, couponIds: mergeBound(config.gift.couponIds) },
+    delivery: { ...config.delivery, autoConfirm: config.delivery.autoConfirm ?? true, couponIds: deliveryCouponIds },
+    gift: { ...config.gift, couponIds: [...(config.gift.couponIds ?? [])] },
   };
 }
 

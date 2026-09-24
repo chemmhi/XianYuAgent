@@ -66,8 +66,10 @@ export class ProductAutomationService {
       configByProductId[product.id] = validated;
       configDigests[product.id] = digestJson(validated);
     }
+    const inputRules = asRecord(input.config);
+    const syncCouponBindings = inputRules.paidAutoDelivery !== undefined || inputRules.reviewGift !== undefined;
     try {
-      const result = await this.store.updateProductAutomationsBatch({ adminId: input.adminId, productIds, expectedConfigVersions, configByProductId, configDigests });
+      const result = await this.store.updateProductAutomationsBatch({ adminId: input.adminId, productIds, expectedConfigVersions, configByProductId, configDigests, syncCouponBindingsByProduct: Object.fromEntries(productIds.map((productId) => [productId, syncCouponBindings])) });
       await this.audit({ actorId: input.adminId, action: 'product.automation.batch_updated', targetRef: `batch:${productIds.length}`, requestId: input.requestId, traceId: input.traceId, payload: { productIds, configVersion: result.items.map((item) => ({ productId: item.productId, version: item.configVersion })), rules: Object.fromEntries(productIds.map((productId) => [productId, enabledRules(configByProductId[productId]!)])) }, accountId });
       return result;
     } catch (error) {
@@ -446,6 +448,8 @@ function mapAutomationStoreError(error: unknown): ServiceError {
   if (code === 'ACCOUNT_SCOPE_FORBIDDEN') return new ServiceError(403, 'FORBIDDEN', 'account scope required');
   if (code === 'AUTOMATION_VERSION_CONFLICT') return new ServiceError(409, 'AUTOMATION_VERSION_CONFLICT', 'automation config version conflict');
   if (code === 'PRODUCT_NOT_FOUND') return new ServiceError(404, 'NOT_FOUND', 'product not found');
+  if (code === 'COUPON_NOT_FOUND') return new ServiceError(404, 'NOT_FOUND', 'coupon batch not found');
+  if (code === 'COUPON_BATCH_VOIDED') return new ServiceError(409, 'CONFLICT', 'coupon batch is voided or closed');
   if (code === 'AUTOMATION_BATCH_ACCOUNT_MISMATCH') return new ServiceError(422, 'VALIDATION_FAILED', 'batch automation products must belong to the same account');
   if (error instanceof ServiceError) return error;
   throw error;

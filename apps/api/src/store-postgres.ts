@@ -176,6 +176,7 @@ export class PostgresStore implements Store {
       const row = current.rows[0] as Row | undefined;
       const currentVersion = row ? Number(row.config_version) : 1;
       if ((row && currentVersion !== input.expectedConfigVersion) || (!row && input.expectedConfigVersion !== 1)) throw new Error('AUTOMATION_VERSION_CONFLICT');
+      await this.syncProductCouponBindings(client, { productId: input.productId, accountId: String(product.rows[0].account_id), config: input.config });
       const recordId = row ? String(row.id) : createId();
       const version = row ? currentVersion + 1 : 1;
       const saved = row
@@ -193,7 +194,7 @@ export class PostgresStore implements Store {
     } finally { client.release(); }
   }
 
-  async updateProductAutomationsBatch(input: { adminId: string; productIds: string[]; expectedConfigVersions: Record<string, number>; config?: ProductAutomationConfig; configDigest?: string; configByProductId?: Record<string, ProductAutomationConfig>; configDigests?: Record<string, string> }): Promise<ProductAutomationBatchResult> {
+  async updateProductAutomationsBatch(input: { adminId: string; productIds: string[]; expectedConfigVersions: Record<string, number>; config?: ProductAutomationConfig; configDigest?: string; configByProductId?: Record<string, ProductAutomationConfig>; configDigests?: Record<string, string>; syncCouponBindingsByProduct?: Record<string, boolean> }): Promise<ProductAutomationBatchResult> {
     const productIds = [...new Set(input.productIds)];
     if (productIds.length === 0) throw new Error('PRODUCT_NOT_FOUND');
     const client = await this.pool.connect();
@@ -223,13 +224,16 @@ export class PostgresStore implements Store {
       for (const productId of productIds) {
         const row = byProduct.get(productId);
         const version = row ? Number(row.config_version) + 1 : 1;
+        const product = products.rows.find((item) => String(item.id) === productId)!;
+        const config = input.configByProductId?.[productId] ?? input.config!;
+        if (input.syncCouponBindingsByProduct?.[productId] !== false) await this.syncProductCouponBindings(client, { productId, accountId: String(product.account_id), config });
         const result = row
           ? await client.query(`update products.automation_configs
               set config_version=$2, config_json=$3::jsonb, config_digest=$4, updated_at=now()
-              where product_id=$1 returning *`, [productId, version, JSON.stringify(input.configByProductId?.[productId] ?? input.config), input.configDigests?.[productId] ?? input.configDigest ?? ''])
+              where product_id=$1 returning *`, [productId, version, JSON.stringify(config), input.configDigests?.[productId] ?? input.configDigest ?? ''])
           : await client.query(`insert into products.automation_configs
               (id,product_id,account_id,config_version,config_json,config_digest)
-              values ($1,$2,$3,$4,$5::jsonb,$6) returning *`, [createId(), productId, products.rows.find((item) => String(item.id) === productId)!.account_id, version, JSON.stringify(input.configByProductId?.[productId] ?? input.config), input.configDigests?.[productId] ?? input.configDigest ?? '']);
+              values ($1,$2,$3,$4,$5::jsonb,$6) returning *`, [createId(), productId, product.account_id, version, JSON.stringify(config), input.configDigests?.[productId] ?? input.configDigest ?? '']);
         saved.push(this.toProductAutomation(result.rows[0]));
       }
       await client.query('commit');
@@ -238,6 +242,46 @@ export class PostgresStore implements Store {
       try { await client.query('rollback'); } catch { /* preserve original error */ }
       throw error;
     } finally { client.release(); }
+  }
+
+  private automationCouponBatchIds(config: ProductAutomationConfig): string[] {
+    return [...new Set([
+      ...(config.paidAutoDelivery?.couponBatchIds ?? []),
+      ...(config.reviewGift?.couponBatchIds ?? []),
+    ].map((value) => String(value).trim()).filter(Boolean))];
+  }
+
+  private async syncProductCouponBindings(client: PoolClient, input: { productId: string; accountId: string; config: ProductAutomationConfig }): Promise<void> {
+    const selectedRows: Row[] = [];
+    for (const batchRef of this.automationCouponBatchIds(input.config)) {
+      const result = await client.query(`select b.*
+        from coupons.coupon_batches b
+        where (b.id::text=$1 or b.sequence_id::text=$1) and b.account_id=$2
+        order by (b.status='voided') asc, b.created_at desc, b.id desc
+        limit 1 for update`, [batchRef, input.accountId]);
+      const row = result.rows[0] as Row | undefined;
+      if (!row) throw new Error('COUPON_NOT_FOUND');
+      if (row.status === 'voided' || row.status === 'closed') throw new Error('COUPON_BATCH_VOIDED');
+      selectedRows.push(row);
+    }
+    const selectedIds = new Set(selectedRows.map((row) => String(row.id)));
+    const bindings = await client.query('select * from coupons.coupon_bindings where product_id=$1 for update', [input.productId]);
+    const activeIds = new Set(bindings.rows.filter((row) => row.status === 'active').map((row) => String(row.coupon_batch_id)));
+    const touchedBatchIds = new Set<string>();
+    for (const binding of bindings.rows) {
+      const batchId = String(binding.coupon_batch_id);
+      if (binding.status === 'active' && !selectedIds.has(batchId)) {
+        await client.query("update coupons.coupon_bindings set status='inactive',updated_at=now() where id=$1", [binding.id]);
+        touchedBatchIds.add(batchId);
+      }
+    }
+    for (const row of selectedRows) {
+      const batchId = String(row.id);
+      if (activeIds.has(batchId)) continue;
+      await client.query("insert into coupons.coupon_bindings (id,coupon_batch_id,product_id,priority,status) values ($1,$2,$3,0,'active') on conflict (coupon_batch_id,product_id) do update set status='active',updated_at=now()", [createId(), batchId, input.productId]);
+      touchedBatchIds.add(batchId);
+    }
+    for (const batchId of touchedBatchIds) await client.query('update coupons.coupon_batches set version=version+1,updated_at=now() where id=$1', [batchId]);
   }
 
   async persistXianyuItemDetail(input: XianyuItemDetailPersistenceInput): Promise<ProductRecord | undefined> {

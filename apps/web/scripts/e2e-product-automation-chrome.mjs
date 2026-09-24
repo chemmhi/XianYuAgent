@@ -106,9 +106,39 @@ async function run() {
     return { ok: afterRemove === before, before, afterAdd, afterRemove };
   })()`);
   if (!transferAudit?.ok) throw new Error(`coupon transfer semantics failed: ${JSON.stringify(transferAudit)}`);
+  const liveAssociationAudit = automationMode === 'live' ? await evaluate(cdp, `(async () => {
+    const pane = document.querySelectorAll('.coupon-transfer-pane')[0];
+    const target = Array.from(pane?.querySelectorAll('.coupon-item') ?? []).find((item) => item.textContent?.includes('固定文字'));
+    if (!target) return { ok: false, reason: 'fixed coupon missing from complete picker list' };
+    target.querySelector('input[type="checkbox"]')?.click();
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    const selected = Array.from(document.querySelectorAll('.coupon-transfer-pane')[1]?.querySelectorAll('.coupon-item') ?? []).some((item) => item.textContent?.includes('固定文字'));
+    return { ok: selected };
+  })()`) : { ok: true, skipped: true };
+  if (!liveAssociationAudit?.ok) throw new Error(`live coupon association selection failed: ${JSON.stringify(liveAssociationAudit)}`);
   await evaluate(cdp, 'document.querySelector("[data-testid=save-coupon-selection]")?.click()'); await waitFor(async () => !Boolean(await evaluate(cdp, 'document.querySelector("[data-testid=coupon-picker-dialog]")')), 'coupon picker save');
-  await evaluate(cdp, 'document.querySelector(`[aria-label="关闭自动化配置"]`)?.click()'); await evaluate(cdp, 'document.querySelector(`[data-testid=batch-automation]`)?.click()'); await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('批量配置自动化'), 'batch dialog'); await evaluate(cdp, 'document.querySelector(`[data-testid=save-batch-automation]`)?.click()'); try { await waitFor(async () => !Boolean(await evaluate(cdp, 'document.querySelector(`[data-testid=batch-automation-dialog]`)')), 'batch save'); } catch (error) { console.error(`batch failure body: ${await evaluate(cdp, 'document.body.innerText')}`); console.error(`batch failure fetch log: ${await evaluate(cdp, 'JSON.stringify((window.__automationFetchLog ?? []).filter((entry) => entry.url.includes("automation")))')}`); throw error; }
-  console.log('product automation Chrome/CDP E2E passed: list -> four automation panels -> coupon transfer save -> batch dialog save'); cdp.socket.close();
+  await evaluate(cdp, 'document.querySelector("[data-testid=save-automation]")?.click()'); await waitFor(async () => !Boolean(await evaluate(cdp, 'document.querySelector("[data-testid=automation-drawer]")')), 'automation config save after coupon association');
+  if (automationMode === 'live') {
+    await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('固定文字'), 'product table coupon relation refresh');
+    const relationAudit = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll('[role="row"]')).find((item) => item.textContent?.includes('PPT Master pptmaster')); return { ok: Boolean(row?.textContent?.includes('固定文字')), text: row?.textContent ?? '' }; })()`);
+    if (!relationAudit?.ok) throw new Error(`product table did not refresh coupon relation: ${JSON.stringify(relationAudit)}`);
+    await evaluate(cdp, 'document.querySelector("[data-testid^=product-automation-]")?.click()');
+    await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector("[data-testid=automation-drawer]"))')), 'automation drawer reopen after relation sync');
+    await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector("[data-testid=auto-confirm-delivery]"))')), 'automation config reload after relation sync');
+    await evaluate(cdp, 'document.querySelector("[data-testid=automation-tab-gift]")?.click()');
+    try {
+      await waitFor(async () => String(await evaluate(cdp, 'document.querySelector(".automation-rule-panel")?.innerText ?? ""')).includes('未选择赠品卡券'), 'gift rule stays unassociated');
+    } catch (error) {
+      console.error(`gift isolation body: ${await evaluate(cdp, 'document.querySelector(".automation-rule-panel")?.innerText ?? document.body.innerText')}`);
+      console.error(`gift isolation fetch log: ${await evaluate(cdp, 'JSON.stringify((window.__automationFetchLog ?? []).filter((entry) => entry.url.includes("automation")))')}`);
+      throw error;
+    }
+    await evaluate(cdp, `document.querySelector('[aria-label="关闭自动化配置"]')?.click()`);
+  } else {
+    await evaluate(cdp, `document.querySelector('[aria-label="关闭自动化配置"]')?.click()`);
+  }
+  await evaluate(cdp, 'document.querySelector(`[data-testid=batch-automation]`)?.click()'); await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('批量配置自动化'), 'batch dialog'); await evaluate(cdp, 'document.querySelector(`[data-testid=save-batch-automation]`)?.click()'); try { await waitFor(async () => !Boolean(await evaluate(cdp, 'document.querySelector(`[data-testid=batch-automation-dialog]`)')), 'batch save'); } catch (error) { console.error(`batch failure body: ${await evaluate(cdp, 'document.body.innerText')}`); console.error(`batch failure fetch log: ${await evaluate(cdp, 'JSON.stringify((window.__automationFetchLog ?? []).filter((entry) => entry.url.includes("automation")))')}`); throw error; }
+  console.log('product automation Chrome/CDP E2E passed: list -> four automation panels -> complete coupon picker -> atomic relation sync -> gift isolation -> batch dialog save'); cdp.socket.close();
 }
 
 try { await run(); } finally { for (const child of children.reverse()) { if (!child.killed && child.exitCode === null) { if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); else child.kill('SIGTERM'); } child.stdout?.destroy(); child.stderr?.destroy(); } if (apiRuntime) await apiRuntime.close(); try { rmSync(profile, { recursive: true, force: true }); } catch {} }

@@ -62,11 +62,33 @@ test('defaults auto-confirm on and allows disabled coupon-only associations', as
   });
   assert.deepEqual(associated.config.paidAutoDelivery.couponBatchIds, [operatorOnly.id]);
   assert.equal(associated.config.paidAutoDelivery.autoConfirm, true);
+  assert.deepEqual((await store.getProduct(admin.id, product.id))?.couponBatches?.map((item) => item.id), [operatorOnly.sequenceId ?? operatorOnly.id]);
+
+  const cleared = await service.update({
+    adminId: admin.id,
+    productId: product.id,
+    expectedConfigVersion: 1,
+    config: defaultProductAutomationConfig(),
+    requestId: 'req-clear-association',
+    traceId: 'trace-clear-association',
+  });
+  assert.equal(cleared.configVersion, 2);
+  assert.deepEqual((await store.getProduct(admin.id, product.id))?.couponBatches, []);
+  assert.equal((await store.getCouponBatch(admin.id, operatorOnly.id))?.bindings?.some((binding) => binding.productId === product.id && binding.status === 'active'), false);
+  await assert.rejects(() => store.updateProductAutomation({
+    adminId: admin.id,
+    productId: product.id,
+    expectedConfigVersion: 2,
+    config: { ...defaultProductAutomationConfig(), paidAutoDelivery: { ...defaultProductAutomationConfig().paidAutoDelivery, couponBatchIds: [coupon.id, 'missing-coupon'] } },
+    configDigest: 'atomic-failure',
+  }));
+  assert.deepEqual((await store.getProduct(admin.id, product.id))?.couponBatches, []);
+  assert.equal((await service.get(admin.id, product.id)).configVersion, 2);
 
   await assert.rejects(() => service.update({
     adminId: admin.id,
     productId: product.id,
-    expectedConfigVersion: 1,
+    expectedConfigVersion: 2,
     config: {
       ...defaultProductAutomationConfig(),
       paidAutoDelivery: { enabled: true, couponBatchIds: [operatorOnly.id] },
@@ -78,7 +100,7 @@ test('defaults auto-confirm on and allows disabled coupon-only associations', as
   const partial = await service.update({
     adminId: admin.id,
     productId: product.id,
-    expectedConfigVersion: 1,
+    expectedConfigVersion: 2,
     config: {
       ...defaultProductAutomationConfig(),
       paidAutoDelivery: { enabled: true, couponBatchIds: [coupon.id] },

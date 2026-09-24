@@ -161,13 +161,21 @@ export function createProductAutomationApi(transport: ProductAutomationApiTransp
       // purposes (`text`, `data`, `api`, `image`), so forwarding these rule
       // keys makes the live picker fail with a 422 before the drawer can save.
       // Keep the intent parameter for the public contract, but scope by
-      // account only and let the picker show all buyer-deliverable batches.
+      // account only and let the picker show the complete account-scoped list.
       void purpose;
-      const suffix = '&page=1&pageSize=100';
-      const response = await transport.get<{ data?: { items?: Record<string, unknown>[] } | Record<string, unknown>[] } | { items?: Record<string, unknown>[] } | Record<string, unknown>[]>(`/api/v1/coupons/batches?accountId=${encodeURIComponent(accountId)}${suffix}`);
-      const payload = (response as { data?: unknown }).data ?? response;
-      const items = Array.isArray(payload) ? payload : ((payload as { items?: Record<string, unknown>[] }).items ?? []);
-      return items.map(toAutomationCoupon).filter((coupon) => !coupon.deliveryScope || coupon.deliveryScope === 'buyer_deliverable');
+      const items: Record<string, unknown>[] = [];
+      let page = 1;
+      let totalPages = 1;
+      do {
+        const response = await transport.get<{ data?: { items?: Record<string, unknown>[]; totalPages?: number } | Record<string, unknown>[] } | { items?: Record<string, unknown>[]; totalPages?: number } | Record<string, unknown>[]>(`/api/v1/coupons/batches?accountId=${encodeURIComponent(accountId)}&page=${page}&pageSize=100`);
+        const payload = (response as { data?: unknown }).data ?? response;
+        const pageItems = Array.isArray(payload) ? payload : ((payload as { items?: Record<string, unknown>[] }).items ?? []);
+        items.push(...pageItems);
+        const reportedTotalPages = Array.isArray(payload) ? undefined : Number((payload as { totalPages?: unknown }).totalPages);
+        totalPages = Number.isSafeInteger(reportedTotalPages) && reportedTotalPages! > 0 ? reportedTotalPages! : (pageItems.length === 100 ? page + 1 : page);
+        page += 1;
+      } while (page <= totalPages && page <= 100);
+      return items.map(toAutomationCoupon);
     },
     async saveConfig(productId, input) {
       const wire = toAutomationConfigWire(input);
