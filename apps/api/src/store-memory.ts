@@ -286,15 +286,14 @@ export class MemoryStore implements Store {
     return record ? this.cloneProductAutomation(record) : undefined;
   }
 
-  async updateProductAutomation(input: { adminId: string; productId: string; expectedConfigVersion: number; config: ProductAutomationConfig; configDigest: string }): Promise<ProductAutomationConfigRecord | undefined> {
+  async updateProductAutomation(input: { adminId: string; productId: string; expectedConfigVersion: number; config: ProductAutomationConfig; configDigest: string; syncCouponBindings?: boolean }): Promise<ProductAutomationConfigRecord | undefined> {
     const product = this.products.get(input.productId);
     if (!product) return undefined;
     if (!(await this.hasAccountScope(input.adminId, product.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const current = this.productAutomations.get(input.productId);
     if (current && current.configVersion !== input.expectedConfigVersion) throw new Error('AUTOMATION_VERSION_CONFLICT');
     if (!current && input.expectedConfigVersion !== 1) throw new Error('AUTOMATION_VERSION_CONFLICT');
-    const couponBatchIds = this.automationCouponBatchIds(input.config);
-    const couponBatches = couponBatchIds.map((batchId) => {
+    const couponBatches = input.syncCouponBindings === false ? undefined : this.automationCouponBatchIds(input.config).map((batchId) => {
       const batch = this.findCouponBatch(batchId);
       if (!batch || batch.accountId !== product.accountId) throw new Error('COUPON_NOT_FOUND');
       if (batch.status === 'voided' || batch.status === 'closed') throw new Error('COUPON_BATCH_VOIDED');
@@ -311,7 +310,7 @@ export class MemoryStore implements Store {
       createdAt: current?.createdAt ?? now,
       updatedAt: now,
     };
-    this.syncProductCouponBindings(input.productId, couponBatches, now);
+    if (couponBatches) this.syncProductCouponBindings(input.productId, couponBatches, now);
     this.productAutomations.set(input.productId, record);
     return this.cloneProductAutomation(record);
   }

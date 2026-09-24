@@ -56,15 +56,16 @@ export function toAutomationConfig(value: ProductAutomationConfigWire | ProductA
 }
 
 export function toAutomationConfigWire(value: ProductAutomationUpdate): ProductAutomationUpdateWire {
-  const reviewReminder = { enabled: value.review.enabled, firstDelayHours: value.review.reviewInitialHours ?? 72, repeatIntervalHours: value.review.reviewRepeatHours ?? 24, maxReminders: value.review.reviewMaxCount ?? 1 } as Record<string, unknown>;
-  if (value.review.reviewMessage !== undefined) reviewReminder.message = value.review.reviewMessage;
-  return {
-    configVersion: value.version,
-    paidAutoDelivery: { enabled: value.delivery.enabled, couponBatchIds: value.delivery.couponIds ?? [], autoConfirm: value.delivery.autoConfirm ?? true, maxAttempts: 3, retryBackoffSeconds: 30 } as ProductAutomationUpdateWire['paidAutoDelivery'],
-    unpaidAutoReprice: { enabled: value.reprice.enabled, mode: 'fixed', targetPriceMinor: value.reprice.targetPriceMinor ?? 0, message: value.reprice.repriceMessage ?? '', maxAttempts: 3, retryBackoffSeconds: 30 } as ProductAutomationUpdateWire['unpaidAutoReprice'],
-    reviewGift: { enabled: value.gift.enabled, couponBatchIds: value.gift.couponIds ?? [], maxAttempts: 3, retryBackoffSeconds: 30 } as ProductAutomationUpdateWire['reviewGift'],
-    reviewReminder: reviewReminder as unknown as ProductAutomationUpdateWire['reviewReminder'],
-  };
+  const wire: ProductAutomationUpdateWire = { configVersion: value.version };
+  if (value.delivery) wire.paidAutoDelivery = { enabled: value.delivery.enabled, couponBatchIds: value.delivery.couponIds ?? [], autoConfirm: value.delivery.autoConfirm ?? true, maxAttempts: 3, retryBackoffSeconds: 30 } as ProductAutomationUpdateWire['paidAutoDelivery'];
+  if (value.reprice) wire.unpaidAutoReprice = { enabled: value.reprice.enabled, mode: 'fixed', targetPriceMinor: value.reprice.targetPriceMinor ?? 0, message: value.reprice.repriceMessage ?? '', maxAttempts: 3, retryBackoffSeconds: 30 } as ProductAutomationUpdateWire['unpaidAutoReprice'];
+  if (value.gift) wire.reviewGift = { enabled: value.gift.enabled, couponBatchIds: value.gift.couponIds ?? [], maxAttempts: 3, retryBackoffSeconds: 30 } as ProductAutomationUpdateWire['reviewGift'];
+  if (value.review) {
+    const reviewReminder = { enabled: value.review.enabled, firstDelayHours: value.review.reviewInitialHours ?? 72, repeatIntervalHours: value.review.reviewRepeatHours ?? 24, maxReminders: value.review.reviewMaxCount ?? 1 } as Record<string, unknown>;
+    if (value.review.reviewMessage !== undefined) reviewReminder.message = value.review.reviewMessage;
+    wire.reviewReminder = reviewReminder as unknown as ProductAutomationUpdateWire['reviewReminder'];
+  }
+  return wire;
 }
 
 export function toAutomationBatchWire(value: ProductAutomationBatchUpdate, expectedConfigVersions: Record<string, number> = {}): ProductAutomationBatchUpdateWire {
@@ -118,7 +119,10 @@ export function createMockProductAutomationApi(seed: Partial<ProductAutomationCo
     async listCoupons() { return structuredClone(coupons); },
     async saveConfig(productId, input) {
       const current = configs.get(productId) ?? defaultConfig(productId, 'account-001');
-      const next = { ...current, ...input, productId, version: current.version + 1, updatedAt: new Date().toISOString() };
+      const next = { ...current, productId, version: current.version + 1, updatedAt: new Date().toISOString() };
+      for (const key of ['delivery', 'reprice', 'gift', 'review'] as const) {
+        if (input[key]) next[key] = { ...current[key], ...input[key] };
+      }
       configs.set(productId, next);
       return structuredClone(next);
     },

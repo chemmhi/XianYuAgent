@@ -40,9 +40,10 @@ export class ProductAutomationService {
   async update(input: { adminId: string; productId: string; expectedConfigVersion: unknown; config: unknown; requestId: string; traceId: string }): Promise<ProductAutomationConfigRecord> {
     const product = await this.requireProduct(input.adminId, input.productId);
     const expectedConfigVersion = parseVersion(input.expectedConfigVersion);
-    const config = await this.validateConfig(input.adminId, product, input.config);
+    const current = await this.store.getProductAutomation(input.adminId, product.id);
+    const { config, syncCouponBindings } = await this.applyConfigPatch(input.adminId, product, current?.config ?? defaultProductAutomationConfig(), input.config);
     try {
-      const saved = await this.store.updateProductAutomation({ adminId: input.adminId, productId: product.id, expectedConfigVersion, config, configDigest: digestJson(config) });
+      const saved = await this.store.updateProductAutomation({ adminId: input.adminId, productId: product.id, expectedConfigVersion, config, configDigest: digestJson(config), syncCouponBindings });
       if (!saved) throw new ServiceError(404, 'NOT_FOUND', 'product not found');
       await this.audit({ actorId: input.adminId, action: 'product.automation.updated', targetRef: product.id, requestId: input.requestId, traceId: input.traceId, payload: { configVersion: saved.configVersion, rules: enabledRules(config) }, accountId: product.accountId });
       return saved;
@@ -59,15 +60,14 @@ export class ProductAutomationService {
     if (products.some((product) => product.accountId !== accountId)) throw new ServiceError(422, 'VALIDATION_FAILED', 'batch automation products must belong to the same account');
     const configByProductId: Record<string, ProductAutomationConfig> = {};
     const configDigests: Record<string, string> = {};
+    let syncCouponBindings = false;
     for (const product of products) {
       const current = await this.store.getProductAutomation(input.adminId, product.id);
-      const merged = mergeAutomationConfig(current?.config ?? defaultProductAutomationConfig(), input.config);
-      const validated = await this.validateConfig(input.adminId, product, merged);
-      configByProductId[product.id] = validated;
-      configDigests[product.id] = digestJson(validated);
+      const result = await this.applyConfigPatch(input.adminId, product, current?.config ?? defaultProductAutomationConfig(), input.config);
+      configByProductId[product.id] = result.config;
+      configDigests[product.id] = digestJson(result.config);
+      syncCouponBindings = syncCouponBindings || result.syncCouponBindings;
     }
-    const inputRules = asRecord(input.config);
-    const syncCouponBindings = inputRules.paidAutoDelivery !== undefined || inputRules.reviewGift !== undefined;
     try {
       const result = await this.store.updateProductAutomationsBatch({ adminId: input.adminId, productIds, expectedConfigVersions, configByProductId, configDigests, syncCouponBindingsByProduct: Object.fromEntries(productIds.map((productId) => [productId, syncCouponBindings])) });
       await this.audit({ actorId: input.adminId, action: 'product.automation.batch_updated', targetRef: `batch:${productIds.length}`, requestId: input.requestId, traceId: input.traceId, payload: { productIds, configVersion: result.items.map((item) => ({ productId: item.productId, version: item.configVersion })), rules: Object.fromEntries(productIds.map((productId) => [productId, enabledRules(configByProductId[productId]!)])) }, accountId });
@@ -84,21 +84,28 @@ export class ProductAutomationService {
     return product;
   }
 
-  private async validateConfig(adminId: string, product: ProductRecord, input: unknown): Promise<ProductAutomationConfig> {
+  private async applyConfigPatch(adminId: string, product: ProductRecord, base: ProductAutomationConfig, input: unknown): Promise<{ config: ProductAutomationConfig; syncCouponBindings: boolean }> {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ServiceError(422, 'VALIDATION_FAILED', 'automation config must be an object');
     const source = input as Record<string, unknown>;
-    const defaults = defaultProductAutomationConfig();
-    const paid = normalizePaidRule(source.paidAutoDelivery, defaults.paidAutoDelivery);
-    const reprice = normalizeRepriceRule(source.unpaidAutoReprice, defaults.unpaidAutoReprice);
-    const gift = normalizeGiftRule(source.reviewGift, defaults.reviewGift);
-    const reminder = normalizeReminderRule(source.reviewReminder, defaults.reviewReminder);
-    if (paid.enabled && paid.couponBatchIds.length === 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'paidAutoDelivery requires at least one coupon batch');
-    if (gift.enabled && gift.couponBatchIds.length === 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'reviewGift requires at least one coupon batch');
-    await this.validateCouponBatches(adminId, product, [
-      { batchIds: paid.couponBatchIds, requireBuyerDeliverable: paid.enabled },
-      { batchIds: gift.couponBatchIds, requireBuyerDeliverable: gift.enabled },
-    ]);
-    return { paidAutoDelivery: paid, unpaidAutoReprice: reprice, reviewGift: gift, reviewReminder: reminder };
+    const next = structuredClone(base);
+    let syncCouponBindings = false;
+    if (hasRule(source, 'paidAutoDelivery')) {
+      const paid = normalizePaidRule(source.paidAutoDelivery, base.paidAutoDelivery);
+      if (paid.enabled && paid.couponBatchIds.length === 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'paidAutoDelivery requires at least one coupon batch');
+      await this.validateCouponBatches(adminId, product, [{ batchIds: paid.couponBatchIds, requireBuyerDeliverable: paid.enabled }]);
+      next.paidAutoDelivery = paid;
+      syncCouponBindings = true;
+    }
+    if (hasRule(source, 'unpaidAutoReprice')) next.unpaidAutoReprice = normalizeRepriceRule(source.unpaidAutoReprice, base.unpaidAutoReprice);
+    if (hasRule(source, 'reviewGift')) {
+      const gift = normalizeGiftRule(source.reviewGift, base.reviewGift);
+      if (gift.enabled && gift.couponBatchIds.length === 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'reviewGift requires at least one coupon batch');
+      await this.validateCouponBatches(adminId, product, [{ batchIds: gift.couponBatchIds, requireBuyerDeliverable: gift.enabled }]);
+      next.reviewGift = gift;
+      syncCouponBindings = true;
+    }
+    if (hasRule(source, 'reviewReminder')) next.reviewReminder = normalizeReminderRule(source.reviewReminder, base.reviewReminder);
+    return { config: next, syncCouponBindings };
   }
 
   private async validateCouponBatches(adminId: string, product: ProductRecord, rules: Array<{ batchIds: string[]; requireBuyerDeliverable: boolean }>): Promise<void> {
@@ -404,31 +411,20 @@ function parseExpectedVersions(value: unknown, productIds: string[]): Record<str
   return Object.fromEntries(productIds.map((productId) => [productId, parseVersion(source[productId])]));
 }
 
-function mergeAutomationConfig(base: ProductAutomationConfig, input: unknown): ProductAutomationConfig {
-  const source = asRecord(input);
-  const mergeRule = <T extends object>(current: T, next: unknown): T => next === undefined ? structuredClone(current) : { ...structuredClone(current), ...asRecord(next) } as T;
-  return {
-    paidAutoDelivery: mergeRule(base.paidAutoDelivery, source.paidAutoDelivery),
-    unpaidAutoReprice: mergeRule(base.unpaidAutoReprice, source.unpaidAutoReprice),
-    reviewGift: mergeRule(base.reviewGift, source.reviewGift),
-    reviewReminder: mergeRule(base.reviewReminder, source.reviewReminder),
-  };
-}
-
 function normalizePaidRule(value: unknown, fallback: ProductAutomationConfig['paidAutoDelivery']): ProductAutomationConfig['paidAutoDelivery'] {
   const source = asRecord(value);
-  return { enabled: booleanValue(source.enabled, fallback.enabled), couponBatchIds: stringArray(source.couponBatchIds), autoConfirm: booleanValue(source.autoConfirm, fallback.autoConfirm), maxAttempts: boundedInt(source.maxAttempts, fallback.maxAttempts, 1, 5), retryBackoffSeconds: boundedInt(source.retryBackoffSeconds, fallback.retryBackoffSeconds, 0, 86_400) };
+  return { enabled: booleanValue(source.enabled, fallback.enabled), couponBatchIds: stringArray(source.couponBatchIds, fallback.couponBatchIds), autoConfirm: booleanValue(source.autoConfirm, fallback.autoConfirm), maxAttempts: boundedInt(source.maxAttempts, fallback.maxAttempts, 1, 5), retryBackoffSeconds: boundedInt(source.retryBackoffSeconds, fallback.retryBackoffSeconds, 0, 86_400) };
 }
 function normalizeRepriceRule(value: unknown, fallback: ProductAutomationConfig['unpaidAutoReprice']): ProductAutomationConfig['unpaidAutoReprice'] {
   const source = asRecord(value);
   const targetPriceMinor = integer(source.targetPriceMinor, fallback.targetPriceMinor);
   if (targetPriceMinor < 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'targetPriceMinor must be non-negative');
   const message = source.message === undefined || source.message === null ? undefined : stringValue(source.message, 'message', 500);
-  return { enabled: booleanValue(source.enabled, fallback.enabled), mode: 'fixed', targetPriceMinor, message, maxAttempts: boundedInt(source.maxAttempts, fallback.maxAttempts, 1, 5), retryBackoffSeconds: boundedInt(source.retryBackoffSeconds, fallback.retryBackoffSeconds, 0, 86_400) };
+  return { enabled: booleanValue(source.enabled, fallback.enabled), mode: 'fixed', targetPriceMinor, message: source.message === undefined ? fallback.message : message, maxAttempts: boundedInt(source.maxAttempts, fallback.maxAttempts, 1, 5), retryBackoffSeconds: boundedInt(source.retryBackoffSeconds, fallback.retryBackoffSeconds, 0, 86_400) };
 }
 function normalizeGiftRule(value: unknown, fallback: ProductAutomationConfig['reviewGift']): ProductAutomationConfig['reviewGift'] {
   const source = asRecord(value);
-  return { enabled: booleanValue(source.enabled, fallback.enabled), couponBatchIds: stringArray(source.couponBatchIds), maxAttempts: boundedInt(source.maxAttempts, fallback.maxAttempts, 1, 5), retryBackoffSeconds: boundedInt(source.retryBackoffSeconds, fallback.retryBackoffSeconds, 0, 86_400) };
+  return { enabled: booleanValue(source.enabled, fallback.enabled), couponBatchIds: stringArray(source.couponBatchIds, fallback.couponBatchIds), maxAttempts: boundedInt(source.maxAttempts, fallback.maxAttempts, 1, 5), retryBackoffSeconds: boundedInt(source.retryBackoffSeconds, fallback.retryBackoffSeconds, 0, 86_400) };
 }
 function normalizeReminderRule(value: unknown, fallback: ProductAutomationConfig['reviewReminder']): ProductAutomationConfig['reviewReminder'] {
   const source = asRecord(value);
@@ -438,7 +434,8 @@ function normalizeReminderRule(value: unknown, fallback: ProductAutomationConfig
 }
 function asRecord(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function booleanValue(value: unknown, fallback: boolean): boolean { return value === undefined ? fallback : value === true; }
-function stringArray(value: unknown): string[] { if (value === undefined) return []; if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new ServiceError(422, 'VALIDATION_FAILED', 'couponBatchIds must be an array of strings'); return [...new Set(value.map((item) => item.trim()).filter(Boolean))]; }
+function hasRule(source: Record<string, unknown>, key: keyof ProductAutomationConfig): boolean { return Object.prototype.hasOwnProperty.call(source, key) && source[key] !== undefined; }
+function stringArray(value: unknown, fallback: string[] = []): string[] { if (value === undefined) return [...fallback]; if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new ServiceError(422, 'VALIDATION_FAILED', 'couponBatchIds must be an array of strings'); return [...new Set(value.map((item) => item.trim()).filter(Boolean))]; }
 function integer(value: unknown, fallback: number): number { const parsed = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : fallback; if (!Number.isSafeInteger(parsed)) throw new ServiceError(422, 'VALIDATION_FAILED', 'value must be an integer'); return parsed; }
 function boundedInt(value: unknown, fallback: number, min: number, max: number): number { const parsed = integer(value, fallback); if (parsed < min || parsed > max) throw new ServiceError(422, 'VALIDATION_FAILED', `value must be between ${min} and ${max}`); return parsed; }
 function stringValue(value: unknown, field: string, max: number): string { if (typeof value !== 'string' || value.trim().length > max) throw new ServiceError(422, 'VALIDATION_FAILED', `${field} must be a string of at most ${max} characters`); return value.trim(); }

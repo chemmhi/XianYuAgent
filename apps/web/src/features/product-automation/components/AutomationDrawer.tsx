@@ -57,7 +57,9 @@ export function AutomationDrawer({ open, product, accountLabel = '当前账号',
   };
   const save = async () => {
     if (!draft) return;
-    await onSave({ version: draft.version, delivery: draft.delivery, reprice: draft.reprice, gift: draft.gift, review: draft.review });
+    const patch: ProductAutomationUpdate = { version: draft.version };
+    patch[activeTab] = draft[activeTab];
+    await onSave(patch);
   };
 
   return (
