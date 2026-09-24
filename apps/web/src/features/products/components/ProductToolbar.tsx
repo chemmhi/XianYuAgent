@@ -40,7 +40,7 @@ export function ProductToolbar({ currentAccount, contextLoading, contextError, c
       <SearchField className="products-search" aria-label="搜索商品" value={filters.keyword ?? ''} onChange={(event) => onKeywordChange(event.target.value)} onClear={() => onKeywordChange('')} clearable placeholder="搜索商品名称或外部编号" />
       <SelectField aria-label="商品状态" className="products-status-select" value={filters.status ?? 'all'} onChange={(event) => onStatusChange(event.target.value as ProductStatus | 'all')} options={statuses} />
       {onBatchConfigure && <Button variant="ghost" className="products-batch-button" type="button" data-testid="batch-automation" onClick={onBatchConfigure} disabled={actionDisabled || selectedCount === 0}>批量配置自动化{selectedCount > 0 ? ` ${selectedCount}件` : ''}</Button>}
-      <Button variant="ghost" type="button" data-testid="refresh-products" onClick={onRefresh} disabled={phase === 'loading' || actionDisabled}>刷新本地</Button>
+      <Button variant="ghost" type="button" data-testid="refresh-products" onClick={onRefresh} disabled={phase === 'loading' || actionDisabled}>刷新</Button>
       <Button variant="ghost" type="button" data-testid="sync-products" onClick={onSync} disabled={syncing || actionDisabled}>{syncing ? '同步中…' : '同步闲鱼'}</Button>
       <Button variant="primary" type="button" data-testid="publish-product" onClick={onCreate} disabled={actionDisabled}>发布商品</Button>
     </div>

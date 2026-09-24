@@ -12,12 +12,20 @@ export function toOrdersLoadError(error: unknown): OrdersLoadError {
   return { code: 'UNKNOWN', message: error instanceof Error ? error.message : '订单列表加载失败，请重试。', retryable: true };
 }
 
+export function toOrdersSyncError(error: unknown): OrdersLoadError {
+  const mapped = toOrdersLoadError(error);
+  if (mapped.code === 'FORBIDDEN' || mapped.code === 'NOT_FOUND') return mapped;
+  return { ...mapped, message: mapped.code === 'NETWORK_ERROR' ? '订单同步失败，请检查连接后重试。' : '订单同步失败，请稍后重试。' };
+}
+
 export interface OrdersController {
   filters: OrderFilters;
   setFilters: (filters: OrderFilters | ((previous: OrderFilters) => OrderFilters)) => void;
   setKeyword: (keyword: string) => void;
   reload: () => Promise<void>;
   refreshFromXianyu: () => Promise<void>;
+  syncing: boolean;
+  syncError: OrdersLoadError | null;
   openOrder: (orderNo: string) => Promise<void>;
   closeOrder: () => void;
   state: OrderQueryState;
@@ -29,6 +37,8 @@ export function useOrdersController(options: { api?: OrdersApi; initialFilters?:
   const [filters, setFilters] = useState<OrderFilters>({ page: 1, pageSize: 20, sortBy: 'createdAt', sortOrder: 'desc', ...options.initialFilters });
   const [state, setState] = useState<OrderQueryState>({ phase: 'idle', data: null, error: null });
   const [detail, setDetail] = useState<OrderDetailState>({ phase: 'idle', data: null, error: null });
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<OrdersLoadError | null>(null);
   const requestId = useRef(0);
   const detailRequestId = useRef(0);
   const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);
@@ -58,7 +68,18 @@ export function useOrdersController(options: { api?: OrdersApi; initialFilters?:
     void reload();
   }, [filters.accountId, filtersKey, reload]);
 
-  const refreshFromXianyu = useCallback(async () => { await api.refresh(filters.accountId); await reload(); }, [api, filters.accountId, reload]);
+  const refreshFromXianyu = useCallback(async () => {
+    setSyncing(true);
+    setSyncError(null);
+    try {
+      await api.refresh(filters.accountId);
+      await reload();
+    } catch (error) {
+      setSyncError(toOrdersSyncError(error));
+    } finally {
+      setSyncing(false);
+    }
+  }, [api, filters.accountId, reload]);
   const openOrder = useCallback(async (orderNo: string) => {
     const current = ++detailRequestId.current;
     setDetail({ phase: 'loading', orderNo, data: null, error: null });
@@ -75,5 +96,5 @@ export function useOrdersController(options: { api?: OrdersApi; initialFilters?:
   const closeOrder = useCallback(() => { detailRequestId.current += 1; setDetail({ phase: 'idle', data: null, error: null }); }, []);
   const setKeyword = useCallback((keyword: string) => setFilters((previous) => ({ ...previous, keyword, page: 1 })), []);
 
-  return { filters, setFilters, setKeyword, reload, refreshFromXianyu, openOrder, closeOrder, state, detail };
+  return { filters, setFilters, setKeyword, reload, refreshFromXianyu, syncing, syncError, openOrder, closeOrder, state, detail };
 }

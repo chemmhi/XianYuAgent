@@ -14,6 +14,7 @@ import { createMockProductAutomationApi, type ProductAutomationApi } from '../..
 import { useProductAutomationController } from '../../product-automation/controller';
 import { AutomationDrawer } from '../../product-automation/components/AutomationDrawer';
 import { BatchAutomationDialog } from '../../product-automation/components/BatchAutomationDialog';
+import { Toast } from '../../../shared/ui/Toast';
 import './products.css';
 import '../../coupons/components/coupons.css';
 import '../../product-automation/product-automation.css';
@@ -31,9 +32,17 @@ export function ProductsPage({ api: providedApi, automationApi: providedAutomati
   const [automationProductId, setAutomationProductId] = useState<string | undefined>();
   const [batchOpen, setBatchOpen] = useState(false);
   const [automationNotice, setAutomationNotice] = useState<string | null>(null);
+  const [syncToast, setSyncToast] = useState<string | null>(null);
   const [automationSummaries, setAutomationSummaries] = useState<Record<string, { label: string; detail: string; tone: 'ok' | 'warn' | 'muted' }>>({});
   const { setFilters } = controller;
   const automationController = useProductAutomationController({ api: automationApi, accountId: currentAccountId ?? undefined, productId: automationProductId });
+
+  useEffect(() => {
+    if (!controller.syncError) return;
+    setSyncToast(controller.syncError.message);
+    const timeout = window.setTimeout(() => setSyncToast(null), 5000);
+    return () => window.clearTimeout(timeout);
+  }, [controller.syncError]);
 
   useEffect(() => {
     setFilters((previous) => previous.accountId === scopedAccountId ? previous : { ...previous, accountId: scopedAccountId, page: 1 });
@@ -70,13 +79,14 @@ export function ProductsPage({ api: providedApi, automationApi: providedAutomati
       <article className="card panel products-panel">
         <ProductToolbar currentAccount={currentAccount} contextLoading={accountsLoading} contextError={accountsError} contextMissing={contextMissing} filters={controller.filters} phase={controller.state.phase} syncing={controller.mutation.phase === 'saving'} selectedCount={selectedProductIds.length} onKeywordChange={controller.setKeyword} onStatusChange={(status) => controller.setFilters((previous) => ({ ...previous, status, page: 1 }))} onRefresh={controller.reload} onSync={() => { if (currentAccountId) void controller.syncFromXianyu(currentAccountId); }} onCreate={() => { if (!currentAccountId) return; controller.clearMutation(); setDrawer({ mode: 'create' }); }} onChooseAccount={() => { window.history.pushState({}, '', buildAccountsReauthorizePath()); window.dispatchEvent(new PopStateEvent('popstate')); }} onBatchConfigure={() => setBatchOpen(true)} />
         {controller.mutation.error && <div className="products-inline-error" role="alert">{controller.mutation.error.message}</div>}
-        {controller.state.phase === 'success' && pageData && <ProductTable products={products} page={pageData.page} totalPages={pageData.totalPages} total={pageData.total} sortBy={controller.filters.sortBy ?? 'xianyuOrder'} sortOrder={controller.filters.sortOrder ?? 'asc'} onSortChange={(sortBy, sortOrder) => controller.setFilters((previous) => ({ ...previous, sortBy, sortOrder, page: 1 }))} onPageChange={(page) => controller.setFilters((previous) => ({ ...previous, page }))} onOpen={controller.openProduct} onOpenXianyuDetail={controller.openXianyuDetail} selectedIds={selectedProductIds} onToggleSelected={(productId) => setSelectedProductIds((previous) => previous.includes(productId) ? previous.filter((id) => id !== productId) : [...previous, productId])} onToggleAll={(checked) => setSelectedProductIds(checked ? products.map((product) => product.id) : [])} onOpenAutomation={(productId) => { setAutomationNotice(null); setAutomationProductId(productId); }} automationSummary={(product) => automationSummaries[product.id] ?? { label: '读取中…', detail: '正在读取规则', tone: 'muted' }} />}
+        {controller.state.phase === 'success' && pageData && <ProductTable products={products} page={pageData.page} totalPages={pageData.totalPages} total={pageData.total} sortBy={controller.filters.sortBy ?? 'xianyuOrder'} sortOrder={controller.filters.sortOrder ?? 'asc'} onSortChange={(sortBy, sortOrder) => controller.setFilters((previous) => ({ ...previous, sortBy, sortOrder, page: 1 }))} onPageChange={(page) => controller.setFilters((previous) => ({ ...previous, page }))} onOpen={controller.openProduct} onOpenXianyuDetail={controller.openXianyuDetail} selectedIds={selectedProductIds} onToggleSelected={(productId) => setSelectedProductIds((previous) => previous.includes(productId) ? previous.filter((id) => id !== productId) : [...previous, productId])} onToggleAll={(checked) => setSelectedProductIds(checked ? products.map((product) => product.id) : [])} onOpenAutomation={(productId) => { setAutomationNotice(null); setAutomationProductId(productId); }} automationSummary={(product) => automationSummaries[product.id] ?? { label: '读取中...', detail: '正在读取规则', tone: 'muted' }} />}
         <ProductListStateView phase={controller.state.phase} error={controller.state.error} onRetry={controller.reload} accountSelectionRequired={contextMissing} />
       </article>
       <ProductDetailPanel state={controller.detail} onClose={controller.closeProduct} onRetry={() => controller.detail.productId && controller.openProduct(controller.detail.productId)} onEdit={(product) => { controller.closeProduct(); controller.clearMutation(); setDrawer({ mode: 'edit', product }); }} />
       <XianyuDetailDrawer state={controller.xianyuDetail} onClose={controller.closeXianyuDetail} onRetry={() => controller.xianyuDetail.productId && controller.openXianyuDetail(controller.xianyuDetail.productId)} onSync={() => controller.xianyuDetail.productId && controller.syncXianyuDetail(controller.xianyuDetail.productId)} onChooseAccount={() => { window.history.pushState({}, '', buildAccountsReauthorizePath(currentAccountId)); window.dispatchEvent(new PopStateEvent('popstate')); }} />
       {drawer && <ProductDrawer mode={drawer.mode} accountId={currentAccountId} product={drawer.product} error={controller.mutation.error} saving={controller.mutation.phase === 'saving'} onClose={() => setDrawer(null)} onCreate={async (values) => Boolean(await controller.createDraft(values))} onUpdate={async (productId, patch, configVersion) => Boolean(await controller.updateDraft(productId, patch, configVersion))} />}
-      {automationNotice && <div className="automation-toast" role="status">{automationNotice}</div>}
+      {automationNotice && <Toast message={automationNotice} tone="success" onDismiss={() => setAutomationNotice(null)} />}
+      {syncToast && <Toast message={syncToast} tone="error" onDismiss={() => setSyncToast(null)} />}
       <AutomationDrawer open={Boolean(automationProductId)} product={products.find((product) => product.id === automationProductId) ?? null} accountLabel={currentAccount?.displayName ?? '当前账号'} config={automationController.config} coupons={automationController.coupons} loadPhase={automationController.loadPhase} savePhase={automationController.savePhase} error={automationController.error} onClose={() => setAutomationProductId(undefined)} onSave={async (input) => { const result = await automationController.save(input); if (result) { await controller.reload(); setAutomationNotice('商品自动化配置已保存'); setAutomationProductId(undefined); } return result; }} />
       <BatchAutomationDialog open={batchOpen} productIds={selectedProductIds} error={automationController.error} onCancel={() => setBatchOpen(false)} onSave={async (input) => { const result = await automationController.saveBatch(input); if (result) { setAutomationNotice(`已保存 ${result.updatedCount} 件商品的自动化规则`); setBatchOpen(false); setSelectedProductIds([]); } return result; }} />
       {accountsError && <div className="products-inline-error" role="alert">账号上下文加载失败：{accountsError}</div>}

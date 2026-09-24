@@ -22,7 +22,8 @@ describe('ProductToolbar', () => {
 
     expect(html).not.toContain('products-total');
     expect(html).not.toContain('共 0 件');
-    expect(html).toContain('刷新本地');
+    expect(html).toContain('刷新');
+    expect(html).not.toContain('刷新本地');
     expect(html).toContain('aria-label="清空搜索"');
   });
 });

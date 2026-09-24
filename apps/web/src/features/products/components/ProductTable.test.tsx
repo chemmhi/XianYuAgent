@@ -49,4 +49,27 @@ describe('ProductTable', () => {
     expect(css).toContain('.products-table-region { display: flex; flex: 1 1 auto; min-height: 0;');
     expect(css).toContain('.products-table-scroll { flex: 1 1 auto; min-height: 0; overflow: auto;');
   });
+
+  it('reserves a stable two-line automation status slot while configs load', () => {
+    const html = renderToStaticMarkup(createElement(ProductTable, {
+      products: [product],
+      page: 1,
+      totalPages: 1,
+      total: 1,
+      sortBy: 'xianyuOrder',
+      sortOrder: 'asc',
+      onSortChange: vi.fn(),
+      onPageChange: vi.fn(),
+      onOpen: vi.fn(),
+      onOpenXianyuDetail: vi.fn(),
+      selectedIds: [],
+      onToggleSelected: vi.fn(),
+      onToggleAll: vi.fn(),
+      onOpenAutomation: vi.fn(),
+    }));
+    const css = readFileSync(fileURLToPath(new URL('./products.css', import.meta.url)), 'utf8');
+    expect(html).toContain('读取中...');
+    expect(html).toContain('正在读取规则');
+    expect(css).toContain('min-height: 42px');
+  });
 });

@@ -66,6 +66,7 @@ export interface ProductsController {
   createDraft: (input: ProductDraftInput) => Promise<ProductVM | null>;
   updateDraft: (productId: string, patch: ProductDraftPatch, configVersion: number) => Promise<ProductVM | null>;
   syncFromXianyu: (accountId: string) => Promise<boolean>;
+  syncError: ProductMutationError | null;
   clearMutation: () => void;
   state: ProductsQueryState;
   detail: ProductDetailState;
@@ -80,6 +81,7 @@ export function useProductsController(options: { api?: ProductsApi; initialFilte
   const [detail, setDetail] = useState<ProductDetailState>({ phase: 'idle', data: null, error: null });
   const [xianyuDetail, setXianyuDetail] = useState<XianyuDetailState>({ phase: 'idle', data: null, error: null });
   const [mutation, setMutation] = useState<ProductsMutationState>({ phase: 'idle', error: null });
+  const [syncError, setSyncError] = useState<ProductMutationError | null>(null);
   const requestId = useRef(0);
   const detailRequestId = useRef(0);
   const xianyuDetailRequestId = useRef(0);
@@ -178,6 +180,7 @@ export function useProductsController(options: { api?: ProductsApi; initialFilte
     }
   }, [productsApi, reload]);
   const syncFromXianyu = useCallback(async (accountId: string) => {
+    setSyncError(null);
     setMutation({ phase: 'saving', error: null });
     try {
       await productsApi.syncFromXianyu(accountId);
@@ -185,11 +188,13 @@ export function useProductsController(options: { api?: ProductsApi; initialFilte
       await reload();
       return true;
     } catch (error) {
-      setMutation({ phase: 'error', error: toProductsMutationError(error) });
+      const normalized = toProductsMutationError(error);
+      setSyncError(normalized);
+      setMutation({ phase: 'error', error: normalized });
       return false;
     }
   }, [productsApi, reload]);
   const clearMutation = useCallback(() => setMutation({ phase: 'idle', error: null }), []);
 
-  return { filters, setFilters, setKeyword, reload, openProduct, closeProduct, openXianyuDetail, syncXianyuDetail, closeXianyuDetail, createDraft, updateDraft, syncFromXianyu, clearMutation, state, detail, xianyuDetail, mutation };
+  return { filters, setFilters, setKeyword, reload, openProduct, closeProduct, openXianyuDetail, syncXianyuDetail, closeXianyuDetail, createDraft, updateDraft, syncFromXianyu, syncError, clearMutation, state, detail, xianyuDetail, mutation };
 }

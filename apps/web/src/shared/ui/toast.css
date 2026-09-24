@@ -1,0 +1,7 @@
+.app-toast { position: fixed; right: 22px; bottom: 22px; z-index: 70; display: flex; align-items: center; gap: 12px; max-width: min(420px, calc(100vw - 32px)); padding: 11px 13px; border: 1px solid var(--border); border-radius: 9px; background: #fff; color: var(--text); font-size: 12px; line-height: 1.5; font-weight: 700; box-shadow: 0 10px 24px rgba(17,24,39,.12); }
+.app-toast-error { border-color: rgba(180,35,24,.22); background: var(--danger-bg); color: var(--danger); }
+.app-toast-success { border-color: var(--success-border); background: var(--success-bg); color: var(--success); }
+.app-toast-info { border-color: #C8DCEE; background: var(--soft-blue-bg); color: var(--link); }
+.app-toast-dismiss { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: currentColor; font-size: 16px; line-height: 1; cursor: pointer; }
+.app-toast-dismiss:hover { background: rgba(17,24,39,.08); }
+@media (max-width: 900px) { .app-toast { right: 16px; bottom: 16px; left: 16px; max-width: none; justify-content: space-between; } }
