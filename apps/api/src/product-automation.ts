@@ -151,11 +151,11 @@ export interface AutomationOrderSnapshot extends OrderRecord {
 }
 
 export interface AutomationExecutionPort {
-  reserveCoupon(input: { adminId?: string; accountId: string; productId?: string; itemId?: string; itemTitle?: string; batchIds: string[]; quantity: number; executionKey: string; purpose: 'delivery' | 'gift' }): Promise<{ reservationId: string; quantity: number }>;
+  reserveCoupon(input: { adminId?: string; accountId: string; productId?: string; itemId?: string; itemTitle?: string; skuSpec?: string; batchIds: string[]; quantity: number; executionKey: string; purpose: 'delivery' | 'gift' }): Promise<{ reservationId: string; quantity: number; noLogisticsForm?: boolean; tradeText?: string }>;
   sendCoupon(input: { adminId?: string; accountId: string; productId?: string; itemId?: string; itemTitle?: string; orderNo: string; reservationId: string; executionKey: string; purpose: 'delivery' | 'gift' }): Promise<AutomationExternalResult>;
   commitCoupon(input: { adminId?: string; reservationId: string; executionKey: string }): Promise<void>;
   releaseCoupon(input: { adminId?: string; reservationId: string; executionKey: string; reason: string }): Promise<void>;
-  confirmShipment(input: { adminId?: string; accountId: string; productId?: string; itemId?: string; itemTitle?: string; orderNo: string; executionKey: string }): Promise<AutomationExternalResult>;
+  confirmShipment(input: { adminId?: string; accountId: string; productId?: string; itemId?: string; itemTitle?: string; orderNo: string; executionKey: string; noLogisticsForm?: boolean; tradeText?: string }): Promise<AutomationExternalResult>;
   repriceOrder(input: { adminId?: string; accountId: string; productId?: string; itemId?: string; itemTitle?: string; orderNo: string; targetPriceMinor: number; executionKey: string }): Promise<AutomationExternalResult>;
   sendText(input: { adminId?: string; accountId: string; productId?: string; itemId?: string; itemTitle?: string; conversationId: string; text: string; executionKey: string }): Promise<AutomationExternalResult>;
   persistReviewFact(input: { adminId?: string; accountId: string; productId?: string; itemId?: string; itemTitle?: string; orderNo: string; eventId: string; executionKey: string }): Promise<{ created: boolean }>;
@@ -235,10 +235,19 @@ export class AutomationWorkflowService {
       if (input.order.paymentStatus !== 'paid') return skipped(key, 'order_not_paid');
       if (input.order.deliveryStatus === 'delivered') return skipped(key, 'already_delivered');
       const quantity = Math.max(1, Math.trunc(input.order.quantity ?? 1));
-      const reservation = await this.port.reserveCoupon({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, batchIds: rule.couponBatchIds, quantity, executionKey: key, purpose: 'delivery' });
+      let reservation: Awaited<ReturnType<AutomationExecutionPort['reserveCoupon']>>;
+      try {
+        reservation = await this.port.reserveCoupon({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, skuSpec: input.order.skuSpec, batchIds: rule.couponBatchIds, quantity, executionKey: key, purpose: 'delivery' });
+      } catch (error) {
+        return failed(key, failureReason(error, 'coupon_reservation_failed'));
+      }
       if (reservation.quantity < quantity) {
         await this.port.releaseCoupon({ adminId: input.adminId, reservationId: reservation.reservationId, executionKey: key, reason: 'insufficient_inventory' });
         return failed(key, 'insufficient_inventory');
+      }
+      if (reservation.noLogisticsForm && !rule.autoConfirm) {
+        await this.port.releaseCoupon({ adminId: input.adminId, reservationId: reservation.reservationId, executionKey: key, reason: 'no_logistics_requires_auto_confirm' });
+        return failed(key, 'no_logistics_requires_auto_confirm');
       }
       const sent = await this.port.sendCoupon({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, reservationId: reservation.reservationId, executionKey: key, purpose: 'delivery' });
       if (sent.status === 'unknown') {
@@ -256,7 +265,7 @@ export class AutomationWorkflowService {
         return { status: 'manual_review', executionKey: key, reason: failureReason(error, 'coupon_commit_unknown'), externalRef: sent.externalRef, sentQuantity: reservation.quantity };
       }
       if (!rule.autoConfirm) return { status: 'succeeded', executionKey: key, externalRef: sent.externalRef, sentQuantity: reservation.quantity };
-      const confirmed = await this.port.confirmShipment({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key });
+      const confirmed = await this.port.confirmShipment({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key, noLogisticsForm: reservation.noLogisticsForm, tradeText: reservation.tradeText });
       if (confirmed.status === 'unknown') {
         await this.port.markManualReview({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key, reason: 'shipment_confirmation_unknown' });
         return { status: 'manual_review', executionKey: key, reason: confirmed.errorCode ?? 'shipment_confirmation_unknown', externalRef: sent.externalRef, sentQuantity: reservation.quantity };
@@ -298,7 +307,12 @@ export class AutomationWorkflowService {
       const fact = await this.port.persistReviewFact({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, eventId: input.eventId, executionKey: key });
       if (!fact.created && !isRetry) return skipped(key, 'review_already_recorded');
       const quantity = Math.max(1, Math.trunc(input.order.quantity ?? 1));
-      const reservation = await this.port.reserveCoupon({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, batchIds: rule.couponBatchIds, quantity, executionKey: key, purpose: 'gift' });
+      let reservation: Awaited<ReturnType<AutomationExecutionPort['reserveCoupon']>>;
+      try {
+        reservation = await this.port.reserveCoupon({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, skuSpec: input.order.skuSpec, batchIds: rule.couponBatchIds, quantity, executionKey: key, purpose: 'gift' });
+      } catch (error) {
+        return failed(key, failureReason(error, 'coupon_reservation_failed'));
+      }
       if (reservation.quantity < quantity) {
         await this.port.releaseCoupon({ adminId: input.adminId, reservationId: reservation.reservationId, executionKey: key, reason: 'insufficient_inventory' });
         return failed(key, 'insufficient_inventory');

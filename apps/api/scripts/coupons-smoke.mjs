@@ -31,7 +31,7 @@ try {
 
   const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
   const imageDataUrl = `data:image/png;base64,${imageBytes.toString('base64')}`;
-  const created = await request('/api/v1/coupons/batches', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-create-1' }, body: JSON.stringify({ accountId: account.id, label: 'Demo cards', purpose: 'text', deliveryScope: 'operator_only', metadata: { description: 'Demo description', textContent: 'Demo content', delaySeconds: 5, dockable: true, price: '9.90', imageUrls: [imageDataUrl] }, quarkUrl: 'https://quark.example/demo', extractionCode: 'extract-123' }) });
+  const created = await request('/api/v1/coupons/batches', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-create-1' }, body: JSON.stringify({ accountId: account.id, label: 'Demo cards', purpose: 'text', deliveryScope: 'operator_only', metadata: { description: 'Demo description', textContent: 'Demo content', delaySeconds: 5, dockable: true, price: '9.90', imageUrls: [imageDataUrl] } }) });
   assert.equal(created.response.status, 201);
   const batchId = created.body.data.batchId;
   assert.match(String(batchId), /^\d+$/);
@@ -39,6 +39,8 @@ try {
   assert.equal(created.body.data.availableCount, 0);
   assert.equal(created.body.data.stockAlert, 'exhausted');
   assert.equal(created.body.data.purpose, 'text');
+  assert.equal('quarkUrl' in created.body.data, false);
+  assert.equal('extractCode' in created.body.data, false);
   assert.equal(created.body.data.metadata.imageUrls.length, 1);
   assert.match(created.body.data.metadata.imageUrls[0], /^\/api\/v1\/coupons\/batches\/\d+\/assets\//);
   assert.equal(created.body.data.metadata.imageUrls[0].startsWith('data:image/'), false);

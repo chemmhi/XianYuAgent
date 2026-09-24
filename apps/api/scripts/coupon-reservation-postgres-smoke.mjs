@@ -24,7 +24,8 @@ try {
   reservationIds.push(first.reservationId);
   assert.equal(first.reservationId, second.reservationId);
   assert.equal(first.items.length, 1);
-  assert.equal(first.items[0].extractionCode, '1357');
+  assert.equal('quarkUrl' in first.items[0], false);
+  assert.equal('extractionCode' in first.items[0], false);
 
   const oversell = await Promise.allSettled([
     runtime.store.reserveCoupon({ ...reserveInput, executionKey: `pg-a-${suffix}` }),

@@ -22,8 +22,8 @@ test('coupon reservation is idempotent under concurrent same-key calls and retur
   assert.equal(first.reservationId, second.reservationId);
   assert.deepEqual(first.items, second.items);
   assert.equal(first.items[0]?.batchLabel, 'Reservation Batch');
-  assert.equal(first.items[0]?.quarkUrl, 'https://quark.example/reservation');
-  assert.equal(first.items[0]?.extractionCode, '2468');
+  assert.equal('quarkUrl' in (first.items[0] ?? {}), false);
+  assert.equal('extractionCode' in (first.items[0] ?? {}), false);
   const batch = await value.store.getCouponBatch(value.admin.id, value.batch.id);
   assert.equal(batch?.items?.filter((item) => item.status === 'available').length, 1);
   assert.equal(batch?.items?.filter((item) => item.status === 'reserved').length, 1);

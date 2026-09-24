@@ -122,10 +122,11 @@ export class CouponService {
     if (!['system_only', 'operator_only', 'buyer_deliverable'].includes(input.deliveryScope)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid deliveryScope');
     try {
       const imageUrls = input.metadata?.imageUrls ?? [];
-      const batch = await this.store.createCouponBatch({ ...input, metadata: this.couponAssets.withoutImages(input.metadata) });
+      const { quarkUrl: _quarkUrl, extractionCode: _extractionCode, requestId: _requestId, traceId: _traceId, ...batchInput } = input;
+      const batch = await this.store.createCouponBatch({ ...batchInput, metadata: this.couponAssets.withoutImages(input.metadata) });
       if (imageUrls.length > 0) await this.couponAssets.replaceImages({ adminId: input.adminId, batch, imageUrls });
       const hydrated = await this.store.getCouponBatch(input.adminId, batch.id) ?? batch;
-      await this.audit({ actorId: input.adminId, action: 'coupon.batch.created', targetRef: hydrated.id, requestId: input.requestId, traceId: input.traceId, payload: { purpose: hydrated.purpose, deliveryScope: hydrated.deliveryScope, hasQuarkUrl: Boolean(hydrated.quarkUrl), hasExtractionCode: Boolean(hydrated.extractionCode), imageCount: hydrated.assets?.length ?? 0 }, accountId: hydrated.accountId });
+      await this.audit({ actorId: input.adminId, action: 'coupon.batch.created', targetRef: hydrated.id, requestId: input.requestId, traceId: input.traceId, payload: { purpose: hydrated.purpose, deliveryScope: hydrated.deliveryScope, imageCount: hydrated.assets?.length ?? 0 }, accountId: hydrated.accountId });
       return this.toBatchView(hydrated, true);
     } catch (error) { throw mapCouponStoreError(error); }
   }
@@ -136,7 +137,8 @@ export class CouponService {
     if (input.patch.status && !['draft', 'active', 'paused', 'closed', 'exhausted', 'voided'].includes(input.patch.status)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon batch status');
     try {
       const imageUrls = input.patch.metadata?.imageUrls;
-      const patch = input.patch.metadata === undefined ? input.patch : { ...input.patch, metadata: this.couponAssets.withoutImages(input.patch.metadata) };
+      const { quarkUrl: _quarkUrl, extractionCode: _extractionCode, ...safePatch } = input.patch;
+      const patch = safePatch.metadata === undefined ? safePatch : { ...safePatch, metadata: this.couponAssets.withoutImages(safePatch.metadata) };
       const batch = await this.store.updateCouponBatch({ ...input, patch });
       if (!batch) throw new ServiceError(404, 'NOT_FOUND', 'coupon batch not found');
       if (imageUrls !== undefined) {
@@ -218,7 +220,7 @@ export class CouponService {
       purpose: input.purpose,
       deliveryScope: found.batch.deliveryScope,
       accountIds: [found.batch.accountId],
-      content: allowed ? { body: found.item.content, quarkUrl: found.batch.quarkUrl, extractionCode: found.batch.extractionCode } : undefined,
+      content: allowed ? { body: found.item.content } : undefined,
       access: { allowed, purpose: input.purpose, auditRef, ...(denialReason ? { denialReason } : {}) },
       inventoryStatus: found.batch.status === 'voided' ? 'void' : found.item.status === 'consumed' ? 'delivered' : found.item.status,
     };
@@ -240,7 +242,7 @@ export class CouponService {
     const listMetadata = { description: metadata.description, delaySeconds: metadata.delaySeconds, deliveryCount: metadata.deliveryCount, useNoLogisticsForm: metadata.useNoLogisticsForm, dockable: metadata.dockable, price: metadata.price, feePayer: metadata.feePayer, minPrice: metadata.minPrice, dockVisibility: metadata.dockVisibility, multiSpec: metadata.multiSpec, specName: metadata.specName, specValue: metadata.specValue };
     const publicBatchId = this.publicBatchId(batch);
     const bindingViews = (batch.bindings ?? []).map((binding) => this.toBindingView(binding, publicBatchId));
-    const result: Record<string, unknown> = { batchId: publicBatchId, id: publicBatchId, accountId: batch.accountId, label: batch.label, purpose: batch.purpose, deliveryScope: batch.deliveryScope, quarkUrl: batch.quarkUrl, extractCode: batch.extractionCode, totalCount, availableCount, reservedCount, consumedCount, stockAlert, status: batch.status, version: batch.version, updatedAt: batch.updatedAt, createdAt: batch.createdAt, metadata: detail ? detailMetadata : listMetadata, contentPreview: { text: metadata.textContent ? metadata.textContent.slice(0, 140) : undefined, dataRemaining: availableCount, apiUrl: metadata.apiConfig?.url, imageUrls }, productBindings: bindingViews.filter((binding) => binding.status === 'active') };
+    const result: Record<string, unknown> = { batchId: publicBatchId, id: publicBatchId, accountId: batch.accountId, label: batch.label, purpose: batch.purpose, deliveryScope: batch.deliveryScope, totalCount, availableCount, reservedCount, consumedCount, stockAlert, status: batch.status, version: batch.version, updatedAt: batch.updatedAt, createdAt: batch.createdAt, metadata: detail ? detailMetadata : listMetadata, contentPreview: { text: metadata.textContent ? metadata.textContent.slice(0, 140) : undefined, dataRemaining: availableCount, apiUrl: metadata.apiConfig?.url, imageUrls }, productBindings: bindingViews.filter((binding) => binding.status === 'active') };
     if (detail) result.items = items.map((item) => this.toItemView(item, publicBatchId));
     if (detail) result.bindings = bindingViews;
     return result;

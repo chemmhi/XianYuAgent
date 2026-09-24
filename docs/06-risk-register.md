@@ -216,3 +216,11 @@
 | S5-RISK-039 | 设计稿与实现截图的严格 pixel diff 仍有 14.39%–25.57% 不同像素，主要集中在字体抗锯齿、表格列宽和文案基线 | P2 | 继续以固定 1440×900 / 390×844 运行 Chrome/CDP，对每个状态单独修复几何和字体偏差；未达到批准阈值前保持视觉验收失败 | OPEN |
 | S5-RISK-040 | `npm --workspace apps/api run test` 的订单 Cookie smoke，以及 Web 全量测试中的 Workspace/Dashboard 契约测试曾失败 | P2 | 已补 `_m_h5_tk` 前缀兼容、Dashboard provider 测试夹具和 Workspace CSS 断言归一化；API 全量与 Web 83 files / 279 tests 已复跑通过 | CLOSED |
 | S5-RISK-041 | 卖家风格提示词优化的真实 PostgreSQL + 模型 provider 端到端尚未在带凭证环境执行 | P2 | 使用隔离测试数据库和可控模型 provider 执行完整清洗 → 抽样 → 逐题生成 → 评分 → 修订 → 追踪落盘链路，并保留 98 分门禁证据 | OPEN |
+
+### 2026-09-24 卡券配置驱动发货链路
+
+| 编号 | 风险 | 等级 | 应对 | 状态 |
+| --- | --- | --- | --- | --- |
+| S5-RISK-042 | 真实闲鱼账号的确认发货、IM 发图和外部 API 组合仍未在生产账号执行 | P1 | 继续使用受控 adapter/E2E 证明业务结果；上线前在隔离账号补齐 MTOP/IM mutation、超时/unknown、回滚和人工复核证据 | OPEN |
+| S5-RISK-043 | 历史 `coupon_batches.quark_url` / `extract_code_ciphertext` 字段仍存在于存储 schema，可能被旧调用方误读 | P2 | 公开创建/更新、reservation 交付对象和消息格式已移除这些字段；后续单独做兼容窗口清理和迁移，不在本切片扩大破坏性 schema 变更 | MITIGATED |
+| S5-RISK-044 | 配置型卡券内部仍借用 `coupon_items` 做 reservation/幂等承载，名称上保留库存语义 | P2 | 配置型卡券自动生成可消费占位条目且不要求手工导入；前端配置和自动化摘要不展示库存要求；后续可独立拆分配置消费与批量数据条目模型 | MITIGATED |

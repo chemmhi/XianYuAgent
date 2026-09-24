@@ -5,7 +5,7 @@ import { buildCouponPayload, CouponCreateModal, type CouponCreateFormState, vali
 import type { CouponBatchVM } from '../types';
 
 const baseForm: CouponCreateFormState = {
-  accountId: 'account-001', label: '', purpose: 'text', deliveryScope: 'operator_only', quarkUrl: '', extractionCode: '', textContent: '', dataContent: '',
+  accountId: 'account-001', label: '', purpose: 'text', deliveryScope: 'operator_only', textContent: '', dataContent: '',
   apiUrl: '', apiMethod: 'GET', apiTimeout: 60, apiHeaders: '', apiParams: '', apiResponseField: '', imageUrls: [], delaySeconds: 0, useNoLogisticsForm: false,
   deliveryCount: 0, description: '', feePayer: '', minPrice: '', dockVisibility: 'public', multiSpec: false, specName: '', specValue: '',
 };

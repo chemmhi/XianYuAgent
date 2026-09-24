@@ -587,3 +587,13 @@
 | S5-R112 | 质量 / 端到端 | 真实 API 模式下，商品列表→自动化抽屉→卡券选择→保存→重开是否通过 | root | PASS（受控环境） | `npm --workspace apps/web run test:e2e:chrome:product-automation`；Chrome/CDP live E2E |
 
 本轮结论：商品自动化保存契约已改为按规则 patch；单流程保存只校验当前规则并保留其余配置，受控 API/Web/Chrome/CDP 门禁通过。真实闲鱼外部 mutation 和严格视觉像素 diff 仍沿用既有开放边界。
+
+### 2026-09-24：卡券配置驱动发货链路迁移与耦合清理
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R113 | 业务 / 验收 | 固定文字、批量数据、API、图片四类卡券及备注变量、延迟、多规格是否能被正常发货链路消费；无需邮寄是否只对真实发货生效 | root | PASS（受控 E2E） | `apps/api/src/coupon-delivery.ts`、`apps/api/src/product-automation-xianyu.ts`、`apps/api/scripts/product-automation-coupon-delivery-e2e.test.ts` 7/7 |
+| S5-R114 | 架构 / 数据流 | 配置驱动卡券是否不再要求手工导入条目；夸克链接/提取码是否从 reservation 交付对象移除；Memory/PostgreSQL 是否保持一致 | root | PASS | `store-memory.ts`、`store-postgres.ts`、`domain.ts`；reservation Memory 6/6；PostgreSQL reservation smoke |
+| S5-R115 | 质量 / 构建 / 回归 | API/Web 类型检查、构建、商品自动化回归和 Web 全量单测是否通过 | root | PASS（受控环境） | `npm run typecheck:api`、`npm run typecheck:web`、`npm run build:api`、`npm run build:web`、`npm --workspace apps/api run test:product-automation`、Web 84 files / 291 tests、`git diff --check` |
+
+本轮结论：参考项目的四类配置消费逻辑已迁移到统一适配器；公开创建/更新和交付 reservation 不再传递夸克字段，配置型卡券无需先导入“库存”条目即可执行。评价赠品即使勾选无需邮寄也只发送 IM，不调用闲鱼确认发货接口。本切片保持 `READY_FOR_REVIEW`，不把受控 E2E 等同于真实闲鱼生产 mutation 验收。

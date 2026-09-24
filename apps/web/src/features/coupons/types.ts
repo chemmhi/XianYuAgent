@@ -58,8 +58,6 @@ export interface CouponBatchVM {
   updatedAt: string;
   bindings: CouponBindingVM[];
   items?: CouponItemVM[];
-  quarkUrl?: string;
-  extractCode?: string;
   createdAt?: string;
   metadata?: CouponMetadataVM;
   contentPreview?: { text?: string; dataRemaining?: number; apiUrl?: string; imageUrls?: string[] };
@@ -106,8 +104,6 @@ export interface CreateCouponBatchRequest {
   label: string;
   purpose: CouponBatchVM['purpose'];
   deliveryScope: DeliveryScope;
-  quarkUrl?: string;
-  extractionCode?: string;
   items?: string[];
   metadata?: CouponMetadataVM;
 }

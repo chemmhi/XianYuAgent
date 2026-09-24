@@ -10,6 +10,7 @@ import { normalizeAutoReplyProductMetric } from './auto-reply-product-metrics.js
 import { cloneCouponReservation, normalizeCouponReservationInput, normalizeLeaseSeconds, reservationFingerprint } from './coupon-reservation.js';
 import { validatePersistedAutoReplyRepairPolicyBundle } from './auto-reply-repair-config.js';
 import { normalizeProductSearchTerms, normalizeProductSearchText, splitProductSearchTerms, type AutoReplyProductSearchMode } from './auto-reply-product-search.js';
+import { splitDataContent } from './coupon-delivery.js';
 
 type Row = Record<string, unknown>;
 const PRODUCT_COUPON_BATCHES_SELECT = `(select coalesce(json_agg(json_build_object('id', cb.sequence_id, 'label', cb.label) order by binding.priority desc, binding.created_at, cb.sequence_id), '[]'::json) from coupons.coupon_bindings binding join coupons.coupon_batches cb on cb.id=binding.coupon_batch_id where binding.product_id=p.id and binding.status='active' and cb.status <> 'voided') as coupon_batches`;
@@ -727,6 +728,7 @@ export class PostgresStore implements Store {
           return record;
         }
       }
+      await this.ensureConfiguredCouponItems(client, lockRows.rows, normalized.quantity);
       const selected = await client.query(`select i.*, b.label as batch_label, b.quark_url as batch_quark_url, b.extract_code_ciphertext as batch_extract_code_ciphertext
         from coupons.coupon_items i join coupons.coupon_batches b on b.id=i.batch_id
         where i.batch_id=any($1::uuid[]) and i.status='available'
@@ -1643,6 +1645,32 @@ export class PostgresStore implements Store {
     return this.toCouponReservation(row, items.rows);
   }
 
+  private async ensureConfiguredCouponItems(client: PoolClient, rows: Row[], quantity: number): Promise<void> {
+    for (const row of rows) {
+      const batchId = String(row.id);
+      const existing = await client.query('select content_ciphertext,status from coupons.coupon_items where batch_id=$1', [batchId]);
+      const existingContent = new Set(existing.rows.map((item) => decryptCouponValue(item.content_ciphertext)));
+      const batch = this.toCouponBatch(row);
+      if (batch.purpose === 'data') {
+        const createdAtBase = Date.now();
+        for (const [index, content] of splitDataContent(batch.metadata?.dataContent).entries()) {
+          if (existingContent.has(content)) continue;
+          await client.query('insert into coupons.coupon_items (id,batch_id,content_ciphertext,status,created_at) values ($1,$2,$3,\'available\',$4)', [createId(), batchId, encryptCouponValue(content), new Date(createdAtBase + index).toISOString()]);
+          existingContent.add(content);
+        }
+      } else {
+        const configuredOnly = existing.rows.length === 0 || existing.rows.every((item) => decryptCouponValue(item.content_ciphertext) === '__CONFIGURED_COUPON__');
+        const availableCount = existing.rows.filter((item) => item.status === 'available').length;
+        const required = configuredOnly ? Math.max(0, quantity - availableCount) : 0;
+        for (let index = 0; index < required; index += 1) {
+          await client.query('insert into coupons.coupon_items (id,batch_id,content_ciphertext,status) values ($1,$2,$3,\'available\')', [createId(), batchId, encryptCouponValue('__CONFIGURED_COUPON__')]);
+        }
+        if (required > 0 && row.status === 'exhausted') await client.query("update coupons.coupon_batches set status='active',version=version+1,updated_at=now() where id=$1", [batchId]);
+      }
+      await client.query('update coupons.coupon_batches set total_count=(select count(*) from coupons.coupon_items where batch_id=$1),version=version+1,updated_at=now() where id=$1', [batchId]);
+    }
+  }
+
   private toCouponBatch(row: Row): CouponBatchRecord {
     const totalCount = Number(row.computed_total_count ?? row.total_count ?? 0);
     const metadata = row.metadata_json && typeof row.metadata_json === 'object' && !Array.isArray(row.metadata_json) ? row.metadata_json as CouponBatchMetadata : {};
@@ -1666,7 +1694,7 @@ export class PostgresStore implements Store {
       status: row.status as CouponReservationRecord['status'],
       leaseUntil: dateIso(row.lease_until),
       reason: row.reason ? String(row.reason) : undefined,
-      items: itemRows.map((item) => ({ itemId: String(item.item_id), content: decryptCouponValue(item.content_ciphertext), batchId: String(item.batch_id), batchLabel: item.batch_label ? String(item.batch_label) : undefined, quarkUrl: item.batch_quark_url ? String(item.batch_quark_url) : undefined, extractionCode: item.batch_extract_code_ciphertext ? decryptCouponValue(item.batch_extract_code_ciphertext) : undefined })),
+      items: itemRows.map((item) => ({ itemId: String(item.item_id), content: decryptCouponValue(item.content_ciphertext), batchId: String(item.batch_id), batchLabel: item.batch_label ? String(item.batch_label) : undefined })),
       createdAt: dateIso(row.created_at),
       updatedAt: dateIso(row.updated_at),
       finalizedAt: iso(row.finalized_at),

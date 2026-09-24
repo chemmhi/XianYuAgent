@@ -91,8 +91,6 @@ function toBatchVM(payload: CouponPayload): CouponBatchVM {
     updatedAt: payload.updatedAt ?? new Date(0).toISOString(),
     bindings,
     items: payload.items?.map((item) => ({ ...item, batchId: item.batchId || batchId })),
-    quarkUrl: payload.quarkUrl,
-    extractCode: payload.extractCode,
     createdAt: payload.createdAt,
     metadata: payload.metadata,
     contentPreview: payload.contentPreview,

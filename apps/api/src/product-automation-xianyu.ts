@@ -4,9 +4,11 @@ import type {
   AutomationOrderSnapshot,
 } from './product-automation.js';
 import type { ProductAutomationExecutionAdapter } from './product-automation-trigger.js';
-import type { CouponReservationRecord, Store } from './domain.js';
+import type { Store } from './domain.js';
 import { XianyuMtopClient, type XianyuExternalMutationResult, type XianyuOrderDetailSummary } from './xianyu-mtop.js';
 import type { XianyuImService } from './xianyu-im-service.js';
+import type { CouponAssetService } from './coupon-assets.js';
+import { buildCouponContext, parseSkuSpec, resolveCouponDelivery } from './coupon-delivery.js';
 
 /**
  * Live product-automation adapter.
@@ -25,20 +27,27 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
     private readonly getMtop: () => XianyuMtopClient,
     private readonly getIm: () => XianyuImService | undefined,
     private readonly audit?: (input: { adminId: string; action: string; accountId?: string; orderNo?: string; executionKey?: string; payload?: unknown }) => Promise<unknown> | unknown,
+    private readonly couponAssets?: CouponAssetService,
   ) {}
 
-  async reserveCoupon(input: Parameters<AutomationExecutionPort['reserveCoupon']>[0]): Promise<{ reservationId: string; quantity: number }> {
+  async reserveCoupon(input: Parameters<AutomationExecutionPort['reserveCoupon']>[0]): Promise<{ reservationId: string; quantity: number; noLogisticsForm?: boolean; tradeText?: string }> {
     const adminId = requireAdminId(input.adminId);
+    const batches = await Promise.all(input.batchIds.map((batchId) => this.store.getCouponBatch(adminId, batchId)));
+    const usableBatches = selectBatchesForSpec(batches.filter((batch): batch is NonNullable<typeof batch> => Boolean(batch)), input.skuSpec);
+    if (usableBatches.length === 0) throw new Error('COUPON_SPEC_MISMATCH');
     const reservation = await this.store.reserveCoupon({
       adminId,
       accountId: input.accountId,
-      batchIds: input.batchIds,
+      batchIds: usableBatches.map((batch) => batch.id),
       quantity: input.quantity,
       executionKey: input.executionKey,
       purpose: input.purpose,
     });
-    await this.recordAudit({ adminId, action: 'product.automation.coupon.reserved', accountId: input.accountId, executionKey: input.executionKey, payload: { reservationId: reservation.reservationId, quantity: reservation.quantity, purpose: input.purpose } });
-    return { reservationId: reservation.reservationId, quantity: reservation.quantity };
+    const formBatch = usableBatches.find((batch) => batch.metadata?.useNoLogisticsForm === true);
+    const noLogisticsForm = input.purpose === 'delivery' && Boolean(formBatch);
+    const tradeText = noLogisticsForm ? formBatch?.metadata?.textContent?.trim() : undefined;
+    await this.recordAudit({ adminId, action: 'product.automation.coupon.reserved', accountId: input.accountId, executionKey: input.executionKey, payload: { reservationId: reservation.reservationId, quantity: reservation.quantity, purpose: input.purpose, batchIds: usableBatches.map((batch) => batch.id), noLogisticsForm } });
+    return { reservationId: reservation.reservationId, quantity: reservation.quantity, noLogisticsForm, tradeText };
   }
 
   async sendCoupon(input: Parameters<AutomationExecutionPort['sendCoupon']>[0]): Promise<AutomationExternalResult> {
@@ -51,15 +60,53 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
     const order = await this.loadScopedOrder(adminId, input.accountId, input.orderNo, input.productId, input.itemId);
     if (!order) return failedExternal('ORDER_NOT_FOUND', 'order or product scope not found');
     if (!order.conversationId) return failedExternal('CONVERSATION_MISSING', 'order conversation is missing');
-    const im = this.getIm();
-    if (!im) return unknownExternal('XIANYU_IM_NOT_READY', 'xianyu im service is not ready');
-
-    const text = formatCouponMessage(reservation);
-    if (!text) return failedExternal('COUPON_CONTENT_EMPTY', 'coupon reservation has no deliverable content');
     try {
-      const sent = await im.sendText(adminId, input.accountId, order.conversationId, text, `automation:${input.executionKey}`, `automation:${input.executionKey}`) as { externalMessageRef?: string };
-      await this.recordAudit({ adminId, action: 'product.automation.coupon.sent', accountId: input.accountId, orderNo: input.orderNo, executionKey: input.executionKey, payload: { reservationId: reservation.reservationId, externalMessageRef: sent.externalMessageRef } });
-      return { status: 'succeeded', externalRef: sent.externalMessageRef ?? `coupon-reservation:${reservation.reservationId}` };
+      const batches = await Promise.all(reservation.batchIds.map((batchId) => this.store.getCouponBatch(adminId, batchId)));
+      if (input.purpose === 'delivery' && batches.some((batch) => batch?.metadata?.useNoLogisticsForm === true)) {
+        const formBatch = batches.find((batch) => batch?.metadata?.useNoLogisticsForm === true);
+        if (!formBatch || formBatch.purpose !== 'text' || !formBatch.metadata?.textContent?.trim()) return failedExternal('NO_LOGISTICS_FORM_INVALID', 'no logistics form requires fixed text content');
+        await waitForDelay(Number(formBatch.metadata.delaySeconds ?? 0));
+        await this.recordAudit({ adminId, action: 'product.automation.coupon.no_logistics_pending', accountId: input.accountId, orderNo: input.orderNo, executionKey: input.executionKey, payload: { reservationId: reservation.reservationId } });
+        return { status: 'succeeded', externalRef: `no-logistics:${reservation.reservationId}` };
+      }
+      const im = this.getIm();
+      if (!im) return unknownExternal('XIANYU_IM_NOT_READY', 'xianyu im service is not ready');
+      const account = await this.store.getAccount(adminId, input.accountId);
+      const orderSpec = parseSkuSpec(order.skuSpec);
+      const context = buildCouponContext({
+        orderId: order.orderNo,
+        itemId: order.itemId,
+        itemTitle: order.itemTitle,
+        buyerName: order.buyerName,
+        buyerId: order.buyerId,
+        sellerName: account?.remark || account?.displayName || account?.sellerRef || '',
+        specName: orderSpec.specName,
+        specValue: orderSpec.specValue,
+        orderAmount: String((order.amountMinor ?? 0) / 100),
+        orderQuantity: String(order.quantity ?? reservation.quantity),
+      });
+      let externalMessageRef: string | undefined;
+      for (const item of reservation.items) {
+        const batch = batches.find((candidate) => candidate?.id === item.batchId) ?? await this.store.getCouponBatch(adminId, item.batchId);
+        if (!batch) return failedExternal('COUPON_BATCH_NOT_FOUND', 'coupon batch not found');
+        const imageUrls = this.couponAssets?.imageUrls(batch) ?? batch.metadata?.imageUrls ?? [];
+        const resolved = await resolveCouponDelivery({ ...batch, metadata: { ...(batch.metadata ?? {}), imageUrls } }, item, context, input.purpose);
+        await waitForDelay(resolved.delaySeconds);
+        for (const imageUrl of resolved.imageUrls) {
+          const file = await this.resolveImage(adminId, batch.id, imageUrl);
+          const sent = await im.sendImage(adminId, input.accountId, order.conversationId, file, `automation:${input.executionKey}`, `automation:${input.executionKey}`) as { externalMessageRef?: string };
+          externalMessageRef = sent.externalMessageRef ?? externalMessageRef;
+        }
+        if (resolved.text) {
+          for (const message of splitMessages(resolved.text)) {
+            const sent = await im.sendText(adminId, input.accountId, order.conversationId, message, `automation:${input.executionKey}`, `automation:${input.executionKey}`) as { externalMessageRef?: string };
+            externalMessageRef = sent.externalMessageRef ?? externalMessageRef;
+          }
+        }
+      }
+      if (!externalMessageRef) return failedExternal('COUPON_CONTENT_EMPTY', 'coupon reservation has no deliverable content');
+      await this.recordAudit({ adminId, action: 'product.automation.coupon.sent', accountId: input.accountId, orderNo: input.orderNo, executionKey: input.executionKey, payload: { reservationId: reservation.reservationId, externalMessageRef } });
+      return { status: 'succeeded', externalRef: externalMessageRef };
     } catch (error) {
       return classifyExternalError(error, 'coupon_send');
     }
@@ -89,7 +136,7 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
     if (isDelivered(detail.detail)) {
       return { status: 'succeeded', externalRef: input.orderNo };
     }
-    const result = await this.getMtop().confirmShipment(adminId, input.accountId, input.orderNo);
+    const result = await this.getMtop().confirmShipment(adminId, input.accountId, input.orderNo, input.noLogisticsForm ? input.tradeText ?? '' : '');
     return mapMutationResult(result);
   }
 
@@ -153,6 +200,20 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
     return order;
   }
 
+  private async resolveImage(adminId: string, batchId: string, imageUrl: string): Promise<{ filename: string; contentType: string; data: Buffer }> {
+    const assetMatch = imageUrl.match(/\/api\/v1\/coupons\/batches\/[^/]+\/assets\/([^/?#]+)/u);
+    if (assetMatch && this.couponAssets) {
+      const asset = await this.couponAssets.getAsset({ adminId, batchId, assetId: decodeURIComponent(assetMatch[1]) });
+      if (asset) return { filename: asset.asset.storageKey.split('/').pop() ?? 'coupon-image', contentType: asset.object.contentType, data: asset.object.body };
+    }
+    const dataUrl = imageUrl.match(/^data:(image\/[^;]+);base64,(.+)$/u);
+    if (dataUrl) return { filename: 'coupon-image', contentType: dataUrl[1], data: Buffer.from(dataUrl[2], 'base64') };
+    const response = await fetch(imageUrl, { signal: AbortSignal.timeout(15_000) });
+    if (!response.ok) throw new Error(`COUPON_IMAGE_HTTP_${response.status}`);
+    const contentType = response.headers.get('content-type')?.split(';')[0] || 'image/jpeg';
+    return { filename: imageUrl.split('/').pop()?.split('?')[0] || 'coupon-image', contentType, data: Buffer.from(await response.arrayBuffer()) };
+  }
+
   private async recordAudit(input: { adminId: string; action: string; accountId?: string; orderNo?: string; executionKey?: string; payload?: unknown }): Promise<void> {
     try { await this.audit?.(input); } catch { /* audit failure must not duplicate an external mutation */ }
   }
@@ -195,15 +256,21 @@ function isDelivered(detail: XianyuOrderDetailSummary): boolean {
   return normalizeDeliveryStatus(detail.deliveryStatus) === 'delivered';
 }
 
-function formatCouponMessage(reservation: CouponReservationRecord): string {
-  const lines: string[] = [];
-  for (const [index, item] of reservation.items.entries()) {
-    const content = item.content.trim();
-    if (content) lines.push(reservation.items.length > 1 ? `${index + 1}. ${content}` : content);
-    if (item.quarkUrl) lines.push(`链接：${item.quarkUrl}`);
-    if (item.extractionCode) lines.push(`提取码：${item.extractionCode}`);
-  }
-  return lines.join('\n').trim();
+function selectBatchesForSpec(batches: Array<NonNullable<Awaited<ReturnType<Store['getCouponBatch']>>>>, skuSpec?: string) {
+  const multiSpec = batches.filter((batch) => batch.metadata?.multiSpec === true);
+  if (multiSpec.length === 0) return batches;
+  const parsed = parseSkuSpec(skuSpec);
+  if (!parsed.specName || !parsed.specValue) throw new Error('COUPON_SPEC_MISMATCH');
+  return multiSpec.filter((batch) => batch.metadata?.specName === parsed.specName && batch.metadata?.specValue === parsed.specValue);
+}
+
+async function waitForDelay(seconds: number): Promise<void> {
+  const milliseconds = Math.max(0, Math.min(3_600_000, Math.trunc(Number(seconds) * 1000 || 0)));
+  if (milliseconds > 0) await new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function splitMessages(value: string): string[] {
+  return value.split('######').map((message) => message.trim()).filter(Boolean);
 }
 
 function mapMutationResult(result: XianyuExternalMutationResult): AutomationExternalResult {

@@ -113,7 +113,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'system', actorId: input.adminId, action: input.action, targetRef: input.orderNo ?? input.executionKey, requestId: `automation:${input.executionKey ?? auditId}`, traceId: `automation:${input.executionKey ?? auditId}`, payloadDigest: digestJson(input.payload ?? {}), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
-  });
+  }, couponAssets);
   const productAutomationWorkflow = new AutomationWorkflowService(productAutomationExecution, new PersistentAutomationExecutionLedger(store));
   const productAutomationTrigger = new ProductAutomationTrigger(store, productAutomation, productAutomationWorkflow, productAutomationExecution, async (input) => {
     const auditId = createId();
@@ -1011,7 +1011,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   if (ctx.path === '/api/v1/coupons/batches' && ctx.method === 'POST') {
     const accountId = String(ctx.body.accountId ?? '');
     const result = await mutation(runtime, ctx, authContext, accountId || undefined, async () => {
-      const batch = await coupons.create({ adminId: authContext.admin.id, accountId, label: optionalString(ctx.body.label), purpose: String(ctx.body.purpose ?? ''), deliveryScope: String(ctx.body.deliveryScope ?? '') as never, quarkUrl: optionalString(ctx.body.quarkUrl), extractionCode: optionalString(ctx.body.extractionCode), metadata: readCouponMetadata(ctx.body.metadata), requestId: ctx.requestId, traceId: ctx.traceId });
+      const batch = await coupons.create({ adminId: authContext.admin.id, accountId, label: optionalString(ctx.body.label), purpose: String(ctx.body.purpose ?? ''), deliveryScope: String(ctx.body.deliveryScope ?? '') as never, metadata: readCouponMetadata(ctx.body.metadata), requestId: ctx.requestId, traceId: ctx.traceId });
       return success(ctx, batch, 201);
     });
     return result;
@@ -1022,7 +1022,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     const action = couponBatchMatch[2];
     if (!action && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, await coupons.get(authContext.admin.id, batchId)).body };
     if (!action && (ctx.method === 'PATCH' || ctx.method === 'PUT')) {
-      return mutation(runtime, ctx, authContext, batchId, async () => success(ctx, await coupons.update({ adminId: authContext.admin.id, batchId, patch: { label: optionalString(ctx.body.label), purpose: optionalString(ctx.body.purpose), deliveryScope: optionalString(ctx.body.deliveryScope) as never, quarkUrl: optionalString(ctx.body.quarkUrl), extractionCode: optionalString(ctx.body.extractionCode), status: optionalString(ctx.body.status) as never, metadata: readCouponMetadata(ctx.body.metadata) }, requestId: ctx.requestId, traceId: ctx.traceId })));
+      return mutation(runtime, ctx, authContext, batchId, async () => success(ctx, await coupons.update({ adminId: authContext.admin.id, batchId, patch: { label: optionalString(ctx.body.label), purpose: optionalString(ctx.body.purpose), deliveryScope: optionalString(ctx.body.deliveryScope) as never, status: optionalString(ctx.body.status) as never, metadata: readCouponMetadata(ctx.body.metadata) }, requestId: ctx.requestId, traceId: ctx.traceId })));
     }
     if (!action && ctx.method === 'DELETE') {
       return mutation(runtime, ctx, authContext, batchId, async () => success(ctx, await coupons.delete({ adminId: authContext.admin.id, batchId, requestId: ctx.requestId, traceId: ctx.traceId })));

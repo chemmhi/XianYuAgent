@@ -320,6 +320,7 @@ export interface OrderRecord {
   buyerAvatarUrl?: string;
   itemId: string;
   itemTitle: string;
+  skuSpec?: string;
   itemImageUrl?: string;
   amountMinor: number;
   paymentStatus: PaymentStatus;
@@ -497,8 +498,6 @@ export interface CouponReservationItemRecord {
   content: string;
   batchId: string;
   batchLabel?: string;
-  quarkUrl?: string;
-  extractionCode?: string;
 }
 
 export interface CouponReservationRecord {

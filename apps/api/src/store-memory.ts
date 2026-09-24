@@ -9,6 +9,7 @@ import { cloneCouponReservation, normalizeCouponReservationInput, normalizeLease
 import { validatePersistedAutoReplyRepairPolicyBundle } from './auto-reply-repair-config.js';
 import { readAutoReplyProductDescription, readAutoReplyProductMetrics } from './auto-reply-product-metrics.js';
 import { normalizeProductSearchTerms, normalizeProductSearchText, productSearchScore, splitProductSearchTerms, type AutoReplyProductSearchMode } from './auto-reply-product-search.js';
+import { splitDataContent } from './coupon-delivery.js';
 
 function meaningfulOrderTitle(value: string | undefined, references: Array<string | undefined>): string | undefined {
   const title = value?.trim();
@@ -704,6 +705,7 @@ export class MemoryStore implements Store {
         if (existing.fingerprint !== fingerprint || existing.adminId !== input.adminId || existing.accountId !== input.accountId) throw new Error('COUPON_RESERVATION_KEY_CONFLICT');
         if (existing.status === 'committed' || existing.status === 'reserved') return cloneCouponReservation(existing);
       }
+      for (const batch of uniqueBatches) this.ensureConfiguredCouponItems(batch, normalized.quantity);
       const selected = this.selectAvailableCouponItems(uniqueBatches, normalized.quantity);
       if (selected.length < normalized.quantity) throw new Error('COUPON_INSUFFICIENT_INVENTORY');
       const now = new Date();
@@ -738,7 +740,7 @@ export class MemoryStore implements Store {
       reservation.updatedAt = nowIso;
       reservation.items = selected.map((item) => {
         const batch = this.couponBatches.get(item.batchId)!;
-        return { itemId: item.id, content: item.content, batchId: batch.id, batchLabel: batch.label, quarkUrl: batch.quarkUrl, extractionCode: batch.extractionCode };
+        return { itemId: item.id, content: item.content, batchId: batch.id, batchLabel: batch.label };
       });
       this.couponReservations.set(reservation.reservationId, reservation);
       this.couponReservationByExecutionKey.set(normalized.executionKey, reservation.reservationId);
@@ -1661,6 +1663,30 @@ export class MemoryStore implements Store {
       if (available.length >= quantity) break;
     }
     return available.slice(0, quantity);
+  }
+
+  private ensureConfiguredCouponItems(batch: CouponBatchRecord, quantity: number): void {
+    const items = [...this.couponItems.values()].filter((item) => item.batchId === batch.id);
+    const existingContents = new Set(items.map((item) => item.content));
+    if (batch.purpose === 'data') {
+      const createdAtBase = Date.now();
+      for (const [index, content] of splitDataContent(batch.metadata?.dataContent).entries()) {
+        if (existingContents.has(content)) continue;
+        const item: CouponItemRecord = { id: createId(), batchId: batch.id, content, status: 'available', createdAt: new Date(createdAtBase + index).toISOString() };
+        this.couponItems.set(item.id, item);
+        existingContents.add(content);
+      }
+    } else {
+      const configuredOnly = items.length === 0 || items.every((item) => item.content === '__CONFIGURED_COUPON__');
+      const availableCount = items.filter((item) => item.status === 'available').length;
+      const required = configuredOnly ? Math.max(0, quantity - availableCount) : 0;
+      for (let index = 0; index < required; index += 1) {
+        const item: CouponItemRecord = { id: createId(), batchId: batch.id, content: '__CONFIGURED_COUPON__', status: 'available', createdAt: new Date().toISOString() };
+        this.couponItems.set(item.id, item);
+      }
+      if (required > 0 && batch.status === 'exhausted') batch.status = 'active';
+    }
+    batch.totalCount = [...this.couponItems.values()].filter((item) => item.batchId === batch.id).length;
   }
 
   private productSummary(product: ProductRecord): ProductRecord {
