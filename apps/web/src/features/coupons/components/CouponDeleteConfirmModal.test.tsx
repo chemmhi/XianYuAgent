@@ -5,7 +5,7 @@ import type { CouponBatchVM } from '../types';
 import { CouponDeleteConfirmModal } from './CouponDeleteConfirmModal';
 
 const batch = (overrides: Partial<CouponBatchVM> = {}): CouponBatchVM => ({
-  batchId: '1', accountId: 'account-1', label: '测试卡券', purpose: 'text', deliveryScope: 'operator_only', status: 'active', version: 1,
+  batchId: '1', accountId: 'account-1', label: '测试卡券', purpose: 'text', status: 'active', version: 1,
   updatedAt: new Date(0).toISOString(), bindings: [], ...overrides,
 });
 

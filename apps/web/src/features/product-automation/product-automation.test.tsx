@@ -15,7 +15,7 @@ describe('product automation API', () => {
   it('maps the live adapter to the canonical automation and coupon contracts', async () => {
     const calls: Array<{ method: string; path: string; body?: unknown; options?: unknown }> = [];
     const api = createProductAutomationApi({
-      async get<T>(path: string) { calls.push({ method: 'GET', path }); return (path.includes('/automation') ? { data: { productId: 'product-1', accountId: 'account-1', configVersion: 7, config: { paidAutoDelivery: { enabled: true, couponBatchIds: ['1'] }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true, firstDelayHours: 72, repeatIntervalHours: 24, maxReminders: 1, message: '请评价' } } } } : { data: { items: [...MOCK_AUTOMATION_COUPONS, { id: 'operator-only', label: '仅运营可见', purpose: 'text', deliveryScope: 'operator_only' }, { id: 'paused-coupon', label: '已禁用卡券', purpose: 'text', deliveryScope: 'buyer_deliverable', status: 'paused' }] } }) as T; },
+      async get<T>(path: string) { calls.push({ method: 'GET', path }); return (path.includes('/automation') ? { data: { productId: 'product-1', accountId: 'account-1', configVersion: 7, config: { paidAutoDelivery: { enabled: true, couponBatchIds: ['1'] }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true, firstDelayHours: 72, repeatIntervalHours: 24, maxReminders: 1, message: '请评价' } } } } : { data: { items: [...MOCK_AUTOMATION_COUPONS, { id: 'active-coupon', label: '普通卡券', purpose: 'text' }, { id: 'paused-coupon', label: '已禁用卡券', purpose: 'text', status: 'paused' }] } }) as T; },
       async patch<T>(path: string, body?: unknown, options?: unknown) { calls.push({ method: 'PATCH', path, body, options }); return { data: { productId: 'product-1', accountId: 'account-1', configVersion: 8, paidAutoDelivery: { enabled: false }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true } } } as T; },
       async post<T>(path: string, body?: unknown, options?: unknown) { calls.push({ method: 'POST', path, body, options }); return { data: { updatedCount: 1 } } as T; },
     });
@@ -24,7 +24,7 @@ describe('product automation API', () => {
     expect(config.delivery.couponIds).toEqual(['1']);
      const availableCoupons = await api.listCoupons('account-1', 'delivery');
      const giftCoupons = await api.listCoupons('account-1', 'gift');
-     expect(availableCoupons.some((coupon) => coupon.id === 'operator-only')).toBe(true);
+     expect(availableCoupons.some((coupon) => coupon.id === 'active-coupon')).toBe(true);
      expect(availableCoupons.some((coupon) => coupon.id === 'paused-coupon')).toBe(false);
      expect(availableCoupons.every((coupon) => coupon.status === 'active')).toBe(true);
      expect(giftCoupons.map((coupon) => coupon.id)).toEqual(availableCoupons.map((coupon) => coupon.id));
@@ -48,8 +48,8 @@ describe('product automation API', () => {
         requestedPaths.push(path);
         const page = new URL(path, 'http://automation.test').searchParams.get('page');
         return (page === '1'
-          ? { data: { items: Array.from({ length: 100 }, (_, index) => ({ id: `coupon-${index + 1}`, label: `卡券 ${index + 1}`, purpose: 'text', deliveryScope: 'buyer_deliverable' })), totalPages: 2 } }
-          : { data: { items: [{ id: 'coupon-101', label: '卡券 101', purpose: 'text', deliveryScope: 'buyer_deliverable' }], totalPages: 2 } }) as T;
+          ? { data: { items: Array.from({ length: 100 }, (_, index) => ({ id: `coupon-${index + 1}`, label: `卡券 ${index + 1}`, purpose: 'text' })), totalPages: 2 } }
+          : { data: { items: [{ id: 'coupon-101', label: '卡券 101', purpose: 'text' }], totalPages: 2 } }) as T;
       },
     });
     const coupons = await api.listCoupons('account-1', 'delivery');
@@ -253,10 +253,10 @@ describe('product automation save error mapping', () => {
   });
 
   it('maps coupon state conflicts to card reselection guidance', () => {
-    expect(toProductAutomationSaveError(new ApiError('coupon batch is closed', 409, { error: { code: 'CONFLICT' } }))).toContain('重新选择可发货卡券');
+    expect(toProductAutomationSaveError(new ApiError('coupon batch is closed', 409, { error: { code: 'CONFLICT' } }))).toContain('重新选择有效卡券');
   });
 
   it('maps validation failures to actionable card configuration guidance', () => {
-    expect(toProductAutomationSaveError(new ApiError('paidAutoDelivery requires at least one coupon batch', 422, { error: { code: 'VALIDATION_FAILED' } }))).toContain('已选择可发货卡券');
+    expect(toProductAutomationSaveError(new ApiError('paidAutoDelivery requires at least one coupon batch', 422, { error: { code: 'VALIDATION_FAILED' } }))).toContain('已选择有效卡券');
   });
 });

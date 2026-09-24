@@ -42,7 +42,7 @@ async function setup() {
   const admin = await store.createAdmin({ email: `trigger-${Math.random()}@example.com`, passwordHash: 'hash', displayName: 'Trigger' });
   const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: `trigger-${Math.random()}` });
   const product = await store.createProduct({ adminId: admin.id, accountId: account.id, title: '自动化商品', status: 'published' });
-  const coupon = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: '自动化卡券', purpose: 'text', deliveryScope: 'buyer_deliverable' });
+  const coupon = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: '自动化卡券', purpose: 'text' });
   await store.importCouponItems({ adminId: admin.id, batchId: coupon.id, contents: ['coupon-1', 'coupon-2'] });
   const configs = new ProductAutomationService(store, async () => 'audit');
   return { store, admin, account, product, coupon, configs };

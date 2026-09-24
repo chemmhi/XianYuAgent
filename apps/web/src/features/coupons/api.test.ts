@@ -6,7 +6,6 @@ const batchPayload = {
   accountId: 'account-001',
   label: '资料包',
   purpose: 'text',
-  deliveryScope: 'buyer_deliverable',
   status: 'active',
   version: 3,
   updatedAt: '2026-09-19T00:00:00.000Z',
@@ -41,7 +40,7 @@ describe('coupons api adapter', () => {
     const get = getMock as unknown as CouponsApiTransport['get'];
     const transport: CouponsApiTransport = { get, post, patch: vi.fn(), delete: vi.fn() };
 
-    const batch = await createCouponsApi(transport).createBatch({ accountId: 'account-001', label: '新批次', purpose: 'text', deliveryScope: 'operator_only', items: ['A-001', 'A-002'] });
+    const batch = await createCouponsApi(transport).createBatch({ accountId: 'account-001', label: '新批次', purpose: 'text', items: ['A-001', 'A-002'] });
     expect(batch.batchId).toBe('4');
     expect(postMock).toHaveBeenCalledTimes(2);
     expect(getMock).toHaveBeenCalledWith('/api/v1/coupons/batches/4');
@@ -101,7 +100,7 @@ describe('coupons api adapter', () => {
       { ...batchPayload, batchId: '2', label: '保留', status: 'active', bindings: [] },
     ]);
     await mock.deleteBatch('1');
-    const recreated = await mock.createBatch({ accountId: 'account-001', label: '重新创建', purpose: 'text', deliveryScope: 'operator_only' });
+    const recreated = await mock.createBatch({ accountId: 'account-001', label: '重新创建', purpose: 'text' });
     expect(recreated.batchId).toBe('1');
     expect((await mock.list()).items.map((item) => item.batchId)).toEqual(['1', '2']);
     expect((await mock.list({ status: 'voided' })).items.map((item) => item.batchId)).toEqual([]);

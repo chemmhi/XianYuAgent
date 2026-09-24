@@ -17,7 +17,7 @@ async function setup() {
   const admin = await store.createAdmin({ email: 'automation@example.com', passwordHash: 'hash', displayName: 'Automation' });
   const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: `automation-${Math.random()}` });
   const product = await store.createProduct({ adminId: admin.id, accountId: account.id, title: '自动化商品', status: 'published' });
-  const coupon = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: '发货卡券', purpose: 'text', deliveryScope: 'buyer_deliverable' });
+  const coupon = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: '发货卡券', purpose: 'text' });
   await store.importCouponItems({ adminId: admin.id, batchId: coupon.id, contents: ['coupon-1', 'coupon-2'] });
   const service = new ProductAutomationService(store, async () => 'audit-id');
   return { store, admin, account, product, coupon, service };
@@ -40,30 +40,30 @@ test('automation config defaults, validation, optimistic locking and account iso
 
   const foreignAdmin = await store.createAdmin({ email: 'foreign-automation@example.com', passwordHash: 'hash', displayName: 'Foreign' });
   const foreignAccount = await store.createAccount({ adminId: foreignAdmin.id, platform: 'xianyu', sellerRef: `foreign-${Math.random()}` });
-  const foreignCoupon = await store.createCouponBatch({ adminId: foreignAdmin.id, accountId: foreignAccount.id, label: 'Foreign', purpose: 'text', deliveryScope: 'buyer_deliverable' });
+  const foreignCoupon = await store.createCouponBatch({ adminId: foreignAdmin.id, accountId: foreignAccount.id, label: 'Foreign', purpose: 'text' });
   await assert.rejects(() => service.update({ adminId: admin.id, productId: product.id, expectedConfigVersion: 2, config: { ...defaultProductAutomationConfig(), reviewGift: { ...defaultProductAutomationConfig().reviewGift, enabled: true, couponBatchIds: [foreignCoupon.id] } }, requestId: 'req-cross', traceId: 'trace-cross' }), (error: unknown) => (error as { code?: string }).code === 'NOT_FOUND' || (error as { code?: string }).code === 'FORBIDDEN');
   assert.equal(account.id, product.accountId);
 });
 
-test('defaults auto-confirm on and allows disabled coupon-only associations', async () => {
+test('defaults auto-confirm on and allows disabled coupon associations', async () => {
   const { admin, product, coupon, service, store, account } = await setup();
   assert.equal(defaultProductAutomationConfig().paidAutoDelivery.autoConfirm, true);
 
-  const operatorOnly = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: '仅关联卡券', purpose: 'text', deliveryScope: 'operator_only' });
+  const associatedCoupon = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: '关联卡券', purpose: 'text' });
   const associated = await service.update({
     adminId: admin.id,
     productId: product.id,
     expectedConfigVersion: 1,
     config: {
       ...defaultProductAutomationConfig(),
-      paidAutoDelivery: { enabled: false, couponBatchIds: [operatorOnly.id] },
+      paidAutoDelivery: { enabled: false, couponBatchIds: [associatedCoupon.id] },
     },
     requestId: 'req-association-only',
     traceId: 'trace-association-only',
   });
-  assert.deepEqual(associated.config.paidAutoDelivery.couponBatchIds, [operatorOnly.sequenceId ?? operatorOnly.id]);
+  assert.deepEqual(associated.config.paidAutoDelivery.couponBatchIds, [associatedCoupon.sequenceId ?? associatedCoupon.id]);
   assert.equal(associated.config.paidAutoDelivery.autoConfirm, true);
-  assert.deepEqual((await store.getProduct(admin.id, product.id))?.couponBatches?.map((item) => item.id), [operatorOnly.sequenceId ?? operatorOnly.id]);
+  assert.deepEqual((await store.getProduct(admin.id, product.id))?.couponBatches?.map((item) => item.id), [associatedCoupon.sequenceId ?? associatedCoupon.id]);
 
   const cleared = await service.update({
     adminId: admin.id,
@@ -75,7 +75,7 @@ test('defaults auto-confirm on and allows disabled coupon-only associations', as
   });
   assert.equal(cleared.configVersion, 2);
   assert.deepEqual((await store.getProduct(admin.id, product.id))?.couponBatches, []);
-  assert.equal((await store.getCouponBatch(admin.id, operatorOnly.id))?.bindings?.some((binding) => binding.productId === product.id && binding.status === 'active'), false);
+  assert.equal((await store.getCouponBatch(admin.id, associatedCoupon.id))?.bindings?.some((binding) => binding.productId === product.id && binding.status === 'active'), false);
   await assert.rejects(() => store.updateProductAutomation({
     adminId: admin.id,
     productId: product.id,
@@ -85,18 +85,6 @@ test('defaults auto-confirm on and allows disabled coupon-only associations', as
   }));
   assert.deepEqual((await store.getProduct(admin.id, product.id))?.couponBatches, []);
   assert.equal((await service.get(admin.id, product.id)).configVersion, 2);
-
-  await assert.rejects(() => service.update({
-    adminId: admin.id,
-    productId: product.id,
-    expectedConfigVersion: 2,
-    config: {
-      ...defaultProductAutomationConfig(),
-      paidAutoDelivery: { enabled: true, couponBatchIds: [operatorOnly.id] },
-    },
-    requestId: 'req-nondeliverable-enabled',
-    traceId: 'trace-nondeliverable-enabled',
-  }), (error: unknown) => (error as { code?: string }).code === 'VALIDATION_FAILED');
 
   const partial = await service.update({
     adminId: admin.id,

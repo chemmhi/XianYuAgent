@@ -21,10 +21,10 @@ try {
   const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: 'automation-api-seller' });
   const product = await runtime.store.createProduct({ adminId, accountId: account.id, title: '自动化 API 商品', status: 'published' });
   const second = await runtime.store.createProduct({ adminId, accountId: account.id, title: '批量 API 商品', status: 'published' });
-  const associationOnlyProduct = await runtime.store.createProduct({ adminId, accountId: account.id, title: '仅关联 API 商品', status: 'published' });
-  const coupon = await runtime.store.createCouponBatch({ adminId, accountId: account.id, label: '自动化 API 卡券', purpose: 'text', deliveryScope: 'buyer_deliverable' });
+  const associationOnlyProduct = await runtime.store.createProduct({ adminId, accountId: account.id, title: '关联 API 商品', status: 'published' });
+  const coupon = await runtime.store.createCouponBatch({ adminId, accountId: account.id, label: '自动化 API 卡券', purpose: 'text' });
   await runtime.store.importCouponItems({ adminId, batchId: coupon.id, contents: ['api-coupon-1'] });
-  const associationOnlyCoupon = await runtime.store.createCouponBatch({ adminId, accountId: account.id, label: '仅关联 API 卡券', purpose: 'text', deliveryScope: 'operator_only' });
+  const associationOnlyCoupon = await runtime.store.createCouponBatch({ adminId, accountId: account.id, label: '关联 API 卡券', purpose: 'text' });
 
   const initial = await request(`/api/v1/products/${product.id}/automation`, { headers: { cookie } });
   assert.equal(initial.response.status, 200);

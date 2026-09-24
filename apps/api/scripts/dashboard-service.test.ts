@@ -15,10 +15,10 @@ test('DashboardService aggregates scoped accounts, orders, products, coupons and
   const otherAccount = await store.createAccount({ adminId: otherAdmin.id, platform: 'xianyu', sellerRef: 'seller-other', displayName: '隔离账号' });
   const product = await store.createProduct({ adminId: admin.id, accountId: account.id, title: '资料包', status: 'published' });
   await store.createProduct({ adminId: admin.id, accountId: secondAccount.id, title: '第二账号商品', status: 'published' });
-  const coupon = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: '资料包交付配置', purpose: 'data', deliveryScope: 'buyer_deliverable' });
+  const coupon = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: '资料包交付配置', purpose: 'data' });
   await store.importCouponItems({ adminId: admin.id, batchId: coupon.id, contents: ['A-001', 'A-002', 'A-003'] });
   await store.bindCouponBatch({ adminId: admin.id, batchId: coupon.id, productId: product.id });
-  const secondCoupon = await store.createCouponBatch({ adminId: admin.id, accountId: secondAccount.id, label: '第二账号交付配置', purpose: 'data', deliveryScope: 'buyer_deliverable' });
+  const secondCoupon = await store.createCouponBatch({ adminId: admin.id, accountId: secondAccount.id, label: '第二账号交付配置', purpose: 'data' });
   await store.importCouponItems({ adminId: admin.id, batchId: secondCoupon.id, contents: ['B-001', 'B-002', 'B-003', 'B-004'] });
 
   const now = '2026-09-20T12:00:00.000Z';

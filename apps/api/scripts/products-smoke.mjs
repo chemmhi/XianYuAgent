@@ -39,9 +39,9 @@ try {
     priceMinor: 1990,
     status: 'ready',
   });
-  const activeCouponBatch = await runtime.store.createCouponBatch({ adminId, accountId: account.id, label: '绑定卡券', purpose: 'text', deliveryScope: 'operator_only' });
+  const activeCouponBatch = await runtime.store.createCouponBatch({ adminId, accountId: account.id, label: '绑定卡券', purpose: 'text' });
   await runtime.store.bindCouponBatch({ adminId, batchId: activeCouponBatch.id, productId: product.id });
-  const inactiveCouponBatch = await runtime.store.createCouponBatch({ adminId, accountId: account.id, label: '已解绑卡券', purpose: 'text', deliveryScope: 'operator_only' });
+  const inactiveCouponBatch = await runtime.store.createCouponBatch({ adminId, accountId: account.id, label: '已解绑卡券', purpose: 'text' });
   await runtime.store.bindCouponBatch({ adminId, batchId: inactiveCouponBatch.id, productId: product.id });
   await runtime.store.unbindCouponBatch({ adminId, batchId: inactiveCouponBatch.id, productId: product.id });
 

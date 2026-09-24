@@ -31,7 +31,7 @@ try {
 
   const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
   const imageDataUrl = `data:image/png;base64,${imageBytes.toString('base64')}`;
-  const created = await request('/api/v1/coupons/batches', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-create-1' }, body: JSON.stringify({ accountId: account.id, label: 'Demo cards', purpose: 'text', deliveryScope: 'operator_only', metadata: { description: 'Demo description', textContent: 'Demo content', delaySeconds: 5, dockable: true, price: '9.90', imageUrls: [imageDataUrl] } }) });
+  const created = await request('/api/v1/coupons/batches', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-create-1' }, body: JSON.stringify({ accountId: account.id, label: 'Demo cards', purpose: 'text', metadata: { description: 'Demo description', textContent: 'Demo content', delaySeconds: 5, dockable: true, price: '9.90', imageUrls: [imageDataUrl] } }) });
   assert.equal(created.response.status, 201);
   assert.equal(created.body.data.status, 'active');
   const batchId = created.body.data.batchId;
@@ -71,7 +71,7 @@ try {
   assert.equal(listed.body.data.items[0].metadata.description, 'Edited description');
   assert.equal(listed.body.data.items[0].metadata.textContent, undefined);
 
-  const sortProbe = await request('/api/v1/coupons/batches', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-create-sort-probe' }, body: JSON.stringify({ accountId: account.id, label: 'Sort probe', purpose: 'text', deliveryScope: 'operator_only' }) });
+  const sortProbe = await request('/api/v1/coupons/batches', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-create-sort-probe' }, body: JSON.stringify({ accountId: account.id, label: 'Sort probe', purpose: 'text' }) });
   assert.equal(sortProbe.response.status, 201);
   assert.equal(sortProbe.body.data.batchId, '2');
   const ascending = await request(`/api/v1/coupons/batches?accountId=${account.id}&sortBy=createdAt&sortOrder=asc`, { headers: { cookie } });
@@ -82,7 +82,7 @@ try {
   assert.deepEqual(descending.body.data.items.slice(0, 2).map((item) => item.label), ['Sort probe', 'Demo cards edited']);
 
   const legacyBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
-  const legacyBatch = await runtime.store.createCouponBatch({ adminId, accountId: account.id, label: 'Legacy image batch', purpose: 'image', deliveryScope: 'operator_only', metadata: { imageUrls: [`data:image/png;base64,${legacyBytes.toString('base64')}`] } });
+  const legacyBatch = await runtime.store.createCouponBatch({ adminId, accountId: account.id, label: 'Legacy image batch', purpose: 'image', metadata: { imageUrls: [`data:image/png;base64,${legacyBytes.toString('base64')}`] } });
   const migrated = await request(`/api/v1/coupons/batches/${legacyBatch.sequenceId}`, { headers: { cookie } });
   assert.equal(migrated.response.status, 200);
   assert.equal(migrated.body.data.metadata.imageUrls.length, 1);
@@ -115,12 +115,12 @@ try {
   assert.equal(legacyDetail.response.status, 200);
   assert.equal(legacyDetail.body.data.batchId, batchId);
 
-  const preview = await request(`/api/v1/coupons/${itemId}/content?purpose=preview&deliveryScope=operator_only&couponId=${itemId}`, { headers: { cookie } });
+  const preview = await request(`/api/v1/coupons/${itemId}/content?purpose=preview&couponId=${itemId}`, { headers: { cookie } });
   assert.equal(preview.response.status, 200);
   assert.equal(preview.body.data.access.allowed, true);
   assert.equal(preview.body.data.content.body, 'code-a');
 
-  const denied = await request(`/api/v1/coupons/${itemId}/content?purpose=delivery&deliveryScope=operator_only&couponId=${itemId}`, { headers: { cookie } });
+  const denied = await request(`/api/v1/coupons/${itemId}/content?purpose=delivery&couponId=${itemId}`, { headers: { cookie } });
   assert.equal(denied.response.status, 200);
   assert.equal(denied.body.data.access.allowed, false);
   assert.equal(denied.body.data.access.denialReason, 'purpose_not_allowed');
@@ -158,7 +158,7 @@ try {
   const forbiddenImport = await request(`/api/v1/coupons/batches/${batchId}/items/import`, { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-import-2' }, body: JSON.stringify({ items: ['code-c'] }) });
   assert.equal(forbiddenImport.response.status, 409);
   assert.equal(forbiddenImport.body.error.code, 'CONFLICT');
-  const secondCreated = await request('/api/v1/coupons/batches', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-create-2' }, body: JSON.stringify({ accountId: account.id, label: 'Second cards', purpose: 'text', deliveryScope: 'operator_only' }) });
+  const secondCreated = await request('/api/v1/coupons/batches', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-create-2' }, body: JSON.stringify({ accountId: account.id, label: 'Second cards', purpose: 'text' }) });
   assert.equal(secondCreated.response.status, 201);
   assert.equal(secondCreated.body.data.batchId, '1');
   const newestFirst = await request(`/api/v1/coupons/batches?accountId=${account.id}`, { headers: { cookie } });

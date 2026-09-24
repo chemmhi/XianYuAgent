@@ -7,7 +7,6 @@ const detail: CouponBatchVM = {
   accountId: 'account-1',
   label: '测试卡券',
   purpose: 'text',
-  deliveryScope: 'operator_only',
   status: 'active',
   version: 2,
   updatedAt: '2026-09-23T00:00:00.000Z',

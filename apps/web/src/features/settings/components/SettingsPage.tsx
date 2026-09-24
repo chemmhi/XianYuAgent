@@ -125,7 +125,7 @@ function ReferencePanel({ tab, onOpenCredentials }: { tab: Exclude<TabKey, 'cred
   const content: Record<Exclude<TabKey, 'credentials'>, { title: string; description: string; rows: Array<[string, string, string]> }> = {
     autoReply: { title: '自动回复 Agent', description: '买家侧 Agent 配置已独立保存，保存后下一条消息读取最新配置。', rows: [['配置范围', '买家侧自动回复', '独立'], ['工具权限', '四个只读工具', '受控'], ['发送模式', '模拟发送 / 白名单真实发送', '策略'] ] },
     model: { title: 'OpenAI API 兼容模型配置', description: 'ModelClient 只消费 CredentialRef，不在页面回显明文 API Key。', rows: [['当前配置', 'openai-compatible / primary', '已脱敏'], ['Secret', 'secret_store_ref:model_api_key_primary', '不可查看'], ['生效规则', '保存后由运行时读取引用', '受控'] ] },
-    safety: { title: '安全输出校验', description: '买家输入按不可信内容处理，凭证、Cookie 和内部配置永不进入买家链路。', rows: [['Prompt Injection', '拦截', '高优先级'], ['凭证泄露', '拦截', '高优先级'], ['非订单交付', '校验 buyer_deliverable', '策略'] ] },
+    safety: { title: '安全输出校验', description: '买家输入按不可信内容处理，凭证、Cookie 和内部配置永不进入买家链路。', rows: [['Prompt Injection', '拦截', '高优先级'], ['凭证泄露', '拦截', '高优先级'], ['非订单交付', '按订单条件校验', '策略'] ] },
     outbox: { title: 'Outbox Worker / Execution Runtime', description: '执行队列和运行时恢复属于后续切片，本页只保留高保真状态入口。', rows: [['Worker', 'online · 最近心跳 14:24:08', '正常'], ['队列深度', '7 pending / 128 succeeded today', '运行中'], ['人工确认', '高风险动作确认后才执行', '已开启'] ] },
     plugins: { title: '插件配置', description: 'Skill / Plugin 版本化管理保留为后续独立切片。', rows: [['Policy Plugin', '自动回复与风险策略', '已启用'], ['Executor Plugin', '消息与 Outbox 执行', '已启用'] ] },
   };

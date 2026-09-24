@@ -10,10 +10,10 @@ export function toProductAutomationSaveError(error: unknown): string {
     : undefined;
   const code = typeof payloadError?.code === 'string' ? payloadError.code : '';
   if (code === 'AUTOMATION_VERSION_CONFLICT') return '自动化配置已被其他操作更新，请关闭抽屉后重新打开再保存。';
-  if (status === 409 || code === 'CONFLICT') return '所选卡券状态已发生变化，请重新选择可发货卡券后再保存。';
+  if (status === 409 || code === 'CONFLICT') return '所选卡券状态已发生变化，请重新选择有效卡券后再保存。';
   if (status === 403 || code === 'FORBIDDEN') return '当前管理员没有保存商品自动化配置的权限。';
   if (status === 404 || code === 'NOT_FOUND') return '商品或自动化配置不存在，请刷新商品列表后重试。';
-  if (status === 422 || code === 'VALIDATION_FAILED') return '自动化配置校验失败，请确认启用的发货/赠品规则已选择可发货卡券，且参数完整。';
+  if (status === 422 || code === 'VALIDATION_FAILED') return '自动化配置校验失败，请确认启用的发货/赠品规则已选择有效卡券，且参数完整。';
   if (error instanceof TypeError) return '自动化配置服务暂时不可用，请检查连接后重试。';
   return error instanceof Error && error.message ? error.message : '自动化配置保存失败，请重试。';
 }

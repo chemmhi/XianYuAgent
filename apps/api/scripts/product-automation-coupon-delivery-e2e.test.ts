@@ -21,7 +21,7 @@ async function createHarness(options: { metadata?: Record<string, unknown>; purp
     skuSpec: options.skuSpec, amountMinor: 1299, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'coupon_only',
     createdAt: '2026-09-24T00:00:00.000Z', updatedAt: '2026-09-24T00:00:00.000Z', conversationId: conversation.id, productId: product.id,
   }});
-  const batch = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'E2E 卡券', purpose: options.purpose ?? 'text', deliveryScope: 'buyer_deliverable', metadata: options.metadata });
+  const batch = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'E2E 卡券', purpose: options.purpose ?? 'text', metadata: options.metadata });
   const sentText: string[] = [];
   const sentImages: Array<{ filename: string; contentType: string; data: Buffer }> = [];
   const textRequestIds: string[] = [];
@@ -177,7 +177,7 @@ test('API 超时返回失败且不会发送空卡券', async () => {
 
 test('多规格卡券精确匹配，不匹配时拒绝发货', async () => {
   const harness = await createHarness({ purpose: 'text', metadata: { multiSpec: true, specName: '颜色', specValue: '红色', textContent: '红色卡券' }, skuSpec: '颜色:红色' });
-  const blue = await harness.store.createCouponBatch({ adminId: harness.admin.id, accountId: harness.account.id, label: '蓝色卡券', purpose: 'text', deliveryScope: 'buyer_deliverable', metadata: { multiSpec: true, specName: '颜色', specValue: '蓝色', textContent: '蓝色卡券' } });
+  const blue = await harness.store.createCouponBatch({ adminId: harness.admin.id, accountId: harness.account.id, label: '蓝色卡券', purpose: 'text', metadata: { multiSpec: true, specName: '颜色', specValue: '蓝色', textContent: '蓝色卡券' } });
   const matched = await harness.workflow.handlePaymentPaid({ adminId: harness.admin.id, config: paidConfig([harness.batch.id, blue.id]), order: harness.order, eventId: 'spec-red-event' });
   assert.equal(matched.status, 'succeeded');
   assert.deepEqual(harness.sentText, ['红色卡券']);

@@ -11,7 +11,6 @@ export type ProductSkuStatus = 'active' | 'archived';
 export type ProductAssetStatus = 'active' | 'archived' | 'failed';
 export type ProductSource = 'local' | 'xianyu';
 export type CouponBatchStatus = 'draft' | 'active' | 'paused' | 'closed' | 'voided';
-export type CouponDeliveryScope = 'system_only' | 'operator_only' | 'buyer_deliverable';
 export type CouponItemStatus = 'available' | 'reserved' | 'consumed';
 export type CouponBindingStatus = 'active' | 'inactive';
 export type CouponReservationPurpose = 'delivery' | 'gift';
@@ -456,7 +455,6 @@ export interface CouponBatchRecord {
   accountId: string;
   label?: string;
   purpose: string;
-  deliveryScope: CouponDeliveryScope;
   totalCount: number;
   status: CouponBatchStatus;
   version: number;
@@ -1384,10 +1382,9 @@ export interface Store {
     accountId: string;
     label?: string;
     purpose: string;
-    deliveryScope: CouponDeliveryScope;
     metadata?: CouponBatchMetadata;
   }): Promise<CouponBatchRecord>;
-  updateCouponBatch(input: { adminId: string; batchId: string; patch: { label?: string; purpose?: string; deliveryScope?: CouponDeliveryScope; status?: CouponBatchStatus; metadata?: CouponBatchMetadata } }): Promise<CouponBatchRecord | undefined>;
+  updateCouponBatch(input: { adminId: string; batchId: string; patch: { label?: string; purpose?: string; status?: CouponBatchStatus; metadata?: CouponBatchMetadata } }): Promise<CouponBatchRecord | undefined>;
   importCouponItems(input: { adminId: string; batchId: string; contents: string[] }): Promise<{ batch: CouponBatchRecord; items: CouponItemRecord[]; rejected: Array<{ index: number; code: string; message: string }> }>;
   bindCouponBatch(input: { adminId: string; batchId: string; productId: string }): Promise<CouponBindingRecord>;
   unbindCouponBatch(input: { adminId: string; batchId: string; productId: string }): Promise<CouponBindingRecord | undefined>;

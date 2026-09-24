@@ -1,5 +1,4 @@
 export type CouponBatchStatus = 'draft' | 'active' | 'paused' | 'closed' | 'voided';
-export type DeliveryScope = 'system_only' | 'operator_only' | 'buyer_deliverable';
 export type CouponItemStatus = 'available' | 'reserved';
 
 export interface CouponApiConfigVM { url: string; method: 'GET' | 'POST'; timeout?: number; headers?: string; params?: string; responseField?: string; }
@@ -44,7 +43,6 @@ export interface CouponBatchVM {
   accountId: string;
   label: string;
   purpose: 'text' | 'data' | 'image' | 'api';
-  deliveryScope: DeliveryScope;
   status: CouponBatchStatus;
   version: number;
   updatedAt: string;
@@ -89,7 +87,6 @@ export interface CreateCouponBatchRequest {
   accountId: string;
   label: string;
   purpose: CouponBatchVM['purpose'];
-  deliveryScope: DeliveryScope;
   items?: string[];
   metadata?: CouponMetadataVM;
 }

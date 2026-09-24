@@ -13,7 +13,7 @@ try {
   const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: `automation-pg-${suffix}` });
   const product = await runtime.store.createProduct({ adminId: admin.id, accountId: account.id, externalProductRef: `pg-item-${suffix}`, title: '自动化 PG 商品', status: 'published' });
   const second = await runtime.store.createProduct({ adminId: admin.id, accountId: account.id, title: '自动化 PG 商品 2', status: 'published' });
-  const coupon = await runtime.store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'PG 自动化卡券', purpose: 'text', deliveryScope: 'buyer_deliverable' });
+  const coupon = await runtime.store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'PG 自动化卡券', purpose: 'text' });
   await runtime.store.importCouponItems({ adminId: admin.id, batchId: coupon.id, contents: [`pg-coupon-${suffix}`] });
   const defaultConfig = await runtime.productAutomation.get(admin.id, product.id);
   const configValue = { ...defaultConfig.config, paidAutoDelivery: { ...defaultConfig.config.paidAutoDelivery, enabled: true, couponBatchIds: [coupon.id], autoConfirm: true } };

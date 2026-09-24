@@ -19,13 +19,13 @@ const postParams = [
 ] as const;
 
 export type CouponCreateFormState = {
-  accountId: string; label: string; purpose: CouponBatchVM['purpose']; deliveryScope: CreateCouponBatchRequest['deliveryScope'];
+  accountId: string; label: string; purpose: CouponBatchVM['purpose'];
   textContent: string; dataContent: string; apiUrl: string; apiMethod: 'GET' | 'POST'; apiTimeout: number; apiHeaders: string; apiParams: string; apiResponseField: string; imageUrls: string[]; delaySeconds: number; useNoLogisticsForm: boolean; description: string; feePayer: '' | 'distributor' | 'dealer'; minPrice: string; dockVisibility: 'public' | 'dealer_only'; multiSpec: boolean; specName: string; specValue: string;
 };
 
 function fromBatch(batch?: CouponBatchVM, accountId?: string): CouponCreateFormState {
   const metadata = batch?.metadata;
-  return { accountId: batch?.accountId ?? accountId ?? '', label: batch?.label ?? '', purpose: batch?.purpose ?? 'text', deliveryScope: batch?.deliveryScope ?? 'operator_only', textContent: metadata?.textContent ?? '', dataContent: metadata?.dataContent ?? '', apiUrl: metadata?.apiConfig?.url ?? '', apiMethod: metadata?.apiConfig?.method ?? 'GET', apiTimeout: metadata?.apiConfig?.timeout ?? 60, apiHeaders: metadata?.apiConfig?.headers ?? '', apiParams: metadata?.apiConfig?.params ?? '', apiResponseField: metadata?.apiConfig?.responseField ?? '', imageUrls: metadata?.imageUrls ?? [], delaySeconds: metadata?.delaySeconds ?? 0, useNoLogisticsForm: metadata?.useNoLogisticsForm ?? false, description: metadata?.description ?? '', feePayer: metadata?.feePayer ?? '', minPrice: metadata?.minPrice ?? '', dockVisibility: metadata?.dockVisibility ?? 'public', multiSpec: metadata?.multiSpec ?? false, specName: metadata?.specName ?? '', specValue: metadata?.specValue ?? '' };
+  return { accountId: batch?.accountId ?? accountId ?? '', label: batch?.label ?? '', purpose: batch?.purpose ?? 'text', textContent: metadata?.textContent ?? '', dataContent: metadata?.dataContent ?? '', apiUrl: metadata?.apiConfig?.url ?? '', apiMethod: metadata?.apiConfig?.method ?? 'GET', apiTimeout: metadata?.apiConfig?.timeout ?? 60, apiHeaders: metadata?.apiConfig?.headers ?? '', apiParams: metadata?.apiConfig?.params ?? '', apiResponseField: metadata?.apiConfig?.responseField ?? '', imageUrls: metadata?.imageUrls ?? [], delaySeconds: metadata?.delaySeconds ?? 0, useNoLogisticsForm: metadata?.useNoLogisticsForm ?? false, description: metadata?.description ?? '', feePayer: metadata?.feePayer ?? '', minPrice: metadata?.minPrice ?? '', dockVisibility: metadata?.dockVisibility ?? 'public', multiSpec: metadata?.multiSpec ?? false, specName: metadata?.specName ?? '', specValue: metadata?.specValue ?? '' };
 }
 
 function parseJson(value: string): boolean { if (!value.trim()) return true; try { JSON.parse(value); return true; } catch { return false; } }
@@ -48,7 +48,7 @@ export function validateCouponForm(form: CouponCreateFormState, mode: 'create' |
 
 export function buildCouponPayload(form: CouponCreateFormState, baseMetadata?: CouponMetadataVM): CreateCouponBatchRequest {
   const metadata: CouponMetadataVM = { ...baseMetadata, description: form.description.trim() || undefined, delaySeconds: Math.max(0, form.delaySeconds), useNoLogisticsForm: form.purpose === 'text' && form.useNoLogisticsForm, feePayer: form.feePayer || undefined, minPrice: form.minPrice.trim() || undefined, dockVisibility: form.dockVisibility, multiSpec: form.multiSpec, specName: form.multiSpec ? form.specName.trim() : undefined, specValue: form.multiSpec ? form.specValue.trim() : undefined, textContent: form.purpose === 'text' ? form.textContent.trim() : undefined, dataContent: form.purpose === 'data' ? form.dataContent.trim() : undefined, apiConfig: form.purpose === 'api' ? { url: form.apiUrl.trim(), method: form.apiMethod, timeout: form.apiTimeout, headers: form.apiHeaders.trim() || undefined, params: form.apiParams.trim() || undefined, responseField: form.apiResponseField.trim() || undefined } : undefined, imageUrls: form.imageUrls.slice(0, 3) };
-  return { accountId: form.accountId.trim(), label: form.label.trim(), purpose: form.purpose, deliveryScope: form.deliveryScope, metadata };
+  return { accountId: form.accountId.trim(), label: form.label.trim(), purpose: form.purpose, metadata };
 }
 
 export function CouponCreateModal({ submitting, mode = 'create', batch, accountId, onClose, onSubmit }: { submitting: boolean; mode?: 'create' | 'edit' | 'copy'; batch?: CouponBatchVM; accountId?: string; onClose: () => void; onSubmit: (input: CreateCouponBatchRequest | UpdateCouponBatchRequest) => Promise<void> }) {

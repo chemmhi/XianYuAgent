@@ -13,7 +13,6 @@ const batch: CouponBatchVM = {
   accountId: 'account-001',
   label: '资料包',
   purpose: 'text',
-  deliveryScope: 'operator_only',
   status: 'active',
   version: 1,
   updatedAt: '2026-09-21T00:00:00.000Z',

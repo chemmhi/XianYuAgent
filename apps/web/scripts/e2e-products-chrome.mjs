@@ -104,7 +104,7 @@ async function run() {
   const account = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `products-e2e-${process.pid}`, displayName: 'Chrome 商品账号' });
   const secondaryAccount = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `products-e2e-secondary-${process.pid}`, displayName: 'Secondary 商品账号' });
   const localProduct = await apiRuntime.store.createProduct({ adminId, accountId: account.id, externalProductRef: `ITEM-${process.pid}`, title: 'Chrome E2E 商品', description: '商品详情来自独立 detail API', categoryCode: 'digital', attributes: { source: 'chrome-e2e' }, knowledgeBase: '请用简洁中文回答买家问题。', priceMinor: 3990, status: 'published' });
-  const couponBatch = await apiRuntime.store.createCouponBatch({ adminId, accountId: account.id, label: 'Chrome E2E 卡券', purpose: 'text', deliveryScope: 'operator_only' });
+  const couponBatch = await apiRuntime.store.createCouponBatch({ adminId, accountId: account.id, label: 'Chrome E2E 卡券', purpose: 'text' });
   await apiRuntime.store.bindCouponBatch({ adminId, batchId: couponBatch.id, productId: localProduct.id });
   apiRuntime.xianyu.fetchItemsAll = async () => {
     const items = Array.from({ length: 29 }, (_, index) => ({ externalProductRef: `SYNC-${process.pid}-${index + 1}`, title: `Chrome E2E 同步商品 ${index + 1}`, description: '来自闲鱼同步 fixture', categoryCode: 'digital', priceMinor: 1290 + index, detailUrl: `https://www.goofish.com/item?id=SYNC-${process.pid}-${index + 1}`, imageUrls: ['https://img.example/sync.jpg'], attributes: { source: 'chrome-sync-e2e' }, sourcePayloadDigest: `sync-${process.pid}-${index + 1}` }));

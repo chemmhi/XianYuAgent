@@ -58,7 +58,7 @@
 | `products` | `id UUID`、`accountId`、`title`、`status`、`categoryCode`、`attributesJson`、`defaultReplyTemplate`、`knowledgeBase`、`configVersion` | `description`、`priceMinor`、`categoryCode`、`attributesJson`、`defaultReplyTemplate`、`knowledgeBase` 可空；`attributesJson={}`、`configVersion=1` | PK `id`；FK `accountId`；唯一 `(accountId, externalProductRef)`（外部引用为空时不生效） | `draft -> ready -> publishing -> published/failed/archived`；配置字段随版本审计 |
 | `product_skus` | `id UUID`、`productId`、`skuCode`、`priceMinor`、`status` | `externalSkuRef` 可空 | PK；FK `productId`；唯一 `(productId, skuCode)` | 已售 SKU 不物理删除 |
 | `asset_refs` | `id UUID`、`productId`、`storageKey`、`mimeType`、`status` | `checksum` 可空 | PK；FK `productId`；唯一 `(productId, storageKey)` | 删除产品前必须先归档资产 |
-| `coupon_batches` | `id UUID`、`accountId`、`purpose`、`deliveryScope`、`status`、`totalCount` | `metadata` 可空；`status=active` | PK；FK `accountId` | `active -> exhausted/voided`；voided 不再分配 |
+| `coupon_batches` | `id UUID`、`accountId`、`purpose`、`status`、`totalCount` | `metadata` 可空；`status=active` | PK；FK `accountId` | `active -> exhausted/voided`；voided 不再分配 |
 | `coupon_items` | `id UUID`、`batchId`、`contentCiphertext`、`status` | `reservedUntil`、`consumedAt` 可空 | PK；FK `batchId`；索引 `(batchId, status)` | `available -> reserved -> consumed`；`reserved -> available` 仅超时释放 |
 | `coupon_asset_refs` | `id UUID`、`couponBatchId`、`storageKey`、`mimeType`、`status` | `checksum`、`caption` 可空 | PK；FK `couponBatchId`；唯一 `(couponBatchId, storageKey)` | 素材归档不影响已交付记录 |
 | `coupon_bindings` | `id UUID`、`couponBatchId`、`productId`、`priority`、`status` | `expiresAt` 可空；`priority=0` | PK；FK 批次/商品；唯一 `(couponBatchId, productId)` | 解绑只改状态，不删除已产生的交付记录 |
@@ -170,9 +170,9 @@ DomainEvent 1 --- N AuditEvent / TraceSpan
 | 仪表盘 | `GET /api/v1/dashboard/snapshot?accountId=...`、`GET /api/v1/dashboard/order-trend` | `dashboard` | 只读聚合，不拥有业务事实；snapshot 必须显式带当前账号 `accountId`，缺失返回 `422 VALIDATION_FAILED`，越权返回 `403 FORBIDDEN` |
 | 商品 | `GET/POST/PATCH /api/v1/products...`、`POST /api/v1/products/sync`、`POST /api/v1/products/pull`、`GET /api/v1/products/{id}/assets`、`POST /api/v1/products/{id}/assets`、`PATCH /api/v1/products/{id}/assets/{assetId}`、`DELETE /api/v1/products/{id}/assets/{assetId}`、`POST /api/v1/products/{id}/publish`、`POST /api/v1/products/bulk-publish` | `products/execution` | 支持指定账号分页拉取与全量同步；发布需要 Confirmation + Outbox；批量操作逐项返回结果 |
 | 卡券批次 | `GET/POST /api/v1/coupons/batches`、`GET/PATCH/DELETE /api/v1/coupons/batches/{id}`、`POST /api/v1/coupons/batches/{id}/bind`、`POST /api/v1/coupons/batches/{id}/unbind`、`POST /api/v1/coupons/batches/{id}/items/import`、`POST /api/v1/coupons/batches/{id}/void` | `coupons` | 当前 S4-VS3 列表默认不返回正文，支持 purpose/metadata、单批编辑、批次软删除、绑定/解除绑定和内容导入；`items/bulk-save`、`items/bulk-delete`、`assets` 保留为后续切片契约；绑定校验商品与账号一致；对外 `batchId`/`id` 为从 1 开始的可回收序号，默认按创建时间倒序，内部 UUID 仅用于持久化关联 |
-| 卡券正文 | `GET /api/v1/coupons/{id}/content` | `coupons/policy` | 管理员可通过受控领域接口直接查看、复制和编辑；买家可见交付仍按 `deliveryScope`、订单支付、商品/账号匹配、策略和 Audit 校验 |
+| 卡券正文 | `GET /api/v1/coupons/{id}/content` | `coupons/policy` | 管理员可通过受控领域接口直接查看、复制和编辑；买家可见交付仍按订单支付、商品/账号匹配、策略和 Audit 校验 |
 | 订单查询 | `GET /api/v1/orders`、`GET /api/v1/orders/{orderNo}`、`POST /api/v1/orders/refresh` | `orders` | 支持账号、状态、商品、买家、时间过滤 |
-| 订单动作 | `POST /api/v1/orders/{orderNo}/delivery-preview`、`/deliver`、`/cancel`、`/retry` | `orders/policy/execution` | 受支付、匹配、deliveryScope、幂等和状态机约束 |
+| 订单动作 | `POST /api/v1/orders/{orderNo}/delivery-preview`、`/deliver`、`/cancel`、`/retry` | `orders/policy/execution` | 受支付、匹配、幂等和状态机约束 |
 | 会话与消息 | `GET /api/v1/conversations`、`GET /api/v1/conversations/{id}/messages`、`POST /api/v1/conversations/{id}/messages`、`POST /api/v1/conversations/{id}/images`、`POST /api/v1/conversations/{id}/messages/{messageId}/recall` | `messages` | 图片先入 storage；外部发送结果写回 Message；撤回必须幂等并记录平台结果 |
 | 消息人工接管 | `POST /api/v1/conversations/{id}/handoff`、`POST /api/v1/conversations/{id}/release` | `messages/policy` | `handoff` 切换为人工处理，`release` 恢复 AI；均校验账号范围、会话版本、幂等键和审计；不得让买家看到内部原因 |
 | 实时事件 | `WS /api/v1/conversations/{id}/events`、`WS /api/v1/workspace/runs/{id}/events` | `messages/workspace` | 校验 Session、Origin 和账号范围 |
@@ -233,13 +233,11 @@ type ConversationHandlingOutput = {
 
 ## 6. 访问语义与敏感交付
 
-| `deliveryScope` | 管理员 | Workspace / Agent | 闲鱼买家 |
+| 卡券交付 | 管理员 | Workspace / Agent | 闲鱼买家 |
 | --- | --- | --- | --- |
-| `system_only` | 可管理 | 仅受控 Runtime/Executor | 禁止 |
-| `operator_only` | 可管理 | 仅显式授权能力 | 禁止 |
-| `buyer_deliverable` | 可管理 | 受策略与订单条件约束 | 仅在全部条件满足后可见 |
+| 有效卡券 | 可管理 | 可按订单与策略选择 | 仅在全部交付条件满足后可见 |
 
-所有 API 先校验服务端 Session，再注入管理员身份与账号范围；前端不能提交更高权限范围。`GET /coupons/{id}/content` 与交付接口分离：批次列表不返回正文，正文读取必须通过 purpose、deliveryScope、账号范围和审计校验。买家交付必须同时满足：`deliveryScope=buyer_deliverable`、订单已支付、商品与账号匹配、交付配置成功解析、策略校验通过、AuditEvent 已写入。交付 API 只返回交付结果，不返回凭证、Cookie、Token、内部 Trace、Prompt 或系统路径。
+所有 API 先校验服务端 Session，再注入管理员身份与账号范围。`GET /coupons/{id}/content` 与交付接口分离：批次列表不返回正文，正文读取必须通过 purpose、账号范围和审计校验。买家交付必须同时满足：订单已支付、商品与账号匹配、交付配置成功解析、策略校验通过、AuditEvent 已写入。交付 API 只返回交付结果，不返回凭证、Cookie、Token、内部 Trace、Prompt 或系统路径。
 
 ## 7. 鉴权、并发与安全边界
 
@@ -271,7 +269,7 @@ type ConversationHandlingOutput = {
 - S2-I001：`unknown` 仅作为 `externalOutcome`，不新增 Outbox 状态；
 - S2-I002：幂等作用域为 `adminId + accountId + route + Idempotency-Key`，默认保留 30 天；
 - S2-I003：SameSite=Lax、CSRF 双提交、Origin allowlist、Session 空闲 30 分钟/绝对 8 小时、登录和密码变更后轮换；
-- S2-I004：`system_only / operator_only / buyer_deliverable`、卡券正文读取、交付预览和订单交付 API 全部纳入本阶段；
+- S2-I004：卡券正文读取、交付预览和订单交付 API 全部纳入本阶段；卡券不再区分内部发货范围；
 - S2-I005：CredentialStore CRUD、rotate、revoke、enable、disable 纳入本阶段，管理员拥有绝对管理权限，但不得向闲鱼买家暴露。
 
 ## 10. P0 覆盖补充映射
@@ -318,7 +316,7 @@ type ConversationHandlingOutput = {
 | `S4-VS3A` 卡券明细/素材 | `POST /coupons/batches/{id}/items/bulk-save`、`/items/bulk-delete`、`/assets` | CouponItem 正文、图片和 metadata 分域；批量结果逐项返回；敏感正文只允许管理员受控读取 | 真实 PostgreSQL/MinIO、批量部分成功、403/409、移动端 |
 | `S4-VS3B` 批量数据并发消费 | 领域命令 `reserve/consume/release`，由订单交付服务调用，不由 CouponsPage 直接操作；reservation 只用于幂等与并发控制 | 行级锁/事务保证同一 CouponItem 只被一个交付占用；`reserved → consumed/released` 非法转换可审计 | 并发集成、失败恢复、重启复读、与订单预览联调 |
 | `S4-VS4A` 订单只读 | `GET /orders`、`GET /orders/{orderNo}`、`POST /orders/refresh` | 支付、订单、交付、售后四套状态分开；列表只读；refresh 才调用闲鱼 adapter 并以账号+订单号幂等 upsert | API smoke、真实 PostgreSQL 重启复读、Chrome/CDP 双 viewport、实闲鱼只读读取 |
-| `S4-VS4B` 交付预览 | `POST /orders/{orderNo}/delivery-preview` | 校验支付、商品/账号匹配、`deliveryScope`、交付配置和策略；预览不消费批量数据、不创建交付记录 | VS3B 并发消费、Policy/Confirmation、失败原因可解释 |
+| `S4-VS4B` 交付预览 | `POST /orders/{orderNo}/delivery-preview` | 校验支付、商品/账号匹配、交付配置和策略；预览不消费批量数据、不创建交付记录 | VS3B 并发消费、Policy/Confirmation、失败原因可解释 |
 | `S4-VS4C` 交付动作 | `POST /orders/{orderNo}/deliver|cancel|retry` | `manual/no_logistics/coupon_only/mixed` 分开处理；Idempotency + Outbox + DeliveryRecord；unknown 仅查询/人工恢复 | 外部 adapter、worker、重复提交/超时/取消/人工恢复 |
 
 ### 12.1 迁移与兼容要求
