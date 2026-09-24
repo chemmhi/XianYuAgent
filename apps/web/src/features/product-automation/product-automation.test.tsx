@@ -149,6 +149,24 @@ describe('product automation components', () => {
     expect(html).toContain('未选择赠品卡券');
   });
 
+  it('keeps configured delivery coupons when the product list has no binding rows', async () => {
+    const api = createMockProductAutomationApi();
+    const config = await api.getConfig(product.id);
+    const html = renderToStaticMarkup(createElement(AutomationDrawer, {
+      open: true,
+      product: { ...product, couponBatches: [] },
+      config,
+      coupons: MOCK_AUTOMATION_COUPONS,
+      loadPhase: 'success',
+      savePhase: 'idle',
+      error: null,
+      onClose: vi.fn(),
+      onSave: vi.fn(async () => config),
+    }));
+    expect(html).toContain('批量数据2');
+    expect(html).toContain('已选发货卡券');
+  });
+
   it('renders the delivery auto-confirm switch and preserves its saved state', () => {
     const savedConfig = {
       productId: product.id,
