@@ -106,7 +106,7 @@ const runtime = createApp(loadConfig({
   AGENT_RUNTIME: 'in-process',
   WIRE_API: 'responses',
   AUTO_REPLY_SEND_MODE: 'simulate',
-  AUTO_REPLY_TEST_BUYER_NAMES: JSON.stringify(['一只橘喵喵亮晶晶']),
+  AUTOMATION_BUYER_ALLOWLIST: JSON.stringify(['一只橘喵喵亮晶晶']),
   AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
   AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS: '0',
 }));

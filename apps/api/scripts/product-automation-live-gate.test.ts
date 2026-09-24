@@ -45,18 +45,18 @@ test('product automation live config defaults to blocked with an empty buyer all
   const config = loadConfig({});
   assert.equal(config.productAutomationExecutionMode, 'simulate');
   assert.equal(config.productAutomationLiveConfirmed, false);
-  assert.deepEqual(config.productAutomationBuyerAllowlist, []);
+  assert.deepEqual(config.buyerAllowlist, []);
 });
 
 test('product automation reuses the buyer allowlist and normalizes presentation whitespace', () => {
   const config = loadConfig({
     PRODUCT_AUTOMATION_EXECUTION_MODE: 'live',
     PRODUCT_AUTOMATION_LIVE_CONFIRMED: 'true',
-    AUTO_REPLY_TEST_BUYER_NAMES: '[" 买家\\nA ", "买家 A"]',
+    AUTOMATION_BUYER_ALLOWLIST: '[" 买家\\nA ", "买家 A"]',
   });
   assert.equal(config.productAutomationExecutionMode, 'live');
   assert.equal(config.productAutomationLiveConfirmed, true);
-  assert.deepEqual(config.productAutomationBuyerAllowlist, ['买家 A']);
+  assert.deepEqual(config.buyerAllowlist, ['买家 A']);
   assert.equal(normalizeAutomationBuyerName(' 买家\nA '), '买家 A');
   assert.deepEqual(parseProductAutomationBuyerAllowlist('[" 买家 ", "买家"]'), ['买家']);
 });

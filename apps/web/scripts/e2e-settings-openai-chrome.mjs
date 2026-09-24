@@ -259,7 +259,7 @@ async function run() {
     AGENT_RUNTIME: 'in-process',
     AUTO_REPLY_MODEL_ENABLED: 'false',
     AUTO_REPLY_SEND_MODE: 'simulate',
-    AUTO_REPLY_TEST_BUYER_NAMES: JSON.stringify(['Buyer E2E']),
+    AUTOMATION_BUYER_ALLOWLIST: JSON.stringify(['Buyer E2E']),
     AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
     AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS: '0',
   });

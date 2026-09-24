@@ -25,7 +25,7 @@ try {
   assert.ok(order, 'order not found in the scoped local store');
   assert.equal(order.accountId, accountId);
   assert.ok(order.productId, 'order is not linked to a local product');
-  const normalizedBuyerNames = config.autoReplyTestBuyerNames.map(normalizeAutomationBuyerName);
+  const normalizedBuyerNames = (config.buyerAllowlist ?? []).map(normalizeAutomationBuyerName);
   assert.ok(normalizedBuyerNames.includes(normalizeAutomationBuyerName(order.buyerName)), 'order buyer is not in the configured buyer allowlist');
   const automation = await runtime.productAutomation.get(adminId, order.productId);
   assert.equal(automation.product.accountId, accountId);

@@ -26,7 +26,7 @@ export interface AppConfig {
   modelWireApi?: ModelWireApi;
   modelTimeoutMs: number;
   autoReplyModelEnabled?: boolean;
-  /** Buyer-facing Auto Reply Agent config; kept separate from Workspace Agent config. */
+  /** Shared buyer allowlist used by Auto Reply and product automation. */
   autoReplyAgent?: AutoReplyAgentRuntimeConfig;
   credentialEncryptionKey: string;
   objectStorageEndpoint: string;
@@ -36,11 +36,10 @@ export interface AppConfig {
   objectStorageBucket: string;
   objectStorageRegion: string;
   autoReplySendMode?: AutoReplySendMode;
-  autoReplyTestBuyerNames?: string[];
+  buyerAllowlist?: string[];
   /** Product automation external writes remain blocked until all live gates pass. */
   productAutomationExecutionMode: ProductAutomationExecutionMode;
   productAutomationLiveConfirmed: boolean;
-  productAutomationBuyerAllowlist: string[];
   autoReplyRepairMode?: AutoReplyRepairMode;
   autoReplyPolicyJson?: string;
   autoReplyOutcomeReviewWorkerEnabled: boolean;
@@ -66,10 +65,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const autoReplySendMode: AutoReplySendMode = env.AUTO_REPLY_SEND_MODE?.trim().toLowerCase() === 'live' ? 'live' : 'simulate';
   const autoReplyRepairMode = resolveAutoReplyRepairMode(env.AUTO_REPLY_REPAIR_MODE);
   const autoReplyOutcomeReviewWorkerEnabled = asBoolean(env.AUTO_REPLY_OUTCOME_REVIEW_WORKER_ENABLED, true);
-  const autoReplyTestBuyerNames = parseBuyerNames(env.AUTO_REPLY_TEST_BUYER_NAMES);
+  const buyerAllowlist = parseBuyerNames(env.AUTOMATION_BUYER_ALLOWLIST);
   const autoReplyAgent = resolveAutoReplyAgentConfig(env);
-  const productAutomationLive = resolveProductAutomationLiveConfig(env, autoReplyTestBuyerNames);
-  if (autoReplySendMode === 'live' && autoReplyTestBuyerNames.length === 0) {
+  const productAutomationLive = resolveProductAutomationLiveConfig(env, buyerAllowlist);
+  if (autoReplySendMode === 'live' && buyerAllowlist.length === 0) {
     throw new Error('AUTO_REPLY_LIVE_REQUIRES_BUYER_ALLOWLIST');
   }
   const configuredRuntime = env.AGENT_RUNTIME?.trim().toLowerCase();
@@ -104,7 +103,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     objectStorageBucket: env.OBJECT_STORAGE_BUCKET?.trim() || 'xianyu-assets',
     objectStorageRegion: env.OBJECT_STORAGE_REGION?.trim() || 'us-east-1',
     autoReplySendMode,
-    autoReplyTestBuyerNames,
+    buyerAllowlist,
     autoReplyRepairMode,
     autoReplyPolicyJson: env.AUTO_REPLY_POLICY_JSON?.trim() || undefined,
     autoReplyOutcomeReviewWorkerEnabled,
@@ -114,7 +113,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     autoReplyAgent,
     productAutomationExecutionMode: productAutomationLive.executionMode,
     productAutomationLiveConfirmed: productAutomationLive.liveConfirmed,
-    productAutomationBuyerAllowlist: productAutomationLive.buyerAllowlist,
   };
 }
 

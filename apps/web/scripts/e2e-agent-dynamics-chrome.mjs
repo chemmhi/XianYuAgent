@@ -120,7 +120,7 @@ async function run() {
     return new Response(JSON.stringify({ model: body.model, choices: [{ message }] }), { status: 200, headers: { 'content-type': 'application/json' } });
   });
   try {
-    apiRuntime = createApp({ host: '127.0.0.1', port: apiPort, databaseUrl, cookieSecure: false, allowInMemory: false, sessionIdleMs: 1_800_000, sessionAbsoluteMs: 28_800_000, xianyuQrMode: 'stub', modelApiKey: 'agent-dynamics-chrome-key', modelBaseUrl: 'https://model.example/v1', modelName: 'agent-dynamics-chrome', modelWireApi: 'chat', modelTimeoutMs: 5_000, autoReplyModelEnabled: true, autoReplySendMode: 'simulate', autoReplyTestBuyerNames: ['Agent Dynamics Buyer'] });
+    apiRuntime = createApp({ host: '127.0.0.1', port: apiPort, databaseUrl, cookieSecure: false, allowInMemory: false, sessionIdleMs: 1_800_000, sessionAbsoluteMs: 28_800_000, xianyuQrMode: 'stub', modelApiKey: 'agent-dynamics-chrome-key', modelBaseUrl: 'https://model.example/v1', modelName: 'agent-dynamics-chrome', modelWireApi: 'chat', modelTimeoutMs: 5_000, autoReplyModelEnabled: true, autoReplySendMode: 'simulate', buyerAllowlist: ['Agent Dynamics Buyer'] });
     await apiRuntime.listen();
     const admin = await apiRuntime.store.createAdmin({ email: `agent-dynamics-e2e-${process.pid}@example.com`, passwordHash: await hashPassword('password-123'), displayName: 'Agent Dynamics E2E' });
     adminId = admin.id;

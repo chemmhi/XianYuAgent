@@ -28,7 +28,7 @@ try {
     host: '127.0.0.1', port: 0, databaseUrl, cookieSecure: false, allowInMemory: false,
     sessionIdleMs: 1_800_000, sessionAbsoluteMs: 28_800_000, xianyuQrMode: 'stub',
     modelApiKey: 'agent-dynamics-postgres-key', modelBaseUrl: 'https://model.example/v1', modelName: 'agent-dynamics-postgres', modelWireApi: 'chat', modelTimeoutMs: 5_000,
-    autoReplyModelEnabled: true, autoReplySendMode: 'simulate', autoReplyTestBuyerNames: ['Agent Dynamics Buyer'],
+    autoReplyModelEnabled: true, autoReplySendMode: 'simulate', buyerAllowlist: ['Agent Dynamics Buyer'],
   });
   await runtime.listen();
   const admin = await runtime.store.createAdmin({ email, passwordHash: 'hash', displayName: 'Agent Dynamics PG' });

@@ -35,7 +35,7 @@ const config = {
   modelTimeoutMs: 5_000,
   autoReplyModelEnabled: true,
   autoReplySendMode: 'simulate',
-  autoReplyTestBuyerNames: ['Auto Reply PostgreSQL Buyer'],
+  buyerAllowlist: ['Auto Reply PostgreSQL Buyer'],
   autoReplyRepairMode: 'enforce',
 };
 

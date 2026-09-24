@@ -163,7 +163,7 @@ test('agent resolves latest persisted config and falls back without restart', as
     return new Response(JSON.stringify({ model: 'runtime-model', output_text: JSON.stringify({ decision: 'reply', text }) }), { status: 200, headers: { 'content-type': 'application/json' } });
   }) as typeof fetch;
 
-  const runtime = createApp(loadConfig({ HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["Buyer"]', AUTO_REPLY_AGENT_DEBOUNCE_MS: '0' }));
+  const runtime = createApp(loadConfig({ HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_SEND_MODE: 'simulate', AUTOMATION_BUYER_ALLOWLIST: '["Buyer"]', AUTO_REPLY_AGENT_DEBOUNCE_MS: '0' }));
   const admin = await runtime.store.createAdmin({ email: `agent-openai-${Date.now()}@example.com`, passwordHash: 'hash', displayName: 'Agent OpenAI' });
   const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: `agent-openai-${Date.now()}` });
   const conversation = await runtime.store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'buyer-openai', buyerDisplayName: 'Buyer', externalConversationRef: `conversation-openai-${Date.now()}` });

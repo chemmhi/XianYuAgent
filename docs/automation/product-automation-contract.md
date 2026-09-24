@@ -109,4 +109,4 @@
 
 当前仍未完成真实账号、订单和 IM 会话的 live mutation 验收；MTOP/IM 契约测试、白名单零副作用测试、Memory/Postgres reservation 并发/过期测试已通过。没有明确的测试账号、订单号和人工确认前，不执行真实发货、改价或发消息。
 
-受控真实测试入口为 `npm --workspace apps/api run test:product-automation:live-order`，必须同时提供 `PRODUCT_AUTOMATION_LIVE_TEST=1`、`PRODUCT_AUTOMATION_LIVE_CONFIRM_TEXT="I UNDERSTAND REAL XIANYU MUTATION"`、`PRODUCT_AUTOMATION_EXECUTION_MODE=live`、`PRODUCT_AUTOMATION_LIVE_CONFIRMED=true`、`AUTO_REPLY_TEST_BUYER_NAMES`、`ADMIN_ID`、`ACCOUNT_ID`、`ORDER_NO` 和 `PRODUCT_AUTOMATION_LIVE_ACTION`；脚本会再次读取本地订单并确认买家在白名单内。
+受控真实测试入口为 `npm --workspace apps/api run test:product-automation:live-order`，必须同时提供 `PRODUCT_AUTOMATION_LIVE_TEST=1`、`PRODUCT_AUTOMATION_LIVE_CONFIRM_TEXT="I UNDERSTAND REAL XIANYU MUTATION"`、`PRODUCT_AUTOMATION_EXECUTION_MODE=live`、`PRODUCT_AUTOMATION_LIVE_CONFIRMED=true`、`AUTOMATION_BUYER_ALLOWLIST`、`ADMIN_ID`、`ACCOUNT_ID`、`ORDER_NO` 和 `PRODUCT_AUTOMATION_LIVE_ACTION`；脚本会再次读取本地订单并确认买家在白名单内。

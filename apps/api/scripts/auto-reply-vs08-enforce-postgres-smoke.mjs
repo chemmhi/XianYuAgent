@@ -37,7 +37,7 @@ try {
     xianyuQrMode: 'stub',
     autoReplyModelEnabled: false,
     autoReplySendMode: 'simulate',
-    autoReplyTestBuyerNames: ['AR-VS-08 PostgreSQL 买家'],
+    buyerAllowlist: ['AR-VS-08 PostgreSQL 买家'],
     autoReplyRepairMode: 'enforce',
     autoReplyPolicyJson: undefined,
     autoReplyOutcomeReviewWorkerEnabled: false,

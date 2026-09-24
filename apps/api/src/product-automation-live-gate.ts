@@ -37,7 +37,7 @@ export function parseProductAutomationBuyerAllowlist(value: string | undefined):
   return [...new Set(normalized)];
 }
 
-export function resolveProductAutomationLiveConfig(env: NodeJS.ProcessEnv, buyerAllowlist = parseProductAutomationBuyerAllowlist(env.AUTO_REPLY_TEST_BUYER_NAMES)): ProductAutomationLiveConfig {
+export function resolveProductAutomationLiveConfig(env: NodeJS.ProcessEnv, buyerAllowlist = parseProductAutomationBuyerAllowlist(env.AUTOMATION_BUYER_ALLOWLIST)): ProductAutomationLiveConfig {
   const executionMode: ProductAutomationExecutionMode = env.PRODUCT_AUTOMATION_EXECUTION_MODE?.trim().toLowerCase() === 'live' ? 'live' : 'simulate';
   return {
     executionMode,
