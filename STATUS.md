@@ -1,4 +1,20 @@
 # XianyuSellerAgent 项目状态
+## 2026-09-24 闲鱼滑块算法迁移（待复核）
+- 目标：将 `.review-xianyu-super-butler/slider_algorithm` 的轨迹与页面流程迁移到 `apps/api`，复用原生 Chrome/CDP，不引入 Playwright。
+- 实现：新增 `xianyu-slider-trajectory.ts` 与 `xianyu-slider-solver.ts`；验证浏览器新增 `XIANYU_VERIFICATION_SLIDER_MODE=auto` 可选接入，失败自动回退人工验证。
+- 验证：API typecheck、API build、5 个滑块单元/受控 Chrome-CDP 测试、`git diff --check` 通过。
+- 未验证：真实闲鱼外部风控挑战、生产浏览器 profile 和真实账号登录；这些仍需人工复核。
+- 状态：`READY_FOR_REVIEW`，尚未合并到 `main`。
+
+
+## 2026-09-24 QR 验证浏览器协同接入
+
+- 目标：QR 登录遇到 `verification_required` 时，支持通过可配置的有头/无头 Chrome CDP 打开验证页；用户完成验证后自动读取浏览器 Cookie，继续 QR 登录流程。
+- 非目标：不计算第三方验证码缺口、不生成拟人拖动轨迹、不绕过闲鱼反自动化校验。
+- 受影响模块：`apps/api/src/xianyu-verification-browser.ts`（浏览器启动/连接、CDP 状态检测、Cookie 读取）、`apps/api/src/xianyu-qr-login.ts`（验证完成后的 Cookie 合并与成功回调）、`apps/api/src/config.ts` / `.env.example`（运行时配置）、`apps/web/src/features/accounts/qr-login/*`（验证期间继续轮询）。
+- 已验证：API/Web typecheck；API/Web build；API 62 项既有测试与 smoke；Web 88 files / 314 tests；新增验证浏览器单测 3 项；QR 验证浏览器回归 1 项；本机 Chrome/CDP 夹具 1 项；`git diff --check`。
+- 未验证：真实闲鱼账号上的外部挑战、人机交互和生产浏览器 profile；需要在受控账号上人工复核，不能用本地夹具替代。
+- 状态：`READY_FOR_REVIEW`。
 
 ## 2026-09-25 QR 扫码登录失败根因修复
 

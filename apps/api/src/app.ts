@@ -11,6 +11,7 @@ import { createStore } from './store.js';
 import type { ProductListResult, ProductRecord, Store } from './domain.js';
 import { createId, digestJson } from './security.js';
 import { XianyuQrLoginAdapter, type XianyuQrPublicSession } from './xianyu-qr-login.js';
+import { XianyuVerificationBrowser } from './xianyu-verification-browser.js';
 import { XianyuMtopClient } from './xianyu-mtop.js';
 import { metadataWithCookieSnapshot } from './xianyu-cookie-jar.js';
 import { XianyuImService } from './xianyu-im-service.js';
@@ -215,7 +216,20 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     requireRepairRuntime: true,
   });
   let productSync: ProductSyncService;
+  const verificationBrowser = config.xianyuVerificationBrowserMode === 'disabled'
+    ? undefined
+    : new XianyuVerificationBrowser({
+      mode: config.xianyuVerificationBrowserMode,
+      sliderMode: config.xianyuVerificationSliderMode,
+      sliderMaxRetries: config.xianyuVerificationSliderMaxRetries,
+      headless: config.xianyuVerificationBrowserHeadless,
+      executablePath: config.xianyuVerificationBrowserExecutablePath,
+      debugPort: config.xianyuVerificationBrowserDebugPort,
+      userDataDir: config.xianyuVerificationBrowserUserDataDir,
+      maxWaitMs: config.xianyuVerificationBrowserMaxWaitMs,
+    });
   const qrLogin = new XianyuQrLoginAdapter({
+    verificationBrowser,
     onStatus: async (status) => {
       const localStatus = mapQrStatusToLoginStatus(status.status);
       if (!localStatus) return;
@@ -789,7 +803,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     const local = await accounts.getLoginSessionById({ adminId: authContext.admin.id, sessionId });
     const external = runtime.qrLogin.get(sessionId);
     const terminal = ['succeeded', 'cancelled', 'failed', 'expired'].includes(local.status);
-    return { statusCode: 200, body: success(ctx, external ? { ...toQrSessionView(local), qrImageDataUrl: external.qrImageDataUrl, pollAfterMs: external.pollAfterMs, expiresAt: external.expiresAt, status: terminal ? local.status : external.status, errorCode: terminal ? local.failureCode : external.errorCode, verificationUrl: external.verificationUrl } : toQrSessionView(local)).body };
+    return { statusCode: 200, body: success(ctx, external ? { ...toQrSessionView(local), qrImageDataUrl: external.qrImageDataUrl, pollAfterMs: external.pollAfterMs, expiresAt: external.expiresAt, status: terminal ? local.status : external.status, errorCode: terminal ? local.failureCode : external.errorCode, verificationUrl: external.verificationUrl, verificationAutoLaunch: external.verificationAutoLaunch } : toQrSessionView(local)).body };
   }
   const globalQrAction = ctx.path.match(/^\/api\/v1\/auth\/qr-sessions\/([^/]+)\/(cancel|renew)$/);
   if (globalQrAction && ctx.method === 'POST') {
@@ -899,7 +913,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
       const local = await accounts.getLoginSession({ adminId: authContext.admin.id, accountId, sessionId });
       const external = runtime.qrLogin.get(sessionId);
       const terminal = ['succeeded', 'cancelled', 'failed', 'expired'].includes(local.status);
-      return { statusCode: 200, body: success(ctx, external ? { ...toQrSessionView(local), qrImageDataUrl: external.qrImageDataUrl, pollAfterMs: external.pollAfterMs, expiresAt: external.expiresAt, status: terminal ? local.status : external.status, errorCode: terminal ? local.failureCode : external.errorCode, verificationUrl: external.verificationUrl } : local).body };
+      return { statusCode: 200, body: success(ctx, external ? { ...toQrSessionView(local), qrImageDataUrl: external.qrImageDataUrl, pollAfterMs: external.pollAfterMs, expiresAt: external.expiresAt, status: terminal ? local.status : external.status, errorCode: terminal ? local.failureCode : external.errorCode, verificationUrl: external.verificationUrl, verificationAutoLaunch: external.verificationAutoLaunch } : local).body };
     }
     if (sessionId && loginSessionMatch[3] === 'cancel' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, accountId, async () => { runtime.qrLogin.cancel(sessionId); return success(ctx, await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId, sessionId, patch: { status: 'cancelled', completedAt: new Date().toISOString() }, requestId: ctx.requestId, traceId: ctx.traceId })); });
     if (sessionId && loginSessionMatch[3] === 'renew' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, accountId, async () => {

@@ -10,6 +10,7 @@ export interface QrLoginSessionVM {
   qrImageDataUrl?: string;
   qrImageRef?: string;
   verificationUrl?: string;
+  verificationAutoLaunch?: boolean;
   expiresAt: string;
   pollAfterMs: number;
   connection?: AccountConnectionVM;
@@ -31,7 +32,8 @@ export interface QrLoginModel {
 
 export function createInitialQrLoginModel(): QrLoginModel { return { phase: 'idle', session: null, error: null }; }
 
-export function isTerminalQrStatus(status: QrLoginStatus): boolean {
+export function isTerminalQrStatus(status: QrLoginStatus, options?: { verificationAutoLaunch?: boolean }): boolean {
+  if (status === 'verification_required' && options?.verificationAutoLaunch) return false;
   return ['succeeded', 'expired', 'failed', 'cancelled', 'verification_required'].includes(status);
 }
 

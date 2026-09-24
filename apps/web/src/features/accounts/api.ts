@@ -49,7 +49,7 @@ interface CanonicalAccountResponse {
 
 interface CanonicalAccountsPayload { items?: CanonicalAccountResponse[]; total?: number; page?: number; pageSize?: number; totalPages?: number; }
 interface ApiEnvelope<T> { success: boolean; data: T | null; error?: { code?: string; details?: unknown }; message?: string | null; }
-interface CanonicalQrSessionResponse { id?: string; qrSessionId?: string; accountId?: string; status: string; qrImageDataUrl?: string; qrImageRef?: string; verificationUrl?: string; expiresAt: string; pollAfterMs?: number; connection?: AccountConnectionVM; errorCode?: string; auditRef?: string; }
+interface CanonicalQrSessionResponse { id?: string; qrSessionId?: string; accountId?: string; status: string; qrImageDataUrl?: string; qrImageRef?: string; verificationUrl?: string; verificationAutoLaunch?: boolean; expiresAt: string; pollAfterMs?: number; connection?: AccountConnectionVM; errorCode?: string; auditRef?: string; }
 
 function unwrapEnvelope<T>(payload: T | ApiEnvelope<T>): T {
   if (payload && typeof payload === 'object' && 'success' in payload && 'data' in payload) {
@@ -96,7 +96,7 @@ function toQrLoginStatus(status: string): QrLoginStatus {
 function toQrLoginSession(payload: CanonicalQrSessionResponse): QrLoginSessionVM {
   const qrSessionId = payload.qrSessionId ?? payload.id;
   if (!qrSessionId) throw new Error('QR_SESSION_ID_MISSING');
-  return { qrSessionId, accountId: payload.accountId, status: toQrLoginStatus(payload.status), qrImageDataUrl: payload.qrImageDataUrl, qrImageRef: payload.qrImageRef, verificationUrl: payload.verificationUrl, expiresAt: payload.expiresAt, pollAfterMs: payload.pollAfterMs ?? 1500, connection: payload.connection, errorCode: payload.errorCode, auditRef: payload.auditRef };
+  return { qrSessionId, accountId: payload.accountId, status: toQrLoginStatus(payload.status), qrImageDataUrl: payload.qrImageDataUrl, qrImageRef: payload.qrImageRef, verificationUrl: payload.verificationUrl, verificationAutoLaunch: payload.verificationAutoLaunch, expiresAt: payload.expiresAt, pollAfterMs: payload.pollAfterMs ?? 1500, connection: payload.connection, errorCode: payload.errorCode, auditRef: payload.auditRef };
 }
 
 function unwrapQrSession(payload: CanonicalQrSessionResponse | ApiEnvelope<CanonicalQrSessionResponse>): QrLoginSessionVM { return toQrLoginSession(unwrapEnvelope(payload)); }

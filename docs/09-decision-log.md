@@ -5,6 +5,13 @@
 
 ## 已确认决策
 
+### 2026-09-24 滑块算法迁移与服务器适配
+
+1. 轨迹生成与页面控制拆成两个 TypeScript 模块，浏览器生命周期继续由 `XianyuVerificationBrowser` 管理。
+2. 正式服务使用原生 Chrome/CDP 的 `Runtime.evaluate` 和 `Input.dispatchMouseEvent`，不把 Playwright 加入 API 生产依赖。
+3. 自动滑块默认关闭；只有显式设置 `XIANYU_VERIFICATION_SLIDER_MODE=auto` 才执行，失败保留 `verification_required` 并允许人工完成。
+4. 服务器部署要求可执行 Chrome/Edge 与 CDP 端口；无头浏览器只作为受控测试或专用验证容器选项，真实外部风控仍需人工验收。
+
 ### 2026-09-25 QR 登录成功边界与 IM listener 解耦
 
 1. 二维码登录的成功条件是闲鱼确认后的 Cookie 校验和账号资料同步；IM WebSocket/token bootstrap 属于后置能力，不得阻断 QR 会话成功落库。

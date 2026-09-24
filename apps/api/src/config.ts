@@ -4,6 +4,8 @@ import { resolveAutoReplyAgentConfig, type AutoReplyAgentRuntimeConfig } from '.
 import { DEFAULT_PI_WIRE_API, type ModelWireApi } from './pi-runtime.js';
 import { resolveProductAutomationLiveConfig, type ProductAutomationExecutionMode } from './product-automation-live-gate.js';
 import { resolveAutoReplyRepairMode, type AutoReplyRepairMode } from './auto-reply-repair-config.js';
+import type { XianyuVerificationBrowserMode } from './xianyu-verification-browser.js';
+import type { XianyuSliderMode } from './xianyu-slider-solver.js';
 
 export type AgentRuntimeMode = 'pi' | 'in-process';
 export type AutoReplySendMode = 'simulate' | 'live';
@@ -18,6 +20,14 @@ export interface AppConfig {
   sessionIdleMs: number;
   sessionAbsoluteMs: number;
   xianyuQrMode: 'real' | 'stub';
+  xianyuVerificationBrowserMode: XianyuVerificationBrowserMode;
+  xianyuVerificationSliderMode: XianyuSliderMode;
+  xianyuVerificationSliderMaxRetries: number;
+  xianyuVerificationBrowserHeadless: boolean;
+  xianyuVerificationBrowserExecutablePath?: string;
+  xianyuVerificationBrowserDebugPort?: number;
+  xianyuVerificationBrowserUserDataDir?: string;
+  xianyuVerificationBrowserMaxWaitMs: number;
   webSocketAllowedOrigins: string[];
   agentRuntime: AgentRuntimeMode;
   modelApiKey?: string;
@@ -87,6 +97,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     sessionIdleMs: Number(env.SESSION_IDLE_MINUTES ?? 30) * 60_000,
     sessionAbsoluteMs: Number(env.SESSION_ABSOLUTE_HOURS ?? 8) * 3_600_000,
     xianyuQrMode: env.XIANYU_QR_MODE === 'stub' ? 'stub' : 'real',
+    xianyuVerificationBrowserMode: normalizeVerificationBrowserMode(env.XIANYU_VERIFICATION_BROWSER_MODE),
+    xianyuVerificationSliderMode: normalizeVerificationSliderMode(env.XIANYU_VERIFICATION_SLIDER_MODE),
+    xianyuVerificationSliderMaxRetries: positiveInteger(env.XIANYU_VERIFICATION_SLIDER_MAX_RETRIES, 3),
+    xianyuVerificationBrowserHeadless: asBoolean(env.XIANYU_VERIFICATION_BROWSER_HEADLESS, false),
+    xianyuVerificationBrowserExecutablePath: env.XIANYU_VERIFICATION_BROWSER_EXECUTABLE?.trim() || undefined,
+    xianyuVerificationBrowserDebugPort: positiveIntegerOrUndefined(env.XIANYU_VERIFICATION_BROWSER_DEBUG_PORT),
+    xianyuVerificationBrowserUserDataDir: env.XIANYU_VERIFICATION_BROWSER_USER_DATA_DIR?.trim() || undefined,
+    xianyuVerificationBrowserMaxWaitMs: positiveNumber(env.XIANYU_VERIFICATION_BROWSER_MAX_WAIT_MS, 3 * 60_000),
     webSocketAllowedOrigins: (env.WS_ALLOWED_ORIGINS ?? 'http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080').split(',').map((value) => value.trim()).filter(Boolean),
     agentRuntime,
     modelApiKey,
@@ -130,6 +148,27 @@ function firstDefined(...values: Array<string | undefined>): string | undefined 
 function positiveNumber(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function positiveInteger(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function positiveIntegerOrUndefined(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function normalizeVerificationBrowserMode(value: string | undefined): XianyuVerificationBrowserMode {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === 'launch' || normalized === 'connect') return normalized;
+  return 'disabled';
+}
+
+function normalizeVerificationSliderMode(value: string | undefined): XianyuSliderMode {
+  return value?.trim().toLowerCase() === 'auto' ? 'auto' : 'disabled';
 }
 
 function normalizeBuyerName(value: string): string | undefined {

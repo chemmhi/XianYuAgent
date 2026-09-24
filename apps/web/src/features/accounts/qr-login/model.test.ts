@@ -8,6 +8,8 @@ describe('qr login model', () => {
     expect(phaseForQrStatus('succeeded')).toBe('succeeded');
     expect(isTerminalQrStatus('expired')).toBe(true);
     expect(isTerminalQrStatus('waiting')).toBe(false);
+    expect(isTerminalQrStatus('verification_required')).toBe(true);
+    expect(isTerminalQrStatus('verification_required', { verificationAutoLaunch: true })).toBe(false);
   });
 
   it('provides stable labels and expiry countdowns', () => {

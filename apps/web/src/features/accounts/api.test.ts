@@ -126,6 +126,7 @@ describe('accounts canonical API adapter', () => {
             accountId: 'account-1',
             status: 'verification_required',
             verificationUrl: 'https://passport.goofish.com/verify/challenge',
+            verificationAutoLaunch: true,
             errorCode: 'VERIFICATION_REQUIRED',
             expiresAt: '2026-09-24T00:05:00.000Z',
             pollAfterMs: 1200,
@@ -139,6 +140,7 @@ describe('accounts canonical API adapter', () => {
     expect(session).toMatchObject({
       status: 'verification_required',
       verificationUrl: 'https://passport.goofish.com/verify/challenge',
+      verificationAutoLaunch: true,
       errorCode: 'VERIFICATION_REQUIRED',
     });
   });
