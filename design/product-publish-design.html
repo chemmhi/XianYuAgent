@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>XianYuAgent · 商品发布设计稿</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --card: #ffffff;
+      --sidebar: #1d2638;
+      --sidebar-hover: #253348;
+      --brand: #1f3a5f;
+      --link: #245a8d;
+      --text: #111827;
+      --sub: #6b7280;
+      --muted: #475569;
+      --border: #e5e7eb;
+      --soft-blue: #ebf3fa;
+      --success: #2e7d5b;
+      --success-bg: #eaf4ef;
+      --warn: #b7791f;
+      --warn-bg: #fef3e2;
+      --danger: #b42318;
+      --danger-bg: #fef0ef;
+      --shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+      --font: Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); }
+    body { font-size: 13px; }
+    button, input, textarea, select { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .55; }
+    svg { display: block; }
+
+    .app { min-height: 100vh; display: flex; overflow: hidden; background: var(--bg); }
+    .sidebar { width: 224px; flex: 0 0 224px; min-height: 100vh; display: flex; flex-direction: column; padding: 18px 14px; background: var(--sidebar); color: #fff; }
+    .brand-block { display: flex; align-items: center; gap: 10px; padding: 0 8px 18px; }
+    .brand-mark { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; background: var(--link); color: #fff; }
+    .brand-mark svg { width: 19px; height: 19px; stroke: currentColor; stroke-width: 1.6; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .brand-name { margin: 0; color: #fff; font-size: 13px; font-weight: 750; letter-spacing: -.01em; }
+    .brand-subtitle { margin: 2px 0 0; color: rgba(255,255,255,.38); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+    .nav-label { margin: 10px 10px 6px; color: rgba(255,255,255,.26); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .side-nav { display: grid; gap: 4px; }
+    .side-nav button { min-height: 36px; display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 9px; padding: 8px 10px; border: 0; border-left: 2px solid transparent; border-radius: 6px; background: transparent; color: rgba(255,255,255,.47); text-align: left; font-size: 13px; }
+    .side-nav button:hover { background: var(--sidebar-hover); color: #fff; }
+    .side-nav button.active { background: rgba(36,90,141,.5); border-left-color: var(--link); color: #fff; }
+    .side-nav button small { color: rgba(255,255,255,.28); font-size: 10px; font-weight: 700; }
+    .side-nav button.active small { color: rgba(255,255,255,.72); }
+    .nav-icon { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.5; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .sidebar-spacer { flex: 1; }
+    .agent-card { display: grid; grid-template-columns: 8px 1fr; gap: 7px 8px; align-items: center; padding: 10px; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; background: rgba(255,255,255,.05); }
+    .agent-card .dot { width: 8px; height: 8px; border-radius: 50%; background: #6ee7b7; box-shadow: 0 0 0 3px rgba(110,231,183,.1); }
+    .agent-card strong { color: rgba(255,255,255,.88); font-size: 12px; }
+    .agent-card small { grid-column: 2; color: rgba(255,255,255,.42); font-size: 10px; }
+    .account-chip { display: flex; align-items: center; gap: 9px; margin-top: 10px; padding: 9px 10px; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; background: rgba(255,255,255,.05); }
+    .avatar { width: 28px; height: 28px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 50%; background: #2d5b85; color: #fff; font-size: 12px; font-weight: 800; }
+    .account-chip strong, .account-chip span { display: block; }
+    .account-chip strong { color: #fff; font-size: 12px; }
+    .account-chip span { margin-top: 2px; color: rgba(255,255,255,.42); font-size: 10px; }
+
+    .body { min-width: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; border-left: 1px solid var(--border); }
+    .topbar { height: 56px; flex: 0 0 56px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 28px; border-bottom: 1px solid var(--border); background: #fff; }
+    .breadcrumb { display: flex; align-items: center; gap: 7px; color: var(--sub); font-size: 12px; }
+    .breadcrumb strong { color: var(--text); font-weight: 750; }
+    .breadcrumb .chevron { color: #9ca3af; }
+    .topbar-actions { display: flex; align-items: center; gap: 12px; }
+    .search { width: 230px; display: flex; align-items: center; gap: 8px; padding: 7px 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: #9ca3af; }
+    .search svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 1.5; fill: none; }
+    .search span { font-size: 12px; }
+    .header-status { display: inline-flex; align-items: center; gap: 6px; color: var(--success); font-size: 11px; font-weight: 700; }
+    .header-status i { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+    .main { min-height: 0; flex: 1; overflow: auto; padding: 22px 28px; }
+    .page-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
+    .eyebrow { margin: 0 0 4px; color: var(--sub); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 24px; line-height: 1.12; letter-spacing: -.02em; }
+    .page-subtitle { margin-top: 6px; color: var(--sub); font-size: 12px; line-height: 1.6; }
+    .toolbar-actions { display: flex; align-items: center; gap: 8px; }
+    .btn { min-height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--muted); font-size: 13px; font-weight: 700; }
+    .btn:hover { border-color: #b9c8d9; background: #f8fafc; }
+    .btn.primary { border-color: var(--link); background: var(--link); color: #fff; }
+    .btn.primary:hover { background: #1f4e79; }
+    .btn.ghost { background: transparent; }
+    .btn.warning { border-color: #d8b36a; background: var(--warn-bg); color: var(--warn); }
+    .btn svg { width: 15px; height: 15px; stroke: currentColor; stroke-width: 1.5; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .filters { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .filter-left, .filter-right { display: flex; align-items: center; gap: 8px; }
+    .input, .select { min-height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--text); font-size: 12px; outline: none; }
+    .input:focus, .select:focus, textarea:focus { border-color: #8ea8c3; box-shadow: 0 0 0 3px rgba(36,90,141,.12); }
+    .input.search-input { width: 230px; }
+    .table-card { overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: #fff; box-shadow: var(--shadow); }
+    .table-head, .table-row { display: grid; grid-template-columns: minmax(260px, 1.7fr) 1fr .8fr 1fr 1fr 86px; gap: 12px; align-items: center; padding: 0 14px; }
+    .table-head { min-height: 40px; background: var(--bg); color: var(--sub); font-size: 11px; font-weight: 800; }
+    .table-row { min-height: 68px; border-top: 1px solid var(--border); font-size: 12px; }
+    .product-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .product-thumb { width: 42px; height: 42px; flex: 0 0 auto; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: linear-gradient(135deg,#dbeafe,#eff6ff); color: #245a8d; font-size: 11px; font-weight: 800; }
+    .product-thumb.alt { background: linear-gradient(135deg,#fce7f3,#fff1f2); color: #a13869; }
+    .product-thumb.green { background: linear-gradient(135deg,#dcfce7,#f0fdf4); color: #2e7d5b; }
+    .product-copy { min-width: 0; }
+    .product-copy strong, .product-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .product-copy strong { font-size: 13px; }
+    .product-copy small { margin-top: 3px; color: var(--sub); font-size: 11px; }
+    .status { display: inline-flex; align-items: center; width: fit-content; padding: 3px 8px; border-radius: 999px; font-size: 12px; line-height: 1.5; font-weight: 700; }
+    .status.ready { color: var(--link); background: var(--soft-blue); }
+    .status.published { color: var(--success); background: var(--success-bg); }
+    .status.draft { color: var(--warn); background: var(--warn-bg); }
+    .row-actions { display: flex; justify-content: flex-end; gap: 6px; }
+    .icon-btn { width: 30px; height: 30px; display: inline-grid; place-items: center; border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--muted); }
+    .icon-btn:hover { color: var(--link); border-color: #b9c8d9; background: #f8fafc; }
+    .icon-btn svg { width: 15px; height: 15px; stroke: currentColor; stroke-width: 1.5; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+
+    .overlay { position: fixed; inset: 0; z-index: 30; display: flex; justify-content: flex-end; background: rgba(22,30,44,.28); }
+    .drawer { width: min(790px, 100vw); height: 100%; display: flex; flex-direction: column; overflow: hidden; background: #fff; box-shadow: -14px 0 34px rgba(15,23,42,.18); }
+    .drawer-header { flex: 0 0 auto; display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 20px 24px 17px; border-bottom: 1px solid var(--border); }
+    .drawer-header h2 { margin-top: 3px; font-size: 20px; line-height: 1.35; letter-spacing: -.01em; }
+    .drawer-header p { margin-top: 5px; color: var(--sub); font-size: 12px; line-height: 1.5; }
+    .drawer-header p.eyebrow { margin-top: 0; }
+    .drawer-header-actions { display: flex; align-items: center; gap: 8px; }
+    .close-btn { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--muted); }
+    .close-btn:hover { background: var(--bg); }
+    .close-btn svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.5; fill: none; stroke-linecap: round; }
+    .drawer-body { min-height: 0; flex: 1; overflow: auto; padding: 18px 24px 24px; background: #fff; }
+    .publish-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-items: start; }
+    .form-stack { display: grid; gap: 16px; min-width: 0; }
+    .section-card { padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: #fff; box-shadow: var(--shadow); }
+    .section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .section-head h3 { font-size: 16px; line-height: 1.5; }
+    .section-head p { margin-top: 4px; color: var(--sub); font-size: 12px; line-height: 1.55; }
+    .section-kicker { color: var(--sub); font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+    .subsection-head { margin: 16px 0 10px; }
+    .subsection-head h4 { margin: 3px 0 0; color: var(--text); font-size: 13px; line-height: 1.5; }
+    .subsection-head p { margin-top: 3px; color: var(--sub); font-size: 14px; line-height: 1.6; }
+    .form-divider { height: 1px; margin: 18px 0 4px; background: var(--border); }
+    .account-select-card { display: grid; grid-template-columns: 30px 1fr auto; gap: 9px; align-items: center; padding: 10px 11px; border: 1px solid #d6e5f2; border-radius: 9px; background: linear-gradient(180deg,#fbfdff,#f5f9fc); }
+    .account-select-card .avatar { width: 30px; height: 30px; background: #e4eff7; color: var(--link); }
+    .account-select-card strong, .account-select-card span { display: block; }
+    .account-select-card strong { font-size: 12px; }
+    .account-select-card span { margin-top: 2px; color: var(--sub); font-size: 10px; }
+    .account-select-card .mini-link { color: var(--link); font-size: 11px; font-weight: 700; }
+    .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .field { display: grid; gap: 6px; min-width: 0; }
+    .field.wide { grid-column: 1 / -1; }
+    .field label { color: var(--muted); font-size: 13px; line-height: 1.5; font-weight: 700; }
+    .field label em { color: var(--danger); font-style: normal; }
+    .field input, .field select { width: 100%; min-height: 38px; padding: 0 11px; border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--text); font-size: 14px; outline: none; }
+    .auto-category { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); }
+    .auto-category strong { color: var(--text); font-size: 14px; font-weight: 700; }
+    .auto-category span { color: var(--sub); font-size: 12px; }
+    .field textarea { width: 100%; min-height: 84px; resize: vertical; padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--text); font-size: 13px; line-height: 1.6; outline: none; }
+    .helper { color: var(--sub); font-size: 12px; line-height: 1.5; }
+    .money-input { position: relative; }
+    .money-input span { position: absolute; top: 50%; left: 10px; transform: translateY(-50%); color: var(--sub); font-size: 12px; }
+    .money-input input { padding-left: 23px; }
+    .image-dropzone { padding: 12px; border: 1px dashed #b9c8d9; border-radius: 9px; background: #fbfdff; transition: border-color .15s, background .15s; }
+    .image-dropzone.dragging { border-color: var(--link); background: var(--soft-blue); }
+    .image-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+    .image-tile { position: relative; min-width: 0; aspect-ratio: 1; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: #f8fafc; }
+    .image-tile img, .image-tile .visual { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    .image-tile .visual { display: grid; place-items: center; color: rgba(31,58,95,.78); font-size: 10px; font-weight: 800; letter-spacing: .04em; }
+    .visual.one { background: linear-gradient(140deg,#dbeafe 0%,#eff6ff 47%,#c7d2fe 100%); }
+    .visual.two { background: linear-gradient(140deg,#fce7f3 0%,#fff1f2 50%,#fed7aa 100%); color: #92405b; }
+    .visual.three { background: linear-gradient(140deg,#dcfce7 0%,#ecfdf5 45%,#bbf7d0 100%); color: #256e53; }
+    .visual.four { background: linear-gradient(140deg,#ede9fe 0%,#f5f3ff 48%,#ddd6fe 100%); color: #5b4c8a; }
+    .image-remove { position: absolute; top: 5px; right: 5px; width: 22px; height: 22px; display: grid; place-items: center; border: 0; border-radius: 50%; background: rgba(255,255,255,.9); color: var(--muted); font-size: 16px; line-height: 1; }
+    .image-remove:hover { color: var(--danger); }
+    .image-add { min-width: 0; aspect-ratio: 1; display: grid; place-items: center; align-content: center; gap: 6px; border: 1px dashed #b9c8d9; border-radius: 8px; background: #fff; color: var(--link); }
+    .image-add:hover { background: var(--soft-blue); }
+    .image-add svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 1.5; fill: none; stroke-linecap: round; }
+    .image-add span { font-size: 10px; font-weight: 700; }
+    .image-dropzone-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 9px; color: var(--sub); font-size: 10px; line-height: 1.5; }
+    .image-dropzone-footer strong { color: var(--link); font-weight: 700; }
+
+    .composer { overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: #fff; transition: border-color .15s, box-shadow .15s, background .15s; }
+    .composer:focus-within { border-color: #b9c8d9; background: #fff; box-shadow: 0 0 0 3px rgba(36,90,141,.10); }
+    .composer-attachments { display: flex; flex-wrap: wrap; gap: 6px; padding: 9px 10px 0; }
+    .composer-attachment { position: relative; width: 60px; height: 60px; overflow: hidden; border: 1px solid #bfdbfe; border-radius: 9px; background: var(--soft-blue); }
+    .composer-attachment-trigger { display: block; width: 100%; height: 100%; padding: 0; border: 0; background: transparent; }
+    .composer-attachment-trigger:hover { filter: brightness(.98); }
+    .composer-attachment .visual { width: 100%; height: 100%; display: grid; place-items: center; color: rgba(31,58,95,.78); font-size: 10px; font-weight: 800; letter-spacing: .04em; }
+    .composer-attachment .visual.one { background: linear-gradient(140deg,#dbeafe 0%,#eff6ff 47%,#c7d2fe 100%); }
+    .composer-attachment .visual.two { background: linear-gradient(140deg,#fce7f3 0%,#fff1f2 50%,#fed7aa 100%); color: #92405b; }
+    .composer-attachment .visual.three { background: linear-gradient(140deg,#dcfce7 0%,#ecfdf5 45%,#bbf7d0 100%); color: #256e53; }
+    .composer-attachment .visual.four { background: linear-gradient(140deg,#ede9fe 0%,#f5f3ff 48%,#ddd6fe 100%); color: #5b4c8a; }
+    .composer-attachment img { width: 100%; height: 100%; display: block; object-fit: cover; }
+    .composer-attachment .remove { position: absolute; top: 4px; right: 4px; width: 19px; height: 19px; display: grid; place-items: center; border: 0; border-radius: 50%; background: rgba(255,255,255,.9); color: var(--muted); font-size: 14px; line-height: 1; }
+    .composer-tools { display: none; }
+    .tool-btn { width: 34px; height: 34px; display: inline-grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted); }
+    .tool-btn:hover { background: var(--soft-blue); color: var(--link); }
+    .upload-plus { width: 30px; height: 30px; flex: 0 0 auto; padding: 0; color: var(--link); font-size: 22px; font-weight: 500; line-height: 1; }
+    .tool-btn svg { width: 17px; height: 17px; stroke: currentColor; stroke-width: 1.5; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .composer-ai { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--sub); font-size: 12px; line-height: 1.5; font-weight: 600; }
+    .composer-ai i { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+    .composer-media-note { display: inline-flex; align-items: center; gap: 5px; color: var(--sub); font-size: 12px; line-height: 1.5; white-space: nowrap; }
+    .composer-media-note svg { width: 14px; height: 14px; flex: 0 0 auto; stroke: var(--muted); stroke-width: 1.5; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .composer-media-note strong { color: var(--link); font-weight: 700; }
+    .composer-editor { padding: 0 10px; }
+    .composer-editor textarea { width: 100%; min-height: 108px; max-height: 190px; resize: vertical; padding: 7px 0 10px; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 14px; line-height: 1.6; }
+    .composer-editor textarea::placeholder { color: #9ca3af; }
+    .composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; padding: 6px 10px 9px; border-top: 1px solid var(--border); font-size: 12px; line-height: 1.5; }
+    .composer-shortcuts { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--sub); font-size: 12px; line-height: 1.5; }
+    .composer-shortcuts > span:first-child { white-space: nowrap; }
+    .composer-status { color: var(--success); font-weight: 700; }
+    .composer-actions { display: flex; align-items: center; gap: 7px; font-size: 12px; line-height: 1.5; }
+    .ai-btn { min-height: 32px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid #b9c8d9; border-radius: 7px; background: var(--soft-blue); color: var(--link); font-size: 12px; font-weight: 700; }
+    .ai-btn:hover { background: var(--soft-blue); }
+    .ai-btn svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 1.5; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .count { color: var(--sub); font-size: 12px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+
+    .side-stack { display: grid; gap: 12px; position: sticky; top: 0; }
+    .provider-card { padding: 13px; border: 1px solid #d6e5f2; border-radius: 10px; background: linear-gradient(180deg,#fbfdff,#f5f9fc); }
+    .provider-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .provider-head h3 { font-size: 12px; }
+    .provider-head p { margin-top: 3px; color: var(--sub); font-size: 10px; line-height: 1.5; }
+    .provider-badge { padding: 3px 6px; border-radius: 999px; background: var(--success-bg); color: var(--success); font-size: 10px; font-weight: 700; white-space: nowrap; }
+    .provider-meta { display: grid; gap: 8px; margin-top: 11px; }
+    .provider-meta div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .provider-meta span { color: var(--sub); font-size: 10px; }
+    .provider-meta strong { color: var(--text); font-size: 10px; font-weight: 700; text-align: right; }
+    .provider-link { display: inline-flex; margin-top: 11px; color: var(--link); font-size: 10px; font-weight: 700; text-decoration: none; }
+    .preview-card { padding: 13px; border: 1px solid var(--border); border-radius: 10px; background: #fff; box-shadow: var(--shadow); }
+    .preview-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+    .preview-head h3 { font-size: 12px; }
+    .preview-head span { color: var(--sub); font-size: 10px; }
+    .preview-image { aspect-ratio: 1.1; overflow: hidden; border-radius: 8px; background: linear-gradient(140deg,#dbeafe 0%,#eff6ff 48%,#c7d2fe 100%); }
+    .preview-image .visual { width: 100%; height: 100%; display: grid; place-items: center; color: rgba(31,58,95,.82); font-size: 18px; font-weight: 800; letter-spacing: .06em; }
+    .preview-title { margin-top: 10px; color: var(--text); font-size: 13px; line-height: 1.55; font-weight: 700; }
+    .preview-price { margin-top: 5px; color: var(--brand); font-size: 20px; line-height: 1; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .preview-desc { display: -webkit-box; margin-top: 8px; overflow: hidden; color: var(--sub); font-size: 10px; line-height: 1.65; -webkit-box-orient: vertical; -webkit-line-clamp: 5; }
+    .preview-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .preview-meta span { padding: 4px 6px; border-radius: 6px; background: var(--bg); color: var(--sub); font-size: 10px; }
+    .publish-check { padding: 13px; border: 1px solid #ead7af; border-radius: 10px; background: var(--warn-bg); }
+    .publish-check strong { display: block; color: var(--warn); font-size: 11px; }
+    .publish-check p { margin-top: 5px; color: #7c5b21; font-size: 10px; line-height: 1.6; }
+    .publish-check code { color: #8a641e; font-size: 10px; }
+
+    .drawer-footer { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 24px 14px; border-top: 1px solid var(--border); background: #fff; }
+    .footer-hint { display: flex; align-items: center; gap: 7px; color: var(--sub); font-size: 12px; line-height: 1.5; }
+    .footer-hint svg { width: 14px; height: 14px; flex: 0 0 auto; stroke: var(--warn); stroke-width: 1.5; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .footer-actions { display: flex; align-items: center; gap: 8px; }
+    .publish-confirmation { display: none; position: absolute; right: 24px; bottom: 72px; width: 350px; padding: 14px; border: 1px solid #c7d8e8; border-radius: 10px; background: #fff; box-shadow: 0 12px 28px rgba(17,24,39,.16); }
+    .publish-confirmation.is-open { display: block; }
+    .publish-confirmation h3 { font-size: 13px; }
+    .publish-confirmation p { margin-top: 5px; color: var(--sub); font-size: 11px; line-height: 1.6; }
+    .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+    .toast { position: fixed; right: 22px; bottom: 22px; z-index: 60; display: none; padding: 11px 13px; border: 1px solid #bbdfcf; border-radius: 9px; background: var(--success-bg); color: var(--success); font-size: 12px; font-weight: 700; box-shadow: 0 10px 24px rgba(17,24,39,.12); }
+    .toast.show { display: block; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    .image-lightbox { position: fixed; inset: 0; z-index: 70; display: none; place-items: center; padding: 24px; background: rgba(15,23,42,.76); }
+    .image-lightbox.is-open { display: grid; }
+    .image-lightbox-panel { position: relative; display: grid; place-items: center; min-width: 220px; min-height: 220px; }
+    .image-lightbox-panel img { display: block; max-width: min(84vw, 760px); max-height: min(82vh, 760px); border-radius: 12px; object-fit: contain; background: #fff; }
+    .image-lightbox-close { position: absolute; top: -14px; right: -14px; z-index: 1; width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 50%; background: rgba(255,255,255,.92); color: var(--muted); font-size: 20px; line-height: 1; }
+    .lightbox-visual { width: min(72vw, 520px); height: min(72vw, 520px); display: grid; place-items: center; border-radius: 12px; color: rgba(31,58,95,.82); font-size: 24px; font-weight: 800; letter-spacing: .06em; }
+    .lightbox-visual.one { background: linear-gradient(140deg,#dbeafe 0%,#eff6ff 47%,#c7d2fe 100%); }
+    .lightbox-visual.two { background: linear-gradient(140deg,#fce7f3 0%,#fff1f2 50%,#fed7aa 100%); color: #92405b; }
+    .lightbox-visual.three { background: linear-gradient(140deg,#dcfce7 0%,#ecfdf5 45%,#bbf7d0 100%); color: #256e53; }
+    .lightbox-visual.four { background: linear-gradient(140deg,#ede9fe 0%,#f5f3ff 48%,#ddd6fe 100%); color: #5b4c8a; }
+
+    @media (max-width: 1100px) { .publish-grid { grid-template-columns: 1fr; } }
+    @media (max-width: 900px) {
+      .sidebar { display: none; }
+      .body { border-left: 0; }
+      .topbar { padding: 0 16px; }
+      .topbar-actions .search, .topbar-actions .header-status { display: none; }
+      .main { padding: 16px; }
+      .filters { align-items: stretch; flex-direction: column; }
+      .filter-left, .filter-right { flex-wrap: wrap; }
+      .input.search-input { flex: 1; width: auto; }
+      .table-card { overflow-x: auto; }
+      .table-head, .table-row { min-width: 820px; }
+      .drawer { width: 100%; }
+      .drawer-header { padding: 16px 16px 15px; }
+      .drawer-body { padding: 14px 16px 20px; }
+      .drawer-footer { padding: 11px 16px 13px; }
+      .publish-confirmation { right: 16px; bottom: 68px; left: 16px; width: auto; }
+    }
+    @media (max-width: 560px) {
+      .page-title-row { flex-direction: column; }
+      .toolbar-actions { width: 100%; }
+      .toolbar-actions .btn { flex: 1; }
+      .field-grid { grid-template-columns: 1fr; }
+      .field.wide { grid-column: auto; }
+      .image-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .drawer-footer { align-items: stretch; flex-direction: column; }
+      .footer-actions { width: 100%; }
+      .footer-actions .btn { flex: 1; }
+      .footer-hint { align-items: flex-start; }
+      .composer-footer { align-items: flex-start; flex-direction: column; }
+      .composer-shortcuts, .composer-actions { width: 100%; justify-content: space-between; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" aria-label="主导航">
+      <div class="brand-block">
+        <div class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="5" width="5" height="5" rx="1"/><rect x="14" y="5" width="5" height="5" rx="1"/><rect x="5" y="14" width="5" height="5" rx="1"/><rect x="14" y="14" width="5" height="5" rx="1"/></svg></div>
+        <div><p class="brand-name">XianYuAgent</p><p class="brand-subtitle">Seller operations</p></div>
+      </div>
+      <p class="nav-label">Workspace</p>
+      <nav class="side-nav">
+        <button type="button"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg><span>总览</span><small>01</small></button>
+        <button type="button"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M5 6h14M5 12h10M5 18h7"/><path d="M17 16v5m-2.5-2.5H20"/></svg><span>Workspace</span><small>02</small></button>
+        <button type="button"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M5 5h14v14H5z"/><path d="m8 9 3 3 5-5M8 16h8"/></svg><span>商品管理</span><small>24</small></button>
+        <button class="active" type="button" aria-current="page"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M5 6h14v12H5z"/><path d="M8 9h8M8 13h5"/><path d="M8 18v2m8-2v2"/></svg><span>商品发布</span><small>NEW</small></button>
+        <button type="button"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/><path d="M17 16h3"/></svg><span>消息中心</span><small>12</small></button>
+        <button type="button"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M4 18h16M6 15l3-4 3 2 5-7"/></svg><span>数据分析</span><small>03</small></button>
+      </nav>
+      <p class="nav-label">System</p>
+      <nav class="side-nav">
+        <button type="button"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M12 3a3 3 0 0 0-3 3v1.1a7 7 0 0 0-3 5.9v3l-1 1h14l-1-1v-3a7 7 0 0 0-3-5.9V6a3 3 0 0 0-3-3Z"/><path d="M10 20h4"/></svg><span>设置</span><small>07</small></button>
+        <button type="button"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg><span>审计与日志</span><small>09</small></button>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <div class="agent-card"><span class="dot"></span><strong>Agent Runtime</strong><small>独立服务 · 正常</small></div>
+      <div class="account-chip"><div class="avatar">M</div><div><strong>Mary Smith</strong><span>管理员 · 3 个账号</span></div></div>
+    </aside>
+
+    <div class="body">
+      <header class="topbar">
+        <div class="breadcrumb"><span>商品管理</span><span class="chevron">/</span><strong>发布商品</strong></div>
+        <div class="topbar-actions"><div class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg><span>搜索商品、订单或会话</span></div><span class="header-status"><i></i>系统运行正常</span><div class="avatar">M</div></div>
+      </header>
+
+      <main class="main">
+        <div class="page-title-row">
+          <div><p class="eyebrow">Products / publish</p><h1>商品管理</h1><p class="page-subtitle">统一维护商品信息、发布状态与闲鱼账号同步结果。</p></div>
+          <div class="toolbar-actions"><button class="btn" type="button"><svg viewBox="0 0 24 24"><path d="M4 7h16M7 4v6M17 14v6M4 17h16"/></svg>批量操作</button><button class="btn primary open-publish" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>发布商品</button></div>
+        </div>
+        <div class="filters"><div class="filter-left"><input class="input search-input" placeholder="搜索商品标题或商品 ID"><select class="select"><option>全部状态</option><option>草稿</option><option>已发布</option><option>待同步</option></select><select class="select"><option>全部账号</option><option>数码优选店</option><option>家居小铺</option></select></div><div class="filter-right"><span class="status ready">今日待发布 3</span><button class="btn" type="button">刷新</button></div></div>
+        <section class="table-card" aria-label="商品列表">
+          <div class="table-head"><span>商品信息</span><span>账号</span><span>价格</span><span>库存</span><span>状态</span><span>操作</span></div>
+          <div class="table-row"><div class="product-cell"><div class="product-thumb">蓝牙耳机</div><div class="product-copy"><strong>降噪蓝牙耳机 Pro｜通勤续航版</strong><small>ID：XY-240918-001 · 最后编辑 10 分钟前</small></div></div><span>数码优选店</span><strong>¥ 169</strong><span>12 件</span><span class="status published">已发布</span><div class="row-actions"><button class="icon-btn" type="button" aria-label="编辑"><svg viewBox="0 0 24 24"><path d="m4 16-.6 4.6L8 20l10.5-10.5a2.2 2.2 0 0 0-3.1-3.1Z"/><path d="m13.8 7.4 2.8 2.8"/></svg></button><button class="icon-btn open-publish" type="button" aria-label="复制发布"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></button></div></div>
+          <div class="table-row"><div class="product-cell"><div class="product-thumb alt">收纳盒</div><div class="product-copy"><strong>桌面抽屉收纳盒｜奶油白</strong><small>ID：XY-240917-009 · 最后编辑 昨天</small></div></div><span>家居小铺</span><strong>¥ 29.9</strong><span>58 件</span><span class="status draft">草稿</span><div class="row-actions"><button class="icon-btn open-publish" type="button" aria-label="编辑"><svg viewBox="0 0 24 24"><path d="m4 16-.6 4.6L8 20l10.5-10.5a2.2 2.2 0 0 0-3.1-3.1Z"/><path d="m13.8 7.4 2.8 2.8"/></svg></button></div></div>
+          <div class="table-row"><div class="product-cell"><div class="product-thumb green">保温杯</div><div class="product-copy"><strong>轻量不锈钢保温杯 500ml｜雾灰</strong><small>ID：XY-240916-004 · 最后编辑 2 天前</small></div></div><span>数码优选店</span><strong>¥ 49</strong><span>34 件</span><span class="status ready">待同步</span><div class="row-actions"><button class="icon-btn open-publish" type="button" aria-label="继续发布"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button></div></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div class="overlay" id="publishOverlay" aria-modal="true" role="dialog" aria-label="发布商品">
+    <section class="drawer">
+      <header class="drawer-header">
+        <div><p class="eyebrow">商品发布 / Draft</p><h2>发布商品</h2><p>填写商品信息后，检查附件与物流并提交到当前闲鱼账号。</p></div>
+        <div class="drawer-header-actions"><span class="status draft" id="draftStatus">草稿 · 未发布</span><button class="close-btn" id="closeDrawer" type="button" aria-label="关闭发布抽屉"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+      </header>
+      <div class="drawer-body">
+        <div class="publish-grid">
+          <div class="form-stack">
+            <section class="section-card">
+              <div class="section-head"><div><h3>商品信息</h3></div></div>
+              <div class="field-grid">
+                <div class="field wide"><label for="titleInput">商品标题 <em>*</em></label><input id="titleInput" maxlength="60" value="降噪蓝牙耳机 Pro｜通勤续航版" placeholder="输入清晰、可检索的商品标题"><span class="helper">建议包含品类、核心卖点和使用场景，最多 60 字。</span></div>
+                <div class="field wide"><label for="categoryValue">商品分类</label><div class="auto-category" id="categoryValue"><strong id="categoryLabel">数码 › 耳机 / 音箱</strong><span id="categoryHint">根据商品描述自动选择</span></div></div>
+                <div class="field wide"><label for="descriptionInput">商品描述 <em>*</em></label>
+                  <div class="composer" id="composer">
+                    <div class="composer-attachments" id="composerAttachments">
+                      <div class="composer-attachment"><button class="composer-attachment-trigger" type="button" aria-label="预览主图"><div class="visual one">主图</div></button><button class="remove" type="button" aria-label="移除主图">×</button></div>
+                      <div class="composer-attachment"><button class="composer-attachment-trigger" type="button" aria-label="预览细节图"><div class="visual two">细节图</div></button><button class="remove" type="button" aria-label="移除细节图">×</button></div>
+                      <div class="composer-attachment"><button class="composer-attachment-trigger" type="button" aria-label="预览佩戴图"><div class="visual three">佩戴图</div></button><button class="remove" type="button" aria-label="移除佩戴图">×</button></div>
+                      <div class="composer-attachment"><button class="composer-attachment-trigger" type="button" aria-label="预览包装图"><div class="visual four">包装图</div></button><button class="remove" type="button" aria-label="移除包装图">×</button></div>
+                    </div>
+                    <div class="composer-tools" aria-hidden="true"></div>
+                    <div class="composer-editor"><textarea id="descriptionInput" maxlength="2000" placeholder="像聊天一样输入商品描述，支持直接上传或粘贴图片。">全新降噪蓝牙耳机 Pro，通勤和居家都适合。
+• 主动降噪，地铁 / 飞机环境更安静
+• 单次续航约 8 小时，充电盒可补电 3 次
+• 支持双设备连接，Type-C 充电
+
+成色：全新未拆封｜发货：24 小时内</textarea></div>
+                    <div class="composer-footer"><div class="composer-shortcuts"><span>按 Enter 换行</span><span class="composer-status" id="aiStatus">已载入当前 Provider</span></div><div class="composer-actions"><span class="count" id="descriptionCount">0 / 2000</span><button class="ai-btn" id="optimizeCopy" type="button"><svg viewBox="0 0 24 24"><path d="m12 3 1.4 4.6L18 9l-4.6 1.4L12 15l-1.4-4.6L6 9l4.6-1.4Z"/><path d="m18.5 14 .7 2.3 2.3.7-2.3.7-.7 2.3-.7-2.3-2.3-.7 2.3-.7Z"/></svg>AI 优化文案</button></div></div>
+                  </div>
+                  <input class="sr-only" id="composerImageInput" type="file" accept="image/*" multiple>
+                </div>
+              </div>
+              <div class="form-divider"></div>
+              <div class="subsection-head"><div><h4>价格与物流</h4></div></div>
+              <div class="field-grid">
+                <div class="field"><label for="priceInput">售价 <em>*</em></label><div class="money-input"><span>¥</span><input id="priceInput" inputmode="decimal" value="169"></div></div>
+                <div class="field"><label for="originalPriceInput">原价</label><div class="money-input"><span>¥</span><input id="originalPriceInput" inputmode="decimal" value="229"></div></div>
+                <div class="field"><label for="quantityInput">库存数量 <em>*</em></label><input id="quantityInput" inputmode="numeric" value="12"></div>
+                <div class="field"><label for="postageModeInput">邮费模式 <em>*</em></label><select id="postageModeInput"><option value="seller">包邮</option><option value="buyer">买家承担</option></select></div>
+                <div class="field"><label for="postageInput">邮费</label><div class="money-input"><span>¥</span><input id="postageInput" inputmode="decimal" value="0"></div></div>
+                <div class="field"><label for="locationInput">发货地 <em>*</em></label><input id="locationInput" value="浙江 杭州" placeholder="省 / 市"></div>
+              </div>
+            </section>
+          </div>
+
+        </div>
+      </div>
+      <footer class="drawer-footer">
+        <div class="footer-hint"><svg viewBox="0 0 24 24"><path d="M12 3 4 6v5c0 5 3.4 8.7 8 10 4.6-1.3 8-5 8-10V6Z"/><path d="M12 8v4m0 3h.01"/></svg><span>发布后会立即同步到闲鱼，建议先检查图片、价格和描述。</span></div>
+        <div class="footer-actions"><button class="btn ghost" id="saveDraft" type="button">保存草稿</button><button class="btn primary" id="openConfirm" type="button"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg>发布到闲鱼</button></div>
+      </footer>
+      <div class="publish-confirmation" id="publishConfirmation"><h3>确认发布到闲鱼？</h3><p>将使用“数码优选店”发布 1 个商品，价格 ¥169，库存 12 件。确认后会进入服务端发布队列。</p><div class="confirm-actions"><button class="btn ghost" id="cancelConfirm" type="button">返回修改</button><button class="btn warning" id="confirmPublish" type="button">确认发布</button></div></div>
+    </section>
+  </div>
+  <div class="image-lightbox" id="imageLightbox" role="dialog" aria-modal="true" aria-label="图片预览">
+    <div class="image-lightbox-panel"><button class="image-lightbox-close" id="closeImageLightbox" type="button" aria-label="关闭图片预览">×</button><div id="imageLightboxContent"></div></div>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+
+  <script>
+    (() => {
+      const overlay = document.getElementById('publishOverlay');
+      const closeDrawer = document.getElementById('closeDrawer');
+      const openButtons = document.querySelectorAll('.open-publish');
+      const toast = document.getElementById('toast');
+      const titleInput = document.getElementById('titleInput');
+      const descriptionInput = document.getElementById('descriptionInput');
+      const descriptionCount = document.getElementById('descriptionCount');
+      const categoryLabel = document.getElementById('categoryLabel');
+      const categoryHint = document.getElementById('categoryHint');
+      const composerImageInput = document.getElementById('composerImageInput');
+      const composerAttachments = document.getElementById('composerAttachments');
+      const confirmation = document.getElementById('publishConfirmation');
+      const imageLightbox = document.getElementById('imageLightbox');
+      const imageLightboxContent = document.getElementById('imageLightboxContent');
+      let toastTimer;
+      let attachmentUrls = [];
+
+      const showToast = (message) => {
+        toast.textContent = message;
+        toast.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toast.classList.remove('show'), 2600);
+      };
+      const updatePreview = () => { descriptionCount.textContent = `${descriptionInput.value.length} / 2000`; };
+      const fileToUrl = (file) => new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.readAsDataURL(file);
+      });
+      const addComposerImages = async (files) => {
+        const currentCount = composerAttachments.querySelectorAll('.composer-attachment').length;
+        for (const file of [...files].filter((candidate) => candidate && candidate.type.startsWith('image/')).slice(0, Math.max(0, 9 - currentCount))) {
+          const url = await fileToUrl(file);
+          attachmentUrls.push(url);
+          const item = document.createElement('div');
+          item.className = 'composer-attachment';
+          item.innerHTML = `<button class="composer-attachment-trigger" type="button" aria-label="预览已上传图片"><img src="${url}" alt="商品图片附件"></button><button class="remove" type="button" aria-label="移除附件">×</button>`;
+          item.querySelector('.composer-attachment-trigger').addEventListener('click', () => openImagePreview(item.querySelector('img')));
+          item.querySelector('.remove').addEventListener('click', () => { attachmentUrls = attachmentUrls.filter((itemUrl) => itemUrl !== url); item.remove(); });
+          composerAttachments.appendChild(item);
+        }
+        document.getElementById('imageCount').textContent = `图片 ${composerAttachments.querySelectorAll('.composer-attachment').length} / 9`;
+      };
+      const openImagePreview = (source) => {
+        imageLightboxContent.innerHTML = '';
+        if (source?.tagName === 'IMG') {
+          const image = document.createElement('img');
+          image.src = source.src;
+          image.alt = source.alt || '商品图片预览';
+          imageLightboxContent.appendChild(image);
+        } else {
+          const visual = source?.querySelector('.visual');
+          const preview = document.createElement('div');
+          preview.className = `lightbox-visual ${visual?.classList.contains('two') ? 'two' : visual?.classList.contains('three') ? 'three' : visual?.classList.contains('four') ? 'four' : 'one'}`;
+          preview.textContent = visual?.textContent || '商品图片';
+          imageLightboxContent.appendChild(preview);
+        }
+        imageLightbox.classList.add('is-open');
+      };
+      const closeImagePreview = () => imageLightbox.classList.remove('is-open');
+      const shortcuts = document.querySelector('.composer-shortcuts');
+      const enterHint = shortcuts?.querySelector('span');
+      const uploadButton = document.createElement('button');
+      uploadButton.className = 'tool-btn upload-plus';
+      uploadButton.id = 'attachComposer';
+      uploadButton.type = 'button';
+      uploadButton.setAttribute('aria-label', '添加商品图片');
+      uploadButton.textContent = '+';
+      const mediaNote = document.createElement('span');
+      mediaNote.className = 'composer-media-note';
+      mediaNote.innerHTML = '<strong id="imageCount">图片 4 / 9</strong> · 支持粘贴';
+      document.getElementById('aiStatus')?.remove();
+      if (shortcuts) {
+        shortcuts.prepend(uploadButton);
+        shortcuts.append(mediaNote);
+      }
+      const updateCategory = () => {
+        const content = `${titleInput?.value ?? ''} ${descriptionInput.value}`;
+        if (/耳机|蓝牙|降噪|音箱/.test(content)) {
+          categoryLabel.textContent = '数码 › 耳机 / 音箱';
+          categoryHint.textContent = '已根据商品描述自动选择';
+        } else if (/收纳|家居|盒子/.test(content)) {
+          categoryLabel.textContent = '家居 › 收纳';
+          categoryHint.textContent = '已根据商品描述自动选择';
+        } else {
+          categoryLabel.textContent = '待识别';
+          categoryHint.textContent = '继续完善描述后自动选择';
+        }
+      };
+      openButtons.forEach((button) => button.addEventListener('click', () => { overlay.style.display = 'flex'; }));
+      closeDrawer.addEventListener('click', () => { overlay.style.display = 'none'; });
+      descriptionInput.addEventListener('input', () => { updatePreview(); updateCategory(); });
+      titleInput.addEventListener('input', updateCategory);
+      descriptionInput.addEventListener('paste', (event) => {
+        const images = [...(event.clipboardData?.items ?? [])].filter((item) => item.type.startsWith('image/')).map((item) => item.getAsFile()).filter(Boolean);
+        if (images.length) { event.preventDefault(); void addComposerImages(images); showToast('已将剪贴板图片添加到描述附件'); }
+      });
+      document.getElementById('attachComposer').addEventListener('click', () => composerImageInput.click());
+      composerImageInput.addEventListener('change', (event) => { void addComposerImages(event.target.files || []); event.target.value = ''; });
+      composerAttachments.querySelectorAll('.composer-attachment').forEach((item) => {
+        item.querySelector('.composer-attachment-trigger').addEventListener('click', () => openImagePreview(item));
+        item.querySelector('.remove').addEventListener('click', () => { item.remove(); document.getElementById('imageCount').textContent = `图片 ${composerAttachments.querySelectorAll('.composer-attachment').length} / 9`; });
+      });
+      document.getElementById('closeImageLightbox').addEventListener('click', closeImagePreview);
+      imageLightbox.addEventListener('click', (event) => { if (event.target === imageLightbox) closeImagePreview(); });
+      document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeImagePreview(); });
+      document.getElementById('optimizeCopy').addEventListener('click', () => {
+        descriptionInput.value = '全新降噪蓝牙耳机 Pro，通勤党和居家办公都很适合。\n\n• 主动降噪：地铁、飞机等嘈杂环境更安静\n• 长效续航：耳机单次约 8 小时，充电盒可补电 3 次\n• 双设备连接：手机 / 电脑切换更顺手\n• Type-C 充电，成色全新未拆封\n\n24 小时内发货，默认包邮，欢迎先收藏再咨询。';
+        updatePreview();
+        updateCategory();
+        showToast('AI 已完成文案优化，可继续手动编辑');
+      });
+      document.getElementById('saveDraft').addEventListener('click', () => showToast('草稿已保存，尚未同步到闲鱼'));
+      document.getElementById('openConfirm').addEventListener('click', () => confirmation.classList.add('is-open'));
+      document.getElementById('cancelConfirm').addEventListener('click', () => confirmation.classList.remove('is-open'));
+      document.getElementById('confirmPublish').addEventListener('click', () => {
+        confirmation.classList.remove('is-open');
+        document.getElementById('draftStatus').className = 'status ready';
+        document.getElementById('draftStatus').textContent = '发布队列中';
+        showToast('已提交发布队列 · 等待服务端返回结果');
+      });
+      document.getElementById('imageCount').textContent = `图片 ${composerAttachments.querySelectorAll('.composer-attachment').length} / 9`;
+      updatePreview();
+      updateCategory();
+    })();
+  </script>
+</body>
+</html>

@@ -37,6 +37,7 @@
     "test:e2e:chrome:dashboard": "npm --workspace apps/web run test:e2e:chrome:dashboard",
     "test:e2e:chrome:dashboard:fullchain": "npm --workspace apps/web run test:e2e:chrome:dashboard:fullchain",
     "test:e2e:chrome:products": "npm --workspace apps/web run test:e2e:chrome:products",
+    "test:visual:product-publish": "npm --workspace apps/web run test:visual:product-publish",
     "test:e2e:chrome:product-automation": "npm --workspace apps/web run test:e2e:chrome:product-automation",
     "test:visual:product-automation": "npm --workspace apps/web run test:visual:product-automation",
     "test:e2e:chrome:coupons": "npm --workspace apps/web run test:e2e:chrome:coupons",
