@@ -259,7 +259,11 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
     const reconcile = async () => {
       const currentRequest = requestId.current;
       try {
-        const result = await api.listConversations({ accountId, limit: 50, refreshExternal: false });
+        // Let the API run its non-blocking external-head refresh. A local-only
+        // read can never discover a conversation that has not been persisted
+        // locally yet, which is why new buyer threads previously appeared only
+        // after a manual page refresh.
+        const result = await api.listConversations({ accountId, limit: 50 });
         if (!cancelled && currentRequest === requestId.current) {
           const nextActiveConversationId = state.activeConversationId ?? result.items[0]?.conversationId;
           if (nextActiveConversationId && !activeIdRef.current) {

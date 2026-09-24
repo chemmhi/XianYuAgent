@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { AccountRecord, ConversationRecord, CredentialRecord, InboundInboxRecord, Store } from './domain.js';
 import { ServiceError } from './services.js';
 import type { MessageService } from './messages.js';
@@ -5,6 +6,7 @@ import type { AutoReplyProcessResult, AutoReplyService } from './auto-reply.js';
 import { XianyuImClient, XianyuImMessageEvent, XianyuImReadReceiptEvent, XianyuImCredential } from './xianyu-im.js';
 import { XianyuMtopClient } from './xianyu-mtop.js';
 import type { ProductAutomationImEventResult, ProductAutomationTrigger } from './product-automation-trigger.js';
+import { InboundInboxWorker } from './inbound-inbox-worker.js';
 
 interface ExternalPage {
   hasMore: boolean;
@@ -16,8 +18,18 @@ export class XianyuImService {
   private readonly clientInFlight = new Map<string, Promise<XianyuImClient>>();
   private readonly recoveryInFlight = new Map<string, Promise<void>>();
   private readonly identityCache = new Map<string, { buyerDisplayName?: string; buyerAvatarUrl?: string }>();
+  private readonly inboundInboxWorker: InboundInboxWorker;
+  private inboundInboxWakeInFlight?: Promise<void>;
+  private inboundInboxWakeRequested = false;
 
-  constructor(private readonly store: Store, private readonly mtop: XianyuMtopClient, private readonly messages: MessageService, private readonly autoReply?: AutoReplyService, private readonly productAutomation?: ProductAutomationTrigger) {}
+  constructor(private readonly store: Store, private readonly mtop: XianyuMtopClient, private readonly messages: MessageService, private readonly autoReply?: AutoReplyService, private readonly productAutomation?: ProductAutomationTrigger) {
+    this.inboundInboxWorker = new InboundInboxWorker(store, this, {
+      workerId: `listener-fallback:${process.pid}:${randomUUID()}`,
+      batchSize: 10,
+      leaseMs: 120_000,
+      maxAttempts: 5,
+    });
+  }
 
   async listConversations(adminId: string, accountId: string, startCursor?: number, limit = 50): Promise<ExternalPage> {
     const client = await this.ensureClient(adminId, accountId);
@@ -163,6 +175,7 @@ export class XianyuImService {
   }
 
   async close(): Promise<void> {
+    await this.inboundInboxWakeInFlight;
     const inFlight = [...this.clientInFlight.values()];
     this.clientInFlight.clear();
     this.recoveryInFlight.clear();
@@ -298,7 +311,13 @@ export class XianyuImService {
             }
           },
           onFailure: async (error) => { await this.markAccountFailure(adminId, accountId, error); },
-          onEvent: async (event) => { await this.handleExternalEvent(adminId, event, { deferAutoReply: true }); },
+          onEvent: async (event) => {
+            await this.handleExternalEvent(adminId, event, { deferAutoReply: true });
+            // The dedicated worker remains the durable primary path. Wake a
+            // local one-shot poll as a fallback so API-only deployments do
+            // not leave queued replies waiting for a separate process.
+            this.wakeInboundInboxWorker();
+          },
           onQuarantine: async (event) => { await this.store.recordInboundQuarantine(event); },
           saveCredential: async (next) => { await this.saveCredential(adminId, account, next); },
         });
@@ -462,19 +481,27 @@ export class XianyuImService {
         externalConversationRef: effectiveEvent.externalConversationRef,
         buyerRef: effectiveEvent.senderRef,
         buyerDisplayName: effectiveEvent.senderName,
+        itemRef: effectiveEvent.itemRef,
+        itemTitle: effectiveEvent.itemTitle,
+        itemImageUrl: effectiveEvent.itemImageUrl,
         unreadCount: 0,
         lastMessagePreview: effectiveEvent.bodyText,
         lastMessageAt: effectiveEvent.occurredAt,
       });
-    } else if (conversation && effectiveEvent.direction === 'inbound' && !conversation.buyerDisplayName && effectiveEvent.senderName) {
+    } else if (conversation && effectiveEvent.direction === 'inbound' && hasConversationMetadataPatch(conversation, effectiveEvent)) {
       // Persist a recovered nickname so later events can use the local
-      // conversation identity even if profile lookup is temporarily down.
+      // conversation identity even if profile lookup is temporarily down, and
+      // fill product metadata carried by the live push before a manual list
+      // refresh has a chance to run.
       conversation = await this.store.upsertExternalConversation({
         adminId,
         accountId: effectiveEvent.accountId,
         externalConversationRef: effectiveEvent.externalConversationRef,
         buyerRef: effectiveEvent.senderRef,
         buyerDisplayName: effectiveEvent.senderName,
+        itemRef: effectiveEvent.itemRef,
+        itemTitle: effectiveEvent.itemTitle,
+        itemImageUrl: effectiveEvent.itemImageUrl,
       });
     }
     if (!conversation) return { created: false };
@@ -511,10 +538,36 @@ export class XianyuImService {
     if (!inbound) throw new Error('INBOUND_MESSAGE_NOT_FOUND');
     return this.autoReply.processInbound({ adminId: record.adminId, conversationId: record.conversationId, inboundMessageId: inbound.id, senderName: conversation.buyerDisplayName, requestId: `xianyu:auto-reply:${record.externalMessageRef}`, traceId: `xianyu:auto-reply:${record.externalMessageRef}`, sourceEventId: record.sourceEventId ?? record.externalMessageRef, sourceSequence: record.sourceSequence });
   }
+
+  /** Wake a bounded one-shot inbox poll without replacing the durable worker. */
+  wakeInboundInboxWorker(): void {
+    this.inboundInboxWakeRequested = true;
+    if (this.inboundInboxWakeInFlight) return;
+    this.inboundInboxWakeInFlight = (async () => {
+      while (this.inboundInboxWakeRequested) {
+        this.inboundInboxWakeRequested = false;
+        try {
+          await this.inboundInboxWorker.pollOnce();
+        } catch (error) {
+          console.warn(JSON.stringify({ component: 'inbound-inbox-fallback', event: 'poll_failed', errorCode: recoveryErrorCode(error) }));
+        }
+      }
+    })().finally(() => {
+      this.inboundInboxWakeInFlight = undefined;
+      if (this.inboundInboxWakeRequested) this.wakeInboundInboxWorker();
+    });
+  }
 }
 
 function isReadReceiptEvent(event: XianyuImMessageEvent | XianyuImReadReceiptEvent): event is XianyuImReadReceiptEvent {
   return 'kind' in event && event.kind === 'read';
+}
+
+function hasConversationMetadataPatch(conversation: ConversationRecord, event: XianyuImMessageEvent): boolean {
+  return (!conversation.buyerDisplayName && Boolean(event.senderName))
+    || (!conversation.itemRef && Boolean(event.itemRef))
+    || (!conversation.itemTitle && Boolean(event.itemTitle))
+    || (!conversation.itemImageUrl && Boolean(event.itemImageUrl));
 }
 
 function toImCredential(credential: CredentialRecord): XianyuImCredential {

@@ -131,6 +131,66 @@ test('seller identity is reconciled to outbound before persistence and inbox enq
   assert.deepEqual(await store.claimInboundInbox({ workerId: 'seller-direction-worker', limit: 10, leaseMs: 5_000 }), []);
 });
 
+test('new buyer push persists product metadata before the conversation list refreshes', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'push-item@example.com', passwordHash: 'hash', displayName: 'Push Item' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'push-item-seller' });
+  const messages = new MessageService(store, async () => 'audit-push-item');
+  const autoReply = { processInbound: async () => undefined };
+  const service = new XianyuImService(store, {} as never, messages, autoReply as never);
+
+  const result = await service.handleExternalEvent(admin.id, {
+    accountId: account.id,
+    externalConversationRef: 'push-item-conversation',
+    externalMessageRef: 'push-item-message.PNM',
+    senderRef: 'push-item-buyer',
+    senderName: 'Push Item Buyer',
+    itemRef: 'push-item-1',
+    itemTitle: 'Push Item Product',
+    itemImageUrl: 'https://img.example/push-item.png',
+    direction: 'inbound',
+    bodyType: 'text',
+    bodyText: '请问还有吗',
+    occurredAt: '2026-09-24T03:00:00.000Z',
+  });
+  assert.equal(result.created, true);
+
+  const conversation = await store.findConversationByExternalRef(admin.id, account.id, 'push-item-conversation');
+  assert.equal(conversation?.itemRef, 'push-item-1');
+  assert.equal(conversation?.itemTitle, 'Push Item Product');
+  assert.equal(conversation?.itemImageUrl, 'https://img.example/push-item.png');
+});
+
+test('listener fallback wakes the durable inbox when no dedicated worker is polling', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'fallback-worker@example.com', passwordHash: 'hash', displayName: 'Fallback Worker' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'fallback-seller' });
+  const calls: string[] = [];
+  const messages = new MessageService(store, async () => 'audit-fallback-worker');
+  const autoReply = { processInbound: async (input: { inboundMessageId: string }) => { calls.push(input.inboundMessageId); return undefined; } };
+  const service = new XianyuImService(store, {} as never, messages, autoReply as never);
+
+  const result = await service.handleExternalEvent(admin.id, {
+    accountId: account.id,
+    externalConversationRef: 'fallback-conversation',
+    externalMessageRef: 'fallback-message.PNM',
+    senderRef: 'fallback-buyer',
+    senderName: 'Fallback Buyer',
+    direction: 'inbound',
+    bodyType: 'text',
+    bodyText: '你好',
+    occurredAt: '2026-09-24T03:00:00.000Z',
+  }, { deferAutoReply: true });
+  assert.equal(result.autoReply, undefined);
+  const conversation = await store.findConversationByExternalRef(admin.id, account.id, 'fallback-conversation');
+  assert.ok(conversation);
+  const inbound = await store.listMessages(admin.id, conversation.id, { limit: 10 });
+
+  service.wakeInboundInboxWorker();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(calls, [inbound.items[0]!.id]);
+});
+
 test('history recovery treats account seller identity as outbound', async () => {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: 'seller-history@example.com', passwordHash: 'hash', displayName: 'Seller History' });

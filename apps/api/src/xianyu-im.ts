@@ -37,6 +37,9 @@ export interface XianyuImMessageEvent {
   externalMessageRef: string;
   senderRef: string;
   senderName?: string;
+  itemRef?: string;
+  itemTitle?: string;
+  itemImageUrl?: string;
   direction: 'inbound' | 'outbound';
   bodyType: 'text' | 'image' | 'system';
   bodyText?: string;
@@ -662,6 +665,10 @@ export function parsePushPayloadDetailed(encoded: string, accountId: string, myI
   const senderName = optionalString(msg10.senderNick ?? msg10.reminderTitle);
   const extension = parseJsonObject(msg10.extJson);
   const reminderUrl = optionalString(msg10.reminderUrl);
+  const itemSources = [msg10, extension, asRecord(msg10.item), asRecord(msg10.itemInfo), asRecord(extension.item), asRecord(extension.itemInfo)];
+  const itemRef = firstString(itemSources, ['itemId', 'itemID', 'itemRef']) ?? parseQueryParam(reminderUrl, 'itemId');
+  const itemTitle = firstString(itemSources, ['itemTitle', 'itemName', 'title']);
+  const itemImageUrl = normalizeAssetUrl(firstString(itemSources, ['itemImageUrl', 'itemMainPic', 'itemPic', 'itemCover', 'mainPic', 'itemImage']));
   // The gateway can expose two ids for one chat message: a stable `.PNM`
   // message number in the compact envelope and a short-lived internal UUID
   // in extJson. Prefer the stable platform id so history sync and live push
@@ -687,6 +694,9 @@ export function parsePushPayloadDetailed(encoded: string, accountId: string, myI
     externalMessageRef,
     senderRef,
     senderName,
+    ...(itemRef ? { itemRef } : {}),
+    ...(itemTitle ? { itemTitle } : {}),
+    ...(itemImageUrl ? { itemImageUrl } : {}),
     direction: matchesSelfIdentity(senderRef, myId) ? 'outbound' : 'inbound',
     bodyType,
     bodyText: decoded.text || fallbackText,
@@ -708,6 +718,10 @@ function parseOperationPushPayload(message: Record<string, unknown>, operation: 
     ...asRecord(operation.extensions),
     ...asRecord(content.extensions),
   };
+  const itemSources = [sessionInfo, operation, content, extensions, asRecord(content.item), asRecord(content.itemInfo), asRecord(extensions.item), asRecord(extensions.itemInfo)];
+  const itemRef = firstString(itemSources, ['itemId', 'itemID', 'itemRef']) ?? parseQueryParam(optionalString(content.reminderUrl) ?? optionalString(operation.reminderUrl), 'itemId');
+  const itemTitle = firstString(itemSources, ['itemTitle', 'itemName', 'title']);
+  const itemImageUrl = normalizeAssetUrl(firstString(itemSources, ['itemImageUrl', 'itemMainPic', 'itemPic', 'itemCover', 'mainPic', 'itemImage']));
   const contentType = numericValue(content.contentType ?? operation.contentType);
   if (contentType === 8) return { quarantine: { reasonCode: 'PUSH_SYSTEM_CONTENT_IGNORED', receivedAt } };
 
@@ -789,6 +803,9 @@ function parseOperationPushPayload(message: Record<string, unknown>, operation: 
     externalMessageRef,
     senderRef,
     senderName,
+    ...(itemRef ? { itemRef } : {}),
+    ...(itemTitle ? { itemTitle } : {}),
+    ...(itemImageUrl ? { itemImageUrl } : {}),
     direction: matchesSelfIdentity(senderRef, myId) ? 'outbound' : 'inbound',
     bodyType,
     bodyText: decoded.text,
@@ -1189,6 +1206,19 @@ function clampLimit(value: number): number { return Math.min(100, Math.max(1, Ma
 function asRecord(value: unknown): Record<string, any> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}; }
 function optionalString(value: unknown): string | undefined { return typeof value === 'string' && value.trim() ? value.trim() : undefined; }
 function stripGoofish(value: string): string { return value.replace(/@goofish$/, ''); }
+function firstString(records: Record<string, any>[], keys: string[]): string | undefined {
+  for (const source of records) {
+    for (const key of keys) {
+      const value = optionalString(source[key]);
+      if (value) return value;
+    }
+  }
+  return undefined;
+}
+function normalizeAssetUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return value.startsWith('//') ? `https:${value}` : value;
+}
 
 function normalizeIdentity(value: unknown): string | undefined {
   if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'bigint') return undefined;

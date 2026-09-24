@@ -129,6 +129,9 @@ test('push parser accepts the named operation.sessionInfo buyer message envelope
     externalMessageRef: 'operation-message-1.PNM',
     senderRef: 'buyer-operation-1',
     senderName: 'Operation Buyer',
+    itemRef: 'item-1',
+    itemTitle: 'Operation Item',
+    itemImageUrl: 'https://img.example/operation-item.png',
     direction: 'inbound',
     bodyType: 'text',
     bodyText: '来自新 envelope 的买家消息',
@@ -139,11 +142,30 @@ test('push parser accepts the named operation.sessionInfo buyer message envelope
       incrementType: 1,
       sessionId: 'operation-conversation-1',
       operation: {
-        sessionInfo: { sessionId: 'operation-conversation-1', extensions: { extUserId: 'buyer-operation-1', itemId: 'item-1' } },
+        sessionInfo: { sessionId: 'operation-conversation-1', extensions: { extUserId: 'buyer-operation-1', itemId: 'item-1', itemTitle: 'Operation Item', itemImageUrl: '//img.example/operation-item.png' } },
         content: { contentType: 1, messageId: 'operation-message-1.PNM', text: { text: '来自新 envelope 的买家消息' }, senderNick: 'Operation Buyer', createAt: 1767225600000 },
       },
     },
   });
+});
+
+test('legacy push parser extracts item metadata from the live message envelope', () => {
+  const encoded = Buffer.from(JSON.stringify({
+    1: {
+      2: 'legacy-item-conversation@goofish',
+      3: 'legacy-item-message.PNM',
+      5: 1767225600000,
+      10: {
+        senderUserId: 'legacy-item-buyer',
+        senderNick: 'Legacy Buyer',
+        extJson: JSON.stringify({ itemId: 'legacy-item-1', itemTitle: 'Legacy Item', itemImageUrl: '//img.example/legacy-item.png' }),
+      },
+    },
+  }), 'utf8').toString('base64');
+  const parsed = parsePushPayload(encoded, 'account-1', 'seller-1');
+  assert.equal(parsed?.itemRef, 'legacy-item-1');
+  assert.equal(parsed?.itemTitle, 'Legacy Item');
+  assert.equal(parsed?.itemImageUrl, 'https://img.example/legacy-item.png');
 });
 
 test('sessionArouse system operation is quarantined instead of treated as buyer text', () => {
@@ -414,7 +436,7 @@ function operationPayload(content: { contentType: number; messageId: string; tex
     incrementType: 1,
     sessionId: 'operation-conversation-1',
     operation: {
-      sessionInfo: { sessionId: 'operation-conversation-1', extensions: { extUserId: 'buyer-operation-1', itemId: 'item-1' } },
+      sessionInfo: { sessionId: 'operation-conversation-1', extensions: { extUserId: 'buyer-operation-1', itemId: 'item-1', itemTitle: 'Operation Item', itemImageUrl: '//img.example/operation-item.png' } },
       content: { contentType: content.contentType, messageId: content.messageId, text: content.text, senderNick: 'Operation Buyer', createAt: 1767225600000 },
     },
   }), 'utf8').toString('base64');
