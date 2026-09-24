@@ -6,7 +6,7 @@
 - 删除交互：删除单张或批量卡券统一使用项目现有 modal 样式；已关联商品时明确提示商品列表和商品自动化配置会移除该卡券，支持取消后保持不变，再确认删除。
 - 商品联动：删除后商品详情/商品列表查询不再返回已作废卡券；新增 API smoke 与 Chrome/CDP 断言覆盖持久化结果。
 - 已验证：API/Web typecheck、API/Web build、API 全量 smoke、Web 全量 88 files / 303 tests、`coupons-smoke.mjs`、Memory/PostgreSQL reservation smoke、Chrome/CDP coupons E2E Memory 连续 2 轮及 PostgreSQL 1 轮、`git diff --check`。
-- 状态：`READY_FOR_MERGE`；合入前仍需完成主线 merge lock、主线复验与登记表回写。
+- 状态：`MERGED`；提交 `ab0b989` 已以 `--no-ff` 合入 `main`，merge commit 为 `ac6fad8`；主线 typecheck、API/Web build、卡券定向测试与 `coupons-smoke.mjs` 复验通过。
 
 ## 2026-09-24 卡券发券可靠性修复已合入 main
 

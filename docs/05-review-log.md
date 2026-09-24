@@ -616,4 +616,4 @@
 | S5-R120 | 业务 / 交互 | 删除已关联商品的卡券是否二次提醒，取消是否保留卡券，确认后商品侧是否移除卡券信息 | root | PASS（受控 E2E） | `CouponDeleteConfirmModal.tsx`、`coupons-smoke.mjs`、Chrome/CDP coupons E2E 连续 2 轮 |
 | S5-R121 | 质量 / 回归 | API/Web 类型检查、构建、全量单测和跨层 smoke 是否通过 | root | PASS | API 全量 smoke；API/Web typecheck、API/Web build；Web 88 files / 303 tests；Chrome/CDP coupons E2E Memory 2 轮 + PostgreSQL 1 轮；`git diff --check` |
 
-本轮结论：卡券不再按单次发货耗尽；删除已关联商品的卡券会在统一产品弹窗中二次确认，并在商品列表/详情侧实时消失。当前分支等待 merge lock 合入 `main` 后复验。
+本轮结论：卡券不再按单次发货耗尽；删除已关联商品的卡券会在统一产品弹窗中二次确认，并在商品列表/详情侧实时消失。提交 `ab0b989` 已以 `--no-ff` 合入 `main`，merge commit 为 `ac6fad8`；主线定向复验通过。
