@@ -14,6 +14,7 @@ interface ExternalPage {
 export class XianyuImService {
   private readonly clients = new Map<string, XianyuImClient>();
   private readonly clientInFlight = new Map<string, Promise<XianyuImClient>>();
+  private readonly recoveryInFlight = new Map<string, Promise<void>>();
   private readonly identityCache = new Map<string, { buyerDisplayName?: string; buyerAvatarUrl?: string }>();
 
   constructor(private readonly store: Store, private readonly mtop: XianyuMtopClient, private readonly messages: MessageService, private readonly autoReply?: AutoReplyService, private readonly productAutomation?: ProductAutomationTrigger) {}
@@ -27,7 +28,7 @@ export class XianyuImService {
     for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
       const page = await this.withAccountFailure(adminId, accountId, () => client.listConversations(cursor, limit));
       const items = Array.isArray(page.userConvs) ? page.userConvs : [];
-      const parsedItems = items.map((item) => normalizeConversation(item, client.userId)).filter((item): item is NonNullable<ReturnType<typeof normalizeConversation>> => Boolean(item));
+      const parsedItems = items.map((item) => normalizeConversation(item, client.selfUserIds)).filter((item): item is NonNullable<ReturnType<typeof normalizeConversation>> => Boolean(item));
       // The conversation payload is not consistent across account/session
       // types: some rows include the avatar but omit the nickname and others
       // include neither. Enrich whenever either identity field is missing so
@@ -59,7 +60,7 @@ export class XianyuImService {
     const page = await this.withAccountFailure(adminId, accountId, () => client.listMessages(externalRef, startCursor, limit));
     const models = Array.isArray(page.userMessageModels) ? page.userMessageModels : [];
     for (const item of [...models].reverse()) {
-      const parsed = normalizeHistoryMessage(item, client.userId);
+      const parsed = normalizeHistoryMessage(item, client.selfUserIds);
       if (!parsed) continue;
       await this.messages.importExternalMessage({
         adminId,
@@ -164,6 +165,7 @@ export class XianyuImService {
   async close(): Promise<void> {
     const inFlight = [...this.clientInFlight.values()];
     this.clientInFlight.clear();
+    this.recoveryInFlight.clear();
     const clients = new Set(this.clients.values());
     this.clients.clear();
     this.identityCache.clear();
@@ -184,7 +186,67 @@ export class XianyuImService {
    * credential becomes active without duplicating client construction.
    */
   async startListener(adminId: string, accountId: string): Promise<void> {
-    await this.ensureClient(adminId, accountId);
+    const client = await this.ensureClient(adminId, accountId);
+    if (client) this.scheduleRecentMessageRecovery(adminId, accountId);
+  }
+
+  /**
+   * Recover the newest messages for conversations already known locally.
+   *
+   * The IM gateway is a live stream, so a reconnect or a transient handler
+   * failure can leave a message absent from the local timeline even though the
+   * platform history endpoint still returns it. Importing history is
+   * idempotent; buyer messages at or after the latest locally persisted
+   * message are offered back to the durable inbound inbox, which itself
+   * suppresses already-processed duplicates.
+   */
+  async recoverRecentMessages(adminId: string, accountId: string, options: { conversationLimit?: number; messageLimit?: number } = {}): Promise<{ conversationsScanned: number; imported: number; queued: number }> {
+    const client = await this.ensureClient(adminId, accountId);
+    const conversationLimit = Math.min(100, Math.max(1, Math.trunc(options.conversationLimit ?? 50)));
+    const messageLimit = Math.min(100, Math.max(1, Math.trunc(options.messageLimit ?? 20)));
+    const conversations = await this.store.listConversations(adminId, { accountId, limit: conversationLimit });
+    let imported = 0;
+    let queued = 0;
+    for (const conversation of conversations.items) {
+      if (!conversation.externalConversationRef) continue;
+      const local = await this.store.listMessages(adminId, conversation.id, { limit: 1 });
+      const latestLocalCreatedAt = local.items[local.items.length - 1]?.createdAt;
+      const page = await this.withAccountFailure(adminId, accountId, () => client.listMessages(conversation.externalConversationRef!, undefined, messageLimit));
+      const models = Array.isArray(page.userMessageModels) ? page.userMessageModels : [];
+      for (const item of [...models].reverse()) {
+        const parsed = normalizeHistoryMessage(item, client.selfUserIds);
+        if (!parsed) continue;
+        const importedMessage = await this.messages.importExternalMessage({
+          adminId,
+          conversationId: conversation.id,
+          direction: parsed.direction,
+          senderRole: parsed.direction === 'outbound' ? 'agent' : parsed.bodyType === 'system' ? 'system' : 'buyer',
+          bodyType: parsed.bodyType,
+          bodyText: parsed.bodyText,
+          bodyRef: parsed.bodyRef,
+          externalMessageRef: parsed.externalMessageRef,
+          externalMessageRefAliases: parsed.externalMessageRefAliases,
+          source: parsed.direction === 'outbound' ? 'human' : 'system',
+          riskFlags: parsed.riskFlags,
+          createdAt: parsed.createdAt,
+          traceId: `xianyu:recovery:${parsed.externalMessageRef}`,
+        });
+        if (importedMessage.created) imported += 1;
+        if (!this.autoReply || parsed.direction !== 'inbound' || !['text', 'image'].includes(parsed.bodyType)) continue;
+        if (latestLocalCreatedAt && parsed.createdAt < latestLocalCreatedAt) continue;
+        const inbox = await this.store.enqueueInboundInbox({
+          adminId,
+          accountId,
+          conversationId: conversation.id,
+          inboundMessageId: importedMessage.message.messageId,
+          externalConversationRef: conversation.externalConversationRef,
+          externalMessageRef: parsed.externalMessageRef,
+          sourceEventId: `history:${parsed.externalMessageRef}`,
+        });
+        if (inbox.created) queued += 1;
+      }
+    }
+    return { conversationsScanned: conversations.items.length, imported, queued };
   }
 
   async resetClient(adminId: string, accountId: string): Promise<void> {
@@ -223,6 +285,7 @@ export class XianyuImService {
         const client = new XianyuImClient({
           accountId,
           credential: toImCredential(credential),
+          selfUserIds: [account.sellerRef, account.platformUserId].filter((value): value is string => Boolean(value)),
           refreshCredential: async () => {
             const current = await this.store.getCredential(adminId, accountId);
             if (!current?.cookieHeader) throw new ServiceError(409, 'CREDENTIAL_MISSING', 'account credential is missing');
@@ -231,6 +294,7 @@ export class XianyuImService {
           onStatusChange: async (status) => {
             if (status === 'connected') {
               await this.store.updateAccount(adminId, accountId, { status: 'connected', lastConnectedAt: new Date().toISOString() });
+              this.scheduleRecentMessageRecovery(adminId, accountId);
             }
           },
           onFailure: async (error) => { await this.markAccountFailure(adminId, accountId, error); },
@@ -283,6 +347,29 @@ export class XianyuImService {
     } catch {
       // Account-state persistence must never hide the original Xianyu failure.
     }
+  }
+
+  private scheduleRecentMessageRecovery(adminId: string, accountId: string): void {
+    if (typeof this.store.listConversations !== 'function') return;
+    const key = `${adminId}:${accountId}`;
+    if (this.recoveryInFlight.has(key)) return;
+    const task = new Promise<void>((resolve) => {
+      setTimeout(() => {
+        void this.recoverRecentMessages(adminId, accountId)
+          .then((result) => {
+            if (result.imported > 0 || result.queued > 0) {
+              console.info(JSON.stringify({ component: 'xianyu-im-listener', event: 'history_recovery_completed', adminId, accountId, ...result }));
+            }
+          })
+          .catch((error) => {
+            console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'history_recovery_failed', adminId, accountId, errorCode: recoveryErrorCode(error) }));
+          })
+          .finally(resolve);
+      }, 0);
+    }).finally(() => {
+      if (this.recoveryInFlight.get(key) === task) this.recoveryInFlight.delete(key);
+    });
+    this.recoveryInFlight.set(key, task);
   }
 
   private async withAccountFailure<T>(adminId: string, accountId: string, operation: () => Promise<T>): Promise<T> {
@@ -349,7 +436,14 @@ export class XianyuImService {
       return { created: false };
     }
     let conversation = await this.store.findConversationByExternalRef(adminId, event.accountId, event.externalConversationRef);
-    let effectiveEvent = event;
+    const account = await this.store.getAccount(adminId, event.accountId);
+    const client = this.clients.get(`${adminId}:${event.accountId}`);
+    const selfUserIds = [
+      account?.sellerRef,
+      account?.platformUserId,
+      ...(client?.selfUserIds ?? []),
+    ].filter((value): value is string => Boolean(value));
+    let effectiveEvent = reconcileMessageDirection(event, selfUserIds, conversation?.buyerRef);
     if (event.direction === 'inbound' && !event.senderName && !conversation?.buyerDisplayName) {
       // Gateway pushes can omit the nickname even though the conversation
       // itself is addressable by a stable external ref. Resolve the profile
@@ -427,7 +521,7 @@ function toImCredential(credential: CredentialRecord): XianyuImCredential {
   return { cookieHeader: credential.cookieHeader ?? '', accessToken: credential.accessToken, deviceId: credential.deviceId };
 }
 
-function normalizeConversation(value: unknown, myId: string): { externalConversationRef: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; unreadCount?: number; lastMessagePreview?: string; lastMessageAt?: string } | undefined {
+function normalizeConversation(value: unknown, myId: string | readonly string[]): { externalConversationRef: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; unreadCount?: number; lastMessagePreview?: string; lastMessageAt?: string } | undefined {
   const wrapper = record(value);
   const conv = record(wrapper.singleChatUserConversation ?? wrapper);
   const single = record(conv.singleChatConversation ?? conv);
@@ -445,9 +539,9 @@ function normalizeConversation(value: unknown, myId: string): { externalConversa
   const last = record(record(conv.lastMessage).message ?? conv.lastMessage);
   const lastExtension = mergeRecords(record(last.extension), parseJsonObject(record(last.extension).extJson));
   const reminderUrl = string(lastExtension.reminderUrl ?? extension.reminderUrl);
-  const buyerRef = first === myId
+  const buyerRef = matchesIdentity(first, myId)
       ? second
-      : second === myId
+      : matchesIdentity(second, myId)
         ? first
       : strip(extension.extUserId ?? extension.peerUserId ?? (first || second)) || strip(parseQueryParam(reminderUrl, 'peerUserId'));
   if (!externalConversationRef || !buyerRef || buyerRef === '0') return undefined;
@@ -487,7 +581,7 @@ function normalizeConversation(value: unknown, myId: string): { externalConversa
   return { externalConversationRef, buyerRef, buyerDisplayName, buyerAvatarUrl, itemRef, itemTitle, itemImageUrl, unreadCount: numberValue(conv.redPoint), lastMessagePreview: preview, lastMessageAt: timestamp };
 }
 
-function normalizeHistoryMessage(value: unknown, myId: string): { externalMessageRef: string; externalMessageRefAliases?: string[]; direction: 'inbound' | 'outbound'; bodyType: 'text' | 'image' | 'system'; bodyText?: string; bodyRef?: string; riskFlags?: string[]; createdAt: string } | undefined {
+function normalizeHistoryMessage(value: unknown, myId: string | readonly string[]): { externalMessageRef: string; externalMessageRefAliases?: string[]; direction: 'inbound' | 'outbound'; bodyType: 'text' | 'image' | 'system'; bodyText?: string; bodyRef?: string; riskFlags?: string[]; createdAt: string } | undefined {
   const model = record(value);
   const message = record(model.message ?? model);
   const extension = record(message.extension);
@@ -502,7 +596,7 @@ function normalizeHistoryMessage(value: unknown, myId: string): { externalMessag
   const externalMessageRef = selectCanonicalMessageRef(...externalMessageRefCandidates);
   if (!externalMessageRef) return undefined;
   const senderRef = strip(extension.senderUserId ?? message.senderUserId);
-  const direction = senderRef && senderRef === myId ? 'outbound' : 'inbound';
+  const direction = senderRef && matchesIdentity(senderRef, myId) ? 'outbound' : 'inbound';
   const content = decodeCustom(record(message.content).custom);
   const custom = record(record(message.content).custom);
   const fallback = string(custom.summary ?? extension.reminderContent ?? extension.detailNotice);
@@ -553,11 +647,49 @@ function normalizeAssetUrl(value: string | undefined): string | undefined {
   if (value.startsWith('//')) return `https:${value}`;
   return value;
 }
+
+function reconcileMessageDirection(event: XianyuImMessageEvent, selfUserIds: readonly string[], buyerRef?: string): XianyuImMessageEvent {
+  if (matchesIdentity(event.senderRef, selfUserIds)) {
+    return event.direction === 'outbound'
+      ? event
+      : { ...event, direction: 'outbound', riskFlags: appendRiskFlag(event.riskFlags, 'sender_identity_reconciled') };
+  }
+  if (buyerRef && matchesIdentity(event.senderRef, [buyerRef])) {
+    return event.direction === 'inbound'
+      ? event
+      : { ...event, direction: 'inbound', riskFlags: appendRiskFlag(event.riskFlags, 'buyer_identity_reconciled') };
+  }
+  return event;
+}
+
+function appendRiskFlag(riskFlags: string[] | undefined, flag: string): string[] {
+  return [...new Set([...(riskFlags ?? []), flag])];
+}
+
+function matchesIdentity(value: unknown, identities: string | readonly string[]): boolean {
+  const normalized = normalizeIdentity(value);
+  if (!normalized) return false;
+  const candidates = Array.isArray(identities) ? identities : [identities];
+  return candidates.some((candidate) => normalizeIdentity(candidate) === normalized);
+}
+
+function normalizeIdentity(value: unknown): string | undefined {
+  const normalized = strip(value);
+  return normalized || undefined;
+}
+
 function strip(value: unknown): string { return String(value ?? '').replace(/@goofish$/, '').trim(); }
 function numberValue(value: unknown): number | undefined { const number = Number(value); return Number.isFinite(number) ? Math.max(0, Math.trunc(number)) : undefined; }
 function numeric(value: unknown): number | undefined { const number = Number(value); return Number.isSafeInteger(number) ? number : undefined; }
 function normalizeTimestamp(value: unknown): string | undefined { const number = Number(value); if (!Number.isFinite(number) || number <= 0) return undefined; const millis = number > 10_000_000_000 ? number : number * 1000; const parsed = new Date(millis); return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString(); }
 function parseQueryParam(value: string | undefined, key: string): string | undefined { if (!value) return undefined; try { return new URL(value.replace(/^fleamarket:\/\//, 'https://placeholder/')).searchParams.get(key) ?? undefined; } catch { return undefined; } }
+
+function recoveryErrorCode(error: unknown): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (typeof code === 'string' && /^[A-Z0-9_:-]{1,64}$/.test(code)) return code;
+  if (error instanceof Error && error.name) return error.name.toUpperCase().replace(/[^A-Z0-9_:-]/g, '_');
+  return 'XIANYU_HISTORY_RECOVERY_FAILED';
+}
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | undefined> {
   return await Promise.race([promise.catch(() => undefined), new Promise<undefined>((resolve) => setTimeout(resolve, timeoutMs))]);

@@ -110,6 +110,17 @@ test('push parser prefers the stable PNM id over an internal transport id', () =
   assert.equal(parsed?.externalMessageRef, 'canonical-1.PNM');
 });
 
+test('push parser treats an account seller identity as outbound even when the cookie identity differs', () => {
+  const sellerPayload = pushPayloadFromSender('seller-outbound-2.PNM', 'seller sent this', 'seller-account-2');
+  const sellerParsed = parsePushPayload(sellerPayload, 'account-1', ['stale-cookie-seller', 'seller-account-2']);
+  assert.equal(sellerParsed?.senderRef, 'seller-account-2');
+  assert.equal(sellerParsed?.direction, 'outbound');
+
+  const buyerParsed = parsePushPayload(pushPayload('buyer-inbound-1.PNM', 'buyer sent this'), 'account-1', ['stale-cookie-seller', 'seller-account-2']);
+  assert.equal(buyerParsed?.senderRef, 'buyer-1');
+  assert.equal(buyerParsed?.direction, 'inbound');
+});
+
 test('push parser accepts the named operation.sessionInfo buyer message envelope', () => {
   const parsed = parsePushPayload(operationPayload({ contentType: 1, messageId: 'operation-message-1.PNM', text: { text: '来自新 envelope 的买家消息' } }), 'account-1', 'seller-1');
   assert.deepEqual(parsed, {
@@ -308,7 +319,7 @@ test('unexpected gateway close schedules a reconnect for the listener', async ()
   await client.disconnect();
 });
 
-test('one push handler failure does not stop later gateway events in the frame', async () => {
+test('transient push handler failure retries before continuing later gateway events', async () => {
   const socket = new FakeSocket(false);
   const events: Array<Record<string, unknown>> = [];
   let calls = 0;
@@ -319,7 +330,7 @@ test('one push handler failure does not stop later gateway events in the frame',
     webSocketFactory: () => socket,
     onEvent: async (event) => {
       calls += 1;
-      if (calls === 1) throw new Error('handler-secret');
+      if (calls === 1) throw new Error('transient-handler-failure');
       events.push(event as Record<string, unknown>);
     },
   });
@@ -331,15 +342,19 @@ test('one push handler failure does not stop later gateway events in the frame',
       headers: { mid: 'push-batch' },
       body: { syncPushPackage: { data: [{ data: pushPayload('first.PNM', 'first') }, { data: pushPayload('second.PNM', 'second') }] } },
     }));
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    assert.equal(calls, 2);
-    assert.equal(events[0]?.externalMessageRef, 'second.PNM');
+    for (let attempt = 0; attempt < 20 && events.length < 2; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.equal(calls, 3);
+    assert.deepEqual(events.map((event) => event.externalMessageRef), ['first.PNM', 'second.PNM']);
   } finally {
     await client.disconnect();
   }
 });
 
 function pushPayload(messageRef = '4263141580162.PNM', text = 'hello from push', transportMessageRef = messageRef): string {
+  return pushPayloadFromSender(messageRef, text, 'buyer-1', transportMessageRef, 'Buyer');
+}
+
+function pushPayloadFromSender(messageRef: string, text: string, senderRef: string, transportMessageRef = messageRef, senderName = 'Sender'): string {
   const content = Buffer.from(JSON.stringify({ contentType: 1, text: { text } }), 'utf8').toString('base64');
   return Buffer.from(JSON.stringify({
     '1': {
@@ -347,7 +362,7 @@ function pushPayload(messageRef = '4263141580162.PNM', text = 'hello from push',
       '3': messageRef,
       '5': 1767225600000,
       '6': { '3': { '5': content } },
-      '10': { senderUserId: 'buyer-1', senderNick: 'Buyer', extJson: JSON.stringify({ messageId: transportMessageRef }) },
+      '10': { senderUserId: senderRef, senderNick: senderName, extJson: JSON.stringify({ messageId: transportMessageRef }) },
     },
   }), 'utf8').toString('base64');
 }
