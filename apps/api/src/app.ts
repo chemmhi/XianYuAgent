@@ -229,13 +229,13 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     onSuccess: async ({ sessionId, adminId, accountId, cookieHeader, cookieSnapshot, unb }) => {
       console.info(JSON.stringify({ component: 'xianyu-qr', event: 'on_success_start', sessionId, adminId, accountId, sellerRefSuffix: unb.slice(-6) }));
       if (accountId) {
-        const existing = await accounts.get(adminId, accountId);
+        const existing = await accounts.getForLogin(adminId, accountId);
         if (existing.sellerRef && !existing.sellerRef.startsWith('pending_') && existing.sellerRef !== unb) {
           await accounts.updateLoginSession({ adminId, accountId, sessionId, patch: { status: 'failed', failureCode: 'QR_ACCOUNT_MISMATCH', completedAt: new Date().toISOString() }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
           throw new Error('QR_ACCOUNT_MISMATCH');
         }
       }
-      const resolvedAccount = await ensureAccountForLogin({ accounts, adminId, accountId, sellerRef: unb, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+      const resolvedAccount = await accounts.resolveForLogin({ adminId, accountId, platform: 'xianyu', sellerRef: unb, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
       const resolvedAccountId = resolvedAccount.id;
       if (resolvedAccountId !== accountId) await accounts.updateLoginSession({ adminId, accountId, sessionId, patch: { accountId: resolvedAccountId }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
       await credentials.save({ adminId, accountId: resolvedAccountId, cookieHeader, clearAccessToken: true, metadata: metadataWithCookieSnapshot({ unb, loginMethod: 'qr_http' }, cookieSnapshot), requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
@@ -817,7 +817,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
       const loginSession = await accounts.createLoginSession({ adminId: authContext.admin.id, loginMethod: 'cookie', requestId: ctx.requestId, traceId: ctx.traceId });
       try {
         const unb = readCookieValue(cookieHeader, 'unb') || `cookie_${createId()}`;
-        const account = await ensureAccountForLogin({ accounts, adminId: authContext.admin.id, accountId: requestedAccountId, sellerRef: unb, requestId: ctx.requestId, traceId: ctx.traceId });
+        const account = await accounts.resolveForLogin({ adminId: authContext.admin.id, accountId: requestedAccountId, platform: 'xianyu', sellerRef: unb, requestId: ctx.requestId, traceId: ctx.traceId });
         await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId: undefined, sessionId: loginSession.id, patch: { accountId: account.id }, requestId: ctx.requestId, traceId: ctx.traceId });
         await credentials.save({ adminId: authContext.admin.id, accountId: account.id, cookieHeader, clearAccessToken: true, metadata: { unb, loginMethod: 'cookie' }, requestId: ctx.requestId, traceId: ctx.traceId });
         await runtime.xianyuIm.resetClient(authContext.admin.id, account.id);
@@ -1532,21 +1532,6 @@ function readCookieValue(cookieHeader: string, name: string): string | undefined
     if (part.slice(0, index).trim() === name) return part.slice(index + 1).trim();
   }
   return undefined;
-}
-
-async function ensureAccountForLogin(input: { accounts: AccountService; adminId: string; accountId?: string; sellerRef: string; requestId: string; traceId: string }) {
-  if (input.accountId) return input.accounts.get(input.adminId, input.accountId);
-  const existing = (await input.accounts.list(input.adminId, { page: 1, pageSize: 100 })).items.find((item) => item.platform === 'xianyu' && item.sellerRef === input.sellerRef);
-  if (existing) return existing;
-  try {
-    return await input.accounts.create({ adminId: input.adminId, platform: 'xianyu', sellerRef: input.sellerRef, displayName: input.sellerRef, requestId: input.requestId, traceId: input.traceId });
-  } catch (error) {
-    if (error instanceof ServiceError && error.code === 'CONFLICT') {
-      const retry = (await input.accounts.list(input.adminId, { page: 1, pageSize: 100 })).items.find((item) => item.platform === 'xianyu' && item.sellerRef === input.sellerRef);
-      if (retry) return retry;
-    }
-    throw error;
-  }
 }
 
 async function hydrateAccountProfile(input: { accounts: AccountService; xianyu: XianyuMtopClient; adminId: string; accountId: string; fallbackSellerRef: string; requestId: string; traceId: string }): Promise<void> {

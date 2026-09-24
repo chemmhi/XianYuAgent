@@ -183,6 +183,24 @@ export class MemoryStore implements Store {
     return { items: filtered.slice((page - 1) * pageSize, page * pageSize), page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
   }
   async getAccount(adminId: string, accountId: string): Promise<AccountRecord | undefined> { if (!(await this.hasAccountScope(adminId, accountId))) return undefined; return this.accounts.get(accountId); }
+  async getAccountForLogin(adminId: string, accountId: string): Promise<AccountRecord | undefined> {
+    const account = this.accounts.get(accountId);
+    if (!account) return undefined;
+    const hasHistoricalScope = [...this.scopes.values()].some((scope) => scope.adminId === adminId && scope.accountId === accountId && scope.scope === 'manage');
+    return hasHistoricalScope ? account : undefined;
+  }
+  async findAccountForLogin(input: { adminId: string; platform: string; sellerRef: string }): Promise<AccountRecord | undefined> {
+    const account = [...this.accounts.values()].find((item) => item.platform === input.platform && item.sellerRef === input.sellerRef);
+    return account ? this.getAccountForLogin(input.adminId, account.id) : undefined;
+  }
+  async restoreAccountForLogin(adminId: string, accountId: string): Promise<AccountRecord | undefined> {
+    const account = await this.getAccountForLogin(adminId, accountId);
+    if (!account) return undefined;
+    await this.grantScope({ adminId, accountId, scope: 'manage' });
+    if (account.status === 'disabled') account.status = 'pending';
+    account.updatedAt = new Date().toISOString();
+    return account;
+  }
   async createAccount(input: { platform: string; sellerRef: string; displayName?: string; adminId: string }): Promise<AccountRecord> {
     const duplicate = [...this.accounts.values()].find((account) => account.platform === input.platform && account.sellerRef === input.sellerRef);
     if (duplicate) throw new Error('ACCOUNT_DUPLICATE');
