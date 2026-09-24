@@ -27,6 +27,8 @@
 .automation-switch.on{background:var(--link)}
 .automation-switch.on span{transform:translateX(16px)}
 .automation-config-card{padding:14px;border:1px solid var(--border);border-radius:10px;background:#fff}
+.automation-config-card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:11px}
+.automation-config-card-head h4{margin:0}
 .automation-config-card h4{margin:0 0 11px;font-size:12px;line-height:1.5}
 .automation-selected-coupon{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 11px;border:1px solid #CFE0EE;border-radius:8px;background:var(--soft-blue-bg)}
 .automation-selected-coupon>div{min-width:0;display:grid;gap:4px}

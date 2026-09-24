@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { ProductVM } from '../../products/types';
+import type { ProductCouponVM, ProductVM } from '../../products/types';
 import { InputField } from '../../../shared/ui/InputField';
 import { TextAreaField } from '../../../shared/ui/TextAreaField';
 import { CouponPickerDialog } from './CouponPickerDialog';
@@ -26,23 +26,16 @@ export function AutomationDrawer({ open, product, accountLabel = '当前账号',
 }) {
   const [activeTab, setActiveTab] = useState<AutomationRuleKey>('delivery');
   const boundCouponIds = useMemo(() => (product?.couponBatches ?? []).map((coupon) => coupon.id).filter(Boolean), [product]);
-  const hasProductCouponBindings = Array.isArray(product?.couponBatches);
-  const pickerCoupons = useMemo(() => {
-    const byId = new Map(coupons.map((coupon) => [coupon.id, coupon]));
-    for (const coupon of product?.couponBatches ?? []) {
-      if (!byId.has(coupon.id)) byId.set(coupon.id, { id: coupon.id, label: coupon.label ?? coupon.id, typeLabel: '已绑定卡券', specSummary: '规格由卡券管理维护', quantitySummary: '按卡券设置' });
-    }
-    return [...byId.values()];
-  }, [coupons, product]);
-  const [draft, setDraft] = useState<ProductAutomationConfig | null>(() => config ? hydrateDraft(config, boundCouponIds, hasProductCouponBindings) : config);
+  const pickerCoupons = useMemo(() => buildAutomationCouponOptions(coupons, product?.couponBatches ?? []), [coupons, product]);
+  const [draft, setDraft] = useState<ProductAutomationConfig | null>(() => config ? hydrateDraft(config, boundCouponIds, pickerCoupons) : config);
   const [couponTarget, setCouponTarget] = useState<AutomationRuleKey | null>(null);
 
   useEffect(() => {
     if (open) {
-      setDraft(config ? hydrateDraft(config, boundCouponIds, hasProductCouponBindings) : config);
+      setDraft(config ? hydrateDraft(config, boundCouponIds, pickerCoupons) : config);
       setActiveTab('delivery');
     }
-  }, [boundCouponIds, config, hasProductCouponBindings, open]);
+  }, [boundCouponIds, config, open, pickerCoupons]);
 
   const selectedCoupons = useMemo(
     () => (key: AutomationRuleKey) => pickerCoupons.filter((coupon) => draft?.[key].couponIds?.includes(coupon.id)),
@@ -144,7 +137,10 @@ function RulePanel({ tab, rule, selectedCoupons, onToggle, onCouponChoose, onCha
       </div>
 
       {isCouponRule && <div className="automation-config-card">
-        <h4>{tab === 'gift' ? '赠品卡券' : '发货卡券'}</h4>
+        <div className="automation-config-card-head">
+          <h4>{tab === 'gift' ? '赠品卡券' : '发货卡券'}</h4>
+          <button className="btn ghost btn-small" type="button" data-testid={`choose-${tab}-coupon`} onClick={onCouponChoose}>选择卡券</button>
+        </div>
         <div className="automation-selected-coupon">
           <div>
             {selectedCoupons.length ? selectedCoupons.map((coupon) => (
@@ -154,7 +150,6 @@ function RulePanel({ tab, rule, selectedCoupons, onToggle, onCouponChoose, onCha
               </div>
             )) : <div className="automation-selected-coupon-item"><strong>未选择{tab === 'gift' ? '赠品' : '发货'}卡券</strong><small>请先选择可用卡券</small></div>}
           </div>
-          <button className="btn" type="button" data-testid={`choose-${tab}-coupon`} onClick={onCouponChoose}>选择卡券</button>
         </div>
         {tab === 'delivery' && <div className="automation-sub-option">
           <div><strong>自动确认发货</strong><small>发卡成功后执行</small></div>
@@ -172,6 +167,15 @@ function RulePanel({ tab, rule, selectedCoupons, onToggle, onCouponChoose, onCha
   );
 }
 
+export function buildAutomationCouponOptions(coupons: AutomationCoupon[], boundCoupons: ProductCouponVM[] = []): AutomationCoupon[] {
+  const byId = new Map(coupons.map((coupon) => [coupon.id, coupon]));
+  for (const coupon of boundCoupons) {
+    if (!coupon.id || byId.has(coupon.id)) continue;
+    byId.set(coupon.id, { id: coupon.id, label: coupon.label ?? coupon.id, typeLabel: '已绑定卡券', specSummary: '规格由卡券管理维护', quantitySummary: '按卡券设置' });
+  }
+  return [...byId.values()];
+}
+
 function summaryText(key: AutomationRuleKey, config: ProductAutomationConfig | null, selected: AutomationCoupon[]) {
   if (!config) return '正在加载配置';
   if (key === 'delivery') return selected.length ? `已选${selected[0].label} · 规则在卡券中维护` : '未选择发货卡券';
@@ -180,20 +184,23 @@ function summaryText(key: AutomationRuleKey, config: ProductAutomationConfig | n
   return config.reprice.enabled && config.reprice.targetPriceMinor ? `目标价 ¥${(config.reprice.targetPriceMinor / 100).toFixed(2)}` : '未设置目标价格和话术';
 }
 
-function hydrateDraft(config: ProductAutomationConfig, boundCouponIds: string[], hasProductCouponBindings: boolean): ProductAutomationConfig {
-  // The automation response is authoritative. Product list bindings are a
-  // legacy fallback only because the list can be stale or normalized to [].
-  const configuredDeliveryCouponIds = config.delivery.couponIds ?? [];
-  const deliveryCouponIds = configuredDeliveryCouponIds.length > 0
-    ? [...new Set(configuredDeliveryCouponIds)]
-    : hasProductCouponBindings
-      ? [...new Set(boundCouponIds)]
-      : [];
+function hydrateDraft(config: ProductAutomationConfig, boundCouponIds: string[], pickerCoupons: AutomationCoupon[]): ProductAutomationConfig {
+  const deliveryCouponIds = resolveDeliveryCouponIds(config.delivery.couponIds, boundCouponIds, pickerCoupons);
   return {
     ...config,
     delivery: { ...config.delivery, autoConfirm: config.delivery.autoConfirm ?? true, couponIds: deliveryCouponIds },
     gift: { ...config.gift, couponIds: [...(config.gift.couponIds ?? [])] },
   };
+}
+
+export function resolveDeliveryCouponIds(configuredIds: string[] | undefined, boundCouponIds: string[], pickerCoupons: AutomationCoupon[]): string[] {
+  const configured = [...new Set((configuredIds ?? []).map(String).map((value) => value.trim()).filter(Boolean))];
+  const visibleIds = new Set(pickerCoupons.map((coupon) => coupon.id));
+  const visibleBound = [...new Set(boundCouponIds.map(String).map((value) => value.trim()).filter((id) => visibleIds.has(id)))];
+  if (visibleBound.length > 0) return visibleBound;
+  const visibleConfigured = configured.filter((id) => visibleIds.has(id));
+  if (visibleConfigured.length > 0) return visibleConfigured;
+  return configured;
 }
 
 function formatTime(value: string) {
