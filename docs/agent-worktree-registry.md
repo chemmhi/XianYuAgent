@@ -163,4 +163,4 @@
 3. 人工审核通过后改为 `READY_FOR_MERGE`；未通过保持 `READY_FOR_REVIEW` 或改为 `BLOCKED`。
 4. 只有持有 merge lock 的 agent 能写入 `MERGING`、`MERGED`、`CLEANED`、`merge_commit` 和 `cleaned_at`。
 5. 每次更新登记表后运行 `git worktree list --porcelain`，确保表格与 Git 实际状态一致。
-| `root` | `auto-reply-openai-web-search-20260924` | `feat/auto-reply-openai-web-search` | `F:\ChenHai\Project\XianYuAgent-auto-reply-openai-web-search` | Codex /root | `2026-09-24 00:00:00 +08:00` | READY_FOR_REVIEW | - | - | 为自动回复 Agent 增加默认关闭的 OpenAI 内置 web_search 工具；限制为商品知识不足且通用知识问题，补充 Responses API 适配与回归测试。API/Web typecheck、API/Web build、自动回复定向全套 155 项测试和 diff-check 已通过。 |
+| `root` | `auto-reply-openai-web-search-20260924` | `feat/auto-reply-openai-web-search` | `F:\ChenHai\Project\XianYuAgent-auto-reply-openai-web-search` | Codex /root | `2026-09-24 00:00:00 +08:00` | MERGED | cb9811afcf951d94a348eb99ac6a279db656ab57 | - | 为自动回复 Agent 增加默认开启的 OpenAI 内置 web_search 工具；限制为商品知识不足且通用知识问题，补充 Responses API 适配与回归测试。API/Web typecheck、API/Web build、自动回复定向全套 155 项测试和 diff-check 已通过。 |
