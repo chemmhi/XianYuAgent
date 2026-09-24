@@ -40,7 +40,7 @@ export interface AppConfig {
   /** Product automation external writes remain blocked until all live gates pass. */
   productAutomationExecutionMode: ProductAutomationExecutionMode;
   productAutomationLiveConfirmed: boolean;
-  productAutomationProductTitleAllowlist: string[];
+  productAutomationBuyerAllowlist: string[];
   autoReplyRepairMode?: AutoReplyRepairMode;
   autoReplyPolicyJson?: string;
   autoReplyOutcomeReviewWorkerEnabled: boolean;
@@ -68,7 +68,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const autoReplyOutcomeReviewWorkerEnabled = asBoolean(env.AUTO_REPLY_OUTCOME_REVIEW_WORKER_ENABLED, true);
   const autoReplyTestBuyerNames = parseBuyerNames(env.AUTO_REPLY_TEST_BUYER_NAMES);
   const autoReplyAgent = resolveAutoReplyAgentConfig(env);
-  const productAutomationLive = resolveProductAutomationLiveConfig(env);
+  const productAutomationLive = resolveProductAutomationLiveConfig(env, autoReplyTestBuyerNames);
   if (autoReplySendMode === 'live' && autoReplyTestBuyerNames.length === 0) {
     throw new Error('AUTO_REPLY_LIVE_REQUIRES_BUYER_ALLOWLIST');
   }
@@ -114,7 +114,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     autoReplyAgent,
     productAutomationExecutionMode: productAutomationLive.executionMode,
     productAutomationLiveConfirmed: productAutomationLive.liveConfirmed,
-    productAutomationProductTitleAllowlist: productAutomationLive.productTitleAllowlist,
+    productAutomationBuyerAllowlist: productAutomationLive.buyerAllowlist,
   };
 }
 

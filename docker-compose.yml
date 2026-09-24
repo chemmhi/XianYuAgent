@@ -58,6 +58,8 @@ services:
       OBJECT_STORAGE_REGION: us-east-1
       AUTO_REPLY_SEND_MODE: ${AUTO_REPLY_SEND_MODE:-simulate}
       AUTO_REPLY_TEST_BUYER_NAMES: ${AUTO_REPLY_TEST_BUYER_NAMES:-[]}
+      PRODUCT_AUTOMATION_EXECUTION_MODE: ${PRODUCT_AUTOMATION_EXECUTION_MODE:-simulate}
+      PRODUCT_AUTOMATION_LIVE_CONFIRMED: ${PRODUCT_AUTOMATION_LIVE_CONFIRMED:-false}
     ports:
       - "8080:8080"
     depends_on:
@@ -78,6 +80,10 @@ services:
       DATABASE_URL: postgres://xianyu:xianyu_dev_only@postgres:5432/xianyu_agent
       REDIS_URL: redis://redis:6379
       ALLOW_IN_MEMORY: "false"
+      AUTO_REPLY_SEND_MODE: ${AUTO_REPLY_SEND_MODE:-simulate}
+      AUTO_REPLY_TEST_BUYER_NAMES: ${AUTO_REPLY_TEST_BUYER_NAMES:-[]}
+      PRODUCT_AUTOMATION_EXECUTION_MODE: ${PRODUCT_AUTOMATION_EXECUTION_MODE:-simulate}
+      PRODUCT_AUTOMATION_LIVE_CONFIRMED: ${PRODUCT_AUTOMATION_LIVE_CONFIRMED:-false}
     depends_on:
       postgres:
         condition: service_healthy

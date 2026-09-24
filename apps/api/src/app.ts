@@ -122,7 +122,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
   }, {
     executionMode: config.productAutomationExecutionMode,
     liveConfirmed: config.productAutomationLiveConfirmed,
-    productTitleAllowlist: config.productAutomationProductTitleAllowlist,
+    buyerAllowlist: config.productAutomationBuyerAllowlist,
   });
   const productAutomationWorker = new ProductAutomationWorker(store, productAutomationTrigger);
   const credentials = new CredentialService(store, async (input) => {
