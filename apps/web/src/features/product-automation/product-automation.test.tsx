@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { createMockProductAutomationApi, createProductAutomationApi, MOCK_AUTOMATION_COUPONS, toAutomationConfig, toAutomationConfigWire } from './api';
-import { AutomationDrawer, buildAutomationCouponOptions, resolveDeliveryCouponIds } from './components/AutomationDrawer';
+import { AutomationDrawer, buildAutomationCouponOptions, buildValidatedAutomationUpdate, resolveDeliveryCouponIds, resolveGiftCouponIds } from './components/AutomationDrawer';
 import { BatchAutomationDialog } from './components/BatchAutomationDialog';
 import { CouponPickerDialog } from './components/CouponPickerDialog';
 import { toProductAutomationSaveError } from './controller';
@@ -22,10 +22,12 @@ describe('product automation API', () => {
     const config = await api.getConfig('product-1');
     expect(config.version).toBe(7);
     expect(config.delivery.couponIds).toEqual(['1']);
-    const availableCoupons = await api.listCoupons('account-1', 'delivery');
-    expect(availableCoupons.some((coupon) => coupon.id === 'operator-only')).toBe(false);
-    expect(availableCoupons.some((coupon) => coupon.id === 'paused-coupon')).toBe(false);
-    expect(availableCoupons.every((coupon) => coupon.deliveryScope === 'buyer_deliverable' && coupon.status === 'active')).toBe(true);
+     const availableCoupons = await api.listCoupons('account-1', 'delivery');
+     const giftCoupons = await api.listCoupons('account-1', 'gift');
+     expect(availableCoupons.some((coupon) => coupon.id === 'operator-only')).toBe(true);
+     expect(availableCoupons.some((coupon) => coupon.id === 'paused-coupon')).toBe(false);
+     expect(availableCoupons.every((coupon) => coupon.status === 'active')).toBe(true);
+     expect(giftCoupons.map((coupon) => coupon.id)).toEqual(availableCoupons.map((coupon) => coupon.id));
     await api.saveConfig('product-1', { version: 7, delivery: { enabled: false } });
     await api.saveBatch({ productIds: ['product-1'], expectedConfigVersions: { 'product-1': 8 }, apply: { delivery: true, reprice: false, gift: false, review: false }, rules: { delivery: { enabled: false }, reprice: { enabled: false }, gift: { enabled: false }, review: { enabled: true } } });
     expect(calls[0].path).toBe('/api/v1/products/product-1/automation');
@@ -131,6 +133,14 @@ describe('product automation components', () => {
     expect(html).not.toContain('2 条规格');
   });
 
+  it('removes the no-op draft button and submits the full rule set on save', async () => {
+    const config = await createMockProductAutomationApi().getConfig(product.id);
+    expect(Object.keys(buildValidatedAutomationUpdate(config))).toEqual(['version', 'delivery', 'reprice', 'gift', 'review']);
+    const html = renderToStaticMarkup(createElement(AutomationDrawer, { open: true, product, config, coupons: MOCK_AUTOMATION_COUPONS, loadPhase: 'success', savePhase: 'idle', error: null, onClose: vi.fn(), onSave: vi.fn(async () => config) }));
+    expect(html).toContain('关闭');
+    expect(html).not.toContain('保存草稿');
+  });
+
   it('renders selected coupons as removable rows without redundant checkboxes', () => {
     const html = renderToStaticMarkup(createElement(CouponPickerDialog, { open: true, title: '选择发货卡券', subtitle: '付款后自动发货使用的卡券', coupons: MOCK_AUTOMATION_COUPONS, selectedIds: ['coupon-batch-2'], onCancel: vi.fn(), onSave: vi.fn() }));
     expect(html).toContain('aria-label="移除批量数据2"');
@@ -188,6 +198,27 @@ describe('product automation components', () => {
     }));
     expect(html).toContain('奥维地图');
     expect(html.indexOf('data-testid="choose-delivery-coupon"')).toBeLessThan(html.indexOf('class="automation-selected-coupon"'));
+  });
+
+  it('hydrates gift selections from the public coupon id without inheriting delivery bindings', async () => {
+    const boundProduct = { ...product, couponBatches: [{ id: 'coupon-owei-map', label: '奥维地图' }] };
+    const coupons = [...MOCK_AUTOMATION_COUPONS, { id: 'coupon-owei-map', label: '奥维地图', typeLabel: '数据卡', specSummary: '按行取值', quantitySummary: '每件 1 份' }];
+    expect(resolveGiftCouponIds(['internal-uuid-for-owei-map'], ['coupon-owei-map'], coupons)).toEqual(['coupon-owei-map']);
+    expect(resolveGiftCouponIds([], ['coupon-owei-map'], coupons)).toEqual([]);
+    const config = await createMockProductAutomationApi().getConfig(product.id);
+    const html = renderToStaticMarkup(createElement(AutomationDrawer, {
+      open: true,
+      product: boundProduct,
+      config: { ...config, delivery: { ...config.delivery, couponIds: ['coupon-owei-map'] }, gift: { ...config.gift, enabled: true, couponIds: ['internal-uuid-for-owei-map'] } },
+      coupons,
+      loadPhase: 'success',
+      savePhase: 'idle',
+      error: null,
+      onClose: vi.fn(),
+      onSave: vi.fn(async () => null),
+    }));
+    expect(html).toContain('评价后发送赠品');
+    expect(html).toContain('已选奥维地图');
   });
 
   it('renders the delivery auto-confirm switch and preserves its saved state', () => {

@@ -138,6 +138,36 @@ async function run() {
       throw error;
     }
     await evaluate(cdp, `document.querySelector('[aria-label="关闭自动化配置"]')?.click()`);
+    const giftProductOpened = await evaluate(cdp, `(() => {
+      const row = Array.from(document.querySelectorAll('[role="row"]')).find((item) => item.textContent?.includes('婚礼视频，AI婚礼视频制作'));
+      const button = row?.querySelector('[data-testid^="product-automation-"]');
+      button?.click();
+      return Boolean(button);
+    })()`);
+    if (!giftProductOpened) throw new Error('gift automation product action missing');
+    await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector("[data-testid=automation-drawer]"))')), 'gift automation drawer');
+    await evaluate(cdp, 'document.querySelector("[data-testid=automation-tab-gift]")?.click()');
+    await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector("[data-testid=choose-gift-coupon]"))')), 'gift rule panel');
+    const giftBindingAudit = await evaluate(cdp, `(() => {
+      const panel = document.querySelector('.automation-rule-panel');
+      return { selected: Boolean(panel?.textContent?.includes('评价赠品批次 A')), body: panel?.textContent ?? '' };
+    })()`);
+    if (!giftBindingAudit?.selected) throw new Error(`gift coupon was not hydrated: ${JSON.stringify(giftBindingAudit)}`);
+    await evaluate(cdp, 'document.querySelector("[data-testid=choose-gift-coupon]")?.click()');
+    await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('待选卡券'), 'gift coupon picker');
+    const giftPickerAudit = await evaluate(cdp, `(() => {
+      const panes = document.querySelectorAll('.coupon-transfer-pane');
+      const availableLabels = Array.from(panes[0]?.querySelectorAll('.coupon-item') ?? []).map((item) => item.textContent ?? '');
+      const selectedLabels = Array.from(panes[1]?.querySelectorAll('.coupon-item') ?? []).map((item) => item.textContent ?? '');
+      return { availableCount: availableLabels.length, availableLabels, selectedLabels };
+    })()`);
+    const requiredGiftLabels = ['批量数据2', '固定文字', '评价赠品批次 A'];
+    const giftListComplete = requiredGiftLabels.every((label) => giftPickerAudit?.availableLabels?.some((value) => value.includes(label)));
+    const giftSelected = giftPickerAudit?.selectedLabels?.some((value) => value.includes('评价赠品批次 A'));
+    if (!giftListComplete || !giftSelected) throw new Error(`gift coupon picker list was incomplete: ${JSON.stringify(giftPickerAudit)}`);
+    await evaluate(cdp, 'document.querySelector("[data-testid=coupon-picker-dialog] button.btn.ghost")?.click()');
+    await waitFor(async () => !Boolean(await evaluate(cdp, 'document.querySelector("[data-testid=coupon-picker-dialog]")')), 'gift coupon picker close');
+    await evaluate(cdp, `document.querySelector('[aria-label="关闭自动化配置"]')?.click()`);
   } else {
     await evaluate(cdp, `document.querySelector('[aria-label="关闭自动化配置"]')?.click()`);
   }

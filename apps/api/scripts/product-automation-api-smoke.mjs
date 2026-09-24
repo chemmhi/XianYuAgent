@@ -33,7 +33,7 @@ try {
   assert.equal(config.paidAutoDelivery.autoConfirm, true);
   const associationOnly = await request(`/api/v1/products/${associationOnlyProduct.id}/automation`, { method: 'PUT', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'automation-association-only', 'If-Match-Version': '1' }, body: JSON.stringify({ config: { ...config, paidAutoDelivery: { ...config.paidAutoDelivery, enabled: false, couponBatchIds: [associationOnlyCoupon.id] } } }) });
   assert.equal(associationOnly.response.status, 200);
-  assert.deepEqual(associationOnly.body.data.config.paidAutoDelivery.couponBatchIds, [associationOnlyCoupon.id]);
+  assert.deepEqual(associationOnly.body.data.config.paidAutoDelivery.couponBatchIds, [associationOnlyCoupon.sequenceId ?? associationOnlyCoupon.id]);
   config.paidAutoDelivery = { ...config.paidAutoDelivery, enabled: true, couponBatchIds: [coupon.id], autoConfirm: true };
   const saved = await request(`/api/v1/products/${product.id}/automation`, { method: 'PUT', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'automation-save-1', 'If-Match-Version': '1' }, body: JSON.stringify({ config }) });
   assert.equal(saved.response.status, 200);

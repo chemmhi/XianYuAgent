@@ -12,7 +12,7 @@ const tabs: Array<{ key: AutomationRuleKey; title: string; subtitle: string }> =
   { key: 'review', title: '超时未评价求评价', subtitle: '发货后 72 小时 · 每 24 小时 · 1 次' },
 ];
 
-export function AutomationDrawer({ open, product, accountLabel = '当前账号', config, coupons, loadPhase, savePhase, error, onClose, onSave }: {
+export function AutomationDrawer({ open, product, accountLabel = '当前账号', config, coupons, loadPhase, savePhase, error, draft: draftOverride, onClose, onSave }: {
   open: boolean;
   product: ProductVM | null;
   accountLabel?: string;
@@ -21,21 +21,23 @@ export function AutomationDrawer({ open, product, accountLabel = '当前账号',
   loadPhase: 'idle' | 'loading' | 'success' | 'error';
   savePhase: 'idle' | 'saving' | 'success' | 'error';
   error: string | null;
-  onClose: () => void;
+  draft?: ProductAutomationConfig | null;
+  onClose: (draft?: ProductAutomationConfig | null) => void;
   onSave: (input: ProductAutomationUpdate) => Promise<unknown>;
 }) {
   const [activeTab, setActiveTab] = useState<AutomationRuleKey>('delivery');
   const boundCouponIds = useMemo(() => (product?.couponBatches ?? []).map((coupon) => coupon.id).filter(Boolean), [product]);
   const pickerCoupons = useMemo(() => buildAutomationCouponOptions(coupons, product?.couponBatches ?? []), [coupons, product]);
-  const [draft, setDraft] = useState<ProductAutomationConfig | null>(() => config ? hydrateDraft(config, boundCouponIds, pickerCoupons) : config);
+  const [draft, setDraft] = useState<ProductAutomationConfig | null>(() => draftOverride ?? (config ? hydrateDraft(config, boundCouponIds, pickerCoupons) : config));
   const [couponTarget, setCouponTarget] = useState<AutomationRuleKey | null>(null);
 
   useEffect(() => {
     if (open) {
-      setDraft(config ? hydrateDraft(config, boundCouponIds, pickerCoupons) : config);
+      setDraft(draftOverride ?? (config ? hydrateDraft(config, boundCouponIds, pickerCoupons) : config));
       setActiveTab('delivery');
+      setCouponTarget(null);
     }
-  }, [boundCouponIds, config, open, pickerCoupons]);
+  }, [boundCouponIds, config, draftOverride, open, pickerCoupons]);
 
   const selectedCoupons = useMemo(
     () => (key: AutomationRuleKey) => pickerCoupons.filter((coupon) => draft?.[key].couponIds?.includes(coupon.id)),
@@ -50,13 +52,12 @@ export function AutomationDrawer({ open, product, accountLabel = '当前账号',
   };
   const save = async () => {
     if (!draft) return;
-    const patch: ProductAutomationUpdate = { version: draft.version };
-    patch[activeTab] = draft[activeTab];
-    await onSave(patch);
+    await onSave(buildValidatedAutomationUpdate(draft));
   };
+  const close = () => onClose(draft);
 
   return (
-    <div className="products-detail-backdrop automation-drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="products-detail-backdrop automation-drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
       <aside className="products-detail-panel automation-drawer" role="dialog" aria-modal="true" aria-label="自动化配置" data-testid="automation-drawer">
         <header className="automation-drawer-head">
           <div className="automation-drawer-top">
@@ -69,7 +70,7 @@ export function AutomationDrawer({ open, product, accountLabel = '当前账号',
               <span className={`automation-status${loadPhase === 'error' || savePhase === 'error' ? ' error' : ''}`}>
                 {loadPhase === 'loading' ? '加载中…' : loadPhase === 'error' ? '加载失败' : savePhase === 'saving' ? '保存中…' : savePhase === 'error' ? '保存失败' : '● 运行中'}
               </span>
-              <button className="icon-button" type="button" aria-label="关闭自动化配置" onClick={onClose}>×</button>
+              <button className="icon-button" type="button" aria-label="关闭自动化配置" onClick={close}>×</button>
             </div>
           </div>
           <div className="automation-summary-grid">
@@ -92,8 +93,7 @@ export function AutomationDrawer({ open, product, accountLabel = '当前账号',
         <footer className="automation-drawer-footer">
           <span>最近保存：{draft?.updatedAt ? formatTime(draft.updatedAt) : '未保存'} · 配置版本 v{draft?.version ?? 1}</span>
           <div>
-            <button className="btn ghost" type="button" onClick={onClose} disabled={savePhase === 'saving'}>取消</button>
-            <button className="btn" type="button" onClick={() => void save()} disabled={!draft || savePhase === 'saving'}>保存草稿</button>
+            <button className="btn ghost" type="button" onClick={close} disabled={savePhase === 'saving'}>关闭</button>
             <button className="btn primary" type="button" data-testid="save-automation" onClick={() => void save()} disabled={!draft || savePhase === 'saving'}>{savePhase === 'saving' ? '保存中…' : '保存并启用'}</button>
           </div>
         </footer>
@@ -186,10 +186,11 @@ function summaryText(key: AutomationRuleKey, config: ProductAutomationConfig | n
 
 function hydrateDraft(config: ProductAutomationConfig, boundCouponIds: string[], pickerCoupons: AutomationCoupon[]): ProductAutomationConfig {
   const deliveryCouponIds = resolveDeliveryCouponIds(config.delivery.couponIds, boundCouponIds, pickerCoupons);
+  const giftCouponIds = resolveGiftCouponIds(config.gift.couponIds, boundCouponIds, pickerCoupons);
   return {
     ...config,
     delivery: { ...config.delivery, autoConfirm: config.delivery.autoConfirm ?? true, couponIds: deliveryCouponIds },
-    gift: { ...config.gift, couponIds: [...(config.gift.couponIds ?? [])] },
+    gift: { ...config.gift, couponIds: giftCouponIds },
   };
 }
 
@@ -201,6 +202,20 @@ export function resolveDeliveryCouponIds(configuredIds: string[] | undefined, bo
   const visibleConfigured = configured.filter((id) => visibleIds.has(id));
   if (visibleConfigured.length > 0) return visibleConfigured;
   return configured;
+}
+
+export function resolveGiftCouponIds(configuredIds: string[] | undefined, boundCouponIds: string[], pickerCoupons: AutomationCoupon[]): string[] {
+  const configured = [...new Set((configuredIds ?? []).map(String).map((value) => value.trim()).filter(Boolean))];
+  const visibleIds = new Set(pickerCoupons.map((coupon) => coupon.id));
+  const visibleConfigured = configured.filter((id) => visibleIds.has(id));
+  if (visibleConfigured.length > 0) return visibleConfigured;
+  if (configured.length === 0) return [];
+  const visibleBound = [...new Set(boundCouponIds.map(String).map((value) => value.trim()).filter((id) => visibleIds.has(id)))];
+  return configured.length === 1 && visibleBound.length === 1 ? visibleBound : configured;
+}
+
+export function buildValidatedAutomationUpdate(draft: ProductAutomationConfig): ProductAutomationUpdate {
+  return { version: draft.version, delivery: draft.delivery, reprice: draft.reprice, gift: draft.gift, review: draft.review };
 }
 
 function formatTime(value: string) {
