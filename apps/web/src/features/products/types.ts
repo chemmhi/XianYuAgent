@@ -69,6 +69,8 @@ export interface ProductDraftInput {
   description?: string;
   categoryCode?: string;
   priceMinor?: number;
+  /** Structured publish-only fields kept in the product attributes envelope until publish API lands. */
+  publishMeta?: ProductPublishMeta;
 }
 
 export interface ProductDraftPatch {
@@ -76,6 +78,22 @@ export interface ProductDraftPatch {
   description?: string;
   categoryCode?: string;
   priceMinor?: number;
+  publishMeta?: ProductPublishMeta;
+}
+
+export interface ProductPublishImageMeta {
+  name: string;
+  mimeType: string;
+  size?: number;
+}
+
+export interface ProductPublishMeta {
+  originalPriceMinor?: number;
+  quantity?: number;
+  postageMode?: 'seller' | 'buyer';
+  postageMinor?: number;
+  location?: string;
+  images?: ProductPublishImageMeta[];
 }
 
 export interface ProductMutationError {

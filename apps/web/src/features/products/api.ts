@@ -313,18 +313,25 @@ export function createProductsApi(transport: ProductsApiTransport): ProductsApi 
     },
     async createDraft(input, options = {}) {
       const post = requireTransportMethod(transport, 'post');
-      const payload = await post<ProductPayload | ApiEnvelope<ProductPayload>>('/api/v1/products', {
+      const body = {
         accountId: input.accountId,
         title: input.title,
         description: input.description ?? null,
         categoryCode: input.categoryCode ?? null,
         priceMinor: input.priceMinor ?? null,
-      }, { headers: { 'Idempotency-Key': options.idempotencyKey ?? idempotencyKey('product-create') } });
+        ...(input.publishMeta ? { attributesJson: { publish: input.publishMeta } } : {}),
+      };
+      const payload = await post<ProductPayload | ApiEnvelope<ProductPayload>>('/api/v1/products', body, { headers: { 'Idempotency-Key': options.idempotencyKey ?? idempotencyKey('product-create') } });
       return toProductVM(unwrapEnvelope(payload));
     },
     async updateDraft(productId, patch, options) {
       const patchRequest = requireTransportMethod(transport, 'patch');
-      const payload = await patchRequest<ProductPayload | ApiEnvelope<ProductPayload>>(`/api/v1/products/${encodeURIComponent(productId)}`, patch, {
+      const body = {
+        ...patch,
+        ...(patch.publishMeta ? { attributesJson: { publish: patch.publishMeta } } : {}),
+      };
+      delete (body as { publishMeta?: unknown }).publishMeta;
+      const payload = await patchRequest<ProductPayload | ApiEnvelope<ProductPayload>>(`/api/v1/products/${encodeURIComponent(productId)}`, body, {
         headers: {
           'Idempotency-Key': options.idempotencyKey ?? idempotencyKey('product-update'),
           'If-Match-Version': String(options.configVersion),
