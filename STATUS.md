@@ -6,7 +6,7 @@
 - 修复：QR 会话以外部 Cookie 校验和资料同步为成功标准，成功后立即持久化 `succeeded`；IM listener 改为后台 best-effort、有限重试；滑块/人工验证错误只把账号标为 `degraded`，保留刚保存的有效 Cookie；QR 后置回调失败立即发出终态并保留原始错误码；前端适配器保留服务端 `verification_required`，不再误映射成 `failed`。
 - 受影响模块：`apps/api/src/xianyu-qr-login.ts`（终态持久化/错误码）、`apps/api/src/app.ts`（成功边界/监听器降级）、`apps/api/src/xianyu-im-service.ts`（验证类错误映射）；新增 QR/IM 回归覆盖。
 - 已验证：API 编译；API 全量 51 个测试文件 / 327 项通过；15 个 API smoke 全部通过；Web QR API 9/9、QR model 2/2、Web typecheck；隔离 PostgreSQL 迁移与 credential store smoke 通过；`git diff --check` 通过。
-- 状态：`READY_FOR_MERGE`；真实闲鱼账号的滑块挑战仍需人工完成，系统会在挑战前保持账号 `degraded` 而非撤销有效 Cookie。
+- 状态：`MERGED`；后端以 `98b7905`、前端以 `807cebe` 合入 `main`。真实闲鱼账号的滑块挑战仍需人工完成，系统会在挑战前保持账号 `degraded` 而非撤销有效 Cookie。
 
 ## 2026-09-24 卡券删除弹窗与启用状态 follow-up
 
