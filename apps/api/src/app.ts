@@ -37,6 +37,7 @@ import { AutomationWorkflowService, PersistentAutomationExecutionLedger } from '
 import { ProductAutomationTrigger, ProductAutomationWorker } from './product-automation-trigger.js';
 import { XianyuProductAutomationExecutionAdapter } from './product-automation-xianyu.js';
 import { conversationRefreshMode, messageRefreshMode } from './messages-loading-policy.js';
+import { CouponAssetService } from './coupon-assets.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -77,6 +78,10 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     throw new Error('AUTO_REPLY_LIVE_REQUIRES_BUYER_ALLOWLIST');
   }
   const store = createStore(config);
+  const objectStorage: ObjectStorage = config.allowInMemory
+    ? new MemoryObjectStorage()
+    : new S3CompatibleObjectStorage({ endpoint: config.objectStorageEndpoint, publicEndpoint: config.objectStoragePublicEndpoint, accessKey: config.objectStorageAccessKey, secretKey: config.objectStorageSecretKey, bucket: config.objectStorageBucket, region: config.objectStorageRegion });
+  const couponAssets = new CouponAssetService(store, objectStorage);
   const autoReplyGodView = createAutoReplyGodViewSink();
   const autoReplyAgentConfig = config.autoReplyAgent ?? resolveAutoReplyAgentConfig();
   const modelClient = createConfiguredModelClient(config);
@@ -91,7 +96,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, reason: input.reason, createdAt: new Date().toISOString() });
     return auditId;
-  });
+  }, couponAssets);
   const products = new ProductService(store, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
@@ -272,9 +277,6 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       await markXianyuAccountFailure(store, adminId, accountId, { errorCode, message, accountInvalid });
     },
   });
-  const objectStorage: ObjectStorage = config.allowInMemory
-    ? new MemoryObjectStorage()
-    : new S3CompatibleObjectStorage({ endpoint: config.objectStorageEndpoint, publicEndpoint: config.objectStoragePublicEndpoint, accessKey: config.objectStorageAccessKey, secretKey: config.objectStorageSecretKey, bucket: config.objectStorageBucket, region: config.objectStorageRegion });
   const xianyuItemDetail = new XianyuItemDetailService(store, xianyu, objectStorage, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
@@ -492,7 +494,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   }
 
   const authContext = await requireAuth(auth, ctx);
-  if (ctx.method !== 'GET' && ctx.path !== '/api/v1/auth/logout') await auth.validateCsrf(authContext, ctx.headers, ctx.cookies);
+  if (ctx.method !== 'GET' && ctx.method !== 'HEAD' && ctx.path !== '/api/v1/auth/logout') await auth.validateCsrf(authContext, ctx.headers, ctx.cookies);
   if (ctx.path === '/api/v1/auth/logout' && ctx.method === 'POST') {
     await auth.validateCsrf(authContext, ctx.headers, ctx.cookies);
     await auth.logout(authContext);
@@ -1046,6 +1048,24 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     const itemId = optionalString(ctx.query.couponId) ?? decodeURIComponent(couponContentMatch[1]);
     const preview = await coupons.content({ adminId: authContext.admin.id, itemId, purpose: optionalString(ctx.query.purpose) ?? 'preview', deliveryScope: optionalString(ctx.query.deliveryScope) ?? 'operator_only', requestId: ctx.requestId, traceId: ctx.traceId });
     return { statusCode: 200, body: success(ctx, preview).body };
+  }
+
+  const couponAssetMatch = ctx.path.match(/^\/api\/v1\/coupons\/batches\/([^/]+)\/assets\/([^/]+)$/);
+  if (couponAssetMatch && (ctx.method === 'GET' || ctx.method === 'HEAD')) {
+    const batchId = decodeURIComponent(couponAssetMatch[1]);
+    const assetId = decodeURIComponent(couponAssetMatch[2]);
+    const resolved = await coupons.getAsset({ adminId: authContext.admin.id, batchId, assetId });
+    if (!resolved) return { statusCode: 404, body: failure(ctx, 404, 'NOT_FOUND', 'coupon image not found').body };
+    response.statusCode = 200;
+    response.setHeader('Content-Type', resolved.object.contentType || resolved.asset.mimeType);
+    response.setHeader('Content-Length', String(resolved.object.body.length));
+    response.setHeader('Cache-Control', 'private, max-age=300');
+    response.setHeader('Content-Disposition', 'inline');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.setHeader('ETag', `"${resolved.asset.checksum ?? resolved.object.etag ?? resolved.asset.id}"`);
+    if (ctx.method === 'HEAD') response.end();
+    else response.end(resolved.object.body);
+    return undefined;
   }
 
   const productDetailAssetMatch = ctx.path.match(/^\/api\/v1\/products\/([^/]+)\/detail\/assets\/([^/]+)$/);

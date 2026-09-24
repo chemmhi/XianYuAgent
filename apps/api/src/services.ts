@@ -3,6 +3,7 @@ import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRe
 import { createId, createToken, digestJson, hashPassword, isSessionFresh, sha256, verifyPassword } from './security.js';
 import type { XianyuMtopClient } from './xianyu-mtop.js';
 import type { ProductAutomationTriggerBatchResult } from './product-automation-trigger.js';
+import { CouponAssetService } from './coupon-assets.js';
 
 export interface AuthContext {
   admin: AdminRecord;
@@ -89,7 +90,7 @@ export class AccountService {
 }
 
 export class CouponService {
-  constructor(private readonly store: Store, private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string; reason?: string }) => Promise<string>) {}
+  constructor(private readonly store: Store, private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string; reason?: string }) => Promise<string>, private readonly couponAssets: CouponAssetService) {}
 
   async list(adminId: string, query: CouponBatchListQuery): Promise<{ items: ReturnType<CouponService['toBatchView']>[]; page: number; pageSize: number; total: number; totalPages: number }> {
     if (query.accountId && !(await this.store.hasAccountScope(adminId, query.accountId))) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
@@ -103,11 +104,13 @@ export class CouponService {
     if (query.sortBy && query.sortBy !== 'createdAt') throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon sort field');
     if (query.sortOrder && !['asc', 'desc'].includes(query.sortOrder)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon sort order');
     const result = await this.store.listCouponBatches(adminId, { ...query, page, pageSize });
-    return { ...result, items: result.items.map((batch) => this.toBatchView(batch)) };
+    const items = await Promise.all(result.items.map(async (batch) => this.couponAssets.migrateLegacyImages({ adminId, batch })));
+    return { ...result, items: items.map((batch) => this.toBatchView(batch)) };
   }
 
   async get(adminId: string, batchId: string): Promise<ReturnType<CouponService['toBatchView']>> {
-    const batch = await this.store.getCouponBatch(adminId, batchId);
+    const current = await this.store.getCouponBatch(adminId, batchId);
+    const batch = current ? await this.couponAssets.migrateLegacyImages({ adminId, batch: current }) : undefined;
     if (!batch) throw new ServiceError(404, 'NOT_FOUND', 'coupon batch not found');
     return this.toBatchView(batch, true);
   }
@@ -118,9 +121,12 @@ export class CouponService {
     if (!['text', 'data', 'api', 'image'].includes(input.purpose)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon purpose');
     if (!['system_only', 'operator_only', 'buyer_deliverable'].includes(input.deliveryScope)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid deliveryScope');
     try {
-      const batch = await this.store.createCouponBatch(input);
-      await this.audit({ actorId: input.adminId, action: 'coupon.batch.created', targetRef: batch.id, requestId: input.requestId, traceId: input.traceId, payload: { purpose: batch.purpose, deliveryScope: batch.deliveryScope, hasQuarkUrl: Boolean(batch.quarkUrl), hasExtractionCode: Boolean(batch.extractionCode) }, accountId: batch.accountId });
-      return this.toBatchView(batch, true);
+      const imageUrls = input.metadata?.imageUrls ?? [];
+      const batch = await this.store.createCouponBatch({ ...input, metadata: this.couponAssets.withoutImages(input.metadata) });
+      if (imageUrls.length > 0) await this.couponAssets.replaceImages({ adminId: input.adminId, batch, imageUrls });
+      const hydrated = await this.store.getCouponBatch(input.adminId, batch.id) ?? batch;
+      await this.audit({ actorId: input.adminId, action: 'coupon.batch.created', targetRef: hydrated.id, requestId: input.requestId, traceId: input.traceId, payload: { purpose: hydrated.purpose, deliveryScope: hydrated.deliveryScope, hasQuarkUrl: Boolean(hydrated.quarkUrl), hasExtractionCode: Boolean(hydrated.extractionCode), imageCount: hydrated.assets?.length ?? 0 }, accountId: hydrated.accountId });
+      return this.toBatchView(hydrated, true);
     } catch (error) { throw mapCouponStoreError(error); }
   }
 
@@ -129,11 +135,22 @@ export class CouponService {
     if (input.patch.deliveryScope && !['system_only', 'operator_only', 'buyer_deliverable'].includes(input.patch.deliveryScope)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid deliveryScope');
     if (input.patch.status && !['draft', 'active', 'paused', 'closed', 'exhausted', 'voided'].includes(input.patch.status)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon batch status');
     try {
-      const batch = await this.store.updateCouponBatch(input);
+      const imageUrls = input.patch.metadata?.imageUrls;
+      const patch = input.patch.metadata === undefined ? input.patch : { ...input.patch, metadata: this.couponAssets.withoutImages(input.patch.metadata) };
+      const batch = await this.store.updateCouponBatch({ ...input, patch });
       if (!batch) throw new ServiceError(404, 'NOT_FOUND', 'coupon batch not found');
-      await this.audit({ actorId: input.adminId, action: 'coupon.batch.updated', targetRef: batch.id, requestId: input.requestId, traceId: input.traceId, payload: { purpose: batch.purpose, status: batch.status, metadataKeys: Object.keys(batch.metadata ?? {}) }, accountId: batch.accountId });
-      return this.toBatchView(batch, true);
+      if (imageUrls !== undefined) {
+        const assetBatch = await this.store.getCouponBatch(input.adminId, batch.id) ?? batch;
+        await this.couponAssets.replaceImages({ adminId: input.adminId, batch: assetBatch, imageUrls });
+      }
+      const hydrated = await this.store.getCouponBatch(input.adminId, batch.id) ?? batch;
+      await this.audit({ actorId: input.adminId, action: 'coupon.batch.updated', targetRef: hydrated.id, requestId: input.requestId, traceId: input.traceId, payload: { purpose: hydrated.purpose, status: hydrated.status, metadataKeys: Object.keys(hydrated.metadata ?? {}), imageCount: hydrated.assets?.length ?? 0 }, accountId: hydrated.accountId });
+      return this.toBatchView(hydrated, true);
     } catch (error) { throw mapCouponStoreError(error); }
+  }
+
+  async getAsset(input: { adminId: string; batchId: string; assetId: string }): Promise<{ asset: import('./domain.js').CouponAssetRecord; object: { key: string; body: Buffer; contentType: string; etag?: string } } | undefined> {
+    return this.couponAssets.getAsset(input);
   }
 
   async importItems(input: { adminId: string; batchId: string; contents: string[]; requestId: string; traceId: string }): Promise<Record<string, unknown>> {
@@ -216,10 +233,14 @@ export class CouponService {
     const totalCount = batch.totalCount || items.length;
     const stockAlert = batch.status === 'voided' || availableCount === 0 ? 'exhausted' : availableCount <= 5 ? 'low_stock' : 'normal';
     const metadata = batch.metadata ?? {};
+    const storedImageUrls = this.couponAssets.imageUrls(batch);
+    const legacyImageUrls = (metadata.imageUrls ?? []).filter((url) => !this.couponAssets.isDataImage(url));
+    const imageUrls = storedImageUrls.length > 0 ? storedImageUrls : legacyImageUrls;
+    const detailMetadata = imageUrls.length > 0 ? { ...metadata, imageUrls } : metadata;
     const listMetadata = { description: metadata.description, delaySeconds: metadata.delaySeconds, deliveryCount: metadata.deliveryCount, useNoLogisticsForm: metadata.useNoLogisticsForm, dockable: metadata.dockable, price: metadata.price, feePayer: metadata.feePayer, minPrice: metadata.minPrice, dockVisibility: metadata.dockVisibility, multiSpec: metadata.multiSpec, specName: metadata.specName, specValue: metadata.specValue };
     const publicBatchId = this.publicBatchId(batch);
     const bindingViews = (batch.bindings ?? []).map((binding) => this.toBindingView(binding, publicBatchId));
-    const result: Record<string, unknown> = { batchId: publicBatchId, id: publicBatchId, accountId: batch.accountId, label: batch.label, purpose: batch.purpose, deliveryScope: batch.deliveryScope, quarkUrl: batch.quarkUrl, extractCode: batch.extractionCode, totalCount, availableCount, reservedCount, consumedCount, stockAlert, status: batch.status, version: batch.version, updatedAt: batch.updatedAt, createdAt: batch.createdAt, metadata: detail ? metadata : listMetadata, contentPreview: { text: metadata.textContent ? metadata.textContent.slice(0, 140) : undefined, dataRemaining: availableCount, apiUrl: metadata.apiConfig?.url, imageUrls: metadata.imageUrls ?? [] }, productBindings: bindingViews.filter((binding) => binding.status === 'active') };
+    const result: Record<string, unknown> = { batchId: publicBatchId, id: publicBatchId, accountId: batch.accountId, label: batch.label, purpose: batch.purpose, deliveryScope: batch.deliveryScope, quarkUrl: batch.quarkUrl, extractCode: batch.extractionCode, totalCount, availableCount, reservedCount, consumedCount, stockAlert, status: batch.status, version: batch.version, updatedAt: batch.updatedAt, createdAt: batch.createdAt, metadata: detail ? detailMetadata : listMetadata, contentPreview: { text: metadata.textContent ? metadata.textContent.slice(0, 140) : undefined, dataRemaining: availableCount, apiUrl: metadata.apiConfig?.url, imageUrls }, productBindings: bindingViews.filter((binding) => binding.status === 'active') };
     if (detail) result.items = items.map((item) => this.toItemView(item, publicBatchId));
     if (detail) result.bindings = bindingViews;
     return result;
@@ -234,6 +255,9 @@ function mapCouponStoreError(error: unknown): ServiceError {
   const code = error instanceof Error ? error.message : String(error);
   if (code === 'COUPON_NOT_FOUND') return new ServiceError(404, 'NOT_FOUND', 'coupon batch not found');
   if (code === 'COUPON_BATCH_VOIDED') return new ServiceError(409, 'CONFLICT', 'coupon batch is voided or closed');
+  if (code === 'COUPON_ASSET_NOT_FOUND') return new ServiceError(404, 'NOT_FOUND', 'coupon image not found');
+  if (code === 'COUPON_IMAGE_REFERENCE_INVALID') return new ServiceError(422, 'VALIDATION_FAILED', 'coupon image reference is invalid');
+  if (code === 'COUPON_IMAGE_TOO_LARGE') return new ServiceError(422, 'VALIDATION_FAILED', 'coupon image must be 5MB or smaller');
   if (code === 'PRODUCT_NOT_FOUND') return new ServiceError(404, 'NOT_FOUND', 'product not found');
   if (code === 'ACCOUNT_SCOPE_FORBIDDEN') return new ServiceError(403, 'FORBIDDEN', 'account scope required');
   return new ServiceError(500, 'INTERNAL_ERROR', error instanceof Error ? error.message : 'coupon operation failed');

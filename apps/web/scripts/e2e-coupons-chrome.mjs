@@ -12,6 +12,7 @@ const { hashPassword } = await import(pathToFileURL(join(root, 'apps', 'api', 'd
 const usePostgres = process.env.COUPONS_E2E_STORAGE === 'postgres';
 const children = [];
 const chromeProfile = join(tmpdir(), `xianyu-agent-coupons-chrome-${process.pid}`);
+const imageFixturePath = join(tmpdir(), `xianyu-agent-coupon-image-${process.pid}.png`);
 const chromePath = process.env.CHROME_PATH ?? join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe');
 const screenshotDir = join(root, 'docs', 'evidence', 'stage5', 'S4-VS3', 'screenshots');
 let apiRuntime;
@@ -78,6 +79,14 @@ async function evaluate(cdp, expression) {
   return result.result?.value;
 }
 
+async function setFileInput(cdp, selector, filePath) {
+  const document = await cdp.send('DOM.getDocument', { depth: -1 });
+  const match = await cdp.send('DOM.querySelector', { nodeId: document.root.nodeId, selector });
+  if (!match.nodeId) return false;
+  await cdp.send('DOM.setFileInputFiles', { nodeId: match.nodeId, files: [filePath] });
+  return true;
+}
+
 async function assertText(cdp, text) {
   const body = await evaluate(cdp, 'document.body.innerText');
   if (!String(body).includes(text)) throw new Error(`page missing text: ${text}`);
@@ -104,6 +113,7 @@ async function run() {
   const apiUrl = `http://127.0.0.1:${apiPort}`;
   const webUrl = `http://127.0.0.1:${webPort}`;
   mkdirSync(chromeProfile, { recursive: true });
+  writeFileSync(imageFixturePath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'));
   const npm = process.env.npm_execpath ? process.execPath : (process.platform === 'win32' ? 'npm.cmd' : 'npm');
   const npmArgs = (args) => process.env.npm_execpath ? [process.env.npm_execpath, ...args] : args;
   const apiBuild = spawnProcess(npm, npmArgs(['--workspace', 'apps/api', 'run', 'build']));
@@ -145,6 +155,7 @@ async function run() {
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
   await cdp.send('Network.enable');
+  await cdp.send('DOM.enable');
   for (const pair of cookie.split('; ')) { const [name, ...valueParts] = pair.split('='); await cdp.send('Network.setCookie', { name, value: valueParts.join('='), url: `${webUrl}/` }); }
   await cdp.send('Page.navigate', { url: `${webUrl}/coupons` });
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'coupons page');
@@ -187,6 +198,8 @@ async function run() {
   const modalFieldAudit = await evaluate(cdp, '(() => { const modal = document.querySelector(".coupons-editor-modal"); const text = modal?.innerText ?? ""; const fileInput = modal?.querySelector("input[type=file]"); return { price: text.includes("对接价格"), dockable: text.includes("是否可对接"), docking: text.includes("对接信息") || text.includes("对接消息"), account: text.includes("账号"), deliveryScope: text.includes("交付范围"), quark: text.includes("夸克链接"), extraction: text.includes("提取码"), shipped: text.includes("已发货次数"), inventory: text.includes("首批库存"), file: Boolean(fileInput && fileInput.getAttribute("accept") === "image/*"), imageBlock: text.includes("支持JPG、PNG、GIF格式，最大5MB，最多上传3张图片（可选）") }; })()');
   if (modalFieldAudit.price || modalFieldAudit.dockable || modalFieldAudit.docking || modalFieldAudit.account || modalFieldAudit.deliveryScope || modalFieldAudit.quark || modalFieldAudit.extraction || modalFieldAudit.shipped || modalFieldAudit.inventory) throw new Error('coupon create modal exposes fields outside the reference schema');
   if (!modalFieldAudit.file || !modalFieldAudit.imageBlock) throw new Error('coupon create modal image uploader does not match the reference interaction');
+  if (!await setFileInput(cdp, '.coupons-editor-modal input[type="file"]', imageFixturePath)) throw new Error('coupon image file input missing for real upload');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".coupons-editor-modal .coupons-image-thumb img[src^=\\"data:image/png\\"]"))'), 'coupon image preview after file upload');
   const switchedToData = await evaluate(cdp, '(() => { const modal = document.querySelector(".coupons-editor-modal"); const select = Array.from(modal?.querySelectorAll("select") ?? []).find((candidate) => Array.from(candidate.options).some((option) => option.value === "data")); if (!select) return false; const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set; setter?.call(select, "data"); select.dispatchEvent(new Event("input", { bubbles: true })); select.dispatchEvent(new Event("change", { bubbles: true })); return true; })()');
   if (!switchedToData) throw new Error('coupon type select missing');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('批量数据配置'), 'coupon data type fields');
@@ -203,6 +216,17 @@ async function run() {
     return page.items.find((item) => item.label === createdLabel) ?? false;
   }, 'coupon API persistence');
   if (!persistedBatch) throw new Error('UI-created coupon was not persisted by the API store');
+  if (persistedBatch.metadata?.imageUrls) throw new Error('UI-created coupon still stores image data in coupon metadata');
+  if (!persistedBatch.assets || persistedBatch.assets.length !== 1) throw new Error('UI-created coupon asset reference was not persisted');
+  const persistedObject = await apiRuntime.objectStorage.getObject(persistedBatch.assets[0].storageKey);
+  if (!persistedObject || persistedObject.body.length === 0 || persistedObject.contentType !== 'image/png') throw new Error('UI-created coupon image was not written to object storage');
+  const editButtonBeforeRelation = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(createdLabel)})); const button = row?.querySelector('button[aria-label="编辑"]'); if (!button) return false; button.click(); return true; })()`);
+  if (!editButtonBeforeRelation) throw new Error('UI-created coupon edit button missing for image echo');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".coupons-editor-modal .coupons-image-thumb img"))'), 'coupon image echo modal');
+  const echoedImage = await evaluate(cdp, `(async () => { const image = document.querySelector('.coupons-editor-modal .coupons-image-thumb img'); if (!image) return null; const response = await fetch(image.src); const bytes = new Uint8Array(await response.arrayBuffer()); let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte); return { src: image.src, status: response.status, contentType: response.headers.get('content-type'), byteLength: bytes.length, base64: btoa(binary) }; })()`);
+  if (!echoedImage || echoedImage.status !== 200 || echoedImage.contentType !== 'image/png' || echoedImage.byteLength === 0 || !echoedImage.src.includes('/api/v1/coupons/batches/')) throw new Error(`coupon image did not echo through asset API: ${JSON.stringify(echoedImage)}`);
+  if (echoedImage.base64 !== 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=') throw new Error('coupon image echo bytes changed during storage round trip');
+  await evaluate(cdp, 'document.querySelector(".coupons-editor-modal button[aria-label=\\"关闭\\"]")?.click()');
   await assertText(cdp, `E2E UI 固定文字内容 ${process.pid}`);
   const tableLayoutAudit = await evaluate(cdp, `(() => { const scroll = document.querySelector('.coupons-table-scroll'); const table = document.querySelector('[data-coupons-table]'); const firstRow = document.querySelector('[data-coupons-table] .coupons-row:not(.coupons-head)'); const layoutRow = Array.from(document.querySelectorAll('[data-batch-id]')).find((row) => row.querySelector('.coupons-title')?.textContent?.trim() === ${JSON.stringify(layoutCouponLabel)}); const style = scroll ? getComputedStyle(scroll) : null; const title = layoutRow?.querySelector('.coupons-title')?.textContent?.trim() ?? ''; const note = layoutRow?.querySelector('.coupons-note')?.textContent?.trim() ?? ''; const headers = Array.from(table?.querySelectorAll('.coupons-head > span') ?? []).map((item) => (item.textContent?.trim() ?? '').replace(/[↕↑↓]/g, '').trim()); const preview = layoutRow?.querySelector('.coupons-preview-cell'); const actionSelector = '.coupons-row-actions > button, .coupons-row-actions > .coupons-more-actions > button'; const actionButtons = layoutRow?.querySelectorAll(actionSelector)?.length ?? 0; const toolbar = document.querySelector('.coupons-toolbar'); return { hasHeader: (table?.querySelector('.coupons-head')?.textContent ?? '').includes('备注信息'), firstNumber: firstRow?.querySelector('.coupons-row-number')?.textContent?.trim() ?? '', overflowY: style?.overflowY ?? '', clientHeight: scroll?.clientHeight ?? 0, scrollHeight: scroll?.scrollHeight ?? 0, title, note, headers, previewTag: preview?.tagName ?? '', previewClass: preview?.className ?? '', actionButtons, hasStatusFilter: Boolean(toolbar?.querySelector('[data-coupons-status-filter]')), hasStockFilter: Boolean(toolbar?.querySelector('[data-coupons-stock-filter]')), actionLabels: Array.from(layoutRow?.querySelectorAll(actionSelector) ?? []).map((button) => button.getAttribute('aria-label') ?? '') }; })()`);
   const expectedHeaders = ['ID', '名称', '类型', '内容预览', '备注信息', '发货设置', '状态', '时间', '操作'];
@@ -299,6 +323,13 @@ async function run() {
   await waitFor(async () => !String(await evaluate(cdp, 'document.body.innerText')).includes(editedLabel), 'coupon delete completed');
   await cdp.send('Page.reload', { ignoreCache: true });
   await waitFor(async () => { const body = String(await evaluate(cdp, 'document.body.innerText')); return body.includes(copiedLabel) && !body.includes(editedLabel); }, 'coupon reload persistence and deleted hidden');
+  await waitFor(async () => await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(copiedLabel)})); return Boolean(row?.querySelector('button[aria-label="编辑"]')); })()`), 'coupon copied row after reload');
+  const reopenAfterReload = await evaluate(cdp, `(() => { const row = Array.from(document.querySelectorAll("[data-batch-id]")).find((candidate) => candidate.textContent?.includes(${JSON.stringify(copiedLabel)})); const button = row?.querySelector('button[aria-label="编辑"]'); if (!button) return false; button.click(); return true; })()`);
+  if (!reopenAfterReload) throw new Error('coupon image row missing after page reload');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".coupons-editor-modal .coupons-image-thumb img"))'), 'coupon image echo after reload');
+  const reloadedImageSrc = await evaluate(cdp, 'document.querySelector(".coupons-editor-modal .coupons-image-thumb img")?.src ?? ""');
+  if (!reloadedImageSrc.includes('/api/v1/coupons/batches/')) throw new Error('coupon image preview did not survive page reload');
+  await evaluate(cdp, 'document.querySelector(".coupons-editor-modal button[aria-label=\\"关闭\\"]")?.click()');
   await captureViewport(cdp, 390, 844, 'coupons-mobile-390x844.png');
   await cdp.send('Emulation.clearDeviceMetricsOverride');
   console.log('local Chrome E2E passed: UI create -> list -> edit/copy/toggle/more/delete -> reload');
@@ -316,4 +347,5 @@ try { await run(); } finally {
   }
   if (apiRuntime) await apiRuntime.close();
   try { rmSync(chromeProfile, { recursive: true, force: true }); } catch (error) { console.warn(`Chrome temporary profile cleanup failed: ${error.message}`); }
+  try { rmSync(imageFixturePath, { force: true }); } catch (error) { console.warn(`Coupon image fixture cleanup failed: ${error.message}`); }
 }

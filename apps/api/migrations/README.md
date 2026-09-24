@@ -35,6 +35,7 @@
 - `033_auto_reply_review_lifecycle.sql`：为 Outcome Review 补充 resolved/closed 生命周期时间戳，支持 worker/reconcile 审计回读。
 - `034_auto_reply_send_outbox.sql`：为自动回复 live sender 补充 payload、外部消息引用、租约与本地出站消息回写字段，支持 requestId 幂等和崩溃恢复。
 - `035_auto_reply_policy_registry.sql`：建立账号级自动回复 repair PolicyConfig 版本注册表；ACTIVE 指针唯一、历史版本可回滚，策略 JSON/hash 保持不可变。
+- `037_coupon_asset_refs.sql`：为卡券图片建立对象存储引用表；数据库只保存 `storage_key`/MIME/checksum 等元数据，图片字节写入现有 S3/MinIO 兼容对象存储，旧 Data URL 由读取链路懒迁移。
 
 迁移执行顺序以完整文件名的字典序为准，数字前缀在历史目录中允许重复（例如 `031_auto_reply_*` 与 `031_product_automation.sql`）；新增迁移应优先使用唯一前缀，并确保 SQL 幂等且依赖在完整文件名顺序下成立。
 

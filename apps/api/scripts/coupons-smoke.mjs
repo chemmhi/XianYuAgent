@@ -11,6 +11,10 @@ async function request(path, options = {}) {
   const body = await response.json();
   return { response, body };
 }
+async function requestRaw(path, options = {}) {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, { ...options, headers: { ...(options.headers ?? {}) } });
+  return { response, body: Buffer.from(await response.arrayBuffer()) };
+}
 
 try {
   const bootstrap = await request('/api/v1/auth/bootstrap', { method: 'POST', headers: { 'Idempotency-Key': 'coupon-bootstrap' }, body: JSON.stringify({ email: 'coupon@example.com', password: 'password-123', displayName: 'Coupon Test' }) });
@@ -25,7 +29,9 @@ try {
   assert.equal(empty.response.status, 200);
   assert.equal(empty.body.data.total, 0);
 
-  const created = await request('/api/v1/coupons/batches', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-create-1' }, body: JSON.stringify({ accountId: account.id, label: 'Demo cards', purpose: 'text', deliveryScope: 'operator_only', metadata: { description: 'Demo description', textContent: 'Demo content', delaySeconds: 5, dockable: true, price: '9.90' }, quarkUrl: 'https://quark.example/demo', extractionCode: 'extract-123' }) });
+  const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+  const imageDataUrl = `data:image/png;base64,${imageBytes.toString('base64')}`;
+  const created = await request('/api/v1/coupons/batches', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-create-1' }, body: JSON.stringify({ accountId: account.id, label: 'Demo cards', purpose: 'text', deliveryScope: 'operator_only', metadata: { description: 'Demo description', textContent: 'Demo content', delaySeconds: 5, dockable: true, price: '9.90', imageUrls: [imageDataUrl] }, quarkUrl: 'https://quark.example/demo', extractionCode: 'extract-123' }) });
   assert.equal(created.response.status, 201);
   const batchId = created.body.data.batchId;
   assert.match(String(batchId), /^\d+$/);
@@ -33,12 +39,31 @@ try {
   assert.equal(created.body.data.availableCount, 0);
   assert.equal(created.body.data.stockAlert, 'exhausted');
   assert.equal(created.body.data.purpose, 'text');
+  assert.equal(created.body.data.metadata.imageUrls.length, 1);
+  assert.match(created.body.data.metadata.imageUrls[0], /^\/api\/v1\/coupons\/batches\/\d+\/assets\//);
+  assert.equal(created.body.data.metadata.imageUrls[0].startsWith('data:image/'), false);
+  const createdBatch = await runtime.store.getCouponBatch(adminId, batchId);
+  assert.equal(createdBatch?.metadata?.imageUrls, undefined);
+  assert.equal(createdBatch?.assets?.length, 1);
+  const storedImage = await runtime.objectStorage.getObject(createdBatch.assets[0].storageKey);
+  assert.deepEqual(storedImage?.body, imageBytes);
+  assert.equal(storedImage?.contentType, 'image/png');
+  const assetResponse = await requestRaw(created.body.data.metadata.imageUrls[0], { headers: { cookie } });
+  assert.equal(assetResponse.response.status, 200);
+  assert.equal(assetResponse.response.headers.get('content-type'), 'image/png');
+  assert.deepEqual(assetResponse.body, imageBytes);
+  const assetHead = await requestRaw(created.body.data.metadata.imageUrls[0], { method: 'HEAD', headers: { cookie } });
+  assert.equal(assetHead.response.status, 200);
+  assert.equal(assetHead.response.headers.get('content-length'), String(imageBytes.length));
+  assert.equal(assetHead.body.length, 0);
 
   const updated = await request(`/api/v1/coupons/batches/${batchId}`, { method: 'PATCH', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-update-1' }, body: JSON.stringify({ label: 'Demo cards edited', status: 'paused', metadata: { description: 'Edited description', textContent: 'Edited content' } }) });
   assert.equal(updated.response.status, 200);
   assert.equal(updated.body.data.label, 'Demo cards edited');
   assert.equal(updated.body.data.status, 'paused');
   assert.equal(updated.body.data.metadata.textContent, 'Edited content');
+  assert.equal(updated.body.data.metadata.imageUrls.length, 1);
+  assert.equal(updated.body.data.metadata.imageUrls[0].startsWith('data:image/'), false);
 
   const listed = await request(`/api/v1/coupons/batches?accountId=${account.id}`, { headers: { cookie } });
   assert.equal(listed.response.status, 200);
@@ -54,6 +79,18 @@ try {
   const descending = await request(`/api/v1/coupons/batches?accountId=${account.id}&sortBy=createdAt&sortOrder=desc`, { headers: { cookie } });
   assert.equal(descending.response.status, 200);
   assert.deepEqual(descending.body.data.items.slice(0, 2).map((item) => item.label), ['Sort probe', 'Demo cards edited']);
+
+  const legacyBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+  const legacyBatch = await runtime.store.createCouponBatch({ adminId, accountId: account.id, label: 'Legacy image batch', purpose: 'image', deliveryScope: 'operator_only', metadata: { imageUrls: [`data:image/png;base64,${legacyBytes.toString('base64')}`] } });
+  const migrated = await request(`/api/v1/coupons/batches/${legacyBatch.sequenceId}`, { headers: { cookie } });
+  assert.equal(migrated.response.status, 200);
+  assert.equal(migrated.body.data.metadata.imageUrls.length, 1);
+  assert.equal(migrated.body.data.metadata.imageUrls[0].startsWith('data:image/'), false);
+  const migratedBatch = await runtime.store.getCouponBatch(adminId, legacyBatch.id);
+  assert.equal(migratedBatch?.metadata?.imageUrls, undefined);
+  assert.equal(migratedBatch?.assets?.length, 1);
+  const migratedObject = await runtime.objectStorage.getObject(migratedBatch.assets[0].storageKey);
+  assert.deepEqual(migratedObject?.body, legacyBytes);
   const invalidSortField = await request(`/api/v1/coupons/batches?accountId=${account.id}&sortBy=updatedAt`, { headers: { cookie } });
   assert.equal(invalidSortField.response.status, 422);
   const invalidSortOrder = await request(`/api/v1/coupons/batches?accountId=${account.id}&sortBy=createdAt&sortOrder=sideways`, { headers: { cookie } });
