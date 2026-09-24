@@ -629,7 +629,6 @@ export class MemoryStore implements Store {
     batch.totalCount = [...this.couponItems.values()].filter((item) => item.batchId === batch.id).length;
     batch.version += 1;
     batch.updatedAt = new Date().toISOString();
-    if (batch.totalCount > 0 && batch.status === 'exhausted') batch.status = 'active';
     return { batch: { ...batch }, items: created, rejected };
   }
   async bindCouponBatch(input: { adminId: string; batchId: string; productId: string }): Promise<CouponBindingRecord> {
@@ -687,7 +686,7 @@ export class MemoryStore implements Store {
       const resolvedBatches = batches as CouponBatchRecord[];
       if (resolvedBatches.some((batch) => batch.accountId !== input.accountId)) throw new Error('COUPON_BATCH_ACCOUNT_MISMATCH');
       const uniqueBatches = [...new Map(resolvedBatches.map((batch) => [batch.id, batch])).values()];
-      if (uniqueBatches.some((batch) => batch.status !== 'active' && batch.status !== 'exhausted')) throw new Error('COUPON_BATCH_UNAVAILABLE');
+      if (uniqueBatches.some((batch) => batch.status !== 'active')) throw new Error('COUPON_BATCH_UNAVAILABLE');
       if (uniqueBatches.some((batch) => batch.deliveryScope !== 'buyer_deliverable')) throw new Error('COUPON_BATCH_NOT_DELIVERABLE');
       const batchIds = uniqueBatches.map((batch) => batch.id);
       const fingerprint = reservationFingerprint({ adminId: input.adminId, accountId: input.accountId, batchIds, quantity: normalized.quantity, purpose: normalized.purpose });
@@ -767,17 +766,11 @@ export class MemoryStore implements Store {
       const selected = reservation.items.map((item) => this.couponItems.get(item.itemId));
       if (selected.some((item) => !item || item.status !== 'reserved')) throw new Error('COUPON_RESERVATION_INCONSISTENT');
       const nowIso = new Date().toISOString();
-      for (const item of selected as CouponItemRecord[]) { item.status = 'consumed'; item.reservedUntil = undefined; item.consumedAt = nowIso; }
+      for (const item of selected as CouponItemRecord[]) { item.status = 'available'; item.reservedUntil = undefined; item.consumedAt = undefined; }
       reservation.status = 'committed';
       reservation.updatedAt = nowIso;
       reservation.finalizedAt = nowIso;
       reservation.reason = undefined;
-      for (const batchId of reservation.batchIds) {
-        const batch = this.couponBatches.get(batchId);
-        if (!batch) continue;
-        const available = [...this.couponItems.values()].some((item) => item.batchId === batch.id && item.status === 'available');
-        if (!available && batch.status === 'active') { batch.status = 'exhausted'; batch.updatedAt = nowIso; batch.version += 1; }
-      }
       return cloneCouponReservation(reservation);
     });
   }
@@ -800,10 +793,6 @@ export class MemoryStore implements Store {
       reservation.reason = input.reason.trim() || 'released';
       reservation.updatedAt = nowIso;
       reservation.finalizedAt = nowIso;
-      for (const batchId of reservation.batchIds) {
-        const batch = this.couponBatches.get(batchId);
-        if (batch?.status === 'exhausted') { batch.status = 'active'; batch.updatedAt = nowIso; batch.version += 1; }
-      }
       return cloneCouponReservation(reservation);
     });
   }
@@ -1638,10 +1627,6 @@ export class MemoryStore implements Store {
       reservation.reason = 'reservation_expired';
       reservation.updatedAt = nowIso;
       reservation.finalizedAt = nowIso;
-      for (const batchId of reservation.batchIds) {
-        const batch = this.couponBatches.get(batchId);
-        if (batch?.status === 'exhausted') { batch.status = 'active'; batch.updatedAt = nowIso; batch.version += 1; }
-      }
     }
   }
 
@@ -1676,7 +1661,6 @@ export class MemoryStore implements Store {
         const item: CouponItemRecord = { id: createId(), batchId: batch.id, content: '__CONFIGURED_COUPON__', status: 'available', createdAt: new Date().toISOString() };
         this.couponItems.set(item.id, item);
       }
-      if (required > 0 && batch.status === 'exhausted') batch.status = 'active';
     }
     batch.totalCount = [...this.couponItems.values()].filter((item) => item.batchId === batch.id).length;
   }

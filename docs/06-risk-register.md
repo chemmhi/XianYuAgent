@@ -224,3 +224,9 @@
 | S5-RISK-042 | 真实闲鱼账号的确认发货、IM 发图和外部 API 组合仍未在生产账号执行；本轮多规格真实发券与图片说明文本真实发送尚未复测 | P1 | 卡券可靠性修复已合入 `main` 并通过受控回归、PostgreSQL persistence smoke；上线前仍需在隔离账号补齐 MTOP/IM mutation、超时/unknown、回滚和人工复核证据 | OPEN |
 | S5-RISK-043 | 历史 `coupon_batches.quark_url` / `extract_code_ciphertext` 字段曾与卡券模型耦合 | P2 | 已通过 `038_remove_coupon_quark_fields.sql` 删除列，并同步移除 domain、MemoryStore、PostgreSQL Store、公开创建/更新和 reservation 交付对象中的字段；不保留兼容读取 | CLOSED |
 | S5-RISK-044 | 配置型卡券内部仍借用 `coupon_items` 做 reservation/幂等承载，名称上保留库存语义 | P2 | 配置型卡券自动生成可消费占位条目且不要求手工导入；前端配置和自动化摘要不展示库存要求；后续可独立拆分配置消费与批量数据条目模型 | MITIGATED |
+
+### 2026-09-24 卡券可重复使用与关联删除确认修复
+
+| 编号 | 风险 | 级别 | 应对 | 状态 |
+| --- | --- | --- | --- | --- |
+| S5-RISK-045 | 旧 reservation 逻辑会在 commit 后把卡券条目标记为 `consumed`、把批次标记为 `exhausted`，导致后续发货被错误阻断；已关联商品的删除也可能留下商品侧卡券摘要 | P1 | commit 后统一恢复 `available`；迁移直接归一化历史状态并移除批次 `exhausted` 约束；删除确认弹窗读取 active bindings，删除后通过商品查询排除 `voided` 批次；Memory/PostgreSQL、API smoke 与 Chrome/CDP 双轮验收均通过 | CLOSED |

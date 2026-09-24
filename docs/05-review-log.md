@@ -607,3 +607,13 @@
 | S5-R118 | 质量 / 主线 | 合入 `main` 后构建、回归、PostgreSQL smoke 和 diff-check 是否通过 | root | PASS | merge `4486592`；`npm run build:api`；卡券回归 13/13；商品自动化 31/31；`npm --workspace apps/api run test:orders:postgres`；`git diff --check` |
 
 本轮结论：提交 `992f9ef` 已在 merge lock 内以 `--no-ff` 合入 `main`。受控回归和 PostgreSQL 订单持久化门禁通过；真实闲鱼外部 mutation 仍保持隔离测试账号复测边界。
+
+### 2026-09-24：卡券可重复使用与关联删除确认修复复审
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R119 | 业务 / 验收 | 卡券发货提交后是否仍为可用状态，是否可以使用新的 execution key 再次发货且不再出现“已耗尽” | root | PASS | `store-memory.ts`、`store-postgres.ts`、`040_reusable_coupons.sql`；reservation Memory 6/6；PostgreSQL reservation smoke |
+| S5-R120 | 业务 / 交互 | 删除已关联商品的卡券是否二次提醒，取消是否保留卡券，确认后商品侧是否移除卡券信息 | root | PASS（受控 E2E） | `CouponDeleteConfirmModal.tsx`、`coupons-smoke.mjs`、Chrome/CDP coupons E2E 连续 2 轮 |
+| S5-R121 | 质量 / 回归 | API/Web 类型检查、构建、全量单测和跨层 smoke 是否通过 | root | PASS | API 全量 smoke；API/Web typecheck、API/Web build；Web 88 files / 303 tests；Chrome/CDP coupons E2E Memory 2 轮 + PostgreSQL 1 轮；`git diff --check` |
+
+本轮结论：卡券不再按单次发货耗尽；删除已关联商品的卡券会在统一产品弹窗中二次确认，并在商品列表/详情侧实时消失。当前分支等待 merge lock 合入 `main` 后复验。

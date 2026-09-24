@@ -140,6 +140,9 @@ try {
   assert.equal(deleted.body.data.batch.status, 'voided');
   assert.equal('availableCount' in deleted.body.data.batch, false);
   assert.equal('stockAlert' in deleted.body.data.batch, false);
+  const productAfterDelete = await request(`/api/v1/products/${encodeURIComponent(product.id)}`, { headers: { cookie } });
+  assert.equal(productAfterDelete.response.status, 200);
+  assert.deepEqual(productAfterDelete.body.data.couponBatches, []);
   const defaultAfterVoid = await request(`/api/v1/coupons/batches?accountId=${account.id}`, { headers: { cookie } });
   assert.equal(defaultAfterVoid.response.status, 200);
   assert.equal(defaultAfterVoid.body.data.items.some((item) => item.batchId === batchId), false);

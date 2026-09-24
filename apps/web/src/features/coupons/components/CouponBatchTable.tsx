@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { CouponBatchVM } from '../types';
 
 const typeLabels: Record<CouponBatchVM['purpose'], string> = { text: '文本', data: '批量数据', api: 'API', image: '图片' };
-const statusLabels: Record<CouponBatchVM['status'], string> = { draft: '草稿', active: '启用', paused: '禁用', closed: '已关闭', exhausted: '已耗尽', voided: '已删除' };
+const statusLabels: Record<CouponBatchVM['status'], string> = { draft: '草稿', active: '启用', paused: '禁用', closed: '已关闭', voided: '已删除' };
 
 export function CouponBatchTable({ batches, selectedIds, page, pageSize, total, totalPages, sortBy, sortOrder, onSortChange, onPageChange, onSelect, onSelectAll, onEdit, onCopy, onBind, onToggle, onDelete }: { batches: CouponBatchVM[]; selectedIds: Set<string>; page: number; pageSize: number; total: number; totalPages: number; sortBy: 'createdAt'; sortOrder: 'asc' | 'desc'; onSortChange: (sortBy: 'createdAt', sortOrder: 'asc' | 'desc') => void; onPageChange: (page: number) => void; onSelect: (batchId: string) => void; onSelectAll: () => void; onEdit: (batch: CouponBatchVM) => void; onCopy: (batch: CouponBatchVM) => void; onBind: (batchId: string) => void; onToggle: (batch: CouponBatchVM) => void; onDelete: (batchId: string) => void }) {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);

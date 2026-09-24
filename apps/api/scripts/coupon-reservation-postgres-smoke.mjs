@@ -33,7 +33,13 @@ try {
   assert.equal(fulfilled.length, 1);
   const rejected = oversell.find((result) => result.status === 'rejected');
   assert.match(String(rejected?.reason?.message), /COUPON_DELIVERY_ITEM_UNAVAILABLE/);
-  for (const result of fulfilled) reservationIds.push(result.value.reservationId);
+  for (const [index, result] of oversell.entries()) {
+    if (result.status !== 'fulfilled') continue;
+    const executionKey = index === 0 ? `pg-a-${suffix}` : `pg-b-${suffix}`;
+    reservationIds.push(result.value.reservationId);
+    const releasedOversell = await runtime.store.releaseCouponReservation({ adminId: admin.id, reservationId: result.value.reservationId, executionKey, reason: 'pg_oversell_cleanup' });
+    assert.equal(releasedOversell.status, 'released');
+  }
 
   const released = await runtime.store.releaseCouponReservation({ adminId: admin.id, reservationId: first.reservationId, executionKey: reserveInput.executionKey, reason: 'pg_send_failed' });
   assert.equal(released.status, 'released');
@@ -44,6 +50,14 @@ try {
   const commitReplay = await runtime.store.commitCouponReservation({ adminId: admin.id, reservationId: reopened.reservationId, executionKey: reserveInput.executionKey });
   assert.equal(committed.status, 'committed');
   assert.deepEqual(commitReplay, committed);
+  const reusableBatch = await runtime.store.getCouponBatch(admin.id, batch.id);
+  assert.equal(reusableBatch?.status, 'active');
+  assert.equal(reusableBatch?.items?.filter((item) => item.status === 'available').length, 2);
+  assert.equal(reusableBatch?.items?.filter((item) => item.status === 'consumed').length, 0);
+  const secondExecution = await runtime.store.reserveCoupon({ ...reserveInput, executionKey: `pg-reuse-${suffix}` });
+  assert.equal(secondExecution.items[0]?.content, committed.items[0]?.content);
+  reservationIds.push(secondExecution.reservationId);
+  await runtime.store.commitCouponReservation({ adminId: admin.id, reservationId: secondExecution.reservationId, executionKey: `pg-reuse-${suffix}` });
 
   await runtime.store.importCouponItems({ adminId: admin.id, batchId: batch.id, contents: [`pg-coupon-3-${suffix}`] });
   const expiryInput = { ...reserveInput, executionKey: `pg-expiry-${suffix}`, leaseSeconds: 1 };

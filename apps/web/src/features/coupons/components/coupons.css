@@ -37,13 +37,12 @@
 .coupons-delivery-setting small { display: block; margin-top: 3px; color: var(--sub); font-size: 12px; line-height: 1.5; }
 .coupons-alert-dot-normal { color: var(--success); }
 .coupons-alert-dot-low_stock { color: var(--warn); }
-.coupons-alert-dot-exhausted { color: var(--danger); }
 .coupons-inventory b { font-size: 14px; font-variant-numeric: tabular-nums; }
 .coupons-inventory small { margin-left: 3px; }
 .coupons-alert, .coupons-status { display: inline-flex; padding: 4px 8px; border-radius: 999px; font-size: 12px; line-height: 1.5; }
 .coupons-alert-normal, .coupons-status-active { color: var(--success); background: var(--success-bg); }
 .coupons-alert-low_stock, .coupons-status-draft, .coupons-status-paused { color: var(--warn); background: var(--warn-bg); }
-.coupons-alert-exhausted, .coupons-status-exhausted, .coupons-status-voided { color: var(--danger); background: var(--danger-bg); }
+.coupons-status-voided { color: var(--danger); background: var(--danger-bg); }
 .coupons-status-closed { color: var(--muted); background: #F1F5F9; }
 .coupons-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 .coupons-action-button { min-width: 46px; }
@@ -122,6 +121,26 @@
 .coupons-image-add span { font-size: 25px; line-height: 1; }
 .coupons-image-add small { font-size: 10px; }
 .coupons-relation-modal { width: min(960px, 100%); height: min(680px, calc(100vh - 48px)); max-height: calc(100vh - 48px); overflow: hidden; display: flex; flex-direction: column; }
+.coupon-delete-modal-backdrop { z-index: 50; background: rgba(17,24,39,.54); backdrop-filter: blur(7px); }
+.coupon-delete-modal { width: min(470px, calc(100vw - 32px)); padding: 0; overflow: hidden; border: 1px solid rgba(17,24,39,.08); border-radius: 16px; box-shadow: 0 18px 48px rgba(17,24,39,.18), 0 4px 12px rgba(17,24,39,.08); }
+.coupon-delete-modal .modal-head { margin: 0; padding: 21px 23px 10px; }
+.coupon-delete-modal .modal-head h2 { font-size: 20px; line-height: 1.25; }
+.coupon-delete-modal .modal-head .eyebrow { margin-bottom: 8px; font-size: 11px; }
+.coupon-delete-body { display: grid; gap: 14px; padding: 0 23px; }
+.coupon-delete-warning { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid rgba(180,35,24,.18); border-radius: 10px; background: var(--danger-bg); }
+.coupon-delete-warning-neutral { border-color: var(--border); background: var(--bg); }
+.coupon-delete-warning-icon { display: grid; flex: 0 0 24px; width: 24px; height: 24px; place-items: center; border-radius: 50%; background: var(--danger); color: #fff; font-size: 13px; font-weight: 800; }
+.coupon-delete-warning-neutral .coupon-delete-warning-icon { background: var(--info); }
+.coupon-delete-warning strong { display: block; margin-bottom: 3px; color: var(--danger); font-size: 12px; }
+.coupon-delete-warning-neutral strong { color: var(--info); }
+.coupon-delete-warning p { color: var(--sub); font-size: 11px; line-height: 1.55; }
+.coupon-delete-summary { padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+.coupon-delete-summary > strong { display: block; margin-bottom: 7px; color: var(--muted); font-size: 11px; }
+.coupon-delete-summary ul { display: grid; gap: 5px; max-height: 120px; margin: 0; padding: 0 0 0 17px; overflow: auto; color: var(--text); font-size: 11px; }
+.coupon-delete-summary li { padding-left: 2px; }
+.coupon-delete-summary li small { margin-left: 8px; color: var(--danger); font-size: 10px; }
+.coupon-delete-error { padding: 9px 10px; border: 1px solid rgba(180,35,24,.18); border-radius: 8px; background: var(--danger-bg); color: var(--danger); font-size: 11px; }
+.coupon-delete-modal .modal-actions { margin-top: 0; padding: 0 23px 21px; }
 .coupons-relation-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr); flex: 1 1 auto; min-height: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin: 18px 0; }
 .coupons-relation-pane { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; border-right: 1px solid var(--border); }
 .coupons-relation-pane:last-child { border-right: 0; }
