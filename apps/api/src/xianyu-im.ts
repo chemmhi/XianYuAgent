@@ -6,6 +6,8 @@ export const XIANYU_IM_TOKEN_API = 'mtop.taobao.idlemessage.pc.login.token';
 export const XIANYU_IM_APP_KEY = '34839810';
 export const XIANYU_IM_APP_ID = '444e9908a51d1cb236a27862abc769c9';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36';
+const PUSH_HANDLER_MAX_ATTEMPTS = 4;
+const PUSH_HANDLER_RETRY_BASE_MS = 50;
 
 export type XianyuImConnectionStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'failed';
 
@@ -87,6 +89,8 @@ interface ImWebSocket {
 export interface XianyuImClientOptions {
   accountId: string;
   credential: XianyuImCredential;
+  /** Additional platform identities that belong to this seller account. */
+  selfUserIds?: string[];
   timeoutMs?: number;
   heartbeatIntervalMs?: number;
   fetch?: typeof fetch;
@@ -129,6 +133,7 @@ export class XianyuImClient {
   private readonly onEvent?: XianyuImClientOptions['onEvent'];
   private readonly onQuarantine?: XianyuImClientOptions['onQuarantine'];
   private readonly pending = new Map<string, PendingRequest>();
+  private readonly selfUserIdSet = new Set<string>();
   private socket?: ImWebSocket;
   private heartbeatTimer?: ReturnType<typeof setInterval>;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
@@ -154,7 +159,9 @@ export class XianyuImClient {
     this.saveCredential = options.saveCredential;
     this.onEvent = options.onEvent;
     this.onQuarantine = options.onQuarantine;
-    this.myId = cookieValue(this.credential.cookieHeader, 'unb') || cookieValue(this.credential.cookieHeader, 'munb') || '';
+    const cookieUserIds = [cookieValue(this.credential.cookieHeader, 'unb'), cookieValue(this.credential.cookieHeader, 'munb')];
+    this.addSelfUserIds([...(options.selfUserIds ?? []), ...cookieUserIds]);
+    this.myId = normalizeIdentity(cookieUserIds.find((value) => Boolean(value)) ?? options.selfUserIds?.find((value) => Boolean(value)) ?? '') ?? '';
     if (!this.credential.deviceId) this.credential.deviceId = createDeviceId(this.myId);
   }
 
@@ -162,6 +169,14 @@ export class XianyuImClient {
   get connected(): boolean { return this._status === 'connected' && this.socket?.readyState === 1; }
   get deviceId(): string { return this.credential.deviceId ?? ''; }
   get userId(): string { return this.myId; }
+  get selfUserIds(): readonly string[] { return [...this.selfUserIdSet]; }
+
+  private addSelfUserIds(values: readonly unknown[]): void {
+    for (const value of values) {
+      const normalized = normalizeIdentity(value);
+      if (normalized) this.selfUserIdSet.add(normalized);
+    }
+  }
 
   private setStatus(status: XianyuImConnectionStatus): void {
     if (this._status === status) return;
@@ -411,8 +426,10 @@ export class XianyuImClient {
     if (this.refreshCredential) {
       const refreshed = await this.refreshCredential();
       this.credential = { ...refreshed };
-      const refreshedUserId = cookieValue(this.credential.cookieHeader, 'unb') || cookieValue(this.credential.cookieHeader, 'munb');
-      if (refreshedUserId) this.myId = refreshedUserId;
+      const refreshedCookieUserIds = [cookieValue(this.credential.cookieHeader, 'unb'), cookieValue(this.credential.cookieHeader, 'munb')];
+      this.addSelfUserIds(refreshedCookieUserIds);
+      const refreshedUserId = refreshedCookieUserIds.find((value) => Boolean(value));
+      if (refreshedUserId) this.myId = normalizeIdentity(refreshedUserId) ?? this.myId;
       if (!this.credential.deviceId) this.credential.deviceId = createDeviceId(this.myId);
       return;
     }
@@ -529,24 +546,34 @@ export class XianyuImClient {
       if (typeof encoded !== 'string') continue;
       const readReceipt = parseReadReceiptPayload(decodePushData(encoded));
       if (readReceipt) {
-        try {
-          await this.onEvent?.({ ...readReceipt, accountId: this.accountId, kind: 'read' });
-        } catch (error) {
-          console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'push_handler_failed', accountId: this.accountId, errorCode: eventErrorCode(error) }));
-        }
+        await this.dispatchEventWithRetry({ ...readReceipt, accountId: this.accountId, kind: 'read' });
         continue;
       }
-      const parsed = parsePushPayloadDetailed(encoded, this.accountId, this.myId, new Date().toISOString(), asRecord(entry));
+      const parsed = parsePushPayloadDetailed(encoded, this.accountId, this.selfUserIds, new Date().toISOString(), asRecord(entry));
       if (parsed.quarantine) {
         await this.emitQuarantine(parsed.quarantine.reasonCode, encoded, parsed.quarantine.receivedAt);
       } else if (parsed.event) {
-        try {
-          await this.onEvent?.(parsed.event);
-        } catch (error) {
-          console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'push_handler_failed', accountId: this.accountId, errorCode: eventErrorCode(error) }));
-        }
+        await this.dispatchEventWithRetry(parsed.event);
       }
     }
+  }
+
+  private async dispatchEventWithRetry(event: XianyuImEvent): Promise<void> {
+    if (!this.onEvent) return;
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= PUSH_HANDLER_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        await this.onEvent(event);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt >= PUSH_HANDLER_MAX_ATTEMPTS) break;
+        const delayMs = PUSH_HANDLER_RETRY_BASE_MS * 2 ** (attempt - 1);
+        console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'push_handler_retry', accountId: this.accountId, attempt, nextAttempt: attempt + 1, delayMs, errorCode: eventErrorCode(error), externalMessageRef: 'externalMessageRef' in event ? event.externalMessageRef : undefined }));
+        await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+    console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'push_handler_failed', accountId: this.accountId, attempts: PUSH_HANDLER_MAX_ATTEMPTS, errorCode: eventErrorCode(lastError), externalMessageRef: 'externalMessageRef' in event ? event.externalMessageRef : undefined }));
   }
 
   private async emitQuarantine(reasonCode: string, payload: string, receivedAt: string): Promise<void> {
@@ -613,11 +640,11 @@ export class XianyuImSessionManager {
   }
 }
 
-export function parsePushPayload(encoded: string, accountId: string, myId: string): XianyuImMessageEvent | undefined {
+export function parsePushPayload(encoded: string, accountId: string, myId: string | readonly string[]): XianyuImMessageEvent | undefined {
   return parsePushPayloadDetailed(encoded, accountId, myId).event;
 }
 
-export function parsePushPayloadDetailed(encoded: string, accountId: string, myId: string, receivedAt = new Date().toISOString(), sourceEnvelope?: unknown): { event?: XianyuImMessageEvent; quarantine?: { reasonCode: string; receivedAt: string } } {
+export function parsePushPayloadDetailed(encoded: string, accountId: string, myId: string | readonly string[], receivedAt = new Date().toISOString(), sourceEnvelope?: unknown): { event?: XianyuImMessageEvent; quarantine?: { reasonCode: string; receivedAt: string } } {
   const parsed = decodePushData(encoded);
   if (!parsed || typeof parsed !== 'object') return { quarantine: { reasonCode: 'PUSH_PAYLOAD_DECODE_FAILED', receivedAt } };
   const message = asRecord(parsed);
@@ -660,7 +687,7 @@ export function parsePushPayloadDetailed(encoded: string, accountId: string, myI
     externalMessageRef,
     senderRef,
     senderName,
-    direction: senderRef === myId ? 'outbound' : 'inbound',
+    direction: matchesSelfIdentity(senderRef, myId) ? 'outbound' : 'inbound',
     bodyType,
     bodyText: decoded.text || fallbackText,
     assetRef: decoded.images[0],
@@ -673,7 +700,7 @@ export function parsePushPayloadDetailed(encoded: string, accountId: string, myI
   } };
 }
 
-function parseOperationPushPayload(message: Record<string, unknown>, operation: Record<string, any>, accountId: string, myId: string, receivedAt: string): { event?: XianyuImMessageEvent; quarantine?: { reasonCode: string; receivedAt: string } } {
+function parseOperationPushPayload(message: Record<string, unknown>, operation: Record<string, any>, accountId: string, myId: string | readonly string[], receivedAt: string): { event?: XianyuImMessageEvent; quarantine?: { reasonCode: string; receivedAt: string } } {
   const sessionInfo = asRecord(operation.sessionInfo);
   const content = asRecord(operation.content);
   const extensions = {
@@ -762,7 +789,7 @@ function parseOperationPushPayload(message: Record<string, unknown>, operation: 
     externalMessageRef,
     senderRef,
     senderName,
-    direction: senderRef === myId ? 'outbound' : 'inbound',
+    direction: matchesSelfIdentity(senderRef, myId) ? 'outbound' : 'inbound',
     bodyType,
     bodyText: decoded.text,
     assetRef: decoded.images[0],
@@ -1162,6 +1189,19 @@ function clampLimit(value: number): number { return Math.min(100, Math.max(1, Ma
 function asRecord(value: unknown): Record<string, any> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}; }
 function optionalString(value: unknown): string | undefined { return typeof value === 'string' && value.trim() ? value.trim() : undefined; }
 function stripGoofish(value: string): string { return value.replace(/@goofish$/, ''); }
+
+function normalizeIdentity(value: unknown): string | undefined {
+  if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'bigint') return undefined;
+  const normalized = stripGoofish(String(value)).trim();
+  return normalized || undefined;
+}
+
+function matchesSelfIdentity(value: unknown, selfUserIds: string | readonly string[]): boolean {
+  const sender = normalizeIdentity(value);
+  if (!sender) return false;
+  const candidates = Array.isArray(selfUserIds) ? selfUserIds : [selfUserIds];
+  return candidates.some((candidate) => normalizeIdentity(candidate) === sender);
+}
 function uniqueStrings(values: unknown[]): string[] { return [...new Set(values.map((value) => optionalString(typeof value === 'number' || typeof value === 'bigint' ? String(value) : value)).filter((value): value is string => Boolean(value)))]; }
 function normalizeTimestamp(value: unknown, receivedAt: string): { value: string; quality: 'platform' | 'received' } {
   const numeric = typeof value === 'number' ? value : Number(value);

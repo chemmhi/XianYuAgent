@@ -66,6 +66,98 @@ test('inbox processing forwards persisted source ordering to AutoReplyService', 
   assert.equal(calls[0]?.sourceSequence, 29);
 });
 
+test('recent history recovery enqueues a buyer message missed by live push', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'recovery@example.com', passwordHash: 'hash', displayName: 'Recovery' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'seller-recovery' });
+  const conversation = await store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'buyer-recovery', buyerDisplayName: 'Recovery Buyer', externalConversationRef: 'conv-recovery' });
+  await store.createMessage({ adminId: admin.id, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '上一条', externalMessageRef: 'recovery-old.PNM', source: 'system', createdAt: '2026-09-24T03:00:00.000Z' });
+
+  const encoded = Buffer.from(JSON.stringify({ contentType: 1, text: { text: '漏掉的这一条' } }), 'utf8').toString('base64');
+  const fakeClient = {
+    listMessages: async () => ({
+      hasMore: false,
+      userMessageModels: [{ message: { messageId: 'recovery-missed.PNM', senderUserId: 'buyer-recovery', createAt: Date.parse('2026-09-24T03:00:05.000Z'), content: { custom: { data: encoded } } } }],
+    }),
+  };
+  const messages = new MessageService(store, async () => 'audit-recovery');
+  const calls: Array<{ inboundMessageId: string; sourceEventId?: string }> = [];
+  const autoReply = { processInbound: async (input: { inboundMessageId: string; sourceEventId?: string }) => { calls.push(input); return undefined; } };
+  const service = new XianyuImService(store, {} as never, messages, autoReply as never);
+  (service as unknown as { ensureClient: () => Promise<unknown> }).ensureClient = async () => fakeClient;
+
+  const result = await service.recoverRecentMessages(admin.id, account.id);
+  assert.equal(result.imported, 1);
+  assert.equal(result.queued, 1);
+
+  const claimed = await store.claimInboundInbox({ workerId: 'recovery-worker', limit: 1, leaseMs: 5_000 });
+  assert.equal(claimed[0]?.externalMessageRef, 'recovery-missed.PNM');
+  await service.processInboundInbox(claimed[0]!);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.inboundMessageId, claimed[0]!.inboundMessageId);
+  assert.equal(calls[0]?.sourceEventId, 'history:recovery-missed.PNM');
+
+  const repeat = await service.recoverRecentMessages(admin.id, account.id);
+  assert.equal(repeat.imported, 0);
+  assert.equal(repeat.queued, 0);
+});
+
+test('seller identity is reconciled to outbound before persistence and inbox enqueue', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'seller-direction@example.com', passwordHash: 'hash', displayName: 'Seller Direction' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'seller-account-ref' });
+  await store.updateAccount(admin.id, account.id, { platformUserId: 'seller-platform-ref' });
+  const conversation = await store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'buyer-direction', externalConversationRef: 'conv-direction' });
+  const messages = new MessageService(store, async () => 'audit-seller-direction');
+  const autoReply = { processInbound: async () => undefined };
+  const service = new XianyuImService(store, {} as never, messages, autoReply as never);
+
+  const result = await service.handleExternalEvent(admin.id, {
+    accountId: account.id,
+    externalConversationRef: 'conv-direction',
+    externalMessageRef: 'seller-direction-1.PNM',
+    senderRef: 'seller-platform-ref',
+    direction: 'inbound',
+    bodyType: 'text',
+    bodyText: '卖家自己发出的消息',
+    occurredAt: '2026-09-24T03:00:00.000Z',
+  });
+  assert.equal(result.created, true);
+
+  const history = await store.listMessages(admin.id, conversation.id, { limit: 20 });
+  assert.equal(history.items[0]?.direction, 'outbound');
+  assert.equal(history.items[0]?.senderRole, 'agent');
+  assert.ok(history.items[0]?.riskFlags.includes('sender_identity_reconciled'));
+  assert.deepEqual(await store.claimInboundInbox({ workerId: 'seller-direction-worker', limit: 10, leaseMs: 5_000 }), []);
+});
+
+test('history recovery treats account seller identity as outbound', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'seller-history@example.com', passwordHash: 'hash', displayName: 'Seller History' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'seller-history-ref' });
+  const conversation = await store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'buyer-history', externalConversationRef: 'conv-history-seller' });
+  const encoded = Buffer.from(JSON.stringify({ text: { text: '历史卖家消息' } }), 'utf8').toString('base64');
+  const fakeClient = {
+    selfUserIds: ['seller-history-ref'],
+    listMessages: async () => ({
+      hasMore: false,
+      userMessageModels: [{ message: { messageId: 'seller-history-1.PNM', senderUserId: 'seller-history-ref', createAt: Date.parse('2026-09-24T03:00:05.000Z'), content: { custom: { data: encoded } } } }],
+    }),
+  };
+  const messages = new MessageService(store, async () => 'audit-seller-history');
+  const autoReply = { processInbound: async () => { throw new Error('seller history must not reach auto reply'); } };
+  const service = new XianyuImService(store, {} as never, messages, autoReply as never);
+  (service as unknown as { ensureClient: () => Promise<unknown> }).ensureClient = async () => fakeClient;
+
+  const result = await service.recoverRecentMessages(admin.id, account.id);
+  assert.equal(result.imported, 1);
+  assert.equal(result.queued, 0);
+  const history = await store.listMessages(admin.id, conversation.id, { limit: 20 });
+  assert.equal(history.items[0]?.direction, 'outbound');
+  assert.equal(history.items[0]?.senderRole, 'agent');
+  assert.deepEqual(await store.claimInboundInbox({ workerId: 'seller-history-worker', limit: 10, leaseMs: 5_000 }), []);
+});
+
 test('history/live alias resolves to the same local message', async () => {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: 'alias@example.com', passwordHash: 'hash', displayName: 'Alias' });
