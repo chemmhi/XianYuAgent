@@ -11,6 +11,7 @@
 2. `ACCOUNT_VALIDATION_REQUIRED`、`FAIL_SYS_USER_VALIDATE`、`X5SEC`、`CAPTCHA`、`SLIDER` 等外部风控错误表示需要人工验证，不等同于凭证失效；账号标为 `degraded`，保留有效 Cookie 并进行有限后台重试。
 3. QR adapter 的 `onSuccess` 异常必须立即持久化 `failed` 终态并保留原始错误码，禁止 durable session 永久停留在 `scanned`。
 4. 真实滑块挑战和外部账号扫码仍需人工验收；受控 smoke 只能证明状态机、错误映射和持久化边界正确。
+5. 前端 API adapter 必须保留服务端 canonical QR 状态；`verification_required` 只能进入人工验证 UI，不得降级为 `failed`。
 
 ### 2026-09-21 自动回复 Agent 设计确认
 

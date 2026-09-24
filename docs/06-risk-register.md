@@ -12,6 +12,7 @@
 | --- | --- | --- | --- | --- |
 | S5-RISK-052 | 闲鱼在 IM token bootstrap 阶段可能要求滑块/人工验证；若把该错误当成 Cookie 失效，会撤销刚完成的扫码登录并误报失败 | P1 | QR 成功边界改为 Cookie 校验 + 资料同步；listener 后台有限重试；`ACCOUNT_VALIDATION_REQUIRED`、`FAIL_SYS_USER_VALIDATE`、`X5SEC`、`CAPTCHA`、`SLIDER` 仅降级账号并保留有效 Cookie | MITIGATED；待真实账号完成滑块挑战后复核 |
 | S5-RISK-053 | `onSuccess` 后置回调异常可能只更新内存状态，持久化会话停在 `scanned` | P1 | QR adapter 在失败终态立即回调 `onStatus`，保存原始错误码；新增失败回调回归 | CLOSED |
+| S5-RISK-054 | 前端 QR API 适配器曾把服务端 `verification_required` 映射为 `failed`，人工验证态被用户看到为“登录失败” | P1 | 保留 canonical 状态并增加 API adapter 回归；验证链接和人工验证提示由既有视图展示 | CLOSED |
 
 ### 2026-09-21 缺陷关闭
 

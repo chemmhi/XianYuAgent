@@ -90,8 +90,7 @@ function toCanonicalPage(payload: CanonicalAccountsPayload): AccountsPageVM {
 
 function toQrLoginStatus(status: string): QrLoginStatus {
   if (status === 'created') return 'waiting';
-  if (status === 'verification_required') return 'failed';
-  return ['waiting', 'scanned', 'succeeded', 'expired', 'failed', 'cancelled'].includes(status) ? status as QrLoginStatus : 'failed';
+  return ['waiting', 'scanned', 'succeeded', 'expired', 'failed', 'cancelled', 'verification_required'].includes(status) ? status as QrLoginStatus : 'failed';
 }
 
 function toQrLoginSession(payload: CanonicalQrSessionResponse): QrLoginSessionVM {
