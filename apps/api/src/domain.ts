@@ -227,6 +227,8 @@ export interface AutoReplyProductListQuery {
   accountId: string;
   productId?: string;
   keyword?: string;
+  /** Core terms selected by the Agent after an exact phrase returns no rows. */
+  keywords?: string[];
   limit?: number;
 }
 
@@ -240,6 +242,7 @@ export interface AutoReplyProductLookup {
 export interface AutoReplyProductListResult {
   items: AutoReplyProductContext[];
   total: number;
+  searchMode?: 'catalog' | 'exact_phrase' | 'core_terms';
 }
 
 export type AutomationRuleType = 'paid_auto_delivery' | 'unpaid_auto_reprice' | 'review_gift' | 'review_reminder';

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { composeAutoReplyAgentSystemPrompt, resolveAutoReplyAgentConfig } from '../src/auto-reply-agent-config.js';
+import { composeAutoReplyAgentSystemPrompt, DEFAULT_AUTO_REPLY_AGENT_SYSTEM_PROMPT, resolveAutoReplyAgentConfig } from '../src/auto-reply-agent-config.js';
 import { AUTO_REPLY_AGENT_TOOLS, AUTO_REPLY_WEB_SEARCH_TOOL, ToolCallingAutoReplyAgent, type AutoReplyAgentTrace } from '../src/auto-reply-agent.js';
 import { AutoReplyService, NoopAutoReplySender, type AutoReplyClassification, type AutoReplyContext, type AutoReplyGeneratorObservation } from '../src/auto-reply.js';
 import { createApp } from '../src/app.js';
@@ -261,6 +261,43 @@ test('shop catalog tool explicitly supports broad inventory questions without a 
   assert.deepEqual(reply, { text: '店铺里目前有资料包和开发服务。', segments: undefined });
   assert.equal(receivedKeyword, undefined);
   assert.equal(requestCount, 2);
+});
+
+test('default system prompt keeps global fact boundaries without embedding tool routing', () => {
+  assert.doesNotMatch(DEFAULT_AUTO_REPLY_AGENT_SYSTEM_PROMPT, /get_buyer_conversations|get_product_info|get_buyer_orders|list_shop_products/);
+  assert.doesNotMatch(DEFAULT_AUTO_REPLY_AGENT_SYSTEM_PROMPT, /web_search 默认开启|只有当前问题属于通用知识/);
+  assert.match(DEFAULT_AUTO_REPLY_AGENT_SYSTEM_PROMPT, /外部信息只能补充通用知识/);
+});
+
+test('shop product tool describes and performs Agent-led core-term retry after no results', async () => {
+  const shopTool = AUTO_REPLY_AGENT_TOOLS.find((tool) => tool.function.name === 'list_shop_products');
+  assert.match(shopTool?.function.description ?? '', /完整短语/);
+  assert.match(shopTool?.function.description ?? '', /核心词/);
+  assert.match(shopTool?.function.description ?? '', /无结果/);
+  const queries: Array<{ accountId?: string; keyword?: string; keywords?: string[]; limit?: number }> = [];
+  let requestCount = 0;
+  const client: ModelClient = {
+    complete: async () => {
+      requestCount += 1;
+      if (requestCount === 1) return { content: '', model: 'test', toolCalls: [{ id: 'tool-shop-phrase', type: 'function', function: { name: 'list_shop_products', arguments: JSON.stringify({ keyword: '夸克自动化' }) } }] };
+      if (requestCount === 2) return { content: '', model: 'test', toolCalls: [{ id: 'tool-shop-terms', type: 'function', function: { name: 'list_shop_products', arguments: JSON.stringify({ keyword: '夸克自动化', keywords: ['夸克', '自动化'] }) } }] };
+      return { content: replyPayload('找到了，相关商品描述里包含夸克和自动化信息。'), model: 'test' };
+    },
+  };
+  const store = {
+    listAutoReplyProducts: async (_adminId: string, query: { accountId: string; keyword?: string; keywords?: string[]; limit?: number }) => {
+      queries.push(query);
+      if (queries.length === 1) return { items: [], total: 0, searchMode: 'exact_phrase' as const };
+      return { items: [{ id: 'product-1', accountId: 'account-1', title: '夸克网盘自动化', description: '夸克 自动化', priceMinor: 100, status: 'published' as const }], total: 1, searchMode: 'core_terms' as const };
+    },
+  } as unknown as Store;
+  const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}));
+  const reply = await agent.generate({ adminId: 'admin-1', context: context(), classification });
+  assert.deepEqual(reply, { text: '找到了，相关商品描述里包含夸克和自动化信息。', segments: undefined });
+  assert.deepEqual(queries, [
+    { accountId: 'account-1', keyword: '夸克自动化', limit: 10 },
+    { accountId: 'account-1', keyword: '夸克自动化', keywords: ['夸克', '自动化'], limit: 10 },
+  ]);
 });
 
 test('agent emits high-level redacted observations for model, tool, and final decision', async () => {
