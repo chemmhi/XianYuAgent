@@ -31,13 +31,13 @@ try {
 
   const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
   const imageDataUrl = `data:image/png;base64,${imageBytes.toString('base64')}`;
-  const created = await request('/api/v1/coupons/batches', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-create-1' }, body: JSON.stringify({ accountId: account.id, label: 'Demo cards', purpose: 'text', deliveryScope: 'operator_only', metadata: { description: 'Demo description', textContent: 'Demo content', delaySeconds: 5, dockable: true, price: '9.90', imageUrls: [imageDataUrl] }, quarkUrl: 'https://quark.example/demo', extractionCode: 'extract-123' }) });
+  const created = await request('/api/v1/coupons/batches', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-create-1' }, body: JSON.stringify({ accountId: account.id, label: 'Demo cards', purpose: 'text', deliveryScope: 'operator_only', metadata: { description: 'Demo description', textContent: 'Demo content', delaySeconds: 5, dockable: true, price: '9.90', imageUrls: [imageDataUrl] } }) });
   assert.equal(created.response.status, 201);
   const batchId = created.body.data.batchId;
   assert.match(String(batchId), /^\d+$/);
   assert.equal(batchId, '1');
-  assert.equal(created.body.data.availableCount, 0);
-  assert.equal(created.body.data.stockAlert, 'exhausted');
+  assert.equal('availableCount' in created.body.data, false);
+  assert.equal('stockAlert' in created.body.data, false);
   assert.equal(created.body.data.purpose, 'text');
   assert.equal(created.body.data.metadata.imageUrls.length, 1);
   assert.match(created.body.data.metadata.imageUrls[0], /^\/api\/v1\/coupons\/batches\/\d+\/assets\//);
@@ -100,7 +100,8 @@ try {
   assert.equal(imported.response.status, 200);
   assert.equal(imported.body.data.importedCount, 2);
   assert.equal(imported.body.data.rejected.length, 2);
-  assert.equal(imported.body.data.stockAlert, 'low_stock');
+  assert.equal('availableCount' in imported.body.data, false);
+  assert.equal('stockAlert' in imported.body.data, false);
 
   const detail = await request(`/api/v1/coupons/batches/${batchId}`, { headers: { cookie } });
   assert.equal(detail.response.status, 200);
@@ -137,7 +138,8 @@ try {
   const deleted = await request(`/api/v1/coupons/batches/${batchId}`, { method: 'DELETE', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-delete-1' } });
   assert.equal(deleted.response.status, 200);
   assert.equal(deleted.body.data.batch.status, 'voided');
-  assert.equal(deleted.body.data.batch.stockAlert, 'exhausted');
+  assert.equal('availableCount' in deleted.body.data.batch, false);
+  assert.equal('stockAlert' in deleted.body.data.batch, false);
   const defaultAfterVoid = await request(`/api/v1/coupons/batches?accountId=${account.id}`, { headers: { cookie } });
   assert.equal(defaultAfterVoid.response.status, 200);
   assert.equal(defaultAfterVoid.body.data.items.some((item) => item.batchId === batchId), false);

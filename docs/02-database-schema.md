@@ -23,7 +23,7 @@
 | `auth` | `admins`、`sessions`、`account_scopes`、`account_login_sessions` | auth | 管理员、会话、账号授权和平台登录会话 |
 | `accounts` | `accounts`、`credential_refs`、`credential_values` | accounts / credential-store | 账号连接与系统凭证 |
 | `products` | `products`、`product_skus`、`asset_refs` | products | 商品、SKU、商品素材 |
-| `coupons` | `coupon_batches`、`coupon_items`、`coupon_asset_refs`、`coupon_bindings` | coupons | 卡券批次、库存、素材和商品绑定 |
+| `coupons` | `coupon_batches`、`coupon_items`、`coupon_asset_refs`、`coupon_bindings` | coupons | 卡券交付配置、批量数据项、素材和商品绑定 |
 | `orders` | `orders`、`delivery_records` | orders | 订单状态与交付尝试 |
 | `messages` | `conversations`、`messages`、`auto_reply_runs`、`auto_reply_run_events` | messages / auto-reply activity | 会话、消息、自动回复运行与脱敏活动事件 |
 | `settings` | `auto_reply_agent_configs`、`auto_reply_agent_account_configs` | auto-reply settings | 管理员默认配置与账号级自动回复配置 |
@@ -62,7 +62,7 @@
 
 | 表 | 关键列 | 主键与外键 | 唯一索引 / 普通索引 | 关键检查 |
 | --- | --- | --- | --- | --- |
-| `coupons.coupon_batches` | `id uuid`；`sequence_id bigint`；`account_id uuid`；`purpose text`；`delivery_scope text`；`quark_url text null`；`extract_code_ciphertext bytea null`；`total_count int`；`status text` | PK `id`；FK account | UQ partial `(sequence_id) where status <> 'voided'`；IDX `(account_id, status)` | `sequence_id` 从 1 开始，对外作为 `batchId`/`id`；作废/删除后可回收；`delivery_scope in ('system_only','operator_only','buyer_deliverable')` |
+| `coupons.coupon_batches` | `id uuid`；`sequence_id bigint`；`account_id uuid`；`purpose text`；`delivery_scope text`；`metadata_json jsonb`；`total_count int`；`status text` | PK `id`；FK account | UQ partial `(sequence_id) where status <> 'voided'`；IDX `(account_id, status)` | `sequence_id` 从 1 开始，对外作为 `batchId`/`id`；作废/删除后可回收；`delivery_scope in ('system_only','operator_only','buyer_deliverable')` |
 | `coupons.coupon_items` | `id uuid`；`batch_id uuid`；`content_ciphertext bytea`；`status text`；`reserved_until timestamptz null`；`consumed_at timestamptz null` | PK；FK batch | IDX `(batch_id, status)`；partial UQ consumed allocation | `available -> reserved -> consumed`；reserved 超时才可释放 |
 | `coupons.coupon_asset_refs` | `id uuid`；`coupon_batch_id uuid`；`storage_key text`；`mime_type text`；`checksum text null`；`caption text null`；`status text` | PK；FK batch | UQ `(coupon_batch_id, storage_key)` | 素材与正文分离 |
 | `coupons.coupon_bindings` | `id uuid`；`coupon_batch_id uuid`；`product_id uuid`；`priority int default 0`；`status text`；`expires_at null` | PK；FK batch/product | UQ `(coupon_batch_id, product_id)`；IDX `(product_id, status)` | 解绑只改状态，不删交付历史 |
@@ -120,7 +120,7 @@
 | `001_auth_accounts` | admins、sessions、accounts、account_scopes、account_login_sessions | 无 | 仅回滚空表；有业务数据时采用向前兼容迁移 |
 | `002_credentials` | credential_refs、credential_values | 001 | 先禁写，再回滚应用；密文不逆向解密 |
 | `003_catalog` | products、product_skus、asset_refs | 001 | 保留旧列，回滚应用读取旧列 |
-| `004_coupons` | coupon_batches、coupon_items、coupon_asset_refs、coupon_bindings | 001/003 | 先停止库存写入，保留已交付记录 |
+| `004_coupons` | coupon_batches、coupon_items、coupon_asset_refs、coupon_bindings | 001/003 | 先停止卡券项写入，保留已交付记录 |
 | `029_coupon_batch_sequence` | coupon_batches.sequence_id、全局序列和非作废批次唯一索引 | 004_coupons | 先回退 API 到 UUID 读写；保留 sequence_id、审计和外键，不物理删除历史 |
 | `005_orders_messages` | orders、delivery_records、conversations、messages | 001/003/004 | 向前修复优先，禁止物理删除订单和消息 |
 | `006_workspace_execution` | agent_sessions、runs、steps、task_contexts、confirmations、idempotency_records、outbox_jobs | 001/005 | 停止新任务，等待租约过期后回退应用 |

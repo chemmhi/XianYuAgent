@@ -8,10 +8,6 @@ const batchPayload = {
   purpose: 'text',
   deliveryScope: 'buyer_deliverable',
   status: 'exhausted',
-  totalCount: 2,
-  availableCount: 0,
-  reservedCount: 0,
-  consumedCount: 2,
   version: 3,
   updatedAt: '2026-09-19T00:00:00.000Z',
   productBindings: [{ id: 'binding-001', productId: 'product-001', priority: 0, status: 'active' }],
@@ -27,8 +23,9 @@ describe('coupons api adapter', () => {
       delete: vi.fn(),
     });
 
-    const page = await api.list({ keyword: '资料', stockAlert: 'exhausted' });
-    expect(page.items[0]).toMatchObject({ batchId: '1', status: 'exhausted', stockAlert: 'exhausted' });
+    const page = await api.list({ keyword: '资料' });
+    expect(page.items[0]).toMatchObject({ batchId: '1', status: 'exhausted' });
+    expect(page.items[0]).not.toHaveProperty('stockAlert');
     expect(page.items[0].bindings[0]).toMatchObject({ bindingId: 'binding-001', batchId: '1', status: 'active' });
   });
 
@@ -50,9 +47,9 @@ describe('coupons api adapter', () => {
     expect(getMock).toHaveBeenCalledWith('/api/v1/coupons/batches/4');
   });
 
-  it('supports mock filtering and initial inventory without exposing plaintext in summaries', async () => {
+  it('supports mock filtering without exposing plaintext in summaries', async () => {
     const api = createMockCouponsApi();
-    const page = await api.list({ keyword: 'GitHub', stockAlert: 'low_stock' });
+    const page = await api.list({ keyword: 'GitHub' });
     expect(page.items).toHaveLength(1);
     expect(page.items[0].items?.[0].maskedLabel).toBeTruthy();
     expect(page.items[0].items?.[0].maskedLabel).not.toContain('GitHub');
@@ -70,8 +67,8 @@ describe('coupons api adapter', () => {
       patch: patch as unknown as CouponsApiTransport['patch'],
       delete: vi.fn() as unknown as CouponsApiTransport['delete'],
     });
-    const page = await api.list({ purpose: 'text', keyword: '备注', status: 'active', stockAlert: 'normal' });
-    expect(get).toHaveBeenCalledWith('/api/v1/coupons/batches?keyword=%E5%A4%87%E6%B3%A8&status=active&stockAlert=normal&purpose=text&sortBy=createdAt&sortOrder=desc&page=1&pageSize=20');
+    const page = await api.list({ purpose: 'text', keyword: '备注', status: 'active' });
+    expect(get).toHaveBeenCalledWith('/api/v1/coupons/batches?keyword=%E5%A4%87%E6%B3%A8&status=active&purpose=text&sortBy=createdAt&sortOrder=desc&page=1&pageSize=20');
     expect(page.items[0].contentPreview?.text).toBe('正文预览');
     await api.updateBatch('1', { status: 'paused', metadata: { description: 'updated' } });
     expect(patch).toHaveBeenCalledWith('/api/v1/coupons/batches/1', { status: 'paused', metadata: { description: 'updated' } }, expect.objectContaining({ headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }) }));
@@ -84,15 +81,15 @@ describe('coupons api adapter', () => {
     expect(get).toHaveBeenCalledWith('/api/v1/coupons/batches?sortBy=createdAt&sortOrder=asc&page=1&pageSize=20');
 
     const mock = createMockCouponsApi([
-      { ...batchPayload, batchId: 'older', label: '更早', createdAt: '2026-09-20T00:00:00.000Z', stockAlert: 'exhausted', bindings: [] },
-      { ...batchPayload, batchId: 'newer', label: '更新', createdAt: '2026-09-21T00:00:00.000Z', stockAlert: 'exhausted', bindings: [] },
+      { ...batchPayload, batchId: 'older', label: '更早', createdAt: '2026-09-20T00:00:00.000Z', bindings: [] },
+      { ...batchPayload, batchId: 'newer', label: '更新', createdAt: '2026-09-21T00:00:00.000Z', bindings: [] },
     ]);
     expect((await mock.list({ sortBy: 'createdAt', sortOrder: 'asc' })).items.map((item) => item.batchId)).toEqual(['older', 'newer']);
     expect((await mock.list({ sortBy: 'createdAt', sortOrder: 'desc' })).items.map((item) => item.batchId)).toEqual(['newer', 'older']);
 
     const withVoided = createMockCouponsApi([
-      { ...batchPayload, batchId: 'active', status: 'active', stockAlert: 'normal', bindings: [] },
-      { ...batchPayload, batchId: 'voided', status: 'voided', stockAlert: 'exhausted', bindings: [] },
+      { ...batchPayload, batchId: 'active', status: 'active', bindings: [] },
+      { ...batchPayload, batchId: 'voided', status: 'voided', bindings: [] },
     ]);
     expect((await withVoided.list()).items.map((item) => item.batchId)).toEqual(['active']);
     expect((await withVoided.list({ status: 'voided' })).items.map((item) => item.batchId)).toEqual(['voided']);
@@ -100,8 +97,8 @@ describe('coupons api adapter', () => {
 
   it('reclaims a deleted numeric batch id on the next create', async () => {
     const mock = createMockCouponsApi([
-      { ...batchPayload, batchId: '1', label: '待删除', status: 'active', stockAlert: 'normal', bindings: [] },
-      { ...batchPayload, batchId: '2', label: '保留', status: 'active', stockAlert: 'normal', bindings: [] },
+      { ...batchPayload, batchId: '1', label: '待删除', status: 'active', bindings: [] },
+      { ...batchPayload, batchId: '2', label: '保留', status: 'active', bindings: [] },
     ]);
     await mock.deleteBatch('1');
     const recreated = await mock.createBatch({ accountId: 'account-001', label: '重新创建', purpose: 'text', deliveryScope: 'operator_only' });

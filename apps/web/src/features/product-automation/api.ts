@@ -80,18 +80,16 @@ export function toAutomationBatchWire(value: ProductAutomationBatchUpdate, expec
 
 function toAutomationCoupon(value: Record<string, unknown>): AutomationCoupon {
   const purpose = String(value.purpose ?? 'text');
-  const availableCount = Number(value.availableCount ?? value.available ?? 0);
   const metadata = (value.metadata && typeof value.metadata === 'object' ? value.metadata : {}) as Record<string, unknown>;
   const typeLabel = purpose === 'data' ? '数据卡' : purpose === 'api' ? 'API 卡' : purpose === 'image' ? '图片卡' : '文字卡';
   const specSummary = metadata.multiSpec ? String(metadata.specName ?? '多规格') : purpose === 'api' ? '动态规格' : `${Number(metadata.specCount ?? 1)} 条规格`;
-  const quantity = Number(metadata.deliveryCount ?? 1);
+  const quantity = 1;
   return {
     id: String(value.id ?? value.batchId ?? ''),
     label: String(value.label ?? value.batchId ?? value.id ?? '未命名卡券'),
     typeLabel,
     specSummary,
     quantitySummary: `每件 ${quantity} 份`,
-    stockSummary: purpose === 'api' ? '动态' : `库存 ${Number.isFinite(availableCount) ? availableCount : 0}`,
     deliveryScope: value.deliveryScope === 'system_only' || value.deliveryScope === 'operator_only' || value.deliveryScope === 'buyer_deliverable' ? value.deliveryScope : undefined,
     accountId: value.accountId ? String(value.accountId) : undefined,
     apiManaged: purpose === 'api',
@@ -99,10 +97,10 @@ function toAutomationCoupon(value: Record<string, unknown>): AutomationCoupon {
 }
 
 export const MOCK_AUTOMATION_COUPONS: AutomationCoupon[] = [
-  { id: 'coupon-batch-2', label: '批量数据2', typeLabel: '数据卡', specSummary: '2 条规格', quantitySummary: '每件 1 份', stockSummary: '库存 120' },
-  { id: 'coupon-gift-a', label: '评价赠品批次 A', typeLabel: '数据卡', specSummary: '1 条规格', quantitySummary: '每件 1 份', stockSummary: '库存 80' },
-  { id: 'coupon-api-member', label: 'API 卡券 · 会员激活码', typeLabel: 'API 卡', specSummary: '动态库存', quantitySummary: '规格由服务返回', stockSummary: '动态', apiManaged: true },
-  { id: 'coupon-text-fixed', label: '固定文字', typeLabel: '文字卡', specSummary: '1 条内容', quantitySummary: '每件 1 份', stockSummary: '不限量' },
+  { id: 'coupon-batch-2', label: '批量数据2', typeLabel: '数据卡', specSummary: '按行取值', quantitySummary: '每件 1 份' },
+  { id: 'coupon-gift-a', label: '评价赠品批次 A', typeLabel: '数据卡', specSummary: '按行取值', quantitySummary: '每件 1 份' },
+  { id: 'coupon-api-member', label: 'API 卡券 · 会员激活码', typeLabel: 'API 卡', specSummary: '动态取值', quantitySummary: '规格由服务返回', apiManaged: true },
+  { id: 'coupon-text-fixed', label: '固定文字', typeLabel: '文字卡', specSummary: '固定内容', quantitySummary: '每件 1 份' },
 ];
 
 export function createMockProductAutomationApi(seed: Partial<ProductAutomationConfig> = {}): ProductAutomationApi {

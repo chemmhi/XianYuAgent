@@ -57,24 +57,24 @@ ENV-0 不是用户可见业务切片，但必须在 S4-VS1 开始前完成或明
 - DoD：草稿可保留；素材失败可单项重试；发布必须走 Policy → Confirmation → Idempotency → Outbox；部分成功逐项返回；跨账号操作拒绝；移动端复用同一 controller/VM/命令；字段级 request/query/response 在实现前冻结。
 - 回滚：停止同步和发布，保留商品行与草稿；撤回未提交素材引用；Outbox 按 attempt 回滚，不删除审计。
 
-### S4-VS3 卡券首页 / 批次与库存管理
+### S4-VS3 卡券首页 / 批次与交付配置管理
 
-- 用户旅程：当前账号 → 查看批次首页 → 创建批次 → 导入/批量编辑库存 → 查看 `stockAlert` → 绑定商品 → 管理员受控查看正文。
+- 用户旅程：当前账号 → 查看批次首页 → 创建四类卡券配置 → 绑定商品 → 管理员受控查看正文。
 - 页面与组件：`/coupons`、`CouponsPage`、`useCouponsController`、`CouponBatchVM`、`CouponItemVM`、`CouponContentPreviewVM`、`InventoryLockVM`。
 - API 范围：批次列表/详情/创建/更新/删除、items 导入/批量保存/批量删除、素材、绑定/解除绑定、作废、受控正文读取。
 - 依赖：S4-VS1 账号范围、S4-VS2 商品绑定、对象存储、事务锁、AuditEvent、deliveryScope 策略。
-- 首页口径：首期首页以批次列表、可用库存、`stockAlert`、状态筛选为主；跨批次 KPI 若需要新增 summary API，必须先冻结字段，不得在页面自行聚合未知字段。
-- DoD：正文不进列表；管理员受控查看/复制；`low_stock` 只作为 `stockAlert` 派生告警；库存写入事务化并逐项返回；绑定必须校验商品与账号一致；作废后禁止恢复性盲重试；敏感字段不进日志/Trace/Replay/Prompt；覆盖空数据、部分成功、冲突、超时和权限失败。
-- 回滚：冻结库存写入；绑定仅允许状态回退，不删除历史；作废不可逆；恢复到只读批次和库存查询。
+- 首页口径：首期首页以批次列表、类型/状态筛选、交付配置摘要和绑定关系为主；不提供卡券库存 KPI 或预警字段。
+- DoD：正文不进列表；管理员受控查看/复制；四类配置项均可保存并被交付链路消费；批量数据按行幂等消费；绑定必须校验商品与账号一致；作废后禁止恢复性盲重试；敏感字段不进日志/Trace/Replay/Prompt；覆盖空数据、部分成功、冲突、超时和权限失败。
+- 回滚：冻结交付配置写入；绑定仅允许状态回退，不删除历史；作废不可逆；恢复到只读批次和配置查询。
 
 ### S4-VS4 订单列表、详情与交付
 
 - 用户旅程：当前账号 → 订单筛选 → 订单详情四态 → 交付预览 → Confirmation → manual / no_logistics / coupon_only / mixed 发货 → DeliveryRecord 与审计。
 - 页面与组件：`/orders`、`OrdersPage`、`useOrdersController`、`OrderVM`、`DeliveryPreviewVM`、`DeliveryRecordVM`、`AfterSalesVM`。
 - API 范围：订单列表/详情/刷新、delivery-preview、deliver、cancel、retry。
-- 依赖：S4-VS1 账号、S4-VS2 商品、S4-VS3 卡券库存、Policy、Confirmation、Outbox、闲鱼 adapter。
+- 依赖：S4-VS1 账号、S4-VS2 商品、S4-VS3 卡券交付配置、Policy、Confirmation、Outbox、闲鱼 adapter。
 - 禁止范围：未知结果时自动再次发货；订单页面直接调用外部交付 adapter；混用支付、订单、交付、售后四套状态。
-- DoD：支持四套独立状态和筛选；交付前校验支付、商品/账号匹配、deliveryScope、库存锁定和策略；重复提交幂等；`unknown/timeout` 只查询 outbox/外部状态或进入人工恢复；失败可按状态重试；交付写 DeliveryRecord 和审计；覆盖未登录/无权/空数据/冲突/超时/重复提交/移动端对等。
+- DoD：支持四套独立状态和筛选；交付前校验支付、商品/账号匹配、deliveryScope、交付配置和策略；重复提交幂等；`unknown/timeout` 只查询 outbox/外部状态或进入人工恢复；失败可按状态重试；交付写 DeliveryRecord 和审计；覆盖未登录/无权/空数据/冲突/超时/重复提交/移动端对等。
 - 回滚：停止新的 delivery outbox，等待租约结束；保留 DeliveryRecord 和审计；必要时退回只读订单和外部状态查询，不回滚已成功交付。
 
 ### 3.2 当前优先垂直切片：Messages / Workspace / Settings API Key
@@ -165,9 +165,9 @@ S4-VS7A（可与 VS5A/VS6A 并行，但先完成 CredentialStore 契约）
 | `S4-VS2D` 受控发布 | Policy → Confirmation → Idempotency → Outbox，逐项结果与恢复 | `S4-VS2A/B/C`、Execution foundation | `PLANNED` | `R-008`、`R-009`、`S5-RISK-014` |
 | `S4-VS2E` 商品外部同步真实验收 | 真实 Cookie/账号、分页/字段映射、unknown/timeout/重试口径 | `S4-VS1`、现有 sync 首片 | `PARTIALLY_VERIFIED` | `R-002`、`S5-I002`、`S5-I008` |
 | `S4-VS3A` 卡券明细与素材 | CouponItem bulk-save/delete、资产上传/删除、敏感正文隔离 | `S4-VS3` 已合入代码、`S4-VS2` 商品绑定 | `PLANNED` | `S4-I003`、`S5-RISK-016` |
-| `S4-VS3B` 库存锁定与消耗 | reserve/consume/lock、并发冲突、订单交付前库存一致性 | `S4-VS3A`、事务锁 | `PLANNED` | `R-009`、`S5-RISK-016` |
+| `S4-VS3B` 批量数据并发消费 | reserve/consume/release、并发冲突、订单交付前内容一致性 | `S4-VS3A`、事务锁 | `PLANNED` | `R-009`、`S5-RISK-016` |
 | `S4-VS4A` 订单列表与详情 | 订单只读、筛选、四套状态、会话/商品关联 | `S4-VS1/B`、订单 schema | `PLANNED` | `S5-RISK-017` |
-| `S4-VS4B` 交付预览与库存锁 | delivery-preview、策略校验、库存预锁、可解释失败 | `S4-VS3B`、Policy/Confirmation | `PLANNED` | `S4-I003`、`S4-I004`、`S5-RISK-017` |
+| `S4-VS4B` 交付预览与配置检查 | delivery-preview、策略校验、配置检查、可解释失败 | `S4-VS3B`、Policy/Confirmation | `PLANNED` | `S4-I003`、`S4-I004`、`S5-RISK-017` |
 | `S4-VS4C` 发货/取消/重试/未知恢复 | manual/no_logistics/coupon_only/mixed、Outbox、人工恢复 | `S4-VS4B`、外部 adapter | `PLANNED` | `R-009`、`S4-I004`、`S5-RISK-018` |
 | `S4-ENV-RECOVERY` 发布级恢复门禁 | 迁移回滚、Testcontainers、Redis/MinIO 重启恢复 | 所有写入切片前置 | `BLOCKED` | `R-001`、`S5-I001`、`S5-RISK-019` |
 | `S4-EXT-ACCOUNT` 真实闲鱼账号验收 | APP 扫码、Cookie、资料同步和账号口径人工复核 | 当前 Chrome 登录态、外部账号 | `BLOCKED` | `R-002`、`S5-I002`、`S5-I004` |
@@ -179,7 +179,7 @@ S4-VS7A（可与 VS5A/VS6A 并行，但先完成 CredentialStore 契约）
 
 1. **用户路径与正式入口**：写清页面、路由、controller、ViewModel、命令和用户可见成功/失败结果。
 2. **后端边界**：route/controller、application service、domain rule、store/adapter、migration 和审计 owner 必须分开；前端不得直连 store、对象存储或闲鱼 adapter。
-3. **权限与敏感数据**：所有写请求带管理员 Session、账号 scope、CSRF 和 Idempotency-Key；卡券正文、夸克链接、提取码只在受控 API 内出现，不进列表、日志、Trace、Replay 或 Prompt。
+3. **权限与敏感数据**：所有写请求带管理员 Session、账号 scope、CSRF 和 Idempotency-Key；卡券正文和图片只在受控 API 内出现，不进列表、日志、Trace、Replay 或 Prompt。
 4. **状态机**：至少覆盖成功、非法转换、资源不存在、403、重复请求/幂等冲突、持久化失败、timeout、unknown、取消和人工恢复；状态字段沿用阶段 2 canonical 定义。
 5. **证据**：单元 + 集成/真实依赖 + 真实 Chrome/CDP E2E + 视觉回归；必须同时断言用户可见结果和持久化结果，不能用 smoke、mock 或页面可打开代替。
 6. **视觉**：固定 `1440×900` 和 `390×844`，记录 loading/empty/error/forbidden/disabled/submitting/success/partial-success/unknown 等适用状态及偏差。
@@ -212,7 +212,7 @@ S4-EXT-ACCOUNT、S4-ENV-RUNTIME 为独立门禁；未通过时只能保留明确
 
 - 现有 `013_coupons.sql` 与 `013_product_sync.sql` 并行存在；本次只在文档中冻结风险，不直接重命名历史迁移。
 - 在下一次新增迁移前，必须完成迁移清单、执行顺序、已有 PostgreSQL volume 的 apply 记录、回滚脚本和重复执行验证；新迁移不得继续占用 `013`。
-- `CouponItem`、`CouponAssetRef`、库存锁和订单交付新增表/字段必须使用新的单调编号，并在 `docs/02-database-schema.md` 写明 expand/backfill/verify/switch/rollback；没有兼容读路径时不得开放流量。
+- `CouponItem`、`CouponAssetRef`、批量消费状态和订单交付新增表/字段必须使用新的单调编号，并在 `docs/02-database-schema.md` 写明 expand/backfill/verify/switch/rollback；卡券旧夸克字段不保留兼容读取。
 
 ## 4. 后置切片
 

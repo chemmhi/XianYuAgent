@@ -30,7 +30,7 @@ export function AutomationDrawer({ open, product, accountLabel = '当前账号',
   const pickerCoupons = useMemo(() => {
     const byId = new Map(coupons.map((coupon) => [coupon.id, coupon]));
     for (const coupon of product?.couponBatches ?? []) {
-      if (!byId.has(coupon.id)) byId.set(coupon.id, { id: coupon.id, label: coupon.label ?? coupon.id, typeLabel: '已绑定卡券', specSummary: '规格由卡券管理维护', quantitySummary: '按卡券设置', stockSummary: '由卡券管理维护' });
+      if (!byId.has(coupon.id)) byId.set(coupon.id, { id: coupon.id, label: coupon.label ?? coupon.id, typeLabel: '已绑定卡券', specSummary: '规格由卡券管理维护', quantitySummary: '按卡券设置' });
     }
     return [...byId.values()];
   }, [coupons, product]);

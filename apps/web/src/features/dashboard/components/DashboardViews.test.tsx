@@ -17,7 +17,7 @@ const state: DashboardState = {
     ],
     trend: [{ label: '周一', primary: 58, secondary: 82 }],
     health: [{ label: '监听心跳', value: '正常', tone: 'ok' }],
-    productRank: [{ title: 'Python 全栈资料包', subtitle: '虚拟资源 · 凭证完整', orders: '42', stock: '368', status: '可售', tone: 'ok' }],
+    productRank: [{ title: 'Python 全栈资料包', subtitle: '虚拟资源 · 交付配置已就绪', orders: '42', deliveryConfig: '已就绪', status: '可交付', tone: 'ok' }],
     recentActivity: [{ time: '14:22', text: 'AI 已回复', status: 'AI 已回复', tone: 'ok', href: '/messages' }],
     riskTodos: [{ id: 'todo_001', title: '考研英语资料缺少发货凭证', detail: '补充凭证', severity: 'high', tone: 'danger', href: '/orders' }],
     updatedAt: new Date(0).toISOString(),
@@ -29,7 +29,7 @@ describe('dashboard views', () => {
     const html = renderToStaticMarkup(createElement(DashboardDesktopContent, { state, query: { range: '1m' }, onOpenTodo: vi.fn(), onRefresh: vi.fn(), onTrendQueryChange: vi.fn() }));
     expect(html).toContain('订单与 AI 闭环趋势');
     expect(html).not.toContain('当前账号健康度');
-    expect(html).not.toContain('可售卡密库存');
+    expect(html).not.toContain('库存');
     expect(html).toContain('总销售额');
     expect(html).toContain('今天');
     expect(html).toContain('三天');

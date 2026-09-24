@@ -1,4 +1,4 @@
-import type { CouponBatchFilters, CouponBatchVM, CouponBindingVM, CouponItemVM, CreateCouponBatchRequest, CouponsPageVM, DeliveryScope, InventoryLockVM, StockAlert, UpdateCouponBatchRequest, CouponMetadataVM } from './types';
+import type { CouponBatchFilters, CouponBatchVM, CouponBindingVM, CouponItemVM, CreateCouponBatchRequest, CouponsPageVM, DeliveryScope, CouponMutationVM, UpdateCouponBatchRequest, CouponMetadataVM } from './types';
 
 export interface CouponsApiTransport {
   get<T>(path: string): Promise<T>;
@@ -12,22 +12,18 @@ export interface CouponsApi {
   getDetail(batchId: string): Promise<CouponBatchVM>;
   createBatch(input: CreateCouponBatchRequest): Promise<CouponBatchVM>;
   updateBatch(batchId: string, input: UpdateCouponBatchRequest): Promise<CouponBatchVM>;
-  importItems(batchId: string, items: string[]): Promise<InventoryLockVM>;
-  bindBatch(batchId: string, productId: string): Promise<InventoryLockVM>;
-  unbindBatch(batchId: string, productId: string): Promise<InventoryLockVM>;
-  voidBatch(batchId: string): Promise<InventoryLockVM>;
-  deleteBatch(batchId: string): Promise<InventoryLockVM>;
-  batchDelete(batchIds: string[]): Promise<InventoryLockVM[]>;
+  importItems(batchId: string, items: string[]): Promise<CouponMutationVM>;
+  bindBatch(batchId: string, productId: string): Promise<CouponMutationVM>;
+  unbindBatch(batchId: string, productId: string): Promise<CouponMutationVM>;
+  voidBatch(batchId: string): Promise<CouponMutationVM>;
+  deleteBatch(batchId: string): Promise<CouponMutationVM>;
+  batchDelete(batchIds: string[]): Promise<CouponMutationVM[]>;
 }
 
 interface ApiEnvelope<T> { success: boolean; data: T | null; message?: string | null; error?: { code?: string }; }
 interface CouponPayload extends Omit<Partial<CouponBatchVM>, 'bindings'> {
   id?: string;
   batchId?: string;
-  total?: number;
-  available?: number;
-  reserved?: number;
-  consumed?: number;
   items?: CouponItemVM[];
   productBindings?: Array<Partial<CouponBindingVM> & { id?: string }>;
   bindings?: Array<Partial<CouponBindingVM> & { id?: string }>;
@@ -35,7 +31,7 @@ interface CouponPayload extends Omit<Partial<CouponBatchVM>, 'bindings'> {
   contentPreview?: CouponBatchVM['contentPreview'];
 }
 
-interface CouponMutationPayload extends Partial<InventoryLockVM> {
+interface CouponMutationPayload extends Partial<CouponMutationVM> {
   batch?: CouponPayload;
   binding?: { id?: string; bindingId?: string; batchId?: string; productId?: string; priority?: number; status?: string; expiresAt?: string };
   importedCount?: number;
@@ -53,18 +49,8 @@ function unwrapEnvelope<T>(payload: T | ApiEnvelope<T>): T {
   return payload as T;
 }
 
-function toStockAlert(value: unknown, availableCount: number, totalCount: number): StockAlert {
-  if (value === 'exhausted' || availableCount <= 0) return 'exhausted';
-  if (value === 'low_stock' || availableCount <= Math.max(1, Math.ceil(totalCount * 0.1))) return 'low_stock';
-  return 'normal';
-}
-
 function toBatchVM(payload: CouponPayload): CouponBatchVM {
   const batchId = String(payload.batchId ?? payload.id ?? '');
-  const totalCount = Number(payload.totalCount ?? payload.total ?? 0);
-  const availableCount = Number(payload.availableCount ?? payload.available ?? 0);
-  const reservedCount = Number(payload.reservedCount ?? payload.reserved ?? 0);
-  const consumedCount = Number(payload.consumedCount ?? payload.consumed ?? Math.max(0, totalCount - availableCount - reservedCount));
   const rawStatus = payload.status as CouponBatchVM['status'] | undefined;
   const bindings = (payload.bindings ?? payload.productBindings ?? []).map((binding) => ({
     bindingId: String(binding.bindingId ?? binding.id ?? ''),
@@ -82,33 +68,21 @@ function toBatchVM(payload: CouponPayload): CouponBatchVM {
     purpose: (payload.purpose as CouponBatchVM['purpose']) ?? 'text',
     deliveryScope: (payload.deliveryScope as DeliveryScope) ?? 'operator_only',
     status: rawStatus ?? 'draft',
-    totalCount,
-    availableCount,
-    reservedCount,
-    consumedCount,
-    stockAlert: toStockAlert(payload.stockAlert, availableCount, totalCount),
     version: Number(payload.version ?? 1),
     updatedAt: payload.updatedAt ?? new Date(0).toISOString(),
     bindings,
     items: payload.items?.map((item) => ({ ...item, batchId: item.batchId || batchId })),
-    quarkUrl: payload.quarkUrl,
-    extractCode: payload.extractCode,
     createdAt: payload.createdAt,
     metadata: payload.metadata,
     contentPreview: payload.contentPreview,
   };
 }
 
-function toInventoryLockVM(payload: CouponMutationPayload): InventoryLockVM {
+function toCouponMutationVM(payload: CouponMutationPayload): CouponMutationVM {
   const batch = payload.batch ? toBatchVM(payload.batch) : undefined;
   return {
     batchId: String(payload.batchId ?? batch?.batchId ?? ''),
     version: Number(payload.version ?? batch?.version ?? 0),
-    totalCount: Number(payload.totalCount ?? batch?.totalCount ?? 0),
-    availableCount: Number(payload.availableCount ?? batch?.availableCount ?? 0),
-    reservedCount: Number(payload.reservedCount ?? batch?.reservedCount ?? 0),
-    consumedCount: Number(payload.consumedCount ?? batch?.consumedCount ?? 0),
-    stockAlert: (payload.stockAlert ?? batch?.stockAlert ?? 'normal') as StockAlert,
     results: payload.results,
   };
 }
@@ -126,7 +100,6 @@ function queryString(filters: CouponBatchFilters = {}): string {
   if (filters.accountId) params.set('accountId', filters.accountId);
   if (filters.keyword?.trim()) params.set('keyword', filters.keyword.trim());
   if (filters.status && filters.status !== 'all') params.set('status', filters.status);
-  if (filters.stockAlert && filters.stockAlert !== 'all') params.set('stockAlert', filters.stockAlert);
   if (filters.purpose && filters.purpose !== 'all') params.set('purpose', filters.purpose);
   params.set('sortBy', filters.sortBy ?? 'createdAt');
   params.set('sortOrder', filters.sortOrder ?? 'desc');
@@ -160,26 +133,26 @@ export function createCouponsApi(transport: CouponsApiTransport): CouponsApi {
     },
     async importItems(batchId, items) {
       const payload = await transport.post<CouponMutationPayload | ApiEnvelope<CouponMutationPayload>>(`/api/v1/coupons/batches/${encodeURIComponent(batchId)}/items/import`, { items }, mutationOptions(`coupons.import.${batchId}.${Date.now()}`));
-      return toInventoryLockVM(unwrapEnvelope(payload));
+      return toCouponMutationVM(unwrapEnvelope(payload));
     },
     async bindBatch(batchId, productId) {
       const payload = await transport.post<CouponMutationPayload | ApiEnvelope<CouponMutationPayload>>(`/api/v1/coupons/batches/${encodeURIComponent(batchId)}/bind`, { productId }, mutationOptions(`coupons.bind.${batchId}.${productId}.${Date.now()}`));
-      return toInventoryLockVM(unwrapEnvelope(payload));
+      return toCouponMutationVM(unwrapEnvelope(payload));
     },
     async unbindBatch(batchId, productId) {
       const payload = await transport.post<CouponMutationPayload | ApiEnvelope<CouponMutationPayload>>(`/api/v1/coupons/batches/${encodeURIComponent(batchId)}/unbind`, { productId }, mutationOptions(`coupons.unbind.${batchId}.${productId}.${Date.now()}`));
-      return toInventoryLockVM(unwrapEnvelope(payload));
+      return toCouponMutationVM(unwrapEnvelope(payload));
     },
     async voidBatch(batchId) {
       const payload = await transport.post<CouponMutationPayload | ApiEnvelope<CouponMutationPayload>>(`/api/v1/coupons/batches/${encodeURIComponent(batchId)}/void`, {}, mutationOptions(`coupons.void.${batchId}.${Date.now()}`));
-      return toInventoryLockVM(unwrapEnvelope(payload));
+      return toCouponMutationVM(unwrapEnvelope(payload));
     },
     async deleteBatch(batchId) {
       const payload = await transport.delete<CouponMutationPayload | ApiEnvelope<CouponMutationPayload>>(`/api/v1/coupons/batches/${encodeURIComponent(batchId)}`, mutationOptions(`coupons.delete.${batchId}.${Date.now()}`));
-      return toInventoryLockVM(unwrapEnvelope(payload));
+      return toCouponMutationVM(unwrapEnvelope(payload));
     },
     async batchDelete(batchIds) {
-      const results: InventoryLockVM[] = [];
+      const results: CouponMutationVM[] = [];
       for (const batchId of batchIds) results.push(await this.deleteBatch(batchId));
       return results;
     },
@@ -187,9 +160,9 @@ export function createCouponsApi(transport: CouponsApiTransport): CouponsApi {
 }
 
 export function createMockCouponsApi(seed: CouponBatchVM[] = [
-  { batchId: '1', accountId: 'account-001', label: 'Python 全栈资料包', purpose: 'text', deliveryScope: 'buyer_deliverable', status: 'active', totalCount: 480, availableCount: 368, reservedCount: 12, consumedCount: 100, stockAlert: 'normal', version: 4, createdAt: '2026-09-19T15:20:00.000Z', updatedAt: '2026-09-19T16:20:00.000Z', bindings: [{ bindingId: 'binding-001', batchId: '1', productId: 'product-001', productTitle: 'Python 全栈资料包', priority: 0, status: 'active' }], items: [{ id: 'coupon-001', batchId: '1', maskedLabel: 'PY-••••-0001', status: 'available' }], contentPreview: { text: '购买后自动发放 Python 全栈资料包下载说明' } },
-  { batchId: '2', accountId: 'account-001', label: 'GitHub 源码下载', purpose: 'data', deliveryScope: 'operator_only', status: 'active', totalCount: 40, availableCount: 3, reservedCount: 0, consumedCount: 37, stockAlert: 'low_stock', version: 2, createdAt: '2026-09-18T10:40:00.000Z', updatedAt: '2026-09-18T11:40:00.000Z', bindings: [], items: [{ id: 'coupon-002', batchId: '2', maskedLabel: 'GH-••••-0021', status: 'available' }], contentPreview: { dataRemaining: 3 } },
-  { batchId: '3', accountId: 'account-002', label: '设计素材合集', purpose: 'image', deliveryScope: 'operator_only', status: 'paused', totalCount: 0, availableCount: 0, reservedCount: 0, consumedCount: 0, stockAlert: 'exhausted', version: 1, createdAt: '2026-09-17T08:05:00.000Z', updatedAt: '2026-09-17T09:05:00.000Z', bindings: [], items: [], contentPreview: { imageUrls: ['暂无图片'] } },
+  { batchId: '1', accountId: 'account-001', label: 'Python 全栈资料包', purpose: 'text', deliveryScope: 'buyer_deliverable', status: 'active', version: 4, createdAt: '2026-09-19T15:20:00.000Z', updatedAt: '2026-09-19T16:20:00.000Z', bindings: [{ bindingId: 'binding-001', batchId: '1', productId: 'product-001', productTitle: 'Python 全栈资料包', priority: 0, status: 'active' }], items: [{ id: 'coupon-001', batchId: '1', maskedLabel: 'PY-••••-0001', status: 'available' }], contentPreview: { text: '购买后自动发放 Python 全栈资料包下载说明' } },
+  { batchId: '2', accountId: 'account-001', label: 'GitHub 源码下载', purpose: 'data', deliveryScope: 'operator_only', status: 'active', version: 2, createdAt: '2026-09-18T10:40:00.000Z', updatedAt: '2026-09-18T11:40:00.000Z', bindings: [], items: [{ id: 'coupon-002', batchId: '2', maskedLabel: 'GH-••••-0021', status: 'available' }] },
+  { batchId: '3', accountId: 'account-002', label: '设计素材合集', purpose: 'image', deliveryScope: 'operator_only', status: 'paused', version: 1, createdAt: '2026-09-17T08:05:00.000Z', updatedAt: '2026-09-17T09:05:00.000Z', bindings: [], items: [], contentPreview: { imageUrls: ['暂无图片'] } },
 ]): CouponsApi {
   let batches: CouponBatchVM[] = seed.map((batch) => ({ ...batch, bindings: [...batch.bindings], items: batch.items?.map((item) => ({ ...item })) }));
   const nextBatchId = () => {
@@ -208,7 +181,6 @@ export function createMockCouponsApi(seed: CouponBatchVM[] = [
         if (filters.status === 'voided') return batch.status === 'voided' && !activeIds.has(batch.batchId);
         if (filters.status && filters.status !== 'all') return batch.status === filters.status;
         if (batch.status === 'voided') return false;
-        if (filters.stockAlert && filters.stockAlert !== 'all' && batch.stockAlert !== filters.stockAlert) return false;
         if (filters.purpose && filters.purpose !== 'all' && batch.purpose !== filters.purpose) return false;
         return !keyword || `${batch.label} ${batch.batchId} ${batch.metadata?.description ?? ''}`.toLowerCase().includes(keyword);
       }).sort((left, right) => {
@@ -226,20 +198,20 @@ export function createMockCouponsApi(seed: CouponBatchVM[] = [
       const now = new Date().toISOString();
       const batchId = nextBatchId();
       const items = (input.items ?? []).filter(Boolean).map((body, index) => ({ id: `coupon-${Date.now()}-${index}`, batchId, maskedLabel: body.length > 6 ? `${body.slice(0, 3)}••••${body.slice(-2)}` : '••••••', status: 'available' as const }));
-      const batch: CouponBatchVM = { batchId, accountId: input.accountId, label: input.label, purpose: input.purpose, deliveryScope: input.deliveryScope, status: 'draft', totalCount: items.length, availableCount: items.length, reservedCount: 0, consumedCount: 0, stockAlert: items.length ? 'normal' : 'exhausted', version: 1, updatedAt: now, createdAt: now, bindings: [], items, metadata: input.metadata, contentPreview: { text: input.metadata?.textContent?.slice(0, 140), dataRemaining: items.length, apiUrl: input.metadata?.apiConfig?.url, imageUrls: input.metadata?.imageUrls ?? [] } };
+      const batch: CouponBatchVM = { batchId, accountId: input.accountId, label: input.label, purpose: input.purpose, deliveryScope: input.deliveryScope, status: 'draft', version: 1, updatedAt: now, createdAt: now, bindings: [], items, metadata: input.metadata, contentPreview: { text: input.metadata?.textContent?.slice(0, 140), apiUrl: input.metadata?.apiConfig?.url, imageUrls: input.metadata?.imageUrls ?? [] } };
       batches = [batch, ...batches];
       return batch;
     },
-    async updateBatch(batchId, input) { const batch = batches.find((item) => item.batchId === batchId); if (!batch) throw Object.assign(new Error('BATCH_NOT_FOUND'), { status: 404 }); Object.assign(batch, input); if (input.metadata !== undefined) batch.metadata = input.metadata; batch.updatedAt = new Date().toISOString(); batch.version += 1; batch.contentPreview = { text: batch.metadata?.textContent?.slice(0, 140), dataRemaining: batch.availableCount, apiUrl: batch.metadata?.apiConfig?.url, imageUrls: batch.metadata?.imageUrls ?? [] }; return { ...batch, bindings: [...batch.bindings] }; },
+    async updateBatch(batchId, input) { const batch = batches.find((item) => item.batchId === batchId); if (!batch) throw Object.assign(new Error('BATCH_NOT_FOUND'), { status: 404 }); Object.assign(batch, input); if (input.metadata !== undefined) batch.metadata = input.metadata; batch.updatedAt = new Date().toISOString(); batch.version += 1; batch.contentPreview = { text: batch.metadata?.textContent?.slice(0, 140), apiUrl: batch.metadata?.apiConfig?.url, imageUrls: batch.metadata?.imageUrls ?? [] }; return { ...batch, bindings: [...batch.bindings] }; },
     async importItems(batchId, items) {
       const batch = batches.find((item) => item.batchId === batchId); if (!batch) throw Object.assign(new Error('BATCH_NOT_FOUND'), { status: 404 });
       const nextItems = items.filter(Boolean).map((body, index) => ({ id: `coupon-${Date.now()}-${index}`, batchId, maskedLabel: body.length > 6 ? `${body.slice(0, 3)}••••${body.slice(-2)}` : '••••••', status: 'available' as const }));
-      batch.items = [...(batch.items ?? []), ...nextItems]; batch.totalCount += nextItems.length; batch.availableCount += nextItems.length; batch.version += 1; batch.updatedAt = new Date().toISOString(); batch.stockAlert = toStockAlert(batch.stockAlert, batch.availableCount, batch.totalCount); return batch;
+      batch.items = [...(batch.items ?? []), ...nextItems]; batch.version += 1; batch.updatedAt = new Date().toISOString(); return batch;
     },
     async bindBatch(batchId, productId) { const batch = batches.find((item) => item.batchId === batchId); if (!batch) throw Object.assign(new Error('BATCH_NOT_FOUND'), { status: 404 }); batch.bindings = [{ bindingId: `binding-${Date.now()}`, batchId, productId, priority: 0, status: 'active' }, ...batch.bindings.filter((item) => item.productId !== productId)]; batch.version += 1; batch.updatedAt = new Date().toISOString(); return batch; },
     async unbindBatch(batchId, productId) { const batch = batches.find((item) => item.batchId === batchId); if (!batch) throw Object.assign(new Error('BATCH_NOT_FOUND'), { status: 404 }); batch.bindings = batch.bindings.map((binding) => binding.productId === productId ? { ...binding, status: 'unbound' as const } : binding); batch.version += 1; batch.updatedAt = new Date().toISOString(); return batch; },
-    async voidBatch(batchId) { const batch = batches.find((item) => item.batchId === batchId); if (!batch) throw Object.assign(new Error('BATCH_NOT_FOUND'), { status: 404 }); batch.status = 'voided'; batch.availableCount = 0; batch.stockAlert = 'exhausted'; batch.version += 1; batch.updatedAt = new Date().toISOString(); return batch; },
-    async deleteBatch(batchId) { const batch = batches.find((item) => item.batchId === batchId); if (!batch) throw Object.assign(new Error('BATCH_NOT_FOUND'), { status: 404 }); batch.status = 'voided'; batch.availableCount = 0; batch.stockAlert = 'exhausted'; batch.version += 1; batch.updatedAt = new Date().toISOString(); return batch; },
+    async voidBatch(batchId) { const batch = batches.find((item) => item.batchId === batchId); if (!batch) throw Object.assign(new Error('BATCH_NOT_FOUND'), { status: 404 }); batch.status = 'voided'; batch.version += 1; batch.updatedAt = new Date().toISOString(); return batch; },
+    async deleteBatch(batchId) { const batch = batches.find((item) => item.batchId === batchId); if (!batch) throw Object.assign(new Error('BATCH_NOT_FOUND'), { status: 404 }); batch.status = 'voided'; batch.version += 1; batch.updatedAt = new Date().toISOString(); return batch; },
     async batchDelete(batchIds) { return Promise.all(batchIds.map((batchId) => this.deleteBatch(batchId))); },
   };
 }

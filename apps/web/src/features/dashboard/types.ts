@@ -30,7 +30,7 @@ export interface DashboardProductRankVM {
   title: string;
   subtitle: string;
   orders: string;
-  stock: string;
+  deliveryConfig: '已就绪' | '待配置';
   status: string;
   tone: DashboardTone;
 }

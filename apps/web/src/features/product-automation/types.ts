@@ -6,7 +6,6 @@ export interface AutomationCoupon {
   typeLabel: string;
   specSummary: string;
   quantitySummary: string;
-  stockSummary: string;
   deliveryScope?: 'system_only' | 'operator_only' | 'buyer_deliverable';
   accountId?: string;
   apiManaged?: boolean;

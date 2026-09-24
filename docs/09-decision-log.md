@@ -28,7 +28,7 @@
 7. 参考项目 `http://localhost:9000/accounts` 的人工复核必须在当前已经打开且已登录闲鱼的 Chrome 窗口中进行，以复用既有浏览器 Cookie / Local Storage；新建 Chrome profile、无痕窗口、headless 或其他浏览器实例均不作为登录态证据。
 7. CredentialStore 直接存项目数据库。管理员拥有绝对管理权限，可查看、编辑、替换、启停、轮换、撤销和操作系统凭证；唯一硬边界是不得暴露给闲鱼买家。
 8. 系统凭证不得进入闲鱼买家可见消息、订单交付内容、外部买家响应、日志、Trace、Replay 或 Prompt。
-9. 卡券正文、夸克链接和提取码只有在 `buyer_deliverable`、订单已支付、商品与账号匹配、策略校验通过、库存成功锁定并记录审计后，才可交付买家。
+9. 卡券正文和图片只有在 `buyer_deliverable`、订单已支付、商品与账号匹配、策略校验通过、消费成功锁定并记录审计后，才可交付买家。
 
 ## 阶段 1 结论
 
@@ -42,7 +42,7 @@
 2026-09-19，用户确认 S2-I001 至 S2-I005 全部接受，结论如下：
 
 1. `unknown` 仅作为 `externalOutcome`，不新增 OutboxStatus。
-2. 幂等作用域为 `adminId + accountId + route + Idempotency-Key`，默认保留 30 天；同指纹重放原 envelope，不重复扣库存、发货、发布或发消息；同 key 不同指纹返回 `IDEMPOTENCY_CONFLICT`。
+2. 幂等作用域为 `adminId + accountId + route + Idempotency-Key`，默认保留 30 天；同指纹重放原 envelope，不重复消费批量数据、发货、发布或发消息；同 key 不同指纹返回 `IDEMPOTENCY_CONFLICT`。
 3. 鉴权基线为 `SameSite=Lax`、`X-CSRF-Token` 双提交、WebSocket Origin allowlist、Session 空闲 30 分钟/绝对 8 小时；登录和密码变更后轮换 Session。
 4. `system_only / operator_only / buyer_deliverable`、卡券正文读取、交付预览和订单交付 API 纳入阶段 2 契约。
 5. CredentialStore CRUD、rotate、revoke、enable、disable 纳入阶段 2 契约；管理员绝对管理，但不得向闲鱼买家暴露。
@@ -111,7 +111,7 @@
 
 1. `RunActionBar` 改为 `onRecoverOutbox(RecoverOutboxRequest)`，并与阶段 2 的 Outbox recover API 对齐；不再保留未定义的 `RecoverRunRequest`。
 2. `RuntimePanel` 与 `OutboxPanel` 已拆分为不同 owner、controller、query、mutation state 和保存入口，禁止跨域合并。
-3. 组件职责矩阵、canonical ViewModel、8×2 页面矩阵、QR/account detail API、queryKey 账号隔离、ControllerResult、canonical error map、`stockAlert`/`inventoryStatus` 均已复核通过。
+3. 组件职责矩阵、canonical ViewModel、8×2 页面矩阵、QR/account detail API、queryKey 账号隔离、ControllerResult、canonical error map、交付配置状态均已复核通过。
 4. 阶段 3 门禁由 `REOPENED / DESIGN REVIEW` 更新为 `PASS`，允许进入阶段 4 迭代计划与纵向切片编排；阶段 3 不包含具体编码。
 
 ## 阶段 4 主体功能优先决策
@@ -120,7 +120,7 @@
 
 1. `S4-VS1`：账号管理，覆盖登录态、账号列表/详情、QR 扫码会话、账号授权会话、连接刷新、scope 和最小 CredentialRef 管理。
 2. `S4-VS2`：商品管理，覆盖商品草稿、基础信息、SKU、素材、同步/拉取契约和 Policy → Confirmation → Idempotency → Outbox 发布链路。
-3. `S4-VS3`：卡券首页 / 批次与库存，覆盖批次列表、库存、`stockAlert`、导入/批量编辑、绑定关系、作废和管理员受控正文预览。
+3. `S4-VS3`：卡券首页 / 批次与交付配置，覆盖批次列表、四类配置、导入/批量编辑、绑定关系、作废和管理员受控正文预览。
 4. `S4-VS4`：订单列表、详情与交付，覆盖四套状态、筛选/刷新、交付预览、manual/no_logistics/coupon_only/mixed、取消、重试、DeliveryRecord 和审计。
 5. Dashboard、Messages、Workspace/Agent、Settings 扩展后置，不得抢占前四个主体切片；ENV-0 的执行基础、最小审计、幂等和 adapter 探针必须在 S4-VS1 前完成或明确阻断。
 6. 阶段 4 只输出计划、依赖、DoD、风险、测试范围、视觉基线和回滚动作；阶段 5 才开始真实代码。每个切片完成后必须更新状态/评审/风险/决策记录并使用中文 Conventional Commit。
@@ -148,7 +148,7 @@
 1. 卡券首页在独立 worktree `F:\ChenHai\Project\XianYuAgent-s4-vs3`、分支 `feature/s4-vs3-coupons` 并行开发，不触碰主工作树中的 S4-VS2 未提交改动。
 2. 旧参考项目仅提供字段与操作参考：列表列、详情抽屉、创建/编辑/复制、商品绑定、启停、删除、正文预览/复制、双栏关联和图片原图预览；表格视觉、颜色、密度和响应式行为继续遵循当前平台壳样式。
 3. canonical coupons batch 只接受 `purpose=text/data/api/image`；metadata 通过 `013_coupons.sql` + `014_coupon_card_metadata.sql` 持久化，列表只返回安全摘要，详情才返回正文/API/图片配置。
-4. 首批库存由前端 `createBatch` 先创建批次，再调用 `/items/import` 并重新读取详情；列表 `keyword`、`stockAlert`、`purpose` 由 API、MemoryStore、PostgresStore 一致处理；编辑使用 PATCH/PUT 语义，删除保留为软作废，绑定字段统一归一到 `bindingId`。
+4. 批量数据由前端 `createBatch` 保存配置，再按需调用 `/items/import`；列表 `keyword`、`purpose` 由 API、MemoryStore、PostgresStore 一致处理；编辑使用 PATCH/PUT 语义，删除保留为软作废，绑定字段统一归一到 `bindingId`。
 5. Chrome/CDP E2E 通过前端正式路由、真实 API、MemoryStore 和页面刷新可见结果，覆盖列表安全元数据列、选择/关联、编辑/复制、启禁用、详情/预览/导入/绑定/作废，生成固定桌面/移动截图；由于使用隔离临时 profile 和受控内存运行时，门禁结论保持 `READY_FOR_REVIEW`，不得直接描述为生产级持久化通过。
 6. 人工审核通过前不执行 merge；人工审核必须使用真实 PostgreSQL/Redis/MinIO 开发链路打开 `http://localhost:5173/coupons`，逐项复核筛选、批量操作、编辑/复制、启禁用、双栏关联、图片预览和移动端横向表格行为；审核通过后才重新跑验证并将 VS3 分支合入 `master`。
 
@@ -156,11 +156,11 @@
 
 ## 未完成任务切片化决策（2026-09-19）
 
-为避免继续把“完整商品管理”“完整卡券库存”“订单交付”和“发布级环境”混成一个大任务，阶段 5 后续按以下规则推进：
+为避免继续把“完整商品管理”“完整卡券交付配置”“订单交付”和“发布级环境”混成一个大任务，阶段 5 后续按以下规则推进：
 
 1. `S4-VS2` 拆为 `S4-VS2A` 草稿基础信息、`S4-VS2B` SKU/多规格、`S4-VS2C` 素材/对象存储、`S4-VS2D` 受控发布、`S4-VS2E` 外部同步真实验收；其中 `VS2E` 可并行，但真实外部结果不能替代本地持久化与页面证据。
-2. `S4-VS3` 当前只代表已合入的批次首页与受控操作，后续拆为 `S4-VS3A` CouponItem/素材和 `S4-VS3B` 库存锁定/消耗；真实 PostgreSQL/Redis/MinIO 与人工浏览器复核未完成前，状态保持 `READY_FOR_REVIEW`。
-3. `S4-VS4` 拆为 `S4-VS4A` 订单只读、`S4-VS4B` 交付预览/库存预锁、`S4-VS4C` 发货/取消/重试/unknown 人工恢复；预览不扣库存、不创建 DeliveryRecord，交付动作不得绕过 Outbox。
+2. `S4-VS3` 当前只代表已合入的批次首页与受控操作，后续拆为 `S4-VS3A` CouponItem/素材和 `S4-VS3B` 批量数据并发消费；真实 PostgreSQL/Redis/MinIO 与人工浏览器复核未完成前，状态保持 `READY_FOR_REVIEW`。
+3. `S4-VS4` 拆为 `S4-VS4A` 订单只读、`S4-VS4B` 交付预览/配置检查、`S4-VS4C` 发货/取消/重试/unknown 人工恢复；预览不消费批量数据、不创建 DeliveryRecord，交付动作不得绕过 Outbox。
 4. `S4-ENV-RECOVERY`、`S4-EXT-ACCOUNT`、`S4-ENV-RUNTIME` 作为横向门禁独立记录，不因业务页面可打开、API 200、MemoryStore 或 fixture 通过而关闭。
 5. `013_coupons.sql` 与 `013_product_sync.sql` 的并行编号本轮不做历史重命名；在新增迁移前先补齐迁移清单、apply/rollback、已有 volume 执行记录和恢复演练，新迁移不得继续使用 `013`。
 6. 每个切片使用 `PLANNED / IN_PROGRESS / PARTIALLY_VERIFIED / READY_FOR_REVIEW / PASS / BLOCKED` 状态；只有真实适用层级测试、视觉证据、回滚证据和两轮独立复审完成，才允许标记 `PASS`。

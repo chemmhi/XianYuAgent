@@ -29,7 +29,7 @@ export function CouponBatchTable({ batches, selectedIds, page, pageSize, total, 
             <span><b className="coupons-type">{typeLabels[batch.purpose]}</b></span>
             <span className="coupons-preview-cell" title={previewText}>{previewText}</span>
             <span className="coupons-note" title={metadata?.description || undefined}>{metadata?.description || '—'}</span>
-            <span className="coupons-delivery-setting">已发货 {metadata?.deliveryCount ?? batch.consumedCount} 次<small>延时 {metadata?.delaySeconds ?? 0} 秒</small></span>
+            <span className="coupons-delivery-setting">自动发货<small>延时 {metadata?.delaySeconds ?? 0} 秒</small></span>
             <span><b className={`coupons-status coupons-status-${batch.status}`}>{statusLabels[batch.status]}</b></span>
             <time className="coupons-muted">创建 {formatDate(batch.createdAt)}<br />更新 {formatDate(batch.updatedAt)}</time>
             <span className="coupons-row-actions" aria-label={`${batch.label} 操作`}>
@@ -66,7 +66,7 @@ function getPreviewText(batch: CouponBatchVM): string {
   const preview = batch.contentPreview;
   const metadata = batch.metadata;
   if (batch.purpose === 'text') return preview?.text || metadata?.textContent || '—';
-  if (batch.purpose === 'data') return preview?.dataRemaining === undefined ? (metadata?.dataContent || `剩余 ${batch.availableCount} 条`) : `剩余 ${preview.dataRemaining} 条`;
+  if (batch.purpose === 'data') return metadata?.dataContent ? '已配置批量数据' : '未配置批量数据';
   if (batch.purpose === 'api') return preview?.apiUrl || metadata?.apiConfig?.url || '—';
   return preview?.imageUrls?.join('、') || metadata?.imageUrls?.join('、') || '暂无图片';
 }

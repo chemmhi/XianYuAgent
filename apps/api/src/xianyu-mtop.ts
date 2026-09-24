@@ -343,7 +343,7 @@ export class XianyuMtopClient {
    * is classified as unknown because the remote side may have committed the
    * shipment even though the HTTP response was not observed.
    */
-  async confirmShipment(adminId: string, accountId: string, orderNo: string): Promise<XianyuExternalMutationResult> {
+  async confirmShipment(adminId: string, accountId: string, orderNo: string, tradeText = ''): Promise<XianyuExternalMutationResult> {
     const normalizedOrderNo = String(orderNo ?? '').trim();
     if (!normalizedOrderNo) return { status: 'failed', errorCode: 'ORDER_NO_MISSING', message: 'orderNo is required', cookieHeader: '' };
     const result = await this.call(
@@ -351,7 +351,7 @@ export class XianyuMtopClient {
       accountId,
       CONSIGN_API,
       '1.0',
-      { orderId: normalizedOrderNo, tradeText: '', picList: [], newUnconsign: true },
+      { orderId: normalizedOrderNo, tradeText, picList: [], newUnconsign: true },
       {},
       { referer: SELLER_ORDER_MANAGE_REFERER },
     );

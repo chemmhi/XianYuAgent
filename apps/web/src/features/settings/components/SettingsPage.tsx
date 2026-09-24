@@ -127,7 +127,7 @@ function ReferencePanel({ tab, onOpenCredentials }: { tab: Exclude<TabKey, 'cred
     model: { title: 'OpenAI API 兼容模型配置', description: 'ModelClient 只消费 CredentialRef，不在页面回显明文 API Key。', rows: [['当前配置', 'openai-compatible / primary', '已脱敏'], ['Secret', 'secret_store_ref:model_api_key_primary', '不可查看'], ['生效规则', '保存后由运行时读取引用', '受控'] ] },
     safety: { title: '安全输出校验', description: '买家输入按不可信内容处理，凭证、Cookie 和内部配置永不进入买家链路。', rows: [['Prompt Injection', '拦截', '高优先级'], ['凭证泄露', '拦截', '高优先级'], ['非订单交付', '校验 buyer_deliverable', '策略'] ] },
     outbox: { title: 'Outbox Worker / Execution Runtime', description: '执行队列和运行时恢复属于后续切片，本页只保留高保真状态入口。', rows: [['Worker', 'online · 最近心跳 14:24:08', '正常'], ['队列深度', '7 pending / 128 succeeded today', '运行中'], ['人工确认', '高风险动作确认后才执行', '已开启'] ] },
-    plugins: { title: '插件配置', description: 'Skill / Plugin 版本化管理保留为后续独立切片。', rows: [['Policy Plugin', '自动回复与风险策略', '已启用'], ['Executor Plugin', '消息与 Outbox 执行', '已启用'], ['夸克交付 Skill', '读取受控凭证引用', '需配置'] ] },
+    plugins: { title: '插件配置', description: 'Skill / Plugin 版本化管理保留为后续独立切片。', rows: [['Policy Plugin', '自动回复与风险策略', '已启用'], ['Executor Plugin', '消息与 Outbox 执行', '已启用'] ] },
   };
   const panel = content[tab];
   return <div className="settings-content"><article className="card panel"><div className="panel-head"><div><p className="eyebrow">Settings Reference</p><h2>{panel.title}</h2><p>{panel.description}</p></div><span className="settings-scope-chip">后续切片</span></div><div className="settings-reference-list">{panel.rows.map(([label, value, tone]) => <div key={label}><strong>{label}</strong><span>{value}</span><em>{tone}</em></div>)}</div>{tab === 'model' && <Button variant="primary" type="button" onClick={onOpenCredentials}>管理 API Key 凭证</Button>}</article></div>;

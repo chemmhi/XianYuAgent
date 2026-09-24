@@ -65,7 +65,7 @@
 | `auth` | 管理员登录、会话、注销、初始化 | 凭证、会话 Cookie | 管理员身份上下文；阶段 1/2 使用 HttpOnly Cookie |
 | `accounts` | 闲鱼账号、连接状态、账号范围和策略摘要 | 管理员命令、平台状态 | Account 领域事实 |
 | `products` | 商品草稿、媒体引用、发布状态 | 商品命令、对象存储引用 | Product 领域事实 |
-| `coupons` | 卡券批次、库存、绑定和交付范围 | 卡券正文、商品绑定命令 | Coupon / delivery 事实 |
+| `coupons` | 卡券批次、交付配置、绑定和交付范围 | 卡券配置、商品绑定命令 | Coupon / delivery 事实 |
 | `orders` | 订单查询、支付状态、发货状态和售后 | 平台订单、管理员命令 | Order 领域事实 |
 | `messages` | 会话、消息、人工接管和 WebSocket 投递 | 平台消息、管理员回复 | Conversation / Message 事实 |
 | `workspace` | Agent Run、Step、Confirmation 和任务上下文 | 管理员自然语言任务 | Run / Step / Confirmation 事实 |
@@ -85,7 +85,7 @@
 | --- | --- | --- | --- | --- |
 | J-01 添加并启用账号 | `accounts` | `auth`、`credential-store`、`xianyu-adapter`、`observability` | `accounts` | Account、连接状态、授权审计 |
 | J-02 商品草稿与发布 | `products` | `storage`、`policy`、`execution`、`xianyu-adapter` | `products` | Product、AssetRef、发布任务状态 |
-| J-03 卡券生成与绑定 | `coupons` | `products`、`policy`、`observability` | `coupons` | CouponBatch、库存、绑定关系 |
+| J-03 卡券配置与绑定 | `coupons` | `products`、`policy`、`observability` | `coupons` | CouponBatch、交付配置、绑定关系 |
 | J-04 订单查询与发货 | `orders` | `coupons`、`accounts`、`policy`、`execution`、`xianyu-adapter` | `orders` | Order、发货状态、幂等记录、审计记录 |
 | J-05 在线聊天与人工接管 | `messages` | `accounts`、`orders`、`policy`、`xianyu-adapter` | `messages` | Conversation、Message、人工接管状态 |
 | J-06 Workspace 查询与写任务 | `workspace` | `policy`、`execution`、`pi-runtime-adapter`、各领域模块 | `workspace` | Run、Step、任务上下文；Confirmation / Outbox 由 `execution` 持有 |
@@ -121,8 +121,8 @@ domain modules -> storage interface
 | 仪表盘视图 | `dashboard` | 只读聚合查询；不写入业务事实 |
 | 闲鱼账号与连接状态 | `accounts` | 领域 API；平台状态由 adapter 事件更新 |
 | 商品与素材引用 | `products` | 商品模块拥有商品元数据和 AssetRef；`storage` 只负责文件生命周期 |
-| 卡券库存与绑定关系 | `coupons` | `coupons` 独占库存、批次、卡券项和绑定关系；其他模块只能发命令 |
-| 交付记录 | `orders` | 订单事务创建 DeliveryRecord；卡券模块只提供可扣减库存 |
+| 卡券配置与绑定关系 | `coupons` | `coupons` 独占批次、卡券项、交付配置和绑定关系；其他模块只能发命令 |
+| 交付记录 | `orders` | 订单事务创建 DeliveryRecord；卡券模块只提供可交付内容与幂等消费能力 |
 | 订单与发货状态 | `orders` | 订单领域服务；外部状态由 Outbox 回写 |
 | 会话与消息 | `messages` | WebSocket + 查询 API |
 | Run、Step、任务上下文 | `workspace` | Workspace 状态机命令与事件 |
@@ -136,7 +136,7 @@ domain modules -> storage interface
 | --- | --- | --- | --- | --- |
 | 账号状态 | `AccountsQuery` | `AccountCommand` -> Outbox | web / workspace | `accounts` |
 | 商品列表与草稿 | `ProductsQuery` | `ProductCommand` -> Outbox | web / workspace | `products` |
-| 卡券库存与正文 | `CouponsQuery` | `CouponCommand` -> transaction + Outbox | web / workspace / orders | `coupons` |
+| 卡券配置与正文 | `CouponsQuery` | `CouponCommand` -> transaction + Outbox | web / workspace / orders | `coupons` |
 | 订单与交付状态 | `OrdersQuery` | `DeliveryCommand` -> Policy -> Outbox | web / workspace | `orders` |
 | 会话与消息 | `MessagesQuery` + WebSocket | `MessageCommand` -> Worker -> adapter | web / workspace | `messages` |
 | Agent 运行 | `WorkspaceQuery` | `RunCommand` -> `pi-runtime-adapter` | web / workspace | `workspace` / `execution` |
@@ -159,7 +159,7 @@ domain modules -> storage interface
 - 管理员可查看、编辑、替换、启停和操作系统凭证。
 - CredentialStore 直接存储在项目数据库；管理员拥有绝对管理权限，不引入外部密钥管理服务。
 - 系统凭证不得进入闲鱼买家可见的消息、订单交付内容或外部买家可见响应。
-- 卡券正文、夸克链接和提取码只有在 `buyer_deliverable`、订单已支付、商品与账号匹配、策略通过且审计记录完成后，才允许交付买家。
+- 卡券配置生成的交付内容只有在 `buyer_deliverable`、订单已支付、商品与账号匹配、策略通过且审计记录完成后，才允许交付买家。
 
 ### 8.1 鉴权迁移落点
 

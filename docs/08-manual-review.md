@@ -28,16 +28,16 @@
 | --- | --- | --- | --- | --- |
 | MR-008 | CredentialStore 生产落地 | 已确认直接存储在项目数据库，管理员拥有绝对管理权限 | 仅保留系统凭证不得进入闲鱼买家可见链路；不再单独展开外部密钥管理选型 | 已决策，非主线 |
 | MR-009 | Pi Runtime 隔离 | 决策已完成，需在阶段 1 形成 ADR 并完成最小运行验证 | 已确认采用独立服务 | 阶段 1 架构评审前 |
-| MR-010 | 敏感业务数据边界 | 已确认：系统凭证永不交付；卡券正文、夸克链接、提取码仅在 buyer_deliverable、订单已支付、商品与账号匹配、策略校验通过且已记录审计时交付买家 | 影响越权、日志泄露和交付审计；技术实现与安全复核仍待阶段 2 | 阶段 2 安全评审前 |
+| MR-010 | 敏感业务数据边界 | 已确认：系统凭证永不交付；卡券正文和图片仅在 buyer_deliverable、订单已支付、商品与账号匹配、策略校验通过且已记录审计时交付买家 | 影响越权、日志泄露和交付审计；技术实现与安全复核仍待阶段 2 | 阶段 2 安全评审前 |
 | MR-011 | 外部平台可复现性 | 闲鱼登录、签名、WebSocket 协议和凭证条件未验证 | 影响账号、商品、订单和聊天迁移 | 阶段 1 ADR / 首个切片前 |
-| MR-012 | 外部结果未知的重试策略 | 尚未验证 Idempotency + Outbox + Audit + 外部状态查询闭环 | 影响重复发布、发货和扣库存 | 阶段 2 契约评审前 |
+| MR-012 | 外部结果未知的重试策略 | 尚未验证 Idempotency + Outbox + Audit + 外部状态查询闭环 | 影响重复发布、发货和批量数据重复消费 | 阶段 2 契约评审前 |
 | MR-013 | 首期生产编排 | 生产编排需要补充发布与回滚证据 | 已确认首期生产允许 Docker Compose；阶段 7 完成演练 | 阶段 7 前 |
 | MR-014 | 原型鉴权存储与生产基线 | SellerAgent liveApi 当前使用 `localStorage.auth_token`，生产基线要求服务端会话 + HttpOnly Cookie | 影响真实鉴权安全、退出和会话生命周期 | 阶段 1/2 鉴权实现前 |
 
 ### 用户确认记录（2026-09-19）
 
 - MR-010 的交付数据边界已确认：系统凭证永不交付。
-- 卡券正文、夸克链接、提取码只有在 `deliveryScope=buyer_deliverable`、订单已支付、商品与账号匹配、策略校验通过并记录审计后，才允许交付买家。
+- 卡券正文和图片只有在 `deliveryScope=buyer_deliverable`、订单已支付、商品与账号匹配、策略校验通过并记录审计后，才允许交付买家。
 - 该确认关闭“边界未定义”这一人工决策缺口，但不替代阶段 2 的接口隔离、权限、日志脱敏、审计和交付实现复核。
 - CredentialStore 已定为直接存储在项目数据库；管理员拥有绝对管理权限，不再引入外部密钥管理服务。
 - 用户于 2026-09-19 确认：S1-I004 降为 P2 跟进项，不作为阶段 1 出门禁；阶段 1 先完成 S1-I001、S1-I002、S1-I003 的独立复核。
@@ -71,6 +71,6 @@
 | MR-015 | FirstRun bootstrap canonical 一致性检查 | 草案统一为 `POST /api/v1/auth/bootstrap`，使用 `BootstrapAdminInput/BootstrapAdminOutput`、专用幂等键和 `bootstrapRequired` | 已核对三份契约文档的路径、字段和幂等语义一致 | VERIFIED / CLOSED；不新增用户裁决 |
 | MR-016 | 消息人工接管 canonical 一致性检查 | 草案统一为 `/handoff`、`/release`，使用 `HandoffConversationInput`、`ReleaseConversationInput`、`ConversationHandlingOutput`、`handlingMode` 和 `expectedVersion` | 已核对 route catalog、状态模型、缓存失效和 WebSocket handling event 一致 | VERIFIED / CLOSED；不新增用户裁决 |
 | MR-017 | 评审与风险记录同步检查 | `docs/05-review-log.md`、`docs/06-risk-register.md`、`STATUS.md` 已同步为阶段 3 PASS、S3-I009/S3-I010 CLOSED | 已复核无旧路径、旧字段和“尚无 endpoint”表述残留 | VERIFIED / CLOSED |
-| MR-018 | 阶段 3 独立设计复审 | `docs/05-review-log.md` 的 S3-R7 已为 `PASS` | 独立复审确认 §9 DoD、8×2 页面矩阵、ControllerResult、canonical error map、stockAlert/inventoryStatus 和反超级组件规则 | PASS；阶段 3 门禁关闭，可进入阶段 4 |
+| MR-018 | 阶段 3 独立设计复审 | `docs/05-review-log.md` 的 S3-R7 已为 `PASS` | 独立复审确认 §9 DoD、8×2 页面矩阵、ControllerResult、canonical error map、交付配置状态和反超级组件规则 | PASS；阶段 3 门禁关闭，可进入阶段 4 |
 
 MR-015 至 MR-018 已完成；阶段 3 门禁关闭，可进入阶段 4。阶段 3 仍不包含具体编码。

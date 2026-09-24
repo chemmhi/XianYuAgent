@@ -7,7 +7,7 @@ describe('mock API contract', () => {
     const snapshot = await api.dashboard.getSnapshot();
 
     expect(snapshot.pendingManualCount).toBe(3);
-    expect(snapshot.availableCouponCount).toBe(1286);
+    expect('availableCouponCount' in snapshot).toBe(false);
     expect(snapshot.totalSales).toBe(78420);
     expect(snapshot.trend).toHaveLength(6);
     expect(snapshot.riskTodos[0]).toMatchObject({ severity: 'high', href: '/orders' });

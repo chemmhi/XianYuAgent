@@ -6,7 +6,7 @@ import { CouponToolbar } from './CouponToolbar';
 describe('CouponToolbar', () => {
   it('renders the compact list actions without redundant search buttons', () => {
     const html = renderToStaticMarkup(createElement(CouponToolbar, {
-      filters: { page: 1, pageSize: 20, keyword: '', purpose: 'all', status: 'all', stockAlert: 'all' },
+      filters: { page: 1, pageSize: 20, keyword: '', purpose: 'all', status: 'all' },
       phase: 'success',
       onKeywordChange: vi.fn(),
       onPurposeChange: vi.fn(),

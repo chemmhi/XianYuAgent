@@ -119,7 +119,7 @@
 
 阶段 3 门禁：PASS。组件职责、数据流、路由/API、8×2 页面矩阵和独立设计复审均已完成；阶段 4 可进入执行门禁编排，但本阶段未进行具体编码。
 
-| S3-R7 | 设计 / 组件 / 数据流 | 详细组件契约、canonical ViewModel、route/API catalog、设计级反超级组件 | feature_coverage_review | PASS | `docs/03-component-contract.md`；RunActionBar/Outbox recover、RuntimePanel/OutboxPanel 拆分、8×2 矩阵、queryKey/account isolation、ControllerResult/error map、stockAlert/inventoryStatus 均已复核 |
+| S3-R7 | 设计 / 组件 / 数据流 | 详细组件契约、canonical ViewModel、route/API catalog、设计级反超级组件 | feature_coverage_review | PASS | `docs/03-component-contract.md`；RunActionBar/Outbox recover、RuntimePanel/OutboxPanel 拆分、8×2 矩阵、queryKey/account isolation、ControllerResult/error map、交付配置状态均已复核 |
 
 ## 6. 阶段 2 人工裁决关闭记录
 
@@ -162,7 +162,7 @@
 | --- | --- | --- | --- | --- | --- |
 | S4-R1 | 业务 / 验收 | 账号管理 → 商品管理 → 卡券首页/库存 → 订单列表/详情/交付的主体功能优先级、用户旅程和后置范围 | stage4_slice_plan | PASS | `docs/04-plan.md` §1、§3、§4；Dashboard、Messages、Workspace、Settings 不抢占前四片 |
 | S4-R2 | 架构 / 数据流 | ENV-0、账号范围、Execution foundation、API/VM、query invalidation 和 VS1→VS2→VS3→VS4 依赖 | stage4_dependency_audit | PASS | `docs/04-plan.md` §2、§3、§5；执行基础与最小审计前置，QR session 与 login-session 分离；迁移拆分、DTO 冻结、fixture/清理责任在阶段 5 各片执行前回写并验证 |
-| S4-R3 | 质量 / 安全 / 运维 | 幂等、unknown/timeout、敏感交付、库存锁、审计、测试证据、视觉基线和回滚动作 | stage4_gate_review | PASS | `docs/04-plan.md` §3、§5、§6；阶段 5 执行时逐片留存真实测试、视觉和回滚证据 |
+| S4-R3 | 质量 / 安全 / 运维 | 幂等、unknown/timeout、敏感交付、批量数据消费、审计、测试证据、视觉基线和回滚动作 | stage4_gate_review | PASS | `docs/04-plan.md` §3、§5、§6；阶段 5 执行时逐片留存真实测试、视觉和回滚证据 |
 
 阶段 4 计划门禁：PASS。允许进入阶段 5 的 S4-VS1 账号管理真实纵向切片；未满足 ENV-0 或首片字段冻结前，不得扩展到商品、卡券和订单写入。
 
@@ -301,7 +301,7 @@
 
 | 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
 | --- | --- | --- | --- | --- | --- |
-| S5-R36 | 业务 / 验收 | 商品草稿、SKU、素材、受控发布、外部同步、卡券库存、订单交付和环境门禁是否有清晰用户路径、正式路由、非目标与完成门禁 | root + 待人工复核 | READY_FOR_REVIEW | `docs/04-plan.md` §3.1；`STATUS.md` 未完成切片索引 |
+| S5-R36 | 业务 / 验收 | 商品草稿、SKU、素材、受控发布、外部同步、卡券交付配置、订单交付和环境门禁是否有清晰用户路径、正式路由、非目标与完成门禁 | root + 待人工复核 | READY_FOR_REVIEW | `docs/04-plan.md` §3.1；`STATUS.md` 未完成切片索引 |
 | S5-R37 | 架构 / 数据流 | 每个切片是否有独立 owner、API/store/migration 边界、账号 scope、状态机、幂等/审计和回滚；迁移 `013` 并行编号是否被显式阻断 | root + 待独立复核 | READY_FOR_REVIEW | `docs/02-data-api.md` §12；`docs/03-component-contract.md` §11；`docs/09-decision-log.md` 未完成任务切片化决策 |
 | S5-R38 | 质量 / 安全 / 运维 | 是否明确真实 PostgreSQL/Redis/MinIO、Chrome/CDP、视觉状态、Testcontainers、恢复和外部账号证据；是否避免 smoke/mock 冒充完成 | root + QA/运维待复核 | BLOCKED | `docs/06-risk-register.md` `S5-RISK-013~S5-RISK-020`；`S4-ENV-RECOVERY`、`S4-EXT-ACCOUNT`、`S4-ENV-RUNTIME` 尚无完成证据 |
 
@@ -587,3 +587,13 @@
 | S5-R112 | 质量 / 端到端 | 真实 API 模式下，商品列表→自动化抽屉→卡券选择→保存→重开是否通过 | root | PASS（受控环境） | `npm --workspace apps/web run test:e2e:chrome:product-automation`；Chrome/CDP live E2E |
 
 本轮结论：商品自动化保存契约已改为按规则 patch；单流程保存只校验当前规则并保留其余配置，受控 API/Web/Chrome/CDP 门禁通过。真实闲鱼外部 mutation 和严格视觉像素 diff 仍沿用既有开放边界。
+
+### 2026-09-24：卡券配置驱动发货链路迁移与耦合清理
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R113 | 业务 / 验收 | 固定文字、批量数据、API、图片四类卡券及备注变量、延迟、多规格是否能被正常发货链路消费；无需邮寄是否只对真实发货生效 | root | PASS（受控 E2E） | `apps/api/src/coupon-delivery.ts`、`apps/api/src/product-automation-xianyu.ts`、`apps/api/scripts/product-automation-coupon-delivery-e2e.test.ts` 11/11 |
+| S5-R114 | 架构 / 数据流 | 配置驱动卡券是否不再要求手工导入条目；历史无关字段是否从 reservation 与存储 schema 移除；Memory/PostgreSQL 是否保持一致 | root | PASS | `store-memory.ts`、`store-postgres.ts`、`domain.ts`、`038_remove_coupon_quark_fields.sql`；reservation Memory 6/6；PostgreSQL reservation smoke |
+| S5-R115 | 质量 / 构建 / 回归 | API/Web 类型检查、构建、商品自动化回归和 Web 全量单测是否通过 | root | PASS（受控环境） | `npm run typecheck:api`、`npm run typecheck:web`、`npm run build:api`、`npm run build:web`、`npm --workspace apps/api run test:product-automation`、Web 84 files / 291 tests、`git diff --check` |
+
+本轮结论：参考项目的四类配置消费逻辑已迁移到统一适配器；公开创建/更新、reservation 和存储 schema 均不再包含历史无关字段，配置型卡券无需先导入手工条目即可执行。评价赠品即使勾选无需邮寄也只发送 IM，不调用闲鱼确认发货接口。本切片保持 `READY_FOR_REVIEW`，不把受控 E2E 等同于真实闲鱼生产 mutation 验收。
