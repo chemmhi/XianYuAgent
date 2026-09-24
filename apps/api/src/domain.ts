@@ -1290,6 +1290,9 @@ export interface Store {
   revokeScope(adminId: string, accountId: string, scope: string): Promise<void>;
   listAccounts(adminId: string, query?: AccountListQuery): Promise<AccountListResult>;
   getAccount(adminId: string, accountId: string): Promise<AccountRecord | undefined>;
+  getAccountForLogin(adminId: string, accountId: string): Promise<AccountRecord | undefined>;
+  findAccountForLogin(input: { adminId: string; platform: string; sellerRef: string }): Promise<AccountRecord | undefined>;
+  restoreAccountForLogin(adminId: string, accountId: string): Promise<AccountRecord | undefined>;
   createAccount(input: { platform: string; sellerRef: string; displayName?: string; adminId: string }): Promise<AccountRecord>;
   updateAccount(adminId: string, accountId: string, patch: { sellerRef?: string; displayName?: string; remark?: string; avatarUrl?: string; platformUserId?: string; status?: AccountStatus; lastConnectedAt?: string }): Promise<AccountRecord | undefined>;
   deleteAccount(adminId: string, accountId: string): Promise<AccountRecord | undefined>;
