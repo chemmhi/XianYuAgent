@@ -16,7 +16,7 @@ export function mapXianyuProductPage(response: Record<string, unknown> | undefin
     const priceInfo = asRecord(cardData.priceInfo);
     const picInfo = asRecord(cardData.picInfo);
     const title = firstString(cardData.title, cardData.itemTitle) ?? externalProductRef;
-    const description = firstString(cardData.description, cardData.desc, cardData.itemDesc);
+    const description = firstString(cardData.description, cardData.desc, cardData.itemDesc, itemInfo.description, itemInfo.desc, itemInfo.itemDesc);
     const categoryCode = firstString(cardData.categoryId, cardData.categoryID);
     const xianyuUpdatedAt = parseDate(
       detailParams.updatedAt,

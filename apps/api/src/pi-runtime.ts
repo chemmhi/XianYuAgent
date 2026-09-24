@@ -64,6 +64,8 @@ export interface ModelCompletionResult {
 }
 
 export interface ModelClient {
+  /** Whether the selected transport can execute OpenAI's built-in web_search tool. */
+  supportsWebSearch?: boolean;
   complete(input: ModelCompletionRequest): Promise<ModelCompletionResult>;
 }
 
@@ -111,11 +113,13 @@ export class OpenAICompatibleModelClient implements ModelClient {
   private readonly timeoutMs: number;
   private readonly wireApi: ModelWireApi;
   private readonly fetchImpl: typeof fetch;
+  readonly supportsWebSearch: boolean;
 
   constructor(private readonly options: OpenAICompatibleModelClientOptions) {
     if (!options.apiKey.trim()) throw new Error('PI_RUNTIME_API_KEY_REQUIRED');
     if (!options.model.trim()) throw new Error('PI_RUNTIME_MODEL_REQUIRED');
     this.wireApi = normalizeWireApi(options.wireApi);
+    this.supportsWebSearch = this.wireApi === 'responses';
     this.endpoint = this.wireApi === 'responses' ? toResponsesEndpoint(options.baseUrl) : toChatCompletionsEndpoint(options.baseUrl);
     this.timeoutMs = positiveInteger(options.timeoutMs, DEFAULT_PI_TIMEOUT_MS);
     this.fetchImpl = options.fetchImpl ?? fetch;

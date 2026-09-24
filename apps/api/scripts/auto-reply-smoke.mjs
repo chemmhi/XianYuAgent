@@ -54,7 +54,8 @@ try {
   assert.equal(inbound.autoReply?.run.status, 'persisted');
   assert.equal(inbound.autoReply?.run.decision, 'replied');
   assert.equal(inbound.autoReply?.context?.product?.id, product.id);
-  assert.ok(inbound.autoReply?.context?.recentMessages.some((message) => message.bodyText === '有货吗'));
+  assert.equal(inbound.autoReply?.context?.inboundMessage?.bodyText, '有货吗');
+  assert.ok(inbound.autoReply?.context?.recentMessages.some((message) => message.bodyText === '之前已给你介绍过商品。'));
   assert.equal(inbound.autoReply?.outboundMessage?.source, 'ai');
   assert.match(inbound.autoReply?.outboundMessage?.externalMessageRef ?? '', /^simulated:auto-reply:/);
   assert.equal(realSendCalls, 0);

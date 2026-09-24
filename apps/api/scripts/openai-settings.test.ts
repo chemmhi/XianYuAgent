@@ -7,13 +7,13 @@ import type { ModelClient } from '../src/pi-runtime.js';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 
-async function fixture(fetchImpl: typeof fetch = (async () => new Response(JSON.stringify({ data: [{ id: 'provider-model-a' }, { id: 'provider-model-b' }] }), { status: 200 })) as typeof fetch) {
+async function fixture(fetchImpl: typeof fetch = (async () => new Response(JSON.stringify({ data: [{ id: 'provider-model-a' }, { id: 'provider-model-b' }] }), { status: 200 })) as typeof fetch, wireApi: 'responses' | 'chat' = 'responses') {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: `openai-${Date.now()}@example.com`, passwordHash: 'hash', displayName: 'OpenAI Test' });
   const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: `seller-${Date.now()}` });
   const key = 'test-encryption-key';
   const credentials = new ApiKeyCredentialService(store, key, async () => 'audit');
-  const service = new OpenAISettingsService(store, credentials, key, async () => 'audit', fetchImpl);
+  const service = new OpenAISettingsService(store, credentials, key, async () => 'audit', fetchImpl, wireApi);
   return { store, admin, account, service };
 }
 
@@ -34,6 +34,13 @@ function input(adminId: string, accountId: string, role: 'primary' | 'backup', o
     ...overrides,
   };
 }
+
+test('application config defaults to Responses while honoring explicit Chat compatibility', () => {
+  const base = { API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'test-model' };
+  assert.equal(loadConfig(base).modelWireApi, 'responses');
+  assert.equal(loadConfig({ ...base, WIRE_API: 'responses' }).modelWireApi, 'responses');
+  assert.equal(loadConfig({ ...base, WIRE_API: 'chat' }).modelWireApi, 'chat');
+});
 
 test('persists primary and backup configs with redacted views and provider-owned models', async () => {
   const calls: string[] = [];
@@ -104,6 +111,43 @@ test('rejects cross-account config probes and falls back to backup client', asyn
   const result = await createFallbackModelClient(primaryClient, backupClient).complete({ messages: [{ role: 'user', content: 'hello' }] });
   assert.equal(result.content, '来自备用配置');
   assert.deepEqual(calls, ['primary', 'backup']);
+});
+
+test('fallback advertises web_search only when every provider supports it', async () => {
+  const primary: ModelClient = {
+    supportsWebSearch: true,
+    complete: async () => { throw new Error('primary unavailable'); },
+  };
+  const backup: ModelClient = {
+    supportsWebSearch: false,
+    complete: async () => ({ content: 'fallback reply', model: 'chat-backup' }),
+  };
+  const client = createFallbackModelClient(primary, backup);
+  assert.equal(client.supportsWebSearch, false);
+  const result = await client.complete({
+    messages: [{ role: 'user', content: 'github上有没有这个skill' }],
+  });
+  assert.equal(result.content, 'fallback reply');
+});
+
+test('OpenAI settings apply one global wire mode to every provider', async () => {
+  const { admin, account, service } = await fixture();
+
+  const defaulted = await service.save(input(admin.id, account.id, 'primary'));
+  assert.equal(defaulted.wireApi, 'responses');
+  const chatInput = { ...input(admin.id, account.id, 'primary', { configId: defaulted.id, expectedVersion: defaulted.version, apiKey: undefined }), wireApi: 'chat' as const };
+  const chat = await service.save(chatInput);
+  assert.equal(chat.wireApi, 'responses');
+  const resolved = await service.resolveById(admin.id, chat.id!, account.id);
+  assert.equal(resolved?.wireApi, 'responses');
+
+  const chatFixture = await fixture(undefined, 'chat');
+  const explicitChat = await chatFixture.service.save(input(chatFixture.admin.id, chatFixture.account.id, 'primary'));
+  const explicitChatBackup = await chatFixture.service.save(input(chatFixture.admin.id, chatFixture.account.id, 'backup'));
+  assert.equal(explicitChat.wireApi, 'chat');
+  assert.equal(explicitChatBackup.wireApi, 'chat');
+  const chatResolved = await chatFixture.service.resolveById(chatFixture.admin.id, explicitChat.id!, chatFixture.account.id);
+  assert.equal(chatResolved?.wireApi, 'chat');
 });
 
 test('agent resolves latest persisted config and falls back without restart', async () => {

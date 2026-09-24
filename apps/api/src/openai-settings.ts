@@ -2,7 +2,7 @@ import { decryptCredentialValue } from './credential-crypto.js';
 import type { CredentialRefRecord, Store } from './domain.js';
 import { ServiceError } from './services.js';
 import type { ApiKeyCredentialService } from './credential-store.js';
-import { OpenAICompatibleModelClient, type ModelClient, type ModelWireApi } from './pi-runtime.js';
+import { DEFAULT_PI_WIRE_API, OpenAICompatibleModelClient, type ModelClient, type ModelWireApi } from './pi-runtime.js';
 import { listProviderModels, ModelProviderError, type ProviderModel } from './model-provider.js';
 
 export type OpenAIConfigRole = 'primary' | 'backup';
@@ -67,17 +67,18 @@ export class OpenAISettingsService {
     private readonly encryptionKey: string,
     private readonly audit: Audit,
     private readonly fetchImpl: typeof fetch = fetch,
+    private readonly wireApi: ModelWireApi = DEFAULT_PI_WIRE_API,
   ) {}
 
   async list(input: { adminId: string; accountId: string }): Promise<OpenAIConfigView[]> {
     const refs = await this.credentials.list(input);
     return refs
       .filter((ref) => ref.kind === 'api_key' && ref.purpose === 'model_client')
-      .map((ref) => toView(ref));
+      .map((ref) => toView(ref, this.wireApi));
   }
 
   async save(input: OpenAIConfigInput): Promise<OpenAIConfigView> {
-    const normalized = normalizeInput(input);
+    const normalized = normalizeInput(input, this.wireApi);
     const current = input.configId ? await this.store.getCredentialRef(input.adminId, input.configId) : undefined;
     if (input.configId && (!current || current.accountId !== input.accountId)) throw new ServiceError(404, 'NOT_FOUND', '模型配置不存在');
     if (current && roleFrom(current) !== normalized.role) throw new ServiceError(409, 'CONFLICT', '配置角色不可变，请分别编辑主配置或备用配置');
@@ -119,11 +120,11 @@ export class OpenAISettingsService {
     }
 
     await this.audit({ actorId: input.adminId, action: 'settings.openai.saved', targetRef: saved.id, requestId: input.requestId, traceId: input.traceId, payload: { role: normalized.role, provider: normalized.provider, model: normalized.model, wireApi: normalized.wireApi, timeoutMs: normalized.timeoutMs, version: saved.version }, accountId: saved.accountId });
-    return toView(saved);
+    return toView(saved, this.wireApi);
   }
 
   async test(input: OpenAIConfigInput): Promise<{ ok: true; provider: string; model: string; latencyMs: number; models: ProviderModel[] }> {
-    const normalized = normalizeInput(input);
+    const normalized = normalizeInput(input, this.wireApi);
     if (input.configId) {
       const current = await this.store.getCredentialRef(input.adminId, input.configId);
       if (!current || current.accountId !== input.accountId || current.status === 'revoked') throw new ServiceError(404, 'NOT_FOUND', '模型配置不存在');
@@ -148,7 +149,7 @@ export class OpenAISettingsService {
     for (const ref of refs.filter((item) => item.status === 'active' && item.kind === 'api_key' && item.purpose === 'model_client')) {
       const secret = await this.store.getCredentialRefSecret(adminId, ref.id);
       if (!secret) continue;
-      const view = toView(ref);
+      const view = toView(ref, this.wireApi);
       rows.push({ ...view, apiKey: decryptCredentialValue(secret.secretCiphertext, this.encryptionKey) });
     }
     return rows.sort((left, right) => (left.role === 'primary' ? -1 : right.role === 'primary' ? 1 : 0));
@@ -161,7 +162,7 @@ export class OpenAISettingsService {
       baseUrl: config.baseUrl,
       model: config.model,
       timeoutMs: config.timeoutMs,
-      wireApi: config.wireApi,
+      wireApi: this.wireApi,
       ...(reasoningEffort ? { reasoningEffort } : {}),
     });
   }
@@ -171,7 +172,7 @@ export class OpenAISettingsService {
     if (!ref || ref.accountId !== accountId || ref.status === 'revoked') return undefined;
     const secret = await this.store.getCredentialRefSecret(adminId, configId);
     if (!secret) return undefined;
-    return { ...toView(ref), apiKey: decryptCredentialValue(secret.secretCiphertext, this.encryptionKey) };
+    return { ...toView(ref, this.wireApi), apiKey: decryptCredentialValue(secret.secretCiphertext, this.encryptionKey) };
   }
 
   private async resolveSecret(adminId: string, accountId: string, configId: string | undefined, provided: string | undefined): Promise<string> {
@@ -197,21 +198,25 @@ export class OpenAISettingsService {
 }
 
 export function createFallbackModelClient(primary: ModelClient, backup?: ModelClient): ModelClient {
+  const supportsWebSearch = primary.supportsWebSearch !== false && backup?.supportsWebSearch !== false;
   return {
+    supportsWebSearch,
     async complete(input) {
       try { return await primary.complete(input); }
-      catch (error) { if (!backup) throw error; return backup.complete(input); }
+      catch (error) {
+        if (!backup) throw error;
+        return backup.complete(input);
+      }
     },
   };
 }
 
-function normalizeInput(input: OpenAIConfigInput) {
+function normalizeInput(input: OpenAIConfigInput, wireApi: ModelWireApi) {
   const provider = input.provider.trim();
   const alias = input.alias.trim() || (input.role === 'primary' ? 'primary' : 'backup');
   const baseUrl = normalizeBaseUrl(input.baseUrl);
   const model = input.model.trim();
   const reasoningEffort = input.reasoningEffort?.trim() || undefined;
-  const wireApi: ModelWireApi = input.wireApi === 'chat' ? 'chat' : 'responses';
   const timeoutMs = Number.isFinite(input.timeoutMs) && (input.timeoutMs ?? 0) > 0 ? Math.min(Math.max(Math.trunc(input.timeoutMs!), 1_000), 120_000) : DEFAULT_TIMEOUT_MS;
   if (!provider || !model) throw new ServiceError(422, 'VALIDATION_FAILED', 'provider and model are required');
   return { ...input, provider, alias, baseUrl, model, reasoningEffort, wireApi, timeoutMs, apiKey: input.apiKey?.trim() || undefined };
@@ -242,7 +247,7 @@ function roleFrom(ref: CredentialRefRecord): OpenAIConfigRole {
   return ref.metadata.role === 'backup' || ref.alias.trim().toLowerCase() === 'backup' ? 'backup' : 'primary';
 }
 
-function toView(ref: CredentialRefRecord): OpenAIConfigView {
+function toView(ref: CredentialRefRecord, wireApi: ModelWireApi): OpenAIConfigView {
   const role = roleFrom(ref);
   return {
     id: ref.id,
@@ -254,7 +259,7 @@ function toView(ref: CredentialRefRecord): OpenAIConfigView {
     baseUrl: ref.metadata.baseUrl ?? '',
     model: ref.metadata.model ?? '',
     reasoningEffort: ref.metadata.reasoningEffort?.trim() || undefined,
-    wireApi: ref.metadata.wireApi === 'chat' ? 'chat' : 'responses',
+    wireApi,
     timeoutMs: Number(ref.metadata.timeoutMs ?? DEFAULT_TIMEOUT_MS),
     status: ref.status,
     version: ref.version,

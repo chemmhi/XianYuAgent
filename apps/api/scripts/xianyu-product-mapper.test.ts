@@ -33,3 +33,19 @@ test('does not map item creation time as the remote update time', () => {
 
   assert.equal(page.items[0]?.xianyuUpdatedAt, undefined);
 });
+
+test('maps the itemDO description used by the product detail drawer', () => {
+  const page = mapXianyuProductPage({
+    data: {
+      cardList: [{
+        cardData: {
+          detailParams: { itemId: 'ITEM-DESC' },
+          itemDO: { desc: '来自 itemDO.desc 的详情描述' },
+          title: '详情商品',
+        },
+      }],
+    },
+  }, 1, 20);
+
+  assert.equal(page.items[0]?.description, '来自 itemDO.desc 的详情描述');
+});

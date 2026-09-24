@@ -1,5 +1,14 @@
 # XianyuSellerAgent 项目状态
 
+## 2026-09-24 自动回复商品事实与统一模型协议修复
+
+- 商品读取改为账号范围内的 ID / external ref / 标题单条精确查询；`get_product_info` 优先复用完整 `context.product`，列表查询仅保留给 `list_shop_products`，PostgreSQL 精确查询不再执行 `count(*)`。
+- 商品列表映射补齐 `itemDO.desc`，详情缓存和自动回复上下文继续保留描述、价格、指标、知识库和回复模板等完整事实。
+- `web_search` 仅在自动回复 Agent 的 Responses client、通用知识问题且先完成本地事实读取后暴露；Chat 仍受底层支持，但当前 `WIRE_API` 作为进程级配置统一作用于主备 Provider，默认 Responses，显式 Chat 时全部 Provider 统一 Chat。
+- GitHub skill 问题新增真实 push → 自动回复 → Responses 第二轮工具列表回归；同时补充 Chat 兼容、统一协议、商品精确查询和 `itemDO.desc` 回归测试。
+- 已验证：`npm test`（API 全套 + Web 84 files / 289 tests）通过，API build、Postgres 商品精确查询 smoke、`git diff --check` 通过。
+- 状态：`READY_FOR_RELEASE_CANDIDATE`；真实闲鱼账号 live sender、生产 canary、回滚/备份恢复和目标环境三轮独立复审仍需证据。
+
 ## 2026-09-23 卖家说话风格提示词优化追踪
 
 - 命令统一重命名为 `optimize:seller-style-prompt`，对应脚本文件改为 `apps/api/scripts/optimize-seller-style-prompt.ts` 与 `apps/api/scripts/seller-style-prompt-optimizer.ts`；不保留旧命令别名。

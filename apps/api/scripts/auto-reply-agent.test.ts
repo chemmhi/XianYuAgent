@@ -51,7 +51,7 @@ test('buyer Agent web search is enabled by default and exposed only after local 
       return { content: replyPayload('这个问题属于通用知识，我已参考公开资料。'), model: 'test', webSearchUsed: true };
     },
   };
-  const store = { listAutoReplyProducts: async () => ({ items: [], total: 0 }) } as unknown as Store;
+  const store = { getAutoReplyProduct: async () => undefined } as unknown as Store;
   const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_WEB_SEARCH_ENABLED: 'true' }));
   await agent.generate({ adminId: 'admin-1', context: context(), classification });
   assert.equal(requests.length, 2);
@@ -72,9 +72,33 @@ test('buyer Agent never exposes web search for non-general intent', async () => 
       return { content: replyPayload('已根据商品事实处理。'), model: 'test' };
     },
   };
-  const store = { listAutoReplyProducts: async () => ({ items: [], total: 0 }) } as unknown as Store;
+  const store = { getAutoReplyProduct: async () => undefined } as unknown as Store;
   const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_WEB_SEARCH_ENABLED: 'true' }));
   await agent.generate({ adminId: 'admin-1', context: context(), classification: { ...classification, intent: 'price' } });
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0]?.tools?.length, AUTO_REPLY_AGENT_TOOLS.length);
+  assert.equal(requests[1]?.tools?.length, AUTO_REPLY_AGENT_TOOLS.length);
+});
+
+test('buyer Agent does not expose web_search to Chat Completions clients', async () => {
+  const requests: Array<{ tools?: unknown[] }> = [];
+  let call = 0;
+  const client: ModelClient = {
+    supportsWebSearch: false,
+    complete: async (request) => {
+      requests.push({ tools: request.tools });
+      call += 1;
+      if (call === 1) return { content: '', model: 'chat-test', toolCalls: [{ id: 'tool-product', type: 'function', function: { name: 'get_product_info', arguments: '{}' } }] };
+      return { content: replyPayload('我暂时无法联网核实 GitHub 上是否有这个 skill，建议提供仓库链接。'), model: 'chat-test' };
+    },
+  };
+  const store = { getAutoReplyProduct: async () => undefined } as unknown as Store;
+  const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_WEB_SEARCH_ENABLED: 'true' }));
+  await agent.generate({
+    adminId: 'admin-1',
+    context: context({ inboundMessage: { ...context().inboundMessage, bodyText: 'github上有没有这个skill' } }),
+    classification,
+  });
   assert.equal(requests.length, 2);
   assert.equal(requests[0]?.tools?.length, AUTO_REPLY_AGENT_TOOLS.length);
   assert.equal(requests[1]?.tools?.length, AUTO_REPLY_AGENT_TOOLS.length);
@@ -137,7 +161,7 @@ test('agent chooses product tool then returns final answer', async () => {
     },
   };
   const product = { id: 'product-1', accountId: 'account-1', externalProductRef: 'item-1', title: '资料包', description: '数字资料', browseCount: 321, wantCount: 33, collectCount: 8, defaultReplyTemplate: '付款后发送下载说明。', knowledgeBase: '只回答商品适用范围和使用方式。', attributes: { internalOnly: 'do-not-expose', xianyu: { detail: { summary: { browseCount: 321, wantCount: 33, collectCount: 8, favoriteCount: 2, interactFavoriteCount: 1, soldCount: 45, quantity: 9, rawResponse: { shouldNotExpose: true } } } } }, priceMinor: 1_999, status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' };
-  const store = { listAutoReplyProducts: async () => ({ items: [product], total: 1 }) } as unknown as Store;
+  const store = { getAutoReplyProduct: async () => product } as unknown as Store;
   const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}));
   const reply = await agent.generate({ adminId: 'admin-1', context: context(), classification });
   assert.deepEqual(reply, { text: '这是一个数字资料包，页面显示价格为 19.99 元。', segments: undefined });
@@ -156,6 +180,31 @@ test('agent chooses product tool then returns final answer', async () => {
   assert.match(productPayload, /回复模板：付款后发送下载说明。/);
   assert.doesNotMatch(productPayload, /createdAt|updatedAt|attributes|accountId|productRef|favoriteCount|rawResponse/);
   assert.throws(() => JSON.parse(productPayload));
+});
+
+test('product tool reuses the complete product context without a second store read', async () => {
+  let storeReads = 0;
+  let toolPayload: string | undefined;
+  const product = { id: 'product-1', accountId: 'account-1', externalProductRef: 'item-1', title: '资料包', description: '数字资料', browseCount: 321, wantCount: 33, collectCount: 8, defaultReplyTemplate: '付款后发送下载说明。', knowledgeBase: '只回答商品适用范围和使用方式。', priceMinor: 1_999, status: 'published' as const };
+  const client: ModelClient = {
+    complete: async (request) => {
+      if (request.messages.at(-1)?.role === 'tool') {
+        toolPayload = contentText(request.messages.at(-1)?.content);
+        return { content: replyPayload('已根据完整商品事实回复。'), model: 'test' };
+      }
+      return { content: '', model: 'test', toolCalls: [{ id: 'tool-product-context', type: 'function', function: { name: 'get_product_info', arguments: '{}' } }] };
+    },
+  };
+  const store = { getAutoReplyProduct: async () => { storeReads += 1; throw new Error('SHOULD_REUSE_CONTEXT'); } } as unknown as Store;
+  const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}));
+  const reply = await agent.generate({ adminId: 'admin-1', context: context({ product }), classification });
+  assert.deepEqual(reply, { text: '已根据完整商品事实回复。', segments: undefined });
+  assert.equal(storeReads, 0);
+  assert.match(toolPayload ?? '', /浏览量：321/);
+  assert.match(toolPayload ?? '', /想要人数：33/);
+  assert.match(toolPayload ?? '', /收藏人数：8/);
+  assert.match(toolPayload ?? '', /知识库：只回答商品适用范围和使用方式。/);
+  assert.match(toolPayload ?? '', /回复模板：付款后发送下载说明。/);
 });
 
 test('agent sends document context without internal identifiers and with newest history first', async () => {
@@ -225,7 +274,7 @@ test('agent emits high-level redacted observations for model, tool, and final de
     },
   };
   const product = { id: 'product-1', accountId: 'account-1', externalProductRef: 'item-1', title: '资料包', description: '不应写入观测日志的商品描述', defaultReplyTemplate: undefined, knowledgeBase: undefined, priceMinor: 1_999, status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' };
-  const store = { listAutoReplyProducts: async () => ({ items: [product], total: 1 }) } as unknown as Store;
+  const store = { getAutoReplyProduct: async () => product } as unknown as Store;
   const config = resolveAutoReplyAgentConfig({});
   const agent = new ToolCallingAutoReplyAgent(store, client, config);
 
@@ -432,7 +481,7 @@ test('buyer orders tool reads scoped facts and filters buyer/account scope', asy
 
 test('product tool resolves external numeric refs without UUID lookup and stays account scoped', async () => {
   const product = { id: 'product-account-1', accountId: 'account-1', externalProductRef: '1078553391460', title: '数字资料包', description: '公开说明', priceMinor: 1_999, status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' };
-  let productQuery: { accountId?: string; keyword?: string; productId?: string; limit?: number } | undefined;
+  let productQuery: { accountId?: string; externalProductRef?: string; productId?: string; title?: string } | undefined;
   let toolPayload: string | undefined;
   const client: ModelClient = {
     complete: async (request) => {
@@ -444,12 +493,12 @@ test('product tool resolves external numeric refs without UUID lookup and stays 
     },
   };
   const store = {
-    listAutoReplyProducts: async (_adminId: string, query: { accountId: string; keyword?: string; productId?: string; limit?: number }) => { productQuery = query; return { items: [product], total: 1 }; },
+    getAutoReplyProduct: async (_adminId: string, query: { accountId: string; externalProductRef?: string; productId?: string; title?: string }) => { productQuery = query; return query.externalProductRef === product.externalProductRef ? product : undefined; },
   } as unknown as Store;
   const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}));
   const reply = await agent.generate({ adminId: 'admin-1', context: { ...context(), conversation: { ...context().conversation, itemRef: '1078553391460' } }, classification });
   assert.deepEqual(reply, { text: '这是数字资料包。', segments: undefined });
-  assert.deepEqual(productQuery, { accountId: 'account-1', keyword: '1078553391460', limit: 50 });
+  assert.deepEqual(productQuery, { accountId: 'account-1', externalProductRef: '1078553391460' });
   const payload = toolPayload ?? '';
   assert.match(payload, /标题：数字资料包/);
   assert.doesNotMatch(payload, /1078553391460|product-1|createdAt|updatedAt|accountId|商品引用：/);
@@ -515,7 +564,7 @@ test('insufficient product facts return not-found and hand off instead of guessi
       return { content: '', model: 'test', toolCalls: [{ id: 'tool-product-missing', type: 'function', function: { name: 'get_product_info', arguments: JSON.stringify({ productRef: 'missing-item' }) } }] };
     },
   };
-  const store = { listAutoReplyProducts: async () => ({ items: [], total: 0 }) } as unknown as Store;
+  const store = { getAutoReplyProduct: async () => undefined } as unknown as Store;
   const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}));
   await assert.rejects(() => agent.generate({ adminId: 'admin-1', context: context(), classification }), (error: unknown) => (error as { code?: string }).code === 'AGENT_HANDOFF');
   const payload = toolPayload ?? '';
@@ -540,7 +589,7 @@ test('agent fails safely when loop limit is reached', async () => {
   let calls = 0;
   const client: ModelClient = { complete: async () => { calls += 1; return { content: '', model: 'test', toolCalls: [{ id: `tool-${calls}`, type: 'function', function: { name: 'get_product_info', arguments: JSON.stringify({ productRef: `item-${calls}` }) } }] }; } };
   const product = { id: 'product-1', accountId: 'account-1', externalProductRef: 'item-1', title: '资料包', status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' };
-  const store = { listAutoReplyProducts: async () => ({ items: [product], total: 1 }) } as unknown as Store;
+  const store = { getAutoReplyProduct: async () => product } as unknown as Store;
   const config = resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_MAX_LOOPS: '2' });
   const traces: AutoReplyAgentTrace[] = [];
   const agent = new ToolCallingAutoReplyAgent(store, client, config, { onTrace: (trace) => { traces.push(trace); } });

@@ -173,7 +173,7 @@ test('xianyu listener drives product and general auto-reply chains without real 
   }
 });
 
-test('real push enters buyer Agent tool loop, simulates reply, and persists run without sending', async () => {
+test('real push handles a GitHub skill question through the Responses search path', async () => {
   const originalFetch = globalThis.fetch;
   const modelRequests: Array<Record<string, unknown>> = [];
   let modelCall = 0;
@@ -181,15 +181,15 @@ test('real push enters buyer Agent tool loop, simulates reply, and persists run 
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     modelRequests.push(body);
     modelCall += 1;
-    const message = modelCall === 1
-      ? { content: '', tool_calls: [{ id: 'call-product-1', type: 'function', function: { name: 'get_product_info', arguments: '{}' } }] }
-      : { content: replyPayload('这是一个数字资料包，页面显示价格为 19.99 元。') };
-    return new Response(JSON.stringify({ model: 'buyer-agent-test', choices: [{ message }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    const payload = modelCall === 1
+      ? { model: 'buyer-agent-test', output: [{ type: 'function_call', call_id: 'call-product-1', name: 'get_product_info', arguments: '{}' }] }
+      : { model: 'buyer-agent-test', output_text: replyPayload('我暂时无法联网核实 GitHub 上是否有这个 skill，建议提供仓库链接。'), output: [{ type: 'web_search_call', id: 'web-search-1', status: 'completed' }, { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: replyPayload('我暂时无法联网核实 GitHub 上是否有这个 skill，建议提供仓库链接。') }] }] };
+    return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } });
   }) as typeof fetch;
   const runtime = createApp(loadConfig({
     ...process.env,
     HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
-    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'buyer-agent-test', WIRE_API: 'chat', AUTO_REPLY_MODEL_ENABLED: 'true', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["买家"]', AUTO_REPLY_AGENT_DEBOUNCE_MS: '0', AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS: '0',
+    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'buyer-agent-test', WIRE_API: 'responses', AUTO_REPLY_MODEL_ENABLED: 'true', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["买家"]', AUTO_REPLY_AGENT_DEBOUNCE_MS: '0', AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS: '0',
   }));
   await runtime.listen();
   let client: XianyuImClient | undefined;
@@ -205,16 +205,18 @@ test('real push enters buyer Agent tool loop, simulates reply, and persists run 
     const connectPromise = client.connect();
     queueMicrotask(() => socket.emit('open'));
     await connectPromise;
-    socket.emit('message', pushFrame('buyer-agent-push-1', 'buyer-agent-conversation-1', 'buyer-agent-message-1.PNM', 'buyer-agent-buyer-1', '请问这个是什么东西？', '买家'));
+    socket.emit('message', pushFrame('buyer-agent-push-1', 'buyer-agent-conversation-1', 'buyer-agent-message-1.PNM', 'buyer-agent-buyer-1', 'github上有没有这个skill', '买家'));
     await waitFor(() => results.length >= 1);
     const result = results[0]!;
     assert.equal(result.created, true);
     assert.equal(result.autoReply?.run.status, 'persisted');
     assert.equal(result.autoReply?.run.senderOutcome, 'simulated');
-    assert.equal(result.autoReply?.outboundMessage?.bodyText, '这是一个数字资料包，页面显示价格为 19.99 元。');
+    assert.equal(result.autoReply?.outboundMessage?.bodyText, '我暂时无法联网核实 GitHub 上是否有这个 skill，建议提供仓库链接。');
     assert.equal(modelCall, 2);
     assert.equal((modelRequests[0]?.tools as unknown[]).length, 4);
-    assert.equal((modelRequests[1]?.messages as Array<{ role: string }>).at(-1)?.role, 'tool');
+    assert.equal((modelRequests[1]?.tools as unknown[]).length, 5);
+    assert.deepEqual((modelRequests[1]?.tools as Array<Record<string, unknown>>).at(-1), { type: 'web_search' });
+    assert.equal((modelRequests[1]?.input as Array<{ type: string }>).at(-1)?.type, 'function_call_output');
     const stored = await runtime.messages.listMessages(adminId, conversation.id, { limit: 20 });
     assert.equal(stored.items.filter((message) => message.direction === 'outbound').length, 1);
     assert.ok(await runtime.store.findAutoReplyRunByInboundMessage(adminId, result.autoReply!.inboundMessage.id));

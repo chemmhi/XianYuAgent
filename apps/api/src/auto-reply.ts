@@ -626,9 +626,14 @@ export class AutoReplyService {
 
   private async findProduct(adminId: string, conversation: ConversationRecord): Promise<AutoReplyContext['product']> {
     if (!conversation.itemRef) return undefined;
-    const result = await this.store.listAutoReplyProducts(adminId, { accountId: conversation.accountId, keyword: conversation.itemRef, limit: 10 });
-    const product = result.items.find((item) => item.id === conversation.itemRef || item.externalProductRef === conversation.itemRef) ?? result.items.find((item) => item.title === conversation.itemTitle);
-    return product;
+    const product = await this.store.getAutoReplyProduct(adminId, isUuid(conversation.itemRef)
+      ? { accountId: conversation.accountId, productId: conversation.itemRef }
+      : { accountId: conversation.accountId, externalProductRef: conversation.itemRef });
+    if (product) return product;
+    if (conversation.itemTitle && conversation.itemTitle !== conversation.itemRef) {
+      return this.store.getAutoReplyProduct(adminId, { accountId: conversation.accountId, title: conversation.itemTitle });
+    }
+    return undefined;
   }
 
   private async findOrders(adminId: string, conversation: ConversationRecord): Promise<AutoReplyOrderContext[]> {
@@ -649,6 +654,10 @@ export class AutoReplyService {
   private async recordAudit(adminId: string, accountId: string, runId: string, requestId: string, traceId: string, payload: unknown): Promise<void> {
     await this.audit({ actorId: adminId, action: 'auto_reply.processed', targetRef: runId, requestId, traceId, payload, accountId });
   }
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function normalizeGeneratedReply(value: string | AutoReplyGeneratedReply | undefined): AutoReplyGeneratedReply | undefined {

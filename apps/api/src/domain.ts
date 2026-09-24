@@ -230,6 +230,13 @@ export interface AutoReplyProductListQuery {
   limit?: number;
 }
 
+export interface AutoReplyProductLookup {
+  accountId: string;
+  productId?: string;
+  externalProductRef?: string;
+  title?: string;
+}
+
 export interface AutoReplyProductListResult {
   items: AutoReplyProductContext[];
   total: number;
@@ -1336,6 +1343,7 @@ export interface Store {
   appendWorkspaceMessage(input: { adminId: string; sessionId: string; runId?: string; type: WorkspaceMessageType; content: string; summary?: string }): Promise<WorkspaceMessageRecord>;
   listWorkspaceMessages(adminId: string, sessionId: string, limit?: number): Promise<WorkspaceMessageRecord[]>;
   listProducts(adminId: string, query: ProductListQuery): Promise<ProductListResult>;
+  getAutoReplyProduct(adminId: string, query: AutoReplyProductLookup): Promise<AutoReplyProductContext | undefined>;
   listAutoReplyProducts(adminId: string, query: AutoReplyProductListQuery): Promise<AutoReplyProductListResult>;
   getProduct(adminId: string, productId: string): Promise<ProductRecord | undefined>;
   getProductAutomation(adminId: string, productId: string): Promise<ProductAutomationConfigRecord | undefined>;
