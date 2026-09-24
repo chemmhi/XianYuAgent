@@ -32,8 +32,9 @@ test('QR login can wait for a user-completed verification browser and then finis
   try {
     const verificationBrowser = {
       enabled: true,
-      waitForCompletion: async (input: { verificationUrl: string }) => {
+      waitForCompletion: async (input: { verificationUrl: string; allowManualFallback?: boolean }) => {
         assert.equal(input.verificationUrl, 'https://punish.goofish.com/verify?token=redacted');
+        assert.equal(input.allowManualFallback, false);
         return {
           finalUrl: 'https://www.goofish.com/im',
           cookieSnapshot: [{ name: 'x5sec', value: 'redacted', domain: '.goofish.com', path: '/', secure: true }],
@@ -44,6 +45,7 @@ test('QR login can wait for a user-completed verification browser and then finis
       pollIntervalMs: 5,
       maxWaitMs: 500,
       verificationBrowser: verificationBrowser as never,
+      allowManualVerificationFallback: false,
       onStatus: async (status) => { statuses.push({ status: status.status, verificationAutoLaunch: status.verificationAutoLaunch }); },
       onSuccess: async ({ unb }) => { if (unb === 'verified-user') successCount += 1; },
     });

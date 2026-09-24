@@ -65,7 +65,7 @@ describe('xianyu IM credential refresh', () => {
       enabled: true,
       waitForCompletion: async (input: { verificationUrl: string; initialCookieSnapshot?: unknown[] }) => {
         assert.equal(input.verificationUrl, 'https://punish.goofish.com/verify?token=redacted');
-        assert.equal(input.initialCookieSnapshot?.some((cookie) => (cookie as { name?: string }).name === 'x5secdata'), false);
+        assert.equal(input.initialCookieSnapshot?.some((cookie) => (cookie as { name?: string }).name === 'x5secdata'), true);
         return {
           finalUrl: 'https://www.goofish.com/im',
           cookieSnapshot: [
@@ -132,6 +132,32 @@ describe('xianyu IM credential refresh', () => {
     assert.ok(Date.now() - startedAt < 1_000);
   });
 
+  it('does not reopen a blank verification browser on every reconnect retry', async () => {
+    let browserCalls = 0;
+    const store = {
+      getCredential: async () => ({ cookieHeader: 'unb=seller-1; _m_h5_tk=token-1', metadata: {}, expiresAt: '2026-10-01T00:00:00.000Z' }),
+      upsertCredential: async () => { throw new Error('should not persist failed verification'); },
+    };
+    const service = new XianyuImService(store as never, {
+      fetchImToken: async () => ({ success: false, accountInvalid: true, errorCode: 'ACCOUNT_VALIDATION_REQUIRED', message: 'FAIL_SYS_USER_VALIDATE', verificationUrl: 'https://punish.goofish.com/verify?token=redacted', cookieHeader: 'unb=seller-1; _m_h5_tk=token-1' }),
+    } as never, {} as never, undefined, undefined, {
+      enabled: true,
+      waitForCompletion: async () => {
+        browserCalls += 1;
+        throw new Error('XIANYU_VERIFICATION_AUTO_SOLVE_FAILED:slider_timeout');
+      },
+    } as never);
+    const refresh = () => (service as unknown as { refreshCredential: (adminId: string, account: { id: string; platform: string }, credential: Record<string, unknown>) => Promise<unknown> }).refreshCredential(
+      'admin-1',
+      { id: 'account-1', platform: 'xianyu' },
+      { cookieHeader: 'unb=seller-1; _m_h5_tk=token-1', metadata: {}, expiresAt: '2026-10-01T00:00:00.000Z' },
+    );
+
+    await assert.rejects(refresh, (error: unknown) => error instanceof ServiceError && error.code === 'ACCOUNT_VALIDATION_REQUIRED');
+    await assert.rejects(refresh, (error: unknown) => error instanceof ServiceError && error.code === 'ACCOUNT_VALIDATION_REQUIRED');
+    assert.equal(browserCalls, 1);
+  });
+
   it('cleans up a failed IM client so validation cannot leave a reconnect timer behind', async () => {
     const store = {
       getAccount: async () => ({ id: 'account-1', platform: 'xianyu', sellerRef: 'seller-1', status: 'connected' as const }),
@@ -148,6 +174,27 @@ describe('xianyu IM credential refresh', () => {
     await assert.rejects(() => service.startListener('admin-1', 'account-1'), (error: unknown) => error instanceof ServiceError && error.code === 'ACCOUNT_VALIDATION_REQUIRED');
     assert.equal((service as unknown as { clients: Map<string, unknown> }).clients.size, 0);
     assert.equal((service as unknown as { clientInFlight: Map<string, unknown> }).clientInFlight.size, 0);
+  });
+
+  it('disconnects an existing failed IM client before replacing it', async () => {
+    let disconnectCalls = 0;
+    const store = {
+      getAccount: async () => ({ id: 'account-1', platform: 'xianyu', sellerRef: 'seller-1', status: 'connected' as const }),
+      getCredential: async () => undefined,
+      updateAccount: async () => undefined,
+    };
+    const service = new XianyuImService(store as never, {} as never, {} as never);
+    (service as unknown as { clients: Map<string, unknown> }).clients.set('admin-1:account-1', {
+      connect: async () => { throw new Error('XIANYU_VERIFICATION_AUTO_SOLVE_FAILED:slider_timeout'); },
+      disconnect: async () => { disconnectCalls += 1; },
+    });
+
+    await assert.rejects(
+      () => (service as unknown as { ensureClient: (adminId: string, accountId: string) => Promise<unknown> }).ensureClient('admin-1', 'account-1'),
+      (error: unknown) => error instanceof ServiceError && error.code === 'CREDENTIAL_MISSING',
+    );
+    assert.equal(disconnectCalls, 1);
+    assert.equal((service as unknown as { clients: Map<string, unknown> }).clients.size, 0);
   });
 
   it('persists an expired account when listener bootstrap finds missing credentials', async () => {

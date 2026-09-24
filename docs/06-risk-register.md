@@ -259,3 +259,10 @@
 | 编号 | 风险 | 等级 | 应对 | 状态 |
 | --- | --- | --- | --- | --- |
 | S5-RISK-051 | QR 成功回调拿到有效 `unb` 后，历史软删除账号仍占用唯一键且 scope 已撤销，账号落库阶段会把成功误报为 `account already exists / CONFLICT`，导致扫码更新卡在 `scanned` | P1 | 登录专用解析先按管理员历史归属查找账号；恢复 `manage` scope，`disabled -> pending`，并让 QR 回调与 Cookie 更新共用同一幂等路径；补 Memory/PostgreSQL 回归和主线全量 API 验证 | CLOSED |
+
+### 闲鱼发送链路修复（本轮）
+
+| 编号 | 风险 | 级别 | 应对 | 状态 |
+| --- | --- | --- | --- | --- |
+| S5-RISK-052 | 闲鱼 NC 滑块挑战在真实账号上返回 `验证失败(error:fALStr)`，自动 solver 尚未获得新 `x5sec`，因此真实白名单消息仍无法外发 | P0 | 保留 `ACCOUNT_VALIDATION_REQUIRED` fail-closed；自动模式隐藏/最小化浏览器并回收进程；待外部挑战允许自动化通过后重新执行真实发送与消息落库复核 | OPEN / BLOCKED_BY_EXTERNAL_CHALLENGE |
+| S5-RISK-053 | 外部验证请求若长期不返回，前端可能重复提交或永久显示发送中 | P1 | HTTP 客户端 45 秒超时、消息控制器 40 秒 UI 超时、保持同一幂等键并在会话切换后不污染当前时间线；补控制器回归与 Chrome/CDP E2E | CLOSED |

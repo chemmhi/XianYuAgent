@@ -54,6 +54,7 @@
   },
   "dependencies": {
     "ioredis": "^5.7.0",
+    "patchright": "^1.63.0",
     "pg": "^8.16.3",
     "qrcode": "^1.5.4",
     "ws": "^8.21.3"

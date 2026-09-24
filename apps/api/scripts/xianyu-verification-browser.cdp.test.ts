@@ -56,6 +56,52 @@ test('verification browser reads completion from a real local Chrome/CDP session
   }
 });
 
+test('verification browser accepts canvas-only challenge pages instead of treating them as blank', async () => {
+  const executablePath = process.env.XIANYU_VERIFICATION_BROWSER_EXECUTABLE || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+  const profile = await mkdtemp(join(tmpdir(), 'xianyu-verification-canvas-cdp-test-'));
+  const debugPort = await findFreePort();
+  const fixture = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    response.end('<!doctype html><canvas id="captcha" width="360" height="160"></canvas><script>document.getElementById("captcha").getContext("2d").fillRect(0,0,1,1)</script>');
+  });
+  await new Promise<void>((resolve) => fixture.listen(0, '127.0.0.1', () => resolve()));
+  const address = fixture.address();
+  assert.ok(address && typeof address === 'object');
+  const verificationUrl = `http://127.0.0.1:${address.port}/canvas`;
+  let chrome: ChildProcess | undefined;
+  try {
+    chrome = spawn(executablePath, [
+      '--headless=new', '--disable-gpu', '--disable-extensions', '--no-first-run', '--no-default-browser-check',
+      '--remote-allow-origins=*', `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`, '--window-size=1440,900', 'about:blank',
+    ], { stdio: 'ignore', windowsHide: true });
+    await waitFor(async () => (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).ok, 8_000);
+
+    const browser = new XianyuVerificationBrowser({ mode: 'connect', debugPort, maxWaitMs: 8_000, pollIntervalMs: 100 });
+    const completion = browser.waitForCompletion({ verificationUrl });
+    const target = await waitFor(async () => {
+      const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`);
+      if (!response.ok) return undefined;
+      const pages = await response.json() as Array<{ type?: string; webSocketDebuggerUrl?: string }>;
+      return pages.find((page) => page.type === 'page' && page.webSocketDebuggerUrl);
+    }, 8_000);
+    assert.ok(target?.webSocketDebuggerUrl);
+    await setCookie(target.webSocketDebuggerUrl, {
+      name: 'x5sec', value: 'fixture-canvas', domain: '.goofish.com', path: '/', secure: true,
+      url: 'https://www.goofish.com/im',
+    });
+
+    const result = await completion;
+    assert.equal(result.cookieSnapshot.find((cookie) => cookie.name === 'x5sec')?.value, 'fixture-canvas');
+  } finally {
+    if (chrome && chrome.exitCode === null) {
+      chrome.kill();
+      await waitForChildExit(chrome, 2_000);
+    }
+    await new Promise<void>((resolve) => fixture.close(() => resolve()));
+    await rm(profile, { recursive: true, force: true });
+  }
+});
+
 async function setCookie(webSocketUrl: string, cookie: Record<string, unknown>): Promise<void> {
   const socket = new WebSocket(webSocketUrl);
   await new Promise<void>((resolve, reject) => {

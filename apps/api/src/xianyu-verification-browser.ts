@@ -1,11 +1,12 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { clearCaptchaChallengeCookies, dropStaleCaptchaChallengeCookies, type XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
+import { dropStaleCaptchaChallengeCookies, type XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
 import { XianyuSliderSolver, type XianyuSliderMode } from './xianyu-slider-solver.js';
+import { xianyuChromeVersion } from './xianyu-browser-identity.js';
 
 export type XianyuVerificationBrowserMode = 'disabled' | 'launch' | 'connect';
 
@@ -60,8 +61,6 @@ interface BrowserProcess {
 
 const DEFAULT_MAX_WAIT_MS = 3 * 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
-const DEFAULT_BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36';
-
 /** Opens a verification page and waits for the user to finish it. */
 export class XianyuVerificationBrowser {
   private readonly mode: XianyuVerificationBrowserMode;
@@ -74,7 +73,8 @@ export class XianyuVerificationBrowser {
   private readonly maxWaitMs: number;
   private readonly pollIntervalMs: number;
   private readonly allowManualFallback: boolean;
-  private readonly userAgent: string;
+  private readonly userAgent?: string;
+  private readonly activeVerifications = new Map<string, Promise<XianyuVerificationBrowserResult>>();
 
   constructor(options: XianyuVerificationBrowserOptions = {}) {
     this.mode = options.mode ?? 'disabled';
@@ -87,34 +87,94 @@ export class XianyuVerificationBrowser {
     this.maxWaitMs = options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this.allowManualFallback = options.allowManualFallback ?? true;
-    this.userAgent = options.userAgent?.trim() || DEFAULT_BROWSER_USER_AGENT;
+    // Preserve the installed Chrome UA by default. An explicit UA override can
+    // be supplied for controlled fixtures, but a hard-coded version can make
+    // Client Hints and the browser's native UA disagree under anti-bot checks.
+    this.userAgent = options.userAgent?.trim() || process.env.XIANYU_BROWSER_USER_AGENT?.trim() || undefined;
   }
 
   get enabled(): boolean { return this.mode !== 'disabled'; }
 
   async waitForCompletion(input: { verificationUrl: string; initialCookieSnapshot?: XianyuCookieSnapshot; allowManualFallback?: boolean; maxWaitMs?: number; pollIntervalMs?: number }): Promise<XianyuVerificationBrowserResult> {
+    const verificationKey = `${input.verificationUrl}\u0000${JSON.stringify(input.initialCookieSnapshot ?? [])}`;
+    const active = this.activeVerifications.get(verificationKey);
+    if (active) return active;
+    const task = this.runVerification(input);
+    this.activeVerifications.set(verificationKey, task);
+    try {
+      return await task;
+    } finally {
+      if (this.activeVerifications.get(verificationKey) === task) this.activeVerifications.delete(verificationKey);
+    }
+  }
+
+  private async runVerification(input: { verificationUrl: string; initialCookieSnapshot?: XianyuCookieSnapshot; allowManualFallback?: boolean; maxWaitMs?: number; pollIntervalMs?: number }): Promise<XianyuVerificationBrowserResult> {
     if (this.mode === 'disabled') throw new Error('XIANYU_VERIFICATION_BROWSER_DISABLED');
     assertVerificationUrl(input.verificationUrl);
     const maxWaitMs = Math.max(250, Math.floor(input.maxWaitMs ?? this.maxWaitMs));
     const pollIntervalMs = Math.max(25, Math.floor(input.pollIntervalMs ?? this.pollIntervalMs));
-    const browser = await this.prepareBrowser(input.verificationUrl);
+    const allowManualFallback = input.allowManualFallback ?? this.allowManualFallback;
+    // An automatic, non-interactive verification must never flash a visible
+    // blank Chrome window. QR/manual login keeps the configured headed mode.
+    // Headless Chrome is challenged more aggressively by the platform. Auto
+    // solving therefore uses the installed, headed Chrome engine but keeps the
+    // owned window off-screen so users never see an empty verification tab.
+    // Set XIANYU_VERIFICATION_AUTO_HEADLESS=true only for CI environments with
+    // no desktop session.
+    const useHeadless = shouldUseHeadlessVerificationBrowser(this.sliderMode, this.headless);
+    // Automatic solving is non-interactive by contract. Keep the owned
+    // browser fully off-screen even when the caller would otherwise allow a
+    // manual fallback; revealing a headed auto-solver only shows a transient
+    // blank tab and invites a second, conflicting verification flow.
+    const hideWindow = shouldHideVerificationWindow(this.sliderMode, useHeadless);
+    const browser = await this.prepareBrowser(useHeadless, hideWindow);
     let cdp: CdpConnection | undefined;
     try {
       cdp = await connectToChrome(browser.debugPort, maxWaitMs, pollIntervalMs, input.verificationUrl);
       await cdp.send('Page.enable');
       await cdp.send('Runtime.enable');
       await cdp.send('Network.enable');
-      await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
-        source: `Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh', 'en'] });`,
-      });
-      await cdp.send('Emulation.setUserAgentOverride', { userAgent: this.userAgent, platform: 'Windows', acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8' }).catch(() => undefined);
-      const initialCookieSnapshot = clearCaptchaChallengeCookies(input.initialCookieSnapshot);
+      await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: buildAutomationEvasionScript() });
+      await cdp.send('Emulation.setAutomationOverride', { enabled: false }).catch(() => undefined);
+      if (browser.ownsProcess && hideWindow && !useHeadless) await moveVerificationWindowOffscreen(cdp);
+      if (this.userAgent && this.mode === 'connect') {
+        const major = xianyuChromeVersion(this.userAgent).split('.')[0] || '153';
+        await cdp.send('Emulation.setUserAgentOverride', {
+          userAgent: this.userAgent,
+          platform: 'Windows',
+          acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8',
+          userAgentMetadata: {
+            brands: [
+              { brand: 'Not(A:Brand', version: '99' },
+              { brand: 'Chromium', version: major },
+              { brand: 'Google Chrome', version: major },
+            ],
+            fullVersionList: [
+              { brand: 'Not(A:Brand', version: '99.0.0.0' },
+              { brand: 'Chromium', version: xianyuChromeVersion(this.userAgent) },
+              { brand: 'Google Chrome', version: xianyuChromeVersion(this.userAgent) },
+            ],
+            fullVersion: xianyuChromeVersion(this.userAgent),
+            platform: 'Windows',
+            platformVersion: '10.0.0',
+            architecture: 'x86',
+            model: '',
+            mobile: false,
+          },
+        }).catch(() => undefined);
+      }
+      // The x5secdata/x5sectag challenge markers are part of the active
+      // challenge binding. Removing them before navigation makes NC reject an
+      // otherwise valid drag because the browser session no longer matches the
+      // verification URL. They are removed only after a fresh x5sec is seen.
+      const initialCookieSnapshot = input.initialCookieSnapshot ?? [];
+      const verificationCookieUrl = resolveVerificationCookieUrl(input.verificationUrl);
       if (initialCookieSnapshot.length > 0) {
         await cdp.send('Network.setCookies', {
           cookies: initialCookieSnapshot.map((cookie) => ({
             name: cookie.name,
             value: cookie.value,
-            ...(cookie.domain ? { domain: cookie.domain } : { url: 'https://www.goofish.com/' }),
+            ...(cookie.domain ? { domain: cookie.domain } : { url: verificationCookieUrl }),
             ...(cookie.path ? { path: cookie.path } : {}),
             ...(cookie.expires !== undefined ? { expires: cookie.expires } : {}),
             ...(cookie.httpOnly !== undefined ? { httpOnly: cookie.httpOnly } : {}),
@@ -125,6 +185,16 @@ export class XianyuVerificationBrowser {
       }
       await cdp.send('Page.navigate', { url: input.verificationUrl });
       await waitForPageContent(cdp, maxWaitMs, pollIntervalMs);
+      // Chrome can restore the window bounds after the first real navigation.
+      // Re-apply the hidden bounds after the page is mounted so the transient
+      // about:blank target can never remain visible to the user.
+      if (browser.ownsProcess && hideWindow && !useHeadless) await moveVerificationWindowOffscreen(cdp);
+      // NC mounts the visible handle before its challenge callbacks finish
+      // wiring. Give the page a short, bounded settle window so the first
+      // trusted drag is handled by the live widget instead of a half-mounted
+      // DOM node.
+      await sleep(750);
+      if (browser.ownsProcess && !useHeadless && this.sliderMode !== 'auto' && allowManualFallback) await revealVerificationWindow(cdp);
 
       if (this.sliderMode === 'auto') {
         try {
@@ -134,8 +204,9 @@ export class XianyuVerificationBrowser {
           }).solve();
           if (!sliderResult.success) {
             const reason = sliderResult.failureReason ?? 'unknown';
-            console.warn(JSON.stringify({ component: 'xianyu-verification', event: 'slider_auto_solve_failed', reason }));
-            if (!(input.allowManualFallback ?? this.allowManualFallback)) {
+            console.warn(JSON.stringify({ component: 'xianyu-verification', event: 'slider_auto_solve_failed', reason, attempts: sliderResult.attempts, distance: sliderResult.distance, trajectoryPoints: sliderResult.trajectoryPoints }));
+            if (process.env.XIANYU_VERIFICATION_DEBUG_SCREENSHOT === 'true') await captureVerificationDebug(cdp, reason);
+            if (!allowManualFallback) {
               throw new Error(`XIANYU_VERIFICATION_AUTO_SOLVE_FAILED:${reason}`);
             }
           } else {
@@ -143,7 +214,7 @@ export class XianyuVerificationBrowser {
           }
         } catch (error) {
           console.warn(JSON.stringify({ component: 'xianyu-verification', event: 'slider_auto_solve_failed', reason: error instanceof Error ? error.message : String(error) }));
-          if (!(input.allowManualFallback ?? this.allowManualFallback)) throw error;
+          if (!allowManualFallback) throw error;
         }
       }
 
@@ -164,12 +235,12 @@ export class XianyuVerificationBrowser {
       throw new Error('XIANYU_VERIFICATION_TIMEOUT');
     } finally {
       cdp?.close();
-      if (browser.ownsProcess && browser.child && browser.child.exitCode === null) browser.child.kill();
+      if (browser.ownsProcess && browser.child) await terminateOwnedBrowser(browser.child);
       if (browser.ownsUserDataDir && browser.userDataDir) await rm(browser.userDataDir, { recursive: true, force: true }).catch(() => undefined);
     }
   }
 
-  private async prepareBrowser(verificationUrl: string): Promise<BrowserProcess> {
+  private async prepareBrowser(useHeadless: boolean, hideWindow = false): Promise<BrowserProcess> {
     if (this.mode === 'connect') {
       if (!this.debugPort) throw new Error('XIANYU_VERIFICATION_DEBUG_PORT_REQUIRED');
       return { ownsProcess: false, debugPort: this.debugPort, ownsUserDataDir: false };
@@ -180,8 +251,9 @@ export class XianyuVerificationBrowser {
     const ownsUserDataDir = !this.userDataDir;
     const userDataDir = this.userDataDir ?? await mkdtemp(join(tmpdir(), 'xianyu-verification-'));
     const args = [
-      ...(this.headless ? ['--headless=new'] : []),
+      ...(useHeadless ? ['--headless=new'] : []),
       '--disable-blink-features=AutomationControlled',
+      '--disable-features=AutomationControlled',
       '--disable-popup-blocking',
       '--disable-background-timer-throttling',
       '--disable-backgrounding-occluded-windows',
@@ -193,12 +265,76 @@ export class XianyuVerificationBrowser {
       `--remote-debugging-port=${debugPort}`,
       `--user-data-dir=${userDataDir}`,
       '--window-size=1440,900',
-      `--user-agent=${this.userAgent}`,
-      verificationUrl,
+      '--lang=zh-CN',
+      ...(this.userAgent ? [`--user-agent=${this.userAgent}`] : []),
+      ...(!useHeadless && hideWindow ? ['--start-minimized', '--window-position=-32000,-32000'] : []),
+      ...(!useHeadless && !hideWindow ? ['--start-minimized'] : []),
+      // Start from a deterministic target and navigate only after CDP has
+      // attached. Passing the challenge URL on the command line can leave a
+      // transient about:blank target selected by CDP and produces a visible
+      // empty page while the real target is still loading.
+      'about:blank',
     ];
     const child = spawn(executablePath, args, { stdio: 'ignore', windowsHide: true });
     return { child, ownsProcess: true, debugPort, userDataDir, ownsUserDataDir };
   }
+}
+
+export function shouldUseHeadlessVerificationBrowser(sliderMode: XianyuSliderMode, configuredHeadless: boolean): boolean {
+  if (configuredHeadless) return true;
+  return sliderMode === 'auto' && process.env.XIANYU_VERIFICATION_AUTO_HEADLESS === 'true';
+}
+
+export function shouldHideVerificationWindow(sliderMode: XianyuSliderMode, useHeadless: boolean): boolean {
+  return sliderMode === 'auto' && !useHeadless;
+}
+
+export function resolveVerificationCookieUrl(verificationUrl: string): string {
+  const url = new URL(verificationUrl);
+  url.hash = '';
+  url.search = '';
+  if (!url.pathname) url.pathname = '/';
+  return url.toString();
+}
+
+async function terminateOwnedBrowser(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null && child.signalCode !== null) return;
+  const pid = child.pid;
+  if (process.platform === 'win32' && pid) {
+    await new Promise<void>((resolve) => {
+      execFile('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true }, () => resolve());
+    });
+  } else {
+    try { child.kill('SIGTERM'); } catch { /* already exited */ }
+  }
+  if (child.exitCode !== null) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, 2_000);
+    child.once('exit', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+function buildAutomationEvasionScript(): string {
+  // Keep the patch intentionally small. Large fingerprint rewrites tend to
+  // create contradictions that are easier to detect than the automation flag.
+  return `(() => {
+    try {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true });
+      delete Object.getPrototypeOf(navigator).webdriver;
+    } catch {}
+    try {
+      delete window.playwright;
+      delete window.__playwright;
+      delete window.__pw_manual;
+      delete window.__PW_inspect;
+      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+    } catch {}
+  })();`;
 }
 
 function assertVerificationUrl(value: string): void {
@@ -215,11 +351,24 @@ function assertVerificationUrl(value: string): void {
 }
 
 async function waitForPageContent(cdp: CdpConnection, maxWaitMs: number, pollIntervalMs: number): Promise<void> {
-  const deadline = Date.now() + maxWaitMs;
+  const deadline = Date.now() + Math.min(maxWaitMs, 12_000);
   let ready = false;
   let blank = true;
   while (Date.now() < deadline) {
-    const result = await cdp.send('Runtime.evaluate', { expression: `({ ready: document.readyState !== 'loading', blank: !document.body || !document.body.innerText.trim() })`, returnByValue: true });
+    const result = await cdp.send('Runtime.evaluate', {
+      expression: `(() => {
+        const body = document.body;
+        const html = document.documentElement;
+        const text = body?.innerText?.trim() ?? '';
+        const renderedNode = body?.querySelector('iframe,canvas,svg,img,video,object,embed,main,section,form,[class],[id],[role]');
+        const meaningfulMarkup = (body?.innerHTML?.trim().length ?? 0) > 48 || (html?.outerHTML?.length ?? 0) > 220;
+        return {
+          ready: document.readyState !== 'loading',
+          blank: !body || (!text && !renderedNode && !meaningfulMarkup),
+        };
+      })()`,
+      returnByValue: true,
+    });
     const value = (result.result as { value?: unknown } | undefined)?.value;
     if (value && typeof value === 'object') {
       const state = value as { ready?: unknown; blank?: unknown };
@@ -231,6 +380,32 @@ async function waitForPageContent(cdp: CdpConnection, maxWaitMs: number, pollInt
   }
   if (ready && blank) throw new Error('XIANYU_VERIFICATION_PAGE_EMPTY');
   throw new Error('XIANYU_VERIFICATION_PAGE_LOAD_TIMEOUT');
+}
+
+async function revealVerificationWindow(cdp: CdpConnection): Promise<void> {
+  try {
+    const windowInfo = await cdp.send('Browser.getWindowForTarget');
+    const windowId = Number(windowInfo.windowId);
+    if (!Number.isFinite(windowId)) return;
+    await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } });
+  } catch {
+    // Window management is best-effort; it must not fail verification.
+  }
+}
+
+async function captureVerificationDebug(cdp: CdpConnection, reason: string): Promise<void> {
+  try {
+    const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png' });
+    const base64 = typeof screenshot.data === 'string' ? screenshot.data : undefined;
+    const dom = await cdp.send('Runtime.evaluate', { expression: 'document.documentElement?.outerHTML ?? ""', returnByValue: true });
+    const html = (dom.result as { value?: unknown } | undefined)?.value;
+    const root = join(process.cwd(), 'artifacts', 'debug');
+    await mkdir(root, { recursive: true });
+    if (base64) await writeFile(join(root, 'xianyu-slider-failure.png'), Buffer.from(base64, 'base64'));
+    await writeFile(join(root, 'xianyu-slider-failure.html'), typeof html === 'string' ? html : `<!-- ${reason} -->`);
+  } catch {
+    // Diagnostics must never alter the verification result.
+  }
 }
 
 function isBlankOrInvalidVerificationPage(value: string): boolean {
@@ -287,10 +462,17 @@ async function connectToChrome(debugPort: number, maxWaitMs: number, pollInterva
     const pages = items.filter((item) => item.type === 'page' && item.webSocketDebuggerUrl);
     const preferred = preferredUrl ? (() => {
       try {
-        const hostname = new URL(preferredUrl).hostname;
-        return pages.find((item) => {
+        const expected = new URL(preferredUrl);
+        const exact = pages.find((item) => String((item as CdpTarget & { url?: string }).url ?? '') === expected.href);
+        if (exact) return exact;
+        const hostname = expected.hostname;
+        const sameHost = pages.find((item) => {
           try { return new URL(String((item as CdpTarget & { url?: string }).url ?? '')).hostname === hostname; } catch { return false; }
         });
+        if (sameHost) return sameHost;
+        // If Chrome has not navigated yet, prefer the target we can control
+        // over an unrelated non-blank tab from a reused browser instance.
+        return pages.find((item) => String((item as CdpTarget & { url?: string }).url ?? '').startsWith('about:blank'));
       } catch { return undefined; }
     })() : undefined;
     return preferred ?? pages.find((item) => !String((item as CdpTarget & { url?: string }).url ?? '').startsWith('about:blank')) ?? pages[0];
@@ -302,7 +484,17 @@ async function connectToChrome(debugPort: number, maxWaitMs: number, pollInterva
   const socket = new WebSocketCtor(url);
   await waitForSocketOpen(socket, maxWaitMs);
   let nextId = 0;
-  const pending = new Map<number, { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void }>();
+  const pending = new Map<number, { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+  let closed = false;
+  const rejectPending = (error: Error): void => {
+    if (closed) return;
+    closed = true;
+    for (const [id, entry] of pending) {
+      clearTimeout(entry.timer);
+      entry.reject(error);
+      pending.delete(id);
+    }
+  };
   socket.addEventListener('message', (event) => {
     const data = typeof event.data === 'string' ? event.data : String(event.data);
     let message: { id?: number; result?: Record<string, unknown>; error?: { message?: string } };
@@ -311,17 +503,56 @@ async function connectToChrome(debugPort: number, maxWaitMs: number, pollInterva
     const entry = pending.get(message.id);
     if (!entry) return;
     pending.delete(message.id);
+    clearTimeout(entry.timer);
     if (message.error) entry.reject(new Error(message.error.message ?? 'XIANYU_VERIFICATION_CDP_ERROR'));
     else entry.resolve(message.result ?? {});
   });
+  socket.addEventListener('error', () => rejectPending(new Error('XIANYU_VERIFICATION_CDP_CONNECTION_CLOSED')));
+  socket.addEventListener('close', () => rejectPending(new Error('XIANYU_VERIFICATION_CDP_CONNECTION_CLOSED')));
   return {
     send: (method, params = {}) => new Promise((resolve, reject) => {
+      if (closed) {
+        reject(new Error('XIANYU_VERIFICATION_CDP_CONNECTION_CLOSED'));
+        return;
+      }
       const id = ++nextId;
-      pending.set(id, { resolve, reject });
-      socket.send(JSON.stringify({ id, method, params }));
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`XIANYU_VERIFICATION_CDP_TIMEOUT:${method}`));
+      }, Math.max(1_000, Math.min(maxWaitMs, 10_000)));
+      pending.set(id, { resolve, reject, timer });
+      try {
+        socket.send(JSON.stringify({ id, method, params }));
+      } catch (error) {
+        clearTimeout(timer);
+        pending.delete(id);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
     }),
-    close: () => socket.close(),
+    close: () => {
+      rejectPending(new Error('XIANYU_VERIFICATION_CDP_CONNECTION_CLOSED'));
+      try { socket.close(); } catch { /* already closed */ }
+    },
   };
+}
+
+async function moveVerificationWindowOffscreen(cdp: CdpConnection): Promise<void> {
+  try {
+    const windowInfo = await cdp.send('Browser.getWindowForTarget');
+    const windowId = Number(windowInfo.windowId);
+    if (!Number.isFinite(windowId)) return;
+    await cdp.send('Browser.setWindowBounds', {
+      windowId,
+      bounds: { windowState: 'normal', left: -32000, top: -32000, width: 1, height: 1 },
+    });
+    await cdp.send('Browser.setWindowBounds', {
+      windowId,
+      bounds: { windowState: 'minimized', left: -32000, top: -32000, width: 1, height: 1 },
+    });
+  } catch {
+    // Window management is best-effort; the off-screen launch flags remain
+    // the primary guard and must not fail an otherwise valid challenge.
+  }
 }
 
 interface WebSocketLike {
