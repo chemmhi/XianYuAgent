@@ -98,7 +98,7 @@ export class CouponService {
     const pageSize = query.pageSize ?? 20;
     if (!Number.isInteger(page) || page < 1) throw new ServiceError(422, 'VALIDATION_FAILED', 'page must be a positive integer');
     if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new ServiceError(422, 'VALIDATION_FAILED', 'pageSize must be between 1 and 100');
-    if (query.status && !['draft', 'active', 'paused', 'closed', 'exhausted', 'voided'].includes(query.status)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon batch status');
+    if (query.status && !['draft', 'active', 'paused', 'closed', 'voided'].includes(query.status)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon batch status');
     if (query.purpose && !['text', 'data', 'api', 'image'].includes(query.purpose)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon purpose');
     if (query.sortBy && query.sortBy !== 'createdAt') throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon sort field');
     if (query.sortOrder && !['asc', 'desc'].includes(query.sortOrder)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon sort order');
@@ -133,7 +133,7 @@ export class CouponService {
   async update(input: { adminId: string; batchId: string; patch: { label?: string; purpose?: string; deliveryScope?: CouponDeliveryScope; status?: CouponBatchStatus; metadata?: CouponBatchMetadata }; requestId: string; traceId: string }): Promise<ReturnType<CouponService['toBatchView']>> {
     if (input.patch.purpose && !['text', 'data', 'api', 'image'].includes(input.patch.purpose)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon purpose');
     if (input.patch.deliveryScope && !['system_only', 'operator_only', 'buyer_deliverable'].includes(input.patch.deliveryScope)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid deliveryScope');
-    if (input.patch.status && !['draft', 'active', 'paused', 'closed', 'exhausted', 'voided'].includes(input.patch.status)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon batch status');
+    if (input.patch.status && !['draft', 'active', 'paused', 'closed', 'voided'].includes(input.patch.status)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid coupon batch status');
     try {
       const imageUrls = input.patch.metadata?.imageUrls;
       const patch = input.patch.metadata === undefined ? input.patch : { ...input.patch, metadata: this.couponAssets.withoutImages(input.patch.metadata) };

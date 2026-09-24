@@ -59,7 +59,12 @@ test('commit is idempotent and prevents release after finalization', async () =>
   const replay = await value.store.commitCouponReservation({ adminId: value.admin.id, reservationId: reserved.reservationId, executionKey: input.executionKey });
   assert.equal(committed.status, 'committed');
   assert.deepEqual(replay, committed);
-  assert.equal((await value.store.getCouponBatch(value.admin.id, value.batch.id))?.items?.filter((item) => item.status === 'consumed').length, 1);
+  const reusableBatch = await value.store.getCouponBatch(value.admin.id, value.batch.id);
+  assert.equal(reusableBatch?.status, 'active');
+  assert.equal(reusableBatch?.items?.filter((item) => item.status === 'available').length, 1);
+  assert.equal(reusableBatch?.items?.filter((item) => item.status === 'consumed').length, 0);
+  const second = await value.store.reserveCoupon(reservationInput(value, 'commit-key-second'));
+  assert.equal(second.items[0]?.content, committed.items[0]?.content);
   await assert.rejects(() => value.store.releaseCouponReservation({ adminId: value.admin.id, reservationId: reserved.reservationId, executionKey: input.executionKey, reason: 'late_release' }), /COUPON_RESERVATION_FINALIZED/);
 });
 

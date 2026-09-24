@@ -648,7 +648,7 @@ export class PostgresStore implements Store {
       }
       const countResult = await client.query('select count(*)::int as count from coupons.coupon_items where batch_id=$1', [batch.id]);
       const count = Number(countResult.rows[0]?.count ?? 0);
-      const updated = await client.query("update coupons.coupon_batches set total_count=$2,status=case when status='exhausted' and $2>0 then 'active' else status end,version=version+1,updated_at=now() where id=$1 returning *", [batch.id, count]);
+      const updated = await client.query('update coupons.coupon_batches set total_count=$2,version=version+1,updated_at=now() where id=$1 returning *', [batch.id, count]);
       await client.query('commit');
       return { batch: this.toCouponBatch(updated.rows[0]), items: created, rejected };
     } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
@@ -707,7 +707,7 @@ export class PostgresStore implements Store {
       const batchIds = uniqueRows.map((row) => String(row.id));
       const lockRows = await client.query('select * from coupons.coupon_batches where id=any($1::uuid[]) order by id for update', [batchIds]);
       if (lockRows.rowCount !== batchIds.length) throw new Error('COUPON_BATCH_NOT_FOUND');
-      if (lockRows.rows.some((row) => row.status !== 'active' && row.status !== 'exhausted')) throw new Error('COUPON_BATCH_UNAVAILABLE');
+      if (lockRows.rows.some((row) => row.status !== 'active')) throw new Error('COUPON_BATCH_UNAVAILABLE');
       if (lockRows.rows.some((row) => row.delivery_scope !== 'buyer_deliverable')) throw new Error('COUPON_BATCH_NOT_DELIVERABLE');
       const fingerprint = reservationFingerprint({ adminId: input.adminId, accountId: input.accountId, batchIds, quantity: normalized.quantity, purpose: normalized.purpose });
       const existingResult = await client.query('select * from coupons.coupon_reservations where execution_key=$1 for update', [normalized.executionKey]);
@@ -741,8 +741,6 @@ export class PostgresStore implements Store {
       const itemIds = selected.rows.map((row) => String(row.id));
       const itemPlaceholders = itemIds.map((_, index) => `($1,$${index + 2})`).join(',');
       await client.query(`insert into coupons.coupon_reservation_items (reservation_id,item_id) values ${itemPlaceholders}`, [reservationId, ...itemIds]);
-      await client.query(`update coupons.coupon_batches b set status='exhausted',version=version+1,updated_at=now()
-        where b.id=any($1::uuid[]) and b.status='active' and not exists (select 1 from coupons.coupon_items i where i.batch_id=b.id and i.status='available')`, [batchIds]);
       const record = await this.loadCouponReservation(client, { id: reservationId, admin_id: input.adminId, account_id: input.accountId, execution_key: normalized.executionKey, purpose: normalized.purpose, batch_ids: batchIds, fingerprint, quantity: normalized.quantity, status: 'reserved', lease_until: leaseUntil, reason: null, created_at: existing?.created_at ?? nowIso, updated_at: nowIso, finalized_at: null });
       await client.query('commit');
       return record;
@@ -778,12 +776,10 @@ export class PostgresStore implements Store {
       if (row.status === 'expired') { await client.query('commit'); throw new Error('COUPON_RESERVATION_EXPIRED'); }
       if (row.status !== 'reserved') throw new Error('COUPON_RESERVATION_NOT_ACTIVE');
       if (new Date(String(row.lease_until)).getTime() <= Date.now()) { await this.expireCouponReservations(client); throw new Error('COUPON_RESERVATION_EXPIRED'); }
-      const consumed = await client.query(`update coupons.coupon_items i set status='consumed',reserved_until=null,consumed_at=now()
+      const reusable = await client.query(`update coupons.coupon_items i set status='available',reserved_until=null,consumed_at=null
         where i.status='reserved' and i.id in (select ri.item_id from coupons.coupon_reservation_items ri where ri.reservation_id=$1) returning i.id`, [input.reservationId]);
-      if ((consumed.rowCount ?? 0) !== Number(row.quantity)) throw new Error('COUPON_RESERVATION_INCONSISTENT');
+      if ((reusable.rowCount ?? 0) !== Number(row.quantity)) throw new Error('COUPON_RESERVATION_INCONSISTENT');
       await client.query("update coupons.coupon_reservations set status='committed',reason=null,finalized_at=now(),updated_at=now() where id=$1", [input.reservationId]);
-      await client.query(`update coupons.coupon_batches b set status='exhausted',version=version+1,updated_at=now()
-        where b.id=any($1::uuid[]) and b.status='active' and not exists (select 1 from coupons.coupon_items i where i.batch_id=b.id and i.status='available')`, [row.batch_ids]);
       const committed = await client.query('select * from coupons.coupon_reservations where id=$1', [input.reservationId]);
       const record = await this.loadCouponReservation(client, committed.rows[0]);
       await client.query('commit');
@@ -808,8 +804,6 @@ export class PostgresStore implements Store {
       await client.query(`update coupons.coupon_items i set status='available',reserved_until=null
         where i.status='reserved' and i.id in (select ri.item_id from coupons.coupon_reservation_items ri where ri.reservation_id=$1)`, [input.reservationId]);
       await client.query("update coupons.coupon_reservations set status='released',reason=$2,finalized_at=now(),updated_at=now() where id=$1", [input.reservationId, input.reason.trim() || 'released']);
-      await client.query(`update coupons.coupon_batches b set status='active',version=version+1,updated_at=now()
-        where b.id=any($1::uuid[]) and b.status='exhausted' and exists (select 1 from coupons.coupon_items i where i.batch_id=b.id and i.status='available')`, [row.batch_ids]);
       const released = await client.query('select * from coupons.coupon_reservations where id=$1', [input.reservationId]);
       const record = await this.loadCouponReservation(client, released.rows[0]);
       await client.query('commit');
@@ -1623,8 +1617,6 @@ export class PostgresStore implements Store {
     from coupons.coupon_reservation_items ri
     join expired e on e.id=ri.reservation_id
     where i.id=ri.item_id and i.status='reserved'`);
-    await client.query(`update coupons.coupon_batches b set status='active',version=version+1,updated_at=now()
-      where b.status='exhausted' and exists (select 1 from coupons.coupon_items i where i.batch_id=b.id and i.status='available')`);
   }
 
   private async loadCouponReservation(client: PoolClient, row: Row): Promise<CouponReservationRecord> {
@@ -1657,7 +1649,6 @@ export class PostgresStore implements Store {
         for (let index = 0; index < required; index += 1) {
           await client.query('insert into coupons.coupon_items (id,batch_id,content_ciphertext,status) values ($1,$2,$3,\'available\')', [createId(), batchId, encryptCouponValue('__CONFIGURED_COUPON__')]);
         }
-        if (required > 0 && row.status === 'exhausted') await client.query("update coupons.coupon_batches set status='active',version=version+1,updated_at=now() where id=$1", [batchId]);
       }
       await client.query('update coupons.coupon_batches set total_count=(select count(*) from coupons.coupon_items where batch_id=$1),version=version+1,updated_at=now() where id=$1', [batchId]);
     }

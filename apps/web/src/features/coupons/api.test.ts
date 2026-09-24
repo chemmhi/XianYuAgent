@@ -7,14 +7,14 @@ const batchPayload = {
   label: '资料包',
   purpose: 'text',
   deliveryScope: 'buyer_deliverable',
-  status: 'exhausted',
+  status: 'active',
   version: 3,
   updatedAt: '2026-09-19T00:00:00.000Z',
   productBindings: [{ id: 'binding-001', productId: 'product-001', priority: 0, status: 'active' }],
 } as const;
 
 describe('coupons api adapter', () => {
-  it('normalizes backend ids, binding status and exhausted batches', async () => {
+  it('normalizes backend ids and binding status for reusable batches', async () => {
     const get: CouponsApiTransport['get'] = async <T>() => ({ success: true, data: { items: [batchPayload], total: 1, page: 1, pageSize: 20, totalPages: 1 } } as T);
     const api = createCouponsApi({
       get,
@@ -24,7 +24,7 @@ describe('coupons api adapter', () => {
     });
 
     const page = await api.list({ keyword: '资料' });
-    expect(page.items[0]).toMatchObject({ batchId: '1', status: 'exhausted' });
+    expect(page.items[0]).toMatchObject({ batchId: '1', status: 'active' });
     expect(page.items[0]).not.toHaveProperty('stockAlert');
     expect(page.items[0].bindings[0]).toMatchObject({ bindingId: 'binding-001', batchId: '1', status: 'active' });
   });

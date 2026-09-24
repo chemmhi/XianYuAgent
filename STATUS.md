@@ -1,5 +1,13 @@
 # XianyuSellerAgent 项目状态
 
+## 2026-09-24 卡券可重复使用与关联删除确认修复
+
+- 目标行为：卡券发货提交后回到 `available`，不再把批次标记为 `exhausted`，同一配置可重复用于后续发货；历史 `exhausted` 批次和 `consumed` 条目通过 `040_reusable_coupons.sql` 直接归一化。
+- 删除交互：删除单张或批量卡券统一使用项目现有 modal 样式；已关联商品时明确提示商品列表和商品自动化配置会移除该卡券，支持取消后保持不变，再确认删除。
+- 商品联动：删除后商品详情/商品列表查询不再返回已作废卡券；新增 API smoke 与 Chrome/CDP 断言覆盖持久化结果。
+- 已验证：API/Web typecheck、API/Web build、API 全量 smoke、Web 全量 88 files / 303 tests、`coupons-smoke.mjs`、Memory/PostgreSQL reservation smoke、Chrome/CDP coupons E2E Memory 连续 2 轮及 PostgreSQL 1 轮、`git diff --check`。
+- 状态：`READY_FOR_MERGE`；合入前仍需完成主线 merge lock、主线复验与登记表回写。
+
 ## 2026-09-24 卡券发券可靠性修复已合入 main
 
 - 目标行为：多规格订单持久化 `skuSpec` 并参与卡券精确匹配；图片卡券说明文本在 IM 断线/未连接/超时类错误时只重试一次并复用同一请求标识，避免重复消息和错误进入人工复核。

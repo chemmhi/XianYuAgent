@@ -1,4 +1,4 @@
-export type CouponBatchStatus = 'draft' | 'active' | 'paused' | 'closed' | 'exhausted' | 'voided';
+export type CouponBatchStatus = 'draft' | 'active' | 'paused' | 'closed' | 'voided';
 export type DeliveryScope = 'system_only' | 'operator_only' | 'buyer_deliverable';
 export type CouponItemStatus = 'available' | 'reserved' | 'consumed' | 'delivered' | 'void' | 'exhausted';
 
