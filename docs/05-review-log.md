@@ -628,3 +628,13 @@
 | S5-R125 | 质量 / 发布 | 类型检查、构建、全量测试、API smoke、真实 API + Chrome/CDP + PostgreSQL 是否完成 | root + verification_audit | PASS（受控环境） | API/Web typecheck；API/Web build；API 全量测试；Web 88 files / 304 tests；`coupons-smoke.mjs`；Chrome/CDP Memory 1 轮 + PostgreSQL 1 轮；`git diff --check` |
 
 本轮结论：卡券删除弹窗视觉和交互问题已修复；状态列统一为启用开关并覆盖加载禁用态；自动化发送只消费启用的买家可交付卡券；批量数据卡保持可重复使用并按成功发送次数轮换。受控跨层门禁通过，真实闲鱼外部 mutation 仍保持既有隔离测试账号边界。提交 `adfd372` 已以 `--no-ff` 合入 `main`，merge commit 为 `aff9390`；主线 typecheck、build、全量测试、定向回归、Memory/PostgreSQL Chrome/CDP E2E 与 diff-check 复验通过。
+
+### 2026-09-24：商品发布官方主流程回放复审
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R126 | 业务 / 前端 | 图片与描述驱动的规格提示、官方四种发货设置、一口价邮费必填、地址跳过状态是否在桌面/移动端可见且与请求契约一致 | root | PASS（受控环境） | `ProductPublishForm.tsx`、`product-publish.ts`、`validation.ts`、`product-publish.test.ts`；商品发布视觉回归桌面/移动截图 |
+| S5-R127 | API / 数据流 | 图片上传、属性推荐、发布接口的顺序；固定邮费字段映射；发布成功后本地 `published` 与 `externalProductRef` 持久化；Provider 驱动文案优化 | root | PASS（受控环境） | `apps/api/src/product-publish.ts`、`apps/api/scripts/product-publish.test.ts`；API 发布 3/3；视觉回归 persistence passed；`official-flow.fixture.json` |
+| S5-R128 | 质量 / 外部验收 | 是否已在真实闲鱼账号完成一次受控外部发布并核对商品详情页 | root | PARTIALLY_VERIFIED | 真实外部浏览器/账号发布本轮未执行；已保留脱敏回放 fixture，禁止将 stub/fixture 证据升级为真实外部发布通过 |
+
+本轮结论：本地前端、API、持久化与脱敏回放链路已按官方主流程完成并通过受控验证；地址流程按用户要求暂时跳过。真实闲鱼外部发布仍需在隔离账号/当前登录态下补做一次人工或可审计 E2E 复核。

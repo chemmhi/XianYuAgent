@@ -1,4 +1,5 @@
 import type { ProductAssetVM, ProductCouponVM, ProductDraftInput, ProductDraftPatch, ProductFilters, ProductSkuVM, ProductStatus, ProductSyncResultVM, ProductVM, ProductsPageVM, XianyuItemDetailVM, XianyuItemImageVM, XianyuItemSellerVM } from './types';
+import type { ProductPostageMode, PublishAttachment } from './product-publish';
 
 export interface ProductsApiTransport {
   get<T>(path: string): Promise<T>;
@@ -13,7 +14,33 @@ export interface ProductsApi {
   syncXianyuDetail(productId: string): Promise<XianyuItemDetailVM>;
   createDraft(input: ProductDraftInput, options?: { idempotencyKey?: string }): Promise<ProductVM>;
   updateDraft(productId: string, patch: ProductDraftPatch, options: { configVersion: number; idempotencyKey?: string }): Promise<ProductVM>;
+  publishProduct(input: ProductPublishRequest, options?: { idempotencyKey?: string }): Promise<ProductPublishResultVM>;
+  optimizeDescription(input: { accountId: string; title: string; description: string }, options?: { idempotencyKey?: string }): Promise<{ description: string; provider: string; model: string }>;
   syncFromXianyu(accountId: string, options?: { pageSize?: number; maxPages?: number; idempotencyKey?: string }): Promise<ProductSyncResultVM>;
+}
+
+export interface ProductPublishRequest {
+  accountId: string;
+  title: string;
+  description: string;
+  categoryCode?: string;
+  priceMinor: number;
+  originalPriceMinor?: number;
+  quantity: number;
+  postageMode: ProductPostageMode;
+  postageMinor?: number;
+  location?: string;
+  attachments: PublishAttachment[];
+}
+
+export interface ProductPublishResultVM {
+  product: ProductVM;
+  itemId: string;
+  itemUrl: string;
+  category: { catId: string; catName: string; channelCatId: string; tbCatId?: string };
+  postageMode: ProductPostageMode;
+  imageUrls: string[];
+  replay: { source: string; steps: Array<{ api: string; status: string }> };
 }
 
 interface ApiEnvelope<T> {
@@ -50,6 +77,16 @@ interface ProductPayload {
   assets?: ProductAssetVM[];
   skuCount?: number;
   assetCount?: number;
+}
+
+interface ProductPublishResultPayload {
+  product: ProductPayload;
+  itemId: string;
+  itemUrl: string;
+  category: { catId: string; catName: string; channelCatId: string; tbCatId?: string };
+  postageMode: ProductPostageMode;
+  imageUrls: string[];
+  replay: { source: string; steps: Array<{ api: string; status: string }> };
 }
 
 interface ProductsPayload {
@@ -339,6 +376,29 @@ export function createProductsApi(transport: ProductsApiTransport): ProductsApi 
       });
       return toProductVM(unwrapEnvelope(payload));
     },
+    async publishProduct(input, options = {}) {
+      const post = requireTransportMethod(transport, 'post');
+      const form = new FormData();
+      form.set('accountId', input.accountId);
+      form.set('title', input.title);
+      form.set('description', input.description);
+      form.set('categoryCode', input.categoryCode ?? '');
+      form.set('priceMinor', String(input.priceMinor));
+      form.set('originalPriceMinor', input.originalPriceMinor === undefined ? '' : String(input.originalPriceMinor));
+      form.set('quantity', String(input.quantity));
+      form.set('postageMode', input.postageMode);
+      form.set('postageMinor', input.postageMinor === undefined ? '' : String(input.postageMinor));
+      // 地址流程按用户要求暂时跳过；后续官方地点选择器接入后再填充结构化 JSON。
+      for (const attachment of input.attachments) if (attachment.file) form.append('images', attachment.file, attachment.file.name);
+      const payload = await post<ProductPublishResultPayload | ApiEnvelope<ProductPublishResultPayload>>('/api/v1/products/publish', form, { headers: { 'Idempotency-Key': options.idempotencyKey ?? idempotencyKey('product-publish') } });
+      const result = unwrapEnvelope(payload);
+      return { ...result, product: toProductVM(result.product) };
+    },
+    async optimizeDescription(input, options = {}) {
+      const post = requireTransportMethod(transport, 'post');
+      const payload = await post<{ description: string; provider: string; model: string } | ApiEnvelope<{ description: string; provider: string; model: string }>>('/api/v1/products/publish/optimize-description', input, { headers: { 'Idempotency-Key': options.idempotencyKey ?? idempotencyKey('product-copy') } });
+      return unwrapEnvelope(payload);
+    },
     async syncFromXianyu(accountId, options = {}) {
       const post = requireTransportMethod(transport, 'post');
       const payload = await post<{ syncRunId: string; accountId: string; fetchedCount: number; createdCount: number; updatedCount: number; skippedLocalDraftCount: number; hasMore: boolean; nextPageNumber?: number; items: ProductPayload[] } | ApiEnvelope<{ syncRunId: string; accountId: string; fetchedCount: number; createdCount: number; updatedCount: number; skippedLocalDraftCount: number; hasMore: boolean; nextPageNumber?: number; items: ProductPayload[] }>>('/api/v1/products/sync', {
@@ -428,6 +488,30 @@ export function createMockProductsApi(seed: ProductVM[] = [
       }
       Object.assign(product, patch, { configVersion: product.configVersion + 1, updatedAt: new Date().toISOString() });
       return product;
+    },
+    async publishProduct(input) {
+      const product: ProductVM = {
+        id: `published-${seed.length + 1}`,
+        accountId: input.accountId,
+        externalProductRef: `mock-item-${seed.length + 1}`,
+        title: input.title,
+        description: input.description,
+        categoryCode: input.categoryCode,
+        attributesJson: { publish: { postageMode: input.postageMode, postageMinor: input.postageMinor, quantity: input.quantity, imageCount: input.attachments.length } },
+        configVersion: 1,
+        priceMinor: input.priceMinor,
+        status: 'published',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        skuCount: 0,
+        assetCount: input.attachments.length,
+      };
+      seed.push(product);
+      const itemId = product.externalProductRef ?? `mock-item-${seed.length}`;
+      return { product, itemId, itemUrl: `https://www.goofish.com/item?id=${itemId}`, category: { catId: input.categoryCode ?? 'mock', catName: input.categoryCode ?? 'Mock', channelCatId: 'mock' }, postageMode: input.postageMode, imageUrls: input.attachments.map((attachment) => attachment.url), replay: { source: 'mock', steps: [] } };
+    },
+    async optimizeDescription(input) {
+      return { description: input.description.trim() ? `${input.description.trim()}\n\n成色与发货信息已保留，请以实物为准。` : '请补充商品卖点、成色、适用场景和发货说明。', provider: 'mock', model: 'mock' };
     },
     async syncFromXianyu(accountId) {
       const items = seed.filter((item) => item.accountId === accountId);

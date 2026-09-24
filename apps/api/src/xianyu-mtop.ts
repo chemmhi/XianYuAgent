@@ -126,6 +126,15 @@ export class XianyuMtopClient {
     return this.call(adminId, accountId, 'mtop.taobao.idlemessage.pc.loginuser.get', '1.0', {}, { spm_cnt: 'a21ybx.im.0.0', needLogin: 'false' });
   }
 
+  /**
+   * Expose the already signed MTOP transport to domain-specific adapters.
+   * The adapter owns payload construction; this client remains responsible for
+   * cookies, signing, retries, response-cookie persistence and failure mapping.
+   */
+  async callApi(adminId: string, accountId: string, api: string, version: string, data: Record<string, unknown>, extraParams: Record<string, string> = {}, options: { referer?: string } = {}): Promise<MtopResult> {
+    return this.call(adminId, accountId, api, version, data, extraParams, options);
+  }
+
   async fetchImToken(adminId: string, accountId: string, deviceId: string): Promise<{ success: boolean; accountInvalid: boolean; errorCode?: string; message?: string; accessToken?: string; cookieHeader: string }> {
     const result = await this.call(adminId, accountId, 'mtop.taobao.idlemessage.pc.login.token', '1.0', { appKey: XIANYU_IM_APP_KEY, deviceId }, { spm_cnt: 'a21ybx.im.0.0', spm_pre: 'a21ybx.item.want.1.14ad3da6ALVq3n', log_id: '14ad3da6ALVq3n' });
     const accessToken = nestedString(result.response, ['data', 'accessToken']);

@@ -1,4 +1,5 @@
 import type { ProductDraftInput, ProductDraftPatch, ProductPublishImageMeta } from './types';
+import { yuanToMinor } from './product-publish';
 
 export type ProductFormValues = {
   accountId: string;
@@ -9,7 +10,7 @@ export type ProductFormValues = {
   priceYuan?: string;
   originalPriceYuan?: string;
   quantity?: string;
-  postageMode?: 'seller' | 'buyer';
+  postageMode?: 'free' | 'distance' | 'fixed' | 'none' | 'seller' | 'buyer';
   postageYuan?: string;
   location?: string;
   publishImages?: ProductPublishImageMeta[];
@@ -29,15 +30,9 @@ export function validateProductForm(values: ProductFormValues): ProductFormError
     if (values.originalPriceYuan?.trim() && (!/^\d+(?:\.\d{1,2})?$/.test(values.originalPriceYuan.trim()) || Number(values.originalPriceYuan) < 0)) errors.originalPriceYuan = '原价必须是非负金额，最多保留 2 位小数。';
     if (values.quantity?.trim() && (!/^\d+$/.test(values.quantity.trim()) || Number(values.quantity) < 1)) errors.quantity = '库存数量必须是大于 0 的整数。';
     if (values.postageYuan?.trim() && (!/^\d+(?:\.\d{1,2})?$/.test(values.postageYuan.trim()) || Number(values.postageYuan) < 0)) errors.postageYuan = '邮费必须是非负金额，最多保留 2 位小数。';
-    if (!values.location?.trim()) errors.location = '请填写发货地。';
+    if ((values.postageMode === 'fixed' || values.postageMode === 'buyer') && !values.postageYuan?.trim()) errors.postageYuan = '一口价模式必须填写邮费。';
   } else if (values.priceMinor.trim() && (!/^\d+$/.test(values.priceMinor.trim()) || Number(values.priceMinor) < 0)) errors.priceMinor = '价格必须是非负整数（单位：分）。';
   return errors;
-}
-
-function yuanToMinor(value?: string): number | undefined {
-  if (!value?.trim()) return undefined;
-  const numeric = Number(value.trim());
-  return Number.isFinite(numeric) && numeric >= 0 ? Math.round(numeric * 100) : undefined;
 }
 
 function publishMeta(values: ProductFormValues) {
@@ -45,7 +40,7 @@ function publishMeta(values: ProductFormValues) {
   return {
     originalPriceMinor: yuanToMinor(values.originalPriceYuan),
     quantity: values.quantity?.trim() ? Number(values.quantity.trim()) : undefined,
-    postageMode: values.postageMode ?? 'seller',
+    postageMode: values.postageMode ?? 'free',
     postageMinor: yuanToMinor(values.postageYuan),
     location: values.location?.trim() || undefined,
     images: values.publishImages ?? [],

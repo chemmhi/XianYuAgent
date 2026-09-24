@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createMockProductsApi, type ProductsApi } from './api';
 import type { ProductDetailState, ProductDraftInput, ProductDraftPatch, ProductFilters, ProductMutationError, ProductsLoadError, ProductsQueryState, ProductVM, XianyuDetailState } from './types';
+import type { ProductPublishFormValues } from './product-publish';
+import { yuanToMinor } from './product-publish';
 
 const defaultProductsApi = createMockProductsApi();
 
@@ -65,6 +67,8 @@ export interface ProductsController {
   closeXianyuDetail: () => void;
   createDraft: (input: ProductDraftInput) => Promise<ProductVM | null>;
   updateDraft: (productId: string, patch: ProductDraftPatch, configVersion: number) => Promise<ProductVM | null>;
+  publishProduct: (values: ProductPublishFormValues) => Promise<boolean>;
+  optimizeDescription: (input: { accountId: string; title: string; description: string }) => Promise<string>;
   syncFromXianyu: (accountId: string) => Promise<boolean>;
   syncError: ProductMutationError | null;
   clearMutation: () => void;
@@ -161,6 +165,39 @@ export function useProductsController(options: { api?: ProductsApi; initialFilte
       return null;
     }
   }, [productsApi, reload]);
+  const publishProduct = useCallback(async (values: ProductPublishFormValues) => {
+    setMutation({ phase: 'saving', error: null });
+    try {
+      const result = await productsApi.publishProduct({
+        accountId: values.accountId.trim(),
+        title: values.title.trim(),
+        description: values.description.trim(),
+        categoryCode: values.categoryCode.trim() || undefined,
+        priceMinor: yuanToMinor(values.priceYuan) ?? 0,
+        originalPriceMinor: yuanToMinor(values.originalPriceYuan),
+        quantity: Number(values.quantity),
+        postageMode: values.postageMode,
+        postageMinor: yuanToMinor(values.postageYuan),
+        attachments: values.attachments,
+      });
+      setMutation({ phase: 'success', error: null });
+      await reload();
+      return Boolean(result.product.externalProductRef || result.itemId);
+    } catch (error) {
+      setMutation({ phase: 'error', error: toProductsMutationError(error) });
+      return false;
+    }
+  }, [productsApi, reload]);
+  const optimizeDescription = useCallback(async (input: { accountId: string; title: string; description: string }) => {
+    try {
+      const result = await productsApi.optimizeDescription(input);
+      setMutation({ phase: 'idle', error: null });
+      return result.description;
+    } catch (error) {
+      setMutation({ phase: 'error', error: toProductsMutationError(error) });
+      return input.description;
+    }
+  }, [productsApi]);
 
   const updateDraft = useCallback(async (productId: string, patch: ProductDraftPatch, configVersion: number) => {
     setMutation({ phase: 'saving', error: null });
@@ -196,5 +233,5 @@ export function useProductsController(options: { api?: ProductsApi; initialFilte
   }, [productsApi, reload]);
   const clearMutation = useCallback(() => setMutation({ phase: 'idle', error: null }), []);
 
-  return { filters, setFilters, setKeyword, reload, openProduct, closeProduct, openXianyuDetail, syncXianyuDetail, closeXianyuDetail, createDraft, updateDraft, syncFromXianyu, syncError, clearMutation, state, detail, xianyuDetail, mutation };
+  return { filters, setFilters, setKeyword, reload, openProduct, closeProduct, openXianyuDetail, syncXianyuDetail, closeXianyuDetail, createDraft, updateDraft, publishProduct, optimizeDescription, syncFromXianyu, syncError, clearMutation, state, detail, xianyuDetail, mutation };
 }

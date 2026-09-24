@@ -13,4 +13,9 @@ describe('product draft validation', () => {
     expect(errors.priceMinor).toBeTruthy();
     expect(toDraftInput({ accountId: 'account-1', title: ' 草稿 ', description: ' 说明 ', categoryCode: ' digital ', priceMinor: '1990' })).toEqual({ accountId: 'account-1', title: '草稿', description: '说明', categoryCode: 'digital', priceMinor: 1990 });
   });
+
+  it('requires postage when the official fixed-price mode is selected', () => {
+    const errors = validateProductForm({ accountId: 'account-1', title: '商品', description: '描述', categoryCode: 'digital', priceMinor: '', priceYuan: '200', quantity: '1', postageMode: 'fixed', postageYuan: '' });
+    expect(errors.postageYuan).toBe('一口价模式必须填写邮费。');
+  });
 });
