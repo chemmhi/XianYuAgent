@@ -181,7 +181,14 @@ function summaryText(key: AutomationRuleKey, config: ProductAutomationConfig | n
 }
 
 function hydrateDraft(config: ProductAutomationConfig, boundCouponIds: string[], hasProductCouponBindings: boolean): ProductAutomationConfig {
-  const deliveryCouponIds = hasProductCouponBindings ? [...new Set(boundCouponIds)] : [...(config.delivery.couponIds ?? [])];
+  // The automation response is authoritative. Product list bindings are a
+  // legacy fallback only because the list can be stale or normalized to [].
+  const configuredDeliveryCouponIds = config.delivery.couponIds ?? [];
+  const deliveryCouponIds = configuredDeliveryCouponIds.length > 0
+    ? [...new Set(configuredDeliveryCouponIds)]
+    : hasProductCouponBindings
+      ? [...new Set(boundCouponIds)]
+      : [];
   return {
     ...config,
     delivery: { ...config.delivery, autoConfirm: config.delivery.autoConfirm ?? true, couponIds: deliveryCouponIds },
