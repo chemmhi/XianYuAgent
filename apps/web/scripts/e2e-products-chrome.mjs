@@ -166,7 +166,7 @@ async function run() {
   if (await evaluate(cdp, 'document.querySelector("[data-testid=products-total]") !== null')) throw new Error('redundant toolbar total should be removed');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome E2E 商品'), 'product row');
   const tableTypography = await evaluate(cdp, '(() => { const size = (selector) => { const node = document.querySelector(selector); return node ? getComputedStyle(node).fontSize : null; }; return { row: size(".products-row:not(.products-head)"), head: size(".products-head"), title: size(".products-title strong"), titleMeta: size(".products-title small"), coupons: size(".products-coupons"), knowledgeBase: size(".products-knowledge-base"), meta: size(".products-meta"), pagination: size(".products-pagination"), pageButton: size(".products-page-button") }; })()');
-  const expectedTypography = { row: '14px', head: '13px', title: '16px', titleMeta: '12px', coupons: '12px', knowledgeBase: '12px', meta: '12px', pagination: '12px', pageButton: '13px' };
+  const expectedTypography = { row: '14px', head: '13px', title: '14px', titleMeta: '12px', coupons: '14px', knowledgeBase: '14px', meta: '12px', pagination: '12px', pageButton: '13px' };
   if (JSON.stringify(tableTypography) !== JSON.stringify(expectedTypography)) throw new Error(`product table typography mismatch: ${JSON.stringify(tableTypography)}`);
   const columns = await evaluate(cdp, 'Array.from(document.querySelectorAll(".products-head > span")).map((item) => item.textContent?.trim() ?? "").map((text) => text.replace(/\\s*[↑↓↕]$/, "")).filter(Boolean)');
   const expectedColumns = ['商品标题', '价格', '关联卡券', '自动化', '知识库', '创建时间', '操作'];

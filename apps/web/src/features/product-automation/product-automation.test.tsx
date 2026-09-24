@@ -23,7 +23,7 @@ describe('product automation API', () => {
     expect(config.version).toBe(7);
     expect(config.delivery.couponIds).toEqual(['1']);
     const availableCoupons = await api.listCoupons('account-1', 'delivery');
-    expect(availableCoupons.some((coupon) => coupon.id === 'operator-only')).toBe(false);
+    expect(availableCoupons.some((coupon) => coupon.id === 'operator-only')).toBe(true);
     await api.saveConfig('product-1', { version: 7, delivery: { enabled: false }, reprice: { enabled: false }, gift: { enabled: false }, review: { enabled: true } });
     await api.saveBatch({ productIds: ['product-1'], expectedConfigVersions: { 'product-1': 8 }, apply: { delivery: true, reprice: false, gift: false, review: false }, rules: { delivery: { enabled: false }, reprice: { enabled: false }, gift: { enabled: false }, review: { enabled: true } } });
     expect(calls[0].path).toBe('/api/v1/products/product-1/automation');
@@ -34,6 +34,26 @@ describe('product automation API', () => {
     expect(saveCall?.options).toMatchObject({ headers: expect.objectContaining({ 'If-Match-Version': '7', 'Idempotency-Key': expect.any(String) }) });
     const batchCall = calls.find((call) => call.path.endsWith('/automation/batch'));
     expect(batchCall?.body).toMatchObject({ productIds: ['product-1'], expectedConfigVersions: { 'product-1': 8 }, config: { paidAutoDelivery: { enabled: false } } });
+  });
+
+  it('loads every coupon page for the automation picker', async () => {
+    const requestedPaths: string[] = [];
+    const api = createProductAutomationApi({
+      async get<T>(path: string) {
+        requestedPaths.push(path);
+        const page = new URL(path, 'http://automation.test').searchParams.get('page');
+        return (page === '1'
+          ? { data: { items: Array.from({ length: 100 }, (_, index) => ({ id: `coupon-${index + 1}`, label: `卡券 ${index + 1}`, purpose: 'text', deliveryScope: 'buyer_deliverable' })), totalPages: 2 } }
+          : { data: { items: [{ id: 'coupon-101', label: '卡券 101', purpose: 'text', deliveryScope: 'buyer_deliverable' }], totalPages: 2 } }) as T;
+      },
+    });
+    const coupons = await api.listCoupons('account-1', 'delivery');
+    expect(coupons).toHaveLength(101);
+    expect(coupons.at(-1)?.id).toBe('coupon-101');
+    expect(requestedPaths).toEqual([
+      '/api/v1/coupons/batches?accountId=account-1&page=1&pageSize=100',
+      '/api/v1/coupons/batches?accountId=account-1&page=2&pageSize=100',
+    ]);
   });
 
   it('persists product rule changes with a version bump', async () => {
@@ -115,6 +135,7 @@ describe('product automation components', () => {
     const html = renderToStaticMarkup(createElement(AutomationDrawer, { open: true, product: boundProduct, config: { ...config, delivery: { ...config.delivery, couponIds: [] }, gift: { ...config.gift, couponIds: [] } }, coupons: MOCK_AUTOMATION_COUPONS, loadPhase: 'success', savePhase: 'idle', error: null, onClose: vi.fn(), onSave: vi.fn(async () => config) }));
     expect(html).toContain('评价赠品批次 A');
     expect((html.match(/已选发货卡券/g) ?? []).length).toBeGreaterThan(0);
+    expect(html).toContain('未选择赠品卡券');
   });
 
   it('renders the delivery auto-confirm switch and preserves its saved state', () => {

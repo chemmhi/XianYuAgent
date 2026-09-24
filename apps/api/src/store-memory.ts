@@ -260,6 +260,13 @@ export class MemoryStore implements Store {
     const current = this.productAutomations.get(input.productId);
     if (current && current.configVersion !== input.expectedConfigVersion) throw new Error('AUTOMATION_VERSION_CONFLICT');
     if (!current && input.expectedConfigVersion !== 1) throw new Error('AUTOMATION_VERSION_CONFLICT');
+    const couponBatchIds = this.automationCouponBatchIds(input.config);
+    const couponBatches = couponBatchIds.map((batchId) => {
+      const batch = this.findCouponBatch(batchId);
+      if (!batch || batch.accountId !== product.accountId) throw new Error('COUPON_NOT_FOUND');
+      if (batch.status === 'voided' || batch.status === 'closed') throw new Error('COUPON_BATCH_VOIDED');
+      return batch;
+    });
     const now = new Date().toISOString();
     const record: ProductAutomationConfigRecord = {
       id: current?.id ?? createId(),
@@ -271,11 +278,12 @@ export class MemoryStore implements Store {
       createdAt: current?.createdAt ?? now,
       updatedAt: now,
     };
+    this.syncProductCouponBindings(input.productId, couponBatches, now);
     this.productAutomations.set(input.productId, record);
     return this.cloneProductAutomation(record);
   }
 
-  async updateProductAutomationsBatch(input: { adminId: string; productIds: string[]; expectedConfigVersions: Record<string, number>; config?: ProductAutomationConfig; configDigest?: string; configByProductId?: Record<string, ProductAutomationConfig>; configDigests?: Record<string, string> }): Promise<ProductAutomationBatchResult> {
+  async updateProductAutomationsBatch(input: { adminId: string; productIds: string[]; expectedConfigVersions: Record<string, number>; config?: ProductAutomationConfig; configDigest?: string; configByProductId?: Record<string, ProductAutomationConfig>; configDigests?: Record<string, string>; syncCouponBindingsByProduct?: Record<string, boolean> }): Promise<ProductAutomationBatchResult> {
     const uniqueProductIds = [...new Set(input.productIds)];
     const products = uniqueProductIds.map((productId) => this.products.get(productId));
     if (products.some((product) => !product)) throw new Error('PRODUCT_NOT_FOUND');
@@ -300,6 +308,22 @@ export class MemoryStore implements Store {
         updatedAt: now,
       } satisfies ProductAutomationConfigRecord;
     });
+    const stagedCouponBatches = new Map<string, CouponBatchRecord[]>();
+    for (const record of staged) {
+      if (input.syncCouponBindingsByProduct?.[record.productId] === false) continue;
+      const product = products.find((item) => item?.id === record.productId)!;
+      const couponBatches = this.automationCouponBatchIds(record.config).map((batchId) => {
+        const batch = this.findCouponBatch(batchId);
+        if (!batch || batch.accountId !== product.accountId) throw new Error('COUPON_NOT_FOUND');
+        if (batch.status === 'voided' || batch.status === 'closed') throw new Error('COUPON_BATCH_VOIDED');
+        return batch;
+      });
+      stagedCouponBatches.set(record.productId, couponBatches);
+    }
+    for (const record of staged) {
+      if (input.syncCouponBindingsByProduct?.[record.productId] === false) continue;
+      this.syncProductCouponBindings(record.productId, stagedCouponBatches.get(record.productId) ?? [], now);
+    }
     for (const record of staged) this.productAutomations.set(record.productId, record);
     return { items: staged.map((record) => this.cloneProductAutomation(record)), updatedProductIds: uniqueProductIds };
   }
@@ -1693,6 +1717,44 @@ export class MemoryStore implements Store {
 
   private cloneProductAutomation(record: ProductAutomationConfigRecord): ProductAutomationConfigRecord {
     return { ...record, config: structuredClone(record.config) };
+  }
+
+  private automationCouponBatchIds(config: ProductAutomationConfig): string[] {
+    return [...new Set([
+      ...(config.paidAutoDelivery?.couponBatchIds ?? []),
+      ...(config.reviewGift?.couponBatchIds ?? []),
+    ].map((value) => String(value).trim()).filter(Boolean))];
+  }
+
+  private syncProductCouponBindings(productId: string, selectedBatches: CouponBatchRecord[], now: string): void {
+    const selectedIds = new Set(selectedBatches.map((batch) => batch.id));
+    const activeBindings = [...this.couponBindings.values()].filter((binding) => binding.productId === productId && binding.status === 'active');
+    const touchedBatchIds = new Set<string>();
+    for (const binding of activeBindings) {
+      if (selectedIds.has(binding.batchId)) continue;
+      binding.status = 'inactive';
+      binding.updatedAt = now;
+      touchedBatchIds.add(binding.batchId);
+    }
+    for (const batch of selectedBatches) {
+      const existing = [...this.couponBindings.values()].find((binding) => binding.batchId === batch.id && binding.productId === productId);
+      if (existing?.status === 'active') continue;
+      if (existing) {
+        existing.status = 'active';
+        existing.updatedAt = now;
+      } else {
+        const id = createId();
+        this.couponBindings.set(id, { id, batchId: batch.id, productId, priority: 0, status: 'active', createdAt: now, updatedAt: now });
+      }
+      touchedBatchIds.add(batch.id);
+    }
+    for (const batchId of touchedBatchIds) {
+      const batch = this.couponBatches.get(batchId);
+      if (batch) {
+        batch.version += 1;
+        batch.updatedAt = now;
+      }
+    }
   }
 
   private productCouponBatches(productId: string): Array<{ id: string; label?: string }> {
