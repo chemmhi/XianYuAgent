@@ -91,7 +91,7 @@ function toAutomationCoupon(value: Record<string, unknown>): AutomationCoupon {
     specSummary,
     quantitySummary: `每件 ${quantity} 份`,
     deliveryScope: value.deliveryScope === 'system_only' || value.deliveryScope === 'operator_only' || value.deliveryScope === 'buyer_deliverable' ? value.deliveryScope : undefined,
-    status: value.status === 'paused' ? 'paused' : 'active',
+    status: value.status === undefined || value.status === 'active' ? 'active' : 'paused',
     accountId: value.accountId ? String(value.accountId) : undefined,
     apiManaged: purpose === 'api',
   };
@@ -178,7 +178,10 @@ export function createProductAutomationApi(transport: ProductAutomationApiTransp
         totalPages = Number.isSafeInteger(reportedTotalPages) && reportedTotalPages! > 0 ? reportedTotalPages! : (pageItems.length === 100 ? page + 1 : page);
         page += 1;
       } while (page <= totalPages && page <= 100);
-      return items.map(toAutomationCoupon).filter((coupon) => coupon.status === 'active' && coupon.deliveryScope === 'buyer_deliverable');
+      // The picker is an inventory chooser, so it must show every active batch
+      // in the account. The save API remains the validation boundary for rules
+      // that are enabled and therefore require buyer-deliverable batches.
+      return items.map(toAutomationCoupon).filter((coupon) => coupon.status === 'active');
     },
     async saveConfig(productId, input) {
       const wire = toAutomationConfigWire(input);

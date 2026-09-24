@@ -31,7 +31,7 @@ export class ProductAutomationService {
     const product = await this.store.getProduct(adminId, productId);
     if (!product) throw new ServiceError(404, 'NOT_FOUND', 'product not found');
     const current = await this.store.getProductAutomation(adminId, productId);
-    if (current) return { ...current, product: { id: product.id, accountId: product.accountId, title: product.title } };
+    if (current) return { ...current, config: await this.publicizeCouponIds(adminId, current.config), product: { id: product.id, accountId: product.accountId, title: product.title } };
     const now = new Date().toISOString();
     const config = defaultProductAutomationConfig();
     return { id: `virtual:${productId}`, productId, accountId: product.accountId, configVersion: 1, config, configDigest: digestJson(config), createdAt: now, updatedAt: now, product: { id: product.id, accountId: product.accountId, title: product.title } };
@@ -46,7 +46,7 @@ export class ProductAutomationService {
       const saved = await this.store.updateProductAutomation({ adminId: input.adminId, productId: product.id, expectedConfigVersion, config, configDigest: digestJson(config), syncCouponBindings });
       if (!saved) throw new ServiceError(404, 'NOT_FOUND', 'product not found');
       await this.audit({ actorId: input.adminId, action: 'product.automation.updated', targetRef: product.id, requestId: input.requestId, traceId: input.traceId, payload: { configVersion: saved.configVersion, rules: enabledRules(config) }, accountId: product.accountId });
-      return saved;
+      return { ...saved, config: await this.publicizeCouponIds(input.adminId, saved.config) };
     } catch (error) {
       throw mapAutomationStoreError(error);
     }
@@ -71,7 +71,7 @@ export class ProductAutomationService {
     try {
       const result = await this.store.updateProductAutomationsBatch({ adminId: input.adminId, productIds, expectedConfigVersions, configByProductId, configDigests, syncCouponBindingsByProduct: Object.fromEntries(productIds.map((productId) => [productId, syncCouponBindings])) });
       await this.audit({ actorId: input.adminId, action: 'product.automation.batch_updated', targetRef: `batch:${productIds.length}`, requestId: input.requestId, traceId: input.traceId, payload: { productIds, configVersion: result.items.map((item) => ({ productId: item.productId, version: item.configVersion })), rules: Object.fromEntries(productIds.map((productId) => [productId, enabledRules(configByProductId[productId]!)])) }, accountId });
-      return result;
+      return { ...result, items: await Promise.all(result.items.map(async (item) => ({ ...item, config: await this.publicizeCouponIds(input.adminId, item.config) }))) };
     } catch (error) {
       throw mapAutomationStoreError(error);
     }
@@ -82,6 +82,22 @@ export class ProductAutomationService {
     const product = await this.store.getProduct(adminId, productId);
     if (!product) throw new ServiceError(404, 'NOT_FOUND', 'product not found');
     return product;
+  }
+
+  /**
+   * The public automation contract uses the stable coupon batch sequence id.
+   * Storage may still contain legacy UUID references, so normalize only at
+   * the service boundary and keep the persistence adapter free to use UUIDs.
+   */
+  private async publicizeCouponIds(adminId: string, config: ProductAutomationConfig): Promise<ProductAutomationConfig> {
+    const next = structuredClone(config);
+    for (const key of ['paidAutoDelivery', 'reviewGift'] as const) {
+      next[key].couponBatchIds = await Promise.all((next[key].couponBatchIds ?? []).map(async (batchId) => {
+        const batch = await this.store.getCouponBatch(adminId, batchId);
+        return batch?.sequenceId ?? batchId;
+      }));
+    }
+    return next;
   }
 
   private async applyConfigPatch(adminId: string, product: ProductRecord, base: ProductAutomationConfig, input: unknown): Promise<{ config: ProductAutomationConfig; syncCouponBindings: boolean }> {

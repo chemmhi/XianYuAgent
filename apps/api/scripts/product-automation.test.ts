@@ -32,6 +32,7 @@ test('automation config defaults, validation, optimistic locking and account iso
   const config = { ...defaultProductAutomationConfig(), paidAutoDelivery: { ...defaultProductAutomationConfig().paidAutoDelivery, enabled: true, couponBatchIds: [coupon.id], autoConfirm: true } } satisfies ProductAutomationConfig;
   const saved = await service.update({ adminId: admin.id, productId: product.id, expectedConfigVersion: 1, config, requestId: 'req-1', traceId: 'trace-1' });
   assert.equal(saved.configVersion, 1);
+  assert.deepEqual(saved.config.paidAutoDelivery.couponBatchIds, [coupon.sequenceId ?? coupon.id]);
   const savedAgain = await service.update({ adminId: admin.id, productId: product.id, expectedConfigVersion: 1, config: { ...config, unpaidAutoReprice: { ...config.unpaidAutoReprice, enabled: true, targetPriceMinor: 990 } }, requestId: 'req-2', traceId: 'trace-2' });
   assert.equal(savedAgain.configVersion, 2);
   await assert.rejects(() => service.update({ adminId: admin.id, productId: product.id, expectedConfigVersion: 1, config, requestId: 'req-stale', traceId: 'trace-stale' }), (error: unknown) => (error as { code?: string }).code === 'AUTOMATION_VERSION_CONFLICT');
@@ -60,7 +61,7 @@ test('defaults auto-confirm on and allows disabled coupon-only associations', as
     requestId: 'req-association-only',
     traceId: 'trace-association-only',
   });
-  assert.deepEqual(associated.config.paidAutoDelivery.couponBatchIds, [operatorOnly.id]);
+  assert.deepEqual(associated.config.paidAutoDelivery.couponBatchIds, [operatorOnly.sequenceId ?? operatorOnly.id]);
   assert.equal(associated.config.paidAutoDelivery.autoConfirm, true);
   assert.deepEqual((await store.getProduct(admin.id, product.id))?.couponBatches?.map((item) => item.id), [operatorOnly.sequenceId ?? operatorOnly.id]);
 
@@ -144,7 +145,7 @@ test('single-rule updates preserve untouched rules without validating them', asy
   });
 
   assert.equal(saved.config.paidAutoDelivery.enabled, true);
-  assert.deepEqual(saved.config.paidAutoDelivery.couponBatchIds, [coupon.id]);
+  assert.deepEqual(saved.config.paidAutoDelivery.couponBatchIds, [coupon.sequenceId ?? coupon.id]);
   assert.equal(saved.config.reviewReminder.message, '');
 });
 

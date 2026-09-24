@@ -14,6 +14,7 @@ import { createMockProductAutomationApi, type ProductAutomationApi } from '../..
 import { useProductAutomationController } from '../../product-automation/controller';
 import { AutomationDrawer } from '../../product-automation/components/AutomationDrawer';
 import { BatchAutomationDialog } from '../../product-automation/components/BatchAutomationDialog';
+import type { ProductAutomationConfig } from '../../product-automation/types';
 import { Toast } from '../../../shared/ui/Toast';
 import './products.css';
 import '../../coupons/components/coupons.css';
@@ -30,6 +31,7 @@ export function ProductsPage({ api: providedApi, automationApi: providedAutomati
   const [drawer, setDrawer] = useState<{ mode: 'create' | 'edit'; product?: NonNullable<typeof controller.detail.data> } | null>(null);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [automationProductId, setAutomationProductId] = useState<string | undefined>();
+  const [automationDrafts, setAutomationDrafts] = useState<Record<string, ProductAutomationConfig>>({});
   const [batchOpen, setBatchOpen] = useState(false);
   const [automationNotice, setAutomationNotice] = useState<string | null>(null);
   const [syncToast, setSyncToast] = useState<string | null>(null);
@@ -48,6 +50,7 @@ export function ProductsPage({ api: providedApi, automationApi: providedAutomati
     setFilters((previous) => previous.accountId === scopedAccountId ? previous : { ...previous, accountId: scopedAccountId, page: 1 });
     setDrawer(null);
     setAutomationProductId(undefined);
+    setAutomationDrafts({});
     setSelectedProductIds([]);
   }, [scopedAccountId, setFilters]);
 
@@ -87,7 +90,7 @@ export function ProductsPage({ api: providedApi, automationApi: providedAutomati
       {drawer && <ProductDrawer mode={drawer.mode} accountId={currentAccountId} product={drawer.product} error={controller.mutation.error} saving={controller.mutation.phase === 'saving'} onClose={() => setDrawer(null)} onCreate={async (values) => Boolean(await controller.createDraft(values))} onUpdate={async (productId, patch, configVersion) => Boolean(await controller.updateDraft(productId, patch, configVersion))} />}
       {automationNotice && <Toast message={automationNotice} tone="success" onDismiss={() => setAutomationNotice(null)} />}
       {syncToast && <Toast message={syncToast} tone="error" onDismiss={() => setSyncToast(null)} />}
-      <AutomationDrawer open={Boolean(automationProductId)} product={products.find((product) => product.id === automationProductId) ?? null} accountLabel={currentAccount?.displayName ?? '当前账号'} config={automationController.config} coupons={automationController.coupons} loadPhase={automationController.loadPhase} savePhase={automationController.savePhase} error={automationController.error} onClose={() => setAutomationProductId(undefined)} onSave={async (input) => { const result = await automationController.save(input); if (result) { await controller.reload(); setAutomationNotice('商品自动化配置已保存'); setAutomationProductId(undefined); } return result; }} />
+      <AutomationDrawer open={Boolean(automationProductId)} product={products.find((product) => product.id === automationProductId) ?? null} accountLabel={currentAccount?.displayName ?? '当前账号'} config={automationController.config} coupons={automationController.coupons} loadPhase={automationController.loadPhase} savePhase={automationController.savePhase} error={automationController.error} draft={automationProductId ? automationDrafts[`${currentAccountId ?? 'unknown'}:${automationProductId}`] ?? null : null} onClose={(draft) => { if (automationProductId && draft) setAutomationDrafts((previous) => ({ ...previous, [`${currentAccountId ?? 'unknown'}:${automationProductId}`]: draft })); setAutomationProductId(undefined); }} onSave={async (input) => { const result = await automationController.save(input); if (result) { await controller.reload(); if (automationProductId) setAutomationDrafts((previous) => { const next = { ...previous }; delete next[`${currentAccountId ?? 'unknown'}:${automationProductId}`]; return next; }); setAutomationNotice('商品自动化配置已保存'); setAutomationProductId(undefined); } return result; }} />
       <BatchAutomationDialog open={batchOpen} productIds={selectedProductIds} error={automationController.error} onCancel={() => setBatchOpen(false)} onSave={async (input) => { const result = await automationController.saveBatch(input); if (result) { setAutomationNotice(`已保存 ${result.updatedCount} 件商品的自动化规则`); setBatchOpen(false); setSelectedProductIds([]); } return result; }} />
       {accountsError && <div className="products-inline-error" role="alert">账号上下文加载失败：{accountsError}</div>}
     </section>
