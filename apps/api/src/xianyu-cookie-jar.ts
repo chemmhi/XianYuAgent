@@ -2,6 +2,7 @@ export const XIANYU_COOKIE_SNAPSHOT_KEY = 'cookies_refresh_snapshot';
 export const XIANYU_COOKIE_SNAPSHOT_LEGACY_KEY = 'cookie_refresh_snapshot';
 export const XIANYU_COOKIE_SNAPSHOT_CAMEL_KEY = 'cookieSnapshot';
 export const XIANYU_TOP_SITE = 'https://goofish.com';
+const CAPTCHA_CHALLENGE_COOKIES = new Set(['x5secdata', 'x5sectag', 'x5step']);
 
 export interface XianyuBrowserCookie {
   name: string;
@@ -86,6 +87,17 @@ export function cookieHeaderFromSnapshot(snapshot: XianyuCookieSnapshot | undefi
     result.push(`${cookie.name}=${cookie.value}`);
   }
   return result.join('; ');
+}
+
+/**
+ * Once a browser receives x5sec, the old challenge markers must be removed.
+ * Keeping x5secdata/x5sectag/x5step beside x5sec makes the next MTOP request
+ * look like the challenge is still pending and causes another validation error.
+ */
+export function dropStaleCaptchaChallengeCookies(snapshot: XianyuCookieSnapshot | undefined): XianyuCookieSnapshot {
+  const normalized = normalizeCookieSnapshot(snapshot) ?? [];
+  if (!normalized.some((cookie) => cookie.name.toLowerCase() === 'x5sec')) return normalized;
+  return normalized.filter((cookie) => !CAPTCHA_CHALLENGE_COOKIES.has(cookie.name.toLowerCase()));
 }
 
 export function cookieValue(snapshot: XianyuCookieSnapshot | undefined, name: string, rawUrl?: string): string {

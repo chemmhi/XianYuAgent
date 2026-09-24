@@ -44,6 +44,62 @@ describe('xianyu IM credential refresh', () => {
     );
   });
 
+  it('runs the configured verification browser for IM token validation and retries with cleaned cookies', async () => {
+    let fetchCount = 0;
+    const saved: Array<Record<string, unknown>> = [];
+    const store = {
+      getCredential: async () => ({
+        cookieHeader: 'unb=seller-1; _m_h5_tk=token-1; x5secdata=challenge',
+        metadata: {
+          cookies_refresh_snapshot: JSON.stringify([
+            { name: 'unb', value: 'seller-1', domain: '.goofish.com', path: '/' },
+            { name: '_m_h5_tk', value: 'token-1_suffix', domain: '.goofish.com', path: '/' },
+            { name: 'x5secdata', value: 'challenge', domain: '.goofish.com', path: '/' },
+          ]),
+        },
+        expiresAt: '2026-10-01T00:00:00.000Z',
+      }),
+      upsertCredential: async (input: Record<string, unknown>) => { saved.push(input); return input; },
+    };
+    const verificationBrowser = {
+      enabled: true,
+      waitForCompletion: async (input: { verificationUrl: string; initialCookieSnapshot?: unknown[] }) => {
+        assert.equal(input.verificationUrl, 'https://punish.goofish.com/verify?token=redacted');
+        assert.equal(input.initialCookieSnapshot?.some((cookie) => (cookie as { name?: string }).name === 'x5secdata'), true);
+        return {
+          finalUrl: 'https://www.goofish.com/im',
+          cookieSnapshot: [
+            { name: 'unb', value: 'seller-1', domain: '.goofish.com', path: '/' },
+            { name: '_m_h5_tk', value: 'token-2_suffix', domain: '.goofish.com', path: '/' },
+            { name: 'x5sec', value: 'passed', domain: '.goofish.com', path: '/' },
+            { name: 'x5secdata', value: 'stale', domain: '.goofish.com', path: '/' },
+          ],
+        };
+      },
+    };
+    const service = new XianyuImService(store as never, {
+      fetchImToken: async () => {
+        fetchCount += 1;
+        return fetchCount === 1
+          ? { success: false, accountInvalid: true, errorCode: 'ACCOUNT_VALIDATION_REQUIRED', message: 'FAIL_SYS_USER_VALIDATE', verificationUrl: 'https://punish.goofish.com/verify?token=redacted', cookieHeader: 'unb=seller-1; _m_h5_tk=token-1_suffix; x5secdata=challenge' }
+          : { success: true, accountInvalid: false, accessToken: 'access-2', cookieHeader: 'unb=seller-1; _m_h5_tk=token-2_suffix; x5sec=passed' };
+      },
+    } as never, {} as never, undefined, undefined, verificationBrowser as never);
+
+    const result = await (service as unknown as { refreshCredential: (adminId: string, account: { id: string; platform: string }, credential: Record<string, unknown>) => Promise<Record<string, unknown>> }).refreshCredential(
+      'admin-1',
+      { id: 'account-1', platform: 'xianyu' },
+      { cookieHeader: 'unb=seller-1; _m_h5_tk=token-1', metadata: {}, expiresAt: '2026-10-01T00:00:00.000Z' },
+    );
+
+    assert.equal(fetchCount, 2);
+    assert.equal(result.accessToken, 'access-2');
+    assert.equal(saved.length, 2);
+    assert.match(String(saved[0]?.cookieHeader), /x5sec=passed/);
+    assert.doesNotMatch(String(saved[0]?.cookieHeader), /x5secdata=/);
+    assert.equal(saved[1]?.accessToken, 'access-2');
+  });
+
   it('persists an expired account when listener bootstrap finds missing credentials', async () => {
     let account = { id: 'account-1', platform: 'xianyu', status: 'connected' as const };
     const store = {

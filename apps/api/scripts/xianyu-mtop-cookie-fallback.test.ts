@@ -53,6 +53,26 @@ test('prefers a newer raw cookie after a slider challenge over a stale browser s
   }
 });
 
+test('exposes the live verification URL from an IM token challenge', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    ret: ['FAIL_SYS_USER_VALIDATE::请完成验证'],
+    data: { url: 'https://punish.goofish.com/verify?token=redacted' },
+  }), { status: 200, headers: { 'content-type': 'application/json' } });
+  try {
+    const client = new XianyuMtopClient({
+      loadCredential: async () => ({ cookieHeader: '_m_h5_tk=token_value_1; unb=seller-1' }),
+      saveCookie: async () => undefined,
+    });
+    const result = await client.fetchImToken('admin-1', 'account-1', 'device-1');
+    assert.equal(result.success, false);
+    assert.equal(result.errorCode, 'ACCOUNT_VALIDATION_REQUIRED');
+    assert.equal(result.verificationUrl, 'https://punish.goofish.com/verify?token=redacted');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('does not let a stale snapshot overwrite a refreshed raw Cookie when MTOP rotates cookies', async () => {
   const originalFetch = globalThis.fetch;
   let requestCookie = '';

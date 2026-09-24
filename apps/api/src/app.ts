@@ -113,6 +113,18 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
   });
   let xianyu: XianyuMtopClient;
   let xianyuIm!: XianyuImService;
+  const verificationBrowser = config.xianyuVerificationBrowserMode === 'disabled'
+    ? undefined
+    : new XianyuVerificationBrowser({
+      mode: config.xianyuVerificationBrowserMode,
+      sliderMode: config.xianyuVerificationSliderMode,
+      sliderMaxRetries: config.xianyuVerificationSliderMaxRetries,
+      headless: config.xianyuVerificationBrowserHeadless,
+      executablePath: config.xianyuVerificationBrowserExecutablePath,
+      debugPort: config.xianyuVerificationBrowserDebugPort,
+      userDataDir: config.xianyuVerificationBrowserUserDataDir,
+      maxWaitMs: config.xianyuVerificationBrowserMaxWaitMs,
+    });
   const productAutomationExecution = new XianyuProductAutomationExecutionAdapter(store, () => xianyu, () => xianyuIm, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'system', actorId: input.adminId, action: input.action, targetRef: input.orderNo ?? input.executionKey, requestId: `automation:${input.executionKey ?? auditId}`, traceId: `automation:${input.executionKey ?? auditId}`, payloadDigest: digestJson(input.payload ?? {}), accountId: input.accountId, createdAt: new Date().toISOString() });
@@ -216,18 +228,6 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     requireRepairRuntime: true,
   });
   let productSync: ProductSyncService;
-  const verificationBrowser = config.xianyuVerificationBrowserMode === 'disabled'
-    ? undefined
-    : new XianyuVerificationBrowser({
-      mode: config.xianyuVerificationBrowserMode,
-      sliderMode: config.xianyuVerificationSliderMode,
-      sliderMaxRetries: config.xianyuVerificationSliderMaxRetries,
-      headless: config.xianyuVerificationBrowserHeadless,
-      executablePath: config.xianyuVerificationBrowserExecutablePath,
-      debugPort: config.xianyuVerificationBrowserDebugPort,
-      userDataDir: config.xianyuVerificationBrowserUserDataDir,
-      maxWaitMs: config.xianyuVerificationBrowserMaxWaitMs,
-    });
   const qrLogin = new XianyuQrLoginAdapter({
     verificationBrowser,
     onStatus: async (status) => {
@@ -315,7 +315,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   }, async (input) => productAutomationWorker.processOrderRefresh(input));
-  xianyuIm = new XianyuImService(store, xianyu, messages, autoReply, productAutomationTrigger);
+  xianyuIm = new XianyuImService(store, xianyu, messages, autoReply, productAutomationTrigger, verificationBrowser);
 
   const wsServer = new WebSocketServer({ noServer: true });
   const workspaceRuntime: WorkspaceRuntime = config.agentRuntime === 'pi'

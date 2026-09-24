@@ -8,6 +8,8 @@ import { XianyuImClient, XianyuImMessageEvent, XianyuImReadReceiptEvent, XianyuI
 import { XianyuMtopClient } from './xianyu-mtop.js';
 import type { ProductAutomationImEventResult, ProductAutomationTrigger } from './product-automation-trigger.js';
 import { InboundInboxWorker } from './inbound-inbox-worker.js';
+import { cookieHeaderFromSnapshot, cookieSnapshotFromMetadata, dropStaleCaptchaChallengeCookies, metadataWithCookieSnapshot, type XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
+import type { XianyuVerificationBrowser } from './xianyu-verification-browser.js';
 
 interface ExternalPage {
   hasMore: boolean;
@@ -23,7 +25,7 @@ export class XianyuImService {
   private inboundInboxWakeInFlight?: Promise<void>;
   private inboundInboxWakeRequested = false;
 
-  constructor(private readonly store: Store, private readonly mtop: XianyuMtopClient, private readonly messages: MessageService, private readonly autoReply?: AutoReplyService, private readonly productAutomation?: ProductAutomationTrigger) {
+  constructor(private readonly store: Store, private readonly mtop: XianyuMtopClient, private readonly messages: MessageService, private readonly autoReply?: AutoReplyService, private readonly productAutomation?: ProductAutomationTrigger, private readonly verificationBrowser?: XianyuVerificationBrowser) {
     this.inboundInboxWorker = new InboundInboxWorker(store, this, {
       workerId: `listener-fallback:${process.pid}:${randomUUID()}`,
       batchSize: 10,
@@ -343,8 +345,35 @@ export class XianyuImService {
 
   private async refreshCredential(adminId: string, account: AccountRecord, credential: CredentialRecord): Promise<CredentialRecord> {
     const deviceId = credential.deviceId ?? `xianyu-${account.id}`;
-    const token = await this.mtop.fetchImToken(adminId, account.id, deviceId);
+    let token = await this.mtop.fetchImToken(adminId, account.id, deviceId);
     if (!token.success || !token.accessToken) {
+      if (token.errorCode === 'ACCOUNT_VALIDATION_REQUIRED' && this.verificationBrowser?.enabled && token.verificationUrl) {
+        const latest = await this.store.getCredential(adminId, account.id) ?? credential;
+        const initialSnapshot = cookieSnapshotFromMetadata(latest.metadata)
+          ?? cookieSnapshotFromHeader(token.cookieHeader || latest.cookieHeader || credential.cookieHeader);
+        try {
+          const completed = await this.verificationBrowser.waitForCompletion({ verificationUrl: token.verificationUrl, initialCookieSnapshot: initialSnapshot });
+          const mergedSnapshot = dropStaleCaptchaChallengeCookies(mergeCookieSnapshots(initialSnapshot, completed.cookieSnapshot));
+          const browserCookieHeader = cookieHeaderFromSnapshot(mergedSnapshot);
+          const browserMetadata = metadataWithCookieSnapshot(latest.metadata, mergedSnapshot);
+          await this.store.upsertCredential({
+            adminId,
+            accountId: account.id,
+            platform: account.platform,
+            cookieHeader: browserCookieHeader || token.cookieHeader || latest.cookieHeader || credential.cookieHeader,
+            deviceId,
+            metadata: browserMetadata,
+            expiresAt: latest.expiresAt ?? credential.expiresAt,
+          });
+          token = await this.mtop.fetchImToken(adminId, account.id, deviceId);
+          if (token.success && token.accessToken) {
+            const persisted = await this.store.getCredential(adminId, account.id);
+            return this.store.upsertCredential({ adminId, accountId: account.id, platform: account.platform, cookieHeader: token.cookieHeader, accessToken: token.accessToken, deviceId, metadata: persisted?.metadata ?? browserMetadata, expiresAt: persisted?.expiresAt ?? latest.expiresAt ?? credential.expiresAt });
+          }
+        } catch (error) {
+          console.warn(JSON.stringify({ component: 'xianyu-im', event: 'verification_browser_failed', adminId, accountId: account.id, errorCode: recoveryErrorCode(error) }));
+        }
+      }
       const statusCode = token.errorCode === 'ACCOUNT_VALIDATION_REQUIRED' ? 409 : token.accountInvalid ? 401 : 502;
       const message = token.errorCode === 'ACCOUNT_VALIDATION_REQUIRED'
         ? '请先在闲鱼页面完成滑块验证，再把验证后的最新完整 Cookie 回写到账号管理。'
@@ -746,6 +775,27 @@ function recoveryErrorCode(error: unknown): string {
   if (typeof code === 'string' && /^[A-Z0-9_:-]{1,64}$/.test(code)) return code;
   if (error instanceof Error && error.name) return error.name.toUpperCase().replace(/[^A-Z0-9_:-]/g, '_');
   return 'XIANYU_HISTORY_RECOVERY_FAILED';
+}
+
+function mergeCookieSnapshots(base: XianyuCookieSnapshot | undefined, updates: XianyuCookieSnapshot): XianyuCookieSnapshot {
+  const byIdentity = new Map<string, XianyuCookieSnapshot[number]>();
+  for (const cookie of base ?? []) byIdentity.set(cookieIdentity(cookie), cookie);
+  for (const cookie of updates) byIdentity.set(cookieIdentity(cookie), cookie);
+  return [...byIdentity.values()];
+}
+
+function cookieIdentity(cookie: XianyuCookieSnapshot[number]): string {
+  return `${cookie.name}\u0000${cookie.domain ?? ''}\u0000${cookie.path ?? '/'}\u0000${cookie.partitionKey ?? ''}`;
+}
+
+function cookieSnapshotFromHeader(cookieHeader: string | undefined): XianyuCookieSnapshot {
+  return (cookieHeader ?? '').split(';').flatMap((part) => {
+    const separator = part.indexOf('=');
+    if (separator <= 0) return [];
+    const name = part.slice(0, separator).trim();
+    const value = part.slice(separator + 1).trim();
+    return name && value ? [{ name, value, domain: '.goofish.com', path: '/' }] : [];
+  });
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | undefined> {

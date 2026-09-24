@@ -4,7 +4,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
+import { dropStaleCaptchaChallengeCookies, type XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
 import { XianyuSliderSolver, type XianyuSliderMode } from './xianyu-slider-solver.js';
 
 export type XianyuVerificationBrowserMode = 'disabled' | 'launch' | 'connect';
@@ -92,6 +92,20 @@ export class XianyuVerificationBrowser {
       await cdp.send('Page.enable');
       await cdp.send('Runtime.enable');
       await cdp.send('Network.enable');
+      if (input.initialCookieSnapshot && input.initialCookieSnapshot.length > 0) {
+        await cdp.send('Network.setCookies', {
+          cookies: input.initialCookieSnapshot.map((cookie) => ({
+            name: cookie.name,
+            value: cookie.value,
+            ...(cookie.domain ? { domain: cookie.domain } : { url: 'https://www.goofish.com/' }),
+            ...(cookie.path ? { path: cookie.path } : {}),
+            ...(cookie.expires !== undefined ? { expires: cookie.expires } : {}),
+            ...(cookie.httpOnly !== undefined ? { httpOnly: cookie.httpOnly } : {}),
+            ...(cookie.secure !== undefined ? { secure: cookie.secure } : {}),
+            ...(cookie.sameSite && ['Strict', 'Lax', 'None'].includes(cookie.sameSite) ? { sameSite: cookie.sameSite } : {}),
+          })),
+        });
+      }
       await cdp.send('Page.navigate', { url: input.verificationUrl });
 
       if (this.sliderMode === 'auto') {
@@ -118,7 +132,9 @@ export class XianyuVerificationBrowser {
         if (location) lastUrl = location;
         const cookieResult = await cdp.send('Network.getAllCookies');
         lastCookies = mapCookies(cookieResult.cookies);
-        if (isVerificationPageComplete(lastUrl, lastCookies)) return { finalUrl: lastUrl, cookieSnapshot: lastCookies };
+        if (isVerificationPageComplete(lastUrl, lastCookies, input.initialCookieSnapshot)) {
+          return { finalUrl: lastUrl, cookieSnapshot: dropStaleCaptchaChallengeCookies(lastCookies) };
+        }
         await sleep(this.pollIntervalMs);
       }
       throw new Error('XIANYU_VERIFICATION_TIMEOUT');
@@ -153,8 +169,10 @@ export class XianyuVerificationBrowser {
   }
 }
 
-export function isVerificationPageComplete(finalUrl: string, cookies: XianyuCookieSnapshot): boolean {
-  const hasX5sec = cookies.some((cookie) => cookie.name === 'x5sec' && cookie.value && isGoofishCookieDomain(cookie.domain));
+export function isVerificationPageComplete(finalUrl: string, cookies: XianyuCookieSnapshot, previousCookies: XianyuCookieSnapshot = []): boolean {
+  const previousX5sec = new Set(previousCookies.filter((cookie) => cookie.name.toLowerCase() === 'x5sec').map((cookie) => `${cookie.domain ?? ''}\u0000${cookie.path ?? '/'}\u0000${cookie.value}`));
+  const hasX5sec = cookies.some((cookie) => cookie.name.toLowerCase() === 'x5sec' && cookie.value && isGoofishCookieDomain(cookie.domain)
+    && !previousX5sec.has(`${cookie.domain ?? ''}\u0000${cookie.path ?? '/'}\u0000${cookie.value}`));
   if (hasX5sec) return true;
   try {
     const url = new URL(finalUrl);

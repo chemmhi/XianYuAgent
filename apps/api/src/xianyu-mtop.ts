@@ -135,15 +135,16 @@ export class XianyuMtopClient {
     return this.call(adminId, accountId, api, version, data, extraParams, options);
   }
 
-  async fetchImToken(adminId: string, accountId: string, deviceId: string): Promise<{ success: boolean; accountInvalid: boolean; errorCode?: string; message?: string; accessToken?: string; cookieHeader: string }> {
+  async fetchImToken(adminId: string, accountId: string, deviceId: string): Promise<{ success: boolean; accountInvalid: boolean; errorCode?: string; message?: string; accessToken?: string; verificationUrl?: string; response?: Record<string, unknown>; cookieHeader: string }> {
     const result = await this.call(adminId, accountId, 'mtop.taobao.idlemessage.pc.login.token', '1.0', { appKey: XIANYU_IM_APP_KEY, deviceId }, { spm_cnt: 'a21ybx.im.0.0', spm_pre: 'a21ybx.item.want.1.14ad3da6ALVq3n', log_id: '14ad3da6ALVq3n' });
     const accessToken = nestedString(result.response, ['data', 'accessToken']);
+    const verificationUrl = extractVerificationUrl(result.response);
     if (!result.success || !accessToken) {
-      const failure = { success: false, accountInvalid: result.accountInvalid, errorCode: result.errorCode ?? 'IM_TOKEN_MISSING', message: result.message ?? 'unable to obtain im token', cookieHeader: result.cookieHeader };
+      const failure = { success: false, accountInvalid: result.accountInvalid, errorCode: result.errorCode ?? 'IM_TOKEN_MISSING', message: result.message ?? 'unable to obtain im token', verificationUrl, response: result.response, cookieHeader: result.cookieHeader };
       if (result.success) this.reportFailure({ adminId, accountId, api: 'mtop.taobao.idlemessage.pc.login.token', ...failure });
       return failure;
     }
-    return { success: true, accountInvalid: false, accessToken, cookieHeader: result.cookieHeader };
+    return { success: true, accountInvalid: false, accessToken, response: result.response, cookieHeader: result.cookieHeader };
   }
 
   async fetchProfile(adminId: string, accountId: string): Promise<MtopResult> {
@@ -754,6 +755,25 @@ function nestedString(root: unknown, path: string[]): string | undefined {
     current = (current as Record<string, unknown>)[key];
   }
   return typeof current === 'string' && current.trim() ? current.trim() : undefined;
+}
+
+function extractVerificationUrl(response: Record<string, unknown> | undefined): string | undefined {
+  const candidates = [
+    nestedString(response, ['data', 'url']),
+    nestedString(response, ['data', 'verificationUrl']),
+    nestedString(response, ['data', 'verifyUrl']),
+    nestedString(response, ['url']),
+  ];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      const url = new URL(candidate);
+      if (/punish|captcha|verify|security/i.test(`${url.pathname}${url.search}${url.hash}`)) return url.toString();
+    } catch {
+      // Ignore malformed remote values and keep looking for another candidate.
+    }
+  }
+  return undefined;
 }
 
 function recordAt(root: unknown, path: string[]): Record<string, unknown> {
