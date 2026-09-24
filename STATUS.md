@@ -3,10 +3,10 @@
 ## 2026-09-25 QR 扫码登录失败根因修复
 
 - 根因：二维码确认后的 Cookie 已通过 `verifyLogin`，但后置 IM token bootstrap 返回 `ACCOUNT_VALIDATION_REQUIRED` / `FAIL_SYS_USER_VALIDATE`，触发滑块验证；原流程把该错误当成账号失效并阻断 QR 成功落库，且 `onSuccess` 异常后的内存 `failed` 状态没有再次持久化，数据库会永久停在 `scanned`。
-- 修复：QR 会话以外部 Cookie 校验和资料同步为成功标准，成功后立即持久化 `succeeded`；IM listener 改为后台 best-effort、有限重试；滑块/人工验证错误只把账号标为 `degraded`，保留刚保存的有效 Cookie；QR 后置回调失败立即发出终态并保留原始错误码；前端适配器保留服务端 `verification_required`，不再误映射成 `failed`。
+- 修复：QR 会话以外部 Cookie 校验和资料同步为成功标准，成功后立即持久化 `succeeded`；IM listener 改为后台 best-effort、有限重试；滑块/人工验证错误只保留验证错误并进行有限后台重试，不再覆盖刚保存的有效登录态为 `degraded`；真实凭证失效仍进入 `expired`，其他适配器故障才进入 `degraded`；QR 后置回调失败立即发出终态并保留原始错误码；前端适配器保留服务端 `verification_required`，不再误映射成 `failed`。
 - 受影响模块：`apps/api/src/xianyu-qr-login.ts`（终态持久化/错误码）、`apps/api/src/app.ts`（成功边界/监听器降级）、`apps/api/src/xianyu-im-service.ts`（验证类错误映射）；新增 QR/IM 回归覆盖。
 - 已验证：API 编译；API 全量 51 个测试文件 / 327 项通过；15 个 API smoke 全部通过；Web QR API 9/9、QR model 2/2、Web typecheck；隔离 PostgreSQL 迁移与 credential store smoke 通过；`git diff --check` 通过。
-- 状态：`MERGED`；后端以 `98b7905`、前端以 `807cebe` 合入 `main`。真实闲鱼账号的滑块挑战仍需人工完成，系统会在挑战前保持账号 `degraded` 而非撤销有效 Cookie。
+- 状态：`MERGED`；后端以 `98b7905`、前端以 `807cebe` 合入 `main`。真实闲鱼账号的滑块挑战仍需人工完成；挑战期间 QR/Cookie 登录保持 `connected`，IM/商品调用继续返回可恢复的验证错误，不撤销有效 Cookie。
 
 ## 2026-09-24 卡券删除弹窗与启用状态 follow-up
 
