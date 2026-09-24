@@ -136,7 +136,7 @@ export interface AutoReplyProcessResult {
 export interface AutoReplyServiceOptions {
   enabled?: boolean;
   sendMode?: 'simulate' | 'live';
-  testBuyerNames?: string[];
+  buyerAllowlist?: string[];
   totalTimeoutMs?: number;
   debounceMs?: number;
   maxHistory?: number;
@@ -155,7 +155,7 @@ export interface AutoReplyServiceOptions {
 export interface AutoReplyServiceRuntimeOptions {
   enabled?: boolean;
   sendMode?: 'simulate' | 'live';
-  testBuyerNames?: string[];
+  buyerAllowlist?: string[];
   totalTimeoutMs?: number;
   debounceMs?: number;
   maxHistory?: number;
@@ -167,7 +167,7 @@ export interface AutoReplyServiceRuntimeOptions {
 export class AutoReplyService {
   private readonly enabled: boolean;
   private readonly sendMode: 'simulate' | 'live';
-  private readonly testBuyerNames: string[];
+  private readonly buyerAllowlist: string[];
   private readonly totalTimeoutMs: number;
   private readonly debounceMs: number;
   private readonly maxHistory: number;
@@ -190,7 +190,7 @@ export class AutoReplyService {
   ) {
     this.enabled = options.enabled ?? true;
     this.sendMode = options.sendMode ?? 'simulate';
-    this.testBuyerNames = [...new Set((options.testBuyerNames ?? []).map(normalizeBuyerName).filter((value): value is string => Boolean(value)))];
+    this.buyerAllowlist = [...new Set((options.buyerAllowlist ?? []).map(normalizeBuyerName).filter((value): value is string => Boolean(value)))];
     this.totalTimeoutMs = Math.max(1_000, Math.min(options.totalTimeoutMs ?? 60_000, 300_000));
     this.debounceMs = Math.max(0, Math.min(options.debounceMs ?? 2_000, 30_000));
     this.maxHistory = Math.max(1, Math.min(options.maxHistory ?? 20, 50));
@@ -315,7 +315,7 @@ export class AutoReplyService {
 
       const buyerName = normalizeBuyerName(input.senderName) ?? normalizeBuyerName(conversation.buyerDisplayName);
       const buyerIdentityKeys = [buyerName, normalizeBuyerName(conversation.buyerRef), normalizeBuyerName(conversation.externalConversationRef)].filter((value): value is string => Boolean(value));
-      if (runtime.testBuyerNames.length > 0 && !buyerIdentityKeys.some((key) => runtime.testBuyerNames.includes(key))) {
+      if (runtime.buyerAllowlist.length > 0 && !buyerIdentityKeys.some((key) => runtime.buyerAllowlist.includes(key))) {
         const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode: 'TEST_BUYER_NOT_ALLOWLISTED', riskFlags: ['test_buyer_not_allowlisted'], eventPayload: {
           input: { kind: 'buyer_gate', buyerIdentityMatched: false, allowlistConfigured: true, identityKeyCount: buyerIdentityKeys.length },
           output: { decision: 'skipped', reason: 'TEST_BUYER_NOT_ALLOWLISTED' },
@@ -597,11 +597,11 @@ export class AutoReplyService {
 
   private async resolveRuntimeOptions(adminId: string, accountId: string): Promise<Required<AutoReplyServiceRuntimeOptions>> {
     const provided = this.configProvider ? await this.configProvider(adminId, accountId) : {};
-    const testBuyerNames = [...new Set((provided.testBuyerNames ?? this.testBuyerNames).map(normalizeBuyerName).filter((value): value is string => Boolean(value)))];
+    const buyerAllowlist = [...new Set((provided.buyerAllowlist ?? this.buyerAllowlist).map(normalizeBuyerName).filter((value): value is string => Boolean(value)))];
     return {
       enabled: provided.enabled ?? this.enabled,
       sendMode: provided.sendMode ?? this.sendMode,
-      testBuyerNames,
+      buyerAllowlist,
       totalTimeoutMs: Math.max(1_000, Math.min(provided.totalTimeoutMs ?? this.totalTimeoutMs, 300_000)),
       debounceMs: Math.max(0, Math.min(provided.debounceMs ?? this.debounceMs, 30_000)),
       maxHistory: Math.max(1, Math.min(provided.maxHistory ?? this.maxHistory, 50)),

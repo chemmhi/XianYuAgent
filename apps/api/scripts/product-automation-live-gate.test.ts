@@ -6,8 +6,8 @@ import { AutomationWorkflowService, ProductAutomationService, defaultProductAuto
 import { MemoryStore } from '../src/store-memory.js';
 import { ProductAutomationTrigger } from '../src/product-automation-trigger.js';
 import {
-  DEFAULT_PRODUCT_AUTOMATION_PRODUCT_TITLE,
-  normalizeAutomationProductTitle,
+  normalizeAutomationBuyerName,
+  parseProductAutomationBuyerAllowlist,
   type ProductAutomationLiveConfig,
 } from '../src/product-automation-live-gate.js';
 
@@ -29,7 +29,7 @@ function liveGate(overrides: Partial<ProductAutomationLiveConfig> = {}): Product
   return {
     executionMode: 'live',
     liveConfirmed: true,
-    productTitleAllowlist: [DEFAULT_PRODUCT_AUTOMATION_PRODUCT_TITLE],
+    buyerAllowlist: ['买家'],
     ...overrides,
   };
 }
@@ -41,37 +41,38 @@ function order(overrides: Partial<AutomationOrderSnapshot> = {}): AutomationOrde
   };
 }
 
-test('product automation live config defaults to blocked with one exact title', () => {
+test('product automation live config defaults to blocked with an empty buyer allowlist', () => {
   const config = loadConfig({});
   assert.equal(config.productAutomationExecutionMode, 'simulate');
   assert.equal(config.productAutomationLiveConfirmed, false);
-  assert.deepEqual(config.productAutomationProductTitleAllowlist, [DEFAULT_PRODUCT_AUTOMATION_PRODUCT_TITLE]);
+  assert.deepEqual(config.buyerAllowlist, []);
 });
 
-test('product automation title allowlist parses JSON and normalizes presentation whitespace', () => {
+test('product automation reuses the buyer allowlist and normalizes presentation whitespace', () => {
   const config = loadConfig({
     PRODUCT_AUTOMATION_EXECUTION_MODE: 'live',
     PRODUCT_AUTOMATION_LIVE_CONFIRMED: 'true',
-    PRODUCT_AUTOMATION_PRODUCT_TITLE_ALLOWLIST: '[" ２０２６年奥维高清地图骗局 ", "2026年奥维高清地图骗局"]',
+    AUTOMATION_BUYER_ALLOWLIST: '[" 买家\\nA ", "买家 A"]',
   });
   assert.equal(config.productAutomationExecutionMode, 'live');
   assert.equal(config.productAutomationLiveConfirmed, true);
-  assert.deepEqual(config.productAutomationProductTitleAllowlist, [DEFAULT_PRODUCT_AUTOMATION_PRODUCT_TITLE]);
-  assert.equal(normalizeAutomationProductTitle(' 2026年\n奥维高清地图骗局 '), DEFAULT_PRODUCT_AUTOMATION_PRODUCT_TITLE);
+  assert.deepEqual(config.buyerAllowlist, ['买家 A']);
+  assert.equal(normalizeAutomationBuyerName(' 买家\nA '), '买家 A');
+  assert.deepEqual(parseProductAutomationBuyerAllowlist('[" 买家 ", "买家"]'), ['买家']);
 });
 
-test('invalid product title allowlist fails closed during config loading', () => {
+test('invalid buyer allowlist fails closed', () => {
   assert.throws(
-    () => loadConfig({ PRODUCT_AUTOMATION_PRODUCT_TITLE_ALLOWLIST: '["valid", 123]' }),
-    /PRODUCT_AUTOMATION_PRODUCT_TITLE_ALLOWLIST_INVALID/,
+    () => parseProductAutomationBuyerAllowlist('["valid", 123]'),
+    /PRODUCT_AUTOMATION_BUYER_ALLOWLIST_INVALID/,
   );
 });
 
-test('non-whitelist product is blocked before any external side effect', async () => {
+test('non-whitelist buyer is blocked before any external side effect', async () => {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: 'live-gate@example.com', passwordHash: 'hash', displayName: 'Live Gate' });
   const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'live-gate-account' });
-  const product = await store.createProduct({ adminId: admin.id, accountId: account.id, title: '未授权商品', status: 'published' });
+  const product = await store.createProduct({ adminId: admin.id, accountId: account.id, title: '任意商品标题！！', status: 'published' });
   const configs = new ProductAutomationService(store, async () => 'audit');
   const automationConfig = defaultProductAutomationConfig();
   automationConfig.unpaidAutoReprice = { ...automationConfig.unpaidAutoReprice, enabled: true, targetPriceMinor: 880 };
@@ -80,18 +81,39 @@ test('non-whitelist product is blocked before any external side effect', async (
   const port = new CountingPort();
   const adapter = Object.assign(port, { readiness: 'ready' as const });
   const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(port), adapter, undefined, liveGate());
-  const result = await trigger.onOrderRefresh({ adminId: admin.id, accountId: account.id, items: [order({ accountId: account.id, productId: product.id, itemTitle: DEFAULT_PRODUCT_AUTOMATION_PRODUCT_TITLE })], requestId: 'refresh', traceId: 'refresh' });
+  const result = await trigger.onOrderRefresh({ adminId: admin.id, accountId: account.id, items: [order({ accountId: account.id, productId: product.id, buyerName: '其他买家', itemTitle: '任意商品标题！！' })], requestId: 'refresh', traceId: 'refresh' });
 
   assert.equal(result.results[0]?.status, 'blocked');
-  assert.equal(result.results[0]?.reason, 'PRODUCT_AUTOMATION_PRODUCT_TITLE_NOT_ALLOWLISTED');
+  assert.equal(result.results[0]?.reason, 'PRODUCT_AUTOMATION_BUYER_NOT_ALLOWLISTED');
   assert.deepEqual(port.calls, []);
+});
+
+test('allowlisted buyer is not blocked by product title', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'live-gate-buyer@example.com', passwordHash: 'hash', displayName: 'Live Gate Buyer' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'live-gate-buyer-account' });
+  const product = await store.createProduct({ adminId: admin.id, accountId: account.id, title: '2026年奥维高清地图骗局！！', status: 'published' });
+  const configs = new ProductAutomationService(store, async () => 'audit');
+  const automationConfig = defaultProductAutomationConfig();
+  automationConfig.unpaidAutoReprice = { ...automationConfig.unpaidAutoReprice, enabled: true, targetPriceMinor: 880 };
+  await configs.update({ adminId: admin.id, productId: product.id, expectedConfigVersion: 1, config: automationConfig, requestId: 'config', traceId: 'config' });
+
+  const port = new CountingPort();
+  const before = order({ accountId: account.id, productId: product.id, buyerName: '买家', itemTitle: '2026年奥维高清地图骗局！！', paymentStatus: 'unpaid' });
+  port.readOrder = async () => { port.calls.push('read-order'); return before; };
+  const adapter = Object.assign(port, { readiness: 'ready' as const });
+  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(port), adapter, undefined, liveGate());
+  const result = await trigger.onOrderRefresh({ adminId: admin.id, accountId: account.id, items: [order({ accountId: account.id, productId: product.id, buyerName: '买家', itemTitle: '2026年奥维高清地图骗局！！', paymentStatus: 'unpaid' })], requestId: 'refresh', traceId: 'refresh' });
+
+  assert.equal(result.results[0]?.status, 'succeeded');
+  assert.deepEqual(port.calls, ['read-order', 'reprice']);
 });
 
 test('live mode without explicit confirmation is blocked before allowlist evaluation', async () => {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: 'live-gate-confirm@example.com', passwordHash: 'hash', displayName: 'Live Gate Confirm' });
   const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'live-gate-confirm-account' });
-  const product = await store.createProduct({ adminId: admin.id, accountId: account.id, title: DEFAULT_PRODUCT_AUTOMATION_PRODUCT_TITLE, status: 'published' });
+  const product = await store.createProduct({ adminId: admin.id, accountId: account.id, title: '任意商品标题', status: 'published' });
   const configs = new ProductAutomationService(store, async () => 'audit');
   const automationConfig = defaultProductAutomationConfig();
   automationConfig.unpaidAutoReprice = { ...automationConfig.unpaidAutoReprice, enabled: true, targetPriceMinor: 880 };
@@ -100,7 +122,7 @@ test('live mode without explicit confirmation is blocked before allowlist evalua
   const port = new CountingPort();
   const adapter = Object.assign(port, { readiness: 'ready' as const });
   const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(port), adapter, undefined, liveGate({ liveConfirmed: false }));
-  const result = await trigger.onOrderRefresh({ adminId: admin.id, accountId: account.id, items: [order({ accountId: account.id, productId: product.id, itemTitle: DEFAULT_PRODUCT_AUTOMATION_PRODUCT_TITLE })], requestId: 'refresh', traceId: 'refresh' });
+  const result = await trigger.onOrderRefresh({ adminId: admin.id, accountId: account.id, items: [order({ accountId: account.id, productId: product.id, itemTitle: '任意商品标题' })], requestId: 'refresh', traceId: 'refresh' });
 
   assert.equal(result.results[0]?.status, 'blocked');
   assert.equal(result.results[0]?.reason, 'PRODUCT_AUTOMATION_LIVE_CONFIRMATION_REQUIRED');

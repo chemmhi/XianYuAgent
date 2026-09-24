@@ -105,8 +105,8 @@
 - 外部订单 upsert 会在同账号范围内用 `item.productId` 或 `products.external_product_ref = item.itemId` 回填 `order.productId`；无法关联商品时才会返回 `PRODUCT_LINK_MISSING` 并跳过自动化，禁止跨账号猜测商品。
 - `XianyuImService.handleExternalEvent` 在消息落库后调用 `ProductAutomationTrigger.onImEvent`。IM 传输本身不是订单/评价协议，只有上游适配器显式写入 `raw.productAutomation={kind:'review_created',orderNo,eventId}` 才会触发评价赠品；普通聊天文本永远不会被当作评价事实。
 - `ProductAutomationWorker.pollReviewReminders` 提供按账号扫描已发货订单的调度入口，调用方负责分钟级 cron/worker 周期。
-- 生产装配已接入 `XianyuProductAutomationExecutionAdapter`，复用闲鱼 MTOP、IM 和卡券 reservation 存储；但默认仍为 `simulate + 未确认`，入口统一返回 `blocked/PRODUCT_AUTOMATION_LIVE_MODE_REQUIRED`，不调用外部写操作。只有显式 live 模式、人工确认和持久化商品标题白名单同时满足时，才允许真实执行；当前白名单初始仅包含 `2026年奥维高清地图骗局`。
+- 生产装配已接入 `XianyuProductAutomationExecutionAdapter`，复用闲鱼 MTOP、IM 和卡券 reservation 存储；但默认仍为 `simulate + 未确认`，入口统一返回 `blocked/PRODUCT_AUTOMATION_LIVE_MODE_REQUIRED`，不调用外部写操作。只有显式 live 模式、人工确认和现有买家白名单同时满足时，才允许真实执行；商品标题不参与 live 放行。
 
 当前仍未完成真实账号、订单和 IM 会话的 live mutation 验收；MTOP/IM 契约测试、白名单零副作用测试、Memory/Postgres reservation 并发/过期测试已通过。没有明确的测试账号、订单号和人工确认前，不执行真实发货、改价或发消息。
 
-受控真实测试入口为 `npm --workspace apps/api run test:product-automation:live-order`，必须同时提供 `PRODUCT_AUTOMATION_LIVE_TEST=1`、`PRODUCT_AUTOMATION_LIVE_CONFIRM_TEXT="I UNDERSTAND REAL XIANYU MUTATION"`、`PRODUCT_AUTOMATION_EXECUTION_MODE=live`、`PRODUCT_AUTOMATION_LIVE_CONFIRMED=true`、`ADMIN_ID`、`ACCOUNT_ID`、`ORDER_NO` 和 `PRODUCT_AUTOMATION_LIVE_ACTION`；脚本会再次读取本地商品主数据并确认标题精确等于白名单值。
+受控真实测试入口为 `npm --workspace apps/api run test:product-automation:live-order`，必须同时提供 `PRODUCT_AUTOMATION_LIVE_TEST=1`、`PRODUCT_AUTOMATION_LIVE_CONFIRM_TEXT="I UNDERSTAND REAL XIANYU MUTATION"`、`PRODUCT_AUTOMATION_EXECUTION_MODE=live`、`PRODUCT_AUTOMATION_LIVE_CONFIRMED=true`、`AUTOMATION_BUYER_ALLOWLIST`、`ADMIN_ID`、`ACCOUNT_ID`、`ORDER_NO` 和 `PRODUCT_AUTOMATION_LIVE_ACTION`；脚本会再次读取本地订单并确认买家在白名单内。

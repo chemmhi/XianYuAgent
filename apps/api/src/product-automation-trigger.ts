@@ -156,7 +156,7 @@ export class ProductAutomationTrigger {
         return this.finish(trigger, order.orderNo, { trigger, orderNo: order.orderNo, status: 'blocked', reason: this.execution.readinessCode ?? 'AUTOMATION_EXECUTION_NOT_CONFIGURED' }, adminId, order.accountId, requestId, traceId);
       }
       if (ruleEnabled(config, trigger)) {
-        const liveBlockReason = productAutomationLiveBlockReason(this.liveConfig, automation.product.title);
+        const liveBlockReason = productAutomationLiveBlockReason(this.liveConfig, order.buyerName);
         if (liveBlockReason) {
           return this.finish(trigger, order.orderNo, { trigger, orderNo: order.orderNo, status: 'blocked', reason: liveBlockReason }, adminId, order.accountId, requestId, traceId);
         }

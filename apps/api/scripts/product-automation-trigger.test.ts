@@ -8,7 +8,7 @@ import type { ProductAutomationConfig } from '../src/domain.js';
 import type { ProductAutomationLiveConfig } from '../src/product-automation-live-gate.js';
 
 function testLiveGate(): ProductAutomationLiveConfig {
-  return { executionMode: 'live', liveConfirmed: true, productTitleAllowlist: ['自动化商品'] };
+  return { executionMode: 'live', liveConfirmed: true, buyerAllowlist: ['买家'] };
 }
 
 function external(status: AutomationExternalResult['status'], errorCode?: string): AutomationExternalResult { return { status, errorCode, externalRef: status === 'succeeded' ? `ext-${status}` : undefined }; }

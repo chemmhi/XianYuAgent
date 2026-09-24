@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createApp } from '../dist/app.js';
 import { loadConfig } from '../dist/config.js';
+import { normalizeAutomationBuyerName } from '../dist/product-automation-live-gate.js';
 
 const env = process.env;
 assert.equal(env.PRODUCT_AUTOMATION_LIVE_TEST, '1', 'PRODUCT_AUTOMATION_LIVE_TEST=1 is required');
@@ -17,7 +18,6 @@ assert.ok(['payment_paid', 'unpaid_reprice', 'review_gift', 'review_reminder'].i
 const config = loadConfig(env);
 assert.equal(config.productAutomationExecutionMode, 'live');
 assert.equal(config.productAutomationLiveConfirmed, true);
-assert.deepEqual(config.productAutomationProductTitleAllowlist, ['2026年奥维高清地图骗局']);
 
 const runtime = createApp(config);
 try {
@@ -25,9 +25,10 @@ try {
   assert.ok(order, 'order not found in the scoped local store');
   assert.equal(order.accountId, accountId);
   assert.ok(order.productId, 'order is not linked to a local product');
+  const normalizedBuyerNames = (config.buyerAllowlist ?? []).map(normalizeAutomationBuyerName);
+  assert.ok(normalizedBuyerNames.includes(normalizeAutomationBuyerName(order.buyerName)), 'order buyer is not in the configured buyer allowlist');
   const automation = await runtime.productAutomation.get(adminId, order.productId);
   assert.equal(automation.product.accountId, accountId);
-  assert.equal(automation.product.title, '2026年奥维高清地图骗局');
 
   const now = new Date().toISOString();
   const result = action === 'payment_paid' || action === 'unpaid_reprice'

@@ -81,7 +81,7 @@ adminId + inboundMessageId
 - 当前会话不是 `handlingMode=human`；
 - 消息不是空消息、系统消息或不支持的类型；
 - `simulate` / `live` 模式符合环境策略；
-- `live` 模式下买家命中 `AUTO_REPLY_TEST_BUYER_NAMES` 数组白名单；
+- `live` 模式下买家命中 `AUTOMATION_BUYER_ALLOWLIST` 数组白名单；
 - 消息尚未被处理过。
 
 ### 3.3 安全预检

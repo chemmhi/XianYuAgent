@@ -35,7 +35,7 @@ test('template generator only uses redacted product fields', async () => {
 test('auto-reply context loads narrow product, order, and message projections', async () => {
   const runtime = createApp(loadConfig({
     HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
-    API_KEY: 'test-key', AUTO_REPLY_MODEL_ENABLED: 'false', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["Projection Buyer"]',
+    API_KEY: 'test-key', AUTO_REPLY_MODEL_ENABLED: 'false', AUTO_REPLY_SEND_MODE: 'simulate', AUTOMATION_BUYER_ALLOWLIST: '["Projection Buyer"]',
   }));
   const admin = await runtime.store.createAdmin({ email: 'projection@example.com', passwordHash: 'hash', displayName: 'Projection' });
   const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'projection-seller' });
@@ -108,7 +108,7 @@ test('configured model provider generates the persisted auto-reply', async () =>
 
   const runtime = createApp(loadConfig({
     HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
-    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'test-model', WIRE_API: 'chat', MODEL_TIMEOUT_MS: '1000', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["Allowlisted Buyer"]',
+    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'test-model', WIRE_API: 'chat', MODEL_TIMEOUT_MS: '1000', AUTO_REPLY_SEND_MODE: 'simulate', AUTOMATION_BUYER_ALLOWLIST: '["Allowlisted Buyer"]',
   }));
   const admin = await runtime.store.createAdmin({ email: 'model-provider@example.com', passwordHash: 'hash', displayName: 'Model Provider' });
   const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'model-provider-seller' });
@@ -151,7 +151,7 @@ test('multimodal inbound image reaches the model Agent and persists a structured
 
   const runtime = createApp(loadConfig({
     HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
-    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'vision-model', WIRE_API: 'chat', MODEL_TIMEOUT_MS: '1000', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["Vision Buyer"]',
+    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'vision-model', WIRE_API: 'chat', MODEL_TIMEOUT_MS: '1000', AUTO_REPLY_SEND_MODE: 'simulate', AUTOMATION_BUYER_ALLOWLIST: '["Vision Buyer"]',
   }));
   const admin = await runtime.store.createAdmin({ email: 'vision@example.com', passwordHash: 'hash', displayName: 'Vision' });
   const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'vision-seller' });
@@ -187,7 +187,7 @@ test('configured Responses provider generates the persisted auto-reply', async (
 
   const runtime = createApp(loadConfig({
     HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
-    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'responses-model', WIRE_API: 'responses', MODEL_TIMEOUT_MS: '1000', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["Responses Buyer"]',
+    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'responses-model', WIRE_API: 'responses', MODEL_TIMEOUT_MS: '1000', AUTO_REPLY_SEND_MODE: 'simulate', AUTOMATION_BUYER_ALLOWLIST: '["Responses Buyer"]',
   }));
   const admin = await runtime.store.createAdmin({ email: 'responses-provider@example.com', passwordHash: 'hash', displayName: 'Responses Provider' });
   const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'responses-provider-seller' });
@@ -217,7 +217,7 @@ test('disabling the auto-reply model keeps the template generator active', async
   globalThis.fetch = (async () => { throw new Error('auto-reply model must be disabled'); }) as typeof fetch;
   const runtime = createApp(loadConfig({
     HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
-    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'test-model', AUTO_REPLY_MODEL_ENABLED: 'false', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["Allowlisted Buyer"]',
+    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'test-model', AUTO_REPLY_MODEL_ENABLED: 'false', AUTO_REPLY_SEND_MODE: 'simulate', AUTOMATION_BUYER_ALLOWLIST: '["Allowlisted Buyer"]',
   }));
   const admin = await runtime.store.createAdmin({ email: 'model-disabled@example.com', passwordHash: 'hash', displayName: 'Model Disabled' });
   const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'model-disabled-seller' });
@@ -241,7 +241,7 @@ test('model provider failure fails the run without creating an outbound message'
   globalThis.fetch = (async () => new Response('{"error":"unavailable"}', { status: 503 })) as typeof fetch;
   const runtime = createApp(loadConfig({
     HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
-    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'test-model', MODEL_TIMEOUT_MS: '1000', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_TEST_BUYER_NAMES: '["Allowlisted Buyer"]',
+    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'test-model', MODEL_TIMEOUT_MS: '1000', AUTO_REPLY_SEND_MODE: 'simulate', AUTOMATION_BUYER_ALLOWLIST: '["Allowlisted Buyer"]',
   }));
   const admin = await runtime.store.createAdmin({ email: 'model-failure@example.com', passwordHash: 'hash', displayName: 'Model Failure' });
   const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'model-failure-seller' });
@@ -397,7 +397,7 @@ test('history import followed by the same push still runs one idempotent auto-re
     XIANYU_QR_MODE: 'stub',
     AGENT_RUNTIME: 'in-process',
     AUTO_REPLY_SEND_MODE: 'simulate',
-    AUTO_REPLY_TEST_BUYER_NAMES: '["Allowlisted Buyer"]',
+    AUTOMATION_BUYER_ALLOWLIST: '["Allowlisted Buyer"]',
   }));
   const admin = await runtime.store.createAdmin({ email: 'history-push-race@example.com', passwordHash: 'hash', displayName: 'History Push Race' });
   const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'history-push-race-seller' });
@@ -481,7 +481,7 @@ test('push without senderName enriches buyer identity before the allowlist gate'
     XIANYU_QR_MODE: 'stub',
     AGENT_RUNTIME: 'in-process',
     AUTO_REPLY_SEND_MODE: 'simulate',
-    AUTO_REPLY_TEST_BUYER_NAMES: '["Allowlisted Buyer"]',
+    AUTOMATION_BUYER_ALLOWLIST: '["Allowlisted Buyer"]',
   }));
   const admin = await runtime.store.createAdmin({ email: 'push-identity@example.com', passwordHash: 'hash', displayName: 'Push Identity' });
   const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'push-identity-seller' });
@@ -522,11 +522,11 @@ test('live auto-reply requires an explicit buyer allowlist', () => {
     () => loadConfig({ AUTO_REPLY_SEND_MODE: 'live' }),
     /AUTO_REPLY_LIVE_REQUIRES_BUYER_ALLOWLIST/,
   );
-  const config = loadConfig({ AUTO_REPLY_SEND_MODE: 'live', AUTO_REPLY_TEST_BUYER_NAMES: '["一只橘喵喵亮晶晶", "另一位买家"]' });
+  const config = loadConfig({ AUTO_REPLY_SEND_MODE: 'live', AUTOMATION_BUYER_ALLOWLIST: '["一只橘喵喵亮晶晶", "另一位买家"]' });
   assert.equal(config.autoReplySendMode, 'live');
-  assert.deepEqual(config.autoReplyTestBuyerNames, ['一只橘喵喵亮晶晶', '另一位买家']);
-  const legacy = loadConfig({ AUTO_REPLY_SEND_MODE: 'live', AUTO_REPLY_TEST_BUYER_NAMES: '一只橘喵喵亮晶晶, 另一位买家' });
-  assert.deepEqual(legacy.autoReplyTestBuyerNames, ['一只橘喵喵亮晶晶', '另一位买家']);
+  assert.deepEqual(config.buyerAllowlist, ['一只橘喵喵亮晶晶', '另一位买家']);
+  const legacy = loadConfig({ AUTO_REPLY_SEND_MODE: 'live', AUTOMATION_BUYER_ALLOWLIST: '一只橘喵喵亮晶晶, 另一位买家' });
+  assert.deepEqual(legacy.buyerAllowlist, ['一只橘喵喵亮晶晶', '另一位买家']);
 });
 
 test('auto-reply defaults to the repaired enforce chain', () => {

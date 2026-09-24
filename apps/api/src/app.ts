@@ -76,7 +76,7 @@ export interface AppRuntime {
 }
 
 export function createApp(config: AppConfig = loadConfig()): AppRuntime {
-  if (config.autoReplySendMode === 'live' && !(config.autoReplyTestBuyerNames?.length)) {
+  if (config.autoReplySendMode === 'live' && !(config.buyerAllowlist?.length)) {
     throw new Error('AUTO_REPLY_LIVE_REQUIRES_BUYER_ALLOWLIST');
   }
   const store = createStore(config);
@@ -124,7 +124,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
   }, {
     executionMode: config.productAutomationExecutionMode,
     liveConfirmed: config.productAutomationLiveConfirmed,
-    productTitleAllowlist: config.productAutomationProductTitleAllowlist,
+    buyerAllowlist: config.buyerAllowlist ?? [],
   });
   const productAutomationWorker = new ProductAutomationWorker(store, productAutomationTrigger);
   const credentials = new CredentialService(store, async (input) => {
@@ -172,7 +172,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     return auditId;
   }, {
     sendMode: config.autoReplySendMode ?? 'simulate',
-    testBuyerNames: config.autoReplyTestBuyerNames,
+    buyerAllowlist: config.buyerAllowlist,
     debounceMs: autoReplyAgentConfig.debounceMs,
     maxHistory: autoReplyAgentConfig.maxHistory,
     maxReplyLength: autoReplyAgentConfig.maxReplyLength,
@@ -197,7 +197,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       return {
         enabled: settings.enabled,
         sendMode: settings.sendMode === 'live' && envLiveEnabled ? 'live' : 'simulate',
-        testBuyerNames: config.autoReplyTestBuyerNames,
+        buyerAllowlist: config.buyerAllowlist,
         totalTimeoutMs: settings.totalTimeoutMs,
         debounceMs: settings.debounceMs,
         maxHistory: settings.maxHistory,
