@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { composeAutoReplyAgentSystemPrompt, resolveAutoReplyAgentConfig } from '../src/auto-reply-agent-config.js';
-import { AUTO_REPLY_AGENT_TOOLS, ToolCallingAutoReplyAgent, type AutoReplyAgentTrace } from '../src/auto-reply-agent.js';
+import { AUTO_REPLY_AGENT_TOOLS, AUTO_REPLY_WEB_SEARCH_TOOL, ToolCallingAutoReplyAgent, type AutoReplyAgentTrace } from '../src/auto-reply-agent.js';
 import { AutoReplyService, NoopAutoReplySender, type AutoReplyClassification, type AutoReplyContext, type AutoReplyGeneratorObservation } from '../src/auto-reply.js';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
@@ -35,7 +35,49 @@ test('buyer Agent configuration resolves independently from Workspace settings',
   assert.equal(config.maxToolCalls, 2);
   assert.equal(config.debounceMs, 1_500);
   assert.equal(config.systemPrompt, '买家专用提示词');
+  assert.equal(config.webSearchEnabled, true);
+  assert.equal(resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_WEB_SEARCH_ENABLED: 'false' }).webSearchEnabled, false);
   assert.notEqual(config.digest, '');
+});
+
+test('buyer Agent web search is enabled by default and exposed only after local fact lookup for general questions', async () => {
+  const requests: Array<{ tools?: unknown[] }> = [];
+  let call = 0;
+  const client: ModelClient = {
+    complete: async (request) => {
+      requests.push({ tools: request.tools });
+      call += 1;
+      if (call === 1) return { content: '', model: 'test', toolCalls: [{ id: 'tool-product', type: 'function', function: { name: 'get_product_info', arguments: '{}' } }] };
+      return { content: replyPayload('这个问题属于通用知识，我已参考公开资料。'), model: 'test', webSearchUsed: true };
+    },
+  };
+  const store = { listAutoReplyProducts: async () => ({ items: [], total: 0 }) } as unknown as Store;
+  const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_WEB_SEARCH_ENABLED: 'true' }));
+  await agent.generate({ adminId: 'admin-1', context: context(), classification });
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0]?.tools?.length, AUTO_REPLY_AGENT_TOOLS.length);
+  const secondTools = requests[1]?.tools as Array<{ type?: string }>;
+  assert.equal(secondTools.length, AUTO_REPLY_AGENT_TOOLS.length + 1);
+  assert.deepEqual(secondTools.at(-1), AUTO_REPLY_WEB_SEARCH_TOOL);
+});
+
+test('buyer Agent never exposes web search for non-general intent', async () => {
+  const requests: Array<{ tools?: unknown[] }> = [];
+  let call = 0;
+  const client: ModelClient = {
+    complete: async (request) => {
+      requests.push({ tools: request.tools });
+      call += 1;
+      if (call === 1) return { content: '', model: 'test', toolCalls: [{ id: 'tool-product', type: 'function', function: { name: 'get_product_info', arguments: '{}' } }] };
+      return { content: replyPayload('已根据商品事实处理。'), model: 'test' };
+    },
+  };
+  const store = { listAutoReplyProducts: async () => ({ items: [], total: 0 }) } as unknown as Store;
+  const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_WEB_SEARCH_ENABLED: 'true' }));
+  await agent.generate({ adminId: 'admin-1', context: context(), classification: { ...classification, intent: 'price' } });
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0]?.tools?.length, AUTO_REPLY_AGENT_TOOLS.length);
+  assert.equal(requests[1]?.tools?.length, AUTO_REPLY_AGENT_TOOLS.length);
 });
 
 test('buyer Agent enforces a 30-character minimum max reply length', () => {
@@ -240,6 +282,28 @@ test('OpenAI-compatible transport preserves native tool calls', async () => {
     assert.equal(requestBody?.tool_choice, 'auto');
     assert.equal(result.content, '');
     assert.equal(result.toolCalls?.[0]?.function.name, 'get_product_info');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Responses transport serializes built-in web_search and reports its use', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody: Record<string, unknown> | undefined;
+  globalThis.fetch = (async (_input, init) => {
+    requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({
+      model: 'responses-search-model',
+      output_text: replyPayload('已参考公开资料。'),
+      output: [{ type: 'web_search_call', id: 'ws_1', status: 'completed' }, { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: replyPayload('已参考公开资料。') }] }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+  try {
+    const client = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl: 'https://model.example/v1', model: 'responses-search-model', wireApi: 'responses' });
+    const result = await client.complete({ messages: [{ role: 'user', content: '请回答一个通用知识问题' }], tools: [AUTO_REPLY_WEB_SEARCH_TOOL], toolChoice: 'auto' });
+    assert.deepEqual(requestBody?.tools, [{ type: 'web_search' }]);
+    assert.equal(result.webSearchUsed, true);
+    assert.equal(result.content, replyPayload('已参考公开资料。'));
   } finally {
     globalThis.fetch = originalFetch;
   }

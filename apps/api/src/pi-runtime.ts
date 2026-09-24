@@ -25,14 +25,18 @@ export interface ModelToolCall {
   };
 }
 
-export interface ModelToolDefinition {
-  type: 'function';
-  function: {
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>;
-  };
-}
+export type ModelToolDefinition =
+  | {
+      type: 'function';
+      function: {
+        name: string;
+        description: string;
+        parameters: Record<string, unknown>;
+      };
+    }
+  | {
+      type: 'web_search';
+    };
 
 export interface ModelMessage {
   role: ModelMessageRole;
@@ -56,6 +60,7 @@ export interface ModelCompletionResult {
   model: string;
   usage?: Record<string, unknown>;
   toolCalls?: ModelToolCall[];
+  webSearchUsed?: boolean;
 }
 
 export interface ModelClient {
@@ -86,7 +91,8 @@ export type PiModelErrorCode =
   | 'MODEL_TIMEOUT'
   | 'MODEL_HTTP_ERROR'
   | 'MODEL_NETWORK_ERROR'
-  | 'MODEL_INVALID_RESPONSE';
+  | 'MODEL_INVALID_RESPONSE'
+  | 'MODEL_UNSUPPORTED_TOOL';
 
 export class PiModelClientError extends Error {
   readonly code: PiModelErrorCode;
@@ -157,6 +163,7 @@ export class OpenAICompatibleModelClient implements ModelClient {
         model: typeof record?.model === 'string' && record.model.trim() ? record.model : this.options.model,
         usage: isRecord(record?.usage) ? record.usage : undefined,
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        webSearchUsed: this.wireApi === 'responses' && extractResponsesWebSearchUsed(payload),
       };
     } catch (error) {
       if (error instanceof PiModelClientError) throw error;
@@ -398,6 +405,10 @@ function normalizeWireApi(value: string | undefined): ModelWireApi {
 }
 
 function toChatCompletionsRequestBody(model: string, input: ModelCompletionRequest, reasoningEffort?: string): Record<string, unknown> {
+  if (input.tools?.some((tool) => tool.type === 'web_search')) {
+    throw new PiModelClientError('MODEL_UNSUPPORTED_TOOL', 'web_search requires the Responses API');
+  }
+  const functionTools = input.tools?.filter((tool): tool is Extract<ModelToolDefinition, { type: 'function' }> => tool.type === 'function');
   return {
     model,
     messages: input.messages.map((message) => ({
@@ -407,7 +418,7 @@ function toChatCompletionsRequestBody(model: string, input: ModelCompletionReque
       ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
       ...(message.toolCalls ? { tool_calls: message.toolCalls } : {}),
     })),
-    ...(input.tools?.length ? { tools: input.tools } : {}),
+    ...(functionTools?.length ? { tools: functionTools } : {}),
     ...(input.toolChoice ? { tool_choice: input.toolChoice } : {}),
     ...(normalizeReasoningEffort(reasoningEffort) ? { reasoning_effort: normalizeReasoningEffort(reasoningEffort) } : {}),
   };
@@ -463,6 +474,7 @@ function modelContentToText(content: ModelMessageContent): string {
 }
 
 function toResponsesToolDefinition(tool: ModelToolDefinition): Record<string, unknown> {
+  if (tool.type === 'web_search') return { type: 'web_search' };
   return {
     type: 'function',
     name: tool.function.name,
@@ -529,6 +541,11 @@ function extractResponsesToolCalls(payload: unknown): ModelToolCall[] {
     if (!id || !name || args === undefined) return [];
     return [{ id, type: 'function', function: { name, arguments: args } }];
   });
+}
+
+function extractResponsesWebSearchUsed(payload: unknown): boolean {
+  if (!isRecord(payload) || !Array.isArray(payload.output)) return false;
+  return payload.output.some((item) => isRecord(item) && item.type === 'web_search_call');
 }
 
 function redactSensitiveText(value: string, outputLimit: number, secrets: string[] = []): string {
