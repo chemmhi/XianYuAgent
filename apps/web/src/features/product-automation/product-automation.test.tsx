@@ -15,7 +15,7 @@ describe('product automation API', () => {
   it('maps the live adapter to the canonical automation and coupon contracts', async () => {
     const calls: Array<{ method: string; path: string; body?: unknown; options?: unknown }> = [];
     const api = createProductAutomationApi({
-      async get<T>(path: string) { calls.push({ method: 'GET', path }); return (path.includes('/automation') ? { data: { productId: 'product-1', accountId: 'account-1', configVersion: 7, config: { paidAutoDelivery: { enabled: true, couponBatchIds: ['1'] }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true, firstDelayHours: 72, repeatIntervalHours: 24, maxReminders: 1, message: '请评价' } } } } : { data: { items: [...MOCK_AUTOMATION_COUPONS, { id: 'operator-only', label: '仅运营可见', purpose: 'text', deliveryScope: 'operator_only' }] } }) as T; },
+      async get<T>(path: string) { calls.push({ method: 'GET', path }); return (path.includes('/automation') ? { data: { productId: 'product-1', accountId: 'account-1', configVersion: 7, config: { paidAutoDelivery: { enabled: true, couponBatchIds: ['1'] }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true, firstDelayHours: 72, repeatIntervalHours: 24, maxReminders: 1, message: '请评价' } } } } : { data: { items: [...MOCK_AUTOMATION_COUPONS, { id: 'operator-only', label: '仅运营可见', purpose: 'text', deliveryScope: 'operator_only' }, { id: 'paused-coupon', label: '已禁用卡券', purpose: 'text', deliveryScope: 'buyer_deliverable', status: 'paused' }] } }) as T; },
       async patch<T>(path: string, body?: unknown, options?: unknown) { calls.push({ method: 'PATCH', path, body, options }); return { data: { productId: 'product-1', accountId: 'account-1', configVersion: 8, paidAutoDelivery: { enabled: false }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true } } } as T; },
       async post<T>(path: string, body?: unknown, options?: unknown) { calls.push({ method: 'POST', path, body, options }); return { data: { updatedCount: 1 } } as T; },
     });
@@ -23,7 +23,9 @@ describe('product automation API', () => {
     expect(config.version).toBe(7);
     expect(config.delivery.couponIds).toEqual(['1']);
     const availableCoupons = await api.listCoupons('account-1', 'delivery');
-    expect(availableCoupons.some((coupon) => coupon.id === 'operator-only')).toBe(true);
+    expect(availableCoupons.some((coupon) => coupon.id === 'operator-only')).toBe(false);
+    expect(availableCoupons.some((coupon) => coupon.id === 'paused-coupon')).toBe(false);
+    expect(availableCoupons.every((coupon) => coupon.deliveryScope === 'buyer_deliverable' && coupon.status === 'active')).toBe(true);
     await api.saveConfig('product-1', { version: 7, delivery: { enabled: false } });
     await api.saveBatch({ productIds: ['product-1'], expectedConfigVersions: { 'product-1': 8 }, apply: { delivery: true, reprice: false, gift: false, review: false }, rules: { delivery: { enabled: false }, reprice: { enabled: false }, gift: { enabled: false }, review: { enabled: true } } });
     expect(calls[0].path).toBe('/api/v1/products/product-1/automation');

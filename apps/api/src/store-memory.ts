@@ -1632,10 +1632,21 @@ export class MemoryStore implements Store {
 
   private selectAvailableCouponItems(batches: CouponBatchRecord[], quantity: number): CouponItemRecord[] {
     const available: CouponItemRecord[] = [];
+    const committedUsage = new Map<string, number>();
+    for (const reservation of this.couponReservations.values()) {
+      if (reservation.status !== 'committed') continue;
+      for (const item of reservation.items) committedUsage.set(item.itemId, (committedUsage.get(item.itemId) ?? 0) + 1);
+    }
     for (const batch of batches) {
       const items = [...this.couponItems.values()]
         .filter((item) => item.batchId === batch.id && item.status === 'available')
-        .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+        .sort((left, right) => {
+          if (batch.purpose === 'data') {
+            const usageDelta = (committedUsage.get(left.id) ?? 0) - (committedUsage.get(right.id) ?? 0);
+            if (usageDelta !== 0) return usageDelta;
+          }
+          return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
+        });
       available.push(...items);
       if (available.length >= quantity) break;
     }

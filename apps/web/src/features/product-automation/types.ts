@@ -7,6 +7,7 @@ export interface AutomationCoupon {
   specSummary: string;
   quantitySummary: string;
   deliveryScope?: 'system_only' | 'operator_only' | 'buyer_deliverable';
+  status?: 'active' | 'paused';
   accountId?: string;
   apiManaged?: boolean;
 }

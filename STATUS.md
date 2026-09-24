@@ -1,5 +1,14 @@
 # XianyuSellerAgent 项目状态
 
+## 2026-09-24 卡券删除弹窗与启用状态 follow-up
+
+- 目标行为：删除卡券弹窗复用创建卡券弹窗的颜色与结构，内容区和操作区有明确间距；名称列通过悬停查看完整名称；图片内容以缩略图展示并支持点击大图预览。
+- 状态行为：批次状态统一为启用/未启用 switch；切换请求期间 switch 置灰；移除“启用/禁用”菜单动作；新建卡券默认启用；商品自动化只允许启用且 `buyer_deliverable` 的卡券进入发送链路。
+- 数据卡轮换：可重复使用的批量数据卡按已成功发送次数轮换行号，避免每次都重复首行；Memory/PostgreSQL 选择策略和回归测试保持一致。
+- 已验证：API/Web typecheck；API/Web build；API 全量测试；Web 88 files / 304 tests；API 商品自动化 32/32；Memory reservation + 商品自动化发券 E2E 21/21；PostgreSQL reservation smoke（含批量数据轮换）；`coupons-smoke.mjs`；Chrome/CDP coupons E2E Memory 1 轮 + PostgreSQL 1 轮；`git diff --check`。
+- 视觉证据：`docs/evidence/stage5/S4-VS3/screenshots/` 已由真实 Vite + API + Chrome/CDP 重新生成桌面/移动卡券列表、创建弹窗、关联弹窗截图。
+- 状态：`READY_FOR_REVIEW`；本轮未执行真实闲鱼外部 mutation，不将受控 E2E 解释为生产账号发券验收。
+
 ## 2026-09-24 卡券可重复使用与关联删除确认修复
 
 - 目标行为：卡券发货提交后回到 `available`，不再把批次标记为 `exhausted`，同一配置可重复用于后续发货；历史 `exhausted` 批次和 `consumed` 条目通过 `040_reusable_coupons.sql` 直接归一化。

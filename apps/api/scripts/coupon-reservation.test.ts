@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { MemoryStore } from '../src/store-memory.js';
 
-async function fixture(itemCount = 2) {
+async function fixture(itemCount = 2, purpose: 'text' | 'data' = 'text') {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: `coupon-reservation-${Date.now()}-${Math.random()}@example.com`, passwordHash: 'hash', displayName: 'Coupon Reservation Test' });
   const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: `coupon-reservation-${Date.now()}-${Math.random()}` });
-  const batch = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'Reservation Batch', purpose: 'text', deliveryScope: 'buyer_deliverable' });
-  await store.importCouponItems({ adminId: admin.id, batchId: batch.id, contents: Array.from({ length: itemCount }, (_, index) => `coupon-${index + 1}`) });
+  const batch = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'Reservation Batch', purpose, deliveryScope: 'buyer_deliverable', metadata: purpose === 'data' ? { dataContent: Array.from({ length: itemCount }, (_, index) => `coupon-${index + 1}`).join('\n') } : undefined });
+  if (purpose !== 'data') await store.importCouponItems({ adminId: admin.id, batchId: batch.id, contents: Array.from({ length: itemCount }, (_, index) => `coupon-${index + 1}`) });
   return { store, admin, account, batch };
 }
 
@@ -66,6 +66,18 @@ test('commit is idempotent and prevents release after finalization', async () =>
   const second = await value.store.reserveCoupon(reservationInput(value, 'commit-key-second'));
   assert.equal(second.items[0]?.content, committed.items[0]?.content);
   await assert.rejects(() => value.store.releaseCouponReservation({ adminId: value.admin.id, reservationId: reserved.reservationId, executionKey: input.executionKey, reason: 'late_release' }), /COUPON_RESERVATION_FINALIZED/);
+});
+
+test('configured batch data rotates reusable rows by committed delivery count', async () => {
+  const value = await fixture(2, 'data');
+  const first = await value.store.reserveCoupon(reservationInput(value, 'data-rotation-1'));
+  await value.store.commitCouponReservation({ adminId: value.admin.id, reservationId: first.reservationId, executionKey: 'data-rotation-1' });
+  const second = await value.store.reserveCoupon(reservationInput(value, 'data-rotation-2'));
+  assert.equal(first.items[0]?.content, 'coupon-1');
+  assert.equal(second.items[0]?.content, 'coupon-2');
+  await value.store.commitCouponReservation({ adminId: value.admin.id, reservationId: second.reservationId, executionKey: 'data-rotation-2' });
+  const third = await value.store.reserveCoupon(reservationInput(value, 'data-rotation-3'));
+  assert.equal(third.items[0]?.content, 'coupon-1');
 });
 
 test('expired lease is released before read and can be reopened', async () => {

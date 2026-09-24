@@ -8,6 +8,7 @@ const suffix = `${process.pid}-${Date.now()}`;
 let admin;
 let account;
 let batch;
+let dataBatch;
 const reservationIds = [];
 
 await runtime.store.pool.query(await readFile(new URL('../migrations/033_coupon_reservations.sql', import.meta.url), 'utf8'));
@@ -59,6 +60,16 @@ try {
   reservationIds.push(secondExecution.reservationId);
   await runtime.store.commitCouponReservation({ adminId: admin.id, reservationId: secondExecution.reservationId, executionKey: `pg-reuse-${suffix}` });
 
+  dataBatch = await runtime.store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'PG Data Rotation Batch', purpose: 'data', deliveryScope: 'buyer_deliverable', metadata: { dataContent: `pg-data-1-${suffix}\npg-data-2-${suffix}` } });
+  const dataFirstKey = `pg-data-1-${suffix}`;
+  const dataSecondKey = `pg-data-2-${suffix}`;
+  const dataFirst = await runtime.store.reserveCoupon({ adminId: admin.id, accountId: account.id, batchIds: [dataBatch.id], quantity: 1, executionKey: dataFirstKey, purpose: 'delivery' });
+  await runtime.store.commitCouponReservation({ adminId: admin.id, reservationId: dataFirst.reservationId, executionKey: dataFirstKey });
+  const dataSecond = await runtime.store.reserveCoupon({ adminId: admin.id, accountId: account.id, batchIds: [dataBatch.id], quantity: 1, executionKey: dataSecondKey, purpose: 'delivery' });
+  assert.equal(dataFirst.items[0]?.content, `pg-data-1-${suffix}`);
+  assert.equal(dataSecond.items[0]?.content, `pg-data-2-${suffix}`);
+  await runtime.store.commitCouponReservation({ adminId: admin.id, reservationId: dataSecond.reservationId, executionKey: dataSecondKey });
+
   await runtime.store.importCouponItems({ adminId: admin.id, batchId: batch.id, contents: [`pg-coupon-3-${suffix}`] });
   const expiryInput = { ...reserveInput, executionKey: `pg-expiry-${suffix}`, leaseSeconds: 1 };
   const expiring = await runtime.store.reserveCoupon(expiryInput);
@@ -73,6 +84,12 @@ try {
     await runtime.store.pool.query('delete from coupons.coupon_reservations where account_id=$1', [account.id]);
     await runtime.store.pool.query('delete from coupons.coupon_items where batch_id=$1', [batch.id]);
     await runtime.store.pool.query('delete from coupons.coupon_batches where id=$1', [batch.id]);
+  }
+  if (dataBatch) {
+    await runtime.store.pool.query('delete from coupons.coupon_reservation_items where reservation_id in (select id from coupons.coupon_reservations where account_id=$1)', [account.id]);
+    await runtime.store.pool.query('delete from coupons.coupon_reservations where account_id=$1', [account.id]);
+    await runtime.store.pool.query('delete from coupons.coupon_items where batch_id=$1', [dataBatch.id]);
+    await runtime.store.pool.query('delete from coupons.coupon_batches where id=$1', [dataBatch.id]);
   }
   if (account) {
     await runtime.store.pool.query('delete from auth.account_scopes where account_id=$1', [account.id]);

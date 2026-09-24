@@ -111,6 +111,23 @@ test('defaults auto-confirm on and allows disabled coupon-only associations', as
   assert.equal(partial.config.paidAutoDelivery.autoConfirm, true);
 });
 
+test('disabled coupon batches cannot be bound to an enabled delivery rule', async () => {
+  const { admin, product, coupon, service, store } = await setup();
+  await store.updateCouponBatch({ adminId: admin.id, batchId: coupon.id, patch: { status: 'paused' } });
+  await assert.rejects(() => service.update({
+    adminId: admin.id,
+    productId: product.id,
+    expectedConfigVersion: 1,
+    config: {
+      ...defaultProductAutomationConfig(),
+      paidAutoDelivery: { enabled: true, couponBatchIds: [coupon.id] },
+    },
+    requestId: 'disabled-coupon-rule',
+    traceId: 'disabled-coupon-rule',
+  }), (error: unknown) => (error as { code?: string }).code === 'CONFLICT');
+  await assert.rejects(() => store.reserveCoupon({ adminId: admin.id, accountId: product.accountId, batchIds: [coupon.id], quantity: 1, executionKey: 'disabled-reservation', purpose: 'delivery' }), /COUPON_BATCH_UNAVAILABLE/);
+});
+
 test('single-rule updates preserve untouched rules without validating them', async () => {
   const { admin, product, service, store, coupon } = await setup();
   const seeded = defaultProductAutomationConfig();

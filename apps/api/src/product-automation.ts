@@ -119,6 +119,7 @@ export class ProductAutomationService {
       if (!batch) throw new ServiceError(404, 'NOT_FOUND', `coupon batch not found: ${batchId}`);
       if (batch.accountId !== product.accountId) throw new ServiceError(403, 'FORBIDDEN', 'coupon batch account scope mismatch');
       if (batch.status === 'voided' || batch.status === 'closed') throw new ServiceError(409, 'CONFLICT', `coupon batch is ${batch.status}`);
+      if (requireBuyerDeliverable && batch.status !== 'active') throw new ServiceError(409, 'CONFLICT', 'coupon batch is not enabled');
       if (requireBuyerDeliverable && batch.deliveryScope !== 'buyer_deliverable') throw new ServiceError(422, 'VALIDATION_FAILED', 'automation requires buyer_deliverable coupon batches');
     }
   }

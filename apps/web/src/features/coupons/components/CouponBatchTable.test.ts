@@ -76,7 +76,7 @@ describe('CouponBatchTable', () => {
     expect(html).toContain('<span>名称</span><span>类型</span><span>内容预览</span><span>备注信息</span>');
     expect(html).toContain('<span class="coupons-note" title="备注内容">备注内容</span>');
     expect(html).toContain('<span class="coupons-preview-cell" title="正文预览">正文预览</span>');
-    expect(html).toContain('<div class="coupons-title"><strong>资料包</strong></div>');
+    expect(html).toContain('<div class="coupons-title"><strong title="资料包">资料包</strong></div>');
     expect(html).not.toContain('对接信息');
     expect(html).not.toContain('库存 2');
     expect(html).not.toContain('查看明细');
@@ -150,5 +150,37 @@ describe('CouponBatchTable', () => {
     expect(couponsCss).toContain('.coupons-more-menu {');
     expect(couponsCss).not.toContain('.coupons-action-icon');
     expect(couponsCss).not.toContain('.coupons-drawer');
+  });
+
+  it('renders a disabled-safe status switch and image thumbnails without enable/disable menu actions', () => {
+    const html = renderToStaticMarkup(createElement(CouponBatchTable, {
+      batches: [{ ...batch, label: '一张很长的卡券名称', purpose: 'image', contentPreview: { imageUrls: ['data:image/png;base64,aGVsbG8='] } }, { ...batch, batchId: '89', status: 'paused' }],
+      selectedIds: new Set<string>(),
+      page: 1,
+      pageSize: 20,
+      total: 2,
+      totalPages: 1,
+      sortBy: 'createdAt',
+      sortOrder: 'desc',
+      togglingBatchId: '89',
+      onSortChange: vi.fn(),
+      onPageChange: vi.fn(),
+      onSelect: vi.fn(),
+      onSelectAll: vi.fn(),
+      onEdit: vi.fn(),
+      onCopy: vi.fn(),
+      onBind: vi.fn(),
+      onToggle: vi.fn(),
+      onDelete: vi.fn(),
+    }));
+
+    expect(html).toContain('role="switch"');
+    expect(html).toContain('aria-label="一张很长的卡券名称已启用"');
+    expect(html).toContain('aria-label="资料包未启用"');
+    expect(html).toContain('class="coupons-preview-cell coupons-preview-images"');
+    expect(html).toContain('class="coupons-preview-thumb"');
+    expect(html).toContain('title="一张很长的卡券名称"');
+    expect(html).not.toContain('>禁用</button>');
+    expect(html).not.toContain('>启用</button>');
   });
 });
