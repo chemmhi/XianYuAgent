@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isVerificationPageComplete } from '../src/xianyu-verification-browser.js';
+import { isVerificationPageComplete, resolveVerificationCookieUrl, shouldHideVerificationWindow, shouldUseHeadlessVerificationBrowser } from '../src/xianyu-verification-browser.js';
 import { loadConfig } from '../src/config.js';
 
 test('verification completion requires an x5sec cookie or the post-verification IM target', () => {
@@ -16,6 +16,23 @@ test('verification browser configuration is explicit and disabled by default', (
   assert.equal(config.xianyuVerificationBrowserHeadless, false);
   assert.equal(loadConfig({ ALLOW_IN_MEMORY: 'true', XIANYU_VERIFICATION_BROWSER_MODE: 'launch', XIANYU_VERIFICATION_BROWSER_HEADLESS: 'true' }).xianyuVerificationBrowserMode, 'launch');
   assert.equal(loadConfig({ ALLOW_IN_MEMORY: 'true', XIANYU_VERIFICATION_BROWSER_MODE: 'connect', XIANYU_VERIFICATION_BROWSER_DEBUG_PORT: '9222' }).xianyuVerificationBrowserDebugPort, 9222);
+});
+
+test('automatic verification honors explicit headless configuration and avoids a visible blank window', () => {
+  const previous = process.env.XIANYU_VERIFICATION_AUTO_HEADLESS;
+  delete process.env.XIANYU_VERIFICATION_AUTO_HEADLESS;
+  try {
+    assert.equal(shouldUseHeadlessVerificationBrowser('auto', true), true);
+    assert.equal(shouldUseHeadlessVerificationBrowser('auto', false), false);
+    assert.equal(shouldUseHeadlessVerificationBrowser('disabled', true), true);
+    assert.equal(shouldHideVerificationWindow('auto', false), true);
+    assert.equal(shouldHideVerificationWindow('auto', true), false);
+    assert.equal(shouldHideVerificationWindow('disabled', false), false);
+    assert.equal(resolveVerificationCookieUrl('https://punish.goofish.com/verify?token=redacted#challenge'), 'https://punish.goofish.com/verify');
+  } finally {
+    if (previous === undefined) delete process.env.XIANYU_VERIFICATION_AUTO_HEADLESS;
+    else process.env.XIANYU_VERIFICATION_AUTO_HEADLESS = previous;
+  }
 });
 
 test('verification browser rejects blank or unrelated targets before opening Chrome', async () => {

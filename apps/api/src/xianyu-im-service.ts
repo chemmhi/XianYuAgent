@@ -8,8 +8,8 @@ import { XianyuImClient, XianyuImMessageEvent, XianyuImReadReceiptEvent, XianyuI
 import { XianyuMtopClient } from './xianyu-mtop.js';
 import type { ProductAutomationImEventResult, ProductAutomationTrigger } from './product-automation-trigger.js';
 import { InboundInboxWorker } from './inbound-inbox-worker.js';
-import { clearCaptchaChallengeCookies, cookieHeaderFromSnapshot, cookieSnapshotFromMetadata, dropStaleCaptchaChallengeCookies, metadataWithCookieSnapshot, type XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
-import type { XianyuVerificationBrowser } from './xianyu-verification-browser.js';
+import { cookieHeaderFromSnapshot, cookieSnapshotFromMetadata, dropStaleCaptchaChallengeCookies, metadataWithCookieSnapshot, type XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
+import type { XianyuVerificationBrowser, XianyuVerificationBrowserResult } from './xianyu-verification-browser.js';
 
 interface ExternalPage {
   hasMore: boolean;
@@ -19,6 +19,8 @@ interface ExternalPage {
 export class XianyuImService {
   private readonly clients = new Map<string, XianyuImClient>();
   private readonly clientInFlight = new Map<string, Promise<XianyuImClient>>();
+  private readonly verificationInFlight = new Map<string, Promise<XianyuVerificationBrowserResult>>();
+  private readonly verificationRetryAfter = new Map<string, number>();
   private readonly recoveryInFlight = new Map<string, Promise<void>>();
   private readonly identityCache = new Map<string, { buyerDisplayName?: string; buyerAvatarUrl?: string }>();
   private readonly inboundInboxWorker: InboundInboxWorker;
@@ -182,6 +184,8 @@ export class XianyuImService {
     const inFlight = [...this.clientInFlight.values()];
     this.clientInFlight.clear();
     this.recoveryInFlight.clear();
+    this.verificationInFlight.clear();
+    this.verificationRetryAfter.clear();
     const clients = new Set(this.clients.values());
     this.clients.clear();
     this.identityCache.clear();
@@ -286,6 +290,10 @@ export class XianyuImService {
       try { await existing.connect(); return existing; } catch (error) {
         await this.markAccountFailure(adminId, accountId, error);
         if (this.clients.get(key) === existing) this.clients.delete(key);
+        // Existing clients can schedule their own reconnect timer before
+        // connect() rejects. Stop that timer before dropping the reference;
+        // otherwise every retry can launch another verification browser.
+        await existing.disconnect().catch(() => undefined);
       }
     }
     const inFlight = this.clientInFlight.get(key);
@@ -354,20 +362,45 @@ export class XianyuImService {
     if (!token.success || !token.accessToken) {
       if (token.errorCode === 'ACCOUNT_VALIDATION_REQUIRED' && this.verificationBrowser?.enabled && token.verificationUrl) {
         const latest = await this.store.getCredential(adminId, account.id) ?? credential;
-        const initialSnapshot = clearCaptchaChallengeCookies(cookieSnapshotFromMetadata(latest.metadata)
-          ?? cookieSnapshotFromHeader(token.cookieHeader || latest.cookieHeader || credential.cookieHeader));
+        // Keep stable account cookies from the browser snapshot, but prefer
+        // the fresh flat header returned by this validation response. The
+        // x5secdata/x5sectag markers in that header bind the challenge URL to
+        // this browser session and must be present while solving it.
+        const initialSnapshot = mergeCookieSnapshots(
+          cookieSnapshotFromMetadata(latest.metadata)?.filter((cookie) => !isCaptchaChallengeCookie(cookie.name)),
+          cookieSnapshotFromHeader(token.cookieHeader || latest.cookieHeader || credential.cookieHeader),
+        );
         try {
           // IM sends must not hold an HTTP request open for the QR/manual
           // verification window. Auto mode is fail-fast: either a fresh
           // challenge cookie is obtained quickly or the caller gets the
           // validation error and can retry with a new token.
-          const completed = await this.verificationBrowser.waitForCompletion({
-            verificationUrl: token.verificationUrl,
-            initialCookieSnapshot: initialSnapshot,
-            allowManualFallback: false,
-            maxWaitMs: 20_000,
-            pollIntervalMs: 250,
-          });
+          const verificationKey = `${adminId}:${account.id}`;
+          const retryAfter = this.verificationRetryAfter.get(verificationKey) ?? 0;
+          if (retryAfter > Date.now()) throw new Error('XIANYU_VERIFICATION_COOLDOWN');
+          const existingVerification = this.verificationInFlight.get(verificationKey);
+          let completed: XianyuVerificationBrowserResult;
+          if (existingVerification) {
+            completed = await existingVerification;
+          } else {
+            const verificationPromise = this.verificationBrowser.waitForCompletion({
+              verificationUrl: token.verificationUrl,
+              initialCookieSnapshot: initialSnapshot,
+              allowManualFallback: false,
+              maxWaitMs: 20_000,
+              pollIntervalMs: 250,
+            });
+            this.verificationInFlight.set(verificationKey, verificationPromise);
+            try {
+              completed = await verificationPromise;
+              this.verificationRetryAfter.delete(verificationKey);
+            } catch (error) {
+              this.verificationRetryAfter.set(verificationKey, Date.now() + 30_000);
+              throw error;
+            } finally {
+              if (this.verificationInFlight.get(verificationKey) === verificationPromise) this.verificationInFlight.delete(verificationKey);
+            }
+          }
           const mergedSnapshot = dropStaleCaptchaChallengeCookies(mergeCookieSnapshots(initialSnapshot, completed.cookieSnapshot));
           const browserCookieHeader = cookieHeaderFromSnapshot(mergedSnapshot);
           const browserMetadata = metadataWithCookieSnapshot(latest.metadata, mergedSnapshot);
@@ -385,6 +418,7 @@ export class XianyuImService {
             const persisted = await this.store.getCredential(adminId, account.id);
             return this.store.upsertCredential({ adminId, accountId: account.id, platform: account.platform, cookieHeader: token.cookieHeader, accessToken: token.accessToken, deviceId, metadata: persisted?.metadata ?? browserMetadata, expiresAt: persisted?.expiresAt ?? latest.expiresAt ?? credential.expiresAt });
           }
+          this.verificationRetryAfter.set(verificationKey, Date.now() + 30_000);
         } catch (error) {
           console.warn(JSON.stringify({ component: 'xianyu-im', event: 'verification_browser_failed', adminId, accountId: account.id, errorCode: recoveryErrorCode(error) }));
         }
@@ -804,6 +838,10 @@ function mergeCookieSnapshots(base: XianyuCookieSnapshot | undefined, updates: X
 
 function cookieIdentity(cookie: XianyuCookieSnapshot[number]): string {
   return `${cookie.name}\u0000${cookie.domain ?? ''}\u0000${cookie.path ?? '/'}\u0000${cookie.partitionKey ?? ''}`;
+}
+
+function isCaptchaChallengeCookie(name: string): boolean {
+  return new Set(['x5secdata', 'x5sectag', 'x5step']).has(name.toLowerCase());
 }
 
 function cookieSnapshotFromHeader(cookieHeader: string | undefined): XianyuCookieSnapshot {

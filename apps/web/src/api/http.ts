@@ -5,6 +5,8 @@ export interface HttpClientOptions {
   credentials?: RequestCredentials;
 }
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 45_000;
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -48,7 +50,16 @@ export function createHttpClient(options: HttpClientOptions = {}) {
       if (csrfToken) headers.set('X-CSRF-Token', csrfToken);
     }
 
-    const response = await fetch(joinUrl(baseUrl, path), { ...init, headers, credentials: options.credentials ?? 'include' });
+    const signal = init.signal ?? AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await fetch(joinUrl(baseUrl, path), { ...init, headers, credentials: options.credentials ?? 'include', signal });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'TimeoutError') {
+        throw new ApiError('请求超时，请重试', 504);
+      }
+      throw error;
+    }
     const contentType = response.headers.get('content-type') ?? '';
     const payload = contentType.includes('application/json')
       ? await response.json()

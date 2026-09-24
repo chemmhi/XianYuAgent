@@ -658,3 +658,13 @@
 | S5-R130 | 质量 / 回归 | Cookie 更新、QR renewal、API 全量测试与合并后主线验证是否通过 | root | PASS | `account-login-recovery.test.ts`、`account-login-recovery-postgres-smoke.mjs`、`xianyu-cookie-login-update.test.ts`、`xianyu-qr-login-smoke.mjs`；API 58/58 + 详情 17/17 |
 
 本轮结论：QR 成功回调与 Cookie 登录统一使用登录专用账号解析/恢复路径；软删除账号可在同一管理员历史归属下恢复 scope 并重新进入 `pending`，避免唯一键冲突导致二维码成功后被误判失败。提交 `425382d` 已以 `--no-ff` 合入 `main`，merge commit 为 `b21be57`。真实闲鱼 APP 扫码、外部 Cookie 与资料同步仍由既有人工验收门禁承接。
+
+### 闲鱼发送链路修复复审（本轮）
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R135 | 前端 / 实时 | 实时连接建立后，会话列表轮询是否改用本地快照，避免外部刷新竞态；发送是否有确定性超时 | root | PASS（受控环境） | `apps/web/src/features/messages/controller.ts`、`controller.test.ts`；`npm run test:e2e:chrome:messages` |
+| S5-R136 | 浏览器 / 进程 | 自动验证是否不再显示空白窗口，CDP 关闭/超时是否回收进程树 | root | PASS（本机 Chrome/CDP） | `apps/api/src/xianyu-verification-browser.ts`、`xianyu-verification-browser.test.ts`、CDP fixture |
+| S5-R137 | 外部平台 / 真实发送 | 白名单买家是否完成真实滑块后外发并落库 | root | BLOCKED | 真实 NC 页面加载正常，但三次轨迹均返回 `验证失败(error:fALStr)`；保留 `ACCOUNT_VALIDATION_REQUIRED`，无外部消息引用 |
+
+本轮结论：本地发送状态和实时消息竞态已修复并通过真实浏览器 E2E；真实闲鱼外部挑战仍阻塞自动发送，未把受控夹具或失败重试解释为真实发送成功。

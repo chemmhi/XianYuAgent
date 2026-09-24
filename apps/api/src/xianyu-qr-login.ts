@@ -10,6 +10,7 @@ import {
   type XianyuCookieSnapshot,
 } from './xianyu-cookie-jar.js';
 import type { XianyuVerificationBrowser } from './xianyu-verification-browser.js';
+import { XIANYU_USER_AGENT } from './xianyu-browser-identity.js';
 
 const APP_KEY = '34839810';
 const PASSPORT_HOST = 'https://passport.goofish.com';
@@ -18,7 +19,7 @@ const API_MINI_LOGIN = `${PASSPORT_HOST}/mini_login.htm`;
 const API_GENERATE_QR = `${PASSPORT_HOST}/newlogin/qrcode/generate.do`;
 const API_SCAN_STATUS = `${PASSPORT_HOST}/newlogin/qrcode/query.do`;
 const QR_VERIFY_TARGET = 'https://www.goofish.com/im';
-const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
+const USER_AGENT = XIANYU_USER_AGENT;
 
 export type XianyuQrStatus = 'waiting' | 'scanned' | 'succeeded' | 'expired' | 'cancelled' | 'failed' | 'verification_required';
 
@@ -52,6 +53,8 @@ export interface XianyuQrAdapterOptions {
   onSuccess?: (result: XianyuQrSuccess) => Promise<void>;
   onStatus?: (session: XianyuQrStatusEvent) => Promise<void>;
   verificationBrowser?: XianyuVerificationBrowser;
+  /** Automatic slider mode must not fall back to a visible/manual window. */
+  allowManualVerificationFallback?: boolean;
 }
 
 type CookieJar = XianyuCookieSnapshot;
@@ -80,6 +83,7 @@ export class XianyuQrLoginAdapter {
   private readonly onSuccess?: XianyuQrAdapterOptions['onSuccess'];
   private readonly onStatus?: XianyuQrAdapterOptions['onStatus'];
   private readonly verificationBrowser?: XianyuVerificationBrowser;
+  private readonly allowManualVerificationFallback: boolean;
 
   constructor(options: XianyuQrAdapterOptions = {}) {
     this.timeoutMs = options.timeoutMs ?? 25_000;
@@ -88,6 +92,7 @@ export class XianyuQrLoginAdapter {
     this.onSuccess = options.onSuccess;
     this.onStatus = options.onStatus;
     this.verificationBrowser = options.verificationBrowser;
+    this.allowManualVerificationFallback = options.allowManualVerificationFallback ?? true;
   }
 
   async create(input: { sessionId: string; adminId: string; accountId?: string }): Promise<XianyuQrPublicSession> {
@@ -168,7 +173,11 @@ export class XianyuQrLoginAdapter {
             await this.emitStatus(session);
             if (this.verificationBrowser?.enabled) {
               try {
-                const completed = await this.verificationBrowser.waitForCompletion({ verificationUrl: result.iframeRedirectUrl, initialCookieSnapshot: session.jar });
+                const completed = await this.verificationBrowser.waitForCompletion({
+                  verificationUrl: result.iframeRedirectUrl,
+                  initialCookieSnapshot: session.jar,
+                  allowManualFallback: this.allowManualVerificationFallback,
+                });
                 if (!this.isCurrent(session)) return;
                 session.jar.splice(0, session.jar.length, ...mergeCookieSnapshots(session.jar, completed.cookieSnapshot));
                 await this.completeConfirmedLogin(session);

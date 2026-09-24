@@ -230,6 +230,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
   let productSync: ProductSyncService;
   const qrLogin = new XianyuQrLoginAdapter({
     verificationBrowser,
+    allowManualVerificationFallback: config.xianyuVerificationSliderMode !== 'auto',
     onStatus: async (status) => {
       const localStatus = mapQrStatusToLoginStatus(status.status);
       if (!localStatus) return;

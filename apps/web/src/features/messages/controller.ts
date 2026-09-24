@@ -1,9 +1,31 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createMessagesApi, type MessagesApi } from './api';
 import { applyRealtimeEvent, markConversationRead, mergeConversation, mergeTimelineMessages, reconcileConversations } from './model';
-import type { MessagesError, MessagesState, RealtimeEvent } from './types';
+import type { MessagesError, MessagesState, RealtimeEvent, RealtimePhase } from './types';
 
 const defaultApi = createMessagesApi({ get: async () => { throw new Error('messages api unavailable'); } });
+export const MESSAGE_SEND_TIMEOUT_MS = 40_000;
+
+export function conversationListRefreshExternal(realtimePhase: RealtimePhase): boolean | undefined {
+  // Once the selected conversation has a live socket, the local index is the
+  // authoritative snapshot for previews. Avoid an external head refresh on
+  // every 2.5s cycle racing the socket event; disconnected states still use
+  // the external refresh so newly discovered buyer threads can be imported.
+  return realtimePhase === 'connected' ? false : undefined;
+}
+
+export function withMessageSendTimeout<T>(promise: Promise<T>, timeoutMs = MESSAGE_SEND_TIMEOUT_MS): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('消息发送超时，请重试')), timeoutMs);
+    promise.then((value) => {
+      clearTimeout(timer);
+      resolve(value);
+    }, (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
 
 function normalizeError(error: unknown): MessagesError {
   const status = typeof error === 'object' && error && 'status' in error ? Number((error as { status?: unknown }).status) : undefined;
@@ -263,7 +285,7 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
         // read can never discover a conversation that has not been persisted
         // locally yet, which is why new buyer threads previously appeared only
         // after a manual page refresh.
-        const result = await api.listConversations({ accountId, limit: 50 });
+        const result = await api.listConversations({ accountId, limit: 50, refreshExternal: conversationListRefreshExternal(state.realtimePhase) });
         if (!cancelled && currentRequest === requestId.current) {
           const nextActiveConversationId = state.activeConversationId ?? result.items[0]?.conversationId;
           if (nextActiveConversationId && !activeIdRef.current) {
@@ -290,7 +312,7 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [accountId, api, enabled, loadTimeline, state.activeConversationId, state.listPhase]);
+  }, [accountId, api, enabled, loadTimeline, state.activeConversationId, state.listPhase, state.realtimePhase]);
 
   useEffect(() => {
     if (!enabled) {
@@ -312,12 +334,13 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
   const retryRealtime = useCallback(() => { if (state.activeConversationId) { reconnectAttempt.current = 0; connectRealtime(state.activeConversationId, cursorRef.current); } }, [connectRealtime, state.activeConversationId]);
 
   const sendMessage = useCallback(async (text: string) => {
-    if (!accountId || !state.activeConversationId || !text.trim()) return;
+    const conversationId = state.activeConversationId;
+    if (!accountId || !conversationId || !text.trim()) return;
     const idempotencyKey = globalThis.crypto?.randomUUID?.() ?? `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     setState((previous) => ({ ...previous, sendPhase: 'submitting', sendError: undefined }));
     try {
-      const message = await api.sendMessage({ accountId, conversationId: state.activeConversationId, text: text.trim(), idempotencyKey });
-      setState((previous) => ({ ...previous, messages: previous.messages.some((item) => item.messageId === message.messageId) ? previous.messages : [...previous.messages, message], sendPhase: 'sent', sendError: undefined }));
+      const message = await withMessageSendTimeout(api.sendMessage({ accountId, conversationId, text: text.trim(), idempotencyKey }));
+      setState((previous) => ({ ...previous, messages: previous.activeConversationId === conversationId && !previous.messages.some((item) => item.messageId === message.messageId) ? [...previous.messages, message] : previous.messages, sendPhase: 'sent', sendError: undefined }));
     } catch (error) {
       setState((previous) => ({ ...previous, sendPhase: 'error', sendError: error instanceof Error ? error.message : '发送失败，请重试' }));
       throw error;
@@ -325,12 +348,13 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
   }, [accountId, api, state.activeConversationId]);
 
   const sendImage = useCallback(async (file: File) => {
-    if (!accountId || !state.activeConversationId || !file) return;
+    const conversationId = state.activeConversationId;
+    if (!accountId || !conversationId || !file) return;
     const idempotencyKey = globalThis.crypto?.randomUUID?.() ?? `img-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     setState((previous) => ({ ...previous, sendPhase: 'submitting', sendError: undefined }));
     try {
-      const message = await api.sendImage({ accountId, conversationId: state.activeConversationId, file, idempotencyKey });
-      setState((previous) => ({ ...previous, messages: previous.messages.some((item) => item.messageId === message.messageId) ? previous.messages : [...previous.messages, message], sendPhase: 'sent', sendError: undefined }));
+      const message = await withMessageSendTimeout(api.sendImage({ accountId, conversationId, file, idempotencyKey }));
+      setState((previous) => ({ ...previous, messages: previous.activeConversationId === conversationId && !previous.messages.some((item) => item.messageId === message.messageId) ? [...previous.messages, message] : previous.messages, sendPhase: 'sent', sendError: undefined }));
     } catch (error) {
       setState((previous) => ({ ...previous, sendPhase: 'error', sendError: error instanceof Error ? error.message : '图片发送失败，请重试' }));
       throw error;

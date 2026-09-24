@@ -17,6 +17,10 @@ test('slider trajectory is deterministic with an injected random source', () => 
   assert.ok(first.points.length >= 75);
   assert.ok(first.points.every(([x, y, delay]) => Number.isFinite(x) && Number.isFinite(y) && delay > 0));
   assert.ok(first.metadata.plannedElapsed > 0);
+  const finalX = first.points.at(-1)?.[0] ?? 0;
+  assert.ok(Math.abs(finalX - 180) <= 2, `trajectory must settle at target, got ${finalX}`);
+  assert.ok(first.metadata.overshoot < 16, `overshoot must remain a small correction, got ${first.metadata.overshoot}`);
+  assert.ok(first.points.every(([, y]) => Math.abs(y) <= 3), 'vertical motion must stay inside the slider lane');
 });
 
 test('trajectory replay preserves relative coordinates and planned timing', async () => {

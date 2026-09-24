@@ -1,4 +1,11 @@
 # XianyuSellerAgent 项目状态
+## 闲鱼发送链路修复（本轮）
+- 目标行为：白名单买家发送失败时不再让前端永久停留“正在发送”，自动验证浏览器不再弹出可见空白 Chrome；实时消息不因会话列表轮询外部刷新而丢失或竞态。
+- 实现：自动验证窗口启动即最小化并移出屏幕，Windows 关闭时回收整个 Chrome 子进程树；会话轮询在实时连接后改走本地快照；文本/图片发送增加 40 秒 UI 超时和会话快照保护。
+- 已验证：API/Web typecheck；API/Web build；API 全量测试；Web 全量测试；`npm run test:e2e:chrome:messages`；`git diff --check`；本机 Chrome/CDP 验证浏览器与滑块受控夹具。
+- 真实外发：使用白名单买家 `一只橘喵喵亮晶晶` 受控尝试 3 次，闲鱼 NC 返回 `验证失败(error:fALStr)` / `ACCOUNT_VALIDATION_REQUIRED`，未产生外部消息引用，未伪造成功。
+- 状态：`PARTIALLY_VERIFIED / BLOCKED_BY_EXTERNAL_CHALLENGE`；本地代码可交付，真实闲鱼挑战仍需平台允许自动化通过后再复验。
+
 ## 2026-09-24 闲鱼滑块算法迁移（待复核）
 - 目标：将 `.review-xianyu-super-butler/slider_algorithm` 的轨迹与页面流程迁移到 `apps/api`，复用原生 Chrome/CDP，不引入 Playwright。
 - 实现：新增 `xianyu-slider-trajectory.ts` 与 `xianyu-slider-solver.ts`；验证浏览器新增 `XIANYU_VERIFICATION_SLIDER_MODE=auto` 可选接入，失败自动回退人工验证。

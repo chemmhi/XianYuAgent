@@ -14,11 +14,12 @@ import {
   XIANYU_TOP_SITE,
   type XianyuCookieSnapshot,
 } from './xianyu-cookie-jar.js';
+import { XIANYU_USER_AGENT, xianyuSecChUa } from './xianyu-browser-identity.js';
 
 const APP_KEY = '34839810';
 export const XIANYU_IM_APP_KEY = '444e9908a51d1cb236a27862abc769c9';
 const BASE_URL = 'https://h5api.m.goofish.com/h5';
-const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36';
+const USER_AGENT = XIANYU_USER_AGENT;
 const SOLD_ORDERS_API = 'mtop.taobao.idle.trade.merchant.sold.get';
 const SOLD_ORDERS_REFERER = 'https://seller.goofish.com/?site=COMMONPRO#/seller-trade/order-manage';
 const SELLER_ORDER_MANAGE_REFERER = SOLD_ORDERS_REFERER;
@@ -500,7 +501,7 @@ export class XianyuMtopClient {
           'sec-fetch-dest': 'empty',
           'sec-fetch-mode': 'cors',
           'sec-fetch-site': 'same-site',
-          'sec-ch-ua': '"Chromium";v="139", "Not(A:Brand";v="99"',
+          'sec-ch-ua': xianyuSecChUa(),
           'sec-ch-ua-mobile': '?0',
           'sec-ch-ua-platform': '"Windows"',
           'user-agent': USER_AGENT,
