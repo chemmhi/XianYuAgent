@@ -134,8 +134,9 @@ body .app-viewport .product-automation-overlay .automation-modal-footer .btn{fon
 .coupon-picker-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
 .coupon-picker-item{width:100%;margin:0;padding:10px;gap:8px;cursor:pointer;font-size:12px;line-height:1.4}
 .coupon-picker-item.active{background:var(--soft-blue-bg)}
+.coupon-picker-item.selected{cursor:default}
 .coupon-picker-item .coupon-item-main{display:grid;gap:2px;min-width:0;overflow:visible;text-overflow:clip;white-space:normal}
-.coupon-picker-item input{flex:0 0 auto;width:15px;height:15px;margin:0;accent-color:var(--link)}
+.coupon-picker-item .coupon-choice-mark{flex:0 0 auto;width:15px;text-align:center;line-height:1}
 .coupon-picker-item small{display:block;color:var(--sub);font-size:10px;line-height:1.5}
 .coupon-picker-item .coupon-remove{width:auto;height:auto;min-width:30px;padding:4px 7px;border-radius:6px;color:var(--danger);font-size:13px;line-height:1.45}
 .coupon-picker-select-all{white-space:nowrap}
