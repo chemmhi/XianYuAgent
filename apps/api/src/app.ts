@@ -39,6 +39,7 @@ import { XianyuProductAutomationExecutionAdapter } from './product-automation-xi
 import { conversationRefreshMode, messageRefreshMode } from './messages-loading-policy.js';
 import { CouponAssetService } from './coupon-assets.js';
 import { ProductPublishService } from './product-publish.js';
+import { classifyXianyuFailure } from './xianyu-account-health.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -369,11 +370,13 @@ async function markXianyuAccountFailure(store: Store, adminId: string, accountId
   try {
     const account = await store.getAccount(adminId, accountId);
     if (!account || account.status === 'disabled') return;
-    const text = `${input.errorCode ?? ''} ${input.message ?? ''}`;
-    const requiresVerification = /ACCOUNT_VALIDATION_REQUIRED|FAIL_SYS_USER_VALIDATE|X5SEC|CAPTCHA|SLIDER/i.test(text);
-    const requiresReauth = !requiresVerification && (input.accountInvalid || /CREDENTIAL_MISSING|SESSION_EXPIRED|MTOP_TOKEN_(MISSING|EXPIRED)|IM_TOKEN_FAILED|XIANYU_IM_TOKEN_FAILED|REQUEST_REJECTED:401|USER_VALIDATE|LOGIN.*INVALID/i.test(text));
-    const status = requiresReauth ? 'expired' : 'degraded';
-    if (requiresReauth) {
+    const classification = classifyXianyuFailure(input);
+    // A valid QR/Cookie login can still be blocked by a separate slider
+    // challenge during IM or product bootstrap. Keep the authenticated
+    // account state intact; the caller still exposes the verification error.
+    if (classification.kind === 'verification_required') return;
+    const status = classification.accountStatus!;
+    if (classification.kind === 'reauth_required') {
       try { await store.markCredentialVerified({ adminId, accountId, status: 'expired' }); } catch { /* account status remains the primary signal */ }
     }
     if (account.status === 'expired' && status === 'degraded') return;

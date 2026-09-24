@@ -60,7 +60,7 @@ describe('xianyu IM credential refresh', () => {
     assert.equal(account.status, 'expired');
   });
 
-  it('keeps a freshly logged-in account degraded, not expired, when IM bootstrap hits slider validation', async () => {
+  it('keeps a freshly logged-in account connected when IM bootstrap hits slider validation', async () => {
     let account = { id: 'account-1', platform: 'xianyu', status: 'connected' as const };
     let updatedCredentialStatus: string | undefined;
     const store = {
@@ -77,7 +77,7 @@ describe('xianyu IM credential refresh', () => {
     } as never, {} as never);
 
     await assert.rejects(() => service.startListener('admin-1', 'account-1'), (error: unknown) => error instanceof ServiceError && error.code === 'ACCOUNT_VALIDATION_REQUIRED');
-    assert.equal(account.status, 'degraded');
+    assert.equal(account.status, 'connected');
     assert.equal(updatedCredentialStatus, undefined);
   });
 

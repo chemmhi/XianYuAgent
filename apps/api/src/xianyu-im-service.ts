@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AccountRecord, ConversationRecord, CredentialRecord, InboundInboxRecord, Store } from './domain.js';
 import { ServiceError } from './services.js';
+import { classifyXianyuFailure } from './xianyu-account-health.js';
 import type { MessageService } from './messages.js';
 import type { AutoReplyProcessResult, AutoReplyService } from './auto-reply.js';
 import { XianyuImClient, XianyuImMessageEvent, XianyuImReadReceiptEvent, XianyuImCredential } from './xianyu-im.js';
@@ -359,9 +360,11 @@ export class XianyuImService {
       if (!account || account.status === 'disabled') return;
       const code = error instanceof ServiceError ? error.code : (error as { code?: unknown } | null)?.code;
       const normalizedCode = typeof code === 'string' ? code : error instanceof Error ? error.message : String(error);
-      const requiresVerification = /ACCOUNT_VALIDATION_REQUIRED|FAIL_SYS_USER_VALIDATE|X5SEC|CAPTCHA|SLIDER/i.test(normalizedCode);
-      const requiresReauth = !requiresVerification && /CREDENTIAL_MISSING|SESSION_EXPIRED|MTOP_TOKEN_(MISSING|EXPIRED)|IM_TOKEN_FAILED|XIANYU_IM_TOKEN_FAILED|REQUEST_REJECTED:401|USER_VALIDATE|LOGIN.*INVALID/i.test(normalizedCode);
-      const status = requiresReauth ? 'expired' : 'degraded';
+      const classification = classifyXianyuFailure({ errorCode: normalizedCode });
+      // Slider validation is an external challenge, not proof that the QR
+      // login cookie is invalid. Preserve the authenticated account state.
+      if (classification.kind === 'verification_required') return;
+      const status = classification.accountStatus!;
       if (account.status === 'expired' && status === 'degraded') return;
       if (account.status !== status) await this.store.updateAccount(adminId, accountId, { status });
     } catch {
