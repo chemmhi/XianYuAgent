@@ -87,7 +87,7 @@ export function useQrLoginController(options: { api: AccountsApi; accountId?: st
 
   const refresh = useCallback(async () => {
     const session = model.session;
-    if (!enabled || !session || isTerminalQrStatus(session.status)) return;
+    if (!enabled || !session || isTerminalQrStatus(session.status, { verificationAutoLaunch: session.verificationAutoLaunch })) return;
     const currentRequest = ++requestId.current;
     try {
       const next = await api.getQrSession(activeAccountId || session.accountId, session.qrSessionId);
@@ -152,7 +152,7 @@ export function useQrLoginController(options: { api: AccountsApi; accountId?: st
       return;
     }
     const session = model.session;
-    if (!session || isTerminalQrStatus(session.status)) {
+    if (!session || isTerminalQrStatus(session.status, { verificationAutoLaunch: session.verificationAutoLaunch })) {
       clearTimer();
       return;
     }

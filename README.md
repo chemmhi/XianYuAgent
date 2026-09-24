@@ -79,3 +79,10 @@ npm run compose:down
 Compose 当前负责 API、Worker、PostgreSQL、Redis 和 MinIO；对象存储映射到 `19000/19001`，保留 `9000` 给 PRD 参考项目；本地前端由根命令 `npm run dev` 启动。
 
 真实闲鱼二维码模式由 `XIANYU_QR_MODE=real` 控制；未设置或设置为其他值时，后端默认仍采用真实模式，自动化测试会显式使用 `stub`。
+
+二维码遇到风控验证时，可启用用户协同浏览器：
+
+- `XIANYU_VERIFICATION_BROWSER_MODE=launch`：服务端启动 Chrome/Edge 并打开验证页；
+- `XIANYU_VERIFICATION_BROWSER_MODE=connect`：连接已启用 CDP 的浏览器，需同时配置 `XIANYU_VERIFICATION_BROWSER_DEBUG_PORT`；
+- `XIANYU_VERIFICATION_BROWSER_HEADLESS=false`：默认有头模式，便于用户完成验证；无头模式仅适合外部 CDP 控制或受控测试；
+- 验证完成后，服务端只检查页面已离开验证态并读取浏览器 Cookie，然后继续 QR 登录，不自动识别或拖动滑块。

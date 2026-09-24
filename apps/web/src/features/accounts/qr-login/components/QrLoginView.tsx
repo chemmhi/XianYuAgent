@@ -28,7 +28,7 @@ export function QrLoginView({ model }: QrLoginViewProps) {
           {session.qrImageDataUrl ? <><img src={session.qrImageDataUrl} alt="闲鱼二维码登录"/><span className="qr-login-help">打开闲鱼 App → 扫一扫</span><span className="qr-login-note">请勿截屏或转发二维码</span></> : <div className="qr-login-placeholder"><strong>二维码暂不可用</strong><span>请关闭弹窗后重新打开。</span></div>}
         </div>
         {session.verificationUrl && <a className="qr-login-link" href={session.verificationUrl} target="_blank" rel="noreferrer">在新窗口打开验证链接</a>}
-        {session.status === 'verification_required' && <div className="qr-login-error" role="alert"><strong>需要完成人工验证</strong><span>闲鱼已要求额外验证。完成验证后请重新扫码，系统不会伪造登录成功。</span></div>}
+        {session.status === 'verification_required' && <div className="qr-login-error" role="alert"><strong>需要完成人工验证</strong><span>{session.verificationAutoLaunch ? '验证页已由浏览器打开，请完成页面上的验证；完成后系统会自动继续登录。' : '闲鱼已要求额外验证。请打开验证链接完成验证后再重试，系统不会伪造登录成功。'}</span></div>}
         {session.errorCode && session.status !== 'verification_required' && <div className="qr-login-error" role="alert"><strong>登录状态异常</strong><span>{session.errorCode}</span></div>}
         {session.status === 'succeeded' && <div className="qr-login-success" role="status"><strong>账号已重新连接</strong><span>凭证已由服务端保存并完成登录态校验。</span></div>}
       </>}

@@ -9,6 +9,7 @@ import {
   XIANYU_TOP_SITE,
   type XianyuCookieSnapshot,
 } from './xianyu-cookie-jar.js';
+import type { XianyuVerificationBrowser } from './xianyu-verification-browser.js';
 
 const APP_KEY = '34839810';
 const PASSPORT_HOST = 'https://passport.goofish.com';
@@ -30,6 +31,7 @@ export interface XianyuQrPublicSession {
   pollAfterMs: number;
   errorCode?: string;
   verificationUrl?: string;
+  verificationAutoLaunch?: boolean;
 }
 
 export type XianyuQrStatusEvent = XianyuQrPublicSession & { adminId: string };
@@ -49,6 +51,7 @@ export interface XianyuQrAdapterOptions {
   maxWaitMs?: number;
   onSuccess?: (result: XianyuQrSuccess) => Promise<void>;
   onStatus?: (session: XianyuQrStatusEvent) => Promise<void>;
+  verificationBrowser?: XianyuVerificationBrowser;
 }
 
 type CookieJar = XianyuCookieSnapshot;
@@ -76,6 +79,7 @@ export class XianyuQrLoginAdapter {
   private readonly maxWaitMs: number;
   private readonly onSuccess?: XianyuQrAdapterOptions['onSuccess'];
   private readonly onStatus?: XianyuQrAdapterOptions['onStatus'];
+  private readonly verificationBrowser?: XianyuVerificationBrowser;
 
   constructor(options: XianyuQrAdapterOptions = {}) {
     this.timeoutMs = options.timeoutMs ?? 25_000;
@@ -83,6 +87,7 @@ export class XianyuQrLoginAdapter {
     this.maxWaitMs = options.maxWaitMs ?? 5 * 60_000;
     this.onSuccess = options.onSuccess;
     this.onStatus = options.onStatus;
+    this.verificationBrowser = options.verificationBrowser;
   }
 
   async create(input: { sessionId: string; adminId: string; accountId?: string }): Promise<XianyuQrPublicSession> {
@@ -160,8 +165,20 @@ export class XianyuQrLoginAdapter {
             session.status = 'verification_required';
             session.verificationUrl = result.iframeRedirectUrl;
             session.errorCode = 'VERIFICATION_REQUIRED';
-            // 人脸/风控链路依赖页面挑战，先保留可复核状态，不伪造成功。
             await this.emitStatus(session);
+            if (this.verificationBrowser?.enabled) {
+              try {
+                const completed = await this.verificationBrowser.waitForCompletion({ verificationUrl: result.iframeRedirectUrl, initialCookieSnapshot: session.jar });
+                if (!this.isCurrent(session)) return;
+                session.jar.splice(0, session.jar.length, ...mergeCookieSnapshots(session.jar, completed.cookieSnapshot));
+                await this.completeConfirmedLogin(session);
+                await this.emitStatus(session);
+              } catch (error) {
+                if (!this.isCurrent(session)) return;
+                session.errorCode = classifyError(error);
+                await this.emitStatus(session);
+              }
+            }
             return;
           }
           await this.completeConfirmedLogin(session);
@@ -298,7 +315,7 @@ export class XianyuQrLoginAdapter {
   }
 
   private toPublic(session: InternalSession): XianyuQrPublicSession {
-    return { sessionId: session.sessionId, accountId: session.accountId, status: session.status, qrImageDataUrl: session.qrImageDataUrl, expiresAt: new Date(session.expiresAt).toISOString(), pollAfterMs: this.pollIntervalMs, errorCode: session.errorCode, verificationUrl: session.verificationUrl };
+    return { sessionId: session.sessionId, accountId: session.accountId, status: session.status, qrImageDataUrl: session.qrImageDataUrl, expiresAt: new Date(session.expiresAt).toISOString(), pollAfterMs: this.pollIntervalMs, errorCode: session.errorCode, verificationUrl: session.verificationUrl, ...(this.verificationBrowser?.enabled ? { verificationAutoLaunch: true } : {}) };
   }
 
   private async emitStatus(session: InternalSession): Promise<void> {
@@ -330,6 +347,13 @@ function absorbSetCookies(jar: CookieJar, requestUrl: string, headers: Headers):
 }
 
 function cookieHeader(jar: CookieJar, requestUrl: string): string { return cookieHeaderForUrl(jar, requestUrl, Date.now(), XIANYU_TOP_SITE); }
+function mergeCookieSnapshots(current: CookieJar, incoming: CookieJar): CookieJar {
+  const identity = (cookie: CookieJar[number]) => `${cookie.name}\u0000${(cookie.domain ?? '').toLowerCase()}\u0000${cookie.path ?? '/'}\u0000${cookie.partitionKey ?? ''}`;
+  const merged = new Map<string, CookieJar[number]>();
+  for (const cookie of current) merged.set(identity(cookie), cookie);
+  for (const cookie of incoming) merged.set(identity(cookie), cookie);
+  return [...merged.values()];
+}
 function md5(value: string): string { return crypto.createHash('md5').update(value).digest('hex'); }
 function sleep(ms: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function classifyError(error: unknown): string {
