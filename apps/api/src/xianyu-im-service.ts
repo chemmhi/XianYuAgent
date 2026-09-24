@@ -8,7 +8,7 @@ import { XianyuImClient, XianyuImMessageEvent, XianyuImReadReceiptEvent, XianyuI
 import { XianyuMtopClient } from './xianyu-mtop.js';
 import type { ProductAutomationImEventResult, ProductAutomationTrigger } from './product-automation-trigger.js';
 import { InboundInboxWorker } from './inbound-inbox-worker.js';
-import { cookieHeaderFromSnapshot, cookieSnapshotFromMetadata, dropStaleCaptchaChallengeCookies, metadataWithCookieSnapshot, type XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
+import { clearCaptchaChallengeCookies, cookieHeaderFromSnapshot, cookieSnapshotFromMetadata, dropStaleCaptchaChallengeCookies, metadataWithCookieSnapshot, type XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
 import type { XianyuVerificationBrowser } from './xianyu-verification-browser.js';
 
 interface ExternalPage {
@@ -326,6 +326,11 @@ export class XianyuImService {
         });
         try { await client.connect(); } catch (error) {
           if (this.clients.get(key) === client) this.clients.delete(key);
+          // A failed bootstrap can schedule the client's internal reconnect
+          // timer before surfacing the original error. Stop that client here
+          // so a validation challenge cannot spawn orphan browser windows in
+          // the background after the request has already failed.
+          await client.disconnect().catch(() => undefined);
           throw error;
         }
         this.clients.set(key, client);
@@ -349,10 +354,20 @@ export class XianyuImService {
     if (!token.success || !token.accessToken) {
       if (token.errorCode === 'ACCOUNT_VALIDATION_REQUIRED' && this.verificationBrowser?.enabled && token.verificationUrl) {
         const latest = await this.store.getCredential(adminId, account.id) ?? credential;
-        const initialSnapshot = cookieSnapshotFromMetadata(latest.metadata)
-          ?? cookieSnapshotFromHeader(token.cookieHeader || latest.cookieHeader || credential.cookieHeader);
+        const initialSnapshot = clearCaptchaChallengeCookies(cookieSnapshotFromMetadata(latest.metadata)
+          ?? cookieSnapshotFromHeader(token.cookieHeader || latest.cookieHeader || credential.cookieHeader));
         try {
-          const completed = await this.verificationBrowser.waitForCompletion({ verificationUrl: token.verificationUrl, initialCookieSnapshot: initialSnapshot });
+          // IM sends must not hold an HTTP request open for the QR/manual
+          // verification window. Auto mode is fail-fast: either a fresh
+          // challenge cookie is obtained quickly or the caller gets the
+          // validation error and can retry with a new token.
+          const completed = await this.verificationBrowser.waitForCompletion({
+            verificationUrl: token.verificationUrl,
+            initialCookieSnapshot: initialSnapshot,
+            allowManualFallback: false,
+            maxWaitMs: 20_000,
+            pollIntervalMs: 250,
+          });
           const mergedSnapshot = dropStaleCaptchaChallengeCookies(mergeCookieSnapshots(initialSnapshot, completed.cookieSnapshot));
           const browserCookieHeader = cookieHeaderFromSnapshot(mergedSnapshot);
           const browserMetadata = metadataWithCookieSnapshot(latest.metadata, mergedSnapshot);
@@ -773,6 +788,9 @@ function parseQueryParam(value: string | undefined, key: string): string | undef
 function recoveryErrorCode(error: unknown): string {
   const code = (error as { code?: unknown } | null)?.code;
   if (typeof code === 'string' && /^[A-Z0-9_:-]{1,64}$/.test(code)) return code;
+  const message = error instanceof Error ? error.message : String(error);
+  const messageCode = message.split(':', 1)[0]?.trim();
+  if (messageCode && /^[A-Z][A-Z0-9_:-]{1,64}$/.test(messageCode)) return messageCode;
   if (error instanceof Error && error.name) return error.name.toUpperCase().replace(/[^A-Z0-9_:-]/g, '_');
   return 'XIANYU_HISTORY_RECOVERY_FAILED';
 }

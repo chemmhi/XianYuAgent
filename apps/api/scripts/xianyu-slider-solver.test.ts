@@ -48,6 +48,8 @@ test('solver replays CDP mouse events and retries after a failure marker', async
   assert.equal(mouseCalls.find((call) => call.params?.type === 'mousePressed')?.params?.button, 'left');
   const released = [...mouseCalls].reverse().find((call) => call.params?.type === 'mouseReleased');
   assert.equal(released?.params?.button, 'left');
+  assert.equal(mouseCalls.find((call) => call.params?.type === 'mousePressed')?.params?.buttons, 1);
+  assert.equal(released?.params?.buttons, 0);
 });
 
 test('solver reports missing slider elements without dispatching input', async () => {

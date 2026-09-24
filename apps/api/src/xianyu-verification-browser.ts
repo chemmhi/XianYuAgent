@@ -1,10 +1,10 @@
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { dropStaleCaptchaChallengeCookies, type XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
+import { clearCaptchaChallengeCookies, dropStaleCaptchaChallengeCookies, type XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
 import { XianyuSliderSolver, type XianyuSliderMode } from './xianyu-slider-solver.js';
 
 export type XianyuVerificationBrowserMode = 'disabled' | 'launch' | 'connect';
@@ -19,6 +19,8 @@ export interface XianyuVerificationBrowserOptions {
   userDataDir?: string;
   maxWaitMs?: number;
   pollIntervalMs?: number;
+  allowManualFallback?: boolean;
+  userAgent?: string;
 }
 
 export interface XianyuVerificationBrowserResult {
@@ -52,10 +54,13 @@ interface BrowserProcess {
   child?: ChildProcess;
   ownsProcess: boolean;
   debugPort: number;
+  userDataDir?: string;
+  ownsUserDataDir: boolean;
 }
 
 const DEFAULT_MAX_WAIT_MS = 3 * 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
+const DEFAULT_BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36';
 
 /** Opens a verification page and waits for the user to finish it. */
 export class XianyuVerificationBrowser {
@@ -68,6 +73,8 @@ export class XianyuVerificationBrowser {
   private readonly userDataDir?: string;
   private readonly maxWaitMs: number;
   private readonly pollIntervalMs: number;
+  private readonly allowManualFallback: boolean;
+  private readonly userAgent: string;
 
   constructor(options: XianyuVerificationBrowserOptions = {}) {
     this.mode = options.mode ?? 'disabled';
@@ -79,22 +86,32 @@ export class XianyuVerificationBrowser {
     this.userDataDir = options.userDataDir;
     this.maxWaitMs = options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+    this.allowManualFallback = options.allowManualFallback ?? true;
+    this.userAgent = options.userAgent?.trim() || DEFAULT_BROWSER_USER_AGENT;
   }
 
   get enabled(): boolean { return this.mode !== 'disabled'; }
 
-  async waitForCompletion(input: { verificationUrl: string; initialCookieSnapshot?: XianyuCookieSnapshot }): Promise<XianyuVerificationBrowserResult> {
+  async waitForCompletion(input: { verificationUrl: string; initialCookieSnapshot?: XianyuCookieSnapshot; allowManualFallback?: boolean; maxWaitMs?: number; pollIntervalMs?: number }): Promise<XianyuVerificationBrowserResult> {
     if (this.mode === 'disabled') throw new Error('XIANYU_VERIFICATION_BROWSER_DISABLED');
+    assertVerificationUrl(input.verificationUrl);
+    const maxWaitMs = Math.max(250, Math.floor(input.maxWaitMs ?? this.maxWaitMs));
+    const pollIntervalMs = Math.max(25, Math.floor(input.pollIntervalMs ?? this.pollIntervalMs));
     const browser = await this.prepareBrowser(input.verificationUrl);
     let cdp: CdpConnection | undefined;
     try {
-      cdp = await connectToChrome(browser.debugPort, this.maxWaitMs, this.pollIntervalMs);
+      cdp = await connectToChrome(browser.debugPort, maxWaitMs, pollIntervalMs, input.verificationUrl);
       await cdp.send('Page.enable');
       await cdp.send('Runtime.enable');
       await cdp.send('Network.enable');
-      if (input.initialCookieSnapshot && input.initialCookieSnapshot.length > 0) {
+      await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
+        source: `Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh', 'en'] });`,
+      });
+      await cdp.send('Emulation.setUserAgentOverride', { userAgent: this.userAgent, platform: 'Windows', acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8' }).catch(() => undefined);
+      const initialCookieSnapshot = clearCaptchaChallengeCookies(input.initialCookieSnapshot);
+      if (initialCookieSnapshot.length > 0) {
         await cdp.send('Network.setCookies', {
-          cookies: input.initialCookieSnapshot.map((cookie) => ({
+          cookies: initialCookieSnapshot.map((cookie) => ({
             name: cookie.name,
             value: cookie.value,
             ...(cookie.domain ? { domain: cookie.domain } : { url: 'https://www.goofish.com/' }),
@@ -107,6 +124,7 @@ export class XianyuVerificationBrowser {
         });
       }
       await cdp.send('Page.navigate', { url: input.verificationUrl });
+      await waitForPageContent(cdp, maxWaitMs, pollIntervalMs);
 
       if (this.sliderMode === 'auto') {
         try {
@@ -115,16 +133,21 @@ export class XianyuVerificationBrowser {
             logger: console,
           }).solve();
           if (!sliderResult.success) {
-            console.warn(JSON.stringify({ component: 'xianyu-verification', event: 'slider_auto_solve_failed', reason: sliderResult.failureReason ?? 'unknown' }));
+            const reason = sliderResult.failureReason ?? 'unknown';
+            console.warn(JSON.stringify({ component: 'xianyu-verification', event: 'slider_auto_solve_failed', reason }));
+            if (!(input.allowManualFallback ?? this.allowManualFallback)) {
+              throw new Error(`XIANYU_VERIFICATION_AUTO_SOLVE_FAILED:${reason}`);
+            }
           } else {
             console.info(JSON.stringify({ component: 'xianyu-verification', event: 'slider_auto_solve_succeeded', attempts: sliderResult.attempts, distance: sliderResult.distance, trajectoryPoints: sliderResult.trajectoryPoints }));
           }
         } catch (error) {
           console.warn(JSON.stringify({ component: 'xianyu-verification', event: 'slider_auto_solve_failed', reason: error instanceof Error ? error.message : String(error) }));
+          if (!(input.allowManualFallback ?? this.allowManualFallback)) throw error;
         }
       }
 
-      const deadline = Date.now() + this.maxWaitMs;
+      const deadline = Date.now() + maxWaitMs;
       let lastUrl = input.verificationUrl;
       let lastCookies = input.initialCookieSnapshot ?? [];
       while (Date.now() < deadline) {
@@ -135,26 +158,34 @@ export class XianyuVerificationBrowser {
         if (isVerificationPageComplete(lastUrl, lastCookies, input.initialCookieSnapshot)) {
           return { finalUrl: lastUrl, cookieSnapshot: dropStaleCaptchaChallengeCookies(lastCookies) };
         }
-        await sleep(this.pollIntervalMs);
+        if (isBlankOrInvalidVerificationPage(lastUrl)) throw new Error('XIANYU_VERIFICATION_PAGE_EMPTY');
+        await sleep(pollIntervalMs);
       }
       throw new Error('XIANYU_VERIFICATION_TIMEOUT');
     } finally {
       cdp?.close();
       if (browser.ownsProcess && browser.child && browser.child.exitCode === null) browser.child.kill();
+      if (browser.ownsUserDataDir && browser.userDataDir) await rm(browser.userDataDir, { recursive: true, force: true }).catch(() => undefined);
     }
   }
 
   private async prepareBrowser(verificationUrl: string): Promise<BrowserProcess> {
     if (this.mode === 'connect') {
       if (!this.debugPort) throw new Error('XIANYU_VERIFICATION_DEBUG_PORT_REQUIRED');
-      return { ownsProcess: false, debugPort: this.debugPort };
+      return { ownsProcess: false, debugPort: this.debugPort, ownsUserDataDir: false };
     }
     const debugPort = this.debugPort ?? await findFreePort();
     const executablePath = this.executablePath ?? findChromeExecutable();
     if (!executablePath) throw new Error('XIANYU_VERIFICATION_BROWSER_NOT_FOUND');
+    const ownsUserDataDir = !this.userDataDir;
     const userDataDir = this.userDataDir ?? await mkdtemp(join(tmpdir(), 'xianyu-verification-'));
     const args = [
       ...(this.headless ? ['--headless=new'] : []),
+      '--disable-blink-features=AutomationControlled',
+      '--disable-popup-blocking',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
       '--disable-extensions',
       '--no-first-run',
       '--no-default-browser-check',
@@ -162,10 +193,52 @@ export class XianyuVerificationBrowser {
       `--remote-debugging-port=${debugPort}`,
       `--user-data-dir=${userDataDir}`,
       '--window-size=1440,900',
+      `--user-agent=${this.userAgent}`,
       verificationUrl,
     ];
     const child = spawn(executablePath, args, { stdio: 'ignore', windowsHide: true });
-    return { child, ownsProcess: true, debugPort };
+    return { child, ownsProcess: true, debugPort, userDataDir, ownsUserDataDir };
+  }
+}
+
+function assertVerificationUrl(value: string): void {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    const isGoofishHost = hostname === 'goofish.com' || hostname.endsWith('.goofish.com') || hostname === 'localhost' || hostname === '127.0.0.1';
+    const path = `${url.pathname}${url.search}${url.hash}`;
+    const isLocalFixture = hostname === 'localhost' || hostname === '127.0.0.1';
+    if (!isGoofishHost || (!isLocalFixture && !/punish|captcha|verify|security/i.test(path))) throw new Error('invalid target');
+  } catch {
+    throw new Error('XIANYU_VERIFICATION_URL_INVALID');
+  }
+}
+
+async function waitForPageContent(cdp: CdpConnection, maxWaitMs: number, pollIntervalMs: number): Promise<void> {
+  const deadline = Date.now() + maxWaitMs;
+  let ready = false;
+  let blank = true;
+  while (Date.now() < deadline) {
+    const result = await cdp.send('Runtime.evaluate', { expression: `({ ready: document.readyState !== 'loading', blank: !document.body || !document.body.innerText.trim() })`, returnByValue: true });
+    const value = (result.result as { value?: unknown } | undefined)?.value;
+    if (value && typeof value === 'object') {
+      const state = value as { ready?: unknown; blank?: unknown };
+      ready = state.ready === true;
+      blank = state.blank === true;
+      if (ready && !blank) return;
+    }
+    await sleep(pollIntervalMs);
+  }
+  if (ready && blank) throw new Error('XIANYU_VERIFICATION_PAGE_EMPTY');
+  throw new Error('XIANYU_VERIFICATION_PAGE_LOAD_TIMEOUT');
+}
+
+function isBlankOrInvalidVerificationPage(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'about:' || url.hostname === '';
+  } catch {
+    return true;
   }
 }
 
@@ -206,12 +279,21 @@ function mapCookies(value: unknown): XianyuCookieSnapshot {
   });
 }
 
-async function connectToChrome(debugPort: number, maxWaitMs: number, pollIntervalMs: number): Promise<CdpConnection> {
+async function connectToChrome(debugPort: number, maxWaitMs: number, pollIntervalMs: number, preferredUrl?: string): Promise<CdpConnection> {
   const target = await waitFor(async () => {
     const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`);
     if (!response.ok) return undefined;
     const items = await response.json() as CdpTarget[];
-    return items.find((item) => item.type === 'page' && item.webSocketDebuggerUrl);
+    const pages = items.filter((item) => item.type === 'page' && item.webSocketDebuggerUrl);
+    const preferred = preferredUrl ? (() => {
+      try {
+        const hostname = new URL(preferredUrl).hostname;
+        return pages.find((item) => {
+          try { return new URL(String((item as CdpTarget & { url?: string }).url ?? '')).hostname === hostname; } catch { return false; }
+        });
+      } catch { return undefined; }
+    })() : undefined;
+    return preferred ?? pages.find((item) => !String((item as CdpTarget & { url?: string }).url ?? '').startsWith('about:blank')) ?? pages[0];
   }, maxWaitMs, pollIntervalMs);
   const url = target?.webSocketDebuggerUrl;
   if (!url) throw new Error('XIANYU_VERIFICATION_CDP_TARGET_MISSING');

@@ -128,7 +128,7 @@ export class XianyuSliderSolver {
         const generated = generatePhysicsTrajectory(elements.distance, { rng: this.rng });
         result.distance = elements.distance;
         result.trajectoryPoints = generated.points.length;
-        await this.simulateSlide(elements.buttonRect, generated);
+        await this.simulateSlide(elements.buttonRect, elements.distance, generated);
 
         const verification = await this.waitForVerificationResult();
         if (verification.success) {
@@ -168,18 +168,18 @@ export class XianyuSliderSolver {
     return undefined;
   }
 
-  private async simulateSlide(buttonRect: Rect, trajectory: GeneratedSliderTrajectory): Promise<void> {
+  private async simulateSlide(buttonRect: Rect, distance: number, trajectory: GeneratedSliderTrajectory): Promise<void> {
     const startX = buttonRect.x + buttonRect.width / 2;
     const startY = buttonRect.y + buttonRect.height / 2;
-    await this.moveMouse(startX - 20, startY);
+    await this.moveMouse(startX - 20, startY, false);
     await sleep(120);
-    await this.moveMouse(startX, startY);
+    await this.moveMouse(startX, startY, false);
     await sleep(80);
     let pressed = false;
     let releaseX = startX;
     let releaseY = startY;
     try {
-      await this.cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: startX, y: startY, button: 'left', clickCount: 1 });
+      await this.cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: startX, y: startY, button: 'left', buttons: 1, clickCount: 1 });
       pressed = true;
       await replayTrajectory(
         trajectory.points,
@@ -188,11 +188,13 @@ export class XianyuSliderSolver {
         async (x, y) => {
           releaseX = x;
           releaseY = y;
-          await this.moveMouse(x, y);
+          const clampedX = Math.min(startX + distance, Math.max(startX, x));
+          releaseX = clampedX;
+          await this.moveMouse(clampedX, y, true);
         },
       );
     } finally {
-      if (pressed) await this.cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: releaseX, y: releaseY, button: 'left', clickCount: 1 }).catch(() => undefined);
+      if (pressed) await this.cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: releaseX, y: releaseY, button: 'left', buttons: 0, clickCount: 1 }).catch(() => undefined);
     }
   }
 
@@ -213,17 +215,17 @@ export class XianyuSliderSolver {
     const x = rect.x + rect.width / 2;
     const y = rect.y + rect.height / 2;
     try {
-      await this.moveMouse(x, y);
-      await this.cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
-      await this.cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+      await this.moveMouse(x, y, false);
+      await this.cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+      await this.cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
       return true;
     } catch {
       return false;
     }
   }
 
-  private async moveMouse(x: number, y: number): Promise<void> {
-    await this.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none' });
+  private async moveMouse(x: number, y: number, dragging: boolean): Promise<void> {
+    await this.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: dragging ? 'left' : 'none', buttons: dragging ? 1 : 0 });
   }
 
   private async evaluate<T>(expression: string): Promise<T> {
@@ -270,7 +272,12 @@ function buildFindElementsScript(): string {
       if (!button || !track) continue;
       const buttonRect = rect(button);
       const trackRect = rect(track);
-      return { containerRect: rect(container), buttonRect, trackRect, distance: Math.max(0, trackRect.width - buttonRect.width) };
+      // The live Goofish widget insets the handle by a couple of pixels from
+      // the track's left edge. Calculate the remaining travel from the
+      // handle's current right edge to the track's right edge; using
+      // track.width - button.width overshoots and deterministically fails.
+      const distance = Math.max(0, (trackRect.x + trackRect.width) - (buttonRect.x + buttonRect.width));
+      return { containerRect: rect(container), buttonRect, trackRect, distance };
     }
     return null;
   })()`;

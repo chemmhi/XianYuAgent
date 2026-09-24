@@ -97,7 +97,12 @@ export function cookieHeaderFromSnapshot(snapshot: XianyuCookieSnapshot | undefi
 export function dropStaleCaptchaChallengeCookies(snapshot: XianyuCookieSnapshot | undefined): XianyuCookieSnapshot {
   const normalized = normalizeCookieSnapshot(snapshot) ?? [];
   if (!normalized.some((cookie) => cookie.name.toLowerCase() === 'x5sec')) return normalized;
-  return normalized.filter((cookie) => !CAPTCHA_CHALLENGE_COOKIES.has(cookie.name.toLowerCase()));
+  return clearCaptchaChallengeCookies(normalized);
+}
+
+/** Removes challenge markers before opening a fresh verification page. */
+export function clearCaptchaChallengeCookies(snapshot: XianyuCookieSnapshot | undefined): XianyuCookieSnapshot {
+  return (normalizeCookieSnapshot(snapshot) ?? []).filter((cookie) => !CAPTCHA_CHALLENGE_COOKIES.has(cookie.name.toLowerCase()));
 }
 
 export function cookieValue(snapshot: XianyuCookieSnapshot | undefined, name: string, rawUrl?: string): string {
