@@ -44,13 +44,13 @@ async function run() {
     if (stored) { stored.createdAt = '2026-09-19T18:05:00.000Z'; stored.updatedAt = '2026-09-19T18:05:00.000Z'; }
   }
   const [product, secondProduct, thirdProduct, fourthProduct] = products;
-  const deliveryBatch = await apiRuntime.store.createCouponBatch({ adminId: adminProfile.id, accountId: account.id, label: '批量数据2', purpose: 'data', deliveryScope: 'buyer_deliverable', metadata: { multiSpec: true, specName: '版本', specValue: '标准版' } });
+  const deliveryBatch = await apiRuntime.store.createCouponBatch({ adminId: adminProfile.id, accountId: account.id, label: '批量数据2', purpose: 'data', metadata: { multiSpec: true, specName: '版本', specValue: '标准版' } });
   await apiRuntime.store.importCouponItems({ adminId: adminProfile.id, batchId: deliveryBatch.id, contents: ['DELIVERY-001', 'DELIVERY-002'] });
-  const fixedBatch = await apiRuntime.store.createCouponBatch({ adminId: adminProfile.id, accountId: account.id, label: '固定文字', purpose: 'text', deliveryScope: 'buyer_deliverable', metadata: { textContent: '固定文字 E2E' } });
+  const fixedBatch = await apiRuntime.store.createCouponBatch({ adminId: adminProfile.id, accountId: account.id, label: '固定文字', purpose: 'text', metadata: { textContent: '固定文字 E2E' } });
   await apiRuntime.store.importCouponItems({ adminId: adminProfile.id, batchId: fixedBatch.id, contents: ['FIXED-001', 'FIXED-002'] });
-  const giftBatch = await apiRuntime.store.createCouponBatch({ adminId: adminProfile.id, accountId: account.id, label: '评价赠品批次 A', purpose: 'data', deliveryScope: 'buyer_deliverable', metadata: { dataContent: '赠品数据 E2E' } });
+  const giftBatch = await apiRuntime.store.createCouponBatch({ adminId: adminProfile.id, accountId: account.id, label: '评价赠品批次 A', purpose: 'data', metadata: { dataContent: '赠品数据 E2E' } });
   await apiRuntime.store.importCouponItems({ adminId: adminProfile.id, batchId: giftBatch.id, contents: ['GIFT-001'] });
-  await apiRuntime.store.createCouponBatch({ adminId: adminProfile.id, accountId: account.id, label: 'API 卡券 · 会员激活码', purpose: 'api', deliveryScope: 'buyer_deliverable', metadata: { apiConfig: { url: 'https://api.example.test/member/activate', method: 'POST' } } });
+  await apiRuntime.store.createCouponBatch({ adminId: adminProfile.id, accountId: account.id, label: 'API 卡券 · 会员激活码', purpose: 'api', metadata: { apiConfig: { url: 'https://api.example.test/member/activate', method: 'POST' } } });
   await apiRuntime.store.bindCouponBatch({ adminId: adminProfile.id, batchId: deliveryBatch.id, productId: product.id });
   await apiRuntime.store.bindCouponBatch({ adminId: adminProfile.id, batchId: deliveryBatch.id, productId: secondProduct.id });
   await apiRuntime.store.bindCouponBatch({ adminId: adminProfile.id, batchId: fixedBatch.id, productId: thirdProduct.id });

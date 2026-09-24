@@ -189,7 +189,6 @@ type CouponBatchVM = {
   batchId: string;
   accountId: string;
   status: 'draft' | 'active' | 'paused' | 'closed';
-  deliveryScope: 'system_only' | 'operator_only' | 'buyer_deliverable';
   version: number;
   updatedAt: string;
 };
@@ -217,7 +216,6 @@ type CouponContentPreviewVM = {
   couponId: string;
   batchId: string;
   purpose: 'delivery' | 'preview' | 'audit';
-  deliveryScope: 'system_only' | 'operator_only' | 'buyer_deliverable';
   accountIds: string[];
   content: {
     body: string;
@@ -294,7 +292,7 @@ type BusinessLinkVM = {
 };
 ```
 
-敏感字段规则：`CredentialRefVM` 永不包含明文凭证；`S4-VS7A` 中 `canReveal=false`，不提供明文 reveal；若未来需要受控 reveal，必须另立切片并增加独立审计和人工复核。`CouponContentPreviewVM.content` 可由管理员在受控领域接口中直接查看、复制和编辑，但买家可见链路仍必须满足 `deliveryScope=buyer_deliverable`、订单已支付、商品与账号匹配、策略通过并完成审计；`MessageVM.bodyText` 由 adapter 按买家可见边界裁剪。`externalOutcome = 'unknown'` 只表示外部平台结果未知，不是 Outbox 状态，也不允许页面自动重放写请求。
+敏感字段规则：`CredentialRefVM` 永不包含明文凭证；`S4-VS7A` 中 `canReveal=false`，不提供明文 reveal；若未来需要受控 reveal，必须另立切片并增加独立审计和人工复核。`CouponContentPreviewVM.content` 可由管理员在受控领域接口中直接查看、复制和编辑，但买家可见链路仍必须满足订单已支付、商品与账号匹配、策略通过并完成审计；`MessageVM.bodyText` 由 adapter 按买家可见边界裁剪。`externalOutcome = 'unknown'` 只表示外部平台结果未知，不是 Outbox 状态，也不允许页面自动重放写请求。
 
 `api/adapters/*` 必须完成旧字段到上述模型的映射。若映射失败，返回 `CONFLICT` 或 `VALIDATION_FAILED`，不得让页面组件自行兜底成“成功”。
 
@@ -309,7 +307,7 @@ type BusinessLinkVM = {
 | Accounts | `AccountVM`、`AccountConnectionVM`、`LoginSessionVM`、`QrLoginSessionVM`、`AccountScopeVM` | accountId、connection、login status、QR 状态、scope、过期时间；不得包含凭证值 |
 | Messages | `ConversationVM`、`MessageVM`、`BuyerContextVM`、`RealtimeVM` | conversationId、direction、bodyType、order/product link、risk flags、handlingMode、cursor |
 | Products | `ProductVM`、`ProductAssetVM`、`SkuVM`、`PublishResultVM` | productId、accountId、status、version、asset status、逐项发布结果 |
-| Coupons | `CouponBatchVM`、`CouponItemVM`、`CouponContentPreviewVM`、`CouponMutationVM` | batchId、status、deliveryScope、controlled content、mutation state |
+| Coupons | `CouponBatchVM`、`CouponItemVM`、`CouponContentPreviewVM`、`CouponMutationVM` | batchId、status、controlled content、mutation state |
 | Orders | `OrderVM`、`DeliveryPreviewVM`、`DeliveryRecordVM`、`AfterSalesVM` | 四套状态、deliveryType、preview state、attempt、externalOutcome |
 | Settings/Auth | `SettingsSectionVM`、`CredentialRefVM`、`RuntimeHealthVM`、`AdminProfileVM`、`SessionVM` | section version、secret reference、health、profile、session state |
 
@@ -482,7 +480,7 @@ type ConversationHandlingOutput = {
 | `useCouponsController` | `POST /api/v1/coupons/batches/{id}/assets` | `CreateCouponAssetRequest` → `CouponAssetRef` | account scope；Idempotency-Key | 失效 batch/assets | 上传失败可单独重试 |
 | `useCouponsController` | `DELETE /api/v1/coupons/batches/{id}/assets/{assetId}` | 空 → `MutationViewModel` | account scope；Idempotency-Key | 失效 batch/assets | 已删除视为幂等成功 |
 | `useCouponsController` | `POST /api/v1/coupons/batches/{id}/void` | `VoidCouponBatchRequest` → `MutationViewModel` | Policy + account scope；Idempotency-Key | 失效 batch/inventory/order preview | void 后禁止恢复性盲重试 |
-| `useCouponsController` | `GET /api/v1/coupons/{id}/content` | `CouponContentQuery` → `CouponContentPreviewVM` | admin + account scope + purpose + deliveryScope；只读 | `['coupons',accountId,'content',couponId,purpose,scope]` | 受控内容失败只显示拒绝原因，不泄露正文 |
+| `useCouponsController` | `GET /api/v1/coupons/{id}/content` | `CouponContentQuery` → `CouponContentPreviewVM` | admin + account scope + purpose；只读 | `['coupons',accountId,'content',couponId,purpose]` | 受控内容失败只显示拒绝原因，不泄露正文 |
 | `useOrdersController` | `GET /api/v1/orders` | `OrderFilters` → `OrderVM[]` | account scope；只读 | `['orders',accountId,'list',filters]` | 空结果明确展示 |
 | `useOrdersController` | `GET /api/v1/orders/{orderNo}` | Query 空 → `OrderVM` | account scope；只读 | `['orders',accountId,'detail',orderNo]` | `NOT_FOUND` 结束 stale route |
 | `useOrdersController` | `POST /api/v1/orders/refresh` | `RefreshOrdersRequest` → `MutationViewModel` | account scope；Idempotency-Key | 失效 orders、dashboard、conversation links | timeout 转任务状态查询 |
@@ -699,7 +697,7 @@ CouponsPage
 └─ InventoryLockBanner
 ```
 
-`ContentPreview` 展示受控领域接口返回的管理员可见内容和用途，不执行发货；`DeliveryActionBar` 只提交受控 delivery command。买家可见交付仍由订单策略和 `deliveryScope` 条件决定。
+`ContentPreview` 展示受控领域接口返回的管理员可见内容和用途，不执行发货；`DeliveryActionBar` 只提交受控 delivery command。买家可见交付仍由订单策略、商品/账号匹配和审计条件决定。
 
 ### 6.7 Orders
 

@@ -6,7 +6,7 @@ async function fixture(itemCount = 2, purpose: 'text' | 'data' = 'text') {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: `coupon-reservation-${Date.now()}-${Math.random()}@example.com`, passwordHash: 'hash', displayName: 'Coupon Reservation Test' });
   const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: `coupon-reservation-${Date.now()}-${Math.random()}` });
-  const batch = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'Reservation Batch', purpose, deliveryScope: 'buyer_deliverable', metadata: purpose === 'data' ? { dataContent: Array.from({ length: itemCount }, (_, index) => `coupon-${index + 1}`).join('\n') } : undefined });
+  const batch = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'Reservation Batch', purpose, metadata: purpose === 'data' ? { dataContent: Array.from({ length: itemCount }, (_, index) => `coupon-${index + 1}`).join('\n') } : undefined });
   if (purpose !== 'data') await store.importCouponItems({ adminId: admin.id, batchId: batch.id, contents: Array.from({ length: itemCount }, (_, index) => `coupon-${index + 1}`) });
   return { store, admin, account, batch };
 }

@@ -90,7 +90,6 @@ function toAutomationCoupon(value: Record<string, unknown>): AutomationCoupon {
     typeLabel,
     specSummary,
     quantitySummary: `每件 ${quantity} 份`,
-    deliveryScope: value.deliveryScope === 'system_only' || value.deliveryScope === 'operator_only' || value.deliveryScope === 'buyer_deliverable' ? value.deliveryScope : undefined,
     status: value.status === undefined || value.status === 'active' ? 'active' : 'paused',
     accountId: value.accountId ? String(value.accountId) : undefined,
     apiManaged: purpose === 'api',

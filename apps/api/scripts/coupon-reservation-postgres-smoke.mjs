@@ -17,7 +17,7 @@ try {
   assert.equal((await runtime.store.health()).reachable, true, 'PostgreSQL must be reachable and base migrations must be applied');
   admin = await runtime.store.createAdmin({ email: `coupon-reservation-pg-${suffix}@example.com`, passwordHash: 'hash', displayName: 'Coupon Reservation PG' });
   account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: `coupon-reservation-pg-${suffix}` });
-  batch = await runtime.store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'PG Reservation Batch', purpose: 'text', deliveryScope: 'buyer_deliverable' });
+  batch = await runtime.store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'PG Reservation Batch', purpose: 'text' });
   await runtime.store.importCouponItems({ adminId: admin.id, batchId: batch.id, contents: [`pg-coupon-1-${suffix}`, `pg-coupon-2-${suffix}`] });
 
   const reserveInput = { adminId: admin.id, accountId: account.id, batchIds: [batch.id], quantity: 1, executionKey: `pg-same-${suffix}`, purpose: 'delivery' };
@@ -60,7 +60,7 @@ try {
   reservationIds.push(secondExecution.reservationId);
   await runtime.store.commitCouponReservation({ adminId: admin.id, reservationId: secondExecution.reservationId, executionKey: `pg-reuse-${suffix}` });
 
-  dataBatch = await runtime.store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'PG Data Rotation Batch', purpose: 'data', deliveryScope: 'buyer_deliverable', metadata: { dataContent: `pg-data-1-${suffix}\npg-data-2-${suffix}` } });
+  dataBatch = await runtime.store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'PG Data Rotation Batch', purpose: 'data', metadata: { dataContent: `pg-data-1-${suffix}\npg-data-2-${suffix}` } });
   const dataFirstKey = `pg-data-1-${suffix}`;
   const dataSecondKey = `pg-data-2-${suffix}`;
   const dataFirst = await runtime.store.reserveCoupon({ adminId: admin.id, accountId: account.id, batchIds: [dataBatch.id], quantity: 1, executionKey: dataFirstKey, purpose: 'delivery' });

@@ -65,7 +65,7 @@
 | `auth` | 管理员登录、会话、注销、初始化 | 凭证、会话 Cookie | 管理员身份上下文；阶段 1/2 使用 HttpOnly Cookie |
 | `accounts` | 闲鱼账号、连接状态、账号范围和策略摘要 | 管理员命令、平台状态 | Account 领域事实 |
 | `products` | 商品草稿、媒体引用、发布状态 | 商品命令、对象存储引用 | Product 领域事实 |
-| `coupons` | 卡券批次、交付配置、绑定和交付范围 | 卡券配置、商品绑定命令 | Coupon / delivery 事实 |
+| `coupons` | 卡券批次、交付配置和绑定 | 卡券配置、商品绑定命令 | Coupon / delivery 事实 |
 | `orders` | 订单查询、支付状态、发货状态和售后 | 平台订单、管理员命令 | Order 领域事实 |
 | `messages` | 会话、消息、人工接管和 WebSocket 投递 | 平台消息、管理员回复 | Conversation / Message 事实 |
 | `workspace` | Agent Run、Step、Confirmation 和任务上下文 | 管理员自然语言任务 | Run / Step / Confirmation 事实 |
@@ -159,7 +159,7 @@ domain modules -> storage interface
 - 管理员可查看、编辑、替换、启停和操作系统凭证。
 - CredentialStore 直接存储在项目数据库；管理员拥有绝对管理权限，不引入外部密钥管理服务。
 - 系统凭证不得进入闲鱼买家可见的消息、订单交付内容或外部买家可见响应。
-- 卡券配置生成的交付内容只有在 `buyer_deliverable`、订单已支付、商品与账号匹配、策略通过且审计记录完成后，才允许交付买家。
+- 卡券配置生成的交付内容只有在订单已支付、商品与账号匹配、策略通过且审计记录完成后，才允许交付买家。
 
 ### 8.1 鉴权迁移落点
 
@@ -173,7 +173,7 @@ domain modules -> storage interface
 
 | 风险 | 架构落点 | 阶段 2 验证 |
 | --- | --- | --- |
-| R-008 敏感交付数据 | `coupons` 持有内容引用与 `deliveryScope`；`policy` 校验买家交付条件、订单支付、商品 / 账号匹配、策略与管理员会话；`orders` 事务内生成交付记录；`observability` / `execution` 只记录必要审计元数据并禁止系统凭证进入日志、Trace、Replay、Prompt | 权限与买家可见链路测试、审计记录测试、日志 / Trace 抽样脱敏检查 |
+| R-008 敏感交付数据 | `coupons` 持有内容引用；`policy` 校验买家交付条件、订单支付、商品 / 账号匹配、策略与管理员会话；`orders` 事务内生成交付记录；`observability` / `execution` 只记录必要审计元数据并禁止系统凭证进入日志、Trace、Replay、Prompt | 权限与买家可见链路测试、审计记录测试、日志 / Trace 抽样脱敏检查 |
 | R-009 外部结果未知 | `execution` 持有 Idempotency、Outbox、Audit 和重试状态；`xianyu-adapter` 提供外部状态查询；`worker` 在重试 / 取消前按原幂等键查询外部状态，成功步骤不得重放 | 超时未知、重复请求、重试、取消和部分成功的集成测试 |
 
 ## 9. ADR 清单

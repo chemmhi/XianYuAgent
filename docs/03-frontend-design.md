@@ -19,7 +19,7 @@
 3. SellerAgent 原型与 `xianyu-admin-design-style/assets/design-tokens.json` 作为当前视觉基线；没有正式 Figma 时，不宣称已完成 Figma 高保真验收。
 4. 桌面目标 viewport 固定为 **1440 × 900**；移动目标 viewport 固定为 **390 × 844**。
 5. 前端只调用领域 API 契约，不直接调用 Pi Runtime、闲鱼原始 MTOP/WebSocket、旧项目 API wrapper 或数据库。
-6. 系统凭证只显示受控引用和元数据；卡券配置生成的正文或图片只有在阶段 2 定义的 `buyer_deliverable` 交付条件满足后，才允许进入买家交付预览或发送链路。
+6. 系统凭证只显示受控引用和元数据；卡券配置生成的正文或图片只有在订单、商品、账号、策略和审计条件满足后，才允许进入买家交付预览或发送链路。
 
 ## 2. 视觉与布局基线
 
@@ -138,7 +138,7 @@ App
 - 页面可见性由管理员 Session + `account_scopes` 决定；页面可见不代表写权限可用。
 - 高风险动作必须同时满足 capability、account scope、permission、policy gateway 和 confirmation（如适用）。
 - 前端收到 `401` 时进入登录/SessionExpired；`403` 保留当前页面并显示权限说明，不自动重试。
-- `system_only` 凭证永远不进入买家预览、消息编辑器、订单交付内容、日志、Trace 或 Replay。
+- 系统凭证永远不进入买家预览、消息编辑器、订单交付内容、日志、Trace 或 Replay。
 
 ## 6. 通用状态契约
 
@@ -194,7 +194,7 @@ App
 - 组件树：`ConversationList + ConversationHeader + BuyerContextPanel + MessageTimeline + AiSuggestionPanel + HandoffRiskPanel + AttachmentUpload + MessageComposer + MessageActionMenu + ConnectionBanner`；账号范围由全局 `AccountContext` 提供，消息页只读当前账号，不提供账号切换控件。
 - 读取 API：`GET /api/v1/conversations`、`GET /api/v1/conversations/{id}/messages`、`WS /api/v1/conversations/{id}/events`。
 - 写 API：`POST /api/v1/conversations/{id}/messages`、`POST /api/v1/conversations/{id}/images`、`POST /api/v1/conversations/{id}/messages/{messageId}/recall`、`POST /api/v1/conversations/{id}/handoff`、`POST /api/v1/conversations/{id}/release`。
-- 状态：会话列表 loading/empty/error；消息首次加载/分页补历史；WebSocket connecting/connected/reconnecting/forbidden；发送 idle/submitting/sent/failed/unknown；撤回 pending/succeeded/failed；图片 uploading/processed/failed；人工接管 handoff submitting/succeeded/conflict/failed；恢复 AI release submitting/succeeded/conflict/failed；买家发起 Prompt Injection 或索取 system_only 凭证时显示拦截提示，不把内容复制到配置或知识能力。
+- 状态：会话列表 loading/empty/error；消息首次加载/分页补历史；WebSocket connecting/connected/reconnecting/forbidden；发送 idle/submitting/sent/failed/unknown；撤回 pending/succeeded/failed；图片 uploading/processed/failed；人工接管 handoff submitting/succeeded/conflict/failed；恢复 AI release submitting/succeeded/conflict/failed；买家发起 Prompt Injection 或索取系统凭证时显示拦截提示，不把内容复制到配置或知识能力。
 - 可访问性：消息流使用 `aria-live="polite"`，但不朗读敏感正文；发送按钮在空文本、上传中或无权限时禁用；键盘支持 Enter 发送、Shift+Enter 换行。
 
 ### 7.5 Products `/products`
@@ -212,7 +212,7 @@ App
 - 组件树：`BatchToolbar + CouponBatchTable + BatchDrawer (BatchMetadataForm + CouponItemEditor + AssetPanel + BindingPanel + ContentPreview) + DeliveryActionBar + InventoryLockBanner`。
 - 读取 API：`GET /api/v1/coupons/batches`、`GET /api/v1/coupons/batches/{id}`、`GET /api/v1/coupons/{id}/content`（显式用途与审计前置）。
 - 写 API：`POST /api/v1/coupons/batches`、`PATCH /api/v1/coupons/batches/{id}`、`DELETE /api/v1/coupons/batches/{id}`、`POST /api/v1/coupons/batches/{id}/bind`、`POST /api/v1/coupons/batches/{id}/unbind`、`POST /api/v1/coupons/batches/{id}/items/import`、`POST /api/v1/coupons/batches/{id}/void`；`items/bulk-save`、`items/bulk-delete`、`assets` 为后续切片契约，当前页面使用批次级批量删除和 metadata.imageUrls 原图预览。
-- 状态：批次 loading/empty/error；列表只展示类型、交付配置摘要、绑定关系和生命周期状态，不展示卡券库存数量或库存预警；批量保存/删除显示逐项结果；绑定账号不匹配时阻断；管理员正文预览/编辑直接由受控领域接口提供，买家可见交付在不满足 `buyer_deliverable`、订单已支付、商品与账号匹配、策略通过和审计完成时显示 forbidden；作废提交中禁用重复操作。
+- 状态：批次 loading/empty/error；列表只展示类型、交付配置摘要、绑定关系和生命周期状态，不展示卡券库存数量或库存预警；批量保存/删除显示逐项结果；绑定账号不匹配时阻断；管理员正文预览/编辑直接由受控领域接口提供，买家可见交付在不满足订单已支付、商品与账号匹配、策略通过和审计完成时显示 forbidden；作废提交中禁用重复操作。
 - 安全：系统凭证与买家可交付卡券分离；管理员查看卡券正文或图片时保留 purpose、账号范围和 auditRef；买家交付仍必须满足全部策略条件。
 
 ### 7.7 Orders `/orders`
@@ -222,7 +222,7 @@ App
 - 读取 API：`GET /api/v1/orders`、`GET /api/v1/orders/{orderNo}`、`POST /api/v1/orders/refresh`。
 - 写 API：`POST /api/v1/orders/{orderNo}/delivery-preview`、`POST /api/v1/orders/{orderNo}/deliver`、`POST /api/v1/orders/{orderNo}/cancel`、`POST /api/v1/orders/{orderNo}/retry`。
 - 状态：列表 loading/success/empty/error/403；`paymentStatus` unpaid/paid/closed/unknown；`orderStatus` open/cancelling/cancelled/completed/closed/failed；`deliveryStatus` pending/reserving/delivered/partially_delivered/failed/cancelled；`afterSalesStatus` none/requested/refunding/refunded/rejected/closed；预览 ready/blocked；发货/重试 submitting/succeeded/failed/unknown；结果未知时只能查询外部状态或恢复 Outbox，不直接再次发货。
-- 安全：只有订单已支付、商品和账号匹配、deliveryScope 允许、交付配置成功解析、Policy 通过且 Audit 完成时，才显示买家交付内容和可执行 CTA。
+- 安全：只有订单已支付、商品和账号匹配、交付配置成功解析、Policy 通过且 Audit 完成时，才显示买家交付内容和可执行 CTA。
 
 ### 7.8 Settings `/settings`
 

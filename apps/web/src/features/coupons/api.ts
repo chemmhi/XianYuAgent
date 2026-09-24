@@ -1,4 +1,4 @@
-import type { CouponBatchFilters, CouponBatchVM, CouponBindingVM, CouponItemVM, CreateCouponBatchRequest, CouponsPageVM, DeliveryScope, CouponMutationVM, UpdateCouponBatchRequest, CouponMetadataVM } from './types';
+import type { CouponBatchFilters, CouponBatchVM, CouponBindingVM, CouponItemVM, CreateCouponBatchRequest, CouponsPageVM, CouponMutationVM, UpdateCouponBatchRequest, CouponMetadataVM } from './types';
 
 export interface CouponsApiTransport {
   get<T>(path: string): Promise<T>;
@@ -66,7 +66,6 @@ function toBatchVM(payload: CouponPayload): CouponBatchVM {
     accountId: String(payload.accountId ?? ''),
     label: String(payload.label ?? payload.purpose ?? batchId),
     purpose: (payload.purpose as CouponBatchVM['purpose']) ?? 'text',
-    deliveryScope: (payload.deliveryScope as DeliveryScope) ?? 'operator_only',
     status: rawStatus ?? 'active',
     version: Number(payload.version ?? 1),
     updatedAt: payload.updatedAt ?? new Date(0).toISOString(),
@@ -160,9 +159,9 @@ export function createCouponsApi(transport: CouponsApiTransport): CouponsApi {
 }
 
 export function createMockCouponsApi(seed: CouponBatchVM[] = [
-  { batchId: '1', accountId: 'account-001', label: 'Python 全栈资料包', purpose: 'text', deliveryScope: 'buyer_deliverable', status: 'active', version: 4, createdAt: '2026-09-19T15:20:00.000Z', updatedAt: '2026-09-19T16:20:00.000Z', bindings: [{ bindingId: 'binding-001', batchId: '1', productId: 'product-001', productTitle: 'Python 全栈资料包', priority: 0, status: 'active' }], items: [{ id: 'coupon-001', batchId: '1', maskedLabel: 'PY-••••-0001', status: 'available' }], contentPreview: { text: '购买后自动发放 Python 全栈资料包下载说明' } },
-  { batchId: '2', accountId: 'account-001', label: 'GitHub 源码下载', purpose: 'data', deliveryScope: 'operator_only', status: 'active', version: 2, createdAt: '2026-09-18T10:40:00.000Z', updatedAt: '2026-09-18T11:40:00.000Z', bindings: [], items: [{ id: 'coupon-002', batchId: '2', maskedLabel: 'GH-••••-0021', status: 'available' }] },
-  { batchId: '3', accountId: 'account-002', label: '设计素材合集', purpose: 'image', deliveryScope: 'operator_only', status: 'paused', version: 1, createdAt: '2026-09-17T08:05:00.000Z', updatedAt: '2026-09-17T09:05:00.000Z', bindings: [], items: [], contentPreview: { imageUrls: ['暂无图片'] } },
+  { batchId: '1', accountId: 'account-001', label: 'Python 全栈资料包', purpose: 'text', status: 'active', version: 4, createdAt: '2026-09-19T15:20:00.000Z', updatedAt: '2026-09-19T16:20:00.000Z', bindings: [{ bindingId: 'binding-001', batchId: '1', productId: 'product-001', productTitle: 'Python 全栈资料包', priority: 0, status: 'active' }], items: [{ id: 'coupon-001', batchId: '1', maskedLabel: 'PY-••••-0001', status: 'available' }], contentPreview: { text: '购买后自动发放 Python 全栈资料包下载说明' } },
+  { batchId: '2', accountId: 'account-001', label: 'GitHub 源码下载', purpose: 'data', status: 'active', version: 2, createdAt: '2026-09-18T10:40:00.000Z', updatedAt: '2026-09-18T11:40:00.000Z', bindings: [], items: [{ id: 'coupon-002', batchId: '2', maskedLabel: 'GH-••••-0021', status: 'available' }] },
+  { batchId: '3', accountId: 'account-002', label: '设计素材合集', purpose: 'image', status: 'paused', version: 1, createdAt: '2026-09-17T08:05:00.000Z', updatedAt: '2026-09-17T09:05:00.000Z', bindings: [], items: [], contentPreview: { imageUrls: ['暂无图片'] } },
 ]): CouponsApi {
   let batches: CouponBatchVM[] = seed.map((batch) => ({ ...batch, bindings: [...batch.bindings], items: batch.items?.map((item) => ({ ...item })) }));
   const nextBatchId = () => {
@@ -198,7 +197,7 @@ export function createMockCouponsApi(seed: CouponBatchVM[] = [
       const now = new Date().toISOString();
       const batchId = nextBatchId();
       const items = (input.items ?? []).filter(Boolean).map((body, index) => ({ id: `coupon-${Date.now()}-${index}`, batchId, maskedLabel: body.length > 6 ? `${body.slice(0, 3)}••••${body.slice(-2)}` : '••••••', status: 'available' as const }));
-      const batch: CouponBatchVM = { batchId, accountId: input.accountId, label: input.label, purpose: input.purpose, deliveryScope: input.deliveryScope, status: 'active', version: 1, updatedAt: now, createdAt: now, bindings: [], items, metadata: input.metadata, contentPreview: { text: input.metadata?.textContent?.slice(0, 140), apiUrl: input.metadata?.apiConfig?.url, imageUrls: input.metadata?.imageUrls ?? [] } };
+      const batch: CouponBatchVM = { batchId, accountId: input.accountId, label: input.label, purpose: input.purpose, status: 'active', version: 1, updatedAt: now, createdAt: now, bindings: [], items, metadata: input.metadata, contentPreview: { text: input.metadata?.textContent?.slice(0, 140), apiUrl: input.metadata?.apiConfig?.url, imageUrls: input.metadata?.imageUrls ?? [] } };
       batches = [batch, ...batches];
       return batch;
     },

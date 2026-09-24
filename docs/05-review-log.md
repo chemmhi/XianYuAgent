@@ -128,7 +128,7 @@
 | S2-I001 | `unknown` 不作为 OutboxStatus | `unknown` 仅作为 `externalOutcome` 字段 |
 | S2-I002 | 幂等作用域和保留期 | `adminId + accountId + route + Idempotency-Key`，默认 30 天；同指纹重放原结果，不同指纹冲突 |
 | S2-I003 | 鉴权安全基线 | SameSite=Lax、CSRF 双提交、WebSocket Origin allowlist、Session 空闲 30 分钟/绝对 8 小时、登录和密码变更后轮换 |
-| S2-I004 | 交付数据边界 | 三类 deliveryScope、正文读取、交付预览和订单交付 API 纳入阶段 2 |
+| S2-I004 | 交付数据边界 | 卡券正文读取、交付预览和订单交付 API 纳入阶段 2；卡券不再区分内部发货范围 |
 | S2-I005 | CredentialStore 范围 | CRUD、rotate、revoke、enable、disable 纳入阶段 2；管理员绝对管理但不得暴露给买家 |
 
 ## 7. 当前失败点（供人工复核）

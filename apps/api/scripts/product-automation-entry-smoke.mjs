@@ -19,7 +19,7 @@ try {
   const adminId = bootstrap.body.data.profile.id;
   const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: 'automation-entry-seller' });
   const product = await runtime.store.createProduct({ adminId, accountId: account.id, externalProductRef: 'automation-entry-item', title: '自动化入口商品', status: 'published' });
-  const coupon = await runtime.store.createCouponBatch({ adminId, accountId: account.id, label: '入口赠品卡券', purpose: 'text', deliveryScope: 'buyer_deliverable' });
+  const coupon = await runtime.store.createCouponBatch({ adminId, accountId: account.id, label: '入口赠品卡券', purpose: 'text' });
   await runtime.store.importCouponItems({ adminId, batchId: coupon.id, contents: ['entry-gift-1'] });
   const conversation = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'automation-entry-buyer', buyerDisplayName: '入口买家', externalConversationRef: 'automation-entry-conversation' });
   const initial = await runtime.productAutomation.get(adminId, product.id);

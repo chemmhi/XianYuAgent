@@ -23,7 +23,7 @@ XianyuSellerAgent 是面向闲鱼数字商品卖家的轻量化运营控制台�
 3. 让 Workspace 能通过自然语言发起查询、生成、上传、发布和发货任务。
 4. 让 Agent 可替换，Pi 只是一个可插拔运行时，不成为业务代码依赖。
 5. 所有业务写动作先经过 Policy Gateway；仅当策略要求人工确认时展示 Confirmation Card，确认后进入 Outbox。无需确认的低风险写动作在策略通过后直接进入执行阶段。
-6. 账号 Cookie、Token、密码和 API Key 等系统凭证继续由后端管理；管理员可在管理界面直接查看、编辑和操作。系统凭证不得暴露给闲鱼买家；卡券配置与交付内容属于受控业务数据，按交付范围进入管理、Workspace、订单和聊天流程。
+6. 账号 Cookie、Token、密码和 API Key 等系统凭证继续由后端管理；管理员可在管理界面直接查看、编辑和操作。系统凭证不得暴露给闲鱼买家；卡券配置与交付内容属于受控业务数据，按账号、订单和策略进入管理、Workspace、订单和聊天流程。
 
 ### 1.2 非目标
 
@@ -51,7 +51,7 @@ XianyuSellerAgent 是面向闲鱼数字商品卖家的轻量化运营控制台�
 - 账号级数据必须按管理员的账号范围和授权范围过滤。
 - 高风险动作至少需要 `capability + account_scope + permission + policy` 同时通过。
 - 账号 Cookie、Token、登录密码和 API Key 仍属于系统凭证，管理员可查看、编辑和操作；系统凭证不得进入闲鱼买家可见的消息、订单交付内容或外部买家可见响应。卡券配置与交付内容属于受控业务数据，可通过受控领域接口进入卡券管理、Workspace、订单和聊天交付流程；业务上不额外要求管理员侧脱敏、二次确认或超时隐藏。
-- `system_only` 仅允许后端 Runtime / Executor 读取；`operator_only` 允许管理员和受授权 Agent 读取，但不得交付给买家；`buyer_deliverable` 允许管理员、Workspace 和受授权 Agent 读取，并可在订单策略通过后交付给买家。
+- 卡券批次不再区分内部发货范围，所有卡券均可进入买家交付链路；实际是否发送由账号归属、订单状态、商品匹配、策略和审计条件共同决定。
 
 ## 3. 一级页面需求
 
@@ -93,8 +93,8 @@ XianyuSellerAgent 是面向闲鱼数字商品卖家的轻量化运营控制台�
 ### 4.3 卡券生成与绑定
 
 1. 管理员进入卡券管理，选择商品和卡券类型。
-2. 输入批次名称、卡券类型、内容来源、交付范围和可选延迟。
-3. 生成卡券批次，卡券正文写入受控卡券数据或外部交付数据，并关联 `deliveryScope` 和 `contentRef`。
+2. 输入批次名称、卡券类型、内容来源和可选延迟。
+3. 生成卡券批次，卡券正文写入受控卡券数据或外部交付数据，并关联 `contentRef`。
 4. 卡券管理页面通过受控领域接口直接展示批次号、类型、状态、绑定商品、卡券正文和交付信息；管理员可以直接查看、复制、编辑和使用卡券内容。前端不直接访问 CredentialStore 底层实现或平台原始接口。
 5. 管理员可以批量绑定商品、解除绑定、更新交付配置或作废批次。
 6. 订单交付时由后端按幂等键解析配置、消费批量数据并生成交付记录。
@@ -252,7 +252,7 @@ XianyuSellerAgent 是面向闲鱼数字商品卖家的轻量化运营控制台�
 - 上传卡券图片和素材。
 - 批量保存、批量删除、批量绑定和批量解除绑定。
 - 商品与卡券多对多关联。
-- 交付范围必须区分 `buyer_deliverable`、`system_only` 和 `operator_only`。
+- 卡券无需额外的内部交付范围字段，所有有效卡券均可被买家交付流程选择。
 - 卡券管理页面直接展示完整卡券正文、批次摘要、类型、状态、绑定商品和交付信息；管理员可以直接查看、复制、编辑、绑定和执行交付。
 
 **P1 功能**
@@ -330,7 +330,7 @@ XianyuSellerAgent 是面向闲鱼数字商品卖家的轻量化运营控制台�
 | 商品 | `GET /api/v1/items/paginated`、`POST /api/v1/items/get-all-from-account`、`GET /api/v1/items/{cookieId}/{itemId}/seller-detail`、`PUT /api/v1/items/{cookieId}/{itemId}/seller-edit` | 旧字段映射为 `Product` 契约 |
 | 商品发布 | `POST /api/v1/product-publish/materials`、`GET /api/v1/product-publish/materials`、`POST /api/v1/product-publish/publish/single`、`POST /api/v1/product-publish/publish/batch` | 发布动作必须经过确认卡和 Outbox |
 | 商品素材 | `POST /api/v1/product-publish/upload/images`、`POST /api/v1/product-publish/upload/videos`、`POST /api/v1/upload/upload-image` | 返回 `assetId` 和访问地址，不返回本地路径 |
-| 卡券 | `GET/POST /api/v1/cards`、`GET /api/v1/cards/{id}`、`GET /api/v1/cards/{id}/content`、`PUT /api/v1/cards/{id}`、`POST /api/v1/cards/batch-bind` | 卡券正文通过受控领域接口返回明文；接口校验权限、账号范围、deliveryScope 和用途，并记录访问审计 |
+| 卡券 | `GET/POST /api/v1/cards`、`GET /api/v1/cards/{id}`、`GET /api/v1/cards/{id}/content`、`PUT /api/v1/cards/{id}`、`POST /api/v1/cards/batch-bind` | 卡券正文通过受控领域接口返回明文；接口校验权限、账号范围和用途，并记录访问审计 |
 | 订单 | `GET /api/v1/orders`、`GET /api/v1/orders/{orderNo}`、`POST /api/v1/orders/fetch-xianyu` | 订单查询和同步可直接复用 |
 | 订单发货 | `POST /api/v1/orders/manual-delivery`、`POST /api/v1/orders/no-logistics-delivery`、`POST /api/v1/orders/cancel` | 外部写动作走 Gateway + Outbox |
 | AI 设置 | `GET/PUT /api/v1/ai-reply-settings`、`POST /api/v1/ai-reply-settings/models` | 映射为 Agent Provider 配置 |
@@ -397,7 +397,7 @@ Pi 作为第一种 Runtime Adapter；后续可以替换为其他 Node Agent、�
 
 Pi 或其他 Agent 负责理解意图、选择后端业务能力或调用 Pi 原生 Skill。Pi 原生 Skill 不自动访问当前项目数据库；需要业务数据时，可以通过后端 Manifest 提供的查询能力获取。后端 Agent Gateway 按读写类型处理业务能力：
 
-1. `read` 能力：Agent 可以直接通过 Manifest 调用领域查询能力获取业务数据，不进入 Confirmation Card 和 Outbox；读取卡券正文必须使用受控内容能力，并按 `deliveryScope` 校验用途。
+1. `read` 能力：Agent 可以直接通过 Manifest 调用领域查询能力获取业务数据，不进入 Confirmation Card 和 Outbox；读取卡券正文必须使用受控内容能力，并按用途和账号范围校验。
 2. `write` 能力：新增、修改、删除、发布、发货、发送消息等写操作进入 Policy Gateway；外部写动作最终只能由 Gateway 投递到 Outbox。
 3. Skill 只能调用明确提供的领域 API 或 Manifest 能力，不得导入、调用或绕过 `xianyuApi`、闲鱼原始平台接口或 CredentialStore 底层接口。
 4. 写操作校验管理员身份、账号和资源权限，并按策略决定是否需要 Confirmation Card；无需确认的写操作也必须记录 Audit、Trace、ToolCall 并进入幂等执行链路。
@@ -442,7 +442,7 @@ Skill 属于 Pi Runtime 的扩展能力，直接使用 Pi 原生的安装、加�
 ### 9.1 安全
 
 - Cookie、Token、API Key 和密码等系统凭证必须由后端统一管理，并允许管理员直接查看、编辑和操作；卡券正文和外部交付凭证通过受控领域接口按业务需要提供给管理员、Workspace 和 Agent 使用。
-- 卡券正文、图片和配置参数可以在前端、Workspace、订单和聊天交付流程中直接展示、复制和使用；不额外增加脱敏、二次确认或超时隐藏，但受控接口必须校验权限、deliveryScope、用途和账号范围，并记录访问审计。
+- 卡券正文、图片和配置参数可以在前端、Workspace、订单和聊天交付流程中直接展示、复制和使用；不额外增加脱敏、二次确认或超时隐藏，但受控接口必须校验权限、用途和账号范围，并记录访问审计。
 - 系统凭证不得出现在闲鱼买家可见的消息、订单交付内容或外部买家可见响应中；卡券正文和图片可以返回给授权调用方并用于交付。
 - WebSocket 必须校验管理员登录 Token、账号归属和会话权限。
 

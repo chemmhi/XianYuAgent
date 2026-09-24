@@ -22,7 +22,7 @@
 - `029_product_xianyu_updated_at.sql`：为商品保存闲鱼侧更新时间，并支持显式按闲鱼更新时间排序；不再把本地 `updated_at` 当作闲鱼更新时间。
 - `030_product_xianyu_list_rank.sql`：保存闲鱼商品列表返回顺序，支持商品目录按闲鱼页面顺序展示；未出现在最近一次同步结果中的商品排名置空并排在末尾。
 - `029_coupon_batch_sequence.sql`：为卡券批次增加从 1 开始的业务编号；UUID `id` 继续作为内部主键和外键，API `batchId`/`id` 对外返回该序号，作废/删除后的序号可被新批次回收。
-- `031_product_automation.sql`：建立商品级四类自动化配置表，按商品唯一保存规范化 JSON、账号归属、版本和摘要；批量保存使用应用事务，卡券批次仍通过现有 `coupon_batches` 校验账号与 `buyer_deliverable` 范围。
+- `031_product_automation.sql`：建立商品级四类自动化配置表，按商品唯一保存规范化 JSON、账号归属、版本和摘要；批量保存使用应用事务，卡券批次通过现有 `coupon_batches` 校验账号与生命周期状态。
 - `033_coupon_reservations.sql`：增加卡券 reservation 与 reservation item 审计表；reserve 使用批次/卡券行锁，commit/release/lease expiry 保持幂等并支持失败重试重开。
 
 ## 031 商品自动化迁移纪律
@@ -37,6 +37,7 @@
 - `035_auto_reply_policy_registry.sql`：建立账号级自动回复 repair PolicyConfig 版本注册表；ACTIVE 指针唯一、历史版本可回滚，策略 JSON/hash 保持不可变。
 - `037_coupon_asset_refs.sql`：为卡券图片建立对象存储引用表；数据库只保存 `storage_key`/MIME/checksum 等元数据，图片字节写入现有 S3/MinIO 兼容对象存储，旧 Data URL 由读取链路懒迁移。
 - `038_remove_coupon_quark_fields.sql`：删除卡券批次中不再使用的夸克链接和提取码列；不保留兼容读取。
+- `041_remove_coupon_delivery_scope.sql`：将历史卡券批次统一归一化为可发货后删除 `delivery_scope` 列；卡券不再区分系统/运营/买家范围。
 
 迁移执行顺序以完整文件名的字典序为准，数字前缀在历史目录中允许重复（例如 `031_auto_reply_*` 与 `031_product_automation.sql`）；新增迁移应优先使用唯一前缀，并确保 SQL 幂等且依赖在完整文件名顺序下成立。
 

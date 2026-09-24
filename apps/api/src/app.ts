@@ -1011,7 +1011,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   if (ctx.path === '/api/v1/coupons/batches' && ctx.method === 'POST') {
     const accountId = String(ctx.body.accountId ?? '');
     const result = await mutation(runtime, ctx, authContext, accountId || undefined, async () => {
-      const batch = await coupons.create({ adminId: authContext.admin.id, accountId, label: optionalString(ctx.body.label), purpose: String(ctx.body.purpose ?? ''), deliveryScope: String(ctx.body.deliveryScope ?? '') as never, metadata: readCouponMetadata(ctx.body.metadata), requestId: ctx.requestId, traceId: ctx.traceId });
+      const batch = await coupons.create({ adminId: authContext.admin.id, accountId, label: optionalString(ctx.body.label), purpose: String(ctx.body.purpose ?? ''), metadata: readCouponMetadata(ctx.body.metadata), requestId: ctx.requestId, traceId: ctx.traceId });
       return success(ctx, batch, 201);
     });
     return result;
@@ -1022,7 +1022,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     const action = couponBatchMatch[2];
     if (!action && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, await coupons.get(authContext.admin.id, batchId)).body };
     if (!action && (ctx.method === 'PATCH' || ctx.method === 'PUT')) {
-      return mutation(runtime, ctx, authContext, batchId, async () => success(ctx, await coupons.update({ adminId: authContext.admin.id, batchId, patch: { label: optionalString(ctx.body.label), purpose: optionalString(ctx.body.purpose), deliveryScope: optionalString(ctx.body.deliveryScope) as never, status: optionalString(ctx.body.status) as never, metadata: readCouponMetadata(ctx.body.metadata) }, requestId: ctx.requestId, traceId: ctx.traceId })));
+      return mutation(runtime, ctx, authContext, batchId, async () => success(ctx, await coupons.update({ adminId: authContext.admin.id, batchId, patch: { label: optionalString(ctx.body.label), purpose: optionalString(ctx.body.purpose), status: optionalString(ctx.body.status) as never, metadata: readCouponMetadata(ctx.body.metadata) }, requestId: ctx.requestId, traceId: ctx.traceId })));
     }
     if (!action && ctx.method === 'DELETE') {
       return mutation(runtime, ctx, authContext, batchId, async () => success(ctx, await coupons.delete({ adminId: authContext.admin.id, batchId, requestId: ctx.requestId, traceId: ctx.traceId })));
@@ -1046,7 +1046,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   const couponContentMatch = ctx.path.match(/^\/api\/v1\/coupons\/([^/]+)\/content$/);
   if (couponContentMatch && ctx.method === 'GET') {
     const itemId = optionalString(ctx.query.couponId) ?? decodeURIComponent(couponContentMatch[1]);
-    const preview = await coupons.content({ adminId: authContext.admin.id, itemId, purpose: optionalString(ctx.query.purpose) ?? 'preview', deliveryScope: optionalString(ctx.query.deliveryScope) ?? 'operator_only', requestId: ctx.requestId, traceId: ctx.traceId });
+    const preview = await coupons.content({ adminId: authContext.admin.id, itemId, purpose: optionalString(ctx.query.purpose) ?? 'preview', requestId: ctx.requestId, traceId: ctx.traceId });
     return { statusCode: 200, body: success(ctx, preview).body };
   }
 

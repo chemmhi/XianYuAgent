@@ -5,13 +5,13 @@ import { buildCouponPayload, CouponCreateModal, type CouponCreateFormState, vali
 import type { CouponBatchVM } from '../types';
 
 const baseForm: CouponCreateFormState = {
-  accountId: 'account-001', label: '', purpose: 'text', deliveryScope: 'operator_only', textContent: '', dataContent: '',
+  accountId: 'account-001', label: '', purpose: 'text', textContent: '', dataContent: '',
   apiUrl: '', apiMethod: 'GET', apiTimeout: 60, apiHeaders: '', apiParams: '', apiResponseField: '', imageUrls: [], delaySeconds: 0, useNoLogisticsForm: false,
   description: '', feePayer: '', minPrice: '', dockVisibility: 'public', multiSpec: false, specName: '', specValue: '',
 };
 
 function batch(purpose: CouponBatchVM['purpose'], metadata: CouponBatchVM['metadata'] = {}): CouponBatchVM {
-  return { batchId: '4', accountId: 'account-001', label: '测试卡券', purpose, deliveryScope: 'operator_only', status: 'draft', version: 1, updatedAt: '2026-09-20T00:00:00.000Z', bindings: [], metadata };
+  return { batchId: '4', accountId: 'account-001', label: '测试卡券', purpose, status: 'draft', version: 1, updatedAt: '2026-09-20T00:00:00.000Z', bindings: [], metadata };
 }
 
 describe('CouponCreateModal', () => {
@@ -22,7 +22,6 @@ describe('CouponCreateModal', () => {
     expect(html).toContain('type=\"file\"');
     expect(html).toContain('accept=\"image/*\"');
     expect(html).not.toContain('账号');
-    expect(html).not.toContain('交付范围');
     expect(html).not.toContain('夸克链接');
     expect(html).not.toContain('提取码');
     expect(html).not.toContain('已发货次数');
@@ -54,7 +53,7 @@ describe('CouponCreateModal', () => {
   it('builds canonical payload without legacy visible-only fields', () => {
     const form = { ...baseForm, label: '固定文字卡券', textContent: '兑换内容', useNoLogisticsForm: true, description: '{DELIVERY_CONTENT}', imageUrls: ['data:image/png;base64,abc'] };
     const payload = buildCouponPayload(form);
-    expect(payload).toMatchObject({ accountId: 'account-001', label: '固定文字卡券', purpose: 'text', deliveryScope: 'operator_only' });
+    expect(payload).toMatchObject({ accountId: 'account-001', label: '固定文字卡券', purpose: 'text' });
     expect(payload).not.toHaveProperty('items');
     expect(payload.metadata).toMatchObject({ textContent: '兑换内容', useNoLogisticsForm: true, description: '{DELIVERY_CONTENT}', delaySeconds: 0, multiSpec: false, imageUrls: ['data:image/png;base64,abc'] });
     expect(payload.metadata).not.toHaveProperty('price');

@@ -11,7 +11,7 @@
 
 ## 最低测试集
 
-1. `product-automation.test.ts`：默认配置、字段边界、批次账号/交付范围校验、版本冲突、批量全回滚、幂等冲突。
+1. `product-automation.test.ts`：默认配置、字段边界、批次账号/生命周期校验、版本冲突、批量全回滚、幂等冲突。
 2. `product-automation-workflows.test.ts`：四流程分别覆盖成功、失败、预留释放、unknown/manual_review、重复事件、输入指纹冲突、提醒执行前二次校验。
 3. `product-automation-api-smoke.mjs`：真实 HTTP Session/CSRF/Idempotency，单商品读写、批量读写、403/404/409/422，以及保存后重新 GET。
 4. `product-automation-postgres-smoke.mjs`：应用 `031_product_automation.sql`，验证事务回滚、重启后配置复读、账号隔离和版本冲突。

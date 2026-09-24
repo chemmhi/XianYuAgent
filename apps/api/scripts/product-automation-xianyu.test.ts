@@ -16,7 +16,7 @@ async function setup() {
     amountMinor: 1000, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'coupon_only',
     createdAt: '2026-09-23T00:00:00.000Z', updatedAt: '2026-09-23T00:00:00.000Z', conversationId: conversation.id, productId: product.id,
   }});
-  const batch = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'Live Coupon', purpose: 'text', deliveryScope: 'buyer_deliverable' });
+  const batch = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'Live Coupon', purpose: 'text' });
   await store.importCouponItems({ adminId: admin.id, batchId: batch.id, contents: ['LIVE-CODE-001'] });
   return { store, admin, account, product, conversation, order, batch };
 }

@@ -28,7 +28,7 @@
 7. 参考项目 `http://localhost:9000/accounts` 的人工复核必须在当前已经打开且已登录闲鱼的 Chrome 窗口中进行，以复用既有浏览器 Cookie / Local Storage；新建 Chrome profile、无痕窗口、headless 或其他浏览器实例均不作为登录态证据。
 7. CredentialStore 直接存项目数据库。管理员拥有绝对管理权限，可查看、编辑、替换、启停、轮换、撤销和操作系统凭证；唯一硬边界是不得暴露给闲鱼买家。
 8. 系统凭证不得进入闲鱼买家可见消息、订单交付内容、外部买家响应、日志、Trace、Replay 或 Prompt。
-9. 卡券正文和图片只有在 `buyer_deliverable`、订单已支付、商品与账号匹配、策略校验通过、消费成功锁定并记录审计后，才可交付买家。
+9. 卡券正文和图片只有在订单已支付、商品与账号匹配、策略校验通过、消费成功锁定并记录审计后，才可交付买家。
 
 ## 阶段 1 结论
 
@@ -44,7 +44,7 @@
 1. `unknown` 仅作为 `externalOutcome`，不新增 OutboxStatus。
 2. 幂等作用域为 `adminId + accountId + route + Idempotency-Key`，默认保留 30 天；同指纹重放原 envelope，不重复消费批量数据、发货、发布或发消息；同 key 不同指纹返回 `IDEMPOTENCY_CONFLICT`。
 3. 鉴权基线为 `SameSite=Lax`、`X-CSRF-Token` 双提交、WebSocket Origin allowlist、Session 空闲 30 分钟/绝对 8 小时；登录和密码变更后轮换 Session。
-4. `system_only / operator_only / buyer_deliverable`、卡券正文读取、交付预览和订单交付 API 纳入阶段 2 契约。
+4. 卡券正文读取、交付预览和订单交付 API 纳入阶段 2 契约；卡券不再区分内部发货范围。
 5. CredentialStore CRUD、rotate、revoke、enable、disable 纳入阶段 2 契约；管理员绝对管理，但不得向闲鱼买家暴露。
 
 阶段 2 已补齐并冻结：
@@ -56,7 +56,7 @@
 - 字段级 schema、PK/FK、唯一索引、空值/默认值、审计字段、版本并发控制和生命周期约束；
 - 统一响应 envelope、HTTP 状态码、分页、错误码、幂等指纹与冲突语义；
 - 商品同步/素材全生命周期/批量发布，卡券素材与批量操作，账号权限，Runtime/Outbox，Settings Policy Gateway 与外部服务契约；
-- `system_only / operator_only / buyer_deliverable` 的正文读取、交付预览、订单交付和脱敏审计边界。
+- 卡券正文读取、交付预览、订单交付和脱敏审计边界。
 
 阶段 2 评审结论：S2-R1、S2-R2、S2-R3 均 PASS；阶段状态更新为 PASS，允许进入阶段 3 前端设计契约。
 

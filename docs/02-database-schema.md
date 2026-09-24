@@ -62,7 +62,7 @@
 
 | 表 | 关键列 | 主键与外键 | 唯一索引 / 普通索引 | 关键检查 |
 | --- | --- | --- | --- | --- |
-| `coupons.coupon_batches` | `id uuid`；`sequence_id bigint`；`account_id uuid`；`purpose text`；`delivery_scope text`；`metadata_json jsonb`；`total_count int`；`status text` | PK `id`；FK account | UQ partial `(sequence_id) where status <> 'voided'`；IDX `(account_id, status)` | `sequence_id` 从 1 开始，对外作为 `batchId`/`id`；作废/删除后可回收；`delivery_scope in ('system_only','operator_only','buyer_deliverable')` |
+| `coupons.coupon_batches` | `id uuid`；`sequence_id bigint`；`account_id uuid`；`purpose text`；`metadata_json jsonb`；`total_count int`；`status text` | PK `id`；FK account | UQ partial `(sequence_id) where status <> 'voided'`；IDX `(account_id, status)` | `sequence_id` 从 1 开始，对外作为 `batchId`/`id`；作废/删除后可回收；所有有效卡券均可进入买家交付链路 |
 | `coupons.coupon_items` | `id uuid`；`batch_id uuid`；`content_ciphertext bytea`；`status text`；`reserved_until timestamptz null`；`consumed_at timestamptz null` | PK；FK batch | IDX `(batch_id, status)`；partial UQ consumed allocation | `available -> reserved -> consumed`；reserved 超时才可释放 |
 | `coupons.coupon_asset_refs` | `id uuid`；`coupon_batch_id uuid`；`storage_key text`；`mime_type text`；`checksum text null`；`caption text null`；`status text` | PK；FK batch | UQ `(coupon_batch_id, storage_key)` | 素材与正文分离 |
 | `coupons.coupon_bindings` | `id uuid`；`coupon_batch_id uuid`；`product_id uuid`；`priority int default 0`；`status text`；`expires_at null` | PK；FK batch/product | UQ `(coupon_batch_id, product_id)`；IDX `(product_id, status)` | 解绑只改状态，不删交付历史 |

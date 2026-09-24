@@ -62,7 +62,7 @@ ENV-0 不是用户可见业务切片，但必须在 S4-VS1 开始前完成或明
 - 用户旅程：当前账号 → 查看批次首页 → 创建四类卡券配置 → 绑定商品 → 管理员受控查看正文。
 - 页面与组件：`/coupons`、`CouponsPage`、`useCouponsController`、`CouponBatchVM`、`CouponItemVM`、`CouponContentPreviewVM`、`InventoryLockVM`。
 - API 范围：批次列表/详情/创建/更新/删除、items 导入/批量保存/批量删除、素材、绑定/解除绑定、作废、受控正文读取。
-- 依赖：S4-VS1 账号范围、S4-VS2 商品绑定、对象存储、事务锁、AuditEvent、deliveryScope 策略。
+- 依赖：S4-VS1 账号范围、S4-VS2 商品绑定、对象存储、事务锁、AuditEvent、订单与自动化策略。
 - 首页口径：首期首页以批次列表、类型/状态筛选、交付配置摘要和绑定关系为主；不提供卡券库存 KPI 或预警字段。
 - DoD：正文不进列表；管理员受控查看/复制；四类配置项均可保存并被交付链路消费；批量数据按行幂等消费；绑定必须校验商品与账号一致；作废后禁止恢复性盲重试；敏感字段不进日志/Trace/Replay/Prompt；覆盖空数据、部分成功、冲突、超时和权限失败。
 - 回滚：冻结交付配置写入；绑定仅允许状态回退，不删除历史；作废不可逆；恢复到只读批次和配置查询。
@@ -74,7 +74,7 @@ ENV-0 不是用户可见业务切片，但必须在 S4-VS1 开始前完成或明
 - API 范围：订单列表/详情/刷新、delivery-preview、deliver、cancel、retry。
 - 依赖：S4-VS1 账号、S4-VS2 商品、S4-VS3 卡券交付配置、Policy、Confirmation、Outbox、闲鱼 adapter。
 - 禁止范围：未知结果时自动再次发货；订单页面直接调用外部交付 adapter；混用支付、订单、交付、售后四套状态。
-- DoD：支持四套独立状态和筛选；交付前校验支付、商品/账号匹配、deliveryScope、交付配置和策略；重复提交幂等；`unknown/timeout` 只查询 outbox/外部状态或进入人工恢复；失败可按状态重试；交付写 DeliveryRecord 和审计；覆盖未登录/无权/空数据/冲突/超时/重复提交/移动端对等。
+- DoD：支持四套独立状态和筛选；交付前校验支付、商品/账号匹配、交付配置和策略；重复提交幂等；`unknown/timeout` 只查询 outbox/外部状态或进入人工恢复；失败可按状态重试；交付写 DeliveryRecord 和审计；覆盖未登录/无权/空数据/冲突/超时/重复提交/移动端对等。
 - 回滚：停止新的 delivery outbox，等待租约结束；保留 DeliveryRecord 和审计；必要时退回只读订单和外部状态查询，不回滚已成功交付。
 
 ### 3.2 当前优先垂直切片：Messages / Workspace / Settings API Key

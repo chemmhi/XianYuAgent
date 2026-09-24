@@ -38,7 +38,7 @@ async function seed(store) {
   await store.updateAccount(adminId, otherAccountId, { status: 'connected' });
   const product = await store.createProduct({ adminId, accountId, title: 'Dashboard PostgreSQL 商品', status: 'published' });
   productId = product.id;
-  const batch = await store.createCouponBatch({ adminId, accountId, label: 'Dashboard PostgreSQL 交付配置', purpose: 'data', deliveryScope: 'buyer_deliverable' });
+  const batch = await store.createCouponBatch({ adminId, accountId, label: 'Dashboard PostgreSQL 交付配置', purpose: 'data' });
   couponBatchId = batch.id;
   await store.importCouponItems({ adminId, batchId: couponBatchId, contents: [`PG-${suffix}-A`, `PG-${suffix}-B`, `PG-${suffix}-C`] });
   await store.createOrder({ adminId, order: {
