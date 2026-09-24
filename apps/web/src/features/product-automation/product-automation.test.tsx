@@ -129,6 +129,14 @@ describe('product automation components', () => {
     expect(html).not.toContain('2 条规格');
   });
 
+  it('renders selected coupons as removable rows without redundant checkboxes', () => {
+    const html = renderToStaticMarkup(createElement(CouponPickerDialog, { open: true, title: '选择发货卡券', subtitle: '付款后自动发货使用的卡券', coupons: MOCK_AUTOMATION_COUPONS, selectedIds: ['coupon-batch-2'], onCancel: vi.fn(), onSave: vi.fn() }));
+    expect(html).toContain('aria-label="移除批量数据2"');
+    expect((html.match(/<strong>批量数据2<\/strong>/g) ?? []).length).toBe(2);
+    expect(html).toContain('☑');
+    expect(html).not.toContain('<input type="checkbox"');
+  });
+
   it('hydrates automation picker selections from product-level coupon bindings', async () => {
     const api = createMockProductAutomationApi();
     const config = await api.getConfig(product.id);

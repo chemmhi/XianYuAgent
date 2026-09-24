@@ -92,15 +92,15 @@ async function run() {
   await evaluate(cdp, 'Array.from(document.querySelectorAll(".automation-summary")).find((item) => item.textContent?.includes("付款后自动发货"))?.click()'); await evaluate(cdp, 'document.querySelector("[data-testid=choose-delivery-coupon]")?.click()'); await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('待选卡券'), 'coupon picker'); await waitFor(async () => Number(await evaluate(cdp, 'document.querySelectorAll(".coupon-transfer-pane").length')) >= 2, 'coupon transfer controls'); if (automationMode === 'live') await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('批量数据2'), 'live coupon picker list'); await shot(cdp, 1440, 900, '06-delivery-coupon-picker-desktop.png'); await shot(cdp, 390, 844, '06-delivery-coupon-picker-mobile.png');
   const transferAudit = await evaluate(cdp, `(async () => {
     const panes = document.querySelectorAll('.coupon-transfer-pane');
-    const availableInput = panes[0]?.querySelector('input[type="checkbox"]');
+    const availableItem = Array.from(panes[0]?.querySelectorAll('button.coupon-item') ?? []).find((item) => !item.classList.contains('active'));
     const before = panes[1]?.querySelectorAll('.coupon-item').length ?? 0;
-    if (!availableInput || before < 1) return { ok: false, reason: 'transfer controls missing', before };
-    availableInput.click();
+    if (!availableItem || before < 1) return { ok: false, reason: 'transfer controls missing', before };
+    availableItem.click();
     await new Promise((resolve) => setTimeout(resolve, 40));
     const afterAdd = panes[1]?.querySelectorAll('.coupon-item').length ?? 0;
-    const selectedInput = panes[1]?.querySelector('input[type="checkbox"]');
-    if (afterAdd !== before + 1 || !selectedInput) return { ok: false, reason: 'checked item did not move right', before, afterAdd };
-    selectedInput.click();
+    const selectedRemove = panes[1]?.querySelector('button[aria-label^="移除"]');
+    if (afterAdd !== before + 1 || !selectedRemove) return { ok: false, reason: 'selected item did not move right', before, afterAdd };
+    selectedRemove.click();
     await new Promise((resolve) => setTimeout(resolve, 40));
     const afterRemove = panes[1]?.querySelectorAll('.coupon-item').length ?? 0;
     return { ok: afterRemove === before, before, afterAdd, afterRemove };
@@ -110,7 +110,7 @@ async function run() {
     const pane = document.querySelectorAll('.coupon-transfer-pane')[0];
     const target = Array.from(pane?.querySelectorAll('.coupon-item') ?? []).find((item) => item.textContent?.includes('固定文字'));
     if (!target) return { ok: false, reason: 'fixed coupon missing from complete picker list' };
-    target.querySelector('input[type="checkbox"]')?.click();
+    target.click();
     await new Promise((resolve) => setTimeout(resolve, 40));
     const selected = Array.from(document.querySelectorAll('.coupon-transfer-pane')[1]?.querySelectorAll('.coupon-item') ?? []).some((item) => item.textContent?.includes('固定文字'));
     return { ok: selected };
