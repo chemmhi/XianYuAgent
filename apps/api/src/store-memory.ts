@@ -8,6 +8,7 @@ import type { AgentSessionRecord, RunEventRecord, RunRecord, RunStatus, StepReco
 import { cloneCouponReservation, normalizeCouponReservationInput, normalizeLeaseSeconds, reservationFingerprint } from './coupon-reservation.js';
 import { validatePersistedAutoReplyRepairPolicyBundle } from './auto-reply-repair-config.js';
 import { readAutoReplyProductDescription, readAutoReplyProductMetrics } from './auto-reply-product-metrics.js';
+import { normalizeProductSearchTerms, normalizeProductSearchText, productSearchScore, splitProductSearchTerms, type AutoReplyProductSearchMode } from './auto-reply-product-search.js';
 
 function meaningfulOrderTitle(value: string | undefined, references: Array<string | undefined>): string | undefined {
   const title = value?.trim();
@@ -242,15 +243,35 @@ export class MemoryStore implements Store {
   }
   async listAutoReplyProducts(adminId: string, query: AutoReplyProductListQuery): Promise<AutoReplyProductListResult> {
     const scopedAccountIds = new Set((await this.listScopes(adminId)).map((scope) => scope.accountId));
-    const normalizedKeyword = query.keyword?.trim().toLowerCase();
-    const filtered = [...this.products.values()].filter((product) => {
-      if (!scopedAccountIds.has(product.accountId) || product.accountId !== query.accountId) return false;
-      if (query.productId && product.id !== query.productId) return false;
-      if (normalizedKeyword && ![product.title, product.externalProductRef ?? '', product.description ?? ''].some((value) => value.toLowerCase().includes(normalizedKeyword))) return false;
-      return true;
-    }).sort((left, right) => left.title.localeCompare(right.title) || left.id.localeCompare(right.id));
+    const normalizedKeyword = normalizeProductSearchText(query.keyword);
+    const explicitKeywords = normalizeProductSearchTerms(query.keywords);
     const limit = Math.min(50, Math.max(1, query.limit ?? 10));
-    return { items: filtered.slice(0, limit).map(toAutoReplyProductContext), total: filtered.length };
+    const candidates = [...this.products.values()].filter((product) => scopedAccountIds.has(product.accountId)
+      && product.accountId === query.accountId
+      && (!query.productId || product.id === query.productId));
+    const fieldsFor = (product: ProductRecord): string[] => [
+      product.title,
+      product.externalProductRef ?? '',
+      readAutoReplyProductDescription(product.attributes, product.description) ?? '',
+    ].map((value) => value.toLowerCase());
+    const exactMatches = normalizedKeyword
+      ? candidates.filter((product) => fieldsFor(product).some((value) => value.includes(normalizedKeyword)))
+      : [];
+    if (exactMatches.length > 0) {
+      const items = exactMatches.sort((left, right) => left.title.localeCompare(right.title) || left.id.localeCompare(right.id));
+      return { items: items.slice(0, limit).map(toAutoReplyProductContext), total: items.length, searchMode: 'exact_phrase' };
+    }
+    const fallbackTerms = explicitKeywords.length > 0 ? explicitKeywords : splitProductSearchTerms(normalizedKeyword);
+    if (fallbackTerms.length > 0) {
+      const scored = candidates.map((product) => ({ product, score: productSearchScore(fieldsFor(product), fallbackTerms) }))
+        .filter((entry) => entry.score > 0)
+        .sort((left, right) => right.score - left.score || left.product.title.localeCompare(right.product.title) || left.product.id.localeCompare(right.product.id));
+      return { items: scored.slice(0, limit).map((entry) => toAutoReplyProductContext(entry.product)), total: scored.length, searchMode: 'core_terms' };
+    }
+    if (normalizedKeyword) return { items: [], total: 0, searchMode: 'exact_phrase' };
+    const catalog = candidates.sort((left, right) => left.title.localeCompare(right.title) || left.id.localeCompare(right.id));
+    const searchMode: AutoReplyProductSearchMode = 'catalog';
+    return { items: catalog.slice(0, limit).map(toAutoReplyProductContext), total: catalog.length, searchMode };
   }
   async getProduct(adminId: string, productId: string): Promise<ProductRecord | undefined> {
     const product = this.products.get(productId);

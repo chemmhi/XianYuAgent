@@ -9,6 +9,7 @@ import { decodeMessageHistoryCursor } from './message-history-cursor.js';
 import { normalizeAutoReplyProductMetric } from './auto-reply-product-metrics.js';
 import { cloneCouponReservation, normalizeCouponReservationInput, normalizeLeaseSeconds, reservationFingerprint } from './coupon-reservation.js';
 import { validatePersistedAutoReplyRepairPolicyBundle } from './auto-reply-repair-config.js';
+import { normalizeProductSearchTerms, normalizeProductSearchText, splitProductSearchTerms, type AutoReplyProductSearchMode } from './auto-reply-product-search.js';
 
 type Row = Record<string, unknown>;
 const PRODUCT_COUPON_BATCHES_SELECT = `(select coalesce(json_agg(json_build_object('id', cb.sequence_id, 'label', cb.label) order by binding.priority desc, binding.created_at, cb.sequence_id), '[]'::json) from coupons.coupon_bindings binding join coupons.coupon_batches cb on cb.id=binding.coupon_batch_id where binding.product_id=p.id and binding.status='active' and cb.status <> 'voided') as coupon_batches`;
@@ -117,23 +118,49 @@ export class PostgresStore implements Store {
   }
   async listAutoReplyProducts(adminId: string, query: AutoReplyProductListQuery): Promise<AutoReplyProductListResult> {
     const limit = Math.min(50, Math.max(1, query.limit ?? 10));
-    const params: unknown[] = [adminId, query.accountId];
-    const conditions = [
+    const baseParams: unknown[] = [adminId, query.accountId];
+    const baseConditions = [
       'p.account_id=$2',
       "EXISTS (SELECT 1 FROM auth.account_scopes scope WHERE scope.account_id=p.account_id AND scope.admin_id=$1 AND scope.status='active' AND (scope.expires_at IS NULL OR scope.expires_at>now()))",
     ];
     if (query.productId) {
-      params.push(query.productId);
-      conditions.push(`p.id=$${params.length}::uuid`);
+      baseParams.push(query.productId);
+      baseConditions.push(`p.id=$${baseParams.length}::uuid`);
     }
-    if (query.keyword?.trim()) {
-      params.push(`%${query.keyword.trim().toLowerCase()}%`);
-      conditions.push(`(lower(p.title) like $${params.length} or lower(coalesce(p.external_product_ref,'')) like $${params.length} or lower(coalesce(p.description,'')) like $${params.length} or lower(coalesce(p.attributes_json #>> '{xianyu,detail,summary,description}','')) like $${params.length})`);
+    const normalizedKeyword = normalizeProductSearchText(query.keyword);
+    const explicitKeywords = normalizeProductSearchTerms(query.keywords);
+    const fieldSql = (placeholder: string) => `(lower(p.title) like ${placeholder} or lower(coalesce(p.external_product_ref,'')) like ${placeholder} or lower(coalesce(p.description,'')) like ${placeholder} or lower(coalesce(p.attributes_json #>> '{xianyu,detail,summary,description}','')) like ${placeholder})`;
+    const runSearch = async (terms: string[], searchMode: AutoReplyProductSearchMode): Promise<AutoReplyProductListResult> => {
+      const params = [...baseParams];
+      const termConditions: string[] = [];
+      const scoreParts: string[] = [];
+      for (const term of terms) {
+        params.push(`%${term}%`);
+        const placeholder = `$${params.length}`;
+        termConditions.push(fieldSql(placeholder));
+        scoreParts.push(`case when ${fieldSql(placeholder)} then 1 else 0 end`);
+      }
+      const conditions = [...baseConditions, `(${termConditions.join(' or ')})`];
+      const where = conditions.join(' and ');
+      const count = await this.pool.query(`select count(*)::int as total from products.products p where ${where}`, params);
+      const total = Number(count.rows[0]?.total ?? 0);
+      const limitIndex = params.length + 1;
+      const rows = await this.pool.query(`select ${AUTO_REPLY_PRODUCT_SELECT} from products.products p where ${where} order by (${scoreParts.join(' + ')}) desc, p.title asc, p.id asc limit $${limitIndex}`, [...params, limit]);
+      return { items: rows.rows.map((row) => this.toAutoReplyProduct(row)), total, searchMode };
+    };
+    if (normalizedKeyword) {
+      const exact = await runSearch([normalizedKeyword], 'exact_phrase');
+      if (exact.total > 0) return exact;
+      const fallbackTerms = explicitKeywords.length > 0 ? explicitKeywords : splitProductSearchTerms(normalizedKeyword);
+      if (fallbackTerms.length > 0) return runSearch(fallbackTerms, 'core_terms');
+      return { items: [], total: 0, searchMode: 'exact_phrase' };
     }
-    const where = conditions.join(' AND ');
+    if (explicitKeywords.length > 0) return runSearch(explicitKeywords, 'core_terms');
+    const params = [...baseParams];
+    const where = baseConditions.join(' AND ');
     const count = await this.pool.query(`select count(*)::int as total from products.products p where ${where}`, params);
     const rows = await this.pool.query(`select ${AUTO_REPLY_PRODUCT_SELECT} from products.products p where ${where} order by p.title asc, p.id asc limit $${params.length + 1}`, [...params, limit]);
-    return { items: rows.rows.map((row) => this.toAutoReplyProduct(row)), total: Number(count.rows[0]?.total ?? 0) };
+    return { items: rows.rows.map((row) => this.toAutoReplyProduct(row)), total: Number(count.rows[0]?.total ?? 0), searchMode: 'catalog' };
   }
   async getProduct(adminId: string, productId: string): Promise<ProductRecord | undefined> {
     const result = await this.pool.query(`select p.*, (select count(*)::int from products.product_skus sku where sku.product_id=p.id and sku.status <> 'archived') as sku_count, (select count(*)::int from products.asset_refs asset where asset.product_id=p.id and asset.status <> 'archived') as asset_count, ${PRODUCT_COUPON_BATCHES_SELECT} from products.products p where p.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=p.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))`, [productId, adminId]);

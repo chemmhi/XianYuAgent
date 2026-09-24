@@ -69,3 +69,44 @@ test('postgres exact product lookup executes one row query without count', async
   assert.doesNotMatch(queries[0]?.sql ?? '', /count\s*\(/i);
   assert.deepEqual(queries[0]?.params, ['admin-1', 'account-1', row.id]);
 });
+
+test('memory product search lets the Agent retry core terms after an exact phrase miss', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'product-search@example.com', passwordHash: 'hash', displayName: 'Product Search' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'product-search-seller' });
+  const otherAccount = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'product-search-other' });
+  await store.createProduct({ adminId: admin.id, accountId: account.id, title: 'Hermes Agent 企业级实战', description: '夸克网盘 24 小时自动发货，支持 Word/Excel/PPT 自动化。', status: 'published' });
+  await store.createProduct({ adminId: admin.id, accountId: otherAccount.id, title: '其他账号夸克自动化', description: '夸克 自动化', status: 'published' });
+
+  const result = await store.listAutoReplyProducts(admin.id, { accountId: account.id, keyword: '夸克自动化', keywords: ['夸克', '自动化'], limit: 20 });
+  assert.equal(result.searchMode, 'core_terms');
+  assert.equal(result.total, 1);
+  assert.equal(result.items[0]?.title, 'Hermes Agent 企业级实战');
+
+  const noResult = await store.listAutoReplyProducts(admin.id, { accountId: account.id, keyword: '不存在的商品', keywords: ['不存在', '商品'], limit: 20 });
+  assert.equal(noResult.total, 0);
+  assert.deepEqual(noResult.items, []);
+});
+
+test('postgres product search queries the full phrase before Agent-provided core terms', async () => {
+  const queries: Array<{ sql: string; params?: unknown[] }> = [];
+  const store = Object.create(PostgresStore.prototype) as PostgresStore;
+  (store as unknown as { pool: { query: (sql: string, params?: unknown[]) => Promise<{ rows: unknown[] }> } }).pool = {
+    query: async (sql, params) => {
+      queries.push({ sql, params });
+      if (queries.length === 1) return { rows: [{ total: 0 }] };
+      if (queries.length === 2) return { rows: [] };
+      if (queries.length === 3) return { rows: [{ total: 1 }] };
+      return { rows: [{ id: 'product-1', external_product_ref: 'ITEM-1', title: '夸克网盘自动化', description: '夸克 自动化', status: 'published', price_minor: 100 }] };
+    },
+  };
+
+  const result = await store.listAutoReplyProducts('admin-1', { accountId: 'account-1', keyword: '夸克自动化', keywords: ['夸克', '自动化'], limit: 20 });
+  assert.equal(result.searchMode, 'core_terms');
+  assert.equal(result.total, 1);
+  assert.equal(result.items[0]?.title, '夸克网盘自动化');
+  assert.equal(queries.length, 4);
+  assert.deepEqual(queries[0]?.params, ['admin-1', 'account-1', '%夸克自动化%']);
+  assert.deepEqual(queries[2]?.params, ['admin-1', 'account-1', '%夸克%', '%自动化%']);
+  assert.match(queries[2]?.sql ?? '', /or/);
+});
