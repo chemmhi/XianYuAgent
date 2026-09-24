@@ -90,7 +90,7 @@ export interface ProductPublishImageMeta {
 export interface ProductPublishMeta {
   originalPriceMinor?: number;
   quantity?: number;
-  postageMode?: 'seller' | 'buyer';
+  postageMode?: 'free' | 'distance' | 'fixed' | 'none' | 'seller' | 'buyer';
   postageMinor?: number;
   location?: string;
   images?: ProductPublishImageMeta[];

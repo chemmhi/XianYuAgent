@@ -103,9 +103,13 @@ export async function readBody(request: IncomingMessage, maxBytes = 12 * 1024 * 
     const filename = disposition.match(/(?:^|;)\s*filename="([^"]*)"/i)?.[1];
     if (filename !== undefined) {
       const contentTypeHeader = headers.match(/content-type:\s*([^\r\n]+)/i)?.[1]?.trim() ?? 'application/octet-stream';
-      body[name] = { filename, contentType: contentTypeHeader, data: content } satisfies MultipartFilePart;
+      const part = { filename, contentType: contentTypeHeader, data: content } satisfies MultipartFilePart;
+      const previous = body[name];
+      body[name] = previous === undefined ? part : Array.isArray(previous) ? [...previous, part] : [previous, part];
     } else {
-      body[name] = content.toString('utf8');
+      const value = content.toString('utf8');
+      const previous = body[name];
+      body[name] = previous === undefined ? value : Array.isArray(previous) ? [...previous, value] : [previous, value];
     }
     offset = nextBoundary;
   }

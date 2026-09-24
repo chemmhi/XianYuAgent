@@ -99,6 +99,37 @@ describe('products canonical API adapter', () => {
     expect(calls[1]?.headers?.get('If-Match-Version')).toBe('1');
   });
 
+  it('replays the publish multipart contract and omits skipped address fields', async () => {
+    let request: { path: string; body?: unknown; headers?: Headers } | undefined;
+    const api = createProductsApi({
+      async get<T>() { return { success: true, data: { items: [], total: 0, page: 1, pageSize: 20, totalPages: 1 } } as T; },
+      async post<T>(path: string, body?: unknown, init?: RequestInit) {
+        request = { path, body, headers: new Headers(init?.headers) };
+        return { success: true, data: { product: { id: 'local-1', accountId: 'account-1', title: '裙子', status: 'published', configVersion: 1, externalProductRef: '1085806034681' }, itemId: '1085806034681', itemUrl: 'https://www.goofish.com/item?id=1085806034681', category: { catId: 'cat-1', catName: '服饰', channelCatId: 'channel-1' }, postageMode: 'free', imageUrls: ['https://img.example/1.jpg'], replay: { source: 'reference-project', steps: [{ api: 'mtop.idle.pc.idleitem.publish', status: 'succeeded' }] } } } as T;
+      },
+    });
+    const file = new File(['image'], 'dress.png', { type: 'image/png' });
+    const result = await api.publishProduct({ accountId: 'account-1', title: '裙子', description: '九成新', priceMinor: 20000, quantity: 1, postageMode: 'free', attachments: [{ id: 'a1', url: 'blob:a1', name: file.name, mimeType: file.type, size: file.size, file }] }, { idempotencyKey: 'publish-key' });
+    expect(request?.path).toBe('/api/v1/products/publish');
+    expect(request?.headers?.get('Idempotency-Key')).toBe('publish-key');
+    expect(request?.body).toBeInstanceOf(FormData);
+    const form = request?.body as FormData;
+    expect(form.get('priceMinor')).toBe('20000');
+    expect(form.get('postageMode')).toBe('free');
+    expect(form.get('location')).toBeNull();
+    expect(result.itemId).toBe('1085806034681');
+  });
+
+  it('routes description optimization through the configured provider endpoint', async () => {
+    const calls: string[] = [];
+    const api = createProductsApi({
+      async get<T>() { return { success: true, data: { items: [], total: 0, page: 1, pageSize: 20, totalPages: 1 } } as T; },
+      async post<T>(path: string) { calls.push(path); return { success: true, data: { description: '优化后的文案', provider: 'configured', model: 'model-x' } } as T; },
+    });
+    await expect(api.optimizeDescription({ accountId: 'account-1', title: '裙子', description: '九成新' }, { idempotencyKey: 'copy-key' })).resolves.toMatchObject({ description: '优化后的文案', provider: 'configured' });
+    expect(calls).toEqual(['/api/v1/products/publish/optimize-description']);
+  });
+
   it('reads and persists Xianyu detail through the dedicated route', async () => {
     const calls: Array<{ method: string; path: string; body?: unknown; headers?: Headers }> = [];
     const api = createProductsApi({

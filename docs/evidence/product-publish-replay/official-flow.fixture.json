@@ -1,0 +1,33 @@
+{
+  "fixtureVersion": 1,
+  "source": "official-goofish-publish-page",
+  "capturedAt": "2026-09-24",
+  "redaction": {
+    "cookies": "omitted",
+    "tokens": "omitted",
+    "signatures": "omitted",
+    "accessTokens": "omitted"
+  },
+  "flow": [
+    { "step": 1, "action": "upload images", "api": "stream-upload.goofish.com/api/upload.api", "status": "succeeded", "notes": "multipart images are sent in display order" },
+    { "step": 2, "action": "recommend category and attributes", "api": "mtop.taobao.idle.kgraph.property.recommend", "status": "succeeded", "notes": "title, description and imageInfos are submitted together" },
+    { "step": 3, "action": "publish item", "api": "mtop.idle.pc.idleitem.publish", "status": "succeeded", "notes": "itemPostFeeDTO follows the selected official shipping mode" }
+  ],
+  "shippingModeMap": {
+    "free": "canFreeShipping=true",
+    "distance": "templateId=-100",
+    "fixed": "supportFreight=true and postPriceInCent is required",
+    "none": "onlyTakeSelf=true"
+  },
+  "address": {
+    "status": "skipped",
+    "reason": "user requested main flow first",
+    "payloadField": "itemAddrDTO"
+  },
+  "successReceipt": {
+    "itemId": "redacted-example",
+    "itemUrlPattern": "https://www.goofish.com/item?id={itemId}",
+    "localStatus": "published",
+    "localExternalProductRef": "itemId"
+  }
+}

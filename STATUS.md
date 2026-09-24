@@ -342,3 +342,12 @@
 - 视觉证据：`docs/evidence/product-publish-ui/` 下生成桌面 1440×900、移动 390×844、发布确认和设计稿对照截图；Chrome/CDP 盒模型对齐容差 1.1px，`layoutParity: passed`。
 - 跨层证据：确认发布后复读 `apiRuntime.store`，断言 `priceMinor=16900`、原价 `22900`、库存 `12`、包邮、发货地 `浙江 杭州` 和 4 张图片元数据均持久化成功。
 - 门禁：Web typecheck、Web 全量 301/301 测试、Web/API build、`git diff --check` 均通过。真实闲鱼商品发布 API 仍未接入，当前“发布到闲鱼”完成本地草稿保存与发布队列 UI 状态。
+
+## 2026-09-24 商品发布主流程与官方回放切片
+
+- 当前 worktree：`F:\ChenHai\Project\XianYuAgent-product-publish-replay-20260924`；分支：`feat/product-publish-replay-20260924`；状态：`READY_FOR_REVIEW`。
+- 完成范围：前端按官方发布主流程适配“图片/描述 → 属性规格提示 → 发货设置 → 发布”；发货设置支持 `包邮`、`按距离计费`、`一口价`、`无需邮寄`，其中一口价强制填写合法邮费；宝贝所在地按当前用户要求明确标记为本轮跳过，不向接口发送地点字段。
+- 官方回放链路：图片上传 → `mtop.taobao.idle.kgraph.property.recommend` 属性/类目推荐 → `mtop.idle.pc.idleitem.publish` 发布；发布成功后本地商品保存为 `published` 并回写闲鱼商品 ID。
+- AI 文案优化：前端按钮调用配置页当前账号的 Provider，后端拒绝未配置 Provider，不再使用硬编码文案。
+- 已验证：Web typecheck；API build；商品发布 Web 定向测试 3 files / 22 tests；API 发布测试 3/3；商品发布视觉回归桌面/移动与发布后持久化断言通过；`git diff --check` 通过。
+- 验收边界：当前未在真实闲鱼账号上执行一次受控外部发布，因此状态保持 `READY_FOR_REVIEW`，不能把 stub 视觉回归或脱敏 fixture 解释为真实外部发布已验收。

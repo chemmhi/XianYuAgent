@@ -38,6 +38,7 @@ import { ProductAutomationTrigger, ProductAutomationWorker } from './product-aut
 import { XianyuProductAutomationExecutionAdapter } from './product-automation-xianyu.js';
 import { conversationRefreshMode, messageRefreshMode } from './messages-loading-policy.js';
 import { CouponAssetService } from './coupon-assets.js';
+import { ProductPublishService } from './product-publish.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -47,6 +48,7 @@ export interface AppRuntime {
   coupons: CouponService;
   orders: OrderService;
   products: ProductService;
+  productPublisher: ProductPublishService;
   productAutomation: ProductAutomationService;
   productAutomationTrigger: ProductAutomationTrigger;
   productAutomationWorker: ProductAutomationWorker;
@@ -277,6 +279,16 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       await markXianyuAccountFailure(store, adminId, accountId, { errorCode, message, accountInvalid });
     },
   });
+  const productPublisher = new ProductPublishService(xianyu, products, async (adminId, accountId) => {
+    const configured = await openaiSettings.resolveForRuntime(adminId, accountId);
+    if (configured.length === 0) return undefined;
+    const clients = await Promise.all(configured.slice(0, 2).map((item) => openaiSettings.createRuntimeClient(item)));
+    return createFallbackModelClient(clients[0]!, clients[1]);
+  }, async (input) => {
+    const auditId = createId();
+    await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
+    return auditId;
+  });
   const xianyuItemDetail = new XianyuItemDetailService(store, xianyu, objectStorage, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
@@ -306,7 +318,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, orders, products, productAutomation, productAutomationTrigger, productAutomationWorker, productSync, credentials, apiKeyCredentials, openaiSettings, dashboard, messages, autoReply, autoReplyRepair, autoReplyAgentSettings, autoReplyActivity, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
+    config, store, auth, accounts, coupons, orders, products, productPublisher, productAutomation, productAutomationTrigger, productAutomationWorker, productSync, credentials, apiKeyCredentials, openaiSettings, dashboard, messages, autoReply, autoReplyRepair, autoReplyAgentSettings, autoReplyActivity, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
     server,
     async listen() {
       await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));
@@ -1124,6 +1136,37 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
       return success(ctx, saved);
     });
   }
+  if (ctx.path === '/api/v1/products/publish' && ctx.method === 'POST') {
+    const accountId = optionalString(ctx.body.accountId);
+    return mutation(runtime, ctx, authContext, accountId, async () => {
+      if (!accountId) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
+      const published = await runtime.productPublisher.publish({
+        adminId: authContext.admin.id,
+        accountId,
+        title: String(ctx.body.title ?? ''),
+        description: String(ctx.body.description ?? ''),
+        categoryCode: optionalString(ctx.body.categoryCode),
+        priceMinor: parsePublishMinor(ctx.body.priceMinor ?? ctx.body.price),
+        originalPriceMinor: parseOptionalPublishMinor(ctx.body.originalPriceMinor ?? ctx.body.originalPrice),
+        quantity: parsePublishInteger(ctx.body.quantity),
+        postageMode: parsePublishPostageMode(ctx.body.postageMode),
+        postageMinor: parseOptionalPublishMinor(ctx.body.postageMinor ?? ctx.body.postage),
+        location: parsePublishLocation(ctx.body.location),
+        images: readPublishImages(ctx.body.images),
+        requestId: ctx.requestId,
+        traceId: ctx.traceId,
+      });
+      return success(ctx, { ...published, product: toProductView(published.product) }, 201);
+    });
+  }
+  if (ctx.path === '/api/v1/products/publish/optimize-description' && ctx.method === 'POST') {
+    const accountId = optionalString(ctx.body.accountId);
+    return mutation(runtime, ctx, authContext, accountId, async () => {
+      if (!accountId) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
+      const optimized = await runtime.productPublisher.optimizeDescription({ adminId: authContext.admin.id, accountId, title: String(ctx.body.title ?? ''), description: String(ctx.body.description ?? ''), requestId: ctx.requestId, traceId: ctx.traceId });
+      return success(ctx, optimized);
+    });
+  }
   const productMatch = ctx.path.match(/^\/api\/v1\/products\/([^/]+)$/);
   if (ctx.path === '/api/v1/products/sync' && ctx.method === 'POST') {
     const accountId = optionalString(ctx.body.accountId);
@@ -1263,6 +1306,47 @@ function optionalString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const normalized = value.trim();
   return normalized ? normalized : undefined;
+}
+
+function parsePublishMinor(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : Number(String(value ?? '').trim());
+  if (!Number.isSafeInteger(parsed)) throw new ServiceError(422, 'VALIDATION_FAILED', '金额必须是整数分');
+  return parsed;
+}
+
+function parseOptionalPublishMinor(value: unknown): number | undefined {
+  if (value === undefined || value === null || String(value).trim() === '') return undefined;
+  return parsePublishMinor(value);
+}
+
+function parsePublishInteger(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : Number(String(value ?? '').trim());
+  if (!Number.isSafeInteger(parsed)) throw new ServiceError(422, 'VALIDATION_FAILED', '库存数量必须是整数');
+  return parsed;
+}
+
+function parsePublishPostageMode(value: unknown): import('./product-publish.js').ProductPostageMode {
+  const normalized = String(value ?? '').trim();
+  if (normalized === 'seller' || normalized === 'free') return 'free';
+  if (normalized === 'buyer' || normalized === 'fixed') return 'fixed';
+  if (normalized === 'distance' || normalized === 'none') return normalized;
+  throw new ServiceError(422, 'VALIDATION_FAILED', '邮费模式无效');
+}
+
+function parsePublishLocation(value: unknown): import('./product-publish.js').ProductPublishLocationInput | undefined {
+  if (value === undefined || value === null || String(value).trim() === '') return undefined;
+  if (typeof value === 'object' && !Array.isArray(value)) return value as import('./product-publish.js').ProductPublishLocationInput;
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as import('./product-publish.js').ProductPublishLocationInput : undefined;
+  } catch {
+    throw new ServiceError(422, 'VALIDATION_FAILED', '发货地字段格式无效');
+  }
+}
+
+function readPublishImages(value: unknown): Array<{ filename: string; contentType: string; data: Buffer }> {
+  const items = Array.isArray(value) ? value : value ? [value] : [];
+  return items.filter((item): item is { filename?: unknown; contentType?: unknown; data: Buffer } => Boolean(item && typeof item === 'object' && Buffer.isBuffer((item as { data?: unknown }).data))).map((item) => ({ filename: String(item.filename ?? 'image'), contentType: String(item.contentType ?? 'application/octet-stream'), data: item.data }));
 }
 
 function parseProductListQuery(query: Record<string, string>): import('./domain.js').ProductListQuery {

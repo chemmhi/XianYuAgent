@@ -146,9 +146,18 @@
     .field label { color: var(--muted); font-size: 13px; line-height: 1.5; font-weight: 700; }
     .field label em { color: var(--danger); font-style: normal; }
     .field input, .field select { width: 100%; min-height: 38px; padding: 0 11px; border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--text); font-size: 14px; outline: none; }
-    .auto-category { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); }
+    .auto-category { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); }
+    .auto-category > div:first-child { display: grid; gap: 2px; min-width: 150px; }
     .auto-category strong { color: var(--text); font-size: 14px; font-weight: 700; }
     .auto-category span { color: var(--sub); font-size: 12px; }
+    .spec-list { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+    .spec { display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border: 1px solid #d9e4f0; border-radius: 999px; background: #fff; color: var(--sub); font-size: 11px; line-height: 1.3; white-space: nowrap; }
+    .spec b { color: var(--text); font-weight: 700; }
+    .spec.official { border-color: #c7d8e8; color: var(--link); background: #f4f8fc; }
+    .spec.image { border-color: #d8e8d7; color: #46704b; background: #f4faf3; }
+    .location-skip { display: grid; gap: 3px; min-height: 38px; padding: 8px 11px; border: 1px dashed #c7d8e8; border-radius: 7px; background: #f8fafc; }
+    .location-skip strong { color: var(--text); font-size: 13px; }
+    .location-skip span, .location-skip small { color: var(--sub); font-size: 12px; line-height: 1.45; }
     .field textarea { width: 100%; min-height: 84px; resize: vertical; padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--text); font-size: 13px; line-height: 1.6; outline: none; }
     .helper { color: var(--sub); font-size: 12px; line-height: 1.5; }
     .money-input { position: relative; }
@@ -282,6 +291,9 @@
       .toolbar-actions { width: 100%; }
       .toolbar-actions .btn { flex: 1; }
       .field-grid { grid-template-columns: 1fr; }
+      .auto-category { align-items: flex-start; flex-direction: column; }
+      .spec-list { justify-content: flex-start; }
+      .location-skip { padding-bottom: 14px; }
       .field.wide { grid-column: auto; }
       .image-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
       .drawer-footer { align-items: stretch; flex-direction: column; }
@@ -354,7 +366,7 @@
               <div class="section-head"><div><h3>商品信息</h3></div></div>
               <div class="field-grid">
                 <div class="field wide"><label for="titleInput">商品标题 <em>*</em></label><input id="titleInput" maxlength="60" value="降噪蓝牙耳机 Pro｜通勤续航版" placeholder="输入清晰、可检索的商品标题"><span class="helper">建议包含品类、核心卖点和使用场景，最多 60 字。</span></div>
-                <div class="field wide"><label for="categoryValue">商品分类</label><div class="auto-category" id="categoryValue"><strong id="categoryLabel">数码 › 耳机 / 音箱</strong><span id="categoryHint">根据商品描述自动选择</span></div></div>
+                <div class="field wide"><label for="categoryValue">商品分类与规格</label><div class="auto-category" id="categoryValue"><div><strong id="categoryLabel">数码 › 耳机 / 音箱</strong><span id="categoryHint">根据商品描述自动选择</span></div><div class="spec-list" aria-label="自动识别规格"><span class="spec official"><b>类目</b>数码 › 耳机 / 音箱</span><span class="spec description"><b>成色</b>全新未拆封</span><span class="spec image"><b>图片</b>4 张，发布时交给闲鱼官方识别</span></div></div><span class="helper">发布时会把图片与描述一并提交给闲鱼官方属性推荐接口，自动确认可用规格后再发布。</span></div>
                 <div class="field wide"><label for="descriptionInput">商品描述 <em>*</em></label>
                   <div class="composer" id="composer">
                     <div class="composer-attachments" id="composerAttachments">
@@ -381,9 +393,9 @@
                 <div class="field"><label for="priceInput">售价 <em>*</em></label><div class="money-input"><span>¥</span><input id="priceInput" inputmode="decimal" value="169"></div></div>
                 <div class="field"><label for="originalPriceInput">原价</label><div class="money-input"><span>¥</span><input id="originalPriceInput" inputmode="decimal" value="229"></div></div>
                 <div class="field"><label for="quantityInput">库存数量 <em>*</em></label><input id="quantityInput" inputmode="numeric" value="12"></div>
-                <div class="field"><label for="postageModeInput">邮费模式 <em>*</em></label><select id="postageModeInput"><option value="seller">包邮</option><option value="buyer">买家承担</option></select></div>
+                <div class="field"><label for="postageModeInput">发货设置 <em>*</em></label><select id="postageModeInput"><option value="free">包邮</option><option value="distance">按距离计费</option><option value="fixed">一口价</option><option value="none">无需邮寄</option></select><span class="helper">按官方包邮模式发布</span></div>
                 <div class="field"><label for="postageInput">邮费</label><div class="money-input"><span>¥</span><input id="postageInput" inputmode="decimal" value="0"></div></div>
-                <div class="field"><label for="locationInput">发货地 <em>*</em></label><input id="locationInput" value="浙江 杭州" placeholder="省 / 市"></div>
+                <div class="field wide"><label>宝贝所在地（本轮跳过）</label><div class="location-skip"><strong>暂不发送地址设置</strong><span>按当前验收要求，发布请求不带官方地点字段；后续接入地点弹窗后再补充。</span></div></div>
               </div>
             </section>
           </div>
@@ -391,7 +403,7 @@
         </div>
       </div>
       <footer class="drawer-footer">
-        <div class="footer-hint"><svg viewBox="0 0 24 24"><path d="M12 3 4 6v5c0 5 3.4 8.7 8 10 4.6-1.3 8-5 8-10V6Z"/><path d="M12 8v4m0 3h.01"/></svg><span>发布后会立即同步到闲鱼，建议先检查图片、价格和描述。</span></div>
+        <div class="footer-hint"><svg viewBox="0 0 24 24"><path d="M12 3 4 6v5c0 5 3.4 8.7 8 10 4.6-1.3 8-5 8-10V6Z"/><path d="M12 8v4m0 3h.01"/></svg><span>发布后会立即同步到闲鱼，建议先检查图片、价格、描述与物流模式。</span></div>
         <div class="footer-actions"><button class="btn ghost" id="saveDraft" type="button">保存草稿</button><button class="btn primary" id="openConfirm" type="button"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg>发布到闲鱼</button></div>
       </footer>
       <div class="publish-confirmation" id="publishConfirmation"><h3>确认发布到闲鱼？</h3><p>将使用“数码优选店”发布 1 个商品，价格 ¥169，库存 12 件。确认后会进入服务端发布队列。</p><div class="confirm-actions"><button class="btn ghost" id="cancelConfirm" type="button">返回修改</button><button class="btn warning" id="confirmPublish" type="button">确认发布</button></div></div>
