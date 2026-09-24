@@ -597,3 +597,13 @@
 | S5-R115 | 质量 / 构建 / 回归 | API/Web 类型检查、构建、商品自动化回归和 Web 全量单测是否通过 | root | PASS（受控环境） | `npm run typecheck:api`、`npm run typecheck:web`、`npm run build:api`、`npm run build:web`、`npm --workspace apps/api run test:product-automation`、Web 84 files / 291 tests、`git diff --check` |
 
 本轮结论：参考项目的四类配置消费逻辑已迁移到统一适配器；公开创建/更新、reservation 和存储 schema 均不再包含历史无关字段，配置型卡券无需先导入手工条目即可执行。评价赠品即使勾选无需邮寄也只发送 IM，不调用闲鱼确认发货接口。本切片保持 `READY_FOR_REVIEW`，不把受控 E2E 等同于真实闲鱼生产 mutation 验收。
+
+### 2026-09-24：卡券发券可靠性修复合入复审
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R116 | 业务 / 验收 | 多规格订单是否持久化 `skuSpec` 并用于卡券精确匹配；图片说明文本断线后是否有限重试且不重复落库 | root | PASS（受控链路） | `039_order_sku_spec.sql`、`xianyu-order-mapper.ts`、`product-automation-xianyu.ts`；卡券回归 13/13；商品自动化 31/31 |
+| S5-R117 | 架构 / 数据流 | Memory/PostgreSQL 订单读写、重启复读和发送 request ID 是否保持一致 | root | PASS | `store-postgres.ts`、`orders-postgres-smoke.mjs`、`product-automation-coupon-delivery-e2e.test.ts`；订单 PostgreSQL persistence smoke |
+| S5-R118 | 质量 / 主线 | 合入 `main` 后构建、回归、PostgreSQL smoke 和 diff-check 是否通过 | root | PASS | merge `4486592`；`npm run build:api`；卡券回归 13/13；商品自动化 31/31；`npm --workspace apps/api run test:orders:postgres`；`git diff --check` |
+
+本轮结论：提交 `992f9ef` 已在 merge lock 内以 `--no-ff` 合入 `main`。受控回归和 PostgreSQL 订单持久化门禁通过；真实闲鱼外部 mutation 仍保持隔离测试账号复测边界。

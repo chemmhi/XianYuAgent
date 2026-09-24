@@ -1,5 +1,13 @@
 # XianyuSellerAgent 项目状态
 
+## 2026-09-24 卡券发券可靠性修复已合入 main
+
+- 目标行为：多规格订单持久化 `skuSpec` 并参与卡券精确匹配；图片卡券说明文本在 IM 断线/未连接/超时类错误时只重试一次并复用同一请求标识，避免重复消息和错误进入人工复核。
+- 实现边界：新增 `apps/api/migrations/039_order_sku_spec.sql`；闲鱼订单映射、PostgreSQL create/upsert/read 全链路保存 `skuSpec`；发券文本发送增加有限重试和幂等 request ID；不改变其他卡券配置契约。
+- 合入记录：`992f9ef` 已通过 `4486592` 以 `--no-ff` 合入 `main`。
+- 合并后验证：`npm run build:api`；卡券回归 13/13；商品自动化定向 31/31；`npm --workspace apps/api run test:orders:postgres`；`git diff --check`。
+- 状态：`MERGED / PARTIALLY_VERIFIED`；真实闲鱼账号的外部 mutation（多规格真实发券、图片 + 说明文本真实发送）仍需隔离测试账号复测，未将受控测试升级为生产验收。
+
 ## 2026-09-24 卡券配置驱动发货链路迁移与耦合清理
 
 - 目标行为：固定文字、批量数据、API、图片四类卡券都由配置直接驱动真实发货链路；备注变量、延迟、多规格和图片资源可被消费；评价赠品永远不执行“填写到无需邮寄凭证”。

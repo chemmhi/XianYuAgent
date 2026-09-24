@@ -219,6 +219,13 @@
 4. 只有综合相似度达到 98 分才生成 `seller-style-prompt.txt`；未达阈值时只生成 `seller-style-prompt-candidate.txt` 并以失败状态退出。
 5. 合并提交：`58473ff`；主线定向测试 15/15、API build、CLI help、diff-check 通过；真实 provider 端到端留作环境具备凭证后的复验。
 
+## 2026-09-24 卡券发券可靠性修复合入决策
+
+1. 真实链路发现的多规格订单必须在订单映射与 PostgreSQL create/upsert/read 全链路持久化 `skuSpec`，卡券匹配继续采用精确规格语义，不能回退到商品级模糊匹配。
+2. 图片卡券的说明文本发送按消息独立生成稳定 request ID；仅对 IM 连接断开、未连接和超时类错误执行一次重试，并复用同一 request ID，避免重复消息。
+3. 提交 `992f9ef` 已在 merge lock 内以 `--no-ff` 合入 `main`，merge commit 为 `4486592`；受控回归和订单 PostgreSQL persistence smoke 已通过。
+4. 真实闲鱼外部 mutation 仍作为隔离测试账号的后续复验，不因受控测试通过而宣称生产验收。
+
 ## Git 提交记录
 
 - 阶段 0：`38862e5`（`feat: 阶段0文档产出`）
