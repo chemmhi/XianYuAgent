@@ -363,6 +363,7 @@ export interface XianyuOrderItem {
   buyerAvatarUrl?: string;
   itemId: string;
   itemTitle: string;
+  skuSpec?: string;
   itemImageUrl?: string;
   amountMinor: number;
   paymentStatus: PaymentStatus;

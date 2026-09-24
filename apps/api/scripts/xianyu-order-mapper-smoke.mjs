@@ -8,7 +8,7 @@ const page = mapXianyuOrderPage({
       nextPage: 'false',
       totalCount: '1',
       items: [{
-        commonData: { orderId: 'X-1', itemId: 'item-1', itemInfo: { itemName: '测试商品' }, orderStatus: '待发货', inRefund: 'false' },
+        commonData: { orderId: 'X-1', itemId: 'item-1', itemInfo: { itemName: '测试商品', specName: '颜色', specValue: '红色' }, orderStatus: '待发货', inRefund: 'false' },
         buyerInfoVO: { buyerId: 'buyer-1', nick: '买家昵称1', name: '买家姓名1', avatar: 'https://img.example/buyer-1.png' },
         priceVO: { totalPrice: '39.90', buyNum: '2' },
         rightVO: { btnList: [{ tradeAction: 'SKIP_PIN' }] },
@@ -24,6 +24,7 @@ assert.equal(page.items[0].buyerName, '买家姓名1');
 assert.equal(page.items[0].itemId, 'item-1');
 assert.equal(page.items[0].buyerAvatarUrl, 'https://img.example/buyer-1.png');
 assert.equal(page.items[0].itemTitle, '测试商品');
+assert.equal(page.items[0].skuSpec, '颜色:红色');
 assert.equal(page.items[0].amountMinor, 3990);
 assert.equal(page.items[0].paymentStatus, 'paid');
 assert.equal(page.items[0].orderStatus, 'open');

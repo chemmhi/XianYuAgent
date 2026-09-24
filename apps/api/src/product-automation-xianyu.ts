@@ -95,15 +95,20 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
         const imageUrls = this.couponAssets?.imageUrls(batch) ?? batch.metadata?.imageUrls ?? [];
         const resolved = await resolveCouponDelivery({ ...batch, metadata: { ...(batch.metadata ?? {}), imageUrls } }, item, context, input.purpose);
         await waitForDelay(resolved.delaySeconds);
+        let imageIndex = 0;
         for (const imageUrl of resolved.imageUrls) {
           const file = await this.resolveImage(adminId, batch.id, imageUrl);
-          const sent = await im.sendImage(adminId, input.accountId, order.conversationId, file, `automation:${input.executionKey}`, `automation:${input.executionKey}`) as { externalMessageRef?: string };
+          const sent = await im.sendImage(adminId, input.accountId, order.conversationId, file, `automation:${input.executionKey}:image:${imageIndex}`, `automation:${input.executionKey}:image:${imageIndex}`) as { externalMessageRef?: string };
           externalMessageRef = sent.externalMessageRef ?? externalMessageRef;
+          imageIndex += 1;
         }
         if (resolved.text) {
+          let textIndex = 0;
           for (const message of splitMessages(resolved.text)) {
-            const sent = await im.sendText(adminId, input.accountId, order.conversationId, message, `automation:${input.executionKey}`, `automation:${input.executionKey}`) as { externalMessageRef?: string };
+            const requestId = `automation:${input.executionKey}:text:${textIndex}`;
+            const sent = await sendTextWithReconnectRetry(im, adminId, input.accountId, order.conversationId, message, requestId) as { externalMessageRef?: string };
             externalMessageRef = sent.externalMessageRef ?? externalMessageRef;
+            textIndex += 1;
           }
         }
       }
@@ -274,6 +279,21 @@ async function waitForDelay(seconds: number): Promise<void> {
 
 function splitMessages(value: string): string[] {
   return value.split('######').map((message) => message.trim()).filter(Boolean);
+}
+
+async function sendTextWithReconnectRetry(im: XianyuImService, adminId: string, accountId: string, conversationId: string, text: string, requestId: string): Promise<unknown> {
+  try {
+    return await im.sendText(adminId, accountId, conversationId, text, requestId, requestId);
+  } catch (error) {
+    if (!isRetryableImConnectionError(error) || typeof im.resetClient !== 'function') throw error;
+    await im.resetClient(adminId, accountId);
+    return im.sendText(adminId, accountId, conversationId, text, requestId, requestId);
+  }
+}
+
+function isRetryableImConnectionError(error: unknown): boolean {
+  const code = errorCode(error);
+  return /(?:XIANYU_IM_CONNECTION_CLOSED|XIANYU_IM_NOT_CONNECTED|XIANYU_IM_WS_OPEN_TIMEOUT|ECONNRESET|ETIMEDOUT|TIMEOUT)/u.test(code);
 }
 
 function mapMutationResult(result: XianyuExternalMutationResult): AutomationExternalResult {
