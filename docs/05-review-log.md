@@ -617,3 +617,14 @@
 | S5-R121 | 质量 / 回归 | API/Web 类型检查、构建、全量单测和跨层 smoke 是否通过 | root | PASS | API 全量 smoke；API/Web typecheck、API/Web build；Web 88 files / 303 tests；Chrome/CDP coupons E2E Memory 2 轮 + PostgreSQL 1 轮；`git diff --check` |
 
 本轮结论：卡券不再按单次发货耗尽；删除已关联商品的卡券会在统一产品弹窗中二次确认，并在商品列表/详情侧实时消失。提交 `ab0b989` 已以 `--no-ff` 合入 `main`，merge commit 为 `ac6fad8`；主线定向复验通过。
+
+### 2026-09-24：卡券删除弹窗与启用开关 follow-up
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R122 | 业务 / 交互 | 删除弹窗颜色是否参考创建弹窗，内容与按钮区是否有间距，长名称是否可悬停查看，关联商品是否仍二次提醒 | root + acceptance_review | PASS | `CouponDeleteConfirmModal.tsx`、`coupons.css`、`CouponDeleteConfirmModal.test.tsx`；Chrome/CDP 删除链路 |
+| S5-R123 | 前端 / 视觉 | 图片内容是否先显示小图，点击后是否打开大图；状态列是否改为语义 switch，切换中是否置灰并移除旧启用/禁用菜单 | root + visual_review | PASS（受控浏览器） | `CouponBatchTable.tsx`、`CouponBatchTable.test.ts`、`docs/evidence/stage5/S4-VS3/screenshots/`；Memory/PostgreSQL Chrome/CDP E2E |
+| S5-R124 | 架构 / 数据流 | 新建默认 active，未启用或非买家可交付卡券是否被自动化发送拒绝；批量数据可重复使用时是否按成功发送次数轮换 | root + data_flow_review | PASS | `coupons/api.ts`、`product-automation.ts`、`store-memory.ts`、`store-postgres.ts`；API 商品自动化 32/32；Memory reservation 7/7；PostgreSQL reservation smoke |
+| S5-R125 | 质量 / 发布 | 类型检查、构建、全量测试、API smoke、真实 API + Chrome/CDP + PostgreSQL 是否完成 | root + verification_audit | PASS（受控环境） | API/Web typecheck；API/Web build；API 全量测试；Web 88 files / 304 tests；`coupons-smoke.mjs`；Chrome/CDP Memory 1 轮 + PostgreSQL 1 轮；`git diff --check` |
+
+本轮结论：卡券删除弹窗视觉和交互问题已修复；状态列统一为启用开关并覆盖加载禁用态；自动化发送只消费启用的买家可交付卡券；批量数据卡保持可重复使用并按成功发送次数轮换。受控跨层门禁通过，真实闲鱼外部 mutation 仍保持既有隔离测试账号边界。

@@ -33,6 +33,7 @@ try {
   const imageDataUrl = `data:image/png;base64,${imageBytes.toString('base64')}`;
   const created = await request('/api/v1/coupons/batches', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-create-1' }, body: JSON.stringify({ accountId: account.id, label: 'Demo cards', purpose: 'text', deliveryScope: 'operator_only', metadata: { description: 'Demo description', textContent: 'Demo content', delaySeconds: 5, dockable: true, price: '9.90', imageUrls: [imageDataUrl] } }) });
   assert.equal(created.response.status, 201);
+  assert.equal(created.body.data.status, 'active');
   const batchId = created.body.data.batchId;
   assert.match(String(batchId), /^\d+$/);
   assert.equal(batchId, '1');

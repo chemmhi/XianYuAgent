@@ -67,7 +67,7 @@ function toBatchVM(payload: CouponPayload): CouponBatchVM {
     label: String(payload.label ?? payload.purpose ?? batchId),
     purpose: (payload.purpose as CouponBatchVM['purpose']) ?? 'text',
     deliveryScope: (payload.deliveryScope as DeliveryScope) ?? 'operator_only',
-    status: rawStatus ?? 'draft',
+    status: rawStatus ?? 'active',
     version: Number(payload.version ?? 1),
     updatedAt: payload.updatedAt ?? new Date(0).toISOString(),
     bindings,
@@ -198,7 +198,7 @@ export function createMockCouponsApi(seed: CouponBatchVM[] = [
       const now = new Date().toISOString();
       const batchId = nextBatchId();
       const items = (input.items ?? []).filter(Boolean).map((body, index) => ({ id: `coupon-${Date.now()}-${index}`, batchId, maskedLabel: body.length > 6 ? `${body.slice(0, 3)}••••${body.slice(-2)}` : '••••••', status: 'available' as const }));
-      const batch: CouponBatchVM = { batchId, accountId: input.accountId, label: input.label, purpose: input.purpose, deliveryScope: input.deliveryScope, status: 'draft', version: 1, updatedAt: now, createdAt: now, bindings: [], items, metadata: input.metadata, contentPreview: { text: input.metadata?.textContent?.slice(0, 140), apiUrl: input.metadata?.apiConfig?.url, imageUrls: input.metadata?.imageUrls ?? [] } };
+      const batch: CouponBatchVM = { batchId, accountId: input.accountId, label: input.label, purpose: input.purpose, deliveryScope: input.deliveryScope, status: 'active', version: 1, updatedAt: now, createdAt: now, bindings: [], items, metadata: input.metadata, contentPreview: { text: input.metadata?.textContent?.slice(0, 140), apiUrl: input.metadata?.apiConfig?.url, imageUrls: input.metadata?.imageUrls ?? [] } };
       batches = [batch, ...batches];
       return batch;
     },

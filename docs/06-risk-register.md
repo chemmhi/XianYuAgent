@@ -230,3 +230,12 @@
 | 编号 | 风险 | 级别 | 应对 | 状态 |
 | --- | --- | --- | --- | --- |
 | S5-RISK-045 | 旧 reservation 逻辑会在 commit 后把卡券条目标记为 `consumed`、把批次标记为 `exhausted`，导致后续发货被错误阻断；已关联商品的删除也可能留下商品侧卡券摘要 | P1 | commit 后统一恢复 `available`；迁移直接归一化历史状态并移除批次 `exhausted` 约束；删除确认弹窗读取 active bindings，删除后通过商品查询排除 `voided` 批次；Memory/PostgreSQL、API smoke 与 Chrome/CDP 双轮验收均通过 | CLOSED |
+
+### 2026-09-24 卡券删除弹窗与启用状态 follow-up
+
+| 风险编号 | 风险描述 | 级别 | 应对 / 关闭条件 | 状态 |
+| --- | --- | --- | --- | --- |
+| S5-RISK-046 | 删除弹窗视觉层级、长名称、图片预览和状态开关在不同 viewport 或提交中状态下可能回退 | P2 | 统一复用创建卡券弹窗颜色体系；名称 `title` 悬停；图片缩略图 + 大图预览；switch 语义和提交中置灰；组件测试与 Memory/PostgreSQL Chrome/CDP 双 viewport 复验 | CLOSED |
+| S5-RISK-047 | 自动化规则可能继续选择未启用或非买家可交付卡券，导致错误发送或规则保存后运行时失败 | P1 | 前端候选筛选 `active + buyer_deliverable`；后端启用规则时拒绝未启用/不可交付批次；补 API 与发券 E2E 回归 | CLOSED |
+| S5-RISK-048 | 批量数据卡可重复使用后若始终选择首行，配置顺序和测试语义会退化 | P2 | 对 `purpose=data` 按已提交 reservation 次数轮换；Memory/PostgreSQL 共享策略；补 reservation 单测、PostgreSQL smoke 和商品自动化 E2E | CLOSED |
+| S5-RISK-049 | 本轮受控 E2E 未覆盖真实闲鱼外部 mutation（IM/MTOP） | P1 | 继续使用隔离测试账号、明确买家与订单后执行真实发券/禁用拦截/重试验收；在此之前不得把本轮受控证据升级为生产通过 | OPEN |

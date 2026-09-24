@@ -186,6 +186,16 @@ test('多规格卡券精确匹配，不匹配时拒绝发货', async () => {
   assert.equal(mismatched.reason, 'COUPON_SPEC_MISMATCH');
 });
 
+test('未启用卡券不会进入自动化发送', async () => {
+  const harness = await createHarness({ metadata: { textContent: '不应发送' } });
+  await harness.store.updateCouponBatch({ adminId: harness.admin.id, batchId: harness.batch.id, patch: { status: 'paused' } });
+  const result = await harness.workflow.handlePaymentPaid({ adminId: harness.admin.id, config: paidConfig([harness.batch.id]), order: harness.order, eventId: 'disabled-coupon-event' });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.reason, 'COUPON_BATCH_UNAVAILABLE');
+  assert.deepEqual(harness.sentText, []);
+  assert.deepEqual(harness.sentImages, []);
+});
+
 test('无需邮寄凭证只对真实发货生效，评价赠品强制忽略该配置', async () => {
   const delivery = await createHarness({ metadata: { textContent: '免邮凭证', useNoLogisticsForm: true } });
   const deliveryResult = await delivery.workflow.handlePaymentPaid({ adminId: delivery.admin.id, config: paidConfig([delivery.batch.id], { autoConfirm: true }), order: delivery.order, eventId: 'no-logistics-delivery' });

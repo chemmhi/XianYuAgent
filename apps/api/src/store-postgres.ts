@@ -721,24 +721,42 @@ export class PostgresStore implements Store {
         }
       }
       await this.ensureConfiguredCouponItems(client, lockRows.rows, normalized.quantity);
-      const selected = await client.query(`select i.*, b.label as batch_label
+      const candidates = await client.query(`select i.*, b.label as batch_label
         from coupons.coupon_items i join coupons.coupon_batches b on b.id=i.batch_id
         where i.batch_id=any($1::uuid[]) and i.status='available'
         order by array_position($1::uuid[], i.batch_id), i.created_at, i.id
-        for update skip locked limit $2`, [batchIds, normalized.quantity]);
-      if ((selected.rowCount ?? 0) < normalized.quantity) throw new Error('COUPON_DELIVERY_ITEM_UNAVAILABLE');
+        for update skip locked`, [batchIds]);
+      if ((candidates.rowCount ?? 0) < normalized.quantity) throw new Error('COUPON_DELIVERY_ITEM_UNAVAILABLE');
+      const candidateIds = candidates.rows.map((row) => String(row.id));
+      const usageResult = await client.query(`select ri.item_id, count(*)::int as use_count
+        from coupons.coupon_reservation_items ri
+        join coupons.coupon_reservations r on r.id=ri.reservation_id
+        where ri.item_id=any($1::uuid[]) and r.status='committed'
+        group by ri.item_id`, [candidateIds]);
+      const usageByItemId = new Map(usageResult.rows.map((row) => [String(row.item_id), Number(row.use_count ?? 0)]));
+      const batchPurposeById = new Map(lockRows.rows.map((row) => [String(row.id), String(row.purpose)]));
+      const batchOrder = new Map(batchIds.map((batchId, index) => [batchId, index]));
+      const selectedRows = [...candidates.rows].sort((left, right) => {
+        const batchDelta = (batchOrder.get(String(left.batch_id)) ?? Number.MAX_SAFE_INTEGER) - (batchOrder.get(String(right.batch_id)) ?? Number.MAX_SAFE_INTEGER);
+        if (batchDelta !== 0) return batchDelta;
+        if (batchPurposeById.get(String(left.batch_id)) === 'data') {
+          const usageDelta = (usageByItemId.get(String(left.id)) ?? 0) - (usageByItemId.get(String(right.id)) ?? 0);
+          if (usageDelta !== 0) return usageDelta;
+        }
+        return new Date(String(left.created_at)).getTime() - new Date(String(right.created_at)).getTime() || String(left.id).localeCompare(String(right.id));
+      }).slice(0, normalized.quantity);
       const now = new Date();
       const nowIso = now.toISOString();
       const leaseUntil = new Date(now.getTime() + leaseSeconds * 1000).toISOString();
       const reservationId = existing ? String(existing.id) : createId();
-      await client.query('update coupons.coupon_items set status=\'reserved\',reserved_until=$2 where id=any($1::uuid[])', [selected.rows.map((row) => String(row.id)), leaseUntil]);
+      await client.query('update coupons.coupon_items set status=\'reserved\',reserved_until=$2 where id=any($1::uuid[])', [selectedRows.map((row) => String(row.id)), leaseUntil]);
       if (existing) {
         await client.query(`update coupons.coupon_reservations set admin_id=$2,account_id=$3,purpose=$4,batch_ids=$5::uuid[],fingerprint=$6,quantity=$7,status='reserved',lease_until=$8,reason=null,finalized_at=null,updated_at=now() where id=$1`, [reservationId, input.adminId, input.accountId, normalized.purpose, batchIds, fingerprint, normalized.quantity, leaseUntil]);
         await client.query('delete from coupons.coupon_reservation_items where reservation_id=$1', [reservationId]);
       } else {
         await client.query(`insert into coupons.coupon_reservations (id,admin_id,account_id,execution_key,purpose,batch_ids,fingerprint,quantity,status,lease_until) values ($1,$2,$3,$4,$5,$6::uuid[],$7,$8,'reserved',$9)`, [reservationId, input.adminId, input.accountId, normalized.executionKey, normalized.purpose, batchIds, fingerprint, normalized.quantity, leaseUntil]);
       }
-      const itemIds = selected.rows.map((row) => String(row.id));
+      const itemIds = selectedRows.map((row) => String(row.id));
       const itemPlaceholders = itemIds.map((_, index) => `($1,$${index + 2})`).join(',');
       await client.query(`insert into coupons.coupon_reservation_items (reservation_id,item_id) values ${itemPlaceholders}`, [reservationId, ...itemIds]);
       const record = await this.loadCouponReservation(client, { id: reservationId, admin_id: input.adminId, account_id: input.accountId, execution_key: normalized.executionKey, purpose: normalized.purpose, batch_ids: batchIds, fingerprint, quantity: normalized.quantity, status: 'reserved', lease_until: leaseUntil, reason: null, created_at: existing?.created_at ?? nowIso, updated_at: nowIso, finalized_at: null });

@@ -91,6 +91,7 @@ function toAutomationCoupon(value: Record<string, unknown>): AutomationCoupon {
     specSummary,
     quantitySummary: `每件 ${quantity} 份`,
     deliveryScope: value.deliveryScope === 'system_only' || value.deliveryScope === 'operator_only' || value.deliveryScope === 'buyer_deliverable' ? value.deliveryScope : undefined,
+    status: value.status === 'paused' ? 'paused' : 'active',
     accountId: value.accountId ? String(value.accountId) : undefined,
     apiManaged: purpose === 'api',
   };
@@ -177,7 +178,7 @@ export function createProductAutomationApi(transport: ProductAutomationApiTransp
         totalPages = Number.isSafeInteger(reportedTotalPages) && reportedTotalPages! > 0 ? reportedTotalPages! : (pageItems.length === 100 ? page + 1 : page);
         page += 1;
       } while (page <= totalPages && page <= 100);
-      return items.map(toAutomationCoupon);
+      return items.map(toAutomationCoupon).filter((coupon) => coupon.status === 'active' && coupon.deliveryScope === 'buyer_deliverable');
     },
     async saveConfig(productId, input) {
       const wire = toAutomationConfigWire(input);

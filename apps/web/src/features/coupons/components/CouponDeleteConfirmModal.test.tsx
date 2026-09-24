@@ -17,6 +17,8 @@ describe('CouponDeleteConfirmModal', () => {
     }));
 
     expect(html).toContain('role="dialog"');
+    expect(html).toContain('coupons-modal card coupon-delete-modal');
+    expect(html).toContain('coupons-modal-footer');
     expect(html).toContain('已有卡券关联商品');
     expect(html).toContain('商品列表和商品自动化配置中将不再显示这些卡券');
     expect(html).toContain('data-testid="coupon-delete-confirm"');

@@ -2,10 +2,10 @@ import { useState } from 'react';
 import type { CouponBatchVM } from '../types';
 
 const typeLabels: Record<CouponBatchVM['purpose'], string> = { text: '文本', data: '批量数据', api: 'API', image: '图片' };
-const statusLabels: Record<CouponBatchVM['status'], string> = { draft: '草稿', active: '启用', paused: '禁用', closed: '已关闭', voided: '已删除' };
 
-export function CouponBatchTable({ batches, selectedIds, page, pageSize, total, totalPages, sortBy, sortOrder, onSortChange, onPageChange, onSelect, onSelectAll, onEdit, onCopy, onBind, onToggle, onDelete }: { batches: CouponBatchVM[]; selectedIds: Set<string>; page: number; pageSize: number; total: number; totalPages: number; sortBy: 'createdAt'; sortOrder: 'asc' | 'desc'; onSortChange: (sortBy: 'createdAt', sortOrder: 'asc' | 'desc') => void; onPageChange: (page: number) => void; onSelect: (batchId: string) => void; onSelectAll: () => void; onEdit: (batch: CouponBatchVM) => void; onCopy: (batch: CouponBatchVM) => void; onBind: (batchId: string) => void; onToggle: (batch: CouponBatchVM) => void; onDelete: (batchId: string) => void }) {
+export function CouponBatchTable({ batches, selectedIds, page, pageSize, total, totalPages, sortBy, sortOrder, togglingBatchId, onSortChange, onPageChange, onSelect, onSelectAll, onEdit, onCopy, onBind, onToggle, onDelete }: { batches: CouponBatchVM[]; selectedIds: Set<string>; page: number; pageSize: number; total: number; totalPages: number; sortBy: 'createdAt'; sortOrder: 'asc' | 'desc'; togglingBatchId?: string | null; onSortChange: (sortBy: 'createdAt', sortOrder: 'asc' | 'desc') => void; onPageChange: (page: number) => void; onSelect: (batchId: string) => void; onSelectAll: () => void; onEdit: (batch: CouponBatchVM) => void; onCopy: (batch: CouponBatchVM) => void; onBind: (batchId: string) => void; onToggle: (batch: CouponBatchVM) => void; onDelete: (batchId: string) => void }) {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const allSelected = batches.length > 0 && batches.every((batch) => selectedIds.has(batch.batchId));
   const pageItems = getPageItems(page, totalPages);
   const sortButton = (key: 'createdAt', label: string) => {
@@ -21,16 +21,19 @@ export function CouponBatchTable({ batches, selectedIds, page, pageSize, total, 
         {batches.map((batch) => {
           const metadata = batch.metadata;
           const previewText = getPreviewText(batch);
+          const previewImages = batch.purpose === 'image' ? (batch.contentPreview?.imageUrls ?? batch.metadata?.imageUrls ?? []).filter((url) => url && url !== '暂无图片') : [];
           const menuOpen = openMenuId === batch.batchId;
           return <div className={`coupons-row${selectedIds.has(batch.batchId) ? ' selected' : ''}`} role="row" key={batch.batchId} data-batch-id={batch.batchId}>
             <button type="button" className="coupons-check" aria-label={`选择 ${batch.label}`} onClick={() => onSelect(batch.batchId)}>{selectedIds.has(batch.batchId) ? '☑' : '□'}</button>
             <span className="coupons-muted coupons-row-number">{batch.batchId}</span>
-            <div className="coupons-title"><strong>{batch.label || '未命名卡券'}</strong></div>
+            <div className="coupons-title"><strong title={batch.label || '未命名卡券'}>{batch.label || '未命名卡券'}</strong></div>
             <span><b className="coupons-type">{typeLabels[batch.purpose]}</b></span>
-            <span className="coupons-preview-cell" title={previewText}>{previewText}</span>
+            {previewImages.length > 0
+              ? <span className="coupons-preview-cell coupons-preview-images" title="点击图片查看大图">{previewImages.map((url, index) => <button className="coupons-preview-thumb" key={`${url}-${index}`} type="button" aria-label={`查看${batch.label || '卡券'}图片${index + 1}`} onClick={() => setPreviewImageUrl(url)}><img src={url} alt={`${batch.label || '卡券'}预览${index + 1}`} /></button>)}</span>
+              : <span className="coupons-preview-cell" title={previewText}>{previewText}</span>}
             <span className="coupons-note" title={metadata?.description || undefined}>{metadata?.description || '—'}</span>
             <span className="coupons-delivery-setting">自动发货<small>延时 {metadata?.delaySeconds ?? 0} 秒</small></span>
-            <span><b className={`coupons-status coupons-status-${batch.status}`}>{statusLabels[batch.status]}</b></span>
+            <span className="coupons-status-cell"><button className={`coupon-status-switch${batch.status === 'active' ? ' on' : ''}`} type="button" role="switch" aria-checked={batch.status === 'active'} aria-label={`${batch.label || '未命名卡券'}${batch.status === 'active' ? '已启用' : '未启用'}`} disabled={batch.status === 'voided' || batch.status === 'closed' || togglingBatchId === batch.batchId} onClick={() => onToggle(batch)}><span aria-hidden="true" /><em>{batch.status === 'active' ? '启用' : '未启用'}</em></button></span>
             <time className="coupons-muted">创建 {formatDate(batch.createdAt)}<br />更新 {formatDate(batch.updatedAt)}</time>
             <span className="coupons-row-actions" aria-label={`${batch.label} 操作`}>
               <button className="btn ghost btn-small coupons-action-button" type="button" aria-label="编辑" onClick={() => onEdit(batch)}>编辑</button>
@@ -39,7 +42,6 @@ export function CouponBatchTable({ batches, selectedIds, page, pageSize, total, 
                 <button className="btn ghost btn-small coupons-action-button" type="button" aria-label="更多" aria-expanded={menuOpen} onClick={() => setOpenMenuId(menuOpen ? null : batch.batchId)}>更多</button>
                 {menuOpen && <span className="coupons-more-menu" role="menu">
                   <button className="btn ghost btn-small" type="button" role="menuitem" onClick={() => { setOpenMenuId(null); onCopy(batch); }}>复制</button>
-                  <button className="btn ghost btn-small" type="button" role="menuitem" onClick={() => { setOpenMenuId(null); onToggle(batch); }}>{batch.status === 'active' ? '禁用' : '启用'}</button>
                   <button className="btn danger btn-small" type="button" role="menuitem" onClick={() => { setOpenMenuId(null); onDelete(batch.batchId); }}>删除</button>
                 </span>}
               </span>
@@ -59,6 +61,12 @@ export function CouponBatchTable({ batches, selectedIds, page, pageSize, total, 
       </div>
       <span className="coupons-pagination-status">第 {page} / {totalPages} 页</span>
     </nav>
+    {previewImageUrl && <div className="coupons-image-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewImageUrl(null); }}>
+      <section className="coupons-image-preview" role="dialog" aria-modal="true" aria-label="卡券图片预览">
+        <button className="icon-button coupons-image-preview-close" type="button" aria-label="关闭图片预览" onClick={() => setPreviewImageUrl(null)}>×</button>
+        <img src={previewImageUrl} alt="卡券大图预览" />
+      </section>
+    </div>}
   </div>;
 }
 
