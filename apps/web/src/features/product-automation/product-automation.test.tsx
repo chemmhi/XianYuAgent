@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { createMockProductAutomationApi, createProductAutomationApi, MOCK_AUTOMATION_COUPONS, toAutomationConfig, toAutomationConfigWire } from './api';
-import { AutomationDrawer } from './components/AutomationDrawer';
+import { AutomationDrawer, buildAutomationCouponOptions, resolveDeliveryCouponIds } from './components/AutomationDrawer';
 import { BatchAutomationDialog } from './components/BatchAutomationDialog';
 import { CouponPickerDialog } from './components/CouponPickerDialog';
 import { toProductAutomationSaveError } from './controller';
@@ -165,6 +165,29 @@ describe('product automation components', () => {
     }));
     expect(html).toContain('批量数据2');
     expect(html).toContain('已选发货卡券');
+  });
+
+  it('falls back to the visible product binding when the saved automation id is stale', async () => {
+    const boundProduct = { ...product, couponBatches: [{ id: 'coupon-owei-map', label: '奥维地图' }] };
+    const coupons = [...MOCK_AUTOMATION_COUPONS, { id: 'coupon-owei-map', label: '奥维地图', typeLabel: '数据卡', specSummary: '按行取值', quantitySummary: '每件 1 份' }];
+    const pickerCoupons = buildAutomationCouponOptions(coupons, boundProduct.couponBatches);
+    expect(pickerCoupons.map((coupon) => coupon.id)).toEqual(expect.arrayContaining(['coupon-batch-2', 'coupon-gift-a', 'coupon-api-member', 'coupon-text-fixed', 'coupon-owei-map']));
+    expect(resolveDeliveryCouponIds(['internal-uuid-for-owei-map'], ['coupon-owei-map'], pickerCoupons)).toEqual(['coupon-owei-map']);
+    expect(resolveDeliveryCouponIds(['coupon-batch-2'], ['coupon-owei-map'], pickerCoupons)).toEqual(['coupon-owei-map']);
+    const config = await createMockProductAutomationApi().getConfig(product.id);
+    const html = renderToStaticMarkup(createElement(AutomationDrawer, {
+      open: true,
+      product: boundProduct,
+      config: { ...config, delivery: { ...config.delivery, enabled: true, couponIds: ['internal-uuid-for-owei-map'] } },
+      coupons,
+      loadPhase: 'success',
+      savePhase: 'idle',
+      error: null,
+      onClose: vi.fn(),
+      onSave: vi.fn(async () => null),
+    }));
+    expect(html).toContain('奥维地图');
+    expect(html.indexOf('data-testid="choose-delivery-coupon"')).toBeLessThan(html.indexOf('class="automation-selected-coupon"'));
   });
 
   it('renders the delivery auto-confirm switch and preserves its saved state', () => {
