@@ -312,7 +312,7 @@
 - 后续：等待人工审核后，再将本修正分支合入 `main`。
 ## 2026-09-24 商品发布 UI 高保真切片
 
-- 当前 worktree：`F:\ChenHai\Project\XianYuAgent-product-publish-ui-20260924`；分支：`feat/product-publish-ui-20260924`；状态：`READY_FOR_REVIEW`。
+- 当前 worktree：`F:\ChenHai\Project\XianYuAgent-product-publish-ui-20260924`；分支：`feat/product-publish-ui-20260924`；状态：`MERGED`；合并提交：`79a3e6e`。
 - 完成范围：按当前 SellerAgent/SellerAgent drawer 规范落地商品发布抽屉；复用账号上下文；连续商品信息与价格物流表单；聊天式描述 Composer，支持上传/粘贴/预览/删除图片（最多 9 张）与 AI 文案优化；分类自动识别；确认发布与队列中状态。
 - 视觉证据：`docs/evidence/product-publish-ui/` 下生成桌面 1440×900、移动 390×844、发布确认和设计稿对照截图；Chrome/CDP 盒模型对齐容差 1.1px，`layoutParity: passed`。
 - 跨层证据：确认发布后复读 `apiRuntime.store`，断言 `priceMinor=16900`、原价 `22900`、库存 `12`、包邮、发货地 `浙江 杭州` 和 4 张图片元数据均持久化成功。
