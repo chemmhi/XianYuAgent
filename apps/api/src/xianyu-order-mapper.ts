@@ -43,6 +43,7 @@ export function mapXianyuOrder(value: unknown): XianyuOrderItem | undefined {
   const buyerName = firstString(raw.buyerName, raw.buyer_name, raw.buyerRealName, raw.buyer_real_name, raw.receiverName, raw.receiver_name, buyer.realName, buyer.receiverName, buyer.name, buyerInfo.realName, buyerInfo.receiverName, buyerInfo.name) ?? '';
   const itemId = firstString(raw.itemId, raw.item_id, raw.auctionId, raw.auction_id, raw.commodityId, raw.commodity_id, item.id, itemInfo.itemId, itemInfo.item_id, itemInfo.id) ?? 'unknown-item';
   const itemTitle = firstString(raw.itemTitle, raw.item_title, raw.itemName, raw.item_name, raw.goodsTitle, raw.goods_title, raw.productTitle, raw.product_title, raw.title, raw.auctionTitle, raw.auction_title, item.title, item.itemTitle, item.itemName, item.name, item.goodsTitle, item.productTitle, item.auctionTitle, itemInfo.title, itemInfo.itemTitle, itemInfo.itemName, itemInfo.name, itemInfo.goodsTitle, itemInfo.productTitle, itemInfo.auctionTitle) ?? '';
+  const skuSpec = joinSpec(firstString(raw.specName, raw.spec_name, raw.skuName, raw.sku_name, item.specName, itemInfo.specName), firstString(raw.specValue, raw.spec_value, raw.skuValue, raw.sku_value, item.specValue, itemInfo.specValue));
   const itemImageUrl = firstString(raw.itemImageUrl, raw.item_image_url, raw.itemImage, raw.item_image, raw.imageUrl, raw.image_url, raw.picUrl, raw.pic_url, raw.mainImageUrl, raw.main_image_url, item.imageUrl, item.image_url, item.picUrl, item.pic_url, item.mainImageUrl, item.main_image_url, itemInfo.imageUrl, itemInfo.image_url, itemInfo.picUrl, itemInfo.pic_url, itemInfo.mainImageUrl, itemInfo.main_image_url);
   const amountMinor = parseAmountMinorFields(raw);
   const createdAt = parseDate(firstValue(raw.createdAt, raw.created_at, raw.placedAt, raw.placed_at, raw.createTime, raw.create_time, raw.orderTime, raw.order_time)) ?? new Date().toISOString();
@@ -56,6 +57,7 @@ export function mapXianyuOrder(value: unknown): XianyuOrderItem | undefined {
     buyerAvatarUrl,
     itemId,
     itemTitle,
+    skuSpec,
     itemImageUrl,
     amountMinor,
     paymentStatus: mapPaymentStatus(firstString(raw.paymentStatus, raw.payment_status, raw.payStatus, raw.pay_status, raw.tradeStatus, raw.trade_status)),
@@ -156,5 +158,6 @@ function mapOrderStatus(value: string | undefined): OrderStatus { const normaliz
 function mapDeliveryStatus(value: string | undefined): DeliveryStatus { const normalized = normalize(value); if (/reserve|lock|锁库存/.test(normalized)) return 'reserving'; if (/partial|部分/.test(normalized)) return 'partially_delivered'; if (/deliver|ship|已发货|已交付|交易成功|已完成/.test(normalized)) return 'delivered'; if (/fail|失败/.test(normalized)) return 'failed'; if (/cancel|未发货|取消/.test(normalized)) return 'cancelled'; return 'pending'; }
 function mapAfterSalesStatus(value: string | undefined): AfterSalesStatus { const normalized = normalize(value); if (!normalized || /none|无售后|无/.test(normalized)) return 'none'; if (/request|申请/.test(normalized)) return 'requested'; if (/refund.*ing|退款中/.test(normalized)) return 'refunding'; if (/refunded|已退款|退款成功/.test(normalized)) return 'refunded'; if (/reject|驳回/.test(normalized)) return 'rejected'; if (/closed|关闭/.test(normalized)) return 'closed'; return 'requested'; }
 function mapDeliveryType(raw: Record<string, unknown>): OrderDeliveryType { const value = normalize(firstString(raw.deliveryType, raw.delivery_type, raw.shipType, raw.ship_type, raw.logisticsType, raw.logistics_type)); if (/coupon|卡券/.test(value)) return 'coupon_only'; if (/mixed|混合/.test(value)) return 'mixed'; if (/no.?logistics|免物流/.test(value)) return 'no_logistics'; return 'manual'; }
+function joinSpec(name?: string, value?: string): string | undefined { if (!name && !value) return undefined; if (!name) return value; if (!value) return name; return `${name}:${value}`; }
 function digest(value: unknown): string { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
 function isUuid(value: string | undefined): value is string { return Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)); }

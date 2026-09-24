@@ -51,6 +51,7 @@ try {
       conversationId: buyerConversation.id,
       itemId: 'pg-item',
       itemTitle: 'pg-item',
+      skuSpec: '颜色:红色',
       amountMinor: 3990,
       paymentStatus: 'paid',
       orderStatus: 'open',
@@ -68,6 +69,8 @@ try {
   assert.equal(listed.body.data.items[0].buyerAvatarUrl, 'https://img.example/pg-nick.png');
   assert.equal(listed.body.data.items[0].itemTitle, 'PostgreSQL 订单商品');
   assert.equal(listed.body.data.items[0].itemImageUrl, 'https://img.example/pg-product.png');
+  const persistedDetail = await request(port, `/api/v1/orders/${encodeURIComponent(orderNo)}?accountId=${encodeURIComponent(accountId)}`, { headers: { cookie } });
+  assert.equal(persistedDetail.body.data.skuSpec, '颜色:红色');
   const buyerIdSearch = await request(port, `/api/v1/orders?accountId=${encodeURIComponent(accountId)}&keyword=pg-buyer`, { headers: { cookie } });
   assert.equal(buyerIdSearch.body.data.total, 0);
   const itemIdSearch = await request(port, `/api/v1/orders?accountId=${encodeURIComponent(accountId)}&keyword=pg-item`, { headers: { cookie } });
@@ -90,7 +93,7 @@ try {
   await runtime.store.createProduct({ adminId, accountId, externalProductRef: 'pg-xianyu-item', title: '闲鱼同步商品标题' });
   runtime.xianyu.fetchOrdersAll = async () => ({
     pages: [{ success: true, accountInvalid: false, pageNumber: 1, pageSize: 30, items: [] }],
-    items: [{ orderNo: refreshedOrderNo, buyerId: 'pg-xianyu-buyer', buyerNickname: '闲鱼同步昵称', buyerName: '闲鱼同步买家', itemId: 'pg-xianyu-item', itemTitle: 'pg-xianyu-item', amountMinor: 12900, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'manual', createdAt: new Date().toISOString(), sourcePayloadDigest: 'postgres-xianyu-fixture' }],
+    items: [{ orderNo: refreshedOrderNo, buyerId: 'pg-xianyu-buyer', buyerNickname: '闲鱼同步昵称', buyerName: '闲鱼同步买家', itemId: 'pg-xianyu-item', itemTitle: 'pg-xianyu-item', skuSpec: '版本:专业版', amountMinor: 12900, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'manual', createdAt: new Date().toISOString(), sourcePayloadDigest: 'postgres-xianyu-fixture' }],
     hasMore: false,
   });
   const refreshed = await request(port, '/api/v1/orders/refresh', { method: 'POST', headers: { cookie, 'X-CSRF-Token': loggedIn.csrfToken, 'Idempotency-Key': `orders-pg-refresh-${process.pid}` }, body: JSON.stringify({ accountId }) });
@@ -109,6 +112,8 @@ try {
   assert.equal(reread.body.data.items[0].source, 'xianyu');
   assert.equal(reread.body.data.items[0].buyerNickname, '闲鱼同步昵称');
   assert.equal(reread.body.data.items[0].itemTitle, '闲鱼同步商品标题');
+  const rereadDetail = await request(restartedPort, `/api/v1/orders/${encodeURIComponent(refreshedOrderNo)}?accountId=${encodeURIComponent(accountId)}`, { headers: { cookie } });
+  assert.equal(rereadDetail.body.data.skuSpec, '版本:专业版');
   console.log('orders postgres persistence smoke passed');
 } finally {
   const active = restarted ?? runtime;

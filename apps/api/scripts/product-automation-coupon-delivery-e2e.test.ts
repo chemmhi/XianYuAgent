@@ -10,7 +10,7 @@ import type { XianyuMtopClient } from '../src/xianyu-mtop.js';
 
 type Harness = Awaited<ReturnType<typeof createHarness>>;
 
-async function createHarness(options: { metadata?: Record<string, unknown>; purpose?: 'text' | 'data' | 'api' | 'image'; skuSpec?: string } = {}) {
+async function createHarness(options: { metadata?: Record<string, unknown>; purpose?: 'text' | 'data' | 'api' | 'image'; skuSpec?: string; failFirstTextSend?: boolean } = {}) {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: `coupon-e2e-${Math.random()}@example.com`, passwordHash: 'hash', displayName: 'Coupon E2E' });
   const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: `seller-${Math.random()}`, displayName: '卖家昵称' });
@@ -24,10 +24,14 @@ async function createHarness(options: { metadata?: Record<string, unknown>; purp
   const batch = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'E2E 卡券', purpose: options.purpose ?? 'text', deliveryScope: 'buyer_deliverable', metadata: options.metadata });
   const sentText: string[] = [];
   const sentImages: Array<{ filename: string; contentType: string; data: Buffer }> = [];
+  const textRequestIds: string[] = [];
+  let textSendAttempts = 0;
+  let resetClientCalls = 0;
   const shipmentCalls: string[] = [];
   const fakeIm = {
-    sendText: async (_adminId: string, _accountId: string, _conversationId: string, text: string) => { sentText.push(text); return { externalMessageRef: `text-${sentText.length}` }; },
+    sendText: async (_adminId: string, _accountId: string, _conversationId: string, text: string, requestId: string) => { textSendAttempts += 1; textRequestIds.push(requestId); if (options.failFirstTextSend && textSendAttempts === 1) throw Object.assign(new Error('xianyu IM connection closed'), { code: 'XIANYU_IM_CONNECTION_CLOSED' }); sentText.push(text); return { externalMessageRef: `text-${sentText.length}` }; },
     sendImage: async (_adminId: string, _accountId: string, _conversationId: string, file: { filename: string; contentType: string; data: Buffer }) => { sentImages.push(file); return { externalMessageRef: `image-${sentImages.length}` }; },
+    resetClient: async () => { resetClientCalls += 1; },
   } as unknown as XianyuImService;
   const fakeMtop = {
     readOrderDetail: async () => ({ success: true, accountInvalid: false, cookieHeader: '', detail: { orderNo: order.orderNo, itemId: order.itemId, itemTitle: order.itemTitle, buyerId: order.buyerId, conversationId: order.conversationId, paymentStatus: 'paid', deliveryStatus: 'pending', skuSpec: order.skuSpec } }),
@@ -35,7 +39,7 @@ async function createHarness(options: { metadata?: Record<string, unknown>; purp
   } as unknown as XianyuMtopClient;
   const adapter = new XianyuProductAutomationExecutionAdapter(store, () => fakeMtop, () => fakeIm);
   const workflow = new AutomationWorkflowService(adapter);
-  return { store, admin, account, product, conversation, order: { ...order, skuSpec: options.skuSpec }, batch, workflow, sentText, sentImages, shipmentCalls };
+  return { store, admin, account, product, conversation, order: { ...order, skuSpec: options.skuSpec }, batch, workflow, sentText, sentImages, shipmentCalls, textRequestIds, getTextSendAttempts: () => textSendAttempts, getResetClientCalls: () => resetClientCalls };
 }
 
 function paidConfig(batchIds: string[], patch: Partial<ProductAutomationConfig['paidAutoDelivery']> = {}): ProductAutomationConfig {
@@ -127,6 +131,17 @@ test('图片配置发送多张图片、备注文本并匹配多规格', async ()
   assert.equal(harness.sentImages.length, 2);
   assert.deepEqual(harness.sentImages.map((file) => file.contentType), ['image/png', 'image/jpeg']);
   assert.deepEqual(harness.sentText, [`图片备注：${harness.order.itemId} / 商品详情文本 / 买家小明 / ${harness.account.id}`]);
+});
+
+test('图片说明文本在 IM 断线后只重试一次并复用同一请求标识', async () => {
+  const harness = await createHarness({ purpose: 'image', metadata: { imageUrls: ['data:image/png;base64,aGVsbG8='], description: '图片备注：{buyer_name}' }, failFirstTextSend: true });
+  const result = await harness.workflow.handlePaymentPaid({ adminId: harness.admin.id, config: paidConfig([harness.batch.id]), order: harness.order, eventId: 'image-text-retry-event' });
+  assert.equal(result.status, 'succeeded');
+  assert.equal(harness.sentImages.length, 1);
+  assert.deepEqual(harness.sentText, ['图片备注：买家小明']);
+  assert.equal(harness.getTextSendAttempts(), 2);
+  assert.equal(harness.getResetClientCalls(), 1);
+  assert.equal(harness.textRequestIds[0], harness.textRequestIds[1]);
 });
 
 test('API 5xx 与 408 会按配置重试，最终成功后才发货', async () => {
