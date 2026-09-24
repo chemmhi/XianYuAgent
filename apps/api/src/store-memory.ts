@@ -7,7 +7,7 @@ import { decodeMessageHistoryCursor } from './message-history-cursor.js';
 import type { AgentSessionRecord, RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, WorkspaceMessageRecord, WorkspaceMessageType } from './domain.js';
 import { cloneCouponReservation, normalizeCouponReservationInput, normalizeLeaseSeconds, reservationFingerprint } from './coupon-reservation.js';
 import { validatePersistedAutoReplyRepairPolicyBundle } from './auto-reply-repair-config.js';
-import { readAutoReplyProductMetrics } from './auto-reply-product-metrics.js';
+import { readAutoReplyProductDescription, readAutoReplyProductMetrics } from './auto-reply-product-metrics.js';
 
 function meaningfulOrderTitle(value: string | undefined, references: Array<string | undefined>): string | undefined {
   const title = value?.trim();
@@ -31,7 +31,7 @@ function toAutoReplyProductContext(product: ProductRecord): AutoReplyProductCont
     id: product.id,
     externalProductRef: product.externalProductRef,
     title: product.title,
-    description: product.description,
+    description: readAutoReplyProductDescription(product.attributes, product.description),
     ...readAutoReplyProductMetrics(product.attributes),
     defaultReplyTemplate: product.defaultReplyTemplate,
     knowledgeBase: product.knowledgeBase,
@@ -198,7 +198,8 @@ export class MemoryStore implements Store {
       if (!scopedAccountIds.has(product.accountId)) return false;
       if (query.accountId && product.accountId !== query.accountId) return false;
       if (query.status && product.status !== query.status) return false;
-      if (normalizedKeyword && ![product.title, product.externalProductRef ?? '', product.description ?? ''].some((value) => value.toLowerCase().includes(normalizedKeyword))) return false;
+      const description = readAutoReplyProductDescription(product.attributes, product.description) ?? '';
+      if (normalizedKeyword && ![product.title, product.externalProductRef ?? '', description].some((value) => value.toLowerCase().includes(normalizedKeyword))) return false;
       return true;
     });
     const sortBy = query.sortBy ?? 'xianyuOrder';
@@ -437,9 +438,11 @@ export class MemoryStore implements Store {
         ...(existingXianyu.detail !== undefined ? { detail: existingXianyu.detail } : incomingXianyu.detail !== undefined ? { detail: incomingXianyu.detail } : {}),
       },
     };
+    const detailDescription = readAutoReplyProductDescription(attributes);
+    const incomingDescription = typeof input.item.description === 'string' && input.item.description.trim() ? input.item.description.trim() : undefined;
     if (existing) {
       existing.title = input.item.title;
-      existing.description = input.item.description;
+      existing.description = incomingDescription ?? readAutoReplyProductDescription(existing.attributes, existing.description) ?? detailDescription;
       existing.categoryCode = input.item.categoryCode;
       existing.priceMinor = input.item.priceMinor;
       existing.attributes = attributes;
@@ -453,7 +456,7 @@ export class MemoryStore implements Store {
       existing.updatedAt = now;
       return { action: 'updated', product: this.productDetail(existing) };
     }
-    const product: ProductRecord = { id: createId(), accountId: input.accountId, externalProductRef: input.item.externalProductRef, title: input.item.title, description: input.item.description, categoryCode: input.item.categoryCode, attributes, configVersion: 1, priceMinor: input.item.priceMinor, status: 'published', source: 'xianyu', lastSyncedAt: input.syncedAt, xianyuUpdatedAt: input.item.xianyuUpdatedAt, xianyuListRank: input.item.xianyuListRank, sourcePayloadDigest: input.item.sourcePayloadDigest, createdAt: now, updatedAt: now, skuCount: 0, assetCount: 0, skus: [], assets: [] };
+    const product: ProductRecord = { id: createId(), accountId: input.accountId, externalProductRef: input.item.externalProductRef, title: input.item.title, description: incomingDescription ?? detailDescription, categoryCode: input.item.categoryCode, attributes, configVersion: 1, priceMinor: input.item.priceMinor, status: 'published', source: 'xianyu', lastSyncedAt: input.syncedAt, xianyuUpdatedAt: input.item.xianyuUpdatedAt, xianyuListRank: input.item.xianyuListRank, sourcePayloadDigest: input.item.sourcePayloadDigest, createdAt: now, updatedAt: now, skuCount: 0, assetCount: 0, skus: [], assets: [] };
     this.products.set(product.id, product);
     return { action: 'created', product: this.productDetail(product) };
   }

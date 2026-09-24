@@ -101,11 +101,13 @@ export class PostgresStore implements Store {
     }
     if (query.keyword?.trim()) {
       params.push(`%${query.keyword.trim().toLowerCase()}%`);
-      conditions.push(`(lower(p.title) like $${params.length} or lower(coalesce(p.external_product_ref,'')) like $${params.length} or lower(coalesce(p.description,'')) like $${params.length})`);
+      conditions.push(`(lower(p.title) like $${params.length} or lower(coalesce(p.external_product_ref,'')) like $${params.length} or lower(coalesce(p.description,'')) like $${params.length} or lower(coalesce(p.attributes_json #>> '{xianyu,detail,summary,description}','')) like $${params.length})`);
     }
     const where = conditions.join(' AND ');
     const count = await this.pool.query(`select count(*)::int as total from products.products p where ${where}`, params);
-    const rows = await this.pool.query(`select p.id,p.external_product_ref,p.title,p.description,p.default_reply_template,p.knowledge_base,p.price_minor,p.status,
+    const rows = await this.pool.query(`select p.id,p.external_product_ref,p.title,
+        coalesce(nullif(btrim(p.description), ''), nullif(btrim(p.attributes_json #>> '{xianyu,detail,summary,description}'), '')) as description,
+        p.default_reply_template,p.knowledge_base,p.price_minor,p.status,
         nullif(p.attributes_json #>> '{xianyu,detail,summary,browseCount}', '')::int as browse_count,
         nullif(p.attributes_json #>> '{xianyu,detail,summary,wantCount}', '')::int as want_count,
         nullif(p.attributes_json #>> '{xianyu,detail,summary,collectCount}', '')::int as collect_count
@@ -440,7 +442,7 @@ export class PostgresStore implements Store {
     const id = existing ? String(existing.id) : createId();
     await this.pool.query(`insert into products.products (id,account_id,external_product_ref,title,description,category_code,attributes_json,price_minor,status,source,last_synced_at,xianyu_updated_at,xianyu_list_rank,source_payload_digest)
       values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'published','xianyu',$9,$10,$11,$12)
-      on conflict (account_id,external_product_ref) where external_product_ref is not null do update set title=excluded.title,description=excluded.description,category_code=excluded.category_code,attributes_json=excluded.attributes_json,price_minor=excluded.price_minor,status='published',source='xianyu',last_synced_at=excluded.last_synced_at,xianyu_updated_at=coalesce(excluded.xianyu_updated_at,products.products.xianyu_updated_at),xianyu_list_rank=coalesce(excluded.xianyu_list_rank,products.products.xianyu_list_rank),source_payload_digest=excluded.source_payload_digest,config_version=products.products.config_version+1,updated_at=now()
+      on conflict (account_id,external_product_ref) where external_product_ref is not null do update set title=excluded.title,description=coalesce(nullif(btrim(excluded.description), ''), nullif(btrim(products.products.description), ''), nullif(btrim(excluded.attributes_json #>> '{xianyu,detail,summary,description}'), '')),category_code=excluded.category_code,attributes_json=excluded.attributes_json,price_minor=excluded.price_minor,status='published',source='xianyu',last_synced_at=excluded.last_synced_at,xianyu_updated_at=coalesce(excluded.xianyu_updated_at,products.products.xianyu_updated_at),xianyu_list_rank=coalesce(excluded.xianyu_list_rank,products.products.xianyu_list_rank),source_payload_digest=excluded.source_payload_digest,config_version=products.products.config_version+1,updated_at=now()
       returning id`, [id, input.accountId, input.item.externalProductRef, input.item.title, input.item.description ?? null, input.item.categoryCode ?? null, JSON.stringify(attributes), input.item.priceMinor ?? null, input.syncedAt, input.item.xianyuUpdatedAt ?? null, input.item.xianyuListRank ?? null, input.item.sourcePayloadDigest]);
     const product = await this.getProduct(input.adminId, id);
     if (!product) throw new Error('PRODUCT_SYNC_READBACK_FAILED');

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createApp } from '../dist/app.js';
 import { hashPassword } from '../dist/security.js';
 import { createDefaultAutoReplyRepairPolicy } from '../dist/auto-reply-repair-config.js';
+import { resolveAutoReplyAgentConfig } from '../dist/auto-reply-agent-config.js';
 
 const databaseUrl = process.env.DATABASE_URL ?? 'postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/xianyu_agent';
 const suffix = `${process.pid}-${Date.now()}`;
@@ -18,7 +19,7 @@ globalThis.fetch = (async (_input, init) => {
   assert.equal(body.model, 'auto-reply-postgres-smoke');
   return new Response(JSON.stringify({ model: 'auto-reply-postgres-smoke', choices: [{ message }] }), { status: 200, headers: { 'content-type': 'application/json' } });
 });
-const config = { host: '127.0.0.1', port: 0, databaseUrl, cookieSecure: false, allowInMemory: false, sessionIdleMs: 1_800_000, sessionAbsoluteMs: 28_800_000, xianyuQrMode: 'stub', modelApiKey: 'auto-reply-postgres-smoke-key', modelBaseUrl: 'https://model.example/v1', modelName: 'auto-reply-postgres-smoke', modelWireApi: 'chat', modelTimeoutMs: 5_000, autoReplyModelEnabled: true, autoReplySendMode: 'simulate', autoReplyTestBuyerNames: [`Auto Reply PostgreSQL Buyer`] };
+const config = { host: '127.0.0.1', port: 0, databaseUrl, cookieSecure: false, allowInMemory: false, sessionIdleMs: 1_800_000, sessionAbsoluteMs: 28_800_000, xianyuQrMode: 'stub', modelApiKey: 'auto-reply-postgres-smoke-key', modelBaseUrl: 'https://model.example/v1', modelName: 'auto-reply-postgres-smoke', modelWireApi: 'chat', modelTimeoutMs: 5_000, autoReplyModelEnabled: true, autoReplySendMode: 'simulate', autoReplyTestBuyerNames: [`Auto Reply PostgreSQL Buyer`], autoReplyAgent: resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_WEB_SEARCH_ENABLED: 'false' }) };
 let runtime;
 let adminId;
 let accountId;
@@ -34,6 +35,26 @@ try {
   accountId = account.id;
   await runtime.store.publishAutoReplyRepairPolicy({ accountId, bundle: createDefaultAutoReplyRepairPolicy(accountId) });
   const product = await runtime.store.createProduct({ adminId, accountId, externalProductRef: `1078553391460-${suffix}`, title: 'Postgres 资料包', knowledgeBase: '说明适用范围和交付方式。', priceMinor: 2_590, status: 'published' });
+  const detailDescription = '详情同步回填的 PostgreSQL 商品描述。';
+  await runtime.store.persistXianyuItemDetail({
+    adminId,
+    productId: product.id,
+    itemId: product.externalProductRef,
+    summary: { itemId: product.externalProductRef, title: product.title, description: detailDescription },
+    rawResponse: { data: { itemDO: { itemId: product.externalProductRef, desc: detailDescription } } },
+    imageUrls: [],
+    syncedAt: '2026-09-24T02:00:00.000Z',
+    sourcePayloadDigest: 'detail-digest',
+    assets: [],
+  });
+  await runtime.store.upsertExternalProduct({
+    adminId,
+    accountId,
+    item: { externalProductRef: product.externalProductRef, title: product.title, imageUrls: [], attributes: {}, sourcePayloadDigest: 'list-digest' },
+    syncedAt: '2026-09-24T03:00:00.000Z',
+  });
+  const descriptionProjection = await runtime.store.listAutoReplyProducts(adminId, { accountId, productId: product.id, limit: 1 });
+  assert.equal(descriptionProjection.items[0]?.description, detailDescription);
   const conversation = await runtime.store.createConversation({ adminId, accountId, buyerRef: `pg-buyer-${suffix}`, buyerDisplayName: 'Auto Reply PostgreSQL Buyer', itemRef: product.externalProductRef, itemTitle: product.title, externalConversationRef: `pg-conv-${suffix}` });
   conversationId = conversation.id;
 
