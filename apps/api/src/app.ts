@@ -220,6 +220,8 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     ? undefined
     : new XianyuVerificationBrowser({
       mode: config.xianyuVerificationBrowserMode,
+      sliderMode: config.xianyuVerificationSliderMode,
+      sliderMaxRetries: config.xianyuVerificationSliderMaxRetries,
       headless: config.xianyuVerificationBrowserHeadless,
       executablePath: config.xianyuVerificationBrowserExecutablePath,
       debugPort: config.xianyuVerificationBrowserDebugPort,

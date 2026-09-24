@@ -1,4 +1,11 @@
 # XianyuSellerAgent 项目状态
+## 2026-09-24 闲鱼滑块算法迁移（待复核）
+- 目标：将 `.review-xianyu-super-butler/slider_algorithm` 的轨迹与页面流程迁移到 `apps/api`，复用原生 Chrome/CDP，不引入 Playwright。
+- 实现：新增 `xianyu-slider-trajectory.ts` 与 `xianyu-slider-solver.ts`；验证浏览器新增 `XIANYU_VERIFICATION_SLIDER_MODE=auto` 可选接入，失败自动回退人工验证。
+- 验证：API typecheck、API build、5 个滑块单元/受控 Chrome-CDP 测试、`git diff --check` 通过。
+- 未验证：真实闲鱼外部风控挑战、生产浏览器 profile 和真实账号登录；这些仍需人工复核。
+- 状态：`READY_FOR_REVIEW`，尚未合并到 `main`。
+
 
 ## 2026-09-24 QR 验证浏览器协同接入
 

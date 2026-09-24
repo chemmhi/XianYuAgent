@@ -85,4 +85,17 @@ Compose 当前负责 API、Worker、PostgreSQL、Redis 和 MinIO；对象存储�
 - `XIANYU_VERIFICATION_BROWSER_MODE=launch`：服务端启动 Chrome/Edge 并打开验证页；
 - `XIANYU_VERIFICATION_BROWSER_MODE=connect`：连接已启用 CDP 的浏览器，需同时配置 `XIANYU_VERIFICATION_BROWSER_DEBUG_PORT`；
 - `XIANYU_VERIFICATION_BROWSER_HEADLESS=false`：默认有头模式，便于用户完成验证；无头模式仅适合外部 CDP 控制或受控测试；
-- 验证完成后，服务端只检查页面已离开验证态并读取浏览器 Cookie，然后继续 QR 登录，不自动识别或拖动滑块。
+- `XIANYU_VERIFICATION_SLIDER_MODE=auto`：在已有 Chrome/CDP 页面中启用抽离后的滑块轨迹算法；算法失败时保留人工验证流程，不伪造成功；生产默认 `disabled`；
+- `XIANYU_VERIFICATION_SLIDER_MAX_RETRIES=3`：单次验证最多自动尝试次数；
+- 验证完成后，服务端只检查页面已离开验证态并读取浏览器 Cookie，然后继续 QR 登录。
+
+滑块适配位于 `apps/api/src/xianyu-slider-trajectory.ts` 与 `apps/api/src/xianyu-slider-solver.ts`：
+
+1. 通过 CDP `Runtime.evaluate` 在主文档和可访问 iframe 中发现验证码容器、滑块按钮和轨道；
+2. 按轨道宽度减去按钮宽度计算水平位移；
+3. 生成带加减速、二维抖动、超调、回弹和时间轴延迟的轨迹；
+4. 通过 CDP `Input.dispatchMouseEvent` 回放按下、移动、释放；
+5. 轮询成功/失败文本和页面 URL；失败时点击重试控件或刷新验证页；
+6. 任意自动尝试失败都回到现有人工验证等待，不改变 `verification_required` 的状态语义。
+
+该实现不引入 Playwright，不在服务端保存业务 Cookie 或 Token，也不依赖桌面窗口；服务器部署时需要可执行的 Chrome/Edge 和可用的 CDP 端口。无头浏览器适合受控测试或专用验证容器，真实账号登录仍建议由人工复核风控结果。

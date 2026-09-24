@@ -5,11 +5,14 @@ import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
+import { XianyuSliderSolver, type XianyuSliderMode } from './xianyu-slider-solver.js';
 
 export type XianyuVerificationBrowserMode = 'disabled' | 'launch' | 'connect';
 
 export interface XianyuVerificationBrowserOptions {
   mode?: XianyuVerificationBrowserMode;
+  sliderMode?: XianyuSliderMode;
+  sliderMaxRetries?: number;
   headless?: boolean;
   executablePath?: string;
   debugPort?: number;
@@ -57,6 +60,8 @@ const DEFAULT_POLL_INTERVAL_MS = 1_000;
 /** Opens a verification page and waits for the user to finish it. */
 export class XianyuVerificationBrowser {
   private readonly mode: XianyuVerificationBrowserMode;
+  private readonly sliderMode: XianyuSliderMode;
+  private readonly sliderMaxRetries: number;
   private readonly headless: boolean;
   private readonly executablePath?: string;
   private readonly debugPort?: number;
@@ -66,6 +71,8 @@ export class XianyuVerificationBrowser {
 
   constructor(options: XianyuVerificationBrowserOptions = {}) {
     this.mode = options.mode ?? 'disabled';
+    this.sliderMode = options.sliderMode ?? 'disabled';
+    this.sliderMaxRetries = Math.max(1, Math.floor(options.sliderMaxRetries ?? 3));
     this.headless = options.headless ?? false;
     this.executablePath = options.executablePath;
     this.debugPort = options.debugPort;
@@ -86,6 +93,22 @@ export class XianyuVerificationBrowser {
       await cdp.send('Runtime.enable');
       await cdp.send('Network.enable');
       await cdp.send('Page.navigate', { url: input.verificationUrl });
+
+      if (this.sliderMode === 'auto') {
+        try {
+          const sliderResult = await new XianyuSliderSolver(cdp, {
+            maxRetries: this.sliderMaxRetries,
+            logger: console,
+          }).solve();
+          if (!sliderResult.success) {
+            console.warn(JSON.stringify({ component: 'xianyu-verification', event: 'slider_auto_solve_failed', reason: sliderResult.failureReason ?? 'unknown' }));
+          } else {
+            console.info(JSON.stringify({ component: 'xianyu-verification', event: 'slider_auto_solve_succeeded', attempts: sliderResult.attempts, distance: sliderResult.distance, trajectoryPoints: sliderResult.trajectoryPoints }));
+          }
+        } catch (error) {
+          console.warn(JSON.stringify({ component: 'xianyu-verification', event: 'slider_auto_solve_failed', reason: error instanceof Error ? error.message : String(error) }));
+        }
+      }
 
       const deadline = Date.now() + this.maxWaitMs;
       let lastUrl = input.verificationUrl;
