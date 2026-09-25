@@ -161,7 +161,7 @@
 
 | `root` | `coupon-reusable-delete-confirm-20260924` | `fix/coupon-reusable-delete-confirm-20260924` | `F:\ChenHai\Project\XianYuAgent-coupon-reusable-delete-confirm-20260924` | Codex /root | `2026-09-24 19:40:00 +08:00` | `MERGED` | `ac6fad8` | `-` | 提交 `ab0b989` 已以 `--no-ff` 合入 `main`；卡券发货后恢复 `available` 并移除 `exhausted` 状态；新增关联商品删除二次确认弹窗、商品侧联动断言、迁移 040；分支侧 API/Web typecheck/build、API 全量 smoke、Web 88 files / 303 tests、Memory/PostgreSQL reservation smoke、Chrome/CDP coupons E2E Memory 2 轮 + PostgreSQL 1 轮通过；主线定向复验通过。 |
 
-| `root` | `xianyu-abstraction-20260925` | `refactor/xianyu-abstraction-20260925` | `F:\ChenHai\Project\XianYuAgent-xianyu-abstraction-20260925` | Codex /root | `2026-09-25 10:49:28 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 进一步抽离滑块端口与 Patchright 适配器，保持 Patchright-only；验证浏览器仍由单一适配器负责，业务 solver 不直接依赖 Patchright。API typecheck/build、全量 API 测试、定向验证回归 10/10 与依赖边界检查已通过，待独立复核。 |
+| `root` | `xianyu-abstraction-20260925` | `refactor/xianyu-abstraction-20260925` | `F:\ChenHai\Project\XianYuAgent-xianyu-abstraction-20260925` | Codex /root | `2026-09-25 10:49:28 +08:00` | `READY_FOR_MERGE` | `-` | `-` | 进一步抽离滑块端口与 Patchright 适配器，保持 Patchright-only；验证浏览器仍由单一适配器负责，业务 solver 不直接依赖 Patchright。API typecheck/build、全量 API 测试、定向验证回归 10/10 与依赖边界检查已通过，复核无残留 CDP/Playwright 引用。 |
 
 ## 登记维护规则
 
