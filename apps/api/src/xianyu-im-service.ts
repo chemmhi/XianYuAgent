@@ -28,7 +28,15 @@ export class XianyuImService {
   private inboundInboxWakeInFlight?: Promise<void>;
   private inboundInboxWakeRequested = false;
 
-  constructor(private readonly store: Store, private readonly mtop: XianyuMtopClient, private readonly messages: MessageService, private readonly autoReply?: AutoReplyService, private readonly productAutomation?: ProductAutomationTrigger, private readonly verificationBrowser?: XianyuVerificationBrowser) {
+  constructor(
+    private readonly store: Store,
+    private readonly mtop: XianyuMtopClient,
+    private readonly messages: MessageService,
+    private readonly autoReply?: AutoReplyService,
+    private readonly productAutomation?: ProductAutomationTrigger,
+    private readonly verificationBrowser?: XianyuVerificationBrowser,
+    private readonly refreshOrdersForTrustedUnpaidEvent?: (input: { adminId: string; accountId: string; event: XianyuImMessageEvent }) => Promise<void>,
+  ) {
     this.inboundInboxWorker = new InboundInboxWorker(store, this, {
       workerId: `listener-fallback:${process.pid}:${randomUUID()}`,
       batchSize: 10,
@@ -572,6 +580,13 @@ export class XianyuImService {
       ...(client?.selfUserIds ?? []),
     ].filter((value): value is string => Boolean(value));
     let effectiveEvent = reconcileMessageDirection(event, selfUserIds, conversation?.buyerRef);
+    if (isTrustedUnpaidOrderEvent(effectiveEvent) && this.refreshOrdersForTrustedUnpaidEvent) {
+      try {
+        await this.refreshOrdersForTrustedUnpaidEvent({ adminId, accountId: event.accountId, event: effectiveEvent });
+      } catch (error) {
+        console.warn(JSON.stringify({ component: 'xianyu-im', event: 'trusted_unpaid_order_refresh_failed', adminId, accountId: event.accountId, externalMessageRef: event.externalMessageRef, error: error instanceof Error ? error.message : String(error) }));
+      }
+    }
     const classified = await this.classifySystemCandidate(adminId, event.accountId, conversation?.id, effectiveEvent);
     effectiveEvent = { ...effectiveEvent, bodyType: classified.bodyType, riskFlags: classified.riskFlags };
     if (event.direction === 'inbound' && !event.senderName && !conversation?.buyerDisplayName) {
@@ -698,6 +713,12 @@ export class XianyuImService {
       if (this.inboundInboxWakeRequested) this.wakeInboundInboxWorker();
     });
   }
+}
+
+function isTrustedUnpaidOrderEvent(event: XianyuImMessageEvent): boolean {
+  return event.direction === 'inbound'
+    && event.platformSystemMessage === true
+    && parseXianyuSystemMessageKind(event.bodyText) === 'unpaid_order';
 }
 
 function isReadReceiptEvent(event: XianyuImMessageEvent | XianyuImReadReceiptEvent): event is XianyuImReadReceiptEvent {

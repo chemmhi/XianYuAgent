@@ -315,7 +315,14 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   }, async (input) => productAutomationWorker.processOrderRefresh(input));
-  xianyuIm = new XianyuImService(store, xianyu, messages, autoReply, productAutomationTrigger, verificationBrowser);
+  xianyuIm = new XianyuImService(store, xianyu, messages, autoReply, productAutomationTrigger, verificationBrowser, async ({ adminId, accountId, event }) => {
+    await orders.refresh({
+      adminId,
+      accountId,
+      requestId: `xianyu:unpaid-order:${event.externalMessageRef}`,
+      traceId: `xianyu:unpaid-order:${event.externalMessageRef}`,
+    });
+  });
 
   const wsServer = new WebSocketServer({ noServer: true });
   const workspaceRuntime: WorkspaceRuntime = config.agentRuntime === 'pi'

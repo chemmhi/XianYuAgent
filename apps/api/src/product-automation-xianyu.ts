@@ -165,7 +165,7 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
     if (!detail.success || !detail.detail) {
       return unknownExternal(detail.errorCode ?? 'ORDER_DETAIL_UNAVAILABLE', detail.message ?? 'authoritative order detail is unavailable');
     }
-    const paymentStatus = normalizePaymentStatus(detail.detail.paymentStatus);
+    const paymentStatus = normalizePaymentStatus(detail.detail.paymentStatus, detail.detail.orderStatus);
     if (paymentStatus === 'paid') return failedExternal('ORDER_ALREADY_PAID', 'order is no longer unpaid');
     if (paymentStatus !== 'unpaid') return unknownExternal('ORDER_PAYMENT_STATUS_UNKNOWN', 'order payment status is not authoritative');
     const result = await this.getMtop().repriceOrder(adminId, input.accountId, input.orderNo, input.targetPriceMinor);
@@ -197,7 +197,7 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
     if (!local) return undefined;
     const detail = await this.getMtop().readOrderDetail(adminId, input.accountId, input.orderNo);
     if (!detail.success || !detail.detail) return undefined;
-    if (!normalizePaymentStatus(detail.detail.paymentStatus) || !normalizeDeliveryStatus(detail.detail.deliveryStatus)) return undefined;
+    if (!normalizePaymentStatus(detail.detail.paymentStatus, detail.detail.orderStatus) || !normalizeDeliveryStatus(detail.detail.deliveryStatus)) return undefined;
     return mergeOrderSnapshot(local, detail.detail);
   }
 
@@ -247,18 +247,21 @@ function mergeOrderSnapshot(local: AutomationOrderSnapshot, detail: XianyuOrderD
     itemTitle: detail.itemTitle ?? local.itemTitle,
     conversationId: detail.conversationId ?? local.conversationId,
     buyerId: detail.buyerId ?? local.buyerId,
-    paymentStatus: normalizePaymentStatus(detail.paymentStatus) ?? local.paymentStatus,
+    paymentStatus: normalizePaymentStatus(detail.paymentStatus, detail.orderStatus) ?? local.paymentStatus,
     deliveryStatus: normalizeDeliveryStatus(detail.deliveryStatus) ?? local.deliveryStatus,
     reviewedAt: detail.reviewedAt ?? local.reviewedAt,
     updatedAt: new Date().toISOString(),
   };
 }
 
-function normalizePaymentStatus(value?: string): AutomationOrderSnapshot['paymentStatus'] | undefined {
-  const normalized = value?.trim().toLowerCase();
-  if (!normalized) return undefined;
-  if (['paid', 'success', 'pay_success', 'trade_success', '已付款', '交易成功'].includes(normalized)) return 'paid';
-  if (['unpaid', 'wait_buyer_pay', 'wait_pay', 'pending', '待付款', '未付款'].includes(normalized)) return 'unpaid';
+function normalizePaymentStatus(value?: string, orderStatus?: string): AutomationOrderSnapshot['paymentStatus'] | undefined {
+  const candidates = [value, orderStatus]
+    .map((candidate) => candidate?.trim().toLowerCase())
+    .filter((candidate): candidate is string => Boolean(candidate));
+  for (const normalized of candidates) {
+    if (['paid', 'success', 'pay_success', 'trade_success', 'wait_consign', 'shipped', 'completed', '已付款', '待发货', '已发货', '交易成功', '已完成'].includes(normalized)) return 'paid';
+    if (['1', 'unpaid', 'wait_buyer_pay', 'wait_pay', 'pending', 'processing', '待付款', '未付款', '处理中'].includes(normalized)) return 'unpaid';
+  }
   return undefined;
 }
 
@@ -269,7 +272,7 @@ function normalizeDeliveryStatus(value?: string): AutomationOrderSnapshot['deliv
   // 3 = shipped, and 4 = completed. Treat both shipped and completed as
   // delivered for idempotent confirmation checks.
   if (['3', '4', 'delivered', 'consigned', 'shipped', '已发货', '交易成功'].includes(normalized)) return 'delivered';
-  if (['2', 'pending', 'wait_consign', 'not_delivered', '待发货', '未发货'].includes(normalized)) return 'pending';
+  if (['1', '2', 'pending', 'wait_consign', 'not_delivered', '待发货', '未发货'].includes(normalized)) return 'pending';
   return undefined;
 }
 
