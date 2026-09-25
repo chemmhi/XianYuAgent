@@ -255,8 +255,11 @@ function normalizePaymentStatus(value?: string): AutomationOrderSnapshot['paymen
 function normalizeDeliveryStatus(value?: string): AutomationOrderSnapshot['deliveryStatus'] | undefined {
   const normalized = value?.trim().toLowerCase();
   if (!normalized) return undefined;
-  if (['4', 'delivered', 'consigned', 'shipped', '已发货', '交易成功'].includes(normalized)) return 'delivered';
-  if (['pending', 'wait_consign', 'not_delivered', '待发货', '未发货'].includes(normalized)) return 'pending';
+  // Xianyu order detail uses numeric status codes: 2 = pending shipment,
+  // 3 = shipped, and 4 = completed. Treat both shipped and completed as
+  // delivered for idempotent confirmation checks.
+  if (['3', '4', 'delivered', 'consigned', 'shipped', '已发货', '交易成功'].includes(normalized)) return 'delivered';
+  if (['2', 'pending', 'wait_consign', 'not_delivered', '待发货', '未发货'].includes(normalized)) return 'pending';
   return undefined;
 }
 
