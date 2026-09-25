@@ -126,7 +126,19 @@ export class XianyuImService {
     const externalRef = conversation.externalConversationRef;
     if (!externalRef) throw new ServiceError(409, 'EXTERNAL_CONVERSATION_MISSING', 'conversation is not linked to xianyu');
     const client = await this.ensureClient(adminId, accountId);
-    return this.withAccountFailure(adminId, accountId, () => client.sendText(externalRef, conversation.buyerRef, normalizedText, requestId));
+    try {
+      return await client.sendText(externalRef, conversation.buyerRef, normalizedText, requestId);
+    } catch (error) {
+      await this.markAccountFailure(adminId, accountId, error);
+      if (!requiresCredentialRefresh(error)) throw error;
+      await this.resetClient(adminId, accountId);
+      const account = await this.store.getAccount(adminId, accountId);
+      const credential = await this.store.getCredential(adminId, accountId);
+      if (!account || !credential?.cookieHeader) throw error;
+      await this.refreshCredential(adminId, account, credential);
+      const refreshedClient = await this.ensureClient(adminId, accountId, { forceCredentialRefresh: true });
+      return refreshedClient.sendText(externalRef, conversation.buyerRef, normalizedText, requestId);
+    }
   }
 
   async sendText(adminId: string, accountId: string, conversationId: string, text: string, requestId: string, traceId: string): Promise<unknown> {
@@ -283,8 +295,15 @@ export class XianyuImService {
     return conversation;
   }
 
-  private async ensureClient(adminId: string, accountId: string): Promise<XianyuImClient> {
+  private async ensureClient(adminId: string, accountId: string, options: { forceCredentialRefresh?: boolean } = {}): Promise<XianyuImClient> {
     const key = `${adminId}:${accountId}`;
+    if (options.forceCredentialRefresh) {
+      const existing = this.clients.get(key);
+      if (existing) {
+        this.clients.delete(key);
+        await existing.disconnect().catch(() => undefined);
+      }
+    }
     const existing = this.clients.get(key);
     if (existing) {
       try { await existing.connect(); return existing; } catch (error) {
@@ -828,6 +847,10 @@ function recoveryErrorCode(error: unknown): string {
   if (messageCode && /^[A-Z][A-Z0-9_:-]{1,64}$/.test(messageCode)) return messageCode;
   if (error instanceof Error && error.name) return error.name.toUpperCase().replace(/[^A-Z0-9_:-]/g, '_');
   return 'XIANYU_HISTORY_RECOVERY_FAILED';
+}
+
+function requiresCredentialRefresh(error: unknown): boolean {
+  return /ACCOUNT_VALIDATION_REQUIRED|FAIL_SYS_USER_VALIDATE|X5SEC|CAPTCHA|SLIDER/u.test(recoveryErrorCode(error));
 }
 
 function mergeCookieSnapshots(base: XianyuCookieSnapshot | undefined, updates: XianyuCookieSnapshot): XianyuCookieSnapshot {

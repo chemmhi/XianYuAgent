@@ -59,7 +59,6 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
 
     const order = await this.loadScopedOrder(adminId, input.accountId, input.orderNo, input.productId, input.itemId);
     if (!order) return failedExternal('ORDER_NOT_FOUND', 'order or product scope not found');
-    if (!order.conversationId) return failedExternal('CONVERSATION_MISSING', 'order conversation is missing');
     try {
       const batches = await Promise.all(reservation.batchIds.map((batchId) => this.store.getCouponBatch(adminId, batchId)));
       if (input.purpose === 'delivery' && batches.some((batch) => batch?.metadata?.useNoLogisticsForm === true)) {
@@ -69,6 +68,7 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
         await this.recordAudit({ adminId, action: 'product.automation.coupon.no_logistics_pending', accountId: input.accountId, orderNo: input.orderNo, executionKey: input.executionKey, payload: { reservationId: reservation.reservationId } });
         return { status: 'succeeded', externalRef: `no-logistics:${reservation.reservationId}` };
       }
+      if (!order.conversationId) return failedExternal('CONVERSATION_MISSING', 'order conversation is missing');
       const im = this.getIm();
       if (!im) return unknownExternal('XIANYU_IM_NOT_READY', 'xianyu im service is not ready');
       const account = await this.store.getAccount(adminId, input.accountId);

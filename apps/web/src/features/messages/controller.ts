@@ -27,7 +27,7 @@ export function withMessageSendTimeout<T>(promise: Promise<T>, timeoutMs = MESSA
   });
 }
 
-function normalizeError(error: unknown): MessagesError {
+export function normalizeError(error: unknown): MessagesError {
   const status = typeof error === 'object' && error && 'status' in error ? Number((error as { status?: unknown }).status) : undefined;
   if (status === 403) return { code: 'FORBIDDEN', message: '当前管理员没有读取该账号或会话的权限。', retryable: false };
   if (status === 404) return { code: 'NOT_FOUND', message: '会话不存在或已被归档。', retryable: false };
