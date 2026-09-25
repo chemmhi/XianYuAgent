@@ -78,6 +78,82 @@ npm run compose:down
 
 Compose 当前负责 API、Worker、PostgreSQL、Redis 和 MinIO；对象存储映射到 `19000/19001`，保留 `9000` 给 PRD 参考项目；本地前端由根命令 `npm run dev` 启动。
 
+## 生产部署（Git + SSH）
+
+生产部署必须经过 Git，不要使用 `scp`、直接上传文件或在服务器工作树中手工改代码。以下命令以 SSH 别名 `server-prod` 和服务器目录 `/home/ubuntu/xianyu-agent-prod` 为例；如果目录或别名不同，只替换这两个值。
+
+### 1. 提交并推送代码
+
+在本地工作树执行：
+
+```powershell
+git status --short
+npm ci
+npm run typecheck
+npm run build
+docker compose config --quiet
+git diff --check
+git add <已确认的文件>
+git commit -m "<说明本次部署变更>"
+git push 'server-prod:/home/ubuntu/git/xianyu-agent.git' HEAD:main
+```
+
+不要把其他未相关的工作树改动一起提交。服务器使用 `/home/ubuntu/git/xianyu-agent.git` 这个裸仓库作为 `origin`，因此推送成功是后续服务器拉取的前置条件。
+
+### 2. 检查并更新服务器工作树
+
+```powershell
+ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && git status --short && git pull --ff-only'
+```
+
+如果服务器存在未提交的代码改动，先停止部署并处理这些改动；`.env` 及 `.env.bak-*` 属于运行配置/备份，不应提交到 Git。
+
+### 3. 重建并滚动 API/Worker
+
+生产环境优先只重建应用服务，避免因为基础设施镜像仓库权限、MinIO 拉取或已有数据卷导致整套 Compose 被重启：
+
+```powershell
+ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker compose config --quiet && docker compose build api worker && docker compose up -d --no-deps api worker'
+```
+
+只有在需要初始化或变更 PostgreSQL、Redis、MinIO 时，才执行完整拓扑启动：
+
+```powershell
+ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker compose --profile full up -d --build'
+```
+
+如果完整启动因为 `object-storage` 镜像仓库返回 `unauthorized` 失败，保持现有基础设施容器运行，改用上面的 `docker compose build api worker` 与 `docker compose up -d --no-deps api worker`。
+
+### 4. 部署后验收
+
+```powershell
+ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker compose ps'
+ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker compose logs --tail=80 api worker'
+ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker compose exec -T postgres sh -lc "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -Atc \"select count(*) from settings.auto_reply_repair_policies;\""'
+```
+
+API/Worker 应为 `Up`，日志应包含 `repairMode=enforce`、`primaryRoute=repair` 和 `outcomeReviewWorker=enabled`；策略表至少应有一个有效账号策略。若出现 `28P01`，优先检查 `POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_DB` 与已存在数据卷是否一致。
+
+### 5. 自动回复相关环境变量
+
+`.env` 是隐藏文件，`ls` 默认不会显示；它只在服务器上保存运行配置，不进入 Git。Compose 通过显式映射把需要的变量注入 API/Worker，不能假设“服务器有 `.env`”就等于“容器能读取 `.env`”。
+
+必需的生产开关：
+
+- `AUTO_REPLY_REPAIR_MODE=enforce`：启用修复后的自动回复主链路。
+- `AUTO_REPLY_OUTCOME_REVIEW_WORKER_ENABLED=true`：启用发送结果审核 Worker。
+- `AUTO_REPLY_MODEL_ENABLED=true`：允许使用配置的模型生成回复；仍受 `API_KEY`、`BASE_URL`、`MODEL` 等配置约束。
+- `AUTO_REPLY_SEND_MODE=live`：允许真实发送；排障或演练时可切换为 `simulate`。
+- `AUTO_REPLY_POLICY_BOOTSTRAP_DEFAULT=true`：账号没有持久化策略时，API 启动自动写入版本化默认策略。
+- `AUTO_REPLY_POLICY_JSON`：兼容兜底用的完整 JSON bundle，包含 policy、pre-send policy 和 outcome policy。正常生产不再依赖它；只有关闭默认策略引导或无法写入策略表时才需要提供。
+
+数据库和容器内连接：
+
+- `POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD`：PostgreSQL 数据卷初始化和应用连接使用的凭据；已有数据卷的密码必须保持一致。
+- `DATABASE_URL_DOCKER`、`REDIS_URL_DOCKER`：可选的容器内连接覆盖。不要把仅适用于宿主机的 `127.0.0.1` 地址直接当作容器间地址。
+
+完整模板见 `.env.example`。自动回复策略的正常启动路径是“读取账号持久化策略 → 缺失时自动引导默认策略 → 兼容配置兜底”，因此后续按本节 Git 部署流程发布时，不应再因为漏配 `AUTO_REPLY_POLICY_JSON` 而导致 `POLICY_CONFIG_UNAVAILABLE`。
+
 真实闲鱼二维码模式由 `XIANYU_QR_MODE=real` 控制；未设置或设置为其他值时，后端默认仍采用真实模式，自动化测试会显式使用 `stub`。
 
 二维码或 IM 遇到风控验证时，可启用 Patchright 驱动的系统 Chrome：
