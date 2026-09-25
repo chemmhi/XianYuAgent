@@ -161,7 +161,7 @@
 
 | `root` | `coupon-reusable-delete-confirm-20260924` | `fix/coupon-reusable-delete-confirm-20260924` | `F:\ChenHai\Project\XianYuAgent-coupon-reusable-delete-confirm-20260924` | Codex /root | `2026-09-24 19:40:00 +08:00` | `MERGED` | `ac6fad8` | `-` | 提交 `ab0b989` 已以 `--no-ff` 合入 `main`；卡券发货后恢复 `available` 并移除 `exhausted` 状态；新增关联商品删除二次确认弹窗、商品侧联动断言、迁移 040；分支侧 API/Web typecheck/build、API 全量 smoke、Web 88 files / 303 tests、Memory/PostgreSQL reservation smoke、Chrome/CDP coupons E2E Memory 2 轮 + PostgreSQL 1 轮通过；主线定向复验通过。 |
 
-| `root` | `xianyu-abstraction-20260925` | `refactor/xianyu-abstraction-20260925` | `F:\ChenHai\Project\XianYuAgent-xianyu-abstraction-20260925` | Codex /root | `2026-09-25 10:49:28 +08:00` | `MERGED` | `3e217b2` | `-` | 已在 merge lock 内以 `--no-ff` 合入 `main`；API typecheck/build、全量 API 测试、定向验证回归 10/10、依赖边界检查和合并后回归均通过。Patchright 为唯一浏览器运行时依赖，未保留 CDP/Playwright fallback。 |
+| `root` | `xianyu-abstraction-20260925` | `refactor/xianyu-abstraction-20260925` | `F:\ChenHai\Project\XianYuAgent-xianyu-abstraction-20260925` | Codex /root | `2026-09-25 10:49:28 +08:00` | `CLEANED` | `3e217b2` | `2026-09-25 11:08:00 +08:00` | 已在 merge lock 内以 `--no-ff` 合入 `main`；API typecheck/build、全量 API 测试、定向验证回归 10/10、依赖边界检查和合并后回归均通过。Patchright 为唯一浏览器运行时依赖，未保留 CDP/Playwright fallback。Git worktree 元数据与分支已清理；物理目录因本地依赖文件残留保留，未删除。 |
 
 ## 登记维护规则
 
