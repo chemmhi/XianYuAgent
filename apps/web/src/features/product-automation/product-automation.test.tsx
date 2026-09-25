@@ -15,7 +15,7 @@ describe('product automation API', () => {
   it('maps the live adapter to the canonical automation and coupon contracts', async () => {
     const calls: Array<{ method: string; path: string; body?: unknown; options?: unknown }> = [];
     const api = createProductAutomationApi({
-      async get<T>(path: string) { calls.push({ method: 'GET', path }); return (path.includes('/automation') ? { data: { productId: 'product-1', accountId: 'account-1', configVersion: 7, config: { paidAutoDelivery: { enabled: true, couponBatchIds: ['1'] }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true, firstDelayHours: 72, repeatIntervalHours: 24, maxReminders: 1, message: '请评价' } } } } : { data: { items: [...MOCK_AUTOMATION_COUPONS, { id: 'active-coupon', label: '普通卡券', purpose: 'text' }, { id: 'paused-coupon', label: '已禁用卡券', purpose: 'text', status: 'paused' }] } }) as T; },
+      async get<T>(path: string) { calls.push({ method: 'GET', path }); return (path.includes('/automation') ? { data: { productId: 'product-1', accountId: 'account-1', configVersion: 7, config: { paidAutoDelivery: { enabled: true, couponBatchIds: ['1'] }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true, firstDelayMinutes: 72 * 60, repeatIntervalMinutes: 24 * 60, maxReminders: 1, message: '请评价' } } } } : { data: { items: [...MOCK_AUTOMATION_COUPONS, { id: 'active-coupon', label: '普通卡券', purpose: 'text' }, { id: 'paused-coupon', label: '已禁用卡券', purpose: 'text', status: 'paused' }] } }) as T; },
       async patch<T>(path: string, body?: unknown, options?: unknown) { calls.push({ method: 'PATCH', path, body, options }); return { data: { productId: 'product-1', accountId: 'account-1', configVersion: 8, paidAutoDelivery: { enabled: false }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true } } } as T; },
       async post<T>(path: string, body?: unknown, options?: unknown) { calls.push({ method: 'POST', path, body, options }); return { data: { updatedCount: 1 } } as T; },
     });
@@ -102,6 +102,16 @@ describe('product automation components', () => {
     const wire = toAutomationConfigWire({ version: 1, delivery: { enabled: false }, reprice: { enabled: false }, gift: { enabled: false }, review: { enabled: false } });
     expect(wire.paidAutoDelivery?.autoConfirm).toBe(true);
     expect(toAutomationConfig({ productId: 'product-1', accountId: 'account-1', version: 1, delivery: { enabled: false }, reprice: { enabled: false }, gift: { enabled: false }, review: { enabled: false } }).delivery.autoConfirm).toBe(true);
+  });
+
+  it('maps review reminder values to minutes and writes minute fields', () => {
+    const legacy = toAutomationConfig({ productId: 'product-1', accountId: 'account-1', configVersion: 1, paidAutoDelivery: { enabled: false }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true, firstDelayHours: 2, repeatIntervalHours: 3, maxReminders: 1, message: '请评价' } } as never);
+    expect(legacy.review.reviewInitialMinutes).toBe(120);
+    expect(legacy.review.reviewRepeatMinutes).toBe(180);
+
+    const wire = toAutomationConfigWire({ version: 1, delivery: { enabled: false }, reprice: { enabled: false }, gift: { enabled: false }, review: { enabled: true, reviewInitialMinutes: 15, reviewRepeatMinutes: 30, reviewMaxCount: 2, reviewMessage: '请评价' } });
+    expect(wire.reviewReminder).toMatchObject({ enabled: true, firstDelayMinutes: 15, repeatIntervalMinutes: 30, maxReminders: 2, message: '请评价' });
+    expect(wire.reviewReminder).not.toHaveProperty('firstDelayHours');
   });
 
   it('preserves backend defaults when the legacy response omits review message', async () => {

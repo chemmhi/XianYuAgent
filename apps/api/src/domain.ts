@@ -271,8 +271,8 @@ export interface ReviewGiftRule {
 
 export interface ReviewReminderRule {
   enabled: boolean;
-  firstDelayHours: number;
-  repeatIntervalHours: number;
+  firstDelayMinutes: number;
+  repeatIntervalMinutes: number;
   maxReminders: number;
   message: string;
 }
@@ -376,6 +376,7 @@ export interface XianyuOrderItem {
   conversationId?: string;
   productId?: string;
   sourcePayloadDigest: string;
+  reviewedAt?: string;
 }
 
 export interface OrderListQuery {

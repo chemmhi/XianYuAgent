@@ -71,6 +71,7 @@ export function mapXianyuOrder(value: unknown): XianyuOrderItem | undefined {
     conversationId: firstString(raw.conversationId, raw.conversation_id, raw.cid, raw.sessionId, raw.session_id),
     productId: isUuid(productIdCandidate) ? productIdCandidate : undefined,
     sourcePayloadDigest: digest(raw),
+    reviewedAt: firstString(raw.reviewedAt, raw.reviewed_at, raw.rateTime, raw.rate_time, raw.reviewTime, raw.review_time, raw.evaluateTime, raw.evaluate_time),
   };
 }
 

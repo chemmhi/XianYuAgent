@@ -9,7 +9,7 @@ const tabs: Array<{ key: AutomationRuleKey; title: string; subtitle: string }> =
   { key: 'delivery', title: '付款后自动发货', subtitle: '使用已选卡券，规则在卡券中维护' },
   { key: 'reprice', title: '拍下未付款改价', subtitle: '未设置目标价格和话术' },
   { key: 'gift', title: '评价后发送赠品', subtitle: '使用已选赠品卡券，规则在卡券中维护' },
-  { key: 'review', title: '超时未评价求评价', subtitle: '发货后 72 小时 · 每 24 小时 · 1 次' },
+  { key: 'review', title: '超时未评价求评价', subtitle: '发货后 4320 分钟 · 每 1440 分钟 · 1 次' },
 ];
 
 export function AutomationDrawer({ open, product, accountLabel = '当前账号', config, coupons, loadPhase, savePhase, error, draft: draftOverride, onClose, onSave }: {
@@ -159,7 +159,7 @@ function RulePanel({ tab, rule, selectedCoupons, onToggle, onCouponChoose, onCha
 
       {tab === 'reprice' && <div className="automation-config-card"><div className="automation-field-grid"><InputField label="目标价格" aria-label="目标价格" value={((rule.targetPriceMinor ?? 0) / 100).toFixed(2)} onChange={(event) => onChange({ targetPriceMinor: Math.round(Number(event.target.value || 0) * 100) })} /><InputField label="改价后发送文本" aria-label="改价后发送文本" value={rule.repriceMessage ?? ''} onChange={(event) => onChange({ repriceMessage: event.target.value })} /></div></div>}
 
-      {tab === 'review' && <div className="automation-config-card"><div className="automation-field-grid"><InputField label="首次提醒（小时）" aria-label="首次提醒" type="number" min="1" value={rule.reviewInitialHours ?? 72} onChange={(event) => onChange({ reviewInitialHours: Number(event.target.value) })} /><InputField label="重复提醒间隔（小时）" aria-label="重复提醒间隔" type="number" min="1" value={rule.reviewRepeatHours ?? 24} onChange={(event) => onChange({ reviewRepeatHours: Number(event.target.value) })} /><InputField label="最多提醒次数" aria-label="最多提醒次数" type="number" min="1" value={rule.reviewMaxCount ?? 1} onChange={(event) => onChange({ reviewMaxCount: Number(event.target.value) })} /><TextAreaField label="提醒文案" aria-label="提醒文案" value={rule.reviewMessage ?? ''} onChange={(event) => onChange({ reviewMessage: event.target.value })} /></div></div>}
+      {tab === 'review' && <div className="automation-config-card"><div className="automation-field-grid"><InputField label="首次提醒（分钟）" aria-label="首次提醒" type="number" min="1" value={rule.reviewInitialMinutes ?? 72 * 60} onChange={(event) => onChange({ reviewInitialMinutes: Number(event.target.value) })} /><InputField label="重复提醒间隔（分钟）" aria-label="重复提醒间隔" type="number" min="1" value={rule.reviewRepeatMinutes ?? 24 * 60} onChange={(event) => onChange({ reviewRepeatMinutes: Number(event.target.value) })} /><InputField label="最多提醒次数" aria-label="最多提醒次数" type="number" min="1" value={rule.reviewMaxCount ?? 1} onChange={(event) => onChange({ reviewMaxCount: Number(event.target.value) })} /><TextAreaField label="提醒文案" aria-label="提醒文案" value={rule.reviewMessage ?? ''} onChange={(event) => onChange({ reviewMessage: event.target.value })} /></div></div>}
 
       {(tab === 'delivery' || tab === 'gift') && <div className="automation-preview"><p className="automation-kicker">规则预览</p><div><span>{tab === 'gift' ? '买家完成评价' : '买家付款'}</span><b>→</b><span>使用已选{tab === 'gift' ? '赠品' : '发货'}卡券</span>{tab === 'delivery' && <><b>→</b><span>确认发货</span></>}</div></div>}
       {tab === 'delivery' && <div className="automation-alert"><strong>风险提示</strong><span>卡券发送失败或外部结果未知时，不会自动确认发货，订单会进入人工复核。</span></div>}
@@ -180,7 +180,7 @@ function summaryText(key: AutomationRuleKey, config: ProductAutomationConfig | n
   if (!config) return '正在加载配置';
   if (key === 'delivery') return selected.length ? `已选${selected[0].label} · 规则在卡券中维护` : '未选择发货卡券';
   if (key === 'gift') return selected.length ? `已选${selected[0].label} · 规则在卡券中维护` : '未选择赠品卡券';
-  if (key === 'review') return `发货后${config.review.reviewInitialHours ?? 72}小时 · 每${config.review.reviewRepeatHours ?? 24}小时 · ${config.review.reviewMaxCount ?? 1}次`;
+  if (key === 'review') return `发货后${config.review.reviewInitialMinutes ?? 72 * 60}分钟 · 每${config.review.reviewRepeatMinutes ?? 24 * 60}分钟 · ${config.review.reviewMaxCount ?? 1}次`;
   return config.reprice.enabled && config.reprice.targetPriceMinor ? `目标价 ¥${(config.reprice.targetPriceMinor / 100).toFixed(2)}` : '未设置目标价格和话术';
 }
 

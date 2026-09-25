@@ -27,7 +27,7 @@ try {
     adminId,
     productId: product.id,
     expectedConfigVersion: initial.configVersion,
-    config: { ...initial.config, unpaidAutoReprice: { ...initial.config.unpaidAutoReprice, enabled: true, targetPriceMinor: 880 }, reviewGift: { ...initial.config.reviewGift, enabled: true, couponBatchIds: [coupon.id] }, reviewReminder: { ...initial.config.reviewReminder, enabled: true, firstDelayHours: 1, message: '请评价' } },
+    config: { ...initial.config, unpaidAutoReprice: { ...initial.config.unpaidAutoReprice, enabled: true, targetPriceMinor: 880 }, reviewGift: { ...initial.config.reviewGift, enabled: true, couponBatchIds: [coupon.id] }, reviewReminder: { ...initial.config.reviewReminder, enabled: true, firstDelayMinutes: 60, message: '请评价' } },
     requestId: 'entry-config',
     traceId: 'entry-config',
   });

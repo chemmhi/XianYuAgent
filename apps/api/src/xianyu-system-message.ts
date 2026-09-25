@@ -66,7 +66,7 @@ export function matchesXianyuOrderStatus(kind: XianyuSystemMessageKind, order: X
     case 'received':
       return deliveryStatus === 'delivered' || orderStatus === 'completed';
     case 'reviewed':
-      return orderStatus === 'completed';
+      return orderStatus === 'completed' || deliveryStatus === 'delivered';
     case 'trade_success':
       return paymentStatus === 'paid' && (orderStatus === 'completed' || deliveryStatus === 'delivered');
     case 'trade_closed':
