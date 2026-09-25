@@ -80,6 +80,15 @@ test('configured batch data rotates reusable rows by committed delivery count', 
   assert.equal(third.items[0]?.content, 'coupon-1');
 });
 
+test('multi-batch reservation takes the requested quantity from every selected batch', async () => {
+  const value = await fixture(1);
+  const secondBatch = await value.store.createCouponBatch({ adminId: value.admin.id, accountId: value.account.id, label: 'Second Reservation Batch', purpose: 'text' });
+  await value.store.importCouponItems({ adminId: value.admin.id, batchId: secondBatch.id, contents: ['second-coupon'] });
+  const reserved = await value.store.reserveCoupon({ adminId: value.admin.id, accountId: value.account.id, batchIds: [value.batch.id, secondBatch.id], quantity: 1, executionKey: 'multi-batch-key', purpose: 'delivery' });
+  assert.equal(reserved.items.length, 2);
+  assert.deepEqual(new Set(reserved.items.map((item) => item.batchId)), new Set([value.batch.id, secondBatch.id]));
+});
+
 test('expired lease is released before read and can be reopened', async () => {
   const value = await fixture(1);
   const input = { ...reservationInput(value, 'expiry-key'), leaseSeconds: 1 };

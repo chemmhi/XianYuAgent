@@ -61,11 +61,22 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
     if (!order) return failedExternal('ORDER_NOT_FOUND', 'order or product scope not found');
     try {
       const batches = await Promise.all(reservation.batchIds.map((batchId) => this.store.getCouponBatch(adminId, batchId)));
-      if (input.purpose === 'delivery' && batches.some((batch) => batch?.metadata?.useNoLogisticsForm === true)) {
-        const formBatch = batches.find((batch) => batch?.metadata?.useNoLogisticsForm === true);
-        if (!formBatch || formBatch.purpose !== 'text' || !formBatch.metadata?.textContent?.trim()) return failedExternal('NO_LOGISTICS_FORM_INVALID', 'no logistics form requires fixed text content');
-        await waitForDelay(Number(formBatch.metadata.delaySeconds ?? 0));
-        await this.recordAudit({ adminId, action: 'product.automation.coupon.no_logistics_pending', accountId: input.accountId, orderNo: input.orderNo, executionKey: input.executionKey, payload: { reservationId: reservation.reservationId } });
+      const noLogisticsBatchIds: string[] = [];
+      const deliverableItems = [];
+      for (const item of reservation.items) {
+        const batch = batches.find((candidate) => candidate?.id === item.batchId) ?? await this.store.getCouponBatch(adminId, item.batchId);
+        if (!batch) return failedExternal('COUPON_BATCH_NOT_FOUND', 'coupon batch not found');
+        const useNoLogisticsForm = input.purpose === 'delivery' && batch.metadata?.useNoLogisticsForm === true;
+        if (useNoLogisticsForm && (batch.purpose !== 'text' || !batch.metadata?.textContent?.trim())) return failedExternal('NO_LOGISTICS_FORM_INVALID', 'no logistics form requires fixed text content');
+        if (useNoLogisticsForm) {
+          noLogisticsBatchIds.push(batch.id);
+          await waitForDelay(Number(batch.metadata?.delaySeconds ?? 0));
+        } else {
+          deliverableItems.push({ item, batch });
+        }
+      }
+      if (deliverableItems.length === 0) {
+        await this.recordAudit({ adminId, action: 'product.automation.coupon.no_logistics_pending', accountId: input.accountId, orderNo: input.orderNo, executionKey: input.executionKey, payload: { reservationId: reservation.reservationId, batchIds: noLogisticsBatchIds } });
         return { status: 'succeeded', externalRef: `no-logistics:${reservation.reservationId}` };
       }
       if (!order.conversationId) return failedExternal('CONVERSATION_MISSING', 'order conversation is missing');
@@ -89,23 +100,22 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
         orderQuantity: String(order.quantity ?? reservation.quantity),
       });
       let externalMessageRef: string | undefined;
-      for (const item of reservation.items) {
-        const batch = batches.find((candidate) => candidate?.id === item.batchId) ?? await this.store.getCouponBatch(adminId, item.batchId);
-        if (!batch) return failedExternal('COUPON_BATCH_NOT_FOUND', 'coupon batch not found');
+      for (const { item, batch } of deliverableItems) {
         const imageUrls = this.couponAssets?.imageUrls(batch) ?? batch.metadata?.imageUrls ?? [];
         const resolved = await resolveCouponDelivery({ ...batch, metadata: { ...(batch.metadata ?? {}), imageUrls } }, item, context, input.purpose);
         await waitForDelay(resolved.delaySeconds);
         let imageIndex = 0;
         for (const imageUrl of resolved.imageUrls) {
           const file = await this.resolveImage(adminId, batch.id, imageUrl);
-          const sent = await im.sendImage(adminId, input.accountId, order.conversationId, file, `automation:${input.executionKey}:image:${imageIndex}`, `automation:${input.executionKey}:image:${imageIndex}`) as { externalMessageRef?: string };
+          const requestId = `automation:${input.executionKey}:batch:${batch.id}:image:${imageIndex}`;
+          const sent = await im.sendImage(adminId, input.accountId, order.conversationId, file, requestId, requestId) as { externalMessageRef?: string };
           externalMessageRef = sent.externalMessageRef ?? externalMessageRef;
           imageIndex += 1;
         }
         if (resolved.text) {
           let textIndex = 0;
           for (const message of splitMessages(resolved.text)) {
-            const requestId = `automation:${input.executionKey}:text:${textIndex}`;
+            const requestId = `automation:${input.executionKey}:batch:${batch.id}:text:${textIndex}`;
             const sent = await sendTextWithReconnectRetry(im, adminId, input.accountId, order.conversationId, message, requestId) as { externalMessageRef?: string };
             externalMessageRef = sent.externalMessageRef ?? externalMessageRef;
             textIndex += 1;

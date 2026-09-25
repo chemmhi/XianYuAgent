@@ -1663,10 +1663,13 @@ export class MemoryStore implements Store {
           }
           return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
         });
-      available.push(...items);
-      if (available.length >= quantity) break;
+      // Each selected batch is an independent delivery component. Reserve the
+      // requested quantity from every batch so a multi-select configuration
+      // sends all selected card types instead of treating later batches as a
+      // fallback pool for the first one.
+      available.push(...items.slice(0, quantity));
     }
-    return available.slice(0, quantity);
+    return available;
   }
 
   private ensureConfiguredCouponItems(batch: CouponBatchRecord, quantity: number): void {

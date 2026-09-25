@@ -166,6 +166,8 @@
 | root | fish-agent-brand-20260925 | codex/fish-agent-brand-20260925 | F:\\ChenHai\\Project\\XianYuAgent-fish-agent-brand-20260925 | Codex /root | 2026-09-25 21:37:27 +08:00 | READY_FOR_REVIEW | - | - | 提交 `1ddde39`：正式 Web 控制台品牌文案统一为 FishAgent，侧栏品牌图标按设计规范由 28px 放大到 32px；Web 定向测试 11/11、typecheck、build 通过。Dashboard Chrome E2E 在既有“考研英语资料缺少发货凭证”数据断言处失败，与本切片无关。 |
 | root | fish-agent-deploy-20260925 | codex/fish-agent-deploy-20260925 | F:\\ChenHai\\Project\\XianYuAgent-fish-agent-deploy-20260925 | Codex /root | 2026-09-25 21:44:25 +08:00 | REGISTERED | - | - | 基于服务器当前主线 e88e0e5 生成 FishAgent 部署提交，执行生产前校验、Git+SSH 推送、服务器应用滚动重建与部署后健康检查。 |
 
+| `root` | `coupon-mixed-delivery-20260925` | `fix/coupon-mixed-delivery-20260925` | `F:\\ChenHai\\Project\\XianYuAgent-coupon-mixed-delivery-20260925` | Codex /root | `2026-09-25 00:09:55 +08:00` | MERGED | `85e9750` | `-` | 用户已明确要求合入 main；混合卡券逐批预留和四类内容发送修复已合入，保留无需邮寄批次仅用于确认发货。合并后将执行卡券与商品自动化定向回归。 |
+
 ## 登记维护规则
 
 | `root` | `dashboard-home-refresh` | `codex/dashboard-home-refresh` | `F:\ChenHai\Project\XianYuAgent-dashboard-home-refresh` | Codex `/root` | `2026-09-22 00:00:00 +08:00` | `MERGED` | `c86ee9e` / `5d8bba9` | `-` | 仪表盘首页布局、趋势时间筛选与指标卡片调整；已在 merge lock 内以 `--no-ff` 合入 main。主线 Dashboard API 单测、Web 定向回归、typecheck、构建与 Chrome/CDP E2E 均通过；保留 worktree 供审计。 |
@@ -197,3 +199,4 @@
 | `root` | `chat-delivery-fix-20260925` | `fix/chat-delivery-fix-20260925` | `F:\\ChenHai\\Project\\XianYuAgent-chat-delivery-fix-20260925` | Codex /root | `2026-09-25 11:00:52 +08:00` | `CLEANED` | `a9d366f` | `2026-09-25 12:13:43 +08:00` | 已以 `--no-ff` 合入 `main`，并清理 feature worktree 与分支。修复缓存 IM 客户端在滑块验证拒绝后不重建/不强制刷新 token；前端将 Failed to fetch 映射为可重试网络错误；无需邮寄发货不再要求聊天会话；兼容闲鱼订单状态 4。合并后 API build、30 项定向回归、订单 mapper smoke、Web typecheck/build、消息控制器 3 项测试与 diff-check 通过。真实订单仍受 `PRODUCT_AUTOMATION_BUYER_NOT_ALLOWLISTED` 保护门禁约束，未自动绕过。 |
 | root | auto-reply-policy-bootstrap-20260925 | fix/auto-reply-policy-bootstrap-20260925 | F:\ChenHai\Project\XianYuAgent-auto-reply-policy-bootstrap-20260925 | Codex /root | 2026-09-25 21:27:55 +08:00 | REGISTERED | - | - | 自动回复策略缺失导致生产 POLICY_CONFIG_UNAVAILABLE；补齐启动引导、.env.example 与回归测试。 |
 | `root` | `auto-reply-delay-send-20260925` | `feat/auto-reply-delay-send-20260925` | `F:\ChenHai\Project\XianYuAgent-auto-reply-delay-send-20260925` | Codex /root | `2026-09-25 22:36:27 +08:00` | REGISTERED | - | - | 自动回复 Agent 延迟发送配置；默认 300 秒；人工回复窗口内取消发送且不入库；待补配置、链路和端到端验证。 |
+

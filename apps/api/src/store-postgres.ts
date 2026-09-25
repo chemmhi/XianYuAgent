@@ -748,16 +748,20 @@ export class PostgresStore implements Store {
         group by ri.item_id`, [candidateIds]);
       const usageByItemId = new Map(usageResult.rows.map((row) => [String(row.item_id), Number(row.use_count ?? 0)]));
       const batchPurposeById = new Map(lockRows.rows.map((row) => [String(row.id), String(row.purpose)]));
-      const batchOrder = new Map(batchIds.map((batchId, index) => [batchId, index]));
-      const selectedRows = [...candidates.rows].sort((left, right) => {
-        const batchDelta = (batchOrder.get(String(left.batch_id)) ?? Number.MAX_SAFE_INTEGER) - (batchOrder.get(String(right.batch_id)) ?? Number.MAX_SAFE_INTEGER);
-        if (batchDelta !== 0) return batchDelta;
-        if (batchPurposeById.get(String(left.batch_id)) === 'data') {
-          const usageDelta = (usageByItemId.get(String(left.id)) ?? 0) - (usageByItemId.get(String(right.id)) ?? 0);
-          if (usageDelta !== 0) return usageDelta;
-        }
-        return new Date(String(left.created_at)).getTime() - new Date(String(right.created_at)).getTime() || String(left.id).localeCompare(String(right.id));
-      }).slice(0, normalized.quantity);
+      const selectedRows: Row[] = [];
+      for (const batchId of batchIds) {
+        const batchRows = candidates.rows.filter((row) => String(row.batch_id) === batchId).sort((left, right) => {
+          if (batchPurposeById.get(batchId) === 'data') {
+            const usageDelta = (usageByItemId.get(String(left.id)) ?? 0) - (usageByItemId.get(String(right.id)) ?? 0);
+            if (usageDelta !== 0) return usageDelta;
+          }
+          const leftCreatedAt = left.created_at instanceof Date ? left.created_at.getTime() : Date.parse(String(left.created_at));
+          const rightCreatedAt = right.created_at instanceof Date ? right.created_at.getTime() : Date.parse(String(right.created_at));
+          return leftCreatedAt - rightCreatedAt || String(left.id).localeCompare(String(right.id));
+        });
+        if (batchRows.length < normalized.quantity) throw new Error('COUPON_DELIVERY_ITEM_UNAVAILABLE');
+        selectedRows.push(...batchRows.slice(0, normalized.quantity));
+      }
       const now = new Date();
       const nowIso = now.toISOString();
       const leaseUntil = new Date(now.getTime() + leaseSeconds * 1000).toISOString();
