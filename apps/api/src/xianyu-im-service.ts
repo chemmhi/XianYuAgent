@@ -5,6 +5,7 @@ import { classifyXianyuFailure } from './xianyu-account-health.js';
 import type { MessageService } from './messages.js';
 import type { AutoReplyProcessResult, AutoReplyService } from './auto-reply.js';
 import { XianyuImClient, XianyuImMessageEvent, XianyuImReadReceiptEvent, XianyuImCredential } from './xianyu-im.js';
+import { hasXianyuSystemEnvelopeMarker, isXianyuSystemMessageText, matchesXianyuOrderStatus, parseXianyuSystemMessageKind } from './xianyu-system-message.js';
 import { XianyuMtopClient } from './xianyu-mtop.js';
 import type { ProductAutomationImEventResult, ProductAutomationTrigger } from './product-automation-trigger.js';
 import { InboundInboxWorker } from './inbound-inbox-worker.js';
@@ -79,18 +80,19 @@ export class XianyuImService {
     for (const item of [...models].reverse()) {
       const parsed = normalizeHistoryMessage(item, client.selfUserIds);
       if (!parsed) continue;
+      const classified = await this.classifySystemCandidate(adminId, accountId, conversationId, parsed);
       await this.messages.importExternalMessage({
         adminId,
         conversationId,
         direction: parsed.direction,
-        senderRole: parsed.direction === 'outbound' ? 'agent' : parsed.bodyType === 'system' ? 'system' : 'buyer',
-        bodyType: parsed.bodyType,
+        senderRole: parsed.direction === 'outbound' ? 'agent' : classified.bodyType === 'system' ? 'system' : 'buyer',
+        bodyType: classified.bodyType,
         bodyText: parsed.bodyText,
         bodyRef: parsed.bodyRef,
         externalMessageRef: parsed.externalMessageRef,
         externalMessageRefAliases: parsed.externalMessageRefAliases,
         source: parsed.direction === 'outbound' ? 'human' : 'system',
-        riskFlags: parsed.riskFlags,
+        riskFlags: classified.riskFlags,
         createdAt: parsed.createdAt,
         traceId: `xianyu:history:${parsed.externalMessageRef}`,
       });
@@ -252,23 +254,24 @@ export class XianyuImService {
       for (const item of [...models].reverse()) {
         const parsed = normalizeHistoryMessage(item, client.selfUserIds);
         if (!parsed) continue;
+        const classified = await this.classifySystemCandidate(adminId, accountId, conversation.id, parsed);
         const importedMessage = await this.messages.importExternalMessage({
           adminId,
           conversationId: conversation.id,
           direction: parsed.direction,
-          senderRole: parsed.direction === 'outbound' ? 'agent' : parsed.bodyType === 'system' ? 'system' : 'buyer',
-          bodyType: parsed.bodyType,
+          senderRole: parsed.direction === 'outbound' ? 'agent' : classified.bodyType === 'system' ? 'system' : 'buyer',
+          bodyType: classified.bodyType,
           bodyText: parsed.bodyText,
           bodyRef: parsed.bodyRef,
           externalMessageRef: parsed.externalMessageRef,
           externalMessageRefAliases: parsed.externalMessageRefAliases,
           source: parsed.direction === 'outbound' ? 'human' : 'system',
-          riskFlags: parsed.riskFlags,
+          riskFlags: classified.riskFlags,
           createdAt: parsed.createdAt,
           traceId: `xianyu:recovery:${parsed.externalMessageRef}`,
         });
         if (importedMessage.created) imported += 1;
-        if (!this.autoReply || parsed.direction !== 'inbound' || !['text', 'image'].includes(parsed.bodyType)) continue;
+        if (!this.autoReply || parsed.direction !== 'inbound' || !['text', 'image'].includes(classified.bodyType)) continue;
         if (latestLocalCreatedAt && parsed.createdAt < latestLocalCreatedAt) continue;
         const inbox = await this.store.enqueueInboundInbox({
           adminId,
@@ -569,6 +572,8 @@ export class XianyuImService {
       ...(client?.selfUserIds ?? []),
     ].filter((value): value is string => Boolean(value));
     let effectiveEvent = reconcileMessageDirection(event, selfUserIds, conversation?.buyerRef);
+    const classified = await this.classifySystemCandidate(adminId, event.accountId, conversation?.id, effectiveEvent);
+    effectiveEvent = { ...effectiveEvent, bodyType: classified.bodyType, riskFlags: classified.riskFlags };
     if (event.direction === 'inbound' && !event.senderName && !conversation?.buyerDisplayName) {
       // Gateway pushes can omit the nickname even though the conversation
       // itself is addressable by a stable external ref. Resolve the profile
@@ -578,7 +583,7 @@ export class XianyuImService {
         externalConversationRef: event.externalConversationRef,
         buyerRef: event.senderRef,
       });
-      if (enriched.buyerDisplayName) effectiveEvent = { ...event, senderName: enriched.buyerDisplayName };
+      if (enriched.buyerDisplayName) effectiveEvent = { ...effectiveEvent, senderName: enriched.buyerDisplayName };
     }
     if (!conversation && effectiveEvent.direction === 'inbound') {
       conversation = await this.store.upsertExternalConversation({
@@ -643,6 +648,36 @@ export class XianyuImService {
     const inbound = await this.store.findMessageByExternalRef(record.adminId, record.conversationId, record.externalMessageRef);
     if (!inbound) throw new Error('INBOUND_MESSAGE_NOT_FOUND');
     return this.autoReply.processInbound({ adminId: record.adminId, conversationId: record.conversationId, inboundMessageId: inbound.id, senderName: conversation.buyerDisplayName, requestId: `xianyu:auto-reply:${record.externalMessageRef}`, traceId: `xianyu:auto-reply:${record.externalMessageRef}`, sourceEventId: record.sourceEventId ?? record.externalMessageRef, sourceSequence: record.sourceSequence });
+  }
+
+  private async classifySystemCandidate(
+    adminId: string,
+    accountId: string,
+    conversationId: string | undefined,
+    message: { bodyType: 'text' | 'image' | 'system'; bodyText?: string; senderRef?: string; itemRef?: string; platformSystemMessage?: boolean; riskFlags?: string[] },
+  ): Promise<{ bodyType: 'text' | 'image' | 'system'; riskFlags?: string[] }> {
+    const baseRiskFlags = [...new Set(message.riskFlags ?? [])];
+    if (message.bodyType !== 'text' || !message.platformSystemMessage || !isXianyuSystemMessageText(message.bodyText)) {
+      return { bodyType: message.bodyType, riskFlags: baseRiskFlags.length > 0 ? baseRiskFlags : undefined };
+    }
+    const kind = parseXianyuSystemMessageKind(message.bodyText);
+    if (!kind) return { bodyType: 'text', riskFlags: appendRiskFlag(baseRiskFlags, 'xianyu_system_candidate_unverified') };
+    try {
+      const orders = await this.store.listAutoReplyOrders(adminId, {
+        accountId,
+        buyerId: message.senderRef,
+        conversationId,
+        limit: 50,
+      });
+      const matched = orders.items.some((order) => {
+        if (message.itemRef && order.itemId && message.itemRef !== order.itemId) return false;
+        return matchesXianyuOrderStatus(kind, order);
+      });
+      if (matched) return { bodyType: 'system', riskFlags: appendRiskFlag(baseRiskFlags, 'xianyu_system_message') };
+    } catch {
+      // Fail closed: a reminder without a verified order must never reach auto reply.
+    }
+    return { bodyType: 'text', riskFlags: appendRiskFlag(baseRiskFlags, 'xianyu_system_candidate_unverified') };
   }
 
   /** Wake a bounded one-shot inbox poll without replacing the durable worker. */
@@ -740,10 +775,10 @@ function normalizeConversation(value: unknown, myId: string | readonly string[])
   return { externalConversationRef, buyerRef, buyerDisplayName, buyerAvatarUrl, itemRef, itemTitle, itemImageUrl, unreadCount: numberValue(conv.redPoint), lastMessagePreview: preview, lastMessageAt: timestamp };
 }
 
-function normalizeHistoryMessage(value: unknown, myId: string | readonly string[]): { externalMessageRef: string; externalMessageRefAliases?: string[]; direction: 'inbound' | 'outbound'; bodyType: 'text' | 'image' | 'system'; bodyText?: string; bodyRef?: string; riskFlags?: string[]; createdAt: string } | undefined {
+function normalizeHistoryMessage(value: unknown, myId: string | readonly string[]): { externalMessageRef: string; externalMessageRefAliases?: string[]; senderRef?: string; itemRef?: string; direction: 'inbound' | 'outbound'; bodyType: 'text' | 'image' | 'system'; bodyText?: string; bodyRef?: string; platformSystemMessage?: boolean; riskFlags?: string[]; createdAt: string } | undefined {
   const model = record(value);
   const message = record(model.message ?? model);
-  const extension = record(message.extension);
+  const extension = mergeRecords(record(model.extension), record(message.extension), parseJsonObject(record(model.extension).extJson), parseJsonObject(record(message.extension).extJson));
   // History and live push may expose the same platform message under both a
   // stable `.PNM` id and an internal transport id. Keep the stable id when it
   // is present so the store's external-message uniqueness remains effective.
@@ -761,10 +796,12 @@ function normalizeHistoryMessage(value: unknown, myId: string | readonly string[
   const fallback = string(custom.summary ?? extension.reminderContent ?? extension.detailNotice);
   const bodyText = content.text ?? fallback;
   const bodyRef = content.images[0];
+  const itemRef = firstString([extension, message], ['itemId', 'itemID', 'itemRef']);
+  const platformSystemMessage = Boolean(bodyText && isXianyuSystemMessageText(bodyText) && hasXianyuSystemEnvelopeMarker(model, message, extension, custom));
   const bodyType = bodyRef ? 'image' : bodyText ? 'text' : 'system';
   const receivedAt = new Date().toISOString();
   const createdAt = normalizeTimestamp(message.createAt);
-  return { externalMessageRef, externalMessageRefAliases: externalMessageRefCandidates.filter((value) => value !== externalMessageRef), direction, bodyType, bodyText, bodyRef, riskFlags: createdAt ? undefined : ['source_timestamp_invalid'], createdAt: createdAt ?? receivedAt };
+  return { externalMessageRef, externalMessageRefAliases: externalMessageRefCandidates.filter((value) => value !== externalMessageRef), senderRef: senderRef || undefined, itemRef, direction, bodyType, bodyText, bodyRef, ...(platformSystemMessage ? { platformSystemMessage: true } : {}), riskFlags: createdAt ? undefined : ['source_timestamp_invalid'], createdAt: createdAt ?? receivedAt };
 }
 
 function decodeCustom(value: unknown): { text?: string; images: string[] } {

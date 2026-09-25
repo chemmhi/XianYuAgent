@@ -53,6 +53,7 @@ export function AutoReplyAgentPanel({ controller, accountName, accountId }: { co
           <InputField label="最大回复长度" type="number" min={30} max={4000} value={draft.maxReplyLength} onChange={(event) => setField('maxReplyLength', Number(event.target.value))} required />
           <InputField label="分段发送间隔（毫秒）" type="number" min={0} max={30000} value={draft.replySegmentDelayMs} onChange={(event) => setField('replySegmentDelayMs', Number(event.target.value))} required />
           <InputField label="防抖窗口（毫秒）" type="number" min={0} max={30000} value={draft.debounceMs} onChange={(event) => setField('debounceMs', Number(event.target.value))} required />
+          <InputField label="自动回复延迟发送时间（秒）" type="number" min={0} max={86400} value={draft.sendDelaySeconds} onChange={(event) => setField('sendDelaySeconds', Number(event.target.value))} required />
           <SelectField label="发送模式" value={draft.sendMode} onChange={(event) => setField('sendMode', event.target.value as EditableConfig['sendMode'])} options={[{ value: 'simulate', label: '模拟发送' }, { value: 'live', label: '真实发送（受白名单约束）' }]} />
         </fieldset>
       </div>

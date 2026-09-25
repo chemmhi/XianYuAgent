@@ -187,6 +187,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     maxHistory: autoReplyAgentConfig.maxHistory,
     maxReplyLength: autoReplyAgentConfig.maxReplyLength,
     replySegmentDelayMs: autoReplyAgentConfig.replySegmentDelayMs,
+    sendDelaySeconds: autoReplyAgentConfig.sendDelaySeconds,
     generator: autoReplyModelClient ? new ToolCallingAutoReplyAgent(store, autoReplyModelClient, autoReplyAgentConfig, { godView: autoReplyGodView }) : undefined,
     godView: autoReplyGodView,
     totalTimeoutMs: 60_000,
@@ -213,6 +214,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
         maxHistory: settings.maxHistory,
         maxReplyLength: settings.maxReplyLength,
         replySegmentDelayMs: settings.replySegmentDelayMs,
+        sendDelaySeconds: settings.sendDelaySeconds,
         generator: runtimeModelClient ? new ToolCallingAutoReplyAgent(store, runtimeModelClient, runtimeConfig, { godView: autoReplyGodView }) : undefined,
       };
     },
@@ -1614,7 +1616,7 @@ function readAutoReplyAgentPatch(body: Record<string, unknown>): import('./domai
   const patch: import('./domain.js').AutoReplyAgentConfigPatch = {};
   const booleanFields = ['enabled'] as const;
   const stringFields = ['systemPrompt', 'userPromptTemplate', 'sendMode'] as const;
-  const numberFields = ['maxLoops', 'maxToolCalls', 'toolTimeoutMs', 'totalTimeoutMs', 'maxHistory', 'maxReplyLength', 'replySegmentDelayMs', 'debounceMs'] as const;
+  const numberFields = ['maxLoops', 'maxToolCalls', 'toolTimeoutMs', 'totalTimeoutMs', 'maxHistory', 'maxReplyLength', 'replySegmentDelayMs', 'debounceMs', 'sendDelaySeconds'] as const;
   for (const field of booleanFields) if (typeof body[field] === 'boolean') patch[field] = body[field] as never;
   for (const field of stringFields) if (typeof body[field] === 'string') patch[field] = body[field] as never;
   for (const field of numberFields) if (typeof body[field] === 'number') patch[field] = body[field] as never;

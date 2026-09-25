@@ -142,6 +142,7 @@ export interface AutoReplyServiceOptions {
   maxHistory?: number;
   maxReplyLength?: number;
   replySegmentDelayMs?: number;
+  sendDelaySeconds?: number;
   classifier?: RuleBasedIntentClassifier;
   generator?: AutoReplyGenerator;
   sender?: AutoReplySender;
@@ -161,6 +162,7 @@ export interface AutoReplyServiceRuntimeOptions {
   maxHistory?: number;
   maxReplyLength?: number;
   replySegmentDelayMs?: number;
+  sendDelaySeconds?: number;
   generator?: AutoReplyGenerator;
 }
 
@@ -173,6 +175,7 @@ export class AutoReplyService {
   private readonly maxHistory: number;
   private readonly maxReplyLength: number;
   private readonly replySegmentDelayMs: number;
+  private readonly sendDelaySeconds: number;
   private readonly classifier: RuleBasedIntentClassifier;
   private readonly generator: AutoReplyGenerator;
   private readonly sender: AutoReplySender;
@@ -196,6 +199,7 @@ export class AutoReplyService {
     this.maxHistory = Math.max(1, Math.min(options.maxHistory ?? 20, 50));
     this.maxReplyLength = Math.max(30, Math.min(options.maxReplyLength ?? 500, 2_000));
     this.replySegmentDelayMs = Math.max(0, Math.min(options.replySegmentDelayMs ?? 350, 5_000));
+    this.sendDelaySeconds = Math.max(0, Math.min(options.sendDelaySeconds ?? 0, 86_400));
     this.classifier = options.classifier ?? new RuleBasedIntentClassifier();
     this.generator = options.generator ?? new TemplateAutoReplyGenerator();
     this.sender = options.sender ?? new NoopAutoReplySender();
@@ -301,7 +305,7 @@ export class AutoReplyService {
       const runtime = await this.resolveRuntimeOptions(input.adminId, conversation.accountId);
       const modelDecidesRouting = runtime.generator.supportsStructuredDecision === true;
       const supportedMessage = inboundMessage.bodyType === 'text'
-        ? Boolean(inboundMessage.bodyText?.trim())
+        ? Boolean(inboundMessage.bodyText?.trim()) && !inboundMessage.riskFlags.includes('xianyu_system_candidate_unverified')
         : inboundMessage.bodyType === 'image' && runtime.generator.supportsMultimodal === true && Boolean(inboundMessage.bodyRef?.trim());
       if (!runtime.enabled || inboundMessage.direction !== 'inbound' || !supportedMessage) {
         const failureCode = !runtime.enabled ? 'AUTO_REPLY_DISABLED' : 'UNSUPPORTED_MESSAGE';
@@ -488,6 +492,25 @@ export class AutoReplyService {
           if (this.repairRuntime.currentMode === 'enforce') throw error;
         }
       }
+      if (runtime.sendDelaySeconds > 0) {
+        await updateRun({ eventPayload: {
+          input: { kind: 'send_delay_gate', delaySeconds: runtime.sendDelaySeconds, inboundMessageCreatedAt: inboundMessage.createdAt },
+          output: { decision: 'waiting', reason: 'AUTO_REPLY_SEND_DELAY' },
+        } });
+        await delay(runtime.sendDelaySeconds * 1_000);
+        const humanReply = await this.findHumanReplyAfter(input.adminId, conversation.id, inboundMessage.createdAt);
+        if (humanReply) {
+          const failureCode = 'AUTO_REPLY_CANCELLED_BY_HUMAN_REPLY';
+          const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode, riskFlags: [...classification.riskFlags, 'human_reply_during_send_delay'], eventPayload: {
+            input: { kind: 'send_delay_gate', delaySeconds: runtime.sendDelaySeconds, inboundMessageCreatedAt: inboundMessage.createdAt },
+            output: { decision: 'skipped', reason: failureCode, humanReplyMessageId: humanReply.id, humanReplyCreatedAt: humanReply.createdAt },
+            error: { code: failureCode },
+          } });
+          await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'skipped', reason: failureCode, humanReplyMessageId: humanReply.id, delaySeconds: runtime.sendDelaySeconds });
+          await this.godView?.emit({ phase: 'run', event: 'run.cancelled', traceId, runId: run.id, buyer, payload: { status: 'skipped', decision: 'skipped', failureCode, delaySeconds: runtime.sendDelaySeconds, humanReplyMessageId: humanReply.id } });
+          return { run: updated ?? run, inboundMessage, classification, context, repair };
+        }
+      }
       let lastOutboundMessageId: string | undefined;
       let lastOutcome: Awaited<ReturnType<AutoReplySender['send']>>['outcome'] = 'simulated';
       let lastExternalMessageRef: string | undefined;
@@ -607,6 +630,7 @@ export class AutoReplyService {
       maxHistory: Math.max(1, Math.min(provided.maxHistory ?? this.maxHistory, 50)),
       maxReplyLength: Math.max(30, Math.min(provided.maxReplyLength ?? this.maxReplyLength, 2_000)),
       replySegmentDelayMs: Math.max(0, Math.min(provided.replySegmentDelayMs ?? this.replySegmentDelayMs, 5_000)),
+      sendDelaySeconds: Math.max(0, Math.min(provided.sendDelaySeconds ?? this.sendDelaySeconds, 86_400)),
       generator: provided.generator ?? this.generator,
     };
   }
@@ -649,6 +673,16 @@ export class AutoReplyService {
   private async findMessage(adminId: string, conversationId: string, messageId: string): Promise<MessageRecord | undefined> {
     const result = await this.store.listMessages(adminId, conversationId, { limit: 200 });
     return result.items.find((message) => message.id === messageId);
+  }
+
+  private async findHumanReplyAfter(adminId: string, conversationId: string, afterCreatedAt: string): Promise<MessageRecord | undefined> {
+    const result = await this.store.listMessages(adminId, conversationId, { limit: 200 });
+    const after = Date.parse(afterCreatedAt);
+    return result.items.find((message) => {
+      if (message.direction !== 'outbound' || message.senderRole !== 'agent' || message.source !== 'human') return false;
+      const createdAt = Date.parse(message.createdAt);
+      return !Number.isFinite(after) || !Number.isFinite(createdAt) || createdAt >= after;
+    });
   }
 
   private async recordAudit(adminId: string, accountId: string, runId: string, requestId: string, traceId: string, payload: unknown): Promise<void> {

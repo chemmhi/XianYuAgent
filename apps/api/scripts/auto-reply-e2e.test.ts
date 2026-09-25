@@ -9,9 +9,184 @@ function replyPayload(text: string): string {
   return JSON.stringify({ decision: 'reply', text });
 }
 
+test('verified transaction status notices are persisted as system messages and never enter auto reply', async () => {
+  const runtime = createApp(loadConfig({
+    ...process.env,
+    AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
+    HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false',
+    XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_MODEL_ENABLED: 'false', AUTO_REPLY_SEND_MODE: 'simulate',
+    AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
+  }));
+  await runtime.listen();
+  try {
+    const boot = await runtime.auth.bootstrap({ email: 'system-message-e2e@example.com', password: 'password-123', displayName: 'System Message E2E' });
+    const adminId = boot.admin.id;
+    const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: 'system-message-seller' });
+    const conversation = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'system-message-buyer', buyerDisplayName: '系统消息买家', externalConversationRef: 'system-message-conversation' });
+    await runtime.store.createOrder({ adminId, order: { orderNo: 'SYSTEM-MESSAGE-ORDER-1', accountId: account.id, buyerId: conversation.buyerRef, buyerName: conversation.buyerDisplayName ?? '系统消息买家', conversationId: conversation.id, itemId: 'system-message-item', itemTitle: '系统消息商品', amountMinor: 1_000, paymentStatus: 'unpaid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'manual' } });
+
+    const result = await runtime.xianyuIm.handleExternalEvent(adminId, {
+      accountId: account.id,
+      externalConversationRef: conversation.externalConversationRef!,
+      externalMessageRef: 'system-message-1.PNM',
+      senderRef: conversation.buyerRef,
+      senderName: conversation.buyerDisplayName,
+      direction: 'inbound',
+      bodyType: 'text',
+      bodyText: '[我已拍下，待付款]',
+      platformSystemMessage: true,
+      occurredAt: new Date().toISOString(),
+    });
+
+    assert.equal(result.created, true);
+    assert.equal(result.autoReply, undefined);
+    const messages = await runtime.messages.listMessages(adminId, conversation.id, { limit: 20 });
+    assert.equal(messages.items[0]?.bodyType, 'system');
+    assert.equal(messages.items[0]?.senderRole, 'system');
+    assert.equal(messages.items.filter((message) => message.direction === 'outbound').length, 0);
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('manual status text remains an auto-reply message while an unverified platform candidate is skipped', async () => {
+  const runtime = createApp(loadConfig({
+    ...process.env,
+    AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
+    HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false',
+    XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_MODEL_ENABLED: 'false', AUTO_REPLY_SEND_MODE: 'simulate',
+    AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
+  }));
+  await runtime.listen();
+  try {
+    const boot = await runtime.auth.bootstrap({ email: 'status-boundary-e2e@example.com', password: 'password-123', displayName: 'Status Boundary E2E' });
+    const adminId = boot.admin.id;
+    const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: 'status-boundary-seller' });
+    const manual = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'manual-status-buyer', buyerDisplayName: '手动同文案买家', externalConversationRef: 'manual-status-conversation' });
+    const candidate = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'candidate-status-buyer', buyerDisplayName: '未核验买家', externalConversationRef: 'candidate-status-conversation' });
+
+    const manualResult = await runtime.xianyuIm.handleExternalEvent(adminId, {
+      accountId: account.id,
+      externalConversationRef: manual.externalConversationRef!,
+      externalMessageRef: 'manual-status-message-1.PNM',
+      senderRef: manual.buyerRef,
+      senderName: manual.buyerDisplayName,
+      direction: 'inbound',
+      bodyType: 'text',
+      bodyText: '[我已付款，等待你发货]',
+      occurredAt: new Date().toISOString(),
+    });
+    assert.equal(manualResult.autoReply?.run.status, 'persisted');
+    assert.equal(manualResult.autoReply?.outboundMessage?.direction, 'outbound');
+
+    const candidateResult = await runtime.xianyuIm.handleExternalEvent(adminId, {
+      accountId: account.id,
+      externalConversationRef: candidate.externalConversationRef!,
+      externalMessageRef: 'candidate-status-message-1.PNM',
+      senderRef: candidate.buyerRef,
+      senderName: candidate.buyerDisplayName,
+      direction: 'inbound',
+      bodyType: 'text',
+      bodyText: '[我已付款，等待你发货]',
+      platformSystemMessage: true,
+      occurredAt: new Date().toISOString(),
+    });
+    assert.equal(candidateResult.autoReply?.run.status, 'skipped');
+    assert.equal(candidateResult.autoReply?.run.failureCode, 'UNSUPPORTED_MESSAGE');
+    assert.equal(candidateResult.autoReply?.outboundMessage, undefined);
+    const candidateMessages = await runtime.messages.listMessages(adminId, candidate.id, { limit: 20 });
+    assert.equal(candidateMessages.items[0]?.bodyType, 'text');
+    assert.equal(candidateMessages.items[0]?.riskFlags.includes('xianyu_system_candidate_unverified'), true);
+    assert.equal(candidateMessages.items.filter((message) => message.direction === 'outbound').length, 0);
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('delayed auto reply is cancelled by a human reply and never persists AI text', async () => {
+  const runtime = createApp(loadConfig({
+    ...process.env,
+    AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
+    HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false',
+    XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_MODEL_ENABLED: 'false', AUTO_REPLY_SEND_MODE: 'simulate',
+    AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
+  }));
+  await runtime.listen();
+  try {
+    const boot = await runtime.auth.bootstrap({ email: 'delay-cancel-e2e@example.com', password: 'password-123', displayName: 'Delay Cancel E2E' });
+    const adminId = boot.admin.id;
+    const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: 'delay-cancel-seller' });
+    const conversation = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'delay-cancel-buyer', buyerDisplayName: '延迟买家', externalConversationRef: 'delay-cancel-conversation' });
+    const current = await runtime.autoReplyAgentSettings.get(adminId, account.id);
+    await runtime.autoReplyAgentSettings.update({ adminId, accountId: account.id, expectedVersion: current.configVersion, patch: { sendDelaySeconds: 1, debounceMs: 0 }, requestId: 'delay-cancel-settings', traceId: 'delay-cancel-settings' });
+
+    const pending = runtime.xianyuIm.handleExternalEvent(adminId, {
+      accountId: account.id,
+      externalConversationRef: conversation.externalConversationRef!,
+      externalMessageRef: 'delay-cancel-inbound.PNM',
+      senderRef: conversation.buyerRef,
+      senderName: conversation.buyerDisplayName,
+      direction: 'inbound',
+      bodyType: 'text',
+      bodyText: '请问多少钱？',
+      occurredAt: new Date().toISOString(),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await runtime.messages.createMessage({ adminId, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: '人工已接管，请稍等。', source: 'human', requestId: 'delay-cancel-human', traceId: 'delay-cancel-human' });
+    const result = await pending;
+
+    assert.equal(result.autoReply?.run.status, 'skipped');
+    assert.equal(result.autoReply?.run.failureCode, 'AUTO_REPLY_CANCELLED_BY_HUMAN_REPLY');
+    const messages = await runtime.messages.listMessages(adminId, conversation.id, { limit: 20 });
+    assert.equal(messages.items.filter((message) => message.direction === 'outbound' && message.source === 'ai').length, 0);
+    assert.equal(messages.items.filter((message) => message.direction === 'outbound' && message.source === 'human').length, 1);
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('delayed auto reply sends and persists when no human reply arrives', async () => {
+  const runtime = createApp(loadConfig({
+    ...process.env,
+    AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
+    HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false',
+    XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_MODEL_ENABLED: 'false', AUTO_REPLY_SEND_MODE: 'simulate',
+    AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
+  }));
+  await runtime.listen();
+  try {
+    const boot = await runtime.auth.bootstrap({ email: 'delay-send-e2e@example.com', password: 'password-123', displayName: 'Delay Send E2E' });
+    const adminId = boot.admin.id;
+    const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: 'delay-send-seller' });
+    const conversation = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'delay-send-buyer', buyerDisplayName: '延迟发送买家', externalConversationRef: 'delay-send-conversation' });
+    const current = await runtime.autoReplyAgentSettings.get(adminId, account.id);
+    await runtime.autoReplyAgentSettings.update({ adminId, accountId: account.id, expectedVersion: current.configVersion, patch: { sendDelaySeconds: 1, debounceMs: 0 }, requestId: 'delay-send-settings', traceId: 'delay-send-settings' });
+
+    const result = await runtime.xianyuIm.handleExternalEvent(adminId, {
+      accountId: account.id,
+      externalConversationRef: conversation.externalConversationRef!,
+      externalMessageRef: 'delay-send-inbound.PNM',
+      senderRef: conversation.buyerRef,
+      senderName: conversation.buyerDisplayName,
+      direction: 'inbound',
+      bodyType: 'text',
+      bodyText: '你好',
+      occurredAt: new Date().toISOString(),
+    });
+
+    assert.equal(result.autoReply?.run.status, 'persisted');
+    assert.equal(result.autoReply?.outboundMessage?.source, 'ai');
+    const messages = await runtime.messages.listMessages(adminId, conversation.id, { limit: 20 });
+    assert.equal(messages.items.filter((message) => message.direction === 'outbound' && message.source === 'ai').length, 1);
+  } finally {
+    await runtime.close();
+  }
+});
+
 test('production listener callback defers to the inbox worker and publishes both message events', async () => {
   const runtime = createApp(loadConfig({
     ...process.env,
+    AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
     HOST: '127.0.0.1',
     PORT: '0',
     DATABASE_URL: '',
@@ -72,6 +247,7 @@ test('production listener callback defers to the inbox worker and publishes both
 test('xianyu listener drives product and general auto-reply chains without real send', async () => {
   const runtime = createApp(loadConfig({
     ...process.env,
+    AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
     HOST: '127.0.0.1',
     PORT: '0',
     DATABASE_URL: '',
@@ -188,6 +364,7 @@ test('real push handles a GitHub skill question through the Responses search pat
   }) as typeof fetch;
   const runtime = createApp(loadConfig({
     ...process.env,
+    AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
     HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
     API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'buyer-agent-test', WIRE_API: 'responses', AUTO_REPLY_MODEL_ENABLED: 'true', AUTO_REPLY_SEND_MODE: 'simulate', AUTOMATION_BUYER_ALLOWLIST: '["买家"]', AUTO_REPLY_AGENT_DEBOUNCE_MS: '0', AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS: '0',
   }));
@@ -243,6 +420,7 @@ test('persisted Agent settings apply to the next buyer push without restart', as
   }) as typeof fetch;
   const runtime = createApp(loadConfig({
     ...process.env,
+    AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
     HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
     API_KEY: 'settings-e2e-key', BASE_URL: 'https://model.example/v1', MODEL: 'settings-e2e', WIRE_API: 'chat', AUTO_REPLY_MODEL_ENABLED: 'true', AUTO_REPLY_SEND_MODE: 'simulate', AUTOMATION_BUYER_ALLOWLIST: '["设置买家"]', AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
     AUTO_REPLY_AGENT_SYSTEM_PROMPT: '初始系统提示',

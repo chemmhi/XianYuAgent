@@ -1899,6 +1899,7 @@ export class PostgresStore implements Store {
       maxReplyLength: Number(config.maxReplyLength ?? 1_000),
       replySegmentDelayMs: Number(config.replySegmentDelayMs ?? 800),
       debounceMs: Number(config.debounceMs ?? 2_000),
+      sendDelaySeconds: Number(config.sendDelaySeconds ?? 300),
       sendMode: config.sendMode === 'live' ? 'live' : 'simulate',
       configVersion: Number(row.config_version ?? 1),
       configDigest: String(row.config_digest ?? ''),
