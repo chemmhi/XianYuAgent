@@ -540,7 +540,32 @@ test('auto-reply defaults to the repaired enforce chain', () => {
     AGENT_RUNTIME: 'in-process',
   });
   assert.equal(config.autoReplyRepairMode, 'enforce');
+  assert.equal(config.autoReplyPolicyBootstrapDefault, true);
   assert.equal(config.autoReplyOutcomeReviewWorkerEnabled, true);
+});
+
+test('app startup bootstraps a default repair policy for accounts without one', async () => {
+  const runtime = createApp(loadConfig({
+    HOST: '127.0.0.1',
+    PORT: '0',
+    DATABASE_URL: '',
+    REDIS_URL: '',
+    ALLOW_IN_MEMORY: 'true',
+    COOKIE_SECURE: 'false',
+    XIANYU_QR_MODE: 'stub',
+    AGENT_RUNTIME: 'in-process',
+    AUTO_REPLY_POLICY_BOOTSTRAP_DEFAULT: 'true',
+  }));
+  try {
+    const admin = await runtime.store.createAdmin({ email: 'policy-bootstrap@example.com', passwordHash: 'hash', displayName: 'Policy Bootstrap' });
+    const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'policy-bootstrap-account' });
+    await runtime.listen();
+    const policy = await runtime.store.getActiveAutoReplyRepairPolicy(account.id);
+    assert.equal(policy?.policyConfig.accountScope, account.id);
+    assert.equal(policy?.policyConfig.policyVersion, 'ar-vs08-shadow-v1');
+  } finally {
+    await runtime.close();
+  }
 });
 
 test('legacy repair modes are removed from app configuration', () => {

@@ -51,6 +51,8 @@ export interface AppConfig {
   productAutomationLiveConfirmed: boolean;
   autoReplyRepairMode?: AutoReplyRepairMode;
   autoReplyPolicyJson?: string;
+  /** Seed the built-in versioned repair policy when no account policy exists. */
+  autoReplyPolicyBootstrapDefault?: boolean;
   autoReplyOutcomeReviewWorkerEnabled: boolean;
   autoReplyOutcomeReviewWorkerPollMs: number;
   autoReplyOutcomeReviewWorkerBatchSize: number;
@@ -119,6 +121,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     buyerAllowlist,
     autoReplyRepairMode,
     autoReplyPolicyJson: env.AUTO_REPLY_POLICY_JSON?.trim() || undefined,
+    autoReplyPolicyBootstrapDefault: asBoolean(env.AUTO_REPLY_POLICY_BOOTSTRAP_DEFAULT, true),
     autoReplyOutcomeReviewWorkerEnabled,
     autoReplyOutcomeReviewWorkerPollMs: positiveNumber(env.AUTO_REPLY_OUTCOME_REVIEW_WORKER_POLL_MS, 1_000),
     autoReplyOutcomeReviewWorkerBatchSize: positiveNumber(env.AUTO_REPLY_OUTCOME_REVIEW_WORKER_BATCH_SIZE, 10),

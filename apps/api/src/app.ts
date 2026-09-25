@@ -173,7 +173,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
   const autoReplyRepair = new AutoReplyRepairRuntime(store, autoReplyRepairMode, async (accountId, now) => {
     const persisted = await store.getActiveAutoReplyRepairPolicy(accountId, now.toISOString());
     if (persisted) return persisted;
-    if (config.allowInMemory) return createDefaultAutoReplyRepairPolicy(accountId, now);
+    if (config.allowInMemory || config.autoReplyPolicyBootstrapDefault !== false) return createDefaultAutoReplyRepairPolicy(accountId, now);
     return parseAutoReplyRepairPolicyBundle(config.autoReplyPolicyJson, accountId);
   });
   const autoReply = new AutoReplyService(store, messages, async (input) => {
@@ -330,6 +330,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     server,
     async listen() {
       await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));
+      await bootstrapRepairPoliciesBestEffort(runtime);
       if (config.xianyuQrMode === 'real') void startAllRecoverableListenersBestEffort(runtime);
     },
     async close() {
@@ -428,6 +429,28 @@ async function startAllRecoverableListenersBestEffort(runtime: AppRuntime): Prom
     for (const adminId of adminIds) await startRecoverableListenersBestEffort(runtime, adminId);
   } catch (error) {
     console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'admin_scan_failed', errorCode: listenerErrorCode(error) }));
+  }
+}
+
+async function bootstrapRepairPoliciesBestEffort(runtime: AppRuntime): Promise<void> {
+  if (runtime.config.autoReplyPolicyBootstrapDefault === false) return;
+  try {
+    const now = new Date();
+    for (const adminId of await runtime.store.listAdminIds()) {
+      const accounts = await runtime.accounts.list(adminId, { page: 1, pageSize: 100 });
+      for (const account of accounts.items) {
+        const existing = await runtime.store.getActiveAutoReplyRepairPolicy(account.id, now.toISOString());
+        if (existing) continue;
+        try {
+          await runtime.store.publishAutoReplyRepairPolicy({ accountId: account.id, bundle: createDefaultAutoReplyRepairPolicy(account.id, now) });
+          console.info(JSON.stringify({ component: 'auto-reply-policy-bootstrap', event: 'default_policy_published', accountId: account.id, policyVersion: 'ar-vs08-shadow-v1' }));
+        } catch (error) {
+          console.warn(JSON.stringify({ component: 'auto-reply-policy-bootstrap', event: 'default_policy_publish_failed', accountId: account.id, errorCode: listenerErrorCode(error) }));
+        }
+      }
+    }
+  } catch (error) {
+    console.warn(JSON.stringify({ component: 'auto-reply-policy-bootstrap', event: 'account_scan_failed', errorCode: listenerErrorCode(error) }));
   }
 }
 
