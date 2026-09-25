@@ -938,6 +938,43 @@ export class MemoryStore implements Store {
     return message ? { ...message, riskFlags: [...message.riskFlags] } : undefined;
   }
 
+  async reconcileExternalMessage(input: { adminId: string; conversationId: string; externalMessageRef: string; senderRole: MessageRecord['senderRole']; bodyType: MessageRecord['bodyType']; source?: MessageRecord['source']; riskFlags?: string[]; traceId?: string }): Promise<{ message: MessageRecord; event?: ConversationEventRecord } | undefined> {
+    const conversation = await this.getConversation(input.adminId, input.conversationId);
+    if (!conversation) return undefined;
+    const aliasMessageId = this.inboundMessageAliases.get(`${conversation.accountId}:${input.conversationId}:${input.externalMessageRef}`);
+    const message = [...this.messages.values()].find((item) => item.conversationId === input.conversationId && (item.externalMessageRef === input.externalMessageRef || item.id === aliasMessageId));
+    if (!message) return undefined;
+
+    const systemUpgrade = message.direction === 'inbound' && input.senderRole === 'system' && input.bodyType === 'system';
+    const mergedRiskFlags = [...new Set([...message.riskFlags, ...(input.riskFlags ?? [])])];
+    const changed = (systemUpgrade && (message.senderRole !== 'system' || message.bodyType !== 'system' || (input.source && message.source !== input.source)))
+      || mergedRiskFlags.length !== message.riskFlags.length;
+    if (!changed) return { message: { ...message, riskFlags: [...message.riskFlags] } };
+
+    if (systemUpgrade) {
+      message.senderRole = 'system';
+      message.bodyType = 'system';
+      if (input.source) message.source = input.source;
+    }
+    message.riskFlags = mergedRiskFlags;
+    conversation.version += 1;
+    const occurredAt = new Date().toISOString();
+    const cursor = (this.conversationCursors.get(conversation.id) ?? 0) + 1;
+    this.conversationCursors.set(conversation.id, cursor);
+    const event: ConversationEventRecord = {
+      eventId: createId(),
+      conversationId: conversation.id,
+      accountId: conversation.accountId,
+      cursor,
+      type: 'chat.message.updated',
+      occurredAt,
+      traceId: input.traceId ?? `reconcile:${message.id}`,
+      payload: { message: { ...message, riskFlags: [...message.riskFlags] }, conversation: { ...conversation } },
+    };
+    this.conversationEvents.get(conversation.id)?.push(event);
+    return { message: { ...message, riskFlags: [...message.riskFlags] }, event: { ...event, payload: { ...event.payload } } };
+  }
+
   async createConversation(input: { adminId: string; accountId: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; externalConversationRef?: string }): Promise<ConversationRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const now = new Date().toISOString();

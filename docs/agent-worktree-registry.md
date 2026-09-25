@@ -202,3 +202,6 @@
 
 | root | product-automation-identity-status-20260925 | fix/product-automation-identity-status-20260925 | F:\ChenHai\Project\XianYuAgent-product-automation-identity-status-20260925 | Codex /root | 2026-09-25 00:20:00 +08:00 | MERGED | 4fbe20d | - | 买家白名单改用闲鱼昵称、兼容订单状态数字码、买家手动输入支付文案保持普通文本；已合入 main 并通过相关回归。 |
 | `root` | `product-automation-rule-lifecycle-20260925` | `fix/product-automation-rule-lifecycle-20260925` | `F:\ChenHai\Project\XianYuAgent-product-automation-rule-lifecycle-20260925` | Codex /root | 2026-09-25 00:30:00 +08:00 | `CLEANED` | 58ce80c4fbb5ddf1e13be65f446aa020b6809faf | 2026-09-25 00:00:00 +08:00 | 已合入 main；评价外部写操作新增独立确认门禁；API 商品自动化回归 42/42、四规则 E2E 1/1、API build 与 diff-check 通过。 |
+| `root` | `auto-reply-system-buyer-routing-20260926` | `fix/auto-reply-system-buyer-routing-20260926` | `F:\\ChenHai\\Project\\XianYuAgent-system-buyer-routing-20260926` | Codex /root | `2026-09-25 00:00:00 +08:00` | `READY_FOR_MERGE` | `-` | `-` | 官方结构化系统消息识别、历史旧记录自修正、目标卖家/买家 28 条历史数据回填；窄回归 23/23、API build、PostgreSQL reconcile smoke 通过；完整自动回复单测卡在既有 AR-VS-08 repaired runtime 用例。 |
+
+
