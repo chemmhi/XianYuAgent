@@ -24,7 +24,7 @@ function defaultConfig(productId: string, accountId: string): ProductAutomationC
     delivery: { enabled: true, couponIds: ['coupon-batch-2'], autoConfirm: true },
     reprice: { enabled: false, targetPriceMinor: 990, repriceMessage: '已为您调整价格，请及时付款' },
     gift: { enabled: false, couponIds: [] },
-    review: { enabled: true, reviewInitialHours: 72, reviewRepeatHours: 24, reviewMaxCount: 1, reviewMessage: '商品已经发出，如果使用满意，麻烦帮忙点个好评～' },
+    review: { enabled: true, reviewInitialMinutes: 72 * 60, reviewRepeatMinutes: 24 * 60, reviewMaxCount: 1, reviewMessage: '商品已经发出，如果使用满意，麻烦帮忙点个好评～' },
   };
 }
 
@@ -46,8 +46,8 @@ export function toAutomationConfig(value: ProductAutomationConfigWire | ProductA
     gift: { enabled: canonical.reviewGift?.enabled ?? false, couponIds: ((canonical.reviewGift as { couponBatchIds?: string[]; couponIds?: string[] } | undefined)?.couponBatchIds ?? (canonical.reviewGift as { couponBatchIds?: string[]; couponIds?: string[] } | undefined)?.couponIds ?? []) },
     review: {
       enabled: canonical.reviewReminder?.enabled ?? false,
-      reviewInitialHours: (canonical.reviewReminder as { firstDelayHours?: number } | undefined)?.firstDelayHours ?? 72,
-      reviewRepeatHours: (canonical.reviewReminder as { repeatIntervalHours?: number } | undefined)?.repeatIntervalHours ?? 24,
+      reviewInitialMinutes: reviewDelayMinutes(canonical.reviewReminder, 'firstDelayMinutes', 'firstDelayHours', 72 * 60),
+      reviewRepeatMinutes: reviewDelayMinutes(canonical.reviewReminder, 'repeatIntervalMinutes', 'repeatIntervalHours', 24 * 60),
       reviewMaxCount: (canonical.reviewReminder as { maxReminders?: number } | undefined)?.maxReminders ?? 1,
       reviewMessage: (canonical.reviewReminder as { message?: string; reviewMessage?: string } | undefined)?.message ?? (canonical.reviewReminder as { message?: string; reviewMessage?: string } | undefined)?.reviewMessage ?? DEFAULT_REVIEW_MESSAGE,
     },
@@ -61,11 +61,20 @@ export function toAutomationConfigWire(value: ProductAutomationUpdate): ProductA
   if (value.reprice) wire.unpaidAutoReprice = { enabled: value.reprice.enabled, mode: 'fixed', targetPriceMinor: value.reprice.targetPriceMinor ?? 0, message: value.reprice.repriceMessage ?? '', maxAttempts: 3, retryBackoffSeconds: 30 } as ProductAutomationUpdateWire['unpaidAutoReprice'];
   if (value.gift) wire.reviewGift = { enabled: value.gift.enabled, couponBatchIds: value.gift.couponIds ?? [], maxAttempts: 3, retryBackoffSeconds: 30 } as ProductAutomationUpdateWire['reviewGift'];
   if (value.review) {
-    const reviewReminder = { enabled: value.review.enabled, firstDelayHours: value.review.reviewInitialHours ?? 72, repeatIntervalHours: value.review.reviewRepeatHours ?? 24, maxReminders: value.review.reviewMaxCount ?? 1 } as Record<string, unknown>;
+    const reviewReminder = { enabled: value.review.enabled, firstDelayMinutes: value.review.reviewInitialMinutes ?? 72 * 60, repeatIntervalMinutes: value.review.reviewRepeatMinutes ?? 24 * 60, maxReminders: value.review.reviewMaxCount ?? 1 } as Record<string, unknown>;
     if (value.review.reviewMessage !== undefined) reviewReminder.message = value.review.reviewMessage;
     wire.reviewReminder = reviewReminder as unknown as ProductAutomationUpdateWire['reviewReminder'];
   }
   return wire;
+}
+
+function reviewDelayMinutes(value: unknown, minuteKey: string, legacyHourKey: string, fallback: number): number {
+  const source = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const minutes = source[minuteKey];
+  if (typeof minutes === 'number' && Number.isFinite(minutes)) return minutes;
+  const hours = source[legacyHourKey];
+  if (typeof hours === 'number' && Number.isFinite(hours)) return hours * 60;
+  return fallback;
 }
 
 export function toAutomationBatchWire(value: ProductAutomationBatchUpdate, expectedConfigVersions: Record<string, number> = {}): ProductAutomationBatchUpdateWire {

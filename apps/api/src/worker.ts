@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import { InboundInboxWorker } from './inbound-inbox-worker.js';
+import { ProductAutomationReminderWorker } from './product-automation-reminder-worker.js';
 
 const config = loadConfig();
 const runtime = createApp(config);
@@ -23,12 +24,19 @@ const outcomeReviewWorker = config.autoReplyOutcomeReviewWorkerEnabled
       onError: (error) => console.error('outcome review worker poll failed', error),
     })
   : undefined;
-console.log(`xianyu-agent-worker started; redis=${config.redisUrl ?? 'not_configured'} workerId=${workerId} repairMode=${runtime.autoReplyRepair.currentMode} outcomeReviewWorker=${outcomeReviewWorker ? 'enabled' : 'disabled'}`);
+const productAutomationReminderWorker = new ProductAutomationReminderWorker(runtime.store, runtime.productAutomationWorker, {
+  enabled: process.env.PRODUCT_AUTOMATION_REVIEW_REMINDER_WORKER_ENABLED?.trim().toLowerCase() !== 'false',
+  pollMs: positiveNumber(process.env.PRODUCT_AUTOMATION_REVIEW_REMINDER_WORKER_POLL_MS, 60_000),
+  onError: (error) => console.error('product automation reminder worker poll failed', error),
+});
+console.log(`xianyu-agent-worker started; redis=${config.redisUrl ?? 'not_configured'} workerId=${workerId} repairMode=${runtime.autoReplyRepair.currentMode} outcomeReviewWorker=${outcomeReviewWorker ? 'enabled' : 'disabled'} productAutomationReminderWorker=${productAutomationReminderWorker ? 'enabled' : 'disabled'}`);
 worker.start();
 outcomeReviewWorker?.start();
+productAutomationReminderWorker.start();
 const shutdown = (signal: string) => {
   void (async () => {
     await outcomeReviewWorker?.stop();
+    await productAutomationReminderWorker.stop();
     await worker.stop();
     await runtime.xianyuIm.close();
     await runtime.redisRealtime?.close();
@@ -40,3 +48,8 @@ const shutdown = (signal: string) => {
 };
 process.once('SIGINT', () => shutdown('SIGINT'));
 process.once('SIGTERM', () => shutdown('SIGTERM'));
+
+function positiveNumber(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}

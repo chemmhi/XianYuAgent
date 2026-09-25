@@ -1,5 +1,6 @@
 import type { OrderRecord, Store } from './domain.js';
 import type { XianyuImMessageEvent } from './xianyu-im.js';
+import { parseXianyuSystemMessageKind } from './xianyu-system-message.js';
 import {
   AutomationExecutionPort,
   AutomationExecutionResult,
@@ -125,7 +126,8 @@ export class ProductAutomationTrigger {
    * a review or payment event.
    */
   async onImEvent(adminId: string, event: XianyuImMessageEvent): Promise<ProductAutomationImEventResult> {
-    const signal = extractReviewSignal(event.raw);
+    const explicitSignal = extractReviewSignal(event.raw);
+    const signal = explicitSignal ?? await this.deriveReviewSignal(adminId, event);
     if (!signal) return { accepted: false, reason: 'AUTOMATION_SIGNAL_NOT_PRESENT' };
     if (event.direction !== 'inbound' || event.bodyType !== 'system') return { accepted: false, reason: 'AUTOMATION_SIGNAL_SOURCE_INVALID' };
     if (signal.accountId && signal.accountId !== event.accountId) return { accepted: false, reason: 'AUTOMATION_SIGNAL_ACCOUNT_MISMATCH' };
@@ -145,6 +147,30 @@ export class ProductAutomationTrigger {
     }
     const result = await this.onReviewEvent({ adminId, accountId: event.accountId, orderNo: signal.orderNo, eventId: signal.eventId, requestId: `xianyu:review:${signal.eventId}`, traceId: `xianyu:review:${signal.eventId}` });
     return { accepted: true, result };
+  }
+
+  private async deriveReviewSignal(adminId: string, event: XianyuImMessageEvent): Promise<ProductAutomationReviewSignal | undefined> {
+    if (event.direction !== 'inbound' || event.bodyType !== 'system' || event.platformSystemMessage !== true) return undefined;
+    if (parseXianyuSystemMessageKind(event.bodyText) !== 'reviewed') return undefined;
+    const conversation = await this.store.findConversationByExternalRef(adminId, event.accountId, event.externalConversationRef);
+    const candidates = await this.store.listAutoReplyOrders(adminId, {
+      accountId: event.accountId,
+      buyerId: event.senderRef,
+      conversationId: conversation?.id,
+      limit: 50,
+    });
+    const matches = candidates.items.filter((candidate) => {
+      if (event.itemRef && candidate.itemId !== event.itemRef) return false;
+      return candidate.orderStatus === 'completed' || candidate.deliveryStatus === 'delivered';
+    });
+    if (matches.length !== 1) return undefined;
+    return {
+      kind: 'review_created',
+      orderNo: matches[0]!.orderNo,
+      eventId: event.sourceEventId ?? event.externalMessageRef,
+      accountId: event.accountId,
+      productId: matches[0]!.itemId,
+    };
   }
 
   private async runForOrder(trigger: ProductAutomationTriggerKind, adminId: string, order: AutomationOrderSnapshot, requestId: string, traceId: string, eventId?: string, now?: string): Promise<ProductAutomationTriggerResult> {

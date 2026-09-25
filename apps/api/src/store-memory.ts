@@ -476,7 +476,9 @@ export class MemoryStore implements Store {
     const existing = [...this.orders.values()].find((order) => order.accountId === input.accountId && order.orderNo === input.item.orderNo);
     const now = input.syncedAt;
     if (existing) {
+      const previousReviewedAt = existing.reviewedAt;
       Object.assign(existing, { ...input.item, productId: linkedProductId ?? existing.productId, accountId: input.accountId, accountName: input.accountName ?? existing.accountName, updatedAt: now, source: 'xianyu' as const, sourcePayloadDigest: input.item.sourcePayloadDigest, configVersion: existing.configVersion + 1 });
+      existing.reviewedAt = input.item.reviewedAt ?? previousReviewedAt;
       return { action: 'updated', order: this.enrichOrder(existing) };
     }
     const order: OrderRecord = { ...input.item, productId: linkedProductId, id: createId(), accountId: input.accountId, accountName: input.accountName, updatedAt: input.item.updatedAt ?? now, configVersion: 1, source: 'xianyu' };

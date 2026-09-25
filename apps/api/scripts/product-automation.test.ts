@@ -45,6 +45,18 @@ test('automation config defaults, validation, optimistic locking and account iso
   assert.equal(account.id, product.accountId);
 });
 
+test('legacy hour reminder fields are read as canonical minutes', async () => {
+  const { admin, product, store, service } = await setup();
+  const legacyConfig = {
+    ...defaultProductAutomationConfig(),
+    reviewReminder: { enabled: true, firstDelayHours: 2, repeatIntervalHours: 3, maxReminders: 2, message: '' },
+  } as unknown as ProductAutomationConfig;
+  await store.updateProductAutomation({ adminId: admin.id, productId: product.id, expectedConfigVersion: 1, config: legacyConfig, configDigest: 'legacy-hours', syncCouponBindings: false });
+  const read = await service.get(admin.id, product.id);
+  assert.deepEqual(read.config.reviewReminder, { enabled: true, firstDelayMinutes: 120, repeatIntervalMinutes: 180, maxReminders: 2, message: '' });
+  assert.equal('firstDelayHours' in (read.config.reviewReminder as unknown as Record<string, unknown>), false);
+});
+
 test('defaults auto-confirm on and allows disabled coupon associations', async () => {
   const { admin, product, coupon, service, store, account } = await setup();
   assert.equal(defaultProductAutomationConfig().paidAutoDelivery.autoConfirm, true);
@@ -362,12 +374,53 @@ test('review reminder re-checks order state before sending and caps repeat count
   port.readOrderResult = baseOrder({ deliveryStatus: 'delivered', reviewedAt: '2026-09-22T00:00:00.000Z' });
   const workflow = new AutomationWorkflowService(port);
   const config = defaultProductAutomationConfig();
-  config.reviewReminder = { ...config.reviewReminder, enabled: true, firstDelayHours: 1, maxReminders: 1 };
+  config.reviewReminder = { ...config.reviewReminder, enabled: true, firstDelayMinutes: 60, maxReminders: 1 };
   const result = await workflow.handleReviewReminder({ config, order: baseOrder({ createdAt: '2026-09-20T00:00:00.000Z', deliveryStatus: 'delivered' }), now: '2026-09-22T00:00:00.000Z' });
   assert.equal(result.status, 'skipped');
   assert.deepEqual(port.calls, ['read-order']);
   const capped = await new AutomationWorkflowService(new FakePort()).handleReviewReminder({ config, order: baseOrder({ deliveryStatus: 'delivered', reminderCount: 1 }), now: '2026-09-22T00:00:00.000Z' });
   assert.equal(capped.status, 'skipped');
+});
+
+test('review reminder uses minute precision for first and repeat windows', async () => {
+  const config = defaultProductAutomationConfig();
+  config.reviewReminder = { ...config.reviewReminder, enabled: true, firstDelayMinutes: 1, repeatIntervalMinutes: 2, maxReminders: 3 };
+
+  const beforeDuePort = new FakePort();
+  beforeDuePort.readOrderResult = baseOrder({ deliveryStatus: 'delivered' });
+  const beforeDue = await new AutomationWorkflowService(beforeDuePort).handleReviewReminder({
+    config,
+    order: baseOrder({ createdAt: '2026-09-25T00:00:00.000Z', deliveryStatus: 'delivered' }),
+    now: '2026-09-25T00:00:59.999Z',
+  });
+  assert.equal(beforeDue.status, 'skipped');
+
+  const atDuePort = new FakePort();
+  atDuePort.readOrderResult = baseOrder({ deliveryStatus: 'delivered' });
+  const atDue = await new AutomationWorkflowService(atDuePort).handleReviewReminder({
+    config,
+    order: baseOrder({ createdAt: '2026-09-25T00:00:00.000Z', deliveryStatus: 'delivered' }),
+    now: '2026-09-25T00:01:00.000Z',
+  });
+  assert.equal(atDue.status, 'succeeded');
+
+  const repeatPort = new FakePort();
+  repeatPort.readOrderResult = baseOrder({ deliveryStatus: 'delivered' });
+  const beforeRepeat = await new AutomationWorkflowService(repeatPort).handleReviewReminder({
+    config,
+    order: baseOrder({ createdAt: '2026-09-25T00:00:00.000Z', deliveryStatus: 'delivered', lastReminderAt: '2026-09-25T00:01:00.000Z', reminderCount: 1 }),
+    now: '2026-09-25T00:02:59.999Z',
+  });
+  assert.equal(beforeRepeat.status, 'skipped');
+
+  const atRepeatPort = new FakePort();
+  atRepeatPort.readOrderResult = baseOrder({ deliveryStatus: 'delivered' });
+  const atRepeat = await new AutomationWorkflowService(atRepeatPort).handleReviewReminder({
+    config,
+    order: baseOrder({ createdAt: '2026-09-25T00:00:00.000Z', deliveryStatus: 'delivered', lastReminderAt: '2026-09-25T00:01:00.000Z', reminderCount: 1 }),
+    now: '2026-09-25T00:03:00.000Z',
+  });
+  assert.equal(atRepeat.status, 'succeeded');
 });
 
 test('reminder state is persisted and increments exactly once per successful send', async () => {

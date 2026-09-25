@@ -16,7 +16,7 @@ export function defaultProductAutomationConfig(): ProductAutomationConfig {
     paidAutoDelivery: { enabled: false, couponBatchIds: [], autoConfirm: true, maxAttempts: 3, retryBackoffSeconds: 30 },
     unpaidAutoReprice: { enabled: false, mode: 'fixed', targetPriceMinor: 0, maxAttempts: 3, retryBackoffSeconds: 30 },
     reviewGift: { enabled: false, couponBatchIds: [], maxAttempts: 3, retryBackoffSeconds: 30 },
-    reviewReminder: { enabled: false, firstDelayHours: 72, repeatIntervalHours: 24, maxReminders: 1, message: '如果使用满意，欢迎给个好评，谢谢支持～' },
+    reviewReminder: { enabled: false, firstDelayMinutes: 72 * 60, repeatIntervalMinutes: 24 * 60, maxReminders: 1, message: '如果使用满意，欢迎给个好评，谢谢支持～' },
   };
 }
 
@@ -31,7 +31,10 @@ export class ProductAutomationService {
     const product = await this.store.getProduct(adminId, productId);
     if (!product) throw new ServiceError(404, 'NOT_FOUND', 'product not found');
     const current = await this.store.getProductAutomation(adminId, productId);
-    if (current) return { ...current, config: await this.publicizeCouponIds(adminId, current.config), product: { id: product.id, accountId: product.accountId, title: product.title } };
+    if (current) {
+      const config = normalizeStoredConfig(current.config);
+      return { ...current, config: await this.publicizeCouponIds(adminId, config), product: { id: product.id, accountId: product.accountId, title: product.title } };
+    }
     const now = new Date().toISOString();
     const config = defaultProductAutomationConfig();
     return { id: `virtual:${productId}`, productId, accountId: product.accountId, configVersion: 1, config, configDigest: digestJson(config), createdAt: now, updatedAt: now, product: { id: product.id, accountId: product.accountId, title: product.title } };
@@ -41,7 +44,7 @@ export class ProductAutomationService {
     const product = await this.requireProduct(input.adminId, input.productId);
     const expectedConfigVersion = parseVersion(input.expectedConfigVersion);
     const current = await this.store.getProductAutomation(input.adminId, product.id);
-    const { config, syncCouponBindings } = await this.applyConfigPatch(input.adminId, product, current?.config ?? defaultProductAutomationConfig(), input.config);
+    const { config, syncCouponBindings } = await this.applyConfigPatch(input.adminId, product, current ? normalizeStoredConfig(current.config) : defaultProductAutomationConfig(), input.config);
     try {
       const saved = await this.store.updateProductAutomation({ adminId: input.adminId, productId: product.id, expectedConfigVersion, config, configDigest: digestJson(config), syncCouponBindings });
       if (!saved) throw new ServiceError(404, 'NOT_FOUND', 'product not found');
@@ -63,7 +66,7 @@ export class ProductAutomationService {
     let syncCouponBindings = false;
     for (const product of products) {
       const current = await this.store.getProductAutomation(input.adminId, product.id);
-      const result = await this.applyConfigPatch(input.adminId, product, current?.config ?? defaultProductAutomationConfig(), input.config);
+      const result = await this.applyConfigPatch(input.adminId, product, current ? normalizeStoredConfig(current.config) : defaultProductAutomationConfig(), input.config);
       configByProductId[product.id] = result.config;
       configDigests[product.id] = digestJson(result.config);
       syncCouponBindings = syncCouponBindings || result.syncCouponBindings;
@@ -359,9 +362,9 @@ export class AutomationWorkflowService {
       if (!rule.enabled) return skipped(key, 'rule_disabled');
       const now = Date.parse(input.now ?? new Date().toISOString());
       const created = Date.parse(input.order.createdAt);
-      const firstDue = created + rule.firstDelayHours * 3_600_000;
+      const firstDue = created + rule.firstDelayMinutes * 60_000;
       const previous = input.order.lastReminderAt ? Date.parse(input.order.lastReminderAt) : undefined;
-      const repeatDue = previous === undefined ? firstDue : previous + rule.repeatIntervalHours * 3_600_000;
+      const repeatDue = previous === undefined ? firstDue : previous + rule.repeatIntervalMinutes * 60_000;
       const count = input.order.reminderCount ?? 0;
       if (!Number.isFinite(now) || now < repeatDue || count >= rule.maxReminders) return skipped(key, 'not_due_or_capped');
       const before = await this.port.readOrder({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo });
@@ -460,7 +463,34 @@ function normalizeReminderRule(value: unknown, fallback: ProductAutomationConfig
   const source = asRecord(value);
   const message = source.message === undefined ? fallback.message : stringValue(source.message, 'message', 500);
   if (!message.trim()) throw new ServiceError(422, 'VALIDATION_FAILED', 'reviewReminder.message is required');
-  return { enabled: booleanValue(source.enabled, fallback.enabled), firstDelayHours: boundedInt(source.firstDelayHours, fallback.firstDelayHours, 1, 720), repeatIntervalHours: boundedInt(source.repeatIntervalHours, fallback.repeatIntervalHours, 1, 720), maxReminders: boundedInt(source.maxReminders, fallback.maxReminders, 1, 10), message: message.trim() };
+  const firstDelayMinutes = source.firstDelayMinutes === undefined
+    ? legacyHoursToMinutes(source.firstDelayHours, fallback.firstDelayMinutes)
+    : boundedInt(source.firstDelayMinutes, fallback.firstDelayMinutes, 1, 43_200);
+  const repeatIntervalMinutes = source.repeatIntervalMinutes === undefined
+    ? legacyHoursToMinutes(source.repeatIntervalHours, fallback.repeatIntervalMinutes)
+    : boundedInt(source.repeatIntervalMinutes, fallback.repeatIntervalMinutes, 1, 43_200);
+  return { enabled: booleanValue(source.enabled, fallback.enabled), firstDelayMinutes, repeatIntervalMinutes, maxReminders: boundedInt(source.maxReminders, fallback.maxReminders, 1, 10), message: message.trim() };
+}
+function legacyHoursToMinutes(value: unknown, fallbackMinutes: number): number {
+  if (value === undefined) return fallbackMinutes;
+  return boundedInt(value, Math.max(1, Math.round(fallbackMinutes / 60)), 1, 720) * 60;
+}
+function normalizeStoredConfig(value: ProductAutomationConfig): ProductAutomationConfig {
+  const defaults = defaultProductAutomationConfig();
+  const source = asRecord(value.reviewReminder);
+  const rest = { ...source };
+  delete rest.firstDelayHours;
+  delete rest.repeatIntervalHours;
+  const firstDelayMinutes = source.firstDelayMinutes === undefined
+    ? legacyHoursToMinutes(source.firstDelayHours, defaults.reviewReminder.firstDelayMinutes)
+    : source.firstDelayMinutes;
+  const repeatIntervalMinutes = source.repeatIntervalMinutes === undefined
+    ? legacyHoursToMinutes(source.repeatIntervalHours, defaults.reviewReminder.repeatIntervalMinutes)
+    : source.repeatIntervalMinutes;
+  return {
+    ...value,
+    reviewReminder: { ...rest, firstDelayMinutes, repeatIntervalMinutes } as ProductAutomationConfig['reviewReminder'],
+  };
 }
 function asRecord(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function booleanValue(value: unknown, fallback: boolean): boolean { return value === undefined ? fallback : value === true; }

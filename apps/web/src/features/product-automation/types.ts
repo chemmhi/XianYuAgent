@@ -18,8 +18,8 @@ export interface AutomationRuleState {
   autoConfirm?: boolean;
   targetPriceMinor?: number;
   repriceMessage?: string;
-  reviewInitialHours?: number;
-  reviewRepeatHours?: number;
+  reviewInitialMinutes?: number;
+  reviewRepeatMinutes?: number;
   reviewMaxCount?: number;
   reviewMessage?: string;
 }

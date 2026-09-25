@@ -39,8 +39,8 @@
   },
   "reviewReminder": {
     "enabled": false,
-    "firstDelayHours": 72,
-    "repeatIntervalHours": 24,
+    "firstDelayMinutes": 4320,
+    "repeatIntervalMinutes": 1440,
     "maxReminders": 1,
     "message": "如果使用满意，欢迎给个好评，谢谢支持～"
   }

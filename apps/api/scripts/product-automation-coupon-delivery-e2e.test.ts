@@ -47,7 +47,7 @@ function paidConfig(batchIds: string[], patch: Partial<ProductAutomationConfig['
     paidAutoDelivery: { enabled: true, couponBatchIds: batchIds, autoConfirm: false, maxAttempts: 1, retryBackoffSeconds: 0, ...patch },
     unpaidAutoReprice: { enabled: false, mode: 'fixed', targetPriceMinor: 0, maxAttempts: 1, retryBackoffSeconds: 0 },
     reviewGift: { enabled: false, couponBatchIds: [], maxAttempts: 1, retryBackoffSeconds: 0 },
-    reviewReminder: { enabled: false, firstDelayHours: 1, repeatIntervalHours: 1, maxReminders: 1, message: '请评价' },
+    reviewReminder: { enabled: false, firstDelayMinutes: 60, repeatIntervalMinutes: 60, maxReminders: 1, message: '请评价' },
   };
 }
 
