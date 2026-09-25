@@ -59,7 +59,7 @@ function iconFor(name: string) {
 
 export default function App() {
   useEffect(() => {
-    document.title = 'XianyuSellerAgent · 运营控制台';
+    document.title = 'FishAgent · 运营控制台';
     const icon = document.querySelector<HTMLLinkElement>('link[data-xianyu-brand-icon]') ?? document.createElement('link');
     icon.rel = 'icon';
     icon.type = 'image/svg+xml';
@@ -130,7 +130,7 @@ export function AuthenticatedShell({ admin, onLogout = async () => undefined, lo
     <div className="app-viewport">
       <div className={`desktop-shell${page === 'workspace' ? ' workspace-shell' : page === 'products' ? ' products-shell' : page === 'accounts' ? ' accounts-shell' : page === 'orders' ? ' orders-shell' : page === 'coupons' ? ' coupons-shell' : page === 'settings' ? ' settings-shell' : page === 'agent-dynamics' ? ' agent-dynamics-shell-host' : ''}`}>
         <aside className="sidebar">
-          <div className="brand-block"><Logo className="brand-mark" variant={activeLogoVariant} label="XianyuSellerAgent Logo" /><div className="brand-copy"><strong>XianyuSellerAgent</strong><span>运营控制台</span></div><div className="mobile-account-anchor"><button className="mobile-account-trigger" type="button" data-testid="account-menu-trigger" aria-label="打开账户菜单" aria-expanded={accountMenuOpen} aria-haspopup="menu" onClick={() => setAccountMenuOpen((open) => !open)}><span className="avatar">{adminInitial}</span><span className="mobile-account-name">{adminName}</span><ChevronIcon open={accountMenuOpen} /></button>{accountMenu}</div></div>
+          <div className="brand-block"><Logo className="brand-mark" variant={activeLogoVariant} label="FishAgent Logo" /><div className="brand-copy"><strong>FishAgent</strong><span>运营控制台</span></div><div className="mobile-account-anchor"><button className="mobile-account-trigger" type="button" data-testid="account-menu-trigger" aria-label="打开账户菜单" aria-expanded={accountMenuOpen} aria-haspopup="menu" onClick={() => setAccountMenuOpen((open) => !open)}><span className="avatar">{adminInitial}</span><span className="mobile-account-name">{adminName}</span><ChevronIcon open={accountMenuOpen} /></button>{accountMenu}</div></div>
           <div className="side-section">运营台</div>
           <nav className="side-nav" aria-label="主导航">
             {navItems.map((item) => <button key={item.key} type="button" className={page === item.key ? 'active' : ''} aria-current={page === item.key ? 'page' : undefined} onClick={() => navigate(item.key)}>{iconFor(item.icon)}<span>{item.label}</span></button>)}

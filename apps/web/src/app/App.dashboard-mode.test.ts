@@ -53,7 +53,11 @@ describe('dashboard API mode resolution', () => {
     const html = renderShell(props);
 
     expect(html).toContain('class="sidebar"');
-    expect(html).toContain('XianyuSellerAgent');
+    expect(html).toContain('FishAgent');
+    expect(html).not.toContain('XianyuSellerAgent');
+    expect(html).toContain('alt="FishAgent Logo"');
+    expect(html).toContain('width="32"');
+    expect(html).toContain('height="32"');
     expect(html).toContain('运营控制台');
     expect(html).toContain('Agent Runtime');
     expect(html).toContain('陈晨');
