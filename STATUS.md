@@ -1,4 +1,11 @@
 # XianyuSellerAgent 项目状态
+## 2026-09-25 Patchright-only 闲鱼验证与真实外发
+- 目标行为：移除裸 CDP 回退，使用正式版系统 Chrome 的 Patchright 持久化上下文；验证成功必须同时满足离开 punish/captcha 状态和拿到新的 `x5sec`，随后关闭验证上下文，避免空白窗口与永久“发送中”。
+- 实现：`xianyu-verification-browser.ts` 改为 `launchPersistentContext` + `channel: chrome`；按账号/会话复用 profile；`xianyu-slider-solver.ts` 改为 Patchright locator 与 `page.mouse` 可信事件；删除 CDP solver/浏览器夹具和 `connect` 配置路径；IM/QR 调用传入 profile key；运行时关闭补齐未监听服务的幂等清理。
+- 已验证：API typecheck、API build、API 全量测试（67 主测试 + item-detail 18 + slider 4 + 全部 smoke）；Patchright 本地系统 Chrome 夹具 9/9；QR 验证回归 1/1；runtime 未 listen close 回归通过。
+- 真实外发：白名单买家 `一只橘喵喵亮晶晶`、账号 `19cfbfea-a849-4cb3-94ad-573199a32414`、会话 `53dd21f7-a4d4-4628-8927-4d49d08cdb7b` 实际发送成功，闲鱼返回外部消息引用 `4313484369439.PNM`；PostgreSQL 已落库为 outbound/created，未伪造成功。
+- 状态：`PASS / REAL_EXTERNAL_SEND_VERIFIED`。
+
 ## 闲鱼发送链路修复（本轮）
 - 目标行为：白名单买家发送失败时不再让前端永久停留“正在发送”，自动验证浏览器不再弹出可见空白 Chrome；实时消息不因会话列表轮询外部刷新而丢失或竞态。
 - 实现：自动验证窗口启动即最小化并移出屏幕，Windows 关闭时回收整个 Chrome 子进程树；会话轮询在实时连接后改走本地快照；文本/图片发送增加 40 秒 UI 超时和会话快照保护。

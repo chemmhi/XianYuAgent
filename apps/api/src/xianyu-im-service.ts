@@ -385,6 +385,7 @@ export class XianyuImService {
           } else {
             const verificationPromise = this.verificationBrowser.waitForCompletion({
               verificationUrl: token.verificationUrl,
+              profileKey: account.id,
               initialCookieSnapshot: initialSnapshot,
               allowManualFallback: false,
               maxWaitMs: 20_000,

@@ -25,7 +25,6 @@ export interface AppConfig {
   xianyuVerificationSliderMaxRetries: number;
   xianyuVerificationBrowserHeadless: boolean;
   xianyuVerificationBrowserExecutablePath?: string;
-  xianyuVerificationBrowserDebugPort?: number;
   xianyuVerificationBrowserUserDataDir?: string;
   xianyuVerificationBrowserMaxWaitMs: number;
   webSocketAllowedOrigins: string[];
@@ -102,7 +101,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     xianyuVerificationSliderMaxRetries: positiveInteger(env.XIANYU_VERIFICATION_SLIDER_MAX_RETRIES, 3),
     xianyuVerificationBrowserHeadless: asBoolean(env.XIANYU_VERIFICATION_BROWSER_HEADLESS, false),
     xianyuVerificationBrowserExecutablePath: env.XIANYU_VERIFICATION_BROWSER_EXECUTABLE?.trim() || undefined,
-    xianyuVerificationBrowserDebugPort: positiveIntegerOrUndefined(env.XIANYU_VERIFICATION_BROWSER_DEBUG_PORT),
     xianyuVerificationBrowserUserDataDir: env.XIANYU_VERIFICATION_BROWSER_USER_DATA_DIR?.trim() || undefined,
     xianyuVerificationBrowserMaxWaitMs: positiveNumber(env.XIANYU_VERIFICATION_BROWSER_MAX_WAIT_MS, 3 * 60_000),
     webSocketAllowedOrigins: (env.WS_ALLOWED_ORIGINS ?? 'http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080').split(',').map((value) => value.trim()).filter(Boolean),
@@ -163,7 +161,7 @@ function positiveIntegerOrUndefined(value: string | undefined): number | undefin
 
 function normalizeVerificationBrowserMode(value: string | undefined): XianyuVerificationBrowserMode {
   const normalized = value?.trim().toLowerCase();
-  if (normalized === 'launch' || normalized === 'connect') return normalized;
+  if (normalized === 'launch') return normalized;
   return 'disabled';
 }
 

@@ -80,22 +80,21 @@ Compose 当前负责 API、Worker、PostgreSQL、Redis 和 MinIO；对象存储�
 
 真实闲鱼二维码模式由 `XIANYU_QR_MODE=real` 控制；未设置或设置为其他值时，后端默认仍采用真实模式，自动化测试会显式使用 `stub`。
 
-二维码遇到风控验证时，可启用用户协同浏览器：
+二维码或 IM 遇到风控验证时，可启用 Patchright 驱动的系统 Chrome：
 
-- `XIANYU_VERIFICATION_BROWSER_MODE=launch`：服务端启动 Chrome/Edge 并打开验证页；
-- `XIANYU_VERIFICATION_BROWSER_MODE=connect`：连接已启用 CDP 的浏览器，需同时配置 `XIANYU_VERIFICATION_BROWSER_DEBUG_PORT`；
-- `XIANYU_VERIFICATION_BROWSER_HEADLESS=false`：默认有头模式，便于用户完成验证；无头模式仅适合外部 CDP 控制或受控测试；
-- `XIANYU_VERIFICATION_SLIDER_MODE=auto`：在已有 Chrome/CDP 页面中启用抽离后的滑块轨迹算法；算法失败时保留人工验证流程，不伪造成功；生产默认 `disabled`；
+- `XIANYU_VERIFICATION_BROWSER_MODE=launch`：服务端按账号/会话启动持久化系统 Chrome；
+- `XIANYU_VERIFICATION_BROWSER_HEADLESS=false`：默认使用系统 Chrome 有头引擎；自动模式窗口移出屏幕，避免出现空白验证窗口；
+- `XIANYU_VERIFICATION_SLIDER_MODE=auto`：使用 Patchright 页面 API 和真实鼠标事件执行滑块轨迹；算法失败直接返回验证失败，不伪造成功；生产默认 `disabled`；
 - `XIANYU_VERIFICATION_SLIDER_MAX_RETRIES=3`：单次验证最多自动尝试次数；
-- 验证完成后，服务端只检查页面已离开验证态并读取浏览器 Cookie，然后继续 QR 登录。
+- 验证完成后，服务端必须同时确认页面已离开验证态并拿到新的 `x5sec`，随后关闭浏览器上下文。
 
 滑块适配位于 `apps/api/src/xianyu-slider-trajectory.ts` 与 `apps/api/src/xianyu-slider-solver.ts`：
 
-1. 通过 CDP `Runtime.evaluate` 在主文档和可访问 iframe 中发现验证码容器、滑块按钮和轨道；
+1. 通过 Patchright locator 在主文档和 iframe 中发现验证码容器、滑块按钮和轨道；
 2. 按轨道宽度减去按钮宽度计算水平位移；
 3. 生成带加减速、二维抖动、超调、回弹和时间轴延迟的轨迹；
-4. 通过 CDP `Input.dispatchMouseEvent` 回放按下、移动、释放；
+4. 通过 Patchright `page.mouse` 回放真实按下、移动、释放事件；
 5. 轮询成功/失败文本和页面 URL；失败时点击重试控件或刷新验证页；
-6. 任意自动尝试失败都回到现有人工验证等待，不改变 `verification_required` 的状态语义。
+6. 任意自动尝试失败都返回验证错误，不伪造成功；只有新的 `x5sec` 且页面离开验证态才算通过。
 
-该实现不引入 Playwright，不在服务端保存业务 Cookie 或 Token，也不依赖桌面窗口；服务器部署时需要可执行的 Chrome/Edge 和可用的 CDP 端口。无头浏览器适合受控测试或专用验证容器，真实账号登录仍建议由人工复核风控结果。
+该实现不依赖裸 CDP，也不在服务端日志中输出业务 Cookie 或 Token；服务器部署时需要可执行的正式版 Chrome。验证上下文完成后立即关闭，持久化 profile 仅用于复用账号登录态。
