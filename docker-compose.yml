@@ -2,16 +2,16 @@ services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_DB: xianyu_agent
-      POSTGRES_USER: xianyu
-      POSTGRES_PASSWORD: xianyu_dev_only
+      POSTGRES_DB: ${POSTGRES_DB:-xianyu_agent}
+      POSTGRES_USER: ${POSTGRES_USER:-xianyu}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-xianyu_dev_only}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./apps/api/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U xianyu -d xianyu_agent"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-xianyu} -d ${POSTGRES_DB:-xianyu_agent}"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -30,8 +30,8 @@ services:
     image: quay.io/minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: xianyu
-      MINIO_ROOT_PASSWORD: xianyu_dev_only
+      MINIO_ROOT_USER: ${OBJECT_STORAGE_ACCESS_KEY:-xianyu}
+      MINIO_ROOT_PASSWORD: ${OBJECT_STORAGE_SECRET_KEY:-xianyu_dev_only}
     ports:
       # Keep 9000 free for the PRD reference project.
       - "19000:9000"
@@ -46,10 +46,15 @@ services:
     environment:
       NODE_ENV: production
       PORT: 8080
-      DATABASE_URL: postgres://xianyu:xianyu_dev_only@postgres:5432/xianyu_agent
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: ${DATABASE_URL_DOCKER:-postgres://${POSTGRES_USER:-xianyu}:${POSTGRES_PASSWORD:-xianyu_dev_only}@postgres:5432/${POSTGRES_DB:-xianyu_agent}}
+      REDIS_URL: ${REDIS_URL_DOCKER:-redis://redis:6379}
       COOKIE_SECURE: "false"
       ALLOW_IN_MEMORY: "false"
+      API_KEY: ${API_KEY:-}
+      BASE_URL: ${BASE_URL:-https://api.openai.com/v1}
+      MODEL: ${MODEL:-gpt-4o-mini}
+      WIRE_API: ${WIRE_API:-responses}
+      MODEL_TIMEOUT_MS: ${MODEL_TIMEOUT_MS:-60000}
       XIANYU_VERIFICATION_BROWSER_MODE: ${XIANYU_VERIFICATION_BROWSER_MODE:-disabled}
       XIANYU_VERIFICATION_SLIDER_MODE: ${XIANYU_VERIFICATION_SLIDER_MODE:-disabled}
       XIANYU_VERIFICATION_BROWSER_EXECUTABLE: ${XIANYU_VERIFICATION_BROWSER_EXECUTABLE:-/usr/bin/chromium}
@@ -58,10 +63,15 @@ services:
       XIANYU_VERIFICATION_BROWSER_MAX_WAIT_MS: ${XIANYU_VERIFICATION_BROWSER_MAX_WAIT_MS:-180000}
       OBJECT_STORAGE_ENDPOINT: http://object-storage:9000
       OBJECT_STORAGE_PUBLIC_ENDPOINT: http://localhost:19000
-      OBJECT_STORAGE_ACCESS_KEY: xianyu
-      OBJECT_STORAGE_SECRET_KEY: xianyu_dev_only
-      OBJECT_STORAGE_BUCKET: xianyu-assets
-      OBJECT_STORAGE_REGION: us-east-1
+      OBJECT_STORAGE_ACCESS_KEY: ${OBJECT_STORAGE_ACCESS_KEY:-xianyu}
+      OBJECT_STORAGE_SECRET_KEY: ${OBJECT_STORAGE_SECRET_KEY:-xianyu_dev_only}
+      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET:-xianyu-assets}
+      OBJECT_STORAGE_REGION: ${OBJECT_STORAGE_REGION:-us-east-1}
+      AUTO_REPLY_MODEL_ENABLED: ${AUTO_REPLY_MODEL_ENABLED:-true}
+      AUTO_REPLY_REPAIR_MODE: ${AUTO_REPLY_REPAIR_MODE:-enforce}
+      AUTO_REPLY_POLICY_JSON: ${AUTO_REPLY_POLICY_JSON:-}
+      AUTO_REPLY_POLICY_BOOTSTRAP_DEFAULT: ${AUTO_REPLY_POLICY_BOOTSTRAP_DEFAULT:-true}
+      AUTO_REPLY_OUTCOME_REVIEW_WORKER_ENABLED: ${AUTO_REPLY_OUTCOME_REVIEW_WORKER_ENABLED:-true}
       AUTO_REPLY_SEND_MODE: ${AUTO_REPLY_SEND_MODE:-simulate}
       AUTOMATION_BUYER_ALLOWLIST: ${AUTOMATION_BUYER_ALLOWLIST:-[]}
       PRODUCT_AUTOMATION_EXECUTION_MODE: ${PRODUCT_AUTOMATION_EXECUTION_MODE:-simulate}
@@ -85,9 +95,19 @@ services:
       context: ./apps/api
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgres://xianyu:xianyu_dev_only@postgres:5432/xianyu_agent
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: ${DATABASE_URL_DOCKER:-postgres://${POSTGRES_USER:-xianyu}:${POSTGRES_PASSWORD:-xianyu_dev_only}@postgres:5432/${POSTGRES_DB:-xianyu_agent}}
+      REDIS_URL: ${REDIS_URL_DOCKER:-redis://redis:6379}
       ALLOW_IN_MEMORY: "false"
+      API_KEY: ${API_KEY:-}
+      BASE_URL: ${BASE_URL:-https://api.openai.com/v1}
+      MODEL: ${MODEL:-gpt-4o-mini}
+      WIRE_API: ${WIRE_API:-responses}
+      MODEL_TIMEOUT_MS: ${MODEL_TIMEOUT_MS:-60000}
+      AUTO_REPLY_MODEL_ENABLED: ${AUTO_REPLY_MODEL_ENABLED:-true}
+      AUTO_REPLY_REPAIR_MODE: ${AUTO_REPLY_REPAIR_MODE:-enforce}
+      AUTO_REPLY_POLICY_JSON: ${AUTO_REPLY_POLICY_JSON:-}
+      AUTO_REPLY_POLICY_BOOTSTRAP_DEFAULT: ${AUTO_REPLY_POLICY_BOOTSTRAP_DEFAULT:-true}
+      AUTO_REPLY_OUTCOME_REVIEW_WORKER_ENABLED: ${AUTO_REPLY_OUTCOME_REVIEW_WORKER_ENABLED:-true}
       AUTO_REPLY_SEND_MODE: ${AUTO_REPLY_SEND_MODE:-simulate}
       AUTOMATION_BUYER_ALLOWLIST: ${AUTOMATION_BUYER_ALLOWLIST:-[]}
       PRODUCT_AUTOMATION_EXECUTION_MODE: ${PRODUCT_AUTOMATION_EXECUTION_MODE:-simulate}
