@@ -4,7 +4,7 @@
 - 实现：新增 `xianyu-browser-port.ts`、`xianyu-slider-port.ts` 与 `patchright-verification-browser.ts`；Patchright 改为唯一懒加载适配器；`xianyu-verification-browser.ts` 只消费浏览器端口；`xianyu-slider-solver.ts` 只消费独立滑块端口；不保留 CDP/Playwright fallback。
 - 依赖边界：API 运行时浏览器外部依赖仅保留 `patchright@1.63.0`；`npm ls --depth=0 --workspace apps/api patchright playwright playwright-core chrome-remote-interface puppeteer` 仅列出 Patchright。
 - 已验证：API typecheck、API build、API 全量测试（67 主测试 + item-detail 18 + slider 4 + 全部 smoke）、验证浏览器/滑块定向回归 10/10、端口注入回归 1/1、`git diff --check`。
-- 状态：`READY_FOR_REVIEW`；待独立复核后合入 `main`。
+- 状态：`PASS / MERGED`；合并提交 `3e217b2`，主线合并后定向回归通过。
 
 ## 2026-09-25 Patchright-only 闲鱼验证与真实外发
 - 目标行为：移除裸 CDP 回退，使用正式版系统 Chrome 的 Patchright 持久化上下文；验证成功必须同时满足离开 punish/captcha 状态和拿到新的 `x5sec`，随后关闭验证上下文，避免空白窗口与永久“发送中”。
