@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { WebSocket } from 'ws';
 import { XIANYU_USER_AGENT, xianyuChromeVersion } from './xianyu-browser-identity.js';
+import { isXianyuSystemMessageText } from './xianyu-system-message.js';
 
 export const XIANYU_IM_WS_URL = 'wss://wss-goofish.dingtalk.com/';
 export const XIANYU_IM_TOKEN_API = 'mtop.taobao.idlemessage.pc.login.token';
@@ -687,7 +688,8 @@ export function parsePushPayloadDetailed(encoded: string, accountId: string, myI
   const sourceOrdering = extractSourceOrdering([sourceEnvelope, message, msg1, msg10, extension]);
   const decoded = decodeContent(msg1);
   const fallbackText = optionalString(msg10.reminderContent);
-  const bodyType = decoded.images.length > 0 ? 'image' : decoded.text || fallbackText ? 'text' : 'system';
+  const bodyText = decoded.text || fallbackText;
+  const bodyType = decoded.images.length > 0 ? 'image' : isXianyuSystemMessageText(bodyText) ? 'system' : bodyText ? 'text' : 'system';
   const timestamp = normalizeTimestamp(msg1['5'] ?? message['5'], receivedAt);
   return { event: {
     accountId,
@@ -700,7 +702,7 @@ export function parsePushPayloadDetailed(encoded: string, accountId: string, myI
     ...(itemImageUrl ? { itemImageUrl } : {}),
     direction: matchesSelfIdentity(senderRef, myId) ? 'outbound' : 'inbound',
     bodyType,
-    bodyText: decoded.text || fallbackText,
+    bodyText,
     assetRef: decoded.images[0],
     occurredAt: timestamp.value,
     ...(timestamp.quality === 'received' ? { receivedAt, timestampQuality: timestamp.quality, riskFlags: ['source_timestamp_invalid'] } : {}),

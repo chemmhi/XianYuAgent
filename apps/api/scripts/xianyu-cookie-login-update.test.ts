@@ -4,7 +4,7 @@ import { loadConfig } from '../src/config.js';
 import { createApp } from '../src/app.js';
 
 test('Cookie reauthorization updates the explicitly selected account', async () => {
-  const runtime = createApp(loadConfig({
+  const runtime = createApp(loadConfig({ AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
     HOST: '127.0.0.1',
     PORT: '0',
     DATABASE_URL: '',

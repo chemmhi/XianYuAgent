@@ -5,6 +5,7 @@ import { classifyXianyuFailure } from './xianyu-account-health.js';
 import type { MessageService } from './messages.js';
 import type { AutoReplyProcessResult, AutoReplyService } from './auto-reply.js';
 import { XianyuImClient, XianyuImMessageEvent, XianyuImReadReceiptEvent, XianyuImCredential } from './xianyu-im.js';
+import { isXianyuSystemMessageText } from './xianyu-system-message.js';
 import { XianyuMtopClient } from './xianyu-mtop.js';
 import type { ProductAutomationImEventResult, ProductAutomationTrigger } from './product-automation-trigger.js';
 import { InboundInboxWorker } from './inbound-inbox-worker.js';
@@ -569,6 +570,9 @@ export class XianyuImService {
       ...(client?.selfUserIds ?? []),
     ].filter((value): value is string => Boolean(value));
     let effectiveEvent = reconcileMessageDirection(event, selfUserIds, conversation?.buyerRef);
+    if (effectiveEvent.bodyType === 'text' && isXianyuSystemMessageText(effectiveEvent.bodyText)) {
+      effectiveEvent = { ...effectiveEvent, bodyType: 'system', riskFlags: [...new Set([...(effectiveEvent.riskFlags ?? []), 'xianyu_system_message'])] };
+    }
     if (event.direction === 'inbound' && !event.senderName && !conversation?.buyerDisplayName) {
       // Gateway pushes can omit the nickname even though the conversation
       // itself is addressable by a stable external ref. Resolve the profile
@@ -578,7 +582,7 @@ export class XianyuImService {
         externalConversationRef: event.externalConversationRef,
         buyerRef: event.senderRef,
       });
-      if (enriched.buyerDisplayName) effectiveEvent = { ...event, senderName: enriched.buyerDisplayName };
+      if (enriched.buyerDisplayName) effectiveEvent = { ...effectiveEvent, senderName: enriched.buyerDisplayName };
     }
     if (!conversation && effectiveEvent.direction === 'inbound') {
       conversation = await this.store.upsertExternalConversation({
@@ -761,7 +765,7 @@ function normalizeHistoryMessage(value: unknown, myId: string | readonly string[
   const fallback = string(custom.summary ?? extension.reminderContent ?? extension.detailNotice);
   const bodyText = content.text ?? fallback;
   const bodyRef = content.images[0];
-  const bodyType = bodyRef ? 'image' : bodyText ? 'text' : 'system';
+  const bodyType = bodyRef ? 'image' : isXianyuSystemMessageText(bodyText) ? 'system' : bodyText ? 'text' : 'system';
   const receivedAt = new Date().toISOString();
   const createdAt = normalizeTimestamp(message.createAt);
   return { externalMessageRef, externalMessageRefAliases: externalMessageRefCandidates.filter((value) => value !== externalMessageRef), direction, bodyType, bodyText, bodyRef, riskFlags: createdAt ? undefined : ['source_timestamp_invalid'], createdAt: createdAt ?? receivedAt };

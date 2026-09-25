@@ -13,6 +13,7 @@ export interface AutoReplyAgentRuntimeConfig {
   maxReplyLength: number;
   replySegmentDelayMs: number;
   debounceMs: number;
+  sendDelaySeconds: number;
   version: string;
   digest: string;
 }
@@ -50,6 +51,7 @@ export function resolveAutoReplyAgentConfig(env: NodeJS.ProcessEnv = process.env
     maxReplyLength: boundedInt(env.AUTO_REPLY_AGENT_MAX_REPLY_LENGTH, 500, 30, 2_000),
     replySegmentDelayMs: boundedInt(env.AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS, 350, 0, 5_000),
     debounceMs: boundedInt(env.AUTO_REPLY_AGENT_DEBOUNCE_MS, 2_000, 0, 30_000),
+    sendDelaySeconds: boundedInt(env.AUTO_REPLY_AGENT_SEND_DELAY_SECONDS, 300, 0, 86_400),
     version: env.AUTO_REPLY_AGENT_CONFIG_VERSION?.trim() || 'env-v1',
   };
   return { ...raw, digest: digestConfig(raw) };
@@ -79,6 +81,7 @@ export function mergeAutoReplyAgentRuntimeConfig(
     maxReplyLength: settings.maxReplyLength,
     replySegmentDelayMs: settings.replySegmentDelayMs,
     debounceMs: settings.debounceMs,
+    sendDelaySeconds: settings.sendDelaySeconds,
     version: `settings-v${settings.configVersion ?? 0}`,
   };
   return { ...raw, digest: digestConfig(raw) };

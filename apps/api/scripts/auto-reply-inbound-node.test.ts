@@ -35,6 +35,82 @@ test('push parser preserves explicit source event id and sequence from the gatew
   assert.equal(result.event?.sourceSequence, 17);
 });
 
+test('legacy push parser classifies transaction status notices as system messages', () => {
+  const systemText = '[我已拍下，待付款]';
+  const content = Buffer.from(JSON.stringify({ contentType: 1, text: { text: systemText } }), 'utf8').toString('base64');
+  const encoded = Buffer.from(JSON.stringify({
+    1: {
+      2: 'conv-system@goofish',
+      3: 'system-message-1.PNM',
+      5: 1767225600000,
+      6: { 3: { 5: content } },
+      10: { senderUserId: 'buyer-system', senderNick: 'Buyer' },
+    },
+  }), 'utf8').toString('base64');
+
+  const systemResult = parsePushPayloadDetailed(encoded, 'account-1', 'seller-1');
+  assert.equal(systemResult.event?.bodyType, 'system');
+  assert.equal(systemResult.event?.bodyText, systemText);
+
+  const normalContent = Buffer.from(JSON.stringify({ contentType: 1, text: { text: '请问还有货吗？' } }), 'utf8').toString('base64');
+  const normalEncoded = Buffer.from(JSON.stringify({
+    1: {
+      2: 'conv-system@goofish',
+      3: 'buyer-message-1.PNM',
+      5: 1767225600000,
+      6: { 3: { 5: normalContent } },
+      10: { senderUserId: 'buyer-system', senderNick: 'Buyer' },
+    },
+  }), 'utf8').toString('base64');
+  const normalResult = parsePushPayloadDetailed(normalEncoded, 'account-1', 'seller-1');
+  assert.equal(normalResult.event?.bodyType, 'text');
+
+  const bracketedBuyerText = Buffer.from(JSON.stringify({ contentType: 1, text: { text: '[请问付款后什么时候发货？]' } }), 'utf8').toString('base64');
+  const bracketedBuyerEncoded = Buffer.from(JSON.stringify({
+    1: {
+      2: 'conv-system@goofish',
+      3: 'buyer-message-2.PNM',
+      5: 1767225600000,
+      6: { 3: { 5: bracketedBuyerText } },
+      10: { senderUserId: 'buyer-system', senderNick: 'Buyer' },
+    },
+  }), 'utf8').toString('base64');
+  const bracketedBuyerResult = parsePushPayloadDetailed(bracketedBuyerEncoded, 'account-1', 'seller-1');
+  assert.equal(bracketedBuyerResult.event?.bodyType, 'text');
+});
+
+test('system classification survives buyer identity enrichment', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'system-enrichment@example.com', passwordHash: 'hash', displayName: 'System Enrichment' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'seller-system-enrichment' });
+  const messages = new MessageService(store, async () => 'audit-system-enrichment');
+  const autoReplyCalls: string[] = [];
+  const autoReply = { processInbound: async () => { autoReplyCalls.push('called'); return undefined; } };
+  const mtop = { fetchChatUserInfo: async () => ({ buyerDisplayName: 'Recovered Buyer' }) };
+  const service = new XianyuImService(store, mtop as never, messages, autoReply as never);
+
+  const result = await service.handleExternalEvent(admin.id, {
+    accountId: account.id,
+    externalConversationRef: 'conv-system-enrichment',
+    externalMessageRef: 'system-enrichment-1.PNM',
+    senderRef: 'buyer-system-enrichment',
+    direction: 'inbound',
+    bodyType: 'text',
+    bodyText: '[我已付款，等待你发货]',
+    occurredAt: '2026-09-25T14:00:00.000Z',
+  });
+
+  assert.equal(result.created, true);
+  assert.equal(result.autoReply, undefined);
+  assert.deepEqual(autoReplyCalls, []);
+  const conversation = await store.findConversationByExternalRef(admin.id, account.id, 'conv-system-enrichment');
+  assert.ok(conversation);
+  assert.equal(conversation.buyerDisplayName, 'Recovered Buyer');
+  const stored = await messages.listMessages(admin.id, conversation.id, { limit: 10 });
+  assert.equal(stored.items[0]?.bodyType, 'system');
+  assert.equal(stored.items[0]?.senderRole, 'system');
+});
+
 test('deferred inbox record carries source ordering into the repair worker input', async () => {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: 'source-order@example.com', passwordHash: 'hash', displayName: 'Source Order' });

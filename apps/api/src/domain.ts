@@ -1013,6 +1013,8 @@ export interface AutoReplyAgentConfig {
   maxReplyLength: number;
   replySegmentDelayMs: number;
   debounceMs: number;
+  /** Delay before the first automatic reply is sent. Zero disables the delay. */
+  sendDelaySeconds: number;
   sendMode: AutoReplyAgentSendMode;
 }
 

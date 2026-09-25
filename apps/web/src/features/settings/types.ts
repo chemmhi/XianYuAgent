@@ -46,6 +46,7 @@ export interface AutoReplyAgentConfigVM {
   maxReplyLength: number;
   replySegmentDelayMs: number;
   debounceMs: number;
+  sendDelaySeconds: number;
   sendMode: AutoReplyAgentSendMode;
   accountId: string;
   updatedByAdminId?: string;

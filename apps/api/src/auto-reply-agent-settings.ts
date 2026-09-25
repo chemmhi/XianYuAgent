@@ -15,6 +15,7 @@ export const DEFAULT_AUTO_REPLY_AGENT_CONFIG: AutoReplyAgentConfig = {
   maxReplyLength: 1_000,
   replySegmentDelayMs: 800,
   debounceMs: 2_000,
+  sendDelaySeconds: 300,
   sendMode: 'simulate',
 };
 
@@ -31,6 +32,7 @@ export function autoReplyAgentConfigFromEnv(env: NodeJS.ProcessEnv = process.env
     maxReplyLength: parseBoundedInteger(env.AUTO_REPLY_AGENT_MAX_REPLY_LENGTH, DEFAULT_AUTO_REPLY_AGENT_CONFIG.maxReplyLength, 30, 4_000),
     replySegmentDelayMs: parseBoundedInteger(env.AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.replySegmentDelayMs, 0, 30_000),
     debounceMs: parseBoundedInteger(env.AUTO_REPLY_AGENT_DEBOUNCE_MS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.debounceMs, 0, 30_000),
+    sendDelaySeconds: parseBoundedInteger(env.AUTO_REPLY_AGENT_SEND_DELAY_SECONDS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.sendDelaySeconds, 0, 86_400),
     sendMode: env.AUTO_REPLY_SEND_MODE?.trim().toLowerCase() === 'live' ? 'live' : DEFAULT_AUTO_REPLY_AGENT_CONFIG.sendMode,
   };
 }
@@ -83,6 +85,7 @@ function validateConfig(config: AutoReplyAgentConfig): AutoReplyAgentConfig {
     maxReplyLength: boundedNumber(config.maxReplyLength, 'maxReplyLength', 30, 4_000),
     replySegmentDelayMs: boundedNumber(config.replySegmentDelayMs, 'replySegmentDelayMs', 0, 30_000),
     debounceMs: boundedNumber(config.debounceMs, 'debounceMs', 0, 30_000),
+    sendDelaySeconds: boundedNumber(config.sendDelaySeconds, 'sendDelaySeconds', 0, 86_400),
     sendMode: config.sendMode === 'live' ? 'live' : 'simulate',
   };
 }

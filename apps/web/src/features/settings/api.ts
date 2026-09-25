@@ -134,6 +134,7 @@ export function createMockAutoReplyAgentSettingsApi(): AutoReplyAgentSettingsApi
     maxReplyLength: 1_000,
     replySegmentDelayMs: 800,
     debounceMs: 2_000,
+    sendDelaySeconds: 300,
     sendMode: 'simulate',
   };
   return {
