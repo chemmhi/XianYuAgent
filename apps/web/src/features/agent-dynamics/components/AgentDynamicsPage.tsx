@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useAccountContext } from '../../../app/account-context';
 import type { PageKey } from '../../../app/navigation';
 import { createMockAgentDynamicsApi, type AgentDynamicsApi } from '../api';
+import { resolveRuntimeApi } from '../../../api/runtime';
 import { useAgentDynamicsController } from '../controller';
 import { AgentDynamicsDropdown } from './AgentDynamicsDropdown';
 import { ErrorBanner, ExceptionPanel, KpiStrip, RunDrawer, RunsTable, RuntimePanel, SkeletonBlocks, StatusPanel } from './AgentDynamicsViews';
@@ -14,7 +15,7 @@ export interface AgentDynamicsPageProps {
 
 export function AgentDynamicsPage({ api: providedApi, onNavigate }: AgentDynamicsPageProps) {
   const { accounts, currentAccountId, currentAccount, accountsLoading, accountsError } = useAccountContext();
-  const api = useMemo(() => providedApi ?? createMockAgentDynamicsApi(), [providedApi]);
+  const api = useMemo(() => resolveRuntimeApi(providedApi, createMockAgentDynamicsApi, 'AGENT_DYNAMICS_API_NOT_PROVIDED'), [providedApi]);
   const controller = useAgentDynamicsController({ api, accountId: currentAccountId });
   const summary = controller.summary.data;
   const summaryError = controller.summary.error;

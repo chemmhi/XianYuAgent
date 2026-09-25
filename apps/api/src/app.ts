@@ -78,9 +78,6 @@ export interface AppRuntime {
 }
 
 export function createApp(config: AppConfig = loadConfig()): AppRuntime {
-  if (config.autoReplySendMode === 'live' && !(config.buyerAllowlist?.length)) {
-    throw new Error('AUTO_REPLY_LIVE_REQUIRES_BUYER_ALLOWLIST');
-  }
   const store = createStore(config);
   const objectStorage: ObjectStorage = config.allowInMemory
     ? new MemoryObjectStorage()

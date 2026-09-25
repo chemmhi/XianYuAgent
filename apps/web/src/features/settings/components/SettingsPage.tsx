@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { chooseFirstAvailableAccountId, useAccountContext } from '../../../app/account-context';
 import { createCredentialApi, createMockAutoReplyAgentSettingsApi, createMockCredentialApi, createMockOpenAISettingsApi, type AutoReplyAgentSettingsApi, type CredentialApi, type OpenAISettingsApi } from '../api';
+import { resolveRuntimeApi } from '../../../api/runtime';
 import { useAutoReplyAgentSettingsController } from '../agent-settings-controller';
 import { AutoReplyAgentPanel } from './AutoReplyAgentPanel';
 import { useCredentialController } from '../controller';
@@ -26,8 +27,8 @@ const tabs: Array<{ id: TabKey; label: string; mobileLabel: string; meta: string
 export function SettingsPage({ api: providedApi, agentApi: providedAgentApi, openaiApi: providedOpenaiApi, modelApi: providedModelApi }: { api?: CredentialApi; agentApi?: AutoReplyAgentSettingsApi; openaiApi?: OpenAISettingsApi; modelApi?: ModelProviderApi }) {
   const { accounts, accountsLoading, accountsError, currentAccountId, setCurrentAccountId } = useAccountContext();
   const api = useMemo(() => providedApi ?? createCredentialApiFromRuntime(), [providedApi]);
-  const agentApi = useMemo(() => providedAgentApi ?? createMockAutoReplyAgentSettingsApi(), [providedAgentApi]);
-  const openaiApi = useMemo(() => providedOpenaiApi ?? createMockOpenAISettingsApi(), [providedOpenaiApi]);
+  const agentApi = useMemo(() => resolveRuntimeApi(providedAgentApi, createMockAutoReplyAgentSettingsApi, 'AUTO_REPLY_AGENT_API_NOT_PROVIDED'), [providedAgentApi]);
+  const openaiApi = useMemo(() => resolveRuntimeApi(providedOpenaiApi, createMockOpenAISettingsApi, 'OPENAI_SETTINGS_API_NOT_PROVIDED'), [providedOpenaiApi]);
   const modelApi = useMemo(() => providedModelApi ?? createEmptyModelProviderApi(), [providedModelApi]);
   const [activeTab, setActiveTab] = useState<TabKey>('credentials');
   const [editor, setEditor] = useState<'create' | 'edit' | 'rotate' | null>(null);
@@ -74,7 +75,7 @@ function createEmptyModelProviderApi(): ModelProviderApi {
 }
 
 function createCredentialApiFromRuntime(): CredentialApi {
-  if (import.meta.env.VITE_API_MODE === 'mock') return createMockCredentialApi();
+  if (!import.meta.env.PROD && import.meta.env.VITE_API_MODE === 'mock') return createMockCredentialApi();
   throw new Error('SETTINGS_API_NOT_PROVIDED');
 }
 

@@ -1,6 +1,6 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AccountContextProvider } from './account-context';
 import { AccountMenu, AuthenticatedShell, resolveDashboardMode } from './App';
 
@@ -10,12 +10,19 @@ function renderShell(props: Parameters<typeof AuthenticatedShell>[0]) {
 }
 
 describe('dashboard API mode resolution', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
   it('inherits live mode when the dashboard override is unset', () => {
     expect(resolveDashboardMode('live')).toBe('live');
   });
 
   it('keeps mock mode when the dashboard override is explicit', () => {
     expect(resolveDashboardMode('live', 'mock')).toBe('mock');
+  });
+
+  it('forces live mode in production even when a mock override is present', () => {
+    vi.stubEnv('PROD', true);
+    expect(resolveDashboardMode('live', 'mock')).toBe('live');
   });
 
   it('does not promote a mock API transport to live mode', () => {

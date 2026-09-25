@@ -77,9 +77,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const buyerAllowlist = parseBuyerNames(env.AUTOMATION_BUYER_ALLOWLIST);
   const autoReplyAgent = resolveAutoReplyAgentConfig(env);
   const productAutomationLive = resolveProductAutomationLiveConfig(env, buyerAllowlist);
-  if (autoReplySendMode === 'live' && buyerAllowlist.length === 0) {
-    throw new Error('AUTO_REPLY_LIVE_REQUIRES_BUYER_ALLOWLIST');
-  }
   const configuredRuntime = env.AGENT_RUNTIME?.trim().toLowerCase();
   const agentRuntime: AgentRuntimeMode = configuredRuntime === 'in-process'
     ? 'in-process'

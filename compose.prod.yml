@@ -1,73 +1,62 @@
 services:
   postgres:
     image: postgres:17-alpine
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: xianyu_agent
-      POSTGRES_USER: xianyu
-      POSTGRES_PASSWORD: xianyu_dev_only
-    ports:
-      - "5432:5432"
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: Asia/Shanghai
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./apps/api/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U xianyu -d xianyu_agent"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 3s
-      retries: 20
+      retries: 30
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
-      retries: 20
+      retries: 30
 
   object-storage:
-    image: quay.io/minio/minio:latest
+    image: minio/minio:latest
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: xianyu
-      MINIO_ROOT_PASSWORD: xianyu_dev_only
-    ports:
-      # Keep 9000 free for the PRD reference project.
-      - "19000:9000"
-      - "19001:9001"
+      MINIO_ROOT_USER: ${OBJECT_STORAGE_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${OBJECT_STORAGE_SECRET_KEY}
     volumes:
       - object_storage_data:/data
 
   api:
-    profiles: [full]
     build:
       context: ./apps/api
+    restart: unless-stopped
+    env_file:
+      - .env
     environment:
-      NODE_ENV: production
-      PORT: 8080
-      DATABASE_URL: postgres://xianyu:xianyu_dev_only@postgres:5432/xianyu_agent
+      DATABASE_URL: postgres://xianyu:${POSTGRES_PASSWORD}@postgres:5432/xianyu_agent
       REDIS_URL: redis://redis:6379
-      COOKIE_SECURE: "false"
-      ALLOW_IN_MEMORY: "false"
+      OBJECT_STORAGE_ENDPOINT: http://object-storage:9000
+      OBJECT_STORAGE_ACCESS_KEY: ${OBJECT_STORAGE_ACCESS_KEY}
+      OBJECT_STORAGE_SECRET_KEY: ${OBJECT_STORAGE_SECRET_KEY}
+      OBJECT_STORAGE_BUCKET: xianyu-assets
+      OBJECT_STORAGE_REGION: us-east-1
       XIANYU_VERIFICATION_BROWSER_MODE: ${XIANYU_VERIFICATION_BROWSER_MODE:-disabled}
       XIANYU_VERIFICATION_SLIDER_MODE: ${XIANYU_VERIFICATION_SLIDER_MODE:-disabled}
       XIANYU_VERIFICATION_BROWSER_EXECUTABLE: ${XIANYU_VERIFICATION_BROWSER_EXECUTABLE:-/usr/bin/chromium}
       XIANYU_VERIFICATION_BROWSER_HEADLESS: ${XIANYU_VERIFICATION_BROWSER_HEADLESS:-true}
       XIANYU_VERIFICATION_BROWSER_USER_DATA_DIR: ${XIANYU_VERIFICATION_BROWSER_USER_DATA_DIR:-/app/browser_data/xianyu-verification}
       XIANYU_VERIFICATION_BROWSER_MAX_WAIT_MS: ${XIANYU_VERIFICATION_BROWSER_MAX_WAIT_MS:-180000}
-      OBJECT_STORAGE_ENDPOINT: http://object-storage:9000
-      OBJECT_STORAGE_PUBLIC_ENDPOINT: http://localhost:19000
-      OBJECT_STORAGE_ACCESS_KEY: xianyu
-      OBJECT_STORAGE_SECRET_KEY: xianyu_dev_only
-      OBJECT_STORAGE_BUCKET: xianyu-assets
-      OBJECT_STORAGE_REGION: us-east-1
-      AUTO_REPLY_SEND_MODE: ${AUTO_REPLY_SEND_MODE:-simulate}
-      AUTOMATION_BUYER_ALLOWLIST: ${AUTOMATION_BUYER_ALLOWLIST:-[]}
-      PRODUCT_AUTOMATION_EXECUTION_MODE: ${PRODUCT_AUTOMATION_EXECUTION_MODE:-simulate}
-      PRODUCT_AUTOMATION_LIVE_CONFIRMED: ${PRODUCT_AUTOMATION_LIVE_CONFIRMED:-false}
     ports:
-      - "8080:8080"
+      - "127.0.0.1:18082:8080"
     volumes:
       - browser_data:/app/browser_data
     depends_on:
@@ -80,23 +69,26 @@ services:
     command: ["node", "dist/index.js"]
 
   worker:
-    profiles: [full]
     build:
       context: ./apps/api
+    restart: unless-stopped
+    env_file:
+      - .env
     environment:
-      NODE_ENV: production
-      DATABASE_URL: postgres://xianyu:xianyu_dev_only@postgres:5432/xianyu_agent
+      DATABASE_URL: postgres://xianyu:${POSTGRES_PASSWORD}@postgres:5432/xianyu_agent
       REDIS_URL: redis://redis:6379
-      ALLOW_IN_MEMORY: "false"
-      AUTO_REPLY_SEND_MODE: ${AUTO_REPLY_SEND_MODE:-simulate}
-      AUTOMATION_BUYER_ALLOWLIST: ${AUTOMATION_BUYER_ALLOWLIST:-[]}
-      PRODUCT_AUTOMATION_EXECUTION_MODE: ${PRODUCT_AUTOMATION_EXECUTION_MODE:-simulate}
-      PRODUCT_AUTOMATION_LIVE_CONFIRMED: ${PRODUCT_AUTOMATION_LIVE_CONFIRMED:-false}
+      OBJECT_STORAGE_ENDPOINT: http://object-storage:9000
+      OBJECT_STORAGE_ACCESS_KEY: ${OBJECT_STORAGE_ACCESS_KEY}
+      OBJECT_STORAGE_SECRET_KEY: ${OBJECT_STORAGE_SECRET_KEY}
+      OBJECT_STORAGE_BUCKET: xianyu-assets
+      OBJECT_STORAGE_REGION: us-east-1
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      object-storage:
+        condition: service_started
     command: ["node", "dist/worker.js"]
 
 volumes:

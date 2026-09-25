@@ -2,7 +2,9 @@ import type { ApiMode } from './contracts';
 import { createMockApi } from './mockApi';
 import { createLiveApi, type XianyuApi } from './xianyuApi';
 
-export const apiMode: ApiMode = import.meta.env.VITE_API_MODE === 'live' ? 'live' : 'mock';
+export const apiMode: ApiMode = import.meta.env.PROD
+  ? 'live'
+  : import.meta.env.VITE_API_MODE === 'live' ? 'live' : 'mock';
 
 export const api: XianyuApi = apiMode === 'live'
   ? createLiveApi({

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAccountContext } from '../../../app/account-context';
 import { createMockOrdersApi, type OrdersApi } from '../api';
+import { resolveRuntimeApi } from '../../../api/runtime';
 import { hasOrdersContextLoadFailure } from '../context-state';
 import { useOrdersController } from '../controller';
 import { OrderDetailDrawer } from './OrderDetailDrawer';
@@ -11,7 +12,7 @@ import { Toast } from '../../../shared/ui/Toast';
 import './orders.css';
 
 export function OrdersPage({ api: providedApi }: { api?: OrdersApi }) {
-  const api = useMemo(() => providedApi ?? createMockOrdersApi(), [providedApi]);
+  const api = useMemo(() => resolveRuntimeApi(providedApi, createMockOrdersApi, 'ORDERS_API_NOT_PROVIDED'), [providedApi]);
   const { currentAccountId, currentAccount, accountsLoading, accountsError, refreshAccounts } = useAccountContext();
   const scopedAccountId = currentAccountId ?? '__no_active_account__';
   const controller = useOrdersController({ api, initialFilters: { accountId: scopedAccountId, sortBy: 'createdAt', sortOrder: 'desc' } });

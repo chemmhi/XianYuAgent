@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAccountContext } from '../../../app/account-context';
 import { createAccountsApi, createMockAccountsApi, type AccountsApi } from '../api';
+import { resolveRuntimeApi } from '../../../api/runtime';
 import { useAccountsController } from '../controller';
 import type { AccountVM } from '../types';
 import { AccountTable } from './AccountTable';
@@ -15,7 +16,7 @@ import './accounts.css';
 export interface AccountsPageProps { api?: AccountsApi; }
 
 export function AccountsPage({ api: providedApi }: AccountsPageProps) {
-  const api = useMemo(() => providedApi ?? createMockAccountsApi(), [providedApi]);
+  const api = useMemo(() => resolveRuntimeApi(providedApi, createMockAccountsApi, 'ACCOUNTS_API_NOT_PROVIDED'), [providedApi]);
   const controller = useAccountsController({ api });
   const { accounts: contextAccounts, accountsLoading, currentAccountId, currentAccount, setCurrentAccountId, removeAccount, refreshAccounts } = useAccountContext();
   const [loginAccountId, setLoginAccountId] = useState<string | null>(null);

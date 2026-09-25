@@ -25,6 +25,8 @@ export function createPatchrightVerificationBrowserFactory(): XianyuVerification
           '--disable-backgrounding-occluded-windows',
           '--disable-renderer-backgrounding',
           '--disable-extensions',
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
           '--no-first-run',
           '--no-default-browser-check',
           '--window-size=1440,900',

@@ -13,9 +13,10 @@ export const DEFAULT_PRODUCT_AUTOMATION_LIVE_CONFIG: ProductAutomationLiveConfig
 };
 
 /**
- * Normalizes only buyer-name presentation noise. Matching remains exact after
- * this step; no substring, fuzzy, or case-insensitive matching is allowed for
- * live writes.
+ * Normalizes only buyer-name presentation noise. When the allowlist is empty,
+ * live writes are intentionally open to every buyer; otherwise matching
+ * remains exact after this step with no substring, fuzzy, or case-insensitive
+ * matching.
  */
 export function normalizeAutomationBuyerName(value: string): string {
   return value.normalize('NFKC').replace(/[\r\n]+/gu, ' ').replace(/[\t ]+/gu, ' ').trim();
@@ -53,7 +54,7 @@ export function productAutomationLiveBlockReason(config: ProductAutomationLiveCo
   const normalizedAllowlist = (Array.isArray(config.buyerAllowlist) ? config.buyerAllowlist : [])
     .map(normalizeAutomationBuyerName)
     .filter(Boolean);
-  if (!normalizedBuyerName || !normalizedAllowlist.includes(normalizedBuyerName)) return 'PRODUCT_AUTOMATION_BUYER_NOT_ALLOWLISTED';
+  if (normalizedAllowlist.length > 0 && (!normalizedBuyerName || !normalizedAllowlist.includes(normalizedBuyerName))) return 'PRODUCT_AUTOMATION_BUYER_NOT_ALLOWLISTED';
   return undefined;
 }
 

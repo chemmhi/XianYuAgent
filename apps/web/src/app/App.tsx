@@ -38,7 +38,9 @@ function pageFromPath(pathname: string): PageKey {
 }
 
 export function resolveDashboardMode(apiModeValue: typeof apiMode, dashboardModeOverride?: string): typeof apiMode {
-  return dashboardModeOverride ? (dashboardModeOverride === 'live' ? 'live' : 'mock') : apiModeValue;
+  if (import.meta.env.PROD) return 'live';
+  if (apiModeValue === 'live' && dashboardModeOverride === undefined) return 'live';
+  return dashboardModeOverride === 'live' ? 'live' : 'mock';
 }
 
 function iconFor(name: string) {
@@ -76,7 +78,9 @@ export default function App() {
   const authApi = useMemo(() => createAuthApi({ get: transport.get, post: transport.post }), [transport]);
   const accountsApi = useMemo(() => createAccountsApi({ get: transport.get, post: transport.post, delete: transport.delete }), [transport]);
   const productsApi = useMemo(() => createProductsApi({ get: transport.get, post: transport.post, patch: transport.patch }), [transport]);
-  const productAutomationApi = useMemo(() => import.meta.env.VITE_AUTOMATION_MODE === 'mock' ? createMockProductAutomationApi() : createProductAutomationApi({ get: transport.get, post: transport.post, patch: transport.patch }), [transport]);
+  const productAutomationApi = useMemo(() => !import.meta.env.PROD && import.meta.env.VITE_AUTOMATION_MODE === 'mock'
+    ? createMockProductAutomationApi()
+    : createProductAutomationApi({ get: transport.get, post: transport.post, patch: transport.patch }), [transport]);
   const couponsApi = useMemo(() => createCouponsApi({ get: transport.get, post: transport.post, patch: transport.patch, delete: transport.delete }), [transport]);
   const messagesApi = useMemo(() => createMessagesApi({ get: transport.get, post: transport.post, baseUrl: import.meta.env.VITE_API_BASE_URL ?? undefined }), [transport]);
   const workspaceApi = useMemo(() => createWorkspaceApi({ get: transport.get, post: transport.post }, { baseUrl: import.meta.env.VITE_API_BASE_URL ?? '' }), [transport]);

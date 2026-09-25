@@ -61,6 +61,26 @@ test('product automation reuses the buyer allowlist and normalizes presentation 
   assert.deepEqual(parseProductAutomationBuyerAllowlist('[" 买家 ", "买家"]'), ['买家']);
 });
 
+test('live product automation opens to every buyer when the allowlist is empty', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'live-gate-open@example.com', passwordHash: 'hash', displayName: 'Live Gate Open' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'live-gate-open-account' });
+  const product = await store.createProduct({ adminId: admin.id, accountId: account.id, title: '任意商品标题', status: 'published' });
+  const configs = new ProductAutomationService(store, async () => 'audit');
+  const automationConfig = defaultProductAutomationConfig();
+  automationConfig.unpaidAutoReprice = { ...automationConfig.unpaidAutoReprice, enabled: true, targetPriceMinor: 880 };
+  await configs.update({ adminId: admin.id, productId: product.id, expectedConfigVersion: 1, config: automationConfig, requestId: 'config', traceId: 'config' });
+
+  const port = new CountingPort();
+  port.readOrder = async () => { port.calls.push('read-order'); return order({ accountId: account.id, productId: product.id, buyerName: '任意买家' }); };
+  const adapter = Object.assign(port, { readiness: 'ready' as const });
+  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(port), adapter, undefined, liveGate({ buyerAllowlist: [] }));
+  const result = await trigger.onOrderRefresh({ adminId: admin.id, accountId: account.id, items: [order({ accountId: account.id, productId: product.id, buyerName: '任意买家', paymentStatus: 'unpaid' })], requestId: 'refresh', traceId: 'refresh' });
+
+  assert.equal(result.results[0]?.status, 'succeeded');
+  assert.deepEqual(port.calls, ['read-order', 'reprice']);
+});
+
 test('invalid buyer allowlist fails closed', () => {
   assert.throws(
     () => parseProductAutomationBuyerAllowlist('["valid", 123]'),

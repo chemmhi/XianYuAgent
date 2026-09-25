@@ -2,13 +2,16 @@ import { useState } from 'react';
 import { useAccountContext } from '../../../app/account-context';
 import type { PageKey } from '../../../app/navigation';
 import type { DashboardApi } from '../api';
+import { createMockDashboardApi } from '../api.mock';
+import { resolveRuntimeApi } from '../../../api/runtime';
 import { useDashboardController } from '../controller';
 import { DashboardDesktopContent, DashboardMobileContent } from './DashboardViews';
 import './dashboard.css';
 
 export function DashboardPage({ api, onNavigate }: { api?: DashboardApi; apiMode: 'live' | 'mock'; onNavigate: (page: PageKey) => void }) {
   const { currentAccountId, currentAccount, accountsLoading, accountsError, refreshAccounts } = useAccountContext();
-  const controller = useDashboardController({ api, accountId: accountsLoading || Boolean(accountsError) ? undefined : currentAccountId });
+  const runtimeApi = resolveRuntimeApi(api, createMockDashboardApi, 'DASHBOARD_API_NOT_PROVIDED');
+  const controller = useDashboardController({ api: runtimeApi, accountId: accountsLoading || Boolean(accountsError) ? undefined : currentAccountId });
   const [riskDrawer, setRiskDrawer] = useState<string | null>(null);
 
   const accountContextMissing = !accountsLoading && !accountsError && !currentAccountId;

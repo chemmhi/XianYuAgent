@@ -517,11 +517,10 @@ test('push without senderName enriches buyer identity before the allowlist gate'
   }
 });
 
-test('live auto-reply requires an explicit buyer allowlist', () => {
-  assert.throws(
-    () => loadConfig({ AUTO_REPLY_SEND_MODE: 'live' }),
-    /AUTO_REPLY_LIVE_REQUIRES_BUYER_ALLOWLIST/,
-  );
+test('live auto-reply allows every buyer when the allowlist is empty', () => {
+  const unrestricted = loadConfig({ AUTO_REPLY_SEND_MODE: 'live' });
+  assert.equal(unrestricted.autoReplySendMode, 'live');
+  assert.deepEqual(unrestricted.buyerAllowlist, []);
   const config = loadConfig({ AUTO_REPLY_SEND_MODE: 'live', AUTOMATION_BUYER_ALLOWLIST: '["一只橘喵喵亮晶晶", "另一位买家"]' });
   assert.equal(config.autoReplySendMode, 'live');
   assert.deepEqual(config.buyerAllowlist, ['一只橘喵喵亮晶晶', '另一位买家']);

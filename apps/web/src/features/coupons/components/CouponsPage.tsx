@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAccountContext } from '../../../app/account-context';
 import { createMockCouponsApi, type CouponsApi } from '../api';
+import { resolveRuntimeApi } from '../../../api/runtime';
 import { useCouponsController } from '../controller';
 import type { CouponBatchVM } from '../types';
 import { createMockProductsApi, type ProductsApi } from '../../products/api';
@@ -18,8 +19,8 @@ export interface CouponsPageProps { api?: CouponsApi; productsApi?: ProductsApi;
 export function CouponsPage({ api: providedApi, productsApi: providedProductsApi }: CouponsPageProps) {
   const { currentAccountId, accountsLoading, accountsError } = useAccountContext();
   const scopedAccountId = currentAccountId ?? '__no_active_account__';
-  const api = useMemo(() => providedApi ?? createMockCouponsApi(), [providedApi]);
-  const productsApi = useMemo(() => providedProductsApi ?? createMockProductsApi(), [providedProductsApi]);
+  const api = useMemo(() => resolveRuntimeApi(providedApi, createMockCouponsApi, 'COUPONS_API_NOT_PROVIDED'), [providedApi]);
+  const productsApi = useMemo(() => resolveRuntimeApi(providedProductsApi, createMockProductsApi, 'COUPONS_PRODUCTS_API_NOT_PROVIDED'), [providedProductsApi]);
   const controller = useCouponsController({ api, initialFilters: { accountId: scopedAccountId, sortBy: 'createdAt', sortOrder: 'desc' } });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [editor, setEditor] = useState<{ mode: 'create' | 'edit' | 'copy'; batch?: CouponBatchVM } | null>(null);

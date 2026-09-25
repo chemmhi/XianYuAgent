@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { AccountsApi } from '../../accounts/api';
 import { useAccountContext } from '../../../app/account-context';
 import { createMockProductsApi, type ProductsApi } from '../api';
+import { resolveRuntimeApi } from '../../../api/runtime';
 import { useProductsController } from '../controller';
 import { ProductDetailPanel } from './ProductDetailPanel';
 import { ProductDrawer } from './ProductDrawer';
@@ -23,8 +24,8 @@ import '../../product-automation/product-automation.css';
 export interface ProductsPageProps { api?: ProductsApi; accountsApi?: AccountsApi; automationApi?: ProductAutomationApi; }
 
 export function ProductsPage({ api: providedApi, automationApi: providedAutomationApi }: ProductsPageProps) {
-  const api = useMemo(() => providedApi ?? createMockProductsApi(), [providedApi]);
-  const automationApi = useMemo(() => providedAutomationApi ?? createMockProductAutomationApi(), [providedAutomationApi]);
+  const api = useMemo(() => resolveRuntimeApi(providedApi, createMockProductsApi, 'PRODUCTS_API_NOT_PROVIDED'), [providedApi]);
+  const automationApi = useMemo(() => resolveRuntimeApi(providedAutomationApi, createMockProductAutomationApi, 'PRODUCT_AUTOMATION_API_NOT_PROVIDED'), [providedAutomationApi]);
   const { currentAccountId, currentAccount, accountsLoading, accountsError } = useAccountContext();
   const scopedAccountId = currentAccountId ?? '__no_active_account__';
   const controller = useProductsController({ api, initialFilters: { accountId: scopedAccountId, sortBy: 'xianyuOrder', sortOrder: 'asc' } });
