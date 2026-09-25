@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { WebSocket } from 'ws';
 import { XIANYU_USER_AGENT, xianyuChromeVersion } from './xianyu-browser-identity.js';
-import { isXianyuSystemMessageText } from './xianyu-system-message.js';
+import { hasXianyuSystemEnvelopeMarker, isXianyuSystemMessageText } from './xianyu-system-message.js';
 
 export const XIANYU_IM_WS_URL = 'wss://wss-goofish.dingtalk.com/';
 export const XIANYU_IM_TOKEN_API = 'mtop.taobao.idlemessage.pc.login.token';
@@ -52,6 +52,8 @@ export interface XianyuImMessageEvent {
   externalMessageRefAliases?: string[];
   sourceEventId?: string;
   sourceSequence?: number;
+  /** Set only when the gateway supplied a reminder envelope marker. */
+  platformSystemMessage?: boolean;
   riskFlags?: string[];
   raw?: Record<string, unknown>;
 }
@@ -689,7 +691,8 @@ export function parsePushPayloadDetailed(encoded: string, accountId: string, myI
   const decoded = decodeContent(msg1);
   const fallbackText = optionalString(msg10.reminderContent);
   const bodyText = decoded.text || fallbackText;
-  const bodyType = decoded.images.length > 0 ? 'image' : isXianyuSystemMessageText(bodyText) ? 'system' : bodyText ? 'text' : 'system';
+  const platformSystemMessage = Boolean(bodyText && isXianyuSystemMessageText(bodyText) && hasXianyuSystemEnvelopeMarker(msg10, extension));
+  const bodyType = decoded.images.length > 0 ? 'image' : bodyText ? 'text' : 'system';
   const timestamp = normalizeTimestamp(msg1['5'] ?? message['5'], receivedAt);
   return { event: {
     accountId,
@@ -704,6 +707,7 @@ export function parsePushPayloadDetailed(encoded: string, accountId: string, myI
     bodyType,
     bodyText,
     assetRef: decoded.images[0],
+    ...(platformSystemMessage ? { platformSystemMessage: true } : {}),
     occurredAt: timestamp.value,
     ...(timestamp.quality === 'received' ? { receivedAt, timestampQuality: timestamp.quality, riskFlags: ['source_timestamp_invalid'] } : {}),
     ...(externalMessageRefCandidates.filter((value) => value !== externalMessageRef).length > 0 ? { externalMessageRefAliases: externalMessageRefCandidates.filter((value) => value !== externalMessageRef) } : {}),
@@ -793,6 +797,7 @@ function parseOperationPushPayload(message: Record<string, unknown>, operation: 
   if (!senderRef) return { quarantine: { reasonCode: 'PUSH_SENDER_REF_MISSING', receivedAt } };
 
   const decoded = decodeOperationContent(content, extensions);
+  const platformSystemMessage = Boolean(decoded.text && isXianyuSystemMessageText(decoded.text) && hasXianyuSystemEnvelopeMarker(content, extensions, operation, sessionInfo));
   const bodyType = decoded.images.length > 0 ? 'image' : decoded.text ? 'text' : 'system';
   if (bodyType === 'system') return { quarantine: { reasonCode: 'PUSH_SYSTEM_CONTENT_IGNORED', receivedAt } };
   const timestamp = normalizeTimestamp(
@@ -813,6 +818,7 @@ function parseOperationPushPayload(message: Record<string, unknown>, operation: 
     bodyType,
     bodyText: decoded.text,
     assetRef: decoded.images[0],
+    ...(platformSystemMessage ? { platformSystemMessage: true } : {}),
     occurredAt: timestamp.value,
     ...(timestamp.quality === 'received' ? { receivedAt, timestampQuality: timestamp.quality, riskFlags: ['source_timestamp_invalid'] } : {}),
     ...(externalMessageRefCandidates.filter((value) => value !== externalMessageRef).length > 0 ? { externalMessageRefAliases: externalMessageRefCandidates.filter((value) => value !== externalMessageRef) } : {}),

@@ -9,7 +9,7 @@ function replyPayload(text: string): string {
   return JSON.stringify({ decision: 'reply', text });
 }
 
-test('transaction status notices are persisted as system messages and never enter auto reply', async () => {
+test('verified transaction status notices are persisted as system messages and never enter auto reply', async () => {
   const runtime = createApp(loadConfig({
     ...process.env,
     AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
@@ -23,6 +23,7 @@ test('transaction status notices are persisted as system messages and never ente
     const adminId = boot.admin.id;
     const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: 'system-message-seller' });
     const conversation = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'system-message-buyer', buyerDisplayName: '系统消息买家', externalConversationRef: 'system-message-conversation' });
+    await runtime.store.createOrder({ adminId, order: { orderNo: 'SYSTEM-MESSAGE-ORDER-1', accountId: account.id, buyerId: conversation.buyerRef, buyerName: conversation.buyerDisplayName ?? '系统消息买家', conversationId: conversation.id, itemId: 'system-message-item', itemTitle: '系统消息商品', amountMinor: 1_000, paymentStatus: 'unpaid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'manual' } });
 
     const result = await runtime.xianyuIm.handleExternalEvent(adminId, {
       accountId: account.id,
@@ -33,6 +34,7 @@ test('transaction status notices are persisted as system messages and never ente
       direction: 'inbound',
       bodyType: 'text',
       bodyText: '[我已拍下，待付款]',
+      platformSystemMessage: true,
       occurredAt: new Date().toISOString(),
     });
 
@@ -42,6 +44,60 @@ test('transaction status notices are persisted as system messages and never ente
     assert.equal(messages.items[0]?.bodyType, 'system');
     assert.equal(messages.items[0]?.senderRole, 'system');
     assert.equal(messages.items.filter((message) => message.direction === 'outbound').length, 0);
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('manual status text remains an auto-reply message while an unverified platform candidate is skipped', async () => {
+  const runtime = createApp(loadConfig({
+    ...process.env,
+    AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
+    HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false',
+    XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_MODEL_ENABLED: 'false', AUTO_REPLY_SEND_MODE: 'simulate',
+    AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
+  }));
+  await runtime.listen();
+  try {
+    const boot = await runtime.auth.bootstrap({ email: 'status-boundary-e2e@example.com', password: 'password-123', displayName: 'Status Boundary E2E' });
+    const adminId = boot.admin.id;
+    const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: 'status-boundary-seller' });
+    const manual = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'manual-status-buyer', buyerDisplayName: '手动同文案买家', externalConversationRef: 'manual-status-conversation' });
+    const candidate = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'candidate-status-buyer', buyerDisplayName: '未核验买家', externalConversationRef: 'candidate-status-conversation' });
+
+    const manualResult = await runtime.xianyuIm.handleExternalEvent(adminId, {
+      accountId: account.id,
+      externalConversationRef: manual.externalConversationRef!,
+      externalMessageRef: 'manual-status-message-1.PNM',
+      senderRef: manual.buyerRef,
+      senderName: manual.buyerDisplayName,
+      direction: 'inbound',
+      bodyType: 'text',
+      bodyText: '[我已付款，等待你发货]',
+      occurredAt: new Date().toISOString(),
+    });
+    assert.equal(manualResult.autoReply?.run.status, 'persisted');
+    assert.equal(manualResult.autoReply?.outboundMessage?.direction, 'outbound');
+
+    const candidateResult = await runtime.xianyuIm.handleExternalEvent(adminId, {
+      accountId: account.id,
+      externalConversationRef: candidate.externalConversationRef!,
+      externalMessageRef: 'candidate-status-message-1.PNM',
+      senderRef: candidate.buyerRef,
+      senderName: candidate.buyerDisplayName,
+      direction: 'inbound',
+      bodyType: 'text',
+      bodyText: '[我已付款，等待你发货]',
+      platformSystemMessage: true,
+      occurredAt: new Date().toISOString(),
+    });
+    assert.equal(candidateResult.autoReply?.run.status, 'skipped');
+    assert.equal(candidateResult.autoReply?.run.failureCode, 'UNSUPPORTED_MESSAGE');
+    assert.equal(candidateResult.autoReply?.outboundMessage, undefined);
+    const candidateMessages = await runtime.messages.listMessages(adminId, candidate.id, { limit: 20 });
+    assert.equal(candidateMessages.items[0]?.bodyType, 'text');
+    assert.equal(candidateMessages.items[0]?.riskFlags.includes('xianyu_system_candidate_unverified'), true);
+    assert.equal(candidateMessages.items.filter((message) => message.direction === 'outbound').length, 0);
   } finally {
     await runtime.close();
   }

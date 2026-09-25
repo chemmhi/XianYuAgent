@@ -1,7 +1,6 @@
 import type { AutoReplyDecision, AutoReplyOrderContext, AutoReplyProductContext, AutoReplyRunRecord, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyRunUpdate, ConversationRecord, MessageRecord, Store } from './domain.js';
 import type { MessageService } from './messages.js';
 import { digestJson } from './security.js';
-import { isXianyuSystemMessageText } from './xianyu-system-message.js';
 import type { AutoReplyRepairCandidateResult, AutoReplyRepairRuntime } from './auto-reply-repair-runtime.js';
 import type { AutoReplyGodViewSink } from './auto-reply-god-view.js';
 
@@ -306,7 +305,7 @@ export class AutoReplyService {
       const runtime = await this.resolveRuntimeOptions(input.adminId, conversation.accountId);
       const modelDecidesRouting = runtime.generator.supportsStructuredDecision === true;
       const supportedMessage = inboundMessage.bodyType === 'text'
-        ? Boolean(inboundMessage.bodyText?.trim()) && !isXianyuSystemMessageText(inboundMessage.bodyText)
+        ? Boolean(inboundMessage.bodyText?.trim()) && !inboundMessage.riskFlags.includes('xianyu_system_candidate_unverified')
         : inboundMessage.bodyType === 'image' && runtime.generator.supportsMultimodal === true && Boolean(inboundMessage.bodyRef?.trim());
       if (!runtime.enabled || inboundMessage.direction !== 'inbound' || !supportedMessage) {
         const failureCode = !runtime.enabled ? 'AUTO_REPLY_DISABLED' : 'UNSUPPORTED_MESSAGE';
