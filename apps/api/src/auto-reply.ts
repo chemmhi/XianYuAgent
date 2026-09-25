@@ -307,7 +307,7 @@ export class AutoReplyService {
       const supportedMessage = inboundMessage.bodyType === 'text'
         ? Boolean(inboundMessage.bodyText?.trim()) && !inboundMessage.riskFlags.includes('xianyu_system_candidate_unverified')
         : inboundMessage.bodyType === 'image' && runtime.generator.supportsMultimodal === true && Boolean(inboundMessage.bodyRef?.trim());
-      if (!runtime.enabled || inboundMessage.direction !== 'inbound' || !supportedMessage) {
+      if (!runtime.enabled || inboundMessage.direction !== 'inbound' || inboundMessage.senderRole === 'system' || !supportedMessage) {
         const failureCode = !runtime.enabled ? 'AUTO_REPLY_DISABLED' : 'UNSUPPORTED_MESSAGE';
         const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode, eventPayload: {
           input: { kind: 'inbound_message', messageId: inboundMessage.id, digest: inputDigest, bodyType: inboundMessage.bodyType, direction: inboundMessage.direction, supportedMessage, enabled: runtime.enabled, textLength: inboundMessage.bodyText?.length ?? 0 },
