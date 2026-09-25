@@ -259,4 +259,43 @@ describe('xianyu IM credential refresh', () => {
 
     assert.deepEqual(order, ['connect', 'upload', 'sendImage']);
   });
+
+  it('rebuilds a cached IM client after slider rejection and retries once with the same request id', async () => {
+    const sentRequestIds: string[] = [];
+    let refreshCalls = 0;
+    let disconnectCalls = 0;
+    const store = {
+      getConversation: async () => ({ id: 'conversation-1', accountId: 'account-1', externalConversationRef: 'conversation-external', buyerRef: 'buyer-1' }),
+      getAccount: async () => ({ id: 'account-1', platform: 'xianyu', sellerRef: 'seller-1', status: 'connected' as const }),
+      getCredential: async () => ({ cookieHeader: 'unb=seller-1; _m_h5_tk=token-1', accessToken: 'access-1', deviceId: 'device-1' }),
+      updateAccount: async () => undefined,
+    };
+    const service = new XianyuImService(store as never, {} as never, {} as never);
+    const staleClient = {
+      sendText: async () => { throw new Error('FAIL_SYS_USER_VALIDATE'); },
+      disconnect: async () => { disconnectCalls += 1; },
+    };
+    const freshClient = {
+      sendText: async (_conversationRef: string, _recipientRef: string, _text: string, requestId: string) => {
+        sentRequestIds.push(requestId);
+        return { externalMessageRef: 'fresh-message' };
+      },
+      disconnect: async () => undefined,
+    };
+    const internal = service as unknown as {
+      clients: Map<string, unknown>;
+      ensureClient: (adminId: string, accountId: string, options?: { forceCredentialRefresh?: boolean }) => Promise<unknown>;
+      refreshCredential: (...args: unknown[]) => Promise<unknown>;
+    };
+    internal.clients.set('admin-1:account-1', staleClient);
+    internal.ensureClient = async (_adminId, _accountId, options) => options?.forceCredentialRefresh ? freshClient : staleClient;
+    internal.refreshCredential = async () => { refreshCalls += 1; return { cookieHeader: 'unb=seller-1', accessToken: 'access-2', deviceId: 'device-1' }; };
+
+    const result = await service.sendExternalText('admin-1', 'account-1', 'conversation-1', '你好', 'request-1', 'trace-1');
+
+    assert.deepEqual(result, { externalMessageRef: 'fresh-message' });
+    assert.equal(refreshCalls, 1);
+    assert.equal(disconnectCalls, 1);
+    assert.deepEqual(sentRequestIds, ['request-1']);
+  });
 });

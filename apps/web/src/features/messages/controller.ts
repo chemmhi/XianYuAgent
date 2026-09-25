@@ -27,7 +27,7 @@ export function withMessageSendTimeout<T>(promise: Promise<T>, timeoutMs = MESSA
   });
 }
 
-function normalizeError(error: unknown): MessagesError {
+export function normalizeError(error: unknown): MessagesError {
   const status = typeof error === 'object' && error && 'status' in error ? Number((error as { status?: unknown }).status) : undefined;
   if (status === 403) return { code: 'FORBIDDEN', message: '当前管理员没有读取该账号或会话的权限。', retryable: false };
   if (status === 404) return { code: 'NOT_FOUND', message: '会话不存在或已被归档。', retryable: false };
@@ -342,7 +342,7 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
       const message = await withMessageSendTimeout(api.sendMessage({ accountId, conversationId, text: text.trim(), idempotencyKey }));
       setState((previous) => ({ ...previous, messages: previous.activeConversationId === conversationId && !previous.messages.some((item) => item.messageId === message.messageId) ? [...previous.messages, message] : previous.messages, sendPhase: 'sent', sendError: undefined }));
     } catch (error) {
-      setState((previous) => ({ ...previous, sendPhase: 'error', sendError: error instanceof Error ? error.message : '发送失败，请重试' }));
+      setState((previous) => ({ ...previous, sendPhase: 'error', sendError: normalizeError(error).message }));
       throw error;
     }
   }, [accountId, api, state.activeConversationId]);
@@ -356,7 +356,7 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
       const message = await withMessageSendTimeout(api.sendImage({ accountId, conversationId, file, idempotencyKey }));
       setState((previous) => ({ ...previous, messages: previous.activeConversationId === conversationId && !previous.messages.some((item) => item.messageId === message.messageId) ? [...previous.messages, message] : previous.messages, sendPhase: 'sent', sendError: undefined }));
     } catch (error) {
-      setState((previous) => ({ ...previous, sendPhase: 'error', sendError: error instanceof Error ? error.message : '图片发送失败，请重试' }));
+      setState((previous) => ({ ...previous, sendPhase: 'error', sendError: normalizeError(error).message }));
       throw error;
     }
   }, [accountId, api, state.activeConversationId]);

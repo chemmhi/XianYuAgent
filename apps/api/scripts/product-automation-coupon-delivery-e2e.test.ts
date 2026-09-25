@@ -10,7 +10,7 @@ import type { XianyuMtopClient } from '../src/xianyu-mtop.js';
 
 type Harness = Awaited<ReturnType<typeof createHarness>>;
 
-async function createHarness(options: { metadata?: Record<string, unknown>; purpose?: 'text' | 'data' | 'api' | 'image'; skuSpec?: string; failFirstTextSend?: boolean } = {}) {
+async function createHarness(options: { metadata?: Record<string, unknown>; purpose?: 'text' | 'data' | 'api' | 'image'; skuSpec?: string; failFirstTextSend?: boolean; withoutConversation?: boolean } = {}) {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: `coupon-e2e-${Math.random()}@example.com`, passwordHash: 'hash', displayName: 'Coupon E2E' });
   const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: `seller-${Math.random()}`, displayName: '卖家昵称' });
@@ -19,7 +19,7 @@ async function createHarness(options: { metadata?: Record<string, unknown>; purp
   const order = await store.createOrder({ adminId: admin.id, order: {
     orderNo: `ORDER-${Math.random()}`, accountId: account.id, buyerId: 'buyer-e2e', buyerName: '买家小明', itemId: product.externalProductRef!, itemTitle: product.title,
     skuSpec: options.skuSpec, amountMinor: 1299, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'coupon_only',
-    createdAt: '2026-09-24T00:00:00.000Z', updatedAt: '2026-09-24T00:00:00.000Z', conversationId: conversation.id, productId: product.id,
+    createdAt: '2026-09-24T00:00:00.000Z', updatedAt: '2026-09-24T00:00:00.000Z', conversationId: options.withoutConversation ? undefined : conversation.id, productId: product.id,
   }});
   const batch = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'E2E 卡券', purpose: options.purpose ?? 'text', metadata: options.metadata });
   const sentText: string[] = [];
@@ -211,6 +211,14 @@ test('无需邮寄凭证只对真实发货生效，评价赠品强制忽略该�
   assert.equal(giftResult.status, 'succeeded');
   assert.deepEqual(gift.sentText, ['赠品内容']);
   assert.deepEqual(gift.shipmentCalls, []);
+});
+
+test('无需邮寄凭证不要求订单存在聊天会话', async () => {
+  const harness = await createHarness({ metadata: { textContent: '免邮凭证', useNoLogisticsForm: true }, withoutConversation: true });
+  const result = await harness.workflow.handlePaymentPaid({ adminId: harness.admin.id, config: paidConfig([harness.batch.id], { autoConfirm: true }), order: harness.order, eventId: 'no-logistics-without-conversation' });
+  assert.equal(result.status, 'succeeded');
+  assert.deepEqual(harness.sentText, []);
+  assert.deepEqual(harness.shipmentCalls, ['免邮凭证']);
 });
 
 test('非固定文字卡券开启无需邮寄凭证时拒绝真实发货', async () => {

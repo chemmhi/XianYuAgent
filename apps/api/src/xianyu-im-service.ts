@@ -125,8 +125,24 @@ export class XianyuImService {
     const conversation = await this.getConversation(adminId, accountId, conversationId);
     const externalRef = conversation.externalConversationRef;
     if (!externalRef) throw new ServiceError(409, 'EXTERNAL_CONVERSATION_MISSING', 'conversation is not linked to xianyu');
-    const client = await this.ensureClient(adminId, accountId);
-    return this.withAccountFailure(adminId, accountId, () => client.sendText(externalRef, conversation.buyerRef, normalizedText, requestId));
+    let client = await this.ensureClient(adminId, accountId);
+    try {
+      return await this.withAccountFailure(adminId, accountId, () => client.sendText(externalRef, conversation.buyerRef, normalizedText, requestId));
+    } catch (error) {
+      if (!isRecoverableTextSendError(error)) throw error;
+      await this.resetClient(adminId, accountId);
+      if (isValidationTextSendError(error)) {
+        const account = await this.store.getAccount(adminId, accountId);
+        const credential = await this.store.getCredential(adminId, accountId);
+        if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found');
+        if (!credential?.cookieHeader) throw new ServiceError(409, 'CREDENTIAL_MISSING', 'account credential is missing');
+        // A cached IM access token can survive the browser slider challenge.
+        // Force a fresh MTOP token before constructing the replacement client.
+        await this.refreshCredential(adminId, account, credential);
+      }
+      client = await this.ensureClient(adminId, accountId, { forceCredentialRefresh: isValidationTextSendError(error) });
+      return this.withAccountFailure(adminId, accountId, () => client.sendText(externalRef, conversation.buyerRef, normalizedText, requestId));
+    }
   }
 
   async sendText(adminId: string, accountId: string, conversationId: string, text: string, requestId: string, traceId: string): Promise<unknown> {
@@ -283,8 +299,15 @@ export class XianyuImService {
     return conversation;
   }
 
-  private async ensureClient(adminId: string, accountId: string): Promise<XianyuImClient> {
+  private async ensureClient(adminId: string, accountId: string, options: { forceCredentialRefresh?: boolean } = {}): Promise<XianyuImClient> {
     const key = `${adminId}:${accountId}`;
+    if (options.forceCredentialRefresh) {
+      const existing = this.clients.get(key);
+      if (existing) {
+        this.clients.delete(key);
+        await existing.disconnect().catch(() => undefined);
+      }
+    }
     const existing = this.clients.get(key);
     if (existing) {
       try { await existing.connect(); return existing; } catch (error) {
@@ -828,6 +851,17 @@ function recoveryErrorCode(error: unknown): string {
   if (messageCode && /^[A-Z][A-Z0-9_:-]{1,64}$/.test(messageCode)) return messageCode;
   if (error instanceof Error && error.name) return error.name.toUpperCase().replace(/[^A-Z0-9_:-]/g, '_');
   return 'XIANYU_HISTORY_RECOVERY_FAILED';
+}
+
+function isRecoverableTextSendError(error: unknown): boolean {
+  const code = recoveryErrorCode(error);
+  const message = error instanceof Error ? error.message.toUpperCase() : String(error).toUpperCase();
+  return isValidationTextSendError(error) || /XIANYU_IM_(?:CONNECTION_CLOSED|NOT_CONNECTED|WS_OPEN_TIMEOUT)|ECONNRESET|ETIMEDOUT|TIMEOUT|FAILED_TO_FETCH/u.test(code) || /FAILED TO FETCH|FETCH FAILED/u.test(message);
+}
+
+function isValidationTextSendError(error: unknown): boolean {
+  const code = recoveryErrorCode(error);
+  return /FAIL_SYS_USER_VALIDATE|ACCOUNT_VALIDATION_REQUIRED|X5SEC|CAPTCHA|SLIDER|VALIDAT(?:E|ION)/u.test(code);
 }
 
 function mergeCookieSnapshots(base: XianyuCookieSnapshot | undefined, updates: XianyuCookieSnapshot): XianyuCookieSnapshot {
