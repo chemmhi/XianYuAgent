@@ -3,3 +3,5 @@
 @media(min-width:901px){html,body,#root{height:100%}.app-viewport,.desktop-shell{height:100vh;min-height:0}.desktop-body{min-height:0}.desktop-body main{min-height:0}}
 @media(max-width:900px){html,body,#root,.app-viewport,.desktop-shell{height:auto}}
 .modal-head-actions{display:flex;align-items:center;gap:8px}
+/* FishAgent brand sizing: keep the sidebar mark legible at a glance. */
+.brand-mark{width:32px;height:32px}

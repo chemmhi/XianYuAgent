@@ -7,7 +7,7 @@ type LogoProps = {
   size?: number;
 };
 
-export function Logo({ variant, className, label = 'XianyuSellerAgent', size = 28 }: LogoProps) {
+export function Logo({ variant, className, label = 'FishAgent', size = 32 }: LogoProps) {
   const resolvedVariant = variant ?? resolveLogoVariant();
   return <img className={className} src={logoAssetPath(resolvedVariant)} width={size} height={size} alt={label} />;
 }
