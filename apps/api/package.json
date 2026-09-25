@@ -10,6 +10,8 @@
     "start": "node dist/index.js",
     "worker": "node dist/worker.js",
     "migrate": "node scripts/migrate.mjs",
+    "repair:xianyu-system-messages": "node scripts/repair-xianyu-system-messages.mjs",
+    "test:xianyu-system-reconcile:postgres": "npm run build && node scripts/xianyu-system-message-reconcile-postgres-smoke.mjs",
     "test:postgres": "npm run build && node scripts/products-postgres-smoke.mjs",
     "test:compose-migration": "node scripts/compose-migration-config.test.mjs",
     "test:postgres:credentials": "npm run build && node scripts/credential-store-postgres-smoke.mjs",

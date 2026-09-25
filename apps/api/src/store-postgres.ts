@@ -960,6 +960,48 @@ export class PostgresStore implements Store {
     return result.rows[0] ? this.toMessage(result.rows[0]) : undefined;
   }
 
+  async reconcileExternalMessage(input: { adminId: string; conversationId: string; externalMessageRef: string; senderRole: MessageRecord['senderRole']; bodyType: MessageRecord['bodyType']; source?: MessageRecord['source']; riskFlags?: string[]; traceId?: string }): Promise<{ message: MessageRecord; event?: ConversationEventRecord } | undefined> {
+    const conversation = await this.getConversation(input.adminId, input.conversationId);
+    if (!conversation) return undefined;
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const result = await client.query('select m.* from messages.messages m where m.conversation_id=$1 and (m.external_message_ref=$2 or exists (select 1 from messages.message_external_ref_aliases a where a.message_id=m.id and a.external_message_ref=$2)) limit 1 for update', [input.conversationId, input.externalMessageRef]);
+      if (!result.rows[0]) {
+        await client.query('commit');
+        return undefined;
+      }
+      const current = this.toMessage(result.rows[0]);
+      const systemUpgrade = current.direction === 'inbound' && input.senderRole === 'system' && input.bodyType === 'system';
+      const mergedRiskFlags = [...new Set([...current.riskFlags, ...(input.riskFlags ?? [])])];
+      const changed = (systemUpgrade && (current.senderRole !== 'system' || current.bodyType !== 'system' || (input.source && current.source !== input.source)))
+        || mergedRiskFlags.length !== current.riskFlags.length;
+      if (!changed) {
+        await client.query('commit');
+        return { message: current };
+      }
+      const senderRole = systemUpgrade ? 'system' : current.senderRole;
+      const bodyType = systemUpgrade ? 'system' : current.bodyType;
+      const source = systemUpgrade ? (input.source ?? 'system') : current.source;
+      const updatedResult = await client.query('update messages.messages set sender_role=$2,body_type=$3,source=$4,risk_flags=$5::jsonb where id=$1 returning *', [current.id, senderRole, bodyType, source ?? null, JSON.stringify(mergedRiskFlags)]);
+      const updatedConversationResult = await client.query('update messages.conversations set version=version+1,updated_at=now() where id=$1 returning *', [conversation.id]);
+      await client.query('select pg_advisory_xact_lock(hashtext($1))', [conversation.id]);
+      const cursorResult = await client.query('select coalesce(max(cursor),0)::bigint + 1 as cursor from messages.events where conversation_id=$1', [conversation.id]);
+      const cursor = Number(cursorResult.rows[0]?.cursor ?? 1);
+      const message = this.toMessage(updatedResult.rows[0]);
+      const updatedConversation = this.toConversation(updatedConversationResult.rows[0]);
+      const event: ConversationEventRecord = { eventId: createId(), conversationId: conversation.id, accountId: conversation.accountId, cursor, type: 'chat.message.updated', occurredAt: new Date().toISOString(), traceId: input.traceId ?? `reconcile:${message.id}`, payload: { message, conversation: updatedConversation } };
+      const eventResult = await client.query('insert into messages.events (event_id,conversation_id,account_id,cursor,type,occurred_at,trace_id,payload_json) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb) returning *', [event.eventId, event.conversationId, event.accountId, event.cursor, event.type, event.occurredAt, event.traceId, JSON.stringify(event.payload)]);
+      await client.query('commit');
+      return { message, event: this.toConversationEvent(eventResult.rows[0]) };
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async createConversation(input: { adminId: string; accountId: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; externalConversationRef?: string }): Promise<ConversationRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const result = await this.pool.query('insert into messages.conversations (id,account_id,external_conversation_ref,buyer_ref,buyer_display_name,buyer_avatar_url,item_ref,item_title,item_image_url) values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *', [createId(), input.accountId, input.externalConversationRef ?? null, input.buyerRef, input.buyerDisplayName ?? null, input.buyerAvatarUrl ?? null, input.itemRef ?? null, input.itemTitle ?? null, input.itemImageUrl ?? null]);

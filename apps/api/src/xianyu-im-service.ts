@@ -5,7 +5,7 @@ import { classifyXianyuFailure } from './xianyu-account-health.js';
 import type { MessageService } from './messages.js';
 import type { AutoReplyProcessResult, AutoReplyService } from './auto-reply.js';
 import { XianyuImClient, XianyuImMessageEvent, XianyuImReadReceiptEvent, XianyuImCredential } from './xianyu-im.js';
-import { hasXianyuSystemEnvelopeMarker, matchesXianyuOrderStatus, parseXianyuSystemMessageKind } from './xianyu-system-message.js';
+import { hasXianyuStructuredSystemMarker, matchesXianyuOrderStatus, parseXianyuSystemMessageKind } from './xianyu-system-message.js';
 import { XianyuMtopClient } from './xianyu-mtop.js';
 import type { ProductAutomationImEventResult, ProductAutomationTrigger } from './product-automation-trigger.js';
 import { InboundInboxWorker } from './inbound-inbox-worker.js';
@@ -695,7 +695,7 @@ export class XianyuImService {
     } catch {
       // Fail closed: a reminder without a verified order must never reach auto reply.
     }
-    return { bodyType: 'text', riskFlags: appendRiskFlag(baseRiskFlags, 'xianyu_system_candidate_unverified') };
+    return { bodyType: 'system', riskFlags: appendRiskFlag(baseRiskFlags, 'xianyu_system_candidate_unverified') };
   }
 
   /** Wake a bounded one-shot inbox poll without replacing the durable worker. */
@@ -821,7 +821,7 @@ function normalizeHistoryMessage(value: unknown, myId: string | readonly string[
   const bodyText = content.text ?? fallback;
   const bodyRef = content.images[0];
   const itemRef = firstString([extension, message], ['itemId', 'itemID', 'itemRef']);
-  const platformSystemMessage = Boolean(bodyText && hasXianyuSystemEnvelopeMarker(model, message, extension, custom));
+  const platformSystemMessage = hasXianyuStructuredSystemMarker(model, message, extension, custom);
   const bodyType = bodyRef ? 'image' : bodyText ? 'text' : 'system';
   const receivedAt = new Date().toISOString();
   const createdAt = normalizeTimestamp(message.createAt);
