@@ -149,7 +149,7 @@ test('product automation full E2E executes each configured rule from order state
       new AutomationWorkflowService(adapter, new PersistentAutomationExecutionLedger(runtime.store)),
       adapter,
       undefined,
-      { executionMode: 'live', liveConfirmed: true, buyerAllowlist: [] },
+      { executionMode: 'live', liveConfirmed: true, reviewExternalWritesConfirmed: true, buyerAllowlist: [] },
     );
 
     const paidResult = await trigger.onOrderRefresh({ adminId, accountId: account.id, items: [paidOrder], requestId: 'full-e2e-paid', traceId: 'full-e2e-paid' });

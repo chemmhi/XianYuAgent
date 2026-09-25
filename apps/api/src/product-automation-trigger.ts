@@ -11,6 +11,7 @@ import {
 import {
   DEFAULT_PRODUCT_AUTOMATION_LIVE_CONFIG,
   productAutomationLiveBlockReason,
+  productAutomationReviewExternalWriteBlockReason,
   type ProductAutomationLiveConfig,
 } from './product-automation-live-gate.js';
 
@@ -190,6 +191,12 @@ export class ProductAutomationTrigger {
         if (liveBlockReason) {
           return this.finish(trigger, order.orderNo, { trigger, orderNo: order.orderNo, status: 'blocked', reason: liveBlockReason }, adminId, order.accountId, requestId, traceId);
         }
+        if (isReviewTrigger(trigger)) {
+          const reviewBlockReason = productAutomationReviewExternalWriteBlockReason(this.liveConfig);
+          if (reviewBlockReason) {
+            return this.finish(trigger, order.orderNo, { trigger, orderNo: order.orderNo, status: 'blocked', reason: reviewBlockReason }, adminId, order.accountId, requestId, traceId);
+          }
+        }
       }
       const result = trigger === 'payment_paid'
         ? await this.workflow.handlePaymentPaid({ adminId, config, order, eventId: eventId ?? `order-refresh:${order.orderNo}:${order.updatedAt}` })
@@ -247,6 +254,10 @@ function ruleEnabled(config: import('./domain.js').ProductAutomationConfig, trig
   if (trigger === 'unpaid_reprice') return config.unpaidAutoReprice.enabled;
   if (trigger === 'review_gift') return config.reviewGift.enabled;
   return config.reviewReminder.enabled;
+}
+
+function isReviewTrigger(trigger: ProductAutomationTriggerKind): boolean {
+  return trigger === 'review_gift' || trigger === 'review_reminder';
 }
 
 function blockedExternalResult(): { status: 'failed'; errorCode: string; message: string } {

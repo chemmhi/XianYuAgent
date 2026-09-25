@@ -247,6 +247,7 @@
 | S5-RISK-047 | 自动化规则可能继续选择未启用卡券，导致错误发送或规则保存后运行时失败 | P1 | 前端候选筛选 `active`；后端启用规则时拒绝未启用批次；补 API 与发券 E2E 回归 | CLOSED |
 | S5-RISK-048 | 批量数据卡可重复使用后若始终选择首行，配置顺序和测试语义会退化 | P2 | 对 `purpose=data` 按已提交 reservation 次数轮换；Memory/PostgreSQL 共享策略；补 reservation 单测、PostgreSQL smoke 和商品自动化 E2E | CLOSED |
 | S5-RISK-049 | 本轮受控 E2E 未覆盖真实闲鱼外部 mutation（IM/MTOP） | P1 | 继续使用隔离测试账号、明确买家与订单后执行真实发券/禁用拦截/重试验收；在此之前不得把本轮受控证据升级为生产通过 | OPEN |
+| S5-RISK-055 | 评价触发后的 IM 写操作若与发货/改价共用 live 确认，可能在误识别或测试配置错误时触达真实会话 | P1 | 增加 `PRODUCT_AUTOMATION_REVIEW_EXTERNAL_WRITES_CONFIRMED` 独立门禁；默认 false；评价识别仅接受受信系统事件，且评价链路 E2E 在适配器边界使用 fake 外部调用 | MITIGATED |
 
 ### 2026-09-24 商品发布主流程回放
 

@@ -3,12 +3,15 @@ export type ProductAutomationExecutionMode = 'simulate' | 'live';
 export interface ProductAutomationLiveConfig {
   executionMode: ProductAutomationExecutionMode;
   liveConfirmed: boolean;
+  /** Review-triggered IM writes require an independent explicit confirmation. */
+  reviewExternalWritesConfirmed: boolean;
   buyerAllowlist: string[];
 }
 
 export const DEFAULT_PRODUCT_AUTOMATION_LIVE_CONFIG: ProductAutomationLiveConfig = {
   executionMode: 'simulate',
   liveConfirmed: false,
+  reviewExternalWritesConfirmed: false,
   buyerAllowlist: [],
 };
 
@@ -43,8 +46,15 @@ export function resolveProductAutomationLiveConfig(env: NodeJS.ProcessEnv, buyer
   return {
     executionMode,
     liveConfirmed: parseBoolean(env.PRODUCT_AUTOMATION_LIVE_CONFIRMED),
+    reviewExternalWritesConfirmed: parseBoolean(env.PRODUCT_AUTOMATION_REVIEW_EXTERNAL_WRITES_CONFIRMED),
     buyerAllowlist: [...new Set(buyerAllowlist.map(normalizeAutomationBuyerName).filter(Boolean))],
   };
+}
+
+export function productAutomationReviewExternalWriteBlockReason(config: ProductAutomationLiveConfig): string | undefined {
+  return config.reviewExternalWritesConfirmed
+    ? undefined
+    : 'PRODUCT_AUTOMATION_REVIEW_EXTERNAL_WRITES_REQUIRE_CONFIRMATION';
 }
 
 export function productAutomationLiveBlockReason(config: ProductAutomationLiveConfig, buyerName: string | undefined): string | undefined {

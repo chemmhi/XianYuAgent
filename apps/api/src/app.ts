@@ -134,6 +134,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
   }, {
     executionMode: config.productAutomationExecutionMode,
     liveConfirmed: config.productAutomationLiveConfirmed,
+    reviewExternalWritesConfirmed: config.productAutomationReviewExternalWritesConfirmed,
     buyerAllowlist: config.buyerAllowlist ?? [],
   });
   const productAutomationWorker = new ProductAutomationWorker(store, productAutomationTrigger);
