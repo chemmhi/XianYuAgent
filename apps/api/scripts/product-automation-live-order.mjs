@@ -26,7 +26,8 @@ try {
   assert.equal(order.accountId, accountId);
   assert.ok(order.productId, 'order is not linked to a local product');
   const normalizedBuyerNames = (config.buyerAllowlist ?? []).map(normalizeAutomationBuyerName);
-  assert.ok(normalizedBuyerNames.includes(normalizeAutomationBuyerName(order.buyerName)), 'order buyer is not in the configured buyer allowlist');
+  const liveBuyerIdentity = order.buyerNickname?.trim() || order.buyerName;
+  assert.ok(normalizedBuyerNames.includes(normalizeAutomationBuyerName(liveBuyerIdentity)), 'order buyer nickname is not in the configured buyer allowlist');
   const automation = await runtime.productAutomation.get(adminId, order.productId);
   assert.equal(automation.product.accountId, accountId);
 

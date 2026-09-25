@@ -71,3 +71,31 @@ test('treats numeric order status 4 as already delivered', async () => {
   assert.equal(result.externalRef, order.orderNo);
   assert.equal(confirmed, false);
 });
+
+test('treats numeric order status 2 as pending and confirms shipment', async () => {
+  const { store, admin, account, order } = await setup();
+  let confirmed = false;
+  const fakeMtop = {
+    readOrderDetail: async () => ({ success: true, accountInvalid: false, detail: { orderNo: order.orderNo, deliveryStatus: '2' }, cookieHeader: '' }),
+    confirmShipment: async () => { confirmed = true; return { status: 'succeeded', externalRef: order.orderNo }; },
+  } as unknown as XianyuMtopClient;
+  const adapter = new XianyuProductAutomationExecutionAdapter(store, () => fakeMtop, () => undefined);
+  const result = await adapter.confirmShipment({ adminId: admin.id, accountId: account.id, productId: order.productId, itemId: order.itemId, itemTitle: order.itemTitle, orderNo: order.orderNo, executionKey: 'live-confirm-numeric-2' });
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.externalRef, order.orderNo);
+  assert.equal(confirmed, true);
+});
+
+test('treats numeric order status 3 as already shipped', async () => {
+  const { store, admin, account, order } = await setup();
+  let confirmed = false;
+  const fakeMtop = {
+    readOrderDetail: async () => ({ success: true, accountInvalid: false, detail: { orderNo: order.orderNo, deliveryStatus: '3' }, cookieHeader: '' }),
+    confirmShipment: async () => { confirmed = true; return { status: 'succeeded', externalRef: order.orderNo }; },
+  } as unknown as XianyuMtopClient;
+  const adapter = new XianyuProductAutomationExecutionAdapter(store, () => fakeMtop, () => undefined);
+  const result = await adapter.confirmShipment({ adminId: admin.id, accountId: account.id, productId: order.productId, itemId: order.itemId, itemTitle: order.itemTitle, orderNo: order.orderNo, executionKey: 'live-confirm-numeric-3' });
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.externalRef, order.orderNo);
+  assert.equal(confirmed, false);
+});

@@ -110,6 +110,14 @@ test('push parser prefers the stable PNM id over an internal transport id', () =
   assert.equal(parsed?.externalMessageRef, 'canonical-1.PNM');
 });
 
+test('buyer-authored payment-status text remains ordinary text, not a system event', () => {
+  const bodyText = '[已付款，等待发货]';
+  const parsed = parsePushPayload(pushPayload('manual-payment-text-1.PNM', bodyText), 'account-1', 'seller-1');
+  assert.equal(parsed?.direction, 'inbound');
+  assert.equal(parsed?.bodyType, 'text');
+  assert.equal(parsed?.bodyText, bodyText);
+});
+
 test('push parser treats an account seller identity as outbound even when the cookie identity differs', () => {
   const sellerPayload = pushPayloadFromSender('seller-outbound-2.PNM', 'seller sent this', 'seller-account-2');
   const sellerParsed = parsePushPayload(sellerPayload, 'account-1', ['stale-cookie-seller', 'seller-account-2']);

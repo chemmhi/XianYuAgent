@@ -156,7 +156,11 @@ export class ProductAutomationTrigger {
         return this.finish(trigger, order.orderNo, { trigger, orderNo: order.orderNo, status: 'blocked', reason: this.execution.readinessCode ?? 'AUTOMATION_EXECUTION_NOT_CONFIGURED' }, adminId, order.accountId, requestId, traceId);
       }
       if (ruleEnabled(config, trigger)) {
-        const liveBlockReason = productAutomationLiveBlockReason(this.liveConfig, order.buyerName);
+        // Xianyu's buyer_name may be the real-name field from the order detail
+        // (for example, "陈晨"). The buyer nickname is the stable identity
+        // shown in IM and the value used by AUTOMATION_BUYER_ALLOWLIST.
+        const liveBuyerIdentity = order.buyerNickname?.trim() || order.buyerName;
+        const liveBlockReason = productAutomationLiveBlockReason(this.liveConfig, liveBuyerIdentity);
         if (liveBlockReason) {
           return this.finish(trigger, order.orderNo, { trigger, orderNo: order.orderNo, status: 'blocked', reason: liveBlockReason }, adminId, order.accountId, requestId, traceId);
         }

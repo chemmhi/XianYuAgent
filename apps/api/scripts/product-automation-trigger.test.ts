@@ -64,6 +64,33 @@ test('order refresh trigger dispatches paid and unpaid workflows through a ready
   assert.deepEqual(port.calls, ['reserve:delivery', 'send:delivery', 'commit', 'confirm', 'read-order', 'reprice:880']);
 });
 
+test('paid live gate matches buyer nickname instead of order real-name field', async () => {
+  const { store, admin, account, product, coupon, configs } = await setup();
+  const config = defaultProductAutomationConfig();
+  config.paidAutoDelivery = { ...config.paidAutoDelivery, enabled: true, couponBatchIds: [coupon.id] };
+  await configs.update({ adminId: admin.id, productId: product.id, expectedConfigVersion: 1, config, requestId: 'nickname-config', traceId: 'nickname-config' });
+
+  const port = new ReadyPort();
+  const trigger = new ProductAutomationTrigger(
+    store,
+    configs,
+    new AutomationWorkflowService(port),
+    Object.assign(port, { readiness: 'ready' as const }),
+    undefined,
+    { executionMode: 'live', liveConfirmed: true, buyerAllowlist: ['一只橘喵喵亮晶晶'] },
+  );
+  const result = await trigger.onOrderRefresh({
+    adminId: admin.id,
+    accountId: account.id,
+    items: [order({ accountId: account.id, productId: product.id, buyerName: '陈晨', buyerNickname: '一只橘喵喵亮晶晶' })],
+    requestId: 'nickname-refresh',
+    traceId: 'nickname-refresh',
+  });
+
+  assert.equal(result.results[0]?.status, 'succeeded');
+  assert.deepEqual(port.calls, ['reserve:delivery', 'send:delivery', 'commit', 'confirm']);
+});
+
 test('default adapter blocks without fabricating shipment/reprice success and worker polls reminders', async () => {
   const { store, admin, account, product, coupon, configs } = await setup();
   const config = defaultProductAutomationConfig();
@@ -128,7 +155,7 @@ test('IM adapter envelope accepts only explicit review signals', async () => {
   const { store, admin, account, product, configs } = await setup();
   const config = defaultProductAutomationConfig();
   const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(new NotConfiguredAutomationExecutionAdapter()), new NotConfiguredAutomationExecutionAdapter(), undefined, testLiveGate());
-  const ignored = await trigger.onImEvent(admin.id, { accountId: account.id, externalConversationRef: 'c', externalMessageRef: 'm-1', senderRef: 'buyer', direction: 'inbound', bodyType: 'text', bodyText: '好评', occurredAt: '2026-09-23T00:00:00.000Z', raw: { text: '好评' } });
+  const ignored = await trigger.onImEvent(admin.id, { accountId: account.id, externalConversationRef: 'c', externalMessageRef: 'm-1', senderRef: 'buyer', direction: 'inbound', bodyType: 'text', bodyText: '[已付款，等待发货]', occurredAt: '2026-09-23T00:00:00.000Z', raw: { text: '[已付款，等待发货]' } });
   assert.deepEqual(ignored, { accepted: false, reason: 'AUTOMATION_SIGNAL_NOT_PRESENT' });
   const accepted = await trigger.onImEvent(admin.id, { accountId: account.id, externalConversationRef: 'c', externalMessageRef: 'm-2', senderRef: 'buyer', direction: 'inbound', bodyType: 'system', occurredAt: '2026-09-23T00:00:00.000Z', raw: { productAutomation: { kind: 'review_created', orderNo: 'MISSING', eventId: 'review-1' } } });
   assert.equal(accepted.accepted, true);
