@@ -175,6 +175,7 @@ export class XianyuQrLoginAdapter {
               try {
                 const completed = await this.verificationBrowser.waitForCompletion({
                   verificationUrl: result.iframeRedirectUrl,
+                  profileKey: session.accountId ?? session.sessionId,
                   initialCookieSnapshot: session.jar,
                   allowManualFallback: this.allowManualVerificationFallback,
                 });

@@ -121,7 +121,6 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       sliderMaxRetries: config.xianyuVerificationSliderMaxRetries,
       headless: config.xianyuVerificationBrowserHeadless,
       executablePath: config.xianyuVerificationBrowserExecutablePath,
-      debugPort: config.xianyuVerificationBrowserDebugPort,
       userDataDir: config.xianyuVerificationBrowserUserDataDir,
       maxWaitMs: config.xianyuVerificationBrowserMaxWaitMs,
     });
@@ -340,7 +339,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       for (const client of wsServer.clients) client.close(1001, 'server shutdown');
       await new Promise<void>((resolve) => wsServer.close(() => resolve()));
       workspaceRuntime.stop();
-      await new Promise<void>((resolve, reject) => runtime.server.close((error) => error ? reject(error) : resolve()));
+      await closeHttpServer(runtime.server);
       await redisRealtime?.close();
       await xianyuIm.close();
       const close = (store as Store & { close?: () => Promise<void> }).close;
@@ -364,6 +363,15 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     if (context) void attachConversationSocket(runtime, socket, request, context);
   });
   return runtime;
+}
+
+async function closeHttpServer(server: Server): Promise<void> {
+  if (!server.listening) return;
+  await new Promise<void>((resolve, reject) => server.close((error) => {
+    const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code) : undefined;
+    if (!error || code === 'ERR_SERVER_NOT_RUNNING') resolve();
+    else reject(error);
+  }));
 }
 
 async function startXianyuListenerBestEffort(runtime: AppRuntime, adminId: string, accountId: string): Promise<void> {
