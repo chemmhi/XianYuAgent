@@ -8,6 +8,7 @@ const suffix = `${process.pid}-${Date.now()}`;
 let admin;
 let account;
 let batch;
+let mixedBatch;
 let dataBatch;
 const reservationIds = [];
 
@@ -60,6 +61,14 @@ try {
   reservationIds.push(secondExecution.reservationId);
   await runtime.store.commitCouponReservation({ adminId: admin.id, reservationId: secondExecution.reservationId, executionKey: `pg-reuse-${suffix}` });
 
+  mixedBatch = await runtime.store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'PG Mixed Batch', purpose: 'text' });
+  await runtime.store.importCouponItems({ adminId: admin.id, batchId: mixedBatch.id, contents: [`pg-mixed-${suffix}`] });
+  const mixed = await runtime.store.reserveCoupon({ adminId: admin.id, accountId: account.id, batchIds: [batch.id, mixedBatch.id], quantity: 1, executionKey: `pg-mixed-${suffix}`, purpose: 'delivery' });
+  reservationIds.push(mixed.reservationId);
+  assert.equal(mixed.items.length, 2);
+  assert.deepEqual(new Set(mixed.items.map((item) => item.batchId)), new Set([batch.id, mixedBatch.id]));
+  await runtime.store.releaseCouponReservation({ adminId: admin.id, reservationId: mixed.reservationId, executionKey: `pg-mixed-${suffix}`, reason: 'pg_mixed_cleanup' });
+
   dataBatch = await runtime.store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'PG Data Rotation Batch', purpose: 'data', metadata: { dataContent: `pg-data-1-${suffix}\npg-data-2-${suffix}` } });
   const dataFirstKey = `pg-data-1-${suffix}`;
   const dataSecondKey = `pg-data-2-${suffix}`;
@@ -90,6 +99,10 @@ try {
     await runtime.store.pool.query('delete from coupons.coupon_reservations where account_id=$1', [account.id]);
     await runtime.store.pool.query('delete from coupons.coupon_items where batch_id=$1', [dataBatch.id]);
     await runtime.store.pool.query('delete from coupons.coupon_batches where id=$1', [dataBatch.id]);
+  }
+  if (mixedBatch) {
+    await runtime.store.pool.query('delete from coupons.coupon_items where batch_id=$1', [mixedBatch.id]);
+    await runtime.store.pool.query('delete from coupons.coupon_batches where id=$1', [mixedBatch.id]);
   }
   if (account) {
     await runtime.store.pool.query('delete from auth.account_scopes where account_id=$1', [account.id]);

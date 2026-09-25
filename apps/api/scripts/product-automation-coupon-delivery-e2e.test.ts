@@ -231,5 +231,36 @@ test('非固定文字卡券开启无需邮寄凭证时拒绝真实发货', async
   assert.deepEqual(harness.shipmentCalls, []);
 });
 
+test('多选卡券逐批发送四类内容，且无需邮寄批次只用于确认发货', async () => {
+  let apiCalls = 0;
+  const server = createServer((_request, response) => {
+    apiCalls += 1;
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({ content: 'API-MIX' }));
+  });
+  await listen(server);
+  try {
+    const harness = await createHarness({ metadata: { textContent: '免邮凭证', useNoLogisticsForm: true } });
+    const dataBatch = await harness.store.createCouponBatch({ adminId: harness.admin.id, accountId: harness.account.id, label: '批量数据', purpose: 'data', metadata: { dataContent: 'DATA-MIX' } });
+    const apiBatch = await harness.store.createCouponBatch({ adminId: harness.admin.id, accountId: harness.account.id, label: 'API 卡券', purpose: 'api', metadata: { apiConfig: { url: `http://127.0.0.1:${(server.address() as { port: number }).port}/card`, method: 'GET' } } });
+    const imageBatch = await harness.store.createCouponBatch({ adminId: harness.admin.id, accountId: harness.account.id, label: '图片卡券', purpose: 'image', metadata: { imageUrls: ['data:image/png;base64,aGVsbG8='], description: '图片备注：{buyer_name}' } });
+
+    const result = await harness.workflow.handlePaymentPaid({
+      adminId: harness.admin.id,
+      config: paidConfig([harness.batch.id, dataBatch.id, apiBatch.id, imageBatch.id], { autoConfirm: true }),
+      order: harness.order,
+      eventId: 'mixed-coupon-types-event',
+    });
+
+    assert.equal(result.status, 'succeeded');
+    assert.deepEqual(harness.sentText, ['DATA-MIX', 'API-MIX', '图片备注：买家小明']);
+    assert.equal(harness.sentImages.length, 1);
+    assert.equal(apiCalls, 1);
+    assert.deepEqual(harness.shipmentCalls, ['免邮凭证']);
+  } finally {
+    await close(server);
+  }
+});
+
 async function listen(server: Server): Promise<void> { await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve)); }
 async function close(server: Server): Promise<void> { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
