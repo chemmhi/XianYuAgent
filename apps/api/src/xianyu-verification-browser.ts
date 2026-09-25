@@ -1,9 +1,9 @@
-import { resolve } from 'node:path';
 import { mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
-import { chromium, type BrowserContext, type Page } from 'patchright';
+import { join, resolve } from 'node:path';
 import { dropStaleCaptchaChallengeCookies, normalizeCookieSnapshot, type XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
-import { XianyuSliderSolver, type XianyuSliderMode, type XianyuSliderPage } from './xianyu-slider-solver.js';
+import { createPatchrightVerificationBrowserFactory } from './patchright-verification-browser.js';
+import type { XianyuVerificationBrowserFactory, XianyuVerificationContext, XianyuVerificationCookie, XianyuVerificationPage } from './xianyu-browser-port.js';
+import { XianyuSliderSolver, type XianyuSliderMode } from './xianyu-slider-solver.js';
 
 export type XianyuVerificationBrowserMode = 'disabled' | 'launch';
 
@@ -18,6 +18,8 @@ export interface XianyuVerificationBrowserOptions {
   pollIntervalMs?: number;
   allowManualFallback?: boolean;
   userAgent?: string;
+  /** Injectable boundary for unit tests and future browser implementations. */
+  browserFactory?: XianyuVerificationBrowserFactory;
 }
 
 export interface XianyuVerificationBrowserResult {
@@ -46,6 +48,7 @@ export class XianyuVerificationBrowser {
   private readonly pollIntervalMs: number;
   private readonly allowManualFallback: boolean;
   private readonly userAgent?: string;
+  private readonly browserFactory: XianyuVerificationBrowserFactory;
   private readonly activeVerifications = new Map<string, Promise<XianyuVerificationBrowserResult>>();
 
   constructor(options: XianyuVerificationBrowserOptions = {}) {
@@ -59,6 +62,7 @@ export class XianyuVerificationBrowser {
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this.allowManualFallback = options.allowManualFallback ?? false;
     this.userAgent = options.userAgent?.trim() || process.env.XIANYU_BROWSER_USER_AGENT?.trim() || undefined;
+    this.browserFactory = options.browserFactory ?? createPatchrightVerificationBrowserFactory();
   }
 
   get enabled(): boolean { return this.mode !== 'disabled'; }
@@ -99,18 +103,24 @@ export class XianyuVerificationBrowser {
     const useHeadless = shouldUseHeadlessVerificationBrowser(this.sliderMode, this.headless);
     const hideWindow = shouldHideVerificationWindow(this.sliderMode, useHeadless);
     const profileDir = await this.resolveProfileDir(input.profileKey);
-    const context = await this.launchPersistentContext(profileDir, useHeadless, hideWindow);
+    const context = await this.browserFactory.launchPersistentContext({
+      profileDir,
+      headless: useHeadless,
+      hideWindow,
+      executablePath: this.executablePath,
+      userAgent: this.userAgent,
+    });
     try {
       await context.addInitScript({ content: buildAutomationEvasionScript() });
       const page = await this.reuseVerificationPage(context);
       const initialSnapshot = normalizeCookieSnapshot(input.initialCookieSnapshot) ?? [];
-      if (initialSnapshot.length > 0) await context.addCookies(toPatchrightCookies(initialSnapshot, input.verificationUrl));
+      if (initialSnapshot.length > 0) await context.addCookies(toBrowserCookies(initialSnapshot, input.verificationUrl));
       await page.goto(input.verificationUrl, { waitUntil: 'domcontentloaded', timeout: maxWaitMs });
       await waitForPageContent(page, Math.min(maxWaitMs, 12_000), pollIntervalMs);
       await sleep(750);
 
       if (this.sliderMode === 'auto') {
-        const sliderResult = await new XianyuSliderSolver(page as unknown as XianyuSliderPage, {
+        const sliderResult = await new XianyuSliderSolver(page, {
           maxRetries: this.sliderMaxRetries,
           logger: console,
         }).solve();
@@ -153,34 +163,7 @@ export class XianyuVerificationBrowser {
     return profileDir;
   }
 
-  private async launchPersistentContext(profileDir: string, headless: boolean, hideWindow: boolean): Promise<BrowserContext> {
-    const options = {
-      channel: this.executablePath ? undefined : 'chrome',
-      ...(this.executablePath ? { executablePath: this.executablePath } : {}),
-      headless,
-      ...(this.userAgent ? { userAgent: this.userAgent } : {}),
-      viewport: { width: 1440, height: 900 },
-      locale: 'zh-CN',
-      args: [
-        '--disable-blink-features=AutomationControlled',
-        '--disable-features=AutomationControlled',
-        '--disable-popup-blocking',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        '--disable-extensions',
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--window-size=1440,900',
-        '--lang=zh-CN',
-        ...(!headless && hideWindow ? ['--start-minimized', '--window-position=-32000,-32000'] : []),
-        ...(!headless && !hideWindow ? ['--start-minimized'] : []),
-      ] as string[],
-    };
-    return chromium.launchPersistentContext(profileDir, options);
-  }
-
-  private async reuseVerificationPage(context: BrowserContext): Promise<Page> {
+  private async reuseVerificationPage(context: XianyuVerificationContext): Promise<XianyuVerificationPage> {
     const pages = context.pages();
     const page = pages[0] ?? await context.newPage();
     for (const extra of pages.slice(1)) await extra.close().catch(() => undefined);
@@ -231,7 +214,7 @@ function isBlankOrInvalidVerificationPage(value: string): boolean {
   }
 }
 
-async function waitForPageContent(page: Page, maxWaitMs: number, pollIntervalMs: number): Promise<void> {
+async function waitForPageContent(page: XianyuVerificationPage, maxWaitMs: number, pollIntervalMs: number): Promise<void> {
   const deadline = Date.now() + maxWaitMs;
   while (Date.now() < deadline) {
     const state = await page.evaluate(() => {
@@ -248,17 +231,7 @@ async function waitForPageContent(page: Page, maxWaitMs: number, pollIntervalMs:
   throw new Error('XIANYU_VERIFICATION_PAGE_EMPTY');
 }
 
-function toPatchrightCookies(snapshot: XianyuCookieSnapshot, verificationUrl: string): Array<{
-  name: string;
-  value: string;
-  url?: string;
-  domain?: string;
-  path?: string;
-  expires?: number;
-  httpOnly?: boolean;
-  secure?: boolean;
-  sameSite?: 'Strict' | 'Lax' | 'None';
-}> {
+function toBrowserCookies(snapshot: XianyuCookieSnapshot, verificationUrl: string): XianyuVerificationCookie[] {
   const cookieUrl = resolveVerificationCookieUrl(verificationUrl);
   return snapshot.map((cookie) => ({
     name: cookie.name,
@@ -268,7 +241,7 @@ function toPatchrightCookies(snapshot: XianyuCookieSnapshot, verificationUrl: st
     ...(cookie.expires !== undefined ? { expires: cookie.expires } : {}),
     ...(cookie.httpOnly !== undefined ? { httpOnly: cookie.httpOnly } : {}),
     ...(cookie.secure !== undefined ? { secure: cookie.secure } : {}),
-    ...(cookie.sameSite && ['Strict', 'Lax', 'None'].includes(cookie.sameSite) ? { sameSite: cookie.sameSite as 'Strict' | 'Lax' | 'None' } : {}),
+    ...(cookie.sameSite ? { sameSite: cookie.sameSite } : {}),
   }));
 }
 

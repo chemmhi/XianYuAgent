@@ -1,30 +1,9 @@
 import { generatePhysicsTrajectory, replayTrajectory, type GeneratedSliderTrajectory } from './xianyu-slider-trajectory.js';
+import type { XianyuSliderFrame, XianyuSliderLocator, XianyuSliderPage, XianyuSliderRect } from './xianyu-slider-port.js';
+
+export type { XianyuSliderFrame, XianyuSliderLocator, XianyuSliderPage, XianyuSliderRect } from './xianyu-slider-port.js';
 
 export type XianyuSliderMode = 'disabled' | 'auto';
-
-export interface XianyuSliderLocator {
-  first(): XianyuSliderLocator;
-  isVisible(options?: { timeout?: number }): Promise<boolean>;
-  boundingBox(): Promise<Rect | null>;
-  textContent(): Promise<string | null>;
-  hover(options?: { timeout?: number }): Promise<void>;
-  click(options?: { timeout?: number }): Promise<void>;
-}
-
-export interface XianyuSliderFrame {
-  locator(selector: string): XianyuSliderLocator;
-}
-
-export interface XianyuSliderPage extends XianyuSliderFrame {
-  url(): string;
-  frames(): readonly XianyuSliderFrame[];
-  mouse: {
-    move(x: number, y: number): Promise<void>;
-    down(options?: { button?: 'left' | 'right' | 'middle' }): Promise<void>;
-    up(options?: { button?: 'left' | 'right' | 'middle' }): Promise<void>;
-  };
-  reload(options?: { waitUntil?: 'domcontentloaded' | 'load' | 'networkidle'; timeout?: number }): Promise<unknown>;
-}
 
 export interface XianyuSliderSolverOptions {
   maxRetries?: number;
@@ -51,8 +30,8 @@ interface SliderElementSnapshot {
   button: XianyuSliderLocator;
   container: XianyuSliderLocator;
   frame: XianyuSliderFrame;
-  buttonRect: Rect;
-  trackRect: Rect;
+  buttonRect: XianyuSliderRect;
+  trackRect: XianyuSliderRect;
   distance: number;
 }
 
@@ -61,13 +40,6 @@ interface SliderProbeSnapshot {
   retry?: XianyuSliderLocator;
   failureText?: string;
   pageUrl: string;
-}
-
-interface Rect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
 }
 
 const DEFAULT_CONTAINER_SELECTORS = [
@@ -207,7 +179,7 @@ export class XianyuSliderSolver {
     return undefined;
   }
 
-  private async simulateSlide(button: XianyuSliderLocator, buttonRect: Rect, trajectory: GeneratedSliderTrajectory): Promise<void> {
+  private async simulateSlide(button: XianyuSliderLocator, buttonRect: XianyuSliderRect, trajectory: GeneratedSliderTrajectory): Promise<void> {
     const startX = buttonRect.x + buttonRect.width / 2;
     const startY = buttonRect.y + buttonRect.height / 2;
     await this.page.mouse.move(startX - 24, startY - 4);
