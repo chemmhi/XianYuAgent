@@ -9,7 +9,8 @@ RUN npm run build
 FROM node:24-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production
-RUN apt-get update \
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends chromium fonts-noto-cjk ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && chromium --version
