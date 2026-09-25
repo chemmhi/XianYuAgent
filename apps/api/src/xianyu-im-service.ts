@@ -5,7 +5,7 @@ import { classifyXianyuFailure } from './xianyu-account-health.js';
 import type { MessageService } from './messages.js';
 import type { AutoReplyProcessResult, AutoReplyService } from './auto-reply.js';
 import { XianyuImClient, XianyuImMessageEvent, XianyuImReadReceiptEvent, XianyuImCredential } from './xianyu-im.js';
-import { hasXianyuSystemEnvelopeMarker, isXianyuSystemMessageText, matchesXianyuOrderStatus, parseXianyuSystemMessageKind } from './xianyu-system-message.js';
+import { hasXianyuSystemEnvelopeMarker, matchesXianyuOrderStatus, parseXianyuSystemMessageKind } from './xianyu-system-message.js';
 import { XianyuMtopClient } from './xianyu-mtop.js';
 import type { ProductAutomationImEventResult, ProductAutomationTrigger } from './product-automation-trigger.js';
 import { InboundInboxWorker } from './inbound-inbox-worker.js';
@@ -672,11 +672,14 @@ export class XianyuImService {
     message: { bodyType: 'text' | 'image' | 'system'; bodyText?: string; senderRef?: string; itemRef?: string; platformSystemMessage?: boolean; riskFlags?: string[] },
   ): Promise<{ bodyType: 'text' | 'image' | 'system'; riskFlags?: string[] }> {
     const baseRiskFlags = [...new Set(message.riskFlags ?? [])];
-    if (message.bodyType !== 'text' || !message.platformSystemMessage || !isXianyuSystemMessageText(message.bodyText)) {
+    if (message.bodyType !== 'text' || !message.platformSystemMessage) {
       return { bodyType: message.bodyType, riskFlags: baseRiskFlags.length > 0 ? baseRiskFlags : undefined };
     }
     const kind = parseXianyuSystemMessageKind(message.bodyText);
-    if (!kind) return { bodyType: 'text', riskFlags: appendRiskFlag(baseRiskFlags, 'xianyu_system_candidate_unverified') };
+    // Generic platform reminders do not carry an order-status phrase. The
+    // gateway reminder marker is still authoritative, so isolate them as
+    // system messages and keep them out of the buyer auto-reply path.
+    if (!kind) return { bodyType: 'system', riskFlags: appendRiskFlag(baseRiskFlags, 'xianyu_system_message') };
     try {
       const orders = await this.store.listAutoReplyOrders(adminId, {
         accountId,
@@ -818,7 +821,7 @@ function normalizeHistoryMessage(value: unknown, myId: string | readonly string[
   const bodyText = content.text ?? fallback;
   const bodyRef = content.images[0];
   const itemRef = firstString([extension, message], ['itemId', 'itemID', 'itemRef']);
-  const platformSystemMessage = Boolean(bodyText && isXianyuSystemMessageText(bodyText) && hasXianyuSystemEnvelopeMarker(model, message, extension, custom));
+  const platformSystemMessage = Boolean(bodyText && hasXianyuSystemEnvelopeMarker(model, message, extension, custom));
   const bodyType = bodyRef ? 'image' : bodyText ? 'text' : 'system';
   const receivedAt = new Date().toISOString();
   const createdAt = normalizeTimestamp(message.createAt);

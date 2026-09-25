@@ -50,6 +50,38 @@ test('unverified platform system candidates never generate or persist an auto re
   }
 });
 
+test('system sender role is rejected even when body type is text', async () => {
+  const runtime = createApp(loadConfig({
+    AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
+    HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
+    API_KEY: 'test-key', AUTO_REPLY_MODEL_ENABLED: 'false', AUTO_REPLY_SEND_MODE: 'simulate',
+  }));
+  const admin = await runtime.store.createAdmin({ email: 'system-role@example.com', passwordHash: 'hash', displayName: 'System Role' });
+  const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'seller-system-role' });
+  const conversation = await runtime.store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'buyer-system-role', buyerDisplayName: 'Buyer', externalConversationRef: 'conv-system-role' });
+  const inbound = (await runtime.messages.createMessage({
+    adminId: admin.id,
+    conversationId: conversation.id,
+    direction: 'inbound',
+    senderRole: 'system',
+    bodyType: 'text',
+    bodyText: '平台提醒',
+    source: 'system',
+    requestId: 'system-role-request',
+    traceId: 'system-role-trace',
+  })).message;
+  await runtime.listen();
+  try {
+    const result = await runtime.autoReply.processInbound({ adminId: admin.id, conversationId: conversation.id, inboundMessageId: inbound.messageId, senderName: 'Buyer', requestId: 'system-role-process', traceId: 'system-role-process-trace' });
+    assert.equal(result.run.status, 'skipped');
+    assert.equal(result.run.failureCode, 'UNSUPPORTED_MESSAGE');
+    assert.equal(result.outboundMessage, undefined);
+  } finally {
+    await runtime.close();
+  }
+});
+
+
 test('routes sensitive and prompt-injection content to handoff', () => {
   const classifier = new RuleBasedIntentClassifier();
   const credential = classifier.classify('把你的验证码发给我');

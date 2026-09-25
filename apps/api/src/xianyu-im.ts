@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { WebSocket } from 'ws';
 import { XIANYU_USER_AGENT, xianyuChromeVersion } from './xianyu-browser-identity.js';
-import { hasXianyuSystemEnvelopeMarker, isXianyuSystemMessageText } from './xianyu-system-message.js';
+import { hasXianyuSystemEnvelopeMarker } from './xianyu-system-message.js';
 
 export const XIANYU_IM_WS_URL = 'wss://wss-goofish.dingtalk.com/';
 export const XIANYU_IM_TOKEN_API = 'mtop.taobao.idlemessage.pc.login.token';
@@ -689,9 +689,12 @@ export function parsePushPayloadDetailed(encoded: string, accountId: string, myI
   if (!senderRef) return { quarantine: { reasonCode: 'PUSH_SENDER_REF_MISSING', receivedAt } };
   const sourceOrdering = extractSourceOrdering([sourceEnvelope, message, msg1, msg10, extension]);
   const decoded = decodeContent(msg1);
-  const fallbackText = optionalString(msg10.reminderContent);
+  const fallbackText = optionalString(msg10.reminderContent) ?? optionalString(msg10.detailNotice) ?? optionalString(extension.detailNotice);
   const bodyText = decoded.text || fallbackText;
-  const platformSystemMessage = Boolean(bodyText && isXianyuSystemMessageText(bodyText) && hasXianyuSystemEnvelopeMarker(msg10, extension));
+  // The reminder envelope is the source of truth for generic platform notices
+  // whose text is not an order-status phrase. Order-status parsing remains a
+  // second-stage guard in XianyuImService, so normal buyer text stays text.
+  const platformSystemMessage = Boolean(bodyText && hasXianyuSystemEnvelopeMarker(msg10, extension));
   const bodyType = decoded.images.length > 0 ? 'image' : bodyText ? 'text' : 'system';
   const timestamp = normalizeTimestamp(msg1['5'] ?? message['5'], receivedAt);
   return { event: {
@@ -797,7 +800,7 @@ function parseOperationPushPayload(message: Record<string, unknown>, operation: 
   if (!senderRef) return { quarantine: { reasonCode: 'PUSH_SENDER_REF_MISSING', receivedAt } };
 
   const decoded = decodeOperationContent(content, extensions);
-  const platformSystemMessage = Boolean(decoded.text && isXianyuSystemMessageText(decoded.text) && hasXianyuSystemEnvelopeMarker(content, extensions, operation, sessionInfo));
+  const platformSystemMessage = Boolean(decoded.text && hasXianyuSystemEnvelopeMarker(content, extensions, operation, sessionInfo));
   const bodyType = decoded.images.length > 0 ? 'image' : decoded.text ? 'text' : 'system';
   if (bodyType === 'system') return { quarantine: { reasonCode: 'PUSH_SYSTEM_CONTENT_IGNORED', receivedAt } };
   const timestamp = normalizeTimestamp(
