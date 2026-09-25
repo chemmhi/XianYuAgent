@@ -342,7 +342,7 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
       const message = await withMessageSendTimeout(api.sendMessage({ accountId, conversationId, text: text.trim(), idempotencyKey }));
       setState((previous) => ({ ...previous, messages: previous.activeConversationId === conversationId && !previous.messages.some((item) => item.messageId === message.messageId) ? [...previous.messages, message] : previous.messages, sendPhase: 'sent', sendError: undefined }));
     } catch (error) {
-      setState((previous) => ({ ...previous, sendPhase: 'error', sendError: error instanceof Error ? error.message : '发送失败，请重试' }));
+      setState((previous) => ({ ...previous, sendPhase: 'error', sendError: normalizeError(error).message }));
       throw error;
     }
   }, [accountId, api, state.activeConversationId]);
@@ -356,7 +356,7 @@ export function useMessagesController(options: { api?: MessagesApi; accountId?: 
       const message = await withMessageSendTimeout(api.sendImage({ accountId, conversationId, file, idempotencyKey }));
       setState((previous) => ({ ...previous, messages: previous.activeConversationId === conversationId && !previous.messages.some((item) => item.messageId === message.messageId) ? [...previous.messages, message] : previous.messages, sendPhase: 'sent', sendError: undefined }));
     } catch (error) {
-      setState((previous) => ({ ...previous, sendPhase: 'error', sendError: error instanceof Error ? error.message : '图片发送失败，请重试' }));
+      setState((previous) => ({ ...previous, sendPhase: 'error', sendError: normalizeError(error).message }));
       throw error;
     }
   }, [accountId, api, state.activeConversationId]);

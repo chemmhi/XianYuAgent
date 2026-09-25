@@ -125,19 +125,23 @@ export class XianyuImService {
     const conversation = await this.getConversation(adminId, accountId, conversationId);
     const externalRef = conversation.externalConversationRef;
     if (!externalRef) throw new ServiceError(409, 'EXTERNAL_CONVERSATION_MISSING', 'conversation is not linked to xianyu');
-    const client = await this.ensureClient(adminId, accountId);
+    let client = await this.ensureClient(adminId, accountId);
     try {
-      return await client.sendText(externalRef, conversation.buyerRef, normalizedText, requestId);
+      return await this.withAccountFailure(adminId, accountId, () => client.sendText(externalRef, conversation.buyerRef, normalizedText, requestId));
     } catch (error) {
-      await this.markAccountFailure(adminId, accountId, error);
-      if (!requiresCredentialRefresh(error)) throw error;
+      if (!isRecoverableTextSendError(error)) throw error;
       await this.resetClient(adminId, accountId);
-      const account = await this.store.getAccount(adminId, accountId);
-      const credential = await this.store.getCredential(adminId, accountId);
-      if (!account || !credential?.cookieHeader) throw error;
-      await this.refreshCredential(adminId, account, credential);
-      const refreshedClient = await this.ensureClient(adminId, accountId, { forceCredentialRefresh: true });
-      return refreshedClient.sendText(externalRef, conversation.buyerRef, normalizedText, requestId);
+      if (isValidationTextSendError(error)) {
+        const account = await this.store.getAccount(adminId, accountId);
+        const credential = await this.store.getCredential(adminId, accountId);
+        if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found');
+        if (!credential?.cookieHeader) throw new ServiceError(409, 'CREDENTIAL_MISSING', 'account credential is missing');
+        // A cached IM access token can survive the browser slider challenge.
+        // Force a fresh MTOP token before constructing the replacement client.
+        await this.refreshCredential(adminId, account, credential);
+      }
+      client = await this.ensureClient(adminId, accountId, { forceCredentialRefresh: isValidationTextSendError(error) });
+      return this.withAccountFailure(adminId, accountId, () => client.sendText(externalRef, conversation.buyerRef, normalizedText, requestId));
     }
   }
 
@@ -849,8 +853,15 @@ function recoveryErrorCode(error: unknown): string {
   return 'XIANYU_HISTORY_RECOVERY_FAILED';
 }
 
-function requiresCredentialRefresh(error: unknown): boolean {
-  return /ACCOUNT_VALIDATION_REQUIRED|FAIL_SYS_USER_VALIDATE|X5SEC|CAPTCHA|SLIDER/u.test(recoveryErrorCode(error));
+function isRecoverableTextSendError(error: unknown): boolean {
+  const code = recoveryErrorCode(error);
+  const message = error instanceof Error ? error.message.toUpperCase() : String(error).toUpperCase();
+  return isValidationTextSendError(error) || /XIANYU_IM_(?:CONNECTION_CLOSED|NOT_CONNECTED|WS_OPEN_TIMEOUT)|ECONNRESET|ETIMEDOUT|TIMEOUT|FAILED_TO_FETCH/u.test(code) || /FAILED TO FETCH|FETCH FAILED/u.test(message);
+}
+
+function isValidationTextSendError(error: unknown): boolean {
+  const code = recoveryErrorCode(error);
+  return /FAIL_SYS_USER_VALIDATE|ACCOUNT_VALIDATION_REQUIRED|X5SEC|CAPTCHA|SLIDER|VALIDAT(?:E|ION)/u.test(code);
 }
 
 function mergeCookieSnapshots(base: XianyuCookieSnapshot | undefined, updates: XianyuCookieSnapshot): XianyuCookieSnapshot {

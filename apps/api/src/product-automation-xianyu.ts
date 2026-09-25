@@ -255,7 +255,7 @@ function normalizePaymentStatus(value?: string): AutomationOrderSnapshot['paymen
 function normalizeDeliveryStatus(value?: string): AutomationOrderSnapshot['deliveryStatus'] | undefined {
   const normalized = value?.trim().toLowerCase();
   if (!normalized) return undefined;
-  if (['delivered', 'consigned', 'shipped', '已发货', '交易成功'].includes(normalized)) return 'delivered';
+  if (['4', 'delivered', 'consigned', 'shipped', '已发货', '交易成功'].includes(normalized)) return 'delivered';
   if (['pending', 'wait_consign', 'not_delivered', '待发货', '未发货'].includes(normalized)) return 'pending';
   return undefined;
 }
