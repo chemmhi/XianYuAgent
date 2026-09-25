@@ -166,7 +166,7 @@ async function run() {
   if (sharedSidebarCount !== 1) throw new Error(`expected one shared sidebar, found ${sharedSidebarCount}`);
   const legacyDashboardSidebarCount = await evaluate(cdp, 'document.querySelectorAll(".dashboard-sidebar").length');
   if (legacyDashboardSidebarCount !== 0) throw new Error('legacy dashboard sidebar is still mounted');
-  await assertText(cdp, 'XianyuSellerAgent');
+  await assertText(cdp, 'FishAgent');
   await assertText(cdp, '运营台');
   const desktopState = await evaluate(cdp, 'getComputedStyle(document.querySelector(".dashboard-desktop-content")).display');
   if (desktopState === 'none') throw new Error('desktop dashboard shell is hidden at 1440px');

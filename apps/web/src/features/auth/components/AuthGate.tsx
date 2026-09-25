@@ -27,5 +27,5 @@ function AuthFrame({ children }: { children: ReactNode }) {
 }
 
 function AuthState({ title, message, action }: { title: string; message: string; action?: ReactNode }) {
-  return <AuthFrame><div className="auth-state"><p className="eyebrow">XianyuSellerAgent</p><h1>{title}</h1><p>{message}</p>{action}</div></AuthFrame>;
+  return <AuthFrame><div className="auth-state"><p className="eyebrow">FishAgent</p><h1>{title}</h1><p>{message}</p>{action}</div></AuthFrame>;
 }
