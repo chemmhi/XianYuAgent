@@ -11,6 +11,7 @@
     "worker": "node dist/worker.js",
     "migrate": "node scripts/migrate.mjs",
     "repair:xianyu-system-messages": "node scripts/repair-xianyu-system-messages.mjs",
+    "repair:product-automation": "node scripts/repair-product-automation-rules.mjs",
     "test:xianyu-system-reconcile:postgres": "npm run build && node scripts/xianyu-system-message-reconcile-postgres-smoke.mjs",
     "test:postgres": "npm run build && node scripts/products-postgres-smoke.mjs",
     "test:compose-migration": "node scripts/compose-migration-config.test.mjs",
@@ -26,6 +27,8 @@
     "test:xianyu-im-read": "node --import tsx --test scripts/xianyu-im-read.test.ts",
     "test:xianyu-slider": "node --import tsx --test scripts/xianyu-slider-trajectory.test.ts scripts/xianyu-slider-solver.test.ts",
     "test:xianyu-item-detail": "node --import tsx --test scripts/xianyu-item-detail-mapper.test.ts scripts/xianyu-item-detail-service.test.ts scripts/object-storage.test.ts scripts/xianyu-mtop-cookie-fallback.test.ts",
+    "test:product-sync": "node --import tsx --test scripts/product-sync-automation.test.ts",
+    "test:product-sync:postgres": "npm run build && node scripts/product-sync-automation-postgres-smoke.mjs",
     "test:xianyu-image-upload": "npm run build && node scripts/xianyu-image-upload-smoke.mjs && node --import tsx --test scripts/xianyu-im-credential.test.ts",
     "test:product-publish": "node --import tsx --test scripts/product-publish.test.ts",
     "test:auto-reply": "npm run build && node scripts/auto-reply-smoke.mjs",
@@ -53,7 +56,7 @@
     "smoke": "npm run build && node scripts/smoke.mjs",
     "test:orders": "npm run build && node scripts/orders-smoke.mjs",
     "test:orders:postgres": "npm run build && node scripts/orders-postgres-smoke.mjs",
-    "test": "npm run build && node --import tsx --test scripts/auto-reply.test.ts scripts/auto-reply-e2e.test.ts scripts/auto-reply-product-lookup.test.ts scripts/openai-settings.test.ts scripts/xianyu-account-health.test.ts scripts/xianyu-im-credential.test.ts scripts/credential-service.test.ts scripts/xianyu-cookie-login-update.test.ts scripts/account-login-recovery.test.ts scripts/xianyu-product-mapper.test.ts scripts/products-sort.test.ts scripts/product-sync-description.test.ts scripts/messages-loading-policy.test.ts && npm run test:xianyu-item-detail && npm run test:xianyu-slider && node scripts/smoke.mjs && node scripts/credential-store-smoke.mjs && node scripts/messages-smoke.mjs && node scripts/auto-reply-smoke.mjs && node scripts/onboarding-smoke.mjs && node scripts/workspace-smoke.mjs && node scripts/workspace-ws-smoke.mjs && node scripts/products-smoke.mjs && node scripts/products-sync-smoke.mjs && node scripts/xianyu-product-mapper-smoke.mjs && node scripts/xianyu-order-mapper-smoke.mjs && node scripts/xianyu-cookie-jar-smoke.mjs && node scripts/xianyu-qr-login-smoke.mjs && node scripts/xianyu-order-request-smoke.mjs && node scripts/xianyu-image-upload-smoke.mjs && node scripts/orders-smoke.mjs && node scripts/pi-runtime-smoke.mjs"
+    "test": "npm run build && node --import tsx --test scripts/auto-reply.test.ts scripts/auto-reply-e2e.test.ts scripts/auto-reply-product-lookup.test.ts scripts/openai-settings.test.ts scripts/xianyu-account-health.test.ts scripts/xianyu-im-credential.test.ts scripts/credential-service.test.ts scripts/xianyu-cookie-login-update.test.ts scripts/account-login-recovery.test.ts scripts/xianyu-product-mapper.test.ts scripts/product-sync-automation.test.ts scripts/products-sort.test.ts scripts/product-sync-description.test.ts scripts/messages-loading-policy.test.ts && npm run test:xianyu-item-detail && npm run test:xianyu-slider && node scripts/smoke.mjs && node scripts/credential-store-smoke.mjs && node scripts/messages-smoke.mjs && node scripts/auto-reply-smoke.mjs && node scripts/onboarding-smoke.mjs && node scripts/workspace-smoke.mjs && node scripts/workspace-ws-smoke.mjs && node scripts/products-smoke.mjs && node scripts/products-sync-smoke.mjs && node scripts/xianyu-product-mapper-smoke.mjs && node scripts/xianyu-order-mapper-smoke.mjs && node scripts/xianyu-cookie-jar-smoke.mjs && node scripts/xianyu-qr-login-smoke.mjs && node scripts/xianyu-order-request-smoke.mjs && node scripts/xianyu-image-upload-smoke.mjs && node scripts/orders-smoke.mjs && node scripts/pi-runtime-smoke.mjs"
   },
   "dependencies": {
     "ioredis": "^5.7.0",

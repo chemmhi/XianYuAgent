@@ -142,6 +142,8 @@ export interface ProductRecord {
 
 export interface XianyuProductItem {
   externalProductRef: string;
+  /** All stable item id candidates seen in the list card. */
+  externalProductRefs?: string[];
   title: string;
   description?: string;
   categoryCode?: string;
