@@ -11,7 +11,7 @@ import type { XianyuMtopClient } from '../src/xianyu-mtop.js';
 
 type Harness = Awaited<ReturnType<typeof createHarness>>;
 
-async function createHarness(options: { metadata?: Record<string, unknown>; purpose?: 'text' | 'data' | 'api' | 'image'; skuSpec?: string; quantity?: number; failFirstTextSend?: boolean; withoutConversation?: boolean } = {}) {
+async function createHarness(options: { metadata?: Record<string, unknown>; purpose?: 'text' | 'data' | 'api' | 'image'; skuSpec?: string; quantity?: number; failFirstTextSend?: boolean; failTextSendAttempts?: number; failFirstImageSend?: boolean; withoutConversation?: boolean } = {}) {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: `coupon-e2e-${Math.random()}@example.com`, passwordHash: 'hash', displayName: 'Coupon E2E' });
   const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: `seller-${Math.random()}`, displayName: '卖家昵称' });
@@ -26,12 +26,14 @@ async function createHarness(options: { metadata?: Record<string, unknown>; purp
   const sentText: string[] = [];
   const sentImages: Array<{ filename: string; contentType: string; data: Buffer }> = [];
   const textRequestIds: string[] = [];
+  const imageRequestIds: string[] = [];
   let textSendAttempts = 0;
   let resetClientCalls = 0;
+  let imageSendAttempts = 0;
   const shipmentCalls: string[] = [];
   const fakeIm = {
-    sendText: async (_adminId: string, _accountId: string, _conversationId: string, text: string, requestId: string) => { textSendAttempts += 1; textRequestIds.push(requestId); if (options.failFirstTextSend && textSendAttempts === 1) throw Object.assign(new Error('xianyu IM connection closed'), { code: 'XIANYU_IM_CONNECTION_CLOSED' }); sentText.push(text); return { externalMessageRef: `text-${sentText.length}` }; },
-    sendImage: async (_adminId: string, _accountId: string, _conversationId: string, file: { filename: string; contentType: string; data: Buffer }) => { sentImages.push(file); return { externalMessageRef: `image-${sentImages.length}` }; },
+    sendText: async (_adminId: string, _accountId: string, _conversationId: string, text: string, requestId: string) => { textSendAttempts += 1; textRequestIds.push(requestId); const failureLimit = options.failTextSendAttempts ?? (options.failFirstTextSend ? 1 : 0); if (textSendAttempts <= failureLimit) throw Object.assign(new Error('xianyu IM connection closed'), { code: 'XIANYU_IM_CONNECTION_CLOSED' }); sentText.push(text); return { externalMessageRef: `text-${sentText.length}` }; },
+    sendImage: async (_adminId: string, _accountId: string, _conversationId: string, file: { filename: string; contentType: string; data: Buffer }, requestId: string) => { imageSendAttempts += 1; imageRequestIds.push(requestId); if (options.failFirstImageSend && imageSendAttempts === 1) throw Object.assign(new Error('xianyu IM connection closed'), { code: 'XIANYU_IM_CONNECTION_CLOSED' }); sentImages.push(file); return { externalMessageRef: `image-${sentImages.length}` }; },
     resetClient: async () => { resetClientCalls += 1; },
   } as unknown as XianyuImService;
   const fakeMtop = {
@@ -40,7 +42,7 @@ async function createHarness(options: { metadata?: Record<string, unknown>; purp
   } as unknown as XianyuMtopClient;
   const adapter = new XianyuProductAutomationExecutionAdapter(store, () => fakeMtop, () => fakeIm);
   const workflow = new AutomationWorkflowService(adapter);
-  return { store, admin, account, product, conversation, order: { ...order, skuSpec: options.skuSpec }, batch, workflow, adapter, sentText, sentImages, shipmentCalls, textRequestIds, getTextSendAttempts: () => textSendAttempts, getResetClientCalls: () => resetClientCalls };
+  return { store, admin, account, product, conversation, order: { ...order, skuSpec: options.skuSpec }, batch, workflow, adapter, sentText, sentImages, shipmentCalls, textRequestIds, imageRequestIds, getTextSendAttempts: () => textSendAttempts, getImageSendAttempts: () => imageSendAttempts, getResetClientCalls: () => resetClientCalls };
 }
 
 function paidConfig(batchIds: string[], patch: Partial<ProductAutomationConfig['paidAutoDelivery']> = {}): ProductAutomationConfig {
@@ -163,6 +165,33 @@ test('图片说明文本在 IM 断线后只重试一次并复用同一请求标�
   assert.equal(harness.getTextSendAttempts(), 2);
   assert.equal(harness.getResetClientCalls(), 1);
   assert.equal(harness.textRequestIds[0], harness.textRequestIds[1]);
+});
+
+test('IM 连续断线返回可重试结果，下一轮复用同一 reservation 后成功发货', async () => {
+  const harness = await createHarness({ failTextSendAttempts: 2 });
+  const config = paidConfig([harness.batch.id], { maxAttempts: 3 });
+  const first = await harness.workflow.handlePaymentPaid({ adminId: harness.admin.id, config, order: harness.order, eventId: 'retryable-connection-event' });
+  assert.equal(first.status, 'unknown');
+  assert.equal(first.reason, 'XIANYU_IM_CONNECTION_CLOSED');
+  assert.equal(harness.sentText.length, 0);
+  assert.equal(harness.getTextSendAttempts(), 2);
+  assert.equal(harness.getResetClientCalls(), 1);
+
+  const second = await harness.workflow.handlePaymentPaid({ adminId: harness.admin.id, config, order: harness.order, eventId: 'retryable-connection-event' });
+  assert.equal(second.status, 'succeeded');
+  assert.equal(harness.sentText.length, 1);
+  assert.equal(harness.getTextSendAttempts(), 3);
+  assert.ok(harness.textRequestIds.every((requestId) => requestId === harness.textRequestIds[0]));
+});
+
+test('图片卡券在 IM 断线后重连并复用同一请求标识', async () => {
+  const harness = await createHarness({ purpose: 'image', metadata: { imageUrls: ['data:image/png;base64,aGVsbG8='] }, failFirstImageSend: true });
+  const result = await harness.workflow.handlePaymentPaid({ adminId: harness.admin.id, config: paidConfig([harness.batch.id]), order: harness.order, eventId: 'image-reconnect-event' });
+  assert.equal(result.status, 'succeeded');
+  assert.equal(harness.getImageSendAttempts(), 2);
+  assert.equal(harness.sentImages.length, 1);
+  assert.equal(harness.getResetClientCalls(), 1);
+  assert.equal(harness.imageRequestIds[0], harness.imageRequestIds[1]);
 });
 
 test('API 5xx 与 408 会按配置重试，最终成功后才发货', async () => {
