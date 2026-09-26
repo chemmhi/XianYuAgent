@@ -183,6 +183,79 @@ test('delayed auto reply sends and persists when no human reply arrives', async 
   }
 });
 
+test('deferred inbox aggregates messages received during the takeover wait', async () => {
+  const runtime = createApp(loadConfig({
+    ...process.env,
+    AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
+    HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false',
+    XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_MODEL_ENABLED: 'false', AUTO_REPLY_SEND_MODE: 'simulate',
+    AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
+  }));
+  await runtime.listen();
+  try {
+    const boot = await runtime.auth.bootstrap({ email: 'deferred-aggregate-e2e@example.com', password: 'password-123', displayName: 'Deferred Aggregate E2E' });
+    const adminId = boot.admin.id;
+    const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: 'deferred-aggregate-seller' });
+    const conversation = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'deferred-aggregate-buyer', buyerDisplayName: '延迟聚合买家', externalConversationRef: 'deferred-aggregate-conversation' });
+    const current = await runtime.autoReplyAgentSettings.get(adminId, account.id);
+    await runtime.autoReplyAgentSettings.update({ adminId, accountId: account.id, expectedVersion: current.configVersion, patch: { sendDelaySeconds: 1, debounceMs: 0 }, requestId: 'deferred-aggregate-settings', traceId: 'deferred-aggregate-settings' });
+    await runtime.xianyuIm.handleExternalEvent(adminId, {
+      accountId: account.id, externalConversationRef: conversation.externalConversationRef!, externalMessageRef: 'deferred-aggregate-1.PNM', senderRef: conversation.buyerRef, senderName: conversation.buyerDisplayName,
+      direction: 'inbound', bodyType: 'text', bodyText: '第一个问题', occurredAt: new Date().toISOString(),
+    }, { deferAutoReply: true });
+    await runtime.xianyuIm.handleExternalEvent(adminId, {
+      accountId: account.id, externalConversationRef: conversation.externalConversationRef!, externalMessageRef: 'deferred-aggregate-2.PNM', senderRef: conversation.buyerRef, senderName: conversation.buyerDisplayName,
+      direction: 'inbound', bodyType: 'text', bodyText: '窗口内第二个问题', occurredAt: new Date().toISOString(),
+    }, { deferAutoReply: true });
+
+    const worker = new InboundInboxWorker(runtime.store, runtime.xianyuIm, { workerId: 'deferred-aggregate-worker', leaseMs: 5_000, maxAttempts: 2 });
+    assert.equal(await worker.pollOnce(), 1);
+    assert.equal(await worker.pollOnce(), 1);
+    const messages = await runtime.messages.listMessages(adminId, conversation.id, { limit: 20 });
+    assert.equal(messages.items.filter((message) => message.direction === 'outbound' && message.source === 'ai').length, 1);
+    const runs = await runtime.store.listAutoReplyRuns(adminId, { accountId: account.id, page: 1, pageSize: 20 });
+    assert.equal(runs.items.filter((run) => run.failureCode === 'AUTO_REPLY_COALESCED_INTO_INITIAL_WINDOW').length, 1);
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('deferred inbox cancels queued auto replies after human takeover', async () => {
+  const runtime = createApp(loadConfig({
+    ...process.env,
+    AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
+    HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false',
+    XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_MODEL_ENABLED: 'false', AUTO_REPLY_SEND_MODE: 'simulate',
+    AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
+  }));
+  await runtime.listen();
+  try {
+    const boot = await runtime.auth.bootstrap({ email: 'deferred-human-e2e@example.com', password: 'password-123', displayName: 'Deferred Human E2E' });
+    const adminId = boot.admin.id;
+    const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: 'deferred-human-seller' });
+    const conversation = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'deferred-human-buyer', buyerDisplayName: '延迟人工买家', externalConversationRef: 'deferred-human-conversation' });
+    const current = await runtime.autoReplyAgentSettings.get(adminId, account.id);
+    await runtime.autoReplyAgentSettings.update({ adminId, accountId: account.id, expectedVersion: current.configVersion, patch: { sendDelaySeconds: 1, debounceMs: 0 }, requestId: 'deferred-human-settings', traceId: 'deferred-human-settings' });
+    const event = (externalMessageRef: string, bodyText: string) => ({
+      accountId: account.id, externalConversationRef: conversation.externalConversationRef!, externalMessageRef, senderRef: conversation.buyerRef, senderName: conversation.buyerDisplayName,
+      direction: 'inbound' as const, bodyType: 'text' as const, bodyText, occurredAt: new Date().toISOString(),
+    });
+    await runtime.xianyuIm.handleExternalEvent(adminId, event('deferred-human-1.PNM', '第一个问题'), { deferAutoReply: true });
+    await runtime.xianyuIm.handleExternalEvent(adminId, event('deferred-human-2.PNM', '窗口内第二个问题'), { deferAutoReply: true });
+    const worker = new InboundInboxWorker(runtime.store, runtime.xianyuIm, { workerId: 'deferred-human-worker', leaseMs: 5_000, maxAttempts: 2 });
+    const firstPoll = worker.pollOnce();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await runtime.messages.createMessage({ adminId, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: '人工已接管，请稍等。', source: 'human', requestId: 'deferred-human-reply', traceId: 'deferred-human-reply' });
+    assert.equal(await firstPoll, 1);
+    assert.equal(await worker.pollOnce(), 1);
+    const messages = await runtime.messages.listMessages(adminId, conversation.id, { limit: 20 });
+    assert.equal(messages.items.filter((message) => message.direction === 'outbound' && message.source === 'ai').length, 0);
+    assert.equal(messages.items.filter((message) => message.direction === 'outbound' && message.source === 'human').length, 1);
+  } finally {
+    await runtime.close();
+  }
+});
+
 test('production listener callback defers to the inbox worker and publishes both message events', async () => {
   const runtime = createApp(loadConfig({
     ...process.env,
