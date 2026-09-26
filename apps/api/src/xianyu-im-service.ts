@@ -189,7 +189,7 @@ export class XianyuImService {
     const client = await this.ensureClient(adminId, accountId);
     const upload = await this.mtop.uploadChatImage(adminId, accountId, file.filename, file.contentType, file.data);
     if (!upload.success || !upload.url) throw new ServiceError(upload.accountInvalid ? 401 : 502, upload.errorCode ?? 'IMAGE_UPLOAD_FAILED', upload.message ?? 'unable to upload image');
-    const sent = await this.withAccountFailure(adminId, accountId, () => client.sendImage(externalRef, conversation.buyerRef, upload.url!, upload.width, upload.height));
+    const sent = await this.withAccountFailure(adminId, accountId, () => client.sendImage(externalRef, conversation.buyerRef, upload.url!, upload.width, upload.height, requestId));
     const created = await this.messages.createMessage({
       adminId,
       conversationId,
@@ -234,6 +234,16 @@ export class XianyuImService {
   async startListener(adminId: string, accountId: string): Promise<void> {
     const client = await this.ensureClient(adminId, accountId);
     if (client) this.scheduleRecentMessageRecovery(adminId, accountId);
+  }
+
+  /** Ensure the account-scoped socket is usable before an irreversible send. */
+  async isReady(adminId: string, accountId: string): Promise<boolean> {
+    try {
+      const client = await this.ensureClient(adminId, accountId);
+      return client.connected;
+    } catch {
+      return false;
+    }
   }
 
   /**

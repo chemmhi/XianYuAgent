@@ -222,7 +222,7 @@ export class ProductAutomationTrigger {
             ? await this.workflow.handleReviewGift({ adminId, config, order: effectiveOrder, eventId: eventId ?? `review:${order.orderNo}:${order.updatedAt}` })
             : await this.workflow.handleReviewReminder({ adminId, config, order, now });
       if (trigger === 'review_reminder' && result.status === 'succeeded') {
-        await this.store.recordReviewReminderSent({ accountId: order.accountId, orderNo: order.orderNo, sentAt: now ?? new Date().toISOString() });
+        await this.store.recordReviewReminderSent({ accountId: order.accountId, orderNo: order.orderNo, sentAt: now ?? new Date().toISOString(), expectedReminderCount: order.reminderCount ?? 0 });
       }
       return this.finish(trigger, order.orderNo, { trigger, orderNo: order.orderNo, status: result.status, executionKey: result.executionKey, reason: result.reason }, adminId, order.accountId, requestId, traceId);
     } catch (error) {

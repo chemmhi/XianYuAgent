@@ -1684,9 +1684,14 @@ export class MemoryStore implements Store {
     try { return await work(); } finally { release(); }
   }
 
-  private async expireCouponReservations(): Promise<void> {
+  async cleanupExpiredCouponReservations(): Promise<number> {
+    return this.withCouponReservationLock(() => this.expireCouponReservations());
+  }
+
+  private async expireCouponReservations(): Promise<number> {
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
+    let expiredCount = 0;
     for (const reservation of this.couponReservations.values()) {
       if (reservation.status !== 'reserved' || Date.parse(reservation.leaseUntil) > now) continue;
       for (const itemRef of reservation.items) {
@@ -1697,7 +1702,9 @@ export class MemoryStore implements Store {
       reservation.reason = 'reservation_expired';
       reservation.updatedAt = nowIso;
       reservation.finalizedAt = nowIso;
+      expiredCount += 1;
     }
+    return expiredCount;
   }
 
   private selectAvailableCouponItems(batches: CouponBatchRecord[], quantity: number): CouponItemRecord[] {
@@ -1820,9 +1827,10 @@ export class MemoryStore implements Store {
     if (order) { order.reviewedAt = reviewedAt; order.updatedAt = reviewedAt; order.configVersion += 1; }
     return { created: true };
   }
-  async recordReviewReminderSent(input: { accountId: string; orderNo: string; sentAt: string }): Promise<OrderRecord | undefined> {
+  async recordReviewReminderSent(input: { accountId: string; orderNo: string; sentAt: string; expectedReminderCount?: number }): Promise<OrderRecord | undefined> {
     const order = [...this.orders.values()].find((candidate) => candidate.accountId === input.accountId && candidate.orderNo === input.orderNo);
     if (!order) return undefined;
+    if (input.expectedReminderCount !== undefined && (order.reminderCount ?? 0) !== input.expectedReminderCount) return this.enrichOrder(order);
     order.reminderCount = (order.reminderCount ?? 0) + 1;
     order.lastReminderAt = input.sentAt;
     order.updatedAt = input.sentAt;

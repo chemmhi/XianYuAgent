@@ -287,7 +287,7 @@ export class XianyuImClient {
     return { externalMessageRef };
   }
 
-  async sendImage(conversationRef: string, recipientRef: string, imageUrl: string, width = 800, height = 600): Promise<{ externalMessageRef?: string }> {
+  async sendImage(conversationRef: string, recipientRef: string, imageUrl: string, width = 800, height = 600, requestId?: string): Promise<{ externalMessageRef?: string }> {
     const cid = stripGoofish(conversationRef);
     const toId = stripGoofish(recipientRef);
     const normalizedUrl = imageUrl.trim();
@@ -296,7 +296,7 @@ export class XianyuImClient {
     const content = Buffer.from(JSON.stringify({ contentType: 2, image: { pics: [{ height: height > 0 ? height : 600, type: 0, url: normalizedUrl, width: width > 0 ? width : 800 }] } }), 'utf8').toString('base64');
     const response = await this.sendLwp('/r/MessageSend/sendByReceiverScope', [
       {
-        uuid: crypto.randomUUID(),
+        uuid: requestId ? deterministicUuid(requestId) : crypto.randomUUID(),
         cid: `${cid}@goofish`,
         conversationType: 1,
         content: { contentType: 101, custom: { type: 1, data: content } },

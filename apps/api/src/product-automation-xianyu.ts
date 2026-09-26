@@ -35,6 +35,11 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
     const batches = await Promise.all(input.batchIds.map((batchId) => this.store.getCouponBatch(adminId, batchId)));
     const usableBatches = selectBatchesForSpec(batches.filter((batch): batch is NonNullable<typeof batch> => Boolean(batch)), input.skuSpec);
     if (usableBatches.length === 0) throw new Error('COUPON_SPEC_MISMATCH');
+    const requiresIm = input.purpose === 'gift' || usableBatches.some((batch) => !(input.purpose === 'delivery' && batch.metadata?.useNoLogisticsForm === true));
+    if (requiresIm) {
+      const im = this.getIm();
+      if (im && typeof im.isReady === 'function' && !await im.isReady(adminId, input.accountId)) throw new Error('XIANYU_IM_NOT_READY');
+    }
     const reservation = await this.store.reserveCoupon({
       adminId,
       accountId: input.accountId,
@@ -82,6 +87,7 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
       if (!order.conversationId) return failedExternal('CONVERSATION_MISSING', 'order conversation is missing');
       const im = this.getIm();
       if (!im) return unknownExternal('XIANYU_IM_NOT_READY', 'xianyu im service is not ready');
+      if (typeof im.isReady === 'function' && !await im.isReady(adminId, input.accountId)) return failedExternal('XIANYU_IM_NOT_READY', 'xianyu im service is not ready before coupon send');
       const account = await this.store.getAccount(adminId, input.accountId);
       const product = order.productId ? await this.store.getProduct(adminId, order.productId) : undefined;
       const orderSpec = parseSkuSpec(order.skuSpec);
@@ -168,6 +174,9 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
     const paymentStatus = normalizePaymentStatus(detail.detail.paymentStatus, detail.detail.orderStatus);
     if (paymentStatus === 'paid') return failedExternal('ORDER_ALREADY_PAID', 'order is no longer unpaid');
     if (paymentStatus !== 'unpaid') return unknownExternal('ORDER_PAYMENT_STATUS_UNKNOWN', 'order payment status is not authoritative');
+    if (detail.detail.amountMinor === input.targetPriceMinor) {
+      return { status: 'succeeded', externalRef: input.orderNo };
+    }
     const result = await this.getMtop().repriceOrder(adminId, input.accountId, input.orderNo, input.targetPriceMinor);
     return mapMutationResult(result);
   }
@@ -176,6 +185,7 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
     const adminId = requireAdminId(input.adminId);
     const im = this.getIm();
     if (!im) return unknownExternal('XIANYU_IM_NOT_READY', 'xianyu im service is not ready');
+    if (typeof im.isReady === 'function' && !await im.isReady(adminId, input.accountId)) return failedExternal('XIANYU_IM_NOT_READY', 'xianyu im service is not ready before text send');
     try {
       const sent = await im.sendText(adminId, input.accountId, input.conversationId, input.text, `automation:${input.executionKey}`, `automation:${input.executionKey}`) as { externalMessageRef?: string };
       return { status: 'succeeded', externalRef: sent.externalMessageRef };

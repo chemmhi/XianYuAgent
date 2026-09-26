@@ -450,6 +450,20 @@ export class PostgresStore implements Store {
       where execution_key=$1 and owner_token=$2`, [input.executionKey, input.ownerToken, JSON.stringify(input.result), input.retryable]);
     if ((result.rowCount ?? 0) !== 1) throw new Error('AUTOMATION_EXECUTION_OWNER_CONFLICT');
   }
+  async cleanupExpiredCouponReservations(): Promise<number> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const count = await this.expireCouponReservations(client);
+      await client.query('commit');
+      return count;
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
   async recordReviewFact(input: { accountId: string; orderNo: string; eventId: string; reviewedAt?: string }): Promise<{ created: boolean }> {
     const reviewedAt = input.reviewedAt ?? new Date().toISOString();
     const client = await this.pool.connect();
@@ -462,9 +476,13 @@ export class PostgresStore implements Store {
       return { created: Boolean(inserted.rows[0]) };
     } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
   }
-  async recordReviewReminderSent(input: { accountId: string; orderNo: string; sentAt: string }): Promise<OrderRecord | undefined> {
-    const result = await this.pool.query(`update orders.orders set review_reminder_count=review_reminder_count+1, last_review_reminder_at=$3, updated_at=$3, config_version=config_version+1 where account_id=$1 and order_no=$2 returning *`, [input.accountId, input.orderNo, input.sentAt]);
-    return result.rows[0] ? this.toOrder(result.rows[0]) : undefined;
+  async recordReviewReminderSent(input: { accountId: string; orderNo: string; sentAt: string; expectedReminderCount?: number }): Promise<OrderRecord | undefined> {
+    const values: unknown[] = [input.accountId, input.orderNo, input.sentAt];
+    const expectedClause = input.expectedReminderCount === undefined ? '' : ` and review_reminder_count=$${values.push(input.expectedReminderCount)}`;
+    const result = await this.pool.query(`update orders.orders set review_reminder_count=review_reminder_count+1, last_review_reminder_at=$3, updated_at=$3, config_version=config_version+1 where account_id=$1 and order_no=$2${expectedClause} returning *`, values);
+    if (result.rows[0]) return this.toOrder(result.rows[0]);
+    const current = await this.pool.query('select * from orders.orders where account_id=$1 and order_no=$2', [input.accountId, input.orderNo]);
+    return current.rows[0] ? this.toOrder(current.rows[0]) : undefined;
   }
   async createOrder(input: { adminId: string; order: Omit<OrderRecord, 'id' | 'createdAt' | 'updatedAt' | 'configVersion' | 'source'> & { id?: string; createdAt?: string; updatedAt?: string; configVersion?: number; source?: OrderSource } }): Promise<OrderRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.order.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
@@ -1696,18 +1714,22 @@ export class PostgresStore implements Store {
   }
   async close(): Promise<void> { await this.pool.end(); }
 
-  private async expireCouponReservations(client: PoolClient): Promise<void> {
-    await client.query(`with expired as (
+  private async expireCouponReservations(client: PoolClient): Promise<number> {
+    const result = await client.query(`with expired as (
       update coupons.coupon_reservations
       set status='expired',reason='reservation_expired',finalized_at=now(),updated_at=now()
       where status='reserved' and lease_until<=now()
       returning id
+    ), released as (
+      update coupons.coupon_items i
+      set status='available',reserved_until=null
+      from coupons.coupon_reservation_items ri
+      join expired e on e.id=ri.reservation_id
+      where i.id=ri.item_id and i.status='reserved'
+      returning i.id
     )
-    update coupons.coupon_items i
-    set status='available',reserved_until=null
-    from coupons.coupon_reservation_items ri
-    join expired e on e.id=ri.reservation_id
-    where i.id=ri.item_id and i.status='reserved'`);
+    select count(*)::int as count from expired`);
+    return Number(result.rows[0]?.count ?? 0);
   }
 
   private async loadCouponReservation(client: PoolClient, row: Row): Promise<CouponReservationRecord> {

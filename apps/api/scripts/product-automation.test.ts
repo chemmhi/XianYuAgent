@@ -456,10 +456,13 @@ test('reminder state is persisted and increments exactly once per successful sen
   const { store, admin, account, product } = await setup();
   const created = await store.createOrder({ adminId: admin.id, order: { ...baseOrder({ id: 'reminder-state', orderNo: 'REMINDER-STATE', accountId: account.id, productId: product.id, deliveryStatus: 'delivered', paymentStatus: 'paid' }), source: 'local' } });
   assert.equal(created.reminderCount ?? 0, 0);
-  const first = await store.recordReviewReminderSent({ accountId: account.id, orderNo: created.orderNo, sentAt: '2026-09-22T01:00:00.000Z' });
+  const first = await store.recordReviewReminderSent({ accountId: account.id, orderNo: created.orderNo, sentAt: '2026-09-22T01:00:00.000Z', expectedReminderCount: 0 });
   assert.equal(first?.reminderCount, 1);
   assert.equal(first?.lastReminderAt, '2026-09-22T01:00:00.000Z');
-  const second = await store.recordReviewReminderSent({ accountId: account.id, orderNo: created.orderNo, sentAt: '2026-09-22T02:00:00.000Z' });
+  const duplicate = await store.recordReviewReminderSent({ accountId: account.id, orderNo: created.orderNo, sentAt: '2026-09-22T01:30:00.000Z', expectedReminderCount: 0 });
+  assert.equal(duplicate?.reminderCount, 1);
+  assert.equal(duplicate?.lastReminderAt, '2026-09-22T01:00:00.000Z');
+  const second = await store.recordReviewReminderSent({ accountId: account.id, orderNo: created.orderNo, sentAt: '2026-09-22T02:00:00.000Z', expectedReminderCount: 1 });
   assert.equal(second?.reminderCount, 2);
   const reread = await store.getOrder(admin.id, created.orderNo, account.id);
   assert.equal(reread?.reminderCount, 2);

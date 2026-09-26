@@ -84,6 +84,28 @@ test('live adapter treats numeric orderStatus 1 as unpaid', async () => {
   assert.equal(repriced, true);
 });
 
+test('live adapter skips reprice when authoritative amount already matches target', async () => {
+  const { store, admin, account, order } = await setup();
+  let repriced = false;
+  const fakeMtop = {
+    readOrderDetail: async () => ({ success: true, accountInvalid: false, detail: { orderNo: order.orderNo, orderStatus: '待付款', paymentStatus: 'unpaid', deliveryStatus: '1', amountMinor: 3000 }, cookieHeader: '' }),
+    repriceOrder: async () => { repriced = true; return { status: 'succeeded', externalRef: order.orderNo }; },
+  } as unknown as XianyuMtopClient;
+  const adapter = new XianyuProductAutomationExecutionAdapter(store, () => fakeMtop, () => undefined);
+  const result = await adapter.repriceOrder({ adminId: admin.id, accountId: account.id, productId: order.productId, itemId: order.itemId, itemTitle: order.itemTitle, orderNo: order.orderNo, targetPriceMinor: 3000, executionKey: 'live-reprice-idempotent' });
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.externalRef, order.orderNo);
+  assert.equal(repriced, false);
+});
+
+test('live adapter does not reserve coupon while IM is unavailable', async () => {
+  const { store, admin, account, order, batch } = await setup();
+  const fakeIm = { isReady: async () => false } as unknown as XianyuImService;
+  const adapter = new XianyuProductAutomationExecutionAdapter(store, () => ({} as XianyuMtopClient), () => fakeIm);
+  await assert.rejects(() => adapter.reserveCoupon({ adminId: admin.id, accountId: account.id, batchIds: [batch.id], quantity: 1, executionKey: 'live-reserve-not-ready', purpose: 'delivery' }), /XIANYU_IM_NOT_READY/);
+  assert.equal((await store.getCouponReservation({ adminId: admin.id, reservationId: 'missing' }))?.status, undefined);
+});
+
 test('live adapter maps numeric status 1 to unpaid and pending in readOrder', async () => {
   const { store, admin, account, order } = await setup();
   const fakeMtop = {

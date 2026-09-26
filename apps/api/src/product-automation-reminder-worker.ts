@@ -55,7 +55,9 @@ export class ProductAutomationReminderWorker {
         const accounts = await this.store.listAccounts(adminId, { page, pageSize: 100 });
         totalPages = accounts.totalPages;
         for (const account of accounts.items) {
-          if (account.status !== 'connected') continue;
+          // Degraded/disconnected accounts may still recover their IM session
+          // during the attempt. Only skip accounts that cannot be acted on.
+          if (account.status === 'disabled' || account.status === 'expired' || account.status === 'pending') continue;
           try {
             const batch = await this.automation.pollReviewReminders({ adminId, accountId: account.id, now });
             results.push(...batch.results);

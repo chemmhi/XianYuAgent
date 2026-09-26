@@ -71,3 +71,14 @@ test('Xianyu sendText derives a stable external uuid from requestId', async () =
   assert.equal((bodies[0]?.[0] as Record<string, unknown>).uuid, (bodies[1]?.[0] as Record<string, unknown>).uuid);
   assert.notEqual((bodies[0]?.[0] as Record<string, unknown>).uuid, (bodies[2]?.[0] as Record<string, unknown>).uuid);
 });
+
+test('Xianyu sendImage derives a stable external uuid from requestId', async () => {
+  const client = new XianyuImClient({ accountId: 'account-1', credential: { cookieHeader: 'unb=seller-1', accessToken: 'token' } });
+  const bodies: unknown[][] = [];
+  (client as unknown as { sendLwp: (lwp: string, body: unknown[]) => Promise<Record<string, unknown>> }).sendLwp = async (_lwp, body) => { bodies.push(body); return { body: { messageId: 'sent-image.PNM' } }; };
+  await client.sendImage('conversation-1', 'buyer-1', 'https://img.example/one.png', 800, 600, 'same-image-request');
+  await client.sendImage('conversation-1', 'buyer-1', 'https://img.example/one.png', 800, 600, 'same-image-request');
+  await client.sendImage('conversation-1', 'buyer-1', 'https://img.example/one.png', 800, 600, 'different-image-request');
+  assert.equal((bodies[0]?.[0] as Record<string, unknown>).uuid, (bodies[1]?.[0] as Record<string, unknown>).uuid);
+  assert.notEqual((bodies[0]?.[0] as Record<string, unknown>).uuid, (bodies[2]?.[0] as Record<string, unknown>).uuid);
+});
