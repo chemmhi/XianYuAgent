@@ -277,6 +277,7 @@ export interface OrderRefreshResult {
   fetchedCount: number;
   createdCount: number;
   updatedCount: number;
+  deletedCount: number;
   hasMore: boolean;
   items: OrderRecord[];
   automation?: ProductAutomationTriggerBatchResult;
@@ -335,10 +336,14 @@ export class OrderService {
       if (result.action === 'created') createdCount += 1;
       else updatedCount += 1;
     }
+    const orderNos = [...new Set(fetched.items.map((item) => item.orderNo.trim()).filter(Boolean))];
+    const deletedCount = fetched.hasMore
+      ? 0
+      : await this.store.deleteExternalOrdersNotInSnapshot({ adminId: input.adminId, accountId: account.id, orderNos });
     const syncRunId = createId();
-    await this.audit({ actorId: input.adminId, action: 'order.refresh.completed', targetRef: syncRunId, requestId: input.requestId, traceId: input.traceId, accountId: account.id, payload: { pagesFetched: fetched.pages.length, fetchedCount: fetched.items.length, createdCount, updatedCount, hasMore: fetched.hasMore } });
+    await this.audit({ actorId: input.adminId, action: 'order.refresh.completed', targetRef: syncRunId, requestId: input.requestId, traceId: input.traceId, accountId: account.id, payload: { pagesFetched: fetched.pages.length, fetchedCount: fetched.items.length, createdCount, updatedCount, deletedCount, hasMore: fetched.hasMore } });
     const automation = this.afterRefresh ? await this.afterRefresh({ adminId: input.adminId, accountId: account.id, items, requestId: input.requestId, traceId: input.traceId }) : undefined;
-    return { syncRunId, accountId: account.id, pagesFetched: fetched.pages.length, fetchedCount: fetched.items.length, createdCount, updatedCount, hasMore: fetched.hasMore, items, ...(automation ? { automation } : {}) };
+    return { syncRunId, accountId: account.id, pagesFetched: fetched.pages.length, fetchedCount: fetched.items.length, createdCount, updatedCount, deletedCount, hasMore: fetched.hasMore, items, ...(automation ? { automation } : {}) };
   }
 
   private async resolveAccount(adminId: string, accountId?: string): Promise<AccountRecord> {

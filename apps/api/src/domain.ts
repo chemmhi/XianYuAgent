@@ -1363,6 +1363,7 @@ export interface Store {
   recordReviewReminderSent(input: { accountId: string; orderNo: string; sentAt: string }): Promise<OrderRecord | undefined>;
   createOrder(input: { adminId: string; order: Omit<OrderRecord, 'id' | 'createdAt' | 'updatedAt' | 'configVersion' | 'source'> & { id?: string; createdAt?: string; updatedAt?: string; configVersion?: number; source?: OrderSource } }): Promise<OrderRecord>;
   upsertExternalOrder(input: { adminId: string; accountId: string; item: XianyuOrderItem; syncedAt: string; accountName?: string }): Promise<OrderUpsertResult>;
+  deleteExternalOrdersNotInSnapshot(input: { adminId: string; accountId: string; orderNos: readonly string[] }): Promise<number>;
   createProduct(input: {
     adminId: string;
     accountId: string;

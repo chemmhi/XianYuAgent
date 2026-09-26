@@ -489,6 +489,17 @@ export class MemoryStore implements Store {
     this.orders.set(order.id, order);
     return { action: 'created', order: this.enrichOrder(order) };
   }
+  async deleteExternalOrdersNotInSnapshot(input: { adminId: string; accountId: string; orderNos: readonly string[] }): Promise<number> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const keepOrderNos = new Set(input.orderNos.map((orderNo) => orderNo.trim()).filter(Boolean));
+    let deletedCount = 0;
+    for (const [id, order] of this.orders) {
+      if (order.accountId !== input.accountId || order.source !== 'xianyu' || keepOrderNos.has(order.orderNo)) continue;
+      this.orders.delete(id);
+      deletedCount += 1;
+    }
+    return deletedCount;
+  }
   async createProduct(input: { adminId: string; accountId: string; externalProductRef?: string; title: string; description?: string; categoryCode?: string; attributes?: Record<string, unknown>; defaultReplyTemplate?: string; knowledgeBase?: string; priceMinor?: number; status?: ProductStatus }): Promise<ProductRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const duplicate = [...this.products.values()].find((product) => product.accountId === input.accountId && input.externalProductRef && product.externalProductRef === input.externalProductRef);

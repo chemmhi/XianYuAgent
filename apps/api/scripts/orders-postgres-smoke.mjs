@@ -90,6 +90,13 @@ try {
   assert.equal(conversationOnlyIdSearch.body.data.total, 0);
 
   const refreshedOrderNo = `${orderNo}-X`;
+  const staleExternalOrderNo = `${orderNo}-STALE`;
+  await runtime.store.upsertExternalOrder({
+    adminId,
+    accountId,
+    syncedAt: new Date().toISOString(),
+    item: { orderNo: staleExternalOrderNo, buyerId: 'pg-stale-buyer', buyerName: 'PostgreSQL 过期买家', itemId: 'pg-item', itemTitle: 'pg-item', amountMinor: 1000, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'manual', createdAt: new Date().toISOString(), sourcePayloadDigest: 'postgres-stale-fixture' },
+  });
   await runtime.store.createProduct({ adminId, accountId, externalProductRef: 'pg-xianyu-item', title: '闲鱼同步商品标题' });
   runtime.xianyu.fetchOrdersAll = async () => ({
     pages: [{ success: true, accountInvalid: false, pageNumber: 1, pageSize: 30, items: [] }],
@@ -99,6 +106,7 @@ try {
   const refreshed = await request(port, '/api/v1/orders/refresh', { method: 'POST', headers: { cookie, 'X-CSRF-Token': loggedIn.csrfToken, 'Idempotency-Key': `orders-pg-refresh-${process.pid}` }, body: JSON.stringify({ accountId }) });
   assert.equal(refreshed.response.status, 200);
   assert.equal(refreshed.body.data.createdCount, 1);
+  assert.equal(refreshed.body.data.deletedCount, 1);
 
   await runtime.close();
   runtime = undefined;
@@ -114,6 +122,8 @@ try {
   assert.equal(reread.body.data.items[0].itemTitle, '闲鱼同步商品标题');
   const rereadDetail = await request(restartedPort, `/api/v1/orders/${encodeURIComponent(refreshedOrderNo)}?accountId=${encodeURIComponent(accountId)}`, { headers: { cookie } });
   assert.equal(rereadDetail.body.data.skuSpec, '版本:专业版');
+  const stale = await request(restartedPort, `/api/v1/orders/${encodeURIComponent(staleExternalOrderNo)}?accountId=${encodeURIComponent(accountId)}`, { headers: { cookie } });
+  assert.equal(stale.response.status, 404);
   console.log('orders postgres persistence smoke passed');
 } finally {
   const active = restarted ?? runtime;
@@ -122,6 +132,7 @@ try {
     if (accountId) await active.store.pool.query('delete from products.products where account_id=$1', [accountId]);
     if (accountId) await active.store.pool.query('delete from messages.conversations where account_id=$1', [accountId]);
     if (accountId) await active.store.pool.query('delete from observability.audit_events where account_id=$1', [accountId]);
+    if (accountId) await active.store.pool.query('delete from settings.auto_reply_repair_policies where account_id=$1', [accountId]);
     if (accountId) await active.store.pool.query('delete from auth.account_credentials where account_id=$1', [accountId]);
     if (accountId) await active.store.pool.query('delete from auth.account_scopes where account_id=$1', [accountId]);
     if (accountId) await active.store.pool.query('delete from accounts.accounts where id=$1', [accountId]);
