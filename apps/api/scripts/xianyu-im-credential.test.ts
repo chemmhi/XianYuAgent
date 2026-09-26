@@ -249,15 +249,17 @@ describe('xianyu IM credential refresh', () => {
       createMessage: async () => ({ message: { messageId: 'message-1', bodyType: 'image' } }),
     };
     const service = new XianyuImService(store as never, mtop as never, messages as never);
+    const sentImageRequestIds: string[] = [];
     const fakeClient = {
       connect: async () => { order.push('connect'); },
-      sendImage: async () => { order.push('sendImage'); return { externalMessageRef: 'external-message-1' }; },
+      sendImage: async (_conversationRef: string, _recipientRef: string, _imageUrl: string, _width: number, _height: number, requestId?: string) => { order.push('sendImage'); sentImageRequestIds.push(String(requestId)); return { externalMessageRef: 'external-message-1' }; },
     };
     (service as unknown as { clients: Map<string, unknown> }).clients.set('admin-1:account-1', fakeClient);
 
     await service.sendImage('admin-1', 'account-1', 'conversation-1', { filename: 'image.png', contentType: 'image/png', data: Buffer.from([1]) }, 'request-1', 'trace-1');
 
     assert.deepEqual(order, ['connect', 'upload', 'sendImage']);
+    assert.deepEqual(sentImageRequestIds, ['request-1']);
   });
 
   it('rebuilds a cached IM client after slider rejection and retries once with the same request id', async () => {

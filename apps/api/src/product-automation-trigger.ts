@@ -1,5 +1,6 @@
 import type { OrderRecord, Store } from './domain.js';
 import type { XianyuImMessageEvent } from './xianyu-im.js';
+import { parseXianyuSystemMessageKind } from './xianyu-system-message.js';
 import {
   AutomationExecutionPort,
   AutomationExecutionResult,
@@ -10,6 +11,7 @@ import {
 import {
   DEFAULT_PRODUCT_AUTOMATION_LIVE_CONFIG,
   productAutomationLiveBlockReason,
+  productAutomationReviewExternalWriteBlockReason,
   type ProductAutomationLiveConfig,
 } from './product-automation-live-gate.js';
 
@@ -125,7 +127,8 @@ export class ProductAutomationTrigger {
    * a review or payment event.
    */
   async onImEvent(adminId: string, event: XianyuImMessageEvent): Promise<ProductAutomationImEventResult> {
-    const signal = extractReviewSignal(event.raw);
+    const explicitSignal = extractReviewSignal(event.raw);
+    const signal = explicitSignal ?? await this.deriveReviewSignal(adminId, event);
     if (!signal) return { accepted: false, reason: 'AUTOMATION_SIGNAL_NOT_PRESENT' };
     if (event.direction !== 'inbound' || event.bodyType !== 'system') return { accepted: false, reason: 'AUTOMATION_SIGNAL_SOURCE_INVALID' };
     if (signal.accountId && signal.accountId !== event.accountId) return { accepted: false, reason: 'AUTOMATION_SIGNAL_ACCOUNT_MISMATCH' };
@@ -147,6 +150,30 @@ export class ProductAutomationTrigger {
     return { accepted: true, result };
   }
 
+  private async deriveReviewSignal(adminId: string, event: XianyuImMessageEvent): Promise<ProductAutomationReviewSignal | undefined> {
+    if (event.direction !== 'inbound' || event.bodyType !== 'system' || event.platformSystemMessage !== true) return undefined;
+    if (parseXianyuSystemMessageKind(event.bodyText) !== 'reviewed') return undefined;
+    const conversation = await this.store.findConversationByExternalRef(adminId, event.accountId, event.externalConversationRef);
+    const candidates = await this.store.listAutoReplyOrders(adminId, {
+      accountId: event.accountId,
+      buyerId: event.senderRef,
+      conversationId: conversation?.id,
+      limit: 50,
+    });
+    const matches = candidates.items.filter((candidate) => {
+      if (event.itemRef && candidate.itemId !== event.itemRef) return false;
+      return candidate.orderStatus === 'completed' || candidate.deliveryStatus === 'delivered';
+    });
+    if (matches.length !== 1) return undefined;
+    return {
+      kind: 'review_created',
+      orderNo: matches[0]!.orderNo,
+      eventId: event.sourceEventId ?? event.externalMessageRef,
+      accountId: event.accountId,
+      productId: matches[0]!.itemId,
+    };
+  }
+
   private async runForOrder(trigger: ProductAutomationTriggerKind, adminId: string, order: AutomationOrderSnapshot, requestId: string, traceId: string, eventId?: string, now?: string): Promise<ProductAutomationTriggerResult> {
     if (!order.productId) return { trigger, orderNo: order.orderNo, status: 'skipped', reason: 'PRODUCT_LINK_MISSING' };
     try {
@@ -156,20 +183,46 @@ export class ProductAutomationTrigger {
         return this.finish(trigger, order.orderNo, { trigger, orderNo: order.orderNo, status: 'blocked', reason: this.execution.readinessCode ?? 'AUTOMATION_EXECUTION_NOT_CONFIGURED' }, adminId, order.accountId, requestId, traceId);
       }
       if (ruleEnabled(config, trigger)) {
-        const liveBlockReason = productAutomationLiveBlockReason(this.liveConfig, order.buyerName);
+        // Xianyu's buyer_name may be the real-name field from the order detail
+        // (for example, "陈晨"). The buyer nickname is the stable identity
+        // shown in IM and the value used by AUTOMATION_BUYER_ALLOWLIST.
+        const liveBuyerIdentity = order.buyerNickname?.trim() || order.buyerName;
+        const liveBlockReason = productAutomationLiveBlockReason(this.liveConfig, liveBuyerIdentity);
         if (liveBlockReason) {
           return this.finish(trigger, order.orderNo, { trigger, orderNo: order.orderNo, status: 'blocked', reason: liveBlockReason }, adminId, order.accountId, requestId, traceId);
         }
+        if (isReviewTrigger(trigger)) {
+          const reviewBlockReason = productAutomationReviewExternalWriteBlockReason(this.liveConfig);
+          if (reviewBlockReason) {
+            return this.finish(trigger, order.orderNo, { trigger, orderNo: order.orderNo, status: 'blocked', reason: reviewBlockReason }, adminId, order.accountId, requestId, traceId);
+          }
+        }
+      }
+      let effectiveOrder = order;
+      if ((trigger === 'payment_paid' || trigger === 'review_gift') && order.source === 'xianyu' && ruleEnabled(config, trigger)) {
+        try {
+          const authoritative = await this.execution.readOrder({
+            adminId,
+            accountId: order.accountId,
+            productId: order.productId,
+            itemId: order.itemId,
+            itemTitle: order.itemTitle,
+            orderNo: order.orderNo,
+          });
+          if (authoritative) effectiveOrder = { ...order, ...authoritative };
+        } catch {
+          // Keep the synced snapshot when the live detail is temporarily unavailable.
+        }
       }
       const result = trigger === 'payment_paid'
-        ? await this.workflow.handlePaymentPaid({ adminId, config, order, eventId: eventId ?? `order-refresh:${order.orderNo}:${order.updatedAt}` })
+        ? await this.workflow.handlePaymentPaid({ adminId, config, order: effectiveOrder, eventId: eventId ?? `order-refresh:${order.orderNo}:${order.updatedAt}` })
         : trigger === 'unpaid_reprice'
           ? await this.workflow.handleUnpaidReprice({ adminId, config, order, eventId: eventId ?? `order-refresh:${order.orderNo}:${order.updatedAt}` })
           : trigger === 'review_gift'
-            ? await this.workflow.handleReviewGift({ adminId, config, order, eventId: eventId ?? `review:${order.orderNo}:${order.updatedAt}` })
+            ? await this.workflow.handleReviewGift({ adminId, config, order: effectiveOrder, eventId: eventId ?? `review:${order.orderNo}:${order.updatedAt}` })
             : await this.workflow.handleReviewReminder({ adminId, config, order, now });
       if (trigger === 'review_reminder' && result.status === 'succeeded') {
-        await this.store.recordReviewReminderSent({ accountId: order.accountId, orderNo: order.orderNo, sentAt: now ?? new Date().toISOString() });
+        await this.store.recordReviewReminderSent({ accountId: order.accountId, orderNo: order.orderNo, sentAt: now ?? new Date().toISOString(), expectedReminderCount: order.reminderCount ?? 0 });
       }
       return this.finish(trigger, order.orderNo, { trigger, orderNo: order.orderNo, status: result.status, executionKey: result.executionKey, reason: result.reason }, adminId, order.accountId, requestId, traceId);
     } catch (error) {
@@ -217,6 +270,10 @@ function ruleEnabled(config: import('./domain.js').ProductAutomationConfig, trig
   if (trigger === 'unpaid_reprice') return config.unpaidAutoReprice.enabled;
   if (trigger === 'review_gift') return config.reviewGift.enabled;
   return config.reviewReminder.enabled;
+}
+
+function isReviewTrigger(trigger: ProductAutomationTriggerKind): boolean {
+  return trigger === 'review_gift' || trigger === 'review_reminder';
 }
 
 function blockedExternalResult(): { status: 'failed'; errorCode: string; message: string } {

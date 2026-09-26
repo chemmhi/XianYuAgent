@@ -35,6 +35,11 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
     const batches = await Promise.all(input.batchIds.map((batchId) => this.store.getCouponBatch(adminId, batchId)));
     const usableBatches = selectBatchesForSpec(batches.filter((batch): batch is NonNullable<typeof batch> => Boolean(batch)), input.skuSpec);
     if (usableBatches.length === 0) throw new Error('COUPON_SPEC_MISMATCH');
+    const requiresIm = input.purpose === 'gift' || usableBatches.some((batch) => !(input.purpose === 'delivery' && batch.metadata?.useNoLogisticsForm === true));
+    if (requiresIm) {
+      const im = this.getIm();
+      if (im && typeof im.isReady === 'function' && !await im.isReady(adminId, input.accountId)) throw new Error('XIANYU_IM_NOT_READY');
+    }
     const reservation = await this.store.reserveCoupon({
       adminId,
       accountId: input.accountId,
@@ -61,16 +66,28 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
     if (!order) return failedExternal('ORDER_NOT_FOUND', 'order or product scope not found');
     try {
       const batches = await Promise.all(reservation.batchIds.map((batchId) => this.store.getCouponBatch(adminId, batchId)));
-      if (input.purpose === 'delivery' && batches.some((batch) => batch?.metadata?.useNoLogisticsForm === true)) {
-        const formBatch = batches.find((batch) => batch?.metadata?.useNoLogisticsForm === true);
-        if (!formBatch || formBatch.purpose !== 'text' || !formBatch.metadata?.textContent?.trim()) return failedExternal('NO_LOGISTICS_FORM_INVALID', 'no logistics form requires fixed text content');
-        await waitForDelay(Number(formBatch.metadata.delaySeconds ?? 0));
-        await this.recordAudit({ adminId, action: 'product.automation.coupon.no_logistics_pending', accountId: input.accountId, orderNo: input.orderNo, executionKey: input.executionKey, payload: { reservationId: reservation.reservationId } });
+      const noLogisticsBatchIds: string[] = [];
+      const deliverableItems = [];
+      for (const item of reservation.items) {
+        const batch = batches.find((candidate) => candidate?.id === item.batchId) ?? await this.store.getCouponBatch(adminId, item.batchId);
+        if (!batch) return failedExternal('COUPON_BATCH_NOT_FOUND', 'coupon batch not found');
+        const useNoLogisticsForm = input.purpose === 'delivery' && batch.metadata?.useNoLogisticsForm === true;
+        if (useNoLogisticsForm && (batch.purpose !== 'text' || !batch.metadata?.textContent?.trim())) return failedExternal('NO_LOGISTICS_FORM_INVALID', 'no logistics form requires fixed text content');
+        if (useNoLogisticsForm) {
+          noLogisticsBatchIds.push(batch.id);
+          await waitForDelay(Number(batch.metadata?.delaySeconds ?? 0));
+        } else {
+          deliverableItems.push({ item, batch });
+        }
+      }
+      if (deliverableItems.length === 0) {
+        await this.recordAudit({ adminId, action: 'product.automation.coupon.no_logistics_pending', accountId: input.accountId, orderNo: input.orderNo, executionKey: input.executionKey, payload: { reservationId: reservation.reservationId, batchIds: noLogisticsBatchIds } });
         return { status: 'succeeded', externalRef: `no-logistics:${reservation.reservationId}` };
       }
       if (!order.conversationId) return failedExternal('CONVERSATION_MISSING', 'order conversation is missing');
       const im = this.getIm();
       if (!im) return unknownExternal('XIANYU_IM_NOT_READY', 'xianyu im service is not ready');
+      if (typeof im.isReady === 'function' && !await im.isReady(adminId, input.accountId)) return failedExternal('XIANYU_IM_NOT_READY', 'xianyu im service is not ready before coupon send');
       const account = await this.store.getAccount(adminId, input.accountId);
       const product = order.productId ? await this.store.getProduct(adminId, order.productId) : undefined;
       const orderSpec = parseSkuSpec(order.skuSpec);
@@ -89,23 +106,22 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
         orderQuantity: String(order.quantity ?? reservation.quantity),
       });
       let externalMessageRef: string | undefined;
-      for (const item of reservation.items) {
-        const batch = batches.find((candidate) => candidate?.id === item.batchId) ?? await this.store.getCouponBatch(adminId, item.batchId);
-        if (!batch) return failedExternal('COUPON_BATCH_NOT_FOUND', 'coupon batch not found');
+      for (const { item, batch } of deliverableItems) {
         const imageUrls = this.couponAssets?.imageUrls(batch) ?? batch.metadata?.imageUrls ?? [];
         const resolved = await resolveCouponDelivery({ ...batch, metadata: { ...(batch.metadata ?? {}), imageUrls } }, item, context, input.purpose);
         await waitForDelay(resolved.delaySeconds);
         let imageIndex = 0;
         for (const imageUrl of resolved.imageUrls) {
           const file = await this.resolveImage(adminId, batch.id, imageUrl);
-          const sent = await im.sendImage(adminId, input.accountId, order.conversationId, file, `automation:${input.executionKey}:image:${imageIndex}`, `automation:${input.executionKey}:image:${imageIndex}`) as { externalMessageRef?: string };
+          const requestId = `automation:${input.executionKey}:batch:${batch.id}:image:${imageIndex}`;
+          const sent = await im.sendImage(adminId, input.accountId, order.conversationId, file, requestId, requestId) as { externalMessageRef?: string };
           externalMessageRef = sent.externalMessageRef ?? externalMessageRef;
           imageIndex += 1;
         }
         if (resolved.text) {
           let textIndex = 0;
           for (const message of splitMessages(resolved.text)) {
-            const requestId = `automation:${input.executionKey}:text:${textIndex}`;
+            const requestId = `automation:${input.executionKey}:batch:${batch.id}:text:${textIndex}`;
             const sent = await sendTextWithReconnectRetry(im, adminId, input.accountId, order.conversationId, message, requestId) as { externalMessageRef?: string };
             externalMessageRef = sent.externalMessageRef ?? externalMessageRef;
             textIndex += 1;
@@ -155,9 +171,12 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
     if (!detail.success || !detail.detail) {
       return unknownExternal(detail.errorCode ?? 'ORDER_DETAIL_UNAVAILABLE', detail.message ?? 'authoritative order detail is unavailable');
     }
-    const paymentStatus = normalizePaymentStatus(detail.detail.paymentStatus);
+    const paymentStatus = normalizePaymentStatus(detail.detail.paymentStatus, detail.detail.orderStatus);
     if (paymentStatus === 'paid') return failedExternal('ORDER_ALREADY_PAID', 'order is no longer unpaid');
     if (paymentStatus !== 'unpaid') return unknownExternal('ORDER_PAYMENT_STATUS_UNKNOWN', 'order payment status is not authoritative');
+    if (detail.detail.amountMinor === input.targetPriceMinor) {
+      return { status: 'succeeded', externalRef: input.orderNo };
+    }
     const result = await this.getMtop().repriceOrder(adminId, input.accountId, input.orderNo, input.targetPriceMinor);
     return mapMutationResult(result);
   }
@@ -166,6 +185,7 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
     const adminId = requireAdminId(input.adminId);
     const im = this.getIm();
     if (!im) return unknownExternal('XIANYU_IM_NOT_READY', 'xianyu im service is not ready');
+    if (typeof im.isReady === 'function' && !await im.isReady(adminId, input.accountId)) return failedExternal('XIANYU_IM_NOT_READY', 'xianyu im service is not ready before text send');
     try {
       const sent = await im.sendText(adminId, input.accountId, input.conversationId, input.text, `automation:${input.executionKey}`, `automation:${input.executionKey}`) as { externalMessageRef?: string };
       return { status: 'succeeded', externalRef: sent.externalMessageRef };
@@ -187,7 +207,7 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
     if (!local) return undefined;
     const detail = await this.getMtop().readOrderDetail(adminId, input.accountId, input.orderNo);
     if (!detail.success || !detail.detail) return undefined;
-    if (!normalizePaymentStatus(detail.detail.paymentStatus) || !normalizeDeliveryStatus(detail.detail.deliveryStatus)) return undefined;
+    if (!normalizePaymentStatus(detail.detail.paymentStatus, detail.detail.orderStatus) || !normalizeDeliveryStatus(detail.detail.deliveryStatus)) return undefined;
     return mergeOrderSnapshot(local, detail.detail);
   }
 
@@ -237,26 +257,32 @@ function mergeOrderSnapshot(local: AutomationOrderSnapshot, detail: XianyuOrderD
     itemTitle: detail.itemTitle ?? local.itemTitle,
     conversationId: detail.conversationId ?? local.conversationId,
     buyerId: detail.buyerId ?? local.buyerId,
-    paymentStatus: normalizePaymentStatus(detail.paymentStatus) ?? local.paymentStatus,
+    paymentStatus: normalizePaymentStatus(detail.paymentStatus, detail.orderStatus) ?? local.paymentStatus,
     deliveryStatus: normalizeDeliveryStatus(detail.deliveryStatus) ?? local.deliveryStatus,
     reviewedAt: detail.reviewedAt ?? local.reviewedAt,
     updatedAt: new Date().toISOString(),
   };
 }
 
-function normalizePaymentStatus(value?: string): AutomationOrderSnapshot['paymentStatus'] | undefined {
-  const normalized = value?.trim().toLowerCase();
-  if (!normalized) return undefined;
-  if (['paid', 'success', 'pay_success', 'trade_success', '已付款', '交易成功'].includes(normalized)) return 'paid';
-  if (['unpaid', 'wait_buyer_pay', 'wait_pay', 'pending', '待付款', '未付款'].includes(normalized)) return 'unpaid';
+function normalizePaymentStatus(value?: string, orderStatus?: string): AutomationOrderSnapshot['paymentStatus'] | undefined {
+  const candidates = [value, orderStatus]
+    .map((candidate) => candidate?.trim().toLowerCase())
+    .filter((candidate): candidate is string => Boolean(candidate));
+  for (const normalized of candidates) {
+    if (['paid', 'success', 'pay_success', 'trade_success', 'wait_consign', 'shipped', 'completed', '已付款', '待发货', '已发货', '交易成功', '已完成'].includes(normalized)) return 'paid';
+    if (['1', 'unpaid', 'wait_buyer_pay', 'wait_pay', 'pending', 'processing', '待付款', '未付款', '处理中'].includes(normalized)) return 'unpaid';
+  }
   return undefined;
 }
 
 function normalizeDeliveryStatus(value?: string): AutomationOrderSnapshot['deliveryStatus'] | undefined {
   const normalized = value?.trim().toLowerCase();
   if (!normalized) return undefined;
-  if (['4', 'delivered', 'consigned', 'shipped', '已发货', '交易成功'].includes(normalized)) return 'delivered';
-  if (['pending', 'wait_consign', 'not_delivered', '待发货', '未发货'].includes(normalized)) return 'pending';
+  // Xianyu order detail uses numeric status codes: 2 = pending shipment,
+  // 3 = shipped, and 4 = completed. Treat both shipped and completed as
+  // delivered for idempotent confirmation checks.
+  if (['3', '4', 'delivered', 'consigned', 'shipped', '已发货', '交易成功'].includes(normalized)) return 'delivered';
+  if (['1', '2', 'pending', 'wait_consign', 'not_delivered', '待发货', '未发货'].includes(normalized)) return 'pending';
   return undefined;
 }
 

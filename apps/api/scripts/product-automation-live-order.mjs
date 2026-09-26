@@ -14,6 +14,9 @@ const accountId = required('ACCOUNT_ID');
 const orderNo = required('ORDER_NO');
 const action = required('PRODUCT_AUTOMATION_LIVE_ACTION');
 assert.ok(['payment_paid', 'unpaid_reprice', 'review_gift', 'review_reminder'].includes(action), 'unsupported live action');
+if (action === 'review_gift' || action === 'review_reminder') {
+  assert.equal(String(env.PRODUCT_AUTOMATION_REVIEW_EXTERNAL_WRITES_CONFIRMED).toLowerCase(), 'true', 'PRODUCT_AUTOMATION_REVIEW_EXTERNAL_WRITES_CONFIRMED=true is required for review live actions');
+}
 
 const config = loadConfig(env);
 assert.equal(config.productAutomationExecutionMode, 'live');
@@ -26,7 +29,8 @@ try {
   assert.equal(order.accountId, accountId);
   assert.ok(order.productId, 'order is not linked to a local product');
   const normalizedBuyerNames = (config.buyerAllowlist ?? []).map(normalizeAutomationBuyerName);
-  assert.ok(normalizedBuyerNames.includes(normalizeAutomationBuyerName(order.buyerName)), 'order buyer is not in the configured buyer allowlist');
+  const liveBuyerIdentity = order.buyerNickname?.trim() || order.buyerName;
+  assert.ok(normalizedBuyerNames.includes(normalizeAutomationBuyerName(liveBuyerIdentity)), 'order buyer nickname is not in the configured buyer allowlist');
   const automation = await runtime.productAutomation.get(adminId, order.productId);
   assert.equal(automation.product.accountId, accountId);
 

@@ -474,14 +474,31 @@ export class MemoryStore implements Store {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const linkedProductId = input.item.productId ?? [...this.products.values()].find((product) => product.accountId === input.accountId && product.externalProductRef === input.item.itemId)?.id;
     const existing = [...this.orders.values()].find((order) => order.accountId === input.accountId && order.orderNo === input.item.orderNo);
+    const matchedConversationId = [...this.conversations.values()]
+      .filter((conversation) => conversation.accountId === input.accountId && conversation.buyerRef === input.item.buyerId && conversation.itemRef === input.item.itemId)
+      .sort((left, right) => conversationSortKey(right).localeCompare(conversationSortKey(left)) || right.id.localeCompare(left.id))[0]?.id;
+    const conversationId = input.item.conversationId ?? existing?.conversationId ?? matchedConversationId;
     const now = input.syncedAt;
     if (existing) {
-      Object.assign(existing, { ...input.item, productId: linkedProductId ?? existing.productId, accountId: input.accountId, accountName: input.accountName ?? existing.accountName, updatedAt: now, source: 'xianyu' as const, sourcePayloadDigest: input.item.sourcePayloadDigest, configVersion: existing.configVersion + 1 });
+      const previousReviewedAt = existing.reviewedAt;
+      Object.assign(existing, { ...input.item, conversationId, productId: linkedProductId ?? existing.productId, accountId: input.accountId, accountName: input.accountName ?? existing.accountName, updatedAt: now, source: 'xianyu' as const, sourcePayloadDigest: input.item.sourcePayloadDigest, configVersion: existing.configVersion + 1 });
+      existing.reviewedAt = input.item.reviewedAt ?? previousReviewedAt;
       return { action: 'updated', order: this.enrichOrder(existing) };
     }
-    const order: OrderRecord = { ...input.item, productId: linkedProductId, id: createId(), accountId: input.accountId, accountName: input.accountName, updatedAt: input.item.updatedAt ?? now, configVersion: 1, source: 'xianyu' };
+    const order: OrderRecord = { ...input.item, conversationId, productId: linkedProductId, id: createId(), accountId: input.accountId, accountName: input.accountName, updatedAt: input.item.updatedAt ?? now, configVersion: 1, source: 'xianyu' };
     this.orders.set(order.id, order);
     return { action: 'created', order: this.enrichOrder(order) };
+  }
+  async deleteExternalOrdersNotInSnapshot(input: { adminId: string; accountId: string; orderNos: readonly string[] }): Promise<number> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const keepOrderNos = new Set(input.orderNos.map((orderNo) => orderNo.trim()).filter(Boolean));
+    let deletedCount = 0;
+    for (const [id, order] of this.orders) {
+      if (order.accountId !== input.accountId || order.source !== 'xianyu' || keepOrderNos.has(order.orderNo)) continue;
+      this.orders.delete(id);
+      deletedCount += 1;
+    }
+    return deletedCount;
   }
   async createProduct(input: { adminId: string; accountId: string; externalProductRef?: string; title: string; description?: string; categoryCode?: string; attributes?: Record<string, unknown>; defaultReplyTemplate?: string; knowledgeBase?: string; priceMinor?: number; status?: ProductStatus }): Promise<ProductRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
@@ -934,6 +951,43 @@ export class MemoryStore implements Store {
     const aliasMessageId = this.inboundMessageAliases.get(`${conversation.accountId}:${conversationId}:${externalMessageRef}`);
     const message = [...this.messages.values()].find((item) => item.conversationId === conversationId && (item.externalMessageRef === externalMessageRef || item.id === aliasMessageId));
     return message ? { ...message, riskFlags: [...message.riskFlags] } : undefined;
+  }
+
+  async reconcileExternalMessage(input: { adminId: string; conversationId: string; externalMessageRef: string; senderRole: MessageRecord['senderRole']; bodyType: MessageRecord['bodyType']; source?: MessageRecord['source']; riskFlags?: string[]; traceId?: string }): Promise<{ message: MessageRecord; event?: ConversationEventRecord } | undefined> {
+    const conversation = await this.getConversation(input.adminId, input.conversationId);
+    if (!conversation) return undefined;
+    const aliasMessageId = this.inboundMessageAliases.get(`${conversation.accountId}:${input.conversationId}:${input.externalMessageRef}`);
+    const message = [...this.messages.values()].find((item) => item.conversationId === input.conversationId && (item.externalMessageRef === input.externalMessageRef || item.id === aliasMessageId));
+    if (!message) return undefined;
+
+    const systemUpgrade = message.direction === 'inbound' && input.senderRole === 'system' && input.bodyType === 'system';
+    const mergedRiskFlags = [...new Set([...message.riskFlags, ...(input.riskFlags ?? [])])];
+    const changed = (systemUpgrade && (message.senderRole !== 'system' || message.bodyType !== 'system' || (input.source && message.source !== input.source)))
+      || mergedRiskFlags.length !== message.riskFlags.length;
+    if (!changed) return { message: { ...message, riskFlags: [...message.riskFlags] } };
+
+    if (systemUpgrade) {
+      message.senderRole = 'system';
+      message.bodyType = 'system';
+      if (input.source) message.source = input.source;
+    }
+    message.riskFlags = mergedRiskFlags;
+    conversation.version += 1;
+    const occurredAt = new Date().toISOString();
+    const cursor = (this.conversationCursors.get(conversation.id) ?? 0) + 1;
+    this.conversationCursors.set(conversation.id, cursor);
+    const event: ConversationEventRecord = {
+      eventId: createId(),
+      conversationId: conversation.id,
+      accountId: conversation.accountId,
+      cursor,
+      type: 'chat.message.updated',
+      occurredAt,
+      traceId: input.traceId ?? `reconcile:${message.id}`,
+      payload: { message: { ...message, riskFlags: [...message.riskFlags] }, conversation: { ...conversation } },
+    };
+    this.conversationEvents.get(conversation.id)?.push(event);
+    return { message: { ...message, riskFlags: [...message.riskFlags] }, event: { ...event, payload: { ...event.payload } } };
   }
 
   async createConversation(input: { adminId: string; accountId: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; externalConversationRef?: string }): Promise<ConversationRecord> {
@@ -1630,9 +1684,14 @@ export class MemoryStore implements Store {
     try { return await work(); } finally { release(); }
   }
 
-  private async expireCouponReservations(): Promise<void> {
+  async cleanupExpiredCouponReservations(): Promise<number> {
+    return this.withCouponReservationLock(() => this.expireCouponReservations());
+  }
+
+  private async expireCouponReservations(): Promise<number> {
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
+    let expiredCount = 0;
     for (const reservation of this.couponReservations.values()) {
       if (reservation.status !== 'reserved' || Date.parse(reservation.leaseUntil) > now) continue;
       for (const itemRef of reservation.items) {
@@ -1643,7 +1702,9 @@ export class MemoryStore implements Store {
       reservation.reason = 'reservation_expired';
       reservation.updatedAt = nowIso;
       reservation.finalizedAt = nowIso;
+      expiredCount += 1;
     }
+    return expiredCount;
   }
 
   private selectAvailableCouponItems(batches: CouponBatchRecord[], quantity: number): CouponItemRecord[] {
@@ -1663,10 +1724,13 @@ export class MemoryStore implements Store {
           }
           return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
         });
-      available.push(...items);
-      if (available.length >= quantity) break;
+      // Each selected batch is an independent delivery component. Reserve the
+      // requested quantity from every batch so a multi-select configuration
+      // sends all selected card types instead of treating later batches as a
+      // fallback pool for the first one.
+      available.push(...items.slice(0, quantity));
     }
-    return available.slice(0, quantity);
+    return available;
   }
 
   private ensureConfiguredCouponItems(batch: CouponBatchRecord, quantity: number): void {
@@ -1730,7 +1794,8 @@ export class MemoryStore implements Store {
       this.automationExecutions.set(input.executionKey, record);
       return { claimed: true, record: structuredClone(record) };
     }
-    if (existing.fingerprint !== input.fingerprint) throw new Error('AUTOMATION_EXECUTION_FINGERPRINT_CONFLICT');
+    if (existing.fingerprint !== input.fingerprint && !(existing.status === 'completed' && existing.retryable)) throw new Error('AUTOMATION_EXECUTION_FINGERPRINT_CONFLICT');
+    if (existing.status === 'completed' && existing.retryable) existing.fingerprint = input.fingerprint;
     const expired = existing.status === 'running' && (!existing.leaseUntil || Date.parse(existing.leaseUntil) <= Date.now());
     if ((existing.status === 'completed' && existing.retryable) || expired) {
       existing.status = 'running';
@@ -1762,9 +1827,10 @@ export class MemoryStore implements Store {
     if (order) { order.reviewedAt = reviewedAt; order.updatedAt = reviewedAt; order.configVersion += 1; }
     return { created: true };
   }
-  async recordReviewReminderSent(input: { accountId: string; orderNo: string; sentAt: string }): Promise<OrderRecord | undefined> {
+  async recordReviewReminderSent(input: { accountId: string; orderNo: string; sentAt: string; expectedReminderCount?: number }): Promise<OrderRecord | undefined> {
     const order = [...this.orders.values()].find((candidate) => candidate.accountId === input.accountId && candidate.orderNo === input.orderNo);
     if (!order) return undefined;
+    if (input.expectedReminderCount !== undefined && (order.reminderCount ?? 0) !== input.expectedReminderCount) return this.enrichOrder(order);
     order.reminderCount = (order.reminderCount ?? 0) + 1;
     order.lastReminderAt = input.sentAt;
     order.updatedAt = input.sentAt;

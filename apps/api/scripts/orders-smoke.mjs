@@ -76,15 +76,39 @@ try {
   assert.equal(forbiddenRefresh.response.status, 403);
 
   await runtime.store.createProduct({ adminId, accountId: account.id, externalProductRef: 'item-refresh', title: '刷新商品标题' });
+  const staleExternalOrderNo = 'XY202609200005';
+  await runtime.store.upsertExternalOrder({
+    adminId,
+    accountId: account.id,
+    accountName: account.displayName,
+    syncedAt: '2026-09-20T01:00:00.000Z',
+    item: order(account.id, staleExternalOrderNo, { sourcePayloadDigest: 'fixture-stale-external' }),
+  });
   runtime.xianyu.fetchOrdersAll = async () => ({ pages: [{ success: true, accountInvalid: false, pageNumber: 1, pageSize: 30, items: [] }], items: [{ orderNo: 'XY202609200004', buyerId: 'buyer-refresh', buyerNickname: '刷新昵称', buyerName: '刷新买家', itemId: 'item-refresh', itemTitle: 'item-refresh', amountMinor: 4990, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'manual', createdAt: '2026-09-20T01:00:00.000Z', sourcePayloadDigest: 'fixture-refresh' }], hasMore: false });
   const refreshed = await request('/api/v1/orders/refresh', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'orders-refresh-1' }, body: JSON.stringify({ accountId: account.id }) });
   assert.equal(refreshed.response.status, 200);
   assert.equal(refreshed.body.data.createdCount, 1);
+  assert.equal(refreshed.body.data.deletedCount, 1);
+  assert.equal(await runtime.store.getOrder(adminId, staleExternalOrderNo, account.id), undefined);
+  assert.ok(await runtime.store.getOrder(adminId, first.orderNo, account.id));
   const afterRefresh = await request('/api/v1/orders?accountId=' + encodeURIComponent(account.id) + '&keyword=刷新', { headers: { cookie } });
   assert.equal(afterRefresh.body.data.total, 1);
   assert.equal(afterRefresh.body.data.items[0].source, 'xianyu');
   assert.equal(afterRefresh.body.data.items[0].buyerNickname, '刷新昵称');
   assert.equal(afterRefresh.body.data.items[0].itemTitle, '刷新商品标题');
+  const partialStaleExternalOrderNo = 'XY202609200006';
+  await runtime.store.upsertExternalOrder({
+    adminId,
+    accountId: account.id,
+    accountName: account.displayName,
+    syncedAt: '2026-09-20T01:00:00.000Z',
+    item: order(account.id, partialStaleExternalOrderNo, { sourcePayloadDigest: 'fixture-partial-stale-external' }),
+  });
+  runtime.xianyu.fetchOrdersAll = async () => ({ pages: [{ success: true, accountInvalid: false, pageNumber: 1, pageSize: 1, items: [] }], items: [], hasMore: true });
+  const partialRefresh = await request('/api/v1/orders/refresh', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'orders-refresh-partial' }, body: JSON.stringify({ accountId: account.id, pageSize: 1, maxPages: 1 }) });
+  assert.equal(partialRefresh.response.status, 200);
+  assert.equal(partialRefresh.body.data.deletedCount, 0);
+  assert.ok(await runtime.store.getOrder(adminId, partialStaleExternalOrderNo, account.id));
   console.log('orders read/refresh smoke passed');
 } finally {
   await runtime.close();

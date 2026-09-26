@@ -436,10 +436,10 @@ export class PostgresStore implements Store {
     const existing = await this.pool.query('select * from automation.execution_ledger where execution_key=$1 limit 1', [input.executionKey]);
     if (!existing.rows[0]) throw new Error('AUTOMATION_EXECUTION_CLAIM_LOST');
     const current = this.toAutomationExecution(existing.rows[0]);
-    if (current.fingerprint !== input.fingerprint) throw new Error('AUTOMATION_EXECUTION_FINGERPRINT_CONFLICT');
+    if (current.fingerprint !== input.fingerprint && !(current.status === 'completed' && current.retryable)) throw new Error('AUTOMATION_EXECUTION_FINGERPRINT_CONFLICT');
     const takeover = await this.pool.query(`update automation.execution_ledger
-      set status='running', result_json=null, retryable=false, owner_token=$3, lease_until=$4, attempt_count=attempt_count+1, updated_at=now()
-      where execution_key=$1 and fingerprint=$2 and ((status='completed' and retryable=true) or (status='running' and lease_until < now())) returning *`, [input.executionKey, input.fingerprint, input.ownerToken, input.leaseUntil]);
+      set status='running', fingerprint=$2, result_json=null, retryable=false, owner_token=$3, lease_until=$4, attempt_count=attempt_count+1, updated_at=now()
+      where execution_key=$1 and ((status='completed' and retryable=true) or (status='running' and fingerprint=$2 and lease_until < now())) returning *`, [input.executionKey, input.fingerprint, input.ownerToken, input.leaseUntil]);
     if (takeover.rows[0]) return { claimed: true, record: this.toAutomationExecution(takeover.rows[0]) };
     const latest = await this.pool.query('select * from automation.execution_ledger where execution_key=$1 limit 1', [input.executionKey]);
     return { claimed: false, record: this.toAutomationExecution(latest.rows[0]) };
@@ -449,6 +449,20 @@ export class PostgresStore implements Store {
       set status='completed', result_json=$3::jsonb, retryable=$4, lease_until=null, updated_at=now()
       where execution_key=$1 and owner_token=$2`, [input.executionKey, input.ownerToken, JSON.stringify(input.result), input.retryable]);
     if ((result.rowCount ?? 0) !== 1) throw new Error('AUTOMATION_EXECUTION_OWNER_CONFLICT');
+  }
+  async cleanupExpiredCouponReservations(): Promise<number> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const count = await this.expireCouponReservations(client);
+      await client.query('commit');
+      return count;
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
   async recordReviewFact(input: { accountId: string; orderNo: string; eventId: string; reviewedAt?: string }): Promise<{ created: boolean }> {
     const reviewedAt = input.reviewedAt ?? new Date().toISOString();
@@ -462,9 +476,13 @@ export class PostgresStore implements Store {
       return { created: Boolean(inserted.rows[0]) };
     } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
   }
-  async recordReviewReminderSent(input: { accountId: string; orderNo: string; sentAt: string }): Promise<OrderRecord | undefined> {
-    const result = await this.pool.query(`update orders.orders set review_reminder_count=review_reminder_count+1, last_review_reminder_at=$3, updated_at=$3, config_version=config_version+1 where account_id=$1 and order_no=$2 returning *`, [input.accountId, input.orderNo, input.sentAt]);
-    return result.rows[0] ? this.toOrder(result.rows[0]) : undefined;
+  async recordReviewReminderSent(input: { accountId: string; orderNo: string; sentAt: string; expectedReminderCount?: number }): Promise<OrderRecord | undefined> {
+    const values: unknown[] = [input.accountId, input.orderNo, input.sentAt];
+    const expectedClause = input.expectedReminderCount === undefined ? '' : ` and review_reminder_count=$${values.push(input.expectedReminderCount)}`;
+    const result = await this.pool.query(`update orders.orders set review_reminder_count=review_reminder_count+1, last_review_reminder_at=$3, updated_at=$3, config_version=config_version+1 where account_id=$1 and order_no=$2${expectedClause} returning *`, values);
+    if (result.rows[0]) return this.toOrder(result.rows[0]);
+    const current = await this.pool.query('select * from orders.orders where account_id=$1 and order_no=$2', [input.accountId, input.orderNo]);
+    return current.rows[0] ? this.toOrder(current.rows[0]) : undefined;
   }
   async createOrder(input: { adminId: string; order: Omit<OrderRecord, 'id' | 'createdAt' | 'updatedAt' | 'configVersion' | 'source'> & { id?: string; createdAt?: string; updatedAt?: string; configVersion?: number; source?: OrderSource } }): Promise<OrderRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.order.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
@@ -482,14 +500,28 @@ export class PostgresStore implements Store {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const linkedProduct = await this.pool.query('select id from products.products where account_id=$1 and (id::text=$2 or external_product_ref=$3) order by (id::text=$2) desc limit 1', [input.accountId, input.item.productId ?? '', input.item.itemId]);
     const linkedProductId = input.item.productId ?? (linkedProduct.rows[0]?.id ? String(linkedProduct.rows[0].id) : undefined);
+    const existingOrder = await this.pool.query('select conversation_id from orders.orders where account_id=$1 and order_no=$2 limit 1', [input.accountId, input.item.orderNo]);
+    const existingConversationId = existingOrder.rows[0]?.conversation_id ? String(existingOrder.rows[0].conversation_id) : undefined;
+    const matchedConversation = await this.pool.query('select id from messages.conversations where account_id=$1 and buyer_ref=$2 and item_ref=$3 order by updated_at desc nulls last, id desc limit 1', [input.accountId, input.item.buyerId, input.item.itemId]);
+    const matchedConversationId = matchedConversation.rows[0]?.id ? String(matchedConversation.rows[0].id) : undefined;
+    const conversationId = input.item.conversationId ?? existingConversationId ?? matchedConversationId;
     const id = createId();
-    const result = await this.pool.query(`insert into orders.orders (id,order_no,account_id,account_name,buyer_id,buyer_name,buyer_nickname,buyer_avatar_url,item_id,item_title,amount_minor,payment_status,order_status,delivery_status,after_sales_status,delivery_type,created_at,updated_at,delivery_fail_reason,conversation_id,product_id,config_version,source,source_payload_digest,sku_spec)
-      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,1,'xianyu',$22,$23)
-      on conflict (account_id,order_no) do update set account_name=coalesce(excluded.account_name,orders.orders.account_name),buyer_id=excluded.buyer_id,buyer_name=excluded.buyer_name,buyer_nickname=excluded.buyer_nickname,buyer_avatar_url=excluded.buyer_avatar_url,item_id=excluded.item_id,item_title=excluded.item_title,amount_minor=excluded.amount_minor,payment_status=excluded.payment_status,order_status=excluded.order_status,delivery_status=excluded.delivery_status,after_sales_status=excluded.after_sales_status,delivery_type=excluded.delivery_type,created_at=excluded.created_at,updated_at=$18,delivery_fail_reason=excluded.delivery_fail_reason,conversation_id=excluded.conversation_id,product_id=excluded.product_id,config_version=orders.orders.config_version+1,source='xianyu',source_payload_digest=excluded.source_payload_digest,sku_spec=excluded.sku_spec
-      returning *, (xmax = 0) as inserted`, [id, input.item.orderNo, input.accountId, input.accountName ?? null, input.item.buyerId, input.item.buyerName, input.item.buyerNickname ?? null, input.item.buyerAvatarUrl ?? null, input.item.itemId, input.item.itemTitle, input.item.amountMinor, input.item.paymentStatus, input.item.orderStatus, input.item.deliveryStatus, input.item.afterSalesStatus, input.item.deliveryType, input.item.createdAt, input.syncedAt, input.item.deliveryFailReason ?? null, input.item.conversationId ?? null, linkedProductId ?? null, input.item.sourcePayloadDigest, input.item.skuSpec ?? null]);
+    const result = await this.pool.query(`insert into orders.orders (id,order_no,account_id,account_name,buyer_id,buyer_name,buyer_nickname,buyer_avatar_url,item_id,item_title,amount_minor,payment_status,order_status,delivery_status,after_sales_status,delivery_type,created_at,updated_at,delivery_fail_reason,conversation_id,product_id,config_version,source,source_payload_digest,sku_spec,reviewed_at)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,1,'xianyu',$22,$23,$24)
+      on conflict (account_id,order_no) do update set account_name=coalesce(excluded.account_name,orders.orders.account_name),buyer_id=excluded.buyer_id,buyer_name=excluded.buyer_name,buyer_nickname=excluded.buyer_nickname,buyer_avatar_url=excluded.buyer_avatar_url,item_id=excluded.item_id,item_title=excluded.item_title,amount_minor=excluded.amount_minor,payment_status=excluded.payment_status,order_status=excluded.order_status,delivery_status=excluded.delivery_status,after_sales_status=excluded.after_sales_status,delivery_type=excluded.delivery_type,created_at=excluded.created_at,updated_at=$18,delivery_fail_reason=excluded.delivery_fail_reason,conversation_id=coalesce(excluded.conversation_id,orders.orders.conversation_id),product_id=excluded.product_id,config_version=orders.orders.config_version+1,source='xianyu',source_payload_digest=excluded.source_payload_digest,sku_spec=excluded.sku_spec,reviewed_at=coalesce(excluded.reviewed_at,orders.orders.reviewed_at)
+      returning *, (xmax = 0) as inserted`, [id, input.item.orderNo, input.accountId, input.accountName ?? null, input.item.buyerId, input.item.buyerName, input.item.buyerNickname ?? null, input.item.buyerAvatarUrl ?? null, input.item.itemId, input.item.itemTitle, input.item.amountMinor, input.item.paymentStatus, input.item.orderStatus, input.item.deliveryStatus, input.item.afterSalesStatus, input.item.deliveryType, input.item.createdAt, input.syncedAt, input.item.deliveryFailReason ?? null, conversationId ?? null, linkedProductId ?? null, input.item.sourcePayloadDigest, input.item.skuSpec ?? null, input.item.reviewedAt ?? null]);
     const row = result.rows[0];
     const enriched = await this.getOrder(input.adminId, input.item.orderNo, input.accountId);
     return { action: row.inserted ? 'created' : 'updated', order: enriched ?? this.toOrder(row) };
+  }
+  async deleteExternalOrdersNotInSnapshot(input: { adminId: string; accountId: string; orderNos: readonly string[] }): Promise<number> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const keepOrderNos = [...new Set(input.orderNos.map((orderNo) => orderNo.trim()).filter(Boolean))];
+    const result = await this.pool.query(
+      'delete from orders.orders where account_id=$1 and source=\'xianyu\' and order_no <> all($2::text[])',
+      [input.accountId, keepOrderNos],
+    );
+    return result.rowCount ?? 0;
   }
   async createProduct(input: { adminId: string; accountId: string; externalProductRef?: string; title: string; description?: string; categoryCode?: string; attributes?: Record<string, unknown>; defaultReplyTemplate?: string; knowledgeBase?: string; priceMinor?: number; status?: ProductStatus }): Promise<ProductRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
@@ -748,16 +780,20 @@ export class PostgresStore implements Store {
         group by ri.item_id`, [candidateIds]);
       const usageByItemId = new Map(usageResult.rows.map((row) => [String(row.item_id), Number(row.use_count ?? 0)]));
       const batchPurposeById = new Map(lockRows.rows.map((row) => [String(row.id), String(row.purpose)]));
-      const batchOrder = new Map(batchIds.map((batchId, index) => [batchId, index]));
-      const selectedRows = [...candidates.rows].sort((left, right) => {
-        const batchDelta = (batchOrder.get(String(left.batch_id)) ?? Number.MAX_SAFE_INTEGER) - (batchOrder.get(String(right.batch_id)) ?? Number.MAX_SAFE_INTEGER);
-        if (batchDelta !== 0) return batchDelta;
-        if (batchPurposeById.get(String(left.batch_id)) === 'data') {
-          const usageDelta = (usageByItemId.get(String(left.id)) ?? 0) - (usageByItemId.get(String(right.id)) ?? 0);
-          if (usageDelta !== 0) return usageDelta;
-        }
-        return new Date(String(left.created_at)).getTime() - new Date(String(right.created_at)).getTime() || String(left.id).localeCompare(String(right.id));
-      }).slice(0, normalized.quantity);
+      const selectedRows: Row[] = [];
+      for (const batchId of batchIds) {
+        const batchRows = candidates.rows.filter((row) => String(row.batch_id) === batchId).sort((left, right) => {
+          if (batchPurposeById.get(batchId) === 'data') {
+            const usageDelta = (usageByItemId.get(String(left.id)) ?? 0) - (usageByItemId.get(String(right.id)) ?? 0);
+            if (usageDelta !== 0) return usageDelta;
+          }
+          const leftCreatedAt = left.created_at instanceof Date ? left.created_at.getTime() : Date.parse(String(left.created_at));
+          const rightCreatedAt = right.created_at instanceof Date ? right.created_at.getTime() : Date.parse(String(right.created_at));
+          return leftCreatedAt - rightCreatedAt || String(left.id).localeCompare(String(right.id));
+        });
+        if (batchRows.length < normalized.quantity) throw new Error('COUPON_DELIVERY_ITEM_UNAVAILABLE');
+        selectedRows.push(...batchRows.slice(0, normalized.quantity));
+      }
       const now = new Date();
       const nowIso = now.toISOString();
       const leaseUntil = new Date(now.getTime() + leaseSeconds * 1000).toISOString();
@@ -954,6 +990,48 @@ export class PostgresStore implements Store {
     if (!conversation) return undefined;
     const result = await this.pool.query('select m.* from messages.messages m left join messages.message_external_ref_aliases a on a.message_id=m.id where m.conversation_id=$1 and (m.external_message_ref=$2 or a.external_message_ref=$2) limit 1', [conversationId, externalMessageRef]);
     return result.rows[0] ? this.toMessage(result.rows[0]) : undefined;
+  }
+
+  async reconcileExternalMessage(input: { adminId: string; conversationId: string; externalMessageRef: string; senderRole: MessageRecord['senderRole']; bodyType: MessageRecord['bodyType']; source?: MessageRecord['source']; riskFlags?: string[]; traceId?: string }): Promise<{ message: MessageRecord; event?: ConversationEventRecord } | undefined> {
+    const conversation = await this.getConversation(input.adminId, input.conversationId);
+    if (!conversation) return undefined;
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const result = await client.query('select m.* from messages.messages m where m.conversation_id=$1 and (m.external_message_ref=$2 or exists (select 1 from messages.message_external_ref_aliases a where a.message_id=m.id and a.external_message_ref=$2)) limit 1 for update', [input.conversationId, input.externalMessageRef]);
+      if (!result.rows[0]) {
+        await client.query('commit');
+        return undefined;
+      }
+      const current = this.toMessage(result.rows[0]);
+      const systemUpgrade = current.direction === 'inbound' && input.senderRole === 'system' && input.bodyType === 'system';
+      const mergedRiskFlags = [...new Set([...current.riskFlags, ...(input.riskFlags ?? [])])];
+      const changed = (systemUpgrade && (current.senderRole !== 'system' || current.bodyType !== 'system' || (input.source && current.source !== input.source)))
+        || mergedRiskFlags.length !== current.riskFlags.length;
+      if (!changed) {
+        await client.query('commit');
+        return { message: current };
+      }
+      const senderRole = systemUpgrade ? 'system' : current.senderRole;
+      const bodyType = systemUpgrade ? 'system' : current.bodyType;
+      const source = systemUpgrade ? (input.source ?? 'system') : current.source;
+      const updatedResult = await client.query('update messages.messages set sender_role=$2,body_type=$3,source=$4,risk_flags=$5::jsonb where id=$1 returning *', [current.id, senderRole, bodyType, source ?? null, JSON.stringify(mergedRiskFlags)]);
+      const updatedConversationResult = await client.query('update messages.conversations set version=version+1,updated_at=now() where id=$1 returning *', [conversation.id]);
+      await client.query('select pg_advisory_xact_lock(hashtext($1))', [conversation.id]);
+      const cursorResult = await client.query('select coalesce(max(cursor),0)::bigint + 1 as cursor from messages.events where conversation_id=$1', [conversation.id]);
+      const cursor = Number(cursorResult.rows[0]?.cursor ?? 1);
+      const message = this.toMessage(updatedResult.rows[0]);
+      const updatedConversation = this.toConversation(updatedConversationResult.rows[0]);
+      const event: ConversationEventRecord = { eventId: createId(), conversationId: conversation.id, accountId: conversation.accountId, cursor, type: 'chat.message.updated', occurredAt: new Date().toISOString(), traceId: input.traceId ?? `reconcile:${message.id}`, payload: { message, conversation: updatedConversation } };
+      const eventResult = await client.query('insert into messages.events (event_id,conversation_id,account_id,cursor,type,occurred_at,trace_id,payload_json) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb) returning *', [event.eventId, event.conversationId, event.accountId, event.cursor, event.type, event.occurredAt, event.traceId, JSON.stringify(event.payload)]);
+      await client.query('commit');
+      return { message, event: this.toConversationEvent(eventResult.rows[0]) };
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async createConversation(input: { adminId: string; accountId: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; externalConversationRef?: string }): Promise<ConversationRecord> {
@@ -1636,18 +1714,22 @@ export class PostgresStore implements Store {
   }
   async close(): Promise<void> { await this.pool.end(); }
 
-  private async expireCouponReservations(client: PoolClient): Promise<void> {
-    await client.query(`with expired as (
+  private async expireCouponReservations(client: PoolClient): Promise<number> {
+    const result = await client.query(`with expired as (
       update coupons.coupon_reservations
       set status='expired',reason='reservation_expired',finalized_at=now(),updated_at=now()
       where status='reserved' and lease_until<=now()
       returning id
+    ), released as (
+      update coupons.coupon_items i
+      set status='available',reserved_until=null
+      from coupons.coupon_reservation_items ri
+      join expired e on e.id=ri.reservation_id
+      where i.id=ri.item_id and i.status='reserved'
+      returning i.id
     )
-    update coupons.coupon_items i
-    set status='available',reserved_until=null
-    from coupons.coupon_reservation_items ri
-    join expired e on e.id=ri.reservation_id
-    where i.id=ri.item_id and i.status='reserved'`);
+    select count(*)::int as count from expired`);
+    return Number(result.rows[0]?.count ?? 0);
   }
 
   private async loadCouponReservation(client: PoolClient, row: Row): Promise<CouponReservationRecord> {
@@ -1782,7 +1864,7 @@ export class PostgresStore implements Store {
   private toProductAutomation(row: Row): ProductAutomationConfigRecord {
     const config: ProductAutomationConfig = row.config_json && typeof row.config_json === 'object' && !Array.isArray(row.config_json)
       ? row.config_json as ProductAutomationConfig
-      : { paidAutoDelivery: { enabled: false, couponBatchIds: [], autoConfirm: true, maxAttempts: 3, retryBackoffSeconds: 30 }, unpaidAutoReprice: { enabled: false, mode: 'fixed', targetPriceMinor: 0, maxAttempts: 3, retryBackoffSeconds: 30 }, reviewGift: { enabled: false, couponBatchIds: [], maxAttempts: 3, retryBackoffSeconds: 30 }, reviewReminder: { enabled: false, firstDelayHours: 72, repeatIntervalHours: 24, maxReminders: 1, message: '' } };
+      : { paidAutoDelivery: { enabled: false, couponBatchIds: [], autoConfirm: true, maxAttempts: 3, retryBackoffSeconds: 30 }, unpaidAutoReprice: { enabled: false, mode: 'fixed', targetPriceMinor: 0, maxAttempts: 3, retryBackoffSeconds: 30 }, reviewGift: { enabled: false, couponBatchIds: [], maxAttempts: 3, retryBackoffSeconds: 30 }, reviewReminder: { enabled: false, firstDelayMinutes: 72 * 60, repeatIntervalMinutes: 24 * 60, maxReminders: 1, message: '' } };
     return { id: String(row.id), productId: String(row.product_id), accountId: String(row.account_id), configVersion: Number(row.config_version ?? 1), config: structuredClone(config), configDigest: String(row.config_digest ?? ''), createdAt: dateIso(row.created_at), updatedAt: dateIso(row.updated_at) };
   }
   private toOrder(row: Row): OrderRecord {
@@ -1899,6 +1981,7 @@ export class PostgresStore implements Store {
       maxReplyLength: Number(config.maxReplyLength ?? 1_000),
       replySegmentDelayMs: Number(config.replySegmentDelayMs ?? 800),
       debounceMs: Number(config.debounceMs ?? 2_000),
+      sendDelaySeconds: Number(config.sendDelaySeconds ?? 300),
       sendMode: config.sendMode === 'live' ? 'live' : 'simulate',
       configVersion: Number(row.config_version ?? 1),
       configDigest: String(row.config_digest ?? ''),

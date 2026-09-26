@@ -13,17 +13,19 @@ test('auto reply agent settings are versioned, audited and isolated from workspa
   const defaults = await service.get(admin.id, account.id);
   assert.equal(defaults.configVersion, 0);
   assert.equal(defaults.sendMode, 'simulate');
+  assert.equal(defaults.sendDelaySeconds, 300);
   assert.equal(defaults.maxLoops, 4);
   assert.equal('allowPaidOrderReply' in defaults, false);
 
-  const saved = await service.update({ adminId: admin.id, accountId: account.id, expectedVersion: 0, patch: { maxLoops: 6, debounceMs: 1_500, systemPrompt: '只回答商品事实。' }, requestId: 'req-1', traceId: 'trace-1' });
+  const saved = await service.update({ adminId: admin.id, accountId: account.id, expectedVersion: 0, patch: { maxLoops: 6, debounceMs: 1_500, sendDelaySeconds: 12, systemPrompt: '只回答商品事实。' }, requestId: 'req-1', traceId: 'trace-1' });
   assert.equal(saved.configVersion, 1);
   assert.equal(saved.maxLoops, 6);
-  assert.equal(saved.debounceMs, 1_500);
+  assert.equal(saved.debounceMs, defaults.debounceMs);
+  assert.equal(saved.sendDelaySeconds, 12);
   assert.equal('allowPaidOrderReply' in saved, false);
   assert.notEqual(saved.configDigest, defaults.configDigest);
   assert.equal(audits.length, 1);
-  assert.deepEqual(audits[0]?.payload, { configVersion: 1, configDigest: saved.configDigest, changedFields: ['debounceMs', 'maxLoops', 'systemPrompt'] });
+  assert.deepEqual(audits[0]?.payload, { configVersion: 1, configDigest: saved.configDigest, changedFields: ['maxLoops', 'sendDelaySeconds', 'systemPrompt'] });
   assert.equal(JSON.stringify(audits[0]?.payload).includes('只回答商品事实'), false);
 
   const reread = await service.get(admin.id, account.id);
@@ -57,4 +59,5 @@ test('auto reply agent max reply length accepts 30 and rejects values below it',
   const accepted = await service.update({ adminId: admin.id, accountId: account.id, expectedVersion: 0, patch: { maxReplyLength: 30 }, requestId: 'req-5', traceId: 'trace-5' });
   assert.equal(accepted.maxReplyLength, 30);
   await assert.rejects(() => service.update({ adminId: admin.id, accountId: account.id, expectedVersion: accepted.configVersion, patch: { maxReplyLength: 29 }, requestId: 'req-6', traceId: 'trace-6' }), (error: unknown) => error instanceof Error && error.message.includes('maxReplyLength'));
+  await assert.rejects(() => service.update({ adminId: admin.id, accountId: account.id, expectedVersion: accepted.configVersion, patch: { sendDelaySeconds: 86_401 }, requestId: 'req-7', traceId: 'trace-7' }), (error: unknown) => error instanceof Error && error.message.includes('sendDelaySeconds'));
 });

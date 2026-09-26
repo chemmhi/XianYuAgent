@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { WebSocket } from 'ws';
 import { XIANYU_USER_AGENT, xianyuChromeVersion } from './xianyu-browser-identity.js';
+import { hasXianyuStructuredSystemMarker } from './xianyu-system-message.js';
 
 export const XIANYU_IM_WS_URL = 'wss://wss-goofish.dingtalk.com/';
 export const XIANYU_IM_TOKEN_API = 'mtop.taobao.idlemessage.pc.login.token';
@@ -51,6 +52,8 @@ export interface XianyuImMessageEvent {
   externalMessageRefAliases?: string[];
   sourceEventId?: string;
   sourceSequence?: number;
+  /** Set only when the gateway supplied a reminder envelope marker. */
+  platformSystemMessage?: boolean;
   riskFlags?: string[];
   raw?: Record<string, unknown>;
 }
@@ -284,7 +287,7 @@ export class XianyuImClient {
     return { externalMessageRef };
   }
 
-  async sendImage(conversationRef: string, recipientRef: string, imageUrl: string, width = 800, height = 600): Promise<{ externalMessageRef?: string }> {
+  async sendImage(conversationRef: string, recipientRef: string, imageUrl: string, width = 800, height = 600, requestId?: string): Promise<{ externalMessageRef?: string }> {
     const cid = stripGoofish(conversationRef);
     const toId = stripGoofish(recipientRef);
     const normalizedUrl = imageUrl.trim();
@@ -293,7 +296,7 @@ export class XianyuImClient {
     const content = Buffer.from(JSON.stringify({ contentType: 2, image: { pics: [{ height: height > 0 ? height : 600, type: 0, url: normalizedUrl, width: width > 0 ? width : 800 }] } }), 'utf8').toString('base64');
     const response = await this.sendLwp('/r/MessageSend/sendByReceiverScope', [
       {
-        uuid: crypto.randomUUID(),
+        uuid: requestId ? deterministicUuid(requestId) : crypto.randomUUID(),
         cid: `${cid}@goofish`,
         conversationType: 1,
         content: { contentType: 101, custom: { type: 1, data: content } },
@@ -686,8 +689,13 @@ export function parsePushPayloadDetailed(encoded: string, accountId: string, myI
   if (!senderRef) return { quarantine: { reasonCode: 'PUSH_SENDER_REF_MISSING', receivedAt } };
   const sourceOrdering = extractSourceOrdering([sourceEnvelope, message, msg1, msg10, extension]);
   const decoded = decodeContent(msg1);
-  const fallbackText = optionalString(msg10.reminderContent);
-  const bodyType = decoded.images.length > 0 ? 'image' : decoded.text || fallbackText ? 'text' : 'system';
+  const fallbackText = optionalString(msg10.reminderContent) ?? optionalString(msg10.detailNotice) ?? optionalString(extension.detailNotice);
+  const bodyText = decoded.text || fallbackText;
+  // Ordinary chat also carries reminderContent/detailNotice. Only explicit
+  // custom/content types or task metadata identify platform-generated notices.
+  // Order-status parsing remains a second-stage guard in XianyuImService.
+  const platformSystemMessage = hasXianyuStructuredSystemMarker(msg10, extension, decoded);
+  const bodyType = decoded.images.length > 0 ? 'image' : bodyText ? 'text' : 'system';
   const timestamp = normalizeTimestamp(msg1['5'] ?? message['5'], receivedAt);
   return { event: {
     accountId,
@@ -700,8 +708,9 @@ export function parsePushPayloadDetailed(encoded: string, accountId: string, myI
     ...(itemImageUrl ? { itemImageUrl } : {}),
     direction: matchesSelfIdentity(senderRef, myId) ? 'outbound' : 'inbound',
     bodyType,
-    bodyText: decoded.text || fallbackText,
+    bodyText,
     assetRef: decoded.images[0],
+    ...(platformSystemMessage ? { platformSystemMessage: true } : {}),
     occurredAt: timestamp.value,
     ...(timestamp.quality === 'received' ? { receivedAt, timestampQuality: timestamp.quality, riskFlags: ['source_timestamp_invalid'] } : {}),
     ...(externalMessageRefCandidates.filter((value) => value !== externalMessageRef).length > 0 ? { externalMessageRefAliases: externalMessageRefCandidates.filter((value) => value !== externalMessageRef) } : {}),
@@ -791,6 +800,7 @@ function parseOperationPushPayload(message: Record<string, unknown>, operation: 
   if (!senderRef) return { quarantine: { reasonCode: 'PUSH_SENDER_REF_MISSING', receivedAt } };
 
   const decoded = decodeOperationContent(content, extensions);
+  const platformSystemMessage = hasXianyuStructuredSystemMarker(content, extensions, operation, sessionInfo, decoded);
   const bodyType = decoded.images.length > 0 ? 'image' : decoded.text ? 'text' : 'system';
   if (bodyType === 'system') return { quarantine: { reasonCode: 'PUSH_SYSTEM_CONTENT_IGNORED', receivedAt } };
   const timestamp = normalizeTimestamp(
@@ -811,6 +821,7 @@ function parseOperationPushPayload(message: Record<string, unknown>, operation: 
     bodyType,
     bodyText: decoded.text,
     assetRef: decoded.images[0],
+    ...(platformSystemMessage ? { platformSystemMessage: true } : {}),
     occurredAt: timestamp.value,
     ...(timestamp.quality === 'received' ? { receivedAt, timestampQuality: timestamp.quality, riskFlags: ['source_timestamp_invalid'] } : {}),
     ...(externalMessageRefCandidates.filter((value) => value !== externalMessageRef).length > 0 ? { externalMessageRefAliases: externalMessageRefCandidates.filter((value) => value !== externalMessageRef) } : {}),
@@ -1129,7 +1140,7 @@ function decodeMessagePack(bytes: Uint8Array): unknown {
   return read();
 }
 
-function decodeContent(msg1: Record<string, unknown>): { text?: string; images: string[] } {
+function decodeContent(msg1: Record<string, unknown>): { text?: string; images: string[]; contentType?: string } {
   const content = asRecord(asRecord(msg1['6'])['3']);
   const candidates = [content['5'], content['1']];
   for (const candidate of candidates) {
@@ -1142,7 +1153,9 @@ function decodeContent(msg1: Record<string, unknown>): { text?: string; images: 
     const text = optionalString(asRecord(data.text).text);
     const pics = asRecord(data.image).pics;
     const images = Array.isArray(pics) ? pics.map((pic) => optionalString(asRecord(pic).url)).filter((url): url is string => Boolean(url)) : [];
-    if (text || images.length > 0) return { text, images };
+    const contentType = optionalString(typeof data.contentType === 'number' || typeof data.contentType === 'bigint' ? String(data.contentType) : data.contentType)
+      ?? optionalString(typeof data.type === 'number' || typeof data.type === 'bigint' ? String(data.type) : data.type);
+    if (text || images.length > 0 || contentType) return { text, images, ...(contentType ? { contentType } : {}) };
   }
   return { images: [] };
 }

@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { createMockProductAutomationApi, createProductAutomationApi, MOCK_AUTOMATION_COUPONS, toAutomationConfig, toAutomationConfigWire } from './api';
-import { AutomationDrawer, buildAutomationCouponOptions, buildValidatedAutomationUpdate, resolveDeliveryCouponIds, resolveGiftCouponIds } from './components/AutomationDrawer';
+import { AutomationDrawer, buildAutomationCouponOptions, buildValidatedAutomationUpdate, filterAutomationCouponOptions, resolveDeliveryCouponIds, resolveGiftCouponIds } from './components/AutomationDrawer';
 import { BatchAutomationDialog } from './components/BatchAutomationDialog';
 import { CouponPickerDialog } from './components/CouponPickerDialog';
 import { toProductAutomationSaveError } from './controller';
@@ -15,7 +15,7 @@ describe('product automation API', () => {
   it('maps the live adapter to the canonical automation and coupon contracts', async () => {
     const calls: Array<{ method: string; path: string; body?: unknown; options?: unknown }> = [];
     const api = createProductAutomationApi({
-      async get<T>(path: string) { calls.push({ method: 'GET', path }); return (path.includes('/automation') ? { data: { productId: 'product-1', accountId: 'account-1', configVersion: 7, config: { paidAutoDelivery: { enabled: true, couponBatchIds: ['1'] }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true, firstDelayHours: 72, repeatIntervalHours: 24, maxReminders: 1, message: '请评价' } } } } : { data: { items: [...MOCK_AUTOMATION_COUPONS, { id: 'active-coupon', label: '普通卡券', purpose: 'text' }, { id: 'paused-coupon', label: '已禁用卡券', purpose: 'text', status: 'paused' }] } }) as T; },
+      async get<T>(path: string) { calls.push({ method: 'GET', path }); return (path.includes('/automation') ? { data: { productId: 'product-1', accountId: 'account-1', configVersion: 7, config: { paidAutoDelivery: { enabled: true, couponBatchIds: ['1'] }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true, firstDelayMinutes: 72 * 60, repeatIntervalMinutes: 24 * 60, maxReminders: 1, message: '请评价' } } } } : { data: { items: [...MOCK_AUTOMATION_COUPONS, { id: 'active-coupon', label: '普通卡券', purpose: 'text' }, { id: 'paused-coupon', label: '已禁用卡券', purpose: 'text', status: 'paused' }] } }) as T; },
       async patch<T>(path: string, body?: unknown, options?: unknown) { calls.push({ method: 'PATCH', path, body, options }); return { data: { productId: 'product-1', accountId: 'account-1', configVersion: 8, paidAutoDelivery: { enabled: false }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true } } } as T; },
       async post<T>(path: string, body?: unknown, options?: unknown) { calls.push({ method: 'POST', path, body, options }); return { data: { updatedCount: 1 } } as T; },
     });
@@ -104,6 +104,16 @@ describe('product automation components', () => {
     expect(toAutomationConfig({ productId: 'product-1', accountId: 'account-1', version: 1, delivery: { enabled: false }, reprice: { enabled: false }, gift: { enabled: false }, review: { enabled: false } }).delivery.autoConfirm).toBe(true);
   });
 
+  it('maps review reminder values to minutes and writes minute fields', () => {
+    const legacy = toAutomationConfig({ productId: 'product-1', accountId: 'account-1', configVersion: 1, paidAutoDelivery: { enabled: false }, unpaidAutoReprice: { enabled: false }, reviewGift: { enabled: false }, reviewReminder: { enabled: true, firstDelayHours: 2, repeatIntervalHours: 3, maxReminders: 1, message: '请评价' } } as never);
+    expect(legacy.review.reviewInitialMinutes).toBe(120);
+    expect(legacy.review.reviewRepeatMinutes).toBe(180);
+
+    const wire = toAutomationConfigWire({ version: 1, delivery: { enabled: false }, reprice: { enabled: false }, gift: { enabled: false }, review: { enabled: true, reviewInitialMinutes: 15, reviewRepeatMinutes: 30, reviewMaxCount: 2, reviewMessage: '请评价' } });
+    expect(wire.reviewReminder).toMatchObject({ enabled: true, firstDelayMinutes: 15, repeatIntervalMinutes: 30, maxReminders: 2, message: '请评价' });
+    expect(wire.reviewReminder).not.toHaveProperty('firstDelayHours');
+  });
+
   it('preserves backend defaults when the legacy response omits review message', async () => {
     const calls: Array<{ body?: unknown }> = [];
     const api = createProductAutomationApi({
@@ -149,13 +159,13 @@ describe('product automation components', () => {
     expect(html).not.toContain('<input type="checkbox"');
   });
 
-  it('hydrates automation picker selections from product-level coupon bindings', async () => {
+  it('does not hydrate product-level gift bindings into the delivery rule', async () => {
     const api = createMockProductAutomationApi();
     const config = await api.getConfig(product.id);
     const boundProduct = { ...product, couponBatches: [{ id: 'coupon-gift-a', label: '评价赠品批次 A' }] };
     const html = renderToStaticMarkup(createElement(AutomationDrawer, { open: true, product: boundProduct, config: { ...config, delivery: { ...config.delivery, couponIds: [] }, gift: { ...config.gift, couponIds: [] } }, coupons: MOCK_AUTOMATION_COUPONS, loadPhase: 'success', savePhase: 'idle', error: null, onClose: vi.fn(), onSave: vi.fn(async () => config) }));
-    expect(html).toContain('评价赠品批次 A');
-    expect((html.match(/已选发货卡券/g) ?? []).length).toBeGreaterThan(0);
+    expect(html).not.toContain('评价赠品批次 A</strong><small>数据卡 · 已选发货卡券');
+    expect(html).toContain('未选择发货卡券');
     expect(html).toContain('未选择赠品卡券');
   });
 
@@ -219,6 +229,28 @@ describe('product automation components', () => {
     }));
     expect(html).toContain('评价后发送赠品');
     expect(html).toContain('已选奥维地图');
+  });
+
+  it('does not hydrate a gift-only product binding into paid delivery', async () => {
+    const boundProduct = { ...product, couponBatches: [{ id: 'coupon-gift-a', label: '评价赠品批次 A' }] };
+    const config = await createMockProductAutomationApi().getConfig(product.id);
+    const coupons = MOCK_AUTOMATION_COUPONS;
+    expect(resolveDeliveryCouponIds([], ['coupon-gift-a'], coupons)).toEqual([]);
+    expect(filterAutomationCouponOptions('delivery', coupons, { ...config, delivery: { ...config.delivery, couponIds: [] }, gift: { ...config.gift, couponIds: ['coupon-gift-a'] } }).map((coupon) => coupon.id)).not.toContain('coupon-gift-a');
+    const html = renderToStaticMarkup(createElement(AutomationDrawer, {
+      open: true,
+      product: boundProduct,
+      config: { ...config, delivery: { ...config.delivery, couponIds: [] }, gift: { ...config.gift, enabled: true, couponIds: ['coupon-gift-a'] } },
+      coupons,
+      loadPhase: 'success',
+      savePhase: 'idle',
+      error: null,
+      onClose: vi.fn(),
+      onSave: vi.fn(async () => null),
+    }));
+    expect(html).toContain('未选择发货卡券');
+    expect(html).toContain('已选评价赠品批次 A');
+    expect(html).not.toContain('已选评价赠品批次 A</strong><small>数据卡 · 已选发货卡券');
   });
 
   it('renders the delivery auto-confirm switch and preserves its saved state', () => {

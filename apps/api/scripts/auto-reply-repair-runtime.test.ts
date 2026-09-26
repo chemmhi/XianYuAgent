@@ -25,6 +25,7 @@ function testConfig() {
     AUTO_REPLY_MODEL_ENABLED: 'false',
     AUTO_REPLY_SEND_MODE: 'simulate',
     AUTO_REPLY_REPAIR_MODE: 'enforce',
+    AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
     AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
   });
 }

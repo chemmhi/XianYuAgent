@@ -35,6 +35,261 @@ test('push parser preserves explicit source event id and sequence from the gatew
   assert.equal(result.event?.sourceSequence, 17);
 });
 
+test('legacy push parser keeps buyer text as text unless the gateway supplies a reminder marker', () => {
+  const systemText = '[我已拍下，待付款]';
+  const content = Buffer.from(JSON.stringify({ contentType: 1, text: { text: systemText } }), 'utf8').toString('base64');
+  const encoded = Buffer.from(JSON.stringify({
+    1: {
+      2: 'conv-system@goofish',
+      3: 'system-message-1.PNM',
+      5: 1767225600000,
+      6: { 3: { 5: content } },
+      10: { senderUserId: 'buyer-system', senderNick: 'Buyer' },
+    },
+  }), 'utf8').toString('base64');
+
+  const systemResult = parsePushPayloadDetailed(encoded, 'account-1', 'seller-1');
+  assert.equal(systemResult.event?.bodyType, 'text');
+  assert.equal(systemResult.event?.bodyText, systemText);
+  assert.equal(systemResult.event?.platformSystemMessage, undefined);
+
+  const reminderContent = Buffer.from(JSON.stringify({ contentType: 26, text: { text: systemText } }), 'utf8').toString('base64');
+  const reminderEncoded = Buffer.from(JSON.stringify({
+    1: {
+      2: 'conv-system@goofish',
+      3: 'system-reminder-1.PNM',
+      5: 1767225600000,
+      6: { 3: { 5: reminderContent } },
+      10: { senderUserId: 'buyer-system', senderNick: 'Buyer', extJson: '{"contentType":"26"}', reminderContent: systemText, reminderUrl: 'fleamarket://message?messageId=system-reminder-1.PNM' },
+    },
+  }), 'utf8').toString('base64');
+  const reminderResult = parsePushPayloadDetailed(reminderEncoded, 'account-1', 'seller-1');
+  assert.equal(reminderResult.event?.bodyType, 'text');
+  assert.equal(reminderResult.event?.platformSystemMessage, true);
+
+  const normalContent = Buffer.from(JSON.stringify({ contentType: 1, text: { text: '请问还有货吗？' } }), 'utf8').toString('base64');
+  const normalEncoded = Buffer.from(JSON.stringify({
+    1: {
+      2: 'conv-system@goofish',
+      3: 'buyer-message-1.PNM',
+      5: 1767225600000,
+      6: { 3: { 5: normalContent } },
+      10: { senderUserId: 'buyer-system', senderNick: 'Buyer' },
+    },
+  }), 'utf8').toString('base64');
+  const normalResult = parsePushPayloadDetailed(normalEncoded, 'account-1', 'seller-1');
+  assert.equal(normalResult.event?.bodyType, 'text');
+
+  const bracketedBuyerText = Buffer.from(JSON.stringify({ contentType: 1, text: { text: '[请问付款后什么时候发货？]' } }), 'utf8').toString('base64');
+  const bracketedBuyerEncoded = Buffer.from(JSON.stringify({
+    1: {
+      2: 'conv-system@goofish',
+      3: 'buyer-message-2.PNM',
+      5: 1767225600000,
+      6: { 3: { 5: bracketedBuyerText } },
+      10: { senderUserId: 'buyer-system', senderNick: 'Buyer' },
+    },
+  }), 'utf8').toString('base64');
+  const bracketedBuyerResult = parsePushPayloadDetailed(bracketedBuyerEncoded, 'account-1', 'seller-1');
+  assert.equal(bracketedBuyerResult.event?.bodyType, 'text');
+});
+
+test('generic platform reminders are marked system while ordinary buyer text stays unmarked', () => {
+  const text = "温馨提醒：商品信息近期有过变更，请与买家沟通一致，防止误拍引起纠纷，<font color='#4F7CAF' weight='w400'>查看商品详情</font>";
+  const content = Buffer.from(JSON.stringify({ contentType: 14, text: { text } }), 'utf8').toString('base64');
+  const reminderEncoded = Buffer.from(JSON.stringify({
+    1: {
+      2: 'conv-generic-system@goofish',
+      3: 'generic-system-1.PNM',
+      5: 1767225600000,
+      6: { 3: { 5: content } },
+      10: { senderUserId: 'buyer-generic-system', senderNick: 'Buyer', extJson: '{"contentType":"14","taskName":"下单前修改商品信息提示_卖家"}', reminderContent: text, reminderUrl: 'fleamarket://message?messageId=generic-system-1.PNM' },
+    },
+  }), 'utf8').toString('base64');
+  const reminder = parsePushPayloadDetailed(reminderEncoded, 'account-1', 'seller-1');
+  assert.equal(reminder.event?.bodyType, 'text');
+  assert.equal(reminder.event?.platformSystemMessage, true);
+
+  const buyerContent = Buffer.from(JSON.stringify({ contentType: 1, text: { text } }), 'utf8').toString('base64');
+  const buyerEncoded = Buffer.from(JSON.stringify({
+    1: {
+      2: 'conv-generic-system@goofish',
+      3: 'buyer-generic-1.PNM',
+      5: 1767225600000,
+      6: { 3: { 5: buyerContent } },
+      10: { senderUserId: 'buyer-generic-system', senderNick: 'Buyer' },
+    },
+  }), 'utf8').toString('base64');
+  const buyer = parsePushPayloadDetailed(buyerEncoded, 'account-1', 'seller-1');
+  assert.equal(buyer.event?.bodyType, 'text');
+  assert.equal(buyer.event?.platformSystemMessage, undefined);
+});
+
+
+test('platform reminder becomes system only after matching the buyer order status', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'system-enrichment@example.com', passwordHash: 'hash', displayName: 'System Enrichment' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'seller-system-enrichment' });
+  const conversation = await store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'buyer-system-enrichment', buyerDisplayName: 'Recovered Buyer', externalConversationRef: 'conv-system-enrichment' });
+  await store.createOrder({ adminId: admin.id, order: { orderNo: 'SYSTEM-STATUS-1', accountId: account.id, buyerId: 'buyer-system-enrichment', buyerName: 'Recovered Buyer', conversationId: conversation.id, itemId: 'item-system', itemTitle: '系统状态商品', amountMinor: 1_000, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'manual' } });
+  const messages = new MessageService(store, async () => 'audit-system-enrichment');
+  const autoReplyCalls: string[] = [];
+  const autoReply = { processInbound: async () => { autoReplyCalls.push('called'); return undefined; } };
+  const mtop = { fetchChatUserInfo: async () => ({ buyerDisplayName: 'Recovered Buyer' }) };
+  const service = new XianyuImService(store, mtop as never, messages, autoReply as never);
+
+  const result = await service.handleExternalEvent(admin.id, {
+    accountId: account.id,
+    externalConversationRef: 'conv-system-enrichment',
+    externalMessageRef: 'system-enrichment-1.PNM',
+    senderRef: 'buyer-system-enrichment',
+    direction: 'inbound',
+    bodyType: 'text',
+    bodyText: '[我已付款，等待你发货]',
+    platformSystemMessage: true,
+    occurredAt: '2026-09-25T14:00:00.000Z',
+  });
+
+  assert.equal(result.created, true);
+  assert.equal(result.autoReply, undefined);
+  assert.deepEqual(autoReplyCalls, []);
+  const persistedConversation = await store.findConversationByExternalRef(admin.id, account.id, 'conv-system-enrichment');
+  assert.ok(persistedConversation);
+  assert.equal(persistedConversation.buyerDisplayName, 'Recovered Buyer');
+  const stored = await messages.listMessages(admin.id, persistedConversation.id, { limit: 10 });
+  assert.equal(stored.items[0]?.bodyType, 'system');
+  assert.equal(stored.items[0]?.senderRole, 'system');
+});
+
+test('buyer manually typing the exact status text stays text and can enter auto reply', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'manual-status@example.com', passwordHash: 'hash', displayName: 'Manual Status' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'seller-manual-status' });
+  const messages = new MessageService(store, async () => 'audit-manual-status');
+  const autoReplyCalls: string[] = [];
+  const autoReply = { processInbound: async () => { autoReplyCalls.push('called'); return undefined; } };
+  const service = new XianyuImService(store, {} as never, messages, autoReply as never);
+
+  const result = await service.handleExternalEvent(admin.id, {
+    accountId: account.id,
+    externalConversationRef: 'conv-manual-status',
+    externalMessageRef: 'manual-status-1.PNM',
+    senderRef: 'buyer-manual-status',
+    direction: 'inbound',
+    bodyType: 'text',
+    bodyText: '[我已付款，等待你发货]',
+    occurredAt: '2026-09-25T14:00:00.000Z',
+  });
+
+  assert.equal(result.created, true);
+  assert.equal(autoReplyCalls.length, 1);
+  const conversation = await store.findConversationByExternalRef(admin.id, account.id, 'conv-manual-status');
+  assert.ok(conversation);
+  const stored = await messages.listMessages(admin.id, conversation.id, { limit: 10 });
+  assert.equal(stored.items[0]?.bodyType, 'text');
+  assert.equal(stored.items[0]?.senderRole, 'buyer');
+  assert.equal(stored.items[0]?.riskFlags.includes('xianyu_system_candidate_unverified'), false);
+});
+
+test('platform reminder without a matching order is stored as system and marked unverified', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'unverified-status@example.com', passwordHash: 'hash', displayName: 'Unverified Status' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'seller-unverified-status' });
+  const messages = new MessageService(store, async () => 'audit-unverified-status');
+  const autoReply = { processInbound: async () => undefined };
+  const service = new XianyuImService(store, {} as never, messages, autoReply as never);
+
+  const result = await service.handleExternalEvent(admin.id, {
+    accountId: account.id,
+    externalConversationRef: 'conv-unverified-status',
+    externalMessageRef: 'unverified-status-1.PNM',
+    senderRef: 'buyer-unverified-status',
+    direction: 'inbound',
+    bodyType: 'text',
+    bodyText: '[我已付款，等待你发货]',
+    platformSystemMessage: true,
+    occurredAt: '2026-09-25T14:00:00.000Z',
+  });
+
+  assert.equal(result.created, true);
+  const conversation = await store.findConversationByExternalRef(admin.id, account.id, 'conv-unverified-status');
+  assert.ok(conversation);
+  const stored = await messages.listMessages(admin.id, conversation.id, { limit: 10 });
+  assert.equal(stored.items[0]?.bodyType, 'system');
+  assert.equal(stored.items[0]?.riskFlags.includes('xianyu_system_candidate_unverified'), true);
+});
+
+test('generic platform reminder is isolated while a normal buyer message enters auto reply', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'generic-system@example.com', passwordHash: 'hash', displayName: 'Generic System' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'seller-generic-system' });
+  const messages = new MessageService(store, async () => 'audit-generic-system');
+  const autoReplyCalls: string[] = [];
+  const autoReply = { processInbound: async () => { autoReplyCalls.push('called'); return undefined; } };
+  const service = new XianyuImService(store, {} as never, messages, autoReply as never);
+  const genericText = '恭喜新手卖家，您的宝贝有人来询单啦！也提醒您闲鱼客服不会以聊天的方式要求您缴纳保证金或开通服务保障，请勿轻信，如遇以上问题请立刻举报！';
+
+  const systemResult = await service.handleExternalEvent(admin.id, {
+    accountId: account.id,
+    externalConversationRef: 'generic-system-conversation',
+    externalMessageRef: 'generic-system-message.PNM',
+    senderRef: 'generic-system-buyer',
+    direction: 'inbound',
+    bodyType: 'text',
+    bodyText: genericText,
+    platformSystemMessage: true,
+    occurredAt: '2026-09-25T14:00:00.000Z',
+  });
+  assert.equal(systemResult.autoReply, undefined);
+  assert.deepEqual(autoReplyCalls, []);
+  const conversation = await store.findConversationByExternalRef(admin.id, account.id, 'generic-system-conversation');
+  assert.ok(conversation);
+  const storedSystem = await messages.listMessages(admin.id, conversation.id, { limit: 10 });
+  assert.equal(storedSystem.items[0]?.bodyType, 'system');
+  assert.equal(storedSystem.items[0]?.senderRole, 'system');
+
+  const buyerResult = await service.handleExternalEvent(admin.id, {
+    accountId: account.id,
+    externalConversationRef: 'generic-system-conversation',
+    externalMessageRef: 'generic-buyer-message.PNM',
+    senderRef: 'generic-system-buyer',
+    direction: 'inbound',
+    bodyType: 'text',
+    bodyText: '你好',
+    occurredAt: '2026-09-25T14:00:01.000Z',
+  });
+  assert.equal(buyerResult.created, true);
+  assert.deepEqual(autoReplyCalls, ['called']);
+  const storedBuyer = await messages.listMessages(admin.id, conversation.id, { limit: 10 });
+  const storedBuyerMessage = storedBuyer.items.find((item) => item.externalMessageRef === 'generic-buyer-message.PNM');
+  assert.ok(storedBuyerMessage);
+  assert.equal(storedBuyerMessage.bodyType, 'text');
+  assert.equal(storedBuyerMessage.senderRole, 'buyer');
+});
+
+
+test('history synchronization applies the same platform and order gates', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'history-status@example.com', passwordHash: 'hash', displayName: 'History Status' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'seller-history-status' });
+  const conversation = await store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'buyer-history-status', buyerDisplayName: 'History Buyer', externalConversationRef: 'conv-history-status' });
+  await store.createOrder({ adminId: admin.id, order: { orderNo: 'HISTORY-STATUS-1', accountId: account.id, buyerId: 'buyer-history-status', buyerName: 'History Buyer', conversationId: conversation.id, itemId: 'item-history', itemTitle: '历史状态商品', amountMinor: 1_000, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'manual' } });
+  const text = '[我已付款，等待你发货]';
+  const encoded = Buffer.from(JSON.stringify({ text: { text } }), 'utf8').toString('base64');
+  const fakeClient = {
+    selfUserIds: ['seller-history-status'],
+    listMessages: async () => ({ hasMore: false, userMessageModels: [{ message: { messageId: 'history-status-1.PNM', senderUserId: 'buyer-history-status', createAt: Date.parse('2026-09-25T14:00:00.000Z'), extension: { reminderContent: text, reminderUrl: 'fleamarket://message?messageId=history-status-1.PNM', itemId: 'item-history' }, content: { custom: { type: 26, data: encoded } } } }] }),
+  };
+  const messages = new MessageService(store, async () => 'audit-history-status');
+  const service = new XianyuImService(store, {} as never, messages);
+  (service as unknown as { ensureClient: () => Promise<unknown> }).ensureClient = async () => fakeClient;
+
+  await service.listMessages(admin.id, account.id, conversation.id);
+  const stored = await messages.listMessages(admin.id, conversation.id, { limit: 10 });
+  assert.equal(stored.items[0]?.bodyType, 'system');
+  assert.equal(stored.items[0]?.riskFlags.includes('xianyu_system_message'), true);
+});
+
 test('deferred inbox record carries source ordering into the repair worker input', async () => {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: 'source-order@example.com', passwordHash: 'hash', displayName: 'Source Order' });
@@ -226,6 +481,31 @@ test('history/live alias resolves to the same local message', async () => {
   const created = await store.createMessage({ adminId: admin.id, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: 'hello', externalMessageRef: 'canonical-1.PNM', externalMessageRefAliases: ['transport-uuid-1'], source: 'system', traceId: 'alias-test' });
   const resolved = await store.findMessageByExternalRef(admin.id, conversation.id, 'transport-uuid-1');
   assert.equal(resolved?.id, created.message.id);
+});
+
+test('history resync upgrades an existing buyer row when the platform marker arrives later', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'history-reconcile@example.com', passwordHash: 'hash', displayName: 'History Reconcile' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'seller-history-reconcile' });
+  const conversation = await store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'buyer-history-reconcile', externalConversationRef: 'conv-history-reconcile' });
+  const messages = new MessageService(store, async () => 'audit-history-reconcile');
+  await store.createMessage({ adminId: admin.id, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '[卖家已发货]', externalMessageRef: 'history-reconcile-1.PNM', source: 'system', traceId: 'history-reconcile-seed' });
+
+  const encoded = Buffer.from(JSON.stringify({ contentType: 26, text: { text: '[卖家已发货]' } }), 'utf8').toString('base64');
+  const fakeClient = {
+    selfUserIds: ['seller-history-reconcile'],
+    listMessages: async () => ({ hasMore: false, userMessageModels: [{ message: { messageId: 'history-reconcile-1.PNM', senderUserId: 'buyer-history-reconcile', createAt: Date.parse('2026-09-25T14:00:00.000Z'), content: { custom: { type: 26, data: encoded } } } }] }),
+  };
+  const service = new XianyuImService(store, {} as never, messages);
+  (service as unknown as { ensureClient: () => Promise<unknown> }).ensureClient = async () => fakeClient;
+
+  const result = await service.listMessages(admin.id, account.id, conversation.id);
+  assert.equal(result.hasMore, false);
+  const stored = await messages.listMessages(admin.id, conversation.id, { limit: 10 });
+  assert.equal(stored.items[0]?.senderRole, 'system');
+  assert.equal(stored.items[0]?.bodyType, 'system');
+  assert.equal(stored.items[0]?.bodyText, '[卖家已发货]');
+  assert.equal(stored.items[0]?.riskFlags.includes('xianyu_system_message'), true);
 });
 
 test('inbox worker retries transient failed runs but acknowledges terminal failures', async () => {

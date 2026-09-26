@@ -49,6 +49,8 @@ export interface AppConfig {
   /** Product automation external writes remain blocked until all live gates pass. */
   productAutomationExecutionMode: ProductAutomationExecutionMode;
   productAutomationLiveConfirmed: boolean;
+  /** Review-triggered IM writes have a separate confirmation gate. */
+  productAutomationReviewExternalWritesConfirmed: boolean;
   autoReplyRepairMode?: AutoReplyRepairMode;
   autoReplyPolicyJson?: string;
   /** Seed the built-in versioned repair policy when no account policy exists. */
@@ -129,6 +131,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     autoReplyAgent,
     productAutomationExecutionMode: productAutomationLive.executionMode,
     productAutomationLiveConfirmed: productAutomationLive.liveConfirmed,
+    productAutomationReviewExternalWritesConfirmed: productAutomationLive.reviewExternalWritesConfirmed,
   };
 }
 

@@ -4,7 +4,7 @@ import { MemoryStore } from '../src/store-memory.js';
 import { ProductAutomationService, AutomationWorkflowService, PersistentAutomationExecutionLedger, type AutomationExecutionPort, type AutomationExternalResult, type AutomationOrderSnapshot, defaultProductAutomationConfig } from '../src/product-automation.js';
 import type { ProductAutomationConfig } from '../src/domain.js';
 
-function result(status: AutomationExternalResult['status'], errorCode?: string): AutomationExternalResult { return { status, errorCode, externalRef: status === 'succeeded' ? `ext-${Math.random().toString(16).slice(2)}` : undefined }; }
+function result(status: AutomationExternalResult['status'], errorCode?: string, message?: string): AutomationExternalResult { return { status, errorCode, message, externalRef: status === 'succeeded' ? `ext-${Math.random().toString(16).slice(2)}` : undefined }; }
 function baseOrder(overrides: Partial<AutomationOrderSnapshot> = {}): AutomationOrderSnapshot {
   return {
     id: 'order-id', orderNo: 'ORDER-1', accountId: 'account-id', buyerId: 'buyer-id', buyerName: '买家', itemId: 'item-id', itemTitle: '资料包', amountMinor: 1990,
@@ -43,6 +43,18 @@ test('automation config defaults, validation, optimistic locking and account iso
   const foreignCoupon = await store.createCouponBatch({ adminId: foreignAdmin.id, accountId: foreignAccount.id, label: 'Foreign', purpose: 'text' });
   await assert.rejects(() => service.update({ adminId: admin.id, productId: product.id, expectedConfigVersion: 2, config: { ...defaultProductAutomationConfig(), reviewGift: { ...defaultProductAutomationConfig().reviewGift, enabled: true, couponBatchIds: [foreignCoupon.id] } }, requestId: 'req-cross', traceId: 'trace-cross' }), (error: unknown) => (error as { code?: string }).code === 'NOT_FOUND' || (error as { code?: string }).code === 'FORBIDDEN');
   assert.equal(account.id, product.accountId);
+});
+
+test('legacy hour reminder fields are read as canonical minutes', async () => {
+  const { admin, product, store, service } = await setup();
+  const legacyConfig = {
+    ...defaultProductAutomationConfig(),
+    reviewReminder: { enabled: true, firstDelayHours: 2, repeatIntervalHours: 3, maxReminders: 2, message: '' },
+  } as unknown as ProductAutomationConfig;
+  await store.updateProductAutomation({ adminId: admin.id, productId: product.id, expectedConfigVersion: 1, config: legacyConfig, configDigest: 'legacy-hours', syncCouponBindings: false });
+  const read = await service.get(admin.id, product.id);
+  assert.deepEqual(read.config.reviewReminder, { enabled: true, firstDelayMinutes: 120, repeatIntervalMinutes: 180, maxReminders: 2, message: '' });
+  assert.equal('firstDelayHours' in (read.config.reviewReminder as unknown as Record<string, unknown>), false);
 });
 
 test('defaults auto-confirm on and allows disabled coupon associations', async () => {
@@ -166,6 +178,7 @@ class FakePort implements AutomationExecutionPort {
   couponSend: AutomationExternalResult = result('succeeded');
   confirm: AutomationExternalResult = result('succeeded');
   reprice: AutomationExternalResult = result('succeeded');
+  repriceSequence?: AutomationExternalResult[];
   text: AutomationExternalResult = result('succeeded');
   reviewCreated = true;
   reviewError?: Error;
@@ -177,7 +190,7 @@ class FakePort implements AutomationExecutionPort {
   async commitCoupon(input: { reservationId: string; executionKey: string }): Promise<void> { this.calls.push('commit'); }
   async releaseCoupon(input: { reservationId: string; executionKey: string; reason: string }): Promise<void> { this.calls.push(`release:${input.reason}`); }
   async confirmShipment(input: { accountId: string; orderNo: string; executionKey: string }): Promise<AutomationExternalResult> { this.calls.push('confirm'); return this.confirm; }
-  async repriceOrder(input: { accountId: string; orderNo: string; targetPriceMinor: number; executionKey: string }): Promise<AutomationExternalResult> { this.calls.push(`reprice:${input.targetPriceMinor}`); return this.reprice; }
+  async repriceOrder(input: { accountId: string; orderNo: string; targetPriceMinor: number; executionKey: string }): Promise<AutomationExternalResult> { this.calls.push(`reprice:${input.targetPriceMinor}`); return this.repriceSequence?.shift() ?? this.reprice; }
   async sendText(input: { accountId: string; conversationId: string; text: string; executionKey: string }): Promise<AutomationExternalResult> { this.calls.push(`text:${input.text}`); return this.text; }
   async persistReviewFact(input: { accountId: string; orderNo: string; eventId: string; executionKey: string }): Promise<{ created: boolean }> { this.calls.push('review-fact'); if (this.reviewError) throw this.reviewError; return { created: this.reviewCreated }; }
   async readOrder(input: { accountId: string; orderNo: string }): Promise<AutomationOrderSnapshot | undefined> { this.calls.push('read-order'); return this.readOrderResult; }
@@ -260,9 +273,23 @@ test('persistent ledger deduplicates across workflow instances and survives retr
   const failed = await retryWorkflow.handlePaymentPaid({ config, order: retryOrder, eventId: 'persistent-retry' });
   assert.equal(failed.status, 'failed');
   retryPort.couponSend = result('succeeded');
-  const recovered = await retryWorkflow.handlePaymentPaid({ config, order: retryOrder, eventId: 'persistent-retry' });
+  const recovered = await retryWorkflow.handlePaymentPaid({ config, order: retryOrder, eventId: 'persistent-retry-replayed' });
   assert.equal(recovered.status, 'succeeded');
   assert.equal(retryPort.calls.filter((call) => call === 'send:delivery').length, 2);
+});
+
+test('retryable legacy execution can adopt the current stable fingerprint after event replay', async () => {
+  const store = new MemoryStore();
+  const config = defaultProductAutomationConfig();
+  config.paidAutoDelivery = { ...config.paidAutoDelivery, enabled: true, couponBatchIds: ['batch-1'], retryBackoffSeconds: 0 };
+  const key = 'paid_auto_delivery:account-id:ORDER-LEGACY-FINGERPRINT';
+  const claimed = await store.claimAutomationExecution({ executionKey: key, fingerprint: 'legacy-event-fingerprint', ownerToken: 'legacy-owner', leaseUntil: new Date(Date.now() + 10_000).toISOString() });
+  assert.equal(claimed.claimed, true);
+  await store.completeAutomationExecution({ executionKey: key, ownerToken: 'legacy-owner', result: { status: 'failed', executionKey: key, reason: 'CONVERSATION_MISSING' }, retryable: true });
+  const port = new FakePort();
+  const recovered = await new AutomationWorkflowService(port, new PersistentAutomationExecutionLedger(store)).handlePaymentPaid({ config, order: baseOrder({ orderNo: 'ORDER-LEGACY-FINGERPRINT' }), eventId: 'replayed-event' });
+  assert.equal(recovered.status, 'succeeded');
+  assert.equal(port.calls.filter((call) => call === 'send:delivery').length, 1);
 });
 
 test('persistent ledger rejects completion by a different owner', async () => {
@@ -320,6 +347,20 @@ test('unpaid reprice does not fabricate success and does not reprice twice', asy
   const unknown = await new AutomationWorkflowService(unknownPort).handleUnpaidReprice({ config, order, eventId: 'unpaid-2' });
   assert.equal(unknown.status, 'unknown');
   assert.equal(unknownPort.calls.length, 2);
+  const transientPort = new FakePort();
+  transientPort.readOrderResult = order;
+  transientPort.repriceSequence = [result('failed', 'MTOP_BUSINESS_ERROR', 'data.success=false'), result('succeeded')];
+  const transientConfig = { ...config, unpaidAutoReprice: { ...config.unpaidAutoReprice, retryBackoffSeconds: 0 } };
+  const transient = await new AutomationWorkflowService(transientPort).handleUnpaidReprice({ config: transientConfig, order, eventId: 'unpaid-transient-remote-rejection' });
+  assert.equal(transient.status, 'succeeded');
+  assert.deepEqual(transientPort.calls, ['read-order', 'reprice:1290', 'reprice:1290', 'text:已为你调整价格']);
+  const rejectedPort = new FakePort();
+  rejectedPort.reprice = result('failed', 'MTOP_BUSINESS_ERROR', 'data.success=false | code=PRICE_NOT_ALLOWED | 订单状态不允许改价');
+  rejectedPort.readOrderResult = order;
+  const rejected = await new AutomationWorkflowService(rejectedPort).handleUnpaidReprice({ config, order, eventId: 'unpaid-remote-rejected' });
+  assert.equal(rejected.status, 'failed');
+  assert.equal(rejected.reason, 'MTOP_BUSINESS_ERROR');
+  assert.match(rejected.message ?? '', /PRICE_NOT_ALLOWED/);
   const paidBeforeAction = new FakePort();
   paidBeforeAction.readOrderResult = baseOrder({ paymentStatus: 'paid' });
   const skipped = await new AutomationWorkflowService(paidBeforeAction).handleUnpaidReprice({ config, order, eventId: 'unpaid-paid-before-action' });
@@ -362,7 +403,7 @@ test('review reminder re-checks order state before sending and caps repeat count
   port.readOrderResult = baseOrder({ deliveryStatus: 'delivered', reviewedAt: '2026-09-22T00:00:00.000Z' });
   const workflow = new AutomationWorkflowService(port);
   const config = defaultProductAutomationConfig();
-  config.reviewReminder = { ...config.reviewReminder, enabled: true, firstDelayHours: 1, maxReminders: 1 };
+  config.reviewReminder = { ...config.reviewReminder, enabled: true, firstDelayMinutes: 60, maxReminders: 1 };
   const result = await workflow.handleReviewReminder({ config, order: baseOrder({ createdAt: '2026-09-20T00:00:00.000Z', deliveryStatus: 'delivered' }), now: '2026-09-22T00:00:00.000Z' });
   assert.equal(result.status, 'skipped');
   assert.deepEqual(port.calls, ['read-order']);
@@ -370,14 +411,58 @@ test('review reminder re-checks order state before sending and caps repeat count
   assert.equal(capped.status, 'skipped');
 });
 
+test('review reminder uses minute precision for first and repeat windows', async () => {
+  const config = defaultProductAutomationConfig();
+  config.reviewReminder = { ...config.reviewReminder, enabled: true, firstDelayMinutes: 1, repeatIntervalMinutes: 2, maxReminders: 3 };
+
+  const beforeDuePort = new FakePort();
+  beforeDuePort.readOrderResult = baseOrder({ deliveryStatus: 'delivered' });
+  const beforeDue = await new AutomationWorkflowService(beforeDuePort).handleReviewReminder({
+    config,
+    order: baseOrder({ createdAt: '2026-09-25T00:00:00.000Z', deliveryStatus: 'delivered' }),
+    now: '2026-09-25T00:00:59.999Z',
+  });
+  assert.equal(beforeDue.status, 'skipped');
+
+  const atDuePort = new FakePort();
+  atDuePort.readOrderResult = baseOrder({ deliveryStatus: 'delivered' });
+  const atDue = await new AutomationWorkflowService(atDuePort).handleReviewReminder({
+    config,
+    order: baseOrder({ createdAt: '2026-09-25T00:00:00.000Z', deliveryStatus: 'delivered' }),
+    now: '2026-09-25T00:01:00.000Z',
+  });
+  assert.equal(atDue.status, 'succeeded');
+
+  const repeatPort = new FakePort();
+  repeatPort.readOrderResult = baseOrder({ deliveryStatus: 'delivered' });
+  const beforeRepeat = await new AutomationWorkflowService(repeatPort).handleReviewReminder({
+    config,
+    order: baseOrder({ createdAt: '2026-09-25T00:00:00.000Z', deliveryStatus: 'delivered', lastReminderAt: '2026-09-25T00:01:00.000Z', reminderCount: 1 }),
+    now: '2026-09-25T00:02:59.999Z',
+  });
+  assert.equal(beforeRepeat.status, 'skipped');
+
+  const atRepeatPort = new FakePort();
+  atRepeatPort.readOrderResult = baseOrder({ deliveryStatus: 'delivered' });
+  const atRepeat = await new AutomationWorkflowService(atRepeatPort).handleReviewReminder({
+    config,
+    order: baseOrder({ createdAt: '2026-09-25T00:00:00.000Z', deliveryStatus: 'delivered', lastReminderAt: '2026-09-25T00:01:00.000Z', reminderCount: 1 }),
+    now: '2026-09-25T00:03:00.000Z',
+  });
+  assert.equal(atRepeat.status, 'succeeded');
+});
+
 test('reminder state is persisted and increments exactly once per successful send', async () => {
   const { store, admin, account, product } = await setup();
   const created = await store.createOrder({ adminId: admin.id, order: { ...baseOrder({ id: 'reminder-state', orderNo: 'REMINDER-STATE', accountId: account.id, productId: product.id, deliveryStatus: 'delivered', paymentStatus: 'paid' }), source: 'local' } });
   assert.equal(created.reminderCount ?? 0, 0);
-  const first = await store.recordReviewReminderSent({ accountId: account.id, orderNo: created.orderNo, sentAt: '2026-09-22T01:00:00.000Z' });
+  const first = await store.recordReviewReminderSent({ accountId: account.id, orderNo: created.orderNo, sentAt: '2026-09-22T01:00:00.000Z', expectedReminderCount: 0 });
   assert.equal(first?.reminderCount, 1);
   assert.equal(first?.lastReminderAt, '2026-09-22T01:00:00.000Z');
-  const second = await store.recordReviewReminderSent({ accountId: account.id, orderNo: created.orderNo, sentAt: '2026-09-22T02:00:00.000Z' });
+  const duplicate = await store.recordReviewReminderSent({ accountId: account.id, orderNo: created.orderNo, sentAt: '2026-09-22T01:30:00.000Z', expectedReminderCount: 0 });
+  assert.equal(duplicate?.reminderCount, 1);
+  assert.equal(duplicate?.lastReminderAt, '2026-09-22T01:00:00.000Z');
+  const second = await store.recordReviewReminderSent({ accountId: account.id, orderNo: created.orderNo, sentAt: '2026-09-22T02:00:00.000Z', expectedReminderCount: 1 });
   assert.equal(second?.reminderCount, 2);
   const reread = await store.getOrder(admin.id, created.orderNo, account.id);
   assert.equal(reread?.reminderCount, 2);

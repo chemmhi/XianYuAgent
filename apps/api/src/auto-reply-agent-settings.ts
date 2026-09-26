@@ -15,6 +15,7 @@ export const DEFAULT_AUTO_REPLY_AGENT_CONFIG: AutoReplyAgentConfig = {
   maxReplyLength: 1_000,
   replySegmentDelayMs: 800,
   debounceMs: 2_000,
+  sendDelaySeconds: 300,
   sendMode: 'simulate',
 };
 
@@ -31,6 +32,7 @@ export function autoReplyAgentConfigFromEnv(env: NodeJS.ProcessEnv = process.env
     maxReplyLength: parseBoundedInteger(env.AUTO_REPLY_AGENT_MAX_REPLY_LENGTH, DEFAULT_AUTO_REPLY_AGENT_CONFIG.maxReplyLength, 30, 4_000),
     replySegmentDelayMs: parseBoundedInteger(env.AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.replySegmentDelayMs, 0, 30_000),
     debounceMs: parseBoundedInteger(env.AUTO_REPLY_AGENT_DEBOUNCE_MS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.debounceMs, 0, 30_000),
+    sendDelaySeconds: parseBoundedInteger(env.AUTO_REPLY_AGENT_SEND_DELAY_SECONDS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.sendDelaySeconds, 0, 86_400),
     sendMode: env.AUTO_REPLY_SEND_MODE?.trim().toLowerCase() === 'live' ? 'live' : DEFAULT_AUTO_REPLY_AGENT_CONFIG.sendMode,
   };
 }
@@ -53,10 +55,12 @@ export class AutoReplyAgentSettingsService {
     if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'expectedVersion must be a non-negative integer');
     const current = await this.get(input.adminId, input.accountId);
     if (current.configVersion !== input.expectedVersion) throw new ServiceError(409, 'VERSION_CONFLICT', 'auto reply agent settings version conflict', { server: current });
-    const config = validateConfig({ ...current, ...input.patch });
-    const saved = await this.store.upsertAutoReplyAgentConfig({ adminId: input.adminId, accountId: input.accountId, expectedVersion: input.expectedVersion, patch: input.patch, config, configDigest: digestJson(config) });
+    const { debounceMs: _legacyDebounceMs, ...effectivePatch } = input.patch;
+    void _legacyDebounceMs;
+    const config = validateConfig({ ...current, ...effectivePatch });
+    const saved = await this.store.upsertAutoReplyAgentConfig({ adminId: input.adminId, accountId: input.accountId, expectedVersion: input.expectedVersion, patch: effectivePatch, config, configDigest: digestJson(config) });
     if (!saved) throw new ServiceError(500, 'SETTINGS_SAVE_FAILED', 'auto reply agent settings could not be saved');
-    await this.audit({ actorId: input.adminId, action: 'auto_reply_agent.settings.updated', targetRef: `${input.accountId}:v${saved.configVersion}`, requestId: input.requestId, traceId: input.traceId, payload: { configVersion: saved.configVersion, configDigest: saved.configDigest, changedFields: Object.keys(input.patch).sort() } });
+    await this.audit({ actorId: input.adminId, action: 'auto_reply_agent.settings.updated', targetRef: `${input.accountId}:v${saved.configVersion}`, requestId: input.requestId, traceId: input.traceId, payload: { configVersion: saved.configVersion, configDigest: saved.configDigest, changedFields: Object.keys(effectivePatch).sort() } });
     return saved;
   }
 
@@ -83,6 +87,7 @@ function validateConfig(config: AutoReplyAgentConfig): AutoReplyAgentConfig {
     maxReplyLength: boundedNumber(config.maxReplyLength, 'maxReplyLength', 30, 4_000),
     replySegmentDelayMs: boundedNumber(config.replySegmentDelayMs, 'replySegmentDelayMs', 0, 30_000),
     debounceMs: boundedNumber(config.debounceMs, 'debounceMs', 0, 30_000),
+    sendDelaySeconds: boundedNumber(config.sendDelaySeconds, 'sendDelaySeconds', 0, 86_400),
     sendMode: config.sendMode === 'live' ? 'live' : 'simulate',
   };
 }

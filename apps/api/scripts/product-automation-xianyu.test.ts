@@ -58,6 +58,65 @@ test('live adapter refuses mutation when authoritative order detail is unavailab
   assert.equal(confirmed, false);
 });
 
+test('live adapter infers unpaid payment from orderStatus when detail omits paymentStatus', async () => {
+  const { store, admin, account, order } = await setup();
+  let repriced = false;
+  const fakeMtop = {
+    readOrderDetail: async () => ({ success: true, accountInvalid: false, detail: { orderNo: order.orderNo, orderStatus: '待付款' }, cookieHeader: '' }),
+    repriceOrder: async () => { repriced = true; return { status: 'succeeded', externalRef: order.orderNo }; },
+  } as unknown as XianyuMtopClient;
+  const adapter = new XianyuProductAutomationExecutionAdapter(store, () => fakeMtop, () => undefined);
+  const result = await adapter.repriceOrder({ adminId: admin.id, accountId: account.id, productId: order.productId, itemId: order.itemId, itemTitle: order.itemTitle, orderNo: order.orderNo, targetPriceMinor: 777, executionKey: 'live-reprice-order-status' });
+  assert.equal(result.status, 'succeeded');
+  assert.equal(repriced, true);
+});
+
+test('live adapter treats numeric orderStatus 1 as unpaid', async () => {
+  const { store, admin, account, order } = await setup();
+  let repriced = false;
+  const fakeMtop = {
+    readOrderDetail: async () => ({ success: true, accountInvalid: false, detail: { orderNo: order.orderNo, orderStatus: '1', deliveryStatus: '1' }, cookieHeader: '' }),
+    repriceOrder: async () => { repriced = true; return { status: 'succeeded', externalRef: order.orderNo }; },
+  } as unknown as XianyuMtopClient;
+  const adapter = new XianyuProductAutomationExecutionAdapter(store, () => fakeMtop, () => undefined);
+  const result = await adapter.repriceOrder({ adminId: admin.id, accountId: account.id, productId: order.productId, itemId: order.itemId, itemTitle: order.itemTitle, orderNo: order.orderNo, targetPriceMinor: 777, executionKey: 'live-reprice-numeric-1' });
+  assert.equal(result.status, 'succeeded');
+  assert.equal(repriced, true);
+});
+
+test('live adapter skips reprice when authoritative amount already matches target', async () => {
+  const { store, admin, account, order } = await setup();
+  let repriced = false;
+  const fakeMtop = {
+    readOrderDetail: async () => ({ success: true, accountInvalid: false, detail: { orderNo: order.orderNo, orderStatus: '待付款', paymentStatus: 'unpaid', deliveryStatus: '1', amountMinor: 3000 }, cookieHeader: '' }),
+    repriceOrder: async () => { repriced = true; return { status: 'succeeded', externalRef: order.orderNo }; },
+  } as unknown as XianyuMtopClient;
+  const adapter = new XianyuProductAutomationExecutionAdapter(store, () => fakeMtop, () => undefined);
+  const result = await adapter.repriceOrder({ adminId: admin.id, accountId: account.id, productId: order.productId, itemId: order.itemId, itemTitle: order.itemTitle, orderNo: order.orderNo, targetPriceMinor: 3000, executionKey: 'live-reprice-idempotent' });
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.externalRef, order.orderNo);
+  assert.equal(repriced, false);
+});
+
+test('live adapter does not reserve coupon while IM is unavailable', async () => {
+  const { store, admin, account, order, batch } = await setup();
+  const fakeIm = { isReady: async () => false } as unknown as XianyuImService;
+  const adapter = new XianyuProductAutomationExecutionAdapter(store, () => ({} as XianyuMtopClient), () => fakeIm);
+  await assert.rejects(() => adapter.reserveCoupon({ adminId: admin.id, accountId: account.id, batchIds: [batch.id], quantity: 1, executionKey: 'live-reserve-not-ready', purpose: 'delivery' }), /XIANYU_IM_NOT_READY/);
+  assert.equal((await store.getCouponReservation({ adminId: admin.id, reservationId: 'missing' }))?.status, undefined);
+});
+
+test('live adapter maps numeric status 1 to unpaid and pending in readOrder', async () => {
+  const { store, admin, account, order } = await setup();
+  const fakeMtop = {
+    readOrderDetail: async () => ({ success: true, accountInvalid: false, detail: { orderNo: order.orderNo, orderStatus: '1', deliveryStatus: '1' }, cookieHeader: '' }),
+  } as unknown as XianyuMtopClient;
+  const adapter = new XianyuProductAutomationExecutionAdapter(store, () => fakeMtop, () => undefined);
+  const result = await adapter.readOrder({ adminId: admin.id, accountId: account.id, productId: order.productId, itemId: order.itemId, itemTitle: order.itemTitle, orderNo: order.orderNo });
+  assert.equal(result?.paymentStatus, 'unpaid');
+  assert.equal(result?.deliveryStatus, 'pending');
+});
+
 test('treats numeric order status 4 as already delivered', async () => {
   const { store, admin, account, order } = await setup();
   let confirmed = false;
@@ -67,6 +126,34 @@ test('treats numeric order status 4 as already delivered', async () => {
   } as unknown as XianyuMtopClient;
   const adapter = new XianyuProductAutomationExecutionAdapter(store, () => fakeMtop, () => undefined);
   const result = await adapter.confirmShipment({ adminId: admin.id, accountId: account.id, productId: order.productId, itemId: order.itemId, itemTitle: order.itemTitle, orderNo: order.orderNo, executionKey: 'live-confirm-numeric-4' });
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.externalRef, order.orderNo);
+  assert.equal(confirmed, false);
+});
+
+test('treats numeric order status 2 as pending and confirms shipment', async () => {
+  const { store, admin, account, order } = await setup();
+  let confirmed = false;
+  const fakeMtop = {
+    readOrderDetail: async () => ({ success: true, accountInvalid: false, detail: { orderNo: order.orderNo, deliveryStatus: '2' }, cookieHeader: '' }),
+    confirmShipment: async () => { confirmed = true; return { status: 'succeeded', externalRef: order.orderNo }; },
+  } as unknown as XianyuMtopClient;
+  const adapter = new XianyuProductAutomationExecutionAdapter(store, () => fakeMtop, () => undefined);
+  const result = await adapter.confirmShipment({ adminId: admin.id, accountId: account.id, productId: order.productId, itemId: order.itemId, itemTitle: order.itemTitle, orderNo: order.orderNo, executionKey: 'live-confirm-numeric-2' });
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.externalRef, order.orderNo);
+  assert.equal(confirmed, true);
+});
+
+test('treats numeric order status 3 as already shipped', async () => {
+  const { store, admin, account, order } = await setup();
+  let confirmed = false;
+  const fakeMtop = {
+    readOrderDetail: async () => ({ success: true, accountInvalid: false, detail: { orderNo: order.orderNo, deliveryStatus: '3' }, cookieHeader: '' }),
+    confirmShipment: async () => { confirmed = true; return { status: 'succeeded', externalRef: order.orderNo }; },
+  } as unknown as XianyuMtopClient;
+  const adapter = new XianyuProductAutomationExecutionAdapter(store, () => fakeMtop, () => undefined);
+  const result = await adapter.confirmShipment({ adminId: admin.id, accountId: account.id, productId: order.productId, itemId: order.itemId, itemTitle: order.itemTitle, orderNo: order.orderNo, executionKey: 'live-confirm-numeric-3' });
   assert.equal(result.status, 'succeeded');
   assert.equal(result.externalRef, order.orderNo);
   assert.equal(confirmed, false);

@@ -172,7 +172,24 @@ export class MessageService {
 
   async importExternalMessage(input: { adminId: string; conversationId: string; direction: MessageRecord['direction']; senderRole: MessageRecord['senderRole']; bodyType: MessageRecord['bodyType']; bodyText?: string; bodyRef?: string; externalMessageRef: string; externalMessageRefAliases?: string[]; source?: MessageRecord['source']; riskFlags?: string[]; createdAt?: string; traceId: string }): Promise<{ message: MessageVM; event?: RealtimeEventVM; created: boolean }> {
     const existing = await this.store.findMessageByExternalRef(input.adminId, input.conversationId, input.externalMessageRef);
-    if (existing) return { message: this.toMessageView(existing), created: false };
+    if (existing) {
+      const reconciled = await this.store.reconcileExternalMessage({
+        adminId: input.adminId,
+        conversationId: input.conversationId,
+        externalMessageRef: input.externalMessageRef,
+        senderRole: input.senderRole,
+        bodyType: input.bodyType,
+        source: input.source,
+        riskFlags: input.riskFlags,
+        traceId: input.traceId,
+      });
+      const message = reconciled?.message ?? existing;
+      if (reconciled?.event) {
+        this.realtime.publish(reconciled.event);
+        try { void Promise.resolve(this.publishExternal?.(reconciled.event)).catch(() => undefined); } catch { /* Redis transport must not fail a committed message */ }
+      }
+      return { message: this.toMessageView(message), ...(reconciled?.event ? { event: toEventView(reconciled.event) } : {}), created: false };
+    }
     const created = await this.store.createMessage({ ...input, createdAt: input.createdAt });
     const event = toEventView(created.event);
     this.realtime.publish(created.event);

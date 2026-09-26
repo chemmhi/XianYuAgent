@@ -31,7 +31,7 @@ export interface CredentialApi {
 
 export interface AutoReplyAgentSettingsApi {
   get(accountId: string): Promise<AutoReplyAgentConfigVM>;
-  update(input: { accountId: string; expectedVersion: number; patch: Partial<Omit<AutoReplyAgentConfigVM, 'accountId' | 'updatedByAdminId' | 'configVersion' | 'configDigest' | 'createdAt' | 'updatedAt'>> }): Promise<AutoReplyAgentConfigVM>;
+  update(input: { accountId: string; expectedVersion: number; patch: Partial<Omit<AutoReplyAgentConfigVM, 'accountId' | 'updatedByAdminId' | 'configVersion' | 'configDigest' | 'createdAt' | 'updatedAt' | 'debounceMs'>> }): Promise<AutoReplyAgentConfigVM>;
 }
 
 export interface OpenAISettingsApi {
@@ -134,6 +134,7 @@ export function createMockAutoReplyAgentSettingsApi(): AutoReplyAgentSettingsApi
     maxReplyLength: 1_000,
     replySegmentDelayMs: 800,
     debounceMs: 2_000,
+    sendDelaySeconds: 300,
     sendMode: 'simulate',
   };
   return {

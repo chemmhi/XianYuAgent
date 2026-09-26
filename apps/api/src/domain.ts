@@ -271,8 +271,8 @@ export interface ReviewGiftRule {
 
 export interface ReviewReminderRule {
   enabled: boolean;
-  firstDelayHours: number;
-  repeatIntervalHours: number;
+  firstDelayMinutes: number;
+  repeatIntervalMinutes: number;
   maxReminders: number;
   message: string;
 }
@@ -376,6 +376,7 @@ export interface XianyuOrderItem {
   conversationId?: string;
   productId?: string;
   sourcePayloadDigest: string;
+  reviewedAt?: string;
 }
 
 export interface OrderListQuery {
@@ -1013,6 +1014,8 @@ export interface AutoReplyAgentConfig {
   maxReplyLength: number;
   replySegmentDelayMs: number;
   debounceMs: number;
+  /** Delay before the first automatic reply is sent. Zero disables the delay. */
+  sendDelaySeconds: number;
   sendMode: AutoReplyAgentSendMode;
 }
 
@@ -1356,10 +1359,12 @@ export interface Store {
   getAutomationExecution(executionKey: string): Promise<AutomationExecutionLedgerRecord | undefined>;
   claimAutomationExecution(input: { executionKey: string; fingerprint: string; ownerToken: string; leaseUntil: string }): Promise<{ claimed: boolean; record: AutomationExecutionLedgerRecord }>;
   completeAutomationExecution(input: { executionKey: string; ownerToken: string; result: unknown; retryable: boolean }): Promise<void>;
+  cleanupExpiredCouponReservations(): Promise<number>;
   recordReviewFact(input: { accountId: string; orderNo: string; eventId: string; reviewedAt?: string }): Promise<{ created: boolean }>;
-  recordReviewReminderSent(input: { accountId: string; orderNo: string; sentAt: string }): Promise<OrderRecord | undefined>;
+  recordReviewReminderSent(input: { accountId: string; orderNo: string; sentAt: string; expectedReminderCount?: number }): Promise<OrderRecord | undefined>;
   createOrder(input: { adminId: string; order: Omit<OrderRecord, 'id' | 'createdAt' | 'updatedAt' | 'configVersion' | 'source'> & { id?: string; createdAt?: string; updatedAt?: string; configVersion?: number; source?: OrderSource } }): Promise<OrderRecord>;
   upsertExternalOrder(input: { adminId: string; accountId: string; item: XianyuOrderItem; syncedAt: string; accountName?: string }): Promise<OrderUpsertResult>;
+  deleteExternalOrdersNotInSnapshot(input: { adminId: string; accountId: string; orderNos: readonly string[] }): Promise<number>;
   createProduct(input: {
     adminId: string;
     accountId: string;
@@ -1407,6 +1412,7 @@ export interface Store {
   listAutoReplyMessages(adminId: string, conversationId: string, query: AutoReplyMessageListQuery): Promise<AutoReplyMessageListResult>;
   listConversationEvents(adminId: string, conversationId: string, afterCursor: number, limit: number): Promise<ConversationEventRecord[]>;
   findMessageByExternalRef(adminId: string, conversationId: string, externalMessageRef: string): Promise<MessageRecord | undefined>;
+  reconcileExternalMessage(input: { adminId: string; conversationId: string; externalMessageRef: string; senderRole: MessageSenderRole; bodyType: MessageBodyType; source?: MessageRecord['source']; riskFlags?: string[]; traceId?: string }): Promise<{ message: MessageRecord; event?: ConversationEventRecord } | undefined>;
   createConversation(input: { adminId: string; accountId: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; externalConversationRef?: string }): Promise<ConversationRecord>;
   createMessage(input: { adminId: string; conversationId: string; direction: MessageDirection; senderRole: MessageSenderRole; bodyType: MessageBodyType; bodyText?: string; bodyRef?: string; externalMessageRef?: string; externalMessageRefAliases?: string[]; source?: MessageRecord['source']; orderRef?: string; productRef?: string; riskFlags?: string[]; createdAt?: string; traceId?: string }): Promise<{ message: MessageRecord; event: ConversationEventRecord }>;
   createAutoReplyRun(input: { adminId: string; accountId: string; conversationId: string; inboundMessageId: string; intent: string; decision: AutoReplyDecision; status: AutoReplyRunStatus; riskFlags?: string[]; productId?: string; orderRefs?: string[]; inputDigest: string; contextDigest?: string; replyDigest?: string; senderOutcome?: AutoReplyRunRecord['senderOutcome']; outboundMessageId?: string; failureCode?: string }): Promise<AutoReplyRunRecord>;

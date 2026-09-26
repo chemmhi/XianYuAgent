@@ -391,11 +391,14 @@ export class XianyuMtopClient {
     );
     const businessSuccess = nestedBoolean(result.response, ['data', 'success']);
     if (result.success && businessSuccess !== true) {
+      const remoteDetail = summarizeMutationFailure(result.response, businessSuccess);
+      const message = `闲鱼订单改价接口未确认 data.success=true${remoteDetail ? `: ${remoteDetail}` : ''}`;
+      this.reportFailure({ adminId, accountId, api: ADJUST_PRICE_API, errorCode: 'MTOP_BUSINESS_ERROR', message, accountInvalid: false });
       return {
         status: 'failed',
         externalRef: normalizedOrderNo,
         errorCode: 'MTOP_BUSINESS_ERROR',
-        message: '闲鱼订单改价接口未确认 data.success=true',
+        message,
         response: result.response,
         cookieHeader: result.cookieHeader,
       };
@@ -605,6 +608,29 @@ function nestedBoolean(root: unknown, path: string[]): boolean | undefined {
   if (typeof current === 'number') return current !== 0;
   if (typeof current === 'string' && current.trim()) return /^(true|1|yes)$/i.test(current.trim());
   return undefined;
+}
+
+function summarizeMutationFailure(response: Record<string, unknown> | undefined, businessSuccess: boolean | undefined): string | undefined {
+  const data = record(response?.data);
+  const values = [
+    data.errorCode,
+    data.bizCode,
+    data.code,
+    data.subCode,
+    data.message,
+    data.msg,
+    data.errorMsg,
+    data.reason,
+    response?.errorCode,
+    response?.message,
+    response?.msg,
+  ]
+    .map((value) => typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '')
+    .filter(Boolean);
+  const ret = Array.isArray(response?.ret) ? response.ret.map(String).filter(Boolean) : [];
+  const parts = [...new Set([...values, ...ret])];
+  if (businessSuccess !== undefined) parts.unshift(`data.success=${businessSuccess}`);
+  return parts.length > 0 ? parts.join(' | ').slice(0, 240) : undefined;
 }
 
 function mapXianyuOrderDetail(response: Record<string, unknown> | undefined, orderNo: string): XianyuOrderDetailSummary | undefined {

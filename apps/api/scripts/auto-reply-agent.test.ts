@@ -644,8 +644,8 @@ test('agent rejects unknown tools and out-of-contract arguments', async () => {
   await assert.rejects(() => agent.generate({ adminId: 'admin-1', context: context(), classification }), /AGENT_INVALID_TOOL_ARGUMENTS/);
 });
 
-test('auto-reply service debounces same-conversation messages and splits long replies', async () => {
-  const runtime = createApp(loadConfig({ HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_SEND_MODE: 'simulate', AUTOMATION_BUYER_ALLOWLIST: '["买家"]', AUTO_REPLY_AGENT_DEBOUNCE_MS: '1000', AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS: '0' }));
+test('auto-reply service keeps consecutive messages active and splits long replies', async () => {
+  const runtime = createApp(loadConfig({ AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0', HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_SEND_MODE: 'simulate', AUTOMATION_BUYER_ALLOWLIST: '["买家"]', AUTO_REPLY_AGENT_DEBOUNCE_MS: '1000', AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS: '0' }));
   const admin = await runtime.store.createAdmin({ email: 'agent-debounce@example.com', passwordHash: 'hash', displayName: 'Agent Debounce' });
   const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'agent-debounce-seller' });
   const conversation = await runtime.store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'buyer-1', buyerDisplayName: '买家', externalConversationRef: 'agent-debounce-conversation' });
@@ -663,7 +663,8 @@ test('auto-reply service debounces same-conversation messages and splits long re
     const firstResult = await autoReply.processInbound({ adminId: admin.id, conversationId: conversation.id, inboundMessageId: first.message.id, senderName: '买家' });
     const secondResult = await autoReply.processInbound({ adminId: admin.id, conversationId: conversation.id, inboundMessageId: second.message.id, senderName: '买家' });
     assert.equal(firstResult.run.status, 'persisted');
-    assert.equal(secondResult.run.failureCode, 'AUTO_REPLY_DEBOUNCED');
+    assert.equal(secondResult.run.status, 'persisted');
+    assert.equal(sender.calls.length, 2);
     const longSender = new NoopAutoReplySender();
     const semanticSegments = ['这是商品的第一部分说明。', '这是商品的第二部分说明。', '如果你需要，我还可以继续补充。'];
     const longReply = new AutoReplyService(runtime.store, runtime.messages, async () => 'audit-agent-segments', {

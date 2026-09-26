@@ -25,8 +25,10 @@ try {
   const reviewFact = await runtime.store.recordReviewFact({ accountId: account.id, orderNo: reminderOrder.orderNo, eventId: `pg-review-${suffix}`, reviewedAt: '2026-09-22T01:00:00.000Z' });
   assert.equal(reviewFact.created, true);
   assert.equal((await runtime.store.recordReviewFact({ accountId: account.id, orderNo: reminderOrder.orderNo, eventId: `pg-review-${suffix}` })).created, false);
-  const reminded = await runtime.store.recordReviewReminderSent({ accountId: account.id, orderNo: reminderOrder.orderNo, sentAt: '2026-09-22T02:00:00.000Z' });
+  const reminded = await runtime.store.recordReviewReminderSent({ accountId: account.id, orderNo: reminderOrder.orderNo, sentAt: '2026-09-22T02:00:00.000Z', expectedReminderCount: 0 });
   assert.equal(reminded.reminderCount, 1);
+  const duplicateReminder = await runtime.store.recordReviewReminderSent({ accountId: account.id, orderNo: reminderOrder.orderNo, sentAt: '2026-09-22T02:30:00.000Z', expectedReminderCount: 0 });
+  assert.equal(duplicateReminder.reminderCount, 1);
   const ledgerClaim = await runtime.store.claimAutomationExecution({ executionKey: `pg-ledger-${suffix}`, fingerprint: 'pg-fp', ownerToken: 'pg-owner-1', leaseUntil: new Date(Date.now() + 30_000).toISOString() });
   assert.equal(ledgerClaim.claimed, true);
   await runtime.store.completeAutomationExecution({ executionKey: `pg-ledger-${suffix}`, ownerToken: 'pg-owner-1', result: { status: 'succeeded', executionKey: `pg-ledger-${suffix}` }, retryable: false });

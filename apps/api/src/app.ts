@@ -134,6 +134,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
   }, {
     executionMode: config.productAutomationExecutionMode,
     liveConfirmed: config.productAutomationLiveConfirmed,
+    reviewExternalWritesConfirmed: config.productAutomationReviewExternalWritesConfirmed,
     buyerAllowlist: config.buyerAllowlist ?? [],
   });
   const productAutomationWorker = new ProductAutomationWorker(store, productAutomationTrigger);
@@ -187,6 +188,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     maxHistory: autoReplyAgentConfig.maxHistory,
     maxReplyLength: autoReplyAgentConfig.maxReplyLength,
     replySegmentDelayMs: autoReplyAgentConfig.replySegmentDelayMs,
+    sendDelaySeconds: autoReplyAgentConfig.sendDelaySeconds,
     generator: autoReplyModelClient ? new ToolCallingAutoReplyAgent(store, autoReplyModelClient, autoReplyAgentConfig, { godView: autoReplyGodView }) : undefined,
     godView: autoReplyGodView,
     totalTimeoutMs: 60_000,
@@ -213,6 +215,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
         maxHistory: settings.maxHistory,
         maxReplyLength: settings.maxReplyLength,
         replySegmentDelayMs: settings.replySegmentDelayMs,
+        sendDelaySeconds: settings.sendDelaySeconds,
         generator: runtimeModelClient ? new ToolCallingAutoReplyAgent(store, runtimeModelClient, runtimeConfig, { godView: autoReplyGodView }) : undefined,
       };
     },
@@ -312,7 +315,14 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   }, async (input) => productAutomationWorker.processOrderRefresh(input));
-  xianyuIm = new XianyuImService(store, xianyu, messages, autoReply, productAutomationTrigger, verificationBrowser);
+  xianyuIm = new XianyuImService(store, xianyu, messages, autoReply, productAutomationTrigger, verificationBrowser, async ({ adminId, accountId, event }) => {
+    await orders.refresh({
+      adminId,
+      accountId,
+      requestId: `xianyu:order-state:${event.externalMessageRef}`,
+      traceId: `xianyu:order-state:${event.externalMessageRef}`,
+    });
+  });
 
   const wsServer = new WebSocketServer({ noServer: true });
   const workspaceRuntime: WorkspaceRuntime = config.agentRuntime === 'pi'
@@ -1614,7 +1624,7 @@ function readAutoReplyAgentPatch(body: Record<string, unknown>): import('./domai
   const patch: import('./domain.js').AutoReplyAgentConfigPatch = {};
   const booleanFields = ['enabled'] as const;
   const stringFields = ['systemPrompt', 'userPromptTemplate', 'sendMode'] as const;
-  const numberFields = ['maxLoops', 'maxToolCalls', 'toolTimeoutMs', 'totalTimeoutMs', 'maxHistory', 'maxReplyLength', 'replySegmentDelayMs', 'debounceMs'] as const;
+  const numberFields = ['maxLoops', 'maxToolCalls', 'toolTimeoutMs', 'totalTimeoutMs', 'maxHistory', 'maxReplyLength', 'replySegmentDelayMs', 'sendDelaySeconds'] as const;
   for (const field of booleanFields) if (typeof body[field] === 'boolean') patch[field] = body[field] as never;
   for (const field of stringFields) if (typeof body[field] === 'string') patch[field] = body[field] as never;
   for (const field of numberFields) if (typeof body[field] === 'number') patch[field] = body[field] as never;

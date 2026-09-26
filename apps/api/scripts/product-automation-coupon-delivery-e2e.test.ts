@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import test from 'node:test';
-import { AutomationWorkflowService } from '../src/product-automation.js';
+import { AutomationWorkflowService, ProductAutomationService } from '../src/product-automation.js';
 import { XianyuProductAutomationExecutionAdapter } from '../src/product-automation-xianyu.js';
+import { ProductAutomationTrigger } from '../src/product-automation-trigger.js';
 import type { ProductAutomationConfig } from '../src/domain.js';
 import { MemoryStore } from '../src/store-memory.js';
 import type { XianyuImService } from '../src/xianyu-im-service.js';
@@ -10,7 +11,7 @@ import type { XianyuMtopClient } from '../src/xianyu-mtop.js';
 
 type Harness = Awaited<ReturnType<typeof createHarness>>;
 
-async function createHarness(options: { metadata?: Record<string, unknown>; purpose?: 'text' | 'data' | 'api' | 'image'; skuSpec?: string; failFirstTextSend?: boolean; withoutConversation?: boolean } = {}) {
+async function createHarness(options: { metadata?: Record<string, unknown>; purpose?: 'text' | 'data' | 'api' | 'image'; skuSpec?: string; quantity?: number; failFirstTextSend?: boolean; withoutConversation?: boolean } = {}) {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: `coupon-e2e-${Math.random()}@example.com`, passwordHash: 'hash', displayName: 'Coupon E2E' });
   const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: `seller-${Math.random()}`, displayName: '卖家昵称' });
@@ -34,12 +35,12 @@ async function createHarness(options: { metadata?: Record<string, unknown>; purp
     resetClient: async () => { resetClientCalls += 1; },
   } as unknown as XianyuImService;
   const fakeMtop = {
-    readOrderDetail: async () => ({ success: true, accountInvalid: false, cookieHeader: '', detail: { orderNo: order.orderNo, itemId: order.itemId, itemTitle: order.itemTitle, buyerId: order.buyerId, conversationId: order.conversationId, paymentStatus: 'paid', deliveryStatus: 'pending', skuSpec: order.skuSpec } }),
+    readOrderDetail: async () => ({ success: true, accountInvalid: false, cookieHeader: '', detail: { orderNo: order.orderNo, itemId: order.itemId, itemTitle: order.itemTitle, buyerId: order.buyerId, conversationId: order.conversationId, paymentStatus: 'paid', deliveryStatus: 'pending', skuSpec: order.skuSpec, quantity: options.quantity } }),
     confirmShipment: async (_adminId: string, _accountId: string, _orderNo: string, tradeText = '') => { shipmentCalls.push(tradeText); return { status: 'succeeded', externalRef: `shipment-${shipmentCalls.length}`, cookieHeader: '' }; },
   } as unknown as XianyuMtopClient;
   const adapter = new XianyuProductAutomationExecutionAdapter(store, () => fakeMtop, () => fakeIm);
   const workflow = new AutomationWorkflowService(adapter);
-  return { store, admin, account, product, conversation, order: { ...order, skuSpec: options.skuSpec }, batch, workflow, sentText, sentImages, shipmentCalls, textRequestIds, getTextSendAttempts: () => textSendAttempts, getResetClientCalls: () => resetClientCalls };
+  return { store, admin, account, product, conversation, order: { ...order, skuSpec: options.skuSpec }, batch, workflow, adapter, sentText, sentImages, shipmentCalls, textRequestIds, getTextSendAttempts: () => textSendAttempts, getResetClientCalls: () => resetClientCalls };
 }
 
 function paidConfig(batchIds: string[], patch: Partial<ProductAutomationConfig['paidAutoDelivery']> = {}): ProductAutomationConfig {
@@ -47,7 +48,7 @@ function paidConfig(batchIds: string[], patch: Partial<ProductAutomationConfig['
     paidAutoDelivery: { enabled: true, couponBatchIds: batchIds, autoConfirm: false, maxAttempts: 1, retryBackoffSeconds: 0, ...patch },
     unpaidAutoReprice: { enabled: false, mode: 'fixed', targetPriceMinor: 0, maxAttempts: 1, retryBackoffSeconds: 0 },
     reviewGift: { enabled: false, couponBatchIds: [], maxAttempts: 1, retryBackoffSeconds: 0 },
-    reviewReminder: { enabled: false, firstDelayHours: 1, repeatIntervalHours: 1, maxReminders: 1, message: '请评价' },
+    reviewReminder: { enabled: false, firstDelayMinutes: 60, repeatIntervalMinutes: 60, maxReminders: 1, message: '请评价' },
   };
 }
 
@@ -86,6 +87,26 @@ test('批量数据配置消费备注变量、延迟和多规格匹配', async ()
   assert.equal(result.status, 'succeeded');
   assert.ok(Date.now() - startedAt >= 8);
   assert.deepEqual(harness.sentText, [`订单=${harness.order.orderNo};内容=DATA-REMARK;买家=买家小明`]);
+});
+
+test('自动化触发器按订单详情数量发送批量数据，并为每一行注入备注', async () => {
+  const harness = await createHarness({ purpose: 'data', quantity: 2, metadata: { dataContent: 'DATA-1\nDATA-2', description: '内容={DELIVERY_CONTENT};订单={order_id}' } });
+  const configs = new ProductAutomationService(harness.store, async () => 'audit');
+  const config = paidConfig([harness.batch.id]);
+  await configs.update({ adminId: harness.admin.id, productId: harness.product.id, expectedConfigVersion: 1, config, requestId: 'batch-quantity-config', traceId: 'batch-quantity-config' });
+  const trigger = new ProductAutomationTrigger(
+    harness.store,
+    configs,
+    harness.workflow,
+    Object.assign(harness.adapter, { readiness: 'ready' as const }),
+    undefined,
+    { executionMode: 'live', liveConfirmed: true, reviewExternalWritesConfirmed: true, buyerAllowlist: ['买家小明'] },
+  );
+
+  const result = await trigger.onOrderRefresh({ adminId: harness.admin.id, accountId: harness.account.id, items: [{ ...harness.order, source: 'xianyu' }], requestId: 'batch-quantity-refresh', traceId: 'batch-quantity-refresh' });
+
+  assert.equal(result.results[0]?.status, 'succeeded');
+  assert.deepEqual(harness.sentText, [`内容=DATA-1;订单=${harness.order.orderNo}`, `内容=DATA-2;订单=${harness.order.orderNo}`]);
 });
 
 test('API GET 配置消费响应字段、查询参数和多规格匹配', async () => {
@@ -229,6 +250,37 @@ test('非固定文字卡券开启无需邮寄凭证时拒绝真实发货', async
   assert.deepEqual(harness.sentText, []);
   assert.deepEqual(harness.sentImages, []);
   assert.deepEqual(harness.shipmentCalls, []);
+});
+
+test('多选卡券逐批发送四类内容，且无需邮寄批次只用于确认发货', async () => {
+  let apiCalls = 0;
+  const server = createServer((_request, response) => {
+    apiCalls += 1;
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({ content: 'API-MIX' }));
+  });
+  await listen(server);
+  try {
+    const harness = await createHarness({ metadata: { textContent: '免邮凭证', useNoLogisticsForm: true } });
+    const dataBatch = await harness.store.createCouponBatch({ adminId: harness.admin.id, accountId: harness.account.id, label: '批量数据', purpose: 'data', metadata: { dataContent: 'DATA-MIX' } });
+    const apiBatch = await harness.store.createCouponBatch({ adminId: harness.admin.id, accountId: harness.account.id, label: 'API 卡券', purpose: 'api', metadata: { apiConfig: { url: `http://127.0.0.1:${(server.address() as { port: number }).port}/card`, method: 'GET' } } });
+    const imageBatch = await harness.store.createCouponBatch({ adminId: harness.admin.id, accountId: harness.account.id, label: '图片卡券', purpose: 'image', metadata: { imageUrls: ['data:image/png;base64,aGVsbG8='], description: '图片备注：{buyer_name}' } });
+
+    const result = await harness.workflow.handlePaymentPaid({
+      adminId: harness.admin.id,
+      config: paidConfig([harness.batch.id, dataBatch.id, apiBatch.id, imageBatch.id], { autoConfirm: true }),
+      order: harness.order,
+      eventId: 'mixed-coupon-types-event',
+    });
+
+    assert.equal(result.status, 'succeeded');
+    assert.deepEqual(harness.sentText, ['DATA-MIX', 'API-MIX', '图片备注：买家小明']);
+    assert.equal(harness.sentImages.length, 1);
+    assert.equal(apiCalls, 1);
+    assert.deepEqual(harness.shipmentCalls, ['免邮凭证']);
+  } finally {
+    await close(server);
+  }
 });
 
 async function listen(server: Server): Promise<void> { await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve)); }

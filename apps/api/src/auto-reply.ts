@@ -142,6 +142,7 @@ export interface AutoReplyServiceOptions {
   maxHistory?: number;
   maxReplyLength?: number;
   replySegmentDelayMs?: number;
+  sendDelaySeconds?: number;
   classifier?: RuleBasedIntentClassifier;
   generator?: AutoReplyGenerator;
   sender?: AutoReplySender;
@@ -161,7 +162,14 @@ export interface AutoReplyServiceRuntimeOptions {
   maxHistory?: number;
   maxReplyLength?: number;
   replySegmentDelayMs?: number;
+  sendDelaySeconds?: number;
   generator?: AutoReplyGenerator;
+}
+
+interface PendingInitialWindow {
+  readonly key: string;
+  readonly promise: Promise<void>;
+  resolve(): void;
 }
 
 export class AutoReplyService {
@@ -169,10 +177,10 @@ export class AutoReplyService {
   private readonly sendMode: 'simulate' | 'live';
   private readonly buyerAllowlist: string[];
   private readonly totalTimeoutMs: number;
-  private readonly debounceMs: number;
   private readonly maxHistory: number;
   private readonly maxReplyLength: number;
   private readonly replySegmentDelayMs: number;
+  private readonly sendDelaySeconds: number;
   private readonly classifier: RuleBasedIntentClassifier;
   private readonly generator: AutoReplyGenerator;
   private readonly sender: AutoReplySender;
@@ -180,7 +188,7 @@ export class AutoReplyService {
   private readonly requireRepairRuntime: boolean;
   private readonly godView?: AutoReplyGodViewSink;
   private readonly configProvider?: (adminId: string, accountId: string) => Promise<AutoReplyServiceRuntimeOptions>;
-  private readonly lastAcceptedAt = new Map<string, number>();
+  private readonly pendingInitialWindows = new Map<string, PendingInitialWindow>();
 
   constructor(
     private readonly store: Store,
@@ -192,10 +200,10 @@ export class AutoReplyService {
     this.sendMode = options.sendMode ?? 'simulate';
     this.buyerAllowlist = [...new Set((options.buyerAllowlist ?? []).map(normalizeBuyerName).filter((value): value is string => Boolean(value)))];
     this.totalTimeoutMs = Math.max(1_000, Math.min(options.totalTimeoutMs ?? 60_000, 300_000));
-    this.debounceMs = Math.max(0, Math.min(options.debounceMs ?? 2_000, 30_000));
     this.maxHistory = Math.max(1, Math.min(options.maxHistory ?? 20, 50));
     this.maxReplyLength = Math.max(30, Math.min(options.maxReplyLength ?? 500, 2_000));
     this.replySegmentDelayMs = Math.max(0, Math.min(options.replySegmentDelayMs ?? 350, 5_000));
+    this.sendDelaySeconds = Math.max(0, Math.min(options.sendDelaySeconds ?? 0, 86_400));
     this.classifier = options.classifier ?? new RuleBasedIntentClassifier();
     this.generator = options.generator ?? new TemplateAutoReplyGenerator();
     this.sender = options.sender ?? new NoopAutoReplySender();
@@ -237,6 +245,7 @@ export class AutoReplyService {
     let run: AutoReplyRunRecord;
     let repair: AutoReplyRepairCandidateResult | undefined;
     let repairRoute: Awaited<ReturnType<AutoReplyRepairRuntime['routeInbound']>>;
+    let pendingInitialWindow: PendingInitialWindow | undefined;
     try {
       run = await this.store.createAutoReplyRun({ adminId: input.adminId, accountId: conversation.accountId, conversationId: conversation.id, inboundMessageId: inboundMessage.id, intent: 'pending', decision: 'skipped', status: 'received', inputDigest });
     } catch (error) {
@@ -301,9 +310,9 @@ export class AutoReplyService {
       const runtime = await this.resolveRuntimeOptions(input.adminId, conversation.accountId);
       const modelDecidesRouting = runtime.generator.supportsStructuredDecision === true;
       const supportedMessage = inboundMessage.bodyType === 'text'
-        ? Boolean(inboundMessage.bodyText?.trim())
+        ? Boolean(inboundMessage.bodyText?.trim()) && !inboundMessage.riskFlags.includes('xianyu_system_candidate_unverified')
         : inboundMessage.bodyType === 'image' && runtime.generator.supportsMultimodal === true && Boolean(inboundMessage.bodyRef?.trim());
-      if (!runtime.enabled || inboundMessage.direction !== 'inbound' || !supportedMessage) {
+      if (!runtime.enabled || inboundMessage.direction !== 'inbound' || inboundMessage.senderRole === 'system' || !supportedMessage) {
         const failureCode = !runtime.enabled ? 'AUTO_REPLY_DISABLED' : 'UNSUPPORTED_MESSAGE';
         const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode, eventPayload: {
           input: { kind: 'inbound_message', messageId: inboundMessage.id, digest: inputDigest, bodyType: inboundMessage.bodyType, direction: inboundMessage.direction, supportedMessage, enabled: runtime.enabled, textLength: inboundMessage.bodyText?.length ?? 0 },
@@ -351,19 +360,40 @@ export class AutoReplyService {
         payload: { ruleClassification, classification, modelDecidesRouting, hardSafety, allowlisted: true },
       });
       if (classification.decision === 'replied') {
-        const debounceKey = `${input.adminId}:${conversation.id}`;
-        const now = Date.now();
-        const lastAcceptedAt = this.lastAcceptedAt.get(debounceKey);
-        if (runtime.debounceMs > 0 && lastAcceptedAt !== undefined && now - lastAcceptedAt < runtime.debounceMs) {
-          const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode: 'AUTO_REPLY_DEBOUNCED', riskFlags: ['debounced'], eventPayload: {
-            input: { kind: 'debounce_gate', debounceMs: runtime.debounceMs, elapsedMs: Math.max(0, now - lastAcceptedAt) },
-            output: { decision: 'skipped', reason: 'AUTO_REPLY_DEBOUNCED' },
-            error: { code: 'AUTO_REPLY_DEBOUNCED' },
-          } });
-          await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'skipped', reason: 'AUTO_REPLY_DEBOUNCED', debounceMs: runtime.debounceMs });
-          return { run: updated ?? run, inboundMessage };
+        const agentTakeoverActive = await this.isAgentTakeoverActive(input.adminId, conversation.id);
+        if (!agentTakeoverActive && runtime.sendDelaySeconds > 0) {
+          const windowKey = `${input.adminId}:${conversation.id}`;
+          const existingWindow = this.pendingInitialWindows.get(windowKey);
+          if (existingWindow) {
+            await existingWindow.promise;
+            const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode: 'AUTO_REPLY_COALESCED_INTO_INITIAL_WINDOW', riskFlags: ['takeover_window_coalesced'], eventPayload: {
+              input: { kind: 'takeover_window_join', windowKey },
+              output: { decision: 'skipped', reason: 'AUTO_REPLY_COALESCED_INTO_INITIAL_WINDOW', leaderWindow: true },
+              error: { code: 'AUTO_REPLY_COALESCED_INTO_INITIAL_WINDOW' },
+            } });
+            return { run: updated ?? run, inboundMessage, classification };
+          }
+          pendingInitialWindow = this.createPendingInitialWindow(windowKey);
+          this.pendingInitialWindows.set(windowKey, pendingInitialWindow);
         }
-        this.lastAcceptedAt.set(debounceKey, now);
+      }
+      if (pendingInitialWindow) {
+        await updateRun({ eventPayload: {
+          input: { kind: 'takeover_window', delaySeconds: runtime.sendDelaySeconds, inboundMessageCreatedAt: inboundMessage.createdAt },
+          output: { decision: 'waiting', reason: 'AUTO_REPLY_TAKEOVER_WINDOW' },
+        } });
+        const humanReply = await this.waitForHumanReplyOrDelay(input.adminId, conversation.id, inboundMessage.id, runtime.sendDelaySeconds * 1_000);
+        if (humanReply) {
+          const failureCode = 'AUTO_REPLY_CANCELLED_BY_HUMAN_REPLY';
+          const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode, riskFlags: [...classification.riskFlags, 'human_reply_during_send_delay'], eventPayload: {
+            input: { kind: 'takeover_window', delaySeconds: runtime.sendDelaySeconds, inboundMessageCreatedAt: inboundMessage.createdAt },
+            output: { decision: 'skipped', reason: failureCode, humanReplyMessageId: humanReply.id, humanReplyCreatedAt: humanReply.createdAt },
+            error: { code: failureCode },
+          } });
+          await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'skipped', reason: failureCode, humanReplyMessageId: humanReply.id, delaySeconds: runtime.sendDelaySeconds });
+          await this.godView?.emit({ phase: 'run', event: 'run.cancelled', traceId, runId: run.id, buyer, payload: { status: 'skipped', decision: 'skipped', failureCode, delaySeconds: runtime.sendDelaySeconds, humanReplyMessageId: humanReply.id } });
+          return { run: updated ?? run, inboundMessage, classification, repair };
+        }
       }
       const context = await this.buildContext(input.adminId, conversation, inboundMessage, runtime.maxHistory);
       const contextDigest = digestJson({ conversationId: conversation.id, productId: context.product?.id, orderRefs: context.orders.map((order) => order.orderNo), history: context.recentMessages.map((message) => ({ direction: message.direction, senderRole: message.senderRole, createdAt: message.createdAt, bodyText: message.bodyText ?? '' })) });
@@ -492,7 +522,30 @@ export class AutoReplyService {
       let lastOutcome: Awaited<ReturnType<AutoReplySender['send']>>['outcome'] = 'simulated';
       let lastExternalMessageRef: string | undefined;
       for (let index = 0; index < segments.length; index += 1) {
-        if (index > 0 && runtime.replySegmentDelayMs > 0) await delay(runtime.replySegmentDelayMs);
+        if (index > 0 && runtime.replySegmentDelayMs > 0) {
+          const humanReply = await this.waitForHumanReplyOrDelay(input.adminId, conversation.id, inboundMessage.id, runtime.replySegmentDelayMs);
+          if (humanReply) {
+            const failureCode = 'AUTO_REPLY_CANCELLED_BY_HUMAN_REPLY';
+            const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode, riskFlags: [...classification.riskFlags, 'human_reply_during_segmented_send'], eventPayload: {
+              input: { kind: 'segmented_send_gate', segmentIndex: index, segmentCount: segments.length },
+              output: { decision: 'skipped', reason: failureCode, humanReplyMessageId: humanReply.id, humanReplyCreatedAt: humanReply.createdAt },
+              error: { code: failureCode },
+            } });
+            await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'skipped', reason: failureCode, humanReplyMessageId: humanReply.id, segmentIndex: index });
+            return { run: updated ?? run, inboundMessage, classification, context, repair };
+          }
+        }
+        const humanBeforeSend = await this.findHumanReplyAfterMessage(input.adminId, conversation.id, inboundMessage.id);
+        if (humanBeforeSend) {
+          const failureCode = 'AUTO_REPLY_CANCELLED_BY_HUMAN_REPLY';
+          const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode, riskFlags: [...classification.riskFlags, 'human_reply_during_send'], eventPayload: {
+            input: { kind: 'send_gate', segmentIndex: index, segmentCount: segments.length },
+            output: { decision: 'skipped', reason: failureCode, humanReplyMessageId: humanBeforeSend.id, humanReplyCreatedAt: humanBeforeSend.createdAt },
+            error: { code: failureCode },
+          } });
+          await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'skipped', reason: failureCode, humanReplyMessageId: humanBeforeSend.id, segmentIndex: index });
+          return { run: updated ?? run, inboundMessage, classification, context, repair };
+        }
         const segment = segments[index]!;
         const sendRequestId = segments.length > 1 ? `${requestId}:segment:${index + 1}` : requestId;
         const sent = await this.sender.send({ adminId: input.adminId, accountId: conversation.accountId, requestId: sendRequestId, conversation, recipientRef: conversation.buyerRef, text: segment, mode: runtime.sendMode, traceId, runId: run.id, inboundMessageId: inboundMessage.id, productRef: context.product?.id, riskFlags: classification.riskFlags, segmentIndex: index, segmentCount: segments.length });
@@ -507,6 +560,17 @@ export class AutoReplyService {
         lastOutcome = sent.outcome;
         lastExternalMessageRef = sent.externalMessageRef;
         if (sent.outcome === 'known_failure' || sent.outcome === 'unknown') throw new Error(sent.outcome === 'unknown' ? 'AUTO_REPLY_SEND_UNKNOWN' : 'AUTO_REPLY_SEND_FAILED');
+        const humanDuringSend = await this.findHumanReplyAfterMessage(input.adminId, conversation.id, inboundMessage.id);
+        if (humanDuringSend) {
+          const failureCode = 'AUTO_REPLY_CANCELLED_BY_HUMAN_REPLY';
+          const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode, riskFlags: [...classification.riskFlags, 'human_reply_during_send'], eventPayload: {
+            input: { kind: 'send_gate', segmentIndex: index, segmentCount: segments.length },
+            output: { decision: 'skipped', reason: failureCode, humanReplyMessageId: humanDuringSend.id, humanReplyCreatedAt: humanDuringSend.createdAt },
+            error: { code: failureCode },
+          } });
+          await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'skipped', reason: failureCode, humanReplyMessageId: humanDuringSend.id, segmentIndex: index });
+          return { run: updated ?? run, inboundMessage, classification, context, repair };
+        }
         const simulatedRef = sent.outcome === 'simulated' ? `${sent.externalMessageRef ?? `simulated:auto-reply:${inboundMessage.id}`}:${index + 1}` : sent.externalMessageRef;
         const outbound = await this.messages.createMessage({ adminId: input.adminId, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: segment, externalMessageRef: simulatedRef, source: 'ai', productRef: context.product?.id, riskFlags: [...classification.riskFlags, ...(sent.outcome === 'simulated' ? ['simulated_send'] : []), ...(segments.length > 1 ? [`reply_segment_${index + 1}_of_${segments.length}`] : [])], requestId: sendRequestId, traceId });
         try { await this.sender.markPersisted?.({ outboxJobId: sent.outboxJobId, outboundMessageId: outbound.message.messageId }); } catch { /* local message is authoritative; outbox reconciliation can retry the link */ }
@@ -576,7 +640,58 @@ export class AutoReplyService {
         payload: { status: 'failed', decision: 'failed', failureCode, currentStatus: run.status },
       });
       return { run: updated ?? run, inboundMessage };
+    } finally {
+      if (pendingInitialWindow) {
+        pendingInitialWindow.resolve();
+        this.pendingInitialWindows.delete(pendingInitialWindow.key);
+      }
     }
+  }
+
+  private createPendingInitialWindow(key: string): PendingInitialWindow {
+    let resolvePromise!: () => void;
+    const promise = new Promise<void>((resolve) => { resolvePromise = resolve; });
+    return { key, promise, resolve: resolvePromise };
+  }
+
+  private async isAgentTakeoverActive(adminId: string, conversationId: string): Promise<boolean> {
+    const events = await this.store.listConversationEvents(adminId, conversationId, 0, 500);
+    const eventMessages = events
+      .map((event) => ({ cursor: event.cursor, message: event.payload?.message as { id?: unknown; direction?: unknown; source?: unknown } | undefined }))
+      .filter((entry) => typeof entry.message?.id === 'string' && entry.message.direction === 'outbound' && (entry.message.source === 'ai' || entry.message.source === 'human'))
+      .sort((left, right) => left.cursor - right.cursor);
+    const latestEventMessage = eventMessages.at(-1)?.message;
+    if (latestEventMessage) return latestEventMessage.source === 'ai';
+    const messages = await this.messages.listMessages(adminId, conversationId, { limit: 200 });
+    const outgoing = messages.items
+      .filter((message) => message.direction === 'outbound' && (message.source === 'ai' || message.source === 'human'))
+      .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.messageId.localeCompare(right.messageId));
+    return outgoing.at(-1)?.source === 'ai';
+  }
+
+  private async waitForHumanReplyOrDelay(adminId: string, conversationId: string, afterMessageId: string, delayMs: number): Promise<MessageRecord | undefined> {
+    const existing = await this.findHumanReplyAfterMessage(adminId, conversationId, afterMessageId);
+    if (existing || delayMs <= 0) return existing;
+    return new Promise<MessageRecord | undefined>((resolve) => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let unsubscribe: (() => void) | undefined;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        unsubscribe?.();
+        void this.findHumanReplyAfterMessage(adminId, conversationId, afterMessageId).then(resolve).catch(() => resolve(undefined));
+      };
+      timer = setTimeout(finish, delayMs);
+      unsubscribe = this.messages.realtime.subscribe(conversationId, (event) => {
+        const message = event.payload.message as { direction?: string; source?: string; createdAt?: string } | undefined;
+        if (message?.direction !== 'outbound' || message.source !== 'human') return;
+        void this.findHumanReplyAfterMessage(adminId, conversationId, afterMessageId).then((humanReply) => {
+          if (humanReply) finish();
+        }).catch(() => undefined);
+      });
+    });
   }
 
   private async buildContext(adminId: string, conversation: ConversationRecord, inboundMessage: MessageRecord, maxHistory = this.maxHistory): Promise<AutoReplyContext> {
@@ -603,10 +718,13 @@ export class AutoReplyService {
       sendMode: provided.sendMode ?? this.sendMode,
       buyerAllowlist,
       totalTimeoutMs: Math.max(1_000, Math.min(provided.totalTimeoutMs ?? this.totalTimeoutMs, 300_000)),
-      debounceMs: Math.max(0, Math.min(provided.debounceMs ?? this.debounceMs, 30_000)),
+      // Kept in the runtime shape for backward-compatible callers; the
+      // legacy debounce gate is intentionally no longer applied.
+      debounceMs: 0,
       maxHistory: Math.max(1, Math.min(provided.maxHistory ?? this.maxHistory, 50)),
       maxReplyLength: Math.max(30, Math.min(provided.maxReplyLength ?? this.maxReplyLength, 2_000)),
       replySegmentDelayMs: Math.max(0, Math.min(provided.replySegmentDelayMs ?? this.replySegmentDelayMs, 5_000)),
+      sendDelaySeconds: Math.max(0, Math.min(provided.sendDelaySeconds ?? this.sendDelaySeconds, 86_400)),
       generator: provided.generator ?? this.generator,
     };
   }
@@ -649,6 +767,32 @@ export class AutoReplyService {
   private async findMessage(adminId: string, conversationId: string, messageId: string): Promise<MessageRecord | undefined> {
     const result = await this.store.listMessages(adminId, conversationId, { limit: 200 });
     return result.items.find((message) => message.id === messageId);
+  }
+
+  private async findHumanReplyAfterMessage(adminId: string, conversationId: string, afterMessageId: string): Promise<MessageRecord | undefined> {
+    const result = await this.store.listMessages(adminId, conversationId, { limit: 200 });
+    const events = await this.store.listConversationEvents(adminId, conversationId, 0, 500);
+    const anchorEvent = events.find((event) => {
+      const message = event.payload?.message as { id?: unknown } | undefined;
+      return message?.id === afterMessageId;
+    });
+    if (anchorEvent) {
+      const humanMessageIds = new Set(events
+        .filter((event) => event.cursor > anchorEvent.cursor)
+        .map((event) => event.payload?.message as { id?: unknown; direction?: unknown; senderRole?: unknown; source?: unknown } | undefined)
+        .filter((message) => typeof message?.id === 'string' && message.direction === 'outbound' && message.senderRole === 'agent' && message.source === 'human')
+        .map((message) => message!.id as string));
+      const eventHuman = result.items.find((message) => humanMessageIds.has(message.id));
+      if (eventHuman) return eventHuman;
+      return undefined;
+    }
+    const anchorMessage = result.items.find((message) => message.id === afterMessageId);
+    const anchorCreatedAt = anchorMessage ? Date.parse(anchorMessage.createdAt) : Number.NEGATIVE_INFINITY;
+    return result.items.find((message) => {
+      if (message.direction !== 'outbound' || message.senderRole !== 'agent' || message.source !== 'human') return false;
+      const createdAt = Date.parse(message.createdAt);
+      return !Number.isFinite(anchorCreatedAt) || !Number.isFinite(createdAt) || createdAt >= anchorCreatedAt;
+    });
   }
 
   private async recordAudit(adminId: string, accountId: string, runId: string, requestId: string, traceId: string, payload: unknown): Promise<void> {
@@ -707,10 +851,6 @@ function validateSemanticSegments(proposed: string[] | undefined, reply: string)
   const normalizedReply = reply.replace(/\s+/g, '');
   if (joined.replace(/\s+/g, '') !== normalizedReply) return undefined;
   return segments;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {

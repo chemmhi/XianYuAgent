@@ -16,7 +16,7 @@ export function defaultProductAutomationConfig(): ProductAutomationConfig {
     paidAutoDelivery: { enabled: false, couponBatchIds: [], autoConfirm: true, maxAttempts: 3, retryBackoffSeconds: 30 },
     unpaidAutoReprice: { enabled: false, mode: 'fixed', targetPriceMinor: 0, maxAttempts: 3, retryBackoffSeconds: 30 },
     reviewGift: { enabled: false, couponBatchIds: [], maxAttempts: 3, retryBackoffSeconds: 30 },
-    reviewReminder: { enabled: false, firstDelayHours: 72, repeatIntervalHours: 24, maxReminders: 1, message: '如果使用满意，欢迎给个好评，谢谢支持～' },
+    reviewReminder: { enabled: false, firstDelayMinutes: 72 * 60, repeatIntervalMinutes: 24 * 60, maxReminders: 1, message: '如果使用满意，欢迎给个好评，谢谢支持～' },
   };
 }
 
@@ -31,7 +31,10 @@ export class ProductAutomationService {
     const product = await this.store.getProduct(adminId, productId);
     if (!product) throw new ServiceError(404, 'NOT_FOUND', 'product not found');
     const current = await this.store.getProductAutomation(adminId, productId);
-    if (current) return { ...current, config: await this.publicizeCouponIds(adminId, current.config), product: { id: product.id, accountId: product.accountId, title: product.title } };
+    if (current) {
+      const config = normalizeStoredConfig(current.config);
+      return { ...current, config: await this.publicizeCouponIds(adminId, config), product: { id: product.id, accountId: product.accountId, title: product.title } };
+    }
     const now = new Date().toISOString();
     const config = defaultProductAutomationConfig();
     return { id: `virtual:${productId}`, productId, accountId: product.accountId, configVersion: 1, config, configDigest: digestJson(config), createdAt: now, updatedAt: now, product: { id: product.id, accountId: product.accountId, title: product.title } };
@@ -41,7 +44,7 @@ export class ProductAutomationService {
     const product = await this.requireProduct(input.adminId, input.productId);
     const expectedConfigVersion = parseVersion(input.expectedConfigVersion);
     const current = await this.store.getProductAutomation(input.adminId, product.id);
-    const { config, syncCouponBindings } = await this.applyConfigPatch(input.adminId, product, current?.config ?? defaultProductAutomationConfig(), input.config);
+    const { config, syncCouponBindings } = await this.applyConfigPatch(input.adminId, product, current ? normalizeStoredConfig(current.config) : defaultProductAutomationConfig(), input.config);
     try {
       const saved = await this.store.updateProductAutomation({ adminId: input.adminId, productId: product.id, expectedConfigVersion, config, configDigest: digestJson(config), syncCouponBindings });
       if (!saved) throw new ServiceError(404, 'NOT_FOUND', 'product not found');
@@ -63,7 +66,7 @@ export class ProductAutomationService {
     let syncCouponBindings = false;
     for (const product of products) {
       const current = await this.store.getProductAutomation(input.adminId, product.id);
-      const result = await this.applyConfigPatch(input.adminId, product, current?.config ?? defaultProductAutomationConfig(), input.config);
+      const result = await this.applyConfigPatch(input.adminId, product, current ? normalizeStoredConfig(current.config) : defaultProductAutomationConfig(), input.config);
       configByProductId[product.id] = result.config;
       configDigests[product.id] = digestJson(result.config);
       syncCouponBindings = syncCouponBindings || result.syncCouponBindings;
@@ -146,6 +149,7 @@ export interface AutomationExecutionResult {
   status: AutomationExecutionStatus;
   executionKey: string;
   reason?: string;
+  message?: string;
   externalRef?: string;
   sentQuantity?: number;
   reminderCount?: number;
@@ -196,7 +200,8 @@ export class InMemoryAutomationExecutionLedger implements AutomationExecutionLed
       this.entries.set(input.key, { status: 'running', ownerToken: input.ownerToken, leaseUntil: input.leaseUntil, entry: { fingerprint: input.fingerprint, result: skipped(input.key, 'running'), retryable: false, attemptCount: 1, updatedAt: new Date().toISOString() } });
       return { claimed: true };
     }
-    if (current.entry.fingerprint !== input.fingerprint) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution key reused with different input');
+    if (current.entry.fingerprint !== input.fingerprint && !(current.status === 'completed' && current.entry.retryable)) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution key reused with different input');
+    if (current.status === 'completed' && current.entry.retryable) current.entry.fingerprint = input.fingerprint;
     const expired = current.status === 'running' && (!current.leaseUntil || Date.parse(current.leaseUntil) <= Date.now());
     if ((current.status === 'completed' && current.entry.retryable) || expired) {
       current.status = 'running';
@@ -246,7 +251,7 @@ export class AutomationWorkflowService {
   async handlePaymentPaid(input: { adminId?: string; config: ProductAutomationConfig; order: AutomationOrderSnapshot; eventId: string }): Promise<AutomationExecutionResult> {
     const rule = input.config.paidAutoDelivery;
     const key = `paid_auto_delivery:${input.order.accountId}:${input.order.orderNo}`;
-    return this.once(key, { eventId: input.eventId, orderNo: input.order.orderNo, rule }, async () => {
+    return this.once(key, { orderNo: input.order.orderNo, rule }, async () => {
       if (!rule.enabled) return skipped(key, 'rule_disabled');
       if (input.order.paymentStatus !== 'paid') return skipped(key, 'order_not_paid');
       if (input.order.deliveryStatus === 'delivered') return skipped(key, 'already_delivered');
@@ -297,15 +302,15 @@ export class AutomationWorkflowService {
   async handleUnpaidReprice(input: { adminId?: string; config: ProductAutomationConfig; order: AutomationOrderSnapshot; eventId: string }): Promise<AutomationExecutionResult> {
     const rule = input.config.unpaidAutoReprice;
     const key = `unpaid_auto_reprice:${input.order.accountId}:${input.order.orderNo}`;
-    return this.once(key, { eventId: input.eventId, orderNo: input.order.orderNo, rule }, async () => {
+    return this.once(key, { orderNo: input.order.orderNo, rule }, async () => {
       if (!rule.enabled) return skipped(key, 'rule_disabled');
       if (input.order.paymentStatus !== 'unpaid') return skipped(key, 'order_not_unpaid');
       const before = await this.port.readOrder({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo });
       if (!before) return { status: 'manual_review', executionKey: key, reason: 'reprice_state_unavailable' };
       if (before.paymentStatus !== 'unpaid') return skipped(key, 'order_paid_before_reprice');
-      const changed = await this.port.repriceOrder({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, targetPriceMinor: rule.targetPriceMinor, executionKey: key });
+      const changed = await this.repriceWithConsistencyRetry({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, targetPriceMinor: rule.targetPriceMinor, executionKey: key }, rule.retryBackoffSeconds);
       if (changed.status === 'unknown') return unknown(key, changed.errorCode ?? 'reprice_result_unknown');
-      if (changed.status === 'failed') return failed(key, changed.errorCode ?? 'reprice_failed');
+      if (changed.status === 'failed') return failed(key, changed.errorCode ?? 'reprice_failed', changed.message);
       if (rule.message && input.order.conversationId) {
         const sent = await this.port.sendText({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, conversationId: input.order.conversationId, text: rule.message, executionKey: `${key}:message` });
         if (sent.status === 'unknown') return { status: 'manual_review', executionKey: key, reason: 'reprice_succeeded_message_unknown', externalRef: changed.externalRef };
@@ -313,6 +318,17 @@ export class AutomationWorkflowService {
       }
       return { status: 'succeeded', executionKey: key, externalRef: changed.externalRef };
     }, { maxAttempts: rule.maxAttempts, retryBackoffSeconds: rule.retryBackoffSeconds });
+  }
+
+  private async repriceWithConsistencyRetry(input: Parameters<AutomationExecutionPort['repriceOrder']>[0], retryBackoffSeconds: number): Promise<AutomationExternalResult> {
+    const first = await this.port.repriceOrder(input);
+    if (first.status !== 'failed' || first.errorCode !== 'MTOP_BUSINESS_ERROR') return first;
+    // A just-created Xianyu order can briefly reject price mutation while its
+    // trade state propagates. Retry once after a short grace period; later
+    // retries still flow through the persistent ledger/backoff policy.
+    const delaySeconds = Math.min(2, Math.max(0, retryBackoffSeconds));
+    if (delaySeconds > 0) await waitForDelay(delaySeconds);
+    return this.port.repriceOrder(input);
   }
 
   async handleReviewGift(input: { adminId?: string; config: ProductAutomationConfig; order: AutomationOrderSnapshot; eventId: string }): Promise<AutomationExecutionResult> {
@@ -359,9 +375,9 @@ export class AutomationWorkflowService {
       if (!rule.enabled) return skipped(key, 'rule_disabled');
       const now = Date.parse(input.now ?? new Date().toISOString());
       const created = Date.parse(input.order.createdAt);
-      const firstDue = created + rule.firstDelayHours * 3_600_000;
+      const firstDue = created + rule.firstDelayMinutes * 60_000;
       const previous = input.order.lastReminderAt ? Date.parse(input.order.lastReminderAt) : undefined;
-      const repeatDue = previous === undefined ? firstDue : previous + rule.repeatIntervalHours * 3_600_000;
+      const repeatDue = previous === undefined ? firstDue : previous + rule.repeatIntervalMinutes * 60_000;
       const count = input.order.reminderCount ?? 0;
       if (!Number.isFinite(now) || now < repeatDue || count >= rule.maxReminders) return skipped(key, 'not_due_or_capped');
       const before = await this.port.readOrder({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo });
@@ -383,7 +399,7 @@ export class AutomationWorkflowService {
     const existing = await this.ledger.get(key);
     const isRetry = Boolean(existing?.retryable);
     if (existing) {
-      if (existing.fingerprint !== fingerprint) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution key reused with different input');
+      if (existing.fingerprint !== fingerprint && !existing.retryable) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution key reused with different input');
       if (!existing.retryable) return existing.result;
       if ((policy.maxAttempts ?? 5) <= existing.attemptCount) return { status: 'manual_review', executionKey: key, reason: 'retry_exhausted' };
       const backoffMs = Math.max(0, policy.retryBackoffSeconds ?? 0) * 1000;
@@ -460,7 +476,34 @@ function normalizeReminderRule(value: unknown, fallback: ProductAutomationConfig
   const source = asRecord(value);
   const message = source.message === undefined ? fallback.message : stringValue(source.message, 'message', 500);
   if (!message.trim()) throw new ServiceError(422, 'VALIDATION_FAILED', 'reviewReminder.message is required');
-  return { enabled: booleanValue(source.enabled, fallback.enabled), firstDelayHours: boundedInt(source.firstDelayHours, fallback.firstDelayHours, 1, 720), repeatIntervalHours: boundedInt(source.repeatIntervalHours, fallback.repeatIntervalHours, 1, 720), maxReminders: boundedInt(source.maxReminders, fallback.maxReminders, 1, 10), message: message.trim() };
+  const firstDelayMinutes = source.firstDelayMinutes === undefined
+    ? legacyHoursToMinutes(source.firstDelayHours, fallback.firstDelayMinutes)
+    : boundedInt(source.firstDelayMinutes, fallback.firstDelayMinutes, 1, 43_200);
+  const repeatIntervalMinutes = source.repeatIntervalMinutes === undefined
+    ? legacyHoursToMinutes(source.repeatIntervalHours, fallback.repeatIntervalMinutes)
+    : boundedInt(source.repeatIntervalMinutes, fallback.repeatIntervalMinutes, 1, 43_200);
+  return { enabled: booleanValue(source.enabled, fallback.enabled), firstDelayMinutes, repeatIntervalMinutes, maxReminders: boundedInt(source.maxReminders, fallback.maxReminders, 1, 10), message: message.trim() };
+}
+function legacyHoursToMinutes(value: unknown, fallbackMinutes: number): number {
+  if (value === undefined) return fallbackMinutes;
+  return boundedInt(value, Math.max(1, Math.round(fallbackMinutes / 60)), 1, 720) * 60;
+}
+function normalizeStoredConfig(value: ProductAutomationConfig): ProductAutomationConfig {
+  const defaults = defaultProductAutomationConfig();
+  const source = asRecord(value.reviewReminder);
+  const rest = { ...source };
+  delete rest.firstDelayHours;
+  delete rest.repeatIntervalHours;
+  const firstDelayMinutes = source.firstDelayMinutes === undefined
+    ? legacyHoursToMinutes(source.firstDelayHours, defaults.reviewReminder.firstDelayMinutes)
+    : source.firstDelayMinutes;
+  const repeatIntervalMinutes = source.repeatIntervalMinutes === undefined
+    ? legacyHoursToMinutes(source.repeatIntervalHours, defaults.reviewReminder.repeatIntervalMinutes)
+    : source.repeatIntervalMinutes;
+  return {
+    ...value,
+    reviewReminder: { ...rest, firstDelayMinutes, repeatIntervalMinutes } as ProductAutomationConfig['reviewReminder'],
+  };
 }
 function asRecord(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function booleanValue(value: unknown, fallback: boolean): boolean { return value === undefined ? fallback : value === true; }
@@ -483,8 +526,12 @@ function mapAutomationStoreError(error: unknown): ServiceError {
 }
 
 function skipped(executionKey: string, reason: string): AutomationExecutionResult { return { status: 'skipped', executionKey, reason }; }
-function failed(executionKey: string, reason: string): AutomationExecutionResult { return { status: 'failed', executionKey, reason }; }
+function failed(executionKey: string, reason: string, message?: string): AutomationExecutionResult { return { status: 'failed', executionKey, reason, ...(message ? { message } : {}) }; }
 function unknown(executionKey: string, reason: string): AutomationExecutionResult { return { status: 'unknown', executionKey, reason }; }
+async function waitForDelay(seconds: number): Promise<void> {
+  const milliseconds = Math.max(0, Math.min(10_000, Math.trunc(Number(seconds) * 1000 || 0)));
+  if (milliseconds > 0) await new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
 function failureReason(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim()) return error.message.slice(0, 160);
   return fallback;

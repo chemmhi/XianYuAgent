@@ -57,6 +57,32 @@ test('repriceOrder uses integer fen and classifies data.success=false as a known
   }
 });
 
+test('repriceOrder preserves remote business rejection details for diagnosis', async () => {
+  const originalFetch = globalThis.fetch;
+  let reported: { api?: string; errorCode?: string; message?: string } | undefined;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    ret: ['SUCCESS::调用成功'],
+    data: { success: false, code: 'PRICE_NOT_ALLOWED', message: '订单状态不允许改价' },
+  }), { status: 200, headers: { 'content-type': 'application/json' } });
+  const client = new XianyuMtopClient({
+    timeoutMs: 2_000,
+    loadCredential: async () => credential,
+    saveCookie: async () => undefined,
+    onFailure: async (input) => { reported = input; },
+  });
+  try {
+    const result = await client.repriceOrder('admin-1', 'account-1', 'ORDER-002C', 1299);
+    assert.equal(result.status, 'failed');
+    assert.match(result.message ?? '', /PRICE_NOT_ALLOWED/);
+    assert.match(result.message ?? '', /订单状态不允许改价/);
+    assert.equal(reported?.api, 'mtop.taobao.idle.trade.user.adjust.price');
+    assert.equal(reported?.errorCode, 'MTOP_BUSINESS_ERROR');
+    assert.match(reported?.message ?? '', /data\.success=false/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('repriceOrder does not treat a missing business success flag as success', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({ ret: ['SUCCESS::调用成功'], data: {} }), { status: 200, headers: { 'content-type': 'application/json' } });
