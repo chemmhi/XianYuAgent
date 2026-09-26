@@ -219,3 +219,4 @@
 
 
 
+| root | auto-reply-scope-fix-20260926 | codex/auto-reply-scope-20260926 | F:\\ChenHai\\Project\\XianYuAgent-auto-reply-scope-fix | Codex /root | 2026-09-26 05:33:24 +08:00 | CLEANED | b348d53 | 2026-09-26 05:35:00 +08:00 | Outcome Review worker 透传 accountId，补充跨账号隔离回归与 AR-VS-08 PostgreSQL 门禁修复；分支已合入 main 并清理 worktree。
