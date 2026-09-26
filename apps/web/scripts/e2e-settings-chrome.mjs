@@ -210,7 +210,7 @@ async function run() {
   await setLabelInput(cdp, '最大循环次数', '6');
   const legacyDebounceField = await evaluate(cdp, "Boolean(Array.from(document.querySelectorAll('[data-auto-reply-agent-panel] label')).find((label) => label.textContent?.includes('防抖窗口')))" );
   if (legacyDebounceField) throw new Error('legacy debounce field should not be visible');
-  await setLabelInput(cdp, '自动回复延迟发送时间（秒）', '1');
+  await setLabelInput(cdp, '自动回复接管等待时间（秒）', '1');
   await clickText(cdp, '保存自动回复 Agent 配置');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('自动回复 Agent 配置已保存'), 'agent settings saved');
   const agentSaved = await requestJson(apiUrl, agentPath, { headers: { cookie } });
