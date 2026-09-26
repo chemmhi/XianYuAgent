@@ -45,7 +45,8 @@ export interface AutoReplyAgentConfigVM {
   maxHistory: number;
   maxReplyLength: number;
   replySegmentDelayMs: number;
-  debounceMs: number;
+  /** Legacy response field retained for backward compatibility; the UI no longer edits it. */
+  debounceMs?: number;
   sendDelaySeconds: number;
   sendMode: AutoReplyAgentSendMode;
   accountId: string;

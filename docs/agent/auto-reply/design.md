@@ -70,7 +70,9 @@ accountId + conversationRef + externalMessageRef
 adminId + inboundMessageId
 ```
 
-同一会话内的消息应串行处理，或使用 conversation version，避免两条新消息并发生成乱序回复。
+同一会话内的消息应串行处理，或使用 conversation version，避免两条新消息并发生成乱序回复；初次 AI 接管前使用 `sendDelaySeconds` 合并窗口收集连续买家消息。
+
+初次接管窗口内的全部买家消息进入同一次上下文和逻辑回复；窗口内一旦出现人工出站消息，当前自动回复立即取消。AI 已经出站后，后续买家消息直接进入 Agent，不重复等待 `sendDelaySeconds`；只有新的人工出站消息才重新开启下一条买家消息的初次接管窗口。
 
 ### 3.2 资格检查
 
@@ -215,7 +217,7 @@ Agent 初始输入只包含必要 ID/元数据和当前消息，不预加载全�
 
 - 分段必须保持事实、顺序和全文内容完整；
 - 不设置固定单段长度或总段数上限，段落由 Agent 按买家阅读习惯决定；
-- 段间延迟使用 `replySegmentDelayMs`，可配置；
+- 段间延迟使用 `replySegmentDelayMs`，可配置；分段发送前、段间和段后均检查人工介入，人工介入后停止剩余分段。
 - 多段共享 `replyGroupId`，每段记录 `segmentIndex` / `segmentCount`；
 - 发送按顺序执行，任一段失败或结果未知时停止后续段发送并记录 `partial_send` / `send_unknown`；
 - 每段使用独立幂等键，禁止重试导致重复段落。
@@ -287,7 +289,7 @@ skipped | handoff | failed | send_unknown | partial_send
 - `maxHistory`；
 - `maxReplyLength`；
 - `replySegmentDelayMs`；
-- `debounceMs`；
+- `sendDelaySeconds`：首次 AI 接管前的延迟发送窗口，默认 300 秒；接管后不重复等待，人工出站后重新开启；
 - `sendMode` 和白名单策略引用；
 - `configVersion` / `configDigest`。
 
@@ -313,6 +315,8 @@ skipped | handoff | failed | send_unknown | partial_send
 - live 仅对白名单数组买家发送；
 - 长回复按配置拆段，段顺序、幂等键和失败恢复正确；
 - 重复 push 只产生一个 run 和一个逻辑回复；
+- 初次接管窗口聚合全部买家消息；Agent 接管后下一条消息立即处理；人工回复取消当前自动回复并重新开启等待窗口；
+- 分段发送过程中人工介入会停止剩余 AI 分段；
 - AutoReply Agent 不进入 Workspace Agent 链路，也不复用 Workspace Run/Step。
 
 ## 11. 回滚

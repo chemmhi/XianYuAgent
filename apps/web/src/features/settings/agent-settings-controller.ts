@@ -12,7 +12,7 @@ function messageOf(error: unknown): string {
 export interface AutoReplyAgentSettingsController {
   state: AutoReplyAgentSettingsState;
   reload: () => Promise<void>;
-  update: (input: { expectedVersion: number; patch: Partial<Omit<AutoReplyAgentConfigVM, 'accountId' | 'updatedByAdminId' | 'configVersion' | 'configDigest' | 'createdAt' | 'updatedAt'>> }) => Promise<AutoReplyAgentConfigVM>;
+  update: (input: { expectedVersion: number; patch: Partial<Omit<AutoReplyAgentConfigVM, 'accountId' | 'updatedByAdminId' | 'configVersion' | 'configDigest' | 'createdAt' | 'updatedAt' | 'debounceMs'>> }) => Promise<AutoReplyAgentConfigVM>;
 }
 
 export function useAutoReplyAgentSettingsController(api: AutoReplyAgentSettingsApi = fallbackApi, accountId?: string): AutoReplyAgentSettingsController {
@@ -34,7 +34,7 @@ export function useAutoReplyAgentSettingsController(api: AutoReplyAgentSettingsA
 
   useEffect(() => { void reload(); }, [reload]);
 
-  async function update(input: { expectedVersion: number; patch: Partial<Omit<AutoReplyAgentConfigVM, 'accountId' | 'updatedByAdminId' | 'configVersion' | 'configDigest' | 'createdAt' | 'updatedAt'>> }): Promise<AutoReplyAgentConfigVM> {
+  async function update(input: { expectedVersion: number; patch: Partial<Omit<AutoReplyAgentConfigVM, 'accountId' | 'updatedByAdminId' | 'configVersion' | 'configDigest' | 'createdAt' | 'updatedAt' | 'debounceMs'>> }): Promise<AutoReplyAgentConfigVM> {
     if (!accountId) throw new Error('ACCOUNT_CONTEXT_REQUIRED');
     setState((previous) => ({ ...previous, phase: 'submitting', error: null, lastAction: 'updated' }));
     try {

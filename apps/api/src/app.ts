@@ -1624,7 +1624,7 @@ function readAutoReplyAgentPatch(body: Record<string, unknown>): import('./domai
   const patch: import('./domain.js').AutoReplyAgentConfigPatch = {};
   const booleanFields = ['enabled'] as const;
   const stringFields = ['systemPrompt', 'userPromptTemplate', 'sendMode'] as const;
-  const numberFields = ['maxLoops', 'maxToolCalls', 'toolTimeoutMs', 'totalTimeoutMs', 'maxHistory', 'maxReplyLength', 'replySegmentDelayMs', 'debounceMs', 'sendDelaySeconds'] as const;
+  const numberFields = ['maxLoops', 'maxToolCalls', 'toolTimeoutMs', 'totalTimeoutMs', 'maxHistory', 'maxReplyLength', 'replySegmentDelayMs', 'sendDelaySeconds'] as const;
   for (const field of booleanFields) if (typeof body[field] === 'boolean') patch[field] = body[field] as never;
   for (const field of stringFields) if (typeof body[field] === 'string') patch[field] = body[field] as never;
   for (const field of numberFields) if (typeof body[field] === 'number') patch[field] = body[field] as never;

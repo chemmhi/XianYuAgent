@@ -78,7 +78,7 @@
 ### AR-NODE1-006（S1）无效时间戳被伪造成当前时间
 
 - **现象**：无效时间戳会回退到 `Date.now()`。
-- **风险**：旧消息可能被排序为最新消息，影响上下文、debounce 和自动回复顺序。
+- **风险**：旧消息可能被排序为最新消息，影响上下文、接管窗口和自动回复顺序。
 - **代码位置**：`apps/api/src/xianyu-im.ts:799`；历史归一化见 `apps/api/src/xianyu-im-service.ts:396-417`。
 - **批准方案**：保存 `occurredAt=null`、`receivedAt=now` 和 `timestampQuality`，不以当前时间冒充平台时间。
 - **关闭条件**：无效时间消息不会改变业务排序或被错误当作新消息触发。
@@ -205,14 +205,14 @@
 
 ### D. 并发、状态机与人工接管
 
-#### AR-CON-001（S0）会话并发、人工接管与 debounce 竞态
+#### AR-CON-001（S0）会话并发与人工接管竞态
 
-- **问题**：`lastAcceptedAt` 是进程内 Map；分类后到发送前没有数据库锁、conversation version 或原子的人接管检查。
+- **问题**：同一会话的初次接管窗口由进程内协调，分类后到发送前仍没有数据库锁、conversation version 或原子的人接管检查；旧 `debounceMs` 已不再参与运行时决策。
 - **影响**：多实例部署、重连、人工接管或连续消息可能产生乱序、过时回复或越过人工模式。
-- **证据**：`apps/api/src/auto-reply.ts:152,213-223,228-232`；设计要求见 `docs/agent/auto-reply/design.md:60-74`。
-- **当前状态**：`OPEN`。
+- **证据**：`apps/api/src/auto-reply.ts` 的 `pendingInitialWindows`、`isAgentTakeoverActive`、`waitForHumanReplyOrDelay` 及 `docs/agent/auto-reply/design.md` 的接管窗口约束。
+- **当前状态**：`PARTIALLY MITIGATED`。
 - **目标**：同一会话使用 DB/Redis lease 或版本号；发送前再次原子校验 handlingMode、最新入站版本和 run ownership。
-- **验证**：双 worker 并发、人工接管竞态、乱序消息、重试与 lease 过期测试。
+- **验证**：已覆盖单进程初次窗口聚合、接管后立即处理、人工回复取消并重开窗口、服务重建恢复、分段发送中止；双 worker 并发、跨进程 lease 和原子发送前校验仍待补齐。
 - **是否需讨论**：不需要，选择与现有 Redis/PostgreSQL 基础设施一致的方案即可。
 
 #### AR-CON-002（S1）run 卡住后没有 lease、heartbeat 和 stale-run reaper

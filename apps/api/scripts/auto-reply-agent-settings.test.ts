@@ -20,12 +20,12 @@ test('auto reply agent settings are versioned, audited and isolated from workspa
   const saved = await service.update({ adminId: admin.id, accountId: account.id, expectedVersion: 0, patch: { maxLoops: 6, debounceMs: 1_500, sendDelaySeconds: 12, systemPrompt: '只回答商品事实。' }, requestId: 'req-1', traceId: 'trace-1' });
   assert.equal(saved.configVersion, 1);
   assert.equal(saved.maxLoops, 6);
-  assert.equal(saved.debounceMs, 1_500);
+  assert.equal(saved.debounceMs, defaults.debounceMs);
   assert.equal(saved.sendDelaySeconds, 12);
   assert.equal('allowPaidOrderReply' in saved, false);
   assert.notEqual(saved.configDigest, defaults.configDigest);
   assert.equal(audits.length, 1);
-  assert.deepEqual(audits[0]?.payload, { configVersion: 1, configDigest: saved.configDigest, changedFields: ['debounceMs', 'maxLoops', 'sendDelaySeconds', 'systemPrompt'] });
+  assert.deepEqual(audits[0]?.payload, { configVersion: 1, configDigest: saved.configDigest, changedFields: ['maxLoops', 'sendDelaySeconds', 'systemPrompt'] });
   assert.equal(JSON.stringify(audits[0]?.payload).includes('只回答商品事实'), false);
 
   const reread = await service.get(admin.id, account.id);
