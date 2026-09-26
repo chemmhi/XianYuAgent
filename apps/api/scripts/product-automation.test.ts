@@ -182,12 +182,13 @@ class FakePort implements AutomationExecutionPort {
   text: AutomationExternalResult = result('succeeded');
   reviewCreated = true;
   reviewError?: Error;
+  commitError?: Error;
   sendWaitFor?: Promise<void>;
   sendStarted?: { resolve: () => void };
   readOrderResult: AutomationOrderSnapshot | undefined;
   async reserveCoupon(input: { accountId: string; batchIds: string[]; quantity: number; executionKey: string; purpose: 'delivery' | 'gift' }): Promise<{ reservationId: string; quantity: number }> { this.calls.push(`reserve:${input.purpose}`); return { reservationId: `reservation-${input.executionKey}`, quantity: input.quantity }; }
   async sendCoupon(input: { accountId: string; orderNo: string; reservationId: string; executionKey: string; purpose: 'delivery' | 'gift' }): Promise<AutomationExternalResult> { this.calls.push(`send:${input.purpose}`); this.sendStarted?.resolve(); if (this.sendWaitFor) await this.sendWaitFor; return this.couponSend; }
-  async commitCoupon(input: { reservationId: string; executionKey: string }): Promise<void> { this.calls.push('commit'); }
+  async commitCoupon(input: { reservationId: string; executionKey: string }): Promise<void> { this.calls.push('commit'); if (this.commitError) throw this.commitError; }
   async releaseCoupon(input: { reservationId: string; executionKey: string; reason: string }): Promise<void> { this.calls.push(`release:${input.reason}`); }
   async confirmShipment(input: { accountId: string; orderNo: string; executionKey: string }): Promise<AutomationExternalResult> { this.calls.push('confirm'); return this.confirm; }
   async repriceOrder(input: { accountId: string; orderNo: string; targetPriceMinor: number; executionKey: string }): Promise<AutomationExternalResult> { this.calls.push(`reprice:${input.targetPriceMinor}`); return this.repriceSequence?.shift() ?? this.reprice; }
@@ -223,6 +224,27 @@ test('payment automation is ordered, idempotent, quantity-aware and never confir
   const confirmationUnknown = await new AutomationWorkflowService(confirmationUnknownPort).handlePaymentPaid({ config, order: baseOrder(), eventId: 'paid-confirm-unknown' });
   assert.equal(confirmationUnknown.status, 'manual_review');
   assert.ok(confirmationUnknownPort.calls.includes('manual:shipment_confirmation_unknown'));
+});
+
+test('delivery confirmation is not blocked by reservation cleanup and recovery never resends', async () => {
+  const port = new FakePort();
+  port.commitError = new Error('COUPON_RESERVATION_INCONSISTENT');
+  port.confirm = result('failed', 'SHIPMENT_RETRYABLE');
+  const workflow = new AutomationWorkflowService(port);
+  const config = defaultProductAutomationConfig();
+  config.paidAutoDelivery = { ...config.paidAutoDelivery, enabled: true, couponBatchIds: ['batch-1'], autoConfirm: true, retryBackoffSeconds: 0 };
+
+  const first = await workflow.handlePaymentPaid({ config, order: baseOrder(), eventId: 'paid-cleanup-failure' });
+  assert.equal(first.status, 'manual_review');
+  assert.equal('sentQuantity' in first, false);
+  assert.deepEqual(port.calls.slice(0, 5), ['reserve:delivery', 'send:delivery', 'commit', 'release:coupon_commit_cleanup', 'confirm']);
+
+  port.confirm = result('succeeded', 'shipment-recovered');
+  const replay = await workflow.handlePaymentPaid({ config, order: baseOrder(), eventId: 'paid-cleanup-recovery' });
+  assert.equal(replay.status, 'succeeded');
+  assert.equal(port.calls.filter((call) => call === 'reserve:delivery').length, 1);
+  assert.equal(port.calls.filter((call) => call === 'send:delivery').length, 1);
+  assert.equal(port.calls.filter((call) => call === 'confirm').length, 2);
 });
 
 test('concurrent duplicate event shares one in-flight execution', async () => {

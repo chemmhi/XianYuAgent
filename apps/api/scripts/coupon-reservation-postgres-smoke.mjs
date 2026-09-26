@@ -67,7 +67,8 @@ try {
   reservationIds.push(mixed.reservationId);
   assert.equal(mixed.items.length, 2);
   assert.deepEqual(new Set(mixed.items.map((item) => item.batchId)), new Set([batch.id, mixedBatch.id]));
-  await runtime.store.releaseCouponReservation({ adminId: admin.id, reservationId: mixed.reservationId, executionKey: `pg-mixed-${suffix}`, reason: 'pg_mixed_cleanup' });
+  const mixedCommitted = await runtime.store.commitCouponReservation({ adminId: admin.id, reservationId: mixed.reservationId, executionKey: `pg-mixed-${suffix}` });
+  assert.equal(mixedCommitted.status, 'committed');
 
   dataBatch = await runtime.store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: 'PG Data Rotation Batch', purpose: 'data', metadata: { dataContent: `pg-data-1-${suffix}\npg-data-2-${suffix}` } });
   const dataFirstKey = `pg-data-1-${suffix}`;

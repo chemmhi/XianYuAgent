@@ -429,17 +429,19 @@ export class PostgresStore implements Store {
     const result = await this.pool.query('select * from automation.execution_ledger where execution_key=$1 limit 1', [executionKey]);
     return result.rows[0] ? this.toAutomationExecution(result.rows[0]) : undefined;
   }
-  async claimAutomationExecution(input: { executionKey: string; fingerprint: string; ownerToken: string; leaseUntil: string }): Promise<{ claimed: boolean; record: AutomationExecutionLedgerRecord }> {
+  async claimAutomationExecution(input: { executionKey: string; fingerprint: string; ownerToken: string; leaseUntil: string; allowManualReviewRecovery?: boolean }): Promise<{ claimed: boolean; record: AutomationExecutionLedgerRecord }> {
     const inserted = await this.pool.query(`insert into automation.execution_ledger (execution_key,fingerprint,status,owner_token,lease_until,attempt_count)
       values ($1,$2,'running',$3,$4,1) on conflict (execution_key) do nothing returning *`, [input.executionKey, input.fingerprint, input.ownerToken, input.leaseUntil]);
     if (inserted.rows[0]) return { claimed: true, record: this.toAutomationExecution(inserted.rows[0]) };
     const existing = await this.pool.query('select * from automation.execution_ledger where execution_key=$1 limit 1', [input.executionKey]);
     if (!existing.rows[0]) throw new Error('AUTOMATION_EXECUTION_CLAIM_LOST');
     const current = this.toAutomationExecution(existing.rows[0]);
-    if (current.fingerprint !== input.fingerprint && !(current.status === 'completed' && current.retryable)) throw new Error('AUTOMATION_EXECUTION_FINGERPRINT_CONFLICT');
+    const allowManualReviewRecovery = input.allowManualReviewRecovery === true;
+    const recoverManualReview = allowManualReviewRecovery && current.status === 'completed' && (current.result as { status?: unknown } | undefined)?.status === 'manual_review';
+    if (current.fingerprint !== input.fingerprint && !(current.status === 'completed' && current.retryable) && !recoverManualReview) throw new Error('AUTOMATION_EXECUTION_FINGERPRINT_CONFLICT');
     const takeover = await this.pool.query(`update automation.execution_ledger
       set status='running', fingerprint=$2, result_json=null, retryable=false, owner_token=$3, lease_until=$4, attempt_count=attempt_count+1, updated_at=now()
-      where execution_key=$1 and ((status='completed' and retryable=true) or (status='running' and fingerprint=$2 and lease_until < now())) returning *`, [input.executionKey, input.fingerprint, input.ownerToken, input.leaseUntil]);
+      where execution_key=$1 and ((status='completed' and retryable=true) or (status='completed' and $5=true and result_json->>'status'='manual_review') or (status='running' and fingerprint=$2 and lease_until < now())) returning *`, [input.executionKey, input.fingerprint, input.ownerToken, input.leaseUntil, allowManualReviewRecovery]);
     if (takeover.rows[0]) return { claimed: true, record: this.toAutomationExecution(takeover.rows[0]) };
     const latest = await this.pool.query('select * from automation.execution_ledger where execution_key=$1 limit 1', [input.executionKey]);
     return { claimed: false, record: this.toAutomationExecution(latest.rows[0]) };
@@ -852,9 +854,11 @@ export class PostgresStore implements Store {
       if (row.status === 'expired') { await client.query('commit'); throw new Error('COUPON_RESERVATION_EXPIRED'); }
       if (row.status !== 'reserved') throw new Error('COUPON_RESERVATION_NOT_ACTIVE');
       if (new Date(String(row.lease_until)).getTime() <= Date.now()) { await this.expireCouponReservations(client); throw new Error('COUPON_RESERVATION_EXPIRED'); }
+      const expectedItems = await client.query('select count(*)::int as count from coupons.coupon_reservation_items where reservation_id=$1', [input.reservationId]);
+      const expectedItemCount = Number(expectedItems.rows[0]?.count ?? 0);
       const reusable = await client.query(`update coupons.coupon_items i set status='available',reserved_until=null,consumed_at=null
         where i.status='reserved' and i.id in (select ri.item_id from coupons.coupon_reservation_items ri where ri.reservation_id=$1) returning i.id`, [input.reservationId]);
-      if ((reusable.rowCount ?? 0) !== Number(row.quantity)) throw new Error('COUPON_RESERVATION_INCONSISTENT');
+      if (expectedItemCount <= 0 || (reusable.rowCount ?? 0) !== expectedItemCount) throw new Error('COUPON_RESERVATION_INCONSISTENT');
       await client.query("update coupons.coupon_reservations set status='committed',reason=null,finalized_at=now(),updated_at=now() where id=$1", [input.reservationId]);
       const committed = await client.query('select * from coupons.coupon_reservations where id=$1', [input.reservationId]);
       const record = await this.loadCouponReservation(client, committed.rows[0]);

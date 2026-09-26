@@ -151,7 +151,6 @@ export interface AutomationExecutionResult {
   reason?: string;
   message?: string;
   externalRef?: string;
-  sentQuantity?: number;
   reminderCount?: number;
 }
 
@@ -189,23 +188,24 @@ export interface ExecutionLedgerEntry { fingerprint: string; result: AutomationE
 
 export interface AutomationExecutionLedger {
   get(key: string): ExecutionLedgerEntry | undefined | Promise<ExecutionLedgerEntry | undefined>;
-  claim(input: { key: string; fingerprint: string; ownerToken: string; leaseUntil: string }): { claimed: boolean; entry?: ExecutionLedgerEntry; running?: boolean } | Promise<{ claimed: boolean; entry?: ExecutionLedgerEntry; running?: boolean }>;
+  claim(input: { key: string; fingerprint: string; ownerToken: string; leaseUntil: string; allowManualReviewRecovery?: boolean }): { claimed: boolean; entry?: ExecutionLedgerEntry; running?: boolean } | Promise<{ claimed: boolean; entry?: ExecutionLedgerEntry; running?: boolean }>;
   complete(input: { key: string; ownerToken: string; result: AutomationExecutionResult; retryable: boolean }): void | Promise<void>;
 }
 
 export class InMemoryAutomationExecutionLedger implements AutomationExecutionLedger {
   private readonly entries = new Map<string, { entry: ExecutionLedgerEntry; ownerToken?: string; status: 'running' | 'completed'; leaseUntil?: string }>();
   get(key: string): ExecutionLedgerEntry | undefined { return this.entries.get(key)?.status === 'completed' ? structuredClone(this.entries.get(key)!.entry) : undefined; }
-  claim(input: { key: string; fingerprint: string; ownerToken: string; leaseUntil: string }): { claimed: boolean; entry?: ExecutionLedgerEntry; running?: boolean } {
+  claim(input: { key: string; fingerprint: string; ownerToken: string; leaseUntil: string; allowManualReviewRecovery?: boolean }): { claimed: boolean; entry?: ExecutionLedgerEntry; running?: boolean } {
     const current = this.entries.get(input.key);
     if (!current) {
       this.entries.set(input.key, { status: 'running', ownerToken: input.ownerToken, leaseUntil: input.leaseUntil, entry: { fingerprint: input.fingerprint, result: skipped(input.key, 'running'), retryable: false, attemptCount: 1, updatedAt: new Date().toISOString() } });
       return { claimed: true };
     }
-    if (current.entry.fingerprint !== input.fingerprint && !(current.status === 'completed' && current.entry.retryable)) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution key reused with different input');
+    const recoverManualReview = Boolean(input.allowManualReviewRecovery && current.status === 'completed' && current.entry.result.status === 'manual_review');
+    if (current.entry.fingerprint !== input.fingerprint && !(current.status === 'completed' && current.entry.retryable) && !recoverManualReview) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution key reused with different input');
     if (current.status === 'completed' && current.entry.retryable) current.entry.fingerprint = input.fingerprint;
     const expired = current.status === 'running' && (!current.leaseUntil || Date.parse(current.leaseUntil) <= Date.now());
-    if ((current.status === 'completed' && current.entry.retryable) || expired) {
+    if ((current.status === 'completed' && (current.entry.retryable || recoverManualReview)) || expired) {
       current.status = 'running';
       current.ownerToken = input.ownerToken;
       current.leaseUntil = input.leaseUntil;
@@ -233,8 +233,8 @@ export class PersistentAutomationExecutionLedger implements AutomationExecutionL
     if (!record || record.status !== 'completed' || !record.result) return undefined;
     return { fingerprint: record.fingerprint, result: record.result as AutomationExecutionResult, retryable: record.retryable, attemptCount: record.attemptCount, updatedAt: record.updatedAt };
   }
-  async claim(input: { key: string; fingerprint: string; ownerToken: string; leaseUntil: string }): Promise<{ claimed: boolean; entry?: ExecutionLedgerEntry; running?: boolean }> {
-    const result = await this.store.claimAutomationExecution({ executionKey: input.key, fingerprint: input.fingerprint, ownerToken: input.ownerToken, leaseUntil: input.leaseUntil });
+  async claim(input: { key: string; fingerprint: string; ownerToken: string; leaseUntil: string; allowManualReviewRecovery?: boolean }): Promise<{ claimed: boolean; entry?: ExecutionLedgerEntry; running?: boolean }> {
+    const result = await this.store.claimAutomationExecution({ executionKey: input.key, fingerprint: input.fingerprint, ownerToken: input.ownerToken, leaseUntil: input.leaseUntil, allowManualReviewRecovery: input.allowManualReviewRecovery });
     if (result.claimed) return { claimed: true };
     const record = result.record;
     if (record.status === 'completed' && record.result) return { claimed: false, entry: { fingerprint: record.fingerprint, result: record.result as AutomationExecutionResult, retryable: record.retryable, attemptCount: record.attemptCount, updatedAt: record.updatedAt } };
@@ -253,7 +253,21 @@ export class AutomationWorkflowService {
   async handlePaymentPaid(input: { adminId?: string; config: ProductAutomationConfig; order: AutomationOrderSnapshot; eventId: string }): Promise<AutomationExecutionResult> {
     const rule = input.config.paidAutoDelivery;
     const key = `paid_auto_delivery:${input.order.accountId}:${input.order.orderNo}`;
+    const existing = await this.ledger.get(key);
+    const recoverShipmentOnly = Boolean(existing?.result.status === 'manual_review' && existing.result.externalRef && rule.autoConfirm && input.order.deliveryStatus !== 'delivered');
     return this.once(key, { orderNo: input.order.orderNo, rule }, async () => {
+      if (recoverShipmentOnly) {
+        const confirmed = await this.port.confirmShipment({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key });
+        if (confirmed.status === 'unknown') {
+          await this.port.markManualReview({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key, reason: confirmed.errorCode ?? 'shipment_confirmation_unknown' });
+          return { status: 'manual_review', executionKey: key, reason: confirmed.errorCode ?? 'shipment_confirmation_unknown', externalRef: existing?.result.externalRef };
+        }
+        if (confirmed.status === 'failed') {
+          await this.port.markManualReview({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key, reason: confirmed.errorCode ?? 'shipment_confirmation_failed' });
+          return { status: 'manual_review', executionKey: key, reason: confirmed.errorCode ?? 'shipment_confirmation_failed', externalRef: existing?.result.externalRef };
+        }
+        return { status: 'succeeded', executionKey: key, externalRef: confirmed.externalRef ?? existing?.result.externalRef };
+      }
       if (!rule.enabled) return skipped(key, 'rule_disabled');
       if (input.order.paymentStatus !== 'paid') return skipped(key, 'order_not_paid');
       if (input.order.deliveryStatus === 'delivered') return skipped(key, 'already_delivered');
@@ -274,32 +288,39 @@ export class AutomationWorkflowService {
       }
       const sent = await this.port.sendCoupon({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, reservationId: reservation.reservationId, executionKey: key, purpose: 'delivery' });
       if (sent.status === 'unknown') {
-        if (sent.retryable) return { status: 'unknown', executionKey: key, reason: sent.errorCode ?? 'coupon_send_retryable', externalRef: sent.externalRef, sentQuantity: reservation.quantity };
+        if (sent.retryable) return { status: 'unknown', executionKey: key, reason: sent.errorCode ?? 'coupon_send_retryable', externalRef: sent.externalRef };
         await this.port.markManualReview({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key, reason: sent.errorCode ?? 'coupon_send_result_unknown' });
-        return { status: 'manual_review', executionKey: key, reason: sent.errorCode ?? 'coupon_send_result_unknown', sentQuantity: reservation.quantity };
+        return { status: 'manual_review', executionKey: key, reason: sent.errorCode ?? 'coupon_send_result_unknown' };
       }
       if (sent.status === 'failed') {
         await this.port.releaseCoupon({ adminId: input.adminId, reservationId: reservation.reservationId, executionKey: key, reason: sent.errorCode ?? sent.status });
         return failed(key, sent.errorCode ?? 'coupon_send_failed');
       }
+      let commitError: unknown;
       try {
         await this.port.commitCoupon({ adminId: input.adminId, reservationId: reservation.reservationId, executionKey: key });
       } catch (error) {
-        await this.port.markManualReview({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key, reason: 'coupon_commit_unknown' });
-        return { status: 'manual_review', executionKey: key, reason: failureReason(error, 'coupon_commit_unknown'), externalRef: sent.externalRef, sentQuantity: reservation.quantity };
+        commitError = error;
+        try { await this.port.releaseCoupon({ adminId: input.adminId, reservationId: reservation.reservationId, executionKey: key, reason: 'coupon_commit_cleanup' }); } catch { /* cleanup is best effort; remote shipment remains authoritative */ }
       }
-      if (!rule.autoConfirm) return { status: 'succeeded', executionKey: key, externalRef: sent.externalRef, sentQuantity: reservation.quantity };
+      if (!rule.autoConfirm) {
+        if (commitError) {
+          await this.port.markManualReview({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key, reason: `coupon_commit_cleanup:${failureReason(commitError, 'coupon_commit_unknown')}` });
+          return { status: 'manual_review', executionKey: key, reason: failureReason(commitError, 'coupon_commit_unknown'), externalRef: sent.externalRef };
+        }
+        return { status: 'succeeded', executionKey: key, externalRef: sent.externalRef };
+      }
       const confirmed = await this.port.confirmShipment({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key, noLogisticsForm: reservation.noLogisticsForm, tradeText: reservation.tradeText });
       if (confirmed.status === 'unknown') {
         await this.port.markManualReview({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key, reason: 'shipment_confirmation_unknown' });
-        return { status: 'manual_review', executionKey: key, reason: confirmed.errorCode ?? 'shipment_confirmation_unknown', externalRef: sent.externalRef, sentQuantity: reservation.quantity };
+        return { status: 'manual_review', executionKey: key, reason: confirmed.errorCode ?? 'shipment_confirmation_unknown', externalRef: sent.externalRef };
       }
       if (confirmed.status === 'failed') {
         await this.port.markManualReview({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key, reason: confirmed.errorCode ?? 'shipment_confirmation_failed' });
-        return { status: 'manual_review', executionKey: key, reason: confirmed.errorCode ?? 'shipment_confirmation_failed', externalRef: sent.externalRef, sentQuantity: reservation.quantity };
+        return { status: 'manual_review', executionKey: key, reason: confirmed.errorCode ?? 'shipment_confirmation_failed', externalRef: sent.externalRef };
       }
-      return { status: 'succeeded', executionKey: key, externalRef: confirmed.externalRef ?? sent.externalRef, sentQuantity: reservation.quantity };
-    }, { maxAttempts: rule.maxAttempts, retryBackoffSeconds: rule.retryBackoffSeconds });
+      return { status: 'succeeded', executionKey: key, externalRef: confirmed.externalRef ?? sent.externalRef };
+    }, { maxAttempts: rule.maxAttempts, retryBackoffSeconds: rule.retryBackoffSeconds, allowManualReviewRecovery: recoverShipmentOnly });
   }
 
   async handleUnpaidReprice(input: { adminId?: string; config: ProductAutomationConfig; order: AutomationOrderSnapshot; eventId: string }): Promise<AutomationExecutionResult> {
@@ -354,9 +375,9 @@ export class AutomationWorkflowService {
       }
       const sent = await this.port.sendCoupon({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, reservationId: reservation.reservationId, executionKey: key, purpose: 'gift' });
       if (sent.status === 'unknown') {
-        if (sent.retryable) return { status: 'unknown', executionKey: key, reason: sent.errorCode ?? 'gift_send_retryable', externalRef: sent.externalRef, sentQuantity: reservation.quantity };
+        if (sent.retryable) return { status: 'unknown', executionKey: key, reason: sent.errorCode ?? 'gift_send_retryable', externalRef: sent.externalRef };
         await this.port.markManualReview({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key, reason: sent.errorCode ?? 'gift_send_result_unknown' });
-        return { status: 'manual_review', executionKey: key, reason: sent.errorCode ?? 'gift_send_result_unknown', sentQuantity: reservation.quantity };
+        return { status: 'manual_review', executionKey: key, reason: sent.errorCode ?? 'gift_send_result_unknown' };
       }
       if (sent.status === 'failed') {
         await this.port.releaseCoupon({ adminId: input.adminId, reservationId: reservation.reservationId, executionKey: key, reason: sent.errorCode ?? sent.status });
@@ -366,9 +387,9 @@ export class AutomationWorkflowService {
         await this.port.commitCoupon({ adminId: input.adminId, reservationId: reservation.reservationId, executionKey: key });
       } catch (error) {
         await this.port.markManualReview({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key, reason: 'coupon_commit_unknown' });
-        return { status: 'manual_review', executionKey: key, reason: failureReason(error, 'coupon_commit_unknown'), externalRef: sent.externalRef, sentQuantity: reservation.quantity };
+        return { status: 'manual_review', executionKey: key, reason: failureReason(error, 'coupon_commit_unknown'), externalRef: sent.externalRef };
       }
-      return { status: 'succeeded', executionKey: key, externalRef: sent.externalRef, sentQuantity: reservation.quantity };
+      return { status: 'succeeded', executionKey: key, externalRef: sent.externalRef };
     }, { maxAttempts: rule.maxAttempts, retryBackoffSeconds: rule.retryBackoffSeconds });
   }
 
@@ -393,7 +414,7 @@ export class AutomationWorkflowService {
     });
   }
 
-  private async once(key: string, value: unknown, handler: (isRetry: boolean) => Promise<AutomationExecutionResult>, policy: { maxAttempts?: number; retryBackoffSeconds?: number } = {}): Promise<AutomationExecutionResult> {
+  private async once(key: string, value: unknown, handler: (isRetry: boolean) => Promise<AutomationExecutionResult>, policy: { maxAttempts?: number; retryBackoffSeconds?: number; allowManualReviewRecovery?: boolean } = {}): Promise<AutomationExecutionResult> {
     const fingerprint = digestJson(value);
     const running = this.inFlight.get(key);
     if (running) {
@@ -402,22 +423,23 @@ export class AutomationWorkflowService {
     }
     const existing = await this.ledger.get(key);
     const isRetry = Boolean(existing?.retryable);
+    const recoverManualReview = Boolean(policy.allowManualReviewRecovery && existing?.result.status === 'manual_review');
     if (existing) {
-      if (existing.fingerprint !== fingerprint && !existing.retryable) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution key reused with different input');
-      if (!existing.retryable) return existing.result;
+      if (existing.fingerprint !== fingerprint && !existing.retryable && !recoverManualReview) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution key reused with different input');
+      if (!existing.retryable && !recoverManualReview) return existing.result;
       if ((policy.maxAttempts ?? 5) <= existing.attemptCount) return { status: 'manual_review', executionKey: key, reason: 'retry_exhausted' };
       const backoffMs = Math.max(0, policy.retryBackoffSeconds ?? 0) * 1000;
       if (backoffMs > 0 && Date.parse(existing.updatedAt) + backoffMs > Date.now()) return existing.result;
     }
     const ownerToken = createId();
     const promise = (async () => {
-      let claim = await this.ledger.claim({ key, fingerprint, ownerToken, leaseUntil: new Date(Date.now() + 120_000).toISOString() });
+      let claim = await this.ledger.claim({ key, fingerprint, ownerToken, leaseUntil: new Date(Date.now() + 120_000).toISOString(), allowManualReviewRecovery: recoverManualReview });
       if (!claim.claimed) {
         if (claim.entry) return claim.entry.result;
         const deadline = Date.now() + 125_000;
         while (Date.now() < deadline) {
           await new Promise((resolve) => setTimeout(resolve, 50));
-          claim = await this.ledger.claim({ key, fingerprint, ownerToken, leaseUntil: new Date(Date.now() + 120_000).toISOString() });
+          claim = await this.ledger.claim({ key, fingerprint, ownerToken, leaseUntil: new Date(Date.now() + 120_000).toISOString(), allowManualReviewRecovery: recoverManualReview });
           if (claim.claimed) break;
           if (claim.entry) return claim.entry.result;
         }
