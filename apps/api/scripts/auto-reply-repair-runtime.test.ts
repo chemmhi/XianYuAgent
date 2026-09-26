@@ -100,6 +100,37 @@ test('AR-VS-08 deferred inbox reuses the same repair ingress and preserves sourc
   }
 });
 
+test('outcome review worker keeps the requested account scope', async () => {
+  const runtime = createApp(testConfig());
+  await runtime.listen();
+  try {
+    const boot = await runtime.auth.bootstrap({ email: 'ar-vs08-worker-scope@example.com', password: 'password-123', displayName: 'AR-VS-08 Worker Scope' });
+    const adminId = boot.admin.id;
+    const createReview = async (suffix: string) => {
+      const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `ar-vs08-worker-scope-${suffix}` });
+      const product = await runtime.store.createProduct({ adminId, accountId: account.id, externalProductRef: `ar-vs08-worker-product-${suffix}`, title: `AR-VS-08 Worker 商品 ${suffix}`, priceMinor: 1_999, status: 'published' });
+      const conversation = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: `ar-vs08-worker-buyer-${suffix}`, buyerDisplayName: `AR-VS-08 Worker 买家 ${suffix}`, itemRef: product.externalProductRef, itemTitle: product.title });
+      const inbound = await runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '请问多少钱？', externalMessageRef: `ar-vs08-worker-inbound-${suffix}.PNM`, source: 'system' });
+      const result = await runtime.autoReply.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: inbound.message.id, requestId: `ar-vs08-worker-request-${suffix}`, traceId: `ar-vs08-worker-trace-${suffix}` });
+      const reviews = await runtime.autoReplyRepair.listReviews(account.id, conversation.id);
+      return { account, conversation, review: reviews.find((item) => item.reviewType === 'OUTCOME')!, run: result.run };
+    };
+
+    const selected = await createReview('selected');
+    const foreign = await createReview('foreign');
+    const worker = runtime.autoReplyRepair.createOutcomeReviewWorker({
+      accountId: selected.account.id,
+      workerId: 'ar-vs08-worker-scope-test',
+      evidenceProvider: async () => [{ evidenceId: 'scope-domain-fact', type: 'DOMAIN_FACT_SATISFIED', observedAt: new Date().toISOString(), sourceEventId: 'scope-domain-fact', summary: 'scope test fact', authoritative: true }],
+    });
+    assert.deepEqual(await worker.pollOnce(), { claimed: 1, completed: 1, retried: 0, failed: 0, skipped: 0 });
+    assert.equal((await runtime.autoReplyRepair.listReviews(selected.account.id, selected.conversation.id))[1]?.resolutionStatus, 'resolved');
+    assert.equal((await runtime.autoReplyRepair.listReviews(foreign.account.id, foreign.conversation.id))[1]?.resolutionStatus, 'review_pending');
+  } finally {
+    await runtime.close();
+  }
+});
+
 test('repository keeps state_id separate from update expected_state_version', async () => {
   const calls: Array<{ text: string; values: unknown[] }> = [];
   const pool = {
