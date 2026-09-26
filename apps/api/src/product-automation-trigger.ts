@@ -198,12 +198,28 @@ export class ProductAutomationTrigger {
           }
         }
       }
+      let effectiveOrder = order;
+      if ((trigger === 'payment_paid' || trigger === 'review_gift') && order.source === 'xianyu' && ruleEnabled(config, trigger)) {
+        try {
+          const authoritative = await this.execution.readOrder({
+            adminId,
+            accountId: order.accountId,
+            productId: order.productId,
+            itemId: order.itemId,
+            itemTitle: order.itemTitle,
+            orderNo: order.orderNo,
+          });
+          if (authoritative) effectiveOrder = { ...order, ...authoritative };
+        } catch {
+          // Keep the synced snapshot when the live detail is temporarily unavailable.
+        }
+      }
       const result = trigger === 'payment_paid'
-        ? await this.workflow.handlePaymentPaid({ adminId, config, order, eventId: eventId ?? `order-refresh:${order.orderNo}:${order.updatedAt}` })
+        ? await this.workflow.handlePaymentPaid({ adminId, config, order: effectiveOrder, eventId: eventId ?? `order-refresh:${order.orderNo}:${order.updatedAt}` })
         : trigger === 'unpaid_reprice'
           ? await this.workflow.handleUnpaidReprice({ adminId, config, order, eventId: eventId ?? `order-refresh:${order.orderNo}:${order.updatedAt}` })
           : trigger === 'review_gift'
-            ? await this.workflow.handleReviewGift({ adminId, config, order, eventId: eventId ?? `review:${order.orderNo}:${order.updatedAt}` })
+            ? await this.workflow.handleReviewGift({ adminId, config, order: effectiveOrder, eventId: eventId ?? `review:${order.orderNo}:${order.updatedAt}` })
             : await this.workflow.handleReviewReminder({ adminId, config, order, now });
       if (trigger === 'review_reminder' && result.status === 'succeeded') {
         await this.store.recordReviewReminderSent({ accountId: order.accountId, orderNo: order.orderNo, sentAt: now ?? new Date().toISOString() });
