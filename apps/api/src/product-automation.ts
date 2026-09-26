@@ -149,6 +149,7 @@ export interface AutomationExecutionResult {
   status: AutomationExecutionStatus;
   executionKey: string;
   reason?: string;
+  message?: string;
   externalRef?: string;
   sentQuantity?: number;
   reminderCount?: number;
@@ -308,7 +309,7 @@ export class AutomationWorkflowService {
       if (before.paymentStatus !== 'unpaid') return skipped(key, 'order_paid_before_reprice');
       const changed = await this.port.repriceOrder({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, targetPriceMinor: rule.targetPriceMinor, executionKey: key });
       if (changed.status === 'unknown') return unknown(key, changed.errorCode ?? 'reprice_result_unknown');
-      if (changed.status === 'failed') return failed(key, changed.errorCode ?? 'reprice_failed');
+      if (changed.status === 'failed') return failed(key, changed.errorCode ?? 'reprice_failed', changed.message);
       if (rule.message && input.order.conversationId) {
         const sent = await this.port.sendText({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, conversationId: input.order.conversationId, text: rule.message, executionKey: `${key}:message` });
         if (sent.status === 'unknown') return { status: 'manual_review', executionKey: key, reason: 'reprice_succeeded_message_unknown', externalRef: changed.externalRef };
@@ -513,7 +514,7 @@ function mapAutomationStoreError(error: unknown): ServiceError {
 }
 
 function skipped(executionKey: string, reason: string): AutomationExecutionResult { return { status: 'skipped', executionKey, reason }; }
-function failed(executionKey: string, reason: string): AutomationExecutionResult { return { status: 'failed', executionKey, reason }; }
+function failed(executionKey: string, reason: string, message?: string): AutomationExecutionResult { return { status: 'failed', executionKey, reason, ...(message ? { message } : {}) }; }
 function unknown(executionKey: string, reason: string): AutomationExecutionResult { return { status: 'unknown', executionKey, reason }; }
 function failureReason(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim()) return error.message.slice(0, 160);

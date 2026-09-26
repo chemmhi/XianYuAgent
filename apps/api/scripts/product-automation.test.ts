@@ -4,7 +4,7 @@ import { MemoryStore } from '../src/store-memory.js';
 import { ProductAutomationService, AutomationWorkflowService, PersistentAutomationExecutionLedger, type AutomationExecutionPort, type AutomationExternalResult, type AutomationOrderSnapshot, defaultProductAutomationConfig } from '../src/product-automation.js';
 import type { ProductAutomationConfig } from '../src/domain.js';
 
-function result(status: AutomationExternalResult['status'], errorCode?: string): AutomationExternalResult { return { status, errorCode, externalRef: status === 'succeeded' ? `ext-${Math.random().toString(16).slice(2)}` : undefined }; }
+function result(status: AutomationExternalResult['status'], errorCode?: string, message?: string): AutomationExternalResult { return { status, errorCode, message, externalRef: status === 'succeeded' ? `ext-${Math.random().toString(16).slice(2)}` : undefined }; }
 function baseOrder(overrides: Partial<AutomationOrderSnapshot> = {}): AutomationOrderSnapshot {
   return {
     id: 'order-id', orderNo: 'ORDER-1', accountId: 'account-id', buyerId: 'buyer-id', buyerName: '买家', itemId: 'item-id', itemTitle: '资料包', amountMinor: 1990,
@@ -332,6 +332,13 @@ test('unpaid reprice does not fabricate success and does not reprice twice', asy
   const unknown = await new AutomationWorkflowService(unknownPort).handleUnpaidReprice({ config, order, eventId: 'unpaid-2' });
   assert.equal(unknown.status, 'unknown');
   assert.equal(unknownPort.calls.length, 2);
+  const rejectedPort = new FakePort();
+  rejectedPort.reprice = result('failed', 'MTOP_BUSINESS_ERROR', 'data.success=false | code=PRICE_NOT_ALLOWED | 订单状态不允许改价');
+  rejectedPort.readOrderResult = order;
+  const rejected = await new AutomationWorkflowService(rejectedPort).handleUnpaidReprice({ config, order, eventId: 'unpaid-remote-rejected' });
+  assert.equal(rejected.status, 'failed');
+  assert.equal(rejected.reason, 'MTOP_BUSINESS_ERROR');
+  assert.match(rejected.message ?? '', /PRICE_NOT_ALLOWED/);
   const paidBeforeAction = new FakePort();
   paidBeforeAction.readOrderResult = baseOrder({ paymentStatus: 'paid' });
   const skipped = await new AutomationWorkflowService(paidBeforeAction).handleUnpaidReprice({ config, order, eventId: 'unpaid-paid-before-action' });
