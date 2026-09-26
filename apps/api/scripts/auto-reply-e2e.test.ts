@@ -49,7 +49,7 @@ test('verified transaction status notices are persisted as system messages and n
   }
 });
 
-test('manual status text remains an auto-reply message while an unverified platform candidate is skipped', async () => {
+test('manual status text remains an auto-reply message while an unverified platform candidate stays system-only', async () => {
   const runtime = createApp(loadConfig({
     ...process.env,
     AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
@@ -91,11 +91,9 @@ test('manual status text remains an auto-reply message while an unverified platf
       platformSystemMessage: true,
       occurredAt: new Date().toISOString(),
     });
-    assert.equal(candidateResult.autoReply?.run.status, 'skipped');
-    assert.equal(candidateResult.autoReply?.run.failureCode, 'UNSUPPORTED_MESSAGE');
-    assert.equal(candidateResult.autoReply?.outboundMessage, undefined);
+    assert.equal(candidateResult.autoReply, undefined);
     const candidateMessages = await runtime.messages.listMessages(adminId, candidate.id, { limit: 20 });
-    assert.equal(candidateMessages.items[0]?.bodyType, 'text');
+    assert.equal(candidateMessages.items[0]?.bodyType, 'system');
     assert.equal(candidateMessages.items[0]?.riskFlags.includes('xianyu_system_candidate_unverified'), true);
     assert.equal(candidateMessages.items.filter((message) => message.direction === 'outbound').length, 0);
   } finally {

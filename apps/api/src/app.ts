@@ -319,8 +319,8 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await orders.refresh({
       adminId,
       accountId,
-      requestId: `xianyu:unpaid-order:${event.externalMessageRef}`,
-      traceId: `xianyu:unpaid-order:${event.externalMessageRef}`,
+      requestId: `xianyu:order-state:${event.externalMessageRef}`,
+      traceId: `xianyu:order-state:${event.externalMessageRef}`,
     });
   });
 

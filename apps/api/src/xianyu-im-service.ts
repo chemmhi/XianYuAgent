@@ -35,7 +35,7 @@ export class XianyuImService {
     private readonly autoReply?: AutoReplyService,
     private readonly productAutomation?: ProductAutomationTrigger,
     private readonly verificationBrowser?: XianyuVerificationBrowser,
-    private readonly refreshOrdersForTrustedUnpaidEvent?: (input: { adminId: string; accountId: string; event: XianyuImMessageEvent }) => Promise<void>,
+    private readonly refreshOrdersForTrustedOrderEvent?: (input: { adminId: string; accountId: string; event: XianyuImMessageEvent }) => Promise<void>,
   ) {
     this.inboundInboxWorker = new InboundInboxWorker(store, this, {
       workerId: `listener-fallback:${process.pid}:${randomUUID()}`,
@@ -580,11 +580,12 @@ export class XianyuImService {
       ...(client?.selfUserIds ?? []),
     ].filter((value): value is string => Boolean(value));
     let effectiveEvent = reconcileMessageDirection(event, selfUserIds, conversation?.buyerRef);
-    if (isTrustedUnpaidOrderEvent(effectiveEvent) && this.refreshOrdersForTrustedUnpaidEvent) {
+    const trustedOrderEventKind = trustedOrderRefreshKind(effectiveEvent);
+    if (trustedOrderEventKind && this.refreshOrdersForTrustedOrderEvent) {
       try {
-        await this.refreshOrdersForTrustedUnpaidEvent({ adminId, accountId: event.accountId, event: effectiveEvent });
+        await this.refreshOrdersForTrustedOrderEvent({ adminId, accountId: event.accountId, event: effectiveEvent });
       } catch (error) {
-        console.warn(JSON.stringify({ component: 'xianyu-im', event: 'trusted_unpaid_order_refresh_failed', adminId, accountId: event.accountId, externalMessageRef: event.externalMessageRef, error: error instanceof Error ? error.message : String(error) }));
+        console.warn(JSON.stringify({ component: 'xianyu-im', event: 'trusted_order_refresh_failed', orderEventKind: trustedOrderEventKind, adminId, accountId: event.accountId, externalMessageRef: event.externalMessageRef, error: error instanceof Error ? error.message : String(error) }));
       }
     }
     const classified = await this.classifySystemCandidate(adminId, event.accountId, conversation?.id, effectiveEvent);
@@ -718,10 +719,10 @@ export class XianyuImService {
   }
 }
 
-function isTrustedUnpaidOrderEvent(event: XianyuImMessageEvent): boolean {
-  return event.direction === 'inbound'
-    && event.platformSystemMessage === true
-    && parseXianyuSystemMessageKind(event.bodyText) === 'unpaid_order';
+function trustedOrderRefreshKind(event: XianyuImMessageEvent): 'unpaid_order' | 'paid_waiting_shipment' | undefined {
+  if (event.direction !== 'inbound' || event.platformSystemMessage !== true) return undefined;
+  const kind = parseXianyuSystemMessageKind(event.bodyText);
+  return kind === 'unpaid_order' || kind === 'paid_waiting_shipment' ? kind : undefined;
 }
 
 function isReadReceiptEvent(event: XianyuImMessageEvent | XianyuImReadReceiptEvent): event is XianyuImReadReceiptEvent {

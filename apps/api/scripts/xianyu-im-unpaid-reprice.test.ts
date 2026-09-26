@@ -4,7 +4,7 @@ import { MemoryStore } from '../src/store-memory.js';
 import { MessageService } from '../src/messages.js';
 import { XianyuImService } from '../src/xianyu-im-service.js';
 
-test('trusted platform unpaid reminder refreshes orders, while buyer text does not', async () => {
+test('trusted platform payment-state reminders refresh orders, while buyer text does not', async () => {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: 'unpaid-refresh@example.com', passwordHash: 'hash', displayName: 'Unpaid Refresh' });
   const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'seller-unpaid-refresh' });
@@ -39,7 +39,13 @@ test('trusted platform unpaid reminder refreshes orders, while buyer text does n
   };
 
   await service.handleExternalEvent(admin.id, { ...baseEvent, externalMessageRef: 'trusted-unpaid-event', platformSystemMessage: true });
+  await service.handleExternalEvent(admin.id, {
+    ...baseEvent,
+    externalMessageRef: 'trusted-paid-event',
+    bodyText: '[我已付款，等待你发货]',
+    platformSystemMessage: true,
+  });
   await service.handleExternalEvent(admin.id, { ...baseEvent, externalMessageRef: 'buyer-text-event' });
 
-  assert.deepEqual(refreshes, ['trusted-unpaid-event']);
+  assert.deepEqual(refreshes, ['trusted-unpaid-event', 'trusted-paid-event']);
 });
