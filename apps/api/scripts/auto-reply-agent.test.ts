@@ -4,6 +4,7 @@ import { composeAutoReplyAgentSystemPrompt, DEFAULT_AUTO_REPLY_AGENT_SYSTEM_PROM
 import { DEFAULT_AUTO_REPLY_AGENT_CONFIG } from '../src/auto-reply-agent-settings.js';
 import { AUTO_REPLY_AGENT_TOOLS, AUTO_REPLY_WEB_SEARCH_TOOL, ToolCallingAutoReplyAgent, type AutoReplyAgentTrace } from '../src/auto-reply-agent.js';
 import { AutoReplyService, NoopAutoReplySender, type AutoReplyClassification, type AutoReplyContext, type AutoReplyGeneratorObservation } from '../src/auto-reply.js';
+import { formatAutoReplyContextDocument } from '../src/auto-reply-context-document.js';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { OpenAICompatibleModelClient, type ModelClient, type ModelMessage } from '../src/pi-runtime.js';
@@ -264,6 +265,18 @@ test('agent prompt explicitly carries every pending buyer message into one reply
   assert.match(prompt, /待处理买家消息（必须在同一条回复中逐条覆盖，不能只回答第一条）/);
   assert.match(prompt, /第一个待处理问题/);
   assert.match(prompt, /第二个待处理问题/);
+});
+
+test('agent context does not repeat the current buyer message in the pending list', () => {
+  const base = context({
+    pendingBuyerMessages: [
+      { id: 'message-1', direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '这个是什么？', createdAt: '2026-09-21T00:00:00.000Z' },
+      { id: 'message-2', direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '怎么使用？', createdAt: '2026-09-21T00:00:01.000Z' },
+    ],
+  });
+  const document = formatAutoReplyContextDocument(base, classification, { maxHistory: 5, maxFieldLength: 800, maxOrders: 20 });
+  assert.equal(document.match(/这个是什么？/g)?.length, 1);
+  assert.match(document, /怎么使用？/);
 });
 
 test('agent appends context for legacy buyerMessage-only templates', async () => {

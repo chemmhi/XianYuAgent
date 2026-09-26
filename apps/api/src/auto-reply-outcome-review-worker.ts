@@ -4,6 +4,7 @@ import { createId } from './security.js';
 
 export interface OutcomeReviewWorkerOptions {
   workerId: string;
+  accountId?: string;
   batchSize?: number;
   leaseSeconds?: number;
   pollMs?: number;
@@ -58,7 +59,7 @@ export class OutcomeReviewWorker {
 
   async pollOnce(): Promise<OutcomeReviewPollResult> {
     const now = this.now();
-    const candidates = await this.repository.listClaimableOutcomeReviews({ limit: this.batchSize, now: now.toISOString() });
+    const candidates = await this.repository.listClaimableOutcomeReviews({ accountId: this.options.accountId, limit: this.batchSize, now: now.toISOString() });
     const result: OutcomeReviewPollResult = { claimed: 0, completed: 0, retried: 0, failed: 0, skipped: 0 };
     await Promise.all(candidates.map(async (candidate) => {
       const outcome = await this.processOne(candidate);

@@ -61,6 +61,88 @@ test('first takeover window aggregates buyer messages into one AI reply', { conc
   }
 });
 
+test('three messages already imported before processing produce one aggregate reply without duplicate follow-ups', { concurrency: false }, async () => {
+  const { runtime, adminId, conversation } = await bootRuntime('takeover-three-imported', 1);
+  try {
+    const seenContexts: string[][] = [];
+    let sends = 0;
+    const service = new AutoReplyService(runtime.store, runtime.messages, async () => 'takeover-three-imported-audit', {
+      sendMode: 'simulate',
+      buyerAllowlist: ['买家'],
+      sendDelaySeconds: 1,
+      generator: {
+        generate: async ({ context }) => {
+          const messages = [context.inboundMessage.bodyText ?? '', ...(context.pendingBuyerMessages ?? []).map((message) => message.bodyText ?? '')];
+          seenContexts.push(messages);
+          return messages.filter(Boolean).join('；');
+        },
+      },
+      sender: {
+        async send({ text }) {
+          sends += 1;
+          return { outcome: 'simulated' as const, externalMessageRef: `takeover-three-imported-${sends}`, };
+        },
+      },
+    });
+    const messages = await Promise.all([
+      runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '3+3等于几', source: 'system', externalMessageRef: 'takeover-three-imported-1.PNM' }),
+      runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '4+4呢', source: 'system', externalMessageRef: 'takeover-three-imported-2.PNM' }),
+      runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '5+5呢', source: 'system', externalMessageRef: 'takeover-three-imported-3.PNM' }),
+    ]);
+    const results = await Promise.all(messages.map((entry) => service.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: entry.message.id, senderName: '买家' })));
+    const stored = await runtime.messages.listMessages(adminId, conversation.id, { limit: 50 });
+    const ai = stored.items.filter((message) => message.direction === 'outbound' && message.source === 'ai');
+    assert.equal(sends, 1);
+    assert.equal(ai.length, 1);
+    assert.equal(seenContexts.length, 1);
+    assert.ok(seenContexts[0]?.some((message) => message.includes('3+3等于几')));
+    assert.ok(seenContexts[0]?.some((message) => message.includes('4+4呢')));
+    assert.ok(seenContexts[0]?.some((message) => message.includes('5+5呢')));
+    assert.equal(results.filter((result) => result.run.failureCode === 'AUTO_REPLY_COALESCED_INTO_INITIAL_WINDOW').length, 2);
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('separate auto-reply workers coalesce the same initial takeover window', { concurrency: false }, async () => {
+  const { runtime, adminId, conversation } = await bootRuntime('takeover-cross-worker', 1);
+  try {
+    const sentTexts: string[] = [];
+    const createService = (label: string) => new AutoReplyService(runtime.store, runtime.messages, async () => `takeover-cross-worker-${label}-audit`, {
+      sendMode: 'simulate',
+      buyerAllowlist: ['买家'],
+      sendDelaySeconds: 1,
+      generator: {
+        generate: async ({ context }) => [context.inboundMessage.bodyText ?? '', ...(context.pendingBuyerMessages ?? []).map((message) => message.bodyText ?? '')].filter(Boolean).join('；'),
+      },
+      sender: {
+        async send({ text }) {
+          sentTexts.push(text);
+          return { outcome: 'simulated' as const, externalMessageRef: `takeover-cross-worker-${sentTexts.length}` };
+        },
+      },
+    });
+    const serviceA = createService('a');
+    const serviceB = createService('b');
+    const imported = await Promise.all([
+      runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '3+3等于几', source: 'system', externalMessageRef: 'takeover-cross-worker-1.PNM' }),
+      runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '4+4呢', source: 'system', externalMessageRef: 'takeover-cross-worker-2.PNM' }),
+      runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '5+5呢', source: 'system', externalMessageRef: 'takeover-cross-worker-3.PNM' }),
+    ]);
+    const [first, second, third] = await Promise.all([
+      serviceA.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: imported[0]!.message.id, senderName: '买家' }),
+      serviceB.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: imported[1]!.message.id, senderName: '买家' }),
+      serviceB.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: imported[2]!.message.id, senderName: '买家' }),
+    ]);
+    const messages = await runtime.messages.listMessages(adminId, conversation.id, { limit: 50 });
+    const ai = messages.items.filter((message) => message.direction === 'outbound' && message.source === 'ai');
+    assert.equal(sentTexts.length, 1, JSON.stringify({ sentTexts, runs: [first.run.failureCode ?? first.run.status, second.run.failureCode ?? second.run.status, third.run.failureCode ?? third.run.status] }));
+    assert.equal(ai.length, 1);
+  } finally {
+    await runtime.close();
+  }
+});
+
 test('takeover window gives the generator the full buyer conversation before sending', { concurrency: false }, async () => {
   const { runtime, adminId, account, conversation } = await bootRuntime('takeover-context', 1);
   try {

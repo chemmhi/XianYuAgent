@@ -493,6 +493,15 @@ export class AutoReplyService {
         input: { kind: 'context_lookup', conversationId: conversation.id, maxHistory: runtime.maxHistory },
         output: { contextDigest, historyCount: context.recentMessages.length, pendingBuyerMessageCount: context.pendingBuyerMessages?.length ?? 0, pendingBuyerMessageIds: (context.pendingBuyerMessages ?? []).map((message) => message.id), productId: context.product?.id, orderRefs: context.orders.map((order) => order.orderNo), orderRefsCount: context.orders.length },
       } });
+      const coalescedFailureCode = agentTakeoverActive ? 'AUTO_REPLY_COALESCED_INTO_ACTIVE_GENERATION' : 'AUTO_REPLY_COALESCED_INTO_INITIAL_WINDOW';
+      if (await this.shouldYieldToEarlierRun(input.adminId, conversation.accountId, conversation.id, run.id, run.createdAt, inboundMessage.id, inboundMessage.createdAt)) {
+        const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode: coalescedFailureCode, riskFlags: [...classification.riskFlags, 'persistent_takeover_coalesced'], eventPayload: {
+          input: { kind: 'persistent_takeover_leader', inboundMessageId: inboundMessage.id, agentTakeoverActive },
+          output: { decision: 'skipped', reason: coalescedFailureCode, leaderSelectedPersistently: true },
+          error: { code: coalescedFailureCode },
+        } });
+        return { run: updated ?? run, inboundMessage, classification, context };
+      }
       await this.godView?.emit({
         phase: 'memory',
         event: 'memory.loaded',
@@ -641,6 +650,14 @@ export class AutoReplyService {
         pendingInitialWindow.coveredMessageIds.clear();
         for (const message of context.pendingBuyerMessages ?? []) pendingInitialWindow.coveredMessageIds.add(message.id);
         pendingInitialWindow.coveredMessageIds.add(inboundMessage.id);
+      }
+      if (await this.isMessageCoveredByLatestAiRun(input.adminId, conversation.accountId, conversation.id, inboundMessage.id)) {
+        const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode: coalescedFailureCode, riskFlags: [...classification.riskFlags, 'persistent_takeover_coverage'], eventPayload: {
+          input: { kind: 'persistent_takeover_coverage_before_send', inboundMessageId: inboundMessage.id, agentTakeoverActive },
+          output: { decision: 'skipped', reason: coalescedFailureCode, coveredBeforeSend: true },
+          error: { code: coalescedFailureCode },
+        } });
+        return { run: updated ?? run, inboundMessage, classification, context, repair };
       }
       let lastOutboundMessageId: string | undefined;
       let lastOutcome: Awaited<ReturnType<AutoReplySender['send']>>['outcome'] = 'simulated';
@@ -812,6 +829,27 @@ export class AutoReplyService {
       const output = event.payload?.output as { pendingBuyerMessageIds?: unknown } | undefined;
       if (!Array.isArray(output?.pendingBuyerMessageIds)) continue;
       if (output.pendingBuyerMessageIds.some((value) => value === inboundMessageId)) return true;
+    }
+    return false;
+  }
+
+  private async shouldYieldToEarlierRun(adminId: string, accountId: string, conversationId: string, currentRunId: string, currentRunCreatedAt: string, inboundMessageId: string, inboundMessageCreatedAt: string): Promise<boolean> {
+    const runs = await this.store.listAutoReplyRuns(adminId, { accountId, conversationId, processing: true, page: 1, pageSize: 100 });
+    const candidates = runs.items
+      .filter((run) => run.id !== currentRunId)
+      .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.id.localeCompare(right.id));
+    const currentStartedAt = Date.parse(currentRunCreatedAt);
+    for (const candidate of candidates) {
+      const candidateStartedAt = Date.parse(candidate.createdAt);
+      if (Number.isFinite(candidateStartedAt) && Number.isFinite(currentStartedAt) && (candidateStartedAt > currentStartedAt || (candidateStartedAt === currentStartedAt && candidate.id.localeCompare(currentRunId) > 0))) break;
+      const events = await this.store.listAutoReplyRunEvents(adminId, candidate.id);
+      const explicitlyCovered = events.some((event) => {
+        const output = event.payload?.output as { pendingBuyerMessageIds?: unknown } | undefined;
+        return Array.isArray(output?.pendingBuyerMessageIds) && output.pendingBuyerMessageIds.some((value) => value === inboundMessageId);
+      });
+      if (explicitlyCovered) return true;
+      const inboundAt = Date.parse(inboundMessageCreatedAt);
+      if (Number.isFinite(inboundAt) && Number.isFinite(candidateStartedAt) && inboundAt <= candidateStartedAt) return true;
     }
     return false;
   }

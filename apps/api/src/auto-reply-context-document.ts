@@ -35,6 +35,7 @@ export function formatAutoReplyContextDocument(
   }
 
   const pendingBuyerMessages = (context.pendingBuyerMessages ?? [])
+    .filter((message) => message.id !== context.inboundMessage.id)
     .filter((message) => Boolean(message.bodyText?.trim()) || Boolean(message.bodyRef));
   if (pendingBuyerMessages.length > 0) {
     lines.push('', '待处理买家消息（必须在同一条回复中逐条覆盖，不能只回答第一条）：');

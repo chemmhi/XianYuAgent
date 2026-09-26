@@ -27,7 +27,7 @@ try {
   assert.equal(await repository.insertReview(review), true);
   assert.equal(await repository.insertReviewEvent(event), true);
 
-  const worker = new OutcomeReviewWorker(repository, { workerId: `pg-worker-${suffix}`, policyProvider: () => policy, evidenceProvider: async () => [{ evidenceId: `fact:${suffix}`, type: 'DOMAIN_FACT_SATISFIED', observedAt: '2026-09-23T00:00:10.000Z', sourceEventId: `fact:${suffix}`, summary: 'postgres smoke fact', authoritative: true }] });
+  const worker = new OutcomeReviewWorker(repository, { accountId: account.id, workerId: `pg-worker-${suffix}`, policyProvider: () => policy, evidenceProvider: async () => [{ evidenceId: `fact:${suffix}`, type: 'DOMAIN_FACT_SATISFIED', observedAt: '2026-09-23T00:00:10.000Z', sourceEventId: `fact:${suffix}`, summary: 'postgres smoke fact', authoritative: true }] });
   const result = await worker.pollOnce();
   assert.deepEqual(result, { claimed: 1, completed: 1, retried: 0, failed: 0, skipped: 0 });
   const stored = await repository.getReview(ids.reviewId);
