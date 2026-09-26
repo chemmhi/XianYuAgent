@@ -208,11 +208,13 @@ async function run() {
   await evaluate(cdp, "(() => { const enabled = document.querySelector('[data-auto-reply-agent-panel] input[type=\"checkbox\"]'); enabled?.click(); return true; })()");
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-auto-reply-agent-panel] fieldset.auto-reply-agent-fields:not([disabled])"))'), 'Auto Reply Agent re-enabled');
   await setLabelInput(cdp, '最大循环次数', '6');
-  await setLabelInput(cdp, '防抖窗口（毫秒）', '1500');
+  const legacyDebounceField = await evaluate(cdp, "Boolean(Array.from(document.querySelectorAll('[data-auto-reply-agent-panel] label')).find((label) => label.textContent?.includes('防抖窗口')))" );
+  if (legacyDebounceField) throw new Error('legacy debounce field should not be visible');
+  await setLabelInput(cdp, '自动回复延迟发送时间（秒）', '1');
   await clickText(cdp, '保存自动回复 Agent 配置');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('自动回复 Agent 配置已保存'), 'agent settings saved');
   const agentSaved = await requestJson(apiUrl, agentPath, { headers: { cookie } });
-  if (!agentSaved.response.ok || agentSaved.body.data?.configVersion !== 1 || agentSaved.body.data?.maxLoops !== 6 || agentSaved.body.data?.debounceMs !== 1500) throw new Error(`agent settings persistence failed: ${agentSaved.response.status} ${JSON.stringify(agentSaved.body)}`);
+  if (!agentSaved.response.ok || agentSaved.body.data?.configVersion !== 1 || agentSaved.body.data?.maxLoops !== 6 || agentSaved.body.data?.sendDelaySeconds !== 1) throw new Error(`agent settings persistence failed: ${agentSaved.response.status} ${JSON.stringify(agentSaved.body)}`);
   const agentStale = await requestJson(apiUrl, '/api/v1/settings/agent', {
     method: 'PATCH',
     headers: { 'content-type': 'application/json', cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': `agent-settings-stale-${process.pid}` },

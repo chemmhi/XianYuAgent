@@ -55,10 +55,12 @@ export class AutoReplyAgentSettingsService {
     if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'expectedVersion must be a non-negative integer');
     const current = await this.get(input.adminId, input.accountId);
     if (current.configVersion !== input.expectedVersion) throw new ServiceError(409, 'VERSION_CONFLICT', 'auto reply agent settings version conflict', { server: current });
-    const config = validateConfig({ ...current, ...input.patch });
-    const saved = await this.store.upsertAutoReplyAgentConfig({ adminId: input.adminId, accountId: input.accountId, expectedVersion: input.expectedVersion, patch: input.patch, config, configDigest: digestJson(config) });
+    const { debounceMs: _legacyDebounceMs, ...effectivePatch } = input.patch;
+    void _legacyDebounceMs;
+    const config = validateConfig({ ...current, ...effectivePatch });
+    const saved = await this.store.upsertAutoReplyAgentConfig({ adminId: input.adminId, accountId: input.accountId, expectedVersion: input.expectedVersion, patch: effectivePatch, config, configDigest: digestJson(config) });
     if (!saved) throw new ServiceError(500, 'SETTINGS_SAVE_FAILED', 'auto reply agent settings could not be saved');
-    await this.audit({ actorId: input.adminId, action: 'auto_reply_agent.settings.updated', targetRef: `${input.accountId}:v${saved.configVersion}`, requestId: input.requestId, traceId: input.traceId, payload: { configVersion: saved.configVersion, configDigest: saved.configDigest, changedFields: Object.keys(input.patch).sort() } });
+    await this.audit({ actorId: input.adminId, action: 'auto_reply_agent.settings.updated', targetRef: `${input.accountId}:v${saved.configVersion}`, requestId: input.requestId, traceId: input.traceId, payload: { configVersion: saved.configVersion, configDigest: saved.configDigest, changedFields: Object.keys(effectivePatch).sort() } });
     return saved;
   }
 

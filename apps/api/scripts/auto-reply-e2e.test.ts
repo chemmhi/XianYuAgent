@@ -49,7 +49,7 @@ test('verified transaction status notices are persisted as system messages and n
   }
 });
 
-test('manual status text remains an auto-reply message while an unverified platform candidate stays system-only', async () => {
+test('manual status text remains an auto-reply message while an unverified platform candidate is skipped', async () => {
   const runtime = createApp(loadConfig({
     ...process.env,
     AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
@@ -91,6 +91,8 @@ test('manual status text remains an auto-reply message while an unverified platf
       platformSystemMessage: true,
       occurredAt: new Date().toISOString(),
     });
+    // The gateway classifies an unverified platform candidate as a system
+    // message before auto-reply routing, so no auto-reply run is created.
     assert.equal(candidateResult.autoReply, undefined);
     const candidateMessages = await runtime.messages.listMessages(adminId, candidate.id, { limit: 20 });
     assert.equal(candidateMessages.items[0]?.bodyType, 'system');
