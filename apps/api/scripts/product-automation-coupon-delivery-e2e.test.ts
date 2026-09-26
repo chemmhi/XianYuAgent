@@ -11,7 +11,7 @@ import type { XianyuMtopClient } from '../src/xianyu-mtop.js';
 
 type Harness = Awaited<ReturnType<typeof createHarness>>;
 
-async function createHarness(options: { metadata?: Record<string, unknown>; purpose?: 'text' | 'data' | 'api' | 'image'; skuSpec?: string; quantity?: number; failFirstTextSend?: boolean; failTextSendAttempts?: number; failFirstImageSend?: boolean; withoutConversation?: boolean } = {}) {
+async function createHarness(options: { metadata?: Record<string, unknown>; purpose?: 'text' | 'data' | 'api' | 'image'; skuSpec?: string; quantity?: number; failFirstTextSend?: boolean; failTextSendAttempts?: number; failFirstImageSend?: boolean; withoutConversation?: boolean; detailUnavailable?: boolean } = {}) {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: `coupon-e2e-${Math.random()}@example.com`, passwordHash: 'hash', displayName: 'Coupon E2E' });
   const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: `seller-${Math.random()}`, displayName: '卖家昵称' });
@@ -37,7 +37,9 @@ async function createHarness(options: { metadata?: Record<string, unknown>; purp
     resetClient: async () => { resetClientCalls += 1; },
   } as unknown as XianyuImService;
   const fakeMtop = {
-    readOrderDetail: async () => ({ success: true, accountInvalid: false, cookieHeader: '', detail: { orderNo: order.orderNo, itemId: order.itemId, itemTitle: order.itemTitle, buyerId: order.buyerId, conversationId: order.conversationId, paymentStatus: 'paid', deliveryStatus: 'pending', skuSpec: order.skuSpec, quantity: options.quantity } }),
+    readOrderDetail: async () => options.detailUnavailable
+      ? ({ success: false, accountInvalid: false, errorCode: 'MTOP_RETRY_EXHAUSTED', message: 'detail unavailable', cookieHeader: '' })
+      : ({ success: true, accountInvalid: false, cookieHeader: '', detail: { orderNo: order.orderNo, itemId: order.itemId, itemTitle: order.itemTitle, buyerId: order.buyerId, conversationId: order.conversationId, paymentStatus: 'paid', deliveryStatus: 'pending', skuSpec: order.skuSpec, quantity: options.quantity } }),
     confirmShipment: async (_adminId: string, _accountId: string, _orderNo: string, tradeText = '') => { shipmentCalls.push(tradeText); return { status: 'succeeded', externalRef: `shipment-${shipmentCalls.length}`, cookieHeader: '' }; },
   } as unknown as XianyuMtopClient;
   const adapter = new XianyuProductAutomationExecutionAdapter(store, () => fakeMtop, () => fakeIm);
@@ -53,6 +55,13 @@ function paidConfig(batchIds: string[], patch: Partial<ProductAutomationConfig['
     reviewReminder: { enabled: false, firstDelayMinutes: 60, repeatIntervalMinutes: 60, maxReminders: 1, message: '请评价' },
   };
 }
+
+test('发卡成功后即使订单详情读取失败也调用闲鱼确认发货 API', async () => {
+  const harness = await createHarness({ metadata: { textContent: '固定卡密' }, detailUnavailable: true });
+  const result = await harness.workflow.handlePaymentPaid({ adminId: harness.admin.id, config: paidConfig([harness.batch.id], { autoConfirm: true }), order: harness.order, eventId: 'shipment-after-detail-failure' });
+  assert.equal(result.status, 'succeeded');
+  assert.deepEqual(harness.shipmentCalls, ['']);
+});
 
 test('固定文字配置消费备注常量并执行延迟', async () => {
   const harness = await createHarness({ metadata: { textContent: '固定卡密', description: '订单={order_id};商品编号={item_id};商品详情={item_detail};商品={item_title};买家={buyer_name};买家ID={buyer_id};账号={cookie_id};卖家={seller_name};规格名={spec_name};规格值={spec_value};金额={order_amount};数量={order_quantity};内容={DELIVERY_CONTENT}', delaySeconds: 0.01 }, skuSpec: '颜色:红色' });
