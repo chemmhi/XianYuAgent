@@ -38,6 +38,7 @@
 - `037_coupon_asset_refs.sql`：为卡券图片建立对象存储引用表；数据库只保存 `storage_key`/MIME/checksum 等元数据，图片字节写入现有 S3/MinIO 兼容对象存储，旧 Data URL 由读取链路懒迁移。
 - `038_remove_coupon_quark_fields.sql`：删除卡券批次中不再使用的夸克链接和提取码列；不保留兼容读取。
 - `041_remove_coupon_delivery_scope.sql`：将历史卡券批次统一归一化为可发货后删除 `delivery_scope` 列；卡券不再区分系统/运营/买家范围。
+- `042_remove_automation_ledger_sent_quantity.sql`：清理历史自动化执行账本结果中的 `sentQuantity` 字段；数量只属于内部卡券 reservation，不再作为账本结果对外暴露。
 
 迁移执行顺序以完整文件名的字典序为准，数字前缀在历史目录中允许重复（例如 `031_auto_reply_*` 与 `031_product_automation.sql`）；新增迁移应优先使用唯一前缀，并确保 SQL 幂等且依赖在完整文件名顺序下成立。
 

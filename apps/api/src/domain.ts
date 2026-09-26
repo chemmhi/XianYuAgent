@@ -1358,7 +1358,7 @@ export interface Store {
   listAutoReplyOrders(adminId: string, query: AutoReplyOrderListQuery): Promise<AutoReplyOrderListResult>;
   getOrder(adminId: string, orderNo: string, accountId?: string): Promise<OrderRecord | undefined>;
   getAutomationExecution(executionKey: string): Promise<AutomationExecutionLedgerRecord | undefined>;
-  claimAutomationExecution(input: { executionKey: string; fingerprint: string; ownerToken: string; leaseUntil: string }): Promise<{ claimed: boolean; record: AutomationExecutionLedgerRecord }>;
+  claimAutomationExecution(input: { executionKey: string; fingerprint: string; ownerToken: string; leaseUntil: string; allowManualReviewRecovery?: boolean }): Promise<{ claimed: boolean; record: AutomationExecutionLedgerRecord }>;
   completeAutomationExecution(input: { executionKey: string; ownerToken: string; result: unknown; retryable: boolean }): Promise<void>;
   cleanupExpiredCouponReservations(): Promise<number>;
   recordReviewFact(input: { accountId: string; orderNo: string; eventId: string; reviewedAt?: string }): Promise<{ created: boolean }>;

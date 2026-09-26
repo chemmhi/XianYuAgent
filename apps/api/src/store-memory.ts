@@ -1787,7 +1787,7 @@ export class MemoryStore implements Store {
     const record = this.automationExecutions.get(executionKey);
     return record ? structuredClone(record) : undefined;
   }
-  async claimAutomationExecution(input: { executionKey: string; fingerprint: string; ownerToken: string; leaseUntil: string }): Promise<{ claimed: boolean; record: AutomationExecutionLedgerRecord }> {
+  async claimAutomationExecution(input: { executionKey: string; fingerprint: string; ownerToken: string; leaseUntil: string; allowManualReviewRecovery?: boolean }): Promise<{ claimed: boolean; record: AutomationExecutionLedgerRecord }> {
     const now = new Date().toISOString();
     const existing = this.automationExecutions.get(input.executionKey);
     if (!existing) {
@@ -1795,10 +1795,11 @@ export class MemoryStore implements Store {
       this.automationExecutions.set(input.executionKey, record);
       return { claimed: true, record: structuredClone(record) };
     }
-    if (existing.fingerprint !== input.fingerprint && !(existing.status === 'completed' && existing.retryable)) throw new Error('AUTOMATION_EXECUTION_FINGERPRINT_CONFLICT');
-    if (existing.status === 'completed' && existing.retryable) existing.fingerprint = input.fingerprint;
+    const recoverManualReview = Boolean(input.allowManualReviewRecovery && existing.status === 'completed' && (existing.result as { status?: unknown } | undefined)?.status === 'manual_review');
+    if (existing.fingerprint !== input.fingerprint && !(existing.status === 'completed' && existing.retryable) && !recoverManualReview) throw new Error('AUTOMATION_EXECUTION_FINGERPRINT_CONFLICT');
+    if (existing.status === 'completed' && (existing.retryable || recoverManualReview)) existing.fingerprint = input.fingerprint;
     const expired = existing.status === 'running' && (!existing.leaseUntil || Date.parse(existing.leaseUntil) <= Date.now());
-    if ((existing.status === 'completed' && existing.retryable) || expired) {
+    if ((existing.status === 'completed' && (existing.retryable || recoverManualReview)) || expired) {
       existing.status = 'running';
       existing.result = undefined;
       existing.retryable = false;
