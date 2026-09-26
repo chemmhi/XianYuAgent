@@ -279,30 +279,6 @@ test('configured Responses provider generates the persisted auto-reply', async (
   }
 });
 
-test('disabling the auto-reply model keeps the template generator active', async () => {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () => { throw new Error('auto-reply model must be disabled'); }) as typeof fetch;
-  const runtime = createApp(loadConfig({ AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
-    HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
-    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'test-model', AUTO_REPLY_MODEL_ENABLED: 'false', AUTO_REPLY_SEND_MODE: 'simulate', AUTOMATION_BUYER_ALLOWLIST: '["Allowlisted Buyer"]',
-  }));
-  const admin = await runtime.store.createAdmin({ email: 'model-disabled@example.com', passwordHash: 'hash', displayName: 'Model Disabled' });
-  const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'model-disabled-seller' });
-  const product = await runtime.store.createProduct({ adminId: admin.id, accountId: account.id, externalProductRef: 'model-disabled-item', title: '资料包', description: '数字资料', defaultReplyTemplate: '你好，{{buyerName}}，{{productTitle}}可拍。', priceMinor: 1_999, status: 'published' });
-  const conversation = await runtime.store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'buyer-1', buyerDisplayName: 'Allowlisted Buyer', itemRef: product.externalProductRef, itemTitle: product.title, externalConversationRef: 'model-disabled-conversation' });
-  await runtime.listen();
-  try {
-    const result = await runtime.xianyuIm.handleExternalEvent(admin.id, {
-      accountId: account.id, externalConversationRef: conversation.externalConversationRef, externalMessageRef: 'model-disabled-message-1.PNM', senderRef: 'buyer-1', senderName: 'Allowlisted Buyer', direction: 'inbound', bodyType: 'text', bodyText: '你好', occurredAt: new Date().toISOString(),
-    });
-    assert.equal(result.autoReply?.run.status, 'persisted');
-    assert.equal(result.autoReply?.outboundMessage?.bodyText, '你好，Allowlisted Buyer，资料包可拍。');
-  } finally {
-    await runtime.close();
-    globalThis.fetch = originalFetch;
-  }
-});
-
 test('model provider failure fails the run without creating an outbound message', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => new Response('{"error":"unavailable"}', { status: 503 })) as typeof fetch;

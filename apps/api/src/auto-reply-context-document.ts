@@ -34,6 +34,15 @@ export function formatAutoReplyContextDocument(
     }
   }
 
+  const pendingBuyerMessages = (context.pendingBuyerMessages ?? [])
+    .filter((message) => Boolean(message.bodyText?.trim()) || Boolean(message.bodyRef));
+  if (pendingBuyerMessages.length > 0) {
+    lines.push('', '待处理买家消息（必须在同一条回复中逐条覆盖，不能只回答第一条）：');
+    for (const message of pendingBuyerMessages) {
+      lines.push(`- 买家：${textValue(trimField(message.bodyText, options.maxFieldLength), message.bodyRef ? '[图片或附件]' : '[无文本]')}`);
+    }
+  }
+
   if (classification?.riskFlags?.length) lines.push('', `风险标记：${classification.riskFlags.join('、')}`);
 
   const orders = context.orders.slice(0, Math.max(1, options.maxOrders));

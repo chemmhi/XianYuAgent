@@ -1096,6 +1096,7 @@ export class MemoryStore implements Store {
     const filtered = [...this.autoReplyRuns.values()]
       .filter((run) => run.adminId === adminId && scoped.has(run.accountId))
       .filter((run) => !query.accountId || run.accountId === query.accountId)
+      .filter((run) => !query.conversationId || run.conversationId === query.conversationId)
       .filter((run) => Date.parse(run.createdAt) >= from && Date.parse(run.createdAt) <= to)
       .filter((run) => !query.status || run.status === query.status)
       .filter((run) => !query.decision || run.decision === query.decision)

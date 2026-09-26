@@ -441,7 +441,12 @@ function validateToolArguments(name: AutoReplyToolName, args: Record<string, unk
 
 function renderUserPrompt(template: string, context: AutoReplyContext, classification: AutoReplyClassification, config: AutoReplyAgentConfig): string {
   const document = formatAutoReplyContextDocument(context, classification, { maxHistory: config.maxHistory, maxFieldLength: 800, maxOrders: 20 });
-  return template.replaceAll('{{context}}', document);
+  const buyerMessage = context.inboundMessage.bodyText?.trim() || (context.inboundMessage.bodyRef ? '[图片或附件]' : '[无文本]');
+  const rendered = template
+    .replaceAll('{{buyerMessage}}', buyerMessage)
+    .replaceAll('{{context}}', document)
+    .replaceAll('{{facts}}', document);
+  return rendered.includes(document) ? rendered : `${rendered}\n\n<buyer_context>\n${document}\n</buyer_context>`;
 }
 
 function stringArg(value: unknown): string | undefined {

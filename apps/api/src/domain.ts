@@ -919,6 +919,7 @@ export interface AutoReplyRunUpdate {
 
 export interface AutoReplyRunListQuery {
   accountId?: string;
+  conversationId?: string;
   from?: string;
   to?: string;
   status?: AutoReplyRunStatus;

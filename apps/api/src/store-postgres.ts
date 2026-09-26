@@ -1184,6 +1184,7 @@ export class PostgresStore implements Store {
     const conditions = ["exists (select 1 from auth.account_scopes scope where scope.admin_id=$1 and scope.account_id=r.account_id and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))"];
     const add = (value: unknown) => { params.push(value); return `$${params.length}`; };
     if (query.accountId) conditions.push(`r.account_id=${add(query.accountId)}`);
+    if (query.conversationId) conditions.push(`r.conversation_id=${add(query.conversationId)}`);
     if (query.from) conditions.push(`r.created_at >= ${add(query.from)}`);
     if (query.to) conditions.push(`r.created_at <= ${add(query.to)}`);
     if (query.status) conditions.push(`r.status = ${add(query.status)}`);

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createApp } from '../dist/app.js';
+import { resolveAutoReplyAgentConfig } from '../dist/auto-reply-agent-config.js';
 import { hashPassword } from '../dist/security.js';
 import { XianyuImClient } from '../dist/xianyu-im.js';
 
@@ -8,6 +9,7 @@ const suffix = `${process.pid}-${Date.now()}`;
 const email = `auto-reply-push-pg-${suffix}@example.com`;
 const sellerRef = `auto-reply-push-pg-${suffix}`;
 const originalFetch = globalThis.fetch;
+const autoReplyAgent = resolveAutoReplyAgentConfig({ ...process.env, AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0', AUTO_REPLY_AGENT_DEBOUNCE_MS: '0', AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS: '0' });
 let modelCall = 0;
 globalThis.fetch = (async (_input, init) => {
   modelCall += 1;
@@ -35,6 +37,7 @@ const config = {
   modelTimeoutMs: 5_000,
   autoReplyModelEnabled: true,
   autoReplySendMode: 'simulate',
+  autoReplyAgent,
   buyerAllowlist: ['Auto Reply PostgreSQL Buyer'],
   autoReplyRepairMode: 'enforce',
 };
@@ -171,6 +174,7 @@ try {
     if (accountId) await active.store.pool.query('delete from messages.conversations where account_id=$1', [accountId]);
     if (accountId) await active.store.pool.query('delete from products.products where account_id=$1', [accountId]);
     if (accountId) await active.store.pool.query('delete from observability.audit_events where account_id=$1', [accountId]);
+    if (accountId) await active.store.pool.query('delete from settings.auto_reply_repair_policies where account_id=$1', [accountId]);
     if (accountId) await active.store.pool.query('delete from auth.account_credentials where account_id=$1', [accountId]);
     if (accountId) await active.store.pool.query('delete from auth.account_scopes where account_id=$1', [accountId]);
     if (accountId) await active.store.pool.query('delete from accounts.accounts where id=$1', [accountId]);

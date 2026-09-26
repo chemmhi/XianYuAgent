@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { composeAutoReplyAgentSystemPrompt, DEFAULT_AUTO_REPLY_AGENT_SYSTEM_PROMPT, resolveAutoReplyAgentConfig } from '../src/auto-reply-agent-config.js';
+import { DEFAULT_AUTO_REPLY_AGENT_CONFIG } from '../src/auto-reply-agent-settings.js';
 import { AUTO_REPLY_AGENT_TOOLS, AUTO_REPLY_WEB_SEARCH_TOOL, ToolCallingAutoReplyAgent, type AutoReplyAgentTrace } from '../src/auto-reply-agent.js';
 import { AutoReplyService, NoopAutoReplySender, type AutoReplyClassification, type AutoReplyContext, type AutoReplyGeneratorObservation } from '../src/auto-reply.js';
 import { createApp } from '../src/app.js';
@@ -236,6 +237,72 @@ test('agent sends document context without internal identifiers and with newest 
   assert.match(prompt, /商品事实：/);
   assert.doesNotMatch(prompt, /account-1|conversation-1|buyer-1|item-1|账号：|会话：|商品引用：/);
   assert.doesNotMatch(prompt, /"currentMessage"|"recentMessages"|"product"/);
+});
+
+test('agent prompt explicitly carries every pending buyer message into one reply', async () => {
+  let prompt = '';
+  const client: ModelClient = {
+    complete: async (input) => {
+      prompt = contentText(input.messages[1]?.content);
+      return { content: replyPayload('我会一起回答两个问题。'), model: 'test' };
+    },
+  };
+  const agent = new ToolCallingAutoReplyAgent({} as Store, client, resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_MAX_HISTORY: '1' }));
+  const base = context();
+  await agent.generate({
+    adminId: 'admin-1',
+    context: {
+      ...base,
+      inboundMessage: { ...base.inboundMessage, bodyText: '当前问题' },
+      pendingBuyerMessages: [
+        { id: 'pending-1', direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '第一个待处理问题', createdAt: '2026-09-21T00:00:01.000Z' },
+        { id: 'pending-2', direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '第二个待处理问题', createdAt: '2026-09-21T00:00:02.000Z' },
+      ],
+    },
+    classification,
+  });
+  assert.match(prompt, /待处理买家消息（必须在同一条回复中逐条覆盖，不能只回答第一条）/);
+  assert.match(prompt, /第一个待处理问题/);
+  assert.match(prompt, /第二个待处理问题/);
+});
+
+test('agent appends context for legacy buyerMessage-only templates', async () => {
+  let prompt = '';
+  const client: ModelClient = {
+    complete: async (input) => {
+      prompt = contentText(input.messages[1]?.content);
+      return { content: replyPayload('我会结合商品事实回复。'), model: 'test' };
+    },
+  };
+  const agent = new ToolCallingAutoReplyAgent({} as Store, client, { ...DEFAULT_AUTO_REPLY_AGENT_CONFIG, userPromptTemplate: '{{buyerMessage}}' });
+  await agent.generate({ adminId: 'admin-1', context: context(), classification });
+  assert.match(prompt, /这个是什么？/);
+  assert.match(prompt, /当前买家消息：/);
+  assert.match(prompt, /商品事实：/);
+});
+
+test('agent forwards pending buyer images as multimodal model input', async () => {
+  let request: ModelMessage | undefined;
+  const client: ModelClient = {
+    complete: async (input) => {
+      request = input.messages[1];
+      return { content: replyPayload('我已看到你补充的图片。'), model: 'test' };
+    },
+  };
+  const base = context();
+  const agent = new ToolCallingAutoReplyAgent({} as Store, client, resolveAutoReplyAgentConfig({}));
+  await agent.generate({
+    adminId: 'admin-1',
+    context: {
+      ...base,
+      pendingBuyerMessages: [
+        { id: 'pending-image-1', direction: 'inbound', senderRole: 'buyer', bodyType: 'image', bodyRef: 'https://img.example/pending.png', bodyText: undefined, createdAt: '2026-09-21T00:00:01.000Z' },
+      ],
+    },
+    classification,
+  });
+  assert.ok(Array.isArray(request?.content));
+  assert.deepEqual((request?.content as Array<Record<string, unknown>>).at(-1), { type: 'image_url', image_url: { url: 'https://img.example/pending.png', detail: 'auto' } });
 });
 
 test('shop catalog tool explicitly supports broad inventory questions without a keyword', async () => {
@@ -663,8 +730,8 @@ test('auto-reply service keeps consecutive messages active and splits long repli
     const firstResult = await autoReply.processInbound({ adminId: admin.id, conversationId: conversation.id, inboundMessageId: first.message.id, senderName: '买家' });
     const secondResult = await autoReply.processInbound({ adminId: admin.id, conversationId: conversation.id, inboundMessageId: second.message.id, senderName: '买家' });
     assert.equal(firstResult.run.status, 'persisted');
-    assert.equal(secondResult.run.status, 'persisted');
-    assert.equal(sender.calls.length, 2);
+    assert.equal(secondResult.run.failureCode, 'AUTO_REPLY_COALESCED_INTO_INITIAL_WINDOW');
+    assert.equal(sender.calls.length, 1);
     const longSender = new NoopAutoReplySender();
     const semanticSegments = ['这是商品的第一部分说明。', '这是商品的第二部分说明。', '如果你需要，我还可以继续补充。'];
     const longReply = new AutoReplyService(runtime.store, runtime.messages, async () => 'audit-agent-segments', {
