@@ -361,6 +361,17 @@ export class AutoReplyService {
       });
       if (classification.decision === 'replied') {
         const agentTakeoverActive = await this.isAgentTakeoverActive(input.adminId, conversation.id);
+        if (agentTakeoverActive && runtime.sendDelaySeconds > 0) {
+          const aiReplyAfterInbound = await this.findAiReplyAfterMessage(input.adminId, conversation.id, inboundMessage.id);
+          if (aiReplyAfterInbound) {
+            const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode: 'AUTO_REPLY_COALESCED_INTO_INITIAL_WINDOW', riskFlags: [...classification.riskFlags, 'takeover_window_coalesced'], eventPayload: {
+              input: { kind: 'takeover_window_join', inboundMessageId: inboundMessage.id },
+              output: { decision: 'skipped', reason: 'AUTO_REPLY_COALESCED_INTO_INITIAL_WINDOW', leaderMessageId: aiReplyAfterInbound.id, leaderMessageCreatedAt: aiReplyAfterInbound.createdAt },
+              error: { code: 'AUTO_REPLY_COALESCED_INTO_INITIAL_WINDOW' },
+            } });
+            return { run: updated ?? run, inboundMessage, classification };
+          }
+        }
         if (!agentTakeoverActive && runtime.sendDelaySeconds > 0) {
           const windowKey = `${input.adminId}:${conversation.id}`;
           const existingWindow = this.pendingInitialWindows.get(windowKey);
@@ -667,6 +678,30 @@ export class AutoReplyService {
       .filter((message) => message.direction === 'outbound' && (message.source === 'ai' || message.source === 'human'))
       .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.messageId.localeCompare(right.messageId));
     return outgoing.at(-1)?.source === 'ai';
+  }
+
+  private async findAiReplyAfterMessage(adminId: string, conversationId: string, afterMessageId: string): Promise<MessageRecord | undefined> {
+    const result = await this.store.listMessages(adminId, conversationId, { limit: 200 });
+    const events = await this.store.listConversationEvents(adminId, conversationId, 0, 500);
+    const anchorEvent = events.find((event) => {
+      const message = event.payload?.message as { id?: unknown } | undefined;
+      return message?.id === afterMessageId;
+    });
+    if (anchorEvent) {
+      const aiMessageIds = new Set(events
+        .filter((event) => event.cursor > anchorEvent.cursor)
+        .map((event) => event.payload?.message as { id?: unknown; direction?: unknown; senderRole?: unknown; source?: unknown } | undefined)
+        .filter((message) => typeof message?.id === 'string' && message.direction === 'outbound' && message.senderRole === 'agent' && message.source === 'ai')
+        .map((message) => message!.id as string));
+      return result.items.find((message) => aiMessageIds.has(message.id));
+    }
+    const anchorMessage = result.items.find((message) => message.id === afterMessageId);
+    const anchorCreatedAt = anchorMessage ? Date.parse(anchorMessage.createdAt) : Number.NEGATIVE_INFINITY;
+    return result.items.find((message) => {
+      if (message.direction !== 'outbound' || message.senderRole !== 'agent' || message.source !== 'ai') return false;
+      const createdAt = Date.parse(message.createdAt);
+      return !Number.isFinite(anchorCreatedAt) || !Number.isFinite(createdAt) || createdAt >= anchorCreatedAt;
+    });
   }
 
   private async waitForHumanReplyOrDelay(adminId: string, conversationId: string, afterMessageId: string, delayMs: number): Promise<MessageRecord | undefined> {

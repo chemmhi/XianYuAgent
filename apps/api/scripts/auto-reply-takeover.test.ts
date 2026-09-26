@@ -98,6 +98,97 @@ test('takeover window gives the generator the full buyer conversation before sen
   }
 });
 
+test('inbound inbox coalesces messages received during the initial takeover window', { concurrency: false }, async () => {
+  const { runtime, adminId, account, conversation } = await bootRuntime('takeover-inbox-coalesce', 1);
+  try {
+    await runtime.xianyuIm.handleExternalEvent(adminId, inbound(account.id, conversation.externalConversationRef!, 'takeover-inbox-coalesce-1.PNM', '第一个问题'), { deferAutoReply: true });
+    await runtime.xianyuIm.handleExternalEvent(adminId, inbound(account.id, conversation.externalConversationRef!, 'takeover-inbox-coalesce-2.PNM', '窗口内的第二个问题'), { deferAutoReply: true });
+
+    const firstClaim = await runtime.store.claimInboundInbox({ workerId: 'takeover-inbox-coalesce-worker', limit: 10, leaseMs: 5_000 });
+    assert.equal(firstClaim.length, 1);
+    const firstResult = await runtime.xianyuIm.processInboundInbox(firstClaim[0]!);
+    assert.equal(firstResult?.run.status, 'persisted');
+    await runtime.store.ackInboundInbox({ id: firstClaim[0]!.id, workerId: 'takeover-inbox-coalesce-worker' });
+
+    const secondClaim = await runtime.store.claimInboundInbox({ workerId: 'takeover-inbox-coalesce-worker', limit: 10, leaseMs: 5_000 });
+    assert.equal(secondClaim.length, 1);
+    const secondResult = await runtime.xianyuIm.processInboundInbox(secondClaim[0]!);
+    assert.equal(secondResult?.run.failureCode, 'AUTO_REPLY_COALESCED_INTO_INITIAL_WINDOW');
+    await runtime.store.ackInboundInbox({ id: secondClaim[0]!.id, workerId: 'takeover-inbox-coalesce-worker' });
+
+    const messages = await runtime.messages.listMessages(adminId, conversation.id, { limit: 50 });
+    assert.equal(messages.items.filter((message) => message.direction === 'outbound' && message.source === 'ai').length, 1);
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('deferred inbox auto reply is cancelled when human message arrives during the wait', { concurrency: false }, async () => {
+  const { runtime, adminId, account, conversation } = await bootRuntime('takeover-inbox-human-cancel', 2);
+  try {
+    await runtime.xianyuIm.handleExternalEvent(adminId, inbound(account.id, conversation.externalConversationRef!, 'takeover-inbox-human-cancel-1.PNM', '请先回答这个问题'), { deferAutoReply: true });
+    const claimed = await runtime.store.claimInboundInbox({ workerId: 'takeover-inbox-human-worker', limit: 10, leaseMs: 5_000 });
+    assert.equal(claimed.length, 1);
+    const processing = runtime.xianyuIm.processInboundInbox(claimed[0]!);
+    await wait(150);
+    await runtime.xianyuIm.handleExternalEvent(adminId, {
+      accountId: account.id,
+      externalConversationRef: conversation.externalConversationRef!,
+      externalMessageRef: 'takeover-inbox-human-cancel-human.PNM',
+      senderRef: account.sellerRef,
+      senderName: '卖家',
+      direction: 'outbound',
+      bodyType: 'text',
+      bodyText: '人工已接管，请稍等。',
+      occurredAt: new Date().toISOString(),
+    });
+    const result = await processing;
+    assert.equal(result?.run.failureCode, 'AUTO_REPLY_CANCELLED_BY_HUMAN_REPLY');
+    await runtime.store.ackInboundInbox({ id: claimed[0]!.id, workerId: 'takeover-inbox-human-worker' });
+    const messages = await runtime.messages.listMessages(adminId, conversation.id, { limit: 50 });
+    assert.equal(messages.items.filter((message) => message.direction === 'outbound' && message.source === 'ai').length, 0);
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('human intervention cancels queued follow-up messages from the same takeover window', { concurrency: false }, async () => {
+  const { runtime, adminId, account, conversation } = await bootRuntime('takeover-inbox-human-queued', 2);
+  try {
+    await runtime.xianyuIm.handleExternalEvent(adminId, inbound(account.id, conversation.externalConversationRef!, 'takeover-inbox-human-queued-1.PNM', '第一个问题'), { deferAutoReply: true });
+    await runtime.xianyuIm.handleExternalEvent(adminId, inbound(account.id, conversation.externalConversationRef!, 'takeover-inbox-human-queued-2.PNM', '窗口内第二个问题'), { deferAutoReply: true });
+    const firstClaim = await runtime.store.claimInboundInbox({ workerId: 'takeover-inbox-human-queued-worker', limit: 10, leaseMs: 5_000 });
+    assert.equal(firstClaim.length, 1);
+    const firstProcessing = runtime.xianyuIm.processInboundInbox(firstClaim[0]!);
+    await wait(150);
+    await runtime.xianyuIm.handleExternalEvent(adminId, {
+      accountId: account.id,
+      externalConversationRef: conversation.externalConversationRef!,
+      externalMessageRef: 'takeover-inbox-human-queued-human.PNM',
+      senderRef: account.sellerRef,
+      senderName: '卖家',
+      direction: 'outbound',
+      bodyType: 'text',
+      bodyText: '人工已接管，请稍等。',
+      occurredAt: new Date().toISOString(),
+    });
+    const firstResult = await firstProcessing;
+    assert.equal(firstResult?.run.failureCode, 'AUTO_REPLY_CANCELLED_BY_HUMAN_REPLY');
+    await runtime.store.ackInboundInbox({ id: firstClaim[0]!.id, workerId: 'takeover-inbox-human-queued-worker' });
+
+    const secondClaim = await runtime.store.claimInboundInbox({ workerId: 'takeover-inbox-human-queued-worker', limit: 10, leaseMs: 5_000 });
+    assert.equal(secondClaim.length, 1);
+    const secondResult = await runtime.xianyuIm.processInboundInbox(secondClaim[0]!);
+    assert.equal(secondResult?.run.failureCode, 'AUTO_REPLY_CANCELLED_BY_HUMAN_REPLY');
+    await runtime.store.ackInboundInbox({ id: secondClaim[0]!.id, workerId: 'takeover-inbox-human-queued-worker' });
+
+    const messages = await runtime.messages.listMessages(adminId, conversation.id, { limit: 50 });
+    assert.equal(messages.items.filter((message) => message.direction === 'outbound' && message.source === 'ai').length, 0);
+  } finally {
+    await runtime.close();
+  }
+});
+
 test('agent takeover stays active and answers the next buyer message without another five minute wait', { concurrency: false }, async () => {
   const { runtime, adminId, account, conversation } = await bootRuntime('takeover-active');
   try {
