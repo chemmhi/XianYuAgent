@@ -88,6 +88,7 @@ try {
   assert.equal(reviewEvents.some((event) => event.payload.policyHash === policyBundle.policyConfig.policyHash), true);
 
   const worker = runtime.autoReplyRepair.createOutcomeReviewWorker({
+    accountId: ids.accountId,
     workerId: `ar-vs08-outcome-${suffix}`,
     batchSize: 10,
     leaseSeconds: 60,

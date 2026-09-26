@@ -221,6 +221,7 @@ export class AutoReplyRepairRuntime {
   createOutcomeReviewWorker(options: OutcomeReviewWorkerFactoryOptions = {}): OutcomeReviewWorker {
     return new OutcomeReviewWorker(this.repository, {
       workerId: options.workerId ?? 'auto-reply-outcome-worker',
+      accountId: options.accountId,
       batchSize: options.batchSize,
       leaseSeconds: options.leaseSeconds,
       pollMs: options.pollMs,
