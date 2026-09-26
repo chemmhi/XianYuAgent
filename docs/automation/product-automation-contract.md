@@ -90,7 +90,7 @@
 
 `AutomationWorkflowService` 通过 `AutomationExecutionPort` 注入外部副作用，禁止路由直接调用闲鱼写接口。
 
-- 付款后自动发货：先 `reserveCoupon`，再 `sendCoupon`，成功后 `commitCoupon`，仅当 `autoConfirm=true` 才调用 `confirmShipment`。明确发卡失败才 `releaseCoupon`；网络超时/结果不确定时保留 reservation 并转入 `manual_review`，避免未知结果后重复发卡。确认发货未知或失败同样进入 `manual_review`，不得再次发卡。
+- 付款后自动发货：先 `reserveCoupon`，再 `sendCoupon`，成功后 `commitCoupon`，仅当 `autoConfirm=true` 才调用 `confirmShipment`。明确发卡失败才 `releaseCoupon`；对使用稳定请求 ID 的 IM 连接瞬断，保留 reservation 并记录为可重试 `unknown`，由执行账本按配置继续重试，超过最大次数再转入 `manual_review`；其它网络超时/结果不确定仍保留 reservation 并转入 `manual_review`，避免未知结果后重复发卡。确认发货未知或失败同样进入 `manual_review`，平台返回 `ORDER_ALREADY_DELIVERY` 按幂等成功处理，不得再次发卡。
 - 拍下未付款自动改价：只处理 `paymentStatus=unpaid`；价格使用分；外部返回 `unknown` 时结果为 `unknown`，绝不伪造成功。改价成功后文本发送失败不回滚改价，文本未知进入 `manual_review`。
 - 评价后发送赠品：先 `persistReviewFact` 再申请赠品库存；评价事实已存在时跳过。明确赠品发送失败才释放预留库存；网络超时/结果不确定时保留 reservation 并转入 `manual_review`，评价事实不会被清除，避免未知结果后的重复赠品。
 - 超时未评价求评价：执行前读取订单，必须满足已发货、未评价、有会话；达到首次/重复间隔且未超最大次数。消息发送前再次 `readOrder`，若期间已评价或不再满足条件则跳过。

@@ -160,6 +160,8 @@ export interface AutomationExternalResult {
   externalRef?: string;
   errorCode?: string;
   message?: string;
+  /** The request can be retried with the same idempotency key without manual review. */
+  retryable?: boolean;
 }
 
 export interface AutomationOrderSnapshot extends OrderRecord {
@@ -272,6 +274,7 @@ export class AutomationWorkflowService {
       }
       const sent = await this.port.sendCoupon({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, reservationId: reservation.reservationId, executionKey: key, purpose: 'delivery' });
       if (sent.status === 'unknown') {
+        if (sent.retryable) return { status: 'unknown', executionKey: key, reason: sent.errorCode ?? 'coupon_send_retryable', externalRef: sent.externalRef, sentQuantity: reservation.quantity };
         await this.port.markManualReview({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key, reason: sent.errorCode ?? 'coupon_send_result_unknown' });
         return { status: 'manual_review', executionKey: key, reason: sent.errorCode ?? 'coupon_send_result_unknown', sentQuantity: reservation.quantity };
       }
@@ -351,6 +354,7 @@ export class AutomationWorkflowService {
       }
       const sent = await this.port.sendCoupon({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, reservationId: reservation.reservationId, executionKey: key, purpose: 'gift' });
       if (sent.status === 'unknown') {
+        if (sent.retryable) return { status: 'unknown', executionKey: key, reason: sent.errorCode ?? 'gift_send_retryable', externalRef: sent.externalRef, sentQuantity: reservation.quantity };
         await this.port.markManualReview({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, executionKey: key, reason: sent.errorCode ?? 'gift_send_result_unknown' });
         return { status: 'manual_review', executionKey: key, reason: sent.errorCode ?? 'gift_send_result_unknown', sentQuantity: reservation.quantity };
       }

@@ -86,8 +86,8 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
       }
       if (!order.conversationId) return failedExternal('CONVERSATION_MISSING', 'order conversation is missing');
       const im = this.getIm();
-      if (!im) return unknownExternal('XIANYU_IM_NOT_READY', 'xianyu im service is not ready');
-      if (typeof im.isReady === 'function' && !await im.isReady(adminId, input.accountId)) return failedExternal('XIANYU_IM_NOT_READY', 'xianyu im service is not ready before coupon send');
+      if (!im) return retryableUnknownExternal('XIANYU_IM_NOT_READY', 'xianyu im service is not ready');
+      if (typeof im.isReady === 'function' && !await im.isReady(adminId, input.accountId)) return retryableUnknownExternal('XIANYU_IM_NOT_READY', 'xianyu im service is not ready before coupon send');
       const account = await this.store.getAccount(adminId, input.accountId);
       const product = order.productId ? await this.store.getProduct(adminId, order.productId) : undefined;
       const orderSpec = parseSkuSpec(order.skuSpec);
@@ -114,7 +114,7 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
         for (const imageUrl of resolved.imageUrls) {
           const file = await this.resolveImage(adminId, batch.id, imageUrl);
           const requestId = `automation:${input.executionKey}:batch:${batch.id}:image:${imageIndex}`;
-          const sent = await im.sendImage(adminId, input.accountId, order.conversationId, file, requestId, requestId) as { externalMessageRef?: string };
+          const sent = await sendImageWithReconnectRetry(im, adminId, input.accountId, order.conversationId, file, requestId) as { externalMessageRef?: string };
           externalMessageRef = sent.externalMessageRef ?? externalMessageRef;
           imageIndex += 1;
         }
@@ -161,7 +161,9 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
       return { status: 'succeeded', externalRef: input.orderNo };
     }
     const result = await this.getMtop().confirmShipment(adminId, input.accountId, input.orderNo, input.noLogisticsForm ? input.tradeText ?? '' : '');
-    return mapMutationResult(result);
+    const mapped = mapMutationResult(result);
+    if (mapped.status === 'failed' && isAlreadyDeliveredResult(mapped)) return { status: 'succeeded', externalRef: mapped.externalRef ?? input.orderNo };
+    return mapped;
   }
 
   async repriceOrder(input: Parameters<AutomationExecutionPort['repriceOrder']>[0]): Promise<AutomationExternalResult> {
@@ -308,18 +310,32 @@ function splitMessages(value: string): string[] {
 }
 
 async function sendTextWithReconnectRetry(im: XianyuImService, adminId: string, accountId: string, conversationId: string, text: string, requestId: string): Promise<unknown> {
-  try {
-    return await im.sendText(adminId, accountId, conversationId, text, requestId, requestId);
-  } catch (error) {
-    if (!isRetryableImConnectionError(error) || typeof im.resetClient !== 'function') throw error;
-    await im.resetClient(adminId, accountId);
-    return im.sendText(adminId, accountId, conversationId, text, requestId, requestId);
+  return sendWithReconnectRetry(async () => im.sendText(adminId, accountId, conversationId, text, requestId, requestId), im, adminId, accountId);
+}
+
+async function sendImageWithReconnectRetry(im: XianyuImService, adminId: string, accountId: string, conversationId: string, file: { filename: string; contentType: string; data: Buffer }, requestId: string): Promise<unknown> {
+  return sendWithReconnectRetry(async () => im.sendImage(adminId, accountId, conversationId, file, requestId, requestId), im, adminId, accountId);
+}
+
+async function sendWithReconnectRetry(send: () => Promise<unknown>, im: XianyuImService, adminId: string, accountId: string): Promise<unknown> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await send();
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableImConnectionError(error) || typeof im.resetClient !== 'function' || attempt === 1) throw error;
+      await im.resetClient(adminId, accountId);
+    }
   }
+  throw lastError;
 }
 
 function isRetryableImConnectionError(error: unknown): boolean {
   const code = errorCode(error);
-  return /(?:XIANYU_IM_CONNECTION_CLOSED|XIANYU_IM_NOT_CONNECTED|XIANYU_IM_WS_OPEN_TIMEOUT|ECONNRESET|ETIMEDOUT|TIMEOUT)/u.test(code);
+  const message = error instanceof Error ? error.message.toUpperCase() : String(error).toUpperCase();
+  return /(?:XIANYU_IM_CONNECTION_CLOSED|XIANYU_IM_NOT_CONNECTED|XIANYU_IM_WS_OPEN_TIMEOUT|ECONNRESET|ETIMEDOUT|TIMEOUT|FAILED_TO_FETCH)/u.test(code)
+    || /FAILED TO FETCH|FETCH FAILED/u.test(message);
 }
 
 function mapMutationResult(result: XianyuExternalMutationResult): AutomationExternalResult {
@@ -330,7 +346,8 @@ function classifyExternalError(error: unknown, prefix: string): AutomationExtern
   const code = errorCode(error);
   const message = error instanceof Error ? error.message.slice(0, 180) : String(error).slice(0, 180);
   const knownFailure = /INVALID|MISSING|NOT_FOUND|FORBIDDEN|SCOPE|SESSION_EXPIRED|ACCOUNT|AUTH|PERMISSION|REJECTED_4\d\d|REMOTE_4\d\d|COUPON_CONTENT_EMPTY/u.test(code);
-  return { status: knownFailure ? 'failed' : 'unknown', errorCode: code || `${prefix.toUpperCase()}_UNKNOWN`, message };
+  const retryable = !knownFailure && isRetryableImConnectionError(error);
+  return { status: knownFailure ? 'failed' : 'unknown', errorCode: code || `${prefix.toUpperCase()}_UNKNOWN`, message, retryable };
 }
 
 function failedExternal(errorCode: string, message: string): AutomationExternalResult {
@@ -339,6 +356,15 @@ function failedExternal(errorCode: string, message: string): AutomationExternalR
 
 function unknownExternal(errorCode: string, message: string): AutomationExternalResult {
   return { status: 'unknown', errorCode, message };
+}
+
+function retryableUnknownExternal(errorCode: string, message: string): AutomationExternalResult {
+  return { status: 'unknown', errorCode, message, retryable: true };
+}
+
+function isAlreadyDeliveredResult(result: AutomationExternalResult): boolean {
+  return result.errorCode === 'ORDER_ALREADY_DELIVERY'
+    || result.message?.includes('ORDER_ALREADY_DELIVERY') === true;
 }
 
 function requireAdminId(value: string | undefined): string {

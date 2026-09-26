@@ -158,3 +158,17 @@ test('treats numeric order status 3 as already shipped', async () => {
   assert.equal(result.externalRef, order.orderNo);
   assert.equal(confirmed, false);
 });
+
+test('treats ORDER_ALREADY_DELIVERY from the shipment mutation as idempotent success', async () => {
+  const { store, admin, account, order } = await setup();
+  let confirmed = false;
+  const fakeMtop = {
+    readOrderDetail: async () => ({ success: true, accountInvalid: false, detail: { orderNo: order.orderNo, deliveryStatus: '2' }, cookieHeader: '' }),
+    confirmShipment: async () => { confirmed = true; return { status: 'failed', errorCode: 'ORDER_ALREADY_DELIVERY', message: '订单已发货', externalRef: order.orderNo }; },
+  } as unknown as XianyuMtopClient;
+  const adapter = new XianyuProductAutomationExecutionAdapter(store, () => fakeMtop, () => undefined);
+  const result = await adapter.confirmShipment({ adminId: admin.id, accountId: account.id, productId: order.productId, itemId: order.itemId, itemTitle: order.itemTitle, orderNo: order.orderNo, executionKey: 'live-confirm-already-delivered' });
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.externalRef, order.orderNo);
+  assert.equal(confirmed, true);
+});
