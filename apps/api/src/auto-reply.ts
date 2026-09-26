@@ -17,6 +17,7 @@ export interface AutoReplyContext {
   conversation: ConversationRecord;
   inboundMessage: MessageRecord;
   recentMessages: Array<Pick<MessageRecord, 'direction' | 'senderRole' | 'bodyText'> & Partial<Pick<MessageRecord, 'createdAt' | 'source' | 'bodyType' | 'bodyRef'>>>;
+  pendingBuyerMessages?: Array<Pick<MessageRecord, 'id' | 'direction' | 'senderRole' | 'bodyText' | 'bodyType' | 'bodyRef' | 'createdAt'>>;
   product?: AutoReplyProductContext;
   orders: AutoReplyOrderContext[];
 }
@@ -169,8 +170,20 @@ export interface AutoReplyServiceRuntimeOptions {
 interface PendingInitialWindow {
   readonly key: string;
   readonly promise: Promise<void>;
+  readonly delayMs: number;
+  readonly coveredMessageIds: Set<string>;
+  succeeded: boolean;
   resolve(): void;
 }
+
+interface ActiveGenerationTask {
+  readonly key: string;
+  readonly promise: Promise<void>;
+  readonly coveredMessageIds: Set<string>;
+  resolve(): void;
+}
+
+const ACTIVE_GENERATION_COALESCE_MS = 100;
 
 export class AutoReplyService {
   private readonly enabled: boolean;
@@ -189,6 +202,7 @@ export class AutoReplyService {
   private readonly godView?: AutoReplyGodViewSink;
   private readonly configProvider?: (adminId: string, accountId: string) => Promise<AutoReplyServiceRuntimeOptions>;
   private readonly pendingInitialWindows = new Map<string, PendingInitialWindow>();
+  private readonly activeGenerationTasks = new Map<string, ActiveGenerationTask>();
 
   constructor(
     private readonly store: Store,
@@ -246,6 +260,8 @@ export class AutoReplyService {
     let repair: AutoReplyRepairCandidateResult | undefined;
     let repairRoute: Awaited<ReturnType<AutoReplyRepairRuntime['routeInbound']>>;
     let pendingInitialWindow: PendingInitialWindow | undefined;
+    let activeGenerationTask: ActiveGenerationTask | undefined;
+    let agentTakeoverActive = false;
     try {
       run = await this.store.createAutoReplyRun({ adminId: input.adminId, accountId: conversation.accountId, conversationId: conversation.id, inboundMessageId: inboundMessage.id, intent: 'pending', decision: 'skipped', status: 'received', inputDigest });
     } catch (error) {
@@ -360,7 +376,7 @@ export class AutoReplyService {
         payload: { ruleClassification, classification, modelDecidesRouting, hardSafety, allowlisted: true },
       });
       if (classification.decision === 'replied') {
-        const agentTakeoverActive = await this.isAgentTakeoverActive(input.adminId, conversation.id);
+        agentTakeoverActive = await this.isAgentTakeoverActive(input.adminId, conversation.id);
         if (agentTakeoverActive && runtime.sendDelaySeconds > 0) {
           const aiReplyAfterInbound = await this.findAiReplyAfterMessage(input.adminId, conversation.id, inboundMessage.id);
           if (aiReplyAfterInbound) {
@@ -374,26 +390,51 @@ export class AutoReplyService {
         }
         if (!agentTakeoverActive && runtime.sendDelaySeconds > 0) {
           const windowKey = `${input.adminId}:${conversation.id}`;
-          const existingWindow = this.pendingInitialWindows.get(windowKey);
-          if (existingWindow) {
+          while (true) {
+            const existingWindow = this.pendingInitialWindows.get(windowKey);
+            if (!existingWindow) {
+              pendingInitialWindow = this.createPendingInitialWindow(windowKey, runtime.sendDelaySeconds * 1_000);
+              this.pendingInitialWindows.set(windowKey, pendingInitialWindow);
+              break;
+            }
             await existingWindow.promise;
-            const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode: 'AUTO_REPLY_COALESCED_INTO_INITIAL_WINDOW', riskFlags: ['takeover_window_coalesced'], eventPayload: {
-              input: { kind: 'takeover_window_join', windowKey },
-              output: { decision: 'skipped', reason: 'AUTO_REPLY_COALESCED_INTO_INITIAL_WINDOW', leaderWindow: true },
-              error: { code: 'AUTO_REPLY_COALESCED_INTO_INITIAL_WINDOW' },
-            } });
-            return { run: updated ?? run, inboundMessage, classification };
+            const humanReply = await this.findHumanReplyAfterMessage(input.adminId, conversation.id, inboundMessage.id);
+            if (humanReply) {
+              const failureCode = 'AUTO_REPLY_CANCELLED_BY_HUMAN_REPLY';
+              const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode, riskFlags: [...classification.riskFlags, 'human_reply_during_send_delay'], eventPayload: {
+                input: { kind: 'takeover_window_join', windowKey },
+                output: { decision: 'skipped', reason: failureCode, humanReplyMessageId: humanReply.id },
+                error: { code: failureCode },
+              } });
+              return { run: updated ?? run, inboundMessage, classification };
+            }
+            if (existingWindow.succeeded && existingWindow.coveredMessageIds.has(inboundMessage.id)) {
+              const failureCode = 'AUTO_REPLY_COALESCED_INTO_INITIAL_WINDOW';
+              const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode, riskFlags: ['takeover_window_coalesced'], eventPayload: {
+                input: { kind: 'takeover_window_join', windowKey },
+                output: { decision: 'skipped', reason: failureCode, leaderWindow: true },
+                error: { code: failureCode },
+              } });
+              return { run: updated ?? run, inboundMessage, classification };
+            }
+            // The leader failed or sent before this message was covered. Reuse
+            // the already elapsed window and let one retrying run own the next
+            // generation while other joiners wait on it.
+            const retryWindow = this.pendingInitialWindows.get(windowKey);
+            if (!retryWindow) {
+              pendingInitialWindow = this.createPendingInitialWindow(windowKey, 0);
+              this.pendingInitialWindows.set(windowKey, pendingInitialWindow);
+              break;
+            }
           }
-          pendingInitialWindow = this.createPendingInitialWindow(windowKey);
-          this.pendingInitialWindows.set(windowKey, pendingInitialWindow);
         }
       }
       if (pendingInitialWindow) {
         await updateRun({ eventPayload: {
-          input: { kind: 'takeover_window', delaySeconds: runtime.sendDelaySeconds, inboundMessageCreatedAt: inboundMessage.createdAt },
+          input: { kind: 'takeover_window', delaySeconds: pendingInitialWindow.delayMs / 1_000, inboundMessageCreatedAt: inboundMessage.createdAt },
           output: { decision: 'waiting', reason: 'AUTO_REPLY_TAKEOVER_WINDOW' },
         } });
-        const humanReply = await this.waitForHumanReplyOrDelay(input.adminId, conversation.id, inboundMessage.id, runtime.sendDelaySeconds * 1_000);
+        const humanReply = await this.waitForHumanReplyOrDelay(input.adminId, conversation.id, inboundMessage.id, pendingInitialWindow.delayMs);
         if (humanReply) {
           const failureCode = 'AUTO_REPLY_CANCELLED_BY_HUMAN_REPLY';
           const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode, riskFlags: [...classification.riskFlags, 'human_reply_during_send_delay'], eventPayload: {
@@ -406,11 +447,53 @@ export class AutoReplyService {
           return { run: updated ?? run, inboundMessage, classification, repair };
         }
       }
-      const context = await this.buildContext(input.adminId, conversation, inboundMessage, runtime.maxHistory);
-      const contextDigest = digestJson({ conversationId: conversation.id, productId: context.product?.id, orderRefs: context.orders.map((order) => order.orderNo), history: context.recentMessages.map((message) => ({ direction: message.direction, senderRole: message.senderRole, createdAt: message.createdAt, bodyText: message.bodyText ?? '' })) });
+      if (agentTakeoverActive) {
+        const activeKey = `${input.adminId}:${conversation.id}`;
+        while (true) {
+          const existingTask = this.activeGenerationTasks.get(activeKey);
+          if (!existingTask) {
+            activeGenerationTask = this.createActiveGenerationTask(activeKey);
+            this.activeGenerationTasks.set(activeKey, activeGenerationTask);
+            break;
+          }
+          await existingTask.promise;
+          const humanReply = await this.findHumanReplyAfterMessage(input.adminId, conversation.id, inboundMessage.id);
+          if (humanReply) {
+            const failureCode = 'AUTO_REPLY_CANCELLED_BY_HUMAN_REPLY';
+            const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode, riskFlags: [...classification.riskFlags, 'human_reply_during_active_generation'], eventPayload: {
+              input: { kind: 'active_generation_join', inboundMessageId: inboundMessage.id, activeKey },
+              output: { decision: 'skipped', reason: failureCode, leaderGeneration: true, humanReplyMessageId: humanReply.id },
+              error: { code: failureCode },
+            } });
+            return { run: updated ?? run, inboundMessage, classification };
+          }
+          if (existingTask.coveredMessageIds.has(inboundMessage.id)) {
+            const failureCode = 'AUTO_REPLY_COALESCED_INTO_ACTIVE_GENERATION';
+            const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode, riskFlags: [...classification.riskFlags, 'active_generation_coalesced'], eventPayload: {
+              input: { kind: 'active_generation_join', inboundMessageId: inboundMessage.id, activeKey },
+              output: { decision: 'skipped', reason: failureCode, leaderGeneration: true },
+              error: { code: failureCode },
+            } });
+            return { run: updated ?? run, inboundMessage, classification };
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, ACTIVE_GENERATION_COALESCE_MS));
+        const humanDuringAggregation = await this.findHumanReplyAfterMessage(input.adminId, conversation.id, inboundMessage.id);
+        if (humanDuringAggregation) {
+          const failureCode = 'AUTO_REPLY_CANCELLED_BY_HUMAN_REPLY';
+          const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode, riskFlags: [...classification.riskFlags, 'human_reply_during_active_generation'], eventPayload: {
+            input: { kind: 'active_generation_aggregation', activeKey },
+            output: { decision: 'skipped', reason: failureCode, humanReplyMessageId: humanDuringAggregation.id },
+            error: { code: failureCode },
+          } });
+          return { run: updated ?? run, inboundMessage, classification };
+        }
+      }
+      let context = await this.buildContext(input.adminId, conversation, inboundMessage, runtime.maxHistory);
+      let contextDigest = digestJson({ conversationId: conversation.id, productId: context.product?.id, orderRefs: context.orders.map((order) => order.orderNo), history: context.recentMessages.map((message) => ({ direction: message.direction, senderRole: message.senderRole, createdAt: message.createdAt, bodyText: message.bodyText ?? '' })), pendingBuyerMessages: (context.pendingBuyerMessages ?? []).map((message) => ({ id: message.id, bodyText: message.bodyText ?? '' })) });
       await updateRun({ status: 'context_loaded', contextDigest, productId: context.product?.id, orderRefs: context.orders.map((order) => order.orderNo), eventPayload: {
         input: { kind: 'context_lookup', conversationId: conversation.id, maxHistory: runtime.maxHistory },
-        output: { contextDigest, historyCount: context.recentMessages.length, productId: context.product?.id, orderRefs: context.orders.map((order) => order.orderNo), orderRefsCount: context.orders.length },
+        output: { contextDigest, historyCount: context.recentMessages.length, pendingBuyerMessageCount: context.pendingBuyerMessages?.length ?? 0, productId: context.product?.id, orderRefs: context.orders.map((order) => order.orderNo), orderRefsCount: context.orders.length },
       } });
       await this.godView?.emit({
         phase: 'memory',
@@ -461,9 +544,31 @@ export class AutoReplyService {
         return { run: updated ?? run, inboundMessage, classification, context };
       }
 
-      const generatedReply = repairRefusal
-        ? { text: '这类敏感信息我无法提供，但我可以继续帮你查询商品、订单、库存或发货信息。' }
-        : normalizeGeneratedReply(await withTimeout(runtime.generator.generate({ adminId: input.adminId, context, classification, observe: observeGenerator, runId: run.id, traceId }), runtime.totalTimeoutMs));
+      let generatedReply: AutoReplyGeneratedReply | undefined;
+      if (repairRefusal) {
+        generatedReply = { text: '这类敏感信息我无法提供，但我可以继续帮你查询商品、订单、库存或发货信息。' };
+      } else {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          generatedReply = normalizeGeneratedReply(await withTimeout(runtime.generator.generate({ adminId: input.adminId, context, classification, observe: observeGenerator, runId: run.id, traceId }), runtime.totalTimeoutMs));
+          const humanAfterGeneration = await this.findHumanReplyAfterMessage(input.adminId, conversation.id, inboundMessage.id);
+          if (humanAfterGeneration) {
+            const failureCode = 'AUTO_REPLY_CANCELLED_BY_HUMAN_REPLY';
+            const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode, riskFlags: [...classification.riskFlags, 'human_reply_during_generation'], eventPayload: {
+              input: { kind: 'generation_refresh_gate', attempt },
+              output: { decision: 'skipped', reason: failureCode, humanReplyMessageId: humanAfterGeneration.id, humanReplyCreatedAt: humanAfterGeneration.createdAt },
+              error: { code: failureCode },
+            } });
+            await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'skipped', reason: failureCode, humanReplyMessageId: humanAfterGeneration.id, attempt });
+            return { run: updated ?? run, inboundMessage, classification, context, repair };
+          }
+          const refreshedContext = await this.buildContext(input.adminId, conversation, inboundMessage, runtime.maxHistory);
+          const previousPendingIds = new Set((context.pendingBuyerMessages ?? []).map((message) => message.id));
+          const hasNewPendingMessage = (refreshedContext.pendingBuyerMessages ?? []).some((message) => !previousPendingIds.has(message.id));
+          if (!hasNewPendingMessage) break;
+          context = refreshedContext;
+          contextDigest = digestJson({ conversationId: conversation.id, productId: context.product?.id, orderRefs: context.orders.map((order) => order.orderNo), history: context.recentMessages.map((message) => ({ direction: message.direction, senderRole: message.senderRole, createdAt: message.createdAt, bodyText: message.bodyText ?? '' })), pendingBuyerMessages: (context.pendingBuyerMessages ?? []).map((message) => ({ id: message.id, bodyText: message.bodyText ?? '' })) });
+        }
+      }
       let reply = generatedReply ? normalizeReply(generatedReply.text) : undefined;
       if (!reply) {
         const updated = await updateRun({ status: 'failed', decision: 'failed', failureCode: 'REPLY_EMPTY', eventPayload: {
@@ -528,6 +633,16 @@ export class AutoReplyService {
           }
           if (this.repairRuntime.currentMode === 'enforce') throw error;
         }
+      }
+      if (activeGenerationTask) {
+        activeGenerationTask.coveredMessageIds.clear();
+        for (const message of context.pendingBuyerMessages ?? []) activeGenerationTask.coveredMessageIds.add(message.id);
+        activeGenerationTask.coveredMessageIds.add(inboundMessage.id);
+      }
+      if (pendingInitialWindow) {
+        pendingInitialWindow.coveredMessageIds.clear();
+        for (const message of context.pendingBuyerMessages ?? []) pendingInitialWindow.coveredMessageIds.add(message.id);
+        pendingInitialWindow.coveredMessageIds.add(inboundMessage.id);
       }
       let lastOutboundMessageId: string | undefined;
       let lastOutcome: Awaited<ReturnType<AutoReplySender['send']>>['outcome'] = 'simulated';
@@ -598,6 +713,7 @@ export class AutoReplyService {
         input: { kind: 'persistence', replyDigest, segmentCount: segments.length, senderOutcome: lastOutcome },
         output: { decision: 'replied', senderOutcome: lastOutcome, outboundMessageId: lastOutboundMessageId, persisted: true, segmentCount: segments.length },
       } });
+      if (pendingInitialWindow) pendingInitialWindow.succeeded = true;
       await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'replied', intent: classification.intent, senderOutcome: lastOutcome, outboundMessageId: lastOutboundMessageId, segmentCount: segments.length, contextDigest, replyDigest });
       await this.godView?.emit({
         phase: 'run',
@@ -654,15 +770,25 @@ export class AutoReplyService {
     } finally {
       if (pendingInitialWindow) {
         pendingInitialWindow.resolve();
-        this.pendingInitialWindows.delete(pendingInitialWindow.key);
+        if (this.pendingInitialWindows.get(pendingInitialWindow.key) === pendingInitialWindow) this.pendingInitialWindows.delete(pendingInitialWindow.key);
+      }
+      if (activeGenerationTask) {
+        activeGenerationTask.resolve();
+        if (this.activeGenerationTasks.get(activeGenerationTask.key) === activeGenerationTask) this.activeGenerationTasks.delete(activeGenerationTask.key);
       }
     }
   }
 
-  private createPendingInitialWindow(key: string): PendingInitialWindow {
+  private createPendingInitialWindow(key: string, delayMs: number): PendingInitialWindow {
     let resolvePromise!: () => void;
     const promise = new Promise<void>((resolve) => { resolvePromise = resolve; });
-    return { key, promise, resolve: resolvePromise };
+    return { key, promise, delayMs, coveredMessageIds: new Set<string>(), succeeded: false, resolve: resolvePromise };
+  }
+
+  private createActiveGenerationTask(key: string): ActiveGenerationTask {
+    let resolvePromise!: () => void;
+    const promise = new Promise<void>((resolve) => { resolvePromise = resolve; });
+    return { key, promise, coveredMessageIds: new Set<string>(), resolve: resolvePromise };
   }
 
   private async isAgentTakeoverActive(adminId: string, conversationId: string): Promise<boolean> {
@@ -687,21 +813,13 @@ export class AutoReplyService {
       const message = event.payload?.message as { id?: unknown } | undefined;
       return message?.id === afterMessageId;
     });
-    if (anchorEvent) {
-      const aiMessageIds = new Set(events
-        .filter((event) => event.cursor > anchorEvent.cursor)
-        .map((event) => event.payload?.message as { id?: unknown; direction?: unknown; senderRole?: unknown; source?: unknown } | undefined)
-        .filter((message) => typeof message?.id === 'string' && message.direction === 'outbound' && message.senderRole === 'agent' && message.source === 'ai')
-        .map((message) => message!.id as string));
-      return result.items.find((message) => aiMessageIds.has(message.id));
-    }
-    const anchorMessage = result.items.find((message) => message.id === afterMessageId);
-    const anchorCreatedAt = anchorMessage ? Date.parse(anchorMessage.createdAt) : Number.NEGATIVE_INFINITY;
-    return result.items.find((message) => {
-      if (message.direction !== 'outbound' || message.senderRole !== 'agent' || message.source !== 'ai') return false;
-      const createdAt = Date.parse(message.createdAt);
-      return !Number.isFinite(anchorCreatedAt) || !Number.isFinite(createdAt) || createdAt >= anchorCreatedAt;
-    });
+    if (!anchorEvent) return undefined;
+    const aiMessageIds = new Set(events
+      .filter((event) => event.cursor > anchorEvent.cursor)
+      .map((event) => event.payload?.message as { id?: unknown; direction?: unknown; senderRole?: unknown; source?: unknown } | undefined)
+      .filter((message) => typeof message?.id === 'string' && message.direction === 'outbound' && message.senderRole === 'agent' && message.source === 'ai')
+      .map((message) => message!.id as string));
+    return result.items.find((message) => aiMessageIds.has(message.id));
   }
 
   private async waitForHumanReplyOrDelay(adminId: string, conversationId: string, afterMessageId: string, delayMs: number): Promise<MessageRecord | undefined> {
@@ -731,6 +849,19 @@ export class AutoReplyService {
 
   private async buildContext(adminId: string, conversation: ConversationRecord, inboundMessage: MessageRecord, maxHistory = this.maxHistory): Promise<AutoReplyContext> {
     const history = await this.store.listAutoReplyMessages(adminId, conversation.id, { limit: maxHistory + 1 });
+    const allMessages = (await this.store.listMessages(adminId, conversation.id, { limit: 200 })).items
+      .slice()
+      .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.id.localeCompare(right.id));
+    let latestAgentReplyIndex = -1;
+    for (let index = 0; index < allMessages.length; index += 1) {
+      const message = allMessages[index]!;
+      if (message.direction === 'outbound' && message.senderRole === 'agent' && (message.source === 'ai' || message.source === 'human')) latestAgentReplyIndex = index;
+    }
+    const pendingBuyerMessages = allMessages
+      .slice(latestAgentReplyIndex + 1)
+      .filter((message) => message.direction === 'inbound' && message.senderRole === 'buyer' && Boolean(message.bodyText?.trim() || message.bodyRef))
+      .slice(-Math.max(1, maxHistory))
+      .map((message) => ({ id: message.id, direction: message.direction, senderRole: message.senderRole, bodyType: message.bodyType, bodyText: message.bodyText, bodyRef: message.bodyRef, createdAt: message.createdAt }));
     const product = await this.findProduct(adminId, conversation);
     const orders = await this.findOrders(adminId, conversation);
     return {
@@ -739,7 +870,8 @@ export class AutoReplyService {
       recentMessages: history.items
         .filter((message) => message.messageId !== inboundMessage.id)
         .slice(-maxHistory)
-        .map((message) => ({ direction: message.direction, senderRole: message.senderRole, bodyType: message.bodyType, bodyText: message.bodyText, bodyRef: message.bodyRef })),
+        .map((message) => ({ messageId: message.messageId, direction: message.direction, senderRole: message.senderRole, bodyType: message.bodyType, bodyText: message.bodyText, bodyRef: message.bodyRef })),
+      pendingBuyerMessages,
       product,
       orders,
     };

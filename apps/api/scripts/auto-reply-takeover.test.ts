@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
-import { AutoReplyService, type AutoReplySendInput } from '../src/auto-reply.js';
+import { AutoReplyService, type AutoReplyContext, type AutoReplySendInput } from '../src/auto-reply.js';
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -93,6 +93,244 @@ test('takeover window gives the generator the full buyer conversation before sen
     assert.equal(sends, 1);
     assert.equal(seenHistory.length, 1);
     assert.ok(seenHistory[0]?.includes('第二个问题'));
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('takeover window refreshes the context when a buyer message arrives during generation', { concurrency: false }, async () => {
+  const { runtime, adminId, account, conversation } = await bootRuntime('takeover-generation-aggregate', 1);
+  try {
+    const seenContexts: string[][] = [];
+    const service = new AutoReplyService(runtime.store, runtime.messages, async () => 'takeover-generation-aggregate-audit', {
+      sendMode: 'simulate',
+      buyerAllowlist: ['买家'],
+      sendDelaySeconds: 1,
+      generator: {
+        generate: async ({ context }) => {
+          seenContexts.push([
+            context.inboundMessage.bodyText ?? '',
+            ...(context.pendingBuyerMessages ?? []).map((message) => message.bodyText ?? ''),
+          ]);
+          return '我会一起处理这两条问题。';
+        },
+      },
+    });
+    const first = await runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '第一个问题', source: 'system', externalMessageRef: 'takeover-generation-aggregate-1.PNM' });
+    const firstRun = service.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: first.message.id, senderName: '买家' });
+    await wait(100);
+    await runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '生成期间的第二个问题', source: 'system', externalMessageRef: 'takeover-generation-aggregate-2.PNM' });
+    await firstRun;
+    assert.equal(seenContexts.length, 1);
+    assert.ok(seenContexts[0]?.includes('第一个问题'));
+    assert.ok(seenContexts[0]?.includes('生成期间的第二个问题'));
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('active takeover coalesces messages received while the agent is generating', { concurrency: false }, async () => {
+  const { runtime, adminId, account, conversation } = await bootRuntime('active-generation-aggregate', 0);
+  try {
+    await runtime.xianyuIm.handleExternalEvent(adminId, inbound(account.id, conversation.externalConversationRef!, 'active-generation-aggregate-seed.PNM', '先建立接管状态'));
+    const seenContexts: string[][] = [];
+    let generationStarted!: () => void;
+    const generationStartedPromise = new Promise<void>((resolve) => { generationStarted = resolve; });
+    let releaseGeneration!: () => void;
+    const generationReleasePromise = new Promise<void>((resolve) => { releaseGeneration = resolve; });
+    let generationCalls = 0;
+    const service = new AutoReplyService(runtime.store, runtime.messages, async () => 'active-generation-aggregate-audit', {
+      sendMode: 'simulate',
+      buyerAllowlist: ['买家'],
+      sendDelaySeconds: 0,
+      generator: {
+        generate: async ({ context }) => {
+          generationCalls += 1;
+          seenContexts.push([
+            context.inboundMessage.bodyText ?? '',
+            ...(context.pendingBuyerMessages ?? []).map((message) => message.bodyText ?? ''),
+          ]);
+          generationStarted();
+          await generationReleasePromise;
+          return '我会一起处理接管后的两条问题。';
+        },
+      },
+    });
+    const first = await runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '接管后的第一个问题', source: 'system', externalMessageRef: 'active-generation-aggregate-1.PNM' });
+    const firstRun = service.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: first.message.id, senderName: '买家' });
+    await wait(20);
+    const second = await runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '接管后的第二个问题', source: 'system', externalMessageRef: 'active-generation-aggregate-2.PNM' });
+    const secondRun = service.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: second.message.id, senderName: '买家' });
+    await new Promise((resolve) => generationStartedPromise.then(resolve));
+    releaseGeneration();
+    const [firstResult, secondResult] = await Promise.all([firstRun, secondRun]);
+    assert.equal(generationCalls, 1);
+    assert.equal(seenContexts.length, 1);
+    assert.ok(seenContexts[0]?.includes('接管后的第一个问题'));
+    assert.ok(seenContexts[0]?.includes('接管后的第二个问题'));
+    assert.equal(firstResult.run.status, 'persisted');
+    assert.equal(secondResult.run.failureCode, 'AUTO_REPLY_COALESCED_INTO_ACTIVE_GENERATION');
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('active takeover refreshes the model context when a message arrives after generation starts', { concurrency: false }, async () => {
+  const { runtime, adminId, account, conversation } = await bootRuntime('active-generation-late-arrival', 0);
+  try {
+    await runtime.xianyuIm.handleExternalEvent(adminId, inbound(account.id, conversation.externalConversationRef!, 'active-generation-late-arrival-seed.PNM', '先建立接管状态'));
+    const seenContexts: string[][] = [];
+    let generationStarted!: () => void;
+    const generationStartedPromise = new Promise<void>((resolve) => { generationStarted = resolve; });
+    let releaseFirstGeneration!: () => void;
+    const releaseFirstGenerationPromise = new Promise<void>((resolve) => { releaseFirstGeneration = resolve; });
+    let generationCalls = 0;
+    const service = new AutoReplyService(runtime.store, runtime.messages, async () => 'active-generation-late-arrival-audit', {
+      sendMode: 'simulate',
+      buyerAllowlist: ['买家'],
+      sendDelaySeconds: 0,
+      generator: {
+        generate: async ({ context }) => {
+          generationCalls += 1;
+          seenContexts.push([
+            context.inboundMessage.bodyText ?? '',
+            ...(context.pendingBuyerMessages ?? []).map((message) => message.bodyText ?? ''),
+          ]);
+          if (generationCalls === 1) {
+            generationStarted();
+            await releaseFirstGenerationPromise;
+          }
+          return '我会一起处理接管后的全部问题。';
+        },
+      },
+    });
+    const first = await runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '接管后的第一个问题', source: 'system', externalMessageRef: 'active-generation-late-arrival-1.PNM' });
+    const firstRun = service.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: first.message.id, senderName: '买家' });
+    await new Promise((resolve) => generationStartedPromise.then(resolve));
+    const second = await runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '生成开始后的第二个问题', source: 'system', externalMessageRef: 'active-generation-late-arrival-2.PNM' });
+    const secondRun = service.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: second.message.id, senderName: '买家' });
+    releaseFirstGeneration();
+    const [firstResult, secondResult] = await Promise.all([firstRun, secondRun]);
+    const messages = await runtime.messages.listMessages(adminId, conversation.id, { limit: 50 });
+    assert.equal(generationCalls, 2);
+    assert.ok(seenContexts.at(-1)?.includes('生成开始后的第二个问题'));
+    assert.equal(messages.items.filter((message) => message.direction === 'outbound' && message.source === 'ai' && message.bodyText === '我会一起处理接管后的全部问题。').length, 1);
+    assert.equal(firstResult.run.status, 'persisted');
+    assert.equal(secondResult.run.failureCode, 'AUTO_REPLY_COALESCED_INTO_ACTIVE_GENERATION');
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('active takeover does not lose a buyer message that arrives during sending', { concurrency: false }, async () => {
+  const { runtime, adminId, account, conversation } = await bootRuntime('active-send-race', 0);
+  try {
+    await runtime.xianyuIm.handleExternalEvent(adminId, inbound(account.id, conversation.externalConversationRef!, 'active-send-race-seed.PNM', '先建立接管状态'));
+    let service!: AutoReplyService;
+    let secondRunPromise: Promise<Awaited<ReturnType<AutoReplyService['processInbound']>>> | undefined;
+    let generationCalls = 0;
+    const serviceOptions = {
+      sendMode: 'simulate' as const,
+      buyerAllowlist: ['买家'],
+      sendDelaySeconds: 0,
+      generator: {
+        generate: async ({ context }: { context: AutoReplyContext }) => {
+          generationCalls += 1;
+          return `已处理：${context.pendingBuyerMessages?.map((message) => message.bodyText).filter(Boolean).join('；') ?? ''}`;
+        },
+      },
+      sender: {
+        send: async (input: AutoReplySendInput) => {
+          if (!secondRunPromise) {
+            const second = await runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '发送阶段到达的第二个问题', source: 'system', externalMessageRef: 'active-send-race-2.PNM' });
+            secondRunPromise = service.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: second.message.id, senderName: '买家' });
+          }
+          return { outcome: 'simulated' as const, externalMessageRef: `active-send-race-${input.segmentIndex ?? 0}` };
+        },
+      },
+    };
+    service = new AutoReplyService(runtime.store, runtime.messages, async () => 'active-send-race-audit', serviceOptions);
+    const first = await runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '发送前的第一个问题', source: 'system', externalMessageRef: 'active-send-race-1.PNM' });
+    const firstResult = await service.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: first.message.id, senderName: '买家' });
+    assert.ok(secondRunPromise);
+    const secondResult = await secondRunPromise;
+    const messages = await runtime.messages.listMessages(adminId, conversation.id, { limit: 50 });
+    assert.equal(firstResult.run.status, 'persisted');
+    assert.equal(secondResult.run.status, 'persisted');
+    assert.equal(generationCalls, 2);
+    assert.equal(messages.items.filter((message) => message.direction === 'outbound' && message.source === 'ai').length, 2);
+    assert.ok(messages.items.some((message) => message.bodyText?.includes('发送阶段到达的第二个问题')));
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('active takeover retries a coalesced buyer message when the leader generation fails', { concurrency: false }, async () => {
+  const { runtime, adminId, account, conversation } = await bootRuntime('active-generation-failure', 0);
+  try {
+    await runtime.xianyuIm.handleExternalEvent(adminId, inbound(account.id, conversation.externalConversationRef!, 'active-generation-failure-seed.PNM', '先建立接管状态'));
+    let releaseFirstGeneration!: () => void;
+    const firstGenerationRelease = new Promise<void>((resolve) => { releaseFirstGeneration = resolve; });
+    let generationCalls = 0;
+    const service = new AutoReplyService(runtime.store, runtime.messages, async () => 'active-generation-failure-audit', {
+      sendMode: 'simulate',
+      buyerAllowlist: ['买家'],
+      sendDelaySeconds: 0,
+      generator: {
+        generate: async () => {
+          generationCalls += 1;
+          if (generationCalls === 1) {
+            await firstGenerationRelease;
+            throw new Error('MODEL_TEMPORARY_FAILURE');
+          }
+          return '第二次生成已覆盖买家问题。';
+        },
+      },
+    });
+    const first = await runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '首个问题', source: 'system', externalMessageRef: 'active-generation-failure-1.PNM' });
+    const firstRun = service.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: first.message.id, senderName: '买家' });
+    await wait(20);
+    const second = await runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '失败期间的第二个问题', source: 'system', externalMessageRef: 'active-generation-failure-2.PNM' });
+    const secondRun = service.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: second.message.id, senderName: '买家' });
+    releaseFirstGeneration();
+    const [firstResult, secondResult] = await Promise.all([firstRun, secondRun]);
+    const messages = await runtime.messages.listMessages(adminId, conversation.id, { limit: 50 });
+    assert.equal(firstResult.run.status, 'failed');
+    assert.equal(secondResult.run.status, 'persisted');
+    assert.equal(generationCalls, 2);
+    assert.equal(messages.items.filter((message) => message.direction === 'outbound' && message.source === 'ai').length, 2);
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('initial takeover retries a coalesced buyer message when the leader generation fails', { concurrency: false }, async () => {
+  const { runtime, adminId, conversation } = await bootRuntime('initial-generation-failure', 1);
+  try {
+    let generationCalls = 0;
+    const service = new AutoReplyService(runtime.store, runtime.messages, async () => 'initial-generation-failure-audit', {
+      sendMode: 'simulate',
+      buyerAllowlist: ['买家'],
+      sendDelaySeconds: 1,
+      generator: {
+        generate: async () => {
+          generationCalls += 1;
+          if (generationCalls === 1) throw new Error('MODEL_TEMPORARY_FAILURE');
+          return '重试生成已覆盖窗口内问题。';
+        },
+      },
+    });
+    const first = await runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '窗口首个问题', source: 'system', externalMessageRef: 'initial-generation-failure-1.PNM' });
+    const firstRun = service.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: first.message.id, senderName: '买家' });
+    await wait(100);
+    const second = await runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '窗口失败期间的第二个问题', source: 'system', externalMessageRef: 'initial-generation-failure-2.PNM' });
+    const secondRun = service.processInbound({ adminId, conversationId: conversation.id, inboundMessageId: second.message.id, senderName: '买家' });
+    const [firstResult, secondResult] = await Promise.all([firstRun, secondRun]);
+    const messages = await runtime.messages.listMessages(adminId, conversation.id, { limit: 50 });
+    assert.equal(firstResult.run.status, 'failed');
+    assert.equal(secondResult.run.status, 'persisted');
+    assert.equal(generationCalls, 2);
+    assert.equal(messages.items.filter((message) => message.direction === 'outbound' && message.source === 'ai').length, 1);
   } finally {
     await runtime.close();
   }

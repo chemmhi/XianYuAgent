@@ -238,6 +238,57 @@ test('agent sends document context without internal identifiers and with newest 
   assert.doesNotMatch(prompt, /"currentMessage"|"recentMessages"|"product"/);
 });
 
+test('agent prompt explicitly carries every pending buyer message into one reply', async () => {
+  let prompt = '';
+  const client: ModelClient = {
+    complete: async (input) => {
+      prompt = contentText(input.messages[1]?.content);
+      return { content: replyPayload('我会一起回答两个问题。'), model: 'test' };
+    },
+  };
+  const agent = new ToolCallingAutoReplyAgent({} as Store, client, resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_MAX_HISTORY: '5' }));
+  const base = context();
+  await agent.generate({
+    adminId: 'admin-1',
+    context: {
+      ...base,
+      inboundMessage: { ...base.inboundMessage, bodyText: '当前问题' },
+      pendingBuyerMessages: [
+        { id: 'pending-1', direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '第一个待处理问题', createdAt: '2026-09-21T00:00:01.000Z' },
+        { id: 'pending-2', direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '第二个待处理问题', createdAt: '2026-09-21T00:00:02.000Z' },
+      ],
+    },
+    classification,
+  });
+  assert.match(prompt, /待处理买家消息（必须在同一条回复中逐条覆盖，不能只回答第一条）/);
+  assert.match(prompt, /第一个待处理问题/);
+  assert.match(prompt, /第二个待处理问题/);
+});
+
+test('agent forwards pending buyer images as multimodal model input', async () => {
+  let request: ModelMessage | undefined;
+  const client: ModelClient = {
+    complete: async (input) => {
+      request = input.messages[1];
+      return { content: replyPayload('我已看到你补充的图片。'), model: 'test' };
+    },
+  };
+  const base = context();
+  const agent = new ToolCallingAutoReplyAgent({} as Store, client, resolveAutoReplyAgentConfig({}));
+  await agent.generate({
+    adminId: 'admin-1',
+    context: {
+      ...base,
+      pendingBuyerMessages: [
+        { id: 'pending-image-1', direction: 'inbound', senderRole: 'buyer', bodyType: 'image', bodyRef: 'https://img.example/pending.png', bodyText: undefined, createdAt: '2026-09-21T00:00:01.000Z' },
+      ],
+    },
+    classification,
+  });
+  assert.ok(Array.isArray(request?.content));
+  assert.deepEqual((request?.content as Array<Record<string, unknown>>).at(-1), { type: 'image_url', image_url: { url: 'https://img.example/pending.png', detail: 'auto' } });
+});
+
 test('shop catalog tool explicitly supports broad inventory questions without a keyword', async () => {
   const shopTool = AUTO_REPLY_AGENT_TOOLS.find((tool) => tool.function.name === 'list_shop_products');
   assert.match(shopTool?.function.description ?? '', /店铺有哪些商品/);

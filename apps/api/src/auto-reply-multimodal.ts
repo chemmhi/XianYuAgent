@@ -9,6 +9,7 @@ export function buildAutoReplyModelContent(text: string, context: AutoReplyConte
 
   addMediaRef(mediaRefs, context.inboundMessage.bodyType, context.inboundMessage.bodyRef);
   for (const message of context.recentMessages) addMediaRef(mediaRefs, message.bodyType, message.bodyRef);
+  for (const message of context.pendingBuyerMessages ?? []) addMediaRef(mediaRefs, message.bodyType, message.bodyRef);
 
   for (const url of [...mediaRefs].slice(0, MAX_MEDIA_PARTS)) {
     parts.push({ type: 'image_url', image_url: { url, detail: 'auto' } });
@@ -24,6 +25,7 @@ function collectMediaRefs(context: AutoReplyContext): Set<string> {
   const refs = new Set<string>();
   addMediaRef(refs, context.inboundMessage.bodyType, context.inboundMessage.bodyRef);
   for (const message of context.recentMessages) addMediaRef(refs, message.bodyType, message.bodyRef);
+  for (const message of context.pendingBuyerMessages ?? []) addMediaRef(refs, message.bodyType, message.bodyRef);
   return refs;
 }
 
