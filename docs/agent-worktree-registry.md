@@ -205,4 +205,4 @@
 | `root` | `auto-reply-system-buyer-routing-20260926` | `fix/auto-reply-system-buyer-routing-20260926` | `F:\\ChenHai\\Project\\XianYuAgent-system-buyer-routing-20260926` | Codex /root | `2026-09-25 00:00:00 +08:00` | `READY_FOR_MERGE` | `-` | `-` | 官方结构化系统消息识别、历史旧记录自修正、目标卖家/买家 28 条历史数据回填；窄回归 23/23、API build、PostgreSQL reconcile smoke 通过；完整自动回复单测卡在既有 AR-VS-08 repaired runtime 用例。 |
 
 
-| \`root\` | \`auto-reply-agent-takeover-20260927\` | \`fix/auto-reply-agent-takeover-20260927\` | \`F:\\ChenHai\\Project\\XianYuAgent-auto-reply-takeover-20260927\` | Codex \`/root\` | \`2026-09-26 00:00:00 +08:00\` | \`READY_FOR_REVIEW\` | \`-\` | \`-\` | 先补充延迟发送与人工接管状态机测试；行为实现已完成，正在执行 Web/API/真实 E2E/PostgreSQL/Chrome 全链路验证。 |
+| \`root\` | \`auto-reply-agent-takeover-20260927\` | \`fix/auto-reply-agent-takeover-20260927\` | \`F:\\ChenHai\\Project\\XianYuAgent-auto-reply-takeover-20260927\` | Codex \`/root\` | \`2026-09-26 00:00:00 +08:00\` | \`READY_FOR_MERGE\` | \`6e6304c\` | \`-\` | 先补充延迟发送与人工接管状态机测试；实现、文档、API/Web/真实 E2E/PostgreSQL/Chrome 全链路验证已通过，等待 merge lock 合入 main。 |
