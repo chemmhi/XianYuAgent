@@ -404,3 +404,10 @@
 - 扫码成功回调与 Cookie 更新统一复用登录专用账号解析路径；对已软删除、scope 已撤销但仍占用唯一键的闲鱼账号恢复 `manage` scope 并将 `disabled` 置回 `pending`，避免成功后误报 `account already exists / CONFLICT`。
 - 提交 `425382d` 已以 `--no-ff` 合入 `main`，merge commit 为 `b21be57`；API 全量测试、PostgreSQL 恢复 smoke、QR renewal smoke 与 `git diff --check` 通过。
 - 真实 APP 扫码、外部 Cookie 与资料同步仍保留原有人工验收门禁。
+
+## 2026-09-26 自动回复语义断言与结果回读门禁
+
+- 语义断言文档：`docs/agent/auto-reply/semantic-assertions.md`，共 112 条断言，覆盖 14 个阶段节点和 normal/boundary/error/security/idempotency/concurrency/observability 分支。
+- 可执行测试：语义断言 10/10；自动回复单元 221/221；真实 API E2E 10/10；simulate smoke、PostgreSQL persistence、Outcome Review、buyer push、AR-VS-08 enforce、release smoke 全部通过；API/Web typecheck、build、root `npm test`（显式 simulate 配置）通过。
+- 根因修复：`AutoReplyRepairRuntime.createOutcomeReviewWorker` 透传 `accountId`，并补充跨账号隔离回归；AR-VS-08 PostgreSQL 门禁恢复通过。
+- 合入与部署：merge commit `b348d53`；当前 `main` 已完成健康检查，`/healthz` 与 `/readyz` 均返回 200；随后已停止当前 Compose 全部服务。标准 Docker base image 拉取受本机代理阻塞，使用本地缓存镜像 overlay 完成同等运行时部署验证。
