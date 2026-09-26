@@ -45,7 +45,7 @@ test('uncertain IM send keeps the reservation held for manual review', async () 
   assert.equal((await store.getCouponReservation({ adminId: admin.id, reservationId: reservation.reservationId }))?.status, 'reserved');
 });
 
-test('live adapter refuses mutation when authoritative order detail is unavailable', async () => {
+test('live adapter still calls remote shipment mutation when order detail is unavailable', async () => {
   const { store, admin, account, order } = await setup();
   let confirmed = false;
   const fakeMtop = {
@@ -54,8 +54,10 @@ test('live adapter refuses mutation when authoritative order detail is unavailab
   } as unknown as XianyuMtopClient;
   const adapter = new XianyuProductAutomationExecutionAdapter(store, () => fakeMtop, () => undefined);
   const result = await adapter.confirmShipment({ adminId: admin.id, accountId: account.id, productId: order.productId, itemId: order.itemId, itemTitle: order.itemTitle, orderNo: order.orderNo, executionKey: 'live-confirm-1' });
-  assert.equal(result.status, 'unknown');
-  assert.equal(confirmed, false);
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.externalRef, order.orderNo);
+  assert.equal(confirmed, true);
+  assert.equal((await store.getOrder(admin.id, order.orderNo, account.id))?.deliveryStatus, 'delivered');
 });
 
 test('live adapter infers unpaid payment from orderStatus when detail omits paymentStatus', async () => {
@@ -129,6 +131,7 @@ test('treats numeric order status 4 as already delivered', async () => {
   assert.equal(result.status, 'succeeded');
   assert.equal(result.externalRef, order.orderNo);
   assert.equal(confirmed, false);
+  assert.equal((await store.getOrder(admin.id, order.orderNo, account.id))?.deliveryStatus, 'delivered');
 });
 
 test('treats numeric order status 2 as pending and confirms shipment', async () => {
@@ -143,6 +146,7 @@ test('treats numeric order status 2 as pending and confirms shipment', async () 
   assert.equal(result.status, 'succeeded');
   assert.equal(result.externalRef, order.orderNo);
   assert.equal(confirmed, true);
+  assert.equal((await store.getOrder(admin.id, order.orderNo, account.id))?.deliveryStatus, 'delivered');
 });
 
 test('treats numeric order status 3 as already shipped', async () => {
@@ -157,6 +161,7 @@ test('treats numeric order status 3 as already shipped', async () => {
   assert.equal(result.status, 'succeeded');
   assert.equal(result.externalRef, order.orderNo);
   assert.equal(confirmed, false);
+  assert.equal((await store.getOrder(admin.id, order.orderNo, account.id))?.deliveryStatus, 'delivered');
 });
 
 test('treats ORDER_ALREADY_DELIVERY from the shipment mutation as idempotent success', async () => {
@@ -171,4 +176,22 @@ test('treats ORDER_ALREADY_DELIVERY from the shipment mutation as idempotent suc
   assert.equal(result.status, 'succeeded');
   assert.equal(result.externalRef, order.orderNo);
   assert.equal(confirmed, true);
+  assert.equal((await store.getOrder(admin.id, order.orderNo, account.id))?.deliveryStatus, 'delivered');
+});
+
+test('returns unknown when remote shipment succeeds but local delivery status persistence fails', async () => {
+  const { store, admin, account, order } = await setup();
+  let confirmed = false;
+  const failingStore = store as MemoryStore & { markOrderDelivered: MemoryStore['markOrderDelivered'] };
+  failingStore.markOrderDelivered = async () => { throw new Error('database unavailable'); };
+  const fakeMtop = {
+    readOrderDetail: async () => ({ success: true, accountInvalid: false, detail: { orderNo: order.orderNo, deliveryStatus: '2' }, cookieHeader: '' }),
+    confirmShipment: async () => { confirmed = true; return { status: 'succeeded', externalRef: order.orderNo }; },
+  } as unknown as XianyuMtopClient;
+  const adapter = new XianyuProductAutomationExecutionAdapter(failingStore, () => fakeMtop, () => undefined);
+  const result = await adapter.confirmShipment({ adminId: admin.id, accountId: account.id, productId: order.productId, itemId: order.itemId, itemTitle: order.itemTitle, orderNo: order.orderNo, executionKey: 'live-confirm-local-persist-failure' });
+  assert.equal(result.status, 'unknown');
+  assert.equal(result.errorCode, 'LOCAL_ORDER_STATUS_PERSIST_FAILED');
+  assert.equal(confirmed, true);
+  assert.equal((await store.getOrder(admin.id, order.orderNo, account.id))?.deliveryStatus, 'pending');
 });

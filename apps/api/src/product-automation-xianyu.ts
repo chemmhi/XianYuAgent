@@ -152,18 +152,27 @@ export class XianyuProductAutomationExecutionAdapter implements ProductAutomatio
     const adminId = requireAdminId(input.adminId);
     if (!await this.loadScopedOrder(adminId, input.accountId, input.orderNo, input.productId, input.itemId)) return failedExternal('ORDER_SCOPE_MISMATCH', 'order or product scope does not match');
     const detail = await this.getMtop().readOrderDetail(adminId, input.accountId, input.orderNo);
-    if (!detail.success || !detail.detail) {
-      return unknownExternal(detail.errorCode ?? 'ORDER_DETAIL_UNAVAILABLE', detail.message ?? 'authoritative order detail is unavailable');
-    }
-    const deliveryStatus = normalizeDeliveryStatus(detail.detail.deliveryStatus);
-    if (!deliveryStatus) return unknownExternal('ORDER_DELIVERY_STATUS_UNKNOWN', 'order delivery status is not authoritative');
-    if (isDelivered(detail.detail)) {
-      return { status: 'succeeded', externalRef: input.orderNo };
-    }
+    // The reference implementation calls the remote Consign mutation directly.
+    // A missing or incomplete detail snapshot must not prevent the real shipment
+    // API from running; the mutation itself is idempotent and returns
+    // ORDER_ALREADY_DELIVERY when the platform has already shipped the order.
+    if (detail.success && detail.detail && isDelivered(detail.detail)) return this.persistDeliveredOrder(adminId, input, input.orderNo);
     const result = await this.getMtop().confirmShipment(adminId, input.accountId, input.orderNo, input.noLogisticsForm ? input.tradeText ?? '' : '');
     const mapped = mapMutationResult(result);
-    if (mapped.status === 'failed' && isAlreadyDeliveredResult(mapped)) return { status: 'succeeded', externalRef: mapped.externalRef ?? input.orderNo };
+    if (mapped.status === 'succeeded') return this.persistDeliveredOrder(adminId, input, mapped.externalRef ?? input.orderNo);
+    if (mapped.status === 'failed' && isAlreadyDeliveredResult(mapped)) return this.persistDeliveredOrder(adminId, input, mapped.externalRef ?? input.orderNo);
     return mapped;
+  }
+
+  private async persistDeliveredOrder(adminId: string, input: Parameters<AutomationExecutionPort['confirmShipment']>[0], externalRef: string): Promise<AutomationExternalResult> {
+    try {
+      const updated = await this.store.markOrderDelivered({ adminId, accountId: input.accountId, orderNo: input.orderNo });
+      if (!updated) return unknownExternal('LOCAL_ORDER_STATUS_PERSIST_FAILED', 'remote shipment succeeded but local order was not found');
+      await this.recordAudit({ adminId, action: 'product.automation.order.delivered', accountId: input.accountId, orderNo: input.orderNo, executionKey: input.executionKey, payload: { deliveryStatus: updated.deliveryStatus, externalRef } });
+      return { status: 'succeeded', externalRef };
+    } catch (error) {
+      return unknownExternal('LOCAL_ORDER_STATUS_PERSIST_FAILED', `remote shipment succeeded but local order status persistence failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   async repriceOrder(input: Parameters<AutomationExecutionPort['repriceOrder']>[0]): Promise<AutomationExternalResult> {

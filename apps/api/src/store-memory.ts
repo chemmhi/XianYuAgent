@@ -1837,6 +1837,13 @@ export class MemoryStore implements Store {
     order.configVersion += 1;
     return this.enrichOrder(order);
   }
+  async markOrderDelivered(input: { adminId: string; accountId: string; orderNo: string }): Promise<OrderRecord | undefined> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const order = [...this.orders.values()].find((candidate) => candidate.accountId === input.accountId && candidate.orderNo === input.orderNo);
+    if (!order) return undefined;
+    Object.assign(order, { deliveryStatus: 'delivered' as const, deliveryFailReason: undefined, updatedAt: new Date().toISOString(), configVersion: order.configVersion + 1 });
+    return this.enrichOrder(order);
+  }
 
   private productDetail(product: ProductRecord): ProductRecord {
     return { ...product, attributes: { ...product.attributes }, couponBatches: this.productCouponBatches(product.id), skus: product.skus?.map((sku) => ({ ...sku })), assets: product.assets?.map((asset) => ({ ...asset })), skuCount: product.skus?.filter((sku) => sku.status !== 'archived').length ?? product.skuCount ?? 0, assetCount: product.assets?.filter((asset) => asset.status !== 'archived').length ?? product.assetCount ?? 0 };

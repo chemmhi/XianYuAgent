@@ -484,6 +484,15 @@ export class PostgresStore implements Store {
     const current = await this.pool.query('select * from orders.orders where account_id=$1 and order_no=$2', [input.accountId, input.orderNo]);
     return current.rows[0] ? this.toOrder(current.rows[0]) : undefined;
   }
+  async markOrderDelivered(input: { adminId: string; accountId: string; orderNo: string }): Promise<OrderRecord | undefined> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const result = await this.pool.query(`update orders.orders
+      set delivery_status='delivered', delivery_fail_reason=null, updated_at=now(), config_version=config_version+1
+      where account_id=$1 and order_no=$2
+      returning *`, [input.accountId, input.orderNo]);
+    if (!result.rows[0]) return undefined;
+    return this.toOrder(result.rows[0]);
+  }
   async createOrder(input: { adminId: string; order: Omit<OrderRecord, 'id' | 'createdAt' | 'updatedAt' | 'configVersion' | 'source'> & { id?: string; createdAt?: string; updatedAt?: string; configVersion?: number; source?: OrderSource } }): Promise<OrderRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.order.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const order = input.order;
