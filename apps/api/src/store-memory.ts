@@ -474,14 +474,18 @@ export class MemoryStore implements Store {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const linkedProductId = input.item.productId ?? [...this.products.values()].find((product) => product.accountId === input.accountId && product.externalProductRef === input.item.itemId)?.id;
     const existing = [...this.orders.values()].find((order) => order.accountId === input.accountId && order.orderNo === input.item.orderNo);
+    const matchedConversationId = [...this.conversations.values()]
+      .filter((conversation) => conversation.accountId === input.accountId && conversation.buyerRef === input.item.buyerId && conversation.itemRef === input.item.itemId)
+      .sort((left, right) => conversationSortKey(right).localeCompare(conversationSortKey(left)) || right.id.localeCompare(left.id))[0]?.id;
+    const conversationId = input.item.conversationId ?? existing?.conversationId ?? matchedConversationId;
     const now = input.syncedAt;
     if (existing) {
       const previousReviewedAt = existing.reviewedAt;
-      Object.assign(existing, { ...input.item, productId: linkedProductId ?? existing.productId, accountId: input.accountId, accountName: input.accountName ?? existing.accountName, updatedAt: now, source: 'xianyu' as const, sourcePayloadDigest: input.item.sourcePayloadDigest, configVersion: existing.configVersion + 1 });
+      Object.assign(existing, { ...input.item, conversationId, productId: linkedProductId ?? existing.productId, accountId: input.accountId, accountName: input.accountName ?? existing.accountName, updatedAt: now, source: 'xianyu' as const, sourcePayloadDigest: input.item.sourcePayloadDigest, configVersion: existing.configVersion + 1 });
       existing.reviewedAt = input.item.reviewedAt ?? previousReviewedAt;
       return { action: 'updated', order: this.enrichOrder(existing) };
     }
-    const order: OrderRecord = { ...input.item, productId: linkedProductId, id: createId(), accountId: input.accountId, accountName: input.accountName, updatedAt: input.item.updatedAt ?? now, configVersion: 1, source: 'xianyu' };
+    const order: OrderRecord = { ...input.item, conversationId, productId: linkedProductId, id: createId(), accountId: input.accountId, accountName: input.accountName, updatedAt: input.item.updatedAt ?? now, configVersion: 1, source: 'xianyu' };
     this.orders.set(order.id, order);
     return { action: 'created', order: this.enrichOrder(order) };
   }
@@ -1772,7 +1776,8 @@ export class MemoryStore implements Store {
       this.automationExecutions.set(input.executionKey, record);
       return { claimed: true, record: structuredClone(record) };
     }
-    if (existing.fingerprint !== input.fingerprint) throw new Error('AUTOMATION_EXECUTION_FINGERPRINT_CONFLICT');
+    if (existing.fingerprint !== input.fingerprint && !(existing.status === 'completed' && existing.retryable)) throw new Error('AUTOMATION_EXECUTION_FINGERPRINT_CONFLICT');
+    if (existing.status === 'completed' && existing.retryable) existing.fingerprint = input.fingerprint;
     const expired = existing.status === 'running' && (!existing.leaseUntil || Date.parse(existing.leaseUntil) <= Date.now());
     if ((existing.status === 'completed' && existing.retryable) || expired) {
       existing.status = 'running';

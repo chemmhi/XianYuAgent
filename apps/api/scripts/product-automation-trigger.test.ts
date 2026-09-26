@@ -267,3 +267,17 @@ test('external order upsert links productId from account-scoped externalProductR
   assert.equal(upserted.order.productId, product.id);
   assert.equal((await store.getOrder(admin.id, 'LINK-1', account.id))?.productId, product.id);
 });
+
+test('external order upsert links an existing buyer-item conversation when Xianyu omits conversationId', async () => {
+  const { store, admin, account, product } = await setup();
+  const conversation = await store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'buyer-conversation-link', itemRef: product.externalProductRef!, externalConversationRef: 'external-conversation-link' });
+  const item = {
+    orderNo: 'LINK-CONVERSATION-1', buyerId: 'buyer-conversation-link', buyerName: '会话关联买家', itemId: product.externalProductRef!, itemTitle: product.externalProductRef!, amountMinor: 1000,
+    paymentStatus: 'paid' as const, orderStatus: 'open' as const, deliveryStatus: 'pending' as const, afterSalesStatus: 'none' as const, deliveryType: 'coupon_only' as const,
+    createdAt: '2026-09-22T00:00:00.000Z', sourcePayloadDigest: 'conversation-link-fixture',
+  };
+  const first = await store.upsertExternalOrder({ adminId: admin.id, accountId: account.id, syncedAt: '2026-09-22T00:00:01.000Z', item });
+  assert.equal(first.order.conversationId, conversation.id);
+  const second = await store.upsertExternalOrder({ adminId: admin.id, accountId: account.id, syncedAt: '2026-09-22T00:00:02.000Z', item: { ...item, paymentStatus: 'paid', conversationId: undefined } });
+  assert.equal(second.order.conversationId, conversation.id);
+});

@@ -273,9 +273,23 @@ test('persistent ledger deduplicates across workflow instances and survives retr
   const failed = await retryWorkflow.handlePaymentPaid({ config, order: retryOrder, eventId: 'persistent-retry' });
   assert.equal(failed.status, 'failed');
   retryPort.couponSend = result('succeeded');
-  const recovered = await retryWorkflow.handlePaymentPaid({ config, order: retryOrder, eventId: 'persistent-retry' });
+  const recovered = await retryWorkflow.handlePaymentPaid({ config, order: retryOrder, eventId: 'persistent-retry-replayed' });
   assert.equal(recovered.status, 'succeeded');
   assert.equal(retryPort.calls.filter((call) => call === 'send:delivery').length, 2);
+});
+
+test('retryable legacy execution can adopt the current stable fingerprint after event replay', async () => {
+  const store = new MemoryStore();
+  const config = defaultProductAutomationConfig();
+  config.paidAutoDelivery = { ...config.paidAutoDelivery, enabled: true, couponBatchIds: ['batch-1'], retryBackoffSeconds: 0 };
+  const key = 'paid_auto_delivery:account-id:ORDER-LEGACY-FINGERPRINT';
+  const claimed = await store.claimAutomationExecution({ executionKey: key, fingerprint: 'legacy-event-fingerprint', ownerToken: 'legacy-owner', leaseUntil: new Date(Date.now() + 10_000).toISOString() });
+  assert.equal(claimed.claimed, true);
+  await store.completeAutomationExecution({ executionKey: key, ownerToken: 'legacy-owner', result: { status: 'failed', executionKey: key, reason: 'CONVERSATION_MISSING' }, retryable: true });
+  const port = new FakePort();
+  const recovered = await new AutomationWorkflowService(port, new PersistentAutomationExecutionLedger(store)).handlePaymentPaid({ config, order: baseOrder({ orderNo: 'ORDER-LEGACY-FINGERPRINT' }), eventId: 'replayed-event' });
+  assert.equal(recovered.status, 'succeeded');
+  assert.equal(port.calls.filter((call) => call === 'send:delivery').length, 1);
 });
 
 test('persistent ledger rejects completion by a different owner', async () => {

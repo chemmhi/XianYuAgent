@@ -200,7 +200,8 @@ export class InMemoryAutomationExecutionLedger implements AutomationExecutionLed
       this.entries.set(input.key, { status: 'running', ownerToken: input.ownerToken, leaseUntil: input.leaseUntil, entry: { fingerprint: input.fingerprint, result: skipped(input.key, 'running'), retryable: false, attemptCount: 1, updatedAt: new Date().toISOString() } });
       return { claimed: true };
     }
-    if (current.entry.fingerprint !== input.fingerprint) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution key reused with different input');
+    if (current.entry.fingerprint !== input.fingerprint && !(current.status === 'completed' && current.entry.retryable)) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution key reused with different input');
+    if (current.status === 'completed' && current.entry.retryable) current.entry.fingerprint = input.fingerprint;
     const expired = current.status === 'running' && (!current.leaseUntil || Date.parse(current.leaseUntil) <= Date.now());
     if ((current.status === 'completed' && current.entry.retryable) || expired) {
       current.status = 'running';
@@ -250,7 +251,7 @@ export class AutomationWorkflowService {
   async handlePaymentPaid(input: { adminId?: string; config: ProductAutomationConfig; order: AutomationOrderSnapshot; eventId: string }): Promise<AutomationExecutionResult> {
     const rule = input.config.paidAutoDelivery;
     const key = `paid_auto_delivery:${input.order.accountId}:${input.order.orderNo}`;
-    return this.once(key, { eventId: input.eventId, orderNo: input.order.orderNo, rule }, async () => {
+    return this.once(key, { orderNo: input.order.orderNo, rule }, async () => {
       if (!rule.enabled) return skipped(key, 'rule_disabled');
       if (input.order.paymentStatus !== 'paid') return skipped(key, 'order_not_paid');
       if (input.order.deliveryStatus === 'delivered') return skipped(key, 'already_delivered');
@@ -301,7 +302,7 @@ export class AutomationWorkflowService {
   async handleUnpaidReprice(input: { adminId?: string; config: ProductAutomationConfig; order: AutomationOrderSnapshot; eventId: string }): Promise<AutomationExecutionResult> {
     const rule = input.config.unpaidAutoReprice;
     const key = `unpaid_auto_reprice:${input.order.accountId}:${input.order.orderNo}`;
-    return this.once(key, { eventId: input.eventId, orderNo: input.order.orderNo, rule }, async () => {
+    return this.once(key, { orderNo: input.order.orderNo, rule }, async () => {
       if (!rule.enabled) return skipped(key, 'rule_disabled');
       if (input.order.paymentStatus !== 'unpaid') return skipped(key, 'order_not_unpaid');
       const before = await this.port.readOrder({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo });
@@ -398,7 +399,7 @@ export class AutomationWorkflowService {
     const existing = await this.ledger.get(key);
     const isRetry = Boolean(existing?.retryable);
     if (existing) {
-      if (existing.fingerprint !== fingerprint) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution key reused with different input');
+      if (existing.fingerprint !== fingerprint && !existing.retryable) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution key reused with different input');
       if (!existing.retryable) return existing.result;
       if ((policy.maxAttempts ?? 5) <= existing.attemptCount) return { status: 'manual_review', executionKey: key, reason: 'retry_exhausted' };
       const backoffMs = Math.max(0, policy.retryBackoffSeconds ?? 0) * 1000;
