@@ -38,6 +38,7 @@ const config = {
   autoReplyModelEnabled: true,
   autoReplySendMode: 'simulate',
   autoReplyAgent,
+  autoReplyOutcomeReviewWorkerEnabled: false,
   buyerAllowlist: ['Auto Reply PostgreSQL Buyer'],
   autoReplyRepairMode: 'enforce',
 };

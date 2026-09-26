@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createApp } from '../dist/app.js';
+import { resolveAutoReplyAgentConfig } from '../dist/auto-reply-agent-config.js';
 
 const databaseUrl = process.env.DATABASE_URL ?? 'postgres://xianyu:xianyu_dev_only@127.0.0.1:5432/xianyu_agent';
 const suffix = `${process.pid}-${Date.now()}`;
@@ -17,6 +18,7 @@ try {
     autoReplySendMode: 'simulate', buyerAllowlist: [], autoReplyRepairMode: 'enforce',
     autoReplyOutcomeReviewWorkerEnabled: false, autoReplyOutcomeReviewWorkerPollMs: 1_000,
     autoReplyOutcomeReviewWorkerBatchSize: 10, autoReplyOutcomeReviewWorkerLeaseSeconds: 60,
+    autoReplyAgent: resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0', AUTO_REPLY_AGENT_DEBOUNCE_MS: '0', AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS: '0' }),
     credentialEncryptionKey: 'activity-review-postgres-smoke', objectStorageEndpoint: 'http://127.0.0.1:19000',
     objectStorageAccessKey: 'xianyu', objectStorageSecretKey: 'xianyu_dev_only', objectStorageBucket: 'xianyu-assets', objectStorageRegion: 'us-east-1',
   });
@@ -51,6 +53,7 @@ try {
     if (accountId) await runtime.store.pool.query('delete from auto_reply_review_events where account_id=$1', [accountId]);
     if (accountId) await runtime.store.pool.query('delete from auto_reply_review_records where account_id=$1', [accountId]);
     if (accountId) await runtime.store.pool.query('delete from auto_reply_conversation_state where account_id=$1', [accountId]);
+    if (accountId) await runtime.store.pool.query('delete from settings.auto_reply_repair_policies where account_id=$1', [accountId]);
     if (accountId) await runtime.store.pool.query('delete from messages.messages where account_id=$1', [accountId]);
     if (accountId) await runtime.store.pool.query('delete from messages.events where account_id=$1', [accountId]);
     if (conversationId) await runtime.store.pool.query('delete from messages.conversations where id=$1', [conversationId]);

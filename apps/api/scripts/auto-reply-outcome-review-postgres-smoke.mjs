@@ -43,6 +43,7 @@ try {
     await store.pool.query('delete from auto_reply_review_events where account_id=$1', [ids.accountId]);
     await store.pool.query('delete from auto_reply_review_records where account_id=$1', [ids.accountId]);
     await store.pool.query('delete from auto_reply_conversation_state where account_id=$1', [ids.accountId]);
+    await store.pool.query('delete from settings.auto_reply_repair_policies where account_id=$1', [ids.accountId]);
     await store.pool.query('delete from auth.account_scopes where account_id=$1', [ids.accountId]);
     await store.pool.query('delete from accounts.accounts where id=$1', [ids.accountId]);
   }
