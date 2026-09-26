@@ -496,6 +496,15 @@ export class PostgresStore implements Store {
     const enriched = await this.getOrder(input.adminId, input.item.orderNo, input.accountId);
     return { action: row.inserted ? 'created' : 'updated', order: enriched ?? this.toOrder(row) };
   }
+  async deleteExternalOrdersNotInSnapshot(input: { adminId: string; accountId: string; orderNos: readonly string[] }): Promise<number> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const keepOrderNos = [...new Set(input.orderNos.map((orderNo) => orderNo.trim()).filter(Boolean))];
+    const result = await this.pool.query(
+      'delete from orders.orders where account_id=$1 and source=\'xianyu\' and order_no <> all($2::text[])',
+      [input.accountId, keepOrderNos],
+    );
+    return result.rowCount ?? 0;
+  }
   async createProduct(input: { adminId: string; accountId: string; externalProductRef?: string; title: string; description?: string; categoryCode?: string; attributes?: Record<string, unknown>; defaultReplyTemplate?: string; knowledgeBase?: string; priceMinor?: number; status?: ProductStatus }): Promise<ProductRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const id = createId();

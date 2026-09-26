@@ -315,7 +315,7 @@ type ConversationHandlingOutput = {
 | `S4-VS2E` 外部同步验收 | 复用 `POST /products/sync`，冻结真实 `accountId`、分页、分组、数量口径和错误映射 | 外部结果与本地 Upsert 分离；外部超时/未知不覆盖本地草稿；Cookie/Token 不出日志和响应 | 当前已登录 Chrome + 真实账号人工复核；受控 fixture 只能作为补充证据 |
 | `S4-VS3A` 卡券明细/素材 | `POST /coupons/batches/{id}/items/bulk-save`、`/items/bulk-delete`、`/assets` | CouponItem 正文、图片和 metadata 分域；批量结果逐项返回；敏感正文只允许管理员受控读取 | 真实 PostgreSQL/MinIO、批量部分成功、403/409、移动端 |
 | `S4-VS3B` 批量数据并发消费 | 领域命令 `reserve/consume/release`，由订单交付服务调用，不由 CouponsPage 直接操作；reservation 只用于幂等与并发控制 | 行级锁/事务保证同一 CouponItem 只被一个交付占用；`reserved → consumed/released` 非法转换可审计 | 并发集成、失败恢复、重启复读、与订单预览联调 |
-| `S4-VS4A` 订单只读 | `GET /orders`、`GET /orders/{orderNo}`、`POST /orders/refresh` | 支付、订单、交付、售后四套状态分开；列表只读；refresh 才调用闲鱼 adapter 并以账号+订单号幂等 upsert | API smoke、真实 PostgreSQL 重启复读、Chrome/CDP 双 viewport、实闲鱼只读读取 |
+| `S4-VS4A` 订单只读 | `GET /orders`、`GET /orders/{orderNo}`、`POST /orders/refresh` | 支付、订单、交付、售后四套状态分开；列表只读；refresh 调用闲鱼 adapter 并以账号+订单号幂等 upsert，完整分页快照会删除该账号下缺失的外部订单并返回 `deletedCount`；分页未完成时不做删除 | API smoke、真实 PostgreSQL 重启复读、Chrome/CDP 双 viewport、实闲鱼只读读取 |
 | `S4-VS4B` 交付预览 | `POST /orders/{orderNo}/delivery-preview` | 校验支付、商品/账号匹配、交付配置和策略；预览不消费批量数据、不创建交付记录 | VS3B 并发消费、Policy/Confirmation、失败原因可解释 |
 | `S4-VS4C` 交付动作 | `POST /orders/{orderNo}/deliver|cancel|retry` | `manual/no_logistics/coupon_only/mixed` 分开处理；Idempotency + Outbox + DeliveryRecord；unknown 仅查询/人工恢复 | 外部 adapter、worker、重复提交/超时/取消/人工恢复 |
 
