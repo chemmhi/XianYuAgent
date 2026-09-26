@@ -5,6 +5,8 @@ import { TextAreaField } from '../../../shared/ui/TextAreaField';
 import { CouponPickerDialog } from './CouponPickerDialog';
 import type { AutomationCoupon, AutomationRuleKey, ProductAutomationConfig, ProductAutomationUpdate } from '../types';
 
+type CouponRuleKey = Extract<AutomationRuleKey, 'delivery' | 'gift'>;
+
 const tabs: Array<{ key: AutomationRuleKey; title: string; subtitle: string }> = [
   { key: 'delivery', title: '付款后自动发货', subtitle: '使用已选卡券，规则在卡券中维护' },
   { key: 'reprice', title: '拍下未付款改价', subtitle: '未设置目标价格和话术' },
@@ -29,7 +31,7 @@ export function AutomationDrawer({ open, product, accountLabel = '当前账号',
   const boundCouponIds = useMemo(() => (product?.couponBatches ?? []).map((coupon) => coupon.id).filter(Boolean), [product]);
   const pickerCoupons = useMemo(() => buildAutomationCouponOptions(coupons, product?.couponBatches ?? []), [coupons, product]);
   const [draft, setDraft] = useState<ProductAutomationConfig | null>(() => draftOverride ?? (config ? hydrateDraft(config, boundCouponIds, pickerCoupons) : config));
-  const [couponTarget, setCouponTarget] = useState<AutomationRuleKey | null>(null);
+  const [couponTarget, setCouponTarget] = useState<CouponRuleKey | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -87,7 +89,7 @@ export function AutomationDrawer({ open, product, accountLabel = '当前账号',
         <div className="automation-drawer-body">
           {(loadPhase === 'error' || savePhase === 'error') && <div className="automation-error" role="alert">{error ?? (savePhase === 'error' ? '自动化配置保存失败，请重试' : '自动化配置加载失败')}</div>}
           {loadPhase === 'loading' && <div className="automation-loading">正在加载自动化配置…</div>}
-          {rule && <RulePanel tab={activeTab} rule={rule} selectedCoupons={selectedCoupons(activeTab)} onToggle={(enabled) => updateRule({ enabled })} onCouponChoose={() => setCouponTarget(activeTab)} onChange={(patch) => updateRule(patch)} />}
+          {rule && <RulePanel tab={activeTab} rule={rule} selectedCoupons={selectedCoupons(activeTab)} onToggle={(enabled) => updateRule({ enabled })} onCouponChoose={() => { if (activeTab === 'delivery' || activeTab === 'gift') setCouponTarget(activeTab); }} onChange={(patch) => updateRule(patch)} />}
         </div>
 
         <footer className="automation-drawer-footer">
@@ -103,7 +105,7 @@ export function AutomationDrawer({ open, product, accountLabel = '当前账号',
         open
         title={couponTarget === 'gift' ? '选择赠品卡券' : '选择发货卡券'}
         subtitle={couponTarget === 'gift' ? '评价后自动发送的赠品卡券' : '付款后自动发货使用的卡券'}
-        coupons={pickerCoupons}
+        coupons={filterAutomationCouponOptions(couponTarget, pickerCoupons, draft)}
         selectedIds={draft?.[couponTarget].couponIds ?? []}
         onCancel={() => setCouponTarget(null)}
         onSave={(ids) => {
@@ -176,6 +178,12 @@ export function buildAutomationCouponOptions(coupons: AutomationCoupon[], boundC
   return [...byId.values()];
 }
 
+export function filterAutomationCouponOptions(target: CouponRuleKey, coupons: AutomationCoupon[], config: ProductAutomationConfig | null): AutomationCoupon[] {
+  const selectedIds = new Set(config?.[target].couponIds ?? []);
+  const blockedIds = new Set(config?.[target === 'delivery' ? 'gift' : 'delivery'].couponIds ?? []);
+  return coupons.filter((coupon) => selectedIds.has(coupon.id) || !blockedIds.has(coupon.id));
+}
+
 function summaryText(key: AutomationRuleKey, config: ProductAutomationConfig | null, selected: AutomationCoupon[]) {
   if (!config) return '正在加载配置';
   if (key === 'delivery') return selected.length ? `已选${selected[0].label} · 规则在卡券中维护` : '未选择发货卡券';
@@ -185,8 +193,10 @@ function summaryText(key: AutomationRuleKey, config: ProductAutomationConfig | n
 }
 
 function hydrateDraft(config: ProductAutomationConfig, boundCouponIds: string[], pickerCoupons: AutomationCoupon[]): ProductAutomationConfig {
-  const deliveryCouponIds = resolveDeliveryCouponIds(config.delivery.couponIds, boundCouponIds, pickerCoupons);
   const giftCouponIds = resolveGiftCouponIds(config.gift.couponIds, boundCouponIds, pickerCoupons);
+  const giftCouponIdSet = new Set(giftCouponIds);
+  const deliveryCouponIds = resolveDeliveryCouponIds(config.delivery.couponIds, boundCouponIds, pickerCoupons)
+    .filter((couponId) => !giftCouponIdSet.has(couponId));
   return {
     ...config,
     delivery: { ...config.delivery, autoConfirm: config.delivery.autoConfirm ?? true, couponIds: deliveryCouponIds },
@@ -196,6 +206,7 @@ function hydrateDraft(config: ProductAutomationConfig, boundCouponIds: string[],
 
 export function resolveDeliveryCouponIds(configuredIds: string[] | undefined, boundCouponIds: string[], pickerCoupons: AutomationCoupon[]): string[] {
   const configured = [...new Set((configuredIds ?? []).map(String).map((value) => value.trim()).filter(Boolean))];
+  if (configured.length === 0) return [];
   const visibleIds = new Set(pickerCoupons.map((coupon) => coupon.id));
   const visibleBound = [...new Set(boundCouponIds.map(String).map((value) => value.trim()).filter((id) => visibleIds.has(id)))];
   if (visibleBound.length > 0) return visibleBound;

@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { createMockProductAutomationApi, createProductAutomationApi, MOCK_AUTOMATION_COUPONS, toAutomationConfig, toAutomationConfigWire } from './api';
-import { AutomationDrawer, buildAutomationCouponOptions, buildValidatedAutomationUpdate, resolveDeliveryCouponIds, resolveGiftCouponIds } from './components/AutomationDrawer';
+import { AutomationDrawer, buildAutomationCouponOptions, buildValidatedAutomationUpdate, filterAutomationCouponOptions, resolveDeliveryCouponIds, resolveGiftCouponIds } from './components/AutomationDrawer';
 import { BatchAutomationDialog } from './components/BatchAutomationDialog';
 import { CouponPickerDialog } from './components/CouponPickerDialog';
 import { toProductAutomationSaveError } from './controller';
@@ -159,13 +159,13 @@ describe('product automation components', () => {
     expect(html).not.toContain('<input type="checkbox"');
   });
 
-  it('hydrates automation picker selections from product-level coupon bindings', async () => {
+  it('does not hydrate product-level gift bindings into the delivery rule', async () => {
     const api = createMockProductAutomationApi();
     const config = await api.getConfig(product.id);
     const boundProduct = { ...product, couponBatches: [{ id: 'coupon-gift-a', label: '评价赠品批次 A' }] };
     const html = renderToStaticMarkup(createElement(AutomationDrawer, { open: true, product: boundProduct, config: { ...config, delivery: { ...config.delivery, couponIds: [] }, gift: { ...config.gift, couponIds: [] } }, coupons: MOCK_AUTOMATION_COUPONS, loadPhase: 'success', savePhase: 'idle', error: null, onClose: vi.fn(), onSave: vi.fn(async () => config) }));
-    expect(html).toContain('评价赠品批次 A');
-    expect((html.match(/已选发货卡券/g) ?? []).length).toBeGreaterThan(0);
+    expect(html).not.toContain('评价赠品批次 A</strong><small>数据卡 · 已选发货卡券');
+    expect(html).toContain('未选择发货卡券');
     expect(html).toContain('未选择赠品卡券');
   });
 
@@ -229,6 +229,28 @@ describe('product automation components', () => {
     }));
     expect(html).toContain('评价后发送赠品');
     expect(html).toContain('已选奥维地图');
+  });
+
+  it('does not hydrate a gift-only product binding into paid delivery', async () => {
+    const boundProduct = { ...product, couponBatches: [{ id: 'coupon-gift-a', label: '评价赠品批次 A' }] };
+    const config = await createMockProductAutomationApi().getConfig(product.id);
+    const coupons = MOCK_AUTOMATION_COUPONS;
+    expect(resolveDeliveryCouponIds([], ['coupon-gift-a'], coupons)).toEqual([]);
+    expect(filterAutomationCouponOptions('delivery', coupons, { ...config, delivery: { ...config.delivery, couponIds: [] }, gift: { ...config.gift, couponIds: ['coupon-gift-a'] } }).map((coupon) => coupon.id)).not.toContain('coupon-gift-a');
+    const html = renderToStaticMarkup(createElement(AutomationDrawer, {
+      open: true,
+      product: boundProduct,
+      config: { ...config, delivery: { ...config.delivery, couponIds: [] }, gift: { ...config.gift, enabled: true, couponIds: ['coupon-gift-a'] } },
+      coupons,
+      loadPhase: 'success',
+      savePhase: 'idle',
+      error: null,
+      onClose: vi.fn(),
+      onSave: vi.fn(async () => null),
+    }));
+    expect(html).toContain('未选择发货卡券');
+    expect(html).toContain('已选评价赠品批次 A');
+    expect(html).not.toContain('已选评价赠品批次 A</strong><small>数据卡 · 已选发货卡券');
   });
 
   it('renders the delivery auto-confirm switch and preserves its saved state', () => {
