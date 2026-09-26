@@ -178,6 +178,7 @@ class FakePort implements AutomationExecutionPort {
   couponSend: AutomationExternalResult = result('succeeded');
   confirm: AutomationExternalResult = result('succeeded');
   reprice: AutomationExternalResult = result('succeeded');
+  repriceSequence?: AutomationExternalResult[];
   text: AutomationExternalResult = result('succeeded');
   reviewCreated = true;
   reviewError?: Error;
@@ -189,7 +190,7 @@ class FakePort implements AutomationExecutionPort {
   async commitCoupon(input: { reservationId: string; executionKey: string }): Promise<void> { this.calls.push('commit'); }
   async releaseCoupon(input: { reservationId: string; executionKey: string; reason: string }): Promise<void> { this.calls.push(`release:${input.reason}`); }
   async confirmShipment(input: { accountId: string; orderNo: string; executionKey: string }): Promise<AutomationExternalResult> { this.calls.push('confirm'); return this.confirm; }
-  async repriceOrder(input: { accountId: string; orderNo: string; targetPriceMinor: number; executionKey: string }): Promise<AutomationExternalResult> { this.calls.push(`reprice:${input.targetPriceMinor}`); return this.reprice; }
+  async repriceOrder(input: { accountId: string; orderNo: string; targetPriceMinor: number; executionKey: string }): Promise<AutomationExternalResult> { this.calls.push(`reprice:${input.targetPriceMinor}`); return this.repriceSequence?.shift() ?? this.reprice; }
   async sendText(input: { accountId: string; conversationId: string; text: string; executionKey: string }): Promise<AutomationExternalResult> { this.calls.push(`text:${input.text}`); return this.text; }
   async persistReviewFact(input: { accountId: string; orderNo: string; eventId: string; executionKey: string }): Promise<{ created: boolean }> { this.calls.push('review-fact'); if (this.reviewError) throw this.reviewError; return { created: this.reviewCreated }; }
   async readOrder(input: { accountId: string; orderNo: string }): Promise<AutomationOrderSnapshot | undefined> { this.calls.push('read-order'); return this.readOrderResult; }
@@ -332,6 +333,13 @@ test('unpaid reprice does not fabricate success and does not reprice twice', asy
   const unknown = await new AutomationWorkflowService(unknownPort).handleUnpaidReprice({ config, order, eventId: 'unpaid-2' });
   assert.equal(unknown.status, 'unknown');
   assert.equal(unknownPort.calls.length, 2);
+  const transientPort = new FakePort();
+  transientPort.readOrderResult = order;
+  transientPort.repriceSequence = [result('failed', 'MTOP_BUSINESS_ERROR', 'data.success=false'), result('succeeded')];
+  const transientConfig = { ...config, unpaidAutoReprice: { ...config.unpaidAutoReprice, retryBackoffSeconds: 0 } };
+  const transient = await new AutomationWorkflowService(transientPort).handleUnpaidReprice({ config: transientConfig, order, eventId: 'unpaid-transient-remote-rejection' });
+  assert.equal(transient.status, 'succeeded');
+  assert.deepEqual(transientPort.calls, ['read-order', 'reprice:1290', 'reprice:1290', 'text:已为你调整价格']);
   const rejectedPort = new FakePort();
   rejectedPort.reprice = result('failed', 'MTOP_BUSINESS_ERROR', 'data.success=false | code=PRICE_NOT_ALLOWED | 订单状态不允许改价');
   rejectedPort.readOrderResult = order;

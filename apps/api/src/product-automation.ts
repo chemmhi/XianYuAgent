@@ -307,7 +307,7 @@ export class AutomationWorkflowService {
       const before = await this.port.readOrder({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo });
       if (!before) return { status: 'manual_review', executionKey: key, reason: 'reprice_state_unavailable' };
       if (before.paymentStatus !== 'unpaid') return skipped(key, 'order_paid_before_reprice');
-      const changed = await this.port.repriceOrder({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, targetPriceMinor: rule.targetPriceMinor, executionKey: key });
+      const changed = await this.repriceWithConsistencyRetry({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, targetPriceMinor: rule.targetPriceMinor, executionKey: key }, rule.retryBackoffSeconds);
       if (changed.status === 'unknown') return unknown(key, changed.errorCode ?? 'reprice_result_unknown');
       if (changed.status === 'failed') return failed(key, changed.errorCode ?? 'reprice_failed', changed.message);
       if (rule.message && input.order.conversationId) {
@@ -317,6 +317,17 @@ export class AutomationWorkflowService {
       }
       return { status: 'succeeded', executionKey: key, externalRef: changed.externalRef };
     }, { maxAttempts: rule.maxAttempts, retryBackoffSeconds: rule.retryBackoffSeconds });
+  }
+
+  private async repriceWithConsistencyRetry(input: Parameters<AutomationExecutionPort['repriceOrder']>[0], retryBackoffSeconds: number): Promise<AutomationExternalResult> {
+    const first = await this.port.repriceOrder(input);
+    if (first.status !== 'failed' || first.errorCode !== 'MTOP_BUSINESS_ERROR') return first;
+    // A just-created Xianyu order can briefly reject price mutation while its
+    // trade state propagates. Retry once after a short grace period; later
+    // retries still flow through the persistent ledger/backoff policy.
+    const delaySeconds = Math.min(2, Math.max(0, retryBackoffSeconds));
+    if (delaySeconds > 0) await waitForDelay(delaySeconds);
+    return this.port.repriceOrder(input);
   }
 
   async handleReviewGift(input: { adminId?: string; config: ProductAutomationConfig; order: AutomationOrderSnapshot; eventId: string }): Promise<AutomationExecutionResult> {
@@ -516,6 +527,10 @@ function mapAutomationStoreError(error: unknown): ServiceError {
 function skipped(executionKey: string, reason: string): AutomationExecutionResult { return { status: 'skipped', executionKey, reason }; }
 function failed(executionKey: string, reason: string, message?: string): AutomationExecutionResult { return { status: 'failed', executionKey, reason, ...(message ? { message } : {}) }; }
 function unknown(executionKey: string, reason: string): AutomationExecutionResult { return { status: 'unknown', executionKey, reason }; }
+async function waitForDelay(seconds: number): Promise<void> {
+  const milliseconds = Math.max(0, Math.min(10_000, Math.trunc(Number(seconds) * 1000 || 0)));
+  if (milliseconds > 0) await new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
 function failureReason(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim()) return error.message.slice(0, 160);
   return fallback;
