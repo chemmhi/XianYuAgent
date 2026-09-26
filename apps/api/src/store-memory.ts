@@ -28,6 +28,10 @@ function productImageUrl(product: ProductRecord | undefined): string | undefined
   return firstImageUrl(xianyu.imageUrls) ?? firstImageUrl(xianyu.imageUrl) ?? firstImageUrl(attributes.imageUrls) ?? firstImageUrl(attributes.imageUrl);
 }
 
+function externalProductRefs(item: XianyuProductItem): string[] {
+  return [...new Set([item.externalProductRef, ...(item.externalProductRefs ?? [])].map((value) => String(value ?? '').trim()).filter(Boolean))];
+}
+
 function toAutoReplyProductContext(product: ProductRecord): AutoReplyProductContext {
   return {
     id: product.id,
@@ -512,7 +516,8 @@ export class MemoryStore implements Store {
 
   async upsertExternalProduct(input: { adminId: string; accountId: string; item: XianyuProductItem; syncedAt: string }): Promise<ProductUpsertResult> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
-    const existing = [...this.products.values()].find((product) => product.accountId === input.accountId && product.externalProductRef === input.item.externalProductRef);
+    const knownRefs = externalProductRefs(input.item);
+    const existing = [...this.products.values()].find((product) => product.accountId === input.accountId && product.externalProductRef && knownRefs.includes(product.externalProductRef));
     if (existing?.source === 'local' && existing.status === 'draft') return { action: 'skipped_local_draft', product: this.productDetail(existing) };
     const now = new Date().toISOString();
     const existingAttributes = existing?.attributes && typeof existing.attributes === 'object' ? existing.attributes : {};
@@ -527,6 +532,10 @@ export class MemoryStore implements Store {
         detailUrl: input.item.detailUrl,
         externalStatus: input.item.externalStatus,
         imageUrls: input.item.imageUrls,
+        externalProductRefs: [...new Set([
+          ...(Array.isArray(existingXianyu.externalProductRefs) ? existingXianyu.externalProductRefs.map((value) => String(value).trim()) : []),
+          ...knownRefs,
+        ].filter(Boolean))],
         ...(input.item.xianyuUpdatedAt ? { updatedAt: input.item.xianyuUpdatedAt } : {}),
         ...(existingXianyu.detail !== undefined ? { detail: existingXianyu.detail } : incomingXianyu.detail !== undefined ? { detail: incomingXianyu.detail } : {}),
       },
@@ -534,6 +543,7 @@ export class MemoryStore implements Store {
     const detailDescription = readAutoReplyProductDescription(attributes);
     const incomingDescription = typeof input.item.description === 'string' && input.item.description.trim() ? input.item.description.trim() : undefined;
     if (existing) {
+      existing.externalProductRef = input.item.externalProductRef;
       existing.title = input.item.title;
       existing.description = incomingDescription ?? readAutoReplyProductDescription(existing.attributes, existing.description) ?? detailDescription;
       existing.categoryCode = input.item.categoryCode;

@@ -11,7 +11,9 @@ export function mapXianyuProductPage(response: Record<string, unknown> | undefin
     const detailParams = asRecord(cardData.detailParams);
     const itemInfo = asRecord(cardData.itemDO ?? cardData.itemInfo ?? cardData.item);
     const attributeMap = asRecord(cardData.attributeMap);
-    const externalProductRef = firstString(detailParams.itemId, cardData.id, cardData.itemId);
+    const externalProductRefs = uniqueStrings(detailParams.itemId, cardData.id, cardData.itemId, itemInfo.itemId, itemInfo.id)
+      .filter((value) => !value.startsWith('auto_'));
+    const externalProductRef = externalProductRefs[0];
     if (!externalProductRef || externalProductRef.startsWith('auto_')) continue;
     const priceInfo = asRecord(cardData.priceInfo);
     const picInfo = asRecord(cardData.picInfo);
@@ -54,6 +56,7 @@ export function mapXianyuProductPage(response: Record<string, unknown> | undefin
     const itemStatus = cardData.itemStatus;
     const item: XianyuProductItem = {
       externalProductRef,
+      externalProductRefs,
       title,
       description,
       categoryCode,
@@ -75,6 +78,10 @@ export function mapXianyuProductPage(response: Record<string, unknown> | undefin
   const totalCount = firstNumber(data.totalCount, data.total_count, data.total);
   const totalPages = firstNumber(data.pageCount, data.page_count, data.totalPages, data.total_pages) ?? (totalCount && pageSize > 0 ? Math.ceil(totalCount / pageSize) : undefined);
   return { items, pageNumber, pageSize, totalCount, totalPages, hasMore: totalPages ? pageNumber < totalPages : items.length >= pageSize };
+}
+
+function uniqueStrings(...values: unknown[]): string[] {
+  return [...new Set(values.map((value) => firstString(value)).filter((value): value is string => Boolean(value)))];
 }
 
 function asRecord(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}; }

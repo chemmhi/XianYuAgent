@@ -566,37 +566,79 @@ export class PostgresStore implements Store {
 
   async upsertExternalProduct(input: { adminId: string; accountId: string; item: XianyuProductItem; syncedAt: string }): Promise<ProductUpsertResult> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
-    const existingResult = await this.pool.query('select id,source,status,attributes_json from products.products where account_id=$1 and external_product_ref=$2 limit 1', [input.accountId, input.item.externalProductRef]);
-    const existing = existingResult.rows[0] as Row | undefined;
-    if (existing && String(existing.source ?? 'local') === 'local' && String(existing.status) === 'draft') {
-      const product = await this.getProduct(input.adminId, String(existing.id));
-      if (!product) throw new Error('PRODUCT_SYNC_READBACK_FAILED');
-      return { action: 'skipped_local_draft', product };
-    }
-    const existingAttributes = existing?.attributes_json && typeof existing.attributes_json === 'object' && !Array.isArray(existing.attributes_json) ? existing.attributes_json as Record<string, unknown> : {};
-    const existingXianyu = existingAttributes.xianyu && typeof existingAttributes.xianyu === 'object' && !Array.isArray(existingAttributes.xianyu) ? existingAttributes.xianyu as Record<string, unknown> : {};
-    const incomingXianyu = input.item.attributes?.xianyu && typeof input.item.attributes.xianyu === 'object' && !Array.isArray(input.item.attributes.xianyu) ? input.item.attributes.xianyu as Record<string, unknown> : {};
-    const attributes = {
-      ...existingAttributes,
-      ...input.item.attributes,
-      xianyu: {
-        ...existingXianyu,
-        ...incomingXianyu,
-        detailUrl: input.item.detailUrl,
-        externalStatus: input.item.externalStatus,
-        imageUrls: input.item.imageUrls,
-        ...(input.item.xianyuUpdatedAt ? { updatedAt: input.item.xianyuUpdatedAt } : {}),
-        ...(existingXianyu.detail !== undefined ? { detail: existingXianyu.detail } : incomingXianyu.detail !== undefined ? { detail: incomingXianyu.detail } : {}),
-      },
-    };
-    const id = existing ? String(existing.id) : createId();
-    await this.pool.query(`insert into products.products (id,account_id,external_product_ref,title,description,category_code,attributes_json,price_minor,status,source,last_synced_at,xianyu_updated_at,xianyu_list_rank,source_payload_digest)
-      values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'published','xianyu',$9,$10,$11,$12)
-      on conflict (account_id,external_product_ref) where external_product_ref is not null do update set title=excluded.title,description=coalesce(nullif(btrim(excluded.description), ''), nullif(btrim(products.products.description), ''), nullif(btrim(excluded.attributes_json #>> '{xianyu,detail,summary,description}'), '')),category_code=excluded.category_code,attributes_json=excluded.attributes_json,price_minor=excluded.price_minor,status='published',source='xianyu',last_synced_at=excluded.last_synced_at,xianyu_updated_at=coalesce(excluded.xianyu_updated_at,products.products.xianyu_updated_at),xianyu_list_rank=coalesce(excluded.xianyu_list_rank,products.products.xianyu_list_rank),source_payload_digest=excluded.source_payload_digest,config_version=products.products.config_version+1,updated_at=now()
-      returning id`, [id, input.accountId, input.item.externalProductRef, input.item.title, input.item.description ?? null, input.item.categoryCode ?? null, JSON.stringify(attributes), input.item.priceMinor ?? null, input.syncedAt, input.item.xianyuUpdatedAt ?? null, input.item.xianyuListRank ?? null, input.item.sourcePayloadDigest]);
-    const product = await this.getProduct(input.adminId, id);
+    const knownRefs = [...new Set([input.item.externalProductRef, ...(input.item.externalProductRefs ?? [])]
+      .map((value) => String(value ?? '').trim()).filter(Boolean))];
+    const client = await this.pool.connect();
+    let productId: string | undefined;
+    let action: ProductUpsertResult['action'] = 'created';
+    try {
+      await client.query('begin');
+      const existingResult = await client.query(`select id,source,status,attributes_json,external_product_ref
+        from products.products
+        where account_id=$1 and external_product_ref = any($2::text[])
+        order by (external_product_ref=$3) desc, updated_at desc, id
+        limit 1 for update`, [input.accountId, knownRefs, input.item.externalProductRef]);
+      const existing = existingResult.rows[0] as Row | undefined;
+      if (existing && String(existing.source ?? 'local') === 'local' && String(existing.status) === 'draft') {
+        productId = String(existing.id);
+        await client.query('rollback');
+        const product = await this.getProduct(input.adminId, productId);
+        if (!product) throw new Error('PRODUCT_SYNC_READBACK_FAILED');
+        return { action: 'skipped_local_draft', product };
+      }
+      const existingAttributes = existing?.attributes_json && typeof existing.attributes_json === 'object' && !Array.isArray(existing.attributes_json) ? existing.attributes_json as Record<string, unknown> : {};
+      const existingXianyu = existingAttributes.xianyu && typeof existingAttributes.xianyu === 'object' && !Array.isArray(existingAttributes.xianyu) ? existingAttributes.xianyu as Record<string, unknown> : {};
+      const previousRefs = Array.isArray(existingXianyu.externalProductRefs) ? existingXianyu.externalProductRefs.map((value) => String(value).trim()) : [];
+      const incomingXianyu = input.item.attributes?.xianyu && typeof input.item.attributes.xianyu === 'object' && !Array.isArray(input.item.attributes.xianyu) ? input.item.attributes.xianyu as Record<string, unknown> : {};
+      const attributes = {
+        ...existingAttributes,
+        ...input.item.attributes,
+        xianyu: {
+          ...existingXianyu,
+          ...incomingXianyu,
+          detailUrl: input.item.detailUrl,
+          externalStatus: input.item.externalStatus,
+          imageUrls: input.item.imageUrls,
+          externalProductRefs: [...new Set([...previousRefs, ...knownRefs].filter(Boolean))],
+          ...(input.item.xianyuUpdatedAt ? { updatedAt: input.item.xianyuUpdatedAt } : {}),
+          ...(existingXianyu.detail !== undefined ? { detail: existingXianyu.detail } : incomingXianyu.detail !== undefined ? { detail: incomingXianyu.detail } : {}),
+        },
+      };
+      productId = existing ? String(existing.id) : createId();
+      action = existing ? 'updated' : 'created';
+      if (existing) {
+        await client.query(`update products.products set
+            external_product_ref=$2,
+            title=$3,
+            description=coalesce(nullif(btrim($4), ''), nullif(btrim(description), ''), nullif(btrim($5::jsonb #>> '{xianyu,detail,summary,description}'), '')),
+            category_code=$6,
+            attributes_json=$5::jsonb,
+            price_minor=$7,
+            status='published',
+            source='xianyu',
+            last_synced_at=$8,
+            xianyu_updated_at=coalesce($9, xianyu_updated_at),
+            xianyu_list_rank=coalesce($10, xianyu_list_rank),
+            source_payload_digest=$11,
+            config_version=config_version+1,
+            updated_at=now()
+          where id=$1`, [productId, input.item.externalProductRef, input.item.title, input.item.description ?? null, JSON.stringify(attributes), input.item.categoryCode ?? null, input.item.priceMinor ?? null, input.syncedAt, input.item.xianyuUpdatedAt ?? null, input.item.xianyuListRank ?? null, input.item.sourcePayloadDigest]);
+      } else {
+        const inserted = await client.query(`insert into products.products (id,account_id,external_product_ref,title,description,category_code,attributes_json,price_minor,status,source,last_synced_at,xianyu_updated_at,xianyu_list_rank,source_payload_digest)
+          values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'published','xianyu',$9,$10,$11,$12)
+          on conflict (account_id,external_product_ref) where external_product_ref is not null do update set title=excluded.title,description=coalesce(nullif(btrim(excluded.description), ''), nullif(btrim(products.products.description), ''), nullif(btrim(excluded.attributes_json #>> '{xianyu,detail,summary,description}'), '')),category_code=excluded.category_code,attributes_json=excluded.attributes_json,price_minor=excluded.price_minor,status='published',source='xianyu',last_synced_at=excluded.last_synced_at,xianyu_updated_at=coalesce(excluded.xianyu_updated_at,products.products.xianyu_updated_at),xianyu_list_rank=coalesce(excluded.xianyu_list_rank,products.products.xianyu_list_rank),source_payload_digest=excluded.source_payload_digest,config_version=products.products.config_version+1,updated_at=now()
+          returning id, (xmax = 0) as inserted`, [productId, input.accountId, input.item.externalProductRef, input.item.title, input.item.description ?? null, input.item.categoryCode ?? null, JSON.stringify(attributes), input.item.priceMinor ?? null, input.syncedAt, input.item.xianyuUpdatedAt ?? null, input.item.xianyuListRank ?? null, input.item.sourcePayloadDigest]);
+        productId = String(inserted.rows[0]?.id ?? productId);
+        action = inserted.rows[0]?.inserted ? 'created' : 'updated';
+      }
+      await client.query('commit');
+    } catch (error) {
+      try { await client.query('rollback'); } catch { /* preserve original error */ }
+      throw error;
+    } finally { client.release(); }
+    const product = await this.getProduct(input.adminId, productId!);
     if (!product) throw new Error('PRODUCT_SYNC_READBACK_FAILED');
-    return { action: existing ? 'updated' : 'created', product };
+    return { action, product };
   }
   async resetXianyuListRanks(adminId: string, accountId: string): Promise<void> {
     if (!(await this.hasAccountScope(adminId, accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
