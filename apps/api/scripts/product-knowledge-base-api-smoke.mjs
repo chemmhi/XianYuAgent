@@ -2,14 +2,16 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createApp } from '../dist/app.js';
 
+const observedPrompts = [];
 const modelServer = createServer(async (request, response) => {
   let body = '';
   for await (const chunk of request) body += chunk;
   const parsed = JSON.parse(body || '{}');
   const prompt = JSON.stringify(parsed.messages ?? []);
+  observedPrompts.push(prompt);
   const content = prompt.includes('已有知识库')
     ? JSON.stringify({ knowledgeBase: '交付方式：付款后发送。\n适用范围：仅限本商品。' })
-    : JSON.stringify({ knowledgeBase: '高频问题：多久发货？\n答案：付款后马上发送。' });
+    : JSON.stringify({ knowledgeBase: '高频问题：多久发货？\n答案：付款后马上发送。\n夸克网盘：https://pan.quark.cn/s/API-SMOKE-SECRET\n提取码：API42' });
   response.writeHead(200, { 'content-type': 'application/json' });
   response.end(JSON.stringify({ model: 'smoke-model', choices: [{ message: { content } }] }));
 });
@@ -37,13 +39,16 @@ try {
   const conversation = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'buyer-api', itemRef: product.externalProductRef, itemTitle: product.title });
   await runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '多久发货？', source: 'system' });
   await runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: 'AI 回复不能进入知识库', source: 'ai' });
-  await runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: '付款后马上发送。', source: 'human' });
+  await runtime.store.createMessage({ adminId, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: '付款后马上发送。\n夸克网盘：https://pan.quark.cn/s/API-SMOKE-SECRET\n提取码：API42', source: 'human' });
 
   const generated = await request(`/api/v1/products/${product.id}/knowledge-base/generate-from-conversations`, { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'kb-generate-api', 'If-Match-Version': String(product.configVersion) }, body: JSON.stringify({ accountId: account.id }) });
   assert.equal(generated.response.status, 200);
   assert.equal(generated.body.data.humanReplyCount, 1);
   assert.match(generated.body.data.product.knowledgeBase, /多久发货/);
+  assert.match(generated.body.data.product.knowledgeBase, /付款后马上发送/);
+  assert.doesNotMatch(generated.body.data.product.knowledgeBase, /API-SMOKE-SECRET|API42|pan\.quark\.cn/);
   assert.doesNotMatch(generated.body.data.product.knowledgeBase, /AI 回复不能进入/);
+  assert.equal(observedPrompts.some((prompt) => /API-SMOKE-SECRET|API42|pan\.quark\.cn/.test(prompt)), false);
 
   const generatedVersion = generated.body.data.product.configVersion;
   const optimized = await request(`/api/v1/products/${product.id}/knowledge-base/optimize`, { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'kb-optimize-api', 'If-Match-Version': String(generatedVersion) }, body: JSON.stringify({ accountId: account.id }) });
