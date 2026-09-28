@@ -1,6 +1,6 @@
 import { Pool, type PoolClient } from 'pg';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, AutoReplyProductLookup, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponAssetRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceMessageRecord, WorkspaceMessageType, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, AutoReplyProductLookup, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponAssetRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceConfirmationRecord, WorkspaceMessageRecord, WorkspaceMessageType, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { projectAutoReplyRun } from './auto-reply-activity-projection.js';
 import { createId } from './security.js';
@@ -1768,6 +1768,42 @@ export class PostgresStore implements Store {
     const result = await this.pool.query('select * from workspace.messages where session_id=$1 order by sequence desc limit $2', [sessionId, Math.max(1, Math.min(limit, 500))]);
     return result.rows.reverse().map((row) => this.toWorkspaceMessage(row));
   }
+
+  async createWorkspaceConfirmation(input: { adminId: string; runId: string; stepId: string; accountId: string; requestedBy: string; action: WorkspaceConfirmationRecord['action']; policyRef: string; manifest: Record<string, unknown>; expiresAt: string }): Promise<WorkspaceConfirmationRecord> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const existing = await this.pool.query("select c.* from workspace.confirmations c where c.run_id=$1 and c.status='active' limit 1", [input.runId]);
+    if (existing.rows[0]) return this.toWorkspaceConfirmation(existing.rows[0]);
+    const result = await this.pool.query(`insert into workspace.confirmations (id,run_id,step_id,account_id,requested_by,action,policy_ref,manifest_json,status,version,expires_at)
+      values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,'active',1,$9) returning *`, [createId(), input.runId, input.stepId, input.accountId, input.requestedBy, input.action, input.policyRef, JSON.stringify(input.manifest), input.expiresAt]);
+    return this.toWorkspaceConfirmation(result.rows[0]);
+  }
+
+  async getWorkspaceConfirmation(adminId: string, runId: string): Promise<WorkspaceConfirmationRecord | undefined> {
+    const result = await this.pool.query('select c.* from workspace.confirmations c where c.run_id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=c.account_id and scope.admin_id=$2 and scope.status=\'active\' and (scope.expires_at is null or scope.expires_at>now())) order by c.created_at desc limit 1', [runId, adminId]);
+    if (!result.rows[0]) return undefined;
+    const row = result.rows[0];
+    if (row.status === 'active' && new Date(String(row.expires_at)).getTime() <= Date.now()) {
+      const expired = await this.pool.query("update workspace.confirmations set status='expired',version=version+1,updated_at=now() where id=$1 and status='active' returning *", [row.id]);
+      return expired.rows[0] ? this.toWorkspaceConfirmation(expired.rows[0]) : this.toWorkspaceConfirmation(row);
+    }
+    return this.toWorkspaceConfirmation(row);
+  }
+
+  async transitionWorkspaceConfirmation(input: { adminId: string; confirmationId: string; expectedVersion: number; status: Exclude<WorkspaceConfirmationRecord['status'], 'active'>; actorId: string }): Promise<WorkspaceConfirmationRecord | undefined> {
+    const result = await this.pool.query(`update workspace.confirmations c set status=$3,version=version+1,confirmed_at=case when $3='confirmed' then now() else confirmed_at end,confirmed_by=case when $3='confirmed' then $4 else confirmed_by end,cancelled_at=case when $3='cancelled' then now() else cancelled_at end,updated_at=now()
+      where c.id=$1 and c.version=$2 and c.status='active' and exists (select 1 from auth.account_scopes scope where scope.account_id=c.account_id and scope.admin_id=$5 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now())) returning c.*`, [input.confirmationId, input.expectedVersion, input.status, input.actorId, input.adminId]);
+    return result.rows[0] ? this.toWorkspaceConfirmation(result.rows[0]) : undefined;
+  }
+
+  async getExecutionOutboxById(scope: string, id: string): Promise<AutoReplyOutboxRecord | undefined> {
+    const result = await this.pool.query('select * from execution.outbox_jobs where scope=$1 and id=$2 limit 1', [scope, id]);
+    return result.rows[0] ? this.toAutoReplyOutbox(result.rows[0]) : undefined;
+  }
+
+  async requeueExecutionOutbox(input: { scope: string; id: string; availableAt?: string }): Promise<AutoReplyOutboxRecord | undefined> {
+    const result = await this.pool.query("update execution.outbox_jobs set status='pending',available_at=coalesce($3::timestamptz,now()),locked_at=null,lease_expires_at=null,lease_owner=null,updated_at=now() where scope=$1 and id=$2 and status in ('retryable','dead_lettered') returning *", [input.scope, input.id, input.availableAt ?? null]);
+    return result.rows[0] ? this.toAutoReplyOutbox(result.rows[0]) : undefined;
+  }
   async close(): Promise<void> { await this.pool.end(); }
 
   private async expireCouponReservations(client: PoolClient): Promise<number> {
@@ -1991,6 +2027,10 @@ export class PostgresStore implements Store {
   private toStep(row: Row): StepRecord { return { id: String(row.id), runId: String(row.run_id), stepNo: Number(row.step_no), kind: row.kind as StepRecord['kind'], label: String(row.label), status: row.status as StepRecord['status'], attempt: Number(row.attempt ?? 1), inputSummary: row.input_summary ? String(row.input_summary) : undefined, outputSummary: row.output_summary ? String(row.output_summary) : undefined, errorCode: row.error_code ? String(row.error_code) : undefined, createdAt: new Date(String(row.created_at)).toISOString(), startedAt: iso(row.started_at), finishedAt: iso(row.finished_at) }; }
   private toRunEvent(row: Row): RunEventRecord { const payload = row.payload_json && typeof row.payload_json === 'object' && !Array.isArray(row.payload_json) ? row.payload_json as Record<string, unknown> : {}; return { sequence: Number(row.sequence), runId: String(row.run_id), eventType: String(row.event_type), payload: { ...payload }, createdAt: new Date(String(row.created_at)).toISOString() }; }
   private toWorkspaceMessage(row: Row): WorkspaceMessageRecord { return { id: String(row.id), sessionId: String(row.session_id), runId: row.run_id ? String(row.run_id) : undefined, type: row.message_type as WorkspaceMessageType, content: String(row.content), summary: row.summary ? String(row.summary) : undefined, createdAt: new Date(String(row.created_at)).toISOString(), sequence: Number(row.sequence) }; }
+  private toWorkspaceConfirmation(row: Row): WorkspaceConfirmationRecord {
+    const manifest = row.manifest_json && typeof row.manifest_json === 'object' && !Array.isArray(row.manifest_json) ? row.manifest_json as Record<string, unknown> : {};
+    return { id: String(row.id), runId: String(row.run_id), stepId: String(row.step_id), accountId: String(row.account_id), requestedBy: String(row.requested_by), action: row.action as WorkspaceConfirmationRecord['action'], policyRef: String(row.policy_ref), manifest: { ...manifest }, status: row.status as WorkspaceConfirmationRecord['status'], version: Number(row.version ?? 1), expiresAt: new Date(String(row.expires_at)).toISOString(), confirmedAt: iso(row.confirmed_at), confirmedBy: row.confirmed_by ? String(row.confirmed_by) : undefined, cancelledAt: iso(row.cancelled_at), createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString() };
+  }
   private normalizeLoginSession(row?: Row): LoginSessionRecord | undefined { if (!row) return undefined; if (row.status === 'waiting' && row.expires_at && new Date(String(row.expires_at)).getTime() <= Date.now()) { void this.pool.query('update auth.account_login_sessions set status=\'expired\', completed_at=now() where id=$1 and status=\'waiting\'', [row.id]); row.status = 'expired'; } return this.toLoginSession(row); }
   private toLoginSession(row: Row): LoginSessionRecord { return { id: String(row.id), adminId: row.admin_id ? String(row.admin_id) : undefined, accountId: row.account_id ? String(row.account_id) : undefined, provisionalAccountRef: row.provisional_account_ref ? String(row.provisional_account_ref) : undefined, loginMethod: String(row.login_method), status: row.status as LoginSessionRecord['status'], startedAt: new Date(String(row.started_at)).toISOString(), expiresAt: new Date(String(row.expires_at)).toISOString(), completedAt: iso(row.completed_at), failureCode: row.failure_code ? String(row.failure_code) : undefined, qrTokenRef: row.qr_token_ref ? String(row.qr_token_ref) : undefined }; }
   private toCredential(row: Row): CredentialRecord {

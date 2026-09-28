@@ -347,6 +347,9 @@ type ConversationHandlingOutput = {
 
 Workspace 的 `Run/Step` 结果可以引用商品、卡券、订单，但只能返回脱敏 `BusinessLinkVM`：`{ type: 'product'|'coupon_batch'|'order'|'conversation', id, accountId, label?, route, redacted: true }`；不得把卡券正文、CredentialValue、买家敏感内容或 Pi 原始 payload 直接放入前端 ViewModel。
 
+2026-09-28，WS-VS-02 已完成 Confirmation/Cancel/Outbox 入队子片：商品发布指令由服务端识别，Confirmation Manifest 只包含脱敏商品字段；确认后的 Outbox 保持 `pending`，不伪造闲鱼外部发布成功。WS-VS-03 随后复用同一 Confirmation API，新增 `coupon_create` action 和 `coupon.create.confirm` Policy；确认后由服务端 `CouponService` 创建本地卡券批次，`data` 类型复用 `importItems`，本地 Outbox 以 `succeeded / known_success` 收敛。卡券正文只在服务端创建边界处理，不进入 Workspace Message、Run Event 或前端 summary。真实外部商品 Worker、`unknown` 恢复和发布级迁移回滚仍由后续门禁承接。
+WS-VS-04 再复用同一 Confirmation API，新增 `agent_settings_update` action 和 `agent.settings.update.confirm` Policy；确认前校验配置 `expectedVersion`，确认后调用 `AutoReplyAgentSettingsService.update` 写入账号级自动回复 Agent 配置，本地 Outbox 以 `succeeded / known_success` 收敛。Workspace 只允许安全运行参数，不接收 Prompt 原文、Credential 或 Provider 密文；配置 owner 仍是 Settings Agent API。
+
 ### 13.3 Settings API Key 配置
 
 | 切片 | API / 输入输出 | 敏感边界与状态 | 完成门禁 |

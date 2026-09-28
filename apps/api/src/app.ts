@@ -332,7 +332,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
-  });
+  }, coupons, autoReplyAgentSettings);
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
@@ -1046,6 +1046,28 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
       const result = await workspace.startRun({ adminId: authContext.admin.id, accountId: accountId ?? '', sessionId: String(ctx.body.sessionId ?? ''), instruction: String(ctx.body.instruction ?? ''), clientRunRef: optionalString(ctx.body.clientRunRef), requestId: ctx.requestId, traceId: ctx.traceId });
       return success(ctx, result.run, result.duplicate ? 200 : 201);
     });
+  }
+  const workspaceConfirmationMatch = ctx.path.match(/^\/api\/v1\/workspace\/runs\/([^/]+)\/(confirmation|confirm|cancel|retry)$/);
+  if (workspaceConfirmationMatch) {
+    const runId = decodeURIComponent(workspaceConfirmationMatch[1]);
+    const action = workspaceConfirmationMatch[2];
+    if (action === 'confirmation' && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, await workspace.getConfirmation({ adminId: authContext.admin.id, runId })).body };
+    if (action === 'confirm' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, undefined, async () => {
+      const expectedVersion = Number(ctx.body.expectedVersion);
+      if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1) throw new ServiceError(422, 'VALIDATION_FAILED', 'expectedVersion must be a positive integer');
+      return success(ctx, await workspace.confirmRun({ adminId: authContext.admin.id, runId, expectedVersion, requestId: ctx.requestId, traceId: ctx.traceId }));
+    });
+    if (action === 'cancel' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, undefined, async () => {
+      const expectedVersion = Number(ctx.body.expectedVersion);
+      if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1) throw new ServiceError(422, 'VALIDATION_FAILED', 'expectedVersion must be a positive integer');
+      return success(ctx, await workspace.cancelRun({ adminId: authContext.admin.id, runId, expectedVersion, requestId: ctx.requestId, traceId: ctx.traceId }));
+    });
+    if (action === 'retry' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, undefined, async () => success(ctx, await workspace.retryRun({ adminId: authContext.admin.id, runId, requestId: ctx.requestId, traceId: ctx.traceId })));
+  }
+  if (ctx.path === '/api/v1/execution/outbox' && ctx.method === 'GET') {
+    const runId = optionalString(ctx.query.runId);
+    if (!runId) throw new ServiceError(422, 'VALIDATION_FAILED', 'runId is required');
+    return { statusCode: 200, body: success(ctx, { items: await workspace.listOutbox({ adminId: authContext.admin.id, runId }) }).body };
   }
   const workspaceRunMatch = ctx.path.match(/^\/api\/v1\/workspace\/runs\/([^/]+)(?:\/events)?$/);
   if (workspaceRunMatch && ctx.method === 'GET') {

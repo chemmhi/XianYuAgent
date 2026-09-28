@@ -15,6 +15,18 @@
 
 本轮结论：商品目录知识库已完成列表展示、查看/编辑弹窗、账号隔离、数据库持久化和 Agent 消费闭环；受控 UI、Memory/PostgreSQL 与 Agent 回归均通过。
 
+### 2026-09-28：Workspace 原生能力合入主线复审
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R160 | 业务 / 查询 | Workspace 是否能按当前账号 scope 查看商品、卡券、订单和 Agent 运营数据 | root | PASS | `WS-VS-01-native-read.md`；Memory/PostgreSQL、Chrome/CDP 双 viewport 与持久化复读 |
+| S5-R161 | 业务 / 商品发布 | 商品发布是否先生成脱敏 Confirmation，支持确认、取消、重试和 Outbox 入队，并避免伪造外部成功 | root | PASS（受控环境） | `WS-VS-02-product-publish-confirmation.md`；Confirmation/Outbox smoke 与真实 Chrome/CDP |
+| S5-R162 | 业务 / 卡券创建 | 新增卡券是否复用 CouponService，支持固定文字/批量数据创建，且正文不进入 Workspace 可见数据 | root | PASS（受控环境） | `WS-VS-03-coupon-create-confirmation.md`；Memory/PostgreSQL/Chrome/CDP、正文脱敏断言 |
+| S5-R163 | 业务 / 配置修改 | 自动回复 Agent 安全运行参数是否支持 Confirmation、expectedVersion 冲突保护、配置持久化和取消 | root | PASS（受控环境） | `WS-VS-04-agent-settings-confirmation.md`；16/16 API 合并测试、PostgreSQL 与 Chrome/CDP |
+| S5-R164 | 架构 / 发布卫生 | Workspace 四条原生路径是否保持 Store/Service owner 边界、迁移顺序、审计和回滚说明 | root | PASS | `docs/02-data-api.md`、`docs/migrations/README.md`、`docs/06-risk-register.md`、`docs/10-stage5-progress.md` |
+
+本轮结论：Workspace 原生读取、商品发布确认、新增卡券确认和自动回复 Agent 配置修改已按垂直切片完成验证并合入 `main`。商品真实外部发布 Worker、Provider/Credential/Policy Gateway/Runtime 等后续能力仍保持独立门禁。
+
 ### 2026-09-28：商品知识库单抽屉互斥修复
 
 | 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |

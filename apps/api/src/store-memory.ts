@@ -4,7 +4,7 @@ import { projectAutoReplyRun } from './auto-reply-activity-projection.js';
 import { createId } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor, isAfterConversationCursor } from './conversation-cursor.js';
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
-import type { AgentSessionRecord, RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, WorkspaceMessageRecord, WorkspaceMessageType } from './domain.js';
+import type { AgentSessionRecord, RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, WorkspaceConfirmationRecord, WorkspaceMessageRecord, WorkspaceMessageType } from './domain.js';
 import { cloneCouponReservation, normalizeCouponReservationInput, normalizeLeaseSeconds, reservationFingerprint } from './coupon-reservation.js';
 import { validatePersistedAutoReplyRepairPolicyBundle } from './auto-reply-repair-config.js';
 import { readAutoReplyProductDescription, readAutoReplyProductMetrics } from './auto-reply-product-metrics.js';
@@ -81,6 +81,10 @@ function cloneOutbox(record: AutoReplyOutboxRecord): AutoReplyOutboxRecord {
   return { ...record, payload: { ...record.payload } };
 }
 
+function cloneWorkspaceConfirmation(record: WorkspaceConfirmationRecord): WorkspaceConfirmationRecord {
+  return { ...record, manifest: { ...record.manifest } };
+}
+
 function conversationSortKey(conversation: ConversationRecord): string { return conversation.lastMessageAt ?? conversation.updatedAt; }
 
 type MemoryRepairPolicyRecord = {
@@ -137,6 +141,7 @@ export class MemoryStore implements Store {
   private readonly steps = new Map<string, StepRecord>();
   private readonly runEvents = new Map<string, RunEventRecord[]>();
   private readonly workspaceMessages = new Map<string, WorkspaceMessageRecord[]>();
+  private readonly workspaceConfirmations = new Map<string, WorkspaceConfirmationRecord>();
   private runEventSequence = 0;
   readonly audits: AuditEventRecord[] = [];
 
@@ -1685,6 +1690,56 @@ export class MemoryStore implements Store {
     if (!session) return [];
     const messages = this.workspaceMessages.get(sessionId) ?? [];
     return messages.slice(-Math.max(1, Math.min(limit, 500))).map((message) => ({ ...message }));
+  }
+
+  async createWorkspaceConfirmation(input: { adminId: string; runId: string; stepId: string; accountId: string; requestedBy: string; action: WorkspaceConfirmationRecord['action']; policyRef: string; manifest: Record<string, unknown>; expiresAt: string }): Promise<WorkspaceConfirmationRecord> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const existing = [...this.workspaceConfirmations.values()].find((item) => item.runId === input.runId && item.status === 'active');
+    if (existing) return cloneWorkspaceConfirmation(existing);
+    const now = new Date().toISOString();
+    const record: WorkspaceConfirmationRecord = { id: createId(), runId: input.runId, stepId: input.stepId, accountId: input.accountId, requestedBy: input.requestedBy, action: input.action, policyRef: input.policyRef, manifest: { ...input.manifest }, status: 'active', version: 1, expiresAt: input.expiresAt, createdAt: now, updatedAt: now };
+    this.workspaceConfirmations.set(record.id, record);
+    return cloneWorkspaceConfirmation(record);
+  }
+
+  async getWorkspaceConfirmation(adminId: string, runId: string): Promise<WorkspaceConfirmationRecord | undefined> {
+    const record = [...this.workspaceConfirmations.values()].find((item) => item.runId === runId);
+    if (!record || !(await this.hasAccountScope(adminId, record.accountId))) return undefined;
+    if (record.status === 'active' && Date.parse(record.expiresAt) <= Date.now()) {
+      record.status = 'expired';
+      record.version += 1;
+      record.updatedAt = new Date().toISOString();
+    }
+    return cloneWorkspaceConfirmation(record);
+  }
+
+  async transitionWorkspaceConfirmation(input: { adminId: string; confirmationId: string; expectedVersion: number; status: Exclude<WorkspaceConfirmationRecord['status'], 'active'>; actorId: string }): Promise<WorkspaceConfirmationRecord | undefined> {
+    const record = this.workspaceConfirmations.get(input.confirmationId);
+    if (!record || !(await this.hasAccountScope(input.adminId, record.accountId)) || record.status !== 'active' || record.version !== input.expectedVersion) return undefined;
+    const now = new Date().toISOString();
+    record.status = input.status;
+    record.version += 1;
+    record.updatedAt = now;
+    if (input.status === 'confirmed') { record.confirmedAt = now; record.confirmedBy = input.actorId; }
+    if (input.status === 'cancelled') record.cancelledAt = now;
+    return cloneWorkspaceConfirmation(record);
+  }
+
+  async getExecutionOutboxById(scope: string, id: string): Promise<AutoReplyOutboxRecord | undefined> {
+    const record = [...this.autoReplyOutbox.values()].find((item) => item.scope === scope && item.id === id);
+    return record ? cloneOutbox(record) : undefined;
+  }
+
+  async requeueExecutionOutbox(input: { scope: string; id: string; availableAt?: string }): Promise<AutoReplyOutboxRecord | undefined> {
+    const record = [...this.autoReplyOutbox.values()].find((item) => item.scope === input.scope && item.id === input.id);
+    if (!record || !['retryable', 'dead_lettered'].includes(record.status)) return undefined;
+    record.status = 'pending';
+    record.availableAt = input.availableAt ?? new Date().toISOString();
+    record.updatedAt = new Date().toISOString();
+    record.leaseOwner = undefined;
+    record.leaseExpiresAt = undefined;
+    record.lockedAt = undefined;
+    return cloneOutbox(record);
   }
 
   private async withCouponReservationLock<T>(work: () => Promise<T>): Promise<T> {

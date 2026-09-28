@@ -1,6 +1,8 @@
 export type WorkspaceRunStatus = 'queued' | 'running' | 'waiting_confirmation' | 'executing' | 'retrying' | 'cancelling' | 'succeeded' | 'partially_succeeded' | 'failed' | 'cancelled' | 'expired';
 export type WorkspaceStepStatus = 'pending' | 'running' | 'waiting_confirmation' | 'executing' | 'retrying' | 'succeeded' | 'partially_succeeded' | 'failed' | 'skipped' | 'cancelled';
 export type WorkspaceMessageType = 'user_message' | 'reasoning_summary' | 'tool_event' | 'final_answer';
+export type WorkspaceConfirmationStatus = 'active' | 'confirmed' | 'expired' | 'rejected' | 'cancelled';
+export type WorkspaceOutboxStatus = 'pending' | 'processing' | 'retryable' | 'succeeded' | 'dead_lettered';
 
 export interface WorkspaceSessionVM {
   id: string;
@@ -44,6 +46,39 @@ export interface WorkspaceRunVM {
   clientRunRef?: string;
 }
 
+export interface WorkspaceConfirmationVM {
+  confirmationId: string;
+  runId: string;
+  stepId: string;
+  accountId: string;
+  action: 'product_publish' | 'coupon_create' | 'agent_settings_update';
+  policyRef: string;
+  manifest: Record<string, unknown>;
+  status: WorkspaceConfirmationStatus;
+  version: number;
+  expiresAt: string;
+  confirmedAt?: string;
+  confirmedBy?: string;
+  cancelledAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceOutboxVM {
+  outboxId: string;
+  runId: string;
+  scope: string;
+  operation: string;
+  status: WorkspaceOutboxStatus;
+  attempt: number;
+  availableAt: string;
+  externalOutcome?: 'known_success' | 'known_failure' | 'unknown';
+  lastErrorCode?: string;
+  idempotencyKey: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface WorkspaceRunEventVM {
   sequence: number;
   runId: string;
@@ -76,4 +111,7 @@ export interface WorkspaceState {
   connection: 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'closed';
   error: string | null;
   submitting: boolean;
+  confirmation: WorkspaceConfirmationVM | null;
+  outbox: WorkspaceOutboxVM[];
+  actionSubmitting: boolean;
 }

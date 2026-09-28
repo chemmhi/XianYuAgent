@@ -1211,6 +1211,8 @@ export type StepStatus = 'pending' | 'running' | 'waiting_confirmation' | 'execu
 export type StepKind = 'plan' | 'tool_call' | 'policy_check' | 'mutation' | 'observation';
 export type ExternalOutcome = 'known_success' | 'known_failure' | 'unknown';
 export type WorkspaceMessageType = 'user_message' | 'reasoning_summary' | 'tool_event' | 'final_answer';
+export type WorkspaceConfirmationStatus = 'active' | 'confirmed' | 'expired' | 'rejected' | 'cancelled';
+export type WorkspaceActionKind = 'product_publish' | 'coupon_create' | 'agent_settings_update';
 
 export interface AgentSessionRecord {
   id: string;
@@ -1274,6 +1276,25 @@ export interface WorkspaceMessageRecord {
   summary?: string;
   createdAt: string;
   sequence: number;
+}
+
+export interface WorkspaceConfirmationRecord {
+  id: string;
+  runId: string;
+  stepId: string;
+  accountId: string;
+  requestedBy: string;
+  action: WorkspaceActionKind;
+  policyRef: string;
+  manifest: Record<string, unknown>;
+  status: WorkspaceConfirmationStatus;
+  version: number;
+  expiresAt: string;
+  confirmedAt?: string;
+  confirmedBy?: string;
+  cancelledAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Store {
@@ -1348,6 +1369,11 @@ export interface Store {
   listRunEvents(adminId: string, runId: string, afterSequence?: number): Promise<RunEventRecord[]>;
   appendWorkspaceMessage(input: { adminId: string; sessionId: string; runId?: string; type: WorkspaceMessageType; content: string; summary?: string }): Promise<WorkspaceMessageRecord>;
   listWorkspaceMessages(adminId: string, sessionId: string, limit?: number): Promise<WorkspaceMessageRecord[]>;
+  createWorkspaceConfirmation(input: { adminId: string; runId: string; stepId: string; accountId: string; requestedBy: string; action: WorkspaceActionKind; policyRef: string; manifest: Record<string, unknown>; expiresAt: string }): Promise<WorkspaceConfirmationRecord>;
+  getWorkspaceConfirmation(adminId: string, runId: string): Promise<WorkspaceConfirmationRecord | undefined>;
+  transitionWorkspaceConfirmation(input: { adminId: string; confirmationId: string; expectedVersion: number; status: Exclude<WorkspaceConfirmationStatus, 'active'>; actorId: string }): Promise<WorkspaceConfirmationRecord | undefined>;
+  getExecutionOutboxById(scope: string, id: string): Promise<AutoReplyOutboxRecord | undefined>;
+  requeueExecutionOutbox(input: { scope: string; id: string; availableAt?: string }): Promise<AutoReplyOutboxRecord | undefined>;
   listProducts(adminId: string, query: ProductListQuery): Promise<ProductListResult>;
   getAutoReplyProduct(adminId: string, query: AutoReplyProductLookup): Promise<AutoReplyProductContext | undefined>;
   listAutoReplyProducts(adminId: string, query: AutoReplyProductListQuery): Promise<AutoReplyProductListResult>;
