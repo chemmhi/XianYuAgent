@@ -22,6 +22,8 @@ describe('ProductKnowledgeBaseModal', () => {
   it('opens an empty product directly in edit mode', () => {
     const html = renderToStaticMarkup(createElement(ProductKnowledgeBaseModal, { product: { ...product, knowledgeBase: undefined }, saving: false, error: null, onClose: vi.fn(), onSave: vi.fn() }));
     expect(html).toContain('data-testid="product-knowledge-base-input"');
+    expect(html).toContain('data-testid="generate-product-knowledge-base"');
+    expect(html).toContain('data-testid="optimize-product-knowledge-base"');
     expect(html).toContain('保存知识库');
     expect(html).toContain('0/5000');
   });

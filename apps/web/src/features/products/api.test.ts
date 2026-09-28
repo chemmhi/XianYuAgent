@@ -117,6 +117,25 @@ describe('products canonical API adapter', () => {
     expect(product).toMatchObject({ accountId: 'account-1', knowledgeBase: '支持数字资料交付。', configVersion: 8 });
   });
 
+  it('calls conversation generation and optimization with product version guards', async () => {
+    const calls: Array<{ path: string; body?: unknown; headers?: Headers }> = [];
+    const api = createProductsApi({
+      async get<T>() { return { success: true, data: { items: [], total: 0, page: 1, pageSize: 20, totalPages: 1 } } as T; },
+      async post<T>(path: string, body?: unknown, init?: RequestInit) {
+        calls.push({ path, body, headers: new Headers(init?.headers) });
+        return { success: true, data: { product: { id: 'product-1', accountId: 'account-1', title: '商品一', knowledgeBase: '整理后的内容', status: 'published', configVersion: 9, updatedAt: '2026-09-28T00:00:00.000Z' }, conversationCount: 2, messageCount: 4, questionCount: 2, humanReplyCount: 2, changed: true, model: 'model-x' } } as T;
+      },
+    });
+
+    await api.generateKnowledgeBaseFromConversations('product-1', { accountId: 'account-1', configVersion: 7, idempotencyKey: 'generate-key' });
+    await api.optimizeKnowledgeBase('product-1', { accountId: 'account-1', configVersion: 8, idempotencyKey: 'optimize-key' });
+    expect(calls.map((call) => call.path)).toEqual(['/api/v1/products/product-1/knowledge-base/generate-from-conversations', '/api/v1/products/product-1/knowledge-base/optimize']);
+    expect(calls[0]?.headers?.get('If-Match-Version')).toBe('7');
+    expect(calls[1]?.headers?.get('If-Match-Version')).toBe('8');
+    expect(calls[0]?.headers?.get('Idempotency-Key')).toBe('generate-key');
+    expect(calls[1]?.headers?.get('Idempotency-Key')).toBe('optimize-key');
+  });
+
   it('replays the publish multipart contract and omits skipped address fields', async () => {
     let request: { path: string; body?: unknown; headers?: Headers } | undefined;
     const api = createProductsApi({
