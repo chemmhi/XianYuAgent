@@ -9,6 +9,7 @@
     "build": "npm run typecheck && vite build",
     "test": "vitest run",
     "test:e2e:chrome": "node scripts/e2e-chrome.mjs",
+    "test:e2e:chrome:brand-block": "node scripts/e2e-brand-block-chrome.mjs",
     "test:e2e:chrome:dashboard": "node scripts/e2e-dashboard-chrome.mjs",
     "test:e2e:chrome:dashboard:fullchain": "node scripts/e2e-dashboard-fullchain.mjs",
     "test:e2e:chrome:products": "node scripts/e2e-products-chrome.mjs",

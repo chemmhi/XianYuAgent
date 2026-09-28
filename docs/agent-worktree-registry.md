@@ -222,3 +222,4 @@
 
 
 | root | auto-reply-scope-fix-20260926 | codex/auto-reply-scope-20260926 | F:\\ChenHai\\Project\\XianYuAgent-auto-reply-scope-fix | Codex /root | 2026-09-26 05:33:24 +08:00 | CLEANED | b348d53 | 2026-09-26 05:35:00 +08:00 | Outcome Review worker 透传 accountId，补充跨账号隔离回归与 AR-VS-08 PostgreSQL 门禁修复；分支已合入 main 并清理 worktree。
+| `root` | `brand-block-dashboard-20260928` | `fix/brand-block-dashboard-20260928` | `F:\\ChenHai\\Project\\XianYuAgent-brand-block-dashboard-20260928` | Codex /root | `2026-09-28 16:54:56 +08:00` | `READY_FOR_MERGE` | `-` | `-` | 点击 `div.brand-block` 返回 `/dashboard`，增加无障碍键盘入口与移动账户菜单事件隔离；App 回归 9/9、Web 全量 327/327、Web/API typecheck、Web build、品牌块 Chrome/CDP E2E 与 diff-check 通过。全仓库直接 Vitest 扫描仍命中既有 71 个无测试套件文件，未作为本切片门禁。 |
