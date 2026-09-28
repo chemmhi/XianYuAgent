@@ -1,6 +1,8 @@
-import type { AgentSessionRecord, RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, Store, WorkspaceMessageRecord } from './domain.js';
+import type { AgentSessionRecord, AutoReplyOutboxRecord, RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, Store, WorkspaceConfirmationRecord, WorkspaceMessageRecord } from './domain.js';
 import { ServiceError } from './services.js';
 import { executeNativeWorkspaceRead } from './workspace-native-read.js';
+import { prepareNativeWorkspaceWrite } from './workspace-native-write.js';
+import { persistWorkspaceConfirmation } from './workspace-confirmation.js';
 
 const terminalRunStatuses = new Set<RunStatus>(['succeeded', 'partially_succeeded', 'failed', 'cancelled', 'expired']);
 const runTransitions: Record<RunStatus, RunStatus[]> = {
@@ -73,6 +75,39 @@ export interface WorkspaceRunView {
   clientRunRef?: string;
 }
 
+export interface WorkspaceConfirmationView {
+  confirmationId: string;
+  runId: string;
+  stepId: string;
+  accountId: string;
+  action: WorkspaceConfirmationRecord['action'];
+  policyRef: string;
+  manifest: Record<string, unknown>;
+  status: WorkspaceConfirmationRecord['status'];
+  version: number;
+  expiresAt: string;
+  confirmedAt?: string;
+  confirmedBy?: string;
+  cancelledAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceOutboxView {
+  outboxId: string;
+  runId: string;
+  scope: string;
+  operation: string;
+  status: AutoReplyOutboxRecord['status'];
+  attempt: number;
+  availableAt: string;
+  externalOutcome?: AutoReplyOutboxRecord['externalOutcome'];
+  lastErrorCode?: string;
+  idempotencyKey: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface WorkspaceRuntime {
   enqueue(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> }): void;
   stop(): void;
@@ -104,6 +139,15 @@ export class InProcessAgentRuntime implements WorkspaceRuntime {
     await this.emit(input.run.id, 'run.started', { status: 'running' });
     await this.emit(input.run.id, 'step.started', { stepId: step.id, status: 'running' });
     await new Promise((resolve) => setTimeout(resolve, 5));
+    const nativeWrite = await prepareNativeWorkspaceWrite({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction });
+    if (nativeWrite) {
+      const sessionId = input.sessionId ?? input.run.sessionId;
+      await this.transitionStep(step, 'waiting_confirmation', { outputSummary: nativeWrite.summary });
+      await this.transitionRun(input.run, 'waiting_confirmation', { resultSummary: nativeWrite.summary });
+      const confirmation = await persistWorkspaceConfirmation({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, sessionId, run: input.run, step, plan: nativeWrite });
+      await this.emit(input.run.id, 'workspace.confirmation.created', { status: 'active', confirmationId: confirmation.id, action: confirmation.action, policyRef: confirmation.policyRef, manifest: confirmation.manifest, expiresAt: confirmation.expiresAt });
+      return;
+    }
     await this.transitionRun(input.run, 'executing');
     await this.transitionStep(step, 'executing');
     await this.emit(input.run.id, 'run.executing', { status: 'executing' });
@@ -235,12 +279,93 @@ export class WorkspaceService {
     return this.store.listWorkspaceMessages(input.adminId, input.sessionId, input.limit ?? 100);
   }
 
+  async getConfirmation(input: { adminId: string; runId: string }): Promise<WorkspaceConfirmationView> {
+    const bundle = await this.store.getRun(input.adminId, input.runId);
+    if (!bundle) throw new ServiceError(404, 'NOT_FOUND', 'run not found');
+    const confirmation = await this.store.getWorkspaceConfirmation(input.adminId, input.runId);
+    if (!confirmation) throw new ServiceError(404, 'NOT_FOUND', 'confirmation not found');
+    return this.toConfirmationView(confirmation);
+  }
+
+  async confirmRun(input: { adminId: string; runId: string; expectedVersion: number; requestId: string; traceId: string }): Promise<{ run: WorkspaceRunView; confirmation: WorkspaceConfirmationView; outbox: WorkspaceOutboxView }> {
+    const bundle = await this.store.getRun(input.adminId, input.runId);
+    if (!bundle) throw new ServiceError(404, 'NOT_FOUND', 'run not found');
+    if (bundle.run.status !== 'waiting_confirmation') throw new ServiceError(409, 'CONFLICT', 'run is not waiting for confirmation');
+    const current = await this.store.getWorkspaceConfirmation(input.adminId, input.runId);
+    if (!current) throw new ServiceError(404, 'NOT_FOUND', 'confirmation not found');
+    if (current.status !== 'active') throw new ServiceError(409, 'CONFLICT', 'confirmation is no longer active', { status: current.status });
+    const confirmation = await this.store.transitionWorkspaceConfirmation({ adminId: input.adminId, confirmationId: current.id, expectedVersion: input.expectedVersion, status: 'confirmed', actorId: input.adminId });
+    if (!confirmation) throw new ServiceError(409, 'VERSION_CONFLICT', 'confirmation version changed; refresh and retry');
+    const step = bundle.steps.find((item) => item.id === confirmation.stepId);
+    if (!step) throw new ServiceError(409, 'CONFLICT', 'confirmation step not found');
+    const run = await this.store.updateRun(input.runId, { status: 'executing', resultSummary: '管理员已确认，已进入外部执行队列' });
+    await this.store.updateRunStep(step.id, { status: 'executing', outputSummary: '已通过管理员确认，等待 Outbox Worker' });
+    const scope = this.executionScope(input.adminId, bundle.run.accountId);
+    const queued = await this.store.enqueueAutoReplyOutbox({ scope, aggregateType: 'workspace_run', aggregateId: bundle.run.id, operation: confirmation.action, idempotencyKey: `workspace-confirm:${confirmation.id}`, payload: confirmation.manifest, traceId: input.traceId });
+    await this.store.appendRunEvent({ runId: input.runId, eventType: 'workspace.confirmation.confirmed', payload: { confirmationId: confirmation.id, status: 'confirmed', version: confirmation.version } });
+    await this.store.appendRunEvent({ runId: input.runId, eventType: 'workspace.outbox.enqueued', payload: { outboxId: queued.record.id, status: queued.record.status, operation: queued.record.operation } });
+    await this.audit({ actorId: input.adminId, action: 'workspace.confirmation.confirmed', targetRef: confirmation.id, requestId: input.requestId, traceId: input.traceId, payload: { action: confirmation.action, outboxId: queued.record.id }, accountId: bundle.run.accountId });
+    if (!run) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'run update failed');
+    return { run: this.toRunView(run, (await this.store.getRun(input.adminId, input.runId))?.steps ?? bundle.steps), confirmation: this.toConfirmationView(confirmation), outbox: this.toOutboxView(queued.record, bundle.run.id) };
+  }
+
+  async cancelRun(input: { adminId: string; runId: string; expectedVersion: number; requestId: string; traceId: string }): Promise<{ run: WorkspaceRunView; confirmation: WorkspaceConfirmationView }> {
+    const bundle = await this.store.getRun(input.adminId, input.runId);
+    if (!bundle) throw new ServiceError(404, 'NOT_FOUND', 'run not found');
+    if (bundle.run.status !== 'waiting_confirmation') throw new ServiceError(409, 'CONFLICT', 'run is not waiting for confirmation');
+    const current = await this.store.getWorkspaceConfirmation(input.adminId, input.runId);
+    if (!current) throw new ServiceError(404, 'NOT_FOUND', 'confirmation not found');
+    const confirmation = await this.store.transitionWorkspaceConfirmation({ adminId: input.adminId, confirmationId: current.id, expectedVersion: input.expectedVersion, status: 'cancelled', actorId: input.adminId });
+    if (!confirmation) throw new ServiceError(409, 'VERSION_CONFLICT', 'confirmation version changed; refresh and retry');
+    const step = bundle.steps.find((item) => item.id === confirmation.stepId);
+    if (!step) throw new ServiceError(409, 'CONFLICT', 'confirmation step not found');
+    const run = await this.store.updateRun(input.runId, { status: 'cancelled', resultSummary: '管理员已取消外部动作', finishedAt: new Date().toISOString() });
+    await this.store.updateRunStep(step.id, { status: 'cancelled', finishedAt: new Date().toISOString(), outputSummary: '管理员取消确认' });
+    await this.store.appendRunEvent({ runId: input.runId, eventType: 'workspace.confirmation.cancelled', payload: { confirmationId: confirmation.id, status: 'cancelled', version: confirmation.version } });
+    await this.audit({ actorId: input.adminId, action: 'workspace.confirmation.cancelled', targetRef: confirmation.id, requestId: input.requestId, traceId: input.traceId, payload: {}, accountId: bundle.run.accountId });
+    if (!run) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'run update failed');
+    return { run: this.toRunView(run, (await this.store.getRun(input.adminId, input.runId))?.steps ?? bundle.steps), confirmation: this.toConfirmationView(confirmation) };
+  }
+
+  async listOutbox(input: { adminId: string; runId: string }): Promise<WorkspaceOutboxView[]> {
+    const bundle = await this.store.getRun(input.adminId, input.runId);
+    if (!bundle) throw new ServiceError(404, 'NOT_FOUND', 'run not found');
+    const scope = this.executionScope(input.adminId, bundle.run.accountId);
+    const items = await this.store.listAutoReplyOutboxByAggregate(scope, bundle.run.id);
+    return items.map((item) => this.toOutboxView(item, bundle.run.id));
+  }
+
+  async retryRun(input: { adminId: string; runId: string; requestId: string; traceId: string }): Promise<{ run: WorkspaceRunView; outbox: WorkspaceOutboxView }> {
+    const bundle = await this.store.getRun(input.adminId, input.runId);
+    if (!bundle) throw new ServiceError(404, 'NOT_FOUND', 'run not found');
+    const scope = this.executionScope(input.adminId, bundle.run.accountId);
+    const items = await this.store.listAutoReplyOutboxByAggregate(scope, bundle.run.id);
+    const latest = items.at(-1);
+    if (!latest) throw new ServiceError(409, 'CONFLICT', '没有可重试的 Outbox 作业');
+    if (latest.externalOutcome === 'unknown') throw new ServiceError(409, 'OUTBOX_UNKNOWN_REQUIRES_RECOVERY', '外部结果未知，只能先查询或人工恢复');
+    if (!['retryable', 'dead_lettered'].includes(latest.status)) throw new ServiceError(409, 'CONFLICT', '当前 Outbox 状态不可重试', { status: latest.status });
+    const requeued = await this.store.requeueExecutionOutbox({ scope, id: latest.id });
+    if (!requeued) throw new ServiceError(409, 'CONFLICT', 'Outbox 状态已变化，请刷新后重试');
+    await this.store.updateRun(bundle.run.id, { status: 'retrying', resultSummary: 'Outbox 已重新入队，等待执行 Worker' });
+    await this.store.appendRunEvent({ runId: bundle.run.id, eventType: 'workspace.outbox.requeued', payload: { outboxId: requeued.id, status: requeued.status } });
+    await this.audit({ actorId: input.adminId, action: 'workspace.outbox.requeued', targetRef: requeued.id, requestId: input.requestId, traceId: input.traceId, payload: {}, accountId: bundle.run.accountId });
+    const latestRun = await this.store.getRun(input.adminId, bundle.run.id);
+    if (!latestRun) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'run reload failed');
+    return { run: this.toRunView(latestRun.run, latestRun.steps), outbox: this.toOutboxView(requeued, bundle.run.id) };
+  }
+
   private async appendMessage(input: { adminId: string; sessionId: string; runId?: string; type: 'user_message' | 'reasoning_summary' | 'tool_event' | 'final_answer'; content: string; summary?: string }): Promise<void> {
     const message = await this.store.appendWorkspaceMessage(input);
     if (input.runId) await this.store.appendRunEvent({ runId: input.runId, eventType: 'message.appended', payload: { messageType: message.type, messageId: message.id, content: message.content, summary: message.summary, createdAt: message.createdAt } });
   }
 
   private toSessionView(session: AgentSessionRecord): WorkspaceSessionView { return { ...session }; }
+
+  private executionScope(adminId: string, accountId: string): string { return `workspace:${adminId}:${accountId}`; }
+
+  private toConfirmationView(confirmation: WorkspaceConfirmationRecord): WorkspaceConfirmationView { return { confirmationId: confirmation.id, runId: confirmation.runId, stepId: confirmation.stepId, accountId: confirmation.accountId, action: confirmation.action, policyRef: confirmation.policyRef, manifest: { ...confirmation.manifest }, status: confirmation.status, version: confirmation.version, expiresAt: confirmation.expiresAt, confirmedAt: confirmation.confirmedAt, confirmedBy: confirmation.confirmedBy, cancelledAt: confirmation.cancelledAt, createdAt: confirmation.createdAt, updatedAt: confirmation.updatedAt }; }
+
+  private toOutboxView(outbox: AutoReplyOutboxRecord, runId: string): WorkspaceOutboxView { return { outboxId: outbox.id, runId, scope: outbox.scope, operation: outbox.operation, status: outbox.status, attempt: outbox.attempt, availableAt: outbox.availableAt, externalOutcome: outbox.externalOutcome, lastErrorCode: outbox.lastErrorCode, idempotencyKey: outbox.idempotencyKey, createdAt: outbox.createdAt, updatedAt: outbox.updatedAt }; }
 
   private toRunView(run: RunRecord, steps: StepRecord[]): WorkspaceRunView {
     const mappedSteps = steps.map((step) => ({ stepId: step.id, runId: step.runId, sequence: step.stepNo, kind: step.kind, label: step.label, status: step.status, startedAt: step.startedAt, finishedAt: step.finishedAt, inputSummary: step.inputSummary, outputSummary: step.outputSummary, affectedEntityRefs: [], errorCode: step.errorCode }));

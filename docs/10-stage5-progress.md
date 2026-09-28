@@ -1,6 +1,6 @@
 # 阶段 5 执行进度：在线聊天 / Workspace / Settings API Key 优先队列
 
-- 日期：2026-09-21
+- 日期：2026-09-28
 - 阶段状态：进行中；账号、商品、卡券已具备主体链路，S4-VS3 仍待真实环境人工审核；下一批优先切片为在线聊天、Workspace 和 Settings API Key。
 - 当前唯一目标：按 `docs/04-plan.md` 逐片推进 `S4-VS5A/B/C`、`S4-VS6A/B`、`S4-VS7A`，不把 mock、MemoryStore、fixture、API 200 或页面可打开当作完整交付。
 
@@ -23,7 +23,7 @@
 | `S4-VS5B` 在线聊天发送/附件/撤回 | `PLANNED` | Message 状态机和发送/图片/撤回 API 已冻结 | 持久化、对象存储、幂等、unknown/timeout、脱敏 |
 | `S4-VS5C` 人工接管与 AI 恢复 | `PLANNED` | handoff/release、版本和审计契约已冻结 | 非法转换、403/409、页面禁用、移动端 |
 | `S4-VS6A` Workspace 会话与 Run 首链路 | `PARTIALLY_VERIFIED` | AgentSession/Run/Step、Memory/Postgres Store、受控 Runtime、前端 `/workspace`、clientRunRef、WS cursor replay、真实 PostgreSQL/Chrome/CDP 首链路 | 独立 Worker/Pi Runtime、发布级恢复、人工视觉签核与完整状态回归 |
-| `S4-VS6B` Workspace Confirmation/Outbox | `PLANNED` | Confirmation/Outbox/恢复 API 已冻结 | Policy、幂等、租约、cancel/retry/recover |
+| `S4-VS6B` Workspace Confirmation/Outbox | `VERIFIED`（商品发布确认子片） | WS-VS-02：商品发布指令、脱敏 Confirmation Card、Confirm/Cancel/Retry、Outbox pending、Memory/PostgreSQL、Chrome/CDP 双 viewport | 真实外部发布 Worker、unknown/recovery、发布级迁移回滚仍由后续门禁承接 |
 | `S4-VS7A` Settings API Key 配置 | `READY_FOR_REVIEW` | OpenAI 主备配置、动态 provider `/models`、思考程度元数据、API Key 等长脱敏回显、真实 PostgreSQL + Chrome/CDP UI→DB→Agent、更新无重启生效、主失败切备用、重启后待测试并主动测试回显、双 viewport 截图 | fallback 审计可查询化、迁移 024 发布级 rollback/兼容窗口、三轮独立评审；本片不做 reveal |
 | `S4-VS-DASHBOARD` 仪表盘高保真界面 | `PARTIALLY_VERIFIED` | `/dashboard` 正式 feature、桌面/移动独立组合、KPI/趋势/健康度/商品排行/最近处理/风险抽屉、Web 单测/构建、真实 Chrome/CDP + PostgreSQL/Redis + 闲鱼全链路、双 viewport 截图 | 旧 `/order-trend` 兼容接口、全状态截图、独立视觉签核与 rollback |
 | `S4-ENV-RECOVERY` | `BLOCKED` | Compose/健康检查/部分持久化已有证据 | 完整迁移回滚、Testcontainers、Redis/MinIO 重启和发布级恢复 |
@@ -37,6 +37,7 @@
 - `npm run verify`、商品 PostgreSQL smoke、商品/卡券 Chrome/CDP E2E 和 Compose 配置检查已有历史通过记录；这些记录只覆盖对应首片和受控环境。
 - `docs/04-plan.md`、`docs/02-data-api.md`、`docs/03-component-contract.md`、`docs/06-risk-register.md`、`docs/09-decision-log.md` 已同步新增切片、依赖、回滚、状态和风险映射。
 - `S4-VS7A` 当前实现已在独立 worktree 完成首片代码：`apps/api` 提供 `/api/v1/credentials` 及 rotate/enable/disable/revoke，CredentialRef 只返回脱敏 metadata；`apps/web` 提供 `/settings`、明确 `accountId` 选择、CredentialStore panel 与编辑/轮换/启停/撤销交互。`npm --workspace apps/api run build`、`node apps/api/scripts/credential-store-smoke.mjs`、`npm --workspace apps/web run typecheck`、`npm --workspace apps/web run test -- --run`（26 files / 88 tests）、`npm --workspace apps/web run build`、`git diff --check` 已通过；上述证据尚未替代真实 PostgreSQL、浏览器视觉和独立复审。
+- 2026-09-28 WS-VS-02 已完成：`workspace.confirmations` 迁移 043、商品发布确认服务、Confirm/Cancel/Retry/Outbox API、Workspace Confirmation Card 与 Outbox Panel 已接入；`workspace-confirmation.test.ts` 5/5、Workspace 原生读写合并 10/10、Memory HTTP smoke、临时 PostgreSQL 关闭/重开复读、真实 Chrome/CDP Confirm/Cancel E2E 和 1440×900 / 390×844 截图均通过。证据文档：`docs/agent/workspace/WS-VS-02-product-publish-confirmation.md`。
 
 ## 当前阻断与执行规则
 
@@ -50,7 +51,7 @@
 ## 下一步顺序
 
 1. `S4-VS5A` → `S4-VS5B` → `S4-VS5C`：在线聊天读取、发送/附件、接管/恢复 AI。
-2. `S4-VS6A` → `S4-VS6B`：Workspace 会话/Run，再做 Confirmation/Outbox/恢复。
+2. WS-VS-01（原生只读）→ WS-VS-02（商品发布确认）已完成；下一条 Workspace 原生写入切片可承接新增卡券或修改配置，真实外部发布 Worker 与恢复仍独立推进。
 3. `S4-VS7A`：合并后完成 fallback 审计可查询化、迁移 024 发布级 rollback/兼容窗口和三轮独立复审；不把当前受控证据直接升级为 PASS。
 4. `S4-VS4A` → `S4-VS4B` → `S4-VS4C`：订单只读、交付预览、交付动作后置。
 5. 横向独立执行 `S4-ENV-RECOVERY`、`S4-EXT-ACCOUNT`、`S4-ENV-RUNTIME`，每项都保留真实环境证据和回滚结果。

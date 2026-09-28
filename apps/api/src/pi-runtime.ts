@@ -1,6 +1,8 @@
 import type { RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, Store } from './domain.js';
 import type { WorkspaceRuntime } from './workspace.js';
 import { executeNativeWorkspaceRead } from './workspace-native-read.js';
+import { prepareNativeWorkspaceWrite } from './workspace-native-write.js';
+import { persistWorkspaceConfirmation } from './workspace-confirmation.js';
 
 export const DEFAULT_PI_BASE_URL = 'https://api.openai.com/v1';
 export const DEFAULT_PI_MODEL = 'gpt-4o-mini';
@@ -282,6 +284,15 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       await this.emit(input.run.id, 'step.started', { stepId: step.id, status: 'running' });
       await this.emit(input.run.id, 'runtime.started', { status: 'running', model: this.options.model, messageType: 'tool_event' });
       await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: '正在分析请求并准备执行上下文。', summary: '已创建高层推理摘要' });
+
+      const nativeWrite = await prepareNativeWorkspaceWrite({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction });
+      if (nativeWrite) {
+        await this.transitionStep(step, 'waiting_confirmation', { outputSummary: nativeWrite.summary });
+        await this.transitionRun(input.run, 'waiting_confirmation', { resultSummary: nativeWrite.summary });
+        const confirmation = await persistWorkspaceConfirmation({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, sessionId, run: input.run, step, plan: nativeWrite });
+        await this.emit(input.run.id, 'workspace.confirmation.created', { status: 'active', confirmationId: confirmation.id, action: confirmation.action, policyRef: confirmation.policyRef, manifest: confirmation.manifest, expiresAt: confirmation.expiresAt });
+        return;
+      }
 
       await this.transitionRun(input.run, 'executing');
       await this.transitionStep(step, 'executing');

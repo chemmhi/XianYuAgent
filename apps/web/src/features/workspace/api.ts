@@ -1,4 +1,4 @@
-import type { WorkspaceMessageVM, WorkspaceRunEventVM, WorkspaceRunVM, WorkspaceSessionVM } from './types';
+import type { WorkspaceConfirmationVM, WorkspaceMessageVM, WorkspaceOutboxVM, WorkspaceRunEventVM, WorkspaceRunVM, WorkspaceSessionVM } from './types';
 
 export interface WorkspaceApiTransport {
   get<T>(path: string): Promise<T>;
@@ -14,6 +14,11 @@ export interface WorkspaceApi {
   startRun(input: { accountId: string; sessionId: string; instruction: string; clientRunRef: string }): Promise<WorkspaceRunVM>;
   getRun(runId: string): Promise<WorkspaceRunVM>;
   listEvents(runId: string, afterSequence?: number): Promise<WorkspaceRunEventVM[]>;
+  getConfirmation(runId: string): Promise<WorkspaceConfirmationVM>;
+  confirmRun(runId: string, expectedVersion: number): Promise<{ run: WorkspaceRunVM; confirmation: WorkspaceConfirmationVM; outbox: WorkspaceOutboxVM }>;
+  cancelRun(runId: string, expectedVersion: number): Promise<{ run: WorkspaceRunVM; confirmation: WorkspaceConfirmationVM }>;
+  retryRun(runId: string): Promise<{ run: WorkspaceRunVM; outbox: WorkspaceOutboxVM }>;
+  listOutbox(runId: string): Promise<WorkspaceOutboxVM[]>;
   openRunEvents(runId: string, afterSequence: number, handlers: { onOpen: () => void; onEvent: (event: WorkspaceRunEventVM) => void; onClose: () => void; onError: () => void }): WebSocket;
 }
 
@@ -21,6 +26,7 @@ interface ApiEnvelope<T> { success: boolean; data: T | null; message?: string | 
 interface SessionPayload { items?: WorkspaceSessionVM[]; }
 interface EventPayload { items?: WorkspaceRunEventVM[]; }
 interface MessagePayload { items?: Array<{ id: string; sessionId: string; runId?: string; type: WorkspaceMessageVM['type']; content: string; summary?: string; createdAt: string; sequence: number }>; }
+interface OutboxPayload { items?: WorkspaceOutboxVM[]; }
 
 function messageTitle(type: WorkspaceMessageVM['type']): string {
   if (type === 'user_message') return '用户';
@@ -70,6 +76,11 @@ export function createWorkspaceApi(transport: WorkspaceApiTransport, options: { 
       const payload = await transport.get<EventPayload | ApiEnvelope<EventPayload>>(`/api/v1/workspace/runs/${encodeURIComponent(runId)}/events?after=${afterSequence}`);
       return unwrap(payload).items ?? [];
     },
+    async getConfirmation(runId) { return unwrap(await transport.get<WorkspaceConfirmationVM | ApiEnvelope<WorkspaceConfirmationVM>>(`/api/v1/workspace/runs/${encodeURIComponent(runId)}/confirmation`)); },
+    async confirmRun(runId, expectedVersion) { return unwrap(await post<{ run: WorkspaceRunVM; confirmation: WorkspaceConfirmationVM; outbox: WorkspaceOutboxVM } | ApiEnvelope<{ run: WorkspaceRunVM; confirmation: WorkspaceConfirmationVM; outbox: WorkspaceOutboxVM }>>(`/api/v1/workspace/runs/${encodeURIComponent(runId)}/confirm`, { expectedVersion }, 'workspace-confirm')); },
+    async cancelRun(runId, expectedVersion) { return unwrap(await post<{ run: WorkspaceRunVM; confirmation: WorkspaceConfirmationVM } | ApiEnvelope<{ run: WorkspaceRunVM; confirmation: WorkspaceConfirmationVM }>>(`/api/v1/workspace/runs/${encodeURIComponent(runId)}/cancel`, { expectedVersion }, 'workspace-cancel')); },
+    async retryRun(runId) { return unwrap(await post<{ run: WorkspaceRunVM; outbox: WorkspaceOutboxVM } | ApiEnvelope<{ run: WorkspaceRunVM; outbox: WorkspaceOutboxVM }>>(`/api/v1/workspace/runs/${encodeURIComponent(runId)}/retry`, {}, 'workspace-retry')); },
+    async listOutbox(runId) { return (unwrap(await transport.get<OutboxPayload | ApiEnvelope<OutboxPayload>>(`/api/v1/execution/outbox?runId=${encodeURIComponent(runId)}`))).items ?? []; },
     openRunEvents(runId, afterSequence, handlers) {
       const base = options.baseUrl ? new URL(options.baseUrl, window.location.origin) : new URL(window.location.origin);
       base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:';

@@ -668,3 +668,14 @@
 | S5-R137 | 外部平台 / 真实发送 | 白名单买家是否完成真实滑块后外发并落库 | root | BLOCKED | 真实 NC 页面加载正常，但三次轨迹均返回 `验证失败(error:fALStr)`；保留 `ACCOUNT_VALIDATION_REQUIRED`，无外部消息引用 |
 
 本轮结论：本地发送状态和实时消息竞态已修复并通过真实浏览器 E2E；真实闲鱼外部挑战仍阻塞自动发送，未把受控夹具或失败重试解释为真实发送成功。
+
+### 2026-09-28：Workspace 原生只读与商品发布确认垂直切片复审
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R138 | 业务 / 验收 | Workspace 是否能按当前账号 scope 生成商品发布确认卡，并支持确认、取消和 Outbox 状态回显 | root | PASS | `WS-VS-02-product-publish-confirmation.md`；真实 `/workspace` Chrome/CDP E2E；确认 Run `executing`、取消 Run `cancelled` |
+| S5-R139 | 架构 / 数据流 | Policy → Confirmation → Idempotency → Outbox 顺序、Run/Step 状态机、Manifest 脱敏和账号隔离是否成立 | root | PASS | `workspace.ts`、`workspace-native-write.ts`、`workspace-confirmation.ts`、`store-memory.ts`、`store-postgres.ts`；Memory 10/10；PostgreSQL 复读 |
+| S5-R140 | 数据库 / 持久化 | 迁移 043 是否可重复执行，确认、版本、Run/Step、Outbox 是否在关闭并重开 Store 后保持一致 | root | PASS（临时 PostgreSQL） | `043_workspace_confirmations.sql`、`workspace-confirmation-postgres-smoke.mjs`；version=2、Run/Step=executing、Outbox=pending |
+| S5-R141 | 质量 / 视觉 / 安全 | API/Web typecheck/build、Workspace 定向测试、真实浏览器双 viewport、敏感字段边界和 diff-check 是否通过 | root | PASS（受控环境） | `npm run typecheck:api`、`npm run typecheck:web`、`npm run build:api`、`npm run build:web`、Chrome/CDP 截图、`git diff --check` |
+
+本轮结论：WS-VS-01 原生只读与 WS-VS-02 商品发布确认均已完成并验证。确认后只进入 `execution.outbox_jobs` 的 `pending` 状态，不伪造真实闲鱼商品发布成功；外部发布 Worker、unknown/recovery 和发布级迁移回滚继续保持独立后续门禁。下一条 Workspace 原生写入切片可进入新增卡券或修改配置。

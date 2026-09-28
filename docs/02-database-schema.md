@@ -130,6 +130,7 @@
 | `022_auto_reply_agent_settings` | settings.auto_reply_agent_configs 管理员默认配置 | 001_auth_accounts | 回退应用继续读取环境配置；保留已写配置等待向前迁移 |
 | `023_auto_reply_agent_account_scope` | settings.auto_reply_agent_account_configs 账号级配置，并从 active account scope 回填 | 022_auto_reply_agent_settings、account_scopes | 先停止配置写入，保留管理员默认配置；回滚应用读取 fallback |
 | `024_auto_reply_run_events` | messages.auto_reply_run_events 事件表、run sequence 唯一约束和查询索引 | 021_auto_reply_runs、001_auth_accounts | 停止事件写入并保留 run；若回退，详情暂不展示事件时间线，不删除历史事件 |
+| `043_workspace_confirmations` | workspace.confirmations 商品发布确认记录、状态/版本约束、active step 部分唯一索引和过期查询索引 | 006_workspace_execution、001_auth_accounts、034_auto_reply_send_outbox | 应用先回退并停止新确认写入；保留历史 Confirmation/Run/Step/Outbox，完成备份与恢复演练后再评估 DDL 回滚 |
 
 迁移采用 expand → backfill → verify → switch → contract；每次迁移必须可重复执行或具备可靠回滚说明。不可逆变更前必须完成数据库备份、读写验证和恢复演练。
 

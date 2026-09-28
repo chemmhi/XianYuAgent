@@ -267,3 +267,11 @@
 | --- | --- | --- | --- | --- |
 | S5-RISK-052 | 闲鱼 NC 滑块挑战在真实账号上返回 `验证失败(error:fALStr)`，自动 solver 尚未获得新 `x5sec`，因此真实白名单消息仍无法外发 | P0 | 保留 `ACCOUNT_VALIDATION_REQUIRED` fail-closed；自动模式隐藏/最小化浏览器并回收进程；待外部挑战允许自动化通过后重新执行真实发送与消息落库复核 | OPEN / BLOCKED_BY_EXTERNAL_CHALLENGE |
 | S5-RISK-053 | 外部验证请求若长期不返回，前端可能重复提交或永久显示发送中 | P1 | HTTP 客户端 45 秒超时、消息控制器 40 秒 UI 超时、保持同一幂等键并在会话切换后不污染当前时间线；补控制器回归与 Chrome/CDP E2E | CLOSED |
+
+### 2026-09-28 Workspace 商品发布确认垂直切片
+
+| 编号 | 风险 | 级别 | 应对 | 状态 |
+| --- | --- | --- | --- | --- |
+| S5-RISK-057 | Workspace 商品发布确认后若直接把 Outbox `pending` 显示为外部发布成功，会造成错误业务认知 | P1 | Confirmation Card 明确展示“进入执行队列”；Outbox 只显示 `pending`，真实闲鱼 Worker 与外部结果由后续切片负责；unknown 禁止盲目重放 | MITIGATED |
+| S5-RISK-058 | Confirmation、Run/Step 和 Outbox 分步写入时，外部执行失败可能留下部分状态 | P1 | 先通过 Policy、版本和请求幂等校验；写入后保留 Run Event/AuditEvent；`workspace-confirmation-postgres-smoke.mjs` 验证关闭/重开复读；发布级事务/恢复演练纳入 `S4-ENV-RECOVERY` | OPEN |
+| S5-RISK-059 | 迁移 043 在已有 PostgreSQL volume 上未执行会导致确认路由与 schema 漂移 | P1 | 使用 `npm run db:migrate` 显式 apply；`docs/migrations/README.md` 记录已有 volume、重复执行和回滚边界；临时 PostgreSQL 001–043 复读已通过 | MITIGATED |

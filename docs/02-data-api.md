@@ -347,6 +347,8 @@ type ConversationHandlingOutput = {
 
 Workspace 的 `Run/Step` 结果可以引用商品、卡券、订单，但只能返回脱敏 `BusinessLinkVM`：`{ type: 'product'|'coupon_batch'|'order'|'conversation', id, accountId, label?, route, redacted: true }`；不得把卡券正文、CredentialValue、买家敏感内容或 Pi 原始 payload 直接放入前端 ViewModel。
 
+2026-09-28，WS-VS-02 已完成 Confirmation/Cancel/Outbox 入队子片：商品发布指令由服务端识别，Confirmation Manifest 只包含脱敏商品字段；确认后的 Outbox 保持 `pending`，不伪造闲鱼外部发布成功。真实外部 Worker、`unknown` 恢复和发布级迁移回滚仍由后续门禁承接。
+
 ### 13.3 Settings API Key 配置
 
 | 切片 | API / 输入输出 | 敏感边界与状态 | 完成门禁 |
