@@ -40,6 +40,7 @@ import { XianyuProductAutomationExecutionAdapter } from './product-automation-xi
 import { conversationRefreshMode, messageRefreshMode } from './messages-loading-policy.js';
 import { CouponAssetService } from './coupon-assets.js';
 import { ProductPublishService } from './product-publish.js';
+import { ProductKnowledgeBaseService } from './product-knowledge-base.js';
 import { classifyXianyuFailure } from './xianyu-account-health.js';
 
 export interface AppRuntime {
@@ -51,6 +52,7 @@ export interface AppRuntime {
   orders: OrderService;
   products: ProductService;
   productPublisher: ProductPublishService;
+  productKnowledgeBase: ProductKnowledgeBaseService;
   productAutomation: ProductAutomationService;
   productAutomationTrigger: ProductAutomationTrigger;
   productAutomationWorker: ProductAutomationWorker;
@@ -290,16 +292,19 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       await markXianyuAccountFailure(store, adminId, accountId, { errorCode, message, accountInvalid });
     },
   });
-  const productPublisher = new ProductPublishService(xianyu, products, async (adminId, accountId) => {
+  const resolveConfiguredModelClient = async (adminId: string, accountId: string): Promise<ModelClient | undefined> => {
     const configured = await openaiSettings.resolveForRuntime(adminId, accountId);
-    if (configured.length === 0) return undefined;
+    if (configured.length === 0) return modelClient;
     const clients = await Promise.all(configured.slice(0, 2).map((item) => openaiSettings.createRuntimeClient(item)));
     return createFallbackModelClient(clients[0]!, clients[1]);
-  }, async (input) => {
+  };
+  const productAudit = async (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
-  });
+  };
+  const productPublisher = new ProductPublishService(xianyu, products, resolveConfiguredModelClient, productAudit);
+  const productKnowledgeBase = new ProductKnowledgeBaseService(store, products, resolveConfiguredModelClient, productAudit);
   const xianyuItemDetail = new XianyuItemDetailService(store, xianyu, objectStorage, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
@@ -336,7 +341,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, orders, products, productPublisher, productAutomation, productAutomationTrigger, productAutomationWorker, productSync, credentials, apiKeyCredentials, openaiSettings, dashboard, messages, autoReply, autoReplyRepair, autoReplyAgentSettings, autoReplyActivity, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
+    config, store, auth, accounts, coupons, orders, products, productPublisher, productKnowledgeBase, productAutomation, productAutomationTrigger, productAutomationWorker, productSync, credentials, apiKeyCredentials, openaiSettings, dashboard, messages, autoReply, autoReplyRepair, autoReplyAgentSettings, autoReplyActivity, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
     server,
     async listen() {
       await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));
@@ -1256,6 +1261,18 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
       if (!accountId) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
       const optimized = await runtime.productPublisher.optimizeDescription({ adminId: authContext.admin.id, accountId, title: String(ctx.body.title ?? ''), description: String(ctx.body.description ?? ''), requestId: ctx.requestId, traceId: ctx.traceId });
       return success(ctx, optimized);
+    });
+  }
+  const productKnowledgeBaseActionMatch = ctx.path.match(/^\/api\/v1\/products\/([^/]+)\/knowledge-base\/(generate-from-conversations|optimize)$/);
+  if (productKnowledgeBaseActionMatch && ctx.method === 'POST') {
+    const productId = decodeURIComponent(productKnowledgeBaseActionMatch[1]);
+    const accountId = optionalString(ctx.body.accountId);
+    return mutation(runtime, ctx, authContext, accountId, async () => {
+      const input = { adminId: authContext.admin.id, productId, accountId, expectedConfigVersion: parseExpectedProductVersion(ctx), requestId: ctx.requestId, traceId: ctx.traceId };
+      const result = productKnowledgeBaseActionMatch[2] === 'optimize'
+        ? await runtime.productKnowledgeBase.optimize(input)
+        : await runtime.productKnowledgeBase.appendFromConversations(input);
+      return success(ctx, { ...result, product: toProductView(result.product) });
     });
   }
   const productMatch = ctx.path.match(/^\/api\/v1\/products\/([^/]+)$/);

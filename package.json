@@ -58,7 +58,8 @@
     "compose:logs": "docker compose --profile full logs -f api worker",
     "monitor:auto-reply": "node scripts/auto-reply-monitor/monitor-auto-reply.mjs",
     "compose:ps": "docker compose ps",
-    "db:migrate": "npm --workspace apps/api run migrate"
+    "db:migrate": "npm --workspace apps/api run migrate",
+    "knowledge-base:init": "npm --workspace apps/api run knowledge-base:init"
   },
   "devDependencies": {
     "concurrently": "10.0.5",

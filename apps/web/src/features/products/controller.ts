@@ -69,6 +69,8 @@ export interface ProductsController {
   createDraft: (input: ProductDraftInput) => Promise<ProductVM | null>;
   updateDraft: (productId: string, patch: ProductDraftPatch, configVersion: number) => Promise<ProductVM | null>;
   updateKnowledgeBase: (product: ProductVM, knowledgeBase: string) => Promise<ProductVM | null>;
+  generateKnowledgeBaseFromConversations: (product: ProductVM) => Promise<import('./api').ProductKnowledgeBaseActionVM | null>;
+  optimizeKnowledgeBase: (product: ProductVM) => Promise<import('./api').ProductKnowledgeBaseActionVM | null>;
   publishProduct: (values: ProductPublishFormValues) => Promise<boolean>;
   previewProduct: (values: Pick<ProductPublishFormValues, 'accountId' | 'title' | 'description' | 'attachments'>) => Promise<ProductPublishPreviewVM>;
   optimizeDescription: (input: { accountId: string; title: string; description: string }) => Promise<string>;
@@ -241,6 +243,38 @@ export function useProductsController(options: { api?: ProductsApi; initialFilte
       return null;
     }
   }, [productsApi, reload]);
+  const generateKnowledgeBaseFromConversations = useCallback(async (product: ProductVM) => {
+    setMutation({ phase: 'saving', error: null });
+    try {
+      const result = await productsApi.generateKnowledgeBaseFromConversations(product.id, { accountId: product.accountId, configVersion: product.configVersion });
+      setMutation({ phase: 'success', error: null });
+      await reload();
+      return result;
+    } catch (error) {
+      const normalized = toProductsMutationError(error);
+      if (normalized.code === 'VERSION_CONFLICT') {
+        try { normalized.conflict = { server: await productsApi.getDetail(product.id), local: { knowledgeBase: product.knowledgeBase ?? '' } }; } catch { normalized.conflict = { local: { knowledgeBase: product.knowledgeBase ?? '' } }; }
+      }
+      setMutation({ phase: 'error', error: normalized });
+      return null;
+    }
+  }, [productsApi, reload]);
+  const optimizeKnowledgeBase = useCallback(async (product: ProductVM) => {
+    setMutation({ phase: 'saving', error: null });
+    try {
+      const result = await productsApi.optimizeKnowledgeBase(product.id, { accountId: product.accountId, configVersion: product.configVersion });
+      setMutation({ phase: 'success', error: null });
+      await reload();
+      return result;
+    } catch (error) {
+      const normalized = toProductsMutationError(error);
+      if (normalized.code === 'VERSION_CONFLICT') {
+        try { normalized.conflict = { server: await productsApi.getDetail(product.id), local: { knowledgeBase: product.knowledgeBase ?? '' } }; } catch { normalized.conflict = { local: { knowledgeBase: product.knowledgeBase ?? '' } }; }
+      }
+      setMutation({ phase: 'error', error: normalized });
+      return null;
+    }
+  }, [productsApi, reload]);
   const syncFromXianyu = useCallback(async (accountId: string) => {
     setSyncError(null);
     setMutation({ phase: 'saving', error: null });
@@ -258,5 +292,5 @@ export function useProductsController(options: { api?: ProductsApi; initialFilte
   }, [productsApi, reload]);
   const clearMutation = useCallback(() => setMutation({ phase: 'idle', error: null }), []);
 
-  return { filters, setFilters, setKeyword, reload, openProduct, closeProduct, openXianyuDetail, syncXianyuDetail, closeXianyuDetail, createDraft, updateDraft, updateKnowledgeBase, publishProduct, previewProduct, optimizeDescription, syncFromXianyu, syncError, clearMutation, state, detail, xianyuDetail, mutation };
+  return { filters, setFilters, setKeyword, reload, openProduct, closeProduct, openXianyuDetail, syncXianyuDetail, closeXianyuDetail, createDraft, updateDraft, updateKnowledgeBase, generateKnowledgeBaseFromConversations, optimizeKnowledgeBase, publishProduct, previewProduct, optimizeDescription, syncFromXianyu, syncError, clearMutation, state, detail, xianyuDetail, mutation };
 }

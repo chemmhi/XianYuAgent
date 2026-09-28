@@ -15,10 +15,22 @@ export interface ProductsApi {
   createDraft(input: ProductDraftInput, options?: { idempotencyKey?: string }): Promise<ProductVM>;
   updateDraft(productId: string, patch: ProductDraftPatch, options: { configVersion: number; idempotencyKey?: string }): Promise<ProductVM>;
   updateKnowledgeBase(productId: string, input: { accountId: string; knowledgeBase: string | null; configVersion: number; idempotencyKey?: string }): Promise<ProductVM>;
+  generateKnowledgeBaseFromConversations(productId: string, input: { accountId: string; configVersion: number; idempotencyKey?: string }): Promise<ProductKnowledgeBaseActionVM>;
+  optimizeKnowledgeBase(productId: string, input: { accountId: string; configVersion: number; idempotencyKey?: string }): Promise<ProductKnowledgeBaseActionVM>;
   publishProduct(input: ProductPublishRequest, options?: { idempotencyKey?: string }): Promise<ProductPublishResultVM>;
   previewProduct(input: ProductPublishPreviewRequest, options?: { idempotencyKey?: string }): Promise<ProductPublishPreviewVM>;
   optimizeDescription(input: { accountId: string; title: string; description: string }, options?: { idempotencyKey?: string }): Promise<{ description: string; provider: string; model: string }>;
   syncFromXianyu(accountId: string, options?: { pageSize?: number; maxPages?: number; idempotencyKey?: string }): Promise<ProductSyncResultVM>;
+}
+
+export interface ProductKnowledgeBaseActionVM {
+  product: ProductVM;
+  conversationCount: number;
+  messageCount: number;
+  questionCount: number;
+  humanReplyCount: number;
+  changed: boolean;
+  model?: string;
 }
 
 export interface ProductPublishRequest {
@@ -128,6 +140,16 @@ interface ProductsPayload {
   page?: number;
   pageSize?: number;
   totalPages?: number;
+}
+
+interface ProductKnowledgeBaseActionPayload {
+  product: ProductPayload;
+  conversationCount?: number;
+  messageCount?: number;
+  questionCount?: number;
+  humanReplyCount?: number;
+  changed?: boolean;
+  model?: string;
 }
 
 interface XianyuItemDetailPayload {
@@ -362,6 +384,18 @@ function requireTransportMethod<T extends 'post' | 'patch'>(transport: ProductsA
   return handler as NonNullable<ProductsApiTransport[T]>;
 }
 
+function toProductKnowledgeBaseAction(payload: ProductKnowledgeBaseActionPayload): ProductKnowledgeBaseActionVM {
+  return {
+    product: toProductVM(payload.product),
+    conversationCount: payload.conversationCount ?? 0,
+    messageCount: payload.messageCount ?? 0,
+    questionCount: payload.questionCount ?? 0,
+    humanReplyCount: payload.humanReplyCount ?? 0,
+    changed: payload.changed ?? false,
+    model: payload.model,
+  };
+}
+
 export function createProductsApi(transport: ProductsApiTransport): ProductsApi {
   return {
     async list(filters = {}) {
@@ -421,6 +455,16 @@ export function createProductsApi(transport: ProductsApiTransport): ProductsApi 
         },
       });
       return toProductVM(unwrapEnvelope(payload));
+    },
+    async generateKnowledgeBaseFromConversations(productId, input) {
+      const post = requireTransportMethod(transport, 'post');
+      const payload = await post<ProductKnowledgeBaseActionPayload | ApiEnvelope<ProductKnowledgeBaseActionPayload>>(`/api/v1/products/${encodeURIComponent(productId)}/knowledge-base/generate-from-conversations`, { accountId: input.accountId }, { headers: { 'Idempotency-Key': input.idempotencyKey ?? idempotencyKey('product-knowledge-base-generate'), 'If-Match-Version': String(input.configVersion) } });
+      return toProductKnowledgeBaseAction(unwrapEnvelope(payload));
+    },
+    async optimizeKnowledgeBase(productId, input) {
+      const post = requireTransportMethod(transport, 'post');
+      const payload = await post<ProductKnowledgeBaseActionPayload | ApiEnvelope<ProductKnowledgeBaseActionPayload>>(`/api/v1/products/${encodeURIComponent(productId)}/knowledge-base/optimize`, { accountId: input.accountId }, { headers: { 'Idempotency-Key': input.idempotencyKey ?? idempotencyKey('product-knowledge-base-optimize'), 'If-Match-Version': String(input.configVersion) } });
+      return toProductKnowledgeBaseAction(unwrapEnvelope(payload));
     },
     async publishProduct(input, options = {}) {
       const post = requireTransportMethod(transport, 'post');
@@ -566,6 +610,28 @@ export function createMockProductsApi(seed: ProductVM[] = [
       product.configVersion += 1;
       product.updatedAt = new Date().toISOString();
       return product;
+    },
+    async generateKnowledgeBaseFromConversations(productId) {
+      const product = seed.find((item) => item.id === productId);
+      if (!product) throw new Error('PRODUCT_NOT_FOUND');
+      const addition = '常见问题：请先确认交付方式与适用范围，再按商品说明完成下单。';
+      product.knowledgeBase = product.knowledgeBase?.trim() ? `${product.knowledgeBase.trim()}\n\n${addition}` : addition;
+      product.configVersion += 1;
+      product.updatedAt = new Date().toISOString();
+      return { product, conversationCount: 1, messageCount: 2, questionCount: 1, humanReplyCount: 1, changed: true, model: 'mock' };
+    },
+    async optimizeKnowledgeBase(productId) {
+      const product = seed.find((item) => item.id === productId);
+      if (!product) throw new Error('PRODUCT_NOT_FOUND');
+      const current = (product.knowledgeBase ?? '').trim();
+      const optimized = [...new Set(current.split(/\n+/).map((line) => line.trim()).filter(Boolean))].join('\n');
+      const changed = optimized !== current;
+      if (changed) {
+        product.knowledgeBase = optimized;
+        product.configVersion += 1;
+        product.updatedAt = new Date().toISOString();
+      }
+      return { product, conversationCount: 0, messageCount: 0, questionCount: 0, humanReplyCount: 0, changed, model: 'mock' };
     },
     async publishProduct(input) {
       const product: ProductVM = {
