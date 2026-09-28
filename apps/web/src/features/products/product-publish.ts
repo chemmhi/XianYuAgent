@@ -14,6 +14,28 @@ export type ProductPublishSpec = {
   source: 'description' | 'image' | 'official';
 };
 
+export type ProductPublishSpecOption = {
+  valueId?: string;
+  valueName?: string;
+  text: string;
+  channelCatId?: string;
+  catId?: string;
+  catName?: string;
+  tbCatId?: string;
+};
+
+export type ProductPublishSpecPreview = {
+  propertyId: string;
+  propertyName: string;
+  selected?: ProductPublishSpecOption;
+  options: ProductPublishSpecOption[];
+};
+
+export type ProductPublishSpecOverride = ProductPublishSpecOption & {
+  propertyId: string;
+  propertyName: string;
+};
+
 export type ProductPublishFormValues = {
   accountId: string;
   title: string;
@@ -22,11 +44,11 @@ export type ProductPublishFormValues = {
   priceMinor: string;
   priceYuan: string;
   originalPriceYuan: string;
-  quantity: string;
   postageMode: ProductPostageMode;
   postageYuan: string;
   location: string;
   attachments: PublishAttachment[];
+  specOverrides?: ProductPublishSpecOverride[];
 };
 
 export const DEFAULT_PRODUCT_DESCRIPTION = '全新降噪蓝牙耳机 Pro，通勤和居家都适合。\n• 主动降噪，地铁 / 飞机环境更安静\n• 单次续航约 8 小时，充电盒可补电 3 次\n• 支持双设备连接，Type-C 充电\n\n成色：全新未拆封｜发货：24 小时内';
@@ -65,6 +87,10 @@ export function inferProductSpecs(title: string, description: string, attachment
   return specs;
 }
 
+export function shouldPreviewOfficialSpecifications(input: Pick<ProductPublishFormValues, 'accountId' | 'title' | 'description' | 'attachments'>): boolean {
+  return Boolean(input.accountId.trim() && input.title.trim() && input.description.trim() && input.attachments.some((attachment) => Boolean(attachment.file)));
+}
+
 function normalizePostageMode(value: unknown): ProductPostageMode {
   if (value === 'distance') return 'distance';
   if (value === 'fixed' || value === 'buyer') return 'fixed';
@@ -78,7 +104,6 @@ export function publishMetaFromProduct(product?: ProductVM | null): ProductPubli
   const value = raw as Record<string, unknown>;
   return {
     originalPriceMinor: typeof value.originalPriceMinor === 'number' ? value.originalPriceMinor : undefined,
-    quantity: typeof value.quantity === 'number' ? value.quantity : undefined,
     postageMode: normalizePostageMode(value.postageMode),
     postageMinor: typeof value.postageMinor === 'number' ? value.postageMinor : undefined,
     location: typeof value.location === 'string' ? value.location : undefined,
@@ -97,7 +122,6 @@ export function createInitialProductPublishValues(accountId?: string, product?: 
     priceMinor: product?.priceMinor === undefined ? '' : String(product.priceMinor),
     priceYuan: formatYuan(product?.priceMinor),
     originalPriceYuan: formatYuan(meta.originalPriceMinor),
-    quantity: meta.quantity === undefined ? '' : String(meta.quantity),
     postageMode: normalizePostageMode(meta.postageMode),
     postageYuan: formatYuan(meta.postageMinor),
     location: meta.location ?? '',

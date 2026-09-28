@@ -1223,15 +1223,31 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
         categoryCode: optionalString(ctx.body.categoryCode),
         priceMinor: parsePublishMinor(ctx.body.priceMinor ?? ctx.body.price),
         originalPriceMinor: parseOptionalPublishMinor(ctx.body.originalPriceMinor ?? ctx.body.originalPrice),
-        quantity: parsePublishInteger(ctx.body.quantity),
         postageMode: parsePublishPostageMode(ctx.body.postageMode),
         postageMinor: parseOptionalPublishMinor(ctx.body.postageMinor ?? ctx.body.postage),
         location: parsePublishLocation(ctx.body.location),
+        specOverrides: parsePublishSpecOverrides(ctx.body.specOverrides),
         images: readPublishImages(ctx.body.images),
         requestId: ctx.requestId,
         traceId: ctx.traceId,
       });
       return success(ctx, { ...published, product: toProductView(published.product) }, 201);
+    });
+  }
+  if (ctx.path === '/api/v1/products/publish/preview' && ctx.method === 'POST') {
+    const accountId = optionalString(ctx.body.accountId);
+    return mutation(runtime, ctx, authContext, accountId, async () => {
+      if (!accountId) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
+      const preview = await runtime.productPublisher.preview({
+        adminId: authContext.admin.id,
+        accountId,
+        title: String(ctx.body.title ?? ''),
+        description: String(ctx.body.description ?? ''),
+        images: readPublishImages(ctx.body.images),
+        requestId: ctx.requestId,
+        traceId: ctx.traceId,
+      });
+      return success(ctx, preview);
     });
   }
   if (ctx.path === '/api/v1/products/publish/optimize-description' && ctx.method === 'POST') {
@@ -1394,12 +1410,6 @@ function parseOptionalPublishMinor(value: unknown): number | undefined {
   return parsePublishMinor(value);
 }
 
-function parsePublishInteger(value: unknown): number {
-  const parsed = typeof value === 'number' ? value : Number(String(value ?? '').trim());
-  if (!Number.isSafeInteger(parsed)) throw new ServiceError(422, 'VALIDATION_FAILED', '库存数量必须是整数');
-  return parsed;
-}
-
 function parsePublishPostageMode(value: unknown): import('./product-publish.js').ProductPostageMode {
   const normalized = String(value ?? '').trim();
   if (normalized === 'seller' || normalized === 'free') return 'free';
@@ -1415,8 +1425,36 @@ function parsePublishLocation(value: unknown): import('./product-publish.js').Pr
     const parsed = JSON.parse(String(value));
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as import('./product-publish.js').ProductPublishLocationInput : undefined;
   } catch {
-    throw new ServiceError(422, 'VALIDATION_FAILED', '发货地字段格式无效');
+    const label = String(value).trim();
+    if (!label) return undefined;
+    return locationFromLabel(label);
   }
+}
+
+function locationFromLabel(label: string): import('./product-publish.js').ProductPublishLocationInput {
+  const parts = label.split(/[\s,，]+/u).map((part) => part.trim()).filter(Boolean);
+  if (parts.length >= 3) return { province: parts[0], city: parts[1], area: parts.slice(2).join(' '), poiName: label };
+  if (parts.length === 2) return { province: parts[0], city: parts[1], poiName: label };
+  return { poiName: label };
+}
+
+function parsePublishSpecOverrides(value: unknown): import('./product-publish.js').ProductPublishSpecOverride[] | undefined {
+  if (value === undefined || value === null || String(value).trim() === '') return undefined;
+  const parsed = typeof value === 'string' ? (() => {
+    try { return JSON.parse(value); } catch { throw new ServiceError(422, 'VALIDATION_FAILED', '规格覆盖字段格式无效'); }
+  })() : value;
+  if (!Array.isArray(parsed)) throw new ServiceError(422, 'VALIDATION_FAILED', '规格覆盖字段格式无效');
+  return parsed.filter((item): item is import('./product-publish.js').ProductPublishSpecOverride => Boolean(item && typeof item === 'object' && typeof (item as { propertyId?: unknown }).propertyId === 'string' && typeof (item as { propertyName?: unknown }).propertyName === 'string' && typeof (item as { text?: unknown }).text === 'string')).map((item) => ({
+    propertyId: item.propertyId.trim(),
+    propertyName: item.propertyName.trim(),
+    text: item.text.trim(),
+    ...(typeof item.valueId === 'string' && item.valueId.trim() ? { valueId: item.valueId.trim() } : {}),
+    ...(typeof item.valueName === 'string' && item.valueName.trim() ? { valueName: item.valueName.trim() } : {}),
+    ...(typeof item.channelCatId === 'string' && item.channelCatId.trim() ? { channelCatId: item.channelCatId.trim() } : {}),
+    ...(typeof item.catId === 'string' && item.catId.trim() ? { catId: item.catId.trim() } : {}),
+    ...(typeof item.catName === 'string' && item.catName.trim() ? { catName: item.catName.trim() } : {}),
+    ...(typeof item.tbCatId === 'string' && item.tbCatId.trim() ? { tbCatId: item.tbCatId.trim() } : {}),
+  }));
 }
 
 function readPublishImages(value: unknown): Array<{ filename: string; contentType: string; data: Buffer }> {

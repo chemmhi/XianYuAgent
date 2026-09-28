@@ -176,6 +176,7 @@ body .app-viewport .products-detail-panel .xianyu-detail-description { padding: 
 .product-publish-subhead { margin: 16px 0 10px; }
 .product-publish-subhead h4 { margin: 0; color: var(--text); font-size: 13px; line-height: 1.5; }
 .product-publish-divider { height: 1px; margin: 18px 0 4px; background: var(--border); }
+.product-publish-official-note { margin: 0 0 12px; padding: 8px 10px; border: 1px solid #D9E4F0; border-radius: 7px; background: #F8FAFC; color: var(--sub); font-size: 12px; line-height: 1.5; }
 .product-publish-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .product-publish-field { display: grid; gap: 6px; min-width: 0; color: var(--muted); font-size: 13px; font-weight: 700; }
 .product-publish-field-wide { grid-column: 1 / -1; }
@@ -194,9 +195,10 @@ body .app-viewport .products-detail-panel .xianyu-detail-description { padding: 
 .product-publish-spec b { color: var(--text); font-weight: 700; }
 .product-publish-spec-official { border-color: #C7D8E8; color: var(--link); background: #F4F8FC; }
 .product-publish-spec-image { border-color: #D8E8D7; color: #46704B; background: #F4FAF3; }
-.product-publish-location-skip { display: grid; gap: 3px; min-height: 38px; padding: 8px 11px; border: 1px dashed #C7D8E8; border-radius: 7px; background: #F8FAFC; }
-.product-publish-location-skip strong { color: var(--text); font-size: 13px; }
-.product-publish-location-skip span, .product-publish-location-skip small { color: var(--sub); font-size: 12px; font-weight: 400; line-height: 1.45; }
+.product-publish-official-specs { display: grid; gap: 8px; padding: 10px 11px; border: 1px solid #C7D8E8; border-radius: 7px; background: #F8FAFC; }
+.product-publish-official-spec { display: grid; grid-template-columns: minmax(86px, 0.35fr) minmax(0, 1fr); align-items: center; gap: 10px; }
+.product-publish-official-spec b { color: var(--text); font-size: 12px; }
+.product-publish-spec-value { min-height: 32px; display: flex; align-items: center; padding: 0 9px; border: 1px solid #D9E4F0; border-radius: 6px; background: #fff; color: var(--text); font-size: 13px; font-weight: 500; }
 .product-publish-money-input { position: relative; display: block; }
 .product-publish-money-input b { position: absolute; top: 50%; left: 10px; transform: translateY(-50%); color: var(--sub); font-size: 12px; font-weight: 500; }
 .product-publish-money-input input { padding-left: 23px; }

@@ -9,7 +9,6 @@ export type ProductFormValues = {
   priceMinor: string;
   priceYuan?: string;
   originalPriceYuan?: string;
-  quantity?: string;
   postageMode?: 'free' | 'distance' | 'fixed' | 'none' | 'seller' | 'buyer';
   postageYuan?: string;
   location?: string;
@@ -28,7 +27,6 @@ export function validateProductForm(values: ProductFormValues): ProductFormError
   if (values.priceYuan !== undefined) {
     if (values.priceYuan.trim() && (!/^\d+(?:\.\d{1,2})?$/.test(values.priceYuan.trim()) || Number(values.priceYuan) < 0)) errors.priceYuan = '售价必须是非负金额，最多保留 2 位小数。';
     if (values.originalPriceYuan?.trim() && (!/^\d+(?:\.\d{1,2})?$/.test(values.originalPriceYuan.trim()) || Number(values.originalPriceYuan) < 0)) errors.originalPriceYuan = '原价必须是非负金额，最多保留 2 位小数。';
-    if (values.quantity?.trim() && (!/^\d+$/.test(values.quantity.trim()) || Number(values.quantity) < 1)) errors.quantity = '库存数量必须是大于 0 的整数。';
     if (values.postageYuan?.trim() && (!/^\d+(?:\.\d{1,2})?$/.test(values.postageYuan.trim()) || Number(values.postageYuan) < 0)) errors.postageYuan = '邮费必须是非负金额，最多保留 2 位小数。';
     if ((values.postageMode === 'fixed' || values.postageMode === 'buyer') && !values.postageYuan?.trim()) errors.postageYuan = '一口价模式必须填写邮费。';
   } else if (values.priceMinor.trim() && (!/^\d+$/.test(values.priceMinor.trim()) || Number(values.priceMinor) < 0)) errors.priceMinor = '价格必须是非负整数（单位：分）。';
@@ -36,10 +34,9 @@ export function validateProductForm(values: ProductFormValues): ProductFormError
 }
 
 function publishMeta(values: ProductFormValues) {
-  if (values.priceYuan === undefined && values.originalPriceYuan === undefined && values.quantity === undefined && values.postageMode === undefined && values.postageYuan === undefined && values.location === undefined && values.publishImages === undefined) return undefined;
+  if (values.priceYuan === undefined && values.originalPriceYuan === undefined && values.postageMode === undefined && values.postageYuan === undefined && values.location === undefined && values.publishImages === undefined) return undefined;
   return {
     originalPriceMinor: yuanToMinor(values.originalPriceYuan),
-    quantity: values.quantity?.trim() ? Number(values.quantity.trim()) : undefined,
     postageMode: values.postageMode ?? 'free',
     postageMinor: yuanToMinor(values.postageYuan),
     location: values.location?.trim() || undefined,

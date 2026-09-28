@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { ProductPublishComposer } from './components/ProductPublishComposer';
 import { ProductPublishForm } from './components/ProductPublishForm';
-import { inferProductCategory, inferProductSpecs, serializeAttachments } from './product-publish';
+import { inferProductCategory, inferProductSpecs, serializeAttachments, shouldPreviewOfficialSpecifications } from './product-publish';
 import { toDraftInput, validateProductForm } from './validation';
 
 describe('product publish form contract', () => {
@@ -17,9 +17,9 @@ describe('product publish form contract', () => {
   });
 
   it('maps yuan inputs to minor units and validates logistics fields', () => {
-    const values = { accountId: 'account-1', title: '耳机', description: '全新', categoryCode: 'digital.audio', priceMinor: '', priceYuan: '169', originalPriceYuan: '229', quantity: '12', postageMode: 'free' as const, postageYuan: '', location: '浙江 杭州', publishImages: [{ name: 'one.png', mimeType: 'image/png', size: 12 }] };
+    const values = { accountId: 'account-1', title: '耳机', description: '全新', categoryCode: 'digital.audio', priceMinor: '', priceYuan: '169', originalPriceYuan: '229', postageMode: 'free' as const, postageYuan: '', location: '浙江 杭州', publishImages: [{ name: 'one.png', mimeType: 'image/png', size: 12 }] };
     expect(validateProductForm(values)).toEqual({});
-    expect(toDraftInput(values)).toMatchObject({ priceMinor: 16900, publishMeta: { originalPriceMinor: 22900, quantity: 12, postageMode: 'free', location: '浙江 杭州' } });
+    expect(toDraftInput(values)).toMatchObject({ priceMinor: 16900, publishMeta: { originalPriceMinor: 22900, postageMode: 'free', location: '浙江 杭州' } });
   });
 
   it('shows description-derived specs and image handoff status', () => {
@@ -31,9 +31,9 @@ describe('product publish form contract', () => {
     ]));
   });
 
-  it('adapts shipping and skipped address UI to the official publish flow', () => {
+  it('adapts shipping and address UI to the official publish flow', () => {
     const html = renderToStaticMarkup(createElement(ProductPublishForm, {
-      values: { accountId: 'account-1', title: '耳机', description: '全新', categoryCode: 'digital.audio', priceMinor: '', priceYuan: '200', originalPriceYuan: '', quantity: '1', postageMode: 'fixed', postageYuan: '', location: '', attachments: [] },
+      values: { accountId: 'account-1', title: '耳机', description: '全新', categoryCode: 'digital.audio', priceMinor: '', priceYuan: '200', originalPriceYuan: '', postageMode: 'fixed', postageYuan: '', location: '', attachments: [] },
       errors: {},
       onChange: vi.fn(),
       onAttachmentsChange: vi.fn(),
@@ -41,8 +41,33 @@ describe('product publish form contract', () => {
     }));
     expect(html).toContain('发货设置');
     expect(html).toContain('一口价');
-    expect(html).toContain('暂不发送地址设置');
-    expect(html).toContain('自动确认可用规格');
+    expect(html).not.toContain('aria-label="库存数量"');
+    expect(html).toContain('库存按闲鱼官方逻辑处理。');
+    expect(html).toContain('宝贝所在地');
+    expect(html).toContain('例如：深圳湾公园');
+    expect(html).toContain('自动预览官方规格');
+  });
+
+  it('starts official recommendation after an image is uploaded', () => {
+    const base = { accountId: 'account-1', title: '店铺管家', description: '闲鱼超级助手' };
+    expect(shouldPreviewOfficialSpecifications({ ...base, attachments: [{ id: 'a1', url: 'blob:a1', name: 'one.png', mimeType: 'image/png', file: {} as File }] })).toBe(true);
+    expect(shouldPreviewOfficialSpecifications({ ...base, attachments: [] })).toBe(false);
+  });
+
+  it('renders official options as editable selectors before publishing', () => {
+    const html = renderToStaticMarkup(createElement(ProductPublishForm, {
+      values: { accountId: 'account-1', title: '游戏资料', description: '攻略', categoryCode: '', priceMinor: '', priceYuan: '20', originalPriceYuan: '', postageMode: 'free' as const, postageYuan: '', location: '深圳湾公园', attachments: [], specOverrides: [] },
+      errors: {},
+      officialPreview: { category: { catId: 'cat-1', catName: '游戏装备', channelCatId: 'channel-1' }, specs: [{ propertyId: '-10000', propertyName: '分类', selected: { text: '游戏装备' }, options: [{ text: '游戏装备' }, { text: '电子资料' }] }], imageUrls: [], replay: { source: 'reference-project', steps: [] } },
+      previewState: 'success',
+      onSpecOverrideChange: vi.fn(),
+      onChange: vi.fn(),
+      onAttachmentsChange: vi.fn(),
+      onOptimize: vi.fn(),
+    }));
+    expect(html).toContain('闲鱼官方规格预览');
+    expect(html).toContain('可在提交前修正');
+    expect(html).toContain('游戏装备');
   });
 
   it('keeps the composer free of emoji and provider status copy', () => {

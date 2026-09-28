@@ -129,7 +129,6 @@ async function run() {
       favoriteCount: 2,
       interactFavoriteCount: 1,
       soldCount: 0,
-      quantity: 10000,
       seller: { sellerId: 'seller-e2e', nickname: 'E2E 卖家', city: '深圳', soldCount: 59, itemCount: 37, goodRemarkCount: 22, badRemarkCount: 0 },
       imageUrls: ['https://img.example/xianyu-detail.jpg'],
     },
@@ -275,9 +274,9 @@ async function run() {
   if (cdp.events.slice(refreshMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.url?.includes('/api/v1/products/sync'))) throw new Error('refresh must not call xianyu sync endpoint');
   const publishMark = cdp.events.length;
   if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=publish-product]"); if (!button || button.disabled) return false; button.click(); return true; })()')) throw new Error('publish product button missing or disabled');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('发布商品'), 'create draft drawer');
+  await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector(".product-publish-drawer"))')), 'create draft drawer');
   if (cdp.events.slice(publishMark).some((event) => event.method === 'Network.requestWillBeSent' && /publish|bulk-publish|mtop/i.test(event.params?.request?.url ?? ''))) throw new Error('publish draft entry must not call a real publish endpoint');
-  await evaluate(cdp, '(() => { const set = (label, value) => { const field = Array.from(document.querySelectorAll(".product-publish-field")).find((candidate) => candidate.textContent?.includes(label)); const input = field?.querySelector("input,textarea"); if (!input) throw new Error(`missing ${label}`); const setter = Object.getOwnPropertyDescriptor(input.__proto__, "value")?.set; setter?.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); }; set("商品标题", "Chrome 创建草稿"); set("售价", "29.90"); set("库存数量", "1"); set("商品描述", "来自 Chrome E2E 的草稿"); })()');
+  await evaluate(cdp, '(() => { const set = (selector, value) => { const input = document.querySelector(selector); if (!input) throw new Error(`missing ${selector}`); const setter = Object.getOwnPropertyDescriptor(input.__proto__, "value")?.set; setter?.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); }; set(".product-publish-field input[placeholder=\\"输入清晰、可检索的商品标题\\"]", "Chrome 创建草稿"); set(".product-publish-field textarea[aria-label=\\"商品描述\\"]", "来自 Chrome E2E 的草稿"); set(".product-publish-field input[aria-label=\\"售价\\"]", "29.90"); })()');
   const savedCreate = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((item) => item.textContent?.includes("保存草稿")); if (!button || button.disabled) return false; button.click(); return true; })()');
   if (!savedCreate) throw new Error('save draft button disabled');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome 创建草稿'), 'created draft row');
@@ -286,8 +285,8 @@ async function run() {
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome 创建草稿'), 'product detail');
   const openedEdit = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((item) => item.textContent?.includes("编辑草稿")); if (!button) return false; button.click(); return true; })()');
   if (!openedEdit) throw new Error('edit draft button missing');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('编辑商品'), 'edit draft drawer');
-  await evaluate(cdp, '(() => { const field = Array.from(document.querySelectorAll(".product-publish-field")).find((candidate) => candidate.textContent?.includes("商品标题")); const input = field?.querySelector("input"); if (!input) throw new Error("missing title"); const setter = Object.getOwnPropertyDescriptor(input.__proto__, "value")?.set; setter?.call(input, "Chrome 编辑草稿"); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); })()');
+  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector(".product-publish-drawer h2")?.textContent ?? ""')).includes('编辑商品'), 'edit draft drawer');
+  await evaluate(cdp, '(() => { const input = document.querySelector(".product-publish-field input[placeholder=\\"输入清晰、可检索的商品标题\\"]"); if (!input) throw new Error("missing title"); const setter = Object.getOwnPropertyDescriptor(input.__proto__, "value")?.set; setter?.call(input, "Chrome 编辑草稿"); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); })()');
   const savedEdit = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((item) => item.textContent?.includes("保存草稿")); if (!button || button.disabled) return false; button.click(); return true; })()');
   if (!savedEdit) throw new Error('edit save button disabled');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome 编辑草稿'), 'updated draft row');

@@ -1,5 +1,5 @@
 import type { ProductAssetVM, ProductCouponVM, ProductDraftInput, ProductDraftPatch, ProductFilters, ProductSkuVM, ProductStatus, ProductSyncResultVM, ProductVM, ProductsPageVM, XianyuItemDetailVM, XianyuItemImageVM, XianyuItemSellerVM } from './types';
-import type { ProductPostageMode, PublishAttachment } from './product-publish';
+import type { ProductPostageMode, ProductPublishSpecOverride, ProductPublishSpecPreview, PublishAttachment } from './product-publish';
 
 export interface ProductsApiTransport {
   get<T>(path: string): Promise<T>;
@@ -16,6 +16,7 @@ export interface ProductsApi {
   updateDraft(productId: string, patch: ProductDraftPatch, options: { configVersion: number; idempotencyKey?: string }): Promise<ProductVM>;
   updateKnowledgeBase(productId: string, input: { accountId: string; knowledgeBase: string | null; configVersion: number; idempotencyKey?: string }): Promise<ProductVM>;
   publishProduct(input: ProductPublishRequest, options?: { idempotencyKey?: string }): Promise<ProductPublishResultVM>;
+  previewProduct(input: ProductPublishPreviewRequest, options?: { idempotencyKey?: string }): Promise<ProductPublishPreviewVM>;
   optimizeDescription(input: { accountId: string; title: string; description: string }, options?: { idempotencyKey?: string }): Promise<{ description: string; provider: string; model: string }>;
   syncFromXianyu(accountId: string, options?: { pageSize?: number; maxPages?: number; idempotencyKey?: string }): Promise<ProductSyncResultVM>;
 }
@@ -27,10 +28,32 @@ export interface ProductPublishRequest {
   categoryCode?: string;
   priceMinor: number;
   originalPriceMinor?: number;
-  quantity: number;
   postageMode: ProductPostageMode;
   postageMinor?: number;
-  location?: string;
+  location?: string | ProductPublishLocation;
+  attachments: PublishAttachment[];
+  specOverrides?: ProductPublishSpecOverride[];
+}
+
+export interface ProductPublishLocation {
+  area?: string;
+  aoiId?: string;
+  aoiName?: string;
+  addressType?: number;
+  cainiaoDivision?: string;
+  city?: string;
+  divisionId?: string;
+  longitude?: number;
+  latitude?: number;
+  poiId?: string;
+  poiName?: string;
+  province?: string;
+}
+
+export interface ProductPublishPreviewRequest {
+  accountId: string;
+  title: string;
+  description: string;
   attachments: PublishAttachment[];
 }
 
@@ -89,6 +112,15 @@ interface ProductPublishResultPayload {
   imageUrls: string[];
   replay: { source: string; steps: Array<{ api: string; status: string }> };
 }
+
+interface ProductPublishPreviewPayload {
+  category: { catId: string; catName: string; channelCatId: string; tbCatId?: string };
+  specs: ProductPublishSpecPreview[];
+  imageUrls: string[];
+  replay: { source: string; steps: Array<{ api: string; status: string }> };
+}
+
+export type ProductPublishPreviewVM = ProductPublishPreviewPayload;
 
 interface ProductsPayload {
   items?: ProductPayload[];
@@ -399,14 +431,28 @@ export function createProductsApi(transport: ProductsApiTransport): ProductsApi 
       form.set('categoryCode', input.categoryCode ?? '');
       form.set('priceMinor', String(input.priceMinor));
       form.set('originalPriceMinor', input.originalPriceMinor === undefined ? '' : String(input.originalPriceMinor));
-      form.set('quantity', String(input.quantity));
       form.set('postageMode', input.postageMode);
       form.set('postageMinor', input.postageMinor === undefined ? '' : String(input.postageMinor));
-      // 地址流程按用户要求暂时跳过；后续官方地点选择器接入后再填充结构化 JSON。
+      if (typeof input.location === 'string') {
+        if (input.location.trim()) form.set('location', JSON.stringify({ poiName: input.location.trim() }));
+      } else if (input.location) {
+        form.set('location', JSON.stringify(input.location));
+      }
+      form.set('specOverrides', input.specOverrides?.length ? JSON.stringify(input.specOverrides) : '');
       for (const attachment of input.attachments) if (attachment.file) form.append('images', attachment.file, attachment.file.name);
       const payload = await post<ProductPublishResultPayload | ApiEnvelope<ProductPublishResultPayload>>('/api/v1/products/publish', form, { headers: { 'Idempotency-Key': options.idempotencyKey ?? idempotencyKey('product-publish') } });
       const result = unwrapEnvelope(payload);
       return { ...result, product: toProductVM(result.product) };
+    },
+    async previewProduct(input, options = {}) {
+      const post = requireTransportMethod(transport, 'post');
+      const form = new FormData();
+      form.set('accountId', input.accountId);
+      form.set('title', input.title);
+      form.set('description', input.description);
+      for (const attachment of input.attachments) if (attachment.file) form.append('images', attachment.file, attachment.file.name);
+      const payload = await post<ProductPublishPreviewPayload | ApiEnvelope<ProductPublishPreviewPayload>>('/api/v1/products/publish/preview', form, { headers: { 'Idempotency-Key': options.idempotencyKey ?? idempotencyKey('product-publish-preview') } });
+      return unwrapEnvelope(payload);
     },
     async optimizeDescription(input, options = {}) {
       const post = requireTransportMethod(transport, 'post');
@@ -529,7 +575,7 @@ export function createMockProductsApi(seed: ProductVM[] = [
         title: input.title,
         description: input.description,
         categoryCode: input.categoryCode,
-        attributesJson: { publish: { postageMode: input.postageMode, postageMinor: input.postageMinor, quantity: input.quantity, imageCount: input.attachments.length } },
+        attributesJson: { publish: { postageMode: input.postageMode, postageMinor: input.postageMinor, imageCount: input.attachments.length } },
         configVersion: 1,
         priceMinor: input.priceMinor,
         status: 'published',
@@ -541,6 +587,17 @@ export function createMockProductsApi(seed: ProductVM[] = [
       seed.push(product);
       const itemId = product.externalProductRef ?? `mock-item-${seed.length}`;
       return { product, itemId, itemUrl: `https://www.goofish.com/item?id=${itemId}`, category: { catId: input.categoryCode ?? 'mock', catName: input.categoryCode ?? 'Mock', channelCatId: 'mock' }, postageMode: input.postageMode, imageUrls: input.attachments.map((attachment) => attachment.url), replay: { source: 'mock', steps: [] } };
+    },
+    async previewProduct(input) {
+      const category = input.title.includes('耳机') || input.description.includes('蓝牙')
+        ? { catId: 'mock-audio', catName: '数码 › 耳机 / 音箱', channelCatId: 'mock-audio' }
+        : { catId: 'mock-digital', catName: '电子资料', channelCatId: 'mock-digital' };
+      return {
+        category,
+        specs: [{ propertyId: '-10000', propertyName: '分类', selected: { text: category.catName, ...category }, options: [{ text: category.catName, ...category }] }],
+        imageUrls: input.attachments.map((attachment) => attachment.url),
+        replay: { source: 'mock', steps: [] },
+      };
     },
     async optimizeDescription(input) {
       return { description: input.description.trim() ? `${input.description.trim()}\n\n成色与发货信息已保留，请以实物为准。` : '请补充商品卖点、成色、适用场景和发货说明。', provider: 'mock', model: 'mock' };

@@ -682,6 +682,18 @@
 
 本轮结论：本地前端、API、持久化与脱敏回放链路已按官方主流程完成并通过受控验证；地址流程按用户要求暂时跳过。真实闲鱼外部发布仍需在隔离账号/当前登录态下补做一次人工或可审计 E2E 复核。
 
+### 2026-09-28：商品发布失败修复与真实外部复验
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R138 | 根因 / API | 图片上传后是否按官方顺序触发属性推荐，推荐失败是否阻止继续发布，标题与描述是否分离传输 | root | PASS | `apps/api/src/product-publish.ts`、`apps/api/scripts/product-publish.test.ts`；API 发布 6/6 |
+| S5-R139 | 前端 / 交互 | 图片上传且标题、描述齐全时是否自动预览官方规格，发布前是否可以修正，地点是否可编辑 | root | PASS | `ProductDrawer.tsx`、`ProductPublishForm.tsx`、`product-publish.test.ts`；Web 定向 26/26 |
+| S5-R140 | 数据 / 契约 | 显式库存是否从发布配置和 payload 中彻底删除；官方地点结构是否写入 `itemAddrDTO` | root | PASS | API/Web tests；`quantity` 不在发布请求、草稿元数据或审计字段中 |
+| S5-R141 | 外部平台 / 真实发布 | 真实账号是否完成 5 张图片上传、官方推荐、发布，并可通过详情查询最终商品 | root | PASS（真实账号） | admin/account 脱敏记录；商品 `1086738034344`；详情成功、标题/价格/5 图/默认 `quantity=1` 与本地 `published` 复读一致 |
+| S5-R142 | 质量 / 浏览器回归 | 当前发布表单是否完成真实 Chrome/CDP 草稿创建、详情、编辑、刷新和视觉回归 | root | PASS | `test:e2e:chrome:products` 通过；商品发布视觉回归桌面/移动 `layoutParity: passed`；API/Web 定向测试、Web typecheck/build、`git diff --check` 通过 |
+
+本轮结论：发布失败根因已修复；上传图片触发官方推荐、发布前预览与修正、所在地同步、无显式库存配置和标题/描述分离均已落地。最终商品已在闲鱼可查，外部验收商品为 `https://www.goofish.com/item?id=1086738034344`。另一次旧 payload 产生的 `1087804453696` 仅保留作标题覆盖根因证据。
+
 ### 10.9 QR 登录成功回调账号恢复冲突修复（2026-09-25）
 
 | 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
