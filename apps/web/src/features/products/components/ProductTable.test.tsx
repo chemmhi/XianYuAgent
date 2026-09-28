@@ -42,7 +42,8 @@ describe('ProductTable', () => {
       onOpenAutomation: vi.fn(),
     }));
 
-    expect(html.indexOf('data-testid="product-detail-product-1"')).toBeLessThan(html.indexOf('data-testid="product-automation-product-1"'));
+    expect(html.indexOf('data-testid="product-detail-product-1"')).toBeLessThan(html.indexOf('data-testid="product-knowledge-base-product-1"'));
+    expect(html.indexOf('data-testid="product-knowledge-base-product-1"')).toBeLessThan(html.indexOf('data-testid="product-automation-product-1"'));
     expect(readFileSync(fileURLToPath(new URL('./products.css', import.meta.url)), 'utf8')).toContain('.products-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px;');
   });
 
