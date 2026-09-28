@@ -105,6 +105,33 @@ describe('dashboard API mode resolution', () => {
     expect(sidebarNav).not.toContain('<small>');
   });
 
+  it('makes the brand block an accessible dashboard navigation target', () => {
+    const props = {
+      admin: { id: 'admin-brand', email: 'brand@example.com', displayName: '品牌测试', role: 'admin' },
+      page: 'accounts',
+      accountsApi: {},
+      productsApi: {},
+      couponsApi: {},
+      messagesApi: {},
+      workspaceApi: {},
+      ordersApi: {},
+      settingsApi: {},
+      autoReplyAgentSettingsApi: {},
+      openaiSettingsApi: {},
+      modelProviderApi: {},
+      agentDynamicsApi: {},
+      dashboardApi: { getSnapshot: vi.fn() },
+      navigate: vi.fn(),
+    } as unknown as Parameters<typeof AuthenticatedShell>[0];
+
+    const html = renderShell(props);
+
+    expect(html).toContain('data-testid="brand-block"');
+    expect(html).toContain('role="link"');
+    expect(html).toContain('tabindex="0"');
+    expect(html).toContain('aria-label="返回仪表盘"');
+  });
+
   it('falls back to 管理员 when displayName is empty', () => {
     const props = {
       admin: { id: 'admin-empty-name', email: 'empty-name@example.com', displayName: '  ', role: 'admin' },

@@ -130,7 +130,28 @@ export function AuthenticatedShell({ admin, onLogout = async () => undefined, lo
     <div className="app-viewport">
       <div className={`desktop-shell${page === 'workspace' ? ' workspace-shell' : page === 'products' ? ' products-shell' : page === 'accounts' ? ' accounts-shell' : page === 'orders' ? ' orders-shell' : page === 'coupons' ? ' coupons-shell' : page === 'settings' ? ' settings-shell' : page === 'agent-dynamics' ? ' agent-dynamics-shell-host' : ''}`}>
         <aside className="sidebar">
-          <div className="brand-block"><Logo className="brand-mark" variant={activeLogoVariant} label="FishAgent Logo" /><div className="brand-copy"><strong>FishAgent</strong><span>运营控制台</span></div><div className="mobile-account-anchor"><button className="mobile-account-trigger" type="button" data-testid="account-menu-trigger" aria-label="打开账户菜单" aria-expanded={accountMenuOpen} aria-haspopup="menu" onClick={() => setAccountMenuOpen((open) => !open)}><span className="avatar">{adminInitial}</span><span className="mobile-account-name">{adminName}</span><ChevronIcon open={accountMenuOpen} /></button>{accountMenu}</div></div>
+          <div
+            className="brand-block"
+            data-testid="brand-block"
+            role="link"
+            tabIndex={0}
+            aria-label="返回仪表盘"
+            onClick={(event) => {
+              const target = event.target;
+              if (target instanceof HTMLElement && target.closest('.mobile-account-anchor')) return;
+              navigate('dashboard');
+            }}
+            onKeyDown={(event) => {
+              if (event.target !== event.currentTarget) return;
+              if (event.key !== 'Enter' && event.key !== ' ') return;
+              event.preventDefault();
+              navigate('dashboard');
+            }}
+          >
+            <Logo className="brand-mark" variant={activeLogoVariant} label="FishAgent Logo" />
+            <div className="brand-copy"><strong>FishAgent</strong><span>运营控制台</span></div>
+            <div className="mobile-account-anchor"><button className="mobile-account-trigger" type="button" data-testid="account-menu-trigger" aria-label="打开账户菜单" aria-expanded={accountMenuOpen} aria-haspopup="menu" onClick={() => setAccountMenuOpen((open) => !open)}><span className="avatar">{adminInitial}</span><span className="mobile-account-name">{adminName}</span><ChevronIcon open={accountMenuOpen} /></button>{accountMenu}</div>
+          </div>
           <div className="side-section">运营台</div>
           <nav className="side-nav" aria-label="主导航">
             {navItems.map((item) => <button key={item.key} type="button" className={page === item.key ? 'active' : ''} aria-current={page === item.key ? 'page' : undefined} onClick={() => navigate(item.key)}>{iconFor(item.icon)}<span>{item.label}</span></button>)}
