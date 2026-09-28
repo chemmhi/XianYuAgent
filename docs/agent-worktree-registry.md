@@ -220,3 +220,4 @@
 
 
 | root | auto-reply-scope-fix-20260926 | codex/auto-reply-scope-20260926 | F:\\ChenHai\\Project\\XianYuAgent-auto-reply-scope-fix | Codex /root | 2026-09-26 05:33:24 +08:00 | CLEANED | b348d53 | 2026-09-26 05:35:00 +08:00 | Outcome Review worker 透传 accountId，补充跨账号隔离回归与 AR-VS-08 PostgreSQL 门禁修复；分支已合入 main 并清理 worktree。
+| `root` | `product-publish-failure-20260928` | `fix/product-publish-failure-20260928` | `F:\\ChenHai\\Project\\XianYuAgent-product-publish-failure-20260928` | Codex /root | `2026-09-28 15:50:58 +08:00` | `READY_FOR_MERGE` | `-` | `-` | 已修复图片上传触发官方推荐、发布前规格预览/修正、标题描述分离、官方所在地同步，并彻底删除显式库存配置；真实账号发布商品 `1086738034344` 已通过详情与本地 published 复读；API/Web 定向测试、Chrome/CDP E2E、视觉回归、typecheck/build、diff-check 均通过。 |

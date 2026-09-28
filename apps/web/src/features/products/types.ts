@@ -89,7 +89,6 @@ export interface ProductPublishImageMeta {
 
 export interface ProductPublishMeta {
   originalPriceMinor?: number;
-  quantity?: number;
   postageMode?: 'free' | 'distance' | 'fixed' | 'none' | 'seller' | 'buyer';
   postageMinor?: number;
   location?: string;

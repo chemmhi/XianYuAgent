@@ -5,6 +5,7 @@ import { XianyuMtopClient, type MtopResult } from './xianyu-mtop.js';
 
 export const PRODUCT_PUBLISH_API = 'mtop.idle.pc.idleitem.publish';
 export const PRODUCT_PROPERTY_RECOMMEND_API = 'mtop.taobao.idle.kgraph.property.recommend';
+const DEFAULT_PUBLISH_CATEGORY = { catId: '50023914', catName: '电子资料', channelCatId: '202036301' } as const;
 
 export type ProductPostageMode = 'free' | 'distance' | 'fixed' | 'none';
 
@@ -16,6 +17,10 @@ export interface ProductPublishImageInput {
 
 export interface ProductPublishLocationInput {
   area?: string;
+  aoiId?: string;
+  aoiName?: string;
+  addressType?: number;
+  cainiaoDivision?: string;
   city?: string;
   divisionId?: string;
   longitude?: number;
@@ -33,13 +38,52 @@ export interface ProductPublishInput {
   categoryCode?: string;
   priceMinor: number;
   originalPriceMinor?: number;
-  quantity: number;
   postageMode: ProductPostageMode;
   postageMinor?: number;
   location?: ProductPublishLocationInput;
   images: ProductPublishImageInput[];
+  specOverrides?: ProductPublishSpecOverride[];
   requestId: string;
   traceId: string;
+}
+
+export interface ProductPublishSpecOption {
+  valueId?: string;
+  valueName?: string;
+  text: string;
+  channelCatId?: string;
+  catId?: string;
+  catName?: string;
+  tbCatId?: string;
+}
+
+export interface ProductPublishSpecPreview {
+  propertyId: string;
+  propertyName: string;
+  selected?: ProductPublishSpecOption;
+  options: ProductPublishSpecOption[];
+}
+
+export interface ProductPublishSpecOverride extends ProductPublishSpecOption {
+  propertyId: string;
+  propertyName: string;
+}
+
+export interface ProductPublishPreviewInput {
+  adminId: string;
+  accountId: string;
+  title: string;
+  description: string;
+  images: ProductPublishImageInput[];
+  requestId: string;
+  traceId: string;
+}
+
+export interface ProductPublishPreviewResult {
+  category: { catId: string; catName: string; channelCatId: string; tbCatId?: string };
+  specs: ProductPublishSpecPreview[];
+  imageUrls: string[];
+  replay: ProductPublishResult['replay'];
 }
 
 export interface ProductPublishResult {
@@ -72,30 +116,24 @@ export class ProductPublishService {
     private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => Promise<string>,
   ) {}
 
+  async preview(input: ProductPublishPreviewInput): Promise<ProductPublishPreviewResult> {
+    validatePreviewInput(input);
+    const prepared = await this.prepareRecommendation(input);
+    return {
+      category: prepared.category,
+      specs: readSpecPreviews(prepared.recommendation, prepared.category),
+      imageUrls: prepared.uploaded.map((image) => image.url),
+      replay: { source: 'reference-project', steps: prepared.steps },
+    };
+  }
+
   async publish(input: ProductPublishInput): Promise<ProductPublishResult> {
     validatePublishInput(input);
-    const uploaded: Array<{ url: string; width: number; height: number }> = [];
-    const steps: ProductPublishResult['replay']['steps'] = [];
+    const prepared = await this.prepareRecommendation(input);
+    const { uploaded, steps, category } = prepared;
+    const normalizedCategoryPayload = applySpecOverrides(prepared.recommendation, input.specOverrides, category);
 
-    for (const image of input.images) {
-      const uploadedImage = await this.xianyu.uploadChatImage(input.adminId, input.accountId, image.filename, image.contentType, image.data);
-      if (!uploadedImage.success || !uploadedImage.url) throw externalPublishError(uploadedImage, '商品图片上传失败');
-      uploaded.push({ url: uploadedImage.url, width: uploadedImage.width ?? 800, height: uploadedImage.height ?? 600 });
-    }
-    steps.push({ api: 'stream-upload.goofish.com/api/upload.api', status: 'succeeded' });
-
-    const recommendation = await this.xianyu.callApi(input.adminId, input.accountId, PRODUCT_PROPERTY_RECOMMEND_API, '2.0', buildRecommendPayload(input, uploaded), {
-      spm_cnt: 'a21ybx.publish.0.0',
-      spm_pre: 'a21ybx.item.sidebar.1.67321598K9Vgx8',
-      log_id: '67321598K9Vgx8',
-    });
-    if (!recommendation.success && recommendation.accountInvalid) throw externalPublishError(recommendation, '闲鱼账号登录态已失效');
-    if (!recommendation.success && !input.categoryCode) throw externalPublishError(recommendation, '闲鱼属性规格推荐失败');
-    const categoryPayload = recommendation.success ? record(recommendation.response?.data) : {};
-    const category = resolveCategory(categoryPayload, input.categoryCode);
-    steps.push({ api: PRODUCT_PROPERTY_RECOMMEND_API, status: recommendation.success ? 'succeeded' : 'skipped' });
-
-    const publishResponse = await this.xianyu.callApi(input.adminId, input.accountId, PRODUCT_PUBLISH_API, '1.0', buildPublishPayload(input, uploaded, categoryPayload, category), {
+    const publishResponse = await this.xianyu.callApi(input.adminId, input.accountId, PRODUCT_PUBLISH_API, '1.0', buildPublishPayload(input, uploaded, normalizedCategoryPayload, category), {
       spm_cnt: 'a21ybx.publish.0.0',
       spm_pre: 'a21ybx.home.sidebar.1.46413da6EPl7v5',
       log_id: '46413da6EPl7v5',
@@ -119,9 +157,9 @@ export class ProductPublishService {
       attributesJson: {
         publish: {
           originalPriceMinor: input.originalPriceMinor,
-          quantity: input.quantity,
           postageMode: input.postageMode,
           postageMinor: input.postageMinor,
+          location: locationLabel(input.location),
           imageUrls,
           category,
           replaySteps: steps,
@@ -130,8 +168,35 @@ export class ProductPublishService {
       requestId: input.requestId,
       traceId: input.traceId,
     });
-    await this.audit({ actorId: input.adminId, action: 'product.published', targetRef: product.id, requestId: input.requestId, traceId: input.traceId, accountId: input.accountId, payload: { itemId, itemUrl, priceMinor: input.priceMinor, quantity: input.quantity, postageMode: input.postageMode, imageCount: imageUrls.length, replaySteps: steps } });
+    await this.audit({ actorId: input.adminId, action: 'product.published', targetRef: product.id, requestId: input.requestId, traceId: input.traceId, accountId: input.accountId, payload: { itemId, itemUrl, priceMinor: input.priceMinor, postageMode: input.postageMode, imageCount: imageUrls.length, replaySteps: steps } });
     return { product, itemId, itemUrl, category, postageMode: input.postageMode, imageUrls, replay: { source: 'reference-project', steps } };
+  }
+
+  private async prepareRecommendation(input: ProductPublishInput | ProductPublishPreviewInput): Promise<{
+    uploaded: Array<{ url: string; width: number; height: number }>;
+    recommendation: Record<string, unknown>;
+    category: { catId: string; catName: string; channelCatId: string; tbCatId?: string };
+    steps: ProductPublishResult['replay']['steps'];
+  }> {
+    const uploaded: Array<{ url: string; width: number; height: number }> = [];
+    const steps: ProductPublishResult['replay']['steps'] = [];
+    for (const image of input.images) {
+      const uploadedImage = await this.xianyu.uploadChatImage(input.adminId, input.accountId, image.filename, image.contentType, image.data);
+      if (!uploadedImage.success || !uploadedImage.url) throw externalPublishError(uploadedImage, '商品图片上传失败');
+      uploaded.push({ url: uploadedImage.url, width: uploadedImage.width ?? 800, height: uploadedImage.height ?? 600 });
+    }
+    steps.push({ api: 'stream-upload.goofish.com/api/upload.api', status: 'succeeded' });
+    const recommendation = await this.xianyu.callApi(input.adminId, input.accountId, PRODUCT_PROPERTY_RECOMMEND_API, '2.0', buildRecommendPayload(input, uploaded), {
+      spm_cnt: 'a21ybx.publish.0.0',
+      spm_pre: 'a21ybx.item.sidebar.1.67321598K9Vgx8',
+      log_id: '67321598K9Vgx8',
+    });
+    if (!recommendation.success) throw externalPublishError(recommendation, recommendation.accountInvalid ? '闲鱼账号登录态已失效' : '闲鱼属性规格推荐失败');
+    const categoryPayload = record(recommendation.response?.data);
+    const category = resolveCategory(categoryPayload, 'categoryCode' in input && typeof input.categoryCode === 'string' ? input.categoryCode : undefined);
+    const normalizedCategoryPayload = normalizeCategoryPayload(categoryPayload, category);
+    steps.push({ api: PRODUCT_PROPERTY_RECOMMEND_API, status: 'succeeded' });
+    return { uploaded, recommendation: normalizedCategoryPayload, category, steps };
   }
 
   async optimizeDescription(input: ProductDescriptionOptimizeInput): Promise<{ description: string; provider: string; model: string }> {
@@ -159,7 +224,6 @@ function validatePublishInput(input: ProductPublishInput): void {
   if (!input.description.trim()) throw new ServiceError(422, 'VALIDATION_FAILED', '商品描述不能为空');
   if (!Number.isSafeInteger(input.priceMinor) || input.priceMinor <= 0) throw new ServiceError(422, 'VALIDATION_FAILED', '商品价格必须大于 0');
   if (input.originalPriceMinor !== undefined && (!Number.isSafeInteger(input.originalPriceMinor) || input.originalPriceMinor < 0)) throw new ServiceError(422, 'VALIDATION_FAILED', '原价必须是合法金额');
-  if (!Number.isSafeInteger(input.quantity) || input.quantity <= 0) throw new ServiceError(422, 'VALIDATION_FAILED', '库存数量必须大于 0');
   if (!['free', 'distance', 'fixed', 'none'].includes(input.postageMode)) throw new ServiceError(422, 'VALIDATION_FAILED', '邮费模式无效');
   const postageMinor = input.postageMinor;
   if (input.postageMode === 'fixed' && (typeof postageMinor !== 'number' || !Number.isSafeInteger(postageMinor) || postageMinor < 0)) throw new ServiceError(422, 'VALIDATION_FAILED', '一口价模式必须填写合法邮费');
@@ -167,14 +231,22 @@ function validatePublishInput(input: ProductPublishInput): void {
   if (input.images.length < 1 || input.images.length > 9) throw new ServiceError(422, 'VALIDATION_FAILED', '商品图片数量必须在 1 到 9 张之间');
 }
 
-function buildRecommendPayload(input: ProductPublishInput, images: Array<{ url: string; width: number; height: number }>): Record<string, unknown> {
+function validatePreviewInput(input: ProductPublishPreviewInput): void {
+  if (!input.accountId.trim()) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
+  if (!input.title.trim()) throw new ServiceError(422, 'VALIDATION_FAILED', '商品标题不能为空');
+  if (!input.description.trim()) throw new ServiceError(422, 'VALIDATION_FAILED', '商品描述不能为空');
+  if (input.images.length < 1 || input.images.length > 9) throw new ServiceError(422, 'VALIDATION_FAILED', '商品图片数量必须在 1 到 9 张之间');
+}
+
+function buildRecommendPayload(input: Pick<ProductPublishInput | ProductPublishPreviewInput, 'title' | 'description'>, images: Array<{ url: string; width: number; height: number }>): Record<string, unknown> {
+  const recommendationText = [input.title.trim(), input.description.trim()].filter(Boolean).join('\n');
   return {
-    title: input.title.trim(),
+    title: recommendationText,
     lockCpv: false,
     multiSKU: false,
     publishScene: 'mainPublish',
     scene: 'newPublishChoice',
-    description: input.description.trim(),
+    description: recommendationText,
     uniqueCode: `${Date.now()}${Math.floor(Math.random() * 1_000_000)}`,
     imageInfos: images.map((image, index) => publishImagePayload(image, index === 0)),
   };
@@ -184,10 +256,9 @@ function buildPublishPayload(input: ProductPublishInput, images: Array<{ url: st
   const data: Record<string, unknown> = {
     freebies: false,
     itemTypeStr: 'b',
-    quantity: String(input.quantity),
     simpleItem: 'true',
     imageInfoDOList: images.map((image, index) => publishImagePayload(image, index === 0)),
-    itemTextDTO: { desc: input.description.trim(), title: input.title.trim(), titleDescSeparate: false },
+    itemTextDTO: { desc: input.description.trim(), title: input.title.trim(), titleDescSeparate: true },
     itemLabelExtList: publishLabels(recommendation),
     itemPriceDTO: {
       priceInCent: String(input.priceMinor),
@@ -196,7 +267,7 @@ function buildPublishPayload(input: ProductPublishInput, images: Array<{ url: st
     userRightsProtocols: [{ enable: false, serviceCode: 'SKILL_PLAY_NO_MIND' }],
     itemPostFeeDTO: postageDto(input.postageMode, input.postageMinor),
     defaultPrice: false,
-    itemCatDTO: category,
+    itemCatDTO: { ...category, tbCatId: category.tbCatId ?? '' },
     uniqueCode: `${Date.now()}${Math.floor(Math.random() * 1_000_000)}`,
     sourceId: 'pcMainPublish',
     bizcode: 'pcMainPublish',
@@ -205,16 +276,90 @@ function buildPublishPayload(input: ProductPublishInput, images: Array<{ url: st
   if (input.location) {
     const location = input.location;
     data.itemAddrDTO = {
-      area: location.area ?? '',
-      city: location.city ?? '',
-      divisionId: location.divisionId ?? '',
-      gps: `${location.latitude ?? 0},${location.longitude ?? 0}`,
-      poiId: location.poiId ?? '',
-      poiName: location.poiName ?? '',
-      prov: location.province ?? '',
+      ...(location.area ? { area: location.area } : {}),
+      ...(location.addressType !== undefined ? { addressType: location.addressType } : {}),
+      ...(location.aoiId ? { aoiId: location.aoiId } : {}),
+      ...(location.aoiName ? { aoiName: location.aoiName } : {}),
+      ...(location.cainiaoDivision ? { cainiaoDivision: location.cainiaoDivision } : {}),
+      ...(location.city ? { city: location.city } : {}),
+      ...(location.divisionId ? { divisionId: location.divisionId } : {}),
+      ...(location.latitude !== undefined || location.longitude !== undefined ? { gps: `${location.latitude ?? 0},${location.longitude ?? 0}` } : {}),
+      ...(location.poiId ? { poiId: location.poiId } : {}),
+      ...(location.poiName ? { poiName: location.poiName } : {}),
+      ...(location.province ? { prov: location.province } : {}),
     };
   }
   return data;
+}
+
+function locationLabel(location?: ProductPublishLocationInput): string | undefined {
+  if (!location) return undefined;
+  const label = [location.province, location.city, location.area, location.poiName].filter((value, index, values): value is string => Boolean(value && values.indexOf(value) === index)).join(' ').trim();
+  return label || undefined;
+}
+
+function applySpecOverrides(payload: Record<string, unknown>, overrides: ProductPublishSpecOverride[] | undefined, category: { catId: string; catName: string; channelCatId: string; tbCatId?: string }): Record<string, unknown> {
+  if (!overrides || overrides.length === 0) return payload;
+  const cardList = overridesToCardList(overrides, category);
+  return cardList.length > 0 ? { ...payload, cardList } : payload;
+}
+
+function overridesToCardList(overrides: ProductPublishSpecOverride[], category: { catId: string; catName: string; channelCatId: string; tbCatId?: string }): unknown[] {
+  const grouped = new Map<string, { propertyId: string; propertyName: string; valuesList: Record<string, unknown>[] }>();
+  for (const override of overrides) {
+    const propertyId = stringValue(override.propertyId);
+    const propertyName = stringValue(override.propertyName);
+    const text = stringValue(override.text);
+    if (!propertyId || !propertyName || !text) continue;
+    const channelCatId = stringValue(override.channelCatId) || (propertyId === '-10000' ? category.channelCatId : stringValue(override.valueId));
+    if (!channelCatId) continue;
+    const card = grouped.get(propertyId) ?? { propertyId, propertyName, valuesList: [] };
+    card.valuesList.push({
+      ...(override.valueId ? { valueId: override.valueId } : {}),
+      ...(override.valueName ? { valueName: override.valueName } : {}),
+      text,
+      channelCatId,
+      ...(override.catId || propertyId === '-10000' ? { catId: override.catId ?? category.catId } : {}),
+      ...(override.catName || propertyId === '-10000' ? { catName: override.catName ?? category.catName } : {}),
+      tbCatId: override.tbCatId ?? (propertyId === '-10000' ? category.tbCatId ?? '' : ''),
+      isClicked: true,
+    });
+    grouped.set(propertyId, card);
+  }
+  return [...grouped.values()].map((card) => ({ cardData: card }));
+}
+
+function readSpecPreviews(payload: Record<string, unknown>, category: { catId: string; catName: string; channelCatId: string; tbCatId?: string }): ProductPublishSpecPreview[] {
+  const cards = Array.isArray(payload.cardList) ? payload.cardList : [];
+  const previews: ProductPublishSpecPreview[] = [];
+  for (const rawCard of cards) {
+    const cardData = record(record(rawCard).cardData);
+    const propertyId = stringValue(cardData.propertyId);
+    const propertyName = stringValue(cardData.propertyName, cardData.title, cardData.name);
+    if (!propertyId || !propertyName) continue;
+    const rawValues = Array.isArray(cardData.valuesList) ? cardData.valuesList : [];
+    const options = rawValues.map((rawValue) => {
+      const value = record(rawValue);
+      const text = stringValue(value.text, value.catName, value.valueName, value.name);
+      if (!text) return undefined;
+      return {
+        ...(stringValue(value.valueId) ? { valueId: stringValue(value.valueId) } : {}),
+        ...(stringValue(value.valueName) ? { valueName: stringValue(value.valueName) } : {}),
+        text,
+        ...(stringValue(value.channelCatId) ? { channelCatId: stringValue(value.channelCatId) } : {}),
+        ...(stringValue(value.catId) ? { catId: stringValue(value.catId) } : {}),
+        ...(stringValue(value.catName) ? { catName: stringValue(value.catName) } : {}),
+        ...(stringValue(value.tbCatId) ? { tbCatId: stringValue(value.tbCatId) } : {}),
+      } as ProductPublishSpecOption;
+    }).filter((value): value is ProductPublishSpecOption => Boolean(value)).slice(0, 50);
+    const selectedIndex = rawValues.findIndex((value) => isSelected(record(value).isClicked));
+    previews.push({ propertyId, propertyName, selected: selectedIndex >= 0 ? options[selectedIndex] : undefined, options });
+  }
+  if (!previews.some((item) => item.propertyId === '-10000')) {
+    const categoryOption: ProductPublishSpecOption = { text: category.catName, catId: category.catId, catName: category.catName, channelCatId: category.channelCatId, ...(category.tbCatId ? { tbCatId: category.tbCatId } : {}) };
+    previews.unshift({ propertyId: '-10000', propertyName: '分类', selected: categoryOption, options: [categoryOption] });
+  }
+  return previews;
 }
 
 function postageDto(mode: ProductPostageMode, postageMinor?: number): Record<string, unknown> {
@@ -255,11 +400,43 @@ function publishLabels(category: Record<string, unknown>): unknown[] {
 function resolveCategory(payload: Record<string, unknown>, categoryCode?: string): { catId: string; catName: string; channelCatId: string; tbCatId?: string } {
   const predicted = record(payload.categoryPredictResult);
   const selected = categoryFromCards(payload) ?? undefined;
-  const catId = stringValue(predicted.catId) || selected?.catId || (categoryCode?.trim() || '50023914');
-  const catName = stringValue(predicted.catName) || selected?.catName || (categoryCode?.trim() ? categoryCode.trim() : '电子资料');
-  const channelCatId = stringValue(predicted.channelCatId) || selected?.channelCatId || '202036301';
+  const fallbackCatId = categoryCode?.trim() && /^\d+$/u.test(categoryCode.trim()) ? categoryCode.trim() : DEFAULT_PUBLISH_CATEGORY.catId;
+  const catId = stringValue(predicted.catId) || selected?.catId || fallbackCatId;
+  const catName = stringValue(predicted.catName) || selected?.catName || DEFAULT_PUBLISH_CATEGORY.catName;
+  const channelCatId = stringValue(predicted.channelCatId) || selected?.channelCatId || DEFAULT_PUBLISH_CATEGORY.channelCatId;
   const tbCatId = stringValue(predicted.tbCatId) || selected?.tbCatId || undefined;
   return { catId, catName, channelCatId, ...(tbCatId ? { tbCatId } : {}) };
+}
+
+function normalizeCategoryPayload(payload: Record<string, unknown>, category: { catId: string; catName: string; channelCatId: string; tbCatId?: string }): Record<string, unknown> {
+  const next = { ...payload };
+  const predicted = record(next.categoryPredictResult);
+  if (!stringValue(predicted.catId) || !stringValue(predicted.catName) || !stringValue(predicted.channelCatId)) next.categoryPredictResult = { ...category, tbCatId: category.tbCatId ?? '' };
+  if (!hasSelectedCategoryLabel(next)) {
+    next.cardList = [
+      ...(Array.isArray(next.cardList) ? next.cardList : []),
+      {
+        cardData: {
+          propertyId: '-10000',
+          propertyName: '分类',
+          valuesList: [{ catId: category.catId, catName: category.catName, channelCatId: category.channelCatId, tbCatId: category.tbCatId ?? '', isClicked: true }],
+        },
+      },
+    ];
+  }
+  return next;
+}
+
+function hasSelectedCategoryLabel(payload: Record<string, unknown>): boolean {
+  const cards = Array.isArray(payload.cardList) ? payload.cardList : [];
+  return cards.some((rawCard) => {
+    const cardData = record(record(rawCard).cardData);
+    if (stringValue(cardData.propertyId) !== '-10000') return false;
+    return (Array.isArray(cardData.valuesList) ? cardData.valuesList : []).some((rawValue) => {
+      const value = record(rawValue);
+      return isSelected(value.isClicked) && Boolean(stringValue(value.channelCatId) && stringValue(value.catName));
+    });
+  });
 }
 
 function categoryFromCards(payload: Record<string, unknown>): { catId: string; catName: string; channelCatId: string; tbCatId?: string } | null {
@@ -295,5 +472,8 @@ function findStringDeep(root: unknown, ...keys: string[]): string | undefined {
 }
 
 function isSelected(value: unknown): boolean { return value === true || value === 1 || String(value ?? '').trim().toLowerCase() === '1' || String(value ?? '').trim().toLowerCase() === 'true'; }
-function stringValue(value: unknown): string { return typeof value === 'string' && value.trim() ? value.trim() : ''; }
+function stringValue(...values: unknown[]): string {
+  for (const value of values) if (typeof value === 'string' && value.trim()) return value.trim();
+  return '';
+}
 function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}; }

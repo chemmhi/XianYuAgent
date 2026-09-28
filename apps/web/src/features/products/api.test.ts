@@ -99,7 +99,7 @@ describe('products canonical API adapter', () => {
     expect(calls[1]?.headers?.get('If-Match-Version')).toBe('1');
   });
 
-  it('replays the publish multipart contract and omits skipped address fields', async () => {
+  it('replays the publish multipart contract and forwards the selected address', async () => {
     let request: { path: string; body?: unknown; headers?: Headers } | undefined;
     const api = createProductsApi({
       async get<T>() { return { success: true, data: { items: [], total: 0, page: 1, pageSize: 20, totalPages: 1 } } as T; },
@@ -109,15 +109,30 @@ describe('products canonical API adapter', () => {
       },
     });
     const file = new File(['image'], 'dress.png', { type: 'image/png' });
-    const result = await api.publishProduct({ accountId: 'account-1', title: '裙子', description: '九成新', priceMinor: 20000, quantity: 1, postageMode: 'free', attachments: [{ id: 'a1', url: 'blob:a1', name: file.name, mimeType: file.type, size: file.size, file }] }, { idempotencyKey: 'publish-key' });
+    const result = await api.publishProduct({ accountId: 'account-1', title: '裙子', description: '九成新', priceMinor: 20000, postageMode: 'free', location: '深圳湾公园', attachments: [{ id: 'a1', url: 'blob:a1', name: file.name, mimeType: file.type, size: file.size, file }] }, { idempotencyKey: 'publish-key' });
     expect(request?.path).toBe('/api/v1/products/publish');
     expect(request?.headers?.get('Idempotency-Key')).toBe('publish-key');
     expect(request?.body).toBeInstanceOf(FormData);
     const form = request?.body as FormData;
     expect(form.get('priceMinor')).toBe('20000');
     expect(form.get('postageMode')).toBe('free');
-    expect(form.get('location')).toBeNull();
+    expect(JSON.parse(String(form.get('location')))).toEqual({ poiName: '深圳湾公园' });
     expect(result.itemId).toBe('1085806034681');
+  });
+
+  it('preserves structured official location payloads without adding inventory configuration', async () => {
+    let request: { body?: unknown } | undefined;
+    const api = createProductsApi({
+      async get<T>() { return { success: true, data: { items: [], total: 0, page: 1, pageSize: 20, totalPages: 1 } } as T; },
+      async post<T>(_path: string, body?: unknown) {
+        request = { body };
+        return { success: true, data: { product: { id: 'local-1', accountId: 'account-1', title: '店铺管家', status: 'published', configVersion: 1, externalProductRef: 'item-1' }, itemId: 'item-1', itemUrl: 'https://www.goofish.com/item?id=item-1', category: { catId: 'cat-1', catName: '其他闲置', channelCatId: 'channel-1' }, postageMode: 'free', imageUrls: [], replay: { source: 'reference-project', steps: [] } } } as T;
+      },
+    });
+    const file = new File(['image'], 'one.png', { type: 'image/png' });
+    await api.publishProduct({ accountId: 'account-1', title: '店铺管家', description: '闲鱼超级助手', priceMinor: 19900, postageMode: 'free', location: { poiName: '深圳湾公园', poiId: 'B0FFFRDS71', aoiId: 'B0FFFRDS71', addressType: 5, cainiaoDivision: '440305' }, attachments: [{ id: 'a1', url: 'blob:a1', name: file.name, mimeType: file.type, size: file.size, file }] });
+    const form = request?.body as FormData;
+    expect(JSON.parse(String(form.get('location')))).toEqual({ poiName: '深圳湾公园', poiId: 'B0FFFRDS71', aoiId: 'B0FFFRDS71', addressType: 5, cainiaoDivision: '440305' });
   });
 
   it('routes description optimization through the configured provider endpoint', async () => {
@@ -128,6 +143,26 @@ describe('products canonical API adapter', () => {
     });
     await expect(api.optimizeDescription({ accountId: 'account-1', title: '裙子', description: '九成新' }, { idempotencyKey: 'copy-key' })).resolves.toMatchObject({ description: '优化后的文案', provider: 'configured' });
     expect(calls).toEqual(['/api/v1/products/publish/optimize-description']);
+  });
+
+  it('replays the official specification preview multipart contract', async () => {
+    let request: { path: string; body?: unknown; headers?: Headers } | undefined;
+    const api = createProductsApi({
+      async get<T>() { return { success: true, data: { items: [], total: 0, page: 1, pageSize: 20, totalPages: 1 } } as T; },
+      async post<T>(path: string, body?: unknown, init?: RequestInit) {
+        request = { path, body, headers: new Headers(init?.headers) };
+        return { success: true, data: { category: { catId: 'cat-1', catName: '游戏装备', channelCatId: 'channel-1' }, specs: [{ propertyId: '-10000', propertyName: '分类', selected: { text: '游戏装备' }, options: [{ text: '游戏装备' }] }], imageUrls: ['https://img.example/1.jpg'], replay: { source: 'reference-project', steps: [] } } } as T;
+      },
+    });
+    const file = new File(['image'], 'dress.png', { type: 'image/png' });
+    const preview = await api.previewProduct({ accountId: 'account-1', title: '游戏资料', description: '新手攻略', attachments: [{ id: 'a1', url: 'blob:a1', name: file.name, mimeType: file.type, size: file.size, file }] }, { idempotencyKey: 'preview-key' });
+    expect(request?.path).toBe('/api/v1/products/publish/preview');
+    expect(request?.headers?.get('Idempotency-Key')).toBe('preview-key');
+    expect(request?.body).toBeInstanceOf(FormData);
+    const form = request?.body as FormData;
+    expect(form.get('title')).toBe('游戏资料');
+    expect(form.get('description')).toBe('新手攻略');
+    expect(preview.specs[0]?.propertyName).toBe('分类');
   });
 
   it('reads and persists Xianyu detail through the dedicated route', async () => {

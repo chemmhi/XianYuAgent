@@ -15,7 +15,7 @@ describe('product draft validation', () => {
   });
 
   it('requires postage when the official fixed-price mode is selected', () => {
-    const errors = validateProductForm({ accountId: 'account-1', title: '商品', description: '描述', categoryCode: 'digital', priceMinor: '', priceYuan: '200', quantity: '1', postageMode: 'fixed', postageYuan: '' });
+    const errors = validateProductForm({ accountId: 'account-1', title: '商品', description: '描述', categoryCode: 'digital', priceMinor: '', priceYuan: '200', postageMode: 'fixed', postageYuan: '' });
     expect(errors.postageYuan).toBe('一口价模式必须填写邮费。');
   });
 });

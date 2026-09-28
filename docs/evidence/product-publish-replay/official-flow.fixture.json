@@ -1,7 +1,7 @@
 {
   "fixtureVersion": 1,
   "source": "official-goofish-publish-page",
-  "capturedAt": "2026-09-24",
+  "capturedAt": "2026-09-28",
   "redaction": {
     "cookies": "omitted",
     "tokens": "omitted",
@@ -11,7 +11,8 @@
   "flow": [
     { "step": 1, "action": "upload images", "api": "stream-upload.goofish.com/api/upload.api", "status": "succeeded", "notes": "multipart images are sent in display order" },
     { "step": 2, "action": "recommend category and attributes", "api": "mtop.taobao.idle.kgraph.property.recommend", "status": "succeeded", "notes": "title, description and imageInfos are submitted together" },
-    { "step": 3, "action": "publish item", "api": "mtop.idle.pc.idleitem.publish", "status": "succeeded", "notes": "itemPostFeeDTO follows the selected official shipping mode" }
+    { "step": 3, "action": "select item location", "api": "ui-only until publish", "status": "succeeded", "notes": "the location dialog supports search plus recent and nearby places; the selected place is carried into itemAddrDTO" },
+    { "step": 4, "action": "publish item", "api": "mtop.idle.pc.idleitem.publish", "status": "succeeded", "notes": "itemPostFeeDTO follows the selected official shipping mode and itemAddrDTO carries the selected location" }
   ],
   "shippingModeMap": {
     "free": "canFreeShipping=true",
@@ -20,13 +21,32 @@
     "none": "onlyTakeSelf=true"
   },
   "address": {
-    "status": "skipped",
-    "reason": "user requested main flow first",
-    "payloadField": "itemAddrDTO"
+    "status": "recorded",
+    "interaction": "宝贝所在地 dialog with search input, 常用地址 list and 附近地址 list",
+    "payloadField": "itemAddrDTO",
+    "localEditor": "editable location field with the selected label forwarded as poiName"
+  },
+  "previewTrigger": {
+    "status": "recorded",
+    "condition": "after at least one image upload and non-empty title plus description",
+    "api": "POST /api/v1/products/publish/preview",
+    "remoteSequence": ["stream-upload.goofish.com/api/upload.api", "mtop.taobao.idle.kgraph.property.recommend"]
+  },
+  "inventory": {
+    "status": "removed",
+    "publishConfigField": "absent",
+    "payloadField": "absent",
+    "remoteDetailDefault": 1
   },
   "successReceipt": {
-    "itemId": "redacted-example",
+    "itemId": "1086738034344",
     "itemUrlPattern": "https://www.goofish.com/item?id={itemId}",
+    "itemUrl": "https://www.goofish.com/item?id=1086738034344",
+    "title": "店铺管家，闲鱼超级助手",
+    "priceMinor": 19900,
+    "imageCount": 5,
+    "location": "深圳湾公园",
+    "category": { "catId": "50023914", "catName": "软件/程序/网站开发", "channelCatId": "201453616", "tbCatId": "50014907" },
     "localStatus": "published",
     "localExternalProductRef": "itemId"
   }
