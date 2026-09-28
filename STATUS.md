@@ -1,4 +1,11 @@
 # XianyuSellerAgent 项目状态
+## 2026-09-28 商品目录知识库闭环
+- 目标行为：商品列表知识库列无内容显示“—”，有内容显示省略文本并支持悬浮查看全文；操作列统一使用“详情 / 自动化 / 知识库”，移除独立详情列和工具栏知识库统计提示。
+- 实现：新增商品知识库查看/编辑弹窗；无内容商品直接进入编辑，有内容商品先查看后编辑；支持未保存关闭确认、保存中状态、错误提示和 5000 字计数；编辑框按视口剩余高度自适应，超长内容在框内滚动。
+- 数据与 Agent：前端 PATCH 请求携带 `accountId`、`If-Match-Version`、`Idempotency-Key`；后端沿用商品 `knowledge_base` 字段、版本校验与账号范围校验；商品查询与列表 Agent 工具继续消费同一商品知识库内容。
+- 已验证：Web typecheck；Web 全量 Vitest 91 files / 326 tests；Web build；API build；API auto-reply unit 221/221；Memory products smoke；PostgreSQL products smoke；Chrome/CDP 商品 E2E（含新增、查看、编辑、保存回显、账号切换隔离）；`git diff --check`。
+- 状态：`READY_FOR_MERGE`。
+
 ## 2026-09-25 闲鱼验证浏览器端口抽象
 - 目标行为：保持已验证的 Patchright-only 验证链路，同时让验证核心与滑块算法不直接依赖浏览器库，便于单测、替换实现和延迟加载。
 - 实现：新增 `xianyu-browser-port.ts`、`xianyu-slider-port.ts` 与 `patchright-verification-browser.ts`；Patchright 改为唯一懒加载适配器；`xianyu-verification-browser.ts` 只消费浏览器端口；`xianyu-slider-solver.ts` 只消费独立滑块端口；不保留 CDP/Playwright fallback。

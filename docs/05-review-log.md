@@ -4,6 +4,17 @@
 - 更新日期：2026-09-19
 - 评审规则：问题先修复，再复验，再由独立评审关闭；未关闭的 P0-P2 不得进入下一阶段。
 
+### 2026-09-28：商品目录知识库闭环
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R138 | 业务 / 交互 | 商品列表是否仅保留操作列按钮，知识库按钮名称是否明确；空内容是否显示短横线，有内容是否省略并支持悬浮查看全文 | root | PASS | `ProductTable.tsx`、`ProductTable.test.tsx`；Chrome/CDP 商品 E2E |
+| S5-R139 | 前端 / 弹窗 | 新增、查看、编辑、保存和未保存关闭确认是否可用；弹窗内容、按钮、错误态和自适应编辑区是否正常 | root | PASS | `ProductKnowledgeBaseModal.tsx`、`ProductKnowledgeBaseModal.test.tsx`；Chrome/CDP 商品 E2E |
+| S5-R140 | 数据 / 隔离 | 知识库是否通过商品 PATCH 持久化到数据库，并按 accountId、商品 configVersion 做范围和并发保护 | root | PASS | `products-smoke.mjs`、`products-postgres-smoke.mjs`；Memory/PostgreSQL smoke |
+| S5-R141 | Agent / 回归 | `get_product_info` 与 `list_shop_products` 是否继续返回商品知识库，且不跨账号读取 | root | PASS | `auto-reply-product-lookup.test.ts`、`auto-reply-agent.test.ts`；API auto-reply unit 221/221 |
+
+本轮结论：商品目录知识库已完成列表展示、查看/编辑弹窗、账号隔离、数据库持久化和 Agent 消费闭环；受控 UI、Memory/PostgreSQL 与 Agent 回归均通过。
+
 ## 2026-09-25：QR 扫码登录后置 IM 验证失败复审
 
 | 评审编号 | 类型 | 结论 | 证据 |
@@ -668,3 +679,13 @@
 | S5-R137 | 外部平台 / 真实发送 | 白名单买家是否完成真实滑块后外发并落库 | root | BLOCKED | 真实 NC 页面加载正常，但三次轨迹均返回 `验证失败(error:fALStr)`；保留 `ACCOUNT_VALIDATION_REQUIRED`，无外部消息引用 |
 
 本轮结论：本地发送状态和实时消息竞态已修复并通过真实浏览器 E2E；真实闲鱼外部挑战仍阻塞自动发送，未把受控夹具或失败重试解释为真实发送成功。
+### 2026-09-28：商品目录知识库闭环
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R138 | 业务 / 交互 | 商品列表是否仅保留操作列按钮，知识库按钮名称是否明确；空内容是否显示短横线，有内容是否省略并支持悬浮查看全文 | root | PASS | `ProductTable.tsx`、`ProductTable.test.tsx`；Chrome/CDP 商品 E2E |
+| S5-R139 | 前端 / 弹窗 | 新增、查看、编辑、保存和未保存关闭确认是否可用；弹窗内容、按钮、错误态和自适应编辑区是否正常 | root | PASS | `ProductKnowledgeBaseModal.tsx`、`ProductKnowledgeBaseModal.test.tsx`；Chrome/CDP 商品 E2E |
+| S5-R140 | 数据 / 隔离 | 知识库是否通过商品 PATCH 持久化到数据库，并按 accountId、商品 configVersion 做范围和并发保护 | root | PASS | `products-smoke.mjs`、`products-postgres-smoke.mjs`；Memory/PostgreSQL smoke |
+| S5-R141 | Agent / 回归 | `get_product_info` 与 `list_shop_products` 是否继续返回商品知识库，且不跨账号读取 | root | PASS | `auto-reply-product-lookup.test.ts`、`auto-reply-agent.test.ts`；API auto-reply unit 221/221 |
+
+本轮结论：商品目录知识库已完成列表展示、查看/编辑弹窗、账号隔离、数据库持久化和 Agent 消费闭环；受控 UI、Memory/PostgreSQL 与 Agent 回归均通过。

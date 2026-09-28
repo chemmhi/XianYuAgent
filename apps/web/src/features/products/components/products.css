@@ -22,8 +22,8 @@
 .products-table-scroll { scrollbar-width: none; }
 .products-table { display: grid; min-width: 0; }
 .products-table-automation { min-width: 0; }
-.products-row { display: grid; grid-template-columns: minmax(220px, 1.55fr) .7fr 1.2fr 1.35fr 1.1fr 1.1fr 70px; gap: 12px; align-items: center; min-height: 66px; padding: 11px 12px; border-bottom: 1px solid var(--border); font-size: 14px; line-height: 1.6; }
-.products-table-automation .products-row { grid-template-columns: 34px minmax(180px, 1.5fr) .7fr 1.1fr 1.35fr 1.1fr 1.1fr 150px; gap: 10px; }
+.products-row { display: grid; grid-template-columns: minmax(220px, 1.55fr) .7fr 1.2fr 1.35fr 1.1fr 1.1fr 170px; gap: 12px; align-items: center; min-height: 66px; padding: 11px 12px; border-bottom: 1px solid var(--border); font-size: 14px; line-height: 1.6; }
+.products-table-automation .products-row { grid-template-columns: 34px minmax(180px, 1.5fr) .7fr 1.1fr 1.35fr 1.1fr 1.1fr 210px; gap: 10px; }
 .products-check-cell { display: flex; align-items: center; justify-content: center; }
 .products-check-cell input { width: 14px; height: 14px; accent-color: var(--link); }
 .products-automation-status { display: grid; gap: 4px; align-content: center; min-width: 0; min-height: 42px; }
@@ -49,7 +49,7 @@
 .products-status-publishing { color: var(--info); background: var(--soft-blue-bg); }
 .products-status-failed { color: var(--danger); background: var(--danger-bg); }
 .products-status-archived { color: var(--muted); background: #F1F5F9; }
-.products-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.products-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
 .products-row-actions .btn-small { min-width: 46px; }
 .products-status-select .ui-select-menu-option { white-space: nowrap; }
 .products-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 11px 12px; border-top: 1px solid var(--border); background: #fff; color: var(--sub); font-size: 12px; line-height: 1.5; }
@@ -133,6 +133,32 @@ body .app-viewport .products-detail-panel h2 { margin: 4px 0 0; font-size: 20px;
 body .app-viewport .products-detail-panel .xianyu-detail-description { padding: 12px; border: 1px solid var(--border); border-radius: 9px; color: var(--sub); font-size: 14px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
 .products-detail-panel .xianyu-rich-description, .products-detail-panel .xianyu-raw-payload { border: 1px solid var(--border); border-radius: 8px; background: #F8FAFC; color: var(--sub); font-size: 14px; line-height: 1.6; }
 .products-detail-panel .xianyu-rich-description summary, .products-detail-panel .xianyu-raw-payload summary { padding: 9px 10px; cursor: pointer; font-size: 14px; line-height: 1.5; }
+
+.product-knowledge-base-backdrop { z-index: 36; }
+.product-knowledge-base-modal { width: min(560px, 100vw); display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+.product-knowledge-base-header { flex: 0 0 auto; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 22px 24px 17px; border-bottom: 1px solid var(--border); }
+.product-knowledge-base-header h2 { margin: 4px 0 0; font-size: 20px; line-height: 1.35; }
+.product-knowledge-base-header p:not(.eyebrow) { margin: 5px 0 0; color: var(--sub); font-size: 12px; line-height: 1.6; }
+.product-knowledge-base-body { min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column; overflow: auto; padding: 20px 24px 24px; background: #fff; }
+.product-knowledge-base-view, .product-knowledge-base-edit { display: grid; gap: 10px; }
+.product-knowledge-base-edit { min-height: 0; flex: 1 1 auto; grid-template-rows: auto minmax(0, 1fr) auto; }
+.product-knowledge-base-view-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.product-knowledge-base-view-head h3 { margin: 0; font-size: 15px; line-height: 1.5; }
+.product-knowledge-base-view-head span, .product-knowledge-base-editor-meta { color: var(--sub); font-size: 12px; line-height: 1.5; }
+.product-knowledge-base-content { min-height: 190px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: #F8FAFC; color: var(--text); font-size: 14px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.product-knowledge-base-hint { margin: 0; color: var(--sub); font-size: 12px; line-height: 1.6; }
+.product-knowledge-base-edit label { color: var(--muted); font-size: 13px; font-weight: 700; }
+.product-knowledge-base-edit .product-knowledge-base-textarea { width: 100%; height: clamp(260px, calc(100dvh - 320px), 600px); min-height: 0; max-height: calc(100dvh - 280px); box-sizing: border-box; resize: vertical; overflow-y: auto; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: #fff; color: var(--text); font: inherit; font-size: 14px; line-height: 1.7; outline: none; }
+.product-knowledge-base-edit .product-knowledge-base-textarea:focus { border-color: #8EA8C3; box-shadow: 0 0 0 3px rgba(36,90,141,.12); }
+.product-knowledge-base-editor-meta { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.product-knowledge-base-editor-meta span:last-child { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.product-knowledge-base-error { margin: 16px 24px 0; }
+.product-knowledge-base-footer { flex: 0 0 auto; display: flex; justify-content: flex-end; gap: 8px; padding: 12px 24px 14px; border-top: 1px solid var(--border); background: #fff; }
+.product-knowledge-base-confirm { position: absolute; right: 24px; bottom: 70px; width: min(320px, calc(100% - 48px)); padding: 14px; border: 1px solid #D6B86A; border-radius: 10px; background: #FFFDF5; box-shadow: 0 12px 28px rgba(17,24,39,.16); }
+.product-knowledge-base-confirm strong { display: block; color: var(--text); font-size: 13px; line-height: 1.5; }
+.product-knowledge-base-confirm p { margin: 5px 0 0; color: var(--sub); font-size: 12px; line-height: 1.5; }
+.product-knowledge-base-confirm > div { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+@media (max-width: 900px) { .product-knowledge-base-header { padding: 17px 16px 14px; } .product-knowledge-base-body { padding: 16px; } .product-knowledge-base-footer { padding: 11px 16px 13px; } .product-knowledge-base-error { margin: 14px 16px 0; } .product-knowledge-base-confirm { right: 16px; bottom: 64px; width: calc(100% - 32px); } }
 
 /* Product publish drawer: mirrors the existing message composer and drawer
    density while keeping the publish form as one continuous card. */

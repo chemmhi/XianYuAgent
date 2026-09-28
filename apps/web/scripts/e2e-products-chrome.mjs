@@ -104,6 +104,7 @@ async function run() {
   const account = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `products-e2e-${process.pid}`, displayName: 'Chrome 商品账号' });
   const secondaryAccount = await apiRuntime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `products-e2e-secondary-${process.pid}`, displayName: 'Secondary 商品账号' });
   const localProduct = await apiRuntime.store.createProduct({ adminId, accountId: account.id, externalProductRef: `ITEM-${process.pid}`, title: 'Chrome E2E 商品', description: '商品详情来自独立 detail API', categoryCode: 'digital', attributes: { source: 'chrome-e2e' }, knowledgeBase: '请用简洁中文回答买家问题。', priceMinor: 3990, status: 'published' });
+  const emptyKnowledgeBaseProduct = await apiRuntime.store.createProduct({ adminId, accountId: account.id, externalProductRef: `EMPTY-${process.pid}`, title: 'Chrome E2E 空知识库商品', description: '用于验证新增知识库流程', categoryCode: 'digital', priceMinor: 1990, status: 'published' });
   const couponBatch = await apiRuntime.store.createCouponBatch({ adminId, accountId: account.id, label: 'Chrome E2E 卡券', purpose: 'text' });
   await apiRuntime.store.bindCouponBatch({ adminId, batchId: couponBatch.id, productId: localProduct.id });
   apiRuntime.xianyu.fetchItemsAll = async () => {
@@ -173,6 +174,20 @@ async function run() {
   if (JSON.stringify(columns) !== JSON.stringify(expectedColumns)) throw new Error(`product columns mismatch: ${JSON.stringify(columns)}`);
   const productText = String(await evaluate(cdp, 'document.body.innerText'));
   if (!productText.includes('Chrome E2E 卡券') || !productText.includes('请用简洁中文回答买家问题。')) throw new Error('coupon or AI prompt column content missing');
+  if (!await evaluate(cdp, `(() => { const button = document.querySelector('[data-testid="product-knowledge-base-${emptyKnowledgeBaseProduct.id}"]'); if (!button) return false; button.click(); return true; })()`)) throw new Error('empty knowledge-base action button missing');
+  await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector("[data-testid=product-knowledge-base-input]"))')), 'empty knowledge-base editor');
+  if (!String(await evaluate(cdp, 'document.body.innerText')).includes('保存知识库')) throw new Error('empty knowledge-base editor content missing');
+  if (!await evaluate(cdp, '(() => { const button = document.querySelector("[aria-label=\\"关闭知识库\\"]"); if (!button) return false; button.click(); return true; })()')) throw new Error('knowledge-base modal close button missing');
+  const knowledgeBaseMark = cdp.events.length;
+  if (!await evaluate(cdp, `(() => { const button = document.querySelector('[data-testid="product-knowledge-base-${localProduct.id}"]'); if (!button) return false; button.click(); return true; })()`)) throw new Error('existing knowledge-base action button missing');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('请用简洁中文回答买家问题。'), 'knowledge-base read view');
+  if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=edit-product-knowledge-base]"); if (!button) return false; button.click(); return true; })()')) throw new Error('knowledge-base edit action missing');
+  await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector("[data-testid=product-knowledge-base-input]"))')), 'knowledge-base edit form');
+  await evaluate(cdp, '(() => { const input = document.querySelector("[data-testid=product-knowledge-base-input]"); if (!input) throw new Error("knowledge-base input missing"); const setter = Object.getOwnPropertyDescriptor(input.__proto__, "value")?.set; setter?.call(input, "更新后的商品交付说明"); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); })()');
+  if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=save-product-knowledge-base]"); if (!button || button.disabled) return false; button.click(); return true; })()')) throw new Error('knowledge-base save button missing or disabled');
+  await waitFor(async () => cdp.events.slice(knowledgeBaseMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'PATCH' && event.params?.request?.url?.match(/\/api\/v1\/products\/[^/]+$/)), 'knowledge-base persistence request');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('更新后的商品交付说明'), 'knowledge-base list readback');
+  if (await evaluate(cdp, 'document.querySelector("[data-testid=product-knowledge-base-modal]") !== null')) throw new Error('knowledge-base modal did not close after save');
   const detailMark = cdp.events.length;
   if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid^=product-detail-]"); if (!button) return false; button.click(); return true; })()')) throw new Error('product detail action button missing');
   await waitFor(async () => cdp.events.slice(detailMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'GET' && event.params?.request?.url?.match(/\/api\/v1\/products\/[^/]+\/detail(?:\?|$)/)), 'xianyu product detail read request');
@@ -219,6 +234,7 @@ async function run() {
   await cdp.send('Network.setBlockedURLs', { urls: [] });
   if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=refresh-products]"); if (!button || button.disabled) return false; button.click(); return true; })()')) throw new Error('product refresh retry missing or disabled');
   await waitFor(async () => { const text = String(await evaluate(cdp, 'document.body.innerText')); return text.includes('Chrome E2E 闲鱼详情') || text.includes('Chrome E2E 商品'); }, 'product row after error retry');
+  await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector("[data-testid=product-sort-createdAt]"))')), 'product sort controls after error retry');
   if (!cdp.events.some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'GET' && (() => { const url = new URL(event.params.request.url); return url.pathname === '/api/v1/products' && url.searchParams.get('sortBy') === 'xianyuOrder' && url.searchParams.get('sortOrder') === 'asc'; })())) throw new Error('default Xianyu page-order sort request missing');
   const createdSortMark = cdp.events.length;
   if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=product-sort-createdAt]"); if (!button) return false; button.click(); return true; })()')) throw new Error('createdAt sort button missing');
@@ -240,7 +256,7 @@ async function run() {
   const syncButton = await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=sync-products]"); if (!button || button.disabled) return false; button.click(); return true; })()');
   if (!syncButton) throw new Error('sync products button missing or disabled');
   await waitFor(async () => cdp.events.some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'POST' && event.params?.request?.url?.includes('/api/v1/products/sync')), 'xianyu product sync request');
-  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector(".products-pagination-total")?.textContent ?? ""')).includes('30'), '29 synced products plus local product');
+  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector(".products-pagination-total")?.textContent ?? ""')).includes('31'), '29 synced products plus two local products');
   if (!await evaluate(cdp, 'String(document.querySelector("[data-testid=products-pagination]")?.textContent ?? "").includes("第 1 / 2 页")')) throw new Error('products pagination missing after sync');
   const pageTwoMark = cdp.events.length;
   if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=products-page-2]"); if (!button || button.disabled) return false; button.click(); return true; })()')) throw new Error('products page 2 button missing or disabled');
@@ -258,9 +274,9 @@ async function run() {
   if (cdp.events.slice(refreshMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.url?.includes('/api/v1/products/sync'))) throw new Error('refresh must not call xianyu sync endpoint');
   const publishMark = cdp.events.length;
   if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid=publish-product]"); if (!button || button.disabled) return false; button.click(); return true; })()')) throw new Error('publish product button missing or disabled');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('新建商品草稿'), 'create draft drawer');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('发布商品'), 'create draft drawer');
   if (cdp.events.slice(publishMark).some((event) => event.method === 'Network.requestWillBeSent' && /publish|bulk-publish|mtop/i.test(event.params?.request?.url ?? ''))) throw new Error('publish draft entry must not call a real publish endpoint');
-  await evaluate(cdp, '(() => { const set = (label, value) => { const field = Array.from(document.querySelectorAll(".product-basic-form label")).find((candidate) => candidate.textContent?.includes(label)); const input = field?.querySelector("input,textarea"); if (!input) throw new Error(`missing ${label}`); const setter = Object.getOwnPropertyDescriptor(input.__proto__, "value")?.set; setter?.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); }; set("商品标题", "Chrome 创建草稿"); set("分类编码", "digital"); set("价格（分）", "2990"); set("商品描述", "来自 Chrome E2E 的草稿"); })()');
+  await evaluate(cdp, '(() => { const set = (label, value) => { const field = Array.from(document.querySelectorAll(".product-publish-field")).find((candidate) => candidate.textContent?.includes(label)); const input = field?.querySelector("input,textarea"); if (!input) throw new Error(`missing ${label}`); const setter = Object.getOwnPropertyDescriptor(input.__proto__, "value")?.set; setter?.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); }; set("商品标题", "Chrome 创建草稿"); set("售价", "29.90"); set("库存数量", "1"); set("商品描述", "来自 Chrome E2E 的草稿"); })()');
   const savedCreate = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((item) => item.textContent?.includes("保存草稿")); if (!button || button.disabled) return false; button.click(); return true; })()');
   if (!savedCreate) throw new Error('save draft button disabled');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome 创建草稿'), 'created draft row');
@@ -269,8 +285,8 @@ async function run() {
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome 创建草稿'), 'product detail');
   const openedEdit = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((item) => item.textContent?.includes("编辑草稿")); if (!button) return false; button.click(); return true; })()');
   if (!openedEdit) throw new Error('edit draft button missing');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('编辑商品草稿'), 'edit draft drawer');
-  await evaluate(cdp, '(() => { const field = Array.from(document.querySelectorAll(".product-basic-form label")).find((candidate) => candidate.textContent?.includes("商品标题")); const input = field?.querySelector("input"); if (!input) throw new Error("missing title"); const setter = Object.getOwnPropertyDescriptor(input.__proto__, "value")?.set; setter?.call(input, "Chrome 编辑草稿"); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); })()');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('编辑商品'), 'edit draft drawer');
+  await evaluate(cdp, '(() => { const field = Array.from(document.querySelectorAll(".product-publish-field")).find((candidate) => candidate.textContent?.includes("商品标题")); const input = field?.querySelector("input"); if (!input) throw new Error("missing title"); const setter = Object.getOwnPropertyDescriptor(input.__proto__, "value")?.set; setter?.call(input, "Chrome 编辑草稿"); input.dispatchEvent(new Event("input", { bubbles: true })); input.dispatchEvent(new Event("change", { bubbles: true })); })()');
   const savedEdit = await evaluate(cdp, '(() => { const button = Array.from(document.querySelectorAll("button")).find((item) => item.textContent?.includes("保存草稿")); if (!button || button.disabled) return false; button.click(); return true; })()');
   if (!savedEdit) throw new Error('edit save button disabled');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('Chrome 编辑草稿'), 'updated draft row');

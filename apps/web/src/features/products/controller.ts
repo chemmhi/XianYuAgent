@@ -67,6 +67,7 @@ export interface ProductsController {
   closeXianyuDetail: () => void;
   createDraft: (input: ProductDraftInput) => Promise<ProductVM | null>;
   updateDraft: (productId: string, patch: ProductDraftPatch, configVersion: number) => Promise<ProductVM | null>;
+  updateKnowledgeBase: (product: ProductVM, knowledgeBase: string) => Promise<ProductVM | null>;
   publishProduct: (values: ProductPublishFormValues) => Promise<boolean>;
   optimizeDescription: (input: { accountId: string; title: string; description: string }) => Promise<string>;
   syncFromXianyu: (accountId: string) => Promise<boolean>;
@@ -216,6 +217,27 @@ export function useProductsController(options: { api?: ProductsApi; initialFilte
       return null;
     }
   }, [productsApi, reload]);
+  const updateKnowledgeBase = useCallback(async (product: NonNullable<ProductDetailState['data']>, knowledgeBase: string) => {
+    setMutation({ phase: 'saving', error: null });
+    try {
+      const updated = await productsApi.updateKnowledgeBase(product.id, {
+        accountId: product.accountId,
+        knowledgeBase: knowledgeBase.trim() || null,
+        configVersion: product.configVersion,
+      });
+      setMutation({ phase: 'success', error: null });
+      await reload();
+      setDetail({ phase: 'success', productId: product.id, data: updated, error: null });
+      return updated;
+    } catch (error) {
+      const normalized = toProductsMutationError(error);
+      if (normalized.code === 'VERSION_CONFLICT') {
+        try { normalized.conflict = { server: await productsApi.getDetail(product.id), local: { knowledgeBase } }; } catch { normalized.conflict = { local: { knowledgeBase } }; }
+      }
+      setMutation({ phase: 'error', error: normalized });
+      return null;
+    }
+  }, [productsApi, reload]);
   const syncFromXianyu = useCallback(async (accountId: string) => {
     setSyncError(null);
     setMutation({ phase: 'saving', error: null });
@@ -233,5 +255,5 @@ export function useProductsController(options: { api?: ProductsApi; initialFilte
   }, [productsApi, reload]);
   const clearMutation = useCallback(() => setMutation({ phase: 'idle', error: null }), []);
 
-  return { filters, setFilters, setKeyword, reload, openProduct, closeProduct, openXianyuDetail, syncXianyuDetail, closeXianyuDetail, createDraft, updateDraft, publishProduct, optimizeDescription, syncFromXianyu, syncError, clearMutation, state, detail, xianyuDetail, mutation };
+  return { filters, setFilters, setKeyword, reload, openProduct, closeProduct, openXianyuDetail, syncXianyuDetail, closeXianyuDetail, createDraft, updateDraft, updateKnowledgeBase, publishProduct, optimizeDescription, syncFromXianyu, syncError, clearMutation, state, detail, xianyuDetail, mutation };
 }
