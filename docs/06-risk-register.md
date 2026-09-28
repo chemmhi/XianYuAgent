@@ -283,3 +283,11 @@
 | S5-RISK-060 | Workspace 若把卡券正文写入 Message、Run Event 或 Confirmation Manifest，会造成敏感卡券内容泄露 | P1 | 仅保存 `label/purpose/itemCount/configured` 等脱敏字段；正文只在服务端 `CouponService` 创建边界处理；Memory、PostgreSQL、Chrome/CDP 均断言 `redacted=true` 且正文不出现在 Workspace | MITIGATED |
 | S5-RISK-061 | 新增卡券本地创建成功后若沿用商品发布的 `pending` 语义，会让管理员误以为仍未完成或误触发外部 Worker | P1 | `coupon_create` 使用本地创建专用分支，CouponBatch 与 data import 完成后 Outbox 收敛为 `succeeded / known_success`；UI 明确显示“创建卡券批次” | MITIGATED |
 | S5-RISK-062 | 迁移 044 未在已有 PostgreSQL volume 上执行，会导致 `coupon_create` Confirmation 被约束拒绝 | P1 | 显式执行 `npm run db:migrate`，验证 action check 包含 `coupon_create`；临时 PostgreSQL 001–044 和关闭/重开复读通过；回滚采用应用先行 | MITIGATED |
+
+### 2026-09-28 Workspace 自动回复 Agent 配置修改确认垂直切片
+
+| 编号 | 风险 | 级别 | 应对 | 状态 |
+| --- | --- | --- | --- | --- |
+| S5-RISK-063 | Workspace 配置修改若覆盖 Settings 页面的新版本，会丢失管理员的最新配置 | P1 | Confirmation Manifest 保存 `expectedVersion`；确认前再次读取 Settings 版本，冲突返回 `VERSION_CONFLICT` 并保留 Confirmation `active`；Memory/PostgreSQL 回归已通过 | MITIGATED |
+| S5-RISK-064 | Workspace 将 Prompt、Credential 或原始指令带入确认卡、事件或审计，会造成敏感配置泄露 | P1 | 仅允许安全运行参数；Prompt 字段不解析；Message/Run Event/Outbox/Audit 只写字段名、版本和 `redacted=true`；Chrome/CDP 断言原始指令不出现 | MITIGATED |
+| S5-RISK-065 | 迁移 045 未在已有 PostgreSQL volume 上执行，会导致 `agent_settings_update` Confirmation 被约束拒绝 | P1 | 显式执行 `npm run db:migrate`，验证 action check 包含 `agent_settings_update`；临时 PostgreSQL 001–045 和关闭/重开复读通过；回滚采用应用先行 | MITIGATED |

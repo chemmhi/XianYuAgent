@@ -21,3 +21,13 @@
 - Verify：`node apps/api/scripts/workspace-coupon-postgres-smoke.mjs`；临时 PostgreSQL 执行 `001`–`044`，确认、CouponBatch、Outbox 成功和 Store 重开复读均通过。
 - 已有 volume：必须在目标数据库显式执行 `npm run db:migrate`，并确认 action check 已包含 `coupon_create` 后再开放新增卡券确认写入；不依赖 Compose `initdb` 重放历史迁移。
 - Rollback：应用先停止新的 `coupon_create` Confirmation 写入并回退 API，保留历史 Confirmation、CouponBatch、Run/Step、Outbox 和审计；DDL 回滚待 `S4-ENV-RECOVERY` 完成兼容窗口演练后执行。
+
+## 045_workspace_agent_settings_confirmations.sql
+
+- 归属切片：WS-VS-04 / `S4-VS6B` 自动回复 Agent 配置修改子片。
+- 前置：`044_workspace_coupon_confirmations.sql`、`022_auto_reply_agent_settings.sql`、`023_auto_reply_agent_account_scope.sql` 和 `AutoReplyAgentSettingsService`。
+- 内容：扩展 `workspace.confirmations.action` 检查约束，允许 `agent_settings_update`；不新增配置表，也不复制 Prompt 或 Credential。
+- Apply：`npm run db:migrate`；脚本先删除旧 action check，再创建兼容 `product_publish | coupon_create | agent_settings_update` 的约束，可重复执行。
+- Verify：`node apps/api/scripts/workspace-agent-settings-postgres-smoke.mjs`；临时 PostgreSQL 执行 `001`–`045`，配置版本、Confirmation、Outbox 成功和 Store 重开复读均通过。
+- 已有 volume：必须在目标数据库显式执行 `npm run db:migrate`，并确认 action check 已包含 `agent_settings_update` 后再开放 Workspace 配置写入；不依赖 Compose `initdb` 重放历史迁移。
+- Rollback：应用先停止新的 `agent_settings_update` Confirmation 写入并回退 API，保留历史配置版本、Confirmation、Run/Step、Outbox 和审计；DDL 回滚待 `S4-ENV-RECOVERY` 完成兼容窗口演练后执行。

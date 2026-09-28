@@ -689,3 +689,13 @@
 | S5-R144 | 质量 / 视觉 / 安全 | API/Web typecheck/build、Workspace 定向测试、真实浏览器双 viewport、正文不泄露和 diff-check 是否通过 | root | PASS（受控环境） | `workspace-coupon-smoke.mjs`、`workspace-coupon-postgres-smoke.mjs`、`e2e-workspace-coupon.mjs`、桌面/移动截图、`git diff --check` |
 
 本轮结论：WS-VS-03 已完成并验证。新增卡券确认只在本地卡券域完成，Outbox 明确为 `succeeded / known_success`；卡券正文未进入 Workspace 可见数据。下一切片才可进入“修改配置”，商品外部发布 Worker、unknown/recovery 和发布级迁移回滚继续保持独立后续门禁。
+
+### 2026-09-28：Workspace 自动回复 Agent 配置修改确认垂直切片复审
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R145 | 业务 / 验收 | Workspace 是否能按当前账号 scope 生成 Agent 配置确认卡，并支持安全参数修改、确认、取消和版本回显 | root | PASS | `WS-VS-04-agent-settings-confirmation.md`；真实 `/workspace` Chrome/CDP E2E；配置 API 读回 `configVersion=1` |
+| S5-R146 | 架构 / 数据流 | `agent.settings.update.confirm` Policy、SettingsService owner、expectedVersion、Run/Step 状态机和本地 Outbox 收敛是否成立 | root | PASS | `workspace-native-write.ts`、`workspace.ts`、`auto-reply-agent-settings.ts`、`045_workspace_agent_settings_confirmations.sql`；Memory 16/16；PostgreSQL 001–045 |
+| S5-R147 | 质量 / 视觉 / 安全 | API/Web typecheck/build、Workspace 定向测试、真实浏览器双 viewport、Prompt/原始指令不泄露和 diff-check 是否通过 | root | PASS（受控环境） | `workspace-agent-settings-smoke.mjs`、`workspace-agent-settings-postgres-smoke.mjs`、`e2e-workspace-agent-settings.mjs`、桌面/移动截图、`git diff --check` |
+
+本轮结论：WS-VS-04 已完成并验证。Workspace 当前提出的原生读、商品发布确认、新增卡券确认和自动回复配置修改路径均已完成；Provider、Credential、Policy Gateway、Runtime 等其他配置域继续保持独立 owner 和独立切片边界。

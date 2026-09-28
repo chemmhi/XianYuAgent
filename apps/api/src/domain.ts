@@ -1212,7 +1212,7 @@ export type StepKind = 'plan' | 'tool_call' | 'policy_check' | 'mutation' | 'obs
 export type ExternalOutcome = 'known_success' | 'known_failure' | 'unknown';
 export type WorkspaceMessageType = 'user_message' | 'reasoning_summary' | 'tool_event' | 'final_answer';
 export type WorkspaceConfirmationStatus = 'active' | 'confirmed' | 'expired' | 'rejected' | 'cancelled';
-export type WorkspaceActionKind = 'product_publish' | 'coupon_create';
+export type WorkspaceActionKind = 'product_publish' | 'coupon_create' | 'agent_settings_update';
 
 export interface AgentSessionRecord {
   id: string;

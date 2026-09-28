@@ -1,8 +1,9 @@
 import type { AgentSessionRecord, AutoReplyOutboxRecord, RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, Store, WorkspaceConfirmationRecord, WorkspaceMessageRecord } from './domain.js';
 import { ServiceError } from './services.js';
 import type { CouponService } from './services.js';
+import type { AutoReplyAgentSettingsService } from './auto-reply-agent-settings.js';
 import { executeNativeWorkspaceRead } from './workspace-native-read.js';
-import { parseNativeWorkspaceCouponCreate, prepareNativeWorkspaceWrite, sanitizeWorkspaceInstruction } from './workspace-native-write.js';
+import { parseNativeWorkspaceAgentSettingsUpdate, parseNativeWorkspaceCouponCreate, prepareNativeWorkspaceWrite, sanitizeWorkspaceInstruction } from './workspace-native-write.js';
 import { persistWorkspaceConfirmation } from './workspace-confirmation.js';
 
 const terminalRunStatuses = new Set<RunStatus>(['succeeded', 'partially_succeeded', 'failed', 'cancelled', 'expired']);
@@ -204,6 +205,7 @@ export class WorkspaceService {
     private readonly runtime: WorkspaceRuntime,
     private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => Promise<string>,
     private readonly coupons?: CouponService,
+    private readonly agentSettings?: AutoReplyAgentSettingsService,
   ) {}
 
   async listSessions(input: { adminId: string; accountId?: string; search?: string }): Promise<WorkspaceSessionView[]> {
@@ -296,13 +298,22 @@ export class WorkspaceService {
     const current = await this.store.getWorkspaceConfirmation(input.adminId, input.runId);
     if (!current) throw new ServiceError(404, 'NOT_FOUND', 'confirmation not found');
     if (current.status !== 'active') throw new ServiceError(409, 'CONFLICT', 'confirmation is no longer active', { status: current.status });
+    if (current.action === 'agent_settings_update') {
+      if (!this.agentSettings) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'agent settings service unavailable');
+      const expectedVersion = Number(current.manifest.expectedVersion ?? 0);
+      const currentSettings = await this.agentSettings.get(input.adminId, bundle.run.accountId);
+      if (currentSettings.configVersion !== expectedVersion) throw new ServiceError(409, 'VERSION_CONFLICT', 'agent settings version changed; refresh and retry', { server: currentSettings });
+    }
     const confirmation = await this.store.transitionWorkspaceConfirmation({ adminId: input.adminId, confirmationId: current.id, expectedVersion: input.expectedVersion, status: 'confirmed', actorId: input.adminId });
     if (!confirmation) throw new ServiceError(409, 'VERSION_CONFLICT', 'confirmation version changed; refresh and retry');
     const step = bundle.steps.find((item) => item.id === confirmation.stepId);
     if (!step) throw new ServiceError(409, 'CONFLICT', 'confirmation step not found');
-    const run = await this.store.updateRun(input.runId, { status: 'executing', resultSummary: confirmation.action === 'coupon_create' ? '管理员已确认，正在写入卡券域' : '管理员已确认，已进入外部执行队列' });
-    await this.store.updateRunStep(step.id, { status: 'executing', outputSummary: confirmation.action === 'coupon_create' ? '已通过管理员确认，正在创建卡券批次' : '已通过管理员确认，等待 Outbox Worker' });
+    const run = await this.store.updateRun(input.runId, { status: 'executing', resultSummary: confirmation.action === 'coupon_create' ? '管理员已确认，正在写入卡券域' : confirmation.action === 'agent_settings_update' ? '管理员已确认，正在写入 Agent 配置' : '管理员已确认，已进入外部执行队列' });
+    await this.store.updateRunStep(step.id, { status: 'executing', outputSummary: confirmation.action === 'coupon_create' ? '已通过管理员确认，正在创建卡券批次' : confirmation.action === 'agent_settings_update' ? '已通过管理员确认，正在更新 Agent 配置' : '已通过管理员确认，等待 Outbox Worker' });
     const scope = this.executionScope(input.adminId, bundle.run.accountId);
+    if (confirmation.action === 'agent_settings_update') {
+      return this.confirmAgentSettingsUpdate({ input, bundle, step, confirmation, scope, run: run!, requestId: input.requestId, traceId: input.traceId });
+    }
     if (confirmation.action === 'coupon_create') {
       return this.confirmCouponCreate({ input, bundle, step, confirmation, scope, run: run!, requestId: input.requestId, traceId: input.traceId });
     }
@@ -343,6 +354,36 @@ export class WorkspaceService {
       const finishedAt = new Date().toISOString();
       await this.store.updateRun(input.bundle.run.id, { status: 'failed', finishedAt, errorCode: error instanceof ServiceError ? error.code : 'COUPON_CREATE_FAILED', resultSummary: '卡券创建失败，需要人工检查' });
       await this.store.updateRunStep(input.step.id, { status: 'failed', finishedAt, errorCode: error instanceof ServiceError ? error.code : 'COUPON_CREATE_FAILED', outputSummary: '卡券创建失败，需要人工检查' });
+      throw error;
+    }
+  }
+
+  private async confirmAgentSettingsUpdate(input: { input: { adminId: string; runId: string; requestId: string; traceId: string }; bundle: { run: RunRecord; steps: StepRecord[] }; step: StepRecord; confirmation: WorkspaceConfirmationRecord; scope: string; run: RunRecord; requestId: string; traceId: string }): Promise<{ run: WorkspaceRunView; confirmation: WorkspaceConfirmationView; outbox: WorkspaceOutboxView }> {
+    if (!this.agentSettings) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'agent settings service unavailable');
+    const parsed = parseNativeWorkspaceAgentSettingsUpdate(input.bundle.run.instruction);
+    if (!parsed) throw new ServiceError(422, 'VALIDATION_FAILED', '自动回复 Agent 配置指令缺少可解析字段');
+    try {
+      const expectedVersion = Number(input.confirmation.manifest.expectedVersion ?? 0);
+      const updated = await this.agentSettings.update({ adminId: input.input.adminId, accountId: input.bundle.run.accountId, expectedVersion, patch: parsed.patch, requestId: input.requestId, traceId: input.traceId });
+      const queued = await this.store.enqueueAutoReplyOutbox({ scope: input.scope, aggregateType: 'workspace_run', aggregateId: input.bundle.run.id, operation: 'agent_settings_update', idempotencyKey: `workspace-confirm:${input.confirmation.id}`, payload: { ...input.confirmation.manifest, configVersion: updated.configVersion }, traceId: input.traceId });
+      const workerId = `workspace-local-agent-settings:${input.bundle.run.id}`;
+      const claimed = await this.store.claimAutoReplyOutbox({ scope: input.scope, workerId, limit: 1, leaseMs: 60_000, id: queued.record.id });
+      if (!claimed[0] || !(await this.store.completeAutoReplyOutbox({ id: queued.record.id, workerId, externalOutcome: 'known_success', externalMessageRef: `${input.bundle.run.accountId}:v${updated.configVersion}` }))) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'agent settings outbox completion failed');
+      const finishedAt = new Date().toISOString();
+      const updatedRun = await this.store.updateRun(input.bundle.run.id, { status: 'succeeded', finishedAt, resultSummary: `自动回复 Agent 配置已更新（v${updated.configVersion}）` });
+      await this.store.updateRunStep(input.step.id, { status: 'succeeded', finishedAt, outputSummary: `自动回复 Agent 配置已更新（v${updated.configVersion}）` });
+      await this.store.appendWorkspaceMessage({ adminId: input.input.adminId, sessionId: input.bundle.run.sessionId, runId: input.bundle.run.id, type: 'final_answer', content: `自动回复 Agent 配置已更新，当前版本 v${updated.configVersion}。Prompt 原文不会显示在 Workspace。`, summary: '自动回复 Agent 配置已更新' });
+      await this.store.appendRunEvent({ runId: input.input.runId, eventType: 'workspace.agent_settings.updated', payload: { status: 'succeeded', configVersion: updated.configVersion, changedFields: parsed.changes.map((change) => change.field), redacted: true } });
+      await this.store.appendRunEvent({ runId: input.input.runId, eventType: 'workspace.outbox.completed', payload: { outboxId: queued.record.id, status: 'succeeded', operation: 'agent_settings_update', externalOutcome: 'known_success' } });
+      await this.audit({ actorId: input.input.adminId, action: 'workspace.agent_settings.updated', targetRef: `${input.bundle.run.accountId}:v${updated.configVersion}`, requestId: input.requestId, traceId: input.traceId, payload: { configVersion: updated.configVersion, changedFields: parsed.changes.map((change) => change.field), redacted: true }, accountId: input.bundle.run.accountId });
+      const latest = await this.store.getAutoReplyOutbox(input.scope, queued.record.idempotencyKey);
+      if (!updatedRun || !latest) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'agent settings result readback failed');
+      const latestBundle = await this.store.getRun(input.input.adminId, input.input.runId);
+      return { run: this.toRunView(updatedRun, latestBundle?.steps ?? input.bundle.steps), confirmation: this.toConfirmationView(input.confirmation), outbox: this.toOutboxView(latest, input.bundle.run.id) };
+    } catch (error) {
+      const finishedAt = new Date().toISOString();
+      await this.store.updateRun(input.bundle.run.id, { status: 'failed', finishedAt, errorCode: error instanceof ServiceError ? error.code : 'AGENT_SETTINGS_UPDATE_FAILED', resultSummary: '自动回复 Agent 配置更新失败，需要人工检查' });
+      await this.store.updateRunStep(input.step.id, { status: 'failed', finishedAt, errorCode: error instanceof ServiceError ? error.code : 'AGENT_SETTINGS_UPDATE_FAILED', outputSummary: '自动回复 Agent 配置更新失败，需要人工检查' });
       throw error;
     }
   }
