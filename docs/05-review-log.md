@@ -15,6 +15,15 @@
 
 本轮结论：商品目录知识库已完成列表展示、查看/编辑弹窗、账号隔离、数据库持久化和 Agent 消费闭环；受控 UI、Memory/PostgreSQL 与 Agent 回归均通过。
 
+### 2026-09-28：商品知识库单抽屉互斥修复
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R142 | 交互 / 状态 | 知识库保存是否误打开商品详情；商品详情、闲鱼详情、知识库、商品编辑、自动化和批量配置是否保持单抽屉互斥 | root | PASS | `ProductsPage.tsx`、`controller.ts`；Chrome/CDP 商品 E2E 单抽屉守门 |
+| S5-R143 | Agent / 回归 | 新增知识库是否继续被 `get_product_info`、`list_shop_products` 消费并按账号范围返回 | root | PASS | `auto-reply-agent.test.ts`、`auto-reply-product-lookup.test.ts`；API auto-reply unit 221/221；Memory/PostgreSQL products smoke |
+
+本轮结论：知识库保存不再触发详情抽屉，相关商品入口统一按单抽屉规则切换；新增知识库持久化后可被自动回复 Agent 的商品查询工具正常消费。
+
 ## 2026-09-25：QR 扫码登录后置 IM 验证失败复审
 
 | 评审编号 | 类型 | 结论 | 证据 |
