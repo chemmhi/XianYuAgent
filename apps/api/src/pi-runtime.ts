@@ -1,5 +1,6 @@
 import type { RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, Store } from './domain.js';
 import type { WorkspaceRuntime } from './workspace.js';
+import { executeNativeWorkspaceRead } from './workspace-native-read.js';
 
 export const DEFAULT_PI_BASE_URL = 'https://api.openai.com/v1';
 export const DEFAULT_PI_MODEL = 'gpt-4o-mini';
@@ -286,6 +287,20 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       await this.transitionStep(step, 'executing');
       await this.emit(input.run.id, 'run.executing', { status: 'executing', messageType: 'tool_event' });
       await this.emit(input.run.id, 'step.executing', { stepId: step.id, status: 'executing', messageType: 'tool_event' });
+
+      const nativeRead = await executeNativeWorkspaceRead({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction });
+      if (nativeRead) {
+        const sessionId = input.sessionId ?? input.run.sessionId;
+        await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'tool_event', content: nativeRead.content, summary: nativeRead.summary });
+        await this.emit(input.run.id, 'workspace.native_read', { messageType: 'tool_event', resource: nativeRead.kind, summary: nativeRead.summary, data: nativeRead.data });
+        const finishedAt = new Date().toISOString();
+        await this.transitionStep(step, 'succeeded', { finishedAt, outputSummary: nativeRead.summary });
+        await this.transitionRun(input.run, 'succeeded', { finishedAt, resultSummary: nativeRead.content });
+        await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'final_answer', content: nativeRead.content });
+        await this.emit(input.run.id, 'runtime.succeeded', { status: 'succeeded', model: this.options.model, messageType: 'final_answer', content: nativeRead.content, resource: nativeRead.kind });
+        await this.emit(input.run.id, 'run.succeeded', { status: 'succeeded', resultSummary: nativeRead.content, messageType: 'final_answer', content: nativeRead.content, resource: nativeRead.kind });
+        return;
+      }
 
       const result = await this.modelClient.complete({
         messages: [...(input.history ?? []), { role: 'user', content: input.run.instruction }],

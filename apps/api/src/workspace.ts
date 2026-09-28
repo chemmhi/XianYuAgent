@@ -1,5 +1,6 @@
 import type { AgentSessionRecord, RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, Store, WorkspaceMessageRecord } from './domain.js';
 import { ServiceError } from './services.js';
+import { executeNativeWorkspaceRead } from './workspace-native-read.js';
 
 const terminalRunStatuses = new Set<RunStatus>(['succeeded', 'partially_succeeded', 'failed', 'cancelled', 'expired']);
 const runTransitions: Record<RunStatus, RunStatus[]> = {
@@ -83,7 +84,7 @@ export class InProcessAgentRuntime implements WorkspaceRuntime {
 
   constructor(private readonly store: Store) {}
 
-  enqueue(input: { run: RunRecord; steps: StepRecord[] }): void {
+  enqueue(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string }): void {
     if (this.stopped || this.active.has(input.run.id)) return;
     this.active.add(input.run.id);
     setTimeout(() => {
@@ -94,7 +95,7 @@ export class InProcessAgentRuntime implements WorkspaceRuntime {
 
   stop(): void { this.stopped = true; }
 
-  private async execute(input: { run: RunRecord; steps: StepRecord[] }): Promise<void> {
+  private async execute(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string }): Promise<void> {
     const step = input.steps[0];
     if (!step) return;
     const startedAt = new Date().toISOString();
@@ -109,6 +110,17 @@ export class InProcessAgentRuntime implements WorkspaceRuntime {
     await this.emit(input.run.id, 'step.executing', { stepId: step.id, status: 'executing' });
     await new Promise((resolve) => setTimeout(resolve, 5));
     const finishedAt = new Date().toISOString();
+    const nativeRead = await executeNativeWorkspaceRead({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction });
+    if (nativeRead) {
+      const sessionId = input.sessionId ?? input.run.sessionId;
+      await this.store.appendWorkspaceMessage({ adminId: input.adminId ?? input.run.requestedBy, sessionId, runId: input.run.id, type: 'tool_event', content: nativeRead.content, summary: nativeRead.summary });
+      await this.emit(input.run.id, 'workspace.native_read', { messageType: 'tool_event', resource: nativeRead.kind, summary: nativeRead.summary, content: nativeRead.content, data: nativeRead.data });
+      await this.transitionStep(step, 'succeeded', { finishedAt, outputSummary: nativeRead.summary });
+      await this.transitionRun(input.run, 'succeeded', { finishedAt, resultSummary: nativeRead.content });
+      await this.store.appendWorkspaceMessage({ adminId: input.adminId ?? input.run.requestedBy, sessionId, runId: input.run.id, type: 'final_answer', content: nativeRead.content });
+      await this.emit(input.run.id, 'run.succeeded', { status: 'succeeded', resultSummary: nativeRead.content, messageType: 'final_answer', content: nativeRead.content, resource: nativeRead.kind });
+      return;
+    }
     if (/\b(fail|failed|error)\b/i.test(input.run.instruction)) {
       await this.transitionStep(step, 'failed', { errorCode: 'RUNTIME_FAILED', finishedAt, outputSummary: '受控 Runtime 返回失败结果' });
       await this.transitionRun(input.run, 'failed', { errorCode: 'RUNTIME_FAILED', finishedAt });
