@@ -1,7 +1,8 @@
 import type { AgentSessionRecord, AutoReplyOutboxRecord, RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, Store, WorkspaceConfirmationRecord, WorkspaceMessageRecord } from './domain.js';
 import { ServiceError } from './services.js';
+import type { CouponService } from './services.js';
 import { executeNativeWorkspaceRead } from './workspace-native-read.js';
-import { prepareNativeWorkspaceWrite } from './workspace-native-write.js';
+import { parseNativeWorkspaceCouponCreate, prepareNativeWorkspaceWrite, sanitizeWorkspaceInstruction } from './workspace-native-write.js';
 import { persistWorkspaceConfirmation } from './workspace-confirmation.js';
 
 const terminalRunStatuses = new Set<RunStatus>(['succeeded', 'partially_succeeded', 'failed', 'cancelled', 'expired']);
@@ -202,6 +203,7 @@ export class WorkspaceService {
     private readonly store: Store,
     private readonly runtime: WorkspaceRuntime,
     private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => Promise<string>,
+    private readonly coupons?: CouponService,
   ) {}
 
   async listSessions(input: { adminId: string; accountId?: string; search?: string }): Promise<WorkspaceSessionView[]> {
@@ -251,7 +253,7 @@ export class WorkspaceService {
       const created = await this.store.createRun({ adminId: input.adminId, accountId: input.accountId, sessionId: input.sessionId, instruction, clientRunRef: input.clientRunRef });
       await this.audit({ actorId: input.adminId, action: 'workspace.run.created', targetRef: created.run.id, requestId: input.requestId, traceId: input.traceId, payload: { sessionId: input.sessionId, instructionLength: instruction.length, hasClientRunRef: Boolean(input.clientRunRef) }, accountId: input.accountId });
       await this.store.appendRunEvent({ runId: created.run.id, eventType: 'run.queued', payload: { status: 'queued', sessionId: input.sessionId, accountId: input.accountId } });
-      await this.appendMessage({ adminId: input.adminId, sessionId: input.sessionId, runId: created.run.id, type: 'user_message', content: instruction.slice(0, 2_000) });
+      await this.appendMessage({ adminId: input.adminId, sessionId: input.sessionId, runId: created.run.id, type: 'user_message', content: sanitizeWorkspaceInstruction(instruction) });
       const history = (await this.store.listWorkspaceMessages(input.adminId, input.sessionId, 100))
         .filter((message) => message.id !== undefined)
         .slice(0, -1)
@@ -298,15 +300,51 @@ export class WorkspaceService {
     if (!confirmation) throw new ServiceError(409, 'VERSION_CONFLICT', 'confirmation version changed; refresh and retry');
     const step = bundle.steps.find((item) => item.id === confirmation.stepId);
     if (!step) throw new ServiceError(409, 'CONFLICT', 'confirmation step not found');
-    const run = await this.store.updateRun(input.runId, { status: 'executing', resultSummary: '管理员已确认，已进入外部执行队列' });
-    await this.store.updateRunStep(step.id, { status: 'executing', outputSummary: '已通过管理员确认，等待 Outbox Worker' });
+    const run = await this.store.updateRun(input.runId, { status: 'executing', resultSummary: confirmation.action === 'coupon_create' ? '管理员已确认，正在写入卡券域' : '管理员已确认，已进入外部执行队列' });
+    await this.store.updateRunStep(step.id, { status: 'executing', outputSummary: confirmation.action === 'coupon_create' ? '已通过管理员确认，正在创建卡券批次' : '已通过管理员确认，等待 Outbox Worker' });
     const scope = this.executionScope(input.adminId, bundle.run.accountId);
+    if (confirmation.action === 'coupon_create') {
+      return this.confirmCouponCreate({ input, bundle, step, confirmation, scope, run: run!, requestId: input.requestId, traceId: input.traceId });
+    }
     const queued = await this.store.enqueueAutoReplyOutbox({ scope, aggregateType: 'workspace_run', aggregateId: bundle.run.id, operation: confirmation.action, idempotencyKey: `workspace-confirm:${confirmation.id}`, payload: confirmation.manifest, traceId: input.traceId });
     await this.store.appendRunEvent({ runId: input.runId, eventType: 'workspace.confirmation.confirmed', payload: { confirmationId: confirmation.id, status: 'confirmed', version: confirmation.version } });
     await this.store.appendRunEvent({ runId: input.runId, eventType: 'workspace.outbox.enqueued', payload: { outboxId: queued.record.id, status: queued.record.status, operation: queued.record.operation } });
     await this.audit({ actorId: input.adminId, action: 'workspace.confirmation.confirmed', targetRef: confirmation.id, requestId: input.requestId, traceId: input.traceId, payload: { action: confirmation.action, outboxId: queued.record.id }, accountId: bundle.run.accountId });
     if (!run) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'run update failed');
     return { run: this.toRunView(run, (await this.store.getRun(input.adminId, input.runId))?.steps ?? bundle.steps), confirmation: this.toConfirmationView(confirmation), outbox: this.toOutboxView(queued.record, bundle.run.id) };
+  }
+
+  private async confirmCouponCreate(input: { input: { adminId: string; runId: string; requestId: string; traceId: string }; bundle: { run: RunRecord; steps: StepRecord[] }; step: StepRecord; confirmation: WorkspaceConfirmationRecord; scope: string; run: RunRecord; requestId: string; traceId: string }): Promise<{ run: WorkspaceRunView; confirmation: WorkspaceConfirmationView; outbox: WorkspaceOutboxView }> {
+    if (!this.coupons) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'coupon service unavailable');
+    const parsed = parseNativeWorkspaceCouponCreate(input.bundle.run.instruction);
+    if (!parsed) throw new ServiceError(422, 'VALIDATION_FAILED', '新增卡券指令缺少可解析字段');
+    try {
+      const created = await this.coupons.create({ adminId: input.input.adminId, accountId: input.bundle.run.accountId, label: parsed.label, purpose: parsed.purpose, metadata: parsed.metadata, requestId: input.requestId, traceId: input.traceId });
+      if (parsed.items.length > 0) {
+        await this.coupons.importItems({ adminId: input.input.adminId, batchId: String((created as Record<string, unknown>).batchId ?? ''), contents: parsed.items, requestId: input.requestId, traceId: input.traceId });
+      }
+      const batchId = String((created as Record<string, unknown>).batchId ?? '');
+      const queued = await this.store.enqueueAutoReplyOutbox({ scope: input.scope, aggregateType: 'workspace_run', aggregateId: input.bundle.run.id, operation: 'coupon_create', idempotencyKey: `workspace-confirm:${input.confirmation.id}`, payload: { ...input.confirmation.manifest, batchId }, traceId: input.traceId });
+      const workerId = `workspace-local-coupon:${input.bundle.run.id}`;
+      const claimed = await this.store.claimAutoReplyOutbox({ scope: input.scope, workerId, limit: 1, leaseMs: 60_000, id: queued.record.id });
+      if (!claimed[0] || !(await this.store.completeAutoReplyOutbox({ id: queued.record.id, workerId, externalOutcome: 'known_success', externalMessageRef: batchId }))) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'coupon outbox completion failed');
+      const finishedAt = new Date().toISOString();
+      const updatedRun = await this.store.updateRun(input.bundle.run.id, { status: 'succeeded', finishedAt, resultSummary: `卡券“${parsed.label}”已创建` });
+      await this.store.updateRunStep(input.step.id, { status: 'succeeded', finishedAt, outputSummary: `卡券批次已创建（${parsed.purpose}）` });
+      await this.store.appendWorkspaceMessage({ adminId: input.input.adminId, sessionId: input.bundle.run.sessionId, runId: input.bundle.run.id, type: 'final_answer', content: `卡券“${parsed.label}”已创建，类型：${parsed.purpose}。正文已安全写入卡券域。`, summary: `卡券已创建：${parsed.label}` });
+      await this.store.appendRunEvent({ runId: input.input.runId, eventType: 'workspace.coupon.created', payload: { status: 'succeeded', batchId, label: parsed.label, purpose: parsed.purpose, redacted: true } });
+      await this.store.appendRunEvent({ runId: input.input.runId, eventType: 'workspace.outbox.completed', payload: { outboxId: queued.record.id, status: 'succeeded', operation: 'coupon_create', externalOutcome: 'known_success' } });
+      await this.audit({ actorId: input.input.adminId, action: 'workspace.coupon.created', targetRef: batchId, requestId: input.requestId, traceId: input.traceId, payload: { purpose: parsed.purpose, itemCount: parsed.items.length, redacted: true }, accountId: input.bundle.run.accountId });
+      const latest = await this.store.getAutoReplyOutbox(input.scope, queued.record.idempotencyKey);
+      if (!updatedRun || !latest) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'coupon result readback failed');
+      const latestBundle = await this.store.getRun(input.input.adminId, input.input.runId);
+      return { run: this.toRunView(updatedRun, latestBundle?.steps ?? input.bundle.steps), confirmation: this.toConfirmationView(input.confirmation), outbox: this.toOutboxView(latest, input.bundle.run.id) };
+    } catch (error) {
+      const finishedAt = new Date().toISOString();
+      await this.store.updateRun(input.bundle.run.id, { status: 'failed', finishedAt, errorCode: error instanceof ServiceError ? error.code : 'COUPON_CREATE_FAILED', resultSummary: '卡券创建失败，需要人工检查' });
+      await this.store.updateRunStep(input.step.id, { status: 'failed', finishedAt, errorCode: error instanceof ServiceError ? error.code : 'COUPON_CREATE_FAILED', outputSummary: '卡券创建失败，需要人工检查' });
+      throw error;
+    }
   }
 
   async cancelRun(input: { adminId: string; runId: string; expectedVersion: number; requestId: string; traceId: string }): Promise<{ run: WorkspaceRunView; confirmation: WorkspaceConfirmationView }> {
@@ -370,7 +408,7 @@ export class WorkspaceService {
   private toRunView(run: RunRecord, steps: StepRecord[]): WorkspaceRunView {
     const mappedSteps = steps.map((step) => ({ stepId: step.id, runId: step.runId, sequence: step.stepNo, kind: step.kind, label: step.label, status: step.status, startedAt: step.startedAt, finishedAt: step.finishedAt, inputSummary: step.inputSummary, outputSummary: step.outputSummary, affectedEntityRefs: [], errorCode: step.errorCode }));
     const current = mappedSteps.find((step) => ['running', 'executing', 'waiting_confirmation', 'retrying'].includes(step.status));
-    return { runId: run.id, sessionId: run.sessionId, accountId: run.accountId, status: run.status, instructionSummary: run.instruction.slice(0, 240), createdAt: run.createdAt, updatedAt: run.updatedAt, startedAt: run.startedAt, finishedAt: run.finishedAt, currentStepId: current?.stepId, steps: mappedSteps, resultSummary: run.resultSummary, errorCode: run.errorCode, clientRunRef: run.clientRunRef };
+    return { runId: run.id, sessionId: run.sessionId, accountId: run.accountId, status: run.status, instructionSummary: sanitizeWorkspaceInstruction(run.instruction), createdAt: run.createdAt, updatedAt: run.updatedAt, startedAt: run.startedAt, finishedAt: run.finishedAt, currentStepId: current?.stepId, steps: mappedSteps, resultSummary: run.resultSummary, errorCode: run.errorCode, clientRunRef: run.clientRunRef };
   }
 }
 

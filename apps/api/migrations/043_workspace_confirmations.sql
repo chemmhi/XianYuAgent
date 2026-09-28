@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS workspace.confirmations (
   step_id uuid NOT NULL REFERENCES workspace.steps(id) ON DELETE CASCADE,
   account_id uuid NOT NULL REFERENCES accounts.accounts(id) ON DELETE RESTRICT,
   requested_by uuid NOT NULL REFERENCES auth.admins(id) ON DELETE RESTRICT,
-  action text NOT NULL CHECK (action IN ('product_publish')),
+  action text NOT NULL CHECK (action IN ('product_publish', 'coupon_create')),
   policy_ref text NOT NULL,
   manifest_json jsonb NOT NULL DEFAULT '{}'::jsonb,
   status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'confirmed', 'expired', 'rejected', 'cancelled')),

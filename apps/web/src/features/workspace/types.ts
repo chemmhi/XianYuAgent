@@ -51,7 +51,7 @@ export interface WorkspaceConfirmationVM {
   runId: string;
   stepId: string;
   accountId: string;
-  action: 'product_publish';
+  action: 'product_publish' | 'coupon_create';
   policyRef: string;
   manifest: Record<string, unknown>;
   status: WorkspaceConfirmationStatus;

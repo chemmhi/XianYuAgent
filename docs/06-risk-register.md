@@ -275,3 +275,11 @@
 | S5-RISK-057 | Workspace 商品发布确认后若直接把 Outbox `pending` 显示为外部发布成功，会造成错误业务认知 | P1 | Confirmation Card 明确展示“进入执行队列”；Outbox 只显示 `pending`，真实闲鱼 Worker 与外部结果由后续切片负责；unknown 禁止盲目重放 | MITIGATED |
 | S5-RISK-058 | Confirmation、Run/Step 和 Outbox 分步写入时，外部执行失败可能留下部分状态 | P1 | 先通过 Policy、版本和请求幂等校验；写入后保留 Run Event/AuditEvent；`workspace-confirmation-postgres-smoke.mjs` 验证关闭/重开复读；发布级事务/恢复演练纳入 `S4-ENV-RECOVERY` | OPEN |
 | S5-RISK-059 | 迁移 043 在已有 PostgreSQL volume 上未执行会导致确认路由与 schema 漂移 | P1 | 使用 `npm run db:migrate` 显式 apply；`docs/migrations/README.md` 记录已有 volume、重复执行和回滚边界；临时 PostgreSQL 001–043 复读已通过 | MITIGATED |
+
+### 2026-09-28 Workspace 新增卡券确认垂直切片
+
+| 编号 | 风险 | 级别 | 应对 | 状态 |
+| --- | --- | --- | --- | --- |
+| S5-RISK-060 | Workspace 若把卡券正文写入 Message、Run Event 或 Confirmation Manifest，会造成敏感卡券内容泄露 | P1 | 仅保存 `label/purpose/itemCount/configured` 等脱敏字段；正文只在服务端 `CouponService` 创建边界处理；Memory、PostgreSQL、Chrome/CDP 均断言 `redacted=true` 且正文不出现在 Workspace | MITIGATED |
+| S5-RISK-061 | 新增卡券本地创建成功后若沿用商品发布的 `pending` 语义，会让管理员误以为仍未完成或误触发外部 Worker | P1 | `coupon_create` 使用本地创建专用分支，CouponBatch 与 data import 完成后 Outbox 收敛为 `succeeded / known_success`；UI 明确显示“创建卡券批次” | MITIGATED |
+| S5-RISK-062 | 迁移 044 未在已有 PostgreSQL volume 上执行，会导致 `coupon_create` Confirmation 被约束拒绝 | P1 | 显式执行 `npm run db:migrate`，验证 action check 包含 `coupon_create`；临时 PostgreSQL 001–044 和关闭/重开复读通过；回滚采用应用先行 | MITIGATED |

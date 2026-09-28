@@ -679,3 +679,13 @@
 | S5-R141 | 质量 / 视觉 / 安全 | API/Web typecheck/build、Workspace 定向测试、真实浏览器双 viewport、敏感字段边界和 diff-check 是否通过 | root | PASS（受控环境） | `npm run typecheck:api`、`npm run typecheck:web`、`npm run build:api`、`npm run build:web`、Chrome/CDP 截图、`git diff --check` |
 
 本轮结论：WS-VS-01 原生只读与 WS-VS-02 商品发布确认均已完成并验证。确认后只进入 `execution.outbox_jobs` 的 `pending` 状态，不伪造真实闲鱼商品发布成功；外部发布 Worker、unknown/recovery 和发布级迁移回滚继续保持独立后续门禁。下一条 Workspace 原生写入切片可进入新增卡券或修改配置。
+
+### 2026-09-28：Workspace 新增卡券确认垂直切片复审
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R142 | 业务 / 验收 | Workspace 是否能按当前账号 scope 生成新增卡券确认卡，并支持确认、取消、本地批次创建和 data 导入 | root | PASS | `WS-VS-03-coupon-create-confirmation.md`；真实 `/workspace` Chrome/CDP E2E；Confirmation、CouponBatch、Outbox 结果复读 |
+| S5-R143 | 架构 / 数据流 | `coupon.create.confirm` Policy、脱敏 Manifest、CouponService 复用、Run/Step 状态机和本地 Outbox 收敛是否成立 | root | PASS | `workspace-native-write.ts`、`workspace.ts`、`services.ts`、`044_workspace_coupon_confirmations.sql`；Memory 13/13；PostgreSQL 001–044 |
+| S5-R144 | 质量 / 视觉 / 安全 | API/Web typecheck/build、Workspace 定向测试、真实浏览器双 viewport、正文不泄露和 diff-check 是否通过 | root | PASS（受控环境） | `workspace-coupon-smoke.mjs`、`workspace-coupon-postgres-smoke.mjs`、`e2e-workspace-coupon.mjs`、桌面/移动截图、`git diff --check` |
+
+本轮结论：WS-VS-03 已完成并验证。新增卡券确认只在本地卡券域完成，Outbox 明确为 `succeeded / known_success`；卡券正文未进入 Workspace 可见数据。下一切片才可进入“修改配置”，商品外部发布 Worker、unknown/recovery 和发布级迁移回滚继续保持独立后续门禁。
