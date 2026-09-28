@@ -81,15 +81,58 @@ export function ProductsPage({ api: providedApi, automationApi: providedAutomati
     return () => { cancelled = true; };
   }, [automationApi, currentAccountId, products]);
 
+  const closeSecondaryOverlays = () => {
+    setDrawer(null);
+    setAutomationProductId(undefined);
+    setKnowledgeBaseProductId(undefined);
+    setBatchOpen(false);
+  };
+  const openProduct = (productId: string) => {
+    closeSecondaryOverlays();
+    controller.closeXianyuDetail();
+    void controller.openProduct(productId);
+  };
+  const openXianyuDetail = (productId: string) => {
+    closeSecondaryOverlays();
+    controller.closeProduct();
+    void controller.openXianyuDetail(productId);
+  };
+  const openKnowledgeBase = (productId: string) => {
+    closeSecondaryOverlays();
+    controller.closeProduct();
+    controller.closeXianyuDetail();
+    controller.clearMutation();
+    setKnowledgeBaseProductId(productId);
+  };
+  const openProductEditor = (nextDrawer: { mode: 'create' | 'edit'; product?: NonNullable<typeof controller.detail.data> }) => {
+    closeSecondaryOverlays();
+    controller.closeProduct();
+    controller.closeXianyuDetail();
+    controller.clearMutation();
+    setDrawer(nextDrawer);
+  };
+  const openAutomation = (productId: string) => {
+    closeSecondaryOverlays();
+    controller.closeProduct();
+    controller.closeXianyuDetail();
+    setAutomationProductId(productId);
+  };
+  const openBatchAutomation = () => {
+    closeSecondaryOverlays();
+    controller.closeProduct();
+    controller.closeXianyuDetail();
+    setBatchOpen(true);
+  };
+
   return (
     <section className="page-stack products-domain" data-products-domain>
       <article className="card panel products-panel">
-        <ProductToolbar currentAccount={currentAccount} contextLoading={accountsLoading} contextError={accountsError} contextMissing={contextMissing} filters={controller.filters} phase={controller.state.phase} syncing={controller.mutation.phase === 'saving'} selectedCount={selectedProductIds.length} onKeywordChange={controller.setKeyword} onStatusChange={(status) => controller.setFilters((previous) => ({ ...previous, status, page: 1 }))} onRefresh={controller.reload} onSync={() => { if (currentAccountId) void controller.syncFromXianyu(currentAccountId); }} onCreate={() => { if (!currentAccountId) return; controller.clearMutation(); setDrawer({ mode: 'create' }); }} onChooseAccount={() => { window.history.pushState({}, '', buildAccountsReauthorizePath()); window.dispatchEvent(new PopStateEvent('popstate')); }} onBatchConfigure={() => setBatchOpen(true)} />
+        <ProductToolbar currentAccount={currentAccount} contextLoading={accountsLoading} contextError={accountsError} contextMissing={contextMissing} filters={controller.filters} phase={controller.state.phase} syncing={controller.mutation.phase === 'saving'} selectedCount={selectedProductIds.length} onKeywordChange={controller.setKeyword} onStatusChange={(status) => controller.setFilters((previous) => ({ ...previous, status, page: 1 }))} onRefresh={controller.reload} onSync={() => { if (currentAccountId) void controller.syncFromXianyu(currentAccountId); }} onCreate={() => { if (!currentAccountId) return; openProductEditor({ mode: 'create' }); }} onChooseAccount={() => { window.history.pushState({}, '', buildAccountsReauthorizePath()); window.dispatchEvent(new PopStateEvent('popstate')); }} onBatchConfigure={openBatchAutomation} />
         {controller.mutation.error && <div className="products-inline-error" role="alert">{controller.mutation.error.message}</div>}
-        {controller.state.phase === 'success' && pageData && <ProductTable products={products} page={pageData.page} totalPages={pageData.totalPages} total={pageData.total} sortBy={controller.filters.sortBy ?? 'xianyuOrder'} sortOrder={controller.filters.sortOrder ?? 'asc'} onSortChange={(sortBy, sortOrder) => controller.setFilters((previous) => ({ ...previous, sortBy, sortOrder, page: 1 }))} onPageChange={(page) => controller.setFilters((previous) => ({ ...previous, page }))} onOpen={controller.openProduct} onOpenXianyuDetail={controller.openXianyuDetail} onOpenKnowledgeBase={(productId) => { controller.clearMutation(); setKnowledgeBaseProductId(productId); }} selectedIds={selectedProductIds} onToggleSelected={(productId) => setSelectedProductIds((previous) => previous.includes(productId) ? previous.filter((id) => id !== productId) : [...previous, productId])} onToggleAll={(checked) => setSelectedProductIds(checked ? products.map((product) => product.id) : [])} onOpenAutomation={(productId) => { setAutomationNotice(null); setAutomationProductId(productId); }} automationSummary={(product) => automationSummaries[product.id] ?? { label: '读取中...', detail: '正在读取规则', tone: 'muted' }} />}
+        {controller.state.phase === 'success' && pageData && <ProductTable products={products} page={pageData.page} totalPages={pageData.totalPages} total={pageData.total} sortBy={controller.filters.sortBy ?? 'xianyuOrder'} sortOrder={controller.filters.sortOrder ?? 'asc'} onSortChange={(sortBy, sortOrder) => controller.setFilters((previous) => ({ ...previous, sortBy, sortOrder, page: 1 }))} onPageChange={(page) => controller.setFilters((previous) => ({ ...previous, page }))} onOpen={openProduct} onOpenXianyuDetail={openXianyuDetail} onOpenKnowledgeBase={openKnowledgeBase} selectedIds={selectedProductIds} onToggleSelected={(productId) => setSelectedProductIds((previous) => previous.includes(productId) ? previous.filter((id) => id !== productId) : [...previous, productId])} onToggleAll={(checked) => setSelectedProductIds(checked ? products.map((product) => product.id) : [])} onOpenAutomation={(productId) => { setAutomationNotice(null); openAutomation(productId); }} automationSummary={(product) => automationSummaries[product.id] ?? { label: '读取中...', detail: '正在读取规则', tone: 'muted' }} />}
         <ProductListStateView phase={controller.state.phase} error={controller.state.error} onRetry={controller.reload} accountSelectionRequired={contextMissing} />
       </article>
-      <ProductDetailPanel state={controller.detail} onClose={controller.closeProduct} onRetry={() => controller.detail.productId && controller.openProduct(controller.detail.productId)} onEdit={(product) => { controller.closeProduct(); controller.clearMutation(); setDrawer({ mode: 'edit', product }); }} />
+      <ProductDetailPanel state={controller.detail} onClose={controller.closeProduct} onRetry={() => controller.detail.productId && controller.openProduct(controller.detail.productId)} onEdit={(product) => { controller.closeProduct(); openProductEditor({ mode: 'edit', product }); }} />
       {knowledgeBaseProductId && products.find((product) => product.id === knowledgeBaseProductId) && <ProductKnowledgeBaseModal product={products.find((product) => product.id === knowledgeBaseProductId)!} saving={controller.mutation.phase === 'saving'} error={controller.mutation.error} onClose={() => { setKnowledgeBaseProductId(undefined); controller.clearMutation(); }} onSave={async (knowledgeBase) => Boolean(await controller.updateKnowledgeBase(products.find((product) => product.id === knowledgeBaseProductId)!, knowledgeBase))} />}
       <XianyuDetailDrawer state={controller.xianyuDetail} onClose={controller.closeXianyuDetail} onRetry={() => controller.xianyuDetail.productId && controller.openXianyuDetail(controller.xianyuDetail.productId)} onSync={() => controller.xianyuDetail.productId && controller.syncXianyuDetail(controller.xianyuDetail.productId)} onChooseAccount={() => { window.history.pushState({}, '', buildAccountsReauthorizePath(currentAccountId)); window.dispatchEvent(new PopStateEvent('popstate')); }} />
       {drawer && <ProductDrawer mode={drawer.mode} accountId={currentAccountId} product={drawer.product} error={controller.mutation.error} saving={controller.mutation.phase === 'saving'} onClose={() => setDrawer(null)} onCreate={async (values) => Boolean(await controller.createDraft(values))} onUpdate={async (productId, patch, configVersion) => Boolean(await controller.updateDraft(productId, patch, configVersion))} onPublish={controller.publishProduct} optimizeDescription={async (input) => controller.optimizeDescription({ accountId: currentAccountId ?? '', ...input })} />}

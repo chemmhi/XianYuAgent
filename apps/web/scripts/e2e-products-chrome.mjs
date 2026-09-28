@@ -188,6 +188,7 @@ async function run() {
   await waitFor(async () => cdp.events.slice(knowledgeBaseMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'PATCH' && event.params?.request?.url?.match(/\/api\/v1\/products\/[^/]+$/)), 'knowledge-base persistence request');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('更新后的商品交付说明'), 'knowledge-base list readback');
   if (await evaluate(cdp, 'document.querySelector("[data-testid=product-knowledge-base-modal]") !== null')) throw new Error('knowledge-base modal did not close after save');
+  if (await evaluate(cdp, 'document.querySelector(".products-detail-panel:not(.product-knowledge-base-modal):not(.xianyu-detail-drawer)") !== null')) throw new Error('knowledge-base save unexpectedly opened product detail drawer');
   const detailMark = cdp.events.length;
   if (!await evaluate(cdp, '(() => { const button = document.querySelector("[data-testid^=product-detail-]"); if (!button) return false; button.click(); return true; })()')) throw new Error('product detail action button missing');
   await waitFor(async () => cdp.events.slice(detailMark).some((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'GET' && event.params?.request?.url?.match(/\/api\/v1\/products\/[^/]+\/detail(?:\?|$)/)), 'xianyu product detail read request');
