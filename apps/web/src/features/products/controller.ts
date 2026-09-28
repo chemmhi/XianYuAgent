@@ -50,11 +50,6 @@ export function toProductsMutationError(error: unknown): ProductMutationError {
   return { code: 'UNKNOWN', message: error instanceof Error ? error.message : '商品保存失败，请重试。', retryable: true };
 }
 
-export function applyKnowledgeBaseDetailUpdate(current: ProductDetailState, product: ProductVM): ProductDetailState {
-  if (current.phase === 'idle' || current.productId !== product.id) return current;
-  return { phase: 'success', productId: product.id, data: product, error: null };
-}
-
 export interface ProductsMutationState {
   phase: 'idle' | 'saving' | 'success' | 'error';
   error: ProductMutationError | null;
@@ -232,7 +227,6 @@ export function useProductsController(options: { api?: ProductsApi; initialFilte
       });
       setMutation({ phase: 'success', error: null });
       await reload();
-      setDetail((current) => applyKnowledgeBaseDetailUpdate(current, updated));
       return updated;
     } catch (error) {
       const normalized = toProductsMutationError(error);
