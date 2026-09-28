@@ -99,6 +99,24 @@ describe('products canonical API adapter', () => {
     expect(calls[1]?.headers?.get('If-Match-Version')).toBe('1');
   });
 
+  it('persists a product-scoped knowledge base with account and version headers', async () => {
+    let request: { path: string; body?: unknown; headers?: Headers } | undefined;
+    const api = createProductsApi({
+      async get<T>() { return { success: true, data: { items: [], total: 0, page: 1, pageSize: 20, totalPages: 1 } } as T; },
+      async patch<T>(path: string, body?: unknown, init?: RequestInit) {
+        request = { path, body, headers: new Headers(init?.headers) };
+        return { success: true, data: { id: 'product-1', accountId: 'account-1', title: '商品一', knowledgeBase: '支持数字资料交付。', status: 'published', configVersion: 8, updatedAt: '2026-09-28T00:00:00.000Z' } } as T;
+      },
+    });
+
+    const product = await api.updateKnowledgeBase('product-1', { accountId: 'account-1', knowledgeBase: '支持数字资料交付。', configVersion: 7, idempotencyKey: 'kb-key' });
+
+    expect(request).toMatchObject({ path: '/api/v1/products/product-1', body: { accountId: 'account-1', knowledgeBase: '支持数字资料交付。' } });
+    expect(request?.headers?.get('Idempotency-Key')).toBe('kb-key');
+    expect(request?.headers?.get('If-Match-Version')).toBe('7');
+    expect(product).toMatchObject({ accountId: 'account-1', knowledgeBase: '支持数字资料交付。', configVersion: 8 });
+  });
+
   it('replays the publish multipart contract and omits skipped address fields', async () => {
     let request: { path: string; body?: unknown; headers?: Headers } | undefined;
     const api = createProductsApi({

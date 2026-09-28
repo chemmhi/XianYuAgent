@@ -36,6 +36,7 @@ try {
     description: '商品详情',
     categoryCode: 'digital',
     attributes: { deliveryType: 'coupon_only' },
+    knowledgeBase: '支持数字资料交付；付款后发送下载说明。',
     priceMinor: 1990,
     status: 'ready',
   });
@@ -51,6 +52,7 @@ try {
   assert.equal(list.body.data.items[0].priceMinor, 1990);
   assert.equal(list.body.data.items[0].skuCount, 0);
   assert.equal(list.body.data.items[0].assetCount, 0);
+  assert.equal(list.body.data.items[0].knowledgeBase, '支持数字资料交付；付款后发送下载说明。');
   assert.deepEqual(list.body.data.items[0].couponBatches, [{ id: activeCouponBatch.sequenceId, label: '绑定卡券' }]);
   assert.equal(list.body.data.total, 1);
   assert.equal(list.body.data.totalPages, 1);
@@ -59,6 +61,7 @@ try {
   assert.equal(detail.response.status, 200);
   assert.equal(detail.body.data.externalProductRef, 'ITEM-001');
   assert.deepEqual(detail.body.data.attributesJson, { deliveryType: 'coupon_only' });
+  assert.equal(detail.body.data.knowledgeBase, '支持数字资料交付；付款后发送下载说明。');
   assert.deepEqual(detail.body.data.couponBatches, [{ id: activeCouponBatch.sequenceId, label: '绑定卡券' }]);
   assert.deepEqual(detail.body.data.skus, []);
   assert.deepEqual(detail.body.data.assets, []);
@@ -115,6 +118,17 @@ try {
   });
   assert.equal(headerConflict.response.status, 409);
   assert.equal(headerConflict.body.error.code, 'IDEMPOTENCY_CONFLICT');
+
+  const knowledgeBaseUpdate = await request(`/api/v1/products/${encodeURIComponent(createdId)}`, {
+    method: 'PATCH',
+    headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'product-knowledge-base-1', 'If-Match-Version': '3' },
+    body: JSON.stringify({ accountId: account.id, knowledgeBase: '更新后的商品交付说明。' }),
+  });
+  assert.equal(knowledgeBaseUpdate.response.status, 200);
+  assert.equal(knowledgeBaseUpdate.body.data.knowledgeBase, '更新后的商品交付说明。');
+  assert.equal(knowledgeBaseUpdate.body.data.configVersion, 4);
+  const knowledgeBaseReadback = await request(`/api/v1/products/${encodeURIComponent(createdId)}`, { headers: { cookie } });
+  assert.equal(knowledgeBaseReadback.body.data.knowledgeBase, '更新后的商品交付说明。');
 
   const replayedUpdate = await request(`/api/v1/products/${encodeURIComponent(createdId)}`, {
     method: 'PATCH',

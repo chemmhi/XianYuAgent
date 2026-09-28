@@ -38,18 +38,20 @@ try {
 
   const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: `products-postgres-${process.pid}` });
   accountId = account.id;
-  const product = await runtime.store.createProduct({ adminId, accountId, externalProductRef: `PG-${process.pid}`, title: 'Postgres 商品', description: '持久化商品详情', categoryCode: 'digital', attributes: { source: 'postgres-smoke' }, priceMinor: 2590, status: 'ready' });
+  const product = await runtime.store.createProduct({ adminId, accountId, externalProductRef: `PG-${process.pid}`, title: 'Postgres 商品', description: '持久化商品详情', categoryCode: 'digital', attributes: { source: 'postgres-smoke' }, knowledgeBase: 'Postgres 持久化知识库。', priceMinor: 2590, status: 'ready' });
   productId = product.id;
 
   const list = await request(`/api/v1/products?accountId=${encodeURIComponent(accountId)}&status=ready`, { headers: { cookie } });
   assert.equal(list.response.status, 200);
   assert.equal(list.body.data.items[0].id, productId);
   assert.equal(list.body.data.items[0].priceMinor, 2590);
+  assert.equal(list.body.data.items[0].knowledgeBase, 'Postgres 持久化知识库。');
 
   const detail = await request(`/api/v1/products/${encodeURIComponent(productId)}`, { headers: { cookie } });
   assert.equal(detail.response.status, 200);
   assert.equal(detail.body.data.title, 'Postgres 商品');
   assert.deepEqual(detail.body.data.attributesJson, { source: 'postgres-smoke' });
+  assert.equal(detail.body.data.knowledgeBase, 'Postgres 持久化知识库。');
 
   const created = await request('/api/v1/products', {
     method: 'POST',
@@ -87,6 +89,17 @@ try {
   assert.equal(headerConflict.response.status, 409);
   assert.equal(headerConflict.body.error.code, 'IDEMPOTENCY_CONFLICT');
 
+  const knowledgeBaseUpdate = await request(`/api/v1/products/${encodeURIComponent(createdId)}`, {
+    method: 'PATCH',
+    headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': `products-postgres-knowledge-base-${process.pid}`, 'If-Match-Version': '3' },
+    body: JSON.stringify({ accountId, knowledgeBase: 'Postgres 更新后的知识库。' }),
+  });
+  assert.equal(knowledgeBaseUpdate.response.status, 200);
+  assert.equal(knowledgeBaseUpdate.body.data.knowledgeBase, 'Postgres 更新后的知识库。');
+  assert.equal(knowledgeBaseUpdate.body.data.configVersion, 4);
+  const knowledgeBaseReadback = await request(`/api/v1/products/${encodeURIComponent(createdId)}`, { headers: { cookie } });
+  assert.equal(knowledgeBaseReadback.body.data.knowledgeBase, 'Postgres 更新后的知识库。');
+
   const conflict = await request(`/api/v1/products/${encodeURIComponent(createdId)}`, {
     method: 'PATCH',
     headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': `products-postgres-stale-${process.pid}`, 'If-Match-Version': '1' },
@@ -97,6 +110,8 @@ try {
 
   const persisted = await runtime.store.getProduct(adminId, productId);
   assert.equal(persisted?.externalProductRef, `PG-${process.pid}`);
+  const persistedKnowledgeBase = await runtime.store.getProduct(adminId, createdId);
+  assert.equal(persistedKnowledgeBase?.knowledgeBase, 'Postgres 更新后的知识库。');
 
   runtime.xianyu.fetchItemsAll = async () => {
     const items = [

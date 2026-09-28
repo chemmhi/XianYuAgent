@@ -14,6 +14,7 @@ export interface ProductsApi {
   syncXianyuDetail(productId: string): Promise<XianyuItemDetailVM>;
   createDraft(input: ProductDraftInput, options?: { idempotencyKey?: string }): Promise<ProductVM>;
   updateDraft(productId: string, patch: ProductDraftPatch, options: { configVersion: number; idempotencyKey?: string }): Promise<ProductVM>;
+  updateKnowledgeBase(productId: string, input: { accountId: string; knowledgeBase: string | null; configVersion: number; idempotencyKey?: string }): Promise<ProductVM>;
   publishProduct(input: ProductPublishRequest, options?: { idempotencyKey?: string }): Promise<ProductPublishResultVM>;
   optimizeDescription(input: { accountId: string; title: string; description: string }, options?: { idempotencyKey?: string }): Promise<{ description: string; provider: string; model: string }>;
   syncFromXianyu(accountId: string, options?: { pageSize?: number; maxPages?: number; idempotencyKey?: string }): Promise<ProductSyncResultVM>;
@@ -376,6 +377,19 @@ export function createProductsApi(transport: ProductsApiTransport): ProductsApi 
       });
       return toProductVM(unwrapEnvelope(payload));
     },
+    async updateKnowledgeBase(productId, input) {
+      const patchRequest = requireTransportMethod(transport, 'patch');
+      const payload = await patchRequest<ProductPayload | ApiEnvelope<ProductPayload>>(`/api/v1/products/${encodeURIComponent(productId)}`, {
+        accountId: input.accountId,
+        knowledgeBase: input.knowledgeBase,
+      }, {
+        headers: {
+          'Idempotency-Key': input.idempotencyKey ?? idempotencyKey('product-knowledge-base'),
+          'If-Match-Version': String(input.configVersion),
+        },
+      });
+      return toProductVM(unwrapEnvelope(payload));
+    },
     async publishProduct(input, options = {}) {
       const post = requireTransportMethod(transport, 'post');
       const form = new FormData();
@@ -487,6 +501,24 @@ export function createMockProductsApi(seed: ProductVM[] = [
         throw error;
       }
       Object.assign(product, patch, { configVersion: product.configVersion + 1, updatedAt: new Date().toISOString() });
+      return product;
+    },
+    async updateKnowledgeBase(productId, input) {
+      const product = seed.find((item) => item.id === productId);
+      if (!product) throw new Error('PRODUCT_NOT_FOUND');
+      if (product.accountId !== input.accountId) {
+        const error = new Error('FORBIDDEN') as Error & { status?: number };
+        error.status = 403;
+        throw error;
+      }
+      if (product.configVersion !== input.configVersion) {
+        const error = new Error('PRODUCT_VERSION_CONFLICT') as Error & { status?: number };
+        error.status = 409;
+        throw error;
+      }
+      product.knowledgeBase = input.knowledgeBase?.trim() || undefined;
+      product.configVersion += 1;
+      product.updatedAt = new Date().toISOString();
       return product;
     },
     async publishProduct(input) {

@@ -78,6 +78,7 @@ export interface ProductDraftPatch {
   description?: string;
   categoryCode?: string;
   priceMinor?: number;
+  knowledgeBase?: string | null;
   publishMeta?: ProductPublishMeta;
 }
 

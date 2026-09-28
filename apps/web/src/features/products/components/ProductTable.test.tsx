@@ -20,6 +20,8 @@ const product: ProductVM = {
   assetCount: 0,
 };
 
+const productWithKnowledgeBase: ProductVM = { ...product, knowledgeBase: '支持数字资料交付；付款后发送下载说明。' };
+
 describe('ProductTable', () => {
   it('places detail before automation and keeps an explicit action gap', () => {
     const html = renderToStaticMarkup(createElement(ProductTable, {
@@ -33,6 +35,7 @@ describe('ProductTable', () => {
       onPageChange: vi.fn(),
       onOpen: vi.fn(),
       onOpenXianyuDetail: vi.fn(),
+      onOpenKnowledgeBase: vi.fn(),
       selectedIds: [],
       onToggleSelected: vi.fn(),
       onToggleAll: vi.fn(),
@@ -40,7 +43,23 @@ describe('ProductTable', () => {
     }));
 
     expect(html.indexOf('data-testid="product-detail-product-1"')).toBeLessThan(html.indexOf('data-testid="product-automation-product-1"'));
-    expect(readFileSync(fileURLToPath(new URL('./products.css', import.meta.url)), 'utf8')).toContain('.products-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }');
+    expect(readFileSync(fileURLToPath(new URL('./products.css', import.meta.url)), 'utf8')).toContain('.products-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px;');
+  });
+
+  it('shows a scoped knowledge-base action and uses a dash for empty content', () => {
+    const emptyHtml = renderToStaticMarkup(createElement(ProductTable, {
+      products: [product], page: 1, totalPages: 1, total: 1, sortBy: 'xianyuOrder', sortOrder: 'asc',
+      onSortChange: vi.fn(), onPageChange: vi.fn(), onOpen: vi.fn(), onOpenXianyuDetail: vi.fn(), onOpenKnowledgeBase: vi.fn(),
+    }));
+    const filledHtml = renderToStaticMarkup(createElement(ProductTable, {
+      products: [productWithKnowledgeBase], page: 1, totalPages: 1, total: 1, sortBy: 'xianyuOrder', sortOrder: 'asc',
+      onSortChange: vi.fn(), onPageChange: vi.fn(), onOpen: vi.fn(), onOpenXianyuDetail: vi.fn(), onOpenKnowledgeBase: vi.fn(),
+    }));
+    expect(emptyHtml).toContain('data-testid="product-knowledge-base-product-1"');
+    expect(emptyHtml).toContain('>—</span>');
+    expect(filledHtml).toContain('支持数字资料交付；付款后发送下载说明。');
+    expect(filledHtml).toContain('title="支持数字资料交付；付款后发送下载说明。"');
+    expect(filledHtml).toContain('>知识库</button>');
   });
 
   it('constrains the product table to the available page height', () => {
@@ -62,6 +81,7 @@ describe('ProductTable', () => {
       onPageChange: vi.fn(),
       onOpen: vi.fn(),
       onOpenXianyuDetail: vi.fn(),
+      onOpenKnowledgeBase: vi.fn(),
       selectedIds: [],
       onToggleSelected: vi.fn(),
       onToggleAll: vi.fn(),
