@@ -4,6 +4,8 @@
 
 生产部署必须通过 GitHub `origin/main` 完成。禁止向服务器裸仓库直接推送，禁止从开发机使用 `scp`、`rsync` 或其他方式上传代码，禁止在服务器工作树中手工改代码。服务器部署目录的 `origin` 必须是 `https://github.com/chemmhi/XianYuAgent.git` 或等价的 GitHub SSH 地址；部署前必须执行 `git fetch origin main && git pull --ff-only origin main`。
 
+已有 PostgreSQL volume 不会因 Compose 重建自动重放新迁移。对已有生产数据卷，必须从已拉取的 GitHub 工作树显式执行 `node apps/api/scripts/migrate.mjs`，确认迁移完成后再开放新功能写入。
+
 ## 固定部署入口
 
 生产 API 由 Nginx 反代到 `127.0.0.1:18082`，容器内部仍监听 `8080`。服务器部署目录为 `/home/ubuntu/xianyu-agent-prod`，必须显式使用 `compose.prod.yml`：
@@ -35,7 +37,7 @@ bash scripts/deploy-production.sh
 1. 使用 `docker compose -f compose.prod.yml up -d --build --force-recreate postgres redis object-storage api worker` 重建服务；未删除 PostgreSQL、Redis、MinIO 或 `browser_data` 数据卷。
 2. 修复后 API 映射为 `127.0.0.1:18082->8080`。
 3. 2026-09-25 21:55（Asia/Shanghai）验证：本地 `/healthz`、`/readyz` 为 `200`；公网 `https://xy.chemhi.top/healthz`、`/readyz` 和 `/api/v1/auth/session` 均为 `200`。
-4. 服务器未安装 Node/npm；前端必须在服务器从 GitHub 工作树使用一次性 Node 容器执行 `npm ci && npm run build:web`，再由服务器本机备份并同步到 `/var/www/xy.chemhi.top`。禁止从开发机上传源码或 `dist`。发布前备份保存为 `/var/backups/xy.chemhi.top-20260925215631/site.tgz`。公网 HTML 标题已为 `FishAgent · 运营控制台`。
+4. 服务器未安装 Node/npm；前端必须在服务器从 GitHub 工作树使用一次性 Node 容器清理旧依赖并执行 `npm ci && npm run build:web`，再由服务器本机备份并同步到 `/var/www/xy.chemhi.top`。禁止从开发机上传源码或 `dist`。发布前备份保存为 `/var/backups/xy.chemhi.top-20260925215631/site.tgz`。公网 HTML 标题已为 `FishAgent · 运营控制台`。
 
 ### 防止下次复发
 
