@@ -128,16 +128,24 @@ ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker compose --profile f
 
 如果完整启动因为 `object-storage` 镜像仓库返回 `unauthorized` 失败，保持现有基础设施容器运行，改用上面的 `docker compose build api worker` 与 `docker compose up -d --no-deps api worker`。
 
-### 4. 在服务器工作树构建并发布前端
+### 4. 应用已有 PostgreSQL volume 的迁移
+
+已有数据卷不会因为 Compose 重建而自动重放新迁移。服务器必须从已拉取的 GitHub 工作树执行迁移，再开放新功能写入：
+
+```powershell
+ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && POSTGRES_PASSWORD="$(sed -n "s/^POSTGRES_PASSWORD=//p" .env | tr -d "\r" | head -n 1)" && test -n "$POSTGRES_PASSWORD" && docker run --rm --network xianyu-agent-prod_default -v "$PWD:/workspace" -w /workspace -e DATABASE_URL="postgres://xianyu:${POSTGRES_PASSWORD}@postgres:5432/xianyu_agent" node:24-bookworm-slim node apps/api/scripts/migrate.mjs'
+```
+
+### 5. 在服务器工作树构建并发布前端
 
 服务器不需要安装 Node/npm；前端必须从服务器已拉取的 GitHub 工作树构建，并在服务器本机备份后发布到 Nginx 目录。开发机不得上传 `dist` 或源码：
 
 ```powershell
-ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/workspace" -w /workspace node:24-bookworm-slim bash -lc "npm ci && npm run build:web"'
+ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker run --rm -u 0 -e NPM_CONFIG_UPDATE_NOTIFIER=false -e NPM_CONFIG_REGISTRY=https://registry.npmmirror.com -v "$PWD:/workspace" -w /workspace node:24-bookworm-slim bash -lc "rm -rf node_modules apps/api/node_modules apps/web/node_modules SellerAgent/node_modules && npm ci --registry=https://registry.npmmirror.com && npm run build:web"'
 ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && backup="/var/backups/xy.chemhi.top-$(date +%Y%m%d%H%M%S)" && sudo mkdir -p "$backup" && sudo tar -czf "$backup/site.tgz" -C /var/www/xy.chemhi.top . && sudo rsync -a --delete apps/web/dist/ /var/www/xy.chemhi.top/'
 ```
 
-### 5. 部署后验收
+### 6. 部署后验收
 
 ```powershell
 ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker compose ps'
@@ -147,7 +155,7 @@ ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker compose exec -T pos
 
 API/Worker 应为 `Up`，日志应包含 `repairMode=enforce`、`primaryRoute=repair` 和 `outcomeReviewWorker=enabled`；策略表至少应有一个有效账号策略。若出现 `28P01`，优先检查 `POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_DB` 与已存在数据卷是否一致。
 
-### 6. 自动回复相关环境变量
+### 7. 自动回复相关环境变量
 
 `.env` 是隐藏文件，`ls` 默认不会显示；它只在服务器上保存运行配置，不进入 Git。Compose 通过显式映射把需要的变量注入 API/Worker，不能假设“服务器有 `.env`”就等于“容器能读取 `.env`”。
 
