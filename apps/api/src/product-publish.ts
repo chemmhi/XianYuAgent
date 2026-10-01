@@ -1,6 +1,6 @@
 import type { ProductRecord } from './domain.js';
 import { ServiceError, ProductService } from './services.js';
-import type { ModelClient } from './pi-runtime.js';
+import type { ModelClient } from './model-client.js';
 import { XianyuMtopClient, type MtopResult } from './xianyu-mtop.js';
 
 export const PRODUCT_PUBLISH_API = 'mtop.idle.pc.idleitem.publish';

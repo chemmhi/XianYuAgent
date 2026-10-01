@@ -5,7 +5,7 @@ import { formatAutoReplyContextDocument } from './auto-reply-context-document.js
 import { buildAutoReplyModelContent } from './auto-reply-multimodal.js';
 import { parseAutoReplyModelDecision, parseJsonObject } from './auto-reply-output.js';
 import { digestJson } from './security.js';
-import type { ModelClient, ModelCompletionResult, ModelMessage, ModelToolCall, ModelToolDefinition } from './pi-runtime.js';
+import type { ModelClient, ModelCompletionResult, ModelMessage, ModelToolCall, ModelToolDefinition } from './model-client.js';
 import type { AutoReplyGodViewSink } from './auto-reply-god-view.js';
 
 export const AUTO_REPLY_TOOL_NAMES = [

@@ -1,6 +1,6 @@
 import type { ProductKnowledgeBaseMessageRecord, ProductRecord, Store } from './domain.js';
 import { ProductService, ServiceError } from './services.js';
-import type { ModelClient, ModelMessage } from './pi-runtime.js';
+import type { ModelClient, ModelMessage } from './model-client.js';
 import { sanitizeKnowledgeText } from './product-knowledge-base-safety.js';
 
 const MAX_SOURCE_CHARS = 60_000;

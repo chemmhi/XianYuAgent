@@ -176,7 +176,11 @@ domain modules -> storage interface
 | R-008 敏感交付数据 | `coupons` 持有内容引用；`policy` 校验买家交付条件、订单支付、商品 / 账号匹配、策略与管理员会话；`orders` 事务内生成交付记录；`observability` / `execution` 只记录必要审计元数据并禁止系统凭证进入日志、Trace、Replay、Prompt | 权限与买家可见链路测试、审计记录测试、日志 / Trace 抽样脱敏检查 |
 | R-009 外部结果未知 | `execution` 持有 Idempotency、Outbox、Audit 和重试状态；`xianyu-adapter` 提供外部状态查询；`worker` 在重试 / 取消前按原幂等键查询外部状态，成功步骤不得重放 | 超时未知、重复请求、重试、取消和部分成功的集成测试 |
 
-## 9. ADR 清单
+## 9. ModelClient 服务边界
+
+所有需要调用大模型的功能统一依赖 `apps/api/src/model-client.ts` 的 `ModelClient` / `ModelClientService`。Provider 适配、API Key 解密、主备选择、失败切换和 Responses / Chat wire 细节属于基础设施与应用组合根职责；商品、知识库、自动回复、Workspace 和 CLI 业务模块不得直接创建 Provider 客户端或读取 API Key。完整接入规范见 [`docs/model-client-service.md`](./model-client-service.md)。
+
+## 10. ADR 清单
 
 | ADR | 决策 | 当前状态 |
 | --- | --- | --- |
@@ -188,7 +192,7 @@ domain modules -> storage interface
 | ADR-006 | Pi Runtime 内部 HTTP/JSON v1、服务间鉴权与故障边界 | 已通过阶段 1 复核 |
 | ADR-007 | 闲鱼适配器隔离与 Worker 外部写入边界 | 已通过阶段 1 复核 |
 
-## 10. 阶段 1 待办与门禁
+## 11. 阶段 1 待办与门禁
 
 ### 待办
 
@@ -206,6 +210,6 @@ domain modules -> storage interface
 - S1-R1、S1-R2、S1-R3 完成独立评审；
 - 通过后才进入阶段 2 数据模型与 API 契约设计。
 
-## 11. 回滚方式
+## 12. 回滚方式
 
 本阶段只有文档和决策变更，回滚方式为恢复最近一次通过的阶段 0 文档状态；不回滚或改写用户已确认的范围决策。任何后续代码切片必须独立提交，并在对应切片文档中记录回滚点。

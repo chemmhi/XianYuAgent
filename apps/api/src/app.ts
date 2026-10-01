@@ -19,14 +19,15 @@ import { MessageRealtimeHub, MessageService } from './messages.js';
 import { RedisConversationEventBridge } from './messages-realtime.js';
 import { decodeMessageHistoryCursor, encodeMessageHistoryCursor } from './message-history-cursor.js';
 import { InProcessAgentRuntime, isTerminalRunStatus, WorkspaceService, type WorkspaceRuntime } from './workspace.js';
-import { OpenAICompatibleModelClient, PiRuntimeAdapter, type ModelClient } from './pi-runtime.js';
+import { OpenAICompatibleModelClient, PiModelClientError, PiRuntimeAdapter } from './pi-runtime.js';
+import { ModelClientService, type ModelClient } from './model-client.js';
 import { ApiKeyCredentialService } from './credential-store.js';
 import { DashboardService, type DashboardRange } from './dashboard.js';
 import { AutoReplyService } from './auto-reply.js';
 import { ReliableExternalAutoReplySender } from './auto-reply-outbox.js';
 import { AutoReplyAgentSettingsService, resolveAutoReplyAgentDefaults } from './auto-reply-agent-settings.js';
 import { ToolCallingAutoReplyAgent } from './auto-reply-agent.js';
-import { OpenAISettingsService, createFallbackModelClient } from './openai-settings.js';
+import { OpenAISettingsService } from './openai-settings.js';
 import { AutoReplyActivityService } from './auto-reply-activity.js';
 import { AutoReplyRepairRuntime } from './auto-reply-repair-runtime.js';
 import { createDefaultAutoReplyRepairPolicy, parseAutoReplyRepairPolicyBundle } from './auto-reply-repair-config.js';
@@ -155,6 +156,12 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   }, fetch, config.modelWireApi);
+  const resolveConfiguredModelClient = async (adminId: string, accountId: string): Promise<ModelClient | undefined> => {
+    const configured = await openaiSettings.resolveForRuntime(adminId, accountId);
+    if (configured.length === 0) return modelClient;
+    const clients = await Promise.all(configured.slice(0, 2).map((item) => openaiSettings.createRuntimeClient(item)));
+    return new ModelClientService({ primary: clients[0]!, backup: clients[1] });
+  };
   const dashboard = new DashboardService(store);
   const realtime = new MessageRealtimeHub();
   const redisRealtime = config.redisUrl && !config.allowInMemory
@@ -199,11 +206,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       const runtimeConfig = mergeAutoReplyAgentRuntimeConfig(autoReplyAgentConfig, settings);
       let runtimeModelClient: ModelClient | undefined = autoReplyModelClient;
       try {
-        const configured = await openaiSettings.resolveForRuntime(adminId, accountId);
-        if (configured.length > 0) {
-          const clients = await Promise.all(configured.slice(0, 2).map((item) => openaiSettings.createRuntimeClient(item)));
-          runtimeModelClient = createFallbackModelClient(clients[0]!, clients[1]);
-        }
+        runtimeModelClient = await resolveConfiguredModelClient(adminId, accountId);
       } catch {
         runtimeModelClient = autoReplyModelClient;
       }
@@ -292,12 +295,6 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
       await markXianyuAccountFailure(store, adminId, accountId, { errorCode, message, accountInvalid });
     },
   });
-  const resolveConfiguredModelClient = async (adminId: string, accountId: string): Promise<ModelClient | undefined> => {
-    const configured = await openaiSettings.resolveForRuntime(adminId, accountId);
-    if (configured.length === 0) return modelClient;
-    const clients = await Promise.all(configured.slice(0, 2).map((item) => openaiSettings.createRuntimeClient(item)));
-    return createFallbackModelClient(clients[0]!, clients[1]);
-  };
   const productAudit = async (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
@@ -331,7 +328,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
 
   const wsServer = new WebSocketServer({ noServer: true });
   const workspaceRuntime: WorkspaceRuntime = config.agentRuntime === 'pi'
-    ? createPiWorkspaceRuntime(config, store, modelClient)
+    ? createPiWorkspaceRuntime(config, store, modelClient, resolveConfiguredModelClient)
     : new InProcessAgentRuntime(store);
   const workspace = new WorkspaceService(store, workspaceRuntime, async (input) => {
     const auditId = createId();
@@ -482,17 +479,28 @@ function listenerErrorCode(error: unknown): string {
 }
 function createConfiguredModelClient(config: AppConfig): ModelClient | undefined {
   if (!config.modelApiKey || !config.modelBaseUrl || !config.modelName) return undefined;
-  return new OpenAICompatibleModelClient({ apiKey: config.modelApiKey, baseUrl: config.modelBaseUrl, model: config.modelName, timeoutMs: config.modelTimeoutMs, wireApi: config.modelWireApi });
+  return new ModelClientService({
+    primary: new OpenAICompatibleModelClient({ apiKey: config.modelApiKey, baseUrl: config.modelBaseUrl, model: config.modelName, timeoutMs: config.modelTimeoutMs, wireApi: config.modelWireApi }),
+  });
 }
 
-function createPiWorkspaceRuntime(config: AppConfig, store: Store, sharedModelClient?: ModelClient): WorkspaceRuntime {
-  if (!config.modelApiKey || !config.modelBaseUrl || !config.modelName) throw new Error('PI_RUNTIME_CONFIG_MISSING');
-  const modelClient = sharedModelClient ?? createConfiguredModelClient(config);
-  if (!modelClient) throw new Error('PI_RUNTIME_CONFIG_MISSING');
+function createPiWorkspaceRuntime(config: AppConfig, store: Store, sharedModelClient: ModelClient | undefined, resolveModelClient: (adminId: string, accountId: string) => Promise<ModelClient | undefined>): WorkspaceRuntime {
+  const modelClient = sharedModelClient ?? {
+    supportsWebSearch: false,
+    async complete() { throw new PiModelClientError('MODEL_NOT_CONFIGURED', 'model provider is not configured'); },
+  } satisfies ModelClient;
   return new PiRuntimeAdapter(store, modelClient, {
-    model: config.modelName,
-    redactSecrets: [config.modelApiKey],
+    model: config.modelName ?? 'account-configured',
+    redactSecrets: [config.modelApiKey].filter((value): value is string => Boolean(value)),
     persistUserMessage: false,
+    resolveModelClient: async ({ adminId, accountId }) => {
+      if (!adminId) return modelClient;
+      try {
+        return await resolveModelClient(adminId, accountId);
+      } catch {
+        return modelClient;
+      }
+    },
     messageSink: async (message) => {
       if (!message.adminId) return;
       const record = await store.appendWorkspaceMessage({ adminId: message.adminId, sessionId: message.sessionId, runId: message.runId, type: message.messageType, content: message.content, summary: message.summary });

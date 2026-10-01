@@ -3,6 +3,7 @@ import type { WorkspaceRuntime } from './workspace.js';
 import { executeNativeWorkspaceRead } from './workspace-native-read.js';
 import { prepareNativeWorkspaceWrite } from './workspace-native-write.js';
 import { persistWorkspaceConfirmation } from './workspace-confirmation.js';
+import { ModelClientService } from './model-client.js';
 
 export const DEFAULT_PI_BASE_URL = 'https://api.openai.com/v1';
 export const DEFAULT_PI_MODEL = 'gpt-4o-mini';
@@ -92,6 +93,7 @@ export interface OpenAICompatibleModelClientOptions {
 }
 
 export type PiModelErrorCode =
+  | 'MODEL_NOT_CONFIGURED'
   | 'MODEL_ABORTED'
   | 'MODEL_TIMEOUT'
   | 'MODEL_HTTP_ERROR'
@@ -208,6 +210,7 @@ export interface PiRuntimeAdapterOptions {
   outputLimit?: number;
   redactSecrets?: string[];
   persistUserMessage?: boolean;
+  resolveModelClient?: (input: { adminId?: string; accountId: string }) => Promise<ModelClient | undefined>;
   messageSink?: (message: PiRuntimeMessage) => void | Promise<void>;
   onEvent?: (event: PiRuntimeEvent) => void | Promise<void>;
 }
@@ -313,7 +316,11 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
         return;
       }
 
-      const result = await this.modelClient.complete({
+      const modelClient = await this.options.resolveModelClient?.({
+        adminId: input.adminId ?? input.run.requestedBy,
+        accountId: input.run.accountId,
+      }) ?? this.modelClient;
+      const result = await modelClient.complete({
         messages: [...(input.history ?? []), { role: 'user', content: input.run.instruction }],
         signal,
       });
@@ -407,8 +414,18 @@ export function loadPiRuntimeConfig(env: NodeJS.ProcessEnv = process.env): PiRun
 
 export function createPiRuntimeAdapterFromEnv(store: Store, env: NodeJS.ProcessEnv = process.env): PiRuntimeAdapter | undefined {
   const config = loadPiRuntimeConfig(env);
-  if (!config) return undefined;
-  return new PiRuntimeAdapter(store, new OpenAICompatibleModelClient(config), { model: config.model, redactSecrets: [config.apiKey] });
+  const modelClient = createModelClientServiceFromEnv(env);
+  if (!config || !modelClient) return undefined;
+  return new PiRuntimeAdapter(store, modelClient, { model: config.model, redactSecrets: [config.apiKey] });
+}
+
+export function createModelClientServiceFromEnv(env: NodeJS.ProcessEnv = process.env): ModelClientService | undefined {
+  const primaryConfig = loadPiRuntimeConfig(env);
+  if (!primaryConfig) return undefined;
+  const primary = new OpenAICompatibleModelClient(primaryConfig);
+  const backupConfig = loadBackupPiRuntimeConfig(env);
+  const backup = backupConfig ? new OpenAICompatibleModelClient(backupConfig) : undefined;
+  return new ModelClientService({ primary, backup });
 }
 
 export function toChatCompletionsEndpoint(baseUrl: string): string {
@@ -432,6 +449,21 @@ function normalizeWireApi(value: string | undefined): ModelWireApi {
   if (normalized === 'chat') return 'chat';
   if (normalized === 'responses') return 'responses';
   return DEFAULT_PI_WIRE_API;
+}
+
+function loadBackupPiRuntimeConfig(env: NodeJS.ProcessEnv): PiRuntimeConfig | undefined {
+  const apiKey = firstNonEmpty(env.BACKUP_API_KEY, env.SECONDARY_API_KEY);
+  const baseUrl = firstNonEmpty(env.BACKUP_BASE_URL, env.SECONDARY_BASE_URL);
+  const model = firstNonEmpty(env.BACKUP_MODEL, env.SECONDARY_MODEL);
+  if (!apiKey || !baseUrl || !model) return undefined;
+  return loadPiRuntimeConfig({
+    API_KEY: apiKey,
+    BASE_URL: baseUrl,
+    MODEL: model,
+    WIRE_API: firstNonEmpty(env.BACKUP_WIRE_API, env.BACKUP_MODEL_WIRE_API),
+    MODEL_TIMEOUT_MS: firstNonEmpty(env.BACKUP_MODEL_TIMEOUT_MS, env.MODEL_TIMEOUT_MS),
+    REASONING_EFFORT: firstNonEmpty(env.BACKUP_REASONING_EFFORT),
+  });
 }
 
 function toChatCompletionsRequestBody(model: string, input: ModelCompletionRequest, reasoningEffort?: string): Record<string, unknown> {

@@ -4,10 +4,9 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import {
-  OpenAICompatibleModelClient,
-  loadPiRuntimeConfig,
-  type ModelClient,
+  createModelClientServiceFromEnv,
 } from '../src/pi-runtime.ts';
+import type { ModelClient } from '../src/model-client.ts';
 import {
   buildLocalStylePrompt,
   buildStyleCorpus,
@@ -669,8 +668,7 @@ export function validatePersonaDocuments(input: Pick<PersonaDocuments, 'reportMa
 }
 
 function createModelClient(): ModelClient | undefined {
-  const config = loadPiRuntimeConfig(process.env);
-  return config ? new OpenAICompatibleModelClient(config) : undefined;
+  return createModelClientServiceFromEnv(process.env);
 }
 
 interface CliOptions extends CleaningOptions {
