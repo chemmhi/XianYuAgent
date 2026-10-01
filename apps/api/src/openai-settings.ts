@@ -2,7 +2,8 @@ import { decryptCredentialValue } from './credential-crypto.js';
 import type { CredentialRefRecord, Store } from './domain.js';
 import { ServiceError } from './services.js';
 import type { ApiKeyCredentialService } from './credential-store.js';
-import { DEFAULT_PI_WIRE_API, OpenAICompatibleModelClient, type ModelClient, type ModelWireApi } from './pi-runtime.js';
+import { DEFAULT_PI_WIRE_API, OpenAICompatibleModelClient, type ModelWireApi } from './pi-runtime.js';
+import { ModelClientService, type ModelClient } from './model-client.js';
 import { listProviderModels, ModelProviderError, type ProviderModel } from './model-provider.js';
 
 export type OpenAIConfigRole = 'primary' | 'backup';
@@ -198,17 +199,7 @@ export class OpenAISettingsService {
 }
 
 export function createFallbackModelClient(primary: ModelClient, backup?: ModelClient): ModelClient {
-  const supportsWebSearch = primary.supportsWebSearch !== false && backup?.supportsWebSearch !== false;
-  return {
-    supportsWebSearch,
-    async complete(input) {
-      try { return await primary.complete(input); }
-      catch (error) {
-        if (!backup) throw error;
-        return backup.complete(input);
-      }
-    },
-  };
+  return new ModelClientService({ primary, backup });
 }
 
 function normalizeInput(input: OpenAIConfigInput, wireApi: ModelWireApi) {

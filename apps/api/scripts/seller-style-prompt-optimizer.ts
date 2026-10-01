@@ -1,4 +1,4 @@
-import type { ModelClient } from '../src/pi-runtime.ts';
+import type { ModelClient } from '../src/model-client.ts';
 import type { CleanedConversation } from './optimize-seller-style-prompt.ts';
 
 export const MIN_REAL_DIALOGUE_ROUNDS = 5;

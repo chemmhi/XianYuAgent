@@ -3,7 +3,7 @@ import type { AutoReplyClassification, AutoReplyContext, AutoReplyGenerator } fr
 import { formatAutoReplyContextDocument } from './auto-reply-context-document.js';
 import { buildAutoReplyModelContent } from './auto-reply-multimodal.js';
 import { parseAutoReplyModelDecision } from './auto-reply-output.js';
-import type { ModelClient, ModelMessage } from './pi-runtime.js';
+import type { ModelClient, ModelMessage } from './model-client.js';
 
 const DEFAULT_HISTORY_LIMIT = 12;
 const DEFAULT_FIELD_LIMIT = 1_200;

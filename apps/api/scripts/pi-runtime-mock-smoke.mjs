@@ -9,7 +9,7 @@ const mockApiKey = 'mock-local-only-key';
 const calls = [];
 
 const provider = createServer(async (request, response) => {
-  if (request.method !== 'POST' || request.url !== '/v1/chat/completions') {
+  if (request.method !== 'POST' || request.url !== '/v1/responses') {
     response.writeHead(404);
     response.end();
     return;
@@ -22,7 +22,7 @@ const provider = createServer(async (request, response) => {
     body,
   });
 
-  if (Array.isArray(body?.messages) && body.messages.some((message) => message?.content === 'force model failure')) {
+  if (JSON.stringify(body).includes('force model failure')) {
     response.writeHead(503, { 'content-type': 'application/json' });
     response.end(JSON.stringify({ error: { message: 'mock provider unavailable' } }));
     return;
@@ -30,9 +30,9 @@ const provider = createServer(async (request, response) => {
 
   response.writeHead(200, { 'content-type': 'application/json' });
   response.end(JSON.stringify({
-    id: 'chatcmpl-mock',
+    id: 'resp-mock',
     model: modelName,
-    choices: [{ message: { role: 'assistant', content: 'mock provider response' } }],
+    output_text: 'mock provider response',
     usage: { prompt_tokens: 3, completion_tokens: 3, total_tokens: 6 },
   }));
 });
@@ -102,11 +102,13 @@ try {
   assert.equal(calls[0].authorization, `Bearer ${mockApiKey}`);
   assert.equal(calls[0].contentType, 'application/json');
   assert.equal(calls[0].body.model, modelName);
-  assert.deepEqual(calls[0].body.messages, [{ role: 'user', content: 'return a deterministic mock answer' }]);
+  assert.ok(Array.isArray(calls[0].body.input));
+  assert.equal(calls[0].body.input[0]?.type, 'message');
+  assert.equal(calls[0].body.input[0]?.content, 'return a deterministic mock answer');
 
   console.log(JSON.stringify({
     provider: {
-      endpoint: '/v1/chat/completions',
+      endpoint: '/v1/responses',
       requests: calls.length,
       authorizationForwarded: calls.every((call) => typeof call.authorization === 'string' && call.authorization.startsWith('Bearer ')),
       keyPrinted: false,
