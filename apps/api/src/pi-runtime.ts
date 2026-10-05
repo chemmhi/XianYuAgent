@@ -5,6 +5,7 @@ import { prepareNativeWorkspaceWrite } from './workspace-native-write.js';
 import type { WorkspaceCommandInput, WorkspaceCommandOrchestrator, WorkspaceModelToolResult } from './workspace-commands.js';
 import { persistWorkspaceConfirmation } from './workspace-confirmation.js';
 import { ModelClientService } from './model-client.js';
+import type { PiSkillManager } from './pi-skills.js';
 
 export const DEFAULT_PI_BASE_URL = 'https://api.openai.com/v1';
 export const DEFAULT_PI_MODEL = 'gpt-4o-mini';
@@ -301,6 +302,7 @@ export interface PiRuntimeAdapterOptions {
   messageSink?: (message: PiRuntimeMessage) => void | Promise<void>;
   onEvent?: (event: PiRuntimeEvent) => void | Promise<void>;
   workspaceCommands?: WorkspaceCommandOrchestrator;
+  skillManager?: PiSkillManager;
 }
 
 export interface PiRuntimeEnqueueInput {
@@ -379,6 +381,19 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
         adminId: input.adminId ?? input.run.requestedBy,
         accountId: input.run.accountId,
       }) ?? this.modelClient;
+      const skillInstruction = await this.options.skillManager?.handleInstruction({ adminId: input.adminId ?? input.run.requestedBy, instruction: input.run.instruction });
+      if (skillInstruction) {
+        const output = redactSensitiveText(skillInstruction.content, this.options.outputLimit ?? 2_000, this.options.redactSecrets);
+        const finishedAt = new Date().toISOString();
+        await this.transitionStep(step, 'succeeded', { finishedAt, outputSummary: skillInstruction.summary });
+        await this.transitionRun(input.run, 'succeeded', { finishedAt, resultSummary: output });
+        await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'tool_event', content: output, summary: skillInstruction.title });
+        await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'final_answer', content: output });
+        await this.emit(input.run.id, 'workspace.skill.lifecycle', { status: 'succeeded', title: skillInstruction.title, summary: skillInstruction.summary, data: skillInstruction.data });
+        await this.emit(input.run.id, 'runtime.succeeded', { status: 'succeeded', model: this.options.model, messageType: 'final_answer', content: output, resource: 'pi_skill' });
+        await this.emit(input.run.id, 'run.succeeded', { status: 'succeeded', resultSummary: output, messageType: 'final_answer', content: output, resource: 'pi_skill' });
+        return;
+      }
       if (modelClient.stream && this.options.workspaceCommands) {
         await this.executeModelDriven(input, step, sessionId, modelClient, signal);
         return;
@@ -449,10 +464,11 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     await this.emit(input.run.id, 'run.executing', { status: 'executing', messageType: 'tool_event' });
     await this.emit(input.run.id, 'step.executing', { stepId: step.id, status: 'executing', messageType: 'tool_event' });
 
-    const tools = commands.getModelTools();
+    const tools = [...commands.getModelTools(), ...(this.options.skillManager?.getModelTools() ?? [])];
     const messages: ModelMessage[] = [...(input.history ?? [])];
     if (!messages.some((message) => message.role === 'system')) {
-      messages.unshift({ role: 'system', content: 'You are a Workspace agent. Choose tools autonomously from their contracts. Use workspace_product_search for a product-specific name or external-number lookup instead of loading the full product list. Use workspace_prepare_write for cancellation, disable, update, publish, delivery, or other mutations and wait for confirmation; never use workspace_read for those actions. After a tool result, either answer from the result or choose a different tool only when the result explicitly says the request needs correction. Do not claim a tool ran unless its result is returned. Keep the final answer concise and grounded in tool results.' });
+      const skillPrompt = this.options.skillManager ? await this.options.skillManager.buildSystemPrompt(input.adminId ?? input.run.requestedBy) : '';
+      messages.unshift({ role: 'system', content: ['You are a Workspace agent. Choose tools autonomously from their contracts. Use workspace_product_search for a product-specific name or external-number lookup instead of loading the full product list. Use workspace_prepare_write for cancellation, disable, update, publish, delivery, or other mutations and wait for confirmation; never use workspace_read for those actions. After a tool result, either answer from the result or choose a different tool only when the result explicitly says the request needs correction. Do not claim a tool ran unless its result is returned. Keep the final answer concise and grounded in tool results.', skillPrompt].filter(Boolean).join('\n\n') });
     }
     messages.push({ role: 'user', content: input.run.instruction });
 
@@ -514,7 +530,9 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
         let result: WorkspaceModelToolResult;
         try {
           const toolInput: WorkspaceCommandInput = { adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction, requestId: `workspace:${input.run.id}`, traceId: `workspace:${input.run.id}` };
-          result = await commands.executeModelTool(call.function.name, args, toolInput);
+          result = this.options.skillManager && call.function.name.startsWith('pi_skill_')
+            ? await this.options.skillManager.executeModelTool(call.function.name, args, toolInput)
+            : await commands.executeModelTool(call.function.name, args, toolInput);
         } catch (error) {
           const failure = toSafeFailure(error);
           const errorResult = toolFailureResult(failure);

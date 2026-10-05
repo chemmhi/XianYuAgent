@@ -45,6 +45,7 @@ import { CouponAssetService } from './coupon-assets.js';
 import { ProductPublishService } from './product-publish.js';
 import { ProductKnowledgeBaseService } from './product-knowledge-base.js';
 import { classifyXianyuFailure } from './xianyu-account-health.js';
+import { PiSkillManager } from './pi-skills.js';
 
 export interface AppRuntime {
   config: AppConfig;
@@ -72,6 +73,7 @@ export interface AppRuntime {
   autoReplyActivity: AutoReplyActivityService;
   redisRealtime?: RedisConversationEventBridge;
   workspace: WorkspaceService;
+  piSkills: PiSkillManager;
   workspaceCommands: WorkspaceCommandOrchestrator;
   workspaceRuntime: WorkspaceRuntime;
   qrLogin: XianyuQrLoginAdapter;
@@ -97,6 +99,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
   const autoReplyGodView = createAutoReplyGodViewSink();
   const autoReplyAgentConfig = config.autoReplyAgent ?? resolveAutoReplyAgentConfig();
   const modelClient = createConfiguredModelClient(config);
+  const piSkills = new PiSkillManager({ rootDir: config.piSkillRoot });
   const autoReplyModelClient = config.autoReplyModelEnabled === false ? undefined : modelClient;
   const auth = new AuthService(store, config);
   const accounts = new AccountService(store, async (input) => {
@@ -382,7 +385,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
   });
   const wsServer = new WebSocketServer({ noServer: true });
   const workspaceRuntime: WorkspaceRuntime = config.agentRuntime === 'pi'
-    ? createPiWorkspaceRuntime(config, store, modelClient, resolveConfiguredModelClient, workspaceCommands)
+    ? createPiWorkspaceRuntime(config, store, modelClient, resolveConfiguredModelClient, workspaceCommands, piSkills)
     : new InProcessAgentRuntime(store, workspaceCommands);
   const workspace = new WorkspaceService(store, workspaceRuntime, async (input) => {
     const auditId = createId();
@@ -392,7 +395,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, orders, orderDelivery, products, productPublisher, productKnowledgeBase, productAutomation, productAutomationTrigger, productAutomationWorker, productSync, credentials, apiKeyCredentials, openaiSettings, dashboard, messages, autoReply, autoReplyRepair, autoReplyAgentSettings, autoReplyActivity, redisRealtime, workspace, workspaceCommands, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
+    config, store, auth, accounts, coupons, orders, orderDelivery, products, productPublisher, productKnowledgeBase, productAutomation, productAutomationTrigger, productAutomationWorker, productSync, credentials, apiKeyCredentials, openaiSettings, dashboard, messages, autoReply, autoReplyRepair, autoReplyAgentSettings, autoReplyActivity, redisRealtime, workspace, piSkills, workspaceCommands, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
     server,
     async listen() {
       await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));
@@ -544,7 +547,7 @@ function createConfiguredModelClient(config: AppConfig): ModelClient | undefined
   });
 }
 
-function createPiWorkspaceRuntime(config: AppConfig, store: Store, sharedModelClient: ModelClient | undefined, resolveModelClient: (adminId: string, accountId: string) => Promise<ModelClient | undefined>, workspaceCommands: WorkspaceCommandOrchestrator): WorkspaceRuntime {
+function createPiWorkspaceRuntime(config: AppConfig, store: Store, sharedModelClient: ModelClient | undefined, resolveModelClient: (adminId: string, accountId: string) => Promise<ModelClient | undefined>, workspaceCommands: WorkspaceCommandOrchestrator, piSkills: PiSkillManager): WorkspaceRuntime {
   const modelClient = sharedModelClient ?? {
     supportsWebSearch: false,
     async complete() { throw new PiModelClientError('MODEL_NOT_CONFIGURED', 'model provider is not configured'); },
@@ -554,6 +557,7 @@ function createPiWorkspaceRuntime(config: AppConfig, store: Store, sharedModelCl
     redactSecrets: [config.modelApiKey].filter((value): value is string => Boolean(value)),
     persistUserMessage: false,
     workspaceCommands,
+    skillManager: piSkills,
     resolveModelClient: async ({ adminId, accountId }) => {
       if (!adminId) return modelClient;
       try {
@@ -589,7 +593,7 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
 }
 
 async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: ServerResponse): Promise<{ statusCode: number; body: unknown } | undefined> {
-  const { auth, accounts, coupons, orders, products, productAutomation, productSync, credentials, apiKeyCredentials, dashboard, messages, workspace, store, config, xianyuIm } = runtime;
+  const { auth, accounts, coupons, orders, products, productAutomation, productSync, credentials, apiKeyCredentials, dashboard, messages, workspace, piSkills, store, config, xianyuIm } = runtime;
   if (ctx.path === '/healthz' && ctx.method === 'GET') {
     const health = await store.health();
     const redis = !config.redisUrl || !runtime.redisRealtime
@@ -640,6 +644,37 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     setCookie(response, 'session_id', '', { httpOnly: true, secure: config.cookieSecure, maxAge: 0 });
     setCookie(response, 'csrf_token', '', { secure: config.cookieSecure, maxAge: 0 });
     return { statusCode: 200, body: success(ctx, { loggedOut: true }).body };
+  }
+
+  if (ctx.path === '/api/v1/workspace/skills' && ctx.method === 'GET') {
+    return { statusCode: 200, body: success(ctx, { items: await piSkills.list(authContext.admin.id) }).body };
+  }
+  if (ctx.path === '/api/v1/workspace/skills/install' && ctx.method === 'POST') {
+    return mutation(runtime, ctx, authContext, undefined, async () => {
+      const source = optionalString(ctx.body.source) ?? optionalString(ctx.body.url);
+      if (!source) throw new ServiceError(422, 'VALIDATION_FAILED', 'skill source is required');
+      const item = await piSkills.install({ adminId: authContext.admin.id, source, expectedSha256: optionalString(ctx.body.expectedSha256) });
+      return success(ctx, item, 201);
+    });
+  }
+  const skillActionMatch = ctx.path.match(/^\/api\/v1\/workspace\/skills\/([^/]+)\/(authorize|enable|disable|execute)$/);
+  if (skillActionMatch && ctx.method === 'POST') {
+    const skillId = decodeURIComponent(skillActionMatch[1]);
+    const action = skillActionMatch[2];
+    return mutation(runtime, ctx, authContext, undefined, async () => {
+      if (action === 'authorize') {
+        const token = optionalString(ctx.body.token);
+        if (!token) throw new ServiceError(422, 'VALIDATION_FAILED', 'skill authorization token is required');
+        const result = await piSkills.authorize(authContext.admin.id, skillId, token);
+        return success(ctx, { skillId, code: result.code, stdout: result.stdout, stderr: result.stderr });
+      }
+      if (action === 'enable' || action === 'disable') return success(ctx, await piSkills.setEnabled(authContext.admin.id, skillId, action === 'enable'));
+      const command = optionalString(ctx.body.command);
+      if (!command) throw new ServiceError(422, 'VALIDATION_FAILED', 'skill command is required');
+      const args = Array.isArray(ctx.body.args) ? ctx.body.args.filter((value): value is string => typeof value === 'string').slice(0, 64) : [];
+      const result = await piSkills.execute({ adminId: authContext.admin.id, skillId, command, args, sessionInput: optionalString(ctx.body.sessionInput), sessionId: optionalString(ctx.body.sessionId) });
+      return success(ctx, result);
+    });
   }
 
   if (ctx.path === '/api/v1/dashboard/snapshot' && ctx.method === 'GET') {
