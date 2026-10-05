@@ -22,14 +22,14 @@
 | 5 | PROD-AUTO-REPRICE | 商品自动化 | 配置自动改价 | 商品详情规则卡显示启用及价格参数 | PASS | 同商品自动化 E2E；`docs/evidence/product-automation/03-unpaid-reprice-desktop.png`；未付款改价配置复读通过 |
 | 6 | PROD-AUTO-REVIEW | 商品自动化 | 配置求评价 | 商品详情规则卡显示启用及触发条件 | PASS | 同商品自动化 E2E；`docs/evidence/product-automation/04-review-gift-desktop.png`、`05-overdue-review-desktop.png`；求评价规则复读通过 |
 | 7 | PROD-AUTO-GIFT | 商品自动化 | 配置发送赠品 | 商品详情规则卡显示启用及关联卡券 | PASS | 同商品自动化 E2E；`docs/evidence/product-automation/06-delivery-coupon-picker-desktop.png`；赠品卡券选择/隔离/保存复读通过 |
-| 8 | PROD-PUBLISH-DRYRUN | 商品发布 | 打开发布并完成确认/取消 | 页面显示确认/Outbox，本地状态可复读，不触发外部发布 | PASS | `node apps/web/scripts/e2e-workspace-confirmation.mjs`；WS-VS-02 截图 `artifacts/real-verify/S4-VS-WS-VS-02/screenshots/workspace-confirmation-desktop-1440x900.png`、`workspace-confirmation-mobile-390x844.png`；确认与取消均通过，未触发真实发布 |
+| 8 | PROD-PUBLISH-DRYRUN | 商品发布 | 打开发布并完成确认/取消 | 页面显示确认/Outbox，本地状态可复读，不触发外部发布 | PASS | `node apps/web/scripts/e2e-workspace-confirmation.mjs`；截图 `docs/evidence/workspace-e2e-20261006/workspace-confirmation-desktop-1440x900.png`、`workspace-confirmation-mobile-390x844.png`；确认与取消均通过，未触发真实发布 |
 | 9 | COUPON-CRUD | 卡券管理 | 新增、编辑、查询 | 卡券列表显示最终名称/状态/库存 | PASS | `npm run test:e2e:chrome:coupons`；`docs/evidence/stage5/S4-VS3/screenshots/coupons-desktop-1440x900.png`、`coupons-create-modal-desktop-1440x900.png`；新增/编辑/启停/刷新复读通过 |
 | 10 | COUPON-LINK | 卡券管理 | 关联商品 | 卡券列表与商品详情双向显示绑定 | PASS | 同卡券 E2E；`coupons-relation-modal-desktop-1440x900.png`；关联商品与解绑状态复读通过 |
 | 11 | COUPON-DELETE | 卡券管理 | 删除测试卡券 | 列表不再显示或显示可恢复已删除状态 | PASS | 同卡券 E2E；更多操作/删除后列表刷新复读通过 |
 | 12 | COUPON-COPY | 卡券管理 | 复制卡券 | 列表新增副本且正文/库存隔离 | PASS | 同卡券 E2E；复制后列表新增批次，正文隔离断言通过 |
 | 13 | ORDER-SYNC | 订单管理 | 同步闲鱼订单 | 订单列表显示同步时间、订单号、支付/交付状态 | PASS | `npm run test:e2e:chrome:orders`；`docs/evidence/stage5/S4-VS4A/screenshots/orders-desktop-1440x900.png`、`orders-detail-drawer-desktop-1440x900.png`；本地刷新/闲鱼刷新/列表复读通过 |
 | 14 | AGENT-OPENAI | 自动回复配置 | 修改 OpenAI API 兼容 Provider/模型/Base URL | 配置页显示已保存版本、脱敏 Key、连通状态 | PASS | `npm --workspace apps/web run test:e2e:chrome:settings:openai`；`docs/evidence/stage5/S4-VS7A/screenshots/settings-openai-primary-success-desktop-1440x900.png`、`settings-openai-fallback-desktop-1440x900.png`；Provider/模型/Base URL/主备/fallback/脱敏复读通过 |
-| 15 | WORKSPACE-EVIDENCE | Workspace 对话 | 对上述操作做真实对话查询 | 对话结果与列表/配置页一致，Run/Message 持久化 | PASS | WS-VS-01 原生读 `artifacts/real-verify/S4-VS-WS-VS-01/screenshots/workspace-native-read-desktop-1440x900.png`；WS-VS-06A 事件回放 `artifacts/real-verify/S4-VS6A/screenshots/workspace-desktop-1440x900.png`；WS-VS-02/03/04 Confirmation/Outbox 复读通过 |
+| 15 | WORKSPACE-EVIDENCE | Workspace 对话 | 对上述操作做真实对话查询 | 对话结果与列表/配置页一致，Run/Message 持久化 | PASS | 原生读 `docs/evidence/workspace-e2e-20261006/workspace-native-read-desktop-1440x900.png`；事件回放 `docs/evidence/workspace-e2e-20261006/workspace-desktop-1440x900.png`；Confirmation/Outbox 截图 `workspace-confirmation-*`、`workspace-coupon-*`、`workspace-agent-settings-*`，Run/Message 持久化复读通过 |
 
 ## 认领记录
 
