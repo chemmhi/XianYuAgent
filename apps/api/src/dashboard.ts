@@ -27,6 +27,7 @@ export interface DashboardQuery {
 export interface DashboardSnapshot {
   totalSales: number;
   todayOrderAmount: number;
+  selectedRangeSales: number;
   autoProcessRate: number;
   pendingManualCount: number;
   trend: DashboardTrendPoint[];
@@ -73,7 +74,12 @@ export class DashboardService {
     const coupons = couponsResult.items;
     const conversations = conversationsResult.items;
 
-    const trend = buildTrend(orders, now, resolvedQuery);
+    const trendWindow = resolveTrendWindow(now, resolvedQuery);
+    const trend = buildTrend(orders, trendWindow);
+    const selectedRangeSalesOrders = orders.filter((order) => {
+      const createdAt = parseTime(order.createdAt);
+      return order.paymentStatus === 'paid' && createdAt >= trendWindow.start && createdAt < trendWindow.end;
+    });
     const todayStart = startOfUtcDay(now);
     const todayOrders = orders.filter((order) => parseTime(order.createdAt) >= todayStart);
     const todayPaidOrders = todayOrders.filter((order) => order.paymentStatus === 'paid');
@@ -83,6 +89,7 @@ export class DashboardService {
     return {
       totalSales: round(sumMajorUnits(paidOrders)),
       todayOrderAmount: round(sumMajorUnits(todayPaidOrders)),
+      selectedRangeSales: round(sumMajorUnits(selectedRangeSalesOrders)),
       autoProcessRate: autoProcessRate(todayOrders),
       pendingManualCount,
       trend,
@@ -94,8 +101,7 @@ export class DashboardService {
   }
 }
 
-function buildTrend(orders: OrderRecord[], now: Date, query: DashboardQuery): DashboardTrendPoint[] {
-  const window = resolveTrendWindow(now, query);
+function buildTrend(orders: OrderRecord[], window: ReturnType<typeof resolveTrendWindow>): DashboardTrendPoint[] {
   const points: DashboardTrendPoint[] = [];
   const bucketMs = window.granularity === 'hour' ? HOUR_MS : DAY_MS;
   for (let bucketStart = window.start; bucketStart < window.end; bucketStart += bucketMs) {

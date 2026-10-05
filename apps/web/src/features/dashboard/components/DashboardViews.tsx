@@ -52,19 +52,17 @@ function formatAxisTick(value: number, kind: 'currency' | 'percent') {
 
 export function MiniAreaChart({ state, compact = false }: { state: DashboardState; compact?: boolean }) {
   const points = state.data?.trend.length ? state.data.trend : [
-    { label: '周一', primary: 58, sales: 52, secondary: 82 }, { label: '周二', primary: 64, sales: 59, secondary: 85 }, { label: '周三', primary: 61, sales: 56, secondary: 84 }, { label: '周四', primary: 75, sales: 71, secondary: 88 }, { label: '周五', primary: 72, sales: 69, secondary: 90 }, { label: '周六', primary: 84, sales: 80, secondary: 93 },
+    { label: '周一', sales: 52, secondary: 82 }, { label: '周二', sales: 59, secondary: 85 }, { label: '周三', sales: 56, secondary: 84 }, { label: '周四', sales: 71, secondary: 88 }, { label: '周五', sales: 69, secondary: 90 }, { label: '周六', sales: 80, secondary: 93 },
   ];
-  const primaryScale = createChartScale([...points.map((point) => point.primary), ...points.map((point) => point.sales)], 'currency');
+  const salesScale = createChartScale(points.map((point) => point.sales), 'currency');
   const secondaryScale = createChartScale(points.map((point) => point.secondary), 'percent');
   const makePath = (values: number[], scale: ChartScale) => values.map((value, index) => {
     const x = CHART_LEFT + (index * (CHART_RIGHT - CHART_LEFT)) / Math.max(1, values.length - 1);
     return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)} ${chartY(value, scale).toFixed(1)}`;
   }).join(' ');
-  const primaryValues = points.map((point) => point.primary);
   const salesValues = points.map((point) => point.sales);
   const secondaryValues = points.map((point) => point.secondary);
-  const primary = makePath(primaryValues, primaryScale);
-  const sales = makePath(salesValues, primaryScale);
+  const sales = makePath(salesValues, salesScale);
   const secondary = makePath(secondaryValues, secondaryScale);
   const labels = points.map((point) => point.label);
   const labelStep = Math.max(1, Math.ceil(labels.length / 6));
@@ -73,8 +71,7 @@ export function MiniAreaChart({ state, compact = false }: { state: DashboardStat
   const activeIndex = hoveredIndex === null ? null : Math.min(hoveredIndex, Math.max(0, points.length - 1));
   const hoverX = activeIndex === null ? 0 : CHART_LEFT + (activeIndex * (CHART_RIGHT - CHART_LEFT)) / Math.max(1, points.length - 1);
   const tooltipLeft = Math.min(86, Math.max(14, (hoverX / 520) * 100));
-  const activePrimaryTop = activeIndex === null ? 0 : (chartY(points[activeIndex]!.primary, primaryScale) / 232) * 100;
-  const activeSalesTop = activeIndex === null ? 0 : (chartY(points[activeIndex]!.sales, primaryScale) / 232) * 100;
+  const activeSalesTop = activeIndex === null ? 0 : (chartY(points[activeIndex]!.sales, salesScale) / 232) * 100;
   const activeSecondaryTop = activeIndex === null ? 0 : (chartY(points[activeIndex]!.secondary, secondaryScale) / 232) * 100;
   const handleMouseMove = (event: MouseEvent<SVGSVGElement>) => {
     if (points.length < 2) {
@@ -87,30 +84,28 @@ export function MiniAreaChart({ state, compact = false }: { state: DashboardStat
     const clampedRatio = Math.min(1, Math.max(0, plotRatio));
     setHoveredIndex(Math.round(clampedRatio * (points.length - 1)));
   };
-  return <div className={`dashboard-chart-wrap${compact ? ' dashboard-chart-compact' : ''}`} role="img" aria-label="订单金额、销售金额与自动处理趋势图">
+  return <div className={`dashboard-chart-wrap${compact ? ' dashboard-chart-compact' : ''}`} role="img" aria-label="销售金额与自动处理趋势图">
     <svg viewBox="0 0 520 232" preserveAspectRatio="none" onMouseMove={handleMouseMove} onMouseLeave={() => setHoveredIndex(null)}>
       <defs>
-        <linearGradient id={`dashboard-primary-${gradientSuffix}`} x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#245A8D" stopOpacity="0.12"/><stop offset="100%" stopColor="#245A8D" stopOpacity="0.01"/></linearGradient>
+        <linearGradient id={`dashboard-sales-${gradientSuffix}`} x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#C56A21" stopOpacity="0.14"/><stop offset="100%" stopColor="#C56A21" stopOpacity="0.01"/></linearGradient>
         <linearGradient id={`dashboard-secondary-${gradientSuffix}`} x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#2E7D5B" stopOpacity="0.10"/><stop offset="100%" stopColor="#2E7D5B" stopOpacity="0.01"/></linearGradient>
       </defs>
-      {primaryScale.ticks.map((tick) => <line key={tick} x1={CHART_LEFT} x2={CHART_RIGHT} y1={chartY(tick, primaryScale)} y2={chartY(tick, primaryScale)} className="dashboard-chart-grid"/>)}
+      {salesScale.ticks.map((tick) => <line key={tick} x1={CHART_LEFT} x2={CHART_RIGHT} y1={chartY(tick, salesScale)} y2={chartY(tick, salesScale)} className="dashboard-chart-grid"/>)}
       <path d={`${secondary} L ${CHART_RIGHT} ${CHART_BOTTOM} L ${CHART_LEFT} ${CHART_BOTTOM} Z`} fill={`url(#dashboard-secondary-${gradientSuffix})`}/>
-      <path d={`${primary} L ${CHART_RIGHT} ${CHART_BOTTOM} L ${CHART_LEFT} ${CHART_BOTTOM} Z`} fill={`url(#dashboard-primary-${gradientSuffix})`}/>
+      <path d={`${sales} L ${CHART_RIGHT} ${CHART_BOTTOM} L ${CHART_LEFT} ${CHART_BOTTOM} Z`} fill={`url(#dashboard-sales-${gradientSuffix})`}/>
       <path d={secondary} className="dashboard-chart-line dashboard-chart-line-secondary"/>
-      <path d={primary} className="dashboard-chart-line"/>
       <path d={sales} className="dashboard-chart-line dashboard-chart-line-sales"/>
       {activeIndex !== null ? <line x1={hoverX} x2={hoverX} y1={CHART_TOP} y2={CHART_BOTTOM} className="dashboard-chart-hover-line"/> : null}
     </svg>
     {activeIndex !== null ? <div className="dashboard-chart-point-layer" aria-hidden="true">
-      <span className="dashboard-chart-point dashboard-chart-point-primary" style={{ left: `${(hoverX / 520) * 100}%`, top: `${activePrimaryTop}%` }}/>
       <span className="dashboard-chart-point dashboard-chart-point-sales" style={{ left: `${(hoverX / 520) * 100}%`, top: `${activeSalesTop}%` }}/>
       <span className="dashboard-chart-point dashboard-chart-point-secondary" style={{ left: `${(hoverX / 520) * 100}%`, top: `${activeSecondaryTop}%` }}/>
     </div> : null}
-    <div className="dashboard-chart-y-axis dashboard-y-axis-primary" aria-hidden="true">{primaryScale.ticks.slice().reverse().map((tick) => <span key={tick}>{formatAxisTick(tick, 'currency')}</span>)}</div>
+    <div className="dashboard-chart-y-axis dashboard-y-axis-primary" aria-hidden="true">{salesScale.ticks.slice().reverse().map((tick) => <span key={tick}>{formatAxisTick(tick, 'currency')}</span>)}</div>
     <div className="dashboard-chart-y-axis dashboard-y-axis-secondary" aria-hidden="true">{secondaryScale.ticks.slice().reverse().map((tick) => <span key={tick}>{formatAxisTick(tick, 'percent')}</span>)}</div>
     <div className="dashboard-chart-axis" aria-hidden="true">{labels.map((label, index) => <span key={`${label}-${index}`}>{labels.length <= 7 || index === 0 || index === labels.length - 1 || index % labelStep === 0 ? label : ''}</span>)}</div>
-    {activeIndex !== null ? <div className="dashboard-chart-tooltip" style={{ left: `${tooltipLeft}%` }}><strong>{points[activeIndex]!.label}</strong><span>订单金额 ¥{points[activeIndex]!.primary.toLocaleString('zh-CN')}</span><span>销售金额 ¥{points[activeIndex]!.sales.toLocaleString('zh-CN')}</span><span>AI 闭环率 {points[activeIndex]!.secondary}%</span></div> : null}
-    <div className="dashboard-chart-legend"><span><i className="dashboard-legend-line primary"/>订单金额</span><span><i className="dashboard-legend-line sales"/>销售金额</span><span><i className="dashboard-legend-line secondary"/>AI 闭环率</span></div>
+    {activeIndex !== null ? <div className="dashboard-chart-tooltip" style={{ left: `${tooltipLeft}%` }}><strong>{points[activeIndex]!.label}</strong><span>销售金额 ¥{points[activeIndex]!.sales.toLocaleString('zh-CN')}</span><span>AI 闭环率 {points[activeIndex]!.secondary}%</span></div> : null}
+    <div className="dashboard-chart-legend"><span><i className="dashboard-legend-line sales"/>销售金额</span><span><i className="dashboard-legend-line secondary"/>AI 闭环率</span></div>
   </div>;
 }
 
@@ -208,7 +203,7 @@ export function DashboardDesktopContent({ state, query, onOpenTodo, onRefresh, o
   if (!data || state.phase !== 'success') return <DashboardStateViewBlock state={state} onRefresh={onRefresh}/>;
   return <section className="dashboard-page-stack" data-dashboard-surface="desktop">
     <div className="dashboard-kpi-grid">{data.kpis.map((kpi) => kpi.key === 'pendingManual' ? <PendingManualKpiCard key={kpi.key} kpi={kpi} riskTodos={data.riskTodos} onOpenTodo={onOpenTodo} surface="desktop"/> : <article className="dashboard-card dashboard-kpi-card" key={kpi.key}><div className="dashboard-kpi-label">{kpi.label}</div><div className="dashboard-kpi-value">{kpi.value}</div><div className="dashboard-kpi-delta"><span className={toneClass(kpi.tone)}>{kpi.delta}</span><small>{kpi.context}</small></div></article>)}</div>
-    <div className="dashboard-main-grid"><article className="dashboard-card dashboard-panel"><div className="dashboard-panel-head"><div><h2>订单与 AI 闭环趋势</h2><p>按所选时间范围查看订单金额、自动回复成功率和人工接管变化。</p></div><div className="dashboard-trend-head-actions"><TrendRangeControl query={query} onChange={onTrendQueryChange}/></div></div><MiniAreaChart state={state}/></article></div>
+    <div className="dashboard-main-grid"><article className="dashboard-card dashboard-panel"><div className="dashboard-panel-head"><div><h2>订单与 AI 闭环趋势</h2><p>按所选时间范围查看销售金额、自动回复成功率和人工接管变化。</p></div><div className="dashboard-trend-head-actions"><div className="dashboard-trend-summary"><span>所选区间销售总额</span><strong>¥{data.selectedRangeSales.toLocaleString('zh-CN')}</strong></div><TrendRangeControl query={query} onChange={onTrendQueryChange}/></div></div><MiniAreaChart state={state}/></article></div>
     <div className="dashboard-two-grid"><article className="dashboard-card dashboard-panel"><div className="dashboard-panel-head"><div><h2>商品排行</h2><p>按当前账号订单与交付配置状态排序。</p></div><Badge tone="info">4 个商品</Badge></div><div className="dashboard-data-table dashboard-products-table"><div className="dashboard-table-head"><span>商品</span><span>订单</span><span>交付配置</span><span>状态</span></div>{data.productRank.length ? data.productRank.map((row) => <div className="dashboard-table-row" key={row.title}><span><b>{row.title}</b><small>{row.subtitle}</small></span><span>{row.orders}</span><span>{row.deliveryConfig}</span><Badge tone={row.tone}>{row.status}</Badge></div>) : <div className="dashboard-empty-row">暂无商品排行</div>}</div></article><article className="dashboard-card dashboard-panel"><div className="dashboard-panel-head"><div><h2>最近处理记录</h2><p>最近 24 小时的 AI、订单与风险动作。</p></div><Badge tone="ok">自动刷新</Badge></div><div className="dashboard-timeline">{data.recentActivity.length ? data.recentActivity.map((item) => <button className="dashboard-timeline-row" key={`${item.time}-${item.text}`} type="button" onClick={() => item.href && onOpenTodo(item.href)}><strong>{item.time}</strong><span>{item.text}</span><Badge tone={item.tone}>{item.status}</Badge></button>) : <div className="dashboard-empty-row">暂无最近处理记录</div>}</div></article></div>
   </section>;
 }
@@ -236,7 +231,7 @@ export function DashboardMobileContent({ state, accountLabel = '当前账号', o
     <section className="dashboard-mobile-quick-grid" aria-label="移动端快捷动作">{[['补交付凭证', '考研英语资料', 'warn'], ['确认风险', '跨商品资源请求', 'danger'], ['查看发货', '7 单已执行', 'ok'], ['补充知识', '2 条新问题', 'info']].map(([title, meta, tone]) => <button type="button" className={`dashboard-mobile-quick-card dashboard-tone-card-${tone}`} key={title} onClick={() => onOpenTodo(title)}><span>{title}</span><small>{meta}</small></button>)}</section>
     <div className="dashboard-mobile-kpis">{data.kpis.map((kpi) => kpi.key === 'pendingManual' ? <PendingManualKpiCard key={kpi.key} kpi={kpi} riskTodos={data.riskTodos} onOpenTodo={onOpenTodo} surface="mobile"/> : <article className="dashboard-card dashboard-kpi-card" key={kpi.key}><div className="dashboard-kpi-label">{kpi.label}</div><div className="dashboard-kpi-value">{kpi.value}</div><div className="dashboard-kpi-delta"><span className={toneClass(kpi.tone)}>{kpi.delta}</span><small>{kpi.context}</small></div></article>)}</div>
     <section className="dashboard-card dashboard-mobile-task-card"><div className="dashboard-mobile-section-head"><div><h2>今天优先处理</h2><p>按风险和时效排序，不展示桌面大表格。</p></div><Badge tone="warn">{data.riskTodos.length} 待办</Badge></div><div className="dashboard-mobile-task-list">{data.riskTodos.slice(0, 3).map((todo) => <button type="button" className={`dashboard-mobile-task-row ${todo.severity === 'high' ? 'urgent' : ''}`} key={todo.id} onClick={() => onOpenTodo(todo.id)}><i/><div><strong>{todo.title}</strong><span>{todo.detail}</span></div><Badge tone={todo.tone}>{todo.severity === 'high' ? '补凭证' : todo.severity === 'medium' ? '确认' : '补知识'}</Badge></button>)}</div></section>
-    <section className="dashboard-card dashboard-mobile-pulse-card"><div className="dashboard-mobile-section-head"><div><h2>经营快照</h2><p>只保留移动端可扫读指标。</p></div><button type="button" className="dashboard-text-button">详情</button></div><MiniAreaChart state={state} compact/></section>
+    <section className="dashboard-card dashboard-mobile-pulse-card"><div className="dashboard-mobile-section-head"><div><h2>经营快照</h2><p>只保留移动端可扫读指标。</p></div><button type="button" className="dashboard-text-button">详情</button></div><div className="dashboard-mobile-sales-total"><span>所选区间销售总额</span><strong>¥{data.selectedRangeSales.toLocaleString('zh-CN')}</strong></div><MiniAreaChart state={state} compact/></section>
   </div>;
 }
 

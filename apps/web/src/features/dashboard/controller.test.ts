@@ -6,6 +6,7 @@ const loadedState: DashboardState = {
   phase: 'success',
   data: {
     kpis: [],
+    selectedRangeSales: 0,
     trend: [],
     health: [],
     productRank: [],

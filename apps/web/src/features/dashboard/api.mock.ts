@@ -41,6 +41,7 @@ export function createMockDashboardApi(): DashboardApi {
       return {
         totalSales: 78420,
         todayOrderAmount: 18640,
+        selectedRangeSales: 78420,
         autoProcessRate: 96.8,
         pendingManualCount: 3,
         trend: visibleTrend,
