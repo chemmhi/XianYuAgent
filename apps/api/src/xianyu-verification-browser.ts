@@ -1,4 +1,5 @@
 import { mkdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { dropStaleCaptchaChallengeCookies, normalizeCookieSnapshot, type XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
 import { createPatchrightVerificationBrowserFactory } from './patchright-verification-browser.js';
@@ -29,6 +30,15 @@ export interface XianyuVerificationBrowserResult {
 
 const DEFAULT_MAX_WAIT_MS = 3 * 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
+
+/**
+ * Keep implicit Chrome profiles outside the repository. Production and
+ * container deployments should pass an explicit persistent directory when
+ * they need profile reuse; local development must not pollute the workspace.
+ */
+export function resolveDefaultVerificationUserDataDir(): string {
+  return join(tmpdir(), 'xianyu-agent', 'browser_data', 'xianyu-verification');
+}
 
 /**
  * Patchright-only verification browser.
@@ -156,7 +166,7 @@ export class XianyuVerificationBrowser {
   }
 
   private async resolveProfileDir(profileKey = 'default'): Promise<string> {
-    const root = resolve(this.configuredUserDataDir ?? join(process.cwd(), 'browser_data', 'xianyu-verification'));
+    const root = resolve(this.configuredUserDataDir ?? resolveDefaultVerificationUserDataDir());
     const safeKey = sanitizeProfileKey(profileKey);
     const profileDir = join(root, safeKey);
     await mkdir(profileDir, { recursive: true });

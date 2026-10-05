@@ -33,3 +33,6 @@ runtime-live/*.jsonl
 runtime-live/*.enable
 runtime-live/*.enable.owners/
 runtime-live/*.enable.owners.lock
+
+# Explicitly configured browser profiles are runtime state, not source files.
+apps/api/browser_data/

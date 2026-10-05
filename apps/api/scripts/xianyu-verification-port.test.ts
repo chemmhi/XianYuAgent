@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { XianyuVerificationBrowser } from '../src/xianyu-verification-browser.js';
 import type { XianyuBrowserCookie } from '../src/xianyu-cookie-jar.js';
 import type { XianyuSliderFrame, XianyuSliderLocator } from '../src/xianyu-slider-port.js';
@@ -81,25 +84,30 @@ class FakeFactory implements XianyuVerificationBrowserFactory {
 
 test('verification core runs against a browser port without importing Patchright types', async () => {
   const factory = new FakeFactory();
-  const browser = new XianyuVerificationBrowser({
-    mode: 'launch',
-    sliderMode: 'disabled',
-    headless: true,
-    userDataDir: 'browser_data/port-test',
-    maxWaitMs: 4_000,
-    pollIntervalMs: 25,
-    browserFactory: factory,
-  });
+  const userDataDir = await mkdtemp(join(tmpdir(), 'xianyu-verification-port-test-'));
+  try {
+    const browser = new XianyuVerificationBrowser({
+      mode: 'launch',
+      sliderMode: 'disabled',
+      headless: true,
+      userDataDir,
+      maxWaitMs: 4_000,
+      pollIntervalMs: 25,
+      browserFactory: factory,
+    });
 
-  const result = await browser.waitForCompletion({
-    verificationUrl: 'http://127.0.0.1:19191/punish',
-    profileKey: 'port-test-account',
-  });
+    const result = await browser.waitForCompletion({
+      verificationUrl: 'http://127.0.0.1:19191/punish',
+      profileKey: 'port-test-account',
+    });
 
-  assert.equal(result.finalUrl, 'http://127.0.0.1:19191/im');
-  assert.equal(result.cookieSnapshot.find((cookie) => cookie.name === 'x5sec')?.value, 'fresh-port-test');
-  assert.equal(factory.launches.length, 1);
-  assert.equal(factory.launches[0]?.headless, true);
-  assert.match(factory.launches[0]?.profileDir ?? '', /port-test-account$/);
-  assert.equal(factory.context.closed, true);
+    assert.equal(result.finalUrl, 'http://127.0.0.1:19191/im');
+    assert.equal(result.cookieSnapshot.find((cookie) => cookie.name === 'x5sec')?.value, 'fresh-port-test');
+    assert.equal(factory.launches.length, 1);
+    assert.equal(factory.launches[0]?.headless, true);
+    assert.match(factory.launches[0]?.profileDir ?? '', /port-test-account$/);
+    assert.equal(factory.context.closed, true);
+  } finally {
+    await rm(userDataDir, { recursive: true, force: true });
+  }
 });

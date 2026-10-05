@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { isVerificationPageComplete, resolveVerificationCookieUrl, shouldHideVerificationWindow, shouldUseHeadlessVerificationBrowser, XianyuVerificationBrowser } from '../src/xianyu-verification-browser.js';
+import { isVerificationPageComplete, resolveDefaultVerificationUserDataDir, resolveVerificationCookieUrl, shouldHideVerificationWindow, shouldUseHeadlessVerificationBrowser, XianyuVerificationBrowser } from '../src/xianyu-verification-browser.js';
 import { loadConfig } from '../src/config.js';
 
 test('verification completion requires a fresh x5sec cookie after leaving punish', () => {
@@ -22,6 +22,11 @@ test('verification browser configuration is explicit and disabled by default', (
   assert.equal(config.xianyuVerificationBrowserHeadless, false);
   assert.equal(loadConfig({ ALLOW_IN_MEMORY: 'true', XIANYU_VERIFICATION_BROWSER_MODE: 'launch', XIANYU_VERIFICATION_BROWSER_HEADLESS: 'true' }).xianyuVerificationBrowserMode, 'launch');
   assert.equal(loadConfig({ ALLOW_IN_MEMORY: 'true', XIANYU_VERIFICATION_BROWSER_MODE: 'connect' }).xianyuVerificationBrowserMode, 'disabled');
+});
+
+test('implicit verification profiles stay outside the workspace', () => {
+  assert.equal(resolveDefaultVerificationUserDataDir(), join(tmpdir(), 'xianyu-agent', 'browser_data', 'xianyu-verification'));
+  assert.notEqual(resolveDefaultVerificationUserDataDir(), join(process.cwd(), 'browser_data', 'xianyu-verification'));
 });
 
 test('automatic verification honors explicit headless configuration and avoids a visible blank window', () => {
