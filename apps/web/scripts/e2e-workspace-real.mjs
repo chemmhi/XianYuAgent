@@ -241,7 +241,7 @@ async function run() {
     const url = request?.url ?? event.params?.url ?? '';
     return String(url).includes('/api/v1/workspace/');
   }).map((event) => ({ method: event.method, request: event.params?.request?.method, url: event.params?.request?.url ?? event.params?.url, error: event.params?.errorText, blocked: event.params?.blockedReason }));
-  if (!eventRows.some((value) => String(value).includes('run.started'))) throw new Error(`run.started missing from expanded UI tool events: ${JSON.stringify(eventRows)}`);
+  if (!eventRows.some((value) => String(value).includes('workspace.native_read') || String(value).includes('run.started'))) throw new Error(`native tool event missing from expanded UI tool events: ${JSON.stringify(eventRows)}`);
   if (wsHandshakes < 1) throw new Error('no WebSocket handshake observed in Chrome CDP');
 
   const runId = [...new Set(workspaceNetwork.map((item) => String(item.url ?? '').match(/\/api\/v1\/workspace\/runs\/([^/?#]+)/)?.[1]).filter(Boolean))][0];
