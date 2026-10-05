@@ -99,6 +99,7 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
       return { ...previous, events };
     });
     eventCursorRef.current = Math.max(eventCursorRef.current, event.sequence);
+    if (event.eventType === 'reasoning.delta' || event.eventType === 'assistant.delta' || event.eventType === 'tool.call.delta') return;
     const currentRun = runRef.current;
     if (currentRun) void api.getRun(currentRun.runId).then((run) => { runRef.current = run; return refreshRunExecution(run); }).catch(() => undefined);
   }, [api, refreshRunExecution]);
