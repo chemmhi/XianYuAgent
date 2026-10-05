@@ -28,7 +28,9 @@ const state: DashboardState = {
 describe('dashboard views', () => {
   it('renders the high-fidelity desktop hierarchy', () => {
     const html = renderToStaticMarkup(createElement(DashboardDesktopContent, { state, query: { range: '1m' }, onOpenTodo: vi.fn(), onRefresh: vi.fn(), onTrendQueryChange: vi.fn() }));
-    expect(html).toContain('订单与 AI 闭环趋势');
+    expect(html).toContain('dashboard-trend-panel');
+    expect(html).toContain('销售总额：');
+    expect(html).not.toContain('订单与 AI 闭环趋势');
     expect(html).not.toContain('当前账号健康度');
     expect(html).not.toContain('库存');
     expect(html).toContain('总销售额');
@@ -42,7 +44,8 @@ describe('dashboard views', () => {
     expect(html).toContain('dashboard-y-axis-primary');
     expect(html).toContain('dashboard-y-axis-secondary');
     expect(html).toContain('dashboard-chart-legend');
-    expect(html).toContain('所选区间销售总额');
+    expect(html).toContain('dashboard-trend-date-controls');
+    expect(html).toContain('销售总额：');
     expect(html).toContain('¥18,640');
     expect(html).toContain('viewBox="0 0 520 232"');
     expect(html.indexOf('dashboard-chart-axis')).toBeLessThan(html.indexOf('dashboard-chart-legend'));

@@ -146,14 +146,16 @@ function TrendRangeControl({ query, onChange }: { query: DashboardQuery; onChang
   };
   return <div className="dashboard-trend-controls" aria-label="趋势时间范围">
     <div className="dashboard-trend-quick-ranges">{quickRanges.map((option) => <Button key={option.value} type="button" size="small" variant={query.range === option.value ? 'primary' : 'default'} className="dashboard-trend-range-btn" onClick={() => setQuickRange(option.value)}>{option.label}</Button>)}</div>
-    <SelectField className="dashboard-trend-month-select" aria-label="月份选择" value={monthValue} options={[{ value: '', label: '月份选择' }, ...monthOptions]} onChange={(event) => selectMonth(event.target.value)}/>
-    <Button type="button" size="small" variant={customOpen ? 'primary' : 'default'} className="dashboard-trend-custom-toggle" onClick={() => { setCustomOpen(true); setMonthValue(''); }}>自定义时间区间</Button>
-    {customOpen ? <div className="dashboard-trend-custom-panel">
-      <InputField className="dashboard-trend-date" aria-label="趋势开始日期" type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)}/>
-      <span className="dashboard-trend-date-separator">至</span>
-      <InputField className="dashboard-trend-date" aria-label="趋势结束日期" type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)}/>
-      <Button type="button" size="small" variant="ghost" className="dashboard-trend-apply" disabled={!customFrom || !customTo} onClick={() => onChange({ range: 'custom', from: customFrom, to: customTo })}>应用</Button>
-    </div> : null}
+    <div className="dashboard-trend-date-controls">
+      <SelectField className="dashboard-trend-month-select" aria-label="月份选择" value={monthValue} options={[{ value: '', label: '月份选择' }, ...monthOptions]} onChange={(event) => selectMonth(event.target.value)}/>
+      <Button type="button" size="small" variant={customOpen ? 'primary' : 'default'} className="dashboard-trend-custom-toggle" onClick={() => { setCustomOpen(true); setMonthValue(''); }}>自定义时间区间</Button>
+      {customOpen ? <div className="dashboard-trend-custom-panel">
+        <InputField className="dashboard-trend-date" aria-label="趋势开始日期" type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)}/>
+        <span className="dashboard-trend-date-separator">至</span>
+        <InputField className="dashboard-trend-date" aria-label="趋势结束日期" type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)}/>
+        <Button type="button" size="small" variant="ghost" className="dashboard-trend-apply" disabled={!customFrom || !customTo} onClick={() => onChange({ range: 'custom', from: customFrom, to: customTo })}>应用</Button>
+      </div> : null}
+    </div>
   </div>;
 }
 
@@ -203,7 +205,7 @@ export function DashboardDesktopContent({ state, query, onOpenTodo, onRefresh, o
   if (!data || state.phase !== 'success') return <DashboardStateViewBlock state={state} onRefresh={onRefresh}/>;
   return <section className="dashboard-page-stack" data-dashboard-surface="desktop">
     <div className="dashboard-kpi-grid">{data.kpis.map((kpi) => kpi.key === 'pendingManual' ? <PendingManualKpiCard key={kpi.key} kpi={kpi} riskTodos={data.riskTodos} onOpenTodo={onOpenTodo} surface="desktop"/> : <article className="dashboard-card dashboard-kpi-card" key={kpi.key}><div className="dashboard-kpi-label">{kpi.label}</div><div className="dashboard-kpi-value">{kpi.value}</div><div className="dashboard-kpi-delta"><span className={toneClass(kpi.tone)}>{kpi.delta}</span><small>{kpi.context}</small></div></article>)}</div>
-    <div className="dashboard-main-grid"><article className="dashboard-card dashboard-panel"><div className="dashboard-panel-head"><div><h2>订单与 AI 闭环趋势</h2><p>按所选时间范围查看销售金额、自动回复成功率和人工接管变化。</p></div><div className="dashboard-trend-head-actions"><div className="dashboard-trend-summary"><span>所选区间销售总额</span><strong>¥{data.selectedRangeSales.toLocaleString('zh-CN')}</strong></div><TrendRangeControl query={query} onChange={onTrendQueryChange}/></div></div><MiniAreaChart state={state}/></article></div>
+    <div className="dashboard-main-grid"><article className="dashboard-card dashboard-panel dashboard-trend-panel"><div className="dashboard-trend-toolbar"><TrendRangeControl query={query} onChange={onTrendQueryChange}/></div><div className="dashboard-trend-total"><span>销售总额：</span><strong>¥{data.selectedRangeSales.toLocaleString('zh-CN')}</strong></div><MiniAreaChart state={state}/></article></div>
     <div className="dashboard-two-grid"><article className="dashboard-card dashboard-panel"><div className="dashboard-panel-head"><div><h2>商品排行</h2><p>按当前账号订单与交付配置状态排序。</p></div><Badge tone="info">4 个商品</Badge></div><div className="dashboard-data-table dashboard-products-table"><div className="dashboard-table-head"><span>商品</span><span>订单</span><span>交付配置</span><span>状态</span></div>{data.productRank.length ? data.productRank.map((row) => <div className="dashboard-table-row" key={row.title}><span><b>{row.title}</b><small>{row.subtitle}</small></span><span>{row.orders}</span><span>{row.deliveryConfig}</span><Badge tone={row.tone}>{row.status}</Badge></div>) : <div className="dashboard-empty-row">暂无商品排行</div>}</div></article><article className="dashboard-card dashboard-panel"><div className="dashboard-panel-head"><div><h2>最近处理记录</h2><p>最近 24 小时的 AI、订单与风险动作。</p></div><Badge tone="ok">自动刷新</Badge></div><div className="dashboard-timeline">{data.recentActivity.length ? data.recentActivity.map((item) => <button className="dashboard-timeline-row" key={`${item.time}-${item.text}`} type="button" onClick={() => item.href && onOpenTodo(item.href)}><strong>{item.time}</strong><span>{item.text}</span><Badge tone={item.tone}>{item.status}</Badge></button>) : <div className="dashboard-empty-row">暂无最近处理记录</div>}</div></article></div>
   </section>;
 }
@@ -231,7 +233,7 @@ export function DashboardMobileContent({ state, accountLabel = '当前账号', o
     <section className="dashboard-mobile-quick-grid" aria-label="移动端快捷动作">{[['补交付凭证', '考研英语资料', 'warn'], ['确认风险', '跨商品资源请求', 'danger'], ['查看发货', '7 单已执行', 'ok'], ['补充知识', '2 条新问题', 'info']].map(([title, meta, tone]) => <button type="button" className={`dashboard-mobile-quick-card dashboard-tone-card-${tone}`} key={title} onClick={() => onOpenTodo(title)}><span>{title}</span><small>{meta}</small></button>)}</section>
     <div className="dashboard-mobile-kpis">{data.kpis.map((kpi) => kpi.key === 'pendingManual' ? <PendingManualKpiCard key={kpi.key} kpi={kpi} riskTodos={data.riskTodos} onOpenTodo={onOpenTodo} surface="mobile"/> : <article className="dashboard-card dashboard-kpi-card" key={kpi.key}><div className="dashboard-kpi-label">{kpi.label}</div><div className="dashboard-kpi-value">{kpi.value}</div><div className="dashboard-kpi-delta"><span className={toneClass(kpi.tone)}>{kpi.delta}</span><small>{kpi.context}</small></div></article>)}</div>
     <section className="dashboard-card dashboard-mobile-task-card"><div className="dashboard-mobile-section-head"><div><h2>今天优先处理</h2><p>按风险和时效排序，不展示桌面大表格。</p></div><Badge tone="warn">{data.riskTodos.length} 待办</Badge></div><div className="dashboard-mobile-task-list">{data.riskTodos.slice(0, 3).map((todo) => <button type="button" className={`dashboard-mobile-task-row ${todo.severity === 'high' ? 'urgent' : ''}`} key={todo.id} onClick={() => onOpenTodo(todo.id)}><i/><div><strong>{todo.title}</strong><span>{todo.detail}</span></div><Badge tone={todo.tone}>{todo.severity === 'high' ? '补凭证' : todo.severity === 'medium' ? '确认' : '补知识'}</Badge></button>)}</div></section>
-    <section className="dashboard-card dashboard-mobile-pulse-card"><div className="dashboard-mobile-section-head"><div><h2>经营快照</h2><p>只保留移动端可扫读指标。</p></div><button type="button" className="dashboard-text-button">详情</button></div><div className="dashboard-mobile-sales-total"><span>所选区间销售总额</span><strong>¥{data.selectedRangeSales.toLocaleString('zh-CN')}</strong></div><MiniAreaChart state={state} compact/></section>
+    <section className="dashboard-card dashboard-mobile-pulse-card"><div className="dashboard-mobile-section-head"><div><h2>经营快照</h2><p>只保留移动端可扫读指标。</p></div><button type="button" className="dashboard-text-button">详情</button></div><div className="dashboard-mobile-sales-total"><span>销售总额：</span><strong>¥{data.selectedRangeSales.toLocaleString('zh-CN')}</strong></div><MiniAreaChart state={state} compact/></section>
   </div>;
 }
 
