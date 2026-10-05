@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createWorkspaceApi, type WorkspaceApi } from './api';
-import type { WorkspaceConfirmationVM, WorkspaceOutboxVM, WorkspaceRunEventVM, WorkspaceRunVM, WorkspaceSessionVM, WorkspaceState } from './types';
+import type { WorkspaceConfirmationVM, WorkspaceMessageVM, WorkspaceOutboxVM, WorkspaceRunEventVM, WorkspaceRunVM, WorkspaceSessionVM, WorkspaceState } from './types';
 
 const defaultApi = createWorkspaceApi({ get: async () => { throw new Error('WORKSPACE_API_UNAVAILABLE'); } });
 
@@ -21,7 +21,30 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
   const runRef = useRef<WorkspaceRunVM | null>(null);
   const eventCursorRef = useRef(0);
   const requestRef = useRef(0);
+  const runRefreshRequestRef = useRef(0);
+  const actionInFlightRef = useRef(false);
   const activeSessionIdRef = useRef<string | undefined>(undefined);
+  const sessionStorageKey = options.accountId ? `workspace:active-session:${options.accountId}` : undefined;
+
+  const rememberActiveSession = useCallback((sessionId?: string) => {
+    activeSessionIdRef.current = sessionId;
+    if (typeof window === 'undefined' || !sessionStorageKey) return;
+    if (sessionId) window.sessionStorage.setItem(sessionStorageKey, sessionId);
+    else window.sessionStorage.removeItem(sessionStorageKey);
+  }, [sessionStorageKey]);
+
+  const recoverRun = useCallback(async (messages: WorkspaceMessageVM[]) => {
+    const latestRunId = [...messages].reverse().find((message) => message.runId)?.runId;
+    if (!latestRunId) return { run: null, events: [], confirmation: null, outbox: [] as WorkspaceOutboxVM[] };
+    const run = await api.getRun(latestRunId).catch(() => null);
+    if (!run) return { run: null, events: [], confirmation: null, outbox: [] as WorkspaceOutboxVM[] };
+    const [events, confirmation, outbox] = await Promise.all([
+      api.listEvents(run.runId, 0).catch(() => [] as WorkspaceRunEventVM[]),
+      run.status === 'waiting_confirmation' ? api.getConfirmation(run.runId).catch(() => null) : Promise.resolve<WorkspaceConfirmationVM | null>(null),
+      api.listOutbox(run.runId).catch(() => [] as WorkspaceOutboxVM[]),
+    ]);
+    return { run, events, confirmation, outbox };
+  }, [api]);
 
   const reload = useCallback(async () => {
     const requestId = ++requestRef.current;
@@ -29,26 +52,36 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
       socketRef.current?.close();
       runRef.current = null;
       eventCursorRef.current = 0;
-      activeSessionIdRef.current = undefined;
+      runRefreshRequestRef.current += 1;
+      rememberActiveSession(undefined);
       setState((previous) => ({ ...previous, phase: 'empty', sessions: [], activeSessionId: undefined, run: null, messages: [], events: [], connection: 'idle', error: null, confirmation: null, outbox: [] }));
       return;
     }
+    socketRef.current?.close();
+    runRef.current = null;
+    eventCursorRef.current = 0;
+    runRefreshRequestRef.current += 1;
     setState((previous) => ({ ...previous, phase: 'loading', error: null }));
     try {
       const sessions = await listWorkspaceSessions(api, options.accountId, search);
       if (requestId !== requestRef.current) return;
       const firstActive = sessions.find((session) => session.status === 'active');
-      const activeSessionId = activeSessionIdRef.current && sessions.some((session) => session.id === activeSessionIdRef.current && session.status === 'active') ? activeSessionIdRef.current : firstActive?.id;
+      const rememberedSessionId = activeSessionIdRef.current ?? (sessionStorageKey && typeof window !== 'undefined' ? window.sessionStorage.getItem(sessionStorageKey) ?? undefined : undefined);
+      const activeSessionId = rememberedSessionId && sessions.some((session) => session.id === rememberedSessionId && session.status === 'active') ? rememberedSessionId : firstActive?.id;
       const messages = activeSessionId ? await api.listMessages(activeSessionId).catch(() => []) : [];
       if (requestId !== requestRef.current) return;
-      activeSessionIdRef.current = activeSessionId;
-      setState((previous) => ({ ...previous, phase: sessions.length ? 'success' : 'empty', sessions, activeSessionId, messages: activeSessionId ? messages : [], run: null, events: [], connection: 'idle', error: null, confirmation: null, outbox: [] }));
+      const recovered = activeSessionId ? await recoverRun(messages) : { run: null, events: [], confirmation: null, outbox: [] as WorkspaceOutboxVM[] };
+      if (requestId !== requestRef.current) return;
+      rememberActiveSession(activeSessionId);
+      runRef.current = recovered.run;
+      eventCursorRef.current = recovered.events.reduce((max, event) => Math.max(max, event.sequence), 0);
+      setState((previous) => ({ ...previous, phase: sessions.length ? 'success' : 'empty', sessions, activeSessionId, messages: activeSessionId ? messages : [], run: recovered.run, events: recovered.events, connection: 'idle', error: null, confirmation: recovered.confirmation, outbox: recovered.outbox }));
     } catch (error) {
       if (requestId !== requestRef.current) return;
       const normalized = normalizeError(error);
       setState((previous) => ({ ...previous, phase: normalized.forbidden ? 'forbidden' : 'error', error: normalized.message }));
     }
-  }, [api, options.accountId, search]);
+  }, [api, options.accountId, recoverRun, rememberActiveSession, search, sessionStorageKey]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void reload(); }, search.trim() ? 220 : 0);
@@ -66,29 +99,34 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     setState((previous) => ({ ...previous, submitting: true, error: null }));
     try {
       const session = await api.createSession({ accountId: options.accountId, title });
-      activeSessionIdRef.current = session.id;
+      rememberActiveSession(session.id);
       setState((previous) => ({ ...previous, sessions: [session, ...previous.sessions], activeSessionId: session.id, phase: 'success', messages: [], run: null, events: [], connection: 'idle', submitting: false, confirmation: null, outbox: [] }));
       return session;
     } catch (error) { const normalized = normalizeError(error); setState((previous) => ({ ...previous, submitting: false, error: normalized.message })); return null; }
-  }, [api, options.accountId]);
+  }, [api, options.accountId, rememberActiveSession]);
 
   const switchSession = useCallback(async (sessionId: string) => {
+    socketRef.current?.close();
+    runRef.current = null;
+    eventCursorRef.current = 0;
+    runRefreshRequestRef.current += 1;
     setState((previous) => ({ ...previous, submitting: true, error: null }));
-    try { const session = await api.switchSession(sessionId); const messages = await api.listMessages(session.id).catch(() => []); activeSessionIdRef.current = session.id; setState((previous) => ({ ...previous, activeSessionId: session.id, messages, run: null, events: [], connection: 'idle', submitting: false, confirmation: null, outbox: [] })); return session; }
+    try { const session = await api.switchSession(sessionId); const messages = await api.listMessages(session.id).catch(() => []); const recovered = await recoverRun(messages); rememberActiveSession(session.id); runRef.current = recovered.run; eventCursorRef.current = recovered.events.reduce((max, event) => Math.max(max, event.sequence), 0); setState((previous) => ({ ...previous, activeSessionId: session.id, messages, run: recovered.run, events: recovered.events, connection: 'idle', submitting: false, confirmation: recovered.confirmation, outbox: recovered.outbox })); return session; }
     catch (error) { const normalized = normalizeError(error); setState((previous) => ({ ...previous, submitting: false, error: normalized.message })); return null; }
-  }, [api]);
+  }, [api, recoverRun, rememberActiveSession]);
 
   const archiveSession = useCallback(async (sessionId: string) => {
     setState((previous) => ({ ...previous, submitting: true, error: null }));
-    try { const session = await api.archiveSession(sessionId); if (activeSessionIdRef.current === session.id) activeSessionIdRef.current = undefined; setState((previous) => ({ ...previous, sessions: previous.sessions.map((item) => item.id === session.id ? session : item), activeSessionId: previous.activeSessionId === session.id ? undefined : previous.activeSessionId, submitting: false })); return session; }
+    try { const session = await api.archiveSession(sessionId); if (activeSessionIdRef.current === session.id) rememberActiveSession(undefined); setState((previous) => ({ ...previous, sessions: previous.sessions.map((item) => item.id === session.id ? session : item), activeSessionId: previous.activeSessionId === session.id ? undefined : previous.activeSessionId, submitting: false })); return session; }
     catch (error) { const normalized = normalizeError(error); setState((previous) => ({ ...previous, submitting: false, error: normalized.message })); return null; }
-  }, [api]);
+  }, [api, rememberActiveSession]);
 
   const refreshRunExecution = useCallback(async (run: WorkspaceRunVM) => {
     const [confirmation, outbox] = await Promise.all([
       run.status === 'waiting_confirmation' ? api.getConfirmation(run.runId).catch(() => null) : Promise.resolve<WorkspaceConfirmationVM | null>(null),
       api.listOutbox(run.runId).catch(() => [] as WorkspaceOutboxVM[]),
     ]);
+    runRef.current = run;
     setState((previous) => ({ ...previous, run, confirmation, outbox }));
   }, [api]);
 
@@ -101,7 +139,13 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     eventCursorRef.current = Math.max(eventCursorRef.current, event.sequence);
     if (event.eventType === 'reasoning.delta' || event.eventType === 'assistant.delta' || event.eventType === 'tool.call.delta') return;
     const currentRun = runRef.current;
-    if (currentRun) void api.getRun(currentRun.runId).then((run) => { runRef.current = run; return refreshRunExecution(run); }).catch(() => undefined);
+    if (currentRun) {
+      const refreshRequestId = ++runRefreshRequestRef.current;
+      void api.getRun(currentRun.runId).then((run) => {
+        if (refreshRequestId !== runRefreshRequestRef.current) return;
+        return refreshRunExecution(run);
+      }).catch(() => undefined);
+    }
   }, [api, refreshRunExecution]);
 
   const connectRun = useCallback(async (runId: string, afterSequence = eventCursorRef.current) => {
@@ -146,33 +190,45 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
 
   const confirmRun = useCallback(async () => {
     const currentRun = runRef.current;
-    if (!currentRun) return null;
+    if (!currentRun || actionInFlightRef.current) return null;
+    actionInFlightRef.current = true;
+    runRefreshRequestRef.current += 1;
     setState((previous) => ({ ...previous, actionSubmitting: true, error: null }));
     try {
-      const confirmation = state.confirmation ?? await api.getConfirmation(currentRun.runId);
-      const result = await api.confirmRun(currentRun.runId, confirmation.version);
+      const latestRun = await api.getRun(currentRun.runId);
+      runRef.current = latestRun;
+      const confirmation = await api.getConfirmation(latestRun.runId);
+      const result = await api.confirmRun(latestRun.runId, confirmation.version);
       runRef.current = result.run;
       setState((previous) => ({ ...previous, run: result.run, confirmation: result.confirmation, outbox: [result.outbox], actionSubmitting: false }));
       return result;
     } catch (error) { const normalized = normalizeError(error); setState((previous) => ({ ...previous, actionSubmitting: false, error: normalized.message })); return null; }
-  }, [api, state.confirmation]);
+    finally { actionInFlightRef.current = false; }
+  }, [api]);
 
   const cancelRun = useCallback(async () => {
     const currentRun = runRef.current;
-    if (!currentRun) return null;
+    if (!currentRun || actionInFlightRef.current) return null;
+    actionInFlightRef.current = true;
+    runRefreshRequestRef.current += 1;
     setState((previous) => ({ ...previous, actionSubmitting: true, error: null }));
     try {
-      const confirmation = state.confirmation ?? await api.getConfirmation(currentRun.runId);
-      const result = await api.cancelRun(currentRun.runId, confirmation.version);
+      const latestRun = await api.getRun(currentRun.runId);
+      runRef.current = latestRun;
+      const confirmation = await api.getConfirmation(latestRun.runId);
+      const result = await api.cancelRun(latestRun.runId, confirmation.version);
       runRef.current = result.run;
       setState((previous) => ({ ...previous, run: result.run, confirmation: result.confirmation, outbox: [], actionSubmitting: false }));
       return result;
     } catch (error) { const normalized = normalizeError(error); setState((previous) => ({ ...previous, actionSubmitting: false, error: normalized.message })); return null; }
-  }, [api, state.confirmation]);
+    finally { actionInFlightRef.current = false; }
+  }, [api]);
 
   const retryRun = useCallback(async () => {
     const currentRun = runRef.current;
-    if (!currentRun) return null;
+    if (!currentRun || actionInFlightRef.current) return null;
+    actionInFlightRef.current = true;
+    runRefreshRequestRef.current += 1;
     setState((previous) => ({ ...previous, actionSubmitting: true, error: null }));
     try {
       const result = await api.retryRun(currentRun.runId);
@@ -180,6 +236,7 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
       setState((previous) => ({ ...previous, run: result.run, outbox: [result.outbox], actionSubmitting: false }));
       return result;
     } catch (error) { const normalized = normalizeError(error); setState((previous) => ({ ...previous, actionSubmitting: false, error: normalized.message })); return null; }
+    finally { actionInFlightRef.current = false; }
   }, [api]);
 
   return { state, search, setSearch, reload, createSession, switchSession, archiveSession, startRun, reconnectRun, confirmRun, cancelRun, retryRun };

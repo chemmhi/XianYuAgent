@@ -6,6 +6,7 @@ import type { WorkspaceApi } from '../api';
 import type { WorkspaceConfirmationVM, WorkspaceMessageVM, WorkspaceOutboxVM, WorkspaceRunStatus, WorkspaceRunVM, WorkspaceSessionVM } from '../types';
 import { SearchField } from '../../../shared/ui/SearchField';
 import { Button } from '../../../shared/ui/Button';
+import { Toast } from '../../../shared/ui/Toast';
 import './workspace.css';
 
 export interface WorkspacePageProps { api: WorkspaceApi; }
@@ -44,9 +45,16 @@ export function WorkspacePage({ api }: WorkspacePageProps) {
   const [instruction, setInstruction] = useState('');
   const [draftMode, setDraftMode] = useState(false);
   const [expandedTrace, setExpandedTrace] = useState<string | null>(null);
+  const [errorToast, setErrorToast] = useState<string | null>(null);
   const instructionRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { if (draftMode) instructionRef.current?.focus(); }, [draftMode]);
   useLayoutEffect(() => { resizeComposerTextarea(instructionRef.current); }, [instruction]);
+  useEffect(() => {
+    if (!state.error || state.phase === 'forbidden') { setErrorToast(null); return; }
+    setErrorToast(state.error);
+    const timer = window.setTimeout(() => setErrorToast(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [state.error, state.phase]);
 
   const visibleSessions = useMemo(() => state.sessions, [state.sessions]);
   const activeSession = draftMode ? undefined : state.sessions.find((session) => session.id === state.activeSessionId);
@@ -76,7 +84,7 @@ export function WorkspacePage({ api }: WorkspacePageProps) {
 
   return <section className="page-stack workspace-domain" data-workspace-domain>
     {accountsError && <div className="workspace-inline-error" role="alert">账号上下文加载失败：{accountsError}</div>}
-    {state.error && <div className="workspace-inline-error" role="alert">{state.error}</div>}
+    {errorToast && <Toast message={errorToast} tone="error" onDismiss={() => setErrorToast(null)} />}
     {contextMissing ? <WorkspaceState title="请先选择账号" message="每个工作区会话都绑定一个可用的闲鱼账号。" action={<button className="btn primary" type="button" onClick={chooseAccount}>前往账号管理</button>} />
       : state.phase === 'forbidden' ? <WorkspaceState title="暂无工作区权限" message={state.error ?? '当前账号范围无法读取工作区。'} action={<button className="btn ghost" type="button" onClick={() => void controller.reload()}>重新加载</button>} />
         : <div className="workspace-surface">
