@@ -183,6 +183,89 @@ test('delayed auto reply sends and persists when no human reply arrives', async 
   }
 });
 
+test('buyer acknowledgement after the latest AI reply is skipped without generating duplicate text', async () => {
+  const runtime = createApp(loadConfig({
+    ...process.env,
+    AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
+    HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false',
+    XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_MODEL_ENABLED: 'false', AUTO_REPLY_SEND_MODE: 'simulate',
+    AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
+  }));
+  await runtime.listen();
+  try {
+    const boot = await runtime.auth.bootstrap({ email: 'ack-gate-e2e@example.com', password: 'password-123', displayName: 'Ack Gate E2E' });
+    const adminId = boot.admin.id;
+    const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: 'ack-gate-seller' });
+    const conversation = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'ack-gate-buyer', buyerDisplayName: 'Ack Buyer', externalConversationRef: 'ack-gate-conversation' });
+
+    const first = await runtime.xianyuIm.handleExternalEvent(adminId, {
+      accountId: account.id,
+      externalConversationRef: conversation.externalConversationRef!,
+      externalMessageRef: 'ack-gate-question.PNM',
+      senderRef: conversation.buyerRef,
+      senderName: conversation.buyerDisplayName,
+      direction: 'inbound',
+      bodyType: 'text',
+      bodyText: 'Can I press enter here?',
+      occurredAt: '2026-10-05T01:00:00.000Z',
+    });
+    assert.equal(first.autoReply?.run.status, 'persisted');
+
+    const acknowledgement = await runtime.xianyuIm.handleExternalEvent(adminId, {
+      accountId: account.id,
+      externalConversationRef: conversation.externalConversationRef!,
+      externalMessageRef: 'ack-gate-ok.PNM',
+      senderRef: conversation.buyerRef,
+      senderName: conversation.buyerDisplayName,
+      direction: 'inbound',
+      bodyType: 'text',
+      bodyText: 'OK',
+      occurredAt: '2026-10-05T01:00:01.000Z',
+    });
+
+    assert.equal(acknowledgement.autoReply?.run.status, 'skipped');
+    assert.equal(acknowledgement.autoReply?.run.failureCode, 'AUTO_REPLY_ACKNOWLEDGEMENT_AFTER_AGENT_REPLY');
+    assert.equal(acknowledgement.autoReply?.outboundMessage, undefined);
+    const messages = await runtime.messages.listMessages(adminId, conversation.id, { limit: 20 });
+    assert.equal(messages.items.filter((message) => message.direction === 'outbound' && message.source === 'ai').length, 1);
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('acknowledgement is not suppressed when a newer buyer message follows the agent reply', async () => {
+  const runtime = createApp(loadConfig({
+    ...process.env,
+    AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
+    HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false',
+    XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_MODEL_ENABLED: 'false', AUTO_REPLY_SEND_MODE: 'simulate',
+    AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
+  }));
+  await runtime.listen();
+  try {
+    const boot = await runtime.auth.bootstrap({ email: 'ack-gate-follow-up@example.com', password: 'password-123', displayName: 'Ack Gate Follow Up E2E' });
+    const adminId = boot.admin.id;
+    const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: 'ack-gate-follow-up-seller' });
+    const conversation = await runtime.store.createConversation({ adminId, accountId: account.id, buyerRef: 'ack-gate-follow-up-buyer', buyerDisplayName: 'Ack Follow Up Buyer', externalConversationRef: 'ack-gate-follow-up-conversation' });
+
+    const first = await runtime.xianyuIm.handleExternalEvent(adminId, {
+      accountId: account.id, externalConversationRef: conversation.externalConversationRef!, externalMessageRef: 'ack-follow-up-question.PNM',
+      senderRef: conversation.buyerRef, senderName: conversation.buyerDisplayName, direction: 'inbound', bodyType: 'text', bodyText: 'What is the delivery time?', occurredAt: '2026-10-05T01:00:00.000Z',
+    });
+    assert.equal(first.autoReply?.run.status, 'persisted');
+
+    const followUp = await runtime.xianyuIm.handleExternalEvent(adminId, {
+      accountId: account.id, externalConversationRef: conversation.externalConversationRef!, externalMessageRef: 'ack-follow-up-new-question.PNM',
+      senderRef: conversation.buyerRef, senderName: conversation.buyerDisplayName, direction: 'inbound', bodyType: 'text', bodyText: 'OK, and can I change the address?', occurredAt: '2026-10-05T01:00:01.000Z',
+    });
+
+    assert.notEqual(followUp.autoReply?.run.failureCode, 'AUTO_REPLY_ACKNOWLEDGEMENT_AFTER_AGENT_REPLY');
+    assert.equal(followUp.autoReply?.outboundMessage?.source, 'ai');
+  } finally {
+    await runtime.close();
+  }
+});
+
 test('deferred inbox aggregates messages received during the takeover wait', async () => {
   const runtime = createApp(loadConfig({
     ...process.env,

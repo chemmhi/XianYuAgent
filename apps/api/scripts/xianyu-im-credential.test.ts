@@ -197,6 +197,32 @@ describe('xianyu IM credential refresh', () => {
     assert.equal((service as unknown as { clients: Map<string, unknown> }).clients.size, 0);
   });
 
+  it('refreshes an idle connected client through one account-scoped single-flight session refresh', async () => {
+    let refreshCalls = 0;
+    const service = new XianyuImService({} as never, {} as never, {} as never);
+    const client = {
+      connected: true,
+      refreshSession: async () => {
+        refreshCalls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      },
+      disconnect: async () => undefined,
+    };
+    const internal = service as unknown as {
+      clients: Map<string, unknown>;
+      refreshActiveCredential: (adminId: string, accountId: string) => Promise<void>;
+    };
+    internal.clients.set('admin-1:account-1', client);
+
+    await Promise.all([
+      internal.refreshActiveCredential('admin-1', 'account-1'),
+      internal.refreshActiveCredential('admin-1', 'account-1'),
+    ]);
+
+    assert.equal(refreshCalls, 1);
+    await service.close();
+  });
+
   it('persists an expired account when listener bootstrap finds missing credentials', async () => {
     let account = { id: 'account-1', platform: 'xianyu', status: 'connected' as const };
     const store = {

@@ -511,6 +511,26 @@ export class AutoReplyService {
         payload: { contextDigest, maxHistory: runtime.maxHistory, context },
       });
 
+      if (classification.decision === 'replied' && isAcknowledgementAfterAgentReply(inboundMessage.bodyText, context)) {
+        const failureCode = 'AUTO_REPLY_ACKNOWLEDGEMENT_AFTER_AGENT_REPLY';
+        const riskFlags = [...classification.riskFlags, 'buyer_acknowledgement'];
+        const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode, riskFlags, eventPayload: {
+          input: { kind: 'acknowledgement_gate', messageId: inboundMessage.id, contextDigest },
+          output: { decision: 'skipped', reason: failureCode },
+          error: { code: failureCode },
+        } });
+        await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'skipped', reason: failureCode, contextDigest });
+        await this.godView?.emit({
+          phase: 'route',
+          event: 'route.acknowledgement_skipped',
+          traceId,
+          runId: run.id,
+          buyer,
+          payload: { status: 'skipped', decision: 'skipped', failureCode, contextDigest },
+        });
+        return { run: updated ?? run, inboundMessage, classification: { ...classification, decision: 'skipped', riskFlags }, context };
+      }
+
       if (this.repairRuntime?.enabled) {
         try {
           repairRoute = await this.repairRuntime.routeInbound({ conversation, inboundMessage, context, classification });
@@ -1046,6 +1066,19 @@ function stripSensitiveTerms(value: string): string {
     .replace(/cookie|api\s*key|access[_ -]?token|验证码|密码|秘钥|密钥/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function isAcknowledgementAfterAgentReply(text: string | undefined, context: AutoReplyContext): boolean {
+  const normalized = text?.trim().toLocaleLowerCase().replace(/[\s.,!?，。！？、~～…]+/gu, '');
+  if (!normalized || normalized.length > 24) return false;
+  // Only suppress a short acknowledgement when the latest conversational
+  // message is already an agent reply. Older agent messages must not swallow
+  // a real follow-up after a newer buyer message.
+  const latestConversationalMessage = [...context.recentMessages]
+    .reverse()
+    .find((message) => message.senderRole !== 'system' && Boolean(message.bodyText?.trim()));
+  if (!latestConversationalMessage || latestConversationalMessage.direction !== 'outbound' || latestConversationalMessage.senderRole !== 'agent') return false;
+  return /^(?:ok(?:ay)?|kk|gotit|understood|thanks?|thankyou|received|好的?|好滴|收到|明白(?:了)?|了解(?:了)?|知道了?|行(?:的)?|可以|嗯+|哦+|谢(?:谢|了)|没问题|好嘞|好哒)$/iu.test(normalized);
 }
 
 function validateSemanticSegments(proposed: string[] | undefined, reply: string): string[] | undefined {
