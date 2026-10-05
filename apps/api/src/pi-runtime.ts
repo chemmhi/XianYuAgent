@@ -2,7 +2,7 @@ import type { RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, Stor
 import type { WorkspaceRuntime } from './workspace.js';
 import { executeNativeWorkspaceRead } from './workspace-native-read.js';
 import { prepareNativeWorkspaceWrite } from './workspace-native-write.js';
-import type { WorkspaceCommandOrchestrator } from './workspace-commands.js';
+import type { WorkspaceCommandInput, WorkspaceCommandOrchestrator, WorkspaceModelToolResult } from './workspace-commands.js';
 import { persistWorkspaceConfirmation } from './workspace-confirmation.js';
 import { ModelClientService } from './model-client.js';
 
@@ -68,10 +68,26 @@ export interface ModelCompletionResult {
   webSearchUsed?: boolean;
 }
 
+export interface ModelToolCallDelta {
+  index: number;
+  id?: string;
+  name?: string;
+  argumentsDelta?: string;
+}
+
+export interface ModelStreamHandlers {
+  onTextDelta?: (delta: string) => void | Promise<void>;
+  onReasoningDelta?: (delta: string) => void | Promise<void>;
+  onToolCallDelta?: (delta: ModelToolCallDelta) => void | Promise<void>;
+  onToolCall?: (call: ModelToolCall) => void | Promise<void>;
+  onDone?: (result: ModelCompletionResult) => void | Promise<void>;
+}
+
 export interface ModelClient {
   /** Whether the selected transport can execute OpenAI's built-in web_search tool. */
   supportsWebSearch?: boolean;
   complete(input: ModelCompletionRequest): Promise<ModelCompletionResult>;
+  stream?(input: ModelCompletionRequest, handlers: ModelStreamHandlers): Promise<ModelCompletionResult>;
 }
 
 export interface PiRuntimeConfig {
@@ -187,6 +203,75 @@ export class OpenAICompatibleModelClient implements ModelClient {
       input.signal?.removeEventListener('abort', onAbort);
     }
   }
+
+  async stream(input: ModelCompletionRequest, handlers: ModelStreamHandlers = {}): Promise<ModelCompletionResult> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort('timeout'), this.timeoutMs);
+    const onAbort = () => controller.abort('external');
+    if (input.signal?.aborted) controller.abort('external');
+    else input.signal?.addEventListener('abort', onAbort, { once: true });
+
+    try {
+      const response = await this.fetchImpl(this.endpoint, {
+        method: 'POST',
+        headers: {
+          accept: 'text/event-stream, application/json',
+          authorization: `Bearer ${this.options.apiKey}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(this.wireApi === 'responses'
+          ? { ...toResponsesRequestBody(this.options.model, input, input.reasoningEffort ?? this.options.reasoningEffort), stream: true }
+          : { ...toChatCompletionsRequestBody(this.options.model, input, input.reasoningEffort ?? this.options.reasoningEffort), stream: true }),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new PiModelClientError('MODEL_HTTP_ERROR', `model provider returned HTTP ${response.status}`, response.status);
+
+      const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
+      if (!contentType.includes('text/event-stream') || !response.body) {
+        let payload: unknown;
+        try { payload = await response.json(); } catch { throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model provider returned invalid JSON'); }
+        const result = this.resultFromPayload(payload);
+        if (!result.content && !result.toolCalls?.length) throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model provider returned empty content');
+        if (result.content) await handlers.onTextDelta?.(result.content);
+        for (const call of result.toolCalls ?? []) await handlers.onToolCall?.(call);
+        await handlers.onDone?.(result);
+        return result;
+      }
+
+      const state = createStreamState(this.options.model);
+      await consumeSse(response.body, async (eventType, payload) => {
+        if (this.wireApi === 'responses') await handleResponsesStreamEvent(eventType, payload, state, handlers);
+        else await handleChatStreamEvent(eventType, payload, state, handlers);
+      });
+      const result = finalizeStreamState(state, this.options.model, this.wireApi === 'responses');
+      if (!result.content && !result.toolCalls?.length) throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model provider returned empty content');
+      await handlers.onDone?.(result);
+      return result;
+    } catch (error) {
+      if (error instanceof PiModelClientError) throw error;
+      if (controller.signal.aborted) {
+        if (input.signal?.aborted) throw new PiModelClientError('MODEL_ABORTED', 'model request aborted');
+        throw new PiModelClientError('MODEL_TIMEOUT', `model request timed out after ${this.timeoutMs}ms`);
+      }
+      throw new PiModelClientError('MODEL_NETWORK_ERROR', 'model provider request failed');
+    } finally {
+      clearTimeout(timeout);
+      input.signal?.removeEventListener('abort', onAbort);
+    }
+  }
+
+  private resultFromPayload(payload: unknown): ModelCompletionResult {
+    const toolCalls = this.wireApi === 'responses' ? extractResponsesToolCalls(payload) : extractCompletionToolCalls(payload);
+    const content = this.wireApi === 'responses' ? extractResponsesContent(payload) : extractCompletionContent(payload);
+    const record = isRecord(payload) ? payload : undefined;
+    return {
+      content,
+      model: typeof record?.model === 'string' && record.model.trim() ? record.model : this.options.model,
+      usage: isRecord(record?.usage) ? record.usage : undefined,
+      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+      webSearchUsed: this.wireApi === 'responses' && extractResponsesWebSearchUsed(payload),
+    };
+  }
 }
 
 export interface PiRuntimeEvent {
@@ -288,12 +373,21 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       await this.emit(input.run.id, 'run.started', { status: 'running' });
       await this.emit(input.run.id, 'step.started', { stepId: step.id, status: 'running' });
       await this.emit(input.run.id, 'runtime.started', { status: 'running', model: this.options.model, messageType: 'tool_event' });
-      await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: '正在分析请求并准备执行上下文。', summary: '已创建高层推理摘要' });
+
+      const modelClient = await this.options.resolveModelClient?.({
+        adminId: input.adminId ?? input.run.requestedBy,
+        accountId: input.run.accountId,
+      }) ?? this.modelClient;
+      if (modelClient.stream && this.options.workspaceCommands) {
+        await this.executeModelDriven(input, step, sessionId, modelClient, signal);
+        return;
+      }
 
       const nativeWrite = this.options.workspaceCommands
         ? await this.options.workspaceCommands.prepareWrite({ adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction, requestId: `workspace:${input.run.id}`, traceId: `workspace:${input.run.id}` })
         : await prepareNativeWorkspaceWrite({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction });
       if (nativeWrite) {
+        await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: nativeWrite.summary, summary: nativeWrite.title });
         await this.transitionStep(step, 'waiting_confirmation', { outputSummary: nativeWrite.summary });
         await this.transitionRun(input.run, 'waiting_confirmation', { resultSummary: nativeWrite.summary });
         const confirmation = await persistWorkspaceConfirmation({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, sessionId, run: input.run, step, plan: nativeWrite });
@@ -305,6 +399,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       await this.transitionStep(step, 'executing');
       await this.emit(input.run.id, 'run.executing', { status: 'executing', messageType: 'tool_event' });
       await this.emit(input.run.id, 'step.executing', { stepId: step.id, status: 'executing', messageType: 'tool_event' });
+      await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: '已识别为受控工作区命令，正在读取真实数据。', summary: '执行工作区命令' });
 
       const nativeRead = this.options.workspaceCommands
         ? await this.options.workspaceCommands.execute({ adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction, requestId: `workspace:${input.run.id}`, traceId: `workspace:${input.run.id}` })
@@ -323,10 +418,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
         return;
       }
 
-      const modelClient = await this.options.resolveModelClient?.({
-        adminId: input.adminId ?? input.run.requestedBy,
-        accountId: input.run.accountId,
-      }) ?? this.modelClient;
+      await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: '未匹配到内置工作区命令，正在调用模型生成回复。', summary: '调用模型' });
       const result = await modelClient.complete({
         messages: [...(input.history ?? []), { role: 'user', content: input.run.instruction }],
         signal,
@@ -337,7 +429,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       const output = redactSensitiveText(result.content, this.options.outputLimit ?? 2_000, this.options.redactSecrets);
       await this.transitionStep(step, 'succeeded', { finishedAt, outputSummary: output });
       await this.transitionRun(input.run, 'succeeded', { finishedAt, resultSummary: output });
-      await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: '已完成模型处理并整理结果。', summary: step.label });
+      await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: `模型 ${result.model} 已返回结果，正在整理回复。`, summary: '整理模型结果' });
       await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'final_answer', content: output });
       await this.emit(input.run.id, 'step.succeeded', { stepId: step.id, status: 'succeeded', messageType: 'reasoning_summary', summary: step.label });
       await this.emit(input.run.id, 'runtime.succeeded', { status: 'succeeded', model: result.model, messageType: 'final_answer', content: output });
@@ -348,6 +440,130 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     }
   }
 
+  private async executeModelDriven(input: PiRuntimeEnqueueInput, step: StepRecord, sessionId: string, modelClient: ModelClient, signal: AbortSignal): Promise<void> {
+    const commands = this.options.workspaceCommands;
+    if (!commands?.getModelTools || !commands.executeModelTool || !modelClient.stream) throw new Error('MODEL_TOOL_RUNTIME_UNAVAILABLE');
+    await this.transitionRun(input.run, 'executing');
+    await this.transitionStep(step, 'executing');
+    await this.emit(input.run.id, 'run.executing', { status: 'executing', messageType: 'tool_event' });
+    await this.emit(input.run.id, 'step.executing', { stepId: step.id, status: 'executing', messageType: 'tool_event' });
+
+    const tools = commands.getModelTools();
+    const messages: ModelMessage[] = [...(input.history ?? [])];
+    if (!messages.some((message) => message.role === 'system')) {
+      messages.unshift({ role: 'system', content: 'You are a Workspace agent. Use the provided tools for account-scoped data and mutations. Do not claim a tool ran unless its result is returned. For mutations, use the preparation tool and wait for confirmation. Keep the final answer concise and grounded in tool results.' });
+    }
+    messages.push({ role: 'user', content: input.run.instruction });
+
+    const allReasoning: string[] = [];
+    let finalResult: ModelCompletionResult | undefined;
+    let waitingConfirmation = false;
+    let completedWithoutTool = false;
+    const maxRounds = 8;
+    for (let round = 0; round < maxRounds; round += 1) {
+      if (this.stopped || signal.aborted) return;
+      const streamId = `${input.run.id}:stream:${round + 1}`;
+      const reasoningMessageId = `${streamId}:reasoning`;
+      const assistantMessageId = `${streamId}:assistant`;
+      let reasoning = '';
+      let assistant = '';
+      const toolCallNames = new Map<number, string>();
+      await this.emit(input.run.id, 'stream.started', { streamId, round: round + 1, model: this.options.model, status: 'running' });
+      const result = await modelClient.stream({ messages, tools, toolChoice: 'auto', signal }, {
+        onReasoningDelta: async (delta) => {
+          reasoning += delta;
+          allReasoning.push(delta);
+          await this.emit(input.run.id, 'reasoning.delta', { streamId, messageId: reasoningMessageId, contentDelta: redactSensitiveText(delta, 2_000, this.options.redactSecrets), messageType: 'reasoning_summary', status: 'running' });
+        },
+        onTextDelta: async (delta) => {
+          assistant += delta;
+          await this.emit(input.run.id, 'assistant.delta', { streamId, messageId: assistantMessageId, contentDelta: redactSensitiveText(delta, 4_000, this.options.redactSecrets), messageType: 'final_answer', status: 'running' });
+        },
+        onToolCallDelta: async (delta) => {
+          if (delta.name) toolCallNames.set(delta.index, delta.name);
+          await this.emit(input.run.id, 'tool.call.delta', { streamId, toolCallId: delta.id, toolName: delta.name ?? toolCallNames.get(delta.index), index: delta.index, argumentsDelta: redactSensitiveText(delta.argumentsDelta ?? '', 4_000, this.options.redactSecrets), status: 'streaming' });
+        },
+        onToolCall: async (call) => {
+          await this.emit(input.run.id, 'tool.call.completed', { streamId, toolCallId: call.id, toolName: call.function.name, arguments: redactSensitiveText(call.function.arguments, 4_000, this.options.redactSecrets), status: 'selected' });
+        },
+      });
+      finalResult = result;
+      if (reasoning) await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: redactSensitiveText(reasoning, 8_000, this.options.redactSecrets), summary: '模型原生推理' });
+      const calls = result.toolCalls ?? [];
+      if (calls.length === 0) {
+        completedWithoutTool = true;
+        break;
+      }
+
+      messages.push({ role: 'assistant', content: result.content ?? assistant, toolCalls: calls });
+      for (const call of calls) {
+        const toolStartedAt = new Date().toISOString();
+        await this.emit(input.run.id, 'tool.call.started', { streamId, toolCallId: call.id, toolName: call.function.name, arguments: redactSensitiveText(call.function.arguments, 4_000, this.options.redactSecrets), startedAt: toolStartedAt, status: 'running' });
+        let args: Record<string, unknown>;
+        try {
+          const parsed: unknown = JSON.parse(call.function.arguments || '{}');
+          if (!isRecord(parsed) || Array.isArray(parsed)) throw new Error('invalid tool arguments');
+          args = parsed;
+        } catch {
+          const errorResult = { ok: false, code: 'INVALID_TOOL_ARGUMENTS' };
+          await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, status: 'failed', result: errorResult });
+          messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(errorResult) });
+          continue;
+        }
+        try {
+          const toolInput: WorkspaceCommandInput = { adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction, requestId: `workspace:${input.run.id}`, traceId: `workspace:${input.run.id}` };
+          const result = await commands.executeModelTool(call.function.name, args, toolInput);
+          const redacted = this.redactToolResult(result);
+          await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, status: 'succeeded', result: redacted, completedAt: new Date().toISOString() });
+          messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(redacted) });
+          if (result.kind === 'write_plan' && result.plan) {
+            await this.transitionStep(step, 'waiting_confirmation', { outputSummary: result.plan.summary });
+            await this.transitionRun(input.run, 'waiting_confirmation', { resultSummary: result.plan.summary });
+            const confirmation = await persistWorkspaceConfirmation({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, sessionId, run: input.run, step, plan: result.plan });
+            await this.emit(input.run.id, 'workspace.confirmation.created', { status: 'active', confirmationId: confirmation.id, action: confirmation.action, policyRef: confirmation.policyRef, manifest: confirmation.manifest, expiresAt: confirmation.expiresAt });
+            waitingConfirmation = true;
+            break;
+          }
+        } catch (error) {
+          const failure = toSafeFailure(error);
+          const errorResult = { ok: false, code: failure.code, message: failure.summary };
+          await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, status: 'failed', result: errorResult, completedAt: new Date().toISOString() });
+          messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(errorResult) });
+        }
+      }
+      await this.emit(input.run.id, 'stream.round.completed', { streamId, round: round + 1, toolCallCount: calls.length, status: waitingConfirmation ? 'waiting_confirmation' : 'tool_completed' });
+      if (waitingConfirmation) break;
+    }
+
+    if (waitingConfirmation) {
+      await this.emit(input.run.id, 'stream.completed', { status: 'waiting_confirmation', model: finalResult?.model ?? this.options.model, reasoningMessageCount: allReasoning.length });
+      return;
+    }
+    if (!completedWithoutTool) throw new PiModelClientError('MODEL_INVALID_RESPONSE', `model tool loop exceeded ${maxRounds} rounds`);
+    if (!finalResult) throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model provider returned no result');
+    const output = redactSensitiveText(finalResult.content, this.options.outputLimit ?? 2_000, this.options.redactSecrets);
+    const finishedAt = new Date().toISOString();
+    await this.transitionStep(step, 'succeeded', { finishedAt, outputSummary: output });
+    await this.transitionRun(input.run, 'succeeded', { finishedAt, resultSummary: output });
+    await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'final_answer', content: output });
+    await this.emit(input.run.id, 'stream.completed', { status: 'succeeded', model: finalResult.model, content: output, reasoningMessageCount: allReasoning.length });
+    await this.emit(input.run.id, 'step.succeeded', { stepId: step.id, status: 'succeeded', messageType: 'final_answer', summary: step.label });
+    await this.emit(input.run.id, 'runtime.succeeded', { status: 'succeeded', model: finalResult.model, messageType: 'final_answer', content: output });
+    await this.emit(input.run.id, 'run.succeeded', { status: 'succeeded', resultSummary: output, messageType: 'final_answer', content: output });
+  }
+
+  private redactToolResult(result: WorkspaceModelToolResult): Record<string, unknown> {
+    return {
+      ok: true,
+      kind: result.kind,
+      title: result.title,
+      summary: result.summary,
+      content: redactSensitiveText(result.content, this.options.outputLimit ?? 2_000, this.options.redactSecrets),
+      ...(result.data ? { data: redactSensitiveText(JSON.stringify(result.data), this.options.outputLimit ?? 2_000, this.options.redactSecrets) } : {}),
+      ...(result.plan ? { requiresConfirmation: true, action: result.plan.action, policyRef: result.plan.policyRef, manifest: result.plan.manifest } : {}),
+    };
+  }
+
   private async recordFailure(input: PiRuntimeEnqueueInput, step: StepRecord, error: unknown): Promise<void> {
     const run = input.run;
     const failure = toSafeFailure(error);
@@ -356,6 +572,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       if (step.status !== 'failed') await this.transitionStep(step, 'failed', { finishedAt, errorCode: failure.code, outputSummary: failure.summary });
       if (run.status !== 'failed') await this.transitionRun(run, 'failed', { finishedAt, errorCode: failure.code });
       const sessionId = input.sessionId ?? run.sessionId;
+      await this.persistMessage({ adminId: input.adminId, sessionId, runId: run.id, messageType: 'reasoning_summary', content: failure.summary, summary: `运行失败：${failure.code}` });
       await this.persistMessage({ adminId: input.adminId, sessionId, runId: run.id, messageType: 'final_answer', content: failure.summary });
       await this.emit(run.id, 'step.failed', { stepId: step.id, status: 'failed', errorCode: failure.code, messageType: 'tool_event' });
       await this.emit(run.id, 'runtime.failed', { status: 'failed', errorCode: failure.code, messageType: 'final_answer', content: failure.summary });
@@ -542,6 +759,188 @@ function modelContentToText(content: ModelMessageContent): string {
   return content.filter((part): part is { type: 'text'; text: string } => part.type === 'text').map((part) => part.text).join('\n');
 }
 
+interface StreamState {
+  content: string;
+  reasoning: string;
+  model: string;
+  usage?: Record<string, unknown>;
+  toolCalls: Map<number, { id: string; name: string; arguments: string }>;
+  webSearchUsed: boolean;
+  emittedText: boolean;
+}
+
+function createStreamState(model: string): StreamState {
+  return { content: '', reasoning: '', model, toolCalls: new Map(), webSearchUsed: false, emittedText: false };
+}
+
+function finalizeStreamState(state: StreamState, fallbackModel: string, responses: boolean): ModelCompletionResult {
+  return {
+    content: state.content.trim(),
+    model: state.model || fallbackModel,
+    usage: state.usage,
+    toolCalls: state.toolCalls.size > 0 ? [...state.toolCalls.entries()].sort(([left], [right]) => left - right).map(([, value]) => ({ id: value.id, type: 'function' as const, function: { name: value.name, arguments: value.arguments } })) : undefined,
+    webSearchUsed: responses ? state.webSearchUsed : undefined,
+  };
+}
+
+async function handleChatStreamEvent(eventType: string | undefined, payload: unknown, state: StreamState, handlers: ModelStreamHandlers): Promise<void> {
+  if (!isRecord(payload)) return;
+  if (typeof payload.model === 'string' && payload.model.trim()) state.model = payload.model;
+  if (isRecord(payload.usage)) state.usage = payload.usage;
+  const choices = Array.isArray(payload.choices) ? payload.choices : [];
+  const choice = isRecord(choices[0]) ? choices[0] : undefined;
+  const delta = choice && isRecord(choice.delta) ? choice.delta : undefined;
+  if (!delta) return;
+
+  const text = extractDeltaText(delta.content);
+  if (text) {
+    state.content += text;
+    state.emittedText = true;
+    await handlers.onTextDelta?.(text);
+  }
+  const reasoning = firstString(delta.reasoning_content, delta.reasoning, delta.reasoning_summary);
+  if (reasoning) {
+    state.reasoning += reasoning;
+    await handlers.onReasoningDelta?.(reasoning);
+  }
+  if (Array.isArray(delta.tool_calls)) {
+    for (const candidate of delta.tool_calls) {
+      if (!isRecord(candidate)) continue;
+      const index = typeof candidate.index === 'number' ? candidate.index : state.toolCalls.size;
+      const current = state.toolCalls.get(index) ?? { id: '', name: '', arguments: '' };
+      const id = typeof candidate.id === 'string' ? candidate.id : current.id;
+      const fn = isRecord(candidate.function) ? candidate.function : undefined;
+      const name = typeof fn?.name === 'string' ? fn.name : current.name;
+      const argumentsDelta = typeof fn?.arguments === 'string' ? fn.arguments : '';
+      state.toolCalls.set(index, { id, name, arguments: current.arguments + argumentsDelta });
+      await handlers.onToolCallDelta?.({ index, ...(id ? { id } : {}), ...(name ? { name } : {}), ...(argumentsDelta ? { argumentsDelta } : {}) });
+    }
+  }
+  if (choice?.finish_reason === 'tool_calls') {
+    for (const [, value] of [...state.toolCalls.entries()].sort(([left], [right]) => left - right)) {
+      if (value.id && value.name) await handlers.onToolCall?.({ id: value.id, type: 'function', function: { name: value.name, arguments: value.arguments } });
+    }
+  }
+  void eventType;
+}
+
+async function handleResponsesStreamEvent(eventType: string | undefined, payload: unknown, state: StreamState, handlers: ModelStreamHandlers): Promise<void> {
+  if (!isRecord(payload)) return;
+  const type = typeof payload.type === 'string' ? payload.type : eventType;
+  if (type === 'response.output_text.delta') {
+    const delta = typeof payload.delta === 'string' ? payload.delta : '';
+    if (delta) { state.content += delta; state.emittedText = true; await handlers.onTextDelta?.(delta); }
+    return;
+  }
+  if (type?.includes('reasoning') && type.includes('delta')) {
+    const delta = firstString(payload.delta, payload.text);
+    if (delta) { state.reasoning += delta; await handlers.onReasoningDelta?.(delta); }
+    return;
+  }
+  if (type === 'response.output_item.added' || type === 'response.output_item.done') {
+    const item = isRecord(payload.item) ? payload.item : isRecord(payload.output_item) ? payload.output_item : undefined;
+    if (item?.type === 'web_search_call') state.webSearchUsed = true;
+    if (item?.type === 'function_call') {
+      const index = typeof payload.output_index === 'number' ? payload.output_index : state.toolCalls.size;
+      const id = typeof item.call_id === 'string' ? item.call_id : typeof item.id === 'string' ? item.id : `call_${index}`;
+      const name = typeof item.name === 'string' ? item.name : '';
+      const args = typeof item.arguments === 'string' ? item.arguments : '';
+      const existing = state.toolCalls.get(index);
+      state.toolCalls.set(index, { id, name, arguments: (existing?.arguments ?? '') + args });
+      if (type === 'response.output_item.done' && name) await handlers.onToolCall?.({ id, type: 'function', function: { name, arguments: state.toolCalls.get(index)?.arguments ?? args } });
+    }
+    return;
+  }
+  if (type === 'response.function_call_arguments.delta') {
+    const index = typeof payload.output_index === 'number' ? payload.output_index : state.toolCalls.size;
+    const existing = state.toolCalls.get(index) ?? { id: typeof payload.call_id === 'string' ? payload.call_id : `call_${index}`, name: typeof payload.name === 'string' ? payload.name : '', arguments: '' };
+    const delta = typeof payload.delta === 'string' ? payload.delta : '';
+    state.toolCalls.set(index, { ...existing, arguments: existing.arguments + delta });
+    await handlers.onToolCallDelta?.({ index, ...(existing.id ? { id: existing.id } : {}), ...(existing.name ? { name: existing.name } : {}), ...(delta ? { argumentsDelta: delta } : {}) });
+    return;
+  }
+  if (type === 'response.function_call_arguments.done') {
+    const index = typeof payload.output_index === 'number' ? payload.output_index : state.toolCalls.size;
+    const existing = state.toolCalls.get(index) ?? { id: typeof payload.call_id === 'string' ? payload.call_id : `call_${index}`, name: typeof payload.name === 'string' ? payload.name : '', arguments: '' };
+    const args = typeof payload.arguments === 'string' ? payload.arguments : existing.arguments;
+    state.toolCalls.set(index, { ...existing, arguments: args });
+    return;
+  }
+  if (type === 'response.completed' || type === 'response.done') {
+    const response = isRecord(payload.response) ? payload.response : payload;
+    if (typeof response.model === 'string' && response.model.trim()) state.model = response.model;
+    if (isRecord(response.usage)) state.usage = response.usage;
+    if (extractResponsesWebSearchUsed(response)) state.webSearchUsed = true;
+    const content = extractResponsesContent(response);
+    if (content && !state.emittedText) { state.content = content; await handlers.onTextDelta?.(content); }
+    const calls = extractResponsesToolCalls(response);
+    for (const call of calls) {
+      const existing = [...state.toolCalls.values()].find((candidate) => candidate.id === call.id);
+      if (!existing) await handlers.onToolCall?.(call);
+      else state.toolCalls.set([...state.toolCalls.entries()].find(([, candidate]) => candidate.id === call.id)?.[0] ?? state.toolCalls.size, { ...existing, name: call.function.name, arguments: call.function.arguments });
+    }
+    return;
+  }
+  if (type === 'error' || type === 'response.failed') {
+    const message = isRecord(payload.error) && typeof payload.error.message === 'string' ? payload.error.message : 'model provider stream failed';
+    throw new PiModelClientError('MODEL_INVALID_RESPONSE', message);
+  }
+}
+
+async function consumeSse(body: ReadableStream<Uint8Array>, onEvent: (eventType: string | undefined, payload: unknown) => Promise<void>): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let eventType: string | undefined;
+  let dataLines: string[] = [];
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      let newline = buffer.indexOf('\n');
+      while (newline >= 0) {
+        const line = buffer.slice(0, newline).replace(/\r$/, '');
+        buffer = buffer.slice(newline + 1);
+        if (!line) {
+          if (dataLines.length) {
+            const raw = dataLines.join('\n');
+            if (raw !== '[DONE]') {
+              let payload: unknown;
+              try { payload = JSON.parse(raw); } catch { throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model provider returned invalid SSE JSON'); }
+              await onEvent(eventType, payload);
+            }
+          }
+          eventType = undefined;
+          dataLines = [];
+        } else if (line.startsWith('event:')) eventType = line.slice(6).trim() || undefined;
+        else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+        newline = buffer.indexOf('\n');
+      }
+    }
+    if (buffer.trim() || dataLines.length) {
+      const raw = dataLines.length ? dataLines.join('\n') : buffer.trim();
+      if (raw && raw !== '[DONE]') {
+        let payload: unknown;
+        try { payload = JSON.parse(raw); } catch { throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model provider returned invalid SSE JSON'); }
+        await onEvent(eventType, payload);
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function extractDeltaText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) return '';
+  return value.map((part) => isRecord(part) && typeof part.text === 'string' ? part.text : typeof part === 'string' ? part : '').join('');
+}
+
+function firstString(...values: unknown[]): string {
+  return values.find((value): value is string => typeof value === 'string' && value.length > 0) ?? '';
+}
+
 function toResponsesToolDefinition(tool: ModelToolDefinition): Record<string, unknown> {
   if (tool.type === 'web_search') return { type: 'web_search' };
   return {
@@ -628,6 +1027,12 @@ function redactSensitiveText(value: string, outputLimit: number, secrets: string
 function toSafeFailure(error: unknown): { code: string; summary: string } {
   if (error instanceof PiModelClientError) {
     return { code: error.code, summary: 'Pi Runtime 调用失败，请稍后重试' };
+  }
+  const candidate = isRecord(error) ? error : undefined;
+  const code = typeof candidate?.code === 'string' ? candidate.code : undefined;
+  const message = typeof candidate?.message === 'string' ? candidate.message.trim() : undefined;
+  if (code && message && ['VALIDATION_FAILED', 'NOT_FOUND', 'FORBIDDEN', 'CONFLICT', 'ACCOUNT_SCOPE_FORBIDDEN', 'WORKSPACE_PRODUCT_REQUIRED', 'WORKSPACE_PRODUCT_NOT_FOUND'].includes(code)) {
+    return { code, summary: message };
   }
   return { code: 'RUNTIME_FAILED', summary: 'Pi Runtime 执行失败，请稍后重试' };
 }

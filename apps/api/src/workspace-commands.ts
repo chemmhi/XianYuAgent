@@ -13,6 +13,7 @@ import type { Store, RunRecord, StepRecord } from './domain.js';
 import type { OrderDeliveryService } from './order-delivery.js';
 import { executeNativeWorkspaceRead, type NativeWorkspaceReadResult } from './workspace-native-read.js';
 import { prepareNativeWorkspaceWrite, type NativeWorkspaceWritePlan } from './workspace-native-write.js';
+import type { ModelToolDefinition } from './pi-runtime.js';
 
 export type WorkspaceCommandResult = NativeWorkspaceReadResult & { mutation?: boolean; operation?: string };
 
@@ -44,6 +45,15 @@ export interface WorkspaceCommandInput {
   traceId: string;
 }
 
+export interface WorkspaceModelToolResult {
+  kind: 'read' | 'write_plan';
+  title: string;
+  summary: string;
+  content: string;
+  data?: Record<string, unknown>;
+  plan?: NativeWorkspaceWritePlan;
+}
+
 type CommandKind = 'accounts' | 'dashboard' | 'products' | 'coupons' | 'orders' | 'agent_activity' | 'agent_settings' | 'model_settings';
 
 /**
@@ -53,6 +63,53 @@ type CommandKind = 'accounts' | 'dashboard' | 'products' | 'coupons' | 'orders' 
  */
 export class WorkspaceCommandOrchestrator {
   constructor(private readonly deps: WorkspaceCommandDependencies) {}
+
+  getModelTools(): ModelToolDefinition[] {
+    return [
+      {
+        type: 'function',
+        function: {
+          name: 'workspace_read',
+          description: 'Read current Workspace data for the selected account. Use the user instruction verbatim; this tool only performs read/diagnostic operations.',
+          parameters: {
+            type: 'object',
+            additionalProperties: false,
+            properties: { instruction: { type: 'string', description: 'The complete read request to execute.' } },
+            required: ['instruction'],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'workspace_prepare_write',
+          description: 'Prepare a controlled Workspace mutation. This creates a confirmation plan and never executes the mutation before the user confirms it.',
+          parameters: {
+            type: 'object',
+            additionalProperties: false,
+            properties: { instruction: { type: 'string', description: 'The complete mutation request to prepare.' } },
+            required: ['instruction'],
+          },
+        },
+      },
+    ];
+  }
+
+  async executeModelTool(name: string, args: Record<string, unknown>, input: WorkspaceCommandInput): Promise<WorkspaceModelToolResult> {
+    const instruction = typeof args.instruction === 'string' ? args.instruction.trim() : '';
+    if (!instruction) throw new ServiceError(422, 'VALIDATION_FAILED', 'workspace tool instruction is required');
+    if (name === 'workspace_read') {
+      const result = await this.execute({ ...input, instruction });
+      if (!result || result.mutation) throw new ServiceError(422, 'VALIDATION_FAILED', 'workspace_read only accepts read operations');
+      return { kind: 'read', title: result.title, summary: result.summary, content: result.content, data: result.data };
+    }
+    if (name === 'workspace_prepare_write') {
+      const plan = await this.prepareWrite({ ...input, instruction });
+      if (!plan) throw new ServiceError(422, 'VALIDATION_FAILED', 'workspace mutation is not supported by the configured tools');
+      return { kind: 'write_plan', title: plan.title, summary: plan.summary, content: plan.content, data: plan.manifest, plan };
+    }
+    throw new ServiceError(422, 'VALIDATION_FAILED', `unknown workspace tool: ${name}`);
+  }
 
   async prepareWrite(input: WorkspaceCommandInput): Promise<NativeWorkspaceWritePlan | undefined> {
     const existing = await prepareNativeWorkspaceWrite({ store: this.deps.store, adminId: input.adminId, accountId: input.accountId, instruction: input.instruction });
@@ -81,8 +138,20 @@ export class WorkspaceCommandOrchestrator {
     if (kind === 'products' && /(知识库|自动化|规则|编辑商品|修改商品)/i.test(input.instruction)) {
       const productId = await this.resolveProductId(input, fields.productId);
       const action = /(自动化|规则|发货|改价|赠品|评价)/i.test(input.instruction) ? 'product_automation_update' : /知识库|问答|客服知识/i.test(input.instruction) ? 'product_knowledge_update' : 'product_update';
-      const summary = action === 'product_automation_update' ? `准备更新商品自动化规则（商品 ${productId}）` : action === 'product_knowledge_update' ? `准备更新商品知识库（商品 ${productId}）` : `准备更新商品信息（商品 ${productId}）`;
-      return this.plan(action, action === 'product_automation_update' ? '商品自动化规则确认' : action === 'product_knowledge_update' ? '商品知识库确认' : '商品信息变更确认', summary, expiresAt, { action, accountId, productId, expectedConfigVersion: await this.currentProductVersion(input.adminId, productId), fields: safeFieldNames(fields) });
+      const disablingAutomation = action === 'product_automation_update' && /(取消|关闭|停用|禁用)/i.test(input.instruction);
+      const summary = action === 'product_automation_update'
+        ? `${disablingAutomation ? '准备停用' : '准备更新'}商品自动化规则（商品 ${productId}）`
+        : action === 'product_knowledge_update' ? `准备更新商品知识库（商品 ${productId}）` : `准备更新商品信息（商品 ${productId}）`;
+      const manifest: Record<string, unknown> = { action, accountId, productId, expectedConfigVersion: await this.currentProductVersion(input.adminId, productId), fields: safeFieldNames(fields) };
+      if (disablingAutomation) {
+        manifest.config = {
+          paidAutoDelivery: { enabled: false },
+          unpaidAutoReprice: { enabled: false },
+          reviewGift: { enabled: false },
+          reviewReminder: { enabled: false },
+        };
+      }
+      return this.plan(action, action === 'product_automation_update' ? `${disablingAutomation ? '停用' : ''}商品自动化规则确认` : action === 'product_knowledge_update' ? '商品知识库确认' : '商品信息变更确认', summary, expiresAt, manifest);
     }
 
     if (kind === 'coupons') {
@@ -237,6 +306,7 @@ export class WorkspaceCommandOrchestrator {
       const configRaw = fields.config ?? fields.automation;
       let config: unknown;
       try { config = configRaw ? JSON.parse(configRaw) : undefined; } catch { throw new ServiceError(422, 'VALIDATION_FAILED', '自动化规则必须是 JSON 对象'); }
+      config ??= input.plan.manifest.config;
       if (!config) throw new ServiceError(422, 'VALIDATION_FAILED', '自动化规则配置不能为空');
       const updated = await this.deps.productAutomation.update({ adminId: input.adminId, productId, expectedConfigVersion: Number(input.plan.manifest.expectedConfigVersion ?? 1), config, requestId: input.requestId, traceId: input.traceId });
       return { resultSummary: `商品自动化规则已更新（v${updated.configVersion}）`, outputSummary: `商品 ${product.title} 自动化规则已更新`, data: { productId, configVersion: updated.configVersion, config: updated.config } };
@@ -348,10 +418,21 @@ export class WorkspaceCommandOrchestrator {
   }
 
   private async resolveProductId(input: WorkspaceCommandInput, explicit?: string): Promise<string> {
-    const productId = explicit ?? extractProductId(input.instruction) ?? extractId(input.instruction);
-    if (!productId) throw new ServiceError(422, 'VALIDATION_FAILED', '商品 ID 不能为空');
-    await this.deps.products.get(input.adminId, productId);
-    return productId;
+    const productRef = explicit ?? extractProductId(input.instruction) ?? extractId(input.instruction) ?? extractExternalProductRef(input.instruction);
+    if (!productRef) throw new ServiceError(422, 'VALIDATION_FAILED', '商品 ID 或外部商品编号不能为空');
+    if (/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(productRef)) {
+      await this.deps.products.get(input.adminId, productRef);
+      return productRef;
+    }
+    const productService = this.deps.products as ProductService & { list?: ProductService['list'] };
+    if (typeof productService.list !== 'function') {
+      await this.deps.products.get(input.adminId, productRef);
+      return productRef;
+    }
+    const listed = await productService.list(input.adminId, { accountId: input.accountId, keyword: productRef, page: 1, pageSize: 20 });
+    const matched = listed.items.find((product) => product.id === productRef || product.externalProductRef === productRef || product.title === productRef);
+    if (!matched) throw new ServiceError(404, 'NOT_FOUND', `未找到商品 ${productRef}`);
+    return matched.id;
   }
 
   private async currentProductVersion(adminId: string, productId: string): Promise<number> {
@@ -419,6 +500,7 @@ function normalizeField(value: string): string {
 
 function extractId(input: string): string | undefined { return input.match(/[0-9a-f]{8}-[0-9a-f-]{27}/i)?.[0] ?? input.match(/(?:\bID\b|编号)\s*[:：]?\s*([A-Za-z0-9_-]{4,})/i)?.[1]; }
 function extractProductId(input: string): string | undefined { return input.match(/商品(?:ID|id)?\s*[:：]?\s*([A-Za-z0-9_-]{4,})/)?.[1]; }
+function extractExternalProductRef(input: string): string | undefined { return input.match(/\b\d{6,20}\b/)?.[0]; }
 function extractOrderNo(input: string): string | undefined { return input.match(/(?:订单号|order(?:\s*no)?)\s*[:：]?\s*([A-Za-z0-9_-]{4,})/i)?.[1] ?? input.match(/\b(XY|ORD|ORDER)[A-Za-z0-9_-]{3,}\b/i)?.[0]; }
 function extractKeyword(input: string, prefixes: string[]): string | undefined { const stripped = prefixes.reduce((value, prefix) => value.replace(new RegExp(prefix, 'i'), ''), input).replace(/(?:关键词|关键字|keyword)\s*[:：]?\s*/i, '').trim(); return stripped && !/^(商品|订单|列表|查询|查看|列出|状态|详情)$/i.test(stripped) ? stripped : undefined; }
 function extractStatus(input: string): string | undefined { return input.match(/(?:状态|status)\s*[:：]?\s*([\w-]+)/i)?.[1]; }
