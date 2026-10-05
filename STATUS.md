@@ -438,3 +438,10 @@
 - 已验证：API build、Workspace 命令单元测试 9/9、test:workspace-platform smoke 通过，git diff --check 通过。
 - 当前边界：订单发货/取消/重试已接入正式 DeliveryRecord、execution outbox 与 unknown recovery 入口，并通过 Memory/HTTP 受控 smoke；真实闲鱼账号 mutation、PostgreSQL migration、外部 timeout/unknown 与人工恢复演练仍属于 S4-VS4B/C 发布门禁；商品外部发布仍需受控账号 E2E 才能关闭真实平台门禁；完整 API 测试在既有 auto-reply-smoke.mjs 阶段长时间无输出，未作为全量通过证据。
 - 当前工作区状态：PARTIALLY_VERIFIED / READY_FOR_REVIEW，不得将 MemoryStore、fixture 或 HTTP 200 解释为真实闲鱼 mutation 已验收。
+
+## 2026-10-05 Workspace confirmation flow fixes
+
+- Merged `fix/workspace-confirmation-fixes-20261006` with merge commit `7c5e39b73b689a3cdb0b6ce2f4cc80b7675a9cfa`.
+- Fixed confirmation action refresh/deduplication, session rehydration after tab switches, bottom-right error toasts, and warning-button hover contrast.
+- Verification: Web typecheck, 91 Web test files / 342 tests, Web build, API build, 24 targeted API tests, PostgreSQL browser E2E, screenshots, and `git diff --check` passed.
+- Boundary: this slice validates the confirmation workflow and controlled outbox path; it does not claim external platform mutation production acceptance.

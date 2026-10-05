@@ -300,3 +300,11 @@
 | S5-RISK-067 | 订单发货/取消/重试尚未形成正式 DeliveryRecord、delivery outbox、unknown 查询和人工恢复闭环 | 当前仅开放订单查询、同步和交付预览；禁止伪造发货成功或盲目重放 | OPEN，阻断 WS-OR-04 |
 | S5-RISK-068 | 商品发布已接入现有 ProductPublishService，但真实外部账号、超时和未知结果仍未完成发布级复验 | 发布前校验素材和账号 scope；失败保留 Run/Outbox/Audit；待受控账号 E2E | OPEN |
 | S5-RISK-069 | 完整 API 测试在既有 auto-reply-smoke.mjs 阶段长时间无输出，无法据此宣称全量通过 | 仅引用已完成的定向测试、build 和 Workspace smoke 证据 | OPEN |
+
+## 2026-10-05 Workspace confirmation flow
+
+| risk_id | risk | mitigation / evidence | status |
+| --- | --- | --- | --- |
+| WS-RISK-01 | stale run or confirmation state can reject a user action after background refresh | action handlers fetch the latest run and confirmation; refresh sequencing and in-flight guard prevent stale or duplicate writes | CLOSED in `7c5e39b` |
+| WS-RISK-02 | confirmation UI can disappear after session navigation | active session is remembered in session storage and run/events/confirmation/outbox are rehydrated from the API | CLOSED in `7c5e39b` |
+| WS-RISK-03 | external platform mutation acceptance remains outside this slice | outbox and controlled confirmation path are verified; external mutation remains a separate release gate | OPEN / follow-up |

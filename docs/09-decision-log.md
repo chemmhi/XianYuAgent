@@ -275,3 +275,11 @@
 - 订单交付不在 Workspace 层拼接闲鱼调用；`OrderDeliveryService` 复用既有 `ProductAutomationExecutionAdapter`，统一处理卡券 reservation、IM 交付、确认发货、外部状态读取和账号 scope。
 - `DeliveryRecord` 使用独立迁移 `047_order_delivery_records.sql`；execution outbox 只保存脱敏 payload 和外部 outcome，unknown 不进入成功状态，也不盲目重放。
 - 当前验收状态为 `IMPLEMENTED / PARTIALLY_VERIFIED`：Memory/HTTP/Workspace 回归已通过，真实闲鱼 mutation、PostgreSQL migration smoke 和人工恢复仍需发布门禁。
+
+## 2026-10-05 Workspace confirmation flow decision
+
+1. Confirmation and cancellation always use the latest server-side run and confirmation version before posting.
+2. Active session identity is persisted per account and rehydrated from API state so confirmation cards survive reloads and tab switches.
+3. Workspace operation errors use the shared bottom-right toast; forbidden access remains inline because it is page state.
+4. Warning actions use explicit hover, focus, and active colors with white text for contrast.
+5. Merge acceptance is based on PostgreSQL Chrome E2E plus Web/API regression evidence; external platform mutation remains a separate gate.

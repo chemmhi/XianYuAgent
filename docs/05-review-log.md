@@ -742,3 +742,13 @@
 - 重复交付请求先按账号 scope + 幂等键读回原记录，已完成订单也能正确重放；不同订单复用同一键返回 `IDEMPOTENCY_CONFLICT`。成功卡券交付写入 `couponItemId`。
 - Workspace 发货动作在 Confirmation 之前复用 `OrderDeliveryService.preview`，缺少人工物流引用或卡券配置时不再生成不可执行确认卡。
 - 新增 `apps/api/scripts/order-delivery-postgres-smoke.mjs`；本机执行因 `127.0.0.1:5432` 未监听而失败，记录为环境阻断，不将 Memory/HTTP smoke 升级为 PostgreSQL 验收。
+
+### 2026-10-05 Workspace confirmation regression review
+
+| review_id | type | focus | reviewer | conclusion | evidence |
+| --- | --- | --- | --- | --- | --- |
+| WS-R-01 | controller / runtime | confirm and cancel refresh the latest run and confirmation, suppress duplicate submissions, and ignore stale refresh responses | root | PASS | `apps/web/src/features/workspace/controller.ts`; API targeted tests 24/24 |
+| WS-R-02 | frontend / persistence | active session and waiting confirmation rehydrate after reload or tab switch | root | PASS | PostgreSQL Chrome E2E `WS-VS-02`; desktop/mobile screenshots |
+| WS-R-03 | frontend / feedback | warning action remains readable on hover and operation errors render as bottom-right toast | root | PASS | `WorkspacePage.test.ts`; `workspace.css`; screenshot evidence |
+
+Review conclusion: workspace confirmation fixes were merged after code review and real browser verification.
