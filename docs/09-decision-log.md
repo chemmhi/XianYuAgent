@@ -262,3 +262,16 @@
 1. 账号删除继续采用软删除并保留唯一键，扫码或 Cookie 重新授权时不得新建重复账号；登录专用查询允许同一管理员读取历史归属，即使当前 scope 已撤销或账号状态为 `disabled`。
 2. 恢复动作在事务内重新激活 `manage` scope，并将 `disabled` 账号置回 `pending`；QR 成功回调与 Cookie 登录统一调用该恢复路径，保持账号归属和凭证写入幂等。
 3. 提交 `425382d` 已在 merge lock 内以 `--no-ff` 合入 `main`，merge commit 为 `b21be57`；Memory/PostgreSQL 回归、QR renewal、Cookie 更新和 API 全量验证通过。真实闲鱼 APP 扫码与外部凭证验收仍保持独立人工门禁。
+
+## 2026-10-05 Workspace 平台接管编排决策
+
+1. Workspace 只提供自然语言命令编排和脱敏结果展示；商品、卡券、订单、账号、凭证和 Agent 配置仍由各自领域服务持有。
+2. 所有命令必须带 accountId；服务端在读取和写入前再次校验管理员 scope，跨账号请求在外部调用前失败。
+3. 读命令直接调用现有查询服务；写命令统一进入 Confirmation -> Idempotency -> Outbox -> Audit，模型连通性测试保持只读。
+4. 订单交付写入不在本轮伪造完成：在 S4-VS4B/C 的 DeliveryRecord、交付 Outbox、外部状态查询和人工恢复正式实现前，Workspace 只暴露交付预览和同步结果。
+5. 迁移 046_workspace_platform_takeover_actions.sql 仅扩展 Workspace Confirmation action 白名单；未新增订单交付表，因此不把订单发货/取消/重试标为完成。
+## 2026-10-05：订单交付正式复用执行适配器
+
+- 订单交付不在 Workspace 层拼接闲鱼调用；`OrderDeliveryService` 复用既有 `ProductAutomationExecutionAdapter`，统一处理卡券 reservation、IM 交付、确认发货、外部状态读取和账号 scope。
+- `DeliveryRecord` 使用独立迁移 `047_order_delivery_records.sql`；execution outbox 只保存脱敏 payload 和外部 outcome，unknown 不进入成功状态，也不盲目重放。
+- 当前验收状态为 `IMPLEMENTED / PARTIALLY_VERIFIED`：Memory/HTTP/Workspace 回归已通过，真实闲鱼 mutation、PostgreSQL migration smoke 和人工恢复仍需发布门禁。

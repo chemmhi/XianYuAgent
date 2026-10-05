@@ -39,6 +39,8 @@
 - `038_remove_coupon_quark_fields.sql`：删除卡券批次中不再使用的夸克链接和提取码列；不保留兼容读取。
 - `041_remove_coupon_delivery_scope.sql`：将历史卡券批次统一归一化为可发货后删除 `delivery_scope` 列；卡券不再区分系统/运营/买家范围。
 - `042_remove_automation_ledger_sent_quantity.sql`：清理历史自动化执行账本结果中的 `sentQuantity` 字段；数量只属于内部卡券 reservation，不再作为账本结果对外暴露。
+- `046_workspace_platform_takeover_actions.sql`：扩展 Workspace Confirmation action 白名单，覆盖商品编辑/知识库/自动化、卡券管理和模型配置。
+- `047_order_delivery_records.sql`：建立订单交付记录、幂等键、attempt、外部结果与失败恢复字段；复用现有 execution outbox，不删除已成功订单交付历史。
 
 迁移执行顺序以完整文件名的字典序为准，数字前缀在历史目录中允许重复（例如 `031_auto_reply_*` 与 `031_product_automation.sql`）；新增迁移应优先使用唯一前缀，并确保 SQL 幂等且依赖在完整文件名顺序下成立。
 

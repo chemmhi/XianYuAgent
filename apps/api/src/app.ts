@@ -19,6 +19,8 @@ import { MessageRealtimeHub, MessageService } from './messages.js';
 import { RedisConversationEventBridge } from './messages-realtime.js';
 import { decodeMessageHistoryCursor, encodeMessageHistoryCursor } from './message-history-cursor.js';
 import { InProcessAgentRuntime, isTerminalRunStatus, WorkspaceService, type WorkspaceRuntime } from './workspace.js';
+import { WorkspaceCommandOrchestrator } from './workspace-commands.js';
+import { OrderDeliveryService } from './order-delivery.js';
 import { OpenAICompatibleModelClient, PiModelClientError, PiRuntimeAdapter } from './pi-runtime.js';
 import { ModelClientService, type ModelClient } from './model-client.js';
 import { ApiKeyCredentialService } from './credential-store.js';
@@ -51,6 +53,7 @@ export interface AppRuntime {
   accounts: AccountService;
   coupons: CouponService;
   orders: OrderService;
+  orderDelivery: OrderDeliveryService;
   products: ProductService;
   productPublisher: ProductPublishService;
   productKnowledgeBase: ProductKnowledgeBaseService;
@@ -69,6 +72,7 @@ export interface AppRuntime {
   autoReplyActivity: AutoReplyActivityService;
   redisRealtime?: RedisConversationEventBridge;
   workspace: WorkspaceService;
+  workspaceCommands: WorkspaceCommandOrchestrator;
   workspaceRuntime: WorkspaceRuntime;
   qrLogin: XianyuQrLoginAdapter;
   xianyu: XianyuMtopClient;
@@ -322,6 +326,17 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   }, async (input) => productAutomationWorker.processOrderRefresh(input));
+  const orderDelivery = new OrderDeliveryService({
+    store,
+    orders,
+    productAutomation,
+    execution: productAutomationExecution,
+    audit: async (input) => {
+      const auditId = createId();
+      await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
+      return auditId;
+    },
+  });
   xianyuIm = new XianyuImService(store, xianyu, messages, autoReply, productAutomationTrigger, verificationBrowser, async ({ adminId, accountId, event }) => {
     await orders.refresh({
       adminId,
@@ -331,19 +346,53 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     });
   });
 
+  const workspaceCommands = new WorkspaceCommandOrchestrator({
+    store,
+    accounts,
+    products,
+    productSync,
+    productKnowledgeBase,
+    productAutomation,
+    productPublisher,
+    objectStorage,
+    coupons,
+    orders,
+    orderDelivery,
+    dashboard,
+    autoReplyActivity,
+    autoReplyAgentSettings,
+    openaiSettings,
+    verifyAccount: async ({ adminId, accountId, requestId, traceId }) => {
+      const verification = await xianyu.verifyLogin(adminId, accountId);
+      await accounts.update({ adminId, accountId, patch: { status: verification.success ? 'connected' : verification.accountInvalid ? 'expired' : 'degraded' }, requestId, traceId });
+      try { await credentials.verify({ adminId, accountId, status: verification.success ? 'active' : 'expired', requestId, traceId }); } catch { /* keep account health as the primary signal when no credential row exists */ }
+      return { success: verification.success, accountInvalid: verification.accountInvalid, errorCode: verification.errorCode, message: verification.message };
+    },
+    startLoginRecovery: async ({ adminId, accountId, requestId, traceId }) => {
+      const loginSession = await accounts.createLoginSession({ adminId, accountId, loginMethod: 'qr', requestId, traceId });
+      if (config.xianyuQrMode === 'stub') return { loginSessionId: loginSession.id, accountId, status: loginSession.status, expiresAt: loginSession.expiresAt };
+      try {
+        const qrSession = await qrLogin.create({ sessionId: loginSession.id, adminId, accountId });
+        return { loginSessionId: loginSession.id, accountId, status: qrSession.status, expiresAt: qrSession.expiresAt, pollAfterMs: qrSession.pollAfterMs, verificationUrl: qrSession.verificationUrl, qrImageDataUrl: qrSession.qrImageDataUrl };
+      } catch (error) {
+        await accounts.updateLoginSession({ adminId, accountId, sessionId: loginSession.id, patch: { status: 'failed', failureCode: error instanceof Error ? error.message : 'QR_GENERATE_FAILED', completedAt: new Date().toISOString() }, requestId, traceId });
+        throw new ServiceError(502, 'QR_GENERATE_FAILED', 'unable to generate xianyu qr session');
+      }
+    },
+  });
   const wsServer = new WebSocketServer({ noServer: true });
   const workspaceRuntime: WorkspaceRuntime = config.agentRuntime === 'pi'
-    ? createPiWorkspaceRuntime(config, store, modelClient, resolveConfiguredModelClient)
-    : new InProcessAgentRuntime(store);
+    ? createPiWorkspaceRuntime(config, store, modelClient, resolveConfiguredModelClient, workspaceCommands)
+    : new InProcessAgentRuntime(store, workspaceCommands);
   const workspace = new WorkspaceService(store, workspaceRuntime, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
-  }, coupons, autoReplyAgentSettings);
+  }, coupons, autoReplyAgentSettings, workspaceCommands);
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, orders, products, productPublisher, productKnowledgeBase, productAutomation, productAutomationTrigger, productAutomationWorker, productSync, credentials, apiKeyCredentials, openaiSettings, dashboard, messages, autoReply, autoReplyRepair, autoReplyAgentSettings, autoReplyActivity, redisRealtime, workspace, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
+    config, store, auth, accounts, coupons, orders, orderDelivery, products, productPublisher, productKnowledgeBase, productAutomation, productAutomationTrigger, productAutomationWorker, productSync, credentials, apiKeyCredentials, openaiSettings, dashboard, messages, autoReply, autoReplyRepair, autoReplyAgentSettings, autoReplyActivity, redisRealtime, workspace, workspaceCommands, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
     server,
     async listen() {
       await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));
@@ -495,7 +544,7 @@ function createConfiguredModelClient(config: AppConfig): ModelClient | undefined
   });
 }
 
-function createPiWorkspaceRuntime(config: AppConfig, store: Store, sharedModelClient: ModelClient | undefined, resolveModelClient: (adminId: string, accountId: string) => Promise<ModelClient | undefined>): WorkspaceRuntime {
+function createPiWorkspaceRuntime(config: AppConfig, store: Store, sharedModelClient: ModelClient | undefined, resolveModelClient: (adminId: string, accountId: string) => Promise<ModelClient | undefined>, workspaceCommands: WorkspaceCommandOrchestrator): WorkspaceRuntime {
   const modelClient = sharedModelClient ?? {
     supportsWebSearch: false,
     async complete() { throw new PiModelClientError('MODEL_NOT_CONFIGURED', 'model provider is not configured'); },
@@ -504,6 +553,7 @@ function createPiWorkspaceRuntime(config: AppConfig, store: Store, sharedModelCl
     model: config.modelName ?? 'account-configured',
     redactSecrets: [config.modelApiKey].filter((value): value is string => Boolean(value)),
     persistUserMessage: false,
+    workspaceCommands,
     resolveModelClient: async ({ adminId, accountId }) => {
       if (!adminId) return modelClient;
       try {
@@ -1109,6 +1159,26 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   if (ctx.path === '/api/v1/orders/refresh' && ctx.method === 'POST') {
     const accountId = optionalString(ctx.body.accountId);
     return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await orders.refresh({ adminId: authContext.admin.id, accountId, pageSize: ctx.body.pageSize, maxPages: ctx.body.maxPages, requestId: ctx.requestId, traceId: ctx.traceId })));
+  }
+  const orderActionMatch = ctx.path.match(/^\/api\/v1\/orders\/([^/]+)\/(delivery-preview|deliver|cancel|retry)$/);
+  if (orderActionMatch) {
+    const orderNo = decodeURIComponent(orderActionMatch[1]);
+    const action = orderActionMatch[2];
+    const accountId = optionalString(ctx.body.accountId) ?? optionalString(ctx.query.accountId);
+    if (!accountId) return failure(ctx, 422, 'VALIDATION_FAILED', 'accountId is required for order delivery');
+    if (action === 'delivery-preview' && ctx.method === 'POST') {
+      const preview = await runtime.orderDelivery.preview({ adminId: authContext.admin.id, accountId, orderNo, deliveryType: optionalString(ctx.body.deliveryType) as import('./domain.js').OrderDeliveryType | undefined, couponBatchIds: Array.isArray(ctx.body.couponBatchIds) ? ctx.body.couponBatchIds.filter((value): value is string => typeof value === 'string') : undefined, trackingRef: optionalString(ctx.body.trackingRef) });
+      return { statusCode: 200, body: success(ctx, preview).body };
+    }
+    if (action === 'deliver' && ctx.method === 'POST') {
+      return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await runtime.orderDelivery.deliver({ adminId: authContext.admin.id, accountId, orderNo, deliveryType: optionalString(ctx.body.deliveryType) as import('./domain.js').OrderDeliveryType | undefined, couponBatchIds: Array.isArray(ctx.body.couponBatchIds) ? ctx.body.couponBatchIds.filter((value): value is string => typeof value === 'string') : undefined, trackingRef: optionalString(ctx.body.trackingRef), tradeText: optionalString(ctx.body.tradeText), idempotencyKey: requireIdempotencyKey(ctx), requestId: ctx.requestId, traceId: ctx.traceId })));
+    }
+    if (action === 'retry' && ctx.method === 'POST') {
+      return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await runtime.orderDelivery.retry({ adminId: authContext.admin.id, accountId, orderNo, idempotencyKey: requireIdempotencyKey(ctx), requestId: ctx.requestId, traceId: ctx.traceId })));
+    }
+    if (action === 'cancel' && ctx.method === 'POST') {
+      return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await runtime.orderDelivery.cancel({ adminId: authContext.admin.id, accountId, orderNo, requestId: ctx.requestId, traceId: ctx.traceId })));
+    }
   }
   const orderDetailMatch = ctx.path.match(/^\/api\/v1\/orders\/([^/]+)$/);
   if (orderDetailMatch && ctx.method === 'GET') {

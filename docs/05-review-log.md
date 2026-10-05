@@ -722,3 +722,23 @@
 | S5-R141 | Agent / 回归 | `get_product_info` 与 `list_shop_products` 是否继续返回商品知识库，且不跨账号读取 | root | PASS | `auto-reply-product-lookup.test.ts`、`auto-reply-agent.test.ts`；API auto-reply unit 221/221 |
 
 本轮结论：商品目录知识库已完成列表展示、查看/编辑弹窗、账号隔离、数据库持久化和 Agent 消费闭环；受控 UI、Memory/PostgreSQL 与 Agent 回归均通过。
+
+## 2026-10-05 Workspace 平台接管编排复审
+
+- 文档依据：docs/PRD.md、docs/00-scope.md、docs/02-data-api.md、docs/04-plan.md 与 docs/agent/workspace/WS-VS-01~05。
+- 代码复核：WorkspaceCommandOrchestrator 是唯一 Workspace 领域命令入口，读取路径委托现有服务；写路径保留账号 scope、Confirmation、Outbox、Audit 和幂等边界。
+- 定向验证：npm run build、node --import tsx --test scripts/workspace-commands.test.ts（9/9）、npm run test:workspace-platform、git diff --check 通过。
+- 结论：账号健康/恢复、经营分析与建议、商品查询/同步/编辑/知识库/自动化规则、卡券 CRUD/关联/启停/作废/复制、订单查询/同步/详情/交付预览、Agent 动态与配置、模型配置读取/保存/连通性测试已接通；订单交付写链路与商品外部发布发布级证据仍开放，故本轮为 PARTIALLY_VERIFIED，不标记 PASS。
+## 2026-10-05 S4-VS4B/C 订单交付接入复核
+
+- `OrderDeliveryService` 已接入 Workspace 与订单 API；预览、发货、取消、重试统一走账号 scope、DeliveryRecord、execution Outbox、Idempotency-Key 和 Audit。
+- `047_order_delivery_records.sql` 补齐 DeliveryRecord 持久化结构；MemoryStore HTTP smoke、Workspace confirmation、既有订单回归和 API build 均通过。
+- 结论：代码层 `IMPLEMENTED / PARTIALLY_VERIFIED`；真实闲鱼 mutation、PostgreSQL migration smoke、浏览器双 viewport、外部 unknown/人工恢复演练仍保持独立发布门禁，不宣称已完成生产验收。
+
+### 2026-10-05 S4-VS4B/C 增量可靠性修复
+
+- 迁移 `047_order_delivery_records.sql` 已补齐 `coupon_item_id` → `coupons.coupon_items(id)` 外键，以及成功状态部分唯一索引；与 `docs/02-database-schema.md` / `docs/02-data-api.md` 契约对齐。
+- PostgreSQL `createDeliveryRecord` 改为“先读、`ON CONFLICT DO NOTHING`、再读回”，避免并发幂等下依赖 no-op update 的错误结果；Memory/PostgreSQL 更新均保留省略字段。
+- 重复交付请求先按账号 scope + 幂等键读回原记录，已完成订单也能正确重放；不同订单复用同一键返回 `IDEMPOTENCY_CONFLICT`。成功卡券交付写入 `couponItemId`。
+- Workspace 发货动作在 Confirmation 之前复用 `OrderDeliveryService.preview`，缺少人工物流引用或卡券配置时不再生成不可执行确认卡。
+- 新增 `apps/api/scripts/order-delivery-postgres-smoke.mjs`；本机执行因 `127.0.0.1:5432` 未监听而失败，记录为环境阻断，不将 Memory/HTTP smoke 升级为 PostgreSQL 验收。

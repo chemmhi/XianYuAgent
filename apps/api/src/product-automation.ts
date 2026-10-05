@@ -157,6 +157,8 @@ export interface AutomationExecutionResult {
 export interface AutomationExternalResult {
   status: 'succeeded' | 'failed' | 'unknown';
   externalRef?: string;
+  /** The reserved CouponItem involved in this delivery attempt, when applicable. */
+  couponItemId?: string;
   errorCode?: string;
   message?: string;
   /** The request can be retried with the same idempotency key without manual review. */

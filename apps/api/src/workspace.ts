@@ -5,6 +5,7 @@ import type { AutoReplyAgentSettingsService } from './auto-reply-agent-settings.
 import { executeNativeWorkspaceRead } from './workspace-native-read.js';
 import { parseNativeWorkspaceAgentSettingsUpdate, parseNativeWorkspaceCouponCreate, prepareNativeWorkspaceWrite, sanitizeWorkspaceInstruction } from './workspace-native-write.js';
 import { persistWorkspaceConfirmation } from './workspace-confirmation.js';
+import type { WorkspaceCommandOrchestrator } from './workspace-commands.js';
 
 const terminalRunStatuses = new Set<RunStatus>(['succeeded', 'partially_succeeded', 'failed', 'cancelled', 'expired']);
 const runTransitions: Record<RunStatus, RunStatus[]> = {
@@ -119,7 +120,7 @@ export class InProcessAgentRuntime implements WorkspaceRuntime {
   private readonly active = new Set<string>();
   private stopped = false;
 
-  constructor(private readonly store: Store) {}
+  constructor(private readonly store: Store, private readonly commands?: WorkspaceCommandOrchestrator) {}
 
   enqueue(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string }): void {
     if (this.stopped || this.active.has(input.run.id)) return;
@@ -141,7 +142,9 @@ export class InProcessAgentRuntime implements WorkspaceRuntime {
     await this.emit(input.run.id, 'run.started', { status: 'running' });
     await this.emit(input.run.id, 'step.started', { stepId: step.id, status: 'running' });
     await new Promise((resolve) => setTimeout(resolve, 5));
-    const nativeWrite = await prepareNativeWorkspaceWrite({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction });
+    const nativeWrite = this.commands
+      ? await this.commands.prepareWrite({ adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction, requestId: `workspace:${input.run.id}`, traceId: `workspace:${input.run.id}` })
+      : await prepareNativeWorkspaceWrite({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction });
     if (nativeWrite) {
       const sessionId = input.sessionId ?? input.run.sessionId;
       await this.transitionStep(step, 'waiting_confirmation', { outputSummary: nativeWrite.summary });
@@ -156,11 +159,14 @@ export class InProcessAgentRuntime implements WorkspaceRuntime {
     await this.emit(input.run.id, 'step.executing', { stepId: step.id, status: 'executing' });
     await new Promise((resolve) => setTimeout(resolve, 5));
     const finishedAt = new Date().toISOString();
-    const nativeRead = await executeNativeWorkspaceRead({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction });
+    const nativeRead = this.commands
+      ? await this.commands.execute({ adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction, requestId: `workspace:${input.run.id}`, traceId: `workspace:${input.run.id}` })
+      : await executeNativeWorkspaceRead({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction });
     if (nativeRead) {
       const sessionId = input.sessionId ?? input.run.sessionId;
       await this.store.appendWorkspaceMessage({ adminId: input.adminId ?? input.run.requestedBy, sessionId, runId: input.run.id, type: 'tool_event', content: nativeRead.content, summary: nativeRead.summary });
-      await this.emit(input.run.id, 'workspace.native_read', { messageType: 'tool_event', resource: nativeRead.kind, summary: nativeRead.summary, content: nativeRead.content, data: nativeRead.data });
+      const commandResult = 'mutation' in nativeRead && nativeRead.mutation;
+      await this.emit(input.run.id, commandResult ? 'workspace.command.executed' : 'workspace.native_read', { messageType: 'tool_event', resource: nativeRead.kind, operation: 'operation' in nativeRead ? nativeRead.operation : undefined, summary: nativeRead.summary, content: nativeRead.content, data: nativeRead.data });
       await this.transitionStep(step, 'succeeded', { finishedAt, outputSummary: nativeRead.summary });
       await this.transitionRun(input.run, 'succeeded', { finishedAt, resultSummary: nativeRead.content });
       await this.store.appendWorkspaceMessage({ adminId: input.adminId ?? input.run.requestedBy, sessionId, runId: input.run.id, type: 'final_answer', content: nativeRead.content });
@@ -206,6 +212,7 @@ export class WorkspaceService {
     private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => Promise<string>,
     private readonly coupons?: CouponService,
     private readonly agentSettings?: AutoReplyAgentSettingsService,
+    private readonly commands?: WorkspaceCommandOrchestrator,
   ) {}
 
   async listSessions(input: { adminId: string; accountId?: string; search?: string }): Promise<WorkspaceSessionView[]> {
@@ -317,12 +324,52 @@ export class WorkspaceService {
     if (confirmation.action === 'coupon_create') {
       return this.confirmCouponCreate({ input, bundle, step, confirmation, scope, run: run!, requestId: input.requestId, traceId: input.traceId });
     }
+    const canExecuteProductPublish = confirmation.action !== 'product_publish' || Boolean(this.commands && await this.commands.canExecuteProductPublish({ adminId: input.adminId, manifest: confirmation.manifest }));
+    if (this.commands && canExecuteProductPublish) {
+      return this.confirmCommand({ input, bundle, step, confirmation, scope, run: run!, requestId: input.requestId, traceId: input.traceId });
+    }
     const queued = await this.store.enqueueAutoReplyOutbox({ scope, aggregateType: 'workspace_run', aggregateId: bundle.run.id, operation: confirmation.action, idempotencyKey: `workspace-confirm:${confirmation.id}`, payload: confirmation.manifest, traceId: input.traceId });
     await this.store.appendRunEvent({ runId: input.runId, eventType: 'workspace.confirmation.confirmed', payload: { confirmationId: confirmation.id, status: 'confirmed', version: confirmation.version } });
     await this.store.appendRunEvent({ runId: input.runId, eventType: 'workspace.outbox.enqueued', payload: { outboxId: queued.record.id, status: queued.record.status, operation: queued.record.operation } });
     await this.audit({ actorId: input.adminId, action: 'workspace.confirmation.confirmed', targetRef: confirmation.id, requestId: input.requestId, traceId: input.traceId, payload: { action: confirmation.action, outboxId: queued.record.id }, accountId: bundle.run.accountId });
     if (!run) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'run update failed');
     return { run: this.toRunView(run, (await this.store.getRun(input.adminId, input.runId))?.steps ?? bundle.steps), confirmation: this.toConfirmationView(confirmation), outbox: this.toOutboxView(queued.record, bundle.run.id) };
+  }
+
+  private async confirmCommand(input: { input: { adminId: string; runId: string; requestId: string; traceId: string }; bundle: { run: RunRecord; steps: StepRecord[] }; step: StepRecord; confirmation: WorkspaceConfirmationRecord; scope: string; run: RunRecord; requestId: string; traceId: string }): Promise<{ run: WorkspaceRunView; confirmation: WorkspaceConfirmationView; outbox: WorkspaceOutboxView }> {
+    if (!this.commands) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'workspace command orchestrator unavailable');
+    try {
+      const plan = {
+        kind: input.confirmation.action as never,
+        action: input.confirmation.action as never,
+        policyRef: input.confirmation.policyRef,
+        title: String(input.confirmation.manifest.title ?? input.confirmation.action),
+        summary: String(input.confirmation.manifest.summary ?? input.confirmation.action),
+        content: '',
+        expiresAt: input.confirmation.expiresAt,
+        manifest: input.confirmation.manifest,
+      };
+      const result = await this.commands.confirm({ plan, run: input.bundle.run, step: input.step, adminId: input.input.adminId, requestId: input.requestId, traceId: input.traceId });
+      const queued = await this.store.enqueueAutoReplyOutbox({ scope: input.scope, aggregateType: 'workspace_run', aggregateId: input.bundle.run.id, operation: input.confirmation.action, idempotencyKey: `workspace-confirm:${input.confirmation.id}`, payload: { ...input.confirmation.manifest, result: result.data ?? {} }, traceId: input.traceId });
+      const workerId = `workspace-local-command:${input.bundle.run.id}`;
+      const claimed = await this.store.claimAutoReplyOutbox({ scope: input.scope, workerId, limit: 1, leaseMs: 60_000, id: queued.record.id });
+      if (!claimed[0] || !(await this.store.completeAutoReplyOutbox({ id: queued.record.id, workerId, externalOutcome: 'known_success', externalMessageRef: input.confirmation.action }))) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'workspace command outbox completion failed');
+      const finishedAt = new Date().toISOString();
+      const updatedRun = await this.store.updateRun(input.bundle.run.id, { status: 'succeeded', finishedAt, resultSummary: result.resultSummary });
+      await this.store.updateRunStep(input.step.id, { status: 'succeeded', finishedAt, outputSummary: result.outputSummary });
+      await this.store.appendWorkspaceMessage({ adminId: input.input.adminId, sessionId: input.bundle.run.sessionId, runId: input.bundle.run.id, type: 'final_answer', content: result.outputSummary, summary: result.resultSummary });
+      await this.store.appendRunEvent({ runId: input.input.runId, eventType: 'workspace.command.completed', payload: { action: input.confirmation.action, status: 'succeeded', outboxId: queued.record.id, result: result.data ?? {} } });
+      await this.audit({ actorId: input.input.adminId, action: `workspace.${input.confirmation.action}.completed`, targetRef: input.confirmation.id, requestId: input.requestId, traceId: input.traceId, payload: { action: input.confirmation.action, outboxId: queued.record.id, result: result.data ?? {} }, accountId: input.bundle.run.accountId });
+      const latest = await this.store.getAutoReplyOutbox(input.scope, queued.record.idempotencyKey);
+      const latestBundle = await this.store.getRun(input.input.adminId, input.input.runId);
+      if (!updatedRun || !latest) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'workspace command result readback failed');
+      return { run: this.toRunView(updatedRun, latestBundle?.steps ?? input.bundle.steps), confirmation: this.toConfirmationView(input.confirmation), outbox: this.toOutboxView(latest, input.bundle.run.id) };
+    } catch (error) {
+      const finishedAt = new Date().toISOString();
+      await this.store.updateRun(input.bundle.run.id, { status: 'failed', finishedAt, errorCode: error instanceof ServiceError ? error.code : 'WORKSPACE_COMMAND_FAILED', resultSummary: 'Workspace 动作执行失败，请查看错误并重试' });
+      await this.store.updateRunStep(input.step.id, { status: 'failed', finishedAt, errorCode: error instanceof ServiceError ? error.code : 'WORKSPACE_COMMAND_FAILED', outputSummary: 'Workspace 动作执行失败' });
+      throw error;
+    }
   }
 
   private async confirmCouponCreate(input: { input: { adminId: string; runId: string; requestId: string; traceId: string }; bundle: { run: RunRecord; steps: StepRecord[] }; step: StepRecord; confirmation: WorkspaceConfirmationRecord; scope: string; run: RunRecord; requestId: string; traceId: string }): Promise<{ run: WorkspaceRunView; confirmation: WorkspaceConfirmationView; outbox: WorkspaceOutboxView }> {

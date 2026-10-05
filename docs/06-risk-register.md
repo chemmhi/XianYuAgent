@@ -146,14 +146,14 @@
 ### 2026-09-20 商品表格空态修订风险复核
 
 - 本轮只调整前端状态容器布局、工具栏冗余统计展示和对应回归/E2E 断言，不改变商品 API、数据库、外部同步或持久化边界；`S5-I007`、`S5-I008`、`S5-I009` 及商品后续切片风险保持原状态。
-- `S5-RISK-017` 部分缓解：四套订单状态已在 `OrderVM`、PostgreSQL 约束、API 筛选和详情抽屉中独立维护；`npm --workspace apps/api run test:orders`、`npm --workspace apps/api run test:orders:postgres` 和 `npm run test:e2e:chrome:orders` 通过。交付预览、库存锁、发货动作、unknown/timeout/retry 仍未实现，不能关闭 `S4-VS4B/C` 风险。
+- `S5-RISK-017` 部分缓解：四套订单状态已在 `OrderVM`、PostgreSQL 约束、API 筛选和详情抽屉中独立维护；交付预览已接入支付/售后/账号/商品/卡券检查，且不消费卡券、不创建交付记录。`npm --workspace apps/api run test:order-delivery` 通过；真实 PostgreSQL/浏览器双 viewport 证据仍开放。
 - 新增 `018_orders.sql` 使用单调编号并已在当前 PostgreSQL 实例执行；`S5-RISK-019` 仍开放，因为完整迁移回滚、旧数据兼容、Testcontainers 和发布级恢复演练尚未完成。
 - 历史复验保留：旧实现携带 `idle_site_biz_code: COMMONPRO` 时返回 `PERMISSION_EXCEPTION::无权限访问`，并已通过回归断言防止重新引入；修复后真实订单读取与 PostgreSQL 落库复读通过，未使用 fixture 伪造外部订单。
 
 ### 2026-09-20 S4-VS4A 订单列表界面修订风险复核
 
 - 本轮仅调整订单列表前端展示与交互：移除页面标题，保留操作列/查看详情/详情抽屉，收敛搜索与状态筛选，增加买家姓名悬浮提示、表格内部滚动和分页；不改变订单 API、数据库、外部请求、状态模型或交付边界。
-- `S5-RISK-017` 继续保持开放：四套订单状态仍按既有 canonical 字段投影到当前状态筛选；交付预览、库存锁、发货/取消/重试、unknown/timeout、Outbox 和 DeliveryRecord 仍不在本轮范围。
+- `S5-RISK-017` 继续保持开放：四套订单状态仍按既有 canonical 字段投影到当前状态筛选；交付预览、Outbox 和 DeliveryRecord 已接入，但真实 PostgreSQL migration、库存锁并发证据和浏览器视觉复核仍待补齐。
 - `S5-RISK-027` 已关闭：完整浏览器入口、真实 active 凭证、MTOP、API、PostgreSQL 与页面可见结果均通过；订单交付动作另由 `S4-VS4B/C` 承接。
 - 买家昵称与实名目前继续共用既有 `buyerName` 数据契约；本轮只增加悬浮提示，不伪造额外实名字段。详情抽屉内容留待下一步单独调整。
 
@@ -291,3 +291,12 @@
 | S5-RISK-063 | Workspace 配置修改若覆盖 Settings 页面的新版本，会丢失管理员的最新配置 | P1 | Confirmation Manifest 保存 `expectedVersion`；确认前再次读取 Settings 版本，冲突返回 `VERSION_CONFLICT` 并保留 Confirmation `active`；Memory/PostgreSQL 回归已通过 | MITIGATED |
 | S5-RISK-064 | Workspace 将 Prompt、Credential 或原始指令带入确认卡、事件或审计，会造成敏感配置泄露 | P1 | 仅允许安全运行参数；Prompt 字段不解析；Message/Run Event/Outbox/Audit 只写字段名、版本和 `redacted=true`；Chrome/CDP 断言原始指令不出现 | MITIGATED |
 | S5-RISK-065 | 迁移 045 未在已有 PostgreSQL volume 上执行，会导致 `agent_settings_update` Confirmation 被约束拒绝 | P1 | 显式执行 `npm run db:migrate`，验证 action check 包含 `agent_settings_update`；临时 PostgreSQL 001–045 和关闭/重开复读通过；回滚采用应用先行 | MITIGATED |
+
+## 2026-10-05 Workspace 平台接管风险
+
+| 风险编号 | 风险描述 | 当前控制 | 状态 |
+| --- | --- | --- | --- |
+| S5-RISK-066 | Workspace 解析商品自动化规则和模型配置时依赖受控键值/JSON；自然语言歧义可能被错误解释 | 解析失败返回 422，不执行写动作；Confirmation Manifest 只保留字段摘要 | OPEN |
+| S5-RISK-067 | 订单发货/取消/重试尚未形成正式 DeliveryRecord、delivery outbox、unknown 查询和人工恢复闭环 | 当前仅开放订单查询、同步和交付预览；禁止伪造发货成功或盲目重放 | OPEN，阻断 WS-OR-04 |
+| S5-RISK-068 | 商品发布已接入现有 ProductPublishService，但真实外部账号、超时和未知结果仍未完成发布级复验 | 发布前校验素材和账号 scope；失败保留 Run/Outbox/Audit；待受控账号 E2E | OPEN |
+| S5-RISK-069 | 完整 API 测试在既有 auto-reply-smoke.mjs 阶段长时间无输出，无法据此宣称全量通过 | 仅引用已完成的定向测试、build 和 Workspace smoke 证据 | OPEN |
