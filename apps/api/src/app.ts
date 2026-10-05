@@ -23,7 +23,7 @@ import { OpenAICompatibleModelClient, PiModelClientError, PiRuntimeAdapter } fro
 import { ModelClientService, type ModelClient } from './model-client.js';
 import { ApiKeyCredentialService } from './credential-store.js';
 import { DashboardService, type DashboardRange } from './dashboard.js';
-import { AutoReplyService } from './auto-reply.js';
+import { AutoReplyService, type AutoReplyAcknowledgementEvaluator } from './auto-reply.js';
 import { ReliableExternalAutoReplySender } from './auto-reply-outbox.js';
 import { AutoReplyAgentSettingsService, resolveAutoReplyAgentDefaults } from './auto-reply-agent-settings.js';
 import { ToolCallingAutoReplyAgent } from './auto-reply-agent.js';
@@ -80,7 +80,11 @@ export interface AppRuntime {
   close(): Promise<void>;
 }
 
-export function createApp(config: AppConfig = loadConfig()): AppRuntime {
+export interface CreateAppOptions {
+  autoReplyAcknowledgementEvaluator?: AutoReplyAcknowledgementEvaluator;
+}
+
+export function createApp(config: AppConfig = loadConfig(), options: CreateAppOptions = {}): AppRuntime {
   const store = createStore(config);
   const objectStorage: ObjectStorage = config.allowInMemory
     ? new MemoryObjectStorage()
@@ -199,6 +203,7 @@ export function createApp(config: AppConfig = loadConfig()): AppRuntime {
     replySegmentDelayMs: autoReplyAgentConfig.replySegmentDelayMs,
     sendDelaySeconds: autoReplyAgentConfig.sendDelaySeconds,
     generator: autoReplyModelClient ? new ToolCallingAutoReplyAgent(store, autoReplyModelClient, autoReplyAgentConfig, { godView: autoReplyGodView }) : undefined,
+    acknowledgementEvaluator: options.autoReplyAcknowledgementEvaluator,
     godView: autoReplyGodView,
     totalTimeoutMs: 60_000,
     configProvider: async (adminId, accountId) => {
@@ -419,23 +424,29 @@ async function markXianyuAccountFailure(store: Store, adminId: string, accountId
   }
 }
 
-async function startRecoverableListenersBestEffort(runtime: AppRuntime, adminId: string): Promise<void> {
+export async function startRecoverableListenersBestEffort(runtime: AppRuntime, adminId: string): Promise<void> {
   try {
-    const accounts = await runtime.accounts.list(adminId, { page: 1, pageSize: 100 });
-    for (const account of accounts.items) {
-      if (account.status !== 'connected' && account.status !== 'degraded' && account.status !== 'disconnected') continue;
-      if (account.status === 'disconnected') {
+    let page = 1;
+    while (true) {
+      const accounts = await runtime.accounts.list(adminId, { page, pageSize: 100 });
+      for (const account of accounts.items) {
+        if (account.status === 'disabled') continue;
         const credential = await runtime.store.getCredential(adminId, account.id);
-        if (credential?.status !== 'active') continue;
+        // Credential state is the login source of truth. Do not limit
+        // keepalive to the currently selected/connected account or to the
+        // account status rendered by the dashboard.
+        if (credential?.status !== 'active' || !credential.cookieHeader) continue;
+        await startXianyuListenerBestEffort(runtime, adminId, account.id);
       }
-      await startXianyuListenerBestEffort(runtime, adminId, account.id);
+      if (page >= accounts.totalPages) break;
+      page += 1;
     }
   } catch (error) {
     console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'account_scan_failed', adminId, errorCode: listenerErrorCode(error) }));
   }
 }
 
-async function startAllRecoverableListenersBestEffort(runtime: AppRuntime): Promise<void> {
+export async function startAllRecoverableListenersBestEffort(runtime: AppRuntime): Promise<void> {
   try {
     const adminIds = await runtime.store.listAdminIds();
     for (const adminId of adminIds) await startRecoverableListenersBestEffort(runtime, adminId);

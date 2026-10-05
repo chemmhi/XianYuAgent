@@ -9,6 +9,17 @@ function replyPayload(text: string): string {
   return JSON.stringify({ decision: 'reply', text });
 }
 
+function semanticAcknowledgementFixture(decisions: Array<'skip' | 'reply'>) {
+  let index = 0;
+  return {
+    async evaluate() {
+      const decision = decisions[index] ?? 'reply';
+      index += 1;
+      return { decision, confidence: decision === 'skip' ? 0.99 : 0.95, reason: `fixture_semantic_${decision}` };
+    },
+  };
+}
+
 test('verified transaction status notices are persisted as system messages and never enter auto reply', async () => {
   const runtime = createApp(loadConfig({
     ...process.env,
@@ -16,7 +27,7 @@ test('verified transaction status notices are persisted as system messages and n
     HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false',
     XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_MODEL_ENABLED: 'false', AUTO_REPLY_SEND_MODE: 'simulate',
     AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
-  }));
+  }), { autoReplyAcknowledgementEvaluator: semanticAcknowledgementFixture(['skip']) });
   await runtime.listen();
   try {
     const boot = await runtime.auth.bootstrap({ email: 'system-message-e2e@example.com', password: 'password-123', displayName: 'System Message E2E' });
@@ -56,7 +67,7 @@ test('manual status text remains an auto-reply message while an unverified platf
     HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false',
     XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_MODEL_ENABLED: 'false', AUTO_REPLY_SEND_MODE: 'simulate',
     AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
-  }));
+  }), { autoReplyAcknowledgementEvaluator: semanticAcknowledgementFixture(['skip']) });
   await runtime.listen();
   try {
     const boot = await runtime.auth.bootstrap({ email: 'status-boundary-e2e@example.com', password: 'password-123', displayName: 'Status Boundary E2E' });
@@ -190,7 +201,7 @@ test('buyer acknowledgement after the latest AI reply is skipped without generat
     HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false',
     XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_MODEL_ENABLED: 'false', AUTO_REPLY_SEND_MODE: 'simulate',
     AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
-  }));
+  }), { autoReplyAcknowledgementEvaluator: semanticAcknowledgementFixture(['skip']) });
   await runtime.listen();
   try {
     const boot = await runtime.auth.bootstrap({ email: 'ack-gate-e2e@example.com', password: 'password-123', displayName: 'Ack Gate E2E' });
@@ -206,7 +217,7 @@ test('buyer acknowledgement after the latest AI reply is skipped without generat
       senderName: conversation.buyerDisplayName,
       direction: 'inbound',
       bodyType: 'text',
-      bodyText: 'Can I press enter here?',
+      bodyText: '什么时候发货？',
       occurredAt: '2026-10-05T01:00:00.000Z',
     });
     assert.equal(first.autoReply?.run.status, 'persisted');
@@ -240,7 +251,7 @@ test('acknowledgement is not suppressed when a newer buyer message follows the a
     HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false',
     XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_MODEL_ENABLED: 'false', AUTO_REPLY_SEND_MODE: 'simulate',
     AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
-  }));
+  }), { autoReplyAcknowledgementEvaluator: semanticAcknowledgementFixture(['reply']) });
   await runtime.listen();
   try {
     const boot = await runtime.auth.bootstrap({ email: 'ack-gate-follow-up@example.com', password: 'password-123', displayName: 'Ack Gate Follow Up E2E' });

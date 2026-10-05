@@ -331,7 +331,13 @@ test('external sender simulates by default and delegates only in live mode', asy
 test('listener startup delegates to the account-scoped client bootstrap', async () => {
   const service = Object.create(XianyuImService.prototype) as XianyuImService;
   const calls: string[] = [];
-  const unsafe = service as unknown as { ensureClient: (adminId: string, accountId: string) => Promise<unknown> };
+  const unsafe = service as unknown as {
+    ensureClient: (adminId: string, accountId: string) => Promise<unknown>;
+    credentialRefreshTimers: Map<string, unknown>;
+    credentialRefreshInFlight: Map<string, Promise<void>>;
+  };
+  unsafe.credentialRefreshTimers = new Map();
+  unsafe.credentialRefreshInFlight = new Map();
   unsafe.ensureClient = async (adminId, accountId) => {
     calls.push(`${adminId}:${accountId}`);
     return undefined;
@@ -639,13 +645,14 @@ test('app startup scans connected accounts without an auth page request', async 
   const admin = await runtime.store.createAdmin({ email: 'startup-listener@example.com', passwordHash: 'hash', displayName: 'Startup Listener' });
   const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'startup-seller' });
   await runtime.store.updateAccount(admin.id, account.id, { status: 'connected' });
+  await runtime.store.upsertCredential({ adminId: admin.id, accountId: account.id, platform: 'xianyu', cookieHeader: 'unb=startup-seller', accessToken: 'token', deviceId: 'device' });
   await runtime.listen();
   for (let attempt = 0; attempt < 50 && calls.length === 0; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
   assert.deepEqual(calls, [`${admin.id}:${account.id}`]);
   await runtime.close();
 });
 
-test('app startup recovers active degraded and disconnected listeners but skips non-recoverable accounts', async () => {
+test('app startup recovers every logged-in account and skips missing or revoked credentials', async () => {
   const runtime = createApp(loadConfig({ AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
     HOST: '127.0.0.1',
     PORT: '0',
@@ -673,13 +680,15 @@ test('app startup recovers active degraded and disconnected listeners but skips 
     for (const [index, status] of (['connected', 'degraded', 'disconnected', 'expired', 'pending', 'disabled', 'disconnected'] as const).entries()) {
       await runtime.store.updateAccount(admin.id, accounts[index].id, { status });
     }
-    await runtime.store.upsertCredential({ adminId: admin.id, accountId: accounts[2].id, platform: 'xianyu', cookieHeader: 'unb=active-disconnected', accessToken: 'token', deviceId: 'device' });
+    for (const index of [0, 1, 2, 3, 4] as const) {
+      await runtime.store.upsertCredential({ adminId: admin.id, accountId: accounts[index].id, platform: 'xianyu', cookieHeader: `unb=active-${index}`, accessToken: 'token', deviceId: 'device' });
+    }
     await runtime.store.upsertCredential({ adminId: admin.id, accountId: accounts[6].id, platform: 'xianyu', cookieHeader: 'unb=revoked-disconnected', accessToken: 'token', deviceId: 'device' });
     await runtime.store.revokeCredential(admin.id, accounts[6].id);
     await runtime.listen();
-    for (let attempt = 0; attempt < 80 && calls.length < 3; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
-    assert.deepEqual(new Set(calls), new Set([accounts[0].id, accounts[1].id, accounts[2].id]));
-    assert.equal(calls.length, 3);
+    for (let attempt = 0; attempt < 80 && calls.length < 5; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(new Set(calls), new Set([accounts[0].id, accounts[1].id, accounts[2].id, accounts[3].id, accounts[4].id]));
+    assert.equal(calls.length, 5);
   } finally {
     await runtime.close();
   }
@@ -709,6 +718,7 @@ test('app startup retries a failed connected listener with bounded backoff', asy
     const admin = await runtime.store.createAdmin({ email: 'startup-listener-retry@example.com', passwordHash: 'hash', displayName: 'Startup Listener Retry' });
     const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'startup-retry-seller' });
     await runtime.store.updateAccount(admin.id, account.id, { status: 'connected' });
+    await runtime.store.upsertCredential({ adminId: admin.id, accountId: account.id, platform: 'xianyu', cookieHeader: 'unb=startup-retry-seller', accessToken: 'token', deviceId: 'device' });
     await runtime.listen();
     for (let attempt = 0; attempt < 80 && calls.length < 3; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
     assert.deepEqual(calls, [`${admin.id}:${account.id}`, `${admin.id}:${account.id}`, `${admin.id}:${account.id}`]);

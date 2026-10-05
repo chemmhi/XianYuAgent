@@ -25,6 +25,18 @@ export interface AutoReplyContext {
 export interface AutoReplyGeneratedReply {
   text: string;
   segments?: string[];
+  decision?: 'reply' | 'skip';
+  reason?: string;
+}
+
+export interface AutoReplyAcknowledgementEvaluation {
+  decision: 'skip' | 'reply';
+  confidence: number;
+  reason: string;
+}
+
+export interface AutoReplyAcknowledgementEvaluator {
+  evaluate(input: { adminId?: string; context: AutoReplyContext; classification: AutoReplyClassification }): Promise<AutoReplyAcknowledgementEvaluation>;
 }
 
 /** High-level, redacted execution evidence for one agent step. */
@@ -147,6 +159,7 @@ export interface AutoReplyServiceOptions {
   classifier?: RuleBasedIntentClassifier;
   generator?: AutoReplyGenerator;
   sender?: AutoReplySender;
+  acknowledgementEvaluator?: AutoReplyAcknowledgementEvaluator;
   repairRuntime?: AutoReplyRepairRuntime;
   /** Production/runtime wiring must provide the repaired route explicitly. */
   requireRepairRuntime?: boolean;
@@ -165,7 +178,10 @@ export interface AutoReplyServiceRuntimeOptions {
   replySegmentDelayMs?: number;
   sendDelaySeconds?: number;
   generator?: AutoReplyGenerator;
+  acknowledgementEvaluator?: AutoReplyAcknowledgementEvaluator;
 }
+
+type ResolvedAutoReplyServiceRuntimeOptions = Required<Omit<AutoReplyServiceRuntimeOptions, 'acknowledgementEvaluator'>> & Pick<AutoReplyServiceRuntimeOptions, 'acknowledgementEvaluator'>;
 
 interface PendingInitialWindow {
   readonly key: string;
@@ -196,6 +212,7 @@ export class AutoReplyService {
   private readonly sendDelaySeconds: number;
   private readonly classifier: RuleBasedIntentClassifier;
   private readonly generator: AutoReplyGenerator;
+  private readonly acknowledgementEvaluator?: AutoReplyAcknowledgementEvaluator;
   private readonly sender: AutoReplySender;
   private readonly repairRuntime?: AutoReplyRepairRuntime;
   private readonly requireRepairRuntime: boolean;
@@ -220,6 +237,7 @@ export class AutoReplyService {
     this.sendDelaySeconds = Math.max(0, Math.min(options.sendDelaySeconds ?? 0, 86_400));
     this.classifier = options.classifier ?? new RuleBasedIntentClassifier();
     this.generator = options.generator ?? new TemplateAutoReplyGenerator();
+    this.acknowledgementEvaluator = options.acknowledgementEvaluator;
     this.sender = options.sender ?? new NoopAutoReplySender();
     this.repairRuntime = options.repairRuntime;
     this.requireRepairRuntime = options.requireRepairRuntime === true;
@@ -511,22 +529,26 @@ export class AutoReplyService {
         payload: { contextDigest, maxHistory: runtime.maxHistory, context },
       });
 
-      if (classification.decision === 'replied' && isAcknowledgementAfterAgentReply(inboundMessage.bodyText, context)) {
+      const shouldPreGateAcknowledgement = classification.decision === 'replied' && Boolean(runtime.acknowledgementEvaluator);
+      const acknowledgementEvaluation = shouldPreGateAcknowledgement
+        ? await this.evaluateAcknowledgement(runtime.acknowledgementEvaluator, input.adminId, context, classification)
+        : undefined;
+      if (acknowledgementEvaluation?.decision === 'skip') {
         const failureCode = 'AUTO_REPLY_ACKNOWLEDGEMENT_AFTER_AGENT_REPLY';
         const riskFlags = [...classification.riskFlags, 'buyer_acknowledgement'];
         const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode, riskFlags, eventPayload: {
           input: { kind: 'acknowledgement_gate', messageId: inboundMessage.id, contextDigest },
-          output: { decision: 'skipped', reason: failureCode },
+          output: { decision: 'skipped', reason: failureCode, semanticReason: acknowledgementEvaluation.reason, confidence: acknowledgementEvaluation.confidence },
           error: { code: failureCode },
         } });
-        await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'skipped', reason: failureCode, contextDigest });
+        await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'skipped', reason: failureCode, semanticReason: acknowledgementEvaluation.reason, confidence: acknowledgementEvaluation.confidence, contextDigest });
         await this.godView?.emit({
           phase: 'route',
           event: 'route.acknowledgement_skipped',
           traceId,
           runId: run.id,
           buyer,
-          payload: { status: 'skipped', decision: 'skipped', failureCode, contextDigest },
+          payload: { status: 'skipped', decision: 'skipped', failureCode, semanticReason: acknowledgementEvaluation.reason, confidence: acknowledgementEvaluation.confidence, contextDigest },
         });
         return { run: updated ?? run, inboundMessage, classification: { ...classification, decision: 'skipped', riskFlags }, context };
       }
@@ -595,6 +617,18 @@ export class AutoReplyService {
           context = refreshedContext;
           contextDigest = digestJson({ conversationId: conversation.id, productId: context.product?.id, orderRefs: context.orders.map((order) => order.orderNo), history: context.recentMessages.map((message) => ({ direction: message.direction, senderRole: message.senderRole, createdAt: message.createdAt, bodyText: message.bodyText ?? '' })), pendingBuyerMessages: (context.pendingBuyerMessages ?? []).map((message) => ({ id: message.id, bodyText: message.bodyText ?? '' })) });
         }
+      }
+      if (generatedReply?.decision === 'skip') {
+        const failureCode = 'AUTO_REPLY_ACKNOWLEDGEMENT_AFTER_AGENT_REPLY';
+        const riskFlags = [...classification.riskFlags, 'buyer_acknowledgement'];
+        const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode, riskFlags, eventPayload: {
+          input: { kind: 'agent_semantic_decision', messageId: inboundMessage.id, contextDigest },
+          output: { decision: 'skipped', reason: failureCode, semanticReason: generatedReply.reason ?? 'agent_semantic_skip' },
+          error: { code: failureCode },
+        } });
+        await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'skipped', reason: failureCode, semanticReason: generatedReply.reason ?? 'agent_semantic_skip', contextDigest });
+        await this.godView?.emit({ phase: 'route', event: 'route.acknowledgement_skipped', traceId, runId: run.id, buyer, payload: { status: 'skipped', decision: 'skipped', failureCode, semanticReason: generatedReply.reason ?? 'agent_semantic_skip', contextDigest } });
+        return { run: updated ?? run, inboundMessage, classification: { ...classification, decision: 'skipped', riskFlags }, context };
       }
       let reply = generatedReply ? normalizeReply(generatedReply.text) : undefined;
       if (!reply) {
@@ -935,7 +969,7 @@ export class AutoReplyService {
     };
   }
 
-  private async resolveRuntimeOptions(adminId: string, accountId: string): Promise<Required<AutoReplyServiceRuntimeOptions>> {
+  private async resolveRuntimeOptions(adminId: string, accountId: string): Promise<ResolvedAutoReplyServiceRuntimeOptions> {
     const provided = this.configProvider ? await this.configProvider(adminId, accountId) : {};
     const buyerAllowlist = [...new Set((provided.buyerAllowlist ?? this.buyerAllowlist).map(normalizeBuyerName).filter((value): value is string => Boolean(value)))];
     return {
@@ -951,10 +985,27 @@ export class AutoReplyService {
       replySegmentDelayMs: Math.max(0, Math.min(provided.replySegmentDelayMs ?? this.replySegmentDelayMs, 5_000)),
       sendDelaySeconds: Math.max(0, Math.min(provided.sendDelaySeconds ?? this.sendDelaySeconds, 86_400)),
       generator: provided.generator ?? this.generator,
+      acknowledgementEvaluator: provided.acknowledgementEvaluator ?? this.acknowledgementEvaluator,
     };
   }
 
-  private async resolveReplySegments(generator: AutoReplyGenerator, proposed: string[] | undefined, reply: string, runtime: Required<AutoReplyServiceRuntimeOptions>): Promise<string[]> {
+  private async evaluateAcknowledgement(evaluator: AutoReplyAcknowledgementEvaluator | undefined, adminId: string, context: AutoReplyContext, classification: AutoReplyClassification): Promise<AutoReplyAcknowledgementEvaluation | undefined> {
+    if (!evaluator) return undefined;
+    const latestAgentReply = [...context.recentMessages].reverse().find((message) => message.direction === 'outbound' && message.senderRole === 'agent' && Boolean(message.bodyText?.trim()));
+    if (!latestAgentReply) return undefined;
+    try {
+      const evaluation = await evaluator.evaluate({ adminId, context, classification });
+      if (evaluation.decision !== 'skip' && evaluation.decision !== 'reply') return { decision: 'reply', confidence: 0, reason: 'invalid_semantic_evaluator_decision' };
+      const confidence = Number.isFinite(evaluation.confidence) ? Math.max(0, Math.min(1, evaluation.confidence)) : 0;
+      if (evaluation.decision === 'skip' && confidence < 0.8) return { decision: 'reply', confidence, reason: 'skip_confidence_below_threshold' };
+      return { decision: evaluation.decision, confidence, reason: evaluation.reason?.trim().slice(0, 240) || 'semantic_evaluator_decision' };
+    } catch {
+      // Fail open so an unavailable semantic judge never drops a buyer request.
+      return { decision: 'reply', confidence: 0, reason: 'semantic_evaluator_failed' };
+    }
+  }
+
+  private async resolveReplySegments(generator: AutoReplyGenerator, proposed: string[] | undefined, reply: string, runtime: ResolvedAutoReplyServiceRuntimeOptions): Promise<string[]> {
     if (reply.length > runtime.maxReplyLength) throw new Error('AUTO_REPLY_REPLY_TOO_LONG');
     const validated = validateSemanticSegments(proposed, reply);
     if (validated) return validated;
@@ -1031,8 +1082,10 @@ function isUuid(value: string): boolean {
 
 function normalizeGeneratedReply(value: string | AutoReplyGeneratedReply | undefined): AutoReplyGeneratedReply | undefined {
   if (typeof value === 'string') return { text: value };
-  if (!value || typeof value.text !== 'string') return undefined;
-  return { text: value.text, segments: Array.isArray(value.segments) ? value.segments : undefined };
+  if (!value) return undefined;
+  if (value.decision === 'skip') return { text: '', decision: 'skip', reason: value.reason?.trim() || 'agent_semantic_skip' };
+  if (typeof value.text !== 'string') return undefined;
+  return { text: value.text, segments: Array.isArray(value.segments) ? value.segments : undefined, decision: 'reply' };
 }
 
 function normalizeReply(value: string | undefined): string | undefined {
@@ -1066,19 +1119,6 @@ function stripSensitiveTerms(value: string): string {
     .replace(/cookie|api\s*key|access[_ -]?token|验证码|密码|秘钥|密钥/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-}
-
-function isAcknowledgementAfterAgentReply(text: string | undefined, context: AutoReplyContext): boolean {
-  const normalized = text?.trim().toLocaleLowerCase().replace(/[\s.,!?，。！？、~～…]+/gu, '');
-  if (!normalized || normalized.length > 24) return false;
-  // Only suppress a short acknowledgement when the latest conversational
-  // message is already an agent reply. Older agent messages must not swallow
-  // a real follow-up after a newer buyer message.
-  const latestConversationalMessage = [...context.recentMessages]
-    .reverse()
-    .find((message) => message.senderRole !== 'system' && Boolean(message.bodyText?.trim()));
-  if (!latestConversationalMessage || latestConversationalMessage.direction !== 'outbound' || latestConversationalMessage.senderRole !== 'agent') return false;
-  return /^(?:ok(?:ay)?|kk|gotit|understood|thanks?|thankyou|received|好的?|好滴|收到|明白(?:了)?|了解(?:了)?|知道了?|行(?:的)?|可以|嗯+|哦+|谢(?:谢|了)|没问题|好嘞|好哒)$/iu.test(normalized);
 }
 
 function validateSemanticSegments(proposed: string[] | undefined, reply: string): string[] | undefined {
