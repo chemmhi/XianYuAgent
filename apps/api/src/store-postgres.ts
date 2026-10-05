@@ -1,6 +1,6 @@
 import { Pool, type PoolClient } from 'pg';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, AutoReplyProductLookup, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponAssetRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductKnowledgeBaseMessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceConfirmationRecord, WorkspaceMessageRecord, WorkspaceMessageType, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, AutoReplyProductLookup, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponAssetRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, DeliveryRecord, DeliveryRecordStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductKnowledgeBaseMessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceConfirmationRecord, WorkspaceMessageRecord, WorkspaceMessageType, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { projectAutoReplyRun } from './auto-reply-activity-projection.js';
 import { createId } from './security.js';
@@ -494,6 +494,46 @@ export class PostgresStore implements Store {
       returning *`, [input.accountId, input.orderNo]);
     if (!result.rows[0]) return undefined;
     return this.toOrder(result.rows[0]);
+  }
+  async updateOrderDelivery(input: { adminId: string; accountId: string; orderNo: string; deliveryStatus: OrderRecord['deliveryStatus']; deliveryFailReason?: string; deliveryType?: OrderRecord['deliveryType'] }): Promise<OrderRecord | undefined> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const result = await this.pool.query(`update orders.orders
+      set delivery_status=$3, delivery_fail_reason=$4, delivery_type=coalesce($5,delivery_type), updated_at=now(), config_version=config_version+1
+      where account_id=$1 and order_no=$2
+      returning *`, [input.accountId, input.orderNo, input.deliveryStatus, input.deliveryFailReason ?? null, input.deliveryType ?? null]);
+    return result.rows[0] ? this.toOrder(result.rows[0]) : undefined;
+  }
+  async listDeliveryRecords(adminId: string, input: { accountId: string; orderNo: string }): Promise<DeliveryRecord[]> {
+    if (!(await this.hasAccountScope(adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const result = await this.pool.query(`select * from orders.delivery_records where account_id=$1 and order_no=$2 order by attempt desc, created_at desc`, [input.accountId, input.orderNo]);
+    return result.rows.map((row) => this.toDeliveryRecord(row));
+  }
+  async getDeliveryRecordByIdempotency(adminId: string, input: { accountId: string; idempotencyKey: string }): Promise<DeliveryRecord | undefined> {
+    if (!(await this.hasAccountScope(adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const scope = `order-delivery:${adminId}:${input.accountId}`;
+    const result = await this.pool.query('select * from orders.delivery_records where account_id=$1 and idempotency_scope=$2 and idempotency_key=$3 limit 1', [input.accountId, scope, input.idempotencyKey]);
+    return result.rows[0] ? this.toDeliveryRecord(result.rows[0]) : undefined;
+  }
+  async createDeliveryRecord(input: { adminId: string; orderId: string; orderNo: string; accountId: string; deliveryType: OrderRecord['deliveryType']; idempotencyScope: string; idempotencyKey: string; attempt: number; trackingRef?: string }): Promise<DeliveryRecord> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const existing = await this.pool.query(`select * from orders.delivery_records where idempotency_scope=$1 and idempotency_key=$2 limit 1`, [input.idempotencyScope, input.idempotencyKey]);
+    if (existing.rows[0]) return this.toDeliveryRecord(existing.rows[0]);
+    const inserted = await this.pool.query(`insert into orders.delivery_records (id,order_id,order_no,account_id,delivery_type,status,idempotency_scope,idempotency_key,attempt,tracking_ref)
+      values ($1,$2,$3,$4,$5,'pending',$6,$7,$8,$9)
+      on conflict (idempotency_scope,idempotency_key) do nothing
+      returning *`, [createId(), input.orderId, input.orderNo, input.accountId, input.deliveryType, input.idempotencyScope, input.idempotencyKey, input.attempt, input.trackingRef ?? null]);
+    if (inserted.rows[0]) return this.toDeliveryRecord(inserted.rows[0]);
+    const readback = await this.pool.query(`select * from orders.delivery_records where idempotency_scope=$1 and idempotency_key=$2 limit 1`, [input.idempotencyScope, input.idempotencyKey]);
+    if (!readback.rows[0]) throw new Error('DELIVERY_RECORD_READBACK_FAILED');
+    return this.toDeliveryRecord(readback.rows[0]);
+  }
+  async updateDeliveryRecord(input: { adminId: string; id: string; status: DeliveryRecordStatus; externalOutcome?: 'known_success' | 'known_failure' | 'unknown'; externalRef?: string; couponItemId?: string; trackingRef?: string; deliveredAt?: string; failureCode?: string; failureMessage?: string }): Promise<DeliveryRecord | undefined> {
+    const current = await this.pool.query('select account_id from orders.delivery_records where id=$1', [input.id]);
+    if (!current.rows[0]) return undefined;
+    const accountId = String(current.rows[0].account_id);
+    if (!(await this.hasAccountScope(input.adminId, accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const result = await this.pool.query(`update orders.delivery_records set status=$2, external_outcome=coalesce($3,external_outcome), external_ref=coalesce($4,external_ref), coupon_item_id=coalesce($5,coupon_item_id), tracking_ref=coalesce($6,tracking_ref), delivered_at=coalesce($7,delivered_at), failure_code=coalesce($8,failure_code), failure_message=coalesce($9,failure_message), updated_at=now() where id=$1 returning *`, [input.id, input.status, input.externalOutcome ?? null, input.externalRef ?? null, input.couponItemId ?? null, input.trackingRef ?? null, input.deliveredAt ?? null, input.failureCode ?? null, input.failureMessage ?? null]);
+    return result.rows[0] ? this.toDeliveryRecord(result.rows[0]) : undefined;
   }
   async createOrder(input: { adminId: string; order: Omit<OrderRecord, 'id' | 'createdAt' | 'updatedAt' | 'configVersion' | 'source'> & { id?: string; createdAt?: string; updatedAt?: string; configVersion?: number; source?: OrderSource } }): Promise<OrderRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.order.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
@@ -2000,6 +2040,28 @@ export class PostgresStore implements Store {
       reviewedAt: iso(row.reviewed_at),
       reminderCount: Number(row.review_reminder_count ?? 0),
       lastReminderAt: iso(row.last_review_reminder_at),
+    };
+  }
+  private toDeliveryRecord(row: Row): DeliveryRecord {
+    return {
+      id: String(row.id),
+      orderId: String(row.order_id),
+      orderNo: String(row.order_no),
+      accountId: String(row.account_id),
+      deliveryType: row.delivery_type as DeliveryRecord['deliveryType'],
+      status: row.status as DeliveryRecordStatus,
+      idempotencyScope: String(row.idempotency_scope),
+      idempotencyKey: String(row.idempotency_key),
+      attempt: Number(row.attempt ?? 1),
+      couponItemId: row.coupon_item_id ? String(row.coupon_item_id) : undefined,
+      trackingRef: row.tracking_ref ? String(row.tracking_ref) : undefined,
+      deliveredAt: iso(row.delivered_at),
+      failureCode: row.failure_code ? String(row.failure_code) : undefined,
+      failureMessage: row.failure_message ? String(row.failure_message) : undefined,
+      externalOutcome: row.external_outcome ? row.external_outcome as DeliveryRecord['externalOutcome'] : undefined,
+      externalRef: row.external_ref ? String(row.external_ref) : undefined,
+      createdAt: dateIso(row.created_at),
+      updatedAt: dateIso(row.updated_at),
     };
   }
   private toAutomationExecution(row: Row): AutomationExecutionLedgerRecord {

@@ -1,6 +1,6 @@
 import type { AutoReplyAgentConfigPatch, CouponBatchMetadata, ProductRecord, Store } from './domain.js';
 
-export type NativeWorkspaceWriteKind = 'product_publish' | 'coupon_create' | 'agent_settings_update';
+export type NativeWorkspaceWriteKind = 'product_publish' | 'product_update' | 'coupon_create' | 'agent_settings_update' | 'product_knowledge_update' | 'product_automation_update' | 'coupon_update' | 'coupon_enable' | 'coupon_disable' | 'coupon_bind' | 'coupon_unbind' | 'coupon_void' | 'coupon_copy' | 'model_settings_update';
 export type NativeWorkspaceWriteAction = NativeWorkspaceWriteKind;
 
 export interface NativeCouponCreateInput {
@@ -46,9 +46,11 @@ export function detectNativeWorkspaceWrite(instruction: string): NativeWorkspace
 
 export function sanitizeWorkspaceInstruction(instruction: string): string {
   const kind = detectNativeWorkspaceWrite(instruction);
-  if (kind === 'coupon_create') return '已请求新增卡券（卡券正文将在确认后写入卡券域）';
+  if (kind === 'coupon_create' || /(卡券|卡密|优惠券).*(内容|正文|数据)/i.test(instruction)) return '已请求卡券操作（卡券正文将在确认后通过受控卡券域写入）';
   if (kind === 'agent_settings_update') return '已请求修改自动回复 Agent 配置（等待管理员确认）';
-  return instruction.slice(0, 2_000);
+  return instruction
+    .replace(/((?:api[_ -]?key|access[_ -]?token|cookie|密钥|令牌|token)\s*[:：=]\s*)[^;；\n\s]+/gi, '$1[REDACTED]')
+    .slice(0, 2_000);
 }
 
 export function parseNativeWorkspaceCouponCreate(instruction: string): NativeCouponCreateInput | undefined {

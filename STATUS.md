@@ -209,7 +209,7 @@
 - 当前目标：完成 `S4-VS5A` 独立复审后推进 `S4-VS5B/C`；并行收尾 `S4-VS6B`、`S4-VS7A` 的真实 PostgreSQL、浏览器视觉和独立评审门禁，以及既有账号/商品/卡券真实环境门禁，不再把受控证据冒充发布级完成
 - 多 Agent 协作状态：已启用独立 worktree、登记表和全局 merge lock 强制规则；当前活动登记见 `docs/agent-worktree-registry.md`，主工作区禁止直接开发
 - 已完成范围：阶段 0 范围门禁；阶段 1 架构与模块边界；阶段 2 数据模型、数据库表设计、关系基数、状态机、API envelope、幂等、鉴权、敏感交付、迁移边界；阶段 5 账号登录方法选择、真实 QR 适配器、Cookie 登录、账号资料同步、登录会话持久化、AuthGate 会话门禁、Vite 默认代理、账号列表真实读取和 Chrome/CDP 控制环境 E2E；S4-VS2 商品列表/详情只读首片、003_catalog 迁移、Memory/Postgres scope-aware 查询、真实 PostgreSQL smoke 和 Chrome/CDP 商品 E2E
-- 未完成范围：在线聊天 `S4-VS5B/C`、Workspace `S4-VS6B`、Settings API Key `S4-VS7A` 已完成首片并保持 `READY_FOR_REVIEW`；订单交付 `S4-VS4B/C`；订单只读列表 `S4-VS4A` 的真实闲鱼读取与 PostgreSQL 落库已通过，交付动作仍后置；Dashboard 全状态截图、独立视觉签核与 rollback 仍开放；VS5A 保持 `PARTIALLY_VERIFIED`，待独立复审确认生产部署拓扑后关闭 `S5-RISK-021`；`S4-VS6A` 已完成真实 PostgreSQL、WS 和 Chrome/CDP 首链路复核并保持 `PARTIALLY_VERIFIED`，尚未满足独立 Worker/Pi Runtime、发布级恢复和人工视觉签核；商品/卡券剩余写入与库存门禁；`S4-ENV-RECOVERY`、`S4-EXT-ACCOUNT`、`S4-ENV-RUNTIME`；完整迁移/回滚/Testcontainers、Redis/MinIO 恢复和逐状态视觉回归。账号密码登录依赖独立浏览器运行时，当前明确不可用。
+- 未完成范围：在线聊天 `S4-VS5B/C`、Workspace `S4-VS6B`、Settings API Key `S4-VS7A` 已完成首片并保持 `READY_FOR_REVIEW`；订单交付 `S4-VS4B/C` 代码与受控 Memory smoke 已接通，当前保持 `PARTIALLY_VERIFIED`，待真实闲鱼 mutation、PostgreSQL migration smoke、浏览器双 viewport、外部 timeout/unknown 与人工恢复证据；订单只读列表 `S4-VS4A` 的真实闲鱼读取与 PostgreSQL 落库已通过；Dashboard 全状态截图、独立视觉签核与 rollback 仍开放；VS5A 保持 `PARTIALLY_VERIFIED`，待独立复审确认生产部署拓扑后关闭 `S5-RISK-021`；`S4-VS6A` 已完成真实 PostgreSQL、WS 和 Chrome/CDP 首链路复核并保持 `PARTIALLY_VERIFIED`，尚未满足独立 Worker/Pi Runtime、发布级恢复和人工视觉签核；商品/卡券剩余写入与库存门禁；`S4-ENV-RECOVERY`、`S4-EXT-ACCOUNT`、`S4-ENV-RUNTIME`；完整迁移/回滚/Testcontainers、Redis/MinIO 恢复和逐状态视觉回归。账号密码登录依赖独立浏览器运行时，当前明确不可用。
 - 未解决风险：除既有项目风险外，OpenAI 主备切换的 `S5-RISK-031/P2`（fallback 专用审计未暴露）与 `S5-RISK-032/P1`（迁移 024 的发布级 rollback/兼容窗口）保持开放；`S5-RISK-028/P2` 已部分缓解但仍待独立视觉签核。
 - 待复审问题：S3-R5 为超出当前范围的实现审计；S3-R6 设计范围已澄清；S1-I004 保持 P2 跟进项；阶段 4 计划门禁已通过
 - 下一步：推进 `S4-VS5B/C`、`S4-VS6B`；并完成 `S4-VS7A` 的真实 PostgreSQL、Chrome/CDP 双 viewport、403/409 跨层 E2E、迁移回滚和三轮独立复审。VS5A 的真实 Redis/PostgreSQL、跨进程广播、重启恢复和 Chrome/CDP 断线证据已归档，待独立复审确认生产部署拓扑。商品同步、卡券首页等既有首片证据继续保留，但不替代真实外部账号、持久化和人工视觉门禁
@@ -299,7 +299,7 @@
 | `S4-VS2E` 商品外部同步真实验收 | `PARTIALLY_VERIFIED` | 真实账号、Cookie、分页、字段映射和数量口径 | 当前已登录 Chrome + 真实闲鱼账号人工复核 |
 | `S4-VS3A/B` 卡券明细、素材、批量数据消费 | `PLANNED` | CouponItem bulk 操作、素材、reserve/consume/release | PostgreSQL/Redis/MinIO 并发集成、敏感字段裁剪 |
 | `S4-VS4A` 订单列表只读 | `PASS` | 订单列表/详情/refresh、四套状态（含待发货/待评价边界）、账号 scope、关键词、分页、桌面/移动；昵称/商品标题与缩略图聚合、缺失商品提示、真实 seller 订单读取与 PostgreSQL refresh 落库 | 交付预览、配置检查、发货/取消/重试转入 `S4-VS4B/C` |
-| `S4-VS4B/C` 订单交付 | `PLANNED` | delivery-preview、发货/取消/重试/unknown 恢复 | 四套状态、配置检查、Outbox、DeliveryRecord |
+| `S4-VS4B/C` 订单交付 | `PARTIALLY_VERIFIED` | delivery-preview、发货/取消/重试/unknown 恢复已接通，受控 smoke 通过 | 四套状态、配置检查、Outbox、DeliveryRecord；真实外部 mutation 与人工恢复仍待证据 |
 | `S4-VS5A` 在线聊天读取与实时连接 | `PARTIALLY_VERIFIED` | 会话列表、消息时间线、MemoryStore/PostgreSQL HTTP/WS、Redis 跨进程广播与重启恢复、cursor 重连去重、Chrome/CDP 双 viewport 断线视觉证据；本轮补齐搜索、全部/未读筛选、独立滚动、整行选择、头像/商品缩略图和 `016_conversation_media.sql` | 独立复审、生产部署拓扑确认；发送/附件/撤回仍属 `S4-VS5B` |
 | `S4-VS5B` 在线聊天发送/附件/撤回 | `PLANNED` | 文本发送、图片上传、失败重试、撤回 | PostgreSQL/对象存储、幂等、unknown/timeout、脱敏 |
 | `S4-VS5C` 人工接管与 AI 恢复 | `PLANNED` | handoff/release、版本冲突、审计 | 非法转换、403/409、桌面/移动状态 |
@@ -429,3 +429,12 @@
 - 可执行测试：语义断言 10/10；自动回复单元 221/221；真实 API E2E 10/10；simulate smoke、PostgreSQL persistence、Outcome Review、buyer push、AR-VS-08 enforce、release smoke 全部通过；API/Web typecheck、build、root `npm test`（显式 simulate 配置）通过。
 - 根因修复：`AutoReplyRepairRuntime.createOutcomeReviewWorker` 透传 `accountId`，并补充跨账号隔离回归；AR-VS-08 PostgreSQL 门禁恢复通过。
 - 合入与部署：merge commit `b348d53`；当前 `main` 已完成健康检查，`/healthz` 与 `/readyz` 均返回 200；随后已停止当前 Compose 全部服务。标准 Docker base image 拉取受本机代理阻塞，使用本地缓存镜像 overlay 完成同等运行时部署验证。
+
+## 2026-10-05 Workspace 平台接管编排补齐
+
+- 依据 docs/PRD.md、docs/00-scope.md、docs/02-data-api.md、docs/04-plan.md 和 docs/agent/workspace/WS-VS-01~05，新增 Workspace 平台接管用户故事清单和统一编排边界。
+- 新增 WorkspaceCommandOrchestrator，把账号、Dashboard、商品、卡券、订单、Agent 动态、Agent 配置和 OpenAI-compatible 模型能力路由到现有领域服务；Workspace 不复制领域数据模型。
+- 原生写动作继续遵循 Policy -> Confirmation -> Idempotency -> Outbox -> Audit，并按 adminId + accountId 复核账号范围；Workspace 输出不包含 Credential、Cookie、API Key、Prompt 原文、卡券正文或买家敏感字段。
+- 已验证：API build、Workspace 命令单元测试 9/9、test:workspace-platform smoke 通过，git diff --check 通过。
+- 当前边界：订单发货/取消/重试已接入正式 DeliveryRecord、execution outbox 与 unknown recovery 入口，并通过 Memory/HTTP 受控 smoke；真实闲鱼账号 mutation、PostgreSQL migration、外部 timeout/unknown 与人工恢复演练仍属于 S4-VS4B/C 发布门禁；商品外部发布仍需受控账号 E2E 才能关闭真实平台门禁；完整 API 测试在既有 auto-reply-smoke.mjs 阶段长时间无输出，未作为全量通过证据。
+- 当前工作区状态：PARTIALLY_VERIFIED / READY_FOR_REVIEW，不得将 MemoryStore、fixture 或 HTTP 200 解释为真实闲鱼 mutation 已验收。

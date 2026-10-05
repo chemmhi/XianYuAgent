@@ -308,6 +308,7 @@ export type DeliveryStatus = 'pending' | 'reserving' | 'delivered' | 'partially_
 export type AfterSalesStatus = 'none' | 'requested' | 'refunding' | 'refunded' | 'rejected' | 'closed';
 export type OrderDeliveryType = 'manual' | 'no_logistics' | 'coupon_only' | 'mixed';
 export type OrderSource = 'local' | 'xianyu';
+export type DeliveryRecordStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'unknown' | 'cancelled';
 
 export interface OrderRecord {
   id: string;
@@ -339,6 +340,27 @@ export interface OrderRecord {
   reviewedAt?: string;
   reminderCount?: number;
   lastReminderAt?: string;
+}
+
+export interface DeliveryRecord {
+  id: string;
+  orderId: string;
+  orderNo: string;
+  accountId: string;
+  deliveryType: OrderDeliveryType;
+  status: DeliveryRecordStatus;
+  idempotencyScope: string;
+  idempotencyKey: string;
+  attempt: number;
+  couponItemId?: string;
+  trackingRef?: string;
+  deliveredAt?: string;
+  failureCode?: string;
+  failureMessage?: string;
+  externalOutcome?: ExternalOutcome;
+  externalRef?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type AutomationExecutionLedgerStatus = 'running' | 'completed';
@@ -1219,7 +1241,24 @@ export type StepKind = 'plan' | 'tool_call' | 'policy_check' | 'mutation' | 'obs
 export type ExternalOutcome = 'known_success' | 'known_failure' | 'unknown';
 export type WorkspaceMessageType = 'user_message' | 'reasoning_summary' | 'tool_event' | 'final_answer';
 export type WorkspaceConfirmationStatus = 'active' | 'confirmed' | 'expired' | 'rejected' | 'cancelled';
-export type WorkspaceActionKind = 'product_publish' | 'coupon_create' | 'agent_settings_update';
+export type WorkspaceActionKind =
+  | 'product_publish'
+  | 'product_update'
+  | 'coupon_create'
+  | 'agent_settings_update'
+  | 'product_knowledge_update'
+  | 'product_automation_update'
+  | 'coupon_update'
+  | 'coupon_enable'
+  | 'coupon_disable'
+  | 'coupon_bind'
+  | 'coupon_unbind'
+  | 'coupon_void'
+  | 'coupon_copy'
+  | 'model_settings_update'
+  | 'order_deliver'
+  | 'order_retry'
+  | 'order_cancel';
 
 export interface AgentSessionRecord {
   id: string;
@@ -1399,6 +1438,11 @@ export interface Store {
   recordReviewFact(input: { accountId: string; orderNo: string; eventId: string; reviewedAt?: string }): Promise<{ created: boolean }>;
   recordReviewReminderSent(input: { accountId: string; orderNo: string; sentAt: string; expectedReminderCount?: number }): Promise<OrderRecord | undefined>;
   markOrderDelivered(input: { adminId: string; accountId: string; orderNo: string }): Promise<OrderRecord | undefined>;
+  updateOrderDelivery(input: { adminId: string; accountId: string; orderNo: string; deliveryStatus: DeliveryStatus; deliveryFailReason?: string; deliveryType?: OrderDeliveryType }): Promise<OrderRecord | undefined>;
+  listDeliveryRecords(adminId: string, input: { accountId: string; orderNo: string }): Promise<DeliveryRecord[]>;
+  getDeliveryRecordByIdempotency(adminId: string, input: { accountId: string; idempotencyKey: string }): Promise<DeliveryRecord | undefined>;
+  createDeliveryRecord(input: { adminId: string; orderId: string; orderNo: string; accountId: string; deliveryType: OrderDeliveryType; idempotencyScope: string; idempotencyKey: string; attempt: number; trackingRef?: string }): Promise<DeliveryRecord>;
+  updateDeliveryRecord(input: { adminId: string; id: string; status: DeliveryRecordStatus; externalOutcome?: ExternalOutcome; externalRef?: string; couponItemId?: string; trackingRef?: string; deliveredAt?: string; failureCode?: string; failureMessage?: string }): Promise<DeliveryRecord | undefined>;
   createOrder(input: { adminId: string; order: Omit<OrderRecord, 'id' | 'createdAt' | 'updatedAt' | 'configVersion' | 'source'> & { id?: string; createdAt?: string; updatedAt?: string; configVersion?: number; source?: OrderSource } }): Promise<OrderRecord>;
   upsertExternalOrder(input: { adminId: string; accountId: string; item: XianyuOrderItem; syncedAt: string; accountName?: string }): Promise<OrderUpsertResult>;
   deleteExternalOrdersNotInSnapshot(input: { adminId: string; accountId: string; orderNos: readonly string[] }): Promise<number>;

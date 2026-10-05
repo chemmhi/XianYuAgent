@@ -2,6 +2,7 @@ import type { RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, Stor
 import type { WorkspaceRuntime } from './workspace.js';
 import { executeNativeWorkspaceRead } from './workspace-native-read.js';
 import { prepareNativeWorkspaceWrite } from './workspace-native-write.js';
+import type { WorkspaceCommandOrchestrator } from './workspace-commands.js';
 import { persistWorkspaceConfirmation } from './workspace-confirmation.js';
 import { ModelClientService } from './model-client.js';
 
@@ -213,6 +214,7 @@ export interface PiRuntimeAdapterOptions {
   resolveModelClient?: (input: { adminId?: string; accountId: string }) => Promise<ModelClient | undefined>;
   messageSink?: (message: PiRuntimeMessage) => void | Promise<void>;
   onEvent?: (event: PiRuntimeEvent) => void | Promise<void>;
+  workspaceCommands?: WorkspaceCommandOrchestrator;
 }
 
 export interface PiRuntimeEnqueueInput {
@@ -288,7 +290,9 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       await this.emit(input.run.id, 'runtime.started', { status: 'running', model: this.options.model, messageType: 'tool_event' });
       await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: '正在分析请求并准备执行上下文。', summary: '已创建高层推理摘要' });
 
-      const nativeWrite = await prepareNativeWorkspaceWrite({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction });
+      const nativeWrite = this.options.workspaceCommands
+        ? await this.options.workspaceCommands.prepareWrite({ adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction, requestId: `workspace:${input.run.id}`, traceId: `workspace:${input.run.id}` })
+        : await prepareNativeWorkspaceWrite({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction });
       if (nativeWrite) {
         await this.transitionStep(step, 'waiting_confirmation', { outputSummary: nativeWrite.summary });
         await this.transitionRun(input.run, 'waiting_confirmation', { resultSummary: nativeWrite.summary });
@@ -302,11 +306,14 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       await this.emit(input.run.id, 'run.executing', { status: 'executing', messageType: 'tool_event' });
       await this.emit(input.run.id, 'step.executing', { stepId: step.id, status: 'executing', messageType: 'tool_event' });
 
-      const nativeRead = await executeNativeWorkspaceRead({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction });
+      const nativeRead = this.options.workspaceCommands
+        ? await this.options.workspaceCommands.execute({ adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction, requestId: `workspace:${input.run.id}`, traceId: `workspace:${input.run.id}` })
+        : await executeNativeWorkspaceRead({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction });
       if (nativeRead) {
         const sessionId = input.sessionId ?? input.run.sessionId;
         await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'tool_event', content: nativeRead.content, summary: nativeRead.summary });
-        await this.emit(input.run.id, 'workspace.native_read', { messageType: 'tool_event', resource: nativeRead.kind, summary: nativeRead.summary, data: nativeRead.data });
+        const commandResult = 'mutation' in nativeRead && nativeRead.mutation;
+        await this.emit(input.run.id, commandResult ? 'workspace.command.executed' : 'workspace.native_read', { messageType: 'tool_event', resource: nativeRead.kind, operation: 'operation' in nativeRead ? nativeRead.operation : undefined, summary: nativeRead.summary, data: nativeRead.data });
         const finishedAt = new Date().toISOString();
         await this.transitionStep(step, 'succeeded', { finishedAt, outputSummary: nativeRead.summary });
         await this.transitionRun(input.run, 'succeeded', { finishedAt, resultSummary: nativeRead.content });

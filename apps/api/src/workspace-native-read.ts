@@ -64,10 +64,10 @@ function couponResult(items: CouponBatchRecord[], total: number): NativeWorkspac
 }
 
 function orderResult(items: OrderRecord[], total: number): NativeWorkspaceReadResult {
-  const rows = items.map((item) => ({ orderNo: item.orderNo, itemTitle: item.itemTitle, buyerName: item.buyerName, amountMinor: item.amountMinor, paymentStatus: item.paymentStatus, orderStatus: item.orderStatus, deliveryStatus: item.deliveryStatus, afterSalesStatus: item.afterSalesStatus, createdAt: item.createdAt, updatedAt: item.updatedAt }));
+  const rows = items.map((item) => ({ orderNo: item.orderNo, itemTitle: item.itemTitle, amountMinor: item.amountMinor, paymentStatus: item.paymentStatus, orderStatus: item.orderStatus, deliveryStatus: item.deliveryStatus, afterSalesStatus: item.afterSalesStatus, createdAt: item.createdAt, updatedAt: item.updatedAt }));
   const content = rows.length === 0
     ? '当前账号暂无订单。'
-    : [`当前账号共有 ${total} 个订单，以下展示最近的 ${rows.length} 个：`, ...rows.map((item, index) => `${index + 1}. ${item.orderNo} · ${item.itemTitle} · ${item.buyerName} · ${formatMoney(item.amountMinor)} · 支付 ${paymentStatusLabel(item.paymentStatus)} · 交付 ${deliveryStatusLabel(item.deliveryStatus)} · ${formatTime(item.createdAt)}`)].join('\n');
+    : [`当前账号共有 ${total} 个订单，以下展示最近的 ${rows.length} 个：`, ...rows.map((item, index) => `${index + 1}. ${item.orderNo} · ${item.itemTitle} · 买家信息已脱敏 · ${formatMoney(item.amountMinor)} · 支付 ${paymentStatusLabel(item.paymentStatus)} · 交付 ${deliveryStatusLabel(item.deliveryStatus)} · ${formatTime(item.createdAt)}`)].join('\n');
   return { kind: 'orders', title: '订单查询', content, summary: `已读取 ${total} 个订单`, data: { total, items: rows } };
 }
 

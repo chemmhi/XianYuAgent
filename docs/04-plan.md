@@ -167,8 +167,8 @@ S4-VS7A（可与 VS5A/VS6A 并行，但先完成 CredentialStore 契约）
 | `S4-VS3A` 卡券明细与素材 | CouponItem bulk-save/delete、资产上传/删除、敏感正文隔离 | `S4-VS3` 已合入代码、`S4-VS2` 商品绑定 | `PLANNED` | `S4-I003`、`S5-RISK-016` |
 | `S4-VS3B` 批量数据并发消费 | reserve/consume/release、并发冲突、订单交付前内容一致性 | `S4-VS3A`、事务锁 | `PLANNED` | `R-009`、`S5-RISK-016` |
 | `S4-VS4A` 订单列表与详情 | 订单只读、筛选、四套状态、会话/商品关联 | `S4-VS1/B`、订单 schema | `PLANNED` | `S5-RISK-017` |
-| `S4-VS4B` 交付预览与配置检查 | delivery-preview、策略校验、配置检查、可解释失败 | `S4-VS3B`、Policy/Confirmation | `PLANNED` | `S4-I003`、`S4-I004`、`S5-RISK-017` |
-| `S4-VS4C` 发货/取消/重试/未知恢复 | manual/no_logistics/coupon_only/mixed、Outbox、人工恢复 | `S4-VS4B`、外部 adapter | `PLANNED` | `R-009`、`S4-I004`、`S5-RISK-018` |
+| `S4-VS4B` 交付预览与配置检查 | delivery-preview、策略校验、配置检查、可解释失败 | `S4-VS3B`、Policy/Confirmation | `IMPLEMENTED / READY_FOR_REVIEW` | `S4-I003`、`S4-I004`、`S5-RISK-017` |
+| `S4-VS4C` 发货/取消/重试/未知恢复 | manual/no_logistics/coupon_only/mixed、Outbox、人工恢复 | `S4-VS4B`、外部 adapter | `IMPLEMENTED / PARTIALLY_VERIFIED` | `R-009`、`S4-I004`、`S5-RISK-018` |
 | `S4-ENV-RECOVERY` 发布级恢复门禁 | 迁移回滚、Testcontainers、Redis/MinIO 重启恢复 | 所有写入切片前置 | `BLOCKED` | `R-001`、`S5-I001`、`S5-RISK-019` |
 | `S4-EXT-ACCOUNT` 真实闲鱼账号验收 | APP 扫码、Cookie、资料同步和账号口径人工复核 | 当前 Chrome 登录态、外部账号 | `BLOCKED` | `R-002`、`S5-I002`、`S5-I004` |
 | `S4-ENV-RUNTIME` Pi Runtime 门禁 | 健康、超时、重试、取消、不可用和观测 | Execution foundation | `PLANNED` | `R-006`、`S5-RISK-020` |

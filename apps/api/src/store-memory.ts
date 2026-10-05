@@ -1,4 +1,4 @@
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, AutoReplyProductLookup, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponAssetRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponItemRecord, CouponReservationItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductKnowledgeBaseMessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, AutoReplyProductLookup, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponAssetRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponItemRecord, CouponReservationItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, DeliveryRecord, DeliveryRecordStatus, DeliveryStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductKnowledgeBaseMessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { projectAutoReplyRun } from './auto-reply-activity-projection.js';
 import { createId } from './security.js';
@@ -114,6 +114,7 @@ export class MemoryStore implements Store {
   private readonly products = new Map<string, ProductRecord>();
   private readonly productAutomations = new Map<string, ProductAutomationConfigRecord>();
   private readonly orders = new Map<string, OrderRecord>();
+  private readonly deliveryRecords = new Map<string, DeliveryRecord>();
   private readonly automationExecutions = new Map<string, AutomationExecutionLedgerRecord>();
   private readonly reviewFacts = new Map<string, { accountId: string; orderNo: string; eventId: string; reviewedAt: string }>();
   private readonly couponBatches = new Map<string, CouponBatchRecord>();
@@ -1920,6 +1921,51 @@ export class MemoryStore implements Store {
     if (!order) return undefined;
     Object.assign(order, { deliveryStatus: 'delivered' as const, deliveryFailReason: undefined, updatedAt: new Date().toISOString(), configVersion: order.configVersion + 1 });
     return this.enrichOrder(order);
+  }
+  async updateOrderDelivery(input: { adminId: string; accountId: string; orderNo: string; deliveryStatus: DeliveryStatus; deliveryFailReason?: string; deliveryType?: OrderRecord['deliveryType'] }): Promise<OrderRecord | undefined> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const order = [...this.orders.values()].find((candidate) => candidate.accountId === input.accountId && candidate.orderNo === input.orderNo);
+    if (!order) return undefined;
+    Object.assign(order, { deliveryStatus: input.deliveryStatus, deliveryFailReason: input.deliveryFailReason, ...(input.deliveryType ? { deliveryType: input.deliveryType } : {}), updatedAt: new Date().toISOString(), configVersion: order.configVersion + 1 });
+    return this.enrichOrder(order);
+  }
+  async listDeliveryRecords(adminId: string, input: { accountId: string; orderNo: string }): Promise<DeliveryRecord[]> {
+    if (!(await this.hasAccountScope(adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    return [...this.deliveryRecords.values()]
+      .filter((record) => record.accountId === input.accountId && record.orderNo === input.orderNo)
+      .sort((left, right) => right.attempt - left.attempt || right.createdAt.localeCompare(left.createdAt))
+      .map((record) => structuredClone(record));
+  }
+  async getDeliveryRecordByIdempotency(adminId: string, input: { accountId: string; idempotencyKey: string }): Promise<DeliveryRecord | undefined> {
+    if (!(await this.hasAccountScope(adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const scope = `order-delivery:${adminId}:${input.accountId}`;
+    const record = [...this.deliveryRecords.values()].find((candidate) => candidate.accountId === input.accountId && candidate.idempotencyScope === scope && candidate.idempotencyKey === input.idempotencyKey);
+    return record ? structuredClone(record) : undefined;
+  }
+  async createDeliveryRecord(input: { adminId: string; orderId: string; orderNo: string; accountId: string; deliveryType: OrderRecord['deliveryType']; idempotencyScope: string; idempotencyKey: string; attempt: number; trackingRef?: string }): Promise<DeliveryRecord> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const existing = [...this.deliveryRecords.values()].find((candidate) => candidate.accountId === input.accountId && candidate.idempotencyScope === input.idempotencyScope && candidate.idempotencyKey === input.idempotencyKey);
+    if (existing) return structuredClone(existing);
+    const now = new Date().toISOString();
+    const record: DeliveryRecord = { id: createId(), orderId: input.orderId, orderNo: input.orderNo, accountId: input.accountId, deliveryType: input.deliveryType, status: 'pending', idempotencyScope: input.idempotencyScope, idempotencyKey: input.idempotencyKey, attempt: input.attempt, trackingRef: input.trackingRef, createdAt: now, updatedAt: now };
+    this.deliveryRecords.set(record.id, record);
+    return structuredClone(record);
+  }
+  async updateDeliveryRecord(input: { adminId: string; id: string; status: DeliveryRecordStatus; externalOutcome?: 'known_success' | 'known_failure' | 'unknown'; externalRef?: string; couponItemId?: string; trackingRef?: string; deliveredAt?: string; failureCode?: string; failureMessage?: string }): Promise<DeliveryRecord | undefined> {
+    const existing = this.deliveryRecords.get(input.id);
+    if (!existing || !(await this.hasAccountScope(input.adminId, existing.accountId))) return undefined;
+    Object.assign(existing, {
+      status: input.status,
+      ...(input.externalOutcome !== undefined ? { externalOutcome: input.externalOutcome } : {}),
+      ...(input.externalRef !== undefined ? { externalRef: input.externalRef } : {}),
+      ...(input.couponItemId !== undefined ? { couponItemId: input.couponItemId } : {}),
+      ...(input.trackingRef !== undefined ? { trackingRef: input.trackingRef } : {}),
+      ...(input.deliveredAt !== undefined ? { deliveredAt: input.deliveredAt } : {}),
+      ...(input.failureCode !== undefined ? { failureCode: input.failureCode } : {}),
+      ...(input.failureMessage !== undefined ? { failureMessage: input.failureMessage } : {}),
+      updatedAt: new Date().toISOString(),
+    });
+    return structuredClone(existing);
   }
 
   private productDetail(product: ProductRecord): ProductRecord {
