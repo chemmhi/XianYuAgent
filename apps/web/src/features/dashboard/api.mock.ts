@@ -56,6 +56,7 @@ export function createMockDashboardApi(): DashboardApi {
           { title: 'AI 绘画教程合集', subtitle: '虚拟资源 · 交付配置已就绪', orders: '31', deliveryConfig: '已就绪', status: '可交付', tone: 'ok' },
           { title: '考研英语资料', subtitle: '虚拟资源 · 待配置交付内容', orders: '18', deliveryConfig: '待配置', status: '待配置', tone: 'warn' },
           { title: '自动化办公模板', subtitle: '虚拟资源 · 交付配置已就绪', orders: '12', deliveryConfig: '已就绪', status: '可交付', tone: 'ok' },
+          { title: '短视频运营脚本包', subtitle: '虚拟资源 · 交付配置已就绪', orders: '9', deliveryConfig: '已就绪', status: '可交付', tone: 'ok' },
         ],
         recentActivity: [
           { time: '14:22', text: '小橙子询问付款后发货时间，AI 已引用商品知识 v12 回复。', status: 'AI 已回复', tone: 'ok', href: '/messages' },
