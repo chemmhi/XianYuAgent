@@ -24,14 +24,26 @@ describe('workspace message projection', () => {
     ]);
     const blocks = groupWorkspaceMessages(projected);
     expect(blocks.map((block) => block.type)).toEqual(['user_message', 'agent_trace', 'final_answer']);
-    expect(blocks[1]).toMatchObject({ type: 'agent_trace', messages: expect.arrayContaining([expect.objectContaining({ type: 'reasoning_summary' }), expect.objectContaining({ type: 'tool_event' })]) });
+    expect(blocks[1]).toMatchObject({ type: 'agent_trace', messages: expect.arrayContaining([expect.objectContaining({ type: 'reasoning_summary' })]) });
   });
 
   it('renders the four canonical message types in chronological order', () => {
     const messages = buildWorkspaceMessages(run, events);
-    expect(messages.map((message) => message.type)).toEqual(['user_message', 'reasoning_summary', 'tool_event', 'final_answer']);
+    expect(messages.map((message) => message.type)).toEqual(['user_message', 'reasoning_summary', 'final_answer']);
     expect(messages[1]).toMatchObject({ collapsible: true, summary: 'Prepare execution context · 已完成' });
-    expect(messages[2]).toMatchObject({ eventType: 'step.succeeded', sequence: 2 });
+    expect(messages[2]).toMatchObject({ type: 'final_answer' });
+  });
+
+  it('does not project lifecycle events as fake tool messages', () => {
+    const projected = buildWorkspaceMessages({ ...run, status: 'running' }, [
+      { sequence: 2, runId: 'run-1', eventType: 'run.queued', payload: { status: 'queued' }, createdAt: '2026-09-20T00:00:00.100Z' },
+      { sequence: 3, runId: 'run-1', eventType: 'run.started', payload: { status: 'running' }, createdAt: '2026-09-20T00:00:00.200Z' },
+      { sequence: 4, runId: 'run-1', eventType: 'runtime.started', payload: { status: 'running', messageType: 'tool_event' }, createdAt: '2026-09-20T00:00:00.300Z' },
+      { sequence: 5, runId: 'run-1', eventType: 'stream.started', payload: { status: 'running' }, createdAt: '2026-09-20T00:00:00.400Z' },
+      { sequence: 6, runId: 'run-1', eventType: 'step.executing', payload: { status: 'executing', messageType: 'tool_event' }, createdAt: '2026-09-20T00:00:00.500Z' },
+    ]);
+    expect(projected.filter((message) => message.type === 'tool_event')).toHaveLength(0);
+    expect(projected.map((message) => message.type)).toEqual(['user_message', 'reasoning_summary']);
   });
 
   it('does not create a second trace from terminal reasoning events after the final answer', () => {

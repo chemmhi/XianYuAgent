@@ -92,6 +92,25 @@ function messageType(event: WorkspaceRunEventVM): WorkspaceMessageVM['type'] | u
   return value === 'user_message' || value === 'reasoning_summary' || value === 'tool_event' || value === 'final_answer' ? value : undefined;
 }
 
+const lifecycleEventTypes = new Set([
+  'run.queued',
+  'run.started',
+  'run.executing',
+  'runtime.started',
+  'step.started',
+  'step.executing',
+  'stream.started',
+  'stream.round.completed',
+  'stream.completed',
+]);
+
+function shouldProjectEvent(event: WorkspaceRunEventVM): boolean {
+  if (lifecycleEventTypes.has(event.eventType)) return false;
+  if (event.eventType === 'step.succeeded' || event.eventType === 'step.failed') return Boolean(messageType(event));
+  if (event.eventType === 'runtime.succeeded' || event.eventType === 'runtime.failed' || event.eventType === 'run.succeeded' || event.eventType === 'run.failed') return Boolean(messageType(event) || event.payload.content);
+  return true;
+}
+
 export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRunEventVM[]): WorkspaceMessageVM[] {
   const messages: WorkspaceMessageVM[] = [{
     id: `${run.runId}:user`,
@@ -124,6 +143,7 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
   const seenReasoningKeys = new Set<string>();
   let finalAnswerRendered = false;
   mergeStreamingEvents(events).sort((left, right) => left.sequence - right.sequence).forEach((event) => {
+    if (!shouldProjectEvent(event)) return;
     if (event.eventType === 'workspace.message') return;
     const messageKind = messageType(event);
     if (messageKind === 'user_message') return;
