@@ -113,3 +113,63 @@ test('OpenAI Responses streaming forwards reasoning summary and function calls',
   assert.equal(result.toolCalls?.[0]?.id, 'call-r1');
   assert.deepEqual(result.usage, { input_tokens: 2, output_tokens: 3 });
 });
+
+test('Pi runtime replays a wrong tool choice and lets the model correct itself from the tool error', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'tool-recovery@example.com', passwordHash: 'hash', displayName: 'Tool Recovery' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'tool-recovery' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Tool recovery' });
+  const instruction = '\u5e2e\u6211\u53d6\u6d88 \u89c6\u9891\u4e0b\u8f7d\u53ca\u6587\u6848\u63d0\u53d6\u6e90\u7801\uff0c\u5305\u6559\u5305\u4f1a \u8fd9\u4e2a\u5546\u54c1\u7684\u81ea\u52a8\u5316\u89c4\u5219';
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction });
+  const selectedTools: string[] = [];
+  let round = 0;
+  const readCall = { id: 'call-read', type: 'function' as const, function: { name: 'workspace_read', arguments: JSON.stringify({ instruction }) } };
+  const writeCall = { id: 'call-write', type: 'function' as const, function: { name: 'workspace_prepare_write', arguments: JSON.stringify({ instruction }) } };
+  const model: ModelClient = {
+    async stream(_input, handlers) {
+      round += 1;
+      if (round === 1) {
+        selectedTools.push(readCall.function.name);
+        await handlers.onToolCall?.(readCall);
+        return { content: '', model: 'recovery-model', toolCalls: [readCall] };
+      }
+      if (round === 2) {
+        selectedTools.push(writeCall.function.name);
+        await handlers.onToolCall?.(writeCall);
+        return { content: '', model: 'recovery-model', toolCalls: [writeCall] };
+      }
+      await handlers.onTextDelta?.('confirmation plan ready');
+      return { content: 'confirmation plan ready', model: 'recovery-model' };
+    },
+    async complete() { return { content: 'unused', model: 'unused' }; },
+  };
+  const commandTool = {
+    getModelTools: () => [
+      { type: 'function', function: { name: 'workspace_read', description: 'read', parameters: { type: 'object' } } },
+      { type: 'function', function: { name: 'workspace_prepare_write', description: 'write', parameters: { type: 'object' } } },
+    ],
+    executeModelTool: async (name: string) => {
+      if (name === 'workspace_read') {
+        const error = new Error('mutation requires workspace_prepare_write') as Error & { code: string };
+        error.code = 'WORKSPACE_WRITE_REQUIRED';
+        throw error;
+      }
+      return { kind: 'write_plan' as const, title: 'Disable automation confirmation', summary: 'Prepared disable plan', content: 'Awaiting confirmation', plan: { kind: 'product_automation_update', action: 'product_automation_update', title: 'Disable automation confirmation', summary: 'Prepared disable plan', content: 'Awaiting confirmation', policyRef: 'workspace.product_automation_update.confirm', expiresAt: new Date(Date.now() + 60_000).toISOString(), manifest: { action: 'product_automation_update', productId: 'product-1' } } };
+    },
+  } as unknown as WorkspaceCommandOrchestrator;
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, model: 'recovery-model' });
+  runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const bundle = await store.getRun(admin.id, created.run.id);
+    if (bundle?.run.status === 'waiting_confirmation' || bundle?.run.status === 'failed') break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const bundle = await store.getRun(admin.id, created.run.id);
+  assert.equal(bundle?.run.status, 'waiting_confirmation');
+  assert.deepEqual(selectedTools, ['workspace_read', 'workspace_prepare_write']);
+  const events = await store.listRunEvents(admin.id, created.run.id, 0);
+  assert.ok(events.some((event) => event.eventType === 'tool.result' && event.payload.status === 'failed' && (event.payload.result as { code?: string })?.code === 'WORKSPACE_WRITE_REQUIRED' && (event.payload.result as { suggestedTool?: string })?.suggestedTool === 'workspace_prepare_write'));
+  assert.ok(events.some((event) => event.eventType === 'workspace.confirmation.created'));
+  runtime.stop();
+});

@@ -70,7 +70,7 @@ export class WorkspaceCommandOrchestrator {
         type: 'function',
         function: {
           name: 'workspace_read',
-          description: 'Read current Workspace data for the selected account. Use the user instruction verbatim; this tool only performs read/diagnostic operations.',
+          description: 'Read current Workspace data for the selected account. Use only for read/diagnostic requests such as account, order, dashboard, or broad product reads. Do not use for cancellation, disable, update, publish, delivery, or other mutations; do not use for a product-name lookup when workspace_product_search applies.',
           parameters: {
             type: 'object',
             additionalProperties: false,
@@ -83,12 +83,28 @@ export class WorkspaceCommandOrchestrator {
         type: 'function',
         function: {
           name: 'workspace_prepare_write',
-          description: 'Prepare a controlled Workspace mutation. This creates a confirmation plan and never executes the mutation before the user confirms it.',
+          description: 'Prepare a controlled Workspace mutation. Use for cancellation, disable, update, publish, delivery, configuration, and other write requests. This creates a confirmation plan and never executes the mutation before the user confirms it. Resolve a product by its name or external number when the user did not provide an internal ID.',
           parameters: {
             type: 'object',
             additionalProperties: false,
-            properties: { instruction: { type: 'string', description: 'The complete mutation request to prepare.' } },
+            properties: {
+              instruction: { type: 'string', description: 'The complete mutation request to prepare.' },
+              productId: { type: 'string', description: 'Resolved internal product ID from workspace_product_search, when available.' },
+            },
             required: ['instruction'],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'workspace_product_search',
+          description: 'Search one account-scoped product by exact name or external product number. Use this for product-specific lookups and return the matching product identity; do not call a broad product-list read for a named product.',
+          parameters: {
+            type: 'object',
+            additionalProperties: false,
+            properties: { query: { type: 'string', description: 'Exact or near-exact product title or external product number.' } },
+            required: ['query'],
           },
         },
       },
@@ -97,14 +113,23 @@ export class WorkspaceCommandOrchestrator {
 
   async executeModelTool(name: string, args: Record<string, unknown>, input: WorkspaceCommandInput): Promise<WorkspaceModelToolResult> {
     const instruction = typeof args.instruction === 'string' ? args.instruction.trim() : '';
+    if (name === 'workspace_product_search') {
+      const query = typeof args.query === 'string' ? args.query.trim() : '';
+      if (!query) throw new ServiceError(422, 'VALIDATION_FAILED', 'workspace product search query is required');
+      const result = await this.searchProducts(input, query);
+      return { kind: 'read', title: '商品搜索', summary: `已按名称/外部编号筛选 ${result.total} 个商品`, content: productSearchContent(result.items, result.total), data: { total: result.total, items: result.items.map(safeProduct) } };
+    }
     if (!instruction) throw new ServiceError(422, 'VALIDATION_FAILED', 'workspace tool instruction is required');
     if (name === 'workspace_read') {
+      if (requiresWorkspaceWrite(instruction)) throw new ServiceError(422, 'WORKSPACE_WRITE_REQUIRED', '该请求包含商品变更动作，请使用 workspace_prepare_write');
       const result = await this.execute({ ...input, instruction });
       if (!result || result.mutation) throw new ServiceError(422, 'VALIDATION_FAILED', 'workspace_read only accepts read operations');
       return { kind: 'read', title: result.title, summary: result.summary, content: result.content, data: result.data };
     }
     if (name === 'workspace_prepare_write') {
-      const plan = await this.prepareWrite({ ...input, instruction });
+      const productId = typeof args.productId === 'string' ? args.productId.trim() : '';
+      const preparedInstruction = productId && !/(?:商品(?:ID|id)|productId)\s*[:：=]/i.test(instruction) ? `${instruction}; 商品ID:${productId}` : instruction;
+      const plan = await this.prepareWrite({ ...input, instruction: preparedInstruction });
       if (!plan) throw new ServiceError(422, 'VALIDATION_FAILED', 'workspace mutation is not supported by the configured tools');
       return { kind: 'write_plan', title: plan.title, summary: plan.summary, content: plan.content, data: plan.manifest, plan };
     }
@@ -211,7 +236,7 @@ export class WorkspaceCommandOrchestrator {
       const summary = await this.deps.autoReplyActivity.summary({ adminId: input.adminId, accountId: input.accountId });
       return { kind: 'agent_activity', title: 'Agent 运营数据', summary: `已读取 Agent 运营摘要（${summary.inboundCount} 条入站）`, content: `过去 24 小时收到 ${summary.inboundCount} 条消息，完成率 ${(summary.completionRate <= 1 ? summary.completionRate * 100 : summary.completionRate).toFixed(1)}%，转人工 ${summary.handoffCount} 条，失败 ${summary.failedCount} 条，P95 ${Math.round(summary.p95DurationMs)}ms。`, data: { ...summary } };
     }
-    if (kind === 'products' && /(自动化|规则|发货|改价|赠品|评价)/i.test(normalized) && !/(修改|更新|配置|设置|启用|禁用)/i.test(normalized)) {
+    if (kind === 'products' && /(自动化|规则|发货|改价|赠品|评价)/i.test(normalized) && !/(修改|更新|配置|设置|启用|禁用|取消|关闭|停用)/i.test(normalized)) {
       const productId = await this.resolveProductId(input, fields.productId);
       const config = await this.deps.productAutomation.get(input.adminId, productId);
       return { kind: 'products', title: '商品自动化规则', summary: `已读取商品自动化规则（v${config.configVersion}）`, content: `商品 ${config.product.title}：自动发货 ${config.config.paidAutoDelivery.enabled ? '开启' : '关闭'}，未付款改价 ${config.config.unpaidAutoReprice.enabled ? '开启' : '关闭'}，赠品 ${config.config.reviewGift.enabled ? '开启' : '关闭'}，求评价 ${config.config.reviewReminder.enabled ? '开启' : '关闭'}。`, data: { ...config } };
@@ -221,7 +246,7 @@ export class WorkspaceCommandOrchestrator {
       const product = await this.deps.products.get(input.adminId, productId);
       return { kind: 'products', title: '商品知识库', summary: `已读取商品知识库（${product.title}）`, content: product.knowledgeBase?.trim() || '该商品尚未配置知识库。', data: { productId, title: product.title, knowledgeBase: product.knowledgeBase ?? '' } };
     }
-    if (kind === 'products' && /(查询|查看|列出|列表|详情|状态|标题)/i.test(normalized) && !/(知识库|自动化规则|发货规则|改价|赠品|评价|同步|刷新|拉取)/i.test(normalized)) {
+    if (kind === 'products' && /(查询|查看|列出|列表|搜索|查找|匹配|详情|状态|标题)/i.test(normalized) && !/(知识库|自动化规则|发货规则|改价|赠品|评价|同步|刷新|拉取)/i.test(normalized)) {
       const productId = fields.productId ?? extractProductId(normalized);
       if (productId && /(详情|detail|ID|编号)/i.test(normalized)) {
         const product = await this.deps.products.get(input.adminId, productId);
@@ -418,7 +443,8 @@ export class WorkspaceCommandOrchestrator {
   }
 
   private async resolveProductId(input: WorkspaceCommandInput, explicit?: string): Promise<string> {
-    const productRef = explicit ?? extractProductId(input.instruction) ?? extractId(input.instruction) ?? extractExternalProductRef(input.instruction);
+    const extractedTitle = extractProductTitle(input.instruction);
+    const productRef = explicit ?? extractedTitle ?? extractProductId(input.instruction) ?? extractId(input.instruction) ?? extractExternalProductRef(input.instruction);
     if (!productRef) throw new ServiceError(422, 'VALIDATION_FAILED', '商品 ID 或外部商品编号不能为空');
     if (/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(productRef)) {
       await this.deps.products.get(input.adminId, productRef);
@@ -430,9 +456,18 @@ export class WorkspaceCommandOrchestrator {
       return productRef;
     }
     const listed = await productService.list(input.adminId, { accountId: input.accountId, keyword: productRef, page: 1, pageSize: 20 });
-    const matched = listed.items.find((product) => product.id === productRef || product.externalProductRef === productRef || product.title === productRef);
+    const normalizedRef = productRef.trim().toLocaleLowerCase();
+    const matched = listed.items.find((product) => product.title.trim().toLocaleLowerCase() === normalizedRef)
+      ?? listed.items.find((product) => product.id === productRef || product.externalProductRef === productRef)
+      ?? (extractedTitle === productRef && listed.items.length === 1 ? listed.items[0] : undefined);
     if (!matched) throw new ServiceError(404, 'NOT_FOUND', `未找到商品 ${productRef}`);
     return matched.id;
+  }
+
+  private async searchProducts(input: WorkspaceCommandInput, query: string): Promise<Awaited<ReturnType<ProductService['list']>>> {
+    const productService = this.deps.products as ProductService & { list?: ProductService['list'] };
+    if (typeof productService.list !== 'function') throw new ServiceError(501, 'WORKSPACE_PRODUCT_SEARCH_UNAVAILABLE', '商品搜索能力未接入');
+    return productService.list(input.adminId, { accountId: input.accountId, keyword: query, page: 1, pageSize: 20, sortBy: 'updatedAt', sortOrder: 'desc' });
   }
 
   private async currentProductVersion(adminId: string, productId: string): Promise<number> {
@@ -475,7 +510,7 @@ export function detectCommand(instruction: string): CommandKind | undefined {
   const value = instruction.toLowerCase();
   if (/(账号|账户|店铺|登录态|连接状态)/i.test(value)) return 'accounts';
   if (/(经营|运营分析|仪表盘|销售趋势|风险待办|订单趋势|异常|待处理|需要处理)/i.test(value)) return 'dashboard';
-  if (/(商品|货架|库存|知识库|自动化规则|发货规则|改价|赠品|评价)/i.test(value)) return 'products';
+  if (/(商品|货架|库存|知识库|自动化规则|发货规则|改价|赠品|评价)/i.test(value) || /(?:搜索|查找|匹配).*(?:商品|产品)/i.test(value)) return 'products';
   if (/(卡券|卡密|优惠券|券批次)/i.test(value)) return 'coupons';
   if (/(订单|买家|付款|支付|发货|交付)/i.test(value)) return 'orders';
   if (/(agent|自动回复|智能客服|运行动态|工作流程|转人工)/i.test(value)) return /(配置|设置|修改|更新|启用|禁用|关闭)/i.test(value) ? 'agent_settings' : 'agent_activity';
@@ -502,7 +537,13 @@ function extractId(input: string): string | undefined { return input.match(/[0-9
 function extractProductId(input: string): string | undefined { return input.match(/商品(?:ID|id)?\s*[:：]?\s*([A-Za-z0-9_-]{4,})/)?.[1]; }
 function extractExternalProductRef(input: string): string | undefined { return input.match(/\b\d{6,20}\b/)?.[0]; }
 function extractOrderNo(input: string): string | undefined { return input.match(/(?:订单号|order(?:\s*no)?)\s*[:：]?\s*([A-Za-z0-9_-]{4,})/i)?.[1] ?? input.match(/\b(XY|ORD|ORDER)[A-Za-z0-9_-]{3,}\b/i)?.[0]; }
-function extractKeyword(input: string, prefixes: string[]): string | undefined { const stripped = prefixes.reduce((value, prefix) => value.replace(new RegExp(prefix, 'i'), ''), input).replace(/(?:关键词|关键字|keyword)\s*[:：]?\s*/i, '').trim(); return stripped && !/^(商品|订单|列表|查询|查看|列出|状态|详情)$/i.test(stripped) ? stripped : undefined; }
+function extractProductTitle(input: string): string | undefined {
+  const named = input.match(/(?:商品名称|商品标题|标题)\s*[:：=]\s*[“"']?([^“”"'\n;；]+?)[”"']?(?=\s*(?:这个商品|的自动化|自动化规则|[;；]|$))/i)?.[1];
+  const contextual = input.match(/(?:^|[\s,，])(?:帮我|请|麻烦|我要)?\s*(?:取消|关闭|停用|禁用|更新|修改|配置|设置|启用|查看|查询|搜索|查找)?\s*([^\n]+?)\s*这个商品(?:的)?\s*(?:自动化规则|自动化|规则)/i)?.[1];
+  const value = (named ?? contextual)?.replace(/^[“"']|[”"']$/g, '').replace(/^(?:商品名称|商品标题|标题)\s*[:：=]\s*/i, '').replace(/[，,；;:：]+$/g, '').trim();
+  return value || undefined;
+}
+function extractKeyword(input: string, prefixes: string[]): string | undefined { const stripped = prefixes.reduce((value, prefix) => value.replace(new RegExp(prefix, 'i'), ''), input).replace(/(?:关键词|关键字|keyword)\s*[:：]?\s*/i, '').trim(); return stripped && !/^(商品|订单|列表|查询|查看|列出|搜索|查找|匹配|状态|详情)$/i.test(stripped) ? stripped : undefined; }
 function extractStatus(input: string): string | undefined { return input.match(/(?:状态|status)\s*[:：]?\s*([\w-]+)/i)?.[1]; }
 function extractStatusToken(input: string, tokens: string[]): string | undefined { return tokens.find((token) => input.includes(token)); }
 function normalizeProductStatus(value?: string): ProductRecord['status'] | undefined { return value && ['draft', 'ready', 'publishing', 'published', 'failed', 'archived'].includes(value) ? value as ProductRecord['status'] : undefined; }
@@ -522,6 +563,8 @@ function safeProduct(product: ProductRecord): Record<string, unknown> { return {
 function productListResult(items: ProductRecord[], total: number): WorkspaceCommandResult { const rows = items.map((item) => safeProduct(item)); return { kind: 'products', title: '商品查询', summary: `已读取 ${total} 个商品`, content: rows.length ? [`当前账号共有 ${total} 个商品：`, ...rows.map((item, index) => `${index + 1}. ${String(item.title)} · ${String(item.status)} · ${formatMoney(typeof item.priceMinor === 'number' ? item.priceMinor : undefined)}`)].join('\n') : '当前账号暂无匹配商品。', data: { total, items: rows } }; }
 function orderListResult(items: OrderRecord[], total: number): WorkspaceCommandResult { const rows = items.map((item) => ({ orderNo: item.orderNo, itemTitle: item.itemTitle, amountMinor: item.amountMinor, paymentStatus: item.paymentStatus, orderStatus: item.orderStatus, deliveryStatus: item.deliveryStatus, afterSalesStatus: item.afterSalesStatus, createdAt: item.createdAt, updatedAt: item.updatedAt, redacted: true })); return { kind: 'orders', title: '订单查询', summary: `已读取 ${total} 个订单`, content: rows.length ? [`当前账号共有 ${total} 个订单：`, ...rows.map((item, index) => `${index + 1}. ${item.orderNo} · ${item.itemTitle} · 支付 ${item.paymentStatus} · 交付 ${item.deliveryStatus} · 售后 ${item.afterSalesStatus}`)].join('\n') : '当前账号暂无匹配订单。', data: { total, items: rows } }; }
 function safeFieldNames(fields: Record<string, string>): string[] { return Object.keys(fields).filter((key) => key !== 'content' && key !== 'knowledgeBase' && key !== 'apiKey'); }
+function productSearchContent(items: ProductRecord[], total: number): string { return items.length ? [`匹配到 ${total} 个商品：`, ...items.map((item, index) => `${index + 1}. ${item.title} · ${item.externalProductRef ?? item.id} · ${item.status}`)].join('\n') : '未匹配到商品。'; }
+function requiresWorkspaceWrite(instruction: string): boolean { return /(取消|关闭|停用|禁用|修改|更新|配置|设置|启用|删除|发布|发货|改价|赠品|评价|绑定|解绑)/i.test(instruction) && /(商品|自动化|规则|知识库|卡券|订单|发货)/i.test(instruction); }
 function parseRange(input: string): 'today' | '3d' | '7d' | '1m' | undefined { if (/今天|今日/.test(input)) return 'today'; if (/3天|三天/.test(input)) return '3d'; if (/月|30天/.test(input)) return '1m'; if (/7天|一周|本周/.test(input)) return '7d'; return undefined; }
 function formatDashboard(snapshot: DashboardSnapshot): string { return [`销售额 ${snapshot.totalSales.toFixed(2)}，选定区间销售额 ${snapshot.selectedRangeSales.toFixed(2)}`, `今日订单金额 ${snapshot.todayOrderAmount.toFixed(2)}，自动处理率 ${snapshot.autoProcessRate.toFixed(1)}%，待人工 ${snapshot.pendingManualCount}`, snapshot.riskTodos.length ? `风险待办：${snapshot.riskTodos.slice(0, 5).map((item) => item.title).join('；')}` : '当前无高优先级风险待办'].join('\n'); }
 function formatMoney(valueMinor?: number): string { return typeof valueMinor === 'number' && Number.isFinite(valueMinor) ? `¥${(valueMinor / 100).toFixed(2)}` : '价格未设置'; }

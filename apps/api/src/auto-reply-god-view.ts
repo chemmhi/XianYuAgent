@@ -53,12 +53,13 @@ export function createAutoReplyGodViewSink(options: AutoReplyGodViewOptions = {}
   const filePath = resolve(options.filePath ?? env.AUTO_REPLY_GOD_VIEW_FILE ?? DEFAULT_FILE_PATH);
   const flagPath = resolve(options.flagPath ?? env.AUTO_REPLY_GOD_VIEW_FLAG ?? DEFAULT_FLAG_PATH);
   const forced = env.AUTO_REPLY_GOD_VIEW === '1' || env.AUTO_REPLY_TRACE_VERBOSE === '1';
+  const flagConfigured = options.flagPath !== undefined || Boolean(env.AUTO_REPLY_GOD_VIEW_FLAG?.trim());
   const maxChars = positiveInt(env.AUTO_REPLY_GOD_VIEW_MAX_CHARS, 200_000);
   let pending = Promise.resolve();
 
   return {
     emit(event) {
-      if (!forced && !existsSync(flagPath)) return Promise.resolve();
+      if (!forced && (!flagConfigured || !existsSync(flagPath))) return Promise.resolve();
       const record = sanitizeEvent({ ...event, ts: new Date().toISOString() }, maxChars);
       const line = `${JSON.stringify(record)}\n`;
       pending = pending.then(async () => {

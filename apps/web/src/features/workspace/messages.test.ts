@@ -96,4 +96,14 @@ describe('workspace message projection', () => {
     expect(messages.find((message) => message.type === 'tool_event')?.content).toContain('商品 1 个');
     expect(messages.find((message) => message.type === 'final_answer')?.content).toBe('已找到 1 个商品。');
   });
+
+  it('shows the concrete tool name and final tool result event type', () => {
+    const messages = buildWorkspaceMessages(run, [
+      { sequence: 2, runId: 'run-1', eventType: 'tool.call.delta', payload: { toolCallId: 'call-2', argumentsDelta: '{"query":', status: 'streaming' }, createdAt: '2026-09-20T00:00:01.000Z' },
+      { sequence: 3, runId: 'run-1', eventType: 'tool.result', payload: { toolCallId: 'call-2', toolName: 'workspace_product_search', result: { ok: true, content: '匹配到 1 个商品' }, status: 'succeeded' }, createdAt: '2026-09-20T00:00:01.500Z' },
+    ]);
+    const tool = messages.find((message) => message.type === 'tool_event');
+    expect(tool).toMatchObject({ title: 'workspace_product_search', eventType: 'tool.result' });
+    expect(tool?.content).toContain('匹配到 1 个商品');
+  });
 });

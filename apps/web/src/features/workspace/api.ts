@@ -68,7 +68,7 @@ export function createWorkspaceApi(transport: WorkspaceApiTransport, options: { 
     async archiveSession(sessionId) { return unwrap(await post<WorkspaceSessionVM | ApiEnvelope<WorkspaceSessionVM>>(`/api/v1/workspace/agent-sessions/${encodeURIComponent(sessionId)}/archive`, {}, 'workspace-archive')); },
     async listMessages(sessionId, limit = 100) {
       const payload = await transport.get<MessagePayload | ApiEnvelope<MessagePayload>>(`/api/v1/workspace/agent-sessions/${encodeURIComponent(sessionId)}/messages?limit=${Math.max(1, Math.min(500, Math.trunc(limit)))}`);
-      return (unwrap(payload).items ?? []).map((message) => ({ id: message.id, runId: message.runId, type: message.type, createdAt: message.createdAt, title: messageTitle(message.type), content: message.content, summary: message.summary, sequence: message.sequence, collapsible: message.type === 'reasoning_summary' }));
+      return (unwrap(payload).items ?? []).map((message) => ({ id: message.id, runId: message.runId, type: message.type, createdAt: message.createdAt, title: message.type === 'tool_event' && message.summary?.trim() ? message.summary.trim() : messageTitle(message.type), content: message.content, summary: message.summary, sequence: message.sequence, collapsible: message.type === 'reasoning_summary' }));
     },
     async startRun(input) { return unwrap(await post<WorkspaceRunVM | ApiEnvelope<WorkspaceRunVM>>('/api/v1/workspace/runs', input, 'workspace-run')); },
     async getRun(runId) { return unwrap(await transport.get<WorkspaceRunVM | ApiEnvelope<WorkspaceRunVM>>(`/api/v1/workspace/runs/${encodeURIComponent(runId)}`)); },

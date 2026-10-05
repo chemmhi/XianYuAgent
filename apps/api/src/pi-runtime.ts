@@ -116,6 +116,7 @@ export type PiModelErrorCode =
   | 'MODEL_HTTP_ERROR'
   | 'MODEL_NETWORK_ERROR'
   | 'MODEL_INVALID_RESPONSE'
+  | 'MODEL_TOOL_LOOP_EXCEEDED'
   | 'MODEL_UNSUPPORTED_TOOL';
 
 export class PiModelClientError extends Error {
@@ -314,7 +315,7 @@ const runTransitions: Record<RunStatus, RunStatus[]> = {
   queued: ['running', 'cancelled', 'expired'],
   running: ['waiting_confirmation', 'executing', 'failed', 'cancelled'],
   waiting_confirmation: ['executing', 'cancelled', 'expired'],
-  executing: ['succeeded', 'partially_succeeded', 'failed', 'cancelling'],
+  executing: ['waiting_confirmation', 'succeeded', 'partially_succeeded', 'failed', 'cancelling'],
   retrying: ['running', 'failed', 'cancelled'],
   cancelling: ['cancelled', 'failed'],
   succeeded: [],
@@ -328,7 +329,7 @@ const stepTransitions: Record<StepStatus, StepStatus[]> = {
   pending: ['running', 'cancelled', 'skipped'],
   running: ['waiting_confirmation', 'executing', 'succeeded', 'failed', 'cancelled'],
   waiting_confirmation: ['executing', 'cancelled'],
-  executing: ['succeeded', 'partially_succeeded', 'failed', 'cancelled'],
+  executing: ['waiting_confirmation', 'succeeded', 'partially_succeeded', 'failed', 'cancelled'],
   retrying: ['running', 'failed', 'cancelled'],
   succeeded: [],
   partially_succeeded: [],
@@ -451,7 +452,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     const tools = commands.getModelTools();
     const messages: ModelMessage[] = [...(input.history ?? [])];
     if (!messages.some((message) => message.role === 'system')) {
-      messages.unshift({ role: 'system', content: 'You are a Workspace agent. Use the provided tools for account-scoped data and mutations. Do not claim a tool ran unless its result is returned. For mutations, use the preparation tool and wait for confirmation. Keep the final answer concise and grounded in tool results.' });
+      messages.unshift({ role: 'system', content: 'You are a Workspace agent. Choose tools autonomously from their contracts. Use workspace_product_search for a product-specific name or external-number lookup instead of loading the full product list. Use workspace_prepare_write for cancellation, disable, update, publish, delivery, or other mutations and wait for confirmation; never use workspace_read for those actions. After a tool result, either answer from the result or choose a different tool only when the result explicitly says the request needs correction. Do not claim a tool ran unless its result is returned. Keep the final answer concise and grounded in tool results.' });
     }
     messages.push({ role: 'user', content: input.run.instruction });
 
@@ -510,25 +511,27 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(errorResult) });
           continue;
         }
+        let result: WorkspaceModelToolResult;
         try {
           const toolInput: WorkspaceCommandInput = { adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction, requestId: `workspace:${input.run.id}`, traceId: `workspace:${input.run.id}` };
-          const result = await commands.executeModelTool(call.function.name, args, toolInput);
-          const redacted = this.redactToolResult(result);
-          await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, status: 'succeeded', result: redacted, completedAt: new Date().toISOString() });
-          messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(redacted) });
-          if (result.kind === 'write_plan' && result.plan) {
-            await this.transitionStep(step, 'waiting_confirmation', { outputSummary: result.plan.summary });
-            await this.transitionRun(input.run, 'waiting_confirmation', { resultSummary: result.plan.summary });
-            const confirmation = await persistWorkspaceConfirmation({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, sessionId, run: input.run, step, plan: result.plan });
-            await this.emit(input.run.id, 'workspace.confirmation.created', { status: 'active', confirmationId: confirmation.id, action: confirmation.action, policyRef: confirmation.policyRef, manifest: confirmation.manifest, expiresAt: confirmation.expiresAt });
-            waitingConfirmation = true;
-            break;
-          }
+          result = await commands.executeModelTool(call.function.name, args, toolInput);
         } catch (error) {
           const failure = toSafeFailure(error);
-          const errorResult = { ok: false, code: failure.code, message: failure.summary };
+          const errorResult = toolFailureResult(failure);
           await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, status: 'failed', result: errorResult, completedAt: new Date().toISOString() });
           messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(errorResult) });
+          continue;
+        }
+        const redacted = this.redactToolResult(result);
+        await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, status: 'succeeded', result: redacted, completedAt: new Date().toISOString() });
+        messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(redacted) });
+        if (result.kind === 'write_plan' && result.plan) {
+          const confirmation = await persistWorkspaceConfirmation({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, sessionId, run: input.run, step, plan: result.plan });
+          await this.transitionStep(step, 'waiting_confirmation', { outputSummary: result.plan.summary });
+          await this.transitionRun(input.run, 'waiting_confirmation', { resultSummary: result.plan.summary });
+          await this.emit(input.run.id, 'workspace.confirmation.created', { status: 'active', confirmationId: confirmation.id, action: confirmation.action, policyRef: confirmation.policyRef, manifest: confirmation.manifest, expiresAt: confirmation.expiresAt });
+          waitingConfirmation = true;
+          break;
         }
       }
       await this.emit(input.run.id, 'stream.round.completed', { streamId, round: round + 1, toolCallCount: calls.length, status: waitingConfirmation ? 'waiting_confirmation' : 'tool_completed' });
@@ -539,7 +542,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       await this.emit(input.run.id, 'stream.completed', { status: 'waiting_confirmation', model: finalResult?.model ?? this.options.model, reasoningMessageCount: allReasoning.length });
       return;
     }
-    if (!completedWithoutTool) throw new PiModelClientError('MODEL_INVALID_RESPONSE', `model tool loop exceeded ${maxRounds} rounds`);
+    if (!completedWithoutTool) throw new PiModelClientError('MODEL_TOOL_LOOP_EXCEEDED', `model tool loop exceeded ${maxRounds} rounds`);
     if (!finalResult) throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model provider returned no result');
     const output = redactSensitiveText(finalResult.content, this.options.outputLimit ?? 2_000, this.options.redactSecrets);
     const finishedAt = new Date().toISOString();
@@ -1026,15 +1029,46 @@ function redactSensitiveText(value: string, outputLimit: number, secrets: string
 
 function toSafeFailure(error: unknown): { code: string; summary: string } {
   if (error instanceof PiModelClientError) {
-    return { code: error.code, summary: 'Pi Runtime 调用失败，请稍后重试' };
+    return { code: error.code, summary: summarizePiFailure(error) };
   }
   const candidate = isRecord(error) ? error : undefined;
   const code = typeof candidate?.code === 'string' ? candidate.code : undefined;
   const message = typeof candidate?.message === 'string' ? candidate.message.trim() : undefined;
-  if (code && message && ['VALIDATION_FAILED', 'NOT_FOUND', 'FORBIDDEN', 'CONFLICT', 'ACCOUNT_SCOPE_FORBIDDEN', 'WORKSPACE_PRODUCT_REQUIRED', 'WORKSPACE_PRODUCT_NOT_FOUND'].includes(code)) {
-    return { code, summary: message };
+  const inferredCode = code ?? message?.match(/\b[A-Z][A-Z0-9_]{2,}\b/)?.[0];
+  const safeCodes = ['VALIDATION_FAILED', 'NOT_FOUND', 'FORBIDDEN', 'CONFLICT', 'ACCOUNT_SCOPE_FORBIDDEN', 'WORKSPACE_PRODUCT_REQUIRED', 'WORKSPACE_PRODUCT_NOT_FOUND', 'WORKSPACE_WRITE_REQUIRED', 'WORKSPACE_PRODUCT_SEARCH_UNAVAILABLE', 'MODEL_TOOL_RUNTIME_UNAVAILABLE', 'DUPLICATE_TOOL_CALL'];
+  if (inferredCode && message && safeCodes.includes(inferredCode)) {
+    return { code: inferredCode, summary: message };
   }
   return { code: 'RUNTIME_FAILED', summary: 'Pi Runtime 执行失败，请稍后重试' };
+}
+
+function summarizePiFailure(error: PiModelClientError): string {
+  if (error.code === 'MODEL_TOOL_LOOP_EXCEEDED') return '模型重复调用工具或超过 8 轮工具循环，已停止本次执行。';
+  if (error.code === 'MODEL_TIMEOUT') return '模型请求超时，未能在限定时间内完成。';
+  if (error.code === 'MODEL_ABORTED') return '模型请求已取消。';
+  if (error.code === 'MODEL_NETWORK_ERROR') return '模型服务网络请求失败。';
+  if (error.code === 'MODEL_HTTP_ERROR') return '模型服务返回 HTTP 错误。';
+  if (error.code === 'MODEL_UNSUPPORTED_TOOL') return '模型请求了当前运行时不支持的工具。';
+  if (error.code === 'MODEL_INVALID_RESPONSE') {
+    if (/tool loop|identical tool|repeat/i.test(error.message)) return '模型重复调用工具或超过 8 轮工具循环，已停止本次执行。';
+    if (/empty content|no result/i.test(error.message)) return '模型返回为空，未生成可用结果。';
+    return '模型返回格式无效，未生成可用结果。';
+  }
+  return 'Pi Runtime 执行失败，请稍后重试';
+}
+
+function toolFailureResult(failure: { code: string; summary: string }): Record<string, unknown> {
+  const suggestedTool = failure.code === 'WORKSPACE_WRITE_REQUIRED'
+    ? 'workspace_prepare_write'
+    : failure.code === 'WORKSPACE_PRODUCT_SEARCH_REQUIRED'
+      ? 'workspace_product_search'
+      : undefined;
+  return {
+    ok: false,
+    code: failure.code,
+    message: failure.summary,
+    ...(suggestedTool ? { suggestedTool } : {}),
+  };
 }
 
 function firstNonEmpty(...values: Array<string | undefined>): string | undefined {

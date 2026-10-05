@@ -79,6 +79,43 @@ test('resolves numeric external product refs and builds a disable-all automation
   assert.deepEqual(updatedConfig, plan?.manifest.config);
 });
 
+test('resolves the exact product title in a natural-language cancellation and filters by name', async () => {
+  const product = { id: 'product-title-1', accountId: 'account-1', externalProductRef: '1082449333831', title: '视频下载及文案提取源码，包教包会', configVersion: 7 };
+  const queries: Array<Record<string, unknown>> = [];
+  const commands = orchestrator({
+    products: {
+      get: async () => product,
+      list: async (_adminId: string, query: Record<string, unknown>) => { queries.push(query); return { items: [product], page: 1, pageSize: 20, total: 1, totalPages: 1 }; },
+    },
+    productAutomation: { get: async () => ({ configVersion: 7, product, config: {} }), update: async () => ({ configVersion: 8, config: {} }) },
+  });
+
+  const plan = await commands.prepareWrite({ ...input, instruction: '帮我取消 视频下载及文案提取源码，包教包会 这个商品的自动化规则' });
+
+  assert.equal(plan?.action, 'product_automation_update');
+  assert.equal(plan?.manifest.productId, product.id);
+  assert.equal(queries.length, 1);
+  assert.equal(queries[0]?.keyword, product.title);
+});
+
+test('rejects read-tool routing for product mutation instructions', async () => {
+  const commands = orchestrator();
+  await assert.rejects(
+    () => commands.executeModelTool('workspace_read', { instruction: '帮我取消 视频下载及文案提取源码，包教包会 这个商品的自动化规则' }, input),
+    (error: unknown) => (error as { code?: string }).code === 'WORKSPACE_WRITE_REQUIRED',
+  );
+});
+
+test('searches a product by name through the dedicated workspace tool', async () => {
+  const product = { id: 'product-search-1', accountId: 'account-1', externalProductRef: '1082449333831', title: '视频下载及文案提取源码，包教包会', configVersion: 1 };
+  let query = '';
+  const commands = orchestrator({ products: { get: async () => product, list: async (_adminId: string, input: { keyword?: string }) => { query = input.keyword ?? ''; return { items: [product], page: 1, pageSize: 20, total: 1, totalPages: 1 }; } } });
+  const result = await commands.executeModelTool('workspace_product_search', { query: product.title }, input);
+  assert.equal(query, product.title);
+  assert.equal(result.title, '商品搜索');
+  assert.match(result.content, /视频下载及文案提取源码/);
+});
+
 test('blocks an unready manual delivery before confirmation creation', async () => {
   const commands = orchestrator({
     orderDelivery: {

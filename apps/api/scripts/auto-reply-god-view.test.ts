@@ -45,6 +45,14 @@ test('god view sink waits for the local monitor flag before writing', async () =
   assert.equal(JSON.parse(lines[0]!).payload.bodyText, '你好');
 });
 
+test('god view sink ignores an unconfigured legacy flag path', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'xianyu-god-view-legacy-'));
+  const tracePath = join(directory, 'trace.ndjson');
+  const sink = createAutoReplyGodViewSink({ env: {}, filePath: tracePath });
+  await sink.emit({ phase: 'inbound', event: 'inbound.received', payload: { bodyText: 'legacy flag must not enable tracing' } });
+  assert.equal(existsSync(tracePath), false);
+});
+
 test('agent emits prompt, model output, and tool-capable run identifiers to god view', async () => {
   const events: Array<Omit<AutoReplyGodViewEvent, 'ts'>> = [];
   const sink: AutoReplyGodViewSink = { emit: async (event) => { events.push(event); } };

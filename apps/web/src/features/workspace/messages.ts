@@ -164,12 +164,13 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
       if (seenReasoningKeys.has(reasoningKey)) return;
       seenReasoningKeys.add(reasoningKey);
     }
+    const toolName = messageKind === 'tool_event' && typeof event.payload.toolName === 'string' ? event.payload.toolName : undefined;
     messages.push({
       id: `${run.runId}:event:${event.sequence}`,
       runId: run.runId,
       type: messageKind ?? 'tool_event',
       createdAt: event.createdAt,
-      title: messageKind === 'reasoning_summary' ? '推理摘要' : messageKind === 'final_answer' ? 'Agent' : '工具事件',
+      title: messageKind === 'reasoning_summary' ? '推理摘要' : messageKind === 'final_answer' ? 'Agent' : (toolName ?? (summary || '工具事件')),
       content: messageKind === 'reasoning_summary' ? (content || summary || eventSummary(event)) : content,
       summary,
       eventType: event.eventType,
@@ -212,7 +213,8 @@ function mergeStreamingEvents(events: WorkspaceRunEventVM[]): WorkspaceRunEventV
       return;
     }
     const previous = typeof existing.payload.content === 'string' ? existing.payload.content : '';
-    existing.payload = { ...existing.payload, content: type === 'tool_event' ? content : `${previous}${content}`, messageType: type, messageId, ...(summary ? { summary } : {}) };
+    existing.payload = { ...existing.payload, ...event.payload, content: type === 'tool_event' ? content : `${previous}${content}`, messageType: type, messageId, ...(summary ? { summary } : {}) };
+    existing.eventType = event.eventType;
     existing.sequence = Math.max(existing.sequence, event.sequence);
     existing.createdAt = event.createdAt;
   };
