@@ -31,6 +31,10 @@ test('DashboardService aggregates scoped accounts, orders, products, coupons and
     productId: product.id, amountMinor: 5_000, paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'coupon_only', createdAt: now, updatedAt: now,
   } });
   await store.createOrder({ adminId: admin.id, order: {
+    orderNo: 'DASH-UNPAID-TODAY', accountId: account.id, buyerId: 'buyer-unpaid-today', buyerName: '未付款买家', itemId: 'item-1', itemTitle: product.title,
+    productId: product.id, amountMinor: 7_000, paymentStatus: 'unpaid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'coupon_only', createdAt: now, updatedAt: now,
+  } });
+  await store.createOrder({ adminId: admin.id, order: {
     orderNo: 'DASH-OLD', accountId: account.id, buyerId: 'buyer-old', buyerName: '旧买家', itemId: 'item-old', itemTitle: '历史资料包',
     amountMinor: 8_000, paymentStatus: 'paid', orderStatus: 'completed', deliveryStatus: 'delivered', afterSalesStatus: 'none', deliveryType: 'coupon_only', createdAt: '2026-09-01T12:00:00.000Z', updatedAt: '2026-09-01T12:00:00.000Z',
   } });
@@ -58,9 +62,10 @@ test('DashboardService aggregates scoped accounts, orders, products, coupons and
   assert.equal(snapshot.autoProcessRate, 50);
   assert.equal(snapshot.pendingManualCount, 2);
   assert.equal('availableCouponCount' in snapshot, false);
-  assert.equal(snapshot.trend.at(-1)?.orderAmount, 179);
+  assert.equal(snapshot.trend.at(-1)?.orderAmount, 249);
+  assert.equal(snapshot.trend.at(-1)?.salesAmount, 179);
   assert.equal(snapshot.productRank[0]?.title, '资料包');
-  assert.equal(snapshot.productRank[0]?.orders, '2');
+  assert.equal(snapshot.productRank[0]?.orders, '3');
   assert.equal(snapshot.productRank[0]?.status, '可交付');
   assert.equal(snapshot.productRank[0]?.subtitle, '虚拟资源 · 交付配置已就绪');
   assert.ok(snapshot.recentActivity.some((item) => item.text.includes('DASH-PENDING')));
@@ -74,7 +79,8 @@ test('DashboardService aggregates scoped accounts, orders, products, coupons and
 
   const today = await service.getSnapshot(admin.id, new Date(now), { accountId: account.id, range: 'today' });
   assert.equal(today.trend.length, 24);
-  assert.equal(today.trend[12]?.orderAmount, 179);
+  assert.equal(today.trend[12]?.orderAmount, 249);
+  assert.equal(today.trend[12]?.salesAmount, 179);
 
   const custom = await service.getSnapshot(admin.id, new Date(now), { accountId: account.id, range: 'custom', from: '2026-09-01', to: '2026-09-01' });
   assert.equal(custom.trend.length, 24);
@@ -82,5 +88,6 @@ test('DashboardService aggregates scoped accounts, orders, products, coupons and
 
   const threeDays = await service.getSnapshot(admin.id, new Date(now), { accountId: account.id, range: '3d' });
   assert.equal(threeDays.trend.length, 3);
-  assert.equal(threeDays.trend.at(-1)?.orderAmount, 179);
+  assert.equal(threeDays.trend.at(-1)?.orderAmount, 249);
+  assert.equal(threeDays.trend.at(-1)?.salesAmount, 179);
 });

@@ -11,6 +11,7 @@ import { ServiceError } from './services.js';
 export interface DashboardTrendPoint {
   label: string;
   orderAmount: number;
+  salesAmount: number;
   autoProcessRate: number;
 }
 
@@ -75,12 +76,13 @@ export class DashboardService {
     const trend = buildTrend(orders, now, resolvedQuery);
     const todayStart = startOfUtcDay(now);
     const todayOrders = orders.filter((order) => parseTime(order.createdAt) >= todayStart);
+    const todayPaidOrders = todayOrders.filter((order) => order.paymentStatus === 'paid');
     const paidOrders = orders.filter((order) => order.paymentStatus === 'paid');
     const pendingManualCount = countPendingManual(orders, accounts, conversations);
 
     return {
       totalSales: round(sumMajorUnits(paidOrders)),
-      todayOrderAmount: round(sumMajorUnits(todayOrders)),
+      todayOrderAmount: round(sumMajorUnits(todayPaidOrders)),
       autoProcessRate: autoProcessRate(todayOrders),
       pendingManualCount,
       trend,
@@ -102,10 +104,12 @@ function buildTrend(orders: OrderRecord[], now: Date, query: DashboardQuery): Da
       const createdAt = parseTime(order.createdAt);
       return createdAt >= bucketStart && createdAt < bucketEnd;
     });
+    const paidBucketOrders = bucketOrders.filter((order) => order.paymentStatus === 'paid');
     const date = new Date(bucketStart);
     points.push({
       label: window.granularity === 'hour' ? hourLabel(date) : dayLabel(date, window.dayCount),
       orderAmount: round(sumMajorUnits(bucketOrders)),
+      salesAmount: round(sumMajorUnits(paidBucketOrders)),
       autoProcessRate: autoProcessRate(bucketOrders),
     });
   }

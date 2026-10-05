@@ -84,7 +84,7 @@ export interface DashboardSnapshot {
   todayOrderAmount: number;
   autoProcessRate: number;
   pendingManualCount: number;
-  trend: Array<{ label: string; orderAmount: number; autoProcessRate: number }>;
+  trend: Array<{ label: string; orderAmount: number; salesAmount?: number; autoProcessRate: number }>;
   health?: Array<{ label: string; value: string; tone: 'ok' | 'warn' | 'danger' | 'info' | 'gray' }>;
   productRank?: Array<{ title: string; subtitle: string; orders: string; deliveryConfig: '已就绪' | '待配置'; status: string; tone: 'ok' | 'warn' | 'danger' | 'info' | 'gray' }>;
   recentActivity?: Array<{ time: string; text: string; status: string; tone: 'ok' | 'warn' | 'danger' | 'info' | 'gray'; href?: string }>;
