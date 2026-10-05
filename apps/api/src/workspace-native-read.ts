@@ -17,7 +17,7 @@ export function detectNativeWorkspaceRead(instruction: string): NativeWorkspaceR
   const normalized = instruction.replace(/\s+/g, ' ').trim();
   if (!normalized || WRITE_TERMS.test(normalized) && !/(查看|查询|状态|未发货|失败)/i.test(normalized)) return undefined;
   if (!READ_TERMS.test(normalized)) return undefined;
-  if (/(运营|自动回复|agent|智能客服|处理量|成功率|吞吐|p95|转人工|健康|运行数据)/i.test(normalized)) return 'agent_activity';
+  if (/(运营|自动回复|agent|智能客服|处理量|成功率|吞吐|p95|转人工|健康|运行数据|workspace\s*状态|工作区状态|状态摘要|运行摘要)/i.test(normalized)) return 'agent_activity';
   if (/(卡券|卡密|优惠券|券批次|交付配置)/i.test(normalized)) return 'coupons';
   if (/(订单|买家|付款|支付|未发货|交付)/i.test(normalized)) return 'orders';
   if (/(商品|货架|库存|商品列表|商品状态)/i.test(normalized)) return 'products';

@@ -11,7 +11,7 @@ import type { ProductPublishService, ProductPublishImageInput, ProductPostageMod
 import type { ObjectStorage } from './object-storage.js';
 import type { Store, RunRecord, StepRecord } from './domain.js';
 import type { OrderDeliveryService } from './order-delivery.js';
-import { executeNativeWorkspaceRead, type NativeWorkspaceReadResult } from './workspace-native-read.js';
+import { detectNativeWorkspaceRead, executeNativeWorkspaceRead, type NativeWorkspaceReadResult } from './workspace-native-read.js';
 import { prepareNativeWorkspaceWrite, type NativeWorkspaceWritePlan } from './workspace-native-write.js';
 import type { ModelToolDefinition } from './pi-runtime.js';
 
@@ -140,6 +140,7 @@ export class WorkspaceCommandOrchestrator {
   async prepareWrite(input: WorkspaceCommandInput): Promise<NativeWorkspaceWritePlan | undefined> {
     const existing = await prepareNativeWorkspaceWrite({ store: this.deps.store, adminId: input.adminId, accountId: input.accountId, instruction: input.instruction });
     if (existing) return existing;
+    if (shouldDelegateNativeRead(input.instruction)) return undefined;
     const kind = detectCommand(input.instruction);
     if (!kind) return undefined;
     const fields = parseFields(input.instruction);
@@ -149,7 +150,7 @@ export class WorkspaceCommandOrchestrator {
     if (kind === 'products' && /(同步|刷新|拉取)/i.test(input.instruction)) return undefined;
     if (kind === 'orders' && /(同步|刷新|拉取)/i.test(input.instruction)) return undefined;
 
-    if (kind === 'orders' && !/(预览)/i.test(input.instruction) && /(发货|交付|取消发货|取消交付|重试发货|重试交付)/i.test(input.instruction)) {
+    if (kind === 'orders' && !/(预览)/i.test(input.instruction) && !/(未发货|待发货)/i.test(input.instruction) && /(发货|交付|取消发货|取消交付|重试发货|重试交付)/i.test(input.instruction)) {
       const orderNo = fields.orderNo ?? extractOrderNo(input.instruction);
       if (!orderNo) throw new ServiceError(422, 'VALIDATION_FAILED', '订单号不能为空');
       const action = /(取消发货|取消交付)/i.test(input.instruction) ? 'order_cancel' : /(重试发货|重试交付|重试)/i.test(input.instruction) ? 'order_retry' : 'order_deliver';
@@ -204,6 +205,7 @@ export class WorkspaceCommandOrchestrator {
 
   async execute(input: WorkspaceCommandInput): Promise<WorkspaceCommandResult | undefined> {
     const normalized = input.instruction.replace(/\s+/g, ' ').trim();
+    if (shouldDelegateNativeRead(normalized)) return executeNativeWorkspaceRead({ store: this.deps.store, adminId: input.adminId, accountId: input.accountId, instruction: normalized });
     const kind = detectCommand(normalized);
     if (!kind) return executeNativeWorkspaceRead({ store: this.deps.store, adminId: input.adminId, accountId: input.accountId, instruction: normalized });
     if (!(await this.deps.store.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
@@ -254,7 +256,8 @@ export class WorkspaceCommandOrchestrator {
         if (product.accountId !== input.accountId) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
         return { kind: 'products', title: '商品详情', summary: `已读取商品 ${product.id}`, content: `商品 ${product.title} · 状态 ${product.status} · 价格 ${formatMoney(product.priceMinor)} · 配置版本 v${product.configVersion}`, data: { product: safeProduct(product) } };
       }
-      const query = { accountId: input.accountId, keyword: fields.keyword ?? extractKeyword(normalized, ['查询商品', '查看商品', '列出商品', '商品列表']), status: normalizeProductStatus(fields.status ?? extractStatus(normalized)), page: toOptionalInt(fields.page) ?? 1, pageSize: Math.min(100, toOptionalInt(fields.pageSize) ?? 20), sortBy: 'updatedAt' as const, sortOrder: 'desc' as const };
+      const accountScopedBrowse = /(?:当前账号|本账号|这个账号).*(?:商品|产品)|(?:商品|产品).*(?:当前账号|本账号|这个账号)/i.test(normalized);
+      const query = { accountId: input.accountId, keyword: accountScopedBrowse ? undefined : fields.keyword ?? extractKeyword(normalized, ['查询商品', '查看商品', '列出商品', '商品列表']), status: normalizeProductStatus(fields.status ?? extractStatus(normalized)), page: toOptionalInt(fields.page) ?? 1, pageSize: Math.min(100, toOptionalInt(fields.pageSize) ?? 20), sortBy: 'updatedAt' as const, sortOrder: 'desc' as const };
       if (typeof (this.deps.products as unknown as { list?: unknown }).list !== 'function') return executeNativeWorkspaceRead({ store: this.deps.store, adminId: input.adminId, accountId: input.accountId, instruction: normalized });
       const result = await this.deps.products.list(input.adminId, query);
       return productListResult(result.items, result.total);
@@ -509,14 +512,20 @@ export class WorkspaceCommandOrchestrator {
 
 export function detectCommand(instruction: string): CommandKind | undefined {
   const value = instruction.toLowerCase();
-  if (/(账号|账户|店铺|登录态|连接状态)/i.test(value)) return 'accounts';
   if (/(经营|运营分析|仪表盘|销售趋势|风险待办|订单趋势|异常|待处理|需要处理)/i.test(value)) return 'dashboard';
   if (/(商品|货架|库存|知识库|自动化规则|发货规则|改价|赠品|评价)/i.test(value) || /(?:搜索|查找|匹配).*(?:商品|产品)/i.test(value)) return 'products';
   if (/(卡券|卡密|优惠券|券批次)/i.test(value)) return 'coupons';
   if (/(订单|买家|付款|支付|发货|交付)/i.test(value)) return 'orders';
   if (/(agent|自动回复|智能客服|运行动态|工作流程|转人工)/i.test(value)) return /(配置|设置|修改|更新|启用|禁用|关闭)/i.test(value) ? 'agent_settings' : 'agent_activity';
   if (/(模型|provider|openai|兼容|base url|api key)/i.test(value)) return 'model_settings';
+  if (/(账号|账户|店铺|登录态|连接状态)/i.test(value)) return 'accounts';
   return undefined;
+}
+
+function shouldDelegateNativeRead(instruction: string): boolean {
+  const normalized = instruction.replace(/\s+/g, ' ').trim();
+  if (requiresWorkspaceWrite(normalized) || !detectNativeWorkspaceRead(normalized)) return false;
+  return /(当前账号|本账号|这个账号|最近|今天)/i.test(normalized);
 }
 
 function parseFields(input: string): Record<string, string> {
@@ -565,7 +574,10 @@ function productListResult(items: ProductRecord[], total: number): WorkspaceComm
 function orderListResult(items: OrderRecord[], total: number): WorkspaceCommandResult { const rows = items.map((item) => ({ orderNo: item.orderNo, itemTitle: item.itemTitle, amountMinor: item.amountMinor, paymentStatus: item.paymentStatus, orderStatus: item.orderStatus, deliveryStatus: item.deliveryStatus, afterSalesStatus: item.afterSalesStatus, createdAt: item.createdAt, updatedAt: item.updatedAt, redacted: true })); return { kind: 'orders', title: '订单查询', summary: `已读取 ${total} 个订单`, content: rows.length ? [`当前账号共有 ${total} 个订单：`, ...rows.map((item, index) => `${index + 1}. ${item.orderNo} · ${item.itemTitle} · 支付 ${item.paymentStatus} · 交付 ${item.deliveryStatus} · 售后 ${item.afterSalesStatus}`)].join('\n') : '当前账号暂无匹配订单。', data: { total, items: rows } }; }
 function safeFieldNames(fields: Record<string, string>): string[] { return Object.keys(fields).filter((key) => key !== 'content' && key !== 'knowledgeBase' && key !== 'apiKey'); }
 function productSearchContent(items: ProductRecord[], total: number): string { return items.length ? [`匹配到 ${total} 个商品：`, ...items.map((item, index) => `${index + 1}. ${item.title} · ${item.externalProductRef ?? item.id} · ${item.status}`)].join('\n') : '未匹配到商品。'; }
-function requiresWorkspaceWrite(instruction: string): boolean { return /(取消|关闭|停用|禁用|修改|更新|配置|设置|启用|删除|发布|发货|改价|赠品|评价|绑定|解绑)/i.test(instruction) && /(商品|自动化|规则|知识库|卡券|订单|发货)/i.test(instruction); }
+function requiresWorkspaceWrite(instruction: string): boolean {
+  const readNormalized = instruction.replace(/(?:未|待)发货/gi, '');
+  return /(取消|关闭|停用|禁用|修改|更新|配置|设置|启用|删除|发布|发货|改价|赠品|评价|绑定|解绑)/i.test(readNormalized) && /(商品|自动化|规则|知识库|卡券|订单|发货)/i.test(readNormalized);
+}
 function requiresWorkspaceProductSearch(instruction: string): boolean {
   const normalized = instruction.replace(/\s+/g, ' ').trim();
   if (!/(商品|产品)/i.test(normalized) || !/(搜索|查找|匹配|按名称|按标题|商品名称|商品标题|外部商品编号)/i.test(normalized)) return false;

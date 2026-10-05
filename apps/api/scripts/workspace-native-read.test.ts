@@ -27,6 +27,7 @@ test('native workspace read routes only supported read intents', () => {
   assert.equal(detectNativeWorkspaceRead('有哪些可用卡券'), 'coupons');
   assert.equal(detectNativeWorkspaceRead('最近的订单和未发货订单'), 'orders');
   assert.equal(detectNativeWorkspaceRead('查看今天 Agent 运营数据'), 'agent_activity');
+  assert.equal(detectNativeWorkspaceRead('检查当前 Workspace 状态并返回摘要'), 'agent_activity');
   assert.equal(detectNativeWorkspaceRead('发布商品'), undefined);
   assert.equal(detectNativeWorkspaceRead('新增卡券'), undefined);
   assert.equal(detectNativeWorkspaceRead('修改自动回复配置'), undefined);

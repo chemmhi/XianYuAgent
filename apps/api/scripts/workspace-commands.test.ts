@@ -27,6 +27,7 @@ const input = { adminId: 'admin-1', accountId: 'account-1', requestId: 'req-1', 
 test('detects workspace takeover command families', () => {
   assert.equal(detectCommand('分析近 7 天经营情况'), 'dashboard');
   assert.equal(detectCommand('刷新商品列表'), 'products');
+  assert.equal(detectCommand('查看当前账号的商品'), 'products');
   assert.equal(detectCommand('同步闲鱼订单'), 'orders');
   assert.equal(detectCommand('检查 Agent 工作流程'), 'agent_activity');
   assert.equal(detectCommand('配置 OpenAI-compatible 模型'), 'model_settings');
