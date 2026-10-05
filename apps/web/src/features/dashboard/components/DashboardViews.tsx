@@ -21,6 +21,12 @@ const CHART_RIGHT = 500;
 const CHART_TOP = 16;
 const CHART_BOTTOM = 214;
 
+export function getMonthValueForQuery(query: DashboardQuery) {
+  if (query.range !== 'custom' || !query.from || !query.to) return '';
+  const fromMonth = query.from.slice(0, 7);
+  return fromMonth === query.to.slice(0, 7) ? fromMonth : '';
+}
+
 type ChartScale = { min: number; max: number; ticks: number[] };
 
 function niceStep(rawStep: number) {
@@ -113,7 +119,8 @@ function TrendRangeControl({ query, onChange }: { query: DashboardQuery; onChang
   const [customFrom, setCustomFrom] = useState(query.from ?? '');
   const [customTo, setCustomTo] = useState(query.to ?? '');
   const [customOpen, setCustomOpen] = useState(query.range === 'custom');
-  const [monthValue, setMonthValue] = useState('');
+  const [monthValue, setMonthValue] = useState(getMonthValueForQuery(query));
+  useEffect(() => { setMonthValue(getMonthValueForQuery(query)); }, [query.range, query.from, query.to]);
   const quickRanges: Array<{ value: Exclude<DashboardRange, 'custom'>; label: string }> = [
     { value: 'today', label: '今天' },
     { value: '3d', label: '三天' },

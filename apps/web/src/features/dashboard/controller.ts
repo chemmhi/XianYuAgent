@@ -26,6 +26,13 @@ export function getVisibleDashboardState(state: DashboardState, loadedAccountId:
   return { phase: accountId ? 'loading' : 'idle', data: null, error: null, refreshing: false };
 }
 
+export function getDashboardReloadState(state: DashboardState, loadedAccountId: string | undefined, accountId: string | undefined): DashboardState {
+  if (accountId && loadedAccountId === accountId && state.data) {
+    return { phase: 'success', data: state.data, error: null, refreshing: true };
+  }
+  return { phase: accountId ? 'loading' : 'idle', data: null, error: null, refreshing: false };
+}
+
 export function useDashboardController(options: { api?: DashboardApi; accountId?: string } = {}): DashboardController {
   const dashboardApi = options.api ?? defaultMockDashboardApi;
   const accountId = options.accountId?.trim() || undefined;
@@ -47,7 +54,7 @@ export function useDashboardController(options: { api?: DashboardApi; accountId?
       setState({ phase: 'idle', data: null, error: null, refreshing: false });
       return;
     }
-    setState((previous) => ({ phase: 'loading', data: previous.data && loadedAccountIdRef.current === accountId ? previous.data : null, error: null, refreshing: Boolean(previous.data && loadedAccountIdRef.current === accountId) }));
+    setState((previous) => getDashboardReloadState(previous, loadedAccountIdRef.current, accountId));
     try {
       const snapshot = await dashboardApi.getSnapshot({ ...query, accountId });
       if (currentRequest !== requestId.current) return;

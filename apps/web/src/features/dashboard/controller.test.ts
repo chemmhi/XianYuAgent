@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getVisibleDashboardState } from './controller';
+import { getDashboardReloadState, getVisibleDashboardState } from './controller';
 import type { DashboardState } from './types';
 
 const loadedState: DashboardState = {
@@ -27,5 +27,19 @@ describe('dashboard account visibility', () => {
 
   it('keeps the loaded snapshot for the matching account', () => {
     expect(getVisibleDashboardState(loadedState, 'account-a', 'account-a')).toBe(loadedState);
+  });
+
+  it('keeps the visible snapshot while a matching account refreshes', () => {
+    const refreshing = getDashboardReloadState(loadedState, 'account-a', 'account-a');
+    expect(refreshing.phase).toBe('success');
+    expect(refreshing.data).toBe(loadedState.data);
+    expect(refreshing.refreshing).toBe(true);
+  });
+
+  it('clears the snapshot when a different account starts loading', () => {
+    const loading = getDashboardReloadState(loadedState, 'account-a', 'account-b');
+    expect(loading.phase).toBe('loading');
+    expect(loading.data).toBeNull();
+    expect(loading.refreshing).toBe(false);
   });
 });

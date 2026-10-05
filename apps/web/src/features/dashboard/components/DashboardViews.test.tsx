@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { DashboardDesktopContent, DashboardMobileContent, MiniAreaChart } from './DashboardViews';
+import { DashboardDesktopContent, DashboardMobileContent, MiniAreaChart, getMonthValueForQuery } from './DashboardViews';
 import type { DashboardState } from '../types';
 
 const state: DashboardState = {
@@ -93,6 +93,12 @@ describe('dashboard views', () => {
     expect(html).toContain('2026-09-01');
     expect(html).toContain('2026-09-07');
     expect(html).toContain('应用');
+  });
+
+  it('derives the selected month from a same-month custom query', () => {
+    expect(getMonthValueForQuery({ range: 'custom', from: '2026-08-01', to: '2026-08-31' })).toBe('2026-08');
+    expect(getMonthValueForQuery({ range: 'custom', from: '2026-08-01', to: '2026-09-01' })).toBe('');
+    expect(getMonthValueForQuery({ range: '1m' })).toBe('');
   });
 
   it('keeps loading and forbidden states inside the dashboard surface', () => {
