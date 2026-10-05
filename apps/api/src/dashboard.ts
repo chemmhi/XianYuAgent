@@ -192,7 +192,7 @@ function buildProductRank(products: ProductRecord[], orders: OrderRecord[]): Das
       };
     })
     .sort((left, right) => right.orderCount - left.orderCount || right.updatedAt.localeCompare(left.updatedAt) || left.row.title.localeCompare(right.row.title))
-    .slice(0, 4)
+    .slice(0, 5)
     .map((entry) => entry.row);
 }
 

@@ -15,6 +15,9 @@ test('DashboardService aggregates scoped accounts, orders, products, coupons and
   const otherAccount = await store.createAccount({ adminId: otherAdmin.id, platform: 'xianyu', sellerRef: 'seller-other', displayName: '隔离账号' });
   const product = await store.createProduct({ adminId: admin.id, accountId: account.id, title: '资料包', status: 'published' });
   await store.createProduct({ adminId: admin.id, accountId: secondAccount.id, title: '第二账号商品', status: 'published' });
+  for (let index = 1; index <= 5; index += 1) {
+    await store.createProduct({ adminId: admin.id, accountId: account.id, title: `排行商品 ${index}`, status: 'published' });
+  }
   const coupon = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: '资料包交付配置', purpose: 'data' });
   await store.importCouponItems({ adminId: admin.id, batchId: coupon.id, contents: ['A-001', 'A-002', 'A-003'] });
   await store.bindCouponBatch({ adminId: admin.id, batchId: coupon.id, productId: product.id });
@@ -69,6 +72,7 @@ test('DashboardService aggregates scoped accounts, orders, products, coupons and
   assert.equal(snapshot.productRank[0]?.orders, '3');
   assert.equal(snapshot.productRank[0]?.status, '可交付');
   assert.equal(snapshot.productRank[0]?.subtitle, '虚拟资源 · 交付配置已就绪');
+  assert.equal(snapshot.productRank.length, 5);
   assert.ok(snapshot.recentActivity.some((item) => item.text.includes('DASH-PENDING')));
   assert.ok(snapshot.riskTodos.some((item) => item.id.startsWith('order-')));
   assert.ok(snapshot.riskTodos.some((item) => item.id.startsWith('conversation-')));

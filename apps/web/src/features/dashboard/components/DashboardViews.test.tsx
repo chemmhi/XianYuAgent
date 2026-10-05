@@ -58,6 +58,19 @@ describe('dashboard views', () => {
     expect(html).toContain('data-dashboard-surface="desktop"');
   });
 
+  it('renders the product count badge from the five visible ranking rows', () => {
+    const fiveProducts = [
+      ...state.data!.productRank,
+      { title: 'AI 绘画教程合集', subtitle: '虚拟资源 · 交付配置已就绪', orders: '31', deliveryConfig: '已就绪' as const, status: '可交付', tone: 'ok' as const },
+      { title: '考研英语资料', subtitle: '虚拟资源 · 待配置交付内容', orders: '18', deliveryConfig: '待配置' as const, status: '待配置', tone: 'warn' as const },
+      { title: '自动化办公模板', subtitle: '虚拟资源 · 交付配置已就绪', orders: '12', deliveryConfig: '已就绪' as const, status: '可交付', tone: 'ok' as const },
+      { title: '短视频运营脚本包', subtitle: '虚拟资源 · 交付配置已就绪', orders: '9', deliveryConfig: '已就绪' as const, status: '可交付', tone: 'ok' as const },
+    ];
+    const html = renderToStaticMarkup(createElement(DashboardDesktopContent, { state: { ...state, data: { ...state.data!, productRank: fiveProducts } }, query: { range: '1m' }, onOpenTodo: vi.fn(), onRefresh: vi.fn(), onTrendQueryChange: vi.fn() }));
+    expect(html).toContain('5 个商品');
+    expect(html).toContain('短视频运营脚本包');
+  });
+
   it('renders the independent mobile composition', () => {
     const html = renderToStaticMarkup(createElement(DashboardMobileContent, { state, onOpenTodo: vi.fn() }));
     expect(html).toContain('Agent 在线 · 当前账号');
