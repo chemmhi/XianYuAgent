@@ -54,7 +54,8 @@ export interface DashboardRiskTodoVM {
 
 export interface DashboardVM {
   kpis: DashboardKpiVM[];
-  trend: Array<{ label: string; primary: number; sales: number; secondary: number }>;
+  selectedRangeSales: number;
+  trend: Array<{ label: string; sales: number; secondary: number }>;
   health: DashboardHealthVM[];
   productRank: DashboardProductRankVM[];
   recentActivity: DashboardActivityVM[];
@@ -102,7 +103,8 @@ export function toDashboardVM(snapshot: DashboardSnapshot): DashboardVM {
 
   return {
     kpis,
-    trend: snapshot.trend.map((item) => ({ label: item.label, primary: item.orderAmount, sales: item.salesAmount ?? item.orderAmount, secondary: item.autoProcessRate })),
+    selectedRangeSales: snapshot.selectedRangeSales,
+    trend: snapshot.trend.map((item) => ({ label: item.label, sales: item.salesAmount ?? item.orderAmount, secondary: item.autoProcessRate })),
     health,
     productRank,
     recentActivity,

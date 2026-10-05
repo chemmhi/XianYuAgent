@@ -82,6 +82,7 @@ export interface ChatMessage {
 export interface DashboardSnapshot {
   totalSales: number;
   todayOrderAmount: number;
+  selectedRangeSales: number;
   autoProcessRate: number;
   pendingManualCount: number;
   trend: Array<{ label: string; orderAmount: number; salesAmount?: number; autoProcessRate: number }>;

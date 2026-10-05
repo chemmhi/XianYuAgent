@@ -59,6 +59,7 @@ test('DashboardService aggregates scoped accounts, orders, products, coupons and
   const snapshot = await service.getSnapshot(admin.id, new Date(now), { accountId: account.id });
   assert.equal(snapshot.totalSales, 259);
   assert.equal(snapshot.todayOrderAmount, 179);
+  assert.equal(snapshot.selectedRangeSales, 179);
   assert.equal(snapshot.autoProcessRate, 50);
   assert.equal(snapshot.pendingManualCount, 2);
   assert.equal('availableCouponCount' in snapshot, false);
@@ -78,15 +79,18 @@ test('DashboardService aggregates scoped accounts, orders, products, coupons and
   assert.ok(!JSON.stringify(snapshot).includes('DASH-OTHER'));
 
   const today = await service.getSnapshot(admin.id, new Date(now), { accountId: account.id, range: 'today' });
+  assert.equal(today.selectedRangeSales, 179);
   assert.equal(today.trend.length, 24);
   assert.equal(today.trend[12]?.orderAmount, 249);
   assert.equal(today.trend[12]?.salesAmount, 179);
 
   const custom = await service.getSnapshot(admin.id, new Date(now), { accountId: account.id, range: 'custom', from: '2026-09-01', to: '2026-09-01' });
+  assert.equal(custom.selectedRangeSales, 80);
   assert.equal(custom.trend.length, 24);
   assert.equal(custom.trend[12]?.orderAmount, 80);
 
   const threeDays = await service.getSnapshot(admin.id, new Date(now), { accountId: account.id, range: '3d' });
+  assert.equal(threeDays.selectedRangeSales, 179);
   assert.equal(threeDays.trend.length, 3);
   assert.equal(threeDays.trend.at(-1)?.orderAmount, 249);
   assert.equal(threeDays.trend.at(-1)?.salesAmount, 179);

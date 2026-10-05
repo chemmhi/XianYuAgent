@@ -227,6 +227,7 @@ export function createLiveApi(options: { baseUrl?: string; getToken?: () => stri
         return {
           totalSales: Number(admin.total_sales ?? admin.totalSales ?? today.total_order_amount ?? today.order_amount ?? 0),
           todayOrderAmount: Number(today.today_order_amount ?? today.order_amount ?? 0),
+          selectedRangeSales: rows.reduce((sum, row) => sum + Number(row.amount ?? 0), 0),
           autoProcessRate: Number(admin.auto_process_rate ?? admin.ai_reply_success_rate ?? 0),
           pendingManualCount: Number(admin.pending_manual_count ?? admin.risk_count ?? 0),
           trend: rows.map((row) => ({ label: row.date, orderAmount: row.amount, autoProcessRate: row.count })),
