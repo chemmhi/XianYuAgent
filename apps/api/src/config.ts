@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { resolveAutoReplyAgentConfig, type AutoReplyAgentRuntimeConfig } from './auto-reply-agent-config.js';
 import { DEFAULT_PI_WIRE_API, type ModelWireApi } from './pi-runtime.js';
@@ -34,6 +35,7 @@ export interface AppConfig {
   modelName?: string;
   modelWireApi?: ModelWireApi;
   modelTimeoutMs: number;
+  piSkillRoot: string;
   autoReplyModelEnabled?: boolean;
   /** Shared buyer allowlist used by Auto Reply and product automation. */
   autoReplyAgent?: AutoReplyAgentRuntimeConfig;
@@ -111,6 +113,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     modelName,
     modelWireApi,
     modelTimeoutMs: positiveNumber(env.MODEL_TIMEOUT_MS, 60_000),
+    piSkillRoot: resolve(env.PI_SKILL_ROOT?.trim() || resolve(homedir(), '.pi', 'skills')),
     autoReplyModelEnabled: asBoolean(env.AUTO_REPLY_MODEL_ENABLED, Boolean(modelApiKey && modelBaseUrl && modelName)),
     credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY?.trim() || 'development-only-credential-key-change-me',
     objectStorageEndpoint: env.OBJECT_STORAGE_ENDPOINT?.trim() || 'http://127.0.0.1:19000',
