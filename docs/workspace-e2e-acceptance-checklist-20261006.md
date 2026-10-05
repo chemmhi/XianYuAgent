@@ -40,6 +40,6 @@
 
 | ID | 失败现象 | 根因 | 修复提交 | 复测结果 |
 |---|---|---|---|---|
-| WS-01 | 原生读 E2E 将“查看当前账号的商品”误路由为账号读取；修复后又被当作商品关键词过滤 | `detectCommand()` 账号泛匹配优先；商品浏览未识别“当前账号”范围 | 待最终提交 | 改为业务词优先、对账号范围浏览禁用关键词过滤；`node apps/web/scripts/e2e-workspace-native-read.mjs` PASS，PostgreSQL/Chrome/CDP 双 viewport 与 4 Run 复读通过 |
-| WS-02 | Workspace 事件展开等待不到 2 行，且断言 UI 必须显示 `run.started` | 测试指令未命中内置读意图；UI 按契约过滤生命周期事件，仅投影 `workspace.native_read` | 待最终提交 | 将 Workspace 状态摘要识别为 Agent 原生读；验收断言改为检查实际投影工具事件，同时保留持久化 `run.succeeded` 校验；`npm run test:e2e:chrome:workspace` PASS |
+| WS-01 | 原生读 E2E 将“查看当前账号的商品”误路由为账号读取；修复后又被当作商品关键词过滤 | `detectCommand()` 账号泛匹配优先；商品浏览未识别“当前账号”范围 | `3c79ed6` | 改为业务词优先、对账号范围浏览禁用关键词过滤；`node apps/web/scripts/e2e-workspace-native-read.mjs` PASS，PostgreSQL/Chrome/CDP 双 viewport 与 4 Run 复读通过 |
+| WS-02 | Workspace 事件展开等待不到 2 行，且断言 UI 必须显示 `run.started` | 测试指令未命中内置读意图；UI 按契约过滤生命周期事件，仅投影 `workspace.native_read` | `3c79ed6` | 将 Workspace 状态摘要识别为 Agent 原生读；验收断言改为检查实际投影工具事件，同时保留持久化 `run.succeeded` 校验；`npm run test:e2e:chrome:workspace` PASS |
 
