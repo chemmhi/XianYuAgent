@@ -94,3 +94,13 @@ describe('Workspace session search alignment contract', () => {
     expect(workspaceCss).toContain('.workspace-session-list { display: grid; align-content: start; width: 100%; box-sizing: border-box; overflow-x: hidden; overflow-y: auto; padding: 0 8px 10px; }');
   });
 });
+
+describe('Workspace confirmation feedback contract', () => {
+  it('keeps the continue action readable on hover and renders controller errors as a toast', () => {
+    expect(workspaceCss).toContain('.workspace-confirmation-actions .warning:hover:not(:disabled)');
+    expect(workspaceCss).toContain('background: #8F5A0E; color: #fff;');
+    expect(workspacePageSource).toContain("import { Toast } from '../../../shared/ui/Toast';");
+    expect(workspacePageSource).toContain('{errorToast && <Toast message={errorToast} tone="error"');
+    expect(workspacePageSource).not.toContain('{state.error && <div className="workspace-inline-error"');
+  });
+});
