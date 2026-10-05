@@ -32,7 +32,7 @@ const productAutomationReminderWorker = new ProductAutomationReminderWorker(runt
 });
 const productAutomationOrderRefreshWorker = new ProductAutomationOrderRefreshWorker(runtime.store, (input) => runtime.orders.refresh(input), {
   enabled: process.env.PRODUCT_AUTOMATION_ORDER_REFRESH_WORKER_ENABLED?.trim().toLowerCase() !== 'false',
-  pollMs: positiveNumber(process.env.PRODUCT_AUTOMATION_ORDER_REFRESH_WORKER_POLL_MS, 30_000),
+  pollMs: positiveNumber(process.env.PRODUCT_AUTOMATION_ORDER_REFRESH_WORKER_POLL_MS, 5_000),
   pageSize: positiveNumber(process.env.PRODUCT_AUTOMATION_ORDER_REFRESH_PAGE_SIZE, 100),
   maxPages: positiveNumber(process.env.PRODUCT_AUTOMATION_ORDER_REFRESH_MAX_PAGES, 20),
   onError: (error) => console.error('product automation order refresh worker poll failed', error),

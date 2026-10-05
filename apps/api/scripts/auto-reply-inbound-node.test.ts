@@ -94,6 +94,29 @@ test('legacy push parser keeps buyer text as text unless the gateway supplies a 
   assert.equal(bracketedBuyerResult.event?.bodyType, 'text');
 });
 
+test('order-status reminder text with a gateway reminder envelope is treated as a trusted platform event', () => {
+  const systemText = '[我已付款，等待你发货]';
+  const content = Buffer.from(JSON.stringify({ contentType: 1, text: { text: systemText } }), 'utf8').toString('base64');
+  const encoded = Buffer.from(JSON.stringify({
+    1: {
+      2: 'conv-paid-reminder@goofish',
+      3: 'paid-reminder-1.PNM',
+      5: 1767225600000,
+      6: { 3: { 5: content } },
+      10: {
+        senderUserId: 'buyer-paid-reminder',
+        senderNick: 'Buyer',
+        reminderContent: systemText,
+        reminderUrl: 'fleamarket://message?messageId=paid-reminder-1.PNM',
+      },
+    },
+  }), 'utf8').toString('base64');
+
+  const result = parsePushPayloadDetailed(encoded, 'account-1', 'seller-1');
+  assert.equal(result.event?.bodyType, 'text');
+  assert.equal(result.event?.platformSystemMessage, true);
+});
+
 test('generic platform reminders are marked system while ordinary buyer text stays unmarked', () => {
   const text = "温馨提醒：商品信息近期有过变更，请与买家沟通一致，防止误拍引起纠纷，<font color='#4F7CAF' weight='w400'>查看商品详情</font>";
   const content = Buffer.from(JSON.stringify({ contentType: 14, text: { text } }), 'utf8').toString('base64');

@@ -23,6 +23,8 @@ export class XianyuImService {
   private readonly verificationInFlight = new Map<string, Promise<XianyuVerificationBrowserResult>>();
   private readonly verificationRetryAfter = new Map<string, number>();
   private readonly recoveryInFlight = new Map<string, Promise<void>>();
+  private readonly credentialRefreshTimers = new Map<string, ReturnType<typeof setInterval>>();
+  private readonly credentialRefreshInFlight = new Map<string, Promise<void>>();
   private readonly identityCache = new Map<string, { buyerDisplayName?: string; buyerAvatarUrl?: string }>();
   private readonly inboundInboxWorker: InboundInboxWorker;
   private inboundInboxWakeInFlight?: Promise<void>;
@@ -207,6 +209,9 @@ export class XianyuImService {
 
   async close(): Promise<void> {
     await this.inboundInboxWakeInFlight;
+    for (const timer of this.credentialRefreshTimers.values()) clearInterval(timer);
+    this.credentialRefreshTimers.clear();
+    this.credentialRefreshInFlight.clear();
     const inFlight = [...this.clientInFlight.values()];
     this.clientInFlight.clear();
     this.recoveryInFlight.clear();
@@ -233,6 +238,7 @@ export class XianyuImService {
    */
   async startListener(adminId: string, accountId: string): Promise<void> {
     const client = await this.ensureClient(adminId, accountId);
+    this.scheduleCredentialRefresh(adminId, accountId);
     if (client) this.scheduleRecentMessageRecovery(adminId, accountId);
   }
 
@@ -475,6 +481,34 @@ export class XianyuImService {
       throw new ServiceError(statusCode, token.errorCode ?? 'IM_TOKEN_FAILED', message);
     }
     return this.store.upsertCredential({ adminId, accountId: account.id, platform: account.platform, cookieHeader: token.cookieHeader, accessToken: token.accessToken, deviceId, metadata: credential.metadata, expiresAt: credential.expiresAt });
+  }
+
+  private scheduleCredentialRefresh(adminId: string, accountId: string): void {
+    const key = `${adminId}:${accountId}`;
+    if (this.credentialRefreshTimers.has(key)) return;
+    const intervalMs = Math.max(60_000, Number(process.env.XIANYU_CREDENTIAL_REFRESH_INTERVAL_MS ?? 10 * 60_000));
+    const timer = setInterval(() => {
+      void this.refreshActiveCredential(adminId, accountId).catch((error) => {
+        console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'credential_refresh_failed', adminId, accountId, errorCode: recoveryErrorCode(error) }));
+      });
+    }, intervalMs);
+    timer.unref?.();
+    this.credentialRefreshTimers.set(key, timer);
+  }
+
+  private async refreshActiveCredential(adminId: string, accountId: string): Promise<void> {
+    const key = `${adminId}:${accountId}`;
+    const existing = this.credentialRefreshInFlight.get(key);
+    if (existing) return existing;
+    const task = (async () => {
+      const client = this.clients.get(key);
+      if (!client || !client.connected) return;
+      await client.refreshSession();
+    })().finally(() => {
+      if (this.credentialRefreshInFlight.get(key) === task) this.credentialRefreshInFlight.delete(key);
+    });
+    this.credentialRefreshInFlight.set(key, task);
+    return task;
   }
 
   private async markAccountFailure(adminId: string, accountId: string, error: unknown): Promise<void> {

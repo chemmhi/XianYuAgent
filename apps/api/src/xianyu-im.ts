@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { WebSocket } from 'ws';
 import { XIANYU_USER_AGENT, xianyuChromeVersion } from './xianyu-browser-identity.js';
-import { hasXianyuStructuredSystemMarker } from './xianyu-system-message.js';
+import { hasXianyuStructuredSystemMarker, hasXianyuSystemEnvelopeMarker, parseXianyuSystemMessageKind } from './xianyu-system-message.js';
 
 export const XIANYU_IM_WS_URL = 'wss://wss-goofish.dingtalk.com/';
 export const XIANYU_IM_TOKEN_API = 'mtop.taobao.idlemessage.pc.login.token';
@@ -235,6 +235,12 @@ export class XianyuImClient {
     this.reconnectTimer = undefined;
     this.setStatus('disconnected');
     await this.cleanupSocket();
+  }
+
+  /** Refresh the MTOP-backed credential and re-register the live socket. */
+  async refreshSession(): Promise<void> {
+    if (!this.reconnectEnabled) return;
+    await this.reconnectWithFreshToken();
   }
 
   async listConversations(startCursor?: number, limit = 20): Promise<XianyuImConversationPage> {
@@ -694,7 +700,8 @@ export function parsePushPayloadDetailed(encoded: string, accountId: string, myI
   // Ordinary chat also carries reminderContent/detailNotice. Only explicit
   // custom/content types or task metadata identify platform-generated notices.
   // Order-status parsing remains a second-stage guard in XianyuImService.
-  const platformSystemMessage = hasXianyuStructuredSystemMarker(msg10, extension, decoded);
+  const platformSystemMessage = hasXianyuStructuredSystemMarker(msg10, extension, decoded)
+    || isOrderStatusReminder(bodyText, msg10, extension);
   const bodyType = decoded.images.length > 0 ? 'image' : bodyText ? 'text' : 'system';
   const timestamp = normalizeTimestamp(msg1['5'] ?? message['5'], receivedAt);
   return { event: {
@@ -800,7 +807,8 @@ function parseOperationPushPayload(message: Record<string, unknown>, operation: 
   if (!senderRef) return { quarantine: { reasonCode: 'PUSH_SENDER_REF_MISSING', receivedAt } };
 
   const decoded = decodeOperationContent(content, extensions);
-  const platformSystemMessage = hasXianyuStructuredSystemMarker(content, extensions, operation, sessionInfo, decoded);
+  const platformSystemMessage = hasXianyuStructuredSystemMarker(content, extensions, operation, sessionInfo, decoded)
+    || isOrderStatusReminder(decoded.text, content, extensions, operation, sessionInfo);
   const bodyType = decoded.images.length > 0 ? 'image' : decoded.text ? 'text' : 'system';
   if (bodyType === 'system') return { quarantine: { reasonCode: 'PUSH_SYSTEM_CONTENT_IGNORED', receivedAt } };
   const timestamp = normalizeTimestamp(
@@ -1232,6 +1240,12 @@ function firstString(records: Record<string, any>[], keys: string[]): string | u
 function normalizeAssetUrl(value: string | undefined): string | undefined {
   if (!value) return undefined;
   return value.startsWith('//') ? `https:${value}` : value;
+}
+
+function isOrderStatusReminder(bodyText: string | undefined, ...sources: unknown[]): boolean {
+  const kind = parseXianyuSystemMessageKind(bodyText);
+  if (kind !== 'unpaid_order' && kind !== 'paid_waiting_shipment') return false;
+  return hasXianyuSystemEnvelopeMarker(...sources);
 }
 
 function normalizeIdentity(value: unknown): string | undefined {
