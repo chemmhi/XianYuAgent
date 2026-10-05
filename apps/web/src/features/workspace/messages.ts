@@ -103,24 +103,27 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
   }];
 
   const steps = [...run.steps].sort((left, right) => left.sequence - right.sequence);
-  steps.forEach((step) => {
-    messages.push({
-      id: `${run.runId}:reasoning:${step.stepId}`,
-      runId: run.runId,
-      type: 'reasoning_summary',
-      createdAt: step.startedAt ?? run.updatedAt,
-      title: '推理摘要',
-      content: stepSummary(step),
-      summary: `${step.label} · ${statusLabel(step.status)}`,
-      status: step.status,
-      collapsible: true,
+  const hasPersistedReasoning = events.some((event) => messageType(event) === 'reasoning_summary' || event.eventType === 'reasoning.delta');
+  if (!hasPersistedReasoning) {
+    steps.forEach((step) => {
+      messages.push({
+        id: `${run.runId}:reasoning:${step.stepId}`,
+        runId: run.runId,
+        type: 'reasoning_summary',
+        createdAt: step.startedAt ?? run.updatedAt,
+        title: '推理摘要',
+        content: stepSummary(step),
+        summary: `${step.label} · ${statusLabel(step.status)}`,
+        status: step.status,
+        collapsible: true,
+      });
     });
-  });
+  }
 
   const seenMessageIds = new Set<string>();
   const seenReasoningKeys = new Set<string>();
   let finalAnswerRendered = false;
-  [...events].sort((left, right) => left.sequence - right.sequence).forEach((event) => {
+  mergeStreamingEvents(events).sort((left, right) => left.sequence - right.sequence).forEach((event) => {
     if (event.eventType === 'workspace.message') return;
     const messageKind = messageType(event);
     if (messageKind === 'user_message') return;
@@ -147,7 +150,7 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
       type: messageKind ?? 'tool_event',
       createdAt: event.createdAt,
       title: messageKind === 'reasoning_summary' ? '推理摘要' : messageKind === 'final_answer' ? 'Agent' : '工具事件',
-      content: messageKind === 'reasoning_summary' ? (summary ?? eventSummary(event)) : content,
+      content: messageKind === 'reasoning_summary' ? (content || summary || eventSummary(event)) : content,
       summary,
       eventType: event.eventType,
       sequence: event.sequence,
@@ -176,4 +179,55 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
     const byTime = new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
     return byTime || (left.sequence ?? 0) - (right.sequence ?? 0);
   });
+}
+
+function mergeStreamingEvents(events: WorkspaceRunEventVM[]): WorkspaceRunEventVM[] {
+  const passthrough: WorkspaceRunEventVM[] = [];
+  const streams = new Map<string, WorkspaceRunEventVM>();
+  const append = (event: WorkspaceRunEventVM, type: WorkspaceMessageVM['type'], content: string, messageId: string, summary?: string) => {
+    if (!content && type !== 'tool_event') return;
+    const existing = streams.get(messageId);
+    if (!existing) {
+      streams.set(messageId, { ...event, eventType: event.eventType, payload: { ...event.payload, messageType: type, messageId, content, ...(summary ? { summary } : {}) } });
+      return;
+    }
+    const previous = typeof existing.payload.content === 'string' ? existing.payload.content : '';
+    existing.payload = { ...existing.payload, content: type === 'tool_event' ? content : `${previous}${content}`, messageType: type, messageId, ...(summary ? { summary } : {}) };
+    existing.sequence = Math.max(existing.sequence, event.sequence);
+    existing.createdAt = event.createdAt;
+  };
+
+  [...events].sort((left, right) => left.sequence - right.sequence).forEach((event) => {
+    const payload = event.payload;
+    if (event.eventType === 'reasoning.delta') {
+      const messageId = typeof payload.messageId === 'string' ? payload.messageId : `${event.runId}:reasoning`;
+      append(event, 'reasoning_summary', typeof payload.contentDelta === 'string' ? payload.contentDelta : '', messageId, '模型原生推理');
+      return;
+    }
+    if (event.eventType === 'assistant.delta') {
+      const messageId = typeof payload.messageId === 'string' ? payload.messageId : `${event.runId}:assistant`;
+      append(event, 'final_answer', typeof payload.contentDelta === 'string' ? payload.contentDelta : '', messageId);
+      return;
+    }
+    if (event.eventType === 'tool.call.started' || event.eventType === 'tool.call.delta' || event.eventType === 'tool.call.completed' || event.eventType === 'tool.result') {
+      const toolCallId = typeof payload.toolCallId === 'string' ? payload.toolCallId : `${event.sequence}`;
+      const messageId = `${event.runId}:tool:${toolCallId}`;
+      const toolName = typeof payload.toolName === 'string' ? payload.toolName : 'tool';
+      let content = `${toolName}`;
+      if (event.eventType === 'tool.call.started') content = `选择工具：${toolName}\n参数：${typeof payload.arguments === 'string' ? payload.arguments : '{}'}`;
+      if (event.eventType === 'tool.call.delta') content = `调用参数：${typeof payload.argumentsDelta === 'string' ? payload.argumentsDelta : ''}`;
+      if (event.eventType === 'tool.call.completed') content = `已选择工具：${toolName}`;
+      if (event.eventType === 'tool.result') {
+        const result = payload.result;
+        const resultContent = result && typeof result === 'object' && !Array.isArray(result) && typeof (result as Record<string, unknown>).content === 'string'
+          ? String((result as Record<string, unknown>).content)
+          : typeof result === 'string' ? result : JSON.stringify(result ?? {});
+        content = `工具结果：${resultContent}`;
+      }
+      append(event, 'tool_event', content, messageId, toolName);
+      return;
+    }
+    passthrough.push(event);
+  });
+  return [...passthrough, ...streams.values()];
 }

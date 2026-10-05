@@ -51,3 +51,37 @@ test('Workspace PI resolves the account ModelClientService and fails over to bac
     runtime.stop();
   }
 });
+
+test('Workspace PI preserves safe command validation failures instead of collapsing them into RUNTIME_FAILED', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'workspace-runtime-error@example.com', passwordHash: 'hash', displayName: 'Workspace Runtime Error' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'workspace-runtime-error' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Runtime error mapping' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '帮我取消 1082449333831 这个商品的自动化规则' });
+  const runtime = new PiRuntimeAdapter(store, { complete: async () => ({ content: 'should not call model', model: 'unused' }) }, {
+    workspaceCommands: {
+      prepareWrite: async () => { const error = new Error('商品 ID 或外部商品编号不能为空') as Error & { code: string }; error.code = 'VALIDATION_FAILED'; throw error; },
+      execute: async () => undefined,
+    } as never,
+    model: 'unused',
+    messageSink: async (message) => {
+      await store.appendWorkspaceMessage({ adminId: message.adminId ?? admin.id, sessionId: message.sessionId, runId: message.runId, type: message.messageType, content: message.content, summary: message.summary });
+    },
+  });
+  try {
+    runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+    const deadline = Date.now() + 2_000;
+    let bundle;
+    while (Date.now() < deadline) {
+      bundle = await store.getRun(admin.id, created.run.id);
+      if (bundle?.run.status === 'failed') break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(bundle?.run.status, 'failed');
+    assert.equal(bundle?.run.errorCode, 'VALIDATION_FAILED');
+    const messages = await store.listWorkspaceMessages(admin.id, session.id, 20);
+    assert.ok(messages.some((message) => message.content === '商品 ID 或外部商品编号不能为空'));
+  } finally {
+    runtime.stop();
+  }
+});

@@ -52,6 +52,33 @@ test('prepares redacted confirmation plans for coupon and product rules', async 
   assert.equal(automation?.manifest.productId, 'product-1');
 });
 
+test('resolves numeric external product refs and builds a disable-all automation patch', async () => {
+  const product = { id: 'product-108244', accountId: 'account-1', externalProductRef: '1082449333831', title: '视频下载及文案提取源码，包教包会', configVersion: 4 };
+  let updatedConfig: unknown;
+  const commands = orchestrator({
+    products: {
+      get: async () => product,
+      list: async () => ({ items: [product], page: 1, pageSize: 20, total: 1, totalPages: 1 }),
+    },
+    productAutomation: {
+      get: async () => ({ configVersion: 4, product, config: {} }),
+      update: async (input: { config: unknown }) => { updatedConfig = input.config; return { configVersion: 5, config: input.config }; },
+    },
+  });
+  const plan = await commands.prepareWrite({ ...input, instruction: '帮我取消 1082449333831 这个商品的自动化规则' });
+  assert.equal(plan?.action, 'product_automation_update');
+  assert.equal(plan?.manifest.productId, product.id);
+  assert.deepEqual(plan?.manifest.config, {
+    paidAutoDelivery: { enabled: false },
+    unpaidAutoReprice: { enabled: false },
+    reviewGift: { enabled: false },
+    reviewReminder: { enabled: false },
+  });
+
+  await commands.confirm({ plan: plan!, run: { id: 'run-1', requestedBy: input.adminId, accountId: input.accountId, instruction: '帮我取消 1082449333831 这个商品的自动化规则' } as never, step: {} as never, adminId: input.adminId, requestId: input.requestId, traceId: input.traceId });
+  assert.deepEqual(updatedConfig, plan?.manifest.config);
+});
+
 test('blocks an unready manual delivery before confirmation creation', async () => {
   const commands = orchestrator({
     orderDelivery: {
