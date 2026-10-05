@@ -106,6 +106,14 @@ test('rejects read-tool routing for product mutation instructions', async () => 
   );
 });
 
+test('rejects broad-read routing for named product lookup instructions', async () => {
+  const commands = orchestrator();
+  await assert.rejects(
+    () => commands.executeModelTool('workspace_read', { instruction: '搜索商品：视频下载及文案提取源码，包教包会' }, input),
+    (error: unknown) => (error as { code?: string }).code === 'WORKSPACE_PRODUCT_SEARCH_REQUIRED',
+  );
+});
+
 test('searches a product by name through the dedicated workspace tool', async () => {
   const product = { id: 'product-search-1', accountId: 'account-1', externalProductRef: '1082449333831', title: '视频下载及文案提取源码，包教包会', configVersion: 1 };
   let query = '';

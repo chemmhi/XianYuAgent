@@ -122,6 +122,7 @@ export class WorkspaceCommandOrchestrator {
     if (!instruction) throw new ServiceError(422, 'VALIDATION_FAILED', 'workspace tool instruction is required');
     if (name === 'workspace_read') {
       if (requiresWorkspaceWrite(instruction)) throw new ServiceError(422, 'WORKSPACE_WRITE_REQUIRED', '该请求包含商品变更动作，请使用 workspace_prepare_write');
+      if (requiresWorkspaceProductSearch(instruction)) throw new ServiceError(422, 'WORKSPACE_PRODUCT_SEARCH_REQUIRED', '该商品按名称或外部编号查找应使用 workspace_product_search');
       const result = await this.execute({ ...input, instruction });
       if (!result || result.mutation) throw new ServiceError(422, 'VALIDATION_FAILED', 'workspace_read only accepts read operations');
       return { kind: 'read', title: result.title, summary: result.summary, content: result.content, data: result.data };
@@ -565,6 +566,12 @@ function orderListResult(items: OrderRecord[], total: number): WorkspaceCommandR
 function safeFieldNames(fields: Record<string, string>): string[] { return Object.keys(fields).filter((key) => key !== 'content' && key !== 'knowledgeBase' && key !== 'apiKey'); }
 function productSearchContent(items: ProductRecord[], total: number): string { return items.length ? [`匹配到 ${total} 个商品：`, ...items.map((item, index) => `${index + 1}. ${item.title} · ${item.externalProductRef ?? item.id} · ${item.status}`)].join('\n') : '未匹配到商品。'; }
 function requiresWorkspaceWrite(instruction: string): boolean { return /(取消|关闭|停用|禁用|修改|更新|配置|设置|启用|删除|发布|发货|改价|赠品|评价|绑定|解绑)/i.test(instruction) && /(商品|自动化|规则|知识库|卡券|订单|发货)/i.test(instruction); }
+function requiresWorkspaceProductSearch(instruction: string): boolean {
+  const normalized = instruction.replace(/\s+/g, ' ').trim();
+  if (!/(商品|产品)/i.test(normalized) || !/(搜索|查找|匹配|按名称|按标题|商品名称|商品标题|外部商品编号)/i.test(normalized)) return false;
+  if (/(列表|全部|所有|总数|分页)/i.test(normalized) && !/(按名称|按标题|商品名称|商品标题|外部商品编号)/i.test(normalized)) return false;
+  return true;
+}
 function parseRange(input: string): 'today' | '3d' | '7d' | '1m' | undefined { if (/今天|今日/.test(input)) return 'today'; if (/3天|三天/.test(input)) return '3d'; if (/月|30天/.test(input)) return '1m'; if (/7天|一周|本周/.test(input)) return '7d'; return undefined; }
 function formatDashboard(snapshot: DashboardSnapshot): string { return [`销售额 ${snapshot.totalSales.toFixed(2)}，选定区间销售额 ${snapshot.selectedRangeSales.toFixed(2)}`, `今日订单金额 ${snapshot.todayOrderAmount.toFixed(2)}，自动处理率 ${snapshot.autoProcessRate.toFixed(1)}%，待人工 ${snapshot.pendingManualCount}`, snapshot.riskTodos.length ? `风险待办：${snapshot.riskTodos.slice(0, 5).map((item) => item.title).join('；')}` : '当前无高优先级风险待办'].join('\n'); }
 function formatMoney(valueMinor?: number): string { return typeof valueMinor === 'number' && Number.isFinite(valueMinor) ? `¥${(valueMinor / 100).toFixed(2)}` : '价格未设置'; }
