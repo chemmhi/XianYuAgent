@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { DashboardDesktopContent, DashboardMobileContent } from './DashboardViews';
+import { DashboardDesktopContent, DashboardMobileContent, MiniAreaChart } from './DashboardViews';
 import type { DashboardState } from '../types';
 
 const state: DashboardState = {
@@ -11,11 +11,11 @@ const state: DashboardState = {
   data: {
     kpis: [
       { key: 'totalSales', label: '总销售额', value: '¥78,420', delta: '累计', context: '全部已付款订单', tone: 'info' },
-      { key: 'orderAmount', label: '今日订单金额', value: '¥18,640', delta: '实时', context: '今日汇总', tone: 'ok' },
+      { key: 'orderAmount', label: '今日订单金额', value: '¥18,640', delta: '实时', context: '今日已支付汇总', tone: 'ok' },
       { key: 'autoProcessRate', label: '自动处理成功率', value: '96.8%', delta: '实时', context: '当前账号', tone: 'ok' },
       { key: 'pendingManual', label: '待人工处理', value: '3', delta: '待处理', context: '风险待办', tone: 'warn' },
     ],
-    trend: [{ label: '周一', primary: 58, secondary: 82 }],
+    trend: [{ label: '周一', primary: 58, sales: 52, secondary: 82 }],
     health: [{ label: '监听心跳', value: '正常', tone: 'ok' }],
     productRank: [{ title: 'Python 全栈资料包', subtitle: '虚拟资源 · 交付配置已就绪', orders: '42', deliveryConfig: '已就绪', status: '可交付', tone: 'ok' }],
     recentActivity: [{ time: '14:22', text: 'AI 已回复', status: 'AI 已回复', tone: 'ok', href: '/messages' }],
@@ -68,6 +68,14 @@ describe('dashboard views', () => {
     expect(html).not.toContain('闲鱼账号 A');
   });
 
+  it('renders the selected-range sales series alongside order amount and AI rate', () => {
+    const html = renderToStaticMarkup(createElement(MiniAreaChart, { state }));
+    expect(html).toContain('dashboard-chart-line-sales');
+    expect(html).toContain('销售金额');
+    expect(html).toContain('订单金额');
+    expect(html).toContain('AI 闭环率');
+  });
+
   it('renders custom trend date inputs when the custom range is selected', () => {
     const html = renderToStaticMarkup(createElement(DashboardDesktopContent, {
       state,
@@ -103,7 +111,7 @@ describe('dashboard views', () => {
 
   it('adapts the primary vertical axis to the visible order range', () => {
     const html = renderToStaticMarkup(createElement(DashboardDesktopContent, {
-      state: { ...state, data: { ...state.data!, trend: [{ label: 'A', primary: 10, secondary: 80 }, { label: 'B', primary: 1000, secondary: 90 }] } },
+      state: { ...state, data: { ...state.data!, trend: [{ label: 'A', primary: 10, sales: 8, secondary: 80 }, { label: 'B', primary: 1000, sales: 900, secondary: 90 }] } },
       query: { range: '1m' },
       onOpenTodo: vi.fn(),
       onRefresh: vi.fn(),
