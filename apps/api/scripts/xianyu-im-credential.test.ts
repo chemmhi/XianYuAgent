@@ -223,6 +223,34 @@ describe('xianyu IM credential refresh', () => {
     await service.close();
   });
 
+  it('reconnects an active account when keepalive finds no cached client', async () => {
+    const service = new XianyuImService({} as never, {} as never, {} as never);
+    let ensureCalls = 0;
+    const internal = service as unknown as {
+      ensureClient: (adminId: string, accountId: string) => Promise<unknown>;
+      refreshActiveCredential: (adminId: string, accountId: string) => Promise<void>;
+    };
+    internal.ensureClient = async () => { ensureCalls += 1; return {}; };
+
+    await internal.refreshActiveCredential('admin-1', 'account-1');
+
+    assert.equal(ensureCalls, 1);
+    await service.close();
+  });
+
+  it('registers keepalive before a failed initial listener bootstrap', async () => {
+    const service = new XianyuImService({} as never, {} as never, {} as never);
+    const internal = service as unknown as {
+      ensureClient: () => Promise<unknown>;
+      credentialRefreshTimers: Map<string, unknown>;
+    };
+    internal.ensureClient = async () => { throw new Error('bootstrap failed'); };
+
+    await assert.rejects(() => service.startListener('admin-1', 'account-1'));
+    assert.equal(internal.credentialRefreshTimers.size, 1);
+    await service.close();
+  });
+
   it('persists an expired account when listener bootstrap finds missing credentials', async () => {
     let account = { id: 'account-1', platform: 'xianyu', status: 'connected' as const };
     const store = {

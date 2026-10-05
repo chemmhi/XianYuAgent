@@ -237,8 +237,10 @@ export class XianyuImService {
    * credential becomes active without duplicating client construction.
    */
   async startListener(adminId: string, accountId: string): Promise<void> {
-    const client = await this.ensureClient(adminId, accountId);
+    // Register the keepalive before bootstrap so an active login is retried
+    // even when the first socket/token exchange fails transiently.
     this.scheduleCredentialRefresh(adminId, accountId);
+    const client = await this.ensureClient(adminId, accountId);
     if (client) this.scheduleRecentMessageRecovery(adminId, accountId);
   }
 
@@ -502,7 +504,10 @@ export class XianyuImService {
     if (existing) return existing;
     const task = (async () => {
       const client = this.clients.get(key);
-      if (!client || !client.connected) return;
+      if (!client || !client.connected) {
+        await this.ensureClient(adminId, accountId);
+        return;
+      }
       await client.refreshSession();
     })().finally(() => {
       if (this.credentialRefreshInFlight.get(key) === task) this.credentialRefreshInFlight.delete(key);

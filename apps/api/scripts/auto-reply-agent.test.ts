@@ -485,6 +485,47 @@ test('agent routes structured handoff output without returning reply text', asyn
   await assert.rejects(() => agent.generate({ adminId: 'admin-1', context: context(), classification }), (error: unknown) => (error as { code?: string; message?: string }).code === 'AGENT_HANDOFF' && (error as { message?: string }).message === '需要人工确认售后状态');
 });
 
+test('agent returns a semantic skip decision without a fixed acknowledgement vocabulary', async () => {
+  let systemPrompt = '';
+  const agent = new ToolCallingAutoReplyAgent({} as Store, {
+    complete: async (request) => {
+      systemPrompt = contentText(request.messages[0]?.content);
+      return { content: JSON.stringify({ decision: 'skip', reason: '上一轮买家问题已完整解决，当前消息没有新增事项。' }), model: 'test' };
+    },
+  }, resolveAutoReplyAgentConfig({}));
+
+  const result = await agent.generate({
+    adminId: 'admin-1',
+    context: context({
+      inboundMessage: { ...context().inboundMessage, bodyText: '感谢确认' },
+      recentMessages: [
+        { direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '请问什么时候发货？' },
+        { direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: '付款后今天安排发货。' },
+      ],
+    }),
+    classification,
+  });
+
+  assert.deepEqual(result, { text: '', decision: 'skip', reason: '上一轮买家问题已完整解决，当前消息没有新增事项。' });
+  assert.match(systemPrompt, /不得依赖固定确认词表/);
+  assert.doesNotMatch(systemPrompt, /(?:OK|Thanks|收到|好的)/i);
+});
+
+test('acknowledgement gate fails open on evaluator errors and low-confidence skips', async () => {
+  const service = new AutoReplyService({ enabled: true, generator: { generate: async () => 'fallback reply' } });
+  const evaluate = (service as unknown as {
+    evaluateAcknowledgement: (evaluator: { evaluate: () => Promise<{ decision: 'skip'; confidence: number; reason: string }> }, adminId: string, context: AutoReplyContext, classification: AutoReplyClassification) => Promise<unknown>;
+  }).evaluateAcknowledgement.bind(service);
+  const sampleContext = context({ recentMessages: [{ direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '什么时候发货？' }, { direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: '付款后今天安排发货。' }] });
+
+  assert.deepEqual(await evaluate({ evaluate: async () => ({ decision: 'skip', confidence: 0.4, reason: 'uncertain' }) }, 'admin-1', sampleContext, classification), {
+    decision: 'reply', confidence: 0.4, reason: 'skip_confidence_below_threshold',
+  });
+  assert.deepEqual(await evaluate({ evaluate: async () => { throw new Error('judge unavailable'); } }, 'admin-1', sampleContext, classification), {
+    decision: 'reply', confidence: 0, reason: 'semantic_evaluator_failed',
+  });
+});
+
 test('OpenAI-compatible transport maps image content for Chat and Responses APIs', async () => {
   const originalFetch = globalThis.fetch;
   const requests: Array<Record<string, unknown>> = [];

@@ -2,11 +2,16 @@ import type { AutoReplyGeneratedReply } from './auto-reply.js';
 
 export type AutoReplyModelDecision =
   | { decision: 'reply'; reply: AutoReplyGeneratedReply }
+  | { decision: 'skip'; reason: string }
   | { decision: 'handoff'; reason: string };
 
 export function parseAutoReplyModelDecision(content: string): AutoReplyModelDecision | undefined {
   const parsed = parseJsonObject(content);
-  if (!parsed || (parsed.decision !== 'reply' && parsed.decision !== 'handoff')) return undefined;
+  if (!parsed || (parsed.decision !== 'reply' && parsed.decision !== 'skip' && parsed.decision !== 'handoff')) return undefined;
+  if (parsed.decision === 'skip') {
+    const reason = typeof parsed.reason === 'string' && parsed.reason.trim() ? parsed.reason.trim().slice(0, 500) : '当前消息已被上一轮回复覆盖';
+    return { decision: 'skip', reason };
+  }
   if (parsed.decision === 'handoff') {
     const reason = typeof parsed.reason === 'string' && parsed.reason.trim()
       ? parsed.reason.trim().slice(0, 500)
