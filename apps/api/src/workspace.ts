@@ -107,6 +107,7 @@ export interface WorkspaceOutboxView {
   attempt: number;
   availableAt: string;
   externalOutcome?: AutoReplyOutboxRecord['externalOutcome'];
+  result?: Record<string, unknown>;
   lastErrorCode?: string;
   idempotencyKey: string;
   createdAt: string;
@@ -421,7 +422,7 @@ export class WorkspaceService {
       const updatedRun = await this.store.updateRun(input.bundle.run.id, { status: 'succeeded', finishedAt, resultSummary: result.resultSummary });
       await this.store.updateRunStep(input.step.id, { status: 'succeeded', finishedAt, outputSummary: result.outputSummary });
       await this.store.appendWorkspaceMessage({ adminId: input.input.adminId, sessionId: input.bundle.run.sessionId, runId: input.bundle.run.id, type: 'final_answer', content: result.outputSummary, summary: result.resultSummary });
-      await this.store.appendRunEvent({ runId: input.input.runId, eventType: 'workspace.command.completed', payload: { action: input.confirmation.action, status: 'succeeded', outboxId: queued.record.id, result: result.data ?? {} } });
+      await this.store.appendRunEvent({ runId: input.input.runId, eventType: 'workspace.command.completed', payload: { action: input.confirmation.action, status: 'succeeded', messageType: 'final_answer', content: result.outputSummary, summary: result.resultSummary, outboxId: queued.record.id, result: result.data ?? {} } });
       await this.audit({ actorId: input.input.adminId, action: `workspace.${input.confirmation.action}.completed`, targetRef: input.confirmation.id, requestId: input.requestId, traceId: input.traceId, payload: { action: input.confirmation.action, outboxId: queued.record.id, result: result.data ?? {} }, accountId: input.bundle.run.accountId });
       const latest = await this.store.getAutoReplyOutbox(input.scope, queued.record.idempotencyKey);
       const latestBundle = await this.store.getRun(input.input.adminId, input.input.runId);
@@ -583,7 +584,7 @@ export class WorkspaceService {
 
   private toConfirmationView(confirmation: WorkspaceConfirmationRecord): WorkspaceConfirmationView { return { confirmationId: confirmation.id, runId: confirmation.runId, stepId: confirmation.stepId, accountId: confirmation.accountId, action: confirmation.action, policyRef: confirmation.policyRef, manifest: { ...confirmation.manifest }, status: confirmation.status, version: confirmation.version, expiresAt: confirmation.expiresAt, confirmedAt: confirmation.confirmedAt, confirmedBy: confirmation.confirmedBy, cancelledAt: confirmation.cancelledAt, createdAt: confirmation.createdAt, updatedAt: confirmation.updatedAt }; }
 
-  private toOutboxView(outbox: AutoReplyOutboxRecord, runId: string): WorkspaceOutboxView { return { outboxId: outbox.id, runId, scope: outbox.scope, operation: outbox.operation, status: outbox.status, attempt: outbox.attempt, availableAt: outbox.availableAt, externalOutcome: outbox.externalOutcome, lastErrorCode: outbox.lastErrorCode, idempotencyKey: outbox.idempotencyKey, createdAt: outbox.createdAt, updatedAt: outbox.updatedAt }; }
+  private toOutboxView(outbox: AutoReplyOutboxRecord, runId: string): WorkspaceOutboxView { const result = outbox.payload?.result; return { outboxId: outbox.id, runId, scope: outbox.scope, operation: outbox.operation, status: outbox.status, attempt: outbox.attempt, availableAt: outbox.availableAt, externalOutcome: outbox.externalOutcome, lastErrorCode: outbox.lastErrorCode, result: result && typeof result === 'object' && !Array.isArray(result) ? result as Record<string, unknown> : undefined, idempotencyKey: outbox.idempotencyKey, createdAt: outbox.createdAt, updatedAt: outbox.updatedAt }; }
 
   private toRunView(run: RunRecord, steps: StepRecord[]): WorkspaceRunView {
     const mappedSteps = steps.map((step) => ({ stepId: step.id, runId: step.runId, sequence: step.stepNo, kind: step.kind, label: step.label, status: step.status, startedAt: step.startedAt, finishedAt: step.finishedAt, inputSummary: step.inputSummary, outputSummary: step.outputSummary, affectedEntityRefs: [], errorCode: step.errorCode }));

@@ -1,6 +1,6 @@
 import type { AccountService } from './services.js';
 import { CouponService, OrderService, ProductService, ProductSyncService, ServiceError } from './services.js';
-import type { ProductRecord, OrderRecord, OrderDeliveryType } from './domain.js';
+import type { ProductAutomationConfig, ProductRecord, OrderRecord, OrderDeliveryType } from './domain.js';
 import type { DashboardService, DashboardSnapshot } from './dashboard.js';
 import type { AutoReplyActivityService } from './auto-reply-activity.js';
 import type { AutoReplyAgentSettingsService } from './auto-reply-agent-settings.js';
@@ -417,7 +417,22 @@ export class WorkspaceCommandOrchestrator {
       let config: unknown = execution.config;
       if (!config) throw new ServiceError(422, 'VALIDATION_FAILED', '自动化规则配置不能为空');
       const updated = await this.deps.productAutomation.update({ adminId: input.adminId, productId, expectedConfigVersion: Number(execution.expectedConfigVersion ?? input.plan.manifest.expectedConfigVersion ?? 1), config, requestId: input.requestId, traceId: input.traceId });
-      return { resultSummary: `商品自动化规则已更新（v${updated.configVersion}）`, outputSummary: `商品 ${product.title} 自动化规则已更新`, data: { productId, configVersion: updated.configVersion, config: updated.config } };
+      const persisted = await this.deps.productAutomation.get(input.adminId, productId);
+      if (persisted.configVersion !== updated.configVersion || (updated.configDigest && persisted.configDigest !== updated.configDigest)) {
+        throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', '商品自动化规则落库回读校验失败');
+      }
+      const couponBatches = await this.loadAutomationCouponBatches(input.adminId, persisted.config);
+      const resultData = {
+        persisted: true,
+        persistenceVerifiedAt: persisted.updatedAt,
+        product: { id: product.id, externalProductRef: product.externalProductRef, title: product.title },
+        productId,
+        configVersion: persisted.configVersion,
+        configDigest: persisted.configDigest,
+        config: persisted.config,
+        couponBatches,
+      };
+      return { resultSummary: `商品自动化规则已更新（v${persisted.configVersion}）`, outputSummary: formatAutomationPersistedResult(resultData), data: resultData };
     }
     if (typeof action === 'string' && action.startsWith('coupon_')) return this.confirmCoupon(input, action);
     if (action === 'order_deliver' || action === 'order_retry' || action === 'order_cancel') {
@@ -562,6 +577,18 @@ export class WorkspaceCommandOrchestrator {
     return (await this.deps.productAutomation.get(adminId, productId)).configVersion;
   }
 
+  private async loadAutomationCouponBatches(adminId: string, config: ProductAutomationConfig): Promise<Array<{ id: string; sequenceId?: string; label?: string; purpose?: string; status?: string; availableCount?: number }>> {
+    const ids = [...new Set([
+      ...(config.paidAutoDelivery?.couponBatchIds ?? []),
+      ...(config.reviewGift?.couponBatchIds ?? []),
+    ])];
+    const batches = await Promise.all(ids.map(async (id) => {
+      const batch = await this.deps.store.getCouponBatch(adminId, id);
+      return batch ? { id: batch.id, sequenceId: batch.sequenceId, label: batch.label, purpose: batch.purpose, status: batch.status, availableCount: batch.availableCount } : { id };
+    }));
+    return batches;
+  }
+
   private async accountsResult(input: WorkspaceCommandInput): Promise<WorkspaceCommandResult> {
     const result = await this.deps.accounts.list(input.adminId, { page: 1, pageSize: 100 });
     const items = result.items.map((item) => ({ id: item.id, displayName: item.displayName, sellerRef: item.sellerRef, platform: item.platform, status: item.status, updatedAt: item.updatedAt }));
@@ -656,6 +683,32 @@ function normalizeAfterSalesStatus(value?: string): OrderRecord['afterSalesStatu
 function safeProduct(product: ProductRecord): Record<string, unknown> { return { id: product.id, accountId: product.accountId, externalProductRef: product.externalProductRef, title: product.title, description: product.description, categoryCode: product.categoryCode, priceMinor: product.priceMinor, status: product.status, configVersion: product.configVersion, skuCount: product.skuCount ?? 0, assetCount: product.assetCount ?? 0, updatedAt: product.updatedAt, redacted: true }; }
 function productListResult(items: ProductRecord[], total: number): WorkspaceCommandResult { const rows = items.map((item) => safeProduct(item)); return { kind: 'products', title: '商品查询', summary: `已读取 ${total} 个商品`, content: rows.length ? [`当前账号共有 ${total} 个商品：`, ...rows.map((item, index) => `${index + 1}. ${String(item.title)} · ${String(item.status)} · ${formatMoney(typeof item.priceMinor === 'number' ? item.priceMinor : undefined)}`)].join('\n') : '当前账号暂无匹配商品。', data: { total, items: rows } }; }
 function orderListResult(items: OrderRecord[], total: number): WorkspaceCommandResult { const rows = items.map((item) => ({ orderNo: item.orderNo, itemTitle: item.itemTitle, amountMinor: item.amountMinor, paymentStatus: item.paymentStatus, orderStatus: item.orderStatus, deliveryStatus: item.deliveryStatus, afterSalesStatus: item.afterSalesStatus, createdAt: item.createdAt, updatedAt: item.updatedAt, redacted: true })); return { kind: 'orders', title: '订单查询', summary: `已读取 ${total} 个订单`, content: rows.length ? [`当前账号共有 ${total} 个订单：`, ...rows.map((item, index) => `${index + 1}. ${item.orderNo} · ${item.itemTitle} · 支付 ${item.paymentStatus} · 交付 ${item.deliveryStatus} · 售后 ${item.afterSalesStatus}`)].join('\n') : '当前账号暂无匹配订单。', data: { total, items: rows } }; }
+function formatAutomationPersistedResult(result: { product: { id: string; externalProductRef?: string; title: string }; configVersion: number; config: ProductAutomationConfig; couponBatches: Array<{ id: string; sequenceId?: string; label?: string; purpose?: string; status?: string; availableCount?: number }>; persisted: boolean; persistenceVerifiedAt?: string }): string {
+  const config = result.config;
+  const paid = config.paidAutoDelivery ?? { enabled: false, couponBatchIds: [], autoConfirm: true, maxAttempts: 3, retryBackoffSeconds: 30 };
+  const reprice = config.unpaidAutoReprice ?? { enabled: false, mode: 'fixed' as const, targetPriceMinor: 0, maxAttempts: 3, retryBackoffSeconds: 30 };
+  const gift = config.reviewGift ?? { enabled: false, couponBatchIds: [], maxAttempts: 3, retryBackoffSeconds: 30 };
+  const reminder = config.reviewReminder ?? { enabled: false, firstDelayMinutes: 72 * 60, repeatIntervalMinutes: 24 * 60, maxReminders: 1, message: '如果使用满意，欢迎给个好评，谢谢支持～' };
+  const couponLabel = (ids: string[]) => ids.length
+    ? ids.map((id) => {
+      const batch = result.couponBatches.find((item) => item.id === id || item.sequenceId === id);
+      return batch ? `${batch.label ?? batch.sequenceId ?? batch.id}${batch.sequenceId ? `（${batch.sequenceId}）` : ''}` : id;
+    }).join('、')
+    : '未绑定';
+  const enabled = (value: boolean) => value ? '开启' : '关闭';
+  return [
+    `商品自动化规则已落库（v${result.configVersion}）`,
+    `商品：${result.product.title}`,
+    `商品 ID：${result.product.id}${result.product.externalProductRef ? ` · 外部编号：${result.product.externalProductRef}` : ''}`,
+    `持久化校验：${result.persisted ? '已重新读取保存记录' : '已提交'}${result.persistenceVerifiedAt ? ` · ${result.persistenceVerifiedAt}` : ''}`,
+    '',
+    '规则明细：',
+    `- 自动发货：${enabled(paid.enabled)}；自动确认：${paid.autoConfirm ? '是' : '否'}；卡券：${couponLabel(paid.couponBatchIds)}；最大重试：${paid.maxAttempts} 次；退避：${paid.retryBackoffSeconds} 秒`,
+    `- 未付款改价：${enabled(reprice.enabled)}；模式：${reprice.mode}；目标价：${formatMoney(reprice.targetPriceMinor)}；最大重试：${reprice.maxAttempts} 次；退避：${reprice.retryBackoffSeconds} 秒`,
+    `- 评价赠品：${enabled(gift.enabled)}；卡券：${couponLabel(gift.couponBatchIds)}；最大重试：${gift.maxAttempts} 次；退避：${gift.retryBackoffSeconds} 秒`,
+    `- 求评价提醒：${enabled(reminder.enabled)}；首次延迟：${reminder.firstDelayMinutes} 分钟；重复间隔：${reminder.repeatIntervalMinutes} 分钟；最多提醒：${reminder.maxReminders} 次；文案：${reminder.message || '未设置'}`,
+  ].join('\n');
+}
 function safeFieldNames(fields: Record<string, string>): string[] { return Object.keys(fields).filter((key) => key !== 'content' && key !== 'knowledgeBase' && key !== 'apiKey'); }
 function productSearchContent(items: ProductRecord[], total: number): string { return items.length ? [`匹配到 ${total} 个商品：`, ...items.map((item, index) => `${index + 1}. ${item.title} · ${item.externalProductRef ?? item.id} · ${item.status}`)].join('\n') : '未匹配到商品。'; }
 function stripNegatedWorkspaceClauses(instruction: string): string {

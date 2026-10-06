@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { WorkspaceCommandOrchestrator, detectCommand } from '../src/workspace-commands.js';
 import { MemoryStore } from '../src/store-memory.js';
+import { ProductAutomationService, defaultProductAutomationConfig } from '../src/product-automation.js';
 import { findWorkspaceExecutionStep, InProcessAgentRuntime, WorkspaceService } from '../src/workspace.js';
 
 function orchestrator(overrides: Record<string, unknown> = {}) {
@@ -91,18 +92,20 @@ test('workspace_prepare_write accepts canonical coupon parameters and preserves 
 test('resolves numeric external product refs and builds a disable-all automation patch', async () => {
   const product = { id: 'product-108244', accountId: 'account-1', externalProductRef: '1082449333831', title: '视频下载及文案提取源码，包教包会', configVersion: 4 };
   let updatedConfig: unknown;
+  let savedVersion = 4;
   const commands = orchestrator({
     products: {
       get: async () => product,
       list: async () => ({ items: [product], page: 1, pageSize: 20, total: 1, totalPages: 1 }),
     },
     productAutomation: {
-      get: async () => ({ configVersion: 4, product, config: {} }),
+      get: async () => ({ configVersion: savedVersion, product, config: updatedConfig ?? {} }),
       update: async (input: { config: unknown }) => {
         const config = input.config as { paidAutoDelivery?: { couponBatchIds?: string[] }; reviewGift?: { couponBatchIds?: string[] } };
         if ((config.paidAutoDelivery?.couponBatchIds?.length ?? 0) > 0 || (config.reviewGift?.couponBatchIds?.length ?? 0) > 0) throw new Error('coupon batch is voided');
         updatedConfig = input.config;
-        return { configVersion: 5, config: input.config };
+        savedVersion = 5;
+        return { configVersion: savedVersion, config: input.config };
       },
     },
   });
@@ -116,8 +119,11 @@ test('resolves numeric external product refs and builds a disable-all automation
     reviewReminder: { enabled: false },
   });
 
-  await commands.confirm({ plan: plan!, run: { id: 'run-1', requestedBy: input.adminId, accountId: input.accountId, instruction: '帮我取消 1082449333831 这个商品的自动化规则' } as never, step: {} as never, adminId: input.adminId, requestId: input.requestId, traceId: input.traceId });
+  const confirmed = await commands.confirm({ plan: plan!, run: { id: 'run-1', requestedBy: input.adminId, accountId: input.accountId, instruction: '帮我取消 1082449333831 这个商品的自动化规则' } as never, step: {} as never, adminId: input.adminId, requestId: input.requestId, traceId: input.traceId });
   assert.deepEqual(updatedConfig, plan?.manifest.config);
+  assert.match(confirmed.outputSummary, /商品自动化规则已落库/);
+  assert.match(confirmed.outputSummary, /规则明细/);
+  assert.equal(confirmed.data?.persisted, true);
 });
 
 test('resolves the exact product title in a natural-language cancellation and filters by name', async () => {
@@ -146,6 +152,9 @@ test('runs a named product automation cancellation through Workspace confirmatio
   const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Automation Confirm' });
   const product = { id: 'product-title-1', accountId: account.id, externalProductRef: '1082449333831', title: '视频下载及文案提取源码，包教包会', configVersion: 9 };
   let receivedExpectedVersion: number | undefined;
+  let savedVersion = 2;
+  let savedConfig: unknown = {};
+  let savedDigest: string | undefined;
   const commands = orchestrator({
     store,
     products: {
@@ -153,11 +162,14 @@ test('runs a named product automation cancellation through Workspace confirmatio
       list: async () => ({ items: [product], page: 1, pageSize: 20, total: 1, totalPages: 1 }),
     },
     productAutomation: {
-      get: async () => ({ configVersion: 2, product, config: {} }),
+      get: async () => ({ configVersion: savedVersion, product, config: savedConfig, configDigest: savedDigest, updatedAt: '2026-10-06T07:00:00.000Z' }),
       update: async (input: { expectedConfigVersion: number; config: unknown }) => {
         receivedExpectedVersion = input.expectedConfigVersion;
         if (input.expectedConfigVersion !== 2) throw new Error('AUTOMATION_VERSION_CONFLICT');
-        return { configVersion: 3, config: input.config };
+        savedVersion = 3;
+        savedConfig = input.config;
+        savedDigest = 'digest-3';
+        return { configVersion: savedVersion, config: savedConfig, configDigest: 'digest-3', updatedAt: '2026-10-06T07:00:00.000Z' };
       },
     },
   });
@@ -179,6 +191,39 @@ test('runs a named product automation cancellation through Workspace confirmatio
   assert.equal(receivedExpectedVersion, 2);
   assert.equal(result.run.status, 'succeeded');
   assert.match(result.run.resultSummary ?? '', /自动化规则已更新/);
+  assert.equal(result.outbox.result?.persisted, true);
+  assert.equal((result.outbox.result?.product as { title?: string })?.title, product.title);
+  const messages = await store.listWorkspaceMessages(admin.id, session.id);
+  assert.match(messages.at(-1)?.content ?? '', /商品自动化规则已落库/);
+  assert.match(messages.at(-1)?.content ?? '', /规则明细/);
+  const events = await store.listRunEvents(admin.id, created.run.id);
+  const completed = events.find((event) => event.eventType === 'workspace.command.completed');
+  assert.equal(completed?.payload.messageType, 'final_answer');
+  assert.match(String(completed?.payload.content ?? ''), /已重新读取保存记录/);
+});
+
+test('persists structured automation updates and returns a verified readback', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'workspace-automation-readback@example.com', passwordHash: 'hash', displayName: 'Automation Readback' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'automation-readback', displayName: 'Automation Readback' });
+  const product = await store.createProduct({ adminId: admin.id, accountId: account.id, title: '自动化回读商品', priceMinor: 1_200, status: 'published' });
+  const productAutomation = new ProductAutomationService(store, async () => 'audit-automation-readback');
+  const commands = orchestrator({
+    store,
+    products: { get: async () => product },
+    productAutomation,
+  });
+  const config = defaultProductAutomationConfig();
+  config.reviewReminder.enabled = true;
+  config.reviewReminder.firstDelayMinutes = 30;
+  const plan = await commands.prepareWrite({ adminId: admin.id, accountId: account.id, instruction: '', operation: 'product_automation_update', parameters: { productId: product.id, config }, requestId: 'req-readback', traceId: 'trace-readback' });
+  const result = await commands.confirm({ plan: plan!, run: { id: 'run-readback', requestedBy: admin.id, accountId: account.id, instruction: '配置商品自动化规则' } as never, step: {} as never, adminId: admin.id, requestId: 'req-readback', traceId: 'trace-readback' });
+  const saved = await store.getProductAutomation(admin.id, product.id);
+  assert.equal(saved?.configVersion, 1);
+  assert.equal(saved?.config.reviewReminder.firstDelayMinutes, 30);
+  assert.equal(result.data?.persisted, true);
+  assert.equal(result.data?.configVersion, 1);
+  assert.match(result.outputSummary, /已重新读取保存记录/);
 });
 
 test('rejects read-tool routing for product mutation instructions', async () => {
