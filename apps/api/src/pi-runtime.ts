@@ -562,7 +562,11 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
         },
       });
       finalResult = result;
-      if (reasoning) await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: redactSensitiveText(reasoning, 8_000, this.options.redactSecrets), summary: '模型原生推理' });
+      if (reasoning) {
+        await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: redactSensitiveText(reasoning, 8_000, this.options.redactSecrets), summary: '模型原生推理' });
+      } else if (round === 0) {
+        await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: '已收到请求，正在根据当前账号范围整理结果。', summary: '执行 Workspace 任务' });
+      }
       const calls = result.toolCalls ?? [];
       if (calls.length === 0) {
         completedWithoutTool = true;

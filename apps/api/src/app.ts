@@ -167,7 +167,10 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   }, fetch, config.modelWireApi);
-  const resolveConfiguredModelClient = async (adminId: string, accountId: string): Promise<ModelClient | undefined> => {
+  // Account-scoped OpenAI provider credentials are shared infrastructure. The
+  // buyer-facing AutoReply Agent owns its runtime configuration separately;
+  // this resolver must never read AutoReplyAgentSettingsService.
+  const resolveAccountModelClient = async (adminId: string, accountId: string): Promise<ModelClient | undefined> => {
     const configured = await openaiSettings.resolveForRuntime(adminId, accountId);
     if (configured.length === 0) return modelClient;
     const clients = await Promise.all(configured.slice(0, 2).map((item) => openaiSettings.createRuntimeClient(item)));
@@ -218,7 +221,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
       const runtimeConfig = mergeAutoReplyAgentRuntimeConfig(autoReplyAgentConfig, settings);
       let runtimeModelClient: ModelClient | undefined = autoReplyModelClient;
       try {
-        runtimeModelClient = await resolveConfiguredModelClient(adminId, accountId);
+        runtimeModelClient = await resolveAccountModelClient(adminId, accountId);
       } catch {
         runtimeModelClient = autoReplyModelClient;
       }
@@ -312,8 +315,8 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   };
-  const productPublisher = new ProductPublishService(xianyu, products, resolveConfiguredModelClient, productAudit);
-  const productKnowledgeBase = new ProductKnowledgeBaseService(store, products, resolveConfiguredModelClient, productAudit);
+  const productPublisher = new ProductPublishService(xianyu, products, resolveAccountModelClient, productAudit);
+  const productKnowledgeBase = new ProductKnowledgeBaseService(store, products, resolveAccountModelClient, productAudit);
   const xianyuItemDetail = new XianyuItemDetailService(store, xianyu, objectStorage, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
@@ -385,7 +388,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
   });
   const wsServer = new WebSocketServer({ noServer: true });
   const workspaceRuntime: WorkspaceRuntime = config.agentRuntime === 'pi'
-    ? createPiWorkspaceRuntime(config, store, modelClient, resolveConfiguredModelClient, workspaceCommands, piSkills)
+    ? createPiWorkspaceRuntime(config, store, modelClient, resolveAccountModelClient, workspaceCommands, piSkills)
     : new InProcessAgentRuntime(store, workspaceCommands);
   const workspace = new WorkspaceService(store, workspaceRuntime, async (input) => {
     const auditId = createId();
@@ -547,7 +550,7 @@ function createConfiguredModelClient(config: AppConfig): ModelClient | undefined
   });
 }
 
-function createPiWorkspaceRuntime(config: AppConfig, store: Store, sharedModelClient: ModelClient | undefined, resolveModelClient: (adminId: string, accountId: string) => Promise<ModelClient | undefined>, workspaceCommands: WorkspaceCommandOrchestrator, piSkills: PiSkillManager): WorkspaceRuntime {
+function createPiWorkspaceRuntime(config: AppConfig, store: Store, sharedModelClient: ModelClient | undefined, resolveAccountModelClient: (adminId: string, accountId: string) => Promise<ModelClient | undefined>, workspaceCommands: WorkspaceCommandOrchestrator, piSkills: PiSkillManager): WorkspaceRuntime {
   const modelClient = sharedModelClient ?? {
     supportsWebSearch: false,
     async complete() { throw new PiModelClientError('MODEL_NOT_CONFIGURED', 'model provider is not configured'); },
@@ -561,7 +564,7 @@ function createPiWorkspaceRuntime(config: AppConfig, store: Store, sharedModelCl
     resolveModelClient: async ({ adminId, accountId }) => {
       if (!adminId) return modelClient;
       try {
-        return await resolveModelClient(adminId, accountId);
+        return await resolveAccountModelClient(adminId, accountId);
       } catch {
         return modelClient;
       }
