@@ -712,6 +712,15 @@
 | S5-R137 | 外部平台 / 真实发送 | 白名单买家是否完成真实滑块后外发并落库 | root | BLOCKED | 真实 NC 页面加载正常，但三次轨迹均返回 `验证失败(error:fALStr)`；保留 `ACCOUNT_VALIDATION_REQUIRED`，无外部消息引用 |
 
 本轮结论：本地发送状态和实时消息竞态已修复并通过真实浏览器 E2E；真实闲鱼外部挑战仍阻塞自动发送，未把受控夹具或失败重试解释为真实发送成功。
+
+### 2026-10-06 在线聊天发送超时根因复核
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R145 | 根因 / IM 网关 | 慢速入站推送处理是否会阻塞已收到的发送响应，最终触发前端 40 秒超时 | root | PASS（可复现） | 隔离 worktree 的 main 基线运行 `xianyu-im-gateway.test.ts` 时，新增回归稳定以 `XIANYU_IM_TIMEOUT:/r/MessageSend/sendByReceiverScope` 失败；修复后同一回归 17/17 通过 |
+| S5-R146 | 环境 / 生产证据 | 是否取得当前生产容器日志以核对同一请求链路 | root | PARTIALLY_VERIFIED | 本机 Docker CLI 可用但 `docker compose ps/logs` 未返回运行态或日志；本轮不宣称已完成生产日志闭环，仅确认代码级根因与症状一致 |
+
+本轮根因结论：`XianyuImClient` 原先把所有入站帧排入同一串行 `incomingChain`，慢速买家推送/自动回复处理会延迟后续发送响应帧的 pending resolve；基线回归已稳定复现超时。修复为先同步结算 pending response，再将推送业务处理排入串行队列。
 ### 2026-09-28：商品目录知识库闭环
 
 | 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
