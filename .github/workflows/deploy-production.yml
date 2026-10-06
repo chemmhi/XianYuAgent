@@ -50,7 +50,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
-            -o ConnectTimeout=15 -p "$DEPLOY_PORT" \
+            -o ConnectTimeout=15 -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" \
             "$DEPLOY_USER@$DEPLOY_HOST" \
             "EXPECTED_SHA='$DEPLOY_SHA' DEPLOY_PATH='$DEPLOY_PATH' bash -se" <<'REMOTE'
           set -Eeuo pipefail
