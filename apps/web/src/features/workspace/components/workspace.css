@@ -2,7 +2,7 @@
 .workspace-scope { display: inline-flex; align-items: center; gap: 8px; padding: 8px 11px; border: 1px solid var(--border); border-radius: 999px; background: #fff; color: var(--muted); font-size: var(--font-size-meta); line-height: var(--font-line-meta); font-weight: 700; white-space: nowrap; }
 .workspace-scope-dot { width: 7px; height: 7px; border-radius: 50%; background: #CBD5E1; }
 .workspace-scope-dot.online { background: var(--success); box-shadow: 0 0 0 3px var(--success-bg); }
-.workspace-layout { display: grid; grid-template-columns: minmax(250px, 310px) minmax(0, 1fr); gap: 16px; align-items: start; align-content: start; }
+.workspace-layout { display: grid; grid-template-columns: minmax(250px, 310px) minmax(0, 1fr); gap: 16px; align-items: start; }
 .workspace-sessions-panel, .workspace-composer-panel, .workspace-run-panel { min-width: 0; overflow: hidden; }
 .workspace-sessions-panel { display: flex; flex: 0 0 auto; flex-direction: column; align-self: start; height: auto; min-height: 0; max-height: none; padding: 0; overflow: visible; }
 .workspace-panel-head { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; padding: 18px; border-bottom: 1px solid var(--border); }
@@ -217,7 +217,7 @@
 .workspace-page-title p { margin: 0; color: var(--sub); font-size: 12px; line-height: 1.55; }
 .workspace-page-title .eyebrow { margin-bottom: 5px; }
 .workspace-scope { margin-top: 4px; }
-.workspace-layout { grid-template-columns: 292px minmax(0, 1fr); gap: 14px; min-height: 0; align-items: start; align-content: start; }
+.workspace-layout { grid-template-columns: 292px minmax(0, 1fr); gap: 14px; min-height: 0; align-items: start; }
 .workspace-sidebar { display: block; min-width: 0; align-self: start; height: max-content; }
 .workspace-confirmation-card { width: min(100%, 760px); margin: 0 auto; padding: 14px 0; border-top: 1px solid var(--border); }
 .workspace-confirmation-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
@@ -264,7 +264,7 @@
   .workspace-domain { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
   .workspace-surface { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; height: 100%; }
   .workspace-page-body { display: flex; flex: 1 1 auto; min-height: 0; box-sizing: border-box; }
-  .workspace-layout { flex: 1 1 auto; align-items: start; align-content: start; min-height: 0; height: auto; }
+  .workspace-layout { flex: 1 1 auto; align-items: start; min-height: 0; height: auto; }
   .workspace-sidebar { height: max-content; min-height: 0; }
   .workspace-thread { height: 100%; min-height: 0; }
   .workspace-sessions-panel { height: auto; min-height: 0; max-height: none; }
