@@ -157,6 +157,20 @@
 .workspace-trace-row strong { display: block; color: var(--text); font-size: var(--font-size-body-compact); line-height: 1.5; font-weight: 700; }
 .workspace-trace-row p { margin: 3px 0 0; color: var(--muted); font-size: var(--font-size-body-compact); line-height: 1.55; white-space: pre-wrap; }
 .workspace-trace-row small { display: block; margin-top: 4px; color: var(--sub); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--font-size-meta); line-height: var(--font-line-meta); }
+.workspace-activity-duration { padding-bottom: 9px; border-bottom: 1px solid var(--border); color: var(--sub); font-size: var(--font-size-body-compact); line-height: 1.5; }
+.workspace-execution-summary { display: grid; grid-template-columns: 16px minmax(0,1fr); gap: 10px; max-width: 720px; }
+.workspace-activity-icon { display: inline-grid; place-items: center; width: 16px; height: 16px; color: var(--sub); font-size: 13px; line-height: 1; }
+.workspace-activity-icon-summary { font-size: 15px; }
+.workspace-activity-icon-tool { font-size: 12px; }
+.workspace-activity-copy { min-width: 0; }
+.workspace-activity-copy strong { display: block; color: var(--sub); font-size: var(--font-size-body-compact); font-weight: 500; line-height: 1.5; }
+.workspace-activity-copy p { margin: 7px 0 0; color: var(--text); font-size: 13px; line-height: 1.75; white-space: pre-wrap; }
+.workspace-tool-event { max-width: 720px; }
+.workspace-tool-event-toggle { display: flex; align-items: center; gap: 10px; width: 100%; padding: 0; border: 0; background: transparent; color: var(--sub); text-align: left; cursor: pointer; }
+.workspace-tool-event-toggle strong { color: var(--sub); font-size: var(--font-size-body-compact); font-weight: 500; line-height: 1.5; }
+.workspace-tool-event-action { margin-left: auto; color: var(--sub); font-size: var(--font-size-meta); }
+.workspace-tool-event-details { margin: 7px 0 0 26px; padding: 10px 12px; border-left: 2px solid var(--border); background: #F8FAFC; }
+.workspace-tool-event-details p { margin: 0; color: var(--text); font-size: 12px; line-height: 1.65; white-space: pre-wrap; }
 @media (max-width: 900px) {
   .workspace-message-list { gap: 18px; padding: 20px 16px 28px; }
   .workspace-message-user { max-width: 92%; }

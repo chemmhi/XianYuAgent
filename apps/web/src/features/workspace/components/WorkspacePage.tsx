@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useAccountContext } from '../../../app/account-context';
 import { isWorkspaceRunReconnectable, useWorkspaceController } from '../controller';
-import { buildWorkspaceMessages, deriveSessionTitle, eventTitle, groupWorkspaceMessages, type WorkspaceAgentTraceGroup } from '../messages';
+import { buildWorkspaceMessages, deriveSessionTitle } from '../messages';
 import type { WorkspaceApi } from '../api';
 import type { WorkspaceConfirmationVM, WorkspaceMessageVM, WorkspaceOutboxVM, WorkspaceRunStatus, WorkspaceRunVM, WorkspaceSessionVM } from '../types';
 import { SearchField } from '../../../shared/ui/SearchField';
@@ -147,23 +147,29 @@ export function WorkspaceDeleteSessionModal({ session, submitting = false, onClo
   </div>;
 }
 
-export function MessageStream({ messages, expandedTrace, onToggleTrace }: { messages: WorkspaceMessageVM[]; expandedTrace: string | null; onToggleTrace: (id: string) => void }) { return <div className="workspace-message-list">{groupWorkspaceMessages(messages).map((block) => block.type === 'agent_trace' ? <AgentTraceView key={block.id} group={block} expanded={expandedTrace === block.id} onToggle={() => onToggleTrace(block.id)} /> : <MessageBubble key={block.id} message={block} />)}</div>; }
-function traceSummary(group: WorkspaceAgentTraceGroup): string {
-  const stepCount = group.messages.filter((message) => message.type === 'reasoning_summary').length;
-  const toolCount = group.messages.filter((message) => message.type === 'tool_event').length;
-  const start = Date.parse(group.createdAt);
-  const latest = group.messages[group.messages.length - 1];
-  const end = Date.parse(latest?.createdAt ?? group.createdAt);
-  const durationMs = Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, end - start) : 0;
-  const parts = [
-    stepCount ? `${stepCount} 个步骤` : '',
-    toolCount ? `${toolCount} 次工具调用` : '',
-    durationMs ? `已处理 ${formatDuration(durationMs)}` : '',
-  ].filter(Boolean);
-  return `已完成${parts.length ? ` ${parts.join(' · ')}` : ''}`;
+export function MessageStream({ messages, expandedTrace, onToggleTrace }: { messages: WorkspaceMessageVM[]; expandedTrace: string | null; onToggleTrace: (id: string) => void }) {
+  const visibleMessages = messages.filter(isVisibleWorkspaceActivity);
+  const duration = formatActivityDuration(visibleMessages);
+  return <div className="workspace-message-list">
+    {duration && <div className="workspace-activity-duration">已处理 {duration}</div>}
+    {visibleMessages.map((message) => message.type === 'reasoning_summary'
+      ? <ExecutionSummaryView key={message.id} message={message} />
+      : message.type === 'tool_event'
+        ? <ToolEventView key={message.id} message={message} expanded={expandedTrace === message.id} onToggle={() => onToggleTrace(message.id)} />
+        : <MessageBubble key={message.id} message={message} />)}
+  </div>;
 }
 
-function formatDuration(durationMs: number): string {
+function isVisibleWorkspaceActivity(message: WorkspaceMessageVM): boolean {
+  if (message.type !== 'reasoning_summary') return true;
+  if (message.eventType === 'reasoning.delta') return false;
+  return !['模型原生推理', '执行 Workspace 任务'].includes(message.summary ?? '');
+}
+
+function formatActivityDuration(messages: WorkspaceMessageVM[]): string | undefined {
+  const timestamps = messages.map((message) => Date.parse(message.createdAt)).filter(Number.isFinite);
+  if (timestamps.length < 2 || !messages.some((message) => message.type === 'reasoning_summary' || message.type === 'tool_event')) return undefined;
+  const durationMs = Math.max(0, Math.max(...timestamps) - Math.min(...timestamps));
   const totalSeconds = Math.max(1, Math.round(durationMs / 1_000));
   const hours = Math.floor(totalSeconds / 3_600);
   const minutes = Math.floor((totalSeconds % 3_600) / 60);
@@ -173,12 +179,27 @@ function formatDuration(durationMs: number): string {
   return `${seconds}秒`;
 }
 
-function truncateTraceText(value: string, maxLength = 52): string {
-  const normalized = value.replace(/\s+/g, ' ').trim();
-  return normalized.length <= maxLength ? normalized : `${normalized.slice(0, Math.max(1, maxLength - 1))}…`;
+function ExecutionSummaryView({ message }: { message: WorkspaceMessageVM }) {
+  return <article className="workspace-execution-summary">
+    <span className="workspace-activity-icon workspace-activity-icon-summary" aria-hidden="true">✎</span>
+    <div className="workspace-activity-copy">
+      <strong>{message.summary ?? '执行摘要'}</strong>
+      <p>{message.content}</p>
+    </div>
+  </article>;
 }
 
-function AgentTraceView({ group, expanded, onToggle }: { group: WorkspaceAgentTraceGroup; expanded: boolean; onToggle: () => void }) { const latest = group.messages[group.messages.length - 1]; const active = latest?.status ? statusTone(latest.status) === 'info' : false; const latestText = latest ? truncateTraceText(latest.summary ?? latest.content) : ''; return <article className="workspace-agent-trace"><button type="button" className="workspace-trace-toggle" onClick={onToggle} aria-expanded={expanded}><span className="workspace-trace-copy"><strong>{active && latestText ? `正在处理 · ${latestText}` : active ? '正在处理' : traceSummary(group)}</strong></span><span className="workspace-trace-action">{expanded ? '收起' : '可展开'}</span><span className="workspace-message-chevron" aria-hidden="true">{expanded ? '⌃' : '⌄'}</span></button>{expanded && <div className="workspace-trace-details">{group.messages.map((message) => <div className="workspace-trace-row" key={message.id}><span className="workspace-trace-row-dot" aria-hidden="true" /><div><strong>{message.type === 'reasoning_summary' ? (message.summary ?? '执行步骤') : message.title}</strong><p>{message.content}</p>{message.eventType && <small>{eventTitle(message.eventType)}{message.sequence ? ` · #${message.sequence}` : ''}</small>}</div></div>)}</div>}</article>; }
+function ToolEventView({ message, expanded, onToggle }: { message: WorkspaceMessageVM; expanded: boolean; onToggle: () => void }) {
+  return <article className="workspace-tool-event">
+    <button type="button" className="workspace-tool-event-toggle" onClick={onToggle} aria-expanded={expanded}>
+      <span className="workspace-activity-icon workspace-activity-icon-tool" aria-hidden="true">▣</span>
+      <strong>{message.title}</strong>
+      <span className="workspace-tool-event-action">{expanded ? '收起' : '展开'}</span>
+      <span className="workspace-message-chevron" aria-hidden="true">{expanded ? '⌃' : '⌄'}</span>
+    </button>
+    {expanded && <div className="workspace-tool-event-details"><p>{message.content}</p></div>}
+  </article>;
+}
 function MessageBubble({ message }: { message: WorkspaceMessageVM }) { if (message.type === 'user_message') return <article className="workspace-message workspace-message-user"><div className="workspace-message-content"><MarkdownContent className="workspace-markdown" content={message.content} /></div></article>; if (message.type === 'final_answer') return <article className={`workspace-message workspace-message-final ${message.status && statusTone(message.status) === 'danger' ? 'is-error' : ''}`}><div className="workspace-message-content"><MarkdownContent className="workspace-markdown" content={message.content} /></div></article>; return <article className="workspace-message workspace-message-assistant"><div className="workspace-message-content"><MarkdownContent className="workspace-markdown" content={message.content} /></div></article>; }
 function WorkspaceContextPanel({ account }: { account?: { displayName?: string } }) { return <section className="card workspace-context-panel"><div className="workspace-context-head"><div><p className="eyebrow">当前上下文</p><h3>当前上下文</h3></div><button className="icon-button" type="button" aria-label="编辑上下文">✎</button></div><div className="workspace-context-account"><strong>{account?.displayName ?? '闲鱼账号 A'}</strong><span>已连接 · 消息监听正常</span></div><div className="workspace-context-list"><div><b>商品</b><span>未指定</span></div><div><b>订单</b><span>未指定</span></div><div><b>权限范围</b><span>workspace.run / audit.read</span></div></div><div className="workspace-capability-grid"><span>read.products</span><span>write.products</span><span>audit.run</span></div><div className="workspace-context-footer">凭证引用：cred_••••</div></section>; }
 function WorkspaceConfirmationCard({ run, accountName, confirmation, actionSubmitting, onConfirm, onCancel }: { run: WorkspaceRunVM; accountName: string; confirmation: WorkspaceConfirmationVM; actionSubmitting: boolean; onConfirm: () => void; onCancel: () => void }) {

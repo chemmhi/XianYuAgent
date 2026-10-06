@@ -105,7 +105,7 @@ describe('Workspace MessageStream', () => {
     expect(workspacePageSource).toContain('scrollMessageStreamToLatest(messageStreamRef.current)');
   });
 
-  it('keeps agent execution details collapsed and removes avatar chrome', () => {
+  it('renders summaries as feed items and keeps each tool call collapsible', () => {
     const messages: WorkspaceMessageVM[] = [
       { id: 'user-1', runId: 'run-1', type: 'user_message', createdAt: '2026-09-22T00:00:00.000Z', title: '用户', content: '检查店铺状态' },
       { id: 'reasoning-1', runId: 'run-1', type: 'reasoning_summary', createdAt: '2026-09-22T00:00:01.000Z', title: '推理摘要', summary: '读取店铺状态 · 已完成', content: '读取店铺状态' },
@@ -115,13 +115,18 @@ describe('Workspace MessageStream', () => {
 
     const html = renderToStaticMarkup(createElement(MessageStream, { messages, expandedTrace: null, onToggleTrace: vi.fn() }));
 
-    expect(html).toContain('class="workspace-agent-trace"');
+    expect(html).toContain('class="workspace-execution-summary"');
+    expect(html).toContain('class="workspace-tool-event"');
+    expect(html).toContain('class="workspace-tool-event-toggle"');
     expect(html).toContain('aria-expanded="false"');
-    expect(html).toContain('已完成 1 个步骤 · 1 次工具调用');
-    expect(html).toContain('class="workspace-trace-action">可展开</span>');
+    expect(html).toContain('class="workspace-tool-event-action">展开</span>');
+    expect(html).toContain('已处理 3秒');
     expect(html).toContain('workspace-message workspace-message-final');
     expect(html).not.toContain('workspace-message-avatar');
     expect(html).not.toContain('workspace-message-tool');
+
+    const expandedHtml = renderToStaticMarkup(createElement(MessageStream, { messages, expandedTrace: 'tool-1', onToggleTrace: vi.fn() }));
+    expect(expandedHtml).toContain('已读取商品列表');
   });
 
   it('renders trace duration in human-friendly units', () => {
