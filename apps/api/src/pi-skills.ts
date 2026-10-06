@@ -14,6 +14,7 @@ const MAX_SKILL_TEXT = 16 * 1024;
 const MAX_TOTAL_PROMPT = 48 * 1024;
 const DEFAULT_EXEC_TIMEOUT_MS = 60_000;
 const REGISTRY_FILE = '.registry.json';
+const AUTH_STATE_FILE = 'authorization.json';
 
 export interface PiSkillInfo {
   id: string;
@@ -54,6 +55,7 @@ export interface PiSkillExecutionResult {
   stderr: string;
   parsed?: unknown;
   timedOut?: boolean;
+  requiresLogin?: boolean;
 }
 
 export type PiSkillLoginStatus = 'succeeded' | 'already_authorized' | 'pending_user_action' | 'failed';
@@ -76,6 +78,7 @@ export interface PiSkillLoginResult {
   prompt?: string;
   authUrl?: string;
   userActionRequired?: boolean;
+  reusedAuthorization?: boolean;
 }
 
 export interface PiSkillInstructionResult {
@@ -107,6 +110,14 @@ interface SkillManifest {
 
 interface RegistryState {
   items: PiSkillInfo[];
+}
+
+interface PiSkillAuthorizationState {
+  authorized: boolean;
+  updatedAt: string;
+  lastValidatedAt?: string;
+  invalidatedAt?: string;
+  reason?: string;
 }
 
 export interface PiSkillManagerOptions {
@@ -223,6 +234,21 @@ export class PiSkillManager {
     const id = sanitizeSkillId(input.skillId);
     const token = typeof input.token === 'string' ? input.token.trim() : '';
     if (token.length > 4096) throw new PiSkillError('SKILL_AUTH_TOKEN_INVALID', 'skill authorization token is too long');
+    const state = await this.readRegistry(input.adminId);
+    const item = state.items.find((candidate) => candidate.id === id);
+    if (!item) throw new PiSkillError('SKILL_NOT_INSTALLED', `skill ${input.skillId} is not installed`);
+    if (!item.enabled) throw new PiSkillError('SKILL_DISABLED', `skill ${input.skillId} is disabled`);
+    if (!token && await this.hasUsableAuthorization(input.adminId, id, item.authorized)) {
+      await this.touchAuthorization(input.adminId, id);
+      return {
+        skillId: id,
+        status: 'already_authorized',
+        code: -118,
+        stdout: 'Reused persisted login state.',
+        stderr: '',
+        reusedAuthorization: true,
+      };
+    }
     const args = token ? ['--token', token, ...(input.args ?? [])] : [...(input.args ?? [])];
     const result = await this.executeInternal({
       adminId: input.adminId,
@@ -243,6 +269,7 @@ export class PiSkillManager {
         code: effectiveCode,
         stdout: result.stdout,
         stderr: result.stderr,
+        reusedAuthorization: false,
       };
     }
     const combined = sanitizeSkillOutput(`${result.stdout}\n${result.stderr}`.trim(), token ? [token] : []);
@@ -301,7 +328,7 @@ export class PiSkillManager {
     }
     if (sections.length === 0) return '';
     return [
-      'Installed Pi skills are available below. Use pi_skill_exec for skill CLI operations and pi_skill_login to start browser or token login. Never reveal authorization tokens or local paths. If a skill is not authorized, explain the authorization requirement and do not fabricate success. Interactive login may return pending_user_action; stop and wait for the user to finish login or paste the code, and do not auto-retry.',
+      'Installed Pi skills are available below. Login state is persisted per admin and Skill across sessions, so reuse an authorized state and do not call pi_skill_login again unless pi_skill_exec reports requiresLogin or the user explicitly asks to re-authenticate. Use pi_skill_exec for skill CLI operations and pi_skill_login only for login. Never reveal authorization tokens or local paths. If a Skill result reports requiresLogin or unauthorized, do not repeat the original command; start login once or ask the user to finish login. Interactive login may return pending_user_action; stop and wait for the user to finish login or paste the code, and do not auto-retry.',
       sections.join('\n\n'),
     ].join('\n\n');
   }
@@ -418,7 +445,7 @@ export class PiSkillManager {
         title: `${skillId} | login`,
         summary: result.status === 'succeeded' || result.status === 'already_authorized' ? 'Skill login complete' : result.status === 'pending_user_action' ? 'Skill login needs user action' : 'Skill login failed',
         content,
-        data: { skillId: result.skillId, status: result.status, code: result.code, userActionRequired: result.userActionRequired ?? false, authUrl: result.authUrl },
+        data: { skillId: result.skillId, status: result.status, code: result.code, userActionRequired: result.userActionRequired ?? false, authUrl: result.authUrl, reusedAuthorization: result.reusedAuthorization ?? false },
       };
     }
     if (name === 'pi_skill_exec') {
@@ -430,9 +457,11 @@ export class PiSkillManager {
       return {
         kind: 'read',
         title: `${skillId} | ${command}`,
-        summary: result.code === 0 ? 'Skill execution complete' : `Skill execution failed (${result.code})`,
-        content: output,
-        data: { code: result.code, parsed: result.parsed },
+        summary: result.requiresLogin ? 'Skill login required' : result.code === 0 ? 'Skill execution complete' : `Skill execution failed (${result.code})`,
+        content: result.requiresLogin
+          ? `${output}\nSkill login is required before retrying this command. Use pi_skill_login once; do not repeat the original command until login completes.`.trim()
+          : output,
+        data: { code: result.code, parsed: result.parsed, status: result.requiresLogin ? 'unauthorized' : result.code === 0 ? 'succeeded' : 'failed', requiresLogin: result.requiresLogin ?? false, userActionRequired: result.requiresLogin ?? false },
       };
     }
     throw new PiSkillError('SKILL_TOOL_UNKNOWN', `unknown Pi Skill tool: ${name}`);
@@ -535,16 +564,23 @@ export class PiSkillManager {
       const result = await promisify(this.execFileImpl)(executable, argv, { cwd: skillRoot, env, timeout: this.executionTimeoutMs, maxBuffer: 512 * 1024, windowsHide: true });
       const stdout = sanitizeSkillOutput(String(result.stdout ?? ''), secretToRedact ? [secretToRedact] : []);
       const stderr = sanitizeSkillOutput(String(result.stderr ?? ''), secretToRedact ? [secretToRedact] : []);
+      const parsed = parseLastJsonLine(`${stdout}\n${stderr}`);
+      const requiresLogin = detectRequiresLogin(command, stdout, stderr, parsed);
+      if (requiresLogin) await this.markUnauthorized(input.adminId, id, 'skill reported an unauthenticated or expired session').catch(() => undefined);
+      else if (item.authorized) await this.touchAuthorization(input.adminId, id).catch(() => undefined);
       await this.persistStateBridge(skillRoot, stateDir, item.statePaths);
-      return { skillId: id, command, code: 0, stdout, stderr, parsed: parseLastJsonLine(stdout) };
+      return { skillId: id, command, code: 0, stdout, stderr, parsed, requiresLogin };
     } catch (error) {
       const candidate = error as { code?: unknown; stdout?: unknown; stderr?: unknown };
       const timedOut = candidate.code === 'ETIMEDOUT' || (candidate as { killed?: unknown }).killed === true || (candidate as { signal?: unknown }).signal === 'SIGTERM';
       const numeric = typeof candidate.code === 'number' ? candidate.code : 1;
       const stdout = sanitizeSkillOutput(String(candidate.stdout ?? ''), secretToRedact ? [secretToRedact] : []);
       const stderr = sanitizeSkillOutput(String(candidate.stderr ?? (error instanceof Error ? error.message : String(error))), secretToRedact ? [secretToRedact] : []);
+      const parsed = parseLastJsonLine(`${stdout}\n${stderr}`);
+      const requiresLogin = detectRequiresLogin(input.command, stdout, stderr, parsed);
+      if (requiresLogin) await this.markUnauthorized(input.adminId, id, 'skill reported an unauthenticated or expired session').catch(() => undefined);
       await this.persistStateBridge(skillRoot, stateDir, item.statePaths).catch(() => undefined);
-      return { skillId: id, command, code: numeric, stdout, stderr, parsed: parseLastJsonLine(stdout), timedOut };
+      return { skillId: id, command, code: numeric, stdout, stderr, parsed, timedOut, requiresLogin };
     }
   }
 
@@ -555,6 +591,70 @@ export class PiSkillManager {
     item.authorized = true;
     item.updatedAt = new Date().toISOString();
     await this.writeRegistry(adminId, state);
+    await this.writeAuthorizationState(adminId, skillId, {
+      authorized: true,
+      updatedAt: item.updatedAt,
+      lastValidatedAt: item.updatedAt,
+    });
+  }
+
+  private async markUnauthorized(adminId: string, skillId: string, reason: string): Promise<void> {
+    const state = await this.readRegistry(adminId);
+    const item = state.items.find((candidate) => candidate.id === sanitizeSkillId(skillId));
+    if (!item) throw new PiSkillError('SKILL_NOT_INSTALLED', `skill ${skillId} is not installed`);
+    const now = new Date().toISOString();
+    item.authorized = false;
+    item.updatedAt = now;
+    await this.writeRegistry(adminId, state);
+    await this.writeAuthorizationState(adminId, skillId, {
+      authorized: false,
+      updatedAt: now,
+      invalidatedAt: now,
+      reason,
+    });
+  }
+
+  private async hasUsableAuthorization(adminId: string, skillId: string, registryAuthorized: boolean): Promise<boolean> {
+    const persisted = await this.readAuthorizationState(adminId, skillId);
+    return persisted ? persisted.authorized : registryAuthorized;
+  }
+
+  private async touchAuthorization(adminId: string, skillId: string): Promise<void> {
+    const now = new Date().toISOString();
+    const persisted = await this.readAuthorizationState(adminId, skillId);
+    await this.writeAuthorizationState(adminId, skillId, {
+      authorized: true,
+      updatedAt: persisted?.updatedAt ?? now,
+      lastValidatedAt: now,
+    });
+  }
+
+  private authorizationStatePath(adminId: string, skillId: string): string {
+    return join(this.rootDir, sanitizeAdminId(adminId), '.state', sanitizeSkillId(skillId), AUTH_STATE_FILE);
+  }
+
+  private async readAuthorizationState(adminId: string, skillId: string): Promise<PiSkillAuthorizationState | undefined> {
+    try {
+      const parsed = JSON.parse(await readFile(this.authorizationStatePath(adminId, skillId), 'utf8')) as Partial<PiSkillAuthorizationState>;
+      if (typeof parsed.authorized !== 'boolean' || typeof parsed.updatedAt !== 'string') return undefined;
+      return {
+        authorized: parsed.authorized,
+        updatedAt: parsed.updatedAt,
+        lastValidatedAt: typeof parsed.lastValidatedAt === 'string' ? parsed.lastValidatedAt : undefined,
+        invalidatedAt: typeof parsed.invalidatedAt === 'string' ? parsed.invalidatedAt : undefined,
+        reason: typeof parsed.reason === 'string' ? parsed.reason : undefined,
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async writeAuthorizationState(adminId: string, skillId: string, value: PiSkillAuthorizationState): Promise<void> {
+    const target = this.authorizationStatePath(adminId, skillId);
+    await mkdir(dirname(target), { recursive: true });
+    const temp = `${target}.${process.pid}.tmp`;
+    await writeFile(temp, JSON.stringify(value, null, 2), 'utf8');
+    await rename(temp, target);
   }
 
   private async prepareStateBridge(skillRoot: string, stateDir: string, configuredPaths?: string[]): Promise<void> {
@@ -750,6 +850,14 @@ function skillPayloadCode(value: unknown): number | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const code = (value as { code?: unknown }).code;
   return typeof code === 'number' && Number.isFinite(code) ? code : undefined;
+}
+
+function detectRequiresLogin(command: string, stdout: string, stderr: string, parsed: unknown): boolean {
+  if (command.trim().toLowerCase() === 'login') return false;
+  const payloadCode = skillPayloadCode(parsed);
+  if (payloadCode !== undefined && [-103, -104, -1408].includes(payloadCode)) return true;
+  const text = `${stdout}\n${stderr}\n${JSON.stringify(parsed ?? '')}`;
+  return /(?:not[_ -]?authenticated|unauthori[sz]ed|authentication\s+(?:required|failed|expired)|authorization\s+(?:required|failed|expired)|login\s+(?:required|failed|expired)|token\s+(?:expired|invalid)|session\s+expired|action\s*[:=]\s*not_authenticated|未登录|未授权|认证失败|认证已过期|授权失败|授权已过期|登录已过期|需要登录)/i.test(text);
 }
 
 function looksLikeLoginPrompt(value: string): boolean {

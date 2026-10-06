@@ -227,6 +227,62 @@ test('marks authorization only after the Skill reports a successful login payloa
   }
 });
 
+test('persists authorization across manager instances, reuses it, and invalidates it after expiry', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'pi-skill-login-persisted-'));
+  try {
+    const skillRoot = join(fixtureRoot, 'persist-skill');
+    const installedRoot = join(fixtureRoot, 'installed');
+    await mkdir(join(skillRoot, 'scripts'), { recursive: true });
+    await writeFile(join(skillRoot, 'SKILL.md'), '---\nname: persist-skill\nversion: 1.0.0\n---\n');
+    await writeFile(join(skillRoot, 'scripts', 'main.cjs'), [
+      "const fs = require('fs');",
+      "const path = require('path');",
+      "const args = process.argv.slice(2);",
+      "const countFile = path.join(process.env.PI_SKILL_STATE_DIR, 'login-count.txt');",
+      "const count = fs.existsSync(countFile) ? Number(fs.readFileSync(countFile, 'utf8')) : 0;",
+      "if (args[0] === 'login') fs.writeFileSync(countFile, String(count + 1));",
+      "if (args[0] === 'login' && args[2] === 'good-token') { console.log(JSON.stringify({ code: 0, msg: 'authorized' })); process.exit(0); }",
+      "if (args[0] === 'login') { console.log(JSON.stringify({ code: -1408, msg: 'open browser https://example.test/oauth/login' })); process.exit(1); }",
+      "if (args[0] === 'search') { console.log(JSON.stringify({ code: -103, action: 'not_authenticated', msg: 'session expired' })); process.exit(1); }",
+      "console.log(JSON.stringify({ code: 0, msg: 'ok' }));",
+    ].join('\n'));
+    const archive = join(fixtureRoot, 'persist-skill.zip');
+    await execFile('tar', ['-a', '-c', '-f', archive, '-C', fixtureRoot, 'persist-skill']);
+
+    const manager = new PiSkillManager({ rootDir: installedRoot, executionTimeoutMs: 5_000 });
+    const installed = await manager.install({ adminId: 'admin/persist', source: archive });
+    const firstLogin = await manager.login({ adminId: 'admin/persist', skillId: installed.id, token: 'good-token' });
+    assert.equal(firstLogin.status, 'succeeded');
+
+    const authStatePath = join(installedRoot, 'admin_persist', '.state', installed.id, 'authorization.json');
+    const authState = JSON.parse(await readFile(authStatePath, 'utf8')) as { authorized?: boolean; lastValidatedAt?: string };
+    assert.equal(authState.authorized, true);
+    assert.equal(typeof authState.lastValidatedAt, 'string');
+    assert.doesNotMatch(await readFile(authStatePath, 'utf8'), /good-token/);
+
+    const nextSessionManager = new PiSkillManager({ rootDir: installedRoot, executionTimeoutMs: 5_000 });
+    const reused = await nextSessionManager.login({ adminId: 'admin/persist', skillId: installed.id });
+    assert.equal(reused.status, 'already_authorized');
+    assert.equal(reused.reusedAuthorization, true);
+    const loginCountAfterReuse = await readFile(join(installedRoot, 'admin_persist', '.state', installed.id, 'login-count.txt'), 'utf8');
+    assert.equal(loginCountAfterReuse, '1');
+
+    const expired = await nextSessionManager.execute({ adminId: 'admin/persist', skillId: installed.id, command: 'search' });
+    assert.equal(expired.requiresLogin, true);
+    assert.equal((await nextSessionManager.list('admin/persist'))[0]?.authorized, false);
+    const invalidated = JSON.parse(await readFile(authStatePath, 'utf8')) as { authorized?: boolean; invalidatedAt?: string };
+    assert.equal(invalidated.authorized, false);
+    assert.equal(typeof invalidated.invalidatedAt, 'string');
+
+    const reLogin = await nextSessionManager.login({ adminId: 'admin/persist', skillId: installed.id });
+    assert.equal(reLogin.status, 'pending_user_action');
+    const loginCountAfterExpiry = await readFile(join(installedRoot, 'admin_persist', '.state', installed.id, 'login-count.txt'), 'utf8');
+    assert.equal(loginCountAfterExpiry, '2');
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 function parseLastJson(value: string): any {
   const lines = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).reverse();
   for (const line of lines) {

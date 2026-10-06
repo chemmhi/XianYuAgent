@@ -173,3 +173,40 @@ test('Pi runtime replays a wrong tool choice and lets the model correct itself f
   assert.ok(events.some((event) => event.eventType === 'workspace.confirmation.created'));
   runtime.stop();
 });
+
+test('Pi runtime closes a Skill login run after pending user action', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'skill-pending@example.com', passwordHash: 'hash', displayName: 'Skill Pending' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'skill-pending' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Skill Pending' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '登录夸克网盘' });
+  let rounds = 0;
+  const model: ModelClient = {
+    async stream(_input, handlers) {
+      rounds += 1;
+      const call = { id: 'skill-login', type: 'function' as const, function: { name: 'pi_skill_login', arguments: JSON.stringify({ skillId: 'quarkclouddrive' }) } };
+      await handlers.onToolCall?.(call);
+      return { content: '', model: 'pending-model', toolCalls: [call] };
+    },
+    async complete() { return { content: 'unused', model: 'unused' }; },
+  };
+  const commandTool = {
+    getModelTools: () => [{ type: 'function', function: { name: 'pi_skill_login', description: 'login', parameters: { type: 'object' } } }],
+    executeModelTool: async () => ({ kind: 'read' as const, title: 'quarkclouddrive | login', summary: 'Skill login needs user action', content: '请在浏览器中完成登录后把授权码粘贴回当前对话。', data: { status: 'pending_user_action', userActionRequired: true, authUrl: 'https://example.test/login' } }),
+  } as unknown as WorkspaceCommandOrchestrator;
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, model: 'pending-model' });
+  runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const bundle = await store.getRun(admin.id, created.run.id);
+    if (bundle?.run.status === 'succeeded' || bundle?.run.status === 'failed') break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const bundle = await store.getRun(admin.id, created.run.id);
+  assert.equal(bundle?.run.status, 'succeeded');
+  assert.equal(rounds, 1);
+  const events = await store.listRunEvents(admin.id, created.run.id, 0);
+  assert.ok(events.some((event) => event.eventType === 'workspace.skill.lifecycle' && event.payload.status === 'pending_user_action'));
+  assert.ok(events.some((event) => event.eventType === 'run.succeeded' && String(event.payload.content).includes('授权码')));
+  runtime.stop();
+});

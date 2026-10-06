@@ -1762,7 +1762,7 @@ function sendSocketEvent(socket: WebSocket, event: import('./messages.js').Realt
 }
 
 function rejectUpgrade(socket: Duplex, status: number, message: string): void {
-  const body = `${message}\n`;
+  const body = `${message}\r\n`;
   socket.write(`HTTP/1.1 ${status} ${status === 401 ? 'Unauthorized' : status === 403 ? 'Forbidden' : 'Not Found'}\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
   socket.destroy();
 }

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { getComposerTextareaMetrics, MessageStream, SessionRow } from './WorkspacePage';
 import type { WorkspaceMessageVM, WorkspaceSessionVM } from '../types';
 
-const workspaceCss = readFileSync(fileURLToPath(new URL('./workspace.css', import.meta.url)), 'utf8').replace(/\r\n/g, '\n').replace(/\s+/g, ' ').trim();
+const workspaceCss = readFileSync(fileURLToPath(new URL('./workspace.css', import.meta.url)), 'utf8').replace(/\r\n/g, '\r\n').replace(/\s+/g, ' ').trim();
 const workspacePageSource = readFileSync(fileURLToPath(new URL('./WorkspacePage.tsx', import.meta.url)), 'utf8');
 
 const session: WorkspaceSessionVM = {

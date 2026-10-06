@@ -472,13 +472,14 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     const messages: ModelMessage[] = [...(input.history ?? [])];
     if (!messages.some((message) => message.role === 'system')) {
       const skillPrompt = this.options.skillManager ? await this.options.skillManager.buildSystemPrompt(input.adminId ?? input.run.requestedBy) : '';
-      messages.unshift({ role: 'system', content: ['You are a Workspace agent. Choose tools autonomously from their contracts. Use workspace_product_search for a product-specific name or external-number lookup instead of loading the full product list. Use workspace_prepare_write for cancellation, disable, update, publish, delivery, or other mutations and wait for confirmation; never use workspace_read for those actions. After a tool result, either answer from the result or choose a different tool only when the result explicitly says the request needs correction. Do not claim a tool ran unless its result is returned. Keep the final answer concise and grounded in tool results.', skillPrompt].filter(Boolean).join('\n\n') });
+      messages.unshift({ role: 'system', content: ['You are a Workspace agent. Choose tools autonomously from their contracts. Use workspace_product_search for a product-specific name or external-number lookup instead of loading the full product list. Use workspace_prepare_write for cancellation, disable, update, publish, delivery, or other mutations and wait for confirmation; never use workspace_read for those actions. Pi Skill login state is persisted per admin and Skill across sessions: reuse an authorized state, do not call pi_skill_login again unless the Skill result reports requiresLogin or the user explicitly asks to re-authenticate. Use pi_skill_install only for installation, pi_skill_login only for login, and pi_skill_exec only with a command explicitly documented by the Skill; never pass shell commands such as bash or install to pi_skill_exec. If a Skill result reports requiresLogin, unauthorized, pending_user_action, or userActionRequired, do not repeat the original command; start at most one login flow or return the user action prompt and stop tool execution. After a tool result, either answer from the result or choose a different tool only when the result explicitly says the request needs correction. Do not claim a tool ran unless its result is returned. Keep the final answer concise and grounded in tool results.', skillPrompt].filter(Boolean).join('\n\n') });
     }
     messages.push({ role: 'user', content: input.run.instruction });
 
     const allReasoning: string[] = [];
     let finalResult: ModelCompletionResult | undefined;
     let waitingConfirmation = false;
+    let pendingUserAction: { title: string; summary: string; content: string; data?: Record<string, unknown> } | undefined;
     let completedWithoutTool = false;
     const maxRounds = 8;
     for (let round = 0; round < maxRounds; round += 1) {
@@ -547,6 +548,11 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
         const redacted = this.redactToolResult(result);
         await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, status: 'succeeded', result: redacted, completedAt: new Date().toISOString() });
         messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(redacted) });
+        const resultData = result.data;
+        if (resultData && (resultData.status === 'pending_user_action' || resultData.userActionRequired === true)) {
+          pendingUserAction = { title: result.title, summary: result.summary, content: result.content, data: resultData };
+          break;
+        }
         if (result.kind === 'write_plan' && result.plan) {
           const confirmation = await persistWorkspaceConfirmation({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, sessionId, run: input.run, step, plan: result.plan });
           await this.transitionStep(step, 'waiting_confirmation', { outputSummary: result.plan.summary });
@@ -556,12 +562,26 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           break;
         }
       }
-      await this.emit(input.run.id, 'stream.round.completed', { streamId, round: round + 1, toolCallCount: calls.length, status: waitingConfirmation ? 'waiting_confirmation' : 'tool_completed' });
+      await this.emit(input.run.id, 'stream.round.completed', { streamId, round: round + 1, toolCallCount: calls.length, status: waitingConfirmation ? 'waiting_confirmation' : pendingUserAction ? 'pending_user_action' : 'tool_completed' });
       if (waitingConfirmation) break;
+      if (pendingUserAction) break;
     }
 
     if (waitingConfirmation) {
       await this.emit(input.run.id, 'stream.completed', { status: 'waiting_confirmation', model: finalResult?.model ?? this.options.model, reasoningMessageCount: allReasoning.length });
+      return;
+    }
+    if (pendingUserAction) {
+      const output = redactSensitiveText(pendingUserAction.content, this.options.outputLimit ?? 2_000, this.options.redactSecrets);
+      const finishedAt = new Date().toISOString();
+      await this.transitionStep(step, 'succeeded', { finishedAt, outputSummary: pendingUserAction.summary });
+      await this.transitionRun(input.run, 'succeeded', { finishedAt, resultSummary: output });
+      await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'final_answer', content: output });
+      await this.emit(input.run.id, 'workspace.skill.lifecycle', { status: 'pending_user_action', title: pendingUserAction.title, summary: pendingUserAction.summary, data: pendingUserAction.data ?? {} });
+      await this.emit(input.run.id, 'stream.completed', { status: 'succeeded', model: finalResult?.model ?? this.options.model, content: output, reasoningMessageCount: allReasoning.length });
+      await this.emit(input.run.id, 'step.succeeded', { stepId: step.id, status: 'succeeded', messageType: 'final_answer', summary: step.label });
+      await this.emit(input.run.id, 'runtime.succeeded', { status: 'succeeded', model: finalResult?.model ?? this.options.model, messageType: 'final_answer', content: output, resource: 'pi_skill' });
+      await this.emit(input.run.id, 'run.succeeded', { status: 'succeeded', resultSummary: output, messageType: 'final_answer', content: output, resource: 'pi_skill' });
       return;
     }
     if (!completedWithoutTool) throw new PiModelClientError('MODEL_TOOL_LOOP_EXCEEDED', `model tool loop exceeded ${maxRounds} rounds`);
