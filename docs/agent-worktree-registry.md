@@ -1,4 +1,4 @@
-﻿# Agent Worktree 登记表
+# Agent Worktree 登记表
 
 - 生效日期：2026-09-19
 - 维护责任：持有 merge lock 的主 agent 负责在合并区间内更新
@@ -263,4 +263,4 @@
 | root | conversation-tool-reconnect-20261006 | fix/conversation-tool-reconnect-20261006 | F:\\ChenHai\\Project\\XianYuAgent-conversation-tool-reconnect-20261006 | Codex /root | 2026-10-06 13:11:40 +08:00 | READY_FOR_REVIEW | - | 2026-10-06 13:45:10 +08:00 | Session polling/loading sync, persisted Pi tool failure feedback, broad tool-result parsing, and offline reconnect resume from the current non-terminal step are implemented. API model/workspace tests, Web full suite (353 tests), typecheck, build, and diff-check pass. |
 | root | conversation-tool-reconnect-20261006 | fix/conversation-tool-reconnect-20261006 | F:\\ChenHai\\Project\\XianYuAgent-conversation-tool-reconnect-20261006 | Codex /root | 2026-10-06 13:11:40 +08:00 | MERGED | e993acc | 2026-10-06 13:47:00 +08:00 | Session polling/loading sync, persisted Pi tool failure feedback, broad tool-result parsing, and offline reconnect resume from the current non-terminal step are implemented. API model/workspace tests, Web full suite (353 tests), typecheck, build, and diff-check passed after merge. |
 
-| `root` | `conversation-ui-language-autoscroll-reconnect-20261006` | `fix/conversation-ui-language-autoscroll-reconnect-20261006` | `F:\\ChenHai\\Project\\XianYuAgent-conversation-ui-language-autoscroll-reconnect-20261006` | Codex `/root` | `2026-10-06 14:18:28 +08:00` | `IN_PROGRESS` | `-` | `-` | 修复推理中文化、消息自动滚动、离线会话从最近失败节点重连；待补回归与端到端证据。 |
+| `root` | `conversation-ui-language-autoscroll-reconnect-20261006` | `fix/conversation-ui-language-autoscroll-reconnect-20261006` | `F:\\ChenHai\\Project\\XianYuAgent-conversation-ui-language-autoscroll-reconnect-20261006` | Codex `/root` | `2026-10-06 14:18:28 +08:00` | `READY_FOR_REVIEW` | `-` | `-` | 固定 Workspace 推理、工具说明和失败反馈为简体中文，移除英文语言分支；消息/确认/Outbox 追加后自动滚动到底部；重连按最近失败/执行节点恢复并带上已持久化上下文，避免重复用户消息和混入后续 Run。API/Web 定向回归、Web 354 tests、API model/workspace tests、typecheck、build、diff-check 通过；Chrome Workspace E2E 在既有 expanded tool event group 检查处阻塞。提交 ba1e105。 |
