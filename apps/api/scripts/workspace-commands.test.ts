@@ -113,6 +113,30 @@ test('workspace_prepare_write normalizes flat automation fields into canonical p
   });
 });
 
+test('workspace_prepare_write wraps direct automation rule parameters into config', async () => {
+  const product = { id: 'product-direct-automation', accountId: 'account-1', title: '直接规则商品', configVersion: 3 };
+  const rule = { enabled: true, couponBatchIds: ['batch-1'] };
+  const commands = orchestrator({
+    products: { get: async () => product },
+    productAutomation: { get: async () => ({ configVersion: 3, product, config: {} }), update: async () => ({ configVersion: 4, config: { paidAutoDelivery: rule } }) },
+  });
+
+  const result = await commands.executeModelTool('workspace_prepare_write', {
+    operation: 'product_automation_update',
+    parameters: { paidAutoDelivery: rule },
+    productId: product.id,
+  }, input);
+
+  assert.equal(result.kind, 'write_plan');
+  assert.deepEqual(result.plan?.executionPlan, {
+    action: 'product_automation_update',
+    accountId: input.accountId,
+    productId: product.id,
+    expectedConfigVersion: 3,
+    config: { paidAutoDelivery: rule },
+  });
+});
+
 test('resolves numeric external product refs and builds a disable-all automation patch', async () => {
   const product = { id: 'product-108244', accountId: 'account-1', externalProductRef: '1082449333831', title: '视频下载及文案提取源码，包教包会', configVersion: 4 };
   let updatedConfig: unknown;
@@ -302,6 +326,19 @@ test('keeps read-only order analysis out of the mutation guard', async () => {
   const result = await commands.executeModelTool('workspace_read', { instruction: '分析当前的订单数据，并给出运营建议' }, input);
   assert.equal(result.kind, 'read');
   assert.match(result.title, /运营/);
+});
+
+test('keeps explicit read-only coupon lookup out of the mutation guard', async () => {
+  const commands = orchestrator({
+    store: {
+      hasAccountScope: async () => true,
+      listCouponBatches: async () => ({ items: [], page: 1, pageSize: 20, total: 0, totalPages: 0 }),
+      getCouponBatch: async () => undefined,
+    },
+  });
+  const result = await commands.executeModelTool('workspace_read', { instruction: '仅返回可用于商品自动赠品发货绑定的卡券批次，不执行任何修改' }, input);
+  assert.equal(result.kind, 'read');
+  assert.equal(result.title, '卡券查询');
 });
 
 test('rejects broad-read routing for named product lookup instructions', async () => {

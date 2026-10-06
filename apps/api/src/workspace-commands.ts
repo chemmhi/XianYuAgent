@@ -730,6 +730,7 @@ function validateAutomationConfig(config: Record<string, unknown>): void {
     if (Object.prototype.hasOwnProperty.call(rule, 'couponName') || Object.prototype.hasOwnProperty.call(rule, 'couponId') || Object.prototype.hasOwnProperty.call(rule, 'couponBatchId')) throw new ServiceError(422, 'VALIDATION_FAILED', `${key} requires couponBatchIds from a prior coupon lookup; human coupon labels are not accepted`);
   }
 }
+const AUTOMATION_RULE_KEYS = ['paidAutoDelivery', 'unpaidAutoReprice', 'reviewGift', 'reviewReminder'] as const;
 function normalizeWorkspacePrepareWriteParameters(args: Record<string, unknown>): Record<string, unknown> | undefined {
   const nested = isRecord(args.parameters) ? args.parameters : {};
   const envelopeKeys = new Set(['operation', 'instruction', 'parameters', 'productId']);
@@ -737,6 +738,10 @@ function normalizeWorkspacePrepareWriteParameters(args: Record<string, unknown>)
   const merged = { ...flat, ...nested };
   const productId = typeof args.productId === 'string' ? args.productId.trim() : '';
   if (productId) merged.productId = productId;
+  if (typeof args.operation === 'string' && args.operation.trim() === 'product_automation_update' && !isRecord(merged.config)) {
+    const config = Object.fromEntries(AUTOMATION_RULE_KEYS.filter((key) => Object.prototype.hasOwnProperty.call(merged, key)).map((key) => [key, merged[key]]));
+    if (Object.keys(config).length) return { ...merged, config };
+  }
   return Object.keys(merged).length ? merged : undefined;
 }
 function stripNegatedWorkspaceClauses(instruction: string): string {
@@ -748,11 +753,15 @@ function stripNegatedWorkspaceClauses(instruction: string): string {
 }
 
 function requiresWorkspaceWrite(instruction: string): boolean {
+  if (hasExplicitReadOnlyIntent(instruction)) return false;
   const normalized = stripNegatedWorkspaceClauses(instruction).replace(/(?:未|待)发货/gi, '');
   if (!/(商品|自动化|规则|知识库|卡券|订单|发货)/i.test(normalized)) return false;
   const mutation = /(取消|关闭|停用|禁用|修改|更新|设置|启用|删除|发布|改价|绑定|解绑|选择|开启|打开|配置\s*(?:商品|自动化|规则|卡券)|(?:自动发货|发货规则|自动化规则)\s*(?:为|成|开启|关闭|启用|停用|禁用|使用|选择)|(?:发货|交付)\s*(?:订单|订单号|给)|赠品|评价)/i.test(normalized);
   if (/(查询|查看|读取|获取|查找|搜索|列出|列表|详情|状态|当前)/i.test(normalized) && !mutation) return false;
   return mutation;
+}
+function hasExplicitReadOnlyIntent(instruction: string): boolean {
+  return /(?:只读|只查询|仅查询|仅返回|仅查看|不(?:要|做|进行|执行)任何(?:修改|写入|变更|更新)|无需(?:修改|写入|变更|更新)|不要(?:修改|写入|变更|更新))/i.test(instruction);
 }
 function requiresWorkspaceProductSearch(instruction: string): boolean {
   const normalized = instruction.replace(/\s+/g, ' ').trim();
