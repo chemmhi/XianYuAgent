@@ -1,0 +1,92 @@
+name: Deploy production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy pushed commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/home/ubuntu/xianyu-agent-prod' }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      DEPLOY_SHA: ${{ github.sha }}
+    steps:
+      - name: Validate deployment secrets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          : "${DEPLOY_HOST:?Missing repository secret DEPLOY_HOST}"
+          : "${DEPLOY_USER:?Missing repository secret DEPLOY_USER}"
+          : "${DEPLOY_SSH_KEY:?Missing repository secret DEPLOY_SSH_KEY}"
+          : "${DEPLOY_KNOWN_HOSTS:?Missing repository secret DEPLOY_KNOWN_HOSTS}"
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+
+      - name: Pull and deploy exact commit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=15 -p "$DEPLOY_PORT" \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "EXPECTED_SHA='$DEPLOY_SHA' DEPLOY_PATH='$DEPLOY_PATH' bash -se" <<'REMOTE'
+          set -Eeuo pipefail
+
+          fail() {
+            printf 'github-deploy: %s\n' "$*" >&2
+            exit 1
+          }
+
+          cd "$DEPLOY_PATH" || fail "部署目录不存在: $DEPLOY_PATH"
+          origin_url="$(git remote get-url origin)"
+          case "$origin_url" in
+            https://github.com/chemmhi/XianYuAgent.git|git@github.com:chemmhi/XianYuAgent.git) ;;
+            *) fail "origin 必须指向 GitHub 仓库，当前为 $origin_url" ;;
+          esac
+
+          if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+            fail "服务器工作树存在未提交的受跟踪文件改动"
+          fi
+
+          fetched=0
+          for attempt in 1 2 3 4 5; do
+            if git fetch --prune origin main; then
+              fetched=1
+              break
+            fi
+            printf 'github-deploy: git fetch failed (attempt %s/5)\n' "$attempt" >&2
+            sleep "$((attempt * 5))"
+          done
+          (( fetched == 1 )) || fail '从 GitHub 获取 main 失败'
+
+          git pull --ff-only origin main
+          actual_sha="$(git rev-parse HEAD)"
+          [[ "$actual_sha" == "$EXPECTED_SHA" ]] || \
+            fail "部署提交不匹配: expected=$EXPECTED_SHA actual=$actual_sha"
+
+          bash scripts/deploy-production.sh
+          printf 'github-deploy: deployed %s\n' "$actual_sha"
+          REMOTE

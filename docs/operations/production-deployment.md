@@ -15,6 +15,12 @@ cd /home/ubuntu/xianyu-agent-prod
 bash scripts/deploy-production.sh
 ```
 
+## GitHub Push 自动部署
+
+仓库工作流 `.github/workflows/deploy-production.yml` 监听 `main` 分支的 `push`，并支持 `workflow_dispatch` 手动触发。工作流通过固定 SSH 主机指纹连接生产服务器，在服务器上执行以下顺序：校验 GitHub `origin` → 拒绝受跟踪文件本地改动 → 重试 `git fetch origin main` → `git pull --ff-only origin main` → 校验 `HEAD == github.sha` → `bash scripts/deploy-production.sh`。
+
+启用工作流前，必须在 GitHub Actions secrets 中配置 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY` 和 `DEPLOY_KNOWN_HOSTS`；`DEPLOY_PORT` 默认 `22`，`DEPLOY_PATH` 默认 `/home/ubuntu/xianyu-agent-prod`。部署私钥只授予服务器部署用户，`DEPLOY_KNOWN_HOSTS` 使用固定主机指纹，不在工作流中动态信任未知主机。
+
 脚本会在执行前拒绝以下两类配置错误：
 
 - 使用开发用 `docker-compose.yml`，它把 API 暴露为宿主机 `8080`；

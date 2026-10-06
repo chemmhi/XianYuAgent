@@ -114,6 +114,17 @@ git push origin HEAD:main
 
 不要把其他未相关的工作树改动一起提交。推送成功后，服务器只能从 GitHub 拉取该提交；服务器上的本地裸仓库、临时目录或手工复制都不属于发布链路。
 
+仓库已配置 GitHub Actions 工作流 `.github/workflows/deploy-production.yml`：每次推送到 `main` 都会通过 SSH 拉取并部署刚推送的精确提交；也可以在 GitHub Actions 页面手动执行 `workflow_dispatch`。首次启用前，在仓库 `Settings → Secrets and variables → Actions` 添加以下 secrets：
+
+- `DEPLOY_HOST`：生产服务器主机名或 IP；
+- `DEPLOY_PORT`：SSH 端口，可省略（默认 `22`）；
+- `DEPLOY_USER`：SSH 登录用户；
+- `DEPLOY_SSH_KEY`：仅用于部署的 Ed25519 私钥；
+- `DEPLOY_KNOWN_HOSTS`：生产服务器的固定 `known_hosts` 行；
+- `DEPLOY_PATH`：部署目录，可省略（默认 `/home/ubuntu/xianyu-agent-prod`）。
+
+工作流会拒绝非 GitHub `origin`、受跟踪文件的服务器本地改动和提交 SHA 不匹配，并在拉取失败时自动重试后再执行 `scripts/deploy-production.sh`。
+
 ### 2. 检查并更新服务器工作树
 
 ```powershell
