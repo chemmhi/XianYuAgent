@@ -423,9 +423,9 @@ export class XianyuImService {
           cookieSnapshotFromHeader(token.cookieHeader || latest.cookieHeader || credential.cookieHeader),
         );
         try {
-          // Use the verification browser's configured wait budget. The
-          // browser owns the production timeout so slow challenge pages do
-          // not get cut off by a shorter IM-specific override.
+          // Use the verification browser's configured timeout. The browser
+          // owns the production wait budget because slider solving can take
+          // longer than a short IM request retry window.
           const verificationKey = `${adminId}:${account.id}`;
           const retryAfter = this.verificationRetryAfter.get(verificationKey) ?? 0;
           if (retryAfter > Date.now()) throw new Error('XIANYU_VERIFICATION_COOLDOWN');

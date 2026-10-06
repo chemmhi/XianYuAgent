@@ -239,6 +239,24 @@ try {
   const notFound = await requestUpgrade('/api/v1/workspace/runs/does-not-exist/events', { Cookie: cookie, Origin: `http://127.0.0.1:${port}` });
   assert.equal(notFound.status, 404);
 
+  // A deleted run must close its old stream without taking down the API.
+  const staleSession = await request('/api/v1/workspace/agent-sessions', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'workspace-ws-stale-session' }, body: JSON.stringify({ accountId, title: 'Workspace WS 删除回归', summary: 'workspace ws stale run' }) });
+  assert.equal(staleSession.response.status, 201);
+  const adminId = (await runtime.store.listAdminIds())[0];
+  const staleRun = await runtime.store.createRun({ adminId, accountId, sessionId: staleSession.body.data.id, instruction: '保持实时流以验证删除回归', clientRunRef: 'workspace-ws-stale-run' });
+  await runtime.store.appendRunEvent({ runId: staleRun.run.id, eventType: 'run.queued', payload: { status: 'queued' } });
+  const stale = await requestUpgrade(`/api/v1/workspace/runs/${encodeURIComponent(staleRun.run.id)}/events`, { Cookie: cookie, Origin: `http://127.0.0.1:${port}` });
+  assert.equal(stale.status, 101);
+  assert.ok(await stale.nextFrame(), 'stale websocket did not send snapshot');
+  await runtime.store.deleteAgentSession(adminId, staleSession.body.data.id);
+  let staleClosed = false;
+  for (let index = 0; index < 3; index += 1) {
+    if (await stale.nextFrame() === null) { staleClosed = true; break; }
+  }
+  assert.equal(staleClosed, true);
+  const health = await request('/healthz');
+  assert.equal(health.response.status, 200);
+
   console.log('workspace websocket smoke passed');
 } finally {
   await runtime.close();

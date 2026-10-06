@@ -424,7 +424,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     }
     if (/^\/api\/v1\/workspace\/runs\/[^/]+\/events$/.test(pathname)) {
       void handleWorkspaceUpgrade(runtime, request, socket).catch((error) => {
-        console.warn(JSON.stringify({ component: 'workspace', event: 'upgrade_failed', errorCode: listenerErrorCode(error) }));
+        console.warn(JSON.stringify({ component: 'workspace-ws', event: 'upgrade_failed', errorCode: listenerErrorCode(error) }));
         socket.destroy();
       });
       return;
@@ -1498,9 +1498,8 @@ async function handleWorkspaceUpgrade(runtime: AppRuntime, request: IncomingMess
     try {
       events = await runtime.workspace.listEvents({ adminId: authContext.admin.id, runId, afterSequence: cursor });
     } catch (error) {
-      console.warn(JSON.stringify({ component: 'workspace', event: 'stream_read_failed', adminId: authContext.admin.id, runId, errorCode: listenerErrorCode(error) }));
-      socket.destroy();
-      return;
+      if (error instanceof ServiceError && error.statusCode === 404) break;
+      throw error;
     }
     for (const event of events) {
       if (closed) break;
@@ -1513,12 +1512,8 @@ async function handleWorkspaceUpgrade(runtime: AppRuntime, request: IncomingMess
     try {
       latest = await runtime.workspace.getRun({ adminId: authContext.admin.id, runId });
     } catch (error) {
-      // A client can keep an old run socket open after its session is deleted.
-      // Treat the missing run as a normal stream termination instead of
-      // allowing the rejected promise to bring down the API process.
-      console.warn(JSON.stringify({ component: 'workspace', event: 'stream_run_unavailable', adminId: authContext.admin.id, runId, errorCode: listenerErrorCode(error) }));
-      socket.end();
-      return;
+      if (error instanceof ServiceError && error.statusCode === 404) break;
+      throw error;
     }
     run.status = latest.status;
     run.updatedAt = latest.updatedAt;

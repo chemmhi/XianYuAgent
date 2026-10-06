@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { XianyuSliderSolver, type XianyuSliderFrame, type XianyuSliderLocator, type XianyuSliderPage } from '../src/xianyu-slider-solver.js';
+import { calculateSliderDistance, XianyuSliderSolver, type XianyuSliderFrame, type XianyuSliderLocator, type XianyuSliderPage } from '../src/xianyu-slider-solver.js';
 
 type State = { dragCount: number; success: boolean; failure: boolean };
 
@@ -75,4 +75,11 @@ test('Patchright solver reports missing slider elements without sending input', 
   assert.equal(result.failureReason, 'slider_elements_not_found');
   assert.equal(result.trajectoryPoints, 0);
   assert.equal(page.calls.length, 0);
+});
+
+test('slider travel uses the two right edges when boxes have different left offsets', () => {
+  assert.equal(
+    calculateSliderDistance({ x: 570, y: 537, width: 300, height: 34 }, { x: 572, y: 539, width: 42, height: 30 }),
+    256,
+  );
 });
