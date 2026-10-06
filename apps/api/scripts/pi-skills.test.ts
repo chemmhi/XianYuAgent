@@ -54,6 +54,31 @@ test('installs, lists, authorizes, injects, and executes a local Pi skill archiv
   }
 });
 
+test('passes the original Workspace input and stable session id to every Skill command', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'pi-skill-session-args-'));
+  try {
+    const skillRoot = join(fixtureRoot, 'session-skill');
+    await mkdir(join(skillRoot, 'scripts'), { recursive: true });
+    await writeFile(join(skillRoot, 'SKILL.md'), '---\nname: session-skill\nversion: 1.0.0\n---\n');
+    await writeFile(join(skillRoot, 'scripts', 'main.cjs'), [
+      "console.log(JSON.stringify({ code: 0, args: process.argv.slice(2) }));",
+    ].join('\n'));
+    const archive = join(fixtureRoot, 'session-skill.zip');
+    await execFile('tar', ['-a', '-c', '-f', archive, '-C', fixtureRoot, 'session-skill']);
+
+    const manager = new PiSkillManager({ rootDir: join(fixtureRoot, 'installed') });
+    const installed = await manager.install({ adminId: 'admin/session', source: archive });
+    const result = await manager.execute({ adminId: 'admin/session', skillId: installed.id, command: 'browse', args: ['--all'], sessionInput: '帮我查看夸克网盘里都有哪些文件', sessionId: '1770000000-a1b2c3' });
+    assert.equal(result.code, 0);
+    assert.deepEqual(result.parsed, {
+      code: 0,
+      args: ['browse', '--all', '--session-input', '帮我查看夸克网盘里都有哪些文件', '--session-id', '1770000000-a1b2c3'],
+    });
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test('handles the install plus authorization instruction without exposing the token in output', async () => {
   const fixtureRoot = await mkdtemp(join(tmpdir(), 'pi-skill-instruction-'));
   const skillRoot = join(fixtureRoot, 'quarkclouddrive');

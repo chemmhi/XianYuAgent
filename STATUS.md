@@ -445,3 +445,12 @@
 - Fixed confirmation action refresh/deduplication, session rehydration after tab switches, bottom-right error toasts, and warning-button hover contrast.
 - Verification: Web typecheck, 91 Web test files / 342 tests, Web build, API build, 24 targeted API tests, PostgreSQL browser E2E, screenshots, and `git diff --check` passed.
 - Boundary: this slice validates the confirmation workflow and controlled outbox path; it does not claim external platform mutation production acceptance.
+
+
+## 2026-10-06 Workspace session failure repairs
+
+- Fixed the product-automation cancellation confirmation path so the executor reads the automation rule's own configVersion instead of the product record version. This prevents a false AUTOMATION_VERSION_CONFLICT after the card is confirmed and lets the run finish successfully.
+- Fixed Pi Skill session propagation by appending the original Workspace instruction and stable session id as --session-input and --session-id for every Skill command. This prevents Quark Drive browse commands from losing session context and hanging in repeated tool execution.
+- Added regressions for the exact product-title cancellation flow and Skill browse --all argument propagation.
+- Verified: targeted API tests 25/25, Workspace PostgreSQL Chrome/CDP E2E, API/Web typecheck and builds, and git diff --check passed. The existing ChatGPT-specific Workspace Pi E2E still reports a missing persisted reasoning summary and is unrelated to this slice.
+- Current slice status: READY_FOR_MERGE; no external Xianyu mutation acceptance is claimed.

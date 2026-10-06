@@ -169,7 +169,10 @@ export class WorkspaceCommandOrchestrator {
       const summary = action === 'product_automation_update'
         ? `${disablingAutomation ? '准备停用' : '准备更新'}商品自动化规则（商品 ${productId}）`
         : action === 'product_knowledge_update' ? `准备更新商品知识库（商品 ${productId}）` : `准备更新商品信息（商品 ${productId}）`;
-      const manifest: Record<string, unknown> = { action, accountId, productId, expectedConfigVersion: await this.currentProductVersion(input.adminId, productId), fields: safeFieldNames(fields) };
+      const expectedConfigVersion = action === 'product_automation_update'
+        ? await this.currentProductAutomationVersion(input.adminId, productId)
+        : await this.currentProductVersion(input.adminId, productId);
+      const manifest: Record<string, unknown> = { action, accountId, productId, expectedConfigVersion, fields: safeFieldNames(fields) };
       if (disablingAutomation) {
         manifest.config = {
           paidAutoDelivery: { enabled: false, couponBatchIds: [] },
@@ -476,6 +479,10 @@ export class WorkspaceCommandOrchestrator {
 
   private async currentProductVersion(adminId: string, productId: string): Promise<number> {
     return (await this.deps.products.get(adminId, productId)).configVersion;
+  }
+
+  private async currentProductAutomationVersion(adminId: string, productId: string): Promise<number> {
+    return (await this.deps.productAutomation.get(adminId, productId)).configVersion;
   }
 
   private async accountsResult(input: WorkspaceCommandInput): Promise<WorkspaceCommandResult> {
