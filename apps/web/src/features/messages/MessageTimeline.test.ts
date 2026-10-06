@@ -58,6 +58,19 @@ describe('MessageTimeline', () => {
     expect(html).not.toContain('收到[尊嘟假嘟]');
   });
 
+  it('renders assistant-style Markdown without exposing raw syntax', () => {
+    const html = renderToStaticMarkup(createElement(MessageTimeline, {
+      phase: 'success',
+      messages: [message({ bodyText: '找到的商品是 **PPT Master**。\n\n- Windows 安装包\n- `一键卸载脚本`' })],
+    }));
+    expect(html).toContain('data-markdown-content');
+    expect(html).toContain('<strong>PPT Master</strong>');
+    expect(html).toContain('<ul>');
+    expect(html).toContain('<code>一键卸载脚本</code>');
+    expect(html).not.toContain('**PPT Master**');
+    expect(html).not.toContain('- Windows 安装包');
+  });
+
   it('renders avatar, compact message metadata, and outbound read state without names', () => {
     const html = renderToStaticMarkup(createElement(MessageTimeline, {
       phase: 'success',
