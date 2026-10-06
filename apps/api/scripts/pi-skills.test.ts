@@ -167,7 +167,7 @@ test('starts interactive login with isolated runtime directories and leaves auth
     await writeFile(join(skillRoot, 'codex', 'config.json'), '{"seed":true}');
     await writeFile(join(skillRoot, 'scripts', 'main.cjs'), [
       "const args = process.argv.slice(2);",
-      "if (args[0] === 'login' && !args.includes('--token')) { console.log(JSON.stringify({ code: -1408, msg: 'open browser https://example.test/oauth/login', env: { home: process.env.HOME, runtime: process.env.OPENCLAW_RUNTIME_DIR, config: process.env.XDG_CONFIG_HOME, data: process.env.XDG_DATA_HOME, state: process.env.XDG_STATE_HOME, codex: process.env.CODEX_HOME, admin: process.env.PI_SKILL_ADMIN_ID, root: process.env.PI_SKILL_ROOT, mode: process.env.PI_SKILL_LOGIN_MODE } })); process.exit(1); }",
+      "if (args[0] === 'login' && !args.includes('--token')) { console.log(JSON.stringify({ code: -1408, msg: 'open browser https://example.test/oauth/login', env: { home: process.env.HOME, runtime: process.env.OPENCLAW_RUNTIME_DIR, config: process.env.XDG_CONFIG_HOME, data: process.env.XDG_DATA_HOME, state: process.env.XDG_STATE_HOME, codex: process.env.CODEX_HOME, admin: process.env.PI_SKILL_ADMIN_ID, root: process.env.PI_SKILL_ROOT, mode: process.env.PI_SKILL_LOGIN_MODE, openclawCli: process.env.OPENCLAW_CLI, openclawMarker: process.env.OPENCLAW_SERVICE_MARKER } })); process.exit(1); }",
       "console.log(JSON.stringify({ code: 0, msg: 'ok' }));",
     ].join('\n'));
     const archive = join(fixtureRoot, 'login-skill.zip');
@@ -184,6 +184,8 @@ test('starts interactive login with isolated runtime directories and leaves auth
     const parsed = parseLastJson(result.prompt ?? '');
     assert.equal(parsed?.env?.admin, 'admin/login');
     assert.equal(parsed?.env?.mode, 'interactive');
+    assert.equal(parsed?.env?.openclawCli, '1');
+    assert.equal(parsed?.env?.openclawMarker, 'openclaw');
     assert.notEqual(parsed?.env?.runtime, parsed?.env?.config);
     assert.match(parsed?.env?.root ?? '', /login-skill/);
 

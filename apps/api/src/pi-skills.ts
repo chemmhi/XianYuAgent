@@ -510,6 +510,8 @@ export class PiSkillManager {
       ...process.env,
       HOME: runtimeDir,
       USERPROFILE: runtimeDir,
+      OPENCLAW_CLI: '1',
+      OPENCLAW_SERVICE_MARKER: 'openclaw',
       OPENCLAW_RUNTIME_DIR: runtimeDir,
       XDG_CONFIG_HOME: configDir,
       XDG_DATA_HOME: dataDir,
