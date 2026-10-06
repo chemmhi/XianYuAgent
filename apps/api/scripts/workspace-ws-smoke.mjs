@@ -204,6 +204,19 @@ try {
   const firstSequence = liveEvents[0].cursor;
   live.close();
 
+  // A stale client may keep a stream open after its workspace session is
+  // deleted. The server must close that stream without crashing the process.
+  const stale = await requestUpgrade(`/api/v1/workspace/runs/${encodeURIComponent(runId)}/events?after=0`, { Cookie: cookie, Origin: `http://127.0.0.1:${port}` });
+  assert.equal(stale.status, 101);
+  await runtime.store.deleteAgentSession((await runtime.store.findAdminByEmail('workspace-ws@example.com')).id, sessionId);
+  const staleFrames = [];
+  for (;;) {
+    const frame = await stale.nextFrame(2_000);
+    if (!frame) break;
+    staleFrames.push(frame);
+  }
+  assert.equal(staleFrames[0]?.opcode, 1);
+
   const completed = await waitForRun(runId, cookie);
   assert.equal(completed.status, 'succeeded');
   const replay = await requestUpgrade(`/api/v1/workspace/runs/${encodeURIComponent(runId)}/events?after=${firstSequence}`, { Cookie: cookie, Origin: `http://127.0.0.1:${port}` });

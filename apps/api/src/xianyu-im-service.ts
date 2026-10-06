@@ -423,10 +423,9 @@ export class XianyuImService {
           cookieSnapshotFromHeader(token.cookieHeader || latest.cookieHeader || credential.cookieHeader),
         );
         try {
-          // IM sends must not hold an HTTP request open for the QR/manual
-          // verification window. Auto mode is fail-fast: either a fresh
-          // challenge cookie is obtained quickly or the caller gets the
-          // validation error and can retry with a new token.
+          // Use the verification browser's configured wait budget. The
+          // browser owns the production timeout so slow challenge pages do
+          // not get cut off by a shorter IM-specific override.
           const verificationKey = `${adminId}:${account.id}`;
           const retryAfter = this.verificationRetryAfter.get(verificationKey) ?? 0;
           if (retryAfter > Date.now()) throw new Error('XIANYU_VERIFICATION_COOLDOWN');
@@ -440,7 +439,6 @@ export class XianyuImService {
               profileKey: account.id,
               initialCookieSnapshot: initialSnapshot,
               allowManualFallback: false,
-              maxWaitMs: 20_000,
               pollIntervalMs: 250,
             });
             this.verificationInFlight.set(verificationKey, verificationPromise);

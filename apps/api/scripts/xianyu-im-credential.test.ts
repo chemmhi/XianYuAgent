@@ -128,7 +128,7 @@ describe('xianyu IM credential refresh', () => {
       (error: unknown) => error instanceof ServiceError && error.statusCode === 409 && error.code === 'ACCOUNT_VALIDATION_REQUIRED',
     );
     assert.equal(allowManualFallback, false);
-    assert.equal(maxWaitMs, 20_000);
+    assert.equal(maxWaitMs, undefined);
     assert.ok(Date.now() - startedAt < 1_000);
   });
 
