@@ -63,16 +63,21 @@ test('resolves numeric external product refs and builds a disable-all automation
     },
     productAutomation: {
       get: async () => ({ configVersion: 4, product, config: {} }),
-      update: async (input: { config: unknown }) => { updatedConfig = input.config; return { configVersion: 5, config: input.config }; },
+      update: async (input: { config: unknown }) => {
+        const config = input.config as { paidAutoDelivery?: { couponBatchIds?: string[] }; reviewGift?: { couponBatchIds?: string[] } };
+        if ((config.paidAutoDelivery?.couponBatchIds?.length ?? 0) > 0 || (config.reviewGift?.couponBatchIds?.length ?? 0) > 0) throw new Error('coupon batch is voided');
+        updatedConfig = input.config;
+        return { configVersion: 5, config: input.config };
+      },
     },
   });
   const plan = await commands.prepareWrite({ ...input, instruction: '帮我取消 1082449333831 这个商品的自动化规则' });
   assert.equal(plan?.action, 'product_automation_update');
   assert.equal(plan?.manifest.productId, product.id);
   assert.deepEqual(plan?.manifest.config, {
-    paidAutoDelivery: { enabled: false },
+    paidAutoDelivery: { enabled: false, couponBatchIds: [] },
     unpaidAutoReprice: { enabled: false },
-    reviewGift: { enabled: false },
+    reviewGift: { enabled: false, couponBatchIds: [] },
     reviewReminder: { enabled: false },
   });
 
