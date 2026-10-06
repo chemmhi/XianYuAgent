@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import type { MessageReadState, MessageVM } from '../types';
 import { renderXianyuText } from '../xianyu-emojis';
 import { TimelineSkeleton } from './MessagesSkeletons';
+import { MarkdownContent } from '../../../shared/ui/MarkdownContent';
 
 type Participant = { displayName: string; avatarUrl?: string };
 
@@ -50,7 +51,7 @@ export function MessageTimeline({ messages, phase, hasMoreHistory = false, loadi
         </div>
         <div className="messages-message-stack">
           <div className={`messages-bubble ${isOutbound ? 'outbound' : 'inbound'}`}>
-            {imageUrl ? <button className="messages-image-button" type="button" aria-label="查看聊天图片" onClick={() => onOpenImage?.(imageUrl)}><img className="messages-image" src={imageUrl} alt="聊天图片" loading="lazy" /></button> : <span>{renderMessageText(message.bodyText || (message.bodyType === 'image' ? '[图片]' : '[系统消息]'))}</span>}
+            {imageUrl ? <button className="messages-image-button" type="button" aria-label="查看聊天图片" onClick={() => onOpenImage?.(imageUrl)}><img className="messages-image" src={imageUrl} alt="聊天图片" loading="lazy" /></button> : <MarkdownContent className="messages-markdown" content={message.bodyText || (message.bodyType === 'image' ? '[图片]' : '[系统消息]')} renderText={renderXianyuText} />}
           </div>
           <div className="messages-message-foot"><time>{formatTime(message.createdAt)}</time>{message.source === 'ai' && <span className="messages-source-label ai">AI</span>}{message.source === 'human' && <span className="messages-source-label human">人工</span>}{isOutbound && renderReadState(message)}</div>
         </div>
@@ -77,19 +78,6 @@ function renderReadState(message: MessageVM): ReactNode {
   // explicit server-side receipt.
   const readState = resolveMessageReadState(message) ?? 'unread';
   return <span className={`messages-read-state ${readState}`}>{readState === 'read' ? '已读' : '未读'}</span>;
-}
-
-function renderMessageText(value: string): ReactNode {
-  const parts = value.split(/(https?:\/\/[^\s<]+)/gi);
-  if (parts.length === 1) return renderXianyuText(value);
-  return parts.map((part, index) => {
-    const match = part.match(/^([\s\S]*?)([),.!?，。！？、]+)$/);
-    const candidate = match?.[1] ?? part;
-    const trailing = match?.[2] ?? '';
-    const url = safeUrl(candidate);
-    if (!url) return <span key={`${index}-${part}`}>{renderXianyuText(part)}</span>;
-    return <span key={`${index}-${part}`}><a className="messages-link" href={url} target="_blank" rel="noreferrer noopener">{candidate}</a>{trailing}</span>;
-  });
 }
 
 function safeUrl(value?: string): string | undefined {

@@ -104,7 +104,7 @@ async function assertText(cdp, text) {
 }
 
 async function messageBodies(cdp) {
-  return await evaluate(cdp, 'Array.from(document.querySelectorAll(".messages-bubble span")).map((node) => node.textContent ?? "")');
+  return await evaluate(cdp, 'Array.from(document.querySelectorAll(".messages-bubble .messages-markdown")).map((node) => node.textContent ?? "")');
 }
 
 async function captureViewport(cdp, width, height, filename) {

@@ -70,6 +70,20 @@ describe('Workspace MessageStream', () => {
     expect(html).not.toContain('workspace-message-avatar');
     expect(html).not.toContain('workspace-message-tool');
   });
+
+  it('renders Markdown in final answers like the ChatGPT conversation surface', () => {
+    const messages: WorkspaceMessageVM[] = [
+      { id: 'final-1', runId: 'run-1', type: 'final_answer', createdAt: '2026-09-22T00:00:03.000Z', title: 'Agent', content: '找到的商品是 **PPT Master**。\n\n- Windows 安装包\n- `一键卸载脚本`' },
+    ];
+
+    const html = renderToStaticMarkup(createElement(MessageStream, { messages, expandedTrace: null, onToggleTrace: vi.fn() }));
+
+    expect(html).toContain('data-markdown-content');
+    expect(html).toContain('<strong>PPT Master</strong>');
+    expect(html).toContain('<ul>');
+    expect(html).toContain('<code>一键卸载脚本</code>');
+    expect(html).not.toContain('**PPT Master**');
+  });
 });
 
 describe('Workspace Composer styling contract', () => {
