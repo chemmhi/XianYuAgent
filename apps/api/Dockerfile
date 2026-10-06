@@ -11,9 +11,13 @@ WORKDIR /app
 ENV NODE_ENV=production
 RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
-    && apt-get install -y --no-install-recommends chromium fonts-noto-cjk ca-certificates unzip xvfb xauth \
+    && apt-get install -y --no-install-recommends chromium fonts-noto-cjk ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && chromium --version
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends unzip xvfb xauth \
+    && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
 RUN npm install --omit=dev
 COPY --from=build /app/dist ./dist
