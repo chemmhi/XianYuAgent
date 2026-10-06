@@ -43,6 +43,7 @@ services:
     profiles: [full]
     build:
       context: ./apps/api
+    init: true
     environment:
       NODE_ENV: production
       PORT: 8080
@@ -55,10 +56,10 @@ services:
       MODEL: ${MODEL:-gpt-4o-mini}
       WIRE_API: ${WIRE_API:-responses}
       MODEL_TIMEOUT_MS: ${MODEL_TIMEOUT_MS:-60000}
-      XIANYU_VERIFICATION_BROWSER_MODE: ${XIANYU_VERIFICATION_BROWSER_MODE:-disabled}
-      XIANYU_VERIFICATION_SLIDER_MODE: ${XIANYU_VERIFICATION_SLIDER_MODE:-disabled}
+      XIANYU_VERIFICATION_BROWSER_MODE: ${XIANYU_VERIFICATION_BROWSER_MODE:-launch}
+      XIANYU_VERIFICATION_SLIDER_MODE: ${XIANYU_VERIFICATION_SLIDER_MODE:-auto}
       XIANYU_VERIFICATION_BROWSER_EXECUTABLE: ${XIANYU_VERIFICATION_BROWSER_EXECUTABLE:-/usr/bin/chromium}
-      XIANYU_VERIFICATION_BROWSER_HEADLESS: ${XIANYU_VERIFICATION_BROWSER_HEADLESS:-true}
+      XIANYU_VERIFICATION_BROWSER_HEADLESS: ${XIANYU_VERIFICATION_BROWSER_HEADLESS:-false}
       XIANYU_VERIFICATION_BROWSER_USER_DATA_DIR: ${XIANYU_VERIFICATION_BROWSER_USER_DATA_DIR:-/app/browser_data/xianyu-verification}
       XIANYU_VERIFICATION_BROWSER_MAX_WAIT_MS: ${XIANYU_VERIFICATION_BROWSER_MAX_WAIT_MS:-180000}
       OBJECT_STORAGE_ENDPOINT: http://object-storage:9000
@@ -87,12 +88,13 @@ services:
         condition: service_healthy
       object-storage:
         condition: service_started
-    command: ["node", "dist/index.js"]
+    command: ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1440x900x24 -nolisten tcp", "node", "dist/index.js"]
 
   worker:
     profiles: [full]
     build:
       context: ./apps/api
+    init: true
     environment:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL_DOCKER:-postgres://${POSTGRES_USER:-xianyu}:${POSTGRES_PASSWORD:-xianyu_dev_only}@postgres:5432/${POSTGRES_DB:-xianyu_agent}}
