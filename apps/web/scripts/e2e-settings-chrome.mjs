@@ -185,7 +185,9 @@ async function run() {
   await waitFor(async () => String(await evaluate(cdp, 'document.readyState')) === 'complete', 'settings route');
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-settings-page]"))'), 'Settings page');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('设置'), 'Settings account context');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('当前账号还没有模型 API Key'), 'empty credential state');
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-auto-reply-agent-panel]"))'), 'default Auto Reply Agent panel');
+  const defaultSettingsTab = await evaluate(cdp, 'document.querySelector(".settings-tabs button.active")?.textContent?.trim() ?? ""');
+  if (!String(defaultSettingsTab).includes('自动回复 Agent')) throw new Error(`settings should default to Auto Reply Agent, got: ${defaultSettingsTab}`);
 
   const agentPath = `/api/v1/settings/agent?accountId=${encodeURIComponent(accountId)}`;
   const agentDefaults = await requestJson(apiUrl, agentPath, { headers: { cookie } });
