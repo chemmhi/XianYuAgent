@@ -9,7 +9,7 @@ import { decodeMessageHistoryCursor } from './message-history-cursor.js';
 import { normalizeAutoReplyProductMetric } from './auto-reply-product-metrics.js';
 import { cloneCouponReservation, normalizeCouponReservationInput, normalizeLeaseSeconds, reservationFingerprint } from './coupon-reservation.js';
 import { validatePersistedAutoReplyRepairPolicyBundle } from './auto-reply-repair-config.js';
-import { normalizeProductSearchTerms, normalizeProductSearchText, splitProductSearchTerms, type AutoReplyProductSearchMode } from './auto-reply-product-search.js';
+import { normalizeProductSearchTerms, normalizeProductSearchText, normalizeProductCatalogSearchText, splitProductSearchTerms, type AutoReplyProductSearchMode } from './auto-reply-product-search.js';
 import { splitDataContent } from './coupon-delivery.js';
 
 type Row = Record<string, unknown>;
@@ -97,7 +97,16 @@ export class PostgresStore implements Store {
     const conditions = ["EXISTS (SELECT 1 FROM auth.account_scopes scope WHERE scope.account_id=p.account_id AND scope.admin_id=$1 AND scope.status='active' AND (scope.expires_at IS NULL OR scope.expires_at>now()))"];
     if (query.accountId) { params.push(query.accountId); conditions.push(`p.account_id=$${params.length}`); }
     if (query.status) { params.push(query.status); conditions.push(`p.status=$${params.length}`); }
-    if (query.keyword) { params.push(`%${query.keyword.trim().toLowerCase()}%`); conditions.push(`(lower(p.title) like $${params.length} or lower(coalesce(p.external_product_ref,'')) like $${params.length} or lower(coalesce(p.description,'')) like $${params.length})`); }
+    if (query.keyword) {
+      const rawKeyword = query.keyword.trim().toLowerCase();
+      const normalizedKeyword = normalizeProductCatalogSearchText(query.keyword);
+      params.push(`%${rawKeyword}%`);
+      const rawIndex = params.length;
+      params.push(`%${normalizedKeyword}%`);
+      const normalizedIndex = params.length;
+      const normalizedSql = `(regexp_replace(lower(coalesce(p.title,'')), '[[:space:][:punct:]，。、“”‘’！？：；（）【】《》·、]+', '', 'g') like $${normalizedIndex} or regexp_replace(lower(coalesce(p.external_product_ref,'')), '[[:space:][:punct:]，。、“”‘’！？：；（）【】《》·、]+', '', 'g') like $${normalizedIndex} or regexp_replace(lower(coalesce(p.description,'')), '[[:space:][:punct:]，。、“”‘’！？：；（）【】《》·、]+', '', 'g') like $${normalizedIndex})`;
+      conditions.push(`(lower(p.title) like $${rawIndex} or lower(coalesce(p.external_product_ref,'')) like $${rawIndex} or lower(coalesce(p.description,'')) like $${rawIndex} or ${normalizedSql})`);
+    }
     const where = conditions.join(' AND ');
     const count = await this.pool.query(`select count(*)::int as count from products.products p where ${where}`, params);
     const total = Number(count.rows[0]?.count ?? 0);
