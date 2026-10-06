@@ -4,7 +4,7 @@
 
 生产部署必须通过 GitHub `origin/main` 完成。禁止向服务器裸仓库直接推送，禁止从开发机使用 `scp`、`rsync` 或其他方式上传代码，禁止在服务器工作树中手工改代码。服务器部署目录的 `origin` 必须是 `https://github.com/chemmhi/XianYuAgent.git` 或等价的 GitHub SSH 地址；部署前必须执行 `git fetch origin main && git pull --ff-only origin main`。
 
-已有 PostgreSQL volume 不会因 Compose 重建自动重放新迁移。对已有生产数据卷，必须从已拉取的 GitHub 工作树显式执行 `node apps/api/scripts/migrate.mjs`，确认迁移完成后再开放新功能写入。
+已有 PostgreSQL volume 不会因 Compose 重建自动重放新迁移。`scripts/deploy-production.sh` 现在会先启动基础设施、等待 PostgreSQL 就绪，并在 API/Worker 启动前通过 API runtime image 执行幂等迁移；维护场景仍可从已拉取的 GitHub 工作树手动执行 `node apps/api/scripts/migrate.mjs`。
 
 ## 固定部署入口
 
@@ -28,7 +28,7 @@ bash scripts/deploy-production.sh
 - 使用开发用 `docker-compose.yml`，它把 API 暴露为宿主机 `8080`；
 - Compose 发布端口与 Nginx 的 `proxy_pass` 不一致。
 
-脚本通过后才会执行 `docker compose -f compose.prod.yml up -d --build --force-recreate`，并保留所有数据卷，不执行 `down -v`。随后检查本地与公网的 `/healthz`、`/readyz`，以及 `/api/v1/auth/session`（允许未登录时的 `401/403`）。
+脚本通过后先执行基础设施启动与数据库迁移，再构建并重建 API/Worker；整个过程保留所有数据卷，不执行 `down -v`。随后检查本地与公网的 `/healthz`、`/readyz`，以及 `/api/v1/auth/session`（允许未登录时的 `401/403`）。
 
 ## 2026-09-25 502 事故记录
 
