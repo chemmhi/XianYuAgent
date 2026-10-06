@@ -394,7 +394,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
-  }, coupons, autoReplyAgentSettings, workspaceCommands);
+  }, coupons, autoReplyAgentSettings, workspaceCommands, modelClient);
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
@@ -1150,7 +1150,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   }
   if (ctx.path === '/api/v1/workspace/agent-sessions' && ctx.method === 'POST') {
     const accountId = optionalString(ctx.body.accountId);
-    return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await workspace.createSession({ adminId: authContext.admin.id, accountId: accountId ?? '', title: String(ctx.body.title ?? ''), summary: optionalString(ctx.body.summary), requestId: ctx.requestId, traceId: ctx.traceId }), 201));
+    return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await workspace.createSession({ adminId: authContext.admin.id, accountId: accountId ?? '', title: String(ctx.body.title ?? ''), summary: optionalString(ctx.body.summary), instruction: optionalString(ctx.body.instruction), requestId: ctx.requestId, traceId: ctx.traceId }), 201));
   }
   if (workspaceSessionAction && ctx.method === 'POST') {
     const sessionId = decodeURIComponent(workspaceSessionAction[1]);

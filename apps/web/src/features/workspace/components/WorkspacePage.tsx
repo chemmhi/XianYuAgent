@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useAccountContext } from '../../../app/account-context';
 import { isWorkspaceRunReconnectable, useWorkspaceController } from '../controller';
-import { buildWorkspaceMessages, deriveSessionTitle } from '../messages';
+import { buildWorkspaceMessages } from '../messages';
 import type { WorkspaceApi } from '../api';
 import type { WorkspaceConfirmationVM, WorkspaceMessageVM, WorkspaceOutboxVM, WorkspaceRunStatus, WorkspaceRunVM, WorkspaceSessionVM } from '../types';
 import { SearchField } from '../../../shared/ui/SearchField';
@@ -68,6 +68,7 @@ export function WorkspacePage({ api }: WorkspacePageProps) {
   const visibleSessions = useMemo(() => state.sessions, [state.sessions]);
   const activeSession = draftMode ? undefined : state.sessions.find((session) => session.id === state.activeSessionId);
   const currentRun = state.run && activeSession && state.run.sessionId === activeSession.id ? state.run : null;
+  const activeSessionDisplayTitle = activeSession?.title;
   useEffect(() => {
     if (draftMode || !activeSession) return;
     markSessionViewed(activeSession.id, currentRun?.runId ?? activeSession.runId);
@@ -98,7 +99,7 @@ export function WorkspacePage({ api }: WorkspacePageProps) {
     if (!text || state.submitting || !currentAccountId || (!draftMode && activeSession?.status !== 'active')) return;
     let sessionId = activeSession?.id;
     if (draftMode || !sessionId) {
-      const created = await controller.createSession(deriveSessionTitle(text));
+      const created = await controller.createSession('新会话', text);
       if (!created) return;
       sessionId = created.id;
       setDraftMode(false);
@@ -120,9 +121,8 @@ export function WorkspacePage({ api }: WorkspacePageProps) {
             <div className="workspace-layout">
               <aside className="workspace-sidebar">
                 <section className="card workspace-sessions-panel"><div className="workspace-panel-head"><div><h2>会话</h2><p>{state.sessions.length} 个工作区会话</p></div><Button variant="primary" type="button" onClick={startDraft}>新建会话</Button></div><SearchField className="workspace-search" value={search} onChange={(event) => controller.setSearch(event.target.value)} onClear={() => controller.setSearch('')} clearable placeholder="搜索会话" aria-label="搜索会话" /><div className="workspace-session-list">{state.phase === 'loading' && <div className="workspace-list-state">正在加载会话…</div>}{state.phase !== 'loading' && visibleSessions.length === 0 && <div className="workspace-list-state">{state.sessions.length ? '没有匹配的会话' : '还没有会话，点击“新建会话”开始'}</div>}{visibleSessions.map((session) => { const sessionRunStatus = session.id === state.activeSessionId ? (currentRun?.status ?? session.runStatus) : session.runStatus; return <SessionRow key={session.id} session={session} active={!draftMode && session.id === state.activeSessionId} running={Boolean(sessionRunStatus && !terminalStatuses.has(sessionRunStatus))} unread={state.unreadSessionIds.includes(session.id)} busy={state.submitting} onSwitch={() => { setDraftMode(false); if (session.status === 'active') void controller.switchSession(session.id); }} onDelete={() => setDeleteTarget(session)} />; })}</div></section>
-                <WorkspaceContextPanel account={currentAccount} />
               </aside>
-              <section className={`card workspace-thread${currentRun?.status === 'waiting_confirmation' ? ' is-confirmation' : ''}`} aria-label="Workspace 对话"><header className="workspace-thread-header"><div><p className="eyebrow">连续对话</p><h2>{draftMode ? '新会话' : activeSession?.title ?? '选择活跃会话'}</h2><p>{currentRun ? `${messages.length} 条消息 · Run 创建于 ${formatTime(currentRun.createdAt)}` : draftMode ? '输入第一条消息后，会自动创建会话并生成标题。' : '提交 Run 后，这里会展示连续的 Agent 消息流。'}</p></div><div className="workspace-thread-meta">{currentRun && <span className={`workspace-status workspace-status-${statusTone(currentRun.status)}`}>{statusLabel(currentRun.status)}</span>}<span className={`workspace-connection workspace-connection-${state.connection}`}><span />{state.connection === 'connected' ? '实时' : state.connection === 'reconnecting' ? '重连中' : state.connection === 'connecting' ? '连接中' : '离线'}</span>{currentRun && isWorkspaceRunReconnectable(currentRun.status) && (state.connection !== 'connected' || currentRun.status === 'failed') && <button className="btn ghost workspace-reconnect-button" type="button" onClick={() => void controller.reconnectRun()}>重连</button>}</div></header><div ref={messageStreamRef} data-testid="workspace-message-stream" className={`workspace-message-stream${hasStreamContent ? '' : ' is-empty'}`}>{messages.length ? <MessageStream messages={messages} expandedTrace={expandedTrace} onToggleTrace={(id) => setExpandedTrace((current) => current === id ? null : id)} /> : <WorkspaceState title={draftMode ? '开始一段新对话' : '等待首条 Run'} message={draftMode ? '在下方输入消息，系统会自动创建会话。' : activeSession ? '在下方输入一条指令，开始受控执行。' : '请从左侧选择一个活跃会话。'} compact />}{showConfirmation && <WorkspaceConfirmationCard run={currentRun!} accountName={currentAccount?.displayName ?? '闲鱼账号 A'} confirmation={state.confirmation!} actionSubmitting={state.actionSubmitting} onConfirm={() => void controller.confirmRun()} onCancel={() => void controller.cancelRun()} />}{showOutbox && <WorkspaceOutboxPanel items={state.outbox} actionSubmitting={state.actionSubmitting} onRetry={() => void controller.retryRun()} />}</div><form className="workspace-composer workspace-composer-docked" onSubmit={submitRun}><textarea ref={instructionRef} value={instruction} onChange={(event) => { setInstruction(event.target.value); resizeComposerTextarea(event.currentTarget); }} maxLength={4000} disabled={(!draftMode && (!activeSession || activeSession.status !== 'active')) || state.submitting} placeholder="给 Agent 发消息…" aria-label="Run 指令" /><div className="workspace-composer-foot"><div className="workspace-composer-tools"><button type="button" aria-label="添加附件"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button></div><div className="workspace-composer-meta"><span>{instruction.length}/4000</span><button className="workspace-send-round" type="submit" aria-label={state.submitting ? '提交中' : '发送'} disabled={!instruction.trim() || (!draftMode && (!activeSession || activeSession.status !== 'active')) || state.submitting}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 14-7-4 14-3-6-7-1Z" /><path d="m12 13 3-8" /></svg></button></div></div></form></section>
+              <section className={`card workspace-thread${currentRun?.status === 'waiting_confirmation' ? ' is-confirmation' : ''}`} aria-label="Workspace 对话"><header className="workspace-thread-header"><div><p className="eyebrow">连续对话</p><h2>{draftMode ? '新会话' : activeSessionDisplayTitle ?? '选择活跃会话'}</h2><p>{currentRun ? `${messages.length} 条消息 · Run 创建于 ${formatTime(currentRun.createdAt)}` : draftMode ? '输入第一条消息后，会自动创建会话并生成标题。' : '提交 Run 后，这里会展示连续的 Agent 消息流。'}</p></div><div className="workspace-thread-meta">{currentRun && <span className={`workspace-status workspace-status-${statusTone(currentRun.status)}`}>{statusLabel(currentRun.status)}</span>}<span className={`workspace-connection workspace-connection-${state.connection}`}><span />{state.connection === 'connected' ? '实时' : state.connection === 'reconnecting' ? '重连中' : state.connection === 'connecting' ? '连接中' : '离线'}</span>{currentRun && isWorkspaceRunReconnectable(currentRun.status) && (state.connection !== 'connected' || currentRun.status === 'failed') && <button className="btn ghost workspace-reconnect-button" type="button" onClick={() => void controller.reconnectRun()}>重连</button>}</div></header><div ref={messageStreamRef} data-testid="workspace-message-stream" className={`workspace-message-stream${hasStreamContent ? '' : ' is-empty'}`}>{messages.length ? <MessageStream messages={messages} expandedTrace={expandedTrace} onToggleTrace={(id) => setExpandedTrace((current) => current === id ? null : id)} /> : <WorkspaceState title={draftMode ? '开始一段新对话' : '等待首条 Run'} message={draftMode ? '在下方输入消息，系统会自动创建会话。' : activeSession ? '在下方输入一条指令，开始受控执行。' : '请从左侧选择一个活跃会话。'} compact />}{showConfirmation && <WorkspaceConfirmationCard run={currentRun!} accountName={currentAccount?.displayName ?? '闲鱼账号 A'} confirmation={state.confirmation!} actionSubmitting={state.actionSubmitting} onConfirm={() => void controller.confirmRun()} onCancel={() => void controller.cancelRun()} />}{showOutbox && <WorkspaceOutboxPanel items={state.outbox} actionSubmitting={state.actionSubmitting} onRetry={() => void controller.retryRun()} />}</div><form className="workspace-composer workspace-composer-docked" onSubmit={submitRun}><textarea ref={instructionRef} value={instruction} onChange={(event) => { setInstruction(event.target.value); resizeComposerTextarea(event.currentTarget); }} maxLength={4000} disabled={(!draftMode && (!activeSession || activeSession.status !== 'active')) || state.submitting} placeholder="给 Agent 发消息…" aria-label="Run 指令" /><div className="workspace-composer-foot"><div className="workspace-composer-tools"><button type="button" aria-label="添加附件"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button></div><div className="workspace-composer-meta"><span>{instruction.length}/4000</span><button className="workspace-send-round" type="submit" aria-label={state.submitting ? '提交中' : '发送'} disabled={!instruction.trim() || (!draftMode && (!activeSession || activeSession.status !== 'active')) || state.submitting}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 14-7-4 14-3-6-7-1Z" /><path d="m12 13 3-8" /></svg></button></div></div></form></section>
             </div>
           </div>
           <nav className="workspace-mobile-nav" aria-label="移动端导航"><button type="button">⌂<span>首页</span></button><button className="active" type="button">▣<span>Workspace</span></button><button type="button">✉<span>消息</span></button><button type="button">⚙<span>设置</span></button></nav>
@@ -181,7 +181,9 @@ function formatActivityDuration(messages: WorkspaceMessageVM[]): string | undefi
 
 function ExecutionSummaryView({ message }: { message: WorkspaceMessageVM }) {
   return <article className="workspace-execution-summary">
-    <span className="workspace-activity-icon workspace-activity-icon-summary" aria-hidden="true">✎</span>
+    <span className="workspace-activity-icon workspace-activity-icon-summary" aria-hidden="true">
+      <svg viewBox="0 0 16 16" focusable="false"><path d="m3.25 11.75-.5 1.5 1.5-.5 7.9-7.9-1-1-7.9 7.9Z" /><path d="m10.55 3.15 1-1 1.3 1.3-1 1" /></svg>
+    </span>
     <div className="workspace-activity-copy">
       <strong>{message.summary ?? '执行摘要'}</strong>
       <p>{message.content}</p>
@@ -192,16 +194,19 @@ function ExecutionSummaryView({ message }: { message: WorkspaceMessageVM }) {
 function ToolEventView({ message, expanded, onToggle }: { message: WorkspaceMessageVM; expanded: boolean; onToggle: () => void }) {
   return <article className="workspace-tool-event">
     <button type="button" className="workspace-tool-event-toggle" onClick={onToggle} aria-expanded={expanded}>
-      <span className="workspace-activity-icon workspace-activity-icon-tool" aria-hidden="true">▣</span>
+      <span className="workspace-activity-icon workspace-activity-icon-tool" aria-hidden="true">
+        <svg viewBox="0 0 16 16" focusable="false"><rect x="3.25" y="2.75" width="9.5" height="10.5" rx="1" /><path d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3" /></svg>
+      </span>
       <strong>{message.title}</strong>
-      <span className="workspace-tool-event-action">{expanded ? '收起' : '展开'}</span>
-      <span className="workspace-message-chevron" aria-hidden="true">{expanded ? '⌃' : '⌄'}</span>
+      <span className="workspace-tool-event-control">
+        <span className="workspace-tool-event-action">{expanded ? '收起' : '展开'}</span>
+        <span className="workspace-message-chevron" aria-hidden="true"><svg viewBox="0 0 12 12" focusable="false"><path d={expanded ? 'm3 3.5 3 3 3-3' : 'm4 2.5 3.5 3.5L4 9.5'} /></svg></span>
+      </span>
     </button>
     {expanded && <div className="workspace-tool-event-details"><p>{message.content}</p></div>}
   </article>;
 }
 function MessageBubble({ message }: { message: WorkspaceMessageVM }) { if (message.type === 'user_message') return <article className="workspace-message workspace-message-user"><div className="workspace-message-content"><MarkdownContent className="workspace-markdown" content={message.content} /></div></article>; if (message.type === 'final_answer') return <article className={`workspace-message workspace-message-final ${message.status && statusTone(message.status) === 'danger' ? 'is-error' : ''}`}><div className="workspace-message-content"><MarkdownContent className="workspace-markdown" content={message.content} /></div></article>; return <article className="workspace-message workspace-message-assistant"><div className="workspace-message-content"><MarkdownContent className="workspace-markdown" content={message.content} /></div></article>; }
-function WorkspaceContextPanel({ account }: { account?: { displayName?: string } }) { return <section className="card workspace-context-panel"><div className="workspace-context-head"><div><p className="eyebrow">当前上下文</p><h3>当前上下文</h3></div><button className="icon-button" type="button" aria-label="编辑上下文">✎</button></div><div className="workspace-context-account"><strong>{account?.displayName ?? '闲鱼账号 A'}</strong><span>已连接 · 消息监听正常</span></div><div className="workspace-context-list"><div><b>商品</b><span>未指定</span></div><div><b>订单</b><span>未指定</span></div><div><b>权限范围</b><span>workspace.run / audit.read</span></div></div><div className="workspace-capability-grid"><span>read.products</span><span>write.products</span><span>audit.run</span></div><div className="workspace-context-footer">凭证引用：cred_••••</div></section>; }
 function WorkspaceConfirmationCard({ run, accountName, confirmation, actionSubmitting, onConfirm, onCancel }: { run: WorkspaceRunVM; accountName: string; confirmation: WorkspaceConfirmationVM; actionSubmitting: boolean; onConfirm: () => void; onCancel: () => void }) {
   const manifest = confirmation.manifest;
   const isCouponCreate = confirmation.action === 'coupon_create';

@@ -155,14 +155,14 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     setSearchState(value);
   }, []);
 
-  const createSession = useCallback(async (title: string) => {
+  const createSession = useCallback(async (title: string, instruction?: string) => {
     if (!options.accountId) throw new Error('ACCOUNT_CONTEXT_REQUIRED');
     connectionAttemptRef.current += 1;
     socketRef.current?.close();
     socketRef.current = null;
     setState((previous) => ({ ...previous, submitting: true, error: null }));
     try {
-      const session = await api.createSession({ accountId: options.accountId, title });
+      const session = await api.createSession({ accountId: options.accountId, title, instruction });
       rememberActiveSession(session.id);
       setState((previous) => ({ ...previous, sessions: [session, ...previous.sessions], activeSessionId: session.id, phase: 'success', messages: [], run: null, events: [], connection: 'idle', submitting: false, confirmation: null, outbox: [] }));
       return session;
@@ -403,7 +403,7 @@ export interface WorkspaceController {
   search: string;
   setSearch: (value: string) => void;
   reload: () => Promise<void>;
-  createSession: (title: string) => Promise<WorkspaceState['sessions'][number] | null>;
+  createSession: (title: string, instruction?: string) => Promise<WorkspaceState['sessions'][number] | null>;
   switchSession: (sessionId: string) => Promise<WorkspaceState['sessions'][number] | null>;
   archiveSession: (sessionId: string) => Promise<WorkspaceState['sessions'][number] | null>;
   deleteSession: (sessionId: string) => Promise<{ deleted: boolean; sessionId: string } | null>;

@@ -6,6 +6,7 @@ import { executeNativeWorkspaceRead } from './workspace-native-read.js';
 import { prepareNativeWorkspaceWrite, sanitizeWorkspaceInstruction } from './workspace-native-write.js';
 import { persistWorkspaceConfirmation } from './workspace-confirmation.js';
 import type { WorkspaceCommandOrchestrator } from './workspace-commands.js';
+import type { ModelClient } from './pi-runtime.js';
 
 const terminalRunStatuses = new Set<RunStatus>(['succeeded', 'partially_succeeded', 'failed', 'cancelled', 'expired']);
 const runTransitions: Record<RunStatus, RunStatus[]> = {
@@ -267,6 +268,7 @@ export class WorkspaceService {
     private readonly coupons?: CouponService,
     private readonly agentSettings?: AutoReplyAgentSettingsService,
     private readonly commands?: WorkspaceCommandOrchestrator,
+    private readonly titleModelClient?: ModelClient,
   ) {}
 
   async listSessions(input: { adminId: string; accountId?: string; search?: string }): Promise<WorkspaceSessionView[]> {
@@ -274,9 +276,10 @@ export class WorkspaceService {
     return (await this.store.listAgentSessions(input.adminId, input)).map((session) => this.toSessionView(session));
   }
 
-  async createSession(input: { adminId: string; accountId: string; title: string; summary?: string; requestId: string; traceId: string }): Promise<WorkspaceSessionView> {
+  async createSession(input: { adminId: string; accountId: string; title: string; summary?: string; instruction?: string; requestId: string; traceId: string }): Promise<WorkspaceSessionView> {
     if (!input.accountId.trim()) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
-    const title = input.title.trim() || '新工作区会话';
+    const fallbackTitle = input.title.trim() || '新工作区会话';
+    const title = await summarizeWorkspaceSessionTitle(this.titleModelClient, input.instruction, fallbackTitle);
     try {
       const session = await this.store.createAgentSession({ adminId: input.adminId, accountId: input.accountId, title, summary: input.summary?.trim() || undefined });
       await this.audit({ actorId: input.adminId, action: 'workspace.session.created', targetRef: session.id, requestId: input.requestId, traceId: input.traceId, payload: { title: session.title }, accountId: session.accountId });
@@ -590,6 +593,38 @@ export class WorkspaceService {
     const mappedSteps = steps.map((step) => ({ stepId: step.id, runId: step.runId, sequence: step.stepNo, kind: step.kind, label: step.label, status: step.status, startedAt: step.startedAt, finishedAt: step.finishedAt, inputSummary: step.inputSummary, outputSummary: step.outputSummary, affectedEntityRefs: [], errorCode: step.errorCode }));
     const current = mappedSteps.find((step) => ['running', 'executing', 'waiting_confirmation', 'retrying'].includes(step.status));
     return { runId: run.id, sessionId: run.sessionId, accountId: run.accountId, status: run.status, instructionSummary: sanitizeWorkspaceInstruction(run.instruction), createdAt: run.createdAt, updatedAt: run.updatedAt, startedAt: run.startedAt, finishedAt: run.finishedAt, currentStepId: current?.stepId, steps: mappedSteps, resultSummary: run.resultSummary, errorCode: run.errorCode, clientRunRef: run.clientRunRef };
+  }
+}
+
+const WORKSPACE_TITLE_SYSTEM_PROMPT = [
+  '你是 Workspace 会话标题摘要器。',
+  '请把用户任务总结为一个简短、准确、可检索的简体中文标题。',
+  '只输出标题本身，不要引号、编号、句号、换行或解释；保留核心对象和动作；长度不超过 28 个字符。',
+].join(' ');
+
+async function summarizeWorkspaceSessionTitle(modelClient: ModelClient | undefined, instruction: string | undefined, fallback: string): Promise<string> {
+  const normalizedInstruction = instruction?.replace(/\s+/g, ' ').trim();
+  if (!modelClient || !normalizedInstruction) return fallback;
+  try {
+    const result = await modelClient.complete({
+      messages: [
+        { role: 'system', content: WORKSPACE_TITLE_SYSTEM_PROMPT },
+        { role: 'user', content: normalizedInstruction },
+      ],
+      toolChoice: 'none',
+      reasoningEffort: 'low',
+    });
+    const candidate = result.content
+      .split(/\r?\n/)
+      .map((line) => line.replace(/^\s*(?:[-*#]|\d+[.)])\s*/, '').trim())
+      .find(Boolean)
+      ?.replace(/^[「『"“”]+|[」』"“”]+$/g, '')
+      .replace(/[。.!！?？:：]+$/g, '')
+      .trim();
+    if (!candidate) return fallback;
+    return candidate.length <= 28 ? candidate : `${candidate.slice(0, 27).trimEnd()}…`;
+  } catch {
+    return fallback;
   }
 }
 

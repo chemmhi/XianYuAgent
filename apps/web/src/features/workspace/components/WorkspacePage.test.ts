@@ -164,8 +164,11 @@ describe('Workspace Composer styling contract', () => {
     expect(workspaceCss).toContain('font-size: var(--font-size-body);');
     expect(workspaceCss).toContain('font-size: var(--font-size-body-compact);');
     expect(workspaceCss).toContain('font-size: var(--font-size-meta);');
-    expect(workspaceCss).toContain('.workspace-context-head h3 { font-size: var(--font-size-card-title);');
-    expect(workspaceCss).toContain('.workspace-context-list b, body .app-viewport .workspace-domain .workspace-context-list span { font-size: var(--font-size-body-compact);');
+    expect(workspaceCss).toContain('.workspace-sidebar { display: block; min-width: 0; align-self: start; }');
+    expect(workspaceCss).toContain('.workspace-layout { min-height: 0; }');
+    expect(workspaceCss).toContain('.workspace-tool-event-details { margin: 7px 0 0 26px; padding: 10px 0 0; background: transparent; }');
+    expect(workspaceCss).toContain('.workspace-tool-event-details p { margin: 0; color: var(--sub);');
+    expect(workspacePageSource).not.toContain('WorkspaceContextPanel');
   });
 
   it('grows with content until the maximum, then scrolls internally', () => {

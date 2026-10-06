@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildWorkspaceMessages, deriveSessionTitle, groupWorkspaceMessages } from './messages';
+import { buildWorkspaceMessages, groupWorkspaceMessages } from './messages';
 import type { WorkspaceRunVM, WorkspaceRunEventVM } from './types';
 
 const run: WorkspaceRunVM = {
@@ -11,12 +11,6 @@ const run: WorkspaceRunVM = {
 const events: WorkspaceRunEventVM[] = [{ sequence: 2, runId: 'run-1', eventType: 'step.succeeded', payload: { status: 'succeeded' }, createdAt: '2026-09-20T00:00:02.000Z' }];
 
 describe('workspace message projection', () => {
-  it('derives a short intent title instead of copying the first instruction', () => {
-    expect(deriveSessionTitle('  查看  店铺库存\n并给出补货建议  ')).toBe('库存与补货分析');
-    expect(deriveSessionTitle('我启动AI技术咨询，需要定制开发服务这个商品的自动发货，卡券选择“奥维地图”')).toBe('配置商品自动发货');
-    expect(deriveSessionTitle('这是一个没有可识别意图的任务'.repeat(10))).toBe('工作区任务');
-  });
-
   it('groups adjacent reasoning and tool events into one collapsed trace', () => {
     const projected = buildWorkspaceMessages(run, [
       { sequence: 2, runId: 'run-1', eventType: 'run.executing', payload: { status: 'executing' }, createdAt: '2026-09-20T00:00:01.500Z' },

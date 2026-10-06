@@ -8,7 +8,7 @@ export interface WorkspaceApiTransport {
 
 export interface WorkspaceApi {
   listSessions(accountId?: string, search?: string): Promise<WorkspaceSessionVM[]>;
-  createSession(input: { accountId: string; title: string; summary?: string }): Promise<WorkspaceSessionVM>;
+  createSession(input: { accountId: string; title: string; summary?: string; instruction?: string }): Promise<WorkspaceSessionVM>;
   switchSession(sessionId: string): Promise<WorkspaceSessionVM>;
   archiveSession(sessionId: string): Promise<WorkspaceSessionVM>;
   deleteSession(sessionId: string): Promise<{ deleted: boolean; sessionId: string }>;
