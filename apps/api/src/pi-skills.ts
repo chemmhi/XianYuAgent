@@ -526,6 +526,9 @@ export class PiSkillManager {
     const command = input.command.trim();
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,80}$/.test(command)) throw new PiSkillError('SKILL_COMMAND_INVALID', 'skill command contains unsupported characters');
     const args = (input.args ?? []).map((arg) => String(arg)).slice(0, 64);
+    const argv = [...args];
+    if (input.sessionInput && !argv.includes('--session-input')) argv.push('--session-input', input.sessionInput);
+    if (input.sessionId && !argv.includes('--session-id')) argv.push('--session-id', input.sessionId);
     const skillRoot = resolve(item.path);
     const entryPath = resolve(skillRoot, item.entry);
     if (!isWithin(skillRoot, entryPath) || !existsSync(entryPath)) throw new PiSkillError('SKILL_ENTRYPOINT_INVALID', 'skill entrypoint is outside the installed skill directory');
@@ -559,9 +562,8 @@ export class PiSkillManager {
       PI_SKILL_LOGIN_MODE: input.command === 'login' ? (input.args?.includes('--token') ? 'token' : 'interactive') : 'command',
     };
     const executable = extname(entryPath).toLowerCase() === '.sh' ? 'bash' : process.execPath;
-    const argv = extname(entryPath).toLowerCase() === '.sh' ? [entryPath, command, ...args] : [entryPath, command, ...args];
     try {
-      const result = await promisify(this.execFileImpl)(executable, argv, { cwd: skillRoot, env, timeout: this.executionTimeoutMs, maxBuffer: 512 * 1024, windowsHide: true });
+      const result = await promisify(this.execFileImpl)(executable, [entryPath, command, ...argv], { cwd: skillRoot, env, timeout: this.executionTimeoutMs, maxBuffer: 512 * 1024, windowsHide: true });
       const stdout = sanitizeSkillOutput(String(result.stdout ?? ''), secretToRedact ? [secretToRedact] : []);
       const stderr = sanitizeSkillOutput(String(result.stderr ?? ''), secretToRedact ? [secretToRedact] : []);
       const parsed = parseLastJsonLine(`${stdout}\n${stderr}`);

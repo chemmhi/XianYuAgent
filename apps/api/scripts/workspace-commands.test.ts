@@ -104,6 +104,48 @@ test('resolves the exact product title in a natural-language cancellation and fi
   assert.equal(queries[0]?.keyword, product.title);
 });
 
+test('runs a named product automation cancellation through Workspace confirmation with the automation version', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'workspace-automation-confirm@example.com', passwordHash: 'hash', displayName: 'Workspace Automation Confirm' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'automation-confirm', displayName: 'Automation Confirm' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Automation Confirm' });
+  const product = { id: 'product-title-1', accountId: account.id, externalProductRef: '1082449333831', title: '视频下载及文案提取源码，包教包会', configVersion: 9 };
+  let receivedExpectedVersion: number | undefined;
+  const commands = orchestrator({
+    store,
+    products: {
+      get: async () => product,
+      list: async () => ({ items: [product], page: 1, pageSize: 20, total: 1, totalPages: 1 }),
+    },
+    productAutomation: {
+      get: async () => ({ configVersion: 2, product, config: {} }),
+      update: async (input: { expectedConfigVersion: number; config: unknown }) => {
+        receivedExpectedVersion = input.expectedConfigVersion;
+        if (input.expectedConfigVersion !== 2) throw new Error('AUTOMATION_VERSION_CONFLICT');
+        return { configVersion: 3, config: input.config };
+      },
+    },
+  });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '帮我取消 视频下载及文案提取源码，包教包会 这个商品的自动化规则' });
+  const runtime = new InProcessAgentRuntime(store, commands);
+  const service = new WorkspaceService(store, runtime, async () => 'audit-automation-confirm', undefined, undefined, commands);
+  runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+  const deadline = Date.now() + 2_000;
+  let confirmation;
+  while (Date.now() < deadline) {
+    confirmation = await store.getWorkspaceConfirmation(admin.id, created.run.id);
+    if (confirmation?.status === 'active') break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(confirmation?.action, 'product_automation_update');
+  assert.equal(confirmation?.manifest.expectedConfigVersion, 2);
+
+  const result = await service.confirmRun({ adminId: admin.id, runId: created.run.id, expectedVersion: confirmation!.version, requestId: 'req-automation-confirm', traceId: 'trace-automation-confirm' });
+  assert.equal(receivedExpectedVersion, 2);
+  assert.equal(result.run.status, 'succeeded');
+  assert.match(result.run.resultSummary ?? '', /自动化规则已更新/);
+});
+
 test('rejects read-tool routing for product mutation instructions', async () => {
   const commands = orchestrator();
   await assert.rejects(
