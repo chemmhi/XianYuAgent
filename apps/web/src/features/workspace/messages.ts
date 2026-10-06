@@ -99,6 +99,7 @@ const lifecycleEventTypes = new Set([
   'run.queued',
   'run.started',
   'run.executing',
+  'run.cancelled',
   'runtime.started',
   'step.started',
   'step.executing',

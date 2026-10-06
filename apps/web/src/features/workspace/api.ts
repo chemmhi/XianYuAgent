@@ -19,6 +19,7 @@ export interface WorkspaceApi {
   getConfirmation(runId: string): Promise<WorkspaceConfirmationVM>;
   confirmRun(runId: string, expectedVersion: number): Promise<{ run: WorkspaceRunVM; confirmation: WorkspaceConfirmationVM; outbox: WorkspaceOutboxVM }>;
   cancelRun(runId: string, expectedVersion: number): Promise<{ run: WorkspaceRunVM; confirmation: WorkspaceConfirmationVM }>;
+  cancelActiveRun(runId: string): Promise<WorkspaceRunVM>;
   reconnectRun(runId: string): Promise<WorkspaceRunVM>;
   retryRun(runId: string): Promise<{ run: WorkspaceRunVM; outbox: WorkspaceOutboxVM }>;
   listOutbox(runId: string): Promise<WorkspaceOutboxVM[]>;
@@ -86,6 +87,7 @@ export function createWorkspaceApi(transport: WorkspaceApiTransport, options: { 
     async getConfirmation(runId) { return unwrap(await transport.get<WorkspaceConfirmationVM | ApiEnvelope<WorkspaceConfirmationVM>>(`/api/v1/workspace/runs/${encodeURIComponent(runId)}/confirmation`)); },
     async confirmRun(runId, expectedVersion) { return unwrap(await post<{ run: WorkspaceRunVM; confirmation: WorkspaceConfirmationVM; outbox: WorkspaceOutboxVM } | ApiEnvelope<{ run: WorkspaceRunVM; confirmation: WorkspaceConfirmationVM; outbox: WorkspaceOutboxVM }>>(`/api/v1/workspace/runs/${encodeURIComponent(runId)}/confirm`, { expectedVersion }, 'workspace-confirm')); },
     async cancelRun(runId, expectedVersion) { return unwrap(await post<{ run: WorkspaceRunVM; confirmation: WorkspaceConfirmationVM } | ApiEnvelope<{ run: WorkspaceRunVM; confirmation: WorkspaceConfirmationVM }>>(`/api/v1/workspace/runs/${encodeURIComponent(runId)}/cancel`, { expectedVersion }, 'workspace-cancel')); },
+    async cancelActiveRun(runId) { return unwrap(await post<WorkspaceRunVM | ApiEnvelope<WorkspaceRunVM>>(`/api/v1/workspace/runs/${encodeURIComponent(runId)}/cancel-active`, {}, 'workspace-cancel-active')); },
     async reconnectRun(runId) { return unwrap(await post<WorkspaceRunVM | ApiEnvelope<WorkspaceRunVM>>(`/api/v1/workspace/runs/${encodeURIComponent(runId)}/reconnect`, {}, 'workspace-reconnect')); },
     async retryRun(runId) { return unwrap(await post<{ run: WorkspaceRunVM; outbox: WorkspaceOutboxVM } | ApiEnvelope<{ run: WorkspaceRunVM; outbox: WorkspaceOutboxVM }>>(`/api/v1/workspace/runs/${encodeURIComponent(runId)}/retry`, {}, 'workspace-retry')); },
     async listOutbox(runId) { return (unwrap(await transport.get<OutboxPayload | ApiEnvelope<OutboxPayload>>(`/api/v1/execution/outbox?runId=${encodeURIComponent(runId)}`))).items ?? []; },

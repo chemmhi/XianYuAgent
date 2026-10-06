@@ -385,6 +385,7 @@ const stepTransitions: Record<StepStatus, StepStatus[]> = {
 
 export class PiRuntimeAdapter implements WorkspaceRuntime {
   private readonly active = new Map<string, AbortController>();
+  private readonly cancelled = new Set<string>();
   private stopped = false;
 
   constructor(
@@ -394,19 +395,24 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
   ) {}
 
   enqueue(input: PiRuntimeEnqueueInput): void {
-    if (this.stopped || this.active.has(input.run.id)) return;
+    if (this.stopped || this.active.has(input.run.id) || this.cancelled.has(input.run.id)) return;
     const controller = new AbortController();
     this.active.set(input.run.id, controller);
     void this.execute(input, controller.signal).catch(() => {
       // The execution path records a safe failure event. Keep enqueue fire-and-forget.
-    }).finally(() => this.active.delete(input.run.id));
+    }).finally(() => { this.active.delete(input.run.id); this.cancelled.delete(input.run.id); });
   }
 
   async resume(input: PiRuntimeEnqueueInput): Promise<void> {
-    if (this.stopped || this.active.has(input.run.id)) return;
+    if (this.stopped || this.active.has(input.run.id) || this.cancelled.has(input.run.id)) return;
     const prepared = await prepareWorkspaceRunResume({ store: this.store, run: input.run, steps: input.steps });
     if (!prepared) return;
     this.enqueue({ ...input, ...prepared });
+  }
+
+  cancel(runId: string): void {
+    this.cancelled.add(runId);
+    this.active.get(runId)?.abort('user_cancelled');
   }
 
   stop(): void {
@@ -416,7 +422,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
 
   private async execute(input: PiRuntimeEnqueueInput, signal: AbortSignal): Promise<void> {
     const step = findWorkspaceExecutionStep(input.steps);
-    if (!step || this.stopped) return;
+    if (!step || this.stopped || this.cancelled.has(input.run.id)) return;
     try {
       const sessionId = input.sessionId ?? input.run.sessionId;
       if (this.options.persistUserMessage !== false && !input.resumeFromFailure) await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'user_message', content: redactSensitiveText(input.run.instruction, this.options.outputLimit ?? 2_000, this.options.redactSecrets) });
@@ -432,7 +438,9 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
         accountId: input.run.accountId,
       }) ?? this.modelClient;
       const skillInstruction = await this.options.skillManager?.handleInstruction({ adminId: input.adminId ?? input.run.requestedBy, instruction: input.run.instruction });
+      if (this.stopped || signal.aborted || this.cancelled.has(input.run.id)) return;
       if (skillInstruction) {
+        if (this.stopped || signal.aborted || this.cancelled.has(input.run.id)) return;
         const output = redactSensitiveText(skillInstruction.content, this.options.outputLimit ?? 2_000, this.options.redactSecrets);
         await this.transitionRun(input.run, 'executing');
         await this.transitionStep(step, 'executing');
@@ -456,6 +464,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       const nativeWrite = this.options.workspaceCommands
         ? await this.options.workspaceCommands.prepareWrite({ adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction, requestId: `workspace:${input.run.id}`, traceId: `workspace:${input.run.id}` })
         : await prepareNativeWorkspaceWrite({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction });
+      if (this.stopped || signal.aborted || this.cancelled.has(input.run.id)) return;
       if (nativeWrite) {
         await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: nativeWrite.summary, summary: nativeWrite.title });
         await this.transitionStep(step, 'waiting_confirmation', { outputSummary: nativeWrite.summary });
@@ -474,6 +483,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       const nativeRead = this.options.workspaceCommands
         ? await this.options.workspaceCommands.execute({ adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction, requestId: `workspace:${input.run.id}`, traceId: `workspace:${input.run.id}` })
         : await executeNativeWorkspaceRead({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction });
+      if (this.stopped || signal.aborted || this.cancelled.has(input.run.id)) return;
       if (nativeRead) {
         const sessionId = input.sessionId ?? input.run.sessionId;
         await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'tool_event', content: nativeRead.content, summary: nativeRead.summary });
@@ -505,7 +515,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       await this.emit(input.run.id, 'runtime.succeeded', { status: 'succeeded', model: result.model, messageType: 'final_answer', content: output });
       await this.emit(input.run.id, 'run.succeeded', { status: 'succeeded', resultSummary: output, messageType: 'final_answer', content: output });
     } catch (error) {
-      if (this.stopped && signal.aborted) return;
+      if (signal.aborted || this.cancelled.has(input.run.id)) return;
       await this.recordFailure(input, step, error);
     }
   }
@@ -604,6 +614,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           const rawResult: unknown = this.options.skillManager && call.function.name.startsWith('pi_skill_')
             ? await this.options.skillManager.executeModelTool(call.function.name, args, toolInput)
             : await commands.executeModelTool(call.function.name, args, toolInput);
+          if (this.stopped || signal.aborted) return;
           const normalized = normalizeModelToolResult(rawResult);
           if (!normalized.ok) {
             pendingToolFailure = { toolName: call.function.name, ...normalized.failure };
@@ -643,6 +654,8 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       if (waitingConfirmation) break;
       if (pendingUserAction) break;
     }
+
+    if (this.stopped || signal.aborted) return;
 
     if (waitingConfirmation) {
       await this.emit(input.run.id, 'stream.completed', { status: 'waiting_confirmation', model: finalResult?.model ?? this.options.model, reasoningMessageCount: allReasoning.length });

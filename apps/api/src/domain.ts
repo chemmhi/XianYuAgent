@@ -1408,6 +1408,7 @@ export interface Store {
   recordAudit(event: AuditEventRecord): Promise<void>;
   listAgentSessions(adminId: string, query?: { accountId?: string; search?: string }): Promise<AgentSessionRecord[]>;
   createAgentSession(input: { adminId: string; accountId: string; title: string; summary?: string }): Promise<AgentSessionRecord>;
+  updateAgentSessionTitle(adminId: string, sessionId: string, title: string): Promise<AgentSessionRecord | undefined>;
   getAgentSession(adminId: string, sessionId: string): Promise<AgentSessionRecord | undefined>;
   archiveAgentSession(adminId: string, sessionId: string): Promise<AgentSessionRecord | undefined>;
   deleteAgentSession(adminId: string, sessionId: string): Promise<AgentSessionRecord | undefined>;

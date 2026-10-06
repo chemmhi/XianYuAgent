@@ -1733,6 +1733,13 @@ export class PostgresStore implements Store {
     return this.toAgentSession(result.rows[0]);
   }
 
+  async updateAgentSessionTitle(adminId: string, sessionId: string, title: string): Promise<AgentSessionRecord | undefined> {
+    const normalizedTitle = title.trim();
+    if (!normalizedTitle) return this.getAgentSession(adminId, sessionId);
+    const result = await this.pool.query(`update workspace.agent_sessions s set title=$3,updated_at=now() where s.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=s.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now())) returning s.*`, [sessionId, adminId, normalizedTitle]);
+    return result.rows[0] ? this.toAgentSession(result.rows[0]) : this.getAgentSession(adminId, sessionId).then((session) => session);
+  }
+
   async getAgentSession(adminId: string, sessionId: string): Promise<AgentSessionRecord | undefined> {
     const result = await this.pool.query('select s.* from workspace.agent_sessions s where s.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=s.account_id and scope.admin_id=$2 and scope.status=\'active\' and (scope.expires_at is null or scope.expires_at>now()))', [sessionId, adminId]);
     return result.rows[0] ? this.toAgentSession(result.rows[0]) : undefined;

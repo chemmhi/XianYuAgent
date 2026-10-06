@@ -1615,6 +1615,16 @@ export class MemoryStore implements Store {
     return { ...session };
   }
 
+  async updateAgentSessionTitle(adminId: string, sessionId: string, title: string): Promise<AgentSessionRecord | undefined> {
+    const session = this.agentSessions.get(sessionId);
+    if (!session || !(await this.hasAccountScope(adminId, session.accountId))) return undefined;
+    const normalizedTitle = title.trim();
+    if (!normalizedTitle) return { ...session };
+    session.title = normalizedTitle;
+    session.updatedAt = new Date().toISOString();
+    return { ...session };
+  }
+
   async getAgentSession(adminId: string, sessionId: string): Promise<AgentSessionRecord | undefined> {
     const session = this.agentSessions.get(sessionId);
     if (!session || !(await this.hasAccountScope(adminId, session.accountId))) return undefined;

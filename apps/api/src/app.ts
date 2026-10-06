@@ -1173,11 +1173,12 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
       return success(ctx, result.run, result.duplicate ? 200 : 201);
     });
   }
-  const workspaceConfirmationMatch = ctx.path.match(/^\/api\/v1\/workspace\/runs\/([^/]+)\/(confirmation|confirm|cancel|retry|reconnect)$/);
+  const workspaceConfirmationMatch = ctx.path.match(/^\/api\/v1\/workspace\/runs\/([^/]+)\/(confirmation|confirm|cancel-active|cancel|retry|reconnect)$/);
   if (workspaceConfirmationMatch) {
     const runId = decodeURIComponent(workspaceConfirmationMatch[1]);
     const action = workspaceConfirmationMatch[2];
     if (action === 'confirmation' && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, await workspace.getConfirmation({ adminId: authContext.admin.id, runId })).body };
+    if (action === 'cancel-active' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, undefined, async () => success(ctx, await workspace.cancelActiveRun({ adminId: authContext.admin.id, runId, requestId: ctx.requestId, traceId: ctx.traceId })));
     if (action === 'confirm' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, undefined, async () => {
       const expectedVersion = Number(ctx.body.expectedVersion);
       if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1) throw new ServiceError(422, 'VALIDATION_FAILED', 'expectedVersion must be a positive integer');

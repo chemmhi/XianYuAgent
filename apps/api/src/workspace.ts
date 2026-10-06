@@ -118,6 +118,7 @@ export interface WorkspaceOutboxView {
 export interface WorkspaceRuntime {
   enqueue(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; resumeFromFailure?: boolean }): void;
   resume(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; resumeFromFailure?: boolean }): Promise<void>;
+  cancel(runId: string): void;
   stop(): void;
 }
 
@@ -166,12 +167,13 @@ export async function prepareWorkspaceRunResume(input: { store: Store; run: RunR
 
 export class InProcessAgentRuntime implements WorkspaceRuntime {
   private readonly active = new Set<string>();
+  private readonly cancelled = new Set<string>();
   private stopped = false;
 
   constructor(private readonly store: Store, private readonly commands?: WorkspaceCommandOrchestrator) {}
 
   enqueue(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; resumeFromFailure?: boolean }): void {
-    if (this.stopped || this.active.has(input.run.id)) return;
+    if (this.stopped || this.active.has(input.run.id) || this.cancelled.has(input.run.id)) return;
     this.active.add(input.run.id);
     setTimeout(() => {
       if (this.stopped) { this.active.delete(input.run.id); return; }
@@ -180,23 +182,26 @@ export class InProcessAgentRuntime implements WorkspaceRuntime {
   }
 
   async resume(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; resumeFromFailure?: boolean }): Promise<void> {
-    if (this.stopped || this.active.has(input.run.id)) return;
+    if (this.stopped || this.active.has(input.run.id) || this.cancelled.has(input.run.id)) return;
     const prepared = await prepareWorkspaceRunResume({ store: this.store, run: input.run, steps: input.steps });
     if (!prepared) return;
     this.enqueue({ ...input, ...prepared, resumeFromFailure: true });
   }
 
+  cancel(runId: string): void { this.cancelled.add(runId); }
+
   stop(): void { this.stopped = true; }
 
   private async execute(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string }): Promise<void> {
     const step = findWorkspaceExecutionStep(input.steps);
-    if (!step) return;
+    if (!step || this.stopped || this.cancelled.has(input.run.id)) return;
     const startedAt = new Date().toISOString();
     await this.transitionRun(input.run, 'running', { startedAt });
     await this.transitionStep(step, 'running', { startedAt });
     await this.emit(input.run.id, 'run.started', { status: 'running' });
     await this.emit(input.run.id, 'step.started', { stepId: step.id, status: 'running' });
     await new Promise((resolve) => setTimeout(resolve, 5));
+    if (this.stopped || this.cancelled.has(input.run.id)) return;
     const nativeWrite = this.commands
       ? await this.commands.prepareWrite({ adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction, requestId: `workspace:${input.run.id}`, traceId: `workspace:${input.run.id}` })
       : await prepareNativeWorkspaceWrite({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction });
@@ -213,6 +218,7 @@ export class InProcessAgentRuntime implements WorkspaceRuntime {
     await this.emit(input.run.id, 'run.executing', { status: 'executing' });
     await this.emit(input.run.id, 'step.executing', { stepId: step.id, status: 'executing' });
     await new Promise((resolve) => setTimeout(resolve, 5));
+    if (this.stopped || this.cancelled.has(input.run.id)) return;
     const finishedAt = new Date().toISOString();
     const nativeRead = this.commands
       ? await this.commands.execute({ adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction, requestId: `workspace:${input.run.id}`, traceId: `workspace:${input.run.id}` })
@@ -279,10 +285,17 @@ export class WorkspaceService {
   async createSession(input: { adminId: string; accountId: string; title: string; summary?: string; instruction?: string; requestId: string; traceId: string }): Promise<WorkspaceSessionView> {
     if (!input.accountId.trim()) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
     const fallbackTitle = input.title.trim() || '新工作区会话';
-    const title = await summarizeWorkspaceSessionTitle(this.titleModelClient, input.instruction, fallbackTitle);
     try {
-      const session = await this.store.createAgentSession({ adminId: input.adminId, accountId: input.accountId, title, summary: input.summary?.trim() || undefined });
+      const session = await this.store.createAgentSession({ adminId: input.adminId, accountId: input.accountId, title: fallbackTitle, summary: input.summary?.trim() || undefined });
       await this.audit({ actorId: input.adminId, action: 'workspace.session.created', targetRef: session.id, requestId: input.requestId, traceId: input.traceId, payload: { title: session.title }, accountId: session.accountId });
+      void summarizeWorkspaceSessionTitle(this.titleModelClient, input.instruction, fallbackTitle)
+        .then(async (title) => {
+          if (title === fallbackTitle) return;
+          await this.store.updateAgentSessionTitle(input.adminId, session.id, title);
+        })
+        .catch(() => {
+          // Title generation is best-effort and must never block the session or first run.
+        });
       return this.toSessionView(session);
     } catch (error) { throw mapWorkspaceStoreError(error); }
   }
@@ -342,6 +355,32 @@ export class WorkspaceService {
     const bundle = await this.store.getRun(input.adminId, input.runId);
     if (!bundle) throw new ServiceError(404, 'NOT_FOUND', 'run not found');
     return this.toRunView(bundle.run, bundle.steps);
+  }
+
+  async cancelActiveRun(input: { adminId: string; runId: string; requestId: string; traceId: string }): Promise<WorkspaceRunView> {
+    const bundle = await this.store.getRun(input.adminId, input.runId);
+    if (!bundle) throw new ServiceError(404, 'NOT_FOUND', 'run not found');
+    if (terminalRunStatuses.has(bundle.run.status)) return this.toRunView(bundle.run, bundle.steps);
+
+    this.runtime.cancel(input.runId);
+    const finishedAt = new Date().toISOString();
+    const summary = '任务已取消';
+    const run = await this.store.updateRun(input.runId, { status: 'cancelled', finishedAt, resultSummary: summary, errorCode: null });
+    if (!run) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'run cancellation failed');
+    const step = findWorkspaceExecutionStep(bundle.steps);
+    if (step && !terminalStepStatuses.has(step.status)) {
+      await this.store.updateRunStep(step.id, { status: 'cancelled', finishedAt, outputSummary: summary, errorCode: null });
+    }
+    const confirmation = await this.store.getWorkspaceConfirmation(input.adminId, input.runId);
+    if (confirmation?.status === 'active') {
+      await this.store.transitionWorkspaceConfirmation({ adminId: input.adminId, confirmationId: confirmation.id, expectedVersion: confirmation.version, status: 'cancelled', actorId: input.adminId });
+      await this.store.appendRunEvent({ runId: input.runId, eventType: 'workspace.confirmation.cancelled', payload: { confirmationId: confirmation.id, status: 'cancelled', reason: 'run_cancelled' } });
+    }
+    await this.appendMessage({ adminId: input.adminId, sessionId: bundle.run.sessionId, runId: input.runId, type: 'final_answer', content: summary, summary });
+    await this.store.appendRunEvent({ runId: input.runId, eventType: 'run.cancelled', payload: { status: 'cancelled', resultSummary: summary } });
+    await this.audit({ actorId: input.adminId, action: 'workspace.run.cancelled', targetRef: input.runId, requestId: input.requestId, traceId: input.traceId, payload: { reason: 'user_requested' }, accountId: bundle.run.accountId });
+    const latest = await this.store.getRun(input.adminId, input.runId);
+    return this.toRunView(latest?.run ?? run, latest?.steps ?? bundle.steps);
   }
 
   async listEvents(input: { adminId: string; runId: string; afterSequence?: number }): Promise<RunEventRecord[]> {

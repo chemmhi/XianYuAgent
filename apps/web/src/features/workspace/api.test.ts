@@ -96,4 +96,20 @@ describe('workspace canonical API adapter', () => {
     expect(calls[0]?.headers).toEqual(expect.objectContaining({ 'Idempotency-Key': expect.stringContaining('workspace-reconnect-') }));
   });
 
+  it('cancels an active run through the canonical idempotent route', async () => {
+    const calls: Array<{ path: string; body?: unknown; headers?: HeadersInit }> = [];
+    const api = createWorkspaceApi({
+      async get<T>() { throw new Error('unexpected GET'); },
+      async post<T>(path: string, body?: unknown, init?: RequestInit) {
+        calls.push({ path, body, headers: init?.headers });
+        return { success: true, data: { runId: 'run-1', sessionId: 'session-1', accountId: 'account-1', status: 'cancelled', instructionSummary: '查看状态', createdAt: '2026-09-19T00:00:00.000Z', updatedAt: '2026-09-19T00:00:01.000Z', finishedAt: '2026-09-19T00:00:01.000Z', steps: [] } } as T;
+      },
+    });
+
+    await expect(api.cancelActiveRun('run-1')).resolves.toMatchObject({ runId: 'run-1', status: 'cancelled' });
+    expect(calls[0]?.path).toBe('/api/v1/workspace/runs/run-1/cancel-active');
+    expect(calls[0]?.body).toEqual({});
+    expect(calls[0]?.headers).toEqual(expect.objectContaining({ 'Idempotency-Key': expect.stringContaining('workspace-cancel-active-') }));
+  });
+
 });

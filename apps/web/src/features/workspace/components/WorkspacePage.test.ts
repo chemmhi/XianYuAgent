@@ -186,6 +186,16 @@ describe('Workspace Composer styling contract', () => {
     expect(submitting).toContain('workspace-send-round is-submitting');
     expect(submitting).toContain('<rect x="7" y="7" width="10" height="10"');
     expect(submitting).toContain('aria-label="提交中"');
+    const cancellable = renderToStaticMarkup(createElement(WorkspaceSendButton, { submitting: true, disabled: true, cancellable: true, onCancel: vi.fn() }));
+    expect(cancellable).toContain('aria-label="取消当前任务"');
+    expect(cancellable).toContain('type="button"');
+  });
+
+  it('keeps Enter send and Shift+Enter newline semantics in the source contract', () => {
+    expect(workspacePageSource).toContain("event.key === 'Enter' && !event.shiftKey");
+    expect(workspacePageSource).toContain('event.currentTarget.form?.requestSubmit()');
+    expect(workspacePageSource).toContain('onPaste=');
+    expect(workspacePageSource).toContain('clipboardImageFiles(event.clipboardData)');
   });
 
   it('grows with content until the maximum, then scrolls internally', () => {
