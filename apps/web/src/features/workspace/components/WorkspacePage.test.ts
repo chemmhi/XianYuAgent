@@ -71,6 +71,20 @@ describe('Workspace SessionRow', () => {
     expect(workspaceCss).toContain('margin-left: auto; padding-right: 2px;');
   });
 
+  it('collapses title and task loading into one spinner', () => {
+    const html = renderToStaticMarkup(createElement(SessionRow, {
+      session: { ...session, titlePending: true },
+      active: true,
+      running: true,
+      busy: false,
+      onSwitch: vi.fn(),
+      onDelete: vi.fn(),
+    }));
+
+    expect((html.match(/workspace-session-(?:title-loading|running-icon)/g) ?? []).length).toBe(1);
+    expect(html).toContain('aria-label="会话标题和任务处理中"');
+  });
+
   it('does not render a meaningless active label when the session has no summary', () => {
     const html = renderToStaticMarkup(createElement(SessionRow, {
       session: { ...session, summary: undefined },

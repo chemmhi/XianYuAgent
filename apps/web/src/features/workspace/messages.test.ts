@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildWorkspaceMessages, groupWorkspaceMessages } from './messages';
+import { buildWorkspaceMessages, deriveWorkspaceSessionTitle, groupWorkspaceMessages } from './messages';
 import type { WorkspaceRunVM, WorkspaceRunEventVM } from './types';
 
 const run: WorkspaceRunVM = {
@@ -9,6 +9,13 @@ const run: WorkspaceRunVM = {
 };
 
 const events: WorkspaceRunEventVM[] = [{ sequence: 2, runId: 'run-1', eventType: 'step.succeeded', payload: { status: 'succeeded' }, createdAt: '2026-09-20T00:00:02.000Z' }];
+
+describe('workspace session title fallback', () => {
+  it('keeps the first instruction readable while title generation is pending', () => {
+    expect(deriveWorkspaceSessionTitle('  检查当前商品的自动发货规则  ')).toBe('检查当前商品的自动发货规则');
+    expect(deriveWorkspaceSessionTitle('一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十')).toBe('一二三四五六七八九十一二三四五六七八九十一二三四五六七…');
+  });
+});
 
 describe('workspace message projection', () => {
   it('groups adjacent reasoning and tool events into one collapsed trace', () => {
