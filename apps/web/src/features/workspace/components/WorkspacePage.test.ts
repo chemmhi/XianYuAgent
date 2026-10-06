@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { getComposerTextareaMetrics, MessageStream, SessionRow, WorkspaceDeleteSessionModal } from './WorkspacePage';
+import { getComposerTextareaMetrics, MessageStream, scrollMessageStreamToLatest, SessionRow, WorkspaceDeleteSessionModal } from './WorkspacePage';
 import type { WorkspaceMessageVM, WorkspaceSessionVM } from '../types';
 
 const workspaceCss = readFileSync(fileURLToPath(new URL('./workspace.css', import.meta.url)), 'utf8').replace(/\r\n/g, '\r\n').replace(/\s+/g, ' ').trim();
@@ -97,6 +97,14 @@ describe('Workspace SessionRow', () => {
 });
 
 describe('Workspace MessageStream', () => {
+  it('scrolls the conversation surface to the latest appended content', () => {
+    const stream = { scrollTop: 0, scrollHeight: 720 };
+    scrollMessageStreamToLatest(stream);
+    expect(stream.scrollTop).toBe(720);
+    expect(workspacePageSource).toContain('ref={messageStreamRef}');
+    expect(workspacePageSource).toContain('scrollMessageStreamToLatest(messageStreamRef.current)');
+  });
+
   it('keeps agent execution details collapsed and removes avatar chrome', () => {
     const messages: WorkspaceMessageVM[] = [
       { id: 'user-1', runId: 'run-1', type: 'user_message', createdAt: '2026-09-22T00:00:00.000Z', title: '用户', content: '检查店铺状态' },

@@ -114,15 +114,17 @@ export interface WorkspaceOutboxView {
 }
 
 export interface WorkspaceRuntime {
-  enqueue(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> }): void;
-  resume(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> }): Promise<void>;
+  enqueue(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; resumeFromFailure?: boolean }): void;
+  resume(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; resumeFromFailure?: boolean }): Promise<void>;
   stop(): void;
 }
 
 const terminalStepStatuses = new Set<StepStatus>(['succeeded', 'partially_succeeded', 'skipped', 'cancelled']);
 
 export function findWorkspaceExecutionStep(steps: StepRecord[]): StepRecord | undefined {
-  return steps.find((step) => !terminalStepStatuses.has(step.status));
+  const ordered = [...steps].sort((left, right) => right.stepNo - left.stepNo || right.attempt - left.attempt);
+  const retryable = ordered.find((step) => ['failed', 'retrying', 'running', 'executing'].includes(step.status));
+  return retryable ?? ordered.find((step) => !terminalStepStatuses.has(step.status));
 }
 
 /**
@@ -166,7 +168,7 @@ export class InProcessAgentRuntime implements WorkspaceRuntime {
 
   constructor(private readonly store: Store, private readonly commands?: WorkspaceCommandOrchestrator) {}
 
-  enqueue(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string }): void {
+  enqueue(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; resumeFromFailure?: boolean }): void {
     if (this.stopped || this.active.has(input.run.id)) return;
     this.active.add(input.run.id);
     setTimeout(() => {
@@ -175,11 +177,11 @@ export class InProcessAgentRuntime implements WorkspaceRuntime {
     }, 0);
   }
 
-  async resume(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string }): Promise<void> {
+  async resume(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; resumeFromFailure?: boolean }): Promise<void> {
     if (this.stopped || this.active.has(input.run.id)) return;
     const prepared = await prepareWorkspaceRunResume({ store: this.store, run: input.run, steps: input.steps });
     if (!prepared) return;
-    this.enqueue({ ...input, ...prepared });
+    this.enqueue({ ...input, ...prepared, resumeFromFailure: true });
   }
 
   stop(): void { this.stopped = true; }
@@ -549,7 +551,21 @@ export class WorkspaceService {
   async reconnectRun(input: { adminId: string; runId: string; requestId: string; traceId: string }): Promise<WorkspaceRunView> {
     const bundle = await this.store.getRun(input.adminId, input.runId);
     if (!bundle) throw new ServiceError(404, 'NOT_FOUND', 'run not found');
-    await this.runtime.resume({ run: bundle.run, steps: bundle.steps, adminId: input.adminId, sessionId: bundle.run.sessionId });
+    const runCreatedAt = Date.parse(bundle.run.createdAt);
+    const sessionMessages = await this.store.listWorkspaceMessages(input.adminId, bundle.run.sessionId, 100);
+    const currentRunStartSequence = sessionMessages.find((message) => message.runId === bundle.run.id && message.type === 'user_message')?.sequence;
+    const history = sessionMessages
+      .filter((message) => {
+        if (message.runId === bundle.run.id) return message.type !== 'user_message' && message.type !== 'final_answer';
+        if (currentRunStartSequence !== undefined) return message.sequence < currentRunStartSequence;
+        const messageCreatedAt = Date.parse(message.createdAt);
+        return !Number.isFinite(runCreatedAt) || !Number.isFinite(messageCreatedAt) || messageCreatedAt <= runCreatedAt;
+      })
+      .map((message) => ({
+        role: message.type === 'user_message' ? 'user' as const : 'assistant' as const,
+        content: `[${message.type}] ${message.summary ?? message.content}`,
+      }));
+    await this.runtime.resume({ run: bundle.run, steps: bundle.steps, adminId: input.adminId, sessionId: bundle.run.sessionId, history, resumeFromFailure: true });
     await this.audit({ actorId: input.adminId, action: 'workspace.run.reconnected', targetRef: input.runId, requestId: input.requestId, traceId: input.traceId, payload: { previousStatus: bundle.run.status }, accountId: bundle.run.accountId });
     const latest = await this.store.getRun(input.adminId, input.runId);
     if (!latest) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'run reload failed');
