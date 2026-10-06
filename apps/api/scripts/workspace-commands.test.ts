@@ -154,6 +154,19 @@ test('rejects read-tool routing for product mutation instructions', async () => 
   );
 });
 
+test('keeps read-only order analysis out of the mutation guard', async () => {
+  const commands = orchestrator({
+    store: {
+      hasAccountScope: async () => true,
+      getCouponBatch: async () => undefined,
+      getAutoReplyActivitySummary: async () => ({ inboundCount: 2, processingCount: 0, persistedCount: 2, handoffCount: 0, failedCount: 0, skippedCount: 0, completionRate: 1, throughputPerSecond: 0.1, p95DurationMs: 120, from: '2026-10-06T00:00:00.000Z', to: '2026-10-06T01:00:00.000Z', health: [] }),
+    },
+  });
+  const result = await commands.executeModelTool('workspace_read', { instruction: '分析当前的订单数据，并给出运营建议' }, input);
+  assert.equal(result.kind, 'read');
+  assert.match(result.title, /运营/);
+});
+
 test('rejects broad-read routing for named product lookup instructions', async () => {
   const commands = orchestrator();
   await assert.rejects(

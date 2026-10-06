@@ -581,8 +581,16 @@ function productListResult(items: ProductRecord[], total: number): WorkspaceComm
 function orderListResult(items: OrderRecord[], total: number): WorkspaceCommandResult { const rows = items.map((item) => ({ orderNo: item.orderNo, itemTitle: item.itemTitle, amountMinor: item.amountMinor, paymentStatus: item.paymentStatus, orderStatus: item.orderStatus, deliveryStatus: item.deliveryStatus, afterSalesStatus: item.afterSalesStatus, createdAt: item.createdAt, updatedAt: item.updatedAt, redacted: true })); return { kind: 'orders', title: '订单查询', summary: `已读取 ${total} 个订单`, content: rows.length ? [`当前账号共有 ${total} 个订单：`, ...rows.map((item, index) => `${index + 1}. ${item.orderNo} · ${item.itemTitle} · 支付 ${item.paymentStatus} · 交付 ${item.deliveryStatus} · 售后 ${item.afterSalesStatus}`)].join('\n') : '当前账号暂无匹配订单。', data: { total, items: rows } }; }
 function safeFieldNames(fields: Record<string, string>): string[] { return Object.keys(fields).filter((key) => key !== 'content' && key !== 'knowledgeBase' && key !== 'apiKey'); }
 function productSearchContent(items: ProductRecord[], total: number): string { return items.length ? [`匹配到 ${total} 个商品：`, ...items.map((item, index) => `${index + 1}. ${item.title} · ${item.externalProductRef ?? item.id} · ${item.status}`)].join('\n') : '未匹配到商品。'; }
+function stripNegatedWorkspaceClauses(instruction: string): string {
+  // Model-generated read requests often repeat the write vocabulary in an
+  // explicit safety clause (for example, “不要执行任何订单更新”). Those
+  // terms describe what must not happen and must not route the request to a
+  // mutation tool.
+  return instruction.replace(/(?:仅执行只读查询|仅查询|只读|只查询|不(?:要|做|进行|执行)|无需|禁止)[^。！？\n；;]*(?=[。！？\n；;]|$)/gi, ' ');
+}
+
 function requiresWorkspaceWrite(instruction: string): boolean {
-  const readNormalized = instruction.replace(/(?:未|待)发货/gi, '');
+  const readNormalized = stripNegatedWorkspaceClauses(instruction).replace(/(?:未|待)发货/gi, '');
   return /(取消|关闭|停用|禁用|修改|更新|配置|设置|启用|删除|发布|发货|改价|赠品|评价|绑定|解绑)/i.test(readNormalized) && /(商品|自动化|规则|知识库|卡券|订单|发货)/i.test(readNormalized);
 }
 function requiresWorkspaceProductSearch(instruction: string): boolean {

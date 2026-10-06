@@ -19,7 +19,10 @@
 .workspace-session-row.archived { opacity: .62; }
 .workspace-session-select { display: grid; flex: 1; gap: 4px; min-width: 0; width: 100%; padding: 11px 10px; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
 .workspace-session-select:disabled { cursor: default; }
-.workspace-session-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 700; }
+.workspace-session-title { display: inline-flex; align-items: center; min-width: 0; gap: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 700; }
+.workspace-session-title > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-session-running-icon { width: 9px; height: 9px; flex: 0 0 auto; border: 1.5px solid #F59E0B; border-top-color: transparent; border-radius: 50%; box-sizing: border-box; animation: workspace-session-running-spin .9s linear infinite; }
+@keyframes workspace-session-running-spin { to { transform: rotate(360deg); } }
 .workspace-session-select small { overflow: hidden; color: var(--sub); text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-meta); line-height: var(--font-line-meta); }
 .workspace-session-action { display: grid; place-items: center; align-self: center; width: 32px; height: 30px; margin-right: 5px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--sub); }
 .workspace-session-action:hover:not(:disabled) { background: #fff; color: var(--danger); }

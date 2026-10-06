@@ -39,6 +39,21 @@ describe('Workspace SessionRow', () => {
     expect(workspaceCss).toContain('.workspace-session-action-icon { width: 16px; height: 16px; }');
   });
 
+  it('marks an active session with a compact running indicator in the title', () => {
+    const html = renderToStaticMarkup(createElement(SessionRow, {
+      session,
+      active: true,
+      running: true,
+      busy: false,
+      onSwitch: vi.fn(),
+      onDelete: vi.fn(),
+    }));
+
+    expect(html).toContain('class="workspace-session-running-icon"');
+    expect(html).toContain('aria-label="任务进行中"');
+    expect(workspaceCss).toContain('@keyframes workspace-session-running-spin');
+  });
+
   it('uses the existing modal surface for delete confirmation', () => {
     const html = renderToStaticMarkup(createElement(WorkspaceDeleteSessionModal, { session, onClose: vi.fn(), onConfirm: vi.fn() }));
     expect(html).toContain('role="dialog"');

@@ -38,6 +38,7 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
   const [state, setState] = useState<WorkspaceState>({ phase: 'idle', sessions: [], run: null, messages: [], events: [], connection: 'idle', error: null, submitting: false, confirmation: null, outbox: [], actionSubmitting: false });
   const [search, setSearchState] = useState('');
   const socketRef = useRef<WebSocket | null>(null);
+  const connectionAttemptRef = useRef(0);
   const runRef = useRef<WorkspaceRunVM | null>(null);
   const eventCursorRef = useRef(0);
   const requestRef = useRef(0);
@@ -70,7 +71,9 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
   const reload = useCallback(async () => {
     const requestId = ++requestRef.current;
     if (!options.accountId) {
+      connectionAttemptRef.current += 1;
       socketRef.current?.close();
+      socketRef.current = null;
       runRef.current = null;
       eventCursorRef.current = 0;
       runRefreshRequestRef.current += 1;
@@ -79,7 +82,9 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
       setState((previous) => ({ ...previous, phase: 'empty', sessions: [], activeSessionId: undefined, run: null, messages: [], events: [], connection: 'idle', error: null, confirmation: null, outbox: [] }));
       return;
     }
+    connectionAttemptRef.current += 1;
     socketRef.current?.close();
+    socketRef.current = null;
     runRef.current = null;
     eventCursorRef.current = 0;
     runRefreshRequestRef.current += 1;
@@ -110,7 +115,7 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     return () => window.clearTimeout(timer);
   }, [reload, search]);
 
-  useEffect(() => () => { socketRef.current?.close(); }, []);
+  useEffect(() => () => { connectionAttemptRef.current += 1; socketRef.current?.close(); socketRef.current = null; }, []);
 
   const setSearch = useCallback((value: string) => {
     setSearchState(value);
@@ -118,6 +123,9 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
 
   const createSession = useCallback(async (title: string) => {
     if (!options.accountId) throw new Error('ACCOUNT_CONTEXT_REQUIRED');
+    connectionAttemptRef.current += 1;
+    socketRef.current?.close();
+    socketRef.current = null;
     setState((previous) => ({ ...previous, submitting: true, error: null }));
     try {
       const session = await api.createSession({ accountId: options.accountId, title });
@@ -128,7 +136,9 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
   }, [api, options.accountId, rememberActiveSession]);
 
   const switchSession = useCallback(async (sessionId: string) => {
+    connectionAttemptRef.current += 1;
     socketRef.current?.close();
+    socketRef.current = null;
     runRef.current = null;
     eventCursorRef.current = 0;
     runRefreshRequestRef.current += 1;
@@ -149,7 +159,9 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     try {
       const result = await api.deleteSession(sessionId);
       if (deletingActive) {
+        connectionAttemptRef.current += 1;
         socketRef.current?.close();
+        socketRef.current = null;
         runRef.current = null;
         eventCursorRef.current = 0;
         runRefreshRequestRef.current += 1;
@@ -204,21 +216,26 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
   }, [api, refreshRunExecution]);
 
   const connectRun = useCallback(async (runId: string, afterSequence = eventCursorRef.current) => {
+    const attempt = ++connectionAttemptRef.current;
     socketRef.current?.close();
+    socketRef.current = null;
     setState((previous) => ({ ...previous, connection: 'reconnecting', error: null }));
     try {
       const replay = await api.listEvents(runId, afterSequence);
+      if (attempt !== connectionAttemptRef.current) return;
       replay.forEach((event) => appendEvent(event));
       const cursor = replay.reduce((max, event) => Math.max(max, event.sequence), afterSequence);
       eventCursorRef.current = Math.max(eventCursorRef.current, cursor);
       const socket = api.openRunEvents(runId, eventCursorRef.current, {
-        onOpen: () => setState((previous) => ({ ...previous, connection: 'connected', error: null })),
-        onError: () => setState((previous) => ({ ...previous, connection: 'reconnecting' })),
-        onClose: () => setState((previous) => ({ ...previous, connection: 'closed' })),
-        onEvent: appendEvent,
+        onOpen: () => { if (attempt !== connectionAttemptRef.current) return; setState((previous) => ({ ...previous, connection: 'connected', error: null })); },
+        onError: () => { if (attempt !== connectionAttemptRef.current) return; setState((previous) => ({ ...previous, connection: 'reconnecting' })); },
+        onClose: () => { if (attempt !== connectionAttemptRef.current) return; setState((previous) => ({ ...previous, connection: 'closed' })); },
+        onEvent: (event) => { if (attempt !== connectionAttemptRef.current) return; appendEvent(event); },
       });
+      if (attempt !== connectionAttemptRef.current) { socket.close(); return; }
       socketRef.current = socket;
     } catch (error) {
+      if (attempt !== connectionAttemptRef.current) return;
       const normalized = normalizeError(error);
       setState((previous) => ({ ...previous, connection: 'reconnecting', error: normalized.message }));
     }
@@ -238,10 +255,35 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     } catch (error) { const normalized = normalizeError(error); setState((previous) => ({ ...previous, submitting: false, error: normalized.message })); return null; }
   }, [api, connectRun, options.accountId, state.activeSessionId]);
 
-  const reconnectRun = useCallback(() => {
+  const reconnectRun = useCallback(async () => {
     const currentRun = runRef.current;
-    if (currentRun) void connectRun(currentRun.runId, eventCursorRef.current);
-  }, [connectRun]);
+    if (!currentRun) return;
+    const requestId = ++runRefreshRequestRef.current;
+    setState((previous) => ({ ...previous, connection: 'reconnecting', error: null }));
+    try {
+      const latestRun = await api.getRun(currentRun.runId);
+      if (requestId !== runRefreshRequestRef.current) return;
+      const [confirmation, outbox] = await Promise.all([
+        latestRun.status === 'waiting_confirmation' ? api.getConfirmation(latestRun.runId).catch(() => null) : Promise.resolve<WorkspaceConfirmationVM | null>(null),
+        api.listOutbox(latestRun.runId).catch(() => [] as WorkspaceOutboxVM[]),
+      ]);
+      if (requestId !== runRefreshRequestRef.current) return;
+      runRef.current = latestRun;
+      if (terminalRunStatuses.has(latestRun.status)) {
+        connectionAttemptRef.current += 1;
+        socketRef.current?.close();
+        socketRef.current = null;
+        setState((previous) => ({ ...previous, run: latestRun, confirmation, outbox, connection: 'closed' }));
+        return;
+      }
+      setState((previous) => ({ ...previous, run: latestRun, confirmation, outbox }));
+      await connectRun(latestRun.runId, eventCursorRef.current);
+    } catch (error) {
+      if (requestId !== runRefreshRequestRef.current) return;
+      const normalized = normalizeError(error);
+      setState((previous) => ({ ...previous, connection: 'closed', error: normalized.message }));
+    }
+  }, [api, connectRun]);
 
   const confirmRun = useCallback(async () => {
     const currentRun = runRef.current;
@@ -307,7 +349,7 @@ export interface WorkspaceController {
   archiveSession: (sessionId: string) => Promise<WorkspaceState['sessions'][number] | null>;
   deleteSession: (sessionId: string) => Promise<{ deleted: boolean; sessionId: string } | null>;
   startRun: (instruction: string, sessionIdOverride?: string) => Promise<WorkspaceState['run']>;
-  reconnectRun: () => void;
+  reconnectRun: () => Promise<void>;
   confirmRun: () => Promise<unknown>;
   cancelRun: () => Promise<unknown>;
   retryRun: () => Promise<unknown>;
