@@ -1628,9 +1628,7 @@ export class MemoryStore implements Store {
   async deleteAgentSession(adminId: string, sessionId: string): Promise<AgentSessionRecord | undefined> {
     const session = this.agentSessions.get(sessionId);
     if (!session || !(await this.hasAccountScope(adminId, session.accountId))) return undefined;
-    const terminalStatuses = new Set<RunStatus>(['succeeded', 'partially_succeeded', 'failed', 'cancelled', 'expired']);
     const sessionRuns = [...this.runs.values()].filter((run) => run.sessionId === sessionId);
-    if (sessionRuns.some((run) => !terminalStatuses.has(run.status))) throw new Error('SESSION_HAS_ACTIVE_RUN');
     const runIds = new Set(sessionRuns.map((run) => run.id));
     this.workspaceMessages.delete(sessionId);
     for (const [confirmationId, confirmation] of this.workspaceConfirmations) if (runIds.has(confirmation.runId)) this.workspaceConfirmations.delete(confirmationId);
