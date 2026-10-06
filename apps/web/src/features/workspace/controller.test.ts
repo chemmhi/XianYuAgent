@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { getWorkspaceRunCandidates, isWorkspaceRunActive, isWorkspaceRunReconnectable, listWorkspaceSessions, pickWorkspaceRun } from './controller';
+import { getWorkspaceRunCandidates, isWorkspaceRunActive, isWorkspaceRunReconnectable, listWorkspaceSessions, mergeWorkspaceSessionTitles, pickWorkspaceRun, shouldAutoReconnectWorkspaceRun } from './controller';
 import type { WorkspaceApi } from './api';
-import type { WorkspaceMessageVM, WorkspaceRunVM } from './types';
+import type { WorkspaceMessageVM, WorkspaceRunVM, WorkspaceSessionVM } from './types';
 
 const controllerSource = readFileSync(fileURLToPath(new URL('./controller.ts', import.meta.url)), 'utf8');
 
@@ -28,10 +28,28 @@ describe('workspace controller session loading', () => {
     expect(listSessions).toHaveBeenNthCalledWith(2, 'account-1', '库存');
   });
 
+  it('marks rehydrated active runs for one automatic realtime reconnect', () => {
+    expect(shouldAutoReconnectWorkspaceRun('running', 'reconnecting')).toBe(true);
+    expect(shouldAutoReconnectWorkspaceRun('succeeded', 'reconnecting')).toBe(false);
+    expect(shouldAutoReconnectWorkspaceRun('running', 'idle')).toBe(false);
+  });
+
+  it('keeps an optimistic title while the server still reports the fallback title', () => {
+    const previous = [{ id: 'session-1', accountId: 'account-1', title: '检查商品自动发货', status: 'active', lastActiveAt: '2026-10-06T00:00:00.000Z', updatedAt: '2026-10-06T00:00:00.000Z' }] satisfies WorkspaceSessionVM[];
+    const next = [{ ...previous[0], title: '新会话', titlePending: true }] satisfies WorkspaceSessionVM[];
+    expect(mergeWorkspaceSessionTitles(previous, next)[0]?.title).toBe('检查商品自动发货');
+  });
+
   it('hydrates persisted history before rendering a follow-up run', () => {
     expect(controllerSource).toContain('const persistedMessagesPromise = api.listMessages(sessionId, 500).catch(() => undefined);');
     expect(controllerSource).toContain('messages: persistedMessages ?? previous.messages');
     expect(controllerSource).toContain('api.listMessages(activeSessionId, 500)');
+  });
+
+  it('schedules an active recovered run for reconnect when switching sessions', () => {
+    const switchSessionSource = controllerSource.slice(controllerSource.indexOf('const switchSession'), controllerSource.indexOf('const archiveSession'));
+    expect(switchSessionSource).toContain('reconnectOnHydrateRunRef.current = recovered.run && isWorkspaceRunActive(recovered.run.status) ? recovered.run.runId : undefined;');
+    expect(switchSessionSource).toContain("connection: reconnectOnHydrateRunRef.current ? 'reconnecting' : 'idle'");
   });
 });
 

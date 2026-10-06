@@ -9,6 +9,14 @@ export interface WorkspaceAgentTraceGroup {
 
 export type WorkspaceMessageBlock = WorkspaceMessageVM | WorkspaceAgentTraceGroup;
 
+/** Keep a newly-created session useful before the server-side title model replies. */
+export function deriveWorkspaceSessionTitle(instruction: string, maxLength = 28): string {
+  const normalized = instruction.replace(/\s+/g, ' ').trim();
+  if (!normalized) return '新会话';
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…`;
+}
+
 /** Collapse adjacent reasoning/tool events into one ChatGPT-style execution trace. */
 export function groupWorkspaceMessages(messages: WorkspaceMessageVM[]): WorkspaceMessageBlock[] {
   const blocks: WorkspaceMessageBlock[] = [];

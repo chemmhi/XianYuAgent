@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createWorkspaceApi, type WorkspaceApi } from './api';
 import type { WorkspaceAttachmentPayload } from './attachments';
+import { deriveWorkspaceSessionTitle } from './messages';
 import type { WorkspaceConfirmationVM, WorkspaceMessageVM, WorkspaceOutboxVM, WorkspaceRunEventVM, WorkspaceRunVM, WorkspaceSessionVM, WorkspaceState } from './types';
 
 const defaultApi = createWorkspaceApi({ get: async () => { throw new Error('WORKSPACE_API_UNAVAILABLE'); } });
@@ -12,6 +13,25 @@ export function isWorkspaceRunActive(status?: WorkspaceRunVM['status']): boolean
 
 export function isWorkspaceRunReconnectable(status?: WorkspaceRunVM['status']): boolean {
   return Boolean(status && status !== 'waiting_confirmation' && status !== 'cancelling' && (isWorkspaceRunActive(status) || status === 'failed'));
+}
+
+export function shouldAutoReconnectWorkspaceRun(status: WorkspaceRunVM['status'] | undefined, connection: WorkspaceState['connection']): boolean {
+  return connection === 'reconnecting' && isWorkspaceRunActive(status);
+}
+
+const fallbackSessionTitles = new Set(['新会话', '新工作区会话']);
+
+function isFallbackSessionTitle(title: string): boolean {
+  return fallbackSessionTitles.has(title.trim());
+}
+
+export function mergeWorkspaceSessionTitles(previous: WorkspaceSessionVM[], next: WorkspaceSessionVM[]): WorkspaceSessionVM[] {
+  const previousById = new Map(previous.map((session) => [session.id, session]));
+  return next.map((session) => {
+    const previousSession = previousById.get(session.id);
+    if (!previousSession || !isFallbackSessionTitle(session.title) || isFallbackSessionTitle(previousSession.title)) return session;
+    return { ...session, title: previousSession.title };
+  });
 }
 
 export function getWorkspaceRunCandidates(messages: WorkspaceMessageVM[]): string[] {
@@ -56,8 +76,11 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
   const eventCursorRef = useRef(0);
   const requestRef = useRef(0);
   const runRefreshRequestRef = useRef(0);
+  const sessionSyncRequestRef = useRef(0);
+  const sessionSyncInFlightRef = useRef(false);
   const actionInFlightRef = useRef(false);
   const activeSessionIdRef = useRef<string | undefined>(undefined);
+  const reconnectOnHydrateRunRef = useRef<string | undefined>(undefined);
   const sessionStorageKey = options.accountId ? `workspace:active-session:${options.accountId}` : undefined;
 
   const viewedRunStorageKey = useCallback((sessionId: string) => sessionStorageKey ? `${sessionStorageKey}:viewed-run:${sessionId}` : undefined, [sessionStorageKey]);
@@ -107,6 +130,8 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
       connectionAttemptRef.current += 1;
       socketRef.current?.close();
       socketRef.current = null;
+      reconnectOnHydrateRunRef.current = undefined;
+      sessionSyncRequestRef.current += 1;
       runRef.current = null;
       eventCursorRef.current = 0;
       runRefreshRequestRef.current += 1;
@@ -118,6 +143,8 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     connectionAttemptRef.current += 1;
     socketRef.current?.close();
     socketRef.current = null;
+    reconnectOnHydrateRunRef.current = undefined;
+    sessionSyncRequestRef.current += 1;
     runRef.current = null;
     eventCursorRef.current = 0;
     runRefreshRequestRef.current += 1;
@@ -132,12 +159,17 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
       if (requestId !== requestRef.current) return;
       const recovered = activeSessionId ? await recoverRun(messages) : { run: null, events: [], confirmation: null, outbox: [] as WorkspaceOutboxVM[] };
       if (requestId !== requestRef.current) return;
-      const activeSession = activeSessionId ? sessions.find((session) => session.id === activeSessionId) : undefined;
+      const titleMessage = messages.find((message) => message.type === 'user_message' && message.content.trim());
+      const hydratedSessions = sessions.map((session) => session.id === activeSessionId && isFallbackSessionTitle(session.title) && titleMessage
+        ? { ...session, title: deriveWorkspaceSessionTitle(titleMessage.content) }
+        : session);
+      const activeSession = activeSessionId ? hydratedSessions.find((session) => session.id === activeSessionId) : undefined;
+      reconnectOnHydrateRunRef.current = recovered.run && isWorkspaceRunActive(recovered.run.status) ? recovered.run.runId : undefined;
       if (activeSessionId) persistSessionViewed(activeSessionId, recovered.run?.runId ?? activeSession?.runId);
       rememberActiveSession(activeSessionId);
       runRef.current = recovered.run;
       eventCursorRef.current = recovered.events.reduce((max, event) => Math.max(max, event.sequence), 0);
-      setState((previous) => ({ ...previous, phase: sessions.length ? 'success' : 'empty', sessions, unreadSessionIds: unreadSessionIdsFor(sessions, activeSessionId), activeSessionId, messages: activeSessionId ? messages : [], run: recovered.run, events: recovered.events, connection: 'idle', error: null, confirmation: recovered.confirmation, outbox: recovered.outbox }));
+      setState((previous) => ({ ...previous, phase: hydratedSessions.length ? 'success' : 'empty', sessions: mergeWorkspaceSessionTitles(previous.sessions, hydratedSessions), unreadSessionIds: unreadSessionIdsFor(hydratedSessions, activeSessionId), activeSessionId, messages: activeSessionId ? messages : [], run: recovered.run, events: recovered.events, connection: reconnectOnHydrateRunRef.current ? 'reconnecting' : 'idle', error: null, confirmation: recovered.confirmation, outbox: recovered.outbox }));
     } catch (error) {
       if (requestId !== requestRef.current) return;
       const normalized = normalizeError(error);
@@ -164,9 +196,11 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     setState((previous) => ({ ...previous, submitting: true, error: null }));
     try {
       const session = await api.createSession({ accountId: options.accountId, title, instruction });
+      const optimisticTitle = instruction?.trim() && isFallbackSessionTitle(session.title) ? deriveWorkspaceSessionTitle(instruction) : session.title;
+      const hydratedSession = optimisticTitle === session.title ? session : { ...session, title: optimisticTitle };
       rememberActiveSession(session.id);
-      setState((previous) => ({ ...previous, sessions: [session, ...previous.sessions], activeSessionId: session.id, phase: 'success', messages: [], run: null, events: [], connection: 'idle', submitting: false, confirmation: null, outbox: [] }));
-      return session;
+      setState((previous) => ({ ...previous, sessions: [hydratedSession, ...previous.sessions], activeSessionId: session.id, phase: 'success', messages: [], run: null, events: [], connection: 'idle', submitting: false, confirmation: null, outbox: [] }));
+      return hydratedSession;
     } catch (error) { const normalized = normalizeError(error); setState((previous) => ({ ...previous, submitting: false, error: normalized.message })); return null; }
   }, [api, options.accountId, rememberActiveSession]);
 
@@ -179,7 +213,7 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     eventCursorRef.current = 0;
     runRefreshRequestRef.current += 1;
     setState((previous) => ({ ...previous, submitting: true, error: null }));
-    try { const session = await api.switchSession(sessionId); if (requestId !== requestRef.current) return null; const messages = await api.listMessages(session.id, 500).catch(() => []); if (requestId !== requestRef.current) return null; const recovered = await recoverRun(messages); if (requestId !== requestRef.current) return null; persistSessionViewed(session.id, recovered.run?.runId ?? session.runId); rememberActiveSession(session.id); runRef.current = recovered.run; eventCursorRef.current = recovered.events.reduce((max, event) => Math.max(max, event.sequence), 0); setState((previous) => ({ ...previous, activeSessionId: session.id, unreadSessionIds: previous.unreadSessionIds.filter((id) => id !== session.id), messages, run: recovered.run, events: recovered.events, connection: 'idle', submitting: false, confirmation: recovered.confirmation, outbox: recovered.outbox })); return session; }
+    try { const session = await api.switchSession(sessionId); if (requestId !== requestRef.current) return null; const messages = await api.listMessages(session.id, 500).catch(() => []); if (requestId !== requestRef.current) return null; const recovered = await recoverRun(messages); if (requestId !== requestRef.current) return null; reconnectOnHydrateRunRef.current = recovered.run && isWorkspaceRunActive(recovered.run.status) ? recovered.run.runId : undefined; persistSessionViewed(session.id, recovered.run?.runId ?? session.runId); rememberActiveSession(session.id); runRef.current = recovered.run; eventCursorRef.current = recovered.events.reduce((max, event) => Math.max(max, event.sequence), 0); setState((previous) => ({ ...previous, activeSessionId: session.id, unreadSessionIds: previous.unreadSessionIds.filter((id) => id !== session.id), messages, run: recovered.run, events: recovered.events, connection: reconnectOnHydrateRunRef.current ? 'reconnecting' : 'idle', submitting: false, confirmation: recovered.confirmation, outbox: recovered.outbox })); return session; }
     catch (error) { const normalized = normalizeError(error); setState((previous) => ({ ...previous, submitting: false, error: normalized.message })); return null; }
   }, [api, persistSessionViewed, recoverRun, rememberActiveSession]);
 
@@ -198,6 +232,7 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
         connectionAttemptRef.current += 1;
         socketRef.current?.close();
         socketRef.current = null;
+        reconnectOnHydrateRunRef.current = undefined;
         runRef.current = null;
         eventCursorRef.current = 0;
         runRefreshRequestRef.current += 1;
@@ -239,18 +274,28 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
 
   const syncSessionStatuses = useCallback(async () => {
     if (!options.accountId) return;
+    if (sessionSyncInFlightRef.current) return;
+    sessionSyncInFlightRef.current = true;
     const requestId = requestRef.current;
-    const sessions = await api.listSessions(options.accountId, search).catch(() => null);
-    if (!sessions || requestId !== requestRef.current) return;
-    const activeSessionId = activeSessionIdRef.current;
-    const activeSession = activeSessionId ? sessions.find((session) => session.id === activeSessionId) : undefined;
-    const currentRun = runRef.current;
-    if (currentRun && activeSession?.runId === currentRun.runId && activeSession.runStatus && activeSession.runStatus !== currentRun.status) {
-      const latest = await api.getRun(currentRun.runId).catch(() => null);
-      if (latest && requestId === requestRef.current) await refreshRunExecution(latest);
+    const syncId = ++sessionSyncRequestRef.current;
+    try {
+      const sessions = await api.listSessions(options.accountId, search).catch(() => null);
+      if (!sessions || requestId !== requestRef.current || syncId !== sessionSyncRequestRef.current) return;
+      const activeSessionId = activeSessionIdRef.current;
+      const activeSession = activeSessionId ? sessions.find((session) => session.id === activeSessionId) : undefined;
+      const currentRun = runRef.current;
+      if (currentRun && activeSession?.runId === currentRun.runId && activeSession.runStatus && activeSession.runStatus !== currentRun.status) {
+        const latest = await api.getRun(currentRun.runId).catch(() => null);
+        if (latest && requestId === requestRef.current && syncId === sessionSyncRequestRef.current) await refreshRunExecution(latest);
+      }
+      if (requestId !== requestRef.current || syncId !== sessionSyncRequestRef.current) return;
+      setState((previous) => {
+        const mergedSessions = mergeWorkspaceSessionTitles(previous.sessions, sessions);
+        return { ...previous, sessions: mergedSessions, unreadSessionIds: unreadSessionIdsFor(mergedSessions, activeSessionId) };
+      });
+    } finally {
+      sessionSyncInFlightRef.current = false;
     }
-    if (requestId !== requestRef.current) return;
-    setState((previous) => ({ ...previous, sessions, unreadSessionIds: unreadSessionIdsFor(sessions, activeSessionId) }));
   }, [api, options.accountId, refreshRunExecution, search, unreadSessionIdsFor]);
 
   useEffect(() => {
@@ -302,6 +347,14 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
       setState((previous) => ({ ...previous, connection: 'reconnecting', error: normalized.message }));
     }
   }, [api, appendEvent]);
+
+  useEffect(() => {
+    const runId = reconnectOnHydrateRunRef.current;
+    const hydratedRun = state.run;
+    if (!runId || !hydratedRun || !shouldAutoReconnectWorkspaceRun(hydratedRun.status, state.connection) || hydratedRun.runId !== runId || state.activeSessionId !== hydratedRun.sessionId) return;
+    reconnectOnHydrateRunRef.current = undefined;
+    void connectRun(runId, eventCursorRef.current);
+  }, [connectRun, state.activeSessionId, state.connection, state.run?.runId, state.run?.sessionId, state.run?.status]);
 
   const startRun = useCallback(async (instruction: string, sessionIdOverride?: string, attachments?: WorkspaceAttachmentPayload[]) => {
     const sessionId = sessionIdOverride ?? state.activeSessionId;
