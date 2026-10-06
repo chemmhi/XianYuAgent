@@ -53,6 +53,14 @@ test('prepares redacted confirmation plans for coupon and product rules', async 
   assert.equal(automation?.manifest.productId, 'product-1');
 });
 
+test('routes natural-language coupon creation without asking for a batch id', async () => {
+  const commands = orchestrator();
+  const plan = await commands.prepareWrite({ ...input, instruction: '帮我新建一个测试卡券' });
+  assert.equal(plan?.action, 'coupon_create');
+  assert.equal(plan?.manifest.label, '测试卡券');
+  assert.equal(plan?.manifest.redacted, true);
+});
+
 test('resolves numeric external product refs and builds a disable-all automation patch', async () => {
   const product = { id: 'product-108244', accountId: 'account-1', externalProductRef: '1082449333831', title: '视频下载及文案提取源码，包教包会', configVersion: 4 };
   let updatedConfig: unknown;

@@ -43,6 +43,36 @@ test('native coupon parser supports text and data modes while redacting content'
   assert.equal(plan?.content.includes('A-001'), false);
 });
 
+test('natural-language coupon creation does not require an existing batch id', async () => {
+  const instruction = '帮我新建一个测试卡券';
+  assert.equal(detectNativeWorkspaceWrite(instruction), 'coupon_create');
+  const parsed = parseNativeWorkspaceCouponCreate(instruction);
+  assert.equal(parsed?.label, '测试卡券');
+  assert.equal(parsed?.purpose, 'text');
+  assert.equal(parsed?.metadata.textContent, '');
+
+  const { store, admin, account } = await fixture(instruction);
+  const plan = await prepareNativeWorkspaceWrite({ store, adminId: admin.id, accountId: account.id, instruction });
+  assert.equal(plan?.action, 'coupon_create');
+  assert.equal(plan?.manifest.label, '测试卡券');
+  assert.equal(plan?.manifest.itemCount, 0);
+  assert.equal(plan?.manifest.configured, false);
+});
+
+test('workspace coupon parser accepts the manual form metadata fields', () => {
+  const parsed = parseNativeWorkspaceCouponCreate('新建卡券；名称：API 测试；类型：API接口；接口：https://example.test/cards；请求方法：POST；超时时间：45；请求头：{"Authorization":"Bearer token"}；请求参数：{"count":1}；响应取值字段：data.card；延时发货时间：30；费用承担：dealer；最低售价：9.9；投放可见性：dealer_only；多规格：true；规格名称：套餐；规格值：30天');
+  assert.equal(parsed?.label, 'API 测试');
+  assert.equal(parsed?.purpose, 'api');
+  assert.deepEqual(parsed?.metadata.apiConfig, { url: 'https://example.test/cards', method: 'POST', timeout: 45, headers: '{"Authorization":"Bearer token"}', params: '{"count":1}', responseField: 'data.card' });
+  assert.equal(parsed?.metadata.delaySeconds, 30);
+  assert.equal(parsed?.metadata.feePayer, 'dealer');
+  assert.equal(parsed?.metadata.minPrice, '9.9');
+  assert.equal(parsed?.metadata.dockVisibility, 'dealer_only');
+  assert.equal(parsed?.metadata.multiSpec, true);
+  assert.equal(parsed?.metadata.specName, '套餐');
+  assert.equal(parsed?.metadata.specValue, '30天');
+});
+
 test('workspace coupon confirmation creates a native batch and completed local outbox', async () => {
   const secret = '会员码-ONLY-SERVER';
   const instruction = `新增卡券；名称：会员资料包；类型：固定文字；内容：${secret}`;
