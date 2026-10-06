@@ -311,6 +311,8 @@ export interface PiRuntimeEnqueueInput {
   steps: StepRecord[];
   sessionId?: string;
   history?: ModelMessage[];
+  /** Reconnect resumes the persisted run and must not duplicate its user message. */
+  resumeFromFailure?: boolean;
 }
 
 const WORKSPACE_AGENT_SYSTEM_PROMPT = [
@@ -324,33 +326,27 @@ const WORKSPACE_AGENT_SYSTEM_PROMPT = [
   '最终答复简洁、准确，并且只基于当前上下文和工具结果。',
 ].join('\n');
 
-const WORKSPACE_LANGUAGE_INSTRUCTIONS: Record<WorkspaceResponseLanguage, string> = {
-  'zh-CN': [
-    '输出语言规则（最高优先级）：当前用户消息包含中文字符时，思考摘要、工具调用说明、工具结果说明和最终答复全部使用简体中文。',
-    '不要因为工具名、字段名、历史消息或系统提示中出现英文而切换成英文；工具名、字段名、代码和 API 名称可以原样保留。',
-  ].join('\n'),
-  en: [
-    'Response language rule (highest priority): when the current user message does not contain Chinese characters, write reasoning summaries, tool explanations, tool-result explanations, and the final answer in English.',
-    'Keep tool names, field names, code, and API names unchanged when needed.',
-  ].join('\n'),
-};
+const WORKSPACE_LANGUAGE_INSTRUCTION = [
+  '输出语言规则（最高优先级）：思考摘要、工具调用说明、工具结果说明和最终答复全部使用简体中文。',
+  '不要因为当前用户输入、历史消息、工具名、字段名、代码、API 名称或系统配置中出现英文而输出英文自然语言；工具名、字段名、代码和 API 名称可以原样保留。',
+].join('\n');
 
-export type WorkspaceResponseLanguage = 'zh-CN' | 'en';
+export type WorkspaceResponseLanguage = 'zh-CN';
 
-export function detectWorkspaceResponseLanguage(instruction: string): WorkspaceResponseLanguage {
-  return /[\u3400-\u9fff]/u.test(instruction) ? 'zh-CN' : 'en';
+/** Workspace 对话固定使用简体中文，避免按输入语言切换到英文。 */
+export function detectWorkspaceResponseLanguage(_instruction: string): WorkspaceResponseLanguage {
+  return 'zh-CN';
 }
 
 export function buildWorkspaceModelMessages(history: ModelMessage[], instruction: string, skillPrompt = ''): ModelMessage[] {
   const messages: ModelMessage[] = [...history];
-  const languagePrompt = WORKSPACE_LANGUAGE_INSTRUCTIONS[detectWorkspaceResponseLanguage(instruction)];
   if (messages.some((message) => message.role === 'system')) {
     // Keep caller-provided system context, but place the language rule before
-    // conversation history so the current user's language wins consistently.
+    // conversation history so every Workspace response remains Chinese.
     const firstNonSystem = messages.findIndex((message) => message.role !== 'system');
-    messages.splice(firstNonSystem < 0 ? messages.length : firstNonSystem, 0, { role: 'system', content: languagePrompt });
+    messages.splice(firstNonSystem < 0 ? messages.length : firstNonSystem, 0, { role: 'system', content: WORKSPACE_LANGUAGE_INSTRUCTION });
   } else {
-    messages.unshift({ role: 'system', content: [WORKSPACE_AGENT_SYSTEM_PROMPT, skillPrompt, languagePrompt].filter(Boolean).join('\n\n') });
+    messages.unshift({ role: 'system', content: [WORKSPACE_AGENT_SYSTEM_PROMPT, skillPrompt, WORKSPACE_LANGUAGE_INSTRUCTION].filter(Boolean).join('\n\n') });
   }
   messages.push({ role: 'user', content: instruction });
   return messages;
@@ -419,7 +415,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     if (!step || this.stopped) return;
     try {
       const sessionId = input.sessionId ?? input.run.sessionId;
-      if (this.options.persistUserMessage !== false) await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'user_message', content: redactSensitiveText(input.run.instruction, this.options.outputLimit ?? 2_000, this.options.redactSecrets) });
+      if (this.options.persistUserMessage !== false && !input.resumeFromFailure) await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'user_message', content: redactSensitiveText(input.run.instruction, this.options.outputLimit ?? 2_000, this.options.redactSecrets) });
       const startedAt = new Date().toISOString();
       await this.transitionRun(input.run, 'running', { startedAt });
       await this.transitionStep(step, 'running', { startedAt });
@@ -673,10 +669,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
 
   private async recordToolFailure(input: PiRuntimeEnqueueInput, step: StepRecord, failure: { toolName: string; code: string; summary: string }): Promise<void> {
     const finishedAt = new Date().toISOString();
-    const chinese = detectWorkspaceResponseLanguage(input.run.instruction) === 'zh-CN';
-    const output = chinese
-      ? `工具 ${failure.toolName} 调用失败（${failure.code}）：${failure.summary}。本次任务已停止，请修正后点击重连。`
-      : `Tool ${failure.toolName} failed (${failure.code}): ${failure.summary}. The run stopped; correct the request and reconnect.`;
+    const output = `工具 ${failure.toolName} 调用失败（${failure.code}）：${failure.summary}。本次任务已停止，请修正后点击重连。`;
     await this.transitionStep(step, 'failed', { finishedAt, errorCode: failure.code, outputSummary: output });
     await this.transitionRun(input.run, 'failed', { finishedAt, errorCode: failure.code, resultSummary: output });
     const sessionId = input.sessionId ?? input.run.sessionId;

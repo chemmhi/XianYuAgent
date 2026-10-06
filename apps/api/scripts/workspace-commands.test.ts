@@ -347,10 +347,47 @@ test('reconnects a failed workspace run from its current failed step', async () 
   runtime.stop();
 });
 
-test('selects the first non-terminal step when resuming a multi-step run', () => {
+test('selects the latest failed node instead of restarting from an earlier or pending step', () => {
   const selected = findWorkspaceExecutionStep([
     { id: 'step-1', status: 'succeeded' },
     { id: 'step-2', status: 'failed' },
   ] as never[]);
   assert.equal(selected?.id, 'step-2');
+
+  const failedBeforePending = findWorkspaceExecutionStep([
+    { id: 'step-1', stepNo: 1, attempt: 1, status: 'failed' },
+    { id: 'step-2', stepNo: 2, attempt: 1, status: 'pending' },
+  ] as never[]);
+  assert.equal(failedBeforePending?.id, 'step-1');
+
+  const latestFailed = findWorkspaceExecutionStep([
+    { id: 'step-1', stepNo: 1, attempt: 1, status: 'failed' },
+    { id: 'step-2', stepNo: 2, attempt: 1, status: 'failed' },
+  ] as never[]);
+  assert.equal(latestFailed?.id, 'step-2');
+});
+
+test('reconnect resumes the failed node with the persisted run context', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'workspace-reconnect-context@example.com', passwordHash: 'hash', displayName: 'Workspace Reconnect Context' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'workspace-reconnect-context' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Reconnect Context' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '查询商品库存' });
+  await store.appendWorkspaceMessage({ adminId: admin.id, sessionId: session.id, runId: created.run.id, type: 'user_message', content: '查询商品库存' });
+  await store.appendWorkspaceMessage({ adminId: admin.id, sessionId: session.id, runId: created.run.id, type: 'tool_event', content: '商品查询失败', summary: '读取商品' });
+  await store.appendWorkspaceMessage({ adminId: admin.id, sessionId: session.id, runId: 'future-run', type: 'tool_event', content: '后续运行结果', summary: '后续运行' });
+  await store.updateRun(created.run.id, { status: 'failed', errorCode: 'RUNTIME_FAILED', finishedAt: '2026-10-06T00:00:00.000Z' });
+  await store.updateRunStep(created.steps[0]!.id, { status: 'failed', errorCode: 'RUNTIME_FAILED', finishedAt: '2026-10-06T00:00:00.000Z' });
+
+  let resumeInput: { history?: Array<{ role: string; content: string }>; resumeFromFailure?: boolean } | undefined;
+  const runtime = {
+    enqueue() {},
+    async resume(input: { history?: Array<{ role: string; content: string }>; resumeFromFailure?: boolean }) { resumeInput = input; },
+    stop() {},
+  };
+  const service = new WorkspaceService(store, runtime as never, async () => 'audit');
+  await service.reconnectRun({ adminId: admin.id, runId: created.run.id, requestId: 'req-reconnect-context', traceId: 'trace-reconnect-context' });
+
+  assert.equal(resumeInput?.resumeFromFailure, true);
+  assert.deepEqual(resumeInput?.history, [{ role: 'assistant', content: '[tool_event] 读取商品' }]);
 });

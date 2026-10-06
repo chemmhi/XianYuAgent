@@ -141,16 +141,17 @@ test('Pi runtime surfaces terminal tool failures and consumes fenced tool argume
 
 test('workspace model messages follow the language of the current user instruction', () => {
   assert.equal(detectWorkspaceResponseLanguage('请查看商品状态'), 'zh-CN');
-  assert.equal(detectWorkspaceResponseLanguage('Check the product status'), 'en');
+  assert.equal(detectWorkspaceResponseLanguage('Check the product status'), 'zh-CN');
 
   const chineseMessages = buildWorkspaceModelMessages([{ role: 'assistant', content: 'previous English history' }], '请用中文总结商品状态');
   const chineseSystem = chineseMessages.find((message) => message.role === 'system');
   assert.match(String(chineseSystem?.content), /简体中文/);
   assert.equal(chineseMessages.at(-1)?.role, 'user');
 
-  const englishMessages = buildWorkspaceModelMessages([], 'Summarize the product status');
-  const englishSystem = englishMessages.find((message) => message.role === 'system');
-  assert.match(String(englishSystem?.content), /Response language rule/);
+  const englishInputMessages = buildWorkspaceModelMessages([], 'Summarize the product status');
+  const chineseOnlySystem = englishInputMessages.find((message) => message.role === 'system');
+  assert.match(String(chineseOnlySystem?.content), /简体中文/);
+  assert.doesNotMatch(String(chineseOnlySystem?.content), /Response language rule|write reasoning summaries/i);
 });
 
 test('Pi runtime adds the current Chinese language rule to non-streaming fallback requests', async () => {
