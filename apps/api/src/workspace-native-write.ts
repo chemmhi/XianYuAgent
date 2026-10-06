@@ -27,7 +27,11 @@ export interface NativeWorkspaceWritePlan {
 }
 
 const PRODUCT_PUBLISH_TERMS = /(发布商品|上架商品|发布一个商品|上架一个商品)/i;
-const COUPON_CREATE_TERMS = /(新增卡券|创建卡券|新建卡券)/i;
+// Natural-language requests may insert a quantity or a label between the
+// create verb and “卡券”, e.g. “帮我新建一个测试卡券”. Keep intent detection
+// broader than the exact phrase we strip while parsing.
+const COUPON_CREATE_INTENT = /(?:新增|创建|新建)[^。！？!?\n]{0,24}卡券/i;
+const COUPON_CREATE_TERMS = /(?:新增|创建|新建)\s*(?:一个|一张|一批|一份)?\s*/i;
 const AGENT_SETTINGS_TERMS = /(自动回复(?:\s*Agent)?|Agent)/i;
 const AGENT_SETTINGS_MUTATION_TERMS = /(修改|更新|调整|设置|配置|开启|启用|关闭|禁用|停用|打开)/i;
 const PURPOSES: Record<string, NativeCouponCreateInput['purpose']> = {
@@ -39,7 +43,7 @@ export function detectNativeWorkspaceWrite(instruction: string): NativeWorkspace
   const normalized = instruction.replace(/\s+/g, ' ').trim();
   if (!normalized) return undefined;
   if (PRODUCT_PUBLISH_TERMS.test(normalized)) return 'product_publish';
-  if (COUPON_CREATE_TERMS.test(normalized)) return 'coupon_create';
+  if (COUPON_CREATE_INTENT.test(normalized) && !/(?:不要|无需|不需要|禁止)[^。！？!?\n]{0,8}(?:新增|创建|新建)[^。！？!?\n]{0,24}卡券/i.test(normalized)) return 'coupon_create';
   if (AGENT_SETTINGS_TERMS.test(normalized) && AGENT_SETTINGS_MUTATION_TERMS.test(normalized) && !/(查看|查询|读取|获取)/i.test(normalized)) return 'agent_settings_update';
   return undefined;
 }
@@ -56,7 +60,7 @@ export function sanitizeWorkspaceInstruction(instruction: string): string {
 export function parseNativeWorkspaceCouponCreate(instruction: string): NativeCouponCreateInput | undefined {
   if (detectNativeWorkspaceWrite(instruction) !== 'coupon_create') return undefined;
   const normalized = instruction.replace(/\r/g, '').trim();
-  const body = normalized.replace(COUPON_CREATE_TERMS, '').trim().replace(/^[:：\-\s]+/, '');
+  const body = normalized.replace(/^(?:帮我|请帮我|请|麻烦|帮忙)\s*/i, '').replace(COUPON_CREATE_TERMS, '').trim().replace(/^[:：\-\s]+/, '');
   const fields = parseFields(body);
   const purpose = resolvePurpose(fields.purpose, body);
   const label = (fields.label ?? inferLabel(body, fields)).trim().slice(0, 200) || 'Workspace 新建卡券';
@@ -64,12 +68,31 @@ export function parseNativeWorkspaceCouponCreate(instruction: string): NativeCou
   if (fields.description) metadata.description = fields.description.slice(0, 2_000);
   const delay = Number(fields.delaySeconds);
   if (Number.isFinite(delay)) metadata.delaySeconds = Math.max(0, Math.min(3_600, Math.trunc(delay)));
+  const useNoLogisticsForm = parseCouponBoolean(fields.useNoLogisticsForm);
+  if (useNoLogisticsForm !== undefined) metadata.useNoLogisticsForm = useNoLogisticsForm;
+  if (fields.feePayer === 'distributor' || fields.feePayer === 'dealer') metadata.feePayer = fields.feePayer;
+  if (fields.minPrice?.trim()) metadata.minPrice = fields.minPrice.trim();
+  if (fields.dockVisibility === 'public' || fields.dockVisibility === 'dealer_only') metadata.dockVisibility = fields.dockVisibility;
+  const multiSpec = parseCouponBoolean(fields.multiSpec);
+  if (multiSpec !== undefined) metadata.multiSpec = multiSpec;
+  if (fields.specName?.trim()) metadata.specName = fields.specName.trim();
+  if (fields.specValue?.trim()) metadata.specValue = fields.specValue.trim();
 
-  if (purpose === 'text') metadata.textContent = fields.content ?? inferTrailingContent(body, fields);
-  if (purpose === 'data') metadata.dataContent = fields.content ?? inferTrailingContent(body, fields);
+  if (purpose === 'text') metadata.textContent = fields.content ?? inferTrailingContent(body, fields, label);
+  if (purpose === 'data') metadata.dataContent = fields.content ?? inferTrailingContent(body, fields, label);
   if (purpose === 'api') {
     const url = (fields.url ?? '').trim();
-    if (url) metadata.apiConfig = { url, method: fields.method === 'POST' ? 'POST' : 'GET', responseField: fields.responseField?.trim() || undefined };
+    const timeout = Number(fields.apiTimeout);
+    if (url) {
+      metadata.apiConfig = {
+        url,
+        method: fields.method === 'POST' ? 'POST' : 'GET',
+        timeout: Number.isFinite(timeout) ? Math.max(1, Math.min(3_600, Math.trunc(timeout))) : undefined,
+        headers: fields.apiHeaders?.trim() || undefined,
+        params: fields.apiParams?.trim() || undefined,
+        responseField: fields.responseField?.trim() || undefined,
+      };
+    }
   }
   if (purpose === 'image') metadata.imageUrls = (fields.images ?? fields.content ?? '').split(/\s+/).map((value) => value.trim()).filter(Boolean).slice(0, 3);
 
@@ -182,7 +205,7 @@ export async function prepareNativeWorkspaceWrite(input: { store: Store; adminId
 function parseFields(body: string): Record<string, string> {
   const fields: Record<string, string> = {};
   for (const segment of body.split(/[;；]+/).map((item) => item.trim()).filter(Boolean)) {
-    const match = segment.match(/^(名称|卡券名称|label|类型|purpose|卡券类型|内容|正文|固定文字|数据|dataContent|图片|imageUrls|接口|URL|url|请求方法|method|备注|description|延时发货时间|delaySeconds|响应取值字段|responseField)\s*[:=：]\s*([\s\S]*)$/i);
+    const match = segment.match(/^(名称|卡券名称|label|类型|purpose|卡券类型|内容|正文|固定文字|数据|dataContent|图片|imageUrls|接口|URL|url|请求方法|method|超时时间|timeout|apiTimeout|请求头|headers|请求参数|params|备注|description|延时发货时间|delaySeconds|无须填写凭证|无需填写凭证|useNoLogisticsForm|费用承担|feePayer|最低售价|minPrice|投放可见性|dockVisibility|多规格|multiSpec|规格名称|specName|规格值|specValue|响应取值字段|responseField)\s*[:=：]\s*([\s\S]*)$/i);
     if (!match) continue;
     const key = normalizeFieldKey(match[1]);
     fields[key] = match[2].trim();
@@ -247,6 +270,13 @@ function parseAgentBoolean(value: string): boolean | undefined {
   return undefined;
 }
 
+function parseCouponBoolean(value?: string): boolean | undefined {
+  if (!value) return undefined;
+  if (/^(true|1|yes|on|是|启用|开启|打开)$/i.test(value.trim())) return true;
+  if (/^(false|0|no|off|否|停用|禁用|关闭)$/i.test(value.trim())) return false;
+  return undefined;
+}
+
 function normalizeFieldKey(key: string): string {
   const normalized = key.toLowerCase();
   if (['名称', '卡券名称', 'label'].includes(normalized)) return 'label';
@@ -255,8 +285,18 @@ function normalizeFieldKey(key: string): string {
   if (['图片', 'imageurls'].includes(normalized)) return 'images';
   if (['接口', 'url'].includes(normalized)) return 'url';
   if (['请求方法', 'method'].includes(normalized)) return 'method';
+  if (['超时时间', 'timeout', 'apitimeout'].includes(normalized)) return 'apiTimeout';
+  if (['请求头', 'headers'].includes(normalized)) return 'apiHeaders';
+  if (['请求参数', 'params'].includes(normalized)) return 'apiParams';
   if (['备注', 'description'].includes(normalized)) return 'description';
   if (['延时发货时间', 'delayseconds'].includes(normalized)) return 'delaySeconds';
+  if (['无须填写凭证', '无需填写凭证', '无需邮寄', 'usenologisticsform'].includes(normalized)) return 'useNoLogisticsForm';
+  if (['费用承担', 'feepayer'].includes(normalized)) return 'feePayer';
+  if (['最低售价', 'minprice'].includes(normalized)) return 'minPrice';
+  if (['投放可见性', 'dockvisibility'].includes(normalized)) return 'dockVisibility';
+  if (['多规格', 'multispec'].includes(normalized)) return 'multiSpec';
+  if (['规格名称', 'specname'].includes(normalized)) return 'specName';
+  if (['规格值', 'specvalue'].includes(normalized)) return 'specValue';
   if (['响应取值字段', 'responsefield'].includes(normalized)) return 'responseField';
   return normalized;
 }
@@ -278,9 +318,10 @@ function inferLabel(body: string, fields: Record<string, string>): string {
   return first.replace(/^(名称|卡券名称)\s*[:=：]\s*/i, '');
 }
 
-function inferTrailingContent(body: string, fields: Record<string, string>): string {
+function inferTrailingContent(body: string, fields: Record<string, string>, label?: string): string {
   if (fields.content) return fields.content;
   const stripped = body.replace(COUPON_CREATE_TERMS, '').replace(/(?:名称|卡券名称|label|类型|purpose|卡券类型)\s*[:=：]\s*[^;；\n]+/gi, '').trim();
+  if (label && stripped === label) return '';
   return stripped.replace(/^[;；,，\s]+/, '').trim();
 }
 
