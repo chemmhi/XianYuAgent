@@ -105,6 +105,36 @@ test('mixed gateway response still dispatches syncPushPackage through onEvent', 
   }
 });
 
+test('send response is settled before a slow inbound push handler', async () => {
+  const socket = new SlowPushResponseSocket();
+  let pushStarted = false;
+  const client = new XianyuImClient({
+    accountId: 'account-1',
+    credential: { cookieHeader: 'unb=seller-1', accessToken: 'token', deviceId: 'device-1' },
+    timeoutMs: 50,
+    heartbeatIntervalMs: 60_000,
+    webSocketFactory: () => socket,
+    onEvent: async () => {
+      pushStarted = true;
+      await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    },
+  });
+
+  const connectPromise = client.connect();
+  queueMicrotask(() => socket.emit('open'));
+  await connectPromise;
+  try {
+    socket.emit('message', JSON.stringify({ body: { syncPushPackage: { data: [{ data: pushPayload() }] } } }));
+    for (let attempt = 0; attempt < 20 && !pushStarted; attempt += 1) await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(pushStarted, true);
+
+    const sent = await client.sendText('conversation-1', 'buyer-1', 'hello');
+    assert.equal(sent.externalMessageRef, 'sent-message.PNM');
+  } finally {
+    await client.disconnect();
+  }
+});
+
 test('push parser prefers the stable PNM id over an internal transport id', () => {
   const parsed = parsePushPayload(pushPayload('canonical-1.PNM', 'same message', 'internal-32-char-id'), 'account-1', 'seller-1');
   assert.equal(parsed?.externalMessageRef, 'canonical-1.PNM');
@@ -435,6 +465,16 @@ class RejectingSocket extends FakeSocket {
     const message = JSON.parse(data) as Record<string, any>;
     this.sent.push(message);
     if (message.lwp === '/reg') queueMicrotask(() => this.emit('message', JSON.stringify({ code: 400, headers: { mid: message.headers?.mid }, body: { reason: 'SESSION_EXPIRED' } })));
+  }
+}
+
+class SlowPushResponseSocket extends FakeSocket {
+  override send(data: string): void {
+    super.send(data);
+    const message = JSON.parse(data) as Record<string, any>;
+    if (message.lwp === '/r/MessageSend/sendByReceiverScope') {
+      queueMicrotask(() => this.emit('message', JSON.stringify({ code: 200, headers: { mid: message.headers?.mid }, body: { messageId: 'sent-message.PNM' } })));
+    }
   }
 }
 

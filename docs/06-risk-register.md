@@ -268,6 +268,12 @@
 | S5-RISK-052 | 闲鱼 NC 滑块挑战在真实账号上返回 `验证失败(error:fALStr)`，自动 solver 尚未获得新 `x5sec`，因此真实白名单消息仍无法外发 | P0 | 保留 `ACCOUNT_VALIDATION_REQUIRED` fail-closed；自动模式隐藏/最小化浏览器并回收进程；待外部挑战允许自动化通过后重新执行真实发送与消息落库复核 | OPEN / BLOCKED_BY_EXTERNAL_CHALLENGE |
 | S5-RISK-053 | 外部验证请求若长期不返回，前端可能重复提交或永久显示发送中 | P1 | HTTP 客户端 45 秒超时、消息控制器 40 秒 UI 超时、保持同一幂等键并在会话切换后不污染当前时间线；补控制器回归与 Chrome/CDP E2E | CLOSED |
 
+### 2026-10-06 在线聊天发送超时根因修复
+
+| 编号 | 风险 | 级别 | 缓解措施 | 状态 |
+| --- | --- | --- | --- | --- |
+| S5-RISK-070 | 入站推送处理与 IM 请求响应共用串行队列；慢速推送/自动回复会阻塞发送响应，触发 `XIANYU_IM_TIMEOUT:/r/MessageSend/sendByReceiverScope` 并在前端显示“消息发送超时，请重试” | P1 | 发送响应在 socket 事件入口同步结算，推送业务仍保持串行处理；main 基线回归失败、修复后 17/17 通过；生产容器日志尚未取得 | MITIGATED / PROD_LOG_PENDING |
+
 ### 2026-09-28 Workspace 商品发布确认垂直切片
 
 | 编号 | 风险 | 级别 | 应对 | 状态 |

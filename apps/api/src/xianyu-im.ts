@@ -385,7 +385,18 @@ export class XianyuImClient {
     });
     this.socket = socket;
     socket.on('message', (raw: unknown) => {
-      this.incomingChain = this.incomingChain.then(() => this.handleIncoming(raw)).catch((error) => {
+      const parsed = parseIncomingFrame(raw);
+      if (!parsed.message) {
+        this.incomingChain = this.incomingChain.then(() => this.emitQuarantine('INVALID_FRAME_JSON', parsed.text, new Date().toISOString())).catch((error) => {
+          console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'frame_processing_failed', accountId: this.accountId, errorCode: eventErrorCode(error) }));
+        });
+        return;
+      }
+      // Resolve request/response frames before the serialized push-event lane.
+      // A slow inbound handler (DB writes, auto-reply, or retry backoff) must
+      // not make an already-received send acknowledgement wait behind it.
+      this.settlePendingResponse(parsed.message);
+      this.incomingChain = this.incomingChain.then(() => this.handleIncoming(parsed.message!)).catch((error) => {
         console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'frame_processing_failed', accountId: this.accountId, errorCode: eventErrorCode(error) }));
       });
     });
@@ -526,26 +537,7 @@ export class XianyuImClient {
     return response;
   }
 
-  private async handleIncoming(raw: unknown): Promise<void> {
-    const text = raw instanceof Uint8Array ? Buffer.from(raw).toString('utf8') : String(raw);
-    let message: Record<string, unknown>;
-    try { message = JSON.parse(text) as Record<string, unknown>; } catch {
-      await this.emitQuarantine('INVALID_FRAME_JSON', text, new Date().toISOString());
-      return;
-    }
-    const headers = asRecord(message.headers);
-    const mid = typeof headers.mid === 'string' ? headers.mid : undefined;
-    if (mid) {
-      try { this.sendRaw({ code: 200, headers: { ...headers } }); } catch { /* socket may be closing */ }
-    }
-    if (mid && this.pending.has(mid)) {
-      const pending = this.pending.get(mid)!;
-      this.pending.delete(mid);
-      clearTimeout(pending.timer);
-      const code = typeof message.code === 'number' ? message.code : 200;
-      if (code !== 200) pending.reject(new XianyuImRequestRejected(`XIANYU_IM_REQUEST_REJECTED:${code}`, code));
-      else pending.resolve(message);
-    }
+  private async handleIncoming(message: Record<string, unknown>): Promise<void> {
     void this.handleSyncExtra(message).catch((error) => {
       if (this._status !== 'disconnected' && this._status !== 'failed') {
         console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'sync_state_recovery_failed', accountId: this.accountId, errorCode: eventErrorCode(error) }));
@@ -569,6 +561,21 @@ export class XianyuImClient {
         await this.dispatchEventWithRetry(parsed.event);
       }
     }
+  }
+
+  private settlePendingResponse(message: Record<string, unknown>): void {
+    const headers = asRecord(message.headers);
+    const mid = typeof headers.mid === 'string' ? headers.mid : undefined;
+    if (mid) {
+      try { this.sendRaw({ code: 200, headers: { ...headers } }); } catch { /* socket may be closing */ }
+    }
+    if (!mid || !this.pending.has(mid)) return;
+    const pending = this.pending.get(mid)!;
+    this.pending.delete(mid);
+    clearTimeout(pending.timer);
+    const code = typeof message.code === 'number' ? message.code : 200;
+    if (code !== 200) pending.reject(new XianyuImRequestRejected(`XIANYU_IM_REQUEST_REJECTED:${code}`, code));
+    else pending.resolve(message);
   }
 
   private async dispatchEventWithRetry(event: XianyuImEvent): Promise<void> {
@@ -617,6 +624,16 @@ export class XianyuImClient {
     });
     this.syncStatePromise = wrapped;
     return wrapped;
+  }
+}
+
+function parseIncomingFrame(raw: unknown): { text: string; message?: Record<string, unknown> } {
+  const text = raw instanceof Uint8Array ? Buffer.from(raw).toString('utf8') : String(raw);
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return { text, message: asRecord(parsed) };
+  } catch {
+    return { text };
   }
 }
 
