@@ -128,7 +128,7 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
       const firstActive = sessions.find((session) => session.status === 'active');
       const rememberedSessionId = activeSessionIdRef.current ?? (sessionStorageKey && typeof window !== 'undefined' ? window.sessionStorage.getItem(sessionStorageKey) ?? undefined : undefined);
       const activeSessionId = rememberedSessionId && sessions.some((session) => session.id === rememberedSessionId && session.status === 'active') ? rememberedSessionId : firstActive?.id;
-      const messages = activeSessionId ? await api.listMessages(activeSessionId).catch(() => []) : [];
+      const messages = activeSessionId ? await api.listMessages(activeSessionId, 500).catch(() => []) : [];
       if (requestId !== requestRef.current) return;
       const recovered = activeSessionId ? await recoverRun(messages) : { run: null, events: [], confirmation: null, outbox: [] as WorkspaceOutboxVM[] };
       if (requestId !== requestRef.current) return;
@@ -179,7 +179,7 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     eventCursorRef.current = 0;
     runRefreshRequestRef.current += 1;
     setState((previous) => ({ ...previous, submitting: true, error: null }));
-    try { const session = await api.switchSession(sessionId); if (requestId !== requestRef.current) return null; const messages = await api.listMessages(session.id).catch(() => []); if (requestId !== requestRef.current) return null; const recovered = await recoverRun(messages); if (requestId !== requestRef.current) return null; persistSessionViewed(session.id, recovered.run?.runId ?? session.runId); rememberActiveSession(session.id); runRef.current = recovered.run; eventCursorRef.current = recovered.events.reduce((max, event) => Math.max(max, event.sequence), 0); setState((previous) => ({ ...previous, activeSessionId: session.id, unreadSessionIds: previous.unreadSessionIds.filter((id) => id !== session.id), messages, run: recovered.run, events: recovered.events, connection: 'idle', submitting: false, confirmation: recovered.confirmation, outbox: recovered.outbox })); return session; }
+    try { const session = await api.switchSession(sessionId); if (requestId !== requestRef.current) return null; const messages = await api.listMessages(session.id, 500).catch(() => []); if (requestId !== requestRef.current) return null; const recovered = await recoverRun(messages); if (requestId !== requestRef.current) return null; persistSessionViewed(session.id, recovered.run?.runId ?? session.runId); rememberActiveSession(session.id); runRef.current = recovered.run; eventCursorRef.current = recovered.events.reduce((max, event) => Math.max(max, event.sequence), 0); setState((previous) => ({ ...previous, activeSessionId: session.id, unreadSessionIds: previous.unreadSessionIds.filter((id) => id !== session.id), messages, run: recovered.run, events: recovered.events, connection: 'idle', submitting: false, confirmation: recovered.confirmation, outbox: recovered.outbox })); return session; }
     catch (error) { const normalized = normalizeError(error); setState((previous) => ({ ...previous, submitting: false, error: normalized.message })); return null; }
   }, [api, persistSessionViewed, recoverRun, rememberActiveSession]);
 
@@ -309,10 +309,15 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     runRefreshRequestRef.current += 1;
     setState((previous) => ({ ...previous, submitting: true, error: null }));
     try {
+      // Read the persisted session history in parallel with starting the next run.
+      // This keeps earlier turns visible even if the local message state was
+      // refreshed while the previous run was completing.
+      const persistedMessagesPromise = api.listMessages(sessionId, 500).catch(() => undefined);
       const run = await api.startRun({ accountId: options.accountId, sessionId, instruction, ...(attachments?.length ? { attachments } : {}), clientRunRef: `web-${Date.now()}-${Math.random().toString(16).slice(2)}` });
+      const persistedMessages = await persistedMessagesPromise;
       runRef.current = run;
       eventCursorRef.current = 0;
-      setState((previous) => ({ ...previous, run, events: [], connection: 'connecting', submitting: false, confirmation: null, outbox: [], unreadSessionIds: previous.unreadSessionIds.filter((id) => id !== run.sessionId), sessions: previous.sessions.map((session) => session.id === run.sessionId ? { ...session, runId: run.runId, runStatus: run.status } : session) }));
+      setState((previous) => ({ ...previous, run, messages: persistedMessages ?? previous.messages, events: [], connection: 'connecting', submitting: false, confirmation: null, outbox: [], unreadSessionIds: previous.unreadSessionIds.filter((id) => id !== run.sessionId), sessions: previous.sessions.map((session) => session.id === run.sessionId ? { ...session, runId: run.runId, runStatus: run.status } : session) }));
       void connectRun(run.runId, 0);
       return run;
     } catch (error) { const normalized = normalizeError(error); setState((previous) => ({ ...previous, submitting: false, error: normalized.message })); return null; }

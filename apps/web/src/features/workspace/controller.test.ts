@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { getWorkspaceRunCandidates, isWorkspaceRunActive, isWorkspaceRunReconnectable, listWorkspaceSessions, pickWorkspaceRun } from './controller';
 import type { WorkspaceApi } from './api';
 import type { WorkspaceMessageVM, WorkspaceRunVM } from './types';
+
+const controllerSource = readFileSync(fileURLToPath(new URL('./controller.ts', import.meta.url)), 'utf8');
 
 describe('workspace controller session loading', () => {
   it('treats retryable and in-flight runs as active for the loading indicator', () => {
@@ -22,6 +26,12 @@ describe('workspace controller session loading', () => {
 
     expect(listSessions).toHaveBeenNthCalledWith(1, 'account-1', '巡检');
     expect(listSessions).toHaveBeenNthCalledWith(2, 'account-1', '库存');
+  });
+
+  it('hydrates persisted history before rendering a follow-up run', () => {
+    expect(controllerSource).toContain('const persistedMessagesPromise = api.listMessages(sessionId, 500).catch(() => undefined);');
+    expect(controllerSource).toContain('messages: persistedMessages ?? previous.messages');
+    expect(controllerSource).toContain('api.listMessages(activeSessionId, 500)');
   });
 });
 
