@@ -138,7 +138,13 @@ export class PiSkillManager {
       const replacement = join(staging, 'replacement');
       await cp(skillRoot, replacement, { recursive: true, force: true });
       await rm(target, { recursive: true, force: true });
-      await rename(replacement, target);
+      try {
+        await rename(replacement, target);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error;
+        await cp(replacement, target, { recursive: true, force: true });
+        await rm(replacement, { recursive: true, force: true });
+      }
       const entry = manifest.entry ?? await findEntry(target);
       const now = new Date().toISOString();
       const state = await this.readRegistry(input.adminId);

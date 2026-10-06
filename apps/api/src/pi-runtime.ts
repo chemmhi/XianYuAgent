@@ -384,6 +384,10 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       const skillInstruction = await this.options.skillManager?.handleInstruction({ adminId: input.adminId ?? input.run.requestedBy, instruction: input.run.instruction });
       if (skillInstruction) {
         const output = redactSensitiveText(skillInstruction.content, this.options.outputLimit ?? 2_000, this.options.redactSecrets);
+        await this.transitionRun(input.run, 'executing');
+        await this.transitionStep(step, 'executing');
+        await this.emit(input.run.id, 'run.executing', { status: 'executing', messageType: 'tool_event', resource: 'pi_skill' });
+        await this.emit(input.run.id, 'step.executing', { stepId: step.id, status: 'executing', messageType: 'tool_event', resource: 'pi_skill' });
         const finishedAt = new Date().toISOString();
         await this.transitionStep(step, 'succeeded', { finishedAt, outputSummary: skillInstruction.summary });
         await this.transitionRun(input.run, 'succeeded', { finishedAt, resultSummary: output });
