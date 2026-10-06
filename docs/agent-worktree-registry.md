@@ -1,4 +1,4 @@
-# Agent Worktree 登记表
+﻿# Agent Worktree 登记表
 
 - 生效日期：2026-09-19
 - 维护责任：持有 merge lock 的主 agent 负责在合并区间内更新
@@ -252,4 +252,6 @@
 | root | workspace-conversation-delete-active-run-20261006 | fix/workspace-conversation-delete-active-run-20261006 | F:\ChenHai\Project\XianYuAgent-workspace-conversation-delete-active-run-20261006 | Codex /root | 2026-10-06 11:00:00 +08:00 | CLEANED | 94502aa4bc9fbe543961fca66e6c4b16d4e55bb6 | 2026-10-06 11:00:29 +08:00 | Session deletion now cascades active and terminal Workspace runs instead of returning session has an active run. Post-merge typecheck, API build, Workspace Vitest, workspace smoke with active queued run, and diff-check passed. |
 | root | workspace-language-fix-20261006 | fix/workspace-language-fix-20261006 | F:\ChenHai\Project\XianYuAgent-workspace-language-fix-20261006 | Codex /root | 2026-10-06 11:10:32 +08:00 | CLEANED | 890d462 | 2026-10-06 11:30:55 +08:00 | Root cause was an English-only Workspace system prompt plus no language instruction in the non-streaming fallback. Added locale detection and Chinese/English prompt rules for both paths. Post-merge API typecheck/build, 13 focused model/runtime tests, and diff-check passed. pi-runtime-smoke remains a pre-existing fixture failure on main (native-read store stub). Git worktree metadata and branch cleaned; Windows physical directory remains because the dependency junction cannot be removed safely. |
 
-| root | markdown-rendering-20261006 | fix/markdown-rendering-20261006 | F:\ChenHai\Project\XianYuAgent-markdown-rendering-20261006 | Codex /root | 2026-10-06 11:29:56 +08:00 | REGISTERED | - | - | 修复 Web 消息与 Workspace 最终回复的 Markdown 渲染，复用成熟 Markdown 方案并补充组件回归测试。 |
+| root | markdown-rendering-20261006 | fix/markdown-rendering-20261006 | F:\ChenHai\Project\XianYuAgent-markdown-rendering-20261006 | Codex /root | 2026-10-06 11:29:56 +08:00 | READY_FOR_MERGE | - | - | 提交 `6333b0d` 已完成本地评审：复用 react-markdown + remark-gfm + rehype-sanitize 渲染消息与 Workspace Markdown；补充 Markdown 回归测试、样式和消息 E2E 选择器兼容。Web 91 files / 347 tests、typecheck、build、diff-check 通过；Chrome/CDP E2E 因现有 API worktree 依赖缺失（pg/@types/node 等）未执行。 |
+
+
