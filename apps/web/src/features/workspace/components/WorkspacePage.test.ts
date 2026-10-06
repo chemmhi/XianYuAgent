@@ -3,8 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { getComposerTextareaMetrics, MessageStream, scrollMessageStreamToLatest, SessionRow, WorkspaceDeleteSessionModal, WorkspaceSendButton } from './WorkspacePage';
-import type { WorkspaceMessageVM, WorkspaceSessionVM } from '../types';
+import { formatToolEventContent, getComposerTextareaMetrics, MessageStream, scrollMessageStreamToLatest, SessionRow, WorkspaceConfirmationCard, WorkspaceDeleteSessionModal, WorkspaceSendButton } from './WorkspacePage';
+import type { WorkspaceConfirmationVM, WorkspaceMessageVM, WorkspaceRunVM, WorkspaceSessionVM } from '../types';
 
 const workspaceCss = readFileSync(fileURLToPath(new URL('./workspace.css', import.meta.url)), 'utf8').replace(/\r\n/g, '\r\n').replace(/\s+/g, ' ').trim();
 const workspacePageSource = readFileSync(fileURLToPath(new URL('./WorkspacePage.tsx', import.meta.url)), 'utf8');
@@ -187,9 +187,20 @@ describe('Workspace Composer styling contract', () => {
     expect(workspaceCss).toContain('.workspace-layout { min-height: 0; }');
     expect(workspaceCss).toContain('.workspace-sessions-panel { display: flex; flex: 0 0 auto; flex-direction: column; align-self: stretch; min-height: 0; max-height: none;');
     expect(workspaceCss).toContain('.workspace-session-list { display: grid; align-content: start; width: 100%; box-sizing: border-box; min-height: 0; max-height: none; overflow-y: auto; overflow-x: hidden;');
-    expect(workspaceCss).toContain('.workspace-tool-event-details { margin: 7px 0 0 26px; padding: 10px 0 0; background: transparent; }');
-    expect(workspaceCss).toContain('.workspace-tool-event-details p { margin: 0; color: var(--sub);');
+    expect(workspaceCss).toContain('.workspace-tool-event-details { margin: 7px 0 0 26px; padding: 10px 0 0; background: transparent; min-width: 0; max-width: calc(100% - 26px);');
+    expect(workspaceCss).toContain('.workspace-tool-event-details pre { margin: 0; max-width: 100%; min-width: 0; color: var(--sub); font: inherit; font-size: var(--font-size-body); line-height: var(--font-line-body);');
+    expect(workspaceCss).toContain('overflow-wrap: anywhere; word-break: break-word;');
     expect(workspacePageSource).not.toContain('WorkspaceContextPanel');
+  });
+
+  it('formats JSON tool results and preserves readable wrapping for long payloads', () => {
+    const content = '工具结果：Skill execution complete\n{"code":0,"data":{"file_list":[{"name":"Tools-Installer.exe","size":11032088}]}}{"code":0,"msg":"成功"}';
+    const formatted = formatToolEventContent(content);
+    expect(formatted).toContain('工具结果：Skill execution complete');
+    expect(formatted).toContain('"file_list": [');
+    expect(formatted).toContain('"name": "Tools-Installer.exe"');
+    expect(formatted).toContain('\n\n{\n  "code": 0,');
+    expect(formatted).not.toContain('}{');
   });
 
   it('switches the send action to a stop icon while a run is submitting', () => {
@@ -249,5 +260,63 @@ describe('Workspace confirmation feedback contract', () => {
     expect(workspacePageSource).toContain("import { Toast } from '../../../shared/ui/Toast';");
     expect(workspacePageSource).toContain('{errorToast && <Toast message={errorToast} tone="error"');
     expect(workspacePageSource).not.toContain('{state.error && <div className="workspace-inline-error"');
+  });
+});
+
+describe('Workspace confirmation readability', () => {
+  it('shows the concrete product automation change instead of internal fields', () => {
+    const run: WorkspaceRunVM = {
+      runId: 'run-automation-1',
+      sessionId: 'session-1',
+      accountId: 'account-1',
+      status: 'waiting_confirmation',
+      instructionSummary: '启动商品自动发货',
+      createdAt: '2026-10-06T12:00:00.000Z',
+      updatedAt: '2026-10-06T12:00:01.000Z',
+      steps: [],
+    };
+    const confirmation: WorkspaceConfirmationVM = {
+      confirmationId: 'confirmation-1',
+      runId: run.runId,
+      stepId: 'step-1',
+      accountId: run.accountId,
+      action: 'product_automation_update',
+      policyRef: 'workspace.product_automation_update.confirm',
+      manifest: {
+        action: 'product_automation_update',
+        accountId: run.accountId,
+        productId: 'product-1',
+        productTitle: 'AI工具一键下载服务',
+        expectedConfigVersion: 1,
+        fields: ['paidAutoDelivery'],
+        automationChanges: [{ key: 'paidAutoDelivery', label: '付费自动发货', before: '关闭，未绑定卡券', after: '开启，绑定 1 个卡券批次' }],
+        displayTitle: '商品自动化规则变更确认',
+        displaySummary: '准备启用商品“AI工具一键下载服务”的自动化规则',
+      },
+      status: 'active',
+      version: 1,
+      expiresAt: '2026-10-06T12:10:00.000Z',
+      createdAt: '2026-10-06T12:00:01.000Z',
+      updatedAt: '2026-10-06T12:00:01.000Z',
+    };
+
+    const html = renderToStaticMarkup(createElement(WorkspaceConfirmationCard, {
+      run,
+      accountName: '陈陈cc',
+      confirmation,
+      actionSubmitting: false,
+      onConfirm: vi.fn(),
+      onCancel: vi.fn(),
+    }));
+
+    expect(html).toContain('商品自动化规则变更 · 需要管理员确认');
+    expect(html).toContain('AI工具一键下载服务');
+    expect(html).toContain('付费自动发货');
+    expect(html).toContain('关闭，未绑定卡券 → 开启，绑定 1 个卡券批次');
+    expect(html).toContain('当前状态');
+    expect(html).toContain('确认后');
+    expect(html).not.toContain('accountId');
+    expect(html).not.toContain('productId');
+    expect(html).not.toContain('policy:');
   });
 });

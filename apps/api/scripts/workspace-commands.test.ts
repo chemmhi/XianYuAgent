@@ -94,7 +94,7 @@ test('workspace_prepare_write normalizes flat automation fields into canonical p
   const config = { paidAutoDelivery: { enabled: true, couponBatchIds: ['batch-1'] } };
   const commands = orchestrator({
     products: { get: async () => product },
-    productAutomation: { get: async () => ({ configVersion: 1, product, config: {} }), update: async () => ({ configVersion: 2, config }) },
+    productAutomation: { get: async () => ({ configVersion: 1, product, config: { paidAutoDelivery: { enabled: false, couponBatchIds: [] } } }), update: async () => ({ configVersion: 2, config }) },
   });
 
   const result = await commands.executeModelTool('workspace_prepare_write', {
@@ -111,6 +111,9 @@ test('workspace_prepare_write normalizes flat automation fields into canonical p
     expectedConfigVersion: 1,
     config,
   });
+  assert.equal(result.plan?.manifest.productTitle, product.title);
+  assert.deepEqual(result.plan?.manifest.automationChanges, [{ key: 'paidAutoDelivery', label: '付费自动发货', before: '关闭，未绑定卡券', after: '开启，绑定 1 个卡券批次' }]);
+  assert.match(String(result.plan?.manifest.displaySummary), /付费自动发货：关闭，未绑定卡券 → 开启，绑定 1 个卡券批次/);
 });
 
 test('workspace_prepare_write wraps direct automation rule parameters into config', async () => {
@@ -118,7 +121,7 @@ test('workspace_prepare_write wraps direct automation rule parameters into confi
   const rule = { enabled: true, couponBatchIds: ['batch-1'] };
   const commands = orchestrator({
     products: { get: async () => product },
-    productAutomation: { get: async () => ({ configVersion: 3, product, config: {} }), update: async () => ({ configVersion: 4, config: { paidAutoDelivery: rule } }) },
+    productAutomation: { get: async () => ({ configVersion: 3, product, config: { paidAutoDelivery: { enabled: false, couponBatchIds: [] } } }), update: async () => ({ configVersion: 4, config: { paidAutoDelivery: rule } }) },
   });
 
   const result = await commands.executeModelTool('workspace_prepare_write', {
@@ -135,6 +138,8 @@ test('workspace_prepare_write wraps direct automation rule parameters into confi
     expectedConfigVersion: 3,
     config: { paidAutoDelivery: rule },
   });
+  assert.equal(result.plan?.manifest.productTitle, product.title);
+  assert.match(String(result.plan?.manifest.displaySummary), /付费自动发货：关闭，未绑定卡券 → 开启，绑定 1 个卡券批次/);
 });
 
 test('resolves numeric external product refs and builds a disable-all automation patch', async () => {
@@ -201,13 +206,14 @@ test('resolves a product title when the request starts with 启动 and uses 自�
       get: async () => product,
       list: async (_adminId: string, input: { keyword?: string }) => { query = input.keyword ?? ''; return { items: [product], page: 1, pageSize: 20, total: 1, totalPages: 1 }; },
     },
-    productAutomation: { get: async () => ({ configVersion: 1, product, config: {} }), update: async () => ({ configVersion: 2, config: {} }) },
+    productAutomation: { get: async () => ({ configVersion: 1, product, config: { paidAutoDelivery: { enabled: false, couponBatchIds: [] } } }), update: async () => ({ configVersion: 2, config: {} }) },
   });
 
   const plan = await commands.prepareWrite({ ...input, instruction: '启动 AI 技术咨询，需求定制开发服务 这个商品的自动发货，卡券选择“奥维地图”' });
 
   assert.equal(plan?.action, 'product_automation_update');
   assert.equal(plan?.manifest.productId, product.id);
+  assert.deepEqual(plan?.manifest.automationChanges, [{ key: 'paidAutoDelivery', label: '付费自动发货', before: '关闭，未绑定卡券', after: '开启，未绑定卡券' }]);
   assert.equal(query, product.title);
 });
 

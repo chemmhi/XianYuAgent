@@ -176,20 +176,26 @@ export class WorkspaceCommandOrchestrator {
       const productId = await this.resolveProductId(input, fields.productId);
       const action = /(自动化|规则|发货|改价|赠品|评价)/i.test(input.instruction) ? 'product_automation_update' : /知识库|问答|客服知识/i.test(input.instruction) ? 'product_knowledge_update' : 'product_update';
       const disablingAutomation = action === 'product_automation_update' && /(取消|关闭|停用|禁用)/i.test(input.instruction);
+      const automation = action === 'product_automation_update' ? await this.deps.productAutomation.get(input.adminId, productId) : undefined;
+      const requestedAutomationConfig = disablingAutomation ? {
+        paidAutoDelivery: { enabled: false, couponBatchIds: [] },
+        unpaidAutoReprice: { enabled: false },
+        reviewGift: { enabled: false, couponBatchIds: [] },
+        reviewReminder: { enabled: false },
+      } : undefined;
+      const automationChanges = action === 'product_automation_update'
+        ? buildAutomationPreviewChanges(automation?.config, requestedAutomationConfig, input.instruction)
+        : [];
+      const productTitle = automation?.product.title;
       const summary = action === 'product_automation_update'
-        ? `${disablingAutomation ? '准备停用' : '准备更新'}商品自动化规则（商品 ${productId}）`
+        ? `${disablingAutomation ? '准备停用' : /(?:启动|开启|启用|打开)/i.test(input.instruction) ? '准备启用' : '准备更新'}商品“${productTitle ?? productId}”的自动化规则${automationChanges.length ? `（${automationChanges.map((change) => `${change.label}：${change.before} → ${change.after}`).join('；')}）` : ''}`
         : action === 'product_knowledge_update' ? `准备更新商品知识库（商品 ${productId}）` : `准备更新商品信息（商品 ${productId}）`;
       const expectedConfigVersion = action === 'product_automation_update'
-        ? await this.currentProductAutomationVersion(input.adminId, productId)
+        ? automation?.configVersion ?? await this.currentProductAutomationVersion(input.adminId, productId)
         : await this.currentProductVersion(input.adminId, productId);
-      const manifest: Record<string, unknown> = { action, accountId, productId, expectedConfigVersion, fields: safeFieldNames(fields) };
+      const manifest: Record<string, unknown> = { action, accountId, productId, expectedConfigVersion, fields: safeFieldNames(fields), ...(productTitle ? { productTitle } : {}), ...(automationChanges.length ? { automationChanges } : {}) };
       if (disablingAutomation) {
-        manifest.config = {
-          paidAutoDelivery: { enabled: false, couponBatchIds: [] },
-          unpaidAutoReprice: { enabled: false },
-          reviewGift: { enabled: false, couponBatchIds: [] },
-          reviewReminder: { enabled: false },
-        };
+        manifest.config = requestedAutomationConfig;
       }
       return this.plan(action, action === 'product_automation_update' ? `${disablingAutomation ? '停用' : ''}商品自动化规则确认` : action === 'product_knowledge_update' ? '商品知识库确认' : '商品信息变更确认', summary, expiresAt, manifest);
     }
@@ -255,8 +261,10 @@ export class WorkspaceCommandOrchestrator {
       const current = await this.deps.productAutomation.get(input.adminId, productId);
       const config = parameters.config as Record<string, unknown>;
       validateAutomationConfig(config);
-      const manifest = { action: operation, accountId, productId, expectedConfigVersion: current.configVersion, fields: Object.keys(config), redacted: true };
-      return this.plan(operation, '商品自动化规则确认', `准备更新商品自动化规则（商品 ${productId}）`, expiresAt, manifest, { action: operation, accountId, productId, expectedConfigVersion: current.configVersion, config });
+      const automationChanges = buildAutomationPreviewChanges(current.config, config);
+      const manifest = { action: operation, accountId, productId, productTitle: current.product.title, expectedConfigVersion: current.configVersion, fields: Object.keys(config), automationChanges, redacted: true };
+      const summary = `准备更新商品“${current.product.title}”的自动化规则${automationChanges.length ? `（${automationChanges.map((change) => `${change.label}：${change.before} → ${change.after}`).join('；')}）` : ''}`;
+      return this.plan(operation, '商品自动化规则确认', summary, expiresAt, manifest, { action: operation, accountId, productId, expectedConfigVersion: current.configVersion, config });
     }
     if (operation.startsWith('coupon_')) {
       const batchId = stringParam('batchId');
@@ -627,7 +635,7 @@ export class WorkspaceCommandOrchestrator {
   }
 
   private plan(action: string, title: string, summary: string, expiresAt: string, manifest: Record<string, unknown>, executionPlan: Record<string, unknown> = manifest): NativeWorkspaceWritePlan {
-    return { kind: action as NativeWorkspaceWritePlan['kind'], action: action as NativeWorkspaceWritePlan['action'], policyRef: `workspace.${action}.confirm`, title, summary, content: `已生成${title}。\n${summary}\n确认后将调用现有领域服务并写入审计。`, expiresAt, manifest: { ...manifest, action, requiresLocalExecution: true, redacted: true }, executionPlan: { ...executionPlan, action } };
+    return { kind: action as NativeWorkspaceWritePlan['kind'], action: action as NativeWorkspaceWritePlan['action'], policyRef: `workspace.${action}.confirm`, title, summary, content: `已生成${title}。\n${summary}\n确认后将调用现有领域服务并写入审计。`, expiresAt, manifest: { ...manifest, action, displayTitle: title, displaySummary: summary, requiresLocalExecution: true, redacted: true }, executionPlan: { ...executionPlan, action } };
   }
 }
 
@@ -718,6 +726,39 @@ function formatAutomationPersistedResult(result: { product: { id: string; extern
     `- 评价赠品：${enabled(gift.enabled)}；卡券：${couponLabel(gift.couponBatchIds)}；最大重试：${gift.maxAttempts} 次；退避：${gift.retryBackoffSeconds} 秒`,
     `- 求评价提醒：${enabled(reminder.enabled)}；首次延迟：${reminder.firstDelayMinutes} 分钟；重复间隔：${reminder.repeatIntervalMinutes} 分钟；最多提醒：${reminder.maxReminders} 次；文案：${reminder.message || '未设置'}`,
   ].join('\n');
+}
+interface AutomationPreviewChange { key: string; label: string; before: string; after: string; }
+const AUTOMATION_RULE_LABELS: Record<string, string> = {
+  paidAutoDelivery: '付费自动发货',
+  unpaidAutoReprice: '未付款自动改价',
+  reviewGift: '评价赠品',
+  reviewReminder: '好评提醒',
+};
+function buildAutomationPreviewChanges(current: ProductAutomationConfig | undefined, requested?: Record<string, unknown>, instruction = ''): AutomationPreviewChange[] {
+  const keys = new Set(Object.keys(requested ?? {}).filter((key) => Object.prototype.hasOwnProperty.call(AUTOMATION_RULE_LABELS, key)));
+  if (/(自动发货|paidAutoDelivery)/i.test(instruction)) keys.add('paidAutoDelivery');
+  if (/(改价|unpaidAutoReprice)/i.test(instruction)) keys.add('unpaidAutoReprice');
+  if (/(赠品|reviewGift)/i.test(instruction)) keys.add('reviewGift');
+  if (/(评价提醒|好评提醒|reviewReminder)/i.test(instruction)) keys.add('reviewReminder');
+  const direction = /(?:关闭|停用|禁用|取消)/i.test(instruction) ? false : /(?:启动|开启|启用|打开)/i.test(instruction) ? true : undefined;
+  return [...keys].map((key) => {
+    const currentRule = isRecord(current?.[key as keyof ProductAutomationConfig]) ? current?.[key as keyof ProductAutomationConfig] as unknown as Record<string, unknown> : {};
+    const requestedRule = isRecord(requested?.[key]) ? requested[key] as Record<string, unknown> : undefined;
+    const afterRule = requestedRule ? { ...currentRule, ...requestedRule } : direction === undefined ? currentRule : { ...currentRule, enabled: direction };
+    return { key, label: AUTOMATION_RULE_LABELS[key] ?? key, before: describeAutomationRule(key, currentRule), after: describeAutomationRule(key, afterRule) };
+  });
+}
+function describeAutomationRule(key: string, value: Record<string, unknown>): string {
+  const parts: string[] = [];
+  if (typeof value.enabled === 'boolean') parts.push(value.enabled ? '开启' : '关闭');
+  if (key === 'paidAutoDelivery' && Array.isArray(value.couponBatchIds)) {
+    parts.push(value.couponBatchIds.length ? `绑定 ${value.couponBatchIds.length} 个卡券批次` : '未绑定卡券');
+    if (typeof value.autoConfirm === 'boolean') parts.push(`自动确认${value.autoConfirm ? '开启' : '关闭'}`);
+  }
+  if (key === 'reviewGift' && Array.isArray(value.couponBatchIds)) parts.push(value.couponBatchIds.length ? `绑定 ${value.couponBatchIds.length} 个卡券批次` : '未绑定卡券');
+  if (key === 'unpaidAutoReprice' && typeof value.targetPriceMinor === 'number') parts.push(`目标价 ${formatMoney(value.targetPriceMinor)}`);
+  if (key === 'reviewReminder' && typeof value.firstDelayMinutes === 'number') parts.push(`首次延迟 ${value.firstDelayMinutes} 分钟`);
+  return parts.join('，') || '按确认内容更新';
 }
 function safeFieldNames(fields: Record<string, string>): string[] { return Object.keys(fields).filter((key) => key !== 'content' && key !== 'knowledgeBase' && key !== 'apiKey'); }
 function productSearchContent(items: ProductRecord[], total: number): string { return items.length ? [`匹配到 ${total} 个商品：`, ...items.map((item, index) => `${index + 1}. ${item.title} · ${item.externalProductRef ?? item.id} · ${item.status}`)].join('\n') : '未匹配到商品。'; }
