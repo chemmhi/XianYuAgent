@@ -39,6 +39,8 @@ export interface WorkspaceSessionView {
   accountId: string;
   title: string;
   status: AgentSessionRecord['status'];
+  runId?: string;
+  runStatus?: RunStatus;
   summary?: string;
   lastActiveAt: string;
   archivedAt?: string;

@@ -24,6 +24,19 @@ function orchestrator(overrides: Record<string, unknown> = {}) {
 
 const input = { adminId: 'admin-1', accountId: 'account-1', requestId: 'req-1', traceId: 'trace-1' };
 
+test('includes the latest workspace run state on session listings', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'workspace-session-status@example.com', passwordHash: 'hash', displayName: 'Workspace Session Status' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'session-status', displayName: 'Session Status' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Session Status' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '查看订单' });
+  await store.updateRun(created.run.id, { status: 'executing' });
+
+  const listed = await store.listAgentSessions(admin.id, { accountId: account.id });
+  assert.equal(listed[0]?.runId, created.run.id);
+  assert.equal(listed[0]?.runStatus, 'executing');
+});
+
 test('detects workspace takeover command families', () => {
   assert.equal(detectCommand('分析近 7 天经营情况'), 'dashboard');
   assert.equal(detectCommand('刷新商品列表'), 'products');

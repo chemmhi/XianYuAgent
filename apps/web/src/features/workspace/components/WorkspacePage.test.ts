@@ -34,7 +34,7 @@ describe('Workspace SessionRow', () => {
     expect(html).not.toContain('workspace-session-archive');
     expect(html).not.toContain('归档');
     expect(html).toContain('class="workspace-session-action-icon"');
-    expect(html).toContain('class="workspace-session-time"');
+    expect(html).not.toContain('workspace-session-time');
     expect(html).not.toContain('>•••</button>');
     expect(workspaceCss).toContain('.workspace-session-action-icon { width: 16px; height: 16px; }');
   });
@@ -51,7 +51,37 @@ describe('Workspace SessionRow', () => {
 
     expect(html).toContain('class="workspace-session-running-icon"');
     expect(html).toContain('aria-label="任务进行中"');
+    expect(html.indexOf('workspace-session-title')).toBeLessThan(html.indexOf('workspace-session-running-icon'));
     expect(workspaceCss).toContain('@keyframes workspace-session-running-spin');
+    expect(workspaceCss).toContain('border: 1.5px solid #9CA3AF;');
+  });
+
+  it('does not render a meaningless active label when the session has no summary', () => {
+    const html = renderToStaticMarkup(createElement(SessionRow, {
+      session: { ...session, summary: undefined },
+      active: true,
+      busy: false,
+      onSwitch: vi.fn(),
+      onDelete: vi.fn(),
+    }));
+
+    expect(html).not.toContain('活跃');
+    expect(workspaceCss).toContain('padding: 8px 10px;');
+  });
+
+  it('renders an unread completion dot after the session title', () => {
+    const html = renderToStaticMarkup(createElement(SessionRow, {
+      session,
+      active: false,
+      unread: true,
+      busy: false,
+      onSwitch: vi.fn(),
+      onDelete: vi.fn(),
+    }));
+
+    expect(html).toContain('class="workspace-session-unread-dot"');
+    expect(html).toContain('aria-label="有未读完成任务"');
+    expect(workspaceCss).toContain('background: #2563EB;');
   });
 
   it('uses the existing modal surface for delete confirmation', () => {

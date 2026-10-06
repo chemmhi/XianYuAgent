@@ -29,13 +29,17 @@ function normalizeError(error: unknown): { message: string; forbidden: boolean }
   return { message: error instanceof Error ? error.message : 'Workspace 请求失败', forbidden: status === 403 };
 }
 
+function isTerminalRun(status?: WorkspaceRunVM['status']): boolean {
+  return Boolean(status && terminalRunStatuses.has(status));
+}
+
 export function listWorkspaceSessions(api: WorkspaceApi, accountId: string, search: string): Promise<WorkspaceSessionVM[]> {
   return api.listSessions(accountId, search);
 }
 
 export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?: string }): WorkspaceController {
   const api = options.api ?? defaultApi;
-  const [state, setState] = useState<WorkspaceState>({ phase: 'idle', sessions: [], run: null, messages: [], events: [], connection: 'idle', error: null, submitting: false, confirmation: null, outbox: [], actionSubmitting: false });
+  const [state, setState] = useState<WorkspaceState>({ phase: 'idle', sessions: [], unreadSessionIds: [], run: null, messages: [], events: [], connection: 'idle', error: null, submitting: false, confirmation: null, outbox: [], actionSubmitting: false });
   const [search, setSearchState] = useState('');
   const socketRef = useRef<WebSocket | null>(null);
   const connectionAttemptRef = useRef(0);
@@ -46,6 +50,26 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
   const actionInFlightRef = useRef(false);
   const activeSessionIdRef = useRef<string | undefined>(undefined);
   const sessionStorageKey = options.accountId ? `workspace:active-session:${options.accountId}` : undefined;
+
+  const viewedRunStorageKey = useCallback((sessionId: string) => sessionStorageKey ? `${sessionStorageKey}:viewed-run:${sessionId}` : undefined, [sessionStorageKey]);
+  const getViewedRunId = useCallback((sessionId: string) => {
+    const key = viewedRunStorageKey(sessionId);
+    return typeof window !== 'undefined' && key ? window.sessionStorage.getItem(key) ?? undefined : undefined;
+  }, [viewedRunStorageKey]);
+  const persistSessionViewed = useCallback((sessionId: string, runId?: string) => {
+    const key = viewedRunStorageKey(sessionId);
+    if (typeof window !== 'undefined' && key && runId) window.sessionStorage.setItem(key, runId);
+  }, [viewedRunStorageKey]);
+  const unreadSessionIdsFor = useCallback((sessions: WorkspaceSessionVM[], activeSessionId?: string) => sessions
+    .filter((session) => session.id !== activeSessionId && Boolean(session.runId) && isTerminalRun(session.runStatus) && getViewedRunId(session.id) !== session.runId)
+    .map((session) => session.id), [getViewedRunId]);
+
+  const markSessionViewed = useCallback((sessionId: string, runId?: string) => {
+    persistSessionViewed(sessionId, runId);
+    setState((previous) => previous.unreadSessionIds.includes(sessionId)
+      ? { ...previous, unreadSessionIds: previous.unreadSessionIds.filter((id) => id !== sessionId) }
+      : previous);
+  }, [persistSessionViewed]);
 
   const rememberActiveSession = useCallback((sessionId?: string) => {
     activeSessionIdRef.current = sessionId;
@@ -66,7 +90,7 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
       api.listOutbox(run.runId).catch(() => [] as WorkspaceOutboxVM[]),
     ]);
     return { run, events, confirmation, outbox };
-  }, [api]);
+  }, [api, getViewedRunId]);
 
   const reload = useCallback(async () => {
     const requestId = ++requestRef.current;
@@ -79,7 +103,7 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
       runRefreshRequestRef.current += 1;
       // Keep the per-account session cache while account context is loading.
       // The provider can briefly render without an account during tab remounts.
-      setState((previous) => ({ ...previous, phase: 'empty', sessions: [], activeSessionId: undefined, run: null, messages: [], events: [], connection: 'idle', error: null, confirmation: null, outbox: [] }));
+      setState((previous) => ({ ...previous, phase: 'empty', sessions: [], unreadSessionIds: [], activeSessionId: undefined, run: null, messages: [], events: [], connection: 'idle', error: null, confirmation: null, outbox: [] }));
       return;
     }
     connectionAttemptRef.current += 1;
@@ -99,16 +123,18 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
       if (requestId !== requestRef.current) return;
       const recovered = activeSessionId ? await recoverRun(messages) : { run: null, events: [], confirmation: null, outbox: [] as WorkspaceOutboxVM[] };
       if (requestId !== requestRef.current) return;
+      const activeSession = activeSessionId ? sessions.find((session) => session.id === activeSessionId) : undefined;
+      if (activeSessionId) persistSessionViewed(activeSessionId, recovered.run?.runId ?? activeSession?.runId);
       rememberActiveSession(activeSessionId);
       runRef.current = recovered.run;
       eventCursorRef.current = recovered.events.reduce((max, event) => Math.max(max, event.sequence), 0);
-      setState((previous) => ({ ...previous, phase: sessions.length ? 'success' : 'empty', sessions, activeSessionId, messages: activeSessionId ? messages : [], run: recovered.run, events: recovered.events, connection: 'idle', error: null, confirmation: recovered.confirmation, outbox: recovered.outbox }));
+      setState((previous) => ({ ...previous, phase: sessions.length ? 'success' : 'empty', sessions, unreadSessionIds: unreadSessionIdsFor(sessions, activeSessionId), activeSessionId, messages: activeSessionId ? messages : [], run: recovered.run, events: recovered.events, connection: 'idle', error: null, confirmation: recovered.confirmation, outbox: recovered.outbox }));
     } catch (error) {
       if (requestId !== requestRef.current) return;
       const normalized = normalizeError(error);
       setState((previous) => ({ ...previous, phase: normalized.forbidden ? 'forbidden' : 'error', error: normalized.message }));
     }
-  }, [api, options.accountId, recoverRun, rememberActiveSession, search, sessionStorageKey]);
+  }, [api, options.accountId, persistSessionViewed, recoverRun, rememberActiveSession, search, sessionStorageKey, unreadSessionIdsFor]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void reload(); }, search.trim() ? 220 : 0);
@@ -143,9 +169,9 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     eventCursorRef.current = 0;
     runRefreshRequestRef.current += 1;
     setState((previous) => ({ ...previous, submitting: true, error: null }));
-    try { const session = await api.switchSession(sessionId); const messages = await api.listMessages(session.id).catch(() => []); const recovered = await recoverRun(messages); rememberActiveSession(session.id); runRef.current = recovered.run; eventCursorRef.current = recovered.events.reduce((max, event) => Math.max(max, event.sequence), 0); setState((previous) => ({ ...previous, activeSessionId: session.id, messages, run: recovered.run, events: recovered.events, connection: 'idle', submitting: false, confirmation: recovered.confirmation, outbox: recovered.outbox })); return session; }
+    try { const session = await api.switchSession(sessionId); const messages = await api.listMessages(session.id).catch(() => []); const recovered = await recoverRun(messages); persistSessionViewed(session.id, recovered.run?.runId ?? session.runId); rememberActiveSession(session.id); runRef.current = recovered.run; eventCursorRef.current = recovered.events.reduce((max, event) => Math.max(max, event.sequence), 0); setState((previous) => ({ ...previous, activeSessionId: session.id, unreadSessionIds: previous.unreadSessionIds.filter((id) => id !== session.id), messages, run: recovered.run, events: recovered.events, connection: 'idle', submitting: false, confirmation: recovered.confirmation, outbox: recovered.outbox })); return session; }
     catch (error) { const normalized = normalizeError(error); setState((previous) => ({ ...previous, submitting: false, error: normalized.message })); return null; }
-  }, [api, recoverRun, rememberActiveSession]);
+  }, [api, persistSessionViewed, recoverRun, rememberActiveSession]);
 
   const archiveSession = useCallback(async (sessionId: string) => {
     setState((previous) => ({ ...previous, submitting: true, error: null }));
@@ -194,7 +220,7 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
       api.listOutbox(run.runId).catch(() => [] as WorkspaceOutboxVM[]),
     ]);
     runRef.current = run;
-    setState((previous) => ({ ...previous, run, confirmation, outbox }));
+    setState((previous) => ({ ...previous, run, confirmation, outbox, sessions: previous.sessions.map((session) => session.id === run.sessionId ? { ...session, runId: run.runId, runStatus: run.status } : session), unreadSessionIds: isTerminalRun(run.status) && getViewedRunId(run.sessionId) !== run.runId ? [...new Set([...previous.unreadSessionIds, run.sessionId])] : previous.unreadSessionIds.filter((id) => id !== run.sessionId) }));
   }, [api]);
 
   const appendEvent = useCallback((event: WorkspaceRunEventVM) => {
@@ -249,7 +275,7 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
       const run = await api.startRun({ accountId: options.accountId, sessionId, instruction, clientRunRef: `web-${Date.now()}-${Math.random().toString(16).slice(2)}` });
       runRef.current = run;
       eventCursorRef.current = 0;
-      setState((previous) => ({ ...previous, run, events: [], connection: 'connecting', submitting: false, confirmation: null, outbox: [] }));
+      setState((previous) => ({ ...previous, run, events: [], connection: 'connecting', submitting: false, confirmation: null, outbox: [], unreadSessionIds: previous.unreadSessionIds.filter((id) => id !== run.sessionId), sessions: previous.sessions.map((session) => session.id === run.sessionId ? { ...session, runId: run.runId, runStatus: run.status } : session) }));
       void connectRun(run.runId, 0);
       return run;
     } catch (error) { const normalized = normalizeError(error); setState((previous) => ({ ...previous, submitting: false, error: normalized.message })); return null; }
@@ -273,17 +299,17 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
         connectionAttemptRef.current += 1;
         socketRef.current?.close();
         socketRef.current = null;
-        setState((previous) => ({ ...previous, run: latestRun, confirmation, outbox, connection: 'closed' }));
+        setState((previous) => ({ ...previous, run: latestRun, confirmation, outbox, connection: 'closed', sessions: previous.sessions.map((session) => session.id === latestRun.sessionId ? { ...session, runId: latestRun.runId, runStatus: latestRun.status } : session), unreadSessionIds: isTerminalRun(latestRun.status) && getViewedRunId(latestRun.sessionId) !== latestRun.runId ? [...new Set([...previous.unreadSessionIds, latestRun.sessionId])] : previous.unreadSessionIds.filter((id) => id !== latestRun.sessionId) }));
         return;
       }
-      setState((previous) => ({ ...previous, run: latestRun, confirmation, outbox }));
+      setState((previous) => ({ ...previous, run: latestRun, confirmation, outbox, sessions: previous.sessions.map((session) => session.id === latestRun.sessionId ? { ...session, runId: latestRun.runId, runStatus: latestRun.status } : session), unreadSessionIds: isTerminalRun(latestRun.status) && getViewedRunId(latestRun.sessionId) !== latestRun.runId ? [...new Set([...previous.unreadSessionIds, latestRun.sessionId])] : previous.unreadSessionIds.filter((id) => id !== latestRun.sessionId) }));
       await connectRun(latestRun.runId, eventCursorRef.current);
     } catch (error) {
       if (requestId !== runRefreshRequestRef.current) return;
       const normalized = normalizeError(error);
       setState((previous) => ({ ...previous, connection: 'closed', error: normalized.message }));
     }
-  }, [api, connectRun]);
+  }, [api, connectRun, getViewedRunId]);
 
   const confirmRun = useCallback(async () => {
     const currentRun = runRef.current;
@@ -297,7 +323,7 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
       const confirmation = await api.getConfirmation(latestRun.runId);
       const result = await api.confirmRun(latestRun.runId, confirmation.version);
       runRef.current = result.run;
-      setState((previous) => ({ ...previous, run: result.run, confirmation: result.confirmation, outbox: [result.outbox], actionSubmitting: false }));
+      setState((previous) => ({ ...previous, run: result.run, confirmation: result.confirmation, outbox: [result.outbox], actionSubmitting: false, sessions: previous.sessions.map((session) => session.id === result.run.sessionId ? { ...session, runId: result.run.runId, runStatus: result.run.status } : session) }));
       return result;
     } catch (error) { const normalized = normalizeError(error); setState((previous) => ({ ...previous, actionSubmitting: false, error: normalized.message })); return null; }
     finally { actionInFlightRef.current = false; }
@@ -315,7 +341,7 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
       const confirmation = await api.getConfirmation(latestRun.runId);
       const result = await api.cancelRun(latestRun.runId, confirmation.version);
       runRef.current = result.run;
-      setState((previous) => ({ ...previous, run: result.run, confirmation: result.confirmation, outbox: [], actionSubmitting: false }));
+      setState((previous) => ({ ...previous, run: result.run, confirmation: result.confirmation, outbox: [], actionSubmitting: false, sessions: previous.sessions.map((session) => session.id === result.run.sessionId ? { ...session, runId: result.run.runId, runStatus: result.run.status } : session) }));
       return result;
     } catch (error) { const normalized = normalizeError(error); setState((previous) => ({ ...previous, actionSubmitting: false, error: normalized.message })); return null; }
     finally { actionInFlightRef.current = false; }
@@ -330,13 +356,13 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     try {
       const result = await api.retryRun(currentRun.runId);
       runRef.current = result.run;
-      setState((previous) => ({ ...previous, run: result.run, outbox: [result.outbox], actionSubmitting: false }));
+      setState((previous) => ({ ...previous, run: result.run, outbox: [result.outbox], actionSubmitting: false, sessions: previous.sessions.map((session) => session.id === result.run.sessionId ? { ...session, runId: result.run.runId, runStatus: result.run.status } : session) }));
       return result;
     } catch (error) { const normalized = normalizeError(error); setState((previous) => ({ ...previous, actionSubmitting: false, error: normalized.message })); return null; }
     finally { actionInFlightRef.current = false; }
   }, [api]);
 
-  return { state, search, setSearch, reload, createSession, switchSession, archiveSession, deleteSession, startRun, reconnectRun, confirmRun, cancelRun, retryRun };
+  return { state, search, setSearch, reload, createSession, switchSession, archiveSession, deleteSession, startRun, reconnectRun, confirmRun, cancelRun, retryRun, markSessionViewed };
 }
 
 export interface WorkspaceController {
@@ -353,4 +379,5 @@ export interface WorkspaceController {
   confirmRun: () => Promise<unknown>;
   cancelRun: () => Promise<unknown>;
   retryRun: () => Promise<unknown>;
+  markSessionViewed: (sessionId: string, runId?: string) => void;
 }

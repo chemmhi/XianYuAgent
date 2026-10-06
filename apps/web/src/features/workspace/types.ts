@@ -9,6 +9,8 @@ export interface WorkspaceSessionVM {
   accountId: string;
   title: string;
   status: 'active' | 'archived';
+  runId?: string;
+  runStatus?: WorkspaceRunStatus;
   summary?: string;
   lastActiveAt: string;
   archivedAt?: string;
@@ -104,6 +106,7 @@ export interface WorkspaceMessageVM {
 export interface WorkspaceState {
   phase: 'idle' | 'loading' | 'empty' | 'success' | 'error' | 'forbidden';
   sessions: WorkspaceSessionVM[];
+  unreadSessionIds: string[];
   activeSessionId?: string;
   run: WorkspaceRunVM | null;
   messages: WorkspaceMessageVM[];

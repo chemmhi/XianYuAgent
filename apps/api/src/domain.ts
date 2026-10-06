@@ -1265,6 +1265,8 @@ export interface AgentSessionRecord {
   accountId: string;
   title: string;
   status: AgentSessionStatus;
+  runId?: string;
+  runStatus?: RunStatus;
   summary?: string;
   lastActiveAt: string;
   archivedAt?: string;
