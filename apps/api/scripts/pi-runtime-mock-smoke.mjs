@@ -104,7 +104,7 @@ try {
   assert.equal(calls[0].body.model, modelName);
   assert.ok(Array.isArray(calls[0].body.input));
   assert.equal(calls[0].body.input[0]?.type, 'message');
-  assert.equal(calls[0].body.input[0]?.content, 'return a deterministic mock answer');
+  assert.ok(calls[0].body.input.some((item) => item?.type === 'message' && item.content === 'return a deterministic mock answer'));
 
   console.log(JSON.stringify({
     provider: {

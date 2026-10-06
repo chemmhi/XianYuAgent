@@ -90,6 +90,71 @@ test('Pi runtime executes model-selected workspace tools and streams results', a
   runtime.stop();
 });
 
+test('Pi runtime rechecks the original task after each tool result before finalizing', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'continuation-runtime@example.com', passwordHash: 'hash', displayName: 'Continuation Runtime' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'continuation-runtime' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Continuation' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '创建卡券后关联商品并启动自动发货' });
+  const running = await store.updateRun(created.run.id, { status: 'waiting_confirmation' });
+  const step = await store.updateRunStep(created.steps[0]!.id, { status: 'waiting_confirmation' });
+  assert.ok(running);
+  assert.ok(step);
+
+  let round = 0;
+  const requests: Array<{ messages: Array<{ role: string; content: unknown }> }> = [];
+  const model: ModelClient = {
+    async stream(input, handlers) {
+      requests.push({ messages: input.messages });
+      round += 1;
+      if (round === 1) {
+        const call = { id: 'continuation-search', type: 'function' as const, function: { name: 'workspace_product_search', arguments: JSON.stringify({ query: '测试商品' }) } };
+        await handlers.onToolCall?.(call);
+        return { content: '', model: 'continuation-model', toolCalls: [call] };
+      }
+      if (round === 2) {
+        const call = { id: 'continuation-automation', type: 'function' as const, function: { name: 'workspace_prepare_write', arguments: JSON.stringify({ operation: 'product_automation_update', parameters: { productId: 'product-1', config: { paidAutoDelivery: { enabled: true, couponBatchIds: ['batch-1'] } } } }) } };
+        await handlers.onToolCall?.(call);
+        return { content: '', model: 'continuation-model', toolCalls: [call] };
+      }
+      await handlers.onTextDelta?.('卡券已创建、商品已关联并已启动自动发货');
+      return { content: '卡券已创建、商品已关联并已启动自动发货', model: 'continuation-model' };
+    },
+    async complete() { return { content: 'unused', model: 'unused' }; },
+  };
+  const commandTool = {
+    getModelTools: () => [
+      { type: 'function', function: { name: 'workspace_product_search', description: 'search', parameters: { type: 'object' } } },
+      { type: 'function', function: { name: 'workspace_prepare_write', description: 'write', parameters: { type: 'object' } } },
+    ],
+    executeModelTool: async (name: string) => name === 'workspace_product_search'
+      ? { kind: 'products' as const, title: '商品搜索', summary: '已找到测试商品', content: 'product-1', data: { productId: 'product-1', title: '测试商品' } }
+      : { kind: 'read' as const, title: '自动发货', summary: '自动发货已启动', content: 'automation-updated', data: { productId: 'product-1', configVersion: 2, enabled: true } },
+  } as unknown as WorkspaceCommandOrchestrator;
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, model: 'continuation-model' });
+  await runtime.continueAfterConfirmation({
+    adminId: admin.id,
+    sessionId: session.id,
+    run: running!,
+    steps: [step!],
+    history: [{ role: 'assistant', content: '[tool_event] 卡券已创建 {"batchId":"batch-1"}' }],
+    resumeFromFailure: true,
+  });
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const bundle = await store.getRun(admin.id, created.run.id);
+    if (bundle?.run.status === 'succeeded') break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const bundle = await store.getRun(admin.id, created.run.id);
+  assert.equal(bundle?.run.status, 'succeeded');
+  assert.equal(round, 3);
+  assert.match(String(requests[0]?.messages.some((message) => String(message.content).includes('batch-1'))), /true/);
+  assert.match(String(requests[0]?.messages.find((message) => message.role === 'system')?.content), /一个写操作成功不代表整个任务完成/);
+  assert.ok((await store.listRunEvents(admin.id, created.run.id)).some((event) => event.eventType === 'run.succeeded'));
+  runtime.stop();
+});
+
 test('Workspace Pi runtime does not reuse the Auto-Reply eight-call budget', async () => {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: 'loop-budget@example.com', passwordHash: 'hash', displayName: 'Loop Budget' });
