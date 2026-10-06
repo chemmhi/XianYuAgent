@@ -69,7 +69,7 @@ test('Pi runtime executes model-selected workspace tools and streams results', a
   };
   const commandTool = {
     getModelTools: () => [{ type: 'function', function: { name: 'workspace_read', description: 'read', parameters: { type: 'object' } } }],
-    executeModelTool: async () => ({ kind: 'read' as const, title: '商品', summary: '读取完成', content: '工具返回商品', data: { count: 1 } }),
+    executeModelTool: async () => ({ kind: 'products' as const, title: '商品', summary: '读取完成', content: '工具返回商品', data: { count: 1 } }),
   } as unknown as WorkspaceCommandOrchestrator;
   const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, model: 'stream-model' });
   runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
@@ -87,6 +87,55 @@ test('Pi runtime executes model-selected workspace tools and streams results', a
   assert.match(String(requests[0]?.messages.find((message) => message.role === 'system')?.content), /简体中文/);
   assert.match(String(requests[0]?.messages.find((message) => message.role === 'system')?.content), /思考摘要/);
   assert.equal((await store.getRun(admin.id, created.run.id))?.run.status, 'succeeded');
+  runtime.stop();
+});
+
+test('Pi runtime surfaces terminal tool failures and consumes fenced tool arguments', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'tool-failure@example.com', passwordHash: 'hash', displayName: 'Tool Failure' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'tool-failure' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Tool failure' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '修改商品自动发货规则' });
+  let round = 0;
+  let receivedArgs: Record<string, unknown> | undefined;
+  const call = { id: 'call-failure', type: 'function' as const, function: { name: 'workspace_read', arguments: '```json\n' + JSON.stringify(JSON.stringify({ instruction: '修改商品自动发货规则' })) + '\n```' } };
+  const model: ModelClient = {
+    async stream(_input, handlers) {
+      round += 1;
+      if (round === 1) {
+        await handlers.onTextDelta?.('我先定位这个商品，再为你生成变更确认单。');
+        await handlers.onToolCall?.(call);
+        return { content: '我先定位这个商品，再为你生成变更确认单。', model: 'failure-model', toolCalls: [call] };
+      }
+      await handlers.onTextDelta?.('工具结果已收到。');
+      return { content: '工具结果已收到。', model: 'failure-model' };
+    },
+    async complete() { return { content: 'unused', model: 'unused' }; },
+  };
+  const commandTool = {
+    getModelTools: () => [{ type: 'function', function: { name: 'workspace_read', description: 'read', parameters: { type: 'object' } } }],
+    executeModelTool: async (_name: string, args: Record<string, unknown>) => {
+      receivedArgs = args;
+      const error = new Error('该商品按名称或外部编号查找应使用 workspace_product_search') as Error & { code: string };
+      error.code = 'WORKSPACE_PRODUCT_SEARCH_REQUIRED';
+      throw error;
+    },
+  } as unknown as WorkspaceCommandOrchestrator;
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, model: 'failure-model' });
+  runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const bundle = await store.getRun(admin.id, created.run.id);
+    if (bundle?.run.status === 'failed') break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const bundle = await store.getRun(admin.id, created.run.id);
+  assert.equal(bundle?.run.status, 'failed');
+  assert.deepEqual(receivedArgs, { instruction: '修改商品自动发货规则' });
+  const events = await store.listRunEvents(admin.id, created.run.id, 0);
+  assert.ok(events.some((event) => event.eventType === 'tool.result' && event.payload.status === 'failed' && (event.payload.result as { code?: string })?.code === 'WORKSPACE_PRODUCT_SEARCH_REQUIRED'));
+  assert.ok(events.some((event) => event.eventType === 'run.failed' && String(event.payload.content).includes('工具 workspace_read 调用失败')));
+  assert.ok(events.some((event) => event.eventType === 'workspace.message' && event.payload.messageType === 'final_answer' && String(event.payload.content).includes('请修正后点击重连')));
   runtime.stop();
 });
 

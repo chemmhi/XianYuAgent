@@ -5,6 +5,14 @@ import type { WorkspaceConfirmationVM, WorkspaceMessageVM, WorkspaceOutboxVM, Wo
 const defaultApi = createWorkspaceApi({ get: async () => { throw new Error('WORKSPACE_API_UNAVAILABLE'); } });
 const terminalRunStatuses = new Set<WorkspaceRunVM['status']>(['succeeded', 'partially_succeeded', 'failed', 'cancelled', 'expired']);
 
+export function isWorkspaceRunActive(status?: WorkspaceRunVM['status']): boolean {
+  return Boolean(status && !terminalRunStatuses.has(status));
+}
+
+export function isWorkspaceRunReconnectable(status?: WorkspaceRunVM['status']): boolean {
+  return Boolean(status && status !== 'waiting_confirmation' && status !== 'cancelling' && (isWorkspaceRunActive(status) || status === 'failed'));
+}
+
 export function getWorkspaceRunCandidates(messages: WorkspaceMessageVM[]): string[] {
   const seen = new Set<string>();
   const candidates: string[] = [];
@@ -223,6 +231,28 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     setState((previous) => ({ ...previous, run, confirmation, outbox, sessions: previous.sessions.map((session) => session.id === run.sessionId ? { ...session, runId: run.runId, runStatus: run.status } : session), unreadSessionIds: isTerminalRun(run.status) && getViewedRunId(run.sessionId) !== run.runId ? [...new Set([...previous.unreadSessionIds, run.sessionId])] : previous.unreadSessionIds.filter((id) => id !== run.sessionId) }));
   }, [api]);
 
+  const syncSessionStatuses = useCallback(async () => {
+    if (!options.accountId) return;
+    const requestId = requestRef.current;
+    const sessions = await api.listSessions(options.accountId, search).catch(() => null);
+    if (!sessions || requestId !== requestRef.current) return;
+    const activeSessionId = activeSessionIdRef.current;
+    const activeSession = activeSessionId ? sessions.find((session) => session.id === activeSessionId) : undefined;
+    const currentRun = runRef.current;
+    if (currentRun && activeSession?.runId === currentRun.runId && activeSession.runStatus && activeSession.runStatus !== currentRun.status) {
+      const latest = await api.getRun(currentRun.runId).catch(() => null);
+      if (latest && requestId === requestRef.current) await refreshRunExecution(latest);
+    }
+    if (requestId !== requestRef.current) return;
+    setState((previous) => ({ ...previous, sessions, unreadSessionIds: unreadSessionIdsFor(sessions, activeSessionId) }));
+  }, [api, options.accountId, refreshRunExecution, search, unreadSessionIdsFor]);
+
+  useEffect(() => {
+    if (!options.accountId) return;
+    const timer = window.setInterval(() => { void syncSessionStatuses(); }, 1_500);
+    return () => window.clearInterval(timer);
+  }, [options.accountId, syncSessionStatuses]);
+
   const appendEvent = useCallback((event: WorkspaceRunEventVM) => {
     setState((previous) => {
       if (previous.events.some((item) => item.sequence === event.sequence)) return previous;
@@ -287,8 +317,11 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     const requestId = ++runRefreshRequestRef.current;
     setState((previous) => ({ ...previous, connection: 'reconnecting', error: null }));
     try {
-      const latestRun = await api.getRun(currentRun.runId);
+      let latestRun = await api.getRun(currentRun.runId);
       if (requestId !== runRefreshRequestRef.current) return;
+      if (isWorkspaceRunReconnectable(latestRun.status)) {
+        latestRun = await api.reconnectRun(latestRun.runId);
+      }
       const [confirmation, outbox] = await Promise.all([
         latestRun.status === 'waiting_confirmation' ? api.getConfirmation(latestRun.runId).catch(() => null) : Promise.resolve<WorkspaceConfirmationVM | null>(null),
         api.listOutbox(latestRun.runId).catch(() => [] as WorkspaceOutboxVM[]),
