@@ -1742,8 +1742,6 @@ export class PostgresStore implements Store {
       const sessionRow = sessionResult.rows[0];
       if (!sessionRow) { await client.query('rollback'); return undefined; }
       const runResult = await client.query('select id,status from workspace.runs where session_id=$1 for update', [sessionId]);
-      const terminalStatuses = new Set(['succeeded', 'partially_succeeded', 'failed', 'cancelled', 'expired']);
-      if (runResult.rows.some((row) => !terminalStatuses.has(String(row.status)))) throw new Error('SESSION_HAS_ACTIVE_RUN');
       const runIds = runResult.rows.map((row) => String(row.id));
       if (runIds.length) {
         await client.query("delete from execution.outbox_jobs where aggregate_type='workspace_run' and aggregate_id = any($1::uuid[])", [runIds]);
