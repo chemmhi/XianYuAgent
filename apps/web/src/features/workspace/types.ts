@@ -75,6 +75,7 @@ export interface WorkspaceOutboxVM {
   attempt: number;
   availableAt: string;
   externalOutcome?: 'known_success' | 'known_failure' | 'unknown';
+  result?: Record<string, unknown>;
   lastErrorCode?: string;
   idempotencyKey: string;
   createdAt: string;

@@ -11,9 +11,10 @@ const run: WorkspaceRunVM = {
 const events: WorkspaceRunEventVM[] = [{ sequence: 2, runId: 'run-1', eventType: 'step.succeeded', payload: { status: 'succeeded' }, createdAt: '2026-09-20T00:00:02.000Z' }];
 
 describe('workspace message projection', () => {
-  it('derives a compact title from the first instruction', () => {
-    expect(deriveSessionTitle('  查看  店铺库存\n并给出补货建议  ')).toBe('查看 店铺库存 并给出补货建议');
-    expect(deriveSessionTitle('这是一个任务'.repeat(10))).toHaveLength(28);
+  it('derives a short intent title instead of copying the first instruction', () => {
+    expect(deriveSessionTitle('  查看  店铺库存\n并给出补货建议  ')).toBe('库存与补货分析');
+    expect(deriveSessionTitle('我启动AI技术咨询，需要定制开发服务这个商品的自动发货，卡券选择“奥维地图”')).toBe('配置商品自动发货');
+    expect(deriveSessionTitle('这是一个没有可识别意图的任务'.repeat(10))).toBe('工作区任务');
   });
 
   it('groups adjacent reasoning and tool events into one collapsed trace', () => {
