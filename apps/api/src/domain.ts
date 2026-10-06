@@ -1406,6 +1406,7 @@ export interface Store {
   createAgentSession(input: { adminId: string; accountId: string; title: string; summary?: string }): Promise<AgentSessionRecord>;
   getAgentSession(adminId: string, sessionId: string): Promise<AgentSessionRecord | undefined>;
   archiveAgentSession(adminId: string, sessionId: string): Promise<AgentSessionRecord | undefined>;
+  deleteAgentSession(adminId: string, sessionId: string): Promise<AgentSessionRecord | undefined>;
   createRun(input: { adminId: string; accountId: string; sessionId: string; instruction: string; clientRunRef?: string; route?: string }): Promise<{ run: RunRecord; steps: StepRecord[] }>;
   findRunByClientRef(adminId: string, accountId: string, clientRunRef: string): Promise<{ run: RunRecord; steps: StepRecord[] } | undefined>;
   getRun(adminId: string, runId: string): Promise<{ run: RunRecord; steps: StepRecord[] } | undefined>;

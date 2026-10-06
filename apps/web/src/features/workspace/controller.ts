@@ -143,6 +143,39 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     catch (error) { const normalized = normalizeError(error); setState((previous) => ({ ...previous, submitting: false, error: normalized.message })); return null; }
   }, [api, rememberActiveSession]);
 
+  const deleteSession = useCallback(async (sessionId: string) => {
+    const deletingActive = activeSessionIdRef.current === sessionId;
+    setState((previous) => ({ ...previous, submitting: true, error: null }));
+    try {
+      const result = await api.deleteSession(sessionId);
+      if (deletingActive) {
+        socketRef.current?.close();
+        runRef.current = null;
+        eventCursorRef.current = 0;
+        runRefreshRequestRef.current += 1;
+        rememberActiveSession(undefined);
+      }
+      setState((previous) => ({
+        ...previous,
+        sessions: previous.sessions.filter((item) => item.id !== sessionId),
+        activeSessionId: previous.activeSessionId === sessionId ? undefined : previous.activeSessionId,
+        messages: deletingActive ? [] : previous.messages,
+        run: deletingActive ? null : previous.run,
+        events: deletingActive ? [] : previous.events,
+        confirmation: deletingActive ? null : previous.confirmation,
+        outbox: deletingActive ? [] : previous.outbox,
+        connection: deletingActive ? 'idle' : previous.connection,
+        submitting: false,
+      }));
+      if (deletingActive) await reload();
+      return result;
+    } catch (error) {
+      const normalized = normalizeError(error);
+      setState((previous) => ({ ...previous, submitting: false, error: normalized.message }));
+      return null;
+    }
+  }, [api, rememberActiveSession, reload]);
+
   const refreshRunExecution = useCallback(async (run: WorkspaceRunVM) => {
     const [confirmation, outbox] = await Promise.all([
       run.status === 'waiting_confirmation' ? api.getConfirmation(run.runId).catch(() => null) : Promise.resolve<WorkspaceConfirmationVM | null>(null),
@@ -261,7 +294,7 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     finally { actionInFlightRef.current = false; }
   }, [api]);
 
-  return { state, search, setSearch, reload, createSession, switchSession, archiveSession, startRun, reconnectRun, confirmRun, cancelRun, retryRun };
+  return { state, search, setSearch, reload, createSession, switchSession, archiveSession, deleteSession, startRun, reconnectRun, confirmRun, cancelRun, retryRun };
 }
 
 export interface WorkspaceController {
@@ -272,6 +305,7 @@ export interface WorkspaceController {
   createSession: (title: string) => Promise<WorkspaceState['sessions'][number] | null>;
   switchSession: (sessionId: string) => Promise<WorkspaceState['sessions'][number] | null>;
   archiveSession: (sessionId: string) => Promise<WorkspaceState['sessions'][number] | null>;
+  deleteSession: (sessionId: string) => Promise<{ deleted: boolean; sessionId: string } | null>;
   startRun: (instruction: string, sessionIdOverride?: string) => Promise<WorkspaceState['run']>;
   reconnectRun: () => void;
   confirmRun: () => Promise<unknown>;

@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { getComposerTextareaMetrics, MessageStream, SessionRow } from './WorkspacePage';
+import { getComposerTextareaMetrics, MessageStream, SessionRow, WorkspaceDeleteSessionModal } from './WorkspacePage';
 import type { WorkspaceMessageVM, WorkspaceSessionVM } from '../types';
 
 const workspaceCss = readFileSync(fileURLToPath(new URL('./workspace.css', import.meta.url)), 'utf8').replace(/\r\n/g, '\r\n').replace(/\s+/g, ' ').trim();
@@ -20,21 +20,34 @@ const session: WorkspaceSessionVM = {
 };
 
 describe('Workspace SessionRow', () => {
-  it('renders a semantic icon archive action with an auditable target', () => {
+  it('renders a semantic delete action with an auditable target', () => {
     const html = renderToStaticMarkup(createElement(SessionRow, {
       session,
       active: true,
       busy: false,
       onSwitch: vi.fn(),
-      onArchive: vi.fn(),
+      onDelete: vi.fn(),
     }));
 
-    expect(html).toContain('data-testid="workspace-session-archive"');
-    expect(html).toContain('aria-label="归档 检查当前 Workspace 状态"');
+    expect(html).toContain('data-testid="workspace-session-delete"');
+    expect(html).toContain('aria-label="删除 检查当前 Workspace 状态"');
+    expect(html).not.toContain('workspace-session-archive');
+    expect(html).not.toContain('归档');
     expect(html).toContain('class="workspace-session-action-icon"');
     expect(html).toContain('class="workspace-session-time"');
     expect(html).not.toContain('>•••</button>');
-    expect(workspaceCss).toContain('.workspace-session-action-icon { fill: none; stroke: currentColor;');
+    expect(workspaceCss).toContain('.workspace-session-action-icon { width: 16px; height: 16px; }');
+  });
+
+  it('uses the existing modal surface for delete confirmation', () => {
+    const html = renderToStaticMarkup(createElement(WorkspaceDeleteSessionModal, { session, onClose: vi.fn(), onConfirm: vi.fn() }));
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain('data-testid="workspace-delete-confirm-modal"');
+    expect(html).toContain('class="modal-backdrop"');
+    expect(html).toContain('class="modal-card workspace-delete-modal card"');
+    expect(html).toContain('data-testid="workspace-delete-confirm"');
+    expect(html).toContain('请确认是否删除“检查当前 Workspace 状态”');
+    expect(workspacePageSource).not.toContain('window.confirm');
   });
 });
 

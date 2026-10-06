@@ -245,6 +245,15 @@ export class WorkspaceService {
     return this.toSessionView(session);
   }
 
+  async deleteSession(input: { adminId: string; sessionId: string; requestId: string; traceId: string }): Promise<WorkspaceSessionView> {
+    try {
+      const session = await this.store.deleteAgentSession(input.adminId, input.sessionId);
+      if (!session) throw new ServiceError(404, 'NOT_FOUND', 'agent session not found');
+      await this.audit({ actorId: input.adminId, action: 'workspace.session.deleted', targetRef: session.id, requestId: input.requestId, traceId: input.traceId, payload: {}, accountId: session.accountId });
+      return this.toSessionView(session);
+    } catch (error) { throw mapWorkspaceStoreError(error); }
+  }
+
   async startRun(input: { adminId: string; accountId: string; sessionId: string; instruction: string; clientRunRef?: string; requestId: string; traceId: string }): Promise<{ run: WorkspaceRunView; duplicate: boolean }> {
     const instruction = input.instruction.trim();
     if (!instruction) throw new ServiceError(422, 'VALIDATION_FAILED', 'instruction is required');
@@ -505,6 +514,7 @@ function mapWorkspaceStoreError(error: unknown): ServiceError {
   if (code === 'ACCOUNT_SCOPE_FORBIDDEN') return new ServiceError(403, 'FORBIDDEN', 'account scope required');
   if (code === 'SESSION_NOT_FOUND') return new ServiceError(404, 'NOT_FOUND', 'agent session not found');
   if (code === 'SESSION_ARCHIVED') return new ServiceError(409, 'CONFLICT', 'archived session is read-only');
+  if (code === 'SESSION_HAS_ACTIVE_RUN') return new ServiceError(409, 'CONFLICT', 'session has an active run');
   return error instanceof ServiceError ? error : new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'workspace persistence failed');
 }
 

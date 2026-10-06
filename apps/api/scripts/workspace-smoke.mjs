@@ -63,6 +63,20 @@ try {
   const blockedRun = await request('/api/v1/workspace/runs', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'workspace-run-request-3' }, body: JSON.stringify({ accountId, sessionId, instruction: '归档会话不可写', clientRunRef: 'client-run-003' }) });
   assert.equal(blockedRun.response.status, 409);
 
+  const deletableSession = await request('/api/v1/workspace/agent-sessions', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'workspace-session-delete-target' }, body: JSON.stringify({ accountId, title: '待删除会话', summary: 'delete smoke' }) });
+  assert.equal(deletableSession.response.status, 201);
+  const deletableSessionId = deletableSession.body.data.id;
+  const deleteRun = await request('/api/v1/workspace/runs', { method: 'POST', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'workspace-delete-run' }, body: JSON.stringify({ accountId, sessionId: deletableSessionId, instruction: '为删除链路生成终态记录', clientRunRef: 'workspace-delete-run' }) });
+  assert.equal(deleteRun.response.status, 201);
+  assert.equal((await waitForRun(deleteRun.body.data.runId, cookie)).status, 'succeeded');
+  const deleted = await request(`/api/v1/workspace/agent-sessions/${deletableSessionId}`, { method: 'DELETE', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'workspace-session-delete' } });
+  assert.equal(deleted.response.status, 200);
+  assert.deepEqual(deleted.body.data, { deleted: true, sessionId: deletableSessionId });
+  const deletedMessages = await request(`/api/v1/workspace/agent-sessions/${deletableSessionId}/messages`, { headers: { cookie } });
+  assert.equal(deletedMessages.response.status, 404);
+  const remaining = await request(`/api/v1/workspace/agent-sessions?accountId=${encodeURIComponent(accountId)}`, { headers: { cookie } });
+  assert.ok(remaining.body.data.items.every((item) => item.id !== deletableSessionId));
+
   console.log('workspace session/run smoke passed');
 } finally {
   await runtime.close();
