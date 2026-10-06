@@ -11,11 +11,11 @@ export interface NativeWorkspaceReadResult {
 }
 
 const WRITE_TERMS = /(发布|上传|新增|创建|修改|编辑|更新|保存|删除|作废|绑定|解绑|发货|发送|配置|设置|改价|撤回)/i;
-const READ_TERMS = /(查看|查询|列出|列表|有哪些|多少|最近|状态|数据|概览|统计|当前|未发货|运营|处理量|成功率|耗时|失败|转人工)/i;
+const READ_TERMS = /(查看|查询|列出|列表|有哪些|多少|最近|状态|数据|概览|统计|当前|未发货|运营|处理量|成功率|耗时|失败|转人工|只读|仅查询|仅返回|仅查看)/i;
 
 export function detectNativeWorkspaceRead(instruction: string): NativeWorkspaceReadKind | undefined {
   const normalized = instruction.replace(/\s+/g, ' ').trim();
-  if (!normalized || WRITE_TERMS.test(normalized) && !/(查看|查询|状态|未发货|失败)/i.test(normalized)) return undefined;
+  if (!normalized || WRITE_TERMS.test(normalized) && !/(查看|查询|状态|未发货|失败|只读|仅查询|仅返回|仅查看)/i.test(normalized)) return undefined;
   if (!READ_TERMS.test(normalized)) return undefined;
   if (/(运营|自动回复|agent|智能客服|处理量|成功率|吞吐|p95|转人工|健康|运行数据|workspace\s*状态|工作区状态|状态摘要|运行摘要)/i.test(normalized)) return 'agent_activity';
   if (/(卡券|卡密|优惠券|券批次|交付配置)/i.test(normalized)) return 'coupons';

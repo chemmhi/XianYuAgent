@@ -139,6 +139,53 @@ test('Pi runtime surfaces terminal tool failures and consumes fenced tool argume
   runtime.stop();
 });
 
+test('Pi runtime preserves SKILL error codes from pi_skill_exec failures', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'skill-error@example.com', passwordHash: 'hash', displayName: 'Skill Error' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'skill-error' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Skill error' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '执行夸克网盘 Skill' });
+  const call = { id: 'skill-error-call', type: 'function' as const, function: { name: 'pi_skill_exec', arguments: JSON.stringify({ skillId: 'quarkclouddrive_816db00f', command: 'browse' }) } };
+  let round = 0;
+  const model: ModelClient = {
+    async stream(_input, handlers) {
+      round += 1;
+      if (round === 1) {
+        await handlers.onToolCall?.(call);
+        return { content: '', model: 'skill-error-model', toolCalls: [call] };
+      }
+      return { content: '停止', model: 'skill-error-model' };
+    },
+    async complete() { return { content: 'unused', model: 'unused' }; },
+  };
+  const skillManager = {
+    handleInstruction: async () => undefined,
+    buildSystemPrompt: async () => '',
+    getModelTools: () => [{ type: 'function' as const, function: { name: 'pi_skill_exec', description: 'exec', parameters: { type: 'object' } } }],
+    executeModelTool: async () => {
+      const error = new Error('skill quarkclouddrive_816db00f is not installed') as Error & { code: string };
+      error.code = 'SKILL_NOT_INSTALLED';
+      throw error;
+    },
+  };
+  const runtime = new PiRuntimeAdapter(store, model, {
+    workspaceCommands: { getModelTools: () => [], executeModelTool: async () => ({ kind: 'read', title: 'unused', summary: 'unused', content: 'unused' }) } as never,
+    skillManager: skillManager as never,
+    model: 'skill-error-model',
+  });
+  runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const bundle = await store.getRun(admin.id, created.run.id);
+    if (bundle?.run.status === 'failed') break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal((await store.getRun(admin.id, created.run.id))?.run.status, 'failed');
+  const events = await store.listRunEvents(admin.id, created.run.id, 0);
+  assert.ok(events.some((event) => event.eventType === 'tool.result' && event.payload.status === 'failed' && (event.payload.result as { code?: string })?.code === 'SKILL_NOT_INSTALLED'));
+  runtime.stop();
+});
+
 test('workspace model messages follow the language of the current user instruction', () => {
   assert.equal(detectWorkspaceResponseLanguage('请查看商品状态'), 'zh-CN');
   assert.equal(detectWorkspaceResponseLanguage('Check the product status'), 'zh-CN');

@@ -54,6 +54,40 @@ test('installs, lists, authorizes, injects, and executes a local Pi skill archiv
   }
 });
 
+test('resolves canonical Skill IDs and hydrates aliases from legacy registries', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'pi-skill-canonical-id-'));
+  try {
+    const skillRoot = join(fixtureRoot, 'quarkclouddrive');
+    const installedRoot = join(fixtureRoot, 'installed');
+    await mkdir(join(skillRoot, 'scripts'), { recursive: true });
+    await writeFile(join(skillRoot, 'SKILL.md'), '---\nname: quarkclouddrive\nmetadata.canonicalSkillId: quarkclouddrive_816db00f\nversion: 1.0.0\n---\n');
+    await writeFile(join(skillRoot, 'scripts', 'main.cjs'), "console.log(JSON.stringify({ code: 0, args: process.argv.slice(2) }))");
+    const archive = join(fixtureRoot, 'quarkclouddrive.zip');
+    await execFile('tar', ['-a', '-c', '-f', archive, '-C', fixtureRoot, 'quarkclouddrive']);
+
+    const manager = new PiSkillManager({ rootDir: installedRoot });
+    const installed = await manager.install({ adminId: 'admin/canonical', source: archive });
+    assert.equal(installed.id, 'quarkclouddrive');
+    assert.equal(installed.canonicalSkillId, 'quarkclouddrive_816db00f');
+    const aliasExecution = await manager.execute({ adminId: 'admin/canonical', skillId: 'quarkclouddrive_816db00f', command: 'browse', args: ['--all'] });
+    assert.equal(aliasExecution.code, 0);
+    assert.deepEqual(aliasExecution.parsed, { code: 0, args: ['browse', '--all'] });
+
+    const registryPath = join(installedRoot, 'admin_canonical', '.registry.json');
+    const legacyRegistry = JSON.parse(await readFile(registryPath, 'utf8')) as { items: Array<Record<string, unknown>> };
+    delete legacyRegistry.items[0].canonicalSkillId;
+    await writeFile(registryPath, JSON.stringify(legacyRegistry, null, 2), 'utf8');
+    const reloaded = new PiSkillManager({ rootDir: installedRoot });
+    const hydratedExecution = await reloaded.execute({ adminId: 'admin/canonical', skillId: 'quarkclouddrive_816db00f', command: 'browse' });
+    assert.equal(hydratedExecution.code, 0);
+    assert.equal((await reloaded.list('admin/canonical'))[0]?.canonicalSkillId, 'quarkclouddrive_816db00f');
+    const persisted = JSON.parse(await readFile(registryPath, 'utf8')) as { items: Array<{ canonicalSkillId?: string }> };
+    assert.equal(persisted.items[0]?.canonicalSkillId, 'quarkclouddrive_816db00f');
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test('passes the original Workspace input and stable session id to every Skill command', async () => {
   const fixtureRoot = await mkdtemp(join(tmpdir(), 'pi-skill-session-args-'));
   try {

@@ -1151,6 +1151,7 @@ function toSafeFailure(error: unknown): { code: string; summary: string } {
   const message = typeof candidate?.message === 'string' ? candidate.message.trim() : undefined;
   const inferredCode = code ?? message?.match(/\b[A-Z][A-Z0-9_]{2,}\b/)?.[0];
   const safeCodes = ['VALIDATION_FAILED', 'NOT_FOUND', 'FORBIDDEN', 'CONFLICT', 'ACCOUNT_SCOPE_FORBIDDEN', 'ACCOUNT_RECOVERY_UNAVAILABLE', 'ACCOUNT_VERIFY_UNAVAILABLE', 'DELIVERY_NOT_READY', 'ORDER_DELIVERY_UNAVAILABLE', 'WORKSPACE_PRODUCT_REQUIRED', 'WORKSPACE_PRODUCT_NOT_FOUND', 'WORKSPACE_WRITE_REQUIRED', 'WORKSPACE_PRODUCT_SEARCH_REQUIRED', 'WORKSPACE_PRODUCT_SEARCH_UNAVAILABLE', 'MODEL_TOOL_RUNTIME_UNAVAILABLE', 'DUPLICATE_TOOL_CALL'];
+  if (inferredCode?.startsWith('SKILL_')) return { code: inferredCode, summary: message ?? 'Pi Skill 执行失败' };
   if (inferredCode && message && safeCodes.includes(inferredCode)) {
     return { code: inferredCode, summary: message };
   }

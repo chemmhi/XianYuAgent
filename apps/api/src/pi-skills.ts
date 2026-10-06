@@ -18,6 +18,7 @@ const AUTH_STATE_FILE = 'authorization.json';
 
 export interface PiSkillInfo {
   id: string;
+  canonicalSkillId?: string;
   name: string;
   version?: string;
   description?: string;
@@ -102,6 +103,7 @@ export class PiSkillError extends Error {
 
 interface SkillManifest {
   name: string;
+  canonicalSkillId?: string;
   version?: string;
   description?: string;
   entry?: string;
@@ -187,6 +189,7 @@ export class PiSkillManager {
       const previous = state.items.find((item) => item.id === id);
       const item: PiSkillInfo = {
         id,
+        canonicalSkillId: manifest.canonicalSkillId ?? previous?.canonicalSkillId,
         name: manifest.name || id,
         version: manifest.version,
         description: manifest.description,
@@ -231,12 +234,12 @@ export class PiSkillManager {
    * needs a browser or pasted authorization code.
    */
   async login(input: PiSkillLoginInput): Promise<PiSkillLoginResult> {
-    const id = sanitizeSkillId(input.skillId);
     const token = typeof input.token === 'string' ? input.token.trim() : '';
     if (token.length > 4096) throw new PiSkillError('SKILL_AUTH_TOKEN_INVALID', 'skill authorization token is too long');
     const state = await this.readRegistry(input.adminId);
-    const item = state.items.find((candidate) => candidate.id === id);
+    const item = findSkill(state, input.skillId);
     if (!item) throw new PiSkillError('SKILL_NOT_INSTALLED', `skill ${input.skillId} is not installed`);
+    const id = item.id;
     if (!item.enabled) throw new PiSkillError('SKILL_DISABLED', `skill ${input.skillId} is disabled`);
     if (!token && await this.hasUsableAuthorization(input.adminId, id, item.authorized)) {
       await this.touchAuthorization(input.adminId, id);
@@ -300,7 +303,7 @@ export class PiSkillManager {
 
   async setEnabled(adminId: string, skillId: string, enabled: boolean): Promise<PiSkillInfo> {
     const state = await this.readRegistry(adminId);
-    const item = state.items.find((candidate) => candidate.id === sanitizeSkillId(skillId));
+    const item = findSkill(state, skillId);
     if (!item) throw new PiSkillError('SKILL_NOT_INSTALLED', `skill ${skillId} is not installed`);
     item.enabled = enabled;
     item.updatedAt = new Date().toISOString();
@@ -493,7 +496,7 @@ export class PiSkillManager {
     }
     if (loginIntent || Boolean(tokenMatch?.[1])) {
       const skills = await this.list(input.adminId);
-      const candidate = (requestedSkill && skills.find((item) => item.id === sanitizeSkillId(requestedSkill) || item.name.toLowerCase() === requestedSkill.toLowerCase()))
+      const candidate = (requestedSkill && skills.find((item) => matchesSkillIdentifier(item, requestedSkill)))
         ?? skills.find((item) => /quark|夸克/i.test(item.name) || /quark|夸克/i.test(item.id))
         ?? (skills.length === 1 ? skills[0] : undefined)
         ?? (tokenMatch?.[1] ? skills.find((item) => !item.authorized) : undefined);
@@ -517,10 +520,10 @@ export class PiSkillManager {
   }
 
   private async executeInternal(input: PiSkillExecutionInput, secretToRedact?: string): Promise<PiSkillExecutionResult> {
-    const id = sanitizeSkillId(input.skillId);
     const state = await this.readRegistry(input.adminId);
-    const item = state.items.find((candidate) => candidate.id === id);
+    const item = findSkill(state, input.skillId);
     if (!item) throw new PiSkillError('SKILL_NOT_INSTALLED', `skill ${input.skillId} is not installed`);
+    const id = item.id;
     if (!item.enabled) throw new PiSkillError('SKILL_DISABLED', `skill ${input.skillId} is disabled`);
     if (!item.entry) throw new PiSkillError('SKILL_ENTRYPOINT_MISSING', `skill ${input.skillId} has no executable entrypoint`);
     const command = input.command.trim();
@@ -588,7 +591,7 @@ export class PiSkillManager {
 
   private async markAuthorized(adminId: string, skillId: string): Promise<void> {
     const state = await this.readRegistry(adminId);
-    const item = state.items.find((candidate) => candidate.id === sanitizeSkillId(skillId));
+    const item = findSkill(state, skillId);
     if (!item) throw new PiSkillError('SKILL_NOT_INSTALLED', `skill ${skillId} is not installed`);
     item.authorized = true;
     item.updatedAt = new Date().toISOString();
@@ -602,7 +605,7 @@ export class PiSkillManager {
 
   private async markUnauthorized(adminId: string, skillId: string, reason: string): Promise<void> {
     const state = await this.readRegistry(adminId);
-    const item = state.items.find((candidate) => candidate.id === sanitizeSkillId(skillId));
+    const item = findSkill(state, skillId);
     if (!item) throw new PiSkillError('SKILL_NOT_INSTALLED', `skill ${skillId} is not installed`);
     const now = new Date().toISOString();
     item.authorized = false;
@@ -743,10 +746,20 @@ export class PiSkillManager {
 
   private async readRegistry(adminId: string): Promise<RegistryState> {
     const root = await this.ensureAdminRoot(adminId);
+    let parsed: Partial<RegistryState>;
     try {
-      const parsed = JSON.parse(await readFile(join(root, REGISTRY_FILE), 'utf8')) as Partial<RegistryState>;
-      return { items: Array.isArray(parsed.items) ? parsed.items.filter(isSkillInfo) : [] };
+      parsed = JSON.parse(await readFile(join(root, REGISTRY_FILE), 'utf8')) as Partial<RegistryState>;
     } catch { return { items: [] }; }
+    const original = Array.isArray(parsed.items) ? parsed.items.filter(isSkillInfo) : [];
+    let changed = false;
+    const items = await Promise.all(original.map(async (item) => {
+      const canonicalSkillId = await readCanonicalSkillId(item.path) ?? item.canonicalSkillId;
+      if (canonicalSkillId !== item.canonicalSkillId) changed = true;
+      return canonicalSkillId ? { ...item, canonicalSkillId } : item;
+    }));
+    const state = { items };
+    if (changed) await this.writeRegistry(adminId, state);
+    return state;
   }
 
   private async writeRegistry(adminId: string, state: RegistryState): Promise<void> {
@@ -809,17 +822,33 @@ async function parseSkillManifest(path: string): Promise<SkillManifest> {
   const lines = (frontMatter?.[1] ?? '').split(/\r?\n/);
   const values = new Map<string, string>();
   for (const line of lines) {
-    const match = line.match(/^([A-Za-z][A-Za-z0-9_-]*)\s*:\s*(.*?)\s*$/);
+    const match = line.match(/^\s*([A-Za-z][A-Za-z0-9_.-]*)\s*:\s*(.*?)\s*$/);
     if (!match) continue;
     values.set(match[1].toLowerCase(), stripQuotes(match[2]));
   }
   const name = values.get('name')?.trim() || '';
   const description = values.get('description')?.trim();
+  const canonicalSkillId = values.get('metadata.canonicalskillid')?.trim() ?? values.get('canonicalskillid')?.trim() ?? values.get('canonical-skill-id')?.trim();
   const version = values.get('version')?.trim();
   const entry = values.get('entry')?.trim();
   const statePaths = values.get('statepaths')?.split(',').map((value) => value.trim()).filter(Boolean);
   if (!name) throw new PiSkillError('SKILL_NAME_MISSING', 'SKILL.md front matter must include name');
-  return { name, version, description, entry, statePaths };
+  return { name, canonicalSkillId, version, description, entry, statePaths };
+}
+
+function matchesSkillIdentifier(item: PiSkillInfo, requested: string): boolean {
+  const normalized = sanitizeSkillId(requested);
+  return item.id === normalized
+    || (item.canonicalSkillId ? sanitizeSkillId(item.canonicalSkillId) === normalized : false)
+    || item.name.toLowerCase() === requested.trim().toLowerCase();
+}
+
+function findSkill(state: RegistryState, requested: string): PiSkillInfo | undefined {
+  return state.items.find((item) => matchesSkillIdentifier(item, requested));
+}
+
+async function readCanonicalSkillId(skillPath: string): Promise<string | undefined> {
+  try { return (await parseSkillManifest(join(skillPath, 'SKILL.md'))).canonicalSkillId; } catch { return undefined; }
 }
 
 async function findEntry(root: string): Promise<string | undefined> {
