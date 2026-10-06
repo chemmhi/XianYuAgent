@@ -50,6 +50,8 @@ services:
       OBJECT_STORAGE_SECRET_KEY: ${OBJECT_STORAGE_SECRET_KEY}
       OBJECT_STORAGE_BUCKET: xianyu-assets
       OBJECT_STORAGE_REGION: us-east-1
+      # Keep installed Skills, authorization markers, and CLI state on a named volume.
+      PI_SKILL_ROOT: ${PI_SKILL_ROOT:-/app/pi_skills}
       XIANYU_VERIFICATION_BROWSER_MODE: ${XIANYU_VERIFICATION_BROWSER_MODE:-launch}
       XIANYU_VERIFICATION_SLIDER_MODE: ${XIANYU_VERIFICATION_SLIDER_MODE:-auto}
       XIANYU_VERIFICATION_BROWSER_EXECUTABLE: ${XIANYU_VERIFICATION_BROWSER_EXECUTABLE:-/usr/bin/chromium}
@@ -60,6 +62,7 @@ services:
       - "127.0.0.1:18082:8080"
     volumes:
       - browser_data:/app/browser_data
+      - pi_skill_data:/app/pi_skills
     depends_on:
       postgres:
         condition: service_healthy
@@ -84,6 +87,7 @@ services:
       OBJECT_STORAGE_SECRET_KEY: ${OBJECT_STORAGE_SECRET_KEY}
       OBJECT_STORAGE_BUCKET: xianyu-assets
       OBJECT_STORAGE_REGION: us-east-1
+      PI_SKILL_ROOT: ${PI_SKILL_ROOT:-/app/pi_skills}
     depends_on:
       postgres:
         condition: service_healthy
@@ -91,9 +95,12 @@ services:
         condition: service_healthy
       object-storage:
         condition: service_started
+    volumes:
+      - pi_skill_data:/app/pi_skills
     command: ["node", "dist/worker.js"]
 
 volumes:
   postgres_data:
   object_storage_data:
   browser_data:
+  pi_skill_data:

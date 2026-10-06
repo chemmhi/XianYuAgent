@@ -56,6 +56,8 @@ services:
       MODEL: ${MODEL:-gpt-4o-mini}
       WIRE_API: ${WIRE_API:-responses}
       MODEL_TIMEOUT_MS: ${MODEL_TIMEOUT_MS:-60000}
+      # Keep installed Skills, authorization markers, and CLI state on a named volume.
+      PI_SKILL_ROOT: ${PI_SKILL_ROOT:-/app/pi_skills}
       XIANYU_VERIFICATION_BROWSER_MODE: ${XIANYU_VERIFICATION_BROWSER_MODE:-launch}
       XIANYU_VERIFICATION_SLIDER_MODE: ${XIANYU_VERIFICATION_SLIDER_MODE:-auto}
       XIANYU_VERIFICATION_BROWSER_EXECUTABLE: ${XIANYU_VERIFICATION_BROWSER_EXECUTABLE:-/usr/bin/chromium}
@@ -81,6 +83,7 @@ services:
       - "8080:8080"
     volumes:
       - browser_data:/app/browser_data
+      - pi_skill_data:/app/pi_skills
     depends_on:
       postgres:
         condition: service_healthy
@@ -105,6 +108,7 @@ services:
       MODEL: ${MODEL:-gpt-4o-mini}
       WIRE_API: ${WIRE_API:-responses}
       MODEL_TIMEOUT_MS: ${MODEL_TIMEOUT_MS:-60000}
+      PI_SKILL_ROOT: ${PI_SKILL_ROOT:-/app/pi_skills}
       AUTO_REPLY_MODEL_ENABLED: ${AUTO_REPLY_MODEL_ENABLED:-true}
       AUTO_REPLY_REPAIR_MODE: ${AUTO_REPLY_REPAIR_MODE:-enforce}
       AUTO_REPLY_POLICY_JSON: ${AUTO_REPLY_POLICY_JSON:-}
@@ -119,9 +123,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - pi_skill_data:/app/pi_skills
     command: ["node", "dist/worker.js"]
 
 volumes:
   postgres_data:
   object_storage_data:
   browser_data:
+  pi_skill_data:
