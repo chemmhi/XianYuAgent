@@ -5,7 +5,7 @@ import { CouponService } from '../src/services.js';
 import { MemoryObjectStorage } from '../src/object-storage.js';
 import { InProcessAgentRuntime, WorkspaceService } from '../src/workspace.js';
 import { MemoryStore } from '../src/store-memory.js';
-import { detectNativeWorkspaceWrite, parseNativeWorkspaceCouponCreate, prepareNativeWorkspaceWrite } from '../src/workspace-native-write.js';
+import { detectNativeWorkspaceWrite, parseNativeWorkspaceCouponCreate, prepareNativeWorkspaceWrite, sanitizeWorkspaceInstruction } from '../src/workspace-native-write.js';
 
 async function fixture(instruction: string) {
   const store = new MemoryStore();
@@ -43,20 +43,23 @@ test('native coupon parser supports text and data modes while redacting content'
   assert.equal(plan?.content.includes('A-001'), false);
 });
 
-test('natural-language coupon creation does not require an existing batch id', async () => {
-  const instruction = '帮我新建一个测试卡券';
+test('natural-language coupon creation extracts label and content from one sentence', async () => {
+  const instruction = '帮我新建一个测试卡券，卡券内容为”测试内容“';
   assert.equal(detectNativeWorkspaceWrite(instruction), 'coupon_create');
   const parsed = parseNativeWorkspaceCouponCreate(instruction);
   assert.equal(parsed?.label, '测试卡券');
   assert.equal(parsed?.purpose, 'text');
-  assert.equal(parsed?.metadata.textContent, '');
+  assert.equal(parsed?.metadata.textContent, '测试内容');
+  assert.match(sanitizeWorkspaceInstruction(instruction), /测试卡券/);
+  assert.doesNotMatch(sanitizeWorkspaceInstruction(instruction), /测试内容/);
 
   const { store, admin, account } = await fixture(instruction);
   const plan = await prepareNativeWorkspaceWrite({ store, adminId: admin.id, accountId: account.id, instruction });
   assert.equal(plan?.action, 'coupon_create');
   assert.equal(plan?.manifest.label, '测试卡券');
   assert.equal(plan?.manifest.itemCount, 0);
-  assert.equal(plan?.manifest.configured, false);
+  assert.equal(plan?.manifest.configured, true);
+  assert.deepEqual(plan?.executionPlan, { action: 'coupon_create', accountId: account.id, label: '测试卡券', purpose: 'text', metadata: { textContent: '测试内容' }, items: [] });
 });
 
 test('workspace coupon parser accepts the manual form metadata fields', () => {

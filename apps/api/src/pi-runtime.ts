@@ -545,7 +545,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           await this.emit(input.run.id, 'tool.call.delta', { streamId, toolCallId: delta.id, toolName: delta.name ?? toolCallNames.get(delta.index), index: delta.index, argumentsDelta: redactSensitiveText(delta.argumentsDelta ?? '', 4_000, this.options.redactSecrets), status: 'streaming' });
         },
         onToolCall: async (call) => {
-          await this.emit(input.run.id, 'tool.call.completed', { streamId, toolCallId: call.id, toolName: call.function.name, arguments: redactSensitiveText(call.function.arguments, 4_000, this.options.redactSecrets), status: 'selected' });
+          await this.emit(input.run.id, 'tool.call.completed', { streamId, toolCallId: call.id, toolName: call.function.name, arguments: redactSensitiveText(normalizeToolArguments(call.function.arguments), 4_000, this.options.redactSecrets), status: 'selected' });
         },
       });
       finalResult = result;
@@ -559,7 +559,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       messages.push({ role: 'assistant', content: result.content ?? assistant, toolCalls: calls });
       for (const call of calls) {
         const toolStartedAt = new Date().toISOString();
-        await this.emit(input.run.id, 'tool.call.started', { streamId, toolCallId: call.id, toolName: call.function.name, arguments: redactSensitiveText(call.function.arguments, 4_000, this.options.redactSecrets), startedAt: toolStartedAt, status: 'running' });
+        await this.emit(input.run.id, 'tool.call.started', { streamId, toolCallId: call.id, toolName: call.function.name, arguments: redactSensitiveText(normalizeToolArguments(call.function.arguments), 4_000, this.options.redactSecrets), startedAt: toolStartedAt, status: 'running' });
         let args: Record<string, unknown>;
         try {
           const parsed: unknown = JSON.parse(call.function.arguments || '{}');
@@ -573,7 +573,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
         }
         let result: WorkspaceModelToolResult;
         try {
-          const toolInput: WorkspaceCommandInput = { adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction, requestId: `workspace:${input.run.id}`, traceId: `workspace:${input.run.id}` };
+          const toolInput: WorkspaceCommandInput = { adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: typeof args.instruction === 'string' ? args.instruction : input.run.instruction, operation: typeof args.operation === 'string' ? args.operation : undefined, parameters: isRecord(args.parameters) ? args.parameters : undefined, requestId: `workspace:${input.run.id}`, traceId: `workspace:${input.run.id}` };
           result = this.options.skillManager && call.function.name.startsWith('pi_skill_')
             ? await this.options.skillManager.executeModelTool(call.function.name, args, toolInput)
             : await commands.executeModelTool(call.function.name, args, toolInput);
@@ -1150,6 +1150,17 @@ function toolFailureResult(failure: { code: string; summary: string }): Record<s
     message: failure.summary,
     ...(suggestedTool ? { suggestedTool } : {}),
   };
+}
+
+function normalizeToolArguments(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '{}';
+  try { return JSON.stringify(JSON.parse(trimmed)); } catch { /* preserve provider text when it is not valid JSON */ }
+  if (trimmed.length % 2 === 0) {
+    const midpoint = trimmed.length / 2;
+    if (trimmed.slice(0, midpoint) === trimmed.slice(midpoint)) return trimmed.slice(0, midpoint);
+  }
+  return trimmed;
 }
 
 function firstNonEmpty(...values: Array<string | undefined>): string | undefined {

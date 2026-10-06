@@ -59,7 +59,7 @@ function safeStatus(payload: Record<string, unknown>): string | undefined {
   return typeof payload.status === 'string' ? payload.status : undefined;
 }
 
-function eventTitle(eventType: string): string {
+export function eventTitle(eventType: string): string {
   const labels: Record<string, string> = {
     'run.queued': 'Run 已排队',
     'run.started': 'Run 已开始',
@@ -70,6 +70,13 @@ function eventTitle(eventType: string): string {
     'step.executing': '工具步骤执行中',
     'step.succeeded': '步骤已完成',
     'step.failed': '步骤失败',
+    'workspace.confirmation.created': '已生成确认卡',
+    'workspace.confirmation.confirmed': '确认已提交',
+    'workspace.outbox.enqueued': '已进入执行队列',
+    'workspace.outbox.completed': '执行队列已完成',
+    'workspace.coupon.created': '卡券已创建',
+    'workspace.agent_settings.updated': 'Agent 配置已更新',
+    'workspace.command.completed': '工作区动作已完成',
   };
   return labels[eventType] ?? eventType.replace(/[._]/g, ' ');
 }
@@ -145,6 +152,7 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
   mergeStreamingEvents(events).sort((left, right) => left.sequence - right.sequence).forEach((event) => {
     if (!shouldProjectEvent(event)) return;
     if (event.eventType === 'workspace.message') return;
+    if (event.eventType === 'message.appended' && messageType(event) === 'tool_event') return;
     const messageKind = messageType(event);
     if (messageKind === 'user_message') return;
     const messageId = typeof event.payload.messageId === 'string' ? event.payload.messageId : undefined;
@@ -236,8 +244,8 @@ function mergeStreamingEvents(events: WorkspaceRunEventVM[]): WorkspaceRunEventV
       const messageId = `${event.runId}:tool:${toolCallId}`;
       const toolName = typeof payload.toolName === 'string' ? payload.toolName : 'tool';
       let content = `${toolName}`;
-      if (event.eventType === 'tool.call.started') content = `选择工具：${toolName}\n参数：${typeof payload.arguments === 'string' ? payload.arguments : '{}'}`;
-      if (event.eventType === 'tool.call.delta') content = `调用参数：${typeof payload.argumentsDelta === 'string' ? payload.argumentsDelta : ''}`;
+      if (event.eventType === 'tool.call.started') content = `已准备调用：${toolName}`;
+      if (event.eventType === 'tool.call.delta') content = `正在准备调用：${toolName}`;
       if (event.eventType === 'tool.call.completed') content = `已选择工具：${toolName}`;
       if (event.eventType === 'tool.result') {
         const result = payload.result;
