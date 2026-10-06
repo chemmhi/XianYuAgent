@@ -73,6 +73,43 @@ test('handles the install plus authorization instruction without exposing the to
   }
 });
 
+test('completes the runtime lifecycle for a direct Skill instruction', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'pi-skill-runtime-lifecycle-'));
+  try {
+    const skillRoot = join(fixtureRoot, 'demo-skill');
+    await mkdir(join(skillRoot, 'scripts'), { recursive: true });
+    await writeFile(join(skillRoot, 'SKILL.md'), '---\nname: demo-skill\nversion: 1.0.0\ndescription: Demo skill\n---\n');
+    await writeFile(join(skillRoot, 'scripts', 'main.cjs'), "console.log(JSON.stringify({ code: 0, msg: 'ok' }))");
+    const archive = join(fixtureRoot, 'demo-skill.zip');
+    await execFile('tar', ['-a', '-c', '-f', archive, '-C', fixtureRoot, 'demo-skill']);
+
+    const manager = new PiSkillManager({ rootDir: join(fixtureRoot, 'installed') });
+    const store = new MemoryStore();
+    const admin = await store.createAdmin({ email: 'pi-skill-lifecycle@example.com', passwordHash: 'hash', displayName: 'Pi Skill Lifecycle' });
+    const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'pi-skill-lifecycle' });
+    const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Pi Skill Lifecycle' });
+    const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: `请安装 Skill，技能地址：${archive}` });
+    const runtime = new PiRuntimeAdapter(store, { async complete(): Promise<ModelCompletionResult> { return { content: 'unused', model: 'unused' }; } }, { skillManager: manager, model: 'pi-skill-test' });
+    runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline) {
+      const bundle = await store.getRun(admin.id, created.run.id);
+      if (bundle?.run.status === 'succeeded') break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const bundle = await store.getRun(admin.id, created.run.id);
+    assert.equal(bundle?.run.status, 'succeeded');
+    assert.equal(bundle?.steps[0]?.status, 'succeeded');
+    const events = await store.listRunEvents(admin.id, created.run.id, 0);
+    assert.ok(events.some((event) => event.eventType === 'workspace.skill.lifecycle' && event.payload.status === 'succeeded'));
+    assert.ok(events.some((event) => event.eventType === 'run.succeeded'));
+    runtime.stop();
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test('exposes Pi Skill tools to the runtime and routes tool calls to the skill manager', async () => {
   const fixtureRoot = await mkdtemp(join(tmpdir(), 'pi-skill-runtime-'));
   try {
