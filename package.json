@@ -12,8 +12,12 @@
     "apps/api"
   ],
   "scripts": {
-    "predev": "npm run dev:prepare",
-    "dev": "concurrently --kill-others-on-fail --names api,worker,web --prefix-colors blue,magenta,green \"npm:dev:api\" \"npm:dev:worker\" \"npm:dev:web\"",
+    "preinstall": "node scripts/dev-stop.mjs",
+    "predev": "npm run dev:stop && npm run dev:prepare",
+    "dev": "node scripts/dev-runner.mjs",
+    "dev:stop": "node scripts/dev-stop.mjs",
+    "deps:ci": "npm run dev:stop && npm ci",
+    "test:dev-lifecycle": "node --test scripts/dev-lifecycle.test.mjs",
     "dev:prepare": "docker compose stop api worker && docker compose up -d postgres redis object-storage && npm run db:migrate",
     "infra:up": "docker compose up -d postgres redis object-storage",
     "infra:down": "docker compose stop postgres redis object-storage",
@@ -64,7 +68,6 @@
     "knowledge-base:init": "npm --workspace apps/api run knowledge-base:init"
   },
   "devDependencies": {
-    "concurrently": "10.0.5",
     "cross-env": "10.1.0"
   }
 }

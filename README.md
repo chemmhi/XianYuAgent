@@ -17,6 +17,14 @@
 npm ci
 ```
 
+Windows dependency install should stop local dev processes first:
+
+```powershell
+npm run deps:ci
+```
+
+Running Node/Vite processes lock native `.node` files. Executing `npm ci` while dev is running causes `EPERM`; `deps:ci` stops the managed API, Worker, and Web process tree before reinstalling.
+
 本地同时启动 API 与前端：
 
 ```powershell
@@ -25,6 +33,12 @@ $env:ALLOW_IN_MEMORY = "true"
 $env:COOKIE_SECURE = "false"
 $env:VITE_API_MODE = "live"
 npm run dev
+```
+
+Stop the managed local dev process tree:
+
+```powershell
+npm run dev:stop
 ```
 
 默认情况下，Vite 会把 `/api` 请求代理到 `http://127.0.0.1:8080`；只有 API 不在默认端口时，才需要设置 `VITE_API_PROXY_TARGET` 或 `VITE_API_BASE_URL`。
