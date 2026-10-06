@@ -4,7 +4,7 @@
 .workspace-scope-dot.online { background: var(--success); box-shadow: 0 0 0 3px var(--success-bg); }
 .workspace-layout { display: grid; grid-template-columns: minmax(250px, 310px) minmax(0, 1fr); gap: 16px; align-items: start; }
 .workspace-sessions-panel, .workspace-composer-panel, .workspace-run-panel { min-width: 0; overflow: hidden; }
-.workspace-sessions-panel { display: flex; flex: 0 0 auto; flex-direction: column; align-self: start; height: auto; min-height: 0; max-height: none; padding: 0; overflow: visible; }
+.workspace-sessions-panel { display: flex; flex: 0 0 auto; flex-direction: column; align-self: stretch; min-height: 0; max-height: none; padding: 0; overflow: hidden; }
 .workspace-panel-head { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; padding: 18px; border-bottom: 1px solid var(--border); }
 .workspace-panel-head h2 { margin: 0 0 4px; font-size: 14px; }
 .workspace-panel-head p { margin: 0; font-size: var(--font-size-body-compact); line-height: 1.5; }
@@ -12,7 +12,7 @@
 .workspace-create-form { display: grid; gap: 7px; padding: 12px 14px; border-bottom: 1px solid var(--border); background: var(--bg); color: var(--muted); font-size: var(--font-size-body-compact); line-height: 1.5; font-weight: 700; }
 .workspace-create-row { display: flex; gap: 7px; }
 .workspace-search { width: calc(100% - 16px); max-width: none; margin: 12px 8px 8px; }
-.workspace-session-list { display: grid; align-content: start; width: 100%; box-sizing: border-box; max-height: none; overflow: visible; padding: 0 8px 10px; }
+.workspace-session-list { display: grid; align-content: start; width: 100%; box-sizing: border-box; min-height: 0; max-height: none; overflow-y: auto; overflow-x: hidden; padding: 0 8px 10px; }
 .workspace-session-row { display: flex; align-items: stretch; width: 100%; min-width: 0; box-sizing: border-box; gap: 4px; margin: 1px 0; border: 1px solid transparent; border-radius: 9px; }
 .workspace-session-row:hover { border-color: var(--border); background: var(--bg); }
 .workspace-session-row.active { border-color: #B9C8D9; background: var(--soft-blue-bg); }
@@ -82,8 +82,8 @@
 .workspace-inline-error { padding: 10px 12px; border: 1px solid rgba(180,35,24,.18); border-radius: 8px; background: var(--danger-bg); color: var(--danger); font-size: var(--font-size-body-compact); line-height: 1.5; }
 @media (max-width: 900px) {
   .workspace-layout { grid-template-columns: 1fr; }
-  .workspace-sessions-panel { min-height: 0; max-height: none; }
-  .workspace-session-list { max-height: none; overflow: visible; }
+  .workspace-sessions-panel { align-self: start; height: auto; min-height: 0; max-height: none; overflow: visible; }
+  .workspace-session-list { min-height: 0; max-height: none; overflow: visible; }
 }
 
 /* Continuous conversation surface */
@@ -218,7 +218,7 @@
 .workspace-page-title .eyebrow { margin-bottom: 5px; }
 .workspace-scope { margin-top: 4px; }
 .workspace-layout { grid-template-columns: 292px minmax(0, 1fr); gap: 14px; min-height: 0; align-items: start; }
-.workspace-sidebar { display: block; min-width: 0; align-self: start; height: max-content; }
+.workspace-sidebar { display: block; min-width: 0; align-self: stretch; min-height: 0; }
 .workspace-confirmation-card { width: min(100%, 760px); margin: 0 auto; padding: 14px 0; border-top: 1px solid var(--border); }
 .workspace-confirmation-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
 .workspace-confirmation-head h3 { margin: 0 0 4px; font-size: 14px; }
@@ -265,10 +265,10 @@
   .workspace-surface { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; height: 100%; }
   .workspace-page-body { display: flex; flex: 1 1 auto; min-height: 0; box-sizing: border-box; }
   .workspace-layout { flex: 1 1 auto; align-items: start; min-height: 0; height: auto; }
-  .workspace-sidebar { height: max-content; min-height: 0; }
+  .workspace-sidebar { height: 100%; min-height: 0; }
   .workspace-thread { height: 100%; min-height: 0; }
-  .workspace-sessions-panel { height: auto; min-height: 0; max-height: none; }
-  .workspace-session-list { min-height: 0; max-height: none; overflow: visible; }
+  .workspace-sessions-panel { height: 100%; min-height: 0; max-height: none; }
+  .workspace-session-list { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; overflow-x: hidden; }
   .workspace-message-stream { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 }
 

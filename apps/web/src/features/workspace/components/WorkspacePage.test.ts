@@ -168,10 +168,10 @@ describe('Workspace Composer styling contract', () => {
     expect(workspaceCss).toContain('font-size: var(--font-size-body);');
     expect(workspaceCss).toContain('font-size: var(--font-size-body-compact);');
     expect(workspaceCss).toContain('font-size: var(--font-size-meta);');
-    expect(workspaceCss).toContain('.workspace-sidebar { display: block; min-width: 0; align-self: start; height: max-content; }');
+    expect(workspaceCss).toContain('.workspace-sidebar { display: block; min-width: 0; align-self: stretch; min-height: 0; }');
     expect(workspaceCss).toContain('.workspace-layout { min-height: 0; }');
-    expect(workspaceCss).toContain('.workspace-sessions-panel { display: flex; flex: 0 0 auto; flex-direction: column; align-self: start; height: auto;');
-    expect(workspaceCss).toContain('.workspace-session-list { display: grid; align-content: start; width: 100%; box-sizing: border-box; max-height: none; overflow: visible;');
+    expect(workspaceCss).toContain('.workspace-sessions-panel { display: flex; flex: 0 0 auto; flex-direction: column; align-self: stretch; min-height: 0; max-height: none;');
+    expect(workspaceCss).toContain('.workspace-session-list { display: grid; align-content: start; width: 100%; box-sizing: border-box; min-height: 0; max-height: none; overflow-y: auto; overflow-x: hidden;');
     expect(workspaceCss).toContain('.workspace-tool-event-details { margin: 7px 0 0 26px; padding: 10px 0 0; background: transparent; }');
     expect(workspaceCss).toContain('.workspace-tool-event-details p { margin: 0; color: var(--sub);');
     expect(workspacePageSource).not.toContain('WorkspaceContextPanel');
@@ -208,9 +208,12 @@ describe('Workspace empty state layout contract', () => {
 describe('Workspace session search alignment contract', () => {
   it('uses the same horizontal inset as the session rows below', () => {
     expect(workspaceCss).toContain('.workspace-search { width: calc(100% - 16px); max-width: none; margin: 12px 8px 8px; }');
-    expect(workspaceCss).toContain('.workspace-session-list { display: grid; align-content: start; width: 100%; box-sizing: border-box; max-height: none; overflow: visible; padding: 0 8px 10px; }');
+    expect(workspaceCss).toContain('.workspace-session-list { display: grid; align-content: start; width: 100%; box-sizing: border-box; min-height: 0; max-height: none; overflow-y: auto; overflow-x: hidden; padding: 0 8px 10px; }');
     expect(workspaceCss).toContain('.workspace-layout { grid-template-columns: 292px minmax(0, 1fr); gap: 14px; min-height: 0; align-items: start; }');
-    expect(workspaceCss).toContain('.workspace-sidebar { display: block; min-width: 0; align-self: start; height: max-content; }');
+    expect(workspaceCss).toContain('.workspace-sidebar { display: block; min-width: 0; align-self: stretch; min-height: 0; }');
+    expect(workspaceCss).toContain('.workspace-sidebar { height: 100%; min-height: 0; }');
+    expect(workspaceCss).toContain('.workspace-sessions-panel { height: 100%; min-height: 0; max-height: none; }');
+    expect(workspaceCss).toContain('.workspace-session-list { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; overflow-x: hidden; }');
   });
 });
 
