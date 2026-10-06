@@ -162,7 +162,9 @@ describe('Workspace Composer styling contract', () => {
 
 describe('Workspace empty state layout contract', () => {
   it('centers the new-conversation prompt in the available message stream', () => {
-    expect(workspacePageSource).toContain('workspace-message-stream${messages.length || state.outbox.length ? \'\' : \' is-empty\'}');
+    expect(workspacePageSource).toContain('workspace-message-stream${hasStreamContent ? \'\' : \' is-empty\'}');
+    expect(workspacePageSource).toContain('const showOutbox = !draftMode && Boolean(currentRun && state.outbox.length > 0);');
+    expect(workspacePageSource).toContain('{showOutbox && <WorkspaceOutboxPanel');
     expect(workspaceCss).toContain('.workspace-message-stream.is-empty { display: grid; flex: 1 1 auto; min-height: 0; place-items: center; overflow: auto; }');
     expect(workspaceCss).toContain('.workspace-message-stream.is-empty .workspace-state { width: 100%; min-height: 0;');
   });
