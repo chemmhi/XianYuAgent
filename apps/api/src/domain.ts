@@ -1335,6 +1335,8 @@ export interface WorkspaceConfirmationRecord {
   action: WorkspaceActionKind;
   policyRef: string;
   manifest: Record<string, unknown>;
+  /** Canonical service-only parameters captured at preview time. */
+  executionPlan: Record<string, unknown>;
   status: WorkspaceConfirmationStatus;
   version: number;
   expiresAt: string;
@@ -1418,7 +1420,7 @@ export interface Store {
   listRunEvents(adminId: string, runId: string, afterSequence?: number): Promise<RunEventRecord[]>;
   appendWorkspaceMessage(input: { adminId: string; sessionId: string; runId?: string; type: WorkspaceMessageType; content: string; summary?: string }): Promise<WorkspaceMessageRecord>;
   listWorkspaceMessages(adminId: string, sessionId: string, limit?: number): Promise<WorkspaceMessageRecord[]>;
-  createWorkspaceConfirmation(input: { adminId: string; runId: string; stepId: string; accountId: string; requestedBy: string; action: WorkspaceActionKind; policyRef: string; manifest: Record<string, unknown>; expiresAt: string }): Promise<WorkspaceConfirmationRecord>;
+  createWorkspaceConfirmation(input: { adminId: string; runId: string; stepId: string; accountId: string; requestedBy: string; action: WorkspaceActionKind; policyRef: string; manifest: Record<string, unknown>; executionPlan: Record<string, unknown>; expiresAt: string }): Promise<WorkspaceConfirmationRecord>;
   getWorkspaceConfirmation(adminId: string, runId: string): Promise<WorkspaceConfirmationRecord | undefined>;
   transitionWorkspaceConfirmation(input: { adminId: string; confirmationId: string; expectedVersion: number; status: Exclude<WorkspaceConfirmationStatus, 'active'>; actorId: string }): Promise<WorkspaceConfirmationRecord | undefined>;
   getExecutionOutboxById(scope: string, id: string): Promise<AutoReplyOutboxRecord | undefined>;

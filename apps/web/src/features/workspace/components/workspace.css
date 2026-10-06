@@ -220,6 +220,10 @@
 .workspace-confirmation-head h3 { margin: 0 0 4px; font-size: 14px; }
 .workspace-confirmation-head p { margin: 0; color: var(--sub); font-size: 12px; line-height: 1.45; }
 .workspace-confirmation-head > span { padding: 4px 7px; border-radius: 5px; background: var(--warn-bg); color: var(--warn); font-size: var(--font-size-meta); line-height: var(--font-line-meta); font-weight: 800; white-space: nowrap; }
+.workspace-confirmation-params { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 11px; }
+.workspace-confirmation-params > div { display: flex; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; background: #fbfcfe; }
+.workspace-confirmation-params small { color: var(--sub); font-size: var(--font-size-meta); }
+.workspace-confirmation-params strong { text-align: right; font-size: var(--font-size-body-compact); overflow-wrap: anywhere; }
 .workspace-confirmation-diff { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 11px; }
 .workspace-confirmation-diff > div { padding: 10px; border: 1px solid var(--border); border-radius: 7px; background: #fff; }
 .workspace-confirmation-diff small { display: block; margin-bottom: 4px; color: var(--sub); font-size: var(--font-size-meta); line-height: var(--font-line-meta); font-weight: 800; letter-spacing: .03em; text-transform: uppercase; }
@@ -305,7 +309,7 @@
   .workspace-thread-header { display: none; }
   .workspace-thread.is-confirmation .workspace-composer-docked { display: none; }
   .workspace-context-panel { display: none; }
-  .workspace-confirmation-diff { grid-template-columns: 1fr; }
+  .workspace-confirmation-params, .workspace-confirmation-diff { grid-template-columns: 1fr; }
   .workspace-confirmation-actions { display: grid; grid-template-columns: 1fr; }
   .workspace-confirmation-actions .btn { width: 100%; }
   .workspace-mobile-nav { position: fixed; right: 0; bottom: 0; left: 0; z-index: 10; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 9px 8px 16px; border-top: 1px solid var(--border); background: #fff; }

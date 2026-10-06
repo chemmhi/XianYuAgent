@@ -1,6 +1,6 @@
 import type { AutoReplyAgentConfigPatch, CouponBatchMetadata, ProductRecord, Store } from './domain.js';
 
-export type NativeWorkspaceWriteKind = 'product_publish' | 'product_update' | 'coupon_create' | 'agent_settings_update' | 'product_knowledge_update' | 'product_automation_update' | 'coupon_update' | 'coupon_enable' | 'coupon_disable' | 'coupon_bind' | 'coupon_unbind' | 'coupon_void' | 'coupon_copy' | 'model_settings_update';
+export type NativeWorkspaceWriteKind = 'product_publish' | 'product_update' | 'coupon_create' | 'agent_settings_update' | 'product_knowledge_update' | 'product_automation_update' | 'coupon_update' | 'coupon_enable' | 'coupon_disable' | 'coupon_bind' | 'coupon_unbind' | 'coupon_void' | 'coupon_copy' | 'model_settings_update' | 'order_deliver' | 'order_retry' | 'order_cancel';
 export type NativeWorkspaceWriteAction = NativeWorkspaceWriteKind;
 
 export interface NativeCouponCreateInput {
@@ -24,6 +24,8 @@ export interface NativeWorkspaceWritePlan {
   content: string;
   expiresAt: string;
   manifest: Record<string, unknown>;
+  /** Canonical service parameters captured once during preview. */
+  executionPlan: Record<string, unknown>;
 }
 
 const PRODUCT_PUBLISH_TERMS = /(发布商品|上架商品|发布一个商品|上架一个商品)/i;
@@ -50,11 +52,12 @@ export function detectNativeWorkspaceWrite(instruction: string): NativeWorkspace
 
 export function sanitizeWorkspaceInstruction(instruction: string): string {
   const kind = detectNativeWorkspaceWrite(instruction);
-  if (kind === 'coupon_create' || /(卡券|卡密|优惠券).*(内容|正文|数据)/i.test(instruction)) return '已请求卡券操作（卡券正文将在确认后通过受控卡券域写入）';
-  if (kind === 'agent_settings_update') return '已请求修改自动回复 Agent 配置（等待管理员确认）';
-  return instruction
+  const sanitized = instruction
     .replace(/((?:api[_ -]?key|access[_ -]?token|cookie|密钥|令牌|token)\s*[:：=]\s*)[^;；\n\s]+/gi, '$1[REDACTED]')
     .slice(0, 2_000);
+  if (kind === 'coupon_create') return sanitized.replace(/((?:卡券)?内容|正文|数据)\s*(?:为|是|等于|[:：=])\s*[\s\S]+$/i, '$1：[REDACTED]');
+  if (kind === 'agent_settings_update') return sanitized.replace(/(prompt|提示词|system\s*prompt)\s*[:：=][\s\S]{0,500}/gi, '$1:[REDACTED]');
+  return sanitized;
 }
 
 export function parseNativeWorkspaceCouponCreate(instruction: string): NativeCouponCreateInput | undefined {
@@ -121,10 +124,16 @@ export function parseNativeWorkspaceAgentSettingsUpdate(instruction: string): Na
   return { patch, changes };
 }
 
-export async function prepareNativeWorkspaceWrite(input: { store: Store; adminId: string; accountId: string; instruction: string; now?: Date }): Promise<NativeWorkspaceWritePlan | undefined> {
+export async function prepareNativeWorkspaceWrite(input: { store: Store; adminId: string; accountId: string; instruction: string; operation?: string; parameters?: Record<string, unknown>; now?: Date }): Promise<NativeWorkspaceWritePlan | undefined> {
+  if (!input.adminId || !(await input.store.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+  if (input.operation === 'coupon_create') {
+    return prepareStructuredCouponCreate(input);
+  }
+  if (input.operation === 'agent_settings_update') {
+    return prepareStructuredAgentSettingsUpdate(input);
+  }
   const kind = detectNativeWorkspaceWrite(input.instruction);
   if (!kind) return undefined;
-  if (!input.adminId || !(await input.store.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
   const now = input.now ?? new Date();
   const expiresAt = new Date(now.getTime() + 10 * 60_000).toISOString();
 
@@ -144,7 +153,7 @@ export async function prepareNativeWorkspaceWrite(input: { store: Store; adminId
       redacted: true,
     } satisfies Record<string, unknown>;
     const summary = `准备发布商品“${product.title}”（当前状态：${productStatusLabel(product.status)}，价格：${formatMoney(product.priceMinor)}）`;
-    return { kind, action: 'product_publish', policyRef: 'product.publish.confirm', title: '商品发布确认', summary, content: `已生成商品发布确认卡。\n${summary}\n确认后会进入服务端 Outbox，等待外部发布 Worker 执行。`, expiresAt, manifest };
+    return { kind, action: 'product_publish', policyRef: 'product.publish.confirm', title: '商品发布确认', summary, content: `已生成商品发布确认卡。\n${summary}\n确认后会进入服务端 Outbox，等待外部发布 Worker 执行。`, expiresAt, manifest, executionPlan: { action: 'product_publish', accountId: product.accountId, productId: product.id } };
   }
 
   if (kind === 'agent_settings_update') {
@@ -171,6 +180,7 @@ export async function prepareNativeWorkspaceWrite(input: { store: Store; adminId
       content: `已生成自动回复 Agent 配置确认卡。\n${summary}\n确认后会写入当前账号配置；Prompt 原文和凭证不会显示在 Workspace 消息或确认卡中。`,
       expiresAt,
       manifest,
+      executionPlan: { action: 'agent_settings_update', accountId: input.accountId, expectedVersion, patch: settings.patch },
     };
   }
 
@@ -179,17 +189,7 @@ export async function prepareNativeWorkspaceWrite(input: { store: Store; adminId
   const configured = coupon.purpose === 'api' ? Boolean(coupon.metadata.apiConfig?.url) : coupon.purpose === 'image' ? Boolean(coupon.metadata.imageUrls?.length) : Boolean(coupon.metadata.textContent || coupon.metadata.dataContent);
   const count = coupon.purpose === 'data' ? coupon.items.length : configured ? 1 : 0;
   const summary = `准备新增卡券“${coupon.label}”（类型：${couponPurposeLabel(coupon.purpose)}，${count > 0 ? `已配置 ${count} 项` : '待填写内容'}）`;
-  const manifest = {
-    action: 'coupon_create',
-    accountId: input.accountId,
-    title: coupon.label,
-    label: coupon.label,
-    purpose: coupon.purpose,
-    itemCount: coupon.items.length,
-    configured,
-    requiresLocalExecution: true,
-    redacted: true,
-  } satisfies Record<string, unknown>;
+  const manifest = buildCouponPreviewManifest(input.accountId, coupon.label, coupon.purpose, coupon.metadata, coupon.items);
   return {
     kind,
     action: 'coupon_create',
@@ -199,16 +199,66 @@ export async function prepareNativeWorkspaceWrite(input: { store: Store; adminId
     content: `已生成新增卡券确认卡。\n${summary}\n确认后会写入当前账号的卡券批次；卡券正文不会显示在 Workspace 消息或确认卡中。`,
     expiresAt,
     manifest,
+    executionPlan: { action: 'coupon_create', accountId: input.accountId, label: coupon.label, purpose: coupon.purpose, metadata: coupon.metadata, items: coupon.items },
+  };
+}
+
+function prepareStructuredCouponCreate(input: { store: Store; adminId: string; accountId: string; operation?: string; parameters?: Record<string, unknown>; now?: Date }): NativeWorkspaceWritePlan {
+  const parameters = input.parameters ?? {};
+  const label = stringValue(parameters.label ?? parameters.name);
+  const purpose = normalizePurpose(parameters.purpose ?? parameters.type);
+  if (!label || !purpose) throw new Error('WORKSPACE_COUPON_REQUIRED');
+  const metadata = normalizeCouponMetadata(parameters, purpose);
+  const items = purpose === 'data' ? splitDataContent(metadata.dataContent) : [];
+  const configured = purpose === 'api' ? Boolean(metadata.apiConfig?.url) : purpose === 'image' ? Boolean(metadata.imageUrls?.length) : Boolean(metadata.textContent || metadata.dataContent);
+  const count = purpose === 'data' ? items.length : configured ? 1 : 0;
+  const expiresAt = new Date((input.now ?? new Date()).getTime() + 10 * 60_000).toISOString();
+  const summary = `准备新增卡券“${label}”（类型：${couponPurposeLabel(purpose)}，${count > 0 ? `已配置 ${count} 项` : '待填写内容'}）`;
+  return {
+    kind: 'coupon_create', action: 'coupon_create', policyRef: 'coupon.create.confirm', title: '新增卡券确认', summary,
+    content: `已生成新增卡券确认卡。\n${summary}\n确认后会写入当前账号的卡券批次；卡券正文不会显示在 Workspace 消息或确认卡中。`, expiresAt,
+    manifest: buildCouponPreviewManifest(input.accountId, label, purpose, metadata, items),
+    executionPlan: { action: 'coupon_create', accountId: input.accountId, label, purpose, metadata, items },
+  };
+}
+
+async function prepareStructuredAgentSettingsUpdate(input: { accountId: string; parameters?: Record<string, unknown>; store: Store; adminId: string; now?: Date }): Promise<NativeWorkspaceWritePlan> {
+  const parameters = input.parameters ?? {};
+  const rawPatch = isRecord(parameters.patch) ? parameters.patch : parameters;
+  const patch: AutoReplyAgentConfigPatch = {};
+  const changes: Array<{ field: string; label: string; value: string | number | boolean }> = [];
+  for (const [field, raw] of Object.entries(rawPatch)) {
+    const parsed = parseAgentField(field, String(raw));
+    if (!parsed) continue;
+    patch[parsed.field] = parsed.value as never;
+    changes.push({ field: parsed.field, label: parsed.label, value: parsed.value });
+  }
+  if (!changes.length) throw new Error('WORKSPACE_AGENT_SETTINGS_REQUIRED');
+  const expiresAt = new Date((input.now ?? new Date()).getTime() + 10 * 60_000).toISOString();
+  const current = await input.store.getAutoReplyAgentConfig(input.adminId, input.accountId);
+  const expectedVersion = current?.configVersion ?? 0;
+  return {
+    kind: 'agent_settings_update', action: 'agent_settings_update', policyRef: 'agent.settings.update.confirm', title: '自动回复 Agent 配置确认',
+    summary: `准备修改自动回复 Agent 配置（${changes.map((change) => `${change.label}：${formatAgentValue(change.value)}`).join('、')}）`,
+    content: '已生成自动回复 Agent 配置确认卡。确认后会写入当前账号配置；Prompt 原文和凭证不会显示在 Workspace 消息或确认卡中。', expiresAt,
+    manifest: { action: 'agent_settings_update', accountId: input.accountId, expectedVersion, changes, changedFields: changes.map((change) => change.field), requiresLocalExecution: true, redacted: true },
+    executionPlan: { action: 'agent_settings_update', accountId: input.accountId, expectedVersion, patch },
   };
 }
 
 function parseFields(body: string): Record<string, string> {
   const fields: Record<string, string> = {};
+  const names = '名称|卡券名称|label|类型|purpose|卡券类型|内容|正文|卡券内容|固定文字|数据|dataContent|图片|imageUrls|接口|URL|url|请求方法|method|超时时间|timeout|apiTimeout|请求头|headers|请求参数|params|备注|description|延时发货时间|delaySeconds|无须填写凭证|无需填写凭证|无需邮寄|useNoLogisticsForm|费用承担|feePayer|最低售价|minPrice|投放可见性|dockVisibility|多规格|multiSpec|规格名称|specName|规格值|specValue|响应取值字段|responseField';
+  const keyed = new RegExp(`(?:^|[;；,，\\n]\\s*)(${names})\\s*(?:(?:为|是|等于)\\s*|[:=：]\\s*)([\\s\\S]*?)(?=(?:[;；,，]\\s*(?:${names})\\s*(?:为|是|等于|[:=：])|$))`, 'gi');
+  let match: RegExpExecArray | null;
+  while ((match = keyed.exec(body))) {
+    fields[normalizeFieldKey(match[1])] = cleanExtractedValue(match[2]);
+  }
+  // Preserve legacy semicolon parsing for values which intentionally contain
+  // punctuation not preceded by a recognized key.
   for (const segment of body.split(/[;；]+/).map((item) => item.trim()).filter(Boolean)) {
-    const match = segment.match(/^(名称|卡券名称|label|类型|purpose|卡券类型|内容|正文|固定文字|数据|dataContent|图片|imageUrls|接口|URL|url|请求方法|method|超时时间|timeout|apiTimeout|请求头|headers|请求参数|params|备注|description|延时发货时间|delaySeconds|无须填写凭证|无需填写凭证|useNoLogisticsForm|费用承担|feePayer|最低售价|minPrice|投放可见性|dockVisibility|多规格|multiSpec|规格名称|specName|规格值|specValue|响应取值字段|responseField)\s*[:=：]\s*([\s\S]*)$/i);
-    if (!match) continue;
-    const key = normalizeFieldKey(match[1]);
-    fields[key] = match[2].trim();
+    const legacy = segment.match(/^(名称|卡券名称|label|类型|purpose|卡券类型|内容|正文|卡券内容|固定文字|数据|dataContent|图片|imageUrls|接口|URL|url|请求方法|method|超时时间|timeout|apiTimeout|请求头|headers|请求参数|params|备注|description|延时发货时间|delaySeconds|无须填写凭证|无需填写凭证|无需邮寄|useNoLogisticsForm|费用承担|feePayer|最低售价|minPrice|投放可见性|dockVisibility|多规格|multiSpec|规格名称|specName|规格值|specValue|响应取值字段|responseField)\s*(?:为|是|等于|[:=：])\s*([\s\S]*)$/i);
+    if (legacy) fields[normalizeFieldKey(legacy[1])] = cleanExtractedValue(legacy[2]);
   }
   return fields;
 }
@@ -270,8 +320,9 @@ function parseAgentBoolean(value: string): boolean | undefined {
   return undefined;
 }
 
-function parseCouponBoolean(value?: string): boolean | undefined {
+function parseCouponBoolean(value?: string | boolean): boolean | undefined {
   if (!value) return undefined;
+  if (typeof value === 'boolean') return value;
   if (/^(true|1|yes|on|是|启用|开启|打开)$/i.test(value.trim())) return true;
   if (/^(false|0|no|off|否|停用|禁用|关闭)$/i.test(value.trim())) return false;
   return undefined;
@@ -313,20 +364,88 @@ function resolvePurpose(value: string | undefined, body: string): NativeCouponCr
 
 function inferLabel(body: string, fields: Record<string, string>): string {
   if (fields.label) return fields.label;
-  const first = body.split(/[;；\n]+/)[0]?.trim() ?? '';
+  const contentMarker = body.search(/(?:卡券)?内容\s*(?:为|是|等于|[:：=])/i);
+  const prefix = contentMarker >= 0 ? body.slice(0, contentMarker) : body;
+  const first = prefix.split(/[;；\n,，]+/)[0]?.trim() ?? '';
   if (!first || /^(类型|purpose|卡券类型|内容|正文|固定文字|数据|接口|图片)\s*[:=：]/i.test(first)) return '';
-  return first.replace(/^(名称|卡券名称)\s*[:=：]\s*/i, '');
+  return cleanExtractedValue(first.replace(/^(名称|卡券名称)\s*(?:为|是|等于|[:=：])\s*/i, ''));
 }
 
 function inferTrailingContent(body: string, fields: Record<string, string>, label?: string): string {
   if (fields.content) return fields.content;
-  const stripped = body.replace(COUPON_CREATE_TERMS, '').replace(/(?:名称|卡券名称|label|类型|purpose|卡券类型)\s*[:=：]\s*[^;；\n]+/gi, '').trim();
+  const natural = body.match(/(?:卡券)?内容\s*(?:为|是|等于|[:：=])\s*([\s\S]+)$/i)?.[1];
+  if (natural) return cleanExtractedValue(natural);
+  const stripped = body.replace(COUPON_CREATE_TERMS, '').replace(/(?:名称|卡券名称|label|类型|purpose|卡券类型)\s*(?:为|是|等于|[:=：])\s*[^;；\n,，]+/gi, '').trim();
   if (label && stripped === label) return '';
-  return stripped.replace(/^[;；,，\s]+/, '').trim();
+  return cleanExtractedValue(stripped.replace(/^[;；,，\s]+/, '').trim());
+}
+
+function cleanExtractedValue(value: string): string {
+  return value.trim().replace(/^[“”"'「『《【\s]+|[“”"'」』》】\s]+$/g, '').trim();
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizePurpose(value: unknown): NativeCouponCreateInput['purpose'] | undefined {
+  const normalized = stringValue(value)?.toLowerCase();
+  if (!normalized) return undefined;
+  const key = Object.keys(PURPOSES).find((candidate) => candidate.toLowerCase() === normalized);
+  return key ? PURPOSES[key] : undefined;
+}
+
+function normalizeCouponMetadata(parameters: Record<string, unknown>, purpose: NativeCouponCreateInput['purpose']): CouponBatchMetadata {
+  const metadata: CouponBatchMetadata = {};
+  const textContent = stringValue(parameters.textContent ?? parameters.content);
+  const dataContent = stringValue(parameters.dataContent ?? parameters.content);
+  if (purpose === 'text' && textContent) metadata.textContent = textContent;
+  if (purpose === 'data' && dataContent) metadata.dataContent = dataContent;
+  const description = stringValue(parameters.description);
+  if (description) metadata.description = description.slice(0, 2_000);
+  const delay = Number(parameters.delaySeconds);
+  if (Number.isFinite(delay)) metadata.delaySeconds = Math.max(0, Math.min(3_600, Math.trunc(delay)));
+  const noLogistics = parseCouponBoolean(typeof parameters.useNoLogisticsForm === 'boolean' ? parameters.useNoLogisticsForm : stringValue(parameters.useNoLogisticsForm));
+  if (noLogistics !== undefined) metadata.useNoLogisticsForm = noLogistics;
+  if (parameters.feePayer === 'distributor' || parameters.feePayer === 'dealer') metadata.feePayer = parameters.feePayer;
+  if (stringValue(parameters.minPrice)) metadata.minPrice = stringValue(parameters.minPrice);
+  if (parameters.dockVisibility === 'public' || parameters.dockVisibility === 'dealer_only') metadata.dockVisibility = parameters.dockVisibility;
+  const multiSpec = parseCouponBoolean(typeof parameters.multiSpec === 'boolean' ? parameters.multiSpec : stringValue(parameters.multiSpec));
+  if (multiSpec !== undefined) metadata.multiSpec = multiSpec;
+  if (stringValue(parameters.specName)) metadata.specName = stringValue(parameters.specName);
+  if (stringValue(parameters.specValue)) metadata.specValue = stringValue(parameters.specValue);
+  if (purpose === 'api' && isRecord(parameters.apiConfig)) {
+    const api = parameters.apiConfig;
+    const url = stringValue(api.url);
+    if (url) metadata.apiConfig = { url, method: api.method === 'POST' ? 'POST' : 'GET', timeout: Number.isFinite(Number(api.timeout)) ? Math.max(1, Math.min(3_600, Math.trunc(Number(api.timeout)))) : undefined, headers: stringValue(api.headers), params: stringValue(api.params), responseField: stringValue(api.responseField) };
+  }
+  if (purpose === 'image' && Array.isArray(parameters.imageUrls)) metadata.imageUrls = parameters.imageUrls.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).slice(0, 3);
+  return metadata;
 }
 
 function splitDataContent(value?: string): string[] {
   return (value ?? '').split(/\r?\n/).map((item) => item.trim()).filter(Boolean).slice(0, 1_000);
+}
+
+function buildCouponPreviewManifest(accountId: string, label: string, purpose: NativeCouponCreateInput['purpose'], metadata: CouponBatchMetadata, items: string[]): Record<string, unknown> {
+  const contentLength = purpose === 'text' ? metadata.textContent?.length ?? 0 : purpose === 'data' ? metadata.dataContent?.length ?? 0 : undefined;
+  return {
+    action: 'coupon_create', accountId, title: label, label, purpose, itemCount: items.length,
+    configured: purpose === 'api' ? Boolean(metadata.apiConfig?.url) : purpose === 'image' ? Boolean(metadata.imageUrls?.length) : Boolean(metadata.textContent || metadata.dataContent),
+    contentLength,
+    apiUrl: metadata.apiConfig?.url,
+    apiMethod: metadata.apiConfig?.method,
+    apiTimeout: metadata.apiConfig?.timeout,
+    apiHeadersConfigured: Boolean(metadata.apiConfig?.headers),
+    apiParamsConfigured: Boolean(metadata.apiConfig?.params),
+    responseField: metadata.apiConfig?.responseField,
+    imageCount: metadata.imageUrls?.length ?? 0,
+    requiresLocalExecution: true, redacted: true,
+  };
 }
 
 function productStatusLabel(status: string): string { return ({ draft: '草稿', ready: '待发布', publishing: '发布中', published: '已发布', failed: '发布失败', archived: '已归档' } as Record<string, string>)[status] ?? status; }

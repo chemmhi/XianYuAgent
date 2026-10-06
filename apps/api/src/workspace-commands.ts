@@ -41,6 +41,8 @@ export interface WorkspaceCommandInput {
   adminId: string;
   accountId: string;
   instruction: string;
+  operation?: string;
+  parameters?: Record<string, unknown>;
   requestId: string;
   traceId: string;
 }
@@ -83,15 +85,17 @@ export class WorkspaceCommandOrchestrator {
         type: 'function',
         function: {
           name: 'workspace_prepare_write',
-          description: 'Prepare a controlled Workspace mutation. Use for cancellation, disable, update, publish, delivery, configuration, and other write requests. This creates a confirmation plan and never executes the mutation before the user confirms it. Resolve a product by its name or external number when the user did not provide an internal ID.',
+          description: 'Prepare a controlled Workspace mutation. Prefer structured arguments: operation plus parameters. The model must first resolve the operation contract and required API parameters, then provide canonical values. coupon_create maps to CouponService.create(accountId,label,purpose,metadata); data mode then calls CouponService.importItems(batchId,contents). It requires label, purpose(text|data|api|image), and textContent/dataContent/apiConfig/imageUrls. product_publish requires productId; product_update requires productId and patch; product_knowledge_update requires productId plus knowledgeBase or mode; product_automation_update requires productId and config; order_deliver/order_retry/order_cancel require orderNo; model_settings_update requires provider, baseUrl, model and apiKey only when changing credentials; agent_settings_update requires patch. instruction remains a compatibility fallback. This creates a confirmation plan and never executes the mutation before the user confirms it.',
           parameters: {
             type: 'object',
             additionalProperties: false,
             properties: {
-              instruction: { type: 'string', description: 'The complete mutation request to prepare.' },
+              operation: { type: 'string', enum: ['product_publish', 'product_update', 'coupon_create', 'agent_settings_update', 'product_knowledge_update', 'product_automation_update', 'coupon_update', 'coupon_enable', 'coupon_disable', 'coupon_bind', 'coupon_unbind', 'coupon_void', 'coupon_copy', 'model_settings_update', 'order_deliver', 'order_retry', 'order_cancel'], description: 'Canonical mutation operation.' },
+              parameters: { type: 'object', additionalProperties: true, description: 'Canonical operation parameters. Do not place the whole user instruction here.' },
+              instruction: { type: 'string', description: 'Compatibility fallback when canonical parameters cannot be produced.' },
               productId: { type: 'string', description: 'Resolved internal product ID from workspace_product_search, when available.' },
             },
-            required: ['instruction'],
+            required: [],
           },
         },
       },
@@ -113,13 +117,14 @@ export class WorkspaceCommandOrchestrator {
 
   async executeModelTool(name: string, args: Record<string, unknown>, input: WorkspaceCommandInput): Promise<WorkspaceModelToolResult> {
     const instruction = typeof args.instruction === 'string' ? args.instruction.trim() : '';
+    const operation = typeof args.operation === 'string' ? args.operation.trim() : '';
     if (name === 'workspace_product_search') {
       const query = typeof args.query === 'string' ? args.query.trim() : '';
       if (!query) throw new ServiceError(422, 'VALIDATION_FAILED', 'workspace product search query is required');
       const result = await this.searchProducts(input, query);
       return { kind: 'read', title: '商品搜索', summary: `已按名称/外部编号筛选 ${result.total} 个商品`, content: productSearchContent(result.items, result.total), data: { total: result.total, items: result.items.map(safeProduct) } };
     }
-    if (!instruction) throw new ServiceError(422, 'VALIDATION_FAILED', 'workspace tool instruction is required');
+    if (!instruction && !operation) throw new ServiceError(422, 'VALIDATION_FAILED', 'workspace tool requires operation+parameters or instruction');
     if (name === 'workspace_read') {
       if (requiresWorkspaceWrite(instruction)) throw new ServiceError(422, 'WORKSPACE_WRITE_REQUIRED', '该请求包含商品变更动作，请使用 workspace_prepare_write');
       if (requiresWorkspaceProductSearch(instruction)) throw new ServiceError(422, 'WORKSPACE_PRODUCT_SEARCH_REQUIRED', '该商品按名称或外部编号查找应使用 workspace_product_search');
@@ -128,9 +133,12 @@ export class WorkspaceCommandOrchestrator {
       return { kind: 'read', title: result.title, summary: result.summary, content: result.content, data: result.data };
     }
     if (name === 'workspace_prepare_write') {
+      const structuredOperation = operation || undefined;
+      const parameters = isRecord(args.parameters) ? args.parameters : undefined;
+      if (!instruction && !structuredOperation) throw new ServiceError(422, 'VALIDATION_FAILED', 'workspace mutation requires operation+parameters or instruction');
       const productId = typeof args.productId === 'string' ? args.productId.trim() : '';
       const preparedInstruction = productId && !/(?:商品(?:ID|id)|productId)\s*[:：=]/i.test(instruction) ? `${instruction}; 商品ID:${productId}` : instruction;
-      const plan = await this.prepareWrite({ ...input, instruction: preparedInstruction });
+      const plan = await this.prepareWrite({ ...input, instruction: preparedInstruction, operation: structuredOperation, parameters: productId ? { ...(parameters ?? {}), productId } : parameters });
       if (!plan) throw new ServiceError(422, 'VALIDATION_FAILED', 'workspace mutation is not supported by the configured tools');
       return { kind: 'write_plan', title: plan.title, summary: plan.summary, content: plan.content, data: plan.manifest, plan };
     }
@@ -138,8 +146,9 @@ export class WorkspaceCommandOrchestrator {
   }
 
   async prepareWrite(input: WorkspaceCommandInput): Promise<NativeWorkspaceWritePlan | undefined> {
-    const existing = await prepareNativeWorkspaceWrite({ store: this.deps.store, adminId: input.adminId, accountId: input.accountId, instruction: input.instruction });
+    const existing = await prepareNativeWorkspaceWrite({ store: this.deps.store, adminId: input.adminId, accountId: input.accountId, instruction: input.instruction, operation: input.operation, parameters: input.parameters });
     if (existing) return existing;
+    if (input.operation) return this.prepareStructuredWrite(input);
     if (shouldDelegateNativeRead(input.instruction)) return undefined;
     const kind = detectCommand(input.instruction);
     if (!kind) return undefined;
@@ -202,6 +211,77 @@ export class WorkspaceCommandOrchestrator {
     if (kind === 'model_settings' && /(新增|修改|更新|配置|设置)/i.test(input.instruction)) {
       const summary = `准备更新当前账号的 OpenAI-compatible 模型配置（${fields.provider ?? 'Provider 未指定'} / ${fields.model ?? '模型未指定'}）`;
       return this.plan('model_settings_update', '模型配置确认', summary, expiresAt, { action: 'model_settings_update', accountId, configId: fields.configId, expectedVersion: Number(fields.expectedVersion ?? 0) || undefined, provider: fields.provider, model: fields.model, baseUrl: fields.baseUrl, role: fields.role ?? 'primary', wireApi: fields.wireApi, timeoutMs: Number(fields.timeoutMs ?? 60_000), apiKeyConfigured: Boolean(fields.apiKey), redacted: true });
+    }
+    return undefined;
+  }
+
+  private async prepareStructuredWrite(input: WorkspaceCommandInput): Promise<NativeWorkspaceWritePlan | undefined> {
+    const operation = input.operation;
+    const parameters = input.parameters ?? {};
+    const accountId = input.accountId;
+    const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
+    const stringParam = (key: string): string | undefined => typeof parameters[key] === 'string' && String(parameters[key]).trim() ? String(parameters[key]).trim() : undefined;
+    const productId = stringParam('productId');
+    if (!operation) return undefined;
+    if (operation === 'product_publish') {
+      if (!productId) throw new ServiceError(422, 'VALIDATION_FAILED', 'productId is required');
+      const product = await this.deps.products.get(input.adminId, productId);
+      if (product.accountId !== accountId) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
+      const manifest = { action: operation, accountId, productId, title: product.title, status: product.status, priceMinor: product.priceMinor, categoryCode: product.categoryCode, externalProductRef: product.externalProductRef, requiresExternalExecution: true, redacted: true };
+      return this.plan(operation, '商品发布确认', `准备发布商品“${product.title}”（当前状态：${productStatusLabel(product.status)}，价格：${formatMoney(product.priceMinor)}）`, expiresAt, manifest, { action: operation, accountId, productId });
+    }
+    if (operation === 'product_update') {
+      if (!productId || !isRecord(parameters.patch)) throw new ServiceError(422, 'VALIDATION_FAILED', 'product_update requires productId and patch');
+      const product = await this.deps.products.get(input.adminId, productId);
+      const patch = parameters.patch as Record<string, unknown>;
+      const allowed = ['title', 'description', 'categoryCode', 'defaultReplyTemplate', 'priceMinor'];
+      const cleanPatch = Object.fromEntries(Object.entries(patch).filter(([key]) => allowed.includes(key)));
+      if (!Object.keys(cleanPatch).length) throw new ServiceError(422, 'VALIDATION_FAILED', '商品变更至少需要一个可编辑字段');
+      const manifest = { action: operation, accountId, productId, expectedConfigVersion: product.configVersion, fields: Object.keys(cleanPatch), redacted: true };
+      return this.plan(operation, '商品信息变更确认', `准备更新商品“${product.title}”的信息（${Object.keys(cleanPatch).join('、')}）`, expiresAt, manifest, { action: operation, accountId, productId, expectedConfigVersion: product.configVersion, patch: cleanPatch });
+    }
+    if (operation === 'product_knowledge_update') {
+      if (!productId) throw new ServiceError(422, 'VALIDATION_FAILED', 'product_knowledge_update requires productId');
+      const product = await this.deps.products.get(input.adminId, productId);
+      const knowledgeBase = stringParam('knowledgeBase') ?? stringParam('content');
+      const mode = stringParam('mode') ?? (parameters.optimize === true ? 'optimize' : undefined);
+      if (!knowledgeBase && mode !== 'optimize' && mode !== 'append') throw new ServiceError(422, 'VALIDATION_FAILED', 'knowledge update requires knowledgeBase or mode');
+      const manifest = { action: operation, accountId, productId, expectedConfigVersion: product.configVersion, mode: mode ?? 'replace', redacted: true };
+      return this.plan(operation, '商品知识库确认', `准备更新商品“${product.title}”知识库`, expiresAt, manifest, { action: operation, accountId, productId, expectedConfigVersion: product.configVersion, knowledgeBase, mode });
+    }
+    if (operation === 'product_automation_update') {
+      if (!productId || !isRecord(parameters.config)) throw new ServiceError(422, 'VALIDATION_FAILED', 'product_automation_update requires productId and config');
+      const current = await this.deps.productAutomation.get(input.adminId, productId);
+      const manifest = { action: operation, accountId, productId, expectedConfigVersion: current.configVersion, fields: Object.keys(parameters.config as Record<string, unknown>), redacted: true };
+      return this.plan(operation, '商品自动化规则确认', `准备更新商品自动化规则（商品 ${productId}）`, expiresAt, manifest, { action: operation, accountId, productId, expectedConfigVersion: current.configVersion, config: parameters.config });
+    }
+    if (operation.startsWith('coupon_')) {
+      const batchId = stringParam('batchId');
+      if (!batchId) throw new ServiceError(422, 'VALIDATION_FAILED', 'coupon operation requires batchId');
+      const productRef = stringParam('productId');
+      const patch = isRecord(parameters.patch) ? parameters.patch : undefined;
+      const manifest = { action: operation, accountId, batchId, productId: productRef, changedFields: patch ? Object.keys(patch) : [], redacted: true };
+      return this.plan(operation, '卡券批次变更确认', `准备${operation === 'coupon_copy' ? '复制' : operation === 'coupon_void' ? '作废' : operation === 'coupon_enable' ? '启用' : operation === 'coupon_disable' ? '禁用' : '更新'}卡券批次 ${batchId}`, expiresAt, manifest, { action: operation, accountId, batchId, productId: productRef, patch });
+    }
+    if (operation === 'order_deliver' || operation === 'order_retry' || operation === 'order_cancel') {
+      const orderNo = stringParam('orderNo');
+      if (!orderNo) throw new ServiceError(422, 'VALIDATION_FAILED', 'order operation requires orderNo');
+      const deliveryType = stringParam('deliveryType');
+      if (operation === 'order_deliver' && this.deps.orderDelivery) {
+        const preview = await this.deps.orderDelivery.preview({ adminId: input.adminId, accountId, orderNo, deliveryType: normalizeDeliveryType(deliveryType) });
+        if (preview.state !== 'ready') throw new ServiceError(422, 'DELIVERY_NOT_READY', 'order delivery preview is blocked', { preview });
+      }
+      const manifest = { action: operation, accountId, orderNo, deliveryType, trackingRef: stringParam('trackingRef'), redacted: true };
+      return this.plan(operation, '订单交付确认', `准备${operation === 'order_cancel' ? '取消' : operation === 'order_retry' ? '重试' : '执行'}订单 ${orderNo} 的交付动作`, expiresAt, manifest, { action: operation, accountId, orderNo, deliveryType, trackingRef: stringParam('trackingRef'), tradeText: stringParam('tradeText'), idempotencyKey: stringParam('idempotencyKey') });
+    }
+    if (operation === 'model_settings_update') {
+      const provider = stringParam('provider');
+      const model = stringParam('model');
+      const baseUrl = stringParam('baseUrl');
+      if (!provider || !model || !baseUrl) throw new ServiceError(422, 'VALIDATION_FAILED', 'model_settings_update requires provider, baseUrl and model');
+      const executionPlan = { action: operation, accountId, configId: stringParam('configId'), expectedVersion: toOptionalInt(parameters.expectedVersion), provider, model, baseUrl, role: stringParam('role') ?? 'primary', alias: stringParam('alias') ?? stringParam('role') ?? 'primary', label: stringParam('label'), wireApi: stringParam('wireApi'), timeoutMs: toOptionalInt(parameters.timeoutMs) ?? 60_000, apiKey: stringParam('apiKey') };
+      const manifest = { ...executionPlan, apiKey: undefined, apiKeyConfigured: Boolean(executionPlan.apiKey), redacted: true };
+      return this.plan(operation, '模型配置确认', `准备更新当前账号的 OpenAI-compatible 模型配置（${provider} / ${model}）`, expiresAt, manifest, executionPlan);
     }
     return undefined;
   }
@@ -309,45 +389,41 @@ export class WorkspaceCommandOrchestrator {
 
   async confirm(input: { plan: NativeWorkspaceWritePlan; run: RunRecord; step: StepRecord; adminId: string; requestId: string; traceId: string }): Promise<{ resultSummary: string; outputSummary: string; data?: Record<string, unknown> }> {
     const { action, accountId } = input.plan.manifest;
-    const fields = parseFields(input.run.instruction);
+    const execution = input.plan.executionPlan ?? input.plan.manifest;
     if (action === 'product_publish') {
       return this.confirmProductPublish(input, String(accountId ?? input.run.accountId));
     }
     if (action === 'product_update' || action === 'product_knowledge_update' || action === 'product_automation_update') {
       const productId = String(input.plan.manifest.productId);
       const product = await this.deps.products.get(input.adminId, productId);
-      const version = Number(input.plan.manifest.expectedConfigVersion ?? product.configVersion);
+      const version = Number(execution.expectedConfigVersion ?? input.plan.manifest.expectedConfigVersion ?? product.configVersion);
       if (action === 'product_update') {
-        const patch: Record<string, unknown> = {};
-        for (const key of ['title', 'description', 'categoryCode', 'defaultReplyTemplate', 'priceMinor']) if (fields[key] !== undefined) patch[key] = key === 'priceMinor' ? Number(fields[key]) : fields[key];
+        const patch: Record<string, unknown> = isRecord(execution.patch) ? execution.patch : {};
         if (Object.keys(patch).length === 0) throw new ServiceError(422, 'VALIDATION_FAILED', '商品变更至少需要一个可编辑字段');
         const updated = await this.deps.products.update({ adminId: input.adminId, productId, accountId: String(accountId), expectedConfigVersion: version, patch, requestId: input.requestId, traceId: input.traceId });
         return { resultSummary: `商品信息已更新（v${updated.configVersion}）`, outputSummary: `商品 ${updated.title} 信息已更新`, data: { productId, configVersion: updated.configVersion, changedFields: Object.keys(patch) } };
       }
       if (action === 'product_knowledge_update') {
-        const knowledgeBase = fields.knowledgeBase ?? fields.content;
+        const knowledgeBase = typeof execution.knowledgeBase === 'string' ? execution.knowledgeBase : undefined;
         if (!knowledgeBase) {
-          const generated = /优化/i.test(input.run.instruction)
+          const generated = execution.mode === 'optimize'
             ? await this.deps.productKnowledgeBase.optimize({ adminId: input.adminId, productId, accountId: String(accountId), expectedConfigVersion: version, requestId: input.requestId, traceId: input.traceId })
             : await this.deps.productKnowledgeBase.appendFromConversations({ adminId: input.adminId, productId, accountId: String(accountId), expectedConfigVersion: version, requestId: input.requestId, traceId: input.traceId });
-          return { resultSummary: generated.changed ? `商品知识库已${/优化/i.test(input.run.instruction) ? '优化' : '生成'}（v${generated.product.configVersion}）` : '商品知识库无需变更', outputSummary: generated.changed ? `商品 ${generated.product.title} 知识库已更新` : `商品 ${generated.product.title} 知识库内容未变化`, data: { productId, configVersion: generated.product.configVersion, changed: generated.changed, conversationCount: generated.conversationCount, messageCount: generated.messageCount } };
+          return { resultSummary: generated.changed ? `商品知识库已${execution.mode === 'optimize' ? '优化' : '生成'}（v${generated.product.configVersion}）` : '商品知识库无需变更', outputSummary: generated.changed ? `商品 ${generated.product.title} 知识库已更新` : `商品 ${generated.product.title} 知识库内容未变化`, data: { productId, configVersion: generated.product.configVersion, changed: generated.changed, conversationCount: generated.conversationCount, messageCount: generated.messageCount } };
         }
         const updated = await this.deps.products.update({ adminId: input.adminId, productId, accountId: String(accountId), expectedConfigVersion: version, patch: { knowledgeBase }, requestId: input.requestId, traceId: input.traceId });
         return { resultSummary: `商品知识库已更新（v${updated.configVersion}）`, outputSummary: `商品 ${updated.title} 知识库已更新`, data: { productId, configVersion: updated.configVersion } };
       }
-      const configRaw = fields.config ?? fields.automation;
-      let config: unknown;
-      try { config = configRaw ? JSON.parse(configRaw) : undefined; } catch { throw new ServiceError(422, 'VALIDATION_FAILED', '自动化规则必须是 JSON 对象'); }
-      config ??= input.plan.manifest.config;
+      let config: unknown = execution.config;
       if (!config) throw new ServiceError(422, 'VALIDATION_FAILED', '自动化规则配置不能为空');
-      const updated = await this.deps.productAutomation.update({ adminId: input.adminId, productId, expectedConfigVersion: Number(input.plan.manifest.expectedConfigVersion ?? 1), config, requestId: input.requestId, traceId: input.traceId });
+      const updated = await this.deps.productAutomation.update({ adminId: input.adminId, productId, expectedConfigVersion: Number(execution.expectedConfigVersion ?? input.plan.manifest.expectedConfigVersion ?? 1), config, requestId: input.requestId, traceId: input.traceId });
       return { resultSummary: `商品自动化规则已更新（v${updated.configVersion}）`, outputSummary: `商品 ${product.title} 自动化规则已更新`, data: { productId, configVersion: updated.configVersion, config: updated.config } };
     }
     if (typeof action === 'string' && action.startsWith('coupon_')) return this.confirmCoupon(input, action);
     if (action === 'order_deliver' || action === 'order_retry' || action === 'order_cancel') {
       const delivery = this.deps.orderDelivery;
       if (!delivery) throw new ServiceError(501, 'ORDER_DELIVERY_UNAVAILABLE', '订单交付能力未接入');
-      const orderNo = String(input.plan.manifest.orderNo ?? '');
+      const orderNo = String(execution.orderNo ?? input.plan.manifest.orderNo ?? '');
       const accountIdValue = String(accountId ?? input.run.accountId);
       if (!orderNo) throw new ServiceError(422, 'VALIDATION_FAILED', '订单号不能为空');
       if (action === 'order_cancel') {
@@ -355,13 +431,13 @@ export class WorkspaceCommandOrchestrator {
         return { resultSummary: `订单 ${orderNo} 交付已取消`, outputSummary: `订单 ${orderNo} 的交付动作已取消`, data: { record: cancelled } };
       }
       const result = action === 'order_retry'
-        ? await delivery.retry({ adminId: input.adminId, accountId: accountIdValue, orderNo, requestId: input.requestId, traceId: input.traceId, idempotencyKey: String(input.plan.manifest.idempotencyKey ?? `workspace-order:${accountIdValue}:${orderNo}:retry`) })
-        : await delivery.deliver({ adminId: input.adminId, accountId: accountIdValue, orderNo, deliveryType: input.plan.manifest.deliveryType as OrderDeliveryType | undefined, trackingRef: typeof input.plan.manifest.trackingRef === 'string' ? input.plan.manifest.trackingRef : undefined, tradeText: typeof input.plan.manifest.tradeText === 'string' ? input.plan.manifest.tradeText : undefined, idempotencyKey: String(input.plan.manifest.idempotencyKey ?? `workspace-order:${accountIdValue}:${orderNo}:deliver`), requestId: input.requestId, traceId: input.traceId });
+        ? await delivery.retry({ adminId: input.adminId, accountId: accountIdValue, orderNo, requestId: input.requestId, traceId: input.traceId, idempotencyKey: String(execution.idempotencyKey ?? `workspace-order:${accountIdValue}:${orderNo}:retry`) })
+        : await delivery.deliver({ adminId: input.adminId, accountId: accountIdValue, orderNo, deliveryType: execution.deliveryType as OrderDeliveryType | undefined, trackingRef: typeof execution.trackingRef === 'string' ? execution.trackingRef : undefined, tradeText: typeof execution.tradeText === 'string' ? execution.tradeText : undefined, idempotencyKey: String(execution.idempotencyKey ?? `workspace-order:${accountIdValue}:${orderNo}:deliver`), requestId: input.requestId, traceId: input.traceId });
       return { resultSummary: `订单 ${orderNo} 交付${result.record.status === 'succeeded' ? '成功' : '已记录为 ' + result.record.status}`, outputSummary: `订单 ${orderNo} 交付状态：${result.record.status}`, data: { record: result.record, order: result.order } };
     }
     if (action === 'model_settings_update') {
       const configId = typeof input.plan.manifest.configId === 'string' ? input.plan.manifest.configId : undefined;
-      const saved = await this.deps.openaiSettings.save({ adminId: input.adminId, accountId: String(accountId), configId, role: (String(input.plan.manifest.role ?? 'primary') as 'primary' | 'backup'), provider: String(input.plan.manifest.provider ?? ''), alias: String(input.plan.manifest.alias ?? input.plan.manifest.role ?? 'primary'), label: typeof input.plan.manifest.label === 'string' ? input.plan.manifest.label : undefined, baseUrl: String(input.plan.manifest.baseUrl ?? ''), model: String(input.plan.manifest.model ?? ''), wireApi: typeof input.plan.manifest.wireApi === 'string' ? input.plan.manifest.wireApi as never : undefined, timeoutMs: Number(input.plan.manifest.timeoutMs ?? 60_000), apiKey: fields.apiKey, expectedVersion: Number(input.plan.manifest.expectedVersion ?? 0) || undefined, requestId: input.requestId, traceId: input.traceId });
+      const saved = await this.deps.openaiSettings.save({ adminId: input.adminId, accountId: String(accountId), configId, role: (String(execution.role ?? 'primary') as 'primary' | 'backup'), provider: String(execution.provider ?? ''), alias: String(execution.alias ?? execution.role ?? 'primary'), label: typeof execution.label === 'string' ? execution.label : undefined, baseUrl: String(execution.baseUrl ?? ''), model: String(execution.model ?? ''), wireApi: typeof execution.wireApi === 'string' ? execution.wireApi as never : undefined, timeoutMs: Number(execution.timeoutMs ?? 60_000), apiKey: typeof execution.apiKey === 'string' ? execution.apiKey : undefined, expectedVersion: Number(execution.expectedVersion ?? 0) || undefined, requestId: input.requestId, traceId: input.traceId });
       return { resultSummary: `模型配置已保存（${saved.provider} / ${saved.model}）`, outputSummary: `模型配置已保存，API Key ${saved.apiKeyHint ?? '已配置'}`, data: { id: saved.id, provider: saved.provider, model: saved.model, apiKeyHint: saved.apiKeyHint } };
     }
     throw new ServiceError(422, 'VALIDATION_FAILED', `unsupported workspace action: ${String(action)}`);
@@ -421,9 +497,10 @@ export class WorkspaceCommandOrchestrator {
   }
 
   private async confirmCoupon(input: { plan: NativeWorkspaceWritePlan; run: RunRecord; step: StepRecord; adminId: string; requestId: string; traceId: string }, action: string) {
-    const batchId = String(input.plan.manifest.batchId);
+    const execution = input.plan.executionPlan ?? input.plan.manifest;
+    const batchId = String(execution.batchId ?? input.plan.manifest.batchId ?? '');
     if (action === 'coupon_bind' || action === 'coupon_unbind') {
-      const productId = String(input.plan.manifest.productId ?? '');
+      const productId = String(execution.productId ?? input.plan.manifest.productId ?? '');
       if (!productId) throw new ServiceError(422, 'VALIDATION_FAILED', 'productId is required');
       const result = action === 'coupon_bind' ? await this.deps.coupons.bind({ adminId: input.adminId, batchId, productId, requestId: input.requestId, traceId: input.traceId }) : await this.deps.coupons.unbind({ adminId: input.adminId, batchId, productId, requestId: input.requestId, traceId: input.traceId });
       return { resultSummary: action === 'coupon_bind' ? '卡券已关联商品' : '卡券已解除商品关联', outputSummary: action === 'coupon_bind' ? '卡券商品关联已完成' : '卡券商品解绑已完成', data: result };
@@ -444,7 +521,7 @@ export class WorkspaceCommandOrchestrator {
       if (contents.length) await this.deps.coupons.importItems({ adminId: input.adminId, batchId: String((created as Record<string, unknown>).batchId ?? ''), contents, requestId: input.requestId, traceId: input.traceId });
       return { resultSummary: `卡券批次已复制为 ${String((created as Record<string, unknown>).batchId ?? '')}`, outputSummary: '卡券复制完成', data: { created, copiedItemCount: contents.length } };
     }
-    const patch = (input.plan.manifest.patch ?? {}) as Record<string, unknown>;
+    const patch = (execution.patch ?? input.plan.manifest.patch ?? {}) as Record<string, unknown>;
     const result = await this.deps.coupons.update({ adminId: input.adminId, batchId, patch: { label: typeof patch.label === 'string' ? patch.label : undefined, purpose: typeof patch.purpose === 'string' ? patch.purpose : undefined, status: typeof patch.status === 'string' ? patch.status as never : undefined }, requestId: input.requestId, traceId: input.traceId });
     return { resultSummary: '卡券批次已更新', outputSummary: '卡券批次更新完成', data: result };
   }
@@ -512,8 +589,8 @@ export class WorkspaceCommandOrchestrator {
     return { kind: 'orders', title: '订单交付预览', summary: preview.state === 'ready' ? `订单 ${preview.orderNo} 可以进入交付确认` : `订单 ${preview.orderNo} 暂不能交付`, content: preview.state === 'ready' ? `订单 ${preview.orderNo} 已通过支付、售后、商品与交付配置检查，可继续发货确认。` : `订单 ${preview.orderNo} 暂不能发货：${preview.checks.filter((check) => check.status === 'blocked').map((check) => check.message).join('；')}`, data: { preview } };
   }
 
-  private plan(action: string, title: string, summary: string, expiresAt: string, manifest: Record<string, unknown>): NativeWorkspaceWritePlan {
-    return { kind: action as NativeWorkspaceWritePlan['kind'], action: action as NativeWorkspaceWritePlan['action'], policyRef: `workspace.${action}.confirm`, title, summary, content: `已生成${title}。\n${summary}\n确认后将调用现有领域服务并写入审计。`, expiresAt, manifest: { ...manifest, action, requiresLocalExecution: true, redacted: true } };
+  private plan(action: string, title: string, summary: string, expiresAt: string, manifest: Record<string, unknown>, executionPlan: Record<string, unknown> = manifest): NativeWorkspaceWritePlan {
+    return { kind: action as NativeWorkspaceWritePlan['kind'], action: action as NativeWorkspaceWritePlan['action'], policyRef: `workspace.${action}.confirm`, title, summary, content: `已生成${title}。\n${summary}\n确认后将调用现有领域服务并写入审计。`, expiresAt, manifest: { ...manifest, action, requiresLocalExecution: true, redacted: true }, executionPlan: { ...executionPlan, action } };
   }
 }
 
@@ -602,6 +679,8 @@ function requiresWorkspaceProductSearch(instruction: string): boolean {
 function parseRange(input: string): 'today' | '3d' | '7d' | '1m' | undefined { if (/今天|今日/.test(input)) return 'today'; if (/3天|三天/.test(input)) return '3d'; if (/月|30天/.test(input)) return '1m'; if (/7天|一周|本周/.test(input)) return '7d'; return undefined; }
 function formatDashboard(snapshot: DashboardSnapshot): string { return [`销售额 ${snapshot.totalSales.toFixed(2)}，选定区间销售额 ${snapshot.selectedRangeSales.toFixed(2)}`, `今日订单金额 ${snapshot.todayOrderAmount.toFixed(2)}，自动处理率 ${snapshot.autoProcessRate.toFixed(1)}%，待人工 ${snapshot.pendingManualCount}`, snapshot.riskTodos.length ? `风险待办：${snapshot.riskTodos.slice(0, 5).map((item) => item.title).join('；')}` : '当前无高优先级风险待办'].join('\n'); }
 function formatMoney(valueMinor?: number): string { return typeof valueMinor === 'number' && Number.isFinite(valueMinor) ? `¥${(valueMinor / 100).toFixed(2)}` : '价格未设置'; }
+function productStatusLabel(status: string): string { return ({ draft: '草稿', ready: '待发布', publishing: '发布中', published: '已发布', failed: '发布失败', archived: '已归档' } as Record<string, string>)[status] ?? status; }
+function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
 function recommendations(snapshot: DashboardSnapshot): string[] { const items: string[] = []; if (snapshot.pendingManualCount > 0) items.push('优先处理待人工队列，避免已付款订单延迟交付。'); if (snapshot.autoProcessRate < 80) items.push('检查商品交付配置与自动化规则，提升自动处理率。'); if (snapshot.health.some((item) => item.tone === 'danger' || item.tone === 'warn')) items.push('先修复账号连接或卡券配置告警，再扩大自动化范围。'); if (items.length === 0) items.push('当前指标稳定，可继续观察订单趋势并维护知识库。'); return items; }
 function formatAgentDetail(detail: { run: { id: string; status: string; stage?: string; decision?: string; failureCode?: string }; events?: Array<{ eventType: string; createdAt?: string }> }): string { const run = detail.run; const events = detail.events ?? []; return [`Run ${run.id} · 状态 ${run.status} · 阶段 ${run.stage ?? 'unknown'} · 决策 ${run.decision ?? 'unknown'}`, `事件 ${events.length} 条${events.length ? `：${events.slice(-6).map((event) => event.eventType).join('、')}` : ''}`, run.failureCode ? `失败原因：${run.failureCode}` : '当前未记录失败原因'].join('\n'); }
 function normalizePostageMode(value: unknown): ProductPostageMode {

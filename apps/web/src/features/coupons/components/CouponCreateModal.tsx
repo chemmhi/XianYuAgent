@@ -36,10 +36,10 @@ export function validateCouponForm(form: CouponCreateFormState, mode: 'create' |
   if (!form.accountId.trim()) return '当前没有可用账号，请先选择或创建一个账号。';
   if (!form.purpose) return '请选择卡券类型。';
   if (form.purpose === 'api' && !form.apiUrl.trim()) return '请输入API地址。';
-  if (mode === 'create' && form.purpose === 'text' && !form.textContent.trim()) return '请输入固定文字内容。';
-  if (mode === 'create' && form.purpose === 'data' && !form.dataContent.trim()) return '请输入批量数据。';
+  if (form.purpose === 'text' && !form.textContent.trim()) return '请输入固定文字内容。';
+  if (form.purpose === 'data' && !form.dataContent.trim()) return '请输入批量数据。';
   if (form.multiSpec && (!form.specName.trim() || !form.specValue.trim())) return '多规格卡券必须填写规格名称和规格值。';
-  if (mode === 'create' && form.purpose !== 'image' && form.description.trim() && !form.description.includes('{DELIVERY_CONTENT}')) return '非图片类型卡券的备注中必须包含 {DELIVERY_CONTENT} 变量。';
+  if (form.purpose !== 'image' && form.description.trim() && !form.description.includes('{DELIVERY_CONTENT}')) return '非图片类型卡券的备注中必须包含 {DELIVERY_CONTENT} 变量。';
   if (!parseJson(form.apiHeaders)) return '请求头格式错误，请输入有效的JSON。';
   if (!parseJson(form.apiParams)) return '请求参数格式错误，请输入有效的JSON。';
   if (form.minPrice.trim()) { const minPrice = Number(form.minPrice.trim()); if (!Number.isFinite(minPrice) || minPrice <= 0) return '最低售价必须是大于0的数字。'; if (!/^\d+(\.\d{1,2})?$/.test(form.minPrice.trim())) return '最低售价最多保留两位小数。'; }

@@ -74,6 +74,20 @@ test('routes natural-language coupon creation without asking for a batch id', as
   assert.equal(plan?.manifest.redacted, true);
 });
 
+test('workspace_prepare_write accepts canonical coupon parameters and preserves one execution plan', async () => {
+  const commands = orchestrator();
+  const result = await commands.executeModelTool('workspace_prepare_write', {
+    operation: 'coupon_create',
+    parameters: { label: '会员资料包', purpose: 'text', textContent: '权益内容' },
+  }, input);
+  assert.equal(result.plan?.manifest.label, '会员资料包');
+  assert.equal(result.plan?.manifest.configured, true);
+  assert.deepEqual(result.plan?.executionPlan, {
+    action: 'coupon_create', accountId: input.accountId, label: '会员资料包', purpose: 'text', metadata: { textContent: '权益内容' }, items: [],
+  });
+  assert.equal(result.content.includes('权益内容'), false);
+});
+
 test('resolves numeric external product refs and builds a disable-all automation patch', async () => {
   const product = { id: 'product-108244', accountId: 'account-1', externalProductRef: '1082449333831', title: '视频下载及文案提取源码，包教包会', configVersion: 4 };
   let updatedConfig: unknown;

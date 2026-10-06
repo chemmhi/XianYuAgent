@@ -11,6 +11,7 @@ export async function persistWorkspaceConfirmation(input: { store: Store; adminI
     action: input.plan.action,
     policyRef: input.plan.policyRef,
     manifest: input.plan.manifest,
+    executionPlan: input.plan.executionPlan,
     expiresAt: input.plan.expiresAt,
   });
   const message = await input.store.appendWorkspaceMessage({ adminId: input.adminId, sessionId: input.sessionId, runId: input.run.id, type: 'tool_event', content: input.plan.content, summary: input.plan.summary });

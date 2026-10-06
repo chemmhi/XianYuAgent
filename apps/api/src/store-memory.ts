@@ -82,7 +82,7 @@ function cloneOutbox(record: AutoReplyOutboxRecord): AutoReplyOutboxRecord {
 }
 
 function cloneWorkspaceConfirmation(record: WorkspaceConfirmationRecord): WorkspaceConfirmationRecord {
-  return { ...record, manifest: { ...record.manifest } };
+  return { ...record, manifest: { ...record.manifest }, executionPlan: { ...record.executionPlan } };
 }
 
 function conversationSortKey(conversation: ConversationRecord): string { return conversation.lastMessageAt ?? conversation.updatedAt; }
@@ -1735,12 +1735,12 @@ export class MemoryStore implements Store {
     return messages.slice(-Math.max(1, Math.min(limit, 500))).map((message) => ({ ...message }));
   }
 
-  async createWorkspaceConfirmation(input: { adminId: string; runId: string; stepId: string; accountId: string; requestedBy: string; action: WorkspaceConfirmationRecord['action']; policyRef: string; manifest: Record<string, unknown>; expiresAt: string }): Promise<WorkspaceConfirmationRecord> {
+  async createWorkspaceConfirmation(input: { adminId: string; runId: string; stepId: string; accountId: string; requestedBy: string; action: WorkspaceConfirmationRecord['action']; policyRef: string; manifest: Record<string, unknown>; executionPlan: Record<string, unknown>; expiresAt: string }): Promise<WorkspaceConfirmationRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const existing = [...this.workspaceConfirmations.values()].find((item) => item.runId === input.runId && item.status === 'active');
     if (existing) return cloneWorkspaceConfirmation(existing);
     const now = new Date().toISOString();
-    const record: WorkspaceConfirmationRecord = { id: createId(), runId: input.runId, stepId: input.stepId, accountId: input.accountId, requestedBy: input.requestedBy, action: input.action, policyRef: input.policyRef, manifest: { ...input.manifest }, status: 'active', version: 1, expiresAt: input.expiresAt, createdAt: now, updatedAt: now };
+    const record: WorkspaceConfirmationRecord = { id: createId(), runId: input.runId, stepId: input.stepId, accountId: input.accountId, requestedBy: input.requestedBy, action: input.action, policyRef: input.policyRef, manifest: { ...input.manifest }, executionPlan: { ...input.executionPlan }, status: 'active', version: 1, expiresAt: input.expiresAt, createdAt: now, updatedAt: now };
     this.workspaceConfirmations.set(record.id, record);
     return cloneWorkspaceConfirmation(record);
   }
