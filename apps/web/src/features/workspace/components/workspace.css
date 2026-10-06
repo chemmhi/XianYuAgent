@@ -211,7 +211,7 @@
 .workspace-topbar-actions { display: flex; align-items: center; gap: 14px; }
 .workspace-topbar-search { min-width: 228px; padding: 8px 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: #9CA3AF; font-size: var(--font-size-body-compact); line-height: 1.5; }
 .workspace-topbar-admin { color: var(--text); font-size: var(--font-size-body-compact); line-height: 1.5; font-weight: 700; }
-.workspace-page-body { padding: 22px 28px 28px; }
+.workspace-page-body { padding: 22px 28px; }
 .workspace-page-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
 .workspace-page-title h1 { margin: 0 0 5px; font-size: 24px; line-height: 1.2; }
 .workspace-page-title p { margin: 0; color: var(--sub); font-size: 12px; line-height: 1.55; }
@@ -247,7 +247,7 @@
 
 /* Workspace body starts directly with the two-column work area. */
 .workspace-surface { min-height: 100%; }
-.workspace-page-body { padding: 16px 28px 28px; }
+.workspace-page-body { padding: 22px 28px; }
 .workspace-layout { min-height: 0; }
 
 /* Match the design's quiet session metadata: title + right-aligned time, no mystery block. */
