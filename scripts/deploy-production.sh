@@ -29,6 +29,17 @@ wait_for_status() {
   fail "等待 $url 返回 $expected 超时，最后状态为 $status"
 }
 
+wait_for_postgres() {
+  local attempt
+  for ((attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1)); do
+    if docker compose -f "$COMPOSE_FILE" exec -T postgres pg_isready >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  fail "等待 PostgreSQL 接受连接超时"
+}
+
 cd "$APP_DIR" || fail "找不到部署目录: $APP_DIR"
 [[ -f "$COMPOSE_FILE" ]] || fail "找不到 Compose 文件: $APP_DIR/$COMPOSE_FILE"
 
@@ -46,8 +57,14 @@ sudo grep -Eq "proxy_pass http://127\\.0\\.0\\.1:$UPSTREAM_PORT([;[:space:]]|$)"
   || fail "Nginx 未反代到 127.0.0.1:$UPSTREAM_PORT，拒绝继续部署"
 
 # 不使用 down -v：保留 PostgreSQL、Redis、MinIO 和 browser_data 数据卷。
+# 先启动基础设施并执行迁移，再启动 API/Worker，避免新代码先于已有
+# PostgreSQL volume 的 schema 对外提供确认写入。
 docker compose -f "$COMPOSE_FILE" up -d --build --force-recreate \
-  postgres redis object-storage api worker
+  postgres redis object-storage
+wait_for_postgres
+docker compose -f "$COMPOSE_FILE" build api worker
+docker compose -f "$COMPOSE_FILE" run --rm --no-deps api node scripts/migrate.mjs
+docker compose -f "$COMPOSE_FILE" up -d --force-recreate api worker
 
 wait_for_status "http://127.0.0.1:$UPSTREAM_PORT/healthz" "200"
 wait_for_status "http://127.0.0.1:$UPSTREAM_PORT/readyz" "200"

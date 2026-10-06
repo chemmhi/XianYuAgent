@@ -528,7 +528,7 @@ export class PiSkillManager {
     if (!item.entry) throw new PiSkillError('SKILL_ENTRYPOINT_MISSING', `skill ${input.skillId} has no executable entrypoint`);
     const command = input.command.trim();
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,80}$/.test(command)) throw new PiSkillError('SKILL_COMMAND_INVALID', 'skill command contains unsupported characters');
-    const args = (input.args ?? []).map((arg) => String(arg)).slice(0, 64);
+    const args = normalizeSkillArgs(id, item.canonicalSkillId, command, input.args ?? []);
     const argv = [...args];
     if (input.sessionInput && !argv.includes('--session-input')) argv.push('--session-input', input.sessionInput);
     if (input.sessionId && !argv.includes('--session-id')) argv.push('--session-id', input.sessionId);
@@ -769,6 +769,37 @@ export class PiSkillManager {
     await writeFile(temp, JSON.stringify(state, null, 2), 'utf8');
     await rename(temp, target);
   }
+}
+
+/**
+ * Normalize a small set of documented CLI aliases at the adapter boundary.
+ *
+ * Quark Drive's `share` command accepts FIDs as positional arguments. Older
+ * model turns occasionally emitted `--fid` or `--fid-list`, which the CLI
+ * rejects with `unknown option`. Converting those aliases here keeps the
+ * runtime compatible without changing the Skill bundle or accepting arbitrary
+ * shell-like arguments.
+ */
+function normalizeSkillArgs(skillId: string, canonicalSkillId: string | undefined, command: string, args: readonly string[]): string[] {
+  const normalized = args.map((arg) => String(arg)).slice(0, 64);
+  const isQuarkDrive = skillId === 'quarkclouddrive'
+    || canonicalSkillId === 'quarkclouddrive_816db00f'
+    || skillId === 'quarkclouddrive_816db00f';
+  if (!isQuarkDrive || command.trim().toLowerCase() !== 'share') return normalized;
+
+  const positional: string[] = [];
+  const options: string[] = [];
+  for (let index = 0; index < normalized.length; index += 1) {
+    const value = normalized[index];
+    if (value === '--fid' || value === '--fid-list') {
+      const fid = normalized[index + 1];
+      if (fid && !fid.startsWith('-')) positional.push(fid);
+      if (fid !== undefined) index += 1;
+      continue;
+    }
+    options.push(value);
+  }
+  return [...positional, ...options];
 }
 
 function positiveInteger(value: number | undefined, fallback: number): number { return Number.isInteger(value) && value! > 0 ? value! : fallback; }

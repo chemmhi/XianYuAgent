@@ -113,6 +113,34 @@ test('passes the original Workspace input and stable session id to every Skill c
   }
 });
 
+test('normalizes legacy Quark share FID flags to positional arguments', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'pi-skill-share-args-'));
+  try {
+    const skillRoot = join(fixtureRoot, 'quarkclouddrive');
+    await mkdir(join(skillRoot, 'scripts'), { recursive: true });
+    await writeFile(join(skillRoot, 'SKILL.md'), '---\nname: quarkclouddrive\nmetadata.canonicalSkillId: quarkclouddrive_816db00f\nversion: 1.0.22\n---\n');
+    await writeFile(join(skillRoot, 'scripts', 'main.cjs'), "console.log(JSON.stringify({ code: 0, args: process.argv.slice(2) }));");
+    const archive = join(fixtureRoot, 'quarkclouddrive.zip');
+    await execFile('tar', ['-a', '-c', '-f', archive, '-C', fixtureRoot, 'quarkclouddrive']);
+
+    const manager = new PiSkillManager({ rootDir: join(fixtureRoot, 'installed') });
+    const installed = await manager.install({ adminId: 'admin/share', source: archive });
+    const result = await manager.execute({
+      adminId: 'admin/share',
+      skillId: installed.canonicalSkillId ?? installed.id,
+      command: 'share',
+      args: ['--fid-list', 'fid-a', '--title', '03 PPT Master', '--fid', 'fid-b', '--url-type', '1'],
+    });
+    assert.equal(result.code, 0);
+    assert.deepEqual(result.parsed, {
+      code: 0,
+      args: ['share', 'fid-a', 'fid-b', '--title', '03 PPT Master', '--url-type', '1'],
+    });
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test('handles the install plus authorization instruction without exposing the token in output', async () => {
   const fixtureRoot = await mkdtemp(join(tmpdir(), 'pi-skill-instruction-'));
   const skillRoot = join(fixtureRoot, 'quarkclouddrive');
