@@ -453,4 +453,5 @@
 - Fixed Pi Skill session propagation by appending the original Workspace instruction and stable session id as --session-input and --session-id for every Skill command. This prevents Quark Drive browse commands from losing session context and hanging in repeated tool execution.
 - Added regressions for the exact product-title cancellation flow and Skill browse --all argument propagation.
 - Verified: targeted API tests 25/25, Workspace PostgreSQL Chrome/CDP E2E, API/Web typecheck and builds, and git diff --check passed. The existing ChatGPT-specific Workspace Pi E2E still reports a missing persisted reasoning summary and is unrelated to this slice.
-- Current slice status: READY_FOR_MERGE; no external Xianyu mutation acceptance is claimed.
+- Merged to main as df3ce90 (no-ff); no external Xianyu mutation acceptance is claimed.
+- Post-merge verification: targeted API tests 25/25, Workspace PostgreSQL Chrome/CDP E2E, typecheck, and build passed on main.
