@@ -8,7 +8,7 @@ import type { AgentSessionRecord, RunEventRecord, RunRecord, RunStatus, StepReco
 import { cloneCouponReservation, normalizeCouponReservationInput, normalizeLeaseSeconds, reservationFingerprint } from './coupon-reservation.js';
 import { validatePersistedAutoReplyRepairPolicyBundle } from './auto-reply-repair-config.js';
 import { readAutoReplyProductDescription, readAutoReplyProductMetrics } from './auto-reply-product-metrics.js';
-import { normalizeProductSearchTerms, normalizeProductSearchText, productSearchScore, splitProductSearchTerms, type AutoReplyProductSearchMode } from './auto-reply-product-search.js';
+import { normalizeProductCatalogSearchText, normalizeProductSearchTerms, normalizeProductSearchText, productSearchScore, splitProductSearchTerms, type AutoReplyProductSearchMode } from './auto-reply-product-search.js';
 import { splitDataContent } from './coupon-delivery.js';
 
 function meaningfulOrderTitle(value: string | undefined, references: Array<string | undefined>): string | undefined {
@@ -225,12 +225,13 @@ export class MemoryStore implements Store {
   async listProducts(adminId: string, query: ProductListQuery): Promise<ProductListResult> {
     const scopedAccountIds = new Set((await this.listScopes(adminId)).map((scope) => scope.accountId));
     const normalizedKeyword = query.keyword?.trim().toLowerCase();
+    const normalizedCatalogKeyword = normalizeProductCatalogSearchText(query.keyword);
     const filtered = [...this.products.values()].filter((product) => {
       if (!scopedAccountIds.has(product.accountId)) return false;
       if (query.accountId && product.accountId !== query.accountId) return false;
       if (query.status && product.status !== query.status) return false;
       const description = readAutoReplyProductDescription(product.attributes, product.description) ?? '';
-      if (normalizedKeyword && ![product.title, product.externalProductRef ?? '', description].some((value) => value.toLowerCase().includes(normalizedKeyword))) return false;
+      if (normalizedKeyword && ![product.title, product.externalProductRef ?? '', description].some((value) => value.toLowerCase().includes(normalizedKeyword) || (normalizedCatalogKeyword && normalizeProductCatalogSearchText(value).includes(normalizedCatalogKeyword)))) return false;
       return true;
     });
     const sortBy = query.sortBy ?? 'xianyuOrder';

@@ -10,6 +10,7 @@ import type { ProductKnowledgeBaseService } from './product-knowledge-base.js';
 import type { ProductPublishService, ProductPublishImageInput, ProductPostageMode } from './product-publish.js';
 import type { ObjectStorage } from './object-storage.js';
 import type { Store, RunRecord, StepRecord } from './domain.js';
+import { normalizeProductCatalogSearchText } from './auto-reply-product-search.js';
 import type { OrderDeliveryService } from './order-delivery.js';
 import { detectNativeWorkspaceRead, executeNativeWorkspaceRead, type NativeWorkspaceReadResult } from './workspace-native-read.js';
 import { prepareNativeWorkspaceWrite, type NativeWorkspaceWritePlan } from './workspace-native-write.js';
@@ -85,7 +86,7 @@ export class WorkspaceCommandOrchestrator {
         type: 'function',
         function: {
           name: 'workspace_prepare_write',
-          description: 'Prepare a controlled Workspace mutation. Prefer structured arguments: operation plus parameters. The model must first resolve the operation contract and required API parameters, then provide canonical values. coupon_create maps to CouponService.create(accountId,label,purpose,metadata); data mode then calls CouponService.importItems(batchId,contents). It requires label, purpose(text|data|api|image), and textContent/dataContent/apiConfig/imageUrls. product_publish requires productId; product_update requires productId and patch; product_knowledge_update requires productId plus knowledgeBase or mode; product_automation_update requires productId and config; order_deliver/order_retry/order_cancel require orderNo; model_settings_update requires provider, baseUrl, model and apiKey only when changing credentials; agent_settings_update requires patch. instruction remains a compatibility fallback. This creates a confirmation plan and never executes the mutation before the user confirms it.',
+          description: 'Prepare a controlled Workspace mutation. Prefer structured arguments: operation plus parameters. The model must first resolve the operation contract and required API parameters, then provide canonical values. coupon_create maps to CouponService.create(accountId,label,purpose,metadata); data mode then calls CouponService.importItems(batchId,contents). It requires label, purpose(text|data|api|image), and textContent/dataContent/apiConfig/imageUrls. product_publish requires productId; product_update requires productId and patch; product_knowledge_update requires productId plus knowledgeBase or mode; product_automation_update requires productId and a canonical partial config containing one or more of paidAutoDelivery, unpaidAutoReprice, reviewGift, reviewReminder. For coupon-backed rules, resolve the coupon batch first and pass couponBatchIds, never a human label. order_deliver/order_retry/order_cancel require orderNo; model_settings_update requires provider, baseUrl, model and apiKey only when changing credentials; agent_settings_update requires patch. instruction remains a compatibility fallback. This creates a confirmation plan and never executes the mutation before the user confirms it.',
           parameters: {
             type: 'object',
             additionalProperties: false,
@@ -103,7 +104,7 @@ export class WorkspaceCommandOrchestrator {
         type: 'function',
         function: {
           name: 'workspace_product_search',
-          description: 'Search one account-scoped product by exact name or external product number. Use this for product-specific lookups and return the matching product identity; do not call a broad product-list read for a named product.',
+          description: 'Search one account-scoped product by title or external product number. Matching tolerates spacing and punctuation differences and returns candidate product identities. Use this for product-specific lookups; do not call a broad product-list read for a named product.',
           parameters: {
             type: 'object',
             additionalProperties: false,
@@ -171,7 +172,7 @@ export class WorkspaceCommandOrchestrator {
       return this.plan(action, action === 'order_cancel' ? '取消订单交付确认' : action === 'order_retry' ? '重试订单交付确认' : '订单发货确认', `准备${action === 'order_cancel' ? '取消' : action === 'order_retry' ? '重试' : '执行'}订单 ${orderNo} 的交付动作`, expiresAt, { action, accountId, orderNo, deliveryType, trackingRef: fields.trackingRef, tradeText: fields.tradeText, idempotencyKey: fields.idempotencyKey ?? `workspace-order:${accountId}:${orderNo}:${action}`, redacted: true });
     }
 
-    if (kind === 'products' && /(知识库|自动化|规则|编辑商品|修改商品)/i.test(input.instruction)) {
+    if (kind === 'products' && /(知识库|自动化|自动发货|规则|编辑商品|修改商品)/i.test(input.instruction)) {
       const productId = await this.resolveProductId(input, fields.productId);
       const action = /(自动化|规则|发货|改价|赠品|评价)/i.test(input.instruction) ? 'product_automation_update' : /知识库|问答|客服知识/i.test(input.instruction) ? 'product_knowledge_update' : 'product_update';
       const disablingAutomation = action === 'product_automation_update' && /(取消|关闭|停用|禁用)/i.test(input.instruction);
@@ -252,8 +253,10 @@ export class WorkspaceCommandOrchestrator {
     if (operation === 'product_automation_update') {
       if (!productId || !isRecord(parameters.config)) throw new ServiceError(422, 'VALIDATION_FAILED', 'product_automation_update requires productId and config');
       const current = await this.deps.productAutomation.get(input.adminId, productId);
-      const manifest = { action: operation, accountId, productId, expectedConfigVersion: current.configVersion, fields: Object.keys(parameters.config as Record<string, unknown>), redacted: true };
-      return this.plan(operation, '商品自动化规则确认', `准备更新商品自动化规则（商品 ${productId}）`, expiresAt, manifest, { action: operation, accountId, productId, expectedConfigVersion: current.configVersion, config: parameters.config });
+      const config = parameters.config as Record<string, unknown>;
+      validateAutomationConfig(config);
+      const manifest = { action: operation, accountId, productId, expectedConfigVersion: current.configVersion, fields: Object.keys(config), redacted: true };
+      return this.plan(operation, '商品自动化规则确认', `准备更新商品自动化规则（商品 ${productId}）`, expiresAt, manifest, { action: operation, accountId, productId, expectedConfigVersion: current.configVersion, config });
     }
     if (operation.startsWith('coupon_')) {
       const batchId = stringParam('batchId');
@@ -556,7 +559,9 @@ export class WorkspaceCommandOrchestrator {
     }
     const listed = await productService.list(input.adminId, { accountId: input.accountId, keyword: productRef, page: 1, pageSize: 20 });
     const normalizedRef = productRef.trim().toLocaleLowerCase();
+    const normalizedCatalogRef = normalizeProductCatalogSearchText(productRef);
     const matched = listed.items.find((product) => product.title.trim().toLocaleLowerCase() === normalizedRef)
+      ?? listed.items.find((product) => normalizeProductCatalogSearchText(product.title) === normalizedCatalogRef)
       ?? listed.items.find((product) => product.id === productRef || product.externalProductRef === productRef)
       ?? (extractedTitle === productRef && listed.items.length === 1 ? listed.items[0] : undefined);
     if (!matched) throw new ServiceError(404, 'NOT_FOUND', `未找到商品 ${productRef}`);
@@ -566,7 +571,12 @@ export class WorkspaceCommandOrchestrator {
   private async searchProducts(input: WorkspaceCommandInput, query: string): Promise<Awaited<ReturnType<ProductService['list']>>> {
     const productService = this.deps.products as ProductService & { list?: ProductService['list'] };
     if (typeof productService.list !== 'function') throw new ServiceError(501, 'WORKSPACE_PRODUCT_SEARCH_UNAVAILABLE', '商品搜索能力未接入');
-    return productService.list(input.adminId, { accountId: input.accountId, keyword: query, page: 1, pageSize: 20, sortBy: 'updatedAt', sortOrder: 'desc' });
+    const direct = await productService.list(input.adminId, { accountId: input.accountId, keyword: query, page: 1, pageSize: 20, sortBy: 'updatedAt', sortOrder: 'desc' });
+    if (direct.items.length > 0 || direct.total > 0) return direct;
+    const catalog = await productService.list(input.adminId, { accountId: input.accountId, page: 1, pageSize: 100, sortBy: 'updatedAt', sortOrder: 'desc' });
+    const normalizedQuery = normalizeProductCatalogSearchText(query);
+    const items = catalog.items.filter((product) => [product.title, product.externalProductRef ?? '', product.description ?? ''].some((value) => normalizeProductCatalogSearchText(value).includes(normalizedQuery)));
+    return { ...catalog, items, total: items.length, totalPages: Math.max(1, Math.ceil(items.length / Math.max(1, catalog.pageSize))) };
   }
 
   private async currentProductVersion(adminId: string, productId: string): Promise<number> {
@@ -660,7 +670,7 @@ function extractExternalProductRef(input: string): string | undefined { return i
 function extractOrderNo(input: string): string | undefined { return input.match(/(?:订单号|order(?:\s*no)?)\s*[:：]?\s*([A-Za-z0-9_-]{4,})/i)?.[1] ?? input.match(/\b(XY|ORD|ORDER)[A-Za-z0-9_-]{3,}\b/i)?.[0]; }
 function extractProductTitle(input: string): string | undefined {
   const named = input.match(/(?:商品名称|商品标题|标题)\s*[:：=]\s*[“"']?([^“”"'\n;；]+?)[”"']?(?=\s*(?:这个商品|的自动化|自动化规则|[;；]|$))/i)?.[1];
-  const contextual = input.match(/(?:^|[\s,，])(?:帮我|请|麻烦|我要)?\s*(?:取消|关闭|停用|禁用|更新|修改|配置|设置|启用|查看|查询|搜索|查找)?\s*([^\n]+?)\s*这个商品(?:的)?\s*(?:自动化规则|自动化|规则)/i)?.[1];
+  const contextual = input.match(/(?:^|[\s,，])(?:帮我|请|麻烦|我要)?\s*(?:启动|开始|打开|开启|取消|关闭|停用|禁用|更新|修改|配置|设置|启用|查看|查询|搜索|查找)?\s*([^\n]+?)\s*这个商品(?:的)?\s*(?:自动发货|自动化规则|自动化|规则)/i)?.[1];
   const value = (named ?? contextual)?.replace(/^[“"']|[”"']$/g, '').replace(/^(?:商品名称|商品标题|标题)\s*[:：=]\s*/i, '').replace(/[，,；;:：]+$/g, '').trim();
   return value || undefined;
 }
@@ -711,6 +721,15 @@ function formatAutomationPersistedResult(result: { product: { id: string; extern
 }
 function safeFieldNames(fields: Record<string, string>): string[] { return Object.keys(fields).filter((key) => key !== 'content' && key !== 'knowledgeBase' && key !== 'apiKey'); }
 function productSearchContent(items: ProductRecord[], total: number): string { return items.length ? [`匹配到 ${total} 个商品：`, ...items.map((item, index) => `${index + 1}. ${item.title} · ${item.externalProductRef ?? item.id} · ${item.status}`)].join('\n') : '未匹配到商品。'; }
+function validateAutomationConfig(config: Record<string, unknown>): void {
+  const keys = ['paidAutoDelivery', 'unpaidAutoReprice', 'reviewGift', 'reviewReminder'];
+  if (!keys.some((key) => Object.prototype.hasOwnProperty.call(config, key))) throw new ServiceError(422, 'VALIDATION_FAILED', 'product_automation_update config must use canonical rule keys: paidAutoDelivery, unpaidAutoReprice, reviewGift, or reviewReminder');
+  for (const key of ['paidAutoDelivery', 'reviewGift']) {
+    const rule = config[key];
+    if (!isRecord(rule)) continue;
+    if (Object.prototype.hasOwnProperty.call(rule, 'couponName') || Object.prototype.hasOwnProperty.call(rule, 'couponId') || Object.prototype.hasOwnProperty.call(rule, 'couponBatchId')) throw new ServiceError(422, 'VALIDATION_FAILED', `${key} requires couponBatchIds from a prior coupon lookup; human coupon labels are not accepted`);
+  }
+}
 function stripNegatedWorkspaceClauses(instruction: string): string {
   // Model-generated read requests often repeat the write vocabulary in an
   // explicit safety clause (for example, “不要执行任何订单更新”). Those
@@ -720,12 +739,16 @@ function stripNegatedWorkspaceClauses(instruction: string): string {
 }
 
 function requiresWorkspaceWrite(instruction: string): boolean {
-  const readNormalized = stripNegatedWorkspaceClauses(instruction).replace(/(?:未|待)发货/gi, '');
-  return /(取消|关闭|停用|禁用|修改|更新|配置|设置|启用|删除|发布|发货|改价|赠品|评价|绑定|解绑)/i.test(readNormalized) && /(商品|自动化|规则|知识库|卡券|订单|发货)/i.test(readNormalized);
+  const normalized = stripNegatedWorkspaceClauses(instruction).replace(/(?:未|待)发货/gi, '');
+  if (!/(商品|自动化|规则|知识库|卡券|订单|发货)/i.test(normalized)) return false;
+  const mutation = /(取消|关闭|停用|禁用|修改|更新|设置|启用|删除|发布|改价|绑定|解绑|选择|开启|打开|配置\s*(?:商品|自动化|规则|卡券)|(?:自动发货|发货规则|自动化规则)\s*(?:为|成|开启|关闭|启用|停用|禁用|使用|选择)|(?:发货|交付)\s*(?:订单|订单号|给)|赠品|评价)/i.test(normalized);
+  if (/(查询|查看|读取|获取|查找|搜索|列出|列表|详情|状态|当前)/i.test(normalized) && !mutation) return false;
+  return mutation;
 }
 function requiresWorkspaceProductSearch(instruction: string): boolean {
   const normalized = instruction.replace(/\s+/g, ' ').trim();
-  if (!/(商品|产品)/i.test(normalized) || !/(搜索|查找|匹配|按名称|按标题|商品名称|商品标题|外部商品编号)/i.test(normalized)) return false;
+  const targetsProduct = /(?:搜索|查找|匹配)[^。！？\n]{0,20}(?:商品|产品)|(?:商品|产品)[^。！？\n]{0,20}(?:搜索|查找|匹配|按名称|按标题|商品名称|商品标题|外部商品编号)/i.test(normalized);
+  if (!targetsProduct) return false;
   if (/(列表|全部|所有|总数|分页)/i.test(normalized) && !/(按名称|按标题|商品名称|商品标题|外部商品编号)/i.test(normalized)) return false;
   return true;
 }

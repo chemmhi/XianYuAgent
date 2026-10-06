@@ -145,6 +145,39 @@ test('resolves the exact product title in a natural-language cancellation and fi
   assert.equal(queries[0]?.keyword, product.title);
 });
 
+test('resolves a product title when the request starts with 启动 and uses 自动发货 wording', async () => {
+  const product = { id: 'product-auto-delivery-title', accountId: 'account-1', externalProductRef: '1082410574993', title: 'AI 技术咨询，需求定制开发服务', configVersion: 1 };
+  let query = '';
+  const commands = orchestrator({
+    products: {
+      get: async () => product,
+      list: async (_adminId: string, input: { keyword?: string }) => { query = input.keyword ?? ''; return { items: [product], page: 1, pageSize: 20, total: 1, totalPages: 1 }; },
+    },
+    productAutomation: { get: async () => ({ configVersion: 1, product, config: {} }), update: async () => ({ configVersion: 2, config: {} }) },
+  });
+
+  const plan = await commands.prepareWrite({ ...input, instruction: '启动 AI 技术咨询，需求定制开发服务 这个商品的自动发货，卡券选择“奥维地图”' });
+
+  assert.equal(plan?.action, 'product_automation_update');
+  assert.equal(plan?.manifest.productId, product.id);
+  assert.equal(query, product.title);
+});
+
+test('rejects non-canonical automation shorthand so the model can resolve coupon IDs and retry', async () => {
+  const product = { id: 'product-auto-delivery-shorthand', accountId: 'account-1', title: 'AI 技术咨询，需求定制开发服务', configVersion: 1 };
+  const commands = orchestrator({ products: { get: async () => product } });
+  await assert.rejects(
+    () => commands.prepareWrite({ ...input, operation: 'product_automation_update', parameters: { productId: product.id, config: { enabled: true, couponName: '奥维地图' } }, instruction: '' }),
+    (error: unknown) => (error as { code?: string; message?: string }).code === 'VALIDATION_FAILED' && /canonical rule keys/.test((error as { message?: string }).message ?? ''),
+  );
+});
+
+test('keeps read-only automation diagnostics out of the mutation guard', async () => {
+  const commands = orchestrator({ store: { hasAccountScope: async () => true, getCouponBatch: async () => undefined, listCouponBatches: async () => ({ items: [], page: 1, pageSize: 20, total: 0, totalPages: 1 }) } });
+  const result = await commands.executeModelTool('workspace_read', { instruction: '查询商品 ID product-1 的当前自动发货配置，并查找卡券名称“奥维地图”的可用卡券信息。只读，不执行任何修改。' }, input);
+  assert.equal(result.kind, 'read');
+});
+
 test('runs a named product automation cancellation through Workspace confirmation with the automation version', async () => {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: 'workspace-automation-confirm@example.com', passwordHash: 'hash', displayName: 'Workspace Automation Confirm' });
@@ -262,6 +295,19 @@ test('searches a product by name through the dedicated workspace tool', async ()
   const result = await commands.executeModelTool('workspace_product_search', { query: product.title }, input);
   assert.equal(query, product.title);
   assert.equal(result.title, '商品搜索');
+  assert.match(result.content, /视频下载及文案提取源码/);
+});
+
+test('falls back to normalized catalog matching when the product list rejects a title query', async () => {
+  const product = { id: 'product-search-fallback', accountId: 'account-1', externalProductRef: '1082449333831', title: '视频下载及文案提取源码，包教包会', configVersion: 1 };
+  const commands = orchestrator({ products: {
+    get: async () => product,
+    list: async (_adminId: string, query: { keyword?: string }) => query.keyword
+      ? { items: [], page: 1, pageSize: 20, total: 0, totalPages: 1 }
+      : { items: [product], page: 1, pageSize: 100, total: 1, totalPages: 1 },
+  } });
+  const result = await commands.executeModelTool('workspace_product_search', { query: '视频下载及文案提取源码 包教包会' }, input);
+  assert.equal((result.data as { total?: number }).total, 1);
   assert.match(result.content, /视频下载及文案提取源码/);
 });
 

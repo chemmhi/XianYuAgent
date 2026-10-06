@@ -6,6 +6,14 @@ export function normalizeProductSearchText(value: string | undefined): string | 
 }
 
 /**
+ * Catalog searches should tolerate the punctuation and spacing differences
+ * commonly introduced when a product title is copied from chat or Xianyu.
+ */
+export function normalizeProductCatalogSearchText(value: string | undefined): string {
+  return (value ?? '').normalize('NFKC').toLocaleLowerCase().replace(/[\s\p{P}\p{S}_]+/gu, '');
+}
+
+/**
  * Core terms are selected by the Agent. The backend only normalizes and
  * deduplicates the terms so the same query works in memory and PostgreSQL.
  */
