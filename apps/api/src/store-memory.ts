@@ -1598,7 +1598,12 @@ export class MemoryStore implements Store {
       .filter((session) => !query.accountId || session.accountId === query.accountId)
       .filter((session) => !needle || `${session.title} ${session.summary ?? ''}`.toLowerCase().includes(needle))
       .sort((left, right) => Date.parse(right.lastActiveAt) - Date.parse(left.lastActiveAt))
-      .map((session) => ({ ...session }));
+      .map((session) => {
+        const latestRun = [...this.runs.values()]
+          .filter((run) => run.sessionId === session.id)
+          .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0];
+        return { ...session, runId: latestRun?.id, runStatus: latestRun?.status };
+      });
   }
 
   async createAgentSession(input: { adminId: string; accountId: string; title: string; summary?: string }): Promise<AgentSessionRecord> {
