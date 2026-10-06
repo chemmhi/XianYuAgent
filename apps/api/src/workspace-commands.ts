@@ -46,7 +46,7 @@ export interface WorkspaceCommandInput {
 }
 
 export interface WorkspaceModelToolResult {
-  kind: 'read' | 'write_plan';
+  kind: NativeWorkspaceReadResult['kind'] | 'read' | 'write_plan';
   title: string;
   summary: string;
   content: string;

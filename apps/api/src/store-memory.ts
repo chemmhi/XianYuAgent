@@ -1680,17 +1680,27 @@ export class MemoryStore implements Store {
     return { run: { ...run }, steps: [...this.steps.values()].filter((step) => step.runId === run.id).sort((left, right) => left.stepNo - right.stepNo || left.attempt - right.attempt).map((step) => ({ ...step })) };
   }
 
-  async updateRun(runId: string, patch: { status?: RunStatus; resultSummary?: string; errorCode?: string; startedAt?: string; finishedAt?: string }): Promise<RunRecord | undefined> {
+  async updateRun(runId: string, patch: { status?: RunStatus; resultSummary?: string; errorCode?: string | null; startedAt?: string; finishedAt?: string | null }): Promise<RunRecord | undefined> {
     const run = this.runs.get(runId);
     if (!run) return undefined;
-    Object.assign(run, patch, { updatedAt: new Date().toISOString() });
+    const { errorCode, finishedAt, ...rest } = patch;
+    Object.assign(run, rest, { updatedAt: new Date().toISOString() });
+    if (errorCode === null) delete run.errorCode;
+    else if (errorCode !== undefined) run.errorCode = errorCode;
+    if (finishedAt === null) delete run.finishedAt;
+    else if (finishedAt !== undefined) run.finishedAt = finishedAt;
     return { ...run };
   }
 
-  async updateRunStep(stepId: string, patch: { status?: StepStatus; inputSummary?: string; outputSummary?: string; errorCode?: string; startedAt?: string; finishedAt?: string }): Promise<StepRecord | undefined> {
+  async updateRunStep(stepId: string, patch: { status?: StepStatus; inputSummary?: string; outputSummary?: string; errorCode?: string | null; startedAt?: string; finishedAt?: string | null }): Promise<StepRecord | undefined> {
     const step = this.steps.get(stepId);
     if (!step) return undefined;
-    Object.assign(step, patch);
+    const { errorCode, finishedAt, ...rest } = patch;
+    Object.assign(step, rest);
+    if (errorCode === null) delete step.errorCode;
+    else if (errorCode !== undefined) step.errorCode = errorCode;
+    if (finishedAt === null) delete step.finishedAt;
+    else if (finishedAt !== undefined) step.finishedAt = finishedAt;
     return { ...step };
   }
 

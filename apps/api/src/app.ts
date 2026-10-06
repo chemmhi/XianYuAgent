@@ -1170,7 +1170,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
       return success(ctx, result.run, result.duplicate ? 200 : 201);
     });
   }
-  const workspaceConfirmationMatch = ctx.path.match(/^\/api\/v1\/workspace\/runs\/([^/]+)\/(confirmation|confirm|cancel|retry)$/);
+  const workspaceConfirmationMatch = ctx.path.match(/^\/api\/v1\/workspace\/runs\/([^/]+)\/(confirmation|confirm|cancel|retry|reconnect)$/);
   if (workspaceConfirmationMatch) {
     const runId = decodeURIComponent(workspaceConfirmationMatch[1]);
     const action = workspaceConfirmationMatch[2];
@@ -1186,6 +1186,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
       return success(ctx, await workspace.cancelRun({ adminId: authContext.admin.id, runId, expectedVersion, requestId: ctx.requestId, traceId: ctx.traceId }));
     });
     if (action === 'retry' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, undefined, async () => success(ctx, await workspace.retryRun({ adminId: authContext.admin.id, runId, requestId: ctx.requestId, traceId: ctx.traceId })));
+    if (action === 'reconnect' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, undefined, async () => success(ctx, await workspace.reconnectRun({ adminId: authContext.admin.id, runId, requestId: ctx.requestId, traceId: ctx.traceId })));
   }
   if (ctx.path === '/api/v1/execution/outbox' && ctx.method === 'GET') {
     const runId = optionalString(ctx.query.runId);

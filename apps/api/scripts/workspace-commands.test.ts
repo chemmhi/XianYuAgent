@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { WorkspaceCommandOrchestrator, detectCommand } from '../src/workspace-commands.js';
 import { MemoryStore } from '../src/store-memory.js';
-import { InProcessAgentRuntime, WorkspaceService } from '../src/workspace.js';
+import { findWorkspaceExecutionStep, InProcessAgentRuntime, WorkspaceService } from '../src/workspace.js';
 
 function orchestrator(overrides: Record<string, unknown> = {}) {
   const base = {
@@ -312,4 +312,45 @@ test('model connectivity testing stays read-only', async () => {
   assert.equal(await commands.prepareWrite({ ...input, instruction: '测试 OpenAI-compatible 模型' }), undefined);
   const result = await commands.execute({ ...input, instruction: '测试 OpenAI-compatible 模型' });
   assert.equal((result?.data as { modelCount?: number }).modelCount, 1);
+});
+
+test('reconnects a failed workspace run from its current failed step', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'workspace-reconnect@example.com', passwordHash: 'hash', displayName: 'Workspace Reconnect' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'workspace-reconnect' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Reconnect' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '查看商品' });
+  const oldFinishedAt = '2026-10-06T00:00:00.000Z';
+  await store.updateRun(created.run.id, { status: 'failed', errorCode: 'RUNTIME_FAILED', resultSummary: '执行进程已离线', finishedAt: oldFinishedAt });
+  await store.updateRunStep(created.steps[0]!.id, { status: 'failed', errorCode: 'RUNTIME_FAILED', outputSummary: '执行进程已离线', finishedAt: oldFinishedAt });
+
+  const runtime = new InProcessAgentRuntime(store);
+  const service = new WorkspaceService(store, runtime, async () => 'audit');
+  const reconnected = await service.reconnectRun({ adminId: admin.id, runId: created.run.id, requestId: 'req-reconnect', traceId: 'trace-reconnect' });
+  assert.equal(reconnected.status, 'retrying');
+  assert.equal(reconnected.steps[0]?.status, 'retrying');
+  assert.equal(reconnected.errorCode, undefined);
+  assert.equal(reconnected.finishedAt, undefined);
+  assert.equal(reconnected.steps[0]?.errorCode, undefined);
+  assert.equal(reconnected.steps[0]?.finishedAt, undefined);
+
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const bundle = await store.getRun(admin.id, created.run.id);
+    if (bundle?.run.status === 'succeeded') break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal((await store.getRun(admin.id, created.run.id))?.run.status, 'succeeded');
+  const events = await store.listRunEvents(admin.id, created.run.id, 0);
+  assert.ok(events.some((event) => event.eventType === 'run.retrying'));
+  assert.ok(events.some((event) => event.eventType === 'step.retrying'));
+  runtime.stop();
+});
+
+test('selects the first non-terminal step when resuming a multi-step run', () => {
+  const selected = findWorkspaceExecutionStep([
+    { id: 'step-1', status: 'succeeded' },
+    { id: 'step-2', status: 'failed' },
+  ] as never[]);
+  assert.equal(selected?.id, 'step-2');
 });

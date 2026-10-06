@@ -97,6 +97,26 @@ describe('workspace message projection', () => {
     expect(messages.find((message) => message.type === 'final_answer')?.content).toBe('已找到 1 个商品。');
   });
 
+  it('prefers the persisted failure answer over provisional assistant streaming text', () => {
+    const failedRun: WorkspaceRunVM = {
+      ...run,
+      status: 'failed',
+      errorCode: 'WORKSPACE_PRODUCT_SEARCH_REQUIRED',
+      resultSummary: '工具 workspace_read 调用失败：请改用 workspace_product_search。',
+      finishedAt: '2026-09-20T00:00:03.000Z',
+    };
+    const messages = buildWorkspaceMessages(failedRun, [
+      { sequence: 2, runId: 'run-1', eventType: 'assistant.delta', payload: { messageType: 'final_answer', messageId: 'stream:assistant', contentDelta: '我先定位这个商品，再为你生成变更确认单。', status: 'running' }, createdAt: '2026-09-20T00:00:01.000Z' },
+      { sequence: 3, runId: 'run-1', eventType: 'workspace.message', payload: { messageType: 'final_answer', content: '工具 workspace_read 调用失败：请改用 workspace_product_search。' }, createdAt: '2026-09-20T00:00:02.000Z' },
+      { sequence: 4, runId: 'run-1', eventType: 'run.failed', payload: { status: 'failed', messageType: 'final_answer', content: '工具 workspace_read 调用失败：请改用 workspace_product_search。' }, createdAt: '2026-09-20T00:00:03.000Z' },
+    ]);
+
+    const finalAnswers = messages.filter((message) => message.type === 'final_answer');
+    expect(finalAnswers).toHaveLength(1);
+    expect(finalAnswers[0]?.content).toContain('工具 workspace_read 调用失败');
+    expect(finalAnswers[0]?.content).not.toContain('我先定位这个商品');
+  });
+
   it('shows the concrete tool name and final tool result event type', () => {
     const messages = buildWorkspaceMessages(run, [
       { sequence: 2, runId: 'run-1', eventType: 'tool.call.delta', payload: { toolCallId: 'call-2', argumentsDelta: '{"query":', status: 'streaming' }, createdAt: '2026-09-20T00:00:01.000Z' },

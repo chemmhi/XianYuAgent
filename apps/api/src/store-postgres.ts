@@ -1807,13 +1807,31 @@ export class PostgresStore implements Store {
     return { run: this.toRun(result.rows[0]), steps: steps.rows.map((row) => this.toStep(row)) };
   }
 
-  async updateRun(runId: string, patch: { status?: RunStatus; resultSummary?: string; errorCode?: string; startedAt?: string; finishedAt?: string }): Promise<RunRecord | undefined> {
-    const result = await this.pool.query('update workspace.runs set status=coalesce($2,status),result_summary=coalesce($3,result_summary),error_code=coalesce($4,error_code),started_at=coalesce($5,started_at),finished_at=coalesce($6,finished_at),updated_at=now() where id=$1 returning *', [runId, patch.status ?? null, patch.resultSummary ?? null, patch.errorCode ?? null, patch.startedAt ?? null, patch.finishedAt ?? null]);
+  async updateRun(runId: string, patch: { status?: RunStatus; resultSummary?: string; errorCode?: string | null; startedAt?: string; finishedAt?: string | null }): Promise<RunRecord | undefined> {
+    const values: unknown[] = [runId];
+    const assignments: string[] = [];
+    const add = (column: string, value: unknown) => { values.push(value); assignments.push(`${column}=$${values.length}`); };
+    if (patch.status !== undefined) add('status', patch.status);
+    if (patch.resultSummary !== undefined) add('result_summary', patch.resultSummary);
+    if (patch.errorCode !== undefined) add('error_code', patch.errorCode);
+    if (patch.startedAt !== undefined) add('started_at', patch.startedAt);
+    if (patch.finishedAt !== undefined) add('finished_at', patch.finishedAt);
+    assignments.push('updated_at=now()');
+    const result = await this.pool.query(`update workspace.runs set ${assignments.join(',')} where id=$1 returning *`, values);
     return result.rows[0] ? this.toRun(result.rows[0]) : undefined;
   }
 
-  async updateRunStep(stepId: string, patch: { status?: StepStatus; inputSummary?: string; outputSummary?: string; errorCode?: string; startedAt?: string; finishedAt?: string }): Promise<StepRecord | undefined> {
-    const result = await this.pool.query('update workspace.steps set status=coalesce($2,status),input_summary=coalesce($3,input_summary),output_summary=coalesce($4,output_summary),error_code=coalesce($5,error_code),started_at=coalesce($6,started_at),finished_at=coalesce($7,finished_at) where id=$1 returning *', [stepId, patch.status ?? null, patch.inputSummary ?? null, patch.outputSummary ?? null, patch.errorCode ?? null, patch.startedAt ?? null, patch.finishedAt ?? null]);
+  async updateRunStep(stepId: string, patch: { status?: StepStatus; inputSummary?: string; outputSummary?: string; errorCode?: string | null; startedAt?: string; finishedAt?: string | null }): Promise<StepRecord | undefined> {
+    const values: unknown[] = [stepId];
+    const assignments: string[] = [];
+    const add = (column: string, value: unknown) => { values.push(value); assignments.push(`${column}=$${values.length}`); };
+    if (patch.status !== undefined) add('status', patch.status);
+    if (patch.inputSummary !== undefined) add('input_summary', patch.inputSummary);
+    if (patch.outputSummary !== undefined) add('output_summary', patch.outputSummary);
+    if (patch.errorCode !== undefined) add('error_code', patch.errorCode);
+    if (patch.startedAt !== undefined) add('started_at', patch.startedAt);
+    if (patch.finishedAt !== undefined) add('finished_at', patch.finishedAt);
+    const result = await this.pool.query(`update workspace.steps set ${assignments.join(',')} where id=$1 returning *`, values);
     return result.rows[0] ? this.toStep(result.rows[0]) : undefined;
   }
 

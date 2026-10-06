@@ -10,9 +10,9 @@ import type { WorkspaceCommandOrchestrator } from './workspace-commands.js';
 const terminalRunStatuses = new Set<RunStatus>(['succeeded', 'partially_succeeded', 'failed', 'cancelled', 'expired']);
 const runTransitions: Record<RunStatus, RunStatus[]> = {
   queued: ['running', 'cancelled', 'expired'],
-  running: ['waiting_confirmation', 'executing', 'failed', 'cancelled'],
+  running: ['waiting_confirmation', 'executing', 'failed', 'cancelled', 'retrying'],
   waiting_confirmation: ['executing', 'cancelled', 'expired'],
-  executing: ['waiting_confirmation', 'succeeded', 'partially_succeeded', 'failed', 'cancelling'],
+  executing: ['waiting_confirmation', 'succeeded', 'partially_succeeded', 'failed', 'cancelling', 'retrying'],
   retrying: ['running', 'failed', 'cancelled'],
   cancelling: ['cancelled', 'failed'],
   succeeded: [],
@@ -23,9 +23,9 @@ const runTransitions: Record<RunStatus, RunStatus[]> = {
 };
 const stepTransitions: Record<StepStatus, StepStatus[]> = {
   pending: ['running', 'cancelled', 'skipped'],
-  running: ['waiting_confirmation', 'executing', 'succeeded', 'failed', 'cancelled'],
+  running: ['waiting_confirmation', 'executing', 'succeeded', 'failed', 'cancelled', 'retrying'],
   waiting_confirmation: ['executing', 'cancelled'],
-  executing: ['waiting_confirmation', 'succeeded', 'partially_succeeded', 'failed', 'cancelled'],
+  executing: ['waiting_confirmation', 'succeeded', 'partially_succeeded', 'failed', 'cancelled', 'retrying'],
   retrying: ['running', 'failed', 'cancelled'],
   succeeded: [],
   partially_succeeded: [],
@@ -115,7 +115,49 @@ export interface WorkspaceOutboxView {
 
 export interface WorkspaceRuntime {
   enqueue(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> }): void;
+  resume(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> }): Promise<void>;
   stop(): void;
+}
+
+const terminalStepStatuses = new Set<StepStatus>(['succeeded', 'partially_succeeded', 'skipped', 'cancelled']);
+
+export function findWorkspaceExecutionStep(steps: StepRecord[]): StepRecord | undefined {
+  return steps.find((step) => !terminalStepStatuses.has(step.status));
+}
+
+/**
+ * Reset a stranded Workspace run to the retry boundary before putting it back
+ * on the runtime queue. This is intentionally idempotent so reconnect clicks
+ * and process-restart recovery can share the same path.
+ */
+export async function prepareWorkspaceRunResume(input: { store: Store; run: RunRecord; steps: StepRecord[] }): Promise<{ run: RunRecord; steps: StepRecord[] } | undefined> {
+  if (['succeeded', 'partially_succeeded', 'cancelled', 'expired'].includes(input.run.status) || input.run.status === 'waiting_confirmation' || input.run.status === 'cancelling') return undefined;
+  const run = { ...input.run };
+  const steps = input.steps.map((step) => ({ ...step }));
+  const step = findWorkspaceExecutionStep(steps);
+  if (!step || step.status === 'waiting_confirmation') return undefined;
+  if (run.status === 'queued' && step.status === 'pending') return { run, steps };
+
+  const retrySummary = '任务已从当前失败节点重新入队';
+  if (run.status !== 'retrying') {
+    const updatedRun = await input.store.updateRun(run.id, { status: 'retrying', resultSummary: retrySummary, errorCode: null, finishedAt: null });
+    if (!updatedRun) throw new Error('WORKSPACE_STORE_ERROR');
+    run.status = 'retrying';
+    run.resultSummary = retrySummary;
+    run.errorCode = undefined;
+    run.finishedAt = undefined;
+    await input.store.appendRunEvent({ runId: run.id, eventType: 'run.retrying', payload: { status: 'retrying', reason: 'reconnect', currentStepId: step.id } });
+  }
+  if (step.status !== 'retrying') {
+    const updatedStep = await input.store.updateRunStep(step.id, { status: 'retrying', outputSummary: retrySummary, errorCode: null, finishedAt: null });
+    if (!updatedStep) throw new Error('WORKSPACE_STORE_ERROR');
+    step.status = 'retrying';
+    step.outputSummary = retrySummary;
+    step.errorCode = undefined;
+    step.finishedAt = undefined;
+    await input.store.appendRunEvent({ runId: run.id, eventType: 'step.retrying', payload: { stepId: step.id, status: 'retrying', reason: 'reconnect' } });
+  }
+  return { run, steps };
 }
 
 export class InProcessAgentRuntime implements WorkspaceRuntime {
@@ -133,10 +175,17 @@ export class InProcessAgentRuntime implements WorkspaceRuntime {
     }, 0);
   }
 
+  async resume(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string }): Promise<void> {
+    if (this.stopped || this.active.has(input.run.id)) return;
+    const prepared = await prepareWorkspaceRunResume({ store: this.store, run: input.run, steps: input.steps });
+    if (!prepared) return;
+    this.enqueue({ ...input, ...prepared });
+  }
+
   stop(): void { this.stopped = true; }
 
   private async execute(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string }): Promise<void> {
-    const step = input.steps[0];
+    const step = findWorkspaceExecutionStep(input.steps);
     if (!step) return;
     const startedAt = new Date().toISOString();
     await this.transitionRun(input.run, 'running', { startedAt });
@@ -489,6 +538,16 @@ export class WorkspaceService {
     const latestRun = await this.store.getRun(input.adminId, bundle.run.id);
     if (!latestRun) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'run reload failed');
     return { run: this.toRunView(latestRun.run, latestRun.steps), outbox: this.toOutboxView(requeued, bundle.run.id) };
+  }
+
+  async reconnectRun(input: { adminId: string; runId: string; requestId: string; traceId: string }): Promise<WorkspaceRunView> {
+    const bundle = await this.store.getRun(input.adminId, input.runId);
+    if (!bundle) throw new ServiceError(404, 'NOT_FOUND', 'run not found');
+    await this.runtime.resume({ run: bundle.run, steps: bundle.steps, adminId: input.adminId, sessionId: bundle.run.sessionId });
+    await this.audit({ actorId: input.adminId, action: 'workspace.run.reconnected', targetRef: input.runId, requestId: input.requestId, traceId: input.traceId, payload: { previousStatus: bundle.run.status }, accountId: bundle.run.accountId });
+    const latest = await this.store.getRun(input.adminId, input.runId);
+    if (!latest) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'run reload failed');
+    return this.toRunView(latest.run, latest.steps);
   }
 
   private async appendMessage(input: { adminId: string; sessionId: string; runId?: string; type: 'user_message' | 'reasoning_summary' | 'tool_event' | 'final_answer'; content: string; summary?: string }): Promise<void> {

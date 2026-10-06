@@ -1,5 +1,5 @@
 import type { RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, Store } from './domain.js';
-import type { WorkspaceRuntime } from './workspace.js';
+import { findWorkspaceExecutionStep, prepareWorkspaceRunResume, type WorkspaceRuntime } from './workspace.js';
 import { executeNativeWorkspaceRead } from './workspace-native-read.js';
 import { prepareNativeWorkspaceWrite } from './workspace-native-write.js';
 import type { WorkspaceCommandInput, WorkspaceCommandOrchestrator, WorkspaceModelToolResult } from './workspace-commands.js';
@@ -402,13 +402,20 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     }).finally(() => this.active.delete(input.run.id));
   }
 
+  async resume(input: PiRuntimeEnqueueInput): Promise<void> {
+    if (this.stopped || this.active.has(input.run.id)) return;
+    const prepared = await prepareWorkspaceRunResume({ store: this.store, run: input.run, steps: input.steps });
+    if (!prepared) return;
+    this.enqueue({ ...input, ...prepared });
+  }
+
   stop(): void {
     this.stopped = true;
     for (const controller of this.active.values()) controller.abort();
   }
 
   private async execute(input: PiRuntimeEnqueueInput, signal: AbortSignal): Promise<void> {
-    const step = input.steps[0];
+    const step = findWorkspaceExecutionStep(input.steps);
     if (!step || this.stopped) return;
     try {
       const sessionId = input.sessionId ?? input.run.sessionId;
@@ -520,6 +527,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     let waitingConfirmation = false;
     let pendingUserAction: { title: string; summary: string; content: string; data?: Record<string, unknown> } | undefined;
     let completedWithoutTool = false;
+    let pendingToolFailure: { toolName: string; code: string; summary: string } | undefined;
     const maxRounds = 8;
     for (let round = 0; round < maxRounds; round += 1) {
       if (this.stopped || signal.aborted) return;
@@ -562,24 +570,35 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
         await this.emit(input.run.id, 'tool.call.started', { streamId, toolCallId: call.id, toolName: call.function.name, arguments: redactSensitiveText(call.function.arguments, 4_000, this.options.redactSecrets), startedAt: toolStartedAt, status: 'running' });
         let args: Record<string, unknown>;
         try {
-          const parsed: unknown = JSON.parse(call.function.arguments || '{}');
-          if (!isRecord(parsed) || Array.isArray(parsed)) throw new Error('invalid tool arguments');
-          args = parsed;
+          args = parseModelToolArguments(call.function.arguments);
         } catch {
-          const errorResult = { ok: false, code: 'INVALID_TOOL_ARGUMENTS' };
-          await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, status: 'failed', result: errorResult });
+          const failure = { toolName: call.function.name, code: 'INVALID_TOOL_ARGUMENTS', summary: '工具参数不是可解析的 JSON 对象' };
+          pendingToolFailure = failure;
+          const errorResult = toolFailureResult(failure);
+          await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, status: 'failed', result: errorResult, completedAt: new Date().toISOString() });
           messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(errorResult) });
           continue;
         }
         let result: WorkspaceModelToolResult;
         try {
           const toolInput: WorkspaceCommandInput = { adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction, requestId: `workspace:${input.run.id}`, traceId: `workspace:${input.run.id}` };
-          result = this.options.skillManager && call.function.name.startsWith('pi_skill_')
+          const rawResult: unknown = this.options.skillManager && call.function.name.startsWith('pi_skill_')
             ? await this.options.skillManager.executeModelTool(call.function.name, args, toolInput)
             : await commands.executeModelTool(call.function.name, args, toolInput);
+          const normalized = normalizeModelToolResult(rawResult);
+          if (!normalized.ok) {
+            pendingToolFailure = { toolName: call.function.name, ...normalized.failure };
+            const errorResult = toolFailureResult(pendingToolFailure);
+            await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, status: 'failed', result: errorResult, completedAt: new Date().toISOString() });
+            messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(errorResult) });
+            continue;
+          }
+          result = normalized.result;
+          pendingToolFailure = undefined;
         } catch (error) {
           const failure = toSafeFailure(error);
           const errorResult = toolFailureResult(failure);
+          pendingToolFailure = { toolName: call.function.name, ...failure };
           await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, status: 'failed', result: errorResult, completedAt: new Date().toISOString() });
           messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(errorResult) });
           continue;
@@ -608,6 +627,10 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
 
     if (waitingConfirmation) {
       await this.emit(input.run.id, 'stream.completed', { status: 'waiting_confirmation', model: finalResult?.model ?? this.options.model, reasoningMessageCount: allReasoning.length });
+      return;
+    }
+    if (pendingToolFailure) {
+      await this.recordToolFailure(input, step, pendingToolFailure);
       return;
     }
     if (pendingUserAction) {
@@ -646,6 +669,23 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       ...(result.data ? { data: redactSensitiveText(JSON.stringify(result.data), this.options.outputLimit ?? 2_000, this.options.redactSecrets) } : {}),
       ...(result.plan ? { requiresConfirmation: true, action: result.plan.action, policyRef: result.plan.policyRef, manifest: result.plan.manifest } : {}),
     };
+  }
+
+  private async recordToolFailure(input: PiRuntimeEnqueueInput, step: StepRecord, failure: { toolName: string; code: string; summary: string }): Promise<void> {
+    const finishedAt = new Date().toISOString();
+    const chinese = detectWorkspaceResponseLanguage(input.run.instruction) === 'zh-CN';
+    const output = chinese
+      ? `工具 ${failure.toolName} 调用失败（${failure.code}）：${failure.summary}。本次任务已停止，请修正后点击重连。`
+      : `Tool ${failure.toolName} failed (${failure.code}): ${failure.summary}. The run stopped; correct the request and reconnect.`;
+    await this.transitionStep(step, 'failed', { finishedAt, errorCode: failure.code, outputSummary: output });
+    await this.transitionRun(input.run, 'failed', { finishedAt, errorCode: failure.code, resultSummary: output });
+    const sessionId = input.sessionId ?? input.run.sessionId;
+    await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: output, summary: `工具调用失败：${failure.toolName}` });
+    await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'final_answer', content: output });
+    await this.emit(input.run.id, 'stream.completed', { status: 'failed', model: this.options.model, content: output, errorCode: failure.code });
+    await this.emit(input.run.id, 'step.failed', { stepId: step.id, status: 'failed', errorCode: failure.code, messageType: 'final_answer', content: output, summary: output });
+    await this.emit(input.run.id, 'runtime.failed', { status: 'failed', model: this.options.model, errorCode: failure.code, messageType: 'final_answer', content: output });
+    await this.emit(input.run.id, 'run.failed', { status: 'failed', errorCode: failure.code, resultSummary: output, messageType: 'final_answer', content: output });
   }
 
   private async recordFailure(input: PiRuntimeEnqueueInput, step: StepRecord, error: unknown): Promise<void> {
@@ -862,7 +902,7 @@ function finalizeStreamState(state: StreamState, fallbackModel: string, response
     content: state.content.trim(),
     model: state.model || fallbackModel,
     usage: state.usage,
-    toolCalls: state.toolCalls.size > 0 ? [...state.toolCalls.entries()].sort(([left], [right]) => left - right).map(([, value]) => ({ id: value.id, type: 'function' as const, function: { name: value.name, arguments: value.arguments } })) : undefined,
+    toolCalls: state.toolCalls.size > 0 ? [...state.toolCalls.entries()].sort(([left], [right]) => left - right).map(([index, value]) => ({ id: value.id || `call_${index}`, type: 'function' as const, function: { name: value.name, arguments: value.arguments } })) : undefined,
     webSearchUsed: responses ? state.webSearchUsed : undefined,
   };
 }
@@ -895,14 +935,14 @@ async function handleChatStreamEvent(eventType: string | undefined, payload: unk
       const id = typeof candidate.id === 'string' ? candidate.id : current.id;
       const fn = isRecord(candidate.function) ? candidate.function : undefined;
       const name = typeof fn?.name === 'string' ? fn.name : current.name;
-      const argumentsDelta = typeof fn?.arguments === 'string' ? fn.arguments : '';
+      const argumentsDelta = typeof fn?.arguments === 'string' ? fn.arguments : fn?.arguments === undefined ? '' : JSON.stringify(fn.arguments);
       state.toolCalls.set(index, { id, name, arguments: current.arguments + argumentsDelta });
       await handlers.onToolCallDelta?.({ index, ...(id ? { id } : {}), ...(name ? { name } : {}), ...(argumentsDelta ? { argumentsDelta } : {}) });
     }
   }
   if (choice?.finish_reason === 'tool_calls') {
-    for (const [, value] of [...state.toolCalls.entries()].sort(([left], [right]) => left - right)) {
-      if (value.id && value.name) await handlers.onToolCall?.({ id: value.id, type: 'function', function: { name: value.name, arguments: value.arguments } });
+    for (const [index, value] of [...state.toolCalls.entries()].sort(([left], [right]) => left - right)) {
+      if (value.name) await handlers.onToolCall?.({ id: value.id || `call_${index}`, type: 'function', function: { name: value.name, arguments: value.arguments } });
     }
   }
   void eventType;
@@ -926,7 +966,7 @@ async function handleResponsesStreamEvent(eventType: string | undefined, payload
     if (item?.type === 'web_search_call') state.webSearchUsed = true;
     if (item?.type === 'function_call') {
       const index = typeof payload.output_index === 'number' ? payload.output_index : state.toolCalls.size;
-      const id = typeof item.call_id === 'string' ? item.call_id : typeof item.id === 'string' ? item.id : `call_${index}`;
+      const id = typeof item.call_id === 'string' && item.call_id.trim() ? item.call_id : typeof item.id === 'string' && item.id.trim() ? item.id : `call_${index}`;
       const name = typeof item.name === 'string' ? item.name : '';
       const args = typeof item.arguments === 'string' ? item.arguments : '';
       const existing = state.toolCalls.get(index);
@@ -1059,11 +1099,12 @@ function extractCompletionToolCalls(payload: unknown): ModelToolCall[] {
   const choice = isRecord(payload.choices[0]) ? payload.choices[0] : undefined;
   const message = choice && isRecord(choice.message) ? choice.message : undefined;
   if (!Array.isArray(message?.tool_calls)) return [];
-  return message.tool_calls.flatMap((candidate): ModelToolCall[] => {
-    if (!isRecord(candidate) || candidate.type !== 'function' || typeof candidate.id !== 'string') return [];
+  return message.tool_calls.flatMap((candidate, index): ModelToolCall[] => {
+    if (!isRecord(candidate) || candidate.type !== 'function') return [];
     const fn = isRecord(candidate.function) ? candidate.function : undefined;
-    if (!fn || typeof fn.name !== 'string' || typeof fn.arguments !== 'string') return [];
-    return [{ id: candidate.id, type: 'function', function: { name: fn.name, arguments: fn.arguments } }];
+    if (!fn || typeof fn.name !== 'string' || !fn.name.trim()) return [];
+    const args = typeof fn.arguments === 'string' ? fn.arguments : fn.arguments === undefined ? '{}' : JSON.stringify(fn.arguments);
+    return [{ id: typeof candidate.id === 'string' && candidate.id.trim() ? candidate.id : `call_${index}`, type: 'function', function: { name: fn.name, arguments: args } }];
   });
 }
 
@@ -1085,12 +1126,12 @@ function extractResponsesContent(payload: unknown): string {
 
 function extractResponsesToolCalls(payload: unknown): ModelToolCall[] {
   if (!isRecord(payload) || !Array.isArray(payload.output)) return [];
-  return payload.output.flatMap((item): ModelToolCall[] => {
+  return payload.output.flatMap((item, index): ModelToolCall[] => {
     if (!isRecord(item) || item.type !== 'function_call') return [];
-    const id = typeof item.call_id === 'string' ? item.call_id : typeof item.id === 'string' ? item.id : undefined;
+    const id = typeof item.call_id === 'string' && item.call_id.trim() ? item.call_id : typeof item.id === 'string' && item.id.trim() ? item.id : `call_${index}`;
     const name = typeof item.name === 'string' ? item.name : undefined;
     const args = typeof item.arguments === 'string' ? item.arguments : item.arguments === undefined ? undefined : JSON.stringify(item.arguments);
-    if (!id || !name || args === undefined) return [];
+    if (!name || !name.trim() || args === undefined) return [];
     return [{ id, type: 'function', function: { name, arguments: args } }];
   });
 }
@@ -1116,7 +1157,7 @@ function toSafeFailure(error: unknown): { code: string; summary: string } {
   const code = typeof candidate?.code === 'string' ? candidate.code : undefined;
   const message = typeof candidate?.message === 'string' ? candidate.message.trim() : undefined;
   const inferredCode = code ?? message?.match(/\b[A-Z][A-Z0-9_]{2,}\b/)?.[0];
-  const safeCodes = ['VALIDATION_FAILED', 'NOT_FOUND', 'FORBIDDEN', 'CONFLICT', 'ACCOUNT_SCOPE_FORBIDDEN', 'WORKSPACE_PRODUCT_REQUIRED', 'WORKSPACE_PRODUCT_NOT_FOUND', 'WORKSPACE_WRITE_REQUIRED', 'WORKSPACE_PRODUCT_SEARCH_UNAVAILABLE', 'MODEL_TOOL_RUNTIME_UNAVAILABLE', 'DUPLICATE_TOOL_CALL'];
+  const safeCodes = ['VALIDATION_FAILED', 'NOT_FOUND', 'FORBIDDEN', 'CONFLICT', 'ACCOUNT_SCOPE_FORBIDDEN', 'ACCOUNT_RECOVERY_UNAVAILABLE', 'ACCOUNT_VERIFY_UNAVAILABLE', 'DELIVERY_NOT_READY', 'ORDER_DELIVERY_UNAVAILABLE', 'WORKSPACE_PRODUCT_REQUIRED', 'WORKSPACE_PRODUCT_NOT_FOUND', 'WORKSPACE_WRITE_REQUIRED', 'WORKSPACE_PRODUCT_SEARCH_REQUIRED', 'WORKSPACE_PRODUCT_SEARCH_UNAVAILABLE', 'MODEL_TOOL_RUNTIME_UNAVAILABLE', 'DUPLICATE_TOOL_CALL'];
   if (inferredCode && message && safeCodes.includes(inferredCode)) {
     return { code: inferredCode, summary: message };
   }
@@ -1150,6 +1191,37 @@ function toolFailureResult(failure: { code: string; summary: string }): Record<s
     message: failure.summary,
     ...(suggestedTool ? { suggestedTool } : {}),
   };
+}
+
+function parseModelToolArguments(raw: string): Record<string, unknown> {
+  let candidate: unknown = raw?.trim() || '{}';
+  for (let attempt = 0; attempt < 2 && typeof candidate === 'string'; attempt += 1) {
+    const normalized = candidate.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+    candidate = JSON.parse(normalized || '{}');
+  }
+  if (!isRecord(candidate) || Array.isArray(candidate)) throw new Error('invalid tool arguments');
+  return candidate;
+}
+
+function normalizeModelToolResult(value: unknown): { ok: true; result: WorkspaceModelToolResult } | { ok: false; failure: { code: string; summary: string } } {
+  let candidate = value;
+  if (typeof candidate === 'string') {
+    try { candidate = JSON.parse(candidate); } catch { return { ok: false, failure: { code: 'INVALID_TOOL_RESULT', summary: '工具返回结果不是有效 JSON' } }; }
+  }
+  if (!isRecord(candidate)) return { ok: false, failure: { code: 'INVALID_TOOL_RESULT', summary: '工具返回结果不是对象' } };
+  if (candidate.ok === false) {
+    return {
+      ok: false,
+      failure: {
+        code: typeof candidate.code === 'string' && candidate.code.trim() ? candidate.code : 'TOOL_FAILED',
+        summary: typeof candidate.message === 'string' && candidate.message.trim() ? candidate.message : '工具返回失败结果',
+      },
+    };
+  }
+  if (typeof candidate.kind !== 'string' || !candidate.kind.trim() || typeof candidate.title !== 'string' || typeof candidate.summary !== 'string' || typeof candidate.content !== 'string') {
+    return { ok: false, failure: { code: 'INVALID_TOOL_RESULT', summary: '工具返回结果缺少可消费的 kind/title/summary/content 字段' } };
+  }
+  return { ok: true, result: candidate as unknown as WorkspaceModelToolResult };
 }
 
 function firstNonEmpty(...values: Array<string | undefined>): string | undefined {

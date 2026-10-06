@@ -1,9 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
-import { getWorkspaceRunCandidates, listWorkspaceSessions, pickWorkspaceRun } from './controller';
+import { getWorkspaceRunCandidates, isWorkspaceRunActive, isWorkspaceRunReconnectable, listWorkspaceSessions, pickWorkspaceRun } from './controller';
 import type { WorkspaceApi } from './api';
 import type { WorkspaceMessageVM, WorkspaceRunVM } from './types';
 
 describe('workspace controller session loading', () => {
+  it('treats retryable and in-flight runs as active for the loading indicator', () => {
+    expect(isWorkspaceRunActive('queued')).toBe(true);
+    expect(isWorkspaceRunActive('retrying')).toBe(true);
+    expect(isWorkspaceRunActive('succeeded')).toBe(false);
+    expect(isWorkspaceRunActive('failed')).toBe(false);
+    expect(isWorkspaceRunReconnectable('failed')).toBe(true);
+    expect(isWorkspaceRunReconnectable('waiting_confirmation')).toBe(false);
+  });
+
   it('forwards the server-side search term to the workspace API', async () => {
     const listSessions = vi.fn(async (_accountId?: string, _search?: string) => []);
     const api = { listSessions } as unknown as WorkspaceApi;

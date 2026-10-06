@@ -1412,8 +1412,8 @@ export interface Store {
   createRun(input: { adminId: string; accountId: string; sessionId: string; instruction: string; clientRunRef?: string; route?: string }): Promise<{ run: RunRecord; steps: StepRecord[] }>;
   findRunByClientRef(adminId: string, accountId: string, clientRunRef: string): Promise<{ run: RunRecord; steps: StepRecord[] } | undefined>;
   getRun(adminId: string, runId: string): Promise<{ run: RunRecord; steps: StepRecord[] } | undefined>;
-  updateRun(runId: string, patch: { status?: RunStatus; resultSummary?: string; errorCode?: string; startedAt?: string; finishedAt?: string }): Promise<RunRecord | undefined>;
-  updateRunStep(stepId: string, patch: { status?: StepStatus; inputSummary?: string; outputSummary?: string; errorCode?: string; startedAt?: string; finishedAt?: string }): Promise<StepRecord | undefined>;
+  updateRun(runId: string, patch: { status?: RunStatus; resultSummary?: string; errorCode?: string | null; startedAt?: string; finishedAt?: string | null }): Promise<RunRecord | undefined>;
+  updateRunStep(stepId: string, patch: { status?: StepStatus; inputSummary?: string; outputSummary?: string; errorCode?: string | null; startedAt?: string; finishedAt?: string | null }): Promise<StepRecord | undefined>;
   appendRunEvent(input: { runId: string; eventType: string; payload: Record<string, unknown> }): Promise<RunEventRecord>;
   listRunEvents(adminId: string, runId: string, afterSequence?: number): Promise<RunEventRecord[]>;
   appendWorkspaceMessage(input: { adminId: string; sessionId: string; runId?: string; type: WorkspaceMessageType; content: string; summary?: string }): Promise<WorkspaceMessageRecord>;

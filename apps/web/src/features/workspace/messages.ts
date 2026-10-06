@@ -142,7 +142,8 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
   const seenMessageIds = new Set<string>();
   const seenReasoningKeys = new Set<string>();
   let finalAnswerRendered = false;
-  mergeStreamingEvents(events).sort((left, right) => left.sequence - right.sequence).forEach((event) => {
+  const hasPersistedFinalAnswer = events.some((event) => event.eventType !== 'assistant.delta' && messageType(event) === 'final_answer');
+  mergeStreamingEvents(events, { ignoreAssistantDeltas: hasPersistedFinalAnswer }).sort((left, right) => left.sequence - right.sequence).forEach((event) => {
     if (!shouldProjectEvent(event)) return;
     if (event.eventType === 'workspace.message') return;
     const messageKind = messageType(event);
@@ -180,7 +181,7 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
     });
   });
 
-  if (terminalStatuses.has(run.status) && !events.some((event) => messageType(event) === 'final_answer')) {
+  if (terminalStatuses.has(run.status) && !hasPersistedFinalAnswer) {
     const failed = run.status === 'failed' || run.status === 'cancelled' || run.status === 'expired';
     messages.push({
       id: `${run.runId}:final`,
@@ -202,7 +203,7 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
   });
 }
 
-function mergeStreamingEvents(events: WorkspaceRunEventVM[]): WorkspaceRunEventVM[] {
+function mergeStreamingEvents(events: WorkspaceRunEventVM[], options: { ignoreAssistantDeltas?: boolean } = {}): WorkspaceRunEventVM[] {
   const passthrough: WorkspaceRunEventVM[] = [];
   const streams = new Map<string, WorkspaceRunEventVM>();
   const append = (event: WorkspaceRunEventVM, type: WorkspaceMessageVM['type'], content: string, messageId: string, summary?: string) => {
@@ -227,6 +228,7 @@ function mergeStreamingEvents(events: WorkspaceRunEventVM[]): WorkspaceRunEventV
       return;
     }
     if (event.eventType === 'assistant.delta') {
+      if (options.ignoreAssistantDeltas) return;
       const messageId = typeof payload.messageId === 'string' ? payload.messageId : `${event.runId}:assistant`;
       append(event, 'final_answer', typeof payload.contentDelta === 'string' ? payload.contentDelta : '', messageId);
       return;
