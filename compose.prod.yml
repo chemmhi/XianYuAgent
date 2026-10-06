@@ -39,6 +39,7 @@ services:
     build:
       context: ./apps/api
     restart: unless-stopped
+    init: true
     env_file:
       - .env
     environment:
@@ -49,10 +50,10 @@ services:
       OBJECT_STORAGE_SECRET_KEY: ${OBJECT_STORAGE_SECRET_KEY}
       OBJECT_STORAGE_BUCKET: xianyu-assets
       OBJECT_STORAGE_REGION: us-east-1
-      XIANYU_VERIFICATION_BROWSER_MODE: ${XIANYU_VERIFICATION_BROWSER_MODE:-disabled}
-      XIANYU_VERIFICATION_SLIDER_MODE: ${XIANYU_VERIFICATION_SLIDER_MODE:-disabled}
+      XIANYU_VERIFICATION_BROWSER_MODE: ${XIANYU_VERIFICATION_BROWSER_MODE:-launch}
+      XIANYU_VERIFICATION_SLIDER_MODE: ${XIANYU_VERIFICATION_SLIDER_MODE:-auto}
       XIANYU_VERIFICATION_BROWSER_EXECUTABLE: ${XIANYU_VERIFICATION_BROWSER_EXECUTABLE:-/usr/bin/chromium}
-      XIANYU_VERIFICATION_BROWSER_HEADLESS: ${XIANYU_VERIFICATION_BROWSER_HEADLESS:-true}
+      XIANYU_VERIFICATION_BROWSER_HEADLESS: ${XIANYU_VERIFICATION_BROWSER_HEADLESS:-false}
       XIANYU_VERIFICATION_BROWSER_USER_DATA_DIR: ${XIANYU_VERIFICATION_BROWSER_USER_DATA_DIR:-/app/browser_data/xianyu-verification}
       XIANYU_VERIFICATION_BROWSER_MAX_WAIT_MS: ${XIANYU_VERIFICATION_BROWSER_MAX_WAIT_MS:-180000}
     ports:
@@ -66,12 +67,13 @@ services:
         condition: service_healthy
       object-storage:
         condition: service_started
-    command: ["node", "dist/index.js"]
+    command: ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1440x900x24 -nolisten tcp", "node", "dist/index.js"]
 
   worker:
     build:
       context: ./apps/api
     restart: unless-stopped
+    init: true
     env_file:
       - .env
     environment:
