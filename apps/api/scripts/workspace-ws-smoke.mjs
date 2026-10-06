@@ -245,13 +245,13 @@ try {
   const adminId = (await runtime.store.listAdminIds())[0];
   const staleRun = await runtime.store.createRun({ adminId, accountId, sessionId: staleSession.body.data.id, instruction: '保持实时流以验证删除回归', clientRunRef: 'workspace-ws-stale-run' });
   await runtime.store.appendRunEvent({ runId: staleRun.run.id, eventType: 'run.queued', payload: { status: 'queued' } });
-  const stale = await requestUpgrade(`/api/v1/workspace/runs/${encodeURIComponent(staleRun.run.id)}/events`, { Cookie: cookie, Origin: `http://127.0.0.1:${port}` });
-  assert.equal(stale.status, 101);
-  assert.ok(await stale.nextFrame(), 'stale websocket did not send snapshot');
+  const deletedRunSocket = await requestUpgrade(`/api/v1/workspace/runs/${encodeURIComponent(staleRun.run.id)}/events`, { Cookie: cookie, Origin: `http://127.0.0.1:${port}` });
+  assert.equal(deletedRunSocket.status, 101);
+  assert.ok(await deletedRunSocket.nextFrame(), 'stale websocket did not send snapshot');
   await runtime.store.deleteAgentSession(adminId, staleSession.body.data.id);
   let staleClosed = false;
   for (let index = 0; index < 3; index += 1) {
-    if (await stale.nextFrame() === null) { staleClosed = true; break; }
+    if (await deletedRunSocket.nextFrame() === null) { staleClosed = true; break; }
   }
   assert.equal(staleClosed, true);
   const health = await request('/healthz');
