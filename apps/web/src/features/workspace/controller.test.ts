@@ -45,6 +45,12 @@ describe('workspace controller session loading', () => {
     expect(controllerSource).toContain('messages: persistedMessages ?? previous.messages');
     expect(controllerSource).toContain('api.listMessages(activeSessionId, 500)');
   });
+
+  it('schedules an active recovered run for reconnect when switching sessions', () => {
+    const switchSessionSource = controllerSource.slice(controllerSource.indexOf('const switchSession'), controllerSource.indexOf('const archiveSession'));
+    expect(switchSessionSource).toContain('reconnectOnHydrateRunRef.current = recovered.run && isWorkspaceRunActive(recovered.run.status) ? recovered.run.runId : undefined;');
+    expect(switchSessionSource).toContain("connection: reconnectOnHydrateRunRef.current ? 'reconnecting' : 'idle'");
+  });
 });
 
 describe('workspace confirmation recovery', () => {
