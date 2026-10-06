@@ -92,9 +92,22 @@ npm run compose:down
 
 Compose 当前负责 API、Worker、PostgreSQL、Redis 和 MinIO；对象存储映射到 `19000/19001`，保留 `9000` 给 PRD 参考项目；本地前端由根命令 `npm run dev` 启动。
 
-## 生产部署（GitHub + SSH）
+## 生产部署（GitHub Push 自动部署）
 
 生产部署的唯一代码来源是 GitHub `origin/main`。禁止向服务器裸仓库直接 `git push`，禁止从开发机使用 `scp`、`rsync` 或其他方式上传代码，禁止在服务器工作树中手工改代码。以下命令以 SSH 别名 `server-prod` 和服务器目录 `/home/ubuntu/xianyu-agent-prod` 为例；如果目录或别名不同，只替换这两个值。
+
+> **自动部署已启用（2026-10-06）**：向 `main` 推送后，GitHub Actions 会自动校验本次提交，通过固定 SSH 主机指纹连接服务器，拉取同一 SHA，重建 API/Worker，并在服务器上构建、备份和发布前端静态文件。常规发布不需要再手工登录服务器。
+
+自动发布链路如下：
+
+```text
+git push origin HEAD:main
+  → .github/workflows/deploy-production.yml
+  → git fetch/pull --ff-only + SHA 校验
+  → scripts/deploy-production.sh
+  → scripts/deploy-production-frontend.sh
+  → /healthz、/readyz 与生产站点验收
+```
 
 ### 1. 提交并推送代码
 
@@ -114,7 +127,7 @@ git push origin HEAD:main
 
 不要把其他未相关的工作树改动一起提交。推送成功后，服务器只能从 GitHub 拉取该提交；服务器上的本地裸仓库、临时目录或手工复制都不属于发布链路。
 
-仓库已配置 GitHub Actions 工作流 `.github/workflows/deploy-production.yml`：每次推送到 `main` 都会通过 SSH 拉取并部署刚推送的精确提交；也可以在 GitHub Actions 页面手动执行 `workflow_dispatch`。首次启用前，在仓库 `Settings → Secrets and variables → Actions` 添加以下 secrets：
+仓库已配置并启用 GitHub Actions 工作流 `.github/workflows/deploy-production.yml`：每次推送到 `main` 都会通过 SSH 拉取并部署刚推送的精确提交；也可以在 GitHub Actions 页面手动执行 `workflow_dispatch`。如需新增服务器或轮换凭据，在仓库 `Settings → Secrets and variables → Actions` 维护以下 secrets：
 
 - `DEPLOY_HOST`：生产服务器主机名或 IP；
 - `DEPLOY_PORT`：SSH 端口，可省略（默认 `22`）；
@@ -125,7 +138,11 @@ git push origin HEAD:main
 
 工作流会拒绝非 GitHub `origin`、受跟踪文件的服务器本地改动和提交 SHA 不匹配，并在拉取失败时自动重试后依次执行 `scripts/deploy-production.sh` 与 `scripts/deploy-production-frontend.sh`。后者会在服务器上的 Node 容器中构建前端、备份当前 Nginx 静态目录，再执行 `rsync --delete` 发布最新 `apps/web/dist`。
 
-### 2. 检查并更新服务器工作树
+### 2. 手工恢复与排障（仅必要时）
+
+以下步骤不属于常规发布链路，仅用于 GitHub Actions 故障、服务器维护或紧急回滚。正常发布只需推送 `main` 并查看 Actions 运行结果。
+
+#### 检查并更新服务器工作树
 
 ```powershell
 ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && origin_url="$(git remote get-url origin)" && case "$origin_url" in https://github.com/chemmhi/XianYuAgent.git|git@github.com:chemmhi/XianYuAgent.git) ;; *) echo "拒绝部署：origin 必须指向 GitHub，当前为 $origin_url" >&2; exit 1;; esac && git status --short && git fetch origin main && git pull --ff-only origin main'
@@ -137,7 +154,7 @@ ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && origin_url="$(git remote g
 ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && git remote set-url origin https://github.com/chemmhi/XianYuAgent.git'
 ```
 
-### 3. 重建并滚动 API/Worker
+#### 重建并滚动 API/Worker
 
 生产环境优先只重建应用服务，避免因为基础设施镜像仓库权限、MinIO 拉取或已有数据卷导致整套 Compose 被重启：
 
@@ -153,7 +170,7 @@ ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker compose --profile f
 
 如果完整启动因为 `object-storage` 镜像仓库返回 `unauthorized` 失败，保持现有基础设施容器运行，改用上面的 `docker compose build api worker` 与 `docker compose up -d --no-deps api worker`。
 
-### 4. 应用已有 PostgreSQL volume 的迁移
+#### 应用已有 PostgreSQL volume 的迁移
 
 已有数据卷不会因为 Compose 重建而自动重放新迁移。服务器必须从已拉取的 GitHub 工作树执行迁移，再开放新功能写入：
 
@@ -161,7 +178,7 @@ ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker compose --profile f
 ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && POSTGRES_PASSWORD="$(sed -n "s/^POSTGRES_PASSWORD=//p" .env | tr -d "\r" | head -n 1)" && test -n "$POSTGRES_PASSWORD" && docker run --rm --network xianyu-agent-prod_default -v "$PWD:/workspace" -w /workspace -e DATABASE_URL="postgres://xianyu:${POSTGRES_PASSWORD}@postgres:5432/xianyu_agent" node:24-bookworm-slim node apps/api/scripts/migrate.mjs'
 ```
 
-### 5. 在服务器工作树构建并发布前端
+#### 在服务器工作树构建并发布前端
 
 服务器不需要安装 Node/npm；前端必须从服务器已拉取的 GitHub 工作树构建，并在服务器本机备份后发布到 Nginx 目录。开发机不得上传 `dist` 或源码：
 
@@ -170,7 +187,7 @@ ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker run --rm -u 0 -e NP
 ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && backup="/var/backups/xy.chemhi.top-$(date +%Y%m%d%H%M%S)" && sudo mkdir -p "$backup" && sudo tar -czf "$backup/site.tgz" -C /var/www/xy.chemhi.top . && sudo rsync -a --delete apps/web/dist/ /var/www/xy.chemhi.top/'
 ```
 
-### 6. 部署后验收
+#### 部署后验收
 
 ```powershell
 ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker compose ps'
@@ -180,7 +197,7 @@ ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker compose exec -T pos
 
 API/Worker 应为 `Up`，日志应包含 `repairMode=enforce`、`primaryRoute=repair` 和 `outcomeReviewWorker=enabled`；策略表至少应有一个有效账号策略。若出现 `28P01`，优先检查 `POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_DB` 与已存在数据卷是否一致。
 
-### 7. 自动回复相关环境变量
+### 3. 自动回复相关环境变量
 
 `.env` 是隐藏文件，`ls` 默认不会显示；它只在服务器上保存运行配置，不进入 Git。Compose 通过显式映射把需要的变量注入 API/Worker，不能假设“服务器有 `.env`”就等于“容器能读取 `.env`”。
 
