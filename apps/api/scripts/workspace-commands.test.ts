@@ -89,6 +89,30 @@ test('workspace_prepare_write accepts canonical coupon parameters and preserves 
   assert.equal(result.content.includes('权益内容'), false);
 });
 
+test('workspace_prepare_write normalizes flat automation fields into canonical parameters', async () => {
+  const product = { id: 'product-flat-automation', accountId: 'account-1', title: '测试自动发货商品', configVersion: 1 };
+  const config = { paidAutoDelivery: { enabled: true, couponBatchIds: ['batch-1'] } };
+  const commands = orchestrator({
+    products: { get: async () => product },
+    productAutomation: { get: async () => ({ configVersion: 1, product, config: {} }), update: async () => ({ configVersion: 2, config }) },
+  });
+
+  const result = await commands.executeModelTool('workspace_prepare_write', {
+    operation: 'product_automation_update',
+    productId: product.id,
+    config,
+  }, input);
+
+  assert.equal(result.kind, 'write_plan');
+  assert.deepEqual(result.plan?.executionPlan, {
+    action: 'product_automation_update',
+    accountId: input.accountId,
+    productId: product.id,
+    expectedConfigVersion: 1,
+    config,
+  });
+});
+
 test('resolves numeric external product refs and builds a disable-all automation patch', async () => {
   const product = { id: 'product-108244', accountId: 'account-1', externalProductRef: '1082449333831', title: '视频下载及文案提取源码，包教包会', configVersion: 4 };
   let updatedConfig: unknown;
