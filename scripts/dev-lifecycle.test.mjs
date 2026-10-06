@@ -5,6 +5,7 @@ import test from 'node:test';
 import {
   assertPortFree,
   pidFilePath,
+  projectRoot,
   readPidFile,
   removePidFile,
   writePidFile,
@@ -15,7 +16,7 @@ test('runner pid state round-trips and cleans up', () => {
   writePidFile();
   const record = readPidFile();
   assert.equal(record?.pid, process.pid);
-  assert.match(record?.root ?? '', /XianYuAgent-npm-dev-stability-20261006$/);
+  assert.equal(record?.root, projectRoot);
   removePidFile();
   assert.equal(readPidFile(), null);
 });
