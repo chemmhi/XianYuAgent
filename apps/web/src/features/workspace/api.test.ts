@@ -64,4 +64,20 @@ describe('workspace canonical API adapter', () => {
     expect(requestedPath).toBe('/api/v1/workspace/agent-sessions/session-1/messages?limit=100');
     expect(messages[0]).toMatchObject({ id: 'message-1', title: '用户', runId: 'run-1', type: 'user_message' });
   });
+
+  it('deletes a session through the canonical idempotent route', async () => {
+    const calls: Array<{ path: string; headers?: HeadersInit }> = [];
+    const api = createWorkspaceApi({
+      async get<T>() { throw new Error('unexpected GET'); },
+      async delete<T>(path: string, init?: RequestInit) {
+        calls.push({ path, headers: init?.headers });
+        return { success: true, data: { deleted: true, sessionId: 'session-1' } } as T;
+      },
+    });
+
+    await expect(api.deleteSession('session-1')).resolves.toEqual({ deleted: true, sessionId: 'session-1' });
+    expect(calls[0]?.path).toBe('/api/v1/workspace/agent-sessions/session-1');
+    expect(calls[0]?.headers).toEqual(expect.objectContaining({ 'Idempotency-Key': expect.stringContaining('workspace-session-delete-') }));
+  });
+
 });

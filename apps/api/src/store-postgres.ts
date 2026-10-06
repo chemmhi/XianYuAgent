@@ -1734,6 +1734,30 @@ export class PostgresStore implements Store {
     return result.rows[0] ? this.toAgentSession(result.rows[0]) : this.getAgentSession(adminId, sessionId).then((session) => session);
   }
 
+  async deleteAgentSession(adminId: string, sessionId: string): Promise<AgentSessionRecord | undefined> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const sessionResult = await client.query("select s.* from workspace.agent_sessions s where s.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=s.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now())) for update", [sessionId, adminId]);
+      const sessionRow = sessionResult.rows[0];
+      if (!sessionRow) { await client.query('rollback'); return undefined; }
+      const runResult = await client.query('select id,status from workspace.runs where session_id=$1 for update', [sessionId]);
+      const terminalStatuses = new Set(['succeeded', 'partially_succeeded', 'failed', 'cancelled', 'expired']);
+      if (runResult.rows.some((row) => !terminalStatuses.has(String(row.status)))) throw new Error('SESSION_HAS_ACTIVE_RUN');
+      const runIds = runResult.rows.map((row) => String(row.id));
+      if (runIds.length) {
+        await client.query("delete from execution.outbox_jobs where aggregate_type='workspace_run' and aggregate_id = any($1::uuid[])", [runIds]);
+      }
+      await client.query('delete from workspace.runs where session_id=$1', [sessionId]);
+      const deleted = await client.query('delete from workspace.agent_sessions where id=$1 returning *', [sessionId]);
+      await client.query('commit');
+      return deleted.rows[0] ? this.toAgentSession(deleted.rows[0]) : undefined;
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally { client.release(); }
+  }
+
   async createRun(input: { adminId: string; accountId: string; sessionId: string; instruction: string; clientRunRef?: string; route?: string }): Promise<{ run: RunRecord; steps: StepRecord[] }> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
     const client = await this.pool.connect();

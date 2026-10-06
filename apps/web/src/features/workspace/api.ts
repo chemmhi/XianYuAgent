@@ -3,6 +3,7 @@ import type { WorkspaceConfirmationVM, WorkspaceMessageVM, WorkspaceOutboxVM, Wo
 export interface WorkspaceApiTransport {
   get<T>(path: string): Promise<T>;
   post?<T>(path: string, body?: unknown, init?: RequestInit): Promise<T>;
+  delete?<T>(path: string, init?: RequestInit): Promise<T>;
 }
 
 export interface WorkspaceApi {
@@ -10,6 +11,7 @@ export interface WorkspaceApi {
   createSession(input: { accountId: string; title: string; summary?: string }): Promise<WorkspaceSessionVM>;
   switchSession(sessionId: string): Promise<WorkspaceSessionVM>;
   archiveSession(sessionId: string): Promise<WorkspaceSessionVM>;
+  deleteSession(sessionId: string): Promise<{ deleted: boolean; sessionId: string }>;
   listMessages(sessionId: string, limit?: number): Promise<WorkspaceMessageVM[]>;
   startRun(input: { accountId: string; sessionId: string; instruction: string; clientRunRef: string }): Promise<WorkspaceRunVM>;
   getRun(runId: string): Promise<WorkspaceRunVM>;
@@ -66,6 +68,10 @@ export function createWorkspaceApi(transport: WorkspaceApiTransport, options: { 
     async createSession(input) { return unwrap(await post<WorkspaceSessionVM | ApiEnvelope<WorkspaceSessionVM>>('/api/v1/workspace/agent-sessions', input, 'workspace-session')); },
     async switchSession(sessionId) { return unwrap(await post<WorkspaceSessionVM | ApiEnvelope<WorkspaceSessionVM>>(`/api/v1/workspace/agent-sessions/${encodeURIComponent(sessionId)}/switch`, {}, 'workspace-switch')); },
     async archiveSession(sessionId) { return unwrap(await post<WorkspaceSessionVM | ApiEnvelope<WorkspaceSessionVM>>(`/api/v1/workspace/agent-sessions/${encodeURIComponent(sessionId)}/archive`, {}, 'workspace-archive')); },
+    async deleteSession(sessionId) {
+      if (!transport.delete) throw new Error('WORKSPACE_MUTATION_UNAVAILABLE');
+      return unwrap(await transport.delete<{ deleted: boolean; sessionId: string } | ApiEnvelope<{ deleted: boolean; sessionId: string }>>(`/api/v1/workspace/agent-sessions/${encodeURIComponent(sessionId)}`, { headers: { 'Idempotency-Key': idempotencyKey('workspace-session-delete') } }));
+    },
     async listMessages(sessionId, limit = 100) {
       const payload = await transport.get<MessagePayload | ApiEnvelope<MessagePayload>>(`/api/v1/workspace/agent-sessions/${encodeURIComponent(sessionId)}/messages?limit=${Math.max(1, Math.min(500, Math.trunc(limit)))}`);
       return (unwrap(payload).items ?? []).map((message) => ({ id: message.id, runId: message.runId, type: message.type, createdAt: message.createdAt, title: message.type === 'tool_event' && message.summary?.trim() ? message.summary.trim() : messageTitle(message.type), content: message.content, summary: message.summary, sequence: message.sequence, collapsible: message.type === 'reasoning_summary' }));

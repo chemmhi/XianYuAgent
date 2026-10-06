@@ -24,6 +24,10 @@
 .workspace-session-action { display: grid; place-items: center; align-self: center; width: 32px; height: 30px; margin-right: 5px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--sub); }
 .workspace-session-action:hover:not(:disabled) { background: #fff; color: var(--danger); }
 .workspace-session-action-icon { width: 16px; height: 16px; }
+.workspace-delete-modal { max-width: 460px; }
+.workspace-delete-summary { display: grid; gap: 6px; padding: 12px; border: 1px solid rgba(180,35,24,.18); border-radius: 10px; background: var(--danger-bg); }
+.workspace-delete-summary strong { color: var(--danger); font-size: var(--font-size-body); line-height: var(--font-line-body); }
+.workspace-delete-summary span { color: var(--muted); font-size: var(--font-size-body-compact); line-height: 1.5; }
 .workspace-list-state { padding: 26px 12px; color: var(--sub); font-size: var(--font-size-meta); line-height: var(--font-line-meta); text-align: center; }
 .workspace-main-column { display: grid; align-content: start; gap: 16px; min-width: 0; }
 .workspace-composer-panel, .workspace-run-panel { padding: 0; }

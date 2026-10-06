@@ -1132,6 +1132,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   }
 
   const workspaceSessionAction = ctx.path.match(/^\/api\/v1\/workspace\/agent-sessions\/([^/]+)\/(switch|archive)$/);
+  const workspaceSessionDeleteMatch = ctx.path.match(/^\/api\/v1\/workspace\/agent-sessions\/([^/]+)$/);
   if (ctx.path === '/api/v1/workspace/agent-sessions' && ctx.method === 'GET') {
     return { statusCode: 200, body: success(ctx, { items: await workspace.listSessions({ adminId: authContext.admin.id, accountId: optionalString(ctx.query.accountId), search: optionalString(ctx.query.search) }) }).body };
   }
@@ -1153,6 +1154,13 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     return mutation(runtime, ctx, authContext, undefined, async () => workspaceSessionAction[2] === 'switch'
       ? success(ctx, await workspace.switchSession({ adminId: authContext.admin.id, sessionId, requestId: ctx.requestId, traceId: ctx.traceId }))
       : success(ctx, await workspace.archiveSession({ adminId: authContext.admin.id, sessionId, requestId: ctx.requestId, traceId: ctx.traceId })));
+  }
+  if (workspaceSessionDeleteMatch && ctx.method === 'DELETE') {
+    const sessionId = decodeURIComponent(workspaceSessionDeleteMatch[1]);
+    return mutation(runtime, ctx, authContext, undefined, async () => {
+      const deleted = await workspace.deleteSession({ adminId: authContext.admin.id, sessionId, requestId: ctx.requestId, traceId: ctx.traceId });
+      return success(ctx, { deleted: true, sessionId: deleted.id });
+    });
   }
 
   if (ctx.path === '/api/v1/workspace/runs' && ctx.method === 'POST') {
