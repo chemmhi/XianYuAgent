@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { listWorkspaceSessions } from './controller';
+import { getWorkspaceRunCandidates, listWorkspaceSessions, pickWorkspaceRun } from './controller';
 import type { WorkspaceApi } from './api';
+import type { WorkspaceMessageVM, WorkspaceRunVM } from './types';
 
 describe('workspace controller session loading', () => {
   it('forwards the server-side search term to the workspace API', async () => {
@@ -12,5 +13,22 @@ describe('workspace controller session loading', () => {
 
     expect(listSessions).toHaveBeenNthCalledWith(1, 'account-1', '巡检');
     expect(listSessions).toHaveBeenNthCalledWith(2, 'account-1', '库存');
+  });
+});
+
+describe('workspace confirmation recovery', () => {
+  it('keeps non-terminal runs recoverable even when a later run is terminal', () => {
+    const messages: WorkspaceMessageVM[] = [
+      { id: 'user-1', runId: 'run-waiting', type: 'user_message', createdAt: '2026-10-06T00:00:00.000Z', title: '用户', content: '需要确认' },
+      { id: 'user-2', runId: 'run-succeeded', type: 'user_message', createdAt: '2026-10-06T00:01:00.000Z', title: '用户', content: '后续查询' },
+    ];
+    const candidates = getWorkspaceRunCandidates(messages);
+    expect(candidates).toEqual(['run-succeeded', 'run-waiting']);
+
+    const waiting = { runId: 'run-waiting', status: 'waiting_confirmation' } as WorkspaceRunVM;
+    const running = { runId: 'run-running', status: 'running' } as WorkspaceRunVM;
+    const succeeded = { runId: 'run-succeeded', status: 'succeeded' } as WorkspaceRunVM;
+    expect(pickWorkspaceRun([succeeded, waiting])).toBe(waiting);
+    expect(pickWorkspaceRun([running, waiting])).toBe(waiting);
   });
 });

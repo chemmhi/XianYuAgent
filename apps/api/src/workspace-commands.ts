@@ -172,9 +172,9 @@ export class WorkspaceCommandOrchestrator {
       const manifest: Record<string, unknown> = { action, accountId, productId, expectedConfigVersion: await this.currentProductVersion(input.adminId, productId), fields: safeFieldNames(fields) };
       if (disablingAutomation) {
         manifest.config = {
-          paidAutoDelivery: { enabled: false },
+          paidAutoDelivery: { enabled: false, couponBatchIds: [] },
           unpaidAutoReprice: { enabled: false },
-          reviewGift: { enabled: false },
+          reviewGift: { enabled: false, couponBatchIds: [] },
           reviewReminder: { enabled: false },
         };
       }

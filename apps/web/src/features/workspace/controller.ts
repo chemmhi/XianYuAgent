@@ -3,6 +3,26 @@ import { createWorkspaceApi, type WorkspaceApi } from './api';
 import type { WorkspaceConfirmationVM, WorkspaceMessageVM, WorkspaceOutboxVM, WorkspaceRunEventVM, WorkspaceRunVM, WorkspaceSessionVM, WorkspaceState } from './types';
 
 const defaultApi = createWorkspaceApi({ get: async () => { throw new Error('WORKSPACE_API_UNAVAILABLE'); } });
+const terminalRunStatuses = new Set<WorkspaceRunVM['status']>(['succeeded', 'partially_succeeded', 'failed', 'cancelled', 'expired']);
+
+export function getWorkspaceRunCandidates(messages: WorkspaceMessageVM[]): string[] {
+  const seen = new Set<string>();
+  const candidates: string[] = [];
+  for (const message of [...messages].reverse()) {
+    const runId = message.runId?.trim();
+    if (!runId || seen.has(runId)) continue;
+    seen.add(runId);
+    candidates.push(runId);
+  }
+  return candidates;
+}
+
+export function pickWorkspaceRun(runs: WorkspaceRunVM[]): WorkspaceRunVM | null {
+  return runs.find((run) => run.status === 'waiting_confirmation')
+    ?? runs.find((run) => !terminalRunStatuses.has(run.status))
+    ?? runs[0]
+    ?? null;
+}
 
 function normalizeError(error: unknown): { message: string; forbidden: boolean } {
   const status = typeof error === 'object' && error && 'status' in error ? Number((error as { status?: unknown }).status) : undefined;
@@ -34,9 +54,10 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
   }, [sessionStorageKey]);
 
   const recoverRun = useCallback(async (messages: WorkspaceMessageVM[]) => {
-    const latestRunId = [...messages].reverse().find((message) => message.runId)?.runId;
-    if (!latestRunId) return { run: null, events: [], confirmation: null, outbox: [] as WorkspaceOutboxVM[] };
-    const run = await api.getRun(latestRunId).catch(() => null);
+    const candidateRunIds = getWorkspaceRunCandidates(messages).slice(0, 12);
+    if (!candidateRunIds.length) return { run: null, events: [], confirmation: null, outbox: [] as WorkspaceOutboxVM[] };
+    const runs = (await Promise.all(candidateRunIds.map(async (runId) => api.getRun(runId).catch(() => null)))).filter((run): run is WorkspaceRunVM => Boolean(run));
+    const run = pickWorkspaceRun(runs);
     if (!run) return { run: null, events: [], confirmation: null, outbox: [] as WorkspaceOutboxVM[] };
     const [events, confirmation, outbox] = await Promise.all([
       api.listEvents(run.runId, 0).catch(() => [] as WorkspaceRunEventVM[]),
@@ -53,7 +74,8 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
       runRef.current = null;
       eventCursorRef.current = 0;
       runRefreshRequestRef.current += 1;
-      rememberActiveSession(undefined);
+      // Keep the per-account session cache while account context is loading.
+      // The provider can briefly render without an account during tab remounts.
       setState((previous) => ({ ...previous, phase: 'empty', sessions: [], activeSessionId: undefined, run: null, messages: [], events: [], connection: 'idle', error: null, confirmation: null, outbox: [] }));
       return;
     }
