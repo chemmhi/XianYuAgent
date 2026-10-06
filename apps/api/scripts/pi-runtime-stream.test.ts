@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MemoryStore } from '../src/store-memory.js';
-import { OpenAICompatibleModelClient, PiRuntimeAdapter, type ModelClient, type ModelCompletionResult, type ModelStreamHandlers } from '../src/pi-runtime.js';
+import { buildWorkspaceModelMessages, detectWorkspaceResponseLanguage, OpenAICompatibleModelClient, PiRuntimeAdapter, type ModelClient, type ModelCompletionResult, type ModelStreamHandlers } from '../src/pi-runtime.js';
 import type { WorkspaceCommandOrchestrator } from '../src/workspace-commands.js';
 
 function sse(...events: string[]): Response {
@@ -50,8 +50,10 @@ test('Pi runtime executes model-selected workspace tools and streams results', a
   const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Streaming' });
   const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '查看商品', clientRunRef: 'stream-runtime' });
   let round = 0;
+  const requests: Array<{ messages: Array<{ role: string; content: unknown }> }> = [];
   const model: ModelClient = {
-    async stream(_input, handlers: ModelStreamHandlers): Promise<ModelCompletionResult> {
+    async stream(input, handlers: ModelStreamHandlers): Promise<ModelCompletionResult> {
+      requests.push({ messages: input.messages });
       round += 1;
       if (round === 1) {
         await handlers.onReasoningDelta?.('需要读取商品数据');
@@ -82,7 +84,49 @@ test('Pi runtime executes model-selected workspace tools and streams results', a
   assert.ok(events.some((event) => event.eventType === 'tool.call.started' && event.payload.toolName === 'workspace_read'));
   assert.ok(events.some((event) => event.eventType === 'tool.result' && event.payload.status === 'succeeded'));
   assert.ok(events.some((event) => event.eventType === 'assistant.delta' && String(event.payload.contentDelta).includes('商品读取完成')));
+  assert.match(String(requests[0]?.messages.find((message) => message.role === 'system')?.content), /简体中文/);
+  assert.match(String(requests[0]?.messages.find((message) => message.role === 'system')?.content), /思考摘要/);
   assert.equal((await store.getRun(admin.id, created.run.id))?.run.status, 'succeeded');
+  runtime.stop();
+});
+
+test('workspace model messages follow the language of the current user instruction', () => {
+  assert.equal(detectWorkspaceResponseLanguage('请查看商品状态'), 'zh-CN');
+  assert.equal(detectWorkspaceResponseLanguage('Check the product status'), 'en');
+
+  const chineseMessages = buildWorkspaceModelMessages([{ role: 'assistant', content: 'previous English history' }], '请用中文总结商品状态');
+  const chineseSystem = chineseMessages.find((message) => message.role === 'system');
+  assert.match(String(chineseSystem?.content), /简体中文/);
+  assert.equal(chineseMessages.at(-1)?.role, 'user');
+
+  const englishMessages = buildWorkspaceModelMessages([], 'Summarize the product status');
+  const englishSystem = englishMessages.find((message) => message.role === 'system');
+  assert.match(String(englishSystem?.content), /Response language rule/);
+});
+
+test('Pi runtime adds the current Chinese language rule to non-streaming fallback requests', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'language-fallback@example.com', passwordHash: 'hash', displayName: 'Language Fallback' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'language-fallback' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Language fallback' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '\u8bf7\u7ed9\u6211\u4e00\u4e2a\u7b80\u77ed\u603b\u7ed3' });
+  let request;
+  const model: ModelClient = {
+    async complete(input) {
+      request = { messages: input.messages };
+      return { content: 'done', model: 'fallback-model' };
+    },
+  };
+  const runtime = new PiRuntimeAdapter(store, model, { model: 'fallback-model' });
+  runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const bundle = await store.getRun(admin.id, created.run.id);
+    if (bundle?.run.status === 'succeeded' || bundle?.run.status === 'failed') break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal((await store.getRun(admin.id, created.run.id))?.run.status, 'succeeded');
+  assert.match(String(request?.messages.find((message) => message.role === 'system')?.content), /\u7b80\u4f53\u4e2d\u6587/u);
   runtime.stop();
 });
 

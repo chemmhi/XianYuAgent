@@ -313,6 +313,49 @@ export interface PiRuntimeEnqueueInput {
   history?: ModelMessage[];
 }
 
+const WORKSPACE_AGENT_SYSTEM_PROMPT = [
+  '你是 Workspace Agent。请根据工具契约自主选择工具，并始终以工具返回的真实结果为依据。',
+  '需要查询具体商品名称或外部编号时，优先使用 workspace_product_search，不要先加载完整商品列表。',
+  '取消、下架、更新、发布、发货或其他写入操作必须使用 workspace_prepare_write，并等待用户确认；不要用 workspace_read 代替写操作。',
+  'Pi Skill 的登录状态按管理员和 Skill 持久化：已授权时复用已有状态，除非 Skill 返回 requiresLogin 或用户明确要求重新登录，否则不要再次调用 pi_skill_login。',
+  '只为安装调用 pi_skill_install，只为登录调用 pi_skill_login，只能使用 Skill 明确记录的命令调用 pi_skill_exec；不要把 bash、install 等 shell 命令传给 pi_skill_exec。',
+  '如果 Skill 返回 requiresLogin、unauthorized、pending_user_action 或 userActionRequired，不要重复原命令；最多发起一次登录流程，或直接返回用户需要完成的操作，然后停止工具执行。',
+  '工具返回后，要么基于结果回答，要么只在结果明确要求修正时选择其他工具。没有拿到工具结果时，不要声称工具已经执行。',
+  '最终答复简洁、准确，并且只基于当前上下文和工具结果。',
+].join('\n');
+
+const WORKSPACE_LANGUAGE_INSTRUCTIONS: Record<WorkspaceResponseLanguage, string> = {
+  'zh-CN': [
+    '输出语言规则（最高优先级）：当前用户消息包含中文字符时，思考摘要、工具调用说明、工具结果说明和最终答复全部使用简体中文。',
+    '不要因为工具名、字段名、历史消息或系统提示中出现英文而切换成英文；工具名、字段名、代码和 API 名称可以原样保留。',
+  ].join('\n'),
+  en: [
+    'Response language rule (highest priority): when the current user message does not contain Chinese characters, write reasoning summaries, tool explanations, tool-result explanations, and the final answer in English.',
+    'Keep tool names, field names, code, and API names unchanged when needed.',
+  ].join('\n'),
+};
+
+export type WorkspaceResponseLanguage = 'zh-CN' | 'en';
+
+export function detectWorkspaceResponseLanguage(instruction: string): WorkspaceResponseLanguage {
+  return /[\u3400-\u9fff]/u.test(instruction) ? 'zh-CN' : 'en';
+}
+
+export function buildWorkspaceModelMessages(history: ModelMessage[], instruction: string, skillPrompt = ''): ModelMessage[] {
+  const messages: ModelMessage[] = [...history];
+  const languagePrompt = WORKSPACE_LANGUAGE_INSTRUCTIONS[detectWorkspaceResponseLanguage(instruction)];
+  if (messages.some((message) => message.role === 'system')) {
+    // Keep caller-provided system context, but place the language rule before
+    // conversation history so the current user's language wins consistently.
+    const firstNonSystem = messages.findIndex((message) => message.role !== 'system');
+    messages.splice(firstNonSystem < 0 ? messages.length : firstNonSystem, 0, { role: 'system', content: languagePrompt });
+  } else {
+    messages.unshift({ role: 'system', content: [WORKSPACE_AGENT_SYSTEM_PROMPT, skillPrompt, languagePrompt].filter(Boolean).join('\n\n') });
+  }
+  messages.push({ role: 'user', content: instruction });
+  return messages;
+}
+
 const runTransitions: Record<RunStatus, RunStatus[]> = {
   queued: ['running', 'cancelled', 'expired'],
   running: ['waiting_confirmation', 'executing', 'failed', 'cancelled'],
@@ -440,7 +483,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
 
       await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: '未匹配到内置工作区命令，正在调用模型生成回复。', summary: '调用模型' });
       const result = await modelClient.complete({
-        messages: [...(input.history ?? []), { role: 'user', content: input.run.instruction }],
+        messages: buildWorkspaceModelMessages(input.history ?? [], input.run.instruction),
         signal,
       });
       if (this.stopped || signal.aborted) return;
@@ -469,12 +512,8 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     await this.emit(input.run.id, 'step.executing', { stepId: step.id, status: 'executing', messageType: 'tool_event' });
 
     const tools = [...commands.getModelTools(), ...(this.options.skillManager?.getModelTools() ?? [])];
-    const messages: ModelMessage[] = [...(input.history ?? [])];
-    if (!messages.some((message) => message.role === 'system')) {
-      const skillPrompt = this.options.skillManager ? await this.options.skillManager.buildSystemPrompt(input.adminId ?? input.run.requestedBy) : '';
-      messages.unshift({ role: 'system', content: ['You are a Workspace agent. Choose tools autonomously from their contracts. Use workspace_product_search for a product-specific name or external-number lookup instead of loading the full product list. Use workspace_prepare_write for cancellation, disable, update, publish, delivery, or other mutations and wait for confirmation; never use workspace_read for those actions. Pi Skill login state is persisted per admin and Skill across sessions: reuse an authorized state, do not call pi_skill_login again unless the Skill result reports requiresLogin or the user explicitly asks to re-authenticate. Use pi_skill_install only for installation, pi_skill_login only for login, and pi_skill_exec only with a command explicitly documented by the Skill; never pass shell commands such as bash or install to pi_skill_exec. If a Skill result reports requiresLogin, unauthorized, pending_user_action, or userActionRequired, do not repeat the original command; start at most one login flow or return the user action prompt and stop tool execution. After a tool result, either answer from the result or choose a different tool only when the result explicitly says the request needs correction. Do not claim a tool ran unless its result is returned. Keep the final answer concise and grounded in tool results.', skillPrompt].filter(Boolean).join('\n\n') });
-    }
-    messages.push({ role: 'user', content: input.run.instruction });
+    const skillPrompt = this.options.skillManager ? await this.options.skillManager.buildSystemPrompt(input.adminId ?? input.run.requestedBy) : '';
+    const messages = buildWorkspaceModelMessages(input.history ?? [], input.run.instruction, skillPrompt);
 
     const allReasoning: string[] = [];
     let finalResult: ModelCompletionResult | undefined;
