@@ -158,12 +158,27 @@ function traceSummary(group: WorkspaceAgentTraceGroup): string {
   const parts = [
     stepCount ? `${stepCount} 个步骤` : '',
     toolCount ? `${toolCount} 次工具调用` : '',
-    durationMs ? `${durationMs}ms` : '',
+    durationMs ? `已处理 ${formatDuration(durationMs)}` : '',
   ].filter(Boolean);
   return `已完成${parts.length ? ` ${parts.join(' · ')}` : ''}`;
 }
 
-function AgentTraceView({ group, expanded, onToggle }: { group: WorkspaceAgentTraceGroup; expanded: boolean; onToggle: () => void }) { const latest = group.messages[group.messages.length - 1]; const active = latest?.status ? statusTone(latest.status) === 'info' : false; return <article className="workspace-agent-trace"><button type="button" className="workspace-trace-toggle" onClick={onToggle} aria-expanded={expanded}><span className="workspace-trace-copy"><strong>{active ? '正在处理' : traceSummary(group)}</strong></span><span className="workspace-trace-action">{expanded ? '收起' : '可展开'}</span><span className="workspace-message-chevron" aria-hidden="true">{expanded ? '⌃' : '⌄'}</span></button>{expanded && <div className="workspace-trace-details">{group.messages.map((message) => <div className="workspace-trace-row" key={message.id}><span className="workspace-trace-row-dot" aria-hidden="true" /><div><strong>{message.type === 'reasoning_summary' ? (message.summary ?? '执行步骤') : message.title}</strong><p>{message.content}</p>{message.eventType && <small>{eventTitle(message.eventType)}{message.sequence ? ` · #${message.sequence}` : ''}</small>}</div></div>)}</div>}</article>; }
+function formatDuration(durationMs: number): string {
+  const totalSeconds = Math.max(1, Math.round(durationMs / 1_000));
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}小时${minutes ? ` ${minutes}分钟` : ''}${seconds ? ` ${seconds}秒` : ''}`;
+  if (minutes > 0) return `${minutes}分钟${seconds ? ` ${seconds}秒` : ''}`;
+  return `${seconds}秒`;
+}
+
+function truncateTraceText(value: string, maxLength = 52): string {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  return normalized.length <= maxLength ? normalized : `${normalized.slice(0, Math.max(1, maxLength - 1))}…`;
+}
+
+function AgentTraceView({ group, expanded, onToggle }: { group: WorkspaceAgentTraceGroup; expanded: boolean; onToggle: () => void }) { const latest = group.messages[group.messages.length - 1]; const active = latest?.status ? statusTone(latest.status) === 'info' : false; const latestText = latest ? truncateTraceText(latest.summary ?? latest.content) : ''; return <article className="workspace-agent-trace"><button type="button" className="workspace-trace-toggle" onClick={onToggle} aria-expanded={expanded}><span className="workspace-trace-copy"><strong>{active && latestText ? `正在处理 · ${latestText}` : active ? '正在处理' : traceSummary(group)}</strong></span><span className="workspace-trace-action">{expanded ? '收起' : '可展开'}</span><span className="workspace-message-chevron" aria-hidden="true">{expanded ? '⌃' : '⌄'}</span></button>{expanded && <div className="workspace-trace-details">{group.messages.map((message) => <div className="workspace-trace-row" key={message.id}><span className="workspace-trace-row-dot" aria-hidden="true" /><div><strong>{message.type === 'reasoning_summary' ? (message.summary ?? '执行步骤') : message.title}</strong><p>{message.content}</p>{message.eventType && <small>{eventTitle(message.eventType)}{message.sequence ? ` · #${message.sequence}` : ''}</small>}</div></div>)}</div>}</article>; }
 function MessageBubble({ message }: { message: WorkspaceMessageVM }) { if (message.type === 'user_message') return <article className="workspace-message workspace-message-user"><div className="workspace-message-content"><MarkdownContent className="workspace-markdown" content={message.content} /></div></article>; if (message.type === 'final_answer') return <article className={`workspace-message workspace-message-final ${message.status && statusTone(message.status) === 'danger' ? 'is-error' : ''}`}><div className="workspace-message-content"><MarkdownContent className="workspace-markdown" content={message.content} /></div></article>; return <article className="workspace-message workspace-message-assistant"><div className="workspace-message-content"><MarkdownContent className="workspace-markdown" content={message.content} /></div></article>; }
 function WorkspaceContextPanel({ account }: { account?: { displayName?: string } }) { return <section className="card workspace-context-panel"><div className="workspace-context-head"><div><p className="eyebrow">当前上下文</p><h3>当前上下文</h3></div><button className="icon-button" type="button" aria-label="编辑上下文">✎</button></div><div className="workspace-context-account"><strong>{account?.displayName ?? '闲鱼账号 A'}</strong><span>已连接 · 消息监听正常</span></div><div className="workspace-context-list"><div><b>商品</b><span>未指定</span></div><div><b>订单</b><span>未指定</span></div><div><b>权限范围</b><span>workspace.run / audit.read</span></div></div><div className="workspace-capability-grid"><span>read.products</span><span>write.products</span><span>audit.run</span></div><div className="workspace-context-footer">凭证引用：cred_••••</div></section>; }
 function WorkspaceConfirmationCard({ run, accountName, confirmation, actionSubmitting, onConfirm, onCancel }: { run: WorkspaceRunVM; accountName: string; confirmation: WorkspaceConfirmationVM; actionSubmitting: boolean; onConfirm: () => void; onCancel: () => void }) {

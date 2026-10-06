@@ -108,6 +108,10 @@ export function eventTitle(eventType: string): string {
     'step.succeeded': '步骤已完成',
     'step.failed': '步骤失败',
     'workspace.confirmation.created': '已生成确认卡',
+    'workspace.execution.summary': '执行摘要已更新',
+    'tool.call.started': '开始调用工具',
+    'tool.call.completed': '工具调用已选定',
+    'tool.result': '工具结果已返回',
     'workspace.confirmation.confirmed': '确认已提交',
     'workspace.outbox.enqueued': '已进入执行队列',
     'workspace.outbox.completed': '执行队列已完成',
@@ -187,6 +191,7 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
   const seenReasoningKeys = new Set<string>();
   let finalAnswerRendered = false;
   const hasPersistedFinalAnswer = events.some((event) => event.eventType !== 'assistant.delta' && messageType(event) === 'final_answer');
+  const hasStreamingFinalAnswer = events.some((event) => event.eventType === 'assistant.delta' && typeof event.payload.contentDelta === 'string' && event.payload.contentDelta.trim());
   mergeStreamingEvents(events, { ignoreAssistantDeltas: hasPersistedFinalAnswer }).sort((left, right) => left.sequence - right.sequence).forEach((event) => {
     if (!shouldProjectEvent(event)) return;
     if (event.eventType === 'workspace.message') return;
@@ -226,7 +231,7 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
     });
   });
 
-  if (terminalStatuses.has(run.status) && !hasPersistedFinalAnswer) {
+  if (terminalStatuses.has(run.status) && !hasPersistedFinalAnswer && !hasStreamingFinalAnswer) {
     const failed = run.status === 'failed' || run.status === 'cancelled' || run.status === 'expired';
     messages.push({
       id: `${run.runId}:final`,
@@ -240,11 +245,12 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
   }
 
   return messages.sort((left, right) => {
-    const semanticOrder: Record<WorkspaceMessageVM['type'], number> = { user_message: 0, reasoning_summary: 1, tool_event: 1, final_answer: 2 };
-    const bySemanticOrder = semanticOrder[left.type] - semanticOrder[right.type];
-    if (bySemanticOrder !== 0) return bySemanticOrder;
-    const byTime = new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
-    return byTime || (left.sequence ?? 0) - (right.sequence ?? 0);
+    const rank = (message: WorkspaceMessageVM): number => message.type === 'user_message' ? 0 : message.type === 'final_answer' ? 2 : 1;
+    const byRank = rank(left) - rank(right);
+    if (byRank !== 0) return byRank;
+    const bySequence = (left.sequence ?? 0) - (right.sequence ?? 0);
+    if (bySequence !== 0) return bySequence;
+    return new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
   });
 }
 
@@ -283,20 +289,36 @@ function mergeStreamingEvents(events: WorkspaceRunEventVM[], options: { ignoreAs
       const messageId = `${event.runId}:tool:${toolCallId}`;
       const toolName = typeof payload.toolName === 'string' ? payload.toolName : 'tool';
       let content = `${toolName}`;
-      if (event.eventType === 'tool.call.started') content = `已准备调用：${toolName}`;
-      if (event.eventType === 'tool.call.delta') content = `正在准备调用：${toolName}`;
-      if (event.eventType === 'tool.call.completed') content = `已选择工具：${toolName}`;
+      const progressSummary = typeof payload.summary === 'string' && payload.summary.trim() ? payload.summary.trim() : toolProgressSummary(toolName);
+      if (event.eventType === 'tool.call.started') content = `正在${progressSummary}`;
+      if (event.eventType === 'tool.call.delta') content = `正在准备${progressSummary}`;
+      if (event.eventType === 'tool.call.completed') content = `已选择工具：${toolName}（${progressSummary}）`;
       if (event.eventType === 'tool.result') {
         const result = payload.result;
-        const resultContent = result && typeof result === 'object' && !Array.isArray(result) && typeof (result as Record<string, unknown>).content === 'string'
-          ? String((result as Record<string, unknown>).content)
+        const resultRecord = result && typeof result === 'object' && !Array.isArray(result) ? result as Record<string, unknown> : undefined;
+        const resultSummary = typeof resultRecord?.summary === 'string' && resultRecord.summary.trim() ? resultRecord.summary.trim() : progressSummary;
+        const resultContent = typeof resultRecord?.content === 'string'
+          ? resultRecord.content.trim()
           : typeof result === 'string' ? result : JSON.stringify(result ?? {});
-        content = `工具结果：${resultContent}`;
+        content = resultContent && resultContent !== resultSummary ? `工具结果：${resultSummary}\n${resultContent}` : `工具结果：${resultSummary}`;
       }
-      append(event, 'tool_event', content, messageId, toolName);
+      append(event, 'tool_event', content, messageId, progressSummary);
       return;
     }
     passthrough.push(event);
   });
   return [...passthrough, ...streams.values()];
+}
+
+function toolProgressSummary(toolName: string): string {
+  const labels: Record<string, string> = {
+    workspace_read: '读取工作区数据',
+    workspace_product_search: '检索商品信息',
+    workspace_prepare_write: '准备受控写入',
+    pi_skill_list: '读取已安装 Skill',
+    pi_skill_install: '安装 Skill',
+    pi_skill_login: '登录 Skill',
+    pi_skill_exec: '执行 Skill 命令',
+  };
+  return labels[toolName] ?? `执行 ${toolName}`;
 }

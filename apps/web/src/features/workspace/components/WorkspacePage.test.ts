@@ -124,6 +124,16 @@ describe('Workspace MessageStream', () => {
     expect(html).not.toContain('workspace-message-tool');
   });
 
+  it('renders trace duration in human-friendly units', () => {
+    const messages: WorkspaceMessageVM[] = [
+      { id: 'reasoning-1', runId: 'run-1', type: 'reasoning_summary', createdAt: '2026-09-22T00:00:00.000Z', title: '推理摘要', summary: '读取店铺状态 · 已完成', content: '读取店铺状态' },
+      { id: 'tool-1', runId: 'run-1', type: 'tool_event', createdAt: '2026-09-22T00:05:47.000Z', title: 'workspace_read', eventType: 'tool.result', content: '已读取商品列表' },
+    ];
+    const html = renderToStaticMarkup(createElement(MessageStream, { messages, expandedTrace: null, onToggleTrace: vi.fn() }));
+    expect(html).toContain('已处理 5分钟 47秒');
+    expect(html).not.toContain('347000ms');
+  });
+
   it('renders Markdown in final answers like the ChatGPT conversation surface', () => {
     const messages: WorkspaceMessageVM[] = [
       { id: 'final-1', runId: 'run-1', type: 'final_answer', createdAt: '2026-09-22T00:00:03.000Z', title: 'Agent', content: '找到的商品是 **PPT Master**。\n\n- Windows 安装包\n- `一键卸载脚本`' },

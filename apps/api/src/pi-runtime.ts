@@ -11,6 +11,8 @@ export const DEFAULT_PI_BASE_URL = 'https://api.openai.com/v1';
 export const DEFAULT_PI_MODEL = 'gpt-4o-mini';
 export const DEFAULT_PI_TIMEOUT_MS = 30_000;
 export const DEFAULT_PI_WIRE_API: ModelWireApi = 'responses';
+/** Workspace Agent has its own loop budget; it must not reuse buyer Auto-Reply settings. */
+export const DEFAULT_PI_MAX_TOOL_ROUNDS = 64;
 
 export type ModelWireApi = 'chat' | 'responses';
 
@@ -295,6 +297,8 @@ export interface PiRuntimeMessage {
 
 export interface PiRuntimeAdapterOptions {
   model?: string;
+  /** Independent Workspace tool-loop safety budget. Zero or less means no round cap. */
+  maxToolRounds?: number;
   outputLimit?: number;
   redactSecrets?: string[];
   persistUserMessage?: boolean;
@@ -524,7 +528,10 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     let pendingUserAction: { title: string; summary: string; content: string; data?: Record<string, unknown> } | undefined;
     let completedWithoutTool = false;
     let pendingToolFailure: { toolName: string; code: string; summary: string } | undefined;
-    const maxRounds = 8;
+    const configuredMaxRounds = this.options.maxToolRounds;
+    const maxRounds = configuredMaxRounds !== undefined && configuredMaxRounds <= 0
+      ? Number.POSITIVE_INFINITY
+      : Math.max(1, Math.trunc(configuredMaxRounds ?? DEFAULT_PI_MAX_TOOL_ROUNDS));
     for (let round = 0; round < maxRounds; round += 1) {
       if (this.stopped || signal.aborted) return;
       const streamId = `${input.run.id}:stream:${round + 1}`;
@@ -546,10 +553,12 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
         },
         onToolCallDelta: async (delta) => {
           if (delta.name) toolCallNames.set(delta.index, delta.name);
-          await this.emit(input.run.id, 'tool.call.delta', { streamId, toolCallId: delta.id, toolName: delta.name ?? toolCallNames.get(delta.index), index: delta.index, argumentsDelta: redactSensitiveText(delta.argumentsDelta ?? '', 4_000, this.options.redactSecrets), status: 'streaming' });
+          const toolName = delta.name ?? toolCallNames.get(delta.index);
+          await this.emit(input.run.id, 'tool.call.delta', { streamId, toolCallId: delta.id, toolName, summary: toolName ? workspaceToolProgress(toolName).summary : undefined, index: delta.index, argumentsDelta: redactSensitiveText(delta.argumentsDelta ?? '', 4_000, this.options.redactSecrets), status: 'streaming' });
         },
         onToolCall: async (call) => {
-          await this.emit(input.run.id, 'tool.call.completed', { streamId, toolCallId: call.id, toolName: call.function.name, arguments: redactSensitiveText(normalizeToolArguments(call.function.arguments), 4_000, this.options.redactSecrets), status: 'selected' });
+          const progress = workspaceToolProgress(call.function.name);
+          await this.emit(input.run.id, 'tool.call.completed', { streamId, toolCallId: call.id, toolName: call.function.name, summary: progress.summary, arguments: redactSensitiveText(normalizeToolArguments(call.function.arguments), 4_000, this.options.redactSecrets), status: 'selected' });
         },
       });
       finalResult = result;
@@ -562,8 +571,18 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
 
       messages.push({ role: 'assistant', content: result.content ?? assistant, toolCalls: calls });
       for (const call of calls) {
+        const progress = workspaceToolProgress(call.function.name);
+        await this.emit(input.run.id, 'workspace.execution.summary', {
+          streamId,
+          messageType: 'reasoning_summary',
+          toolCallId: call.id,
+          toolName: call.function.name,
+          summary: progress.summary,
+          content: progress.content,
+          status: 'running',
+        });
         const toolStartedAt = new Date().toISOString();
-        await this.emit(input.run.id, 'tool.call.started', { streamId, toolCallId: call.id, toolName: call.function.name, arguments: redactSensitiveText(normalizeToolArguments(call.function.arguments), 4_000, this.options.redactSecrets), startedAt: toolStartedAt, status: 'running' });
+        await this.emit(input.run.id, 'tool.call.started', { streamId, toolCallId: call.id, toolName: call.function.name, summary: progress.summary, arguments: redactSensitiveText(normalizeToolArguments(call.function.arguments), 4_000, this.options.redactSecrets), startedAt: toolStartedAt, status: 'running' });
         let args: Record<string, unknown>;
         try {
           args = parseModelToolArguments(call.function.arguments);
@@ -571,7 +590,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           const failure = { toolName: call.function.name, code: 'INVALID_TOOL_ARGUMENTS', summary: '工具参数不是可解析的 JSON 对象' };
           pendingToolFailure = failure;
           const errorResult = toolFailureResult(failure);
-          await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, status: 'failed', result: errorResult, completedAt: new Date().toISOString() });
+          await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, summary: failure.summary, status: 'failed', result: errorResult, completedAt: new Date().toISOString() });
           messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(errorResult) });
           continue;
         }
@@ -585,7 +604,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           if (!normalized.ok) {
             pendingToolFailure = { toolName: call.function.name, ...normalized.failure };
             const errorResult = toolFailureResult(pendingToolFailure);
-            await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, status: 'failed', result: errorResult, completedAt: new Date().toISOString() });
+            await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, summary: pendingToolFailure.summary, status: 'failed', result: errorResult, completedAt: new Date().toISOString() });
             messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(errorResult) });
             continue;
           }
@@ -595,12 +614,12 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           const failure = toSafeFailure(error);
           const errorResult = toolFailureResult(failure);
           pendingToolFailure = { toolName: call.function.name, ...failure };
-          await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, status: 'failed', result: errorResult, completedAt: new Date().toISOString() });
+          await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, summary: pendingToolFailure.summary, status: 'failed', result: errorResult, completedAt: new Date().toISOString() });
           messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(errorResult) });
           continue;
         }
         const redacted = this.redactToolResult(result);
-        await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, status: 'succeeded', result: redacted, completedAt: new Date().toISOString() });
+        await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, title: result.title, summary: result.summary, status: 'succeeded', result: redacted, completedAt: new Date().toISOString() });
         messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(redacted) });
         const resultData = result.data;
         if (resultData && (resultData.status === 'pending_user_action' || resultData.userActionRequired === true)) {
@@ -642,7 +661,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       await this.emit(input.run.id, 'run.succeeded', { status: 'succeeded', resultSummary: output, messageType: 'final_answer', content: output, resource: 'pi_skill' });
       return;
     }
-    if (!completedWithoutTool) throw new PiModelClientError('MODEL_TOOL_LOOP_EXCEEDED', `model tool loop exceeded ${maxRounds} rounds`);
+    if (!completedWithoutTool) throw new PiModelClientError('MODEL_TOOL_LOOP_EXCEEDED', `model tool loop exceeded ${Number.isFinite(maxRounds) ? maxRounds : 'configured'} rounds`);
     if (!finalResult) throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model provider returned no result');
     const output = redactSensitiveText(finalResult.content, this.options.outputLimit ?? 2_000, this.options.redactSecrets);
     const finishedAt = new Date().toISOString();
@@ -1159,18 +1178,35 @@ function toSafeFailure(error: unknown): { code: string; summary: string } {
 }
 
 function summarizePiFailure(error: PiModelClientError): string {
-  if (error.code === 'MODEL_TOOL_LOOP_EXCEEDED') return '模型重复调用工具或超过 8 轮工具循环，已停止本次执行。';
+  if (error.code === 'MODEL_TOOL_LOOP_EXCEEDED') return '模型重复调用工具或超过 Workspace 工具循环预算，已停止本次执行。';
   if (error.code === 'MODEL_TIMEOUT') return '模型请求超时，未能在限定时间内完成。';
   if (error.code === 'MODEL_ABORTED') return '模型请求已取消。';
   if (error.code === 'MODEL_NETWORK_ERROR') return '模型服务网络请求失败。';
   if (error.code === 'MODEL_HTTP_ERROR') return '模型服务返回 HTTP 错误。';
   if (error.code === 'MODEL_UNSUPPORTED_TOOL') return '模型请求了当前运行时不支持的工具。';
   if (error.code === 'MODEL_INVALID_RESPONSE') {
-    if (/tool loop|identical tool|repeat/i.test(error.message)) return '模型重复调用工具或超过 8 轮工具循环，已停止本次执行。';
+    if (/tool loop|identical tool|repeat/i.test(error.message)) return '模型重复调用工具或超过 Workspace 工具循环预算，已停止本次执行。';
     if (/empty content|no result/i.test(error.message)) return '模型返回为空，未生成可用结果。';
     return '模型返回格式无效，未生成可用结果。';
   }
   return 'Pi Runtime 执行失败，请稍后重试';
+}
+
+function workspaceToolProgress(toolName: string): { summary: string; content: string } {
+  const labels: Record<string, string> = {
+    workspace_read: '读取工作区数据',
+    workspace_product_search: '检索商品信息',
+    workspace_prepare_write: '准备受控写入',
+    pi_skill_list: '读取已安装 Skill',
+    pi_skill_install: '安装 Skill',
+    pi_skill_login: '登录 Skill',
+    pi_skill_exec: '执行 Skill 命令',
+  };
+  const label = labels[toolName] ?? `执行 ${toolName}`;
+  return {
+    summary: label,
+    content: `正在${label}，等待工具返回真实结果。`,
+  };
 }
 
 function toolFailureResult(failure: { code: string; summary: string }): Record<string, unknown> {

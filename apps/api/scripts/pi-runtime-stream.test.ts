@@ -90,6 +90,43 @@ test('Pi runtime executes model-selected workspace tools and streams results', a
   runtime.stop();
 });
 
+test('Workspace Pi runtime does not reuse the Auto-Reply eight-call budget', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'loop-budget@example.com', passwordHash: 'hash', displayName: 'Loop Budget' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'loop-budget' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Loop budget' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '连续读取工作区数据' });
+  let round = 0;
+  const model: ModelClient = {
+    async stream(_input, handlers) {
+      round += 1;
+      if (round <= 9) {
+        const call = { id: `loop-call-${round}`, type: 'function' as const, function: { name: 'workspace_read', arguments: JSON.stringify({ instruction: `读取第 ${round} 轮` }) } };
+        await handlers.onToolCall?.(call);
+        return { content: '', model: 'loop-budget-model', toolCalls: [call] };
+      }
+      await handlers.onTextDelta?.('已完成连续读取');
+      return { content: '已完成连续读取', model: 'loop-budget-model' };
+    },
+    async complete() { return { content: 'unused', model: 'unused' }; },
+  };
+  const commandTool = {
+    getModelTools: () => [{ type: 'function', function: { name: 'workspace_read', description: 'read', parameters: { type: 'object' } } }],
+    executeModelTool: async () => ({ kind: 'read' as const, title: '工作区读取', summary: '读取完成', content: '读取完成' }),
+  } as unknown as WorkspaceCommandOrchestrator;
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, model: 'loop-budget-model' });
+  runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const bundle = await store.getRun(admin.id, created.run.id);
+    if (bundle?.run.status === 'succeeded' || bundle?.run.status === 'failed') break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal((await store.getRun(admin.id, created.run.id))?.run.status, 'succeeded');
+  assert.equal(round, 10);
+  runtime.stop();
+});
+
 test('Pi runtime surfaces terminal tool failures and consumes fenced tool arguments', async () => {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: 'tool-failure@example.com', passwordHash: 'hash', displayName: 'Tool Failure' });

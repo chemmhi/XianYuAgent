@@ -127,4 +127,18 @@ describe('workspace message projection', () => {
     expect(tool).toMatchObject({ title: 'workspace_product_search', eventType: 'tool.result' });
     expect(tool?.content).toContain('匹配到 1 个商品');
   });
+
+  it('keeps execution summaries and tool results in event order', () => {
+    const messages = buildWorkspaceMessages(run, [
+      { sequence: 2, runId: 'run-1', eventType: 'workspace.execution.summary', payload: { messageType: 'reasoning_summary', summary: '检索商品信息', content: '正在检索商品信息，等待工具返回真实结果。', status: 'running' }, createdAt: '2026-09-20T00:00:01.000Z' },
+      { sequence: 3, runId: 'run-1', eventType: 'tool.call.started', payload: { toolCallId: 'call-1', toolName: 'workspace_product_search', summary: '检索商品信息', status: 'running' }, createdAt: '2026-09-20T00:00:01.100Z' },
+      { sequence: 4, runId: 'run-1', eventType: 'tool.result', payload: { toolCallId: 'call-1', toolName: 'workspace_product_search', summary: '已按名称筛选 1 个商品', result: { summary: '已按名称筛选 1 个商品', content: '匹配到 1 个商品' }, status: 'succeeded' }, createdAt: '2026-09-20T00:00:02.000Z' },
+      { sequence: 5, runId: 'run-1', eventType: 'workspace.execution.summary', payload: { messageType: 'reasoning_summary', summary: '准备受控写入', content: '正在准备受控写入，等待工具返回真实结果。', status: 'running' }, createdAt: '2026-09-20T00:00:02.100Z' },
+      { sequence: 6, runId: 'run-1', eventType: 'tool.call.started', payload: { toolCallId: 'call-2', toolName: 'workspace_prepare_write', summary: '准备受控写入', status: 'running' }, createdAt: '2026-09-20T00:00:02.200Z' },
+    ]);
+    const execution = messages.filter((message) => message.type === 'reasoning_summary' || message.type === 'tool_event');
+    expect(execution.map((message) => message.type)).toEqual(['reasoning_summary', 'tool_event', 'reasoning_summary', 'tool_event']);
+    expect(execution[2]?.summary).toBe('准备受控写入');
+    expect(execution[1]?.content).toContain('已按名称筛选 1 个商品');
+  });
 });
