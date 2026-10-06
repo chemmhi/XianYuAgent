@@ -56,6 +56,21 @@ describe('Workspace SessionRow', () => {
     expect(workspaceCss).toContain('border: 1.5px solid #9CA3AF;');
   });
 
+  it('keeps title generation loading fixed at the right edge before delete', () => {
+    const html = renderToStaticMarkup(createElement(SessionRow, {
+      session: { ...session, titlePending: true },
+      active: true,
+      busy: false,
+      onSwitch: vi.fn(),
+      onDelete: vi.fn(),
+    }));
+
+    expect(html).toContain('class="workspace-session-title-status"');
+    expect(html).toContain('class="workspace-session-title-loading"');
+    expect(html.indexOf('workspace-session-title-status')).toBeLessThan(html.indexOf('workspace-session-action'));
+    expect(workspaceCss).toContain('margin-left: auto; padding-right: 2px;');
+  });
+
   it('does not render a meaningless active label when the session has no summary', () => {
     const html = renderToStaticMarkup(createElement(SessionRow, {
       session: { ...session, summary: undefined },

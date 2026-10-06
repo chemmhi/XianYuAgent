@@ -20,7 +20,8 @@ export type ModelMessageRole = 'system' | 'user' | 'assistant' | 'tool';
 
 export type ModelMessageContentPart =
   | { type: 'text'; text: string }
-  | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } };
+  | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } }
+  | { type: 'file'; file: { filename: string; fileData: string } };
 
 export type ModelMessageContent = string | ModelMessageContentPart[];
 
@@ -315,8 +316,18 @@ export interface PiRuntimeEnqueueInput {
   steps: StepRecord[];
   sessionId?: string;
   history?: ModelMessage[];
+  attachments?: PiRuntimeAttachment[];
   /** Reconnect resumes the persisted run and must not duplicate its user message. */
   resumeFromFailure?: boolean;
+}
+
+export interface PiRuntimeAttachment {
+  kind: 'image' | 'document';
+  name: string;
+  mimeType: string;
+  size: number;
+  dataUrl?: string;
+  textContent?: string;
 }
 
 const WORKSPACE_AGENT_SYSTEM_PROMPT = [
@@ -342,7 +353,7 @@ export function detectWorkspaceResponseLanguage(_instruction: string): Workspace
   return 'zh-CN';
 }
 
-export function buildWorkspaceModelMessages(history: ModelMessage[], instruction: string, skillPrompt = ''): ModelMessage[] {
+export function buildWorkspaceModelMessages(history: ModelMessage[], instruction: string, skillPrompt = '', attachments: PiRuntimeAttachment[] = []): ModelMessage[] {
   const messages: ModelMessage[] = [...history];
   if (messages.some((message) => message.role === 'system')) {
     // Keep caller-provided system context, but place the language rule before
@@ -352,8 +363,28 @@ export function buildWorkspaceModelMessages(history: ModelMessage[], instruction
   } else {
     messages.unshift({ role: 'system', content: [WORKSPACE_AGENT_SYSTEM_PROMPT, skillPrompt, WORKSPACE_LANGUAGE_INSTRUCTION].filter(Boolean).join('\n\n') });
   }
-  messages.push({ role: 'user', content: instruction });
+  messages.push({ role: 'user', content: buildWorkspaceUserContent(instruction, attachments) });
   return messages;
+}
+
+function buildWorkspaceUserContent(instruction: string, attachments: PiRuntimeAttachment[]): ModelMessageContent {
+  const parts: ModelMessageContentPart[] = [{ type: 'text', text: instruction }];
+  for (const attachment of attachments.slice(0, 8)) {
+    const label = `附件：${attachment.name}（${attachment.mimeType || '文件'}，${Math.max(0, Math.trunc(attachment.size))} bytes）`;
+    if (attachment.kind === 'image' && attachment.dataUrl?.startsWith('data:image/')) {
+      parts.push({ type: 'image_url', image_url: { url: attachment.dataUrl, detail: 'auto' } });
+      continue;
+    }
+    if (attachment.kind === 'document' && attachment.dataUrl?.startsWith('data:')) {
+      parts.push({ type: 'file', file: { filename: attachment.name, fileData: attachment.dataUrl } });
+      if (attachment.textContent) parts.push({ type: 'text', text: `文档内容：\n${attachment.textContent}` });
+      continue;
+    }
+    const textPart = parts[0];
+    if (textPart.type === 'text') textPart.text += `\n${label}${attachment.textContent ? `\n${attachment.textContent}` : ''}`;
+  }
+  const firstPart = parts[0];
+  return parts.length === 1 && firstPart.type === 'text' ? firstPart.text : parts;
 }
 
 const runTransitions: Record<RunStatus, RunStatus[]> = {
@@ -500,7 +531,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
 
       await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: '未匹配到内置工作区命令，正在调用模型生成回复。', summary: '调用模型' });
       const result = await modelClient.complete({
-        messages: buildWorkspaceModelMessages(input.history ?? [], input.run.instruction),
+        messages: buildWorkspaceModelMessages(input.history ?? [], input.run.instruction, '', input.attachments),
         signal,
       });
       if (this.stopped || signal.aborted) return;
@@ -530,7 +561,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
 
     const tools = [...commands.getModelTools(), ...(this.options.skillManager?.getModelTools() ?? [])];
     const skillPrompt = this.options.skillManager ? await this.options.skillManager.buildSystemPrompt(input.adminId ?? input.run.requestedBy) : '';
-    const messages = buildWorkspaceModelMessages(input.history ?? [], input.run.instruction, skillPrompt);
+    const messages = buildWorkspaceModelMessages(input.history ?? [], input.run.instruction, skillPrompt, input.attachments);
 
     const allReasoning: string[] = [];
     let finalResult: ModelCompletionResult | undefined;
@@ -852,7 +883,11 @@ function toChatCompletionsRequestBody(model: string, input: ModelCompletionReque
     model,
     messages: input.messages.map((message) => ({
       role: message.role,
-      content: message.content,
+      content: typeof message.content === 'string' ? message.content : message.content.map((part) => part.type === 'text'
+        ? { type: 'text', text: part.text }
+        : part.type === 'image_url'
+          ? { type: 'image_url', image_url: part.image_url }
+          : { type: 'text', text: `附件：${part.file.filename}` }),
       ...(message.name ? { name: message.name } : {}),
       ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
       ...(message.toolCalls ? { tool_calls: message.toolCalls } : {}),
@@ -904,12 +939,14 @@ function toResponsesContent(content: ModelMessageContent): string | Array<Record
   if (typeof content === 'string') return content;
   return content.map((part) => part.type === 'text'
     ? { type: 'input_text', text: part.text }
-    : { type: 'input_image', image_url: part.image_url.url, ...(part.image_url.detail ? { detail: part.image_url.detail } : {}) });
+    : part.type === 'image_url'
+      ? { type: 'input_image', image_url: part.image_url.url, ...(part.image_url.detail ? { detail: part.image_url.detail } : {}) }
+      : { type: 'input_file', filename: part.file.filename, file_data: part.file.fileData });
 }
 
 function modelContentToText(content: ModelMessageContent): string {
   if (typeof content === 'string') return content;
-  return content.filter((part): part is { type: 'text'; text: string } => part.type === 'text').map((part) => part.text).join('\n');
+  return content.map((part) => part.type === 'text' ? part.text : part.type === 'file' ? `附件：${part.file.filename}` : '').filter(Boolean).join('\n');
 }
 
 interface StreamState {

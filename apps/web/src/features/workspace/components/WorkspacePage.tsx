@@ -4,7 +4,7 @@ import { isWorkspaceRunActive, isWorkspaceRunReconnectable, useWorkspaceControll
 import { buildWorkspaceMessages } from '../messages';
 import type { WorkspaceApi } from '../api';
 import type { WorkspaceConfirmationVM, WorkspaceMessageVM, WorkspaceOutboxVM, WorkspaceRunStatus, WorkspaceRunVM, WorkspaceSessionVM } from '../types';
-import { appendWorkspaceAttachments, buildWorkspaceInstruction, clipboardImageFiles, formatWorkspaceFileSize, type WorkspaceAttachment } from '../attachments';
+import { appendWorkspaceAttachments, buildWorkspaceAttachmentPayloads, buildWorkspaceInstruction, clipboardImageFiles, formatWorkspaceFileSize, type WorkspaceAttachment } from '../attachments';
 import { SearchField } from '../../../shared/ui/SearchField';
 import { Button } from '../../../shared/ui/Button';
 import { Toast } from '../../../shared/ui/Toast';
@@ -127,6 +127,7 @@ export function WorkspacePage({ api }: WorkspacePageProps) {
     const text = instruction.trim();
     if ((!text && pendingAttachments.length === 0) || state.submitting || taskRunning || !currentAccountId || (!draftMode && activeSession?.status !== 'active')) return;
     const composedInstruction = await buildWorkspaceInstruction(text, pendingAttachments);
+    const attachmentPayloads = await buildWorkspaceAttachmentPayloads(pendingAttachments);
     let sessionId = activeSession?.id;
     if (draftMode || !sessionId) {
       const created = await controller.createSession('新会话', composedInstruction);
@@ -134,7 +135,7 @@ export function WorkspacePage({ api }: WorkspacePageProps) {
       sessionId = created.id;
       setDraftMode(false);
     }
-    const run = await controller.startRun(composedInstruction, sessionId);
+    const run = await controller.startRun(composedInstruction, sessionId, attachmentPayloads);
     if (run) {
       setInstruction('');
       setPendingAttachments((previous) => { previous.forEach((attachment) => URL.revokeObjectURL(attachment.url)); return []; });
@@ -173,7 +174,7 @@ export function WorkspacePage({ api }: WorkspacePageProps) {
                 <div className="workspace-composer-editor">
                   <textarea ref={instructionRef} value={instruction} onChange={(event) => { setInstruction(event.target.value); resizeComposerTextarea(event.currentTarget); }} onPaste={(event) => { const images = clipboardImageFiles(event.clipboardData); if (images.length === 0) return; event.preventDefault(); addAttachments(images); }} onKeyDown={(event) => { if (event.nativeEvent.isComposing) return; if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} maxLength={4000} disabled={(!draftMode && (!activeSession || activeSession.status !== 'active')) || state.submitting || taskRunning} placeholder="给 Agent 发消息…" aria-label="Run 指令" />
                 </div>
-                <div className="workspace-composer-foot"><div className="workspace-composer-tools"><button type="button" aria-label="上传文档和图片" onClick={() => attachmentInputRef.current?.click()}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button><input ref={attachmentInputRef} className="workspace-file-input" type="file" accept="image/*,.pdf,.doc,.docx,.txt,.md,.csv,.json,.xls,.xlsx,.xml,.yaml,.yml" multiple onChange={(event) => { addAttachments(Array.from(event.target.files ?? [])); event.currentTarget.value = ''; }} /></div><div className="workspace-composer-meta"><WorkspaceSendButton submitting={state.submitting || taskRunning} cancellable={taskRunning} onCancel={cancelCurrentRun} disabled={(!instruction.trim() && pendingAttachments.length === 0) || (!draftMode && (!activeSession || activeSession.status !== 'active')) || state.submitting} /></div></div>
+                <div className="workspace-composer-foot"><div className="workspace-composer-tools"><button type="button" aria-label="上传文档和图片" onClick={() => attachmentInputRef.current?.click()}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button><input ref={attachmentInputRef} className="workspace-file-input" type="file" accept="image/*,.pdf,.doc,.docx,.ppt,.pptx,.txt,.md,.csv,.json,.xls,.xlsx,.xml,.yaml,.yml" multiple onChange={(event) => { addAttachments(Array.from(event.target.files ?? [])); event.currentTarget.value = ''; }} /></div><div className="workspace-composer-meta"><WorkspaceSendButton submitting={state.submitting || taskRunning} cancellable={taskRunning} onCancel={cancelCurrentRun} disabled={(!instruction.trim() && pendingAttachments.length === 0) || (!draftMode && (!activeSession || activeSession.status !== 'active')) || state.submitting} /></div></div>
               </form>{attachmentPreviewUrl && <div className="workspace-image-lightbox" role="dialog" aria-modal="true" aria-label="图片预览" onClick={() => setAttachmentPreviewUrl(null)}><div className="workspace-lightbox-content" onClick={(event) => event.stopPropagation()}><button className="workspace-lightbox-close" type="button" aria-label="关闭图片预览" onClick={() => setAttachmentPreviewUrl(null)}>×</button><img src={attachmentPreviewUrl} alt="待发送图片大图预览" /></div></div>}</section>
             </div>
           </div>
@@ -191,7 +192,7 @@ export function WorkspaceSendButton({ submitting, disabled, cancellable = false,
   </button>;
 }
 
-export function SessionRow({ session, active, running = false, unread = false, busy, onSwitch, onDelete }: { session: WorkspaceSessionVM; active: boolean; running?: boolean; unread?: boolean; busy: boolean; onSwitch: () => void; onDelete: () => void }) { return <div className={`workspace-session-row ${active ? 'active' : ''} ${session.status === 'archived' ? 'archived' : ''}`}><button type="button" className="workspace-session-select" onClick={onSwitch} disabled={busy || session.status === 'archived'} aria-pressed={active}><span className="workspace-session-title"><span>{session.title}</span>{running && <span className="workspace-session-running-icon" role="img" aria-label="任务进行中" title="任务进行中" />}{unread && <span className="workspace-session-unread-dot" role="img" aria-label="有未读完成任务" title="有未读完成任务" />}</span>{(session.summary || session.status === 'archived') && <small>{session.summary ?? '已归档'}</small>}</button><button type="button" className="workspace-session-action" data-testid="workspace-session-delete" onClick={onDelete} disabled={busy} aria-label={`删除 ${session.title}`} title={`删除 ${session.title}`}><svg className="workspace-session-action-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 5h9M6 5V3.5h4V5m-5.5 0 .6 8h5.8l-.6-8M6.5 7.5v3m3-3v3" /></svg></button></div>; }
+export function SessionRow({ session, active, running = false, unread = false, busy, onSwitch, onDelete }: { session: WorkspaceSessionVM; active: boolean; running?: boolean; unread?: boolean; busy: boolean; onSwitch: () => void; onDelete: () => void }) { return <div className={`workspace-session-row ${active ? 'active' : ''} ${session.status === 'archived' ? 'archived' : ''}`}><button type="button" className="workspace-session-select" onClick={onSwitch} disabled={busy || session.status === 'archived'} aria-pressed={active}><span className="workspace-session-title"><span className="workspace-session-title-text">{session.title}</span><span className="workspace-session-title-status">{session.titlePending && <span className="workspace-session-title-loading" role="img" aria-label="正在生成会话标题" title="正在生成会话标题" />}{running && <span className="workspace-session-running-icon" role="img" aria-label="任务进行中" title="任务进行中" />}{unread && <span className="workspace-session-unread-dot" role="img" aria-label="有未读完成任务" title="有未读完成任务" />}</span></span>{(session.summary || session.status === 'archived') && <small>{session.summary ?? '已归档'}</small>}</button><button type="button" className="workspace-session-action" data-testid="workspace-session-delete" onClick={onDelete} disabled={busy} aria-label={`删除 ${session.title}`} title={`删除 ${session.title}`}><svg className="workspace-session-action-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 5h9M6 5V3.5h4V5m-5.5 0 .6 8h5.8l-.6-8M6.5 7.5v3m3-3v3" /></svg></button></div>; }
 
 
 export function WorkspaceDeleteSessionModal({ session, submitting = false, onClose, onConfirm }: { session: WorkspaceSessionVM; submitting?: boolean; onClose: () => void; onConfirm: () => void }) {

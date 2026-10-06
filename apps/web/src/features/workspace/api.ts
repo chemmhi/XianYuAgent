@@ -1,4 +1,5 @@
 import type { WorkspaceConfirmationVM, WorkspaceMessageVM, WorkspaceOutboxVM, WorkspaceRunEventVM, WorkspaceRunVM, WorkspaceSessionVM } from './types';
+import type { WorkspaceAttachmentPayload } from './attachments';
 
 export interface WorkspaceApiTransport {
   get<T>(path: string): Promise<T>;
@@ -13,7 +14,7 @@ export interface WorkspaceApi {
   archiveSession(sessionId: string): Promise<WorkspaceSessionVM>;
   deleteSession(sessionId: string): Promise<{ deleted: boolean; sessionId: string }>;
   listMessages(sessionId: string, limit?: number): Promise<WorkspaceMessageVM[]>;
-  startRun(input: { accountId: string; sessionId: string; instruction: string; clientRunRef: string }): Promise<WorkspaceRunVM>;
+  startRun(input: { accountId: string; sessionId: string; instruction: string; clientRunRef: string; attachments?: WorkspaceAttachmentPayload[] }): Promise<WorkspaceRunVM>;
   getRun(runId: string): Promise<WorkspaceRunVM>;
   listEvents(runId: string, afterSequence?: number): Promise<WorkspaceRunEventVM[]>;
   getConfirmation(runId: string): Promise<WorkspaceConfirmationVM>;

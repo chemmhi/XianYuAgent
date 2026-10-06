@@ -15,6 +15,7 @@ export interface WorkspaceSessionVM {
   lastActiveAt: string;
   archivedAt?: string;
   updatedAt: string;
+  titlePending?: boolean;
 }
 
 export interface WorkspaceStepVM {

@@ -21,7 +21,7 @@ import { decodeMessageHistoryCursor, encodeMessageHistoryCursor } from './messag
 import { InProcessAgentRuntime, isTerminalRunStatus, WorkspaceService, type WorkspaceRuntime } from './workspace.js';
 import { WorkspaceCommandOrchestrator } from './workspace-commands.js';
 import { OrderDeliveryService } from './order-delivery.js';
-import { OpenAICompatibleModelClient, PiModelClientError, PiRuntimeAdapter } from './pi-runtime.js';
+import { OpenAICompatibleModelClient, PiModelClientError, PiRuntimeAdapter, type PiRuntimeAttachment } from './pi-runtime.js';
 import { ModelClientService, type ModelClient } from './model-client.js';
 import { ApiKeyCredentialService } from './credential-store.js';
 import { DashboardService, type DashboardRange } from './dashboard.js';
@@ -1169,7 +1169,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   if (ctx.path === '/api/v1/workspace/runs' && ctx.method === 'POST') {
     const accountId = optionalString(ctx.body.accountId);
     return mutation(runtime, ctx, authContext, accountId, async () => {
-      const result = await workspace.startRun({ adminId: authContext.admin.id, accountId: accountId ?? '', sessionId: String(ctx.body.sessionId ?? ''), instruction: String(ctx.body.instruction ?? ''), clientRunRef: optionalString(ctx.body.clientRunRef), requestId: ctx.requestId, traceId: ctx.traceId });
+      const result = await workspace.startRun({ adminId: authContext.admin.id, accountId: accountId ?? '', sessionId: String(ctx.body.sessionId ?? ''), instruction: String(ctx.body.instruction ?? ''), attachments: parseWorkspaceAttachments(ctx.body.attachments), clientRunRef: optionalString(ctx.body.clientRunRef), requestId: ctx.requestId, traceId: ctx.traceId });
       return success(ctx, result.run, result.duplicate ? 200 : 201);
     });
   }
@@ -1557,6 +1557,23 @@ function optionalString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const normalized = value.trim();
   return normalized ? normalized : undefined;
+}
+
+function parseWorkspaceAttachments(value: unknown): PiRuntimeAttachment[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const attachments = value.slice(0, 8).flatMap((item): PiRuntimeAttachment[] => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    const kind = record.kind === 'image' || record.kind === 'document' ? record.kind : undefined;
+    const name = typeof record.name === 'string' ? record.name.trim().slice(0, 180) : '';
+    const mimeType = typeof record.mimeType === 'string' ? record.mimeType.trim().slice(0, 120) : 'application/octet-stream';
+    const size = typeof record.size === 'number' && Number.isFinite(record.size) ? Math.max(0, Math.trunc(record.size)) : 0;
+    if (!kind || !name) return [];
+    const dataUrl = typeof record.dataUrl === 'string' && record.dataUrl.startsWith('data:') && record.dataUrl.length <= 12_000_000 ? record.dataUrl : undefined;
+    const textContent = typeof record.textContent === 'string' ? record.textContent.slice(0, 12_000) : undefined;
+    return [{ kind, name, mimeType, size, ...(dataUrl ? { dataUrl } : {}), ...(textContent ? { textContent } : {}) }];
+  });
+  return attachments.length ? attachments : undefined;
 }
 
 function parsePublishMinor(value: unknown): number {

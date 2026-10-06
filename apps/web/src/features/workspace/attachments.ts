@@ -7,8 +7,19 @@ export interface WorkspaceAttachment {
   kind: WorkspaceAttachmentKind;
 }
 
+export interface WorkspaceAttachmentPayload {
+  kind: WorkspaceAttachmentKind;
+  name: string;
+  mimeType: string;
+  size: number;
+  dataUrl?: string;
+  textContent?: string;
+}
+
+const MAX_PI_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+
 const DOCUMENT_EXTENSIONS = new Set([
-  'csv', 'doc', 'docx', 'json', 'log', 'md', 'pdf', 'rtf', 'txt', 'xls', 'xlsx', 'xml', 'yaml', 'yml',
+  'csv', 'doc', 'docx', 'json', 'log', 'md', 'pdf', 'ppt', 'pptx', 'rtf', 'txt', 'xls', 'xlsx', 'xml', 'yaml', 'yml',
 ]);
 
 type ClipboardItemLike = { kind?: string; getAsFile?: () => File | null };
@@ -70,6 +81,37 @@ export function formatWorkspaceFileSize(bytes: number): string {
 
 function isTextDocument(file: File): boolean {
   return file.type.startsWith('text/') || ['csv', 'json', 'log', 'md', 'rtf', 'txt', 'xml', 'yaml', 'yml'].includes(extensionOf(file));
+}
+
+async function readFileAsDataUrl(file: File): Promise<string | undefined> {
+  if (file.size > MAX_PI_ATTACHMENT_BYTES) return undefined;
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error ?? new Error('FILE_READ_FAILED'));
+      reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('FILE_READ_FAILED'));
+      reader.readAsDataURL(file);
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+export async function buildWorkspaceAttachmentPayloads(attachments: WorkspaceAttachment[]): Promise<WorkspaceAttachmentPayload[]> {
+  return Promise.all(attachments.map(async (attachment) => {
+    const payload: WorkspaceAttachmentPayload = {
+      kind: attachment.kind,
+      name: attachment.file.name,
+      mimeType: attachment.file.type || 'application/octet-stream',
+      size: attachment.file.size,
+    };
+    if (attachment.kind === 'document' && isTextDocument(attachment.file)) {
+      try { payload.textContent = (await attachment.file.text()).slice(0, 12_000); } catch { /* metadata remains usable */ }
+    }
+    const dataUrl = await readFileAsDataUrl(attachment.file);
+    if (dataUrl) payload.dataUrl = dataUrl;
+    return payload;
+  }));
 }
 
 export async function buildWorkspaceInstruction(instruction: string, attachments: WorkspaceAttachment[]): Promise<string> {

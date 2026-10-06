@@ -6,7 +6,7 @@ import { executeNativeWorkspaceRead } from './workspace-native-read.js';
 import { prepareNativeWorkspaceWrite, sanitizeWorkspaceInstruction } from './workspace-native-write.js';
 import { persistWorkspaceConfirmation } from './workspace-confirmation.js';
 import type { WorkspaceCommandOrchestrator } from './workspace-commands.js';
-import type { ModelClient } from './pi-runtime.js';
+import type { ModelClient, PiRuntimeAttachment } from './pi-runtime.js';
 
 const terminalRunStatuses = new Set<RunStatus>(['succeeded', 'partially_succeeded', 'failed', 'cancelled', 'expired']);
 const runTransitions: Record<RunStatus, RunStatus[]> = {
@@ -47,6 +47,7 @@ export interface WorkspaceSessionView {
   archivedAt?: string;
   createdAt: string;
   updatedAt: string;
+  titlePending?: boolean;
 }
 
 export interface WorkspaceStepView {
@@ -116,8 +117,8 @@ export interface WorkspaceOutboxView {
 }
 
 export interface WorkspaceRuntime {
-  enqueue(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; resumeFromFailure?: boolean }): void;
-  resume(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; resumeFromFailure?: boolean }): Promise<void>;
+  enqueue(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; attachments?: PiRuntimeAttachment[]; resumeFromFailure?: boolean }): void;
+  resume(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; attachments?: PiRuntimeAttachment[]; resumeFromFailure?: boolean }): Promise<void>;
   cancel(runId: string): void;
   stop(): void;
 }
@@ -172,7 +173,7 @@ export class InProcessAgentRuntime implements WorkspaceRuntime {
 
   constructor(private readonly store: Store, private readonly commands?: WorkspaceCommandOrchestrator) {}
 
-  enqueue(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; resumeFromFailure?: boolean }): void {
+  enqueue(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; attachments?: PiRuntimeAttachment[]; resumeFromFailure?: boolean }): void {
     if (this.stopped || this.active.has(input.run.id) || this.cancelled.has(input.run.id)) return;
     this.active.add(input.run.id);
     setTimeout(() => {
@@ -181,7 +182,7 @@ export class InProcessAgentRuntime implements WorkspaceRuntime {
     }, 0);
   }
 
-  async resume(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; resumeFromFailure?: boolean }): Promise<void> {
+  async resume(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; attachments?: PiRuntimeAttachment[]; resumeFromFailure?: boolean }): Promise<void> {
     if (this.stopped || this.active.has(input.run.id) || this.cancelled.has(input.run.id)) return;
     const prepared = await prepareWorkspaceRunResume({ store: this.store, run: input.run, steps: input.steps });
     if (!prepared) return;
@@ -267,6 +268,9 @@ export class InProcessAgentRuntime implements WorkspaceRuntime {
 }
 
 export class WorkspaceService {
+  private readonly pendingTitleSessionIds = new Set<string>();
+  private readonly runAttachments = new Map<string, PiRuntimeAttachment[]>();
+
   constructor(
     private readonly store: Store,
     private readonly runtime: WorkspaceRuntime,
@@ -287,6 +291,7 @@ export class WorkspaceService {
     const fallbackTitle = input.title.trim() || '新工作区会话';
     try {
       const session = await this.store.createAgentSession({ adminId: input.adminId, accountId: input.accountId, title: fallbackTitle, summary: input.summary?.trim() || undefined });
+      this.pendingTitleSessionIds.add(session.id);
       await this.audit({ actorId: input.adminId, action: 'workspace.session.created', targetRef: session.id, requestId: input.requestId, traceId: input.traceId, payload: { title: session.title }, accountId: session.accountId });
       void summarizeWorkspaceSessionTitle(this.titleModelClient, input.instruction, fallbackTitle)
         .then(async (title) => {
@@ -295,7 +300,8 @@ export class WorkspaceService {
         })
         .catch(() => {
           // Title generation is best-effort and must never block the session or first run.
-        });
+        })
+        .finally(() => this.pendingTitleSessionIds.delete(session.id));
       return this.toSessionView(session);
     } catch (error) { throw mapWorkspaceStoreError(error); }
   }
@@ -324,7 +330,7 @@ export class WorkspaceService {
     } catch (error) { throw mapWorkspaceStoreError(error); }
   }
 
-  async startRun(input: { adminId: string; accountId: string; sessionId: string; instruction: string; clientRunRef?: string; requestId: string; traceId: string }): Promise<{ run: WorkspaceRunView; duplicate: boolean }> {
+  async startRun(input: { adminId: string; accountId: string; sessionId: string; instruction: string; attachments?: PiRuntimeAttachment[]; clientRunRef?: string; requestId: string; traceId: string }): Promise<{ run: WorkspaceRunView; duplicate: boolean }> {
     const instruction = input.instruction.trim();
     if (!instruction) throw new ServiceError(422, 'VALIDATION_FAILED', 'instruction is required');
     if (instruction.length > 4000) throw new ServiceError(422, 'VALIDATION_FAILED', 'instruction cannot exceed 4000 characters');
@@ -339,6 +345,7 @@ export class WorkspaceService {
     }
     try {
       const created = await this.store.createRun({ adminId: input.adminId, accountId: input.accountId, sessionId: input.sessionId, instruction, clientRunRef: input.clientRunRef });
+      if (input.attachments?.length) this.runAttachments.set(created.run.id, input.attachments.slice(0, 8));
       await this.audit({ actorId: input.adminId, action: 'workspace.run.created', targetRef: created.run.id, requestId: input.requestId, traceId: input.traceId, payload: { sessionId: input.sessionId, instructionLength: instruction.length, hasClientRunRef: Boolean(input.clientRunRef) }, accountId: input.accountId });
       await this.store.appendRunEvent({ runId: created.run.id, eventType: 'run.queued', payload: { status: 'queued', sessionId: input.sessionId, accountId: input.accountId } });
       await this.appendMessage({ adminId: input.adminId, sessionId: input.sessionId, runId: created.run.id, type: 'user_message', content: sanitizeWorkspaceInstruction(instruction) });
@@ -346,7 +353,7 @@ export class WorkspaceService {
         .filter((message) => message.id !== undefined)
         .slice(0, -1)
         .map((message) => ({ role: message.type === 'user_message' ? 'user' as const : 'assistant' as const, content: `[${message.type}] ${message.summary ?? message.content}` }));
-      this.runtime.enqueue({ ...created, adminId: input.adminId, sessionId: input.sessionId, history });
+      this.runtime.enqueue({ ...created, adminId: input.adminId, sessionId: input.sessionId, history, attachments: this.runAttachments.get(created.run.id) });
       return { run: this.toRunView(created.run, created.steps), duplicate: false };
     } catch (error) { throw mapWorkspaceStoreError(error); }
   }
@@ -608,7 +615,7 @@ export class WorkspaceService {
         role: message.type === 'user_message' ? 'user' as const : 'assistant' as const,
         content: `[${message.type}] ${message.summary ?? message.content}`,
       }));
-    await this.runtime.resume({ run: bundle.run, steps: bundle.steps, adminId: input.adminId, sessionId: bundle.run.sessionId, history, resumeFromFailure: true });
+    await this.runtime.resume({ run: bundle.run, steps: bundle.steps, adminId: input.adminId, sessionId: bundle.run.sessionId, history, attachments: this.runAttachments.get(input.runId), resumeFromFailure: true });
     await this.audit({ actorId: input.adminId, action: 'workspace.run.reconnected', targetRef: input.runId, requestId: input.requestId, traceId: input.traceId, payload: { previousStatus: bundle.run.status }, accountId: bundle.run.accountId });
     const latest = await this.store.getRun(input.adminId, input.runId);
     if (!latest) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'run reload failed');
@@ -620,7 +627,7 @@ export class WorkspaceService {
     if (input.runId) await this.store.appendRunEvent({ runId: input.runId, eventType: 'message.appended', payload: { messageType: message.type, messageId: message.id, content: message.content, summary: message.summary, createdAt: message.createdAt } });
   }
 
-  private toSessionView(session: AgentSessionRecord): WorkspaceSessionView { return { ...session }; }
+  private toSessionView(session: AgentSessionRecord): WorkspaceSessionView { return { ...session, titlePending: this.pendingTitleSessionIds.has(session.id) }; }
 
   private executionScope(adminId: string, accountId: string): string { return `workspace:${adminId}:${accountId}`; }
 
@@ -644,6 +651,8 @@ const WORKSPACE_TITLE_SYSTEM_PROMPT = [
 async function summarizeWorkspaceSessionTitle(modelClient: ModelClient | undefined, instruction: string | undefined, fallback: string): Promise<string> {
   const normalizedInstruction = instruction?.replace(/\s+/g, ' ').trim();
   if (!modelClient || !normalizedInstruction) return fallback;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort('workspace_title_timeout'), 6_000);
   try {
     const result = await modelClient.complete({
       messages: [
@@ -652,6 +661,7 @@ async function summarizeWorkspaceSessionTitle(modelClient: ModelClient | undefin
       ],
       toolChoice: 'none',
       reasoningEffort: 'low',
+      signal: controller.signal,
     });
     const candidate = result.content
       .split(/\r?\n/)
@@ -664,7 +674,7 @@ async function summarizeWorkspaceSessionTitle(modelClient: ModelClient | undefin
     return candidate.length <= 28 ? candidate : `${candidate.slice(0, 27).trimEnd()}…`;
   } catch {
     return fallback;
-  }
+  } finally { clearTimeout(timeout); }
 }
 
 function mapWorkspaceStoreError(error: unknown): ServiceError {

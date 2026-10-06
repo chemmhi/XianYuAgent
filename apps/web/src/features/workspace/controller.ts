@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createWorkspaceApi, type WorkspaceApi } from './api';
+import type { WorkspaceAttachmentPayload } from './attachments';
 import type { WorkspaceConfirmationVM, WorkspaceMessageVM, WorkspaceOutboxVM, WorkspaceRunEventVM, WorkspaceRunVM, WorkspaceSessionVM, WorkspaceState } from './types';
 
 const defaultApi = createWorkspaceApi({ get: async () => { throw new Error('WORKSPACE_API_UNAVAILABLE'); } });
@@ -302,13 +303,13 @@ export function useWorkspaceController(options: { api?: WorkspaceApi; accountId?
     }
   }, [api, appendEvent]);
 
-  const startRun = useCallback(async (instruction: string, sessionIdOverride?: string) => {
+  const startRun = useCallback(async (instruction: string, sessionIdOverride?: string, attachments?: WorkspaceAttachmentPayload[]) => {
     const sessionId = sessionIdOverride ?? state.activeSessionId;
     if (!options.accountId || !sessionId) throw new Error('WORKSPACE_SESSION_REQUIRED');
     runRefreshRequestRef.current += 1;
     setState((previous) => ({ ...previous, submitting: true, error: null }));
     try {
-      const run = await api.startRun({ accountId: options.accountId, sessionId, instruction, clientRunRef: `web-${Date.now()}-${Math.random().toString(16).slice(2)}` });
+      const run = await api.startRun({ accountId: options.accountId, sessionId, instruction, ...(attachments?.length ? { attachments } : {}), clientRunRef: `web-${Date.now()}-${Math.random().toString(16).slice(2)}` });
       runRef.current = run;
       eventCursorRef.current = 0;
       setState((previous) => ({ ...previous, run, events: [], connection: 'connecting', submitting: false, confirmation: null, outbox: [], unreadSessionIds: previous.unreadSessionIds.filter((id) => id !== run.sessionId), sessions: previous.sessions.map((session) => session.id === run.sessionId ? { ...session, runId: run.runId, runStatus: run.status } : session) }));
@@ -434,7 +435,7 @@ export interface WorkspaceController {
   switchSession: (sessionId: string) => Promise<WorkspaceState['sessions'][number] | null>;
   archiveSession: (sessionId: string) => Promise<WorkspaceState['sessions'][number] | null>;
   deleteSession: (sessionId: string) => Promise<{ deleted: boolean; sessionId: string } | null>;
-  startRun: (instruction: string, sessionIdOverride?: string) => Promise<WorkspaceState['run']>;
+  startRun: (instruction: string, sessionIdOverride?: string, attachments?: WorkspaceAttachmentPayload[]) => Promise<WorkspaceState['run']>;
   reconnectRun: () => Promise<void>;
   confirmRun: () => Promise<unknown>;
   cancelRun: () => Promise<unknown>;

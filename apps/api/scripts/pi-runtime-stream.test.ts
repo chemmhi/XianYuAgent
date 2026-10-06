@@ -238,6 +238,17 @@ test('workspace model messages follow the language of the current user instructi
   assert.doesNotMatch(String(chineseOnlySystem?.content), /Response language rule|write reasoning summaries/i);
 });
 
+test('workspace PI model messages carry image and document attachments', () => {
+  const messages = buildWorkspaceModelMessages([], '请分析附件', '', [
+    { kind: 'image', name: '截图.png', mimeType: 'image/png', size: 12, dataUrl: 'data:image/png;base64,AAAA' },
+    { kind: 'document', name: '说明.pdf', mimeType: 'application/pdf', size: 24, dataUrl: 'data:application/pdf;base64,BBBB' },
+  ]);
+  const content = messages.at(-1)?.content;
+  assert.ok(Array.isArray(content));
+  assert.ok(content.some((part) => part.type === 'image_url'));
+  assert.ok(content.some((part) => part.type === 'file'));
+});
+
 test('Pi runtime adds the current Chinese language rule to non-streaming fallback requests', async () => {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: 'language-fallback@example.com', passwordHash: 'hash', displayName: 'Language Fallback' });

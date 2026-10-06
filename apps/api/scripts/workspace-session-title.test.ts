@@ -33,11 +33,13 @@ test('workspace session titles are generated from the model summary', async () =
   });
 
   assert.equal(session.title, '新会话');
+  assert.equal(session.titlePending, true);
   let updated = await store.getAgentSession(admin.id, session.id);
   for (let attempt = 0; attempt < 20 && updated?.title !== '启用商品自动发货'; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 0));
     updated = await store.getAgentSession(admin.id, session.id);
   }
   assert.equal(updated?.title, '启用商品自动发货');
+  assert.equal((await service.listSessions({ adminId: admin.id, accountId: account.id }))[0]?.titlePending, false);
   assert.deepEqual(prompts, ['给“AI工具一键下载服务”这个商品启动自动发货，内容为夸克网盘公开分享链接。']);
 });
