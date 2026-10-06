@@ -44,6 +44,9 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/id_ed25519"
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/id_ed25519" >/dev/null
+          printf 'deployment key fingerprint: '
+          ssh-keygen -lf "$HOME/.ssh/id_ed25519"
 
       - name: Pull and deploy exact commit
         shell: bash
