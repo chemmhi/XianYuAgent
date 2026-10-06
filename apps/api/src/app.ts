@@ -423,7 +423,10 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
       return;
     }
     if (/^\/api\/v1\/workspace\/runs\/[^/]+\/events$/.test(pathname)) {
-      void handleWorkspaceUpgrade(runtime, request, socket);
+      void handleWorkspaceUpgrade(runtime, request, socket).catch((error) => {
+        console.warn(JSON.stringify({ component: 'workspace-ws', event: 'upgrade_failed', errorCode: listenerErrorCode(error) }));
+        socket.destroy();
+      });
       return;
     }
     socket.destroy();
@@ -1491,7 +1494,13 @@ async function handleWorkspaceUpgrade(runtime: AppRuntime, request: IncomingMess
   socket.on('data', () => { /* client frames are intentionally ignored in the read-only VS6A stream */ });
   writeWsFrame(socket, JSON.stringify({ type: 'snapshot', run, cursor }));
   while (!closed) {
-    const events = await runtime.workspace.listEvents({ adminId: authContext.admin.id, runId, afterSequence: cursor });
+    let events;
+    try {
+      events = await runtime.workspace.listEvents({ adminId: authContext.admin.id, runId, afterSequence: cursor });
+    } catch (error) {
+      if (error instanceof ServiceError && error.statusCode === 404) break;
+      throw error;
+    }
     for (const event of events) {
       if (closed) break;
       cursor = Math.max(cursor, event.sequence);
@@ -1499,7 +1508,13 @@ async function handleWorkspaceUpgrade(runtime: AppRuntime, request: IncomingMess
     }
     if (isTerminalRunStatus(run.status) && events.length === 0) break;
     await new Promise((resolve) => setTimeout(resolve, 100));
-    const latest = await runtime.workspace.getRun({ adminId: authContext.admin.id, runId });
+    let latest;
+    try {
+      latest = await runtime.workspace.getRun({ adminId: authContext.admin.id, runId });
+    } catch (error) {
+      if (error instanceof ServiceError && error.statusCode === 404) break;
+      throw error;
+    }
     run.status = latest.status;
     run.updatedAt = latest.updatedAt;
     run.finishedAt = latest.finishedAt;

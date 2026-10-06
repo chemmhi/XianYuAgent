@@ -5,6 +5,7 @@ export interface SliderTrajectoryOptions {
   baseDelayRange?: readonly [number, number];
   jitterXRange?: readonly [number, number];
   jitterYRange?: readonly [number, number];
+  verticalLimit?: number;
   rng?: () => number;
 }
 
@@ -22,7 +23,7 @@ export interface GeneratedSliderTrajectory {
   };
 }
 
-export const DEFAULT_SLIDER_TRAJECTORY_OPTIONS: Required<Omit<SliderTrajectoryOptions, 'rng'>> = {
+export const DEFAULT_SLIDER_TRAJECTORY_OPTIONS: Required<Omit<SliderTrajectoryOptions, 'rng' | 'verticalLimit'>> = {
   totalStepsRange: [70, 95],
   baseDelayRange: [0.007, 0.012],
   jitterXRange: [-1, 1],
@@ -60,15 +61,15 @@ export function generatePhysicsTrajectory(distance: number, options: SliderTraje
   const delayRange = finiteRange(options.baseDelayRange, DEFAULT_SLIDER_TRAJECTORY_OPTIONS.baseDelayRange, 'baseDelayRange');
   const jitterXRange = finiteRange(options.jitterXRange, DEFAULT_SLIDER_TRAJECTORY_OPTIONS.jitterXRange, 'jitterXRange');
   const jitterYRange = finiteRange(options.jitterYRange, DEFAULT_SLIDER_TRAJECTORY_OPTIONS.jitterYRange, 'jitterYRange');
+  const verticalLimit = Number.isFinite(options.verticalLimit) && (options.verticalLimit ?? 0) > 0 ? options.verticalLimit! : 2;
 
   const steps = integer(rng, stepsRange);
   const baseDelay = uniform(rng, delayRange);
-  // A human may overshoot the target by a few pixels, but a 40%–85%
-  // overshoot sends the pointer far outside the NC track and is rejected as
-  // an invalid drag. Keep the correction phase small and finish at the
-  // logical track distance.
-  const overshoot = Math.max(2, uniform(rng, [Math.min(target * 0.015, 8), Math.min(target * 0.04, 16)]));
-  const peakDistance = target + overshoot;
+  // NC rejects a drag as soon as the handle leaves the usable track. Keep
+  // every generated x coordinate inside [0, target] instead of overshooting
+  // the right edge and relying on a later correction.
+  const overshoot = 0;
+  const peakDistance = target;
   const driftDirection = rng() < 0.5 ? -1 : 1;
   // Keep the pointer inside the 34px track while the 30px handle is held.
   // Larger vertical arcs leave the slider lane and are rejected by NC.
@@ -79,31 +80,20 @@ export function generatePhysicsTrajectory(distance: number, options: SliderTraje
   for (let index = 0; index < steps; index += 1) {
     const progress = (index + 1) / steps;
     const eased = 10 * progress ** 3 - 15 * progress ** 4 + 6 * progress ** 5;
-    const x = peakDistance * eased + uniform(rng, jitterXRange);
-    const y = driftDirection * arcAmplitude * Math.sin(progress * Math.PI) + tilt * progress + uniform(rng, jitterYRange) * 0.25;
+    const x = clamp(peakDistance * eased + uniform(rng, jitterXRange), 0, target);
+    const y = clamp(driftDirection * arcAmplitude * Math.sin(progress * Math.PI) + tilt * progress + uniform(rng, jitterYRange) * 0.25, -verticalLimit, verticalLimit);
     let delay = baseDelay * uniform(rng, [0.85, 1.15]);
     if (rng() < 0.04) delay += uniform(rng, [0.02, 0.05]);
     points.push([x, y, delay]);
   }
 
-  const rebound = Math.max(1, overshoot * uniform(rng, [0.85, 1.15]));
-  const reboundSteps = integer(rng, [3, 5]);
+  const correctionSteps = integer(rng, [2, 3]);
   const lastY = points.at(-1)?.[1] ?? 0;
-  for (let index = 0; index < reboundSteps; index += 1) {
-    const progress = (index + 1) / reboundSteps;
-    points.push([
-      peakDistance - rebound * progress + uniform(rng, [-0.8, 0.8]),
-      lastY + uniform(rng, [-1.5, 1.5]),
-      uniform(rng, [0.015, 0.035]),
-    ]);
-  }
-
   const settleX = target;
-  const settleSteps = integer(rng, [2, 3]);
-  for (let index = 0; index < settleSteps; index += 1) {
+  for (let index = 0; index < correctionSteps; index += 1) {
     points.push([
-      settleX + uniform(rng, [-1.2, 1.2]),
-      lastY + uniform(rng, [-1.2, 1.2]),
+      clamp(settleX + uniform(rng, [-0.8, 0]), 0, target),
+      clamp(lastY + uniform(rng, [-1.2, 1.2]), -verticalLimit, verticalLimit),
       uniform(rng, [0.02, 0.045]),
     ]);
   }
@@ -116,12 +106,16 @@ export function generatePhysicsTrajectory(distance: number, options: SliderTraje
       jitterXRange,
       jitterYRange,
       overshoot,
-      correctionSteps: reboundSteps,
+      correctionSteps,
       distance: target,
       totalSteps: points.length,
       plannedElapsed,
     },
   };
+}
+
+function clamp(value: number, low: number, high: number): number {
+  return Math.min(high, Math.max(low, value));
 }
 
 export interface SliderTrajectoryReplayStats {

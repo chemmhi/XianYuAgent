@@ -126,7 +126,10 @@ export class XianyuSliderSolver {
           trackRect: elements.trackRect,
         });
 
-        const generated = generatePhysicsTrajectory(elements.distance, { rng: this.rng });
+        const generated = generatePhysicsTrajectory(elements.distance, {
+          rng: this.rng,
+          verticalLimit: Math.max(0.5, (elements.trackRect.height - elements.buttonRect.height) / 2),
+        });
         result.distance = elements.distance;
         result.trajectoryPoints = generated.points.length;
         await this.simulateSlide(elements.button, elements.buttonRect, generated);
@@ -171,7 +174,7 @@ export class XianyuSliderSolver {
         const buttonRect = await button.boundingBox();
         const trackRect = await track.boundingBox();
         if (!buttonRect || !trackRect) continue;
-        const distance = Math.max(0, trackRect.width - buttonRect.width);
+        const distance = calculateSliderDistance(trackRect, buttonRect);
         if (distance > 0) return { button, container, frame, buttonRect, trackRect, distance };
       }
       await sleep(Math.min(100, this.elementTimeoutMs));
@@ -273,4 +276,16 @@ function sleep(delayMs: number): Promise<void> {
 
 export function solveXianyuSlider(page: XianyuSliderPage, options?: XianyuSliderSolverOptions): Promise<XianyuSliderSolveResult> {
   return new XianyuSliderSolver(page, options).solve();
+}
+
+/**
+ * NC's track box can start a couple of pixels before the draggable handle.
+ * The usable travel is therefore the distance between the two right edges,
+ * not the difference between the element widths.
+ */
+export function calculateSliderDistance(trackRect: XianyuSliderRect, buttonRect: XianyuSliderRect): number {
+  const trackRight = trackRect.x + trackRect.width;
+  const buttonRight = buttonRect.x + buttonRect.width;
+  const distance = trackRight - buttonRight;
+  return Number.isFinite(distance) ? Math.max(0, distance) : 0;
 }
