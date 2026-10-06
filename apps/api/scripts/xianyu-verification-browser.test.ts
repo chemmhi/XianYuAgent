@@ -37,6 +37,7 @@ test('automatic verification honors explicit headless configuration and avoids a
     assert.equal(shouldUseHeadlessVerificationBrowser('auto', false), false);
     assert.equal(shouldUseHeadlessVerificationBrowser('disabled', true), true);
     assert.equal(shouldHideVerificationWindow('auto', false), true);
+    assert.equal(shouldHideVerificationWindow('auto', false, true), false);
     assert.equal(shouldHideVerificationWindow('auto', true), false);
     assert.equal(shouldHideVerificationWindow('disabled', false), false);
     assert.equal(resolveVerificationCookieUrl('https://punish.goofish.com/verify?token=redacted#challenge'), 'https://punish.goofish.com/verify');

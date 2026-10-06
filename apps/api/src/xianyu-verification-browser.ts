@@ -111,7 +111,7 @@ export class XianyuVerificationBrowser {
     const pollIntervalMs = Math.max(25, Math.floor(input.pollIntervalMs ?? this.pollIntervalMs));
     const allowManualFallback = input.allowManualFallback ?? this.allowManualFallback;
     const useHeadless = shouldUseHeadlessVerificationBrowser(this.sliderMode, this.headless);
-    const hideWindow = shouldHideVerificationWindow(this.sliderMode, useHeadless);
+    const hideWindow = shouldHideVerificationWindow(this.sliderMode, useHeadless, allowManualFallback);
     const profileDir = await this.resolveProfileDir(input.profileKey);
     const context = await this.browserFactory.launchPersistentContext({
       profileDir,
@@ -138,6 +138,7 @@ export class XianyuVerificationBrowser {
           const reason = sliderResult.failureReason ?? 'unknown';
           console.warn(JSON.stringify({ component: 'xianyu-verification', event: 'slider_auto_solve_failed', reason, attempts: sliderResult.attempts, distance: sliderResult.distance, trajectoryPoints: sliderResult.trajectoryPoints }));
           if (!allowManualFallback) throw new Error(`XIANYU_VERIFICATION_AUTO_SOLVE_FAILED:${reason}`);
+          console.warn(JSON.stringify({ component: 'xianyu-verification', event: 'slider_manual_fallback_wait', reason }));
         } else {
           console.info(JSON.stringify({ component: 'xianyu-verification', event: 'slider_auto_solve_succeeded', attempts: sliderResult.attempts, distance: sliderResult.distance, trajectoryPoints: sliderResult.trajectoryPoints }));
         }
@@ -186,8 +187,8 @@ export function shouldUseHeadlessVerificationBrowser(sliderMode: XianyuSliderMod
   return sliderMode === 'auto' && process.env.XIANYU_VERIFICATION_AUTO_HEADLESS === 'true';
 }
 
-export function shouldHideVerificationWindow(sliderMode: XianyuSliderMode, useHeadless: boolean): boolean {
-  return sliderMode === 'auto' && !useHeadless;
+export function shouldHideVerificationWindow(sliderMode: XianyuSliderMode, useHeadless: boolean, allowManualFallback = false): boolean {
+  return sliderMode === 'auto' && !useHeadless && !allowManualFallback;
 }
 
 export function resolveVerificationCookieUrl(verificationUrl: string): string {

@@ -784,6 +784,18 @@ function nestedString(root: unknown, path: string[]): string | undefined {
   return typeof current === 'string' && current.trim() ? current.trim() : undefined;
 }
 
+export function normalizeXianyuVerificationUrl(candidate: string): string | undefined {
+  try {
+    const url = new URL(candidate, 'https://h5api.m.goofish.com');
+    url.pathname = url.pathname.replace(/\/{2,}/gu, '/');
+    if (!/^https?:$/u.test(url.protocol)) return undefined;
+    if (!/punish|captcha|verify|security/i.test(`${url.pathname}${url.search}${url.hash}`)) return undefined;
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
 function extractVerificationUrl(response: Record<string, unknown> | undefined): string | undefined {
   const candidates = [
     nestedString(response, ['data', 'url']),
@@ -793,12 +805,8 @@ function extractVerificationUrl(response: Record<string, unknown> | undefined): 
   ];
   for (const candidate of candidates) {
     if (!candidate) continue;
-    try {
-      const url = new URL(candidate);
-      if (/punish|captcha|verify|security/i.test(`${url.pathname}${url.search}${url.hash}`)) return url.toString();
-    } catch {
-      // Ignore malformed remote values and keep looking for another candidate.
-    }
+    const normalized = normalizeXianyuVerificationUrl(candidate);
+    if (normalized) return normalized;
   }
   return undefined;
 }

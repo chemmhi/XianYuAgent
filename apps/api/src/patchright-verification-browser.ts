@@ -36,7 +36,6 @@ export function createPatchrightVerificationBrowserFactory(): XianyuVerification
           '--window-size=1440,900',
           '--lang=zh-CN',
           ...(!options.headless && options.hideWindow ? ['--start-minimized', '--window-position=-32000,-32000'] : []),
-          ...(!options.headless && !options.hideWindow ? ['--start-minimized'] : []),
         ],
       });
       return context as unknown as XianyuVerificationContext;

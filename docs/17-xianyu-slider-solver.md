@@ -43,4 +43,5 @@ XIANYU_VERIFICATION_BROWSER_HEADLESS=false
 
 - 已验证轨迹确定性、时间轴回放、CDP 事件顺序、失败重试和受控本地 Chrome/CDP fixture。
 - 未宣称真实闲鱼外部风控挑战已通过；真实账号、真实 Cookie、外部页面结构和生产 profile 仍需在受控账号上人工验收。
+- 生产复核（2026-10-06）确认：滑块位移为 256px，`/slide` 请求已带 `bx-et`/`bx-pp`，但闲鱼返回 HTTP 200 且业务体为 `code=300, sig=from bx`，页面显示 `验证失败`。因此当前阻断来自外部 BX 风控对自动化交互的拒绝，不是轨道几何或 HTTP 超时；自动模式继续 fail-closed，人工验证仍是恢复路径。
 - 跨域 iframe 无法通过主页面 DOM 直接读取；当前实现会处理主文档和可访问 iframe，遇到不可访问跨域 frame 时保留人工流程，不伪造成功。
