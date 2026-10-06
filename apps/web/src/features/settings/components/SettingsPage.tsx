@@ -30,7 +30,7 @@ export function SettingsPage({ api: providedApi, agentApi: providedAgentApi, ope
   const agentApi = useMemo(() => resolveRuntimeApi(providedAgentApi, createMockAutoReplyAgentSettingsApi, 'AUTO_REPLY_AGENT_API_NOT_PROVIDED'), [providedAgentApi]);
   const openaiApi = useMemo(() => resolveRuntimeApi(providedOpenaiApi, createMockOpenAISettingsApi, 'OPENAI_SETTINGS_API_NOT_PROVIDED'), [providedOpenaiApi]);
   const modelApi = useMemo(() => providedModelApi ?? createEmptyModelProviderApi(), [providedModelApi]);
-  const [activeTab, setActiveTab] = useState<TabKey>('credentials');
+  const [activeTab, setActiveTab] = useState<TabKey>('autoReply');
   const [editor, setEditor] = useState<'create' | 'edit' | 'rotate' | null>(null);
   const [selectedCredential, setSelectedCredential] = useState<CredentialRefVM | undefined>();
   const controller = useCredentialController({ api, accountId: currentAccountId });
