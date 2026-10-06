@@ -27,6 +27,7 @@ docs/agent/**/evidence/**/screenshots/
 *.webp
 
 # Local runtime output
+.xianyu-dev.pid
 runtime-live/*.log
 runtime-live/*.ndjson
 runtime-live/*.jsonl

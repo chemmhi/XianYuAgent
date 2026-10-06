@@ -256,3 +256,4 @@
 
 
 
+| `root` | `npm-dev-stability-20261006` | `fix/npm-dev-stability-20261006` | `F:\ChenHai\Project\XianYuAgent-npm-dev-stability-20261006` | Codex /root | `2026-10-06 11:24:00 +08:00` | `MERGING` | `-` | `-` | Replaced concurrently-only lifecycle with signal-safe runner and stale-process discovery; added port preflight, deps:ci safe install path, lifecycle tests, docs, typecheck/build/Compose validation. |
