@@ -23,4 +23,5 @@ test('production workflow verifies the pushed SHA before deployment', () => {
   assert.match(workflow, /actual_sha=.*git rev-parse HEAD/);
   assert.match(workflow, /actual_sha.*EXPECTED_SHA/);
   assert.match(workflow, /bash scripts\/deploy-production\.sh/);
+  assert.match(workflow, /bash scripts\/deploy-production-frontend\.sh/);
 });

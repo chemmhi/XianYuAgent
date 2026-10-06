@@ -17,9 +17,11 @@ bash scripts/deploy-production.sh
 
 ## GitHub Push 自动部署
 
-仓库工作流 `.github/workflows/deploy-production.yml` 监听 `main` 分支的 `push`，并支持 `workflow_dispatch` 手动触发。工作流通过固定 SSH 主机指纹连接生产服务器，在服务器上执行以下顺序：校验 GitHub `origin` → 拒绝受跟踪文件本地改动 → 重试 `git fetch origin main` → `git pull --ff-only origin main` → 校验 `HEAD == github.sha` → `bash scripts/deploy-production.sh`。
+仓库工作流 `.github/workflows/deploy-production.yml` 监听 `main` 分支的 `push`，并支持 `workflow_dispatch` 手动触发。工作流通过固定 SSH 主机指纹连接生产服务器，在服务器上执行以下顺序：校验 GitHub `origin` → 拒绝受跟踪文件本地改动 → 重试 `git fetch origin main` → `git pull --ff-only origin main` → 校验 `HEAD == github.sha` → `bash scripts/deploy-production.sh` → `bash scripts/deploy-production-frontend.sh`。
 
 启用工作流前，必须在 GitHub Actions secrets 中配置 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY` 和 `DEPLOY_KNOWN_HOSTS`；`DEPLOY_PORT` 默认 `22`，`DEPLOY_PATH` 默认 `/home/ubuntu/xianyu-agent-prod`。部署私钥只授予服务器部署用户，`DEPLOY_KNOWN_HOSTS` 使用固定主机指纹，不在工作流中动态信任未知主机。
+
+`deploy-production-frontend.sh` 会在 Node 容器中执行 `npm ci && npm run build:web`，将当前站点备份到 `/var/backups/xy.chemhi.top-<timestamp>/site.tgz`，再同步到 `/var/www/xy.chemhi.top`。这样每次 `main` push 会同时更新 API/Worker 和 Nginx 静态前端。
 
 脚本会在执行前拒绝以下两类配置错误：
 

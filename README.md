@@ -123,7 +123,7 @@ git push origin HEAD:main
 - `DEPLOY_KNOWN_HOSTS`：生产服务器的固定 `known_hosts` 行；
 - `DEPLOY_PATH`：部署目录，可省略（默认 `/home/ubuntu/xianyu-agent-prod`）。
 
-工作流会拒绝非 GitHub `origin`、受跟踪文件的服务器本地改动和提交 SHA 不匹配，并在拉取失败时自动重试后再执行 `scripts/deploy-production.sh`。
+工作流会拒绝非 GitHub `origin`、受跟踪文件的服务器本地改动和提交 SHA 不匹配，并在拉取失败时自动重试后依次执行 `scripts/deploy-production.sh` 与 `scripts/deploy-production-frontend.sh`。后者会在服务器上的 Node 容器中构建前端、备份当前 Nginx 静态目录，再执行 `rsync --delete` 发布最新 `apps/web/dist`。
 
 ### 2. 检查并更新服务器工作树
 
