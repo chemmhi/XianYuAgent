@@ -255,7 +255,8 @@ describe('Workspace session search alignment contract', () => {
 
 describe('Workspace confirmation feedback contract', () => {
   it('keeps the continue action readable on hover and renders controller errors as a toast', () => {
-    expect(workspaceCss).toContain('.workspace-confirmation-actions .warning:hover:not(:disabled)');
+    expect(workspaceCss).toContain('.workspace-confirmation-actions .warning:hover,');
+    expect(workspaceCss).toContain('.workspace-confirmation-actions .warning:disabled:hover');
     expect(workspaceCss).toContain('background: #8F5A0E; color: #fff;');
     expect(workspacePageSource).toContain("import { Toast } from '../../../shared/ui/Toast';");
     expect(workspacePageSource).toContain('{errorToast && <Toast message={errorToast} tone="error"');
@@ -318,5 +319,25 @@ describe('Workspace confirmation readability', () => {
     expect(html).not.toContain('accountId');
     expect(html).not.toContain('productId');
     expect(html).not.toContain('policy:');
+  });
+
+  it('blocks confirmation instead of showing ambiguous placeholders when preview data is missing', () => {
+    const run: WorkspaceRunVM = {
+      runId: 'run-automation-2', sessionId: 'session-1', accountId: 'account-1', status: 'waiting_confirmation',
+      instructionSummary: '为AI工具一键下载服务设置夸克网盘自动发货', createdAt: '2026-10-06T12:00:00.000Z', updatedAt: '2026-10-06T12:00:01.000Z', steps: [],
+    };
+    const confirmation: WorkspaceConfirmationVM = {
+      confirmationId: 'confirmation-2', runId: run.runId, stepId: 'step-2', accountId: run.accountId,
+      action: 'product_automation_update', policyRef: 'workspace.product_automation_update.confirm',
+      manifest: { action: 'product_automation_update', fields: ['paidAutoDelivery'], expectedConfigVersion: 1 },
+      status: 'active', version: 1, expiresAt: '2026-10-06T12:10:00.000Z', createdAt: '2026-10-06T12:00:01.000Z', updatedAt: '2026-10-06T12:00:01.000Z',
+    };
+    const html = renderToStaticMarkup(createElement(WorkspaceConfirmationCard, { run, accountName: '陈陈cc', confirmation, actionSubmitting: false, onConfirm: vi.fn(), onCancel: vi.fn() }));
+    expect(html).toContain('AI工具一键下载服务');
+    expect(html).toContain('系统未获取到商品“AI工具一键下载服务”的完整自动化配置');
+    expect(html).toContain('disabled=""');
+    expect(html).not.toContain('当前商品');
+    expect(html).not.toContain('未读取当前状态');
+    expect(html).not.toContain('按请求更新');
   });
 });

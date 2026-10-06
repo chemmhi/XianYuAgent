@@ -237,8 +237,10 @@
 .workspace-confirmation-meta { margin-top: 9px; color: var(--sub); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--font-size-meta); line-height: var(--font-line-meta); }
 .workspace-confirmation-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .workspace-confirmation-actions .warning { border-color: #A96F16; background: var(--warn); color: #fff; transition: border-color .15s ease, background .15s ease, color .15s ease, transform .15s ease; }
-.workspace-confirmation-actions .warning:hover:not(:disabled),
-.workspace-confirmation-actions .warning:focus-visible:not(:disabled) { border-color: #8F5A0E; background: #8F5A0E; color: #fff; }
+.workspace-confirmation-actions .warning:disabled { border-color: #A96F16; background: var(--warn); color: #fff; }
+.workspace-confirmation-actions .warning:hover,
+.workspace-confirmation-actions .warning:focus-visible,
+.workspace-confirmation-actions .warning:disabled:hover { border-color: #8F5A0E; background: #8F5A0E; color: #fff; }
 .workspace-confirmation-actions .warning:active:not(:disabled) { border-color: #744709; background: #744709; color: #fff; transform: translateY(1px); }
 .workspace-outbox-panel { width: min(100%, 760px); margin: 0 auto; padding: 12px 0; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--sub); font-size: var(--font-size-body-compact); }
 .workspace-outbox-panel > div { display: grid; gap: 2px; }

@@ -333,41 +333,43 @@ export function WorkspaceConfirmationCard({ run, accountName, confirmation, acti
   const title = textValue(manifest.title) ?? run.instructionSummary;
   const displayTitle = textValue(manifest.displayTitle);
   const displaySummary = textValue(manifest.displaySummary);
-  const productTitle = textValue(manifest.productTitle);
-  const automationChanges = readAutomationChanges(manifest.automationChanges, manifest.fields, run.instructionSummary);
+  const productTitle = textValue(manifest.productTitle) ?? inferProductTitleFromInstruction(run.instructionSummary);
+  const automationChanges = readAutomationChanges(manifest.automationChanges);
+  const automationPreviewReady = !isAutomationUpdate || (Boolean(productTitle) && automationChanges.length > 0);
   const status = confirmation.status === 'active' ? '待确认' : confirmation.status === 'confirmed' ? '已确认' : confirmation.status === 'cancelled' ? '已取消' : confirmation.status === 'expired' ? '已过期' : '已拒绝';
-  const titleText = isAutomationUpdate ? productTitle ?? '当前商品' : isAgentSettingsUpdate ? '自动回复 Agent 配置' : title;
+  const titleText = isAutomationUpdate ? productTitle ?? '商品标题获取失败' : isAgentSettingsUpdate ? '自动回复 Agent 配置' : title;
   const detailRows = isCouponCreate
     ? [['卡券名称', String(manifest.label ?? manifest.title ?? '未解析')], ['卡券类型', purposeLabel(String(manifest.purpose ?? ''))], ['内容状态', manifest.configured === true ? '已解析，可创建' : '未配置，确认后仍会校验'], ['正文长度', manifest.contentLength !== undefined ? `${String(manifest.contentLength)} 字符` : '—'], ['数据条数', String(manifest.itemCount ?? 0)], ...(manifest.purpose === 'api' ? [['接口地址', String(manifest.apiUrl ?? '未配置')], ['请求方法', String(manifest.apiMethod ?? 'GET')], ['超时', manifest.apiTimeout !== undefined ? `${String(manifest.apiTimeout)} 秒` : '默认'], ['请求头/参数', `${manifest.apiHeadersConfigured === true ? '已配置' : '未配置'} / ${manifest.apiParamsConfigured === true ? '已配置' : '未配置'}`], ['响应字段', String(manifest.responseField ?? '未配置')]] : []), ...(manifest.purpose === 'image' ? [['图片数量', String(manifest.imageCount ?? 0)]] : [])]
     : isAgentSettingsUpdate
       ? [['变更字段', Array.isArray(manifest.changedFields) ? manifest.changedFields.map((value) => agentFieldLabel(String(value))).join('、') : '未解析'], ['当前版本', `v${String(manifest.expectedVersion ?? 0)}`]]
       : isAutomationUpdate
-        ? [['商品', productTitle ?? '当前商品'], ['变更规则', automationChanges.length ? automationChanges.map((change) => change.label).join('、') : humanizeRuleFields(manifest.fields)], ['变更内容', automationChanges.length ? automationChanges.map((change) => `${change.label}：${change.before} → ${change.after}`).join('\n') : displaySummary ?? '未解析到具体规则，请重新生成审核预览'], ['当前版本', manifest.expectedConfigVersion !== undefined ? `v${String(manifest.expectedConfigVersion)}` : '读取当前配置']]
+        ? [['商品', productTitle ?? '商品标题获取失败'], ['变更规则', automationChanges.length ? automationChanges.map((change) => change.label).join('、') : humanizeRuleFields(manifest.fields)], ['变更内容', automationChanges.length ? automationChanges.map((change) => `${change.label}：${change.before} → ${change.after}`).join('\n') : '未生成可确认的前后状态预览'], ['当前版本', manifest.expectedConfigVersion !== undefined ? `v${String(manifest.expectedConfigVersion)}` : '版本信息获取失败']]
         : buildReadableConfirmationRows(confirmation.action, manifest, displaySummary);
   const beforeText = isAutomationUpdate
-    ? automationChanges.length ? automationChanges.map((change) => `${change.label}：${change.before}`).join('\n') : '未解析到具体规则，请重新生成审核预览'
+    ? automationChanges.length ? automationChanges.map((change) => `${change.label}：${change.before}`).join('\n') : '未生成当前配置预览，暂不能确认'
     : `${status}\n${titleText}`;
   const afterText = isAutomationUpdate
-    ? automationChanges.length ? automationChanges.map((change) => `${change.label}：${change.after}`).join('\n') : '未解析到具体规则，请重新生成审核预览'
+    ? automationChanges.length ? automationChanges.map((change) => `${change.label}：${change.after}`).join('\n') : '未生成目标配置预览，暂不能确认'
     : isCouponCreate ? '创建卡券批次\n服务端按以上参数写入' : isAgentSettingsUpdate ? '更新 Agent 配置\nPrompt 原文不会显示在 Workspace' : '确认后进入执行队列\n由服务端回传结果';
   const heading = isAutomationUpdate ? '商品自动化规则变更 · 需要管理员确认' : isCouponCreate ? '新增卡券 · 需要管理员确认' : isAgentSettingsUpdate ? '修改配置 · 需要管理员确认' : `${displayTitle ?? '外部动作'} · 需要管理员确认`;
   const description = isAutomationUpdate
-    ? `${displaySummary ?? `将在 ${accountName} 下更新商品自动化规则`}。确认后会立即保存并生效。`
+    ? automationPreviewReady ? `${displaySummary ?? `将在 ${accountName} 下更新商品“${productTitle}”的自动化规则`}。确认后会立即保存并生效。` : `系统未获取到商品“${productTitle ?? '当前请求中的商品'}”的完整自动化配置，暂不能确认，避免误改。请重新生成审核预览。`
     : isCouponCreate ? `确认后会在 ${accountName} 下创建卡券批次，卡券正文不会显示在审核卡片中。` : isAgentSettingsUpdate ? `确认后会更新 ${accountName} 的自动回复 Agent 配置，Prompt 原文和凭证不会显示。` : `${displaySummary ?? '该动作会改变当前账号的对外状态'}。确认后由服务端继续执行。`;
   const riskLabel = isAutomationUpdate ? '中风险 · 商品设置' : isCouponCreate ? '中风险 · 卡券写入' : isAgentSettingsUpdate ? '中风险 · 配置写入' : '中风险 · 外部写入';
-  return <section className="workspace-confirmation-card" data-testid="workspace-confirmation-card"><div className="workspace-confirmation-head"><div><h3>{heading}</h3><p>{description}</p></div><span>{riskLabel}</span></div><div className="workspace-confirmation-params" data-testid="workspace-confirmation-params">{detailRows.map(([key, value]) => <div key={key}><small>{key}</small><strong>{value}</strong></div>)}</div><div className="workspace-confirmation-diff"><div><small>当前状态</small><strong>{beforeText}</strong></div><div><small>确认后</small><strong>{afterText}</strong></div></div><div className="workspace-confirmation-meta">确认有效期至 {formatTime(confirmation.expiresAt)}</div><div className="workspace-confirmation-actions"><button className="btn ghost" type="button" onClick={onCancel} disabled={actionSubmitting || confirmation.status !== 'active'} data-testid="workspace-confirm-cancel">取消动作</button><button className="btn warning" type="button" onClick={onConfirm} disabled={actionSubmitting || confirmation.status !== 'active'} data-testid="workspace-confirm-continue">{actionSubmitting ? '提交中…' : '确认继续'}</button></div></section>;
+  return <section className="workspace-confirmation-card" data-testid="workspace-confirmation-card"><div className="workspace-confirmation-head"><div><h3>{heading}</h3><p>{description}</p></div><span>{riskLabel}</span></div><div className="workspace-confirmation-params" data-testid="workspace-confirmation-params">{detailRows.map(([key, value]) => <div key={key}><small>{key}</small><strong>{value}</strong></div>)}</div><div className="workspace-confirmation-diff"><div><small>当前状态</small><strong>{beforeText}</strong></div><div><small>确认后</small><strong>{afterText}</strong></div></div><div className="workspace-confirmation-meta">确认有效期至 {formatTime(confirmation.expiresAt)}</div><div className="workspace-confirmation-actions"><button className="btn ghost" type="button" onClick={onCancel} disabled={actionSubmitting || confirmation.status !== 'active'} data-testid="workspace-confirm-cancel">取消动作</button><button className="btn warning" type="button" onClick={onConfirm} disabled={actionSubmitting || confirmation.status !== 'active' || !automationPreviewReady} data-testid="workspace-confirm-continue">{actionSubmitting ? '提交中…' : '确认继续'}</button></div></section>;
 }
 function purposeLabel(value: string): string { const label = ({ text: '固定文字', data: '批量数据', api: 'API 接口', image: '图片' } as Record<string, string>)[value]; return label ?? value ?? '未解析'; }
 function textValue(value: unknown): string | undefined { return typeof value === 'string' && value.trim() ? value.trim() : undefined; }
-function readAutomationChanges(value: unknown, fields?: unknown, instruction?: string): Array<{ key: string; label: string; before: string; after: string }> {
+function readAutomationChanges(value: unknown): Array<{ key: string; label: string; before: string; after: string }> {
   const explicit = Array.isArray(value)
-    ? value.filter(isRecord).map((item) => ({ key: textValue(item.key) ?? '', label: textValue(item.label) ?? textValue(item.key) ?? '自动化规则', before: textValue(item.before) ?? '未读取当前状态', after: textValue(item.after) ?? '按请求更新' })).filter((item) => item.key || item.label)
+    ? value.filter(isRecord).map((item) => ({ key: textValue(item.key), label: textValue(item.label) ?? textValue(item.key), before: textValue(item.before), after: textValue(item.after) })).filter((item): item is { key: string; label: string; before: string; after: string } => Boolean(item.key && item.label && item.before && item.after))
     : [];
-  if (explicit.length) return explicit;
-  const labels: Record<string, string> = { paidAutoDelivery: '付费自动发货', unpaidAutoReprice: '未付款自动改价', reviewGift: '评价赠品', reviewReminder: '好评提醒' };
-  const keys = Array.isArray(fields) ? fields.map((item) => String(item)).filter((key) => Boolean(labels[key])) : [];
-  const direction = /(?:关闭|停用|禁用|取消)/i.test(instruction ?? '') ? '关闭' : /(?:启动|开启|启用|打开)/i.test(instruction ?? '') ? '开启' : '按请求更新';
-  return [...new Set(keys)].map((key) => ({ key, label: labels[key]!, before: '未读取当前状态', after: direction }));
+  return explicit;
+}
+function inferProductTitleFromInstruction(instruction: string): string | undefined {
+  const match = instruction.match(/(?:为|给)\s*[“"']?(.+?)[”"']?\s*(?:设置|配置|更新|修改|开启|启用|启动|关闭|停用|禁用)/i);
+  const value = match?.[1]?.replace(/[，,；;:：]+$/g, '').trim();
+  return value && !/^(?:商品|当前商品|自动化规则|自动发货)$/i.test(value) ? value : undefined;
 }
 function humanizeRuleFields(value: unknown): string { if (!Array.isArray(value)) return '未解析'; const labels: Record<string, string> = { paidAutoDelivery: '付费自动发货', unpaidAutoReprice: '未付款自动改价', reviewGift: '评价赠品', reviewReminder: '好评提醒' }; return value.map((item) => labels[String(item)] ?? String(item)).join('、') || '未解析'; }
 function agentFieldLabel(value: string): string { const labels: Record<string, string> = { enabled: '自动回复开关', maxLoops: '最大循环次数', maxToolCalls: '工具调用上限', toolTimeoutMs: '工具超时', totalTimeoutMs: '总超时', maxHistory: '上下文历史条数', maxReplyLength: '最大回复长度', replySegmentDelayMs: '分段发送间隔', sendDelaySeconds: '接管等待时间', sendMode: '发送模式' }; return labels[value] ?? value; }
