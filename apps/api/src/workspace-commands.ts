@@ -92,7 +92,7 @@ export class WorkspaceCommandOrchestrator {
             additionalProperties: false,
             properties: {
               operation: { type: 'string', enum: ['product_publish', 'product_update', 'coupon_create', 'agent_settings_update', 'product_knowledge_update', 'product_automation_update', 'coupon_update', 'coupon_enable', 'coupon_disable', 'coupon_bind', 'coupon_unbind', 'coupon_void', 'coupon_copy', 'model_settings_update', 'order_deliver', 'order_retry', 'order_cancel'], description: 'Canonical mutation operation.' },
-              parameters: { type: 'object', additionalProperties: true, description: 'Canonical operation parameters. Do not place the whole user instruction here.' },
+              parameters: { type: 'object', additionalProperties: true, description: 'Canonical operation parameters. Do not place the whole user instruction here. If a provider emits operation fields at the top level, the runtime normalizes them into this object.' },
               instruction: { type: 'string', description: 'Compatibility fallback when canonical parameters cannot be produced.' },
               productId: { type: 'string', description: 'Resolved internal product ID from workspace_product_search, when available.' },
             },
@@ -135,7 +135,7 @@ export class WorkspaceCommandOrchestrator {
     }
     if (name === 'workspace_prepare_write') {
       const structuredOperation = operation || undefined;
-      const parameters = isRecord(args.parameters) ? args.parameters : undefined;
+      const parameters = normalizeWorkspacePrepareWriteParameters(args);
       if (!instruction && !structuredOperation) throw new ServiceError(422, 'VALIDATION_FAILED', 'workspace mutation requires operation+parameters or instruction');
       const productId = typeof args.productId === 'string' ? args.productId.trim() : '';
       const preparedInstruction = productId && !/(?:商品(?:ID|id)|productId)\s*[:：=]/i.test(instruction) ? `${instruction}; 商品ID:${productId}` : instruction;
@@ -729,6 +729,15 @@ function validateAutomationConfig(config: Record<string, unknown>): void {
     if (!isRecord(rule)) continue;
     if (Object.prototype.hasOwnProperty.call(rule, 'couponName') || Object.prototype.hasOwnProperty.call(rule, 'couponId') || Object.prototype.hasOwnProperty.call(rule, 'couponBatchId')) throw new ServiceError(422, 'VALIDATION_FAILED', `${key} requires couponBatchIds from a prior coupon lookup; human coupon labels are not accepted`);
   }
+}
+function normalizeWorkspacePrepareWriteParameters(args: Record<string, unknown>): Record<string, unknown> | undefined {
+  const nested = isRecord(args.parameters) ? args.parameters : {};
+  const envelopeKeys = new Set(['operation', 'instruction', 'parameters', 'productId']);
+  const flat = Object.fromEntries(Object.entries(args).filter(([key]) => !envelopeKeys.has(key)));
+  const merged = { ...flat, ...nested };
+  const productId = typeof args.productId === 'string' ? args.productId.trim() : '';
+  if (productId) merged.productId = productId;
+  return Object.keys(merged).length ? merged : undefined;
 }
 function stripNegatedWorkspaceClauses(instruction: string): string {
   // Model-generated read requests often repeat the write vocabulary in an
