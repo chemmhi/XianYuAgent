@@ -252,7 +252,7 @@ export class PiSkillManager {
       return {
         skillId: id,
         status: 'pending_user_action',
-        code: result.code,
+        code: effectiveCode,
         stdout: result.stdout,
         stderr: result.stderr,
         prompt: combined || '请在浏览器中完成 Skill 登录；完成后把授权码粘贴回当前对话。',
@@ -263,7 +263,7 @@ export class PiSkillManager {
     return {
       skillId: id,
       status: 'failed',
-      code: result.code,
+      code: effectiveCode,
       stdout: result.stdout,
       stderr: result.stderr,
       prompt: combined || 'Skill 登录失败，请检查登录信息后重试。',
