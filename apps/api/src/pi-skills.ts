@@ -27,6 +27,7 @@ export interface PiSkillInfo {
   enabled: boolean;
   authorized: boolean;
   entry?: string;
+  statePaths?: string[];
   path: string;
 }
 
@@ -52,6 +53,29 @@ export interface PiSkillExecutionResult {
   stdout: string;
   stderr: string;
   parsed?: unknown;
+  timedOut?: boolean;
+}
+
+export type PiSkillLoginStatus = 'succeeded' | 'already_authorized' | 'pending_user_action' | 'failed';
+
+export interface PiSkillLoginInput {
+  adminId: string;
+  skillId: string;
+  token?: string;
+  args?: string[];
+  sessionInput?: string;
+  sessionId?: string;
+}
+
+export interface PiSkillLoginResult {
+  skillId: string;
+  status: PiSkillLoginStatus;
+  code: number;
+  stdout: string;
+  stderr: string;
+  prompt?: string;
+  authUrl?: string;
+  userActionRequired?: boolean;
 }
 
 export interface PiSkillInstructionResult {
@@ -78,6 +102,7 @@ interface SkillManifest {
   version?: string;
   description?: string;
   entry?: string;
+  statePaths?: string[];
 }
 
 interface RegistryState {
@@ -161,6 +186,7 @@ export class PiSkillManager {
         enabled: previous?.enabled ?? true,
         authorized: previous?.authorized ?? false,
         entry,
+        statePaths: manifest.statePaths,
         path: target,
       };
       state.items = [...state.items.filter((candidate) => candidate.id !== id), item].sort((a, b) => a.id.localeCompare(b.id));
@@ -175,15 +201,74 @@ export class PiSkillManager {
     const cleanToken = token.trim();
     if (!cleanToken) throw new PiSkillError('SKILL_AUTH_TOKEN_REQUIRED', 'skill authorization token is required');
     if (cleanToken.length > 4096) throw new PiSkillError('SKILL_AUTH_TOKEN_INVALID', 'skill authorization token is too long');
-    const result = await this.executeInternal({ adminId, skillId, command: 'login', args: ['--token', cleanToken] }, cleanToken);
-    if (result.code !== 0) throw new PiSkillError('SKILL_AUTH_FAILED', sanitizeSkillOutput(result.stderr || result.stdout, [cleanToken]), result);
-    const state = await this.readRegistry(adminId);
-    const item = state.items.find((candidate) => candidate.id === sanitizeSkillId(skillId));
-    if (!item) throw new PiSkillError('SKILL_NOT_INSTALLED', `skill ${skillId} is not installed`);
-    item.authorized = true;
-    item.updatedAt = new Date().toISOString();
-    await this.writeRegistry(adminId, state);
-    return result;
+    const login = await this.login({ adminId, skillId, token: cleanToken });
+    if (login.status !== 'succeeded' && login.status !== 'already_authorized') {
+      throw new PiSkillError('SKILL_AUTH_FAILED', sanitizeSkillOutput(login.stderr || login.stdout || login.prompt || 'skill authorization failed', [cleanToken]), login);
+    }
+    return {
+      skillId: login.skillId,
+      command: 'login',
+      code: login.code,
+      stdout: login.stdout,
+      stderr: login.stderr,
+    };
+  }
+
+  /**
+   * Start an account login flow for a Skill. Token mode completes immediately;
+   * interactive mode returns a pending-user-action result when the child CLI
+   * needs a browser or pasted authorization code.
+   */
+  async login(input: PiSkillLoginInput): Promise<PiSkillLoginResult> {
+    const id = sanitizeSkillId(input.skillId);
+    const token = typeof input.token === 'string' ? input.token.trim() : '';
+    if (token.length > 4096) throw new PiSkillError('SKILL_AUTH_TOKEN_INVALID', 'skill authorization token is too long');
+    const args = token ? ['--token', token, ...(input.args ?? [])] : [...(input.args ?? [])];
+    const result = await this.executeInternal({
+      adminId: input.adminId,
+      skillId: id,
+      command: 'login',
+      args,
+      sessionInput: input.sessionInput,
+      sessionId: input.sessionId,
+    }, token || undefined);
+    const parsedCode = skillPayloadCode(result.parsed);
+    const effectiveCode = parsedCode ?? result.code;
+    const alreadyAuthorized = parsedCode === -118 || /\balready\s+authorized\b|授权仍然有效|已授权/i.test(`${result.stdout}\n${result.stderr}`);
+    if ((effectiveCode === 0 || alreadyAuthorized) && !result.timedOut) {
+      await this.markAuthorized(input.adminId, id);
+      return {
+        skillId: id,
+        status: alreadyAuthorized ? 'already_authorized' : 'succeeded',
+        code: effectiveCode,
+        stdout: result.stdout,
+        stderr: result.stderr,
+      };
+    }
+    const combined = sanitizeSkillOutput(`${result.stdout}\n${result.stderr}`.trim(), token ? [token] : []);
+    const authUrl = extractAuthUrl(combined);
+    const pending = !token && Boolean(result.timedOut || authUrl || looksLikeLoginPrompt(combined));
+    if (pending) {
+      return {
+        skillId: id,
+        status: 'pending_user_action',
+        code: result.code,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        prompt: combined || '请在浏览器中完成 Skill 登录；完成后把授权码粘贴回当前对话。',
+        authUrl,
+        userActionRequired: true,
+      };
+    }
+    return {
+      skillId: id,
+      status: 'failed',
+      code: result.code,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      prompt: combined || 'Skill 登录失败，请检查登录信息后重试。',
+      userActionRequired: false,
+    };
   }
 
   async setEnabled(adminId: string, skillId: string, enabled: boolean): Promise<PiSkillInfo> {
@@ -216,7 +301,7 @@ export class PiSkillManager {
     }
     if (sections.length === 0) return '';
     return [
-      'Installed Pi skills are available below. Use pi_skill_exec for skill CLI operations. Never reveal authorization tokens or local paths. If a skill is not authorized, explain the authorization requirement and do not fabricate success.',
+      'Installed Pi skills are available below. Use pi_skill_exec for skill CLI operations and pi_skill_login to start browser or token login. Never reveal authorization tokens or local paths. If a skill is not authorized, explain the authorization requirement and do not fabricate success. Interactive login may return pending_user_action; stop and wait for the user to finish login or paste the code, and do not auto-retry.',
       sections.join('\n\n'),
     ].join('\n\n');
   }
@@ -252,6 +337,18 @@ export class PiSkillManager {
             type: 'object', additionalProperties: false,
             properties: { skillId: { type: 'string' }, token: { type: 'string' } },
             required: ['skillId', 'token'],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'pi_skill_login',
+          description: 'Start an interactive or token-based login for an installed Pi skill. If no token is provided, return the user action needed to finish login in a browser or by pasting a code.',
+          parameters: {
+            type: 'object', additionalProperties: false,
+            properties: { skillId: { type: 'string' }, token: { type: 'string' }, args: { type: 'array', items: { type: 'string' } } },
+            required: ['skillId'],
           },
         },
       },
@@ -307,6 +404,23 @@ export class PiSkillManager {
         data: { skillId, code: result.code },
       };
     }
+    if (name === 'pi_skill_login') {
+      const skillId = typeof args.skillId === 'string' ? args.skillId.trim() : '';
+      const token = typeof args.token === 'string' ? args.token : undefined;
+      const argv = Array.isArray(args.args) ? args.args.filter((value): value is string => typeof value === 'string').slice(0, 16) : [];
+      const result = await this.login({ adminId: input.adminId, skillId, token, args: argv, sessionInput: input.instruction, sessionId: input.requestId });
+      const secretList = token ? [token] : [];
+      const content = sanitizeSkillOutput(result.status === 'pending_user_action'
+        ? (result.prompt || '请完成 Skill 登录后把授权码粘贴回当前对话。')
+        : (result.stdout || result.stderr || result.prompt || `Skill login ${result.status}.`), secretList);
+      return {
+        kind: 'read',
+        title: `${skillId} | login`,
+        summary: result.status === 'succeeded' || result.status === 'already_authorized' ? 'Skill login complete' : result.status === 'pending_user_action' ? 'Skill login needs user action' : 'Skill login failed',
+        content,
+        data: { skillId: result.skillId, status: result.status, code: result.code, userActionRequired: result.userActionRequired ?? false, authUrl: result.authUrl },
+      };
+    }
     if (name === 'pi_skill_exec') {
       const skillId = typeof args.skillId === 'string' ? args.skillId.trim() : '';
       const command = typeof args.command === 'string' ? args.command.trim() : '';
@@ -330,26 +444,39 @@ export class PiSkillManager {
     const source = urlMatch?.[0].replace(/[),\]}>，。！？；：]+$/g, '');
     const tokenMatch = normalized.match(/(?:\u6388\u6743\u7801|\u6388\u6743\s*token|token|code|\u6388\u6743[^A-Za-z0-9]{0,12})\s*[:：]?\s*([A-Za-z0-9._-]{8,})/i)
       ?? normalized.match(/\b(CAC-[A-Za-z0-9_-]{8,})\b/i);
+    const loginIntent = /(?:\u6388\u6743|\u7ed1\u5b9a|\u767b\u5f55|\u626b\u7801|authorize|login|sign\s*in)/i.test(normalized);
+    const requestedSkill = extractSkillId(normalized);
     const installIntent = (/(?:\u5b89\u88c5|\u4e0b\u8f7d|\u6dfb\u52a0|install)/i.test(normalized) || /\bskill\b/i.test(normalized)) && Boolean(source);
     if (installIntent) {
       const item = await this.install({ adminId: input.adminId, source: source! });
-      let authResult: PiSkillExecutionResult | undefined;
-      if (tokenMatch?.[1]) authResult = await this.authorize(input.adminId, item.id, tokenMatch[1]);
+      const authResult = tokenMatch?.[1] ? await this.login({ adminId: input.adminId, skillId: item.id, token: tokenMatch[1], sessionInput: normalized }) : undefined;
+      const completed = authResult?.status === 'succeeded' || authResult?.status === 'already_authorized';
       return {
         title: 'Pi Skill install',
-        summary: authResult ? `${item.name} installed and authorized` : `${item.name} installed; authorization pending`,
-        content: authResult
+        summary: completed ? `${item.name} installed and authorized` : authResult?.status === 'pending_user_action' ? `${item.name} installed; login needs user action` : `${item.name} installed; authorization pending`,
+        content: completed
           ? `Installed and \u6388\u6743 ${item.name} (${item.id}). The Skill is ready to use in Workspace.`
-          : `Installed ${item.name} (${item.id}). Provide the Skill \u6388\u6743 token before using account-scoped commands.`,
-        data: { item, authorized: Boolean(authResult) },
+          : authResult?.status === 'pending_user_action'
+            ? `Installed ${item.name} (${item.id}). ${authResult.prompt || '请完成登录后把授权码粘贴回当前对话。'}`
+            : `Installed ${item.name} (${item.id}). Provide the Skill \u6388\u6743 token or ask me to start browser login before using account-scoped commands.`,
+        data: { item, authorized: completed, loginStatus: authResult?.status, authUrl: authResult?.authUrl },
       };
     }
-    if (tokenMatch?.[1] && /(?:\u6388\u6743|\u7ed1\u5b9a|\u767b\u5f55|authorize|login)/i.test(normalized)) {
+    if (loginIntent || Boolean(tokenMatch?.[1])) {
       const skills = await this.list(input.adminId);
-      const candidate = skills.find((item) => /quark|\u66f2\u5361/i.test(item.name) || /quark|\u66f2\u5361/i.test(item.id));
+      const candidate = (requestedSkill && skills.find((item) => item.id === sanitizeSkillId(requestedSkill) || item.name.toLowerCase() === requestedSkill.toLowerCase()))
+        ?? skills.find((item) => /quark|夸克/i.test(item.name) || /quark|夸克/i.test(item.id))
+        ?? (skills.length === 1 ? skills[0] : undefined)
+        ?? (tokenMatch?.[1] ? skills.find((item) => !item.authorized) : undefined);
       if (!candidate) return undefined;
-      const result = await this.authorize(input.adminId, candidate.id, tokenMatch[1]);
-      return { title: 'Pi Skill authorization', summary: `${candidate.name} authorization complete`, content: `${candidate.name} is authorized.`, data: { skillId: candidate.id, code: result.code } };
+      const result = await this.login({ adminId: input.adminId, skillId: candidate.id, token: tokenMatch?.[1], sessionInput: normalized });
+      const secretList = tokenMatch?.[1] ? [tokenMatch[1]] : [];
+      const content = result.status === 'pending_user_action'
+        ? sanitizeSkillOutput(result.prompt || '请在浏览器中完成登录；完成后把授权码粘贴回当前对话。', secretList)
+        : result.status === 'succeeded' || result.status === 'already_authorized'
+          ? `${candidate.name} is authorized.`
+          : sanitizeSkillOutput(result.prompt || result.stderr || result.stdout || `${candidate.name} login failed.`, secretList);
+      return { title: 'Pi Skill login', summary: result.status === 'succeeded' || result.status === 'already_authorized' ? `${candidate.name} login complete` : result.status === 'pending_user_action' ? `${candidate.name} login needs user action` : `${candidate.name} login failed`, content, data: { skillId: candidate.id, code: result.code, status: result.status, userActionRequired: result.userActionRequired ?? false, authUrl: result.authUrl } };
     }
     return undefined;
   }
@@ -374,16 +501,31 @@ export class PiSkillManager {
     const entryPath = resolve(skillRoot, item.entry);
     if (!isWithin(skillRoot, entryPath) || !existsSync(entryPath)) throw new PiSkillError('SKILL_ENTRYPOINT_INVALID', 'skill entrypoint is outside the installed skill directory');
     const stateDir = join(this.rootDir, sanitizeAdminId(input.adminId), '.state', id);
-    await mkdir(stateDir, { recursive: true });
+    const runtimeDir = join(this.rootDir, sanitizeAdminId(input.adminId), '.runtime', id);
+    const configDir = join(this.rootDir, sanitizeAdminId(input.adminId), '.config', id);
+    const dataDir = join(this.rootDir, sanitizeAdminId(input.adminId), '.data', id);
+    await Promise.all([mkdir(stateDir, { recursive: true }), mkdir(runtimeDir, { recursive: true }), mkdir(configDir, { recursive: true }), mkdir(dataDir, { recursive: true })]);
+    await this.prepareStateBridge(skillRoot, stateDir, item.statePaths);
     const env = {
       ...process.env,
-      HOME: stateDir,
-      USERPROFILE: stateDir,
+      HOME: runtimeDir,
+      USERPROFILE: runtimeDir,
+      OPENCLAW_RUNTIME_DIR: runtimeDir,
+      XDG_CONFIG_HOME: configDir,
+      XDG_DATA_HOME: dataDir,
+      XDG_STATE_HOME: stateDir,
+      CODEX_HOME: join(configDir, 'codex'),
+      PI_SKILL_ADMIN_ID: input.adminId,
+      PI_SKILL_ROOT: skillRoot,
+      PI_SKILL_RUNTIME_DIR: runtimeDir,
+      PI_SKILL_CONFIG_DIR: configDir,
+      PI_SKILL_DATA_DIR: dataDir,
       PI_SKILL_ID: id,
       PI_SKILL_STATE_DIR: stateDir,
       SKILL_STATE_DIR: stateDir,
       PI_SKILL_SESSION_ID: input.sessionId ?? '',
       PI_SKILL_SESSION_INPUT: input.sessionInput ?? '',
+      PI_SKILL_LOGIN_MODE: input.command === 'login' ? (input.args?.includes('--token') ? 'token' : 'interactive') : 'command',
     };
     const executable = extname(entryPath).toLowerCase() === '.sh' ? 'bash' : process.execPath;
     const argv = extname(entryPath).toLowerCase() === '.sh' ? [entryPath, command, ...args] : [entryPath, command, ...args];
@@ -391,13 +533,52 @@ export class PiSkillManager {
       const result = await promisify(this.execFileImpl)(executable, argv, { cwd: skillRoot, env, timeout: this.executionTimeoutMs, maxBuffer: 512 * 1024, windowsHide: true });
       const stdout = sanitizeSkillOutput(String(result.stdout ?? ''), secretToRedact ? [secretToRedact] : []);
       const stderr = sanitizeSkillOutput(String(result.stderr ?? ''), secretToRedact ? [secretToRedact] : []);
+      await this.persistStateBridge(skillRoot, stateDir, item.statePaths);
       return { skillId: id, command, code: 0, stdout, stderr, parsed: parseLastJsonLine(stdout) };
     } catch (error) {
       const candidate = error as { code?: unknown; stdout?: unknown; stderr?: unknown };
+      const timedOut = candidate.code === 'ETIMEDOUT' || (candidate as { killed?: unknown }).killed === true || (candidate as { signal?: unknown }).signal === 'SIGTERM';
       const numeric = typeof candidate.code === 'number' ? candidate.code : 1;
       const stdout = sanitizeSkillOutput(String(candidate.stdout ?? ''), secretToRedact ? [secretToRedact] : []);
       const stderr = sanitizeSkillOutput(String(candidate.stderr ?? (error instanceof Error ? error.message : String(error))), secretToRedact ? [secretToRedact] : []);
-      return { skillId: id, command, code: numeric, stdout, stderr, parsed: parseLastJsonLine(stdout) };
+      await this.persistStateBridge(skillRoot, stateDir, item.statePaths).catch(() => undefined);
+      return { skillId: id, command, code: numeric, stdout, stderr, parsed: parseLastJsonLine(stdout), timedOut };
+    }
+  }
+
+  private async markAuthorized(adminId: string, skillId: string): Promise<void> {
+    const state = await this.readRegistry(adminId);
+    const item = state.items.find((candidate) => candidate.id === sanitizeSkillId(skillId));
+    if (!item) throw new PiSkillError('SKILL_NOT_INSTALLED', `skill ${skillId} is not installed`);
+    item.authorized = true;
+    item.updatedAt = new Date().toISOString();
+    await this.writeRegistry(adminId, state);
+  }
+
+  private async prepareStateBridge(skillRoot: string, stateDir: string, configuredPaths?: string[]): Promise<void> {
+    for (const relativePath of normalizeStatePaths(configuredPaths)) {
+      const source = join(skillRoot, relativePath);
+      const mirror = join(stateDir, 'bridge', relativePath);
+      if (!existsSync(mirror) && existsSync(source)) {
+        await mkdir(dirname(mirror), { recursive: true });
+        await cp(source, mirror, { recursive: true, force: true });
+      }
+      if (existsSync(mirror)) {
+        await rm(source, { recursive: true, force: true }).catch(() => undefined);
+        await mkdir(dirname(source), { recursive: true });
+        await cp(mirror, source, { recursive: true, force: true });
+      }
+    }
+  }
+
+  private async persistStateBridge(skillRoot: string, stateDir: string, configuredPaths?: string[]): Promise<void> {
+    for (const relativePath of normalizeStatePaths(configuredPaths)) {
+      const source = join(skillRoot, relativePath);
+      const mirror = join(stateDir, 'bridge', relativePath);
+      if (!existsSync(source)) continue;
+      await rm(mirror, { recursive: true, force: true }).catch(() => undefined);
+      await mkdir(dirname(mirror), { recursive: true });
+      await cp(source, mirror, { recursive: true, force: true });
     }
   }
 
@@ -532,8 +713,9 @@ async function parseSkillManifest(path: string): Promise<SkillManifest> {
   const description = values.get('description')?.trim();
   const version = values.get('version')?.trim();
   const entry = values.get('entry')?.trim();
+  const statePaths = values.get('statepaths')?.split(',').map((value) => value.trim()).filter(Boolean);
   if (!name) throw new PiSkillError('SKILL_NAME_MISSING', 'SKILL.md front matter must include name');
-  return { name, version, description, entry };
+  return { name, version, description, entry, statePaths };
 }
 
 async function findEntry(root: string): Promise<string | undefined> {
@@ -560,6 +742,33 @@ function parseLastJsonLine(value: string): unknown {
     try { return JSON.parse(line); } catch { /* keep scanning */ }
   }
   return undefined;
+}
+
+function skillPayloadCode(value: unknown): number | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const code = (value as { code?: unknown }).code;
+  return typeof code === 'number' && Number.isFinite(code) ? code : undefined;
+}
+
+function looksLikeLoginPrompt(value: string): boolean {
+  return /(?:oauth|authorize|authorization|login|sign\s*in|browser|扫码|登录|授权|验证码|授权码|粘贴)/i.test(value);
+}
+
+function extractAuthUrl(value: string): string | undefined {
+  const matches = value.match(/https?:\/\/[^\s"'<>]+/gi) ?? [];
+  return matches.find((url) => /oauth|auth|login|authorize|quark|pan\./i.test(url));
+}
+
+function extractSkillId(value: string): string | undefined {
+  const explicit = value.match(/(?:skill(?:\s*(?:id|name))?|技能(?:\s*(?:id|名称))?)\s*[:：]?\s*([A-Za-z0-9._-]{2,80})/i);
+  if (explicit?.[1]) return explicit[1];
+  const named = value.match(/(?:夸克网盘|夸克|quark(?:clouddrive)?)/i);
+  return named?.[0];
+}
+
+function normalizeStatePaths(paths?: string[]): string[] {
+  const values = paths?.length ? paths : ['codex', '.codex', '.quarkclouddrive'];
+  return [...new Set(values.map((value) => value.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')).filter((value) => value && !value.split('/').includes('..') && !/^[A-Za-z]:/.test(value)))];
 }
 
 function sanitizeSkillOutput(value: string, secrets: string[]): string {

@@ -156,3 +156,79 @@ test('exposes Pi Skill tools to the runtime and routes tool calls to the skill m
     await rm(fixtureRoot, { recursive: true, force: true });
   }
 });
+
+test('starts interactive login with isolated runtime directories and leaves authorization pending', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'pi-skill-login-pending-'));
+  try {
+    const skillRoot = join(fixtureRoot, 'login-skill');
+    await mkdir(join(skillRoot, 'scripts'), { recursive: true });
+    await mkdir(join(skillRoot, 'codex'), { recursive: true });
+    await writeFile(join(skillRoot, 'SKILL.md'), '---\nname: login-skill\nversion: 1.0.0\n---\n');
+    await writeFile(join(skillRoot, 'codex', 'config.json'), '{"seed":true}');
+    await writeFile(join(skillRoot, 'scripts', 'main.cjs'), [
+      "const args = process.argv.slice(2);",
+      "if (args[0] === 'login' && !args.includes('--token')) { console.log(JSON.stringify({ code: -1408, msg: 'open browser https://example.test/oauth/login', env: { home: process.env.HOME, runtime: process.env.OPENCLAW_RUNTIME_DIR, config: process.env.XDG_CONFIG_HOME, data: process.env.XDG_DATA_HOME, state: process.env.XDG_STATE_HOME, codex: process.env.CODEX_HOME, admin: process.env.PI_SKILL_ADMIN_ID, root: process.env.PI_SKILL_ROOT, mode: process.env.PI_SKILL_LOGIN_MODE } })); process.exit(1); }",
+      "console.log(JSON.stringify({ code: 0, msg: 'ok' }));",
+    ].join('\n'));
+    const archive = join(fixtureRoot, 'login-skill.zip');
+    await execFile('tar', ['-a', '-c', '-f', archive, '-C', fixtureRoot, 'login-skill']);
+
+    const manager = new PiSkillManager({ rootDir: join(fixtureRoot, 'installed'), executionTimeoutMs: 5_000 });
+    const installed = await manager.install({ adminId: 'admin/login', source: archive });
+    const result = await manager.login({ adminId: 'admin/login', skillId: installed.id });
+    assert.equal(result.status, 'pending_user_action');
+    assert.equal(result.userActionRequired, true);
+    assert.match(result.authUrl ?? '', /example\.test\/oauth\/login/);
+    assert.match(result.prompt ?? '', /open browser/);
+    assert.equal((await manager.list('admin/login'))[0]?.authorized, false);
+    const parsed = parseLastJson(result.prompt ?? '');
+    assert.equal(parsed?.env?.admin, 'admin/login');
+    assert.equal(parsed?.env?.mode, 'interactive');
+    assert.notEqual(parsed?.env?.runtime, parsed?.env?.config);
+    assert.match(parsed?.env?.root ?? '', /login-skill/);
+
+    const instruction = await manager.handleInstruction({ adminId: 'admin/login', instruction: '请登录 login-skill' });
+    assert.ok(instruction);
+    assert.equal(instruction.data.status, 'pending_user_action');
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('marks authorization only after the Skill reports a successful login payload', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'pi-skill-login-result-'));
+  try {
+    const skillRoot = join(fixtureRoot, 'token-skill');
+    await mkdir(join(skillRoot, 'scripts'), { recursive: true });
+    await writeFile(join(skillRoot, 'SKILL.md'), '---\nname: token-skill\nversion: 1.0.0\n---\n');
+    await writeFile(join(skillRoot, 'scripts', 'main.cjs'), [
+      "const args = process.argv.slice(2);",
+      "if (args[0] === 'login' && args[2] === 'good-token') { console.log(JSON.stringify({ code: 0, msg: 'authorized' })); process.exit(0); }",
+      "if (args[0] === 'login') { console.log(JSON.stringify({ code: -401, msg: 'invalid token' })); process.exit(0); }",
+      "console.log(JSON.stringify({ code: 0, msg: 'ok' }));",
+    ].join('\n'));
+    const archive = join(fixtureRoot, 'token-skill.zip');
+    await execFile('tar', ['-a', '-c', '-f', archive, '-C', fixtureRoot, 'token-skill']);
+    const manager = new PiSkillManager({ rootDir: join(fixtureRoot, 'installed') });
+    const installed = await manager.install({ adminId: 'admin/token', source: archive });
+
+    const failed = await manager.login({ adminId: 'admin/token', skillId: installed.id, token: 'bad-token' });
+    assert.equal(failed.status, 'failed');
+    assert.equal((await manager.list('admin/token'))[0]?.authorized, false);
+
+    const succeeded = await manager.login({ adminId: 'admin/token', skillId: installed.id, token: 'good-token' });
+    assert.equal(succeeded.status, 'succeeded');
+    assert.equal((await manager.list('admin/token'))[0]?.authorized, true);
+    assert.doesNotMatch(JSON.stringify(succeeded), /good-token/);
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+function parseLastJson(value: string): any {
+  const lines = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).reverse();
+  for (const line of lines) {
+    try { return JSON.parse(line); } catch { /* keep scanning */ }
+  }
+  return undefined;
+}

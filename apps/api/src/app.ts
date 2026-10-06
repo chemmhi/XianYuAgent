@@ -657,7 +657,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
       return success(ctx, item, 201);
     });
   }
-  const skillActionMatch = ctx.path.match(/^\/api\/v1\/workspace\/skills\/([^/]+)\/(authorize|enable|disable|execute)$/);
+  const skillActionMatch = ctx.path.match(/^\/api\/v1\/workspace\/skills\/([^/]+)\/(authorize|login|enable|disable|execute)$/);
   if (skillActionMatch && ctx.method === 'POST') {
     const skillId = decodeURIComponent(skillActionMatch[1]);
     const action = skillActionMatch[2];
@@ -667,6 +667,12 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
         if (!token) throw new ServiceError(422, 'VALIDATION_FAILED', 'skill authorization token is required');
         const result = await piSkills.authorize(authContext.admin.id, skillId, token);
         return success(ctx, { skillId, code: result.code, stdout: result.stdout, stderr: result.stderr });
+      }
+      if (action === 'login') {
+        const token = optionalString(ctx.body.token);
+        const args = Array.isArray(ctx.body.args) ? ctx.body.args.filter((value): value is string => typeof value === 'string').slice(0, 16) : [];
+        const result = await piSkills.login({ adminId: authContext.admin.id, skillId, token, args, sessionInput: optionalString(ctx.body.sessionInput), sessionId: optionalString(ctx.body.sessionId) });
+        return success(ctx, result);
       }
       if (action === 'enable' || action === 'disable') return success(ctx, await piSkills.setEnabled(authContext.admin.id, skillId, action === 'enable'));
       const command = optionalString(ctx.body.command);
