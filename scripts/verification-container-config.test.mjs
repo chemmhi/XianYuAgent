@@ -27,8 +27,15 @@ test('API image installs Xvfb and Xauthority support', () => {
   assert.match(dockerfile, /xvfb\s+xauth/);
 });
 
+test('API image exports the runtime Chrome version before Node starts', async () => {
+  assert.match(dockerfile, /COPY docker-entrypoint\.sh \.\/docker-entrypoint\.sh/);
+  assert.match(dockerfile, /ENTRYPOINT \["\.\/docker-entrypoint\.sh"\]/);
+  assert.match(await readFile(path.join(root, 'apps/api/docker-entrypoint.sh'), 'utf8'), /google-chrome --version/);
+});
+
 test('production verification uses Google Chrome and Shanghai timezone', () => {
   assert.match(dockerfile, /google-chrome-stable_current_amd64\.deb/);
   assert.match(dockerfile, /google-chrome --version/);
   assert.match(productionCompose, /XIANYU_VERIFICATION_BROWSER_EXECUTABLE: \/usr\/bin\/google-chrome/);
+  assert.match(productionCompose, /XIANYU_BROWSER_CHROME_VERSION: \$\{XIANYU_BROWSER_CHROME_VERSION:-\}/);
 });
