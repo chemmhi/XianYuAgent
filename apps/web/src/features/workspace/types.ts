@@ -127,6 +127,7 @@ export interface WorkspaceMessageVM {
 
 export interface WorkspaceState {
   phase: 'idle' | 'loading' | 'empty' | 'success' | 'error' | 'forbidden';
+  conversationLoading: boolean;
   sessions: WorkspaceSessionVM[];
   unreadSessionIds: string[];
   activeSessionId?: string;
