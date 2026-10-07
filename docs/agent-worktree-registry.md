@@ -287,3 +287,4 @@
 
 - 2026-10-07 20:35:48 +08:00: recovered stale merge lock for owner=/root branch=codex/workspace-skill-read-cache-20261007 worktree=F:\ChenHai\Project\XianYuAgent-workspace-skill-read-cache-20261007; PID 6324 was not running and the worktree was clean before recovery.
 | `root` | `model-client-circuit-breaker-20261007` | `fix/model-client-circuit-breaker-20261007` | `F:\\ChenHai\\Project\\XianYuAgent-model-client-circuit-breaker-20261007` | Codex `/root` | `2026-10-07 20:54:26 +08:00` | `MERGED` | `3a3d33e` | `-` | Replace one-shot fallback with failure classification, circuit breaker, pool reuse, safe probes, manual routing, and settings runtime status; independent design and code reviews passed. |
+| root | workspace-plan-stop-20261007 | codex/plan-mode-stop | F:\\ChenHai\\Project\\XianYuAgent-worktrees\\plan-mode-stop | Codex /root | 2026-10-07 23:51:56 +08:00 | IN_PROGRESS | - | - | 修复 Plan Mode 完成后仍继续调用工具；新增同响应/下一轮工具闸门回归测试。

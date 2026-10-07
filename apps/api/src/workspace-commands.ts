@@ -362,7 +362,16 @@ export class WorkspaceCommandOrchestrator {
     if (kind === 'products' && /(自动化|规则|发货|改价|赠品|评价)/i.test(normalized) && !/(修改|更新|配置|设置|启用|禁用|取消|关闭|停用)/i.test(normalized)) {
       const productId = await this.resolveProductId(input, fields.productId);
       const config = await this.deps.productAutomation.get(input.adminId, productId);
-      return { kind: 'products', title: '商品自动化规则', summary: `已读取商品自动化规则（v${config.configVersion}）`, content: `商品 ${config.product.title}：自动发货 ${config.config.paidAutoDelivery.enabled ? '开启' : '关闭'}，未付款改价 ${config.config.unpaidAutoReprice.enabled ? '开启' : '关闭'}，赠品 ${config.config.reviewGift.enabled ? '开启' : '关闭'}，求评价 ${config.config.reviewReminder.enabled ? '开启' : '关闭'}。`, data: { ...config } };
+      const couponBatchIds = config.config.paidAutoDelivery.couponBatchIds ?? [];
+      const couponBatches = await Promise.all(couponBatchIds.map(async (batchId) => {
+        try {
+          return await this.deps.coupons.get(input.adminId, String(batchId));
+        } catch {
+          return { id: String(batchId), status: 'missing' };
+        }
+      }));
+      const couponBatchActive = couponBatches.length > 0 && couponBatches.every((batch) => batch.status === 'active');
+      return { kind: 'products', title: '商品自动化规则', summary: `已读取商品自动化规则（v${config.configVersion}）`, content: `商品 ${config.product.title}：自动发货 ${config.config.paidAutoDelivery.enabled ? '开启' : '关闭'}，未付款改价 ${config.config.unpaidAutoReprice.enabled ? '开启' : '关闭'}，赠品 ${config.config.reviewGift.enabled ? '开启' : '关闭'}，求评价 ${config.config.reviewReminder.enabled ? '开启' : '关闭'}。`, data: { ...config, couponBatches, couponBatchActive } };
     }
     if (kind === 'products' && /知识库/i.test(normalized) && !/(修改|更新|编辑|生成|优化)/i.test(normalized)) {
       const productId = await this.resolveProductId(input, fields.productId);
