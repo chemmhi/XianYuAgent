@@ -14,7 +14,7 @@ import {
   XIANYU_TOP_SITE,
   type XianyuCookieSnapshot,
 } from './xianyu-cookie-jar.js';
-import { XIANYU_USER_AGENT, xianyuSecChUa } from './xianyu-browser-identity.js';
+import { XIANYU_USER_AGENT, xianyuSecChUa, xianyuSecChUaPlatform } from './xianyu-browser-identity.js';
 
 const APP_KEY = '34839810';
 export const XIANYU_IM_APP_KEY = '444e9908a51d1cb236a27862abc769c9';
@@ -506,7 +506,7 @@ export class XianyuMtopClient {
           'sec-fetch-site': 'same-site',
           'sec-ch-ua': xianyuSecChUa(),
           'sec-ch-ua-mobile': '?0',
-          'sec-ch-ua-platform': '"Windows"',
+          'sec-ch-ua-platform': xianyuSecChUaPlatform(),
           'user-agent': USER_AGENT,
           cookie: requestCookieHeader,
         };

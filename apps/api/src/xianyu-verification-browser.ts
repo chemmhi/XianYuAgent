@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { dropStaleCaptchaChallengeCookies, normalizeCookieSnapshot, type XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
 import { createPatchrightVerificationBrowserFactory } from './patchright-verification-browser.js';
+import { XIANYU_USER_AGENT } from './xianyu-browser-identity.js';
 import type { XianyuVerificationBrowserFactory, XianyuVerificationContext, XianyuVerificationCookie, XianyuVerificationPage } from './xianyu-browser-port.js';
 import { XianyuSliderSolver, type XianyuSliderMode } from './xianyu-slider-solver.js';
 
@@ -71,7 +72,7 @@ export class XianyuVerificationBrowser {
     this.maxWaitMs = options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this.allowManualFallback = options.allowManualFallback ?? false;
-    this.userAgent = options.userAgent?.trim() || process.env.XIANYU_BROWSER_USER_AGENT?.trim() || undefined;
+    this.userAgent = options.userAgent?.trim() || process.env.XIANYU_BROWSER_USER_AGENT?.trim() || XIANYU_USER_AGENT;
     this.browserFactory = options.browserFactory ?? createPatchrightVerificationBrowserFactory();
   }
 
