@@ -1,4 +1,9 @@
 # XianyuSellerAgent 项目状态
+## 2026-10-08 闲鱼生产滑块身份漂移修复（PASS / 合入 main）
+- 根因：生产容器运行 Linux Google Chrome，但请求侧曾固定 Windows 平台标识；同时生产 Compose 把 Chrome 版本写死，而镜像安装的是会自动更新的 stable 版本。BX 因浏览器 JS 指纹、`sec-ch-ua-platform`、QR `navPlatform`、IM 注册 UA 与实际 Chrome 不一致，返回 `code=300, sig=from bx` 并显示“验证失败”；轨迹距离和超时不是根因。
+- 修复：身份字段统一从 UA 派生 Linux/Windows 平台；容器入口在 Node 启动前读取 `/usr/bin/google-chrome --version`，让滑块浏览器、MTOP、QR、IM 共用实际运行时 Chrome 版本；Compose 移除固定版本默认值，仍保留显式 override。
+- 验证：API build；身份/验证浏览器/IM 回归 24/24；滑块回归 7/7；容器与部署配置 10/10；`git diff --check` 通过。合并提交 `72d37ae`，状态登记见 `docs/agent-worktree-registry.md`。
+
 ## 2026-10-07 Model Provider 主备切换 v2（PASS）
 - 设计文档 `docs/model-provider-failover-v2.md` 已经独立设计审核三轮通过；实现已按文档落地。
 - 已落地：账号级熔断池、CLOSED/OPEN/HALF_OPEN、自动/手动主备路由、有效 Provider 展示、Redis 快照 revision + Lua CAS、generation fencing、Redis routing mirror 读写、探针策略与独立探针超时、V2 回滚 feature flag、主备角色缺失场景、forceProbe 错误返回和 UI 倒计时刷新。
