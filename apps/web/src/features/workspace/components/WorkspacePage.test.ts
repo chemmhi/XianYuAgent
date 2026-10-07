@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { formatToolEventContent, getComposerTextareaMetrics, MessageStream, scrollMessageStreamToLatest, SessionRow, shouldUseWorkspaceDraftMode, WorkspaceConfirmationCard, WorkspaceDeleteSessionModal, WorkspaceSendButton } from './WorkspacePage';
-import type { WorkspaceConfirmationVM, WorkspaceMessageVM, WorkspaceRunVM, WorkspaceSessionVM } from '../types';
+import { WorkspacePlanCard as WorkspacePlanCardComponent } from './WorkspacePlanCard';
+import type { WorkspaceConfirmationVM, WorkspaceMessageVM, WorkspacePlanVM, WorkspaceRunVM, WorkspaceSessionVM } from '../types';
 
 const workspaceCss = readFileSync(fileURLToPath(new URL('./workspace.css', import.meta.url)), 'utf8').replace(/\r\n/g, '\r\n').replace(/\s+/g, ' ').trim();
 const workspacePageSource = readFileSync(fileURLToPath(new URL('./WorkspacePage.tsx', import.meta.url)), 'utf8');
@@ -202,6 +203,43 @@ describe('Workspace MessageStream', () => {
     expect(html).toContain('<ul>');
     expect(html).toContain('<code>一键卸载脚本</code>');
     expect(html).not.toContain('**PPT Master**');
+  });
+});
+
+describe('Workspace execution plan card', () => {
+  const plan: WorkspacePlanVM = {
+    version: 1,
+    revision: 3,
+    goal: '完成卡券创建、商品关联与自动发货启用',
+    status: 'active',
+    currentStepId: 'step-2',
+    steps: [
+      { id: 'step-1', tool: 'pi_skill_catalog', goal: '确认目标与交付要求', status: 'succeeded' },
+      { id: 'step-2', tool: 'pi_skill_read', goal: '读取相关 Skill 文档', status: 'running' },
+      { id: 'step-3', tool: 'workspace_prepare_write', goal: '生成并校验卡券内容', status: 'pending' },
+    ],
+  };
+
+  it('shows only core task labels while keeping the card detached from the message stream', () => {
+    const html = renderToStaticMarkup(createElement(WorkspacePlanCardComponent, { plan }));
+    expect(html).toContain('data-testid="workspace-plan-card"');
+    expect(html).toContain('核心任务列表');
+    expect(html).toContain('确认目标与交付要求');
+    expect(html).toContain('读取相关 Skill 文档');
+    expect(html).toContain('type="checkbox"');
+    expect(html).toContain('data-plan-status="active"');
+    expect(html).not.toContain('pi_skill_catalog');
+    expect(html).not.toContain('workspace_prepare_write');
+    expect(workspaceCss).toContain('.workspace-plan-float {');
+    expect(workspaceCss).toContain('position: absolute;');
+    expect(workspaceCss).toContain('box-shadow: 0 4px 12px rgba(0,0,0,.08);');
+  });
+
+  it('maps completed and blocked states without making checkboxes interactive', () => {
+    const html = renderToStaticMarkup(createElement(WorkspacePlanCardComponent, { plan: { ...plan, status: 'blocked', steps: [{ ...plan.steps[0], status: 'blocked' }] } }));
+    expect(html).toContain('data-plan-status="blocked"');
+    expect(html).toContain('已阻塞');
+    expect(html).toContain('disabled=""');
   });
 });
 

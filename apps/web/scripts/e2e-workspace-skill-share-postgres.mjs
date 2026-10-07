@@ -163,15 +163,19 @@ async function run() {
     modelCalls += 1;
     const body = JSON.parse(String(init?.body ?? '{}'));
     if (body.tool_choice === 'none') {
-      return new Response(JSON.stringify({ model: body.model, choices: [{ message: { role: 'assistant', content: JSON.stringify({ steps: [{ tool: 'pi_skill_read', goal: '读取网盘公开分享说明' }, { tool: 'pi_skill_search', goal: '定位 03 PPT Master' }, { tool: 'pi_skill_exec', goal: '执行 search 后创建公开分享' }] }) } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify({ model: body.model, choices: [{ message: { role: 'assistant', content: JSON.stringify({ steps: [{ tool: 'pi_skill_catalog', goal: '读取夸克 Skill 能力总览' }, { tool: 'pi_skill_read', goal: '读取网盘公开分享说明' }, { tool: 'pi_skill_exec', goal: '执行 search 后创建公开分享' }] }) } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     const lastTool = [...(body.messages ?? [])].reverse().find((message) => message.role === 'tool');
     skillRounds += 1;
     modelTrace.push({ round: skillRounds, toolNames: (body.tools ?? []).map((tool) => tool.function?.name), lastTool: String(lastTool?.content ?? '').slice(0, 500) });
+    if (skillRounds === 2) {
+      const content = String(lastTool?.content ?? '');
+      if (!/Capability overview/.test(content) || !/references[\\/]file-share\.md/.test(content)) modelAssertionError = `catalog evidence missing: ${content}`;
+      else sawReferenceSearch = true;
+    }
     if (skillRounds === 3) {
       const content = String(lastTool?.content ?? '');
-      if (!/references[\\/]file-share\.md/.test(content) || !/share --fid/.test(content)) modelAssertionError = `reference search evidence missing: ${content}`;
-      else sawReferenceSearch = true;
+      if (!/references[\\/]file-share\.md/.test(content) || !/share --fid/.test(content)) modelAssertionError = `reference read evidence missing: ${content}`;
     }
     if (skillRounds === 4) {
       if (!/fid-03-ppt-master/.test(String(lastTool?.content ?? ''))) modelAssertionError = `search result missing: ${String(lastTool?.content ?? '')}`;
@@ -183,9 +187,9 @@ async function run() {
     }
     const tool = (name, args) => ({ id: `skill-call-${skillRounds}`, type: 'function', function: { name, arguments: JSON.stringify(args) } });
     const message = skillRounds === 1
-      ? { role: 'assistant', content: '', tool_calls: [tool('pi_skill_read', { skillId: 'quarkclouddrive' })] }
+      ? { role: 'assistant', content: '', tool_calls: [tool('pi_skill_catalog', { skillId: 'quarkclouddrive' })] }
       : skillRounds === 2
-        ? { role: 'assistant', content: '', tool_calls: [tool('pi_skill_search', { skillId: 'quarkclouddrive', query: '03 PPT Master', mode: 'literal' })] }
+        ? { role: 'assistant', content: '', tool_calls: [tool('pi_skill_read', { skillId: 'quarkclouddrive', filePath: 'references/file-share.md' })] }
         : skillRounds === 3
           ? { role: 'assistant', content: '', tool_calls: [tool('pi_skill_exec', { skillId: 'quarkclouddrive', command: 'search', args: ['03 PPT Master'] })] }
           : skillRounds === 4
@@ -295,13 +299,18 @@ async function run() {
   })()`);
   await evaluate(cdp, 'new Promise((resolve) => setTimeout(resolve, 50))');
   await evaluate(cdp, 'document.querySelector(".workspace-composer")?.requestSubmit()');
-  await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector(".workspace-message-final"))')), 'Skill final reply in Workspace', 30_000);
+  await waitFor(async () => await evaluate(cdp, `(() => {
+    const finalCount = document.querySelectorAll('.workspace-message-final').length;
+    const summaryCount = document.querySelectorAll('[data-testid="workspace-activity-summary"]').length;
+    const toolCount = document.querySelectorAll('[data-testid="workspace-activity-action"]').length;
+    return finalCount === 1 && summaryCount >= 1 && toolCount >= 4;
+  })()`), 'Skill final reply and execution trace in Workspace', 30_000);
 
   const browserState = await evaluate(cdp, `({
     finalCount: document.querySelectorAll('.workspace-message-final').length,
     finalReply: document.querySelector('.workspace-message-final')?.innerText ?? '',
-    summaryCount: document.querySelectorAll('.workspace-execution-summary').length,
-    toolCount: document.querySelectorAll('.workspace-tool-event').length,
+    summaryCount: document.querySelectorAll('[data-testid="workspace-activity-summary"]').length,
+    toolCount: document.querySelectorAll('[data-testid="workspace-activity-action"]').length,
     bodyText: document.body.innerText,
   })`);
   assert.equal(browserState.finalCount, 1, `expected one visible final answer: ${JSON.stringify(browserState)}`);
@@ -318,19 +327,22 @@ async function run() {
   const eventTypes = eventRows.rows.map((row) => row.event_type);
   const toolResults = eventRows.rows.filter((row) => row.event_type === 'tool.result');
   const toolNames = toolResults.map((row) => row.payload_json?.toolName);
-  const skillSearchEvent = toolResults.find((row) => row.payload_json?.toolName === 'pi_skill_search');
+  const skillSearchEvent = toolResults.find((row) => row.payload_json?.toolName === 'pi_skill_exec' && String(row.payload_json?.result?.title ?? '').endsWith('| search'));
   const skillExecEvents = toolResults.filter((row) => row.payload_json?.toolName === 'pi_skill_exec');
   assert.equal(runRow.error_code, null);
   assert.ok(!eventTypes.includes('MODEL_TOOL_LOOP_EXCEEDED'));
-  assert.deepEqual(toolNames.slice(0, 4), ['pi_skill_read', 'pi_skill_search', 'pi_skill_exec', 'pi_skill_exec']);
+  assert.deepEqual(toolNames.slice(0, 4), ['pi_skill_catalog', 'pi_skill_read', 'pi_skill_exec', 'pi_skill_exec']);
   assert.equal(skillExecEvents.length, 2, `expected exactly search + share execution: ${JSON.stringify(skillExecEvents)}`);
   assert.equal(skillExecEvents.filter((row) => row.payload_json?.result?.data?.command === 'share' || String(row.payload_json?.result?.title ?? '').includes('share')).length, 1, `share must execute once: ${JSON.stringify(skillExecEvents)}`);
-  assert.equal(skillSearchEvent?.payload_json?.result?.data?.sourceFile, undefined, 'search should report multi-file evidence without forcing a single file');
-  const commandEvidence = skillSearchEvent?.payload_json?.result?.data?.commandEvidence;
-  assert.ok(Array.isArray(commandEvidence), `reference search must return structured command evidence: ${JSON.stringify(skillSearchEvent)}`);
-  assert.ok(commandEvidence.some((item) => item?.sourceFile === 'references/file-share.md' && /^share\s/.test(String(item.command))), `reference search must expose the documented share command: ${JSON.stringify(commandEvidence)}`);
+  assert.equal(skillSearchEvent?.payload_json?.result?.data?.status, 'succeeded', `search execution must succeed: ${JSON.stringify(skillSearchEvent)}`);
+  const parsedSearch = skillSearchEvent?.payload_json?.result?.data?.parsed;
+  assert.ok(Array.isArray(parsedSearch?.items), `search execution must return parsed items: ${JSON.stringify(skillSearchEvent)}`);
+  assert.ok(parsedSearch.items.some((item) => item?.fid === 'fid-03-ppt-master'), `search result must include the target FID: ${JSON.stringify(parsedSearch)}`);
   assert.ok(eventRows.rows.some((row) => row.event_type === 'workspace.skill.progress' && row.payload_json?.phase === 'execution'), 'share must enter execution phase');
-  assert.ok(eventRows.rows.some((row) => row.event_type === 'workspace.skill.progress' && row.payload_json?.suggestedTool === 'pi_skill_exec'), 'search evidence must suggest pi_skill_exec');
+  const suggestedTools = eventRows.rows
+    .map((row) => row.payload_json?.suggestedTool)
+    .filter((value) => typeof value === 'string');
+  assert.ok(suggestedTools.every((value) => value === 'pi_skill_exec'), `any explicit Skill hint must point to pi_skill_exec: ${JSON.stringify(suggestedTools)}`);
   assert.ok(eventRows.rows.filter((row) => row.event_type === 'assistant.delta').every((row) => row.payload_json?.messageType !== 'final_answer' && row.payload_json?.phase === 'draft'), 'assistant drafts must not be projected as final answers');
   assert.equal(messageRows.rows.filter((row) => row.message_type === 'final_answer').length, 1, `expected exactly one persisted final answer: ${JSON.stringify(messageRows.rows)}`);
   assert.ok(eventTypes.includes('run.succeeded'));

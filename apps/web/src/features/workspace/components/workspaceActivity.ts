@@ -40,7 +40,11 @@ export function buildWorkspaceActivityItems(messages: WorkspaceMessageVM[]): Wor
       continue;
     }
 
-    if (message.type === 'final_answer' && items.some((item) => item.kind === 'summary' && normalize(item.text) === normalize(message.content))) continue;
+    // A draft assistant delta can legitimately have the same text as the
+    // persisted terminal answer. Keep the terminal answer as a real message
+    // bubble; only suppress a duplicate that already came from a non-draft
+    // persisted summary.
+    if (message.type === 'final_answer' && items.some((item) => item.kind === 'summary' && item.message.eventType !== 'assistant.delta' && normalize(item.text) === normalize(message.content))) continue;
     items.push({ kind: 'message', message });
   }
   return items;

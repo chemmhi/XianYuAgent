@@ -353,6 +353,52 @@
   .workspace-mobile-nav button.active { color: var(--link); }
 }
 
+/* Floating execution plan: overlays the thread without changing conversation layout. */
+.workspace-thread { position: relative; }
+.workspace-plan-float {
+  position: absolute;
+  top: 78px;
+  right: 20px;
+  z-index: 5;
+  width: min(304px, calc(100% - 40px));
+  max-height: min(70vh, 440px);
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 16px 16px 13px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(0,0,0,.08);
+}
+.workspace-plan-float-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.workspace-plan-float-kicker { margin: 0 0 3px; color: var(--muted); font-size: 10px; line-height: 1.4; letter-spacing: .06em; text-transform: uppercase; }
+.workspace-plan-float h3 { margin: 0; color: var(--text); font-size: 16px; line-height: 1.5; font-weight: 600; }
+.workspace-plan-float-status { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 8px; border-radius: 999px; background: var(--soft-blue-bg); color: var(--link); font-size: var(--font-size-meta); line-height: 1.5; font-weight: 700; white-space: nowrap; }
+.workspace-plan-float-waiting_confirmation .workspace-plan-float-status { background: var(--warn-bg); color: var(--warn); }
+.workspace-plan-float-blocked .workspace-plan-float-status { background: var(--danger-bg); color: var(--danger); }
+.workspace-plan-float-completed .workspace-plan-float-status { background: var(--success-bg); color: var(--success); }
+.workspace-plan-float-goal { margin: 12px 0 10px; color: var(--muted); font-size: var(--font-size-body-compact); line-height: 1.6; }
+.workspace-plan-float-progress-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; color: var(--sub); font-size: var(--font-size-meta); line-height: var(--font-line-meta); }
+.workspace-plan-float-progress-row strong { color: var(--text); font-variant-numeric: tabular-nums; }
+.workspace-plan-float-progress { height: 4px; overflow: hidden; border-radius: 999px; background: #E5E7EB; }
+.workspace-plan-float-progress span { display: block; height: 100%; border-radius: inherit; background: var(--link); transition: width .2s ease; }
+.workspace-plan-float-list { display: grid; gap: 6px; margin: 12px 0 0; padding: 0; list-style: none; }
+.workspace-plan-float-step { display: flex; align-items: flex-start; gap: 9px; padding: 8px; border: 1px solid transparent; border-radius: 8px; background: var(--bg); }
+.workspace-plan-float-step.is-current { border-color: #B9C8D9; background: var(--soft-blue-bg); }
+.workspace-plan-float-step input { flex: 0 0 auto; width: 15px; height: 15px; margin: 1px 0 0; accent-color: var(--success); }
+.workspace-plan-float-step input:disabled { opacity: 1; cursor: default; }
+.workspace-plan-float-step-blocked { border-color: rgba(180,35,24,.2); background: var(--danger-bg); }
+.workspace-plan-float-step-blocked input { accent-color: var(--danger); }
+.workspace-plan-float-step-copy { min-width: 0; }
+.workspace-plan-float-step-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.workspace-plan-float-step-title strong { min-width: 0; color: var(--text); font-size: var(--font-size-body-compact); line-height: 1.5; font-weight: 600; }
+.workspace-plan-float-current { flex: 0 0 auto; padding: 1px 5px; border-radius: 4px; background: var(--soft-blue-bg); color: var(--link); font-size: 10px; line-height: 1.35; font-weight: 700; }
+.workspace-plan-float-step-status { display: block; margin-top: 2px; color: var(--sub); font-size: var(--font-size-meta); line-height: var(--font-line-meta); }
+.workspace-plan-float-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 11px; color: var(--muted); font-size: 10px; line-height: 1.4; }
+@media (max-width: 900px) {
+  .workspace-plan-float { top: 70px; right: 12px; width: min(304px, calc(100% - 24px)); }
+}
+
 /* Workspace typography follows the shared product scale: body 14, compact 13, meta 12. */
 body .app-viewport .workspace-domain .workspace-panel-head h2,
 body .app-viewport .workspace-domain .workspace-thread-header h2 {

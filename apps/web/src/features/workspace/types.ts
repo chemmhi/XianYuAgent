@@ -91,6 +91,26 @@ export interface WorkspaceRunEventVM {
   createdAt: string;
 }
 
+export type WorkspacePlanStatus = 'active' | 'waiting_confirmation' | 'blocked' | 'completed';
+export type WorkspacePlanStepStatus = 'pending' | 'running' | 'succeeded' | 'waiting_confirmation' | 'blocked';
+
+export interface WorkspacePlanStepVM {
+  id: string;
+  tool: string;
+  goal: string;
+  status: WorkspacePlanStepStatus;
+  evidence?: string;
+}
+
+export interface WorkspacePlanVM {
+  version: number;
+  revision: number;
+  goal: string;
+  status: WorkspacePlanStatus;
+  currentStepId?: string;
+  steps: WorkspacePlanStepVM[];
+}
+
 export interface WorkspaceMessageVM {
   id: string;
   runId?: string;

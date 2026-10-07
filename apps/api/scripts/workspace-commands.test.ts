@@ -142,6 +142,26 @@ test('workspace_prepare_write wraps direct automation rule parameters into confi
   assert.match(String(result.plan?.manifest.displaySummary), /付费自动发货：关闭，未绑定卡券 → 开启，绑定 1 个卡券批次/);
 });
 
+test('workspace_prepare_write reports an already-satisfied automation target as a successful no-op', async () => {
+  const product = { id: 'product-noop-tool', accountId: 'account-1', title: '已启用自动发货商品', configVersion: 4 };
+  const config = { paidAutoDelivery: { enabled: true, couponBatchIds: ['batch-1'] } };
+  const commands = orchestrator({
+    products: { get: async () => product },
+    productAutomation: { get: async () => ({ configVersion: 4, product, config }) },
+  });
+
+  const result = await commands.executeModelTool('workspace_prepare_write', {
+    operation: 'product_automation_update',
+    productId: product.id,
+    config,
+  }, input);
+
+  assert.equal(result.kind, 'read');
+  assert.equal(result.data?.status, 'succeeded');
+  assert.equal(result.data?.code, 'NO_CHANGES');
+  assert.match(result.summary, /无需重复修改/);
+});
+
 test('automation write rejects boolean shorthand and unchanged configuration before confirmation', async () => {
   const product = { id: 'product-noop-automation', accountId: 'account-1', title: '测试商品', configVersion: 2 };
   const commands = orchestrator({

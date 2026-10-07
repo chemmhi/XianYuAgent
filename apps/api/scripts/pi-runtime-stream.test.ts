@@ -3,6 +3,7 @@ import test from 'node:test';
 import { MemoryStore } from '../src/store-memory.js';
 import { buildWorkspaceModelMessages, detectWorkspaceResponseLanguage, OpenAICompatibleModelClient, PiModelClientError, PiRuntimeAdapter, type ModelClient, type ModelCompletionResult, type ModelStreamHandlers } from '../src/pi-runtime.js';
 import type { WorkspaceCommandOrchestrator } from '../src/workspace-commands.js';
+import { createWorkspaceExecutionPlan } from '../src/workspace-context.js';
 
 function sse(...events: string[]): Response {
   const encoder = new TextEncoder();
@@ -96,6 +97,265 @@ test('Pi runtime executes model-selected workspace tools and streams results', a
   assert.match(String(requests[0]?.messages.find((message) => message.role === 'system')?.content), /思考摘要/);
   assert.equal((await store.getRun(admin.id, created.run.id))?.run.status, 'succeeded');
   runtime.stop();
+});
+
+test('Pi runtime executes a durable Plan Mode sequence and exposes the current step after compaction', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'plan-mode@example.com', passwordHash: 'hash', displayName: 'Plan Mode' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'plan-mode' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Plan Mode' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '定位商品并读取商品状态' });
+  let round = 0;
+  let planningCalls = 0;
+  const requests: string[] = [];
+  const model: ModelClient = {
+    async complete() {
+      planningCalls += 1;
+      return { content: '{"steps":[{"tool":"workspace_product_search","goal":"定位目标商品"},{"tool":"workspace_read","goal":"读取商品状态"}]}', model: 'plan-model' };
+    },
+    async stream(input, handlers) {
+      requests.push(JSON.stringify(input.messages));
+      round += 1;
+      const call = round === 1
+        ? { id: 'plan-search', type: 'function' as const, function: { name: 'workspace_product_search', arguments: '{"query":"目标商品"}' } }
+        : round === 2
+          ? { id: 'plan-read', type: 'function' as const, function: { name: 'workspace_read', arguments: '{"instruction":"读取商品状态"}' } }
+          : undefined;
+      if (!call) return { content: '计划已完成', model: 'plan-model' };
+      await handlers.onToolCall?.(call);
+      return { content: '', model: 'plan-model', toolCalls: [call] };
+    },
+  };
+  const commandTool = {
+    getModelTools: () => [
+      { type: 'function', function: { name: 'workspace_product_search', description: 'search', parameters: { type: 'object' } } },
+      { type: 'function', function: { name: 'workspace_read', description: 'read', parameters: { type: 'object' } } },
+    ],
+    executeModelTool: async (name: string) => name === 'workspace_product_search'
+      ? { kind: 'products' as const, title: '商品搜索', summary: '找到目标商品', content: 'productId=product-plan', data: { items: [{ id: 'product-plan', title: '目标商品' }] } }
+      : { kind: 'read' as const, title: '商品状态', summary: '读取完成', content: '商品状态正常' },
+  } as unknown as WorkspaceCommandOrchestrator;
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, model: 'plan-model' });
+  try {
+    runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && (await store.getRun(admin.id, created.run.id))?.run.status !== 'succeeded') await new Promise((resolve) => setTimeout(resolve, 10));
+    const bundle = await store.getRun(admin.id, created.run.id);
+    const events = await store.listRunEvents(admin.id, created.run.id, 0);
+    assert.equal(bundle?.run.status, 'succeeded');
+    assert.equal(planningCalls, 1);
+    assert.equal(round, 3);
+    assert.ok(events.some((event) => event.eventType === 'workspace.plan.created'));
+    const planUpdates = events.filter((event) => event.eventType === 'workspace.plan.updated');
+    assert.ok(planUpdates.length >= 2);
+    assert.equal((planUpdates.at(-1)?.payload.plan as { status?: string } | undefined)?.status, 'completed');
+    assert.match(requests[1] ?? '', /workspace_read/);
+    assert.match(requests[1] ?? '', /当前/);
+  } finally {
+    runtime.stop();
+  }
+});
+
+test('Plan Mode stops the remaining tool calls when a planned step fails', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'plan-batch-failure@example.com', passwordHash: 'hash', displayName: 'Plan Batch Failure' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'plan-batch-failure' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Plan Batch Failure' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '定位商品并准备写入' });
+  let confirmations = 0;
+  const model: ModelClient = {
+    async complete() { return { content: '{"steps":[{"tool":"workspace_product_search","goal":"定位目标商品"},{"tool":"workspace_prepare_write","goal":"准备受控写入"}]}', model: 'plan-batch-failure' }; },
+    async stream(_input, handlers) {
+      const search = { id: 'batch-search', type: 'function' as const, function: { name: 'workspace_product_search', arguments: '{"query":"目标商品"}' } };
+      const write = { id: 'batch-write', type: 'function' as const, function: { name: 'workspace_prepare_write', arguments: '{}' } };
+      await handlers.onToolCall?.(search);
+      await handlers.onToolCall?.(write);
+      return { content: '', model: 'plan-batch-failure', toolCalls: [search, write] };
+    },
+  };
+  const commandTool = {
+    getModelTools: () => [
+      { type: 'function', function: { name: 'workspace_product_search', description: 'search', parameters: { type: 'object' } } },
+      { type: 'function', function: { name: 'workspace_prepare_write', description: 'write', parameters: { type: 'object' } } },
+    ],
+    executeModelTool: async (name: string) => {
+      if (name === 'workspace_product_search') throw Object.assign(new Error('search backend down'), { code: 'SEARCH_BACKEND_DOWN' });
+      confirmations += 1;
+      return { kind: 'write_plan' as const, title: '写入确认', summary: '等待确认', content: '等待确认', plan: { kind: 'coupon_bind', action: 'coupon_bind', title: '写入确认', summary: '等待确认', content: '等待确认', policyRef: 'workspace.coupon_bind.confirm', expiresAt: new Date(Date.now() + 60_000).toISOString(), manifest: { productId: 'product-1' } } };
+    },
+  } as unknown as WorkspaceCommandOrchestrator;
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, model: 'plan-batch-failure' });
+  try {
+    runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && !['succeeded', 'failed'].includes((await store.getRun(admin.id, created.run.id))?.run.status ?? '')) await new Promise((resolve) => setTimeout(resolve, 10));
+    const bundle = await store.getRun(admin.id, created.run.id);
+    const events = await store.listRunEvents(admin.id, created.run.id, 0);
+    assert.equal(bundle?.run.status, 'failed');
+    assert.equal(confirmations, 0);
+    assert.equal(events.some((event) => event.eventType === 'workspace.confirmation.created'), false);
+    const planUpdates = events.filter((event) => event.eventType === 'workspace.plan.updated');
+    assert.equal((planUpdates.at(-1)?.payload.plan as { status?: string } | undefined)?.status, 'blocked');
+  } finally {
+    runtime.stop();
+  }
+});
+
+test('Plan Mode advances a restored step when its successful result is replayed from cache', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'plan-replay-cache@example.com', passwordHash: 'hash', displayName: 'Plan Replay Cache' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'plan-replay-cache' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Plan Replay Cache' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '定位商品' });
+  const plan = createWorkspaceExecutionPlan({ instruction: created.run.instruction, steps: [{ tool: 'workspace_product_search', goal: '定位目标商品' }] })!;
+  await store.appendRunEvent({ runId: created.run.id, eventType: 'workspace.plan.created', payload: { status: plan.status, plan } });
+  const args = '{"query":"目标商品"}';
+  await store.appendRunEvent({ runId: created.run.id, eventType: 'tool.call.started', payload: { toolCallId: 'prior-search', toolName: 'workspace_product_search', arguments: args, argumentFingerprint: undefined, readOnly: true } });
+  await store.appendRunEvent({ runId: created.run.id, eventType: 'tool.result', payload: { toolCallId: 'prior-search', toolName: 'workspace_product_search', status: 'succeeded', result: { kind: 'products', title: '商品搜索', summary: '找到目标商品', content: 'productId=product-replay', data: { items: [{ id: 'product-replay', title: '目标商品' }] } } } });
+  let round = 0;
+  const model: ModelClient = {
+    async stream(_input, handlers) {
+      round += 1;
+      if (round === 1) {
+        const call = { id: 'replay-search', type: 'function' as const, function: { name: 'workspace_product_search', arguments: args } };
+        await handlers.onToolCall?.(call);
+        return { content: '', model: 'plan-replay-cache', toolCalls: [call] };
+      }
+      return { content: '已定位商品', model: 'plan-replay-cache' };
+    },
+    async complete() { return { content: 'unused', model: 'unused' }; },
+  };
+  let executes = 0;
+  const commandTool = {
+    getModelTools: () => [{ type: 'function', function: { name: 'workspace_product_search', description: 'search', parameters: { type: 'object' } } }],
+    executeModelTool: async () => { executes += 1; return { kind: 'products', title: '商品搜索', summary: '找到目标商品', content: 'productId=product-replay' }; },
+  } as unknown as WorkspaceCommandOrchestrator;
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, model: 'plan-replay-cache' });
+  try {
+    runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && (await store.getRun(admin.id, created.run.id))?.run.status !== 'succeeded') await new Promise((resolve) => setTimeout(resolve, 10));
+    const bundle = await store.getRun(admin.id, created.run.id);
+    const events = await store.listRunEvents(admin.id, created.run.id, 0);
+    assert.equal(bundle?.run.status, 'succeeded');
+    assert.equal(executes, 0);
+    assert.ok(events.some((event) => event.eventType === 'tool.result' && event.payload.reused === true));
+    const planUpdates = events.filter((event) => event.eventType === 'workspace.plan.updated');
+    assert.equal((planUpdates.at(-1)?.payload.plan as { status?: string } | undefined)?.status, 'completed');
+  } finally {
+    runtime.stop();
+  }
+});
+
+test('Plan Mode reconnect reopens a blocked durable step before allowing tools', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'plan-blocked-reconnect@example.com', passwordHash: 'hash', displayName: 'Plan Blocked Reconnect' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'plan-blocked-reconnect' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Plan Blocked Reconnect' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '定位商品' });
+  const failedRun = await store.updateRun(created.run.id, { status: 'failed', errorCode: 'SEARCH_BACKEND_DOWN' });
+  const failedStep = await store.updateRunStep(created.steps[0]!.id, { status: 'failed', errorCode: 'SEARCH_BACKEND_DOWN' });
+  assert.ok(failedRun && failedStep);
+  const blockedPlan = {
+    version: 1,
+    revision: 2,
+    goal: created.run.instruction,
+    status: 'blocked',
+    currentStepId: 'step-1',
+    steps: [{ id: 'step-1', tool: 'workspace_product_search', goal: '定位目标商品', status: 'blocked', attempts: 1, evidence: '后端不可用' }],
+  };
+  await store.appendRunEvent({ runId: created.run.id, eventType: 'workspace.plan.updated', payload: { status: 'blocked', plan: blockedPlan } });
+  let round = 0;
+  let executions = 0;
+  const model: ModelClient = {
+    async stream(_input, handlers) {
+      round += 1;
+      if (round === 1) {
+        const call = { id: 'reconnect-search', type: 'function' as const, function: { name: 'workspace_product_search', arguments: '{"query":"目标商品"}' } };
+        await handlers.onToolCall?.(call);
+        return { content: '', model: 'plan-blocked-reconnect', toolCalls: [call] };
+      }
+      return { content: '已重新定位商品', model: 'plan-blocked-reconnect' };
+    },
+    async complete() { return { content: 'unused', model: 'unused' }; },
+  };
+  const commandTool = {
+    getModelTools: () => [{ type: 'function', function: { name: 'workspace_product_search', description: 'search', parameters: { type: 'object' } } }],
+    executeModelTool: async () => { executions += 1; return { kind: 'products', title: '商品搜索', summary: '找到目标商品', content: 'productId=product-reconnect' }; },
+  } as unknown as WorkspaceCommandOrchestrator;
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, model: 'plan-blocked-reconnect' });
+  try {
+    await runtime.resume({ run: failedRun!, steps: [failedStep!], adminId: admin.id, sessionId: session.id, resumeFromFailure: true });
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && (await store.getRun(admin.id, created.run.id))?.run.status !== 'succeeded') await new Promise((resolve) => setTimeout(resolve, 10));
+    const bundle = await store.getRun(admin.id, created.run.id);
+    const events = await store.listRunEvents(admin.id, created.run.id, 0);
+    assert.equal(bundle?.run.status, 'succeeded');
+    assert.equal(executions, 1);
+    assert.ok(events.some((event) => event.eventType === 'workspace.plan.updated' && event.payload.reason === 'reconnect_failed_step'));
+    assert.equal((events.filter((event) => event.eventType === 'workspace.plan.updated').at(-1)?.payload.plan as { status?: string } | undefined)?.status, 'completed');
+  } finally {
+    runtime.stop();
+  }
+});
+
+test('Plan Mode advances past a confirmed write before executing the next step', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'plan-confirmation-continuation@example.com', passwordHash: 'hash', displayName: 'Plan Confirmation Continuation' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'plan-confirmation-continuation' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Plan Confirmation Continuation' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '先创建卡券再定位商品' });
+  const waitingRun = await store.updateRun(created.run.id, { status: 'waiting_confirmation' });
+  const waitingStep = await store.updateRunStep(created.steps[0]!.id, { status: 'waiting_confirmation' });
+  assert.ok(waitingRun && waitingStep);
+  const waitingPlan = {
+    version: 1,
+    revision: 2,
+    goal: created.run.instruction,
+    status: 'waiting_confirmation',
+    currentStepId: 'step-1',
+    steps: [
+      { id: 'step-1', tool: 'workspace_prepare_write', goal: '创建卡券', status: 'waiting_confirmation', attempts: 1, evidence: '等待确认' },
+      { id: 'step-2', tool: 'workspace_product_search', goal: '定位商品', status: 'pending', attempts: 0 },
+    ],
+  };
+  await store.appendRunEvent({ runId: created.run.id, eventType: 'workspace.plan.updated', payload: { status: 'waiting_confirmation', plan: waitingPlan } });
+  let round = 0;
+  const model: ModelClient = {
+    async stream(_input, handlers) {
+      round += 1;
+      if (round === 1) {
+        const call = { id: 'after-confirm-search', type: 'function' as const, function: { name: 'workspace_product_search', arguments: '{"query":"目标商品"}' } };
+        await handlers.onToolCall?.(call);
+        return { content: '', model: 'plan-confirmation-continuation', toolCalls: [call] };
+      }
+      return { content: '卡券已确认，商品已定位', model: 'plan-confirmation-continuation' };
+    },
+    async complete() { return { content: 'unused', model: 'unused' }; },
+  };
+  const commandTool = {
+    getModelTools: () => [{ type: 'function', function: { name: 'workspace_product_search', description: 'search', parameters: { type: 'object' } } }],
+    executeModelTool: async () => ({ kind: 'products', title: '商品搜索', summary: '找到目标商品', content: 'productId=product-after-confirm' }),
+  } as unknown as WorkspaceCommandOrchestrator;
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, model: 'plan-confirmation-continuation' });
+  try {
+    await runtime.continueAfterConfirmation({
+      adminId: admin.id,
+      sessionId: session.id,
+      run: waitingRun!,
+      steps: [waitingStep!],
+      history: [{ role: 'assistant', content: '[tool_event] 卡券已确认创建' }],
+    });
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && (await store.getRun(admin.id, created.run.id))?.run.status !== 'succeeded') await new Promise((resolve) => setTimeout(resolve, 10));
+    const bundle = await store.getRun(admin.id, created.run.id);
+    const events = await store.listRunEvents(admin.id, created.run.id, 0);
+    assert.equal(bundle?.run.status, 'succeeded');
+    assert.ok(events.some((event) => event.eventType === 'workspace.plan.updated' && event.payload.reason === 'confirmation_succeeded'));
+    assert.equal((events.filter((event) => event.eventType === 'workspace.plan.updated').at(-1)?.payload.plan as { status?: string } | undefined)?.status, 'completed');
+  } finally {
+    runtime.stop();
+  }
 });
 
 test('Pi runtime rechecks the original task after each tool result before finalizing', async () => {
@@ -501,8 +761,8 @@ test('Pi runtime reuses a repeated product search and stops a no-progress tool l
     assert.equal(bundle?.run.status, 'failed');
     assert.equal(bundle?.run.errorCode, 'MODEL_TOOL_LOOP_EXCEEDED');
     assert.equal(searches, 1);
-    assert.equal(rounds, 3);
-    assert.equal(events.filter((item) => item.eventType === 'tool.result' && item.payload.reused === true).length, 1);
+    assert.equal(rounds, 4);
+    assert.equal(events.filter((item) => item.eventType === 'tool.result' && item.payload.reused === true).length, 2);
     assert.equal(events.filter((item) => item.eventType === 'context.compacted').length, 0);
   } finally { runtime.stop(); }
 });
@@ -516,9 +776,11 @@ test('Pi runtime preserves the product search cache across Skill writes', async 
   let round = 0;
   let searches = 0;
   let skillWrites = 0;
+  let roundThreeMessages = '';
   const model: ModelClient = {
-    async stream() {
+    async stream(input) {
       round += 1;
+      if (round === 4) roundThreeMessages = JSON.stringify(input.messages);
       const call = round === 1
         ? { id: 'product-1', type: 'function' as const, function: { name: 'workspace_product_search', arguments: '{"query":"AI 技术咨询"}' } }
         : round === 2
@@ -538,7 +800,7 @@ test('Pi runtime preserves the product search cache across Skill writes', async 
   };
   const commandTool = {
     getModelTools: () => [{ type: 'function', function: { name: 'workspace_product_search', description: 'search', parameters: { type: 'object' } } }],
-    executeModelTool: async () => { searches += 1; return { kind: 'read' as const, title: '商品搜索', summary: '找到 1 个商品', content: 'productId=product-1', data: { total: 1, items: [{ id: 'product-1', title: 'AI 技术咨询' }] } }; },
+    executeModelTool: async () => { searches += 1; return { kind: 'products' as const, title: '商品搜索', summary: '找到 1 个商品', content: 'productId=product-1', data: { total: 1, items: [{ id: 'product-1', title: 'AI 技术咨询' }] } }; },
   } as unknown as WorkspaceCommandOrchestrator;
   const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, skillManager: skillManager as never, model: 'test' });
   try {
@@ -550,6 +812,7 @@ test('Pi runtime preserves the product search cache across Skill writes', async 
     assert.equal(bundle?.run.status, 'succeeded');
     assert.equal(searches, 1);
     assert.equal(skillWrites, 1);
+    assert.match(roundThreeMessages, /已复用此前相同工具结果/);
     assert.ok(events.some((event) => event.eventType === 'tool.result' && event.payload.toolName === 'workspace_product_search' && event.payload.reused === true));
   } finally { runtime.stop(); }
 });

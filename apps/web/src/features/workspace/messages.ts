@@ -118,6 +118,10 @@ const lifecycleEventTypes = new Set([
 
 function shouldProjectEvent(event: WorkspaceRunEventVM): boolean {
   if (lifecycleEventTypes.has(event.eventType)) return false;
+  // Plan events are rendered by the detached WorkspacePlanCard, not in the
+  // chronological conversation stream.
+  if (event.eventType === 'workspace.plan.created' || event.eventType === 'workspace.plan.updated') return false;
+  if (isWorkspacePlanContextEvent(event)) return false;
   // Execution summaries are the user-visible high-level reasoning checkpoints.
   // Keep them in the live trace; filtering them here makes the step fallback
   // disappear as soon as the first tool event arrives, which looks like a
@@ -126,6 +130,11 @@ function shouldProjectEvent(event: WorkspaceRunEventVM): boolean {
   if (event.eventType === 'step.succeeded' || event.eventType === 'step.failed') return Boolean(messageType(event));
   if (event.eventType === 'runtime.succeeded' || event.eventType === 'runtime.failed' || event.eventType === 'run.succeeded' || event.eventType === 'run.failed') return Boolean(messageType(event) || event.payload.content);
   return true;
+}
+
+function isWorkspacePlanContextEvent(event: WorkspaceRunEventVM): boolean {
+  const content = event.payload.content;
+  return typeof content === 'string' && content.trimStart().startsWith('[WORKSPACE_PLAN]');
 }
 
 export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRunEventVM[]): WorkspaceMessageVM[] {

@@ -36,6 +36,29 @@ describe('workspace message projection', () => {
     expect(messages[2]).toMatchObject({ type: 'final_answer' });
   });
 
+  it('keeps durable Plan Mode events out of the conversation stream', () => {
+    const messages = buildWorkspaceMessages({ ...run, status: 'executing' }, [{
+      sequence: 2,
+      runId: 'run-1',
+      eventType: 'workspace.plan.created',
+      payload: {
+        status: 'active',
+        plan: {
+          goal: '定位商品并读取状态',
+          status: 'active',
+          currentStepId: 'step-1',
+          steps: [
+            { id: 'step-1', tool: 'workspace_product_search', goal: '定位商品', status: 'pending' },
+            { id: 'step-2', tool: 'workspace_read', goal: '读取状态', status: 'pending' },
+          ],
+        },
+      },
+      createdAt: '2026-10-07T01:00:00.000Z',
+    }]);
+    expect(messages.some((message) => message.eventType === 'workspace.plan.created')).toBe(false);
+    expect(messages.every((message) => !message.content.includes('Plan Mode'))).toBe(true);
+  });
+
   it('does not project lifecycle events as fake tool messages', () => {
     const projected = buildWorkspaceMessages({ ...run, status: 'running' }, [
       { sequence: 2, runId: 'run-1', eventType: 'run.queued', payload: { status: 'queued' }, createdAt: '2026-09-20T00:00:00.100Z' },
@@ -288,11 +311,12 @@ describe('workspace message projection', () => {
       { sequence: 7, runId: 'run-1', eventType: 'workspace.message', payload: { messageType: 'tool_event', content: '{"data":{"items":["raw-json"]}}' }, createdAt: '2026-10-07T01:00:00.500Z' },
       { sequence: 8, runId: 'run-1', eventType: 'message.appended', payload: { messageType: 'reasoning_summary', summary: '上下文摘要', content: '原始目标：大量原始 JSON' }, createdAt: '2026-10-07T01:00:00.600Z' },
       { sequence: 9, runId: 'run-1', eventType: 'context.compacted', payload: { summary: '已压缩上下文并保留任务目标及关键结果' }, createdAt: '2026-10-07T01:00:00.700Z' },
+      { sequence: 10, runId: 'run-1', eventType: 'workspace.message', payload: { messageType: 'reasoning_summary', content: '[WORKSPACE_PLAN]\nPlan Mode 状态：active\n原始目标：只在计划卡片展示' }, createdAt: '2026-10-07T01:00:00.800Z' },
     ]);
     expect(projected.filter((item) => item.type === 'tool_event')).toHaveLength(1);
     expect(projected.some((item) => item.type === 'reasoning_summary' && item.summary === '分析任务')).toBe(true);
     expect(projected.some((item) => item.content.includes('商品 product-1'))).toBe(true);
-    expect(projected.every((item) => !/内部推理细节|raw-json|大量原始 JSON/.test(item.content))).toBe(true);
+    expect(projected.every((item) => !/内部推理细节|raw-json|大量原始 JSON|WORKSPACE_PLAN|Plan Mode/.test(item.content))).toBe(true);
   });
 
   it('does not show a second tool event when a persisted result is reused', () => {

@@ -64,6 +64,17 @@ describe('workspace activity feed', () => {
     expect(items.map((item) => item.kind)).toEqual(['summary']);
   });
 
+  it('keeps a persisted final answer when a draft delta has identical text', () => {
+    const content = '已找到 03 PPT Master，并创建公开分享链接：https://share.example.test/03-ppt-master-public';
+    const items = buildWorkspaceActivityItems([
+      base({ id: 'draft-final', eventType: 'assistant.delta', summary: '模型处理中间进度', content }),
+      base({ id: 'final-answer', type: 'final_answer', eventType: 'workspace.message', title: 'Agent', content }),
+    ]);
+
+    expect(items.map((item) => item.kind)).toEqual(['summary', 'message']);
+    expect(items.at(-1)).toMatchObject({ kind: 'message', message: expect.objectContaining({ type: 'final_answer', content }) });
+  });
+
   it('drops waiting placeholders while keeping concrete result summaries', () => {
     const items = buildWorkspaceActivityItems([
       base({ id: 'summary-placeholder', summary: '检索商品信息', content: '正在检索商品信息，等待工具返回真实结果。' }),

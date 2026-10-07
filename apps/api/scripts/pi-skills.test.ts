@@ -54,7 +54,13 @@ test('installs, lists, authorizes, injects, and executes a local Pi skill archiv
     assert.doesNotMatch(prompt, /SYSTEM OVERRIDE/);
     assert.ok(prompt.length < 2_000);
     assert.ok(manager.getModelTools().some((tool) => tool.function.name === 'pi_skill_read'));
+    assert.ok(manager.getModelTools().some((tool) => tool.function.name === 'pi_skill_catalog'));
     assert.ok(manager.getModelTools().some((tool) => tool.function.name === 'pi_skill_search'));
+    const catalog = await manager.executeModelTool('pi_skill_catalog', { skillId: 'demo-skill' }, { adminId: 'admin/1', accountId: 'account-1', instruction: '查看 Skill 能力总览', requestId: 'skill-catalog', traceId: 'skill-catalog' });
+    assert.equal(catalog.data?.skillId, 'demo-skill');
+    assert.ok(Array.isArray(catalog.data?.documents));
+    assert.match(catalog.content, /Capability overview/);
+    assert.ok(catalog.content.length <= 8 * 1024);
     const instructions = await manager.executeModelTool('pi_skill_read', { skillId: 'demo-skill' }, { adminId: 'admin/1', accountId: 'account-1', instruction: '读取 Skill 使用说明', requestId: 'skill-read', traceId: 'skill-read' });
     assert.match(instructions.content, /Use demo_exec/);
     await assert.rejects(manager.executeModelTool('pi_skill_search', { skillId: 'demo-skill', query: '(a', mode: 'regex' }, { adminId: 'admin/1', accountId: 'account-1', instruction: '检索 Skill 使用说明', requestId: 'skill-search-invalid', traceId: 'skill-search-invalid' }), { code: 'SKILL_SEARCH_QUERY_INVALID' });
@@ -66,6 +72,28 @@ test('installs, lists, authorizes, injects, and executes a local Pi skill archiv
     const toolResult = await manager.executeModelTool('pi_skill_exec', { skillId: 'demo-skill', command: 'share', args: [publicLink] }, { adminId: 'admin/1', accountId: 'account-1', instruction: '创建网盘公开分享', requestId: 'skill-public-link', traceId: 'skill-public-link' });
     assert.ok(toolResult.content.includes(publicLink));
     assert.equal((await manager.execute({ adminId: 'admin/1', skillId: 'demo-skill', command: 'long' })).stdout.trim().length, 40_000);
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('bounds the Skill capability catalog content without truncating structured data', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'pi-skill-catalog-budget-'));
+  const skillRoot = join(fixtureRoot, 'catalog-skill');
+  try {
+    await mkdir(join(skillRoot, 'references'), { recursive: true });
+    await mkdir(join(skillRoot, 'scripts'), { recursive: true });
+    await writeFile(join(skillRoot, 'SKILL.md'), ['---', 'name: catalog-skill', '---', '', ...Array.from({ length: 80 }, (_, index) => `## Capability ${index + 1}`), ''].join('\n'));
+    await Promise.all(Array.from({ length: 60 }, (_, index) => writeFile(join(skillRoot, 'references', `ref-${String(index + 1).padStart(2, '0')}.md`), [`# Reference ${index + 1}`, ...Array.from({ length: 12 }, (_, line) => `## Detail ${index + 1}-${line + 1}`)].join('\n'))));
+    await writeFile(join(skillRoot, 'scripts', 'main.cjs'), "console.log(JSON.stringify({ code: 0 }));");
+    const archive = join(fixtureRoot, 'catalog-skill.zip');
+    await execFile('tar', ['-a', '-c', '-f', archive, '-C', fixtureRoot, 'catalog-skill']);
+    const manager = new PiSkillManager({ rootDir: join(fixtureRoot, 'installed') });
+    await manager.install({ adminId: 'admin/catalog-budget', source: archive });
+    const catalog = await manager.executeModelTool('pi_skill_catalog', { skillId: 'catalog-skill' }, { adminId: 'admin/catalog-budget', accountId: 'account-1', instruction: '查看 Skill 总览', requestId: 'catalog-budget', traceId: 'catalog-budget' });
+    assert.ok(catalog.content.length <= 8 * 1024);
+    assert.match(catalog.content, /catalog truncated/);
+    assert.equal((catalog.data?.documents as unknown[]).length, 61);
   } finally {
     await rm(fixtureRoot, { recursive: true, force: true });
   }
@@ -293,6 +321,16 @@ test('reads and searches reference documents with a bounded cursor and rejects t
       '# File share',
       '1. Search the file with `search --name "03 PPT Master"`.',
       '2. Create the public link with `share --fid FID --title "03 PPT Master" --url-type 1`.',
+      '3. Publish the result with `publish --fid FID`.',
+      'A plain sentence: Search the file with search --name "03 PPT Master".',
+      'Please share --fid FID after reading this paragraph.',
+      'to publish --fid FID is only an example sentence.',
+      'run search --name x',
+      'echo search --name x',
+      'get user',
+      '```bash',
+      '$ search --name "03 PPT Master"',
+      '```',
       '```bash',
       'share --fid FID --title "03 PPT Master" --url-type 1',
       '```',
@@ -310,7 +348,12 @@ test('reads and searches reference documents with a bounded cursor and rejects t
     const discovered = await manager.executeModelTool('pi_skill_search', { skillId: 'reference-skill', query: '03 PPT Master', mode: 'literal' }, input);
     assert.equal(discovered.data?.matches, 3);
     assert.match(discovered.content, /references\/file-share\.md/);
-    assert.ok((discovered.data?.commandEvidence as Array<{ sourceFile?: string; command?: string }>).some((item) => item.sourceFile === 'references/file-share.md' && item.command?.startsWith('share ')));
+    const evidence = discovered.data?.commandEvidence as Array<{ sourceFile?: string; command?: string }>;
+    assert.ok(evidence.some((item) => item.sourceFile === 'references/file-share.md' && item.command?.startsWith('share ')));
+    assert.ok(evidence.some((item) => item.command?.startsWith('publish ')));
+    assert.ok(evidence.some((item) => item.command?.startsWith('search ')));
+    assert.doesNotMatch(JSON.stringify(evidence), /Search the file with|Create the public link with|Publish the result with/);
+    assert.doesNotMatch(JSON.stringify(evidence), /plain sentence|Please share|to publish/);
     const first = await manager.executeModelTool('pi_skill_search', { skillId: 'reference-skill', query: 'share', mode: 'literal', filePath: 'references/file-share.md', limit: 1 }, input);
     assert.equal(first.data?.matches, 1);
     assert.equal(first.data?.hasMore, true);
@@ -431,13 +474,15 @@ test('Skill text search supports literal, Fuse fuzzy, and RE2 regex with bounded
   assert.equal(searchSkillText(body, 'irrelevant', 'literal').matches.length, 3);
 });
 
-test('Workspace reads Skill instructions on demand before executing the documented command', async () => {
+test('Workspace discovers a Skill catalog before reading a targeted command document', async () => {
   const fixtureRoot = await mkdtemp(join(tmpdir(), 'pi-skill-on-demand-'));
   const skillRoot = join(fixtureRoot, 'file-finder');
   let runtime: PiRuntimeAdapter | undefined;
   try {
     await mkdir(join(skillRoot, 'scripts'), { recursive: true });
-    await writeFile(join(skillRoot, 'SKILL.md'), `---\nname: file-finder\ndescription: Find files\n---\n${'x'.repeat(8_000)}\nCOMMAND_SYNTAX: call search with the exact file name.\n`);
+    await mkdir(join(skillRoot, 'references'), { recursive: true });
+    await writeFile(join(skillRoot, 'SKILL.md'), `---\nname: file-finder\ndescription: Find files\n---\n# File Finder\n\n## File retrieval\nUse the reference document for the exact command.\n`);
+    await writeFile(join(skillRoot, 'references', 'file-search.md'), '## Search files\nUse `search --name "03 PPT Master"`.\n');
     await writeFile(join(skillRoot, 'scripts', 'main.cjs'), "if (process.argv[2] === 'search' && process.argv[3] === '03 PPT Master') console.log('fid=123'); else process.exit(1);");
     const archive = join(fixtureRoot, 'file-finder.zip');
     await execFile('tar', ['-a', '-c', '-f', archive, '-C', fixtureRoot, 'file-finder']);
@@ -454,12 +499,12 @@ test('Workspace reads Skill instructions on demand before executing the document
         round += 1;
         const system = String(input.messages.find((message) => message.role === 'system')?.content);
         assert.doesNotMatch(system, /COMMAND_SYNTAX/);
-        if (round === 1) return { content: '', model: 'test', toolCalls: [{ id: 'read-skill', type: 'function', function: { name: 'pi_skill_read', arguments: '{"skillId":"file-finder"}' } }] };
+        if (round === 1) return { content: '', model: 'test', toolCalls: [{ id: 'catalog-skill', type: 'function', function: { name: 'pi_skill_catalog', arguments: '{"skillId":"file-finder"}' } }] };
         if (round === 2) {
-          assert.ok(input.messages.some((message) => message.role === 'tool' && String(message.content).includes('"truncated":true')));
-          return { content: '', model: 'test', toolCalls: [{ id: 'search-skill', type: 'function', function: { name: 'pi_skill_search', arguments: '{"skillId":"file-finder","query":"COMMAND_SYNTAX"}' } }] };
+          assert.ok(input.messages.some((message) => message.role === 'tool' && String(message.content).includes('references/file-search.md')));
+          return { content: '', model: 'test', toolCalls: [{ id: 'read-file', type: 'function', function: { name: 'pi_skill_read', arguments: '{"skillId":"file-finder","filePath":"references/file-search.md"}' } }] };
         }
-        assert.ok(input.messages.some((message) => message.role === 'tool' && String(message.content).includes('COMMAND_SYNTAX')));
+        assert.ok(input.messages.some((message) => message.role === 'tool' && String(message.content).includes('search --name')));
         if (round === 3) return { content: '', model: 'test', toolCalls: [{ id: 'search-file', type: 'function', function: { name: 'pi_skill_exec', arguments: '{"skillId":"file-finder","command":"search","args":["03 PPT Master"]}' } }] };
         assert.ok(input.messages.some((message) => message.role === 'tool' && String(message.content).includes('fid=123')));
         return { content: '找到文件 fid=123', model: 'test' };
@@ -474,7 +519,7 @@ test('Workspace reads Skill instructions on demand before executing the document
     assert.equal(round, 4);
     const events = await store.listRunEvents(admin.id, created.run.id, 0);
     assert.equal(events.filter((event) => event.eventType === 'context.compacted').length, 0);
-    assert.deepEqual(events.filter((event) => event.eventType === 'tool.result').map((event) => event.payload.toolName), ['pi_skill_read', 'pi_skill_search', 'pi_skill_exec']);
+    assert.deepEqual(events.filter((event) => event.eventType === 'tool.result').map((event) => event.payload.toolName), ['pi_skill_catalog', 'pi_skill_read', 'pi_skill_exec']);
   } finally {
     runtime?.stop();
     await rm(fixtureRoot, { recursive: true, force: true });

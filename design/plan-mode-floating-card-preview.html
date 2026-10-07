@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Workspace Plan Mode Floating Card Preview</title>
+<style>
+  :root {
+    --bg: #F6F7F9;
+    --surface: #FFFFFF;
+    --border: #E5E7EB;
+    --text: #111827;
+    --sub: #6B7280;
+    --muted: #475569;
+    --blue: #245A8D;
+    --blue-soft: #EBF3FA;
+    --blue-line: #B9C8D9;
+    --line: #E5E7EB;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; padding: 32px; background: #ECEEF2; color: var(--text); font-family: Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .preview-shell { position: relative; width: min(1180px, 100%); min-height: 720px; margin: 0 auto; overflow: hidden; border: 1px solid #E5E7EB; border-radius: 18px; background: var(--bg); box-shadow: 0 20px 60px rgba(15, 23, 42, .12); }
+  .topbar { display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 28px; border-bottom: 1px solid var(--line); background: #fff; color: var(--sub); font-size: 12px; }
+  .topbar strong { color: var(--text); font-size: 14px; }
+  .topbar .meta { display: flex; align-items: center; gap: 14px; }
+  .connection { display: inline-flex; align-items: center; gap: 6px; }
+  .connection i { width: 7px; height: 7px; border-radius: 50%; background: #31a45a; }
+  .thread { position: relative; width: min(760px, calc(100% - 360px)); min-height: 662px; padding: 26px 36px 36px; }
+  .thread-head { margin-bottom: 26px; }
+  .eyebrow { margin: 0 0 4px; color: var(--muted); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+  h1 { margin: 0; font-size: 20px; line-height: 1.35; }
+  .thread-head p { margin: 6px 0 0; color: var(--sub); font-size: 12px; line-height: 1.6; }
+  .message { max-width: 700px; margin-bottom: 22px; }
+  .message.user { margin-left: auto; max-width: 430px; }
+  .bubble { padding: 11px 14px; border-radius: 15px; background: #eef1f5; color: var(--text); font-size: 13px; line-height: 1.7; }
+  .user .bubble { border-radius: 15px 4px 15px 15px; }
+  .assistant-copy { color: #4b5563; font-size: 13px; line-height: 1.8; }
+  .assistant-copy p { margin: 0 0 12px; }
+  .detail-block { margin: 12px 0 0; padding: 12px 14px; border-left: 2px solid #cbd5e1; color: #64748b; font-size: 12px; line-height: 1.7; }
+  .detail-block strong { color: #475569; }
+  .composer { position: absolute; left: 36px; bottom: 22px; width: min(700px, calc(100% - 72px)); padding: 12px 14px; border: 1px solid #d8dce3; border-radius: 22px; background: #fff; color: #9ca3af; font-size: 12px; box-shadow: 0 2px 8px rgba(15,23,42,.06); }
+  .plan-float { position: absolute; top: 84px; right: 22px; width: 304px; padding: 16px 16px 13px; border: 1px solid var(--border); border-radius: 10px; background: #FFFFFF; box-shadow: 0 4px 12px rgba(0,0,0,.08); backdrop-filter: blur(10px); }
+  .plan-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .plan-kicker { margin: 0 0 3px; color: #7b8794; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+  .plan-head h2 { margin: 0; font-size: 14px; line-height: 1.45; }
+  .status { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 8px; border-radius: 999px; background: #EBF3FA; color: #245A8D; font-size: 11px; font-weight: 700; white-space: nowrap; }
+  .plan-goal { margin: 12px 0 10px; color: #475569; font-size: 12px; line-height: 1.6; }
+  .progress-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; color: var(--sub); font-size: 11px; }
+  .progress { height: 5px; overflow: hidden; border-radius: 999px; background: #E5E7EB; }
+  .progress span { display: block; width: 40%; height: 100%; border-radius: inherit; background: var(--blue); }
+  .tasks { display: grid; gap: 6px; margin: 12px 0 0; padding: 0; list-style: none; }
+  .task { display: flex; align-items: flex-start; gap: 9px; padding: 8px; border: 1px solid transparent; border-radius: 9px; background: #F6F7F9; }
+  .task.current { border-color: var(--blue-line); background: var(--blue-soft); }
+  .task input { flex: 0 0 auto; width: 15px; height: 15px; margin-top: 1px; accent-color: #2E7D5B; }
+  .task-copy { min-width: 0; }
+  .task-title { display: flex; align-items: center; gap: 6px; color: var(--text); font-size: 12px; line-height: 1.5; font-weight: 600; }
+  .current-tag { padding: 1px 5px; border-radius: 4px; background: #EBF3FA; color: #245A8D; font-size: 10px; line-height: 1.3; }
+  .task-status { margin-top: 2px; color: var(--sub); font-size: 10px; line-height: 1.4; }
+  .plan-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 11px; color: var(--muted); font-size: 10px; }
+  .plan-foot a { color: #245A8D; font-weight: 600; text-decoration: none; }
+  .legend { position: absolute; right: 22px; bottom: 20px; width: 304px; padding: 11px 13px; border: 1px dashed #cbd5e1; border-radius: 10px; color: var(--sub); font-size: 11px; line-height: 1.55; }
+  .legend strong { color: var(--text); }
+  @media (max-width: 900px) {
+    body { padding: 12px; }
+    .preview-shell { min-height: 820px; }
+    .thread { width: 100%; padding: 22px 18px 250px; }
+    .plan-float { top: auto; right: 18px; bottom: 20px; left: 18px; width: auto; }
+    .legend { display: none; }
+    .composer { left: 18px; width: calc(100% - 36px); }
+  }
+</style>
+</head>
+<body>
+  <main class="preview-shell" aria-label="Plan Mode 悬浮卡片设计预览">
+    <header class="topbar"><strong>Workspace</strong><div class="meta"><span>连续对话</span><span class="connection"><i></i>实时</span></div></header>
+    <section class="thread">
+      <div class="thread-head"><p class="eyebrow">连续对话</p><h1>用 03 PPT Master 的网盘公开分享链接创建…</h1><p>44 条消息 · Run 创建于 10/07 15:53</p></div>
+      <article class="message user"><div class="bubble">用 03 PPT Master 的网盘公开分享链接创建一个卡券，关联“AI 技术咨询，需求定制开发服务”这个商品，然后启用自动发货。</div></article>
+      <article class="message"><div class="assistant-copy"><p>我先确认目标商品与交付要求，完成后会继续写入卡券并启用自动发货。</p><div class="detail-block"><strong>对话明细</strong><br />已读取夸克 Skill 能力总览，正在核对与网盘公开分享相关的精确文档。<br />已定位目标商品，下一步准备生成卡券并绑定商品。</div></div></article>
+      <div class="composer">给 Agent 发消息…</div>
+    </section>
+    <aside class="plan-float">
+      <div class="plan-head"><div><p class="plan-kicker">Plan Mode</p><h2>执行计划</h2></div><span class="status">执行中</span></div>
+      <p class="plan-goal">完成卡券创建、商品关联与自动发货启用</p>
+      <div class="progress-row"><span>任务进度</span><strong>2 / 5</strong></div>
+      <div class="progress" aria-label="任务进度"><span></span></div>
+      <ol class="tasks" aria-label="核心任务列表">
+        <li class="task"><input type="checkbox" checked disabled /><div class="task-copy"><div class="task-title">确认目标与交付要求</div><div class="task-status">已完成</div></div></li>
+        <li class="task current"><input type="checkbox" disabled /><div class="task-copy"><div class="task-title">读取相关 Skill 文档 <span class="current-tag">当前</span></div><div class="task-status">执行中</div></div></li>
+        <li class="task"><input type="checkbox" disabled /><div class="task-copy"><div class="task-title">生成并校验卡券内容</div><div class="task-status">待执行</div></div></li>
+        <li class="task"><input type="checkbox" disabled /><div class="task-copy"><div class="task-title">关联目标商品</div><div class="task-status">待执行</div></div></li>
+        <li class="task"><input type="checkbox" disabled /><div class="task-copy"><div class="task-title">启用自动发货</div><div class="task-status">待执行</div></div></li>
+      </ol>
+      <div class="plan-foot"><span>修订 3 · 仅展示核心任务</span><a href="#details">在对话中查看详情</a></div>
+    </aside>
+    <div class="legend" id="details"><strong>设计原则：</strong>计划卡片只展示目标、状态、进度和核心任务；工具名、证据、失败原因与执行过程继续留在对话明细中。</div>
+  </main>
+</body>
+</html>

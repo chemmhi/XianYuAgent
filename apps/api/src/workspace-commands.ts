@@ -146,7 +146,21 @@ export class WorkspaceCommandOrchestrator {
       if (!instruction && !structuredOperation) throw new ServiceError(422, 'VALIDATION_FAILED', 'workspace mutation requires operation+parameters or instruction');
       const productId = typeof args.productId === 'string' ? args.productId.trim() : '';
       const preparedInstruction = productId && !/(?:商品(?:ID|id)|productId)\s*[:：=]/i.test(instruction) ? `${instruction}; 商品ID:${productId}` : instruction;
-      const plan = await this.prepareWrite({ ...input, instruction: preparedInstruction, operation: structuredOperation, parameters: productId ? { ...(parameters ?? {}), productId } : parameters });
+      let plan: NativeWorkspaceWritePlan | undefined;
+      try {
+        plan = await this.prepareWrite({ ...input, instruction: preparedInstruction, operation: structuredOperation, parameters: productId ? { ...(parameters ?? {}), productId } : parameters });
+      } catch (error) {
+        if (error instanceof ServiceError && error.code === 'NO_CHANGES') {
+          return {
+            kind: 'read',
+            title: '写入无需变更',
+            summary: '目标配置已满足，无需重复修改',
+            content: '当前配置已是请求的目标状态，本次无需重复写入。',
+            data: { status: 'succeeded', code: 'NO_CHANGES', noChanges: true },
+          };
+        }
+        throw error;
+      }
       if (!plan) throw new ServiceError(422, 'VALIDATION_FAILED', 'workspace mutation is not supported by the configured tools');
       return { kind: 'write_plan', title: plan.title, summary: plan.summary, content: plan.content, data: plan.manifest, plan };
     }
