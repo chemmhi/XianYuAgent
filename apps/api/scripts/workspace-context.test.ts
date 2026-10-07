@@ -23,6 +23,25 @@ test('checkpoint retains identifiers and share URL without replaying raw results
   assert.ok((checkpoint?.length ?? 0) <= 3_100);
 });
 
+test('checkpoint promotes product search item ids into stable productId facts', () => {
+  const checkpoint = buildWorkspaceCheckpoint([
+    event(1, 'tool.result', {
+      status: 'succeeded',
+      toolName: 'workspace_product_search',
+      result: {
+        kind: 'read',
+        title: '商品搜索',
+        summary: '已按名称/外部编号筛选 1 个商品',
+        content: '匹配到 1 个商品',
+        data: { total: 1, items: [{ id: '766c9dc7-aa05-4cc7-8f1e-cd7e35d2e97c', title: 'AI 技术咨询，需求定制开发服务', externalProductRef: '1082410574993' }] },
+      },
+    }),
+  ]) ?? '';
+  assert.match(checkpoint, /productId=766c9dc7-aa05-4cc7-8f1e-cd7e35d2e97c/);
+  assert.match(checkpoint, /externalProductRef=1082410574993/);
+  assert.match(checkpoint, /不要重复搜索/);
+});
+
 test('compaction keeps the original goal and recent results within the model budget', () => {
   const messages = [
     { role: 'system' as const, content: '系统规则' },
@@ -85,6 +104,37 @@ test('model compaction removes redundant output and retains critical identifiers
   assert.match(result.summary ?? '', /product-1|batchId=18/);
   assert.match(result.summary ?? '', /critical-link/);
   assert.doesNotMatch(result.summary ?? '', /x{50}/);
+});
+
+test('compaction preserves an early product search result after later Skill output', () => {
+  const messages = [
+    { role: 'system' as const, content: '系统规则' },
+    { role: 'user' as const, content: '创建卡券并关联 AI 技术咨询，需求定制开发服务' },
+    { role: 'tool' as const, name: 'workspace_product_search', content: JSON.stringify({ ok: true, kind: 'read', title: '商品搜索', data: { items: [{ id: 'product-early', title: 'AI 技术咨询，需求定制开发服务', externalProductRef: '1082410574993' }] } }) },
+    ...Array.from({ length: 30 }, (_, index) => ({ role: 'tool' as const, name: 'pi_skill_search', content: `${index}:${'x'.repeat(1_500)}` })),
+  ];
+  const result = compactWorkspaceModelMessages(messages);
+  assert.match(result.summary ?? '', /productId=product-early/);
+  assert.match(result.summary ?? '', /1082410574993/);
+});
+
+test('model compaction injects early product facts into the model source and fallback summary', async () => {
+  const messages = [
+    { role: 'system' as const, content: '系统规则' },
+    { role: 'user' as const, content: '创建卡券并关联 AI 技术咨询，需求定制开发服务' },
+    { role: 'tool' as const, name: 'workspace_product_search', content: JSON.stringify({ ok: true, kind: 'read', title: '商品搜索', data: { items: [{ id: 'product-early', title: 'AI 技术咨询，需求定制开发服务', externalProductRef: '1082410574993' }] } }) },
+    ...Array.from({ length: 30 }, (_, index) => ({ role: 'tool' as const, name: 'pi_skill_search', content: `${index}:${'x'.repeat(1_000)}` })),
+  ];
+  let modelInput = '';
+  const result = await compactWorkspaceModelMessagesWithModel(messages, {
+    async complete(input) {
+      modelInput = String((input.messages[1] as { content?: unknown } | undefined)?.content ?? '');
+      return { content: '已找到商品，等待后续操作。', model: 'test' };
+    },
+  });
+  assert.equal(result.method, 'model');
+  assert.match(modelInput, /productId=product-early/);
+  assert.match(result.summary ?? '', /productId=product-early/);
 });
 
 test('model failure does not publish a heuristic fallback as a compressed summary', async () => {
