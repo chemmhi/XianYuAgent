@@ -85,18 +85,11 @@ export function OpenAISettingsPanel(props: { accountId: string; accountName?: st
   const [testError, setTestError] = useState<Record<OpenAIConfigRole, string | null>>({ primary: null, backup: null });
   const [routingBusy, setRoutingBusy] = useState(false);
   const [routingError, setRoutingError] = useState<string | null>(null);
-  const [, setCountdownTick] = useState(0);
-  const serverClockOffsetMs = useRef(0);
   const [modelOptions, setModelOptions] = useState<Record<OpenAIConfigRole, OpenAIModelOption[]>>({ primary: [], backup: [] });
   const [modelPhase, setModelPhase] = useState<Record<OpenAIConfigRole, ModelLoadPhase>>({ primary: 'idle', backup: 'idle' });
   const modelLoadedKey = useRef<Record<OpenAIConfigRole, string | undefined>>({ primary: undefined, backup: undefined });
   const modelRequestId = useRef<Record<OpenAIConfigRole, number>>({ primary: 0, backup: 0 });
   const modelRequesting = useRef<Record<OpenAIConfigRole, boolean>>({ primary: false, backup: false });
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setCountdownTick((value) => value + 1), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     // A refreshed account/config list invalidates all provider-derived options.
@@ -130,11 +123,6 @@ export function OpenAISettingsPanel(props: { accountId: string; accountName?: st
   const configured = useMemo(() => Object.values(forms).filter((item) => item.id), [forms]);
   const runtime = controller.state.data?.runtime;
 
-  useEffect(() => {
-    const serverTimeMs = runtime?.server_time ? Date.parse(runtime.server_time) : Number.NaN;
-    serverClockOffsetMs.current = Number.isFinite(serverTimeMs) ? serverTimeMs - Date.now() : 0;
-  }, [runtime?.server_time]);
-
   async function updateRouting(mode: 'auto' | 'manual_primary' | 'manual_backup', forceProbe = false) {
     if (!runtime || runtime.feature_enabled === false) return;
     const role = mode === 'manual_primary' ? 'primary' : mode === 'manual_backup' ? 'backup' : undefined;
@@ -154,15 +142,6 @@ export function OpenAISettingsPanel(props: { accountId: string; accountName?: st
   function providerLabel(provider: { provider?: string; model?: string } | null | undefined): string {
     if (!provider) return '双 Provider 暂不可用';
     return `${provider.provider || '未命名 Provider'} · ${provider.model || '未配置模型'}`;
-  }
-
-  function countdown(iso?: string): string {
-    if (!iso) return '';
-    // Keep the countdown anchored to the last server timestamp while allowing
-    // the local 1-second tick to advance between runtime refreshes.
-    const serverNow = Date.now() + serverClockOffsetMs.current;
-    const seconds = Math.max(0, Math.ceil((Date.parse(iso) - serverNow) / 1000));
-    return seconds > 0 ? `${seconds}s` : '即将探测';
   }
 
   function update(role: OpenAIConfigRole, patch: Partial<ConfigForm>) {
@@ -258,27 +237,22 @@ export function OpenAISettingsPanel(props: { accountId: string; accountName?: st
 
   return <div className="settings-content openai-settings-content" data-openai-panel>
     <article className="card panel openai-settings-hero">
-      <div className="panel-head"><div><p className="eyebrow">ModelClient</p><h2>OpenAI API 兼容模型配置</h2><p>用于 DeepSeek Harness / OpenAI API 兼容 ModelClient；当前配置失败时可切换备用 Provider。</p></div><span className="status-pill info">ModelClient</span></div>
+      <div className="panel-head"><div><p className="eyebrow">ModelClient</p><h2>OpenAI API 兼容模型配置</h2><p>用于 OpenAI API 兼容 ModelClient；主配置失败时可切换备用 Provider。</p></div><span className="status-pill info">ModelClient</span></div>
       {props.accountsError && <div className="settings-state error" role="alert">{props.accountsError}</div>}
       {!props.accountId && !props.accountsLoading && <div className="settings-state empty"><strong>请选择明确的闲鱼账号</strong><span>模型配置按账号隔离，未选择账号时不会读取或编辑任何配置。</span></div>}
       {props.accountId && controller.state.phase === 'loading' && <div className="settings-state loading"><span className="settings-spinner" />正在读取 OpenAI API 配置…</div>}
       {props.accountId && controller.state.phase === 'error' && <div className="settings-state error" role="alert"><strong>{controller.state.error}</strong><Button variant="ghost" type="button" onClick={() => void controller.reload()}>重试</Button></div>}
       {props.accountId && <>
         <section className="openai-runtime-summary" data-openai-runtime>
-          <div className="openai-runtime-head"><div><p className="eyebrow">Runtime Routing</p><h3>当前生效 Provider</h3><strong>{providerLabel(runtime?.effective_provider)}</strong></div><span className={`status-pill ${runtime?.effective_provider ? 'ok' : 'danger'}`}>{runtime?.feature_enabled === false ? '兼容模式' : runtime?.mode === 'manual_primary' ? '手动优先主' : runtime?.mode === 'manual_backup' ? '手动优先备' : '自动模式'}</span></div>
-          <div className="openai-runtime-meta"><span>最近成功：{providerLabel(runtime?.last_successful_provider)}</span><span>冷却：{countdown(runtime?.cooldown_until) || '无'}</span><span>下次探测：{countdown(runtime?.next_probe_at) || '无'}</span></div>
-          <div className="openai-runtime-states">{(['primary', 'backup'] as const).map((role) => { const state = runtime?.provider_states[role]; return <span key={role} className={`runtime-state runtime-state-${state?.state?.toLowerCase() ?? 'unknown'}`}>{role === 'primary' ? '主' : '备'}：{state?.state ?? '未初始化'}{state?.failureCount ? ` · ${state.failureCount}次` : ''}</span>; })}</div>
+          <div className="openai-runtime-inline"><span className="openai-runtime-label">当前生效 Provider</span><strong>{providerLabel(runtime?.effective_provider)}</strong><span className={`status-pill ${runtime?.effective_provider ? 'ok' : 'danger'}`}>{runtime?.feature_enabled === false ? '兼容模式' : '自动切换'}</span><div className="openai-routing-segmented" role="group" aria-label="路由模式">
+            <Button variant="ghost" size="small" className={runtime?.mode === 'auto' || !runtime?.mode ? 'active' : ''} type="button" disabled={routingBusy || !runtime || runtime.feature_enabled === false} onClick={() => void updateRouting('auto')}>自动</Button>
+            <Button variant="ghost" size="small" className={runtime?.mode === 'manual_primary' ? 'active' : ''} type="button" disabled={routingBusy || !runtime || runtime.feature_enabled === false} onClick={() => void updateRouting('manual_primary')}>主优先</Button>
+            <Button variant="ghost" size="small" className={runtime?.mode === 'manual_backup' ? 'active' : ''} type="button" disabled={routingBusy || !runtime || runtime.feature_enabled === false} onClick={() => void updateRouting('manual_backup')}>备优先</Button>
+          </div></div>
           {routingError && <div className="openai-inline-error" role="alert">{routingError}</div>}
-          <div className="card-actions openai-routing-actions"><Button variant="ghost" type="button" disabled={routingBusy || !runtime || runtime.feature_enabled === false} onClick={() => void updateRouting('manual_primary')}>切换到主</Button><Button variant="ghost" type="button" disabled={routingBusy || !runtime || runtime.feature_enabled === false} onClick={() => void updateRouting('manual_backup')}>切换到备</Button><Button variant="primary" type="button" disabled={routingBusy || !runtime || runtime.feature_enabled === false} onClick={() => void updateRouting('auto')}>{routingBusy ? '切换中…' : '恢复自动模式'}</Button></div>
         </section>
         <div className="two-grid nested openai-config-grid">
           {(['primary', 'backup'] as const).map((role) => <OpenAIConfigCard key={role} form={forms[role]} role={role} busy={busyRole === role} testing={testRole === role} error={testError[role]} providerModels={forms[role].id ? modelOptions[role] : localModels[role]} providerPhase={forms[role].id ? modelPhase[role] : modelPhase[role]} onChange={(patch) => update(role, patch)} onTest={() => void test(forms[role])} onSave={() => void save(forms[role])} onLoadModels={() => void loadModels(forms[role])} />)}
-        </div>
-        <div className="openai-compare-summary"><span><strong>当前配置</strong>{connectivitySummary('primary', forms.primary)}</span><span><strong>备用配置</strong>{connectivitySummary('backup', forms.backup)}</span></div>
-        <div className="timeline openai-timeline">
-          <div className="timeline-row"><strong>生效规则</strong><span>Base URL、API Key、Model 填写完整且连接测试通过后才生效。</span><span className="status-pill ok">强校验</span></div>
-          <div className="timeline-row"><strong>故障切换</strong><span>当前 Provider 失败、超时、认证失败或限流时尝试备用配置。</span><span className="status-pill warn">Fallback</span></div>
-          <div className="timeline-row"><strong>审计边界</strong><span>记录失败原因、provider、trace_id；API Key 仅显示脱敏摘要。</span><span className="status-pill info">脱敏</span></div>
         </div>
       </>}
       {controller.state.phase === 'saved' && <div className="settings-save-toast" role="status">{controller.state.lastAction === 'backup' ? '备用 API 配置已保存。' : '当前 API 配置已保存。'}</div>}
@@ -301,10 +275,12 @@ function OpenAIConfigCard(props: { form: ConfigForm; role: OpenAIConfigRole; bus
       <InputField label="Base URL" value={props.form.baseUrl} onChange={(event) => props.onChange({ baseUrl: event.target.value })} placeholder="https://api.example.com/v1" />
       <InputField label="API Key" type={props.form.apiKeyMasked ? 'text' : 'password'} value={props.form.apiKeyMasked ? (props.form.apiKeyHint ?? '') : props.form.apiKey} onFocus={() => { if (props.form.apiKeyMasked) props.onChange({ apiKey: '', apiKeyMasked: false }); }} onChange={(event) => props.onChange({ apiKey: event.target.value, apiKeyMasked: false })} placeholder={props.form.id ? '留空保持当前密钥' : '输入新的 API Key'} autoComplete="new-password" />
       <SelectField label="Model" className="openai-model-field" data-openai-model-select="true" aria-label="Model" value={props.form.model} onFocus={props.onLoadModels} onClick={props.onLoadModels} onChange={(event) => { const model = event.target.value; props.onChange({ model, reasoningEffort: reasoningOptionsFor(model, props.providerModels).includes(props.form.reasoningEffort ?? '') ? props.form.reasoningEffort : '' }); }} options={[{ value: '', label: modelPlaceholder }, ...(props.form.model && !modelIds.includes(props.form.model) ? [{ value: props.form.model, label: props.form.model }] : []), ...props.providerModels.map((model) => ({ value: model.id, label: model.id }))]} />
-      {reasoningOptions.length > 0 && <SelectField label="思考程度" className="openai-reasoning-field" value={props.form.reasoningEffort ?? ''} onChange={(event) => props.onChange({ reasoningEffort: event.target.value })} options={[{ value: '', label: '使用提供商默认' }, ...reasoningOptions.map((option) => ({ value: option, label: option }))]} />}
-      <SelectField label="恢复探针" value={props.form.probeStrategy} onChange={(event) => props.onChange({ probeStrategy: event.target.value as ConfigForm['probeStrategy'] })} options={[{ value: 'models', label: 'GET /models' }, { value: 'completion', label: '最小 completion' }, { value: 'health_url', label: '健康检查 URL' }, { value: 'none', label: '不自动探测' }]} />
-      <InputField label="探针超时(ms)" type="number" value={String(props.form.probeTimeoutMs)} onChange={(event) => props.onChange({ probeTimeoutMs: Math.max(500, Number(event.target.value) || 10_000) })} />
-      {props.form.probeStrategy === 'health_url' && <InputField label="健康检查 URL" value={props.form.probeUrl ?? ''} onChange={(event) => props.onChange({ probeUrl: event.target.value })} placeholder="https://api.example.com/health" />}
+      <details className="openai-advanced-settings"><summary>高级设置</summary><div className="openai-advanced-rows">
+        {reasoningOptions.length > 0 && <SelectField label="思考程度" className="openai-reasoning-field" value={props.form.reasoningEffort ?? ''} onChange={(event) => props.onChange({ reasoningEffort: event.target.value })} options={[{ value: '', label: '使用提供商默认' }, ...reasoningOptions.map((option) => ({ value: option, label: option }))]} />}
+        <SelectField label="恢复探针" value={props.form.probeStrategy} onChange={(event) => props.onChange({ probeStrategy: event.target.value as ConfigForm['probeStrategy'] })} options={[{ value: 'models', label: 'GET /models' }, { value: 'completion', label: '最小 completion' }, { value: 'health_url', label: '健康检查 URL' }, { value: 'none', label: '不自动探测' }]} />
+        <InputField label="探针超时(ms)" type="number" value={String(props.form.probeTimeoutMs)} onChange={(event) => props.onChange({ probeTimeoutMs: Math.max(500, Number(event.target.value) || 10_000) })} />
+        {props.form.probeStrategy === 'health_url' && <InputField label="健康检查 URL" value={props.form.probeUrl ?? ''} onChange={(event) => props.onChange({ probeUrl: event.target.value })} placeholder="https://api.example.com/health" />}
+      </div></details>
       {props.error && <div className="openai-inline-error" role="alert">{props.error}</div>}
     </div>
     <div className="card-actions"><Button variant="ghost" type="button" onClick={props.onTest} disabled={props.busy || !props.form.provider || !props.form.baseUrl || !props.form.model || (!props.form.id && !props.form.apiKey)}>{props.testing ? '测试中…' : '测试连通性'}</Button><Button variant="primary" type="button" onClick={props.onSave} disabled={props.busy || !props.form.provider || !props.form.baseUrl || !props.form.model || (!props.form.id && !props.form.apiKey)}>{props.busy ? '保存中…' : '保存'}</Button></div>

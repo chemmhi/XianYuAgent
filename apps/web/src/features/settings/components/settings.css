@@ -9,19 +9,9 @@
 /* OpenAI ModelClient parity with SellerAgent's editable dual-provider panel. */
 .openai-settings-content,.openai-settings-hero,.openai-model-box{min-width:0}
 .openai-settings-hero,.openai-model-box{overflow:visible}
-.timeline{display:grid;gap:10px}
-.timeline-row{display:grid;grid-template-columns:64px minmax(0,1fr) auto;gap:10px;align-items:center;padding:12px;border:1px solid var(--border);border-radius:10px;background:#fff;font-size:12px}
-.timeline-row strong{font-size:11px;color:var(--muted)}
-.timeline-row span{line-height:1.45}
 .openai-settings-hero{padding:18px}
 .openai-settings-hero .panel-head{margin-bottom:16px}
 .openai-runtime-summary{margin:16px 0;padding:16px;border:1px solid var(--line,#dfe3ea);border-radius:14px;background:var(--surface-soft,#f8fafc)}
-.openai-runtime-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
-.openai-runtime-head h3{margin:2px 0 6px}
-.openai-runtime-meta,.openai-runtime-states{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;color:var(--muted,#667085);font-size:13px}
-.runtime-state{padding:4px 8px;border-radius:999px;background:#eef2f7}
-.runtime-state-closed{background:#e8f7ee;color:#16784b}.runtime-state-open{background:#fff0f0;color:#b42318}.runtime-state-half_open{background:#fff7e6;color:#9a6700}
-.openai-routing-actions{margin-top:14px}
 .openai-config-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:14px}
 .openai-model-box{padding:14px;border:1px solid var(--border);border-radius:10px;background:#fff;box-shadow:none}
 .openai-model-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px}
@@ -37,21 +27,56 @@
 
 
 .openai-inline-error{grid-column:1/-1;padding:8px 10px;border:1px solid rgba(180,35,24,.18);border-radius:8px;background:var(--danger-bg);color:var(--danger);font-size:10px;line-height:1.45}
-.openai-compare-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:14px}
-.openai-compare-summary>span{display:block;min-width:0;padding:10px 12px;border:1px solid #D6E5F2;border-radius:10px;background:var(--soft-blue-bg);color:var(--muted);font-size:11px;line-height:1.45}
-.openai-compare-summary strong{display:block;margin-bottom:3px;color:var(--link);font-size:11px}
-.openai-timeline{margin-top:0}
-.openai-timeline .timeline-row{grid-template-columns:82px minmax(0,1fr) auto}
 .status-pill.info{background:var(--soft-blue-bg);color:var(--info)}
 @media(max-width:900px){
   .openai-settings-hero{padding:14px}
-  .openai-config-grid,.openai-compare-summary{grid-template-columns:1fr}
+  .openai-config-grid{grid-template-columns:1fr}
   .openai-model-box{padding:13px}
   .openai-model-head{display:grid;gap:8px}
   .openai-form-rows .ui-field{grid-template-columns:1fr;gap:6px}
   .openai-model-box .card-actions{justify-content:stretch}
   .openai-model-box .card-actions .btn{flex:1 1 0;min-height:38px}
-  .openai-timeline .timeline-row{grid-template-columns:1fr;gap:6px}
+}
+
+/* OpenAI API tab: compact runtime controls with a calm, single-column form. */
+.openai-settings-hero .panel-head{align-items:flex-start}
+.openai-settings-hero .panel-head p{max-width:720px}
+.openai-runtime-summary{margin:16px 0 14px;padding:0;border:1px solid var(--border);border-radius:10px;background:#fff;box-shadow:none}
+.openai-runtime-inline{display:flex;align-items:center;gap:10px;min-height:48px;padding:9px 12px;color:var(--muted)}
+.openai-runtime-label{color:var(--sub);font-size:var(--font-size-meta,12px);font-weight:700;white-space:nowrap}
+.openai-runtime-inline strong{min-width:0;overflow:hidden;color:var(--text);font-size:var(--font-size-body-compact,13px);font-weight:700;text-overflow:ellipsis;white-space:nowrap}
+.openai-runtime-inline .status-pill{flex:0 0 auto}
+.openai-routing-segmented{display:inline-flex;flex:0 0 auto;margin-left:auto;padding:2px;border:1px solid var(--border);border-radius:7px;background:var(--bg)}
+.openai-routing-segmented .btn{height:26px;min-height:26px;padding:0 9px;border:0;border-radius:5px;background:transparent;color:var(--sub);font-size:var(--font-size-meta,12px);font-weight:700}
+.openai-routing-segmented .btn:hover:not(:disabled){background:#fff;color:var(--link)}
+.openai-routing-segmented .btn.active{background:#fff;color:var(--link);box-shadow:0 1px 2px rgba(15,23,42,.08)}
+.openai-routing-segmented .btn:disabled{opacity:.55}
+.openai-form-rows{gap:14px}
+.openai-form-rows .ui-field{grid-template-columns:92px minmax(0,1fr);gap:10px;align-items:center}
+.openai-form-rows .ui-field-label{color:var(--muted);font-size:var(--font-size-body,14px);font-weight:600;line-height:1.5}
+.openai-form-rows .ui-input-control,.openai-form-rows .ui-select-trigger{min-height:36px;font-size:var(--font-size-body,14px)}
+.openai-form-rows .ui-input-control{padding:8px 10px;background:var(--bg)}
+.openai-form-rows .ui-select-control{min-height:36px}
+.openai-form-rows .ui-select-trigger{padding:0 10px}
+.openai-advanced-settings{margin-top:2px;border-top:1px solid var(--border)}
+.openai-advanced-settings summary{display:flex;align-items:center;justify-content:space-between;min-height:38px;padding:0 2px;color:var(--muted);font-size:var(--font-size-meta,12px);font-weight:700;cursor:pointer;list-style:none}
+.openai-advanced-settings summary::-webkit-details-marker{display:none}
+.openai-advanced-settings summary::after{content:'+';color:var(--sub);font-size:16px;font-weight:400;line-height:1}
+.openai-advanced-settings[open] summary::after{content:'−'}
+.openai-advanced-rows{display:grid;gap:12px;padding:4px 0 2px}
+.openai-advanced-rows .ui-field{grid-template-columns:92px minmax(0,1fr);gap:10px;align-items:center}
+.openai-advanced-rows .ui-field-label{color:var(--muted);font-size:var(--font-size-body,14px);font-weight:600}
+.openai-advanced-rows .ui-input-control,.openai-advanced-rows .ui-select-trigger{min-height:36px;font-size:var(--font-size-body,14px)}
+.openai-inline-error{margin-top:2px}
+@media(max-width:900px){
+  .openai-runtime-inline{align-items:flex-start;flex-wrap:wrap;gap:8px}
+  .openai-runtime-label{width:100%}
+  .openai-runtime-inline strong{max-width:100%}
+  .openai-routing-segmented{width:100%;margin-left:0}
+  .openai-routing-segmented .btn{flex:1 1 0}
+  .openai-form-rows .ui-field,.openai-advanced-rows .ui-field{grid-template-columns:1fr;gap:6px;align-items:stretch}
+  .openai-form-rows .ui-field-label,.openai-advanced-rows .ui-field-label{font-size:var(--font-size-body,14px)}
+  .openai-advanced-rows{gap:10px}
 }
 
 /* Match the online chat conversation list: compact rows, full-width active state, left inset highlight. */
