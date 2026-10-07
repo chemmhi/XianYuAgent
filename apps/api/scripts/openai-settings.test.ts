@@ -91,6 +91,21 @@ test('keeps connectivity probes ephemeral so a fresh process requires an explici
   assert.equal(reloaded?.lastConnectivity ?? 'unknown', 'unknown');
 });
 
+test('save with metadata update and key rotation advances config generation once', async () => {
+  const { store, admin, account, service } = await fixture();
+  const created = await service.save(input(admin.id, account.id, 'primary'));
+  assert.equal(await service.getConfigGeneration(admin.id, account.id), 1);
+
+  await service.save(input(admin.id, account.id, 'primary', {
+    configId: created.id,
+    expectedVersion: created.version,
+    apiKey: 'primary-rotated-key',
+    label: 'rotated',
+  }));
+
+  assert.equal(await service.getConfigGeneration(admin.id, account.id), 2);
+});
+
 test('enforces role uniqueness and optimistic version checks', async () => {
   const { admin, account, service } = await fixture();
   const primary = await service.save(input(admin.id, account.id, 'primary'));
@@ -128,6 +143,26 @@ test('fallback advertises web_search only when every provider supports it', asyn
     messages: [{ role: 'user', content: 'github上有没有这个skill' }],
   });
   assert.equal(result.content, 'fallback reply');
+});
+
+test('persists manual routing mode with optimistic locking', async () => {
+  const { admin, account, service } = await fixture();
+  await service.save(input(admin.id, account.id, 'backup'));
+  const initial = await service.getRouting(admin.id, account.id, 0);
+  assert.equal(initial.mode, 'auto');
+  const switched = await service.updateRouting({ adminId: admin.id, accountId: account.id, expectedVersion: 0, mode: 'manual_backup', preferredRole: 'backup', configGeneration: 2, requestId: 'routing-1', traceId: 'trace-routing-1' });
+  assert.equal(switched.mode, 'manual_backup');
+  assert.equal(switched.preferredRole, 'backup');
+  assert.equal(switched.routingVersion, 1);
+  await assert.rejects(() => service.updateRouting({ adminId: admin.id, accountId: account.id, expectedVersion: 0, mode: 'auto', configGeneration: 2, requestId: 'routing-2', traceId: 'trace-routing-2' }), (error: unknown) => (error as { statusCode?: number }).statusCode === 409);
+});
+
+test('rejects manual routing to an unconfigured provider role', async () => {
+  const { admin, account, service } = await fixture();
+  await assert.rejects(
+    () => service.updateRouting({ adminId: admin.id, accountId: account.id, expectedVersion: 0, mode: 'manual_backup', preferredRole: 'backup', configGeneration: 0, requestId: 'routing-missing', traceId: 'trace-routing-missing' }),
+    (error: unknown) => (error as { statusCode?: number; code?: string }).statusCode === 422 && (error as { code?: string }).code === 'MODEL_PROVIDER_ROLE_NOT_CONFIGURED',
+  );
 });
 
 test('OpenAI settings apply one global wire mode to every provider', async () => {
@@ -190,8 +225,12 @@ test('agent resolves latest persisted config and falls back without restart', as
     const third = await createInbound('第三条消息', 'openai-agent-3');
     const thirdResult = await runtime.autoReply.processInbound({ adminId: admin.id, conversationId: conversation.id, inboundMessageId: third.message.id, senderName: 'Buyer' });
     assert.equal(thirdResult.outboundMessage?.bodyText, 'BACKUP_REPLY');
+    const fourth = await createInbound('第四条消息', 'openai-agent-4');
+    const fourthResult = await runtime.autoReply.processInbound({ adminId: admin.id, conversationId: conversation.id, inboundMessageId: fourth.message.id, senderName: 'Buyer' });
+    assert.equal(fourthResult.outboundMessage?.bodyText, 'BACKUP_REPLY');
     assert.equal(providerCalls.some((call) => call.authorization === 'Bearer primary-fail-secret'), true);
     assert.equal(providerCalls.some((call) => call.authorization === 'Bearer backup-secret-key'), true);
+    assert.equal(providerCalls.filter((call) => call.authorization === 'Bearer primary-fail-secret').length, 1);
     assert.ok(backup.id);
   } finally {
     await runtime.close();

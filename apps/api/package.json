@@ -53,6 +53,7 @@
     "test:product-automation:live-order": "npm run build && node scripts/product-automation-live-order.mjs",
     "test:product-automation:postgres": "npm run build && node scripts/product-automation-postgres-smoke.mjs",
     "test:model-client": "node --import tsx --test scripts/model-client.test.ts scripts/workspace-pi-provider-fallback.test.ts scripts/pi-runtime-stream.test.ts scripts/workspace-context.test.ts scripts/pi-skills.test.ts scripts/workspace-pi-agent-settings-isolation.test.ts",
+    "test:model-provider-failover": "node --import tsx --test scripts/model-provider-runtime.test.ts scripts/model-provider-probe.test.ts && npm run build && node scripts/model-provider-failover-smoke.mjs",
     "test:coupon-reservations": "node --import tsx --test scripts/coupon-reservation.test.ts",
     "test:coupon-reservations:postgres": "npm run build && node scripts/coupon-reservation-postgres-smoke.mjs",
     "optimize:seller-style-prompt": "node --import tsx scripts/optimize-seller-style-prompt.ts",

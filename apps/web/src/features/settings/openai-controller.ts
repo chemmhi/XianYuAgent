@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OpenAISettingsApi } from './api';
-import type { OpenAIConfigVM, OpenAISettingsState } from './types';
+import type { OpenAIConfigVM, OpenAISettingsState, OpenAIRuntimeVM } from './types';
 
 function messageOf(error: unknown): string {
   const status = typeof error === 'object' && error && 'status' in error ? Number((error as { status?: unknown }).status) : undefined;
@@ -14,6 +14,7 @@ export interface OpenAISettingsController {
   reload: () => Promise<void>;
   save: (input: Parameters<OpenAISettingsApi['save']>[0]) => Promise<OpenAIConfigVM>;
   test: (input: Parameters<OpenAISettingsApi['test']>[0]) => ReturnType<OpenAISettingsApi['test']>;
+  updateRouting: (input: Parameters<OpenAISettingsApi['updateRouting']>[0]) => Promise<OpenAIRuntimeVM>;
 }
 
 export function useOpenAISettingsController(api: OpenAISettingsApi, accountId?: string): OpenAISettingsController {
@@ -50,6 +51,18 @@ export function useOpenAISettingsController(api: OpenAISettingsApi, accountId?: 
   }, [api, reload]);
 
   const test = useCallback((input: Parameters<OpenAISettingsApi['test']>[0]) => api.test(input), [api]);
+  const updateRouting = useCallback(async (input: Parameters<OpenAISettingsApi['updateRouting']>[0]) => {
+    setState((previous) => ({ ...previous, phase: 'submitting', error: null, lastAction: 'routing' }));
+    try {
+      const runtime = await api.updateRouting(input);
+      await reload();
+      setState((previous) => ({ ...previous, phase: 'saved', lastAction: 'routing', data: previous.data ? { ...previous.data, runtime } : previous.data }));
+      return runtime;
+    } catch (error) {
+      setState((previous) => ({ ...previous, phase: 'error', error: messageOf(error), lastAction: 'routing' }));
+      throw error;
+    }
+  }, [api, reload]);
 
-  return { state, reload, save, test };
+  return { state, reload, save, test, updateRouting };
 }

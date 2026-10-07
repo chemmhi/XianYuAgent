@@ -1,4 +1,9 @@
 # XianyuSellerAgent 项目状态
+## 2026-10-07 Model Provider 主备切换 v2（PASS）
+- 设计文档 `docs/model-provider-failover-v2.md` 已经独立设计审核三轮通过；实现已按文档落地。
+- 已落地：账号级熔断池、CLOSED/OPEN/HALF_OPEN、自动/手动主备路由、有效 Provider 展示、Redis 快照 revision + Lua CAS、generation fencing、Redis routing mirror 读写、探针策略与独立探针超时、V2 回滚 feature flag、主备角色缺失场景、forceProbe 错误返回和 UI 倒计时刷新。
+- 独立代码复审 `MPF-V2-CODE-R2` 已 PASS，P0/P1 问题均已关闭；P2 仅保留不影响路由正确性的重复 circuit 审计事件观察项。
+- 验证：API 定向 33/33、Web OpenAI Settings 5/5、API/Web typecheck、Web build、failover smoke、Redis 快照/重启 hydration/跨池 probe 单飞/lease 过期/无流量恢复/断连恢复、PostgreSQL migration 001–050、OpenAI settings PostgreSQL smoke 均通过。
 ## 2026-10-07 Workspace 思考摘要闪烁根因修复
 - 根因：Pi Runtime 将推理摘要持久化为 `workspace.message`；前端检测到该事件后关闭步骤兜底摘要，但随后把所有 `workspace.message` 无条件跳过，导致摘要 DOM 被移除，工具事件仍继续显示。
 - 修复：保留 `workspace.message` 的 `reasoning_summary` / `final_answer` 投影，仅跳过已由 `tool.result` 提供规范展示的持久化 `tool_event`，避免重复工具行。
@@ -480,3 +485,10 @@
 - 审核与合入：独立 reviewer agent PASS；提交 `43df91f` 以 `--no-ff` 合入 `main`，merge commit `07b7694`。
 - 验证：Web 93 files / 377 tests、Web typecheck、Web build、`git diff --check`；内置浏览器 `http://localhost:5173/workspace` 刷新后摘要 12 个、工具事件 38 个、最终答复 1 个，稳定包含“分析任务”“检索商品信息”“商品搜索”。
 - 边界：本轮未运行 PostgreSQL/Chrome E2E（Docker 服务未运行）；真实生产新 Run 仍需发布后复验。
+
+## 2026-10-07 Model Provider 主备切换 v2
+
+- 已落地批准文档：`docs/model-provider-failover-v2.md`。
+- 实现范围：账号级 ModelProviderRuntimePool、CLOSED/OPEN/HALF_OPEN 熔断、共享 overall deadline、safeProbe、Redis health mirror/lease、routing record、手动 routing API、Settings runtime 展示与前端切换。
+- 已验证：API/Web TypeScript、ModelClient 定向回归 73/73、OpenAI Settings 10/10、Web Settings 7/7、真实接口 smoke `apps/api/scripts/model-provider-failover-smoke.mjs`、Web build。
+- 当前门禁：等待独立 code reviewer 对方案符合度、遗漏需求和验收证据复核；若提出 P0-P2 问题，修复并重新验证。

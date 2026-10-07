@@ -1,4 +1,4 @@
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, AutoReplyProductLookup, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponAssetRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponItemRecord, CouponReservationItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, DeliveryRecord, DeliveryRecordStatus, DeliveryStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductKnowledgeBaseMessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, AutoReplyProductLookup, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponAssetRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponItemRecord, CouponReservationItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, DeliveryRecord, DeliveryRecordStatus, DeliveryStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ModelProviderRoutingRecord, ModelProviderRoutingMode, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductKnowledgeBaseMessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { projectAutoReplyRun } from './auto-reply-activity-projection.js';
 import { createId } from './security.js';
@@ -108,6 +108,8 @@ export class MemoryStore implements Store {
   private readonly loginSessions = new Map<string, LoginSessionRecord>();
   private readonly credentials = new Map<string, CredentialRecord>();
   private readonly credentialRefs = new Map<string, CredentialRefRecord>();
+  private readonly modelProviderRouting = new Map<string, ModelProviderRoutingRecord>();
+  private readonly modelProviderConfigGenerations = new Map<string, number>();
   private readonly credentialRefSecrets = new Map<string, string>();
   private readonly autoReplyAgentConfigs = new Map<string, AutoReplyAgentConfigRecord>();
   private readonly autoReplyRepairPolicies = new Map<string, Map<string, MemoryRepairPolicyRecord>>();
@@ -1470,6 +1472,40 @@ export class MemoryStore implements Store {
     row.version += 1;
     row.updatedAt = new Date().toISOString();
     return { ...row, metadata: { ...row.metadata }, canReveal: false };
+  }
+  async getModelProviderRouting(adminId: string, accountId: string): Promise<ModelProviderRoutingRecord | undefined> {
+    if (!(await this.hasAccountScope(adminId, accountId))) return undefined;
+    const row = this.modelProviderRouting.get(accountId);
+    return row ? { ...row } : undefined;
+  }
+  async getModelProviderConfigGeneration(adminId: string, accountId: string): Promise<number | undefined> {
+    if (!(await this.hasAccountScope(adminId, accountId))) return undefined;
+    return this.modelProviderConfigGenerations.get(accountId) ?? 0;
+  }
+  async bumpModelProviderConfigGeneration(input: { adminId: string; accountId: string }): Promise<number | undefined> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) return undefined;
+    const next = (this.modelProviderConfigGenerations.get(input.accountId) ?? 0) + 1;
+    this.modelProviderConfigGenerations.set(input.accountId, next);
+    return next;
+  }
+  async upsertModelProviderRouting(input: { adminId: string; accountId: string; expectedVersion: number; mode: ModelProviderRoutingMode; preferredRole?: 'primary' | 'backup'; configGeneration: number }): Promise<ModelProviderRoutingRecord | undefined> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) return undefined;
+    const current = this.modelProviderRouting.get(input.accountId);
+    const currentVersion = current?.routingVersion ?? 0;
+    if (currentVersion !== input.expectedVersion) throw new Error('MODEL_PROVIDER_ROUTING_VERSION_CONFLICT');
+    const now = new Date().toISOString();
+    const row: ModelProviderRoutingRecord = {
+      accountId: input.accountId,
+      mode: input.mode,
+      preferredRole: input.mode === 'auto' ? undefined : input.preferredRole,
+      routingVersion: currentVersion + 1,
+      configGeneration: input.configGeneration,
+      updatedByAdminId: input.adminId,
+      createdAt: current?.createdAt ?? now,
+      updatedAt: now,
+    };
+    this.modelProviderRouting.set(input.accountId, row);
+    return { ...row };
   }
   async getAutoReplyAgentConfig(adminId: string, accountId: string): Promise<AutoReplyAgentConfigRecord | undefined> {
     if (!(await this.hasAccountScope(adminId, accountId))) return undefined;

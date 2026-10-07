@@ -1159,6 +1159,19 @@ export interface CredentialRecord {
 
 export type CredentialRefStatus = 'active' | 'disabled' | 'rotating' | 'revoked';
 
+export type ModelProviderRoutingMode = 'auto' | 'manual_primary' | 'manual_backup';
+
+export interface ModelProviderRoutingRecord {
+  accountId: string;
+  mode: ModelProviderRoutingMode;
+  preferredRole?: 'primary' | 'backup';
+  routingVersion: number;
+  configGeneration: number;
+  updatedByAdminId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** Redacted credential reference returned to Settings and other admin surfaces. */
 export interface CredentialRefRecord {
   id: string;
@@ -1388,6 +1401,10 @@ export interface Store {
   updateCredentialRef(input: { adminId: string; credentialId: string; expectedVersion: number; provider?: string; alias?: string; label?: string; metadata?: Record<string, string> }): Promise<CredentialRefRecord | undefined>;
   rotateCredentialRef(input: { adminId: string; credentialId: string; expectedVersion: number; secretCiphertext: string; fingerprint: string }): Promise<CredentialRefRecord | undefined>;
   updateCredentialRefStatus(input: { adminId: string; credentialId: string; expectedVersion: number; status: CredentialRefStatus }): Promise<CredentialRefRecord | undefined>;
+  getModelProviderConfigGeneration(adminId: string, accountId: string): Promise<number | undefined>;
+  bumpModelProviderConfigGeneration(input: { adminId: string; accountId: string }): Promise<number | undefined>;
+  getModelProviderRouting(adminId: string, accountId: string): Promise<ModelProviderRoutingRecord | undefined>;
+  upsertModelProviderRouting(input: { adminId: string; accountId: string; expectedVersion: number; mode: ModelProviderRoutingMode; preferredRole?: 'primary' | 'backup'; configGeneration: number }): Promise<ModelProviderRoutingRecord | undefined>;
   getAutoReplyAgentConfig(adminId: string, accountId: string): Promise<AutoReplyAgentConfigRecord | undefined>;
   upsertAutoReplyAgentConfig(input: { adminId: string; accountId: string; expectedVersion: number; patch: AutoReplyAgentConfigPatch; config: AutoReplyAgentConfig; configDigest: string }): Promise<AutoReplyAgentConfigRecord | undefined>;
   getActiveAutoReplyRepairPolicy(accountId: string, now?: string): Promise<AutoReplyRepairPolicyBundle | undefined>;

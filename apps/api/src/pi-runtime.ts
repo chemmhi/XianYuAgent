@@ -95,6 +95,13 @@ export interface ModelClient {
   supportsWebSearch?: boolean;
   complete(input: ModelCompletionRequest): Promise<ModelCompletionResult>;
   stream?(input: ModelCompletionRequest, handlers: ModelStreamHandlers): Promise<ModelCompletionResult>;
+  safeProbe?(): Promise<ModelProbeResult>;
+}
+
+export interface ModelProbeResult {
+  ok: boolean;
+  code?: 'PROBE_UNSUPPORTED' | 'PROBE_TIMEOUT' | 'PROBE_FAILED' | 'PROBE_MODEL_MISSING' | 'PROBE_AUTH_FAILED';
+  latencyMs?: number;
 }
 
 export interface PiRuntimeConfig {
@@ -114,6 +121,10 @@ export interface OpenAICompatibleModelClientOptions {
   wireApi?: ModelWireApi;
   reasoningEffort?: string;
   fetchImpl?: typeof fetch;
+  probeStrategy?: 'models' | 'completion' | 'health_url' | 'none';
+  probeUrl?: string;
+  probeModel?: string;
+  probeTimeoutMs?: number;
 }
 
 export type PiModelErrorCode =
@@ -124,17 +135,21 @@ export type PiModelErrorCode =
   | 'MODEL_NETWORK_ERROR'
   | 'MODEL_INVALID_RESPONSE'
   | 'MODEL_TOOL_LOOP_EXCEEDED'
-  | 'MODEL_UNSUPPORTED_TOOL';
+  | 'MODEL_UNSUPPORTED_TOOL'
+  | 'MODEL_PROVIDER_UNAVAILABLE'
+  | 'MODEL_ROUTING_STATE_UNAVAILABLE';
 
 export class PiModelClientError extends Error {
   readonly code: PiModelErrorCode;
   readonly status?: number;
+  readonly retryAfterMs?: number;
 
-  constructor(code: PiModelErrorCode, message: string, status?: number) {
+  constructor(code: PiModelErrorCode, message: string, status?: number, retryAfterMs?: number) {
     super(message);
     this.name = 'PiModelClientError';
     this.code = code;
     this.status = status;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -143,6 +158,10 @@ export class OpenAICompatibleModelClient implements ModelClient {
   private readonly timeoutMs: number;
   private readonly wireApi: ModelWireApi;
   private readonly fetchImpl: typeof fetch;
+  private readonly probeStrategy: NonNullable<OpenAICompatibleModelClientOptions['probeStrategy']>;
+  private readonly probeUrl?: string;
+  private readonly probeModel?: string;
+  private readonly probeTimeoutMs: number;
   readonly supportsWebSearch: boolean;
 
   constructor(private readonly options: OpenAICompatibleModelClientOptions) {
@@ -153,6 +172,81 @@ export class OpenAICompatibleModelClient implements ModelClient {
     this.endpoint = this.wireApi === 'responses' ? toResponsesEndpoint(options.baseUrl) : toChatCompletionsEndpoint(options.baseUrl);
     this.timeoutMs = positiveInteger(options.timeoutMs, DEFAULT_PI_TIMEOUT_MS);
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.probeStrategy = options.probeStrategy ?? 'models';
+    this.probeUrl = options.probeUrl?.trim() || undefined;
+    this.probeModel = options.probeModel?.trim() || options.model.trim();
+    this.probeTimeoutMs = positiveInteger(options.probeTimeoutMs, Math.min(this.timeoutMs, 10_000));
+  }
+
+  async safeProbe(): Promise<ModelProbeResult> {
+    const started = Date.now();
+    if (this.probeStrategy === 'none') return { ok: false, code: 'PROBE_UNSUPPORTED', latencyMs: 0 };
+    if (this.probeStrategy === 'health_url') {
+      if (!this.probeUrl) return { ok: false, code: 'PROBE_UNSUPPORTED', latencyMs: Date.now() - started };
+      return this.probeHealthUrl(started);
+    }
+    if (this.probeStrategy === 'completion') return this.probeCompletion(started);
+    return this.probeModels(started);
+  }
+
+  private async probeModels(started: number): Promise<ModelProbeResult> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort('timeout'), this.probeTimeoutMs);
+    try {
+      const url = toModelsEndpoint(this.options.baseUrl);
+      const response = await this.fetchImpl(url, { method: 'GET', headers: { accept: 'application/json', authorization: `Bearer ${this.options.apiKey}` }, signal: controller.signal });
+      if (response.status === 404 || response.status === 405) return { ok: false, code: 'PROBE_UNSUPPORTED', latencyMs: Date.now() - started };
+      if (!response.ok) {
+        const code = response.status === 401 || response.status === 403
+          ? 'PROBE_AUTH_FAILED'
+          : response.status === 404 || response.status === 405
+            ? 'PROBE_UNSUPPORTED'
+            : 'PROBE_FAILED';
+        return { ok: false, code, latencyMs: Date.now() - started };
+      }
+      const payload = await response.json() as { data?: Array<{ id?: unknown }> };
+      const models = Array.isArray(payload?.data) ? payload.data : [];
+      const found = models.some((item) => String(item?.id ?? '').trim() === this.probeModel);
+      return { ok: found, code: found ? undefined : 'PROBE_MODEL_MISSING', latencyMs: Date.now() - started };
+    } catch (error) {
+      if (controller.signal.aborted) return { ok: false, code: 'PROBE_TIMEOUT', latencyMs: Date.now() - started };
+      return { ok: false, code: 'PROBE_FAILED', latencyMs: Date.now() - started };
+    } finally { clearTimeout(timeout); }
+  }
+
+  private async probeCompletion(started: number): Promise<ModelProbeResult> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort('timeout'), this.probeTimeoutMs);
+    try {
+      const result = await this.complete({ messages: [{ role: 'user', content: 'health probe: reply with OK' }], signal: controller.signal });
+      return { ok: Boolean(result.content || result.toolCalls?.length), latencyMs: Date.now() - started };
+    } catch (error) {
+      const code = controller.signal.aborted || (error instanceof PiModelClientError && error.code === 'MODEL_TIMEOUT')
+        ? 'PROBE_TIMEOUT'
+        : error instanceof PiModelClientError && error.code === 'MODEL_HTTP_ERROR' && (error.status === 401 || error.status === 403)
+          ? 'PROBE_AUTH_FAILED'
+          : 'PROBE_FAILED';
+      return { ok: false, code, latencyMs: Date.now() - started };
+    } finally { clearTimeout(timeout); }
+  }
+
+  private async probeHealthUrl(started: number): Promise<ModelProbeResult> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort('timeout'), this.probeTimeoutMs);
+    try {
+      const url = new URL(this.probeUrl!);
+      const base = new URL(this.options.baseUrl);
+      if (url.host !== base.host) return { ok: false, code: 'PROBE_UNSUPPORTED', latencyMs: Date.now() - started };
+      const response = await this.fetchImpl(url, { method: 'GET', headers: { accept: 'application/json', authorization: `Bearer ${this.options.apiKey}` }, signal: controller.signal });
+      const code = response.ok
+        ? undefined
+        : response.status === 401 || response.status === 403
+          ? 'PROBE_AUTH_FAILED'
+          : 'PROBE_FAILED';
+      return { ok: response.ok, code, latencyMs: Date.now() - started };
+    } catch (error) {
+      return { ok: false, code: controller.signal.aborted ? 'PROBE_TIMEOUT' : 'PROBE_FAILED', latencyMs: Date.now() - started };
+    } finally { clearTimeout(timeout); }
   }
 
   async complete(input: ModelCompletionRequest): Promise<ModelCompletionResult> {
@@ -178,7 +272,7 @@ export class OpenAICompatibleModelClient implements ModelClient {
       });
 
       if (!response.ok) {
-        throw new PiModelClientError('MODEL_HTTP_ERROR', `model provider returned HTTP ${response.status}`, response.status);
+        throw new PiModelClientError('MODEL_HTTP_ERROR', `model provider returned HTTP ${response.status}`, response.status, retryAfterMs(response));
       }
 
       let payload: unknown;
@@ -232,7 +326,7 @@ export class OpenAICompatibleModelClient implements ModelClient {
           : { ...toChatCompletionsRequestBody(this.options.model, input, input.reasoningEffort ?? this.options.reasoningEffort), stream: true }),
         signal: controller.signal,
       });
-      if (!response.ok) throw new PiModelClientError('MODEL_HTTP_ERROR', `model provider returned HTTP ${response.status}`, response.status);
+      if (!response.ok) throw new PiModelClientError('MODEL_HTTP_ERROR', `model provider returned HTTP ${response.status}`, response.status, retryAfterMs(response));
 
       const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
       if (!contentType.includes('text/event-stream') || !response.body) {
@@ -963,11 +1057,29 @@ export function toResponsesEndpoint(baseUrl: string): string {
   return normalized.endsWith('/v1') ? `${normalized}/responses` : `${normalized}/v1/responses`;
 }
 
+export function toModelsEndpoint(baseUrl: string): string {
+  const normalized = baseUrl.trim().replace(/\/+$/, '');
+  if (!normalized) throw new Error('PI_RUNTIME_BASE_URL_REQUIRED');
+  if (normalized.endsWith('/models')) return normalized;
+  if (normalized.endsWith('/responses') || normalized.endsWith('/chat/completions')) return `${normalized.replace(/\/(responses|chat\/completions)$/u, '')}/models`;
+  return normalized.endsWith('/v1') ? `${normalized}/models` : `${normalized}/v1/models`;
+}
+
 function normalizeWireApi(value: string | undefined): ModelWireApi {
   const normalized = value?.trim().toLowerCase();
   if (normalized === 'chat') return 'chat';
   if (normalized === 'responses') return 'responses';
   return DEFAULT_PI_WIRE_API;
+}
+
+function retryAfterMs(response: Response): number | undefined {
+  const raw = response.headers.get('retry-after')?.trim();
+  if (!raw) return undefined;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds)) return Math.min(3_600_000, Math.max(1_000, Math.trunc(seconds * 1000)));
+  const date = Date.parse(raw);
+  if (!Number.isFinite(date)) return undefined;
+  return Math.min(3_600_000, Math.max(1_000, date - Date.now()));
 }
 
 function loadBackupPiRuntimeConfig(env: NodeJS.ProcessEnv): PiRuntimeConfig | undefined {

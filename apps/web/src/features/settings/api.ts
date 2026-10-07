@@ -1,4 +1,4 @@
-import type { AutoReplyAgentConfigVM, CredentialListVM, CredentialRefVM, CredentialStatus, OpenAIConfigListVM, OpenAIConfigVM } from './types';
+import type { AutoReplyAgentConfigVM, CredentialListVM, CredentialRefVM, CredentialStatus, OpenAIConfigListVM, OpenAIConfigVM, OpenAIRuntimeVM, OpenAIRoutingMode } from './types';
 
 interface Transport {
   get<T>(path: string): Promise<T>;
@@ -36,9 +36,10 @@ export interface AutoReplyAgentSettingsApi {
 
 export interface OpenAISettingsApi {
   list(accountId: string): Promise<OpenAIConfigListVM>;
-  save(input: { accountId: string; configId?: string; role: 'primary' | 'backup'; provider: string; alias: string; label?: string; baseUrl: string; model: string; reasoningEffort?: string; wireApi: 'responses' | 'chat'; timeoutMs: number; apiKey?: string; expectedVersion?: number }): Promise<OpenAIConfigVM>;
-  test(input: { accountId: string; configId?: string; role: 'primary' | 'backup'; provider: string; alias: string; baseUrl: string; model: string; reasoningEffort?: string; wireApi: 'responses' | 'chat'; timeoutMs: number; apiKey?: string }): Promise<{ ok: true; provider: string; model: string; latencyMs: number; models: string[] }>;
+  save(input: { accountId: string; configId?: string; role: 'primary' | 'backup'; provider: string; alias: string; label?: string; baseUrl: string; model: string; reasoningEffort?: string; wireApi: 'responses' | 'chat'; timeoutMs: number; probeStrategy?: 'models' | 'completion' | 'health_url' | 'none'; probeUrl?: string; probeModel?: string; probeTimeoutMs?: number; apiKey?: string; expectedVersion?: number }): Promise<OpenAIConfigVM>;
+  test(input: { accountId: string; configId?: string; role: 'primary' | 'backup'; provider: string; alias: string; baseUrl: string; model: string; reasoningEffort?: string; wireApi: 'responses' | 'chat'; timeoutMs: number; probeStrategy?: 'models' | 'completion' | 'health_url' | 'none'; probeUrl?: string; probeModel?: string; probeTimeoutMs?: number; apiKey?: string }): Promise<{ ok: true; provider: string; model: string; latencyMs: number; models: string[] }>;
   listModels(input: { accountId: string; configId?: string }): Promise<string[]>;
+  updateRouting(input: { accountId: string; mode: OpenAIRoutingMode; preferredRole?: 'primary' | 'backup'; forceProbe?: boolean; expectedVersion: number }): Promise<OpenAIRuntimeVM>;
 }
 
 export function createCredentialApi(transport: Transport): CredentialApi {
@@ -101,6 +102,10 @@ export function createOpenAISettingsApi(transport: Transport): OpenAISettingsApi
       const result = unwrap(await transport.get<{ models: string[] } | ApiEnvelope<{ models: string[] }>>(`/api/v1/settings/openai/models?${params.toString()}`));
       return result.models;
     },
+    async updateRouting(input) {
+      const post = requirePost(transport);
+      return unwrap(await post<OpenAIRuntimeVM | ApiEnvelope<OpenAIRuntimeVM>>('/api/v1/settings/openai/routing', input, { headers: { 'Idempotency-Key': idempotency('openai-routing') } }));
+    },
   };
 }
 
@@ -153,8 +158,11 @@ export function createMockOpenAISettingsApi(): OpenAISettingsApi {
   // Test-only fallback: production Model options always come from the provider /models endpoint.
   // Keep the fixture provider-neutral so it cannot be mistaken for a production model allowlist.
   const models = ['mock-provider-model-a', 'mock-provider-model-b'];
+  let routingVersion = 0;
   return {
-    async list(accountId) { return { accountId, items: [...rows.values()].filter((item) => item.accountId === accountId) }; },
+    async list(accountId) {
+      const items = [...rows.values()].filter((item) => item.accountId === accountId);
+      return { accountId, items, runtime: { mode: 'auto', preferred_provider: null, effective_provider: items.find((item) => item.role === 'primary') ? { role: 'primary', id: items.find((item) => item.role === 'primary')?.id, provider: items.find((item) => item.role === 'primary')?.provider ?? '', model: items.find((item) => item.role === 'primary')?.model ?? '' } : null, last_successful_provider: null, observed_at: now(), provider_states: {}, config_generation: 0, routing_version: routingVersion, server_time: now() } }; },
     async save(input) {
       const current = input.configId ? rows.get(input.configId) : undefined;
       if (current && current.version !== input.expectedVersion) throw new Error('版本冲突');
@@ -166,6 +174,7 @@ export function createMockOpenAISettingsApi(): OpenAISettingsApi {
     },
     async test(input) { return { ok: true, provider: input.provider, model: input.model, latencyMs: 12, models }; },
     async listModels() { return models; },
+    async updateRouting(input) { if (input.expectedVersion !== routingVersion) throw new Error('版本冲突'); routingVersion += 1; return { mode: input.mode, preferred_provider: null, effective_provider: null, last_successful_provider: null, observed_at: now(), provider_states: {}, config_generation: 0, routing_version: routingVersion, server_time: now() }; },
   };
 }
 

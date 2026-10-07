@@ -41,6 +41,7 @@
 - `042_remove_automation_ledger_sent_quantity.sql`：清理历史自动化执行账本结果中的 `sentQuantity` 字段；数量只属于内部卡券 reservation，不再作为账本结果对外暴露。
 - `046_workspace_platform_takeover_actions.sql`：扩展 Workspace Confirmation action 白名单，覆盖商品编辑/知识库/自动化、卡券管理和模型配置。
 - `047_order_delivery_records.sql`：建立订单交付记录、幂等键、attempt、外部结果与失败恢复字段；复用现有 execution outbox，不删除已成功订单交付历史。
+- `050_model_provider_routing.sql`：建立账号级 Model Provider 路由偏好、routing version、单调 config generation 序列及 Redis mirror 所需的持久化边界；不修改 Provider 凭证和密钥，回滚时保留历史路由记录并关闭手动切换写入。
 
 迁移执行顺序以完整文件名的字典序为准，数字前缀在历史目录中允许重复（例如 `031_auto_reply_*` 与 `031_product_automation.sql`）；新增迁移应优先使用唯一前缀，并确保 SQL 幂等且依赖在完整文件名顺序下成立。
 

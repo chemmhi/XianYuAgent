@@ -1,8 +1,20 @@
 # XianyuSellerAgent 阶段评审记录
 
-- 文档版本：v0.6
-- 更新日期：2026-09-19
+## 2026-10-07 Model Provider 主备切换 v2
+
+| 评审编号 | 类型 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- |
+| MPF-V2-DESIGN-R1 | 设计 / 路由 / 运维 | 独立设计审核 Agent | APPROVED | `docs/model-provider-failover-v2.md`；三轮审核闭环 |
+| MPF-V2-CODE-R1 | 实现 / 方案符合性 | 独立代码审核 Agent | REJECT（已修复后重审） | P0/P1：快照 CAS、角色映射、generation、Redis routing、探针异常/超时、回滚开关 |
+| MPF-V2-CODE-R2 | 实现 / 方案符合性 | 独立代码审核 Agent | PASS | API 定向 33/33；Web OpenAI settings 5/5；API tsc；failover smoke；真实 Redis 快照/重启 hydration/跨池 probe 单飞/lease 过期/无流量恢复/断连恢复；PostgreSQL migration 001–050 与 OpenAI settings smoke |
+
+实现工作树：`F:\ChenHai\Project\XianYuAgent-model-client-circuit-breaker-20261007`。
+
+- 文档版本：v0.7
+- 更新日期：2026-10-07
 - 评审规则：问题先修复，再复验，再由独立评审关闭；未关闭的 P0-P2 不得进入下一阶段。
+
+复审修复项：Store/PostgreSQL 始终是 routing authoritative source，Redis 仅作镜像；单次 OpenAI Provider 保存同时更新元数据与轮换密钥时只推进一次 `config_generation`。P2 观察项：`onStateChange` 审计回调当前可能对两个 Provider 产生重复 circuit 事件；不影响路由正确性。
 
 ### 2026-09-28：商品目录知识库闭环
 
