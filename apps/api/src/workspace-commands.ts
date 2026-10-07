@@ -123,7 +123,14 @@ export class WorkspaceCommandOrchestrator {
       const query = typeof args.query === 'string' ? args.query.trim() : '';
       if (!query) throw new ServiceError(422, 'VALIDATION_FAILED', 'workspace product search query is required');
       const result = await this.searchProducts(input, query);
-      return { kind: 'read', title: '商品搜索', summary: `已按名称/外部编号筛选 ${result.total} 个商品`, content: productSearchContent(result.items, result.total), data: { total: result.total, items: result.items.map(safeProduct) } };
+      const items = result.items.map(safeProduct);
+      return {
+        kind: 'read',
+        title: '商品搜索',
+        summary: `已按名称/外部编号筛选 ${result.total} 个商品`,
+        content: productSearchContent(result.items, result.total),
+        data: { total: result.total, ...(result.items.length === 1 ? { productId: result.items[0]!.id } : {}), items },
+      };
     }
     if (!instruction && !operation) throw new ServiceError(422, 'VALIDATION_FAILED', 'workspace tool requires operation+parameters or instruction');
     if (name === 'workspace_read') {
@@ -775,7 +782,11 @@ function describeAutomationRule(key: string, value: Record<string, unknown>): st
   return parts.join('，') || '未配置';
 }
 function safeFieldNames(fields: Record<string, string>): string[] { return Object.keys(fields).filter((key) => key !== 'content' && key !== 'knowledgeBase' && key !== 'apiKey'); }
-function productSearchContent(items: ProductRecord[], total: number): string { return items.length ? [`匹配到 ${total} 个商品：`, ...items.map((item, index) => `${index + 1}. ${item.title} · ${item.externalProductRef ?? item.id} · ${item.status}`)].join('\n') : '未匹配到商品。'; }
+function productSearchContent(items: ProductRecord[], total: number): string {
+  return items.length
+    ? ['匹配到 ' + total + ' 个商品：', ...items.map((item, index) => `${index + 1}. productId=${item.id} · title=${item.title} · externalProductRef=${item.externalProductRef ?? '未设置'} · status=${item.status}`)].join('\n')
+    : '未匹配到商品。';
+}
 function validateAutomationConfig(config: Record<string, unknown>): void {
   const keys = ['paidAutoDelivery', 'unpaidAutoReprice', 'reviewGift', 'reviewReminder'];
   if (!keys.some((key) => Object.prototype.hasOwnProperty.call(config, key))) throw new ServiceError(422, 'VALIDATION_FAILED', 'product_automation_update config must use canonical rule keys: paidAutoDelivery, unpaidAutoReprice, reviewGift, or reviewReminder');

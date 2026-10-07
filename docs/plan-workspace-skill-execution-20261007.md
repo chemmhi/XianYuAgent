@@ -59,3 +59,10 @@
 - 代码通过单一中文 Conventional Commit 提交，可独立回退。
 - 无数据库迁移；若发现兼容性问题，回退应用提交即可。
 - 不重放历史失败 Run 的外部写操作。
+
+## 第二轮根因修复与复审（2026-10-07）
+- 第一轮真实 Run 仍在上下文压缩后丢失 `workspace_product_search` 返回的内部商品 ID，模型第三次重复搜索并触发 `MODEL_TOOL_LOOP_EXCEEDED`；独立 reviewer 第一轮结论为 NOT PASS。
+- 修复 `workspace_product_search` 输出：正文显式保留 `productId`，结构化数据补充单结果顶层 `productId`，并保留 `data.items[].id`。
+- 修复 Workspace checkpoint/compaction：从早期商品搜索结果提取 `productId/title/externalProductRef` 稳定事实，压缩前注入模型摘要并在重连历史中优先复用。
+- 新增运行时回归：大结果触发 `context.compacted` 后直接进入 `workspace_prepare_write`，商品搜索仅执行一次、准备写入执行一次、Run 进入 `waiting_confirmation`，无 `MODEL_TOOL_LOOP_EXCEEDED`。
+- 独立 reviewer 第二轮结论：PASS；API 定向测试 73/73、API TypeScript `--noEmit`、`git diff --check` 均通过。

@@ -507,6 +507,81 @@ test('Pi runtime reuses a repeated product search and stops a no-progress tool l
   } finally { runtime.stop(); }
 });
 
+test('Pi runtime keeps the product id through compaction and advances to the write plan', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'product-search-compaction@example.com', passwordHash: 'hash', displayName: 'Product Search Compaction' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'product-search-compaction' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Product search compaction' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '查找商品后准备卡券关联' });
+  let round = 0;
+  let searches = 0;
+  let prepareWrites = 0;
+  let secondRequest = '';
+  const model: ModelClient = {
+    async complete(input) {
+      if (String(input.messages[0]?.content ?? '').includes('制定最短的工具执行顺序')) return { content: '{"steps":[]}', model: 'test' };
+      return { content: '已定位商品，准备关联卡券。', model: 'test' };
+    },
+    async stream(input) {
+      round += 1;
+      if (round === 2) secondRequest = JSON.stringify(input.messages);
+      if (round === 1) return { content: '', model: 'test', toolCalls: [{ id: 'search-1', type: 'function', function: { name: 'workspace_product_search', arguments: '{"query":"AI 技术咨询"}' } }] };
+      return { content: '', model: 'test', toolCalls: [{ id: 'prepare-1', type: 'function', function: { name: 'workspace_prepare_write', arguments: JSON.stringify({ operation: 'coupon_bind', parameters: { batchId: '18', productId: 'product-early' } }) } }] };
+    },
+  };
+  const commandTool = {
+    getModelTools: () => [
+      { type: 'function', function: { name: 'workspace_product_search', description: 'search', parameters: { type: 'object' } } },
+      { type: 'function', function: { name: 'workspace_prepare_write', description: 'prepare', parameters: { type: 'object' } } },
+    ],
+    executeModelTool: async (name: string) => {
+      if (name === 'workspace_product_search') {
+        searches += 1;
+        return {
+          kind: 'read' as const,
+          title: '商品搜索',
+          summary: '已按名称/外部编号筛选 1 个商品',
+          content: `匹配到 1 个商品：productId=product-early · title=AI 技术咨询，需求定制开发服务 · externalProductRef=1082410574993${'x'.repeat(30_000)}`,
+          data: { total: 1, items: [{ id: 'product-early', title: 'AI 技术咨询，需求定制开发服务', externalProductRef: '1082410574993', description: 'x'.repeat(30_000) }] },
+        };
+      }
+      prepareWrites += 1;
+      return {
+        kind: 'write_plan' as const,
+        title: '卡券商品关联确认',
+        summary: '等待确认',
+        content: '等待确认',
+        plan: {
+          kind: 'coupon_bind',
+          action: 'coupon_bind',
+          title: '卡券商品关联确认',
+          summary: '等待确认',
+          content: '等待确认',
+          policyRef: 'workspace.coupon_bind.confirm',
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          manifest: { action: 'coupon_bind', accountId: account.id, batchId: '18', productId: 'product-early' },
+        },
+      };
+    },
+  } as unknown as WorkspaceCommandOrchestrator;
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, model: 'test' });
+  try {
+    runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+    const terminal = new Set(['waiting_confirmation', 'succeeded', 'failed', 'cancelled', 'expired']);
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline && !terminal.has((await store.getRun(admin.id, created.run.id))?.run.status ?? '')) await new Promise((resolve) => setTimeout(resolve, 10));
+    const bundle = await store.getRun(admin.id, created.run.id);
+    const events = await store.listRunEvents(admin.id, created.run.id, 0);
+    assert.equal(bundle?.run.status, 'waiting_confirmation');
+    assert.equal(bundle?.run.errorCode, undefined);
+    assert.equal(searches, 1);
+    assert.equal(prepareWrites, 1);
+    assert.match(secondRequest, /productId=product-early/);
+    assert.ok(events.some((event) => event.eventType === 'context.compacted'));
+    assert.ok(!events.some((event) => event.payload.errorCode === 'MODEL_TOOL_LOOP_EXCEEDED'));
+  } finally { runtime.stop(); }
+});
+
 test('Pi runtime stops varying Skill queries on semantic no-progress and preserves the budget on reconnect', async () => {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: 'skill-semantic-loop@example.com', passwordHash: 'hash', displayName: 'Skill Semantic Loop' });
