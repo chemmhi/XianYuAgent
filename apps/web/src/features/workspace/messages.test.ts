@@ -102,8 +102,8 @@ describe('workspace message projection', () => {
       { sequence: 3, runId: 'run-1', eventType: 'reasoning.delta', payload: { streamId: 's-1', messageId: 's-1:reasoning', contentDelta: '商品。' }, createdAt: '2026-09-20T00:00:01.100Z' },
       { sequence: 4, runId: 'run-1', eventType: 'tool.call.started', payload: { toolCallId: 'call-1', toolName: 'workspace_read', arguments: '{"instruction":"查看商品"}' }, createdAt: '2026-09-20T00:00:01.200Z' },
       { sequence: 5, runId: 'run-1', eventType: 'tool.result', payload: { toolCallId: 'call-1', toolName: 'workspace_read', result: { content: '商品 1 个' } }, createdAt: '2026-09-20T00:00:02.000Z' },
-      { sequence: 6, runId: 'run-1', eventType: 'assistant.delta', payload: { streamId: 's-2', messageId: 's-2:assistant', contentDelta: '已找到' }, createdAt: '2026-09-20T00:00:02.100Z' },
-      { sequence: 7, runId: 'run-1', eventType: 'assistant.delta', payload: { streamId: 's-2', messageId: 's-2:assistant', contentDelta: ' 1 个商品。' }, createdAt: '2026-09-20T00:00:02.200Z' },
+      { sequence: 6, runId: 'run-1', eventType: 'assistant.delta', payload: { streamId: 's-2', messageId: 's-2:assistant', phase: 'terminal', contentDelta: '已找到' }, createdAt: '2026-09-20T00:00:02.100Z' },
+      { sequence: 7, runId: 'run-1', eventType: 'assistant.delta', payload: { streamId: 's-2', messageId: 's-2:assistant', phase: 'terminal', contentDelta: ' 1 个商品。' }, createdAt: '2026-09-20T00:00:02.200Z' },
       { sequence: 8, runId: 'run-1', eventType: 'run.succeeded', payload: { status: 'succeeded', messageType: 'final_answer', content: '已找到 1 个商品。' }, createdAt: '2026-09-20T00:00:02.300Z' },
     ]);
     expect(messages.some((message) => message.content.includes('先读取商品。'))).toBe(false);
@@ -142,7 +142,18 @@ describe('workspace message projection', () => {
       { sequence: 3, runId: 'run-1', eventType: 'assistant.delta', payload: { streamId: 'round-1', messageId: 'round-1:assistant', messageType: 'final_answer', contentDelta: '正在检查当前状态…' }, createdAt: '2026-09-20T00:00:01.000Z' },
     ]);
 
-    expect(messages.find((message) => message.type === 'final_answer')?.content).toBe('正在检查当前状态…');
+    expect(messages.find((message) => message.content === '正在检查当前状态…')?.type).toBe('reasoning_summary');
+    expect(messages.some((message) => message.type === 'final_answer' && message.content.includes('正在检查当前状态…'))).toBe(false);
+  });
+
+  it('keeps a metadata-free first assistant delta in the process trace', () => {
+    const messages = buildWorkspaceMessages({ ...run, status: 'running' }, [
+      { sequence: 2, runId: 'run-1', eventType: 'workspace.execution.summary', payload: { streamId: 'round-1', summary: '分析任务', content: '正在核对任务目标与已有结果。' }, createdAt: '2026-10-07T01:00:00.900Z' },
+      { sequence: 3, runId: 'run-1', eventType: 'assistant.delta', payload: { streamId: 'round-1', messageId: 'round-1:assistant', contentDelta: '匹配。接着读取已授权技能的命令' }, createdAt: '2026-10-07T01:00:01.000Z' },
+    ]);
+
+    expect(messages.find((message) => message.content.includes('匹配。接着读取'))?.type).toBe('reasoning_summary');
+    expect(messages.some((message) => message.type === 'final_answer')).toBe(false);
   });
 
   it('prefers the persisted failure answer over provisional assistant streaming text', () => {
