@@ -507,6 +507,53 @@ test('Pi runtime reuses a repeated product search and stops a no-progress tool l
   } finally { runtime.stop(); }
 });
 
+test('Pi runtime preserves the product search cache across Skill writes', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'product-search-skill-write@example.com', passwordHash: 'hash', displayName: 'Product Search Skill Write' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'product-search-skill-write' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Product search Skill write' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '查找商品并创建分享' });
+  let round = 0;
+  let searches = 0;
+  let skillWrites = 0;
+  const model: ModelClient = {
+    async stream() {
+      round += 1;
+      const call = round === 1
+        ? { id: 'product-1', type: 'function' as const, function: { name: 'workspace_product_search', arguments: '{"query":"AI 技术咨询"}' } }
+        : round === 2
+          ? { id: 'share-1', type: 'function' as const, function: { name: 'pi_skill_exec', arguments: '{"command":"share","args":["fid-1"]}' } }
+          : round === 3
+            ? { id: 'product-2', type: 'function' as const, function: { name: 'workspace_product_search', arguments: '{"query":"AI 技术咨询"}' } }
+            : undefined;
+      return call ? { content: '', model: 'test', toolCalls: [call] } : { content: '已完成', model: 'test' };
+    },
+    async complete() { return { content: '{"steps":[]}', model: 'test' }; },
+  };
+  const skillManager = {
+    handleInstruction: async () => undefined,
+    buildSystemPrompt: async () => '',
+    getModelTools: () => [{ type: 'function', function: { name: 'pi_skill_exec', description: 'exec', parameters: { type: 'object' } } }],
+    executeModelTool: async () => { skillWrites += 1; return { kind: 'read' as const, title: '分享', summary: '执行成功', content: 'share complete', data: { status: 'succeeded', code: 0 } }; },
+  };
+  const commandTool = {
+    getModelTools: () => [{ type: 'function', function: { name: 'workspace_product_search', description: 'search', parameters: { type: 'object' } } }],
+    executeModelTool: async () => { searches += 1; return { kind: 'read' as const, title: '商品搜索', summary: '找到 1 个商品', content: 'productId=product-1', data: { total: 1, items: [{ id: 'product-1', title: 'AI 技术咨询' }] } }; },
+  } as unknown as WorkspaceCommandOrchestrator;
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, skillManager: skillManager as never, model: 'test' });
+  try {
+    runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && !['succeeded', 'failed'].includes((await store.getRun(admin.id, created.run.id))?.run.status ?? '')) await new Promise((resolve) => setTimeout(resolve, 10));
+    const bundle = await store.getRun(admin.id, created.run.id);
+    const events = await store.listRunEvents(admin.id, created.run.id, 0);
+    assert.equal(bundle?.run.status, 'succeeded');
+    assert.equal(searches, 1);
+    assert.equal(skillWrites, 1);
+    assert.ok(events.some((event) => event.eventType === 'tool.result' && event.payload.toolName === 'workspace_product_search' && event.payload.reused === true));
+  } finally { runtime.stop(); }
+});
+
 test('Pi runtime keeps the product id through compaction and advances to the write plan', async () => {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: 'product-search-compaction@example.com', passwordHash: 'hash', displayName: 'Product Search Compaction' });

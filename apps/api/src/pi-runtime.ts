@@ -336,7 +336,7 @@ export interface PiRuntimeAttachment {
 
 const WORKSPACE_AGENT_SYSTEM_PROMPT = [
   '你是 Workspace Agent。请根据工具契约自主选择工具，并始终以工具返回的真实结果为依据。',
-  '需要查询具体商品名称或外部编号时，优先使用 workspace_product_search，不要先加载完整商品列表。',
+  '需要查询具体商品名称或外部编号时，优先使用 workspace_product_search，不要先加载完整商品列表；一旦 workspace_product_search 已返回 productId 或 data.productId，后续写操作必须直接复用该 ID，不要为了再次确认重复搜索，除非上次明确失败或无匹配。',
   '取消、下架、更新、发布、发货或其他写入操作必须使用 workspace_prepare_write，并等待用户确认；不要用 workspace_read 代替写操作。',
   '每次收到工具结果后，必须重新对照原始用户任务逐项检查；一个写操作成功不代表整个任务完成。',
   '只有当原始任务中的所有用户要求都已由真实工具结果确认完成时，才返回最终答复；仍有后续动作时继续规划并调用对应工具。',
@@ -727,7 +727,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           }
           result = normalized.result;
           if (!reused && toolInvalidatesReplayableReads(call.function.name, args, result)) {
-            clearReplayableReads(replayableResults);
+            clearReplayableReads(replayableResults, call.function.name.startsWith('pi_skill_'));
             clearReplayableReadAttempts(repeatedCalls);
           }
           if (replayKey && isReusableToolResult(result) && !reused) replayableResults.set(replayKey, result);
@@ -1513,8 +1513,10 @@ function hasCommandEvidence(result: WorkspaceModelToolResult): boolean {
   return Array.isArray(data?.commandEvidence) && data.commandEvidence.some((item) => isRecord(item) && typeof item.command === 'string' && item.command.trim().length > 0);
 }
 
-function clearReplayableReads(results: Map<string, WorkspaceModelToolResult>): void {
-  for (const key of results.keys()) if (isReadReplayKey(key)) results.delete(key);
+function clearReplayableReads(results: Map<string, WorkspaceModelToolResult>, preserveProductSearch = false): void {
+  for (const key of results.keys()) {
+    if (isReadReplayKey(key) && !(preserveProductSearch && key.startsWith('workspace_product_search:read:'))) results.delete(key);
+  }
 }
 
 function clearReplayableReadAttempts(attempts: Map<string, number>): void {
