@@ -3,7 +3,7 @@ import { useAccountContext } from '../../../app/account-context';
 import { isWorkspaceRunActive, isWorkspaceRunReconnectable, useWorkspaceController } from '../controller';
 import { buildWorkspaceMessages } from '../messages';
 import type { WorkspaceApi } from '../api';
-import type { WorkspaceConfirmationVM, WorkspaceMessageVM, WorkspaceOutboxVM, WorkspaceRunStatus, WorkspaceRunVM, WorkspaceSessionVM } from '../types';
+import type { WorkspaceConfirmationVM, WorkspaceMessageVM, WorkspaceOutboxVM, WorkspaceRunStatus, WorkspaceRunVM, WorkspaceSessionVM, WorkspaceState } from '../types';
 import { appendWorkspaceAttachments, buildWorkspaceAttachmentPayloads, buildWorkspaceInstruction, clipboardImageFiles, formatWorkspaceFileSize, type WorkspaceAttachment } from '../attachments';
 import { SearchField } from '../../../shared/ui/SearchField';
 import { Button } from '../../../shared/ui/Button';
@@ -46,6 +46,10 @@ function statusLabel(status: string): string {
 function statusTone(status: string): string { if (status === 'succeeded') return 'ok'; if (status === 'failed' || status === 'expired') return 'danger'; if (status === 'cancelled' || status === 'skipped') return 'muted'; return 'info'; }
 function formatTime(value?: string): string { if (!value) return '—'; const date = new Date(value); if (Number.isNaN(date.getTime())) return value; return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }); }
 
+export function shouldUseWorkspaceDraftMode(draftMode: boolean, phase: WorkspaceState['phase'], sessionCount: number, search: string): boolean {
+  return draftMode || (phase === 'empty' && sessionCount === 0 && !search.trim());
+}
+
 export function WorkspacePage({ api }: WorkspacePageProps) {
   const { currentAccountId, currentAccount, accountsLoading, accountsError } = useAccountContext();
   const controller = useWorkspaceController({ api, accountId: currentAccountId });
@@ -62,7 +66,10 @@ export function WorkspacePage({ api }: WorkspacePageProps) {
   const pendingAttachmentsRef = useRef<WorkspaceAttachment[]>([]);
   const messageStreamRef = useRef<HTMLDivElement>(null);
   const lastMessageStreamKeyRef = useRef('');
-  useEffect(() => { if (draftMode) instructionRef.current?.focus(); }, [draftMode]);
+  // An empty Workspace is already a valid new-conversation state. Keep the
+  // composer open so the first instruction can create the session inline.
+  const isDraftMode = shouldUseWorkspaceDraftMode(draftMode, state.phase, state.sessions.length, search);
+  useEffect(() => { if (isDraftMode) instructionRef.current?.focus(); }, [isDraftMode]);
   useLayoutEffect(() => { resizeComposerTextarea(instructionRef.current); }, [instruction]);
   useEffect(() => { pendingAttachmentsRef.current = pendingAttachments; }, [pendingAttachments]);
   useEffect(() => () => { pendingAttachmentsRef.current.forEach((attachment) => URL.revokeObjectURL(attachment.url)); }, []);
@@ -81,19 +88,19 @@ export function WorkspacePage({ api }: WorkspacePageProps) {
   }, [state.error, state.phase]);
 
   const visibleSessions = useMemo(() => state.sessions, [state.sessions]);
-  const activeSession = draftMode ? undefined : state.sessions.find((session) => session.id === state.activeSessionId);
+  const activeSession = isDraftMode ? undefined : state.sessions.find((session) => session.id === state.activeSessionId);
   const currentRun = state.run && activeSession && state.run.sessionId === activeSession.id ? state.run : null;
   const activeSessionDisplayTitle = activeSession?.title;
   useEffect(() => {
-    if (draftMode || !activeSession) return;
+    if (isDraftMode || !activeSession) return;
     markSessionViewed(activeSession.id, currentRun?.runId ?? activeSession.runId);
-  }, [activeSession, currentRun?.runId, draftMode, markSessionViewed]);
+  }, [activeSession, currentRun?.runId, isDraftMode, markSessionViewed]);
   useEffect(() => { setExpandedTrace(null); }, [state.activeSessionId, currentRun?.runId]);
   const currentRunMessages = currentRun ? buildWorkspaceMessages(currentRun, state.events) : [];
   const historyMessages = state.messages.filter((message) => !currentRun || message.runId !== currentRun.runId);
-  const messages = draftMode ? [] : currentRun ? [...historyMessages, ...currentRunMessages] : state.messages;
-  const showConfirmation = !draftMode && Boolean(currentRun?.status === 'waiting_confirmation' && state.confirmation);
-  const showOutbox = !draftMode && Boolean(currentRun && state.outbox.length > 0);
+  const messages = isDraftMode ? [] : currentRun ? [...historyMessages, ...currentRunMessages] : state.messages;
+  const showConfirmation = !isDraftMode && Boolean(currentRun?.status === 'waiting_confirmation' && state.confirmation);
+  const showOutbox = !isDraftMode && Boolean(currentRun && state.outbox.length > 0);
   const taskRunning = Boolean(currentRun && isWorkspaceRunActive(currentRun.status));
   const hasStreamContent = messages.length > 0 || showConfirmation || showOutbox;
   const visibleMessageCount = messages.filter((message) => message.type === 'user_message' || message.type === 'final_answer').length;
@@ -126,11 +133,11 @@ export function WorkspacePage({ api }: WorkspacePageProps) {
   async function submitRun(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const text = instruction.trim();
-    if ((!text && pendingAttachments.length === 0) || state.submitting || taskRunning || !currentAccountId || (!draftMode && activeSession?.status !== 'active')) return;
+    if ((!text && pendingAttachments.length === 0) || state.submitting || taskRunning || !currentAccountId || (!isDraftMode && activeSession?.status !== 'active')) return;
     const composedInstruction = await buildWorkspaceInstruction(text, pendingAttachments);
     const attachmentPayloads = await buildWorkspaceAttachmentPayloads(pendingAttachments);
     let sessionId = activeSession?.id;
-    if (draftMode || !sessionId) {
+    if (isDraftMode || !sessionId) {
       const created = await controller.createSession('新会话', composedInstruction);
       if (!created) return;
       sessionId = created.id;
@@ -161,9 +168,9 @@ export function WorkspacePage({ api }: WorkspacePageProps) {
           <div className="workspace-page-body">
             <div className="workspace-layout">
               <aside className="workspace-sidebar">
-                <section className="card workspace-sessions-panel"><div className="workspace-panel-head"><div><h2>会话</h2><p>{state.sessions.length} 个工作区会话</p></div><Button variant="primary" type="button" onClick={startDraft}>新建会话</Button></div><SearchField className="workspace-search" value={search} onChange={(event) => controller.setSearch(event.target.value)} onClear={() => controller.setSearch('')} clearable placeholder="搜索会话" aria-label="搜索会话" /><div className="workspace-session-list">{state.phase === 'loading' && <div className="workspace-list-state">正在加载会话…</div>}{state.phase !== 'loading' && visibleSessions.length === 0 && <div className="workspace-list-state">{state.sessions.length ? '没有匹配的会话' : '还没有会话，点击“新建会话”开始'}</div>}{visibleSessions.map((session) => { const sessionRunStatus = session.id === state.activeSessionId ? (currentRun?.status ?? session.runStatus) : session.runStatus; return <SessionRow key={session.id} session={session} active={!draftMode && session.id === state.activeSessionId} running={Boolean(sessionRunStatus && !terminalStatuses.has(sessionRunStatus))} unread={state.unreadSessionIds.includes(session.id)} busy={state.submitting} onSwitch={() => { setDraftMode(false); if (session.status === 'active') void controller.switchSession(session.id); }} onDelete={() => setDeleteTarget(session)} />; })}</div></section>
+                <section className="card workspace-sessions-panel"><div className="workspace-panel-head"><div><h2>会话</h2><p>{state.sessions.length} 个工作区会话</p></div><Button variant="primary" type="button" onClick={startDraft}>新建会话</Button></div><SearchField className="workspace-search" value={search} onChange={(event) => controller.setSearch(event.target.value)} onClear={() => controller.setSearch('')} clearable placeholder="搜索会话" aria-label="搜索会话" /><div className="workspace-session-list">{state.phase === 'loading' && <div className="workspace-list-state">正在加载会话…</div>}{state.phase !== 'loading' && visibleSessions.length === 0 && <div className="workspace-list-state">{state.sessions.length ? '没有匹配的会话' : '还没有会话，输入指令即可自动创建'}</div>}{visibleSessions.map((session) => { const sessionRunStatus = session.id === state.activeSessionId ? (currentRun?.status ?? session.runStatus) : session.runStatus; return <SessionRow key={session.id} session={session} active={!isDraftMode && session.id === state.activeSessionId} running={Boolean(sessionRunStatus && !terminalStatuses.has(sessionRunStatus))} unread={state.unreadSessionIds.includes(session.id)} busy={state.submitting} onSwitch={() => { setDraftMode(false); if (session.status === 'active') void controller.switchSession(session.id); }} onDelete={() => setDeleteTarget(session)} />; })}</div></section>
               </aside>
-              <section className={`card workspace-thread${currentRun?.status === 'waiting_confirmation' ? ' is-confirmation' : ''}`} aria-label="Workspace 对话"><header className="workspace-thread-header"><div><p className="eyebrow">连续对话</p><h2>{draftMode ? '新会话' : activeSessionDisplayTitle ?? '选择活跃会话'}</h2><p>{currentRun ? `${messages.length} 条消息 · Run 创建于 ${formatTime(currentRun.createdAt)}` : draftMode ? '输入第一条消息后，会自动创建会话并生成标题。' : '提交 Run 后，这里会展示连续的 Agent 消息流。'}</p></div><div className="workspace-thread-meta">{currentRun && <span className={`workspace-status workspace-status-${statusTone(currentRun.status)}`}>{statusLabel(currentRun.status)}</span>}<span className={`workspace-connection workspace-connection-${state.connection}`}><span />{state.connection === 'connected' ? '实时' : state.connection === 'reconnecting' ? '重连中' : state.connection === 'connecting' ? '连接中' : '离线'}</span>{currentRun && isWorkspaceRunReconnectable(currentRun.status) && (state.connection !== 'connected' || currentRun.status === 'failed') && <button className="btn ghost workspace-reconnect-button" type="button" onClick={() => void controller.reconnectRun()}>重连</button>}</div></header><div ref={messageStreamRef} data-testid="workspace-message-stream" className={`workspace-message-stream${hasStreamContent ? '' : ' is-empty'}`}>{messages.length ? <MessageStream messages={messages} expandedTrace={expandedTrace} onToggleTrace={(id) => setExpandedTrace((current) => current === id ? null : id)} /> : <WorkspaceState title={draftMode ? '开始一段新对话' : '等待首条 Run'} message={draftMode ? '在下方输入消息，系统会自动创建会话。' : activeSession ? '在下方输入一条指令，开始受控执行。' : '请从左侧选择一个活跃会话。'} compact />}{showConfirmation && <WorkspaceConfirmationCard run={currentRun!} accountName={currentAccount?.displayName ?? '闲鱼账号 A'} confirmation={state.confirmation!} actionSubmitting={state.actionSubmitting} onConfirm={() => void controller.confirmRun()} onCancel={() => void controller.cancelRun()} />}{showOutbox && <WorkspaceOutboxPanel items={state.outbox} actionSubmitting={state.actionSubmitting} onRetry={() => void controller.retryRun()} />}</div><form className="workspace-composer workspace-composer-docked" onSubmit={submitRun}>
+              <section className={`card workspace-thread${currentRun?.status === 'waiting_confirmation' ? ' is-confirmation' : ''}`} aria-label="Workspace 对话"><header className="workspace-thread-header"><div><p className="eyebrow">连续对话</p><h2>{isDraftMode ? '新会话' : activeSessionDisplayTitle ?? '选择活跃会话'}</h2><p>{currentRun ? `${messages.length} 条消息 · Run 创建于 ${formatTime(currentRun.createdAt)}` : isDraftMode ? '输入第一条消息后，会自动创建会话并生成标题。' : '提交 Run 后，这里会展示连续的 Agent 消息流。'}</p></div><div className="workspace-thread-meta">{currentRun && <span className={`workspace-status workspace-status-${statusTone(currentRun.status)}`}>{statusLabel(currentRun.status)}</span>}<span className={`workspace-connection workspace-connection-${state.connection}`}><span />{state.connection === 'connected' ? '实时' : state.connection === 'reconnecting' ? '重连中' : state.connection === 'connecting' ? '连接中' : '离线'}</span>{currentRun && isWorkspaceRunReconnectable(currentRun.status) && (state.connection !== 'connected' || currentRun.status === 'failed') && <button className="btn ghost workspace-reconnect-button" type="button" onClick={() => void controller.reconnectRun()}>重连</button>}</div></header><div ref={messageStreamRef} data-testid="workspace-message-stream" className={`workspace-message-stream${hasStreamContent ? '' : ' is-empty'}`}>{messages.length ? <MessageStream messages={messages} expandedTrace={expandedTrace} onToggleTrace={(id) => setExpandedTrace((current) => current === id ? null : id)} /> : <WorkspaceState title={isDraftMode ? '开始一段新对话' : '等待首条 Run'} message={isDraftMode ? '在下方输入消息，系统会自动创建会话。' : activeSession ? '在下方输入一条指令，开始受控执行。' : '请从左侧选择一个活跃会话。'} compact />}{showConfirmation && <WorkspaceConfirmationCard run={currentRun!} accountName={currentAccount?.displayName ?? '闲鱼账号 A'} confirmation={state.confirmation!} actionSubmitting={state.actionSubmitting} onConfirm={() => void controller.confirmRun()} onCancel={() => void controller.cancelRun()} />}{showOutbox && <WorkspaceOutboxPanel items={state.outbox} actionSubmitting={state.actionSubmitting} onRetry={() => void controller.retryRun()} />}</div><form className="workspace-composer workspace-composer-docked" onSubmit={submitRun}>
                 {pendingAttachments.length > 0 && <div className="workspace-inline-attachments" aria-label="待发送附件">
                   {pendingAttachments.map((attachment, index) => <div key={attachment.id} className={`workspace-inline-attachment workspace-inline-attachment-${attachment.kind}`}>
                     {attachment.kind === 'image'
@@ -173,9 +180,9 @@ export function WorkspacePage({ api }: WorkspacePageProps) {
                   </div>)}
                 </div>}
                 <div className="workspace-composer-editor">
-                  <textarea ref={instructionRef} value={instruction} onChange={(event) => { setInstruction(event.target.value); resizeComposerTextarea(event.currentTarget); }} onPaste={(event) => { const images = clipboardImageFiles(event.clipboardData); if (images.length === 0) return; event.preventDefault(); addAttachments(images); }} onKeyDown={(event) => { if (event.nativeEvent.isComposing) return; if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} maxLength={4000} disabled={(!draftMode && (!activeSession || activeSession.status !== 'active')) || state.submitting || taskRunning} placeholder="给 Agent 发消息…" aria-label="Run 指令" />
+                  <textarea ref={instructionRef} value={instruction} onChange={(event) => { setInstruction(event.target.value); resizeComposerTextarea(event.currentTarget); }} onPaste={(event) => { const images = clipboardImageFiles(event.clipboardData); if (images.length === 0) return; event.preventDefault(); addAttachments(images); }} onKeyDown={(event) => { if (event.nativeEvent.isComposing) return; if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} maxLength={4000} disabled={(!isDraftMode && (!activeSession || activeSession.status !== 'active')) || state.submitting || taskRunning} placeholder="给 Agent 发消息…" aria-label="Run 指令" />
                 </div>
-                <div className="workspace-composer-foot"><div className="workspace-composer-tools"><button type="button" aria-label="上传文档和图片" onClick={() => attachmentInputRef.current?.click()}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button><input ref={attachmentInputRef} className="workspace-file-input" type="file" accept="image/*,.pdf,.doc,.docx,.ppt,.pptx,.txt,.md,.csv,.json,.xls,.xlsx,.xml,.yaml,.yml" multiple onChange={(event) => { addAttachments(Array.from(event.target.files ?? [])); event.currentTarget.value = ''; }} /></div><div className="workspace-composer-meta"><WorkspaceSendButton submitting={state.submitting || taskRunning} cancellable={taskRunning} onCancel={cancelCurrentRun} disabled={(!instruction.trim() && pendingAttachments.length === 0) || (!draftMode && (!activeSession || activeSession.status !== 'active')) || state.submitting} /></div></div>
+                <div className="workspace-composer-foot"><div className="workspace-composer-tools"><button type="button" aria-label="上传文档和图片" onClick={() => attachmentInputRef.current?.click()}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button><input ref={attachmentInputRef} className="workspace-file-input" type="file" accept="image/*,.pdf,.doc,.docx,.ppt,.pptx,.txt,.md,.csv,.json,.xls,.xlsx,.xml,.yaml,.yml" multiple onChange={(event) => { addAttachments(Array.from(event.target.files ?? [])); event.currentTarget.value = ''; }} /></div><div className="workspace-composer-meta"><WorkspaceSendButton submitting={state.submitting || taskRunning} cancellable={taskRunning} onCancel={cancelCurrentRun} disabled={(!instruction.trim() && pendingAttachments.length === 0) || (!isDraftMode && (!activeSession || activeSession.status !== 'active')) || state.submitting} /></div></div>
               </form>{attachmentPreviewUrl && <div className="workspace-image-lightbox" role="dialog" aria-modal="true" aria-label="图片预览" onClick={() => setAttachmentPreviewUrl(null)}><div className="workspace-lightbox-content" onClick={(event) => event.stopPropagation()}><button className="workspace-lightbox-close" type="button" aria-label="关闭图片预览" onClick={() => setAttachmentPreviewUrl(null)}>×</button><img src={attachmentPreviewUrl} alt="待发送图片大图预览" /></div></div>}</section>
             </div>
           </div>

@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { formatToolEventContent, getComposerTextareaMetrics, MessageStream, scrollMessageStreamToLatest, SessionRow, WorkspaceConfirmationCard, WorkspaceDeleteSessionModal, WorkspaceSendButton } from './WorkspacePage';
+import { formatToolEventContent, getComposerTextareaMetrics, MessageStream, scrollMessageStreamToLatest, SessionRow, shouldUseWorkspaceDraftMode, WorkspaceConfirmationCard, WorkspaceDeleteSessionModal, WorkspaceSendButton } from './WorkspacePage';
 import type { WorkspaceConfirmationVM, WorkspaceMessageVM, WorkspaceRunVM, WorkspaceSessionVM } from '../types';
 
 const workspaceCss = readFileSync(fileURLToPath(new URL('./workspace.css', import.meta.url)), 'utf8').replace(/\r\n/g, '\r\n').replace(/\s+/g, ' ').trim();
@@ -206,6 +206,15 @@ describe('Workspace MessageStream', () => {
 });
 
 describe('Workspace Composer styling contract', () => {
+  it('keeps the composer open for an empty Workspace and preserves search-empty semantics', () => {
+    expect(shouldUseWorkspaceDraftMode(false, 'empty', 0, '')).toBe(true);
+    expect(shouldUseWorkspaceDraftMode(false, 'empty', 0, '没有匹配')).toBe(false);
+    expect(shouldUseWorkspaceDraftMode(false, 'success', 0, '')).toBe(false);
+    expect(shouldUseWorkspaceDraftMode(true, 'success', 2, '已有会话')).toBe(true);
+    expect(workspacePageSource).toContain('if (isDraftMode || !sessionId)');
+    expect(workspacePageSource).toContain('disabled={(!isDraftMode && (!activeSession || activeSession.status !== \'active\'))');
+  });
+
   it('keeps the centered rounded field aligned to the conversation content width', () => {
     expect(workspaceCss).toContain('.workspace-composer-docked { align-self: center; width: min(100%, 760px);');
     expect(workspaceCss).toContain('border: 1px solid #D8DCE3; border-radius: 24px;');
@@ -270,7 +279,7 @@ describe('Workspace Composer styling contract', () => {
 describe('Workspace empty state layout contract', () => {
   it('centers the new-conversation prompt in the available message stream', () => {
     expect(workspacePageSource).toContain('workspace-message-stream${hasStreamContent ? \'\' : \' is-empty\'}');
-    expect(workspacePageSource).toContain('const showOutbox = !draftMode && Boolean(currentRun && state.outbox.length > 0);');
+    expect(workspacePageSource).toContain('const showOutbox = !isDraftMode && Boolean(currentRun && state.outbox.length > 0);');
     expect(workspacePageSource).toContain('{showOutbox && <WorkspaceOutboxPanel');
     expect(workspaceCss).toContain('.workspace-message-stream.is-empty { display: grid; flex: 1 1 auto; min-height: 0; place-items: center; overflow: auto; }');
     expect(workspaceCss).toContain('.workspace-message-stream.is-empty .workspace-state { width: 100%; min-height: 0;');
