@@ -857,7 +857,7 @@ export class PostgresStore implements Store {
           where id=$1`, [automationRow.id, version, JSON.stringify(cleaned.config), digestJson(cleaned.config)]);
       }
       await client.query('commit');
-      return this.toCouponBatch(row);
+      return await this.getCouponBatch(input.adminId, batch.id) ?? this.toCouponBatch(row);
     } catch (error) {
       try { await client.query('rollback'); } catch { /* preserve original error */ }
       throw error;
