@@ -17,11 +17,11 @@ bash scripts/deploy-production.sh
 
 ## GitHub Push 自动部署
 
-仓库工作流 `.github/workflows/deploy-production.yml` 监听 `main` 分支的 `push`，并支持 `workflow_dispatch` 手动触发。工作流通过固定 SSH 主机指纹连接生产服务器，在服务器上执行以下顺序：校验 GitHub `origin` → 拒绝受跟踪文件本地改动 → 重试 `git fetch origin main` → `git pull --ff-only origin main` → 校验 `HEAD == github.sha` → `bash scripts/deploy-production.sh` → `bash scripts/deploy-production-frontend.sh`。
+仓库工作流 `.github/workflows/deploy-production.yml` 监听 `main` 分支的 `push`，并支持 `workflow_dispatch` 手动触发。工作流通过固定 SSH 主机指纹连接生产服务器，在服务器上执行以下顺序：校验 GitHub `origin` → 拒绝受跟踪文件本地改动 → 重试 `git fetch origin main` → `git pull --ff-only origin main` → 校验 `HEAD == github.sha` → 只执行统一入口 `bash scripts/deploy-production.sh`。
 
 启用工作流前，必须在 GitHub Actions secrets 中配置 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY` 和 `DEPLOY_KNOWN_HOSTS`；`DEPLOY_PORT` 默认 `22`，`DEPLOY_PATH` 默认 `/home/ubuntu/xianyu-agent-prod`。部署私钥只授予服务器部署用户，`DEPLOY_KNOWN_HOSTS` 使用固定主机指纹，不在工作流中动态信任未知主机。
 
-`deploy-production-frontend.sh` 会在 Node 容器中执行 `npm ci && npm run build:web`，将当前站点备份到 `/var/backups/xy.chemhi.top-<timestamp>/site.tgz`，再同步到 `/var/www/xy.chemhi.top`。这样每次 `main` push 会同时更新 API/Worker 和 Nginx 静态前端。
+统一部署脚本会先在 Node 容器中执行带重试的 `npm ci --no-audit --no-fund && npm run build:web`，再迁移并重建 API/Worker。后端本地与公网健康检查、会话接口均通过后，才将当前站点备份到 `/var/backups/xy.chemhi.top-<timestamp>/site.tgz` 并同步到 `/var/www/xy.chemhi.top`；前端同步或首页验收失败时会自动从该备份恢复。
 
 脚本会在执行前拒绝以下两类配置错误：
 
@@ -45,11 +45,11 @@ bash scripts/deploy-production.sh
 1. 使用 `docker compose -f compose.prod.yml up -d --build --force-recreate postgres redis object-storage api worker` 重建服务；未删除 PostgreSQL、Redis、MinIO 或 `browser_data` 数据卷。
 2. 修复后 API 映射为 `127.0.0.1:18082->8080`。
 3. 2026-09-25 21:55（Asia/Shanghai）验证：本地 `/healthz`、`/readyz` 为 `200`；公网 `https://xy.chemhi.top/healthz`、`/readyz` 和 `/api/v1/auth/session` 均为 `200`。
-4. 服务器未安装 Node/npm；前端必须在服务器从 GitHub 工作树使用一次性 Node 容器清理旧依赖并执行 `npm ci && npm run build:web`，再由服务器本机备份并同步到 `/var/www/xy.chemhi.top`。禁止从开发机上传源码或 `dist`。发布前备份保存为 `/var/backups/xy.chemhi.top-20260925215631/site.tgz`。公网 HTML 标题已为 `FishAgent · 运营控制台`。
+4. 服务器未安装 Node/npm；统一部署脚本会在服务器从 GitHub 工作树使用一次性 Node 容器清理旧依赖并执行前端构建，再由服务器本机备份并同步到 `/var/www/xy.chemhi.top`。禁止从开发机上传源码或 `dist`。发布前备份保存为 `/var/backups/xy.chemhi.top-20260925215631/site.tgz`。公网 HTML 标题已为 `FishAgent · 运营控制台`。
 
 ### 防止下次复发
 
-- 不再直接运行 `docker compose up`；只运行 `scripts/deploy-production.sh`。
+- 不再直接运行 `docker compose up` 或单独的前端发布命令；只运行统一入口 `scripts/deploy-production.sh`。
 - 部署前保留 `docker compose -f compose.prod.yml config --quiet`、发布端口校验和 Nginx 上游校验。
 - 发布后必须同时检查本地端口、公网健康检查和会话接口；任何一步失败都停止交付。
 - 发布保持“本地检查并推送 GitHub → 服务器 `git pull --ff-only` → 服务器构建 → 服务器备份 → 服务器本机 `rsync --delete`”顺序，并记录备份路径。

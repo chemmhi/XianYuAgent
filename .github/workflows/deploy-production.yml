@@ -89,6 +89,5 @@ jobs:
             fail "部署提交不匹配: expected=$EXPECTED_SHA actual=$actual_sha"
 
           bash scripts/deploy-production.sh
-          bash scripts/deploy-production-frontend.sh
           printf 'github-deploy: deployed %s\n' "$actual_sha"
           REMOTE

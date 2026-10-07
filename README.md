@@ -104,9 +104,8 @@ Compose 当前负责 API、Worker、PostgreSQL、Redis 和 MinIO；对象存储�
 git push origin HEAD:main
   → .github/workflows/deploy-production.yml
   → git fetch/pull --ff-only + SHA 校验
-  → scripts/deploy-production.sh
-  → scripts/deploy-production-frontend.sh
-  → /healthz、/readyz 与生产站点验收
+  → scripts/deploy-production.sh（前端构建/备份/发布 + API/Worker 迁移/重建）
+  → /healthz、/readyz、会话接口与生产站点验收
 ```
 
 ### 1. 提交并推送代码
@@ -136,7 +135,7 @@ git push origin HEAD:main
 - `DEPLOY_KNOWN_HOSTS`：生产服务器的固定 `known_hosts` 行；
 - `DEPLOY_PATH`：部署目录，可省略（默认 `/home/ubuntu/xianyu-agent-prod`）。
 
-工作流会拒绝非 GitHub `origin`、受跟踪文件的服务器本地改动和提交 SHA 不匹配，并在拉取失败时自动重试后依次执行 `scripts/deploy-production.sh` 与 `scripts/deploy-production-frontend.sh`。后者会在服务器上的 Node 容器中构建前端、备份当前 Nginx 静态目录，再执行 `rsync --delete` 发布最新 `apps/web/dist`。
+工作流会拒绝非 GitHub `origin`、受跟踪文件的服务器本地改动和提交 SHA 不匹配，并在拉取失败时自动重试后只执行统一入口 `scripts/deploy-production.sh`。统一入口先在 Node 容器中构建前端，再迁移并重建 API/Worker；后端健康检查通过后才备份并发布 `apps/web/dist`，前端同步或站点验收失败会自动恢复备份，避免 UI 与后端半发布。
 
 ### 2. 手工恢复与排障（仅必要时）
 
@@ -154,21 +153,15 @@ ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && origin_url="$(git remote g
 ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && git remote set-url origin https://github.com/chemmhi/XianYuAgent.git'
 ```
 
-#### 重建并滚动 API/Worker
+#### 手工执行统一生产部署
 
-生产环境优先只重建应用服务，避免因为基础设施镜像仓库权限、MinIO 拉取或已有数据卷导致整套 Compose 被重启：
-
-```powershell
-ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker compose config --quiet && docker compose build api worker && docker compose up -d --no-deps api worker'
-```
-
-只有在需要初始化或变更 PostgreSQL、Redis、MinIO 时，才执行完整拓扑启动：
+生产环境的 UI 与 API/Worker 必须通过同一个脚本执行，避免只更新一侧：
 
 ```powershell
-ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker compose --profile full up -d --build'
+ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && bash scripts/deploy-production.sh'
 ```
 
-如果完整启动因为 `object-storage` 镜像仓库返回 `unauthorized` 失败，保持现有基础设施容器运行，改用上面的 `docker compose build api worker` 与 `docker compose up -d --no-deps api worker`。
+脚本会先构建前端；若 npm、镜像仓库或 Vite/TypeScript 构建失败，API/Worker 不会重启。后端健康检查通过后才备份和同步 Nginx 静态目录；`rsync` 或公网首页验收失败时会自动解压备份恢复旧 UI。
 
 #### 应用已有 PostgreSQL volume 的迁移
 
@@ -176,15 +169,6 @@ ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker compose --profile f
 
 ```powershell
 ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && POSTGRES_PASSWORD="$(sed -n "s/^POSTGRES_PASSWORD=//p" .env | tr -d "\r" | head -n 1)" && test -n "$POSTGRES_PASSWORD" && docker run --rm --network xianyu-agent-prod_default -v "$PWD:/workspace" -w /workspace -e DATABASE_URL="postgres://xianyu:${POSTGRES_PASSWORD}@postgres:5432/xianyu_agent" node:24-bookworm-slim node apps/api/scripts/migrate.mjs'
-```
-
-#### 在服务器工作树构建并发布前端
-
-服务器不需要安装 Node/npm；前端必须从服务器已拉取的 GitHub 工作树构建，并在服务器本机备份后发布到 Nginx 目录。开发机不得上传 `dist` 或源码：
-
-```powershell
-ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && docker run --rm -u 0 -e NPM_CONFIG_UPDATE_NOTIFIER=false -e NPM_CONFIG_REGISTRY=https://registry.npmmirror.com -v "$PWD:/workspace" -w /workspace node:24-bookworm-slim bash -lc "rm -rf node_modules apps/api/node_modules apps/web/node_modules SellerAgent/node_modules && npm ci --registry=https://registry.npmmirror.com && npm run build:web"'
-ssh server-prod 'cd /home/ubuntu/xianyu-agent-prod && backup="/var/backups/xy.chemhi.top-$(date +%Y%m%d%H%M%S)" && sudo mkdir -p "$backup" && sudo tar -czf "$backup/site.tgz" -C /var/www/xy.chemhi.top . && sudo rsync -a --delete apps/web/dist/ /var/www/xy.chemhi.top/'
 ```
 
 #### 部署后验收
