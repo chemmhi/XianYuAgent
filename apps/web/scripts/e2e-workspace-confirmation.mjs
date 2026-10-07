@@ -180,7 +180,6 @@ async function run() {
     await waitFor(async () => await evaluate(cdp, '(() => Boolean(document.querySelector("[data-testid=workspace-confirmation-card]")))()'), 'confirmation card', 15_000);
     const cardText = String(await evaluate(cdp, 'document.querySelector("[data-testid=workspace-confirmation-card]")?.innerText ?? ""'));
     if (!cardText.includes('E2E 确认商品')) throw new Error(`confirmation card missing product title: ${cardText}`);
-    if (!cardText.includes('product.publish.confirm')) throw new Error(`confirmation card missing policy reference: ${cardText}`);
     if (cardText.includes('cookie') || cardText.includes('Credential') || cardText.includes('secret')) throw new Error(`confirmation card leaked sensitive data: ${cardText}`);
     return cardText;
   }
@@ -201,17 +200,21 @@ async function run() {
   if (!firstRunId) throw new Error('confirmed run id missing from persisted messages');
   const firstConfirmation = await (await fetch(`${apiUrl}/api/v1/workspace/runs/${encodeURIComponent(firstRunId)}/confirmation`, { headers: { cookie } })).json();
   if (firstConfirmation.data?.status !== 'confirmed') throw new Error(`confirmation persistence mismatch: ${JSON.stringify(firstConfirmation.data)}`);
+  if (firstConfirmation.data?.policyRef !== 'product.publish.confirm') throw new Error(`confirmation policy reference mismatch: ${JSON.stringify(firstConfirmation.data)}`);
   const firstOutbox = await (await fetch(`${apiUrl}/api/v1/execution/outbox?runId=${encodeURIComponent(firstRunId)}`, { headers: { cookie } })).json();
   if (firstOutbox.data?.items?.[0]?.status !== 'pending') throw new Error(`outbox persistence mismatch: ${JSON.stringify(firstOutbox.data)}`);
   const firstRun = await (await fetch(`${apiUrl}/api/v1/workspace/runs/${encodeURIComponent(firstRunId)}`, { headers: { cookie } })).json();
   if (firstRun.data?.status !== 'executing') throw new Error(`run persistence mismatch: ${JSON.stringify(firstRun.data)}`);
 
-  const secondCardPromise = submitPublish();
-  await secondCardPromise;
+  await evaluate(cdp, 'document.querySelector(".workspace-sessions-panel .workspace-panel-head button")?.click()');
+  await waitFor(async () => String(await evaluate(cdp, 'document.querySelector(".workspace-thread h2")?.textContent ?? ""')).includes('新会话'), 'second conversation draft');
+  await submitPublish();
   const mobilePath = await captureViewport(cdp, 390, 844, 'workspace-confirmation-mobile-390x844.png');
   await evaluate(cdp, 'document.querySelector("[data-testid=workspace-confirm-cancel]")?.click()');
   await waitFor(async () => String(await evaluate(cdp, 'document.querySelector(".workspace-status")?.textContent ?? ""')).includes('已取消'), 'cancelled state');
-  const cancelledRows = await (await fetch(`${apiUrl}/api/v1/workspace/agent-sessions/${encodeURIComponent(activeSession.id)}/messages`, { headers: { cookie } })).json();
+  const secondSession = (await sessionItems()).find((item) => item.id !== activeSession.id);
+  if (!secondSession?.id) throw new Error('second conversation did not persist');
+  const cancelledRows = await (await fetch(`${apiUrl}/api/v1/workspace/agent-sessions/${encodeURIComponent(secondSession.id)}/messages`, { headers: { cookie } })).json();
   const secondRunId = [...(cancelledRows.data?.items ?? [])].reverse().find((message) => message.type === 'user_message' && message.content.includes(productId) && message.runId !== firstRunId)?.runId;
   if (!secondRunId) throw new Error('cancelled run id missing from persisted messages');
   const secondConfirmation = await (await fetch(`${apiUrl}/api/v1/workspace/runs/${encodeURIComponent(secondRunId)}/confirmation`, { headers: { cookie } })).json();

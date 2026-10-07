@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, Store } from './domain.js';
 import { findWorkspaceExecutionStep, prepareWorkspaceRunResume, type WorkspaceRuntime } from './workspace.js';
 import { executeNativeWorkspaceRead } from './workspace-native-read.js';
@@ -6,7 +7,7 @@ import type { WorkspaceCommandInput, WorkspaceCommandOrchestrator, WorkspaceMode
 import { persistWorkspaceConfirmation } from './workspace-confirmation.js';
 import { ModelClientService } from './model-client.js';
 import type { PiSkillManager } from './pi-skills.js';
-import { compactWorkspaceModelMessages } from './workspace-context.js';
+import { compactWorkspaceModelMessagesWithModel, planWorkspaceToolUse } from './workspace-context.js';
 
 export const DEFAULT_PI_BASE_URL = 'https://api.openai.com/v1';
 export const DEFAULT_PI_MODEL = 'gpt-4o-mini';
@@ -601,6 +602,16 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     const tools = [...commands.getModelTools(), ...(this.options.skillManager?.getModelTools() ?? [])];
     const skillPrompt = this.options.skillManager ? await this.options.skillManager.buildSystemPrompt(input.adminId ?? input.run.requestedBy) : '';
     const messages = buildWorkspaceModelMessages(input.history ?? [], input.run.instruction, skillPrompt, input.attachments);
+    const replayableResults = this.options.skillManager
+      ? completedSkillResults(await this.store.listRunEvents(input.adminId ?? input.run.requestedBy, input.run.id, 0))
+      : new Map<string, WorkspaceModelToolResult>();
+    if (!input.resumeAfterConfirmation && !input.resumeFromFailure) {
+      const plan = await planWorkspaceToolUse(input.run.instruction, tools, modelClient, signal);
+      if (plan && !signal.aborted) {
+        messages.push({ role: 'assistant', content: `执行计划（须根据实际工具结果调整）：\n${plan}` });
+        await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: redactSensitiveText(plan, this.options.redactSecrets), summary: '执行计划' });
+      }
+    }
 
     let reasoningDeltaCount = 0;
     let finalResult: ModelCompletionResult | undefined;
@@ -617,12 +628,11 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       const streamId = `${input.run.id}:stream:${round + 1}`;
       const assistantMessageId = `${streamId}:assistant`;
       let assistant = '';
-      const toolCallNames = new Map<number, string>();
-      const compacted = compactWorkspaceModelMessages(messages);
+      const compacted = await compactWorkspaceModelMessagesWithModel(messages, modelClient, false, signal);
       if (compacted.summary) {
         messages.splice(0, messages.length, ...compacted.messages);
-        await this.emit(input.run.id, 'context.compacted', { round: round + 1, status: 'succeeded', summary: '已压缩上下文并保留任务目标及关键结果' });
-        await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: compacted.summary, summary: '上下文摘要' });
+        await this.emit(input.run.id, 'context.compacted', { round: round + 1, status: 'succeeded', method: compacted.method, beforeChars: compacted.beforeChars, afterChars: compacted.afterChars, summary: '已压缩上下文并保留任务目标及关键结果' });
+        await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: redactSensitiveText(compacted.summary, this.options.redactSecrets), summary: '上下文摘要' });
       }
       await this.emit(input.run.id, 'stream.started', { streamId, round: round + 1, model: this.options.model, status: 'running' });
       await this.emit(input.run.id, 'workspace.execution.summary', { streamId, messageType: 'reasoning_summary', summary: round === 0 ? '分析任务' : '评估工具结果', content: round === 0 ? '正在核对任务目标与已有结果。' : '已读取上一轮工具结果，正在确定下一步。', status: 'running' });
@@ -634,14 +644,9 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           assistant += delta;
           await this.emit(input.run.id, 'assistant.delta', { streamId, messageId: assistantMessageId, contentDelta: redactSensitiveText(delta, this.options.redactSecrets), messageType: 'final_answer', status: 'running' });
         },
-        onToolCallDelta: async (delta) => {
-          if (delta.name) toolCallNames.set(delta.index, delta.name);
-          const toolName = delta.name ?? toolCallNames.get(delta.index);
-          await this.emit(input.run.id, 'tool.call.delta', { streamId, toolCallId: delta.id, toolName, summary: toolName ? workspaceToolProgress(toolName).summary : undefined, index: delta.index, argumentsDelta: redactSensitiveText(delta.argumentsDelta ?? '', this.options.redactSecrets), status: 'streaming' });
-        },
         onToolCall: async (call) => {
           const progress = workspaceToolProgress(call.function.name);
-          await this.emit(input.run.id, 'tool.call.completed', { streamId, toolCallId: call.id, toolName: call.function.name, summary: progress.summary, arguments: redactSensitiveText(normalizeToolArguments(call.function.arguments), this.options.redactSecrets), status: 'selected' });
+          await this.emit(input.run.id, 'tool.call.completed', { streamId, toolCallId: call.id, toolName: call.function.name, summary: progress.summary, argumentFingerprint: toolArgumentFingerprint(call.function.arguments), status: 'selected' });
         },
       };
       let result: ModelCompletionResult;
@@ -649,10 +654,10 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
         result = await modelClient.stream({ messages, tools, toolChoice: 'auto', signal }, handlers);
       } catch (error) {
         if (!(error instanceof PiModelClientError) || error.code !== 'MODEL_HTTP_ERROR' || ![400, 413].includes(error.status ?? 0)) throw error;
-        const forced = compactWorkspaceModelMessages(messages, true);
+        const forced = await compactWorkspaceModelMessagesWithModel(messages, modelClient, true, signal);
         messages.splice(0, messages.length, ...forced.messages);
-        await this.emit(input.run.id, 'context.compacted', { round: round + 1, status: 'retrying', summary: '模型上下文超限，已保留目标和关键结果后重试' });
-        await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: forced.summary ?? '', summary: '上下文摘要' });
+        await this.emit(input.run.id, 'context.compacted', { round: round + 1, status: 'retrying', method: forced.method, beforeChars: forced.beforeChars, afterChars: forced.afterChars, summary: '模型上下文超限，已保留目标和关键结果后重试' });
+        await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: redactSensitiveText(forced.summary ?? '', this.options.redactSecrets), summary: '上下文摘要' });
         result = await modelClient.stream({ messages, tools, toolChoice: 'auto', signal }, handlers);
       }
       finalResult = result;
@@ -675,7 +680,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           status: 'running',
         });
         const toolStartedAt = new Date().toISOString();
-        await this.emit(input.run.id, 'tool.call.started', { streamId, toolCallId: call.id, toolName: call.function.name, summary: progress.summary, arguments: redactSensitiveText(normalizeToolArguments(call.function.arguments), this.options.redactSecrets), startedAt: toolStartedAt, status: 'running' });
+        await this.emit(input.run.id, 'tool.call.started', { streamId, toolCallId: call.id, toolName: call.function.name, summary: progress.summary, argumentFingerprint: toolArgumentFingerprint(call.function.arguments), readOnly: skillCallIsReadOnly(call.function.name, call.function.arguments), startedAt: toolStartedAt, status: 'running' });
         let args: Record<string, unknown>;
         try {
           args = parseModelToolArguments(call.function.arguments);
@@ -689,13 +694,15 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           continue;
         }
         let result: WorkspaceModelToolResult;
+        const replayKey = replayableToolKey(call.function.name, args);
+        const reused = replayKey !== undefined && replayableResults.has(replayKey);
         try {
           const toolInput: WorkspaceCommandInput = { adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: typeof args.instruction === 'string' ? args.instruction : input.run.instruction, operation: typeof args.operation === 'string' ? args.operation : undefined, parameters: isRecord(args.parameters) ? args.parameters : undefined, requestId: `workspace:${input.run.id}`, traceId: `workspace:${input.run.id}` };
-          const rawResult: unknown = this.options.skillManager && call.function.name.startsWith('pi_skill_')
+          const rawResult: unknown = reused ? replayableResults.get(replayKey!) : this.options.skillManager && call.function.name.startsWith('pi_skill_')
             ? await this.options.skillManager.executeModelTool(call.function.name, args, toolInput)
             : await commands.executeModelTool(call.function.name, args, toolInput);
           if (this.stopped || signal.aborted) return;
-          const normalized = normalizeModelToolResult(rawResult);
+          const normalized = normalizeModelToolResult(rawResult, call.function.name);
           if (!normalized.ok) {
             pendingToolFailure = { toolName: call.function.name, ...normalized.failure };
             const errorResult = toolFailureResult(pendingToolFailure);
@@ -705,6 +712,10 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
             continue;
           }
           result = normalized.result;
+          if (replayKey && isReusableSkillResult(result) && !reused) {
+            if (!replayKey.startsWith('pi_skill_exec:read:')) clearReplayableReads(replayableResults);
+            replayableResults.set(replayKey, result);
+          }
           pendingToolFailure = undefined;
         } catch (error) {
           const failure = toSafeFailure(error);
@@ -716,9 +727,9 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           continue;
         }
         const redacted = this.redactToolResult(result);
-        await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, title: result.title, summary: result.summary, status: 'succeeded', result: redacted, completedAt: new Date().toISOString() });
+        await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, title: result.title, summary: result.summary, status: 'succeeded', reused, result: redacted, completedAt: new Date().toISOString() });
         await this.emit(input.run.id, 'workspace.execution.summary', { streamId, messageType: 'reasoning_summary', summary: result.title, content: result.summary, status: 'succeeded' });
-        if (result.kind !== 'write_plan') await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'tool_event', content: JSON.stringify(redacted), summary: result.summary });
+        if (result.kind !== 'write_plan' && !reused) await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'tool_event', content: JSON.stringify(redacted), summary: result.summary });
         messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(redacted) });
         const resultData = result.data;
         if (resultData && (resultData.status === 'pending_user_action' || resultData.userActionRequired === true)) {
@@ -1276,7 +1287,7 @@ function toSafeFailure(error: unknown): { code: string; summary: string } {
   const code = typeof candidate?.code === 'string' ? candidate.code : undefined;
   const message = typeof candidate?.message === 'string' ? candidate.message.trim() : undefined;
   const inferredCode = code ?? message?.match(/\b[A-Z][A-Z0-9_]{2,}\b/)?.[0];
-  const safeCodes = ['VALIDATION_FAILED', 'NOT_FOUND', 'FORBIDDEN', 'CONFLICT', 'ACCOUNT_SCOPE_FORBIDDEN', 'ACCOUNT_RECOVERY_UNAVAILABLE', 'ACCOUNT_VERIFY_UNAVAILABLE', 'DELIVERY_NOT_READY', 'ORDER_DELIVERY_UNAVAILABLE', 'WORKSPACE_PRODUCT_REQUIRED', 'WORKSPACE_PRODUCT_NOT_FOUND', 'WORKSPACE_WRITE_REQUIRED', 'WORKSPACE_PRODUCT_SEARCH_REQUIRED', 'WORKSPACE_PRODUCT_SEARCH_UNAVAILABLE', 'MODEL_TOOL_RUNTIME_UNAVAILABLE', 'DUPLICATE_TOOL_CALL'];
+  const safeCodes = ['VALIDATION_FAILED', 'NO_CHANGES', 'NOT_FOUND', 'FORBIDDEN', 'CONFLICT', 'ACCOUNT_SCOPE_FORBIDDEN', 'ACCOUNT_RECOVERY_UNAVAILABLE', 'ACCOUNT_VERIFY_UNAVAILABLE', 'DELIVERY_NOT_READY', 'ORDER_DELIVERY_UNAVAILABLE', 'WORKSPACE_PRODUCT_REQUIRED', 'WORKSPACE_PRODUCT_NOT_FOUND', 'WORKSPACE_WRITE_REQUIRED', 'WORKSPACE_PRODUCT_SEARCH_REQUIRED', 'WORKSPACE_PRODUCT_SEARCH_UNAVAILABLE', 'MODEL_TOOL_RUNTIME_UNAVAILABLE', 'DUPLICATE_TOOL_CALL'];
   if (inferredCode?.startsWith('SKILL_')) return { code: inferredCode, summary: message ?? 'Pi Skill 执行失败' };
   if (inferredCode && message && safeCodes.includes(inferredCode)) {
     return { code: inferredCode, summary: message };
@@ -1340,7 +1351,7 @@ function parseModelToolArguments(raw: string): Record<string, unknown> {
   return candidate;
 }
 
-function normalizeModelToolResult(value: unknown): { ok: true; result: WorkspaceModelToolResult } | { ok: false; failure: { code: string; summary: string } } {
+function normalizeModelToolResult(value: unknown, toolName?: string): { ok: true; result: WorkspaceModelToolResult } | { ok: false; failure: { code: string; summary: string } } {
   let candidate = value;
   if (typeof candidate === 'string') {
     try { candidate = JSON.parse(candidate); } catch { return { ok: false, failure: { code: 'INVALID_TOOL_RESULT', summary: '工具返回结果不是有效 JSON' } }; }
@@ -1355,21 +1366,83 @@ function normalizeModelToolResult(value: unknown): { ok: true; result: Workspace
       },
     };
   }
+  const data = isRecord(candidate.data) ? candidate.data : undefined;
+  if (toolName?.startsWith('pi_skill_') && (data?.status === 'failed' || (toolName === 'pi_skill_exec' && typeof data?.code === 'number' && data.code !== 0 && data.requiresLogin !== true && data.userActionRequired !== true && data.status !== 'pending_user_action'))) {
+    return { ok: false, failure: { code: 'SKILL_EXEC_FAILED', summary: typeof candidate.summary === 'string' ? candidate.summary : 'Skill 执行失败' } };
+  }
   if (typeof candidate.kind !== 'string' || !candidate.kind.trim() || typeof candidate.title !== 'string' || typeof candidate.summary !== 'string' || typeof candidate.content !== 'string') {
     return { ok: false, failure: { code: 'INVALID_TOOL_RESULT', summary: '工具返回结果缺少可消费的 kind/title/summary/content 字段' } };
   }
   return { ok: true, result: candidate as unknown as WorkspaceModelToolResult };
 }
 
-function normalizeToolArguments(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) return '{}';
-  try { return JSON.stringify(JSON.parse(trimmed)); } catch { /* preserve provider text when it is not valid JSON */ }
-  if (trimmed.length % 2 === 0) {
-    const midpoint = trimmed.length / 2;
-    if (trimmed.slice(0, midpoint) === trimmed.slice(midpoint)) return trimmed.slice(0, midpoint);
+function replayableToolKey(toolName: string, args: Record<string, unknown>): string | undefined {
+  if (toolName !== 'pi_skill_exec') return undefined;
+  const readOnly = skillCommandIsReadOnly(args);
+  return `${toolName}:${readOnly ? 'read' : 'write'}:${createHash('sha256').update(JSON.stringify(canonicalJson(args))).digest('hex')}`;
+}
+
+function skillCallIsReadOnly(toolName: string, raw: string): boolean | undefined {
+  if (toolName !== 'pi_skill_exec') return undefined;
+  try { return skillCommandIsReadOnly(parseModelToolArguments(raw)); }
+  catch { return undefined; }
+}
+
+function skillCommandIsReadOnly(args: Record<string, unknown>): boolean {
+  const command = typeof args.command === 'string' ? args.command.trim().toLowerCase() : '';
+  const readCommands = new Set(['search', 'browse', 'list', 'get-user-info', 'info', 'help']);
+  const helpOnly = command === 'quark-drive' && Array.isArray(args.args) && args.args.length === 1 && args.args[0] === '--help';
+  return readCommands.has(command) || helpOnly;
+}
+
+function clearReplayableReads(results: Map<string, WorkspaceModelToolResult>): void {
+  for (const key of results.keys()) if (key.startsWith('pi_skill_exec:read:')) results.delete(key);
+}
+
+function isReusableSkillResult(result: WorkspaceModelToolResult): boolean {
+  if (result.kind !== 'read') return false;
+  const data = isRecord(result.data) ? result.data : undefined;
+  return data?.status !== 'failed' && data?.status !== 'unauthorized' && data?.status !== 'pending_user_action'
+    && data?.requiresLogin !== true && data?.userActionRequired !== true
+    && (typeof data?.code !== 'number' || data.code === 0);
+}
+
+function toolArgumentFingerprint(raw: string): string | undefined {
+  try { return createHash('sha256').update(JSON.stringify(canonicalJson(parseModelToolArguments(raw)))).digest('hex'); }
+  catch { return undefined; }
+}
+
+function canonicalJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (isRecord(value)) return Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, canonicalJson(item)]));
+  return value;
+}
+
+function completedSkillResults(events: RunEventRecord[]): Map<string, WorkspaceModelToolResult> {
+  const calls = new Map<string, string>();
+  const results = new Map<string, WorkspaceModelToolResult>();
+  for (const event of events) {
+    const payload = event.payload;
+    if ((event.eventType === 'workspace.command.completed' || event.eventType === 'workspace.coupon.created') && payload.status === 'succeeded') clearReplayableReads(results);
+    if (event.eventType === 'tool.call.started' && payload.toolName === 'pi_skill_exec' && typeof payload.toolCallId === 'string') {
+      try {
+        const key = typeof payload.argumentFingerprint === 'string' && typeof payload.readOnly === 'boolean'
+          ? `pi_skill_exec:${payload.readOnly ? 'read' : 'write'}:${payload.argumentFingerprint}`
+          : typeof payload.arguments === 'string' ? replayableToolKey('pi_skill_exec', parseModelToolArguments(payload.arguments)) : undefined;
+        if (key) calls.set(payload.toolCallId, key);
+      } catch { /* Invalid arguments were never executed successfully. */ }
+    }
+    if (event.eventType === 'tool.result' && payload.status === 'succeeded' && typeof payload.toolCallId === 'string') {
+      const key = calls.get(payload.toolCallId);
+      if (!key) continue;
+      const result = normalizeModelToolResult(payload.result, 'pi_skill_exec');
+      if (result.ok && isReusableSkillResult(result.result)) {
+        if (!key.startsWith('pi_skill_exec:read:')) clearReplayableReads(results);
+        results.set(key, result.result);
+      }
+    }
   }
-  return trimmed;
+  return results;
 }
 
 function firstNonEmpty(...values: Array<string | undefined>): string | undefined {

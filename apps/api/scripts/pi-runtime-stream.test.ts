@@ -58,6 +58,8 @@ test('Pi runtime executes model-selected workspace tools and streams results', a
       if (round === 1) {
         await handlers.onReasoningDelta?.('需要读取商品数据');
         const call = { id: 'call-1', type: 'function' as const, function: { name: 'workspace_read', arguments: JSON.stringify({ instruction: '查看商品' }) } };
+        await handlers.onToolCallDelta?.({ index: 0, id: call.id, name: 'workspace_read', argumentsDelta: '{"instruction":' });
+        await handlers.onToolCallDelta?.({ index: 0, id: call.id, argumentsDelta: '"查看商品"}' });
         await handlers.onToolCall?.(call);
         return { content: '', model: 'stream-model', toolCalls: [call] };
       }
@@ -83,7 +85,9 @@ test('Pi runtime executes model-selected workspace tools and streams results', a
   assert.ok(events.some((event) => event.eventType === 'workspace.execution.summary' && event.payload.summary === '分析任务'));
   assert.ok(events.some((event) => event.eventType === 'workspace.execution.summary' && event.payload.content === '读取完成'));
   assert.ok(!events.some((event) => event.eventType === 'reasoning.delta'));
+  assert.ok(!events.some((event) => event.eventType === 'tool.call.delta'));
   assert.ok(events.some((event) => event.eventType === 'tool.call.started' && event.payload.toolName === 'workspace_read'));
+  assert.ok(events.filter((event) => event.eventType === 'tool.call.started').every((event) => typeof event.payload.argumentFingerprint === 'string' && event.payload.arguments === undefined));
   assert.ok(events.some((event) => event.eventType === 'tool.result' && event.payload.status === 'succeeded'));
   assert.ok(events.some((event) => event.eventType === 'tool.result' && String((event.payload.result as { content?: string }).content).length > 2_000));
   assert.ok(requests[1]?.messages.some((message) => message.role === 'tool' && String(message.content).length > 2_000));
@@ -373,6 +377,160 @@ test('Pi runtime preserves SKILL error codes from pi_skill_exec failures', async
   const events = await store.listRunEvents(admin.id, created.run.id, 0);
   assert.ok(events.some((event) => event.eventType === 'tool.result' && event.payload.status === 'failed' && (event.payload.result as { code?: string })?.code === 'SKILL_NOT_INSTALLED'));
   runtime.stop();
+});
+
+test('Pi runtime treats a Skill nonzero exit as a failed tool, not a successful result', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'skill-exit@example.com', passwordHash: 'hash', displayName: 'Skill Exit' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'skill-exit' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Skill exit' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '读取网盘文件' });
+  let round = 0;
+  const model: ModelClient = {
+    async stream() {
+      round += 1;
+      return round === 1
+        ? { content: '', model: 'test', toolCalls: [{ id: 'failed-skill', type: 'function', function: { name: 'pi_skill_exec', arguments: '{}' } }] }
+        : { content: '命令失败', model: 'test' };
+    },
+    async complete() { return { content: 'unused', model: 'test' }; },
+  };
+  const skillManager = {
+    handleInstruction: async () => undefined,
+    buildSystemPrompt: async () => '',
+    getModelTools: () => [],
+    executeModelTool: async () => ({ kind: 'read', title: 'Skill', summary: 'Skill execution failed (1)', content: 'file not found', data: { code: 1, status: 'failed' } }),
+  };
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: { getModelTools: () => [], executeModelTool: async () => undefined } as never, skillManager: skillManager as never, model: 'test' });
+  try {
+    runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && !['succeeded', 'failed'].includes((await store.getRun(admin.id, created.run.id))?.run.status ?? '')) await new Promise((resolve) => setTimeout(resolve, 10));
+    const events = await store.listRunEvents(admin.id, created.run.id, 0);
+    assert.ok(events.some((item) => item.eventType === 'tool.result' && item.payload.status === 'failed'));
+    assert.equal((await store.getRun(admin.id, created.run.id))?.run.status, 'failed');
+  } finally { runtime.stop(); }
+});
+
+test('Pi runtime reuses an identical successful Skill call within one run', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'skill-dedup@example.com', passwordHash: 'hash', displayName: 'Skill Dedup' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'skill-dedup' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Skill dedup' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '搜索文件' });
+  let round = 0;
+  let executions = 0;
+  const model: ModelClient = {
+    async stream() {
+      round += 1;
+      return round < 3
+        ? { content: '', model: 'test', toolCalls: [{ id: `call-${round}`, type: 'function', function: { name: 'pi_skill_exec', arguments: round === 1 ? '{"command":"search","args":["file"]}' : '{"args":["file"],"command":"search"}' } }] }
+        : { content: '已找到文件', model: 'test' };
+    },
+    async complete() { return { content: 'unused', model: 'test' }; },
+  };
+  const skillManager = {
+    handleInstruction: async () => undefined,
+    buildSystemPrompt: async () => '',
+    getModelTools: () => [],
+    executeModelTool: async () => { executions += 1; return { kind: 'read', title: '搜索', summary: '找到文件', content: 'fid=123', data: { status: 'succeeded' } }; },
+  };
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: { getModelTools: () => [], executeModelTool: async () => undefined } as never, skillManager: skillManager as never, model: 'test' });
+  try {
+    runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && !['succeeded', 'failed'].includes((await store.getRun(admin.id, created.run.id))?.run.status ?? '')) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal((await store.getRun(admin.id, created.run.id))?.run.status, 'succeeded');
+    assert.equal(executions, 1);
+    const events = await store.listRunEvents(admin.id, created.run.id, 0);
+    assert.equal(events.filter((item) => item.eventType === 'tool.result' && item.payload.reused === true).length, 1);
+  } finally { runtime.stop(); }
+});
+
+test('Pi runtime invalidates read results after a Skill write but deduplicates that write', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'skill-write-cache@example.com', passwordHash: 'hash', displayName: 'Skill Write Cache' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'skill-write-cache' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Skill write cache' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '查询并分享文件' });
+  let round = 0;
+  const executed: string[] = [];
+  const model: ModelClient = {
+    async stream() {
+      round += 1;
+      const command = round % 2 === 1 ? 'search' : 'share';
+      return round <= 4
+        ? { content: '', model: 'test', toolCalls: [{ id: `call-${round}`, type: 'function', function: { name: 'pi_skill_exec', arguments: JSON.stringify({ command, args: ['file'] }) } }] }
+        : { content: '完成', model: 'test' };
+    },
+    async complete() { return { content: 'unused', model: 'test' }; },
+  };
+  const skillManager = {
+    handleInstruction: async () => undefined,
+    buildSystemPrompt: async () => '',
+    getModelTools: () => [],
+    executeModelTool: async (_name: string, args: { command: string }) => {
+      executed.push(args.command);
+      return { kind: 'read', title: args.command, summary: '执行成功', content: args.command, data: { status: 'succeeded', code: 0 } };
+    },
+  };
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: { getModelTools: () => [], executeModelTool: async () => undefined } as never, skillManager: skillManager as never, model: 'test' });
+  try {
+    runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && !['succeeded', 'failed'].includes((await store.getRun(admin.id, created.run.id))?.run.status ?? '')) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal((await store.getRun(admin.id, created.run.id))?.run.status, 'succeeded');
+    assert.deepEqual(executed, ['search', 'share', 'search']);
+    const events = await store.listRunEvents(admin.id, created.run.id, 0);
+    assert.equal(events.filter((item) => item.eventType === 'tool.result' && item.payload.reused === true).length, 1);
+  } finally { runtime.stop(); }
+});
+
+test('Pi runtime reuses a durable Skill result after continuation', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'skill-resume-cache@example.com', passwordHash: 'hash', displayName: 'Skill Resume' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'skill-resume-cache' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Resume cache' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '搜索文件' });
+  await store.appendRunEvent({ runId: created.run.id, eventType: 'tool.call.started', payload: { toolCallId: 'prior', toolName: 'pi_skill_exec', arguments: '{"command":"search","args":["file"]}' } });
+  await store.appendRunEvent({ runId: created.run.id, eventType: 'tool.result', payload: { toolCallId: 'prior', toolName: 'pi_skill_exec', status: 'succeeded', result: { kind: 'read', title: '搜索', summary: '找到文件', content: 'fid=123', data: { status: 'succeeded' } } } });
+  let round = 0;
+  let executions = 0;
+  const model: ModelClient = {
+    async stream() { round += 1; return round === 1 ? { content: '', model: 'test', toolCalls: [{ id: 'again', type: 'function', function: { name: 'pi_skill_exec', arguments: '{"args":["file"],"command":"search"}' } }] } : { content: '完成', model: 'test' }; },
+    async complete() { return { content: 'unused', model: 'test' }; },
+  };
+  const skillManager = { handleInstruction: async () => undefined, buildSystemPrompt: async () => '', getModelTools: () => [], executeModelTool: async () => { executions += 1; throw new Error('must reuse prior result'); } };
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: { getModelTools: () => [], executeModelTool: async () => undefined } as never, skillManager: skillManager as never, model: 'test' });
+  try {
+    runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && !['succeeded', 'failed'].includes((await store.getRun(admin.id, created.run.id))?.run.status ?? '')) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal((await store.getRun(admin.id, created.run.id))?.run.status, 'succeeded');
+    assert.equal(executions, 0);
+    assert.ok((await store.listRunEvents(admin.id, created.run.id, 0)).some((item) => item.eventType === 'tool.result' && item.payload.reused === true));
+  } finally { runtime.stop(); }
+});
+
+test('Pi runtime keeps the Skill login-required state actionable despite a nonzero exit', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'skill-login-required@example.com', passwordHash: 'hash', displayName: 'Skill Login' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'skill-login-required' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Skill login' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '搜索文件' });
+  const model: ModelClient = {
+    async stream() { return { content: '', model: 'test', toolCalls: [{ id: 'login-needed', type: 'function', function: { name: 'pi_skill_exec', arguments: '{}' } }] }; },
+    async complete() { return { content: 'unused', model: 'test' }; },
+  };
+  const skillManager = { handleInstruction: async () => undefined, buildSystemPrompt: async () => '', getModelTools: () => [], executeModelTool: async () => ({ kind: 'read', title: 'Skill', summary: 'Skill login required', content: '请先登录', data: { code: 1, status: 'unauthorized', requiresLogin: true, userActionRequired: true } }) };
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: { getModelTools: () => [], executeModelTool: async () => undefined } as never, skillManager: skillManager as never, model: 'test' });
+  try {
+    runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && !['succeeded', 'failed'].includes((await store.getRun(admin.id, created.run.id))?.run.status ?? '')) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal((await store.getRun(admin.id, created.run.id))?.run.status, 'succeeded');
+    assert.ok((await store.listRunEvents(admin.id, created.run.id, 0)).some((item) => item.eventType === 'workspace.skill.lifecycle' && item.payload.status === 'pending_user_action'));
+  } finally { runtime.stop(); }
 });
 
 test('workspace model messages follow the language of the current user instruction', () => {

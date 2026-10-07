@@ -150,21 +150,25 @@ export function buildWorkspaceRuntimeHistory(messages: WorkspaceMessageRecord[],
   const currentRunStartSequence = messages.find((message) => message.runId === run.id && message.type === 'user_message')?.sequence;
   const history = messages
     .filter((message) => {
-      if (message.type === 'reasoning_summary' && message.summary === '模型原生推理') return false;
-      if (message.runId === run.id) return message.type !== 'user_message' && message.type !== 'final_answer';
+      // Current-run tool results are reconstructed from durable events below.
+      if (message.runId === run.id) return false;
+      if (message.type !== 'user_message' && message.type !== 'final_answer') return false;
       if (currentRunStartSequence !== undefined) return message.sequence < currentRunStartSequence;
       const messageCreatedAt = Date.parse(message.createdAt);
       const runCreatedAt = Date.parse(run.createdAt);
       return !Number.isFinite(runCreatedAt) || !Number.isFinite(messageCreatedAt) || messageCreatedAt <= runCreatedAt;
     })
+    .slice(-12)
     .map((message) => ({
       role: message.type === 'user_message' ? 'user' as const : 'assistant' as const,
-      content: message.type === 'tool_event'
-        ? `[${message.type}] ${message.summary ? `${message.summary}\n` : ''}${message.content}`
-        : `[${message.type}] ${message.summary ?? message.content}`,
+      content: `[${message.type}] ${message.content.slice(0, 1_000)}`,
     }));
   const checkpoint = buildWorkspaceCheckpoint(events);
   if (checkpoint) history.push({ role: 'assistant', content: checkpoint });
+  else {
+    const legacyResult = [...messages].reverse().find((message) => message.runId === run.id && message.type === 'tool_event');
+    if (legacyResult) history.push({ role: 'assistant', content: `[tool_event] ${legacyResult.summary ?? '工具结果'}\n${legacyResult.content.trim().startsWith('{') ? '原始工具结果已省略' : legacyResult.content.slice(0, 400)}` });
+  }
   return history;
 }
 

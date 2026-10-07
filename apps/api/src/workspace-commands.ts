@@ -263,6 +263,7 @@ export class WorkspaceCommandOrchestrator {
       const current = await this.deps.productAutomation.get(input.adminId, productId);
       const config = parameters.config as Record<string, unknown>;
       validateAutomationConfig(config);
+      if (!hasEffectiveAutomationChange(current.config, config)) throw new ServiceError(409, 'NO_CHANGES', 'product_automation_update does not change the current configuration');
       const automationChanges = buildAutomationPreviewChanges(current.config, config);
       const manifest = { action: operation, accountId, productId, productTitle: product.title, expectedConfigVersion: current.configVersion, fields: Object.keys(config), automationChanges, redacted: true };
       const summary = `准备更新商品“${product.title}”的自动化规则${automationChanges.length ? `（${automationChanges.map((change) => `${change.label}：${change.before} → ${change.after}`).join('；')}）` : ''}`;
@@ -778,11 +779,23 @@ function productSearchContent(items: ProductRecord[], total: number): string { r
 function validateAutomationConfig(config: Record<string, unknown>): void {
   const keys = ['paidAutoDelivery', 'unpaidAutoReprice', 'reviewGift', 'reviewReminder'];
   if (!keys.some((key) => Object.prototype.hasOwnProperty.call(config, key))) throw new ServiceError(422, 'VALIDATION_FAILED', 'product_automation_update config must use canonical rule keys: paidAutoDelivery, unpaidAutoReprice, reviewGift, or reviewReminder');
-  for (const key of ['paidAutoDelivery', 'reviewGift']) {
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(config, key)) continue;
     const rule = config[key];
-    if (!isRecord(rule)) continue;
+    if (!isRecord(rule)) throw new ServiceError(422, 'VALIDATION_FAILED', `${key} must be a rule object`);
+    if (rule.enabled !== undefined && typeof rule.enabled !== 'boolean') throw new ServiceError(422, 'VALIDATION_FAILED', `${key}.enabled must be boolean`);
+    if (rule.couponBatchIds !== undefined && (!Array.isArray(rule.couponBatchIds) || !rule.couponBatchIds.every((id) => typeof id === 'string'))) throw new ServiceError(422, 'VALIDATION_FAILED', `${key}.couponBatchIds must be an array of IDs`);
     if (Object.prototype.hasOwnProperty.call(rule, 'couponName') || Object.prototype.hasOwnProperty.call(rule, 'couponId') || Object.prototype.hasOwnProperty.call(rule, 'couponBatchId')) throw new ServiceError(422, 'VALIDATION_FAILED', `${key} requires couponBatchIds from a prior coupon lookup; human coupon labels are not accepted`);
   }
+}
+function hasEffectiveAutomationChange(current: ProductAutomationConfig | undefined, requested: Record<string, unknown>): boolean {
+  return Object.entries(requested).some(([key, value]) => {
+    if (!isRecord(value)) return false;
+    const existing = isRecord(current?.[key as keyof ProductAutomationConfig])
+      ? current[key as keyof ProductAutomationConfig] as unknown as Record<string, unknown>
+      : defaultAutomationRule(key);
+    return Object.entries(value).some(([field, next]) => JSON.stringify(existing[field]) !== JSON.stringify(next));
+  });
 }
 const AUTOMATION_RULE_KEYS = ['paidAutoDelivery', 'unpaidAutoReprice', 'reviewGift', 'reviewReminder'] as const;
 function normalizeWorkspacePrepareWriteParameters(args: Record<string, unknown>): Record<string, unknown> | undefined {

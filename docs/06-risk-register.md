@@ -314,3 +314,11 @@
 | WS-RISK-01 | stale run or confirmation state can reject a user action after background refresh | action handlers fetch the latest run and confirmation; refresh sequencing and in-flight guard prevent stale or duplicate writes | CLOSED in `7c5e39b` |
 | WS-RISK-02 | confirmation UI can disappear after session navigation | active session is remembered in session storage and run/events/confirmation/outbox are rehydrated from the API | CLOSED in `7c5e39b` |
 | WS-RISK-03 | external platform mutation acceptance remains outside this slice | outbox and controlled confirmation path are verified; external mutation remains a separate release gate | OPEN / follow-up |
+
+## 2026-10-07 Workspace 上下文与工具事件
+
+| risk_id | risk | mitigation / evidence | status |
+| --- | --- | --- | --- |
+| WS-RISK-04 | 模型生成的压缩摘要可能漏掉关键结果或引入未经验证的结论 | 输入限定为有界工具结果；关键 ID/URL 由确定性抽取追加；模型失败时降级为有界摘要；发布后核对真实 Run 的关键标识和后续动作 | OPEN / production verification |
+| WS-RISK-05 | 生产旧工具事件仍存有原始参数，可能含分享口令或链接 | 新事件仅写 SHA-256 参数指纹；旧格式兼容读取；历史数据清理需单独制定保留/审计方案，不在本切片直接删除 | OPEN / retention decision |
+| WS-RISK-06 | 新增模型计划调用增加单次任务的模型请求和延迟 | 5 秒上限、结构化校验、失败不阻断执行；隔离 E2E 记录了计划请求和实际工具调用，发布后观察延迟及调用数 | OPEN / production metrics |

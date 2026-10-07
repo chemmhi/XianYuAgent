@@ -142,6 +142,22 @@ test('workspace_prepare_write wraps direct automation rule parameters into confi
   assert.match(String(result.plan?.manifest.displaySummary), /付费自动发货：关闭，未绑定卡券 → 开启，绑定 1 个卡券批次/);
 });
 
+test('automation write rejects boolean shorthand and unchanged configuration before confirmation', async () => {
+  const product = { id: 'product-noop-automation', accountId: 'account-1', title: '测试商品', configVersion: 2 };
+  const commands = orchestrator({
+    products: { get: async () => product },
+    productAutomation: { get: async () => ({ configVersion: 2, product, config: { paidAutoDelivery: { enabled: false, couponBatchIds: [] } } }) },
+  });
+  await assert.rejects(
+    () => commands.prepareWrite({ ...input, operation: 'product_automation_update', parameters: { productId: product.id, config: { paidAutoDelivery: true } }, instruction: '' }),
+    (error: unknown) => (error as { code?: string }).code === 'VALIDATION_FAILED',
+  );
+  await assert.rejects(
+    () => commands.prepareWrite({ ...input, operation: 'product_automation_update', parameters: { productId: product.id, config: { paidAutoDelivery: { enabled: false, couponBatchIds: [] } } }, instruction: '' }),
+    (error: unknown) => (error as { code?: string }).code === 'NO_CHANGES',
+  );
+});
+
 test('resolves numeric external product refs and builds a disable-all automation patch', async () => {
   const product = { id: 'product-108244', accountId: 'account-1', externalProductRef: '1082449333831', title: '视频下载及文案提取源码，包教包会', configVersion: 4 };
   let updatedConfig: unknown;

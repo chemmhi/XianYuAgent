@@ -133,6 +133,9 @@ async function run() {
     if (!String(input).includes('model.example')) return originalFetch(input, init);
     modelCalls += 1;
     const body = JSON.parse(String(init?.body ?? '{}'));
+    if (body.tool_choice === 'none' && String(body.messages?.[0]?.content ?? '').includes('工具执行顺序')) {
+      return new Response(JSON.stringify({ model: body.model, choices: [{ message: { role: 'assistant', content: JSON.stringify({ steps: [{ tool: 'workspace_product_search', goal: '按名称定位目标商品' }] }) } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
     if (Array.isArray(body.tools) && body.tools.some((tool) => tool.function?.name === 'workspace_product_search')) {
       const toolResult = body.messages?.find((message) => message.role === 'tool');
       if (!toolResult) return new Response(JSON.stringify({
@@ -293,7 +296,8 @@ async function run() {
   })`);
   assert.ok(browserState.summaryCount >= 1, `expected a visible execution summary: ${JSON.stringify(browserState)}`);
   assert.ok(browserState.toolCount >= 1, `expected a visible product tool event: ${JSON.stringify(browserState)}`);
-  assert.match(browserState.summaryText, /分析任务|评估工具结果/);
+  assert.match(browserState.summaryText, /workspace_product_search|按名称定位目标商品/);
+  assert.doesNotMatch(browserState.summaryText, /分析任务|评估工具结果|原始目标：/);
   assert.equal(browserState.avatarCount, 0, `avatars should not render in the conversation stream: ${JSON.stringify(browserState)}`);
   console.log(JSON.stringify({
     apiStorage: 'postgres',
