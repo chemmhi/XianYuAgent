@@ -140,7 +140,7 @@ describe('workspace message projection', () => {
     expect(tool?.content).toContain('匹配到 1 个商品');
   });
 
-  it('keeps useful tool results in event order without synthetic execution summaries', () => {
+  it('keeps execution summaries beside useful tool results in event order', () => {
     const messages = buildWorkspaceMessages(run, [
       { sequence: 2, runId: 'run-1', eventType: 'workspace.execution.summary', payload: { messageType: 'reasoning_summary', summary: '检索商品信息', content: '正在检索商品信息，等待工具返回真实结果。', status: 'running' }, createdAt: '2026-09-20T00:00:01.000Z' },
       { sequence: 3, runId: 'run-1', eventType: 'tool.call.started', payload: { toolCallId: 'call-1', toolName: 'workspace_product_search', summary: '检索商品信息', status: 'running' }, createdAt: '2026-09-20T00:00:01.100Z' },
@@ -149,9 +149,10 @@ describe('workspace message projection', () => {
       { sequence: 6, runId: 'run-1', eventType: 'tool.call.started', payload: { toolCallId: 'call-2', toolName: 'workspace_prepare_write', summary: '准备受控写入', status: 'running' }, createdAt: '2026-09-20T00:00:02.200Z' },
     ]);
     const execution = messages.filter((message) => message.type === 'reasoning_summary' || message.type === 'tool_event');
-    expect(execution.map((message) => message.type)).toEqual(['tool_event', 'tool_event']);
-    expect(execution[1]?.summary).toBe('准备受控写入');
-    expect(execution[0]?.content).toContain('已按名称筛选 1 个商品');
+    expect(execution.map((message) => message.type)).toEqual(['reasoning_summary', 'tool_event', 'reasoning_summary', 'tool_event']);
+    expect(execution[0]).toMatchObject({ summary: '检索商品信息', content: '正在检索商品信息，等待工具返回真实结果。' });
+    expect(execution[2]?.summary).toBe('准备受控写入');
+    expect(execution[1]?.content).toContain('已按名称筛选 1 个商品');
   });
 
   it('shows result-based summaries between tools and hides provisional assistant text from tool rounds', () => {
@@ -163,7 +164,7 @@ describe('workspace message projection', () => {
       { sequence: 6, runId: 'run-1', eventType: 'workspace.execution.summary', payload: { streamId: 'round-1', messageType: 'reasoning_summary', summary: '商品搜索', content: '找到商品' }, createdAt: '2026-09-20T00:00:02.100Z' },
       { sequence: 7, runId: 'run-1', eventType: 'tool.call.started', payload: { streamId: 'round-2', toolCallId: 'call-2', toolName: 'workspace_prepare_write', summary: '准备受控写入' }, createdAt: '2026-09-20T00:00:02.200Z' },
     ]);
-    expect(messages.filter((message) => message.type === 'reasoning_summary' || message.type === 'tool_event').map((message) => message.type)).toEqual(['tool_event', 'tool_event']);
+    expect(messages.filter((message) => message.type === 'reasoning_summary' || message.type === 'tool_event').map((message) => message.type)).toEqual(['reasoning_summary', 'tool_event', 'reasoning_summary', 'tool_event']);
     expect(messages.some((message) => message.content === '尚未完成')).toBe(false);
   });
 
@@ -179,6 +180,7 @@ describe('workspace message projection', () => {
       { sequence: 9, runId: 'run-1', eventType: 'context.compacted', payload: { summary: '已压缩上下文并保留任务目标及关键结果' }, createdAt: '2026-10-07T01:00:00.700Z' },
     ]);
     expect(projected.filter((item) => item.type === 'tool_event')).toHaveLength(1);
+    expect(projected.some((item) => item.type === 'reasoning_summary' && item.summary === '分析任务')).toBe(true);
     expect(projected.some((item) => item.content.includes('商品 product-1'))).toBe(true);
     expect(projected.every((item) => !/内部推理细节|raw-json|大量原始 JSON/.test(item.content))).toBe(true);
   });

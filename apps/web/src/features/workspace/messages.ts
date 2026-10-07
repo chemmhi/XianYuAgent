@@ -118,7 +118,11 @@ const lifecycleEventTypes = new Set([
 
 function shouldProjectEvent(event: WorkspaceRunEventVM): boolean {
   if (lifecycleEventTypes.has(event.eventType)) return false;
-  if (event.eventType === 'workspace.execution.summary' || event.eventType === 'context.compacted' || event.eventType === 'reasoning.delta') return false;
+  // Execution summaries are the user-visible high-level reasoning checkpoints.
+  // Keep them in the live trace; filtering them here makes the step fallback
+  // disappear as soon as the first tool event arrives, which looks like a
+  // reasoning summary flashing and then being covered by tool output.
+  if (event.eventType === 'context.compacted' || event.eventType === 'reasoning.delta') return false;
   if (event.eventType === 'step.succeeded' || event.eventType === 'step.failed') return Boolean(messageType(event));
   if (event.eventType === 'runtime.succeeded' || event.eventType === 'runtime.failed' || event.eventType === 'run.succeeded' || event.eventType === 'run.failed') return Boolean(messageType(event) || event.payload.content);
   return true;
