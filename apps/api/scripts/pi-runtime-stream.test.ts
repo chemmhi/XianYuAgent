@@ -507,6 +507,78 @@ test('Pi runtime reuses a repeated product search and stops a no-progress tool l
   } finally { runtime.stop(); }
 });
 
+test('Pi runtime stops varying Skill queries on semantic no-progress and preserves the budget on reconnect', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'skill-semantic-loop@example.com', passwordHash: 'hash', displayName: 'Skill Semantic Loop' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'skill-semantic-loop' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Skill semantic loop' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '查找 03 PPT Master 并创建分享' });
+  let round = 0;
+  const model: ModelClient = {
+    async stream() {
+      round += 1;
+      return { content: '', model: 'test', toolCalls: [{ id: `search-${round}`, type: 'function', function: { name: 'pi_skill_search', arguments: JSON.stringify({ skillId: 'quarkclouddrive', query: `missing-${round}`, mode: 'literal' }) } }] };
+    },
+    async complete() { return { content: 'unused', model: 'test' }; },
+  };
+  const skillManager = {
+    handleInstruction: async () => undefined,
+    buildSystemPrompt: async () => '',
+    getModelTools: () => [],
+    executeModelTool: async () => ({ kind: 'read' as const, title: 'Skill search', summary: 'No Skill instruction matches', content: 'No matches', data: { status: 'succeeded', matches: 0 } }),
+  };
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: { getModelTools: () => [], executeModelTool: async () => undefined } as never, skillManager: skillManager as never, model: 'test' });
+  try {
+    await store.appendRunEvent({ runId: created.run.id, eventType: 'workspace.skill.progress', payload: { phase: 'discovery', discoveryCalls: 7, executionCalls: 0, noProgressCount: 7, evidenceFingerprint: 'pi_skill_search:no-match', suggestedTool: 'pi_skill_exec' } });
+    runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps, resumeFromFailure: true });
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && !['succeeded', 'failed', 'cancelled', 'expired'].includes((await store.getRun(admin.id, created.run.id))?.run.status ?? '')) await new Promise((resolve) => setTimeout(resolve, 10));
+    const bundle = await store.getRun(admin.id, created.run.id);
+    const events = await store.listRunEvents(admin.id, created.run.id, 0);
+    assert.equal(bundle?.run.status, 'succeeded');
+    assert.equal(round, 1);
+    assert.ok(events.some((event) => event.eventType === 'workspace.skill.progress' && event.payload.noProgressCount === 8));
+    assert.ok(events.some((event) => event.eventType === 'workspace.skill.lifecycle' && event.payload.data && (event.payload.data as Record<string, unknown>).code === 'SKILL_DISCOVERY_NO_PROGRESS'));
+    assert.equal(bundle?.run.errorCode, undefined);
+  } finally { runtime.stop(); }
+});
+
+test('Pi runtime bounds a 38-query Skill search loop before any execution', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'skill-38-query-loop@example.com', passwordHash: 'hash', displayName: 'Skill 38 Query Loop' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'skill-38-query-loop' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Skill 38 query loop' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '用 03 PPT Master 的网盘公开分享链接创建' });
+  let rounds = 0;
+  const model: ModelClient = {
+    async stream() {
+      rounds += 1;
+      return { content: '', model: 'test', toolCalls: [{ id: `search-${rounds}`, type: 'function', function: { name: 'pi_skill_search', arguments: JSON.stringify({ skillId: 'quarkclouddrive', query: `03 PPT Master 变体 ${rounds}`, mode: 'literal' }) } }] };
+    },
+    async complete() { return { content: 'unused', model: 'test' }; },
+  };
+  const skillManager = {
+    handleInstruction: async () => undefined,
+    buildSystemPrompt: async () => '',
+    getModelTools: () => [],
+    executeModelTool: async () => ({ kind: 'read' as const, title: 'Skill search', summary: 'No Skill instruction matches', content: 'No matches', data: { status: 'succeeded', matches: 0 } }),
+  };
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: { getModelTools: () => [], executeModelTool: async () => undefined } as never, skillManager: skillManager as never, model: 'test' });
+  try {
+    runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && (await store.getRun(admin.id, created.run.id))?.run.status !== 'succeeded') await new Promise((resolve) => setTimeout(resolve, 10));
+    const bundle = await store.getRun(admin.id, created.run.id);
+    const events = await store.listRunEvents(admin.id, created.run.id, 0);
+    assert.equal(bundle?.run.status, 'succeeded');
+    assert.equal(rounds, 9);
+    assert.equal(events.filter((event) => event.eventType === 'tool.result' && event.payload.toolName === 'pi_skill_exec').length, 0);
+    assert.ok(events.some((event) => event.eventType === 'workspace.skill.lifecycle' && event.payload.status === 'pending_user_action' && (event.payload.data as Record<string, unknown>)?.code === 'SKILL_DISCOVERY_NO_PROGRESS'));
+    assert.ok(events.some((event) => event.eventType === 'workspace.skill.progress' && event.payload.noProgressCount === 8));
+    assert.equal(bundle?.run.errorCode, undefined);
+  } finally { runtime.stop(); }
+});
+
 for (const toolName of ['workspace_read', 'pi_skill_list']) {
   test(`Pi runtime stops repeated ${toolName} reads without executing them again`, async () => {
     const store = new MemoryStore();
@@ -548,7 +620,7 @@ test('Pi runtime invalidates read results after a Skill write but deduplicates t
   const model: ModelClient = {
     async stream() {
       round += 1;
-      const command = round % 2 === 1 ? 'search' : 'share';
+      const command = round % 2 === 1 ? 'get-share-update-files' : 'share';
       return round <= 4
         ? { content: '', model: 'test', toolCalls: [{ id: `call-${round}`, type: 'function', function: { name: 'pi_skill_exec', arguments: JSON.stringify({ command, args: ['file'] }) } }] }
         : { content: '完成', model: 'test' };
@@ -570,7 +642,7 @@ test('Pi runtime invalidates read results after a Skill write but deduplicates t
     const deadline = Date.now() + 2_000;
     while (Date.now() < deadline && !['succeeded', 'failed'].includes((await store.getRun(admin.id, created.run.id))?.run.status ?? '')) await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal((await store.getRun(admin.id, created.run.id))?.run.status, 'succeeded');
-    assert.deepEqual(executed, ['search', 'share', 'search']);
+    assert.deepEqual(executed, ['get-share-update-files', 'share', 'get-share-update-files']);
     const events = await store.listRunEvents(admin.id, created.run.id, 0);
     assert.equal(events.filter((item) => item.eventType === 'tool.result' && item.payload.reused === true).length, 1);
   } finally { runtime.stop(); }

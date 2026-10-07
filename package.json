@@ -50,6 +50,7 @@
     "test:e2e:chrome:messages": "npm --workspace apps/web run test:e2e:chrome:messages",
     "test:e2e:chrome:workspace": "npm --workspace apps/web run test:e2e:chrome:workspace",
     "test:e2e:chrome:workspace:pi": "npm --workspace apps/web run test:e2e:chrome:workspace:pi",
+    "test:e2e:chrome:workspace:skill-share": "npm --workspace apps/web run test:e2e:chrome:workspace:skill-share",
     "test:e2e:chrome:orders": "npm --workspace apps/web run test:e2e:chrome:orders",
     "test:e2e:chrome:settings": "npm --workspace apps/web run test:e2e:chrome:settings",
     "test:e2e:chrome:agent-dynamics": "npm --workspace apps/web run test:e2e:chrome:agent-dynamics",

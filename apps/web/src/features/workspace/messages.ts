@@ -157,7 +157,10 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
   let finalAnswerRendered = false;
   const hasPersistedFinalAnswer = events.some((event) => event.eventType !== 'assistant.delta' && messageType(event) === 'final_answer');
   const toolStreams = new Set(events.filter((event) => event.eventType.startsWith('tool.call.')).map((event) => event.payload.streamId).filter((value): value is string => typeof value === 'string'));
-  const hasStreamingFinalAnswer = events.some((event) => event.eventType === 'assistant.delta' && !toolStreams.has(String(event.payload.streamId ?? '')) && typeof event.payload.contentDelta === 'string' && event.payload.contentDelta.trim());
+  const hasStreamingFinalAnswer = events.some((event) => {
+    if (event.eventType !== 'assistant.delta' || toolStreams.has(String(event.payload.streamId ?? '')) || typeof event.payload.contentDelta !== 'string' || !event.payload.contentDelta.trim()) return false;
+    return event.payload.phase === 'terminal' || (event.payload.phase === undefined && event.payload.messageType !== 'reasoning_summary');
+  });
   mergeStreamingEvents(events, { ignoreAssistantDeltas: hasPersistedFinalAnswer, toolStreams }).sort((left, right) => left.sequence - right.sequence).forEach((event) => {
     if (!shouldProjectEvent(event)) return;
     // Pi Runtime persists live reasoning/final messages as workspace.message.
@@ -250,7 +253,9 @@ function mergeStreamingEvents(events: WorkspaceRunEventVM[], options: { ignoreAs
     if (event.eventType === 'assistant.delta') {
       if (options.ignoreAssistantDeltas || (typeof payload.streamId === 'string' && options.toolStreams?.has(payload.streamId))) return;
       const messageId = typeof payload.messageId === 'string' ? payload.messageId : `${event.runId}:assistant`;
-      append(event, 'final_answer', typeof payload.contentDelta === 'string' ? payload.contentDelta : '', messageId);
+      const legacyTerminal = payload.phase === undefined && payload.messageType !== 'reasoning_summary';
+      const type = payload.phase === 'terminal' || legacyTerminal ? 'final_answer' : 'reasoning_summary';
+      append(event, type, typeof payload.contentDelta === 'string' ? payload.contentDelta : '', messageId, type === 'reasoning_summary' ? '模型处理中间进度' : undefined);
       return;
     }
     if (event.eventType === 'tool.call.started' || event.eventType === 'tool.call.delta' || event.eventType === 'tool.call.completed' || event.eventType === 'tool.result') {

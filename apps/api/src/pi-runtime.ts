@@ -15,6 +15,7 @@ export const DEFAULT_PI_TIMEOUT_MS = 30_000;
 export const DEFAULT_PI_WIRE_API: ModelWireApi = 'responses';
 /** Workspace Agent has its own loop budget; it must not reuse buyer Auto-Reply settings. */
 export const DEFAULT_PI_MAX_TOOL_ROUNDS = 24;
+export const SKILL_NO_PROGRESS_LIMIT = 8;
 
 export type ModelWireApi = 'chat' | 'responses';
 
@@ -341,6 +342,7 @@ const WORKSPACE_AGENT_SYSTEM_PROMPT = [
   '只有当原始任务中的所有用户要求都已由真实工具结果确认完成时，才返回最终答复；仍有后续动作时继续规划并调用对应工具。',
   'Pi Skill 的登录状态按管理员和 Skill 持久化：已授权时复用已有状态，除非 Skill 返回 requiresLogin 或用户明确要求重新登录，否则不要再次调用 pi_skill_login。',
   '只为安装调用 pi_skill_install，只为登录调用 pi_skill_login，只能使用 Skill 明确记录的命令调用 pi_skill_exec；不要把 bash、install 等 shell 命令传给 pi_skill_exec。',
+  'Skill 文档检索按“新证据”推进：拿到可验证的命令片段或文件标识后，优先调用对应的 pi_skill_exec；search、browse、list、get、help 仍属于 discovery，share 等非只读命令才进入 execution。不同关键词如果没有新证据，不要继续换词；达到检索预算时转为可行动等待并停止。',
   '如果 Skill 返回 requiresLogin、unauthorized、pending_user_action 或 userActionRequired，不要重复原命令；最多发起一次登录流程，或直接返回用户需要完成的操作，然后停止工具执行。',
   '工具返回后，要么基于结果回答，要么只在结果明确要求修正时选择其他工具。没有拿到工具结果时，不要声称工具已经执行。',
   '最终答复简洁、准确，并且只基于当前上下文和工具结果。',
@@ -602,7 +604,8 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     const tools = [...commands.getModelTools(), ...(this.options.skillManager?.getModelTools() ?? [])];
     const skillPrompt = this.options.skillManager ? await this.options.skillManager.buildSystemPrompt(input.adminId ?? input.run.requestedBy) : '';
     const messages = buildWorkspaceModelMessages(input.history ?? [], input.run.instruction, skillPrompt, input.attachments);
-    const replayableResults = completedReplayableResults(await this.store.listRunEvents(input.adminId ?? input.run.requestedBy, input.run.id, 0));
+    const priorEvents = await this.store.listRunEvents(input.adminId ?? input.run.requestedBy, input.run.id, 0);
+    const replayableResults = completedReplayableResults(priorEvents);
     if (!input.resumeAfterConfirmation && !input.resumeFromFailure) {
       const plan = await planWorkspaceToolUse(input.run.instruction, tools, modelClient, signal);
       if (plan && !signal.aborted) {
@@ -618,6 +621,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     let completedWithoutTool = false;
     let pendingToolFailure: { toolName: string; code: string; summary: string } | undefined;
     const repeatedCalls = new Map<string, number>();
+    const skillProgress = restoreSkillProgress(priorEvents);
     const configuredMaxRounds = this.options.maxToolRounds;
     const maxRounds = configuredMaxRounds !== undefined && configuredMaxRounds > 0
       ? Math.max(1, Math.trunc(configuredMaxRounds))
@@ -641,7 +645,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
         },
         onTextDelta: async (delta) => {
           assistant += delta;
-          await this.emit(input.run.id, 'assistant.delta', { streamId, messageId: assistantMessageId, contentDelta: redactSensitiveText(delta, this.options.redactSecrets), messageType: 'final_answer', status: 'running' });
+          await this.emit(input.run.id, 'assistant.delta', { streamId, messageId: assistantMessageId, contentDelta: redactSensitiveText(delta, this.options.redactSecrets), messageType: 'reasoning_summary', phase: 'draft', status: 'running' });
         },
         onToolCall: async (call) => {
           const progress = workspaceToolProgress(call.function.name);
@@ -738,6 +742,35 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           continue;
         }
         const redacted = this.redactToolResult(result);
+        if (call.function.name.startsWith('pi_skill_')) {
+          const progress = updateSkillProgress(skillProgress, call.function.name, args, result);
+          await this.emit(input.run.id, 'workspace.skill.progress', {
+            streamId,
+            toolName: call.function.name,
+            phase: progress.phase,
+            discoveryCalls: progress.discoveryCalls,
+            executionCalls: progress.executionCalls,
+            noProgressCount: progress.noProgressCount,
+            evidenceFingerprint: progress.evidenceFingerprint,
+            progressed: progress.progressed,
+            suggestedTool: progress.suggestedTool,
+          });
+          if (progress.phase === 'discovery' && progress.noProgressCount >= SKILL_NO_PROGRESS_LIMIT) {
+            pendingUserAction = {
+              title: 'Skill 检索已暂停',
+              summary: '连续 Skill 检索没有产生新证据',
+              content: '连续 Skill 检索没有产生新证据，已停止继续换词。请补充明确的文件标识、公开分享链接或确认可执行命令后重连。',
+              data: {
+                status: 'pending_user_action',
+                userActionRequired: true,
+                code: 'SKILL_DISCOVERY_NO_PROGRESS',
+                phase: progress.phase,
+                noProgressCount: progress.noProgressCount,
+                suggestedTool: progress.suggestedTool ?? 'pi_skill_exec',
+              },
+            };
+          }
+        }
         await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, title: result.title, summary: result.summary, status: 'succeeded', reused, result: redacted, completedAt: new Date().toISOString() });
         await this.emit(input.run.id, 'workspace.execution.summary', { streamId, messageType: 'reasoning_summary', summary: result.title, content: result.summary, status: 'succeeded' });
         if (result.kind !== 'write_plan' && !reused) await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'tool_event', content: JSON.stringify(redacted), summary: result.summary });
@@ -755,6 +788,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           waitingConfirmation = true;
           break;
         }
+        if (pendingUserAction) break;
       }
       await this.emit(input.run.id, 'stream.round.completed', { streamId, round: round + 1, toolCallCount: calls.length, status: waitingConfirmation ? 'waiting_confirmation' : pendingUserAction ? 'pending_user_action' : 'tool_completed' });
       if (waitingConfirmation) break;
@@ -1418,7 +1452,65 @@ function skillCommandIsReadOnly(args: Record<string, unknown>): boolean {
   const command = typeof args.command === 'string' ? args.command.trim().toLowerCase() : '';
   const readCommands = new Set(['search', 'browse', 'list', 'get-user-info', 'info', 'help']);
   const helpOnly = command === 'quark-drive' && Array.isArray(args.args) && args.args.length === 1 && args.args[0] === '--help';
-  return readCommands.has(command) || helpOnly;
+  return readCommands.has(command) || /^(?:get|list|search|browse|info|check)(?:[-_.].*)?$/.test(command) || helpOnly;
+}
+
+type SkillProgressPhase = 'discovery' | 'execution';
+
+interface SkillProgressState {
+  phase: SkillProgressPhase;
+  noProgressCount: number;
+  discoveryCalls: number;
+  executionCalls: number;
+  evidenceKeys: Set<string>;
+  suggestedTool?: string;
+}
+
+function restoreSkillProgress(events: RunEventRecord[]): SkillProgressState {
+  const state: SkillProgressState = { phase: 'discovery', noProgressCount: 0, discoveryCalls: 0, executionCalls: 0, evidenceKeys: new Set<string>() };
+  for (const event of events) {
+    if (event.eventType !== 'workspace.skill.progress') continue;
+    const payload = event.payload;
+    if (payload.phase === 'execution' || payload.phase === 'discovery') state.phase = payload.phase;
+    if (typeof payload.noProgressCount === 'number') state.noProgressCount = Math.max(0, Math.trunc(payload.noProgressCount));
+    if (typeof payload.discoveryCalls === 'number') state.discoveryCalls = Math.max(0, Math.trunc(payload.discoveryCalls));
+    if (typeof payload.executionCalls === 'number') state.executionCalls = Math.max(0, Math.trunc(payload.executionCalls));
+    if (typeof payload.evidenceFingerprint === 'string' && payload.evidenceFingerprint) state.evidenceKeys.add(payload.evidenceFingerprint);
+    if (typeof payload.suggestedTool === 'string') state.suggestedTool = payload.suggestedTool;
+  }
+  return state;
+}
+
+function updateSkillProgress(state: SkillProgressState, toolName: string, args: Record<string, unknown>, result: WorkspaceModelToolResult): { phase: SkillProgressPhase; noProgressCount: number; discoveryCalls: number; executionCalls: number; evidenceFingerprint: string; progressed: boolean; suggestedTool?: string } {
+  const phase: SkillProgressPhase = toolName === 'pi_skill_exec' && !skillCommandIsReadOnly(args) ? 'execution' : 'discovery';
+  if (phase === 'execution') {
+    state.executionCalls += 1;
+    state.phase = 'execution';
+    state.noProgressCount = 0;
+  } else {
+    state.discoveryCalls += 1;
+    state.phase = 'discovery';
+  }
+  const fingerprint = skillEvidenceFingerprint(toolName, result);
+  const progressed = phase === 'execution' || !state.evidenceKeys.has(fingerprint);
+  if (progressed) state.noProgressCount = 0;
+  else state.noProgressCount += 1;
+  state.evidenceKeys.add(fingerprint);
+  const suggestedTool = phase === 'discovery' && hasCommandEvidence(result) ? 'pi_skill_exec' : state.suggestedTool;
+  state.suggestedTool = suggestedTool;
+  return { phase: state.phase, noProgressCount: state.noProgressCount, discoveryCalls: state.discoveryCalls, executionCalls: state.executionCalls, evidenceFingerprint: fingerprint, progressed, suggestedTool };
+}
+
+function skillEvidenceFingerprint(toolName: string, result: WorkspaceModelToolResult): string {
+  const data = isRecord(result.data) ? result.data : undefined;
+  if (data?.matches === 0 || /no\s+skill\s+instruction\s+matches|no\s+matches/i.test(result.summary)) return `${toolName}:no-match`;
+  const normalized = JSON.stringify({ toolName, summary: result.summary, content: result.content.replace(/line\s+\d+:/gi, 'line:').slice(0, 2_000), data: data ? { sourceFile: data.sourceFile, parsed: data.parsed, code: data.code, status: data.status } : undefined });
+  return createHash('sha256').update(normalized).digest('hex');
+}
+
+function hasCommandEvidence(result: WorkspaceModelToolResult): boolean {
+  const data = isRecord(result.data) ? result.data : undefined;
+  return Array.isArray(data?.commandEvidence) && data.commandEvidence.some((item) => isRecord(item) && typeof item.command === 'string' && item.command.trim().length > 0);
 }
 
 function clearReplayableReads(results: Map<string, WorkspaceModelToolResult>): void {

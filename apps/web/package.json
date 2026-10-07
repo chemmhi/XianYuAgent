@@ -20,6 +20,7 @@
     "test:e2e:chrome:messages": "node scripts/e2e-messages-chrome.mjs",
     "test:e2e:chrome:workspace": "node scripts/e2e-workspace-real.mjs",
     "test:e2e:chrome:workspace:pi": "node scripts/e2e-workspace-chatgpt-postgres.mjs",
+    "test:e2e:chrome:workspace:skill-share": "node scripts/e2e-workspace-skill-share-postgres.mjs",
     "test:e2e:chrome:orders": "node scripts/e2e-orders-chrome.mjs",
     "test:e2e:chrome:settings": "node scripts/e2e-settings-chrome.mjs",
     "test:e2e:chrome:settings:openai": "node scripts/e2e-settings-openai-chrome.mjs",

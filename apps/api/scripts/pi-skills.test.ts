@@ -282,6 +282,146 @@ test('searches a long Skill manifest without returning the whole document', asyn
   } finally { await rm(fixtureRoot, { recursive: true, force: true }); }
 });
 
+test('reads and searches reference documents with a bounded cursor and rejects traversal', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'pi-skill-references-'));
+  try {
+    const skillRoot = join(fixtureRoot, 'reference-skill');
+    await mkdir(join(skillRoot, 'references'), { recursive: true });
+    await mkdir(join(skillRoot, 'scripts'), { recursive: true });
+    await writeFile(join(skillRoot, 'SKILL.md'), '---\nname: reference-skill\n---\nUse references for commands.\n');
+    await writeFile(join(skillRoot, 'references', 'file-share.md'), [
+      '# File share',
+      '1. Search the file with `search --name "03 PPT Master"`.',
+      '2. Create the public link with `share --fid FID --title "03 PPT Master" --url-type 1`.',
+      '```bash',
+      'share --fid FID --title "03 PPT Master" --url-type 1',
+      '```',
+      '3. Return the link.',
+    ].join('\n'));
+    await writeFile(join(skillRoot, 'scripts', 'main.cjs'), "console.log(JSON.stringify({ code: 0, ok: true }));");
+    const archive = join(fixtureRoot, 'reference-skill.zip');
+    await execFile('tar', ['-a', '-c', '-f', archive, '-C', fixtureRoot, 'reference-skill']);
+    const manager = new PiSkillManager({ rootDir: join(fixtureRoot, 'installed') });
+    await manager.install({ adminId: 'admin/reference', source: archive });
+    const input = { adminId: 'admin/reference', accountId: 'account-1', instruction: '查找分享命令', requestId: 'reference-1', traceId: 'reference-1' };
+    const read = await manager.executeModelTool('pi_skill_read', { skillId: 'reference-skill', filePath: 'references/file-share.md' }, input);
+    assert.equal(read.data?.sourceFile, 'references/file-share.md');
+    assert.match(read.content, /share --fid/);
+    const discovered = await manager.executeModelTool('pi_skill_search', { skillId: 'reference-skill', query: '03 PPT Master', mode: 'literal' }, input);
+    assert.equal(discovered.data?.matches, 3);
+    assert.match(discovered.content, /references\/file-share\.md/);
+    assert.ok((discovered.data?.commandEvidence as Array<{ sourceFile?: string; command?: string }>).some((item) => item.sourceFile === 'references/file-share.md' && item.command?.startsWith('share ')));
+    const first = await manager.executeModelTool('pi_skill_search', { skillId: 'reference-skill', query: 'share', mode: 'literal', filePath: 'references/file-share.md', limit: 1 }, input);
+    assert.equal(first.data?.matches, 1);
+    assert.equal(first.data?.hasMore, true);
+    assert.equal(typeof first.data?.nextCursor, 'string');
+    assert.ok(Array.isArray(first.data?.commandEvidence));
+    const multiFile = await manager.executeModelTool('pi_skill_search', { skillId: 'reference-skill', query: '03 PPT Master', mode: 'literal' }, input);
+    assert.equal(multiFile.data?.sourceFile, undefined);
+    assert.ok((multiFile.data?.commandEvidence as Array<{ command?: string }>).some((item) => item.command?.startsWith('share')));
+    const second = await manager.executeModelTool('pi_skill_search', { skillId: 'reference-skill', query: 'share', mode: 'literal', filePath: 'references/file-share.md', limit: 1, cursor: first.data?.nextCursor }, input);
+    assert.equal(second.data?.matches, 1);
+    assert.notEqual(second.data?.nextCursor, first.data?.nextCursor);
+    await assert.rejects(manager.executeModelTool('pi_skill_read', { skillId: 'reference-skill', filePath: '../SKILL.md' }, input), { code: 'SKILL_DOCUMENT_PATH_INVALID' });
+    await assert.rejects(manager.executeModelTool('pi_skill_search', { skillId: 'reference-skill', query: 'share', cursor: 'bad-cursor' }, input), { code: 'SKILL_SEARCH_CURSOR_INVALID' });
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('preflight never runs a manifest install script implicitly', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'pi-skill-preflight-'));
+  try {
+    const skillRoot = join(fixtureRoot, 'preflight-skill');
+    await mkdir(join(skillRoot, 'scripts'), { recursive: true });
+    await writeFile(join(skillRoot, 'SKILL.md'), '---\nname: preflight-skill\npreflight: scripts/install.sh\n---\n');
+    const marker = join(skillRoot, 'install-ran.txt');
+    await writeFile(join(skillRoot, 'scripts', 'install.sh'), `echo ran > "${marker.replace(/\\/g, '/')}"\n`);
+    await writeFile(join(skillRoot, 'scripts', 'main.cjs'), "console.log(JSON.stringify({ code: 0, ok: true }));");
+    const archive = join(fixtureRoot, 'preflight-skill.zip');
+    await execFile('tar', ['-a', '-c', '-f', archive, '-C', fixtureRoot, 'preflight-skill']);
+    const manager = new PiSkillManager({ rootDir: join(fixtureRoot, 'installed') });
+    await manager.install({ adminId: 'admin/preflight', source: archive });
+    const input = { adminId: 'admin/preflight', accountId: 'account-1', instruction: '执行命令', requestId: 'preflight-1', traceId: 'preflight-1' };
+    const result = await manager.executeModelTool('pi_skill_exec', { skillId: 'preflight-skill', command: 'search', args: ['03 PPT Master'] }, input);
+    assert.equal(result.data?.status, 'succeeded');
+    await assert.rejects(manager.executeModelTool('pi_skill_exec', { skillId: 'preflight-skill', command: 'bash', args: ['scripts/install.sh'] }, input), { code: 'SKILL_COMMAND_FORBIDDEN' });
+    const preflight = await manager.preflight({ adminId: 'admin/preflight', skillId: 'preflight-skill', requestId: 'preflight-1' });
+    assert.equal(preflight.setupDeclared, true);
+    assert.equal(preflight.setupRequired, false);
+    assert.equal(preflight.ready, true);
+    assert.equal(await readFile(marker, 'utf8').then(() => true).catch(() => false), false);
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('preflight runs only an explicit read-only probe and reports runtime failures', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'pi-skill-preflight-probe-'));
+  try {
+    const skillRoot = join(fixtureRoot, 'probe-skill');
+    await mkdir(join(skillRoot, 'scripts'), { recursive: true });
+    await writeFile(join(skillRoot, 'SKILL.md'), '---\nname: probe-skill\npreflightCommand: health\npreflightArgs: --probe\n---\n');
+    await writeFile(join(skillRoot, 'scripts', 'main.cjs'), [
+      "const args = process.argv.slice(2);",
+      "if (args[0] === 'health' && args[1] === '--probe') { console.log(JSON.stringify({ code: 0, healthy: true })); process.exit(0); }",
+      "if (args[0] === 'health' && args[1] === '--payload-fail') { console.log(JSON.stringify({ code: 3, healthy: false })); process.exit(0); }",
+      "if (args[0] === 'health') { console.log(JSON.stringify({ code: 3, healthy: false })); process.exit(3); }",
+      "console.log(JSON.stringify({ code: 0 }));",
+    ].join('\n'));
+    const archive = join(fixtureRoot, 'probe-skill.zip');
+    await execFile('tar', ['-a', '-c', '-f', archive, '-C', fixtureRoot, 'probe-skill']);
+    const manager = new PiSkillManager({ rootDir: join(fixtureRoot, 'installed') });
+    const installed = await manager.install({ adminId: 'admin/probe', source: archive });
+    const ready = await manager.preflight({ adminId: 'admin/probe', skillId: installed.id, requestId: 'probe-1' });
+    assert.equal(ready.ready, true);
+    assert.deepEqual(ready.probe, { command: 'health', args: ['--probe'], status: 'succeeded' });
+    const payloadFailure = await manager.execute({ adminId: 'admin/probe', skillId: installed.id, command: 'health', args: ['--payload-fail'] });
+    assert.equal(payloadFailure.code, 3);
+
+    const invalid = join(fixtureRoot, 'invalid-probe');
+    await mkdir(join(invalid, 'scripts'), { recursive: true });
+    await writeFile(join(invalid, 'SKILL.md'), '---\nname: invalid-probe\npreflightCommand: share\n---\n');
+    await writeFile(join(invalid, 'scripts', 'main.cjs'), "console.log(JSON.stringify({ code: 0 }));");
+    const invalidArchive = join(fixtureRoot, 'invalid-probe.zip');
+    await execFile('tar', ['-a', '-c', '-f', invalidArchive, '-C', fixtureRoot, 'invalid-probe']);
+    const invalidInstalled = await manager.install({ adminId: 'admin/probe', source: invalidArchive });
+    const invalidResult = await manager.preflight({ adminId: 'admin/probe', skillId: invalidInstalled.id, requestId: 'probe-2' });
+    assert.equal(invalidResult.ready, false);
+    assert.match(invalidResult.stderr, /read-only/);
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('preflight cache invalidates after reinstall and rejects malformed entrypoints', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'pi-skill-preflight-cache-'));
+  try {
+    const skillRoot = join(fixtureRoot, 'cache-skill');
+    await mkdir(join(skillRoot, 'scripts'), { recursive: true });
+    await writeFile(join(skillRoot, 'SKILL.md'), '---\nname: cache-skill\n---\n');
+    const archive = join(fixtureRoot, 'cache-skill.zip');
+    await execFile('tar', ['-a', '-c', '-f', archive, '-C', fixtureRoot, 'cache-skill']);
+    const manager = new PiSkillManager({ rootDir: join(fixtureRoot, 'installed') });
+    await manager.install({ adminId: 'admin/cache', source: archive });
+    const missing = await manager.preflight({ adminId: 'admin/cache', skillId: 'cache-skill', requestId: 'same-request' });
+    assert.equal(missing.ready, false);
+    await writeFile(join(skillRoot, 'scripts', 'main.cjs'), 'console.log(JSON.stringify({ code: 0 }));');
+    await execFile('tar', ['-a', '-c', '-f', archive, '-C', fixtureRoot, 'cache-skill']);
+    await manager.install({ adminId: 'admin/cache', source: archive });
+    const ready = await manager.preflight({ adminId: 'admin/cache', skillId: 'cache-skill', requestId: 'same-request' });
+    assert.equal(ready.ready, true);
+    await writeFile(join(skillRoot, 'scripts', 'main.cjs'), 'this is not valid javascript');
+    await execFile('tar', ['-a', '-c', '-f', archive, '-C', fixtureRoot, 'cache-skill']);
+    await manager.install({ adminId: 'admin/cache', source: archive });
+    const broken = await manager.preflight({ adminId: 'admin/cache', skillId: 'cache-skill', requestId: 'same-request' });
+    assert.equal(broken.ready, false);
+    assert.equal(broken.entrypoint, false);
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test('Skill text search supports literal, Fuse fuzzy, and RE2 regex with bounded excerpts', () => {
   const body = 'Search files with search --name target.\nShare a file with share --fid 12345.\n' + 'irrelevant\n'.repeat(12);
   assert.equal(searchSkillText(body, 'share --fid', 'literal').matches[0]?.line, 2);
@@ -462,6 +602,41 @@ test('persists authorization across manager instances, reuses it, and invalidate
     assert.equal(reLogin.status, 'pending_user_action');
     const loginCountAfterExpiry = await readFile(join(installedRoot, 'admin_persist', '.state', installed.id, 'login-count.txt'), 'utf8');
     assert.equal(loginCountAfterExpiry, '2');
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('invalidates cached preflight authorization after login and expiry', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'pi-skill-preflight-auth-cache-'));
+  try {
+    const skillRoot = join(fixtureRoot, 'auth-cache-skill');
+    const installedRoot = join(fixtureRoot, 'installed');
+    await mkdir(join(skillRoot, 'scripts'), { recursive: true });
+    await writeFile(join(skillRoot, 'SKILL.md'), '---\nname: auth-cache-skill\nversion: 1.0.0\n---\n');
+    await writeFile(join(skillRoot, 'scripts', 'main.cjs'), [
+      "const args = process.argv.slice(2);",
+      "if (args[0] === 'login' && args[2] === 'good-token') { console.log(JSON.stringify({ code: 0, msg: 'authorized' })); process.exit(0); }",
+      "if (args[0] === 'search') { console.log(JSON.stringify({ code: -103, action: 'not_authenticated' })); process.exit(1); }",
+      "console.log(JSON.stringify({ code: 0, msg: 'ok' }));",
+    ].join('\n'));
+    const archive = join(fixtureRoot, 'auth-cache-skill.zip');
+    await execFile('tar', ['-a', '-c', '-f', archive, '-C', fixtureRoot, 'auth-cache-skill']);
+    const manager = new PiSkillManager({ rootDir: installedRoot, executionTimeoutMs: 5_000 });
+    const installed = await manager.install({ adminId: 'admin/auth-cache', source: archive });
+    const requestId = 'same-preflight-request';
+
+    const beforeLogin = await manager.preflight({ adminId: 'admin/auth-cache', skillId: installed.id, requestId });
+    assert.equal(beforeLogin.authorized, false);
+    const login = await manager.login({ adminId: 'admin/auth-cache', skillId: installed.id, token: 'good-token' });
+    assert.equal(login.status, 'succeeded');
+    const afterLogin = await manager.preflight({ adminId: 'admin/auth-cache', skillId: installed.id, requestId });
+    assert.equal(afterLogin.authorized, true);
+
+    const expired = await manager.execute({ adminId: 'admin/auth-cache', skillId: installed.id, command: 'search' });
+    assert.equal(expired.requiresLogin, true);
+    const afterExpiry = await manager.preflight({ adminId: 'admin/auth-cache', skillId: installed.id, requestId });
+    assert.equal(afterExpiry.authorized, false);
   } finally {
     await rm(fixtureRoot, { recursive: true, force: true });
   }
