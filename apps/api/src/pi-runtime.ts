@@ -9,6 +9,7 @@ import { ModelClientService } from './model-client.js';
 import type { PiSkillManager } from './pi-skills.js';
 import {
   applyWorkspacePlanResult,
+  applyWorkspacePlanFacts,
   compactWorkspaceModelMessagesWithModel,
   completeConfirmedWorkspacePlanStep,
   createWorkspaceExecutionPlanFromModel,
@@ -16,10 +17,18 @@ import {
   reopenBlockedWorkspacePlan,
   reviseWorkspaceExecutionPlanFromModel,
   restoreWorkspaceExecutionPlan,
+  restoreWorkspacePlanFacts,
   workspacePlanCurrentTool,
   workspacePlanHasPendingSteps,
   type WorkspaceExecutionPlan,
 } from './workspace-context.js';
+import {
+  extractWorkspacePlanFacts,
+  mergeWorkspacePlanFacts,
+  validateWorkspacePlanCall,
+  workspacePlanGoalStatus,
+  type WorkspacePlanFacts,
+} from './workspace-plan-contract.js';
 
 export const DEFAULT_PI_BASE_URL = 'https://api.openai.com/v1';
 export const DEFAULT_PI_MODEL = 'gpt-4o-mini';
@@ -715,6 +724,12 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     const priorEvents = await this.store.listRunEvents(input.adminId ?? input.run.requestedBy, input.run.id, 0);
     const replayableResults = completedReplayableResults(priorEvents);
     let executionPlan: WorkspaceExecutionPlan | undefined = restoreWorkspaceExecutionPlan(priorEvents);
+    if (executionPlan) {
+      const recoveredFacts = restoreWorkspacePlanFacts(priorEvents);
+      if (Object.keys(recoveredFacts).length > 0) {
+        executionPlan = { ...executionPlan, facts: mergeWorkspacePlanFacts(executionPlan.facts, recoveredFacts) };
+      }
+    }
     if (executionPlan?.status === 'waiting_confirmation' && input.resumeAfterConfirmation) {
       executionPlan = completeConfirmedWorkspacePlanStep(executionPlan, '确认写入已完成');
       await this.emit(input.run.id, 'workspace.plan.updated', { status: executionPlan.status, plan: executionPlan, reason: 'confirmation_succeeded' });
@@ -737,7 +752,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       }
     }
     if (executionPlan) upsertWorkspacePlanMessage(messages, createWorkspacePlanMessage(executionPlan, cachedReplayableEvidence(replayableResults)));
-    const updateExecutionPlan = async (planUpdate: { toolName: string; succeeded: boolean; waitingConfirmation?: boolean; evidence?: string; reason?: string }): Promise<boolean> => {
+    const updateExecutionPlan = async (planUpdate: { toolName: string; succeeded: boolean; waitingConfirmation?: boolean; evidence?: string; reason?: string; facts?: WorkspacePlanFacts }): Promise<boolean> => {
       if (!executionPlan) return false;
       if (!planUpdate.succeeded) {
         const revised = await reviseWorkspaceExecutionPlanFromModel(executionPlan, {
@@ -759,6 +774,27 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
         }
       }
       executionPlan = applyWorkspacePlanResult(executionPlan, planUpdate);
+      if (planUpdate.facts) executionPlan = applyWorkspacePlanFacts(executionPlan, planUpdate.facts);
+      const goalStatus = workspacePlanGoalStatus(executionPlan.goalPredicateId, executionPlan.facts);
+      if (executionPlan.status === 'completed' && !goalStatus.complete) {
+        const revised = await reviseWorkspaceExecutionPlanFromModel(executionPlan, {
+          toolName: planUpdate.toolName,
+          code: 'PLAN_GOAL_PREDICATE_UNSATISFIED',
+          summary: `计划步骤已走完，但目标谓词仍缺少：${goalStatus.missing.join('、')}`,
+        }, tools, modelClient, signal);
+        if (revised) {
+          executionPlan = revised;
+          await this.emit(input.run.id, 'workspace.plan.updated', {
+            status: executionPlan.status,
+            plan: executionPlan,
+            reason: 'replanned_after_goal_predicate_failure',
+            missingFacts: goalStatus.missing,
+          });
+          upsertWorkspacePlanMessage(messages, createWorkspacePlanMessage(executionPlan, cachedReplayableEvidence(replayableResults)));
+          return true;
+        }
+        executionPlan = { ...executionPlan, status: 'blocked', revision: executionPlan.revision + 1 };
+      }
       await this.emit(input.run.id, 'workspace.plan.updated', { status: executionPlan.status, plan: executionPlan, ...(planUpdate.reason ? { reason: planUpdate.reason } : {}) });
       upsertWorkspacePlanMessage(messages, createWorkspacePlanMessage(executionPlan, cachedReplayableEvidence(replayableResults)));
       return false;
@@ -769,6 +805,8 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     let waitingConfirmation = false;
     let pendingUserAction: { title: string; summary: string; content: string; data?: Record<string, unknown> } | undefined;
     let completedWithoutTool = false;
+    let planCompletedDuringResponse = false;
+    let forceFinalAnswer = false;
     let pendingToolFailure: { toolName: string; code: string; summary: string } | undefined;
     const repeatedCalls = new Map<string, number>();
     const replayedCalls = new Map<string, number>();
@@ -779,6 +817,8 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       : DEFAULT_PI_MAX_TOOL_ROUNDS;
     for (let round = 0; round < maxRounds; round += 1) {
       if (this.stopped || signal.aborted) return;
+      const strictPlanCompletion = Boolean(executionPlan?.goalPredicateId);
+      const finalAnswerRound = forceFinalAnswer || (strictPlanCompletion && executionPlan?.status === 'completed');
       const streamId = `${input.run.id}:stream:${round + 1}`;
       const assistantMessageId = `${streamId}:assistant`;
       let assistant = '';
@@ -792,6 +832,13 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       }
       await this.emit(input.run.id, 'stream.started', { streamId, round: round + 1, model: this.options.model, status: 'running' });
       await this.emit(input.run.id, 'workspace.execution.summary', { streamId, messageType: 'reasoning_summary', summary: round === 0 ? '分析任务' : '评估工具结果', content: round === 0 ? '正在核对任务目标与已有结果。' : '已读取上一轮工具结果，正在确定下一步。', status: 'running' });
+      let surfacedToolCallCount = 0;
+      // A strict contract plan advances one durable step at a time.  Even if
+      // the provider returns several calls in one response, only the call for
+      // the current step may be surfaced, persisted, and executed.
+      const maxToolCallsForResponse = executionPlan?.goalPredicateId
+        ? 1
+        : Number.POSITIVE_INFINITY;
       const handlers: ModelStreamHandlers = {
         onReasoningDelta: async (delta) => {
           if (delta) reasoningDeltaCount += 1;
@@ -801,13 +848,16 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           await this.emit(input.run.id, 'assistant.delta', { streamId, messageId: assistantMessageId, contentDelta: redactSensitiveText(delta, this.options.redactSecrets), messageType: 'reasoning_summary', phase: 'draft', status: 'running' });
         },
         onToolCall: async (call) => {
+          const shouldSurface = surfacedToolCallCount < maxToolCallsForResponse;
+          surfacedToolCallCount += 1;
+          if (!shouldSurface) return;
           const progress = workspaceToolProgress(call.function.name);
           await this.emit(input.run.id, 'tool.call.completed', { streamId, toolCallId: call.id, toolName: call.function.name, summary: progress.summary, argumentFingerprint: toolArgumentFingerprint(call.function.arguments), status: 'selected' });
         },
       };
       let result: ModelCompletionResult;
       try {
-        result = await modelClient.stream({ messages, tools, toolChoice: 'auto', signal }, handlers);
+        result = await modelClient.stream({ messages, tools, toolChoice: finalAnswerRound ? 'none' : 'auto', signal }, handlers);
       } catch (error) {
         if (!(error instanceof PiModelClientError) || error.code !== 'MODEL_HTTP_ERROR' || ![400, 413].includes(error.status ?? 0)) throw error;
         const forced = await compactWorkspaceModelMessagesWithModel(messages, modelClient, true, signal);
@@ -815,10 +865,15 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
         messages.splice(0, messages.length, ...forced.messages);
         await this.emit(input.run.id, 'context.compacted', { round: round + 1, status: 'retrying', method: forced.method, beforeChars: forced.beforeChars, afterChars: forced.afterChars, summary: '模型上下文超限，已保留目标和关键结果后重试' });
         await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: redactSensitiveText(forced.summary ?? '', this.options.redactSecrets), summary: '上下文摘要' });
-        result = await modelClient.stream({ messages, tools, toolChoice: 'auto', signal }, handlers);
+        result = await modelClient.stream({ messages, tools, toolChoice: finalAnswerRound ? 'none' : 'auto', signal }, handlers);
       }
       finalResult = result;
-      const calls = result.toolCalls ?? [];
+      let calls = result.toolCalls ?? [];
+      if (Number.isFinite(maxToolCallsForResponse) && calls.length > maxToolCallsForResponse) calls = calls.slice(0, maxToolCallsForResponse);
+      if (finalAnswerRound && calls.length > 0) {
+        completedWithoutTool = true;
+        break;
+      }
       if (calls.length === 0) {
         if (executionPlan && workspacePlanHasPendingSteps(executionPlan)) {
           messages.push({ role: 'system', content: '[WORKSPACE_PLAN_GUARD] 当前 Plan Mode 仍有未完成步骤。不要返回最终答复，继续调用当前步骤对应工具；如果当前步骤确实无法执行，说明阻塞原因。' });
@@ -861,8 +916,12 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           continue;
         }
         const plannedTool = workspacePlanCurrentTool(executionPlan);
-        if (plannedTool && plannedTool !== call.function.name) {
-          const failure = { toolName: call.function.name, code: 'PLAN_STEP_MISMATCH', summary: `Plan Mode 当前步骤要求调用 ${plannedTool}，本轮收到 ${call.function.name}；请按计划顺序继续` };
+        const plannedStep = executionPlan?.currentStepId ? executionPlan.steps.find((candidate) => candidate.id === executionPlan?.currentStepId) : undefined;
+        const planValidation = plannedStep
+          ? validateWorkspacePlanCall(plannedStep, call.function.name, args, executionPlan?.facts ?? {})
+          : { ok: true };
+        if (!planValidation.ok) {
+          const failure = { toolName: call.function.name, code: planValidation.code ?? 'PLAN_STEP_MISMATCH', summary: planValidation.summary ?? `Plan Mode 当前步骤要求调用 ${plannedTool ?? '未知工具'}；请按计划顺序继续` };
           pendingToolFailure = failure;
           const errorResult = toolFailureResult(failure);
           await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, summary: failure.summary, status: 'failed', result: toolFailureResult(failure), completedAt: new Date().toISOString() });
@@ -977,14 +1036,20 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
             };
           }
         }
-        await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, title: result.title, summary: result.summary, status: 'succeeded', reused, result: redacted, completedAt: new Date().toISOString() });
+        await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, args, title: result.title, summary: result.summary, status: 'succeeded', reused, result: redacted, completedAt: new Date().toISOString() });
         await this.emit(input.run.id, 'workspace.execution.summary', { streamId, messageType: 'reasoning_summary', summary: result.title, content: result.summary, status: 'succeeded' });
         if (result.kind !== 'write_plan' && !reused) await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'tool_event', content: JSON.stringify(redacted), summary: result.summary });
         messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(modelResult) });
         // A replayed read is still a successful execution of the current plan
         // step. Advance the durable plan even when the underlying tool call is
         // served from the run cache after reconnect/compaction.
-        await updateExecutionPlan({ toolName: call.function.name, succeeded: true, waitingConfirmation: result.kind === 'write_plan', evidence: planEvidence(result) });
+        const extractedFacts = extractWorkspacePlanFacts(call.function.name, args, result);
+        await updateExecutionPlan({ toolName: call.function.name, succeeded: true, waitingConfirmation: result.kind === 'write_plan', evidence: planEvidence(result), facts: extractedFacts });
+        if (executionPlan?.status === 'completed' && executionPlan.goalPredicateId) {
+          planCompletedDuringResponse = true;
+          completedWithoutTool = true;
+          break;
+        }
         const resultData = result.data;
         if (resultData && (resultData.status === 'pending_user_action' || resultData.userActionRequired === true)) {
           pendingUserAction = { title: result.title, summary: result.summary, content: result.content, data: resultData };
@@ -1003,6 +1068,11 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       await this.emit(input.run.id, 'stream.round.completed', { streamId, round: round + 1, toolCallCount: calls.length, status: waitingConfirmation ? 'waiting_confirmation' : pendingUserAction ? 'pending_user_action' : 'tool_completed' });
       if (waitingConfirmation) break;
       if (pendingUserAction) break;
+      if (planCompletedDuringResponse) {
+        forceFinalAnswer = true;
+        planCompletedDuringResponse = false;
+        continue;
+      }
       // A blocked durable plan requires an explicit reconnect. Do not let the
       // next model round bypass the failed step while the run is still active.
       if (executionPlan?.status === 'blocked') break;
@@ -1035,9 +1105,18 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       await this.recordToolFailure(input, step, { toolName: 'plan', code: 'PLAN_STEP_BLOCKED', summary: 'Plan Mode 有步骤执行失败，未能完成全部计划；请重试当前步骤或重新提交任务' });
       return;
     }
+    const finalGoalStatus = workspacePlanGoalStatus(executionPlan?.goalPredicateId, executionPlan?.facts);
+    if (executionPlan?.goalPredicateId && !finalGoalStatus.complete) {
+      await this.recordToolFailure(input, step, { toolName: 'plan', code: 'PLAN_GOAL_PREDICATE_UNSATISFIED', summary: `Plan Mode 未满足目标谓词：${finalGoalStatus.missing.join('、')}` });
+      return;
+    }
     if (!completedWithoutTool) throw new PiModelClientError('MODEL_TOOL_LOOP_EXCEEDED', `model tool loop exceeded ${Number.isFinite(maxRounds) ? maxRounds : 'configured'} rounds`);
     if (!finalResult) throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model provider returned no result');
-    const output = redactSensitiveText(finalResult.content, this.options.redactSecrets);
+    const output = redactSensitiveText(
+      finalResult.content?.trim()
+        || (finalGoalStatus.complete ? '任务已完成：公开分享链接、卡券创建、商品绑定和付费自动发货已完成并复核。' : '任务已完成。'),
+      this.options.redactSecrets,
+    );
     const finishedAt = new Date().toISOString();
     await this.transitionStep(step, 'succeeded', { finishedAt, outputSummary: output });
     await this.transitionRun(input.run, 'succeeded', { finishedAt, resultSummary: output });

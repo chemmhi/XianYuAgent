@@ -401,8 +401,9 @@ function normalizePurpose(value: unknown): NativeCouponCreateInput['purpose'] | 
 
 function normalizeCouponMetadata(parameters: Record<string, unknown>, purpose: NativeCouponCreateInput['purpose']): CouponBatchMetadata {
   const metadata: CouponBatchMetadata = {};
-  const textContent = stringValue(parameters.textContent ?? parameters.content);
-  const dataContent = stringValue(parameters.dataContent ?? parameters.content);
+  const nestedMetadata = isRecord(parameters.metadata) ? parameters.metadata : {};
+  const textContent = stringValue(nestedMetadata.textContent ?? parameters.textContent ?? parameters.content);
+  const dataContent = stringValue(nestedMetadata.dataContent ?? parameters.dataContent ?? parameters.content);
   if (purpose === 'text' && textContent) metadata.textContent = textContent;
   if (purpose === 'data' && dataContent) metadata.dataContent = dataContent;
   const description = stringValue(parameters.description);

@@ -1,5 +1,15 @@
 import type { RunEventRecord } from './domain.js';
 import type { ModelClient, ModelMessage, ModelToolDefinition } from './pi-runtime.js';
+import {
+  canonicalWorkspacePlanSteps,
+  contractForWorkspaceStep,
+  extractWorkspacePlanFactsFromEvent,
+  goalPredicateIdForInstruction,
+  mergeWorkspacePlanFacts,
+  type WorkspacePlanFactKey,
+  type WorkspacePlanFacts,
+  type WorkspacePlanStepLike,
+} from './workspace-plan-contract.js';
 
 const MAX_WORKSPACE_PLAN_STEPS = 8;
 const MAX_COMPRESSIBLE_CONTEXT_CHARS = 24_000;
@@ -13,6 +23,11 @@ export interface WorkspacePlanStep {
   id: string;
   tool: string;
   goal: string;
+  action?: string;
+  requiresFacts?: WorkspacePlanFactKey[];
+  producesFacts?: WorkspacePlanFactKey[];
+  confirmationPolicy?: 'none' | 'required';
+  argPredicateId?: string;
   status: WorkspacePlanStepStatus;
   attempts: number;
   evidence?: string;
@@ -25,6 +40,9 @@ export interface WorkspaceExecutionPlan {
   status: WorkspacePlanStatus;
   currentStepId?: string;
   steps: WorkspacePlanStep[];
+  goalPredicateId?: string;
+  facts?: WorkspacePlanFacts;
+  replanCount?: number;
 }
 
 export interface WorkspacePlanFailure {
@@ -46,18 +64,29 @@ export function createWorkspacePlanMessage(plan: WorkspaceExecutionPlan, cachedE
   const cacheLines = cachedEvidence.length
     ? `\n已缓存的只读证据（不要重复调用相同工具）：\n${cachedEvidence.slice(-8).map((item) => `- ${item}`).join('\n')}`
     : '';
-  return `${PLAN_MESSAGE_MARKER}\nPlan Mode 状态：${plan.status}；修订：${plan.revision}\n原始目标：${plan.goal}\n按顺序执行以下步骤；当前步骤完成前不要跳到后续步骤。\n${lines.join('\n') || '暂无步骤'}${cacheLines}`;
+  const factLines = plan.facts && Object.keys(plan.facts).length
+    ? `\n已确认事实：${Object.entries(plan.facts).map(([key, value]) => `${key}=${Array.isArray(value) ? value.join(',') : String(value)}`).join('；')}`
+    : '';
+  return `${PLAN_MESSAGE_MARKER}\nPlan Mode 状态：${plan.status}；修订：${plan.revision}\n原始目标：${plan.goal}\n按顺序执行以下步骤；当前步骤完成前不要跳到后续步骤。\n${lines.join('\n') || '暂无步骤'}${factLines}${cacheLines}`;
 }
 
-export function createWorkspaceExecutionPlan(input: { instruction: string; steps: Array<{ tool: string; goal: string }> }): WorkspaceExecutionPlan | undefined {
+export function createWorkspaceExecutionPlan(input: { instruction: string; steps: WorkspacePlanStepLike[] }): WorkspaceExecutionPlan | undefined {
   if (!input.steps.length || input.steps.length > MAX_WORKSPACE_PLAN_STEPS) return undefined;
-  const steps = input.steps.map((step, index) => ({
-    id: `step-${index + 1}`,
-    tool: step.tool,
-    goal: step.goal,
-    status: 'pending' as const,
-    attempts: 0,
-  }));
+  const steps = input.steps.map((step, index) => {
+    const contract = contractForWorkspaceStep(step);
+    return {
+      id: `step-${index + 1}`,
+      tool: step.tool,
+      goal: step.goal,
+      action: contract.action,
+      requiresFacts: contract.requiresFacts,
+      producesFacts: contract.producesFacts,
+      confirmationPolicy: contract.confirmationPolicy,
+      argPredicateId: contract.argPredicateId,
+      status: 'pending' as const,
+      attempts: 0,
+    };
+  });
   return {
     version: 1,
     revision: 1,
@@ -65,6 +94,9 @@ export function createWorkspaceExecutionPlan(input: { instruction: string; steps
     status: 'active',
     currentStepId: steps[0]?.id,
     steps,
+    ...(goalPredicateIdForInstruction(input.instruction) ? { goalPredicateId: goalPredicateIdForInstruction(input.instruction) } : {}),
+    facts: {},
+    replanCount: 0,
   };
 }
 
@@ -79,7 +111,19 @@ export function restoreWorkspaceExecutionPlan(events: RunEventRecord[]): Workspa
       if (!step || typeof step.id !== 'string' || typeof step.tool !== 'string' || typeof step.goal !== 'string' || typeof step.status !== 'string') return [];
       const status = ['pending', 'running', 'succeeded', 'waiting_confirmation', 'blocked'].includes(step.status) ? step.status as WorkspacePlanStepStatus : undefined;
       if (!status) return [];
-      return [{ id: step.id, tool: step.tool, goal: step.goal, status, attempts: typeof step.attempts === 'number' ? Math.max(0, Math.trunc(step.attempts)) : 0, ...(typeof step.evidence === 'string' ? { evidence: step.evidence } : {}) }];
+      return [{
+        id: step.id,
+        tool: step.tool,
+        goal: step.goal,
+        ...(typeof step.action === 'string' ? { action: step.action } : {}),
+        ...(Array.isArray(step.requiresFacts) ? { requiresFacts: step.requiresFacts.filter((value): value is WorkspacePlanFactKey => typeof value === 'string') } : {}),
+        ...(Array.isArray(step.producesFacts) ? { producesFacts: step.producesFacts.filter((value): value is WorkspacePlanFactKey => typeof value === 'string') } : {}),
+        ...(step.confirmationPolicy === 'none' || step.confirmationPolicy === 'required' ? { confirmationPolicy: step.confirmationPolicy as 'none' | 'required' } : {}),
+        ...(typeof step.argPredicateId === 'string' ? { argPredicateId: step.argPredicateId } : {}),
+        status,
+        attempts: typeof step.attempts === 'number' ? Math.max(0, Math.trunc(step.attempts)) : 0,
+        ...(typeof step.evidence === 'string' ? { evidence: step.evidence } : {}),
+      }];
     });
     if (steps.length !== candidate.steps.length) continue;
     const status = ['active', 'waiting_confirmation', 'blocked', 'completed'].includes(String(candidate.status)) ? candidate.status as WorkspacePlanStatus : undefined;
@@ -91,6 +135,9 @@ export function restoreWorkspaceExecutionPlan(events: RunEventRecord[]): Workspa
       status,
       ...(typeof candidate.currentStepId === 'string' ? { currentStepId: candidate.currentStepId } : {}),
       steps,
+      ...(typeof candidate.goalPredicateId === 'string' ? { goalPredicateId: candidate.goalPredicateId } : {}),
+      ...(candidate.facts && typeof candidate.facts === 'object' && !Array.isArray(candidate.facts) ? { facts: candidate.facts as WorkspacePlanFacts } : {}),
+      ...(typeof candidate.replanCount === 'number' ? { replanCount: Math.max(0, Math.trunc(candidate.replanCount)) } : {}),
     };
   }
   return restored;
@@ -123,6 +170,18 @@ export function applyWorkspacePlanResult(plan: WorkspaceExecutionPlan, input: { 
   next.status = nextStep ? 'active' : 'completed';
   next.revision += 1;
   return next;
+}
+
+export function applyWorkspacePlanFacts(plan: WorkspaceExecutionPlan, facts: WorkspacePlanFacts): WorkspaceExecutionPlan {
+  const next: WorkspaceExecutionPlan = JSON.parse(JSON.stringify(plan)) as WorkspaceExecutionPlan;
+  next.facts = mergeWorkspacePlanFacts(next.facts, facts);
+  return next;
+}
+
+export function restoreWorkspacePlanFacts(events: RunEventRecord[]): WorkspacePlanFacts {
+  let facts: WorkspacePlanFacts = {};
+  for (const event of events) facts = mergeWorkspacePlanFacts(facts, extractWorkspacePlanFactsFromEvent(event.eventType, event.payload));
+  return facts;
 }
 
 export function workspacePlanCurrentTool(plan: WorkspaceExecutionPlan | undefined): string | undefined {
@@ -171,6 +230,8 @@ export async function planWorkspaceToolUse(instruction: string, tools: ModelTool
 export async function createWorkspaceExecutionPlanFromModel(instruction: string, tools: ModelToolDefinition[], model: ModelClient, signal?: AbortSignal, options: { fallback?: boolean } = {}): Promise<WorkspaceExecutionPlan | undefined> {
   const available = tools.flatMap((tool) => tool.type === 'function' ? [tool.function.name] : []);
   if (!available.length) return undefined;
+  const canonical = canonicalWorkspacePlanSteps(instruction, available);
+  if (canonical) return createWorkspaceExecutionPlan({ instruction, steps: canonical });
   try {
     const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(5_000)]) : AbortSignal.timeout(5_000);
     const result = await model.complete({
@@ -195,6 +256,7 @@ export async function reviseWorkspaceExecutionPlanFromModel(
   model: ModelClient,
   signal?: AbortSignal,
 ): Promise<WorkspaceExecutionPlan | undefined> {
+  if ((plan.replanCount ?? 0) >= 2) return undefined;
   const available = tools.flatMap((tool) => tool.type === 'function' ? [tool.function.name] : []);
   if (!available.length) return undefined;
   const current = plan.currentStepId ? plan.steps.find((step) => step.id === plan.currentStepId) : plan.steps.find((step) => step.status === 'pending' || step.status === 'running');
@@ -222,24 +284,49 @@ export async function reviseWorkspaceExecutionPlanFromModel(
     const revisedSteps = [
       ...preserved,
       ...blocked,
-      ...normalized.slice(0, capacity).map((step, index) => ({ id: `step-${nextRevision}-${index + 1}`, tool: step.tool, goal: step.goal, status: 'pending' as const, attempts: 0 })),
+      ...normalized.slice(0, capacity).map((step, index) => ({
+        id: `step-${nextRevision}-${index + 1}`,
+        tool: step.tool,
+        goal: step.goal,
+        ...contractForWorkspaceStep(step),
+        status: 'pending' as const,
+        attempts: 0,
+      })),
     ];
     const nextStep = revisedSteps.find((step) => step.status === 'pending');
     if (!nextStep) return undefined;
-    return { version: 1, revision: nextRevision, goal: plan.goal, status: 'active', currentStepId: nextStep.id, steps: revisedSteps };
+    return {
+      version: 1,
+      revision: nextRevision,
+      goal: plan.goal,
+      status: 'active',
+      currentStepId: nextStep.id,
+      steps: revisedSteps,
+      ...(plan.goalPredicateId ? { goalPredicateId: plan.goalPredicateId } : {}),
+      ...(plan.facts ? { facts: plan.facts } : {}),
+      replanCount: (plan.replanCount ?? 0) + 1,
+    };
   } catch {
     return undefined;
   }
 }
 
-function normalizeWorkspacePlanSteps(parsed: unknown, available: string[]): Array<{ tool: string; goal: string }> | undefined {
+function normalizeWorkspacePlanSteps(parsed: unknown, available: string[]): WorkspacePlanStepLike[] | undefined {
   const steps = asRecord(parsed)?.steps;
   if (!Array.isArray(steps) || steps.length === 0 || steps.length > MAX_WORKSPACE_PLAN_STEPS) return undefined;
   const normalized: Array<{ tool: string; goal: string }> = [];
   for (const step of steps) {
     const record = asRecord(step);
     if (!record || typeof record.tool !== 'string' || !available.includes(record.tool) || typeof record.goal !== 'string' || !record.goal.trim() || record.goal.length > 120) return undefined;
-    normalized.push({ tool: record.tool, goal: record.goal.trim() });
+    normalized.push({
+      tool: record.tool,
+      goal: record.goal.trim(),
+      ...(typeof record.action === 'string' ? { action: record.action.trim() } : {}),
+      ...(Array.isArray(record.requiresFacts) ? { requiresFacts: record.requiresFacts.filter((value): value is WorkspacePlanFactKey => typeof value === 'string') } : {}),
+      ...(Array.isArray(record.producesFacts) ? { producesFacts: record.producesFacts.filter((value): value is WorkspacePlanFactKey => typeof value === 'string') } : {}),
+      ...(record.confirmationPolicy === 'none' || record.confirmationPolicy === 'required' ? { confirmationPolicy: record.confirmationPolicy } : {}),
+      ...(typeof record.argPredicateId === 'string' ? { argPredicateId: record.argPredicateId.trim() } : {}),
+    });
   }
   return normalized;
 }
