@@ -1,6 +1,6 @@
 import { Pool, type PoolClient } from 'pg';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, AutoReplyProductLookup, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponAssetRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, DeliveryRecord, DeliveryRecordStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductKnowledgeBaseMessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceConfirmationRecord, WorkspaceMessageRecord, WorkspaceMessageType, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
+import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, AutoReplyProductLookup, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponAssetRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, DeliveryRecord, DeliveryRecordStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ModelProviderRoutingRecord, ModelProviderRoutingMode, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductKnowledgeBaseMessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceConfirmationRecord, WorkspaceMessageRecord, WorkspaceMessageType, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { projectAutoReplyRun } from './auto-reply-activity-projection.js';
 import { createId } from './security.js';
@@ -1596,6 +1596,45 @@ export class PostgresStore implements Store {
     if (!result.rows[0]) throw new Error('CREDENTIAL_VERSION_CONFLICT');
     return this.getCredentialRef(input.adminId, input.credentialId);
   }
+  async getModelProviderRouting(adminId: string, accountId: string): Promise<ModelProviderRoutingRecord | undefined> {
+    const result = await this.pool.query(`select r.* from settings.model_provider_routing r
+      where r.account_id=$2 and exists (
+        select 1 from auth.account_scopes scope
+        where scope.account_id=r.account_id and scope.admin_id=$1 and scope.status='active'
+          and (scope.expires_at is null or scope.expires_at>now())
+      )`, [adminId, accountId]);
+    return result.rows[0] ? this.toModelProviderRouting(result.rows[0]) : undefined;
+  }
+  async getModelProviderConfigGeneration(adminId: string, accountId: string): Promise<number | undefined> {
+    if (!(await this.hasAccountScope(adminId, accountId))) return undefined;
+    const result = await this.pool.query(`select generation from settings.model_provider_config_generations where account_id=$1`, [accountId]);
+    return result.rows[0] ? Number(result.rows[0].generation ?? 0) : 0;
+  }
+  async bumpModelProviderConfigGeneration(input: { adminId: string; accountId: string }): Promise<number | undefined> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) return undefined;
+    const result = await this.pool.query(`
+      insert into settings.model_provider_config_generations (account_id,generation)
+      values ($1,1)
+      on conflict (account_id) do update set generation=settings.model_provider_config_generations.generation+1, updated_at=now()
+      returning generation`, [input.accountId]);
+    return result.rows[0] ? Number(result.rows[0].generation) : undefined;
+  }
+  async upsertModelProviderRouting(input: { adminId: string; accountId: string; expectedVersion: number; mode: ModelProviderRoutingMode; preferredRole?: 'primary' | 'backup'; configGeneration: number }): Promise<ModelProviderRoutingRecord | undefined> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) return undefined;
+    const current = await this.getModelProviderRouting(input.adminId, input.accountId);
+    const currentVersion = current?.routingVersion ?? 0;
+    if (!current && input.expectedVersion !== 0) throw new Error('MODEL_PROVIDER_ROUTING_VERSION_CONFLICT');
+    if (currentVersion !== input.expectedVersion) throw new Error('MODEL_PROVIDER_ROUTING_VERSION_CONFLICT');
+    const nextVersion = currentVersion + 1;
+    const result = await this.pool.query(`
+      insert into settings.model_provider_routing (account_id,mode,preferred_role,routing_version,config_generation,updated_by_admin_id)
+      values ($1,$2,$3,$4,$5,$6)
+      on conflict (account_id) do update set mode=excluded.mode, preferred_role=excluded.preferred_role, routing_version=excluded.routing_version, config_generation=excluded.config_generation, updated_by_admin_id=excluded.updated_by_admin_id, updated_at=now()
+      where settings.model_provider_routing.routing_version=$7
+      returning *`, [input.accountId, input.mode, input.mode === 'auto' ? null : input.preferredRole ?? null, nextVersion, input.configGeneration, input.adminId, input.expectedVersion]);
+    if (!result.rows[0]) throw new Error('MODEL_PROVIDER_ROUTING_VERSION_CONFLICT');
+    return this.toModelProviderRouting(result.rows[0]);
+  }
   async getAutoReplyAgentConfig(adminId: string, accountId: string): Promise<AutoReplyAgentConfigRecord | undefined> {
     const result = await this.pool.query(`select c.* from settings.auto_reply_agent_account_configs c
       where c.account_id=$2 and exists (
@@ -2186,6 +2225,19 @@ export class PostgresStore implements Store {
       createdAt: new Date(String(row.created_at)).toISOString(),
       updatedAt: new Date(String(row.updated_at)).toISOString(),
       canReveal: false,
+    };
+  }
+  private toModelProviderRouting(row: Row): ModelProviderRoutingRecord {
+    const mode = row.mode === 'manual_primary' || row.mode === 'manual_backup' ? row.mode : 'auto';
+    return {
+      accountId: String(row.account_id),
+      mode,
+      preferredRole: mode === 'manual_primary' ? 'primary' : mode === 'manual_backup' ? 'backup' : undefined,
+      routingVersion: Number(row.routing_version ?? 0),
+      configGeneration: Number(row.config_generation ?? 0),
+      updatedByAdminId: row.updated_by_admin_id ? String(row.updated_by_admin_id) : undefined,
+      createdAt: new Date(String(row.created_at)).toISOString(),
+      updatedAt: new Date(String(row.updated_at)).toISOString(),
     };
   }
   private toAutoReplyAgentConfig(row: Row): AutoReplyAgentConfigRecord {

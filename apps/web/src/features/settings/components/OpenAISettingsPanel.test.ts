@@ -44,4 +44,16 @@ describe('OpenAI settings model controls', () => {
     expect(css).toMatch(/\.openai-model-field\s*\.ui-select-control/);
     expect(css).toMatch(/\.openai-model-field\s+\.ui-select-control\s+select/);
   });
+
+  it('renders runtime provider status and manual routing actions', () => {
+    const source = readFileSync(join(settingsDir, 'OpenAISettingsPanel.tsx'), 'utf8');
+    expect(source).toContain('data-openai-runtime');
+    expect(source).toContain('当前生效 Provider');
+    expect(source).toContain('最近成功');
+    expect(source).toContain('切换到主');
+    expect(source).toContain('切换到备');
+    expect(source).toContain('恢复自动模式');
+    expect(source).toContain('feature_enabled');
+    expect(source).toContain('兼容模式');
+  });
 });

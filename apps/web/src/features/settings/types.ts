@@ -80,6 +80,10 @@ export interface OpenAIConfigVM {
   reasoningEffort?: string;
   wireApi: OpenAIWireApi;
   timeoutMs: number;
+  probeStrategy?: 'models' | 'completion' | 'health_url' | 'none';
+  probeUrl?: string;
+  probeModel?: string;
+  probeTimeoutMs?: number;
   status: CredentialStatus;
   version: number;
   fingerprint?: string;
@@ -92,9 +96,42 @@ export interface OpenAIConfigVM {
   canReveal: false;
 }
 
+export type ModelProviderCircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+export type OpenAIRoutingMode = 'auto' | 'manual_primary' | 'manual_backup';
+
+export interface OpenAIProviderStateVM {
+  role: OpenAIConfigRole;
+  state: ModelProviderCircuitState;
+  failureCount: number;
+  cooldownUntil?: string;
+  nextProbeAt?: string;
+  generation: number;
+  lastTransitionReason?: string;
+}
+
+export interface OpenAIProviderRefVM { role: OpenAIConfigRole; id?: string; provider: string; model: string; }
+
+export interface OpenAIRuntimeVM {
+  feature_enabled?: boolean;
+  mode: OpenAIRoutingMode;
+  preferred_provider: OpenAIProviderRefVM | null;
+  effective_provider: OpenAIProviderRefVM | null;
+  last_successful_provider: OpenAIProviderRefVM | null;
+  last_served_at?: string;
+  observed_at: string;
+  provider_states: Partial<Record<OpenAIConfigRole, OpenAIProviderStateVM>>;
+  cooldown_until?: string;
+  next_probe_at?: string;
+  last_transition_reason?: string;
+  config_generation: number;
+  routing_version: number;
+  server_time: string;
+}
+
 export interface OpenAIConfigListVM {
   accountId: string;
   items: OpenAIConfigVM[];
+  runtime?: OpenAIRuntimeVM;
 }
 
 export interface OpenAIModelsState {

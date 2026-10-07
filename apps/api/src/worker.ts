@@ -48,6 +48,7 @@ const shutdown = (signal: string) => {
     await productAutomationOrderRefreshWorker.stop();
     await productAutomationReminderWorker.stop();
     await worker.stop();
+    await runtime.modelProviderRuntime.close();
     await runtime.xianyuIm.close();
     await runtime.redisRealtime?.close();
     const close = (runtime.store as typeof runtime.store & { close?: () => Promise<void> }).close;

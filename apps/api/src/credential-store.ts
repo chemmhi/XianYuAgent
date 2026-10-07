@@ -36,6 +36,7 @@ export class ApiKeyCredentialService {
     const fingerprint = credentialFingerprint(input.apiKey);
     try {
       const ref = await this.store.createCredentialRef({ ...input, secretCiphertext: encryptCredentialValue(input.apiKey, this.encryptionKey), fingerprint });
+      if (ref.purpose === 'model_client') await this.store.bumpModelProviderConfigGeneration({ adminId: input.adminId, accountId: ref.accountId });
       await this.audit({ actorId: input.adminId, action: 'credential_ref.created', targetRef: ref.id, requestId: input.requestId, traceId: input.traceId, payload: { provider: ref.provider, alias: ref.alias, kind: ref.kind, purpose: ref.purpose, fingerprint: ref.fingerprint }, accountId: ref.accountId });
       return ref;
     } catch (error) {
@@ -44,13 +45,14 @@ export class ApiKeyCredentialService {
     }
   }
 
-  async update(input: { adminId: string; credentialId: string; expectedVersion: number; provider?: string; alias?: string; label?: string; metadata?: Record<string, string>; requestId: string; traceId: string }): Promise<CredentialRefView> {
+  async update(input: { adminId: string; credentialId: string; expectedVersion: number; provider?: string; alias?: string; label?: string; metadata?: Record<string, string>; requestId: string; traceId: string; bumpGeneration?: boolean }): Promise<CredentialRefView> {
     if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 1) throw new ServiceError(422, 'VALIDATION_FAILED', 'expectedVersion must be a positive integer');
     if (input.provider !== undefined && !input.provider.trim()) throw new ServiceError(422, 'VALIDATION_FAILED', 'provider is required');
     if (input.alias !== undefined && !input.alias.trim()) throw new ServiceError(422, 'VALIDATION_FAILED', 'alias is required');
     try {
       const ref = await this.store.updateCredentialRef(input);
       if (!ref) throw new ServiceError(404, 'NOT_FOUND', 'credential not found');
+      if (ref.purpose === 'model_client' && input.bumpGeneration !== false) await this.store.bumpModelProviderConfigGeneration({ adminId: input.adminId, accountId: ref.accountId });
       await this.audit({ actorId: input.adminId, action: 'credential_ref.updated', targetRef: ref.id, requestId: input.requestId, traceId: input.traceId, payload: { provider: ref.provider, alias: ref.alias, version: ref.version }, accountId: ref.accountId });
       return ref;
     } catch (error) {
@@ -65,6 +67,7 @@ export class ApiKeyCredentialService {
     try {
       const ref = await this.store.rotateCredentialRef({ adminId: input.adminId, credentialId: input.credentialId, expectedVersion: input.expectedVersion, secretCiphertext: encryptCredentialValue(input.apiKey, this.encryptionKey), fingerprint: credentialFingerprint(input.apiKey) });
       if (!ref) throw new ServiceError(404, 'NOT_FOUND', 'credential not found');
+      if (ref.purpose === 'model_client') await this.store.bumpModelProviderConfigGeneration({ adminId: input.adminId, accountId: ref.accountId });
       await this.audit({ actorId: input.adminId, action: 'credential_ref.rotated', targetRef: ref.id, requestId: input.requestId, traceId: input.traceId, payload: { fingerprint: ref.fingerprint, version: ref.version }, accountId: ref.accountId });
       return ref;
     } catch (error) {
@@ -79,6 +82,7 @@ export class ApiKeyCredentialService {
     try {
       const ref = await this.store.updateCredentialRefStatus(input);
       if (!ref) throw new ServiceError(404, 'NOT_FOUND', 'credential not found');
+      if (ref.purpose === 'model_client') await this.store.bumpModelProviderConfigGeneration({ adminId: input.adminId, accountId: ref.accountId });
       await this.audit({ actorId: input.adminId, action: `credential_ref.${input.status}`, targetRef: ref.id, requestId: input.requestId, traceId: input.traceId, payload: { status: ref.status, version: ref.version }, accountId: ref.accountId });
       return ref;
     } catch (error) {

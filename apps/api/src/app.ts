@@ -22,7 +22,7 @@ import { InProcessAgentRuntime, isTerminalRunStatus, WorkspaceService, type Work
 import { WorkspaceCommandOrchestrator } from './workspace-commands.js';
 import { OrderDeliveryService } from './order-delivery.js';
 import { OpenAICompatibleModelClient, PiModelClientError, PiRuntimeAdapter, type PiRuntimeAttachment } from './pi-runtime.js';
-import { ModelClientService, type ModelClient } from './model-client.js';
+import { ModelClientService, type ModelClient, type ModelClientRuntimeSnapshot, type ModelProviderRole } from './model-client.js';
 import { ApiKeyCredentialService } from './credential-store.js';
 import { DashboardService, type DashboardRange } from './dashboard.js';
 import { AutoReplyService, type AutoReplyAcknowledgementEvaluator } from './auto-reply.js';
@@ -30,6 +30,7 @@ import { ReliableExternalAutoReplySender } from './auto-reply-outbox.js';
 import { AutoReplyAgentSettingsService, resolveAutoReplyAgentDefaults } from './auto-reply-agent-settings.js';
 import { ToolCallingAutoReplyAgent } from './auto-reply-agent.js';
 import { OpenAISettingsService } from './openai-settings.js';
+import { ModelProviderRuntimePool } from './model-provider-runtime.js';
 import { AutoReplyActivityService } from './auto-reply-activity.js';
 import { AutoReplyRepairRuntime } from './auto-reply-repair-runtime.js';
 import { createDefaultAutoReplyRepairPolicy, parseAutoReplyRepairPolicyBundle } from './auto-reply-repair-config.js';
@@ -65,6 +66,7 @@ export interface AppRuntime {
   credentials: CredentialService;
   apiKeyCredentials: ApiKeyCredentialService;
   openaiSettings: OpenAISettingsService;
+  modelProviderRuntime: ModelProviderRuntimePool;
   dashboard: DashboardService;
   messages: MessageService;
   autoReply: AutoReplyService;
@@ -167,14 +169,58 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
   }, fetch, config.modelWireApi);
+  const modelProviderRuntime = new ModelProviderRuntimePool({
+    redisUrl: config.allowInMemory ? undefined : config.redisUrl,
+    overallTimeoutMs: 60_000,
+    createClient: (resolved) => openaiSettings.createRuntimeClient(resolved),
+    loadAccount: async (adminId, accountId) => {
+      const configs = await openaiSettings.resolveForRuntime(adminId, accountId);
+      const configGeneration = await openaiSettings.getConfigGeneration(adminId, accountId);
+      const routing = await resolveModelProviderRouting(openaiSettings, modelProviderRuntime, adminId, accountId, configGeneration);
+      return { configs, mode: routing.mode, preferredRole: routing.preferredRole, routingVersion: routing.routingVersion, configGeneration };
+    },
+    onFailover: async ({ adminId, accountId, provider, error, cooldownUntil }) => {
+      try {
+        await store.recordAudit({ id: createId(), actorType: 'system', actorId: adminId, action: 'model_provider.failover', targetRef: `${accountId}:${provider}`, requestId: `model-provider:${accountId}`, traceId: `model-provider:${accountId}`, payloadDigest: digestJson({ provider, errorCode: listenerErrorCode(error), cooldownUntil }), accountId, createdAt: new Date().toISOString() });
+      } catch { /* routing must not block the fallback */ }
+    },
+    onFastFail: async ({ adminId, accountId, reason, snapshot }) => {
+      try {
+        await store.recordAudit({ id: createId(), actorType: 'system', actorId: adminId, action: 'model_provider.fast_fail', targetRef: accountId, requestId: `model-provider:${accountId}`, traceId: `model-provider:${accountId}`, payloadDigest: digestJson({ reason, http_status: 503, latency_ms: 0, config_version: snapshot.configGeneration, routing_version: snapshot.routingVersion, snapshot }), accountId, createdAt: new Date().toISOString() });
+      } catch { /* observability must not block fast-fail */ }
+    },
+    onStateChange: async ({ adminId, accountId, snapshot }) => {
+      try {
+        for (const state of Object.values(snapshot.providerStates)) {
+          const reason = state.lastTransitionReason ?? '';
+          const action = reason === 'PROBE_UNSUPPORTED' ? 'model_provider.probe_unsupported' : reason.startsWith('PROBE_') ? 'model_provider.probe_failed' : state.state === 'OPEN' ? 'model_provider.circuit_open' : state.state === 'HALF_OPEN' ? 'model_provider.circuit_half_open' : 'model_provider.circuit_closed';
+          await store.recordAudit({ id: createId(), actorType: 'system', actorId: adminId, action, targetRef: `${accountId}:${state.role}`, requestId: `model-provider:${accountId}`, traceId: `model-provider:${accountId}`, payloadDigest: digestJson({ snapshot, role: state.role, reason: state.lastTransitionReason, cooldownUntil: state.cooldownUntil, nextProbeAt: state.nextProbeAt, http_status: state.lastErrorStatus ?? null, latency_ms: state.lastProbeLatencyMs ?? null, config_version: state.generation, result: state.lastTransitionReason }), accountId, createdAt: new Date().toISOString() });
+        }
+      } catch { /* observability must not block routing */ }
+    },
+    onRedisDegraded: ({ adminId, accountId, error }) => {
+      console.warn(JSON.stringify({ component: 'model-provider-runtime', event: 'redis_degraded', adminId, accountId, errorCode: listenerErrorCode(error) }));
+    },
+  });
+  // Treat an omitted flag in lightweight test/runtime configs as enabled;
+  // only an explicit false opts back into the legacy single-provider path.
+  if (config.modelProviderFailoverV2 !== false) modelProviderRuntime.startScheduler();
   // Account-scoped OpenAI provider credentials are shared infrastructure. The
   // buyer-facing AutoReply Agent owns its runtime configuration separately;
   // this resolver must never read AutoReplyAgentSettingsService.
   const resolveAccountModelClient = async (adminId: string, accountId: string): Promise<ModelClient | undefined> => {
     const configured = await openaiSettings.resolveForRuntime(adminId, accountId);
     if (configured.length === 0) return modelClient;
-    const clients = await Promise.all(configured.slice(0, 2).map((item) => openaiSettings.createRuntimeClient(item)));
-    return new ModelClientService({ primary: clients[0]!, backup: clients[1] });
+    if (config.modelProviderFailoverV2 === false) {
+      const primary = configured.find((item) => item.role === 'primary') ?? configured[0];
+      const backup = configured.find((item) => item.role === 'backup');
+      const primaryClient = await openaiSettings.createRuntimeClient(primary);
+      const backupClient = backup ? await openaiSettings.createRuntimeClient(backup) : undefined;
+      return new ModelClientService({ primary: primaryClient, backup: backupClient });
+    }
+    const configGeneration = await openaiSettings.getConfigGeneration(adminId, accountId);
+    const routing = await resolveModelProviderRouting(openaiSettings, modelProviderRuntime, adminId, accountId, configGeneration);
+    return modelProviderRuntime.resolve({ adminId, accountId, configs: configured, mode: routing.mode, preferredRole: routing.preferredRole, routingVersion: routing.routingVersion, configGeneration });
   };
   const dashboard = new DashboardService(store);
   const realtime = new MessageRealtimeHub();
@@ -398,7 +444,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, orders, orderDelivery, products, productPublisher, productKnowledgeBase, productAutomation, productAutomationTrigger, productAutomationWorker, productSync, credentials, apiKeyCredentials, openaiSettings, dashboard, messages, autoReply, autoReplyRepair, autoReplyAgentSettings, autoReplyActivity, redisRealtime, workspace, piSkills, workspaceCommands, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
+    config, store, auth, accounts, coupons, orders, orderDelivery, products, productPublisher, productKnowledgeBase, productAutomation, productAutomationTrigger, productAutomationWorker, productSync, credentials, apiKeyCredentials, openaiSettings, modelProviderRuntime, dashboard, messages, autoReply, autoReplyRepair, autoReplyAgentSettings, autoReplyActivity, redisRealtime, workspace, piSkills, workspaceCommands, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
     server,
     async listen() {
       await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));
@@ -409,6 +455,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
       for (const client of wsServer.clients) client.close(1001, 'server shutdown');
       await new Promise<void>((resolve) => wsServer.close(() => resolve()));
       workspaceRuntime.stop();
+      await modelProviderRuntime.close();
       await closeHttpServer(runtime.server);
       await redisRealtime?.close();
       await xianyuIm.close();
@@ -599,7 +646,7 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
 }
 
 async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: ServerResponse): Promise<{ statusCode: number; body: unknown } | undefined> {
-  const { auth, accounts, coupons, orders, products, productAutomation, productSync, credentials, apiKeyCredentials, dashboard, messages, workspace, piSkills, store, config, xianyuIm } = runtime;
+  const { auth, accounts, coupons, orders, products, productAutomation, productSync, credentials, apiKeyCredentials, dashboard, messages, workspace, piSkills, store, config, xianyuIm, modelProviderRuntime } = runtime;
   if (ctx.path === '/healthz' && ctx.method === 'GET') {
     const health = await store.health();
     const redis = !config.redisUrl || !runtime.redisRealtime
@@ -746,7 +793,56 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   if (ctx.path === '/api/v1/settings/openai' && ctx.method === 'GET') {
     const accountId = String(ctx.query.accountId ?? '').trim();
     if (!accountId) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
-    return { statusCode: 200, body: success(ctx, { accountId, items: await runtime.openaiSettings.list({ adminId: authContext.admin.id, accountId }) }).body };
+    const items = await runtime.openaiSettings.list({ adminId: authContext.admin.id, accountId });
+    return { statusCode: 200, body: success(ctx, { accountId, items, runtime: await buildOpenAiRuntimeView(runtime, authContext.admin.id, accountId) }).body };
+  }
+  if (ctx.path === '/api/v1/settings/openai/routing' && ctx.method === 'POST') {
+    const key = requireIdempotencyKey(ctx);
+    const accountId = String(ctx.body.accountId ?? '').trim();
+    if (!accountId) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
+    const mode = ctx.body.mode === 'manual_primary' || ctx.body.mode === 'manual_backup' ? ctx.body.mode : ctx.body.mode === 'auto' ? 'auto' : undefined;
+    if (!mode) throw new ServiceError(422, 'VALIDATION_FAILED', 'mode must be auto, manual_primary, or manual_backup');
+    const preferredRole = ctx.body.preferredRole === 'primary' || ctx.body.preferredRole === 'backup' ? ctx.body.preferredRole : undefined;
+    const expectedVersion = Number(ctx.body.expectedVersion);
+    if (!Number.isInteger(expectedVersion) || expectedVersion < 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'expectedVersion must be a non-negative integer');
+    if (config.modelProviderFailoverV2 === false) return { statusCode: 409, body: failure(ctx, 409, 'MODEL_PROVIDER_FAILOVER_DISABLED', 'Model Provider V2 路由已关闭，当前使用 legacy 主 Provider').body };
+    const result = await idempotent(store, {
+      scope: `settings:openai:routing:${accountId}`,
+      key,
+      fingerprint: fingerprint(ctx.method, ctx.path, ctx.body),
+      traceId: ctx.traceId,
+      handler: async () => {
+        const configs = await runtime.openaiSettings.resolveForRuntime(authContext.admin.id, accountId);
+        const configGeneration = await runtime.openaiSettings.getConfigGeneration(authContext.admin.id, accountId);
+        const routing = await runtime.openaiSettings.updateRouting({ adminId: authContext.admin.id, accountId, expectedVersion, mode, preferredRole, configGeneration, requestId: ctx.requestId, traceId: ctx.traceId });
+        try { await modelProviderRuntime.syncRouting({ accountId, routing }); }
+        catch {
+          try { await store.recordAudit({ id: createId(), actorType: 'system', actorId: authContext.admin.id, action: 'model_provider.routing_state_unavailable', targetRef: accountId, requestId: ctx.requestId, traceId: ctx.traceId, payloadDigest: digestJson({ routingVersion: routing.routingVersion, configGeneration: routing.configGeneration }), accountId, createdAt: new Date().toISOString() }); } catch { /* audit must not mask committed routing */ }
+          // The Store write is already committed and remains authoritative when
+          // Redis is unavailable. Return the effective routing with an explicit
+          // degraded mirror marker so clients do not retry a committed update
+          // with a stale expectedVersion.
+          return success(ctx, { ...(await buildOpenAiRuntimeView(runtime, authContext.admin.id, accountId)), routing_mirror: 'degraded' });
+        }
+        if (configs.length > 0) {
+          await modelProviderRuntime.resolve({ adminId: authContext.admin.id, accountId, configs, mode, preferredRole, routingVersion: routing.routingVersion, configGeneration });
+        }
+        if (ctx.body.forceProbe === true && preferredRole && configs.length > 0) {
+          try {
+            const probe = await modelProviderRuntime.forceProbe({ adminId: authContext.admin.id, accountId, role: preferredRole });
+            if (!probe.ok) {
+              try { await store.recordAudit({ id: createId(), actorType: 'system', actorId: authContext.admin.id, action: probe.code === 'PROBE_UNSUPPORTED' ? 'model_provider.probe_unsupported' : 'model_provider.probe_failed', targetRef: `${accountId}:${preferredRole}`, requestId: ctx.requestId, traceId: ctx.traceId, payloadDigest: digestJson({ code: probe.code, latencyMs: probe.latencyMs, role: preferredRole }), accountId, createdAt: new Date().toISOString() }); } catch { /* audit must not mask probe result */ }
+              return failure(ctx, 502, probe.code ?? 'PROBE_FAILED', 'Provider 探针失败');
+            }
+          } catch {
+            try { await store.recordAudit({ id: createId(), actorType: 'system', actorId: authContext.admin.id, action: 'model_provider.probe_failed', targetRef: `${accountId}:${preferredRole}`, requestId: ctx.requestId, traceId: ctx.traceId, payloadDigest: digestJson({ code: 'PROBE_FAILED', role: preferredRole }), accountId, createdAt: new Date().toISOString() }); } catch { /* audit must not mask probe result */ }
+            return failure(ctx, 502, 'PROBE_FAILED', 'Provider 探针失败');
+          }
+        }
+        return success(ctx, await buildOpenAiRuntimeView(runtime, authContext.admin.id, accountId));
+      },
+    });
+    return { statusCode: result.statusCode, body: result.body };
   }
   if (ctx.path === '/api/v1/settings/openai/test' && ctx.method === 'POST') {
     const accountId = String(ctx.body.accountId ?? '').trim();
@@ -1460,6 +1556,83 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
 
 async function requireAuth(auth: AuthService, ctx: RequestContext): Promise<AuthContext> { const context = await auth.contextFromSession(ctx.cookies.session_id); if (!context) throw new ServiceError(401, 'UNAUTHENTICATED', 'session required'); return context; }
 
+async function buildOpenAiRuntimeView(runtime: AppRuntime, adminId: string, accountId: string): Promise<Record<string, unknown>> {
+  const configs = await runtime.openaiSettings.resolveForRuntime(adminId, accountId);
+  const configGeneration = await runtime.openaiSettings.getConfigGeneration(adminId, accountId);
+  const failoverV2Enabled = runtime.config.modelProviderFailoverV2 !== false;
+  const routing = failoverV2Enabled
+    ? await resolveModelProviderRouting(runtime.openaiSettings, runtime.modelProviderRuntime, adminId, accountId, configGeneration)
+    : await runtime.openaiSettings.getRouting(adminId, accountId, configGeneration);
+  let snapshot: ModelClientRuntimeSnapshot | undefined;
+  if (failoverV2Enabled && configs.length > 0) {
+    const service = await runtime.modelProviderRuntime.resolve({ adminId, accountId, configs, mode: routing.mode, preferredRole: routing.preferredRole, routingVersion: routing.routingVersion, configGeneration });
+    snapshot = service.getRuntimeSnapshot();
+  }
+  const items = await runtime.openaiSettings.list({ adminId, accountId });
+  const byRole = new Map(items.map((item) => [item.role, item]));
+  const providerForRole = (role?: ModelProviderRole) => {
+    if (!role) return null;
+    const item = byRole.get(role);
+    return item ? { role, id: item.id, provider: item.provider, model: item.model } : null;
+  };
+  const states = snapshot?.providerStates ?? { primary: undefined, backup: undefined };
+  const stateValues = Object.values(states).filter((item): item is NonNullable<typeof item> => Boolean(item)) as Array<{ cooldownUntil?: string; nextProbeAt?: string; lastTransitionReason?: string }>;
+  const effectiveState = snapshot?.effectiveRole ? snapshot.providerStates[snapshot.effectiveRole] : undefined;
+  const soonest = (field: 'cooldownUntil' | 'nextProbeAt'): string | undefined => {
+    const values: string[] = stateValues
+      .map((item) => item[field])
+      .filter((value): value is string => typeof value === 'string' && Number.isFinite(Date.parse(value)))
+      .sort((left, right) => Date.parse(left) - Date.parse(right));
+    return values[0];
+  };
+  const legacyPrimary = configs.find((item) => item.role === 'primary') ?? configs[0];
+  return {
+    feature_enabled: failoverV2Enabled,
+    mode: failoverV2Enabled ? routing.mode : 'auto',
+    preferred_provider: failoverV2Enabled ? providerForRole(routing.preferredRole) : null,
+    effective_provider: providerForRole(snapshot?.effectiveRole ?? (failoverV2Enabled ? undefined : legacyPrimary?.role)),
+    last_successful_provider: providerForRole(snapshot?.lastSuccessfulRole),
+    last_served_at: snapshot?.lastServedAt,
+    observed_at: snapshot?.observedAt ?? new Date().toISOString(),
+    provider_states: states,
+    cooldown_until: effectiveState?.cooldownUntil ?? soonest('cooldownUntil'),
+    next_probe_at: effectiveState?.nextProbeAt ?? soonest('nextProbeAt'),
+    last_transition_reason: effectiveState?.lastTransitionReason ?? stateValues.map((item) => item.lastTransitionReason).find(Boolean),
+    config_generation: snapshot?.configGeneration ?? configGeneration,
+    routing_version: routing.routingVersion,
+    server_time: new Date().toISOString(),
+  };
+}
+
+export async function resolveModelProviderRouting(
+  settings: OpenAISettingsService,
+  runtime: ModelProviderRuntimePool,
+  adminId: string,
+  accountId: string,
+  configGeneration: number,
+) {
+  let stored: Awaited<ReturnType<OpenAISettingsService['getRouting']>> | undefined;
+  let storeError: unknown;
+  try {
+    stored = await settings.getRouting(adminId, accountId, configGeneration);
+  } catch (error) {
+    storeError = error;
+  }
+  const mirrored = await runtime.readRoutingMirror(accountId);
+  const usableMirror = mirrored && mirrored.configGeneration === configGeneration ? mirrored : undefined;
+  if (stored) {
+    // Store/PostgreSQL remains authoritative. Redis is only a mirror: repair
+    // both stale and spuriously newer mirror records from the committed Store
+    // value rather than allowing the mirror to override it.
+    if (!usableMirror || usableMirror.routingVersion !== stored.routingVersion || usableMirror.mode !== stored.mode || usableMirror.preferredRole !== stored.preferredRole) {
+      void runtime.syncRouting({ accountId, routing: stored }).catch(() => undefined);
+    }
+    return stored;
+  }
+  if (storeError) throw storeError;
+  throw new ServiceError(503, 'MODEL_ROUTING_STATE_UNAVAILABLE', '模型路由状态暂时不可用');
+}
+
 async function handleWorkspaceUpgrade(runtime: AppRuntime, request: IncomingMessage, socket: Duplex): Promise<void> {
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
   const match = url.pathname.match(/^\/api\/v1\/workspace\/runs\/([^/]+)\/events$/);
@@ -1897,6 +2070,10 @@ function readOpenAiConfigInput(body: Record<string, unknown>): import('./openai-
     reasoningEffort: typeof body.reasoningEffort === 'string' ? body.reasoningEffort : undefined,
     wireApi,
     timeoutMs: typeof body.timeoutMs === 'number' ? body.timeoutMs : Number(body.timeoutMs ?? NaN),
+    probeStrategy: body.probeStrategy === 'completion' || body.probeStrategy === 'health_url' || body.probeStrategy === 'none' || body.probeStrategy === 'models' ? body.probeStrategy : undefined,
+    probeUrl: typeof body.probeUrl === 'string' ? body.probeUrl : undefined,
+    probeModel: typeof body.probeModel === 'string' ? body.probeModel : undefined,
+    probeTimeoutMs: typeof body.probeTimeoutMs === 'number' ? body.probeTimeoutMs : Number(body.probeTimeoutMs ?? NaN),
     apiKey: typeof body.apiKey === 'string' ? body.apiKey : undefined,
     expectedVersion: typeof body.expectedVersion === 'number' ? body.expectedVersion : Number(body.expectedVersion ?? NaN),
   };
