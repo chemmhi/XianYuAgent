@@ -81,6 +81,9 @@
 .workspace-state strong { color: var(--text); font-size: 13px; }
 .workspace-state span { max-width: 420px; font-size: var(--font-size-body); line-height: var(--font-line-body); }
 .workspace-state.compact { min-height: 150px; }
+.workspace-conversation-loading { gap: 9px; }
+.workspace-detail-spinner { width: 18px; height: 18px; border: 2px solid #D9E5F1; border-top-color: var(--link); border-radius: 50%; animation: workspace-detail-spin .8s linear infinite; }
+@keyframes workspace-detail-spin { to { transform: rotate(360deg); } }
 .workspace-inline-error { padding: 10px 12px; border: 1px solid rgba(180,35,24,.18); border-radius: 8px; background: var(--danger-bg); color: var(--danger); font-size: var(--font-size-body-compact); line-height: 1.5; }
 @media (max-width: 900px) {
   .workspace-layout { grid-template-columns: 1fr; }

@@ -40,6 +40,12 @@ describe('workspace controller session loading', () => {
     expect(mergeWorkspaceSessionTitles(previous, next)[0]?.title).toBe('检查商品自动发货');
   });
 
+  it('tracks conversation detail loading separately from the session list phase', () => {
+    expect(controllerSource).toContain("conversationLoading: Boolean(activeSessionId)");
+    expect(controllerSource).toContain("conversationLoading: false, sessions: mergeWorkspaceSessionTitles(previous.sessions, hydratedSessions)");
+    expect(controllerSource).toContain("activeSessionId: sessionId, conversationLoading: true");
+  });
+
   it('hydrates persisted history before rendering a follow-up run', () => {
     expect(controllerSource).toContain('const persistedMessagesPromise = api.listMessages(sessionId, 500).catch(() => undefined);');
     expect(controllerSource).toContain('messages: persistedMessages ?? previous.messages');

@@ -124,6 +124,13 @@ describe('Workspace SessionRow', () => {
     expect(html).toContain('请确认是否删除“检查当前 Workspace 状态”');
     expect(workspacePageSource).not.toContain('window.confirm');
   });
+
+  it('keeps conversation-detail loading inside the conversation surface', () => {
+    expect(workspacePageSource).toContain('!isDraftMode && state.conversationLoading ? <WorkspaceConversationLoading />');
+    expect(workspacePageSource).toContain("state.phase === 'loading' && visibleSessions.length === 0");
+    expect(workspacePageSource).toContain('className="workspace-state workspace-conversation-loading compact"');
+    expect(workspaceCss).toContain('.workspace-detail-spinner');
+  });
 });
 
 describe('Workspace MessageStream', () => {
