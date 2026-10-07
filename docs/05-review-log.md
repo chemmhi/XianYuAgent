@@ -782,3 +782,12 @@ Review conclusion: workspace confirmation fixes were merged after code review an
 | WS-R-10 | 合并 / 主线 | 合并提交、主线回归、工作区清理和生产复验边界 | root，第 3 轮 | PASS（合并与受控验证） | `1f918ba` 经 `--no-ff` 合入 `2f5ba65`；主线 API 定向 59/59、Web 全量 376/376、API/Web build 和 typecheck、`git diff --check` 通过；生产新 Run 待复验 |
 
 独立人员复审与修改后生产同类 Run 复验仍待发布阶段执行；本轮结论不把隔离 E2E 等同于真实网盘任务复验。
+
+### 2026-10-07 Workspace 首轮压缩与工具循环复核
+
+| review_id | type | focus | reviewer | conclusion | evidence |
+| --- | --- | --- | --- | --- | --- |
+| WS-R-11 | 生产证据 / 根因 | 新 Run 的首轮 18,436→18,688 字符无效压缩、10 次压缩及 9 次同参商品检索 | root | PASS（只读取证） | `docs/operations/workspace-run-incident-20261007.md`；生产 Run `aeb4ba21-73de-4d1b-b16d-001ab06c9c00` 持久化事件 |
+| WS-R-12 | 全链路 / 恢复 | Skill 短索引与按需检索、模型有效压缩、同参复用、写入后失效、确认续跑、UI 投影 | root | PASS（隔离环境） | API 定向 56/56、API/Web 全量、Chrome/CDP + PostgreSQL Workspace E2E、`npm run build`、`git diff --check` |
+
+用户在当前会话明确要求保留主工作区既有无关文件并直接合入 `main`。真实生产网盘任务尚未在修复版本上复验，不能把本地结论升级为生产修复验收。

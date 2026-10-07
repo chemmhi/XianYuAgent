@@ -7,11 +7,12 @@ import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node
 import { promisify } from 'node:util';
 import type { ModelToolDefinition } from './pi-runtime.js';
 import type { WorkspaceCommandInput, WorkspaceModelToolResult } from './workspace-commands.js';
+import { searchSkillText, type SkillSearchMode } from './skill-text-search.js';
 
 const execFileAsync = promisify(execFile);
 const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
-const MAX_SKILL_TEXT = 16 * 1024;
-const MAX_TOTAL_PROMPT = 48 * 1024;
+const MAX_SKILL_OVERVIEW_CHARS = 4 * 1024;
+const MAX_SKILL_INDEX_CHARS = 2_000;
 const DEFAULT_EXEC_TIMEOUT_MS = 60_000;
 const REGISTRY_FILE = '.registry.json';
 const AUTH_STATE_FILE = 'authorization.json';
@@ -318,21 +319,17 @@ export class PiSkillManager {
   async buildSystemPrompt(adminId: string): Promise<string> {
     const skills = (await this.list(adminId)).filter((skill) => skill.enabled);
     if (skills.length === 0) return '';
-    let remaining = MAX_TOTAL_PROMPT;
+    let remaining = MAX_SKILL_INDEX_CHARS;
     const sections: string[] = [];
     for (const skill of skills) {
-      if (remaining <= 0) break;
-      const skillPath = join(skill.path, 'SKILL.md');
-      let body = '';
-      try { body = await readFile(skillPath, 'utf8'); } catch { continue; }
-      body = body.slice(0, Math.min(MAX_SKILL_TEXT, remaining));
-      remaining -= body.length;
-      sections.push(`## ${skill.name} (${skill.id})\nAuthorized: ${skill.authorized ? 'yes' : 'no'}\n${body}`);
+      const line = `${skill.id} | ${skill.authorized ? 'ready' : 'login required'}`;
+      if (line.length > remaining) break;
+      sections.push(line);
+      remaining -= line.length + 1;
     }
-    if (sections.length === 0) return '';
     return [
-      'Installed Pi skills are available below. Login state is persisted per admin and Skill across sessions, so reuse an authorized state and do not call pi_skill_login again unless pi_skill_exec reports requiresLogin or the user explicitly asks to re-authenticate. Use pi_skill_exec for skill CLI operations and pi_skill_login only for login. Never reveal authorization tokens or local paths. If a Skill result reports requiresLogin or unauthorized, do not repeat the original command; start login once or ask the user to finish login. Interactive login may return pending_user_action; stop and wait for the user to finish login or paste the code, and do not auto-retry.',
-      sections.join('\n\n'),
+      'Installed Pi skills are indexed below. Use pi_skill_read for an overview or pi_skill_search to locate specific command instructions, as needed before pi_skill_exec; do not guess commands. Reuse successful results. Login state persists per admin and skill: call pi_skill_login only after requiresLogin or an explicit user request. If login needs user action, stop and wait. Never reveal tokens or local paths.',
+      sections.join('\n'),
     ].join('\n\n');
   }
 
@@ -385,6 +382,22 @@ export class PiSkillManager {
       {
         type: 'function',
         function: {
+          name: 'pi_skill_read',
+          description: 'Read a short overview of one installed Pi skill. If truncated, use pi_skill_search for the specific command or topic.',
+          parameters: { type: 'object', additionalProperties: false, properties: { skillId: { type: 'string' } }, required: ['skillId'] },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'pi_skill_search',
+          description: 'Search the full SKILL.md of one installed skill and return at most three short matching excerpts. Use literal for exact text, fuzzy for approximate words, or regex for a pattern.',
+          parameters: { type: 'object', additionalProperties: false, properties: { skillId: { type: 'string' }, query: { type: 'string', description: 'Command, topic, or regular expression to locate.' }, mode: { type: 'string', enum: ['literal', 'fuzzy', 'regex'] } }, required: ['skillId', 'query'] },
+        },
+      },
+      {
+        type: 'function',
+        function: {
           name: 'pi_skill_exec',
           description: 'Execute an installed Pi skill command. Pass command name and argv-style args exactly as documented by the skill.',
           parameters: {
@@ -407,7 +420,40 @@ export class PiSkillManager {
         content: items.length
           ? items.map((item) => `${item.id} | ${item.version ?? 'unknown'} | ${item.enabled ? 'enabled' : 'disabled'} | ${item.authorized ? 'authorized' : 'unauthorized'}`).join('\n')
           : 'No Pi Skills are installed.',
-        data: { items },
+        data: { items: items.map(publicSkillInfo) },
+      };
+    }
+    if (name === 'pi_skill_read') {
+      const skillId = typeof args.skillId === 'string' ? args.skillId.trim() : '';
+      const item = (await this.list(input.adminId)).find((skill) => skill.enabled && matchesSkillIdentifier(skill, skillId));
+      if (!item) throw new PiSkillError('SKILL_NOT_INSTALLED', `skill ${skillId} is not installed or enabled`);
+      const body = await readFile(join(item.path, 'SKILL.md'), 'utf8');
+      return {
+        kind: 'read',
+        title: `${item.name} | overview`,
+        summary: 'Skill overview loaded',
+        content: body.slice(0, MAX_SKILL_OVERVIEW_CHARS),
+        data: { skillId: item.id, totalChars: body.length, truncated: body.length > MAX_SKILL_OVERVIEW_CHARS },
+      };
+    }
+    if (name === 'pi_skill_search') {
+      const skillId = typeof args.skillId === 'string' ? args.skillId.trim() : '';
+      const query = typeof args.query === 'string' ? args.query.trim() : '';
+      if (query.length < 2 || query.length > 120) throw new PiSkillError('SKILL_SEARCH_QUERY_INVALID', 'Skill search query must be 2 to 120 characters');
+      const mode = args.mode === undefined ? 'literal' : args.mode;
+      if (mode !== 'literal' && mode !== 'fuzzy' && mode !== 'regex') throw new PiSkillError('SKILL_SEARCH_MODE_INVALID', 'Skill search mode must be literal, fuzzy, or regex');
+      const item = (await this.list(input.adminId)).find((skill) => skill.enabled && matchesSkillIdentifier(skill, skillId));
+      if (!item) throw new PiSkillError('SKILL_NOT_INSTALLED', `skill ${skillId} is not installed or enabled`);
+      const body = await readFile(join(item.path, 'SKILL.md'), 'utf8');
+      let search: ReturnType<typeof searchSkillText>;
+      try { search = searchSkillText(body, query, mode as SkillSearchMode); }
+      catch { throw new PiSkillError('SKILL_SEARCH_QUERY_INVALID', 'Skill search pattern is invalid'); }
+      return {
+        kind: 'read',
+        title: `${item.name} | search`,
+        summary: search.matches.length ? `${search.matches.length} Skill instruction match(es)` : 'No Skill instruction matches',
+        content: search.matches.length ? search.matches.map((match) => `line ${match.line}: ${match.excerpt}`).join('\n---\n') : `No matches for ${query}`,
+        data: { skillId: item.id, query, mode, matches: search.matches.length, hasMore: search.hasMore },
       };
     }
     if (name === 'pi_skill_install') {
@@ -419,7 +465,7 @@ export class PiSkillManager {
         title: 'Pi Skill installed',
         summary: `${item.name} ${item.version ?? ''}`.trim(),
         content: `Installed ${item.name} (${item.id}). ${item.authorized ? 'Authorization is complete.' : 'Authorization is still required.'}`,
-        data: { item },
+        data: { item: publicSkillInfo(item) },
       };
     }
     if (name === 'pi_skill_authorize') {
@@ -491,7 +537,7 @@ export class PiSkillManager {
           : authResult?.status === 'pending_user_action'
             ? `Installed ${item.name} (${item.id}). ${authResult.prompt || '请完成登录后把授权码粘贴回当前对话。'}`
             : `Installed ${item.name} (${item.id}). Provide the Skill \u6388\u6743 token or ask me to start browser login before using account-scoped commands.`,
-        data: { item, authorized: completed, loginStatus: authResult?.status, authUrl: authResult?.authUrl },
+        data: { item: publicSkillInfo(item), authorized: completed, loginStatus: authResult?.status, authUrl: authResult?.authUrl },
       };
     }
     if (loginIntent || Boolean(tokenMatch?.[1])) {
@@ -872,6 +918,10 @@ function matchesSkillIdentifier(item: PiSkillInfo, requested: string): boolean {
   return item.id === normalized
     || (item.canonicalSkillId ? sanitizeSkillId(item.canonicalSkillId) === normalized : false)
     || item.name.toLowerCase() === requested.trim().toLowerCase();
+}
+
+function publicSkillInfo(item: PiSkillInfo): Pick<PiSkillInfo, 'id' | 'name' | 'version' | 'enabled' | 'authorized'> {
+  return { id: item.id, name: item.name, version: item.version, enabled: item.enabled, authorized: item.authorized };
 }
 
 function findSkill(state: RegistryState, requested: string): PiSkillInfo | undefined {

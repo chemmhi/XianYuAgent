@@ -1,8 +1,9 @@
 import type { RunEventRecord } from './domain.js';
 import type { ModelClient, ModelMessage, ModelToolDefinition } from './pi-runtime.js';
 
-const MAX_CONTEXT_CHARS = 12_000;
+const MAX_COMPRESSIBLE_CONTEXT_CHARS = 24_000;
 const MAX_SUMMARY_CHARS = 2_400;
+const MIN_MODEL_COMPACTION_REDUCTION = 0.2;
 
 export async function planWorkspaceToolUse(instruction: string, tools: ModelToolDefinition[], model: ModelClient, signal?: AbortSignal): Promise<string | undefined> {
   const available = tools.flatMap((tool) => tool.type === 'function' ? [tool.function.name] : []);
@@ -73,8 +74,10 @@ export function buildWorkspaceCheckpoint(events: RunEventRecord[]): string | und
 }
 
 export function compactWorkspaceModelMessages(messages: ModelMessage[], force = false): { messages: ModelMessage[]; summary?: string } {
-  const size = messages.reduce((total, message) => total + JSON.stringify(message).length, 0);
-  if (!force && size <= MAX_CONTEXT_CHARS) return { messages };
+  const history = messages.filter((message) => message.role !== 'system');
+  if (!history.some((message) => message.role === 'assistant' || message.role === 'tool')) return { messages };
+  const size = history.reduce((total, message) => total + JSON.stringify(message).length, 0);
+  if (!force && size <= MAX_COMPRESSIBLE_CONTEXT_CHARS) return { messages };
   const systems = messages.filter((message) => message.role === 'system');
   const user = [...messages].reverse().find((message) => message.role === 'user');
   const facts = messages.filter((message) => message.role === 'tool' || (message.role === 'assistant' && !message.toolCalls?.length))
@@ -90,22 +93,22 @@ export function compactWorkspaceModelMessages(messages: ModelMessage[], force = 
     remaining -= item.length + 1;
   }
   const summary = prefix + selected.reverse().join('\n');
-  return { messages: [...systems, { role: 'assistant', content: summary }, ...(user ? [{ role: 'user' as const, content: textContent(user.content).slice(0, 1_500) }] : [])], summary };
+  const compacted: ModelMessage[] = [...systems, { role: 'assistant', content: summary }, ...(user ? [{ role: 'user' as const, content: textContent(user.content).slice(0, 1_500) }] : [])];
+  return JSON.stringify(compacted).length < JSON.stringify(messages).length ? { messages: compacted, summary } : { messages };
 }
 
 export async function compactWorkspaceModelMessagesWithModel(
   messages: ModelMessage[], model: ModelClient, force = false, signal?: AbortSignal,
-): Promise<{ messages: ModelMessage[]; summary?: string; method?: 'model' | 'fallback'; beforeChars: number; afterChars: number }> {
+): Promise<{ messages: ModelMessage[]; summary?: string; method?: 'model'; beforeChars: number; afterChars: number }> {
   const beforeChars = JSON.stringify(messages).length;
   const fallback = compactWorkspaceModelMessages(messages, force);
   if (!fallback.summary) return { messages, beforeChars, afterChars: beforeChars };
-  let summary = fallback.summary;
-  let method: 'model' | 'fallback' = 'fallback';
   const source = messages
     .filter((message) => message.role === 'tool' || (message.role === 'assistant' && !message.toolCalls?.length))
     .slice(-20)
     .map((message) => summarizeFact(typeof message.content === 'string' ? message.content : textContent(message.content)))
     .join('\n');
+  let summary: string;
   try {
     const result = await model.complete({
       messages: [
@@ -116,18 +119,19 @@ export async function compactWorkspaceModelMessagesWithModel(
       signal,
     });
     const candidate = result.content.trim();
-    if (candidate && candidate.length <= 1_800 && !candidate.includes('```') && !candidate.includes('{"ok"')) {
-      const missing = identifiers(fallback.summary).filter((item) => !candidate.includes(item));
-      summary = `原始目标与执行检查点：\n${candidate}${missing.length ? `\n关键标识：${missing.join('；')}` : ''}`.slice(0, MAX_SUMMARY_CHARS);
-      method = 'model';
-    }
+    if (candidate.length < 12 || candidate.length > 1_800 || candidate.includes('```') || candidate.includes('{"ok"')) return { messages, beforeChars, afterChars: beforeChars };
+    const missing = identifiers(fallback.summary).filter((item) => !candidate.includes(item));
+    summary = `原始目标与执行检查点：\n${candidate}${missing.length ? `\n关键标识：${missing.join('；')}` : ''}`.slice(0, MAX_SUMMARY_CHARS);
   } catch {
-    // A model/provider failure must not block the original run.
+    return { messages, beforeChars, afterChars: beforeChars };
   }
   const systems = messages.filter((message) => message.role === 'system');
   const user = [...messages].reverse().find((message) => message.role === 'user');
   const compacted: ModelMessage[] = [...systems, { role: 'assistant', content: summary }, ...(user ? [{ role: 'user' as const, content: textContent(user.content).slice(0, 1_500) }] : [])];
-  return { messages: compacted, summary, method, beforeChars, afterChars: JSON.stringify(compacted).length };
+  const afterChars = JSON.stringify(compacted).length;
+  return afterChars <= beforeChars * (1 - MIN_MODEL_COMPACTION_REDUCTION)
+    ? { messages: compacted, summary, method: 'model', beforeChars, afterChars }
+    : { messages, beforeChars, afterChars: beforeChars };
 }
 
 function summarizeFact(fact: string): string {
