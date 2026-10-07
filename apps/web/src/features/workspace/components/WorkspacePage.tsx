@@ -324,7 +324,14 @@ function findJsonEnd(content: string, start: number): number {
   }
   return -1;
 }
-function MessageBubble({ message }: { message: WorkspaceMessageVM }) { if (message.type === 'user_message') return <article className="workspace-message workspace-message-user"><div className="workspace-message-content"><MarkdownContent className="workspace-markdown" content={message.content} /></div></article>; if (message.type === 'final_answer') return <article className={`workspace-message workspace-message-final ${message.status && statusTone(message.status) === 'danger' ? 'is-error' : ''}`}><div className="workspace-message-content"><MarkdownContent className="workspace-markdown" content={message.content} /></div></article>; return <article className="workspace-message workspace-message-assistant"><div className="workspace-message-content"><MarkdownContent className="workspace-markdown" content={message.content} /></div></article>; }
+function MessageBubble({ message }: { message: WorkspaceMessageVM }) {
+  if (message.type === 'user_message') return <article className="workspace-message workspace-message-user"><div className="workspace-message-content"><MarkdownContent className="workspace-markdown" content={message.content} /></div></article>;
+  if (message.type === 'final_answer') {
+    const streaming = message.eventType === 'assistant.delta' && message.status === 'running';
+    return <article className={`workspace-message workspace-message-final ${streaming ? 'is-streaming' : ''} ${message.status && statusTone(message.status) === 'danger' ? 'is-error' : ''}`}><div className="workspace-message-content"><MarkdownContent className="workspace-markdown" content={message.content} /></div></article>;
+  }
+  return <article className="workspace-message workspace-message-assistant"><div className="workspace-message-content"><MarkdownContent className="workspace-markdown" content={message.content} /></div></article>;
+}
 export function WorkspaceConfirmationCard({ run, accountName, confirmation, actionSubmitting, onConfirm, onCancel }: { run: WorkspaceRunVM; accountName: string; confirmation: WorkspaceConfirmationVM; actionSubmitting: boolean; onConfirm: () => void; onCancel: () => void }) {
   const manifest = confirmation.manifest;
   const isCouponCreate = confirmation.action === 'coupon_create';

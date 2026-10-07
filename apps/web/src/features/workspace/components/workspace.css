@@ -144,6 +144,9 @@
 .workspace-message-assistant .workspace-message-content { padding: 0 2px; }
 .workspace-message-final { max-width: 720px; padding: 0; border: 0; background: transparent; }
 .workspace-message-final .workspace-message-content { padding: 0 2px; }
+.workspace-message-final.is-streaming,
+.workspace-message-final.is-streaming p,
+.workspace-message-final.is-streaming .workspace-markdown { color: var(--sub); }
 .workspace-message-final p { font-size: 13px; line-height: 1.8; }
 .workspace-message-final .workspace-markdown { font-size: 13px; line-height: 1.8; }
 .workspace-agent-trace { max-width: 720px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: transparent; }

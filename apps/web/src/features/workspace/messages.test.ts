@@ -104,10 +104,45 @@ describe('workspace message projection', () => {
       { sequence: 5, runId: 'run-1', eventType: 'tool.result', payload: { toolCallId: 'call-1', toolName: 'workspace_read', result: { content: '商品 1 个' } }, createdAt: '2026-09-20T00:00:02.000Z' },
       { sequence: 6, runId: 'run-1', eventType: 'assistant.delta', payload: { streamId: 's-2', messageId: 's-2:assistant', contentDelta: '已找到' }, createdAt: '2026-09-20T00:00:02.100Z' },
       { sequence: 7, runId: 'run-1', eventType: 'assistant.delta', payload: { streamId: 's-2', messageId: 's-2:assistant', contentDelta: ' 1 个商品。' }, createdAt: '2026-09-20T00:00:02.200Z' },
+      { sequence: 8, runId: 'run-1', eventType: 'run.succeeded', payload: { status: 'succeeded', messageType: 'final_answer', content: '已找到 1 个商品。' }, createdAt: '2026-09-20T00:00:02.300Z' },
     ]);
     expect(messages.some((message) => message.content.includes('先读取商品。'))).toBe(false);
     expect(messages.find((message) => message.type === 'tool_event')?.content).toContain('商品 1 个');
     expect(messages.find((message) => message.type === 'final_answer')?.content).toBe('已找到 1 个商品。');
+  });
+
+  it('keeps assistant progress as a stable summary after a tool stream is identified', () => {
+    const activeRun = { ...run, status: 'running' as const };
+    const messages = buildWorkspaceMessages(activeRun, [
+      { sequence: 2, runId: 'run-1', eventType: 'workspace.execution.summary', payload: { streamId: 'round-1', messageType: 'reasoning_summary', summary: '检索商品信息', content: '正在检索商品信息，等待工具返回真实结果。' }, createdAt: '2026-09-20T00:00:01.000Z' },
+      { sequence: 3, runId: 'run-1', eventType: 'assistant.delta', payload: { streamId: 'round-1', messageId: 'round-1:assistant', messageType: 'final_answer', contentDelta: '匹配。接着读取已授权技能的命令' }, createdAt: '2026-09-20T00:00:01.100Z' },
+      { sequence: 4, runId: 'run-1', eventType: 'workspace.execution.summary', payload: { streamId: 'round-1', toolCallId: 'call-1', toolName: 'pi_skill_read', messageType: 'reasoning_summary', summary: '读取 Skill 使用说明', content: '正在读取 Skill 使用说明，等待工具返回真实结果。' }, createdAt: '2026-09-20T00:00:01.200Z' },
+    ]);
+
+    expect(messages.some((message) => message.type === 'final_answer' && message.content.includes('匹配。接着读取'))).toBe(false);
+    expect(messages.some((message) => message.type === 'reasoning_summary' && message.content.includes('匹配。接着读取'))).toBe(true);
+    expect(messages).toContainEqual(expect.objectContaining({ type: 'reasoning_summary', summary: '检索商品信息' }));
+  });
+
+  it('does not trust a transient terminal status while tool events are still arriving', () => {
+    const messages = buildWorkspaceMessages({ ...run, status: 'succeeded' }, [
+      { sequence: 2, runId: 'run-1', eventType: 'workspace.execution.summary', payload: { streamId: 'round-1', messageType: 'reasoning_summary', summary: '检索商品信息', content: '正在检索商品信息，等待工具返回真实结果。' }, createdAt: '2026-09-20T00:00:01.000Z' },
+      { sequence: 3, runId: 'run-1', eventType: 'assistant.delta', payload: { streamId: 'round-1', messageId: 'round-1:assistant', messageType: 'final_answer', contentDelta: '匹配。接着读取已授权技能的命令' }, createdAt: '2026-09-20T00:00:01.100Z' },
+      { sequence: 4, runId: 'run-1', eventType: 'tool.call.started', payload: { streamId: 'round-1', toolCallId: 'call-1', toolName: 'workspace_product_search', summary: '检索商品信息' }, createdAt: '2026-09-20T00:00:01.200Z' },
+      { sequence: 5, runId: 'run-1', eventType: 'workspace.execution.summary', payload: { streamId: 'round-1', messageType: 'reasoning_summary', summary: '商品搜索', content: '正在读取商品搜索结果。' }, createdAt: '2026-09-20T00:00:01.500Z' },
+    ]);
+
+    expect(messages.some((message) => message.type === 'final_answer' && message.content.includes('匹配。接着读取'))).toBe(false);
+    expect(messages.filter((message) => message.type === 'reasoning_summary').map((message) => message.summary)).toEqual(expect.arrayContaining(['检索商品信息', '商品搜索']));
+  });
+
+  it('keeps a no-tool assistant response streaming while the run is active', () => {
+    const messages = buildWorkspaceMessages({ ...run, status: 'running' }, [
+      { sequence: 2, runId: 'run-1', eventType: 'workspace.execution.summary', payload: { streamId: 'round-1', messageType: 'reasoning_summary', summary: '分析任务', content: '正在核对任务目标与已有结果。' }, createdAt: '2026-09-20T00:00:00.900Z' },
+      { sequence: 3, runId: 'run-1', eventType: 'assistant.delta', payload: { streamId: 'round-1', messageId: 'round-1:assistant', messageType: 'final_answer', contentDelta: '正在检查当前状态…' }, createdAt: '2026-09-20T00:00:01.000Z' },
+    ]);
+
+    expect(messages.find((message) => message.type === 'final_answer')?.content).toBe('正在检查当前状态…');
   });
 
   it('prefers the persisted failure answer over provisional assistant streaming text', () => {
@@ -164,8 +199,9 @@ describe('workspace message projection', () => {
       { sequence: 6, runId: 'run-1', eventType: 'workspace.execution.summary', payload: { streamId: 'round-1', messageType: 'reasoning_summary', summary: '商品搜索', content: '找到商品' }, createdAt: '2026-09-20T00:00:02.100Z' },
       { sequence: 7, runId: 'run-1', eventType: 'tool.call.started', payload: { streamId: 'round-2', toolCallId: 'call-2', toolName: 'workspace_prepare_write', summary: '准备受控写入' }, createdAt: '2026-09-20T00:00:02.200Z' },
     ]);
-    expect(messages.filter((message) => message.type === 'reasoning_summary' || message.type === 'tool_event').map((message) => message.type)).toEqual(['reasoning_summary', 'tool_event', 'reasoning_summary', 'tool_event']);
-    expect(messages.some((message) => message.content === '尚未完成')).toBe(false);
+    expect(messages.filter((message) => message.type === 'reasoning_summary' || message.type === 'tool_event').map((message) => message.type)).toEqual(['reasoning_summary', 'reasoning_summary', 'tool_event', 'reasoning_summary', 'tool_event']);
+    expect(messages.find((message) => message.content === '尚未完成')?.type).toBe('reasoning_summary');
+    expect(messages.some((message) => message.type === 'final_answer')).toBe(false);
   });
 
   it('projects phase=draft assistant deltas as reasoning and keeps one terminal answer', () => {

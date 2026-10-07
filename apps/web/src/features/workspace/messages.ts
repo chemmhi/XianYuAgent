@@ -161,11 +161,22 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
   let finalAnswerRendered = false;
   const hasPersistedFinalAnswer = events.some((event) => event.eventType !== 'assistant.delta' && messageType(event) === 'final_answer');
   const toolStreams = new Set(events.filter((event) => event.eventType.startsWith('tool.call.')).map((event) => event.payload.streamId).filter((value): value is string => typeof value === 'string'));
+  const toolBackedStreams = new Set([
+    ...toolStreams,
+    ...events
+      .filter((event) => event.eventType === 'workspace.execution.summary' && (typeof event.payload.toolCallId === 'string' || typeof event.payload.toolName === 'string'))
+      .map((event) => event.payload.streamId)
+      .filter((value): value is string => typeof value === 'string'),
+  ]);
+  // A live tool round can emit assistant.delta before the tool call is visible.
+  // Once the stream is known to be tool-backed, keep that text as a stable
+  // execution summary instead of letting a black final-answer bubble flash.
   const hasStreamingFinalAnswer = events.some((event) => {
-    if (event.eventType !== 'assistant.delta' || toolStreams.has(String(event.payload.streamId ?? '')) || typeof event.payload.contentDelta !== 'string' || !event.payload.contentDelta.trim()) return false;
+    if (event.eventType !== 'assistant.delta' || toolBackedStreams.has(String(event.payload.streamId ?? '')) || typeof event.payload.contentDelta !== 'string' || !event.payload.contentDelta.trim()) return false;
     return event.payload.phase === 'terminal' || (event.payload.phase === undefined && event.payload.messageType !== 'reasoning_summary');
   });
-  mergeStreamingEvents(events, { ignoreAssistantDeltas: hasPersistedFinalAnswer, toolStreams }).sort((left, right) => left.sequence - right.sequence).forEach((event) => {
+  const hasExecutionActivity = events.some((event) => event.eventType === 'workspace.execution.summary' || event.eventType === 'tool.result' || event.eventType.startsWith('tool.call.'));
+  mergeStreamingEvents(events, { ignoreAssistantDeltas: hasPersistedFinalAnswer, toolBackedStreams }).sort((left, right) => left.sequence - right.sequence).forEach((event) => {
     if (!shouldProjectEvent(event)) return;
     // Pi Runtime persists live reasoning/final messages as workspace.message.
     // Keep those messages in the active run projection; only skip persisted
@@ -208,7 +219,10 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
     });
   });
 
-  if (terminalStatuses.has(run.status) && !hasPersistedFinalAnswer && !hasStreamingFinalAnswer) {
+  // A terminal run snapshot can race ahead of buffered execution events. Once
+  // the execution trace has started, do not invent a fallback final answer
+  // from run.resultSummary until a persisted terminal final event arrives.
+  if (terminalStatuses.has(run.status) && !hasPersistedFinalAnswer && !hasStreamingFinalAnswer && !hasExecutionActivity) {
     const failed = run.status === 'failed' || run.status === 'cancelled' || run.status === 'expired';
     messages.push({
       id: `${run.runId}:final`,
@@ -231,7 +245,7 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
   });
 }
 
-function mergeStreamingEvents(events: WorkspaceRunEventVM[], options: { ignoreAssistantDeltas?: boolean; toolStreams?: Set<string> } = {}): WorkspaceRunEventVM[] {
+function mergeStreamingEvents(events: WorkspaceRunEventVM[], options: { ignoreAssistantDeltas?: boolean; toolBackedStreams?: Set<string> } = {}): WorkspaceRunEventVM[] {
   const passthrough: WorkspaceRunEventVM[] = [];
   const streams = new Map<string, WorkspaceRunEventVM>();
   const reusedToolCalls = new Set(events.filter((event) => event.eventType === 'tool.result' && event.payload.reused === true).map((event) => event.payload.toolCallId).filter((id): id is string => typeof id === 'string'));
@@ -255,11 +269,13 @@ function mergeStreamingEvents(events: WorkspaceRunEventVM[], options: { ignoreAs
       return;
     }
     if (event.eventType === 'assistant.delta') {
-      if (options.ignoreAssistantDeltas || (typeof payload.streamId === 'string' && options.toolStreams?.has(payload.streamId))) return;
+      if (options.ignoreAssistantDeltas) return;
       const messageId = typeof payload.messageId === 'string' ? payload.messageId : `${event.runId}:assistant`;
       const legacyTerminal = payload.phase === undefined && payload.messageType !== 'reasoning_summary';
-      const type = payload.phase === 'terminal' || legacyTerminal ? 'final_answer' : 'reasoning_summary';
-      append(event, type, typeof payload.contentDelta === 'string' ? payload.contentDelta : '', messageId, type === 'reasoning_summary' ? '模型处理中间进度' : undefined);
+      const streamId = typeof payload.streamId === 'string' ? payload.streamId : undefined;
+      const toolBacked = Boolean(streamId && options.toolBackedStreams?.has(streamId));
+      const type = toolBacked ? 'reasoning_summary' : payload.phase === 'terminal' || legacyTerminal ? 'final_answer' : 'reasoning_summary';
+      append(event, type, typeof payload.contentDelta === 'string' ? payload.contentDelta : '', messageId, type === 'reasoning_summary' ? (toolBacked ? '执行进度' : '模型处理中间进度') : undefined);
       return;
     }
     if (event.eventType === 'tool.call.started' || event.eventType === 'tool.call.delta' || event.eventType === 'tool.call.completed' || event.eventType === 'tool.result') {
