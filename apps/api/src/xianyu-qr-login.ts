@@ -10,7 +10,7 @@ import {
   type XianyuCookieSnapshot,
 } from './xianyu-cookie-jar.js';
 import type { XianyuVerificationBrowser } from './xianyu-verification-browser.js';
-import { XIANYU_USER_AGENT } from './xianyu-browser-identity.js';
+import { XIANYU_USER_AGENT, xianyuNavigatorPlatform } from './xianyu-browser-identity.js';
 
 const APP_KEY = '34839810';
 const PASSPORT_HOST = 'https://passport.goofish.com';
@@ -269,7 +269,7 @@ export class XianyuQrLoginAdapter {
   }
 
   private async pollQrStatus(session: InternalSession): Promise<{ status: string; iframeRedirect?: boolean; iframeRedirectUrl?: string }> {
-    const form = new URLSearchParams({ ...session.qrParams, ua: '', navlanguage: 'zh-CN', navUserAgent: USER_AGENT, navPlatform: 'Win32', isIframe: 'true', documentReferer: QR_VERIFY_TARGET, defaultView: 'qrcode' });
+    const form = new URLSearchParams({ ...session.qrParams, ua: '', navlanguage: 'zh-CN', navUserAgent: USER_AGENT, navPlatform: xianyuNavigatorPlatform(), isIframe: 'true', documentReferer: QR_VERIFY_TARGET, defaultView: 'qrcode' });
     const response = await this.request(API_SCAN_STATUS, { method: 'POST', headers: { ...passportHeaders(), 'content-type': 'application/x-www-form-urlencoded', cookie: cookieHeader(session.jar, API_SCAN_STATUS) }, body: form.toString() });
     absorbSetCookies(session.jar, API_SCAN_STATUS, response.headers);
     const payload = await response.json() as { hasError?: boolean; content?: { data?: { qrCodeStatus?: string; iframeRedirect?: boolean; iframeRedirectUrl?: string } } };

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { WebSocket } from 'ws';
-import { XIANYU_USER_AGENT, xianyuChromeVersion } from './xianyu-browser-identity.js';
+import { XIANYU_USER_AGENT, xianyuImUserAgent } from './xianyu-browser-identity.js';
 import { hasXianyuStructuredSystemMarker, hasXianyuSystemEnvelopeMarker, parseXianyuSystemMessageKind } from './xianyu-system-message.js';
 
 export const XIANYU_IM_WS_URL = 'wss://wss-goofish.dingtalk.com/';
@@ -339,7 +339,7 @@ export class XianyuImClient {
               'cache-header': 'app-key token ua wv',
               'app-key': XIANYU_IM_APP_ID,
               token: decodeURIComponent(this.credential.accessToken ?? ''),
-              ua: `${USER_AGENT} DingTalk(2.1.5) OS(Windows/10) Browser(Chrome/${xianyuChromeVersion()}) DingWeb/2.1.5`,
+              ua: xianyuImUserAgent(),
               dt: 'j',
               wv: 'im:3,au:3,sy:6',
               sync: '0,0;0;0;',
