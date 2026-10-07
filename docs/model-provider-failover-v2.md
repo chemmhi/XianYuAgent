@@ -203,9 +203,9 @@ updated_at
 手动切换写入流程：
 
 1. Store/PostgreSQL 乐观锁校验 `expectedVersion`。
-2. 持久化 routing record。
-3. 同步更新 Redis 镜像。
-4. 成功后才返回 200。
+2. 持久化 routing record，并以该提交作为正确性边界。
+3. 尝试同步更新 Redis 镜像；Redis 镜像写入是 best effort，不阻塞已提交配置的生效。
+4. Store 提交成功后返回 `200`；若 Redis 镜像同步失败，响应标记 `routing_mirror=degraded` 并记录修复事件。
 5. 新请求以 Store/PostgreSQL 的 committed routing record 为权威；Redis 只做镜像读取与修复提示，Redis 版本更高也不得覆盖 Store。
 
 Redis pubsub 只负责 cache invalidation/唤醒，不承担正确性。
