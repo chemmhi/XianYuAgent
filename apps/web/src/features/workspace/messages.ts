@@ -158,6 +158,9 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
 
   const seenMessageIds = new Set<string>();
   const seenReasoningKeys = new Set<string>();
+  const narratedStreams = new Set(events
+    .filter((event) => event.eventType === 'assistant.delta' && typeof event.payload.contentDelta === 'string' && event.payload.contentDelta.trim())
+    .map((event) => typeof event.payload.streamId === 'string' ? event.payload.streamId : ''));
   let finalAnswerRendered = false;
   const hasPersistedFinalAnswer = events.some((event) => event.eventType !== 'assistant.delta' && messageType(event) === 'final_answer');
   const toolStreams = new Set(events.filter((event) => event.eventType.startsWith('tool.call.')).map((event) => event.payload.streamId).filter((value): value is string => typeof value === 'string'));
@@ -176,7 +179,7 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
     return event.payload.phase === 'terminal';
   });
   const hasExecutionActivity = events.some((event) => event.eventType === 'workspace.execution.summary' || event.eventType === 'tool.result' || event.eventType.startsWith('tool.call.'));
-  mergeStreamingEvents(events, { ignoreAssistantDeltas: hasPersistedFinalAnswer, toolBackedStreams }).sort((left, right) => left.sequence - right.sequence).forEach((event) => {
+  mergeStreamingEvents(events, { ignoreTerminalAssistantDeltas: hasPersistedFinalAnswer, toolBackedStreams }).sort((left, right) => left.sequence - right.sequence).forEach((event) => {
     if (!shouldProjectEvent(event)) return;
     // Pi Runtime persists live reasoning/final messages as workspace.message.
     // Keep those messages in the active run projection; only skip persisted
@@ -198,6 +201,31 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
     if (messageKind === 'reasoning_summary' && finalAnswerRendered) return;
     const summary = typeof event.payload.summary === 'string' ? event.payload.summary : undefined;
     const content = typeof event.payload.content === 'string' ? event.payload.content : eventSummary(event);
+    const skillProgressStream = typeof event.payload.streamId === 'string' ? event.payload.streamId : '';
+    const isSkillProgressEvent = event.eventType === 'workspace.skill.progress';
+    const skillProgressContent = isSkillProgressEvent && !narratedStreams.has(skillProgressStream)
+      ? skillProgressNarrative(event.payload)
+      : undefined;
+    if (isSkillProgressEvent) {
+      if (!skillProgressContent) return;
+      const reasoningKey = `skill-progress:${event.sequence}:${skillProgressContent}`;
+      if (seenReasoningKeys.has(reasoningKey)) return;
+      seenReasoningKeys.add(reasoningKey);
+      messages.push({
+        id: `${run.runId}:event:${event.sequence}`,
+        runId: run.runId,
+        type: 'reasoning_summary',
+        createdAt: event.createdAt,
+        title: '推理摘要',
+        content: skillProgressContent,
+        summary: '模型思考进度',
+        eventType: event.eventType,
+        sequence: event.sequence,
+        status: safeStatus(event.payload) as WorkspaceMessageVM['status'],
+        collapsible: true,
+      });
+      return;
+    }
     if (messageKind === 'reasoning_summary') {
       const reasoningKey = `${summary ?? ''}:${content}`;
       if (seenReasoningKeys.has(reasoningKey)) return;
@@ -245,7 +273,7 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
   });
 }
 
-function mergeStreamingEvents(events: WorkspaceRunEventVM[], options: { ignoreAssistantDeltas?: boolean; toolBackedStreams?: Set<string> } = {}): WorkspaceRunEventVM[] {
+function mergeStreamingEvents(events: WorkspaceRunEventVM[], options: { ignoreTerminalAssistantDeltas?: boolean; toolBackedStreams?: Set<string> } = {}): WorkspaceRunEventVM[] {
   const passthrough: WorkspaceRunEventVM[] = [];
   const streams = new Map<string, WorkspaceRunEventVM>();
   const reusedToolCalls = new Set(events.filter((event) => event.eventType === 'tool.result' && event.payload.reused === true).map((event) => event.payload.toolCallId).filter((id): id is string => typeof id === 'string'));
@@ -269,7 +297,11 @@ function mergeStreamingEvents(events: WorkspaceRunEventVM[], options: { ignoreAs
       return;
     }
     if (event.eventType === 'assistant.delta') {
-      if (options.ignoreAssistantDeltas) return;
+      // A persisted final answer only replaces terminal assistant output. Draft
+      // deltas are the model's high-level progress narration and must remain in
+      // the chronological trace, otherwise a refresh makes the black summaries
+      // disappear while tool events remain visible.
+      if (options.ignoreTerminalAssistantDeltas && payload.phase === 'terminal') return;
       const messageId = typeof payload.messageId === 'string' ? payload.messageId : `${event.runId}:assistant`;
       const streamId = typeof payload.streamId === 'string' ? payload.streamId : undefined;
       const toolBacked = Boolean(streamId && options.toolBackedStreams?.has(streamId));
@@ -332,4 +364,34 @@ function toolProgressSummary(toolName: string): string {
     pi_skill_exec: '执行 Skill 命令',
   };
   return labels[toolName] ?? `执行 ${toolName}`;
+}
+
+function skillProgressNarrative(payload: Record<string, unknown>): string | undefined {
+  const phase = payload.phase === 'execution' || payload.phase === 'discovery' ? payload.phase : undefined;
+  if (!phase) return undefined;
+  const discoveryCalls = numberValue(payload.discoveryCalls);
+  const executionCalls = numberValue(payload.executionCalls);
+  const noProgressCount = numberValue(payload.noProgressCount);
+  const progressed = payload.progressed === true;
+  const suggestedTool = typeof payload.suggestedTool === 'string' && payload.suggestedTool.trim() ? payload.suggestedTool.trim() : undefined;
+
+  if (phase === 'execution') {
+    if (executionCalls <= 1) return `已从 Skill 检索结果中找到可执行命令，进入执行阶段。下一步运行 ${suggestedTool ?? 'pi_skill_exec'}，并核对真实结果。`;
+    return `执行阶段已推进到第 ${executionCalls} 次，正在基于上一轮结果继续完成任务。下一步等待工具结果并校验执行状态。`;
+  }
+
+  if (progressed) {
+    if (suggestedTool) return `Skill 检索取得新的命令证据（第 ${discoveryCalls} 次）。下一步切换到已发现的执行命令，验证真实结果。`;
+    return `Skill 检索取得新证据（第 ${discoveryCalls} 次）。下一步继续核对可执行命令。`;
+  }
+
+  if (noProgressCount > 0) {
+    const nextStep = suggestedTool ? '停止换词并切换到已发现的执行命令。' : '收紧检索条件，避免重复调用。';
+    return `本轮 Skill 检索没有产生新的证据，已连续 ${noProgressCount} 次重复。下一步${nextStep}`;
+  }
+  return undefined;
+}
+
+function numberValue(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
 }

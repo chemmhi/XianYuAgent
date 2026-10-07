@@ -574,20 +574,20 @@ body .app-viewport .workspace-domain .workspace-mobile-compact-header strong {
   align-items: center;
   min-height: 28px;
   gap: 9px;
-  color: #111827;
+  color: #6B7280;
   line-height: 1.45;
 }
 .workspace-activity-action-icon {
   width: 18px;
   height: 18px;
-  color: #111827;
+  color: #6B7280;
 }
 .workspace-activity-action-icon svg {
   width: 16px;
   height: 16px;
 }
 .workspace-activity-action-label {
-  color: #111827;
+  color: #6B7280;
   font-size: 14px;
   line-height: 1.45;
 }

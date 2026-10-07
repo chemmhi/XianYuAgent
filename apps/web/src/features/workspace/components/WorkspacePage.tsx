@@ -9,7 +9,7 @@ import { SearchField } from '../../../shared/ui/SearchField';
 import { Button } from '../../../shared/ui/Button';
 import { Toast } from '../../../shared/ui/Toast';
 import { MarkdownContent } from '../../../shared/ui/MarkdownContent';
-import { buildWorkspaceActivityItems, isLowSignalSummary, workspaceToolActionIcon, type WorkspaceActivityItem } from './workspaceActivity';
+import { buildWorkspaceActivityItems, isLowSignalSummary, isMeaningfulToolDetail, shouldDisplayToolActionLabel, workspaceToolActionIcon, type WorkspaceActivityItem } from './workspaceActivity';
 import './workspace.css';
 
 export interface WorkspacePageProps { api: WorkspaceApi; }
@@ -235,8 +235,13 @@ function ExecutionSummaryView({ item }: { item: Extract<WorkspaceActivityItem, {
 
 function ToolEventView({ item, expanded, onToggle }: { item: Extract<WorkspaceActivityItem, { kind: 'tool' }>; expanded: boolean; onToggle: () => void }) {
   const icon = workspaceToolActionIcon(item.message);
+  const detailMessages = item.messages.filter(isMeaningfulToolDetail);
+  const canExpand = detailMessages.length > 0;
+  const showLabel = shouldDisplayToolActionLabel(item.label, canExpand);
+  const accessibleLabel = showLabel ? item.label : '工具动作';
+  if (!showLabel && !canExpand) return null;
   return <article className="workspace-activity-action" data-testid="workspace-activity-action" data-tool-name={item.message.title}>
-    <button type="button" className="workspace-activity-action-toggle" onClick={onToggle} aria-expanded={expanded} aria-label={`${item.label}${expanded ? '，收起工具详情' : '，展开工具详情'}`}>
+    <button type="button" className="workspace-activity-action-toggle" onClick={canExpand ? onToggle : undefined} aria-expanded={canExpand ? expanded : undefined} aria-label={`${accessibleLabel}${canExpand ? (expanded ? '，收起工具详情' : '，展开工具详情') : ''}`}>
       <span className={`workspace-activity-action-icon workspace-activity-action-icon-${icon}`} aria-hidden="true">
         {icon === 'edit'
           ? <svg viewBox="0 0 16 16" focusable="false"><path d="m3.25 11.75-.5 1.5 1.5-.5 7.9-7.9-1-1-7.9 7.9Z" /><path d="m10.55 3.15 1-1 1.3 1.3-1 1" /></svg>
@@ -246,16 +251,16 @@ function ToolEventView({ item, expanded, onToggle }: { item: Extract<WorkspaceAc
               ? <svg viewBox="0 0 16 16" focusable="false"><rect x="3" y="2.75" width="10" height="10.5" rx="1" /><path d="M5.25 5.5h5.5M5.25 8h5.5M5.25 10.5h3.5" /></svg>
               : <svg viewBox="0 0 16 16" focusable="false"><path d="m4 4.5 3 3-3 3" /><path d="M8.5 10.5h3.5" /></svg>}
       </span>
-      <span className="workspace-activity-action-label">{item.label}</span>
-      <span className="workspace-activity-action-control">
+      {showLabel && <span className="workspace-activity-action-label">{item.label}</span>}
+      {canExpand && <span className="workspace-activity-action-control">
         <span>{expanded ? '收起' : '展开'}</span>
         <svg className={`workspace-activity-action-chevron${expanded ? ' is-expanded' : ''}`} viewBox="0 0 12 12" focusable="false" aria-hidden="true">
           <path d={expanded ? 'M2.5 4 6 7.5 9.5 4' : 'M4 2.5 7.5 6 4 9.5'} vectorEffect="non-scaling-stroke" />
         </svg>
-      </span>
+      </span>}
     </button>
-    {expanded && <div className="workspace-activity-action-details" data-testid="workspace-activity-action-details">
-      {item.messages.map((message) => <div className="workspace-activity-action-detail" key={message.id}>
+    {expanded && canExpand && <div className="workspace-activity-action-details" data-testid="workspace-activity-action-details">
+      {detailMessages.map((message) => <div className="workspace-activity-action-detail" key={message.id}>
         <strong>{message.title}</strong>
         <pre>{formatToolEventContent(message.content)}</pre>
       </div>)}

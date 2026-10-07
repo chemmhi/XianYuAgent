@@ -162,6 +162,23 @@ describe('Workspace MessageStream', () => {
     expect(expandedHtml).toContain('aria-expanded="true"');
   });
 
+  it('removes empty generic tool rows but keeps expandable command rows', () => {
+    const emptyGeneric: WorkspaceMessageVM = {
+      id: 'tool-empty', runId: 'run-1', type: 'tool_event', createdAt: '2026-09-22T00:00:02.000Z', title: '工具事件', content: 'workspace skill progress',
+    };
+    const usefulCommand: WorkspaceMessageVM = {
+      id: 'tool-command', runId: 'run-1', type: 'tool_event', createdAt: '2026-09-22T00:00:03.000Z', title: 'pi_skill_preflight', summary: '运行了命令', content: '已选择工具：pi_skill_preflight（执行 pi_skill_preflight）',
+    };
+
+    const emptyHtml = renderToStaticMarkup(createElement(MessageStream, { messages: [emptyGeneric] }));
+    expect(emptyHtml).not.toContain('workspace-activity-action');
+
+    const usefulHtml = renderToStaticMarkup(createElement(MessageStream, { messages: [usefulCommand], expandedTrace: 'tool-command', onToggleTrace: vi.fn() }));
+    expect(usefulHtml).toContain('运行了命令');
+    expect(usefulHtml).toContain('pi_skill_preflight');
+    expect(usefulHtml).toContain('workspace-activity-action-details');
+  });
+
   it('renders trace duration in human-friendly units', () => {
     const messages: WorkspaceMessageVM[] = [
       { id: 'reasoning-1', runId: 'run-1', type: 'reasoning_summary', createdAt: '2026-09-22T00:00:00.000Z', title: '推理摘要', summary: '读取店铺状态 · 已完成', content: '读取店铺状态' },

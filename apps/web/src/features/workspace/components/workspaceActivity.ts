@@ -70,6 +70,10 @@ export function workspaceToolActionIcon(message: WorkspaceMessageVM): WorkspaceT
   return 'command';
 }
 
+export function shouldDisplayToolActionLabel(label: string, hasMeaningfulDetails = false): boolean {
+  return normalize(label) !== '运行了命令' || hasMeaningfulDetails;
+}
+
 function toolAggregationKey(message: WorkspaceMessageVM): string {
   return `${message.runId ?? ''}|${message.title.trim().toLowerCase()}|${workspaceToolActionLabel(message)}`;
 }
@@ -78,6 +82,15 @@ export function isLowSignalSummary(message: WorkspaceMessageVM): boolean {
   const content = message.content.trim();
   const summary = (message.summary ?? '').trim();
   return lowSignalSummaryPattern.test(content) && Boolean(summary);
+}
+
+export function isMeaningfulToolDetail(message: WorkspaceMessageVM): boolean {
+  const title = normalize(message.title).toLowerCase();
+  const content = normalize(message.content).toLowerCase();
+  if (!content) return false;
+  if (title === '工具事件' && /^(workspace[ .]skill[ .]progress|workspace[ .]execution[ .]summary|tool[ .]call(?:[ .].*)?)$/.test(content)) return false;
+  if (/^workspace[ .]skill[ .]progress$/.test(content)) return false;
+  return true;
 }
 
 function normalize(value: string): string {

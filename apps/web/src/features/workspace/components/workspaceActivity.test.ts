@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { WorkspaceMessageVM } from '../types';
-import { buildWorkspaceActivityItems, workspaceToolActionIcon, workspaceToolActionLabel } from './workspaceActivity';
+import { buildWorkspaceActivityItems, isMeaningfulToolDetail, shouldDisplayToolActionLabel, workspaceToolActionIcon, workspaceToolActionLabel } from './workspaceActivity';
 
 const base = (overrides: Partial<WorkspaceMessageVM>): WorkspaceMessageVM => ({
   id: overrides.id ?? 'message',
@@ -85,5 +85,16 @@ describe('workspace activity feed', () => {
     expect(workspaceToolActionIcon(base({ type: 'tool_event', title: 'pi_skill_read', summary: '读取 Skill 使用说明' }))).toBe('read');
     expect(workspaceToolActionIcon(base({ type: 'tool_event', title: 'workspace_prepare_write', summary: '准备受控写入' }))).toBe('edit');
     expect(workspaceToolActionIcon(base({ type: 'tool_event', title: 'pi_skill_exec', summary: '执行 Skill 命令' }))).toBe('command');
+  });
+
+  it('filters internal event-only details from expanded tool rows', () => {
+    expect(isMeaningfulToolDetail(base({ type: 'tool_event', title: '工具事件', content: 'workspace skill progress' }))).toBe(false);
+    expect(isMeaningfulToolDetail(base({ type: 'tool_event', title: 'workspace_product_search', content: '工具结果：找到 1 个商品' }))).toBe(true);
+  });
+
+  it('hides the generic command title while keeping semantic action titles', () => {
+    expect(shouldDisplayToolActionLabel('运行了命令')).toBe(false);
+    expect(shouldDisplayToolActionLabel('运行了命令', true)).toBe(true);
+    expect(shouldDisplayToolActionLabel('检索 Skill 使用说明')).toBe(true);
   });
 });

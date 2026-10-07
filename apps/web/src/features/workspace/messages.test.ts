@@ -176,6 +176,25 @@ describe('workspace message projection', () => {
     expect(finalAnswers[0]?.content).not.toContain('我先定位这个商品');
   });
 
+  it('keeps draft model progress visible when a persisted final answer already exists', () => {
+    const failedRun: WorkspaceRunVM = {
+      ...run,
+      status: 'failed',
+      errorCode: 'MODEL_TOOL_LOOP_EXCEEDED',
+      resultSummary: '工具调用失败：重复调用已停止。',
+      finishedAt: '2026-10-07T01:00:03.000Z',
+    };
+    const messages = buildWorkspaceMessages(failedRun, [
+      { sequence: 2, runId: 'run-1', eventType: 'assistant.delta', payload: { streamId: 'round-1', messageId: 'round-1:assistant', phase: 'draft', contentDelta: '已拿到检索结果，接下来核对写入条件。', status: 'running' }, createdAt: '2026-10-07T01:00:01.000Z' },
+      { sequence: 3, runId: 'run-1', eventType: 'tool.call.started', payload: { streamId: 'round-1', toolCallId: 'call-1', toolName: 'workspace_product_search' }, createdAt: '2026-10-07T01:00:01.500Z' },
+      { sequence: 4, runId: 'run-1', eventType: 'workspace.message', payload: { messageType: 'final_answer', content: '工具调用失败：重复调用已停止。' }, createdAt: '2026-10-07T01:00:02.500Z' },
+      { sequence: 5, runId: 'run-1', eventType: 'run.failed', payload: { status: 'failed', messageType: 'final_answer', content: '工具调用失败：重复调用已停止。' }, createdAt: '2026-10-07T01:00:03.000Z' },
+    ]);
+
+    expect(messages.some((message) => message.type === 'reasoning_summary' && message.content.includes('接下来核对写入条件'))).toBe(true);
+    expect(messages.filter((message) => message.type === 'final_answer')).toHaveLength(1);
+  });
+
   it('shows the concrete tool name and final tool result event type', () => {
     const messages = buildWorkspaceMessages(run, [
       { sequence: 2, runId: 'run-1', eventType: 'tool.call.delta', payload: { toolCallId: 'call-2', argumentsDelta: '{"query":', status: 'streaming' }, createdAt: '2026-09-20T00:00:01.000Z' },
@@ -199,6 +218,38 @@ describe('workspace message projection', () => {
     expect(execution[0]).toMatchObject({ summary: '检索商品信息', content: '正在检索商品信息，等待工具返回真实结果。' });
     expect(execution[2]?.summary).toBe('准备受控写入');
     expect(execution[1]?.content).toContain('已按名称筛选 1 个商品');
+  });
+
+  it('projects Skill progress into a black high-level summary with the next step', () => {
+    const messages = buildWorkspaceMessages({ ...run, status: 'running' }, [
+      { sequence: 2, runId: 'run-1', eventType: 'workspace.skill.progress', payload: { phase: 'discovery', discoveryCalls: 2, executionCalls: 0, noProgressCount: 0, progressed: true, suggestedTool: 'pi_skill_exec' }, createdAt: '2026-10-07T01:00:01.000Z' },
+      { sequence: 3, runId: 'run-1', eventType: 'workspace.skill.progress', payload: { phase: 'execution', discoveryCalls: 2, executionCalls: 1, noProgressCount: 0, progressed: true, suggestedTool: 'pi_skill_exec' }, createdAt: '2026-10-07T01:00:02.000Z' },
+    ]);
+
+    const progress = messages.filter((message) => message.eventType === 'workspace.skill.progress');
+    expect(progress).toHaveLength(2);
+    expect(progress[0]?.type).toBe('reasoning_summary');
+    expect(progress[0]?.content).toContain('下一步');
+    expect(progress[0]?.content).toContain('命令证据');
+    expect(progress[1]?.content).toContain('进入执行阶段');
+  });
+
+  it('narrates repeated Skill discovery as a bounded next step', () => {
+    const messages = buildWorkspaceMessages({ ...run, status: 'running' }, [
+      { sequence: 2, runId: 'run-1', eventType: 'workspace.skill.progress', payload: { phase: 'discovery', discoveryCalls: 7, executionCalls: 0, noProgressCount: 3, progressed: false, suggestedTool: 'pi_skill_exec' }, createdAt: '2026-10-07T01:00:01.000Z' },
+    ]);
+
+    expect(messages.find((message) => message.eventType === 'workspace.skill.progress')?.content).toContain('停止换词并切换到已发现的执行命令');
+  });
+
+  it('does not leak Skill progress as a generic tool event when model narration exists', () => {
+    const messages = buildWorkspaceMessages({ ...run, status: 'running' }, [
+      { sequence: 2, runId: 'run-1', eventType: 'assistant.delta', payload: { streamId: 'round-1', messageId: 'round-1:assistant', phase: 'draft', contentDelta: '我已拿到命令证据，准备执行。' }, createdAt: '2026-10-07T01:00:01.000Z' },
+      { sequence: 3, runId: 'run-1', eventType: 'workspace.skill.progress', payload: { streamId: 'round-1', phase: 'discovery', discoveryCalls: 3, executionCalls: 0, noProgressCount: 0, progressed: true, suggestedTool: 'pi_skill_exec' }, createdAt: '2026-10-07T01:00:01.100Z' },
+    ]);
+
+    expect(messages.some((message) => message.type === 'tool_event' && message.content === 'workspace skill progress')).toBe(false);
+    expect(messages.filter((message) => message.type === 'reasoning_summary').some((message) => message.content.includes('我已拿到命令证据'))).toBe(true);
   });
 
   it('shows result-based summaries between tools and hides provisional assistant text from tool rounds', () => {
