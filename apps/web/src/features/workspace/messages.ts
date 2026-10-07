@@ -160,7 +160,10 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
   const hasStreamingFinalAnswer = events.some((event) => event.eventType === 'assistant.delta' && !toolStreams.has(String(event.payload.streamId ?? '')) && typeof event.payload.contentDelta === 'string' && event.payload.contentDelta.trim());
   mergeStreamingEvents(events, { ignoreAssistantDeltas: hasPersistedFinalAnswer, toolStreams }).sort((left, right) => left.sequence - right.sequence).forEach((event) => {
     if (!shouldProjectEvent(event)) return;
-    if (event.eventType === 'workspace.message') return;
+    // Pi Runtime persists live reasoning/final messages as workspace.message.
+    // Keep those messages in the active run projection; only skip persisted
+    // tool messages because tool.result already provides the canonical view.
+    if (event.eventType === 'workspace.message' && messageType(event) === 'tool_event') return;
     if (event.eventType === 'message.appended' && messageType(event) === 'tool_event') return;
     if (messageType(event) === 'reasoning_summary' && event.payload.summary === '上下文摘要') return;
     const messageKind = messageType(event);
