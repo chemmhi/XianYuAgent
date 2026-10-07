@@ -168,6 +168,18 @@ describe('workspace message projection', () => {
     expect(messages.some((message) => message.content === '尚未完成')).toBe(false);
   });
 
+  it('projects phase=draft assistant deltas as reasoning and keeps one terminal answer', () => {
+    const messages = buildWorkspaceMessages(run, [
+      { sequence: 2, runId: 'run-1', eventType: 'assistant.delta', payload: { streamId: 'round-1', messageId: 'draft-1', phase: 'draft', messageType: 'reasoning_summary', contentDelta: '我先定位文件。' }, createdAt: '2026-10-07T01:00:00.000Z' },
+      { sequence: 3, runId: 'run-1', eventType: 'tool.call.started', payload: { streamId: 'round-1', toolCallId: 'call-1', toolName: 'pi_skill_search' }, createdAt: '2026-10-07T01:00:00.100Z' },
+      { sequence: 4, runId: 'run-1', eventType: 'tool.result', payload: { streamId: 'round-1', toolCallId: 'call-1', toolName: 'pi_skill_search', result: { summary: '找到文件', content: 'fid=123' }, status: 'succeeded' }, createdAt: '2026-10-07T01:00:00.200Z' },
+      { sequence: 5, runId: 'run-1', eventType: 'workspace.message', payload: { messageType: 'final_answer', content: '已找到文件 fid=123。' }, createdAt: '2026-10-07T01:00:00.300Z' },
+    ]);
+    expect(messages.filter((message) => message.type === 'final_answer')).toHaveLength(1);
+    expect(messages.filter((message) => message.type === 'final_answer')[0]?.content).toBe('已找到文件 fid=123。');
+    expect(messages.some((message) => message.type === 'final_answer' && message.content.includes('我先定位文件'))).toBe(false);
+  });
+
   it('projects one useful result per tool and never displays raw context checkpoints', () => {
     const projected = buildWorkspaceMessages(run, [
       { sequence: 2, runId: 'run-1', eventType: 'workspace.execution.summary', payload: { messageType: 'reasoning_summary', content: '正在核对任务目标与已有结果。', summary: '分析任务' }, createdAt: '2026-10-07T01:00:00.000Z' },
