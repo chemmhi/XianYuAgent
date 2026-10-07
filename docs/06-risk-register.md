@@ -322,3 +322,5 @@
 | WS-RISK-04 | 模型生成的压缩摘要可能漏掉关键结果或引入未经验证的结论 | 输入限定为有界工具结果；关键 ID/URL 由确定性抽取追加；模型失败时降级为有界摘要；发布后核对真实 Run 的关键标识和后续动作 | OPEN / production verification |
 | WS-RISK-05 | 生产旧工具事件仍存有原始参数，可能含分享口令或链接 | 新事件仅写 SHA-256 参数指纹；旧格式兼容读取；历史数据清理需单独制定保留/审计方案，不在本切片直接删除 | OPEN / retention decision |
 | WS-RISK-06 | 新增模型计划调用增加单次任务的模型请求和延迟 | 5 秒上限、结构化校验、失败不阻断执行；隔离 E2E 记录了计划请求和实际工具调用，发布后观察延迟及调用数 | OPEN / production metrics |
+
+| WS-RISK-07 | 前端过滤已持久化 `workspace.execution.summary`，导致真实推理摘要在首个工具事件到达后消失 | 保留 `workspace.execution.summary` 投影；继续过滤 `reasoning.delta` / `context.compacted`；补充 17 项定向测试、Web 全量回归和内置浏览器稳定 DOM 复验 | CLOSED in `07b7694`; production recheck follow-up |

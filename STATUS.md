@@ -472,3 +472,11 @@
 - Verified: targeted API tests 25/25, Workspace PostgreSQL Chrome/CDP E2E, API/Web typecheck and builds, and git diff --check passed. The existing ChatGPT-specific Workspace Pi E2E still reports a missing persisted reasoning summary and is unrelated to this slice.
 - Merged to main as df3ce90 (no-ff); no external Xianyu mutation acceptance is claimed.
 - Post-merge verification: targeted API tests 25/25, Workspace PostgreSQL Chrome/CDP E2E, typecheck, and build passed on main.
+
+## 2026-10-07 Workspace 实时推理摘要投影修复
+
+- 根因：`workspace.execution.summary` 事件已持久化，但前端投影整体过滤该事件；首个工具事件到达后步骤兜底摘要被移除，导致摘要只闪现一瞬间。
+- 修复：保留真实 `workspace.execution.summary` 作为用户可见推理检查点，继续过滤 `context.compacted` 与 `reasoning.delta`，并补充交替摘要/工具结果回归断言。
+- 审核与合入：独立 reviewer agent PASS；提交 `43df91f` 以 `--no-ff` 合入 `main`，merge commit `07b7694`。
+- 验证：Web 93 files / 377 tests、Web typecheck、Web build、`git diff --check`；内置浏览器 `http://localhost:5173/workspace` 刷新后摘要 12 个、工具事件 38 个、最终答复 1 个，稳定包含“分析任务”“检索商品信息”“商品搜索”。
+- 边界：本轮未运行 PostgreSQL/Chrome E2E（Docker 服务未运行）；真实生产新 Run 仍需发布后复验。

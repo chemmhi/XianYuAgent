@@ -791,3 +791,13 @@ Review conclusion: workspace confirmation fixes were merged after code review an
 | WS-R-12 | 全链路 / 恢复 | Skill 短索引与按需检索、模型有效压缩、同参复用、写入后失效、确认续跑、UI 投影 | root | PASS（隔离环境） | API 定向 56/56、API/Web 全量、Chrome/CDP + PostgreSQL Workspace E2E、`npm run build`、`git diff --check` |
 
 用户在当前会话明确要求保留主工作区既有无关文件并直接合入 `main`。真实生产网盘任务尚未在修复版本上复验，不能把本地结论升级为生产修复验收。
+
+### 2026-10-07 Workspace 实时推理摘要复核
+
+| review_id | type | focus | reviewer | conclusion | evidence |
+| --- | --- | --- | --- | --- | --- |
+| WS-R-13 | 质量 / 前端 | workspace.execution.summary 在实时工具事件到达后是否仍可见，且不泄露 reasoning.delta / 上下文原始检查点 | 独立 agent workspace_reasoning_reviewer | PASS | 提交 43df91f；messages.test.ts 17/17；Web 全量 93 files / 377 tests；Web typecheck；Web build；git diff --check |
+
+独立审核未执行 PostgreSQL/Chrome E2E（当前 Docker 服务未运行）；合并后按流程用内置浏览器复核真实 Workspace DOM 摘要节点。
+
+合并后复核：`43df91f` 已以 `--no-ff` 合入 `main`，merge commit 为 `07b7694`。内置浏览器实际检查 `http://localhost:5173/workspace` 并刷新页面后，`.workspace-execution-summary` 稳定为 12 个，`.workspace-tool-event` 为 38 个，`.workspace-message-final` 为 1 个；摘要文本包含“分析任务”“检索商品信息”“商品搜索”，两次读取结果一致且节点 `display=grid`、`visibility=visible`、`opacity=1`。

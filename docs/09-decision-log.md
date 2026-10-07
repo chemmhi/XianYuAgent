@@ -270,6 +270,12 @@
 3. 读命令直接调用现有查询服务；写命令统一进入 Confirmation -> Idempotency -> Outbox -> Audit，模型连通性测试保持只读。
 4. 订单交付写入不在本轮伪造完成：在 S4-VS4B/C 的 DeliveryRecord、交付 Outbox、外部状态查询和人工恢复正式实现前，Workspace 只暴露交付预览和同步结果。
 5. 迁移 046_workspace_platform_takeover_actions.sql 仅扩展 Workspace Confirmation action 白名单；未新增订单交付表，因此不把订单发货/取消/重试标为完成。
+
+## 2026-10-07 Workspace 实时推理摘要投影决策
+
+1. `workspace.execution.summary` 是已持久化且面向用户的高层推理检查点，必须进入实时 Workspace 执行轨迹，不能按工具事件过滤。
+2. `reasoning.delta` 仍保持过滤，避免把 provider 内部推理细节直接展示；`context.compacted` 继续作为内部上下文事件处理。
+3. 以事件 sequence 保持“摘要 → 工具调用/结果 → 后续摘要”的顺序，并通过独立 reviewer agent、全量 Web 回归和内置浏览器稳定 DOM 证据后合入 `main`。
 ## 2026-10-05：订单交付正式复用执行适配器
 
 - 订单交付不在 Workspace 层拼接闲鱼调用；`OrderDeliveryService` 复用既有 `ProductAutomationExecutionAdapter`，统一处理卡券 reservation、IM 交付、确认发货、外部状态读取和账号 scope。
