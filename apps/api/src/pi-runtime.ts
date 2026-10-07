@@ -20,13 +20,14 @@ import {
   restoreWorkspacePlanFacts,
   workspacePlanCurrentTool,
   workspacePlanHasPendingSteps,
+  workspacePlanCompletionStatus,
   type WorkspaceExecutionPlan,
 } from './workspace-context.js';
 import {
   extractWorkspacePlanFacts,
-  mergeWorkspacePlanFacts,
   validateWorkspacePlanCall,
-  workspacePlanGoalStatus,
+  mergeWorkspacePlanFacts,
+  type WorkspacePlanPolicy,
   type WorkspacePlanFacts,
 } from './workspace-plan-contract.js';
 
@@ -425,6 +426,8 @@ export interface PiRuntimeAdapterOptions {
   onEvent?: (event: PiRuntimeEvent) => void | Promise<void>;
   workspaceCommands?: WorkspaceCommandOrchestrator;
   skillManager?: PiSkillManager;
+  /** Optional policy extension; generic runtime remains usable without one. */
+  planPolicy?: WorkspacePlanPolicy;
 }
 
 export interface PiRuntimeEnqueueInput {
@@ -729,6 +732,17 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       if (Object.keys(recoveredFacts).length > 0) {
         executionPlan = { ...executionPlan, facts: mergeWorkspacePlanFacts(executionPlan.facts, recoveredFacts) };
       }
+      if (executionPlan.policyKey && (
+        this.options.planPolicy?.key !== executionPlan.policyKey
+        || this.options.planPolicy?.version !== executionPlan.policyVersion
+      )) {
+        await this.recordToolFailure(input, step, {
+          toolName: 'plan',
+          code: 'PLAN_POLICY_UNAVAILABLE',
+          summary: `持久化计划需要策略 ${executionPlan.policyKey}@${executionPlan.policyVersion ?? 'unknown'}，当前运行时未提供匹配策略`,
+        });
+        return;
+      }
     }
     if (executionPlan?.status === 'waiting_confirmation' && input.resumeAfterConfirmation) {
       executionPlan = completeConfirmedWorkspacePlanStep(executionPlan, '确认写入已完成');
@@ -743,7 +757,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       await this.emit(input.run.id, 'workspace.plan.updated', { status: executionPlan.status, plan: executionPlan, reason: 'reconnect_failed_step' });
     }
     if (!executionPlan && !input.resumeAfterConfirmation && !input.resumeFromFailure) {
-      executionPlan = await createWorkspaceExecutionPlanFromModel(input.run.instruction, tools, modelClient, signal, { fallback: true });
+      executionPlan = await createWorkspaceExecutionPlanFromModel(input.run.instruction, tools, modelClient, signal, { fallback: true, planPolicy: this.options.planPolicy });
       if (executionPlan && !signal.aborted) {
         await this.emit(input.run.id, 'workspace.plan.created', { status: executionPlan.status, plan: executionPlan });
         const planText = createWorkspacePlanMessage(executionPlan, cachedReplayableEvidence(replayableResults));
@@ -759,7 +773,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           toolName: planUpdate.toolName,
           code: planUpdate.reason ?? 'PLAN_STEP_FAILED',
           summary: planUpdate.evidence ?? '当前步骤无法完成',
-        }, tools, modelClient, signal);
+        }, tools, modelClient, signal, { planPolicy: this.options.planPolicy });
         if (revised) {
           executionPlan = revised;
           await this.emit(input.run.id, 'workspace.plan.updated', {
@@ -775,26 +789,6 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       }
       executionPlan = applyWorkspacePlanResult(executionPlan, planUpdate);
       if (planUpdate.facts) executionPlan = applyWorkspacePlanFacts(executionPlan, planUpdate.facts);
-      const goalStatus = workspacePlanGoalStatus(executionPlan.goalPredicateId, executionPlan.facts);
-      if (executionPlan.status === 'completed' && !goalStatus.complete) {
-        const revised = await reviseWorkspaceExecutionPlanFromModel(executionPlan, {
-          toolName: planUpdate.toolName,
-          code: 'PLAN_GOAL_PREDICATE_UNSATISFIED',
-          summary: `计划步骤已走完，但目标谓词仍缺少：${goalStatus.missing.join('、')}`,
-        }, tools, modelClient, signal);
-        if (revised) {
-          executionPlan = revised;
-          await this.emit(input.run.id, 'workspace.plan.updated', {
-            status: executionPlan.status,
-            plan: executionPlan,
-            reason: 'replanned_after_goal_predicate_failure',
-            missingFacts: goalStatus.missing,
-          });
-          upsertWorkspacePlanMessage(messages, createWorkspacePlanMessage(executionPlan, cachedReplayableEvidence(replayableResults)));
-          return true;
-        }
-        executionPlan = { ...executionPlan, status: 'blocked', revision: executionPlan.revision + 1 };
-      }
       await this.emit(input.run.id, 'workspace.plan.updated', { status: executionPlan.status, plan: executionPlan, ...(planUpdate.reason ? { reason: planUpdate.reason } : {}) });
       upsertWorkspacePlanMessage(messages, createWorkspacePlanMessage(executionPlan, cachedReplayableEvidence(replayableResults)));
       return false;
@@ -815,10 +809,11 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     const maxRounds = configuredMaxRounds !== undefined && configuredMaxRounds > 0
       ? Math.max(1, Math.trunc(configuredMaxRounds))
       : DEFAULT_PI_MAX_TOOL_ROUNDS;
+    const strictPlanExecution = Boolean(executionPlan?.policyKey || executionPlan?.goalPredicateId);
     for (let round = 0; round < maxRounds; round += 1) {
       if (this.stopped || signal.aborted) return;
-      const strictPlanCompletion = Boolean(executionPlan?.goalPredicateId);
-      const finalAnswerRound = forceFinalAnswer || (strictPlanCompletion && executionPlan?.status === 'completed');
+      const planCompletion = strictPlanExecution ? workspacePlanCompletionStatus(executionPlan, this.options.planPolicy) : undefined;
+      const finalAnswerRound = forceFinalAnswer || Boolean(planCompletion?.complete);
       const streamId = `${input.run.id}:stream:${round + 1}`;
       const assistantMessageId = `${streamId}:assistant`;
       let assistant = '';
@@ -836,7 +831,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       // A strict contract plan advances one durable step at a time.  Even if
       // the provider returns several calls in one response, only the call for
       // the current step may be surfaced, persisted, and executed.
-      const maxToolCallsForResponse = executionPlan?.goalPredicateId
+      const maxToolCallsForResponse = strictPlanExecution
         ? 1
         : Number.POSITIVE_INFINITY;
       const handlers: ModelStreamHandlers = {
@@ -918,7 +913,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
         const plannedTool = workspacePlanCurrentTool(executionPlan);
         const plannedStep = executionPlan?.currentStepId ? executionPlan.steps.find((candidate) => candidate.id === executionPlan?.currentStepId) : undefined;
         const planValidation = plannedStep
-          ? validateWorkspacePlanCall(plannedStep, call.function.name, args, executionPlan?.facts ?? {})
+          ? validateWorkspacePlanCall(plannedStep, call.function.name, args, executionPlan?.facts ?? {}, this.options.planPolicy)
           : { ok: true };
         if (!planValidation.ok) {
           const failure = { toolName: call.function.name, code: planValidation.code ?? 'PLAN_STEP_MISMATCH', summary: planValidation.summary ?? `Plan Mode 当前步骤要求调用 ${plannedTool ?? '未知工具'}；请按计划顺序继续` };
@@ -1045,9 +1040,11 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
         // served from the run cache after reconnect/compaction.
         const extractedFacts = extractWorkspacePlanFacts(call.function.name, args, result);
         await updateExecutionPlan({ toolName: call.function.name, succeeded: true, waitingConfirmation: result.kind === 'write_plan', evidence: planEvidence(result), facts: extractedFacts });
-        if (executionPlan?.status === 'completed' && executionPlan.goalPredicateId) {
-          planCompletedDuringResponse = true;
-          completedWithoutTool = true;
+        if (executionPlan && workspacePlanCompletionStatus(executionPlan, this.options.planPolicy).complete) {
+          if (strictPlanExecution) {
+            planCompletedDuringResponse = true;
+            completedWithoutTool = true;
+          }
           break;
         }
         const resultData = result.data;
@@ -1105,16 +1102,22 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       await this.recordToolFailure(input, step, { toolName: 'plan', code: 'PLAN_STEP_BLOCKED', summary: 'Plan Mode 有步骤执行失败，未能完成全部计划；请重试当前步骤或重新提交任务' });
       return;
     }
-    const finalGoalStatus = workspacePlanGoalStatus(executionPlan?.goalPredicateId, executionPlan?.facts);
-    if (executionPlan?.goalPredicateId && !finalGoalStatus.complete) {
-      await this.recordToolFailure(input, step, { toolName: 'plan', code: 'PLAN_GOAL_PREDICATE_UNSATISFIED', summary: `Plan Mode 未满足目标谓词：${finalGoalStatus.missing.join('、')}` });
+    const finalPlanStatus = workspacePlanCompletionStatus(executionPlan, this.options.planPolicy);
+    if (strictPlanExecution && executionPlan && !finalPlanStatus.complete) {
+      await this.recordToolFailure(input, step, {
+        toolName: 'plan',
+        code: finalPlanStatus.reason === 'GOAL_PREDICATE_UNSATISFIED' ? 'PLAN_GOAL_PREDICATE_UNSATISFIED' : 'PLAN_NOT_COMPLETE',
+        summary: finalPlanStatus.goalStatus?.missing.length
+          ? `Plan Mode 未满足完成条件：${finalPlanStatus.goalStatus.missing.join('、')}`
+          : `Plan Mode 未满足完成条件：${finalPlanStatus.reason ?? '状态不一致'}`,
+      });
       return;
     }
     if (!completedWithoutTool) throw new PiModelClientError('MODEL_TOOL_LOOP_EXCEEDED', `model tool loop exceeded ${Number.isFinite(maxRounds) ? maxRounds : 'configured'} rounds`);
     if (!finalResult) throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model provider returned no result');
     const output = redactSensitiveText(
       finalResult.content?.trim()
-        || (finalGoalStatus.complete ? '任务已完成：公开分享链接、卡券创建、商品绑定和付费自动发货已完成并复核。' : '任务已完成。'),
+        || (executionPlan ? '执行计划已完成。' : '任务已完成。'),
       this.options.redactSecrets,
     );
     const finishedAt = new Date().toISOString();

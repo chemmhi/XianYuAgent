@@ -1,13 +1,13 @@
 import type { RunEventRecord } from './domain.js';
 import type { ModelClient, ModelMessage, ModelToolDefinition } from './pi-runtime.js';
 import {
-  canonicalWorkspacePlanSteps,
   contractForWorkspaceStep,
   extractWorkspacePlanFactsFromEvent,
-  goalPredicateIdForInstruction,
   mergeWorkspacePlanFacts,
+  workspacePlanGoalStatus,
   type WorkspacePlanFactKey,
   type WorkspacePlanFacts,
+  type WorkspacePlanPolicy,
   type WorkspacePlanStepLike,
 } from './workspace-plan-contract.js';
 
@@ -40,9 +40,20 @@ export interface WorkspaceExecutionPlan {
   status: WorkspacePlanStatus;
   currentStepId?: string;
   steps: WorkspacePlanStep[];
+  /** Optional policy identity for injected, task-specific extensions. */
+  policyKey?: string;
+  policyVersion?: number;
+  /** Legacy opaque predicate retained for persisted-plan compatibility. */
   goalPredicateId?: string;
   facts?: WorkspacePlanFacts;
   replanCount?: number;
+}
+
+export interface WorkspacePlanCompletionStatus {
+  complete: boolean;
+  reason?: string;
+  incompleteStepIds: string[];
+  goalStatus?: { complete: boolean; missing: string[]; predicateId?: string };
 }
 
 export interface WorkspacePlanFailure {
@@ -70,7 +81,7 @@ export function createWorkspacePlanMessage(plan: WorkspaceExecutionPlan, cachedE
   return `${PLAN_MESSAGE_MARKER}\nPlan Mode 状态：${plan.status}；修订：${plan.revision}\n原始目标：${plan.goal}\n按顺序执行以下步骤；当前步骤完成前不要跳到后续步骤。\n${lines.join('\n') || '暂无步骤'}${factLines}${cacheLines}`;
 }
 
-export function createWorkspaceExecutionPlan(input: { instruction: string; steps: WorkspacePlanStepLike[] }): WorkspaceExecutionPlan | undefined {
+export function createWorkspaceExecutionPlan(input: { instruction: string; steps: WorkspacePlanStepLike[]; policy?: WorkspacePlanPolicy }): WorkspaceExecutionPlan | undefined {
   if (!input.steps.length || input.steps.length > MAX_WORKSPACE_PLAN_STEPS) return undefined;
   const steps = input.steps.map((step, index) => {
     const contract = contractForWorkspaceStep(step);
@@ -94,10 +105,31 @@ export function createWorkspaceExecutionPlan(input: { instruction: string; steps
     status: 'active',
     currentStepId: steps[0]?.id,
     steps,
-    ...(goalPredicateIdForInstruction(input.instruction) ? { goalPredicateId: goalPredicateIdForInstruction(input.instruction) } : {}),
+    ...(input.policy ? { policyKey: input.policy.key, policyVersion: input.policy.version } : {}),
     facts: {},
     replanCount: 0,
   };
+}
+
+export function workspacePlanCompletionStatus(plan: WorkspaceExecutionPlan | undefined, policy?: WorkspacePlanPolicy): WorkspacePlanCompletionStatus {
+  if (!plan) return { complete: false, reason: 'NO_PLAN', incompleteStepIds: [] };
+  const incompleteStepIds = plan.steps.filter((step) => step.status !== 'succeeded').map((step) => step.id);
+  const goalStatus = workspacePlanGoalStatus(
+    plan.goalPredicateId,
+    plan.facts,
+    policy,
+    {
+      predicateId: plan.goalPredicateId,
+      status: plan.status,
+      currentStepId: plan.currentStepId,
+      steps: plan.steps.map((step) => ({ id: step.id, tool: step.tool, goal: step.goal, status: step.status })),
+    },
+  );
+  if (plan.status !== 'completed') return { complete: false, reason: `STATUS_${plan.status.toUpperCase()}`, incompleteStepIds, goalStatus };
+  if (plan.currentStepId) return { complete: false, reason: 'CURRENT_STEP_PRESENT', incompleteStepIds, goalStatus };
+  if (incompleteStepIds.length > 0) return { complete: false, reason: 'INCOMPLETE_STEPS', incompleteStepIds, goalStatus };
+  if (!goalStatus.complete) return { complete: false, reason: 'GOAL_PREDICATE_UNSATISFIED', incompleteStepIds, goalStatus };
+  return { complete: true, incompleteStepIds, goalStatus };
 }
 
 export function restoreWorkspaceExecutionPlan(events: RunEventRecord[]): WorkspaceExecutionPlan | undefined {
@@ -135,6 +167,8 @@ export function restoreWorkspaceExecutionPlan(events: RunEventRecord[]): Workspa
       status,
       ...(typeof candidate.currentStepId === 'string' ? { currentStepId: candidate.currentStepId } : {}),
       steps,
+      ...(typeof candidate.policyKey === 'string' ? { policyKey: candidate.policyKey } : {}),
+      ...(typeof candidate.policyVersion === 'number' ? { policyVersion: Math.max(1, Math.trunc(candidate.policyVersion)) } : {}),
       ...(typeof candidate.goalPredicateId === 'string' ? { goalPredicateId: candidate.goalPredicateId } : {}),
       ...(candidate.facts && typeof candidate.facts === 'object' && !Array.isArray(candidate.facts) ? { facts: candidate.facts as WorkspacePlanFacts } : {}),
       ...(typeof candidate.replanCount === 'number' ? { replanCount: Math.max(0, Math.trunc(candidate.replanCount)) } : {}),
@@ -227,11 +261,11 @@ export async function planWorkspaceToolUse(instruction: string, tools: ModelTool
   return plan ? plan.steps.map((step, index) => `${index + 1}. ${step.tool}：${step.goal}`).join('\n') : undefined;
 }
 
-export async function createWorkspaceExecutionPlanFromModel(instruction: string, tools: ModelToolDefinition[], model: ModelClient, signal?: AbortSignal, options: { fallback?: boolean } = {}): Promise<WorkspaceExecutionPlan | undefined> {
+export async function createWorkspaceExecutionPlanFromModel(instruction: string, tools: ModelToolDefinition[], model: ModelClient, signal?: AbortSignal, options: { fallback?: boolean; planPolicy?: WorkspacePlanPolicy } = {}): Promise<WorkspaceExecutionPlan | undefined> {
   const available = tools.flatMap((tool) => tool.type === 'function' ? [tool.function.name] : []);
   if (!available.length) return undefined;
-  const canonical = canonicalWorkspacePlanSteps(instruction, available);
-  if (canonical) return createWorkspaceExecutionPlan({ instruction, steps: canonical });
+  const selected = options.planPolicy?.selectPlan?.(instruction, available);
+  if (selected?.length) return createWorkspaceExecutionPlan({ instruction, steps: selected, policy: options.planPolicy });
   try {
     const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(5_000)]) : AbortSignal.timeout(5_000);
     const result = await model.complete({
@@ -244,7 +278,7 @@ export async function createWorkspaceExecutionPlanFromModel(instruction: string,
     });
     const normalized = normalizeWorkspacePlanSteps(parsePlanPayload(result.content), available);
     if (!normalized?.length) return options.fallback ? deriveFallbackWorkspacePlan(instruction, available) : undefined;
-    return createWorkspaceExecutionPlan({ instruction, steps: normalized });
+    return createWorkspaceExecutionPlan({ instruction, steps: normalized, policy: options.planPolicy });
   } catch { return options.fallback ? deriveFallbackWorkspacePlan(instruction, available) : undefined; }
 }
 
@@ -255,6 +289,7 @@ export async function reviseWorkspaceExecutionPlanFromModel(
   tools: ModelToolDefinition[],
   model: ModelClient,
   signal?: AbortSignal,
+  options: { planPolicy?: WorkspacePlanPolicy } = {},
 ): Promise<WorkspaceExecutionPlan | undefined> {
   if ((plan.replanCount ?? 0) >= 2) return undefined;
   const available = tools.flatMap((tool) => tool.type === 'function' ? [tool.function.name] : []);
@@ -302,6 +337,7 @@ export async function reviseWorkspaceExecutionPlanFromModel(
       status: 'active',
       currentStepId: nextStep.id,
       steps: revisedSteps,
+      ...(plan.policyKey ? { policyKey: plan.policyKey, policyVersion: plan.policyVersion } : options.planPolicy ? { policyKey: options.planPolicy.key, policyVersion: options.planPolicy.version } : {}),
       ...(plan.goalPredicateId ? { goalPredicateId: plan.goalPredicateId } : {}),
       ...(plan.facts ? { facts: plan.facts } : {}),
       replanCount: (plan.replanCount ?? 0) + 1,

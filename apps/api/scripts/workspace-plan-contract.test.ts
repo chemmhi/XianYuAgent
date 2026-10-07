@@ -1,91 +1,94 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  canonicalWorkspacePlanSteps,
+  contractForWorkspaceStep,
   extractWorkspacePlanFacts,
   validateWorkspacePlanCall,
   workspacePlanGoalStatus,
+  type WorkspacePlanPolicy,
 } from '../src/workspace-plan-contract.js';
+import { createWorkspaceExecutionPlan, restoreWorkspaceExecutionPlan, workspacePlanCompletionStatus } from '../src/workspace-context.js';
 
-const tools = [
-  'pi_skill_catalog',
-  'pi_skill_read',
-  'pi_skill_exec',
-  'workspace_product_search',
-  'workspace_prepare_write',
-  'workspace_read',
-];
+test('generic contracts validate tool order and default write confirmation', () => {
+  const read = contractForWorkspaceStep({ tool: 'workspace_read', goal: '读取当前配置' });
+  assert.equal(read.action, 'read');
+  assert.equal(read.confirmationPolicy, 'none');
+  assert.equal(validateWorkspacePlanCall({ tool: 'workspace_read', goal: '读取当前配置' }, 'workspace_read', { instruction: '读取当前配置' }, {}).ok, true);
 
-test('contract compiler creates the exact public-share, coupon, automation, and readback chain', () => {
-  const steps = canonicalWorkspacePlanSteps('用 03 PPT Master 的网盘公开分享链接创建一个卡券，关联“AI 技术咨询，需求定制开发服务”这个商品，然后启用自动发货', tools);
-  assert.deepEqual(steps?.map((step) => [step.tool, step.action, step.argPredicateId]), [
-    ['pi_skill_catalog', 'catalog', 'catalog-quarkclouddrive'],
-    ['pi_skill_read', 'read-file-share-reference', 'read-file-share-reference'],
-    ['pi_skill_exec', 'search-public-share-file', 'search-public-share-file'],
-    ['pi_skill_exec', 'create-public-share-link', 'create-public-share-link'],
-    ['workspace_product_search', 'resolve-exact-product', 'resolve-exact-product'],
-    ['workspace_prepare_write', 'coupon_create', 'create-coupon-from-public-share'],
-    ['workspace_prepare_write', 'product_automation_update', 'enable-paid-auto-delivery'],
-    ['workspace_read', 'readback-paid-auto-delivery', 'readback-paid-auto-delivery'],
-  ]);
+  const write = contractForWorkspaceStep({ tool: 'workspace_prepare_write', goal: '准备更新配置' });
+  assert.equal(write.action, 'write');
+  assert.equal(write.confirmationPolicy, 'required');
 });
 
-test('contract validation rejects skipped facts and wrong product or automation arguments', () => {
-  const steps = canonicalWorkspacePlanSteps('用 03 PPT Master 的网盘公开分享链接创建一个卡券，关联“AI 技术咨询，需求定制开发服务”这个商品，然后启用自动发货', tools)!;
-  const shareStep = steps[3]!;
-  const missingFid = validateWorkspacePlanCall(shareStep, 'pi_skill_exec', { skillId: 'quarkclouddrive', command: 'share', args: ['fid-1'] }, {});
-  assert.equal(missingFid.code, 'PLAN_FACT_MISSING');
-  const productStep = steps[4]!;
-  const wrongProduct = validateWorkspacePlanCall(productStep, 'workspace_product_search', { query: '其他商品' }, {});
-  assert.equal(wrongProduct.code, 'PLAN_ARGUMENT_MISMATCH');
-  const automationStep = steps[6]!;
-  const wrongAutomation = validateWorkspacePlanCall(automationStep, 'workspace_prepare_write', { operation: 'product_automation_update', parameters: { productId: 'product-1', config: { paidAutoDelivery: { enabled: true, couponBatchIds: ['old-batch'] } } } }, { productId: 'product-1', couponBatchId: 'new-batch' });
-  assert.equal(wrongAutomation.code, 'PLAN_ARGUMENT_MISMATCH');
+test('generic facts only accept facts explicitly returned by a tool contract', () => {
+  assert.deepEqual(
+    extractWorkspacePlanFacts('workspace_read', {}, { data: { facts: { productId: 'p-1', version: 3 } } }),
+    { productId: 'p-1', version: 3 },
+  );
+  assert.deepEqual(extractWorkspacePlanFacts('workspace_read', {}, { data: { productId: 'p-1' } }), {});
 });
 
-test('contract facts and goal predicate prove the final target', () => {
-  const facts = {
-    ...extractWorkspacePlanFacts('pi_skill_exec', { command: 'search' }, { content: 'fid=fid-1', data: { fid: 'fid-1' } }),
-    ...extractWorkspacePlanFacts('pi_skill_exec', { command: 'share' }, { content: 'https://share.example.test/public' }),
-    ...extractWorkspacePlanFacts('workspace_product_search', {}, { data: { items: [{ id: 'product-1', title: 'AI 技术咨询，需求定制开发服务' }] } }),
-    ...extractWorkspacePlanFacts('workspace_read', { instruction: '读取商品 product-1 的自动发货配置并复核 couponBatchId=batch-1' }, { data: { productId: 'product-1', configVersion: 3, config: { paidAutoDelivery: { enabled: true, couponBatchIds: ['batch-1'] } }, couponBatches: [{ id: 'batch-1', status: 'active' }] }, couponBatchId: 'batch-1' }),
-    couponBatchId: 'batch-1',
-    couponBatchActive: true,
+test('generic completion requires a completed, internally consistent plan', () => {
+  const plan = createWorkspaceExecutionPlan({ instruction: '读取并更新配置', steps: [
+    { tool: 'workspace_read', goal: '读取配置' },
+    { tool: 'workspace_prepare_write', goal: '准备更新配置' },
+  ] })!;
+  assert.equal(workspacePlanCompletionStatus(plan).complete, false);
+  plan.steps[0]!.status = 'succeeded';
+  plan.steps[1]!.status = 'succeeded';
+  plan.currentStepId = undefined;
+  plan.status = 'completed';
+  assert.equal(workspacePlanCompletionStatus(plan).complete, true);
+
+  plan.currentStepId = plan.steps[1]!.id;
+  assert.equal(workspacePlanCompletionStatus(plan).complete, false);
+  plan.currentStepId = undefined;
+  plan.steps[1]!.status = 'waiting_confirmation';
+  assert.equal(workspacePlanCompletionStatus(plan).complete, false);
+});
+
+test('legacy opaque predicates fail closed without a matching policy', () => {
+  const status = workspacePlanGoalStatus('legacy-policy', {});
+  assert.equal(status.complete, false);
+  assert.deepEqual(status.missing, ['plan_policy']);
+});
+
+test('policy validation is additive and cannot bypass generic contract checks', () => {
+  const policy: WorkspacePlanPolicy = {
+    key: 'test-policy',
+    version: 1,
+    validateCall: () => ({ ok: true }),
   };
-  facts.readbackConfirmed = true;
-  const status = workspacePlanGoalStatus('coupon_from_public_share_enable_paid_auto_delivery', facts);
-  assert.equal(status.complete, true);
-  assert.deepEqual(status.missing, []);
+  const unknown = validateWorkspacePlanCall({ tool: 'unknown_tool', goal: 'x' }, 'unknown_tool', {}, {}, policy);
+  assert.equal(unknown.ok, false);
+  assert.equal(unknown.code, 'PLAN_CONTRACT_ERROR');
+
+  const known = validateWorkspacePlanCall({ tool: 'workspace_read', goal: '读取配置' }, 'workspace_read', {}, {}, policy);
+  assert.equal(known.ok, true);
 });
 
-test('contract facts extract fid from nested parsed data and stringified Skill output', () => {
-  assert.deepEqual(
-    extractWorkspacePlanFacts('pi_skill_exec', { command: 'search' }, { data: { parsed: { items: [{ fileId: 'fid-nested' }] } } }),
-    { fid: 'fid-nested' },
-  );
-  assert.deepEqual(
-    extractWorkspacePlanFacts('pi_skill_exec', { command: 'search' }, '{"fileId":"fid-json"}'),
-    { fid: 'fid-json' },
-  );
-  assert.deepEqual(
-    extractWorkspacePlanFacts('pi_skill_exec', { command: 'search' }, { content: '{"fileId":"fid-content"}' }),
-    { fid: 'fid-content' },
-  );
+test('policy identity survives plan persistence and legacy predicates fail closed', () => {
+  const policy: WorkspacePlanPolicy = { key: 'test-policy', version: 1, goalStatus: () => ({ complete: true, missing: [] }) };
+  const plan = createWorkspaceExecutionPlan({ instruction: '执行策略计划', steps: [{ tool: 'workspace_read', goal: '读取配置' }], policy })!;
+  const restored = restoreWorkspaceExecutionPlan([{
+    id: 'event-1',
+    runId: 'run-1',
+    eventType: 'workspace.plan.created',
+    createdAt: new Date().toISOString(),
+    payload: { plan: { ...plan, goalPredicateId: 'legacy-policy' } },
+  }]);
+  assert.equal(restored?.policyKey, 'test-policy');
+  assert.equal(restored?.policyVersion, 1);
+  assert.equal(restored?.goalPredicateId, 'legacy-policy');
+  assert.equal(workspacePlanCompletionStatus({ ...restored!, status: 'completed', currentStepId: undefined, steps: [{ ...restored!.steps[0]!, status: 'succeeded' }] }, policy).complete, true);
 });
 
-test('goal predicate rejects wrong title, missing readback version, or stale binding', () => {
-  const base = { shareUrl: 'https://share.example.test/public', couponBatchId: 'batch-1', productId: 'product-1', productTitle: 'AI 技术咨询，需求定制开发服务', configVersion: 3, couponBatchActive: true, paidAutoDeliveryEnabled: true, boundCouponBatchIds: ['batch-1'], readbackConfirmed: true };
-  assert.equal(workspacePlanGoalStatus('coupon_from_public_share_enable_paid_auto_delivery', { ...base, productTitle: 'WRONG' }).complete, false);
-  assert.equal(workspacePlanGoalStatus('coupon_from_public_share_enable_paid_auto_delivery', { ...base, configVersion: undefined }).complete, false);
-  assert.equal(workspacePlanGoalStatus('coupon_from_public_share_enable_paid_auto_delivery', { ...base, boundCouponBatchIds: [] }).complete, false);
-});
+test('unknown actions and tools fail closed', () => {
+  const unknownAction = validateWorkspacePlanCall({ tool: 'workspace_read', goal: 'x', action: 'mystery' }, 'workspace_read', {}, {});
+  assert.equal(unknownAction.ok, false);
+  assert.equal(unknownAction.code, 'PLAN_CONTRACT_ERROR');
 
-test('unknown actions fail closed when no input-output contract exists', () => {
-  const result = validateWorkspacePlanCall({ tool: 'workspace_read', goal: 'unknown action' }, 'workspace_read', { foo: 'bar' }, {});
-  assert.equal(result.ok, false);
-  assert.equal(result.code, 'PLAN_CONTRACT_ERROR');
-  const explicitUnknownAction = validateWorkspacePlanCall({ tool: 'workspace_read', goal: 'x', action: 'mystery' }, 'workspace_read', { foo: 'bar' }, {});
-  assert.equal(explicitUnknownAction.code, 'PLAN_CONTRACT_ERROR');
-  const unknownTool = validateWorkspacePlanCall({ tool: 'mystery', goal: 'x' }, 'mystery', { foo: 'bar' }, {});
+  const unknownTool = validateWorkspacePlanCall({ tool: 'mystery', goal: 'x' }, 'mystery', {}, {});
+  assert.equal(unknownTool.ok, false);
   assert.equal(unknownTool.code, 'PLAN_CONTRACT_ERROR');
 });

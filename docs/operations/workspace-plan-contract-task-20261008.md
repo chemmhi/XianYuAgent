@@ -1,29 +1,32 @@
-@'
-# Workspace Plan Mode Contract-Driven Task Plan (2026-10-08)
+# Workspace Plan Mode 通用合同（2026-10-08）
 
-## User-visible task
-用“03 PPT Master”的网盘公开分享链接创建一个卡券，关联“AI 技术咨询，需求定制开发服务”商品，然后启用自动发货。
+## 设计目标
 
-## Approved design
-- Plan steps carry exact action, requiresFacts, producesFacts, confirmationPolicy, and argPredicateId.
-- Tool contracts are the single source of truth for plan compilation and execution validation.
-- Structured facts persist across confirmation continuation and are sufficient to prove goal completion.
-- The goal is completed only when the final predicate is true:
-  - public share URL exists;
-  - coupon batch ID exists and remains active;
-  - exact product title resolves to a product ID;
-  - paid auto-delivery is enabled;
-  - paid auto-delivery is bound to the newly-created coupon batch ID;
-  - readback confirms the saved configuration.
-- If the compiled plan ends while the predicate is false, re-plan from missing facts/actions at most twice; then emit terminal failure and stop.
-- If a tool has no deterministic input/output contract, emit a contract error instead of allowing the model to guess.
-- Confirmation continuation reuses the same plan, facts, product ID, share URL, and coupon batch ID.
+- Plan Mode 默认由模型自主生成工具顺序，不内置任何单一业务任务的固定步骤。
+- Runtime 只负责通用边界：可用工具、工具动作、步骤顺序、确认门禁、失败重规划和持久化恢复。
+- 业务方如需更严格的目标证明，可通过 `WorkspacePlanPolicy` 注入，并使用 `key + version` 持久化策略身份。
+- 未注入业务策略时，不执行业务样例级的参数、文件名、商品标题或结果谓词校验。
 
-## Validation
-- Unit: contract registry, action mismatch, fact predicates, canonical parameter mapping, plan completion predicate, extra-call truncation, re-plan budget.
-- API/PostgreSQL: two confirmation cycles, durable batch/product/config facts, restart recovery, readback.
-- Codex in-app browser: exact instruction, real DOM snapshots, click each active confirmation card, two stable final reads, one final answer, no duplicate tool loop, persisted goal predicate satisfied.
+## 通用运行规则
 
-## Review
-- Independent plan reviewer: PASS
-- Reviewer hard-blocks resolved by using the isolated codex/plan-mode-stop worktree and preserving unrelated main-worktree changes.
+- 模型计划最多 8 步；空计划交由模型直接回答。
+- `workspace_prepare_write` 默认需要用户确认，读取和查询工具默认不需要确认。
+- 未注册工具或动作 fail-closed，不执行未知调用。
+- 持久化计划恢复时保留旧 `goalPredicateId` / `facts` 字段；若旧计划依赖缺失策略，完成状态保持阻塞，不静默宣称完成。
+- 计划完成必须满足：计划状态为 `completed`、所有步骤为 `succeeded`、无当前步骤、无未完成或待确认步骤。
+- 计划内同一响应的尾部工具调用不会在完成步骤后继续执行；通用模型计划仍可在后续轮次自主继续。
+
+## 可插拔策略
+
+`WorkspacePlanPolicy` 支持以下扩展点：
+
+- `selectPlan`：按任务和可用工具选择额外计划；
+- `validateCall`：在通用校验通过后增加业务校验；
+- `goalStatus`：在通用完成条件通过后增加目标谓词校验。
+
+策略必须提供稳定的 `key` 和正整数 `version`。恢复运行时若策略身份不匹配，Runtime 直接阻塞并要求重新连接，避免策略丢失后误收口。
+
+## 验证
+
+- API TypeScript 检查通过。
+- 通用 Plan/Runtime 定向回归覆盖：计划完成状态、确认尾调用、重规划、恢复、重放、未知工具/动作和策略附加校验。
