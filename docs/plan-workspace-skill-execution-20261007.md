@@ -66,3 +66,5 @@
 - 修复 Workspace checkpoint/compaction：从早期商品搜索结果提取 `productId/title/externalProductRef` 稳定事实，压缩前注入模型摘要并在重连历史中优先复用。
 - 新增运行时回归：大结果触发 `context.compacted` 后直接进入 `workspace_prepare_write`，商品搜索仅执行一次、准备写入执行一次、Run 进入 `waiting_confirmation`，无 `MODEL_TOOL_LOOP_EXCEEDED`。
 - 独立 reviewer 第二轮结论：PASS；API 定向测试 73/73、API TypeScript `--noEmit`、`git diff --check` 均通过。
+- 真实 IAB 复测发现另一层症状：Skill 写入后模型再次选择同参商品搜索，导致缓存被清掉后第三次保护触发。补充系统规则要求已有 `productId` 直接复用，并在同一 Run 的 Skill 写入后保留 `workspace_product_search` 缓存；新增回归验证搜索只执行一次且复用结果。
+- 独立 reviewer 第三轮结论：PASS；API 定向测试 74/74、API TypeScript、`git diff --check` 与 Workspace Chrome/CDP + PostgreSQL Skill E2E 均通过。
