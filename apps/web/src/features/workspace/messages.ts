@@ -118,6 +118,7 @@ const lifecycleEventTypes = new Set([
 
 function shouldProjectEvent(event: WorkspaceRunEventVM): boolean {
   if (lifecycleEventTypes.has(event.eventType)) return false;
+  if (event.eventType === 'workspace.execution.summary' || event.eventType === 'context.compacted' || event.eventType === 'reasoning.delta') return false;
   if (event.eventType === 'step.succeeded' || event.eventType === 'step.failed') return Boolean(messageType(event));
   if (event.eventType === 'runtime.succeeded' || event.eventType === 'runtime.failed' || event.eventType === 'run.succeeded' || event.eventType === 'run.failed') return Boolean(messageType(event) || event.payload.content);
   return true;
@@ -161,6 +162,7 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
     if (!shouldProjectEvent(event)) return;
     if (event.eventType === 'workspace.message') return;
     if (event.eventType === 'message.appended' && messageType(event) === 'tool_event') return;
+    if (messageType(event) === 'reasoning_summary' && event.payload.summary === '上下文摘要') return;
     const messageKind = messageType(event);
     if (messageKind === 'user_message') return;
     const messageId = typeof event.payload.messageId === 'string' ? event.payload.messageId : undefined;
@@ -222,6 +224,7 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
 function mergeStreamingEvents(events: WorkspaceRunEventVM[], options: { ignoreAssistantDeltas?: boolean; toolStreams?: Set<string> } = {}): WorkspaceRunEventVM[] {
   const passthrough: WorkspaceRunEventVM[] = [];
   const streams = new Map<string, WorkspaceRunEventVM>();
+  const reusedToolCalls = new Set(events.filter((event) => event.eventType === 'tool.result' && event.payload.reused === true).map((event) => event.payload.toolCallId).filter((id): id is string => typeof id === 'string'));
   const append = (event: WorkspaceRunEventVM, type: WorkspaceMessageVM['type'], content: string, messageId: string, summary?: string) => {
     if (!content && type !== 'tool_event') return;
     const existing = streams.get(messageId);
@@ -239,8 +242,6 @@ function mergeStreamingEvents(events: WorkspaceRunEventVM[], options: { ignoreAs
   [...events].sort((left, right) => left.sequence - right.sequence).forEach((event) => {
     const payload = event.payload;
     if (event.eventType === 'reasoning.delta') {
-      const messageId = typeof payload.messageId === 'string' ? payload.messageId : `${event.runId}:reasoning`;
-      append(event, 'reasoning_summary', typeof payload.contentDelta === 'string' ? payload.contentDelta : '', messageId, '模型原生推理');
       return;
     }
     if (event.eventType === 'assistant.delta') {
@@ -251,6 +252,7 @@ function mergeStreamingEvents(events: WorkspaceRunEventVM[], options: { ignoreAs
     }
     if (event.eventType === 'tool.call.started' || event.eventType === 'tool.call.delta' || event.eventType === 'tool.call.completed' || event.eventType === 'tool.result') {
       const toolCallId = typeof payload.toolCallId === 'string' ? payload.toolCallId : `${event.sequence}`;
+      if (reusedToolCalls.has(toolCallId)) return;
       const messageId = `${event.runId}:tool:${toolCallId}`;
       const toolName = typeof payload.toolName === 'string' ? payload.toolName : 'tool';
       let content = `${toolName}`;
@@ -265,7 +267,8 @@ function mergeStreamingEvents(events: WorkspaceRunEventVM[], options: { ignoreAs
         const resultContent = typeof resultRecord?.content === 'string'
           ? resultRecord.content.trim()
           : typeof result === 'string' ? result : JSON.stringify(result ?? {});
-        content = resultContent && resultContent !== resultSummary ? `工具结果：${resultSummary}\n${resultContent}` : `工具结果：${resultSummary}`;
+        const readableContent = readableToolContent(resultContent);
+        content = readableContent && readableContent !== resultSummary ? `工具结果：${resultSummary}\n${readableContent}` : `工具结果：${resultSummary}`;
       }
       append(event, 'tool_event', content, messageId, progressSummary);
       return;
@@ -273,6 +276,19 @@ function mergeStreamingEvents(events: WorkspaceRunEventVM[], options: { ignoreAs
     passthrough.push(event);
   });
   return [...passthrough, ...streams.values()];
+}
+
+function readableToolContent(content: string): string {
+  try {
+    const parsed: unknown = JSON.parse(content);
+    if (parsed && typeof parsed === 'object') {
+      const record = Array.isArray(parsed) ? undefined : parsed as Record<string, unknown>;
+      const message = [record?.summary, record?.message, record?.title].find((value): value is string => typeof value === 'string' && value.trim().length > 0);
+      const links = [...new Set(content.match(/https?:\/\/[^\s"\\]+/g) ?? [])].slice(0, 2);
+      return [message, ...links].filter(Boolean).join('\n').slice(0, 700);
+    }
+  } catch { /* Plain-text tool output remains readable as-is. */ }
+  return content.slice(0, 700);
 }
 
 function toolProgressSummary(toolName: string): string {

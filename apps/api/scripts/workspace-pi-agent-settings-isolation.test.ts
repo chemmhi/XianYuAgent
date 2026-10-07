@@ -20,7 +20,9 @@ test('Workspace Pi ignores account AutoReply Agent settings', async () => {
     const url = String(input);
     if (url.endsWith('/v1/chat/completions')) {
       const rawBody = typeof init?.body === 'string' ? init.body : '';
-      requests.push(rawBody ? JSON.parse(rawBody) as Record<string, unknown> : {});
+      const request = rawBody ? JSON.parse(rawBody) as Record<string, unknown> : {};
+      requests.push(request);
+      if (request.stream !== true) return new Response(JSON.stringify({ model: 'pi-isolation-model', choices: [{ message: { content: '{"steps":[]}' } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
       return new Response([
         'data: {"model":"pi-isolation-model","choices":[{"delta":{"content":"PI_AGENT_OK"}}]}\n\n',
         'data: [DONE]\n\n',
@@ -84,11 +86,11 @@ test('Workspace Pi ignores account AutoReply Agent settings', async () => {
     assert.equal(bundle.run.status, 'succeeded');
     assert.equal(bundle.run.resultSummary, 'PI_AGENT_OK');
     assert.ok(elapsedMs < 5_000, `Workspace Pi unexpectedly inherited AutoReply send delay: ${elapsedMs}ms`);
-    assert.equal(requests.length, 1);
-    const firstMessage = requests[0]?.messages;
-    assert.equal(JSON.stringify(firstMessage).includes('PI_AUTO_REPLY_SENTINEL_SHOULD_NOT_REACH_WORKSPACE'), false);
-    assert.equal(JSON.stringify(firstMessage).includes('sendDelaySeconds'), false);
-    assert.equal(JSON.stringify(firstMessage).includes('maxLoops'), false);
+    assert.equal(requests.length, 2);
+    assert.equal(requests.filter((request) => request.stream === true).length, 1);
+    assert.equal(JSON.stringify(requests).includes('PI_AUTO_REPLY_SENTINEL_SHOULD_NOT_REACH_WORKSPACE'), false);
+    assert.equal(JSON.stringify(requests).includes('sendDelaySeconds'), false);
+    assert.equal(JSON.stringify(requests).includes('maxLoops'), false);
   } finally {
     await runtime.close();
     globalThis.fetch = originalFetch;

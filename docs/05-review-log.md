@@ -771,3 +771,13 @@ Review conclusion: workspace confirmation fixes were merged after code review an
 | WS-R-06 | 质量 / 前端 | 超长商品与 Skill 结果、公开链接、工具/摘要交替呈现、真实 Chrome 与 PostgreSQL | root，第 2 轮 | PASS | `npm exec -- cross-env AUTO_REPLY_AGENT_SEND_DELAY_SECONDS=0 npm test`；两条 Workspace Chrome E2E；`npm run typecheck`；`npm run build` |
 
 本轮没有在生产重放写操作。原 Run 仍失败，批次 18 未关联商品；发布后的续办需以管理员当前会话和持久化结果为准。
+
+### 2026-10-07 Workspace 上下文与工具事件复核
+
+| review_id | type | focus | reviewer | conclusion | evidence |
+| --- | --- | --- | --- | --- | --- |
+| WS-R-07 | 业务 / 生产证据 | 两次目标 Run 的事件数量、错误状态、四次确认与空规则更新；未在生产重放写入 | root，第 1 轮 | PASS（只读取证） | `docs/operations/workspace-run-incident-20261007.md`；生产 `workspace.run_events/messages` 聚合 |
+| WS-R-08 | 架构 / 数据流 | 确认续跑从事件构造有界检查点、Skill 成功结果按参数指纹恢复、旧 `arguments` 事件兼容 | root，第 2 轮 | PASS（代码级） | `workspace-context.test.ts`；`pi-runtime-stream.test.ts`；`workspace-commands.test.ts` |
+| WS-R-09 | 质量 / 前端 | 隐藏原始推理和重复事件，浏览器路径仍展示计划、工具结果和最终答复；确认/取消流程分别验证 | root，第 2 轮 | PASS（隔离环境） | `messages.test.ts`；Pi 与确认/取消两条 Chrome/CDP + PostgreSQL E2E；Web 93 文件 / 376 项；API 全量使用 `AUTO_REPLY_AGENT_SEND_DELAY_SECONDS=0` 通过 |
+
+独立人员复审与修改后生产同类 Run 复验仍待发布阶段执行；本轮结论不把隔离 E2E 等同于真实网盘任务复验。
