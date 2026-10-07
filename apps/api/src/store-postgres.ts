@@ -3,7 +3,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, AutoReplyProductLookup, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponAssetRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, DeliveryRecord, DeliveryRecordStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductKnowledgeBaseMessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceConfirmationRecord, WorkspaceMessageRecord, WorkspaceMessageType, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { projectAutoReplyRun } from './auto-reply-activity-projection.js';
-import { createId } from './security.js';
+import { createId, digestJson } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor } from './conversation-cursor.js';
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
 import { normalizeAutoReplyProductMetric } from './auto-reply-product-metrics.js';
@@ -11,6 +11,7 @@ import { cloneCouponReservation, normalizeCouponReservationInput, normalizeLease
 import { validatePersistedAutoReplyRepairPolicyBundle } from './auto-reply-repair-config.js';
 import { normalizeProductSearchTerms, normalizeProductSearchText, normalizeProductCatalogSearchText, splitProductSearchTerms, type AutoReplyProductSearchMode } from './auto-reply-product-search.js';
 import { splitDataContent } from './coupon-delivery.js';
+import { removeCouponBatchFromAutomationConfig } from './product-automation-coupon.js';
 
 type Row = Record<string, unknown>;
 const PRODUCT_COUPON_BATCHES_SELECT = `(select coalesce(json_agg(json_build_object('id', cb.sequence_id, 'label', cb.label) order by binding.priority desc, binding.created_at, cb.sequence_id), '[]'::json) from coupons.coupon_bindings binding join coupons.coupon_batches cb on cb.id=binding.coupon_batch_id where binding.product_id=p.id and binding.status='active' and cb.status <> 'voided') as coupon_batches`;
@@ -821,10 +822,46 @@ export class PostgresStore implements Store {
     return this.toCouponBinding(result.rows[0]);
   }
   async voidCouponBatch(input: { adminId: string; batchId: string }): Promise<CouponBatchRecord | undefined> {
-    const batch = await this.getCouponBatch(input.adminId, input.batchId);
-    if (!batch) return undefined;
-    const result = await this.pool.query("update coupons.coupon_batches set status='voided',version=version+1,updated_at=now() where id=$1 returning *", [batch.id]);
-    return result.rows[0] ? this.toCouponBatch(result.rows[0]) : batch;
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const current = await client.query(`select b.*
+        from coupons.coupon_batches b
+        where (b.id::text=$1 or b.sequence_id::text=$1)
+          and exists (
+            select 1 from auth.account_scopes scope
+            where scope.account_id=b.account_id and scope.admin_id=$2 and scope.status='active'
+              and (scope.expires_at is null or scope.expires_at>now())
+          )
+        limit 1 for update`, [input.batchId, input.adminId]);
+      if (!current.rows[0]) { await client.query('rollback'); return undefined; }
+      const row = current.rows[0] as Row;
+      const batch = this.toCouponBatch(row);
+      if (batch.status !== 'voided') {
+        const updated = await client.query("update coupons.coupon_batches set status='voided',version=version+1,updated_at=now() where id=$1 returning *", [batch.id]);
+        if (updated.rows[0]) Object.assign(row, updated.rows[0]);
+      }
+      await client.query("update coupons.coupon_bindings set status='inactive',updated_at=now() where coupon_batch_id=$1 and status='active'", [batch.id]);
+
+      const automations = await client.query('select * from products.automation_configs where account_id=$1 for update', [batch.accountId]);
+      for (const automationRow of automations.rows as Row[]) {
+        const config = automationRow.config_json && typeof automationRow.config_json === 'object' && !Array.isArray(automationRow.config_json)
+          ? automationRow.config_json as ProductAutomationConfig
+          : undefined;
+        if (!config) continue;
+        const cleaned = removeCouponBatchFromAutomationConfig(config, batch);
+        if (!cleaned.changed) continue;
+        const version = Number(automationRow.config_version) + 1;
+        await client.query(`update products.automation_configs
+          set config_version=$2,config_json=$3::jsonb,config_digest=$4,updated_at=now()
+          where id=$1`, [automationRow.id, version, JSON.stringify(cleaned.config), digestJson(cleaned.config)]);
+      }
+      await client.query('commit');
+      return this.toCouponBatch(row);
+    } catch (error) {
+      try { await client.query('rollback'); } catch { /* preserve original error */ }
+      throw error;
+    } finally { client.release(); }
   }
   async getCouponContent(adminId: string, itemId: string): Promise<{ batch: CouponBatchRecord; item: CouponItemRecord } | undefined> {
     const result = await this.pool.query("select i.id as item_id, i.batch_id as item_batch_id, i.content_ciphertext, i.status as item_status, i.reserved_until, i.consumed_at, i.created_at as item_created_at, b.id as batch_id, b.sequence_id as batch_sequence_id, b.account_id, b.label, b.purpose, b.total_count, b.status as batch_status, b.version, b.created_at as batch_created_at, b.updated_at as batch_updated_at from coupons.coupon_items i join coupons.coupon_batches b on b.id=i.batch_id where i.id=$1 and exists (select 1 from auth.account_scopes scope where scope.account_id=b.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))", [itemId, adminId]);

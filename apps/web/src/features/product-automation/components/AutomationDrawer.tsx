@@ -87,7 +87,6 @@ export function AutomationDrawer({ open, product, accountLabel = '当前账号',
         </header>
 
         <div className="automation-drawer-body">
-          {(loadPhase === 'error' || savePhase === 'error') && <div className="automation-error" role="alert">{error ?? (savePhase === 'error' ? '自动化配置保存失败，请重试' : '自动化配置加载失败')}</div>}
           {loadPhase === 'loading' && <div className="automation-loading">正在加载自动化配置…</div>}
           {rule && <RulePanel tab={activeTab} rule={rule} selectedCoupons={selectedCoupons(activeTab)} onToggle={(enabled) => updateRule({ enabled })} onCouponChoose={() => { if (activeTab === 'delivery' || activeTab === 'gift') setCouponTarget(activeTab); }} onChange={(patch) => updateRule(patch)} />}
         </div>

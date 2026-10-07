@@ -151,6 +151,13 @@ describe('product automation components', () => {
     expect(html).not.toContain('保存草稿');
   });
 
+  it('leaves automation errors to the page-level toast instead of the drawer flow', async () => {
+    const config = await createMockProductAutomationApi().getConfig(product.id);
+    const html = renderToStaticMarkup(createElement(AutomationDrawer, { open: true, product, config, coupons: MOCK_AUTOMATION_COUPONS, loadPhase: 'error', savePhase: 'error', error: '所选卡券状态已发生变化', onClose: vi.fn(), onSave: vi.fn(async () => null) }));
+    expect(html).not.toContain('automation-error');
+    expect(html).not.toContain('所选卡券状态已发生变化');
+  });
+
   it('renders selected coupons as removable rows without redundant checkboxes', () => {
     const html = renderToStaticMarkup(createElement(CouponPickerDialog, { open: true, title: '选择发货卡券', subtitle: '付款后自动发货使用的卡券', coupons: MOCK_AUTOMATION_COUPONS, selectedIds: ['coupon-batch-2'], onCancel: vi.fn(), onSave: vi.fn() }));
     expect(html).toContain('aria-label="移除批量数据2"');
