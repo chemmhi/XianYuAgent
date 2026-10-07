@@ -727,8 +727,9 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           }
           result = normalized.result;
           if (!reused && toolInvalidatesReplayableReads(call.function.name, args, result)) {
-            clearReplayableReads(replayableResults, call.function.name.startsWith('pi_skill_'));
-            clearReplayableReadAttempts(repeatedCalls);
+            const preserveSkillReadCache = call.function.name === 'pi_skill_exec' && !skillCommandIsReadOnly(args);
+            clearReplayableReads(replayableResults, preserveSkillReadCache);
+            clearReplayableReadAttempts(repeatedCalls, preserveSkillReadCache);
           }
           if (replayKey && isReusableToolResult(result) && !reused) replayableResults.set(replayKey, result);
           pendingToolFailure = undefined;
@@ -1513,14 +1514,26 @@ function hasCommandEvidence(result: WorkspaceModelToolResult): boolean {
   return Array.isArray(data?.commandEvidence) && data.commandEvidence.some((item) => isRecord(item) && typeof item.command === 'string' && item.command.trim().length > 0);
 }
 
-function clearReplayableReads(results: Map<string, WorkspaceModelToolResult>, preserveProductSearch = false): void {
+function clearReplayableReads(results: Map<string, WorkspaceModelToolResult>, preserveSkillReadCache = false): void {
   for (const key of results.keys()) {
-    if (isReadReplayKey(key) && !(preserveProductSearch && key.startsWith('workspace_product_search:read:'))) results.delete(key);
+    const preserve = preserveSkillReadCache && (
+      key.startsWith('workspace_product_search:read:')
+      || key.startsWith('pi_skill_read:read:')
+      || key.startsWith('pi_skill_search:read:')
+    );
+    if (isReadReplayKey(key) && !preserve) results.delete(key);
   }
 }
 
-function clearReplayableReadAttempts(attempts: Map<string, number>): void {
-  for (const key of attempts.keys()) if (isReadReplayKey(key)) attempts.delete(key);
+function clearReplayableReadAttempts(attempts: Map<string, number>, preserveSkillReadCache = false): void {
+  for (const key of attempts.keys()) {
+    const preserve = preserveSkillReadCache && (
+      key.startsWith('workspace_product_search:read:')
+      || key.startsWith('pi_skill_read:read:')
+      || key.startsWith('pi_skill_search:read:')
+    );
+    if (isReadReplayKey(key) && !preserve) attempts.delete(key);
+  }
 }
 
 function isReadReplayKey(key: string): boolean {
@@ -1570,7 +1583,7 @@ function completedReplayableResults(events: RunEventRecord[]): Map<string, Works
         const invalidatesReads = toolName === 'pi_skill_install' || toolName === 'pi_skill_authorize'
           || (toolName === 'pi_skill_login' && result.result.data?.status === 'succeeded')
           || (key !== undefined && !isReadReplayKey(key));
-        if (invalidatesReads) clearReplayableReads(results);
+        if (invalidatesReads) clearReplayableReads(results, toolName === 'pi_skill_exec' && result.result.kind === 'read');
         if (key && isReusableToolResult(result.result)) results.set(key, result.result);
       }
     }

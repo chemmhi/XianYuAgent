@@ -68,3 +68,9 @@
 - 独立 reviewer 第二轮结论：PASS；API 定向测试 73/73、API TypeScript `--noEmit`、`git diff --check` 均通过。
 - 真实 IAB 复测发现另一层症状：Skill 写入后模型再次选择同参商品搜索，导致缓存被清掉后第三次保护触发。补充系统规则要求已有 `productId` 直接复用，并在同一 Run 的 Skill 写入后保留 `workspace_product_search` 缓存；新增回归验证搜索只执行一次且复用结果。
 - 独立 reviewer 第三轮结论：PASS；API 定向测试 74/74、API TypeScript、`git diff --check` 与 Workspace Chrome/CDP + PostgreSQL Skill E2E 均通过。
+
+## 第四轮真实 IAB 根因修复与复审（2026-10-07）
+- 真实 IAB 复测继续暴露 `pi_skill_read` 在 `share` 写入后重复调用；根因是文档读取 replay cache 与 attempts 被所有 Skill 写入无差别清空。
+- 仅对非只读 `pi_skill_exec` 写入保留当前 Run 的 `workspace_product_search`、`pi_skill_read`、`pi_skill_search` 结果及重复计数；安装、授权、登录成功仍完整清空，避免旧文档/权限状态复用。
+- 新增回归覆盖 `read → share → read` 缓存复用和 `read ↔ share` 交替第 5 轮停止；确认读取真实执行 1 次、分享写入执行 1/2 次、`MODEL_TOOL_LOOP_EXCEEDED` 保护仍有效。
+- 独立 reviewer 最终复审：PASS；定向 63/63、扩展 102/102、TypeScript `--noEmit`、`git diff --check` 全部通过。
