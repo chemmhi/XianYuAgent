@@ -30,3 +30,14 @@
 - 生产 Run 只读分析不能证明修改后的真实网盘任务已经运行；发布后应新建受控 Run，核对 `context.compacted.beforeChars/afterChars`、`method`、工具结果数、确认数、最终卡券/商品配置及 UI 轨迹，不重放原 Run 的写动作。
 - 回滚为应用提交回退并通过 `main` 的 GitHub 部署工作流发布；本切片无迁移，也不清理历史事件。旧事件 `arguments` 仍可被读用于恢复，新事件使用 `argumentFingerprint`。
 - 交付：功能提交 `1f918ba` 已以 `--no-ff` 合入 `main`（merge commit `2f5ba65`）；主线 API 定向 59/59、Web 全量 376/376、两端构建和类型检查通过。该合并不代表生产已部署或修改后真实网盘 Run 已复验。
+
+## 13:47 新 Run：首轮压缩与重复工具循环
+
+- 2026-10-07 14:14（Asia/Shanghai）通过 SSH 对生产 `2f5ba655` 的 PostgreSQL 执行只读查询；Run `aeb4ba21-73de-4d1b-b16d-001ab06c9c00` 已取消。没有重放该 Run，也没有写入生产数据。
+- 持久化事件最终计数：`context.compacted` 10 次、`tool.call.started` / `tool.result` 各 15 次、`assistant.delta` 200 次。首轮压缩为 **18,436 → 18,688 字符**，反而增长；前 10 轮每轮均发生压缩。相同参数指纹的 `workspace_product_search` 调用 **9 次**，全部 `reused=false`。`pi_skill_exec` 共 4 次，前三次各返回约 4,330 字符，末次为 `SKILL_EXEC_FAILED`；另有一次 `pi_skill_list`、一次 `workspace_read`。10 条可见“上下文摘要”单条最大 2,257 字符。
+- 直接根因：原 `buildSystemPrompt` 将每份 `SKILL.md` 正文最多 16 KiB、合计最多 48 KiB 注入 system；压缩触发器把 system 计入 12,000 字符阈值，压缩后又原样保留 system。首轮无执行结果仍触发摘要，后续每轮再次超过阈值。商品查询无同 Run 复用和无进展退出，导致真实重复执行。
+- 本切片修复：system 仅保留规范化 Skill ID 与状态，Agent 可按需选择 `pi_skill_read` 有界概览或 `pi_skill_search`；后者在全文上用精确、Fuse.js 模糊或 RE2 正则检索并只返回有限命中片段。压缩只按非 system 历史判断，且仅在模型生成有效摘要并至少减少 20% 总消息字符时生效；模型失败、无执行历史或缩减不足时不声称压缩成功。相同只读查询复用结果，成功写入/安装/登录后清除陈旧读取缓存；同参第三次调用前以明确错误退出，默认工具轮数设为 24。
+- 额外发现：`pi_skill_list` 结构化结果曾携带本地安装路径及来源路径；现仅公开 ID、名称、版本、启用与登录状态。`workspace_read` 和 `pi_skill_list` 也纳入同参去重。确认续跑从事件重建缓存时，Skill 安装后的旧说明亦需失效。
+- 链路核对：新 Run 的 Skill system 仅含短索引，首轮无执行历史不压缩；概览超限后可全文检索短片段，再依据 Skill 文档执行真实子进程；同参只读结果在当前 Run 和确认续跑中复用，写入/安装后失效；模型历史超过阈值时仅接受有实际缩减的模型摘要；重复无进展调用停止；事件投影隐藏已复用工具结果，保留真实工具结果和最终答复。持久化恢复补测了连续两个不同只读 Skill 结果，防止误判为写入而丢失缓存。
+- 本地证据：API `test:model-client` 56/56；真实本地 Skill 子进程读取→检索→执行路径通过；`npm exec -- cross-env AUTO_REPLY_AGENT_SEND_DELAY_SECONDS=0 npm test` 完整退出且通过（Web 93 文件 / 376 项）；`npm run test:e2e:chrome:workspace:pi` 完整退出且通过，Chrome/CDP + PostgreSQL 新 Run 零压缩、商品查询一次、UI 工具轨迹一条；API 构建及 `git diff --check` 通过。修改后的真实网盘任务及确认后的生产数据仍需发布后另建受控 Run 复验，不重放原写动作。
+- 合并门禁：用户明确要求直接合入并保留 `main` 工作区已有的 `apps/api/scripts/xianyu-verification-url.test.ts` 修改及两个未跟踪诊断脚本；这些路径与本切片不重叠。独立复核及 merge lock 合并结果另见 review log 和登记表。生产未发布。

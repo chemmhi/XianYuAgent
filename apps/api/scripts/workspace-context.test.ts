@@ -39,6 +39,19 @@ test('compaction keeps the original goal and recent results within the model bud
   assert.ok(JSON.stringify(result.messages).length < JSON.stringify(messages).length);
 });
 
+test('large fixed Skill instructions do not trigger compaction before any tool result', async () => {
+  const messages = [
+    { role: 'system' as const, content: 'x'.repeat(17_000) },
+    { role: 'user' as const, content: '使用 03 PPT Master 创建卡券' },
+  ];
+  const result = await compactWorkspaceModelMessagesWithModel(messages, {
+    async complete() { throw new Error('the first round has nothing to compact'); },
+  });
+  assert.equal(result.summary, undefined);
+  assert.equal(result.afterChars, result.beforeChars);
+  assert.deepEqual(result.messages, messages);
+});
+
 test('checkpoint keeps a share URL when the same Skill later returns help text', () => {
   const checkpoint = buildWorkspaceCheckpoint([
     event(1, 'tool.result', { status: 'succeeded', toolName: 'pi_skill_exec', result: { kind: 'read', title: 'quarkclouddrive | quark-drive', summary: 'Skill execution complete', content: '分享链接 https://example.test/share/critical-link' } }),
@@ -60,7 +73,7 @@ test('model compaction removes redundant output and retains critical identifiers
   const messages = [
     { role: 'system' as const, content: '系统规则' },
     { role: 'user' as const, content: '创建卡券，关联 productId=product-1' },
-    ...Array.from({ length: 20 }, (_, index) => ({ role: 'tool' as const, content: `${index}:${'x'.repeat(1_000)}${index === 19 ? ' https://example.test/share/critical-link batchId=18' : ''}` })),
+    ...Array.from({ length: 30 }, (_, index) => ({ role: 'tool' as const, content: `${index}:${'x'.repeat(1_000)}${index === 29 ? ' https://example.test/share/critical-link batchId=18' : ''}` })),
   ];
   let calls = 0;
   const result = await compactWorkspaceModelMessagesWithModel(messages, {
@@ -72,6 +85,29 @@ test('model compaction removes redundant output and retains critical identifiers
   assert.match(result.summary ?? '', /product-1|batchId=18/);
   assert.match(result.summary ?? '', /critical-link/);
   assert.doesNotMatch(result.summary ?? '', /x{50}/);
+});
+
+test('model failure does not publish a heuristic fallback as a compressed summary', async () => {
+  const messages = [
+    { role: 'system' as const, content: 'Workspace rules' },
+    { role: 'user' as const, content: '创建卡券并关联商品' },
+    ...Array.from({ length: 30 }, (_, index) => ({ role: 'tool' as const, content: `${index}:${'x'.repeat(1_000)}` })),
+  ];
+  const result = await compactWorkspaceModelMessagesWithModel(messages, { async complete() { throw new Error('model unavailable'); } });
+  assert.equal(result.summary, undefined);
+  assert.equal(result.afterChars, result.beforeChars);
+  assert.deepEqual(result.messages, messages);
+});
+
+test('model compaction rejects a marginal reduction dominated by fixed context', async () => {
+  const messages = [
+    { role: 'system' as const, content: 'x'.repeat(40_000) },
+    { role: 'user' as const, content: '创建卡券' },
+    { role: 'assistant' as const, content: 'y'.repeat(8_000) },
+  ];
+  const result = await compactWorkspaceModelMessagesWithModel(messages, { async complete() { return { content: '任务仍在处理中，尚未创建卡券。', model: 'test' }; } }, true);
+  assert.equal(result.summary, undefined);
+  assert.equal(result.afterChars, result.beforeChars);
 });
 
 test('tool planning accepts only available tools and bounded structured steps', async () => {

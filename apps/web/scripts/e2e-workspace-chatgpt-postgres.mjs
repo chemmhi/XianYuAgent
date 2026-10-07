@@ -276,6 +276,8 @@ async function run() {
   const eventTypes = eventRows.rows.map((row) => row.event_type);
   assert.ok(eventTypes.includes('workspace.execution.summary'), `missing execution summary event: ${JSON.stringify(eventTypes)}`);
   assert.ok(eventTypes.includes('tool.result'), `missing product tool result event: ${JSON.stringify(eventTypes)}`);
+  assert.equal(eventTypes.filter((type) => type === 'context.compacted').length, 0, 'a short new run must not compact before meaningful history exists');
+  assert.equal(eventRows.rows.filter((row) => row.event_type === 'tool.result' && row.payload_json?.toolName === 'workspace_product_search').length, 1, 'product search must execute once');
   assert.ok(!eventTypes.includes('reasoning.delta'), 'provider reasoning must not be stored as a raw event');
   assert.ok(eventTypes.includes('run.succeeded'), `missing run.succeeded event: ${JSON.stringify(eventRows.rows)}`);
   assert.ok(eventTypes.includes('workspace.message'), `missing workspace.message event: ${JSON.stringify(eventRows.rows)}`);
@@ -295,7 +297,7 @@ async function run() {
     avatarCount: document.querySelectorAll('.workspace-message-avatar, .workspace-message-icon').length,
   })`);
   assert.ok(browserState.summaryCount >= 1, `expected a visible execution summary: ${JSON.stringify(browserState)}`);
-  assert.ok(browserState.toolCount >= 1, `expected a visible product tool event: ${JSON.stringify(browserState)}`);
+  assert.equal(browserState.toolCount, 1, `expected one visible product tool event: ${JSON.stringify(browserState)}`);
   assert.match(browserState.summaryText, /workspace_product_search|按名称定位目标商品/);
   assert.doesNotMatch(browserState.summaryText, /分析任务|评估工具结果|原始目标：/);
   assert.equal(browserState.avatarCount, 0, `avatars should not render in the conversation stream: ${JSON.stringify(browserState)}`);

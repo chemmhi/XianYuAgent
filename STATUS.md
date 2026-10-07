@@ -1,4 +1,9 @@
 # XianyuSellerAgent 项目状态
+## 2026-10-07 Workspace 新 Run 首轮压缩与重复调用修复
+- 生产 Run `aeb4ba21-73de-4d1b-b16d-001ab06c9c00` 首轮压缩从 18,436 增至 18,688 字符，10 次逐轮压缩、同参商品查询 9 次；详见 `docs/operations/workspace-run-incident-20261007.md`。
+- 本切片在独立 worktree 中改为 Skill 短索引和按需检索、仅接纳模型有效压缩、同参只读复用与无进展止损。API 定向 56/56、API/Web 全量、Chrome/CDP + PostgreSQL Workspace E2E 均通过。
+- 状态：`READY_FOR_REVIEW`。主工作区有无关修改及未跟踪脚本，合并门禁未满足；生产新版本真实网盘 Run 尚未复验。
+
 ## 2026-10-07 Workspace 上下文与事件治理
 - 目标：修复复合任务的伪压缩、重复工具结果、错误状态映射、无效确认和 UI 事件噪声；生产证据见 `docs/operations/workspace-run-incident-20261007.md`。
 - 当前：功能提交 `1f918ba` 已以 `--no-ff` 合入 `main`（merge commit `2f5ba65`）；API 全量在 `AUTO_REPLY_AGENT_SEND_DELAY_SECONDS=0` 测试环境通过，Web 全量 93 文件 / 376 项通过；API/Web 类型检查与构建、Pi Chrome/CDP + PostgreSQL E2E、确认/取消 Chrome E2E 和 PostgreSQL 确认 smoke 均通过。合并后主线 API 定向 59/59、Web 全量 376/376、两端构建与类型检查通过。默认 API 组合脚本会在已登记的 auto-reply smoke 延迟处等待，未作为通过证据。

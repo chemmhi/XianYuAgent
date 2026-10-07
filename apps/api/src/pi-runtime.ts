@@ -14,7 +14,7 @@ export const DEFAULT_PI_MODEL = 'gpt-4o-mini';
 export const DEFAULT_PI_TIMEOUT_MS = 30_000;
 export const DEFAULT_PI_WIRE_API: ModelWireApi = 'responses';
 /** Workspace Agent has its own loop budget; it must not reuse buyer Auto-Reply settings. */
-export const DEFAULT_PI_MAX_TOOL_ROUNDS = 64;
+export const DEFAULT_PI_MAX_TOOL_ROUNDS = 24;
 
 export type ModelWireApi = 'chat' | 'responses';
 
@@ -602,9 +602,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     const tools = [...commands.getModelTools(), ...(this.options.skillManager?.getModelTools() ?? [])];
     const skillPrompt = this.options.skillManager ? await this.options.skillManager.buildSystemPrompt(input.adminId ?? input.run.requestedBy) : '';
     const messages = buildWorkspaceModelMessages(input.history ?? [], input.run.instruction, skillPrompt, input.attachments);
-    const replayableResults = this.options.skillManager
-      ? completedSkillResults(await this.store.listRunEvents(input.adminId ?? input.run.requestedBy, input.run.id, 0))
-      : new Map<string, WorkspaceModelToolResult>();
+    const replayableResults = completedReplayableResults(await this.store.listRunEvents(input.adminId ?? input.run.requestedBy, input.run.id, 0));
     if (!input.resumeAfterConfirmation && !input.resumeFromFailure) {
       const plan = await planWorkspaceToolUse(input.run.instruction, tools, modelClient, signal);
       if (plan && !signal.aborted) {
@@ -619,10 +617,11 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     let pendingUserAction: { title: string; summary: string; content: string; data?: Record<string, unknown> } | undefined;
     let completedWithoutTool = false;
     let pendingToolFailure: { toolName: string; code: string; summary: string } | undefined;
+    const repeatedCalls = new Map<string, number>();
     const configuredMaxRounds = this.options.maxToolRounds;
-    const maxRounds = configuredMaxRounds !== undefined && configuredMaxRounds <= 0
-      ? Number.POSITIVE_INFINITY
-      : Math.max(1, Math.trunc(configuredMaxRounds ?? DEFAULT_PI_MAX_TOOL_ROUNDS));
+    const maxRounds = configuredMaxRounds !== undefined && configuredMaxRounds > 0
+      ? Math.max(1, Math.trunc(configuredMaxRounds))
+      : DEFAULT_PI_MAX_TOOL_ROUNDS;
     for (let round = 0; round < maxRounds; round += 1) {
       if (this.stopped || signal.aborted) return;
       const streamId = `${input.run.id}:stream:${round + 1}`;
@@ -655,6 +654,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       } catch (error) {
         if (!(error instanceof PiModelClientError) || error.code !== 'MODEL_HTTP_ERROR' || ![400, 413].includes(error.status ?? 0)) throw error;
         const forced = await compactWorkspaceModelMessagesWithModel(messages, modelClient, true, signal);
+        if (!forced.summary || forced.afterChars >= forced.beforeChars) throw error;
         messages.splice(0, messages.length, ...forced.messages);
         await this.emit(input.run.id, 'context.compacted', { round: round + 1, status: 'retrying', method: forced.method, beforeChars: forced.beforeChars, afterChars: forced.afterChars, summary: '模型上下文超限，已保留目标和关键结果后重试' });
         await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: redactSensitiveText(forced.summary ?? '', this.options.redactSecrets), summary: '上下文摘要' });
@@ -680,7 +680,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           status: 'running',
         });
         const toolStartedAt = new Date().toISOString();
-        await this.emit(input.run.id, 'tool.call.started', { streamId, toolCallId: call.id, toolName: call.function.name, summary: progress.summary, argumentFingerprint: toolArgumentFingerprint(call.function.arguments), readOnly: skillCallIsReadOnly(call.function.name, call.function.arguments), startedAt: toolStartedAt, status: 'running' });
+        await this.emit(input.run.id, 'tool.call.started', { streamId, toolCallId: call.id, toolName: call.function.name, summary: progress.summary, argumentFingerprint: toolArgumentFingerprint(call.function.arguments), readOnly: replayableCallIsReadOnly(call.function.name, call.function.arguments), startedAt: toolStartedAt, status: 'running' });
         let args: Record<string, unknown>;
         try {
           args = parseModelToolArguments(call.function.arguments);
@@ -695,6 +695,16 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
         }
         let result: WorkspaceModelToolResult;
         const replayKey = replayableToolKey(call.function.name, args);
+        if (replayKey) {
+          const attempts = (repeatedCalls.get(replayKey) ?? 0) + 1;
+          repeatedCalls.set(replayKey, attempts);
+          if (attempts >= 3) {
+            const failure = { toolName: call.function.name, code: 'MODEL_TOOL_LOOP_EXCEEDED', summary: '相同工具和参数已重复调用，且没有新的写入进展；已停止本次执行' };
+            await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, summary: failure.summary, status: 'failed', result: toolFailureResult(failure), completedAt: new Date().toISOString() });
+            await this.recordToolFailure(input, step, failure);
+            return;
+          }
+        }
         const reused = replayKey !== undefined && replayableResults.has(replayKey);
         try {
           const toolInput: WorkspaceCommandInput = { adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: typeof args.instruction === 'string' ? args.instruction : input.run.instruction, operation: typeof args.operation === 'string' ? args.operation : undefined, parameters: isRecord(args.parameters) ? args.parameters : undefined, requestId: `workspace:${input.run.id}`, traceId: `workspace:${input.run.id}` };
@@ -712,10 +722,11 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
             continue;
           }
           result = normalized.result;
-          if (replayKey && isReusableSkillResult(result) && !reused) {
-            if (!replayKey.startsWith('pi_skill_exec:read:')) clearReplayableReads(replayableResults);
-            replayableResults.set(replayKey, result);
+          if (!reused && toolInvalidatesReplayableReads(call.function.name, args, result)) {
+            clearReplayableReads(replayableResults);
+            clearReplayableReadAttempts(repeatedCalls);
           }
+          if (replayKey && isReusableToolResult(result) && !reused) replayableResults.set(replayKey, result);
           pendingToolFailure = undefined;
         } catch (error) {
           const failure = toSafeFailure(error);
@@ -1316,6 +1327,8 @@ function workspaceToolProgress(toolName: string): { summary: string; content: st
     workspace_product_search: '检索商品信息',
     workspace_prepare_write: '准备受控写入',
     pi_skill_list: '读取已安装 Skill',
+    pi_skill_read: '读取 Skill 使用说明',
+    pi_skill_search: '检索 Skill 使用说明',
     pi_skill_install: '安装 Skill',
     pi_skill_login: '登录 Skill',
     pi_skill_exec: '执行 Skill 命令',
@@ -1377,14 +1390,27 @@ function normalizeModelToolResult(value: unknown, toolName?: string): { ok: true
 }
 
 function replayableToolKey(toolName: string, args: Record<string, unknown>): string | undefined {
-  if (toolName !== 'pi_skill_exec') return undefined;
-  const readOnly = skillCommandIsReadOnly(args);
-  return `${toolName}:${readOnly ? 'read' : 'write'}:${createHash('sha256').update(JSON.stringify(canonicalJson(args))).digest('hex')}`;
+  const category = replayableCategory(toolName, args);
+  return category ? `${toolName}:${category}:${createHash('sha256').update(JSON.stringify(canonicalJson(args))).digest('hex')}` : undefined;
 }
 
-function skillCallIsReadOnly(toolName: string, raw: string): boolean | undefined {
-  if (toolName !== 'pi_skill_exec') return undefined;
-  try { return skillCommandIsReadOnly(parseModelToolArguments(raw)); }
+function replayableCategory(toolName: string, args: Record<string, unknown>): 'read' | 'write' | undefined {
+  if (toolName === 'workspace_read' || toolName === 'workspace_product_search' || toolName === 'pi_skill_list' || toolName === 'pi_skill_read' || toolName === 'pi_skill_search') return 'read';
+  if (toolName === 'pi_skill_exec') return skillCommandIsReadOnly(args) ? 'read' : 'write';
+  return undefined;
+}
+
+function toolInvalidatesReplayableReads(toolName: string, args: Record<string, unknown>, result: WorkspaceModelToolResult): boolean {
+  if (toolName === 'pi_skill_install' || toolName === 'pi_skill_authorize') return true;
+  if (toolName === 'pi_skill_login') return result.data?.status === 'succeeded';
+  return replayableCategory(toolName, args) === 'write';
+}
+
+function replayableCallIsReadOnly(toolName: string, raw: string): boolean | undefined {
+  try {
+    const category = replayableCategory(toolName, parseModelToolArguments(raw));
+    return category === undefined ? undefined : category === 'read';
+  }
   catch { return undefined; }
 }
 
@@ -1396,10 +1422,18 @@ function skillCommandIsReadOnly(args: Record<string, unknown>): boolean {
 }
 
 function clearReplayableReads(results: Map<string, WorkspaceModelToolResult>): void {
-  for (const key of results.keys()) if (key.startsWith('pi_skill_exec:read:')) results.delete(key);
+  for (const key of results.keys()) if (isReadReplayKey(key)) results.delete(key);
 }
 
-function isReusableSkillResult(result: WorkspaceModelToolResult): boolean {
+function clearReplayableReadAttempts(attempts: Map<string, number>): void {
+  for (const key of attempts.keys()) if (isReadReplayKey(key)) attempts.delete(key);
+}
+
+function isReadReplayKey(key: string): boolean {
+  return key.includes(':read:');
+}
+
+function isReusableToolResult(result: WorkspaceModelToolResult): boolean {
   if (result.kind !== 'read') return false;
   const data = isRecord(result.data) ? result.data : undefined;
   return data?.status !== 'failed' && data?.status !== 'unauthorized' && data?.status !== 'pending_user_action'
@@ -1418,27 +1452,32 @@ function canonicalJson(value: unknown): unknown {
   return value;
 }
 
-function completedSkillResults(events: RunEventRecord[]): Map<string, WorkspaceModelToolResult> {
+function completedReplayableResults(events: RunEventRecord[]): Map<string, WorkspaceModelToolResult> {
   const calls = new Map<string, string>();
   const results = new Map<string, WorkspaceModelToolResult>();
   for (const event of events) {
     const payload = event.payload;
     if ((event.eventType === 'workspace.command.completed' || event.eventType === 'workspace.coupon.created') && payload.status === 'succeeded') clearReplayableReads(results);
-    if (event.eventType === 'tool.call.started' && payload.toolName === 'pi_skill_exec' && typeof payload.toolCallId === 'string') {
+    if (event.eventType === 'tool.call.started' && typeof payload.toolName === 'string' && typeof payload.toolCallId === 'string') {
       try {
-        const key = typeof payload.argumentFingerprint === 'string' && typeof payload.readOnly === 'boolean'
-          ? `pi_skill_exec:${payload.readOnly ? 'read' : 'write'}:${payload.argumentFingerprint}`
-          : typeof payload.arguments === 'string' ? replayableToolKey('pi_skill_exec', parseModelToolArguments(payload.arguments)) : undefined;
+        const knownRead = payload.toolName === 'workspace_read' || payload.toolName === 'workspace_product_search' || payload.toolName === 'pi_skill_list' || payload.toolName === 'pi_skill_read' || payload.toolName === 'pi_skill_search';
+        const readOnly = knownRead ? true : payload.toolName === 'pi_skill_exec' && typeof payload.readOnly === 'boolean' ? payload.readOnly : undefined;
+        const key = typeof payload.argumentFingerprint === 'string' && typeof readOnly === 'boolean'
+          ? `${payload.toolName}:${readOnly ? 'read' : 'write'}:${payload.argumentFingerprint}`
+          : typeof payload.arguments === 'string' ? replayableToolKey(payload.toolName, parseModelToolArguments(payload.arguments)) : undefined;
         if (key) calls.set(payload.toolCallId, key);
       } catch { /* Invalid arguments were never executed successfully. */ }
     }
     if (event.eventType === 'tool.result' && payload.status === 'succeeded' && typeof payload.toolCallId === 'string') {
       const key = calls.get(payload.toolCallId);
-      if (!key) continue;
-      const result = normalizeModelToolResult(payload.result, 'pi_skill_exec');
-      if (result.ok && isReusableSkillResult(result.result)) {
-        if (!key.startsWith('pi_skill_exec:read:')) clearReplayableReads(results);
-        results.set(key, result.result);
+      const toolName = typeof payload.toolName === 'string' ? payload.toolName : undefined;
+      const result = normalizeModelToolResult(payload.result, toolName);
+      if (result.ok) {
+        const invalidatesReads = toolName === 'pi_skill_install' || toolName === 'pi_skill_authorize'
+          || (toolName === 'pi_skill_login' && result.result.data?.status === 'succeeded')
+          || (key !== undefined && !isReadReplayKey(key));
+        if (invalidatesReads) clearReplayableReads(results);
+        if (key && isReusableToolResult(result.result)) results.set(key, result.result);
       }
     }
   }
