@@ -779,5 +779,6 @@ Review conclusion: workspace confirmation fixes were merged after code review an
 | WS-R-07 | 业务 / 生产证据 | 两次目标 Run 的事件数量、错误状态、四次确认与空规则更新；未在生产重放写入 | root，第 1 轮 | PASS（只读取证） | `docs/operations/workspace-run-incident-20261007.md`；生产 `workspace.run_events/messages` 聚合 |
 | WS-R-08 | 架构 / 数据流 | 确认续跑从事件构造有界检查点、Skill 成功结果按参数指纹恢复、旧 `arguments` 事件兼容 | root，第 2 轮 | PASS（代码级） | `workspace-context.test.ts`；`pi-runtime-stream.test.ts`；`workspace-commands.test.ts` |
 | WS-R-09 | 质量 / 前端 | 隐藏原始推理和重复事件，浏览器路径仍展示计划、工具结果和最终答复；确认/取消流程分别验证 | root，第 2 轮 | PASS（隔离环境） | `messages.test.ts`；Pi 与确认/取消两条 Chrome/CDP + PostgreSQL E2E；Web 93 文件 / 376 项；API 全量使用 `AUTO_REPLY_AGENT_SEND_DELAY_SECONDS=0` 通过 |
+| WS-R-10 | 合并 / 主线 | 合并提交、主线回归、工作区清理和生产复验边界 | root，第 3 轮 | PASS（合并与受控验证） | `1f918ba` 经 `--no-ff` 合入 `2f5ba65`；主线 API 定向 59/59、Web 全量 376/376、API/Web build 和 typecheck、`git diff --check` 通过；生产新 Run 待复验 |
 
 独立人员复审与修改后生产同类 Run 复验仍待发布阶段执行；本轮结论不把隔离 E2E 等同于真实网盘任务复验。

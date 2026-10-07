@@ -1,9 +1,9 @@
 # XianyuSellerAgent 项目状态
 ## 2026-10-07 Workspace 上下文与事件治理
 - 目标：修复复合任务的伪压缩、重复工具结果、错误状态映射、无效确认和 UI 事件噪声；生产证据见 `docs/operations/workspace-run-incident-20261007.md`。
-- 当前：独立 worktree `codex/workspace-context-events-20261007` 已实现；API 全量在 `AUTO_REPLY_AGENT_SEND_DELAY_SECONDS=0` 测试环境通过，Web 全量 93 文件 / 376 项通过；API/Web 类型检查与构建、Pi Chrome/CDP + PostgreSQL E2E、确认/取消 Chrome E2E 和 PostgreSQL 确认 smoke 均通过。默认 API 组合脚本会在已登记的 auto-reply smoke 延迟处等待，未作为通过证据。
+- 当前：功能提交 `1f918ba` 已以 `--no-ff` 合入 `main`（merge commit `2f5ba65`）；API 全量在 `AUTO_REPLY_AGENT_SEND_DELAY_SECONDS=0` 测试环境通过，Web 全量 93 文件 / 376 项通过；API/Web 类型检查与构建、Pi Chrome/CDP + PostgreSQL E2E、确认/取消 Chrome E2E 和 PostgreSQL 确认 smoke 均通过。合并后主线 API 定向 59/59、Web 全量 376/376、两端构建与类型检查通过。默认 API 组合脚本会在已登记的 auto-reply smoke 延迟处等待，未作为通过证据。
 - 风险：生产新版本的同类任务尚未受控复验；历史事件中的原始参数不在本切片清理范围。回滚仅需应用提交回退，无数据库迁移。
-- 状态：`READY_FOR_MERGE / PARTIALLY_VERIFIED`（生产新 Run 未复验）。
+- 状态：`MERGED / PARTIALLY_VERIFIED`（生产新 Run 未复验）。
 
 ## 2026-09-28 商品目录知识库闭环
 - 目标行为：商品列表知识库列无内容显示“—”，有内容显示省略文本并支持悬浮查看全文；操作列统一使用“详情 / 自动化 / 知识库”，移除独立详情列和工具栏知识库统计提示。

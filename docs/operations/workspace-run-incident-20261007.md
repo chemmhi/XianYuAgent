@@ -29,3 +29,4 @@
 - 已执行：API 全量在 `AUTO_REPLY_AGENT_SEND_DELAY_SECONDS=0` 下通过；Web 93 文件 / 376 项通过；Pi Workspace 与确认/取消两条 Chrome/CDP + PostgreSQL E2E、PostgreSQL 确认 smoke、API/Web 类型检查和构建通过。默认 API 组合脚本在已有风险 `S5-RISK-069` 对应的 auto-reply smoke 延迟处挂起，未计作通过。确认/取消 E2E 的旧断言在未修改的 `main` 上同样失败，已改为核对 API `policyRef`，并从新会话验证第二次取消。
 - 生产 Run 只读分析不能证明修改后的真实网盘任务已经运行；发布后应新建受控 Run，核对 `context.compacted.beforeChars/afterChars`、`method`、工具结果数、确认数、最终卡券/商品配置及 UI 轨迹，不重放原 Run 的写动作。
 - 回滚为应用提交回退并通过 `main` 的 GitHub 部署工作流发布；本切片无迁移，也不清理历史事件。旧事件 `arguments` 仍可被读用于恢复，新事件使用 `argumentFingerprint`。
+- 交付：功能提交 `1f918ba` 已以 `--no-ff` 合入 `main`（merge commit `2f5ba65`）；主线 API 定向 59/59、Web 全量 376/376、两端构建和类型检查通过。该合并不代表生产已部署或修改后真实网盘 Run 已复验。
