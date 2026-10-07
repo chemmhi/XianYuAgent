@@ -1,4 +1,10 @@
 # XianyuSellerAgent 项目状态
+## 2026-10-07 Workspace 思考摘要闪烁根因修复
+- 根因：Pi Runtime 将推理摘要持久化为 `workspace.message`；前端检测到该事件后关闭步骤兜底摘要，但随后把所有 `workspace.message` 无条件跳过，导致摘要 DOM 被移除，工具事件仍继续显示。
+- 修复：保留 `workspace.message` 的 `reasoning_summary` / `final_answer` 投影，仅跳过已由 `tool.result` 提供规范展示的持久化 `tool_event`，避免重复工具行。
+- 证据：Web 全量 93 files / 377 tests、Web/API typecheck、Web build、`git diff --check` 通过；回归覆盖“已确认目标商品唯一匹配…”摘要在工具事件到达后仍可见。
+- 状态：`READY_FOR_REVIEW`；独立 worktree `F:\ChenHai\Project\XianYuAgent-workspace-reasoning-summary-persistence-20261007`，尚未合入主工作区。
+
 ## 2026-10-07 Workspace 新 Run 首轮压缩与重复调用修复
 - 生产 Run `aeb4ba21-73de-4d1b-b16d-001ab06c9c00` 首轮压缩从 18,436 增至 18,688 字符，10 次逐轮压缩、同参商品查询 9 次；详见 `docs/operations/workspace-run-incident-20261007.md`。
 - 本切片在独立 worktree 中改为 Skill 短索引和按需检索、仅接纳模型有效压缩、同参只读复用与无进展止损。API 定向 56/56、API/Web 全量、Chrome/CDP + PostgreSQL Workspace E2E 均通过。
