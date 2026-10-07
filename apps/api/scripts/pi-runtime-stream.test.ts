@@ -554,6 +554,96 @@ test('Pi runtime preserves the product search cache across Skill writes', async 
   } finally { runtime.stop(); }
 });
 
+test('Pi runtime preserves Skill documentation reads across a share write', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'skill-read-share-cache@example.com', passwordHash: 'hash', displayName: 'Skill Read Share Cache' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'skill-read-share-cache' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Skill read share cache' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '读取分享规范并创建链接' });
+  let round = 0;
+  let reads = 0;
+  let writes = 0;
+  const model: ModelClient = {
+    async stream() {
+      round += 1;
+      const call = round === 1
+        ? { id: 'read-1', type: 'function' as const, function: { name: 'pi_skill_read', arguments: '{"skillId":"demo","filePath":"references/file-share.md"}' } }
+        : round === 2
+          ? { id: 'share-1', type: 'function' as const, function: { name: 'pi_skill_exec', arguments: '{"command":"share","args":["fid-1"]}' } }
+          : round === 3
+            ? { id: 'read-2', type: 'function' as const, function: { name: 'pi_skill_read', arguments: '{"skillId":"demo","filePath":"references/file-share.md"}' } }
+            : undefined;
+      return call ? { content: '', model: 'test', toolCalls: [call] } : { content: '已完成', model: 'test' };
+    },
+    async complete() { return { content: '{"steps":[]}', model: 'test' }; },
+  };
+  const skillManager = {
+    handleInstruction: async () => undefined,
+    buildSystemPrompt: async () => '',
+    getModelTools: () => [{ type: 'function', function: { name: 'pi_skill_read', description: 'read', parameters: { type: 'object' } } }, { type: 'function', function: { name: 'pi_skill_exec', description: 'exec', parameters: { type: 'object' } } }],
+    executeModelTool: async (name: string) => {
+      if (name === 'pi_skill_read') { reads += 1; return { kind: 'read' as const, title: 'Skill reference loaded', summary: 'Skill reference loaded', content: 'share command docs', data: { status: 'succeeded' } }; }
+      writes += 1;
+      return { kind: 'read' as const, title: 'Skill execution complete', summary: 'Skill execution complete', content: 'share complete', data: { status: 'succeeded', code: 0 } };
+    },
+  };
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: { getModelTools: () => [], executeModelTool: async () => undefined } as never, skillManager: skillManager as never, model: 'test' });
+  try {
+    runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && !['succeeded', 'failed'].includes((await store.getRun(admin.id, created.run.id))?.run.status ?? '')) await new Promise((resolve) => setTimeout(resolve, 10));
+    const bundle = await store.getRun(admin.id, created.run.id);
+    const events = await store.listRunEvents(admin.id, created.run.id, 0);
+    assert.equal(bundle?.run.status, 'succeeded');
+    assert.equal(reads, 1);
+    assert.equal(writes, 1);
+    assert.ok(events.some((event) => event.eventType === 'tool.result' && event.payload.toolName === 'pi_skill_read' && event.payload.reused === true));
+  } finally { runtime.stop(); }
+});
+
+test('Pi runtime bounds Skill-read and share-write alternation', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'skill-read-share-alternation@example.com', passwordHash: 'hash', displayName: 'Skill Read Share Alternation' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'skill-read-share-alternation' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Skill read share alternation' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '反复读取分享规范并执行分享' });
+  let round = 0;
+  let reads = 0;
+  let writes = 0;
+  const model: ModelClient = {
+    async stream() {
+      round += 1;
+      const call = round % 2 === 1
+        ? { id: `read-${round}`, type: 'function' as const, function: { name: 'pi_skill_read', arguments: '{"skillId":"demo","filePath":"references/file-share.md"}' } }
+        : { id: `share-${round}`, type: 'function' as const, function: { name: 'pi_skill_exec', arguments: JSON.stringify({ command: 'share', args: [`fid-${round}`] }) } };
+      return { content: '', model: 'test', toolCalls: [call] };
+    },
+    async complete() { return { content: 'unused', model: 'test' }; },
+  };
+  const skillManager = {
+    handleInstruction: async () => undefined,
+    buildSystemPrompt: async () => '',
+    getModelTools: () => [{ type: 'function', function: { name: 'pi_skill_read', description: 'read', parameters: { type: 'object' } } }, { type: 'function', function: { name: 'pi_skill_exec', description: 'exec', parameters: { type: 'object' } } }],
+    executeModelTool: async (name: string) => {
+      if (name === 'pi_skill_read') { reads += 1; return { kind: 'read' as const, title: 'Skill reference loaded', summary: 'Skill reference loaded', content: 'share command docs', data: { status: 'succeeded' } }; }
+      writes += 1;
+      return { kind: 'read' as const, title: 'Skill execution complete', summary: 'Skill execution complete', content: 'share complete', data: { status: 'succeeded', code: 0 } };
+    },
+  };
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: { getModelTools: () => [], executeModelTool: async () => undefined } as never, skillManager: skillManager as never, model: 'test' });
+  try {
+    runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && !['succeeded', 'failed'].includes((await store.getRun(admin.id, created.run.id))?.run.status ?? '')) await new Promise((resolve) => setTimeout(resolve, 10));
+    const bundle = await store.getRun(admin.id, created.run.id);
+    assert.equal(bundle?.run.status, 'failed');
+    assert.equal(bundle?.run.errorCode, 'MODEL_TOOL_LOOP_EXCEEDED');
+    assert.equal(round, 5);
+    assert.equal(reads, 1);
+    assert.equal(writes, 2);
+  } finally { runtime.stop(); }
+});
+
 test('Pi runtime keeps the product id through compaction and advances to the write plan', async () => {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: 'product-search-compaction@example.com', passwordHash: 'hash', displayName: 'Product Search Compaction' });
