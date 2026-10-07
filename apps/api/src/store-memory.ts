@@ -1757,7 +1757,7 @@ export class MemoryStore implements Store {
   }
 
   async getWorkspaceConfirmation(adminId: string, runId: string): Promise<WorkspaceConfirmationRecord | undefined> {
-    const record = [...this.workspaceConfirmations.values()].find((item) => item.runId === runId);
+    const record = [...this.workspaceConfirmations.values()].reverse().find((item) => item.runId === runId);
     if (!record || !(await this.hasAccountScope(adminId, record.accountId))) return undefined;
     if (record.status === 'active' && Date.parse(record.expiresAt) <= Date.now()) {
       record.status = 'expired';

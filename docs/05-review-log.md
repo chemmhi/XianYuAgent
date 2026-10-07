@@ -761,3 +761,13 @@
 | WS-R-03 | frontend / feedback | warning action remains readable on hover and operation errors render as bottom-right toast | root | PASS | `WorkspacePage.test.ts`; `workspace.css`; screenshot evidence |
 
 Review conclusion: workspace confirmation fixes were merged after code review and real browser verification.
+
+### 2026-10-07 Workspace Runtime 故障复核
+
+| review_id | type | focus | reviewer | conclusion | evidence |
+| --- | --- | --- | --- | --- | --- |
+| WS-R-04 | 业务 / 数据流 | 生产 Run 重复查询、确认回交、批次 18 状态、`batchId` 错误与第二张卡失败路径 | root，第 1 轮 | PASS | `docs/evidence/workspace-runtime-recovery-2026-10-07.md`；生产 PostgreSQL 只读事件聚合和批次查询 |
+| WS-R-05 | 架构 / 持久化 | 049 迁移允许历史多卡且同 Run 仅一张 active；续跑竞态、上下文 checkpoint 和回滚边界 | root，第 2 轮 | PASS | `workspace-confirmation-postgres-smoke.mjs`；`pi-runtime-stream.test.ts`；`docs/migrations/README.md` |
+| WS-R-06 | 质量 / 前端 | 超长商品与 Skill 结果、公开链接、工具/摘要交替呈现、真实 Chrome 与 PostgreSQL | root，第 2 轮 | PASS | `npm exec -- cross-env AUTO_REPLY_AGENT_SEND_DELAY_SECONDS=0 npm test`；两条 Workspace Chrome E2E；`npm run typecheck`；`npm run build` |
+
+本轮没有在生产重放写操作。原 Run 仍失败，批次 18 未关联商品；发布后的续办需以管理员当前会话和持久化结果为准。

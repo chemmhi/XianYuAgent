@@ -142,4 +142,17 @@ describe('workspace message projection', () => {
     expect(execution[2]?.summary).toBe('准备受控写入');
     expect(execution[1]?.content).toContain('已按名称筛选 1 个商品');
   });
+
+  it('shows result-based summaries between tools and hides provisional assistant text from tool rounds', () => {
+    const messages = buildWorkspaceMessages(run, [
+      { sequence: 2, runId: 'run-1', eventType: 'workspace.execution.summary', payload: { streamId: 'round-1', messageType: 'reasoning_summary', summary: '分析任务', content: '核对目标' }, createdAt: '2026-09-20T00:00:01.000Z' },
+      { sequence: 3, runId: 'run-1', eventType: 'assistant.delta', payload: { streamId: 'round-1', messageType: 'final_answer', messageId: 'draft-1', contentDelta: '尚未完成' }, createdAt: '2026-09-20T00:00:01.100Z' },
+      { sequence: 4, runId: 'run-1', eventType: 'tool.call.started', payload: { streamId: 'round-1', toolCallId: 'call-1', toolName: 'workspace_product_search', summary: '检索商品信息' }, createdAt: '2026-09-20T00:00:01.200Z' },
+      { sequence: 5, runId: 'run-1', eventType: 'tool.result', payload: { streamId: 'round-1', toolCallId: 'call-1', toolName: 'workspace_product_search', summary: '找到商品', result: { summary: '找到商品', content: '商品 product-1' } }, createdAt: '2026-09-20T00:00:02.000Z' },
+      { sequence: 6, runId: 'run-1', eventType: 'workspace.execution.summary', payload: { streamId: 'round-1', messageType: 'reasoning_summary', summary: '商品搜索', content: '找到商品' }, createdAt: '2026-09-20T00:00:02.100Z' },
+      { sequence: 7, runId: 'run-1', eventType: 'tool.call.started', payload: { streamId: 'round-2', toolCallId: 'call-2', toolName: 'workspace_prepare_write', summary: '准备受控写入' }, createdAt: '2026-09-20T00:00:02.200Z' },
+    ]);
+    expect(messages.filter((message) => message.type === 'reasoning_summary' || message.type === 'tool_event').map((message) => message.type)).toEqual(['reasoning_summary', 'tool_event', 'reasoning_summary', 'tool_event']);
+    expect(messages.some((message) => message.content === '尚未完成')).toBe(false);
+  });
 });

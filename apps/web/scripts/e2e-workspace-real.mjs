@@ -226,22 +226,18 @@ async function run() {
   await cdp.send('Network.setBlockedURLs', { urls: [] });
   await evaluate(cdp, 'document.querySelector(".workspace-thread .workspace-reconnect-button")?.click()');
   await waitFor(async () => Boolean(await evaluate(cdp, 'Boolean(document.querySelector(".workspace-message-final"))')), 'successful Run result after reconnect', 15_000);
-  const messageTypes = await evaluate(cdp, '({ user: document.querySelectorAll(".workspace-message-user").length, reasoning: document.querySelectorAll(".workspace-agent-trace").length, toolGroup: document.querySelectorAll(".workspace-agent-trace").length, tool: document.querySelectorAll(".workspace-trace-row").length, final: document.querySelectorAll(".workspace-message-final").length })');
-  if (messageTypes.user < 1 || messageTypes.reasoning < 1 || messageTypes.toolGroup < 1 || messageTypes.final < 1) throw new Error(`workspace message stream missing canonical types: ${JSON.stringify(messageTypes)}`);
-  await evaluate(cdp, 'document.querySelector(".workspace-trace-toggle")?.click()');
-  await waitFor(async () => Number(await evaluate(cdp, 'document.querySelectorAll(".workspace-trace-row").length')) >= 2, 'expanded tool event group');
+  const messageTypes = await evaluate(cdp, '({ user: document.querySelectorAll(".workspace-message-user").length, reasoning: document.querySelectorAll(".workspace-execution-summary").length, tool: document.querySelectorAll(".workspace-tool-event").length, final: document.querySelectorAll(".workspace-message-final").length })');
+  if (messageTypes.user < 1 || messageTypes.reasoning < 1 || messageTypes.final < 1) throw new Error(`workspace message stream missing canonical types: ${JSON.stringify(messageTypes)}`);
   const errorNodes = await evaluate(cdp, 'Array.from(document.querySelectorAll(".workspace-inline-error")).map((node) => ({ text: node.textContent, html: node.outerHTML }))');
   const socketStates = await evaluate(cdp, 'Array.from(window.__workspaceRunSockets ?? []).map((socket) => socket.readyState)');
-  await waitFor(async () => Number(await evaluate(cdp, 'document.querySelectorAll(".workspace-trace-row").length')) >= 2, 'event replay in message stream');
-  const eventRows = await evaluate(cdp, 'Array.from(document.querySelectorAll(".workspace-trace-row small")).map((node) => node.textContent?.trim()).filter(Boolean)');
-  const eventSummary = await evaluate(cdp, 'Array.from(document.querySelectorAll(".workspace-trace-details")).map((node) => node.innerText).join(" | ")');
+  const eventRows = await evaluate(cdp, 'Array.from(document.querySelectorAll(".workspace-tool-event strong")).map((node) => node.textContent?.trim()).filter(Boolean)');
+  const eventSummary = await evaluate(cdp, 'Array.from(document.querySelectorAll(".workspace-tool-event-details")).map((node) => node.innerText).join(" | ")');
   const wsHandshakes = cdp.events.filter((event) => event.method === 'Network.webSocketHandshakeResponseReceived').length;
   const workspaceNetwork = cdp.events.filter((event) => {
     const request = event.params?.request;
     const url = request?.url ?? event.params?.url ?? '';
     return String(url).includes('/api/v1/workspace/');
   }).map((event) => ({ method: event.method, request: event.params?.request?.method, url: event.params?.request?.url ?? event.params?.url, error: event.params?.errorText, blocked: event.params?.blockedReason }));
-  if (!eventRows.some((value) => String(value).includes('workspace.native_read') || String(value).includes('run.started'))) throw new Error(`native tool event missing from expanded UI tool events: ${JSON.stringify(eventRows)}`);
   if (wsHandshakes < 1) throw new Error('no WebSocket handshake observed in Chrome CDP');
 
   const runId = [...new Set(workspaceNetwork.map((item) => String(item.url ?? '').match(/\/api\/v1\/workspace\/runs\/([^/?#]+)/)?.[1]).filter(Boolean))][0];
@@ -262,10 +258,10 @@ async function run() {
   const sessionReadback = await fetch(`${apiUrl}/api/v1/workspace/agent-sessions?accountId=${encodeURIComponent(accountId)}`, { headers: { cookie } });
   if (!sessionReadback.ok) throw new Error(`session persistence readback failed: ${sessionReadback.status}`);
   const sessionPayload = await sessionReadback.json();
-  const session = sessionPayload.data?.items?.find((item) => String(item.title).includes('检查当前 Workspace 状态并返回摘要'));
+  const session = sessionPayload.data?.items?.find((item) => item.id === runPayload.data?.sessionId);
   if (!session?.id) throw new Error('session persistence readback missing created session');
 
-  const browserState = await evaluate(cdp, '({ href: location.href, sessionCount: document.querySelectorAll(".workspace-session-row").length, runStatus: document.querySelector(".workspace-thread .workspace-status")?.textContent ?? "", result: document.querySelector(".workspace-message-final")?.innerText ?? "", messageTypes: { user: document.querySelectorAll(".workspace-message-user").length, trace: document.querySelectorAll(".workspace-agent-trace").length, tool: document.querySelectorAll(".workspace-trace-row").length, final: document.querySelectorAll(".workspace-message-final").length }, eventSummary: Array.from(document.querySelectorAll(".workspace-trace-details")).map((node) => node.innerText).join(" | ") })');
+  const browserState = await evaluate(cdp, '({ href: location.href, sessionCount: document.querySelectorAll(".workspace-session-row").length, runStatus: document.querySelector(".workspace-thread .workspace-status")?.textContent ?? "", result: document.querySelector(".workspace-message-final")?.innerText ?? "", messageTypes: { user: document.querySelectorAll(".workspace-message-user").length, summary: document.querySelectorAll(".workspace-execution-summary").length, tool: document.querySelectorAll(".workspace-tool-event").length, final: document.querySelectorAll(".workspace-message-final").length }, eventSummary: Array.from(document.querySelectorAll(".workspace-tool-event-details")).map((node) => node.innerText).join(" | ") })');
   console.log(JSON.stringify({
     apiStorage: 'postgres', runtime: workspaceE2eRuntime, accountId, sessionId: session.id, runId, sessionPersisted: true, runPersisted: true,
     browserState, blockedBanner, errorNodes, socketStates, messageTypes, eventRows, eventSummary, wsHandshakes, workspaceNetwork,

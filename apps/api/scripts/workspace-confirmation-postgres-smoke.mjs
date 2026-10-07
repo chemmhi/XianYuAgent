@@ -120,6 +120,13 @@ async function run() {
   assert.equal(runReadback?.steps[0]?.status, 'executing');
   assert.equal(outboxReadback.length, 1);
   assert.equal(outboxReadback[0]?.status, 'pending');
+  const multiRun = await runtime.store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '创建卡券，关联商品，然后启用自动发货' });
+  const first = await runtime.store.createWorkspaceConfirmation({ adminId: admin.id, runId: multiRun.run.id, stepId: multiRun.steps[0].id, accountId: account.id, requestedBy: admin.id, action: 'coupon_create', policyRef: 'coupon.create.confirm', manifest: { label: '03 PPT Master' }, executionPlan: { label: '03 PPT Master' }, expiresAt: new Date(Date.now() + 60_000).toISOString() });
+  assert.equal((await runtime.store.transitionWorkspaceConfirmation({ adminId: admin.id, confirmationId: first.id, expectedVersion: first.version, status: 'confirmed', actorId: admin.id }))?.status, 'confirmed');
+  const second = await runtime.store.createWorkspaceConfirmation({ adminId: admin.id, runId: multiRun.run.id, stepId: multiRun.steps[0].id, accountId: account.id, requestedBy: admin.id, action: 'coupon_bind', policyRef: 'coupon.bind.confirm', manifest: { batchId: '18', productId: product.id }, executionPlan: { batchId: '18', productId: product.id }, expiresAt: new Date(Date.now() + 60_000).toISOString() });
+  assert.notEqual(second.id, first.id);
+  assert.equal((await runtime.store.getWorkspaceConfirmation(admin.id, multiRun.run.id))?.id, second.id);
+  assert.equal((await runtime.store.createWorkspaceConfirmation({ adminId: admin.id, runId: multiRun.run.id, stepId: multiRun.steps[0].id, accountId: account.id, requestedBy: admin.id, action: 'coupon_bind', policyRef: 'coupon.bind.confirm', manifest: {}, executionPlan: {}, expiresAt: new Date(Date.now() + 60_000).toISOString() })).id, second.id);
   console.log(JSON.stringify({
     status: 'PASS',
     slice: 'WS-VS-02',

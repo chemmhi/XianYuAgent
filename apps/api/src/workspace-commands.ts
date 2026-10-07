@@ -270,9 +270,11 @@ export class WorkspaceCommandOrchestrator {
     }
     if (operation.startsWith('coupon_')) {
       const batchId = stringParam('batchId');
-      if (!batchId) throw new ServiceError(422, 'VALIDATION_FAILED', 'coupon operation requires batchId');
+      if (!batchId) throw new ServiceError(422, 'VALIDATION_FAILED', `${operation} requires batchId; use the batchId returned by the confirmed coupon_create result`);
       const productRef = stringParam('productId');
       const patch = isRecord(parameters.patch) ? parameters.patch : undefined;
+      if ((operation === 'coupon_bind' || operation === 'coupon_unbind') && !productRef) throw new ServiceError(422, 'VALIDATION_FAILED', `${operation} requires productId from workspace_product_search`);
+      if (operation === 'coupon_update' && (!patch || Object.keys(patch).length === 0)) throw new ServiceError(422, 'VALIDATION_FAILED', 'coupon_update requires a non-empty patch; use coupon_bind to associate a product');
       const manifest = { action: operation, accountId, batchId, productId: productRef, changedFields: patch ? Object.keys(patch) : [], redacted: true };
       return this.plan(operation, '卡券批次变更确认', `准备${operation === 'coupon_copy' ? '复制' : operation === 'coupon_void' ? '作废' : operation === 'coupon_enable' ? '启用' : operation === 'coupon_disable' ? '禁用' : '更新'}卡券批次 ${batchId}`, expiresAt, manifest, { action: operation, accountId, batchId, productId: productRef, patch });
     }
@@ -700,7 +702,7 @@ function normalizeDeliveryType(value?: string): OrderDeliveryType | undefined {
   return undefined;
 }
 function normalizeAfterSalesStatus(value?: string): OrderRecord['afterSalesStatus'] | undefined { if (!value) return undefined; if (/退款中|refunding/i.test(value)) return 'refunding'; if (/已退款|refunded/i.test(value)) return 'refunded'; if (/申请|requested|售后/i.test(value)) return 'requested'; if (/关闭|closed/i.test(value)) return 'closed'; return value === 'none' ? 'none' : undefined; }
-function safeProduct(product: ProductRecord): Record<string, unknown> { return { id: product.id, accountId: product.accountId, externalProductRef: product.externalProductRef, title: product.title, description: product.description, categoryCode: product.categoryCode, priceMinor: product.priceMinor, status: product.status, configVersion: product.configVersion, skuCount: product.skuCount ?? 0, assetCount: product.assetCount ?? 0, updatedAt: product.updatedAt, redacted: true }; }
+function safeProduct(product: ProductRecord): Record<string, unknown> { return { ...product }; }
 function productListResult(items: ProductRecord[], total: number): WorkspaceCommandResult { const rows = items.map((item) => safeProduct(item)); return { kind: 'products', title: '商品查询', summary: `已读取 ${total} 个商品`, content: rows.length ? [`当前账号共有 ${total} 个商品：`, ...rows.map((item, index) => `${index + 1}. ${String(item.title)} · ${String(item.status)} · ${formatMoney(typeof item.priceMinor === 'number' ? item.priceMinor : undefined)}`)].join('\n') : '当前账号暂无匹配商品。', data: { total, items: rows } }; }
 function orderListResult(items: OrderRecord[], total: number): WorkspaceCommandResult { const rows = items.map((item) => ({ orderNo: item.orderNo, itemTitle: item.itemTitle, amountMinor: item.amountMinor, paymentStatus: item.paymentStatus, orderStatus: item.orderStatus, deliveryStatus: item.deliveryStatus, afterSalesStatus: item.afterSalesStatus, createdAt: item.createdAt, updatedAt: item.updatedAt, redacted: true })); return { kind: 'orders', title: '订单查询', summary: `已读取 ${total} 个订单`, content: rows.length ? [`当前账号共有 ${total} 个订单：`, ...rows.map((item, index) => `${index + 1}. ${item.orderNo} · ${item.itemTitle} · 支付 ${item.paymentStatus} · 交付 ${item.deliveryStatus} · 售后 ${item.afterSalesStatus}`)].join('\n') : '当前账号暂无匹配订单。', data: { total, items: rows } }; }
 function formatAutomationPersistedResult(result: { product: { id: string; externalProductRef?: string; title: string }; configVersion: number; config: ProductAutomationConfig; couponBatches: Array<{ id: string; sequenceId?: string; label?: string; purpose?: string; status?: string; availableCount?: number }>; persisted: boolean; persistenceVerifiedAt?: string }): string {
