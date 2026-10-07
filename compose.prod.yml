@@ -50,11 +50,14 @@ services:
       OBJECT_STORAGE_SECRET_KEY: ${OBJECT_STORAGE_SECRET_KEY}
       OBJECT_STORAGE_BUCKET: xianyu-assets
       OBJECT_STORAGE_REGION: us-east-1
+      TZ: Asia/Shanghai
       # Keep installed Skills, authorization markers, and CLI state on a named volume.
       PI_SKILL_ROOT: ${PI_SKILL_ROOT:-/app/pi_skills}
       XIANYU_VERIFICATION_BROWSER_MODE: ${XIANYU_VERIFICATION_BROWSER_MODE:-launch}
       XIANYU_VERIFICATION_SLIDER_MODE: ${XIANYU_VERIFICATION_SLIDER_MODE:-auto}
-      XIANYU_VERIFICATION_BROWSER_EXECUTABLE: ${XIANYU_VERIFICATION_BROWSER_EXECUTABLE:-/usr/bin/chromium}
+      # Use the same Google Chrome family as local verification. Do not let a
+      # stale server .env switch production back to distro Chromium.
+      XIANYU_VERIFICATION_BROWSER_EXECUTABLE: /usr/bin/google-chrome
       XIANYU_VERIFICATION_BROWSER_HEADLESS: ${XIANYU_VERIFICATION_BROWSER_HEADLESS:-false}
       XIANYU_VERIFICATION_BROWSER_USER_DATA_DIR: ${XIANYU_VERIFICATION_BROWSER_USER_DATA_DIR:-/app/browser_data/xianyu-verification}
       XIANYU_VERIFICATION_BROWSER_MAX_WAIT_MS: ${XIANYU_VERIFICATION_BROWSER_MAX_WAIT_MS:-180000}

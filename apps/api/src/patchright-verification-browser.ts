@@ -21,6 +21,7 @@ export function createPatchrightVerificationBrowserFactory(): XianyuVerification
         ...(options.userAgent ? { userAgent: options.userAgent } : {}),
         viewport: { width: 1440, height: 900 },
         locale: 'zh-CN',
+        timezoneId: 'Asia/Shanghai',
         args: [
           '--disable-blink-features=AutomationControlled',
           '--disable-features=AutomationControlled',

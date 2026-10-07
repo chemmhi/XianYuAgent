@@ -18,10 +18,17 @@ for (const [name, compose] of [['production', productionCompose], ['development'
     assert.match(compose, /XIANYU_VERIFICATION_BROWSER_MODE: \$\{XIANYU_VERIFICATION_BROWSER_MODE:-launch\}/);
     assert.match(compose, /XIANYU_VERIFICATION_SLIDER_MODE: \$\{XIANYU_VERIFICATION_SLIDER_MODE:-auto\}/);
     assert.match(compose, /XIANYU_VERIFICATION_BROWSER_HEADLESS: \$\{XIANYU_VERIFICATION_BROWSER_HEADLESS:-false\}/);
+    assert.match(compose, /XIANYU_VERIFICATION_BROWSER_EXECUTABLE: \/usr\/bin\/google-chrome/);
     assert.doesNotMatch(compose, /XIANYU_VERIFICATION_BROWSER_HEADLESS: \$\{XIANYU_VERIFICATION_BROWSER_HEADLESS:-true\}/);
   });
 }
 
 test('API image installs Xvfb and Xauthority support', () => {
   assert.match(dockerfile, /xvfb\s+xauth/);
+});
+
+test('production verification uses Google Chrome and Shanghai timezone', () => {
+  assert.match(dockerfile, /google-chrome-stable_current_amd64\.deb/);
+  assert.match(dockerfile, /google-chrome --version/);
+  assert.match(productionCompose, /XIANYU_VERIFICATION_BROWSER_EXECUTABLE: \/usr\/bin\/google-chrome/);
 });

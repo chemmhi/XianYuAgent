@@ -9,11 +9,15 @@ RUN npm run build
 FROM node:24-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production
+ENV TZ=Asia/Shanghai
 RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
-    && apt-get install -y --no-install-recommends chromium fonts-noto-cjk ca-certificates \
+    && apt-get install -y --no-install-recommends wget ca-certificates fonts-noto-cjk \
+    && wget -q -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+    && apt-get install -y --no-install-recommends /tmp/google-chrome.deb \
+    && rm -f /tmp/google-chrome.deb \
     && rm -rf /var/lib/apt/lists/* \
-    && chromium --version
+    && google-chrome --version
 RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
     && apt-get install -y --no-install-recommends unzip xvfb xauth \
