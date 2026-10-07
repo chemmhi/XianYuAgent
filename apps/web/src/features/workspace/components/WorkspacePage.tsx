@@ -9,6 +9,7 @@ import { SearchField } from '../../../shared/ui/SearchField';
 import { Button } from '../../../shared/ui/Button';
 import { Toast } from '../../../shared/ui/Toast';
 import { MarkdownContent } from '../../../shared/ui/MarkdownContent';
+import { buildWorkspaceActivityItems, isLowSignalSummary, workspaceToolActionIcon, type WorkspaceActivityItem } from './workspaceActivity';
 import './workspace.css';
 
 export interface WorkspacePageProps { api: WorkspaceApi; }
@@ -208,63 +209,57 @@ export function WorkspaceDeleteSessionModal({ session, submitting = false, onClo
   </div>;
 }
 
-export function MessageStream({ messages, expandedTrace, onToggleTrace }: { messages: WorkspaceMessageVM[]; expandedTrace: string | null; onToggleTrace: (id: string) => void }) {
+export function MessageStream({ messages, expandedTrace, onToggleTrace }: { messages: WorkspaceMessageVM[]; expandedTrace?: string | null; onToggleTrace?: (id: string) => void }) {
   const visibleMessages = messages.filter(isVisibleWorkspaceActivity);
-  const duration = formatActivityDuration(visibleMessages);
+  const activityItems = buildWorkspaceActivityItems(visibleMessages);
   return <div className="workspace-message-list">
-    {duration && <div className="workspace-activity-duration">已处理 {duration}</div>}
-    {visibleMessages.map((message) => message.type === 'reasoning_summary'
-      ? <ExecutionSummaryView key={message.id} message={message} />
-      : message.type === 'tool_event'
-        ? <ToolEventView key={message.id} message={message} expanded={expandedTrace === message.id} onToggle={() => onToggleTrace(message.id)} />
-        : <MessageBubble key={message.id} message={message} />)}
+    {activityItems.map((item) => item.kind === 'summary'
+      ? <ExecutionSummaryView key={item.id} item={item} />
+      : item.kind === 'tool'
+        ? <ToolEventView key={item.id} item={item} expanded={expandedTrace === item.id} onToggle={() => onToggleTrace?.(item.id)} />
+        : <MessageBubble key={item.message.id} message={item.message} />)}
   </div>;
 }
 
 function isVisibleWorkspaceActivity(message: WorkspaceMessageVM): boolean {
   if (message.type !== 'reasoning_summary') return true;
   if (message.eventType === 'reasoning.delta') return false;
-  return !['模型原生推理', '执行 Workspace 任务'].includes(message.summary ?? '');
+  return !['模型原生推理', '执行 Workspace 任务'].includes(message.summary ?? '') && !isLowSignalSummary(message);
 }
 
-function formatActivityDuration(messages: WorkspaceMessageVM[]): string | undefined {
-  const timestamps = messages.map((message) => Date.parse(message.createdAt)).filter(Number.isFinite);
-  if (timestamps.length < 2 || !messages.some((message) => message.type === 'reasoning_summary' || message.type === 'tool_event')) return undefined;
-  const durationMs = Math.max(0, Math.max(...timestamps) - Math.min(...timestamps));
-  const totalSeconds = Math.max(1, Math.round(durationMs / 1_000));
-  const hours = Math.floor(totalSeconds / 3_600);
-  const minutes = Math.floor((totalSeconds % 3_600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours}小时${minutes ? ` ${minutes}分钟` : ''}${seconds ? ` ${seconds}秒` : ''}`;
-  if (minutes > 0) return `${minutes}分钟${seconds ? ` ${seconds}秒` : ''}`;
-  return `${seconds}秒`;
-}
-
-function ExecutionSummaryView({ message }: { message: WorkspaceMessageVM }) {
-  return <article className="workspace-execution-summary">
-    <span className="workspace-activity-icon workspace-activity-icon-summary" aria-hidden="true">
-      <svg viewBox="0 0 16 16" focusable="false"><path d="m3.25 11.75-.5 1.5 1.5-.5 7.9-7.9-1-1-7.9 7.9Z" /><path d="m10.55 3.15 1-1 1.3 1.3-1 1" /></svg>
-    </span>
-    <div className="workspace-activity-copy">
-      <strong>{message.summary ?? '执行摘要'}</strong>
-      <p>{message.content}</p>
-    </div>
+function ExecutionSummaryView({ item }: { item: Extract<WorkspaceActivityItem, { kind: 'summary' }> }) {
+  return <article className="workspace-activity-summary" data-testid="workspace-activity-summary">
+    <p>{item.text}</p>
   </article>;
 }
 
-function ToolEventView({ message, expanded, onToggle }: { message: WorkspaceMessageVM; expanded: boolean; onToggle: () => void }) {
-  return <article className="workspace-tool-event">
-    <button type="button" className="workspace-tool-event-toggle" onClick={onToggle} aria-expanded={expanded}>
-      <span className="workspace-activity-icon workspace-activity-icon-tool" aria-hidden="true">
-        <svg viewBox="0 0 16 16" focusable="false"><rect x="3.25" y="2.75" width="9.5" height="10.5" rx="1" /><path d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3" /></svg>
+function ToolEventView({ item, expanded, onToggle }: { item: Extract<WorkspaceActivityItem, { kind: 'tool' }>; expanded: boolean; onToggle: () => void }) {
+  const icon = workspaceToolActionIcon(item.message);
+  return <article className="workspace-activity-action" data-testid="workspace-activity-action" data-tool-name={item.message.title}>
+    <button type="button" className="workspace-activity-action-toggle" onClick={onToggle} aria-expanded={expanded} aria-label={`${item.label}${expanded ? '，收起工具详情' : '，展开工具详情'}`}>
+      <span className={`workspace-activity-action-icon workspace-activity-action-icon-${icon}`} aria-hidden="true">
+        {icon === 'edit'
+          ? <svg viewBox="0 0 16 16" focusable="false"><path d="m3.25 11.75-.5 1.5 1.5-.5 7.9-7.9-1-1-7.9 7.9Z" /><path d="m10.55 3.15 1-1 1.3 1.3-1 1" /></svg>
+          : icon === 'search'
+            ? <svg viewBox="0 0 16 16" focusable="false"><circle cx="6.75" cy="6.75" r="3.5" /><path d="m9.4 9.4 3.1 3.1" /></svg>
+            : icon === 'read'
+              ? <svg viewBox="0 0 16 16" focusable="false"><rect x="3" y="2.75" width="10" height="10.5" rx="1" /><path d="M5.25 5.5h5.5M5.25 8h5.5M5.25 10.5h3.5" /></svg>
+              : <svg viewBox="0 0 16 16" focusable="false"><path d="m4 4.5 3 3-3 3" /><path d="M8.5 10.5h3.5" /></svg>}
       </span>
-      <strong>{message.title}</strong>
-      <span className="workspace-tool-event-control">
-        <span className="workspace-tool-event-action">{expanded ? '收起' : '展开'}</span>
-        <span className="workspace-message-chevron" aria-hidden="true"><svg viewBox="0 0 12 12" focusable="false"><path d={expanded ? 'm3 3.5 3 3 3-3' : 'm4 2.5 3.5 3.5L4 9.5'} /></svg></span>
+      <span className="workspace-activity-action-label">{item.label}</span>
+      <span className="workspace-activity-action-control">
+        <span>{expanded ? '收起' : '展开'}</span>
+        <svg className={`workspace-activity-action-chevron${expanded ? ' is-expanded' : ''}`} viewBox="0 0 12 12" focusable="false" aria-hidden="true">
+          <path d={expanded ? 'M2.5 4 6 7.5 9.5 4' : 'M4 2.5 7.5 6 4 9.5'} vectorEffect="non-scaling-stroke" />
+        </svg>
       </span>
     </button>
-    {expanded && <div className="workspace-tool-event-details"><pre>{formatToolEventContent(message.content)}</pre></div>}
+    {expanded && <div className="workspace-activity-action-details" data-testid="workspace-activity-action-details">
+      {item.messages.map((message) => <div className="workspace-activity-action-detail" key={message.id}>
+        <strong>{message.title}</strong>
+        <pre>{formatToolEventContent(message.content)}</pre>
+      </div>)}
+    </div>}
   </article>;
 }
 export function formatToolEventContent(content: string): string {

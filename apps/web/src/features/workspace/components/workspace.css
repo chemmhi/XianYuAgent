@@ -411,3 +411,272 @@ body .app-viewport .workspace-domain .workspace-mobile-compact-header strong {
   font-size: var(--font-size-card-title);
   line-height: 1.5;
 }
+
+/* Compact chronological activity feed: prose checkpoints interleave with
+   one-line human actions, matching the reference conversation surface. */
+.workspace-message-list {
+  display: block;
+  width: min(100%, 760px);
+  padding: 24px 30px 34px;
+  color: #4B5563;
+}
+.workspace-activity-summary,
+.workspace-activity-action {
+  width: 100%;
+  box-sizing: border-box;
+}
+.workspace-activity-summary {
+  margin: 0;
+  padding: 0 2px 17px;
+}
+.workspace-activity-summary p {
+  margin: 0;
+  color: #4B5563;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.78;
+  white-space: pre-wrap;
+}
+.workspace-activity-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 24px;
+  margin: 0 0 17px;
+  padding: 0 2px;
+  color: #6B7280;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.workspace-activity-action-icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: #6B7280;
+}
+.workspace-activity-action-icon svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.25;
+}
+.workspace-activity-action-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-activity-action-count {
+  margin-left: 2px;
+  color: #9CA3AF;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.workspace-activity-summary + .workspace-activity-summary {
+  padding-top: 2px;
+}
+.workspace-activity-action + .workspace-activity-action {
+  margin-top: -5px;
+}
+.workspace-message-list > .workspace-message-user {
+  margin-bottom: 22px;
+}
+.workspace-message-list > .workspace-message-final {
+  margin-top: 10px;
+}
+.workspace-activity-duration,
+.workspace-tool-event,
+.workspace-execution-summary {
+  display: none;
+}
+@media (max-width: 900px) {
+  .workspace-message-list { padding: 20px 18px 28px; }
+  .workspace-activity-summary p { font-size: 12px; }
+}
+.workspace-message-stream { background: #F7F7F8; }
+.workspace-message-list { background: #F7F7F8; }
+.workspace-activity-action-count { display: none; }
+.workspace-activity-action { display: block; }
+.workspace-activity-action-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 24px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.workspace-activity-action-toggle:hover .workspace-activity-action-label,
+.workspace-activity-action-toggle:focus-visible .workspace-activity-action-label { color: #374151; }
+.workspace-activity-action-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: #9CA3AF;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.workspace-activity-action-chevron {
+  display: inline-grid;
+  place-items: center;
+  width: 10px;
+  height: 14px;
+  font-size: 14px;
+  line-height: 1;
+}
+.workspace-activity-action-details {
+  display: grid;
+  gap: 10px;
+  margin: 7px 0 12px 26px;
+  padding: 10px 12px;
+  border-left: 1px solid #D1D5DB;
+  background: rgba(255,255,255,.42);
+}
+.workspace-activity-action-detail { min-width: 0; }
+.workspace-activity-action-detail strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #6B7280;
+  font-size: 11px;
+  font-weight: 500;
+}
+.workspace-activity-action-detail pre {
+  margin: 0;
+  color: #4B5563;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.workspace-activity-action-count { display: none; }
+/* Final readability pass: align action controls and separate primary text
+   from secondary expanded tool details. */
+.workspace-activity-summary p {
+  color: #111827;
+  font-size: 14px;
+  line-height: 1.75;
+}
+.workspace-activity-action-toggle {
+  align-items: center;
+  min-height: 28px;
+  gap: 9px;
+  color: #111827;
+  line-height: 1.45;
+}
+.workspace-activity-action-icon {
+  width: 18px;
+  height: 18px;
+  color: #111827;
+}
+.workspace-activity-action-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.workspace-activity-action-label {
+  color: #111827;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.workspace-activity-action-control {
+  align-self: center;
+  min-height: 18px;
+  color: #6B7280;
+  font-size: 12px;
+  line-height: 18px;
+}
+.workspace-activity-action-chevron {
+  height: 18px;
+  line-height: 18px;
+}
+.workspace-activity-action-details {
+  margin: 8px 0 14px 27px;
+  padding: 10px 12px;
+  border-left: 0;
+  background: #F1F1F1;
+}
+.workspace-activity-action-detail strong,
+.workspace-activity-action-detail pre {
+  color: #6B7280;
+}
+.workspace-activity-action-detail pre {
+  font-size: 13px;
+  line-height: 1.65;
+}
+.workspace-activity-action-details {
+  max-height: 260px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+/* Match the reference activity surface: the conversation stream is a
+   neutral gray canvas while expanded tool details use a darker gray panel. */
+.workspace-message-stream,
+.workspace-message-list {
+  background: #D5D5D5;
+}
+.workspace-activity-action-details {
+  background: #C3C3C3;
+}
+.workspace-message-stream,
+.workspace-message-list {
+  background: #FFFFFF;
+}
+.workspace-activity-action-details {
+  background: transparent;
+}
+.workspace-activity-action-detail,
+.workspace-activity-action-detail strong,
+.workspace-activity-action-detail pre {
+  color: #6B7280;
+}
+.workspace-activity-action-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  height: 20px;
+  line-height: 20px;
+}
+.workspace-activity-action-chevron {
+  display: block;
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.25;
+}
+.workspace-activity-action-chevron {
+  width: 10px;
+  height: 10px;
+  color: #7A7A7A;
+  stroke-width: 1;
+}
+.workspace-activity-action-details {
+  margin-left: 29px;
+  padding: 4px 0 0;
+}
+.workspace-activity-action-detail strong,
+.workspace-activity-action-detail pre {
+  font-size: 13px;
+  line-height: 1.65;
+}
+.workspace-activity-action-detail strong {
+  margin-bottom: 4px;
+  font-weight: 500;
+}

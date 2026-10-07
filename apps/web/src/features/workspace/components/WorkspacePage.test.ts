@@ -134,28 +134,32 @@ describe('Workspace MessageStream', () => {
     expect(workspacePageSource).toContain('scrollMessageStreamToLatest(messageStreamRef.current)');
   });
 
-  it('renders summaries as feed items and keeps each tool call collapsible', () => {
+  it('renders summaries and tool actions as a compact chronological feed', () => {
     const messages: WorkspaceMessageVM[] = [
       { id: 'user-1', runId: 'run-1', type: 'user_message', createdAt: '2026-09-22T00:00:00.000Z', title: '用户', content: '检查店铺状态' },
       { id: 'reasoning-1', runId: 'run-1', type: 'reasoning_summary', createdAt: '2026-09-22T00:00:01.000Z', title: '推理摘要', summary: '读取店铺状态 · 已完成', content: '读取店铺状态' },
-      { id: 'tool-1', runId: 'run-1', type: 'tool_event', createdAt: '2026-09-22T00:00:02.000Z', title: '工具事件', eventType: 'products.read', content: '已读取商品列表' },
+      { id: 'tool-1', runId: 'run-1', type: 'tool_event', createdAt: '2026-09-22T00:00:02.000Z', title: 'workspace_product_search', summary: '检索商品信息', eventType: 'tool.result', content: '已读取商品列表' },
       { id: 'final-1', runId: 'run-1', type: 'final_answer', createdAt: '2026-09-22T00:00:03.000Z', title: 'Agent', content: '店铺状态正常。' },
     ];
 
-    const html = renderToStaticMarkup(createElement(MessageStream, { messages, expandedTrace: null, onToggleTrace: vi.fn() }));
+    const html = renderToStaticMarkup(createElement(MessageStream, { messages }));
 
-    expect(html).toContain('class="workspace-execution-summary"');
-    expect(html).toContain('class="workspace-tool-event"');
-    expect(html).toContain('class="workspace-tool-event-toggle"');
+    expect(html).toContain('class="workspace-activity-summary"');
+    expect(html).toContain('class="workspace-activity-action"');
+    expect(html).toContain('检索商品信息');
+    expect(html).toContain('workspace-activity-action-toggle');
     expect(html).toContain('aria-expanded="false"');
-    expect(html).toContain('class="workspace-tool-event-action">展开</span>');
-    expect(html).toContain('已处理 3秒');
+    expect(html).not.toContain('workspace-activity-action-details');
+    expect(html).not.toContain('已处理 3秒');
     expect(html).toContain('workspace-message workspace-message-final');
     expect(html).not.toContain('workspace-message-avatar');
     expect(html).not.toContain('workspace-message-tool');
+    expect(html.indexOf('读取店铺状态')).toBeLessThan(html.indexOf('检索商品信息'));
 
     const expandedHtml = renderToStaticMarkup(createElement(MessageStream, { messages, expandedTrace: 'tool-1', onToggleTrace: vi.fn() }));
+    expect(expandedHtml).toContain('workspace-activity-action-details');
     expect(expandedHtml).toContain('已读取商品列表');
+    expect(expandedHtml).toContain('aria-expanded="true"');
   });
 
   it('renders trace duration in human-friendly units', () => {
@@ -163,8 +167,9 @@ describe('Workspace MessageStream', () => {
       { id: 'reasoning-1', runId: 'run-1', type: 'reasoning_summary', createdAt: '2026-09-22T00:00:00.000Z', title: '推理摘要', summary: '读取店铺状态 · 已完成', content: '读取店铺状态' },
       { id: 'tool-1', runId: 'run-1', type: 'tool_event', createdAt: '2026-09-22T00:05:47.000Z', title: 'workspace_read', eventType: 'tool.result', content: '已读取商品列表' },
     ];
-    const html = renderToStaticMarkup(createElement(MessageStream, { messages, expandedTrace: null, onToggleTrace: vi.fn() }));
-    expect(html).toContain('已处理 5分钟 47秒');
+    const html = renderToStaticMarkup(createElement(MessageStream, { messages }));
+    expect(html).toContain('读取店铺状态');
+    expect(html).toContain('读取工作区数据');
     expect(html).not.toContain('347000ms');
   });
 
@@ -173,7 +178,7 @@ describe('Workspace MessageStream', () => {
       { id: 'final-1', runId: 'run-1', type: 'final_answer', createdAt: '2026-09-22T00:00:03.000Z', title: 'Agent', content: '找到的商品是 **PPT Master**。\n\n- Windows 安装包\n- `一键卸载脚本`' },
     ];
 
-    const html = renderToStaticMarkup(createElement(MessageStream, { messages, expandedTrace: null, onToggleTrace: vi.fn() }));
+    const html = renderToStaticMarkup(createElement(MessageStream, { messages }));
 
     expect(html).toContain('data-markdown-content');
     expect(html).toContain('<strong>PPT Master</strong>');
