@@ -143,6 +143,12 @@ describe('product automation components', () => {
     expect(html).not.toContain('2 条规格');
   });
 
+  it('drops stale selected ids from the picker count', () => {
+    const html = renderToStaticMarkup(createElement(CouponPickerDialog, { open: true, title: '选择发货卡券', subtitle: '付款后自动发货使用的卡券', coupons: MOCK_AUTOMATION_COUPONS, selectedIds: ['missing-coupon'], onCancel: vi.fn(), onSave: vi.fn() }));
+    expect(html).toContain('保存（0 个）');
+    expect(html).not.toContain('保存（1 个）');
+  });
+
   it('removes the no-op draft button and submits the full rule set on save', async () => {
     const config = await createMockProductAutomationApi().getConfig(product.id);
     expect(Object.keys(buildValidatedAutomationUpdate(config))).toEqual(['version', 'delivery', 'reprice', 'gift', 'review']);
@@ -201,6 +207,7 @@ describe('product automation components', () => {
     expect(pickerCoupons.map((coupon) => coupon.id)).toEqual(expect.arrayContaining(['coupon-batch-2', 'coupon-gift-a', 'coupon-api-member', 'coupon-text-fixed', 'coupon-owei-map']));
     expect(resolveDeliveryCouponIds(['internal-uuid-for-owei-map'], ['coupon-owei-map'], pickerCoupons)).toEqual(['coupon-owei-map']);
     expect(resolveDeliveryCouponIds(['coupon-batch-2'], ['coupon-owei-map'], pickerCoupons)).toEqual(['coupon-owei-map']);
+    expect(resolveDeliveryCouponIds(['missing-coupon'], [], pickerCoupons)).toEqual([]);
     const config = await createMockProductAutomationApi().getConfig(product.id);
     const html = renderToStaticMarkup(createElement(AutomationDrawer, {
       open: true,
@@ -222,6 +229,7 @@ describe('product automation components', () => {
     const coupons = [...MOCK_AUTOMATION_COUPONS, { id: 'coupon-owei-map', label: '奥维地图', typeLabel: '数据卡', specSummary: '按行取值', quantitySummary: '每件 1 份' }];
     expect(resolveGiftCouponIds(['internal-uuid-for-owei-map'], ['coupon-owei-map'], coupons)).toEqual(['coupon-owei-map']);
     expect(resolveGiftCouponIds([], ['coupon-owei-map'], coupons)).toEqual([]);
+    expect(resolveGiftCouponIds(['missing-coupon'], [], coupons)).toEqual([]);
     const config = await createMockProductAutomationApi().getConfig(product.id);
     const html = renderToStaticMarkup(createElement(AutomationDrawer, {
       open: true,

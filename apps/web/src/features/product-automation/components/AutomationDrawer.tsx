@@ -211,7 +211,7 @@ export function resolveDeliveryCouponIds(configuredIds: string[] | undefined, bo
   if (visibleBound.length > 0) return visibleBound;
   const visibleConfigured = configured.filter((id) => visibleIds.has(id));
   if (visibleConfigured.length > 0) return visibleConfigured;
-  return configured;
+  return [];
 }
 
 export function resolveGiftCouponIds(configuredIds: string[] | undefined, boundCouponIds: string[], pickerCoupons: AutomationCoupon[]): string[] {
@@ -221,7 +221,7 @@ export function resolveGiftCouponIds(configuredIds: string[] | undefined, boundC
   if (visibleConfigured.length > 0) return visibleConfigured;
   if (configured.length === 0) return [];
   const visibleBound = [...new Set(boundCouponIds.map(String).map((value) => value.trim()).filter((id) => visibleIds.has(id)))];
-  return configured.length === 1 && visibleBound.length === 1 ? visibleBound : configured;
+  return configured.length === 1 && visibleBound.length === 1 ? visibleBound : [];
 }
 
 export function buildValidatedAutomationUpdate(draft: ProductAutomationConfig): ProductAutomationUpdate {

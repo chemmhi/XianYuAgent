@@ -32,8 +32,20 @@ export class ProductAutomationService {
     if (!product) throw new ServiceError(404, 'NOT_FOUND', 'product not found');
     const current = await this.store.getProductAutomation(adminId, productId);
     if (current) {
-      const config = normalizeStoredConfig(current.config);
-      return { ...current, config: await this.publicizeCouponIds(adminId, config), product: { id: product.id, accountId: product.accountId, title: product.title } };
+      const sanitized = await this.sanitizeCouponReferences(adminId, product.accountId, normalizeStoredConfig(current.config));
+      if (!sanitized.changed) return { ...current, config: sanitized.config, product: { id: product.id, accountId: product.accountId, title: product.title } };
+      try {
+        const repaired = await this.store.updateProductAutomation({ adminId, productId, expectedConfigVersion: current.configVersion, config: sanitized.config, configDigest: digestJson(sanitized.config), syncCouponBindings: true });
+        if (repaired) return { ...repaired, config: sanitized.config, product: { id: product.id, accountId: product.accountId, title: product.title } };
+      } catch (error) {
+        if (!isAutomationVersionConflict(error)) throw error;
+        const latest = await this.store.getProductAutomation(adminId, productId);
+        if (latest) {
+          const latestSanitized = await this.sanitizeCouponReferences(adminId, product.accountId, normalizeStoredConfig(latest.config));
+          return { ...latest, config: latestSanitized.config, product: { id: product.id, accountId: product.accountId, title: product.title } };
+        }
+      }
+      return { ...current, config: sanitized.config, product: { id: product.id, accountId: product.accountId, title: product.title } };
     }
     const now = new Date().toISOString();
     const config = defaultProductAutomationConfig();
@@ -44,12 +56,13 @@ export class ProductAutomationService {
     const product = await this.requireProduct(input.adminId, input.productId);
     const expectedConfigVersion = parseVersion(input.expectedConfigVersion);
     const current = await this.store.getProductAutomation(input.adminId, product.id);
-    const { config, syncCouponBindings } = await this.applyConfigPatch(input.adminId, product, current ? normalizeStoredConfig(current.config) : defaultProductAutomationConfig(), input.config);
+    const base = current ? (await this.sanitizeCouponReferences(input.adminId, product.accountId, normalizeStoredConfig(current.config))).config : defaultProductAutomationConfig();
+    const { config, syncCouponBindings } = await this.applyConfigPatch(input.adminId, product, base, input.config);
     try {
       const saved = await this.store.updateProductAutomation({ adminId: input.adminId, productId: product.id, expectedConfigVersion, config, configDigest: digestJson(config), syncCouponBindings });
       if (!saved) throw new ServiceError(404, 'NOT_FOUND', 'product not found');
       await this.audit({ actorId: input.adminId, action: 'product.automation.updated', targetRef: product.id, requestId: input.requestId, traceId: input.traceId, payload: { configVersion: saved.configVersion, rules: enabledRules(config) }, accountId: product.accountId });
-      return { ...saved, config: await this.publicizeCouponIds(input.adminId, saved.config) };
+      return { ...saved, config: await this.publicizeCouponIds(input.adminId, product.accountId, saved.config) };
     } catch (error) {
       throw mapAutomationStoreError(error);
     }
@@ -66,7 +79,8 @@ export class ProductAutomationService {
     let syncCouponBindings = false;
     for (const product of products) {
       const current = await this.store.getProductAutomation(input.adminId, product.id);
-      const result = await this.applyConfigPatch(input.adminId, product, current ? normalizeStoredConfig(current.config) : defaultProductAutomationConfig(), input.config);
+      const base = current ? (await this.sanitizeCouponReferences(input.adminId, product.accountId, normalizeStoredConfig(current.config))).config : defaultProductAutomationConfig();
+      const result = await this.applyConfigPatch(input.adminId, product, base, input.config);
       configByProductId[product.id] = result.config;
       configDigests[product.id] = digestJson(result.config);
       syncCouponBindings = syncCouponBindings || result.syncCouponBindings;
@@ -74,7 +88,7 @@ export class ProductAutomationService {
     try {
       const result = await this.store.updateProductAutomationsBatch({ adminId: input.adminId, productIds, expectedConfigVersions, configByProductId, configDigests, syncCouponBindingsByProduct: Object.fromEntries(productIds.map((productId) => [productId, syncCouponBindings])) });
       await this.audit({ actorId: input.adminId, action: 'product.automation.batch_updated', targetRef: `batch:${productIds.length}`, requestId: input.requestId, traceId: input.traceId, payload: { productIds, configVersion: result.items.map((item) => ({ productId: item.productId, version: item.configVersion })), rules: Object.fromEntries(productIds.map((productId) => [productId, enabledRules(configByProductId[productId]!)])) }, accountId });
-      return { ...result, items: await Promise.all(result.items.map(async (item) => ({ ...item, config: await this.publicizeCouponIds(input.adminId, item.config) }))) };
+      return { ...result, items: await Promise.all(result.items.map(async (item) => ({ ...item, config: await this.publicizeCouponIds(input.adminId, accountId, item.config) }))) };
     } catch (error) {
       throw mapAutomationStoreError(error);
     }
@@ -92,15 +106,36 @@ export class ProductAutomationService {
    * Storage may still contain legacy UUID references, so normalize only at
    * the service boundary and keep the persistence adapter free to use UUIDs.
    */
-  private async publicizeCouponIds(adminId: string, config: ProductAutomationConfig): Promise<ProductAutomationConfig> {
+  private async publicizeCouponIds(adminId: string, accountId: string, config: ProductAutomationConfig): Promise<ProductAutomationConfig> {
+    return (await this.sanitizeCouponReferences(adminId, accountId, config)).config;
+  }
+
+  /**
+   * Remove legacy references to missing or unavailable coupon batches before
+   * exposing a config to the UI or using it as the base for an update.
+   * Persisted configs may contain internal UUIDs or public sequence ids, so
+   * every surviving reference is converted back to the stable public id.
+   */
+  private async sanitizeCouponReferences(adminId: string, accountId: string, config: ProductAutomationConfig): Promise<{ config: ProductAutomationConfig; changed: boolean }> {
     const next = structuredClone(config);
+    let changed = false;
     for (const key of ['paidAutoDelivery', 'reviewGift'] as const) {
-      next[key].couponBatchIds = await Promise.all((next[key].couponBatchIds ?? []).map(async (batchId) => {
+      const configuredIds = [...new Set((next[key].couponBatchIds ?? []).map((batchId) => String(batchId).trim()).filter(Boolean))];
+      const resolvedIds: string[] = [];
+      for (const batchId of configuredIds) {
         const batch = await this.store.getCouponBatch(adminId, batchId);
-        return batch?.sequenceId ?? batchId;
-      }));
+        if (!batch || batch.accountId !== accountId || batch.status !== 'active') continue;
+        const publicId = String(batch.sequenceId ?? batch.id);
+        if (!resolvedIds.includes(publicId)) resolvedIds.push(publicId);
+      }
+      if (configuredIds.length !== resolvedIds.length || configuredIds.some((batchId, index) => batchId !== resolvedIds[index])) changed = true;
+      next[key].couponBatchIds = resolvedIds;
+      if (resolvedIds.length === 0 && next[key].enabled) {
+        next[key].enabled = false;
+        changed = true;
+      }
     }
-    return next;
+    return { config: next, changed };
   }
 
   private async applyConfigPatch(adminId: string, product: ProductRecord, base: ProductAutomationConfig, input: unknown): Promise<{ config: ProductAutomationConfig; syncCouponBindings: boolean }> {
@@ -111,7 +146,8 @@ export class ProductAutomationService {
     if (hasRule(source, 'paidAutoDelivery')) {
       const paid = normalizePaidRule(source.paidAutoDelivery, base.paidAutoDelivery);
       if (paid.enabled && paid.couponBatchIds.length === 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'paidAutoDelivery requires at least one coupon batch');
-      await this.validateCouponBatches(adminId, product, [{ batchIds: paid.couponBatchIds, requireActive: paid.enabled }]);
+      const canonicalIds = await this.validateCouponBatches(adminId, product, [{ batchIds: paid.couponBatchIds, requireActive: paid.enabled }]);
+      paid.couponBatchIds = [...new Set(paid.couponBatchIds.map((batchId) => canonicalIds.get(batchId) ?? batchId))];
       next.paidAutoDelivery = paid;
       syncCouponBindings = true;
     }
@@ -119,7 +155,8 @@ export class ProductAutomationService {
     if (hasRule(source, 'reviewGift')) {
       const gift = normalizeGiftRule(source.reviewGift, base.reviewGift);
       if (gift.enabled && gift.couponBatchIds.length === 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'reviewGift requires at least one coupon batch');
-      await this.validateCouponBatches(adminId, product, [{ batchIds: gift.couponBatchIds, requireActive: gift.enabled }]);
+      const canonicalIds = await this.validateCouponBatches(adminId, product, [{ batchIds: gift.couponBatchIds, requireActive: gift.enabled }]);
+      gift.couponBatchIds = [...new Set(gift.couponBatchIds.map((batchId) => canonicalIds.get(batchId) ?? batchId))];
       next.reviewGift = gift;
       syncCouponBindings = true;
     }
@@ -127,11 +164,12 @@ export class ProductAutomationService {
     return { config: next, syncCouponBindings };
   }
 
-  private async validateCouponBatches(adminId: string, product: ProductRecord, rules: Array<{ batchIds: string[]; requireActive: boolean }>): Promise<void> {
+  private async validateCouponBatches(adminId: string, product: ProductRecord, rules: Array<{ batchIds: string[]; requireActive: boolean }>): Promise<Map<string, string>> {
     const requirements = new Map<string, boolean>();
     for (const rule of rules) {
       for (const batchId of rule.batchIds) requirements.set(batchId, Boolean(requirements.get(batchId) || rule.requireActive));
     }
+    const canonicalIds = new Map<string, string>();
     for (const [batchId, requireActive] of requirements) {
       if (!batchId.trim()) throw new ServiceError(422, 'VALIDATION_FAILED', 'couponBatchIds cannot contain empty values');
       const batch = await this.store.getCouponBatch(adminId, batchId);
@@ -139,7 +177,9 @@ export class ProductAutomationService {
       if (batch.accountId !== product.accountId) throw new ServiceError(403, 'FORBIDDEN', 'coupon batch account scope mismatch');
       if (batch.status === 'voided' || batch.status === 'closed') throw new ServiceError(409, 'CONFLICT', `coupon batch is ${batch.status}`);
       if (requireActive && batch.status !== 'active') throw new ServiceError(409, 'CONFLICT', 'coupon batch is not enabled');
+      canonicalIds.set(batchId, String(batch.sequenceId ?? batch.id));
     }
+    return canonicalIds;
   }
 }
 
@@ -541,6 +581,7 @@ function integer(value: unknown, fallback: number): number { const parsed = type
 function boundedInt(value: unknown, fallback: number, min: number, max: number): number { const parsed = integer(value, fallback); if (parsed < min || parsed > max) throw new ServiceError(422, 'VALIDATION_FAILED', `value must be between ${min} and ${max}`); return parsed; }
 function stringValue(value: unknown, field: string, max: number): string { if (typeof value !== 'string' || value.trim().length > max) throw new ServiceError(422, 'VALIDATION_FAILED', `${field} must be a string of at most ${max} characters`); return value.trim(); }
 function enabledRules(config: ProductAutomationConfig): string[] { return (Object.entries(config) as Array<[keyof ProductAutomationConfig, ProductAutomationConfig[keyof ProductAutomationConfig]]>).filter(([, rule]) => rule.enabled).map(([name]) => name); }
+function isAutomationVersionConflict(error: unknown): boolean { return error instanceof Error && error.message === 'AUTOMATION_VERSION_CONFLICT'; }
 function mapAutomationStoreError(error: unknown): ServiceError {
   const code = error instanceof Error ? error.message : String(error);
   if (code === 'ACCOUNT_SCOPE_FORBIDDEN') return new ServiceError(403, 'FORBIDDEN', 'account scope required');
