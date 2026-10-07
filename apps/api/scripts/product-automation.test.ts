@@ -155,6 +155,74 @@ test('deleting an automation coupon cleans references and keeps multi-coupon rul
   assert.equal(edited.config.unpaidAutoReprice.enabled, true);
 });
 
+test('sanitizes legacy unavailable coupon references before reading and editing a product', async () => {
+  const { store, admin, account, product, coupon, service } = await setup();
+  const voided = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: '已删除卡券', purpose: 'text' });
+  const paused = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: '已暂停卡券', purpose: 'text' });
+  await store.voidCouponBatch({ adminId: admin.id, batchId: voided.id });
+  await store.updateCouponBatch({ adminId: admin.id, batchId: paused.id, patch: { status: 'paused' } });
+
+  await store.updateProductAutomation({
+    adminId: admin.id,
+    productId: product.id,
+    expectedConfigVersion: 1,
+    config: {
+      ...defaultProductAutomationConfig(),
+      paidAutoDelivery: {
+        ...defaultProductAutomationConfig().paidAutoDelivery,
+        enabled: true,
+        couponBatchIds: [coupon.id, voided.id, paused.id, 'missing-coupon'],
+      },
+      reviewGift: {
+        ...defaultProductAutomationConfig().reviewGift,
+        enabled: true,
+        couponBatchIds: [voided.id],
+      },
+    },
+    configDigest: 'legacy-unavailable-coupons',
+    syncCouponBindings: false,
+  });
+
+  const read = await service.get(admin.id, product.id);
+  assert.deepEqual(read.config.paidAutoDelivery.couponBatchIds, [coupon.sequenceId ?? coupon.id]);
+  assert.equal(read.config.paidAutoDelivery.enabled, true);
+  assert.deepEqual(read.config.reviewGift.couponBatchIds, []);
+  assert.equal(read.config.reviewGift.enabled, false);
+
+  const edited = await service.update({
+    adminId: admin.id,
+    productId: product.id,
+    expectedConfigVersion: read.configVersion,
+    config: { unpaidAutoReprice: { enabled: true, targetPriceMinor: 990 } },
+    requestId: 'legacy-unavailable-coupons-edit',
+    traceId: 'legacy-unavailable-coupons-edit',
+  });
+  assert.equal(edited.config.unpaidAutoReprice.enabled, true);
+  assert.deepEqual(edited.config.paidAutoDelivery.couponBatchIds, [coupon.sequenceId ?? coupon.id]);
+  assert.equal(edited.config.reviewGift.enabled, false);
+});
+
+test('drops cross-account legacy coupon references without breaking automation reads', async () => {
+  const { store, admin, account, product, service } = await setup();
+  const otherAccount = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: `automation-other-${Math.random()}` });
+  const otherCoupon = await store.createCouponBatch({ adminId: admin.id, accountId: otherAccount.id, label: '其他账号卡券', purpose: 'text' });
+  await store.updateProductAutomation({
+    adminId: admin.id,
+    productId: product.id,
+    expectedConfigVersion: 1,
+    config: {
+      ...defaultProductAutomationConfig(),
+      paidAutoDelivery: { ...defaultProductAutomationConfig().paidAutoDelivery, enabled: true, couponBatchIds: [otherCoupon.id] },
+    },
+    configDigest: 'cross-account-legacy-coupon',
+    syncCouponBindings: false,
+  });
+
+  const read = await service.get(admin.id, product.id);
+  assert.deepEqual(read.config.paidAutoDelivery.couponBatchIds, []);
+  assert.equal(read.config.paidAutoDelivery.enabled, false);
+});
+
 test('disabled coupon batches cannot be bound to an enabled delivery rule', async () => {
   const { admin, product, coupon, service, store } = await setup();
   await store.updateCouponBatch({ adminId: admin.id, batchId: coupon.id, patch: { status: 'paused' } });
