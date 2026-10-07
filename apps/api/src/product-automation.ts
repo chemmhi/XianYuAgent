@@ -35,7 +35,7 @@ export class ProductAutomationService {
       const sanitized = await this.sanitizeCouponReferences(adminId, product.accountId, normalizeStoredConfig(current.config));
       if (!sanitized.changed) return { ...current, config: sanitized.config, product: { id: product.id, accountId: product.accountId, title: product.title } };
       try {
-        const repaired = await this.store.updateProductAutomation({ adminId, productId, expectedConfigVersion: current.configVersion, config: sanitized.config, configDigest: digestJson(sanitized.config), syncCouponBindings: true });
+        const repaired = await this.store.updateProductAutomation({ adminId, productId, expectedConfigVersion: current.configVersion, config: sanitized.config, configDigest: digestJson(sanitized.config), syncCouponBindings: false });
         if (repaired) return { ...repaired, config: sanitized.config, product: { id: product.id, accountId: product.accountId, title: product.title } };
       } catch (error) {
         if (!isAutomationVersionConflict(error)) throw error;
