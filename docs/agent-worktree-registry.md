@@ -181,7 +181,7 @@
 
 | root | coupon-mixed-delivery-20260925 | fix/coupon-mixed-delivery-20260925 | F:\ChenHai\Project\XianYuAgent-coupon-mixed-delivery-20260925 | Codex /root | 2026-09-25 00:09:55 +08:00 | MERGED | 961ee67 | - | 用户已明确要求合入 main；混合卡券逐批预留和四类内容发送修复已合入，保留无需邮寄批次仅用于确认发货。合并后窄验证 56/56 通过。 |
 
-| `root` | `unified-production-deploy-20261008` | `fix/unified-production-deploy-20261008` | `F:\ChenHai\Project\XianYuAgent-unified-production-deploy-20261008` | Codex `/root` | `2026-10-07 00:00:00 +08:00` | `READY_FOR_MERGE` | `-` | `-` | 用户已确认将现有 settings/design 改动与部署修复一并提交到 main；部署回归、API/Web typecheck、API/Web build 已通过。 |
+| `root` | `unified-production-deploy-20261008` | `fix/unified-production-deploy-20261008` | `F:\ChenHai\Project\XianYuAgent-unified-production-deploy-20261008` | Codex `/root` | `2026-10-07 00:00:00 +08:00` | `MERGED` | `333c4d660a229e7c05e7cc79b10845aeddc14f2b` | `-` | 用户确认将现有 settings/design 改动与部署修复一并提交到 main；合并后部署回归、API/Web typecheck、API/Web build 已通过。 |
 
 ## 登记维护规则
 
