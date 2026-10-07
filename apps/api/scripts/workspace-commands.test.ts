@@ -561,5 +561,5 @@ test('reconnect resumes the failed node with the persisted run context', async (
   await service.reconnectRun({ adminId: admin.id, runId: created.run.id, requestId: 'req-reconnect-context', traceId: 'trace-reconnect-context' });
 
   assert.equal(resumeInput?.resumeFromFailure, true);
-  assert.deepEqual(resumeInput?.history, [{ role: 'assistant', content: '[tool_event] 读取商品' }]);
+  assert.deepEqual(resumeInput?.history, [{ role: 'assistant', content: '[tool_event] 读取商品\n商品查询失败' }]);
 });

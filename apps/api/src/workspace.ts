@@ -117,10 +117,24 @@ export interface WorkspaceOutboxView {
 }
 
 export interface WorkspaceRuntime {
-  enqueue(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; attachments?: PiRuntimeAttachment[]; resumeFromFailure?: boolean }): void;
-  resume(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; attachments?: PiRuntimeAttachment[]; resumeFromFailure?: boolean }): Promise<void>;
+  enqueue(input: WorkspaceRuntimeInput): void;
+  resume(input: WorkspaceRuntimeInput): Promise<void>;
+  /** Continue a confirmed mutation through the model instead of finalizing locally. */
+  continueAfterConfirmation?(input: WorkspaceRuntimeInput): Promise<void>;
   cancel(runId: string): void;
   stop(): void;
+}
+
+export interface WorkspaceRuntimeInput {
+  run: RunRecord;
+  steps: StepRecord[];
+  adminId?: string;
+  sessionId?: string;
+  history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+  attachments?: PiRuntimeAttachment[];
+  resumeFromFailure?: boolean;
+  /** Continue an existing execution after a confirmed mutation result. */
+  resumeAfterConfirmation?: boolean;
 }
 
 const terminalStepStatuses = new Set<StepStatus>(['succeeded', 'partially_succeeded', 'skipped', 'cancelled']);
@@ -129,6 +143,24 @@ export function findWorkspaceExecutionStep(steps: StepRecord[]): StepRecord | un
   const ordered = [...steps].sort((left, right) => right.stepNo - left.stepNo || right.attempt - left.attempt);
   const retryable = ordered.find((step) => ['failed', 'retrying', 'running', 'executing'].includes(step.status));
   return retryable ?? ordered.find((step) => !terminalStepStatuses.has(step.status));
+}
+
+export function buildWorkspaceRuntimeHistory(messages: WorkspaceMessageRecord[], run: RunRecord): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
+  const currentRunStartSequence = messages.find((message) => message.runId === run.id && message.type === 'user_message')?.sequence;
+  return messages
+    .filter((message) => {
+      if (message.runId === run.id) return message.type !== 'user_message' && message.type !== 'final_answer';
+      if (currentRunStartSequence !== undefined) return message.sequence < currentRunStartSequence;
+      const messageCreatedAt = Date.parse(message.createdAt);
+      const runCreatedAt = Date.parse(run.createdAt);
+      return !Number.isFinite(runCreatedAt) || !Number.isFinite(messageCreatedAt) || messageCreatedAt <= runCreatedAt;
+    })
+    .map((message) => ({
+      role: message.type === 'user_message' ? 'user' as const : 'assistant' as const,
+      content: message.type === 'tool_event'
+        ? `[${message.type}] ${message.summary ? `${message.summary}\n` : ''}${message.content}`
+        : `[${message.type}] ${message.summary ?? message.content}`,
+    }));
 }
 
 /**
@@ -173,7 +205,7 @@ export class InProcessAgentRuntime implements WorkspaceRuntime {
 
   constructor(private readonly store: Store, private readonly commands?: WorkspaceCommandOrchestrator) {}
 
-  enqueue(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; attachments?: PiRuntimeAttachment[]; resumeFromFailure?: boolean }): void {
+  enqueue(input: WorkspaceRuntimeInput): void {
     if (this.stopped || this.active.has(input.run.id) || this.cancelled.has(input.run.id)) return;
     this.active.add(input.run.id);
     setTimeout(() => {
@@ -182,7 +214,7 @@ export class InProcessAgentRuntime implements WorkspaceRuntime {
     }, 0);
   }
 
-  async resume(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string; history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; attachments?: PiRuntimeAttachment[]; resumeFromFailure?: boolean }): Promise<void> {
+  async resume(input: WorkspaceRuntimeInput): Promise<void> {
     if (this.stopped || this.active.has(input.run.id) || this.cancelled.has(input.run.id)) return;
     const prepared = await prepareWorkspaceRunResume({ store: this.store, run: input.run, steps: input.steps });
     if (!prepared) return;
@@ -349,10 +381,7 @@ export class WorkspaceService {
       await this.audit({ actorId: input.adminId, action: 'workspace.run.created', targetRef: created.run.id, requestId: input.requestId, traceId: input.traceId, payload: { sessionId: input.sessionId, instructionLength: instruction.length, hasClientRunRef: Boolean(input.clientRunRef) }, accountId: input.accountId });
       await this.store.appendRunEvent({ runId: created.run.id, eventType: 'run.queued', payload: { status: 'queued', sessionId: input.sessionId, accountId: input.accountId } });
       await this.appendMessage({ adminId: input.adminId, sessionId: input.sessionId, runId: created.run.id, type: 'user_message', content: sanitizeWorkspaceInstruction(instruction) });
-      const history = (await this.store.listWorkspaceMessages(input.adminId, input.sessionId, 100))
-        .filter((message) => message.id !== undefined)
-        .slice(0, -1)
-        .map((message) => ({ role: message.type === 'user_message' ? 'user' as const : 'assistant' as const, content: `[${message.type}] ${message.summary ?? message.content}` }));
+      const history = buildWorkspaceRuntimeHistory(await this.store.listWorkspaceMessages(input.adminId, input.sessionId, 100), created.run);
       this.runtime.enqueue({ ...created, adminId: input.adminId, sessionId: input.sessionId, history, attachments: this.runAttachments.get(created.run.id) });
       return { run: this.toRunView(created.run, created.steps), duplicate: false };
     } catch (error) { throw mapWorkspaceStoreError(error); }
@@ -467,15 +496,30 @@ export class WorkspaceService {
       const workerId = `workspace-local-command:${input.bundle.run.id}`;
       const claimed = await this.store.claimAutoReplyOutbox({ scope: input.scope, workerId, limit: 1, leaseMs: 60_000, id: queued.record.id });
       if (!claimed[0] || !(await this.store.completeAutoReplyOutbox({ id: queued.record.id, workerId, externalOutcome: 'known_success', externalMessageRef: input.confirmation.action }))) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'workspace command outbox completion failed');
+      await this.audit({ actorId: input.input.adminId, action: `workspace.${input.confirmation.action}.completed`, targetRef: input.confirmation.id, requestId: input.requestId, traceId: input.traceId, payload: { action: input.confirmation.action, outboxId: queued.record.id, result: result.data ?? {} }, accountId: input.bundle.run.accountId });
+      const latest = await this.store.getAutoReplyOutbox(input.scope, queued.record.idempotencyKey);
+      if (!latest) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'workspace command result readback failed');
+      const continued = await this.continueAfterConfirmation({
+        adminId: input.input.adminId,
+        run: input.bundle.run,
+        toolEvent: {
+          content: JSON.stringify({ ok: true, action: input.confirmation.action, status: 'succeeded', summary: result.resultSummary, output: result.outputSummary, data: safeWorkspaceResultData(result.data) }),
+          summary: result.resultSummary,
+        },
+      });
+      if (continued) {
+        await this.store.appendRunEvent({ runId: input.input.runId, eventType: 'workspace.command.completed', payload: { action: input.confirmation.action, status: 'succeeded', messageType: 'tool_event', content: result.outputSummary, summary: result.resultSummary, outboxId: queued.record.id, result: safeWorkspaceResultData(result.data) ?? {} } });
+        const continuedBundle = await this.store.getRun(input.input.adminId, input.input.runId);
+        if (!continuedBundle) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'workspace continuation reload failed');
+        return { run: this.toRunView(continuedBundle.run, continuedBundle.steps), confirmation: this.toConfirmationView(input.confirmation), outbox: this.toOutboxView(latest, input.bundle.run.id) };
+      }
       const finishedAt = new Date().toISOString();
       const updatedRun = await this.store.updateRun(input.bundle.run.id, { status: 'succeeded', finishedAt, resultSummary: result.resultSummary });
       await this.store.updateRunStep(input.step.id, { status: 'succeeded', finishedAt, outputSummary: result.outputSummary });
       await this.store.appendWorkspaceMessage({ adminId: input.input.adminId, sessionId: input.bundle.run.sessionId, runId: input.bundle.run.id, type: 'final_answer', content: result.outputSummary, summary: result.resultSummary });
-      await this.store.appendRunEvent({ runId: input.input.runId, eventType: 'workspace.command.completed', payload: { action: input.confirmation.action, status: 'succeeded', messageType: 'final_answer', content: result.outputSummary, summary: result.resultSummary, outboxId: queued.record.id, result: result.data ?? {} } });
-      await this.audit({ actorId: input.input.adminId, action: `workspace.${input.confirmation.action}.completed`, targetRef: input.confirmation.id, requestId: input.requestId, traceId: input.traceId, payload: { action: input.confirmation.action, outboxId: queued.record.id, result: result.data ?? {} }, accountId: input.bundle.run.accountId });
-      const latest = await this.store.getAutoReplyOutbox(input.scope, queued.record.idempotencyKey);
+      await this.store.appendRunEvent({ runId: input.input.runId, eventType: 'workspace.command.completed', payload: { action: input.confirmation.action, status: 'succeeded', messageType: 'final_answer', content: result.outputSummary, summary: result.resultSummary, outboxId: queued.record.id, result: safeWorkspaceResultData(result.data) ?? {} } });
       const latestBundle = await this.store.getRun(input.input.adminId, input.input.runId);
-      if (!updatedRun || !latest) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'workspace command result readback failed');
+      if (!updatedRun) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'workspace command result writeback failed');
       return { run: this.toRunView(updatedRun, latestBundle?.steps ?? input.bundle.steps), confirmation: this.toConfirmationView(input.confirmation), outbox: this.toOutboxView(latest, input.bundle.run.id) };
     } catch (error) {
       const finishedAt = new Date().toISOString();
@@ -503,15 +547,30 @@ export class WorkspaceService {
       const workerId = `workspace-local-coupon:${input.bundle.run.id}`;
       const claimed = await this.store.claimAutoReplyOutbox({ scope: input.scope, workerId, limit: 1, leaseMs: 60_000, id: queued.record.id });
       if (!claimed[0] || !(await this.store.completeAutoReplyOutbox({ id: queued.record.id, workerId, externalOutcome: 'known_success', externalMessageRef: batchId }))) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'coupon outbox completion failed');
-      const finishedAt = new Date().toISOString();
-      const updatedRun = await this.store.updateRun(input.bundle.run.id, { status: 'succeeded', finishedAt, resultSummary: `卡券“${label}”已创建` });
-      await this.store.updateRunStep(input.step.id, { status: 'succeeded', finishedAt, outputSummary: `卡券批次已创建（${purpose}）` });
-      await this.store.appendWorkspaceMessage({ adminId: input.input.adminId, sessionId: input.bundle.run.sessionId, runId: input.bundle.run.id, type: 'final_answer', content: `卡券“${label}”已创建，类型：${purpose}。`, summary: `卡券已创建：${label}` });
       await this.store.appendRunEvent({ runId: input.input.runId, eventType: 'workspace.coupon.created', payload: { status: 'succeeded', batchId, label, purpose, itemCount: items.length, redacted: true } });
       await this.store.appendRunEvent({ runId: input.input.runId, eventType: 'workspace.outbox.completed', payload: { outboxId: queued.record.id, status: 'succeeded', operation: 'coupon_create', externalOutcome: 'known_success' } });
       await this.audit({ actorId: input.input.adminId, action: 'workspace.coupon.created', targetRef: batchId, requestId: input.requestId, traceId: input.traceId, payload: { purpose, itemCount: items.length, redacted: true }, accountId: input.bundle.run.accountId });
       const latest = await this.store.getAutoReplyOutbox(input.scope, queued.record.idempotencyKey);
-      if (!updatedRun || !latest) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'coupon result readback failed');
+      if (!latest) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'coupon result readback failed');
+      const resultSummary = `卡券“${label}”已创建`;
+      const continued = await this.continueAfterConfirmation({
+        adminId: input.input.adminId,
+        run: input.bundle.run,
+        toolEvent: {
+          content: JSON.stringify({ ok: true, action: 'coupon_create', status: 'succeeded', batchId, label, purpose, itemCount: items.length, redacted: true }),
+          summary: resultSummary,
+        },
+      });
+      if (continued) {
+        const continuedBundle = await this.store.getRun(input.input.adminId, input.input.runId);
+        if (!continuedBundle) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'workspace continuation reload failed');
+        return { run: this.toRunView(continuedBundle.run, continuedBundle.steps), confirmation: this.toConfirmationView(input.confirmation), outbox: this.toOutboxView(latest, input.bundle.run.id) };
+      }
+      const finishedAt = new Date().toISOString();
+      const updatedRun = await this.store.updateRun(input.bundle.run.id, { status: 'succeeded', finishedAt, resultSummary });
+      await this.store.updateRunStep(input.step.id, { status: 'succeeded', finishedAt, outputSummary: `卡券批次已创建（${purpose}）` });
+      await this.store.appendWorkspaceMessage({ adminId: input.input.adminId, sessionId: input.bundle.run.sessionId, runId: input.bundle.run.id, type: 'final_answer', content: `${resultSummary}，类型：${purpose}。`, summary: resultSummary });
+      if (!updatedRun) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'coupon result writeback failed');
       const latestBundle = await this.store.getRun(input.input.adminId, input.input.runId);
       return { run: this.toRunView(updatedRun, latestBundle?.steps ?? input.bundle.steps), confirmation: this.toConfirmationView(input.confirmation), outbox: this.toOutboxView(latest, input.bundle.run.id) };
     } catch (error) {
@@ -534,15 +593,30 @@ export class WorkspaceService {
       const workerId = `workspace-local-agent-settings:${input.bundle.run.id}`;
       const claimed = await this.store.claimAutoReplyOutbox({ scope: input.scope, workerId, limit: 1, leaseMs: 60_000, id: queued.record.id });
       if (!claimed[0] || !(await this.store.completeAutoReplyOutbox({ id: queued.record.id, workerId, externalOutcome: 'known_success', externalMessageRef: `${input.bundle.run.accountId}:v${updated.configVersion}` }))) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'agent settings outbox completion failed');
-      const finishedAt = new Date().toISOString();
-      const updatedRun = await this.store.updateRun(input.bundle.run.id, { status: 'succeeded', finishedAt, resultSummary: `自动回复 Agent 配置已更新（v${updated.configVersion}）` });
-      await this.store.updateRunStep(input.step.id, { status: 'succeeded', finishedAt, outputSummary: `自动回复 Agent 配置已更新（v${updated.configVersion}）` });
-      await this.store.appendWorkspaceMessage({ adminId: input.input.adminId, sessionId: input.bundle.run.sessionId, runId: input.bundle.run.id, type: 'final_answer', content: `自动回复 Agent 配置已更新，当前版本 v${updated.configVersion}。Prompt 原文不会显示在 Workspace。`, summary: '自动回复 Agent 配置已更新' });
       await this.store.appendRunEvent({ runId: input.input.runId, eventType: 'workspace.agent_settings.updated', payload: { status: 'succeeded', configVersion: updated.configVersion, changedFields: Object.keys(patch), redacted: true } });
       await this.store.appendRunEvent({ runId: input.input.runId, eventType: 'workspace.outbox.completed', payload: { outboxId: queued.record.id, status: 'succeeded', operation: 'agent_settings_update', externalOutcome: 'known_success' } });
       await this.audit({ actorId: input.input.adminId, action: 'workspace.agent_settings.updated', targetRef: `${input.bundle.run.accountId}:v${updated.configVersion}`, requestId: input.requestId, traceId: input.traceId, payload: { configVersion: updated.configVersion, changedFields: Object.keys(patch), redacted: true }, accountId: input.bundle.run.accountId });
       const latest = await this.store.getAutoReplyOutbox(input.scope, queued.record.idempotencyKey);
-      if (!updatedRun || !latest) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'agent settings result readback failed');
+      if (!latest) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'agent settings result readback failed');
+      const resultSummary = `自动回复 Agent 配置已更新（v${updated.configVersion}）`;
+      const continued = await this.continueAfterConfirmation({
+        adminId: input.input.adminId,
+        run: input.bundle.run,
+        toolEvent: {
+          content: JSON.stringify({ ok: true, action: 'agent_settings_update', status: 'succeeded', configVersion: updated.configVersion, changedFields: Object.keys(patch), redacted: true }),
+          summary: resultSummary,
+        },
+      });
+      if (continued) {
+        const continuedBundle = await this.store.getRun(input.input.adminId, input.input.runId);
+        if (!continuedBundle) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'workspace continuation reload failed');
+        return { run: this.toRunView(continuedBundle.run, continuedBundle.steps), confirmation: this.toConfirmationView(input.confirmation), outbox: this.toOutboxView(latest, input.bundle.run.id) };
+      }
+      const finishedAt = new Date().toISOString();
+      const updatedRun = await this.store.updateRun(input.bundle.run.id, { status: 'succeeded', finishedAt, resultSummary });
+      await this.store.updateRunStep(input.step.id, { status: 'succeeded', finishedAt, outputSummary: resultSummary });
+      await this.store.appendWorkspaceMessage({ adminId: input.input.adminId, sessionId: input.bundle.run.sessionId, runId: input.bundle.run.id, type: 'final_answer', content: `自动回复 Agent 配置已更新，当前版本 v${updated.configVersion}。Prompt 原文不会显示在 Workspace。`, summary: resultSummary });
+      if (!updatedRun) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'agent settings result writeback failed');
       const latestBundle = await this.store.getRun(input.input.adminId, input.input.runId);
       return { run: this.toRunView(updatedRun, latestBundle?.steps ?? input.bundle.steps), confirmation: this.toConfirmationView(input.confirmation), outbox: this.toOutboxView(latest, input.bundle.run.id) };
     } catch (error) {
@@ -601,25 +675,32 @@ export class WorkspaceService {
   async reconnectRun(input: { adminId: string; runId: string; requestId: string; traceId: string }): Promise<WorkspaceRunView> {
     const bundle = await this.store.getRun(input.adminId, input.runId);
     if (!bundle) throw new ServiceError(404, 'NOT_FOUND', 'run not found');
-    const runCreatedAt = Date.parse(bundle.run.createdAt);
     const sessionMessages = await this.store.listWorkspaceMessages(input.adminId, bundle.run.sessionId, 100);
-    const currentRunStartSequence = sessionMessages.find((message) => message.runId === bundle.run.id && message.type === 'user_message')?.sequence;
-    const history = sessionMessages
-      .filter((message) => {
-        if (message.runId === bundle.run.id) return message.type !== 'user_message' && message.type !== 'final_answer';
-        if (currentRunStartSequence !== undefined) return message.sequence < currentRunStartSequence;
-        const messageCreatedAt = Date.parse(message.createdAt);
-        return !Number.isFinite(runCreatedAt) || !Number.isFinite(messageCreatedAt) || messageCreatedAt <= runCreatedAt;
-      })
-      .map((message) => ({
-        role: message.type === 'user_message' ? 'user' as const : 'assistant' as const,
-        content: `[${message.type}] ${message.summary ?? message.content}`,
-      }));
+    const history = buildWorkspaceRuntimeHistory(sessionMessages, bundle.run);
     await this.runtime.resume({ run: bundle.run, steps: bundle.steps, adminId: input.adminId, sessionId: bundle.run.sessionId, history, attachments: this.runAttachments.get(input.runId), resumeFromFailure: true });
     await this.audit({ actorId: input.adminId, action: 'workspace.run.reconnected', targetRef: input.runId, requestId: input.requestId, traceId: input.traceId, payload: { previousStatus: bundle.run.status }, accountId: bundle.run.accountId });
     const latest = await this.store.getRun(input.adminId, input.runId);
     if (!latest) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'run reload failed');
     return this.toRunView(latest.run, latest.steps);
+  }
+
+  private async continueAfterConfirmation(input: { adminId: string; run: RunRecord; toolEvent: { content: string; summary: string } }): Promise<boolean> {
+    if (!this.runtime.continueAfterConfirmation) return false;
+    await this.appendMessage({ adminId: input.adminId, sessionId: input.run.sessionId, runId: input.run.id, type: 'tool_event', content: input.toolEvent.content, summary: input.toolEvent.summary });
+    const latest = await this.store.getRun(input.adminId, input.run.id);
+    if (!latest) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'workspace continuation run reload failed');
+    const sessionMessages = await this.store.listWorkspaceMessages(input.adminId, latest.run.sessionId, 100);
+    const history = buildWorkspaceRuntimeHistory(sessionMessages, latest.run);
+    await this.runtime.continueAfterConfirmation({
+      run: latest.run,
+      steps: latest.steps,
+      adminId: input.adminId,
+      sessionId: latest.run.sessionId,
+      history,
+      attachments: this.runAttachments.get(latest.run.id),
+      resumeFromFailure: true,
+    });
+    return true;
   }
 
   private async appendMessage(input: { adminId: string; sessionId: string; runId?: string; type: 'user_message' | 'reasoning_summary' | 'tool_event' | 'final_answer'; content: string; summary?: string }): Promise<void> {
@@ -675,6 +756,14 @@ async function summarizeWorkspaceSessionTitle(modelClient: ModelClient | undefin
   } catch {
     return fallback;
   } finally { clearTimeout(timeout); }
+}
+
+function safeWorkspaceResultData(data: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!data) return undefined;
+  const allowed = new Set(['action', 'batchId', 'productId', 'productTitle', 'configVersion', 'status', 'enabled', 'changed', 'changedFields', 'itemCount', 'orderNo', 'provider', 'model', 'apiKeyHint']);
+  const safeEntries = Object.entries(data).filter(([key, value]) => allowed.has(key) && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || (Array.isArray(value) && value.every((item) => typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean'))));
+  if (!safeEntries.length) return undefined;
+  return Object.fromEntries(safeEntries);
 }
 
 function mapWorkspaceStoreError(error: unknown): ServiceError {

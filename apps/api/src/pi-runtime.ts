@@ -319,6 +319,8 @@ export interface PiRuntimeEnqueueInput {
   attachments?: PiRuntimeAttachment[];
   /** Reconnect resumes the persisted run and must not duplicate its user message. */
   resumeFromFailure?: boolean;
+  /** Confirmed mutations resume the existing run without restarting it. */
+  resumeAfterConfirmation?: boolean;
 }
 
 export interface PiRuntimeAttachment {
@@ -334,6 +336,8 @@ const WORKSPACE_AGENT_SYSTEM_PROMPT = [
   '你是 Workspace Agent。请根据工具契约自主选择工具，并始终以工具返回的真实结果为依据。',
   '需要查询具体商品名称或外部编号时，优先使用 workspace_product_search，不要先加载完整商品列表。',
   '取消、下架、更新、发布、发货或其他写入操作必须使用 workspace_prepare_write，并等待用户确认；不要用 workspace_read 代替写操作。',
+  '每次收到工具结果后，必须重新对照原始用户任务逐项检查；一个写操作成功不代表整个任务完成。',
+  '只有当原始任务中的所有用户要求都已由真实工具结果确认完成时，才返回最终答复；仍有后续动作时继续规划并调用对应工具。',
   'Pi Skill 的登录状态按管理员和 Skill 持久化：已授权时复用已有状态，除非 Skill 返回 requiresLogin 或用户明确要求重新登录，否则不要再次调用 pi_skill_login。',
   '只为安装调用 pi_skill_install，只为登录调用 pi_skill_login，只能使用 Skill 明确记录的命令调用 pi_skill_exec；不要把 bash、install 等 shell 命令传给 pi_skill_exec。',
   '如果 Skill 返回 requiresLogin、unauthorized、pending_user_action 或 userActionRequired，不要重复原命令；最多发起一次登录流程，或直接返回用户需要完成的操作，然后停止工具执行。',
@@ -441,6 +445,11 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     this.enqueue({ ...input, ...prepared });
   }
 
+  async continueAfterConfirmation(input: PiRuntimeEnqueueInput): Promise<void> {
+    if (this.stopped || this.active.has(input.run.id) || this.cancelled.has(input.run.id)) return;
+    this.enqueue({ ...input, resumeAfterConfirmation: true });
+  }
+
   cancel(runId: string): void {
     this.cancelled.add(runId);
     this.active.get(runId)?.abort('user_cancelled');
@@ -456,13 +465,20 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     if (!step || this.stopped || this.cancelled.has(input.run.id)) return;
     try {
       const sessionId = input.sessionId ?? input.run.sessionId;
-      if (this.options.persistUserMessage !== false && !input.resumeFromFailure) await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'user_message', content: redactSensitiveText(input.run.instruction, this.options.outputLimit ?? 2_000, this.options.redactSecrets) });
-      const startedAt = new Date().toISOString();
-      await this.transitionRun(input.run, 'running', { startedAt });
-      await this.transitionStep(step, 'running', { startedAt });
-      await this.emit(input.run.id, 'run.started', { status: 'running' });
-      await this.emit(input.run.id, 'step.started', { stepId: step.id, status: 'running' });
-      await this.emit(input.run.id, 'runtime.started', { status: 'running', model: this.options.model, messageType: 'tool_event' });
+      const continuingAfterConfirmation = input.resumeAfterConfirmation === true;
+      if (!continuingAfterConfirmation) {
+        if (this.options.persistUserMessage !== false && !input.resumeFromFailure) await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'user_message', content: redactSensitiveText(input.run.instruction, this.options.outputLimit ?? 2_000, this.options.redactSecrets) });
+        const startedAt = new Date().toISOString();
+        await this.transitionRun(input.run, 'running', { startedAt });
+        await this.transitionStep(step, 'running', { startedAt });
+        await this.emit(input.run.id, 'run.started', { status: 'running' });
+        await this.emit(input.run.id, 'step.started', { stepId: step.id, status: 'running' });
+        await this.emit(input.run.id, 'runtime.started', { status: 'running', model: this.options.model, messageType: 'tool_event' });
+      } else {
+        if (input.run.status === 'waiting_confirmation') await this.transitionRun(input.run, 'executing');
+        if (step.status === 'waiting_confirmation') await this.transitionStep(step, 'executing');
+        await this.emit(input.run.id, 'runtime.continuation.started', { status: 'executing', model: this.options.model, messageType: 'tool_event', reason: 'confirmation_result' });
+      }
 
       const modelClient = await this.options.resolveModelClient?.({
         adminId: input.adminId ?? input.run.requestedBy,
@@ -492,9 +508,14 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
         return;
       }
 
-      const nativeWrite = this.options.workspaceCommands
+      const nativeWorkspaceStoreAvailable = typeof this.store.hasAccountScope === 'function';
+      const nativeWrite = continuingAfterConfirmation
+        ? undefined
+        : this.options.workspaceCommands
         ? await this.options.workspaceCommands.prepareWrite({ adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction, requestId: `workspace:${input.run.id}`, traceId: `workspace:${input.run.id}` })
-        : await prepareNativeWorkspaceWrite({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction });
+        : nativeWorkspaceStoreAvailable
+          ? await prepareNativeWorkspaceWrite({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction })
+          : undefined;
       if (this.stopped || signal.aborted || this.cancelled.has(input.run.id)) return;
       if (nativeWrite) {
         await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: nativeWrite.summary, summary: nativeWrite.title });
@@ -511,9 +532,13 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       await this.emit(input.run.id, 'step.executing', { stepId: step.id, status: 'executing', messageType: 'tool_event' });
       await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: '已识别为受控工作区命令，正在读取真实数据。', summary: '执行工作区命令' });
 
-      const nativeRead = this.options.workspaceCommands
+      const nativeRead = continuingAfterConfirmation
+        ? undefined
+        : this.options.workspaceCommands
         ? await this.options.workspaceCommands.execute({ adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction, requestId: `workspace:${input.run.id}`, traceId: `workspace:${input.run.id}` })
-        : await executeNativeWorkspaceRead({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction });
+        : nativeWorkspaceStoreAvailable
+          ? await executeNativeWorkspaceRead({ store: this.store, adminId: input.adminId ?? input.run.requestedBy, accountId: input.run.accountId, instruction: input.run.instruction })
+          : undefined;
       if (this.stopped || signal.aborted || this.cancelled.has(input.run.id)) return;
       if (nativeRead) {
         const sessionId = input.sessionId ?? input.run.sessionId;

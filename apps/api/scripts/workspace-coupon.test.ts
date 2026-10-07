@@ -3,7 +3,7 @@ import test from 'node:test';
 import { CouponAssetService } from '../src/coupon-assets.js';
 import { CouponService } from '../src/services.js';
 import { MemoryObjectStorage } from '../src/object-storage.js';
-import { InProcessAgentRuntime, WorkspaceService } from '../src/workspace.js';
+import { InProcessAgentRuntime, WorkspaceService, type WorkspaceRuntime } from '../src/workspace.js';
 import { MemoryStore } from '../src/store-memory.js';
 import { detectNativeWorkspaceWrite, parseNativeWorkspaceCouponCreate, prepareNativeWorkspaceWrite, sanitizeWorkspaceInstruction } from '../src/workspace-native-write.js';
 
@@ -119,4 +119,36 @@ test('workspace data coupon confirmation imports each line without exposing valu
   const detail = await coupons.get(admin.id, String(page.items[0]?.batchId));
   assert.equal(detail.items?.length, 2);
   assert.equal((await store.listWorkspaceMessages(admin.id, session.id)).some((message) => message.content.includes('CODE-001')), false);
+});
+
+test('coupon confirmation hands the result back to Pi before finalizing the run', async () => {
+  const instruction = '用“测试商品”这个商品创建一个卡券，关联商品并启动自动发货';
+  const { store, admin, account, session, created, coupons } = await fixture(instruction);
+  new InProcessAgentRuntime(store).enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+  await waitForStatus(store, admin.id, created.run.id, 'waiting_confirmation');
+  const confirmation = await store.getWorkspaceConfirmation(admin.id, created.run.id);
+  assert.ok(confirmation);
+
+  const continuationInputs: Array<{ history?: Array<{ role: string; content: string }> }> = [];
+  const runtime: WorkspaceRuntime = {
+    enqueue: () => undefined,
+    async resume() { return undefined; },
+    async continueAfterConfirmation(input) {
+      continuationInputs.push({ history: input.history });
+    },
+    cancel: () => undefined,
+    stop: () => undefined,
+  };
+  const service = new WorkspaceService(store, runtime, async () => 'audit-pi-continuation', coupons);
+  const result = await service.confirmRun({ adminId: admin.id, runId: created.run.id, expectedVersion: confirmation!.version, requestId: 'req-pi-continuation', traceId: 'trace-pi-continuation' });
+
+  assert.equal(result.run.status, 'executing');
+  assert.equal(continuationInputs.length, 1);
+  const messages = await store.listWorkspaceMessages(admin.id, session.id);
+  assert.equal(messages.some((message) => message.runId === created.run.id && message.type === 'final_answer'), false);
+  const toolEvent = messages.find((message) => message.runId === created.run.id && message.type === 'tool_event' && message.content.includes('"batchId"'));
+  assert.ok(toolEvent);
+  assert.match(toolEvent?.content ?? '', /"action":"coupon_create"/);
+  assert.match(String(continuationInputs[0]?.history?.at(-1)?.content), /batchId/);
+  assert.equal(account.id, created.run.accountId);
 });
