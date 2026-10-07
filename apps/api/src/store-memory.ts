@@ -1,7 +1,7 @@
 import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, AutoReplyProductLookup, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponAssetRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponItemRecord, CouponReservationItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, DeliveryRecord, DeliveryRecordStatus, DeliveryStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ModelProviderRoutingRecord, ModelProviderRoutingMode, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductKnowledgeBaseMessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
 import { projectAutoReplyRun } from './auto-reply-activity-projection.js';
-import { createId } from './security.js';
+import { createId, digestJson } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor, isAfterConversationCursor } from './conversation-cursor.js';
 import { decodeMessageHistoryCursor } from './message-history-cursor.js';
 import type { AgentSessionRecord, RunEventRecord, RunRecord, RunStatus, StepRecord, StepStatus, WorkspaceConfirmationRecord, WorkspaceMessageRecord, WorkspaceMessageType } from './domain.js';
@@ -10,6 +10,7 @@ import { validatePersistedAutoReplyRepairPolicyBundle } from './auto-reply-repai
 import { readAutoReplyProductDescription, readAutoReplyProductMetrics } from './auto-reply-product-metrics.js';
 import { normalizeProductCatalogSearchText, normalizeProductSearchTerms, normalizeProductSearchText, productSearchScore, splitProductSearchTerms, type AutoReplyProductSearchMode } from './auto-reply-product-search.js';
 import { splitDataContent } from './coupon-delivery.js';
+import { removeCouponBatchFromAutomationConfig } from './product-automation-coupon.js';
 
 function meaningfulOrderTitle(value: string | undefined, references: Array<string | undefined>): string | undefined {
   const title = value?.trim();
@@ -714,10 +715,27 @@ export class MemoryStore implements Store {
   async voidCouponBatch(input: { adminId: string; batchId: string }): Promise<CouponBatchRecord | undefined> {
     const batch = this.findCouponBatch(input.batchId);
     if (!batch || !(await this.hasAccountScope(input.adminId, batch.accountId))) return undefined;
-    if (batch.status === 'voided') return { ...batch };
-    batch.status = 'voided';
-    batch.version += 1;
-    batch.updatedAt = new Date().toISOString();
+    const now = new Date().toISOString();
+    if (batch.status !== 'voided') {
+      batch.status = 'voided';
+      batch.version += 1;
+      batch.updatedAt = now;
+    }
+    for (const binding of this.couponBindings.values()) {
+      if (binding.batchId === batch.id && binding.status === 'active') {
+        binding.status = 'inactive';
+        binding.updatedAt = now;
+      }
+    }
+    for (const record of this.productAutomations.values()) {
+      if (record.accountId !== batch.accountId) continue;
+      const cleaned = removeCouponBatchFromAutomationConfig(record.config, batch);
+      if (!cleaned.changed) continue;
+      record.config = cleaned.config;
+      record.configDigest = digestJson(cleaned.config);
+      record.configVersion += 1;
+      record.updatedAt = now;
+    }
     return { ...batch };
   }
   async getCouponContent(adminId: string, itemId: string): Promise<{ batch: CouponBatchRecord; item: CouponItemRecord } | undefined> {

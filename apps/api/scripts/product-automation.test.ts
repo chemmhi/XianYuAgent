@@ -3,6 +3,9 @@ import test from 'node:test';
 import { MemoryStore } from '../src/store-memory.js';
 import { ProductAutomationService, AutomationWorkflowService, PersistentAutomationExecutionLedger, type AutomationExecutionPort, type AutomationExternalResult, type AutomationOrderSnapshot, defaultProductAutomationConfig } from '../src/product-automation.js';
 import type { ProductAutomationConfig } from '../src/domain.js';
+import { CouponService } from '../src/services.js';
+import { CouponAssetService } from '../src/coupon-assets.js';
+import { MemoryObjectStorage } from '../src/object-storage.js';
 
 function result(status: AutomationExternalResult['status'], errorCode?: string, message?: string): AutomationExternalResult { return { status, errorCode, message, externalRef: status === 'succeeded' ? `ext-${Math.random().toString(16).slice(2)}` : undefined }; }
 function baseOrder(overrides: Partial<AutomationOrderSnapshot> = {}): AutomationOrderSnapshot {
@@ -110,6 +113,46 @@ test('defaults auto-confirm on and allows disabled coupon associations', async (
     traceId: 'trace-default-confirm',
   });
   assert.equal(partial.config.paidAutoDelivery.autoConfirm, true);
+});
+
+test('deleting an automation coupon cleans references and keeps multi-coupon rules enabled', async () => {
+  const { store, admin, account, product, coupon, service } = await setup();
+  const second = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: '第二张卡券', purpose: 'text' });
+  const third = await store.createCouponBatch({ adminId: admin.id, accountId: account.id, label: '第三张卡券', purpose: 'text' });
+  const initial = await service.update({
+    adminId: admin.id,
+    productId: product.id,
+    expectedConfigVersion: 1,
+    config: {
+      ...defaultProductAutomationConfig(),
+      paidAutoDelivery: { ...defaultProductAutomationConfig().paidAutoDelivery, enabled: true, couponBatchIds: [coupon.sequenceId ?? coupon.id, second.sequenceId ?? second.id] },
+      reviewGift: { ...defaultProductAutomationConfig().reviewGift, enabled: true, couponBatchIds: [third.sequenceId ?? third.id] },
+    },
+    requestId: 'req-delete-cleanup-setup',
+    traceId: 'trace-delete-cleanup-setup',
+  });
+  const coupons = new CouponService(store, async () => 'audit-delete-cleanup', new CouponAssetService(store, new MemoryObjectStorage()));
+
+  await coupons.delete({ adminId: admin.id, batchId: coupon.id, requestId: 'req-delete-multi', traceId: 'trace-delete-multi' });
+  const afterMulti = await service.get(admin.id, product.id);
+  assert.equal(afterMulti.config.paidAutoDelivery.enabled, true);
+  assert.deepEqual(afterMulti.config.paidAutoDelivery.couponBatchIds, [second.sequenceId ?? second.id]);
+  assert.equal(afterMulti.configVersion, initial.configVersion + 1);
+
+  await coupons.delete({ adminId: admin.id, batchId: third.id, requestId: 'req-delete-single', traceId: 'trace-delete-single' });
+  const afterSingle = await service.get(admin.id, product.id);
+  assert.equal(afterSingle.config.reviewGift.enabled, false);
+  assert.deepEqual(afterSingle.config.reviewGift.couponBatchIds, []);
+
+  const edited = await service.update({
+    adminId: admin.id,
+    productId: product.id,
+    expectedConfigVersion: afterSingle.configVersion,
+    config: { ...afterSingle.config, unpaidAutoReprice: { ...afterSingle.config.unpaidAutoReprice, enabled: true, targetPriceMinor: 990 } },
+    requestId: 'req-delete-edit',
+    traceId: 'trace-delete-edit',
+  });
+  assert.equal(edited.config.unpaidAutoReprice.enabled, true);
 });
 
 test('disabled coupon batches cannot be bound to an enabled delivery rule', async () => {
