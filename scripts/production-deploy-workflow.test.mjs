@@ -25,7 +25,20 @@ test('production workflow verifies the pushed SHA before deployment', () => {
   assert.match(workflow, /actual_sha=.*git rev-parse HEAD/);
   assert.match(workflow, /actual_sha.*EXPECTED_SHA/);
   assert.match(workflow, /bash scripts\/deploy-production\.sh/);
-  assert.match(workflow, /bash scripts\/deploy-production-frontend\.sh/);
+  assert.doesNotMatch(workflow, /deploy-production-frontend\.sh/);
+});
+
+test('production deploy keeps UI and API in one verified entrypoint', () => {
+  assert.match(deployScript, /build_frontend\(\)/);
+  assert.match(deployScript, /npm ci --no-audit --no-fund/);
+  assert.match(deployScript, /apps\/web\/dist/);
+  assert.match(deployScript, /npm run build:web/);
+  assert.match(deployScript, /frontend_mutation_started=1/);
+  assert.match(deployScript, /rollback_frontend\(\)/);
+  assert.match(deployScript, /wait_for_text "\$PUBLIC_BASE_URL\//);
+  assert.match(deployScript, /infra_up_args=\(-d\)/);
+  assert.doesNotMatch(deployScript, /up -d --build --force-recreate[\s\S]*postgres redis object-storage/);
+  assert.ok(deployScript.indexOf('build_frontend') < deployScript.indexOf('up -d --force-recreate api worker'));
 });
 
 test('production deploy migrates the existing volume before API and Worker startup', () => {
