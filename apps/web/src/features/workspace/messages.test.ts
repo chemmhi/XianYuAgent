@@ -85,6 +85,17 @@ describe('workspace message projection', () => {
     expect(messages.find((message) => message.content === '已识别为商品自动化命令，正在读取商品配置。')?.type).toBe('reasoning_summary');
   });
 
+  it('keeps persisted Pi reasoning summaries visible after live tool events arrive', () => {
+    const messages = buildWorkspaceMessages(run, [
+      { sequence: 2, runId: 'run-1', eventType: 'workspace.message', payload: { messageType: 'reasoning_summary', content: '已确认目标商品唯一匹配。现在读取分享命令与卡券所需字段。', summary: '核对商品并读取字段' }, createdAt: '2026-09-20T00:00:01.000Z' },
+      { sequence: 3, runId: 'run-1', eventType: 'tool.call.started', payload: { toolCallId: 'call-1', toolName: 'pi_skill_search', summary: '检索 Skill 使用说明' }, createdAt: '2026-09-20T00:00:01.100Z' },
+      { sequence: 4, runId: 'run-1', eventType: 'tool.result', payload: { toolCallId: 'call-1', toolName: 'pi_skill_search', summary: '已找到字段读取命令', result: { summary: '已找到字段读取命令', content: 'share create' } }, createdAt: '2026-09-20T00:00:01.500Z' },
+    ]);
+    const reasoning = messages.find((message) => message.type === 'reasoning_summary');
+    expect(reasoning?.content).toContain('已确认目标商品唯一匹配');
+    expect(messages.filter((message) => message.type === 'tool_event')).toHaveLength(1);
+  });
+
   it('merges tool and answer deltas without rendering provider reasoning', () => {
     const messages = buildWorkspaceMessages(run, [
       { sequence: 2, runId: 'run-1', eventType: 'reasoning.delta', payload: { streamId: 's-1', messageId: 's-1:reasoning', contentDelta: '先读取' }, createdAt: '2026-09-20T00:00:01.000Z' },
