@@ -356,13 +356,14 @@ test('rejects broad-read routing for named product lookup instructions', async (
 });
 
 test('searches a product by name through the dedicated workspace tool', async () => {
-  const product = { id: 'product-search-1', accountId: 'account-1', externalProductRef: '1082449333831', title: '视频下载及文案提取源码，包教包会', configVersion: 1 };
+  const product = { id: 'product-search-1', accountId: 'account-1', externalProductRef: '1082449333831', title: '视频下载及文案提取源码，包教包会', configVersion: 1, knowledgeBase: '完整商品知识库', attributes: { license: 'perpetual' } };
   let query = '';
   const commands = orchestrator({ products: { get: async () => product, list: async (_adminId: string, input: { keyword?: string }) => { query = input.keyword ?? ''; return { items: [product], page: 1, pageSize: 20, total: 1, totalPages: 1 }; } } });
   const result = await commands.executeModelTool('workspace_product_search', { query: product.title }, input);
   assert.equal(query, product.title);
   assert.equal(result.title, '商品搜索');
   assert.match(result.content, /视频下载及文案提取源码/);
+  assert.deepEqual((result.data as { items: unknown[] }).items[0], product);
 });
 
 test('falls back to normalized catalog matching when the product list rejects a title query', async () => {
@@ -403,7 +404,7 @@ test('returns agent workflow details without prompt or credential content', asyn
   assert.doesNotMatch(result?.content ?? '', /secret|api[_-]?key|token/i);
 });
 
-test('runs a redacted coupon confirmation through Workspace state and outbox', async () => {
+test('keeps the full coupon confirmation result in Workspace events', async () => {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: 'workspace-command-confirm@example.com', passwordHash: 'hash', displayName: 'Workspace Confirm' });
   const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'seller-confirm', displayName: 'Confirm Account' });
@@ -411,7 +412,7 @@ test('runs a redacted coupon confirmation through Workspace state and outbox', a
   const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Confirm' });
   const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: `启用卡券 ${batch.id}` });
   let updateCalls = 0;
-  const commands = orchestrator({ store, coupons: { update: async () => { updateCalls += 1; return { status: 'active', batchId: batch.id }; }, bind: async () => ({}), unbind: async () => ({}), void: async () => ({}), create: async () => ({ batchId: 'copy' }), importItems: async () => ({}) } });
+  const commands = orchestrator({ store, coupons: { update: async () => { updateCalls += 1; return { status: 'active', batchId: batch.id, metadata: { source: 'https://example.test/share/full-link' } }; }, bind: async () => ({}), unbind: async () => ({}), void: async () => ({}), create: async () => ({ batchId: 'copy' }), importItems: async () => ({}) } });
   const runtime = new InProcessAgentRuntime(store, commands);
   const service = new WorkspaceService(store, runtime, async () => 'audit', undefined, undefined, commands);
   runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
@@ -427,6 +428,8 @@ test('runs a redacted coupon confirmation through Workspace state and outbox', a
   assert.equal(result.run.status, 'succeeded');
   assert.equal(result.outbox.status, 'succeeded');
   assert.equal(updateCalls, 1);
+  const completed = (await store.listRunEvents(admin.id, created.run.id)).find((event) => event.eventType === 'workspace.command.completed');
+  assert.deepEqual((completed?.payload.result as { metadata?: unknown })?.metadata, { source: 'https://example.test/share/full-link' });
 });
 
 test('routes publish confirmation through ProductPublishService when stored assets exist', async () => {

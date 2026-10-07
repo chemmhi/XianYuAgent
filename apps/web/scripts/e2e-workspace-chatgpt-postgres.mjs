@@ -126,11 +126,24 @@ async function run() {
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   const suffix = `${Date.now()}-${process.pid}`;
   let modelCalls = 0;
+  let productId;
+  let sawFullProduct = false;
   originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     if (!String(input).includes('model.example')) return originalFetch(input, init);
     modelCalls += 1;
     const body = JSON.parse(String(init?.body ?? '{}'));
+    if (Array.isArray(body.tools) && body.tools.some((tool) => tool.function?.name === 'workspace_product_search')) {
+      const toolResult = body.messages?.find((message) => message.role === 'tool');
+      if (!toolResult) return new Response(JSON.stringify({
+        model: body.model,
+        choices: [{ message: { role: 'assistant', content: '', tool_calls: [{ id: 'e2e-product-search', type: 'function', function: { name: 'workspace_product_search', arguments: JSON.stringify({ query: 'Workspace E2E 商品' }) } }] } }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+      const product = JSON.parse(toolResult.content).data?.items?.[0];
+      assert.equal(product?.id, productId);
+      assert.equal(product?.description?.length, 2_500);
+      sawFullProduct = true;
+    }
     return new Response(JSON.stringify({
       model: body.model,
       choices: [{ message: { role: 'assistant', content: '这是 Workspace ChatGPT E2E 的确定性 AI 回复。' } }],
@@ -185,7 +198,9 @@ async function run() {
     headers: { 'content-type': 'application/json', 'Idempotency-Key': `workspace-pi-bootstrap-${suffix}` },
     body: JSON.stringify({ email: `workspace-pi-${suffix}@example.com`, password: 'password-123', displayName: 'Workspace Pi E2E' }),
   });
-  assert.equal(bootstrap.status, 200, await bootstrap.text());
+  const bootstrapBody = await bootstrap.json();
+  assert.equal(bootstrap.status, 200, JSON.stringify(bootstrapBody));
+  const adminId = bootstrapBody.data.profile.id;
   const cookie = cookiesFrom(bootstrap);
   const csrf = csrfFrom(cookie);
   assert.ok(cookie && csrf, 'bootstrap did not return session/csrf cookies');
@@ -198,6 +213,8 @@ async function run() {
   if (accountResponse.status !== 201) throw new Error(`account seed failed: ${accountResponse.status} ${await accountResponse.text()}`);
   const accountId = (await accountResponse.json()).data?.id;
   assert.ok(accountId, 'account seed did not return account id');
+  const product = await apiRuntime.store.createProduct({ adminId, accountId, title: 'Workspace E2E 商品', description: 'x'.repeat(2_500), priceMinor: 1000, status: 'published' });
+  productId = product.id;
 
   const web = spawnProcess(npm, ['--workspace', 'apps/web', 'run', 'dev', '--', '--host', '127.0.0.1', '--port', String(webPort)], {
     env: { ...process.env, VITE_API_MODE: 'live', VITE_API_BASE_URL: '', VITE_API_PROXY_TARGET: apiUrl },
@@ -241,6 +258,7 @@ async function run() {
   const browserReply = await evaluate(cdp, 'document.querySelector(".workspace-message-final")?.innerText ?? ""');
   assert.match(String(browserReply), /确定性 AI 回复/);
   assert.ok(modelCalls >= 1, 'deterministic model stub was not called');
+  assert.ok(sawFullProduct, 'model did not receive the complete product tool result');
 
   const runRow = await waitFor(async () => {
     const result = await apiRuntime.store.pool.query('select id, status, result_summary from workspace.runs where account_id=$1 order by created_at desc limit 1', [accountId]);
@@ -250,10 +268,12 @@ async function run() {
   const eventRows = await apiRuntime.store.pool.query('select event_type, payload_json from workspace.run_events where run_id=$1 order by sequence asc', [runRow.id]);
   const messageTypes = messageRows.rows.map((row) => row.message_type);
   assert.ok(messageTypes.includes('user_message'), `missing persisted user message: ${JSON.stringify(messageRows.rows)}`);
-  assert.ok(messageTypes.includes('reasoning_summary'), `missing persisted reasoning summary: ${JSON.stringify(messageRows.rows)}`);
   assert.ok(messageTypes.includes('final_answer'), `missing persisted final answer: ${JSON.stringify(messageRows.rows)}`);
   assert.ok(messageRows.rows.some((row) => row.message_type === 'final_answer' && String(row.content).includes('确定性 AI 回复')));
   const eventTypes = eventRows.rows.map((row) => row.event_type);
+  assert.ok(eventTypes.includes('workspace.execution.summary'), `missing execution summary event: ${JSON.stringify(eventTypes)}`);
+  assert.ok(eventTypes.includes('tool.result'), `missing product tool result event: ${JSON.stringify(eventTypes)}`);
+  assert.ok(!eventTypes.includes('reasoning.delta'), 'provider reasoning must not be stored as a raw event');
   assert.ok(eventTypes.includes('run.succeeded'), `missing run.succeeded event: ${JSON.stringify(eventRows.rows)}`);
   assert.ok(eventTypes.includes('workspace.message'), `missing workspace.message event: ${JSON.stringify(eventRows.rows)}`);
   assert.ok(eventTypes.includes('message.appended'), `missing message.appended event: ${JSON.stringify(eventRows.rows)}`);
@@ -266,12 +286,14 @@ async function run() {
   const browserState = await evaluate(cdp, `({
     sessionCount: document.querySelectorAll('.workspace-session-row').length,
     finalReply: document.querySelector('.workspace-message-final')?.innerText ?? '',
-    traceCount: document.querySelectorAll('.workspace-agent-trace').length,
-    collapsedTraceCount: document.querySelectorAll('.workspace-agent-trace .workspace-trace-toggle[aria-expanded="false"]').length,
+    summaryCount: document.querySelectorAll('.workspace-execution-summary').length,
+    summaryText: document.querySelector('.workspace-execution-summary')?.innerText ?? '',
+    toolCount: document.querySelectorAll('.workspace-tool-event').length,
     avatarCount: document.querySelectorAll('.workspace-message-avatar, .workspace-message-icon').length,
   })`);
-  assert.equal(browserState.traceCount, 1, `expected one merged execution trace: ${JSON.stringify(browserState)}`);
-  assert.equal(browserState.collapsedTraceCount, 1, `execution trace should be collapsed by default: ${JSON.stringify(browserState)}`);
+  assert.ok(browserState.summaryCount >= 1, `expected a visible execution summary: ${JSON.stringify(browserState)}`);
+  assert.ok(browserState.toolCount >= 1, `expected a visible product tool event: ${JSON.stringify(browserState)}`);
+  assert.match(browserState.summaryText, /分析任务|评估工具结果/);
   assert.equal(browserState.avatarCount, 0, `avatars should not render in the conversation stream: ${JSON.stringify(browserState)}`);
   console.log(JSON.stringify({
     apiStorage: 'postgres',

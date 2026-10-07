@@ -7,6 +7,7 @@ import { prepareNativeWorkspaceWrite, sanitizeWorkspaceInstruction } from './wor
 import { persistWorkspaceConfirmation } from './workspace-confirmation.js';
 import type { WorkspaceCommandOrchestrator } from './workspace-commands.js';
 import type { ModelClient, PiRuntimeAttachment } from './pi-runtime.js';
+import { buildWorkspaceCheckpoint } from './workspace-context.js';
 
 const terminalRunStatuses = new Set<RunStatus>(['succeeded', 'partially_succeeded', 'failed', 'cancelled', 'expired']);
 const runTransitions: Record<RunStatus, RunStatus[]> = {
@@ -145,10 +146,11 @@ export function findWorkspaceExecutionStep(steps: StepRecord[]): StepRecord | un
   return retryable ?? ordered.find((step) => !terminalStepStatuses.has(step.status));
 }
 
-export function buildWorkspaceRuntimeHistory(messages: WorkspaceMessageRecord[], run: RunRecord): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
+export function buildWorkspaceRuntimeHistory(messages: WorkspaceMessageRecord[], run: RunRecord, events: RunEventRecord[] = []): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
   const currentRunStartSequence = messages.find((message) => message.runId === run.id && message.type === 'user_message')?.sequence;
-  return messages
+  const history = messages
     .filter((message) => {
+      if (message.type === 'reasoning_summary' && message.summary === '模型原生推理') return false;
       if (message.runId === run.id) return message.type !== 'user_message' && message.type !== 'final_answer';
       if (currentRunStartSequence !== undefined) return message.sequence < currentRunStartSequence;
       const messageCreatedAt = Date.parse(message.createdAt);
@@ -161,6 +163,9 @@ export function buildWorkspaceRuntimeHistory(messages: WorkspaceMessageRecord[],
         ? `[${message.type}] ${message.summary ? `${message.summary}\n` : ''}${message.content}`
         : `[${message.type}] ${message.summary ?? message.content}`,
     }));
+  const checkpoint = buildWorkspaceCheckpoint(events);
+  if (checkpoint) history.push({ role: 'assistant', content: checkpoint });
+  return history;
 }
 
 /**
@@ -503,12 +508,12 @@ export class WorkspaceService {
         adminId: input.input.adminId,
         run: input.bundle.run,
         toolEvent: {
-          content: JSON.stringify({ ok: true, action: input.confirmation.action, status: 'succeeded', summary: result.resultSummary, output: result.outputSummary, data: safeWorkspaceResultData(result.data) }),
+          content: JSON.stringify({ ok: true, action: input.confirmation.action, status: 'succeeded', summary: result.resultSummary, output: result.outputSummary, data: result.data }),
           summary: result.resultSummary,
         },
       });
       if (continued) {
-        await this.store.appendRunEvent({ runId: input.input.runId, eventType: 'workspace.command.completed', payload: { action: input.confirmation.action, status: 'succeeded', messageType: 'tool_event', content: result.outputSummary, summary: result.resultSummary, outboxId: queued.record.id, result: safeWorkspaceResultData(result.data) ?? {} } });
+        await this.store.appendRunEvent({ runId: input.input.runId, eventType: 'workspace.command.completed', payload: { action: input.confirmation.action, status: 'succeeded', messageType: 'tool_event', content: result.outputSummary, summary: result.resultSummary, outboxId: queued.record.id, result: result.data ?? {} } });
         const continuedBundle = await this.store.getRun(input.input.adminId, input.input.runId);
         if (!continuedBundle) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'workspace continuation reload failed');
         return { run: this.toRunView(continuedBundle.run, continuedBundle.steps), confirmation: this.toConfirmationView(input.confirmation), outbox: this.toOutboxView(latest, input.bundle.run.id) };
@@ -517,7 +522,7 @@ export class WorkspaceService {
       const updatedRun = await this.store.updateRun(input.bundle.run.id, { status: 'succeeded', finishedAt, resultSummary: result.resultSummary });
       await this.store.updateRunStep(input.step.id, { status: 'succeeded', finishedAt, outputSummary: result.outputSummary });
       await this.store.appendWorkspaceMessage({ adminId: input.input.adminId, sessionId: input.bundle.run.sessionId, runId: input.bundle.run.id, type: 'final_answer', content: result.outputSummary, summary: result.resultSummary });
-      await this.store.appendRunEvent({ runId: input.input.runId, eventType: 'workspace.command.completed', payload: { action: input.confirmation.action, status: 'succeeded', messageType: 'final_answer', content: result.outputSummary, summary: result.resultSummary, outboxId: queued.record.id, result: safeWorkspaceResultData(result.data) ?? {} } });
+      await this.store.appendRunEvent({ runId: input.input.runId, eventType: 'workspace.command.completed', payload: { action: input.confirmation.action, status: 'succeeded', messageType: 'final_answer', content: result.outputSummary, summary: result.resultSummary, outboxId: queued.record.id, result: result.data ?? {} } });
       const latestBundle = await this.store.getRun(input.input.adminId, input.input.runId);
       if (!updatedRun) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'workspace command result writeback failed');
       return { run: this.toRunView(updatedRun, latestBundle?.steps ?? input.bundle.steps), confirmation: this.toConfirmationView(input.confirmation), outbox: this.toOutboxView(latest, input.bundle.run.id) };
@@ -676,7 +681,7 @@ export class WorkspaceService {
     const bundle = await this.store.getRun(input.adminId, input.runId);
     if (!bundle) throw new ServiceError(404, 'NOT_FOUND', 'run not found');
     const sessionMessages = await this.store.listWorkspaceMessages(input.adminId, bundle.run.sessionId, 100);
-    const history = buildWorkspaceRuntimeHistory(sessionMessages, bundle.run);
+    const history = buildWorkspaceRuntimeHistory(sessionMessages, bundle.run, await this.store.listRunEvents(input.adminId, bundle.run.id, 0));
     await this.runtime.resume({ run: bundle.run, steps: bundle.steps, adminId: input.adminId, sessionId: bundle.run.sessionId, history, attachments: this.runAttachments.get(input.runId), resumeFromFailure: true });
     await this.audit({ actorId: input.adminId, action: 'workspace.run.reconnected', targetRef: input.runId, requestId: input.requestId, traceId: input.traceId, payload: { previousStatus: bundle.run.status }, accountId: bundle.run.accountId });
     const latest = await this.store.getRun(input.adminId, input.runId);
@@ -690,7 +695,7 @@ export class WorkspaceService {
     const latest = await this.store.getRun(input.adminId, input.run.id);
     if (!latest) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'workspace continuation run reload failed');
     const sessionMessages = await this.store.listWorkspaceMessages(input.adminId, latest.run.sessionId, 100);
-    const history = buildWorkspaceRuntimeHistory(sessionMessages, latest.run);
+    const history = buildWorkspaceRuntimeHistory(sessionMessages, latest.run, await this.store.listRunEvents(input.adminId, latest.run.id, 0));
     await this.runtime.continueAfterConfirmation({
       run: latest.run,
       steps: latest.steps,
@@ -756,14 +761,6 @@ async function summarizeWorkspaceSessionTitle(modelClient: ModelClient | undefin
   } catch {
     return fallback;
   } finally { clearTimeout(timeout); }
-}
-
-function safeWorkspaceResultData(data: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
-  if (!data) return undefined;
-  const allowed = new Set(['action', 'batchId', 'productId', 'productTitle', 'configVersion', 'status', 'enabled', 'changed', 'changedFields', 'itemCount', 'orderNo', 'provider', 'model', 'apiKeyHint']);
-  const safeEntries = Object.entries(data).filter(([key, value]) => allowed.has(key) && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || (Array.isArray(value) && value.every((item) => typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean'))));
-  if (!safeEntries.length) return undefined;
-  return Object.fromEntries(safeEntries);
 }
 
 function mapWorkspaceStoreError(error: unknown): ServiceError {

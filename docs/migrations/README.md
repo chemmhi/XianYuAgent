@@ -31,3 +31,11 @@
 - Verify：`node apps/api/scripts/workspace-agent-settings-postgres-smoke.mjs`；临时 PostgreSQL 执行 `001`–`045`，配置版本、Confirmation、Outbox 成功和 Store 重开复读均通过。
 - 已有 volume：必须在目标数据库显式执行 `npm run db:migrate`，并确认 action check 已包含 `agent_settings_update` 后再开放 Workspace 配置写入；不依赖 Compose `initdb` 重放历史迁移。
 - Rollback：应用先停止新的 `agent_settings_update` Confirmation 写入并回退 API，保留历史配置版本、Confirmation、Run/Step、Outbox 和审计；DDL 回滚待 `S4-ENV-RECOVERY` 完成兼容窗口演练后执行。
+
+## 049_workspace_multi_confirmation.sql
+
+- 归属：Workspace 确认后续跑修复。前置为 `043_workspace_confirmations.sql` 与 `048_workspace_confirmation_execution_plan.sql`。
+- 内容：移除 `(run_id, step_id)` 的终身唯一约束及 active step 索引，改为同一 Run 同时最多一张 active 确认卡；已确认的历史卡继续保留，允许一个 Run 顺序执行多次受控写入。
+- Apply：`npm run db:migrate`。迁移是幂等 DDL；发布时先应用迁移再启动允许多次确认的 API。
+- Verify：`node apps/api/scripts/workspace-confirmation-postgres-smoke.mjs` 在隔离 PostgreSQL 完整迁移后，验证同一 Run/Step 第一张卡确认、第二张卡创建和最新卡回读。
+- Rollback：先停用新的多次确认写入并回退应用。已有一个 Run 多张历史卡时不可直接重建旧唯一约束；保留 049 的扩展 schema，待备份和历史数据兼容方案审定后再做 DDL 回退。

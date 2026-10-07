@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MemoryStore } from '../src/store-memory.js';
-import { buildWorkspaceModelMessages, detectWorkspaceResponseLanguage, OpenAICompatibleModelClient, PiRuntimeAdapter, type ModelClient, type ModelCompletionResult, type ModelStreamHandlers } from '../src/pi-runtime.js';
+import { buildWorkspaceModelMessages, detectWorkspaceResponseLanguage, OpenAICompatibleModelClient, PiModelClientError, PiRuntimeAdapter, type ModelClient, type ModelCompletionResult, type ModelStreamHandlers } from '../src/pi-runtime.js';
 import type { WorkspaceCommandOrchestrator } from '../src/workspace-commands.js';
 
 function sse(...events: string[]): Response {
@@ -69,7 +69,7 @@ test('Pi runtime executes model-selected workspace tools and streams results', a
   };
   const commandTool = {
     getModelTools: () => [{ type: 'function', function: { name: 'workspace_read', description: 'read', parameters: { type: 'object' } } }],
-    executeModelTool: async () => ({ kind: 'products' as const, title: '商品', summary: '读取完成', content: '工具返回商品', data: { count: 1 } }),
+    executeModelTool: async () => ({ kind: 'products' as const, title: '商品', summary: '读取完成', content: `工具返回商品${'x'.repeat(2_500)}`, data: { count: 1 } }),
   } as unknown as WorkspaceCommandOrchestrator;
   const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, model: 'stream-model' });
   runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
@@ -80,9 +80,13 @@ test('Pi runtime executes model-selected workspace tools and streams results', a
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   const events = await store.listRunEvents(admin.id, created.run.id, 0);
-  assert.ok(events.some((event) => event.eventType === 'reasoning.delta' && String(event.payload.contentDelta).includes('读取')));
+  assert.ok(events.some((event) => event.eventType === 'workspace.execution.summary' && event.payload.summary === '分析任务'));
+  assert.ok(events.some((event) => event.eventType === 'workspace.execution.summary' && event.payload.content === '读取完成'));
+  assert.ok(!events.some((event) => event.eventType === 'reasoning.delta'));
   assert.ok(events.some((event) => event.eventType === 'tool.call.started' && event.payload.toolName === 'workspace_read'));
   assert.ok(events.some((event) => event.eventType === 'tool.result' && event.payload.status === 'succeeded'));
+  assert.ok(events.some((event) => event.eventType === 'tool.result' && String((event.payload.result as { content?: string }).content).length > 2_000));
+  assert.ok(requests[1]?.messages.some((message) => message.role === 'tool' && String(message.content).length > 2_000));
   assert.ok(events.some((event) => event.eventType === 'assistant.delta' && String(event.payload.contentDelta).includes('商品读取完成')));
   assert.match(String(requests[0]?.messages.find((message) => message.role === 'system')?.content), /简体中文/);
   assert.match(String(requests[0]?.messages.find((message) => message.role === 'system')?.content), /思考摘要/);
@@ -153,6 +157,89 @@ test('Pi runtime rechecks the original task after each tool result before finali
   assert.match(String(requests[0]?.messages.find((message) => message.role === 'system')?.content), /一个写操作成功不代表整个任务完成/);
   assert.ok((await store.listRunEvents(admin.id, created.run.id)).some((event) => event.eventType === 'run.succeeded'));
   runtime.stop();
+});
+
+test('Pi runtime queues confirmation continuation while the previous round is still closing', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'confirmation-race@example.com', passwordHash: 'hash', displayName: 'Confirmation Race' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'confirmation-race' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Confirmation Race' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '创建卡券后继续关联商品' });
+  const originalAppend = store.appendRunEvent.bind(store);
+  let releaseClosing!: () => void;
+  const closing = new Promise<void>((resolve) => { releaseClosing = resolve; });
+  store.appendRunEvent = async (input) => {
+    if (input.eventType === 'stream.completed' && input.payload.status === 'waiting_confirmation') await closing;
+    return originalAppend(input);
+  };
+  let rounds = 0;
+  const model: ModelClient = {
+    async stream() {
+      rounds += 1;
+      if (rounds === 1) return { content: '', model: 'race-model', toolCalls: [{ id: 'create-coupon', type: 'function' as const, function: { name: 'workspace_prepare_write', arguments: '{}' } }] };
+      return { content: '已收到卡券创建结果，继续处理商品关联', model: 'race-model' };
+    },
+    async complete() { return { content: 'unused', model: 'unused' }; },
+  };
+  const commandTool = {
+    getModelTools: () => [{ type: 'function', function: { name: 'workspace_prepare_write', description: 'write', parameters: { type: 'object' } } }],
+    executeModelTool: async () => ({ kind: 'write_plan' as const, title: '创建卡券', summary: '等待确认', content: '等待确认', plan: { kind: 'coupon_create', action: 'coupon_create', title: '创建卡券', summary: '等待确认', content: '等待确认', policyRef: 'workspace.coupon_create.confirm', expiresAt: new Date(Date.now() + 60_000).toISOString(), manifest: { label: '03 PPT Master' } } }),
+  } as unknown as WorkspaceCommandOrchestrator;
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, model: 'race-model' });
+  try {
+    runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+    const deadline = Date.now() + 2_000;
+    let waiting = await store.getRun(admin.id, created.run.id);
+    while (Date.now() < deadline && waiting?.run.status !== 'waiting_confirmation') {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      waiting = await store.getRun(admin.id, created.run.id);
+    }
+    assert.equal(waiting?.run.status, 'waiting_confirmation');
+    await runtime.continueAfterConfirmation({ adminId: admin.id, sessionId: session.id, run: waiting.run, steps: waiting.steps, history: [{ role: 'assistant', content: '卡券已确认 batchId=18' }] });
+    releaseClosing();
+    while (Date.now() < deadline && (await store.getRun(admin.id, created.run.id))?.run.status !== 'succeeded') await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal((await store.getRun(admin.id, created.run.id))?.run.status, 'succeeded');
+    assert.equal(rounds, 2);
+  } finally {
+    releaseClosing();
+    runtime.stop();
+  }
+});
+
+test('Pi runtime compacts and retries after the model rejects an oversized context', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'context-retry@example.com', passwordHash: 'hash', displayName: 'Context Retry' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'context-retry' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Context Retry' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '完成卡券关联，保留 batchId=18' });
+  let attempts = 0;
+  const requests: string[] = [];
+  const model: ModelClient = {
+    async stream(input) {
+      requests.push(JSON.stringify(input.messages));
+      attempts += 1;
+      if (attempts === 1) throw new PiModelClientError('MODEL_HTTP_ERROR', 'context length exceeded', 413);
+      return { content: '已恢复任务并继续执行', model: 'context-retry-model' };
+    },
+    async complete() { return { content: 'unused', model: 'unused' }; },
+  };
+  const commandTool = {
+    getModelTools: () => [],
+    executeModelTool: async () => { throw new Error('unexpected tool call'); },
+  } as unknown as WorkspaceCommandOrchestrator;
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, model: 'context-retry-model' });
+  try {
+    runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps, history: [{ role: 'assistant', content: `已找到商品 productId=product-1，分享链接 https://example.test/share/critical-link。${'x'.repeat(8_000)}` }] });
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && (await store.getRun(admin.id, created.run.id))?.run.status !== 'succeeded') await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal((await store.getRun(admin.id, created.run.id))?.run.status, 'succeeded');
+    assert.equal(attempts, 2);
+    assert.ok(requests[1]!.length < requests[0]!.length);
+    assert.match(requests[1]!, /batchId=18/);
+    assert.match(requests[1]!, /productId=product-1/);
+    assert.match(requests[1]!, /critical-link/);
+    assert.ok((await store.listRunEvents(admin.id, created.run.id)).some((event) => event.eventType === 'context.compacted'));
+  } finally { runtime.stop(); }
 });
 
 test('Workspace Pi runtime does not reuse the Auto-Reply eight-call budget', async () => {

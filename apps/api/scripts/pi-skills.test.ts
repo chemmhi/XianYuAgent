@@ -28,6 +28,7 @@ test('installs, lists, authorizes, injects, and executes a local Pi skill archiv
     await writeFile(join(skillRoot, 'scripts', 'main.cjs'), [
       "const args = process.argv.slice(2);",
       "if (args[0] === 'login' && args[2] === 'secret-token') { console.log(JSON.stringify({ code: 0, msg: 'authorized' })); process.exit(0); }",
+      "if (args[0] === 'long') { console.log('x'.repeat(40_000)); process.exit(0); }",
       "console.log(JSON.stringify({ code: 0, msg: 'ran', args }));",
     ].join('\n'));
     const archive = join(fixtureRoot, 'demo-skill.zip');
@@ -49,6 +50,10 @@ test('installs, lists, authorizes, injects, and executes a local Pi skill archiv
     const execution = await manager.execute({ adminId: 'admin/1', skillId: 'demo-skill', command: 'search', args: ['--keyword', 'hello'] });
     assert.equal(execution.code, 0);
     assert.deepEqual(execution.parsed, { code: 0, msg: 'ran', args: ['search', '--keyword', 'hello'] });
+    const publicLink = 'https://example.test/share/complete-public-link';
+    const toolResult = await manager.executeModelTool('pi_skill_exec', { skillId: 'demo-skill', command: 'share', args: [publicLink] }, { adminId: 'admin/1', accountId: 'account-1', instruction: '创建网盘公开分享', requestId: 'skill-public-link', traceId: 'skill-public-link' });
+    assert.ok(toolResult.content.includes(publicLink));
+    assert.equal((await manager.execute({ adminId: 'admin/1', skillId: 'demo-skill', command: 'long' })).stdout.trim().length, 40_000);
   } finally {
     await rm(fixtureRoot, { recursive: true, force: true });
   }

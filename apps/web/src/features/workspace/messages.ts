@@ -155,8 +155,9 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
   const seenReasoningKeys = new Set<string>();
   let finalAnswerRendered = false;
   const hasPersistedFinalAnswer = events.some((event) => event.eventType !== 'assistant.delta' && messageType(event) === 'final_answer');
-  const hasStreamingFinalAnswer = events.some((event) => event.eventType === 'assistant.delta' && typeof event.payload.contentDelta === 'string' && event.payload.contentDelta.trim());
-  mergeStreamingEvents(events, { ignoreAssistantDeltas: hasPersistedFinalAnswer }).sort((left, right) => left.sequence - right.sequence).forEach((event) => {
+  const toolStreams = new Set(events.filter((event) => event.eventType.startsWith('tool.call.')).map((event) => event.payload.streamId).filter((value): value is string => typeof value === 'string'));
+  const hasStreamingFinalAnswer = events.some((event) => event.eventType === 'assistant.delta' && !toolStreams.has(String(event.payload.streamId ?? '')) && typeof event.payload.contentDelta === 'string' && event.payload.contentDelta.trim());
+  mergeStreamingEvents(events, { ignoreAssistantDeltas: hasPersistedFinalAnswer, toolStreams }).sort((left, right) => left.sequence - right.sequence).forEach((event) => {
     if (!shouldProjectEvent(event)) return;
     if (event.eventType === 'workspace.message') return;
     if (event.eventType === 'message.appended' && messageType(event) === 'tool_event') return;
@@ -218,7 +219,7 @@ export function buildWorkspaceMessages(run: WorkspaceRunVM, events: WorkspaceRun
   });
 }
 
-function mergeStreamingEvents(events: WorkspaceRunEventVM[], options: { ignoreAssistantDeltas?: boolean } = {}): WorkspaceRunEventVM[] {
+function mergeStreamingEvents(events: WorkspaceRunEventVM[], options: { ignoreAssistantDeltas?: boolean; toolStreams?: Set<string> } = {}): WorkspaceRunEventVM[] {
   const passthrough: WorkspaceRunEventVM[] = [];
   const streams = new Map<string, WorkspaceRunEventVM>();
   const append = (event: WorkspaceRunEventVM, type: WorkspaceMessageVM['type'], content: string, messageId: string, summary?: string) => {
@@ -243,7 +244,7 @@ function mergeStreamingEvents(events: WorkspaceRunEventVM[], options: { ignoreAs
       return;
     }
     if (event.eventType === 'assistant.delta') {
-      if (options.ignoreAssistantDeltas) return;
+      if (options.ignoreAssistantDeltas || (typeof payload.streamId === 'string' && options.toolStreams?.has(payload.streamId))) return;
       const messageId = typeof payload.messageId === 'string' ? payload.messageId : `${event.runId}:assistant`;
       append(event, 'final_answer', typeof payload.contentDelta === 'string' ? payload.contentDelta : '', messageId);
       return;

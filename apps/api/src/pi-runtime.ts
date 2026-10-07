@@ -6,6 +6,7 @@ import type { WorkspaceCommandInput, WorkspaceCommandOrchestrator, WorkspaceMode
 import { persistWorkspaceConfirmation } from './workspace-confirmation.js';
 import { ModelClientService } from './model-client.js';
 import type { PiSkillManager } from './pi-skills.js';
+import { compactWorkspaceModelMessages } from './workspace-context.js';
 
 export const DEFAULT_PI_BASE_URL = 'https://api.openai.com/v1';
 export const DEFAULT_PI_MODEL = 'gpt-4o-mini';
@@ -300,7 +301,6 @@ export interface PiRuntimeAdapterOptions {
   model?: string;
   /** Independent Workspace tool-loop safety budget. Zero or less means no round cap. */
   maxToolRounds?: number;
-  outputLimit?: number;
   redactSecrets?: string[];
   persistUserMessage?: boolean;
   resolveModelClient?: (input: { adminId?: string; accountId: string }) => Promise<ModelClient | undefined>;
@@ -420,6 +420,7 @@ const stepTransitions: Record<StepStatus, StepStatus[]> = {
 
 export class PiRuntimeAdapter implements WorkspaceRuntime {
   private readonly active = new Map<string, AbortController>();
+  private readonly pendingConfirmations = new Map<string, PiRuntimeEnqueueInput>();
   private readonly cancelled = new Set<string>();
   private stopped = false;
 
@@ -435,7 +436,13 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     this.active.set(input.run.id, controller);
     void this.execute(input, controller.signal).catch(() => {
       // The execution path records a safe failure event. Keep enqueue fire-and-forget.
-    }).finally(() => { this.active.delete(input.run.id); this.cancelled.delete(input.run.id); });
+    }).finally(() => {
+      this.active.delete(input.run.id);
+      const continuation = this.pendingConfirmations.get(input.run.id);
+      this.pendingConfirmations.delete(input.run.id);
+      if (continuation && !this.stopped && !this.cancelled.has(input.run.id)) this.enqueue(continuation);
+      this.cancelled.delete(input.run.id);
+    });
   }
 
   async resume(input: PiRuntimeEnqueueInput): Promise<void> {
@@ -446,17 +453,24 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
   }
 
   async continueAfterConfirmation(input: PiRuntimeEnqueueInput): Promise<void> {
-    if (this.stopped || this.active.has(input.run.id) || this.cancelled.has(input.run.id)) return;
-    this.enqueue({ ...input, resumeAfterConfirmation: true });
+    if (this.stopped || this.cancelled.has(input.run.id)) return;
+    const continuation = { ...input, resumeAfterConfirmation: true };
+    if (this.active.has(input.run.id)) {
+      this.pendingConfirmations.set(input.run.id, continuation);
+      return;
+    }
+    this.enqueue(continuation);
   }
 
   cancel(runId: string): void {
     this.cancelled.add(runId);
+    this.pendingConfirmations.delete(runId);
     this.active.get(runId)?.abort('user_cancelled');
   }
 
   stop(): void {
     this.stopped = true;
+    this.pendingConfirmations.clear();
     for (const controller of this.active.values()) controller.abort();
   }
 
@@ -467,7 +481,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       const sessionId = input.sessionId ?? input.run.sessionId;
       const continuingAfterConfirmation = input.resumeAfterConfirmation === true;
       if (!continuingAfterConfirmation) {
-        if (this.options.persistUserMessage !== false && !input.resumeFromFailure) await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'user_message', content: redactSensitiveText(input.run.instruction, this.options.outputLimit ?? 2_000, this.options.redactSecrets) });
+        if (this.options.persistUserMessage !== false && !input.resumeFromFailure) await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'user_message', content: redactSensitiveText(input.run.instruction, this.options.redactSecrets) });
         const startedAt = new Date().toISOString();
         await this.transitionRun(input.run, 'running', { startedAt });
         await this.transitionStep(step, 'running', { startedAt });
@@ -488,7 +502,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       if (this.stopped || signal.aborted || this.cancelled.has(input.run.id)) return;
       if (skillInstruction) {
         if (this.stopped || signal.aborted || this.cancelled.has(input.run.id)) return;
-        const output = redactSensitiveText(skillInstruction.content, this.options.outputLimit ?? 2_000, this.options.redactSecrets);
+        const output = redactSensitiveText(skillInstruction.content, this.options.redactSecrets);
         await this.transitionRun(input.run, 'executing');
         await this.transitionStep(step, 'executing');
         await this.emit(input.run.id, 'run.executing', { status: 'executing', messageType: 'tool_event', resource: 'pi_skill' });
@@ -562,7 +576,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       if (this.stopped || signal.aborted) return;
 
       const finishedAt = new Date().toISOString();
-      const output = redactSensitiveText(result.content, this.options.outputLimit ?? 2_000, this.options.redactSecrets);
+      const output = redactSensitiveText(result.content, this.options.redactSecrets);
       await this.transitionStep(step, 'succeeded', { finishedAt, outputSummary: output });
       await this.transitionRun(input.run, 'succeeded', { finishedAt, resultSummary: output });
       await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: `模型 ${result.model} 已返回结果，正在整理回复。`, summary: '整理模型结果' });
@@ -588,7 +602,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     const skillPrompt = this.options.skillManager ? await this.options.skillManager.buildSystemPrompt(input.adminId ?? input.run.requestedBy) : '';
     const messages = buildWorkspaceModelMessages(input.history ?? [], input.run.instruction, skillPrompt, input.attachments);
 
-    const allReasoning: string[] = [];
+    let reasoningDeltaCount = 0;
     let finalResult: ModelCompletionResult | undefined;
     let waitingConfirmation = false;
     let pendingUserAction: { title: string; summary: string; content: string; data?: Record<string, unknown> } | undefined;
@@ -601,38 +615,47 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     for (let round = 0; round < maxRounds; round += 1) {
       if (this.stopped || signal.aborted) return;
       const streamId = `${input.run.id}:stream:${round + 1}`;
-      const reasoningMessageId = `${streamId}:reasoning`;
       const assistantMessageId = `${streamId}:assistant`;
-      let reasoning = '';
       let assistant = '';
       const toolCallNames = new Map<number, string>();
+      const compacted = compactWorkspaceModelMessages(messages);
+      if (compacted.summary) {
+        messages.splice(0, messages.length, ...compacted.messages);
+        await this.emit(input.run.id, 'context.compacted', { round: round + 1, status: 'succeeded', summary: '已压缩上下文并保留任务目标及关键结果' });
+        await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: compacted.summary, summary: '上下文摘要' });
+      }
       await this.emit(input.run.id, 'stream.started', { streamId, round: round + 1, model: this.options.model, status: 'running' });
-      const result = await modelClient.stream({ messages, tools, toolChoice: 'auto', signal }, {
+      await this.emit(input.run.id, 'workspace.execution.summary', { streamId, messageType: 'reasoning_summary', summary: round === 0 ? '分析任务' : '评估工具结果', content: round === 0 ? '正在核对任务目标与已有结果。' : '已读取上一轮工具结果，正在确定下一步。', status: 'running' });
+      const handlers: ModelStreamHandlers = {
         onReasoningDelta: async (delta) => {
-          reasoning += delta;
-          allReasoning.push(delta);
-          await this.emit(input.run.id, 'reasoning.delta', { streamId, messageId: reasoningMessageId, contentDelta: redactSensitiveText(delta, 2_000, this.options.redactSecrets), messageType: 'reasoning_summary', status: 'running' });
+          if (delta) reasoningDeltaCount += 1;
         },
         onTextDelta: async (delta) => {
           assistant += delta;
-          await this.emit(input.run.id, 'assistant.delta', { streamId, messageId: assistantMessageId, contentDelta: redactSensitiveText(delta, 4_000, this.options.redactSecrets), messageType: 'final_answer', status: 'running' });
+          await this.emit(input.run.id, 'assistant.delta', { streamId, messageId: assistantMessageId, contentDelta: redactSensitiveText(delta, this.options.redactSecrets), messageType: 'final_answer', status: 'running' });
         },
         onToolCallDelta: async (delta) => {
           if (delta.name) toolCallNames.set(delta.index, delta.name);
           const toolName = delta.name ?? toolCallNames.get(delta.index);
-          await this.emit(input.run.id, 'tool.call.delta', { streamId, toolCallId: delta.id, toolName, summary: toolName ? workspaceToolProgress(toolName).summary : undefined, index: delta.index, argumentsDelta: redactSensitiveText(delta.argumentsDelta ?? '', 4_000, this.options.redactSecrets), status: 'streaming' });
+          await this.emit(input.run.id, 'tool.call.delta', { streamId, toolCallId: delta.id, toolName, summary: toolName ? workspaceToolProgress(toolName).summary : undefined, index: delta.index, argumentsDelta: redactSensitiveText(delta.argumentsDelta ?? '', this.options.redactSecrets), status: 'streaming' });
         },
         onToolCall: async (call) => {
           const progress = workspaceToolProgress(call.function.name);
-          await this.emit(input.run.id, 'tool.call.completed', { streamId, toolCallId: call.id, toolName: call.function.name, summary: progress.summary, arguments: redactSensitiveText(normalizeToolArguments(call.function.arguments), 4_000, this.options.redactSecrets), status: 'selected' });
+          await this.emit(input.run.id, 'tool.call.completed', { streamId, toolCallId: call.id, toolName: call.function.name, summary: progress.summary, arguments: redactSensitiveText(normalizeToolArguments(call.function.arguments), this.options.redactSecrets), status: 'selected' });
         },
-      });
-      finalResult = result;
-      if (reasoning) {
-        await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: redactSensitiveText(reasoning, 8_000, this.options.redactSecrets), summary: '模型原生推理' });
-      } else if (round === 0) {
-        await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: '已收到请求，正在根据当前账号范围整理结果。', summary: '执行 Workspace 任务' });
+      };
+      let result: ModelCompletionResult;
+      try {
+        result = await modelClient.stream({ messages, tools, toolChoice: 'auto', signal }, handlers);
+      } catch (error) {
+        if (!(error instanceof PiModelClientError) || error.code !== 'MODEL_HTTP_ERROR' || ![400, 413].includes(error.status ?? 0)) throw error;
+        const forced = compactWorkspaceModelMessages(messages, true);
+        messages.splice(0, messages.length, ...forced.messages);
+        await this.emit(input.run.id, 'context.compacted', { round: round + 1, status: 'retrying', summary: '模型上下文超限，已保留目标和关键结果后重试' });
+        await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'reasoning_summary', content: forced.summary ?? '', summary: '上下文摘要' });
+        result = await modelClient.stream({ messages, tools, toolChoice: 'auto', signal }, handlers);
       }
+      finalResult = result;
       const calls = result.toolCalls ?? [];
       if (calls.length === 0) {
         completedWithoutTool = true;
@@ -652,7 +675,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           status: 'running',
         });
         const toolStartedAt = new Date().toISOString();
-        await this.emit(input.run.id, 'tool.call.started', { streamId, toolCallId: call.id, toolName: call.function.name, summary: progress.summary, arguments: redactSensitiveText(normalizeToolArguments(call.function.arguments), 4_000, this.options.redactSecrets), startedAt: toolStartedAt, status: 'running' });
+        await this.emit(input.run.id, 'tool.call.started', { streamId, toolCallId: call.id, toolName: call.function.name, summary: progress.summary, arguments: redactSensitiveText(normalizeToolArguments(call.function.arguments), this.options.redactSecrets), startedAt: toolStartedAt, status: 'running' });
         let args: Record<string, unknown>;
         try {
           args = parseModelToolArguments(call.function.arguments);
@@ -661,6 +684,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           pendingToolFailure = failure;
           const errorResult = toolFailureResult(failure);
           await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, summary: failure.summary, status: 'failed', result: errorResult, completedAt: new Date().toISOString() });
+          await this.emit(input.run.id, 'workspace.execution.summary', { streamId, messageType: 'reasoning_summary', summary: '工具参数错误', content: failure.summary, status: 'failed' });
           messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(errorResult) });
           continue;
         }
@@ -676,6 +700,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
             pendingToolFailure = { toolName: call.function.name, ...normalized.failure };
             const errorResult = toolFailureResult(pendingToolFailure);
             await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, summary: pendingToolFailure.summary, status: 'failed', result: errorResult, completedAt: new Date().toISOString() });
+            await this.emit(input.run.id, 'workspace.execution.summary', { streamId, messageType: 'reasoning_summary', summary: '工具返回错误', content: pendingToolFailure.summary, status: 'failed' });
             messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(errorResult) });
             continue;
           }
@@ -686,11 +711,14 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           const errorResult = toolFailureResult(failure);
           pendingToolFailure = { toolName: call.function.name, ...failure };
           await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, summary: pendingToolFailure.summary, status: 'failed', result: errorResult, completedAt: new Date().toISOString() });
+          await this.emit(input.run.id, 'workspace.execution.summary', { streamId, messageType: 'reasoning_summary', summary: '工具调用失败', content: pendingToolFailure.summary, status: 'failed' });
           messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(errorResult) });
           continue;
         }
         const redacted = this.redactToolResult(result);
         await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, title: result.title, summary: result.summary, status: 'succeeded', result: redacted, completedAt: new Date().toISOString() });
+        await this.emit(input.run.id, 'workspace.execution.summary', { streamId, messageType: 'reasoning_summary', summary: result.title, content: result.summary, status: 'succeeded' });
+        if (result.kind !== 'write_plan') await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'tool_event', content: JSON.stringify(redacted), summary: result.summary });
         messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(redacted) });
         const resultData = result.data;
         if (resultData && (resultData.status === 'pending_user_action' || resultData.userActionRequired === true)) {
@@ -714,7 +742,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     if (this.stopped || signal.aborted) return;
 
     if (waitingConfirmation) {
-      await this.emit(input.run.id, 'stream.completed', { status: 'waiting_confirmation', model: finalResult?.model ?? this.options.model, reasoningMessageCount: allReasoning.length });
+      await this.emit(input.run.id, 'stream.completed', { status: 'waiting_confirmation', model: finalResult?.model ?? this.options.model, reasoningMessageCount: reasoningDeltaCount });
       return;
     }
     if (pendingToolFailure) {
@@ -722,13 +750,13 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       return;
     }
     if (pendingUserAction) {
-      const output = redactSensitiveText(pendingUserAction.content, this.options.outputLimit ?? 2_000, this.options.redactSecrets);
+      const output = redactSensitiveText(pendingUserAction.content, this.options.redactSecrets);
       const finishedAt = new Date().toISOString();
       await this.transitionStep(step, 'succeeded', { finishedAt, outputSummary: pendingUserAction.summary });
       await this.transitionRun(input.run, 'succeeded', { finishedAt, resultSummary: output });
       await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'final_answer', content: output });
       await this.emit(input.run.id, 'workspace.skill.lifecycle', { status: 'pending_user_action', title: pendingUserAction.title, summary: pendingUserAction.summary, data: pendingUserAction.data ?? {} });
-      await this.emit(input.run.id, 'stream.completed', { status: 'succeeded', model: finalResult?.model ?? this.options.model, content: output, reasoningMessageCount: allReasoning.length });
+      await this.emit(input.run.id, 'stream.completed', { status: 'succeeded', model: finalResult?.model ?? this.options.model, content: output, reasoningMessageCount: reasoningDeltaCount });
       await this.emit(input.run.id, 'step.succeeded', { stepId: step.id, status: 'succeeded', messageType: 'final_answer', summary: step.label });
       await this.emit(input.run.id, 'runtime.succeeded', { status: 'succeeded', model: finalResult?.model ?? this.options.model, messageType: 'final_answer', content: output, resource: 'pi_skill' });
       await this.emit(input.run.id, 'run.succeeded', { status: 'succeeded', resultSummary: output, messageType: 'final_answer', content: output, resource: 'pi_skill' });
@@ -736,25 +764,26 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     }
     if (!completedWithoutTool) throw new PiModelClientError('MODEL_TOOL_LOOP_EXCEEDED', `model tool loop exceeded ${Number.isFinite(maxRounds) ? maxRounds : 'configured'} rounds`);
     if (!finalResult) throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model provider returned no result');
-    const output = redactSensitiveText(finalResult.content, this.options.outputLimit ?? 2_000, this.options.redactSecrets);
+    const output = redactSensitiveText(finalResult.content, this.options.redactSecrets);
     const finishedAt = new Date().toISOString();
     await this.transitionStep(step, 'succeeded', { finishedAt, outputSummary: output });
     await this.transitionRun(input.run, 'succeeded', { finishedAt, resultSummary: output });
     await this.persistMessage({ adminId: input.adminId, sessionId, runId: input.run.id, messageType: 'final_answer', content: output });
-    await this.emit(input.run.id, 'stream.completed', { status: 'succeeded', model: finalResult.model, content: output, reasoningMessageCount: allReasoning.length });
+    await this.emit(input.run.id, 'stream.completed', { status: 'succeeded', model: finalResult.model, content: output, reasoningMessageCount: reasoningDeltaCount });
     await this.emit(input.run.id, 'step.succeeded', { stepId: step.id, status: 'succeeded', messageType: 'final_answer', summary: step.label });
     await this.emit(input.run.id, 'runtime.succeeded', { status: 'succeeded', model: finalResult.model, messageType: 'final_answer', content: output });
     await this.emit(input.run.id, 'run.succeeded', { status: 'succeeded', resultSummary: output, messageType: 'final_answer', content: output });
   }
 
   private redactToolResult(result: WorkspaceModelToolResult): Record<string, unknown> {
+    const data = result.data === undefined ? undefined : JSON.stringify(result.data);
     return {
       ok: true,
       kind: result.kind,
       title: result.title,
       summary: result.summary,
-      content: redactSensitiveText(result.content, this.options.outputLimit ?? 2_000, this.options.redactSecrets),
-      ...(result.data ? { data: redactSensitiveText(JSON.stringify(result.data), this.options.outputLimit ?? 2_000, this.options.redactSecrets) } : {}),
+      content: redactSensitiveText(result.content, this.options.redactSecrets),
+      ...(data ? { data: JSON.parse(redactSensitiveText(data, this.options.redactSecrets)) } : {}),
       ...(result.plan ? { requiresConfirmation: true, action: result.plan.action, policyRef: result.plan.policyRef, manifest: result.plan.manifest } : {}),
     };
   }
@@ -1232,12 +1261,11 @@ function extractResponsesWebSearchUsed(payload: unknown): boolean {
   return payload.output.some((item) => isRecord(item) && item.type === 'web_search_call');
 }
 
-function redactSensitiveText(value: string, outputLimit: number, secrets: string[] = []): string {
-  const limit = positiveInteger(outputLimit, 2_000);
+function redactSensitiveText(value: string, secrets: string[] = []): string {
   const redacted = secrets.filter(Boolean).reduce((current, secret) => current.split(secret).join('[REDACTED]'), value)
     .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [REDACTED]')
     .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, '[REDACTED]');
-  return redacted.length > limit ? `${redacted.slice(0, limit)}…` : redacted;
+  return redacted;
 }
 
 function toSafeFailure(error: unknown): { code: string; summary: string } {

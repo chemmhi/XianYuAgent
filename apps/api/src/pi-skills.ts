@@ -456,7 +456,7 @@ export class PiSkillManager {
       const command = typeof args.command === 'string' ? args.command.trim() : '';
       const argv = Array.isArray(args.args) ? args.args.filter((value): value is string => typeof value === 'string') : [];
       const result = await this.execute({ adminId: input.adminId, skillId, command, args: argv, sessionInput: input.instruction, sessionId: input.requestId });
-      const output = sanitizeSkillOutput(result.stdout || result.stderr || JSON.stringify(result.parsed ?? {}), argv.filter((value) => value.length >= 12));
+      const output = result.stdout || result.stderr || JSON.stringify(result.parsed ?? {});
       return {
         kind: 'read',
         title: `${skillId} | ${command}`,
@@ -944,7 +944,7 @@ function normalizeStatePaths(paths?: string[]): string[] {
 }
 
 function sanitizeSkillOutput(value: string, secrets: string[]): string {
-  let result = value.slice(0, 32_000);
+  let result = value;
   for (const secret of secrets) if (secret) result = result.split(secret).join('[REDACTED]');
   return result;
 }
