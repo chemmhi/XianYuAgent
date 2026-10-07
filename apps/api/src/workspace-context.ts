@@ -1,6 +1,7 @@
 import type { RunEventRecord } from './domain.js';
 import type { ModelClient, ModelMessage, ModelToolDefinition } from './pi-runtime.js';
 
+const MAX_WORKSPACE_PLAN_STEPS = 8;
 const MAX_COMPRESSIBLE_CONTEXT_CHARS = 24_000;
 const MAX_SUMMARY_CHARS = 2_400;
 const MIN_MODEL_COMPACTION_REDUCTION = 0.2;
@@ -26,6 +27,12 @@ export interface WorkspaceExecutionPlan {
   steps: WorkspacePlanStep[];
 }
 
+export interface WorkspacePlanFailure {
+  toolName: string;
+  code: string;
+  summary: string;
+}
+
 const PLAN_MESSAGE_MARKER = '[WORKSPACE_PLAN]';
 
 export function createWorkspacePlanMessage(plan: WorkspaceExecutionPlan, cachedEvidence: string[] = []): string {
@@ -43,7 +50,7 @@ export function createWorkspacePlanMessage(plan: WorkspaceExecutionPlan, cachedE
 }
 
 export function createWorkspaceExecutionPlan(input: { instruction: string; steps: Array<{ tool: string; goal: string }> }): WorkspaceExecutionPlan | undefined {
-  if (!input.steps.length || input.steps.length > 8) return undefined;
+  if (!input.steps.length || input.steps.length > MAX_WORKSPACE_PLAN_STEPS) return undefined;
   const steps = input.steps.map((step, index) => ({
     id: `step-${index + 1}`,
     tool: step.tool,
@@ -174,17 +181,67 @@ export async function createWorkspaceExecutionPlanFromModel(instruction: string,
       toolChoice: 'none',
       signal: requestSignal,
     });
-    const parsed = parsePlanPayload(result.content);
-    const steps = asRecord(parsed)?.steps;
-    if (!Array.isArray(steps) || steps.length === 0 || steps.length > 8) return options.fallback ? deriveFallbackWorkspacePlan(instruction, available) : undefined;
-    const normalized: Array<{ tool: string; goal: string }> = [];
-    for (const step of steps) {
-      const record = asRecord(step);
-      if (!record || typeof record.tool !== 'string' || !available.includes(record.tool) || typeof record.goal !== 'string' || !record.goal.trim() || record.goal.length > 120) return options.fallback ? deriveFallbackWorkspacePlan(instruction, available) : undefined;
-      normalized.push({ tool: record.tool, goal: record.goal.trim() });
-    }
+    const normalized = normalizeWorkspacePlanSteps(parsePlanPayload(result.content), available);
+    if (!normalized?.length) return options.fallback ? deriveFallbackWorkspacePlan(instruction, available) : undefined;
     return createWorkspaceExecutionPlan({ instruction, steps: normalized });
   } catch { return options.fallback ? deriveFallbackWorkspacePlan(instruction, available) : undefined; }
+}
+
+/** Re-plan the remaining work when the current plan cannot complete the task. */
+export async function reviseWorkspaceExecutionPlanFromModel(
+  plan: WorkspaceExecutionPlan,
+  failure: WorkspacePlanFailure,
+  tools: ModelToolDefinition[],
+  model: ModelClient,
+  signal?: AbortSignal,
+): Promise<WorkspaceExecutionPlan | undefined> {
+  const available = tools.flatMap((tool) => tool.type === 'function' ? [tool.function.name] : []);
+  if (!available.length) return undefined;
+  const current = plan.currentStepId ? plan.steps.find((step) => step.id === plan.currentStepId) : plan.steps.find((step) => step.status === 'pending' || step.status === 'running');
+  const completed = plan.steps.filter((step) => step.status === 'succeeded').map((step) => `${step.tool}：${step.goal}`).join('\n') || '无';
+  const remaining = plan.steps.filter((step) => step.status === 'pending' && step.id !== current?.id).map((step) => `${step.tool}：${step.goal}`).join('\n') || '无';
+  try {
+    const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(5_000)]) : AbortSignal.timeout(5_000);
+    const result = await model.complete({
+      messages: [
+        { role: 'system', content: '当前执行计划无法按原顺序完成。请根据失败证据重新规划剩余工作，仅输出 JSON：{"steps":[{"tool":"可用工具名","goal":"简短目标"}]}。不要重复失败工具作为第一步，不要重复已完成步骤；允许更换工具或补充必要步骤。写入仍需准备受控确认，不能直接执行；若没有可行替代方案，输出 {"steps":[]}。' },
+        { role: 'user', content: `原始目标：${plan.goal}\n已完成步骤：\n${completed}\n当前失败步骤：${current?.tool ?? failure.toolName}：${current?.goal ?? '未标记'}\n失败证据：${failure.code}；${failure.summary}\n原计划剩余步骤：\n${remaining}\n可用工具：${available.join('、')}` },
+      ],
+      toolChoice: 'none',
+      signal: requestSignal,
+    });
+    const normalized = normalizeWorkspacePlanSteps(parsePlanPayload(result.content), available);
+    if (!normalized?.length || normalized[0]?.tool === failure.toolName) return undefined;
+    const nextRevision = plan.revision + 1;
+    const preserved = plan.steps.filter((step) => step.status === 'succeeded').map((step) => ({ ...step }));
+    const blocked = current
+      ? [{ ...current, status: 'blocked' as const, attempts: current.attempts + 1, evidence: failure.summary.slice(0, 350) }]
+      : [];
+    const capacity = MAX_WORKSPACE_PLAN_STEPS - preserved.length - blocked.length;
+    if (capacity <= 0) return undefined;
+    const revisedSteps = [
+      ...preserved,
+      ...blocked,
+      ...normalized.slice(0, capacity).map((step, index) => ({ id: `step-${nextRevision}-${index + 1}`, tool: step.tool, goal: step.goal, status: 'pending' as const, attempts: 0 })),
+    ];
+    const nextStep = revisedSteps.find((step) => step.status === 'pending');
+    if (!nextStep) return undefined;
+    return { version: 1, revision: nextRevision, goal: plan.goal, status: 'active', currentStepId: nextStep.id, steps: revisedSteps };
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeWorkspacePlanSteps(parsed: unknown, available: string[]): Array<{ tool: string; goal: string }> | undefined {
+  const steps = asRecord(parsed)?.steps;
+  if (!Array.isArray(steps) || steps.length === 0 || steps.length > MAX_WORKSPACE_PLAN_STEPS) return undefined;
+  const normalized: Array<{ tool: string; goal: string }> = [];
+  for (const step of steps) {
+    const record = asRecord(step);
+    if (!record || typeof record.tool !== 'string' || !available.includes(record.tool) || typeof record.goal !== 'string' || !record.goal.trim() || record.goal.length > 120) return undefined;
+    normalized.push({ tool: record.tool, goal: record.goal.trim() });
+  }
+  return normalized;
 }
 
 function parsePlanPayload(content: string): unknown {
@@ -266,7 +323,7 @@ function deriveFallbackWorkspacePlan(instruction: string, available: string[]): 
   discoveryGroups.sort((left, right) => left.order - right.order);
   for (const group of discoveryGroups) for (const step of group.steps) add(step.tool, step.goal);
   if (mutationTask) add('workspace_prepare_write', '准备受控写入并等待用户确认');
-  return selected.length ? createWorkspaceExecutionPlan({ instruction, steps: selected.slice(0, 8) }) : undefined;
+  return selected.length ? createWorkspaceExecutionPlan({ instruction, steps: selected.slice(0, MAX_WORKSPACE_PLAN_STEPS) }) : undefined;
 }
 
 export function buildWorkspaceCheckpoint(events: RunEventRecord[]): string | undefined {

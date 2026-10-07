@@ -201,6 +201,66 @@ test('Plan Mode stops the remaining tool calls when a planned step fails', async
   }
 });
 
+test('Plan Mode adjusts the plan after a failed step and continues with the replacement path', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'plan-replan@example.com', passwordHash: 'hash', displayName: 'Plan Replan' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'plan-replan' });
+  const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Plan Replan' });
+  const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '定位商品并读取状态' });
+  let planningCalls = 0;
+  let rounds = 0;
+  const executedTools: string[] = [];
+  const model: ModelClient = {
+    async complete() {
+      planningCalls += 1;
+      return { content: planningCalls === 1
+        ? '{"steps":[{"tool":"workspace_product_search","goal":"定位目标商品"},{"tool":"workspace_read","goal":"读取商品状态"}]}'
+        : '{"steps":[{"tool":"workspace_read","goal":"改用现有读取能力获取商品状态"}]}', model: 'plan-replan' };
+    },
+    async stream(_input, handlers) {
+      rounds += 1;
+      if (rounds === 1) {
+        const search = { id: 'replan-search', type: 'function' as const, function: { name: 'workspace_product_search', arguments: '{"query":"目标商品"}' } };
+        await handlers.onToolCall?.(search);
+        return { content: '', model: 'plan-replan', toolCalls: [search] };
+      }
+      if (rounds === 2) {
+        const read = { id: 'replan-read', type: 'function' as const, function: { name: 'workspace_read', arguments: '{"resource":"product"}' } };
+        await handlers.onToolCall?.(read);
+        return { content: '', model: 'plan-replan', toolCalls: [read] };
+      }
+      return { content: '已读取商品状态。', model: 'plan-replan', toolCalls: [] };
+    },
+  };
+  const commandTool = {
+    getModelTools: () => [
+      { type: 'function', function: { name: 'workspace_product_search', description: 'search', parameters: { type: 'object' } } },
+      { type: 'function', function: { name: 'workspace_read', description: 'read', parameters: { type: 'object' } } },
+    ],
+    executeModelTool: async (name: string) => {
+      executedTools.push(name);
+      if (name === 'workspace_product_search') throw Object.assign(new Error('search backend down'), { code: 'SEARCH_BACKEND_DOWN' });
+      return { kind: 'read' as const, title: '商品状态', summary: '已读取商品状态', content: '商品状态正常', data: { status: 'active' } };
+    },
+  } as unknown as WorkspaceCommandOrchestrator;
+  const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, model: 'plan-replan' });
+  try {
+    runtime.enqueue({ adminId: admin.id, sessionId: session.id, run: created.run, steps: created.steps });
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && !['succeeded', 'failed'].includes((await store.getRun(admin.id, created.run.id))?.run.status ?? '')) await new Promise((resolve) => setTimeout(resolve, 10));
+    const bundle = await store.getRun(admin.id, created.run.id);
+    const events = await store.listRunEvents(admin.id, created.run.id, 0);
+    assert.equal(bundle?.run.status, 'succeeded');
+    assert.deepEqual(executedTools, ['workspace_product_search', 'workspace_read']);
+    assert.ok(events.some((event) => event.eventType === 'workspace.plan.updated' && event.payload.reason === 'replanned_after_failure'));
+    const lastPlan = events.filter((event) => event.eventType === 'workspace.plan.updated').at(-1)?.payload.plan as { status?: string; revision?: number } | undefined;
+    assert.equal(lastPlan?.status, 'completed');
+    assert.equal(lastPlan?.revision, 3);
+  } finally {
+    runtime.stop();
+  }
+});
+
 test('Plan Mode advances a restored step when its successful result is replayed from cache', async () => {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: 'plan-replay-cache@example.com', passwordHash: 'hash', displayName: 'Plan Replay Cache' });

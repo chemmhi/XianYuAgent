@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { formatToolEventContent, getComposerTextareaMetrics, MessageStream, scrollMessageStreamToLatest, SessionRow, shouldUseWorkspaceDraftMode, WorkspaceConfirmationCard, WorkspaceDeleteSessionModal, WorkspaceSendButton } from './WorkspacePage';
-import { WorkspacePlanCard as WorkspacePlanCardComponent } from './WorkspacePlanCard';
+import { getWorkspacePlanScrollDelta, WorkspacePlanCard as WorkspacePlanCardComponent } from './WorkspacePlanCard';
 import type { WorkspaceConfirmationVM, WorkspaceMessageVM, WorkspacePlanVM, WorkspaceRunVM, WorkspaceSessionVM } from '../types';
 
 const workspaceCss = readFileSync(fileURLToPath(new URL('./workspace.css', import.meta.url)), 'utf8').replace(/\r\n/g, '\r\n').replace(/\s+/g, ' ').trim();
@@ -228,11 +228,17 @@ describe('Workspace execution plan card', () => {
     expect(html).toContain('读取相关 Skill 文档');
     expect(html).toContain('type="checkbox"');
     expect(html).toContain('data-plan-status="active"');
+    expect(html).toContain('data-plan-expanded="true"');
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('workspace-plan-float-body');
     expect(html).not.toContain('pi_skill_catalog');
     expect(html).not.toContain('workspace_prepare_write');
     expect(workspaceCss).toContain('.workspace-plan-float {');
     expect(workspaceCss).toContain('position: absolute;');
     expect(workspaceCss).toContain('box-shadow: 0 4px 12px rgba(0,0,0,.08);');
+    expect(workspaceCss).toContain('.workspace-plan-float-toggle');
+    expect(workspaceCss).toContain('.workspace-activity-action-label {');
+    expect(workspaceCss).toContain('font-size: 15px;');
   });
 
   it('maps completed and blocked states without making checkboxes interactive', () => {
@@ -240,6 +246,12 @@ describe('Workspace execution plan card', () => {
     expect(html).toContain('data-plan-status="blocked"');
     expect(html).toContain('已阻塞');
     expect(html).toContain('disabled=""');
+  });
+
+  it('computes the minimal scroll needed to reveal the current step', () => {
+    expect(getWorkspacePlanScrollDelta(100, 300, 120, 180)).toBe(0);
+    expect(getWorkspacePlanScrollDelta(100, 300, 60, 140)).toBe(-40);
+    expect(getWorkspacePlanScrollDelta(100, 300, 280, 340)).toBe(40);
   });
 });
 

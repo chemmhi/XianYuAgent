@@ -14,6 +14,7 @@ import {
   createWorkspaceExecutionPlanFromModel,
   createWorkspacePlanMessage,
   reopenBlockedWorkspacePlan,
+  reviseWorkspaceExecutionPlanFromModel,
   restoreWorkspaceExecutionPlan,
   workspacePlanCurrentTool,
   workspacePlanHasPendingSteps,
@@ -736,11 +737,31 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       }
     }
     if (executionPlan) upsertWorkspacePlanMessage(messages, createWorkspacePlanMessage(executionPlan, cachedReplayableEvidence(replayableResults)));
-    const updateExecutionPlan = async (planUpdate: { toolName: string; succeeded: boolean; waitingConfirmation?: boolean; evidence?: string; reason?: string }) => {
-      if (!executionPlan) return;
+    const updateExecutionPlan = async (planUpdate: { toolName: string; succeeded: boolean; waitingConfirmation?: boolean; evidence?: string; reason?: string }): Promise<boolean> => {
+      if (!executionPlan) return false;
+      if (!planUpdate.succeeded) {
+        const revised = await reviseWorkspaceExecutionPlanFromModel(executionPlan, {
+          toolName: planUpdate.toolName,
+          code: planUpdate.reason ?? 'PLAN_STEP_FAILED',
+          summary: planUpdate.evidence ?? '当前步骤无法完成',
+        }, tools, modelClient, signal);
+        if (revised) {
+          executionPlan = revised;
+          await this.emit(input.run.id, 'workspace.plan.updated', {
+            status: executionPlan.status,
+            plan: executionPlan,
+            reason: 'replanned_after_failure',
+            failedTool: planUpdate.toolName,
+            failureCode: planUpdate.reason ?? 'PLAN_STEP_FAILED',
+          });
+          upsertWorkspacePlanMessage(messages, createWorkspacePlanMessage(executionPlan, cachedReplayableEvidence(replayableResults)));
+          return true;
+        }
+      }
       executionPlan = applyWorkspacePlanResult(executionPlan, planUpdate);
       await this.emit(input.run.id, 'workspace.plan.updated', { status: executionPlan.status, plan: executionPlan, ...(planUpdate.reason ? { reason: planUpdate.reason } : {}) });
       upsertWorkspacePlanMessage(messages, createWorkspacePlanMessage(executionPlan, cachedReplayableEvidence(replayableResults)));
+      return false;
     };
 
     let reasoningDeltaCount = 0;
@@ -831,7 +852,11 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, summary: failure.summary, status: 'failed', result: errorResult, completedAt: new Date().toISOString() });
           await this.emit(input.run.id, 'workspace.execution.summary', { streamId, messageType: 'reasoning_summary', summary: '工具参数错误', content: failure.summary, status: 'failed' });
           messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(errorResult) });
-          await updateExecutionPlan({ toolName: call.function.name, succeeded: false, evidence: failure.summary, reason: failure.code });
+          const replanned = await updateExecutionPlan({ toolName: call.function.name, succeeded: false, evidence: failure.summary, reason: failure.code });
+          if (replanned) {
+            pendingToolFailure = undefined;
+            break;
+          }
           if (executionPlan?.status === 'blocked') break;
           continue;
         }
@@ -843,6 +868,8 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, summary: failure.summary, status: 'failed', result: toolFailureResult(failure), completedAt: new Date().toISOString() });
           await this.emit(input.run.id, 'workspace.execution.summary', { streamId, messageType: 'reasoning_summary', summary: '计划顺序校验', content: failure.summary, status: 'failed' });
           messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(errorResult) });
+          const replanned = await updateExecutionPlan({ toolName: plannedTool ?? call.function.name, succeeded: false, evidence: failure.summary, reason: failure.code });
+          if (replanned) pendingToolFailure = undefined;
           // Do not execute later calls from the same provider response. The
           // model can correct the choice on the next round using this error.
           break;
@@ -878,7 +905,11 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
             await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, summary: pendingToolFailure.summary, status: 'failed', result: errorResult, completedAt: new Date().toISOString() });
             await this.emit(input.run.id, 'workspace.execution.summary', { streamId, messageType: 'reasoning_summary', summary: '工具返回错误', content: pendingToolFailure.summary, status: 'failed' });
             messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(errorResult) });
-            await updateExecutionPlan({ toolName: call.function.name, succeeded: false, evidence: pendingToolFailure.summary, reason: pendingToolFailure.code });
+            const replanned = await updateExecutionPlan({ toolName: call.function.name, succeeded: false, evidence: pendingToolFailure.summary, reason: pendingToolFailure.code });
+            if (replanned) {
+              pendingToolFailure = undefined;
+              break;
+            }
             if (executionPlan?.status === 'blocked') break;
             continue;
           }
@@ -901,7 +932,11 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
           await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, summary: pendingToolFailure.summary, status: 'failed', result: errorResult, completedAt: new Date().toISOString() });
           await this.emit(input.run.id, 'workspace.execution.summary', { streamId, messageType: 'reasoning_summary', summary: '工具调用失败', content: pendingToolFailure.summary, status: 'failed' });
           messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(errorResult) });
-          await updateExecutionPlan({ toolName: call.function.name, succeeded: false, evidence: pendingToolFailure.summary, reason: pendingToolFailure.code });
+          const replanned = await updateExecutionPlan({ toolName: call.function.name, succeeded: false, evidence: pendingToolFailure.summary, reason: pendingToolFailure.code });
+          if (replanned) {
+            pendingToolFailure = undefined;
+            break;
+          }
           if (executionPlan?.status === 'blocked') break;
           continue;
         }

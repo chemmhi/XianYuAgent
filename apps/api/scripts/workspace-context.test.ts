@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyWorkspacePlanResult, buildWorkspaceCheckpoint, compactWorkspaceModelMessages, compactWorkspaceModelMessagesWithModel, completeConfirmedWorkspacePlanStep, createWorkspaceExecutionPlan, createWorkspaceExecutionPlanFromModel, createWorkspacePlanMessage, planWorkspaceToolUse, reopenBlockedWorkspacePlan, restoreWorkspaceExecutionPlan } from '../src/workspace-context.js';
+import { applyWorkspacePlanResult, buildWorkspaceCheckpoint, compactWorkspaceModelMessages, compactWorkspaceModelMessagesWithModel, completeConfirmedWorkspacePlanStep, createWorkspaceExecutionPlan, createWorkspaceExecutionPlanFromModel, createWorkspacePlanMessage, planWorkspaceToolUse, reopenBlockedWorkspacePlan, restoreWorkspaceExecutionPlan, reviseWorkspaceExecutionPlanFromModel } from '../src/workspace-context.js';
 import { buildWorkspaceRuntimeHistory } from '../src/workspace.js';
 import type { RunEventRecord } from '../src/domain.js';
 
@@ -212,6 +212,60 @@ test('Plan Mode reopens only the blocked step during an explicit reconnect', () 
   assert.equal(reopened.steps[0]?.status, 'pending');
   assert.equal(reopened.steps[1]?.status, 'pending');
   assert.equal(reopened.revision, blocked.revision + 1);
+});
+
+test('Plan Mode revises the remaining steps when the current tool cannot complete the task', async () => {
+  const plan = createWorkspaceExecutionPlan({ instruction: '定位商品并读取状态', steps: [
+    { tool: 'workspace_product_search', goal: '定位目标商品' },
+    { tool: 'workspace_read', goal: '读取商品状态' },
+  ] })!;
+  const revised = await reviseWorkspaceExecutionPlanFromModel(plan, {
+    toolName: 'workspace_product_search',
+    code: 'SEARCH_BACKEND_DOWN',
+    summary: '搜索后端不可用，改用工作区读取能力',
+  }, [
+    { type: 'function', function: { name: 'workspace_product_search', description: 'search', parameters: {} } },
+    { type: 'function', function: { name: 'workspace_read', description: 'read', parameters: {} } },
+  ], {
+    async complete() { return { content: '{"steps":[{"tool":"workspace_read","goal":"直接读取现有商品状态"}]}', model: 'replan-model' }; },
+  });
+  assert.equal(revised?.revision, 2);
+  assert.equal(revised?.status, 'active');
+  assert.equal(revised?.steps[0]?.status, 'blocked');
+  assert.equal(revised?.steps[0]?.evidence, '搜索后端不可用，改用工作区读取能力');
+  assert.equal(revised?.currentStepId, revised?.steps[1]?.id);
+  assert.equal(revised?.steps[1]?.tool, 'workspace_read');
+});
+
+test('Plan Mode caps replanned steps at the eight-step plan limit', async () => {
+  const plan = createWorkspaceExecutionPlan({ instruction: '执行完整任务', steps: [
+    { tool: 'workspace_read', goal: '已完成读取' },
+    { tool: 'workspace_product_search', goal: '当前搜索' },
+    { tool: 'workspace_read', goal: '原计划步骤 3' },
+    { tool: 'workspace_read', goal: '原计划步骤 4' },
+    { tool: 'workspace_read', goal: '原计划步骤 5' },
+    { tool: 'workspace_read', goal: '原计划步骤 6' },
+    { tool: 'workspace_read', goal: '原计划步骤 7' },
+    { tool: 'workspace_read', goal: '原计划步骤 8' },
+  ] })!;
+  const afterCompleted = applyWorkspacePlanResult(plan, { toolName: 'workspace_read', succeeded: true, evidence: '读取完成' });
+  const revised = await reviseWorkspaceExecutionPlanFromModel(afterCompleted, {
+    toolName: 'workspace_product_search',
+    code: 'SEARCH_BACKEND_DOWN',
+    summary: '搜索后端不可用',
+  }, [
+    { type: 'function', function: { name: 'workspace_product_search', description: 'search', parameters: {} } },
+    { type: 'function', function: { name: 'workspace_read', description: 'read', parameters: {} } },
+  ], {
+    async complete() {
+      return { content: JSON.stringify({ steps: Array.from({ length: 8 }, (_, index) => ({ tool: 'workspace_read', goal: `替代步骤 ${index + 1}` })) }), model: 'replan-model' };
+    },
+  });
+  assert.ok(revised);
+  assert.equal(revised.steps.length, 8);
+  assert.equal(revised.steps.filter((step) => step.status === 'succeeded').length, 1);
+  assert.equal(revised.steps.filter((step) => step.status === 'blocked').length, 1);
+  assert.equal(revised.steps.filter((step) => step.status === 'pending').length, 6);
 });
 
 test('Plan Mode completes a confirmed write before continuing to the next step', () => {

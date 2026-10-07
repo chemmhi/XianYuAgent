@@ -371,6 +371,14 @@
   box-shadow: 0 4px 12px rgba(0,0,0,.08);
 }
 .workspace-plan-float-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.workspace-plan-float-head-actions { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.workspace-plan-float-toggle { display: inline-flex; align-items: center; gap: 4px; min-height: 24px; padding: 2px 0; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: var(--font-size-meta); line-height: 1.4; cursor: pointer; }
+.workspace-plan-float-toggle:hover { color: var(--link); }
+.workspace-plan-float-toggle:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; border-radius: 4px; }
+.workspace-plan-float-toggle svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.25; }
+.workspace-plan-float-body[hidden] { display: none; }
+.workspace-plan-float.is-collapsed { max-height: none; overflow: visible; }
+.workspace-plan-float-body { min-width: 0; }
 .workspace-plan-float-kicker { margin: 0 0 3px; color: var(--muted); font-size: 10px; line-height: 1.4; letter-spacing: .06em; text-transform: uppercase; }
 .workspace-plan-float h3 { margin: 0; color: var(--text); font-size: 16px; line-height: 1.5; font-weight: 600; }
 .workspace-plan-float-status { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 8px; border-radius: 999px; background: var(--soft-blue-bg); color: var(--link); font-size: var(--font-size-meta); line-height: 1.5; font-weight: 700; white-space: nowrap; }
@@ -725,4 +733,17 @@ body .app-viewport .workspace-domain .workspace-mobile-compact-header strong {
 .workspace-activity-action-detail strong {
   margin-bottom: 4px;
   font-weight: 500;
+}
+
+/* Keep collapsed conversation actions readable at the same scale as body copy. */
+.workspace-activity-action-toggle,
+.workspace-activity-action-label {
+  font-size: 15px;
+  line-height: 1.55;
+}
+.workspace-activity-action-control { font-size: 13px; }
+.workspace-activity-action-detail strong,
+.workspace-activity-action-detail pre {
+  font-size: 14px;
+  line-height: 1.7;
 }
