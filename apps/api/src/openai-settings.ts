@@ -211,6 +211,7 @@ export class OpenAISettingsService {
       apiKey: config.apiKey,
       baseUrl: config.baseUrl,
       model: config.model,
+      provider: config.provider,
       timeoutMs: config.timeoutMs,
       wireApi: this.wireApi,
       probeStrategy: config.probeStrategy,

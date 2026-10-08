@@ -53,6 +53,82 @@ test('ModelClientService only advertises web search when every provider supports
   assert.equal(new ModelClientService({ primary }).supportsWebSearch, true);
 });
 
+test('ModelClientService only advertises structured output when every provider supports it', () => {
+  const primary: ModelClient = { supportsStructuredOutput: true, complete: async () => reply('主回复') };
+  const backup: ModelClient = { supportsStructuredOutput: false, complete: async () => reply('备用回复') };
+
+  assert.equal(new ModelClientService({ primary, backup }).supportsStructuredOutput, false);
+  assert.equal(new ModelClientService({ primary }).supportsStructuredOutput, true);
+});
+
+test('Responses structured output uses provider-specific json_schema formatting', async () => {
+  const requests: Array<{ provider: string; body: Record<string, unknown> }> = [];
+  const fetchImpl = (async (_input, init) => {
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    requests.push({ provider: String(body.model), body });
+    return new Response(JSON.stringify({ model: body.model, output_text: '{"decision":"reply"}' }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+  const structuredOutput = {
+    name: 'auto_reply_decision',
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { decision: { type: 'string' } },
+      required: ['decision'],
+    },
+  };
+
+  const openai = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl: 'https://model.example/v1', model: 'openai-model', provider: 'openai', wireApi: 'responses', fetchImpl });
+  const deepseek = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl: 'https://api.deepseek.example/v1', model: 'deepseek-model', provider: 'deepseek', wireApi: 'responses', fetchImpl });
+  await openai.complete({ messages: [{ role: 'user', content: 'reply' }], structuredOutput });
+  await deepseek.complete({
+    messages: [{ role: 'user', content: 'reply' }],
+    tools: [{ type: 'function', function: { name: 'get_product_info', description: 'read product facts', parameters: { type: 'object' } } }],
+    toolChoice: 'auto',
+    structuredOutput,
+  });
+
+  const openaiFormat = ((requests[0]?.body.text as Record<string, unknown>).format) as Record<string, unknown>;
+  const deepseekFormat = ((requests[1]?.body.text as Record<string, unknown>).format) as Record<string, unknown>;
+  assert.deepEqual(openaiFormat, { type: 'json_schema', name: 'auto_reply_decision', strict: true, schema: structuredOutput.schema });
+  assert.deepEqual(deepseekFormat, { type: 'json_schema', name: 'auto_reply_decision', schema: structuredOutput.schema });
+  assert.deepEqual(requests[1]?.body.tools, [{ type: 'function', name: 'get_product_info', description: 'read product facts', parameters: { type: 'object' } }]);
+  assert.equal(openai.supportsStructuredOutput, true);
+  assert.equal(deepseek.supportsStructuredOutput, true);
+  assert.equal(deepseek.supportsWebSearch, false);
+});
+
+test('Responses rejects an unknown provider instead of assuming OpenAI semantics', () => {
+  assert.throws(
+    () => new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl: 'https://model.example/v1', model: 'unknown-model', provider: 'custom-compatible', wireApi: 'responses' }),
+    (error: unknown) => error instanceof PiModelClientError && error.code === 'MODEL_PROVIDER_UNSUPPORTED',
+  );
+  const legacyAlias = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl: 'https://model.example/v1', model: 'legacy-openai-compatible-model', provider: 'openai-compatible', wireApi: 'responses' });
+  assert.equal(legacyAlias.supportsStructuredOutput, true);
+  assert.equal(legacyAlias.supportsWebSearch, true);
+});
+
+test('Responses rejects failed, incomplete, and refusal payloads as invalid responses', async () => {
+  const payloads = [
+    { status: 'failed', error: { message: 'provider failed' } },
+    { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } },
+    { status: 'completed', output: [{ type: 'message', content: [{ type: 'refusal', refusal: '拒绝输出' }] }] },
+  ];
+  for (const payload of payloads) {
+    const client = new OpenAICompatibleModelClient({
+      apiKey: 'test-key',
+      baseUrl: 'https://model.example/v1',
+      model: 'responses-model',
+      wireApi: 'responses',
+      fetchImpl: (async () => new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch,
+    });
+    await assert.rejects(
+      () => client.complete({ messages: [{ role: 'user', content: 'reply' }] }),
+      (error: unknown) => error instanceof PiModelClientError && error.code === 'MODEL_INVALID_RESPONSE',
+    );
+  }
+});
+
 test('ModelClientService bypasses an OPEN primary on subsequent requests', async () => {
   const calls: string[] = [];
   const primary: ModelClient = { complete: async () => { calls.push('primary'); throw new PiModelClientError('MODEL_TIMEOUT', 'primary timed out'); } };

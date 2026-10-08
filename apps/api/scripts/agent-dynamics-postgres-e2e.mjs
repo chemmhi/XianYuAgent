@@ -17,17 +17,20 @@ globalThis.fetch = (async (_input, init) => {
   modelCall += 1;
   const body = JSON.parse(String(init?.body));
   assert.equal(body.model, 'agent-dynamics-postgres');
-  const message = modelCall === 1
-    ? { content: '', tool_calls: [{ id: 'agent-dynamics-product-1', type: 'function', function: { name: 'get_product_info', arguments: '{}' } }] }
-    : { content: JSON.stringify({ decision: 'reply', text: '这是一个真实 PostgreSQL Agent 动态验收回复。' }) };
-  return new Response(JSON.stringify({ model: 'agent-dynamics-postgres', choices: [{ message }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  const response = modelCall === 1
+    ? { output: [{ type: 'function_call', call_id: 'agent-dynamics-product-1', name: 'get_product_info', arguments: '{}' }] }
+    : (() => {
+      const content = JSON.stringify({ decision: 'reply', text: '这是一个真实 PostgreSQL Agent 动态验收回复。', reason: '', segments: [] });
+      return { output_text: content, output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: content }] }] };
+    })();
+  return new Response(JSON.stringify({ model: 'agent-dynamics-postgres', ...response }), { status: 200, headers: { 'content-type': 'application/json' } });
 });
 
 try {
   runtime = createApp({
     host: '127.0.0.1', port: 0, databaseUrl, cookieSecure: false, allowInMemory: false,
     sessionIdleMs: 1_800_000, sessionAbsoluteMs: 28_800_000, xianyuQrMode: 'stub',
-    modelApiKey: 'agent-dynamics-postgres-key', modelBaseUrl: 'https://model.example/v1', modelName: 'agent-dynamics-postgres', modelWireApi: 'chat', modelTimeoutMs: 5_000,
+    modelApiKey: 'agent-dynamics-postgres-key', modelBaseUrl: 'https://model.example/v1', modelName: 'agent-dynamics-postgres', modelWireApi: 'responses', modelTimeoutMs: 5_000,
     autoReplyModelEnabled: true, autoReplySendMode: 'simulate', buyerAllowlist: ['Agent Dynamics Buyer'],
   });
   await runtime.listen();

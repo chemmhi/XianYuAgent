@@ -1430,6 +1430,53 @@ test('OpenAI Responses streaming forwards reasoning summary and function calls',
   assert.deepEqual(result.usage, { input_tokens: 2, output_tokens: 3 });
 });
 
+test('Responses streaming includes the structured-output contract in the request body', async () => {
+  let requestBody: Record<string, unknown> | undefined;
+  const client = new OpenAICompatibleModelClient({
+    apiKey: 'test-key',
+    baseUrl: 'https://model.example/v1',
+    model: 'responses-structured-stream-model',
+    wireApi: 'responses',
+    fetchImpl: async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return sse(
+        'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"{\\"decision\\":\\"reply\\"}"}\n\n',
+        'event: response.completed\ndata: {"type":"response.completed","response":{"status":"completed","model":"responses-structured-stream-model","output":[{"type":"message","content":[{"type":"output_text","text":"{\\"decision\\":\\"reply\\"}"}]}]}}\n\n',
+        'data: [DONE]\n\n',
+      ) as typeof fetch;
+    },
+  });
+  const structuredOutput = {
+    name: 'auto_reply_decision',
+    schema: { type: 'object', additionalProperties: false, properties: { decision: { type: 'string' } }, required: ['decision'] },
+  };
+  const result = await client.stream({ messages: [{ role: 'user', content: 'reply' }], structuredOutput }, {});
+  const format = (((requestBody?.text as Record<string, unknown>).format) as Record<string, unknown>);
+  assert.equal(requestBody?.stream, true);
+  assert.deepEqual(format, { type: 'json_schema', name: 'auto_reply_decision', strict: true, schema: structuredOutput.schema });
+  assert.equal(result.content, '{"decision":"reply"}');
+});
+
+test('Responses streaming rejects incomplete and refusal terminal events', async () => {
+  const payloads = [
+    'event: response.incomplete\ndata: {"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}\n\n',
+    'event: response.completed\ndata: {"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"refusal","refusal":"拒绝输出"}]}]}}\n\n',
+  ];
+  for (const event of payloads) {
+    const client = new OpenAICompatibleModelClient({
+      apiKey: 'test-key',
+      baseUrl: 'https://model.example/v1',
+      model: 'responses-stream-model',
+      wireApi: 'responses',
+      fetchImpl: async () => sse(event, 'data: [DONE]\n\n') as typeof fetch,
+    });
+    await assert.rejects(
+      () => client.stream({ messages: [{ role: 'user', content: 'reply' }] }),
+      (error: unknown) => error instanceof PiModelClientError && error.code === 'MODEL_INVALID_RESPONSE',
+    );
+  }
+});
+
 test('Pi runtime replays a wrong tool choice and lets the model correct itself from the tool error', async () => {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: 'tool-recovery@example.com', passwordHash: 'hash', displayName: 'Tool Recovery' });

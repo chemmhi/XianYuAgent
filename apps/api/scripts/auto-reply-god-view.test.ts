@@ -56,7 +56,7 @@ test('god view sink ignores an unconfigured legacy flag path', async () => {
 test('agent emits prompt, model output, and tool-capable run identifiers to god view', async () => {
   const events: Array<Omit<AutoReplyGodViewEvent, 'ts'>> = [];
   const sink: AutoReplyGodViewSink = { emit: async (event) => { events.push(event); } };
-  const agent = new ToolCallingAutoReplyAgent({} as never, { complete: async () => ({ model: 'god-view-test-model', content: JSON.stringify({ decision: 'reply', text: '已收到。' }) }) }, resolveAutoReplyAgentConfig({}), { godView: sink });
+  const agent = new ToolCallingAutoReplyAgent({} as never, { supportsStructuredOutput: true, complete: async () => ({ model: 'god-view-test-model', content: JSON.stringify({ decision: 'reply', text: '已收到。' }) }) }, resolveAutoReplyAgentConfig({}), { godView: sink });
 
   await agent.generate({
     adminId: 'admin-1',

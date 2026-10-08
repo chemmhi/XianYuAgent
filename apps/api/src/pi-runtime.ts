@@ -38,6 +38,7 @@ import {
 export const DEFAULT_PI_BASE_URL = 'https://api.openai.com/v1';
 export const DEFAULT_PI_MODEL = 'gpt-4o-mini';
 export const DEFAULT_PI_TIMEOUT_MS = 30_000;
+export const DEFAULT_PI_PROVIDER = 'openai';
 export const DEFAULT_PI_WIRE_API: ModelWireApi = 'responses';
 /** Workspace Agent has its own loop budget; it must not reuse buyer Auto-Reply settings. */
 export const DEFAULT_PI_MAX_TOOL_ROUNDS = 24;
@@ -89,6 +90,7 @@ export interface ModelCompletionRequest {
   messages: ModelMessage[];
   tools?: ModelToolDefinition[];
   toolChoice?: 'auto' | 'none' | { type: 'function'; function: { name: string } };
+  structuredOutput?: ModelStructuredOutput;
   /** Provider-declared reasoning level, when supported by the selected model. */
   reasoningEffort?: string;
   signal?: AbortSignal;
@@ -98,6 +100,11 @@ export interface ModelCompletionRequest {
   timeoutPhase?: string;
   /** Auto Reply buffers stream deltas and may retry the attempt before completion. */
   buffered?: boolean;
+}
+
+export interface ModelStructuredOutput {
+  name: string;
+  schema: Record<string, unknown>;
 }
 
 export interface ModelCompletionResult {
@@ -126,6 +133,8 @@ export interface ModelStreamHandlers {
 export interface ModelClient {
   /** Whether the selected transport can execute OpenAI's built-in web_search tool. */
   supportsWebSearch?: boolean;
+  /** Whether the selected transport can enforce the agent's Responses JSON contract. */
+  supportsStructuredOutput?: boolean;
   complete(input: ModelCompletionRequest): Promise<ModelCompletionResult>;
   stream?(input: ModelCompletionRequest, handlers: ModelStreamHandlers): Promise<ModelCompletionResult>;
   safeProbe?(): Promise<ModelProbeResult>;
@@ -150,6 +159,7 @@ export interface PiRuntimeConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
+  provider: string;
   timeoutMs: number;
   wireApi: ModelWireApi;
   reasoningEffort?: string;
@@ -159,6 +169,7 @@ export interface OpenAICompatibleModelClientOptions {
   apiKey: string;
   baseUrl: string;
   model: string;
+  provider?: string;
   timeoutMs?: number;
   wireApi?: ModelWireApi;
   reasoningEffort?: string;
@@ -178,6 +189,7 @@ export type PiModelErrorCode =
   | 'MODEL_INVALID_RESPONSE'
   | 'MODEL_TOOL_LOOP_EXCEEDED'
   | 'MODEL_UNSUPPORTED_TOOL'
+  | 'MODEL_PROVIDER_UNSUPPORTED'
   | 'MODEL_PROVIDER_UNAVAILABLE'
   | 'MODEL_ROUTING_STATE_UNAVAILABLE';
 
@@ -205,18 +217,22 @@ export class OpenAICompatibleModelClient implements ModelClient {
   private readonly endpoint: string;
   private readonly timeoutMs: number;
   private readonly wireApi: ModelWireApi;
+  private readonly responsesProvider: ResponsesProvider;
   private readonly fetchImpl: typeof fetch;
   private readonly probeStrategy: NonNullable<OpenAICompatibleModelClientOptions['probeStrategy']>;
   private readonly probeUrl?: string;
   private readonly probeModel?: string;
   private readonly probeTimeoutMs: number;
   readonly supportsWebSearch: boolean;
+  readonly supportsStructuredOutput: boolean;
 
   constructor(private readonly options: OpenAICompatibleModelClientOptions) {
     if (!options.apiKey.trim()) throw new Error('PI_RUNTIME_API_KEY_REQUIRED');
     if (!options.model.trim()) throw new Error('PI_RUNTIME_MODEL_REQUIRED');
     this.wireApi = normalizeWireApi(options.wireApi);
-    this.supportsWebSearch = this.wireApi === 'responses';
+    this.responsesProvider = this.wireApi === 'responses' ? normalizeResponsesProvider(options.provider) : 'openai';
+    this.supportsWebSearch = this.wireApi === 'responses' && this.responsesProvider === 'openai';
+    this.supportsStructuredOutput = this.wireApi === 'responses';
     this.endpoint = this.wireApi === 'responses' ? toResponsesEndpoint(options.baseUrl) : toChatCompletionsEndpoint(options.baseUrl);
     this.timeoutMs = positiveInteger(options.timeoutMs, DEFAULT_PI_TIMEOUT_MS);
     this.fetchImpl = options.fetchImpl ?? fetch;
@@ -315,7 +331,7 @@ export class OpenAICompatibleModelClient implements ModelClient {
           'content-type': 'application/json',
         },
         body: JSON.stringify(this.wireApi === 'responses'
-          ? toResponsesRequestBody(this.options.model, input, input.reasoningEffort ?? this.options.reasoningEffort)
+          ? toResponsesRequestBody(this.options.model, input, input.reasoningEffort ?? this.options.reasoningEffort, this.responsesProvider)
           : toChatCompletionsRequestBody(this.options.model, input, input.reasoningEffort ?? this.options.reasoningEffort)),
         signal: controller.signal,
       });
@@ -330,6 +346,8 @@ export class OpenAICompatibleModelClient implements ModelClient {
       } catch {
         throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model provider returned invalid JSON');
       }
+
+      if (this.wireApi === 'responses') assertResponsesPayloadAccepted(payload);
 
       const toolCalls = this.wireApi === 'responses' ? extractResponsesToolCalls(payload) : extractCompletionToolCalls(payload);
       const content = this.wireApi === 'responses' ? extractResponsesContent(payload) : extractCompletionContent(payload);
@@ -374,7 +392,7 @@ export class OpenAICompatibleModelClient implements ModelClient {
           'content-type': 'application/json',
         },
         body: JSON.stringify(this.wireApi === 'responses'
-          ? { ...toResponsesRequestBody(this.options.model, input, input.reasoningEffort ?? this.options.reasoningEffort), stream: true }
+          ? { ...toResponsesRequestBody(this.options.model, input, input.reasoningEffort ?? this.options.reasoningEffort, this.responsesProvider), stream: true }
           : { ...toChatCompletionsRequestBody(this.options.model, input, input.reasoningEffort ?? this.options.reasoningEffort), stream: true }),
         signal: controller.signal,
       });
@@ -384,6 +402,7 @@ export class OpenAICompatibleModelClient implements ModelClient {
       if (!contentType.includes('text/event-stream') || !response.body) {
         let payload: unknown;
         try { payload = await response.json(); } catch { throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model provider returned invalid JSON'); }
+        if (this.wireApi === 'responses') assertResponsesPayloadAccepted(payload);
         const result = this.resultFromPayload(payload);
         if (!result.content && !result.toolCalls?.length) throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model provider returned empty content');
         if (result.content) await handlers.onTextDelta?.(result.content);
@@ -1276,6 +1295,7 @@ export function loadPiRuntimeConfig(env: NodeJS.ProcessEnv = process.env): PiRun
     apiKey,
     baseUrl: firstNonEmpty(env.BASE_URL, env.OPENAI_BASE_URL, env.PI_BASE_URL) ?? DEFAULT_PI_BASE_URL,
     model: firstNonEmpty(env.MODEL, env.OPENAI_MODEL, env.PI_MODEL) ?? DEFAULT_PI_MODEL,
+    provider: firstNonEmpty(env.MODEL_PROVIDER, env.OPENAI_PROVIDER, env.PI_PROVIDER) ?? DEFAULT_PI_PROVIDER,
     timeoutMs: positiveInteger(env.PI_RUNTIME_TIMEOUT_MS ?? env.MODEL_TIMEOUT_MS, DEFAULT_PI_TIMEOUT_MS),
     wireApi: normalizeWireApi(firstNonEmpty(env.WIRE_API, env.MODEL_WIRE_API)),
     ...(firstNonEmpty(env.REASONING_EFFORT, env.OPENAI_REASONING_EFFORT, env.PI_REASONING_EFFORT)
@@ -1331,6 +1351,15 @@ function normalizeWireApi(value: string | undefined): ModelWireApi {
   return DEFAULT_PI_WIRE_API;
 }
 
+type ResponsesProvider = 'openai' | 'deepseek';
+
+function normalizeResponsesProvider(value: string | undefined): ResponsesProvider {
+  const normalized = value?.trim().toLowerCase() || DEFAULT_PI_PROVIDER;
+  if (normalized === 'openai' || normalized === 'openai-compatible') return 'openai';
+  if (normalized === 'deepseek') return 'deepseek';
+  throw new PiModelClientError('MODEL_PROVIDER_UNSUPPORTED', `unsupported Responses provider: ${value ?? 'unknown'}`);
+}
+
 function retryAfterMs(response: Response): number | undefined {
   const raw = response.headers.get('retry-after')?.trim();
   if (!raw) return undefined;
@@ -1350,6 +1379,7 @@ function loadBackupPiRuntimeConfig(env: NodeJS.ProcessEnv): PiRuntimeConfig | un
     API_KEY: apiKey,
     BASE_URL: baseUrl,
     MODEL: model,
+    MODEL_PROVIDER: firstNonEmpty(env.BACKUP_MODEL_PROVIDER, env.BACKUP_OPENAI_PROVIDER, env.BACKUP_PI_PROVIDER),
     WIRE_API: firstNonEmpty(env.BACKUP_WIRE_API, env.BACKUP_MODEL_WIRE_API),
     MODEL_TIMEOUT_MS: firstNonEmpty(env.BACKUP_MODEL_TIMEOUT_MS, env.MODEL_TIMEOUT_MS),
     REASONING_EFFORT: firstNonEmpty(env.BACKUP_REASONING_EFFORT),
@@ -1380,13 +1410,25 @@ function toChatCompletionsRequestBody(model: string, input: ModelCompletionReque
   };
 }
 
-function toResponsesRequestBody(model: string, input: ModelCompletionRequest, reasoningEffort?: string): Record<string, unknown> {
+function toResponsesRequestBody(model: string, input: ModelCompletionRequest, reasoningEffort: string | undefined, provider: ResponsesProvider): Record<string, unknown> {
   return {
     model,
     input: input.messages.flatMap(toResponsesInputItems),
     ...(input.tools?.length ? { tools: input.tools.map(toResponsesToolDefinition) } : {}),
     ...(input.toolChoice ? { tool_choice: toResponsesToolChoice(input.toolChoice) } : {}),
     ...(normalizeReasoningEffort(reasoningEffort) ? { reasoning: { effort: normalizeReasoningEffort(reasoningEffort) } } : {}),
+    ...(input.structuredOutput ? { text: { format: toResponsesTextFormat(input.structuredOutput, provider) } } : {}),
+  };
+}
+
+function toResponsesTextFormat(output: ModelStructuredOutput, provider: ResponsesProvider): Record<string, unknown> {
+  const name = output.name.trim();
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'structured output schema name is invalid');
+  return {
+    type: 'json_schema',
+    name,
+    ...(provider === 'openai' ? { strict: true } : {}),
+    schema: output.schema,
   };
 }
 
@@ -1434,6 +1476,7 @@ function modelContentToText(content: ModelMessageContent): string {
 interface StreamState {
   content: string;
   reasoning: string;
+  refusal: string;
   model: string;
   usage?: Record<string, unknown>;
   toolCalls: Map<number, { id: string; name: string; arguments: string }>;
@@ -1442,7 +1485,7 @@ interface StreamState {
 }
 
 function createStreamState(model: string): StreamState {
-  return { content: '', reasoning: '', model, toolCalls: new Map(), webSearchUsed: false, emittedText: false };
+  return { content: '', reasoning: '', refusal: '', model, toolCalls: new Map(), webSearchUsed: false, emittedText: false };
 }
 
 function finalizeStreamState(state: StreamState, fallbackModel: string, responses: boolean): ModelCompletionResult {
@@ -1509,6 +1552,11 @@ async function handleResponsesStreamEvent(eventType: string | undefined, payload
     if (delta) { state.reasoning += delta; await handlers.onReasoningDelta?.(delta); }
     return;
   }
+  if (type?.includes('refusal') && type.includes('delta')) {
+    const delta = firstString(payload.delta, payload.text, payload.refusal);
+    if (delta) state.refusal += delta;
+    return;
+  }
   if (type === 'response.output_item.added' || type === 'response.output_item.done') {
     const item = isRecord(payload.item) ? payload.item : isRecord(payload.output_item) ? payload.output_item : undefined;
     if (item?.type === 'web_search_call') state.webSearchUsed = true;
@@ -1540,6 +1588,8 @@ async function handleResponsesStreamEvent(eventType: string | undefined, payload
   }
   if (type === 'response.completed' || type === 'response.done') {
     const response = isRecord(payload.response) ? payload.response : payload;
+    assertResponsesPayloadAccepted(response);
+    if (state.refusal.trim()) throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model provider refused structured output');
     if (typeof response.model === 'string' && response.model.trim()) state.model = response.model;
     if (isRecord(response.usage)) state.usage = response.usage;
     if (extractResponsesWebSearchUsed(response)) state.webSearchUsed = true;
@@ -1553,9 +1603,8 @@ async function handleResponsesStreamEvent(eventType: string | undefined, payload
     }
     return;
   }
-  if (type === 'error' || type === 'response.failed') {
-    const message = isRecord(payload.error) && typeof payload.error.message === 'string' ? payload.error.message : 'model provider stream failed';
-    throw new PiModelClientError('MODEL_INVALID_RESPONSE', message);
+  if (type === 'error' || type === 'response.failed' || type === 'response.incomplete') {
+    assertResponsesPayloadAccepted(payload);
   }
 }
 
@@ -1694,6 +1743,45 @@ function extractResponsesContent(payload: unknown): string {
   }).join('').trim();
 }
 
+function assertResponsesPayloadAccepted(payload: unknown): void {
+  const envelope = isRecord(payload) ? payload : undefined;
+  const response = envelope && isRecord(envelope.response) ? envelope.response : envelope;
+  const status = typeof response?.status === 'string' ? response.status : undefined;
+  if (status === 'failed') {
+    const message = isRecord(response?.error) && typeof response.error.message === 'string' ? response.error.message : isRecord(envelope?.error) && typeof envelope.error.message === 'string' ? envelope.error.message : 'model provider response failed';
+    throw new PiModelClientError('MODEL_INVALID_RESPONSE', message);
+  }
+  if (status === 'incomplete') {
+    const reason = isRecord(response?.incomplete_details) && typeof response.incomplete_details.reason === 'string' ? response.incomplete_details.reason : isRecord(envelope?.incomplete_details) && typeof envelope.incomplete_details.reason === 'string' ? envelope.incomplete_details.reason : 'unknown';
+    throw new PiModelClientError('MODEL_INVALID_RESPONSE', `model provider response incomplete: ${reason}`);
+  }
+  if (envelope?.type === 'error' || envelope?.type === 'response.failed') {
+    const message = isRecord(envelope.error) && typeof envelope.error.message === 'string' ? envelope.error.message : 'model provider response failed';
+    throw new PiModelClientError('MODEL_INVALID_RESPONSE', message);
+  }
+  if (envelope?.type === 'response.incomplete') {
+    const reason = isRecord(envelope.incomplete_details) && typeof envelope.incomplete_details.reason === 'string' ? envelope.incomplete_details.reason : 'unknown';
+    throw new PiModelClientError('MODEL_INVALID_RESPONSE', `model provider response incomplete: ${reason}`);
+  }
+  const refusal = extractResponsesRefusal(response);
+  if (refusal) throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model provider refused structured output');
+}
+
+function extractResponsesRefusal(payload: unknown): string | undefined {
+  if (!isRecord(payload)) return undefined;
+  if (typeof payload.refusal === 'string' && payload.refusal.trim()) return payload.refusal.trim();
+  if (!Array.isArray(payload.output)) return undefined;
+  for (const item of payload.output) {
+    if (!isRecord(item)) continue;
+    if (item.type === 'refusal' && typeof item.refusal === 'string' && item.refusal.trim()) return item.refusal.trim();
+    if (item.type !== 'message' || !Array.isArray(item.content)) continue;
+    for (const part of item.content) {
+      if (isRecord(part) && part.type === 'refusal' && typeof part.refusal === 'string' && part.refusal.trim()) return part.refusal.trim();
+    }
+  }
+  return undefined;
+}
+
 function extractResponsesToolCalls(payload: unknown): ModelToolCall[] {
   if (!isRecord(payload) || !Array.isArray(payload.output)) return [];
   return payload.output.flatMap((item, index): ModelToolCall[] => {
@@ -1741,6 +1829,7 @@ function summarizePiFailure(error: PiModelClientError): string {
   if (error.code === 'MODEL_NETWORK_ERROR') return '模型服务网络请求失败。';
   if (error.code === 'MODEL_HTTP_ERROR') return '模型服务返回 HTTP 错误。';
   if (error.code === 'MODEL_UNSUPPORTED_TOOL') return '模型请求了当前运行时不支持的工具。';
+  if (error.code === 'MODEL_PROVIDER_UNSUPPORTED') return '模型 Provider 不在当前 Responses 兼容范围内。';
   if (error.code === 'MODEL_INVALID_RESPONSE') {
     if (/tool loop|identical tool|repeat/i.test(error.message)) return '模型重复调用工具或超过 Workspace 工具循环预算，已停止本次执行。';
     if (/empty content|no result/i.test(error.message)) return '模型返回为空，未生成可用结果。';

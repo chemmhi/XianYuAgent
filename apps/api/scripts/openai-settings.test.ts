@@ -22,7 +22,7 @@ function input(adminId: string, accountId: string, role: 'primary' | 'backup', o
     adminId,
     accountId,
     role,
-    provider: role === 'primary' ? 'primary-provider' : 'backup-provider',
+    provider: role === 'primary' ? 'openai' : 'deepseek',
     alias: role,
     baseUrl: `https://${role}.example/v1`,
     model: `${role}-model`,
@@ -38,6 +38,7 @@ function input(adminId: string, accountId: string, role: 'primary' | 'backup', o
 test('application config defaults to Responses while honoring explicit Chat compatibility', () => {
   const base = { API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'test-model' };
   assert.equal(loadConfig(base).modelWireApi, 'responses');
+  assert.equal(loadConfig({ ...base, MODEL_PROVIDER: 'deepseek' }).modelProvider, 'deepseek');
   assert.equal(loadConfig({ ...base, WIRE_API: 'responses' }).modelWireApi, 'responses');
   assert.equal(loadConfig({ ...base, WIRE_API: 'chat' }).modelWireApi, 'chat');
 });
@@ -256,6 +257,66 @@ test('runtime client forwards persisted reasoning effort to the Responses reques
     const client = await service.createRuntimeClient({ ...resolved!, reasoningEffort: 'high' } as Awaited<NonNullable<typeof resolved>> & { reasoningEffort: string });
     await client.complete({ messages: [{ role: 'user', content: 'think carefully' }] });
     assert.deepEqual(requests[0]?.body.reasoning, { effort: 'high' });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('runtime client forwards the persisted provider into Responses structured output formatting', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<Record<string, unknown>> = [];
+  globalThis.fetch = (async (_input, init) => {
+    requests.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
+    return new Response(JSON.stringify({ model: 'deepseek-model', output_text: '{"decision":"reply"}' }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+
+  try {
+    const { admin, account, service } = await fixture();
+    const saved = await service.save(input(admin.id, account.id, 'primary', { provider: 'deepseek', model: 'deepseek-model' }));
+    const resolved = await service.resolveById(admin.id, saved.id!, account.id);
+    assert.ok(resolved);
+    const client = await service.createRuntimeClient(resolved!);
+    await client.complete({
+      messages: [{ role: 'user', content: 'reply' }],
+      structuredOutput: {
+        name: 'auto_reply_decision',
+        schema: { type: 'object', additionalProperties: false, properties: { decision: { type: 'string' } }, required: ['decision'] },
+      },
+    });
+    const format = ((requests[0]?.text as Record<string, unknown>).format) as Record<string, unknown>;
+    assert.deepEqual(format, {
+      type: 'json_schema',
+      name: 'auto_reply_decision',
+      schema: { type: 'object', additionalProperties: false, properties: { decision: { type: 'string' } }, required: ['decision'] },
+    });
+    assert.equal('strict' in format, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('runtime client preserves the legacy openai-compatible provider alias', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<Record<string, unknown>> = [];
+  globalThis.fetch = (async (_input, init) => {
+    requests.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
+    return new Response(JSON.stringify({ model: 'legacy-model', output_text: '{"decision":"reply"}' }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+
+  try {
+    const { admin, account, service } = await fixture();
+    const saved = await service.save(input(admin.id, account.id, 'primary', { provider: 'openai-compatible', model: 'legacy-model' }));
+    const resolved = await service.resolveById(admin.id, saved.id!, account.id);
+    assert.ok(resolved);
+    const client = await service.createRuntimeClient(resolved!);
+    await client.complete({
+      messages: [{ role: 'user', content: 'reply' }],
+      structuredOutput: {
+        name: 'auto_reply_decision',
+        schema: { type: 'object', additionalProperties: false, properties: { decision: { type: 'string' } }, required: ['decision'] },
+      },
+    });
+    assert.equal(((requests[0]?.text as Record<string, unknown>).format as Record<string, unknown>).strict, true);
   } finally {
     globalThis.fetch = originalFetch;
   }

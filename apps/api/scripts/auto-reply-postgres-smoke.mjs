@@ -13,13 +13,16 @@ let modelCall = 0;
 globalThis.fetch = (async (_input, init) => {
   modelCall += 1;
   const body = JSON.parse(String(init?.body));
-  const message = modelCall === 1
-    ? { content: '', tool_calls: [{ id: 'pg-product-1', type: 'function', function: { name: 'get_product_info', arguments: '{}' } }] }
-    : { content: JSON.stringify({ decision: 'reply', text: '这是一个 PostgreSQL 回归测试商品，已确认可以正常回复。' }) };
+  const response = modelCall === 1
+    ? { output: [{ type: 'function_call', call_id: 'pg-product-1', name: 'get_product_info', arguments: '{}' }] }
+    : (() => {
+      const content = JSON.stringify({ decision: 'reply', text: '这是一个 PostgreSQL 回归测试商品，已确认可以正常回复。', reason: '', segments: [] });
+      return { output_text: content, output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: content }] }] };
+    })();
   assert.equal(body.model, 'auto-reply-postgres-smoke');
-  return new Response(JSON.stringify({ model: 'auto-reply-postgres-smoke', choices: [{ message }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  return new Response(JSON.stringify({ model: 'auto-reply-postgres-smoke', ...response }), { status: 200, headers: { 'content-type': 'application/json' } });
 });
-const config = { host: '127.0.0.1', port: 0, databaseUrl, cookieSecure: false, allowInMemory: false, sessionIdleMs: 1_800_000, sessionAbsoluteMs: 28_800_000, xianyuQrMode: 'stub', modelApiKey: 'auto-reply-postgres-smoke-key', modelBaseUrl: 'https://model.example/v1', modelName: 'auto-reply-postgres-smoke', modelWireApi: 'chat', modelTimeoutMs: 5_000, autoReplyModelEnabled: true, autoReplySendMode: 'simulate', buyerAllowlist: [`Auto Reply PostgreSQL Buyer`], autoReplyAgent: resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_WEB_SEARCH_ENABLED: 'false', AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0' }) };
+const config = { host: '127.0.0.1', port: 0, databaseUrl, cookieSecure: false, allowInMemory: false, sessionIdleMs: 1_800_000, sessionAbsoluteMs: 28_800_000, xianyuQrMode: 'stub', modelApiKey: 'auto-reply-postgres-smoke-key', modelBaseUrl: 'https://model.example/v1', modelName: 'auto-reply-postgres-smoke', modelWireApi: 'responses', modelTimeoutMs: 5_000, autoReplyModelEnabled: true, autoReplySendMode: 'simulate', buyerAllowlist: [`Auto Reply PostgreSQL Buyer`], autoReplyAgent: resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_WEB_SEARCH_ENABLED: 'false', AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0' }) };
 let runtime;
 let adminId;
 let accountId;

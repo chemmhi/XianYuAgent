@@ -14,11 +14,14 @@ let modelCall = 0;
 globalThis.fetch = (async (_input, init) => {
   modelCall += 1;
   const body = JSON.parse(String(init?.body));
-  const message = modelCall === 1
-    ? { content: '', tool_calls: [{ id: 'push-product-1', type: 'function', function: { name: 'get_product_info', arguments: '{}' } }] }
-    : { content: JSON.stringify({ decision: 'reply', text: '这是一个 PostgreSQL 买家推送回归测试商品，已确认可以正常回复。' }) };
+  const response = modelCall === 1
+    ? { output: [{ type: 'function_call', call_id: 'push-product-1', name: 'get_product_info', arguments: '{}' }] }
+    : (() => {
+      const content = JSON.stringify({ decision: 'reply', text: '这是一个 PostgreSQL 买家推送回归测试商品，已确认可以正常回复。', reason: '', segments: [] });
+      return { output_text: content, output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: content }] }] };
+    })();
   assert.equal(body.model, 'auto-reply-buyer-push-postgres-smoke');
-  return new Response(JSON.stringify({ model: 'auto-reply-buyer-push-postgres-smoke', choices: [{ message }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  return new Response(JSON.stringify({ model: 'auto-reply-buyer-push-postgres-smoke', ...response }), { status: 200, headers: { 'content-type': 'application/json' } });
 });
 
 const config = {
@@ -33,7 +36,7 @@ const config = {
   modelApiKey: 'auto-reply-buyer-push-postgres-smoke-key',
   modelBaseUrl: 'https://model.example/v1',
   modelName: 'auto-reply-buyer-push-postgres-smoke',
-  modelWireApi: 'chat',
+  modelWireApi: 'responses',
   modelTimeoutMs: 5_000,
   autoReplyModelEnabled: true,
   autoReplySendMode: 'simulate',

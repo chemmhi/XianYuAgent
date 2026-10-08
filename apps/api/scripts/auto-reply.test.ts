@@ -167,15 +167,16 @@ test('model generator sends bounded document context to the shared model client'
 
 test('configured model provider generates the persisted auto-reply', async () => {
   const originalFetch = globalThis.fetch;
-  const calls: Array<{ url: string; body: { model: string; messages: Array<{ role: string; content: string }> } }> = [];
+  const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
   globalThis.fetch = (async (input, init) => {
     calls.push({ url: String(input), body: JSON.parse(String(init?.body)) as typeof calls[number]['body'] });
-    return new Response(JSON.stringify({ model: 'test-model', choices: [{ message: { content: JSON.stringify({ decision: 'reply', text: 'AI 生成的准确回复' }) } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    const content = JSON.stringify({ decision: 'reply', text: 'AI 生成的准确回复', reason: '', segments: [] });
+    return new Response(JSON.stringify({ model: 'test-model', output_text: content, output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: content }] }] }), { status: 200, headers: { 'content-type': 'application/json' } });
   }) as typeof fetch;
 
   const runtime = createApp(loadConfig({ AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
     HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
-    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'test-model', WIRE_API: 'chat', MODEL_TIMEOUT_MS: '1000', AUTO_REPLY_SEND_MODE: 'simulate', AUTOMATION_BUYER_ALLOWLIST: '["Allowlisted Buyer"]',
+    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'test-model', WIRE_API: 'responses', MODEL_TIMEOUT_MS: '1000', AUTO_REPLY_SEND_MODE: 'simulate', AUTOMATION_BUYER_ALLOWLIST: '["Allowlisted Buyer"]',
   }));
   const admin = await runtime.store.createAdmin({ email: 'model-provider@example.com', passwordHash: 'hash', displayName: 'Model Provider' });
   const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'model-provider-seller' });
@@ -199,9 +200,25 @@ test('configured model provider generates the persisted auto-reply', async () =>
     assert.ok(agentLogEvents?.some((event) => (event.payload.log as Record<string, unknown>).phase === 'agent' && (event.payload.log as Record<string, unknown>).decision === 'reply'));
     assert.doesNotMatch(JSON.stringify(detail?.events ?? []), /请问这个是什么东西/);
     assert.equal(calls.length, 1);
-    assert.equal(calls[0]?.url, 'https://model.example/v1/chat/completions');
+    assert.equal(calls[0]?.url, 'https://model.example/v1/responses');
     assert.equal(calls[0]?.body.model, 'test-model');
-    assert.equal(calls[0]?.body.messages[0]?.role, 'system');
+    assert.equal((calls[0]?.body.input as Array<Record<string, unknown>>)[0]?.role, 'system');
+    assert.deepEqual((calls[0]?.body.text as Record<string, unknown>).format, {
+      type: 'json_schema',
+      name: 'auto_reply_decision',
+      strict: true,
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          decision: { type: 'string', enum: ['reply', 'skip', 'handoff'] },
+          text: { type: 'string' },
+          reason: { type: 'string' },
+          segments: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['decision', 'text', 'reason', 'segments'],
+      },
+    });
   } finally {
     await runtime.close();
     globalThis.fetch = originalFetch;
@@ -210,15 +227,16 @@ test('configured model provider generates the persisted auto-reply', async () =>
 
 test('multimodal inbound image reaches the model Agent and persists a structured reply', async () => {
   const originalFetch = globalThis.fetch;
-  const calls: Array<{ body: { messages: Array<{ role: string; content: unknown }> } }> = [];
+  const calls: Array<{ body: Record<string, unknown> }> = [];
   globalThis.fetch = (async (_input, init) => {
     calls.push({ body: JSON.parse(String(init?.body)) as typeof calls[number]['body'] });
-    return new Response(JSON.stringify({ model: 'vision-model', choices: [{ message: { content: JSON.stringify({ decision: 'reply', text: '我看到了你发来的图片。' }) } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    const content = JSON.stringify({ decision: 'reply', text: '我看到了你发来的图片。', reason: '', segments: [] });
+    return new Response(JSON.stringify({ model: 'vision-model', output_text: content, output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: content }] }] }), { status: 200, headers: { 'content-type': 'application/json' } });
   }) as typeof fetch;
 
   const runtime = createApp(loadConfig({ AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0',
     HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process',
-    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'vision-model', WIRE_API: 'chat', MODEL_TIMEOUT_MS: '1000', AUTO_REPLY_SEND_MODE: 'simulate', AUTOMATION_BUYER_ALLOWLIST: '["Vision Buyer"]',
+    API_KEY: 'test-key', BASE_URL: 'https://model.example/v1', MODEL: 'vision-model', WIRE_API: 'responses', MODEL_TIMEOUT_MS: '1000', AUTO_REPLY_SEND_MODE: 'simulate', AUTOMATION_BUYER_ALLOWLIST: '["Vision Buyer"]',
   }));
   const admin = await runtime.store.createAdmin({ email: 'vision@example.com', passwordHash: 'hash', displayName: 'Vision' });
   const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'vision-seller' });
@@ -230,9 +248,9 @@ test('multimodal inbound image reaches the model Agent and persists a structured
     });
     assert.equal(result.autoReply?.run.status, 'persisted');
     assert.equal(result.autoReply?.outboundMessage?.bodyText, '我看到了你发来的图片。');
-    const userMessage = calls[0]?.body.messages.find((message) => message.role === 'user');
+    const userMessage = (calls[0]?.body.input as Array<{ role?: string; content?: unknown }>).find((message) => message.role === 'user');
     assert.ok(Array.isArray(userMessage?.content));
-    assert.deepEqual((userMessage?.content as Array<{ type: string; image_url?: { url: string } }>).filter((part) => part.type === 'image_url').map((part) => part.image_url?.url), ['https://img.example/buyer.png']);
+    assert.deepEqual((userMessage?.content as Array<{ type: string; image_url?: string }>).filter((part) => part.type === 'input_image').map((part) => part.image_url), ['https://img.example/buyer.png']);
   } finally {
     await runtime.close();
     globalThis.fetch = originalFetch;

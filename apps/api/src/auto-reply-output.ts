@@ -1,4 +1,20 @@
 import type { AutoReplyGeneratedReply } from './auto-reply.js';
+import type { ModelStructuredOutput } from './pi-runtime.js';
+
+export const AUTO_REPLY_STRUCTURED_OUTPUT: ModelStructuredOutput = {
+  name: 'auto_reply_decision',
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      decision: { type: 'string', enum: ['reply', 'skip', 'handoff'] },
+      text: { type: 'string' },
+      reason: { type: 'string' },
+      segments: { type: 'array', items: { type: 'string' } },
+    },
+    required: ['decision', 'text', 'reason', 'segments'],
+  },
+};
 
 export type AutoReplyModelDecision =
   | { decision: 'reply'; reply: AutoReplyGeneratedReply }
