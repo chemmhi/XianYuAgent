@@ -1,5 +1,4 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { SelectField } from '../../../shared/ui/SelectField';
 import { Button } from '../../../shared/ui/Button';
 import { InputField } from '../../../shared/ui/InputField';
 import { TextAreaField } from '../../../shared/ui/TextAreaField';
@@ -48,20 +47,14 @@ export function AutoReplyAgentPanel({ controller, accountName, accountId }: { co
           <InputField label="最大循环次数" type="number" min={1} max={12} value={draft.maxLoops} onChange={(event) => setField('maxLoops', Number(event.target.value))} required />
           <InputField label="工具调用上限" type="number" min={1} max={32} value={draft.maxToolCalls} onChange={(event) => setField('maxToolCalls', Number(event.target.value))} required />
           <InputField label="工具超时（毫秒）" type="number" min={100} max={120000} value={draft.toolTimeoutMs} onChange={(event) => setField('toolTimeoutMs', Number(event.target.value))} required />
-          <InputField label={<span className="settings-label-with-help">总超时（毫秒）<InfoTooltip id={`auto-reply-timeout-help-${accountId}`} text="自动回复 Agent 一次完整处理的总时间预算。模型生成、工具调用和回复整理共享该预算；增大后复杂问题可以等待更久，Workspace 的超时设置不受影响。" /></span>} type="number" min={1000} max={300000} value={draft.totalTimeoutMs} onChange={(event) => setField('totalTimeoutMs', Number(event.target.value))} aria-describedby={`auto-reply-timeout-help-${accountId}`} required />
+          <InputField label="总超时（毫秒）" type="number" min={1000} max={300000} value={draft.totalTimeoutMs} onChange={(event) => setField('totalTimeoutMs', Number(event.target.value))} required />
           <InputField label="上下文历史条数" type="number" min={0} max={100} value={draft.maxHistory} onChange={(event) => setField('maxHistory', Number(event.target.value))} required />
           <InputField label="最大回复长度" type="number" min={30} max={4000} value={draft.maxReplyLength} onChange={(event) => setField('maxReplyLength', Number(event.target.value))} required />
           <InputField label="分段发送间隔（毫秒）" type="number" min={0} max={30000} value={draft.replySegmentDelayMs} onChange={(event) => setField('replySegmentDelayMs', Number(event.target.value))} required />
           <InputField label="自动回复接管等待时间（秒）" type="number" min={0} max={86400} value={draft.sendDelaySeconds} onChange={(event) => setField('sendDelaySeconds', Number(event.target.value))} required />
-          <SelectField label="发送模式" value={draft.sendMode} onChange={(event) => setField('sendMode', event.target.value as EditableConfig['sendMode'])} options={[{ value: 'simulate', label: '模拟发送' }, { value: 'live', label: '真实发送（受白名单约束）' }]} />
         </fieldset>
       </div>
-      <div className="settings-editor-note"><strong>配置审计</strong><span>当前版本 v{state.data.configVersion} · 摘要 {state.data.configDigest} · Prompt 原文不会写入审计日志。</span></div>
       <div className="modal-actions"><Button variant="primary" type="submit" disabled={state.phase === 'submitting'}>{state.phase === 'submitting' ? '保存中…' : '保存自动回复 Agent 配置'}</Button></div>
     </form>
   </div>;
-}
-
-function InfoTooltip({ id, text }: { id: string; text: string }) {
-  return <button type="button" className="settings-info-tooltip" aria-describedby={id} aria-label="查看配置说明"><span aria-hidden="true">i</span><span id={id} role="tooltip">{text}</span></button>;
 }

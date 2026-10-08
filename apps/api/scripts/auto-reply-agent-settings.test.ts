@@ -49,6 +49,32 @@ test('auto reply agent settings reject unsafe values before persistence', async 
   assert.equal((await service.get(admin.id, account.id)).configVersion, 0);
 });
 
+test('auto reply agent settings persist every editable field without dropping values', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'agent-settings-roundtrip@example.com', passwordHash: 'hash', displayName: 'Agent Settings Roundtrip' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'agent-settings-roundtrip-seller' });
+  const service = new AutoReplyAgentSettingsService(store, DEFAULT_AUTO_REPLY_AGENT_CONFIG, async () => 'audit-1');
+  const patch = {
+    enabled: false,
+    systemPrompt: '回归系统提示词',
+    userPromptTemplate: '买家问题：{{buyerMessage}}\n{{context}}',
+    maxLoops: 7,
+    maxToolCalls: 9,
+    toolTimeoutMs: 15_000,
+    totalTimeoutMs: 90_000,
+    maxHistory: 15,
+    maxReplyLength: 120,
+    replySegmentDelayMs: 450,
+    sendDelaySeconds: 1,
+    sendMode: 'live' as const,
+  };
+  const saved = await service.update({ adminId: admin.id, accountId: account.id, expectedVersion: 0, patch, requestId: 'req-roundtrip', traceId: 'trace-roundtrip' });
+  for (const [key, value] of Object.entries(patch)) assert.equal(saved[key as keyof typeof patch], value, `${key} was not persisted`);
+  assert.equal(saved.debounceMs, DEFAULT_AUTO_REPLY_AGENT_CONFIG.debounceMs);
+  const reread = await service.get(admin.id, account.id);
+  for (const [key, value] of Object.entries(patch)) assert.equal(reread[key as keyof typeof patch], value, `${key} was not readable after persistence`);
+});
+
 test('auto reply agent max reply length accepts 30 and rejects values below it', async () => {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: 'agent-settings-length@example.com', passwordHash: 'hash', displayName: 'Agent Settings Length' });

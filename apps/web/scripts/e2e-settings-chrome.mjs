@@ -101,6 +101,11 @@ async function setLabelInput(cdp, labelText, value) {
   return evaluate(cdp, expression);
 }
 
+async function setLabelTextArea(cdp, labelText, value) {
+  const expression = `(() => { const label = Array.from(document.querySelectorAll('.settings-form-grid label')).find((node) => node.textContent?.trim().startsWith(${JSON.stringify(labelText)})); const textarea = label?.querySelector('textarea'); if (!textarea) throw new Error('missing labeled textarea: ' + ${JSON.stringify(labelText)}); const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set; setter?.call(textarea, ${JSON.stringify(value)}); textarea.dispatchEvent(new Event('input', { bubbles: true })); textarea.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`;
+  return evaluate(cdp, expression);
+}
+
 async function clickText(cdp, text, selector = 'button') {
   const expression = `(() => { const node = Array.from(document.querySelectorAll(${JSON.stringify(selector)})).find((item) => item.textContent?.trim() === ${JSON.stringify(text)}); if (!node) throw new Error('missing button: ' + ${JSON.stringify(text)}); node.click(); return true; })()`;
   return evaluate(cdp, expression);
@@ -209,14 +214,27 @@ async function run() {
   const agentDisabledMobilePath = await captureViewport(cdp, 390, 844, 'settings-agent-disabled-mobile-390x844.png');
   await evaluate(cdp, "(() => { const enabled = document.querySelector('[data-auto-reply-agent-panel] input[type=\"checkbox\"]'); enabled?.click(); return true; })()");
   await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-auto-reply-agent-panel] fieldset.auto-reply-agent-fields:not([disabled])"))'), 'Auto Reply Agent re-enabled');
+  await setLabelTextArea(cdp, '系统提示词', '设置页全量回归系统提示词');
+  await setLabelTextArea(cdp, '用户提示词模板', '请处理买家问题：{{buyerMessage}}\n{{context}}');
   await setLabelInput(cdp, '最大循环次数', '6');
+  await setLabelInput(cdp, '工具调用上限', '9');
+  await setLabelInput(cdp, '工具超时（毫秒）', '15000');
+  await setLabelInput(cdp, '总超时（毫秒）', '90000');
+  await setLabelInput(cdp, '上下文历史条数', '15');
+  await setLabelInput(cdp, '最大回复长度', '120');
+  await setLabelInput(cdp, '分段发送间隔（毫秒）', '450');
   const legacyDebounceField = await evaluate(cdp, "Boolean(Array.from(document.querySelectorAll('[data-auto-reply-agent-panel] label')).find((label) => label.textContent?.includes('防抖窗口')))" );
   if (legacyDebounceField) throw new Error('legacy debounce field should not be visible');
+  const removedSections = await evaluate(cdp, "(() => { const panel = document.querySelector('[data-auto-reply-agent-panel]'); return { sendMode: Array.from(panel?.querySelectorAll('label') ?? []).some((label) => label.textContent?.includes('发送模式')), audit: panel?.textContent?.includes('配置审计') === true, tooltip: panel?.querySelector('.settings-info-tooltip') !== null }; })()");
+  if (removedSections.sendMode || removedSections.audit || removedSections.tooltip) throw new Error('marked settings content is still visible: ' + JSON.stringify(removedSections));
   await setLabelInput(cdp, '自动回复接管等待时间（秒）', '1');
   await clickText(cdp, '保存自动回复 Agent 配置');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('自动回复 Agent 配置已保存'), 'agent settings saved');
   const agentSaved = await requestJson(apiUrl, agentPath, { headers: { cookie } });
-  if (!agentSaved.response.ok || agentSaved.body.data?.configVersion !== 1 || agentSaved.body.data?.maxLoops !== 6 || agentSaved.body.data?.sendDelaySeconds !== 1) throw new Error(`agent settings persistence failed: ${agentSaved.response.status} ${JSON.stringify(agentSaved.body)}`);
+  const savedConfig = agentSaved.body.data;
+  const expectedConfig = { enabled: true, systemPrompt: '设置页全量回归系统提示词', userPromptTemplate: '请处理买家问题：{{buyerMessage}}\n{{context}}', maxLoops: 6, maxToolCalls: 9, toolTimeoutMs: 15000, totalTimeoutMs: 90000, maxHistory: 15, maxReplyLength: 120, replySegmentDelayMs: 450, sendDelaySeconds: 1 };
+  for (const [key, value] of Object.entries(expectedConfig)) if (savedConfig?.[key] !== value) throw new Error(`agent setting ${key} did not persist: ${JSON.stringify({ expected: value, actual: savedConfig?.[key], response: agentSaved.body })}`);
+  if (!agentSaved.response.ok || savedConfig?.configVersion !== 1) throw new Error(`agent settings persistence failed: ${agentSaved.response.status} ${JSON.stringify(agentSaved.body)}`);
   const agentStale = await requestJson(apiUrl, '/api/v1/settings/agent', {
     method: 'PATCH',
     headers: { 'content-type': 'application/json', cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': `agent-settings-stale-${process.pid}` },
