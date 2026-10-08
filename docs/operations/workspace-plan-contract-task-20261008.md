@@ -1,5 +1,7 @@
 # Workspace Plan Mode 通用合同（2026-10-08）
 
+> SUPERSEDED on 2026-10-08 by [plan-io-alignment-20261008.md](plan-io-alignment-20261008.md). This archival note is retained for history; implementation and review MUST follow the versioned tool-metadata contract, path grammar, confirmation-phase facts, and IAB acceptance gates in the superseding document.
+
 ## 设计目标
 
 - Plan Mode 默认由模型自主生成工具顺序，不内置任何单一业务任务的固定步骤。

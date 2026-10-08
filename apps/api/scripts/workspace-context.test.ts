@@ -1,8 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyWorkspacePlanResult, buildWorkspaceCheckpoint, compactWorkspaceModelMessages, compactWorkspaceModelMessagesWithModel, completeConfirmedWorkspacePlanStep, createWorkspaceExecutionPlan, createWorkspaceExecutionPlanFromModel, createWorkspacePlanMessage, planWorkspaceToolUse, reopenBlockedWorkspacePlan, restoreWorkspaceExecutionPlan, reviseWorkspaceExecutionPlanFromModel } from '../src/workspace-context.js';
+import { applyWorkspacePlanFacts, applyWorkspacePlanResult, buildWorkspaceCheckpoint, compactWorkspaceModelMessages, compactWorkspaceModelMessagesWithModel, completeConfirmedWorkspacePlanStep, createWorkspaceExecutionPlan, createWorkspaceExecutionPlanFromModel, createWorkspacePlanMessage, planWorkspaceToolUse, reopenBlockedWorkspacePlan, restoreWorkspaceExecutionPlan, reviseWorkspaceExecutionPlanFromModel } from '../src/workspace-context.js';
 import { buildWorkspaceRuntimeHistory } from '../src/workspace.js';
+import { allWorkspaceToolPlanMetadata } from '../src/workspace-tool-plans.js';
 import type { RunEventRecord } from '../src/domain.js';
+
+const tool = (name: string, description: string, parameters: Record<string, unknown> = {}) => ({
+  type: 'function' as const,
+  function: { name, description, parameters, plan: allWorkspaceToolPlanMetadata(name) },
+});
+const step = (toolName: string, goal: string, variant = 'default') => ({ tool: toolName, goal, variant, contractVersion: 1 });
 
 const event = (sequence: number, eventType: string, payload: Record<string, unknown>): RunEventRecord => ({
   sequence, runId: 'run-1', eventType, payload, createdAt: '2026-10-07T01:00:00.000Z',
@@ -161,20 +168,20 @@ test('model compaction rejects a marginal reduction dominated by fixed context',
 });
 
 test('tool planning accepts only available tools and bounded structured steps', async () => {
-  const tools = [{ type: 'function' as const, function: { name: 'workspace_product_search', description: 'search', parameters: {} } }];
-  const valid = await planWorkspaceToolUse('查找商品', tools, { async complete() { return { content: '{"steps":[{"tool":"workspace_product_search","goal":"按名称查找目标商品"}]}', model: 'test' }; } });
+  const tools = [tool('workspace_product_search', 'search')];
+  const valid = await planWorkspaceToolUse('查找商品', tools, { async complete() { return { content: '{"steps":[{"tool":"workspace_product_search","variant":"default","contractVersion":1,"goal":"按名称查找目标商品"}]}', model: 'test' }; } });
   assert.match(valid ?? '', /workspace_product_search/);
-  const invalid = await planWorkspaceToolUse('查找商品', tools, { async complete() { return { content: '{"steps":[{"tool":"workspace_prepare_write","goal":"写入"}]}', model: 'test' }; } });
+  const invalid = await planWorkspaceToolUse('查找商品', tools, { async complete() { return { content: '{"steps":[{"tool":"workspace_prepare_write","variant":"default","contractVersion":1,"goal":"写入"}]}', model: 'test' }; } });
   assert.equal(invalid, undefined);
 });
 
 test('Plan Mode creates durable ordered steps and advances only the current step', async () => {
   const tools = [
-    { type: 'function' as const, function: { name: 'workspace_product_search', description: 'search', parameters: {} } },
-    { type: 'function' as const, function: { name: 'workspace_prepare_write', description: 'write', parameters: {} } },
+    tool('workspace_product_search', 'search'),
+    tool('workspace_prepare_write', 'write'),
   ];
   const plan = await createWorkspaceExecutionPlanFromModel('查找商品并准备写入', tools, {
-    async complete() { return { content: '{"steps":[{"tool":"workspace_product_search","goal":"定位目标商品"},{"tool":"workspace_prepare_write","goal":"生成受控写入确认"}]}', model: 'test' }; },
+    async complete() { return { content: '{"steps":[{"tool":"workspace_product_search","variant":"default","contractVersion":1,"goal":"定位目标商品"},{"tool":"workspace_prepare_write","variant":"coupon_create","contractVersion":1,"goal":"生成受控写入确认"}]}', model: 'test' }; },
   });
   assert.deepEqual(plan?.steps.map((step) => [step.id, step.tool, step.status]), [
     ['step-1', 'workspace_product_search', 'pending'],
@@ -195,7 +202,7 @@ test('Plan Mode creates durable ordered steps and advances only the current step
 });
 
 test('Plan Mode marks a completed plan after the final successful step', () => {
-  const plan = createWorkspaceExecutionPlan({ instruction: '完成读取', steps: [{ tool: 'workspace_read', goal: '读取数据' }] })!;
+  const plan = createWorkspaceExecutionPlan({ instruction: '完成读取', steps: [step('workspace_read', '读取数据')], toolMetadata: { workspace_read: allWorkspaceToolPlanMetadata('workspace_read')! } })!;
   const completed = applyWorkspacePlanResult(plan, { toolName: 'workspace_read', succeeded: true, evidence: '读取完成' });
   assert.equal(completed.status, 'completed');
   assert.equal(completed.currentStepId, undefined);
@@ -203,7 +210,7 @@ test('Plan Mode marks a completed plan after the final successful step', () => {
 });
 
 test('Plan Mode reopens only the blocked step during an explicit reconnect', () => {
-  const plan = createWorkspaceExecutionPlan({ instruction: '完成读取', steps: [{ tool: 'workspace_read', goal: '读取数据' }, { tool: 'workspace_prepare_write', goal: '准备写入' }] })!;
+  const plan = createWorkspaceExecutionPlan({ instruction: '完成读取', steps: [step('workspace_read', '读取数据'), step('workspace_prepare_write', '准备写入', 'coupon_create')], toolMetadata: { workspace_read: allWorkspaceToolPlanMetadata('workspace_read')!, workspace_prepare_write: allWorkspaceToolPlanMetadata('workspace_prepare_write')! } })!;
   const blocked = applyWorkspacePlanResult(plan, { toolName: 'workspace_read', succeeded: false, evidence: '后端不可用' });
   const reopened = reopenBlockedWorkspacePlan(blocked);
   assert.equal(blocked.status, 'blocked');
@@ -216,18 +223,18 @@ test('Plan Mode reopens only the blocked step during an explicit reconnect', () 
 
 test('Plan Mode revises the remaining steps when the current tool cannot complete the task', async () => {
   const plan = createWorkspaceExecutionPlan({ instruction: '定位商品并读取状态', steps: [
-    { tool: 'workspace_product_search', goal: '定位目标商品' },
-    { tool: 'workspace_read', goal: '读取商品状态' },
-  ] })!;
+    step('workspace_product_search', '定位目标商品'),
+    step('workspace_read', '读取商品状态'),
+  ], toolMetadata: { workspace_product_search: allWorkspaceToolPlanMetadata('workspace_product_search')!, workspace_read: allWorkspaceToolPlanMetadata('workspace_read')! } })!;
   const revised = await reviseWorkspaceExecutionPlanFromModel(plan, {
     toolName: 'workspace_product_search',
     code: 'SEARCH_BACKEND_DOWN',
     summary: '搜索后端不可用，改用工作区读取能力',
   }, [
-    { type: 'function', function: { name: 'workspace_product_search', description: 'search', parameters: {} } },
-    { type: 'function', function: { name: 'workspace_read', description: 'read', parameters: {} } },
+    tool('workspace_product_search', 'search'),
+    tool('workspace_read', 'read'),
   ], {
-    async complete() { return { content: '{"steps":[{"tool":"workspace_read","goal":"直接读取现有商品状态"}]}', model: 'replan-model' }; },
+    async complete() { return { content: '{"steps":[{"tool":"workspace_read","variant":"default","contractVersion":1,"goal":"直接读取现有商品状态"}]}', model: 'replan-model' }; },
   });
   assert.equal(revised?.revision, 2);
   assert.equal(revised?.status, 'active');
@@ -239,26 +246,26 @@ test('Plan Mode revises the remaining steps when the current tool cannot complet
 
 test('Plan Mode caps replanned steps at the eight-step plan limit', async () => {
   const plan = createWorkspaceExecutionPlan({ instruction: '执行完整任务', steps: [
-    { tool: 'workspace_read', goal: '已完成读取' },
-    { tool: 'workspace_product_search', goal: '当前搜索' },
-    { tool: 'workspace_read', goal: '原计划步骤 3' },
-    { tool: 'workspace_read', goal: '原计划步骤 4' },
-    { tool: 'workspace_read', goal: '原计划步骤 5' },
-    { tool: 'workspace_read', goal: '原计划步骤 6' },
-    { tool: 'workspace_read', goal: '原计划步骤 7' },
-    { tool: 'workspace_read', goal: '原计划步骤 8' },
-  ] })!;
+    step('workspace_read', '已完成读取'),
+    step('workspace_product_search', '当前搜索'),
+    step('workspace_read', '原计划步骤 3'),
+    step('workspace_read', '原计划步骤 4'),
+    step('workspace_read', '原计划步骤 5'),
+    step('workspace_read', '原计划步骤 6'),
+    step('workspace_read', '原计划步骤 7'),
+    step('workspace_read', '原计划步骤 8'),
+  ], toolMetadata: { workspace_read: allWorkspaceToolPlanMetadata('workspace_read')!, workspace_product_search: allWorkspaceToolPlanMetadata('workspace_product_search')! } })!;
   const afterCompleted = applyWorkspacePlanResult(plan, { toolName: 'workspace_read', succeeded: true, evidence: '读取完成' });
   const revised = await reviseWorkspaceExecutionPlanFromModel(afterCompleted, {
     toolName: 'workspace_product_search',
     code: 'SEARCH_BACKEND_DOWN',
     summary: '搜索后端不可用',
   }, [
-    { type: 'function', function: { name: 'workspace_product_search', description: 'search', parameters: {} } },
-    { type: 'function', function: { name: 'workspace_read', description: 'read', parameters: {} } },
+    tool('workspace_product_search', 'search'),
+    tool('workspace_read', 'read'),
   ], {
     async complete() {
-      return { content: JSON.stringify({ steps: Array.from({ length: 8 }, (_, index) => ({ tool: 'workspace_read', goal: `替代步骤 ${index + 1}` })) }), model: 'replan-model' };
+      return { content: JSON.stringify({ steps: Array.from({ length: 8 }, (_, index) => ({ tool: 'workspace_read', variant: 'default', contractVersion: 1, goal: `替代步骤 ${index + 1}` })) }), model: 'replan-model' };
     },
   });
   assert.ok(revised);
@@ -269,9 +276,9 @@ test('Plan Mode caps replanned steps at the eight-step plan limit', async () => 
 });
 
 test('Plan Mode completes a confirmed write before continuing to the next step', () => {
-  const plan = createWorkspaceExecutionPlan({ instruction: '先创建卡券再关联商品', steps: [{ tool: 'workspace_prepare_write', goal: '创建卡券' }, { tool: 'workspace_product_search', goal: '定位商品' }] })!;
+  const plan = createWorkspaceExecutionPlan({ instruction: '先创建卡券再关联商品', steps: [step('workspace_prepare_write', '创建卡券', 'coupon_create'), step('workspace_product_search', '定位商品')], toolMetadata: { workspace_prepare_write: allWorkspaceToolPlanMetadata('workspace_prepare_write')!, workspace_product_search: allWorkspaceToolPlanMetadata('workspace_product_search')! } })!;
   const waiting = applyWorkspacePlanResult(plan, { toolName: 'workspace_prepare_write', succeeded: true, waitingConfirmation: true, evidence: '等待确认' });
-  const continued = completeConfirmedWorkspacePlanStep(waiting, '卡券已确认创建');
+  const continued = completeConfirmedWorkspacePlanStep(applyWorkspacePlanFacts(waiting, { couponBatchId: 'batch-1' }), '卡券已确认创建');
   assert.equal(waiting.status, 'waiting_confirmation');
   assert.equal(continued.status, 'active');
   assert.equal(continued.currentStepId, 'step-2');
@@ -282,36 +289,36 @@ test('Plan Mode completes a confirmed write before continuing to the next step',
 
 test('Plan Mode falls back to a generic ordered tool plan when provider JSON is wrapped or invalid', async () => {
   const tools = [
-    { type: 'function' as const, function: { name: 'pi_skill_catalog', description: 'catalog', parameters: {} } },
-    { type: 'function' as const, function: { name: 'pi_skill_read', description: 'read', parameters: {} } },
-    { type: 'function' as const, function: { name: 'pi_skill_exec', description: 'exec', parameters: {} } },
-    { type: 'function' as const, function: { name: 'workspace_product_search', description: 'search', parameters: {} } },
-    { type: 'function' as const, function: { name: 'workspace_prepare_write', description: 'write', parameters: {} } },
+    tool('pi_skill_catalog', 'catalog'),
+    tool('pi_skill_read', 'read'),
+    tool('pi_skill_exec', 'exec'),
+    tool('workspace_product_search', 'search'),
+    tool('workspace_prepare_write', 'write'),
   ];
   const plan = await createWorkspaceExecutionPlanFromModel('用网盘文件创建卡券并启用自动发货', tools, {
     async complete() { return { content: '我会按以下步骤执行：```json\n{"steps": [bad-json]\n```', model: 'test' }; },
-  }, undefined, { fallback: true });
-  assert.deepEqual(plan?.steps.map((step) => step.tool), ['pi_skill_catalog', 'pi_skill_read', 'pi_skill_exec', 'workspace_product_search', 'workspace_prepare_write']);
+  });
+  assert.equal(plan, undefined);
 });
 
 test('fallback Plan Mode follows explicit discovery order instead of hard-coding Skill before product search', async () => {
   const tools = [
-    { type: 'function' as const, function: { name: 'pi_skill_exec', description: 'exec', parameters: {} } },
-    { type: 'function' as const, function: { name: 'workspace_product_search', description: 'search', parameters: {} } },
+    tool('pi_skill_exec', 'exec'),
+    tool('workspace_product_search', 'search'),
   ];
   const plan = await createWorkspaceExecutionPlanFromModel('查找商品并创建分享', tools, {
     async complete() { return { content: '{"steps":[]}', model: 'test' }; },
-  }, undefined, { fallback: true });
-  assert.deepEqual(plan?.steps.map((step) => step.tool), ['workspace_product_search', 'pi_skill_exec']);
+  });
+  assert.equal(plan, undefined);
 });
 
 test('fallback Plan Mode does not invent tool steps from explicitly excluded nouns', async () => {
   const tools = [
-    { type: 'function' as const, function: { name: 'workspace_product_search', description: 'search', parameters: {} } },
+    tool('workspace_product_search', 'search'),
   ];
   const plan = await createWorkspaceExecutionPlanFromModel('请用模型讲一句关于猫的冷知识，不要读取商品或订单。', tools, {
     async complete() { return { content: '{"steps":[]}', model: 'test' }; },
-  }, undefined, { fallback: true });
+  });
   assert.equal(plan, undefined);
 });
 

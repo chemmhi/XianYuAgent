@@ -508,6 +508,8 @@ export class WorkspaceService {
       await this.audit({ actorId: input.input.adminId, action: `workspace.${input.confirmation.action}.completed`, targetRef: input.confirmation.id, requestId: input.requestId, traceId: input.traceId, payload: { action: input.confirmation.action, outboxId: queued.record.id, result: result.data ?? {} }, accountId: input.bundle.run.accountId });
       const latest = await this.store.getAutoReplyOutbox(input.scope, queued.record.idempotencyKey);
       if (!latest) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'workspace command result readback failed');
+      const completionPayload = { action: input.confirmation.action, status: 'succeeded', messageType: 'tool_event' as const, content: result.outputSummary, summary: result.resultSummary, outboxId: queued.record.id, result: result.data ?? {} };
+      await this.store.appendRunEvent({ runId: input.input.runId, eventType: 'workspace.command.completed', payload: completionPayload });
       const continued = await this.continueAfterConfirmation({
         adminId: input.input.adminId,
         run: input.bundle.run,
@@ -517,7 +519,6 @@ export class WorkspaceService {
         },
       });
       if (continued) {
-        await this.store.appendRunEvent({ runId: input.input.runId, eventType: 'workspace.command.completed', payload: { action: input.confirmation.action, status: 'succeeded', messageType: 'tool_event', content: result.outputSummary, summary: result.resultSummary, outboxId: queued.record.id, result: result.data ?? {} } });
         const continuedBundle = await this.store.getRun(input.input.adminId, input.input.runId);
         if (!continuedBundle) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'workspace continuation reload failed');
         return { run: this.toRunView(continuedBundle.run, continuedBundle.steps), confirmation: this.toConfirmationView(input.confirmation), outbox: this.toOutboxView(latest, input.bundle.run.id) };
