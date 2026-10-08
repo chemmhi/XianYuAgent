@@ -1,6 +1,6 @@
 import { PiModelClientError, type ModelClient, type ModelCompletionRequest, type ModelCompletionResult, type ModelProbeResult, type ModelStreamHandlers } from './pi-runtime.js';
 
-export type { ModelClient, ModelCompletionRequest, ModelCompletionResult, ModelMessage, ModelToolCall, ModelToolDefinition, ModelStreamHandlers, ModelToolCallDelta, ModelProbeResult } from './pi-runtime.js';
+export type { ModelClient, ModelCompletionRequest, ModelCompletionResult, ModelMessage, ModelToolCall, ModelToolDefinition, ModelStreamHandlers, ModelToolCallDelta, ModelProbeResult, ModelStructuredOutput } from './pi-runtime.js';
 
 export type ModelProviderRole = 'primary' | 'backup';
 export type ModelProviderCircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
@@ -31,6 +31,7 @@ const MAX_COOLDOWN_MS = 10 * 60_000;
 /** Stateful router; reuse it from a ModelClientPool so circuit state survives requests. */
 export class ModelClientService implements ModelClient {
   readonly supportsWebSearch: boolean;
+  readonly supportsStructuredOutput: boolean;
   private readonly primary?: ModelClient;
   private readonly backup?: ModelClient;
   private readonly onFailover?: ModelClientServiceOptions['onFailover'];
@@ -61,6 +62,7 @@ export class ModelClientService implements ModelClient {
     this.configGeneration = options.configGeneration ?? 0;
     this.circuits = { primary: createCircuit('primary', this.configGeneration), backup: createCircuit('backup', this.configGeneration) };
     this.supportsWebSearch = (this.primary?.supportsWebSearch !== false) && (this.backup?.supportsWebSearch !== false);
+    this.supportsStructuredOutput = this.primary?.supportsStructuredOutput === true && (this.backup ? this.backup.supportsStructuredOutput === true : true);
   }
 
   setRouting(input: { mode: ModelProviderRoutingMode; preferredRole?: ModelProviderRole; routingVersion: number }): void {

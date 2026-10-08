@@ -596,7 +596,7 @@ function listenerErrorCode(error: unknown): string {
 function createConfiguredModelClient(config: AppConfig): ModelClient | undefined {
   if (!config.modelApiKey || !config.modelBaseUrl || !config.modelName) return undefined;
   return new ModelClientService({
-    primary: new OpenAICompatibleModelClient({ apiKey: config.modelApiKey, baseUrl: config.modelBaseUrl, model: config.modelName, timeoutMs: config.modelTimeoutMs, wireApi: config.modelWireApi }),
+    primary: new OpenAICompatibleModelClient({ apiKey: config.modelApiKey, baseUrl: config.modelBaseUrl, model: config.modelName, provider: config.modelProvider, timeoutMs: config.modelTimeoutMs, wireApi: config.modelWireApi }),
   });
 }
 

@@ -8,6 +8,7 @@ import { formatAutoReplyContextDocument } from '../src/auto-reply-context-docume
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { OpenAICompatibleModelClient, type ModelClient, type ModelMessage } from '../src/pi-runtime.js';
+import { AUTO_REPLY_STRUCTURED_OUTPUT } from '../src/auto-reply-output.js';
 import type { Store } from '../src/domain.js';
 
 function context(overrides: Record<string, unknown> = {}): AutoReplyContext {
@@ -46,6 +47,7 @@ test('buyer Agent web search is enabled by default and exposed only after local 
   const requests: Array<{ tools?: unknown[] }> = [];
   let call = 0;
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     complete: async (request) => {
       requests.push({ tools: request.tools });
       call += 1;
@@ -67,6 +69,7 @@ test('buyer Agent never exposes web search for non-general intent', async () => 
   const requests: Array<{ tools?: unknown[] }> = [];
   let call = 0;
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     complete: async (request) => {
       requests.push({ tools: request.tools });
       call += 1;
@@ -86,6 +89,7 @@ test('buyer Agent does not expose web_search to Chat Completions clients', async
   const requests: Array<{ tools?: unknown[] }> = [];
   let call = 0;
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     supportsWebSearch: false,
     complete: async (request) => {
       requests.push({ tools: request.tools });
@@ -106,6 +110,33 @@ test('buyer Agent does not expose web_search to Chat Completions clients', async
   assert.equal(requests[1]?.tools?.length, AUTO_REPLY_AGENT_TOOLS.length);
 });
 
+test('buyer Agent sends the structured-output contract on every model request', async () => {
+  const requests: Array<{ structuredOutput?: unknown }> = [];
+  const client: ModelClient = {
+    supportsStructuredOutput: true,
+    complete: async (request) => {
+      requests.push({ structuredOutput: request.structuredOutput });
+      return { content: replyPayload('已按结构化协议回复。'), model: 'responses-model' };
+    },
+  };
+  const agent = new ToolCallingAutoReplyAgent({} as Store, client, resolveAutoReplyAgentConfig({}));
+  await agent.generate({ adminId: 'admin-1', context: context(), classification });
+  assert.equal(requests.length, 1);
+  assert.deepEqual(requests[0]?.structuredOutput, AUTO_REPLY_STRUCTURED_OUTPUT);
+});
+
+test('buyer Agent rejects clients without Responses structured-output support', async () => {
+  const client: ModelClient = {
+    supportsStructuredOutput: false,
+    complete: async () => ({ content: replyPayload('不应调用'), model: 'chat-model' }),
+  };
+  const agent = new ToolCallingAutoReplyAgent({} as Store, client, resolveAutoReplyAgentConfig({}));
+  await assert.rejects(
+    () => agent.generate({ adminId: 'admin-1', context: context(), classification }),
+    (error: unknown) => (error as { code?: string }).code === 'AGENT_STRUCTURED_OUTPUT_UNAVAILABLE',
+  );
+});
+
 test('buyer Agent enforces a 30-character minimum max reply length', () => {
   const config = resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_MAX_REPLY_LENGTH: '20' });
   assert.equal(config.maxReplyLength, 30);
@@ -116,7 +147,7 @@ test('buyer Agent enforces a 30-character minimum max reply length', () => {
 test('buyer Agent can resolve the latest persisted configuration per message', async () => {
   const seenPrompts: string[] = [];
   const providerArgs: Array<[string, string]> = [];
-  const client: ModelClient = { complete: async (request) => { seenPrompts.push(typeof request.messages[0]?.content === 'string' ? request.messages[0].content : ''); return { content: replyPayload('已按最新配置处理。'), model: 'test' }; } };
+  const client: ModelClient = { supportsStructuredOutput: true, complete: async (request) => { seenPrompts.push(typeof request.messages[0]?.content === 'string' ? request.messages[0].content : ''); return { content: replyPayload('已按最新配置处理。'), model: 'test' }; } };
   const store = {} as Store;
   const updated = resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_SYSTEM_PROMPT: '设置页最新提示词', AUTO_REPLY_AGENT_CONFIG_VERSION: 'settings-v2' });
   const agent = new ToolCallingAutoReplyAgent(store, client, resolveAutoReplyAgentConfig({}), { configProvider: async (adminId, accountId) => { providerArgs.push([adminId, accountId]); return updated; } });
@@ -139,6 +170,7 @@ test('account persona supplements base system rules instead of replacing them', 
 test('agent system contract requires relevant tools before handoff', async () => {
   let systemPrompt = '';
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     complete: async (request) => {
       systemPrompt = contentText(request.messages[0]?.content);
       return { content: replyPayload('我先根据当前事实回复。'), model: 'test' };
@@ -155,6 +187,7 @@ test('agent chooses product tool then returns final answer', async () => {
   const requests: Array<{ messages: ModelMessage[]; tools?: unknown[] }> = [];
   let call = 0;
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     complete: async (request) => {
       requests.push(request);
       call += 1;
@@ -189,6 +222,7 @@ test('product tool reuses the complete product context without a second store re
   let toolPayload: string | undefined;
   const product = { id: 'product-1', accountId: 'account-1', externalProductRef: 'item-1', title: '资料包', description: '数字资料', browseCount: 321, wantCount: 33, collectCount: 8, defaultReplyTemplate: '付款后发送下载说明。', knowledgeBase: '只回答商品适用范围和使用方式。', priceMinor: 1_999, status: 'published' as const };
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     complete: async (request) => {
       if (request.messages.at(-1)?.role === 'tool') {
         toolPayload = contentText(request.messages.at(-1)?.content);
@@ -212,6 +246,7 @@ test('product tool reuses the complete product context without a second store re
 test('agent sends document context without internal identifiers and with newest history first', async () => {
   let request: ModelMessage | undefined;
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     complete: async (input) => {
       request = input.messages[1];
       return { content: replyPayload('已收到，我先结合商品信息说明。'), model: 'test' };
@@ -243,6 +278,7 @@ test('agent sends document context without internal identifiers and with newest 
 test('agent prompt explicitly carries every pending buyer message into one reply', async () => {
   let prompt = '';
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     complete: async (input) => {
       prompt = contentText(input.messages[1]?.content);
       return { content: replyPayload('我会一起回答两个问题。'), model: 'test' };
@@ -282,6 +318,7 @@ test('agent context does not repeat the current buyer message in the pending lis
 test('agent appends context for legacy buyerMessage-only templates', async () => {
   let prompt = '';
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     complete: async (input) => {
       prompt = contentText(input.messages[1]?.content);
       return { content: replyPayload('我会结合商品事实回复。'), model: 'test' };
@@ -297,6 +334,7 @@ test('agent appends context for legacy buyerMessage-only templates', async () =>
 test('agent forwards pending buyer images as multimodal model input', async () => {
   let request: ModelMessage | undefined;
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     complete: async (input) => {
       request = input.messages[1];
       return { content: replyPayload('我已看到你补充的图片。'), model: 'test' };
@@ -324,6 +362,7 @@ test('shop catalog tool explicitly supports broad inventory questions without a 
   let requestCount = 0;
   let receivedKeyword: string | undefined = 'not-called';
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     complete: async () => {
       requestCount += 1;
       if (requestCount === 1) return { content: '', model: 'test', toolCalls: [{ id: 'tool-shop-catalog', type: 'function', function: { name: 'list_shop_products', arguments: '{}' } }] };
@@ -357,6 +396,7 @@ test('shop product tool describes and performs Agent-led core-term retry after n
   const queries: Array<{ accountId?: string; keyword?: string; keywords?: string[]; limit?: number }> = [];
   let requestCount = 0;
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     complete: async () => {
       requestCount += 1;
       if (requestCount === 1) return { content: '', model: 'test', toolCalls: [{ id: 'tool-shop-phrase', type: 'function', function: { name: 'list_shop_products', arguments: JSON.stringify({ keyword: '夸克自动化' }) } }] };
@@ -384,6 +424,7 @@ test('agent emits high-level redacted observations for model, tool, and final de
   const observations: AutoReplyGeneratorObservation[] = [];
   let call = 0;
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     complete: async () => {
       call += 1;
       if (call === 1) return { content: '', model: 'test-model', toolCalls: [{ id: 'tool-1', type: 'function', function: { name: 'get_product_info', arguments: JSON.stringify({ productRef: 'item-1' }) } }] };
@@ -421,6 +462,7 @@ test('agent emits high-level redacted observations for model, tool, and final de
 test('agent preserves model-provided semantic segments and supports a segmentation retry', async () => {
   let calls = 0;
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     complete: async () => {
       calls += 1;
       if (calls === 1) return { content: replyPayload('先说明商品是什么。再说明使用方式。', ['先说明商品是什么。', '再说明使用方式。']), model: 'test' };
@@ -439,6 +481,7 @@ test('buyer Agent buffers stream events and passes the shared deadline to the mo
   let seenDeadline: number | undefined;
   let seenBuffered = false;
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     stream: async (request, handlers) => {
       streamCalls += 1;
       seenDeadline = request.deadlineAt;
@@ -501,18 +544,19 @@ test('Responses transport serializes built-in web_search and reports its use', a
 });
 
 test('agent rejects unstructured final output instead of sending raw model text', async () => {
-  const agent = new ToolCallingAutoReplyAgent({} as Store, { complete: async () => ({ content: '可以的，我来帮你确认。', model: 'test' }) }, resolveAutoReplyAgentConfig({}));
+  const agent = new ToolCallingAutoReplyAgent({} as Store, { supportsStructuredOutput: true, complete: async () => ({ content: '可以的，我来帮你确认。', model: 'test' }) }, resolveAutoReplyAgentConfig({}));
   await assert.rejects(() => agent.generate({ adminId: 'admin-1', context: context(), classification }), (error: unknown) => (error as { code?: string }).code === 'AGENT_INVALID_OUTPUT');
 });
 
 test('agent routes structured handoff output without returning reply text', async () => {
-  const agent = new ToolCallingAutoReplyAgent({} as Store, { complete: async () => ({ content: JSON.stringify({ decision: 'handoff', reason: '需要人工确认售后状态' }), model: 'test' }) }, resolveAutoReplyAgentConfig({}));
+  const agent = new ToolCallingAutoReplyAgent({} as Store, { supportsStructuredOutput: true, complete: async () => ({ content: JSON.stringify({ decision: 'handoff', reason: '需要人工确认售后状态' }), model: 'test' }) }, resolveAutoReplyAgentConfig({}));
   await assert.rejects(() => agent.generate({ adminId: 'admin-1', context: context(), classification }), (error: unknown) => (error as { code?: string; message?: string }).code === 'AGENT_HANDOFF' && (error as { message?: string }).message === '需要人工确认售后状态');
 });
 
 test('agent returns a semantic skip decision without a fixed acknowledgement vocabulary', async () => {
   let systemPrompt = '';
   const agent = new ToolCallingAutoReplyAgent({} as Store, {
+    supportsStructuredOutput: true,
     complete: async (request) => {
       systemPrompt = contentText(request.messages[0]?.content);
       return { content: JSON.stringify({ decision: 'skip', reason: '上一轮买家问题已完整解决，当前消息没有新增事项。' }), model: 'test' };
@@ -581,7 +625,7 @@ test('OpenAI-compatible transport maps image content for Chat and Responses APIs
 
 test('agent includes buyer images but omits product cover images in multimodal content', async () => {
   let request: ModelMessage | undefined;
-  const client: ModelClient = { complete: async (input) => { request = input.messages[1]; return { content: replyPayload('已看到了图片。'), model: 'test' }; } };
+  const client: ModelClient = { supportsStructuredOutput: true, complete: async (input) => { request = input.messages[1]; return { content: replyPayload('已看到了图片。'), model: 'test' }; } };
   const agent = new ToolCallingAutoReplyAgent({} as Store, client, resolveAutoReplyAgentConfig({}));
   await agent.generate({
     adminId: 'admin-1',
@@ -604,6 +648,7 @@ test('buyer conversation tool filters same buyer across products and orders', as
   const calls: string[] = [];
   const conversationQueries: Array<{ accountId: string; buyerRef: string; limit?: number }> = [];
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     complete: async (request) => {
       calls.push(contentText(request.messages.at(-1)?.content));
       if (calls.length === 1) return { content: '', model: 'test', toolCalls: [{ id: 'tool-conversations', type: 'function', function: { name: 'get_buyer_conversations', arguments: '{}' } }] };
@@ -637,6 +682,7 @@ test('buyer orders tool reads scoped facts and filters buyer/account scope', asy
   const requestedQueries: Array<{ accountId: string; buyerId?: string; conversationId?: string; limit?: number }> = [];
   let orderToolPayload: string | undefined;
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     complete: async (request) => {
       if (request.messages.at(-1)?.role === 'tool') {
         orderToolPayload = contentText(request.messages.at(-1)?.content);
@@ -667,6 +713,7 @@ test('product tool resolves external numeric refs without UUID lookup and stays 
   let productQuery: { accountId?: string; externalProductRef?: string; productId?: string; title?: string } | undefined;
   let toolPayload: string | undefined;
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     complete: async (request) => {
       if (request.messages.at(-1)?.role === 'tool') {
         toolPayload = contentText(request.messages.at(-1)?.content);
@@ -692,6 +739,7 @@ test('shop product tool searches keyword, limits results, and excludes other acc
   const queries: Array<{ accountId?: string; keyword?: string; limit?: number }> = [];
   let toolPayload: string | undefined;
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     complete: async (request) => {
       if (request.messages.at(-1)?.role === 'tool') {
         toolPayload = typeof request.messages.at(-1)?.content === 'string' ? request.messages.at(-1)?.content : undefined;
@@ -739,6 +787,7 @@ test('shop product tool searches keyword, limits results, and excludes other acc
 test('insufficient product facts return not-found and hand off instead of guessing', async () => {
   let toolPayload: string | undefined;
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     complete: async (request) => {
       if (request.messages.at(-1)?.role === 'tool') {
         toolPayload = contentText(request.messages.at(-1)?.content);
@@ -760,6 +809,7 @@ test('insufficient product facts return not-found and hand off instead of guessi
 test('tool read errors stop generation before a synthesized reply', async () => {
   let calls = 0;
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     complete: async () => { calls += 1; return { content: '', model: 'test', toolCalls: [{ id: 'tool-shop-error', type: 'function', function: { name: 'list_shop_products', arguments: '{}' } }] }; },
   };
   const store = { listAutoReplyProducts: async () => { throw new Error('PRODUCT_READ_FAILED'); } } as unknown as Store;
@@ -770,7 +820,7 @@ test('tool read errors stop generation before a synthesized reply', async () => 
 
 test('agent fails safely when loop limit is reached', async () => {
   let calls = 0;
-  const client: ModelClient = { complete: async () => { calls += 1; return { content: '', model: 'test', toolCalls: [{ id: `tool-${calls}`, type: 'function', function: { name: 'get_product_info', arguments: JSON.stringify({ productRef: `item-${calls}` }) } }] }; } };
+  const client: ModelClient = { supportsStructuredOutput: true, complete: async () => { calls += 1; return { content: '', model: 'test', toolCalls: [{ id: `tool-${calls}`, type: 'function', function: { name: 'get_product_info', arguments: JSON.stringify({ productRef: `item-${calls}` }) } }] }; } };
   const product = { id: 'product-1', accountId: 'account-1', externalProductRef: 'item-1', title: '资料包', status: 'published', updatedAt: '2026-09-21T00:00:00.000Z' };
   const store = { getAutoReplyProduct: async () => product } as unknown as Store;
   const config = resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_MAX_LOOPS: '2' });
@@ -783,6 +833,7 @@ test('agent fails safely when loop limit is reached', async () => {
 
 test('agent rejects unknown tools and out-of-contract arguments', async () => {
   const client: ModelClient = {
+    supportsStructuredOutput: true,
     complete: async () => ({ content: '', model: 'test', toolCalls: [{ id: 'bad-tool', type: 'function', function: { name: 'get_product_info', arguments: '{"accountId":"other-account"}' } }] }),
   };
   const store = {} as Store;

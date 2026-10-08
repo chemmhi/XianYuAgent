@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { resolveAutoReplyAgentConfig, type AutoReplyAgentRuntimeConfig } from './auto-reply-agent-config.js';
-import { DEFAULT_PI_WIRE_API, type ModelWireApi } from './pi-runtime.js';
+import { DEFAULT_PI_PROVIDER, DEFAULT_PI_WIRE_API, type ModelWireApi } from './pi-runtime.js';
 import { resolveProductAutomationLiveConfig, type ProductAutomationExecutionMode } from './product-automation-live-gate.js';
 import { resolveAutoReplyRepairMode, type AutoReplyRepairMode } from './auto-reply-repair-config.js';
 import type { XianyuVerificationBrowserMode } from './xianyu-verification-browser.js';
@@ -34,6 +34,7 @@ export interface AppConfig {
   modelApiKey?: string;
   modelBaseUrl?: string;
   modelName?: string;
+  modelProvider?: string;
   modelWireApi?: ModelWireApi;
   modelTimeoutMs: number;
   piSkillRoot: string;
@@ -77,6 +78,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const modelApiKey = firstDefined(env.API_KEY, env.OPENAI_API_KEY, env.PI_API_KEY);
   const modelBaseUrl = firstDefined(env.BASE_URL, env.OPENAI_BASE_URL, env.PI_BASE_URL);
   const modelName = firstDefined(env.MODEL, env.OPENAI_MODEL, env.PI_MODEL);
+  const modelProvider = firstDefined(env.MODEL_PROVIDER, env.OPENAI_PROVIDER, env.PI_PROVIDER) ?? DEFAULT_PI_PROVIDER;
   const modelWireApi = normalizeWireApi(firstDefined(env.WIRE_API, env.MODEL_WIRE_API));
   const autoReplySendMode: AutoReplySendMode = env.AUTO_REPLY_SEND_MODE?.trim().toLowerCase() === 'live' ? 'live' : 'simulate';
   const autoReplyRepairMode = resolveAutoReplyRepairMode(env.AUTO_REPLY_REPAIR_MODE);
@@ -113,6 +115,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     modelApiKey,
     modelBaseUrl,
     modelName,
+    modelProvider,
     modelWireApi,
     modelTimeoutMs: positiveNumber(env.MODEL_TIMEOUT_MS, 60_000),
     piSkillRoot: resolve(env.PI_SKILL_ROOT?.trim() || resolve(homedir(), '.pi', 'skills')),
