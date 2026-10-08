@@ -103,7 +103,7 @@ export class ModelClientService implements ModelClient {
   }
 
   async complete(input: ModelCompletionRequest): Promise<ModelCompletionResult> {
-    const deadline = this.now() + this.overallTimeoutMs;
+    const deadline = Number.isFinite(input.deadlineAt) ? input.deadlineAt! : this.now() + this.overallTimeoutMs;
     const firstRole = this.chooseRole();
     if (!firstRole) { await this.emitFastFail('no_available_provider'); throw unavailableError(); }
     const first = this.clientFor(firstRole);
@@ -131,7 +131,7 @@ export class ModelClientService implements ModelClient {
   }
 
   async stream(input: ModelCompletionRequest, handlers: ModelStreamHandlers = {}): Promise<ModelCompletionResult> {
-    const deadline = this.now() + this.overallTimeoutMs;
+    const deadline = Number.isFinite(input.deadlineAt) ? input.deadlineAt! : this.now() + this.overallTimeoutMs;
     const firstRole = this.chooseRole();
     if (!firstRole) { await this.emitFastFail('no_available_provider'); throw unavailableError(); }
     const first = this.clientFor(firstRole);
@@ -150,7 +150,7 @@ export class ModelClientService implements ModelClient {
       return result;
     } catch (error) {
       if (isHardProviderFailure(error)) await this.openCircuit(firstRole, error);
-      if (emitted || !isHardProviderFailure(error)) throw error;
+      if ((emitted && input.buffered !== true) || !isHardProviderFailure(error)) throw error;
       const fallbackRole = this.otherRole(firstRole);
       const fallback = fallbackRole ? this.clientFor(fallbackRole) : undefined;
       if (!fallback || !this.isClosed(fallbackRole!)) { await this.emitFastFail('fallback_unavailable'); throw error; }
@@ -305,6 +305,7 @@ function createCircuit(role: ModelProviderRole, generation: number): CircuitStat
 function snapshotOf(circuit: CircuitState): ModelProviderCircuitSnapshot { return { role: circuit.role, state: circuit.state, failureCount: circuit.failureCount, cooldownUntil: circuit.cooldownUntil === undefined ? undefined : new Date(circuit.cooldownUntil).toISOString(), nextProbeAt: circuit.nextProbeAt === undefined ? undefined : new Date(circuit.nextProbeAt).toISOString(), generation: circuit.generation, lastTransitionReason: circuit.lastTransitionReason, manualOnly: circuit.manualOnly, backoffMs: circuit.backoffMs, lastErrorStatus: circuit.lastErrorStatus, lastProbeLatencyMs: circuit.lastProbeLatencyMs }; }
 function isHardProviderFailure(error: unknown): boolean {
   if (!(error instanceof PiModelClientError)) return true;
+  if (error.origin === 'agent_deadline') return false;
   if (error.code === 'MODEL_ABORTED' || error.code === 'MODEL_TOOL_LOOP_EXCEEDED' || error.code === 'MODEL_UNSUPPORTED_TOOL') return false;
   if (error.code === 'MODEL_HTTP_ERROR' && error.status !== undefined && error.status >= 400 && error.status < 500 && ![401, 403, 408, 429].includes(error.status)) return false;
   return ['MODEL_TIMEOUT', 'MODEL_NETWORK_ERROR', 'MODEL_INVALID_RESPONSE', 'MODEL_HTTP_ERROR'].includes(error.code);
@@ -313,10 +314,10 @@ function errorCode(error: unknown): string { return error instanceof PiModelClie
 function unavailableError(): PiModelClientError { return new PiModelClientError('MODEL_PROVIDER_UNAVAILABLE', 'model providers are temporarily unavailable'); }
 function scopedRequest(input: ModelCompletionRequest, deadline: number, now: () => number): { request: ModelCompletionRequest; dispose: () => void } {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort('overall-timeout'), Math.max(1, deadline - now()));
-  const onAbort = () => controller.abort('external');
-  if (input.signal?.aborted) controller.abort('external'); else input.signal?.addEventListener('abort', onAbort, { once: true });
-  return { request: { ...input, signal: controller.signal }, dispose: () => { clearTimeout(timer); input.signal?.removeEventListener('abort', onAbort); } };
+  const timer = setTimeout(() => controller.abort('agent_deadline'), Math.max(1, deadline - now()));
+  const onAbort = () => controller.abort(input.signal?.reason ?? 'external_abort');
+  if (input.signal?.aborted) controller.abort(input.signal.reason ?? 'external_abort'); else input.signal?.addEventListener('abort', onAbort, { once: true });
+  return { request: { ...input, deadlineAt: deadline, signal: controller.signal }, dispose: () => { clearTimeout(timer); input.signal?.removeEventListener('abort', onAbort); } };
 }
 
 export function createModelClientService(primary?: ModelClient, backup?: ModelClient, onFailover?: ModelClientServiceOptions['onFailover']): ModelClientService { return new ModelClientService({ primary, backup, onFailover }); }

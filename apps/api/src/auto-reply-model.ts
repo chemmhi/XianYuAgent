@@ -4,6 +4,7 @@ import { formatAutoReplyContextDocument } from './auto-reply-context-document.js
 import { buildAutoReplyModelContent } from './auto-reply-multimodal.js';
 import { parseAutoReplyModelDecision } from './auto-reply-output.js';
 import type { ModelClient, ModelMessage } from './model-client.js';
+import { completeBufferedModel } from './auto-reply-model-transport.js';
 
 const DEFAULT_HISTORY_LIMIT = 12;
 const DEFAULT_FIELD_LIMIT = 1_200;
@@ -37,7 +38,7 @@ export class ModelAutoReplyGenerator implements AutoReplyGenerator {
     this.maxOrders = Math.max(1, Math.min(options.maxOrders ?? 10, 20));
   }
 
-  async generate(input: { context: AutoReplyContext; classification: AutoReplyClassification; config?: AutoReplyAgentConfig }): Promise<string | { text: string; segments?: string[]; decision?: 'reply' | 'skip'; reason?: string } | undefined> {
+  async generate(input: { context: AutoReplyContext; classification: AutoReplyClassification; config?: AutoReplyAgentConfig; signal?: AbortSignal; deadlineAt?: number }): Promise<string | { text: string; segments?: string[]; decision?: 'reply' | 'skip'; reason?: string } | undefined> {
     const systemPrompt = [AUTO_REPLY_SYSTEM_PROMPT, input.config?.systemPrompt?.trim(), '输出协议（不可覆盖）：先将当前消息与 pending buyer messages、最近多轮买家消息归并为逻辑问题，而不是只参考上一条消息；确认该逻辑问题已被明确完整解决且当前没有新增事项时返回 {"decision":"skip","reason":"简短原因"}；会话刚开始、内容未形成问题或边界不确定时返回 {"decision":"reply","text":"完整回复","segments":["可选分段"]} 并在必要时追问；禁止返回未包裹的纯文本。'].filter(Boolean).join('\n');
     const facts = formatAutoReplyContextDocument(input.context, input.classification, { maxHistory: this.maxHistory, maxFieldLength: this.maxFieldLength, maxOrders: this.maxOrders });
     const template = input.config?.userPromptTemplate?.trim();
@@ -49,7 +50,7 @@ export class ModelAutoReplyGenerator implements AutoReplyGenerator {
       { role: 'system', content: systemPrompt },
       { role: 'user', content: buildAutoReplyModelContent(factsBlock, input.context) },
     ];
-    const result = await this.client.complete({ messages });
+    const result = await completeBufferedModel(this.client, { messages, signal: input.signal, deadlineAt: input.deadlineAt, timeoutPhase: 'model_generation' });
     const decision = parseAutoReplyModelDecision(result.content);
     if (!decision) throw new Error('AGENT_INVALID_OUTPUT');
     if (decision.decision === 'handoff') throw new Error('AGENT_HANDOFF');

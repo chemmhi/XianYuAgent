@@ -87,6 +87,12 @@ export interface ModelCompletionRequest {
   /** Provider-declared reasoning level, when supported by the selected model. */
   reasoningEffort?: string;
   signal?: AbortSignal;
+  /** Absolute request deadline. Workspace callers omit this and keep the service default. */
+  deadlineAt?: number;
+  /** Internal phase used to explain which part of an Agent request timed out. */
+  timeoutPhase?: string;
+  /** Auto Reply buffers stream deltas and may retry the attempt before completion. */
+  buffered?: boolean;
 }
 
 export interface ModelCompletionResult {
@@ -124,6 +130,15 @@ export interface ModelProbeResult {
   ok: boolean;
   code?: 'PROBE_UNSUPPORTED' | 'PROBE_TIMEOUT' | 'PROBE_FAILED' | 'PROBE_MODEL_MISSING' | 'PROBE_AUTH_FAILED';
   latencyMs?: number;
+}
+
+export type ModelTimeoutOrigin = 'agent_deadline' | 'provider_timeout' | 'external_abort';
+
+export interface ModelProgressSnapshot {
+  firstEventAt?: number;
+  lastProgressAt?: number;
+  maxIdleMs: number;
+  emittedAny: boolean;
 }
 
 export interface PiRuntimeConfig {
@@ -165,13 +180,19 @@ export class PiModelClientError extends Error {
   readonly code: PiModelErrorCode;
   readonly status?: number;
   readonly retryAfterMs?: number;
+  readonly origin?: ModelTimeoutOrigin;
+  readonly timeoutPhase?: string;
+  modelProgress?: ModelProgressSnapshot;
 
-  constructor(code: PiModelErrorCode, message: string, status?: number, retryAfterMs?: number) {
+  constructor(code: PiModelErrorCode, message: string, status?: number, retryAfterMs?: number, meta?: { origin?: ModelTimeoutOrigin; timeoutPhase?: string; modelProgress?: ModelProgressSnapshot }) {
     super(message);
     this.name = 'PiModelClientError';
     this.code = code;
     this.status = status;
     this.retryAfterMs = retryAfterMs;
+    this.origin = meta?.origin;
+    this.timeoutPhase = meta?.timeoutPhase;
+    this.modelProgress = meta?.modelProgress;
   }
 }
 
@@ -273,10 +294,11 @@ export class OpenAICompatibleModelClient implements ModelClient {
 
   async complete(input: ModelCompletionRequest): Promise<ModelCompletionResult> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort('timeout'), this.timeoutMs);
-    const onAbort = () => controller.abort('external');
+    const transportTimeoutMs = requestTimeoutMs(input, this.timeoutMs);
+    const timeout = setTimeout(() => controller.abort('provider_timeout'), transportTimeoutMs);
+    const onAbort = () => controller.abort(input.signal?.reason ?? 'external_abort');
 
-    if (input.signal?.aborted) controller.abort('external');
+    if (input.signal?.aborted) controller.abort(input.signal.reason ?? 'external_abort');
     else input.signal?.addEventListener('abort', onAbort, { once: true });
 
     try {
@@ -318,8 +340,10 @@ export class OpenAICompatibleModelClient implements ModelClient {
     } catch (error) {
       if (error instanceof PiModelClientError) throw error;
       if (controller.signal.aborted) {
-        if (input.signal?.aborted) throw new PiModelClientError('MODEL_ABORTED', 'model request aborted');
-        throw new PiModelClientError('MODEL_TIMEOUT', `model request timed out after ${this.timeoutMs}ms`);
+        const reason = normalizeAbortReason(controller.signal.reason);
+        if (reason === 'agent_deadline') throw new PiModelClientError('MODEL_TIMEOUT', 'model request exceeded the Agent deadline', undefined, undefined, { origin: 'agent_deadline', timeoutPhase: input.timeoutPhase });
+        if (reason === 'external_abort' || input.signal?.aborted) throw new PiModelClientError('MODEL_ABORTED', 'model request aborted', undefined, undefined, { origin: 'external_abort', timeoutPhase: input.timeoutPhase });
+        throw new PiModelClientError('MODEL_TIMEOUT', `model request timed out after ${transportTimeoutMs}ms`, undefined, undefined, { origin: 'provider_timeout', timeoutPhase: input.timeoutPhase });
       }
       throw new PiModelClientError('MODEL_NETWORK_ERROR', 'model provider request failed');
     } finally {
@@ -330,9 +354,10 @@ export class OpenAICompatibleModelClient implements ModelClient {
 
   async stream(input: ModelCompletionRequest, handlers: ModelStreamHandlers = {}): Promise<ModelCompletionResult> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort('timeout'), this.timeoutMs);
-    const onAbort = () => controller.abort('external');
-    if (input.signal?.aborted) controller.abort('external');
+    const transportTimeoutMs = requestTimeoutMs(input, this.timeoutMs);
+    const timeout = setTimeout(() => controller.abort('provider_timeout'), transportTimeoutMs);
+    const onAbort = () => controller.abort(input.signal?.reason ?? 'external_abort');
+    if (input.signal?.aborted) controller.abort(input.signal.reason ?? 'external_abort');
     else input.signal?.addEventListener('abort', onAbort, { once: true });
 
     try {
@@ -374,8 +399,10 @@ export class OpenAICompatibleModelClient implements ModelClient {
     } catch (error) {
       if (error instanceof PiModelClientError) throw error;
       if (controller.signal.aborted) {
-        if (input.signal?.aborted) throw new PiModelClientError('MODEL_ABORTED', 'model request aborted');
-        throw new PiModelClientError('MODEL_TIMEOUT', `model request timed out after ${this.timeoutMs}ms`);
+        const reason = normalizeAbortReason(controller.signal.reason);
+        if (reason === 'agent_deadline') throw new PiModelClientError('MODEL_TIMEOUT', 'model request exceeded the Agent deadline', undefined, undefined, { origin: 'agent_deadline', timeoutPhase: input.timeoutPhase });
+        if (reason === 'external_abort' || input.signal?.aborted) throw new PiModelClientError('MODEL_ABORTED', 'model request aborted', undefined, undefined, { origin: 'external_abort', timeoutPhase: input.timeoutPhase });
+        throw new PiModelClientError('MODEL_TIMEOUT', `model request timed out after ${transportTimeoutMs}ms`, undefined, undefined, { origin: 'provider_timeout', timeoutPhase: input.timeoutPhase });
       }
       throw new PiModelClientError('MODEL_NETWORK_ERROR', 'model provider request failed');
     } finally {
@@ -1552,6 +1579,17 @@ function extractDeltaText(value: unknown): string {
   if (typeof value === 'string') return value;
   if (!Array.isArray(value)) return '';
   return value.map((part) => isRecord(part) && typeof part.text === 'string' ? part.text : typeof part === 'string' ? part : '').join('');
+}
+
+function requestTimeoutMs(input: ModelCompletionRequest, providerTimeoutMs: number): number {
+  if (Number.isFinite(input.deadlineAt)) return Math.max(1, Math.trunc((input.deadlineAt as number) - Date.now()));
+  return providerTimeoutMs;
+}
+
+function normalizeAbortReason(reason: unknown): 'agent_deadline' | 'provider_timeout' | 'external_abort' | 'other' {
+  if (reason === 'agent_deadline' || reason === 'provider_timeout' || reason === 'external_abort') return reason;
+  if (reason && typeof reason === 'object' && 'kind' in reason && (reason as { kind?: unknown }).kind === 'agent_deadline') return 'agent_deadline';
+  return 'other';
 }
 
 function firstString(...values: unknown[]): string {

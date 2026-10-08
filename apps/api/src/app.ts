@@ -261,7 +261,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     generator: autoReplyModelClient ? new ToolCallingAutoReplyAgent(store, autoReplyModelClient, autoReplyAgentConfig, { godView: autoReplyGodView }) : undefined,
     acknowledgementEvaluator: options.autoReplyAcknowledgementEvaluator,
     godView: autoReplyGodView,
-    totalTimeoutMs: 60_000,
+    totalTimeoutMs: autoReplyAgentConfig.totalTimeoutMs,
     configProvider: async (adminId, accountId) => {
       const settings = await autoReplyAgentSettings.get(adminId, accountId);
       const runtimeConfig = mergeAutoReplyAgentRuntimeConfig(autoReplyAgentConfig, settings);

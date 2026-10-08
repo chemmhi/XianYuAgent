@@ -12,6 +12,7 @@ import { validatePersistedAutoReplyRepairPolicyBundle } from './auto-reply-repai
 import { normalizeProductSearchTerms, normalizeProductSearchText, normalizeProductCatalogSearchText, splitProductSearchTerms, type AutoReplyProductSearchMode } from './auto-reply-product-search.js';
 import { splitDataContent } from './coupon-delivery.js';
 import { removeCouponBatchFromAutomationConfig } from './product-automation-coupon.js';
+import { DEFAULT_AUTO_REPLY_AGENT_CONFIG } from './auto-reply-agent-settings.js';
 
 type Row = Record<string, unknown>;
 const PRODUCT_COUPON_BATCHES_SELECT = `(select coalesce(json_agg(json_build_object('id', cb.sequence_id, 'label', cb.label) order by binding.priority desc, binding.created_at, cb.sequence_id), '[]'::json) from coupons.coupon_bindings binding join coupons.coupon_batches cb on cb.id=binding.coupon_batch_id where binding.product_id=p.id and binding.status='active' and cb.status <> 'voided') as coupon_batches`;
@@ -2290,7 +2291,7 @@ export class PostgresStore implements Store {
       maxLoops: Number(config.maxLoops ?? 4),
       maxToolCalls: Number(config.maxToolCalls ?? 8),
       toolTimeoutMs: Number(config.toolTimeoutMs ?? 10_000),
-      totalTimeoutMs: Number(config.totalTimeoutMs ?? 60_000),
+      totalTimeoutMs: Number(config.totalTimeoutMs ?? DEFAULT_AUTO_REPLY_AGENT_CONFIG.totalTimeoutMs),
       maxHistory: Number(config.maxHistory ?? 20),
       maxReplyLength: Number(config.maxReplyLength ?? 1_000),
       replySegmentDelayMs: Number(config.replySegmentDelayMs ?? 800),

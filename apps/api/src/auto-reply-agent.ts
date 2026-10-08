@@ -7,6 +7,8 @@ import { parseAutoReplyModelDecision, parseJsonObject } from './auto-reply-outpu
 import { digestJson } from './security.js';
 import type { ModelClient, ModelCompletionResult, ModelMessage, ModelToolCall, ModelToolDefinition } from './model-client.js';
 import type { AutoReplyGodViewSink } from './auto-reply-god-view.js';
+import { completeBufferedModel } from './auto-reply-model-transport.js';
+import { withAbort } from './auto-reply-timeout.js';
 
 export const AUTO_REPLY_TOOL_NAMES = [
   'get_buyer_conversations',
@@ -111,7 +113,7 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
     this.config = config;
   }
 
-  async generate(input: { adminId?: string; context: AutoReplyContext; classification: AutoReplyClassification; observe?: AutoReplyGeneratorObserver; runId?: string; traceId?: string }): Promise<string | AutoReplyGeneratedReply | undefined> {
+  async generate(input: { adminId?: string; context: AutoReplyContext; classification: AutoReplyClassification; observe?: AutoReplyGeneratorObserver; runId?: string; traceId?: string; signal?: AbortSignal; deadlineAt?: number }): Promise<string | AutoReplyGeneratedReply | undefined> {
     if (!input.adminId) throw new AutoReplyAgentError('AGENT_ADMIN_REQUIRED');
     const config = await this.options.configProvider?.(input.adminId, input.context.conversation.accountId) ?? this.config;
     const outputContract = [
@@ -173,7 +175,7 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
         payload: { loop, messages, tools, toolChoice: 'auto' },
       });
       try {
-        result = await this.client.complete({ messages, tools, toolChoice: 'auto' });
+        result = await completeBufferedModel(this.client, { messages, tools, toolChoice: 'auto', signal: input.signal, deadlineAt: input.deadlineAt, timeoutPhase: 'model_generation' });
       } catch (error) {
         await this.options.godView?.emit({
           phase: 'model',
@@ -249,7 +251,7 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
           });
           let toolResult: AutoReplyToolResult;
           try {
-            toolResult = await withTimeout(this.executeTool(parsed.name, parsed.arguments, input.adminId, input.context, config), config.toolTimeoutMs);
+            toolResult = await withAbort(withTimeout(this.executeTool(parsed.name, parsed.arguments, input.adminId, input.context, config), config.toolTimeoutMs), input.signal, 'tool_wait');
           } catch (error) {
             await this.options.godView?.emit({
               phase: 'tool',
@@ -325,12 +327,15 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
     throw new AutoReplyAgentError('AGENT_MAX_LOOPS');
   }
 
-  async segmentReply(input: { reply: string }): Promise<string[] | undefined> {
-    const result = await this.client.complete({
+  async segmentReply(input: { reply: string; signal?: AbortSignal; deadlineAt?: number }): Promise<string[] | undefined> {
+    const result = await completeBufferedModel(this.client, {
       messages: [
         { role: 'system', content: '你是消息分段器。只允许按语义边界拆分文本，不得改写、总结、增删事实。' },
         { role: 'user', content: JSON.stringify({ instruction: '将 reply 按语义分成聊天消息段，保持拼接后与原文一致，不设置固定段落长度或段落数量。', reply: input.reply }) },
       ],
+      signal: input.signal,
+      deadlineAt: input.deadlineAt,
+      timeoutPhase: 'reply_segmentation',
     });
     return parseSegments(result.content);
   }

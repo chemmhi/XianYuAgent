@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ModelClientService, type ModelClient } from '../src/model-client.js';
-import { PiModelClientError } from '../src/pi-runtime.js';
+import { OpenAICompatibleModelClient, PiModelClientError } from '../src/pi-runtime.js';
 
 function reply(content: string, model = 'test-model') {
   return { content, model };
@@ -96,6 +96,22 @@ test('ModelClientService never replays a partial stream to backup', async () => 
   assert.deepEqual(calls, ['primary']);
 });
 
+test('ModelClientService retries a buffered stream after partial provider output', async () => {
+  const calls: string[] = [];
+  const primary: ModelClient = {
+    stream: async (_input, handlers) => { calls.push('primary'); await handlers.onTextDelta?.('{"decision":"'); throw new PiModelClientError('MODEL_NETWORK_ERROR', 'stream broke'); },
+    complete: async () => reply('unused'),
+  };
+  const backup: ModelClient = {
+    stream: async (_input, handlers) => { calls.push('backup'); await handlers.onTextDelta?.('{"decision":"reply","text":"ok"}'); return reply('{"decision":"reply","text":"ok"}'); },
+    complete: async () => reply('unused'),
+  };
+  const service = new ModelClientService({ primary, backup });
+  const result = await service.stream!({ messages: [{ role: 'user', content: 'hello' }], buffered: true }, { onTextDelta: async () => undefined });
+  assert.equal(result.content, '{"decision":"reply","text":"ok"}');
+  assert.deepEqual(calls, ['primary', 'backup']);
+});
+
 test('ModelClientService converts thrown probe errors into a retryable OPEN result', async () => {
   let now = 60_000;
   const primary: ModelClient = { complete: async () => reply('unused'), safeProbe: async () => { throw new Error('probe transport failed'); } };
@@ -160,4 +176,77 @@ test('ModelClientService emits a fast-fail event when both circuits are OPEN', a
   await assert.rejects(() => service.complete({ messages: [{ role: 'user', content: 'first' }] }));
   await assert.rejects(() => service.complete({ messages: [{ role: 'user', content: 'second' }] }), (error: unknown) => error instanceof PiModelClientError && error.code === 'MODEL_PROVIDER_UNAVAILABLE');
   assert.deepEqual(events, ['no_available_provider']);
+});
+
+test('ModelClientService honors an Auto Reply request deadline instead of resetting to the Workspace budget', async () => {
+  let receivedDeadline: number | undefined;
+  const service = new ModelClientService({
+    overallTimeoutMs: 10,
+    primary: {
+      complete: async (input) => { receivedDeadline = input.deadlineAt; return reply('ok'); },
+    },
+  });
+  const deadlineAt = Date.now() + 1_000;
+  await service.complete({ messages: [{ role: 'user', content: 'hello' }], deadlineAt, timeoutPhase: 'model_generation' });
+  assert.equal(receivedDeadline, deadlineAt);
+});
+
+test('an internal Agent deadline is MODEL_TIMEOUT without fallback or circuit opening', async () => {
+  const calls: string[] = [];
+  const primary: ModelClient = {
+    complete: async () => { calls.push('primary'); throw new PiModelClientError('MODEL_TIMEOUT', 'agent deadline', undefined, undefined, { origin: 'agent_deadline', timeoutPhase: 'model_generation' }); },
+  };
+  const backup: ModelClient = { complete: async () => { calls.push('backup'); return reply('备用回复'); } };
+  const service = new ModelClientService({ primary, backup });
+  await assert.rejects(() => service.complete({ messages: [{ role: 'user', content: 'hello' }] }), (error: unknown) => error instanceof PiModelClientError && error.origin === 'agent_deadline');
+  assert.deepEqual(calls, ['primary']);
+  assert.equal(service.getRuntimeSnapshot().providerStates.primary.state, 'CLOSED');
+});
+
+test('Auto Reply request deadline is the transport timeout even when provider timeout is shorter', async () => {
+  const client = new OpenAICompatibleModelClient({
+    apiKey: 'test-key',
+    baseUrl: 'https://model.example/v1',
+    model: 'deadline-model',
+    wireApi: 'chat',
+    timeoutMs: 5,
+    fetchImpl: async (_input, init) => await new Promise<Response>((resolve, reject) => {
+      const timer = setTimeout(() => resolve(new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { status: 200, headers: { 'content-type': 'application/json' } })), 10);
+      init?.signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('transport aborted')); }, { once: true });
+    }),
+  });
+  const result = await client.complete({ messages: [{ role: 'user', content: 'hello' }], deadlineAt: Date.now() + 40, timeoutPhase: 'model_generation' });
+  assert.equal(result.content, 'ok');
+});
+
+test('OpenAI transport preserves internal deadline origin instead of misclassifying it as user abort', async () => {
+  const controller = new AbortController();
+  const client = new OpenAICompatibleModelClient({
+    apiKey: 'test-key',
+    baseUrl: 'https://model.example/v1',
+    model: 'timeout-model',
+    wireApi: 'chat',
+    fetchImpl: async (_input, init) => await new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new Error('transport aborted')), { once: true });
+    }),
+  });
+  const request = client.complete({ messages: [{ role: 'user', content: 'slow' }], signal: controller.signal, timeoutPhase: 'model_generation' });
+  setTimeout(() => controller.abort({ kind: 'agent_deadline' }), 5);
+  await assert.rejects(request, (error: unknown) => error instanceof PiModelClientError && error.code === 'MODEL_TIMEOUT' && error.origin === 'agent_deadline' && error.timeoutPhase === 'model_generation');
+});
+
+test('OpenAI transport preserves an already-aborted Agent deadline reason', async () => {
+  const controller = new AbortController();
+  controller.abort({ kind: 'agent_deadline' });
+  const client = new OpenAICompatibleModelClient({
+    apiKey: 'test-key',
+    baseUrl: 'https://model.example/v1',
+    model: 'timeout-model',
+    wireApi: 'chat',
+    fetchImpl: async (_input, init) => {
+      if (init?.signal?.aborted) throw new Error('transport aborted');
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'unexpected' } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+  await assert.rejects(() => client.complete({ messages: [{ role: 'user', content: 'slow' }], signal: controller.signal, timeoutPhase: 'model_generation' }), (error: unknown) => error instanceof PiModelClientError && error.code === 'MODEL_TIMEOUT' && error.origin === 'agent_deadline');
 });
