@@ -230,6 +230,8 @@ async function run() {
   await setLabelInput(cdp, '自动回复接管等待时间（秒）', '1');
   await clickText(cdp, '保存自动回复 Agent 配置');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('自动回复 Agent 配置已保存'), 'agent settings saved');
+  const saveToast = await evaluate(cdp, "(() => { const panel = document.querySelector('[data-auto-reply-agent-panel]'); const toast = document.querySelector('.app-toast-success'); const style = toast ? getComputedStyle(toast) : null; return { inline: panel?.querySelector('.settings-save-toast') !== null, toast: toast?.textContent?.includes('自动回复 Agent 配置已保存') === true, position: style?.position ?? '', right: style?.right ?? '', bottom: style?.bottom ?? '' }; })()");
+  if (saveToast.inline || !saveToast.toast || saveToast.position !== 'fixed' || !saveToast.right || !saveToast.bottom) throw new Error('save feedback did not use the global bottom-right toast: ' + JSON.stringify(saveToast));
   const agentSaved = await requestJson(apiUrl, agentPath, { headers: { cookie } });
   const savedConfig = agentSaved.body.data;
   const expectedConfig = { enabled: true, systemPrompt: '设置页全量回归系统提示词', userPromptTemplate: '请处理买家问题：{{buyerMessage}}\n{{context}}', maxLoops: 6, maxToolCalls: 9, toolTimeoutMs: 15000, totalTimeoutMs: 90000, maxHistory: 15, maxReplyLength: 120, replySegmentDelayMs: 450, sendDelaySeconds: 1 };

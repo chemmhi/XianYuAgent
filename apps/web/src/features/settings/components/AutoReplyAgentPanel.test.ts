@@ -13,6 +13,9 @@ describe('Auto Reply Agent settings surface', () => {
     expect(source).toContain('fieldset className="auto-reply-agent-fields"');
     expect(source).toContain('shared/ui/TextAreaField');
     expect(source).toContain('patch: draft');
+    expect(source).toContain("shared/ui/Toast");
+    expect(source).toContain('tone="success"');
+    expect(source).not.toContain('settings-save-toast');
     expect(source).not.toContain('InfoTooltip');
     expect(source).not.toContain('发送模式');
     expect(source).not.toContain('配置审计');

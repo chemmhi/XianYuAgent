@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Button } from '../../../shared/ui/Button';
 import { InputField } from '../../../shared/ui/InputField';
 import { TextAreaField } from '../../../shared/ui/TextAreaField';
+import { Toast } from '../../../shared/ui/Toast';
 import type { AutoReplyAgentSettingsController } from '../agent-settings-controller';
 import type { AutoReplyAgentConfigVM } from '../types';
 
@@ -10,6 +11,7 @@ type EditableConfig = Omit<AutoReplyAgentConfigVM, 'accountId' | 'updatedByAdmin
 export function AutoReplyAgentPanel({ controller, accountName, accountId }: { controller: AutoReplyAgentSettingsController; accountName?: string; accountId?: string }) {
   const { state } = controller;
   const [draft, setDraft] = useState<EditableConfig | null>(null);
+  const [saveToastVisible, setSaveToastVisible] = useState(false);
 
   useEffect(() => {
     if (state.data) {
@@ -18,6 +20,16 @@ export function AutoReplyAgentPanel({ controller, accountName, accountId }: { co
       setDraft(editable);
     }
   }, [state.data]);
+
+  useEffect(() => {
+    if (state.phase !== 'saved') {
+      setSaveToastVisible(false);
+      return;
+    }
+    setSaveToastVisible(true);
+    const timer = window.setTimeout(() => setSaveToastVisible(false), 5000);
+    return () => window.clearTimeout(timer);
+  }, [state.phase, state.data?.configVersion]);
 
   function setField<K extends keyof EditableConfig>(field: K, value: EditableConfig[K]) {
     setDraft((current) => current ? { ...current, [field]: value } : current);
@@ -34,10 +46,11 @@ export function AutoReplyAgentPanel({ controller, accountName, accountId }: { co
   if (state.phase === 'error' && !state.data) return <div className="settings-state error" role="alert"><strong>{state.error}</strong><Button variant="ghost" type="button" onClick={() => void controller.reload()}>重试</Button></div>;
   if (!draft || !state.data) return null;
 
-  return <div className="settings-content" data-auto-reply-agent-panel>
+  return <>
+    {saveToastVisible && <Toast message="自动回复 Agent 配置已保存，下一条消息将读取新配置。" tone="success" onDismiss={() => setSaveToastVisible(false)} />}
+    <div className="settings-content" data-auto-reply-agent-panel>
     <article className="card panel settings-hero"><div><p className="eyebrow">自动回复 Agent</p><h2>自动回复 Agent 配置</h2><p>配置只作用于买家侧自动回复 Agent，不进入 Workspace Agent 链路。</p></div><span className="settings-scope-chip">{accountName ?? accountId} · v{state.data.configVersion}</span></article>
     {state.error && <div className="settings-state error" role="alert"><strong>{state.error}</strong><Button variant="ghost" type="button" onClick={() => void controller.reload()}>刷新配置</Button></div>}
-    {state.phase === 'saved' && <div className="settings-save-toast" role="status">自动回复 Agent 配置已保存，下一条消息将读取新配置。</div>}
     <form className="card panel settings-editor auto-reply-agent-editor" onSubmit={(event) => void submit(event)}>
       <div className="settings-form-grid">
         <label className="settings-checkbox full"><input type="checkbox" checked={draft.enabled} onChange={(event) => setField('enabled', event.target.checked)} />启用自动回复 Agent</label>
@@ -56,5 +69,6 @@ export function AutoReplyAgentPanel({ controller, accountName, accountId }: { co
       </div>
       <div className="modal-actions"><Button variant="primary" type="submit" disabled={state.phase === 'submitting'}>{state.phase === 'submitting' ? '保存中…' : '保存自动回复 Agent 配置'}</Button></div>
     </form>
-  </div>;
+    </div>
+  </>;
 }
