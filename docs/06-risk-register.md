@@ -324,3 +324,4 @@
 | WS-RISK-06 | 新增模型计划调用增加单次任务的模型请求和延迟 | 5 秒上限、结构化校验、失败不阻断执行；隔离 E2E 记录了计划请求和实际工具调用，发布后观察延迟及调用数 | OPEN / production metrics |
 
 | WS-RISK-07 | 前端过滤已持久化 `workspace.execution.summary`，导致真实推理摘要在首个工具事件到达后消失 | 保留 `workspace.execution.summary` 投影；继续过滤 `reasoning.delta` / `context.compacted`；补充 17 项定向测试、Web 全量回归和内置浏览器稳定 DOM 复验 | CLOSED in `07b7694`; production recheck follow-up |
+| S5-RISK-071 | Responses Provider 的 structured output 语义存在差异，若静默按 OpenAI 处理会导致 schema 请求被拒绝或返回不可解析结果 | P1 | 仅支持 OpenAI/DeepSeek Responses；OpenAI 发送 strict:true，DeepSeek 省略 strict；openai-compatible 映射 OpenAI；未知 Provider fail-closed；补齐 provider、failed/incomplete/refusal 回归 | CLOSED |

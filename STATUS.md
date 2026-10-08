@@ -497,3 +497,10 @@
 - 实现范围：账号级 ModelProviderRuntimePool、CLOSED/OPEN/HALF_OPEN 熔断、共享 overall deadline、safeProbe、Redis health mirror/lease、routing record、手动 routing API、Settings runtime 展示与前端切换。
 - 已验证：API/Web TypeScript、ModelClient 定向回归 73/73、OpenAI Settings 10/10、Web Settings 7/7、真实接口 smoke `apps/api/scripts/model-provider-failover-smoke.mjs`、Web build。
 - 当前门禁：等待独立 code reviewer 对方案符合度、遗漏需求和验收证据复核；若提出 P0-P2 问题，修复并重新验证。
+## 2026-10-09 Auto Reply Responses structured output 修复
+
+- 根因：自动回复 Agent 之前只能依赖 prompt 约束 JSON，Responses 请求未建立 Provider-specific structured output 契约，OpenAI/DeepSeek 差异也未显式建模。
+- 修复：Responses-only structured output；OpenAI 使用 json_schema + strict:true，DeepSeek 使用 json_schema 且省略 strict；历史 openai-compatible 映射 OpenAI；未知 Provider fail-closed。
+- 范围：当前仅 OpenAI、DeepSeek；不新增 Chat Completions structured output、灰度、总开关、fallback、JSON 修复重试或原始输出保存。
+- 验证：独立 reviewer /root/repair_review PASS；主线定向回归 158/158、API TypeScript compile、git diff --check、合并与远程推送通过。
+- 合并提交：c432078164d558c91cf02a06fcc20558265c5612。

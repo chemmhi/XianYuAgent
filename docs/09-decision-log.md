@@ -289,3 +289,10 @@
 3. Workspace operation errors use the shared bottom-right toast; forbidden access remains inline because it is page state.
 4. Warning actions use explicit hover, focus, and active colors with white text for contrast.
 5. Merge acceptance is based on PostgreSQL Chrome E2E plus Web/API regression evidence; external platform mutation remains a separate gate.
+## 2026-10-09 Responses structured output Provider 兼容决策
+
+1. 当前模型调用范围固定为 Responses API，不新增 Chat Completions structured output 分支。
+2. OpenAI Responses 使用 text.format = { type: json_schema, name, strict: true, schema }；DeepSeek Responses 使用同一 json_schema 结构但省略 strict。
+3. openai-compatible 保留为历史兼容别名并按 OpenAI 语义处理；其他 Provider 明确 fail-closed，抛出 MODEL_PROVIDER_UNSUPPORTED。
+4. 自动回复 Agent 仅在 runtime client 声明 supportsStructuredOutput === true 时执行结构化响应；未声明能力的客户端直接拒绝，避免静默退回 prompt-only。
+5. 不加入灰度发布、总开关、fallback、JSON 修复重试、原始输出保存或 24 小时清理逻辑；Responses failed / incomplete / refusal 均按无效响应处理。

@@ -813,3 +813,11 @@ Review conclusion: workspace confirmation fixes were merged after code review an
 独立审核未执行 PostgreSQL/Chrome E2E（当前 Docker 服务未运行）；合并后按流程用内置浏览器复核真实 Workspace DOM 摘要节点。
 
 合并后复核：`43df91f` 已以 `--no-ff` 合入 `main`，merge commit 为 `07b7694`。内置浏览器实际检查 `http://localhost:5173/workspace` 并刷新页面后，`.workspace-execution-summary` 稳定为 12 个，`.workspace-tool-event` 为 38 个，`.workspace-message-final` 为 1 个；摘要文本包含“分析任务”“检索商品信息”“商品搜索”，两次读取结果一致且节点 `display=grid`、`visibility=visible`、`opacity=1`。
+### 2026-10-09 Auto Reply Responses structured output 修复复审
+
+| 评审编号 | 类型 | 评审重点 | 评审人 | 结论 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| S5-R147 | 运行时 / Provider 契约 | OpenAI 与 DeepSeek 的 Responses structured output 是否分别使用 json_schema 语义，未知 Provider 是否 fail-closed，Responses failed/incomplete/refusal 是否阻断无效结果 | 独立 agent /root/repair_review | PASS | apps/api/src/pi-runtime.ts、apps/api/scripts/model-client.test.ts、apps/api/scripts/openai-settings.test.ts；相关回归 76/76，切片定向 158/158、API TypeScript、git diff --check |
+| S5-R148 | 合并 / 主线门禁 | 合并后 main 是否完成定向回归、TypeScript 编译、diff-check、worktree/branch 清理和远程推送 | root | PASS | merge commit、main 定向回归 158/158、API TypeScript、git diff --check、registry cleanup、git push origin main |
+
+本轮结论：自动回复 Agent 仅在 Responses API 上启用 structured output；OpenAI 发送 strict: true，DeepSeek 省略 strict；openai-compatible 仅作为 OpenAI 兼容别名；未知 Provider fail-closed；不新增 Chat Completions structured output、灰度、总开关、fallback、JSON 修复重试或原始输出保存。
