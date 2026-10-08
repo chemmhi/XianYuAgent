@@ -59,11 +59,11 @@ export function AutoReplyAgentPanel({ controller, accountName, accountId }: { co
           <TextAreaField fieldClassName="full" label="用户提示词模板" value={draft.userPromptTemplate} onChange={(event) => setField('userPromptTemplate', event.target.value)} rows={4} maxLength={20000} required />
           <InputField label="最大循环次数" type="number" min={1} max={12} value={draft.maxLoops} onChange={(event) => setField('maxLoops', Number(event.target.value))} required />
           <InputField label="工具调用上限" type="number" min={1} max={32} value={draft.maxToolCalls} onChange={(event) => setField('maxToolCalls', Number(event.target.value))} required />
-          <InputField label="工具超时（毫秒）" type="number" min={100} max={120000} value={draft.toolTimeoutMs} onChange={(event) => setField('toolTimeoutMs', Number(event.target.value))} required />
-          <InputField label="总超时（毫秒）" type="number" min={1000} max={300000} value={draft.totalTimeoutMs} onChange={(event) => setField('totalTimeoutMs', Number(event.target.value))} required />
+          <InputField label="工具超时（秒）" type="number" min={0.1} max={120} step={0.001} value={draft.toolTimeoutSeconds} onChange={(event) => setField('toolTimeoutSeconds', Number(event.target.value))} required />
+          <InputField label="总超时（秒）" type="number" min={1} max={600} step={0.001} value={draft.totalTimeoutSeconds} onChange={(event) => setField('totalTimeoutSeconds', Number(event.target.value))} required />
           <InputField label="上下文历史条数" type="number" min={0} max={100} value={draft.maxHistory} onChange={(event) => setField('maxHistory', Number(event.target.value))} required />
           <InputField label="最大回复长度" type="number" min={30} max={4000} value={draft.maxReplyLength} onChange={(event) => setField('maxReplyLength', Number(event.target.value))} required />
-          <InputField label="分段发送间隔（毫秒）" type="number" min={0} max={30000} value={draft.replySegmentDelayMs} onChange={(event) => setField('replySegmentDelayMs', Number(event.target.value))} required />
+          <InputField label="分段发送间隔（秒）" type="number" min={0} max={30} step={0.001} value={draft.replySegmentDelaySeconds} onChange={(event) => setField('replySegmentDelaySeconds', Number(event.target.value))} required />
           <InputField label="自动回复接管等待时间（秒）" type="number" min={0} max={86400} value={draft.sendDelaySeconds} onChange={(event) => setField('sendDelaySeconds', Number(event.target.value))} required />
         </fieldset>
       </div>

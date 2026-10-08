@@ -423,7 +423,7 @@ export class WorkspaceCommandOrchestrator {
     if (kind === 'agent_settings') {
       const settings = await this.deps.autoReplyAgentSettings.get(input.adminId, input.accountId);
       const safe = { ...settings, systemPrompt: undefined, userPromptTemplate: undefined };
-      return { kind: 'agent_activity', title: 'Agent 配置', summary: `已读取 Agent 配置 v${settings.configVersion}`, content: `自动回复 Agent 当前${settings.enabled ? '已启用' : '已停用'}，配置版本 v${settings.configVersion}，发送模式 ${settings.sendMode}，循环上限 ${settings.maxLoops}，工具调用上限 ${settings.maxToolCalls}，总超时 ${settings.totalTimeoutMs}ms。`, data: safe };
+      return { kind: 'agent_activity', title: 'Agent 配置', summary: `已读取 Agent 配置 v${settings.configVersion}`, content: `自动回复 Agent 当前${settings.enabled ? '已启用' : '已停用'}，配置版本 v${settings.configVersion}，发送模式 ${settings.sendMode}，循环上限 ${settings.maxLoops}，工具调用上限 ${settings.maxToolCalls}，总超时 ${settings.totalTimeoutSeconds}s。`, data: safe };
     }
     if (kind === 'model_settings') {
       const configs = await this.deps.openaiSettings.list({ adminId: input.adminId, accountId: input.accountId });

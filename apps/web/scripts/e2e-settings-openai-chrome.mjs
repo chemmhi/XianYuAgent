@@ -261,7 +261,7 @@ async function run() {
     AUTO_REPLY_SEND_MODE: 'simulate',
     AUTOMATION_BUYER_ALLOWLIST: JSON.stringify(['Buyer E2E']),
     AUTO_REPLY_AGENT_DEBOUNCE_MS: '0',
-    AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS: '0',
+    AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_SECONDS: '0',
   });
   let runtime = createApp(runtimeConfig);
   resources.runtime = runtime;

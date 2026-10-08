@@ -266,7 +266,7 @@ function parseFields(body: string): Record<string, string> {
 function parseAgentFields(body: string): Record<string, string> {
   const fields: Record<string, string> = {};
   for (const segment of body.split(/[;；]+/).map((item) => item.trim()).filter(Boolean)) {
-    const match = segment.match(/^(启用|开启|停用|禁用|关闭|打开|enabled|最大循环次数|循环次数|maxLoops|工具调用上限|maxToolCalls|工具超时|toolTimeoutMs|总超时|totalTimeoutMs|上下文历史条数|maxHistory|最大回复长度|maxReplyLength|分段发送间隔|replySegmentDelayMs|自动回复接管等待时间|发送延迟|sendDelaySeconds|发送模式|sendMode)\s*[:=：]?\s*([\s\S]*)$/i);
+    const match = segment.match(/^(启用|开启|停用|禁用|关闭|打开|enabled|最大循环次数|循环次数|maxLoops|工具调用上限|maxToolCalls|工具超时（秒）|工具超时|toolTimeoutSeconds|toolTimeoutMs|总超时（秒）|总超时|totalTimeoutSeconds|totalTimeoutMs|上下文历史条数|maxHistory|最大回复长度|maxReplyLength|分段发送间隔（秒）|分段发送间隔|replySegmentDelaySeconds|replySegmentDelayMs|自动回复接管等待时间|发送延迟|sendDelaySeconds|发送模式|sendMode)\s*[:=：]?\s*([\s\S]*)$/i);
     if (!match) continue;
     fields[normalizeAgentFieldKey(match[1])] = match[2].trim();
   }
@@ -278,11 +278,19 @@ function normalizeAgentFieldKey(key: string): string {
   if (['启用', '开启', '停用', '禁用', '关闭', '打开', 'enabled'].includes(normalized)) return 'enabled';
   if (['最大循环次数', '循环次数', 'maxloops'].includes(normalized)) return 'maxLoops';
   if (['工具调用上限', 'maxtoolcalls'].includes(normalized)) return 'maxToolCalls';
-  if (['工具超时', 'tooltimeoutms'].includes(normalized)) return 'toolTimeoutMs';
-  if (['总超时', 'totaltimeoutms'].includes(normalized)) return 'totalTimeoutMs';
+  // Keep the historical bare Chinese aliases on the legacy millisecond path.
+  // New second-based input must use the explicit （秒） label or field name.
+  if (['工具超时（秒）', 'tooltimeoutseconds'].includes(normalized)) return 'toolTimeoutSeconds';
+  if (['工具超时'].includes(normalized)) return 'toolTimeoutMs';
+  if (['tooltimeoutms'].includes(normalized)) return 'toolTimeoutMs';
+  if (['总超时（秒）', 'totaltimeoutseconds'].includes(normalized)) return 'totalTimeoutSeconds';
+  if (['总超时'].includes(normalized)) return 'totalTimeoutMs';
+  if (['totaltimeoutms'].includes(normalized)) return 'totalTimeoutMs';
   if (['上下文历史条数', 'maxhistory'].includes(normalized)) return 'maxHistory';
   if (['最大回复长度', 'maxreplylength'].includes(normalized)) return 'maxReplyLength';
-  if (['分段发送间隔', 'replysegmentdelayms'].includes(normalized)) return 'replySegmentDelayMs';
+  if (['分段发送间隔（秒）', 'replysegmentdelayseconds'].includes(normalized)) return 'replySegmentDelaySeconds';
+  if (['分段发送间隔'].includes(normalized)) return 'replySegmentDelayMs';
+  if (['replysegmentdelayms'].includes(normalized)) return 'replySegmentDelayMs';
   if (['自动回复接管等待时间', '发送延迟', 'senddelayseconds'].includes(normalized)) return 'sendDelaySeconds';
   if (['发送模式', 'sendmode'].includes(normalized)) return 'sendMode';
   return normalized;
@@ -300,18 +308,26 @@ function parseAgentField(field: string, raw: string): { field: keyof AutoReplyAg
   const numbers: Record<string, { label: string; min: number; max: number; multiplier?: number }> = {
     maxLoops: { label: '最大循环次数', min: 1, max: 12 },
     maxToolCalls: { label: '工具调用上限', min: 1, max: 32 },
-    toolTimeoutMs: { label: '工具超时（毫秒）', min: 100, max: 120_000 },
-    totalTimeoutMs: { label: '总超时（毫秒）', min: 1_000, max: 300_000 },
+    toolTimeoutSeconds: { label: '工具超时（秒）', min: 0.1, max: 120 },
+    toolTimeoutMs: { label: '工具超时（毫秒，兼容旧字段）', min: 100, max: 120_000 },
+    totalTimeoutSeconds: { label: '总超时（秒）', min: 1, max: 600 },
+    totalTimeoutMs: { label: '总超时（毫秒，兼容旧字段）', min: 1_000, max: 300_000 },
     maxHistory: { label: '上下文历史条数', min: 0, max: 100 },
     maxReplyLength: { label: '最大回复长度', min: 30, max: 4_000 },
-    replySegmentDelayMs: { label: '分段发送间隔（毫秒）', min: 0, max: 30_000 },
+    replySegmentDelaySeconds: { label: '分段发送间隔（秒）', min: 0, max: 30 },
+    replySegmentDelayMs: { label: '分段发送间隔（毫秒，兼容旧字段）', min: 0, max: 30_000 },
     sendDelaySeconds: { label: '自动回复接管等待时间（秒）', min: 0, max: 86_400, multiplier: /毫秒|ms/i.test(raw) ? 0.001 : 1 },
   };
   const definition = numbers[field];
   if (!definition) return undefined;
-  const numeric = Number(raw.replace(/毫秒|ms|秒|s/gi, '').trim()) * (definition.multiplier ?? 1);
-  if (!Number.isInteger(numeric) || numeric < definition.min || numeric > definition.max) return undefined;
-  return { field: field as keyof AutoReplyAgentConfigPatch, label: definition.label, value: numeric };
+  const rawHasMilliseconds = /毫秒|ms/i.test(raw);
+  const base = Number(raw.replace(/毫秒|ms|秒|s/gi, '').trim());
+  if (!Number.isFinite(base)) return undefined;
+  const unitMultiplier = field.endsWith('Ms') ? 1 : rawHasMilliseconds ? 0.001 : (definition.multiplier ?? 1);
+  const numeric = base * unitMultiplier;
+  const rounded = Number(numeric.toFixed(3));
+  if (!Number.isFinite(numeric) || rounded !== numeric || numeric < definition.min || numeric > definition.max) return undefined;
+  return { field: field as keyof AutoReplyAgentConfigPatch, label: definition.label, value: rounded };
 }
 
 function parseAgentBoolean(value: string): boolean | undefined {

@@ -27,7 +27,7 @@ import { ApiKeyCredentialService } from './credential-store.js';
 import { DashboardService, type DashboardRange } from './dashboard.js';
 import { AutoReplyService, type AutoReplyAcknowledgementEvaluator } from './auto-reply.js';
 import { ReliableExternalAutoReplySender } from './auto-reply-outbox.js';
-import { AutoReplyAgentSettingsService, resolveAutoReplyAgentDefaults } from './auto-reply-agent-settings.js';
+import { AutoReplyAgentSettingsService, resolveAutoReplyAgentDefaults, secondsToMilliseconds } from './auto-reply-agent-settings.js';
 import { ToolCallingAutoReplyAgent } from './auto-reply-agent.js';
 import { OpenAISettingsService } from './openai-settings.js';
 import { ModelProviderRuntimePool } from './model-provider-runtime.js';
@@ -276,11 +276,11 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
         enabled: settings.enabled,
         sendMode: settings.sendMode === 'live' && envLiveEnabled ? 'live' : 'simulate',
         buyerAllowlist: config.buyerAllowlist,
-        totalTimeoutMs: settings.totalTimeoutMs,
+        totalTimeoutMs: secondsToMilliseconds(settings.totalTimeoutSeconds),
         debounceMs: settings.debounceMs,
         maxHistory: settings.maxHistory,
         maxReplyLength: settings.maxReplyLength,
-        replySegmentDelayMs: settings.replySegmentDelayMs,
+        replySegmentDelayMs: secondsToMilliseconds(settings.replySegmentDelaySeconds),
         sendDelaySeconds: settings.sendDelaySeconds,
         generator: runtimeModelClient ? new ToolCallingAutoReplyAgent(store, runtimeModelClient, runtimeConfig, { godView: autoReplyGodView }) : undefined,
       };
@@ -2049,7 +2049,7 @@ function readAutoReplyAgentPatch(body: Record<string, unknown>): import('./domai
   const patch: import('./domain.js').AutoReplyAgentConfigPatch = {};
   const booleanFields = ['enabled'] as const;
   const stringFields = ['systemPrompt', 'userPromptTemplate', 'sendMode'] as const;
-  const numberFields = ['maxLoops', 'maxToolCalls', 'toolTimeoutMs', 'totalTimeoutMs', 'maxHistory', 'maxReplyLength', 'replySegmentDelayMs', 'sendDelaySeconds'] as const;
+  const numberFields = ['maxLoops', 'maxToolCalls', 'toolTimeoutSeconds', 'totalTimeoutSeconds', 'maxHistory', 'maxReplyLength', 'replySegmentDelaySeconds', 'sendDelaySeconds', 'toolTimeoutMs', 'totalTimeoutMs', 'replySegmentDelayMs'] as const;
   for (const field of booleanFields) if (typeof body[field] === 'boolean') patch[field] = body[field] as never;
   for (const field of stringFields) if (typeof body[field] === 'string') patch[field] = body[field] as never;
   for (const field of numberFields) if (typeof body[field] === 'number') patch[field] = body[field] as never;

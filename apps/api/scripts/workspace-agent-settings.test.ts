@@ -44,6 +44,10 @@ test('native Agent settings parser supports safe operational fields and redacts 
   assert.equal(plan?.content.includes('不要进入 Workspace'), false);
   const milliseconds = parseNativeWorkspaceAgentSettingsUpdate('调整自动回复 Agent；发送延迟：12000毫秒');
   assert.equal(milliseconds?.patch.sendDelaySeconds, 12);
+  const legacyAliases = parseNativeWorkspaceAgentSettingsUpdate('调整自动回复 Agent；工具超时：10000；总超时：90000；分段发送间隔：450');
+  assert.deepEqual(legacyAliases?.patch, { toolTimeoutMs: 10000, totalTimeoutMs: 90000, replySegmentDelayMs: 450 });
+  const secondAliases = parseNativeWorkspaceAgentSettingsUpdate('调整自动回复 Agent；工具超时（秒）：10；总超时（秒）：600；分段发送间隔（秒）：0.45');
+  assert.deepEqual(secondAliases?.patch, { toolTimeoutSeconds: 10, totalTimeoutSeconds: 600, replySegmentDelaySeconds: 0.45 });
 });
 
 test('Workspace Agent settings confirmation updates config and completes local outbox', async () => {

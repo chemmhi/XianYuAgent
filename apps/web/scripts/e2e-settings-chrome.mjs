@@ -218,11 +218,11 @@ async function run() {
   await setLabelTextArea(cdp, '用户提示词模板', '请处理买家问题：{{buyerMessage}}\n{{context}}');
   await setLabelInput(cdp, '最大循环次数', '6');
   await setLabelInput(cdp, '工具调用上限', '9');
-  await setLabelInput(cdp, '工具超时（毫秒）', '15000');
-  await setLabelInput(cdp, '总超时（毫秒）', '90000');
+  await setLabelInput(cdp, '工具超时（秒）', '15');
+  await setLabelInput(cdp, '总超时（秒）', '600');
   await setLabelInput(cdp, '上下文历史条数', '15');
   await setLabelInput(cdp, '最大回复长度', '120');
-  await setLabelInput(cdp, '分段发送间隔（毫秒）', '450');
+  await setLabelInput(cdp, '分段发送间隔（秒）', '0.45');
   const legacyDebounceField = await evaluate(cdp, "Boolean(Array.from(document.querySelectorAll('[data-auto-reply-agent-panel] label')).find((label) => label.textContent?.includes('防抖窗口')))" );
   if (legacyDebounceField) throw new Error('legacy debounce field should not be visible');
   const removedSections = await evaluate(cdp, "(() => { const panel = document.querySelector('[data-auto-reply-agent-panel]'); return { sendMode: Array.from(panel?.querySelectorAll('label') ?? []).some((label) => label.textContent?.includes('发送模式')), audit: panel?.textContent?.includes('配置审计') === true, tooltip: panel?.querySelector('.settings-info-tooltip') !== null }; })()");
@@ -234,7 +234,7 @@ async function run() {
   if (saveToast.inline || !saveToast.toast || saveToast.position !== 'fixed' || !saveToast.right || !saveToast.bottom) throw new Error('save feedback did not use the global bottom-right toast: ' + JSON.stringify(saveToast));
   const agentSaved = await requestJson(apiUrl, agentPath, { headers: { cookie } });
   const savedConfig = agentSaved.body.data;
-  const expectedConfig = { enabled: true, systemPrompt: '设置页全量回归系统提示词', userPromptTemplate: '请处理买家问题：{{buyerMessage}}\n{{context}}', maxLoops: 6, maxToolCalls: 9, toolTimeoutMs: 15000, totalTimeoutMs: 90000, maxHistory: 15, maxReplyLength: 120, replySegmentDelayMs: 450, sendDelaySeconds: 1 };
+  const expectedConfig = { enabled: true, systemPrompt: '设置页全量回归系统提示词', userPromptTemplate: '请处理买家问题：{{buyerMessage}}\n{{context}}', maxLoops: 6, maxToolCalls: 9, toolTimeoutSeconds: 15, totalTimeoutSeconds: 600, maxHistory: 15, maxReplyLength: 120, replySegmentDelaySeconds: 0.45, sendDelaySeconds: 1 };
   for (const [key, value] of Object.entries(expectedConfig)) if (savedConfig?.[key] !== value) throw new Error(`agent setting ${key} did not persist: ${JSON.stringify({ expected: value, actual: savedConfig?.[key], response: agentSaved.body })}`);
   if (!agentSaved.response.ok || savedConfig?.configVersion !== 1) throw new Error(`agent settings persistence failed: ${agentSaved.response.status} ${JSON.stringify(agentSaved.body)}`);
   const agentStale = await requestJson(apiUrl, '/api/v1/settings/agent', {

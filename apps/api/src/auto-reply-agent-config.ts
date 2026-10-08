@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { AutoReplyAgentConfig as PersistedAutoReplyAgentConfig } from './domain.js';
-import { DEFAULT_AUTO_REPLY_AGENT_CONFIG } from './auto-reply-agent-settings.js';
+import { DEFAULT_AUTO_REPLY_AGENT_CONFIG, secondsToMilliseconds } from './auto-reply-agent-settings.js';
 
 export interface AutoReplyAgentRuntimeConfig {
   systemPrompt: string;
@@ -49,11 +49,11 @@ export function resolveAutoReplyAgentConfig(env: NodeJS.ProcessEnv = process.env
     maxLoops: boundedInt(env.AUTO_REPLY_AGENT_MAX_LOOPS, 4, 1, 8),
     maxToolCalls: boundedInt(env.AUTO_REPLY_AGENT_MAX_TOOL_CALLS, 8, 1, 16),
     maxToolResultChars: boundedInt(env.AUTO_REPLY_AGENT_MAX_TOOL_RESULT_CHARS, 12_000, 500, 40_000),
-    toolTimeoutMs: boundedInt(env.AUTO_REPLY_AGENT_TOOL_TIMEOUT_MS, 10_000, 500, 60_000),
-    totalTimeoutMs: boundedInt(env.AUTO_REPLY_AGENT_TOTAL_TIMEOUT_MS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.totalTimeoutMs, 1_000, 300_000),
+    toolTimeoutMs: parseDurationMilliseconds(env.AUTO_REPLY_AGENT_TOOL_TIMEOUT_SECONDS, env.AUTO_REPLY_AGENT_TOOL_TIMEOUT_MS, 10_000, 500, 60_000),
+    totalTimeoutMs: parseDurationMilliseconds(env.AUTO_REPLY_AGENT_TOTAL_TIMEOUT_SECONDS, env.AUTO_REPLY_AGENT_TOTAL_TIMEOUT_MS, secondsToMilliseconds(DEFAULT_AUTO_REPLY_AGENT_CONFIG.totalTimeoutSeconds), 1_000, 600_000),
     maxHistory: boundedInt(env.AUTO_REPLY_AGENT_MAX_HISTORY, 12, 1, 50),
     maxReplyLength: boundedInt(env.AUTO_REPLY_AGENT_MAX_REPLY_LENGTH, 500, 30, 2_000),
-    replySegmentDelayMs: boundedInt(env.AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS, 350, 0, 5_000),
+    replySegmentDelayMs: parseDurationMilliseconds(env.AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_SECONDS, env.AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS, 350, 0, 30_000),
     debounceMs: boundedInt(env.AUTO_REPLY_AGENT_DEBOUNCE_MS, 2_000, 0, 30_000),
     sendDelaySeconds: boundedInt(env.AUTO_REPLY_AGENT_SEND_DELAY_SECONDS, 300, 0, 86_400),
     version: env.AUTO_REPLY_AGENT_CONFIG_VERSION?.trim() || 'env-v1',
@@ -80,11 +80,11 @@ export function mergeAutoReplyAgentRuntimeConfig(
     maxLoops: settings.maxLoops,
     maxToolCalls: settings.maxToolCalls,
     maxToolResultChars: base.maxToolResultChars,
-    toolTimeoutMs: settings.toolTimeoutMs,
-    totalTimeoutMs: settings.totalTimeoutMs,
+    toolTimeoutMs: secondsToMilliseconds(settings.toolTimeoutSeconds),
+    totalTimeoutMs: secondsToMilliseconds(settings.totalTimeoutSeconds),
     maxHistory: settings.maxHistory,
     maxReplyLength: settings.maxReplyLength,
-    replySegmentDelayMs: settings.replySegmentDelayMs,
+    replySegmentDelayMs: secondsToMilliseconds(settings.replySegmentDelaySeconds),
     debounceMs: settings.debounceMs,
     sendDelaySeconds: settings.sendDelaySeconds,
     version: `settings-v${settings.configVersion ?? 0}`,
@@ -112,6 +112,15 @@ function boundedInt(value: string | undefined, fallback: number, min: number, ma
   const parsed = Number(value);
   if (!Number.isInteger(parsed)) return fallback;
   return Math.min(max, Math.max(min, parsed));
+}
+
+function parseDurationMilliseconds(secondsValue: string | undefined, legacyMillisecondsValue: string | undefined, fallback: number, min: number, max: number): number {
+  if (secondsValue !== undefined) {
+    const parsedSeconds = Number(secondsValue);
+    const parsedMilliseconds = secondsToMilliseconds(parsedSeconds);
+    return Number.isFinite(parsedSeconds) && parsedMilliseconds >= min && parsedMilliseconds <= max ? parsedMilliseconds : fallback;
+  }
+  return boundedInt(legacyMillisecondsValue, fallback, min, max);
 }
 
 function digestConfig(value: Record<string, unknown>): string {

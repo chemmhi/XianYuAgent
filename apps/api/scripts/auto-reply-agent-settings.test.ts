@@ -14,6 +14,7 @@ test('auto reply agent settings are versioned, audited and isolated from workspa
   assert.equal(defaults.configVersion, 0);
   assert.equal(defaults.sendMode, 'simulate');
   assert.equal(defaults.sendDelaySeconds, 300);
+  assert.equal(defaults.totalTimeoutSeconds, 600);
   assert.equal(defaults.maxLoops, 4);
   assert.equal('allowPaidOrderReply' in defaults, false);
 
@@ -60,11 +61,11 @@ test('auto reply agent settings persist every editable field without dropping va
     userPromptTemplate: '买家问题：{{buyerMessage}}\n{{context}}',
     maxLoops: 7,
     maxToolCalls: 9,
-    toolTimeoutMs: 15_000,
-    totalTimeoutMs: 90_000,
+    toolTimeoutSeconds: 15,
+    totalTimeoutSeconds: 90,
     maxHistory: 15,
     maxReplyLength: 120,
-    replySegmentDelayMs: 450,
+    replySegmentDelaySeconds: 0.45,
     sendDelaySeconds: 1,
     sendMode: 'live' as const,
   };
@@ -86,4 +87,21 @@ test('auto reply agent max reply length accepts 30 and rejects values below it',
   assert.equal(accepted.maxReplyLength, 30);
   await assert.rejects(() => service.update({ adminId: admin.id, accountId: account.id, expectedVersion: accepted.configVersion, patch: { maxReplyLength: 29 }, requestId: 'req-6', traceId: 'trace-6' }), (error: unknown) => error instanceof Error && error.message.includes('maxReplyLength'));
   await assert.rejects(() => service.update({ adminId: admin.id, accountId: account.id, expectedVersion: accepted.configVersion, patch: { sendDelaySeconds: 86_401 }, requestId: 'req-7', traceId: 'trace-7' }), (error: unknown) => error instanceof Error && error.message.includes('sendDelaySeconds'));
+});
+
+test('duration settings use seconds while preserving legacy millisecond patches and env values', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'agent-settings-duration@example.com', passwordHash: 'hash', displayName: 'Agent Settings Duration' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'agent-settings-duration-seller' });
+  const service = new AutoReplyAgentSettingsService(store, DEFAULT_AUTO_REPLY_AGENT_CONFIG, async () => 'audit-1');
+  const legacy = await service.update({ adminId: admin.id, accountId: account.id, expectedVersion: 0, patch: { toolTimeoutMs: 1_500, totalTimeoutMs: 90_000, replySegmentDelayMs: 450 }, requestId: 'req-duration-legacy', traceId: 'trace-duration-legacy' });
+  assert.equal(legacy.toolTimeoutSeconds, 1.5);
+  assert.equal(legacy.totalTimeoutSeconds, 90);
+  assert.equal(legacy.replySegmentDelaySeconds, 0.45);
+  const max = await service.update({ adminId: admin.id, accountId: account.id, expectedVersion: legacy.configVersion, patch: { totalTimeoutSeconds: 600 }, requestId: 'req-duration-max', traceId: 'trace-duration-max' });
+  assert.equal(max.totalTimeoutSeconds, 600);
+  const env = autoReplyAgentConfigFromEnv({ AUTO_REPLY_AGENT_TOOL_TIMEOUT_SECONDS: '2.5', AUTO_REPLY_AGENT_TOTAL_TIMEOUT_SECONDS: '600', AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_SECONDS: '0.45' });
+  assert.equal(env.toolTimeoutSeconds, 2.5);
+  assert.equal(env.totalTimeoutSeconds, 600);
+  assert.equal(env.replySegmentDelaySeconds, 0.45);
 });

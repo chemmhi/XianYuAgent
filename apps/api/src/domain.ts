@@ -1040,11 +1040,14 @@ export interface AutoReplyAgentConfig {
   userPromptTemplate: string;
   maxLoops: number;
   maxToolCalls: number;
-  toolTimeoutMs: number;
-  totalTimeoutMs: number;
+  /** User-facing timeout in seconds. Runtime converts this to milliseconds. */
+  toolTimeoutSeconds: number;
+  /** User-facing request deadline in seconds. Runtime converts this to milliseconds. */
+  totalTimeoutSeconds: number;
   maxHistory: number;
   maxReplyLength: number;
-  replySegmentDelayMs: number;
+  /** User-facing delay between reply segments in seconds. Runtime converts this to milliseconds. */
+  replySegmentDelaySeconds: number;
   debounceMs: number;
   /** Delay before the first automatic reply is sent. Zero disables the delay. */
   sendDelaySeconds: number;
@@ -1060,7 +1063,16 @@ export interface AutoReplyAgentConfigRecord extends AutoReplyAgentConfig {
   updatedAt: string;
 }
 
-export type AutoReplyAgentConfigPatch = Partial<AutoReplyAgentConfig>;
+export interface LegacyAutoReplyAgentConfigPatch {
+  /** Legacy persisted/API field retained for backward-compatible reads and writes. */
+  toolTimeoutMs?: number;
+  /** Legacy persisted/API field retained for backward-compatible reads and writes. */
+  totalTimeoutMs?: number;
+  /** Legacy persisted/API field retained for backward-compatible reads and writes. */
+  replySegmentDelayMs?: number;
+}
+
+export type AutoReplyAgentConfigPatch = Partial<AutoReplyAgentConfig> & LegacyAutoReplyAgentConfigPatch;
 
 export interface ConversationEventRecord {
   eventId: string;

@@ -4,7 +4,7 @@ import { digestJson } from './security.js';
 import type { AutoReplyRepairCandidateResult, AutoReplyRepairRuntime } from './auto-reply-repair-runtime.js';
 import type { AutoReplyGodViewSink } from './auto-reply-god-view.js';
 import { AutoReplyDeadlineError, createAutoReplyDeadline, withAbort, timeoutProgress, type AutoReplyDeadline } from './auto-reply-timeout.js';
-import { DEFAULT_AUTO_REPLY_AGENT_CONFIG } from './auto-reply-agent-settings.js';
+import { DEFAULT_AUTO_REPLY_AGENT_CONFIG, secondsToMilliseconds } from './auto-reply-agent-settings.js';
 
 export type AutoReplyIntent = 'price' | 'availability' | 'delivery' | 'general' | 'refund' | 'complaint' | 'cross_product' | 'credential_request' | 'prompt_injection' | 'other';
 
@@ -232,10 +232,10 @@ export class AutoReplyService {
     this.enabled = options.enabled ?? true;
     this.sendMode = options.sendMode ?? 'simulate';
     this.buyerAllowlist = [...new Set((options.buyerAllowlist ?? []).map(normalizeBuyerName).filter((value): value is string => Boolean(value)))];
-    this.totalTimeoutMs = Math.max(1_000, Math.min(options.totalTimeoutMs ?? DEFAULT_AUTO_REPLY_AGENT_CONFIG.totalTimeoutMs, 300_000));
+    this.totalTimeoutMs = Math.max(1_000, Math.min(options.totalTimeoutMs ?? secondsToMilliseconds(DEFAULT_AUTO_REPLY_AGENT_CONFIG.totalTimeoutSeconds), 600_000));
     this.maxHistory = Math.max(1, Math.min(options.maxHistory ?? 20, 50));
     this.maxReplyLength = Math.max(30, Math.min(options.maxReplyLength ?? 500, 2_000));
-    this.replySegmentDelayMs = Math.max(0, Math.min(options.replySegmentDelayMs ?? 350, 5_000));
+    this.replySegmentDelayMs = Math.max(0, Math.min(options.replySegmentDelayMs ?? 350, 30_000));
     this.sendDelaySeconds = Math.max(0, Math.min(options.sendDelaySeconds ?? 0, 86_400));
     this.classifier = options.classifier ?? new RuleBasedIntentClassifier();
     this.generator = options.generator ?? new TemplateAutoReplyGenerator();
@@ -990,13 +990,13 @@ export class AutoReplyService {
       enabled: provided.enabled ?? this.enabled,
       sendMode: provided.sendMode ?? this.sendMode,
       buyerAllowlist,
-      totalTimeoutMs: Math.max(1_000, Math.min(provided.totalTimeoutMs ?? this.totalTimeoutMs, 300_000)),
+      totalTimeoutMs: Math.max(1_000, Math.min(provided.totalTimeoutMs ?? this.totalTimeoutMs, 600_000)),
       // Kept in the runtime shape for backward-compatible callers; the
       // legacy debounce gate is intentionally no longer applied.
       debounceMs: 0,
       maxHistory: Math.max(1, Math.min(provided.maxHistory ?? this.maxHistory, 50)),
       maxReplyLength: Math.max(30, Math.min(provided.maxReplyLength ?? this.maxReplyLength, 2_000)),
-      replySegmentDelayMs: Math.max(0, Math.min(provided.replySegmentDelayMs ?? this.replySegmentDelayMs, 5_000)),
+      replySegmentDelayMs: Math.max(0, Math.min(provided.replySegmentDelayMs ?? this.replySegmentDelayMs, 30_000)),
       sendDelaySeconds: Math.max(0, Math.min(provided.sendDelaySeconds ?? this.sendDelaySeconds, 86_400)),
       generator: provided.generator ?? this.generator,
       acknowledgementEvaluator: provided.acknowledgementEvaluator ?? this.acknowledgementEvaluator,

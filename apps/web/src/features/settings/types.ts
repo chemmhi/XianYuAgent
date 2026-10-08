@@ -40,11 +40,11 @@ export interface AutoReplyAgentConfigVM {
   userPromptTemplate: string;
   maxLoops: number;
   maxToolCalls: number;
-  toolTimeoutMs: number;
-  totalTimeoutMs: number;
+  toolTimeoutSeconds: number;
+  totalTimeoutSeconds: number;
   maxHistory: number;
   maxReplyLength: number;
-  replySegmentDelayMs: number;
+  replySegmentDelaySeconds: number;
   /** Legacy response field retained for backward compatibility; the UI no longer edits it. */
   debounceMs?: number;
   sendDelaySeconds: number;

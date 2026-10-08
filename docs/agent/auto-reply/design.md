@@ -217,7 +217,7 @@ Agent 初始输入只包含必要 ID/元数据和当前消息，不预加载全�
 
 - 分段必须保持事实、顺序和全文内容完整；
 - 不设置固定单段长度或总段数上限，段落由 Agent 按买家阅读习惯决定；
-- 段间延迟使用 `replySegmentDelayMs`，可配置；分段发送前、段间和段后均检查人工介入，人工介入后停止剩余分段。
+- 段间延迟使用 `replySegmentDelaySeconds`，可配置；运行时转换为毫秒计时。分段发送前、段间和段后均检查人工介入，人工介入后停止剩余分段。
 - 多段共享 `replyGroupId`，每段记录 `segmentIndex` / `segmentCount`；
 - 发送按顺序执行，任一段失败或结果未知时停止后续段发送并记录 `partial_send` / `send_unknown`；
 - 每段使用独立幂等键，禁止重试导致重复段落。
@@ -284,11 +284,11 @@ skipped | handoff | failed | send_unknown | partial_send
 - `userPromptTemplate`；
 - `maxLoops`；
 - `maxToolCalls`；
-- `toolTimeoutMs`；
-- `totalTimeoutMs`；
+- `toolTimeoutSeconds`；
+- `totalTimeoutSeconds`；
 - `maxHistory`；
 - `maxReplyLength`；
-- `replySegmentDelayMs`；
+- `replySegmentDelaySeconds`；
 - `sendDelaySeconds`：首次 AI 接管前的延迟发送窗口，默认 300 秒；接管后不重复等待，人工出站后重新开启；
 - `sendMode` 和白名单策略引用；
 - `configVersion` / `configDigest`。

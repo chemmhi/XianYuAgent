@@ -3,7 +3,7 @@ import { createAutoReplyAgentSettingsApi, createMockAutoReplyAgentSettingsApi } 
 import type { AutoReplyAgentConfigVM } from './types';
 
 function config(overrides: Partial<AutoReplyAgentConfigVM> = {}): AutoReplyAgentConfigVM {
-  return { accountId: 'acct-a', configVersion: 2, configDigest: 'd', createdAt: '', updatedAt: '', enabled: true, systemPrompt: 's', userPromptTemplate: 'u', maxLoops: 4, maxToolCalls: 8, toolTimeoutMs: 1000, totalTimeoutMs: 2000, maxHistory: 10, maxReplyLength: 500, replySegmentDelayMs: 100, sendDelaySeconds: 300, sendMode: 'simulate', ...overrides };
+  return { accountId: 'acct-a', configVersion: 2, configDigest: 'd', createdAt: '', updatedAt: '', enabled: true, systemPrompt: 's', userPromptTemplate: 'u', maxLoops: 4, maxToolCalls: 8, toolTimeoutSeconds: 1, totalTimeoutSeconds: 2, maxHistory: 10, maxReplyLength: 500, replySegmentDelaySeconds: 0.1, sendDelaySeconds: 300, sendMode: 'simulate', ...overrides };
 }
 
 describe('Auto Reply Agent settings API', () => {

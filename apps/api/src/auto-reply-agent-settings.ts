@@ -9,11 +9,11 @@ export const DEFAULT_AUTO_REPLY_AGENT_CONFIG: AutoReplyAgentConfig = {
   userPromptTemplate: '{{buyerMessage}}',
   maxLoops: 4,
   maxToolCalls: 8,
-  toolTimeoutMs: 10_000,
-  totalTimeoutMs: 60_000,
+  toolTimeoutSeconds: 10,
+  totalTimeoutSeconds: 600,
   maxHistory: 20,
   maxReplyLength: 1_000,
-  replySegmentDelayMs: 800,
+  replySegmentDelaySeconds: 0.8,
   debounceMs: 2_000,
   sendDelaySeconds: 300,
   sendMode: 'simulate',
@@ -26,11 +26,11 @@ export function autoReplyAgentConfigFromEnv(env: NodeJS.ProcessEnv = process.env
     userPromptTemplate: env.AUTO_REPLY_AGENT_USER_PROMPT?.trim() || DEFAULT_AUTO_REPLY_AGENT_CONFIG.userPromptTemplate,
     maxLoops: parseBoundedInteger(env.AUTO_REPLY_AGENT_MAX_LOOPS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.maxLoops, 1, 12),
     maxToolCalls: parseBoundedInteger(env.AUTO_REPLY_AGENT_MAX_TOOL_CALLS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.maxToolCalls, 1, 32),
-    toolTimeoutMs: parseBoundedInteger(env.AUTO_REPLY_AGENT_TOOL_TIMEOUT_MS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.toolTimeoutMs, 100, 120_000),
-    totalTimeoutMs: parseBoundedInteger(env.AUTO_REPLY_AGENT_TOTAL_TIMEOUT_MS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.totalTimeoutMs, 1_000, 300_000),
+    toolTimeoutSeconds: parseDurationSeconds(env.AUTO_REPLY_AGENT_TOOL_TIMEOUT_SECONDS, env.AUTO_REPLY_AGENT_TOOL_TIMEOUT_MS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.toolTimeoutSeconds, 0.1, 120),
+    totalTimeoutSeconds: parseDurationSeconds(env.AUTO_REPLY_AGENT_TOTAL_TIMEOUT_SECONDS, env.AUTO_REPLY_AGENT_TOTAL_TIMEOUT_MS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.totalTimeoutSeconds, 1, 600),
     maxHistory: parseBoundedInteger(env.AUTO_REPLY_AGENT_MAX_HISTORY, DEFAULT_AUTO_REPLY_AGENT_CONFIG.maxHistory, 0, 100),
     maxReplyLength: parseBoundedInteger(env.AUTO_REPLY_AGENT_MAX_REPLY_LENGTH, DEFAULT_AUTO_REPLY_AGENT_CONFIG.maxReplyLength, 30, 4_000),
-    replySegmentDelayMs: parseBoundedInteger(env.AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.replySegmentDelayMs, 0, 30_000),
+    replySegmentDelaySeconds: parseDurationSeconds(env.AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_SECONDS, env.AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.replySegmentDelaySeconds, 0, 30),
     debounceMs: parseBoundedInteger(env.AUTO_REPLY_AGENT_DEBOUNCE_MS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.debounceMs, 0, 30_000),
     sendDelaySeconds: parseBoundedInteger(env.AUTO_REPLY_AGENT_SEND_DELAY_SECONDS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.sendDelaySeconds, 0, 86_400),
     sendMode: env.AUTO_REPLY_SEND_MODE?.trim().toLowerCase() === 'live' ? 'live' : DEFAULT_AUTO_REPLY_AGENT_CONFIG.sendMode,
@@ -55,7 +55,8 @@ export class AutoReplyAgentSettingsService {
     if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'expectedVersion must be a non-negative integer');
     const current = await this.get(input.adminId, input.accountId);
     if (current.configVersion !== input.expectedVersion) throw new ServiceError(409, 'VERSION_CONFLICT', 'auto reply agent settings version conflict', { server: current });
-    const { debounceMs: _legacyDebounceMs, ...effectivePatch } = input.patch;
+    const normalizedPatch = normalizeAutoReplyAgentConfigPatch(input.patch);
+    const { debounceMs: _legacyDebounceMs, ...effectivePatch } = normalizedPatch;
     void _legacyDebounceMs;
     const config = validateConfig({ ...current, ...effectivePatch });
     const saved = await this.store.upsertAutoReplyAgentConfig({ adminId: input.adminId, accountId: input.accountId, expectedVersion: input.expectedVersion, patch: effectivePatch, config, configDigest: digestJson(config) });
@@ -81,11 +82,11 @@ function validateConfig(config: AutoReplyAgentConfig): AutoReplyAgentConfig {
     userPromptTemplate: boundedText(config.userPromptTemplate, 'userPromptTemplate', 20_000),
     maxLoops: boundedNumber(config.maxLoops, 'maxLoops', 1, 12),
     maxToolCalls: boundedNumber(config.maxToolCalls, 'maxToolCalls', 1, 32),
-    toolTimeoutMs: boundedNumber(config.toolTimeoutMs, 'toolTimeoutMs', 100, 120_000),
-    totalTimeoutMs: boundedNumber(config.totalTimeoutMs, 'totalTimeoutMs', 1_000, 300_000),
+    toolTimeoutSeconds: boundedDuration(config.toolTimeoutSeconds, 'toolTimeoutSeconds', 0.1, 120),
+    totalTimeoutSeconds: boundedDuration(config.totalTimeoutSeconds, 'totalTimeoutSeconds', 1, 600),
     maxHistory: boundedNumber(config.maxHistory, 'maxHistory', 0, 100),
     maxReplyLength: boundedNumber(config.maxReplyLength, 'maxReplyLength', 30, 4_000),
-    replySegmentDelayMs: boundedNumber(config.replySegmentDelayMs, 'replySegmentDelayMs', 0, 30_000),
+    replySegmentDelaySeconds: boundedDuration(config.replySegmentDelaySeconds, 'replySegmentDelaySeconds', 0, 30),
     debounceMs: boundedNumber(config.debounceMs, 'debounceMs', 0, 30_000),
     sendDelaySeconds: boundedNumber(config.sendDelaySeconds, 'sendDelaySeconds', 0, 86_400),
     sendMode: config.sendMode === 'live' ? 'live' : 'simulate',
@@ -104,6 +105,15 @@ function boundedNumber(value: unknown, field: string, min: number, max: number):
   return Number(value);
 }
 
+function boundedDuration(value: unknown, field: string, min: number, max: number): number {
+  const numeric = Number(value);
+  const rounded = Number(numeric.toFixed(3));
+  if (!Number.isFinite(numeric) || rounded !== numeric || numeric < min || numeric > max) {
+    throw new ServiceError(422, 'VALIDATION_FAILED', `${field} must be a number with at most 3 decimal places between ${min} and ${max}`);
+  }
+  return rounded;
+}
+
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   if (value === undefined) return fallback;
   return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
@@ -114,6 +124,47 @@ function parseBoundedInteger(value: string | undefined, fallback: number, min: n
   return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
 }
 
+function parseDurationSeconds(secondsValue: string | undefined, legacyMillisecondsValue: string | undefined, fallback: number, min: number, max: number): number {
+  const raw = secondsValue ?? (legacyMillisecondsValue === undefined ? undefined : String(Number(legacyMillisecondsValue) / 1_000));
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) return fallback;
+  return Number(parsed.toFixed(3));
+}
+
+export function millisecondsToSeconds(value: number): number {
+  return Number((value / 1_000).toFixed(3));
+}
+
+export function secondsToMilliseconds(value: number): number {
+  return Math.max(0, Math.round(value * 1_000));
+}
+
+function normalizeAutoReplyAgentConfigPatch(patch: AutoReplyAgentConfigPatch): AutoReplyAgentConfigPatch {
+  const source = patch as AutoReplyAgentConfigPatch & Record<string, unknown>;
+  const normalized: AutoReplyAgentConfigPatch = { ...patch };
+  if (normalized.toolTimeoutSeconds === undefined && typeof source.toolTimeoutMs === 'number') normalized.toolTimeoutSeconds = millisecondsToSeconds(source.toolTimeoutMs);
+  if (normalized.totalTimeoutSeconds === undefined && typeof source.totalTimeoutMs === 'number') normalized.totalTimeoutSeconds = millisecondsToSeconds(source.totalTimeoutMs);
+  if (normalized.replySegmentDelaySeconds === undefined && typeof source.replySegmentDelayMs === 'number') normalized.replySegmentDelaySeconds = millisecondsToSeconds(source.replySegmentDelayMs);
+  delete normalized.toolTimeoutMs;
+  delete normalized.totalTimeoutMs;
+  delete normalized.replySegmentDelayMs;
+  return normalized;
+}
+
 export function resolveAutoReplyAgentDefaults(config: AppConfig): AutoReplyAgentConfig {
-  return validateConfig({ ...autoReplyAgentConfigFromEnv(), ...(config.autoReplyAgent ?? {}) });
+  const runtime = config.autoReplyAgent;
+  const overrides = runtime ? {
+    systemPrompt: runtime.systemPrompt,
+    userPromptTemplate: runtime.userPromptTemplate,
+    maxLoops: runtime.maxLoops,
+    maxToolCalls: runtime.maxToolCalls,
+    toolTimeoutSeconds: millisecondsToSeconds(runtime.toolTimeoutMs),
+    totalTimeoutSeconds: millisecondsToSeconds(runtime.totalTimeoutMs),
+    maxHistory: runtime.maxHistory,
+    maxReplyLength: runtime.maxReplyLength,
+    replySegmentDelaySeconds: millisecondsToSeconds(runtime.replySegmentDelayMs),
+    debounceMs: runtime.debounceMs,
+    sendDelaySeconds: runtime.sendDelaySeconds,
+  } : {};
+  return validateConfig({ ...autoReplyAgentConfigFromEnv(), ...overrides });
 }

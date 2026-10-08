@@ -12,7 +12,7 @@ import { validatePersistedAutoReplyRepairPolicyBundle } from './auto-reply-repai
 import { normalizeProductSearchTerms, normalizeProductSearchText, normalizeProductCatalogSearchText, splitProductSearchTerms, type AutoReplyProductSearchMode } from './auto-reply-product-search.js';
 import { splitDataContent } from './coupon-delivery.js';
 import { removeCouponBatchFromAutomationConfig } from './product-automation-coupon.js';
-import { DEFAULT_AUTO_REPLY_AGENT_CONFIG } from './auto-reply-agent-settings.js';
+import { DEFAULT_AUTO_REPLY_AGENT_CONFIG, millisecondsToSeconds } from './auto-reply-agent-settings.js';
 
 type Row = Record<string, unknown>;
 const PRODUCT_COUPON_BATCHES_SELECT = `(select coalesce(json_agg(json_build_object('id', cb.sequence_id, 'label', cb.label) order by binding.priority desc, binding.created_at, cb.sequence_id), '[]'::json) from coupons.coupon_bindings binding join coupons.coupon_batches cb on cb.id=binding.coupon_batch_id where binding.product_id=p.id and binding.status='active' and cb.status <> 'voided') as coupon_batches`;
@@ -28,6 +28,14 @@ function dateIso(value: unknown): string {
   return value instanceof Date ? value.toISOString() : new Date(String(value)).toISOString();
 }
 function iso(value: unknown): string | undefined { return value ? dateIso(value) : undefined; }
+
+function readDurationSeconds(config: Record<string, unknown>, secondsKey: string, legacyMillisecondsKey: string, fallback: number): number {
+  const seconds = Number(config[secondsKey]);
+  if (Number.isFinite(seconds)) return Number(seconds.toFixed(3));
+  const milliseconds = Number(config[legacyMillisecondsKey]);
+  if (Number.isFinite(milliseconds)) return millisecondsToSeconds(milliseconds);
+  return fallback;
+}
 
 export class PostgresStore implements Store {
   readonly kind = 'postgres' as const;
@@ -2291,11 +2299,11 @@ export class PostgresStore implements Store {
       userPromptTemplate: String(config.userPromptTemplate ?? ''),
       maxLoops: Number(config.maxLoops ?? 4),
       maxToolCalls: Number(config.maxToolCalls ?? 8),
-      toolTimeoutMs: Number(config.toolTimeoutMs ?? 10_000),
-      totalTimeoutMs: Number(config.totalTimeoutMs ?? DEFAULT_AUTO_REPLY_AGENT_CONFIG.totalTimeoutMs),
+      toolTimeoutSeconds: readDurationSeconds(config, 'toolTimeoutSeconds', 'toolTimeoutMs', DEFAULT_AUTO_REPLY_AGENT_CONFIG.toolTimeoutSeconds),
+      totalTimeoutSeconds: readDurationSeconds(config, 'totalTimeoutSeconds', 'totalTimeoutMs', DEFAULT_AUTO_REPLY_AGENT_CONFIG.totalTimeoutSeconds),
       maxHistory: Number(config.maxHistory ?? 20),
       maxReplyLength: Number(config.maxReplyLength ?? 1_000),
-      replySegmentDelayMs: Number(config.replySegmentDelayMs ?? 800),
+      replySegmentDelaySeconds: readDurationSeconds(config, 'replySegmentDelaySeconds', 'replySegmentDelayMs', DEFAULT_AUTO_REPLY_AGENT_CONFIG.replySegmentDelaySeconds),
       debounceMs: Number(config.debounceMs ?? 2_000),
       sendDelaySeconds: Number(config.sendDelaySeconds ?? 300),
       sendMode: config.sendMode === 'live' ? 'live' : 'simulate',

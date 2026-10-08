@@ -9,7 +9,7 @@ const suffix = `${process.pid}-${Date.now()}`;
 const email = `auto-reply-push-pg-${suffix}@example.com`;
 const sellerRef = `auto-reply-push-pg-${suffix}`;
 const originalFetch = globalThis.fetch;
-const autoReplyAgent = resolveAutoReplyAgentConfig({ ...process.env, AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0', AUTO_REPLY_AGENT_DEBOUNCE_MS: '0', AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS: '0' });
+const autoReplyAgent = resolveAutoReplyAgentConfig({ ...process.env, AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0', AUTO_REPLY_AGENT_DEBOUNCE_MS: '0', AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_SECONDS: '0' });
 let modelCall = 0;
 globalThis.fetch = (async (_input, init) => {
   modelCall += 1;

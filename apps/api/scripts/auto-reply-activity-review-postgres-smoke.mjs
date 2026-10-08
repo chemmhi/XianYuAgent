@@ -18,7 +18,7 @@ try {
     autoReplySendMode: 'simulate', buyerAllowlist: [], autoReplyRepairMode: 'enforce',
     autoReplyOutcomeReviewWorkerEnabled: false, autoReplyOutcomeReviewWorkerPollMs: 1_000,
     autoReplyOutcomeReviewWorkerBatchSize: 10, autoReplyOutcomeReviewWorkerLeaseSeconds: 60,
-    autoReplyAgent: resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0', AUTO_REPLY_AGENT_DEBOUNCE_MS: '0', AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS: '0' }),
+    autoReplyAgent: resolveAutoReplyAgentConfig({ AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0', AUTO_REPLY_AGENT_DEBOUNCE_MS: '0', AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_SECONDS: '0' }),
     credentialEncryptionKey: 'activity-review-postgres-smoke', objectStorageEndpoint: 'http://127.0.0.1:19000',
     objectStorageAccessKey: 'xianyu', objectStorageSecretKey: 'xianyu_dev_only', objectStorageBucket: 'xianyu-assets', objectStorageRegion: 'us-east-1',
   });

@@ -17,7 +17,7 @@
 ## 本切片范围
 
 - Workspace 修改自动回复 Agent 配置指令识别与中文键值解析。
-- 仅开放安全运行参数：`enabled`、`sendMode`、`maxLoops`、`maxToolCalls`、`toolTimeoutMs`、`totalTimeoutMs`、`maxHistory`、`maxReplyLength`、`replySegmentDelayMs`、`sendDelaySeconds`。
+- 仅开放安全运行参数：`enabled`、`sendMode`、`maxLoops`、`maxToolCalls`、`toolTimeoutSeconds`、`totalTimeoutSeconds`、`maxHistory`、`maxReplyLength`、`replySegmentDelaySeconds`、`sendDelaySeconds`。旧毫秒字段仅用于兼容读取和迁移；Workspace 指令中的裸中文超时键保持旧毫秒语义，使用“（秒）”或 `*Seconds` 才按秒解析。
 - 复用现有 `AutoReplyAgentSettingsService`、账号 scope、配置校验、版本控制、摘要审计和运行时读取路径。
 - `agent.settings.update.confirm` Policy、Confirmation / Cancel / Retry / Outbox API 和前端确认卡复用 WS-VS-02/03 的入口。
 - 配置写入成功后的 Run Event、AuditEvent、版本回显和 PostgreSQL 关闭/重开复读。
