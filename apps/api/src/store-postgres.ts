@@ -834,6 +834,7 @@ export class PostgresStore implements Store {
             where scope.account_id=b.account_id and scope.admin_id=$2 and scope.status='active'
               and (scope.expires_at is null or scope.expires_at>now())
           )
+        order by (b.status='voided') asc, b.created_at desc, b.id desc
         limit 1 for update`, [input.batchId, input.adminId]);
       if (!current.rows[0]) { await client.query('rollback'); return undefined; }
       const row = current.rows[0] as Row;
