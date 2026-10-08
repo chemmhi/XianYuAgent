@@ -165,6 +165,12 @@ try {
   assert.equal(newestFirst.response.status, 200);
   assert.equal(newestFirst.body.data.items[0].label, 'Second cards');
   assert.equal(newestFirst.body.data.items[0].batchId, '1');
+  const secondDeleted = await request('/api/v1/coupons/batches/1', { method: 'DELETE', headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': 'coupon-delete-2' } });
+  assert.equal(secondDeleted.response.status, 200);
+  assert.equal(secondDeleted.body.data.batch.label, 'Second cards');
+  const afterReusedIdDelete = await request(`/api/v1/coupons/batches?accountId=${account.id}`, { headers: { cookie } });
+  assert.equal(afterReusedIdDelete.response.status, 200);
+  assert.equal(afterReusedIdDelete.body.data.items.some((item) => item.label === 'Second cards'), false);
   assert.ok(runtime.store.audits.some((event) => event.action === 'coupon.content.previewed'));
   assert.equal(runtime.store.audits.some((event) => event.payloadDigest.includes('code-a')), false);
   console.log('coupons smoke passed');
