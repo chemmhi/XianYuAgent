@@ -15,6 +15,7 @@ import type { OrderDeliveryService } from './order-delivery.js';
 import { detectNativeWorkspaceRead, executeNativeWorkspaceRead, type NativeWorkspaceReadResult } from './workspace-native-read.js';
 import { prepareNativeWorkspaceWrite, type NativeWorkspaceWritePlan } from './workspace-native-write.js';
 import type { ModelToolDefinition } from './pi-runtime.js';
+import { workspacePrepareWritePlan, workspaceProductSearchPlan, workspaceReadPlan } from './workspace-tool-plans.js';
 
 export type WorkspaceCommandResult = NativeWorkspaceReadResult & { mutation?: boolean; operation?: string };
 
@@ -80,6 +81,7 @@ export class WorkspaceCommandOrchestrator {
             properties: { instruction: { type: 'string', description: 'The complete read request to execute.' } },
             required: ['instruction'],
           },
+          plan: workspaceReadPlan,
         },
       },
       {
@@ -98,6 +100,7 @@ export class WorkspaceCommandOrchestrator {
             },
             required: [],
           },
+          plan: workspacePrepareWritePlan,
         },
       },
       {
@@ -111,6 +114,7 @@ export class WorkspaceCommandOrchestrator {
             properties: { query: { type: 'string', description: 'Exact or near-exact product title or external product number.' } },
             required: ['query'],
           },
+          plan: workspaceProductSearchPlan,
         },
       },
     ];

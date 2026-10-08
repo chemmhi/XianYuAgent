@@ -8,15 +8,25 @@ import {
   type WorkspacePlanPolicy,
 } from '../src/workspace-plan-contract.js';
 import { createWorkspaceExecutionPlan, restoreWorkspaceExecutionPlan, workspacePlanCompletionStatus } from '../src/workspace-context.js';
+import { allWorkspaceToolPlanMetadata } from '../src/workspace-tool-plans.js';
+
+const toolMetadata = {
+  workspace_read: allWorkspaceToolPlanMetadata('workspace_read')!,
+  workspace_prepare_write: allWorkspaceToolPlanMetadata('workspace_prepare_write')!,
+};
+const step = (tool: string, goal: string, variant = 'default') => ({ tool, goal, variant, contractVersion: 1 });
 
 test('generic contracts validate tool order and default write confirmation', () => {
-  const read = contractForWorkspaceStep({ tool: 'workspace_read', goal: '读取当前配置' });
-  assert.equal(read.action, 'read');
+  const readStep = step('workspace_read', '读取当前配置');
+  const read = contractForWorkspaceStep(readStep, toolMetadata.workspace_read);
+  assert.equal(read.variant, 'default');
+  assert.equal(read.sideEffect, 'read');
   assert.equal(read.confirmationPolicy, 'none');
-  assert.equal(validateWorkspacePlanCall({ tool: 'workspace_read', goal: '读取当前配置' }, 'workspace_read', { instruction: '读取当前配置' }, {}).ok, true);
+  assert.equal(validateWorkspacePlanCall(readStep, 'workspace_read', { instruction: '读取当前配置' }, {}, undefined, toolMetadata.workspace_read).ok, true);
 
-  const write = contractForWorkspaceStep({ tool: 'workspace_prepare_write', goal: '准备更新配置' });
-  assert.equal(write.action, 'write');
+  const write = contractForWorkspaceStep(step('workspace_prepare_write', '准备更新配置', 'coupon_create'), toolMetadata.workspace_prepare_write);
+  assert.equal(write.variant, 'coupon_create');
+  assert.equal(write.sideEffect, 'prepare_write');
   assert.equal(write.confirmationPolicy, 'required');
 });
 
@@ -30,9 +40,9 @@ test('generic facts only accept facts explicitly returned by a tool contract', (
 
 test('generic completion requires a completed, internally consistent plan', () => {
   const plan = createWorkspaceExecutionPlan({ instruction: '读取并更新配置', steps: [
-    { tool: 'workspace_read', goal: '读取配置' },
-    { tool: 'workspace_prepare_write', goal: '准备更新配置' },
-  ] })!;
+    step('workspace_read', '读取配置'),
+    step('workspace_prepare_write', '准备更新配置', 'coupon_create'),
+  ], toolMetadata })!;
   assert.equal(workspacePlanCompletionStatus(plan).complete, false);
   plan.steps[0]!.status = 'succeeded';
   plan.steps[1]!.status = 'succeeded';
@@ -59,17 +69,17 @@ test('policy validation is additive and cannot bypass generic contract checks', 
     version: 1,
     validateCall: () => ({ ok: true }),
   };
-  const unknown = validateWorkspacePlanCall({ tool: 'unknown_tool', goal: 'x' }, 'unknown_tool', {}, {}, policy);
+  const unknown = validateWorkspacePlanCall(step('unknown_tool', 'x'), 'unknown_tool', {}, {}, policy);
   assert.equal(unknown.ok, false);
-  assert.equal(unknown.code, 'PLAN_CONTRACT_ERROR');
+  assert.equal(unknown.code, 'PLAN_CONTRACT_UNAVAILABLE');
 
-  const known = validateWorkspacePlanCall({ tool: 'workspace_read', goal: '读取配置' }, 'workspace_read', {}, {}, policy);
+  const known = validateWorkspacePlanCall(step('workspace_read', '读取配置'), 'workspace_read', { instruction: '读取配置' }, {}, policy, toolMetadata.workspace_read);
   assert.equal(known.ok, true);
 });
 
 test('policy identity survives plan persistence and legacy predicates fail closed', () => {
   const policy: WorkspacePlanPolicy = { key: 'test-policy', version: 1, goalStatus: () => ({ complete: true, missing: [] }) };
-  const plan = createWorkspaceExecutionPlan({ instruction: '执行策略计划', steps: [{ tool: 'workspace_read', goal: '读取配置' }], policy })!;
+  const plan = createWorkspaceExecutionPlan({ instruction: '执行策略计划', steps: [step('workspace_read', '读取配置')], policy, toolMetadata })!;
   const restored = restoreWorkspaceExecutionPlan([{
     id: 'event-1',
     runId: 'run-1',
@@ -84,11 +94,11 @@ test('policy identity survives plan persistence and legacy predicates fail close
 });
 
 test('unknown actions and tools fail closed', () => {
-  const unknownAction = validateWorkspacePlanCall({ tool: 'workspace_read', goal: 'x', action: 'mystery' }, 'workspace_read', {}, {});
+  const unknownAction = validateWorkspacePlanCall({ ...step('workspace_read', 'x'), variant: 'mystery' }, 'workspace_read', { instruction: 'x' }, {}, undefined, toolMetadata.workspace_read);
   assert.equal(unknownAction.ok, false);
-  assert.equal(unknownAction.code, 'PLAN_CONTRACT_ERROR');
+  assert.equal(unknownAction.code, 'PLAN_CONTRACT_UNAVAILABLE');
 
-  const unknownTool = validateWorkspacePlanCall({ tool: 'mystery', goal: 'x' }, 'mystery', {}, {});
+  const unknownTool = validateWorkspacePlanCall(step('mystery', 'x'), 'mystery', {}, {});
   assert.equal(unknownTool.ok, false);
-  assert.equal(unknownTool.code, 'PLAN_CONTRACT_ERROR');
+  assert.equal(unknownTool.code, 'PLAN_CONTRACT_UNAVAILABLE');
 });

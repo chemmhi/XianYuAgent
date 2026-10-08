@@ -196,3 +196,11 @@ git diff --check
 8. 未登记、`IN_PROGRESS`、`READY_FOR_REVIEW` 或 `BLOCKED` 的 worktree 不得删除；禁止用 `git reset --hard`、强制推送或覆盖式复制隐藏其他 agent 改动。
 
 本规则属于长期执行约束。任何新 agent 在下一次修改前必须先阅读本节和协作文档；违反独立 worktree、登记或 merge lock 任一条款时，交付状态不得标记为完成。
+
+## 2026-10-08 Plan I/O 对齐：禁止 Planner/Runtime/Prompt 硬编码
+
+本仓库的 Planner、Plan Runtime 和 Agent/Skill system prompt 不得硬编码工具名集合、动作枚举、业务关键词、固定路由、商品名、文件名、验收动作、固定多步顺序或“某个目标必须调用哪些工具”的隐式规则。计划只能来自运行时注入的工具 JSON Schema、版本化 `WorkspaceToolPlanMetadata`、输入事实/绑定和真实输出事件；缺少契约、事实或版本匹配时必须 fail-closed，并落库可复核错误码。
+
+允许存在的工具名分派只能位于 adapter/业务实现边界（例如 `WorkspaceCommandOrchestrator.executeModelTool()`、`PiSkillManager.executeModelTool()`）；该分派不得创建、重排、补全或判断 Plan steps，也不得成为关键词 fallback 或完成条件来源。领域 instruction parser 与幂等 replay/cache 只服务于既有业务 adapter，不得反向注入 Planner 语义。
+
+每次独立审核必须执行上下文审计，而不是简单字符串命中：分别检查 Planner、Plan contract、strict Runtime、Agent/Skill prompt、adapter dispatch、instruction parser、replay/cache，列出 allow/deny 证据；任一 Deny 上下文命中即 BLOCKED。审核结论必须包含硬编码扫描、Provider wire 是否剥离内部 `plan`、Plan/Runtime/adapter 边界、确认恢复路径和真实 DOM/数据库 E2E 证据。

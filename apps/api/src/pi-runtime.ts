@@ -18,6 +18,7 @@ import {
   reviseWorkspaceExecutionPlanFromModel,
   restoreWorkspaceExecutionPlan,
   restoreWorkspacePlanFacts,
+  workspacePlanContractUnavailable,
   workspacePlanCurrentTool,
   workspacePlanHasPendingSteps,
   workspacePlanCompletionStatus,
@@ -29,6 +30,9 @@ import {
   mergeWorkspacePlanFacts,
   type WorkspacePlanPolicy,
   type WorkspacePlanFacts,
+  type WorkspaceToolPlanMetadata,
+  resolveWorkspaceToolPlanVariant,
+  validateWorkspacePlanOutputFacts,
 } from './workspace-plan-contract.js';
 
 export const DEFAULT_PI_BASE_URL = 'https://api.openai.com/v1';
@@ -66,6 +70,7 @@ export type ModelToolDefinition =
         name: string;
         description: string;
         parameters: Record<string, unknown>;
+        plan?: WorkspaceToolPlanMetadata;
       };
     }
   | {
@@ -749,11 +754,22 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     await this.emit(input.run.id, 'step.executing', { stepId: step.id, status: 'executing', messageType: 'tool_event' });
 
     const tools = [...commands.getModelTools(), ...(this.options.skillManager?.getModelTools() ?? [])];
+    const toolPlans = new Map<string, WorkspaceToolPlanMetadata>(
+      tools.flatMap((tool) => tool.type === 'function' && tool.function.plan ? [[tool.function.name, tool.function.plan] as const] : []),
+    );
     const skillPrompt = this.options.skillManager ? await this.options.skillManager.buildSystemPrompt(input.adminId ?? input.run.requestedBy) : '';
     const messages = buildWorkspaceModelMessages(input.history ?? [], input.run.instruction, skillPrompt, input.attachments);
     const priorEvents = await this.store.listRunEvents(input.adminId ?? input.run.requestedBy, input.run.id, 0);
     const replayableResults = completedReplayableResults(priorEvents);
     let executionPlan: WorkspaceExecutionPlan | undefined = restoreWorkspaceExecutionPlan(priorEvents);
+    if (!executionPlan && workspacePlanContractUnavailable(priorEvents)) {
+      await this.recordToolFailure(input, step, {
+        toolName: 'plan',
+        code: 'PLAN_CONTRACT_UNAVAILABLE',
+        summary: '持久化计划缺少版本化工具契约，已停止恢复执行；需要重新创建计划',
+      });
+      return;
+    }
     if (executionPlan) {
       const recoveredFacts = restoreWorkspacePlanFacts(priorEvents);
       if (Object.keys(recoveredFacts).length > 0) {
@@ -784,7 +800,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
       await this.emit(input.run.id, 'workspace.plan.updated', { status: executionPlan.status, plan: executionPlan, reason: 'reconnect_failed_step' });
     }
     if (!executionPlan && !input.resumeAfterConfirmation && !input.resumeFromFailure) {
-      executionPlan = await createWorkspaceExecutionPlanFromModel(input.run.instruction, tools, modelClient, signal, { fallback: true, planPolicy: this.options.planPolicy });
+      executionPlan = await createWorkspaceExecutionPlanFromModel(input.run.instruction, tools, modelClient, signal, { planPolicy: this.options.planPolicy });
       if (executionPlan && !signal.aborted) {
         await this.emit(input.run.id, 'workspace.plan.created', { status: executionPlan.status, plan: executionPlan });
         const planText = createWorkspacePlanMessage(executionPlan, cachedReplayableEvidence(replayableResults));
@@ -836,7 +852,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
     const maxRounds = configuredMaxRounds !== undefined && configuredMaxRounds > 0
       ? Math.max(1, Math.trunc(configuredMaxRounds))
       : DEFAULT_PI_MAX_TOOL_ROUNDS;
-    const strictPlanExecution = Boolean(executionPlan?.policyKey || executionPlan?.goalPredicateId);
+    const strictPlanExecution = Boolean(executionPlan);
     for (let round = 0; round < maxRounds; round += 1) {
       if (this.stopped || signal.aborted) return;
       const planCompletion = strictPlanExecution ? workspacePlanCompletionStatus(executionPlan, this.options.planPolicy) : undefined;
@@ -940,7 +956,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
         const plannedTool = workspacePlanCurrentTool(executionPlan);
         const plannedStep = executionPlan?.currentStepId ? executionPlan.steps.find((candidate) => candidate.id === executionPlan?.currentStepId) : undefined;
         const planValidation = plannedStep
-          ? validateWorkspacePlanCall(plannedStep, call.function.name, args, executionPlan?.facts ?? {}, this.options.planPolicy)
+          ? validateWorkspacePlanCall(plannedStep, call.function.name, args, executionPlan?.facts ?? {}, this.options.planPolicy, toolPlans.get(call.function.name))
           : { ok: true };
         if (!planValidation.ok) {
           const failure = { toolName: call.function.name, code: planValidation.code ?? 'PLAN_STEP_MISMATCH', summary: planValidation.summary ?? `Plan Mode 当前步骤要求调用 ${plannedTool ?? '未知工具'}；请按计划顺序继续` };
@@ -1005,6 +1021,18 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
             replayableResults.set(replayKey, result);
             replayedCalls.delete(replayKey);
           }
+          const plannedVariant = plannedStep ? resolveWorkspaceToolPlanVariant(toolPlans.get(call.function.name), plannedStep.variant) : undefined;
+          if (plannedVariant) {
+            const outputCheck = validateWorkspacePlanOutputFacts(plannedVariant, { args, result }, 'tool_result');
+            if (!outputCheck.ok) {
+              pendingToolFailure = { toolName: call.function.name, code: outputCheck.code ?? 'PLAN_OUTPUT_FACT_MISSING', summary: outputCheck.summary ?? '工具成功结果缺少计划要求的输出事实' };
+              const errorResult = toolFailureResult(pendingToolFailure);
+              await this.emit(input.run.id, 'tool.result', { streamId, toolCallId: call.id, toolName: call.function.name, summary: pendingToolFailure.summary, status: 'failed', result: errorResult, completedAt: new Date().toISOString() });
+              messages.push({ role: 'tool', name: call.function.name, toolCallId: call.id, content: JSON.stringify(errorResult) });
+              await updateExecutionPlan({ toolName: call.function.name, succeeded: false, evidence: pendingToolFailure.summary, reason: pendingToolFailure.code });
+              break;
+            }
+          }
           pendingToolFailure = undefined;
         } catch (error) {
           const failure = toSafeFailure(error);
@@ -1065,7 +1093,7 @@ export class PiRuntimeAdapter implements WorkspaceRuntime {
         // A replayed read is still a successful execution of the current plan
         // step. Advance the durable plan even when the underlying tool call is
         // served from the run cache after reconnect/compaction.
-        const extractedFacts = extractWorkspacePlanFacts(call.function.name, args, result);
+        const extractedFacts = extractWorkspacePlanFacts(call.function.name, args, result, plannedStep ? resolveWorkspaceToolPlanVariant(toolPlans.get(call.function.name), plannedStep.variant) : undefined);
         await updateExecutionPlan({ toolName: call.function.name, succeeded: true, waitingConfirmation: result.kind === 'write_plan', evidence: planEvidence(result), facts: extractedFacts });
         if (executionPlan && workspacePlanCompletionStatus(executionPlan, this.options.planPolicy).complete) {
           if (strictPlanExecution) {
@@ -1346,7 +1374,7 @@ function toChatCompletionsRequestBody(model: string, input: ModelCompletionReque
       ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
       ...(message.toolCalls ? { tool_calls: message.toolCalls } : {}),
     })),
-    ...(functionTools?.length ? { tools: functionTools } : {}),
+    ...(functionTools?.length ? { tools: functionTools.map(toProviderFunctionToolDefinition) } : {}),
     ...(input.toolChoice ? { tool_choice: input.toolChoice } : {}),
     ...(normalizeReasoningEffort(reasoningEffort) ? { reasoning_effort: normalizeReasoningEffort(reasoningEffort) } : {}),
   };
@@ -1603,6 +1631,17 @@ function toResponsesToolDefinition(tool: ModelToolDefinition): Record<string, un
     name: tool.function.name,
     description: tool.function.description,
     parameters: tool.function.parameters,
+  };
+}
+
+function toProviderFunctionToolDefinition(tool: Extract<ModelToolDefinition, { type: 'function' }>): Record<string, unknown> {
+  return {
+    type: 'function',
+    function: {
+      name: tool.function.name,
+      description: tool.function.description,
+      parameters: tool.function.parameters,
+    },
   };
 }
 

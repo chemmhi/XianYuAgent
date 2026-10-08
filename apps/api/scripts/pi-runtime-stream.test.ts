@@ -4,6 +4,13 @@ import { MemoryStore } from '../src/store-memory.js';
 import { buildWorkspaceModelMessages, detectWorkspaceResponseLanguage, OpenAICompatibleModelClient, PiModelClientError, PiRuntimeAdapter, type ModelClient, type ModelCompletionResult, type ModelStreamHandlers } from '../src/pi-runtime.js';
 import type { WorkspaceCommandOrchestrator } from '../src/workspace-commands.js';
 import { createWorkspaceExecutionPlan } from '../src/workspace-context.js';
+import { allWorkspaceToolPlanMetadata } from '../src/workspace-tool-plans.js';
+
+const tool = (name: string, description: string, parameters: Record<string, unknown> = {}) => ({
+  type: 'function' as const,
+  function: { name, description, parameters, plan: allWorkspaceToolPlanMetadata(name) },
+});
+const planStep = (toolName: string, goal: string, variant = 'default') => ({ tool: toolName, goal, variant, contractVersion: 1 });
 
 function sse(...events: string[]): Response {
   const encoder = new TextEncoder();
@@ -51,7 +58,7 @@ test('strict Plan Mode truncates extra tool calls after the current generic step
   const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Strict plan extra' });
   const instruction = '读取当前配置并完成后续计划';
   const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction });
-  const plan = createWorkspaceExecutionPlan({ instruction, steps: [{ tool: 'workspace_read', goal: '读取当前配置' }] })!;
+  const plan = createWorkspaceExecutionPlan({ instruction, steps: [planStep('workspace_read', '读取当前配置')], toolMetadata: { workspace_read: allWorkspaceToolPlanMetadata('workspace_read')! } })!;
   await store.appendRunEvent({ runId: created.run.id, eventType: 'workspace.plan.created', payload: { status: plan.status, plan } });
   let round = 0;
   let executed = 0;
@@ -68,8 +75,8 @@ test('strict Plan Mode truncates extra tool calls after the current generic step
   };
   const commands = {
     getModelTools: () => [
-      { type: 'function' as const, function: { name: 'workspace_product_search', description: 'search', parameters: { type: 'object' } } },
-      { type: 'function' as const, function: { name: 'workspace_read', description: 'read', parameters: { type: 'object' } } },
+      tool('workspace_product_search', 'search', { type: 'object' }),
+      tool('workspace_read', 'read', { type: 'object' }),
     ],
     executeModelTool: async (name: string) => {
       executed += 1;
@@ -120,7 +127,7 @@ test('Pi runtime executes model-selected workspace tools and streams results', a
     async complete() { return { content: 'unused', model: 'unused' }; },
   };
   const commandTool = {
-    getModelTools: () => [{ type: 'function', function: { name: 'workspace_read', description: 'read', parameters: { type: 'object' } } }],
+    getModelTools: () => [tool('workspace_read', 'read', { type: 'object' })],
     executeModelTool: async () => ({ kind: 'products' as const, title: '商品', summary: '读取完成', content: `工具返回商品${'x'.repeat(2_500)}`, data: { count: 1 } }),
   } as unknown as WorkspaceCommandOrchestrator;
   const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, model: 'stream-model' });
@@ -160,7 +167,7 @@ test('Pi runtime executes a durable Plan Mode sequence and exposes the current s
   const model: ModelClient = {
     async complete() {
       planningCalls += 1;
-      return { content: '{"steps":[{"tool":"workspace_product_search","goal":"定位目标商品"},{"tool":"workspace_read","goal":"读取商品状态"}]}', model: 'plan-model' };
+      return { content: '{"steps":[{"tool":"workspace_product_search","variant":"default","contractVersion":1,"goal":"定位目标商品"},{"tool":"workspace_read","variant":"default","contractVersion":1,"goal":"读取商品状态"}]}', model: 'plan-model' };
     },
     async stream(input, handlers) {
       requests.push(JSON.stringify(input.messages));
@@ -177,11 +184,11 @@ test('Pi runtime executes a durable Plan Mode sequence and exposes the current s
   };
   const commandTool = {
     getModelTools: () => [
-      { type: 'function', function: { name: 'workspace_product_search', description: 'search', parameters: { type: 'object' } } },
-      { type: 'function', function: { name: 'workspace_read', description: 'read', parameters: { type: 'object' } } },
+      tool('workspace_product_search', 'search', { type: 'object' }),
+      tool('workspace_read', 'read', { type: 'object' }),
     ],
     executeModelTool: async (name: string) => name === 'workspace_product_search'
-      ? { kind: 'products' as const, title: '商品搜索', summary: '找到目标商品', content: 'productId=product-plan', data: { items: [{ id: 'product-plan', title: '目标商品' }] } }
+      ? { kind: 'products' as const, title: '商品搜索', summary: '找到目标商品', content: 'productId=product-plan', data: { productId: 'product-plan', items: [{ id: 'product-plan', title: '目标商品' }] } }
       : { kind: 'read' as const, title: '商品状态', summary: '读取完成', content: '商品状态正常' },
   } as unknown as WorkspaceCommandOrchestrator;
   const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, model: 'plan-model' });
@@ -213,7 +220,7 @@ test('Plan Mode stops the remaining tool calls when a planned step fails', async
   const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '定位商品并准备写入' });
   let confirmations = 0;
   const model: ModelClient = {
-    async complete() { return { content: '{"steps":[{"tool":"workspace_product_search","goal":"定位目标商品"},{"tool":"workspace_prepare_write","goal":"准备受控写入"}]}', model: 'plan-batch-failure' }; },
+    async complete() { return { content: '{"steps":[{"tool":"workspace_product_search","variant":"default","contractVersion":1,"goal":"定位目标商品"},{"tool":"workspace_prepare_write","variant":"coupon_bind","contractVersion":1,"goal":"准备受控写入"}]}', model: 'plan-batch-failure' }; },
     async stream(_input, handlers) {
       const search = { id: 'batch-search', type: 'function' as const, function: { name: 'workspace_product_search', arguments: '{"query":"目标商品"}' } };
       const write = { id: 'batch-write', type: 'function' as const, function: { name: 'workspace_prepare_write', arguments: '{}' } };
@@ -224,8 +231,8 @@ test('Plan Mode stops the remaining tool calls when a planned step fails', async
   };
   const commandTool = {
     getModelTools: () => [
-      { type: 'function', function: { name: 'workspace_product_search', description: 'search', parameters: { type: 'object' } } },
-      { type: 'function', function: { name: 'workspace_prepare_write', description: 'write', parameters: { type: 'object' } } },
+      tool('workspace_product_search', 'search', { type: 'object' }),
+      tool('workspace_prepare_write', 'write', { type: 'object' }),
     ],
     executeModelTool: async (name: string) => {
       if (name === 'workspace_product_search') throw Object.assign(new Error('search backend down'), { code: 'SEARCH_BACKEND_DOWN' });
@@ -263,8 +270,8 @@ test('Plan Mode adjusts the plan after a failed step and continues with the repl
     async complete() {
       planningCalls += 1;
       return { content: planningCalls === 1
-        ? '{"steps":[{"tool":"workspace_product_search","goal":"定位目标商品"},{"tool":"workspace_read","goal":"读取商品状态"}]}'
-        : '{"steps":[{"tool":"workspace_read","goal":"改用现有读取能力获取商品状态"}]}', model: 'plan-replan' };
+        ? '{"steps":[{"tool":"workspace_product_search","variant":"default","contractVersion":1,"goal":"定位目标商品"},{"tool":"workspace_read","variant":"default","contractVersion":1,"goal":"读取商品状态"}]}'
+        : '{"steps":[{"tool":"workspace_read","variant":"default","contractVersion":1,"goal":"改用现有读取能力获取商品状态"}]}', model: 'plan-replan' };
     },
     async stream(_input, handlers) {
       rounds += 1;
@@ -274,7 +281,7 @@ test('Plan Mode adjusts the plan after a failed step and continues with the repl
         return { content: '', model: 'plan-replan', toolCalls: [search] };
       }
       if (rounds === 2) {
-        const read = { id: 'replan-read', type: 'function' as const, function: { name: 'workspace_read', arguments: '{"resource":"product"}' } };
+        const read = { id: 'replan-read', type: 'function' as const, function: { name: 'workspace_read', arguments: '{"instruction":"读取商品状态"}' } };
         await handlers.onToolCall?.(read);
         return { content: '', model: 'plan-replan', toolCalls: [read] };
       }
@@ -283,8 +290,8 @@ test('Plan Mode adjusts the plan after a failed step and continues with the repl
   };
   const commandTool = {
     getModelTools: () => [
-      { type: 'function', function: { name: 'workspace_product_search', description: 'search', parameters: { type: 'object' } } },
-      { type: 'function', function: { name: 'workspace_read', description: 'read', parameters: { type: 'object' } } },
+      tool('workspace_product_search', 'search', { type: 'object' }),
+      tool('workspace_read', 'read', { type: 'object' }),
     ],
     executeModelTool: async (name: string) => {
       executedTools.push(name);
@@ -316,11 +323,11 @@ test('Plan Mode advances a restored step when its successful result is replayed 
   const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'plan-replay-cache' });
   const session = await store.createAgentSession({ adminId: admin.id, accountId: account.id, title: 'Plan Replay Cache' });
   const created = await store.createRun({ adminId: admin.id, accountId: account.id, sessionId: session.id, instruction: '定位商品' });
-  const plan = createWorkspaceExecutionPlan({ instruction: created.run.instruction, steps: [{ tool: 'workspace_product_search', goal: '定位目标商品' }] })!;
+  const plan = createWorkspaceExecutionPlan({ instruction: created.run.instruction, steps: [planStep('workspace_product_search', '定位目标商品')], toolMetadata: { workspace_product_search: allWorkspaceToolPlanMetadata('workspace_product_search')! } })!;
   await store.appendRunEvent({ runId: created.run.id, eventType: 'workspace.plan.created', payload: { status: plan.status, plan } });
   const args = '{"query":"目标商品"}';
   await store.appendRunEvent({ runId: created.run.id, eventType: 'tool.call.started', payload: { toolCallId: 'prior-search', toolName: 'workspace_product_search', arguments: args, argumentFingerprint: undefined, readOnly: true } });
-  await store.appendRunEvent({ runId: created.run.id, eventType: 'tool.result', payload: { toolCallId: 'prior-search', toolName: 'workspace_product_search', status: 'succeeded', result: { kind: 'products', title: '商品搜索', summary: '找到目标商品', content: 'productId=product-replay', data: { items: [{ id: 'product-replay', title: '目标商品' }] } } } });
+  await store.appendRunEvent({ runId: created.run.id, eventType: 'tool.result', payload: { toolCallId: 'prior-search', toolName: 'workspace_product_search', status: 'succeeded', result: { kind: 'products', title: '商品搜索', summary: '找到目标商品', content: 'productId=product-replay', data: { productId: 'product-replay', items: [{ id: 'product-replay', title: '目标商品' }] } } } });
   let round = 0;
   const model: ModelClient = {
     async stream(_input, handlers) {
@@ -336,7 +343,7 @@ test('Plan Mode advances a restored step when its successful result is replayed 
   };
   let executes = 0;
   const commandTool = {
-    getModelTools: () => [{ type: 'function', function: { name: 'workspace_product_search', description: 'search', parameters: { type: 'object' } } }],
+    getModelTools: () => [tool('workspace_product_search', 'search', { type: 'object' })],
     executeModelTool: async () => { executes += 1; return { kind: 'products', title: '商品搜索', summary: '找到目标商品', content: 'productId=product-replay' }; },
   } as unknown as WorkspaceCommandOrchestrator;
   const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, model: 'plan-replay-cache' });
@@ -371,7 +378,7 @@ test('Plan Mode reconnect reopens a blocked durable step before allowing tools',
     goal: created.run.instruction,
     status: 'blocked',
     currentStepId: 'step-1',
-    steps: [{ id: 'step-1', tool: 'workspace_product_search', goal: '定位目标商品', status: 'blocked', attempts: 1, evidence: '后端不可用' }],
+    steps: [{ ...planStep('workspace_product_search', '定位目标商品'), id: 'step-1', status: 'blocked', attempts: 1, evidence: '后端不可用' }],
   };
   await store.appendRunEvent({ runId: created.run.id, eventType: 'workspace.plan.updated', payload: { status: 'blocked', plan: blockedPlan } });
   let round = 0;
@@ -389,7 +396,7 @@ test('Plan Mode reconnect reopens a blocked durable step before allowing tools',
     async complete() { return { content: 'unused', model: 'unused' }; },
   };
   const commandTool = {
-    getModelTools: () => [{ type: 'function', function: { name: 'workspace_product_search', description: 'search', parameters: { type: 'object' } } }],
+    getModelTools: () => [tool('workspace_product_search', 'search', { type: 'object' })],
     executeModelTool: async () => { executions += 1; return { kind: 'products', title: '商品搜索', summary: '找到目标商品', content: 'productId=product-reconnect' }; },
   } as unknown as WorkspaceCommandOrchestrator;
   const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, model: 'plan-blocked-reconnect' });
@@ -424,11 +431,12 @@ test('Plan Mode advances past a confirmed write before executing the next step',
     status: 'waiting_confirmation',
     currentStepId: 'step-1',
     steps: [
-      { id: 'step-1', tool: 'workspace_prepare_write', goal: '创建卡券', status: 'waiting_confirmation', attempts: 1, evidence: '等待确认' },
-      { id: 'step-2', tool: 'workspace_product_search', goal: '定位商品', status: 'pending', attempts: 0 },
+      { ...planStep('workspace_prepare_write', '创建卡券'), id: 'step-1', status: 'waiting_confirmation', attempts: 1, evidence: '等待确认' },
+      { ...planStep('workspace_product_search', '定位商品'), id: 'step-2', status: 'pending', attempts: 0 },
     ],
   };
   await store.appendRunEvent({ runId: created.run.id, eventType: 'workspace.plan.updated', payload: { status: 'waiting_confirmation', plan: waitingPlan } });
+  await store.appendRunEvent({ runId: created.run.id, eventType: 'workspace.coupon.created', payload: { status: 'succeeded', batchId: 'batch-1' } });
   let round = 0;
   const model: ModelClient = {
     async stream(_input, handlers) {
@@ -443,7 +451,7 @@ test('Plan Mode advances past a confirmed write before executing the next step',
     async complete() { return { content: 'unused', model: 'unused' }; },
   };
   const commandTool = {
-    getModelTools: () => [{ type: 'function', function: { name: 'workspace_product_search', description: 'search', parameters: { type: 'object' } } }],
+    getModelTools: () => [tool('workspace_product_search', 'search', { type: 'object' })],
     executeModelTool: async () => ({ kind: 'products', title: '商品搜索', summary: '找到目标商品', content: 'productId=product-after-confirm' }),
   } as unknown as WorkspaceCommandOrchestrator;
   const runtime = new PiRuntimeAdapter(store, model, { workspaceCommands: commandTool, model: 'plan-confirmation-continuation' });
