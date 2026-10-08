@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { AutoReplyAgentConfig as PersistedAutoReplyAgentConfig } from './domain.js';
+import { DEFAULT_AUTO_REPLY_AGENT_CONFIG } from './auto-reply-agent-settings.js';
 
 export interface AutoReplyAgentRuntimeConfig {
   systemPrompt: string;
@@ -9,6 +10,7 @@ export interface AutoReplyAgentRuntimeConfig {
   maxToolCalls: number;
   maxToolResultChars: number;
   toolTimeoutMs: number;
+  totalTimeoutMs: number;
   maxHistory: number;
   maxReplyLength: number;
   replySegmentDelayMs: number;
@@ -48,6 +50,7 @@ export function resolveAutoReplyAgentConfig(env: NodeJS.ProcessEnv = process.env
     maxToolCalls: boundedInt(env.AUTO_REPLY_AGENT_MAX_TOOL_CALLS, 8, 1, 16),
     maxToolResultChars: boundedInt(env.AUTO_REPLY_AGENT_MAX_TOOL_RESULT_CHARS, 12_000, 500, 40_000),
     toolTimeoutMs: boundedInt(env.AUTO_REPLY_AGENT_TOOL_TIMEOUT_MS, 10_000, 500, 60_000),
+    totalTimeoutMs: boundedInt(env.AUTO_REPLY_AGENT_TOTAL_TIMEOUT_MS, DEFAULT_AUTO_REPLY_AGENT_CONFIG.totalTimeoutMs, 1_000, 300_000),
     maxHistory: boundedInt(env.AUTO_REPLY_AGENT_MAX_HISTORY, 12, 1, 50),
     maxReplyLength: boundedInt(env.AUTO_REPLY_AGENT_MAX_REPLY_LENGTH, 500, 30, 2_000),
     replySegmentDelayMs: boundedInt(env.AUTO_REPLY_AGENT_REPLY_SEGMENT_DELAY_MS, 350, 0, 5_000),
@@ -78,6 +81,7 @@ export function mergeAutoReplyAgentRuntimeConfig(
     maxToolCalls: settings.maxToolCalls,
     maxToolResultChars: base.maxToolResultChars,
     toolTimeoutMs: settings.toolTimeoutMs,
+    totalTimeoutMs: settings.totalTimeoutMs,
     maxHistory: settings.maxHistory,
     maxReplyLength: settings.maxReplyLength,
     replySegmentDelayMs: settings.replySegmentDelayMs,

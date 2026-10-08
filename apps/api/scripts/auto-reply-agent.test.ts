@@ -434,6 +434,31 @@ test('agent preserves model-provided semantic segments and supports a segmentati
   assert.deepEqual(retried, ['第一句。', '第二句。']);
 });
 
+test('buyer Agent buffers stream events and passes the shared deadline to the model transport', async () => {
+  let streamCalls = 0;
+  let seenDeadline: number | undefined;
+  let seenBuffered = false;
+  const client: ModelClient = {
+    stream: async (request, handlers) => {
+      streamCalls += 1;
+      seenDeadline = request.deadlineAt;
+      seenBuffered = request.buffered === true;
+      await handlers.onReasoningDelta?.('正在分析');
+      await handlers.onTextDelta?.('{"decision":');
+      await handlers.onTextDelta?.('"reply","text":"已完成"}');
+      return { content: replyPayload('已完成'), model: 'stream-model' };
+    },
+    complete: async () => ({ content: 'unused', model: 'complete-model' }),
+  };
+  const agent = new ToolCallingAutoReplyAgent({} as Store, client, resolveAutoReplyAgentConfig({}));
+  const deadlineAt = Date.now() + 20_000;
+  const result = await agent.generate({ adminId: 'admin-1', context: context(), classification, signal: new AbortController().signal, deadlineAt });
+  assert.deepEqual(result, { text: '已完成', segments: undefined });
+  assert.equal(streamCalls, 1);
+  assert.equal(seenDeadline, deadlineAt);
+  assert.equal(seenBuffered, true);
+});
+
 test('OpenAI-compatible transport preserves native tool calls', async () => {
   const originalFetch = globalThis.fetch;
   let requestBody: Record<string, unknown> | undefined;
@@ -818,6 +843,34 @@ test('auto-reply service keeps consecutive messages active and splits long repli
     assert.equal(fourthResult.run.status, 'persisted');
     assert.equal(retryCalls, 1);
     assert.deepEqual(retrySender.calls.map((call) => call.text), retrySegments);
+  } finally {
+    await runtime.close();
+  }
+});
+
+test('auto-reply generation and segmentation share one absolute deadline', async () => {
+  const runtime = createApp(loadConfig({ AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0', HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_SEND_MODE: 'simulate', AUTOMATION_BUYER_ALLOWLIST: '["预算买家"]' }));
+  const admin = await runtime.store.createAdmin({ email: 'agent-deadline@example.com', passwordHash: 'hash', displayName: 'Agent Deadline' });
+  const account = await runtime.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'agent-deadline-seller' });
+  const conversation = await runtime.store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'deadline-buyer', buyerDisplayName: '预算买家', externalConversationRef: 'agent-deadline-conversation' });
+  const inbound = await runtime.store.createMessage({ adminId: admin.id, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '请详细介绍', externalMessageRef: 'agent-deadline-1.PNM', source: 'human' });
+  const reply = 'a'.repeat(121);
+  const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const sender = new NoopAutoReplySender();
+  const service = new AutoReplyService(runtime.store, runtime.messages, async () => 'audit-agent-deadline', {
+    sendMode: 'simulate', buyerAllowlist: ['预算买家'], debounceMs: 0, totalTimeoutMs: 1_000, maxReplyLength: 500,
+    generator: {
+      generate: async () => { await delay(600); return reply; },
+      segmentReply: async () => { await delay(600); return [reply]; },
+    },
+    sender,
+  });
+  try {
+    const result = await service.processInbound({ adminId: admin.id, conversationId: conversation.id, inboundMessageId: inbound.message.id, senderName: '预算买家' });
+    assert.equal(result.run.status, 'failed');
+    assert.equal(result.run.failureCode, 'AGENT_TOTAL_TIMEOUT');
+    assert.equal(sender.calls.length, 0);
+    assert.equal((await runtime.messages.listMessages(admin.id, conversation.id, { limit: 20 })).items.filter((message) => message.direction === 'outbound').length, 0);
   } finally {
     await runtime.close();
   }

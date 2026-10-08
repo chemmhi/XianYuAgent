@@ -3,6 +3,8 @@ import type { MessageService } from './messages.js';
 import { digestJson } from './security.js';
 import type { AutoReplyRepairCandidateResult, AutoReplyRepairRuntime } from './auto-reply-repair-runtime.js';
 import type { AutoReplyGodViewSink } from './auto-reply-god-view.js';
+import { AutoReplyDeadlineError, createAutoReplyDeadline, withAbort, timeoutProgress, type AutoReplyDeadline } from './auto-reply-timeout.js';
+import { DEFAULT_AUTO_REPLY_AGENT_CONFIG } from './auto-reply-agent-settings.js';
 
 export type AutoReplyIntent = 'price' | 'availability' | 'delivery' | 'general' | 'refund' | 'complaint' | 'cross_product' | 'credential_request' | 'prompt_injection' | 'other';
 
@@ -53,8 +55,8 @@ export type AutoReplyGeneratorObserver = (observation: AutoReplyGeneratorObserva
 export interface AutoReplyGenerator {
   readonly supportsStructuredDecision?: boolean;
   readonly supportsMultimodal?: boolean;
-  generate(input: { adminId?: string; context: AutoReplyContext; classification: AutoReplyClassification; observe?: AutoReplyGeneratorObserver; runId?: string; traceId?: string }): Promise<string | AutoReplyGeneratedReply | undefined>;
-  segmentReply?(input: { reply: string }): Promise<string[] | undefined>;
+  generate(input: { adminId?: string; context: AutoReplyContext; classification: AutoReplyClassification; observe?: AutoReplyGeneratorObserver; runId?: string; traceId?: string; signal?: AbortSignal; deadlineAt?: number }): Promise<string | AutoReplyGeneratedReply | undefined>;
+  segmentReply?(input: { reply: string; signal?: AbortSignal; deadlineAt?: number }): Promise<string[] | undefined>;
 }
 
 export interface AutoReplySendInput {
@@ -230,7 +232,7 @@ export class AutoReplyService {
     this.enabled = options.enabled ?? true;
     this.sendMode = options.sendMode ?? 'simulate';
     this.buyerAllowlist = [...new Set((options.buyerAllowlist ?? []).map(normalizeBuyerName).filter((value): value is string => Boolean(value)))];
-    this.totalTimeoutMs = Math.max(1_000, Math.min(options.totalTimeoutMs ?? 60_000, 300_000));
+    this.totalTimeoutMs = Math.max(1_000, Math.min(options.totalTimeoutMs ?? DEFAULT_AUTO_REPLY_AGENT_CONFIG.totalTimeoutMs, 300_000));
     this.maxHistory = Math.max(1, Math.min(options.maxHistory ?? 20, 50));
     this.maxReplyLength = Math.max(30, Math.min(options.maxReplyLength ?? 500, 2_000));
     this.replySegmentDelayMs = Math.max(0, Math.min(options.replySegmentDelayMs ?? 350, 5_000));
@@ -279,6 +281,7 @@ export class AutoReplyService {
     let repairRoute: Awaited<ReturnType<AutoReplyRepairRuntime['routeInbound']>>;
     let pendingInitialWindow: PendingInitialWindow | undefined;
     let activeGenerationTask: ActiveGenerationTask | undefined;
+    let deadline: AutoReplyDeadline | undefined;
     let agentTakeoverActive = false;
     try {
       run = await this.store.createAutoReplyRun({ adminId: input.adminId, accountId: conversation.accountId, conversationId: conversation.id, inboundMessageId: inboundMessage.id, intent: 'pending', decision: 'skipped', status: 'received', inputDigest });
@@ -342,6 +345,7 @@ export class AutoReplyService {
     };
     try {
       const runtime = await this.resolveRuntimeOptions(input.adminId, conversation.accountId);
+      deadline = createAutoReplyDeadline(runtime.totalTimeoutMs);
       const modelDecidesRouting = runtime.generator.supportsStructuredDecision === true;
       const supportedMessage = inboundMessage.bodyType === 'text'
         ? Boolean(inboundMessage.bodyText?.trim()) && !inboundMessage.riskFlags.includes('xianyu_system_candidate_unverified')
@@ -598,7 +602,8 @@ export class AutoReplyService {
         generatedReply = { text: '这类敏感信息我无法提供，但我可以继续帮你查询商品、订单、库存或发货信息。' };
       } else {
         for (let attempt = 0; attempt < 3; attempt += 1) {
-          generatedReply = normalizeGeneratedReply(await withTimeout(runtime.generator.generate({ adminId: input.adminId, context, classification, observe: observeGenerator, runId: run.id, traceId }), runtime.totalTimeoutMs));
+          generatedReply = normalizeGeneratedReply(await runtime.generator.generate({ adminId: input.adminId, context, classification, observe: observeGenerator, runId: run.id, traceId, signal: deadline.signal, deadlineAt: deadline.deadlineAt }));
+          if (deadline.signal.aborted) throw new AutoReplyDeadlineError('model_generation');
           const humanAfterGeneration = await this.findHumanReplyAfterMessage(input.adminId, conversation.id, inboundMessage.id);
           if (humanAfterGeneration) {
             const failureCode = 'AUTO_REPLY_CANCELLED_BY_HUMAN_REPLY';
@@ -659,7 +664,7 @@ export class AutoReplyService {
         input: { kind: 'reply_generation', intent: classification.intent, contextDigest },
         output: { replyDigest, outputLength: reply.length },
       } });
-      const segments = await this.resolveReplySegments(runtime.generator, generatedReply?.segments, reply, runtime);
+      const segments = await this.resolveReplySegments(runtime.generator, generatedReply?.segments, reply, runtime, deadline);
       if (this.repairRuntime?.enabled) {
         try {
           repair = await this.repairRuntime.reviewCandidate({
@@ -718,7 +723,7 @@ export class AutoReplyService {
       let lastExternalMessageRef: string | undefined;
       for (let index = 0; index < segments.length; index += 1) {
         if (index > 0 && runtime.replySegmentDelayMs > 0) {
-          const humanReply = await this.waitForHumanReplyOrDelay(input.adminId, conversation.id, inboundMessage.id, runtime.replySegmentDelayMs);
+          const humanReply = await withAbort(this.waitForHumanReplyOrDelay(input.adminId, conversation.id, inboundMessage.id, runtime.replySegmentDelayMs, deadline.signal), deadline.signal, 'send_wait');
           if (humanReply) {
             const failureCode = 'AUTO_REPLY_CANCELLED_BY_HUMAN_REPLY';
             const updated = await updateRun({ status: 'skipped', decision: 'skipped', failureCode, riskFlags: [...classification.riskFlags, 'human_reply_during_segmented_send'], eventPayload: {
@@ -743,7 +748,7 @@ export class AutoReplyService {
         }
         const segment = segments[index]!;
         const sendRequestId = segments.length > 1 ? `${requestId}:segment:${index + 1}` : requestId;
-        const sent = await this.sender.send({ adminId: input.adminId, accountId: conversation.accountId, requestId: sendRequestId, conversation, recipientRef: conversation.buyerRef, text: segment, mode: runtime.sendMode, traceId, runId: run.id, inboundMessageId: inboundMessage.id, productRef: context.product?.id, riskFlags: classification.riskFlags, segmentIndex: index, segmentCount: segments.length });
+        const sent = await withAbort(this.sender.send({ adminId: input.adminId, accountId: conversation.accountId, requestId: sendRequestId, conversation, recipientRef: conversation.buyerRef, text: segment, mode: runtime.sendMode, traceId, runId: run.id, inboundMessageId: inboundMessage.id, productRef: context.product?.id, riskFlags: classification.riskFlags, segmentIndex: index, segmentCount: segments.length }), deadline.signal, 'send_wait');
         await this.godView?.emit({
           phase: 'send',
           event: 'send.result',
@@ -795,6 +800,11 @@ export class AutoReplyService {
       return { run: updated ?? run, inboundMessage, outboundMessage: lastOutboundMessageId ? await this.findMessage(input.adminId, input.conversationId, lastOutboundMessageId) : undefined, classification, context, repair };
     } catch (error) {
       const failureCode = toFailureCode(error);
+      const progress = timeoutProgress(error);
+      const timeoutMeta = error && typeof error === 'object'
+        ? { origin: (error as { origin?: unknown }).origin, timeoutPhase: (error as { timeoutPhase?: unknown }).timeoutPhase }
+        : { origin: undefined, timeoutPhase: undefined };
+      const timeoutTelemetry = progress ? { modelProgress: progress, timeoutPhase: classifyTimeoutProgress(progress, deadline?.deadlineAt) } : undefined;
       if (repair?.outcomeReviewId && this.repairRuntime) {
         try {
           await this.repairRuntime.reconcileSendOutcome({ outcomeReviewId: repair.outcomeReviewId, outcome: failureCode === 'AUTO_REPLY_SEND_FAILED' ? 'known_failure' : 'unknown' });
@@ -823,8 +833,8 @@ export class AutoReplyService {
       const reason = safeEventReason(error);
       const updated = await updateRun({ status: 'failed', decision: 'failed', failureCode, eventPayload: {
         input: { kind: 'exception', status: run.status, intent: run.intent },
-        output: { decision: 'failed', failureCode },
-        error: { code: failureCode, ...(reason ? { reason } : {}) },
+        output: { decision: 'failed', failureCode, ...(timeoutTelemetry ?? {}) },
+        error: { code: failureCode, ...(reason ? { reason } : {}), ...(timeoutMeta.origin ? { origin: timeoutMeta.origin } : {}), ...(timeoutMeta.timeoutPhase ? { timeoutPhase: timeoutMeta.timeoutPhase } : {}), ...(timeoutTelemetry ?? {}) },
       } });
       await this.recordAudit(input.adminId, conversation.accountId, run.id, requestId, traceId, { decision: 'failed', failureCode });
       await this.godView?.emit({
@@ -833,7 +843,7 @@ export class AutoReplyService {
         traceId,
         runId: run.id,
         buyer,
-        payload: { status: 'failed', decision: 'failed', failureCode, currentStatus: run.status },
+        payload: { status: 'failed', decision: 'failed', failureCode, currentStatus: run.status, ...(timeoutMeta.origin ? { origin: timeoutMeta.origin } : {}), ...(timeoutMeta.timeoutPhase ? { timeoutPhase: timeoutMeta.timeoutPhase } : {}), ...(timeoutTelemetry ?? {}) },
       });
       return { run: updated ?? run, inboundMessage };
     } finally {
@@ -845,6 +855,7 @@ export class AutoReplyService {
         activeGenerationTask.resolve();
         if (this.activeGenerationTasks.get(activeGenerationTask.key) === activeGenerationTask) this.activeGenerationTasks.delete(activeGenerationTask.key);
       }
+      deadline?.dispose();
     }
   }
 
@@ -908,7 +919,7 @@ export class AutoReplyService {
     return false;
   }
 
-  private async waitForHumanReplyOrDelay(adminId: string, conversationId: string, afterMessageId: string, delayMs: number): Promise<MessageRecord | undefined> {
+  private async waitForHumanReplyOrDelay(adminId: string, conversationId: string, afterMessageId: string, delayMs: number, signal?: AbortSignal): Promise<MessageRecord | undefined> {
     const existing = await this.findHumanReplyAfterMessage(adminId, conversationId, afterMessageId);
     if (existing || delayMs <= 0) return existing;
     return new Promise<MessageRecord | undefined>((resolve) => {
@@ -919,10 +930,13 @@ export class AutoReplyService {
         if (settled) return;
         settled = true;
         if (timer) clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
         unsubscribe?.();
         void this.findHumanReplyAfterMessage(adminId, conversationId, afterMessageId).then(resolve).catch(() => resolve(undefined));
       };
+      const onAbort = () => finish();
       timer = setTimeout(finish, delayMs);
+      signal?.addEventListener('abort', onAbort, { once: true });
       unsubscribe = this.messages.realtime.subscribe(conversationId, (event) => {
         const message = event.payload.message as { direction?: string; source?: string; createdAt?: string } | undefined;
         if (message?.direction !== 'outbound' || message.source !== 'human') return;
@@ -1005,13 +1019,14 @@ export class AutoReplyService {
     }
   }
 
-  private async resolveReplySegments(generator: AutoReplyGenerator, proposed: string[] | undefined, reply: string, runtime: ResolvedAutoReplyServiceRuntimeOptions): Promise<string[]> {
+  private async resolveReplySegments(generator: AutoReplyGenerator, proposed: string[] | undefined, reply: string, runtime: ResolvedAutoReplyServiceRuntimeOptions, deadline: AutoReplyDeadline): Promise<string[]> {
     if (reply.length > runtime.maxReplyLength) throw new Error('AUTO_REPLY_REPLY_TOO_LONG');
     const validated = validateSemanticSegments(proposed, reply);
     if (validated) return validated;
     const needsSemanticSplit = reply.length > 120 || /\n/.test(reply);
     if (generator.segmentReply && needsSemanticSplit) {
-      const segmented = await withTimeout(generator.segmentReply({ reply }), runtime.totalTimeoutMs);
+      const segmented = await generator.segmentReply({ reply, signal: deadline.signal, deadlineAt: deadline.deadlineAt });
+      if (deadline.signal.aborted) throw new AutoReplyDeadlineError('reply_segmentation');
       const retried = validateSemanticSegments(segmented, reply);
       if (retried) return retried;
     }
@@ -1114,6 +1129,12 @@ function safeEventReason(error: unknown): string | undefined {
   return /^[A-Z0-9_:-]{1,64}$/.test(message) ? message : undefined;
 }
 
+function classifyTimeoutProgress(progress: NonNullable<ReturnType<typeof timeoutProgress>>, deadlineAt?: number): 'no_first_event' | 'stalled_after_progress' | 'slow_in_progress' {
+  if (progress.firstEventAt === undefined) return 'no_first_event';
+  if (deadlineAt !== undefined && progress.lastProgressAt !== undefined && deadlineAt - progress.lastProgressAt <= Math.max(1_000, Math.floor((deadlineAt - progress.firstEventAt) / 4))) return 'slow_in_progress';
+  return progress.maxIdleMs > 0 ? 'stalled_after_progress' : 'slow_in_progress';
+}
+
 function stripSensitiveTerms(value: string): string {
   return value
     .replace(/cookie|api\s*key|access[_ -]?token|验证码|密码|秘钥|密钥/gi, ' ')
@@ -1129,20 +1150,6 @@ function validateSemanticSegments(proposed: string[] | undefined, reply: string)
   const normalizedReply = reply.replace(/\s+/g, '');
   if (joined.replace(/\s+/g, '') !== normalizedReply) return undefined;
   return segments;
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(() => reject(new Error('AGENT_TOTAL_TIMEOUT')), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
 }
 
 function normalizeBuyerName(value: string | undefined): string | undefined {

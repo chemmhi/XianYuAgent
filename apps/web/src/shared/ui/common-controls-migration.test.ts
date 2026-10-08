@@ -16,7 +16,8 @@ describe('common controls migration guardrails', () => {
     expect(source('features/auth/components/AdminBootstrapForm.tsx')).toContain("shared/ui/Button");
     expect(source('features/settings/components/SettingsPage.tsx')).toContain("shared/ui/InputField");
     expect(source('features/settings/components/OpenAISettingsPanel.tsx')).toContain("shared/ui/Button");
-    expect(source('features/settings/components/AutoReplyAgentPanel.tsx')).toContain("shared/ui/TextAreaField");
+    expect(source('features/settings/components/AutoReplyAgentPanel.tsx')).toContain("shared/ui/InputField");
+    expect(source('features/settings/components/AutoReplyAgentPanel.tsx')).not.toContain("shared/ui/TextAreaField");
   });
 
   it('keeps the MessagesPage online composer as a page-specific textarea', () => {
