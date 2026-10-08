@@ -204,25 +204,19 @@ async function run() {
   if (settingsTabStyle.height > 72 || settingsTabStyle.height < 40 || !settingsTabStyle.boxShadow.includes('3px 0px 0px')) {
     throw new Error(`settings tab visual state mismatch: ${JSON.stringify(settingsTabStyle)}`);
   }
-  await evaluate(cdp, `(() => { const panel = document.querySelector('[data-auto-reply-agent-panel]'); const enabled = panel?.querySelector('input[type="checkbox"]'); if (!enabled) throw new Error('auto-reply enabled checkbox missing'); enabled.click(); return true; })()`);
-  await waitFor(async () => await evaluate(cdp, `(() => { const panel = document.querySelector('[data-auto-reply-agent-panel]'); const enabled = panel?.querySelector('input[type="checkbox"]'); const timeout = panel?.querySelector('input[type="number"]'); return Boolean(enabled && timeout?.disabled === true); })()`), 'Auto Reply Agent disabled controls');
-  const disabledState = await evaluate(cdp, `(() => { const panel = document.querySelector('[data-auto-reply-agent-panel]'); const enabled = panel?.querySelector('input[type="checkbox"]'); const timeout = panel?.querySelector('input[type="number"]'); const controls = Array.from(panel?.querySelectorAll('input,textarea,select') ?? []); return { enabledChecked: enabled?.checked === true, timeoutDisabled: timeout?.disabled === true, nonCheckboxCount: controls.filter((control) => control !== enabled).length, textAreaCount: panel?.querySelectorAll('textarea').length ?? 0, selectCount: panel?.querySelectorAll('select').length ?? 0 }; })()`);
-  if (disabledState.enabledChecked || !disabledState.timeoutDisabled || disabledState.nonCheckboxCount !== 1 || disabledState.textAreaCount !== 0 || disabledState.selectCount !== 0) throw new Error('disabling Agent did not disable the minimal configuration: ' + JSON.stringify(disabledState));
+  const disabledState = await evaluate(cdp, "(() => { const panel = document.querySelector('[data-auto-reply-agent-panel]'); const enabled = panel?.querySelector('input[type=\"checkbox\"]'); if (!enabled) throw new Error('auto-reply enabled checkbox missing'); enabled.click(); const fields = panel?.querySelector('fieldset.auto-reply-agent-fields'); const editable = Array.from(fields?.querySelectorAll('input,textarea,select') ?? []); return { disabled: fields?.disabled === true, allControlsDisabled: editable.length > 0 && editable.every((control) => control.matches(':disabled')), opacity: fields ? Number(getComputedStyle(fields).opacity) : 1 }; })()");
+  if (!disabledState.disabled || !disabledState.allControlsDisabled || disabledState.opacity >= 1) throw new Error('disabling Agent did not gray configuration: ' + JSON.stringify(disabledState));
   const agentDisabledMobilePath = await captureViewport(cdp, 390, 844, 'settings-agent-disabled-mobile-390x844.png');
-  await evaluate(cdp, `(() => { const enabled = document.querySelector('[data-auto-reply-agent-panel] input[type="checkbox"]'); enabled?.click(); return true; })()`);
-  await waitFor(async () => await evaluate(cdp, `Boolean(document.querySelector('[data-auto-reply-agent-panel] input[type="number"]:not([disabled])'))`), 'Auto Reply Agent re-enabled');
-  await setInput(cdp, '[data-auto-reply-agent-panel] input[type="number"]', '90000');
-  const patchEventCountBeforeSave = cdp.events.filter((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'PATCH' && new URL(event.params.request.url).pathname === '/api/v1/settings/agent').length;
-  await evaluate(cdp, `(() => { const submit = document.querySelector('[data-auto-reply-agent-panel] form button[type="submit"]'); if (!submit) throw new Error('auto-reply save button missing'); submit.click(); return true; })()`);
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('\u81ea\u52a8\u56de\u590d Agent \u914d\u7f6e\u5df2\u4fdd\u5b58'), 'agent settings saved');
-  const patchRequests = cdp.events.filter((event) => event.method === 'Network.requestWillBeSent' && event.params?.request?.method === 'PATCH' && new URL(event.params.request.url).pathname === '/api/v1/settings/agent');
-  const patchRequest = patchRequests[patchRequests.length - 1];
-  if (patchRequests.length <= patchEventCountBeforeSave || !patchRequest?.params?.request?.postData) throw new Error('agent settings save did not issue a PATCH request');
-  const patchPayload = JSON.parse(patchRequest.params.request.postData);
-  const patchKeys = Object.keys(patchPayload).sort();
-  if (JSON.stringify(patchKeys) !== JSON.stringify(['accountId', 'enabled', 'expectedVersion', 'totalTimeoutMs'].sort()) || patchPayload.totalTimeoutMs !== 90000) throw new Error(`agent settings PATCH exposed hidden fields: ${JSON.stringify(patchPayload)}`);
+  await evaluate(cdp, "(() => { const enabled = document.querySelector('[data-auto-reply-agent-panel] input[type=\"checkbox\"]'); enabled?.click(); return true; })()");
+  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-auto-reply-agent-panel] fieldset.auto-reply-agent-fields:not([disabled])"))'), 'Auto Reply Agent re-enabled');
+  await setLabelInput(cdp, '最大循环次数', '6');
+  const legacyDebounceField = await evaluate(cdp, "Boolean(Array.from(document.querySelectorAll('[data-auto-reply-agent-panel] label')).find((label) => label.textContent?.includes('防抖窗口')))" );
+  if (legacyDebounceField) throw new Error('legacy debounce field should not be visible');
+  await setLabelInput(cdp, '自动回复接管等待时间（秒）', '1');
+  await clickText(cdp, '保存自动回复 Agent 配置');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('自动回复 Agent 配置已保存'), 'agent settings saved');
   const agentSaved = await requestJson(apiUrl, agentPath, { headers: { cookie } });
-  if (!agentSaved.response.ok || agentSaved.body.data?.configVersion !== 1 || agentSaved.body.data?.totalTimeoutMs !== 90000) throw new Error(`agent settings persistence failed: ${agentSaved.response.status} ${JSON.stringify(agentSaved.body)}`);
+  if (!agentSaved.response.ok || agentSaved.body.data?.configVersion !== 1 || agentSaved.body.data?.maxLoops !== 6 || agentSaved.body.data?.sendDelaySeconds !== 1) throw new Error(`agent settings persistence failed: ${agentSaved.response.status} ${JSON.stringify(agentSaved.body)}`);
   const agentStale = await requestJson(apiUrl, '/api/v1/settings/agent', {
     method: 'PATCH',
     headers: { 'content-type': 'application/json', cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': `agent-settings-stale-${process.pid}` },
