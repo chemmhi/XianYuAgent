@@ -189,6 +189,9 @@ API/Worker 应为 `Up`，日志应包含 `repairMode=enforce`、`primaryRoute=re
 
 - `AUTO_REPLY_REPAIR_MODE=enforce`：启用修复后的自动回复主链路。
 - `AUTO_REPLY_OUTCOME_REVIEW_WORKER_ENABLED=true`：启用发送结果审核 Worker。
+- `INBOUND_QUARANTINE_CLEANUP_ENABLED=true`：启用入站 quarantine 分批过期清理。
+- `INBOUND_QUARANTINE_RETENTION_DAYS=7`：已解决和未解决 quarantine 统一按该窗口保留；quarantine 仅保留摘要/预览，不作为无限期重放队列。
+- `INBOUND_QUARANTINE_CLEANUP_BATCH_SIZE=10000`、`INBOUND_QUARANTINE_CLEANUP_POLL_MS=300000`：控制每批删除量和轮询间隔。
 - `AUTO_REPLY_MODEL_ENABLED=true`：允许使用配置的模型生成回复；仍受 `API_KEY`、`BASE_URL`、`MODEL` 等配置约束。
 - `AUTO_REPLY_SEND_MODE=live`：允许真实发送；排障或演练时可切换为 `simulate`。
 - `AUTO_REPLY_POLICY_BOOTSTRAP_DEFAULT=true`：账号没有持久化策略时，API 启动自动写入版本化默认策略。
@@ -200,6 +203,8 @@ API/Worker 应为 `Up`，日志应包含 `repairMode=enforce`、`primaryRoute=re
 - `DATABASE_URL_DOCKER`、`REDIS_URL_DOCKER`：可选的容器内连接覆盖。不要把仅适用于宿主机的 `127.0.0.1` 地址直接当作容器间地址。
 
 完整模板见 `.env.example`。自动回复策略的正常启动路径是“读取账号持久化策略 → 缺失时自动引导默认策略 → 兼容配置兜底”，因此后续按本节 Git 部署流程发布时，不应再因为漏配 `AUTO_REPLY_POLICY_JSON` 而导致 `POLICY_CONFIG_UNAVAILABLE`。
+
+quarantine 清理验收：先确认 Worker 启动日志包含 `quarantineCleanupWorker=enabled` 及实际 retention/batch/poll 参数，再观察以下指标持续下降；DELETE 只释放 PostgreSQL 可复用空间，若要立即缩小既有数据卷，需在低峰另行执行 `VACUUM (ANALYZE)` 并评估 `VACUUM FULL`/`pg_repack`。
 
 真实闲鱼二维码模式由 `XIANYU_QR_MODE=real` 控制；未设置或设置为其他值时，后端默认仍采用真实模式，自动化测试会显式使用 `stub`。
 

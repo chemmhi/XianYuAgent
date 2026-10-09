@@ -2,18 +2,30 @@ import crypto from 'node:crypto';
 import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import { InboundInboxWorker } from './inbound-inbox-worker.js';
+import { InboundQuarantineCleanupWorker } from './inbound-quarantine-cleanup-worker.js';
 import { ProductAutomationOrderRefreshWorker } from './product-automation-order-worker.js';
 import { ProductAutomationReminderWorker } from './product-automation-reminder-worker.js';
 
 const config = loadConfig();
 const runtime = createApp(config);
 const workerId = `inbound-inbox:${process.pid}:${crypto.randomUUID()}`;
+const quarantineCleanupEnabled = process.env.INBOUND_QUARANTINE_CLEANUP_ENABLED?.trim().toLowerCase() !== 'false';
+const quarantineCleanupPollMs = positiveNumber(process.env.INBOUND_QUARANTINE_CLEANUP_POLL_MS, 5 * 60 * 1_000);
+const quarantineCleanupRetentionDays = positiveNumber(process.env.INBOUND_QUARANTINE_RETENTION_DAYS, 7);
+const quarantineCleanupBatchSize = positiveNumber(process.env.INBOUND_QUARANTINE_CLEANUP_BATCH_SIZE, 10_000);
 const worker = new InboundInboxWorker(runtime.store, runtime.xianyuIm, {
   workerId,
   batchSize: Number(process.env.INBOUND_INBOX_BATCH_SIZE ?? 10),
   leaseMs: Number(process.env.INBOUND_INBOX_LEASE_MS ?? 120_000),
   pollMs: Number(process.env.INBOUND_INBOX_POLL_MS ?? 1_000),
   maxAttempts: Number(process.env.INBOUND_INBOX_MAX_ATTEMPTS ?? 5),
+});
+const quarantineCleanupWorker = new InboundQuarantineCleanupWorker(runtime.store, {
+  enabled: quarantineCleanupEnabled,
+  pollMs: quarantineCleanupPollMs,
+  retentionDays: quarantineCleanupRetentionDays,
+  batchSize: quarantineCleanupBatchSize,
+  onError: (error) => console.error('inbound quarantine cleanup failed', error),
 });
 const outcomeReviewWorkerId = `outcome-review:${process.pid}:${crypto.randomUUID()}`;
 const outcomeReviewWorker = config.autoReplyOutcomeReviewWorkerEnabled
@@ -37,14 +49,16 @@ const productAutomationOrderRefreshWorker = new ProductAutomationOrderRefreshWor
   maxPages: positiveNumber(process.env.PRODUCT_AUTOMATION_ORDER_REFRESH_MAX_PAGES, 20),
   onError: (error) => console.error('product automation order refresh worker poll failed', error),
 });
-console.log(`xianyu-agent-worker started; redis=${config.redisUrl ?? 'not_configured'} workerId=${workerId} repairMode=${runtime.autoReplyRepair.currentMode} outcomeReviewWorker=${outcomeReviewWorker ? 'enabled' : 'disabled'} productAutomationOrderRefreshWorker=${productAutomationOrderRefreshWorker ? 'enabled' : 'disabled'} productAutomationReminderWorker=${productAutomationReminderWorker ? 'enabled' : 'disabled'}`);
+console.log(`xianyu-agent-worker started; redis=${config.redisUrl ?? 'not_configured'} workerId=${workerId} repairMode=${runtime.autoReplyRepair.currentMode} quarantineCleanupWorker=${quarantineCleanupEnabled ? 'enabled' : 'disabled'} quarantineCleanupPollMs=${quarantineCleanupPollMs} quarantineCleanupRetentionDays=${quarantineCleanupRetentionDays} quarantineCleanupBatchSize=${quarantineCleanupBatchSize} outcomeReviewWorker=${outcomeReviewWorker ? 'enabled' : 'disabled'} productAutomationOrderRefreshWorker=${productAutomationOrderRefreshWorker ? 'enabled' : 'disabled'} productAutomationReminderWorker=${productAutomationReminderWorker ? 'enabled' : 'disabled'}`);
 worker.start();
+quarantineCleanupWorker.start();
 outcomeReviewWorker?.start();
 productAutomationOrderRefreshWorker.start();
 productAutomationReminderWorker.start();
 const shutdown = (signal: string) => {
   void (async () => {
     await outcomeReviewWorker?.stop();
+    await quarantineCleanupWorker.stop();
     await productAutomationOrderRefreshWorker.stop();
     await productAutomationReminderWorker.stop();
     await worker.stop();

@@ -1325,6 +1325,19 @@ export class MemoryStore implements Store {
     return { ...record };
   }
 
+  async cleanupInboundQuarantine(input: { createdBefore: string; limit?: number }): Promise<number> {
+    const cutoff = Date.parse(input.createdBefore);
+    if (!Number.isFinite(cutoff)) throw new Error('INBOUND_QUARANTINE_CUTOFF_INVALID');
+    const requestedLimit = input.limit ?? 1_000;
+    const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(50_000, Math.trunc(requestedLimit))) : 1_000;
+    const candidates = [...this.inboundQuarantine.entries()]
+      .filter(([, record]) => Date.parse(record.createdAt) < cutoff)
+      .sort(([, left], [, right]) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
+      .slice(0, limit);
+    for (const [id] of candidates) this.inboundQuarantine.delete(id);
+    return candidates.length;
+  }
+
   private markOutgoingReadUntil(conversation: ConversationRecord, createdAt: string, readAt?: string): { messages: MessageRecord[]; events: ConversationEventRecord[] } {
     const effectiveReadAt = readAt ?? new Date().toISOString();
     const changed = [...this.messages.values()]

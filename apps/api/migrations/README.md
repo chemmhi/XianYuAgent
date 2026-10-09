@@ -42,6 +42,17 @@
 - `046_workspace_platform_takeover_actions.sql`：扩展 Workspace Confirmation action 白名单，覆盖商品编辑/知识库/自动化、卡券管理和模型配置。
 - `047_order_delivery_records.sql`：建立订单交付记录、幂等键、attempt、外部结果与失败恢复字段；复用现有 execution outbox，不删除已成功订单交付历史。
 - `050_model_provider_routing.sql`：建立账号级 Model Provider 路由偏好、routing version、单调 config generation 序列及 Redis mirror 所需的持久化边界；不修改 Provider 凭证和密钥，回滚时保留历史路由记录并关闭手动切换写入。
+- `051_auto_reply_quarantine_retention.sql`：为入站 quarantine 的按时间分批清理增加并发建索引。
+- `052_auto_reply_quarantine_autovacuum.sql`：降低 quarantine 表 autovacuum 触发阈值，避免分批删除产生长期 dead tuples。
+
+## 051 入站 quarantine 保留与运维纪律
+
+- Worker 默认每 5 分钟按 7 天保留窗口分批删除，单批默认 10,000 行；`INBOUND_QUARANTINE_*` 可在生产环境覆盖。
+- 保留窗口同时适用于已解决和未解决记录；quarantine 只保留摘要/预览，不是可无限期重放的消息队列。若需要更长取证窗口，应先调大 `INBOUND_QUARANTINE_RETENTION_DAYS`。
+- 051 使用 `CREATE INDEX CONCURRENTLY`，单独成文件且迁移执行器不得把该 SQL 包在显式事务中；052 的表参数 DDL 保持独立，避免与 051 合并成多语句事务请求。
+- 若 051 在构建索引期间失败，迁移执行器重试前会检查并并发删除同名 `indisvalid=false` 索引，再重新创建；发布后可用 `pg_index.indisvalid` 做一次验收确认。
+- DELETE 只阻止表继续增长并让空间进入 PostgreSQL 可复用池，不保证立即缩小数据卷；既有 backlog 清理后，低峰执行 `VACUUM (ANALYZE) messages.auto_reply_inbound_quarantine`，需要立即归还文件空间时再单独评估 `VACUUM FULL`/`pg_repack`。
+- 发布验收至少检查：worker 日志出现 `quarantineCleanupWorker=enabled`，quarantine 的 `count(*)` 与最老 `created_at` 持续下降，`pg_stat_user_tables.n_dead_tup` 未持续失控。
 
 迁移执行顺序以完整文件名的字典序为准，数字前缀在历史目录中允许重复（例如 `031_auto_reply_*` 与 `031_product_automation.sql`）；新增迁移应优先使用唯一前缀，并确保 SQL 幂等且依赖在完整文件名顺序下成立。
 

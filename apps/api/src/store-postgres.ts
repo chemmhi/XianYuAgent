@@ -1470,6 +1470,23 @@ export class PostgresStore implements Store {
     return { id: String(row.id), accountId: String(row.account_id), reasonCode: String(row.reason_code), payloadDigest: String(row.payload_digest), payloadPreview: row.payload_preview ? String(row.payload_preview) : undefined, payloadSize: Number(row.payload_size ?? 0), receivedAt: dateIso(row.received_at), resolvedAt: iso(row.resolved_at), createdAt: dateIso(row.created_at) };
   }
 
+  async cleanupInboundQuarantine(input: { createdBefore: string; limit?: number }): Promise<number> {
+    const requestedLimit = input.limit ?? 1_000;
+    const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(50_000, Math.trunc(requestedLimit))) : 1_000;
+    const result = await this.pool.query(`with victims as (
+        select id
+        from messages.auto_reply_inbound_quarantine
+        where created_at < $1::timestamptz
+        order by created_at asc, id asc
+        for update skip locked
+        limit $2
+      )
+      delete from messages.auto_reply_inbound_quarantine quarantine
+      using victims
+      where quarantine.id = victims.id`, [input.createdBefore, limit]);
+    return Number(result.rowCount ?? 0);
+  }
+
   async getAutoReplyActivitySummary(adminId: string, query: { accountId?: string; from: string; to: string }): Promise<AutoReplyActivitySummary> {
     const params: unknown[] = [adminId, query.from, query.to];
     const accountClause = query.accountId ? 'and r.account_id=$4' : '';

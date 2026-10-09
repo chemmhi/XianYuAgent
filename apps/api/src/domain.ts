@@ -1552,4 +1552,5 @@ export interface Store {
   deadLetterInboundInbox(input: { id: string; workerId: string; errorCode: string; errorDigest: string }): Promise<boolean>;
   reapExpiredInboundInbox(now?: string): Promise<number>;
   recordInboundQuarantine(input: { accountId: string; reasonCode: string; payloadDigest: string; payloadPreview?: string; payloadSize: number; receivedAt?: string }): Promise<InboundQuarantineRecord>;
+  cleanupInboundQuarantine(input: { createdBefore: string; limit?: number }): Promise<number>;
 }
