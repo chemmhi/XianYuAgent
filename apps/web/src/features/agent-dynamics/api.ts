@@ -574,7 +574,7 @@ function mapDetail(raw: RawAutoReplyRunDetail): AgentDynamicsRunDetailVM {
   const row = mapRun(raw.run);
   const events = [...raw.events].sort((left, right) => (left.sequence ?? Number.MAX_SAFE_INTEGER) - (right.sequence ?? Number.MAX_SAFE_INTEGER));
   const timeline: AgentDynamicsTimelineItemVM[] = events.length > 0 ? events.map((event) => ({ id: event.id, sequence: event.sequence, stage: event.stage, status: event.status, eventType: event.eventType, traceId: event.traceId, title: eventTitle(event, row), description: eventDescription(event), meta: eventMeta(event), tone: eventTone(event.status, event), details: mapEventDetails(event, row) })) : [{ id: `${row.runId}:status`, title: decisionLabel(row.decision.key), description: '当前运行状态', meta: `${row.timeLabel} · ${statusLabel(raw.run.status)}`, tone: row.decision.tone }];
-  return { ...row, message: raw.inboundMessage?.bodyText ?? row.inboundPreview, reply: raw.outboundMessages[0]?.bodyText, outcomeLabel: row.senderOutcome.label, timeline, chatPath: row.buyer.conversationId ? `/messages?conversationId=${encodeURIComponent(row.buyer.conversationId)}` : '/messages' };
+  return { ...row, message: raw.inboundMessage?.bodyText ?? row.inboundPreview, reply: raw.run.outboundMessageId ? raw.outboundMessages.find((message) => Boolean(message.bodyText))?.bodyText : undefined, outcomeLabel: row.senderOutcome.label, timeline, chatPath: row.buyer.conversationId ? `/messages?conversationId=${encodeURIComponent(row.buyer.conversationId)}` : '/messages' };
 }
 
 export interface AgentDynamicsApi {
