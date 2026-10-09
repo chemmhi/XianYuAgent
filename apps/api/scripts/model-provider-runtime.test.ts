@@ -45,6 +45,33 @@ test('runtime pool preserves backup role when primary is absent', async () => {
   await pool.close();
 });
 
+test('runtime pool isolates primary construction failure and keeps backup usable', async () => {
+  const pool = new ModelProviderRuntimePool({
+    createClient: async (item) => {
+      if (item.role === 'primary') throw new Error('primary construction failed');
+      return { complete: async () => ({ content: 'backup-ok', model: 'backup-model' }), supportsStructuredOutput: true };
+    },
+  });
+  const service = await pool.resolve({ adminId: 'admin-1', accountId: 'account-1', configs: [config('primary', 1), config('backup', 1)], mode: 'auto', routingVersion: 0 });
+  const result = await service.complete({ messages: [{ role: 'user', content: 'hello' }] });
+  assert.equal(result.content, 'backup-ok');
+  const snapshot = service.getRuntimeSnapshot();
+  assert.equal(snapshot.providerStates.primary.state, 'OPEN');
+  assert.equal(snapshot.providerStates.primary.lastTransitionReason, 'PROVIDER_CONSTRUCTION_FAILED');
+  assert.equal(snapshot.providerStates.primary.constructionErrorCode, 'MODEL_PROVIDER_RUNTIME_INIT_FAILED');
+  await pool.close();
+});
+
+test('runtime pool preserves both construction diagnostics when neither role can initialize', async () => {
+  const pool = new ModelProviderRuntimePool({ createClient: async (item) => { throw new Error(`${item.role} failed`); } });
+  const service = await pool.resolve({ adminId: 'admin-1', accountId: 'account-1', configs: [config('primary', 1), config('backup', 1)], mode: 'auto', routingVersion: 0 });
+  await assert.rejects(() => service.complete({ messages: [{ role: 'user', content: 'hello' }] }), /temporarily unavailable/);
+  const snapshot = service.getRuntimeSnapshot();
+  assert.equal(snapshot.providerStates.primary.constructionErrorCode, 'MODEL_PROVIDER_RUNTIME_INIT_FAILED');
+  assert.equal(snapshot.providerStates.backup.constructionErrorCode, 'MODEL_PROVIDER_RUNTIME_INIT_FAILED');
+  await pool.close();
+});
+
 test('runtime pool fences Redis state when account generation changes without credential version change', async () => {
   let created = 0;
   const pool = new ModelProviderRuntimePool({ createClient: async () => { created += 1; return { complete: async () => ({ content: 'ok', model: 'model' }) }; } });

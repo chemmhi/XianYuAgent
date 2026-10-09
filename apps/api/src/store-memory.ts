@@ -1162,7 +1162,9 @@ export class MemoryStore implements Store {
     if (!run || !(await this.hasAccountScope(adminId, run.accountId))) return undefined;
     const conversation = await this.getConversation(adminId, run.conversationId);
     const inboundMessage = [...this.messages.values()].find((message) => message.id === run.inboundMessageId && message.conversationId === run.conversationId);
-    const outboundMessages = [...this.messages.values()].filter((message) => message.conversationId === run.conversationId && message.direction === 'outbound' && (!run.outboundMessageId || message.id === run.outboundMessageId)).sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    const outboundMessages = run.outboundMessageId
+      ? [...this.messages.values()].filter((message) => message.conversationId === run.conversationId && message.direction === 'outbound' && message.id === run.outboundMessageId).sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      : [];
     const product = run.productId ? await this.getProduct(adminId, run.productId) : undefined;
     return { run: this.autoReplyRunListItem(run), events: await this.listAutoReplyRunEvents(adminId, runId), conversation, inboundMessage, outboundMessages, product };
   }

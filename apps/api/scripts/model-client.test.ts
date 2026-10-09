@@ -61,7 +61,7 @@ test('ModelClientService only advertises structured output when every provider s
   assert.equal(new ModelClientService({ primary }).supportsStructuredOutput, true);
 });
 
-test('Responses structured output uses provider-specific json_schema formatting', async () => {
+test('Responses structured output uses identical provider-agnostic json_schema formatting', async () => {
   const requests: Array<{ provider: string; body: Record<string, unknown> }> = [];
   const fetchImpl = (async (_input, init) => {
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -80,6 +80,7 @@ test('Responses structured output uses provider-specific json_schema formatting'
 
   const openai = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl: 'https://model.example/v1', model: 'openai-model', provider: 'openai', wireApi: 'responses', fetchImpl });
   const deepseek = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl: 'https://api.deepseek.example/v1', model: 'deepseek-model', provider: 'deepseek', wireApi: 'responses', fetchImpl });
+  const cch = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl: 'https://cch.example/v1', model: 'cch-model', provider: 'cch', wireApi: 'responses', fetchImpl });
   await openai.complete({ messages: [{ role: 'user', content: 'reply' }], structuredOutput });
   await deepseek.complete({
     messages: [{ role: 'user', content: 'reply' }],
@@ -87,25 +88,51 @@ test('Responses structured output uses provider-specific json_schema formatting'
     toolChoice: 'auto',
     structuredOutput,
   });
+  await cch.complete({ messages: [{ role: 'user', content: 'reply' }], structuredOutput });
 
   const openaiFormat = ((requests[0]?.body.text as Record<string, unknown>).format) as Record<string, unknown>;
   const deepseekFormat = ((requests[1]?.body.text as Record<string, unknown>).format) as Record<string, unknown>;
-  assert.deepEqual(openaiFormat, { type: 'json_schema', name: 'auto_reply_decision', strict: true, schema: structuredOutput.schema });
-  assert.deepEqual(deepseekFormat, { type: 'json_schema', name: 'auto_reply_decision', schema: structuredOutput.schema });
+  const cchFormat = ((requests[2]?.body.text as Record<string, unknown>).format) as Record<string, unknown>;
+  const expectedFormat = { type: 'json_schema', name: 'auto_reply_decision', schema: structuredOutput.schema };
+  assert.deepEqual(openaiFormat, expectedFormat);
+  assert.deepEqual(deepseekFormat, expectedFormat);
+  assert.deepEqual(cchFormat, expectedFormat);
   assert.deepEqual(requests[1]?.body.tools, [{ type: 'function', name: 'get_product_info', description: 'read product facts', parameters: { type: 'object' } }]);
   assert.equal(openai.supportsStructuredOutput, true);
   assert.equal(deepseek.supportsStructuredOutput, true);
-  assert.equal(deepseek.supportsWebSearch, false);
+  assert.equal(deepseek.supportsWebSearch, true);
+  assert.equal(cch.supportsWebSearch, false);
 });
 
-test('Responses rejects an unknown provider instead of assuming OpenAI semantics', () => {
-  assert.throws(
-    () => new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl: 'https://model.example/v1', model: 'unknown-model', provider: 'custom-compatible', wireApi: 'responses' }),
-    (error: unknown) => error instanceof PiModelClientError && error.code === 'MODEL_PROVIDER_UNSUPPORTED',
-  );
+test('Responses accepts unknown providers as metadata without enabling web_search', () => {
+  const custom = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl: 'https://model.example/v1', model: 'unknown-model', provider: 'custom-compatible', wireApi: 'responses' });
+  assert.equal(custom.supportsStructuredOutput, true);
+  assert.equal(custom.supportsWebSearch, false);
   const legacyAlias = new OpenAICompatibleModelClient({ apiKey: 'test-key', baseUrl: 'https://model.example/v1', model: 'legacy-openai-compatible-model', provider: 'openai-compatible', wireApi: 'responses' });
   assert.equal(legacyAlias.supportsStructuredOutput, true);
   assert.equal(legacyAlias.supportsWebSearch, true);
+});
+
+test('ModelClientService falls back after invalid final structured output', async () => {
+  const calls: string[] = [];
+  const validator = (result: { content: string }) => {
+    if (!result.content.includes('valid')) throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'invalid final output');
+  };
+  const primary: ModelClient = { complete: async () => { calls.push('primary'); return reply('{"decision":"broken"}'); } };
+  const backup: ModelClient = { complete: async () => { calls.push('backup'); return reply('{"decision":"valid"}'); } };
+  const service = new ModelClientService({ primary, backup });
+  const result = await service.complete({ messages: [{ role: 'user', content: 'hello' }], validateFinalOutput: validator });
+  assert.equal(result.content, '{"decision":"valid"}');
+  assert.deepEqual(calls, ['primary', 'backup']);
+});
+
+test('ModelClientService preserves invalid-output classification after both final attempts fail', async () => {
+  const validator = () => { throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'invalid final output'); };
+  const service = new ModelClientService({
+    primary: { complete: async () => reply('bad-primary') },
+    backup: { complete: async () => reply('bad-backup') },
+  });
+  await assert.rejects(() => service.complete({ messages: [{ role: 'user', content: 'hello' }], validateFinalOutput: validator }), (error: unknown) => error instanceof PiModelClientError && error.code === 'MODEL_INVALID_RESPONSE');
 });
 
 test('Responses rejects failed, incomplete, and refusal payloads as invalid responses', async () => {

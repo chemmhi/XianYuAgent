@@ -214,9 +214,20 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     if (config.modelProviderFailoverV2 === false) {
       const primary = configured.find((item) => item.role === 'primary') ?? configured[0];
       const backup = configured.find((item) => item.role === 'backup');
-      const primaryClient = await openaiSettings.createRuntimeClient(primary);
-      const backupClient = backup ? await openaiSettings.createRuntimeClient(backup) : undefined;
-      return new ModelClientService({ primary: primaryClient, backup: backupClient });
+      const creations = await Promise.allSettled([
+        openaiSettings.createRuntimeClient(primary),
+        ...(backup ? [openaiSettings.createRuntimeClient(backup)] : []),
+      ]);
+      const primaryClient = creations[0]?.status === 'fulfilled' ? creations[0].value : undefined;
+      const backupClient = backup && creations[1]?.status === 'fulfilled' ? creations[1].value : undefined;
+      return new ModelClientService({
+        primary: primaryClient,
+        backup: backupClient,
+        constructionErrors: {
+          ...(creations[0]?.status === 'rejected' ? { primary: runtimeConstructionErrorCode(creations[0].reason) } : {}),
+          ...(backup && creations[1]?.status === 'rejected' ? { backup: runtimeConstructionErrorCode(creations[1].reason) } : {}),
+        },
+      });
     }
     const configGeneration = await openaiSettings.getConfigGeneration(adminId, accountId);
     const routing = await resolveModelProviderRouting(openaiSettings, modelProviderRuntime, adminId, accountId, configGeneration);
@@ -269,7 +280,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
       try {
         runtimeModelClient = await resolveAccountModelClient(adminId, accountId);
       } catch {
-        runtimeModelClient = autoReplyModelClient;
+        runtimeModelClient = createUnavailableModelClient();
       }
       const envLiveEnabled = config.autoReplySendMode === 'live';
       return {
@@ -600,6 +611,20 @@ function createConfiguredModelClient(config: AppConfig): ModelClient | undefined
   });
 }
 
+function createUnavailableModelClient(): ModelClient {
+  return {
+    supportsWebSearch: false,
+    supportsStructuredOutput: false,
+    async complete() { throw new PiModelClientError('MODEL_PROVIDER_UNAVAILABLE', 'account-scoped model runtime is unavailable'); },
+  };
+}
+
+function runtimeConstructionErrorCode(error: unknown): string {
+  if (error instanceof PiModelClientError) return error.code;
+  if (error instanceof Error && /^[A-Z0-9_:-]{1,64}$/.test(error.name)) return error.name;
+  return 'MODEL_PROVIDER_RUNTIME_INIT_FAILED';
+}
+
 function createPiWorkspaceRuntime(config: AppConfig, store: Store, sharedModelClient: ModelClient | undefined, resolveAccountModelClient: (adminId: string, accountId: string) => Promise<ModelClient | undefined>, workspaceCommands: WorkspaceCommandOrchestrator, piSkills: PiSkillManager): WorkspaceRuntime {
   const modelClient = sharedModelClient ?? {
     supportsWebSearch: false,
@@ -616,7 +641,7 @@ function createPiWorkspaceRuntime(config: AppConfig, store: Store, sharedModelCl
       try {
         return await resolveAccountModelClient(adminId, accountId);
       } catch {
-        return modelClient;
+        return createUnavailableModelClient();
       }
     },
     messageSink: async (message) => {
@@ -812,7 +837,9 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
       fingerprint: fingerprint(ctx.method, ctx.path, ctx.body),
       traceId: ctx.traceId,
       handler: async () => {
-        const configs = await runtime.openaiSettings.resolveForRuntime(authContext.admin.id, accountId);
+        let configs: Awaited<ReturnType<OpenAISettingsService['resolveForRuntime']>> = [];
+        try { configs = await runtime.openaiSettings.resolveForRuntime(authContext.admin.id, accountId); }
+        catch { /* Persisted routing can still be updated when runtime init is degraded. */ }
         const configGeneration = await runtime.openaiSettings.getConfigGeneration(authContext.admin.id, accountId);
         const routing = await runtime.openaiSettings.updateRouting({ adminId: authContext.admin.id, accountId, expectedVersion, mode, preferredRole, configGeneration, requestId: ctx.requestId, traceId: ctx.traceId });
         try { await modelProviderRuntime.syncRouting({ accountId, routing }); }
@@ -1557,18 +1584,50 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
 async function requireAuth(auth: AuthService, ctx: RequestContext): Promise<AuthContext> { const context = await auth.contextFromSession(ctx.cookies.session_id); if (!context) throw new ServiceError(401, 'UNAUTHENTICATED', 'session required'); return context; }
 
 async function buildOpenAiRuntimeView(runtime: AppRuntime, adminId: string, accountId: string): Promise<Record<string, unknown>> {
-  const configs = await runtime.openaiSettings.resolveForRuntime(adminId, accountId);
-  const configGeneration = await runtime.openaiSettings.getConfigGeneration(adminId, accountId);
+  // Persisted configuration is the source of truth for the settings page.
+  // Runtime client construction is best-effort and must not hide saved items.
+  const items = await runtime.openaiSettings.list({ adminId, accountId });
+  let configs: Awaited<ReturnType<OpenAISettingsService['resolveForRuntime']>> = [];
+  let configGeneration = 0;
+  let runtimeStatus: 'ready' | 'degraded' = 'ready';
+  let runtimeErrorCode: string | undefined;
+  try {
+    configs = await runtime.openaiSettings.resolveForRuntime(adminId, accountId);
+  } catch (error) {
+    runtimeStatus = 'degraded';
+    runtimeErrorCode = runtimeViewErrorCode(error, 'MODEL_CONFIG_RESOLUTION_FAILED');
+  }
+  try {
+    configGeneration = await runtime.openaiSettings.getConfigGeneration(adminId, accountId);
+  } catch (error) {
+    runtimeStatus = 'degraded';
+    runtimeErrorCode ??= runtimeViewErrorCode(error, 'MODEL_CONFIG_GENERATION_UNAVAILABLE');
+  }
   const failoverV2Enabled = runtime.config.modelProviderFailoverV2 !== false;
-  const routing = failoverV2Enabled
-    ? await resolveModelProviderRouting(runtime.openaiSettings, runtime.modelProviderRuntime, adminId, accountId, configGeneration)
-    : await runtime.openaiSettings.getRouting(adminId, accountId, configGeneration);
+  const fallbackRouting = { accountId, mode: 'auto' as const, preferredRole: undefined, routingVersion: 0, configGeneration, createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() };
+  let routing: Awaited<ReturnType<OpenAISettingsService['getRouting']>> = fallbackRouting;
+  try {
+    routing = failoverV2Enabled
+      ? await resolveModelProviderRouting(runtime.openaiSettings, runtime.modelProviderRuntime, adminId, accountId, configGeneration)
+      : await runtime.openaiSettings.getRouting(adminId, accountId, configGeneration);
+  } catch (error) {
+    runtimeStatus = 'degraded';
+    runtimeErrorCode ??= runtimeViewErrorCode(error, 'MODEL_ROUTING_STATE_UNAVAILABLE');
+  }
   let snapshot: ModelClientRuntimeSnapshot | undefined;
   if (failoverV2Enabled && configs.length > 0) {
-    const service = await runtime.modelProviderRuntime.resolve({ adminId, accountId, configs, mode: routing.mode, preferredRole: routing.preferredRole, routingVersion: routing.routingVersion, configGeneration });
-    snapshot = service.getRuntimeSnapshot();
+    try {
+      const service = await runtime.modelProviderRuntime.resolve({ adminId, accountId, configs, mode: routing.mode, preferredRole: routing.preferredRole, routingVersion: routing.routingVersion, configGeneration });
+      snapshot = service.getRuntimeSnapshot();
+      if (Object.values(snapshot.providerStates).some((state) => Boolean(state?.constructionErrorCode))) {
+        runtimeStatus = 'degraded';
+        runtimeErrorCode ??= 'MODEL_PROVIDER_RUNTIME_INIT_FAILED';
+      }
+    } catch (error) {
+      runtimeStatus = 'degraded';
+      runtimeErrorCode ??= runtimeViewErrorCode(error, 'MODEL_PROVIDER_RUNTIME_INIT_FAILED');
+    }
   }
-  const items = await runtime.openaiSettings.list({ adminId, accountId });
   const byRole = new Map(items.map((item) => [item.role, item]));
   const providerForRole = (role?: ModelProviderRole) => {
     if (!role) return null;
@@ -1600,8 +1659,16 @@ async function buildOpenAiRuntimeView(runtime: AppRuntime, adminId: string, acco
     last_transition_reason: effectiveState?.lastTransitionReason ?? stateValues.map((item) => item.lastTransitionReason).find(Boolean),
     config_generation: snapshot?.configGeneration ?? configGeneration,
     routing_version: routing.routingVersion,
+    runtime_status: runtimeStatus,
+    ...(runtimeErrorCode ? { runtime_error_code: runtimeErrorCode } : {}),
     server_time: new Date().toISOString(),
   };
+}
+
+function runtimeViewErrorCode(error: unknown, fallback: string): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (typeof code === 'string' && /^[A-Z0-9_:-]{1,64}$/.test(code)) return code;
+  return fallback;
 }
 
 export async function resolveModelProviderRouting(

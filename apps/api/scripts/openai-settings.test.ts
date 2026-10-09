@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { request } from 'node:http';
 import { ApiKeyCredentialService } from '../src/credential-store.js';
 import { MemoryStore } from '../src/store-memory.js';
 import { OpenAISettingsService, createFallbackModelClient } from '../src/openai-settings.js';
@@ -316,8 +317,47 @@ test('runtime client preserves the legacy openai-compatible provider alias', asy
         schema: { type: 'object', additionalProperties: false, properties: { decision: { type: 'string' } }, required: ['decision'] },
       },
     });
-    assert.equal(((requests[0]?.text as Record<string, unknown>).format as Record<string, unknown>).strict, true);
+    assert.equal('strict' in ((requests[0]?.text as Record<string, unknown>).format as Record<string, unknown>), false);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
+
+test('settings echo returns saved items when runtime client resolution is degraded', async () => {
+  const runtime = createApp(loadConfig({ HOST: '127.0.0.1', PORT: '0', DATABASE_URL: '', REDIS_URL: '', ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process' }));
+  await runtime.listen();
+  try {
+    const address = runtime.server.address();
+    assert.ok(address && typeof address === 'object');
+    const base = `http://127.0.0.1:${address.port}`;
+    const boot = await httpJson(`${base}/api/v1/auth/bootstrap`, { method: 'POST', headers: { 'content-type': 'application/json', 'Idempotency-Key': 'settings-echo-bootstrap' }, body: JSON.stringify({ email: 'settings-echo@example.com', password: 'password-123', displayName: 'Settings Echo' }) });
+    assert.equal(boot.status, 200);
+    const cookie = (boot.headers['set-cookie'] ?? []).map((value) => value.split(';', 1)[0]).join('; ');
+    const adminId = String(boot.body.data.profile.id);
+    const account = await runtime.store.createAccount({ adminId, platform: 'xianyu', sellerRef: 'settings-echo-seller' });
+    await runtime.openaiSettings.save(input(adminId, account.id, 'primary'));
+    runtime.openaiSettings.resolveForRuntime = async () => { throw new Error('runtime unavailable'); };
+    const listed = await httpJson(`${base}/api/v1/settings/openai?accountId=${encodeURIComponent(account.id)}`, { headers: { cookie } });
+    assert.equal(listed.status, 200);
+    assert.equal(listed.body.data.items.length, 1);
+    assert.equal(listed.body.data.items[0].provider, 'openai');
+    assert.equal(listed.body.data.runtime.runtime_status, 'degraded');
+    assert.equal(typeof listed.body.data.runtime.runtime_error_code, 'string');
+  } finally {
+    await runtime.close();
+  }
+});
+
+async function httpJson(url: string, options: { method?: string; headers?: Record<string, string>; body?: string } = {}): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: any }> {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const req = request({ hostname: target.hostname, port: Number(target.port), path: `${target.pathname}${target.search}`, method: options.method ?? 'GET', headers: options.headers }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      res.on('end', () => { const text = Buffer.concat(chunks).toString('utf8'); resolve({ status: res.statusCode ?? 0, headers: res.headers as Record<string, string | string[] | undefined>, body: text ? JSON.parse(text) : undefined }); });
+    });
+    req.on('error', reject);
+    if (options.body) req.write(options.body);
+    req.end();
+  });
+}

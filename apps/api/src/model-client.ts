@@ -7,7 +7,7 @@ export type ModelProviderCircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
 export type ModelProviderRoutingMode = 'auto' | 'manual_primary' | 'manual_backup';
 
 export interface ModelClientFailoverEvent { provider: ModelProviderRole; error: unknown; reason?: string; cooldownUntil?: string; }
-export interface ModelProviderCircuitSnapshot { role: ModelProviderRole; state: ModelProviderCircuitState; failureCount: number; cooldownUntil?: string; nextProbeAt?: string; generation: number; lastTransitionReason?: string; manualOnly?: boolean; backoffMs?: number; lastErrorStatus?: number; lastProbeLatencyMs?: number; }
+export interface ModelProviderCircuitSnapshot { role: ModelProviderRole; state: ModelProviderCircuitState; failureCount: number; cooldownUntil?: string; nextProbeAt?: string; generation: number; lastTransitionReason?: string; manualOnly?: boolean; backoffMs?: number; lastErrorStatus?: number; lastProbeLatencyMs?: number; constructionErrorCode?: string; }
 export interface ModelClientRuntimeSnapshot { mode: ModelProviderRoutingMode; preferredRole?: ModelProviderRole; effectiveRole?: ModelProviderRole; lastSuccessfulRole?: ModelProviderRole; lastServedAt?: string; observedAt: string; configGeneration: number; routingVersion: number; stateRevision: number; providerStates: Record<ModelProviderRole, ModelProviderCircuitSnapshot>; }
 
 export interface ModelClientServiceOptions {
@@ -21,6 +21,7 @@ export interface ModelClientServiceOptions {
   routingVersion?: number;
   mode?: ModelProviderRoutingMode;
   preferredRole?: ModelProviderRole;
+  constructionErrors?: Partial<Record<ModelProviderRole, string>>;
   now?: () => number;
 }
 
@@ -60,9 +61,13 @@ export class ModelClientService implements ModelClient {
     this.preferredRole = options.preferredRole;
     this.routingVersion = options.routingVersion ?? 0;
     this.configGeneration = options.configGeneration ?? 0;
-    this.circuits = { primary: createCircuit('primary', this.configGeneration), backup: createCircuit('backup', this.configGeneration) };
-    this.supportsWebSearch = (this.primary?.supportsWebSearch !== false) && (this.backup?.supportsWebSearch !== false);
-    this.supportsStructuredOutput = this.primary?.supportsStructuredOutput === true && (this.backup ? this.backup.supportsStructuredOutput === true : true);
+    this.circuits = {
+      primary: createCircuit('primary', this.configGeneration, options.constructionErrors?.primary),
+      backup: createCircuit('backup', this.configGeneration, options.constructionErrors?.backup),
+    };
+    const availableClients = [this.primary, this.backup].filter((client): client is ModelClient => Boolean(client));
+    this.supportsWebSearch = availableClients.length > 0 && availableClients.every((client) => client.supportsWebSearch !== false);
+    this.supportsStructuredOutput = availableClients.length > 0 && availableClients.every((client) => client.supportsStructuredOutput === true);
   }
 
   setRouting(input: { mode: ModelProviderRoutingMode; preferredRole?: ModelProviderRole; routingVersion: number }): void {
@@ -93,6 +98,7 @@ export class ModelClientService implements ModelClient {
       target.backoffMs = Number.isFinite(source.backoffMs) ? Math.max(INITIAL_COOLDOWN_MS, Math.trunc(source.backoffMs!)) : target.backoffMs;
       target.lastErrorStatus = source.lastErrorStatus;
       target.lastProbeLatencyMs = source.lastProbeLatencyMs;
+      target.constructionErrorCode = source.constructionErrorCode;
     }
     this.lastSuccessfulRole = input.lastSuccessfulRole;
     this.lastServedAt = input.lastServedAt;
@@ -144,11 +150,14 @@ export class ModelClientService implements ModelClient {
       onReasoningDelta: async (delta) => { if (delta) emitted = true; await handlers.onReasoningDelta?.(delta); },
       onToolCallDelta: async (delta) => { emitted = true; await handlers.onToolCallDelta?.(delta); },
       onToolCall: async (call) => { emitted = true; await handlers.onToolCall?.(call); },
-      onDone: handlers.onDone,
+      // Delay completion notification until final-output validation succeeds;
+      // otherwise an invalid primary result could be observed before fallback.
+      onDone: undefined,
     };
     try {
       const result = await this.invokeStream(first, input, guardedHandlers, deadline);
       this.markSuccess(firstRole);
+      await handlers.onDone?.(result);
       return result;
     } catch (error) {
       if (isHardProviderFailure(error)) await this.openCircuit(firstRole, error);
@@ -158,8 +167,9 @@ export class ModelClientService implements ModelClient {
       if (!fallback || !this.isClosed(fallbackRole!)) { await this.emitFastFail('fallback_unavailable'); throw error; }
       await this.emitFailover({ provider: firstRole, error, reason: 'stream_before_output' });
       try {
-        const result = await this.invokeStream(fallback, input, handlers, deadline);
+        const result = await this.invokeStream(fallback, input, guardedHandlers, deadline);
         this.markSuccess(fallbackRole!);
+        await handlers.onDone?.(result);
         return result;
       } catch (backupError) {
         if (isHardProviderFailure(backupError)) await this.openCircuit(fallbackRole!, backupError);
@@ -227,17 +237,25 @@ export class ModelClientService implements ModelClient {
 
   private async invokeComplete(client: ModelClient, input: ModelCompletionRequest, deadline: number): Promise<ModelCompletionResult> {
     const scoped = scopedRequest(input, deadline, this.now);
-    try { return await client.complete(scoped.request); } finally { scoped.dispose(); }
+    try {
+      const result = await client.complete(scoped.request);
+      validateFinalOutput(scoped.request, result);
+      return result;
+    } finally { scoped.dispose(); }
   }
 
   private async invokeStream(client: ModelClient, input: ModelCompletionRequest, handlers: ModelStreamHandlers, deadline: number): Promise<ModelCompletionResult> {
     const scoped = scopedRequest(input, deadline, this.now);
     try {
-      if (client.stream) return await client.stream(scoped.request, handlers);
+      if (client.stream) {
+        const result = await client.stream(scoped.request, handlers);
+        validateFinalOutput(scoped.request, result);
+        return result;
+      }
       const result = await client.complete(scoped.request);
       if (result.content) await handlers.onTextDelta?.(result.content);
       for (const call of result.toolCalls ?? []) await handlers.onToolCall?.(call);
-      await handlers.onDone?.(result);
+      validateFinalOutput(scoped.request, result);
       return result;
     } finally { scoped.dispose(); }
   }
@@ -302,9 +320,21 @@ export class ModelClientService implements ModelClient {
   private async emitFastFail(reason: string): Promise<void> { try { await this.onFastFail?.({ reason, snapshot: this.getRuntimeSnapshot() }); } catch { /* observability must not block routing */ } }
 }
 
-interface CircuitState { role: ModelProviderRole; state: ModelProviderCircuitState; failureCount: number; cooldownUntil?: number; nextProbeAt?: number; generation: number; backoffMs: number; lastTransitionReason?: string; probeInFlight: boolean; manualOnly?: boolean; lastErrorStatus?: number; lastProbeLatencyMs?: number; }
-function createCircuit(role: ModelProviderRole, generation: number): CircuitState { return { role, state: 'CLOSED', failureCount: 0, generation, backoffMs: INITIAL_COOLDOWN_MS, probeInFlight: false, manualOnly: false }; }
-function snapshotOf(circuit: CircuitState): ModelProviderCircuitSnapshot { return { role: circuit.role, state: circuit.state, failureCount: circuit.failureCount, cooldownUntil: circuit.cooldownUntil === undefined ? undefined : new Date(circuit.cooldownUntil).toISOString(), nextProbeAt: circuit.nextProbeAt === undefined ? undefined : new Date(circuit.nextProbeAt).toISOString(), generation: circuit.generation, lastTransitionReason: circuit.lastTransitionReason, manualOnly: circuit.manualOnly, backoffMs: circuit.backoffMs, lastErrorStatus: circuit.lastErrorStatus, lastProbeLatencyMs: circuit.lastProbeLatencyMs }; }
+interface CircuitState { role: ModelProviderRole; state: ModelProviderCircuitState; failureCount: number; cooldownUntil?: number; nextProbeAt?: number; generation: number; backoffMs: number; lastTransitionReason?: string; probeInFlight: boolean; manualOnly?: boolean; lastErrorStatus?: number; lastProbeLatencyMs?: number; constructionErrorCode?: string; }
+function createCircuit(role: ModelProviderRole, generation: number, constructionErrorCode?: string): CircuitState {
+  return {
+    role,
+    state: constructionErrorCode ? 'OPEN' : 'CLOSED',
+    failureCount: constructionErrorCode ? 1 : 0,
+    generation,
+    backoffMs: INITIAL_COOLDOWN_MS,
+    probeInFlight: false,
+    manualOnly: Boolean(constructionErrorCode),
+    lastTransitionReason: constructionErrorCode ? 'PROVIDER_CONSTRUCTION_FAILED' : undefined,
+    constructionErrorCode,
+  };
+}
+function snapshotOf(circuit: CircuitState): ModelProviderCircuitSnapshot { return { role: circuit.role, state: circuit.state, failureCount: circuit.failureCount, cooldownUntil: circuit.cooldownUntil === undefined ? undefined : new Date(circuit.cooldownUntil).toISOString(), nextProbeAt: circuit.nextProbeAt === undefined ? undefined : new Date(circuit.nextProbeAt).toISOString(), generation: circuit.generation, lastTransitionReason: circuit.lastTransitionReason, manualOnly: circuit.manualOnly, backoffMs: circuit.backoffMs, lastErrorStatus: circuit.lastErrorStatus, lastProbeLatencyMs: circuit.lastProbeLatencyMs, constructionErrorCode: circuit.constructionErrorCode }; }
 function isHardProviderFailure(error: unknown): boolean {
   if (!(error instanceof PiModelClientError)) return true;
   if (error.origin === 'agent_deadline') return false;
@@ -314,6 +344,15 @@ function isHardProviderFailure(error: unknown): boolean {
 }
 function errorCode(error: unknown): string { return error instanceof PiModelClientError ? `${error.code}${error.status ? `:${error.status}` : ''}` : error instanceof Error ? error.name : 'UNKNOWN_ERROR'; }
 function unavailableError(): PiModelClientError { return new PiModelClientError('MODEL_PROVIDER_UNAVAILABLE', 'model providers are temporarily unavailable'); }
+function validateFinalOutput(input: ModelCompletionRequest, result: ModelCompletionResult): void {
+  if (!input.validateFinalOutput || (result.toolCalls?.length ?? 0) > 0) return;
+  try {
+    input.validateFinalOutput(result);
+  } catch (error) {
+    if (error instanceof PiModelClientError) throw error;
+    throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model final output failed validation');
+  }
+}
 function scopedRequest(input: ModelCompletionRequest, deadline: number, now: () => number): { request: ModelCompletionRequest; dispose: () => void } {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort('agent_deadline'), Math.max(1, deadline - now()));

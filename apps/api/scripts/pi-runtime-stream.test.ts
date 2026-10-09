@@ -1453,7 +1453,7 @@ test('Responses streaming includes the structured-output contract in the request
   const result = await client.stream({ messages: [{ role: 'user', content: 'reply' }], structuredOutput }, {});
   const format = (((requestBody?.text as Record<string, unknown>).format) as Record<string, unknown>);
   assert.equal(requestBody?.stream, true);
-  assert.deepEqual(format, { type: 'json_schema', name: 'auto_reply_decision', strict: true, schema: structuredOutput.schema });
+  assert.deepEqual(format, { type: 'json_schema', name: 'auto_reply_decision', schema: structuredOutput.schema });
   assert.equal(result.content, '{"decision":"reply"}');
 });
 
