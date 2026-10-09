@@ -91,6 +91,8 @@ export interface ModelCompletionRequest {
   tools?: ModelToolDefinition[];
   toolChoice?: 'auto' | 'none' | { type: 'function'; function: { name: string } };
   structuredOutput?: ModelStructuredOutput;
+  /** Validate a no-tool final response before the router marks the attempt successful. */
+  validateFinalOutput?: (result: ModelCompletionResult) => void;
   /** Provider-declared reasoning level, when supported by the selected model. */
   reasoningEffort?: string;
   signal?: AbortSignal;
@@ -231,7 +233,7 @@ export class OpenAICompatibleModelClient implements ModelClient {
     if (!options.model.trim()) throw new Error('PI_RUNTIME_MODEL_REQUIRED');
     this.wireApi = normalizeWireApi(options.wireApi);
     this.responsesProvider = this.wireApi === 'responses' ? normalizeResponsesProvider(options.provider) : 'openai';
-    this.supportsWebSearch = this.wireApi === 'responses' && this.responsesProvider === 'openai';
+    this.supportsWebSearch = this.wireApi === 'responses' && ['openai', 'deepseek'].includes(this.responsesProvider);
     this.supportsStructuredOutput = this.wireApi === 'responses';
     this.endpoint = this.wireApi === 'responses' ? toResponsesEndpoint(options.baseUrl) : toChatCompletionsEndpoint(options.baseUrl);
     this.timeoutMs = positiveInteger(options.timeoutMs, DEFAULT_PI_TIMEOUT_MS);
@@ -1305,19 +1307,35 @@ export function loadPiRuntimeConfig(env: NodeJS.ProcessEnv = process.env): PiRun
 }
 
 export function createPiRuntimeAdapterFromEnv(store: Store, env: NodeJS.ProcessEnv = process.env): PiRuntimeAdapter | undefined {
-  const config = loadPiRuntimeConfig(env);
+  const config = loadPiRuntimeConfig(env) ?? loadBackupPiRuntimeConfig(env);
   const modelClient = createModelClientServiceFromEnv(env);
   if (!config || !modelClient) return undefined;
-  return new PiRuntimeAdapter(store, modelClient, { model: config.model, redactSecrets: [config.apiKey] });
+  const secrets = [loadPiRuntimeConfig(env)?.apiKey, loadBackupPiRuntimeConfig(env)?.apiKey].filter((value): value is string => Boolean(value));
+  return new PiRuntimeAdapter(store, modelClient, { model: config.model, redactSecrets: secrets });
 }
 
 export function createModelClientServiceFromEnv(env: NodeJS.ProcessEnv = process.env): ModelClientService | undefined {
   const primaryConfig = loadPiRuntimeConfig(env);
-  if (!primaryConfig) return undefined;
-  const primary = new OpenAICompatibleModelClient(primaryConfig);
   const backupConfig = loadBackupPiRuntimeConfig(env);
-  const backup = backupConfig ? new OpenAICompatibleModelClient(backupConfig) : undefined;
-  return new ModelClientService({ primary, backup });
+  if (!primaryConfig && !backupConfig) return undefined;
+  let primary: ModelClient | undefined;
+  let backup: ModelClient | undefined;
+  const constructionErrors: Partial<Record<'primary' | 'backup', string>> = {};
+  if (primaryConfig) {
+    try { primary = new OpenAICompatibleModelClient(primaryConfig); }
+    catch (error) { constructionErrors.primary = runtimeConstructionErrorCode(error); }
+  }
+  if (backupConfig) {
+    try { backup = new OpenAICompatibleModelClient(backupConfig); }
+    catch (error) { constructionErrors.backup = runtimeConstructionErrorCode(error); }
+  }
+  return new ModelClientService({ primary, backup, constructionErrors });
+}
+
+function runtimeConstructionErrorCode(error: unknown): string {
+  if (error instanceof PiModelClientError) return error.code;
+  if (error instanceof Error && /^[A-Z0-9_:-]{1,64}$/.test(error.name)) return error.name;
+  return 'MODEL_PROVIDER_RUNTIME_INIT_FAILED';
 }
 
 export function toChatCompletionsEndpoint(baseUrl: string): string {
@@ -1351,13 +1369,11 @@ function normalizeWireApi(value: string | undefined): ModelWireApi {
   return DEFAULT_PI_WIRE_API;
 }
 
-type ResponsesProvider = 'openai' | 'deepseek';
+type ResponsesProvider = string;
 
 function normalizeResponsesProvider(value: string | undefined): ResponsesProvider {
   const normalized = value?.trim().toLowerCase() || DEFAULT_PI_PROVIDER;
-  if (normalized === 'openai' || normalized === 'openai-compatible') return 'openai';
-  if (normalized === 'deepseek') return 'deepseek';
-  throw new PiModelClientError('MODEL_PROVIDER_UNSUPPORTED', `unsupported Responses provider: ${value ?? 'unknown'}`);
+  return normalized === 'openai-compatible' ? 'openai' : normalized;
 }
 
 function retryAfterMs(response: Response): number | undefined {
@@ -1421,13 +1437,12 @@ function toResponsesRequestBody(model: string, input: ModelCompletionRequest, re
   };
 }
 
-function toResponsesTextFormat(output: ModelStructuredOutput, provider: ResponsesProvider): Record<string, unknown> {
+function toResponsesTextFormat(output: ModelStructuredOutput, _provider: ResponsesProvider): Record<string, unknown> {
   const name = output.name.trim();
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'structured output schema name is invalid');
   return {
     type: 'json_schema',
     name,
-    ...(provider === 'openai' ? { strict: true } : {}),
     schema: output.schema,
   };
 }

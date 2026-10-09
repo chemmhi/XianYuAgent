@@ -2,7 +2,7 @@ import { Redis } from 'ioredis';
 import type { OpenAIResolvedConfig } from './openai-settings.js';
 import type { ModelProviderRoutingRecord } from './domain.js';
 import { ModelClientService, type ModelClientRuntimeSnapshot, type ModelProviderCircuitSnapshot, type ModelProviderRole } from './model-client.js';
-import type { ModelClient } from './pi-runtime.js';
+import { PiModelClientError, type ModelClient } from './pi-runtime.js';
 
 export interface ModelProviderRuntimePoolOptions {
   createClient: (config: OpenAIResolvedConfig) => Promise<ModelClient>;
@@ -52,12 +52,20 @@ export class ModelProviderRuntimePool {
     const existing = this.entries.get(key);
     let service: ModelClientService;
     if (!existing || existing.signature !== signature || existing.generation !== generation) {
-      const clients = await Promise.all(configs.map((item) => this.options.createClient(item)));
+      const creations = await Promise.allSettled(configs.map((item) => this.options.createClient(item)));
+      const clients = creations.map((result) => result.status === 'fulfilled' ? result.value : undefined);
+      const constructionErrors: Partial<Record<ModelProviderRole, string>> = {};
+      creations.forEach((result, index) => {
+        if (result.status !== 'rejected') return;
+        const role = configs[index]?.role;
+        if (role) constructionErrors[role] = constructionErrorCode(result.reason);
+      });
       const primaryIndex = configs.findIndex((item) => item.role === 'primary');
       const backupIndex = configs.findIndex((item) => item.role === 'backup');
       service = new ModelClientService({
         primary: primaryIndex >= 0 ? clients[primaryIndex] : undefined,
         backup: backupIndex >= 0 ? clients[backupIndex] : undefined,
+        constructionErrors,
         mode: input.mode,
         preferredRole: input.preferredRole,
         routingVersion: input.routingVersion,
@@ -257,6 +265,12 @@ export class ModelProviderRuntimePool {
       void this.options.onRedisDegraded?.({ error });
     }
   }
+}
+
+function constructionErrorCode(error: unknown): string {
+  if (error instanceof PiModelClientError) return error.code;
+  if (error instanceof Error && /^[A-Z0-9_:-]{1,64}$/.test(error.name)) return error.name;
+  return 'MODEL_PROVIDER_RUNTIME_INIT_FAILED';
 }
 
 export function providerStateLabel(state: ModelProviderCircuitSnapshot['state']): string { return state; }

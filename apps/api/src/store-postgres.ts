@@ -1361,7 +1361,7 @@ export class PostgresStore implements Store {
       this.listAutoReplyRunEvents(adminId, runId),
       this.getConversation(adminId, run.conversationId),
       this.pool.query('select * from messages.messages where id=$1 and conversation_id=$2 limit 1', [run.inboundMessageId, run.conversationId]),
-      this.pool.query(`select * from messages.messages where conversation_id=$1 and direction='outbound' and ($2::uuid is null or id=$2) order by created_at asc`, [run.conversationId, run.outboundMessageId ?? null]),
+      this.pool.query(`select * from messages.messages where conversation_id=$1 and direction='outbound' and $2::uuid is not null and id=$2 order by created_at asc`, [run.conversationId, run.outboundMessageId ?? null]),
       run.productId ? this.getProduct(adminId, run.productId) : Promise.resolve(undefined),
     ]);
     return { run, events, conversation, inboundMessage: inboundResult.rows[0] ? this.toMessage(inboundResult.rows[0]) : undefined, outboundMessages: outboundResult.rows.map((row) => this.toMessage(row)), product };

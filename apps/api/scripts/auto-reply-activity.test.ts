@@ -44,6 +44,24 @@ test('auto reply activity enforces account scope and date validation', async () 
   await assert.rejects(() => service.summary({ adminId: admin.id, accountId: account.id, from: '2026-09-22T00:00:00.000Z', to: '2026-09-21T00:00:00.000Z' }), /from must be before/);
 });
 
+test('failed run detail never projects historical outbound messages without an explicit link', async () => {
+  const store = new MemoryStore();
+  const admin = await store.createAdmin({ email: 'activity-projection@example.com', passwordHash: 'hash', displayName: 'Projection' });
+  const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'projection-seller' });
+  const conversation = await store.createConversation({ adminId: admin.id, accountId: account.id, buyerRef: 'buyer-projection', buyerDisplayName: '买家' });
+  const inbound = await store.createMessage({ adminId: admin.id, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '回答我啊', source: 'human' });
+  const historical = await store.createMessage({ adminId: admin.id, conversationId: conversation.id, direction: 'outbound', senderRole: 'agent', bodyType: 'text', bodyText: '历史回复', source: 'system' });
+  const failed = await store.createAutoReplyRun({ adminId: admin.id, accountId: account.id, conversationId: conversation.id, inboundMessageId: inbound.message.id, intent: 'general', decision: 'failed', status: 'failed', inputDigest: 'sha256:failed', failureCode: 'AGENT_INVALID_OUTPUT' });
+  const activity = new AutoReplyActivityService(store);
+  const failedDetail = await activity.detail({ adminId: admin.id, runId: failed.id });
+  assert.deepEqual(failedDetail.outboundMessages, []);
+
+  const linkedInbound = await store.createMessage({ adminId: admin.id, conversationId: conversation.id, direction: 'inbound', senderRole: 'buyer', bodyType: 'text', bodyText: '谢谢', source: 'human' });
+  const linkedRun = await store.createAutoReplyRun({ adminId: admin.id, accountId: account.id, conversationId: conversation.id, inboundMessageId: linkedInbound.message.id, intent: 'general', decision: 'replied', status: 'persisted', inputDigest: 'sha256:linked', outboundMessageId: historical.message.id });
+  const linkedDetail = await activity.detail({ adminId: admin.id, runId: linkedRun.id });
+  assert.deepEqual(linkedDetail.outboundMessages.map((message) => message.id), [historical.message.id]);
+});
+
 test('auto reply activity reads repair review and policy action fields', async () => {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: 'activity-review@example.com', passwordHash: 'hash', displayName: 'Activity Review' });

@@ -189,7 +189,10 @@ export class OpenAISettingsService {
     if (input.mode !== 'auto' && input.preferredRole !== (input.mode === 'manual_primary' ? 'primary' : 'backup')) throw new ServiceError(422, 'VALIDATION_FAILED', 'preferredRole must match routing mode');
     if (input.mode === 'auto' && input.preferredRole !== undefined) throw new ServiceError(422, 'VALIDATION_FAILED', 'preferredRole must be empty in auto mode');
     if (input.preferredRole) {
-      const configured = await this.resolveForRuntime(input.adminId, input.accountId);
+      // Routing configuration is metadata-only and must remain writable even
+      // when decrypting a provider secret or constructing its runtime client
+      // is temporarily unavailable.
+      const configured = await this.list({ adminId: input.adminId, accountId: input.accountId });
       const target = configured.find((item) => item.role === input.preferredRole && item.status === 'active');
       if (!target) throw new ServiceError(422, 'MODEL_PROVIDER_ROLE_NOT_CONFIGURED', `${input.preferredRole === 'primary' ? '主' : '备'} Provider 尚未配置或未启用`);
     }

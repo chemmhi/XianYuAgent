@@ -296,3 +296,11 @@
 3. openai-compatible 保留为历史兼容别名并按 OpenAI 语义处理；其他 Provider 明确 fail-closed，抛出 MODEL_PROVIDER_UNSUPPORTED。
 4. 自动回复 Agent 仅在 runtime client 声明 supportsStructuredOutput === true 时执行结构化响应；未声明能力的客户端直接拒绝，避免静默退回 prompt-only。
 5. 不加入灰度发布、总开关、fallback、JSON 修复重试、原始输出保存或 24 小时清理逻辑；Responses failed / incomplete / refusal 均按无效响应处理。
+
+### 2026-10-09 Responses structured output 最终修正
+
+1. Responses 的 `response_format` / `text.format` 使用 Provider-agnostic 的 `{ type: json_schema, name, schema }`；任意非空 Provider 仅作为元数据保留，不再因名称限制结构化输出。
+2. `web_search` 仍由 Responses 能力与现有自动回复 gate 共同决定；OpenAI / DeepSeek 保持可用，未知 Provider 不自动暴露该工具。
+3. 主备 Provider 独立构造；构造失败不阻断另一角色，最终无工具输出先做协议校验，主备都无效才映射 `AGENT_INVALID_OUTPUT`。
+4. 账号级模型运行时异常不再静默回退到环境变量；设置页优先回显已保存配置，并以白名单状态码标记 runtime degraded。
+5. 失败 Run 只有在存在明确 `outbound_message_id` 时才投影出站消息，前端不从历史消息推断本次回复。

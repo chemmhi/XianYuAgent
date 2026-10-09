@@ -9,6 +9,7 @@ import type { ModelClient, ModelCompletionResult, ModelMessage, ModelToolCall, M
 import type { AutoReplyGodViewSink } from './auto-reply-god-view.js';
 import { completeBufferedModel } from './auto-reply-model-transport.js';
 import { withAbort } from './auto-reply-timeout.js';
+import { PiModelClientError } from './pi-runtime.js';
 
 export const AUTO_REPLY_TOOL_NAMES = [
   'get_buyer_conversations',
@@ -176,7 +177,20 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
         payload: { loop, messages, tools, toolChoice: 'auto' },
       });
       try {
-        result = await completeBufferedModel(this.client, { messages, tools, toolChoice: 'auto', structuredOutput: AUTO_REPLY_STRUCTURED_OUTPUT, signal: input.signal, deadlineAt: input.deadlineAt, timeoutPhase: 'model_generation' });
+        result = await completeBufferedModel(this.client, {
+          messages,
+          tools,
+          toolChoice: 'auto',
+          structuredOutput: AUTO_REPLY_STRUCTURED_OUTPUT,
+          validateFinalOutput: (candidate) => {
+            if ((candidate.toolCalls?.length ?? 0) > 0) return;
+            const content = candidate.content?.trim();
+            if (!content || !parseAutoReplyModelDecision(content)) throw new PiModelClientError('MODEL_INVALID_RESPONSE', 'model final output failed Auto Reply schema validation');
+          },
+          signal: input.signal,
+          deadlineAt: input.deadlineAt,
+          timeoutPhase: 'model_generation',
+        });
       } catch (error) {
         await this.options.godView?.emit({
           phase: 'model',
@@ -192,6 +206,7 @@ export class ToolCallingAutoReplyAgent implements AutoReplyGenerator {
           log: { phase: 'model', state: 'failed', message: `第 ${loop} 轮模型调用失败`, loop, errorCode: safeErrorCode(error) },
           durationMs: Date.now() - modelStartedAt,
         });
+        if (error instanceof PiModelClientError && error.code === 'MODEL_INVALID_RESPONSE') throw new AutoReplyAgentError('AGENT_INVALID_OUTPUT', '模型未返回符合协议的 reply/handoff JSON');
         throw error;
       }
       const toolCalls = result.toolCalls ?? [];

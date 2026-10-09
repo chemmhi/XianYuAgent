@@ -8,6 +8,7 @@ import { formatAutoReplyContextDocument } from '../src/auto-reply-context-docume
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { OpenAICompatibleModelClient, type ModelClient, type ModelMessage } from '../src/pi-runtime.js';
+import { ModelClientService } from '../src/model-client.js';
 import { AUTO_REPLY_STRUCTURED_OUTPUT } from '../src/auto-reply-output.js';
 import type { Store } from '../src/domain.js';
 
@@ -545,6 +546,22 @@ test('Responses transport serializes built-in web_search and reports its use', a
 
 test('agent rejects unstructured final output instead of sending raw model text', async () => {
   const agent = new ToolCallingAutoReplyAgent({} as Store, { supportsStructuredOutput: true, complete: async () => ({ content: '可以的，我来帮你确认。', model: 'test' }) }, resolveAutoReplyAgentConfig({}));
+  await assert.rejects(() => agent.generate({ adminId: 'admin-1', context: context(), classification }), (error: unknown) => (error as { code?: string }).code === 'AGENT_INVALID_OUTPUT');
+});
+
+test('agent retries an invalid primary structured result on the backup provider', async () => {
+  const calls: string[] = [];
+  const primary: ModelClient = { supportsStructuredOutput: true, complete: async () => { calls.push('primary'); return { content: 'not-json', model: 'primary' }; } };
+  const backup: ModelClient = { supportsStructuredOutput: true, complete: async () => { calls.push('backup'); return { content: replyPayload('备用回复'), model: 'backup' }; } };
+  const agent = new ToolCallingAutoReplyAgent({} as Store, new ModelClientService({ primary, backup }), resolveAutoReplyAgentConfig({}));
+  const result = await agent.generate({ adminId: 'admin-1', context: context(), classification });
+  assert.deepEqual(result, { text: '备用回复', segments: undefined });
+  assert.deepEqual(calls, ['primary', 'backup']);
+});
+
+test('agent maps double invalid structured results to AGENT_INVALID_OUTPUT', async () => {
+  const invalid: ModelClient = { supportsStructuredOutput: true, complete: async () => ({ content: 'not-json', model: 'invalid' }) };
+  const agent = new ToolCallingAutoReplyAgent({} as Store, new ModelClientService({ primary: invalid, backup: invalid }), resolveAutoReplyAgentConfig({}));
   await assert.rejects(() => agent.generate({ adminId: 'admin-1', context: context(), classification }), (error: unknown) => (error as { code?: string }).code === 'AGENT_INVALID_OUTPUT');
 });
 

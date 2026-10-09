@@ -46,6 +46,7 @@ describe('agent dynamics API adapter', () => {
     expect(detail.timeline[0]?.details?.error).toEqual([{ label: '错误码', value: 'RESPONSES_API_TIMEOUT' }]);
     expect(detail.timeline[0]?.details?.log).toEqual(expect.arrayContaining([{ label: '工作状态', value: '失败' }, { label: '错误码', value: 'RESPONSES_API_TIMEOUT' }]));
     expect(detail.message).toBe('请问购买后怎么使用？');
+    expect(detail.reply).toBeUndefined();
   });
 
   it('keeps legacy events understandable without repeating status as fake output', async () => {

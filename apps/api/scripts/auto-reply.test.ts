@@ -206,7 +206,6 @@ test('configured model provider generates the persisted auto-reply', async () =>
     assert.deepEqual((calls[0]?.body.text as Record<string, unknown>).format, {
       type: 'json_schema',
       name: 'auto_reply_decision',
-      strict: true,
       schema: {
         type: 'object',
         additionalProperties: false,
