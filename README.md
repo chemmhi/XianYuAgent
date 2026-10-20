@@ -43,7 +43,9 @@ Stop the managed local dev process tree:
 npm run dev:stop
 ```
 
-默认情况下，Vite 会把 `/api` 请求代理到 `http://127.0.0.1:8080`；只有 API 不在默认端口时，才需要设置 `VITE_API_PROXY_TARGET` 或 `VITE_API_BASE_URL`。
+`npm run dev` 默认从 API 端口 `8080`、前端端口 `5173` 开始查找；端口被占用时逐个递增，保留占用端口的其他服务。终端会输出实际的 API 和前端地址，并自动同步前端 `/api`（含 WebSocket）代理和 API 的 WebSocket 允许来源，无需手动调整。
+
+可通过环境变量或根目录 `.env` 中的 `PORT`、`VITE_PORT` 修改起始端口；环境变量优先。端口必须为 `1–65535` 的整数，查找到 `65535` 仍无空闲端口时会明确报错。独立执行 `dev:api` / `dev:web` 时仍需自行通过 `PORT`、`VITE_API_PROXY_TARGET`（或 `VITE_API_BASE_URL`）匹配后端地址。
 
 需要单独观察 Worker 时：
 
@@ -51,7 +53,7 @@ npm run dev:stop
 npm run dev:worker
 ```
 
-默认地址：
+默认地址（被占用时以启动日志为准）：
 
 - 前端：`http://localhost:5173`
 - API：`http://localhost:8080`
@@ -69,6 +71,7 @@ npm run dev:web
 npm run typecheck
 npm run build
 npm test
+npm run test:dev-lifecycle
 npm run test:e2e:chrome
 npm run verify
 ```

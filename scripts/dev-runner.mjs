@@ -1,5 +1,6 @@
 import fs from 'node:fs';
-import { assertPortFree, removePidFile, spawnNpmScript, stopManagedRunner, terminateProcessTree, writePidFile } from './dev-lifecycle.mjs';
+import { removePidFile, spawnNpmScript, stopManagedRunner, terminateProcessTree, writePidFile } from './dev-lifecycle.mjs';
+import { createDevEnvironment, resolveDevPorts } from './dev-ports.mjs';
 
 const childScripts = ['dev:api', 'dev:worker', 'dev:web'];
 const children = [];
@@ -33,17 +34,23 @@ process.on('exit', () => {
 });
 
 await stopManagedRunner({ quiet: true });
+let ports;
 try {
-  await Promise.all([assertPortFree(8080), assertPortFree(5173)]);
+  const envFile = new URL('../.env', import.meta.url);
+  if (fs.existsSync(envFile)) process.loadEnvFile(envFile);
+  ports = await resolveDevPorts();
 } catch (error) {
   console.error(`[dev] ${error.message}`);
   process.exitCode = 1;
   process.exit();
 }
 writePidFile();
+const env = createDevEnvironment(ports);
+console.log(`[dev] API: http://127.0.0.1:${ports.apiPort}`);
+console.log(`[dev] Web: http://127.0.0.1:${ports.webPort}`);
 
 for (const scriptName of childScripts) {
-  const child = spawnNpmScript(scriptName);
+  const child = spawnNpmScript(scriptName, { env });
   children.push(child);
   child.once('error', () => {
     void shutdown(1);

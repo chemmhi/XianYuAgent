@@ -1,7 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
-import net from 'node:net';
 import path from 'node:path';
 
 export const projectRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -137,28 +136,15 @@ export async function stopManagedRunner({ quiet = false } = {}) {
   return { stopped: true, pid: record.pid, discoveredPids };
 }
 
-export function assertPortFree(port) {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once('error', (error) => {
-      server.close();
-      reject(new Error(`Port ${port} is already in use. Stop the owning process or run npm run dev:stop.`));
-    });
-    server.listen({ host: '127.0.0.1', port }, () => {
-      server.close(() => resolve());
-    });
-  });
-}
-
-export function spawnNpmScript(scriptName) {
+export function spawnNpmScript(scriptName, { env = {} } = {}) {
   const npmExecPath = process.env.npm_execpath;
   const command = npmExecPath ? process.execPath : process.platform === 'win32' ? 'npm.cmd' : 'npm';
   const args = npmExecPath ? [npmExecPath, 'run', scriptName] : ['run', scriptName];
   return spawn(command, args, {
     cwd: projectRoot,
-    env: { ...process.env },
+    env: { ...process.env, ...env },
     stdio: 'inherit',
-    windowsHide: false,
+    windowsHide: true,
     detached: process.platform !== 'win32',
   });
 }
