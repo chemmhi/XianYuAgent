@@ -2,7 +2,8 @@ import { readFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join, resolve, relative } from 'node:path';
 
 const root = resolve(process.argv[2]);
-const datasets = ['controlled-final', 'live-local', 'native-local', 'native-human', 'tencent-small/xianyu-slider-recording-20261023', 'tencent-browser-small/xianyu-slider-recording-20261023-browser', 'tencent-final/xianyu-slider-recording-20261023-endpoint'];
+const datasets = ['controlled-final', 'live-local', 'native-local', 'native-human', 'tencent-small/xianyu-slider-recording-20261023', 'tencent-browser-small/xianyu-slider-recording-20261023-browser', 'tencent-final/xianyu-slider-recording-20261023-endpoint',
+  'upstream-local', 'upstream-existing-challenge', 'xianyu-session-preflight-20261023'];
 const all = [];
 for (const dataset of datasets) {
   const directory = join(root, dataset);

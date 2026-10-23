@@ -49,3 +49,20 @@
 ## GitHub 对照
 
 已查阅并在本地包保存 `dengyie/xianyu-auto-bot`，SHA `dd31a5effc5090b3e7126734488d22f34d4955bb`。对照范围为首页/IM 预热、真实浏览器、末端动作、严格 x5sec 与 token 恢复；没有执行其完整应用或将它的 README 成功率当作本账号验证结果。来源：https://github.com/dengyie/xianyu-auto-bot 。另查阅 https://github.com/magician-Jackson/XianyuAutoAgent2 的 Cookie/token 双重校验逻辑。
+
+## 续查：Cookie 轮换丢失会话（实施前检查）
+
+- 22:48 腾讯云只读快照：凭证标记 expired，完整 Cookie 只剩三个字段；现有服务日志返回 SESSION_EXPIRED。只读采集另存 `artifacts/slider-recording/20261023-resume`，上一轮完整性封存不改动。
+- 生产候选缺陷位于 `XianyuMtopClient.call`：快照与原始 Cookie 不一致时赋值空数组，数组仍为真；响应轮换 `_m_h5_tk` 后，三项响应 Cookie 可替代完整 Cookie，删除 unb/cookie2/sgcookie。需要回归先失败验证，不能只凭代码阅读断言已定位服务器全部原因。
+- 对照 `dengyie/xianyu-auto-bot` 的 `protected_merge_cookie_dicts`（固定 SHA 如上）：在既有完整 Cookie 上合并增量并保护会话字段；不是以响应增量替换完整会话。另采集 pilot-pro 固定 SHA `4ac92222b4fce42439bc9d8ca8b026c5749333b9` 的续期源码供对照。
+- 边界：Cookie jar 增加清除过期快照元数据的操作；MTOP 失配时回退完整原始 Cookie，响应增量合并后持久化；不修改挑战算法、账号成功判定或生产部署。
+- 验证：覆盖响应直接成功和 TOKEN_EXPIRED 后重试两种轮换；断言请求及持久化保留会话字段、使用轮换 token、移除旧快照；执行已有 MTOP/Cookie/IM 回归与 API 编译。以上不是实际自动挑战通过证据。
+
+### 续查结果（仍在进行）
+
+- 两种 token 轮换回归在修复前均以 `persisted Cookie lost unb` 失败。真实 `CredentialService` 合并元数据的集成回归还发现仅删除快照字段无效，因此以 canonical JSON null 显式失效旧快照及旧别名；三项新增回归与已有相关测试共 36 项通过。API 编译、Cookie jar 和图片上传 Cookie 回归通过。
+- 腾讯云用人工介入前的原始服务器凭证完成了仅内存的 verifyLogin/fetchImToken 预检，均成功；没有调用持久化或账号状态回写。这不属于挑战通过证据，后续没有执行凭证恢复写入。
+- 根据用户澄清，唯一成功标准固定为代码实际通过真实挑战；Cookie 修复、token 或连接成功均排除。
+- Slidex 固定 SHA `66153dc573b954d35541445182c400c128e681e7` 的 `_slide_result.py` 明确将 300 判为 other-punish，停止重复拖动；对照模块包括 `_gestures.py`、`_drag.py`、`providers/aliyun.py`，不以 README 声称的成功率作为证据。
+- 新诊断工具仅调用该固定版本的纯轨迹模块生成计划，浏览器仍使用本项目 Patchright。随机种子、完整事件和接口输出均记录；单次动作上限为 1，关闭人工兜底，不写生产数据库。
+- 本轮打开官方聊天页未出现挑战；精确匹配归档 x5secdata 的旧挑战地址也未出现可操作滑块。两次均为 `no_live_challenge`，没有执行拖动，未记作成功。已询问是否存在仍有效的挑战页面，等待真实挑战供自动验证。
