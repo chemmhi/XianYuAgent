@@ -48,6 +48,17 @@ export function metadataWithCookieSnapshot(metadata: Record<string, string> | un
   return next;
 }
 
+/** Invalidate across merge-based stores while preserving unrelated metadata. */
+export function metadataWithoutCookieSnapshot(metadata: Record<string, string> | undefined): Record<string, string> {
+  const next = { ...(metadata ?? {}) };
+  // CredentialService merges metadata. A missing key would keep the stale
+  // persisted value; JSON null explicitly masks it and any legacy aliases.
+  next[XIANYU_COOKIE_SNAPSHOT_KEY] = 'null';
+  delete next[XIANYU_COOKIE_SNAPSHOT_LEGACY_KEY];
+  delete next[XIANYU_COOKIE_SNAPSHOT_CAMEL_KEY];
+  return next;
+}
+
 export function cookieHeaderForUrl(snapshot: XianyuCookieSnapshot | undefined, rawUrl: string, now = Date.now(), partitionKey?: string): string {
   if (!snapshot) return '';
   const target = parseUrl(rawUrl);
