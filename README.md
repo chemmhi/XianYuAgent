@@ -217,17 +217,19 @@ quarantine 清理验收：先确认 Worker 启动日志包含 `quarantineCleanup
 
 - `XIANYU_VERIFICATION_BROWSER_MODE=launch`：服务端按账号/会话启动持久化系统 Chrome；
 - `XIANYU_VERIFICATION_BROWSER_HEADLESS=false`：默认使用系统 Chrome 有头引擎；自动模式窗口移出屏幕，避免出现空白验证窗口；
-- `XIANYU_VERIFICATION_SLIDER_MODE=auto`：使用 Patchright 页面 API 和真实鼠标事件执行滑块轨迹；算法失败直接返回验证失败，不伪造成功；生产默认 `disabled`；
+- `XIANYU_VERIFICATION_SLIDER_MODE=auto`：使用 Patchright 页面 API 和鼠标事件执行滑块轨迹；达到重试上限后返回验证失败，不伪造成功；生产与开发 Compose 的 API 默认 `launch + auto`，显式 `.env` 值优先；未配置的直接 Node 启动和 `.env.example` 为 `disabled`；
 - `XIANYU_VERIFICATION_SLIDER_MAX_RETRIES=3`：单次验证最多自动尝试次数；
 - 验证完成后，服务端必须同时确认页面已离开验证态并拿到新的 `x5sec`，随后关闭浏览器上下文。
 
 滑块适配位于 `apps/api/src/xianyu-slider-trajectory.ts` 与 `apps/api/src/xianyu-slider-solver.ts`：
 
 1. 通过 Patchright locator 在主文档和 iframe 中发现验证码容器、滑块按钮和轨道；
-2. 按轨道宽度减去按钮宽度计算水平位移；
-3. 生成带加减速、二维抖动、超调、回弹和时间轴延迟的轨迹；
+2. 按轨道右边缘与按钮右边缘之差计算水平位移；
+3. 生成带加减速、轨道内二维抖动、末端微调和时间轴延迟的轨迹，不越过轨道右边缘；
 4. 通过 Patchright `page.mouse` 回放真实按下、移动、释放事件；
 5. 轮询成功/失败文本和页面 URL；失败时点击重试控件或刷新验证页；
-6. 任意自动尝试失败都返回验证错误，不伪造成功；只有新的 `x5sec` 且页面离开验证态才算通过。
+6. 达到自动重试上限后返回验证错误；只有新的 `x5sec` 且页面离开验证态才算通过，IM 还会重试 token 接口确认业务恢复。
 
 该实现不依赖裸 CDP，也不在服务端日志中输出业务 Cookie 或 Token；服务器部署时需要可执行的正式版 Chrome。验证上下文完成后立即关闭，持久化 profile 仅用于复用账号登录态。
+
+普通 `npm run dev` 继承环境配置，不强制启用滑块；`dev:api:verification` / `dev:worker:verification` 显式启用 `launch + auto`。Compose 的 API 通过 Xvfb 虚拟桌面运行有头 Chrome，并持久化 `/app/browser_data`。当前仅支持 `disabled|launch`，不支持 `connect` 或连接日常 Chrome；自动模式的 QR/IM 调用不会回退到可见人工窗口。失败后的人工恢复方式是在闲鱼页面完成验证，再回写最新完整 Cookie。完整说明见 [滑块验证说明](docs/17-xianyu-slider-solver.md)。
