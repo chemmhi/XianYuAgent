@@ -31,6 +31,8 @@ assert.equal(services.api?.depends_on?.redis?.condition, 'service_healthy');
 assert.equal(services.api?.depends_on?.['object-storage']?.condition, 'service_started');
 assert.equal(services.worker?.depends_on?.postgres?.condition, 'service_healthy');
 assert.equal(services.worker?.depends_on?.redis?.condition, 'service_healthy');
+assert.equal(services.worker?.environment?.XIANYU_IM_OWNER_URL, 'http://api:8080');
+assert.equal(services.worker?.environment?.CREDENTIAL_ENCRYPTION_KEY, services.api?.environment?.CREDENTIAL_ENCRYPTION_KEY);
 
 const dockerfile = await readFile(resolve(repoRoot, 'apps/api/Dockerfile'), 'utf8');
 assert.match(dockerfile, /COPY --from=build \/app\/dist \.\/dist/);

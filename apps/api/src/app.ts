@@ -16,6 +16,7 @@ import { XianyuMtopClient } from './xianyu-mtop.js';
 import { metadataWithCookieSnapshot } from './xianyu-cookie-jar.js';
 import { XianyuImService } from './xianyu-im-service.js';
 import { XianyuVerificationRecoveryBridge } from './xianyu-verification-recovery-bridge.js';
+import { IM_OWNER_RPC_PATH, XianyuImOwnerClient, XianyuImOwnerServer } from './xianyu-im-owner-rpc.js';
 import { MessageRealtimeHub, MessageService } from './messages.js';
 import { RedisConversationEventBridge } from './messages-realtime.js';
 import { decodeMessageHistoryCursor, encodeMessageHistoryCursor } from './message-history-cursor.js';
@@ -79,6 +80,7 @@ export interface AppRuntime {
   autoReplyActivity: AutoReplyActivityService;
   redisRealtime?: RedisConversationEventBridge;
   verificationRecoveryBridge?: XianyuVerificationRecoveryBridge;
+  imOwnerServer?: XianyuImOwnerServer;
   workspace: WorkspaceService;
   piSkills: PiSkillManager;
   workspaceCommands: WorkspaceCommandOrchestrator;
@@ -96,6 +98,7 @@ export interface AppRuntime {
 export interface CreateAppOptions {
   autoReplyAcknowledgementEvaluator?: AutoReplyAcknowledgementEvaluator;
   verificationRecoveryOwner?: boolean;
+  imOwnerUrl?: string;
 }
 
 export function createApp(config: AppConfig = loadConfig(), options: CreateAppOptions = {}): AppRuntime {
@@ -132,7 +135,10 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
   });
   let xianyu: XianyuMtopClient;
   let xianyuIm!: XianyuImService;
-  const verificationBrowser = config.xianyuVerificationBrowserMode === 'disabled' || options.verificationRecoveryOwner === false
+  const imOwnerClient = options.imOwnerUrl
+    ? new XianyuImOwnerClient(options.imOwnerUrl, config.credentialEncryptionKey, config.xianyuVerificationBrowserMaxWaitMs * 2 + 60_000)
+    : undefined;
+  const verificationBrowser = config.xianyuVerificationBrowserMode === 'disabled' || options.verificationRecoveryOwner === false || Boolean(imOwnerClient)
     ? undefined
     : new XianyuVerificationBrowser({
       mode: config.xianyuVerificationBrowserMode,
@@ -440,7 +446,8 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     if (!isTrustedPaidEvent(event)) return;
     await store.enqueuePaymentEvent({ adminId, accountId, eventRef: event.externalMessageRef, orderNo: extractTrustedOrderNo(event.raw), buyerRef: event.senderRef, itemRef: event.itemRef, conversationRef: event.externalConversationRef, receivedAt: trustedPaymentOccurredAt(event), observedAt: new Date().toISOString() });
     void paymentEventWorker.pollOnce().catch((error) => console.error(JSON.stringify({ component: 'payment-event-worker', event: 'wake_failed', accountId, error: error instanceof Error ? error.message : String(error) })));
-  }, async (adminId, accountId, source) => { await verificationRecoveryBridge?.publish({ adminId, accountId, source }); });
+  }, async (adminId, accountId, source) => { await verificationRecoveryBridge?.publish({ adminId, accountId, source }); }, imOwnerClient);
+  const imOwnerServer = imOwnerClient ? undefined : new XianyuImOwnerServer(config.credentialEncryptionKey, xianyuIm, store);
 
   const workspaceCommands = new WorkspaceCommandOrchestrator({
     store,
@@ -488,7 +495,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, orders, orderDelivery, products, productPublisher, productKnowledgeBase, productAutomation, productAutomationTrigger, productAutomationWorker, paymentEventWorker, productSync, credentials, apiKeyCredentials, openaiSettings, modelProviderRuntime, dashboard, messages, autoReply, autoReplyRepair, autoReplyAgentSettings, autoReplyActivity, redisRealtime, verificationRecoveryBridge, workspace, piSkills, workspaceCommands, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
+    config, store, auth, accounts, coupons, orders, orderDelivery, products, productPublisher, productKnowledgeBase, productAutomation, productAutomationTrigger, productAutomationWorker, paymentEventWorker, productSync, credentials, apiKeyCredentials, openaiSettings, modelProviderRuntime, dashboard, messages, autoReply, autoReplyRepair, autoReplyAgentSettings, autoReplyActivity, redisRealtime, verificationRecoveryBridge, imOwnerServer, workspace, piSkills, workspaceCommands, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
     server,
     async listen() {
       await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));
@@ -690,6 +697,11 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
   const ids = createIds();
   const ctx: RequestContext = { requestId: ids.requestId, traceId: ids.traceId, method, path: url.pathname, query: Object.fromEntries(url.searchParams.entries()), body: {}, headers: Object.fromEntries(Object.entries(request.headers).map(([key, value]) => [key.toLowerCase(), Array.isArray(value) ? value[0] : value])), cookies: parseCookies(request.headers.cookie) };
   try {
+    if (url.pathname === IM_OWNER_RPC_PATH) {
+      if (!runtime.imOwnerServer) { writeJson(response, 503, { ok: false, error: { code: 'XIANYU_IM_OWNER_UNAVAILABLE', statusCode: 503 } }); return; }
+      await runtime.imOwnerServer.handle(request, response);
+      return;
+    }
     if (method === 'OPTIONS') { response.statusCode = 204; response.end(); return; }
     if (method !== 'GET' && method !== 'HEAD') ctx.body = await readBody(request);
     const result = await dispatch(runtime, ctx, response);

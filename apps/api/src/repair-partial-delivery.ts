@@ -1,6 +1,6 @@
 import { PostgresStore } from './store-postgres.js';
-import { XianyuImClient } from './xianyu-im.js';
-import { confirmPartialDeliveryImage } from './xianyu-im-service.js';
+import { loadConfig } from './config.js';
+import { XianyuImOwnerClient } from './xianyu-im-owner-rpc.js';
 import { XianyuMtopClient } from './xianyu-mtop.js';
 import { XianyuProductAutomationExecutionAdapter } from './product-automation-xianyu.js';
 
@@ -10,7 +10,8 @@ async function main(): Promise<void> {
   const apply = process.argv.includes('--apply');
   if (!orderNo || !accountId || !process.env.DATABASE_URL) throw new Error('order-no, account-id and DATABASE_URL are required');
   const store = new PostgresStore(process.env.DATABASE_URL);
-  let im: XianyuImClient | undefined;
+  const config = loadConfig();
+  const im = new XianyuImOwnerClient(process.env.XIANYU_IM_OWNER_URL?.trim() || `http://127.0.0.1:${config.port}`, config.credentialEncryptionKey);
   try {
     const executionKey = `paid_auto_delivery:${accountId}:${orderNo}`;
     const reservation = await store.pool.query('select admin_id from coupons.coupon_reservations where account_id=$1 and execution_key=$2', [accountId, executionKey]);
@@ -36,14 +37,11 @@ async function main(): Promise<void> {
     const authoritative = await new XianyuProductAutomationExecutionAdapter(store, () => mtop, () => undefined).readOrder({ adminId, accountId, orderNo, productId: order.productId, itemId: order.itemId });
     if (!authoritative || authoritative.paymentStatus !== 'paid' || authoritative.orderStatus !== 'open'
       || authoritative.deliveryStatus !== 'pending' || authoritative.afterSalesStatus !== 'none') throw new Error('DELIVERY_RECOVERY_PLATFORM_ORDER_MISMATCH');
-    im = new XianyuImClient({ accountId, credential: { cookieHeader: credential.cookieHeader, accessToken: credential.accessToken, deviceId: credential.deviceId }, selfUserIds: [account.sellerRef, account.platformUserId].filter((id): id is string => Boolean(id)) });
-    await im.connect();
-    const history = await im.listMessages(conversation.externalConversationRef, undefined, 100);
-    if (!confirmPartialDeliveryImage(history.userMessageModels, im.selfUserIds, { externalMessageRef: imageRef, imageUrl, startedAt: new Date(step.created_at).toISOString() })) throw new Error('DELIVERY_RECOVERY_PLATFORM_HISTORY_MISMATCH');
+    if (!await im.call('verifyPartialDeliveryImage', [adminId, accountId, order.conversationId,
+      { externalMessageRef: imageRef, imageUrl, startedAt: new Date(step.created_at).toISOString() }])) throw new Error('DELIVERY_RECOVERY_PLATFORM_HISTORY_MISMATCH');
     if (apply) await store.resumeVerifiedPartialDelivery({ adminId, accountId, orderNo, executionKey, stepKey: String(step.step_key), externalMessageRef: imageRef });
     console.info(JSON.stringify({ orderNo, accountId, imageRef, platformOrderVerified: true, platformHistoryVerified: true, result: apply ? 'queued_missing_steps' : 'ready_to_resume' }));
   } finally {
-    await im?.disconnect();
     await store.close();
   }
 }

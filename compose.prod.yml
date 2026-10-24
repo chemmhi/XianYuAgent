@@ -86,6 +86,7 @@ services:
     env_file:
       - .env
     environment:
+      XIANYU_IM_OWNER_URL: http://api:8080
       DATABASE_URL: postgres://xianyu:${POSTGRES_PASSWORD}@postgres:5432/xianyu_agent
       REDIS_URL: redis://redis:6379
       OBJECT_STORAGE_ENDPOINT: http://object-storage:9000

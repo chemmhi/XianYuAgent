@@ -11,12 +11,26 @@ import type { ProductAutomationImEventResult, ProductAutomationTrigger } from '.
 import { InboundInboxWorker } from './inbound-inbox-worker.js';
 import { cookieHeaderFromSnapshot, cookieSnapshotFromMetadata, dropStaleCaptchaChallengeCookies, metadataWithCookieSnapshot, type XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
 import type { XianyuVerificationBrowser, XianyuVerificationBrowserResult } from './xianyu-verification-browser.js';
+import type { XianyuImOwnerClient } from './xianyu-im-owner-rpc.js';
 import { planXianyuChatRefresh } from './xianyu-chat-refresh-policy.js';
 import { refreshXianyuChatRequests } from './xianyu-chat-refresh.js';
 
 interface ExternalPage {
   hasMore: boolean;
   nextCursor?: number;
+}
+
+/** This attempt failed before any outbound message was submitted. */
+export class XianyuImSendNotStartedError extends ServiceError {
+  constructor(error: unknown) {
+    const code = error instanceof ServiceError ? error.code
+      : (error as { code?: string })?.code ?? (error instanceof Error && /^XIANYU_[A-Z0-9_]+$/.test(error.message) ? error.message : 'XIANYU_IM_NOT_READY');
+    super(error instanceof ServiceError ? error.statusCode : 503, code, 'IM send preparation failed');
+  }
+}
+
+async function prepareImSend<T>(work: () => Promise<T>): Promise<T> {
+  try { return await work(); } catch (error) { throw new XianyuImSendNotStartedError(error); }
 }
 
 export class XianyuImService {
@@ -48,6 +62,7 @@ export class XianyuImService {
     private readonly verificationBrowser?: XianyuVerificationBrowser,
     private readonly refreshOrdersForTrustedOrderEvent?: (input: { adminId: string; accountId: string; event: XianyuImMessageEvent }) => Promise<void>,
     private readonly notifyVerificationRequired?: (adminId: string, accountId: string, source: string) => Promise<void>,
+    private readonly ownerClient?: XianyuImOwnerClient,
   ) {
     this.inboundInboxWorker = new InboundInboxWorker(store, this, {
       workerId: `listener-fallback:${process.pid}:${randomUUID()}`,
@@ -58,6 +73,7 @@ export class XianyuImService {
   }
 
   async listConversations(adminId: string, accountId: string, startCursor?: number, limit = 50): Promise<ExternalPage> {
+    if (this.ownerClient) return this.ownerClient.call('listConversations', [adminId, accountId, startCursor, limit]);
     const client = await this.ensureClient(adminId, accountId);
     let cursor = startCursor;
     let hasMore = false;
@@ -91,6 +107,7 @@ export class XianyuImService {
   }
 
   async listMessages(adminId: string, accountId: string, conversationId: string, startCursor?: number, limit = 100): Promise<ExternalPage> {
+    if (this.ownerClient) return this.ownerClient.call('listMessages', [adminId, accountId, conversationId, startCursor, limit]);
     const conversation = await this.getConversation(adminId, accountId, conversationId);
     const externalRef = conversation.externalConversationRef;
     if (!externalRef) throw new ServiceError(409, 'EXTERNAL_CONVERSATION_MISSING', 'conversation is not linked to xianyu');
@@ -121,6 +138,7 @@ export class XianyuImService {
   }
 
   async markConversationRead(adminId: string, accountId: string, conversationId: string, requestId: string, traceId: string): Promise<unknown> {
+    if (this.ownerClient) return this.ownerClient.call('markConversationRead', [adminId, accountId, conversationId, requestId, traceId]);
     const conversation = await this.getConversation(adminId, accountId, conversationId);
     const externalRef = conversation.externalConversationRef;
     if (externalRef) {
@@ -142,16 +160,28 @@ export class XianyuImService {
   }
 
   async sendExternalText(adminId: string, accountId: string, conversationId: string, text: string, requestId: string, traceId: string): Promise<{ externalMessageRef?: string }> {
-    return this.store.withOutboundConversationLock(accountId, conversationId, () => this.sendExternalTextLocked(adminId, accountId, conversationId, text, requestId, traceId));
+    if (this.ownerClient) return this.ownerClient.call('sendExternalText', [adminId, accountId, conversationId, text, requestId, traceId]);
+    return this.withSendLock(accountId, conversationId, () => this.sendExternalTextLocked(adminId, accountId, conversationId, text, requestId, traceId));
+  }
+
+  private async withSendLock<T>(accountId: string, conversationId: string, work: () => Promise<T>): Promise<T> {
+    let entered = false;
+    try {
+      return await this.store.withOutboundConversationLock(accountId, conversationId, () => { entered = true; return work(); });
+    } catch (error) {
+      if (!entered) throw new XianyuImSendNotStartedError(error);
+      // A lock-release failure can follow a completed platform write.
+      throw error;
+    }
   }
 
   private async sendExternalTextLocked(adminId: string, accountId: string, conversationId: string, text: string, requestId: string, traceId: string): Promise<{ externalMessageRef?: string }> {
     const normalizedText = text.trim();
     if (!normalizedText) throw new ServiceError(422, 'VALIDATION_FAILED', 'text is required');
-    const conversation = await this.getConversation(adminId, accountId, conversationId);
+    const conversation = await prepareImSend(() => this.getConversation(adminId, accountId, conversationId));
     const externalRef = conversation.externalConversationRef;
-    if (!externalRef) throw new ServiceError(409, 'EXTERNAL_CONVERSATION_MISSING', 'conversation is not linked to xianyu');
-    let client = await this.ensureClient(adminId, accountId);
+    if (!externalRef) throw new XianyuImSendNotStartedError(new ServiceError(409, 'EXTERNAL_CONVERSATION_MISSING', 'conversation is not linked to xianyu'));
+    let client = await prepareImSend(() => this.ensureClient(adminId, accountId));
     const startedAt = new Date().toISOString();
     let sent: { externalMessageRef?: string };
     try {
@@ -180,9 +210,10 @@ export class XianyuImService {
   }
 
   async sendText(adminId: string, accountId: string, conversationId: string, text: string, requestId: string, traceId: string): Promise<unknown> {
+    if (this.ownerClient) return this.ownerClient.call('sendText', [adminId, accountId, conversationId, text, requestId, traceId]);
     const normalizedText = text.trim();
     if (!normalizedText) throw new ServiceError(422, 'VALIDATION_FAILED', 'text is required');
-    const conversation = await this.getConversation(adminId, accountId, conversationId);
+    const conversation = await prepareImSend(() => this.getConversation(adminId, accountId, conversationId));
     const sent = await this.sendExternalText(adminId, accountId, conversationId, normalizedText, requestId, traceId);
     const created = await this.messages.createMessage({
       adminId,
@@ -200,25 +231,29 @@ export class XianyuImService {
   }
 
   async sendImage(adminId: string, accountId: string, conversationId: string, file: { filename: string; contentType: string; data: Buffer }, requestId: string, traceId: string): Promise<unknown> {
+    if (this.ownerClient) return this.ownerClient.call('sendImage', [adminId, accountId, conversationId, file, requestId, traceId]);
     if (!file.data?.length) throw new ServiceError(422, 'VALIDATION_FAILED', 'image is required');
     if (!file.contentType.startsWith('image/')) throw new ServiceError(422, 'VALIDATION_FAILED', 'only image files are supported');
     if (file.data.length > 10 * 1024 * 1024) throw new ServiceError(413, 'PAYLOAD_TOO_LARGE', 'image must be 10MB or smaller');
-    const conversation = await this.getConversation(adminId, accountId, conversationId);
+    const conversation = await prepareImSend(() => this.getConversation(adminId, accountId, conversationId));
     const externalRef = conversation.externalConversationRef;
-    if (!externalRef) throw new ServiceError(409, 'EXTERNAL_CONVERSATION_MISSING', 'conversation is not linked to xianyu');
+    if (!externalRef) throw new XianyuImSendNotStartedError(new ServiceError(409, 'EXTERNAL_CONVERSATION_MISSING', 'conversation is not linked to xianyu'));
     // Image uploads use the MTOP/browser cookie session while text messages
     // use the already-connected IM socket. Wait for the account-scoped IM
     // session first so a background reconnect/token refresh cannot race the
     // upload and make it read a stale cookie snapshot.
-    await this.ensureClient(adminId, accountId);
-    const upload = await this.mtop.uploadChatImage(adminId, accountId, file.filename, file.contentType, file.data);
-    if (!upload.success || !upload.url) throw new ServiceError(upload.accountInvalid ? 401 : 502, upload.errorCode ?? 'IMAGE_UPLOAD_FAILED', upload.message ?? 'unable to upload image');
-    return this.store.withOutboundConversationLock(accountId, conversationId, () => this.sendUploadedImageLocked(adminId, accountId, conversationId, conversation, upload.url!, upload.width, upload.height, requestId, traceId));
+    const upload = await prepareImSend(async () => {
+      await this.ensureClient(adminId, accountId);
+      const result = await this.mtop.uploadChatImage(adminId, accountId, file.filename, file.contentType, file.data);
+      if (!result.success || !result.url) throw new ServiceError(result.accountInvalid ? 401 : 502, result.errorCode ?? 'IMAGE_UPLOAD_FAILED', result.message ?? 'unable to upload image');
+      return result;
+    });
+    return this.withSendLock(accountId, conversationId, () => this.sendUploadedImageLocked(adminId, accountId, conversationId, conversation, upload.url!, upload.width, upload.height, requestId, traceId));
   }
 
   private async sendUploadedImageLocked(adminId: string, accountId: string, conversationId: string, conversation: ConversationRecord, imageUrl: string, width: number | undefined, height: number | undefined, requestId: string, traceId: string): Promise<unknown> {
     const externalRef = conversation.externalConversationRef!;
-    const client = await this.ensureClient(adminId, accountId);
+    const client = await prepareImSend(() => this.ensureClient(adminId, accountId));
     const startedAt = new Date().toISOString();
     let sent: { externalMessageRef?: string };
     try {
@@ -287,6 +322,7 @@ export class XianyuImService {
    * credential becomes active without duplicating client construction.
    */
   async startListener(adminId: string, accountId: string): Promise<void> {
+    if (this.ownerClient) return this.ownerClient.call('startListener', [adminId, accountId]);
     // Register the keepalive before bootstrap so an active login is retried
     // even when the first socket/token exchange fails transiently.
     this.scheduleCredentialRefresh(adminId, accountId);
@@ -335,12 +371,23 @@ export class XianyuImService {
 
   /** Ensure the account-scoped socket is usable before an irreversible send. */
   async isReady(adminId: string, accountId: string): Promise<boolean> {
+    if (this.ownerClient) return this.ownerClient.call('isReady', [adminId, accountId]).catch(() => false);
     try {
       const client = await this.ensureClient(adminId, accountId);
       return client.connected;
     } catch {
       return false;
     }
+  }
+
+  async verifyPartialDeliveryImage(adminId: string, accountId: string, conversationId: string,
+    expected: { externalMessageRef: string; imageUrl: string; startedAt: string }): Promise<boolean> {
+    if (this.ownerClient) return this.ownerClient.call('verifyPartialDeliveryImage', [adminId, accountId, conversationId, expected]);
+    const conversation = await this.getConversation(adminId, accountId, conversationId);
+    if (!conversation.externalConversationRef) throw new ServiceError(409, 'EXTERNAL_CONVERSATION_MISSING', 'conversation is not linked to xianyu');
+    const client = await this.ensureClient(adminId, accountId);
+    const history = await client.listMessages(conversation.externalConversationRef, undefined, 100);
+    return confirmPartialDeliveryImage(history.userMessageModels, client.selfUserIds, expected);
   }
 
   /**
@@ -354,6 +401,7 @@ export class XianyuImService {
    * suppresses already-processed duplicates.
    */
   async recoverRecentMessages(adminId: string, accountId: string, options: { conversationLimit?: number; messageLimit?: number } = {}): Promise<{ conversationsScanned: number; imported: number; queued: number }> {
+    if (this.ownerClient) return this.ownerClient.call('recoverRecentMessages', [adminId, accountId, options]);
     const client = await this.ensureClient(adminId, accountId);
     const conversationLimit = Math.min(100, Math.max(1, Math.trunc(options.conversationLimit ?? 50)));
     const messageLimit = Math.min(100, Math.max(1, Math.trunc(options.messageLimit ?? 20)));
@@ -430,6 +478,7 @@ export class XianyuImService {
   }
 
   async resetClient(adminId: string, accountId: string): Promise<void> {
+    if (this.ownerClient) return this.ownerClient.call('resetClient', [adminId, accountId]);
     const key = `${adminId}:${accountId}`;
     const client = this.clients.get(key);
     if (!client) return;
@@ -445,6 +494,7 @@ export class XianyuImService {
   }
 
   private async ensureClient(adminId: string, accountId: string, options: { forceCredentialRefresh?: boolean } = {}): Promise<XianyuImClient> {
+    if (this.ownerClient) throw new ServiceError(503, 'XIANYU_IM_OWNER_REQUIRED', 'IM connections belong to the API process');
     const key = `${adminId}:${accountId}`;
     if (options.forceCredentialRefresh) {
       const existing = this.clients.get(key);

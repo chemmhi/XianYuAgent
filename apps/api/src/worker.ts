@@ -8,7 +8,8 @@ import { ProductAutomationReminderWorker } from './product-automation-reminder-w
 import { AccountRiskAlertWorker } from './account-risk-alert-worker.js';
 
 const config = loadConfig();
-const runtime = createApp(config, { verificationRecoveryOwner: false });
+const runtime = createApp(config, { verificationRecoveryOwner: false,
+  imOwnerUrl: process.env.XIANYU_IM_OWNER_URL?.trim() || `http://127.0.0.1:${config.port}` });
 const workerId = `inbound-inbox:${process.pid}:${crypto.randomUUID()}`;
 const quarantineCleanupEnabled = process.env.INBOUND_QUARANTINE_CLEANUP_ENABLED?.trim().toLowerCase() !== 'false';
 const quarantineCleanupPollMs = positiveNumber(process.env.INBOUND_QUARANTINE_CLEANUP_POLL_MS, 5 * 60 * 1_000);

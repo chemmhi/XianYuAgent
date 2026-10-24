@@ -50,6 +50,7 @@ services:
       DATABASE_URL: ${DATABASE_URL_DOCKER:-postgres://${POSTGRES_USER:-xianyu}:${POSTGRES_PASSWORD:-xianyu_dev_only}@postgres:5432/${POSTGRES_DB:-xianyu_agent}}
       REDIS_URL: ${REDIS_URL_DOCKER:-redis://redis:6379}
       COOKIE_SECURE: "false"
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       ALLOW_IN_MEMORY: "false"
       API_KEY: ${API_KEY:-}
       BASE_URL: ${BASE_URL:-https://api.openai.com/v1}
@@ -101,6 +102,8 @@ services:
       context: ./apps/api
     init: true
     environment:
+      XIANYU_IM_OWNER_URL: http://api:8080
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL_DOCKER:-postgres://${POSTGRES_USER:-xianyu}:${POSTGRES_PASSWORD:-xianyu_dev_only}@postgres:5432/${POSTGRES_DB:-xianyu_agent}}
       REDIS_URL: ${REDIS_URL_DOCKER:-redis://redis:6379}

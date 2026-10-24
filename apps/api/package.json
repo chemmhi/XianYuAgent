@@ -25,6 +25,8 @@
     "test:messages:infra": "npm run build && node scripts/messages-infra-smoke.mjs",
     "test:xianyu-chat-refresh": "node --import tsx --test scripts/xianyu-chat-refresh.test.ts scripts/xianyu-chat-refresh-integration.test.ts scripts/xianyu-chat-refresh-concurrency.test.ts",
     "test:xianyu-im-gateway": "node --import tsx --test scripts/xianyu-im-gateway.test.ts",
+    "test:xianyu-im-owner": "node --import tsx --test scripts/xianyu-im-owner-rpc.test.ts",
+    "test:xianyu-im-owner:postgres": "node --import tsx --test scripts/xianyu-im-owner-process.test.ts",
     "test:xianyu-im-credentials": "node --import tsx --test scripts/xianyu-im-credential.test.ts scripts/xianyu-im-native-recovery.test.ts scripts/xianyu-browser-im-recovery.test.ts",
     "test:xianyu-verification-recovery": "node --import tsx --test scripts/xianyu-verification-recovery.test.ts scripts/xianyu-listener-startup.test.ts",
     "probe:xianyu-im-gateway": "npm run build && node scripts/xianyu-im-gateway-probe.mjs",
