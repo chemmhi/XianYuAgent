@@ -234,6 +234,14 @@ export class XianyuImClient {
     await this.reconnectWithFreshToken();
   }
 
+  /** Use renewed credentials on the next connection without interrupting a healthy socket. */
+  updateCredential(credential: XianyuImCredential): void {
+    if (!credential.cookieHeader || !credential.accessToken || credential.deviceId !== this.deviceId) {
+      throw new Error('XIANYU_IM_CREDENTIAL_MISMATCH');
+    }
+    this.credential = { ...credential };
+  }
+
   async listConversations(startCursor?: number, limit = 20): Promise<XianyuImConversationPage> {
     const start = startCursor ?? Number.MAX_SAFE_INTEGER;
     const response = await this.sendLwp('/r/Conversation/listNewestPagination', [start, clampLimit(limit)], { retryAfterReconnect: false, preserveConnectionOnRejection: true });

@@ -1,5 +1,6 @@
 import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, AutoReplyProductLookup, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponAssetRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponItemRecord, CouponReservationItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, DeliveryRecord, DeliveryRecordStatus, DeliveryStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ModelProviderRoutingRecord, ModelProviderRoutingMode, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductKnowledgeBaseMessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
+import type { CredentialRefreshUpdate } from './domain.js';
 import { projectAutoReplyRun } from './auto-reply-activity-projection.js';
 import { createId, digestJson } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor, isAfterConversationCursor } from './conversation-cursor.js';
@@ -1673,6 +1674,20 @@ export class MemoryStore implements Store {
         };
     this.credentials.set(input.accountId, credential);
     return credential;
+  }
+  async commitCredentialRefresh(input: CredentialRefreshUpdate): Promise<CredentialRecord | undefined> {
+    if (!(await this.hasAccountScope(input.adminId, input.accountId))) return undefined;
+    // No await between the comparison and mutation: this is an atomic CAS in memory.
+    const current = this.credentials.get(input.accountId);
+    const expected = input.expected;
+    if (!current || this.accounts.get(input.accountId)?.status === 'disabled' || current.status !== 'active'
+      || (current.expiresAt && Date.parse(current.expiresAt) <= Date.now())
+      || current.id !== expected.id || current.cookieHeader !== expected.cookieHeader || current.accessToken !== expected.accessToken
+      || current.deviceId !== expected.deviceId || current.updatedAt !== expected.updatedAt || current.expiresAt !== expected.expiresAt
+      || JSON.stringify(current.metadata) !== JSON.stringify(expected.metadata)) return undefined;
+    Object.assign(current, { cookieHeader: input.cookieHeader, accessToken: input.accessToken, deviceId: input.deviceId,
+      metadata: input.metadata, updatedAt: new Date().toISOString() });
+    return current;
   }
   async revokeCredential(adminId: string, accountId: string): Promise<CredentialRecord | undefined> {
     const credential = await this.getCredential(adminId, accountId);

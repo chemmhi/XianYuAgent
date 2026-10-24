@@ -101,7 +101,7 @@ test('failed verification keeps credentials and a new signal retries after the s
     assert.equal((await f.store.getAccount('admin-1', f.account.id))?.status, 'verification_required');
     t.mock.timers.tick(30_001);
     await f.settled();
-    assert.equal(f.browserCalls(), 2, 'must not wait for the normal ten-minute refresh');
+    assert.equal(f.browserCalls(), 2, 'must not wait for scheduled session maintenance');
   } finally { await f.service.close(); }
 });
 

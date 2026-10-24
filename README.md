@@ -213,6 +213,8 @@ quarantine 清理验收：先确认 Worker 启动日志包含 `quarantineCleanup
 
 真实闲鱼二维码模式由 `XIANYU_QR_MODE=real` 控制；未设置或设置为其他值时，后端默认仍采用真实模式，自动化测试会显式使用 `stub`。
 
+聊天会话保活通过纯 HTTP 顺序调用登录身份检查与 IM token 接口，按北京时间随机调度：09:00–21:00 每 25–45 分钟，07:00–09:00 / 21:00–24:00 每 45–90 分钟，00:00–07:00 每 90–180 分钟。跨时段边界只重新计划，不在整点强制请求。健康 WebSocket 不重连，自动回复和消息接收继续运行；旧 `XIANYU_CREDENTIAL_REFRESH_INTERVAL_MS` 已废弃。验证命令：`npm --workspace apps/api run test:xianyu-chat-refresh`。
+
 二维码或 IM 遇到风控验证时，可启用 Patchright 驱动的系统 Chrome：
 
 - `XIANYU_VERIFICATION_BROWSER_MODE=launch`：服务端按账号/会话启动持久化系统 Chrome；
