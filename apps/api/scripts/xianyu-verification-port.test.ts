@@ -140,6 +140,25 @@ test('verification core runs against a browser port without importing Patchright
   }
 });
 
+test('verification forwards partitioned token cookies and protected session attributes', async () => {
+  const factory = new FakeFactory();
+  const userDataDir = await mkdtemp(join(tmpdir(), 'xianyu-verification-cookie-scope-'));
+  const initial: XianyuBrowserCookie[] = [
+    { name: '_m_h5_tk', value: 'partitioned-token', domain: '.goofish.com', path: '/', secure: true, sameSite: 'None', partitionKey: 'https://goofish.com' },
+    { name: 'cookie2', value: 'protected-session', domain: '.goofish.com', path: '/', secure: true, httpOnly: true, sameSite: 'None' },
+  ];
+  try {
+    const browser = new XianyuVerificationBrowser({ mode: 'launch', sliderMode: 'disabled', headless: true,
+      userDataDir, maxWaitMs: 4000, pollIntervalMs: 25, browserFactory: factory });
+    const result = await browser.waitForCompletion({ verificationUrl: 'http://127.0.0.1:19191/punish',
+      profileKey: 'scope-account', initialCookieSnapshot: initial });
+    for (const cookie of initial) {
+      assert.deepEqual(factory.context.cookiesState.find(actual => actual.name === cookie.name), cookie);
+      assert.deepEqual(result.cookieSnapshot.find(actual => actual.name === cookie.name), cookie);
+    }
+  } finally { await rm(userDataDir, { recursive: true, force: true }); }
+});
+
 test('same persistent profile deduplicates identical verification across browser instances', async () => {
   const factory = new TrackingFactory();
   const userDataDir = await mkdtemp(join(tmpdir(), 'xianyu-verification-profile-lock-test-'));

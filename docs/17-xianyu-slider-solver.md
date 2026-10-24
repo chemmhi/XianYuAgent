@@ -10,6 +10,8 @@
 - `patchright-verification-browser.ts`：唯一浏览器库适配器，懒加载 Patchright，启动正式版系统 Chrome 的持久化上下文；不连接日常浏览器，不要求开放 CDP 端口。
 - QR/IM 服务：提供挑战 URL 与 Cookie，成功后合并并保存新凭证；IM 随后重新调用 token 接口确认恢复。
 
+Cookie 快照需保留域、路径、HttpOnly、Secure、SameSite 和分区键 `partitionKey`。字符串 Cookie 头不包含这些属性，不能作为完整浏览器状态；IM 合并同一 Cookie 的值更新时保留已有属性，轮换值不继承旧值的过期时间，浏览器注入传递分区键。这些状态修复不代表真实挑战已经通过。
+
 ## 当前流程
 
 ```text

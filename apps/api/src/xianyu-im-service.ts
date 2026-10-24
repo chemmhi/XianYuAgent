@@ -1123,7 +1123,17 @@ function isValidationTextSendError(error: unknown): boolean {
 function mergeCookieSnapshots(base: XianyuCookieSnapshot | undefined, updates: XianyuCookieSnapshot): XianyuCookieSnapshot {
   const byIdentity = new Map<string, XianyuCookieSnapshot[number]>();
   for (const cookie of base ?? []) byIdentity.set(cookieIdentity(cookie), cookie);
-  for (const cookie of updates) byIdentity.set(cookieIdentity(cookie), cookie);
+  for (const cookie of updates) {
+    const identity = cookieIdentity(cookie);
+    // Flat response headers update values without describing browser flags.
+    // Keep known scope/security attributes unless an update supplies them.
+    const previous = byIdentity.get(identity);
+    const merged = { ...previous, ...cookie };
+    // A rotated value with no supplied expiry has an unknown lifetime; an old
+    // token's expiry must not make Chrome immediately discard its replacement.
+    if (previous?.value !== cookie.value && cookie.expires === undefined) delete merged.expires;
+    byIdentity.set(identity, merged);
+  }
   return [...byIdentity.values()];
 }
 
