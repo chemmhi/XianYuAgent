@@ -27,6 +27,10 @@ export class XianyuImService {
   private readonly credentialRefreshTimers = new Map<string, ReturnType<typeof setInterval>>();
   private readonly transportHeartbeatTimers = new Map<string, ReturnType<typeof setInterval>>();
   private readonly credentialRefreshInFlight = new Map<string, Promise<void>>();
+  private readonly tokenRefreshInFlight = new Map<string, Promise<CredentialRecord>>();
+  private readonly verificationRecoveryInFlight = new Map<string, Promise<void>>();
+  private readonly verificationRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private closed = false;
   private readonly identityCache = new Map<string, { buyerDisplayName?: string; buyerAvatarUrl?: string }>();
   private readonly inboundInboxWorker: InboundInboxWorker;
   private inboundInboxWakeInFlight?: Promise<void>;
@@ -40,6 +44,7 @@ export class XianyuImService {
     private readonly productAutomation?: ProductAutomationTrigger,
     private readonly verificationBrowser?: XianyuVerificationBrowser,
     private readonly refreshOrdersForTrustedOrderEvent?: (input: { adminId: string; accountId: string; event: XianyuImMessageEvent }) => Promise<void>,
+    private readonly notifyVerificationRequired?: (adminId: string, accountId: string, source: string) => Promise<void>,
   ) {
     this.inboundInboxWorker = new InboundInboxWorker(store, this, {
       workerId: `listener-fallback:${process.pid}:${randomUUID()}`,
@@ -157,15 +162,8 @@ export class XianyuImService {
       }
       if (!isRecoverableTextSendError(error)) throw error;
       await this.resetClient(adminId, accountId);
-      if (isValidationTextSendError(error)) {
-        const account = await this.store.getAccount(adminId, accountId);
-        const credential = await this.store.getCredential(adminId, accountId);
-        if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found');
-        if (!credential?.cookieHeader) throw new ServiceError(409, 'CREDENTIAL_MISSING', 'account credential is missing');
-        // A cached IM access token can survive the browser slider challenge.
-        // Force a fresh MTOP token before constructing the replacement client.
-        await this.refreshCredential(adminId, account, credential);
-      }
+      // Refresh once inside bootstrap: a cached token can survive a rejected
+      // send, but a second token request can immediately issue another challenge.
       client = await this.ensureClient(adminId, accountId, { forceCredentialRefresh: isValidationTextSendError(error) });
       sent = await this.withAccountFailure(adminId, accountId, () => client.sendText(externalRef, conversation.buyerRef, normalizedText, requestId));
     }
@@ -250,11 +248,15 @@ export class XianyuImService {
   }
 
   async close(): Promise<void> {
+    this.closed = true;
     await this.inboundInboxWakeInFlight;
     for (const timer of this.credentialRefreshTimers.values()) clearInterval(timer);
     this.credentialRefreshTimers.clear();
     for (const timer of this.transportHeartbeatTimers.values()) clearInterval(timer);
     this.transportHeartbeatTimers.clear();
+    for (const timer of this.verificationRecoveryTimers.values()) clearTimeout(timer);
+    this.verificationRecoveryTimers.clear();
+    await Promise.allSettled([...this.verificationRecoveryInFlight.values(), ...this.tokenRefreshInFlight.values()]);
     this.credentialRefreshInFlight.clear();
     const inFlight = [...this.clientInFlight.values()];
     this.clientInFlight.clear();
@@ -286,7 +288,46 @@ export class XianyuImService {
     // even when the first socket/token exchange fails transiently.
     this.scheduleCredentialRefresh(adminId, accountId);
     const client = await this.ensureClient(adminId, accountId);
+    this.requestVerificationRecovery(adminId, accountId, 'listener_start');
     if (client) this.scheduleRecentMessageRecovery(adminId, accountId);
+  }
+
+  /** Wake recovery after a committed risk signal without blocking its request. */
+  requestVerificationRecovery(adminId: string, accountId: string, source: string): void {
+    const key = `${adminId}:${accountId}`;
+    if (this.closed || !this.verificationBrowser?.enabled || this.verificationRecoveryInFlight.has(key)) return;
+    const retryInMs = (this.verificationRetryAfter.get(key) ?? 0) - Date.now();
+    if (retryInMs > 0) {
+      if (!this.verificationRecoveryTimers.has(key)) {
+        const timer = setTimeout(() => {
+          this.verificationRecoveryTimers.delete(key);
+          this.requestVerificationRecovery(adminId, accountId, source);
+        }, retryInMs);
+        timer.unref?.();
+        this.verificationRecoveryTimers.set(key, timer);
+      }
+      return;
+    }
+    const pendingTimer = this.verificationRecoveryTimers.get(key);
+    if (pendingTimer) clearTimeout(pendingTimer);
+    this.verificationRecoveryTimers.delete(key);
+    const task = Promise.resolve().then(async () => {
+      // A bootstrap failure callback must never wait on its own connection.
+      await Promise.allSettled([this.clientInFlight.get(key), this.tokenRefreshInFlight.get(key), this.credentialRefreshInFlight.get(key)]);
+      if (this.closed || (this.verificationRetryAfter.get(key) ?? 0) > Date.now()) return;
+      const account = await this.store.getAccount(adminId, accountId);
+      if (!account || account.status === 'disabled' || (!account.riskEpisode && account.status !== 'verification_required')) return;
+      const credential = await this.store.getCredential(adminId, accountId);
+      if (this.closed || credential?.status !== 'active' || !credential.cookieHeader) return;
+      console.info(JSON.stringify({ component: 'xianyu-im', event: 'verification_recovery_started', adminId, accountId, source }));
+      await this.refreshActiveCredential(adminId, accountId, { forceCredentialRefresh: true });
+      console.info(JSON.stringify({ component: 'xianyu-im', event: 'verification_recovery_completed', adminId, accountId, source }));
+    }).catch(error => {
+      console.warn(JSON.stringify({ component: 'xianyu-im', event: 'verification_recovery_failed', adminId, accountId, errorCode: recoveryErrorCode(error) }));
+    }).finally(() => {
+      if (this.verificationRecoveryInFlight.get(key) === task) this.verificationRecoveryInFlight.delete(key);
+    });
+    this.verificationRecoveryInFlight.set(key, task);
   }
 
   /** Ensure the account-scoped socket is usable before an irreversible send. */
@@ -406,6 +447,7 @@ export class XianyuImService {
       const existing = this.clients.get(key);
       if (existing) {
         this.clients.delete(key);
+        this.stopTransportHeartbeat(key);
         await existing.disconnect().catch(() => undefined);
       }
     }
@@ -429,7 +471,10 @@ export class XianyuImService {
         if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found');
         let credential = await this.store.getCredential(adminId, accountId);
         if (!credential?.cookieHeader) throw new ServiceError(409, 'CREDENTIAL_MISSING', 'account credential is missing');
-        if (!credential.accessToken) credential = await this.refreshCredential(adminId, account, credential);
+        if (!credential.accessToken || options.forceCredentialRefresh
+          || (this.verificationBrowser?.enabled && account.status === 'verification_required')) {
+          credential = await this.refreshCredential(adminId, account, credential);
+        }
         let connectionAttemptStartedAt = new Date().toISOString();
         const client = new XianyuImClient({
           accountId,
@@ -490,7 +535,18 @@ export class XianyuImService {
     }
   }
 
-  private async refreshCredential(adminId: string, account: AccountRecord, credential: CredentialRecord): Promise<CredentialRecord> {
+  private refreshCredential(adminId: string, account: AccountRecord, credential: CredentialRecord): Promise<CredentialRecord> {
+    const key = `${adminId}:${account.id}`;
+    const existing = this.tokenRefreshInFlight.get(key);
+    if (existing) return existing;
+    const task = Promise.resolve().then(() => this.refreshCredentialInternal(adminId, account, credential)).finally(() => {
+      if (this.tokenRefreshInFlight.get(key) === task) this.tokenRefreshInFlight.delete(key);
+    });
+    this.tokenRefreshInFlight.set(key, task);
+    return task;
+  }
+
+  private async refreshCredentialInternal(adminId: string, account: AccountRecord, credential: CredentialRecord): Promise<CredentialRecord> {
     const deviceId = credential.deviceId ?? `xianyu-${account.id}`;
     let token = await this.mtop.fetchImToken(adminId, account.id, deviceId);
     if (!token.success || !token.accessToken) {
@@ -607,14 +663,14 @@ export class XianyuImService {
     this.credentialRefreshTimers.set(key, timer);
   }
 
-  private async refreshActiveCredential(adminId: string, accountId: string): Promise<void> {
+  private async refreshActiveCredential(adminId: string, accountId: string, options: { forceCredentialRefresh?: boolean } = {}): Promise<void> {
     const key = `${adminId}:${accountId}`;
     const existing = this.credentialRefreshInFlight.get(key);
     if (existing) return existing;
     const task = (async () => {
       const client = this.clients.get(key);
       if (!client || !client.connected) {
-        await this.ensureClient(adminId, accountId);
+        await this.ensureClient(adminId, accountId, options);
         return;
       }
       await client.refreshSession();
@@ -633,6 +689,8 @@ export class XianyuImService {
       const classification = classifyXianyuFailure({ errorCode: normalizedCode });
       if (classification.kind === 'verification_required') {
         await this.store.recordAccountRisk({ adminId, accountId, code: normalizedCode.slice(0, 120), source });
+        this.requestVerificationRecovery(adminId, accountId, source);
+        await this.notifyVerificationRequired?.(adminId, accountId, source);
         return;
       }
       const status = classification.accountStatus!;

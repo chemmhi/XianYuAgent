@@ -8,7 +8,7 @@ import { ProductAutomationReminderWorker } from './product-automation-reminder-w
 import { AccountRiskAlertWorker } from './account-risk-alert-worker.js';
 
 const config = loadConfig();
-const runtime = createApp(config);
+const runtime = createApp(config, { verificationRecoveryOwner: false });
 const workerId = `inbound-inbox:${process.pid}:${crypto.randomUUID()}`;
 const quarantineCleanupEnabled = process.env.INBOUND_QUARANTINE_CLEANUP_ENABLED?.trim().toLowerCase() !== 'false';
 const quarantineCleanupPollMs = positiveNumber(process.env.INBOUND_QUARANTINE_CLEANUP_POLL_MS, 5 * 60 * 1_000);
@@ -71,6 +71,7 @@ const shutdown = (signal: string) => {
     await runtime.modelProviderRuntime.close();
     await runtime.xianyuIm.close();
     await runtime.redisRealtime?.close();
+    await runtime.verificationRecoveryBridge?.close();
     const close = (runtime.store as typeof runtime.store & { close?: () => Promise<void> }).close;
     if (close) await close.call(runtime.store);
     console.log(`worker received ${signal}, exiting`);

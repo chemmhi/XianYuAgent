@@ -15,6 +15,7 @@ import { XianyuVerificationBrowser } from './xianyu-verification-browser.js';
 import { XianyuMtopClient } from './xianyu-mtop.js';
 import { metadataWithCookieSnapshot } from './xianyu-cookie-jar.js';
 import { XianyuImService } from './xianyu-im-service.js';
+import { XianyuVerificationRecoveryBridge } from './xianyu-verification-recovery-bridge.js';
 import { MessageRealtimeHub, MessageService } from './messages.js';
 import { RedisConversationEventBridge } from './messages-realtime.js';
 import { decodeMessageHistoryCursor, encodeMessageHistoryCursor } from './message-history-cursor.js';
@@ -77,6 +78,7 @@ export interface AppRuntime {
   autoReplyAgentSettings: AutoReplyAgentSettingsService;
   autoReplyActivity: AutoReplyActivityService;
   redisRealtime?: RedisConversationEventBridge;
+  verificationRecoveryBridge?: XianyuVerificationRecoveryBridge;
   workspace: WorkspaceService;
   piSkills: PiSkillManager;
   workspaceCommands: WorkspaceCommandOrchestrator;
@@ -93,6 +95,7 @@ export interface AppRuntime {
 
 export interface CreateAppOptions {
   autoReplyAcknowledgementEvaluator?: AutoReplyAcknowledgementEvaluator;
+  verificationRecoveryOwner?: boolean;
 }
 
 export function createApp(config: AppConfig = loadConfig(), options: CreateAppOptions = {}): AppRuntime {
@@ -129,7 +132,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
   });
   let xianyu: XianyuMtopClient;
   let xianyuIm!: XianyuImService;
-  const verificationBrowser = config.xianyuVerificationBrowserMode === 'disabled'
+  const verificationBrowser = config.xianyuVerificationBrowserMode === 'disabled' || options.verificationRecoveryOwner === false
     ? undefined
     : new XianyuVerificationBrowser({
       mode: config.xianyuVerificationBrowserMode,
@@ -140,6 +143,10 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
       userDataDir: config.xianyuVerificationBrowserUserDataDir,
       maxWaitMs: config.xianyuVerificationBrowserMaxWaitMs,
     });
+  const verificationRecoveryBridge = config.redisUrl && !config.allowInMemory
+    ? new XianyuVerificationRecoveryBridge(config.redisUrl, ({ adminId, accountId, source }) => xianyuIm.requestVerificationRecovery(adminId, accountId, source))
+    : undefined;
+  verificationRecoveryBridge?.startPublisher();
   const productAutomationExecution = new XianyuProductAutomationExecutionAdapter(store, () => xianyu, () => xianyuIm, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'system', actorId: input.adminId, action: input.action, targetRef: input.orderNo ?? input.executionKey, requestId: `automation:${input.executionKey ?? auditId}`, traceId: `automation:${input.executionKey ?? auditId}`, payloadDigest: digestJson(input.payload ?? {}), accountId: input.accountId, createdAt: new Date().toISOString() });
@@ -368,6 +375,10 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     onFailure: async ({ adminId, accountId, api, errorCode, message, accountInvalid }) => {
       console.warn(JSON.stringify({ component: 'xianyu-mtop', event: 'external_failure', adminId, accountId, api, errorCode, accountInvalid, message: message?.slice(0, 160) }));
       await markXianyuAccountFailure(store, adminId, accountId, { errorCode, message, accountInvalid, source: api });
+      if (classifyXianyuFailure({ errorCode, message, accountInvalid }).kind === 'verification_required') {
+        xianyuIm.requestVerificationRecovery(adminId, accountId, api);
+        await verificationRecoveryBridge?.publish({ adminId, accountId, source: api });
+      }
     },
     onSuccess: async ({ adminId, accountId, api, startedAt }) => {
       const account = await store.getAccount(adminId, accountId);
@@ -429,7 +440,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     if (!isTrustedPaidEvent(event)) return;
     await store.enqueuePaymentEvent({ adminId, accountId, eventRef: event.externalMessageRef, orderNo: extractTrustedOrderNo(event.raw), buyerRef: event.senderRef, itemRef: event.itemRef, conversationRef: event.externalConversationRef, receivedAt: trustedPaymentOccurredAt(event), observedAt: new Date().toISOString() });
     void paymentEventWorker.pollOnce().catch((error) => console.error(JSON.stringify({ component: 'payment-event-worker', event: 'wake_failed', accountId, error: error instanceof Error ? error.message : String(error) })));
-  });
+  }, async (adminId, accountId, source) => { await verificationRecoveryBridge?.publish({ adminId, accountId, source }); });
 
   const workspaceCommands = new WorkspaceCommandOrchestrator({
     store,
@@ -477,10 +488,11 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, orders, orderDelivery, products, productPublisher, productKnowledgeBase, productAutomation, productAutomationTrigger, productAutomationWorker, paymentEventWorker, productSync, credentials, apiKeyCredentials, openaiSettings, modelProviderRuntime, dashboard, messages, autoReply, autoReplyRepair, autoReplyAgentSettings, autoReplyActivity, redisRealtime, workspace, piSkills, workspaceCommands, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
+    config, store, auth, accounts, coupons, orders, orderDelivery, products, productPublisher, productKnowledgeBase, productAutomation, productAutomationTrigger, productAutomationWorker, paymentEventWorker, productSync, credentials, apiKeyCredentials, openaiSettings, modelProviderRuntime, dashboard, messages, autoReply, autoReplyRepair, autoReplyAgentSettings, autoReplyActivity, redisRealtime, verificationRecoveryBridge, workspace, piSkills, workspaceCommands, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
     server,
     async listen() {
       await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));
+      if (verificationBrowser?.enabled) verificationRecoveryBridge?.startConsumer(() => startAllRecoverableListenersBestEffort(runtime));
       await bootstrapRepairPoliciesBestEffort(runtime);
       if (config.xianyuQrMode === 'real') void startAllRecoverableListenersBestEffort(runtime);
     },
@@ -491,6 +503,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
       await modelProviderRuntime.close();
       await closeHttpServer(runtime.server);
       await redisRealtime?.close();
+      await verificationRecoveryBridge?.close();
       await xianyuIm.close();
       const close = (store as Store & { close?: () => Promise<void> }).close;
       if (close) await close.call(store);

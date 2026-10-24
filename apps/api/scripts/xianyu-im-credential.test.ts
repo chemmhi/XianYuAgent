@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { XianyuImService } from '../src/xianyu-im-service.js';
 import { ServiceError } from '../src/services.js';
+import { XianyuImClient } from '../src/xianyu-im.js';
 
 describe('xianyu IM credential refresh', () => {
   it('preserves the browser cookie snapshot while saving refreshed IM credentials', async () => {
@@ -339,33 +340,41 @@ describe('xianyu IM credential refresh', () => {
       updateAccount: async () => undefined,
       recordAccountRisk: async () => undefined,
       clearAccountDegraded: async () => undefined,
+      setAccountTransport: async () => undefined,
+      upsertCredential: async (input: Record<string, unknown>) => input,
     };
-    const service = new XianyuImService(store as never, {} as never, {} as never);
+    const service = new XianyuImService(store as never, { fetchImToken: async () => {
+      refreshCalls += 1;
+      return { success: true, accessToken: 'access-2', cookieHeader: 'unb=seller-1; _m_h5_tk=token-2' };
+    } } as never, {} as never);
     const staleClient = {
       sendText: async () => { throw new Error('FAIL_SYS_USER_VALIDATE'); },
       disconnect: async () => { disconnectCalls += 1; },
     };
-    const freshClient = {
-      sendText: async (_conversationRef: string, _recipientRef: string, _text: string, requestId: string) => {
-        sentRequestIds.push(requestId);
-        return { externalMessageRef: 'fresh-message' };
-      },
-      disconnect: async () => undefined,
-    };
     const internal = service as unknown as {
       clients: Map<string, unknown>;
-      ensureClient: (adminId: string, accountId: string, options?: { forceCredentialRefresh?: boolean }) => Promise<unknown>;
-      refreshCredential: (...args: unknown[]) => Promise<unknown>;
     };
     internal.clients.set('admin-1:account-1', staleClient);
-    internal.ensureClient = async (_adminId, _accountId, options) => options?.forceCredentialRefresh ? freshClient : staleClient;
-    internal.refreshCredential = async () => { refreshCalls += 1; return { cookieHeader: 'unb=seller-1', accessToken: 'access-2', deviceId: 'device-1' }; };
-
-    const result = await service.sendExternalText('admin-1', 'account-1', 'conversation-1', '你好', 'request-1', 'trace-1');
-
-    assert.deepEqual(result, { externalMessageRef: 'fresh-message' });
-    assert.equal(refreshCalls, 1);
-    assert.equal(disconnectCalls, 1);
-    assert.deepEqual(sentRequestIds, ['request-1']);
+    const connect = XianyuImClient.prototype.connect;
+    const sendText = XianyuImClient.prototype.sendText;
+    XianyuImClient.prototype.connect = async () => undefined;
+    XianyuImClient.prototype.sendText = async function (_conversationRef, _recipientRef, _text, requestId) {
+      assert.equal((this as unknown as { credential: { accessToken: string } }).credential.accessToken, 'access-2');
+      sentRequestIds.push(String(requestId));
+      return { externalMessageRef: 'fresh-message' };
+    };
+    // The cached client's first call rejects; replacement uses real ensureClient.
+    (staleClient as typeof staleClient & { connect: () => Promise<void> }).connect = async () => undefined;
+    try {
+      const result = await service.sendExternalText('admin-1', 'account-1', 'conversation-1', '你好', 'request-1', 'trace-1');
+      assert.deepEqual(result, { externalMessageRef: 'fresh-message' });
+      assert.equal(refreshCalls, 1);
+      assert.equal(disconnectCalls, 1);
+      assert.deepEqual(sentRequestIds, ['request-1']);
+    } finally {
+      XianyuImClient.prototype.connect = connect;
+      XianyuImClient.prototype.sendText = sendText;
+      await service.close();
+    }
   });
 });

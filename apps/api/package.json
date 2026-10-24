@@ -25,6 +25,7 @@
     "test:messages:infra": "npm run build && node scripts/messages-infra-smoke.mjs",
     "test:xianyu-im-gateway": "node --import tsx --test scripts/xianyu-im-gateway.test.ts",
     "test:xianyu-im-credentials": "node --import tsx --test scripts/xianyu-im-credential.test.ts scripts/xianyu-im-native-recovery.test.ts scripts/xianyu-browser-im-recovery.test.ts",
+    "test:xianyu-verification-recovery": "node --import tsx --test scripts/xianyu-verification-recovery.test.ts scripts/xianyu-listener-startup.test.ts",
     "probe:xianyu-im-gateway": "npm run build && node scripts/xianyu-im-gateway-probe.mjs",
     "probe:xianyu-im-gateway:db": "npm run build && node scripts/xianyu-im-gateway-db-probe.mjs",
     "test:pi:live": "npm run build && node scripts/pi-runtime-live-smoke.mjs",
