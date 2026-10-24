@@ -1,0 +1,74 @@
+{
+  "checkedAt": "2026-10-24T04:59:51.294Z",
+  "sourceManifestSha256": "17895d8e1b3c5094e6e4ceb61e4c7353812e49e9708b6c377a807630d0ed74af",
+  "manifestEntries": 3291,
+  "recordedGaps": 112,
+  "checks": [
+    {
+      "path": "final-checkpoint.json",
+      "bytes": 735,
+      "sha256": "6af0fdab285790d162dbbc45963f0a381c2e9f64cf27c3f39500966999e73903",
+      "matchesManifest": true
+    },
+    {
+      "path": "same-browser-ticket-check/account-verdict.json",
+      "bytes": 89,
+      "sha256": "bfb4239fa2bafdf6e16b1d44403fb8a2876f24e5f9fc356633564ef3e3e961d0",
+      "matchesManifest": true
+    },
+    {
+      "path": "same-browser-ticket-check/account-check-token.json",
+      "bytes": 2110,
+      "sha256": "03a5e51446ee5b80e1ec3991d1e6fe2fdaf06840a59a59f2d6c7b651ea0e9cf0",
+      "matchesManifest": true
+    },
+    {
+      "path": "same-browser-ticket-check/account-check-login.json",
+      "bytes": 1793,
+      "sha256": "38ffde49675125649d63e18cfab079c6f7340ffc19eaa4a27439df8142aca48e",
+      "matchesManifest": true
+    },
+    {
+      "path": "server-existing-client-readonly.stdout.log",
+      "bytes": 35402,
+      "sha256": "01b9f634ac6eb042fcc222e4b808b9f472f1e6e602494cd41491e078454bf54e",
+      "matchesManifest": true
+    },
+    {
+      "path": "production-readonly-comparison.json",
+      "bytes": 391,
+      "sha256": "1aedf3a7c2f86a23201748add44cdc40e81f17063e59b392f797ee0f0470d728",
+      "matchesManifest": true
+    },
+    {
+      "path": "production-close.json",
+      "bytes": 3536,
+      "sha256": "2de423e41959490f22a06db70b9ef0060ff3d1c6766d96d735ff62138c3897a3",
+      "matchesManifest": true
+    },
+    {
+      "path": "capture-gaps.json",
+      "bytes": 102660,
+      "sha256": "05a4824df5e1089242b6d9ac613645b6273cb75975e36925cd405a70bbdafb3a",
+      "matchesManifest": true
+    },
+    {
+      "path": "interface-inventory.json",
+      "bytes": 57557,
+      "sha256": "6b66b0d28d8fa79152df4e6981eef6469940359256cf60f3f66bf4bf87b38b9b",
+      "matchesManifest": true
+    },
+    {
+      "path": "request-response-index.ndjson",
+      "bytes": 10239350,
+      "sha256": "085380b458d40187177d2ddcb827c296383adf25d4cf804265a52ce96c2ac0ea",
+      "matchesManifest": true
+    },
+    {
+      "path": "runtime-archive-references.json",
+      "bytes": 397,
+      "sha256": "7fef2845bfde4e60aaafd23557259cd2ca4d01a184ff079292c9e6bdca511709",
+      "matchesManifest": true
+    }
+  ]
+}

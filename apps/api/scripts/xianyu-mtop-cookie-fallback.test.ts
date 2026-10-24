@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { XianyuMtopClient } from '../src/xianyu-mtop.js';
+import { CredentialService } from '../src/services.js';
+import { MemoryStore } from '../src/store-memory.js';
+import { cookieSnapshotFromMetadata } from '../src/xianyu-cookie-jar.js';
 
 test('risk persistence failure is surfaced instead of returning a stale healthy account result', async () => {
   const originalFetch = globalThis.fetch;
@@ -170,4 +173,87 @@ test('reports final MTOP validation failures to the account health callback', as
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+for (const retryTokenRotation of [false, true]) {
+  test(`retains complete session cookies when a mismatched snapshot receives token rotation (retry=${retryTokenRotation})`, async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: string[] = [];
+    const saved: Array<{ cookieHeader: string; metadata?: Record<string, string> }> = [];
+    let current = {
+      cookieHeader: '_m_h5_tk=fresh_1; _m_h5_tk_enc=fresh_enc; unb=seller-1; cookie2=session-cookie; sgcookie=session-signature; x5sec=fresh-ticket',
+      metadata: { loginMethod: 'cookie', cookies_refresh_snapshot: JSON.stringify([
+        { name: '_m_h5_tk', value: 'stale_1', domain: '.goofish.com', path: '/' },
+        { name: 'unb', value: 'seller-1', domain: '.goofish.com', path: '/' },
+        { name: 'x5sec', value: 'stale-ticket', domain: '.goofish.com', path: '/' },
+      ]) } as Record<string, string>,
+    };
+    globalThis.fetch = async (_input, init) => {
+      requests.push(String((init?.headers as Record<string, string>)?.cookie ?? ''));
+      const rotate = requests.length === 1;
+      const headers = new Headers({ 'content-type': 'application/json' });
+      if (rotate) {
+        headers.append('set-cookie', '_m_h5_tk=rotated_2; Domain=.goofish.com; Path=/; Secure');
+        headers.append('set-cookie', '_m_h5_tk_enc=rotated_enc; Domain=.goofish.com; Path=/; Secure');
+        headers.append('set-cookie', 'mtop_partitioned_detect=1; Path=/; Secure');
+      }
+      return new Response(JSON.stringify({
+        ret: [rotate && retryTokenRotation ? 'FAIL_SYS_TOKEN_EXPIRED::令牌过期' : 'SUCCESS::调用成功'],
+        data: { accessToken: 'rotated-im-token' },
+      }), { headers });
+    };
+    try {
+      const client = new XianyuMtopClient({
+        loadCredential: async () => current,
+        saveCookie: async (_adminId, _accountId, cookieHeader, metadata) => {
+          saved.push({ cookieHeader, metadata });
+          current = { cookieHeader, metadata: metadata ?? {} };
+        },
+      });
+      assert.equal((await client.fetchImToken('admin-1', 'account-1', 'device-1')).success, true);
+      assert.equal(saved.length > 0, true);
+      for (const write of saved) {
+        for (const pair of ['unb=seller-1', 'cookie2=session-cookie', 'sgcookie=session-signature', 'x5sec=fresh-ticket', '_m_h5_tk=rotated_2']) {
+          assert.ok(write.cookieHeader.split('; ').includes(pair), `persisted Cookie lost ${pair.split('=')[0]}`);
+        }
+        assert.equal(write.metadata?.loginMethod, 'cookie');
+        assert.doesNotMatch(JSON.stringify(write.metadata), /stale-ticket|stale_1/);
+      }
+      // A subsequent request must use the complete persisted session too.
+      assert.equal((await client.fetchImToken('admin-1', 'account-1', 'device-1')).success, true);
+      for (const header of requests.slice(1)) {
+        assert.match(header, /unb=seller-1/);
+        assert.match(header, /cookie2=session-cookie/);
+        assert.match(header, /sgcookie=session-signature/);
+        assert.match(header, /_m_h5_tk=rotated_2/);
+        assert.doesNotMatch(header, /stale-ticket|stale_1/);
+      }
+    } finally { globalThis.fetch = originalFetch; }
+  });
+}
+
+test('invalidates a mismatched snapshot through the real merge-based credential service', async () => {
+  const originalFetch = globalThis.fetch;
+  const store = new MemoryStore();
+  const account = await store.createAccount({ adminId: 'admin-1', platform: 'xianyu', sellerRef: 'seller-1' });
+  const credentials = new CredentialService(store, async () => 'audit-1');
+  const stale = JSON.stringify([{ name: '_m_h5_tk', value: 'stale_1', domain: '.goofish.com', path: '/' }]);
+  await credentials.save({ adminId: 'admin-1', accountId: account.id, cookieHeader: '_m_h5_tk=fresh_1; unb=seller-1; cookie2=session-cookie',
+    metadata: { loginMethod: 'cookie', cookies_refresh_snapshot: stale, cookie_refresh_snapshot: stale, cookieSnapshot: stale }, requestId: 'setup', traceId: 'setup' });
+  globalThis.fetch = async () => new Response(JSON.stringify({ ret: ['SUCCESS::调用成功'], data: { accessToken: 'im-token' } }), {
+    headers: { 'content-type': 'application/json', 'set-cookie': '_m_h5_tk=rotated_2; Domain=.goofish.com; Path=/' },
+  });
+  try {
+    const client = new XianyuMtopClient({
+      loadCredential: (adminId, accountId) => store.getCredential(adminId, accountId),
+      saveCookie: async (adminId, accountId, cookieHeader, metadata) => {
+        await credentials.save({ adminId, accountId, cookieHeader, metadata, requestId: 'mtop', traceId: 'mtop' });
+      },
+    });
+    assert.equal((await client.fetchImToken('admin-1', account.id, 'device-1')).success, true);
+    const persisted = await store.getCredential('admin-1', account.id);
+    assert.match(persisted?.cookieHeader ?? '', /unb=seller-1; cookie2=session-cookie/);
+    assert.equal(persisted?.metadata?.loginMethod, 'cookie');
+    assert.equal(cookieSnapshotFromMetadata(persisted?.metadata), undefined);
+  } finally { globalThis.fetch = originalFetch; }
 });

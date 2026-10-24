@@ -53,7 +53,8 @@ describe('xianyu IM credential refresh', () => {
         metadata: {
           cookies_refresh_snapshot: JSON.stringify([
             { name: 'unb', value: 'seller-1', domain: '.goofish.com', path: '/' },
-            { name: '_m_h5_tk', value: 'token-1_suffix', domain: '.goofish.com', path: '/' },
+            { name: 'cookie2', value: 'session', domain: '.goofish.com', path: '/', httpOnly: true, secure: true, sameSite: 'None' },
+            { name: '_m_h5_tk', value: 'token-1_suffix', domain: '.goofish.com', path: '/', expires: 1, secure: true, sameSite: 'None' },
             { name: 'x5secdata', value: 'challenge', domain: '.goofish.com', path: '/' },
           ]),
         },
@@ -66,6 +67,10 @@ describe('xianyu IM credential refresh', () => {
       waitForCompletion: async (input: { verificationUrl: string; initialCookieSnapshot?: unknown[] }) => {
         assert.equal(input.verificationUrl, 'https://punish.goofish.com/verify?token=redacted');
         assert.equal(input.initialCookieSnapshot?.some((cookie) => (cookie as { name?: string }).name === 'x5secdata'), true);
+        assert.deepEqual(input.initialCookieSnapshot?.find(cookie => (cookie as { name?: string }).name === 'cookie2'),
+          { name: 'cookie2', value: 'session', domain: '.goofish.com', path: '/', httpOnly: true, secure: true, sameSite: 'None' });
+        assert.deepEqual(input.initialCookieSnapshot?.find(cookie => (cookie as { name?: string }).name === '_m_h5_tk'),
+          { name: '_m_h5_tk', value: 'token-rotated_suffix', domain: '.goofish.com', path: '/', secure: true, sameSite: 'None' });
         return {
           finalUrl: 'https://www.goofish.com/im',
           cookieSnapshot: [
@@ -81,7 +86,7 @@ describe('xianyu IM credential refresh', () => {
       fetchImToken: async () => {
         fetchCount += 1;
         return fetchCount === 1
-          ? { success: false, accountInvalid: true, errorCode: 'ACCOUNT_VALIDATION_REQUIRED', message: 'FAIL_SYS_USER_VALIDATE', verificationUrl: 'https://punish.goofish.com/verify?token=redacted', cookieHeader: 'unb=seller-1; _m_h5_tk=token-1_suffix; x5secdata=challenge' }
+          ? { success: false, accountInvalid: true, errorCode: 'ACCOUNT_VALIDATION_REQUIRED', message: 'FAIL_SYS_USER_VALIDATE', verificationUrl: 'https://punish.goofish.com/verify?token=redacted', cookieHeader: 'unb=seller-1; cookie2=session; _m_h5_tk=token-rotated_suffix; x5secdata=challenge' }
           : { success: true, accountInvalid: false, accessToken: 'access-2', cookieHeader: 'unb=seller-1; _m_h5_tk=token-2_suffix; x5sec=passed' };
       },
     } as never, {} as never, undefined, undefined, verificationBrowser as never);

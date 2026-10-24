@@ -10,6 +10,7 @@ import {
   cookieHeaderFromSnapshot,
   cookieSnapshotFromMetadata,
   metadataWithCookieSnapshot,
+  metadataWithoutCookieSnapshot,
   setCookieValues,
   XIANYU_TOP_SITE,
   type XianyuCookieSnapshot,
@@ -482,7 +483,14 @@ export class XianyuMtopClient {
     // A manually refreshed raw Cookie is authoritative. Once it diverges from
     // the persisted browser snapshot, discard the stale snapshot for the whole
     // request so a response Set-Cookie cannot rehydrate old validation tokens.
-    if (cookieSnapshot && !cookieHeadersMatch(cookieSnapshot, cookieHeader)) cookieSnapshot = [];
+    // An empty array is still an active jar: rotating _m_h5_tk would replace
+    // the complete session with only the response cookies. Disable jar mode
+    // and merge response deltas into the authoritative flat header instead.
+    let requestMetadata = initialMetadata;
+    if (cookieSnapshot && !cookieHeadersMatch(cookieSnapshot, cookieHeader)) {
+      cookieSnapshot = undefined;
+      requestMetadata = metadataWithoutCookieSnapshot(initialMetadata);
+    }
     const dataValue = JSON.stringify(data);
     let lastError = 'MTOP_REQUEST_FAILED';
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -552,8 +560,8 @@ export class XianyuMtopClient {
         } else if (setCookies.length > 0) {
           cookieHeader = mergeCookies(cookieHeader, setCookies);
         }
-        const nextMetadata = cookieSnapshot ? metadataWithCookieSnapshot(initialMetadata, cookieSnapshot) : initialMetadata;
-        if (cookieHeader !== initialCookieHeader || (cookieSnapshot && JSON.stringify(nextMetadata) !== JSON.stringify(initialMetadata))) await this.saveCookie(adminId, accountId, cookieHeader, nextMetadata);
+        const nextMetadata = cookieSnapshot ? metadataWithCookieSnapshot(requestMetadata, cookieSnapshot) : requestMetadata;
+        if (cookieHeader !== initialCookieHeader || JSON.stringify(nextMetadata) !== JSON.stringify(initialMetadata)) await this.saveCookie(adminId, accountId, cookieHeader, nextMetadata);
         const payload = await response.json() as Record<string, unknown>;
         const ret = Array.isArray(payload.ret) ? payload.ret.map(String) : [];
         const retMessage = ret[0] ?? '';
