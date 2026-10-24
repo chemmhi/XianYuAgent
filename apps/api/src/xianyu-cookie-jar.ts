@@ -14,6 +14,8 @@ export interface XianyuBrowserCookie {
   secure?: boolean;
   sameSite?: string;
   partitionKey?: string;
+  /** Chromium partitions distinguish same-site and cross-site ancestors. */
+  _crHasCrossSiteAncestor?: boolean;
 }
 
 export type XianyuCookieSnapshot = XianyuBrowserCookie[];
@@ -45,6 +47,17 @@ export function metadataWithCookieSnapshot(metadata: Record<string, string> | un
   delete next[XIANYU_COOKIE_SNAPSHOT_LEGACY_KEY];
   delete next[XIANYU_COOKIE_SNAPSHOT_CAMEL_KEY];
   next[XIANYU_COOKIE_SNAPSHOT_KEY] = JSON.stringify(normalizeCookieSnapshot(snapshot) ?? []);
+  return next;
+}
+
+/** Invalidate across merge-based stores while preserving unrelated metadata. */
+export function metadataWithoutCookieSnapshot(metadata: Record<string, string> | undefined): Record<string, string> {
+  const next = { ...(metadata ?? {}) };
+  // CredentialService merges metadata. A missing key would keep the stale
+  // persisted value; JSON null explicitly masks it and any legacy aliases.
+  next[XIANYU_COOKIE_SNAPSHOT_KEY] = 'null';
+  delete next[XIANYU_COOKIE_SNAPSHOT_LEGACY_KEY];
+  delete next[XIANYU_COOKIE_SNAPSHOT_CAMEL_KEY];
   return next;
 }
 
@@ -145,6 +158,9 @@ export function applySetCookies(snapshot: XianyuCookieSnapshot, requestUrl: stri
     const identity = (cookie: XianyuBrowserCookie) => `${cookie.name}\u0000${(cookie.domain ?? '').toLowerCase()}\u0000${cookie.path ?? '/'}\u0000${cookie.partitionKey ?? ''}`;
     const isPartitioned = parts.some((part) => part.trim().toLowerCase() === 'partitioned');
     if (isPartitioned && !partitionKey) continue;
+    const partitionSite = parseUrl(partitionKey ?? '');
+    const sameSitePartition = partitionSite?.protocol === target?.protocol && Boolean(partitionSite?.hostname)
+      && (hostname === partitionSite?.hostname || hostname.endsWith(`.${partitionSite?.hostname}`));
     const next: XianyuBrowserCookie = {
       name,
       value,
@@ -154,7 +170,9 @@ export function applySetCookies(snapshot: XianyuCookieSnapshot, requestUrl: stri
       httpOnly: parts.some((part) => part.trim().toLowerCase() === 'httponly'),
       secure: parts.some((part) => part.trim().toLowerCase() === 'secure'),
       sameSite: parts.find((part) => /^samesite=/i.test(part))?.split('=').slice(1).join('='),
-      ...(isPartitioned ? { partitionKey } : {}),
+      ...(isPartitioned ? { partitionKey,
+        _crHasCrossSiteAncestor: !sameSitePartition,
+      } : {}),
     };
     const key = identity(next);
     const existingIndex = state.findIndex((cookie) => identity(cookie) === key);
