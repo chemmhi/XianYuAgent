@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { chooseFirstAvailableAccountId, useAccountContext } from '../../../app/account-context';
-import { createCredentialApi, createMockAutoReplyAgentSettingsApi, createMockCredentialApi, createMockOpenAISettingsApi, type AutoReplyAgentSettingsApi, type CredentialApi, type OpenAISettingsApi } from '../api';
+import { createCredentialApi, createMockAutoReplyAgentSettingsApi, createMockCredentialApi, createMockOpenAISettingsApi, type AutoReplyAgentSettingsApi, type CredentialApi, type OpenAISettingsApi, type InviteApi, type InviteVM } from '../api';
 import { resolveRuntimeApi } from '../../../api/runtime';
 import { useAutoReplyAgentSettingsController } from '../agent-settings-controller';
 import { AutoReplyAgentPanel } from './AutoReplyAgentPanel';
@@ -13,18 +13,15 @@ import { Button } from '../../../shared/ui/Button';
 import { InputField } from '../../../shared/ui/InputField';
 import './settings.css';
 
-type TabKey = 'autoReply' | 'model' | 'credentials' | 'safety' | 'outbox' | 'plugins';
+type TabKey = 'autoReply' | 'model' | 'invites';
 
 const tabs: Array<{ id: TabKey; label: string; mobileLabel: string; meta: string }> = [
   { id: 'autoReply', label: '自动回复 Agent', mobileLabel: 'Agent', meta: 'Buyer Agent' },
   { id: 'model', label: 'OpenAI API', mobileLabel: '模型', meta: 'ModelClient' },
-  { id: 'credentials', label: '凭证管理', mobileLabel: '凭证', meta: 'CredentialStore' },
-  { id: 'safety', label: '安全输出校验', mobileLabel: '安全', meta: 'Gateway' },
-  { id: 'outbox', label: 'Outbox Worker', mobileLabel: '队列', meta: 'Runtime' },
-  { id: 'plugins', label: '插件配置', mobileLabel: '插件', meta: 'Skill / Plugin' },
+  { id: 'invites', label: '邀请码管理', mobileLabel: '邀请码', meta: 'Admin Only' },
 ];
 
-export function SettingsPage({ api: providedApi, agentApi: providedAgentApi, openaiApi: providedOpenaiApi, modelApi: providedModelApi }: { api?: CredentialApi; agentApi?: AutoReplyAgentSettingsApi; openaiApi?: OpenAISettingsApi; modelApi?: ModelProviderApi }) {
+export function SettingsPage({ adminRole, inviteApi, api: providedApi, agentApi: providedAgentApi, openaiApi: providedOpenaiApi, modelApi: providedModelApi }: { adminRole?: string; inviteApi: InviteApi; api?: CredentialApi; agentApi?: AutoReplyAgentSettingsApi; openaiApi?: OpenAISettingsApi; modelApi?: ModelProviderApi }) {
   const { accounts, accountsLoading, accountsError, currentAccountId, setCurrentAccountId } = useAccountContext();
   const api = useMemo(() => providedApi ?? createCredentialApiFromRuntime(), [providedApi]);
   const agentApi = useMemo(() => resolveRuntimeApi(providedAgentApi, createMockAutoReplyAgentSettingsApi, 'AUTO_REPLY_AGENT_API_NOT_PROVIDED'), [providedAgentApi]);
@@ -54,14 +51,14 @@ export function SettingsPage({ api: providedApi, agentApi: providedAgentApi, ope
     <section className="page-stack settings-page" data-settings-page>
       <div className="settings-grid">
         <aside className="card settings-tabs" aria-label="设置分类">
-          {tabs.map((tab) => <button key={tab.id} type="button" className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)}><span className="settings-tab-label">{tab.label}</span><span className="settings-tab-mobile-label">{tab.mobileLabel}</span><small>{tab.meta}</small></button>)}
+          {tabs.filter((tab) => tab.id !== 'invites' || adminRole === 'admin').map((tab) => <button key={tab.id} type="button" className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)}><span className="settings-tab-label">{tab.label}</span><span className="settings-tab-mobile-label">{tab.mobileLabel}</span><small>{tab.meta}</small></button>)}
         </aside>
         <div className="settings-active">
-          {activeTab === 'credentials' ? <CredentialStorePanel accountName={selectedAccount?.displayName} accountId={currentAccountId ?? ''} accountsLoading={accountsLoading} accountsError={accountsError} state={controller.state} items={items} onCreate={() => openEditor('create')} onEdit={(item) => openEditor('edit', item)} onRotate={(item) => openEditor('rotate', item)} onStatus={(item, status) => { void controller.setStatus({ credentialId: item.id, expectedVersion: item.version, status }); }} onRetry={controller.reload} /> : activeTab === 'autoReply' ? <AutoReplyAgentPanel controller={agentController} accountName={selectedAccount?.displayName} accountId={currentAccountId} /> : activeTab === 'model' ? <OpenAISettingsPanel accountId={currentAccountId ?? ''} accountName={selectedAccount?.displayName} api={openaiApi} modelApi={modelApi} accountsLoading={accountsLoading} accountsError={accountsError} /> : <ReferencePanel tab={activeTab} onOpenCredentials={() => setActiveTab('credentials')} />}
+          {activeTab === 'invites' ? <InvitePanel api={inviteApi} /> : activeTab === 'autoReply' ? <AutoReplyAgentPanel controller={agentController} accountName={selectedAccount?.displayName} accountId={currentAccountId} /> : <OpenAISettingsPanel accountId={currentAccountId ?? ''} accountName={selectedAccount?.displayName} api={openaiApi} modelApi={modelApi} accountsLoading={accountsLoading} accountsError={accountsError} />}
         </div>
       </div>
       {editor && <CredentialEditor mode={editor} accountId={currentAccountId ?? ''} credential={selectedCredential} onClose={() => { setEditor(null); setSelectedCredential(undefined); }} onCreate={controller.create} onUpdate={controller.update} onRotate={controller.rotate} />}
-      <nav className="settings-mobile-bottom" aria-label="移动端设置导航">{tabs.slice(0, 4).map((tab) => <button key={tab.id} type="button" className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)}><span>{tab.id === 'credentials' ? '◇' : tab.id === 'model' ? '◌' : tab.id === 'safety' ? '✓' : '≡'}</span><small>{tab.mobileLabel}</small></button>)}</nav>
+      <nav className="settings-mobile-bottom" aria-label="移动端设置导航">{tabs.filter((tab) => tab.id !== 'invites' || adminRole === 'admin').slice(0, 4).map((tab) => <button key={tab.id} type="button" className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)}><span>{tab.id === 'model' ? '◌' : tab.id === 'invites' ? '✦' : '≡'}</span><small>{tab.mobileLabel}</small></button>)}</nav>
     </section>
   );
 }
@@ -122,14 +119,14 @@ function CredentialEditor({ mode, accountId, credential, onClose, onCreate, onUp
   return <div className="modal-backdrop" role="presentation"><form className="card modal-card settings-editor" onSubmit={(event) => void submit(event)}><div className="modal-head"><div><p className="eyebrow">{mode === 'rotate' ? 'Rotate Secret' : 'Credential Store'}</p><h2>{title}</h2><p>{mode === 'edit' ? '只更新引用元数据，不会读取旧密钥。' : '明文只存在于本次受控提交，不会写入 URL 或本地缓存。'}</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="关闭">×</button></div><div className="settings-form-grid">{mode !== 'rotate' && <><InputField label="Provider" value={provider} onChange={(event) => setProvider(event.target.value)} required /><InputField label="Alias" value={alias} onChange={(event) => setAlias(event.target.value)} required /><InputField fieldClassName="full" label="备注（可选）" value={label} onChange={(event) => setLabel(event.target.value)} /></>}{mode !== 'edit' && <InputField fieldClassName="full" label="API Key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="new-password" placeholder="输入新的 API Key" required minLength={8} />}</div>{error && <div className="inline-error" role="alert">{error}</div>}<div className="settings-editor-note"><strong>安全边界</strong><span>服务端只返回指纹摘要（{credential?.fingerprint ?? '保存后生成'}），不会提供 reveal。</span></div><div className="modal-actions"><Button variant="ghost" type="button" onClick={onClose}>取消</Button><Button variant="primary" type="submit" disabled={busy || !accountId}>{busy ? '提交中…' : mode === 'rotate' ? '确认轮换' : mode === 'create' ? '保存配置' : '保存修改'}</Button></div></form></div>;
 }
 
-function ReferencePanel({ tab, onOpenCredentials }: { tab: Exclude<TabKey, 'credentials'>; onOpenCredentials: () => void }) {
+function ReferencePanel({ tab }: { tab: TabKey }) {
   const content: Record<Exclude<TabKey, 'credentials'>, { title: string; description: string; rows: Array<[string, string, string]> }> = {
     autoReply: { title: '自动回复 Agent', description: '买家侧 Agent 配置已独立保存，保存后下一条消息读取最新配置。', rows: [['配置范围', '买家侧自动回复', '独立'], ['工具权限', '四个只读工具', '受控'], ['发送模式', '模拟发送 / 白名单真实发送', '策略'] ] },
     model: { title: 'OpenAI API 兼容模型配置', description: 'ModelClient 只消费 CredentialRef，不在页面回显明文 API Key。', rows: [['当前配置', 'openai-compatible / primary', '已脱敏'], ['Secret', 'secret_store_ref:model_api_key_primary', '不可查看'], ['生效规则', '保存后由运行时读取引用', '受控'] ] },
-    safety: { title: '安全输出校验', description: '买家输入按不可信内容处理，凭证、Cookie 和内部配置永不进入买家链路。', rows: [['Prompt Injection', '拦截', '高优先级'], ['凭证泄露', '拦截', '高优先级'], ['非订单交付', '按订单条件校验', '策略'] ] },
-    outbox: { title: 'Outbox Worker / Execution Runtime', description: '执行队列和运行时恢复属于后续切片，本页只保留高保真状态入口。', rows: [['Worker', 'online · 最近心跳 14:24:08', '正常'], ['队列深度', '7 pending / 128 succeeded today', '运行中'], ['人工确认', '高风险动作确认后才执行', '已开启'] ] },
-    plugins: { title: '插件配置', description: 'Skill / Plugin 版本化管理保留为后续独立切片。', rows: [['Policy Plugin', '自动回复与风险策略', '已启用'], ['Executor Plugin', '消息与 Outbox 执行', '已启用'] ] },
+    invites: { title: '安全输出校验', description: '买家输入按不可信内容处理，凭证、Cookie 和内部配置永不进入买家链路。', rows: [['Prompt Injection', '拦截', '高优先级'], ['凭证泄露', '拦截', '高优先级'], ['非订单交付', '按订单条件校验', '策略'] ] },
   };
   const panel = content[tab];
-  return <div className="settings-content"><article className="card panel"><div className="panel-head"><div><p className="eyebrow">Settings Reference</p><h2>{panel.title}</h2><p>{panel.description}</p></div><span className="settings-scope-chip">后续切片</span></div><div className="settings-reference-list">{panel.rows.map(([label, value, tone]) => <div key={label}><strong>{label}</strong><span>{value}</span><em>{tone}</em></div>)}</div>{tab === 'model' && <Button variant="primary" type="button" onClick={onOpenCredentials}>管理 API Key 凭证</Button>}</article></div>;
+  return <div className="settings-content"><article className="card panel"><div className="panel-head"><div><p className="eyebrow">Settings Reference</p><h2>{panel.title}</h2><p>{panel.description}</p></div><span className="settings-scope-chip">后续切片</span></div><div className="settings-reference-list">{panel.rows.map(([label, value, tone]) => <div key={label}><strong>{label}</strong><span>{value}</span><em>{tone}</em></div>)}</div>{tab === 'model' && <span className="settings-scope-chip">当前用户账号范围</span>}</article></div>;
 }
+
+function InvitePanel({ api }: { api: InviteApi }) { const [items,setItems]=useState<InviteVM[]>([]); const [code,setCode]=useState(''); const [error,setError]=useState<string|null>(null); const [busy,setBusy]=useState(false); useEffect(()=>{void api.list().then(result=>setItems(result.items)).catch(error=>setError(error instanceof Error?error.message:'邀请码读取失败'));},[api]); async function create(){setBusy(true);setError(null);try{const result=await api.create({requestKey:'invite-'+Date.now()+'-'+Math.random().toString(36).slice(2),days:7});setCode(result.invite.code);setItems(current=>[result.invite,...current]);}catch(error){setError(error instanceof Error?error.message:'邀请码生成失败');}finally{setBusy(false);}} async function revoke(id:string){try{await api.revoke(id);setItems(current=>current.map(item=>item.id===id?{...item,revokedAt:new Date().toISOString()}:item));}catch(error){setError(error instanceof Error?error.message:'邀请码撤销失败');}} return <div className="settings-content"><article className="card panel settings-hero"><div><p className="eyebrow">Invitation Codes</p><h2>邀请码管理</h2><p>生成后仅显示一次完整邀请码；列表只显示前缀和状态。</p></div><Button variant="primary" type="button" disabled={busy} onClick={()=>void create()}>{busy?'生成中…':'生成邀请码'}</Button></article>{code&&<div className="settings-save-toast" role="status">请立即复制邀请码：<strong>{code}</strong></div>}{error&&<div className="settings-state error" role="alert">{error}</div>}<article className="card panel credential-list-card"><div className="panel-head"><div><h2>已生成的邀请码</h2><p>管理员可撤销尚未使用的邀请码。</p></div></div><div className="settings-reference-list">{items.map(item=><div key={item.id}><strong>{item.codePrefix}…</strong><span>{item.usedAt?'已使用':item.revokedAt?'已撤销':Date.parse(item.expiresAt)<=Date.now()?'已过期':'有效至 '+new Date(item.expiresAt).toLocaleString()}</span>{!item.usedAt&&!item.revokedAt&&<Button variant="ghost" type="button" onClick={()=>void revoke(item.id)}>撤销</Button>}</div>)}</div></article></div>; }

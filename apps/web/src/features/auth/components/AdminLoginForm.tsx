@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Button } from '../../../shared/ui/Button';
 import { InputField } from '../../../shared/ui/InputField';
 
-export function AdminLoginForm({ busy, error, onSubmit }: { busy: boolean; error: string | null; onSubmit: (input: { email: string; password: string }) => Promise<void> }) {
+export function AdminLoginForm({ busy, error, onSubmit, onRegister }: { busy: boolean; error: string | null; onSubmit: (input: { email: string; password: string }) => Promise<void>; onRegister?: () => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
@@ -17,7 +17,7 @@ export function AdminLoginForm({ busy, error, onSubmit }: { busy: boolean; error
       <InputField label="管理员邮箱" type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required />
       <InputField label="密码" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
       {error && <p className="auth-form-error" role="alert">{error}</p>}
-      <Button variant="primary" className="auth-submit" type="submit" disabled={busy}>{busy ? '登录中…' : '登录'}</Button>
+      <Button variant="primary" className="auth-submit" type="submit" disabled={busy}>{busy ? '登录中…' : '登录'}</Button>{onRegister && <Button variant="ghost" type="button" onClick={onRegister}>没有账号？去注册</Button>}
     </form>
   );
 }

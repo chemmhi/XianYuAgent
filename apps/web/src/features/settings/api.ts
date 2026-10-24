@@ -4,6 +4,7 @@ interface Transport {
   get<T>(path: string): Promise<T>;
   post?<T>(path: string, body?: unknown, init?: RequestInit): Promise<T>;
   patch?<T>(path: string, body?: unknown, init?: RequestInit): Promise<T>;
+  delete?<T>(path:string, init?:RequestInit):Promise<T>;
 }
 
 interface ApiEnvelope<T> { success: boolean; data: T | null; message?: string | null; error?: { code?: string } }
@@ -185,3 +186,7 @@ function maskApiKey(value: string): string {
   const middleLength = Math.max(1, key.length - visibleEach * 2);
   return `${key.slice(0, visibleEach)}${'*'.repeat(middleLength)}${key.slice(-visibleEach)}`;
 }
+
+export interface InviteVM { id:string; codePrefix:string; expiresAt:string; usedAt?:string; revokedAt?:string; createdAt:string; }
+export interface InviteApi { list():Promise<{items:InviteVM[]}>; create(input:{requestKey:string;days:number}):Promise<{invite:InviteVM & {code:string}}> ; revoke(id:string):Promise<void>; }
+export function createInviteApi(transport: Transport): InviteApi { return { async list(){ return unwrap(await transport.get<{items:InviteVM[]}>('/api/v1/auth/invites')); }, async create(input){ const post=requirePost(transport); return unwrap(await post<{invite:InviteVM & {code:string}}>('/api/v1/auth/invites',input,{headers:{'Idempotency-Key':idempotency('invite')}})); }, async revoke(id){ if(!transport.delete) throw new Error('邀请码撤销不可用'); await transport.delete('/api/v1/auth/invites/'+encodeURIComponent(id)); } }; }

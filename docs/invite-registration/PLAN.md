@@ -31,3 +31,9 @@ D2-P1-02：邀请码创建不用通用幂等响应缓存，表内以(created_by,
 D2-P2-03：注册不缓存公共会话结果，成功响应丢失后重试提示邀请码已用，可凭刚设置的邮箱密码登录。重复邮箱与session写入失败均在同一事务回滚邀请码消费。
 R1-P1-003：普通用户重授权Cookie必须匹配当前账号身份；跨账号身份冲突在写凭证前拒绝。旧管理员仍可换绑未被占用身份。MemoryStore保持与Postgres全局身份唯一约束一致。
 设计第一轮 isolation_review PASS（修复项在S1实施）；第二轮补充决策待复审。
+
+## S2 完成记录
+设置页现在按当前登录角色展示：普通用户只看到自动回复与模型配置，模型/自动回复接口继续按 adminId + accountId 校验；管理员额外看到邀请码管理。废弃的凭证管理、安全输出校验、Outbox Worker、插件配置 tab 已移除，底层凭证/模型服务保留。
+邀请码服务已加入创建/撤销审计，审计只记录 inviteId、前缀、期限、requestKey，不记录明文或 hash；重复 requestKey 返回 409。Memory 使用邀请码串行锁，PostgreSQL 使用 FOR UPDATE，重复邮箱和会话写入失败回滚邀请码。
+S2 验证：invite-registration Memory/PostgreSQL 2/2（含重复requestKey、重复邮箱回滚、同邀请码3路并发仅1成功）；isolation Memory/PostgreSQL 18/18；API/Web typecheck；Web auth/settings 7/7。
+S2 isolation_review PASS；acceptance_review 两次上游错误未产出结论，未以其失败替代已执行的独立隔离审核。P2-INV-002：已统一 Store.createAdmin 的 Postgres role 参数，风险关闭。

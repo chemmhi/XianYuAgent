@@ -168,6 +168,8 @@ export class MemoryStore implements Store {
   private readonly steps = new Map<string, StepRecord>();
   private readonly runEvents = new Map<string, RunEventRecord[]>();
   private readonly workspaceMessages = new Map<string, WorkspaceMessageRecord[]>();
+  private readonly invites = new Map<string, import('./domain.js').InviteRecord & { codeHash?: string }>();
+  private readonly registrationLocks = new Map<string, Promise<void>>();
   private readonly workspaceConfirmations = new Map<string, WorkspaceConfirmationRecord>();
   private runEventSequence = 0;
   readonly audits: AuditEventRecord[] = [];
@@ -178,12 +180,16 @@ export class MemoryStore implements Store {
   async listAdminIds(): Promise<string[]> { return [...this.admins.keys()]; }
   async findAdminById(id: string): Promise<AdminRecord | undefined> { return this.admins.get(id); }
   async findAdminByEmail(email: string): Promise<AdminRecord | undefined> { return [...this.admins.values()].find((admin) => admin.email === email.toLowerCase()); }
-  async createAdmin(input: { email: string; passwordHash: string; displayName: string }): Promise<AdminRecord> {
+  async createAdmin(input: { email: string; passwordHash: string; displayName: string; role?: string }): Promise<AdminRecord> {
     const now = new Date().toISOString();
-    const admin: AdminRecord = { id: createId(), email: input.email.toLowerCase(), passwordHash: input.passwordHash, displayName: input.displayName, role: 'admin', status: 'active', createdAt: now };
+    const admin: AdminRecord = { id: createId(), email: input.email.toLowerCase(), passwordHash: input.passwordHash, displayName: input.displayName, role: input.role ?? 'admin', status: 'active', createdAt: now };
     this.admins.set(admin.id, admin);
     return admin;
   }
+  async createInvite(input: { createdBy: string; codeHash: string; codePrefix: string; requestKey: string; expiresAt: string }): Promise<import('./domain.js').InviteRecord> { if ([...this.invites.values()].some(item => item.createdBy === input.createdBy && item.requestKey === input.requestKey)) throw new Error('INVITE_REQUEST_DUPLICATE'); const item = { id:createId(), ...input, createdAt:new Date().toISOString() }; this.invites.set(item.id,item); const { codeHash: _codeHash, ...publicItem } = item; return publicItem; }
+  async listInvites(createdBy: string): Promise<import('./domain.js').InviteRecord[]> { return [...this.invites.values()].filter(item=>item.createdBy===createdBy).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(({codeHash: _codeHash, ...item})=>item); }
+  async revokeInvite(createdBy: string, inviteId: string): Promise<boolean> { const item=this.invites.get(inviteId); if(!item||item.createdBy!==createdBy||item.usedAt) return false; item.revokedAt=new Date().toISOString(); return true; }
+  async registerWithInvite(input: { codeHash:string; email:string; passwordHash:string; displayName:string; csrfTokenHash:string; expiresAt:string }): Promise<{ admin: AdminRecord; session: SessionRecord }> { const previous=this.registrationLocks.get(input.codeHash) ?? Promise.resolve(); let release!:()=>void; const current=new Promise<void>(resolve=>{release=resolve}); this.registrationLocks.set(input.codeHash, previous.then(()=>current)); await previous; try { const invite=[...this.invites.values()].find(item=>item.codeHash===input.codeHash); if(!invite||invite.revokedAt||invite.usedAt||Date.parse(invite.expiresAt)<=Date.now()) throw new Error('INVITE_INVALID'); if(await this.findAdminByEmail(input.email)) throw new Error('EMAIL_DUPLICATE'); const admin=await this.createAdmin({email:input.email,passwordHash:input.passwordHash,displayName:input.displayName,role:'user'}); const session=await this.createSession({adminId:admin.id,csrfTokenHash:input.csrfTokenHash,expiresAt:input.expiresAt}); invite.usedAt=new Date().toISOString(); invite.usedBy=admin.id; return {admin,session}; } finally { release(); if(this.registrationLocks.get(input.codeHash)===current) this.registrationLocks.delete(input.codeHash); } }
   async touchAdminLogin(adminId: string): Promise<void> { const admin = this.admins.get(adminId); if (admin) admin.lastLoginAt = new Date().toISOString(); }
   async createSession(input: { adminId: string; csrfTokenHash: string; expiresAt: string }): Promise<SessionRecord> {
     const now = new Date().toISOString();

@@ -20,6 +20,7 @@ export interface AuthSessionView {
 export interface AuthApi {
   getSession(): Promise<AuthSessionView>;
   login(input: { email: string; password: string }): Promise<AuthSessionView>;
+  register(input: { inviteCode: string; email: string; password: string; displayName: string }): Promise<AuthSessionView>;
   bootstrap(input: { email: string; password: string; displayName: string }): Promise<AuthSessionView>;
   logout(): Promise<void>;
 }
@@ -61,6 +62,7 @@ export function createAuthApi(transport: AuthApiTransport): AuthApi {
       const post = requirePost(transport);
       return normalizeMutation(unwrap(await post<AuthMutationOutput | ApiEnvelope<AuthMutationOutput>>('/api/v1/auth/password-login', input)));
     },
+    async register(input) { const post=requirePost(transport); return normalizeMutation(unwrap(await post<AuthMutationOutput | ApiEnvelope<AuthMutationOutput>>('/api/v1/auth/register', input))); },
     async bootstrap(input) {
       const post = requirePost(transport);
       return normalizeMutation(unwrap(await post<AuthMutationOutput | ApiEnvelope<AuthMutationOutput>>('/api/v1/auth/bootstrap', input, {

@@ -13,6 +13,13 @@ export interface AuthContext {
   scopes: AccountScopeRecord[];
 }
 
+export class InviteService {
+  constructor(private readonly store: Store) {}
+  async create(input:{adminId:string;requestKey:string;days:number;requestId?:string;traceId?:string}): Promise<{ invite: import('./domain.js').InviteRecord; code: string }> { const actor=await this.store.findAdminById(input.adminId); if(actor?.role!=='admin') throw new ServiceError(403,'FORBIDDEN','仅平台管理员可生成邀请码'); if(!/^[-A-Za-z0-9_]{8,100}$/.test(input.requestKey)) throw new ServiceError(422,'VALIDATION_FAILED','requestKey invalid'); const days=Math.max(1,Math.min(30,Math.trunc(input.days))); const code=createToken(); let invite; try { invite=await this.store.createInvite({createdBy:input.adminId,codeHash:sha256(code),codePrefix:code.slice(0,8),requestKey:input.requestKey,expiresAt:new Date(Date.now()+days*86400000).toISOString()}); } catch(error) { if(error instanceof Error && error.message==='INVITE_REQUEST_DUPLICATE') throw new ServiceError(409,'INVITE_REQUEST_DUPLICATE','该请求已生成过邀请码，请换一个请求标识'); throw error; } await this.store.recordAudit({id:createId(),actorType:'admin',actorId:input.adminId,action:'auth.invite.created',targetRef:invite.id,requestId:input.requestId??'invite',traceId:input.traceId??'invite',payloadDigest:digestJson({codePrefix:invite.codePrefix,expiresAt:invite.expiresAt,requestKey:invite.requestKey}),createdAt:new Date().toISOString()}); return {invite,code}; }
+  async list(adminId:string) { const actor=await this.store.findAdminById(adminId); if(actor?.role!=='admin') throw new ServiceError(403,'FORBIDDEN','仅平台管理员可查看邀请码'); return this.store.listInvites(adminId); }
+  async revoke(adminId:string, inviteId:string, requestId='invite', traceId='invite') { const actor=await this.store.findAdminById(adminId); if(actor?.role!=='admin') throw new ServiceError(403,'FORBIDDEN','仅平台管理员可撤销邀请码'); if(!await this.store.revokeInvite(adminId,inviteId)) throw new ServiceError(404,'NOT_FOUND','邀请码不存在或已使用'); await this.store.recordAudit({id:createId(),actorType:'admin',actorId:adminId,action:'auth.invite.revoked',targetRef:inviteId,requestId,traceId,payloadDigest:digestJson({inviteId}),createdAt:new Date().toISOString()}); }
+}
+
 export class AuthService {
   constructor(private readonly store: Store, private readonly config: AppConfig) {}
 
@@ -23,6 +30,8 @@ export class AuthService {
     const auditRef = await this.audit({ actorType: 'admin', actorId: admin.id, action: 'auth.bootstrap.completed', requestId: input.requestId ?? 'bootstrap', traceId: input.traceId ?? 'bootstrap', payload: { email: admin.email } });
     return { admin, session, csrfToken: this.sessionTokens.get(session.id)!, auditRef };
   }
+
+  async register(input: { code:string; email:string; password:string; displayName:string }): Promise<{ admin: AdminRecord; session: SessionRecord; csrfToken: string }> { if (!/^\S+@\S+\.\S+$/.test(input.email) || input.password.length < 8 || input.displayName.trim().length < 1 || input.code.trim().length < 16) throw new ServiceError(422,'VALIDATION_FAILED','邮箱、昵称、密码和有效邀请码为必填项'); const csrfToken=createToken(); try { const result=await this.store.registerWithInvite({ codeHash:sha256(input.code.trim()), email:input.email.trim().toLowerCase(), passwordHash:await hashPassword(input.password), displayName:input.displayName.trim(), csrfTokenHash:sha256(csrfToken), expiresAt:new Date(Date.now()+this.config.sessionAbsoluteMs).toISOString() }); this.sessionTokens.set(result.session.id,csrfToken); return {...result,csrfToken}; } catch(error) { if(error instanceof Error && error.message==='INVITE_INVALID') throw new ServiceError(409,'INVITE_INVALID','邀请码无效、已使用、已撤销或已过期'); if(error instanceof Error && error.message==='EMAIL_DUPLICATE') throw new ServiceError(409,'EMAIL_DUPLICATE','邮箱已注册'); throw error; } }
 
   async login(input: { email: string; password: string }): Promise<{ admin: AdminRecord; session: SessionRecord; csrfToken: string }> {
     const admin = await this.store.findAdminByEmail(input.email);

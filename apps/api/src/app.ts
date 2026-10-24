@@ -5,7 +5,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { loadConfig, type AppConfig } from './config.js';
 import { mergeAutoReplyAgentRuntimeConfig, resolveAutoReplyAgentConfig } from './auto-reply-agent-config.js';
 import type { AuthContext } from './services.js';
-import { AccountService, AuthService, CouponService, CredentialService, OrderService, ProductService, ProductSyncService, ServiceError, idempotent } from './services.js';
+import { AccountService, AuthService, InviteService, CouponService, CredentialService, OrderService, ProductService, ProductSyncService, ServiceError, idempotent } from './services.js';
 import { createIds, failure, fingerprint, parseCookies, readBody, setCookie, success, writeJson, type RequestContext } from './http.js';
 import { createStore } from './store.js';
 import type { ProductListResult, ProductRecord, Store } from './domain.js';
@@ -56,6 +56,7 @@ export interface AppRuntime {
   config: AppConfig;
   store: Store;
   auth: AuthService;
+  invites: InviteService;
   accounts: AccountService;
   coupons: CouponService;
   orders: OrderService;
@@ -113,6 +114,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
   const piSkills = new PiSkillManager({ rootDir: config.piSkillRoot, canUseHostSkills: async (adminId) => { const actor = await store.findAdminById(adminId); return actor?.role === 'admin' && actor.status === 'active'; } });
   const autoReplyModelClient = config.autoReplyModelEnabled === false ? undefined : modelClient;
   const auth = new AuthService(store, config);
+  const invites = new InviteService(store);
   const accounts = new AccountService(store, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
@@ -501,7 +503,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, orders, orderDelivery, products, productPublisher, productKnowledgeBase, productAutomation, productAutomationTrigger, productAutomationWorker, paymentEventWorker, productSync, credentials, apiKeyCredentials, openaiSettings, modelProviderRuntime, dashboard, messages, autoReply, autoReplyRepair, autoReplyAgentSettings, autoReplyActivity, redisRealtime, verificationRecoveryBridge, imOwnerServer, workspace, piSkills, workspaceCommands, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
+    config, store, auth, invites, accounts, coupons, orders, orderDelivery, products, productPublisher, productKnowledgeBase, productAutomation, productAutomationTrigger, productAutomationWorker, paymentEventWorker, productSync, credentials, apiKeyCredentials, openaiSettings, modelProviderRuntime, dashboard, messages, autoReply, autoReplyRepair, autoReplyAgentSettings, autoReplyActivity, redisRealtime, verificationRecoveryBridge, imOwnerServer, workspace, piSkills, workspaceCommands, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
     server,
     async listen() {
       await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));
@@ -721,7 +723,7 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
 }
 
 async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: ServerResponse): Promise<{ statusCode: number; body: unknown } | undefined> {
-  const { auth, accounts, coupons, orders, products, productAutomation, productSync, credentials, apiKeyCredentials, dashboard, messages, workspace, piSkills, store, config, xianyuIm, modelProviderRuntime } = runtime;
+  const { auth, invites, accounts, coupons, orders, products, productAutomation, productSync, credentials, apiKeyCredentials, dashboard, messages, workspace, piSkills, store, config, xianyuIm, modelProviderRuntime } = runtime;
   if (ctx.path === '/healthz' && ctx.method === 'GET') {
     const health = await store.health();
     const redis = !config.redisUrl || !runtime.redisRealtime
@@ -758,6 +760,12 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     }
     return { statusCode: result.statusCode, body: result.body };
   }
+  if (ctx.path === '/api/v1/auth/register' && ctx.method === 'POST') {
+    const result = await auth.register({ code:String(ctx.body.inviteCode ?? ctx.body.code ?? ''), email:String(ctx.body.email ?? ''), password:String(ctx.body.password ?? ''), displayName:String(ctx.body.displayName ?? '') });
+    setSessionCookies(response, result.csrfToken, result.session.id, config.cookieSecure);
+    return { statusCode: 201, body: success(ctx, { session:{id:result.session.id,expiresAt:result.session.expiresAt}, profile:{id:result.admin.id,email:result.admin.email,displayName:result.admin.displayName,role:result.admin.role} }).body };
+  }
+
   if (ctx.path === '/api/v1/auth/password-login' && ctx.method === 'POST') {
     const result = await auth.login({ email: String(ctx.body.email ?? ''), password: String(ctx.body.password ?? '') });
     setSessionCookies(response, result.csrfToken, result.session.id, config.cookieSecure);
@@ -765,6 +773,10 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   }
 
   const authContext = await requireAuth(auth, ctx);
+  if (ctx.path === '/api/v1/auth/invites' && ctx.method === 'GET') return { statusCode:200, body: success(ctx, { items: await invites.list(authContext.admin.id) }).body };
+  if (ctx.path === '/api/v1/auth/invites' && ctx.method === 'POST') { await auth.validateCsrf(authContext, ctx.headers, ctx.cookies); const result=await invites.create({adminId:authContext.admin.id,requestKey:String(ctx.body.requestKey ?? ''),days:Number(ctx.body.days ?? 7),requestId:ctx.requestId,traceId:ctx.traceId}); return {statusCode:201,body:success(ctx,{invite:{...result.invite,code:result.code}}).body}; }
+  const inviteRevoke=ctx.path.match(/^\/api\/v1\/auth\/invites\/([^/]+)$/);
+  if (inviteRevoke && ctx.method === 'DELETE') { await auth.validateCsrf(authContext, ctx.headers, ctx.cookies); await invites.revoke(authContext.admin.id,decodeURIComponent(inviteRevoke[1]),ctx.requestId,ctx.traceId); return {statusCode:200,body:success(ctx,{revoked:true}).body}; }
   if (ctx.method !== 'GET' && ctx.method !== 'HEAD' && ctx.path !== '/api/v1/auth/logout') await auth.validateCsrf(authContext, ctx.headers, ctx.cookies);
   if (ctx.path === '/api/v1/auth/logout' && ctx.method === 'POST') {
     await auth.validateCsrf(authContext, ctx.headers, ctx.cookies);

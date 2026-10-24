@@ -568,6 +568,8 @@ export interface ProductPatch {
   priceMinor?: number | null;
 }
 
+export interface InviteRecord { codeHash?: string; id: string; codePrefix: string; createdBy: string; requestKey: string; expiresAt: string; usedAt?: string; usedBy?: string; revokedAt?: string; createdAt: string; }
+
 export interface AdminRecord {
   id: string;
   email: string;
@@ -1421,7 +1423,11 @@ export interface Store {
   listAdminIds(): Promise<string[]>;
   findAdminById(id: string): Promise<AdminRecord | undefined>;
   findAdminByEmail(email: string): Promise<AdminRecord | undefined>;
-  createAdmin(input: { email: string; passwordHash: string; displayName: string }): Promise<AdminRecord>;
+  createAdmin(input: { email: string; passwordHash: string; displayName: string; role?: string }): Promise<AdminRecord>;
+  createInvite(input: { createdBy: string; codeHash: string; codePrefix: string; requestKey: string; expiresAt: string }): Promise<InviteRecord>;
+  listInvites(createdBy: string): Promise<InviteRecord[]>;
+  revokeInvite(createdBy: string, inviteId: string): Promise<boolean>;
+  registerWithInvite(input: { codeHash: string; email: string; passwordHash: string; displayName: string; csrfTokenHash: string; expiresAt: string }): Promise<{ admin: AdminRecord; session: SessionRecord }>;
   touchAdminLogin(adminId: string): Promise<void>;
   createSession(input: { adminId: string; csrfTokenHash: string; expiresAt: string }): Promise<SessionRecord>;
   findSession(id: string): Promise<SessionRecord | undefined>;
