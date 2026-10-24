@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { XianyuMtopClient } from '../src/xianyu-mtop.js';
 import { CredentialService } from '../src/services.js';
@@ -255,5 +256,58 @@ test('invalidates a mismatched snapshot through the real merge-based credential 
     assert.match(persisted?.cookieHeader ?? '', /unb=seller-1; cookie2=session-cookie/);
     assert.equal(persisted?.metadata?.loginMethod, 'cookie');
     assert.equal(cookieSnapshotFromMetadata(persisted?.metadata), undefined);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('keeps the native Goofish header compatible with a complete cross-domain browser snapshot', async () => {
+  const originalFetch = globalThis.fetch;
+  const store = new MemoryStore();
+  const account = await store.createAccount({ adminId: 'admin-1', platform: 'xianyu', sellerRef: 'seller-1' });
+  const credentials = new CredentialService(store, async () => 'audit-1');
+  const snapshot = [
+    { name: '_m_h5_tk', value: 'taobao_1', domain: '.taobao.com', path: '/', secure: true },
+    { name: '_m_h5_tk_enc', value: 'taobao-enc', domain: '.taobao.com', path: '/', secure: true },
+    { name: 'tfstk', value: 'taobao-fingerprint', domain: '.taobao.com', path: '/', secure: true },
+    { name: '_m_h5_tk', value: 'goofish_1', domain: '.goofish.com', path: '/', secure: true },
+    { name: '_m_h5_tk_enc', value: 'goofish-enc', domain: '.goofish.com', path: '/', secure: true },
+    { name: 'tfstk', value: 'goofish-fingerprint', domain: '.goofish.com', path: '/', secure: true },
+    { name: 'unb', value: 'seller-1', domain: '.goofish.com', path: '/', secure: true },
+    { name: 'mtop_partitioned_detect', value: 'same-site', domain: '.goofish.com', path: '/', secure: true,
+      partitionKey: 'https://goofish.com', _crHasCrossSiteAncestor: false },
+    { name: 'mtop_partitioned_detect', value: 'cross-site', domain: '.goofish.com', path: '/', secure: true,
+      partitionKey: 'https://goofish.com', _crHasCrossSiteAncestor: true },
+  ];
+  await credentials.save({ adminId: 'admin-1', accountId: account.id,
+    cookieHeader: '_m_h5_tk=goofish_1; _m_h5_tk_enc=goofish-enc; tfstk=goofish-fingerprint; unb=seller-1',
+    metadata: { loginMethod: 'cookie', cookies_refresh_snapshot: JSON.stringify(snapshot) }, requestId: 'native', traceId: 'native' });
+  let requests = 0;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    const token = requests++ === 0 ? 'goofish' : 'rotated';
+    // The body is form encoded; MTOP signs the decoded JSON data value.
+    const data = new URLSearchParams(String(init?.body)).get('data');
+    const expectedSign = createHash('md5').update(`${token}&${url.searchParams.get('t')}&${url.searchParams.get('appKey')}&${data}`).digest('hex');
+    assert.equal(url.searchParams.get('sign'), expectedSign);
+    assert.doesNotMatch(String((init?.headers as Record<string, string>)?.cookie), /taobao/);
+    return new Response(JSON.stringify({ ret: ['SUCCESS::调用成功'], data: { accessToken: 'business-token' } }), {
+      headers: { 'content-type': 'application/json', 'set-cookie': '_m_h5_tk=rotated_2; Domain=.goofish.com; Path=/; Secure' },
+    });
+  };
+  try {
+    const client = new XianyuMtopClient({
+      loadCredential: (adminId, accountId) => store.getCredential(adminId, accountId),
+      saveCookie: async (adminId, accountId, cookieHeader, metadata) => {
+        await credentials.save({ adminId, accountId, cookieHeader, metadata, requestId: 'mtop', traceId: 'mtop' });
+      },
+    });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      assert.equal((await client.fetchImToken('admin-1', account.id, 'device-1')).success, true);
+      const persisted = await store.getCredential('admin-1', account.id);
+      const saved = cookieSnapshotFromMetadata(persisted?.metadata);
+      assert.equal(saved?.find(cookie => cookie.domain === '.taobao.com' && cookie.name === '_m_h5_tk')?.value, 'taobao_1');
+      assert.equal(saved?.find(cookie => cookie.domain === '.goofish.com' && cookie.name === '_m_h5_tk')?.value, 'rotated_2');
+      assert.deepEqual(saved?.filter(cookie => cookie.partitionKey), snapshot.filter(cookie => cookie.partitionKey));
+    }
+    assert.equal(requests, 2);
   } finally { globalThis.fetch = originalFetch; }
 });

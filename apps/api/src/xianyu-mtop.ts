@@ -758,20 +758,27 @@ function cookieValue(cookieHeader: string, name: string): string {
 
 function cookieHeadersMatch(snapshot: XianyuCookieSnapshot | undefined, rawCookieHeader: string): boolean {
   if (!snapshot || !rawCookieHeader.trim()) return true;
-  const snapshotValues = parseCookieHeader(cookieHeaderFromSnapshot(snapshot));
   const rawValues = parseCookieHeader(rawCookieHeader);
   const volatile = new Set(['_m_h5_tk', '_m_h5_tk_enc', 'x5sec', 'x5secdata', 'wua', 'umid', 'cna', 'cookie2', 'unb', 'munb', 'tfstk']);
-  for (const [name, value] of rawValues) {
-    if (!volatile.has(name)) continue;
-    const snapshotValue = snapshotValues.get(name);
-    // Some persisted flat cookies contain only the token prefix while the
-    // browser snapshot still has the authoritative `_m_h5_tk=<token>_<suffix>`
-    // value. Treat that incomplete prefix as compatible, but keep strict
-    // equality for complete values and all other volatile cookies.
-    if (name === '_m_h5_tk' && value && snapshotValue?.startsWith(`${value}_`)) continue;
-    if (snapshotValue !== value) return false;
-  }
-  return true;
+  const matches = (candidate: XianyuCookieSnapshot): boolean => {
+    const snapshotValues = parseCookieHeader(cookieHeaderFromSnapshot(candidate));
+    for (const [name, value] of rawValues) {
+      if (!volatile.has(name)) continue;
+      const snapshotValue = snapshotValues.get(name);
+      // Some persisted flat cookies contain only the token prefix while the
+      // browser snapshot still has the authoritative `_m_h5_tk=<token>_<suffix>`
+      // value. Keep strict equality for complete values and other cookies.
+      if (name === '_m_h5_tk' && value && snapshotValue?.startsWith(`${value}_`)) continue;
+      if (snapshotValue !== value) return false;
+    }
+    return true;
+  };
+  // Native IM recovery stores a Goofish first-party header beside the complete
+  // multi-domain, partitioned browser snapshot. Flattening the whole snapshot
+  // can select a same-named Taobao or cross-site cookie first. That is not a
+  // manual Cookie update and must not invalidate the browser snapshot.
+  return matches(snapshot) || matches(snapshot.filter(cookie => /(^|\.)goofish\.com$/.test(cookie.domain ?? '')
+    && cookie._crHasCrossSiteAncestor !== true));
 }
 
 function parseCookieHeader(cookieHeader: string): Map<string, string> {
