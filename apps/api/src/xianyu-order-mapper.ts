@@ -46,7 +46,8 @@ export function mapXianyuOrder(value: unknown): XianyuOrderItem | undefined {
   const skuSpec = joinSpec(firstString(raw.specName, raw.spec_name, raw.skuName, raw.sku_name, item.specName, itemInfo.specName), firstString(raw.specValue, raw.spec_value, raw.skuValue, raw.sku_value, item.specValue, itemInfo.specValue));
   const itemImageUrl = firstString(raw.itemImageUrl, raw.item_image_url, raw.itemImage, raw.item_image, raw.imageUrl, raw.image_url, raw.picUrl, raw.pic_url, raw.mainImageUrl, raw.main_image_url, item.imageUrl, item.image_url, item.picUrl, item.pic_url, item.mainImageUrl, item.main_image_url, itemInfo.imageUrl, itemInfo.image_url, itemInfo.picUrl, itemInfo.pic_url, itemInfo.mainImageUrl, itemInfo.main_image_url);
   const amountMinor = parseAmountMinorFields(raw);
-  const createdAt = parseDate(firstValue(raw.createdAt, raw.created_at, raw.placedAt, raw.placed_at, raw.createTime, raw.create_time, raw.orderTime, raw.order_time)) ?? new Date().toISOString();
+  const platformCreatedAt = parseDate(firstValue(raw.createdAt, raw.created_at, raw.placedAt, raw.placed_at, raw.createTime, raw.create_time, raw.orderTime, raw.order_time));
+  const createdAt = platformCreatedAt ?? new Date().toISOString();
   const updatedAt = parseDate(firstValue(raw.updatedAt, raw.updated_at, raw.updateTime, raw.update_time, raw.modifyTime, raw.modify_time)) ?? createdAt;
   const productIdCandidate = firstString(raw.productId, raw.product_id);
   return {
@@ -66,6 +67,7 @@ export function mapXianyuOrder(value: unknown): XianyuOrderItem | undefined {
     afterSalesStatus: mapAfterSalesStatus(afterSalesValue),
     deliveryType: mapDeliveryType(raw),
     createdAt,
+    createdAtReliable: platformCreatedAt !== undefined,
     updatedAt,
     deliveryFailReason: firstString(raw.deliveryFailReason, raw.delivery_fail_reason, raw.failReason, raw.fail_reason),
     conversationId: firstString(raw.conversationId, raw.conversation_id, raw.cid, raw.sessionId, raw.session_id),

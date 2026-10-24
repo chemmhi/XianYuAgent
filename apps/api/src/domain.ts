@@ -414,6 +414,7 @@ export interface XianyuOrderItem {
   afterSalesStatus: AfterSalesStatus;
   deliveryType: OrderDeliveryType;
   createdAt: string;
+  createdAtReliable?: boolean;
   updatedAt?: string;
   deliveryFailReason?: string;
   conversationId?: string;
