@@ -1,4 +1,12 @@
 # XianyuSellerAgent 项目状态
+
+## 2026-10-24 会话验证事实审计（文档已整理，生产验收未完成）
+
+- 文档与永久入口：[会话验证事实与交付边界](docs/operations/account-session-audit-20261024.md)、AGENT.md；记录原始证据位置、11 项哈希抽核、112 条采集缺口、历史局部成功和生产验收缺口。
+- 本切片仅文档，基于远程 main 的 76c3b34；不引入历史诊断分支，不执行凭证写回或服务器源码修改。
+- 状态：`READY_FOR_REVIEW`；生产自动挑战验收 `BLOCKED / NOT_IMPLEMENTED_IN_THIS_SLICE`。不把文档校验、既有测试或临时客户端连接当作生产业务验收。
+- 发布约束：所有改动先在本地完成并推送 GitHub；生产仅从 origin/main 经 Actions 和统一部署脚本更新。本文档分支不触发部署。
+
 ## 2026-10-08 闲鱼生产滑块身份漂移修复（PASS / 合入 main）
 - 根因：生产容器运行 Linux Google Chrome，但请求侧曾固定 Windows 平台标识；同时生产 Compose 把 Chrome 版本写死，而镜像安装的是会自动更新的 stable 版本。BX 因浏览器 JS 指纹、`sec-ch-ua-platform`、QR `navPlatform`、IM 注册 UA 与实际 Chrome 不一致，返回 `code=300, sig=from bx` 并显示“验证失败”；轨迹距离和超时不是根因。
 - 修复：身份字段统一从 UA 派生 Linux/Windows 平台；容器入口在 Node 启动前读取 `/usr/bin/google-chrome --version`，让滑块浏览器、MTOP、QR、IM 共用实际运行时 Chrome 版本；Compose 移除固定版本默认值，仍保留显式 override。
