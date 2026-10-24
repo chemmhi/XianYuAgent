@@ -48,7 +48,7 @@ import { CouponAssetService } from './coupon-assets.js';
 import { ProductPublishService } from './product-publish.js';
 import { ProductKnowledgeBaseService } from './product-knowledge-base.js';
 import { classifyXianyuFailure } from './xianyu-account-health.js';
-import { PiSkillManager } from './pi-skills.js';
+import { PiSkillManager, PiSkillError } from './pi-skills.js';
 import { PaymentEventWorker } from './payment-event-worker.js';
 import { extractTrustedOrderNo, isTrustedPaidEvent, trustedPaymentOccurredAt } from './payment-event-parser.js';
 
@@ -110,7 +110,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
   const autoReplyGodView = createAutoReplyGodViewSink();
   const autoReplyAgentConfig = config.autoReplyAgent ?? resolveAutoReplyAgentConfig();
   const modelClient = createConfiguredModelClient(config);
-  const piSkills = new PiSkillManager({ rootDir: config.piSkillRoot });
+  const piSkills = new PiSkillManager({ rootDir: config.piSkillRoot, canUseHostSkills: async (adminId) => { const actor = await store.findAdminById(adminId); return actor?.role === 'admin' && actor.status === 'active'; } });
   const autoReplyModelClient = config.autoReplyModelEnabled === false ? undefined : modelClient;
   const auth = new AuthService(store, config);
   const accounts = new AccountService(store, async (input) => {
@@ -226,7 +226,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
   // this resolver must never read AutoReplyAgentSettingsService.
   const resolveAccountModelClient = async (adminId: string, accountId: string): Promise<ModelClient | undefined> => {
     const configured = await openaiSettings.resolveForRuntime(adminId, accountId);
-    if (configured.length === 0) return modelClient;
+    if (configured.length === 0) return (await store.findAdminById(adminId))?.role === 'admin' ? modelClient : createUnavailableModelClient();
     if (config.modelProviderFailoverV2 === false) {
       const primary = configured.find((item) => item.role === 'primary') ?? configured[0];
       const backup = configured.find((item) => item.role === 'backup');
@@ -491,7 +491,13 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
-  }, coupons, autoReplyAgentSettings, workspaceCommands, modelClient);
+  }, coupons, autoReplyAgentSettings, workspaceCommands, undefined, async (adminId, accountId) => {
+    const actor = await store.findAdminById(adminId);
+    if (actor?.role === 'admin') return modelClient;
+    const configured = await openaiSettings.resolveForRuntime(adminId, accountId);
+    if (configured.length === 0) return undefined;
+    return resolveAccountModelClient(adminId, accountId);
+  });
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
@@ -678,7 +684,7 @@ function createPiWorkspaceRuntime(config: AppConfig, store: Store, sharedModelCl
     resolveModelClient: async ({ adminId, accountId }) => {
       if (!adminId) return modelClient;
       try {
-        return await resolveAccountModelClient(adminId, accountId);
+        return await resolveAccountModelClient(adminId, accountId) ?? createUnavailableModelClient();
       } catch {
         return createUnavailableModelClient();
       }
@@ -707,7 +713,7 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
     const result = await dispatch(runtime, ctx, response);
     if (result) writeJson(response, result.statusCode, result.body);
   } catch (error) {
-    const serviceError = error instanceof ServiceError ? error : undefined;
+    const serviceError = error instanceof ServiceError ? error : error instanceof PiSkillError && error.code === 'FORBIDDEN' ? new ServiceError(403, 'FORBIDDEN', error.message) : undefined;
     const mapped = serviceError ?? new ServiceError(500, 'INTERNAL_ERROR', error instanceof Error ? error.message : 'internal error');
     const body = failure(ctx, mapped.statusCode, mapped.code, mapped.message, mapped.details);
     writeJson(response, body.statusCode, body.body);
@@ -843,7 +849,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   if (ctx.path === '/api/v1/settings/agent' && ctx.method === 'PATCH') {
     const key = requireIdempotencyKey(ctx);
     const result = await idempotent(store, {
-      scope: `settings:agent:${String(ctx.body.accountId ?? '').trim()}`,
+      scope: `${authContext.admin.id}:settings:agent:${String(ctx.body.accountId ?? '').trim()}`,
       key,
       fingerprint: fingerprint(ctx.method, ctx.path, ctx.body),
       traceId: ctx.traceId,
@@ -876,7 +882,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     if (!Number.isInteger(expectedVersion) || expectedVersion < 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'expectedVersion must be a non-negative integer');
     if (config.modelProviderFailoverV2 === false) return { statusCode: 409, body: failure(ctx, 409, 'MODEL_PROVIDER_FAILOVER_DISABLED', 'Model Provider V2 路由已关闭，当前使用 legacy 主 Provider').body };
     const result = await idempotent(store, {
-      scope: `settings:openai:routing:${accountId}`,
+      scope: `${authContext.admin.id}:settings:openai:routing:${accountId}`,
       key,
       fingerprint: fingerprint(ctx.method, ctx.path, ctx.body),
       traceId: ctx.traceId,
@@ -944,7 +950,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     const configId = decodeURIComponent(openAiConfigMatch[1] ?? '') || undefined;
     const key = requireIdempotencyKey(ctx);
     const result = await idempotent(store, {
-      scope: `settings:openai:${configId ?? 'create'}:${String(ctx.body.accountId ?? '').trim()}`,
+      scope: `${authContext.admin.id}:settings:openai:${configId ?? 'create'}:${String(ctx.body.accountId ?? '').trim()}`,
       key,
       fingerprint: fingerprint(ctx.method, ctx.path, ctx.body),
       traceId: ctx.traceId,
@@ -967,7 +973,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   if (credentialCollectionPath && ctx.method === 'POST') {
     const key = requireIdempotencyKey(ctx);
     const result = await idempotent(store, {
-      scope: 'credentials:/api/v1/credentials',
+      scope: `${authContext.admin.id}:credentials:/api/v1/credentials`,
       key,
       fingerprint: fingerprint(ctx.method, ctx.path, ctx.body),
       traceId: ctx.traceId,
@@ -995,7 +1001,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     if (!action && ctx.method === 'PATCH') {
       const key = requireIdempotencyKey(ctx);
       const result = await idempotent(store, {
-        scope: `credentials:${credentialId}:patch`,
+        scope: `${authContext.admin.id}:credentials:${credentialId}:patch`,
         key,
         fingerprint: fingerprint(ctx.method, ctx.path, ctx.body),
         traceId: ctx.traceId,
@@ -1009,7 +1015,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     if (action && ctx.method === 'POST') {
       const key = requireIdempotencyKey(ctx);
       const result = await idempotent(store, {
-        scope: `credentials:${credentialId}:${action}`,
+        scope: `${authContext.admin.id}:credentials:${credentialId}:${action}`,
         key,
         fingerprint: fingerprint(ctx.method, ctx.path, ctx.body),
         traceId: ctx.traceId,

@@ -173,6 +173,7 @@ export interface PiSkillManagerOptions {
   fetchImpl?: typeof fetch;
   execFileImpl?: typeof execFile;
   executionTimeoutMs?: number;
+  canUseHostSkills?: (adminId: string) => Promise<boolean>;
 }
 
 /**
@@ -187,9 +188,11 @@ export class PiSkillManager {
   private readonly fetchImpl: typeof fetch;
   private readonly execFileImpl: typeof execFile;
   private readonly executionTimeoutMs: number;
+  private readonly canUseHostSkills: (adminId: string) => Promise<boolean>;
   private readonly preflightCache = new Map<string, PiSkillPreflightResult>();
 
   constructor(options: PiSkillManagerOptions = {}) {
+    this.canUseHostSkills = options.canUseHostSkills ?? (async () => true);
     this.rootDir = resolve(options.rootDir ?? process.env.PI_SKILL_ROOT ?? join(homedir(), '.pi', 'skills'));
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.execFileImpl = options.execFileImpl ?? execFile;
@@ -197,11 +200,13 @@ export class PiSkillManager {
   }
 
   async list(adminId: string): Promise<PiSkillInfo[]> {
+    if (!(await this.canUseHostSkills(adminId))) return [];
     const state = await this.readRegistry(adminId);
     return state.items.map((item) => ({ ...item }));
   }
 
   async install(input: PiSkillInstallInput): Promise<PiSkillInfo> {
+    await this.requireHostSkillAccess(input.adminId);
     const source = input.source.trim();
     if (!source) throw new PiSkillError('SKILL_SOURCE_REQUIRED', 'skill source is required');
     const adminRoot = await this.ensureAdminRoot(input.adminId);
@@ -285,6 +290,7 @@ export class PiSkillManager {
    * needs a browser or pasted authorization code.
    */
   async login(input: PiSkillLoginInput): Promise<PiSkillLoginResult> {
+    await this.requireHostSkillAccess(input.adminId);
     const token = typeof input.token === 'string' ? input.token.trim() : '';
     if (token.length > 4096) throw new PiSkillError('SKILL_AUTH_TOKEN_INVALID', 'skill authorization token is too long');
     const state = await this.readRegistry(input.adminId);
@@ -353,6 +359,7 @@ export class PiSkillManager {
   }
 
   async setEnabled(adminId: string, skillId: string, enabled: boolean): Promise<PiSkillInfo> {
+    await this.requireHostSkillAccess(adminId);
     const state = await this.readRegistry(adminId);
     const item = findSkill(state, skillId);
     if (!item) throw new PiSkillError('SKILL_NOT_INSTALLED', `skill ${skillId} is not installed`);
@@ -368,6 +375,7 @@ export class PiSkillManager {
   }
 
   async preflight(input: PiSkillPreflightInput): Promise<PiSkillPreflightResult> {
+    await this.requireHostSkillAccess(input.adminId);
     const cacheKey = `${sanitizeAdminId(input.adminId)}:${sanitizeSkillId(input.skillId)}:${input.requestId ?? 'default'}`;
     const cached = this.preflightCache.get(cacheKey);
     if (cached) return { ...cached };
@@ -555,6 +563,7 @@ export class PiSkillManager {
   }
 
   async executeModelTool(name: string, args: Record<string, unknown>, input: WorkspaceCommandInput): Promise<WorkspaceModelToolResult> {
+    await this.requireHostSkillAccess(input.adminId);
     if (name === 'pi_skill_list') {
       const items = await this.list(input.adminId);
       return {
@@ -716,6 +725,7 @@ export class PiSkillManager {
   }
 
   async handleInstruction(input: { adminId: string; instruction: string }): Promise<PiSkillInstructionResult | undefined> {
+    if (!(await this.canUseHostSkills(input.adminId))) return undefined;
     const normalized = input.instruction.replace(/\s+/g, ' ').trim();
     const urlMatch = normalized.match(/(?:https?:\/\/|file:\/\/)[^\s)\]}>]+|(?:[A-Za-z]:[\\/]|\/)[^\s)\]}>]+/i);
     const source = urlMatch?.[0].replace(/[),\]}>，。！？；：]+$/g, '');
@@ -765,6 +775,7 @@ export class PiSkillManager {
   }
 
   private async executeInternal(input: PiSkillExecutionInput, secretToRedact?: string): Promise<PiSkillExecutionResult> {
+    await this.requireHostSkillAccess(input.adminId);
     const state = await this.readRegistry(input.adminId);
     const item = findSkill(state, input.skillId);
     if (!item) throw new PiSkillError('SKILL_NOT_INSTALLED', `skill ${input.skillId} is not installed`);
@@ -1043,6 +1054,10 @@ export class PiSkillManager {
     }
   }
 
+  private async requireHostSkillAccess(adminId: string): Promise<void> {
+    if (!(await this.canUseHostSkills(adminId))) throw new PiSkillError('FORBIDDEN', '仅平台管理员可使用主机 Skill');
+  }
+
   private async ensureAdminRoot(adminId: string): Promise<string> {
     const root = join(this.rootDir, sanitizeAdminId(adminId));
     await mkdir(root, { recursive: true });
@@ -1050,6 +1065,7 @@ export class PiSkillManager {
   }
 
   private async readRegistry(adminId: string): Promise<RegistryState> {
+    await this.requireHostSkillAccess(adminId);
     const root = await this.ensureAdminRoot(adminId);
     let parsed: Partial<RegistryState>;
     try {

@@ -1416,6 +1416,7 @@ export interface Store {
   withOutboundConversationLock<T>(accountId: string, conversationRef: string, work: () => Promise<T>): Promise<T>;
   withVerifiedPartialDeliveryPlan<T>(input: { accountId: string; orderNo: string; executionKey: string; reservationId: string }, work: () => Promise<T>): Promise<T>;
   health(): Promise<{ kind: string; reachable: boolean }>;
+  isAccountIdentityAvailable(platform: string, sellerRef: string, excludeAccountId: string): Promise<boolean>;
   countAdmins(): Promise<number>;
   listAdminIds(): Promise<string[]>;
   findAdminById(id: string): Promise<AdminRecord | undefined>;

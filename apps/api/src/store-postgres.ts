@@ -99,6 +99,7 @@ export class PostgresStore implements Store {
     } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
   }
   async health(): Promise<{ kind: string; reachable: boolean }> { try { await this.pool.query('select 1'); return { kind: this.kind, reachable: true }; } catch { return { kind: this.kind, reachable: false }; } }
+  async isAccountIdentityAvailable(platform: string, sellerRef: string, excludeAccountId: string): Promise<boolean> { const result = await this.pool.query('select 1 from accounts.accounts where platform=$1 and (seller_ref=$2 or platform_user_id=$2) and id<>$3 limit 1', [platform, sellerRef, excludeAccountId]); return result.rows.length === 0; }
   async countAdmins(): Promise<number> { const result = await this.pool.query('select count(*)::int as count from auth.admins'); return Number(result.rows[0].count); }
   async listAdminIds(): Promise<string[]> { const result = await this.pool.query("select id from auth.admins where status='active' order by created_at asc"); return result.rows.map((row) => String(row.id)); }
   async findAdminById(id: string): Promise<AdminRecord | undefined> { const result = await this.pool.query('select * from auth.admins where id=$1 limit 1', [id]); return result.rows[0] ? this.toAdmin(result.rows[0]) : undefined; }

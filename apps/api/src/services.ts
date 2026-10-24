@@ -1,3 +1,4 @@
+import { assertCookieIdentity } from './account-identity.js';
 import type { AppConfig } from './config.js';
 import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CouponBatchListQuery, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, OrderListQuery, OrderListResult, OrderRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSyncResult, SessionRecord, Store, XianyuProductItem } from './domain.js';
 import { createId, createToken, digestJson, hashPassword, isSessionFresh, sha256, verifyPassword } from './security.js';
@@ -84,6 +85,7 @@ export class AccountService {
   async resolveForLogin(input: { adminId: string; accountId?: string; platform: string; sellerRef: string; requestId: string; traceId: string }): Promise<AccountRecord> {
     if (input.accountId) {
       const existing = await this.getForLogin(input.adminId, input.accountId);
+      await assertCookieIdentity(this.store, input.adminId, existing, input.sellerRef);
       return (await this.store.restoreAccountForLogin(input.adminId, existing.id)) ?? existing;
     }
     const existing = await this.store.findAccountForLogin({ adminId: input.adminId, platform: input.platform, sellerRef: input.sellerRef });
@@ -537,6 +539,11 @@ export class CredentialService {
   async save(input: { adminId: string; accountId: string; cookieHeader?: string; accessToken?: string; clearAccessToken?: boolean; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string; requestId: string; traceId: string }): Promise<CredentialRecord> {
     const account = await this.store.getAccount(input.adminId, input.accountId);
     if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found');
+    if (input.cookieHeader) {
+      const identity = /(?:^|;\s*)unb=([^;]+)/.exec(input.cookieHeader)?.[1]?.trim();
+      if ((await this.store.findAdminById(input.adminId))?.role !== 'admin' && !identity) throw new ServiceError(422, 'COOKIE_IDENTITY_REQUIRED', 'Cookie 缺少闲鱼用户身份');
+      if (identity) await assertCookieIdentity(this.store, input.adminId, account, identity);
+    }
     const current = await this.store.getCredential(input.adminId, input.accountId);
     const cookieHeader = input.cookieHeader?.trim() || current?.cookieHeader;
     const accessToken = input.accessToken?.trim() || (input.clearAccessToken ? undefined : current?.accessToken);
