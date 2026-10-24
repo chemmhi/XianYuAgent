@@ -504,15 +504,15 @@ export class XianyuImService {
           cookieSnapshotFromMetadata(latest.metadata)?.filter((cookie) => !isCaptchaChallengeCookie(cookie.name)),
           cookieSnapshotFromHeader(token.cookieHeader || latest.cookieHeader || credential.cookieHeader),
         );
+        let completed: XianyuVerificationBrowserResult | undefined;
+        const verificationKey = `${adminId}:${account.id}`;
         try {
           // Use the verification browser's configured timeout. The browser
           // owns the production wait budget because slider solving can take
           // longer than a short IM request retry window.
-          const verificationKey = `${adminId}:${account.id}`;
           const retryAfter = this.verificationRetryAfter.get(verificationKey) ?? 0;
           if (retryAfter > Date.now()) throw new Error('XIANYU_VERIFICATION_COOLDOWN');
           const existingVerification = this.verificationInFlight.get(verificationKey);
-          let completed: XianyuVerificationBrowserResult;
           if (existingVerification) {
             completed = await existingVerification;
           } else {
@@ -522,6 +522,7 @@ export class XianyuImService {
               initialCookieSnapshot: initialSnapshot,
               allowManualFallback: false,
               pollIntervalMs: 250,
+              imTokenRequest: { deviceId, expectedUserId: account.platformUserId ?? account.sellerRef },
             });
             this.verificationInFlight.set(verificationKey, verificationPromise);
             try {
@@ -534,9 +535,32 @@ export class XianyuImService {
               if (this.verificationInFlight.get(verificationKey) === verificationPromise) this.verificationInFlight.delete(verificationKey);
             }
           }
-          const mergedSnapshot = dropStaleCaptchaChallengeCookies(mergeCookieSnapshots(initialSnapshot, completed.cookieSnapshot));
-          const browserCookieHeader = cookieHeaderFromSnapshot(mergedSnapshot);
-          const browserMetadata = metadataWithCookieSnapshot(latest.metadata, mergedSnapshot);
+        } catch (error) {
+          console.warn(JSON.stringify({ component: 'xianyu-im', event: 'verification_browser_failed', adminId, accountId: account.id, errorCode: recoveryErrorCode(error) }));
+        }
+        // Database failures must propagate, rather than becoming a slider failure.
+        if (completed) {
+          const mergedSnapshot = dropStaleCaptchaChallengeCookies(completed.imToken
+            ? completed.cookieSnapshot
+            : mergeCookieSnapshots(initialSnapshot, completed.cookieSnapshot));
+          const browserCookieHeader = cookieHeaderFromSnapshot(completed.imToken
+            ? mergedSnapshot.filter(cookie => /(^|\.)goofish\.com$/.test(cookie.domain ?? '')
+              && cookie._crHasCrossSiteAncestor !== true)
+            : mergedSnapshot);
+          const current = await this.store.getCredential(adminId, account.id) ?? latest;
+          const browserMetadata = metadataWithCookieSnapshot(current.metadata, mergedSnapshot);
+          if (completed.imToken) {
+            const native = completed.imToken;
+            if (!browserCookieHeader || !native.accessToken?.trim() || native.deviceId !== deviceId
+              || native.userId !== (account.platformUserId ?? account.sellerRef)) {
+              throw new ServiceError(409, 'XIANYU_BROWSER_IM_IDENTITY_MISMATCH', '浏览器恢复凭证与当前账号不匹配');
+            }
+            // Save the matching cookie snapshot and native token together before
+            // any IM client can use the recovered credential.
+            return this.store.upsertCredential({ adminId, accountId: account.id, platform: account.platform,
+              cookieHeader: browserCookieHeader, accessToken: native.accessToken, deviceId,
+              metadata: browserMetadata, expiresAt: current.expiresAt });
+          }
           await this.store.upsertCredential({
             adminId,
             accountId: account.id,
@@ -552,8 +576,6 @@ export class XianyuImService {
             return this.store.upsertCredential({ adminId, accountId: account.id, platform: account.platform, cookieHeader: token.cookieHeader, accessToken: token.accessToken, deviceId, metadata: persisted?.metadata ?? browserMetadata, expiresAt: persisted?.expiresAt ?? latest.expiresAt ?? credential.expiresAt });
           }
           this.verificationRetryAfter.set(verificationKey, Date.now() + 30_000);
-        } catch (error) {
-          console.warn(JSON.stringify({ component: 'xianyu-im', event: 'verification_browser_failed', adminId, accountId: account.id, errorCode: recoveryErrorCode(error) }));
         }
       }
       const statusCode = token.errorCode === 'ACCOUNT_VALIDATION_REQUIRED' ? 409 : token.accountInvalid ? 401 : 502;
@@ -562,7 +584,8 @@ export class XianyuImService {
         : token.message ?? 'unable to obtain xianyu im token';
       throw new ServiceError(statusCode, token.errorCode ?? 'IM_TOKEN_FAILED', message);
     }
-    return this.store.upsertCredential({ adminId, accountId: account.id, platform: account.platform, cookieHeader: token.cookieHeader, accessToken: token.accessToken, deviceId, metadata: credential.metadata, expiresAt: credential.expiresAt });
+    const current = await this.store.getCredential(adminId, account.id) ?? credential;
+    return this.store.upsertCredential({ adminId, accountId: account.id, platform: account.platform, cookieHeader: token.cookieHeader, accessToken: token.accessToken, deviceId, metadata: current.metadata, expiresAt: current.expiresAt });
   }
 
   private scheduleCredentialRefresh(adminId: string, accountId: string): void {

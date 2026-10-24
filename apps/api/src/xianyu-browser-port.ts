@@ -9,7 +9,7 @@ export type XianyuVerificationCookie = XianyuBrowserCookie & {
 
 export interface XianyuVerificationPage extends XianyuSliderPage {
   goto(url: string, options?: { waitUntil?: XianyuVerificationWaitUntil; timeout?: number }): Promise<unknown>;
-  evaluate<T>(pageFunction: () => T | Promise<T>): Promise<T>;
+  evaluate<T, A = undefined>(pageFunction: (arg: A) => T | Promise<T>, arg?: A): Promise<T>;
   close(): Promise<void>;
 }
 

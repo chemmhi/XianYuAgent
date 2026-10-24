@@ -7,6 +7,7 @@ import { XIANYU_USER_AGENT } from './xianyu-browser-identity.js';
 import type { XianyuVerificationBrowserFactory, XianyuVerificationContext, XianyuVerificationCookie, XianyuVerificationPage } from './xianyu-browser-port.js';
 import { acquireXianyuVerificationProfileLock } from './xianyu-verification-profile-lock.js';
 import { XianyuSliderSolver, type XianyuSliderMode } from './xianyu-slider-solver.js';
+import { fetchXianyuBrowserImToken, type XianyuBrowserImToken, type XianyuBrowserImTokenRequest } from './xianyu-browser-im-token.js';
 
 export type XianyuVerificationBrowserMode = 'disabled' | 'launch';
 
@@ -28,6 +29,7 @@ export interface XianyuVerificationBrowserOptions {
 export interface XianyuVerificationBrowserResult {
   finalUrl: string;
   cookieSnapshot: XianyuCookieSnapshot;
+  imToken?: XianyuBrowserImToken;
 }
 
 const DEFAULT_MAX_WAIT_MS = 3 * 60_000;
@@ -93,12 +95,13 @@ export class XianyuVerificationBrowser {
     allowManualFallback?: boolean;
     maxWaitMs?: number;
     pollIntervalMs?: number;
+    imTokenRequest?: XianyuBrowserImTokenRequest;
   }): Promise<XianyuVerificationBrowserResult> {
     if (this.mode === 'disabled') throw new Error('XIANYU_VERIFICATION_BROWSER_DISABLED');
     assertVerificationUrl(input.verificationUrl);
     const profileDir = await this.resolveProfileDir(input.profileKey);
     const profileLockKey = normalizeProfileLockKey(profileDir);
-    const verificationKey = `${profileLockKey}\u0000${input.verificationUrl}\u0000${JSON.stringify(input.initialCookieSnapshot ?? [])}`;
+    const verificationKey = `${profileLockKey}\u0000${input.verificationUrl}\u0000${JSON.stringify(input.initialCookieSnapshot ?? [])}\u0000${JSON.stringify(input.imTokenRequest ?? null)}`;
     const active = activeVerifications.get(verificationKey);
     if (active) return active;
 
@@ -132,6 +135,7 @@ export class XianyuVerificationBrowser {
     allowManualFallback?: boolean;
     maxWaitMs?: number;
     pollIntervalMs?: number;
+    imTokenRequest?: XianyuBrowserImTokenRequest;
   }, profileDir: string): Promise<XianyuVerificationBrowserResult> {
     const maxWaitMs = Math.max(250, Math.floor(input.maxWaitMs ?? this.maxWaitMs));
     const pollIntervalMs = Math.max(25, Math.floor(input.pollIntervalMs ?? this.pollIntervalMs));
@@ -181,7 +185,12 @@ export class XianyuVerificationBrowser {
             await sleep(1_000);
             lastCookies = await context.cookies();
             if (isVerificationPageComplete(lastUrl, lastCookies, initialSnapshot)) {
-              return { finalUrl: lastUrl, cookieSnapshot: dropStaleCaptchaChallengeCookies(mapCookies(lastCookies)) };
+              const imToken = input.imTokenRequest
+                ? await fetchXianyuBrowserImToken(context, page, input.imTokenRequest)
+                : undefined;
+              // Native requests may rotate cookies; export only after they finish.
+              return { finalUrl: page.url(), cookieSnapshot: dropStaleCaptchaChallengeCookies(mapCookies(await context.cookies())),
+                ...(imToken ? { imToken } : {}) };
             }
           }
           if (isBlankOrInvalidVerificationPage(lastUrl)) throw new Error('XIANYU_VERIFICATION_PAGE_EMPTY');
