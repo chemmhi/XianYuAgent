@@ -1,3 +1,4 @@
+import { InvitedUserModelPolicy } from './invited-user-model-policy.js';
 import { decryptCredentialValue } from './credential-crypto.js';
 import type { CredentialRefRecord, ModelProviderRoutingMode, ModelProviderRoutingRecord, Store } from './domain.js';
 import { ServiceError } from './services.js';
@@ -63,6 +64,7 @@ export type OpenAIConfigBody = Pick<OpenAIConfigInput, 'configId' | 'role' | 'pr
 
 export interface OpenAIResolvedConfig extends OpenAIConfigView {
   apiKey: string;
+  restrictedEndpoints?: boolean;
 }
 
 type Audit = (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => Promise<string>;
@@ -77,9 +79,12 @@ export class OpenAISettingsService {
     private readonly audit: Audit,
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly wireApi: ModelWireApi = DEFAULT_PI_WIRE_API,
-  ) {}
+  ) { this.endpointPolicy = new InvitedUserModelPolicy(store); }
+
+  private readonly endpointPolicy: InvitedUserModelPolicy;
 
   async list(input: { adminId: string; accountId: string }): Promise<OpenAIConfigView[]> {
+    if (!(await this.store.hasAccountScope(input.adminId, input.accountId))) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
     const refs = await this.credentials.list(input);
     return refs
       .filter((ref) => ref.kind === 'api_key' && ref.purpose === 'model_client')
@@ -88,6 +93,8 @@ export class OpenAISettingsService {
 
   async save(input: OpenAIConfigInput): Promise<OpenAIConfigView> {
     const normalized = normalizeInput(input, this.wireApi);
+    const restrictedEndpoints = await this.endpointPolicy.restricted(input.adminId, normalized);
+    if (!(await this.store.hasAccountScope(input.adminId, input.accountId))) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
     const current = input.configId ? await this.store.getCredentialRef(input.adminId, input.configId) : undefined;
     if (input.configId && (!current || current.accountId !== input.accountId)) throw new ServiceError(404, 'NOT_FOUND', '模型配置不存在');
     if (current && roleFrom(current) !== normalized.role) throw new ServiceError(409, 'CONFLICT', '配置角色不可变，请分别编辑主配置或备用配置');
@@ -144,13 +151,15 @@ export class OpenAISettingsService {
 
   async test(input: OpenAIConfigInput): Promise<{ ok: true; provider: string; model: string; latencyMs: number; models: ProviderModel[] }> {
     const normalized = normalizeInput(input, this.wireApi);
+    const restrictedEndpoints = await this.endpointPolicy.restricted(input.adminId, normalized);
     if (input.configId) {
       const current = await this.store.getCredentialRef(input.adminId, input.configId);
       if (!current || current.accountId !== input.accountId || current.status === 'revoked') throw new ServiceError(404, 'NOT_FOUND', '模型配置不存在');
     }
+    if (!(await this.store.hasAccountScope(input.adminId, input.accountId))) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
     const secret = await this.resolveSecret(input.adminId, input.accountId, input.configId, normalized.apiKey);
     const started = Date.now();
-    const models = await this.fetchModels({ baseUrl: normalized.baseUrl, apiKey: secret, timeoutMs: normalized.timeoutMs });
+    const models = await this.fetchModels({ baseUrl: normalized.baseUrl, apiKey: secret, timeoutMs: normalized.timeoutMs, restrictedEndpoints });
     return { ok: true, provider: normalized.provider, model: normalized.model, latencyMs: Date.now() - started, models };
   }
 
@@ -159,17 +168,19 @@ export class OpenAISettingsService {
       ? await this.resolveById(input.adminId, input.configId, input.accountId)
       : (await this.resolveForRuntime(input.adminId, input.accountId))[0];
     if (!resolved) return [];
-    return this.fetchModels({ baseUrl: resolved.baseUrl, apiKey: resolved.apiKey, timeoutMs: resolved.timeoutMs });
+    return this.fetchModels({ baseUrl: resolved.baseUrl, apiKey: resolved.apiKey, timeoutMs: resolved.timeoutMs, restrictedEndpoints: resolved.restrictedEndpoints });
   }
 
   async resolveForRuntime(adminId: string, accountId: string): Promise<OpenAIResolvedConfig[]> {
+    if (!(await this.store.hasAccountScope(adminId, accountId))) throw new ServiceError(403, 'FORBIDDEN', 'account scope required');
     const refs = await this.store.listCredentialRefs(adminId, accountId);
     const rows: OpenAIResolvedConfig[] = [];
     for (const ref of refs.filter((item) => item.status === 'active' && item.kind === 'api_key' && item.purpose === 'model_client')) {
       const secret = await this.store.getCredentialRefSecret(adminId, ref.id);
       if (!secret) continue;
       const view = toView(ref, this.wireApi);
-      rows.push({ ...view, apiKey: decryptCredentialValue(secret.secretCiphertext, this.encryptionKey) });
+      const restrictedEndpoints = await this.endpointPolicy.restricted(adminId, view);
+      rows.push({ ...view, restrictedEndpoints, apiKey: decryptCredentialValue(secret.secretCiphertext, this.encryptionKey) });
     }
     return rows.sort((left, right) => (left.role === 'primary' ? -1 : right.role === 'primary' ? 1 : 0));
   }
@@ -212,6 +223,7 @@ export class OpenAISettingsService {
     const reasoningEffort = (config as OpenAIResolvedConfig & { reasoningEffort?: string }).reasoningEffort?.trim() || undefined;
     return new OpenAICompatibleModelClient({
       apiKey: config.apiKey,
+      ...(config.restrictedEndpoints ? { fetchImpl: this.endpointPolicy.fetch(this.fetchImpl) } : {}),
       baseUrl: config.baseUrl,
       model: config.model,
       provider: config.provider,
@@ -230,7 +242,9 @@ export class OpenAISettingsService {
     if (!ref || ref.accountId !== accountId || ref.status === 'revoked') return undefined;
     const secret = await this.store.getCredentialRefSecret(adminId, configId);
     if (!secret) return undefined;
-    return { ...toView(ref, this.wireApi), apiKey: decryptCredentialValue(secret.secretCiphertext, this.encryptionKey) };
+    const view = toView(ref, this.wireApi);
+    const restrictedEndpoints = await this.endpointPolicy.restricted(adminId, view);
+    return { ...view, restrictedEndpoints, apiKey: decryptCredentialValue(secret.secretCiphertext, this.encryptionKey) };
   }
 
   private async resolveSecret(adminId: string, accountId: string, configId: string | undefined, provided: string | undefined): Promise<string> {
@@ -241,9 +255,9 @@ export class OpenAISettingsService {
     return decryptCredentialValue(secret.secretCiphertext, this.encryptionKey);
   }
 
-  private async fetchModels(input: { baseUrl: string; apiKey: string; timeoutMs: number }): Promise<ProviderModel[]> {
+  private async fetchModels(input: { baseUrl: string; apiKey: string; timeoutMs: number; restrictedEndpoints?: boolean }): Promise<ProviderModel[]> {
     try {
-      return await listProviderModels({ baseUrl: input.baseUrl, apiKey: input.apiKey, timeoutMs: input.timeoutMs, fetchImpl: this.fetchImpl });
+      return await listProviderModels({ baseUrl: input.baseUrl, apiKey: input.apiKey, timeoutMs: input.timeoutMs, fetchImpl: input.restrictedEndpoints ? this.endpointPolicy.fetch(this.fetchImpl) : this.fetchImpl });
     } catch (error) {
       if (error instanceof ServiceError) throw error;
       if (error instanceof ModelProviderError) {

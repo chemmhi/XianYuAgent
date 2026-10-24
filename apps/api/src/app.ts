@@ -5,7 +5,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { loadConfig, type AppConfig } from './config.js';
 import { mergeAutoReplyAgentRuntimeConfig, resolveAutoReplyAgentConfig } from './auto-reply-agent-config.js';
 import type { AuthContext } from './services.js';
-import { AccountService, AuthService, CouponService, CredentialService, OrderService, ProductService, ProductSyncService, ServiceError, idempotent } from './services.js';
+import { AccountService, AuthService, InviteService, CouponService, CredentialService, OrderService, ProductService, ProductSyncService, ServiceError, idempotent } from './services.js';
 import { createIds, failure, fingerprint, parseCookies, readBody, setCookie, success, writeJson, type RequestContext } from './http.js';
 import { createStore } from './store.js';
 import type { ProductListResult, ProductRecord, Store, VerificationRecoveryRequest } from './domain.js';
@@ -48,7 +48,7 @@ import { CouponAssetService } from './coupon-assets.js';
 import { ProductPublishService } from './product-publish.js';
 import { ProductKnowledgeBaseService } from './product-knowledge-base.js';
 import { classifyXianyuFailure } from './xianyu-account-health.js';
-import { PiSkillManager } from './pi-skills.js';
+import { PiSkillManager, PiSkillError } from './pi-skills.js';
 import { PaymentEventWorker } from './payment-event-worker.js';
 import { extractTrustedOrderNo, isTrustedPaidEvent, trustedPaymentOccurredAt } from './payment-event-parser.js';
 
@@ -56,6 +56,7 @@ export interface AppRuntime {
   config: AppConfig;
   store: Store;
   auth: AuthService;
+  invites: InviteService;
   accounts: AccountService;
   coupons: CouponService;
   orders: OrderService;
@@ -110,9 +111,10 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
   const autoReplyGodView = createAutoReplyGodViewSink();
   const autoReplyAgentConfig = config.autoReplyAgent ?? resolveAutoReplyAgentConfig();
   const modelClient = createConfiguredModelClient(config);
-  const piSkills = new PiSkillManager({ rootDir: config.piSkillRoot });
+  const piSkills = new PiSkillManager({ rootDir: config.piSkillRoot, canUseHostSkills: async (adminId) => { const actor = await store.findAdminById(adminId); return actor?.role === 'admin' && actor.status === 'active'; } });
   const autoReplyModelClient = config.autoReplyModelEnabled === false ? undefined : modelClient;
   const auth = new AuthService(store, config);
+  const invites = new InviteService(store, config.credentialEncryptionKey)
   const accounts = new AccountService(store, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
@@ -226,7 +228,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
   // this resolver must never read AutoReplyAgentSettingsService.
   const resolveAccountModelClient = async (adminId: string, accountId: string): Promise<ModelClient | undefined> => {
     const configured = await openaiSettings.resolveForRuntime(adminId, accountId);
-    if (configured.length === 0) return modelClient;
+    if (configured.length === 0) return (await store.findAdminById(adminId))?.role === 'admin' ? modelClient : createUnavailableModelClient();
     if (config.modelProviderFailoverV2 === false) {
       const primary = configured.find((item) => item.role === 'primary') ?? configured[0];
       const backup = configured.find((item) => item.role === 'backup');
@@ -491,11 +493,17 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
-  }, coupons, autoReplyAgentSettings, workspaceCommands, modelClient);
+  }, coupons, autoReplyAgentSettings, workspaceCommands, undefined, async (adminId, accountId) => {
+    const actor = await store.findAdminById(adminId);
+    if (actor?.role === 'admin') return modelClient;
+    const configured = await openaiSettings.resolveForRuntime(adminId, accountId);
+    if (configured.length === 0) return undefined;
+    return resolveAccountModelClient(adminId, accountId);
+  });
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
-    config, store, auth, accounts, coupons, orders, orderDelivery, products, productPublisher, productKnowledgeBase, productAutomation, productAutomationTrigger, productAutomationWorker, paymentEventWorker, productSync, credentials, apiKeyCredentials, openaiSettings, modelProviderRuntime, dashboard, messages, autoReply, autoReplyRepair, autoReplyAgentSettings, autoReplyActivity, redisRealtime, verificationRecoveryBridge, imOwnerServer, workspace, piSkills, workspaceCommands, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
+    config, store, auth, invites, accounts, coupons, orders, orderDelivery, products, productPublisher, productKnowledgeBase, productAutomation, productAutomationTrigger, productAutomationWorker, paymentEventWorker, productSync, credentials, apiKeyCredentials, openaiSettings, modelProviderRuntime, dashboard, messages, autoReply, autoReplyRepair, autoReplyAgentSettings, autoReplyActivity, redisRealtime, verificationRecoveryBridge, imOwnerServer, workspace, piSkills, workspaceCommands, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
     server,
     async listen() {
       await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));
@@ -678,7 +686,7 @@ function createPiWorkspaceRuntime(config: AppConfig, store: Store, sharedModelCl
     resolveModelClient: async ({ adminId, accountId }) => {
       if (!adminId) return modelClient;
       try {
-        return await resolveAccountModelClient(adminId, accountId);
+        return await resolveAccountModelClient(adminId, accountId) ?? createUnavailableModelClient();
       } catch {
         return createUnavailableModelClient();
       }
@@ -707,7 +715,7 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
     const result = await dispatch(runtime, ctx, response);
     if (result) writeJson(response, result.statusCode, result.body);
   } catch (error) {
-    const serviceError = error instanceof ServiceError ? error : undefined;
+    const serviceError = error instanceof ServiceError ? error : error instanceof PiSkillError && error.code === 'FORBIDDEN' ? new ServiceError(403, 'FORBIDDEN', error.message) : undefined;
     const mapped = serviceError ?? new ServiceError(500, 'INTERNAL_ERROR', error instanceof Error ? error.message : 'internal error');
     const body = failure(ctx, mapped.statusCode, mapped.code, mapped.message, mapped.details);
     writeJson(response, body.statusCode, body.body);
@@ -715,7 +723,7 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
 }
 
 async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: ServerResponse): Promise<{ statusCode: number; body: unknown } | undefined> {
-  const { auth, accounts, coupons, orders, products, productAutomation, productSync, credentials, apiKeyCredentials, dashboard, messages, workspace, piSkills, store, config, xianyuIm, modelProviderRuntime } = runtime;
+  const { auth, invites, accounts, coupons, orders, products, productAutomation, productSync, credentials, apiKeyCredentials, dashboard, messages, workspace, piSkills, store, config, xianyuIm, modelProviderRuntime } = runtime;
   if (ctx.path === '/healthz' && ctx.method === 'GET') {
     const health = await store.health();
     const redis = !config.redisUrl || !runtime.redisRealtime
@@ -752,6 +760,12 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     }
     return { statusCode: result.statusCode, body: result.body };
   }
+  if (ctx.path === '/api/v1/auth/register' && ctx.method === 'POST') {
+    const result = await auth.register({ code:String(ctx.body.inviteCode ?? ctx.body.code ?? ''), email:String(ctx.body.email ?? ''), password:String(ctx.body.password ?? ''), displayName:String(ctx.body.displayName ?? '') });
+    setSessionCookies(response, result.csrfToken, result.session.id, config.cookieSecure);
+    return { statusCode: 201, body: success(ctx, { session:{id:result.session.id,expiresAt:result.session.expiresAt}, profile:{id:result.admin.id,email:result.admin.email,displayName:result.admin.displayName,role:result.admin.role} }).body };
+  }
+
   if (ctx.path === '/api/v1/auth/password-login' && ctx.method === 'POST') {
     const result = await auth.login({ email: String(ctx.body.email ?? ''), password: String(ctx.body.password ?? '') });
     setSessionCookies(response, result.csrfToken, result.session.id, config.cookieSecure);
@@ -759,6 +773,12 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   }
 
   const authContext = await requireAuth(auth, ctx);
+  if (ctx.path === '/api/v1/auth/invites' && ctx.method === 'GET') return { statusCode:200, body: success(ctx, { items: await invites.list(authContext.admin.id) }).body };
+  if (ctx.path === '/api/v1/auth/invites' && ctx.method === 'POST') { await auth.validateCsrf(authContext, ctx.headers, ctx.cookies); const result=await invites.create({adminId:authContext.admin.id,requestKey:String(ctx.body.requestKey ?? ''),days:Number(ctx.body.days ?? 7),requestId:ctx.requestId,traceId:ctx.traceId}); return {statusCode:201,body:success(ctx,{invite:{...result.invite,code:result.code}}).body}; }
+  const inviteRevoke=ctx.path.match(/^\/api\/v1\/auth\/invites\/([^/]+)$/);
+  if (inviteRevoke && ctx.method === 'DELETE') { await auth.validateCsrf(authContext, ctx.headers, ctx.cookies); await invites.delete(authContext.admin.id,decodeURIComponent(inviteRevoke[1]),ctx.body.purgeUser===true,ctx.requestId,ctx.traceId); return {statusCode:200,body:success(ctx,{deleted:true}).body}; }
+  const inviteAction=ctx.path.match(/^\/api\/v1\/auth\/invites\/([^/]+)\/(enable|disable|renew)$/);
+  if (inviteAction && ctx.method === 'POST') { await auth.validateCsrf(authContext,ctx.headers,ctx.cookies); const id=decodeURIComponent(inviteAction[1]); if(inviteAction[2]==='renew') return {statusCode:200,body:success(ctx,{expiresAt:await invites.renew(authContext.admin.id,id,Number(ctx.body.days??7),ctx.requestId,ctx.traceId)}).body}; await invites.setStatus(authContext.admin.id,id,inviteAction[2]==='enable'?'active':'disabled',ctx.requestId,ctx.traceId); return {statusCode:200,body:success(ctx,{updated:true}).body}; }
   if (ctx.method !== 'GET' && ctx.method !== 'HEAD' && ctx.path !== '/api/v1/auth/logout') await auth.validateCsrf(authContext, ctx.headers, ctx.cookies);
   if (ctx.path === '/api/v1/auth/logout' && ctx.method === 'POST') {
     await auth.validateCsrf(authContext, ctx.headers, ctx.cookies);
@@ -843,7 +863,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   if (ctx.path === '/api/v1/settings/agent' && ctx.method === 'PATCH') {
     const key = requireIdempotencyKey(ctx);
     const result = await idempotent(store, {
-      scope: `settings:agent:${String(ctx.body.accountId ?? '').trim()}`,
+      scope: `${authContext.admin.id}:settings:agent:${String(ctx.body.accountId ?? '').trim()}`,
       key,
       fingerprint: fingerprint(ctx.method, ctx.path, ctx.body),
       traceId: ctx.traceId,
@@ -876,7 +896,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     if (!Number.isInteger(expectedVersion) || expectedVersion < 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'expectedVersion must be a non-negative integer');
     if (config.modelProviderFailoverV2 === false) return { statusCode: 409, body: failure(ctx, 409, 'MODEL_PROVIDER_FAILOVER_DISABLED', 'Model Provider V2 路由已关闭，当前使用 legacy 主 Provider').body };
     const result = await idempotent(store, {
-      scope: `settings:openai:routing:${accountId}`,
+      scope: `${authContext.admin.id}:settings:openai:routing:${accountId}`,
       key,
       fingerprint: fingerprint(ctx.method, ctx.path, ctx.body),
       traceId: ctx.traceId,
@@ -944,7 +964,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     const configId = decodeURIComponent(openAiConfigMatch[1] ?? '') || undefined;
     const key = requireIdempotencyKey(ctx);
     const result = await idempotent(store, {
-      scope: `settings:openai:${configId ?? 'create'}:${String(ctx.body.accountId ?? '').trim()}`,
+      scope: `${authContext.admin.id}:settings:openai:${configId ?? 'create'}:${String(ctx.body.accountId ?? '').trim()}`,
       key,
       fingerprint: fingerprint(ctx.method, ctx.path, ctx.body),
       traceId: ctx.traceId,
@@ -967,7 +987,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   if (credentialCollectionPath && ctx.method === 'POST') {
     const key = requireIdempotencyKey(ctx);
     const result = await idempotent(store, {
-      scope: 'credentials:/api/v1/credentials',
+      scope: `${authContext.admin.id}:credentials:/api/v1/credentials`,
       key,
       fingerprint: fingerprint(ctx.method, ctx.path, ctx.body),
       traceId: ctx.traceId,
@@ -995,7 +1015,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     if (!action && ctx.method === 'PATCH') {
       const key = requireIdempotencyKey(ctx);
       const result = await idempotent(store, {
-        scope: `credentials:${credentialId}:patch`,
+        scope: `${authContext.admin.id}:credentials:${credentialId}:patch`,
         key,
         fingerprint: fingerprint(ctx.method, ctx.path, ctx.body),
         traceId: ctx.traceId,
@@ -1009,7 +1029,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     if (action && ctx.method === 'POST') {
       const key = requireIdempotencyKey(ctx);
       const result = await idempotent(store, {
-        scope: `credentials:${credentialId}:${action}`,
+        scope: `${authContext.admin.id}:credentials:${credentialId}:${action}`,
         key,
         fingerprint: fingerprint(ctx.method, ctx.path, ctx.body),
         traceId: ctx.traceId,

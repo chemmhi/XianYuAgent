@@ -14,6 +14,7 @@ export interface AuthState {
 export interface AuthController extends AuthState {
   refresh: () => Promise<void>;
   login: (input: { email: string; password: string }) => Promise<void>;
+  register: (input: { inviteCode: string; email: string; password: string; displayName: string }) => Promise<void>;
   bootstrap: (input: { email: string; password: string; displayName: string }) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -62,6 +63,8 @@ export function useAuthController(api: AuthApi): AuthController {
     }
   }, [api]);
 
+  const register = useCallback(async (input: { inviteCode: string; email: string; password: string; displayName: string }) => { setState((previous) => ({ ...previous, error: null, busy: true })); try { const session = await api.register(input); setState(stateFromSession({ ...session, authenticated: true, bootstrapRequired: false })); } catch (error) { setState((previous) => ({ ...previous, phase: 'login-required', error: errorMessage(error), busy: false })); throw error; } }, [api]);
+
   const bootstrap = useCallback(async (input: { email: string; password: string; displayName: string }) => {
     setState((previous) => ({ ...previous, error: null, busy: true }));
     try {
@@ -86,5 +89,5 @@ export function useAuthController(api: AuthApi): AuthController {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  return { ...state, refresh, login, bootstrap, logout };
+  return { ...state, refresh, login, register, bootstrap, logout };
 }

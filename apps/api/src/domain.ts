@@ -568,6 +568,9 @@ export interface ProductPatch {
   priceMinor?: number | null;
 }
 
+export type InviteStatus = 'active' | 'disabled' | 'used' | 'expired' | 'deleted';
+export interface InviteRecord { codeHash?: string; codeCiphertext?: string; id: string; code?: string; codePrefix: string; createdBy: string; requestKey: string; expiresAt: string; usedAt?: string; usedBy?: string; usedByEmail?: string; usedByDisplayName?: string; disabledAt?: string; deletedAt?: string; revokedAt?: string; createdAt: string; status?: InviteStatus; }
+
 export interface AdminRecord {
   id: string;
   email: string;
@@ -1426,11 +1429,19 @@ export interface Store {
   withOutboundConversationLock<T>(accountId: string, conversationRef: string, work: () => Promise<T>): Promise<T>;
   withVerifiedPartialDeliveryPlan<T>(input: { accountId: string; orderNo: string; executionKey: string; reservationId: string }, work: () => Promise<T>): Promise<T>;
   health(): Promise<{ kind: string; reachable: boolean }>;
+  isAccountIdentityAvailable(platform: string, sellerRef: string, excludeAccountId: string): Promise<boolean>;
   countAdmins(): Promise<number>;
   listAdminIds(): Promise<string[]>;
   findAdminById(id: string): Promise<AdminRecord | undefined>;
   findAdminByEmail(email: string): Promise<AdminRecord | undefined>;
-  createAdmin(input: { email: string; passwordHash: string; displayName: string }): Promise<AdminRecord>;
+  createAdmin(input: { email: string; passwordHash: string; displayName: string; role?: string }): Promise<AdminRecord>;
+  createInvite(input: { createdBy: string; codeHash: string; codeCiphertext: string; codePrefix: string; requestKey: string; expiresAt: string }): Promise<InviteRecord>;
+  listInvites(createdBy: string): Promise<InviteRecord[]>;
+  revokeInvite(createdBy: string, inviteId: string): Promise<boolean>;
+  setInviteStatus(createdBy: string, inviteId: string, status: 'active' | 'disabled'): Promise<boolean>;
+  renewInvite(createdBy: string, inviteId: string, expiresAt: string): Promise<boolean>;
+  deleteInvite(createdBy: string, inviteId: string, purgeUser?: boolean): Promise<boolean>;
+  registerWithInvite(input: { codeHash: string; email: string; passwordHash: string; displayName: string; csrfTokenHash: string; expiresAt: string }): Promise<{ admin: AdminRecord; session: SessionRecord }>;
   touchAdminLogin(adminId: string): Promise<void>;
   createSession(input: { adminId: string; csrfTokenHash: string; expiresAt: string }): Promise<SessionRecord>;
   findSession(id: string): Promise<SessionRecord | undefined>;

@@ -9,6 +9,8 @@ describe('auth api', () => {
     expect(get).toHaveBeenCalledWith('/api/v1/auth/session');
   });
 
+  it('sends invite registration through the canonical endpoint', async () => { const post = vi.fn().mockResolvedValue({ success:true, data:{ session:{id:'s3',expiresAt:'2026-09-19T00:00:00.000Z'}, profile:{id:'u1',email:'user@example.com',displayName:'User',role:'user'} } }); const api=createAuthApi({get:vi.fn(),post}); await expect(api.register({inviteCode:'invite-code',email:'user@example.com',password:'password-123',displayName:'User'})).resolves.toMatchObject({admin:{role:'user'}}); expect(post).toHaveBeenCalledWith('/api/v1/auth/register',{inviteCode:'invite-code',email:'user@example.com',password:'password-123',displayName:'User'}); });
+
   it('sends login and bootstrap through canonical endpoints', async () => {
     const post = vi.fn()
       .mockResolvedValueOnce({ success: true, data: { session: { id: 's1', expiresAt: '2026-09-19T00:00:00.000Z' }, profile: { id: 'a1', email: 'admin@example.com', displayName: 'Admin', role: 'admin' } } })

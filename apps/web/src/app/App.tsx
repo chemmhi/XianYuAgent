@@ -16,7 +16,7 @@ import { createWorkspaceApi } from '../features/workspace/api';
 import { WorkspacePage } from '../features/workspace/components/WorkspacePage';
 import { createOrdersApi } from '../features/orders/api';
 import { OrdersPage } from '../features/orders/components/OrdersPage';
-import { createAutoReplyAgentSettingsApi, createCredentialApi, createOpenAISettingsApi } from '../features/settings/api';
+import { createAutoReplyAgentSettingsApi, createCredentialApi, createOpenAISettingsApi, createInviteApi } from '../features/settings/api';
 import { createModelProviderApi } from '../features/settings/model-provider-api';
 import { SettingsPage } from '../features/settings/components/SettingsPage';
 import { AccountContextProvider } from './account-context';
@@ -87,6 +87,7 @@ export default function App() {
   const messagesApi = useMemo(() => createMessagesApi({ get: transport.get, post: transport.post, baseUrl: import.meta.env.VITE_API_BASE_URL ?? undefined }), [transport]);
   const workspaceApi = useMemo(() => createWorkspaceApi({ get: transport.get, post: transport.post, delete: transport.delete }, { baseUrl: import.meta.env.VITE_API_BASE_URL ?? '' }), [transport]);
   const ordersApi = useMemo(() => createOrdersApi({ get: transport.get, post: transport.post }), [transport]);
+  const inviteApi = useMemo(() => createInviteApi({ get: transport.get, post: transport.post, delete: transport.delete }), [transport]);
   const settingsApi = useMemo(() => createCredentialApi({ get: transport.get, post: transport.post, patch: transport.patch }), [transport]);
   const autoReplyAgentSettingsApi = useMemo(() => createAutoReplyAgentSettingsApi({ get: transport.get, patch: transport.patch }), [transport]);
   const openaiSettingsApi = useMemo(() => createOpenAISettingsApi({ get: transport.get, post: transport.post, patch: transport.patch }), [transport]);
@@ -108,12 +109,12 @@ export default function App() {
 
   return <AuthGate api={authApi}>
     {(admin, auth) => <ToastProvider><AccountContextProvider api={accountsApi}>
-      <AuthenticatedShell admin={admin} onLogout={auth.logout} logoutBusy={auth.busy} page={page} accountsApi={accountsApi} productsApi={productsApi} productAutomationApi={productAutomationApi} couponsApi={couponsApi} messagesApi={messagesApi} workspaceApi={workspaceApi} ordersApi={ordersApi} settingsApi={settingsApi} autoReplyAgentSettingsApi={autoReplyAgentSettingsApi} openaiSettingsApi={openaiSettingsApi} modelProviderApi={modelProviderApi} agentDynamicsApi={agentDynamicsApi} dashboardApi={dashboardApi} navigate={navigate} />
+      <AuthenticatedShell admin={admin} onLogout={auth.logout} logoutBusy={auth.busy} page={page} accountsApi={accountsApi} productsApi={productsApi} productAutomationApi={productAutomationApi} couponsApi={couponsApi} messagesApi={messagesApi} workspaceApi={workspaceApi} ordersApi={ordersApi} settingsApi={settingsApi} inviteApi={inviteApi} autoReplyAgentSettingsApi={autoReplyAgentSettingsApi} openaiSettingsApi={openaiSettingsApi} modelProviderApi={modelProviderApi} agentDynamicsApi={agentDynamicsApi} dashboardApi={dashboardApi} navigate={navigate} />
     </AccountContextProvider></ToastProvider>}
   </AuthGate>;
 }
 
-export function AuthenticatedShell({ admin, onLogout = async () => undefined, logoutBusy = false, page, accountsApi, productsApi, productAutomationApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi, agentDynamicsApi, dashboardApi, navigate }: { admin?: AdminProfile | null; onLogout?: () => Promise<void>; logoutBusy?: boolean; page: PageKey; accountsApi: ReturnType<typeof createAccountsApi>; productsApi: ReturnType<typeof createProductsApi>; productAutomationApi: ReturnType<typeof createProductAutomationApi>; couponsApi: ReturnType<typeof createCouponsApi>; messagesApi: ReturnType<typeof createMessagesApi>; workspaceApi: ReturnType<typeof createWorkspaceApi>; ordersApi: ReturnType<typeof createOrdersApi>; settingsApi: ReturnType<typeof createCredentialApi>; autoReplyAgentSettingsApi: ReturnType<typeof createAutoReplyAgentSettingsApi>; openaiSettingsApi: ReturnType<typeof createOpenAISettingsApi>; modelProviderApi: ReturnType<typeof createModelProviderApi>; agentDynamicsApi: AgentDynamicsApi; dashboardApi: ReturnType<typeof createDashboardApi>; navigate: (next: PageKey) => void }) {
+export function AuthenticatedShell({ admin, onLogout = async () => undefined, logoutBusy = false, page, accountsApi, productsApi, productAutomationApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, inviteApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi, agentDynamicsApi, dashboardApi, navigate }: { admin?: AdminProfile | null; onLogout?: () => Promise<void>; logoutBusy?: boolean; page: PageKey; accountsApi: ReturnType<typeof createAccountsApi>; productsApi: ReturnType<typeof createProductsApi>; productAutomationApi: ReturnType<typeof createProductAutomationApi>; couponsApi: ReturnType<typeof createCouponsApi>; messagesApi: ReturnType<typeof createMessagesApi>; workspaceApi: ReturnType<typeof createWorkspaceApi>; ordersApi: ReturnType<typeof createOrdersApi>; settingsApi: ReturnType<typeof createCredentialApi>; inviteApi: ReturnType<typeof createInviteApi>; autoReplyAgentSettingsApi: ReturnType<typeof createAutoReplyAgentSettingsApi>; openaiSettingsApi: ReturnType<typeof createOpenAISettingsApi>; modelProviderApi: ReturnType<typeof createModelProviderApi>; agentDynamicsApi: AgentDynamicsApi; dashboardApi: ReturnType<typeof createDashboardApi>; navigate: (next: PageKey) => void }) {
   const dashboardApiMode = resolveDashboardMode(apiMode, import.meta.env.VITE_DASHBOARD_MODE);
   const candidateAdminName = admin?.displayName?.trim() ?? '';
   const adminName = candidateAdminName && !/^[?？]+$/.test(candidateAdminName) ? candidateAdminName : '管理员';
@@ -166,7 +167,7 @@ export function AuthenticatedShell({ admin, onLogout = async () => undefined, lo
             <div hidden={page !== 'messages'}>
               <MessagesPage api={messagesApi} active={page === 'messages'} />
             </div>
-            {page !== 'messages' && renderAuthenticatedPage({ page, accountsApi, productsApi, productAutomationApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi, agentDynamicsApi, dashboardApi, dashboardApiMode, onNavigate: navigate })}
+            {page !== 'messages' && renderAuthenticatedPage({ adminRole: admin?.role, inviteApi, page, accountsApi, productsApi, productAutomationApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi, agentDynamicsApi, dashboardApi, dashboardApiMode, onNavigate: navigate })}
           </main>
         </div>
       </div>
@@ -183,6 +184,7 @@ export function AccountMenu({ adminName, adminEmail, adminInitial, logoutBusy, o
 }
 
 type AuthenticatedPageProps = {
+  adminRole?: string;
   page: PageKey;
   accountsApi: ReturnType<typeof createAccountsApi>;
   productsApi: ReturnType<typeof createProductsApi>;
@@ -192,6 +194,7 @@ type AuthenticatedPageProps = {
   workspaceApi: ReturnType<typeof createWorkspaceApi>;
   ordersApi: ReturnType<typeof createOrdersApi>;
   settingsApi: ReturnType<typeof createCredentialApi>;
+  inviteApi: ReturnType<typeof createInviteApi>;
   autoReplyAgentSettingsApi: ReturnType<typeof createAutoReplyAgentSettingsApi>;
   openaiSettingsApi: ReturnType<typeof createOpenAISettingsApi>;
   modelProviderApi: ReturnType<typeof createModelProviderApi>;
@@ -201,7 +204,7 @@ type AuthenticatedPageProps = {
   onNavigate: (page: PageKey) => void;
 };
 
-export function renderAuthenticatedPage({ page, accountsApi, productsApi, productAutomationApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi, agentDynamicsApi, dashboardApi, dashboardApiMode, onNavigate }: AuthenticatedPageProps) {
+export function renderAuthenticatedPage({ adminRole, page, accountsApi, productsApi, productAutomationApi, couponsApi, messagesApi, workspaceApi, ordersApi, settingsApi, inviteApi, autoReplyAgentSettingsApi, openaiSettingsApi, modelProviderApi, agentDynamicsApi, dashboardApi, dashboardApiMode, onNavigate }: AuthenticatedPageProps) {
   switch (page) {
     case 'dashboard':
       return <DashboardPage api={dashboardApi} apiMode={dashboardApiMode} onNavigate={onNavigate} />;
@@ -218,7 +221,7 @@ export function renderAuthenticatedPage({ page, accountsApi, productsApi, produc
     case 'orders':
       return <OrdersPage api={ordersApi} />;
     case 'settings':
-      return <SettingsPage api={settingsApi} agentApi={autoReplyAgentSettingsApi} openaiApi={openaiSettingsApi} modelApi={modelProviderApi} />;
+      return <SettingsPage adminRole={adminRole} inviteApi={inviteApi} api={settingsApi} agentApi={autoReplyAgentSettingsApi} openaiApi={openaiSettingsApi} modelApi={modelProviderApi} />;
     case 'agent-dynamics':
       return <AgentDynamicsPage api={agentDynamicsApi} onNavigate={onNavigate} />;
     default:

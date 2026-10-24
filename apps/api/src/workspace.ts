@@ -320,6 +320,7 @@ export class WorkspaceService {
     private readonly agentSettings?: AutoReplyAgentSettingsService,
     private readonly commands?: WorkspaceCommandOrchestrator,
     private readonly titleModelClient?: ModelClient,
+    private readonly resolveTitleModelClient?: (adminId: string, accountId: string) => Promise<ModelClient | undefined>,
   ) {}
 
   async listSessions(input: { adminId: string; accountId?: string; search?: string }): Promise<WorkspaceSessionView[]> {
@@ -334,7 +335,7 @@ export class WorkspaceService {
       const session = await this.store.createAgentSession({ adminId: input.adminId, accountId: input.accountId, title: fallbackTitle, summary: input.summary?.trim() || undefined });
       this.pendingTitleSessionIds.add(session.id);
       await this.audit({ actorId: input.adminId, action: 'workspace.session.created', targetRef: session.id, requestId: input.requestId, traceId: input.traceId, payload: { title: session.title }, accountId: session.accountId });
-      void summarizeWorkspaceSessionTitle(this.titleModelClient, input.instruction, fallbackTitle)
+      void (this.resolveTitleModelClient ? this.resolveTitleModelClient(input.adminId, input.accountId) : Promise.resolve(this.titleModelClient)).then((client) => summarizeWorkspaceSessionTitle(client, input.instruction, fallbackTitle))
         .then(async (title) => {
           if (title === fallbackTitle) return;
           await this.store.updateAgentSessionTitle(input.adminId, session.id, title);

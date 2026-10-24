@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 const root = join(import.meta.dirname, '..', '..', '..');
 const chromePath = process.env.CHROME_PATH ?? join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe');
-const screenshotDir = join(root, 'docs', 'evidence', 'stage5', 'S4-VS7A', 'screenshots');
+const screenshotDir = join(root, 'docs', 'evidence', 'invite-registration-20261025', 'screenshots');
 const chromeProfile = join(tmpdir(), `xianyu-agent-settings-chrome-${process.pid}`);
 const children = [];
 
@@ -168,6 +168,9 @@ async function run() {
   });
   if (!account.response.ok) throw new Error(`account seed failed: ${account.response.status} ${JSON.stringify(account.body)}`);
   const accountId = account.body.data?.id;
+  const inviteSeed = await requestJson(apiUrl, '/api/v1/auth/invites', { method: 'POST', headers: { 'content-type': 'application/json', cookie, 'X-CSRF-Token': csrf }, body: JSON.stringify({ requestKey: `settings-invite-${process.pid}`, days: 7 }) });
+  if (!inviteSeed.response.ok || !inviteSeed.body.data?.invite?.code) throw new Error(`invite seed failed: ${inviteSeed.response.status} ${JSON.stringify(inviteSeed.body)}`);
+  const inviteCode = inviteSeed.body.data.invite.code;
   if (!accountId) throw new Error('account seed did not return account id');
 
   const forbidden = await requestJson(apiUrl, `/api/v1/credentials?accountId=${encodeURIComponent('not-scoped-account')}`, { headers: { cookie } });
@@ -254,55 +257,42 @@ async function run() {
   const agentMobileBottomPath = await captureCurrentViewport(cdp, 'settings-agent-mobile-bottom-390x844.png');
   await evaluate(cdp, '(() => { const main = document.querySelector("main.settings-main"); const target = main && main.scrollHeight > main.clientHeight ? main : document.scrollingElement; target?.scrollTo(0, 0); return target?.scrollTop ?? 0; })()');
 
-  await clickContainingText(cdp, '凭证管理');
-  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-credential-panel]"))'), 'credential panel after Agent settings');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('当前账号还没有模型 API Key'), 'empty credential state after Agent settings');
+  const settingsTabs = await evaluate(cdp, "Array.from(document.querySelectorAll('.settings-tabs button')).map((button) => button.textContent?.trim())");
+  const deprecatedTabs = ['凭证管理', '安全输出校验', 'Outbox Worker', '插件配置'];
+  if (deprecatedTabs.some((tab) => settingsTabs.some((item) => item.includes(tab))) || !settingsTabs.some((item) => item.includes('邀请码管理'))) throw new Error('settings tabs do not match the new role-isolated surface: ' + JSON.stringify(settingsTabs));
+  await clickContainingText(cdp, '邀请码管理');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('生成邀请码'), 'invite panel');
+  await clickText(cdp, '生成邀请码');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('邀请码列表'), 'invite code generated');
+  const inviteDesktopPath = await captureViewport(cdp, 1440, 900, 'settings-invite-desktop-1440x900.png');
+  const inviteMobilePath = await captureViewport(cdp, 390, 844, 'settings-invite-mobile-390x844.png');
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  const inviteSurface = await evaluate(cdp, "(() => ({ body: document.body.innerText, tabs: Array.from(document.querySelectorAll('.settings-tabs button')).map((button) => button.textContent?.trim()) }))()");
+  if (!inviteSurface.body.includes('邀请码列表') || !inviteSurface.body.includes('邀请码列表') || !inviteSurface.body.includes('NEW')) throw new Error('invite management surface missing generated code state');
 
-  await clickText(cdp, '新增 API Key');
-  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".settings-editor"))'), 'credential editor');
-  await setInput(cdp, '.settings-editor input[placeholder="输入新的 API Key"]', 'sk-settings-secret-123456');
-  await setLabelInput(cdp, 'Provider', 'openai-compatible');
-  await setLabelInput(cdp, 'Alias', 'primary');
-  await clickText(cdp, '保存配置');
-  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector("[data-credential-row]"))'), 'credential saved');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('不可查看密钥'), 'redacted credential row');
-
-  const browserSecretLeak = await evaluate(cdp, `(() => ({ href: location.href, body: document.body.innerText.includes('sk-settings-secret-123456'), localStorage: Object.values(localStorage).some((value) => value.includes('sk-settings-secret-123456')), inputs: Array.from(document.querySelectorAll('input,textarea')).some((input) => input.value.includes('sk-settings-secret-123456')) }))()`);
-  if (browserSecretLeak.href.includes('sk-settings-secret-123456') || browserSecretLeak.body || browserSecretLeak.localStorage || browserSecretLeak.inputs) throw new Error(`secret leaked into browser surface: ${JSON.stringify(browserSecretLeak)}`);
-
-  const listed = await requestJson(apiUrl, `/api/v1/credentials?accountId=${encodeURIComponent(accountId)}`, { headers: { cookie } });
-  if (!listed.response.ok || listed.body.data?.items?.length !== 1) throw new Error(`credential persistence readback failed: ${listed.response.status} ${JSON.stringify(listed.body)}`);
-  const credential = listed.body.data.items[0];
-  if (credential.canReveal !== false || credential.apiKey !== undefined || JSON.stringify(listed.body).includes('sk-settings-secret-123456')) throw new Error('credential list returned secret material');
-
-  const stale = await requestJson(apiUrl, `/api/v1/credentials/${encodeURIComponent(credential.id)}/disable`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': `settings-stale-${process.pid}` },
-    body: JSON.stringify({ expectedVersion: 99 }),
-  });
-  if (stale.response.status !== 409) throw new Error(`expected 409 version conflict, got ${stale.response.status}`);
-
-  const desktopPath = await captureViewport(cdp, 1440, 900, 'settings-desktop-1440x900.png');
-  const mobilePath = await captureViewport(cdp, 390, 844, 'settings-mobile-390x844.png');
-
-  await clickText(cdp, '轮换');
-  await waitFor(async () => await evaluate(cdp, 'Boolean(document.querySelector(".settings-editor"))'), 'rotate editor');
-  await setInput(cdp, '.settings-editor input[placeholder="输入新的 API Key"]', 'sk-settings-rotated-987654');
-  await clickText(cdp, '确认轮换');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('API Key 已轮换'), 'credential rotated');
-
-  await clickText(cdp, '禁用');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('已禁用'), 'credential disabled');
-  await evaluate(cdp, 'window.confirm = () => true');
-  await clickText(cdp, '撤销');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('已撤销'), 'credential revoked');
-
-  const final = await requestJson(apiUrl, `/api/v1/credentials?accountId=${encodeURIComponent(accountId)}`, { headers: { cookie } });
-  if (final.body.data?.items?.[0]?.status !== 'revoked') throw new Error(`final credential state mismatch: ${JSON.stringify(final.body)}`);
-  if (JSON.stringify(final.body).includes('sk-settings-rotated-987654')) throw new Error('rotated secret leaked in API readback');
+  await cdp.send('Network.clearBrowserCookies');
+  await cdp.send('Page.navigate', { url: webUrl + '/' });
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('登录管理控制台'), 'login page after logout');
+  const loginDesktopPath = await captureViewport(cdp, 1440, 900, 'auth-login-desktop-1440x900.png');
+  const loginMobilePath = await captureViewport(cdp, 390, 844, 'auth-login-mobile-390x844.png');
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await clickText(cdp, '没有账号？去注册');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('注册 FishAgent'), 'registration page');
+  const registerDesktopPath = await captureViewport(cdp, 1440, 900, 'auth-register-desktop-1440x900.png');
+  const registerMobilePath = await captureViewport(cdp, 390, 844, 'auth-register-mobile-390x844.png');
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await setInput(cdp, 'input[autocomplete="one-time-code"]', inviteCode);
+  await setInput(cdp, 'input[autocomplete="name"]', 'Browser Registered User');
+  await setInput(cdp, 'input[autocomplete="email"]', `browser-registered-${process.pid}@example.com`);
+  await setInput(cdp, 'input[autocomplete="new-password"]', 'password-123');
+  await evaluate(cdp, "(() => { const input = document.querySelectorAll('input[autocomplete=\"new-password\"]')[1]; if (!input) throw new Error('missing confirm password'); const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set; setter?.call(input, 'password-123'); input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); return true; })()");
+  await clickText(cdp, '注册');
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const registrationBody = String(await evaluate(cdp, 'document.body.innerText'));
+  if (!registrationBody.includes('运营控制台')) throw new Error('registered authenticated shell did not become ready: ' + registrationBody.slice(0, 1200));
 
   await cdp.send('Emulation.clearDeviceMetricsOverride');
-  console.log(JSON.stringify({ apiStorage: 'memory', accountId, agentSettings: { defaultVersion: agentDefaults.body.data.configVersion, savedVersion: agentSaved.body.data.configVersion, staleStatus: agentStale.response.status }, credentialId: credential.id, forbiddenStatus: forbidden.response.status, staleStatus: stale.response.status, finalStatus: final.body.data.items[0].status, secretRedaction: browserSecretLeak, screenshots: { agentDesktopPath, agentMobilePath, agentDisabledMobilePath, agentDesktopBottomPath, agentMobileBottomPath, desktopPath, mobilePath } }, null, 2));
+  console.log(JSON.stringify({ apiStorage: 'memory', settingsTabs, inviteSurface, screenshots: { loginDesktopPath, loginMobilePath, registerDesktopPath, registerMobilePath, inviteDesktopPath, inviteMobilePath } }, null, 2));
   cdp.socket.close();
 }
 

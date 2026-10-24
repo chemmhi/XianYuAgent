@@ -1,15 +1,27 @@
+import { assertCookieIdentity } from './account-identity.js';
 import type { AppConfig } from './config.js';
 import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, CouponBatchListQuery, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponItemRecord, CredentialRecord, IdempotencyRecord, LoginSessionRecord, OrderListQuery, OrderListResult, OrderRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSyncResult, SessionRecord, Store, XianyuProductItem } from './domain.js';
-import { createId, createToken, digestJson, hashPassword, isSessionFresh, sha256, verifyPassword } from './security.js';
+import { createId, createInviteCode, createToken, digestJson, hashPassword, isSessionFresh, sha256, verifyPassword } from './security.js';
 import type { XianyuMtopClient } from './xianyu-mtop.js';
 import type { ProductAutomationTriggerBatchResult } from './product-automation-trigger.js';
 import { CouponAssetService } from './coupon-assets.js';
+import { encryptCredentialValue, decryptCredentialValue } from './credential-crypto.js';
 
 export interface AuthContext {
   admin: AdminRecord;
   session: SessionRecord;
   csrfToken: string;
   scopes: AccountScopeRecord[];
+}
+
+export class InviteService {
+  constructor(private readonly store: Store, private readonly encryptionKey = 'development-only-credential-key-change-me') {}
+  async create(input:{adminId:string;requestKey:string;days:number;requestId?:string;traceId?:string}): Promise<{ invite: import('./domain.js').InviteRecord; code: string }> { const actor=await this.store.findAdminById(input.adminId); if(actor?.role!=='admin') throw new ServiceError(403,'FORBIDDEN','仅平台管理员可生成邀请码'); if(!/^[-A-Za-z0-9_]{8,100}$/.test(input.requestKey)) throw new ServiceError(422,'VALIDATION_FAILED','requestKey invalid'); const days=Math.max(1,Math.min(30,Math.trunc(input.days))); const code=createInviteCode(); let invite; try { invite=await this.store.createInvite({createdBy:input.adminId,codeHash:sha256(code),codeCiphertext:encryptCredentialValue(code,this.encryptionKey),codePrefix:code.slice(0,8),requestKey:input.requestKey,expiresAt:new Date(Date.now()+days*86400000).toISOString()}); } catch(error) { if(error instanceof Error && error.message==='INVITE_REQUEST_DUPLICATE') throw new ServiceError(409,'INVITE_REQUEST_DUPLICATE','该请求已生成过邀请码，请换一个请求标识'); throw error; } await this.store.recordAudit({id:createId(),actorType:'admin',actorId:input.adminId,action:'auth.invite.created',targetRef:invite.id,requestId:input.requestId??'invite',traceId:input.traceId??'invite',payloadDigest:digestJson({codePrefix:invite.codePrefix,expiresAt:invite.expiresAt,requestKey:invite.requestKey}),createdAt:new Date().toISOString()}); return {invite:{...invite,code,codeHash:undefined,codeCiphertext:undefined},code}; }
+  async list(adminId:string) { const actor=await this.store.findAdminById(adminId); if(actor?.role!=='admin') throw new ServiceError(403,'FORBIDDEN','仅平台管理员可查看邀请码'); return (await this.store.listInvites(adminId)).map(item=>({ ...item, code:item.codeCiphertext?decryptCredentialValue(item.codeCiphertext,this.encryptionKey):undefined, codeHash:undefined, codeCiphertext:undefined })); }
+  async revoke(adminId:string, inviteId:string, requestId='invite', traceId='invite') { const actor=await this.store.findAdminById(adminId); if(actor?.role!=='admin') throw new ServiceError(403,'FORBIDDEN','仅平台管理员可撤销邀请码'); if(!await this.store.revokeInvite(adminId,inviteId)) throw new ServiceError(404,'NOT_FOUND','邀请码不存在或已使用'); await this.store.recordAudit({id:createId(),actorType:'admin',actorId:adminId,action:'auth.invite.revoked',targetRef:inviteId,requestId,traceId,payloadDigest:digestJson({inviteId}),createdAt:new Date().toISOString()}); }
+  async setStatus(adminId:string, inviteId:string, status:'active'|'disabled', requestId='invite', traceId='invite') { const actor=await this.store.findAdminById(adminId); if(actor?.role!=='admin') throw new ServiceError(403,'FORBIDDEN','仅平台管理员可操作邀请码'); if(!await this.store.setInviteStatus(adminId,inviteId,status)) throw new ServiceError(409,'CONFLICT','邀请码不可变更状态'); await this.store.recordAudit({id:createId(),actorType:'admin',actorId:adminId,action:'auth.invite.'+(status==='active'?'enabled':'disabled'),targetRef:inviteId,requestId,traceId,payloadDigest:digestJson({inviteId,status}),createdAt:new Date().toISOString()}); }
+  async renew(adminId:string, inviteId:string, days:number, requestId='invite', traceId='invite') { const actor=await this.store.findAdminById(adminId); if(actor?.role!=='admin') throw new ServiceError(403,'FORBIDDEN','仅平台管理员可操作邀请码'); const expiresAt=new Date(Date.now()+Math.max(1,Math.min(365,Math.trunc(days)))*86400000).toISOString(); if(!await this.store.renewInvite(adminId,inviteId,expiresAt)) throw new ServiceError(409,'CONFLICT','邀请码不可续期'); return expiresAt; }
+  async delete(adminId:string, inviteId:string, purgeUser=false, requestId='invite', traceId='invite') { const actor=await this.store.findAdminById(adminId); if(actor?.role!=='admin') throw new ServiceError(403,'FORBIDDEN','仅平台管理员可删除邀请码'); try { if(!await this.store.deleteInvite(adminId,inviteId,purgeUser)) throw new ServiceError(409,'CONFLICT','邀请码不可删除'); } catch(error) { if(error instanceof Error && error.message==='PURGE_CONFIRMATION_REQUIRED') throw new ServiceError(409,'PURGE_CONFIRMATION_REQUIRED','该邀请码已激活账号，删除前需要确认清空用户数据'); throw error; } await this.store.recordAudit({id:createId(),actorType:'admin',actorId:adminId,action:'auth.invite.deleted',targetRef:inviteId,requestId,traceId,payloadDigest:digestJson({inviteId}),createdAt:new Date().toISOString()}); }
 }
 
 export class AuthService {
@@ -22,6 +34,8 @@ export class AuthService {
     const auditRef = await this.audit({ actorType: 'admin', actorId: admin.id, action: 'auth.bootstrap.completed', requestId: input.requestId ?? 'bootstrap', traceId: input.traceId ?? 'bootstrap', payload: { email: admin.email } });
     return { admin, session, csrfToken: this.sessionTokens.get(session.id)!, auditRef };
   }
+
+  async register(input: { code:string; email:string; password:string; displayName:string }): Promise<{ admin: AdminRecord; session: SessionRecord; csrfToken: string }> { if (!/^\S+@\S+\.\S+$/.test(input.email) || input.password.length < 8 || input.displayName.trim().length < 1 || input.code.trim().length < 8) throw new ServiceError(422,'VALIDATION_FAILED','邮箱、昵称、密码和有效邀请码为必填项'); const csrfToken=createToken(); try { const result=await this.store.registerWithInvite({ codeHash:sha256(input.code.trim()), email:input.email.trim().toLowerCase(), passwordHash:await hashPassword(input.password), displayName:input.displayName.trim(), csrfTokenHash:sha256(csrfToken), expiresAt:new Date(Date.now()+this.config.sessionAbsoluteMs).toISOString() }); this.sessionTokens.set(result.session.id,csrfToken); return {...result,csrfToken}; } catch(error) { if(error instanceof Error && error.message==='INVITE_INVALID') throw new ServiceError(409,'INVITE_INVALID','邀请码无效、已使用、已撤销或已过期'); if(error instanceof Error && error.message==='EMAIL_DUPLICATE') throw new ServiceError(409,'EMAIL_DUPLICATE','邮箱已注册'); throw error; } }
 
   async login(input: { email: string; password: string }): Promise<{ admin: AdminRecord; session: SessionRecord; csrfToken: string }> {
     const admin = await this.store.findAdminByEmail(input.email);
@@ -84,6 +98,7 @@ export class AccountService {
   async resolveForLogin(input: { adminId: string; accountId?: string; platform: string; sellerRef: string; requestId: string; traceId: string }): Promise<AccountRecord> {
     if (input.accountId) {
       const existing = await this.getForLogin(input.adminId, input.accountId);
+      await assertCookieIdentity(this.store, input.adminId, existing, input.sellerRef);
       return (await this.store.restoreAccountForLogin(input.adminId, existing.id)) ?? existing;
     }
     const existing = await this.store.findAccountForLogin({ adminId: input.adminId, platform: input.platform, sellerRef: input.sellerRef });
@@ -537,6 +552,11 @@ export class CredentialService {
   async save(input: { adminId: string; accountId: string; cookieHeader?: string; accessToken?: string; clearAccessToken?: boolean; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string; requestId: string; traceId: string }): Promise<CredentialRecord> {
     const account = await this.store.getAccount(input.adminId, input.accountId);
     if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found');
+    if (input.cookieHeader) {
+      const identity = /(?:^|;\s*)unb=([^;]+)/.exec(input.cookieHeader)?.[1]?.trim();
+      if ((await this.store.findAdminById(input.adminId))?.role !== 'admin' && !identity) throw new ServiceError(422, 'COOKIE_IDENTITY_REQUIRED', 'Cookie 缺少闲鱼用户身份');
+      if (identity) await assertCookieIdentity(this.store, input.adminId, account, identity);
+    }
     const current = await this.store.getCredential(input.adminId, input.accountId);
     const cookieHeader = input.cookieHeader?.trim() || current?.cookieHeader;
     const accessToken = input.accessToken?.trim() || (input.clearAccessToken ? undefined : current?.accessToken);

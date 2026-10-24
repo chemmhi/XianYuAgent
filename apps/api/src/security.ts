@@ -25,9 +25,9 @@ export async function verifyPassword(password: string, encoded: string): Promise
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
-export function createToken(): string {
-  return randomBytes(32).toString('base64url');
-}
+export function createToken(): string { return randomBytes(32).toString('base64url'); }
+
+export function createInviteCode(): string { return randomBytes(8).toString('base64url'); }
 
 export function createId(): string {
   return randomUUID();

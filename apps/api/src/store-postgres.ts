@@ -31,6 +31,52 @@ function dateIso(value: unknown): string {
 }
 function iso(value: unknown): string | undefined { return value ? dateIso(value) : undefined; }
 
+type ForeignKeyMeta = {
+  childKey: string;
+  childSchema: string;
+  childTable: string;
+  childColumns: string[];
+  parentKey: string;
+  parentSchema: string;
+  parentTable: string;
+  parentColumns: string[];
+};
+
+function quoteIdentifier(value: string): string { return `"${value.replaceAll('"', '""')}"`; }
+function qualifiedName(schema: string, table: string): string { return `${quoteIdentifier(schema)}.${quoteIdentifier(table)}`; }
+function postgresTextArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String);
+  if (typeof value !== 'string') return [];
+  const trimmed = value.replace(/^\{/, '').replace(/\}$/, '');
+  return trimmed ? trimmed.split(',').map((item) => item.replace(/^"|"$/g, '')) : [];
+}
+
+function buildPurgePredicate(
+  tableKey: string,
+  alias: string,
+  columnsByTable: Map<string, Set<string>>,
+  foreignKeysByChild: Map<string, ForeignKeyMeta[]>,
+  reachable: Set<string>,
+  stack: Set<string>,
+): string {
+  const direct: string[] = [];
+  const columns = columnsByTable.get(tableKey) ?? new Set<string>();
+  if (tableKey === 'accounts.accounts') direct.push(`${alias}.${quoteIdentifier('id')} = any($1::uuid[])`);
+  if (tableKey === 'auth.admins') direct.push(`${alias}.${quoteIdentifier('id')} = $2::uuid`);
+  if (columns.has('account_id')) direct.push(`${alias}.${quoteIdentifier('account_id')} = any($1::uuid[])`);
+  if (columns.has('admin_id')) direct.push(`${alias}.${quoteIdentifier('admin_id')} = $2::uuid`);
+  const nextStack = new Set(stack).add(tableKey);
+  for (const foreignKey of foreignKeysByChild.get(tableKey) ?? []) {
+    if (!reachable.has(foreignKey.parentKey) || nextStack.has(foreignKey.parentKey)) continue;
+    const parentAlias = `parent_row_${nextStack.size}`;
+    const parentPredicate = buildPurgePredicate(foreignKey.parentKey, parentAlias, columnsByTable, foreignKeysByChild, reachable, nextStack);
+    if (!parentPredicate) continue;
+    const join = foreignKey.childColumns.map((column, index) => `${parentAlias}.${quoteIdentifier(foreignKey.parentColumns[index])} = ${alias}.${quoteIdentifier(column)}`).join(' and ');
+    direct.push(`exists (select 1 from ${qualifiedName(foreignKey.parentSchema, foreignKey.parentTable)} ${parentAlias} where ${join} and (${parentPredicate}))`);
+  }
+  return direct.length > 0 ? direct.map((item) => `(${item})`).join(' or ') : '';
+}
+
 function readDurationSeconds(config: Record<string, unknown>, secondsKey: string, legacyMillisecondsKey: string, fallback: number): number {
   const seconds = Number(config[secondsKey]);
   if (Number.isFinite(seconds)) return Number(seconds.toFixed(3));
@@ -42,6 +88,7 @@ function readDurationSeconds(config: Record<string, unknown>, secondsKey: string
 export class PostgresStore implements Store {
   readonly kind = 'postgres' as const;
   readonly pool: Pool;
+  private toInvite(row: Row): import('./domain.js').InviteRecord { const usedAt=iso(row.used_at); const disabledAt=iso(row.disabled_at); const deletedAt=iso(row.deleted_at); const expiresAt=dateIso(row.expires_at); const status=deletedAt?'deleted':usedAt?'used':disabledAt||row.revoked_at?'disabled':Date.parse(expiresAt)<=Date.now()?'expired':'active'; return { id:String(row.id), codeHash:row.code_hash?String(row.code_hash):undefined, codeCiphertext:row.code_ciphertext?String(row.code_ciphertext):undefined, codePrefix:String(row.code_prefix), createdBy:String(row.created_by), requestKey:String(row.request_key), expiresAt, usedAt, usedBy:row.used_by?String(row.used_by):undefined, usedByEmail:row.used_by_email?String(row.used_by_email):undefined, usedByDisplayName:row.used_by_display_name?String(row.used_by_display_name):undefined, disabledAt, deletedAt, revokedAt:iso(row.revoked_at), createdAt:dateIso(row.created_at), status }; }
   private readonly outboundLockPool: Pool;
   private readonly deliveryPlanPool: Pool;
   constructor(databaseUrl: string) {
@@ -99,11 +146,78 @@ export class PostgresStore implements Store {
     } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
   }
   async health(): Promise<{ kind: string; reachable: boolean }> { try { await this.pool.query('select 1'); return { kind: this.kind, reachable: true }; } catch { return { kind: this.kind, reachable: false }; } }
+  async isAccountIdentityAvailable(platform: string, sellerRef: string, excludeAccountId: string): Promise<boolean> { const result = await this.pool.query('select 1 from accounts.accounts where platform=$1 and (seller_ref=$2 or platform_user_id=$2) and id<>$3 limit 1', [platform, sellerRef, excludeAccountId]); return result.rows.length === 0; }
   async countAdmins(): Promise<number> { const result = await this.pool.query('select count(*)::int as count from auth.admins'); return Number(result.rows[0].count); }
   async listAdminIds(): Promise<string[]> { const result = await this.pool.query("select id from auth.admins where status='active' order by created_at asc"); return result.rows.map((row) => String(row.id)); }
   async findAdminById(id: string): Promise<AdminRecord | undefined> { const result = await this.pool.query('select * from auth.admins where id=$1 limit 1', [id]); return result.rows[0] ? this.toAdmin(result.rows[0]) : undefined; }
   async findAdminByEmail(email: string): Promise<AdminRecord | undefined> { const result = await this.pool.query('select * from auth.admins where lower(email)=lower($1) limit 1', [email]); return result.rows[0] ? this.toAdmin(result.rows[0]) : undefined; }
-  async createAdmin(input: { email: string; passwordHash: string; displayName: string }): Promise<AdminRecord> { const result = await this.pool.query('insert into auth.admins (id,email,password_hash,display_name) values ($1,$2,$3,$4) returning *', [createId(), input.email.toLowerCase(), input.passwordHash, input.displayName]); return this.toAdmin(result.rows[0]); }
+  async createAdmin(input: { email: string; passwordHash: string; displayName: string; role?: string }): Promise<AdminRecord> { const result = await this.pool.query('insert into auth.admins (id,email,password_hash,display_name,role) values ($1,$2,$3,$4,$5) returning *', [createId(), input.email.toLowerCase(), input.passwordHash, input.displayName, input.role ?? 'admin']); return this.toAdmin(result.rows[0]); }
+  async createInvite(input: { createdBy: string; codeHash: string; codeCiphertext: string; codePrefix: string; requestKey: string; expiresAt: string }): Promise<import('./domain.js').InviteRecord> { try { const result=await this.pool.query('insert into auth.registration_invites (id,code_hash,code_ciphertext,code_prefix,created_by,request_key,expires_at) values ($1,$2,$3,$4,$5,$6,$7) returning *',[createId(),input.codeHash,input.codeCiphertext,input.codePrefix,input.createdBy,input.requestKey,input.expiresAt]); return this.toInvite(result.rows[0]); } catch(error) { if ((error as {code?:string}).code==='23505') throw new Error('INVITE_REQUEST_DUPLICATE'); throw error; } }
+  async listInvites(createdBy: string): Promise<import('./domain.js').InviteRecord[]> { const result=await this.pool.query('select i.*, a.email as used_by_email, a.display_name as used_by_display_name from auth.registration_invites i left join auth.admins a on a.id=i.used_by where i.created_by=$1 and i.deleted_at is null order by i.created_at desc',[createdBy]); return result.rows.map(row=>this.toInvite(row)); }
+  async revokeInvite(createdBy:string, inviteId:string):Promise<boolean>{return this.setInviteStatus(createdBy,inviteId,'disabled');}
+  async setInviteStatus(createdBy:string,inviteId:string,status:'active'|'disabled'):Promise<boolean>{const result=await this.pool.query(status==='disabled'?"update auth.registration_invites set disabled_at=now() where id=$1 and created_by=$2 and used_at is null and deleted_at is null":"update auth.registration_invites set disabled_at=null where id=$1 and created_by=$2 and used_at is null and deleted_at is null",[inviteId,createdBy]); return (result.rowCount??0)>0;}
+  async renewInvite(createdBy:string,inviteId:string,expiresAt:string):Promise<boolean>{const result=await this.pool.query("update auth.registration_invites set expires_at=$3 where id=$1 and created_by=$2 and used_at is null and deleted_at is null",[inviteId,createdBy,expiresAt]); return (result.rowCount??0)>0;}
+  private async purgeInviteUser(client: PoolClient, adminId: string, accountIds: string[]): Promise<void> {
+    const [columnsResult, foreignKeysResult] = await Promise.all([
+      client.query("select table_schema,table_name,column_name from information_schema.columns where table_schema not in ('pg_catalog','information_schema')"),
+      client.query(`select child_ns.nspname as child_schema, child.relname as child_table,
+          parent_ns.nspname as parent_schema, parent.relname as parent_table,
+          array_agg(child_att.attname order by pair.ord) as child_columns,
+          array_agg(parent_att.attname order by pair.ord) as parent_columns
+        from pg_constraint constraint_row
+        join pg_class child on child.oid=constraint_row.conrelid
+        join pg_namespace child_ns on child_ns.oid=child.relnamespace
+        join pg_class parent on parent.oid=constraint_row.confrelid
+        join pg_namespace parent_ns on parent_ns.oid=parent.relnamespace
+        cross join lateral unnest(constraint_row.conkey, constraint_row.confkey) with ordinality as pair(child_attnum,parent_attnum,ord)
+        join pg_attribute child_att on child_att.attrelid=child.oid and child_att.attnum=pair.child_attnum
+        join pg_attribute parent_att on parent_att.attrelid=parent.oid and parent_att.attnum=pair.parent_attnum
+        where constraint_row.contype='f'
+        group by child_ns.nspname,child.relname,parent_ns.nspname,parent.relname,constraint_row.oid`),
+    ]);
+    const columnsByTable = new Map<string, Set<string>>();
+    for (const row of columnsResult.rows) {
+      const key = `${row.table_schema}.${row.table_name}`;
+      const columns = columnsByTable.get(key) ?? new Set<string>();
+      columns.add(String(row.column_name));
+      columnsByTable.set(key, columns);
+    }
+    const foreignKeys: ForeignKeyMeta[] = foreignKeysResult.rows.map((row) => ({
+      childKey: `${row.child_schema}.${row.child_table}`,
+      childSchema: String(row.child_schema), childTable: String(row.child_table), childColumns: postgresTextArray(row.child_columns),
+      parentKey: `${row.parent_schema}.${row.parent_table}`,
+      parentSchema: String(row.parent_schema), parentTable: String(row.parent_table), parentColumns: postgresTextArray(row.parent_columns),
+    }));
+    const foreignKeysByChild = new Map<string, ForeignKeyMeta[]>();
+    for (const foreignKey of foreignKeys) foreignKeysByChild.set(foreignKey.childKey, [...(foreignKeysByChild.get(foreignKey.childKey) ?? []), foreignKey]);
+    const depth = new Map<string, number>([['accounts.accounts', 0], ['auth.admins', 0]]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const foreignKey of foreignKeys) {
+        const parentDepth = depth.get(foreignKey.parentKey);
+        if (parentDepth === undefined) continue;
+        const nextDepth = parentDepth + 1;
+        if ((depth.get(foreignKey.childKey) ?? -1) < nextDepth) { depth.set(foreignKey.childKey, nextDepth); changed = true; }
+      }
+    }
+    const reachable = new Set(depth.keys());
+    const tables = [...depth.entries()]
+      .filter(([tableKey]) => !['accounts.accounts', 'auth.admins', 'auth.registration_invites', 'observability.audit_events', 'observability.health_snapshots'].includes(tableKey))
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
+    for (const [tableKey] of tables) {
+      const [schema, table] = tableKey.split('.', 2);
+      const predicate = buildPurgePredicate(tableKey, 'target_row', columnsByTable, foreignKeysByChild, reachable, new Set());
+      if (predicate) await client.query(`delete from ${qualifiedName(schema, table)} target_row where (${predicate}) and ($1::uuid[] is not null) and ($2::uuid is not null)`, [accountIds, adminId]);
+    }
+    // Keep audit history while detaching records from the account that is being purged.
+    await client.query('update observability.audit_events set account_id=null where account_id = any($1::uuid[])', [accountIds]);
+    await client.query('update auth.registration_invites set used_by=null where used_by=$1', [adminId]);
+    await client.query('delete from accounts.accounts where id = any($1::uuid[])', [accountIds]);
+    await client.query('delete from auth.admins where id=$1', [adminId]);
+  }
+  async deleteInvite(createdBy:string, inviteId:string, purgeUser=false):Promise<boolean>{const client=await this.pool.connect(); try{await client.query('begin'); const found=await client.query('select used_by from auth.registration_invites where id=$1 and created_by=$2 and deleted_at is null for update',[inviteId,createdBy]); const row=found.rows[0]; if(!row){await client.query('rollback');return false;} if(row.used_by&&!purgeUser) throw new Error('PURGE_CONFIRMATION_REQUIRED'); if(row.used_by){const accounts=await client.query('select distinct s.account_id from auth.account_scopes s where s.admin_id=$1 and not exists (select 1 from auth.account_scopes other where other.account_id=s.account_id and other.admin_id<>$1)',[row.used_by]); await this.purgeInviteUser(client, String(row.used_by), accounts.rows.map(item=>String(item.account_id)));} await client.query('update auth.registration_invites set deleted_at=now() where id=$1',[inviteId]); await client.query('commit'); return true;}catch(error){await client.query('rollback');throw error;}finally{client.release();}}
+  async registerWithInvite(input: { codeHash:string; email:string; passwordHash:string; displayName:string; csrfTokenHash:string; expiresAt:string }): Promise<{ admin: AdminRecord; session: SessionRecord }> { const client=await this.pool.connect(); try { await client.query('begin'); const invite=await client.query("select * from auth.registration_invites where code_hash=$1 for update",[input.codeHash]); const row=invite.rows[0]; if(!row||row.revoked_at||row.disabled_at||row.deleted_at||row.used_at||new Date(row.expires_at).getTime()<=Date.now()) throw new Error('INVITE_INVALID'); const existing=await client.query('select 1 from auth.admins where lower(email)=lower($1) limit 1',[input.email]); if(existing.rows[0]) throw new Error('EMAIL_DUPLICATE'); const adminResult=await client.query("insert into auth.admins (id,email,password_hash,display_name,role) values ($1,$2,$3,$4,'user') returning *",[createId(),input.email.toLowerCase(),input.passwordHash,input.displayName]); const sessionId=createId(); const sessionResult=await client.query('insert into auth.sessions (id,admin_id,expires_at,csrf_token_hash) values ($1,$2,$3,$4) returning *',[sessionId,adminResult.rows[0].id,input.expiresAt,input.csrfTokenHash]); await client.query('update auth.registration_invites set used_at=now(),used_by=$2 where id=$1',[row.id,adminResult.rows[0].id]); await client.query('commit'); return {admin:this.toAdmin(adminResult.rows[0]),session:this.toSession(sessionResult.rows[0])}; } catch(error){await client.query('rollback'); if((error as {code?:string}).code==='23505') throw new Error('EMAIL_DUPLICATE'); throw error;} finally{client.release();} }
   async touchAdminLogin(adminId: string): Promise<void> { await this.pool.query('update auth.admins set last_login_at=now() where id=$1', [adminId]); }
   async createSession(input: { adminId: string; csrfTokenHash: string; expiresAt: string }): Promise<SessionRecord> { const id = createId(); const result = await this.pool.query('insert into auth.sessions (id,admin_id,expires_at,csrf_token_hash) values ($1,$2,$3,$4) returning *', [id, input.adminId, input.expiresAt, input.csrfTokenHash]); return this.toSession(result.rows[0]); }
   async findSession(id: string): Promise<SessionRecord | undefined> { const result = await this.pool.query('select * from auth.sessions where id=$1 limit 1', [id]); return result.rows[0] ? this.toSession(result.rows[0]) : undefined; }
