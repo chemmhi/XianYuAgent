@@ -2,14 +2,14 @@ import { join } from 'node:path';
 import { cpSync, existsSync, mkdirSync } from 'node:fs';
 import { readFingerprint } from './fingerprint.mjs';
 
-export async function installBrowserRecording(store) {
+export async function installBrowserRecording(store, { snapshotProfile = (profile, destination) => cpSync(profile, destination, { recursive: true }) } = {}) {
   const { chromium } = await import('patchright');
   const launch = chromium.launchPersistentContext.bind(chromium);
   chromium.launchPersistentContext = async (profile, options = {}) => {
     const id = store.id();
     const dir = join(store.root, `browser-${id}`);
     mkdirSync(dir, { recursive: true });
-    if (existsSync(profile)) cpSync(profile, join(dir, 'profile-before'), { recursive: true });
+    if (existsSync(profile)) await snapshotProfile(profile, join(dir, 'profile-before'));
     store.event('browser.launch.input', { id, profile, options });
     const context = await launch(profile, { ...options, recordHar: { path: join(dir, 'network.har'), content: 'embed', mode: 'full' } });
     await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
@@ -116,7 +116,7 @@ export async function installBrowserRecording(store) {
       await drainTasks();
       try { await context.tracing.stop({ path: join(dir, 'trace.zip') }); } catch (error) { store.event('recording.error', { id, scope: 'trace', error }); }
       await close(...args);
-      if (existsSync(profile)) cpSync(profile, join(dir, 'profile-after'), { recursive: true });
+      if (existsSync(profile)) await snapshotProfile(profile, join(dir, 'profile-after'));
       store.event('browser.close', { id, dir });
     })();
     context.close = recordedClose;
