@@ -262,6 +262,9 @@ async function run() {
   if (deprecatedTabs.some((tab) => settingsTabs.some((item) => item.includes(tab))) || !settingsTabs.some((item) => item.includes('邀请码管理'))) throw new Error('settings tabs do not match the new role-isolated surface: ' + JSON.stringify(settingsTabs));
   await clickContainingText(cdp, '邀请码管理');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('生成邀请码'), 'invite panel');
+  const expiryInput = await evaluate(cdp, "(() => Array.from(document.querySelectorAll('input')).find((input) => input.getAttribute('aria-label') === '生成有效期（天）')?.value ?? '')()");
+  if (expiryInput !== '7') throw new Error(`invite creation expiry input missing or wrong default: ${expiryInput}`);
+  await setInput(cdp, 'input[aria-label="生成有效期（天）"]', '14');
   await clickText(cdp, '生成邀请码');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('邀请码列表'), 'invite code generated');
   const inviteDesktopPath = await captureViewport(cdp, 1440, 900, 'settings-invite-desktop-1440x900.png');
