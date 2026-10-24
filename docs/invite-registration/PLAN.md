@@ -37,3 +37,5 @@ R1-P1-003：普通用户重授权Cookie必须匹配当前账号身份；跨账�
 邀请码服务已加入创建/撤销审计，审计只记录 inviteId、前缀、期限、requestKey，不记录明文或 hash；重复 requestKey 返回 409。Memory 使用邀请码串行锁，PostgreSQL 使用 FOR UPDATE，重复邮箱和会话写入失败回滚邀请码。
 S2 验证：invite-registration Memory/PostgreSQL 2/2（含重复requestKey、重复邮箱回滚、同邀请码3路并发仅1成功）；isolation Memory/PostgreSQL 18/18；API/Web typecheck；Web auth/settings 7/7。
 S2 isolation_review PASS；acceptance_review 两次上游错误未产出结论，未以其失败替代已执行的独立隔离审核。P2-INV-002：已统一 Store.createAdmin 的 Postgres role 参数，风险关闭。
+
+视觉证据：docs/evidence/invite-registration-20261025/README.md；包含登录页、注册页、管理员邀请码设置页的桌面 1440×900 与移动 390×844 截图，真实 Chrome E2E 生成。
