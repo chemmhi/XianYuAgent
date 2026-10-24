@@ -1,5 +1,11 @@
 # XianyuSellerAgent 阶段评审记录
 
+## 2026-10-24 分时段随机 HTTP 会话维护
+
+- 独立 reviewer：`/root/independent_review`。首轮 FAIL：R1/P1 在途 Set-Cookie 覆盖人工更新/复活撤销凭证，R2/P2 周期和按需续期单向互斥；两项均已修复并 VERIFIED/CLOSED。
+- 最终 PASS，可合并：独立实际重跑 MemoryStore + PostgreSQL 27/27，复跑原缺陷夹具并核对挑战恢复链、失败保护、diff-check。生产浏览器/求解器和即时风控回调无代码差异。
+- 用户明确授权审核通过后合并并推送；功能 `d3c4276`，main 合并 `2339443`，合并后27项刷新/PG、38项消息/自动回复/挑战回归及 API 编译通过。完整证据见 [切片记录](operations/im-page-refresh-20261024.md)。真实平台长期挑战不由本地夹具代表。
+
 ## 2026-10-07 Model Provider 主备切换 v2
 
 | 评审编号 | 类型 | 评审人 | 结论 | 证据 |
