@@ -8,7 +8,7 @@ import type { AuthContext } from './services.js';
 import { AccountService, AuthService, CouponService, CredentialService, OrderService, ProductService, ProductSyncService, ServiceError, idempotent } from './services.js';
 import { createIds, failure, fingerprint, parseCookies, readBody, setCookie, success, writeJson, type RequestContext } from './http.js';
 import { createStore } from './store.js';
-import type { ProductListResult, ProductRecord, Store } from './domain.js';
+import type { ProductListResult, ProductRecord, Store, VerificationRecoveryRequest } from './domain.js';
 import { createId, digestJson } from './security.js';
 import { XianyuQrLoginAdapter, type XianyuQrPublicSession } from './xianyu-qr-login.js';
 import { XianyuVerificationBrowser } from './xianyu-verification-browser.js';
@@ -378,9 +378,9 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
       console.info(JSON.stringify({ component: 'xianyu-mtop', event: 'cookie_saved', adminId, accountId, hasMetadata: Boolean(metadata) }));
       await credentials.save({ adminId, accountId, cookieHeader, metadata, requestId: 'xianyu-mtop', traceId: 'xianyu-mtop' });
     },
-    onFailure: async ({ adminId, accountId, api, errorCode, message, accountInvalid }) => {
+    onFailure: async ({ adminId, accountId, api, errorCode, message, accountInvalid, recoveryRequest }) => {
       console.warn(JSON.stringify({ component: 'xianyu-mtop', event: 'external_failure', adminId, accountId, api, errorCode, accountInvalid, message: message?.slice(0, 160) }));
-      await markXianyuAccountFailure(store, adminId, accountId, { errorCode, message, accountInvalid, source: api });
+      await markXianyuAccountFailure(store, adminId, accountId, { errorCode, message, accountInvalid, source: api, recoveryRequest });
       if (classifyXianyuFailure({ errorCode, message, accountInvalid }).kind === 'verification_required') {
         xianyuIm.requestVerificationRecovery(adminId, accountId, api);
         await verificationRecoveryBridge?.publish({ adminId, accountId, source: api });
@@ -562,12 +562,12 @@ async function startXianyuListenerBestEffort(runtime: AppRuntime, adminId: strin
   }
 }
 
-async function markXianyuAccountFailure(store: Store, adminId: string, accountId: string, input: { errorCode?: string; message?: string; accountInvalid: boolean; source?: string }): Promise<void> {
+async function markXianyuAccountFailure(store: Store, adminId: string, accountId: string, input: { errorCode?: string; message?: string; accountInvalid: boolean; source?: string; recoveryRequest?: VerificationRecoveryRequest }): Promise<void> {
     const account = await store.getAccount(adminId, accountId);
     if (!account || account.status === 'disabled') return;
     const classification = classifyXianyuFailure(input);
     if (classification.kind === 'verification_required') {
-      await store.recordAccountRisk({ adminId, accountId, code: input.errorCode ?? 'ACCOUNT_VALIDATION_REQUIRED', source: input.source ?? 'xianyu' });
+      await store.recordAccountRisk({ adminId, accountId, code: input.errorCode ?? 'ACCOUNT_VALIDATION_REQUIRED', source: input.source ?? 'xianyu', recoveryRequest: input.recoveryRequest });
       return;
     }
     const status = classification.accountStatus!;

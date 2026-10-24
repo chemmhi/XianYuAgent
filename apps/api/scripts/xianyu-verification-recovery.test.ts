@@ -161,6 +161,7 @@ test('production MTOP failure hook commits risk before waking immediate recovery
     const result = await runtime.xianyu.fetchItemDetail('admin-1', account.id, 'item-1');
     assert.equal(result.errorCode, 'ACCOUNT_VALIDATION_REQUIRED');
     assert.equal((await runtime.store.getAccount('admin-1', account.id))?.status, 'verification_required');
+    assert.deepEqual((await runtime.store.listAccountVerificationRisks('admin-1', account.id))[0].recoveryRequest, { kind: 'item_detail', itemId: 'item-1' });
     assert.deepEqual(calls, [`admin-1:${account.id}:mtop.taobao.idle.pc.detail`]);
   } finally { globalThis.fetch = originalFetch; await runtime.close(); }
 });

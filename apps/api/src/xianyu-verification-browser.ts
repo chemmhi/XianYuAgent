@@ -180,6 +180,11 @@ export class XianyuVerificationBrowser {
               console.warn(JSON.stringify({ component: 'xianyu-verification', event: 'slider_manual_fallback_wait', reason }));
             } else {
               console.info(JSON.stringify({ component: 'xianyu-verification', event: 'slider_auto_solve_succeeded', strategy: 'ydisks', attempts: sliderResult.attempts, distance: sliderResult.distance, trajectoryPoints: sliderResult.trajectoryPoints, protocolCodes: sliderResult.protocolCodes }));
+              // The native caller immediately re-requests Token and verifies
+              // account identity in this same Chrome session. A challenge may
+              // keep its URL or reuse x5sec even after code=0; neither should
+              // block that authoritative business check for another 3 minutes.
+              if (input.imTokenRequest) return;
             }
           }
 
@@ -197,6 +202,10 @@ export class XianyuVerificationBrowser {
             if (isBlankOrInvalidVerificationPage(lastUrl)) throw new Error('XIANYU_VERIFICATION_PAGE_EMPTY');
             await sleep(pollIntervalMs);
           }
+          console.warn(JSON.stringify({ component: 'xianyu-verification', event: 'verification_completion_timeout',
+            nativeTokenRequested: Boolean(input.imTokenRequest), postVerificationUrl: isPostVerificationUrl(lastUrl),
+            verificationCookiePresent: lastCookies.some(c => c.name.toLowerCase() === 'x5sec' && Boolean(c.value)),
+            platformCode: verdicts.read()?.code }));
           throw new Error('XIANYU_VERIFICATION_TIMEOUT');
         };
         try {

@@ -14,6 +14,7 @@ import type { XianyuVerificationBrowser, XianyuVerificationBrowserResult } from 
 import type { XianyuImOwnerClient } from './xianyu-im-owner-rpc.js';
 import { planXianyuChatRefresh } from './xianyu-chat-refresh-policy.js';
 import { refreshXianyuChatRequests } from './xianyu-chat-refresh.js';
+import { recheckVerificationRisks } from './xianyu-verification-risk-recheck.js';
 
 interface ExternalPage {
   hasMore: boolean;
@@ -359,7 +360,27 @@ export class XianyuImService {
       const credential = await this.store.getCredential(adminId, accountId);
       if (this.closed || credential?.status !== 'active' || !credential.cookieHeader) return;
       console.info(JSON.stringify({ component: 'xianyu-im', event: 'verification_recovery_started', adminId, accountId, source }));
-      await this.refreshActiveCredential(adminId, accountId, { forceCredentialRefresh: true });
+      // A prior browser recovery may already have restored this API. Recheck
+      // before forcing another Token exchange/challenge against a healthy IM.
+      await recheckVerificationRisks(this.store, this.mtop, adminId, accountId);
+      let remaining = await this.store.getAccount(adminId, accountId);
+      if (remaining?.riskEpisode || remaining?.status === 'verification_required') {
+        await this.refreshActiveCredential(adminId, accountId, { forceCredentialRefresh: true });
+        await recheckVerificationRisks(this.store, this.mtop, adminId, accountId);
+        remaining = await this.store.getAccount(adminId, accountId);
+      }
+      if (this.closed || !remaining || remaining.status === 'disabled' || remaining.status === 'expired') return;
+      const savedCredential = await this.store.getCredential(adminId, accountId);
+      if (savedCredential?.status !== 'active') return;
+      if (!remaining.riskEpisode && remaining.status !== 'verification_required' && !this.clients.get(key)?.connected) {
+        await this.ensureClient(adminId, accountId);
+        remaining = await this.store.getAccount(adminId, accountId);
+      }
+      if (remaining?.riskEpisode || remaining?.status === 'verification_required') {
+        console.warn(JSON.stringify({ component: 'xianyu-im', event: 'verification_recovery_pending', adminId, accountId,
+          source, riskSource: remaining.riskSource, errorCode: 'XIANYU_VERIFICATION_RISK_UNRESOLVED' }));
+        return;
+      }
       console.info(JSON.stringify({ component: 'xianyu-im', event: 'verification_recovery_completed', adminId, accountId, source }));
     }).catch(error => {
       console.warn(JSON.stringify({ component: 'xianyu-im', event: 'verification_recovery_failed', adminId, accountId, errorCode: recoveryErrorCode(error) }));
@@ -606,6 +627,8 @@ export class XianyuImService {
       if (token.errorCode === 'ACCOUNT_VALIDATION_REQUIRED' && this.verificationBrowser?.enabled && token.verificationUrl) {
         const latest = await this.store.getCredential(adminId, account.id) ?? credential;
         const nativeRecoveryStartedAt = new Date().toISOString();
+        const nativeRiskRevision = (await this.store.listAccountVerificationRisks(adminId, account.id))
+          .find(risk => risk.source === XIANYU_IM_TOKEN_API)?.revision;
         // Keep stable account cookies from the browser snapshot, but prefer
         // the fresh flat header returned by this validation response. The
         // x5secdata/x5sectag markers in that header bind the challenge URL to
@@ -671,8 +694,9 @@ export class XianyuImService {
               cookieHeader: browserCookieHeader, accessToken: native.accessToken, deviceId,
               metadata: browserMetadata, expiresAt: current.expiresAt });
             const recoveredAccount = await this.store.getAccount(adminId, account.id);
-            if (recoveredAccount?.riskEpisode) await this.store.clearAccountRisk({ adminId, accountId: account.id,
-              episode: recoveredAccount.riskEpisode, source: XIANYU_IM_TOKEN_API, startedAt: nativeRecoveryStartedAt });
+            if (recoveredAccount?.riskEpisode && nativeRiskRevision) await this.store.clearAccountRisk({ adminId, accountId: account.id,
+              episode: recoveredAccount.riskEpisode, source: XIANYU_IM_TOKEN_API, startedAt: nativeRecoveryStartedAt,
+              expectedRiskRevision: nativeRiskRevision });
             await this.store.clearAccountDegraded({ adminId, accountId: account.id, source: XIANYU_IM_TOKEN_API, startedAt: nativeRecoveryStartedAt });
             return saved;
           }

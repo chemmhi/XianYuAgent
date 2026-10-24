@@ -1,5 +1,5 @@
 import { Pool, type PoolClient } from 'pg';
-import type { CredentialRefreshUpdate } from './domain.js';
+import type { AccountVerificationRisk, CredentialRefreshUpdate, VerificationRecoveryRequest } from './domain.js';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, AutoReplyProductLookup, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponAssetRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, DeliveryRecord, DeliveryRecordStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ModelProviderRoutingRecord, ModelProviderRoutingMode, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductKnowledgeBaseMessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceConfirmationRecord, WorkspaceMessageRecord, WorkspaceMessageType, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
@@ -182,30 +182,38 @@ export class PostgresStore implements Store {
       return this.toAccount(updated.rows[0]);
     } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
   }
-  async recordAccountRisk(input: { adminId: string; accountId: string; code: string; source: string }): Promise<AccountRecord | undefined> {
+  async recordAccountRisk(input: { adminId: string; accountId: string; code: string; source: string; recoveryRequest?: VerificationRecoveryRequest }): Promise<AccountRecord | undefined> {
     const client = await this.pool.connect();
     try {
       await client.query('begin');
       const row = await client.query("select a.* from accounts.accounts a join auth.account_scopes s on s.account_id=a.id where a.id=$1 and s.admin_id=$2 and s.status='active' and a.status<>'disabled' for update", [input.accountId, input.adminId]);
       if (!row.rows[0]) { await client.query('rollback'); return undefined; }
       const episode = row.rows[0].risk_episode ? String(row.rows[0].risk_episode) : createId();
-      await client.query(`insert into accounts.health_signals(account_id,kind,source,code,episode,last_seen_at)
-        values ($1,'verification_required',$2,$3,$4,now())
-        on conflict(account_id,kind,source) do update set code=excluded.code,episode=excluded.episode,last_seen_at=excluded.last_seen_at`, [input.accountId, input.source, input.code, episode]);
+      await client.query(`insert into accounts.health_signals(account_id,kind,source,code,episode,last_seen_at,recovery_request_json,risk_revision)
+        values ($1,'verification_required',$2,$3,$4,now(),$5::jsonb,$6::uuid)
+        on conflict(account_id,kind,source) do update set code=excluded.code,episode=excluded.episode,last_seen_at=excluded.last_seen_at,recovery_request_json=excluded.recovery_request_json,risk_revision=excluded.risk_revision`, [input.accountId, input.source, input.code, episode, input.recoveryRequest ? JSON.stringify(input.recoveryRequest) : null, createId()]);
       const updated = await client.query("update accounts.accounts set status='verification_required', risk_code=$2, risk_source=$3, risk_first_seen_at=coalesce(risk_first_seen_at,now()), risk_last_seen_at=now(), risk_episode=$4, updated_at=now() where id=$1 returning *", [input.accountId, input.code, input.source, episode]);
       await client.query("insert into accounts.risk_alert_outbox (account_id,episode,event_type) values ($1,$2,'verification_required') on conflict do nothing", [input.accountId, episode]);
       await client.query('commit');
       return this.toAccount(updated.rows[0]);
     } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
   }
-  async clearAccountRisk(input: { adminId: string; accountId: string; episode: string; source: string; startedAt: string }): Promise<AccountRecord | undefined> {
+  async listAccountVerificationRisks(adminId: string, accountId: string): Promise<AccountVerificationRisk[]> {
+    const rows = await this.pool.query(`select h.source,h.episode,h.risk_revision,h.last_seen_at,h.recovery_request_json from accounts.health_signals h
+      where h.account_id=$2 and h.kind='verification_required' and h.episode is not null
+      and exists(select 1 from accounts.accounts a where a.id=h.account_id and a.status<>'disabled')
+      and exists(select 1 from auth.account_scopes s where s.account_id=h.account_id and s.admin_id=$1 and s.status='active' and (s.expires_at is null or s.expires_at>now()))`, [adminId, accountId]);
+    return rows.rows.map(r => ({ source: String(r.source), episode: String(r.episode), revision: String(r.risk_revision), lastSeenAt: dateIso(r.last_seen_at), recoveryRequest: r.recovery_request_json ?? undefined }));
+  }
+  async clearAccountRisk(input: { adminId: string; accountId: string; episode: string; source: string; startedAt: string; expectedRiskRevision?: string }): Promise<AccountRecord | undefined> {
     const client = await this.pool.connect();
     try {
       await client.query('begin');
       const account = await client.query("select a.* from accounts.accounts a join auth.account_scopes s on s.account_id=a.id where a.id=$1 and s.admin_id=$2 and s.status='active' for update", [input.accountId, input.adminId]);
       if (!account.rows[0] || String(account.rows[0].risk_episode ?? '') !== input.episode) { await client.query('commit'); return account.rows[0] ? this.toAccount(account.rows[0]) : undefined; }
       const removed = await client.query(`delete from accounts.health_signals where account_id=$1 and kind='verification_required' and episode=$2::uuid
-        and (source=$3 or source='legacy') and last_seen_at<=$4::timestamptz returning source`, [input.accountId, input.episode, input.source, input.startedAt]);
+        and (source=$3 or source='legacy') and last_seen_at<=$4::timestamptz
+        and ($5::uuid is null or risk_revision=$5::uuid) returning source`, [input.accountId, input.episode, input.source, input.startedAt, input.expectedRiskRevision ?? null]);
       if (!removed.rows[0]) { await client.query('commit'); return this.toAccount(account.rows[0]); }
       const remaining = await client.query("select source,code,last_seen_at from accounts.health_signals where account_id=$1 and kind='verification_required' and episode=$2::uuid order by last_seen_at desc limit 1", [input.accountId, input.episode]);
       let updated;

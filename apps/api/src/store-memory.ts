@@ -1,6 +1,6 @@
 import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, AutoReplyProductLookup, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponAssetRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponItemRecord, CouponReservationItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, DeliveryRecord, DeliveryRecordStatus, DeliveryStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ModelProviderRoutingRecord, ModelProviderRoutingMode, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductKnowledgeBaseMessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
-import type { CredentialRefreshUpdate } from './domain.js';
+import type { AccountVerificationRisk, CredentialRefreshUpdate, VerificationRecoveryRequest } from './domain.js';
 import { projectAutoReplyRun } from './auto-reply-activity-projection.js';
 import { createId, digestJson } from './security.js';
 import { decodeConversationCursor, encodeConversationCursor, isAfterConversationCursor } from './conversation-cursor.js';
@@ -125,7 +125,7 @@ export class MemoryStore implements Store {
   private readonly deliverySteps = new Map<string, { executionKey: string; status: 'sending' | 'succeeded' | 'unknown'; externalRef?: string }>();
   private readonly riskAlerts = new Map<string, { id: string; accountId: string; episode: string; eventType: 'verification_required' | 'verification_cleared'; delivered: boolean }>();
   private readonly riskNotifications = new Map<string, { id: string; adminId: string; accountId: string; eventType: 'verification_required' | 'verification_cleared'; createdAt: string; read: boolean }>();
-  private readonly healthSignals = new Map<string, { accountId: string; kind: 'verification_required' | 'degraded'; source: string; code?: string; episode?: string; seenAt: string }>();
+  private readonly healthSignals = new Map<string, { accountId: string; kind: 'verification_required' | 'degraded'; source: string; code?: string; episode?: string; revision?: string; seenAt: string; recoveryRequest?: VerificationRecoveryRequest }>();
   private readonly deliveryRecords = new Map<string, DeliveryRecord>();
   private readonly automationExecutions = new Map<string, AutomationExecutionLedgerRecord>();
   private readonly reviewFacts = new Map<string, { accountId: string; orderNo: string; eventId: string; reviewedAt: string }>();
@@ -271,12 +271,12 @@ export class MemoryStore implements Store {
     account.updatedAt = new Date().toISOString();
     return account;
   }
-  async recordAccountRisk(input: { adminId: string; accountId: string; code: string; source: string }): Promise<AccountRecord | undefined> {
+  async recordAccountRisk(input: { adminId: string; accountId: string; code: string; source: string; recoveryRequest?: VerificationRecoveryRequest }): Promise<AccountRecord | undefined> {
     const account = await this.getAccount(input.adminId, input.accountId);
     if (!account || account.status === 'disabled') return undefined;
     const now = new Date().toISOString();
     if (!account.riskEpisode) { account.riskEpisode = createId(); account.riskFirstSeenAt = now; }
-    this.healthSignals.set(`${account.id}:verification_required:${input.source}`, { accountId: account.id, kind: 'verification_required', source: input.source, code: input.code, episode: account.riskEpisode, seenAt: now });
+    this.healthSignals.set(`${account.id}:verification_required:${input.source}`, { accountId: account.id, kind: 'verification_required', source: input.source, code: input.code, episode: account.riskEpisode, revision: createId(), seenAt: now, recoveryRequest: input.recoveryRequest ? structuredClone(input.recoveryRequest) : undefined });
     account.status = 'verification_required';
     account.riskCode = input.code;
     account.riskSource = input.source;
@@ -286,11 +286,17 @@ export class MemoryStore implements Store {
     if (!this.riskAlerts.has(key)) this.riskAlerts.set(key, { id: createId(), accountId: account.id, episode: account.riskEpisode!, eventType: 'verification_required', delivered: false });
     return { ...account };
   }
-  async clearAccountRisk(input: { adminId: string; accountId: string; episode: string; source: string; startedAt: string }): Promise<AccountRecord | undefined> {
+  async listAccountVerificationRisks(adminId: string, accountId: string): Promise<AccountVerificationRisk[]> {
+    if (!await this.hasAccountScope(adminId, accountId)) return [];
+    return [...this.healthSignals.values()].filter(s => s.accountId === accountId && s.kind === 'verification_required' && s.episode)
+      .map(s => ({ source: s.source, episode: s.episode!, revision: s.revision!, lastSeenAt: s.seenAt, recoveryRequest: s.recoveryRequest ? structuredClone(s.recoveryRequest) : undefined }));
+  }
+  async clearAccountRisk(input: { adminId: string; accountId: string; episode: string; source: string; startedAt: string; expectedRiskRevision?: string }): Promise<AccountRecord | undefined> {
     const account = await this.getAccount(input.adminId, input.accountId);
     if (!account || account.status !== 'verification_required' || account.riskEpisode !== input.episode) return account;
     const signalKey = `${account.id}:verification_required:${input.source}`;
     const signal = this.healthSignals.get(signalKey);
+    if (input.expectedRiskRevision && signal?.revision !== input.expectedRiskRevision) return account;
     if (!signal || signal.episode !== input.episode || signal.seenAt > input.startedAt) return account;
     this.healthSignals.delete(signalKey);
     const remaining = [...this.healthSignals.values()].filter((item) => item.accountId === account.id && item.kind === 'verification_required' && item.episode === input.episode).sort((a, b) => b.seenAt.localeCompare(a.seenAt))[0];

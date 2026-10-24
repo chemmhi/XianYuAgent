@@ -1411,6 +1411,16 @@ export interface WorkspaceConfirmationRecord {
   updatedAt: string;
 }
 
+/** Only replayable read operations belong here; never store mutation payloads. */
+export interface VerificationRecoveryRequest { kind: 'item_detail'; itemId: string }
+export interface AccountVerificationRisk {
+  source: string;
+  episode: string;
+  revision: string;
+  lastSeenAt: string;
+  recoveryRequest?: VerificationRecoveryRequest;
+}
+
 export interface Store {
   kind: 'memory' | 'postgres';
   withOutboundConversationLock<T>(accountId: string, conversationRef: string, work: () => Promise<T>): Promise<T>;
@@ -1438,8 +1448,9 @@ export interface Store {
   restoreAccountForLogin(adminId: string, accountId: string): Promise<AccountRecord | undefined>;
   createAccount(input: { platform: string; sellerRef: string; displayName?: string; adminId: string }): Promise<AccountRecord>;
   updateAccount(adminId: string, accountId: string, patch: { sellerRef?: string; displayName?: string; remark?: string; avatarUrl?: string; platformUserId?: string; status?: AccountStatus; lastConnectedAt?: string }): Promise<AccountRecord | undefined>;
-  recordAccountRisk(input: { adminId: string; accountId: string; code: string; source: string }): Promise<AccountRecord | undefined>;
-  clearAccountRisk(input: { adminId: string; accountId: string; episode: string; source: string; startedAt: string }): Promise<AccountRecord | undefined>;
+  recordAccountRisk(input: { adminId: string; accountId: string; code: string; source: string; recoveryRequest?: VerificationRecoveryRequest }): Promise<AccountRecord | undefined>;
+  listAccountVerificationRisks(adminId: string, accountId: string): Promise<AccountVerificationRisk[]>;
+  clearAccountRisk(input: { adminId: string; accountId: string; episode: string; source: string; startedAt: string; expectedRiskRevision?: string }): Promise<AccountRecord | undefined>;
   recordAccountDegraded(input: { adminId: string; accountId: string; source: string }): Promise<AccountRecord | undefined>;
   clearAccountDegraded(input: { adminId: string; accountId: string; source: string; startedAt: string }): Promise<AccountRecord | undefined>;
   setAccountTransport(input: { adminId: string; accountId: string; status: 'connecting' | 'connected' | 'disconnected' | 'failed' }): Promise<void>;

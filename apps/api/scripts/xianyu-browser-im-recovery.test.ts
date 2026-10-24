@@ -16,7 +16,8 @@ import type { AccountRecord, CredentialRecord } from '../src/domain.js';
 
 // External platform responses are controlled; Chrome, signatures, cookie
 // rotation, verification lifecycle, IM service and credential storage are real.
-for (const outcome of ['success', 'expired-signing-cookie', 'bootstrap-after-challenge', 'wrong-account', 'missing-token', 'challenge', 'rejected-slider'] as const) {
+const successfulOutcomes = ['success', 'expired-signing-cookie', 'bootstrap-after-challenge', 'accepted-without-redirect', 'accepted-without-cookie-change'];
+for (const outcome of [...successfulOutcomes, 'wrong-account', 'missing-token', 'challenge', 'rejected-slider']) {
   test(`browser native IM recovery ${outcome} (${process.env.NATIVE_RECOVERY_TEST_DATABASE_URL ? 'PostgreSQL' : 'MemoryStore'})`, async () => {
     const databaseUrl = process.env.NATIVE_RECOVERY_TEST_DATABASE_URL;
     if (databaseUrl) {
@@ -29,7 +30,7 @@ for (const outcome of ['success', 'expired-signing-cookie', 'bootstrap-after-cha
     const admin = await store.createAdmin({ email: `native-${randomUUID()}@example.com`, passwordHash: 'test', displayName: 'Native recovery' });
     const account = await store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: '123456' });
     const credential = await store.upsertCredential({ adminId: admin.id, accountId: account.id, platform: 'xianyu',
-      cookieHeader: 'unb=123456; _m_h5_tk=initial_suffix', deviceId: 'native-device', metadata: { loginMethod: 'qr_http',
+      cookieHeader: 'unb=123456; _m_h5_tk=initial_suffix' + (outcome === 'accepted-without-cookie-change' ? '; x5sec=native-passed-existing' : ''), deviceId: 'native-device', metadata: { loginMethod: 'qr_http',
         ...(['expired-signing-cookie', 'bootstrap-after-challenge'].includes(outcome) ? { cookies_refresh_snapshot: JSON.stringify([
           { name: 'unb', value: '123456', domain: '.goofish.com', path: '/' },
           { name: '_m_h5_tk', value: 'initial_suffix', domain: '.goofish.com', path: '/', expires: 1 },
@@ -63,7 +64,7 @@ for (const outcome of ['success', 'expired-signing-cookie', 'bootstrap-after-cha
               document.addEventListener('mouseup',()=>{released=held;held=false;});
               button.addEventListener('click',async()=>{if(!released||distance<258)return; released=false;
                 const result=await fetch('/slide',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({distance,trusted})});
-                const verdict=await result.json();if(verdict.code===0)setTimeout(()=>location.href='/im',150);else document.querySelector('#nc_1_refresh1').hidden=false;
+                const verdict=await result.json();if(verdict.code===0){if(!${JSON.stringify(['accepted-without-redirect', 'accepted-without-cookie-change'].includes(outcome))})setTimeout(()=>location.href='/im',150);}else document.querySelector('#nc_1_refresh1').hidden=false;
               });</script>` });
             return;
           }
@@ -73,7 +74,7 @@ for (const outcome of ['success', 'expired-signing-cookie', 'bootstrap-after-cha
             assert.ok(gesture.distance >= 258 && gesture.distance <= 279);
             assert.ok(gesture.trusted > 20, 'must replay real Chrome pointer events');
             await route.fulfill({ status: 200, headers: { 'content-type': 'application/json',
-              ...(outcome !== 'rejected-slider' ? { 'set-cookie': `x5sec=native-passed-${slideAttempts}; Domain=.goofish.com; Path=/; Secure; SameSite=None` } : {}) },
+              ...(!['rejected-slider', 'accepted-without-cookie-change'].includes(outcome) ? { 'set-cookie': `x5sec=native-passed-${slideAttempts}; Domain=.goofish.com; Path=/; Secure; SameSite=None` } : {}) },
               body: JSON.stringify({ code: outcome === 'rejected-slider' ? 300 : 0, success: true }) });
             return;
           }
@@ -97,7 +98,8 @@ for (const outcome of ['success', 'expired-signing-cookie', 'bootstrap-after-cha
           }
           const needsSigningCookie = !signingToken && (outcome !== 'bootstrap-after-challenge' || slideAttempts > 0);
           const needsChallenge = isToken && (!(headers.cookie ?? '').includes('x5sec=native-passed') || outcome === 'challenge'
-            || (outcome === 'bootstrap-after-challenge' && slideAttempts < 2));
+            || (outcome === 'bootstrap-after-challenge' && slideAttempts < 2)
+            || (outcome === 'accepted-without-cookie-change' && slideAttempts === 0));
           if (!needsChallenge && !needsSigningCookie) assert.match(headers.cookie ?? '', /x5sec=native-passed/);
           const payload = needsSigningCookie ? { ret: ['FAIL_SYS_TOKEN_EMPTY::token bootstrap'], data: {} } : needsChallenge
             ? { ret: ['FAIL_SYS_USER_VALIDATE::validation required'], data: { url: `https://www.goofish.com/punish?source=browser&step=${outcome === 'bootstrap-after-challenge' ? slideAttempts + 1 : 1}` } }
@@ -122,7 +124,7 @@ for (const outcome of ['success', 'expired-signing-cookie', 'bootstrap-after-cha
       refreshCredential(adminId: string, account: AccountRecord, credential: CredentialRecord): Promise<CredentialRecord>;
     }).refreshCredential(admin.id, account, credential);
     try {
-      if (['success', 'expired-signing-cookie', 'bootstrap-after-challenge'].includes(outcome)) await refresh();
+      if (successfulOutcomes.includes(outcome)) await refresh();
       else await assert.rejects(refresh);
       assert.equal(browserClosed, true);
       assert.equal(serverTokenRequests, 1);
@@ -130,7 +132,7 @@ for (const outcome of ['success', 'expired-signing-cookie', 'bootstrap-after-cha
       const reader = databaseUrl ? new PostgresStore(databaseUrl) : store;
       try {
         const saved = await reader.getCredential(admin.id, account.id);
-        if (['success', 'expired-signing-cookie', 'bootstrap-after-challenge'].includes(outcome)) {
+        if (successfulOutcomes.includes(outcome)) {
           assert.equal(saved?.accessToken, 'native-access');
           assert.equal(saved?.deviceId, 'native-device');
           assert.equal(saved?.metadata?.loginMethod, 'qr_http');

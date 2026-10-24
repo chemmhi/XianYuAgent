@@ -101,3 +101,19 @@ test('verified native token clears its API risk only after credentials are persi
   assert.equal((await f.store.getCredential(f.admin.id, f.account.id))?.accessToken, 'native-access');
   assert.equal((await f.store.getAccount(f.admin.id, f.account.id))?.riskSource, 'im_listener', 'socket risk must await real registration');
 });
+
+test('native recovery cannot clear a newer token risk created after its revision snapshot', async () => {
+  const f = await fixture();
+  await f.store.recordAccountRisk({ adminId: f.admin.id, accountId: f.account.id, source: 'mtop.taobao.idlemessage.pc.login.token', code: 'ACCOUNT_VALIDATION_REQUIRED' });
+  const originalUpsert = f.store.upsertCredential.bind(f.store);
+  f.store.upsertCredential = async (input) => {
+    const saved = await originalUpsert(input);
+    await f.store.recordAccountRisk({ adminId: f.admin.id, accountId: f.account.id, source: 'mtop.taobao.idlemessage.pc.login.token', code: 'ACCOUNT_VALIDATION_REQUIRED' });
+    return saved;
+  };
+  await f.refresh();
+  const risks = await f.store.listAccountVerificationRisks(f.admin.id, f.account.id);
+  assert.equal(risks.length, 1);
+  assert.equal(risks[0]?.source, 'mtop.taobao.idlemessage.pc.login.token');
+  assert.equal((await f.store.getAccount(f.admin.id, f.account.id))?.status, 'verification_required');
+});
