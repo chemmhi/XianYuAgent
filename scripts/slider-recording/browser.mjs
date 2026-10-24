@@ -2,7 +2,8 @@ import { join } from 'node:path';
 import { cpSync, existsSync, mkdirSync } from 'node:fs';
 import { readFingerprint } from './fingerprint.mjs';
 
-export async function installBrowserRecording(store, { snapshotProfile = (profile, destination) => cpSync(profile, destination, { recursive: true }) } = {}) {
+export async function installBrowserRecording(store, { snapshotProfile = (profile, destination) => cpSync(profile, destination, { recursive: true }),
+  traceOptions = { screenshots: true, snapshots: true, sources: true } } = {}) {
   const { chromium } = await import('patchright');
   const launch = chromium.launchPersistentContext.bind(chromium);
   chromium.launchPersistentContext = async (profile, options = {}) => {
@@ -12,7 +13,8 @@ export async function installBrowserRecording(store, { snapshotProfile = (profil
     if (existsSync(profile)) await snapshotProfile(profile, join(dir, 'profile-before'));
     store.event('browser.launch.input', { id, profile, options });
     const context = await launch(profile, { ...options, recordHar: { path: join(dir, 'network.har'), content: 'embed', mode: 'full' } });
-    await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+    await context.tracing.start(traceOptions);
+    store.event('browser.trace.start', { id, options: traceOptions });
     store.event('browser.launch.output', { id, version: context.browser()?.version(), options: { ...options, recordHar: { mode: 'full', content: 'embed' } } });
     const tasks = new Map();
     const track = (promise, scope = 'snapshot') => { tasks.set(promise, scope); promise.catch((error) => store.event('recording.error', { id, scope, error })).finally(() => tasks.delete(promise)); };

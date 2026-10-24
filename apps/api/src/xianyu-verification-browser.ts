@@ -295,6 +295,7 @@ function toBrowserCookies(snapshot: XianyuCookieSnapshot, verificationUrl: strin
     ...(cookie.secure !== undefined ? { secure: cookie.secure } : {}),
     ...(cookie.sameSite ? { sameSite: cookie.sameSite } : {}),
     ...(cookie.partitionKey ? { partitionKey: cookie.partitionKey } : {}),
+    ...(cookie._crHasCrossSiteAncestor !== undefined ? { _crHasCrossSiteAncestor: cookie._crHasCrossSiteAncestor } : {}),
   }));
 }
 

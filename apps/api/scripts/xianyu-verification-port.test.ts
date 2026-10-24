@@ -144,7 +144,7 @@ test('verification forwards partitioned token cookies and protected session attr
   const factory = new FakeFactory();
   const userDataDir = await mkdtemp(join(tmpdir(), 'xianyu-verification-cookie-scope-'));
   const initial: XianyuBrowserCookie[] = [
-    { name: '_m_h5_tk', value: 'partitioned-token', domain: '.goofish.com', path: '/', secure: true, sameSite: 'None', partitionKey: 'https://goofish.com' },
+    { name: '_m_h5_tk', value: 'partitioned-token', domain: '.goofish.com', path: '/', secure: true, sameSite: 'None', partitionKey: 'https://goofish.com', _crHasCrossSiteAncestor: false },
     { name: 'cookie2', value: 'protected-session', domain: '.goofish.com', path: '/', secure: true, httpOnly: true, sameSite: 'None' },
   ];
   try {

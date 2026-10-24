@@ -10,7 +10,7 @@
 - `patchright-verification-browser.ts`：唯一浏览器库适配器，懒加载 Patchright，启动正式版系统 Chrome 的持久化上下文；不连接日常浏览器，不要求开放 CDP 端口。
 - QR/IM 服务：提供挑战 URL 与 Cookie，成功后合并并保存新凭证；IM 随后重新调用 token 接口确认恢复。
 
-Cookie 快照需保留域、路径、HttpOnly、Secure、SameSite 和分区键 `partitionKey`。字符串 Cookie 头不包含这些属性，不能作为完整浏览器状态；IM 合并同一 Cookie 的值更新时保留已有属性，轮换值不继承旧值的过期时间，浏览器注入传递分区键。这些状态修复不代表真实挑战已经通过。
+Cookie 快照需保留域、路径、HttpOnly、Secure、SameSite、分区键 `partitionKey` 和 Chromium 的 `_crHasCrossSiteAncestor` 分区标记。字符串 Cookie 头不包含这些属性，不能作为完整浏览器状态；IM 合并同一 Cookie 的值更新时保留已有属性，轮换值不继承旧值的过期时间，浏览器注入传递分区信息。Patchright 遗漏祖先标记时默认按跨站分区注入，实测会改变同站页面的 Cookie 可见性。这些状态修复不代表真实挑战已经通过。
 
 ## 当前流程
 
@@ -58,3 +58,5 @@ iframe 通过 Patchright frame API 操作；不能将主页面 JavaScript 的跨
 历史记录：2026-10-06 生产曾观察到 `/slide` HTTP 200、业务 `code=300, sig=from bx` 与页面“验证失败”；2026-10-08 合入运行时身份漂移修复 `72d37ae`。这些是当时的观察，不代表当前原因或当前已通过。真实闲鱼挑战必须另行记录实际结果。
 
 开发录制与复现边界见 [本地记录验收](agent/slider-recording-20261023.md)。
+
+2026-10-24 的 23Star/Ydisks 隔离实测见 [专项记录](agent/slider-ydisks-20261024.md)。缺失账号签名 Token 的浏览器即使得到 `code=0` 与新 `x5sec`，也不能作为账号恢复证据；必须复核真实请求 Cookie、账号身份和后续 Token/连接结果。
