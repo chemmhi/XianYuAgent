@@ -39,3 +39,5 @@ S2 验证：invite-registration Memory/PostgreSQL 2/2（含重复requestKey、�
 S2 isolation_review PASS；acceptance_review 两次上游错误未产出结论，未以其失败替代已执行的独立隔离审核。P2-INV-002：已统一 Store.createAdmin 的 Postgres role 参数，风险关闭。
 
 视觉证据：docs/evidence/invite-registration-20261025/README.md；包含登录页、注册页、管理员邀请码设置页的桌面 1440×900 与移动 390×844 截图，真实 Chrome E2E 生成。
+
+完整生命周期验收：invite-registration.test.mjs 覆盖有效→禁用→启用→续期→注册激活→激活账号展示→未确认删除拒绝→二次确认清理用户数据并删除，Memory/PostgreSQL 均通过。

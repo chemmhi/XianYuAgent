@@ -114,7 +114,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
   const piSkills = new PiSkillManager({ rootDir: config.piSkillRoot, canUseHostSkills: async (adminId) => { const actor = await store.findAdminById(adminId); return actor?.role === 'admin' && actor.status === 'active'; } });
   const autoReplyModelClient = config.autoReplyModelEnabled === false ? undefined : modelClient;
   const auth = new AuthService(store, config);
-  const invites = new InviteService(store);
+  const invites = new InviteService(store, config.credentialEncryptionKey)
   const accounts = new AccountService(store, async (input) => {
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
@@ -776,7 +776,9 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   if (ctx.path === '/api/v1/auth/invites' && ctx.method === 'GET') return { statusCode:200, body: success(ctx, { items: await invites.list(authContext.admin.id) }).body };
   if (ctx.path === '/api/v1/auth/invites' && ctx.method === 'POST') { await auth.validateCsrf(authContext, ctx.headers, ctx.cookies); const result=await invites.create({adminId:authContext.admin.id,requestKey:String(ctx.body.requestKey ?? ''),days:Number(ctx.body.days ?? 7),requestId:ctx.requestId,traceId:ctx.traceId}); return {statusCode:201,body:success(ctx,{invite:{...result.invite,code:result.code}}).body}; }
   const inviteRevoke=ctx.path.match(/^\/api\/v1\/auth\/invites\/([^/]+)$/);
-  if (inviteRevoke && ctx.method === 'DELETE') { await auth.validateCsrf(authContext, ctx.headers, ctx.cookies); await invites.revoke(authContext.admin.id,decodeURIComponent(inviteRevoke[1]),ctx.requestId,ctx.traceId); return {statusCode:200,body:success(ctx,{revoked:true}).body}; }
+  if (inviteRevoke && ctx.method === 'DELETE') { await auth.validateCsrf(authContext, ctx.headers, ctx.cookies); await invites.delete(authContext.admin.id,decodeURIComponent(inviteRevoke[1]),ctx.body.purgeUser===true,ctx.requestId,ctx.traceId); return {statusCode:200,body:success(ctx,{deleted:true}).body}; }
+  const inviteAction=ctx.path.match(/^\/api\/v1\/auth\/invites\/([^/]+)\/(enable|disable|renew)$/);
+  if (inviteAction && ctx.method === 'POST') { await auth.validateCsrf(authContext,ctx.headers,ctx.cookies); const id=decodeURIComponent(inviteAction[1]); if(inviteAction[2]==='renew') return {statusCode:200,body:success(ctx,{expiresAt:await invites.renew(authContext.admin.id,id,Number(ctx.body.days??7),ctx.requestId,ctx.traceId)}).body}; await invites.setStatus(authContext.admin.id,id,inviteAction[2]==='enable'?'active':'disabled',ctx.requestId,ctx.traceId); return {statusCode:200,body:success(ctx,{updated:true}).body}; }
   if (ctx.method !== 'GET' && ctx.method !== 'HEAD' && ctx.path !== '/api/v1/auth/logout') await auth.validateCsrf(authContext, ctx.headers, ctx.cookies);
   if (ctx.path === '/api/v1/auth/logout' && ctx.method === 'POST') {
     await auth.validateCsrf(authContext, ctx.headers, ctx.cookies);

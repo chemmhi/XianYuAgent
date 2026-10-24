@@ -568,7 +568,8 @@ export interface ProductPatch {
   priceMinor?: number | null;
 }
 
-export interface InviteRecord { codeHash?: string; id: string; codePrefix: string; createdBy: string; requestKey: string; expiresAt: string; usedAt?: string; usedBy?: string; revokedAt?: string; createdAt: string; }
+export type InviteStatus = 'active' | 'disabled' | 'used' | 'expired' | 'deleted';
+export interface InviteRecord { codeHash?: string; codeCiphertext?: string; id: string; code?: string; codePrefix: string; createdBy: string; requestKey: string; expiresAt: string; usedAt?: string; usedBy?: string; usedByEmail?: string; usedByDisplayName?: string; disabledAt?: string; deletedAt?: string; revokedAt?: string; createdAt: string; status?: InviteStatus; }
 
 export interface AdminRecord {
   id: string;
@@ -1424,9 +1425,12 @@ export interface Store {
   findAdminById(id: string): Promise<AdminRecord | undefined>;
   findAdminByEmail(email: string): Promise<AdminRecord | undefined>;
   createAdmin(input: { email: string; passwordHash: string; displayName: string; role?: string }): Promise<AdminRecord>;
-  createInvite(input: { createdBy: string; codeHash: string; codePrefix: string; requestKey: string; expiresAt: string }): Promise<InviteRecord>;
+  createInvite(input: { createdBy: string; codeHash: string; codeCiphertext: string; codePrefix: string; requestKey: string; expiresAt: string }): Promise<InviteRecord>;
   listInvites(createdBy: string): Promise<InviteRecord[]>;
   revokeInvite(createdBy: string, inviteId: string): Promise<boolean>;
+  setInviteStatus(createdBy: string, inviteId: string, status: 'active' | 'disabled'): Promise<boolean>;
+  renewInvite(createdBy: string, inviteId: string, expiresAt: string): Promise<boolean>;
+  deleteInvite(createdBy: string, inviteId: string, purgeUser?: boolean): Promise<boolean>;
   registerWithInvite(input: { codeHash: string; email: string; passwordHash: string; displayName: string; csrfTokenHash: string; expiresAt: string }): Promise<{ admin: AdminRecord; session: SessionRecord }>;
   touchAdminLogin(adminId: string): Promise<void>;
   createSession(input: { adminId: string; csrfTokenHash: string; expiresAt: string }): Promise<SessionRecord>;

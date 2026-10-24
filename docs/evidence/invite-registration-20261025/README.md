@@ -28,6 +28,6 @@
 
 ![邀请码设置移动端](/E:/OpenAI/Codex/home/worktrees/invite-registration-20261025/XianYuAgent/docs/evidence/invite-registration-20261025/screenshots/settings-invite-mobile-390x844.png)
 
-管理员设置页只显示自动回复、模型和邀请码分类；凭证管理、安全输出校验、Outbox Worker、插件配置均已移除。邀请码生成后展示一次完整码，列表只展示前缀和状态。移动端底部导航与内容卡片均在 viewport 内。
+管理员设置页只显示自动回复、模型和邀请码分类；凭证管理、安全输出校验、Outbox Worker、插件配置均已移除。邀请码表格展示完整码、状态、到期时间、激活账号和操作列；操作列包含启用/禁用、续期、删除。激活邀请码删除前需要两次确认，确认后清理激活用户数据。移动端表格在卡片内横向滚动，底部导航与内容卡片均在 viewport 内。
 
 其他自动回复状态截图位于同目录，作为设置页已有功能的回归证据。

@@ -263,12 +263,12 @@ async function run() {
   await clickContainingText(cdp, '邀请码管理');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('生成邀请码'), 'invite panel');
   await clickText(cdp, '生成邀请码');
-  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('请立即复制邀请码'), 'invite code generated');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('新邀请码：'), 'invite code generated');
   const inviteDesktopPath = await captureViewport(cdp, 1440, 900, 'settings-invite-desktop-1440x900.png');
   const inviteMobilePath = await captureViewport(cdp, 390, 844, 'settings-invite-mobile-390x844.png');
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   const inviteSurface = await evaluate(cdp, "(() => ({ body: document.body.innerText, tabs: Array.from(document.querySelectorAll('.settings-tabs button')).map((button) => button.textContent?.trim()) }))()");
-  if (!inviteSurface.body.includes('已生成的邀请码') || !inviteSurface.body.includes('请立即复制邀请码')) throw new Error('invite management surface missing generated code state');
+  if (!inviteSurface.body.includes('邀请码列表') || !inviteSurface.body.includes('新邀请码：')) throw new Error('invite management surface missing generated code state');
 
   await cdp.send('Network.clearBrowserCookies');
   await cdp.send('Page.navigate', { url: webUrl + '/' });
