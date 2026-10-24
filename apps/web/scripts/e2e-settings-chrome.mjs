@@ -272,6 +272,11 @@ async function run() {
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   const inviteSurface = await evaluate(cdp, "(() => ({ body: document.body.innerText, tabs: Array.from(document.querySelectorAll('.settings-tabs button')).map((button) => button.textContent?.trim()) }))()");
   if (!inviteSurface.body.includes('邀请码列表') || !inviteSurface.body.includes('邀请码列表') || !inviteSurface.body.includes('NEW')) throw new Error('invite management surface missing generated code state');
+  await clickText(cdp, '续期');
+  await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('应用续期'), 'invite renew editor');
+  await setInput(cdp, 'input[aria-label="续期天数"]', '30');
+  await clickText(cdp, '应用续期');
+  await waitFor(async () => !String(await evaluate(cdp, 'document.body.innerText')).includes('续期天数必须'), 'invite renew saved');
 
   await cdp.send('Network.clearBrowserCookies');
   await cdp.send('Page.navigate', { url: webUrl + '/' });
