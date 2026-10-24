@@ -11,6 +11,8 @@ import type { ProductAutomationImEventResult, ProductAutomationTrigger } from '.
 import { InboundInboxWorker } from './inbound-inbox-worker.js';
 import { cookieHeaderFromSnapshot, cookieSnapshotFromMetadata, dropStaleCaptchaChallengeCookies, metadataWithCookieSnapshot, type XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
 import type { XianyuVerificationBrowser, XianyuVerificationBrowserResult } from './xianyu-verification-browser.js';
+import { planXianyuChatRefresh } from './xianyu-chat-refresh-policy.js';
+import { refreshXianyuChatRequests } from './xianyu-chat-refresh.js';
 
 interface ExternalPage {
   hasMore: boolean;
@@ -24,7 +26,8 @@ export class XianyuImService {
   private readonly verificationRetryAfter = new Map<string, number>();
   private readonly recoveryInFlight = new Map<string, Promise<void>>();
   private readonly recoveryRetryAfter = new Map<string, number>();
-  private readonly credentialRefreshTimers = new Map<string, ReturnType<typeof setInterval>>();
+  private readonly credentialRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly chatRefreshInFlight = new Map<string, Promise<boolean>>();
   private readonly transportHeartbeatTimers = new Map<string, ReturnType<typeof setInterval>>();
   private readonly credentialRefreshInFlight = new Map<string, Promise<void>>();
   private readonly tokenRefreshInFlight = new Map<string, Promise<CredentialRecord>>();
@@ -250,13 +253,13 @@ export class XianyuImService {
   async close(): Promise<void> {
     this.closed = true;
     await this.inboundInboxWakeInFlight;
-    for (const timer of this.credentialRefreshTimers.values()) clearInterval(timer);
+    for (const timer of this.credentialRefreshTimers.values()) clearTimeout(timer);
     this.credentialRefreshTimers.clear();
     for (const timer of this.transportHeartbeatTimers.values()) clearInterval(timer);
     this.transportHeartbeatTimers.clear();
     for (const timer of this.verificationRecoveryTimers.values()) clearTimeout(timer);
     this.verificationRecoveryTimers.clear();
-    await Promise.allSettled([...this.verificationRecoveryInFlight.values(), ...this.tokenRefreshInFlight.values()]);
+    await Promise.allSettled([...this.verificationRecoveryInFlight.values(), ...this.tokenRefreshInFlight.values(), ...this.chatRefreshInFlight.values(), ...this.credentialRefreshInFlight.values()]);
     this.credentialRefreshInFlight.clear();
     const inFlight = [...this.clientInFlight.values()];
     this.clientInFlight.clear();
@@ -652,15 +655,81 @@ export class XianyuImService {
 
   private scheduleCredentialRefresh(adminId: string, accountId: string): void {
     const key = `${adminId}:${accountId}`;
-    if (this.credentialRefreshTimers.has(key)) return;
-    const intervalMs = Math.max(60_000, Number(process.env.XIANYU_CREDENTIAL_REFRESH_INTERVAL_MS ?? 10 * 60_000));
-    const timer = setInterval(() => {
-      void this.refreshActiveCredential(adminId, accountId).catch((error) => {
+    if (this.closed || this.credentialRefreshTimers.has(key)) return;
+    const plan = planXianyuChatRefresh();
+    const timer = setTimeout(() => {
+      // Keep the timer registered until work completes so repeated listener starts
+      // cannot create a second schedule while the request is in flight.
+      let keepScheduling = true;
+      void Promise.resolve().then(async () => {
+        if (this.closed) return;
+        // A suspended process may resume in a quieter period than it planned for.
+        if (plan.refresh && planXianyuChatRefresh(Date.now(), () => 0).period === plan.period) {
+          keepScheduling = await this.refreshChatSession(adminId, accountId);
+        }
+      }).catch((error) => {
         console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'credential_refresh_failed', adminId, accountId, errorCode: recoveryErrorCode(error) }));
+      }).finally(() => {
+        if (this.credentialRefreshTimers.get(key) !== timer) return;
+        this.credentialRefreshTimers.delete(key);
+        if (keepScheduling && !this.closed) this.scheduleCredentialRefresh(adminId, accountId);
       });
-    }, intervalMs);
+    }, plan.delayMs);
     timer.unref?.();
     this.credentialRefreshTimers.set(key, timer);
+    console.info(JSON.stringify({ component: 'xianyu-im-listener', event: 'chat_refresh_scheduled', adminId, accountId,
+      period: plan.period, delayMs: plan.delayMs, refresh: plan.refresh }));
+  }
+
+  /** HTTP session maintenance does not interrupt a healthy message listener. */
+  private refreshChatSession(adminId: string, accountId: string): Promise<boolean> {
+    const key = `${adminId}:${accountId}`;
+    const existing = this.chatRefreshInFlight.get(key);
+    if (existing) return existing;
+    const task = Promise.resolve().then(async () => {
+      // Let account recovery/token refresh own the credential if already active.
+      if (this.closed || this.verificationRecoveryInFlight.has(key) || this.tokenRefreshInFlight.has(key)
+        || this.credentialRefreshInFlight.has(key) || this.clientInFlight.has(key)) return true;
+      const account = await this.store.getAccount(adminId, accountId);
+      const loaded = await this.store.getCredential(adminId, accountId);
+      // MemoryStore mutates records in place; retain the original generation.
+      const credential = loaded ? { ...loaded, metadata: { ...loaded.metadata } } : undefined;
+      if (!account || account.status === 'disabled' || !credential || credential.status === 'revoked' || !credential.cookieHeader) return false;
+      if (credential.status !== 'active' || account.status === 'verification_required') return true;
+      // Recheck after storage awaits, then reserve the same single-flight slot
+      // used by socket 401 and verification recovery before issuing any HTTP.
+      if (this.closed || this.tokenRefreshInFlight.has(key) || this.credentialRefreshInFlight.has(key)
+        || this.verificationRecoveryInFlight.has(key) || this.clientInFlight.has(key)) return true;
+      let committed = false;
+      const tokenTask = Promise.resolve().then(async () => {
+        const next = await refreshXianyuChatRequests(this.mtop, adminId, account,
+          { ...credential, deviceId: credential.deviceId ?? this.clients.get(key)?.deviceId });
+        if (this.closed) throw new ServiceError(409, 'CREDENTIAL_REFRESH_CANCELLED', '会话维护已停止');
+        // Cookie deltas have only touched the request-local snapshot so far.
+        const saved = await this.store.commitCredentialRefresh({ adminId, accountId, expected: credential,
+          cookieHeader: next.cookieHeader, accessToken: next.accessToken!, deviceId: next.deviceId!, metadata: next.metadata });
+        if (saved) { committed = true; return saved; }
+        // An on-demand caller sharing this promise may use the newer generation.
+        const current = await this.store.getCredential(adminId, accountId);
+        if (current?.status === 'active' && current.cookieHeader && current.accessToken) return current;
+        throw new ServiceError(409, 'CREDENTIAL_REFRESH_SUPERSEDED', '账号凭证已撤销或替换');
+      }).finally(() => {
+        if (this.tokenRefreshInFlight.get(key) === tokenTask) this.tokenRefreshInFlight.delete(key);
+      });
+      this.tokenRefreshInFlight.set(key, tokenTask);
+      const saved = await tokenTask;
+      if (this.closed) return false;
+      if (!committed) return true;
+      const client = this.clients.get(key);
+      client?.updateCredential(toImCredential(saved));
+      if (!client?.connected) await this.ensureClient(adminId, accountId);
+      console.info(JSON.stringify({ component: 'xianyu-im-listener', event: 'chat_refresh_completed', adminId, accountId }));
+      return true;
+    }).finally(() => {
+      if (this.chatRefreshInFlight.get(key) === task) this.chatRefreshInFlight.delete(key);
+    });
+    this.chatRefreshInFlight.set(key, task);
+    return task;
   }
 
   private async refreshActiveCredential(adminId: string, accountId: string, options: { forceCredentialRefresh?: boolean } = {}): Promise<void> {

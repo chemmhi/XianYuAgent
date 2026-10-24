@@ -1198,6 +1198,16 @@ export interface CredentialRecord {
   updatedAt: string;
 }
 
+export interface CredentialRefreshUpdate {
+  adminId: string;
+  accountId: string;
+  expected: CredentialRecord;
+  cookieHeader: string;
+  accessToken: string;
+  deviceId: string;
+  metadata: Record<string, string>;
+}
+
 export type CredentialRefStatus = 'active' | 'disabled' | 'rotating' | 'revoked';
 
 export type ModelProviderRoutingMode = 'auto' | 'manual_primary' | 'manual_backup';
@@ -1443,6 +1453,7 @@ export interface Store {
   updateLoginSession(adminId: string, accountId: string | undefined, sessionId: string, patch: { accountId?: string; status?: LoginSessionStatus; expiresAt?: string; completedAt?: string; failureCode?: string }): Promise<LoginSessionRecord | undefined>;
   getCredential(adminId: string, accountId: string): Promise<CredentialRecord | undefined>;
   upsertCredential(input: { adminId: string; accountId: string; platform: string; cookieHeader?: string; accessToken?: string; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string }): Promise<CredentialRecord>;
+  commitCredentialRefresh(input: CredentialRefreshUpdate): Promise<CredentialRecord | undefined>;
   revokeCredential(adminId: string, accountId: string): Promise<CredentialRecord | undefined>;
   markCredentialVerified(input: { adminId: string; accountId: string; status: CredentialStatus; expiresAt?: string }): Promise<CredentialRecord | undefined>;
   listCredentialRefs(adminId: string, accountId: string): Promise<CredentialRefRecord[]>;

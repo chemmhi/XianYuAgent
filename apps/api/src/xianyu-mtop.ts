@@ -121,14 +121,26 @@ export class XianyuMtopClient {
     this.onSuccess = options.onSuccess;
   }
 
+  /** Buffer Set-Cookie deltas until the caller atomically commits this generation. */
+  createCredentialSession(adminId: string, accountId: string, credential: MtopCredential): {
+    client: XianyuMtopClient; getCredential: () => MtopCredential;
+  } {
+    let snapshot: MtopCredential = { ...credential, metadata: { ...credential.metadata } };
+    const client = new XianyuMtopClient({ timeoutMs: this.timeoutMs,
+      loadCredential: async (admin, account) => admin === adminId && account === accountId ? snapshot : undefined,
+      saveCookie: async (_admin, _account, cookieHeader, metadata) => { snapshot = { ...snapshot, cookieHeader, metadata }; },
+      onFailure: this.onFailure, onSuccess: this.onSuccess });
+    return { client, getCredential: () => snapshot };
+  }
+
   private async reportFailure(input: { adminId: string; accountId: string; api: string; errorCode?: string; message?: string; accountInvalid: boolean }): Promise<void> {
     const { adminId, accountId, api, errorCode, message, accountInvalid } = input;
     try { await this.onFailure?.({ adminId, accountId, api, errorCode, message, accountInvalid }); }
     catch (error) { throw new AccountHealthPersistenceError(error); }
   }
 
-  async verifyLogin(adminId: string, accountId: string): Promise<MtopResult> {
-    return this.call(adminId, accountId, 'mtop.taobao.idlemessage.pc.loginuser.get', '1.0', {}, { spm_cnt: 'a21ybx.im.0.0', needLogin: 'false' });
+  async verifyLogin(adminId: string, accountId: string, options: MtopRequestOptions = {}): Promise<MtopResult> {
+    return this.call(adminId, accountId, 'mtop.taobao.idlemessage.pc.loginuser.get', '1.0', {}, { spm_cnt: 'a21ybx.im.0.0', needLogin: 'false' }, options);
   }
 
   /**
@@ -140,8 +152,8 @@ export class XianyuMtopClient {
     return this.call(adminId, accountId, api, version, data, extraParams, options);
   }
 
-  async fetchImToken(adminId: string, accountId: string, deviceId: string): Promise<{ success: boolean; accountInvalid: boolean; errorCode?: string; message?: string; accessToken?: string; verificationUrl?: string; response?: Record<string, unknown>; cookieHeader: string }> {
-    const result = await this.call(adminId, accountId, 'mtop.taobao.idlemessage.pc.login.token', '1.0', { appKey: XIANYU_IM_APP_KEY, deviceId }, { spm_cnt: 'a21ybx.im.0.0', spm_pre: 'a21ybx.item.want.1.14ad3da6ALVq3n', log_id: '14ad3da6ALVq3n' });
+  async fetchImToken(adminId: string, accountId: string, deviceId: string, options: MtopRequestOptions = {}): Promise<{ success: boolean; accountInvalid: boolean; errorCode?: string; message?: string; accessToken?: string; verificationUrl?: string; response?: Record<string, unknown>; cookieHeader: string }> {
+    const result = await this.call(adminId, accountId, 'mtop.taobao.idlemessage.pc.login.token', '1.0', { appKey: XIANYU_IM_APP_KEY, deviceId }, { spm_cnt: 'a21ybx.im.0.0', spm_pre: 'a21ybx.item.want.1.14ad3da6ALVq3n', log_id: '14ad3da6ALVq3n' }, options);
     const accessToken = nestedString(result.response, ['data', 'accessToken']);
     const verificationUrl = extractVerificationUrl(result.response);
     if (!result.success || !accessToken) {

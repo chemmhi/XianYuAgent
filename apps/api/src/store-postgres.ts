@@ -1,4 +1,5 @@
 import { Pool, type PoolClient } from 'pg';
+import type { CredentialRefreshUpdate } from './domain.js';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, AutoReplyProductLookup, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponAssetRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, DeliveryRecord, DeliveryRecordStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ModelProviderRoutingRecord, ModelProviderRoutingMode, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductKnowledgeBaseMessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceConfirmationRecord, WorkspaceMessageRecord, WorkspaceMessageType, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
@@ -1925,6 +1926,23 @@ export class PostgresStore implements Store {
     const result = await this.pool.query('insert into auth.account_credentials (id,account_id,platform,status,cookie_header,access_token,device_id,metadata_json,expires_at) values ($1,$2,$3,\'active\',$4,$5,$6,$7::jsonb,$8) on conflict (account_id) do update set platform=excluded.platform,status=\'active\',cookie_header=excluded.cookie_header,access_token=excluded.access_token,device_id=excluded.device_id,metadata_json=excluded.metadata_json,expires_at=excluded.expires_at,updated_at=now() returning *', [createId(), input.accountId, input.platform, input.cookieHeader ?? null, input.accessToken ?? null, input.deviceId ?? null, JSON.stringify(input.metadata ?? {}), input.expiresAt ?? null]);
     return this.toCredential(result.rows[0]);
   }
+  async commitCredentialRefresh(input: CredentialRefreshUpdate): Promise<CredentialRecord | undefined> {
+    const expected = input.expected;
+    const result = await this.pool.query(`update auth.account_credentials c
+      set cookie_header=$4, access_token=$5, device_id=$6, metadata_json=$7::jsonb, updated_at=now()
+      where c.account_id=$1 and c.id=$3 and c.status='active' and (c.expires_at is null or c.expires_at>now())
+        and c.cookie_header is not distinct from $8 and c.access_token is not distinct from $9
+        and c.device_id is not distinct from $10 and c.metadata_json=$11::jsonb
+        and date_trunc('milliseconds',c.updated_at)=$12::timestamptz
+        and c.expires_at is not distinct from $13::timestamptz
+        and exists (select 1 from auth.account_scopes s join accounts.accounts a on a.id=s.account_id
+          where s.account_id=c.account_id and s.admin_id=$2 and s.status='active'
+            and (s.expires_at is null or s.expires_at>now()) and a.status<>'disabled')
+      returning c.*`, [input.accountId, input.adminId, expected.id, input.cookieHeader, input.accessToken, input.deviceId,
+      JSON.stringify(input.metadata), expected.cookieHeader ?? null, expected.accessToken ?? null, expected.deviceId ?? null,
+      JSON.stringify(expected.metadata), expected.updatedAt, expected.expiresAt ?? null]);
+    return result.rows[0] ? this.toCredential(result.rows[0]) : undefined;
+  }
   async revokeCredential(adminId: string, accountId: string): Promise<CredentialRecord | undefined> {
     const current = await this.getCredential(adminId, accountId);
     if (!current) return undefined;
@@ -2629,7 +2647,7 @@ export class PostgresStore implements Store {
   private toLoginSession(row: Row): LoginSessionRecord { return { id: String(row.id), adminId: row.admin_id ? String(row.admin_id) : undefined, accountId: row.account_id ? String(row.account_id) : undefined, provisionalAccountRef: row.provisional_account_ref ? String(row.provisional_account_ref) : undefined, loginMethod: String(row.login_method), status: row.status as LoginSessionRecord['status'], startedAt: new Date(String(row.started_at)).toISOString(), expiresAt: new Date(String(row.expires_at)).toISOString(), completedAt: iso(row.completed_at), failureCode: row.failure_code ? String(row.failure_code) : undefined, qrTokenRef: row.qr_token_ref ? String(row.qr_token_ref) : undefined }; }
   private toCredential(row: Row): CredentialRecord {
     const metadata = row.metadata_json && typeof row.metadata_json === 'object' && !Array.isArray(row.metadata_json) ? Object.fromEntries(Object.entries(row.metadata_json as Record<string, unknown>).map(([key, value]) => [key, String(value)])) : {};
-    return { id: String(row.id), accountId: String(row.account_id), platform: String(row.platform), status: row.status as CredentialRecord['status'], cookieHeader: row.cookie_header ? String(row.cookie_header) : undefined, accessToken: row.access_token ? String(row.access_token) : undefined, deviceId: row.device_id ? String(row.device_id) : undefined, metadata, expiresAt: iso(row.expires_at), lastVerifiedAt: iso(row.last_verified_at), createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString() };
+    return { id: String(row.id), accountId: String(row.account_id), platform: String(row.platform), status: row.status as CredentialRecord['status'], cookieHeader: row.cookie_header ? String(row.cookie_header) : undefined, accessToken: row.access_token ? String(row.access_token) : undefined, deviceId: row.device_id ? String(row.device_id) : undefined, metadata, expiresAt: iso(row.expires_at), lastVerifiedAt: iso(row.last_verified_at), createdAt: dateIso(row.created_at), updatedAt: dateIso(row.updated_at) };
   }
   private toCredentialRef(row: Row): CredentialRefRecord {
     const metadata = row.metadata_json && typeof row.metadata_json === 'object' && !Array.isArray(row.metadata_json)
