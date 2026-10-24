@@ -31,6 +31,11 @@ const partitioned = applySetCookies(snapshot, 'https://h5api.m.goofish.com/h5/or
   'partitioned=1; Domain=.goofish.com; Path=/; Secure; SameSite=None; Partitioned',
 ], Date.now(), 'https://goofish.com');
 assert.match(cookieHeaderForUrl(partitioned, 'https://h5api.m.goofish.com/h5/orders', Date.now(), 'https://goofish.com'), /partitioned=1/);
+assert.equal(partitioned.find(cookie => cookie.name === 'partitioned')?._crHasCrossSiteAncestor, false);
+const crossSite = applySetCookies([], 'https://h5api.m.goofish.com/h5/orders', [
+  'partitioned=1; Domain=.goofish.com; Path=/; Secure; SameSite=None; Partitioned',
+], Date.now(), 'https://example.com');
+assert.equal(crossSite[0]?._crHasCrossSiteAncestor, true);
 
 const metadata = metadataWithCookieSnapshot({ unb: 'seller-1', loginMethod: 'qr_http' }, updated);
 assert.equal(cookieSnapshotFromMetadata(metadata)?.[0]?.name, 'root');
