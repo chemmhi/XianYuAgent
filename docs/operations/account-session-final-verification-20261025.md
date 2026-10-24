@@ -68,3 +68,9 @@
 ## 长期限制
 
 生产状态证明的是本次真实服务运行时已恢复；平台挑战、Cookie 有效期和远端风控具有时效性。后续任务仍必须重新核验业务 Token、登录身份、IM connected、凭证状态和风险状态，不能只看 HTTP 200、页面跳转或单次滑块 verdict。
+
+## 文档提交后的再次核验
+
+- 文档提交 `b5744923911ae0a213c86af388667595825f4c03` 已由 GitHub Actions 运行 [40126486116](https://github.com/chemmhi/XianYuAgent/actions/runs/40126486116) 成功部署。该提交只改变文档和永久记忆入口，未改变服务算法或凭证数据。
+- 2026-10-25 11:45:09（Asia/Shanghai）服务器 Git SHA 为 `b5744923911ae0a213c86af388667595825f4c03`，`healthz` 与 `readyz` 均返回成功。
+- 同时段生产只读核验仍为：`逐星智能` `status=connected`、`transport=connected`、`credentialStatus=active`、`riskCode=null`、`riskSource=null`。
