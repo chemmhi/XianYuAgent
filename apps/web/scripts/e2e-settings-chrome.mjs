@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 const root = join(import.meta.dirname, '..', '..', '..');
 const chromePath = process.env.CHROME_PATH ?? join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe');
-const screenshotDir = join(root, 'docs', 'evidence', 'stage5', 'S4-VS7A', 'screenshots');
+const screenshotDir = join(root, 'docs', 'evidence', 'invite-registration-20261025', 'screenshots');
 const chromeProfile = join(tmpdir(), `xianyu-agent-settings-chrome-${process.pid}`);
 const children = [];
 
@@ -264,14 +264,23 @@ async function run() {
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('生成邀请码'), 'invite panel');
   await clickText(cdp, '生成邀请码');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('请立即复制邀请码'), 'invite code generated');
+  const inviteDesktopPath = await captureViewport(cdp, 1440, 900, 'settings-invite-desktop-1440x900.png');
+  const inviteMobilePath = await captureViewport(cdp, 390, 844, 'settings-invite-mobile-390x844.png');
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   const inviteSurface = await evaluate(cdp, "(() => ({ body: document.body.innerText, tabs: Array.from(document.querySelectorAll('.settings-tabs button')).map((button) => button.textContent?.trim()) }))()");
   if (!inviteSurface.body.includes('已生成的邀请码') || !inviteSurface.body.includes('请立即复制邀请码')) throw new Error('invite management surface missing generated code state');
 
   await cdp.send('Network.clearBrowserCookies');
   await cdp.send('Page.navigate', { url: webUrl + '/' });
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('登录管理控制台'), 'login page after logout');
+  const loginDesktopPath = await captureViewport(cdp, 1440, 900, 'auth-login-desktop-1440x900.png');
+  const loginMobilePath = await captureViewport(cdp, 390, 844, 'auth-login-mobile-390x844.png');
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await clickText(cdp, '没有账号？去注册');
   await waitFor(async () => String(await evaluate(cdp, 'document.body.innerText')).includes('注册 FishAgent'), 'registration page');
+  const registerDesktopPath = await captureViewport(cdp, 1440, 900, 'auth-register-desktop-1440x900.png');
+  const registerMobilePath = await captureViewport(cdp, 390, 844, 'auth-register-mobile-390x844.png');
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await setInput(cdp, 'input[autocomplete="one-time-code"]', inviteCode);
   await setInput(cdp, 'input[autocomplete="name"]', 'Browser Registered User');
   await setInput(cdp, 'input[autocomplete="email"]', `browser-registered-${process.pid}@example.com`);
@@ -283,7 +292,7 @@ async function run() {
   if (!registrationBody.includes('运营控制台')) throw new Error('registered authenticated shell did not become ready: ' + registrationBody.slice(0, 1200));
 
   await cdp.send('Emulation.clearDeviceMetricsOverride');
-  console.log(JSON.stringify({ apiStorage: 'memory', settingsTabs, inviteSurface }, null, 2));
+  console.log(JSON.stringify({ apiStorage: 'memory', settingsTabs, inviteSurface, screenshots: { loginDesktopPath, loginMobilePath, registerDesktopPath, registerMobilePath, inviteDesktopPath, inviteMobilePath } }, null, 2));
   cdp.socket.close();
 }
 
