@@ -210,6 +210,8 @@ export class PostgresStore implements Store {
       const predicate = buildPurgePredicate(tableKey, 'target_row', columnsByTable, foreignKeysByChild, reachable, new Set());
       if (predicate) await client.query(`delete from ${qualifiedName(schema, table)} target_row where (${predicate}) and ($1::uuid[] is not null) and ($2::uuid is not null)`, [accountIds, adminId]);
     }
+    // Keep audit history while detaching records from the account that is being purged.
+    await client.query('update observability.audit_events set account_id=null where account_id = any($1::uuid[])', [accountIds]);
     await client.query('update auth.registration_invites set used_by=null where used_by=$1', [adminId]);
     await client.query('delete from accounts.accounts where id = any($1::uuid[])', [accountIds]);
     await client.query('delete from auth.admins where id=$1', [adminId]);
