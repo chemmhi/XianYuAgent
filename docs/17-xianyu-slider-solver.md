@@ -1,48 +1,62 @@
-# 闲鱼滑块算法迁移与部署适配
+# 闲鱼滑块验证与部署适配
 
-## 目标
-
-把 `.review-xianyu-super-butler/slider_algorithm` 中的轨迹生成和页面流程迁移到正式 API 服务，复用项目已有的 Chrome/CDP 骨架，不新增 Playwright 运行时依赖。
+本文描述当前实现。旧的裸 CDP、`connect` 模式、越界超调轨迹和自动失败后可见人工窗口均已移除。
 
 ## 模块边界
 
-- `apps/api/src/xianyu-slider-trajectory.ts`：纯算法模块。输入水平位移，输出带加减速、二维抖动、超调、回弹和每点延迟的 `(x, y, delay)` 轨迹；可注入随机源，便于复现测试。
-- `apps/api/src/xianyu-slider-solver.ts`：CDP 页面适配器。负责元素发现、距离计算、鼠标事件回放、成功/失败判定、重试控件点击和页面刷新；不读取业务 Cookie、Token 或数据库。
-- `apps/api/src/xianyu-verification-browser.ts`：浏览器生命周期与 Cookie 读取。导航到验证页后，在 `XIANYU_VERIFICATION_SLIDER_MODE=auto` 时调用 solver；自动算法失败会回到原有人工等待流程。
-- `apps/api/src/xianyu-qr-login.ts`：保持 `verification_required` 状态机和 Cookie 合并逻辑，不把自动化失败伪造成登录成功。
+- `xianyu-slider-trajectory.ts`：输入水平位移与可选随机源，输出 `(x, y, delay)`、时间轴和元数据。采用加减速、轨道内二维抖动与末端微调，x 不超过目标距离。
+- `xianyu-slider-solver.ts`：通过独立 slider port 定位主文档和 iframe 的元素，按两个右边缘之差计算距离，回放鼠标、探测页面结果、点击重试或刷新。不访问账号数据库。
+- `xianyu-verification-browser.ts`：管理 profile、Cookie 注入、最终完成判定与关闭。仅在页面离开验证态且 `x5sec` 相对输入已更新时返回成功。
+- `patchright-verification-browser.ts`：唯一浏览器库适配器，懒加载 Patchright，启动正式版系统 Chrome 的持久化上下文；不连接日常浏览器，不要求开放 CDP 端口。
+- QR/IM 服务：提供挑战 URL 与 Cookie，成功后合并并保存新凭证；IM 随后重新调用 token 接口确认恢复。
 
-## 完整流程
+Cookie 快照需保留域、路径、HttpOnly、Secure、SameSite、分区键 `partitionKey` 和 Chromium 的 `_crHasCrossSiteAncestor` 分区标记。字符串 Cookie 头不包含这些属性，不能作为完整浏览器状态；IM 合并同一 Cookie 的值更新时保留已有属性，轮换值不继承旧值的过期时间，浏览器注入传递分区信息。Patchright 遗漏祖先标记时默认按跨站分区注入，实测会改变同站页面的 Cookie 可见性。这些状态修复不代表真实挑战已经通过。
+
+## 当前流程
 
 ```text
-QR 登录确认
-  -> 闲鱼返回 iframeRedirectUrl
-  -> verification_required
-  -> Chrome/CDP 打开验证页
-  -> (可选) 自动发现主文档/可访问 iframe 的滑块控件
-  -> 轨道宽度 - 滑块宽度计算位移
-  -> 轨迹生成：加速/减速 + 抖动 + 超调 + 回弹
-  -> CDP mousePressed / mouseMoved / mouseReleased
-  -> 轮询容器可见性、失败文本和 URL
-  -> 成功：读取浏览器 Cookie，继续 QR 登录
-  -> 失败：点击重试；没有重试控件则刷新验证页
-  -> 达到上限：保留 verification_required，等待人工完成
+QR 确认或 IM token 返回需要验证
+  -> 取该挑战 URL 和对应会话 Cookie
+  -> 按账号/会话串行启动独立持久化 Chrome
+  -> 注入 Cookie，打开验证 URL
+  -> auto 模式定位滑块（包括 iframe）
+  -> 计算 trackRight - buttonRight，生成轨迹
+  -> Patchright page.mouse 按下、移动、释放
+  -> 失败时点击重试控件或刷新，最多配置次数
+  -> 达到上限：返回验证错误，保留可恢复状态
+  -> 页面离开验证态 + 新 x5sec：读取 Cookie 并关闭上下文
+  -> QR 继续登录；IM 保存 Cookie 并重新申请 token
 ```
 
-## 配置
+iframe 通过 Patchright frame API 操作；不能将主页面 JavaScript 的跨域 DOM 限制等同于 Patchright 无法定位跨域 iframe。页面结构、frame 生命周期或平台策略仍可能导致定位/验证失败。
 
-```dotenv
-XIANYU_VERIFICATION_BROWSER_MODE=launch|connect
-XIANYU_VERIFICATION_SLIDER_MODE=disabled|auto
-XIANYU_VERIFICATION_SLIDER_MAX_RETRIES=3
-XIANYU_VERIFICATION_BROWSER_HEADLESS=false
-```
+## 配置与默认值
 
-服务器部署时需要 Chrome/Edge 可执行文件和 CDP 端口。`launch` 模式由 API 进程启动浏览器；`connect` 模式连接已有 CDP 浏览器。算法默认关闭，开启后仍保留人工兜底，避免把外部风控状态误判为成功。无头模式适合受控测试或专用验证容器；真实账号建议使用隔离 profile 并进行人工复核。
+| 配置 | 直接 Node 启动未设置时 / `.env.example` | 生产、开发 Compose 的 API 未覆盖时 |
+| --- | --- | --- |
+| `XIANYU_VERIFICATION_BROWSER_MODE` | `disabled` | `launch` |
+| `XIANYU_VERIFICATION_SLIDER_MODE` | `disabled` | `auto` |
+| `XIANYU_VERIFICATION_BROWSER_HEADLESS` | `false` | `false`，Xvfb 虚拟桌面 |
+| `XIANYU_VERIFICATION_SLIDER_MAX_RETRIES` | `3` | `3`，可由环境覆盖 |
+| `XIANYU_VERIFICATION_BROWSER_MAX_WAIT_MS` | `180000` | `180000` |
+| profile 根目录 | 系统临时目录下 `xianyu-agent/browser_data/xianyu-verification` | `/app/browser_data/xianyu-verification`，持久化卷 |
 
-## 证据与边界
+浏览器模式只支持 `disabled|launch`，滑块模式只支持 `disabled|auto`。显式环境值优先；把 `.env.example` 复制为 `.env` 会显式关闭验证，不能仅凭 Compose 默认值推断实际运行状态。
 
-- 已验证轨迹确定性、时间轴回放、CDP 事件顺序、失败重试和受控本地 Chrome/CDP fixture。
-- 未宣称真实闲鱼外部风控挑战已通过；真实账号、真实 Cookie、外部页面结构和生产 profile 仍需在受控账号上人工验收。
-- 生产复核（2026-10-06）确认：滑块位移为 256px，`/slide` 请求已带 `bx-et`/`bx-pp`，但闲鱼返回 HTTP 200 且业务体为 `code=300, sig=from bx`，页面显示 `验证失败`。因此当前阻断来自外部 BX 风控对自动化交互的拒绝，不是轨道几何或 HTTP 超时；自动模式继续 fail-closed，人工验证仍是恢复路径。
-- 2026-10-08 已补齐生产运行时身份漂移防护：Linux 容器的请求侧平台字段从同一 UA 派生，镜像入口读取实际 Google Chrome stable 版本后再启动 Node，避免浏览器自动更新造成版本指纹不一致。对应合并提交 `72d37ae`；真实生产账号仍需按发布流程复测。
-- 跨域 iframe 无法通过主页面 DOM 直接读取；当前实现会处理主文档和可访问 iframe，遇到不可访问跨域 frame 时保留人工流程，不伪造成功。
+普通 `npm run dev` 继承配置；`dev:api:verification` 与 `dev:worker:verification` 显式启用 `launch + auto`。Compose 中此表描述的是 API 服务，不能假设 Worker 有相同变量或虚拟桌面。
+
+本机使用 Windows 正式版 Chrome；容器固定使用 `/usr/bin/google-chrome`。默认窗口隐藏不等于 headless。显式 `HEADLESS=true`，或 auto 模式设置 `XIANYU_VERIFICATION_AUTO_HEADLESS=true`，会使用无头模式。
+
+自动模式的正式 QR/IM 调用不回退到人工窗口。失败时可在闲鱼页面手动验证，并在账号管理回写该账号最新完整 Cookie；本地浏览器的 Cookie 不会自动同步到服务端。
+
+## 身份与证据边界
+
+请求侧平台字段从同一 UA 派生；Linux 镜像入口在 Node 启动前读取实际 Chrome 版本，Windows 从安装目录探测版本。自定义 UA/版本覆盖仍需与实际浏览器一致。
+
+本地与服务器复用同一算法，但出口 IP、操作系统、Chrome 版本、图形环境和 profile 状态各自独立。本地通过不能证明生产通过；拖动完成也不能替代新 `x5sec` 和业务接口恢复的证据。
+
+历史记录：2026-10-06 生产曾观察到 `/slide` HTTP 200、业务 `code=300, sig=from bx` 与页面“验证失败”；2026-10-08 合入运行时身份漂移修复 `72d37ae`。这些是当时的观察，不代表当前原因或当前已通过。真实闲鱼挑战必须另行记录实际结果。
+
+开发录制与复现边界见 [本地记录验收](agent/slider-recording-20261023.md)。
+
+2026-10-24 的 23Star/Ydisks 隔离实测见 [专项记录](agent/slider-ydisks-20261024.md)。缺失账号签名 Token 的浏览器即使得到 `code=0` 与新 `x5sec`，也不能作为账号恢复证据；必须复核真实请求 Cookie、账号身份和后续 Token/连接结果。

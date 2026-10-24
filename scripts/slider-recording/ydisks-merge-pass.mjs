@@ -1,0 +1,13 @@
+import fs from 'node:fs';
+import { join } from 'node:path';
+import { mergeYdisksPass } from './ydisks-credential.mjs';
+const root = process.env.XIANYU_COPY_INPUT_DIR;
+const label = 'linux-scope-retry-challenge';
+const result = JSON.parse(fs.readFileSync(join(root, label, 'result.json'), 'utf8'));
+if (!result.codeZero || !result.freshX5sec || !result.leftChallenge || result.manual) throw Error('Recorded platform acceptance required');
+const input = JSON.parse(fs.readFileSync(join(root, label, 'input.json'), 'utf8')).input;
+const after = JSON.parse(fs.readFileSync(join(root, label, 'after.json'), 'utf8'));
+const merged = mergeYdisksPass(input, after.cookies);
+merged.label = 'verified-challenge-pass-merged';
+fs.writeFileSync(join(root, 'restored-after-challenge-input.json'), JSON.stringify(merged, null, 2));
+console.log(JSON.stringify({ sellerRef: merged.sellerRef, cookieCount: merged.cookieSnapshot.length, freshPassMerged: true }));
