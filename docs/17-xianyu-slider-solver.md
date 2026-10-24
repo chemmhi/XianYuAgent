@@ -1,14 +1,16 @@
 # 闲鱼滑块验证与部署适配
 
-本文描述当前实现。旧的裸 CDP、`connect` 模式、越界超调轨迹和自动失败后可见人工窗口均已移除。
+本文描述当前实现。自动执行器使用固定来源的 Ydisks 轨迹及失败恢复流程；旧物理抖动生成器已删除。
 
 ## 模块边界
 
-- `xianyu-slider-trajectory.ts`：输入水平位移与可选随机源，输出 `(x, y, delay)`、时间轴和元数据。采用加减速、轨道内二维抖动与末端微调，x 不超过目标距离。
-- `xianyu-slider-solver.ts`：通过独立 slider port 定位主文档和 iframe 的元素，按两个右边缘之差计算距离，回放鼠标、探测页面结果、点击重试或刷新。不访问账号数据库。
+- `xianyu-slider-ydisks.ts`：移植固定上游的三段锚点、连续事件、550–1050ms 目标时间、4–20px 受控超调及轨道半高的 Y 轴跨度；包含准备动作、计时回放及松手后的确认事件。测试与独立执行上游 Python 生成的参考逐点比较。
+- `xianyu-slider-solver.ts`：通过独立 slider port 定位主文档和 iframe，按轨道宽减按钮宽测距；失败后只点击平台重试控件，并确认按钮回到起点 ±3px 后重试，不刷新挑战页。不访问账号数据库。
+- `xianyu-slider-verdict.ts`：记录脱敏 `/slide` 返回码。`success=true, code=300` 属于失败；不记录签名、挑战 URL 参数或 Cookie。
 - `xianyu-verification-browser.ts`：管理 profile、Cookie 注入、最终完成判定与关闭。仅在页面离开验证态且 `x5sec` 相对输入已更新时返回成功。
 - `patchright-verification-browser.ts`：唯一浏览器库适配器，懒加载 Patchright，启动正式版系统 Chrome 的持久化上下文；不连接日常浏览器，不要求开放 CDP 端口。
-- QR/IM 服务：提供挑战 URL 与 Cookie，成功后合并并保存新凭证；IM 随后重新调用 token 接口确认恢复。
+- `xianyu-browser-im-token.ts`：在同一浏览器中原生请求 Token、完成该请求生成的挑战、轮换签名 Cookie，并校验登录身份。限制最多两种不同挑战，重复同一挑战或预算耗尽即报错。
+- QR/IM 服务：QR 使用自身挑战；IM 将恢复的 Token、设备 ID、完整 Cookie 快照一次保存后，再核销同来源风险。IM 连接风险在真实注册成功后处理。
 
 Cookie 快照需保留域、路径、HttpOnly、Secure、SameSite、分区键 `partitionKey` 和 Chromium 的 `_crHasCrossSiteAncestor` 分区标记。字符串 Cookie 头不包含这些属性，不能作为完整浏览器状态；IM 合并同一 Cookie 的值更新时保留已有属性，轮换值不继承旧值的过期时间，浏览器注入传递分区信息。Patchright 遗漏祖先标记时默认按跨站分区注入，实测会改变同站页面的 Cookie 可见性。这些状态修复不代表真实挑战已经通过。
 
@@ -16,16 +18,16 @@ Cookie 快照需保留域、路径、HttpOnly、Secure、SameSite、分区键 `p
 
 ```text
 QR 确认或 IM token 返回需要验证
-  -> 取该挑战 URL 和对应会话 Cookie
   -> 按账号/会话串行启动独立持久化 Chrome
-  -> 注入 Cookie，打开验证 URL
-  -> auto 模式定位滑块（包括 iframe）
-  -> 计算 trackRight - buttonRight，生成轨迹
-  -> Patchright page.mouse 按下、移动、释放
-  -> 失败时点击重试控件或刷新，最多配置次数
+  -> 注入 Cookie；IM 原生请求自己的挑战，QR 打开其验证 URL
+  -> Ydisks 准备动作，定位滑块（包括 iframe）
+  -> 计算 track.width - button.width，生成连续轨迹
+  -> Patchright page.mouse 按下、移动、释放，再补确认事件
+  -> 失败时点击平台重试控件，确认归位后再试，最多配置次数
   -> 达到上限：返回验证错误，保留可恢复状态
   -> 页面离开验证态 + 新 x5sec：读取 Cookie 并关闭上下文
-  -> QR 继续登录；IM 保存 Cookie 并重新申请 token
+  -> QR 继续登录；IM 原生获取 Token 并校验身份
+  -> IM 一次保存 Cookie 快照、Token、设备 ID，再执行真实连接
 ```
 
 iframe 通过 Patchright frame API 操作；不能将主页面 JavaScript 的跨域 DOM 限制等同于 Patchright 无法定位跨域 iframe。页面结构、frame 生命周期或平台策略仍可能导致定位/验证失败。
@@ -45,7 +47,7 @@ iframe 通过 Patchright frame API 操作；不能将主页面 JavaScript 的跨
 
 普通 `npm run dev` 继承配置；`dev:api:verification` 与 `dev:worker:verification` 显式启用 `launch + auto`。Compose 中此表描述的是 API 服务，不能假设 Worker 有相同变量或虚拟桌面。
 
-本机使用 Windows 正式版 Chrome；容器固定使用 `/usr/bin/google-chrome`。默认窗口隐藏不等于 headless。显式 `HEADLESS=true`，或 auto 模式设置 `XIANYU_VERIFICATION_AUTO_HEADLESS=true`，会使用无头模式。
+本机使用 Windows 正式版 Chrome；容器固定使用 `/usr/bin/google-chrome`。Ydisks 使用真实 Chrome 默认 UA、原生窗口尺寸及 1920×1080 虚拟桌面；显式 UA 覆盖仍然生效。自动拖动不把窗口移动到屏幕之外。显式 `HEADLESS=true`，或 auto 模式设置 `XIANYU_VERIFICATION_AUTO_HEADLESS=true`，会使用无头模式。
 
 自动模式的正式 QR/IM 调用不回退到人工窗口。失败时可在闲鱼页面手动验证，并在账号管理回写该账号最新完整 Cookie；本地浏览器的 Cookie 不会自动同步到服务端。
 
@@ -60,3 +62,5 @@ iframe 通过 Patchright frame API 操作；不能将主页面 JavaScript 的跨
 开发录制与复现边界见 [本地记录验收](agent/slider-recording-20261023.md)。
 
 2026-10-24 的 23Star/Ydisks 隔离实测见 [专项记录](agent/slider-ydisks-20261024.md)。缺失账号签名 Token 的浏览器即使得到 `code=0` 与新 `x5sec`，也不能作为账号恢复证据；必须复核真实请求 Cookie、账号身份和后续 Token/连接结果。
+
+本次接入正式执行器及真实账号隔离验收见 [2026-10-24 接入记录](operations/ydisks-production-executor-20261024.md)。该验证使用腾讯云出口与生产账号资料副本，凭证写入隔离 PostgreSQL；不代表常驻生产服务已发布或恢复。

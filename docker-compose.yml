@@ -93,7 +93,7 @@ services:
         condition: service_healthy
       object-storage:
         condition: service_started
-    command: ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1440x900x24 -nolisten tcp", "node", "dist/index.js"]
+    command: ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1920x1080x24 -nolisten tcp", "node", "dist/index.js"]
 
   worker:
     profiles: [full]

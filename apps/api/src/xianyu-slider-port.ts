@@ -5,6 +5,7 @@ export interface XianyuSliderLocator {
   textContent(): Promise<string | null>;
   hover(options?: { timeout?: number }): Promise<void>;
   click(options?: { timeout?: number }): Promise<void>;
+  evaluate<T, A>(pageFunction: (element: HTMLElement, arg: A) => T | Promise<T>, arg: A, options?: { timeout?: number }): Promise<T>;
 }
 
 export interface XianyuSliderFrame {
@@ -15,7 +16,8 @@ export interface XianyuSliderPage extends XianyuSliderFrame {
   url(): string;
   frames(): readonly XianyuSliderFrame[];
   mouse: {
-    move(x: number, y: number): Promise<void>;
+    move(x: number, y: number, options?: { steps?: number }): Promise<void>;
+    wheel(deltaX: number, deltaY: number): Promise<void>;
     down(options?: { button?: 'left' | 'right' | 'middle' }): Promise<void>;
     up(options?: { button?: 'left' | 'right' | 'middle' }): Promise<void>;
   };

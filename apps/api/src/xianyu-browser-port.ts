@@ -11,6 +11,13 @@ export interface XianyuVerificationPage extends XianyuSliderPage {
   goto(url: string, options?: { waitUntil?: XianyuVerificationWaitUntil; timeout?: number }): Promise<unknown>;
   evaluate<T, A = undefined>(pageFunction: (arg: A) => T | Promise<T>, arg?: A): Promise<T>;
   close(): Promise<void>;
+  on?(event: 'response', listener: (response: XianyuVerificationResponse) => void): unknown;
+  off?(event: 'response', listener: (response: XianyuVerificationResponse) => void): unknown;
+}
+
+export interface XianyuVerificationResponse {
+  url(): string;
+  json(): Promise<unknown>;
 }
 
 export interface XianyuVerificationContext {
@@ -28,6 +35,7 @@ export interface XianyuVerificationLaunchOptions {
   hideWindow: boolean;
   executablePath?: string;
   userAgent?: string;
+  sliderStrategy?: 'ydisks';
 }
 
 export interface XianyuVerificationBrowserFactory {

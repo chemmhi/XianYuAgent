@@ -17,6 +17,7 @@ export function createPatchrightVerificationBrowserFactory(): XianyuVerification
   return {
     async launchPersistentContext(options: XianyuVerificationLaunchOptions): Promise<XianyuVerificationContext> {
       const { chromium } = await import('patchright');
+      const ydisks = options.sliderStrategy === 'ydisks';
       await cleanupStaleChromiumSingletonLocks(options.profileDir);
       if (await isChromiumProfileInUse(options.profileDir)) throw new Error('XIANYU_VERIFICATION_PROFILE_BUSY');
       const context = await chromium.launchPersistentContext(options.profileDir, {
@@ -24,10 +25,19 @@ export function createPatchrightVerificationBrowserFactory(): XianyuVerification
         ...(options.executablePath ? { executablePath: options.executablePath } : {}),
         headless: options.headless,
         ...(options.userAgent ? { userAgent: options.userAgent } : {}),
-        viewport: { width: 1440, height: 900 },
+        viewport: ydisks ? null : { width: 1440, height: 900 },
+        ...(ydisks ? { colorScheme: 'light' as const } : {}),
         locale: 'zh-CN',
         timezoneId: 'Asia/Shanghai',
-        args: [
+        args: [...(ydisks ? [
+          '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+          '--no-first-run', '--start-maximized', '--window-size=1920,1080',
+          '--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding', '--lang=zh-CN', '--disable-blink-features=AutomationControlled',
+          '--no-default-browser-check', '--disable-popup-blocking', '--disable-search-engine-choice-screen',
+          '--password-store=basic', '--use-mock-keychain',
+          ...(process.platform === 'linux' ? ['--use-angle=swiftshader'] : []),
+        ] : [
           '--disable-blink-features=AutomationControlled',
           '--disable-features=AutomationControlled',
           '--disable-popup-blocking',
@@ -41,8 +51,9 @@ export function createPatchrightVerificationBrowserFactory(): XianyuVerification
           '--no-default-browser-check',
           '--window-size=1440,900',
           '--lang=zh-CN',
+        ]),
           `--xianyu-verification-owner=${process.pid}`,
-          ...(!options.headless && options.hideWindow ? ['--start-minimized', '--window-position=-32000,-32000'] : []),
+          ...(!ydisks && !options.headless && options.hideWindow ? ['--start-minimized', '--window-position=-32000,-32000'] : []),
         ],
       });
       return wrapPatchrightContext(context, options.profileDir);

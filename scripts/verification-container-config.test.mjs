@@ -15,6 +15,7 @@ for (const [name, compose] of [['production', productionCompose], ['development'
   test(`${name} browser container uses init and Patchright Xvfb mode`, () => {
     assert.match(compose, /init:\s*true/);
     assert.match(compose, /command:\s*\["xvfb-run"/);
+    assert.match(compose, /-screen 0 1920x1080x24/);
     assert.match(compose, /XIANYU_VERIFICATION_BROWSER_MODE: \$\{XIANYU_VERIFICATION_BROWSER_MODE:-launch\}/);
     assert.match(compose, /XIANYU_VERIFICATION_SLIDER_MODE: \$\{XIANYU_VERIFICATION_SLIDER_MODE:-auto\}/);
     assert.match(compose, /XIANYU_VERIFICATION_BROWSER_HEADLESS: \$\{XIANYU_VERIFICATION_BROWSER_HEADLESS:-false\}/);

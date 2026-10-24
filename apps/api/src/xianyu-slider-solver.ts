@@ -1,4 +1,4 @@
-import { generatePhysicsTrajectory, replayTrajectory, type GeneratedSliderTrajectory } from './xianyu-slider-trajectory.js';
+import { executeYdisksGesture, generateYdisksTrajectory, prepareYdisksPage } from './xianyu-slider-ydisks.js';
 import type { XianyuSliderFrame, XianyuSliderLocator, XianyuSliderPage, XianyuSliderRect } from './xianyu-slider-port.js';
 
 export type { XianyuSliderFrame, XianyuSliderLocator, XianyuSliderPage, XianyuSliderRect } from './xianyu-slider-port.js';
@@ -13,6 +13,7 @@ export interface XianyuSliderSolverOptions {
   retryDelayMs?: number;
   rng?: () => number;
   logger?: Pick<Console, 'info' | 'warn'>;
+  readVerdict?: () => { sequence: number; code?: number; success?: boolean } | undefined;
 }
 
 export interface XianyuSliderSolveResult {
@@ -24,6 +25,7 @@ export interface XianyuSliderSolveResult {
   pageReloaded: boolean;
   failureReason?: string;
   errors: string[];
+  protocolCodes: number[];
 }
 
 interface SliderElementSnapshot {
@@ -82,15 +84,17 @@ export class XianyuSliderSolver {
   private readonly retryDelayMs: number;
   private readonly rng: () => number;
   private readonly logger?: Pick<Console, 'info' | 'warn'>;
+  private readonly readVerdict?: XianyuSliderSolverOptions['readVerdict'];
 
   constructor(private readonly page: XianyuSliderPage, options: XianyuSliderSolverOptions = {}) {
     this.maxRetries = Math.max(1, Math.floor(options.maxRetries ?? 3));
-    this.elementTimeoutMs = Math.max(100, Math.floor(options.elementTimeoutMs ?? 2_000));
+    this.elementTimeoutMs = Math.max(100, Math.floor(options.elementTimeoutMs ?? 15_000));
     this.verificationTimeoutMs = Math.max(250, Math.floor(options.verificationTimeoutMs ?? 4_000));
     this.verificationPollMs = Math.max(25, Math.floor(options.verificationPollMs ?? 200));
     this.retryDelayMs = Math.max(0, Math.floor(options.retryDelayMs ?? 700));
     this.rng = options.rng ?? Math.random;
     this.logger = options.logger;
+    this.readVerdict = options.readVerdict;
   }
 
   async solve(): Promise<XianyuSliderSolveResult> {
@@ -101,7 +105,9 @@ export class XianyuSliderSolver {
       retryClicked: false,
       pageReloaded: false,
       errors: [],
+      protocolCodes: [],
     };
+    await prepareYdisksPage(this.page, this.rng);
 
     for (let attempt = 1; attempt <= this.maxRetries; attempt += 1) {
       result.attempts = attempt;
@@ -124,17 +130,23 @@ export class XianyuSliderSolver {
           distance: elements.distance,
           buttonRect: elements.buttonRect,
           trackRect: elements.trackRect,
+          strategy: 'ydisks',
         });
 
-        const generated = generatePhysicsTrajectory(elements.distance, {
-          rng: this.rng,
-          verticalLimit: Math.max(0.5, (elements.trackRect.height - elements.buttonRect.height) / 2),
-        });
-        result.distance = elements.distance;
+        const generated = generateYdisksTrajectory(elements.distance + this.rng() - 0.5,
+          (elements.trackRect.height || elements.buttonRect.height) / 2, this.rng);
+        result.distance = generated.distance;
         result.trajectoryPoints = generated.points.length;
-        await this.simulateSlide(elements.button, elements.buttonRect, generated);
+        const verdictStart = this.readVerdict?.()?.sequence ?? 0;
+        const accepted = () => {
+          const verdict = this.readVerdict?.();
+          return Boolean(verdict && verdict.sequence > verdictStart && verdict.code === 0 && verdict.success === true);
+        };
+        await executeYdisksGesture(this.page, elements.button, elements.buttonRect, generated, this.rng, accepted);
 
-        const verification = await this.waitForVerificationResult(elements.container);
+        const verification = await this.waitForVerificationResult(elements.container, verdictStart);
+        const verdict = this.readVerdict?.();
+        if (verdict && verdict.sequence > verdictStart && verdict.code !== undefined) result.protocolCodes.push(verdict.code);
         if (verification.success) {
           result.success = true;
           result.failureReason = undefined;
@@ -144,26 +156,21 @@ export class XianyuSliderSolver {
         result.failureReason = verification.reason;
         result.errors.push(verification.reason);
         if (attempt >= this.maxRetries) break;
-        if (verification.retry) {
-          result.retryClicked = (await this.clickRetry(verification.retry)) || result.retryClicked;
-        }
-        if (!verification.retry || !result.retryClicked) {
-          await this.reloadPage();
-          result.pageReloaded = true;
-        }
+        if (!await this.recoverControl(() => { result.retryClicked = true; })) break;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         result.failureReason = `exception:${error instanceof Error ? error.name : 'Error'}`;
         result.errors.push(message);
         this.logger?.warn('xianyu slider attempt failed', { attempt, message });
+        if (attempt < this.maxRetries && !await this.recoverControl(() => { result.retryClicked = true; })) break;
       }
     }
 
     return result;
   }
 
-  private async waitForElements(): Promise<SliderElementSnapshot | undefined> {
-    const deadline = Date.now() + this.elementTimeoutMs;
+  private async waitForElements(timeoutMs = this.elementTimeoutMs): Promise<SliderElementSnapshot | undefined> {
+    const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       for (const frame of this.iterFrames()) {
         const container = await this.firstVisible(frame, DEFAULT_CONTAINER_SELECTORS);
@@ -182,30 +189,13 @@ export class XianyuSliderSolver {
     return undefined;
   }
 
-  private async simulateSlide(button: XianyuSliderLocator, buttonRect: XianyuSliderRect, trajectory: GeneratedSliderTrajectory): Promise<void> {
-    const startX = buttonRect.x + buttonRect.width / 2;
-    const startY = buttonRect.y + buttonRect.height / 2;
-    await this.page.mouse.move(startX - 24, startY - 4);
-    await this.page.mouse.move(startX - 12, startY + 2);
-    await sleep(120);
-    await button.hover({ timeout: this.elementTimeoutMs });
-    await this.page.mouse.move(startX, startY);
-    await sleep(80);
-    let pressed = false;
-    try {
-      await this.page.mouse.down({ button: 'left' });
-      pressed = true;
-      await sleep(90);
-      await replayTrajectory(trajectory.points, startX, startY, (x, y) => this.page.mouse.move(x, y));
-      await sleep(150);
-    } finally {
-      if (pressed) await this.page.mouse.up({ button: 'left' }).catch(() => undefined);
-    }
-  }
-
-  private async waitForVerificationResult(container: XianyuSliderLocator): Promise<{ success: boolean; reason: string; retry?: XianyuSliderLocator }> {
+  private async waitForVerificationResult(container: XianyuSliderLocator, verdictStart: number): Promise<{ success: boolean; reason: string; retry?: XianyuSliderLocator }> {
     const deadline = Date.now() + this.verificationTimeoutMs;
     while (Date.now() < deadline) {
+      const verdict = this.readVerdict?.();
+      if (verdict && verdict.sequence > verdictStart && verdict.code !== undefined) {
+        return { success: verdict.code === 0 && verdict.success === true, reason: `platform_code:${verdict.code}` };
+      }
       const probe = await this.probe(container);
       if (!probe.container || isPostVerificationUrl(probe.pageUrl)) return { success: true, reason: 'verification_succeeded' };
       if (probe.failureText) return { success: false, reason: `failure_keyword:${probe.failureText}`, retry: probe.retry };
@@ -239,8 +229,33 @@ export class XianyuSliderSolver {
     }
   }
 
-  private async reloadPage(): Promise<void> {
-    await this.page.reload({ waitUntil: 'domcontentloaded', timeout: Math.max(5_000, this.elementTimeoutMs * 5) });
+  private async recoverControl(onRetryClicked: () => void): Promise<boolean> {
+    const deadline = Date.now() + 800;
+    let retry: XianyuSliderLocator | undefined;
+    do {
+      for (const selector of ['#nc_1_refresh1', '.nc_iconfont.btn_refresh', '.errloading', '[class*="refresh"]']) {
+        for (const frame of this.iterFrames()) {
+          retry = await this.firstVisible(frame, [selector]);
+          if (retry) break;
+        }
+        if (retry) break;
+      }
+      if (!retry) for (const frame of this.iterFrames()) {
+        const container = await this.firstVisible(frame, ['.nc-container']);
+        const text = (await container?.textContent().catch(() => '') ?? '').toLowerCase();
+        if (['重试', '刷新', '失败', 'retry', 'refresh', 'failed'].some(word => text.includes(word))) { retry = container; break; }
+      }
+      if (!retry) await sleep(150);
+    } while (!retry && Date.now() < deadline);
+    if (!retry || !await this.clickRetry(retry)) return false;
+    onRetryClicked();
+    const resetDeadline = Date.now() + 4000;
+    while (Date.now() < resetDeadline) {
+      await sleep(300);
+      const control = await this.waitForElements(Math.min(250, resetDeadline - Date.now()));
+      if (control && Math.abs(control.buttonRect.x - control.trackRect.x) <= 3) return true;
+    }
+    return false;
   }
 
   private iterFrames(): XianyuSliderFrame[] {
@@ -279,13 +294,10 @@ export function solveXianyuSlider(page: XianyuSliderPage, options?: XianyuSlider
 }
 
 /**
- * NC's track box can start a couple of pixels before the draggable handle.
- * The usable travel is therefore the distance between the two right edges,
- * not the difference between the element widths.
+ * Match the pinned Ydisks browser measurement. NC clamps the controlled
+ * overshoot; border offsets must not shorten the measured track width.
  */
 export function calculateSliderDistance(trackRect: XianyuSliderRect, buttonRect: XianyuSliderRect): number {
-  const trackRight = trackRect.x + trackRect.width;
-  const buttonRight = buttonRect.x + buttonRect.width;
-  const distance = trackRight - buttonRight;
+  const distance = trackRect.width - buttonRect.width;
   return Number.isFinite(distance) ? Math.max(0, distance) : 0;
 }

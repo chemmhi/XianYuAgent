@@ -8,6 +8,7 @@ import type { XianyuVerificationBrowserFactory, XianyuVerificationContext, Xiany
 import { acquireXianyuVerificationProfileLock } from './xianyu-verification-profile-lock.js';
 import { XianyuSliderSolver, type XianyuSliderMode } from './xianyu-slider-solver.js';
 import { fetchXianyuBrowserImToken, type XianyuBrowserImToken, type XianyuBrowserImTokenRequest } from './xianyu-browser-im-token.js';
+import { observeXianyuSliderVerdicts } from './xianyu-slider-verdict.js';
 
 export type XianyuVerificationBrowserMode = 'disabled' | 'launch';
 
@@ -82,7 +83,8 @@ export class XianyuVerificationBrowser {
     this.maxWaitMs = options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this.allowManualFallback = options.allowManualFallback ?? false;
-    this.userAgent = options.userAgent?.trim() || process.env.XIANYU_BROWSER_USER_AGENT?.trim() || XIANYU_USER_AGENT;
+    this.userAgent = options.userAgent?.trim() || process.env.XIANYU_BROWSER_USER_AGENT?.trim()
+      || (this.sliderMode === 'auto' ? undefined : XIANYU_USER_AGENT);
     this.browserFactory = options.browserFactory ?? createPatchrightVerificationBrowserFactory();
   }
 
@@ -150,53 +152,63 @@ export class XianyuVerificationBrowser {
         hideWindow,
         executablePath: this.executablePath,
         userAgent: this.userAgent,
+        ...(this.sliderMode === 'auto' ? { sliderStrategy: 'ydisks' as const } : {}),
       });
       try {
         await context.addInitScript({ content: buildAutomationEvasionScript() });
         const page = await this.reuseVerificationPage(context);
         const initialSnapshot = normalizeCookieSnapshot(input.initialCookieSnapshot) ?? [];
         if (initialSnapshot.length > 0) await context.addCookies(toBrowserCookies(initialSnapshot, input.verificationUrl));
-        await page.goto(input.verificationUrl, { waitUntil: 'domcontentloaded', timeout: maxWaitMs });
-        await waitForPageContent(page, Math.min(maxWaitMs, 12_000), pollIntervalMs);
-        await sleep(750);
+        const verdicts = observeXianyuSliderVerdicts(page);
+        const solveChallenge = async (verificationUrl: string): Promise<void> => {
+          assertVerificationUrl(verificationUrl);
+          const priorSnapshot = mapCookies(await context.cookies());
+          await page.goto(verificationUrl, { waitUntil: 'domcontentloaded', timeout: maxWaitMs });
+          await waitForPageContent(page, Math.min(maxWaitMs, 12_000), pollIntervalMs);
+          await sleep(750);
 
-        if (this.sliderMode === 'auto') {
-          const sliderResult = await new XianyuSliderSolver(page, {
-            maxRetries: this.sliderMaxRetries,
-            logger: console,
-          }).solve();
-          if (!sliderResult.success) {
-            const reason = sliderResult.failureReason ?? 'unknown';
-            console.warn(JSON.stringify({ component: 'xianyu-verification', event: 'slider_auto_solve_failed', reason, attempts: sliderResult.attempts, distance: sliderResult.distance, trajectoryPoints: sliderResult.trajectoryPoints }));
-            if (!allowManualFallback) throw new Error(`XIANYU_VERIFICATION_AUTO_SOLVE_FAILED:${reason}`);
-            console.warn(JSON.stringify({ component: 'xianyu-verification', event: 'slider_manual_fallback_wait', reason }));
-          } else {
-            console.info(JSON.stringify({ component: 'xianyu-verification', event: 'slider_auto_solve_succeeded', attempts: sliderResult.attempts, distance: sliderResult.distance, trajectoryPoints: sliderResult.trajectoryPoints }));
-          }
-        }
-
-        const deadline = Date.now() + maxWaitMs;
-        let lastUrl = page.url();
-        let lastCookies = await context.cookies();
-        while (Date.now() < deadline) {
-          lastUrl = page.url();
-          lastCookies = await context.cookies();
-          if (isVerificationPageComplete(lastUrl, lastCookies, initialSnapshot)) {
-            await sleep(1_000);
-            lastCookies = await context.cookies();
-            if (isVerificationPageComplete(lastUrl, lastCookies, initialSnapshot)) {
-              const imToken = input.imTokenRequest
-                ? await fetchXianyuBrowserImToken(context, page, input.imTokenRequest)
-                : undefined;
-              // Native requests may rotate cookies; export only after they finish.
-              return { finalUrl: page.url(), cookieSnapshot: dropStaleCaptchaChallengeCookies(mapCookies(await context.cookies())),
-                ...(imToken ? { imToken } : {}) };
+          if (this.sliderMode === 'auto') {
+            const sliderResult = await new XianyuSliderSolver(page, {
+              maxRetries: this.sliderMaxRetries,
+              logger: console,
+              readVerdict: verdicts.read,
+            }).solve();
+            if (!sliderResult.success) {
+              const reason = sliderResult.failureReason ?? 'unknown';
+              console.warn(JSON.stringify({ component: 'xianyu-verification', event: 'slider_auto_solve_failed', strategy: 'ydisks', reason, attempts: sliderResult.attempts, distance: sliderResult.distance, trajectoryPoints: sliderResult.trajectoryPoints, protocolCodes: sliderResult.protocolCodes }));
+              if (!allowManualFallback) throw new Error(`XIANYU_VERIFICATION_AUTO_SOLVE_FAILED:${reason}`);
+              console.warn(JSON.stringify({ component: 'xianyu-verification', event: 'slider_manual_fallback_wait', reason }));
+            } else {
+              console.info(JSON.stringify({ component: 'xianyu-verification', event: 'slider_auto_solve_succeeded', strategy: 'ydisks', attempts: sliderResult.attempts, distance: sliderResult.distance, trajectoryPoints: sliderResult.trajectoryPoints, protocolCodes: sliderResult.protocolCodes }));
             }
           }
-          if (isBlankOrInvalidVerificationPage(lastUrl)) throw new Error('XIANYU_VERIFICATION_PAGE_EMPTY');
-          await sleep(pollIntervalMs);
-        }
-        throw new Error('XIANYU_VERIFICATION_TIMEOUT');
+
+          const deadline = Date.now() + maxWaitMs;
+          let lastUrl = page.url();
+          let lastCookies = await context.cookies();
+          while (Date.now() < deadline) {
+            lastUrl = page.url();
+            lastCookies = await context.cookies();
+            if (isVerificationPageComplete(lastUrl, lastCookies, priorSnapshot)) {
+              await sleep(1_000);
+              lastCookies = await context.cookies();
+              if (isVerificationPageComplete(lastUrl, lastCookies, priorSnapshot)) return;
+            }
+            if (isBlankOrInvalidVerificationPage(lastUrl)) throw new Error('XIANYU_VERIFICATION_PAGE_EMPTY');
+            await sleep(pollIntervalMs);
+          }
+          throw new Error('XIANYU_VERIFICATION_TIMEOUT');
+        };
+        try {
+          // The challenge must be issued by this browser's own Token request.
+          // A server HTTP challenge belongs to a different network session.
+          const imToken = input.imTokenRequest
+            ? await fetchXianyuBrowserImToken(context, page, input.imTokenRequest, solveChallenge)
+            : undefined;
+          if (!input.imTokenRequest) await solveChallenge(input.verificationUrl);
+          return { finalUrl: page.url(), cookieSnapshot: dropStaleCaptchaChallengeCookies(mapCookies(await context.cookies())),
+            ...(imToken ? { imToken } : {}) };
+        } finally { await verdicts.close(); }
       } finally {
         await closeVerificationPages(context);
         await context.close().catch(() => undefined);

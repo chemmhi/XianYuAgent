@@ -22,6 +22,7 @@ class FakeLocator implements XianyuSliderLocator {
   async textContent(): Promise<string | null> { return this.state.failure ? '验证失败 点击框体重试' : ''; }
   async hover(): Promise<void> {}
   async click(): Promise<void> { this.state.failure = false; }
+  async evaluate(): Promise<boolean> { return true; }
 }
 
 class FakeFrame implements XianyuSliderFrame {
@@ -40,6 +41,7 @@ class FakePage extends FakeFrame implements XianyuSliderPage {
   readonly calls: string[] = [];
   readonly mouse = {
     move: async (_x: number, _y: number) => { this.calls.push('move'); },
+    wheel: async () => { this.calls.push('wheel'); },
     down: async () => { this.calls.push('down'); },
     up: async () => {
       this.calls.push('up');
@@ -62,24 +64,55 @@ test('Patchright solver replays trusted mouse actions and retries after a failur
   assert.equal(result.attempts, 2);
   assert.equal(result.retryClicked, true);
   assert.equal(result.distance, 180);
-  assert.ok(result.trajectoryPoints >= 75);
+  assert.ok(result.trajectoryPoints > 40);
+  assert.ok(page.calls.includes('wheel'), 'production solver must include Ydisks preparation');
   assert.ok(page.calls.includes('down'));
   assert.ok(page.calls.includes('up'));
+  assert.equal(result.pageReloaded, false);
 });
 
-test('Patchright solver reports missing slider elements without sending input', async () => {
+test('platform rejection cannot be mistaken for success when the container disappears', async () => {
+  const state: State = { dragCount: 0, success: false, failure: false };
+  const page = new FakePage(state);
+  page.mouse.up = async () => { state.dragCount++; state.success = true; };
+  const result = await new XianyuSliderSolver(page, { maxRetries: 1, rng: () => 0.5,
+    readVerdict: () => state.dragCount ? { sequence: 1, code: 300, success: true } : undefined }).solve();
+  assert.equal(result.success, false);
+  assert.equal(result.failureReason, 'platform_code:300');
+  assert.deepEqual(result.protocolCodes, [300]);
+});
+
+test('a retry that fails to restore the origin never starts a second drag or reloads', async () => {
+  const state: State = { dragCount: 0, success: false, failure: false };
+  const page = new FakePage(state);
+  const locate = page.locator.bind(page);
+  page.locator = selector => {
+    const locator = locate(selector);
+    if (selector === '#nc_1_n1z') locator.boundingBox = async () => ({ x: 28, y: 20, width: 40, height: 40 });
+    return locator;
+  };
+  let reloads = 0;
+  page.reload = async () => { reloads++; };
+  const result = await new XianyuSliderSolver(page, { maxRetries: 2, elementTimeoutMs: 100, retryDelayMs: 0, rng: () => 0.5 }).solve();
+  assert.equal(result.success, false);
+  assert.equal(result.retryClicked, true);
+  assert.equal(state.dragCount, 1);
+  assert.equal(reloads, 0);
+});
+
+test('Patchright solver reports missing slider elements without pressing the mouse', async () => {
   const state: State = { dragCount: 0, success: false, failure: false };
   const page = new FakePage(state, true);
   const result = await new XianyuSliderSolver(page, { elementTimeoutMs: 100 }).solve();
   assert.equal(result.success, false);
   assert.equal(result.failureReason, 'slider_elements_not_found');
   assert.equal(result.trajectoryPoints, 0);
-  assert.equal(page.calls.length, 0);
+  assert.ok(!page.calls.includes('down'));
 });
 
-test('slider travel uses the two right edges when boxes have different left offsets', () => {
+test('Ydisks travel uses the control widths even when the button has a border offset', () => {
   assert.equal(
     calculateSliderDistance({ x: 570, y: 537, width: 300, height: 34 }, { x: 572, y: 539, width: 42, height: 30 }),
-    256,
+    258,
   );
 });

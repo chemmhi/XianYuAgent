@@ -4,7 +4,7 @@ import { ServiceError } from './services.js';
 import { classifyXianyuFailure } from './xianyu-account-health.js';
 import type { MessageService } from './messages.js';
 import type { AutoReplyProcessResult, AutoReplyService } from './auto-reply.js';
-import { XianyuImClient, XianyuImMessageEvent, XianyuImReadReceiptEvent, XianyuImCredential } from './xianyu-im.js';
+import { XianyuImClient, XianyuImMessageEvent, XianyuImReadReceiptEvent, XianyuImCredential, XIANYU_IM_TOKEN_API } from './xianyu-im.js';
 import { hasXianyuStructuredSystemMarker, matchesXianyuOrderStatus, parseXianyuSystemMessageKind } from './xianyu-system-message.js';
 import { XianyuMtopClient } from './xianyu-mtop.js';
 import type { ProductAutomationImEventResult, ProductAutomationTrigger } from './product-automation-trigger.js';
@@ -496,6 +496,7 @@ export class XianyuImService {
     if (!token.success || !token.accessToken) {
       if (token.errorCode === 'ACCOUNT_VALIDATION_REQUIRED' && this.verificationBrowser?.enabled && token.verificationUrl) {
         const latest = await this.store.getCredential(adminId, account.id) ?? credential;
+        const nativeRecoveryStartedAt = new Date().toISOString();
         // Keep stable account cookies from the browser snapshot, but prefer
         // the fresh flat header returned by this validation response. The
         // x5secdata/x5sectag markers in that header bind the challenge URL to
@@ -557,9 +558,14 @@ export class XianyuImService {
             }
             // Save the matching cookie snapshot and native token together before
             // any IM client can use the recovered credential.
-            return this.store.upsertCredential({ adminId, accountId: account.id, platform: account.platform,
+            const saved = await this.store.upsertCredential({ adminId, accountId: account.id, platform: account.platform,
               cookieHeader: browserCookieHeader, accessToken: native.accessToken, deviceId,
               metadata: browserMetadata, expiresAt: current.expiresAt });
+            const recoveredAccount = await this.store.getAccount(adminId, account.id);
+            if (recoveredAccount?.riskEpisode) await this.store.clearAccountRisk({ adminId, accountId: account.id,
+              episode: recoveredAccount.riskEpisode, source: XIANYU_IM_TOKEN_API, startedAt: nativeRecoveryStartedAt });
+            await this.store.clearAccountDegraded({ adminId, accountId: account.id, source: XIANYU_IM_TOKEN_API, startedAt: nativeRecoveryStartedAt });
+            return saved;
           }
           await this.store.upsertCredential({
             adminId,

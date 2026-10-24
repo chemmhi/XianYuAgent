@@ -92,3 +92,12 @@ test('native recovery does not replace stored credentials with an empty browser 
   await assert.rejects(f.refresh, (error: unknown) => (error as { code?: string }).code === 'XIANYU_BROWSER_IM_IDENTITY_MISMATCH');
   assert.equal((await f.store.getCredential(f.admin.id, f.account.id))?.cookieHeader, f.credential.cookieHeader);
 });
+
+test('verified native token clears its API risk only after credentials are persisted', async () => {
+  const f = await fixture();
+  await f.store.recordAccountRisk({ adminId: f.admin.id, accountId: f.account.id, source: 'mtop.taobao.idlemessage.pc.login.token', code: 'ACCOUNT_VALIDATION_REQUIRED' });
+  await f.store.recordAccountRisk({ adminId: f.admin.id, accountId: f.account.id, source: 'im_listener', code: 'ACCOUNT_VALIDATION_REQUIRED' });
+  await f.refresh();
+  assert.equal((await f.store.getCredential(f.admin.id, f.account.id))?.accessToken, 'native-access');
+  assert.equal((await f.store.getAccount(f.admin.id, f.account.id))?.riskSource, 'im_listener', 'socket risk must await real registration');
+});
