@@ -49,6 +49,7 @@ describe('xianyu IM credential refresh', () => {
     let fetchCount = 0;
     const saved: Array<Record<string, unknown>> = [];
     const store = {
+      listAccountVerificationRisks: async () => [],
       getCredential: async () => ({
         cookieHeader: 'unb=seller-1; _m_h5_tk=token-1; x5secdata=challenge',
         metadata: {
@@ -110,6 +111,7 @@ describe('xianyu IM credential refresh', () => {
     let allowManualFallback: boolean | undefined;
     let maxWaitMs: number | undefined;
     const store = {
+      listAccountVerificationRisks: async () => [],
       getCredential: async () => ({ cookieHeader: 'unb=seller-1; _m_h5_tk=token-1', metadata: {}, expiresAt: '2026-10-01T00:00:00.000Z' }),
       upsertCredential: async () => { throw new Error('should not persist failed verification'); },
     };
@@ -141,6 +143,7 @@ describe('xianyu IM credential refresh', () => {
   it('does not reopen a blank verification browser on every reconnect retry', async () => {
     let browserCalls = 0;
     const store = {
+      listAccountVerificationRisks: async () => [],
       getCredential: async () => ({ cookieHeader: 'unb=seller-1; _m_h5_tk=token-1', metadata: {}, expiresAt: '2026-10-01T00:00:00.000Z' }),
       upsertCredential: async () => { throw new Error('should not persist failed verification'); },
     };
@@ -166,6 +169,7 @@ describe('xianyu IM credential refresh', () => {
 
   it('cleans up a failed IM client so validation cannot leave a reconnect timer behind', async () => {
     const store = {
+      listAccountVerificationRisks: async () => [],
       getAccount: async () => ({ id: 'account-1', platform: 'xianyu', sellerRef: 'seller-1', status: 'connected' as const }),
       getCredential: async () => ({ cookieHeader: 'unb=seller-1; _m_h5_tk=token-1', deviceId: 'device-1', status: 'active' as const }),
       updateAccount: async () => undefined,

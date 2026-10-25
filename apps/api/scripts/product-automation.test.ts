@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MemoryStore } from '../src/store-memory.js';
-import { ProductAutomationService, AutomationWorkflowService, PersistentAutomationExecutionLedger, type AutomationExecutionPort, type AutomationExternalResult, type AutomationOrderSnapshot, defaultProductAutomationConfig } from '../src/product-automation.js';
+import { ProductAutomationService, AutomationWorkflowService, InMemoryAutomationExecutionLedger, PersistentAutomationExecutionLedger, type AutomationExecutionPort, type AutomationExternalResult, type AutomationOrderSnapshot, defaultProductAutomationConfig } from '../src/product-automation.js';
 import type { ProductAutomationConfig } from '../src/domain.js';
 import { CouponService } from '../src/services.js';
 import { CouponAssetService } from '../src/coupon-assets.js';
@@ -624,3 +624,58 @@ test('reminder state is persisted and increments exactly once per successful sen
   assert.equal(reread?.reminderCount, 2);
   assert.equal(reread?.lastReminderAt, '2026-09-22T02:00:00.000Z');
 });
+
+for (const kind of ['memory-ledger', 'persistent-memory'] as const) {
+  const makeLedger = () => kind === 'memory-ledger' ? new InMemoryAutomationExecutionLedger() : new PersistentAutomationExecutionLedger(new MemoryStore());
+  test(`${kind}: enabling a skipped rule executes once without an idempotency conflict`, async () => {
+    const ledger = makeLedger();
+    const port = new FakePort();
+    const order = baseOrder({ paymentStatus: 'unpaid' });
+    port.readOrderResult = order;
+    const config = defaultProductAutomationConfig();
+    const first = await new AutomationWorkflowService(port, ledger).handleUnpaidReprice({ config, order, eventId: 'disabled' });
+    assert.equal(first.reason, 'rule_disabled');
+    config.unpaidAutoReprice = { ...config.unpaidAutoReprice, enabled: true, targetPriceMinor: 800, maxAttempts: 1 };
+    const workflow = new AutomationWorkflowService(port, ledger);
+    assert.equal((await workflow.handleUnpaidReprice({ config, order, eventId: 'enabled' })).status, 'succeeded');
+    assert.equal((await workflow.handleUnpaidReprice({ config, order, eventId: 'duplicate' })).status, 'succeeded');
+    assert.equal(port.calls.filter(call => call.startsWith('reprice:')).length, 1);
+  });
+
+  test(`${kind}: future reminders become due and clock changes never replay a successful send`, async () => {
+    const ledger = makeLedger();
+    const port = new FakePort();
+    const order = baseOrder({ deliveryStatus: 'delivered', createdAt: '2026-10-25T00:00:00.000Z' });
+    port.readOrderResult = order;
+    const config = defaultProductAutomationConfig();
+    config.reviewReminder = { enabled: true, firstDelayMinutes: 10, repeatIntervalMinutes: 10, maxReminders: 2, message: '请评价' };
+    const invoke = (now: string, currentOrder = order) => new AutomationWorkflowService(port, ledger).handleReviewReminder({ config, order: currentOrder, now });
+    assert.equal((await invoke('2026-10-25T00:01:00.000Z')).reason, 'not_due_or_capped');
+    assert.equal((await invoke('2026-10-25T00:10:00.000Z')).status, 'succeeded');
+    assert.equal((await invoke('2026-10-25T00:11:00.000Z')).status, 'succeeded');
+    assert.equal(port.calls.filter(call => call.startsWith('text:')).length, 1);
+    const reminded = { ...order, reminderCount: 1, lastReminderAt: '2026-10-25T00:10:00.000Z' };
+    assert.equal((await invoke('2026-10-25T00:19:00.000Z', reminded)).reason, 'not_due_or_capped');
+    assert.equal((await invoke('2026-10-25T00:20:00.000Z', reminded)).status, 'succeeded');
+    assert.equal((await invoke('2026-10-25T00:30:00.000Z', { ...reminded, reminderCount: 2 })).reason, 'not_due_or_capped');
+    assert.equal(port.calls.filter(call => call.startsWith('text:')).length, 2);
+  });
+
+  for (const reason of ['rule_disabled', 'not_due_or_capped']) {
+    test(`${kind}: legacy ${reason} reminder recovers across workflow instances`, async () => {
+      const ledger = makeLedger();
+      const order = baseOrder({ deliveryStatus: 'delivered' });
+      const key = `review_reminder:${order.accountId}:${order.orderNo}:0`;
+      await ledger.claim({ key, fingerprint: 'legacy-clock-and-rule', ownerToken: 'old', leaseUntil: new Date(Date.now()+60000).toISOString() });
+      await ledger.complete({ key, ownerToken: 'old', result: { status: 'skipped', executionKey: key, reason }, retryable: false });
+      const port = new FakePort();
+      port.readOrderResult = order;
+      const config = defaultProductAutomationConfig();
+      config.reviewReminder.enabled = true;
+      const invoke = () => new AutomationWorkflowService(port, ledger).handleReviewReminder({ config, order, now: '2026-10-25T01:00:00.000Z' });
+      const results = await Promise.all([invoke(), invoke()]);
+      assert.ok(results.every(result => result.status === 'succeeded'));
+      assert.equal(port.calls.filter(call => call.startsWith('text:')).length, 1);
+    });
+  }
+}

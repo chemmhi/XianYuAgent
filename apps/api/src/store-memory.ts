@@ -1,3 +1,4 @@
+import { isRecoverableAutomationSkip } from './product-automation-execution-policy.js';
 import { inviteAccessStatus } from './invite-access.js';
 import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, AutoReplyProductLookup, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponAssetRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponItemRecord, CouponReservationItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, DeliveryRecord, DeliveryRecordStatus, DeliveryStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ModelProviderRoutingRecord, ModelProviderRoutingMode, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductKnowledgeBaseMessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
@@ -2267,16 +2268,17 @@ export class MemoryStore implements Store {
       return { claimed: true, record: structuredClone(record) };
     }
     const recoverManualReview = Boolean(input.allowManualReviewRecovery && existing.status === 'completed' && (existing.result as { status?: unknown } | undefined)?.status === 'manual_review');
-    if (existing.fingerprint !== input.fingerprint && !(existing.status === 'completed' && existing.retryable) && !recoverManualReview) throw new Error('AUTOMATION_EXECUTION_FINGERPRINT_CONFLICT');
-    if (existing.status === 'completed' && (existing.retryable || recoverManualReview)) existing.fingerprint = input.fingerprint;
+    const recoverSkipped = existing.status === 'completed' && isRecoverableAutomationSkip(existing.result);
+    if (existing.fingerprint !== input.fingerprint && !(existing.status === 'completed' && existing.retryable) && !recoverManualReview && !recoverSkipped) throw new Error('AUTOMATION_EXECUTION_FINGERPRINT_CONFLICT');
+    if (existing.status === 'completed' && (existing.retryable || recoverManualReview || recoverSkipped)) existing.fingerprint = input.fingerprint;
     const expired = existing.status === 'running' && (!existing.leaseUntil || Date.parse(existing.leaseUntil) <= Date.now());
-    if ((existing.status === 'completed' && (existing.retryable || recoverManualReview)) || expired) {
+    if ((existing.status === 'completed' && (existing.retryable || recoverManualReview || recoverSkipped)) || expired) {
       existing.status = 'running';
       existing.result = undefined;
       existing.retryable = false;
       existing.ownerToken = input.ownerToken;
       existing.leaseUntil = input.leaseUntil;
-      existing.attemptCount += 1;
+      existing.attemptCount = recoverSkipped ? 1 : existing.attemptCount + 1;
       existing.updatedAt = now;
       return { claimed: true, record: structuredClone(existing) };
     }

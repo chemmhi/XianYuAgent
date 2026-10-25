@@ -3,7 +3,7 @@ import { createApp } from '../dist/app.js';
 import { loadConfig } from '../dist/config.js';
 
 let port = 0;
-const config = loadConfig({ ...process.env, PORT: String(port), HOST: '127.0.0.1', ALLOW_IN_MEMORY: 'true', DATABASE_URL: '', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', WS_ALLOWED_ORIGINS: 'http://localhost:5173' });
+const config = loadConfig({ ...process.env, PORT: String(port), HOST: '127.0.0.1', ALLOW_IN_MEMORY: 'true', DATABASE_URL: '', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', AUTO_REPLY_AGENT_SEND_DELAY_SECONDS: '0', AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_MODEL_ENABLED: 'false', WS_ALLOWED_ORIGINS: 'http://localhost:5173' });
 const runtime = createApp(config);
 
 function cookiesFrom(response) {

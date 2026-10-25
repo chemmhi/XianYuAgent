@@ -1,3 +1,4 @@
+import { isRecoverableAutomationSkip } from './product-automation-execution-policy.js';
 import type {
   OrderRecord,
   ProductAutomationConfig,
@@ -245,14 +246,15 @@ export class InMemoryAutomationExecutionLedger implements AutomationExecutionLed
       return { claimed: true };
     }
     const recoverManualReview = Boolean(input.allowManualReviewRecovery && current.status === 'completed' && current.entry.result.status === 'manual_review');
-    if (current.entry.fingerprint !== input.fingerprint && !(current.status === 'completed' && current.entry.retryable) && !recoverManualReview) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution key reused with different input');
-    if (current.status === 'completed' && current.entry.retryable) current.entry.fingerprint = input.fingerprint;
+    const recoverSkipped = current.status === 'completed' && isRecoverableAutomationSkip(current.entry.result);
+    if (current.entry.fingerprint !== input.fingerprint && !(current.status === 'completed' && current.entry.retryable) && !recoverManualReview && !recoverSkipped) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution key reused with different input');
+    if (current.status === 'completed' && (current.entry.retryable || recoverManualReview || recoverSkipped)) current.entry.fingerprint = input.fingerprint;
     const expired = current.status === 'running' && (!current.leaseUntil || Date.parse(current.leaseUntil) <= Date.now());
-    if ((current.status === 'completed' && (current.entry.retryable || recoverManualReview)) || expired) {
+    if ((current.status === 'completed' && (current.entry.retryable || recoverManualReview || recoverSkipped)) || expired) {
       current.status = 'running';
       current.ownerToken = input.ownerToken;
       current.leaseUntil = input.leaseUntil;
-      current.entry.attemptCount += 1;
+      current.entry.attemptCount = recoverSkipped ? 1 : current.entry.attemptCount + 1;
       current.entry.updatedAt = new Date().toISOString();
       return { claimed: true };
     }
@@ -305,6 +307,7 @@ export class AutomationWorkflowService {
   async handlePaymentPaid(input: { adminId?: string; config: ProductAutomationConfig; order: AutomationOrderSnapshot; eventId: string }): Promise<AutomationExecutionResult> {
     const rule = input.config.paidAutoDelivery;
     const key = `paid_auto_delivery:${input.order.accountId}:${input.order.orderNo}`;
+    if (!rule.enabled) return skipped(key, 'rule_disabled');
     const existing = await this.ledger.get(key);
     const recoverShipmentOnly = Boolean(existing?.result.status === 'manual_review' && existing.result.reason?.startsWith('shipment_confirmation_') && existing.result.externalRef && rule.autoConfirm && input.order.deliveryStatus !== 'delivered');
     return this.once(key, { orderNo: input.order.orderNo, rule }, async () => {
@@ -376,6 +379,7 @@ export class AutomationWorkflowService {
   async handleUnpaidReprice(input: { adminId?: string; config: ProductAutomationConfig; order: AutomationOrderSnapshot; eventId: string }): Promise<AutomationExecutionResult> {
     const rule = input.config.unpaidAutoReprice;
     const key = `unpaid_auto_reprice:${input.order.accountId}:${input.order.orderNo}`;
+    if (!rule.enabled) return skipped(key, 'rule_disabled');
     return this.once(key, { orderNo: input.order.orderNo, rule }, async () => {
       if (!rule.enabled) return skipped(key, 'rule_disabled');
       if (input.order.paymentStatus !== 'unpaid') return skipped(key, 'order_not_unpaid');
@@ -408,6 +412,7 @@ export class AutomationWorkflowService {
   async handleReviewGift(input: { adminId?: string; config: ProductAutomationConfig; order: AutomationOrderSnapshot; eventId: string }): Promise<AutomationExecutionResult> {
     const rule = input.config.reviewGift;
     const key = `review_gift:${input.order.accountId}:${input.order.orderNo}`;
+    if (!rule.enabled) return skipped(key, 'rule_disabled');
     return this.once(key, { orderNo: input.order.orderNo, rule }, async (isRetry) => {
       if (!rule.enabled) return skipped(key, 'rule_disabled');
       const fact = await this.port.persistReviewFact({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo, eventId: input.eventId, executionKey: key });
@@ -446,15 +451,19 @@ export class AutomationWorkflowService {
   async handleReviewReminder(input: { adminId?: string; config: ProductAutomationConfig; order: AutomationOrderSnapshot; now?: string }): Promise<AutomationExecutionResult> {
     const rule = input.config.reviewReminder;
     const key = `review_reminder:${input.order.accountId}:${input.order.orderNo}:${input.order.reminderCount ?? 0}`;
-    return this.once(key, { orderNo: input.order.orderNo, rule, now: input.now }, async () => {
-      if (!rule.enabled) return skipped(key, 'rule_disabled');
-      const now = Date.parse(input.now ?? new Date().toISOString());
-      const created = Date.parse(input.order.createdAt);
-      const firstDue = created + rule.firstDelayMinutes * 60_000;
-      const previous = input.order.lastReminderAt ? Date.parse(input.order.lastReminderAt) : undefined;
-      const repeatDue = previous === undefined ? firstDue : previous + rule.repeatIntervalMinutes * 60_000;
-      const count = input.order.reminderCount ?? 0;
-      if (!Number.isFinite(now) || now < repeatDue || count >= rule.maxReminders) return skipped(key, 'not_due_or_capped');
+    if (!rule.enabled) return skipped(key, 'rule_disabled');
+    const now = Date.parse(input.now ?? new Date().toISOString());
+    const created = Date.parse(input.order.createdAt);
+    const firstDue = created + rule.firstDelayMinutes * 60_000;
+    const previous = input.order.lastReminderAt ? Date.parse(input.order.lastReminderAt) : undefined;
+    const repeatDue = previous === undefined ? firstDue : previous + rule.repeatIntervalMinutes * 60_000;
+    const count = input.order.reminderCount ?? 0;
+    if (!Number.isFinite(now) || !Number.isFinite(repeatDue) || now < repeatDue || count >= rule.maxReminders) return skipped(key, 'not_due_or_capped');
+    // Older reminder fingerprints included the polling clock. A persisted
+    // success for this reminder ordinal must never send again during upgrade.
+    const existing = await this.ledger.get(key);
+    if (existing?.result.status === 'succeeded') return existing.result;
+    return this.once(key, { orderNo: input.order.orderNo, rule }, async () => {
       const before = await this.port.readOrder({ adminId: input.adminId, accountId: input.order.accountId, productId: input.order.productId, itemId: input.order.itemId, itemTitle: input.order.itemTitle, orderNo: input.order.orderNo });
       if (!before || before.deliveryStatus !== 'delivered' || before.reviewedAt || !before.conversationId) return skipped(key, 'order_no_longer_eligible');
       const sent = await this.port.sendText({ adminId: input.adminId, accountId: before.accountId, productId: before.productId, itemId: before.itemId, itemTitle: before.itemTitle, conversationId: before.conversationId, text: rule.message, executionKey: key });
@@ -473,13 +482,14 @@ export class AutomationWorkflowService {
     }
     const existing = await this.ledger.get(key);
     const isRetry = Boolean(existing?.retryable);
+    const recoverSkipped = isRecoverableAutomationSkip(existing?.result);
     const recoverManualReview = Boolean(policy.allowManualReviewRecovery && existing?.result.status === 'manual_review');
     if (existing) {
-      if (existing.fingerprint !== fingerprint && !existing.retryable && !recoverManualReview) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution key reused with different input');
-      if (!existing.retryable && !recoverManualReview) return existing.result;
-      if (existing.result.reason !== 'XIANYU_IM_NOT_READY' && existing.result.reason !== 'DELIVERY_VERIFIED_PARTIAL_RESUME' && (policy.maxAttempts ?? 5) <= existing.attemptCount) return { status: 'manual_review', executionKey: key, reason: 'retry_exhausted' };
+      if (existing.fingerprint !== fingerprint && !existing.retryable && !recoverManualReview && !recoverSkipped) throw new ServiceError(409, 'IDEMPOTENCY_CONFLICT', 'automation execution key reused with different input');
+      if (!existing.retryable && !recoverManualReview && !recoverSkipped) return existing.result;
+      if (!recoverSkipped && existing.result.reason !== 'XIANYU_IM_NOT_READY' && existing.result.reason !== 'DELIVERY_VERIFIED_PARTIAL_RESUME' && (policy.maxAttempts ?? 5) <= existing.attemptCount) return { status: 'manual_review', executionKey: key, reason: 'retry_exhausted' };
       const backoffMs = Math.max(0, policy.retryBackoffSeconds ?? 0) * 1000;
-      if (existing.result.reason !== 'DELIVERY_VERIFIED_PARTIAL_RESUME' && backoffMs > 0 && Date.parse(existing.updatedAt) + backoffMs > Date.now()) return existing.result;
+      if (!recoverSkipped && existing.result.reason !== 'DELIVERY_VERIFIED_PARTIAL_RESUME' && backoffMs > 0 && Date.parse(existing.updatedAt) + backoffMs > Date.now()) return existing.result;
     }
     const ownerToken = createId();
     const promise = (async () => {
