@@ -5,10 +5,10 @@ import type { AutomationExecutionPort, AutomationExternalResult, AutomationOrder
 import { AutomationWorkflowService, ProductAutomationService, defaultProductAutomationConfig } from '../src/product-automation.js';
 import { NotConfiguredAutomationExecutionAdapter, ProductAutomationTrigger, ProductAutomationWorker } from '../src/product-automation-trigger.js';
 import type { ProductAutomationConfig } from '../src/domain.js';
-import type { ProductAutomationLiveConfig } from '../src/product-automation-live-gate.js';
+import { resolveProductAutomationLiveConfig, type ProductAutomationLiveConfig } from '../src/product-automation-live-gate.js';
 
 function testLiveGate(): ProductAutomationLiveConfig {
-  return { executionMode: 'live', liveConfirmed: true, reviewExternalWritesConfirmed: true, buyerAllowlist: ['买家'] };
+  return { executionMode: 'live', liveConfirmed: true, buyerAllowlist: ['买家'] };
 }
 
 function external(status: AutomationExternalResult['status'], errorCode?: string): AutomationExternalResult { return { status, errorCode, externalRef: status === 'succeeded' ? `ext-${status}` : undefined }; }
@@ -77,7 +77,7 @@ test('paid live gate matches buyer nickname instead of order real-name field', a
     new AutomationWorkflowService(port),
     Object.assign(port, { readiness: 'ready' as const }),
     undefined,
-    { executionMode: 'live', liveConfirmed: true, reviewExternalWritesConfirmed: true, buyerAllowlist: ['一只橘喵喵亮晶晶'] },
+    { executionMode: 'live', liveConfirmed: true, buyerAllowlist: ['一只橘喵喵亮晶晶'] },
   );
   const result = await trigger.onOrderRefresh({
     adminId: admin.id,
@@ -175,34 +175,75 @@ test('IM review signal validates buyer and conversation ownership before executi
   assert.equal(product.accountId, account.id);
 });
 
-test('review external writes stay blocked until separately confirmed', async () => {
-  const { store, admin, account, product, coupon, configs } = await setup();
-  const config = defaultProductAutomationConfig();
-  config.reviewGift = { ...config.reviewGift, enabled: true, couponBatchIds: [coupon.id] };
-  config.reviewReminder = { ...config.reviewReminder, enabled: true, firstDelayMinutes: 1, message: '请评价' };
-  await configs.update({ adminId: admin.id, productId: product.id, expectedConfigVersion: 1, config, requestId: 'review-gate-config', traceId: 'review-gate-config' });
+for (const legacyFlag of [undefined, 'false', 'true']) {
+  test(`enabled review rules execute with legacy review confirmation ${legacyFlag ?? 'unset'}`, async () => {
+    const { store, admin, account, product, coupon, configs } = await setup();
+    const config = defaultProductAutomationConfig();
+    config.reviewGift = { ...config.reviewGift, enabled: true, couponBatchIds: [coupon.id] };
+    config.reviewReminder = { ...config.reviewReminder, enabled: true, firstDelayMinutes: 1, message: '请评价' };
+    await configs.update({ adminId: admin.id, productId: product.id, expectedConfigVersion: 1, config, requestId: 'review-config', traceId: 'review-config' });
+    const port = new ReadyPort();
+    const adapter = Object.assign(port, { readiness: 'ready' as const });
+    const liveConfig = resolveProductAutomationLiveConfig({
+      PRODUCT_AUTOMATION_EXECUTION_MODE: 'live',
+      PRODUCT_AUTOMATION_LIVE_CONFIRMED: 'true',
+      PRODUCT_AUTOMATION_REVIEW_EXTERNAL_WRITES_CONFIRMED: legacyFlag,
+    });
+    const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(port), adapter, undefined, liveConfig);
+    const giftOrder = await store.createOrder({ adminId: admin.id, order: { ...order({ id: 'review-gift', orderNo: 'REVIEW-GIFT', accountId: account.id, productId: product.id, orderStatus: 'completed', deliveryStatus: 'delivered' }), source: 'local' } });
+    const reminderOrder = await store.createOrder({ adminId: admin.id, order: { ...order({ id: 'review-reminder', orderNo: 'REVIEW-REMINDER', accountId: account.id, productId: product.id, orderStatus: 'completed', deliveryStatus: 'delivered' }), source: 'local' } });
+    port.readOrderResult = reminderOrder;
+
+    const gift = await trigger.onReviewEvent({ adminId: admin.id, accountId: account.id, orderNo: giftOrder.orderNo, eventId: 'review-event' });
+    assert.equal(gift.status, 'succeeded');
+    assert.deepEqual(port.calls, ['review-fact', 'reserve:gift', 'send:gift', 'commit']);
+
+    const reminder = await trigger.onReviewReminder({ adminId: admin.id, order: reminderOrder, now: '2026-09-21T00:00:00.000Z' });
+    assert.equal(reminder.status, 'succeeded');
+    assert.deepEqual(port.calls.slice(4), ['read-order', 'text:请评价']);
+    assert.equal((await store.getOrder(admin.id, reminderOrder.orderNo, account.id))?.reminderCount, 1);
+  });
+}
+
+test('disabled review rules never send a gift or reminder without the legacy gate', async () => {
+  const { store, admin, account, product, configs } = await setup();
   const port = new ReadyPort();
-  const adapter = Object.assign(port, { readiness: 'ready' as const });
-  const trigger = new ProductAutomationTrigger(
-    store,
-    configs,
-    new AutomationWorkflowService(port),
-    adapter,
-    undefined,
-    { executionMode: 'live', liveConfirmed: true, reviewExternalWritesConfirmed: false, buyerAllowlist: ['买家'] },
-  );
-  const reviewOrder = await store.createOrder({ adminId: admin.id, order: { ...order({ id: 'review-gate', orderNo: 'REVIEW-GATE', accountId: account.id, productId: product.id, orderStatus: 'completed', deliveryStatus: 'delivered' }), source: 'local' } });
-
-  const gift = await trigger.onReviewEvent({ adminId: admin.id, accountId: account.id, orderNo: reviewOrder.orderNo, eventId: 'review-gate-event' });
-  assert.equal(gift.status, 'blocked');
-  assert.equal(gift.reason, 'PRODUCT_AUTOMATION_REVIEW_EXTERNAL_WRITES_REQUIRE_CONFIRMATION');
-  assert.deepEqual(port.calls, []);
-
-  const reminder = await trigger.onReviewReminder({ adminId: admin.id, order: { ...reviewOrder, deliveryStatus: 'delivered' }, now: '2026-09-21T00:00:00.000Z' });
-  assert.equal(reminder.status, 'blocked');
-  assert.equal(reminder.reason, 'PRODUCT_AUTOMATION_REVIEW_EXTERNAL_WRITES_REQUIRE_CONFIRMATION');
+  const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(port), Object.assign(port, { readiness: 'ready' as const }), undefined, resolveProductAutomationLiveConfig({ PRODUCT_AUTOMATION_EXECUTION_MODE: 'live', PRODUCT_AUTOMATION_LIVE_CONFIRMED: 'true' }));
+  const created = await store.createOrder({ adminId: admin.id, order: { ...order({ accountId: account.id, productId: product.id, orderStatus: 'completed', deliveryStatus: 'delivered' }), source: 'local' } });
+  const gift = await trigger.onReviewEvent({ adminId: admin.id, accountId: account.id, orderNo: created.orderNo, eventId: 'disabled-review' });
+  const reminder = await trigger.onReviewReminder({ adminId: admin.id, order: created, now: '2026-09-25T00:00:00.000Z' });
+  assert.equal(gift.status, 'skipped');
+  assert.equal(gift.reason, 'rule_disabled');
+  assert.equal(reminder.status, 'skipped');
+  assert.equal(reminder.reason, 'rule_disabled');
   assert.deepEqual(port.calls, []);
 });
+
+const commonReviewGateCases: Array<[string, Partial<ProductAutomationLiveConfig>, string]> = [
+  ['simulation', { executionMode: 'simulate' as const }, 'PRODUCT_AUTOMATION_LIVE_MODE_REQUIRED'],
+  ['unconfirmed live mode', { liveConfirmed: false }, 'PRODUCT_AUTOMATION_LIVE_CONFIRMATION_REQUIRED'],
+  ['buyer restriction', { buyerAllowlist: ['其他买家'] }, 'PRODUCT_AUTOMATION_BUYER_NOT_ALLOWLISTED'],
+];
+for (const [label, overrides, reason] of commonReviewGateCases) {
+  test(`review rules still obey the common live gate: ${label}`, async () => {
+    const { store, admin, account, product, coupon, configs } = await setup();
+    const config = defaultProductAutomationConfig();
+    config.reviewGift = { ...config.reviewGift, enabled: true, couponBatchIds: [coupon.id] };
+    config.reviewReminder = { ...config.reviewReminder, enabled: true };
+    await configs.update({ adminId: admin.id, productId: product.id, expectedConfigVersion: 1, config, requestId: 'common-gate', traceId: 'common-gate' });
+    const port = new ReadyPort();
+    const liveConfig = { ...testLiveGate(), ...overrides, buyerAllowlist: [...(overrides.buyerAllowlist ?? testLiveGate().buyerAllowlist)] };
+    const trigger = new ProductAutomationTrigger(store, configs, new AutomationWorkflowService(port), Object.assign(port, { readiness: 'ready' as const }), undefined, liveConfig);
+    const created = await store.createOrder({ adminId: admin.id, order: { ...order({ accountId: account.id, productId: product.id, orderStatus: 'completed', deliveryStatus: 'delivered' }), source: 'local' } });
+    const gift = await trigger.onReviewEvent({ adminId: admin.id, accountId: account.id, orderNo: created.orderNo, eventId: 'common-gate-review' });
+    const reminder = await trigger.onReviewReminder({ adminId: admin.id, order: created, now: '2026-09-25T00:00:00.000Z' });
+    assert.equal(gift.status, 'blocked');
+    assert.equal(gift.reason, reason);
+    assert.equal(reminder.status, 'blocked');
+    assert.equal(reminder.reason, reason);
+    assert.deepEqual(port.calls, []);
+  });
+}
 
 test('verified Xianyu review system message resolves the unique completed order', async () => {
   const { store, admin, account, product, coupon, configs } = await setup();

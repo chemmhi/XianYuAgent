@@ -1,3 +1,4 @@
+import { isRecoverableAutomationSkip } from './product-automation-execution-policy.js';
 import { purgeMemoryRepairAccount } from './auto-reply-repair-repository.js';
 import { purgeMemoryAccount } from './account-purge-memory.js';
 import type { AccountDeletionCleanup } from './account-purge-postgres.js';
@@ -2307,16 +2308,17 @@ export class MemoryStore implements Store {
       return { claimed: true, record: structuredClone(record) };
     }
     const recoverManualReview = Boolean(input.allowManualReviewRecovery && existing.status === 'completed' && (existing.result as { status?: unknown } | undefined)?.status === 'manual_review');
-    if (existing.fingerprint !== input.fingerprint && !(existing.status === 'completed' && existing.retryable) && !recoverManualReview) throw new Error('AUTOMATION_EXECUTION_FINGERPRINT_CONFLICT');
-    if (existing.status === 'completed' && (existing.retryable || recoverManualReview)) existing.fingerprint = input.fingerprint;
+    const recoverSkipped = existing.status === 'completed' && isRecoverableAutomationSkip(existing.result);
+    if (existing.fingerprint !== input.fingerprint && !(existing.status === 'completed' && existing.retryable) && !recoverManualReview && !recoverSkipped) throw new Error('AUTOMATION_EXECUTION_FINGERPRINT_CONFLICT');
+    if (existing.status === 'completed' && (existing.retryable || recoverManualReview || recoverSkipped)) existing.fingerprint = input.fingerprint;
     const expired = existing.status === 'running' && (!existing.leaseUntil || Date.parse(existing.leaseUntil) <= Date.now());
-    if ((existing.status === 'completed' && (existing.retryable || recoverManualReview)) || expired) {
+    if ((existing.status === 'completed' && (existing.retryable || recoverManualReview || recoverSkipped)) || expired) {
       existing.status = 'running';
       existing.result = undefined;
       existing.retryable = false;
       existing.ownerToken = input.ownerToken;
       existing.leaseUntil = input.leaseUntil;
-      existing.attemptCount += 1;
+      existing.attemptCount = recoverSkipped ? 1 : existing.attemptCount + 1;
       existing.updatedAt = now;
       return { claimed: true, record: structuredClone(existing) };
     }

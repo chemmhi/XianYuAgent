@@ -1,3 +1,4 @@
+import { isRecoverableAutomationSkip, RECOVERABLE_AUTOMATION_SKIP_REASONS } from './product-automation-execution-policy.js';
 import { purgeAccountRows, type AccountDeletionCleanup } from './account-purge-postgres.js';
 import { inviteAccessStatus } from './invite-access.js';
 import { Pool, type PoolClient } from 'pg';
@@ -979,10 +980,11 @@ export class PostgresStore implements Store {
     const current = this.toAutomationExecution(existing.rows[0]);
     const allowManualReviewRecovery = input.allowManualReviewRecovery === true;
     const recoverManualReview = allowManualReviewRecovery && current.status === 'completed' && (current.result as { status?: unknown } | undefined)?.status === 'manual_review';
-    if (current.fingerprint !== input.fingerprint && !(current.status === 'completed' && current.retryable) && !recoverManualReview) throw new Error('AUTOMATION_EXECUTION_FINGERPRINT_CONFLICT');
+    const recoverSkipped = current.status === 'completed' && isRecoverableAutomationSkip(current.result);
+    if (current.fingerprint !== input.fingerprint && !(current.status === 'completed' && current.retryable) && !recoverManualReview && !recoverSkipped) throw new Error('AUTOMATION_EXECUTION_FINGERPRINT_CONFLICT');
     const takeover = await this.pool.query(`update automation.execution_ledger
-      set status='running', fingerprint=$2, result_json=null, retryable=false, owner_token=$3, lease_until=$4, attempt_count=attempt_count+1, updated_at=now()
-      where execution_key=$1 and ((status='completed' and retryable=true) or (status='completed' and $5=true and result_json->>'status'='manual_review') or (status='running' and fingerprint=$2 and lease_until < now())) returning *`, [input.executionKey, input.fingerprint, input.ownerToken, input.leaseUntil, allowManualReviewRecovery]);
+      set status='running', fingerprint=$2, result_json=null, retryable=false, owner_token=$3, lease_until=$4, attempt_count=case when status='completed' and result_json->>'status'='skipped' and result_json->>'reason'=any($6::text[]) then 1 else attempt_count+1 end, updated_at=now()
+      where execution_key=$1 and ((status='completed' and retryable=true) or (status='completed' and $5=true and result_json->>'status'='manual_review') or (status='completed' and result_json->>'status'='skipped' and result_json->>'reason'=any($6::text[])) or (status='running' and fingerprint=$2 and lease_until < now())) returning *`, [input.executionKey, input.fingerprint, input.ownerToken, input.leaseUntil, allowManualReviewRecovery, RECOVERABLE_AUTOMATION_SKIP_REASONS]);
     if (takeover.rows[0]) return { claimed: true, record: this.toAutomationExecution(takeover.rows[0]) };
     const latest = await this.pool.query('select * from automation.execution_ledger where execution_key=$1 limit 1', [input.executionKey]);
     return { claimed: false, record: this.toAutomationExecution(latest.rows[0]) };
