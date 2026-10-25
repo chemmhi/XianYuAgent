@@ -1470,7 +1470,9 @@ export interface Store {
   flushAccountRiskAlerts(limit: number): Promise<number>;
   listRiskNotifications(adminId: string): Promise<Array<{ id: string; accountId: string; eventType: 'verification_required' | 'verification_cleared'; createdAt: string }>>;
   acknowledgeRiskNotification(adminId: string, id: string): Promise<boolean>;
-  deleteAccount(adminId: string, accountId: string): Promise<AccountRecord | undefined>;
+  withAccountWriteGuard<T>(accountId: string, work: () => Promise<T>): Promise<T>;
+  withAccountArtifactWrite<T>(key: string, work: () => Promise<T>): Promise<T>;
+  deleteAccount(adminId: string, accountId: string, cleanup?: import('./account-purge-postgres.js').AccountDeletionCleanup): Promise<AccountRecord | undefined>;
   createLoginSession(input: { adminId: string; accountId?: string; provisionalAccountRef?: string; loginMethod: string; expiresAt: string; qrTokenRef?: string }): Promise<LoginSessionRecord>;
   getLoginSession(adminId: string, accountId: string, sessionId: string): Promise<LoginSessionRecord | undefined>;
   getLoginSessionById(adminId: string, sessionId: string): Promise<LoginSessionRecord | undefined>;

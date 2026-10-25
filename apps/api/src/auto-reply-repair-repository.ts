@@ -73,6 +73,16 @@ const memoryStates = new WeakMap<object, Map<string, ConversationState>>();
 const memoryReviews = new WeakMap<object, Map<string, PersistedRepairReviewRecord>>();
 const memoryEvents = new WeakMap<object, Map<string, PersistedRepairReviewEvent>>();
 
+const deletedMemoryAccounts = new WeakMap<object, Set<string>>();
+export function purgeMemoryRepairAccount(store: object, accountId: string): void {
+  for (const source of [memoryStates, memoryReviews, memoryEvents]) {
+    const records = source.get(store);
+    if (records) for (const [id, record] of records) if (record.accountId === accountId) records.delete(id);
+  }
+  const deleted = deletedMemoryAccounts.get(store) ?? new Set<string>();
+  deleted.add(accountId); deletedMemoryAccounts.set(store, deleted);
+}
+
 export class AutoReplyRepairRepository {
   private readonly pool?: PoolLike;
 
@@ -93,6 +103,7 @@ export class AutoReplyRepairRepository {
     if (this.pool) {
       return persistStateQuery(this.pool, state, expectedStateVersion);
     }
+    if (deletedMemoryAccounts.get(this.store)?.has(state.accountId)) return false;
     const states = memoryStates.get(this.store) ?? new Map<string, ConversationState>();
     const stateKey = key(state.accountId, state.conversationId);
     const current = states.get(stateKey);
@@ -144,6 +155,7 @@ export class AutoReplyRepairRepository {
     if (this.pool) {
       return insertReviewQuery(this.pool, record);
     }
+    if (deletedMemoryAccounts.get(this.store)?.has(record.accountId)) return false;
     const reviews = memoryReviews.get(this.store) ?? new Map<string, PersistedRepairReviewRecord>();
     const reviewKey = `${record.accountId}:${record.idempotencyKey}`;
     if (reviews.has(reviewKey)) return false;
@@ -156,6 +168,7 @@ export class AutoReplyRepairRepository {
     if (this.pool) {
       return insertReviewEventQuery(this.pool, event);
     }
+    if (deletedMemoryAccounts.get(this.store)?.has(event.accountId)) return false;
     const events = memoryEvents.get(this.store) ?? new Map<string, PersistedRepairReviewEvent>();
     const eventKey = `${event.accountId}:${event.conversationId}:${event.idempotencyKey}`;
     if (events.has(eventKey)) return false;

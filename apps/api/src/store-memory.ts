@@ -1,3 +1,6 @@
+import { purgeMemoryRepairAccount } from './auto-reply-repair-repository.js';
+import { purgeMemoryAccount } from './account-purge-memory.js';
+import type { AccountDeletionCleanup } from './account-purge-postgres.js';
 import { inviteAccessStatus } from './invite-access.js';
 import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, AutoReplyProductLookup, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponAssetRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponItemRecord, CouponReservationItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, DeliveryRecord, DeliveryRecordStatus, DeliveryStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ModelProviderRoutingRecord, ModelProviderRoutingMode, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductKnowledgeBaseMessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductStatus, SessionRecord, Store, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
 import { autoReplyStageForStatus } from './domain.js';
@@ -106,6 +109,8 @@ function cloneRepairPolicy(bundle: AutoReplyRepairPolicyBundle): AutoReplyRepair
 
 export class MemoryStore implements Store {
   readonly kind = 'memory' as const;
+  private readonly artifactWrites = new Map<string, Set<Promise<unknown>>>();
+  private readonly deletionRequested = new Set<string>();
   private readonly admins = new Map<string, AdminRecord>();
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly accounts = new Map<string, AccountRecord>();
@@ -219,9 +224,10 @@ export class MemoryStore implements Store {
   async revokeScope(adminId: string, accountId: string, scope: string): Promise<void> { const item = [...this.scopes.values()].find((row) => row.adminId === adminId && row.accountId === accountId && row.scope === scope); if (item) { item.status = 'revoked'; item.revokedAt = new Date().toISOString(); } }
   async listAccounts(adminId: string, query: AccountListQuery = {}): Promise<AccountListResult> {
     const ids = new Set((await this.listScopes(adminId)).map((scope) => scope.accountId));
+    for (const scope of this.scopes.values()) if (scope.adminId === adminId && scope.scope === 'manage' && this.deletionRequested.has(scope.accountId)) ids.add(scope.accountId);
     const search = query.search?.trim().toLowerCase();
     const connectionStatus = (status: AccountRecord['status']): AccountListQuery['connectionStatus'] => status === 'connected' ? 'online' : status === 'pending' ? 'connecting' : status === 'expired' ? 'expired' : status === 'degraded' || status === 'verification_required' ? 'unknown' : 'offline';
-    const filtered = [...this.accounts.values()].filter((account) => ids.has(account.id) && account.status !== 'disabled')
+    const filtered = [...this.accounts.values()].filter((account) => ids.has(account.id) && (account.status !== 'disabled' || this.deletionRequested.has(account.id)))
       .filter((account) => !query.accountId || account.id === query.accountId)
       .filter((account) => !search || [account.id, account.sellerRef, account.displayName ?? '', account.remark ?? ''].some((value) => value.toLowerCase().includes(search)))
       .filter((account) => !query.status || account.status === query.status)
@@ -234,7 +240,7 @@ export class MemoryStore implements Store {
   async getAccount(adminId: string, accountId: string): Promise<AccountRecord | undefined> { if (!(await this.hasAccountScope(adminId, accountId))) return undefined; return this.accounts.get(accountId); }
   async getAccountForLogin(adminId: string, accountId: string): Promise<AccountRecord | undefined> {
     const account = this.accounts.get(accountId);
-    if (!account) return undefined;
+    if (!account || this.deletionRequested.has(accountId)) return undefined;
     const hasHistoricalScope = [...this.scopes.values()].some((scope) => scope.adminId === adminId && scope.accountId === accountId && scope.scope === 'manage');
     return hasHistoricalScope ? account : undefined;
   }
@@ -369,7 +375,38 @@ export class MemoryStore implements Store {
     account.updatedAt = new Date().toISOString();
     if (input.status === 'connected' && !wasConnected) for (const job of this.paymentEvents.values()) if (job.accountId === input.accountId && (job.status === 'pending' || job.status === 'resolve_pending') && job.lastError === 'XIANYU_IM_NOT_READY') job.nextAttemptAt = new Date().toISOString();
   }
-  async deleteAccount(adminId: string, accountId: string): Promise<AccountRecord | undefined> { const account = await this.getAccount(adminId, accountId); if (!account) return undefined; account.status = 'disabled'; account.updatedAt = new Date().toISOString(); const credential = this.credentials.get(accountId); if (credential && credential.status === 'active') { credential.status = 'revoked'; credential.updatedAt = account.updatedAt; } for (const scope of this.scopes.values()) { if (scope.accountId === accountId && scope.status === 'active') { scope.status = 'revoked'; scope.revokedAt = account.updatedAt; } } return { ...account }; }
+  async withAccountArtifactWrite<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const match = /^(coupons|products)\/([0-9a-f-]{36})\//i.exec(key);
+    if (!match) throw new Error('ACCOUNT_ARTIFACT_KEY_INVALID');
+    const owner = match[1] === 'coupons' ? match[2] : this.products.get(match[2])?.accountId;
+    if (!owner) throw new Error('ACCOUNT_ARTIFACT_OWNER_MISSING');
+    return this.withAccountWriteGuard(owner, work);
+  }
+
+  async withAccountWriteGuard<T>(owner: string, work: () => Promise<T>): Promise<T> {
+    if (this.deletionRequested.has(owner) || !this.accounts.has(owner) || this.accounts.get(owner)?.status === 'disabled') throw new Error('ACCOUNT_DELETION_IN_PROGRESS');
+    const task = Promise.resolve().then(work);
+    const writes = this.artifactWrites.get(owner) ?? new Set<Promise<unknown>>();
+    writes.add(task); this.artifactWrites.set(owner, writes);
+    try { return await task; } finally { writes.delete(task); if (!writes.size) this.artifactWrites.delete(owner); }
+  }
+
+  async deleteAccount(adminId: string, accountId: string, cleanup?: AccountDeletionCleanup): Promise<AccountRecord | undefined> {
+    const account = this.accounts.get(accountId);
+    const manager = [...this.scopes.values()].some(scope => scope.accountId === accountId && scope.adminId === adminId && scope.scope === 'manage'
+      && ((scope.status === 'active' && (!scope.expiresAt || Date.parse(scope.expiresAt) > Date.now())) || (account?.status === 'disabled' && scope.status === 'revoked')));
+    if (!account || !manager) return undefined;
+    account.status = 'disabled'; account.updatedAt = new Date().toISOString();
+    this.deletionRequested.add(accountId);
+    for (const scope of this.scopes.values()) if (scope.accountId === accountId) { scope.status = 'revoked'; scope.revokedAt = account.updatedAt; }
+    const credential = this.credentials.get(accountId);
+    if (credential) credential.status = 'revoked';
+    await Promise.allSettled([...(this.artifactWrites.get(accountId) ?? [])]);
+    await cleanup?.({ accountId, productIds: [...this.products.values()].filter(row => row.accountId === accountId).map(row => row.id), loginSessionIds: [...this.loginSessions.values()].filter(row => row.accountId === accountId).map(row => row.id) });
+    purgeMemoryRepairAccount(this, accountId);
+    purgeMemoryAccount(this as unknown as Record<string, unknown>, accountId);
+    return { ...account };
+  }
   async listProducts(adminId: string, query: ProductListQuery): Promise<ProductListResult> {
     const scopedAccountIds = new Set((await this.listScopes(adminId)).map((scope) => scope.accountId));
     const normalizedKeyword = query.keyword?.trim().toLowerCase();
@@ -1886,6 +1923,8 @@ export class MemoryStore implements Store {
   async abortIdempotency(scope: string, key: string): Promise<void> { this.idempotency.delete(`${scope}:${key}`); }
   async completeIdempotency(input: { scope: string; key: string; status: IdempotencyRecord['status']; responseEnvelope: unknown; statusCode: number; traceId: string }): Promise<void> { const row = this.idempotency.get(`${input.scope}:${input.key}`); if (row) Object.assign(row, input); }
   async enqueueAutoReplyOutbox(input: { scope: string; aggregateType: string; aggregateId: string; operation: string; idempotencyKey: string; payload: Record<string, unknown>; traceId?: string; availableAt?: string }): Promise<{ record: AutoReplyOutboxRecord; created: boolean }> {
+    const owner = input.payload.accountId ?? (input.payload.conversation as { accountId?: string } | undefined)?.accountId;
+    if (typeof owner === 'string' && this.deletionRequested.has(owner)) throw new Error('ACCOUNT_DELETION_IN_PROGRESS');
     const key = `${input.scope}:${input.idempotencyKey}`;
     const existing = this.autoReplyOutbox.get(key);
     if (existing) return { record: cloneOutbox(existing), created: false };

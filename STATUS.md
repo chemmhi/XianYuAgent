@@ -541,3 +541,13 @@
 ## 2026-10-25 已激活用户访问生命周期（整合PASS）
 
 刷新/用户名邮箱列、激活用户启停续期、旧会话/WS/工具写权限门禁已完成并逐片独立审核。Web483、授权与隔离API25、API/Web build通过；真实双浏览器验证启停/到期/续期恢复和PG清理。详见[验收记录](docs/evidence/invite-registration-20261025/access-lifecycle/README.md)。
+
+
+## 2026-10-25 账号永久删除修复
+
+- 阶段：5.5；状态：BLOCKED（仅人工合并/生产发布门禁待完成）。本地功能、测试与两轮独立评审 PASS。
+- 目标：清除账号全部业务数据与凭证/附件/运行缓存，释放身份，支持邀请码用户重新绑定；明确不可恢复的删除说明。
+- 实现：codex/account-hard-delete-20261025；独立工作树；未修改主工作区业务源码或生产数据库。
+- 验证：专项 14/14、Chrome/CDP→API→PostgreSQL/MinIO、全量 API 与 Web 483 项、类型检查/构建/diff-check PASS；修复前失败证据与评审闭环见 docs/operations/account-hard-delete-20261025.md。
+- 未完成：人工审核后 merge lock 合入 main、GitHub Actions 发布、腾讯云准确目标历史清理、真实 APP 扫码复验。生产尚未修复，不能宣称整体完成。
+- 风险：永久删除不能通过源码回退恢复；离线备份与运维日志不承诺介质擦除；当前生产自定义明文 trace 未启用。

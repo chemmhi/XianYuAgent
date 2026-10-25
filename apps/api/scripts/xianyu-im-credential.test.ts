@@ -9,6 +9,9 @@ describe('xianyu IM credential refresh', () => {
     const previousMetadata = { cookies_refresh_snapshot: JSON.stringify([{ name: '_m_h5_tk', value: 'fresh', domain: '.goofish.com', path: '/' }]), loginMethod: 'qr_http' };
     let captured: Record<string, unknown> | undefined;
     const store = {
+      listAccountVerificationRisks: async () => [],
+      recordAccountDegraded: async () => undefined,
+      clearAccountDegraded: async () => undefined,
       getCredential: async () => ({ metadata: previousMetadata, expiresAt: '2026-10-01T00:00:00.000Z' }),
       upsertCredential: async (input: Record<string, unknown>) => { captured = input; return input; },
     };
@@ -26,6 +29,9 @@ describe('xianyu IM credential refresh', () => {
 
   it('maps remote slider validation to a recoverable account re-auth error', async () => {
     const store = {
+      listAccountVerificationRisks: async () => [],
+      recordAccountDegraded: async () => undefined,
+      clearAccountDegraded: async () => undefined,
       upsertCredential: async () => { throw new Error('should not persist invalid token'); },
     };
     const mtop = {
@@ -49,6 +55,9 @@ describe('xianyu IM credential refresh', () => {
     let fetchCount = 0;
     const saved: Array<Record<string, unknown>> = [];
     const store = {
+      listAccountVerificationRisks: async () => [],
+      recordAccountDegraded: async () => undefined,
+      clearAccountDegraded: async () => undefined,
       getCredential: async () => ({
         cookieHeader: 'unb=seller-1; _m_h5_tk=token-1; x5secdata=challenge',
         metadata: {
@@ -110,6 +119,9 @@ describe('xianyu IM credential refresh', () => {
     let allowManualFallback: boolean | undefined;
     let maxWaitMs: number | undefined;
     const store = {
+      listAccountVerificationRisks: async () => [],
+      recordAccountDegraded: async () => undefined,
+      clearAccountDegraded: async () => undefined,
       getCredential: async () => ({ cookieHeader: 'unb=seller-1; _m_h5_tk=token-1', metadata: {}, expiresAt: '2026-10-01T00:00:00.000Z' }),
       upsertCredential: async () => { throw new Error('should not persist failed verification'); },
     };
@@ -141,6 +153,9 @@ describe('xianyu IM credential refresh', () => {
   it('does not reopen a blank verification browser on every reconnect retry', async () => {
     let browserCalls = 0;
     const store = {
+      listAccountVerificationRisks: async () => [],
+      recordAccountDegraded: async () => undefined,
+      clearAccountDegraded: async () => undefined,
       getCredential: async () => ({ cookieHeader: 'unb=seller-1; _m_h5_tk=token-1', metadata: {}, expiresAt: '2026-10-01T00:00:00.000Z' }),
       upsertCredential: async () => { throw new Error('should not persist failed verification'); },
     };
@@ -166,6 +181,9 @@ describe('xianyu IM credential refresh', () => {
 
   it('cleans up a failed IM client so validation cannot leave a reconnect timer behind', async () => {
     const store = {
+      listAccountVerificationRisks: async () => [],
+      recordAccountDegraded: async () => undefined,
+      clearAccountDegraded: async () => undefined,
       getAccount: async () => ({ id: 'account-1', platform: 'xianyu', sellerRef: 'seller-1', status: 'connected' as const }),
       getCredential: async () => ({ cookieHeader: 'unb=seller-1; _m_h5_tk=token-1', deviceId: 'device-1', status: 'active' as const }),
       updateAccount: async () => undefined,
@@ -186,6 +204,9 @@ describe('xianyu IM credential refresh', () => {
   it('disconnects an existing failed IM client before replacing it', async () => {
     let disconnectCalls = 0;
     const store = {
+      listAccountVerificationRisks: async () => [],
+      recordAccountDegraded: async () => undefined,
+      clearAccountDegraded: async () => undefined,
       getAccount: async () => ({ id: 'account-1', platform: 'xianyu', sellerRef: 'seller-1', status: 'connected' as const }),
       getCredential: async () => undefined,
       updateAccount: async () => undefined,
@@ -262,6 +283,9 @@ describe('xianyu IM credential refresh', () => {
   it('persists an expired account when listener bootstrap finds missing credentials', async () => {
     let account = { id: 'account-1', platform: 'xianyu', status: 'connected' as const };
     const store = {
+      listAccountVerificationRisks: async () => [],
+      recordAccountDegraded: async () => undefined,
+      clearAccountDegraded: async () => undefined,
       getAccount: async () => account,
       getCredential: async () => undefined,
       updateAccount: async (_adminId: string, _accountId: string, patch: { status?: string }) => {
@@ -279,6 +303,9 @@ describe('xianyu IM credential refresh', () => {
     let account: { id: string; platform: string; status: 'connected' | 'verification_required' } = { id: 'account-1', platform: 'xianyu', status: 'connected' };
     let updatedCredentialStatus: string | undefined;
     const store = {
+      listAccountVerificationRisks: async () => [],
+      recordAccountDegraded: async () => undefined,
+      clearAccountDegraded: async () => undefined,
       getAccount: async () => account,
       getCredential: async () => ({ cookieHeader: 'unb=seller-1; _m_h5_tk=token-1', deviceId: 'device-1', status: 'active' as const }),
       updateAccount: async (_adminId: string, _accountId: string, patch: { status?: string }) => {
@@ -300,6 +327,9 @@ describe('xianyu IM credential refresh', () => {
   it('waits for the IM session before uploading an image', async () => {
     const order: string[] = [];
     const store = {
+      listAccountVerificationRisks: async () => [],
+      recordAccountDegraded: async () => undefined,
+      clearAccountDegraded: async () => undefined,
       withOutboundConversationLock: async (_account: string, _conversation: string, work: () => Promise<unknown>) => work(),
       getConversation: async () => ({ id: 'conversation-1', accountId: 'account-1', externalConversationRef: 'conversation-external', buyerRef: 'buyer-1' }),
       getAccount: async () => ({ id: 'account-1', status: 'connected' }),
@@ -333,6 +363,9 @@ describe('xianyu IM credential refresh', () => {
     let refreshCalls = 0;
     let disconnectCalls = 0;
     const store = {
+      listAccountVerificationRisks: async () => [],
+      recordAccountDegraded: async () => undefined,
+      clearAccountDegraded: async () => undefined,
       withOutboundConversationLock: async (_account: string, _conversation: string, work: () => Promise<unknown>) => work(),
       getConversation: async () => ({ id: 'conversation-1', accountId: 'account-1', externalConversationRef: 'conversation-external', buyerRef: 'buyer-1' }),
       getAccount: async () => ({ id: 'account-1', platform: 'xianyu', sellerRef: 'seller-1', status: 'connected' as const }),

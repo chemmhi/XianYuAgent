@@ -107,7 +107,7 @@ export class AuthService {
 }
 
 export class AccountService {
-  constructor(private readonly store: Store, private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => Promise<string>) {}
+  constructor(private readonly store: Store, private readonly audit: (input: { actorId: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string }) => Promise<string>, private readonly cleanup?: import('./account-purge-postgres.js').AccountDeletionCleanup) {}
   async list(adminId: string, query: AccountListQuery = {}): Promise<AccountListResult> {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
@@ -120,7 +120,12 @@ export class AccountService {
   async get(adminId: string, accountId: string): Promise<AccountRecord> { const account = await this.store.getAccount(adminId, accountId); if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found'); return account; }
   async create(input: { adminId: string; platform: string; sellerRef: string; displayName?: string; requestId: string; traceId: string }): Promise<AccountRecord> { if (!input.platform || !input.sellerRef) throw new ServiceError(422, 'VALIDATION_FAILED', 'platform and sellerRef are required'); try { const account = await this.store.createAccount(input); await this.audit({ actorId: input.adminId, action: 'account.created', targetRef: account.id, requestId: input.requestId, traceId: input.traceId, payload: { platform: account.platform, sellerRef: account.sellerRef }, accountId: account.id }); return account; } catch (error) { if (error instanceof Error && error.message === 'ACCOUNT_DUPLICATE') throw new ServiceError(409, 'CONFLICT', 'account already exists'); const code = (error as { code?: string }).code; if (code === '23505') throw new ServiceError(409, 'CONFLICT', 'account already exists'); throw error; } }
   async update(input: { adminId: string; accountId: string; patch: { sellerRef?: string; displayName?: string; remark?: string; avatarUrl?: string; platformUserId?: string; status?: AccountRecord['status'] }; requestId: string; traceId: string }): Promise<AccountRecord> { const account = await this.store.updateAccount(input.adminId, input.accountId, input.patch); if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found'); await this.audit({ actorId: input.adminId, action: 'account.updated', targetRef: account.id, requestId: input.requestId, traceId: input.traceId, payload: input.patch, accountId: account.id }); return account; }
-  async delete(input: { adminId: string; accountId: string; requestId: string; traceId: string }): Promise<AccountRecord> { const account = await this.store.deleteAccount(input.adminId, input.accountId); if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found'); await this.audit({ actorId: input.adminId, action: 'account.deleted', targetRef: account.id, requestId: input.requestId, traceId: input.traceId, payload: { strategy: 'soft_delete', status: account.status }, accountId: account.id }); return account; }
+  async delete(input: { adminId: string; accountId: string; requestId: string; traceId: string }): Promise<AccountRecord> {
+    const account = await this.store.deleteAccount(input.adminId, input.accountId, this.cleanup);
+    if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found');
+    // Do not recreate an account reference or snapshot after erasing its data.
+    return account;
+  }
   async getForLogin(adminId: string, accountId: string): Promise<AccountRecord> { const account = await this.store.getAccountForLogin(adminId, accountId); if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found'); return account; }
   async resolveForLogin(input: { adminId: string; accountId?: string; platform: string; sellerRef: string; requestId: string; traceId: string }): Promise<AccountRecord> {
     if (input.accountId) {

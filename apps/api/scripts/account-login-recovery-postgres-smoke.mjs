@@ -15,13 +15,12 @@ try {
   await store.deleteAccount(admin.id, account.id);
 
   const service = new AccountService(store, async () => 'audit-id');
-  const session = await service.createLoginSession({ adminId: admin.id, accountId: account.id, loginMethod: 'qr', requestId: 'qr-session-pg', traceId: 'qr-session-pg' });
-  assert.equal(session.accountId, account.id);
-
+  await assert.rejects(() => service.createLoginSession({ adminId: admin.id, accountId: account.id, loginMethod: 'qr', requestId: 'old', traceId: 'old' }), { code: 'NOT_FOUND' });
   const restored = await service.resolveForLogin({ adminId: admin.id, platform: 'xianyu', sellerRef: account.sellerRef, requestId: 'qr-recovery-pg', traceId: 'qr-recovery-pg' });
-  assert.equal(restored.id, account.id);
+  assert.notEqual(restored.id, account.id);
   assert.equal(restored.status, 'pending');
-  assert.equal(await store.hasAccountScope(admin.id, account.id), true);
+  assert.equal(await store.hasAccountScope(admin.id, restored.id), true);
+  account = restored;
   console.log('postgres qr login recovery passed');
 } finally {
   await cleanup.connect();
