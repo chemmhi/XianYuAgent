@@ -12,10 +12,13 @@ test('PostgreSQL automation recovery preserves durable deduplication and leases'
   assert.ok(['127.0.0.1', 'localhost'].includes(parsed.hostname) && parsed.pathname === '/automation_recovery_test', 'dedicated local test database required');
   const store = new PostgresStore(databaseUrl);
   const pool = new Pool({ connectionString: databaseUrl });
+  let adminId = '';
+  let accountId = '';
+  const seededKeys = new Set<string>();
   const ledger = () => new PersistentAutomationExecutionLedger(store);
   const success = { status: 'succeeded' as const, externalRef: 'test-ack' };
   const makeOrder = (patch: Partial<AutomationOrderSnapshot> = {}): AutomationOrderSnapshot => ({
-    id: randomUUID(), orderNo: randomUUID(), accountId: randomUUID(), buyerId: 'buyer', buyerName: 'buyer', itemId: 'item', itemTitle: 'item', amountMinor: 1000,
+    id: randomUUID(), orderNo: randomUUID(), accountId, buyerId: 'buyer', buyerName: 'buyer', itemId: 'item', itemTitle: 'item', amountMinor: 1000,
     paymentStatus: 'paid', orderStatus: 'open', deliveryStatus: 'pending', afterSalesStatus: 'none', deliveryType: 'coupon_only', createdAt: '2026-10-25T00:00:00.000Z', updatedAt: '2026-10-25T00:00:00.000Z', conversationId: 'conversation', configVersion: 1, source: 'local', ...patch,
   });
   const port = (order: AutomationOrderSnapshot, calls: string[]): AutomationExecutionPort => ({
@@ -31,11 +34,16 @@ test('PostgreSQL automation recovery preserves durable deduplication and leases'
     markManualReview: async () => { calls.push('manual'); },
   });
   const seed = async (key: string, result: { status: string; reason?: string }, fingerprint = 'legacy-fingerprint') => {
+    seededKeys.add(key);
     const ownerToken = randomUUID();
     await store.claimAutomationExecution({ executionKey: key, fingerprint, ownerToken, leaseUntil: new Date(Date.now() + 60_000).toISOString() });
     await store.completeAutomationExecution({ executionKey: key, ownerToken, result: { executionKey: key, ...result }, retryable: false });
   };
   try {
+    const admin = await store.createAdmin({ email: `automation-recovery-${randomUUID()}@example.com`, passwordHash: 'test-hash', displayName: 'Automation recovery' });
+    adminId = admin.id;
+    const account = await store.createAccount({ adminId, platform: 'xianyu', sellerRef: `recovery-${randomUUID()}` });
+    accountId = account.id;
     await t.test('all four rules recover old disabled entries after restart, then execute only once', async () => {
       for (const kind of ['paid_auto_delivery', 'unpaid_auto_reprice', 'review_gift', 'review_reminder']) {
         const order = makeOrder(kind === 'unpaid_auto_reprice' ? { paymentStatus: 'unpaid' } : kind === 'review_reminder' ? { deliveryStatus: 'delivered' } : {});
@@ -50,7 +58,7 @@ test('PostgreSQL automation recovery preserves durable deduplication and leases'
         const calls: string[] = [];
         const invoke = () => {
           const workflow = new AutomationWorkflowService(port(order, calls), ledger());
-          const input = { config, order, eventId: randomUUID() };
+          const input = { adminId, config, order, eventId: randomUUID() };
           return kind === 'paid_auto_delivery' ? workflow.handlePaymentPaid(input)
             : kind === 'unpaid_auto_reprice' ? workflow.handleUnpaidReprice(input)
               : kind === 'review_gift' ? workflow.handleReviewGift(input)
@@ -73,7 +81,7 @@ test('PostgreSQL automation recovery preserves durable deduplication and leases'
       const config = defaultProductAutomationConfig();
       config.reviewReminder = { enabled: true, firstDelayMinutes: 10, repeatIntervalMinutes: 10, maxReminders: 2, message: 'review' };
       const calls: string[] = [];
-      const invoke = (now: string) => new AutomationWorkflowService(port(order, calls), ledger()).handleReviewReminder({ config, order, now });
+      const invoke = (now: string) => new AutomationWorkflowService(port(order, calls), ledger()).handleReviewReminder({ adminId, config, order, now });
       assert.equal((await invoke('2026-10-25T00:01:00.000Z')).reason, 'not_due_or_capped');
       const results = await Promise.all([invoke('2026-10-25T00:10:00.000Z'), invoke('2026-10-25T00:10:00.000Z')]);
       assert.ok(results.every(result => result.status === 'succeeded'));
@@ -100,13 +108,20 @@ test('PostgreSQL automation recovery preserves durable deduplication and leases'
         await assert.rejects(() => store.claimAutomationExecution({ executionKey: key, fingerprint: 'changed', ownerToken: randomUUID(), leaseUntil: new Date(Date.now()+60000).toISOString() }), /FINGERPRINT_CONFLICT/);
       }
       const key = randomUUID();
+      seededKeys.add(key);
       const leaseUntil = new Date(Date.now()+60000).toISOString();
       await store.claimAutomationExecution({ executionKey: key, fingerprint: 'fp', ownerToken: 'owner', leaseUntil });
       assert.equal((await store.claimAutomationExecution({ executionKey: key, fingerprint: 'fp', ownerToken: 'other', leaseUntil })).claimed, false);
       await assert.rejects(() => store.completeAutomationExecution({ executionKey: key, ownerToken: 'other', result: success, retryable: false }), /OWNER_CONFLICT/);
     });
   } finally {
-    await pool.end();
-    await store.close();
+    try {
+      await pool.query('delete from automation.execution_ledger where execution_key=any($1::text[])', [[...seededKeys]]);
+      if (accountId) await store.deleteAccount(adminId, accountId);
+      if (adminId) await pool.query('delete from auth.admins where id=$1', [adminId]);
+    } finally {
+      await pool.end();
+      await store.close();
+    }
   }
 });
