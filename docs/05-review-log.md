@@ -835,3 +835,13 @@ status_route_review按S1/S2/S3a/S3b/S3c独立审核并修复阻塞后PASS；isol
 ## 2026-10-25 邀请授权与会话边界最终审核
 
 isolation_review审核后端、logout例外、WS no-touch、入队后失权与并发恢复，全部PASS；status_route_review审核刷新邮箱列、激活操作、会话代际/CSRF隔离及无账号wrapper，全部PASS。整合Web483/API25/build通过；详见访问生命周期验收。
+
+
+## 2026-10-25 评价自动化隐藏开关修复独立审核
+
+- 审核人：独立子 Agent /root/review_automation_gate；用户明确要求审核后提交并核对现有完整功能及工程化规范。
+- 本切片 PASS，无新增 P0/P1/P2；移除生产独立评价门禁，保留商品开关、通用 live 条件、作用域、可信事件、适配器及原有幂等/重试模块。
+- 独立 70/70 回归、API typecheck、diff-check 通过；主 Agent 构建、68项核心回归和16项应用/IM/MTOP/订单观察验证通过。
+- R1-P3-001 文档矛盾已修正并由独立审核人复审关闭。
+- 扩展卡券套件19项既有失败已由双方在修改/未修改工作树复现；完整功能部分验证，未做真实闲鱼写入、生产变更或PostgreSQL全量回归。账本冲突、生产规则关闭、Session过期仍是独立问题。
+- 证据、工程边界和回滚：[交付记录](operations/review-automation-gate-fix-20261025.md)。

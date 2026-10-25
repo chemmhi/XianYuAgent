@@ -29,7 +29,6 @@ function liveGate(overrides: Partial<ProductAutomationLiveConfig> = {}): Product
   return {
     executionMode: 'live',
     liveConfirmed: true,
-    reviewExternalWritesConfirmed: true,
     buyerAllowlist: ['买家'],
     ...overrides,
   };
@@ -46,7 +45,6 @@ test('product automation live config defaults to blocked with an empty buyer all
   const config = loadConfig({});
   assert.equal(config.productAutomationExecutionMode, 'simulate');
   assert.equal(config.productAutomationLiveConfirmed, false);
-  assert.equal(config.productAutomationReviewExternalWritesConfirmed, false);
   assert.deepEqual(config.buyerAllowlist, []);
 });
 
@@ -59,7 +57,6 @@ test('product automation reuses the buyer allowlist and normalizes presentation 
   });
   assert.equal(config.productAutomationExecutionMode, 'live');
   assert.equal(config.productAutomationLiveConfirmed, true);
-  assert.equal(config.productAutomationReviewExternalWritesConfirmed, true);
   assert.deepEqual(config.buyerAllowlist, ['买家 A']);
   assert.equal(normalizeAutomationBuyerName(' 买家\nA '), '买家 A');
   assert.deepEqual(parseProductAutomationBuyerAllowlist('[" 买家 ", "买家"]'), ['买家']);

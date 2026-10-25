@@ -2,14 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
-import { AutomationWorkflowService, PersistentAutomationExecutionLedger } from '../src/product-automation.js';
-import { ProductAutomationTrigger } from '../src/product-automation-trigger.js';
-import { XianyuProductAutomationExecutionAdapter } from '../src/product-automation-xianyu.js';
 import type { OrderRecord, ProductAutomationConfig } from '../src/domain.js';
 import type { XianyuImService } from '../src/xianyu-im-service.js';
 import type { XianyuMtopClient } from '../src/xianyu-mtop.js';
-
-type Runtime = ReturnType<typeof createApp>;
 
 interface ExternalCall {
   kind: 'sendText' | 'sendImage' | 'confirmShipment' | 'repriceOrder';
@@ -18,9 +13,9 @@ interface ExternalCall {
   targetPriceMinor?: number;
 }
 
-test('product automation full E2E executes each configured rule from order state to Xianyu adapter calls', async () => {
+for (const legacyFlag of [undefined, 'false']) {
+test(`product automation app integration executes configured rules with legacy review confirmation ${legacyFlag ?? 'unset'}`, async () => {
   const config = loadConfig({
-    ...process.env,
     HOST: '127.0.0.1',
     PORT: '0',
     ALLOW_IN_MEMORY: 'true',
@@ -28,8 +23,9 @@ test('product automation full E2E executes each configured rule from order state
     AGENT_RUNTIME: 'in-process',
     AUTO_REPLY_MODEL_ENABLED: 'false',
     AUTO_REPLY_OUTCOME_REVIEW_WORKER_ENABLED: 'false',
-    PRODUCT_AUTOMATION_EXECUTION_MODE: 'simulate',
-    PRODUCT_AUTOMATION_LIVE_CONFIRMED: 'false',
+    PRODUCT_AUTOMATION_EXECUTION_MODE: 'live',
+    PRODUCT_AUTOMATION_LIVE_CONFIRMED: 'true',
+    PRODUCT_AUTOMATION_REVIEW_EXTERNAL_WRITES_CONFIRMED: legacyFlag,
   });
   const runtime = createApp(config);
   await runtime.listen();
@@ -146,15 +142,11 @@ test('product automation full E2E executes each configured rule from order state
       sendText: async (_adminId: string, _accountId: string, _conversationId: string, text: string) => { calls.push({ kind: 'sendText', text }); return { externalMessageRef: `text:${calls.length}` }; },
       sendImage: async () => { calls.push({ kind: 'sendImage' }); return { externalMessageRef: `image:${calls.length}` }; },
     } as unknown as XianyuImService;
-    const adapter = new XianyuProductAutomationExecutionAdapter(runtime.store, () => fakeMtop, () => fakeIm);
-    const trigger = new ProductAutomationTrigger(
-      runtime.store,
-      runtime.productAutomation,
-      new AutomationWorkflowService(adapter, new PersistentAutomationExecutionLedger(runtime.store)),
-      adapter,
-      undefined,
-      { executionMode: 'live', liveConfirmed: true, reviewExternalWritesConfirmed: true, buyerAllowlist: [] },
-    );
+    // Replace only the external transport methods. Keep createApp's real
+    // config, trigger, workflow, execution adapter, audit and store wiring.
+    Object.assign(runtime.xianyu, fakeMtop);
+    Object.assign(runtime.xianyuIm, fakeIm, { isReady: async () => true });
+    const trigger = runtime.productAutomationTrigger;
 
     const paidResult = await trigger.onOrderRefresh({ adminId, accountId: account.id, items: [paidOrder], requestId: 'full-e2e-paid', traceId: 'full-e2e-paid' });
     assert.equal(paidResult.results[0]?.trigger, 'payment_paid');
@@ -186,8 +178,10 @@ test('product automation full E2E executes each configured rule from order state
     assert.equal(visibleOrders.response.status, 200);
     const visibleOrderNos = (visibleOrders.body?.data?.items ?? []).map((item: { orderNo: string }) => item.orderNo);
     assert.deepEqual(new Set(visibleOrderNos), new Set(orders.keys()));
-    console.log('product automation full E2E passed: paid delivery, unpaid reprice, system review gift, and minute-based review reminder all executed through the Xianyu adapter');
+    console.log('product automation app integration passed: paid delivery, unpaid reprice, system review gift, and minute-based review reminder all executed through the Xianyu adapter');
   } finally {
     await runtime.close();
   }
 });
+
+}

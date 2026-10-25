@@ -89,7 +89,7 @@ test('trusted paid reminder runs delivery immediately through the event-driven r
     new AutomationWorkflowService(adapter),
     adapter,
     undefined,
-    { executionMode: 'live', liveConfirmed: true, reviewExternalWritesConfirmed: true, buyerAllowlist: ['Buyer'] },
+    { executionMode: 'live', liveConfirmed: true, buyerAllowlist: ['Buyer'] },
   );
   const messages = new MessageService(store, async () => 'audit');
   const service = new XianyuImService(store, {} as never, messages, undefined, trigger, undefined, async ({ adminId, accountId }) => {

@@ -14,6 +14,8 @@ const accountId = required('ACCOUNT_ID');
 const orderNo = required('ORDER_NO');
 const action = required('PRODUCT_AUTOMATION_LIVE_ACTION');
 assert.ok(['payment_paid', 'unpaid_reprice', 'review_gift', 'review_reminder'].includes(action), 'unsupported live action');
+// Test-runner-only confirmation. The production runtime ignores this legacy
+// variable; configured review rules use the same live gate as other rules.
 if (action === 'review_gift' || action === 'review_reminder') {
   assert.equal(String(env.PRODUCT_AUTOMATION_REVIEW_EXTERNAL_WRITES_CONFIRMED).toLowerCase(), 'true', 'PRODUCT_AUTOMATION_REVIEW_EXTERNAL_WRITES_CONFIRMED=true is required for review live actions');
 }

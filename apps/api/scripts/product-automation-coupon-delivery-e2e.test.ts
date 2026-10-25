@@ -111,7 +111,7 @@ test('自动化触发器按订单详情数量发送批量数据，并为每一�
     harness.workflow,
     Object.assign(harness.adapter, { readiness: 'ready' as const }),
     undefined,
-    { executionMode: 'live', liveConfirmed: true, reviewExternalWritesConfirmed: true, buyerAllowlist: ['买家小明'] },
+    { executionMode: 'live', liveConfirmed: true, buyerAllowlist: ['买家小明'] },
   );
 
   const result = await trigger.onOrderRefresh({ adminId: harness.admin.id, accountId: harness.account.id, items: [{ ...harness.order, source: 'xianyu' }], requestId: 'batch-quantity-refresh', traceId: 'batch-quantity-refresh' });
