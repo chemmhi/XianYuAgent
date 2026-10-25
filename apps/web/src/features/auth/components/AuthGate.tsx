@@ -7,6 +7,7 @@ import { UserRegisterForm } from './UserRegisterForm';
 import { Button } from '../../../shared/ui/Button';
 import { useErrorToast } from '../../../shared/ui/useErrorToast';
 import { ToastProvider } from '../../../shared/ui/ToastProvider';
+import type { SessionBoundary } from '../session-boundary';
 import '../auth.css';
 
 export interface AuthGateActions {
@@ -14,9 +15,10 @@ export interface AuthGateActions {
   busy: boolean;
 }
 
-export function AuthGate({ api, children }: { api: AuthApi; children: ReactNode | ((admin: AdminProfile | null, actions: AuthGateActions) => ReactNode) }) {
-  const controller = useAuthController(api);
+export function AuthGate({ api, children, sessionBoundary }: { api: AuthApi; sessionBoundary?: SessionBoundary; children: ReactNode | ((admin: AdminProfile | null, actions: AuthGateActions) => ReactNode) }) {
+  const controller = useAuthController(api, sessionBoundary);
   const [registerMode, setRegisterMode] = React.useState(false);
+  React.useEffect(() => { if (controller.phase === 'authenticated') setRegisterMode(false); }, [controller.phase]);
 
   // Resolve the session silently; do not flash a standalone checking card.
   if (controller.phase === 'checking') return null;

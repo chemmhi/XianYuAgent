@@ -1,3 +1,4 @@
+import { createSessionBoundary } from '../features/auth/session-boundary';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHttpClient } from './http';
 
@@ -57,5 +58,44 @@ describe('http client CSRF recovery', () => {
     await expect(client.post('/api/v1/conversations/c1/messages', { text: 'hello' }))
       .rejects.toMatchObject({ status: 403, payload: { error: { code: 'CSRF_INVALID' } } });
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+});
+
+
+describe('session access rejection', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it('expires business auth failures and ignores login or upstream failures', async () => {
+    const boundary = createSessionBoundary(); const listener = vi.fn(); boundary.subscribe(listener);
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(401, { error: { code: 'UNAUTHENTICATED' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createHttpClient({ sessionBoundary: boundary });
+    await expect(client.get('/api/v1/accounts')).rejects.toMatchObject({ status: 401 });
+    expect(listener).toHaveBeenCalledOnce(); listener.mockClear();
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: { code: 'UNAUTHENTICATED' } }));
+    await expect(client.post('/api/v1/auth/password-login', {})).rejects.toMatchObject({ status: 401 });
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: { code: 'PLATFORM_LOGIN_REQUIRED' } }));
+    await expect(client.get('/api/v1/other')).rejects.toMatchObject({ status: 401 });
+    expect(listener).not.toHaveBeenCalled();
+  });
+  it('aborts old requests and cannot log out the next login from a late 401', async () => {
+    const boundary = createSessionBoundary(); const listener = vi.fn(); boundary.subscribe(listener);
+    let resolve!: (response: Response) => void;
+    const fetchMock = vi.fn<typeof fetch>(() => new Promise(done => { resolve = done; }));
+    vi.stubGlobal('fetch', fetchMock);
+    const pending = createHttpClient({ sessionBoundary: boundary }).get('/api/v1/accounts');
+    boundary.advance();
+    expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    resolve(jsonResponse(401, { error: { code: 'UNAUTHENTICATED' } }));
+    await expect(pending).rejects.toMatchObject({ status: 401 });
+    expect(listener).not.toHaveBeenCalled();
+  });
+  it('never retries an old-session mutation using the next session CSRF cookie', async () => {
+    const boundary = createSessionBoundary(); let resolve!: (response: Response) => void;
+    const fetchMock = vi.fn<typeof fetch>(() => new Promise(done => { resolve = done; }));
+    vi.stubGlobal('fetch', fetchMock);
+    const pending = createHttpClient({ sessionBoundary: boundary }).post('/api/v1/coupons', { label: 'old user data' });
+    boundary.advance(); resolve(jsonResponse(403, { error: { code: 'CSRF_INVALID' } }));
+    await expect(pending).rejects.toMatchObject({ status: 403 });
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });
