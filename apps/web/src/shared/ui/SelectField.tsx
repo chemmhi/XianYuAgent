@@ -10,6 +10,7 @@ import {
   type ReactNode,
   type SelectHTMLAttributes,
 } from 'react';
+import { describedBy, useFieldValidation } from './Form';
 import './field.css';
 import './select-field.css';
 
@@ -23,6 +24,8 @@ export type SelectFieldProps = Omit<SelectHTMLAttributes<HTMLSelectElement>, 'ch
   label?: ReactNode;
   required?: boolean;
   hint?: ReactNode;
+  error?: ReactNode;
+  fieldClassName?: string;
   options: readonly SelectFieldOption[];
   /**
    * Preview-only visual menu. When present with `is-open`, it renders the same
@@ -48,6 +51,8 @@ export function SelectField({
   label,
   required = false,
   hint,
+  error,
+  fieldClassName = '',
   options,
   previewMenuOptions,
   previewSelectedValue,
@@ -62,6 +67,7 @@ export function SelectField({
   onKeyDown: externalOnKeyDown,
   ...selectProps
 }: SelectFieldProps) {
+  const validation = useFieldValidation(error);
   const classTokens = className.split(/\s+/).filter(Boolean);
   const previewIsOpen = classTokens.includes('is-open') && Boolean(previewMenuOptions?.length);
   const stateClassNames = classTokens.filter((token) => token === 'is-focus' || token === 'is-open').join(' ');
@@ -82,7 +88,7 @@ export function SelectField({
   const selectedOption = menuOptions.find((option) => option.value === (previewSelectedValue ?? selectedValue)) ?? menuOptions[0];
   const [highlightedIndex, setHighlightedIndex] = useState(() => firstEnabledIndex(menuOptions, previewSelectedValue ?? selectedValue));
   const ariaLabel = selectProps['aria-label'];
-  const ariaDescribedBy = selectProps['aria-describedby'];
+  const ariaDescribedBy = describedBy(selectProps['aria-describedby'], validation.error ? validation.errorId : undefined);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -200,11 +206,14 @@ export function SelectField({
       <select
         {...selectProps}
         ref={selectRef}
+        data-validation-key={validation.key}
         value={value}
         defaultValue={defaultValue}
         disabled={disabled || undefined}
         required={required || undefined}
         aria-required={required || undefined}
+        aria-invalid={validation.error ? true : selectProps['aria-invalid']}
+        aria-describedby={ariaDescribedBy}
         aria-hidden="true"
         tabIndex={-1}
         className="ui-select-native"
@@ -217,6 +226,7 @@ export function SelectField({
       </select>
       <button
         ref={triggerRef}
+        data-validation-trigger="true"
         type="button"
         className="ui-select-trigger"
         role="combobox"
@@ -226,10 +236,12 @@ export function SelectField({
         aria-label={label === undefined ? ariaLabel : undefined}
         aria-labelledby={label === undefined ? undefined : labelId}
         aria-describedby={ariaDescribedBy}
+        aria-invalid={validation.error ? true : selectProps['aria-invalid']}
         aria-required={required || undefined}
         aria-disabled={disabled || undefined}
         disabled={disabled}
         onFocus={notifyTriggerFocus}
+        onBlur={(event) => { externalOnBlur?.(event as unknown as FocusEvent<HTMLSelectElement>); validation.revalidate(selectRef.current, true); }}
         onClick={(event) => {
           event.preventDefault();
           notifyTriggerClick(event);
@@ -271,11 +283,12 @@ export function SelectField({
     </span>
   );
 
-  if (label === undefined) return field;
+  const message = validation.error ? <span className="ui-field-error" id={validation.errorId}>{validation.error}</span> : hint ? <span className="ui-field-hint">{hint}</span> : validation.inForm && required ? <span className="ui-field-message-placeholder" aria-hidden="true">&nbsp;</span> : null;
+  if (label === undefined) return fieldClassName ? <span className={`ui-field ${fieldClassName}`}>{field}{message}</span> : <>{field}{message}</>;
 
-  return <label className={`ui-field ${className}`.trim()}>
+  return <label className={`ui-field ${className} ${fieldClassName}`.trim()}>
     <span id={labelId} className="ui-field-label">{label}{required && <span className="ui-field-required" aria-hidden="true">*</span>}</span>
     {field}
-    {hint && <span className="ui-field-hint">{hint}</span>}
+    {message}
   </label>;
 }
