@@ -253,6 +253,13 @@ wait_for_status "$PUBLIC_BASE_URL/healthz" "200"
 wait_for_status "$PUBLIC_BASE_URL/readyz" "200"
 backend_services_running || fail '新版 API/worker 未同时运行，停止切换'
 
+# Finish historical soft deletions before declaring this release successful.
+# The CLI snapshots only disabled accounts without any active authorization,
+# then atomically rechecks that condition before removing each account.
+docker compose -f "$COMPOSE_FILE" exec -T api node scripts/purge-deleted-account.mjs \
+  --all-deleted --apply --im-owner-url=http://127.0.0.1:8080
+
+
 session_status="$(curl -ksS -o /dev/null -w '%{http_code}' "$PUBLIC_BASE_URL/api/v1/auth/session" || true)"
 case ",$session_status," in
   *,200,*|*,401,*|*,403,*) ;;

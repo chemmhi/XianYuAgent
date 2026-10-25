@@ -50,3 +50,12 @@ test('production deploy migrates the existing volume before API and Worker start
   assert.match(apiDockerfile, /COPY scripts\/migrate\.mjs \.\/scripts\/migrate\.mjs/);
   assert.match(apiDockerfile, /COPY migrations \.\/migrations/);
 });
+
+test('production release clears historical deleted accounts before publishing the new UI', () => {
+  const purge = deployScript.indexOf('node scripts/purge-deleted-account.mjs');
+  assert.ok(purge > deployScript.indexOf('wait_for_status "http://127.0.0.1:$UPSTREAM_PORT/readyz"'));
+  assert.ok(purge < deployScript.indexOf('backend_validated=1', purge));
+  assert.ok(purge < deployScript.indexOf('sudo rsync -a --delete apps/web/dist/'));
+  assert.match(deployScript, /--all-deleted --apply --im-owner-url=http:\/\/127\.0\.0\.1:8080/);
+  assert.match(apiDockerfile, /COPY scripts\/purge-deleted-account\.mjs \.\/scripts\/purge-deleted-account\.mjs/);
+});

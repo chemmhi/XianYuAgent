@@ -205,6 +205,62 @@ test('postgres: manual delivery paused before enqueue cannot recreate an orphan 
   assert.equal((await f.db.pool.query('select count(*)::int n from execution.outbox_jobs where payload_json->>\'accountId\'=$1', [s.account.id])).rows[0].n, 0);
 });
 
+test('deployment sweep clears every historical deletion and preserves normal and merely disabled accounts', async t => {
+  const f = await fixture('postgres'); t.after(() => f.close());
+  const s = await seed(f);
+  const second = await f.runtime.store.createAccount({ adminId: s.invited.id, platform: 'xianyu', sellerRef: 'second-historical-deletion' });
+  const disabled = await f.runtime.store.createAccount({ adminId: s.admin.id, platform: 'xianyu', sellerRef: 'disabled-with-active-authorization' });
+  await f.runtime.objectStorage.putObject({ key: `coupons/${second.id}/old/file.png`, body: Buffer.from('old attachment'), contentType: 'image/png' });
+  await f.db.pool.query("update accounts.accounts set status='disabled' where id=any($1::uuid[])", [[s.account.id, second.id, disabled.id]]);
+  await f.db.pool.query("update auth.account_scopes set status='revoked' where account_id=any($1::uuid[])", [[s.account.id, second.id]]);
+  const args = [new URL('./purge-deleted-account.mjs', import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1'), '--all-deleted'];
+  const env = { ...process.env, DATABASE_URL: f.db.url, ALLOW_IN_MEMORY: 'false', REDIS_URL: '', CREDENTIAL_ENCRYPTION_KEY: 'invite-test-encryption-key-32-chars', XIANYU_VERIFICATION_BROWSER_MODE: 'disabled' };
+  const execute = promisify(execFile);
+  const dry = await execute(process.execPath, args, { env, timeout: 15_000 });
+  assert.match(dry.stdout, /"candidateCount":2/);
+  assert.equal((await f.db.pool.query('select count(*)::int n from accounts.accounts where id=any($1::uuid[])', [[s.account.id, second.id]])).rows[0].n, 2);
+  const apply = [...args, '--apply', `--im-owner-url=${f.origin}`];
+  const cleaned = await execute(process.execPath, apply, { env, timeout: 15_000 });
+  assert.match(cleaned.stdout, /"purgedCount":2/);
+  assert.equal((await f.db.pool.query('select count(*)::int n from accounts.accounts where id=any($1::uuid[])', [[s.account.id, second.id]])).rows[0].n, 0);
+  assert.equal(await f.runtime.objectStorage.getObject(`coupons/${second.id}/old/file.png`), undefined);
+  assert.ok(await f.runtime.store.getAccount(s.admin.id, s.other.id));
+  assert.ok(await f.runtime.store.getProduct(s.admin.id, s.otherProduct.id));
+  assert.equal((await f.db.pool.query('select count(*)::int n from accounts.accounts where id=$1', [disabled.id])).rows[0].n, 1);
+  const replay = await execute(process.execPath, apply, { env, timeout: 15_000 });
+  assert.match(replay.stdout, /"purgedCount":0/);
+});
+
+for (const kind of ['memory', 'postgres']) test(`${kind}: historical sweep rechecks eligibility atomically after an account is restored`, async t => {
+  const f = await fixture(kind); t.after(() => f.close());
+  const s = await seed(f);
+  if (f.db) {
+    await f.db.pool.query("update accounts.accounts set status='disabled' where id=$1", [s.account.id]);
+    await f.db.pool.query("update auth.account_scopes set status='revoked' where account_id=$1", [s.account.id]);
+  } else {
+    s.account.status = 'disabled';
+    await f.runtime.store.revokeScope(s.admin.id, s.account.id, 'manage');
+  }
+  assert.ok(await f.runtime.store.restoreAccountForLogin(s.admin.id, s.account.id));
+  assert.equal(await f.runtime.store.deleteAccount(s.admin.id, s.account.id, undefined, true), undefined);
+  assert.ok(await f.runtime.store.getProduct(s.admin.id, s.product.id));
+});
+
+test('production migration runner can replay the entire schema twice on existing data', async t => {
+  const f = await fixture('postgres'); t.after(() => f.close());
+  const s = await seed(f);
+  const script = new URL('./migrate.mjs', import.meta.url).pathname.replace(/^\/([A-Z]:)/i, '$1');
+  const execute = promisify(execFile);
+  for (let run = 0; run < 2; run++) {
+    const result = await execute(process.execPath, [script], { env: { ...process.env, DATABASE_URL: f.db.url }, timeout: 30_000 });
+    assert.match(result.stdout, /migration applied: 069_account_deletion_fence.sql/);
+  }
+  assert.ok(await f.runtime.store.getProduct(s.admin.id, s.product.id));
+  assert.ok(await f.runtime.store.getAccount(s.admin.id, s.other.id));
+  const constraints = await f.db.pool.query("select count(*)::int n from pg_constraint where conname in ('repair_state_account_fk','repair_review_account_fk','repair_event_account_fk','execution_ledger_account_fk','outbox_account_fk')");
+  assert.equal(constraints.rows[0].n, 5);
+});
+
 for (const kind of ['memory', 'postgres']) test(`${kind}: cleanup failure fences login and is retryable`, async t => {
   const f = await fixture(kind); t.after(() => f.close());
   const s = await seed(f);

@@ -391,8 +391,9 @@ export class MemoryStore implements Store {
     try { return await task; } finally { writes.delete(task); if (!writes.size) this.artifactWrites.delete(owner); }
   }
 
-  async deleteAccount(adminId: string, accountId: string, cleanup?: AccountDeletionCleanup): Promise<AccountRecord | undefined> {
+  async deleteAccount(adminId: string, accountId: string, cleanup?: AccountDeletionCleanup, onlyPreviouslyDeleted = false): Promise<AccountRecord | undefined> {
     const account = this.accounts.get(accountId);
+    if (onlyPreviouslyDeleted && (account?.status !== 'disabled' || [...this.scopes.values()].some(scope => scope.accountId === accountId && scope.status === 'active'))) return undefined;
     const manager = [...this.scopes.values()].some(scope => scope.accountId === accountId && scope.adminId === adminId && scope.scope === 'manage'
       && ((scope.status === 'active' && (!scope.expiresAt || Date.parse(scope.expiresAt) > Date.now())) || (account?.status === 'disabled' && scope.status === 'revoked')));
     if (!account || !manager) return undefined;

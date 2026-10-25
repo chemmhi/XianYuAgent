@@ -1472,7 +1472,7 @@ export interface Store {
   acknowledgeRiskNotification(adminId: string, id: string): Promise<boolean>;
   withAccountWriteGuard<T>(accountId: string, work: () => Promise<T>): Promise<T>;
   withAccountArtifactWrite<T>(key: string, work: () => Promise<T>): Promise<T>;
-  deleteAccount(adminId: string, accountId: string, cleanup?: import('./account-purge-postgres.js').AccountDeletionCleanup): Promise<AccountRecord | undefined>;
+  deleteAccount(adminId: string, accountId: string, cleanup?: import('./account-purge-postgres.js').AccountDeletionCleanup, onlyPreviouslyDeleted?: boolean): Promise<AccountRecord | undefined>;
   createLoginSession(input: { adminId: string; accountId?: string; provisionalAccountRef?: string; loginMethod: string; expiresAt: string; qrTokenRef?: string }): Promise<LoginSessionRecord>;
   getLoginSession(adminId: string, accountId: string, sessionId: string): Promise<LoginSessionRecord | undefined>;
   getLoginSessionById(adminId: string, sessionId: string): Promise<LoginSessionRecord | undefined>;

@@ -419,14 +419,16 @@ export class PostgresStore implements Store {
     } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
   }
 
-  async deleteAccount(adminId: string, accountId: string, cleanup?: AccountDeletionCleanup): Promise<AccountRecord | undefined> {
+  async deleteAccount(adminId: string, accountId: string, cleanup?: AccountDeletionCleanup, onlyPreviouslyDeleted = false): Promise<AccountRecord | undefined> {
     const client = await this.accountLifecyclePool.connect();
     let artifactsLocked = false;
     try {
       await client.query('begin');
-      const current = await client.query(`select a.* from accounts.accounts a where a.id=$1 and exists(
+      const current = await client.query(`select a.* from accounts.accounts a where a.id=$1
+        and (not $3::boolean or (a.status='disabled' and not exists(select 1 from auth.account_scopes live where live.account_id=a.id and live.status='active')))
+        and exists(
         select 1 from auth.account_scopes s where s.account_id=a.id and s.admin_id=$2 and s.scope='manage'
-        and ((s.status='active' and (s.expires_at is null or s.expires_at>now())) or (a.status='disabled' and s.status='revoked'))) for update`, [accountId, adminId]);
+        and ((s.status='active' and (s.expires_at is null or s.expires_at>now())) or (a.status='disabled' and s.status='revoked'))) for update`, [accountId, adminId, onlyPreviouslyDeleted]);
       if (!current.rows[0]) { await client.query('rollback'); return undefined; }
       // Commit the fence before draining work that may be finishing a DB write.
       await client.query("update accounts.accounts set status='disabled', deletion_started_at=coalesce(deletion_started_at,now()), updated_at=now() where id=$1", [accountId]);

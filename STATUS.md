@@ -548,6 +548,8 @@
 - 阶段：5.5；状态：BLOCKED（仅人工合并/生产发布门禁待完成）。本地功能、测试与两轮独立评审 PASS。
 - 目标：清除账号全部业务数据与凭证/附件/运行缓存，释放身份，支持邀请码用户重新绑定；明确不可恢复的删除说明。
 - 实现：codex/account-hard-delete-20261025；独立工作树；未修改主工作区业务源码或生产数据库。
-- 验证：专项 14/14、Chrome/CDP→API→PostgreSQL/MinIO、全量 API 与 Web 483 项、类型检查/构建/diff-check PASS；修复前失败证据与评审闭环见 docs/operations/account-hard-delete-20261025.md。
-- 未完成：人工审核后 merge lock 合入 main、GitHub Actions 发布、腾讯云准确目标历史清理、真实 APP 扫码复验。生产尚未修复，不能宣称整体完成。
+- 验证：专项 18/18、Chrome/CDP→API→PostgreSQL/MinIO、全量 API 与 Web 483 项、类型检查/构建/diff-check PASS；修复前失败证据与评审闭环见 docs/operations/account-hard-delete-20261025.md。
+- 未完成：人工审核后 merge lock 合入 main、GitHub Actions 发布、腾讯云发布后自动清理全部已删除账号、真实 APP 扫码复验。生产尚未修复，不能宣称整体完成。
 - 风险：永久删除不能通过源码回退恢复；离线备份与运维日志不承诺介质擦除；当前生产自定义明文 trace 未启用。
+
+- 用户补充要求已纳入：deploy-production 自动清理所有 disabled 且无 active 授权的历史账号后才发布 UI；运行中恢复账号会在行锁内重检并保留。新增 Docker CLI 打包、重复部署迁移幂等、真实双次迁移验收；18/18 专项、6/6 部署规则、bash 只读语法检查 PASS。
