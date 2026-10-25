@@ -78,7 +78,8 @@ export function InvitePanel({ api }: { api: InviteApi }) {
   async function status(item: InviteVM, next: 'active' | 'disabled') {
     await perform({ id: item.id, action: next === 'active' ? 'enable' : 'disable' }, async () => {
       await api.setStatus(item.id, next);
-      await refreshed(next === 'active' ? '邀请码已启用' : '邀请码已禁用');
+      const target = item.usedAt || item.usedBy ? '用户访问权限' : '邀请码';
+      await refreshed(`${target}${next === 'active' ? '已启用' : '已禁用'}`);
     });
   }
 
@@ -93,9 +94,8 @@ export function InvitePanel({ api }: { api: InviteApi }) {
     locked.current = true;
     setPending({ id: renewingInvite.id, action: 'renew' });
     try {
-      const result = await api.renew(renewingInvite.id, days);
-      setItems(current => current.map(item => item.id !== renewingInvite.id ? item : { ...item, expiresAt: result.expiresAt, status: item.status === 'expired' ? 'active' : item.status }));
-      feedback('邀请码已续期', 'success');
+      await api.renew(renewingInvite.id, days);
+      await refreshed(renewingInvite.usedAt || renewingInvite.usedBy ? '用户访问权限已续期' : '邀请码已续期');
     } finally { locked.current = false; setPending(null); }
   }
 
