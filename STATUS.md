@@ -1,5 +1,11 @@
 # XianyuSellerAgent 项目状态
 
+## 2026-10-25 逐星智能生产恢复最终验收（PASS）
+
+- 腾讯云生产只读核验：账号状态 `connected`、IM `connected`、风险为空、凭证 `active`。服务 SHA `f9fe016dc34bfd3ff7f66a2f77200654f4cf9ba4`，healthz/readyz 通过，Actions 运行 40114281356 成功。
+- 正式链路已包含 Ydisks 浏览器挑战恢复、同一浏览器 Token/身份校验、凭证落库和风险 revision 保护；详见 [最终验收记录](docs/operations/account-session-final-verification-20261025.md)。
+- 本次最终核验只读，不写生产数据库；原始请求参数与浏览器记录仍在本地忽略目录，不进入 Git。
+
 ## 2026-10-24 分时段随机 HTTP 会话维护（独立审核通过，已合入 main）
 
 - 取消固定十分钟续期；北京时间白天25–45分钟、早晚45–90分钟、深夜90–180分钟随机执行登录检查和token续期。健康消息连接不断开，既有自动回复和自动挑战恢复不变。
