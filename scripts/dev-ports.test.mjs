@@ -86,3 +86,19 @@ test('synchronizes ports and proxy while preserving custom WebSocket origins and
   ]);
   assert.equal(original.VITE_API_PROXY_TARGET, 'http://127.0.0.1:8080');
 });
+
+test('shares a fresh internal IM secret without changing persisted credential encryption', () => {
+  const original = { CREDENTIAL_ENCRYPTION_KEY: 'existing-encryption-key' };
+  const first = createDevEnvironment({ apiPort: 8080, webPort: 5173 }, original);
+  const second = createDevEnvironment({ apiPort: 8080, webPort: 5173 }, original);
+  assert.match(first.XIANYU_IM_OWNER_SECRET, /^[a-f0-9]{64}$/);
+  assert.notEqual(first.XIANYU_IM_OWNER_SECRET, second.XIANYU_IM_OWNER_SECRET);
+  assert.equal(first.CREDENTIAL_ENCRYPTION_KEY, original.CREDENTIAL_ENCRYPTION_KEY);
+  assert.equal(original.XIANYU_IM_OWNER_SECRET, undefined);
+});
+
+test('preserves an explicitly configured internal IM secret', () => {
+  const secret = 'configured-im-owner-secret-with-32-characters';
+  const env = createDevEnvironment({ apiPort: 8080, webPort: 5173 }, { XIANYU_IM_OWNER_SECRET: secret });
+  assert.equal(env.XIANYU_IM_OWNER_SECRET, secret);
+});

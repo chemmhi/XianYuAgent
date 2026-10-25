@@ -147,8 +147,9 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
   });
   let xianyu: XianyuMtopClient;
   let xianyuIm!: XianyuImService;
+  const imOwnerSecret = config.imOwnerSecret ?? config.credentialEncryptionKey;
   const imOwnerClient = options.imOwnerUrl
-    ? new XianyuImOwnerClient(options.imOwnerUrl, config.credentialEncryptionKey, config.xianyuVerificationBrowserMaxWaitMs * 2 + 60_000)
+    ? new XianyuImOwnerClient(options.imOwnerUrl, imOwnerSecret, config.xianyuVerificationBrowserMaxWaitMs * 2 + 60_000)
     : undefined;
   const verificationBrowser = config.xianyuVerificationBrowserMode === 'disabled' || options.verificationRecoveryOwner === false || Boolean(imOwnerClient)
     ? undefined
@@ -461,7 +462,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     await store.enqueuePaymentEvent({ adminId, accountId, eventRef: event.externalMessageRef, orderNo: extractTrustedOrderNo(event.raw), buyerRef: event.senderRef, itemRef: event.itemRef, conversationRef: event.externalConversationRef, receivedAt: trustedPaymentOccurredAt(event), observedAt: new Date().toISOString() });
     void paymentEventWorker.pollOnce().catch((error) => console.error(JSON.stringify({ component: 'payment-event-worker', event: 'wake_failed', accountId, error: error instanceof Error ? error.message : String(error) })));
   }, async (adminId, accountId, source) => { await verificationRecoveryBridge?.publish({ adminId, accountId, source }); }, imOwnerClient);
-  const imOwnerServer = imOwnerClient ? undefined : new XianyuImOwnerServer(config.credentialEncryptionKey, xianyuIm, store);
+  const imOwnerServer = imOwnerClient ? undefined : new XianyuImOwnerServer(imOwnerSecret, xianyuIm, store);
 
   const workspaceCommands = new WorkspaceCommandOrchestrator({
     store,

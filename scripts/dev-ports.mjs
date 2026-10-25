@@ -1,4 +1,5 @@
 import net from 'node:net';
+import { randomBytes } from 'node:crypto';
 
 function parsePort(value, name) {
   const port = Number(value);
@@ -46,6 +47,9 @@ export function createDevEnvironment({ apiPort, webPort }, env = process.env) {
   }
   return {
     ...env,
+    // One launch shares an RPC secret across API/Worker. Keep the persisted
+    // credential-encryption key unchanged when a developer has not set one.
+    XIANYU_IM_OWNER_SECRET: env.XIANYU_IM_OWNER_SECRET?.trim() || randomBytes(32).toString('hex'),
     PORT: String(apiPort),
     VITE_PORT: String(webPort),
     VITE_API_PROXY_TARGET: `http://127.0.0.1:${apiPort}`,

@@ -101,6 +101,7 @@ test('npm run dev increments occupied ports and keeps HTTP, sessions and WebSock
   } }));
   await writeFile(path.join(fixture, '.env'), `PORT=${port}\nVITE_PORT=${port}\nWS_ALLOWED_ORIGINS=http://custom.invalid\n`);
   const env = { ...process.env, NODE_ENV: 'development', HOST: '0.0.0.0', DATABASE_URL: '', REDIS_URL: '',
+    CREDENTIAL_ENCRYPTION_KEY: '', XIANYU_IM_OWNER_SECRET: '', XIANYU_IM_OWNER_URL: '',
     ALLOW_IN_MEMORY: 'true', COOKIE_SECURE: 'false', AGENT_RUNTIME: 'in-process', XIANYU_QR_MODE: 'stub',
     AUTO_REPLY_SEND_MODE: 'simulate', AUTO_REPLY_MODEL_ENABLED: 'false', AUTO_REPLY_REPAIR_MODE: 'enforce',
     AUTO_REPLY_OUTCOME_REVIEW_WORKER_ENABLED: 'false', VITE_API_MODE: 'live', VITE_API_BASE_URL: '',
@@ -115,6 +116,10 @@ test('npm run dev increments occupied ports and keeps HTTP, sessions and WebSock
     assert.equal(child.exitCode, null, output);
     return output.includes(`[dev] API: ${apiUrl}`) && output.includes(`[dev] Web: ${webUrl}`);
   }, () => `Expected API ${apiUrl}, Web ${webUrl}\n${output}`);
+  await waitFor(() => {
+    assert.equal(child.exitCode, null, output);
+    return output.includes('xianyu-agent-worker started;');
+  }, () => output);
   await waitFor(async () => {
     try { return (await fetch(`${webUrl}/api/v1/auth/session`)).ok; } catch { return false; }
   }, () => output);

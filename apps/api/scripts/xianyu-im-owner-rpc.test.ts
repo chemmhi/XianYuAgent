@@ -3,11 +3,44 @@ import { createHmac, randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import test from 'node:test';
 import { MemoryStore } from '../src/store-memory.js';
+import { createApp } from '../src/app.js';
+import { loadConfig } from '../src/config.js';
 import { ServiceError } from '../src/services.js';
 import { XianyuImService, XianyuImSendNotStartedError } from '../src/xianyu-im-service.js';
 import { IM_OWNER_RPC_PATH, XianyuImOwnerClient, XianyuImOwnerServer } from '../src/xianyu-im-owner-rpc.js';
 
 const secret = 'isolated-test-im-owner-secret-32-bytes';
+
+test('app wiring shares a separate RPC secret without rotating credential encryption', async () => {
+  const config = { ...loadConfig({ NODE_ENV: 'test', ALLOW_IN_MEMORY: 'true',
+    XIANYU_QR_MODE: 'stub', AGENT_RUNTIME: 'in-process', AUTO_REPLY_MODEL_ENABLED: 'false',
+    XIANYU_IM_OWNER_SECRET: secret }), port: 0, host: '127.0.0.1' };
+  assert.equal(config.credentialEncryptionKey, 'development-only-credential-key-change-me');
+  const api = createApp(config);
+  let worker: ReturnType<typeof createApp> | undefined;
+  try {
+    await api.listen();
+    const url = `http://127.0.0.1:${(api.server.address() as { port: number }).port}`;
+    worker = createApp(config, { imOwnerUrl: url, verificationRecoveryOwner: false });
+    const admin = await api.store.createAdmin({ email: `${randomUUID()}@example.com`, passwordHash: 'hash', displayName: 'test' });
+    const account = await api.store.createAccount({ adminId: admin.id, platform: 'xianyu', sellerRef: 'dev-secret-test' });
+    let calls = 0;
+    api.xianyuIm.isReady = async () => { calls++; return true; };
+    assert.equal(await worker.xianyuIm.isReady(admin.id, account.id), true);
+    assert.equal(calls, 1);
+    const wrongClient = new XianyuImOwnerClient(url, 'wrong-secret-that-is-at-least-32-characters');
+    await assert.rejects(wrongClient.call('isReady', [admin.id, account.id]), { code: 'IM_OWNER_AUTH_FAILED' });
+  } finally {
+    await worker?.close();
+    await api.close();
+  }
+});
+
+test('RPC rejects the development encryption fallback when no separate secret is configured', () => {
+  const config = loadConfig({ NODE_ENV: 'test', ALLOW_IN_MEMORY: 'true' });
+  assert.equal(config.imOwnerSecret, undefined);
+  assert.throws(() => new XianyuImOwnerClient('http://127.0.0.1:8080', config.credentialEncryptionKey), /XIANYU_IM_OWNER_SECRET_REQUIRED/);
+});
 async function harness(operations: Partial<XianyuImService>, intercept?: (req: IncomingMessage, res: ServerResponse) => boolean) {
   const store = new MemoryStore();
   const admin = await store.createAdmin({ email: `${randomUUID()}@example.com`, passwordHash: 'hash', displayName: 'test' });
