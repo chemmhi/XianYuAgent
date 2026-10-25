@@ -569,7 +569,8 @@ export interface ProductPatch {
 }
 
 export type InviteStatus = 'active' | 'disabled' | 'used' | 'expired' | 'deleted';
-export interface InviteRecord { codeHash?: string; codeCiphertext?: string; id: string; code?: string; codePrefix: string; createdBy: string; requestKey: string; expiresAt: string; usedAt?: string; usedBy?: string; usedByEmail?: string; usedByDisplayName?: string; disabledAt?: string; deletedAt?: string; revokedAt?: string; createdAt: string; status?: InviteStatus; }
+export type InviteAccessStatus = 'active' | 'disabled' | 'expired';
+export interface InviteRecord { codeHash?: string; codeCiphertext?: string; id: string; code?: string; codePrefix: string; createdBy: string; requestKey: string; expiresAt: string; usedAt?: string; usedBy?: string; usedByEmail?: string; usedByDisplayName?: string; disabledAt?: string; deletedAt?: string; revokedAt?: string; createdAt: string; status?: InviteStatus; accessStatus?: InviteAccessStatus; }
 
 export interface AdminRecord {
   id: string;
@@ -1437,6 +1438,7 @@ export interface Store {
   createAdmin(input: { email: string; passwordHash: string; displayName: string; role?: string }): Promise<AdminRecord>;
   createInvite(input: { createdBy: string; codeHash: string; codeCiphertext: string; codePrefix: string; requestKey: string; expiresAt: string }): Promise<InviteRecord>;
   listInvites(createdBy: string): Promise<InviteRecord[]>;
+  findInviteByUsedBy(adminId: string): Promise<InviteRecord | undefined>;
   revokeInvite(createdBy: string, inviteId: string): Promise<boolean>;
   setInviteStatus(createdBy: string, inviteId: string, status: 'active' | 'disabled'): Promise<boolean>;
   renewInvite(createdBy: string, inviteId: string, expiresAt: string): Promise<boolean>;

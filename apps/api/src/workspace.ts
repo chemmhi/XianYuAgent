@@ -219,7 +219,10 @@ export class InProcessAgentRuntime implements WorkspaceRuntime {
     this.active.add(input.run.id);
     setTimeout(() => {
       if (this.stopped) { this.active.delete(input.run.id); return; }
-      void this.execute(input).finally(() => this.active.delete(input.run.id));
+      void this.execute(input)
+        .catch(error => this.failExecution(input, error))
+        .catch(() => { console.warn(JSON.stringify({ component: 'workspace-runtime', event: 'failure_persistence_failed', runId: input.run.id })); })
+        .finally(() => this.active.delete(input.run.id));
     }, 0);
   }
 
@@ -233,6 +236,21 @@ export class InProcessAgentRuntime implements WorkspaceRuntime {
   cancel(runId: string): void { this.cancelled.add(runId); }
 
   stop(): void { this.stopped = true; }
+
+  private async failExecution(input: WorkspaceRuntimeInput, error: unknown): Promise<void> {
+    if (this.stopped || this.cancelled.has(input.run.id)) return;
+    const errorCode = error instanceof ServiceError ? error.code : 'RUNTIME_FAILED';
+    const finishedAt = new Date().toISOString();
+    const resultSummary = errorCode.startsWith('INVITE_ACCESS_') ? '邀请码授权已失效，执行已停止' : 'Workspace 执行失败，请重试';
+    const run = await this.store.updateRun(input.run.id, { status: 'failed', errorCode, finishedAt, resultSummary });
+    if (!run) return; // A concurrently purged user/run must not be recreated.
+    const step = findWorkspaceExecutionStep(input.steps);
+    if (step) {
+      await this.store.updateRunStep(step.id, { status: 'failed', errorCode, finishedAt, outputSummary: resultSummary });
+      await this.emit(input.run.id, 'step.failed', { stepId: step.id, status: 'failed', errorCode });
+    }
+    await this.emit(input.run.id, 'run.failed', { status: 'failed', errorCode, resultSummary });
+  }
 
   private async execute(input: { run: RunRecord; steps: StepRecord[]; adminId?: string; sessionId?: string }): Promise<void> {
     const step = findWorkspaceExecutionStep(input.steps);
@@ -321,6 +339,7 @@ export class WorkspaceService {
     private readonly commands?: WorkspaceCommandOrchestrator,
     private readonly titleModelClient?: ModelClient,
     private readonly resolveTitleModelClient?: (adminId: string, accountId: string) => Promise<ModelClient | undefined>,
+    private readonly assertActorAccess?: (adminId: string) => Promise<void>,
   ) {}
 
   async listSessions(input: { adminId: string; accountId?: string; search?: string }): Promise<WorkspaceSessionView[]> {
@@ -329,6 +348,7 @@ export class WorkspaceService {
   }
 
   async createSession(input: { adminId: string; accountId: string; title: string; summary?: string; instruction?: string; requestId: string; traceId: string }): Promise<WorkspaceSessionView> {
+    await this.assertActorAccess?.(input.adminId);
     if (!input.accountId.trim()) throw new ServiceError(422, 'VALIDATION_FAILED', 'accountId is required');
     const fallbackTitle = input.title.trim() || '新工作区会话';
     try {
@@ -373,6 +393,7 @@ export class WorkspaceService {
   }
 
   async startRun(input: { adminId: string; accountId: string; sessionId: string; instruction: string; attachments?: PiRuntimeAttachment[]; clientRunRef?: string; requestId: string; traceId: string }): Promise<{ run: WorkspaceRunView; duplicate: boolean }> {
+    await this.assertActorAccess?.(input.adminId);
     const instruction = input.instruction.trim();
     if (!instruction) throw new ServiceError(422, 'VALIDATION_FAILED', 'instruction is required');
     if (instruction.length > 4000) throw new ServiceError(422, 'VALIDATION_FAILED', 'instruction cannot exceed 4000 characters');
@@ -404,6 +425,7 @@ export class WorkspaceService {
   }
 
   async cancelActiveRun(input: { adminId: string; runId: string; requestId: string; traceId: string }): Promise<WorkspaceRunView> {
+    await this.assertActorAccess?.(input.adminId);
     const bundle = await this.store.getRun(input.adminId, input.runId);
     if (!bundle) throw new ServiceError(404, 'NOT_FOUND', 'run not found');
     if (terminalRunStatuses.has(bundle.run.status)) return this.toRunView(bundle.run, bundle.steps);
@@ -450,6 +472,7 @@ export class WorkspaceService {
   }
 
   async confirmRun(input: { adminId: string; runId: string; expectedVersion: number; requestId: string; traceId: string }): Promise<{ run: WorkspaceRunView; confirmation: WorkspaceConfirmationView; outbox: WorkspaceOutboxView }> {
+    await this.assertActorAccess?.(input.adminId);
     const bundle = await this.store.getRun(input.adminId, input.runId);
     if (!bundle) throw new ServiceError(404, 'NOT_FOUND', 'run not found');
     if (bundle.run.status !== 'waiting_confirmation') throw new ServiceError(409, 'CONFLICT', 'run is not waiting for confirmation');
@@ -541,6 +564,7 @@ export class WorkspaceService {
   }
 
   private async confirmCouponCreate(input: { input: { adminId: string; runId: string; requestId: string; traceId: string }; bundle: { run: RunRecord; steps: StepRecord[] }; step: StepRecord; confirmation: WorkspaceConfirmationRecord; scope: string; run: RunRecord; requestId: string; traceId: string }): Promise<{ run: WorkspaceRunView; confirmation: WorkspaceConfirmationView; outbox: WorkspaceOutboxView }> {
+    await this.assertActorAccess?.(input.input.adminId);
     if (!this.coupons) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'coupon service unavailable');
     const execution = input.confirmation.executionPlan;
     const label = typeof execution.label === 'string' ? execution.label : '';
@@ -593,6 +617,7 @@ export class WorkspaceService {
   }
 
   private async confirmAgentSettingsUpdate(input: { input: { adminId: string; runId: string; requestId: string; traceId: string }; bundle: { run: RunRecord; steps: StepRecord[] }; step: StepRecord; confirmation: WorkspaceConfirmationRecord; scope: string; run: RunRecord; requestId: string; traceId: string }): Promise<{ run: WorkspaceRunView; confirmation: WorkspaceConfirmationView; outbox: WorkspaceOutboxView }> {
+    await this.assertActorAccess?.(input.input.adminId);
     if (!this.agentSettings) throw new ServiceError(500, 'WORKSPACE_STORE_ERROR', 'agent settings service unavailable');
     const execution = input.confirmation.executionPlan;
     const patch = execution.patch && typeof execution.patch === 'object' && !Array.isArray(execution.patch) ? execution.patch as never : undefined;
@@ -639,6 +664,7 @@ export class WorkspaceService {
   }
 
   async cancelRun(input: { adminId: string; runId: string; expectedVersion: number; requestId: string; traceId: string }): Promise<{ run: WorkspaceRunView; confirmation: WorkspaceConfirmationView }> {
+    await this.assertActorAccess?.(input.adminId);
     const bundle = await this.store.getRun(input.adminId, input.runId);
     if (!bundle) throw new ServiceError(404, 'NOT_FOUND', 'run not found');
     if (bundle.run.status !== 'waiting_confirmation') throw new ServiceError(409, 'CONFLICT', 'run is not waiting for confirmation');
@@ -665,6 +691,7 @@ export class WorkspaceService {
   }
 
   async retryRun(input: { adminId: string; runId: string; requestId: string; traceId: string }): Promise<{ run: WorkspaceRunView; outbox: WorkspaceOutboxView }> {
+    await this.assertActorAccess?.(input.adminId);
     const bundle = await this.store.getRun(input.adminId, input.runId);
     if (!bundle) throw new ServiceError(404, 'NOT_FOUND', 'run not found');
     const scope = this.executionScope(input.adminId, bundle.run.accountId);
@@ -684,6 +711,7 @@ export class WorkspaceService {
   }
 
   async reconnectRun(input: { adminId: string; runId: string; requestId: string; traceId: string }): Promise<WorkspaceRunView> {
+    await this.assertActorAccess?.(input.adminId);
     const bundle = await this.store.getRun(input.adminId, input.runId);
     if (!bundle) throw new ServiceError(404, 'NOT_FOUND', 'run not found');
     const sessionMessages = await this.store.listWorkspaceMessages(input.adminId, bundle.run.sessionId, 100);

@@ -6,6 +6,7 @@ import type { XianyuMtopClient } from './xianyu-mtop.js';
 import type { ProductAutomationTriggerBatchResult } from './product-automation-trigger.js';
 import { CouponAssetService } from './coupon-assets.js';
 import { encryptCredentialValue, decryptCredentialValue } from './credential-crypto.js';
+import { actorInviteAccess, inviteAccessStatus } from './invite-access.js';
 
 export interface AuthContext {
   admin: AdminRecord;
@@ -17,7 +18,7 @@ export interface AuthContext {
 export class InviteService {
   constructor(private readonly store: Store, private readonly encryptionKey = 'development-only-credential-key-change-me') {}
   async create(input:{adminId:string;requestKey:string;days:number;requestId?:string;traceId?:string}): Promise<{ invite: import('./domain.js').InviteRecord; code: string }> { const actor=await this.store.findAdminById(input.adminId); if(actor?.role!=='admin') throw new ServiceError(403,'FORBIDDEN','仅平台管理员可生成邀请码'); if(!/^[-A-Za-z0-9_]{8,100}$/.test(input.requestKey)) throw new ServiceError(422,'VALIDATION_FAILED','requestKey invalid'); const days=Math.max(1,Math.min(30,Math.trunc(input.days))); const code=createInviteCode(); let invite; try { invite=await this.store.createInvite({createdBy:input.adminId,codeHash:sha256(code),codeCiphertext:encryptCredentialValue(code,this.encryptionKey),codePrefix:code.slice(0,8),requestKey:input.requestKey,expiresAt:new Date(Date.now()+days*86400000).toISOString()}); } catch(error) { if(error instanceof Error && error.message==='INVITE_REQUEST_DUPLICATE') throw new ServiceError(409,'INVITE_REQUEST_DUPLICATE','该请求已生成过邀请码，请换一个请求标识'); throw error; } await this.store.recordAudit({id:createId(),actorType:'admin',actorId:input.adminId,action:'auth.invite.created',targetRef:invite.id,requestId:input.requestId??'invite',traceId:input.traceId??'invite',payloadDigest:digestJson({codePrefix:invite.codePrefix,expiresAt:invite.expiresAt,requestKey:invite.requestKey}),createdAt:new Date().toISOString()}); return {invite:{...invite,code,codeHash:undefined,codeCiphertext:undefined},code}; }
-  async list(adminId:string) { const actor=await this.store.findAdminById(adminId); if(actor?.role!=='admin') throw new ServiceError(403,'FORBIDDEN','仅平台管理员可查看邀请码'); return (await this.store.listInvites(adminId)).map(item=>({ ...item, code:item.codeCiphertext?decryptCredentialValue(item.codeCiphertext,this.encryptionKey):undefined, codeHash:undefined, codeCiphertext:undefined })); }
+  async list(adminId:string) { const actor=await this.store.findAdminById(adminId); if(actor?.role!=='admin') throw new ServiceError(403,'FORBIDDEN','仅平台管理员可查看邀请码'); return (await this.store.listInvites(adminId)).map(item=>({ ...item, accessStatus:inviteAccessStatus(item), code:item.codeCiphertext?decryptCredentialValue(item.codeCiphertext,this.encryptionKey):undefined, codeHash:undefined, codeCiphertext:undefined })); }
   async revoke(adminId:string, inviteId:string, requestId='invite', traceId='invite') { const actor=await this.store.findAdminById(adminId); if(actor?.role!=='admin') throw new ServiceError(403,'FORBIDDEN','仅平台管理员可撤销邀请码'); if(!await this.store.revokeInvite(adminId,inviteId)) throw new ServiceError(404,'NOT_FOUND','邀请码不存在或已使用'); await this.store.recordAudit({id:createId(),actorType:'admin',actorId:adminId,action:'auth.invite.revoked',targetRef:inviteId,requestId,traceId,payloadDigest:digestJson({inviteId}),createdAt:new Date().toISOString()}); }
   async setStatus(adminId:string, inviteId:string, status:'active'|'disabled', requestId='invite', traceId='invite') { const actor=await this.store.findAdminById(adminId); if(actor?.role!=='admin') throw new ServiceError(403,'FORBIDDEN','仅平台管理员可操作邀请码'); if(!await this.store.setInviteStatus(adminId,inviteId,status)) throw new ServiceError(409,'CONFLICT','邀请码不可变更状态'); await this.store.recordAudit({id:createId(),actorType:'admin',actorId:adminId,action:'auth.invite.'+(status==='active'?'enabled':'disabled'),targetRef:inviteId,requestId,traceId,payloadDigest:digestJson({inviteId,status}),createdAt:new Date().toISOString()}); }
   async renew(adminId:string, inviteId:string, days:number, requestId='invite', traceId='invite') { const actor=await this.store.findAdminById(adminId); if(actor?.role!=='admin') throw new ServiceError(403,'FORBIDDEN','仅平台管理员可操作邀请码'); const expiresAt=new Date(Date.now()+Math.max(1,Math.min(365,Math.trunc(days)))*86400000).toISOString(); if(!await this.store.renewInvite(adminId,inviteId,expiresAt)) throw new ServiceError(409,'CONFLICT','邀请码不可续期'); return expiresAt; }
@@ -40,22 +41,49 @@ export class AuthService {
   async login(input: { email: string; password: string }): Promise<{ admin: AdminRecord; session: SessionRecord; csrfToken: string }> {
     const admin = await this.store.findAdminByEmail(input.email);
     if (!admin || !(await verifyPassword(input.password, admin.passwordHash)) || admin.status !== 'active') throw new ServiceError(401, 'UNAUTHENTICATED', 'invalid_credentials');
+    await this.assertActorAccess(admin.id);
     await this.store.touchAdminLogin(admin.id);
     const session = await this.createSession(admin.id);
     return { admin, session, csrfToken: this.sessionTokens.get(session.id)! };
   }
 
   async contextFromSession(sessionId: string | undefined): Promise<AuthContext | undefined> {
-    if (!sessionId) return undefined;
-    const session = await this.store.findSession(sessionId);
-    if (!session || session.revokedAt || !isSessionFresh(session, this.config.sessionIdleMs, this.config.sessionAbsoluteMs)) return undefined;
-    const admin = await this.findAdminById(session.adminId);
-    if (!admin || admin.status !== 'active') return undefined;
+    const access = await this.accessFromSession(sessionId);
+    if (!access) return undefined;
+    const { session, admin } = access;
     await this.store.touchSession(session.id, new Date().toISOString());
     let csrfToken = this.sessionTokens.get(session.id);
     if (!csrfToken) { csrfToken = createToken(); await this.store.rotateSessionCsrf(session.id, sha256(csrfToken)); }
     this.sessionTokens.set(session.id, csrfToken);
     return { admin, session, csrfToken, scopes: await this.store.listScopes(admin.id) };
+  }
+
+  /** Realtime streams must not extend the session's idle lifetime. */
+  async accessFromSession(sessionId: string | undefined): Promise<{ admin: AdminRecord; session: SessionRecord } | undefined> {
+    if (!sessionId) return undefined;
+    const session = await this.store.findSession(sessionId);
+    if (!session || session.revokedAt || !isSessionFresh(session, this.config.sessionIdleMs, this.config.sessionAbsoluteMs)) return undefined;
+    const admin = await this.store.findAdminById(session.adminId);
+    if (!admin || admin.status !== 'active') return undefined;
+    if (await actorInviteAccess(this.store, admin) !== 'active') return undefined;
+    return { admin, session };
+  }
+
+  async assertActorAccess(adminId: string): Promise<void> {
+    const admin = await this.store.findAdminById(adminId);
+    if (!admin || admin.status !== 'active') throw new ServiceError(401, 'UNAUTHENTICATED', 'session admin unavailable');
+    const access = await actorInviteAccess(this.store, admin);
+    if (access !== 'active') throw new ServiceError(403, `INVITE_ACCESS_${access.toUpperCase()}`, access === 'disabled' ? '邀请码已禁用，请联系管理员' : access === 'expired' ? '邀请码已到期，请联系管理员续期' : '账号缺少有效邀请码授权，请联系管理员');
+  }
+
+  /** Logout only needs session identity and CSRF; a revoked grant must not prevent logout. */
+  async contextForLogout(sessionId: string | undefined): Promise<AuthContext | undefined> {
+    if (!sessionId) return undefined;
+    const session = await this.store.findSession(sessionId);
+    if (!session || session.revokedAt || !isSessionFresh(session, this.config.sessionIdleMs, this.config.sessionAbsoluteMs)) return undefined;
+    const admin = await this.store.findAdminById(session.adminId);
+    if (!admin || admin.status !== 'active') return undefined;
+    return { admin, session, csrfToken: this.sessionTokens.get(session.id) ?? '', scopes: [] };
   }
 
   async validateCsrf(context: AuthContext, headers: Record<string, string | undefined>, cookies: Record<string, string>): Promise<void> {
@@ -75,7 +103,6 @@ export class AuthService {
 
   private readonly sessionTokens = new Map<string, string>();
   private async createSession(adminId: string): Promise<SessionRecord> { const csrfToken = createToken(); const issuedAt = Date.now(); const session = await this.store.createSession({ adminId, csrfTokenHash: sha256(csrfToken), expiresAt: new Date(issuedAt + this.config.sessionAbsoluteMs).toISOString() }); this.sessionTokens.set(session.id, csrfToken); return session; }
-  private async findAdminById(adminId: string): Promise<AdminRecord> { const admin = await this.store.findAdminById(adminId); if (!admin) throw new ServiceError(401, 'UNAUTHENTICATED', 'session admin not found'); return admin; }
   private async audit(input: { actorType: string; actorId?: string; action: string; targetRef?: string; requestId: string; traceId: string; payload: unknown; accountId?: string; reason?: string }): Promise<string> { const id = createId(); const event: AuditEventRecord = { id, actorType: input.actorType, actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, reason: input.reason, createdAt: new Date().toISOString() }; await this.store.recordAudit(event); return id; }
 }
 
