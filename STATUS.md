@@ -12,9 +12,10 @@
 - 用户追加要求修复本地问题并一起合入本地main、不推送。幂等恢复策略覆盖内存/PG；卡券20项基线失败已维护修复并纳入正式回归。自动化101、关联39、真实PG恢复5项及PGsmoke、完整API npm test通过。
 - 已同步main 05fc2d7；最终独立组合复审PASS，069外键fixture问题已修正并复审关闭，无未关闭P0/P1/P2。组合完整API npm test、101项自动化、PG5项、账号删除18项及类型/构建检查通过；合并提交 bb265fa，合后101+5复验通过。仅合本地main，未推送、未部署。详见 [修复与验证记录](docs/operations/review-automation-gate-fix-20261025.md)。
 
-## 2026-10-25 逐星智能生产恢复最终验收（PASS）
+## 2026-10-25 逐星智能生产会话核验（历史时点正常，持续恢复未达成）
 
-- 腾讯云生产只读核验：账号状态 `connected`、IM `connected`、风险为空、凭证 `active`。服务 SHA `f9fe016dc34bfd3ff7f66a2f77200654f4cf9ba4`，healthz/readyz 通过，Actions 运行 40114281356 成功。
+- 历史 03:37 +08:00 的腾讯云只读快照为 `connected/active`、风险为空；该快照不是持续恢复证明。原文将带 +08:00 的时间再次加八小时，已更正。
+- 最新 16:11 +08:00 生产只读核验：`verification_required/disconnected`，心跳已过期，风险来源 `im_listener`，凭证仍 `active`。生产 SHA `591ce9682752eea267a504a542182d269c141852`，healthz/readyz 正常；服务健康不代表账号恢复。
 - 正式链路已包含 Ydisks 浏览器挑战恢复、同一浏览器 Token/身份校验、凭证落库和风险 revision 保护；详见 [最终验收记录](docs/operations/account-session-final-verification-20261025.md)。
 - 本次最终核验只读，不写生产数据库；原始请求参数与浏览器记录仍在本地忽略目录，不进入 Git。
 

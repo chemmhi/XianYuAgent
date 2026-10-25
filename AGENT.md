@@ -4,7 +4,7 @@
 
 - 处理逐星智能会话、挑战验证或生产发布前，先阅读 [2026-10-24 会话验证事实与交付边界](docs/operations/account-session-audit-20261024.md) 及其证据校验摘要。
 - 会话 Cookie 快照、MTOP 增量合并及浏览器属性保留的正式修复、测试与发布记录见 [会话 Cookie 修复发布](docs/operations/session-cookie-fix-release-20261024.md)。历史诊断脚本不属于该发布内容。
-- 2026-10-25 最终生产验收记录见 [逐星智能生产恢复最终验收](docs/operations/account-session-final-verification-20261025.md)。当前 main 已包含 Ydisks 原生恢复、凭证落库、身份校验与风险 revision 保护；后续以真实业务状态复核为准。
+- 2026-10-25 生产状态与更正见 [逐星智能生产会话核验](docs/operations/account-session-final-verification-20261025.md)。03:37/03:45/03:49 +08:00 曾观察到正常状态，16:11 +08:00 已再次 verification_required/disconnected；不能据旧 PASS 宣称持续恢复。先读取该文档的最新结论，再核验实时状态和连接心跳。
 - 历史隔离会话成功和腾讯云临时 IM 连接不等于生产服务恢复；生产自动完成新挑战尚未验收。不得把人工操作、HTTP 200 或强制修改状态当作自动成功。
 - 用户已否决直接导入实验凭证；旧写回计划已撤销。全部修改先在本地验证并推送 GitHub；生产代码仅来自 origin/main，通过仓库既定 Actions 和统一脚本部署，不手改服务器源码。
 - 原始资料保持在本地 artifacts/slider-recording 中；提交仅含必要源码/测试/文档，不包含 Cookie、Token、密码或生产数据。
