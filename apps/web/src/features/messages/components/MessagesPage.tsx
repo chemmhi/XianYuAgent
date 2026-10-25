@@ -1,3 +1,4 @@
+import { Form } from '../../../shared/ui/Form';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAccountContext } from '../../../app/account-context';
 import { createMessagesApi, type MessagesApi } from '../api';
@@ -192,7 +193,7 @@ export function MessagesPage({ api: providedApi, active = true }: { api?: Messag
             inboundParticipant={{ displayName: activeConversation?.buyerDisplayName || activeConversation?.buyerRef || '买家', avatarUrl: activeConversation?.buyerAvatarUrl }}
             outboundParticipant={{ displayName: currentAccount.displayName || currentAccount.sellerRef || '我', avatarUrl: currentAccount.avatarUrl }}
           />
-          <form className="messages-composer" onSubmit={(event) => { event.preventDefault(); void handleComposerSubmit(); }}>
+          <Form className="messages-composer" onSubmit={(event) => { event.preventDefault(); void handleComposerSubmit(); }}>
             <div className="messages-composer-inner">
               <div className="messages-composer-shell">
                 {pendingImages.length > 0 && <div className="messages-inline-attachments" aria-label="待发送附件">
@@ -228,7 +229,7 @@ export function MessagesPage({ api: providedApi, active = true }: { api?: Messag
                 </div>
               </div>
             </div>
-          </form>
+          </Form>
           {(chatImagePreviewUrl || attachmentPreviewUrl) && <div className="messages-image-lightbox" role="dialog" aria-modal="true" aria-label="图片预览" onClick={() => { setAttachmentPreviewUrl(null); setChatImagePreviewUrl(null); }}>
             <div className="messages-lightbox-content" onClick={(event) => event.stopPropagation()}>
               <button className="messages-lightbox-close" type="button" aria-label="关闭图片预览" onClick={() => { setAttachmentPreviewUrl(null); setChatImagePreviewUrl(null); }}>×</button>

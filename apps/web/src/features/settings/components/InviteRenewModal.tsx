@@ -1,3 +1,4 @@
+import { Form } from '../../../shared/ui/Form';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { Button } from '../../../shared/ui/Button';
 import { InputField } from '../../../shared/ui/InputField';
@@ -52,7 +53,7 @@ export function InviteRenewModal({ invite, onClose, onRenew }: {
   return <div className="modal-backdrop" role="presentation" onMouseDown={event => {
     if (event.target === event.currentTarget && !submitting.current) onClose();
   }}>
-    <form ref={formRef} className="card modal-card settings-editor invite-renew-modal" role="dialog" aria-modal="true" aria-labelledby="invite-renew-title" aria-describedby="invite-renew-description" aria-busy={busy} onSubmit={event => void submit(event)} onKeyDown={keyDown} noValidate>
+    <Form ref={formRef} className="card modal-card settings-editor invite-renew-modal" role="dialog" aria-modal="true" aria-labelledby="invite-renew-title" aria-describedby="invite-renew-description" aria-busy={busy} onSubmit={event => void submit(event)} onKeyDown={keyDown} noValidate>
       <div className="modal-head">
         <div><p className="eyebrow">Invitation Codes</p><h2 id="invite-renew-title">续期邀请码</h2><p id="invite-renew-description">设置从今天起的有效天数，确认后更新到期日期。</p></div>
         <button className="icon-button" type="button" aria-label="关闭续期弹窗" disabled={busy} onClick={onClose}>×</button>
@@ -60,6 +61,6 @@ export function InviteRenewModal({ invite, onClose, onRenew }: {
       <div className="invite-renew-summary"><span>邀请码 <code>{invite.code}</code></span><span>当前到期日期 <strong>{new Date(invite.expiresAt).toLocaleDateString()}</strong></span></div>
       <InputField fieldClassName="invite-renew-days" error={invalid ? <span id="invite-renew-days-error">有效天数必须是 1-365 的整数</span> : undefined} aria-describedby={invalid ? 'invite-renew-days-error' : undefined} label="有效天数" aria-label="有效天数" type="number" min="1" max="365" step="1" value={days} disabled={busy} aria-invalid={invalid || undefined} onChange={event => { setDays(event.target.value); setInvalid(false); dismissToast('invite-renew-error'); }} hint="可填写 1-365 天" />
       <div className="modal-actions"><Button variant="ghost" type="button" disabled={busy} onClick={onClose}>取消</Button><Button variant="primary" type="submit" disabled={busy}>{busy ? '保存中…' : '确认续期'}</Button></div>
-    </form>
+    </Form>
   </div>;
 }

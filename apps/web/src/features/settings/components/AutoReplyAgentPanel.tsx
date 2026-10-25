@@ -1,3 +1,5 @@
+import { useErrorToast } from '../../../shared/ui/useErrorToast';
+import { Form } from '../../../shared/ui/Form';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Button } from '../../../shared/ui/Button';
 import { InputField } from '../../../shared/ui/InputField';
@@ -10,16 +12,17 @@ type EditableConfig = Omit<AutoReplyAgentConfigVM, 'accountId' | 'updatedByAdmin
 
 export function AutoReplyAgentPanel({ controller, accountName, accountId }: { controller: AutoReplyAgentSettingsController; accountName?: string; accountId?: string }) {
   const { state } = controller;
+  useErrorToast(state.error, `agent-settings-${accountId ?? "none"}`);
   const [draft, setDraft] = useState<EditableConfig | null>(null);
   const [saveToastVisible, setSaveToastVisible] = useState(false);
 
   useEffect(() => {
-    if (state.data) {
+    if (state.data && state.data.accountId === accountId) {
       const { accountId: _accountId, updatedByAdminId, configVersion, configDigest, createdAt, updatedAt, debounceMs: _legacyDebounceMs, ...editable } = state.data;
       void _accountId; void updatedByAdminId; void configVersion; void configDigest; void createdAt; void updatedAt; void _legacyDebounceMs;
       setDraft(editable);
     }
-  }, [state.data]);
+  }, [accountId, state.data]);
 
   useEffect(() => {
     if (state.phase !== 'saved') {
@@ -37,21 +40,22 @@ export function AutoReplyAgentPanel({ controller, accountName, accountId }: { co
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!draft || !state.data) return;
-    await controller.update({ expectedVersion: state.data.configVersion, patch: draft });
+    if (!draft || !state.data || state.data.accountId !== accountId) return;
+    try { await controller.update({ expectedVersion: state.data.configVersion, patch: draft }); }
+    catch { /* The controller exposes the current account failure through Toast. */ }
   }
 
   if (!accountId) return <div className="settings-state empty"><strong>请先在账号管理中设置当前账号</strong><span>自动回复 Agent 配置按闲鱼账号隔离，未选择账号时不会读取或编辑配置。</span></div>;
   if (state.phase === 'loading' || state.phase === 'idle') return <div className="settings-state loading"><span className="settings-spinner" />正在读取自动回复 Agent 配置…</div>;
-  if (state.phase === 'error' && !state.data) return <div className="settings-state error" role="alert"><strong>{state.error}</strong><Button variant="ghost" type="button" onClick={() => void controller.reload()}>重试</Button></div>;
-  if (!draft || !state.data) return null;
+  if (state.phase === 'error' && !state.data) return <div className="settings-state error" role="alert"><strong>配置操作失败，请重试</strong><Button variant="ghost" type="button" onClick={() => void controller.reload()}>重试</Button></div>;
+  if (!draft || !state.data || state.data.accountId !== accountId) return null;
 
   return <>
     {saveToastVisible && <Toast message="自动回复 Agent 配置已保存，下一条消息将读取新配置。" tone="success" onDismiss={() => setSaveToastVisible(false)} />}
     <div className="settings-content" data-auto-reply-agent-panel>
     <article className="card panel settings-hero"><div><p className="eyebrow">自动回复 Agent</p><h2>自动回复 Agent 配置</h2><p>配置只作用于买家侧自动回复 Agent，不进入 Workspace Agent 链路。</p></div><span className="settings-scope-chip">{accountName ?? accountId} · v{state.data.configVersion}</span></article>
-    {state.error && <div className="settings-state error" role="alert"><strong>{state.error}</strong><Button variant="ghost" type="button" onClick={() => void controller.reload()}>刷新配置</Button></div>}
-    <form className="card panel settings-editor auto-reply-agent-editor" onSubmit={(event) => void submit(event)}>
+    {state.error && <div className="settings-state error" role="alert"><strong>配置操作失败，请重试</strong><Button variant="ghost" type="button" onClick={() => void controller.reload()}>刷新配置</Button></div>}
+    <Form className="card panel settings-editor auto-reply-agent-editor" onSubmit={(event) => void submit(event)}>
       <div className="settings-form-grid">
         <label className="settings-checkbox full"><input type="checkbox" checked={draft.enabled} onChange={(event) => setField('enabled', event.target.checked)} />启用自动回复 Agent</label>
         <fieldset className="auto-reply-agent-fields" disabled={!draft.enabled} aria-label="自动回复 Agent 配置项">
@@ -68,7 +72,7 @@ export function AutoReplyAgentPanel({ controller, accountName, accountId }: { co
         </fieldset>
       </div>
       <div className="modal-actions"><Button variant="primary" type="submit" disabled={state.phase === 'submitting'}>{state.phase === 'submitting' ? '保存中…' : '保存自动回复 Agent 配置'}</Button></div>
-    </form>
+    </Form>
     </div>
   </>;
 }

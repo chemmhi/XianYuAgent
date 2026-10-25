@@ -1,3 +1,4 @@
+import { Form } from '../../../shared/ui/Form';
 import { useState, type FormEvent } from 'react';
 import { Button } from '../../../shared/ui/Button';
 import { InputField } from '../../../shared/ui/InputField';
@@ -27,7 +28,7 @@ export function UserRegisterForm({ busy, onSubmit, onBack }: {
     catch { /* AuthGate reports request errors through the shared Toast. */ }
   }
 
-  return <form className="auth-form" onSubmit={submit}>
+  return <Form className="auth-form" onSubmit={submit}>
     <div className="auth-form-heading"><p className="eyebrow">Invitation Registration</p><h1>注册 FishAgent</h1><p>请输入管理员提供的邀请码。注册后只能查看和管理你自己绑定的闲鱼账号。</p></div>
     <InputField label="邀请码" value={inviteCode} onChange={event => setInviteCode(event.target.value)} required autoComplete="one-time-code" />
     <InputField label="昵称" value={displayName} onChange={event => setDisplayName(event.target.value)} required autoComplete="name" />
@@ -36,5 +37,5 @@ export function UserRegisterForm({ busy, onSubmit, onBack }: {
     <InputField label="确认密码" fieldClassName="auth-confirm-field" error={passwordMismatch ? <span id="register-password-error">两次输入的密码不一致</span> : undefined} aria-describedby={passwordMismatch ? 'register-password-error' : undefined} name="confirmPassword" type="password" value={confirm} onChange={event => { setConfirm(event.target.value); clearValidation(); }} aria-invalid={passwordMismatch || undefined} required minLength={8} autoComplete="new-password" />
     <Button variant="primary" className="auth-submit" type="submit" disabled={busy}>{busy ? '注册中…' : '注册'}</Button>
     <Button variant="ghost" type="button" onClick={() => { clearValidation(); onBack(); }}>返回登录</Button>
-  </form>;
+  </Form>;
 }

@@ -65,4 +65,14 @@ describe('field constraint validation', () => {
     expect(inputFocus).toHaveBeenCalledOnce();
     expect(selectFocus).not.toHaveBeenCalled();
   });
+  it('opens nested advanced sections before focusing an invalid field', () => {
+    const focus = vi.fn();
+    const outer = { tagName: 'DETAILS', parentElement: null, setAttribute: vi.fn() };
+    const inner = { tagName: 'DETAILS', parentElement: outer, setAttribute: vi.fn() };
+    focusValidationControl(control({ parentElement: inner, focus }));
+    expect(inner.setAttribute).toHaveBeenCalledWith('open', '');
+    expect(outer.setAttribute).toHaveBeenCalledWith('open', '');
+    expect(focus).toHaveBeenCalledOnce();
+  });
+
 });

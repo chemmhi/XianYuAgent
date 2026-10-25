@@ -8,5 +8,3 @@
 .auth-state { justify-items: start; }
 
 .auth-form .ui-input-control[aria-invalid="true"]{border-color:var(--danger);box-shadow:0 0 0 2px rgba(180,35,24,.1)}
-
-.auth-confirm-field{position:relative;padding-bottom:20px}.auth-confirm-field .ui-field-error{position:absolute;left:0;bottom:0;line-height:16px}

@@ -9,8 +9,10 @@ function createId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `publish-image-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-export function ProductPublishComposer({ description, attachments, disabled, optimizing, onDescriptionChange, onAttachmentsChange, onOptimize }: {
+export function ProductPublishComposer({ description, attachments, invalid, errorId, disabled, optimizing, onDescriptionChange, onAttachmentsChange, onOptimize }: {
   description: string;
+  invalid?: boolean;
+  errorId?: string;
   attachments: PublishAttachment[];
   disabled?: boolean;
   optimizing?: boolean;
@@ -57,7 +59,7 @@ export function ProductPublishComposer({ description, attachments, disabled, opt
           <button className="product-publish-attachment-remove" type="button" aria-label={`移除商品图片 ${index + 1}`} onClick={() => removeAttachment(attachment.id)} disabled={disabled}>×</button>
         </div>)}
       </div>}
-      <div className="product-publish-composer-editor"><TextAreaField aria-label="商品描述" className="product-publish-description-control" value={description} maxLength={2000} disabled={disabled} placeholder="像聊天一样输入商品描述，支持直接上传或粘贴图片。" onChange={(event) => onDescriptionChange(event.target.value)} onPaste={(event) => { const files = clipboardImageFiles(event.clipboardData); if (files.length === 0) return; event.preventDefault(); appendFiles(files); }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) event.preventDefault(); }} /></div>
+      <div className="product-publish-composer-editor"><TextAreaField aria-invalid={invalid} aria-describedby={errorId} aria-label="商品描述" className="product-publish-description-control" value={description} maxLength={2000} disabled={disabled} placeholder="像聊天一样输入商品描述，支持直接上传或粘贴图片。" onChange={(event) => onDescriptionChange(event.target.value)} onPaste={(event) => { const files = clipboardImageFiles(event.clipboardData); if (files.length === 0) return; event.preventDefault(); appendFiles(files); }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) event.preventDefault(); }} /></div>
       <div className="product-publish-composer-footer">
         <div className="product-publish-composer-tools">
           <button className="product-publish-upload" type="button" aria-label="添加商品图片" onClick={() => inputRef.current?.click()} disabled={disabled || attachments.length >= MAX_IMAGES}>+</button>

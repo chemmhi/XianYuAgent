@@ -1,3 +1,5 @@
+import { Form } from '../../../shared/ui/Form';
+import { useErrorToast } from '../../../shared/ui/useErrorToast';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { SelectField } from '../../../shared/ui/SelectField';
 import { Button } from '../../../shared/ui/Button';
@@ -89,6 +91,9 @@ export function OpenAISettingsPanel(props: { accountId: string; accountName?: st
   const [modelPhase, setModelPhase] = useState<Record<OpenAIConfigRole, ModelLoadPhase>>({ primary: 'idle', backup: 'idle' });
   const modelLoadedKey = useRef<Record<OpenAIConfigRole, string | undefined>>({ primary: undefined, backup: undefined });
   const modelRequestId = useRef<Record<OpenAIConfigRole, number>>({ primary: 0, backup: 0 });
+  useErrorToast(testError.primary, `openai-primary-${props.accountId}`);
+  useErrorToast(testError.backup, `openai-backup-${props.accountId}`);
+  useErrorToast(routingError, `openai-routing-${props.accountId}`);
   const modelRequesting = useRef<Record<OpenAIConfigRole, boolean>>({ primary: false, backup: false });
 
   useEffect(() => {
@@ -249,7 +254,7 @@ export function OpenAISettingsPanel(props: { accountId: string; accountName?: st
             <Button variant="ghost" size="small" className={runtime?.mode === 'manual_primary' ? 'active' : ''} type="button" disabled={routingBusy || !runtime || runtime.feature_enabled === false} onClick={() => void updateRouting('manual_primary')}>主优先</Button>
             <Button variant="ghost" size="small" className={runtime?.mode === 'manual_backup' ? 'active' : ''} type="button" disabled={routingBusy || !runtime || runtime.feature_enabled === false} onClick={() => void updateRouting('manual_backup')}>备优先</Button>
           </div></div>
-          {routingError && <div className="openai-inline-error" role="alert">{routingError}</div>}
+
         </section>
         <div className="two-grid nested openai-config-grid">
           {(['primary', 'backup'] as const).map((role) => <OpenAIConfigCard key={role} form={forms[role]} role={role} busy={busyRole === role} testing={testRole === role} error={testError[role]} providerModels={forms[role].id ? modelOptions[role] : localModels[role]} providerPhase={forms[role].id ? modelPhase[role] : modelPhase[role]} onChange={(patch) => update(role, patch)} onTest={() => void test(forms[role])} onSave={() => void save(forms[role])} onLoadModels={() => void loadModels(forms[role])} />)}
@@ -268,23 +273,28 @@ function OpenAIConfigCard(props: { form: ConfigForm; role: OpenAIConfigRole; bus
   const modelPlaceholder = props.providerPhase === 'loading' ? '正在读取提供商模型…' : props.providerPhase === 'empty' ? '提供商未返回可用模型' : props.providerPhase === 'error' ? '模型读取失败，请重试' : props.providerModels.length > 0 ? '选择提供商模型' : '展开以读取模型';
   const reasoningOptions = reasoningOptionsFor(props.form.model, props.providerModels);
   const modelIds = props.providerModels.map((item) => item.id);
-  return <section className="model-box openai-model-box" data-openai-config={props.role}>
+  return <Form className="model-box openai-model-box" data-openai-config={props.role} onSubmit={event => {
+    event.preventDefault();
+    if (props.busy) return;
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    if (submitter?.getAttribute('value') === 'test') props.onTest(); else props.onSave();
+  }}>
     <div className="openai-model-head"><div><h3>{title}</h3><p>{props.role === 'primary' ? '优先使用，失败时自动切换备用 Provider。' : '主配置异常时自动接管请求。'}</p></div><span className={`status-pill ${statusTone}`}>{status}</span></div>
     <div className="openai-form-rows">
-      <InputField label="Provider" value={props.form.provider} onChange={(event) => props.onChange({ provider: event.target.value })} placeholder="OpenAI Compatible" />
-      <InputField label="Base URL" value={props.form.baseUrl} onChange={(event) => props.onChange({ baseUrl: event.target.value })} placeholder="https://api.example.com/v1" />
-      <InputField label="API Key" type={props.form.apiKeyMasked ? 'text' : 'password'} value={props.form.apiKeyMasked ? (props.form.apiKeyHint ?? '') : props.form.apiKey} onFocus={() => { if (props.form.apiKeyMasked) props.onChange({ apiKey: '', apiKeyMasked: false }); }} onChange={(event) => props.onChange({ apiKey: event.target.value, apiKeyMasked: false })} placeholder={props.form.id ? '留空保持当前密钥' : '输入新的 API Key'} autoComplete="new-password" />
-      <SelectField label="Model" className="openai-model-field" data-openai-model-select="true" aria-label="Model" value={props.form.model} onFocus={props.onLoadModels} onClick={props.onLoadModels} onChange={(event) => { const model = event.target.value; props.onChange({ model, reasoningEffort: reasoningOptionsFor(model, props.providerModels).includes(props.form.reasoningEffort ?? '') ? props.form.reasoningEffort : '' }); }} options={[{ value: '', label: modelPlaceholder }, ...(props.form.model && !modelIds.includes(props.form.model) ? [{ value: props.form.model, label: props.form.model }] : []), ...props.providerModels.map((model) => ({ value: model.id, label: model.id }))]} />
+      <InputField label="Provider" required value={props.form.provider} onChange={(event) => props.onChange({ provider: event.target.value })} placeholder="OpenAI Compatible" />
+      <InputField label="Base URL" type="url" pattern="https?://.+" required value={props.form.baseUrl} onChange={(event) => props.onChange({ baseUrl: event.target.value })} placeholder="https://api.example.com/v1" />
+      <InputField label="API Key" required={!props.form.id} type={props.form.apiKeyMasked ? 'text' : 'password'} value={props.form.apiKeyMasked ? (props.form.apiKeyHint ?? '') : props.form.apiKey} onFocus={() => { if (props.form.apiKeyMasked) props.onChange({ apiKey: '', apiKeyMasked: false }); }} onChange={(event) => props.onChange({ apiKey: event.target.value, apiKeyMasked: false })} placeholder={props.form.id ? '留空保持当前密钥' : '输入新的 API Key'} autoComplete="new-password" />
+      <SelectField label="Model" required className="openai-model-field" data-openai-model-select="true" aria-label="Model" value={props.form.model} onFocus={props.onLoadModels} onClick={props.onLoadModels} onChange={(event) => { const model = event.target.value; props.onChange({ model, reasoningEffort: reasoningOptionsFor(model, props.providerModels).includes(props.form.reasoningEffort ?? '') ? props.form.reasoningEffort : '' }); }} options={[{ value: '', label: modelPlaceholder }, ...(props.form.model && !modelIds.includes(props.form.model) ? [{ value: props.form.model, label: props.form.model }] : []), ...props.providerModels.map((model) => ({ value: model.id, label: model.id }))]} />
       <details className="openai-advanced-settings"><summary>高级设置</summary><div className="openai-advanced-rows">
         {reasoningOptions.length > 0 && <SelectField label="思考程度" className="openai-reasoning-field" value={props.form.reasoningEffort ?? ''} onChange={(event) => props.onChange({ reasoningEffort: event.target.value })} options={[{ value: '', label: '使用提供商默认' }, ...reasoningOptions.map((option) => ({ value: option, label: option }))]} />}
         <SelectField label="恢复探针" value={props.form.probeStrategy} onChange={(event) => props.onChange({ probeStrategy: event.target.value as ConfigForm['probeStrategy'] })} options={[{ value: 'models', label: 'GET /models' }, { value: 'completion', label: '最小 completion' }, { value: 'health_url', label: '健康检查 URL' }, { value: 'none', label: '不自动探测' }]} />
-        <InputField label="探针超时(ms)" type="number" value={String(props.form.probeTimeoutMs)} onChange={(event) => props.onChange({ probeTimeoutMs: Math.max(500, Number(event.target.value) || 10_000) })} />
-        {props.form.probeStrategy === 'health_url' && <InputField label="健康检查 URL" value={props.form.probeUrl ?? ''} onChange={(event) => props.onChange({ probeUrl: event.target.value })} placeholder="https://api.example.com/health" />}
+        <InputField label="探针超时(ms)" type="number" min={500} max={60000} step={1} required value={String(props.form.probeTimeoutMs)} onChange={(event) => props.onChange({ probeTimeoutMs: Number(event.target.value) })} />
+        {props.form.probeStrategy === 'health_url' && <InputField label="健康检查 URL" type="url" pattern="https?://.+" required value={props.form.probeUrl ?? ''} onChange={(event) => props.onChange({ probeUrl: event.target.value })} placeholder="https://api.example.com/health" />}
       </div></details>
-      {props.error && <div className="openai-inline-error" role="alert">{props.error}</div>}
+
     </div>
-    <div className="card-actions"><Button variant="ghost" type="button" onClick={props.onTest} disabled={props.busy || !props.form.provider || !props.form.baseUrl || !props.form.model || (!props.form.id && !props.form.apiKey)}>{props.testing ? '测试中…' : '测试连通性'}</Button><Button variant="primary" type="button" onClick={props.onSave} disabled={props.busy || !props.form.provider || !props.form.baseUrl || !props.form.model || (!props.form.id && !props.form.apiKey)}>{props.busy ? '保存中…' : '保存'}</Button></div>
-  </section>;
+    <div className="card-actions"><Button variant="primary" style={{ order: 2 }} type="submit" name="action" value="save" disabled={props.busy}>{props.busy ? '保存中…' : '保存'}</Button><Button variant="ghost" style={{ order: 1 }} type="submit" name="action" value="test" disabled={props.busy}>{props.testing ? '测试中…' : '测试连通性'}</Button></div>
+  </Form>;
 }
 
 function fromView(item: OpenAIConfigVM): ConfigForm {

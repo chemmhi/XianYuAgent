@@ -23,6 +23,11 @@ export function isValidatedControl(value: unknown): value is ValidatedControl {
 }
 
 export function focusValidationControl(control: ValidatedControl): void {
+  let ancestor = control.parentElement;
+  while (ancestor) {
+    if (ancestor.tagName === 'DETAILS') ancestor.setAttribute('open', '');
+    ancestor = ancestor.parentElement;
+  }
   const trigger = control.type === 'select-one' || control.type === 'select-multiple'
     ? control.parentElement?.querySelector<HTMLButtonElement>('[data-validation-trigger]') : null;
   (trigger ?? control).focus();
