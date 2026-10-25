@@ -15,6 +15,8 @@ import type { XianyuImOwnerClient } from './xianyu-im-owner-rpc.js';
 import { planXianyuChatRefresh } from './xianyu-chat-refresh-policy.js';
 import { refreshXianyuChatRequests } from './xianyu-chat-refresh.js';
 import { recheckVerificationRisks } from './xianyu-verification-risk-recheck.js';
+import { recoverVerificationReads } from './xianyu-verification-read-recovery.js';
+import { isImVerificationSource } from './xianyu-verification-request.js';
 
 interface ExternalPage {
   hasMore: boolean;
@@ -48,6 +50,8 @@ export class XianyuImService {
   private readonly tokenRefreshInFlight = new Map<string, Promise<CredentialRecord>>();
   private readonly verificationRecoveryInFlight = new Map<string, Promise<void>>();
   private readonly verificationRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly verificationRecoverySignals = new Map<string, Set<string>>();
+  private readonly verificationRecoverySignalVersions = new Map<string, number>();
   private closed = false;
   private readonly deletedAccounts = new Set<string>();
   private readonly identityCache = new Map<string, { buyerDisplayName?: string; buyerAvatarUrl?: string }>();
@@ -337,7 +341,16 @@ export class XianyuImService {
   /** Wake recovery after a committed risk signal without blocking its request. */
   requestVerificationRecovery(adminId: string, accountId: string, source: string): void {
     const key = `${adminId}:${accountId}`;
-    if (this.closed || this.deletedAccounts.has(accountId) || !this.verificationBrowser?.enabled || this.verificationRecoveryInFlight.has(key)) return;
+    if (this.closed || this.deletedAccounts.has(accountId) || !this.verificationBrowser?.enabled) return;
+    if (this.verificationRecoveryInFlight.has(key)) {
+      // Token refresh reports its own failure while this recovery owns it.
+      if (isImVerificationSource(source)) return;
+      const signals = this.verificationRecoverySignals.get(key) ?? new Set<string>();
+      signals.add(source);
+      this.verificationRecoverySignals.set(key, signals);
+      this.verificationRecoverySignalVersions.set(key, (this.verificationRecoverySignalVersions.get(key) ?? 0) + 1);
+      return;
+    }
     const retryInMs = (this.verificationRetryAfter.get(key) ?? 0) - Date.now();
     if (retryInMs > 0) {
       if (!this.verificationRecoveryTimers.has(key)) {
@@ -353,6 +366,7 @@ export class XianyuImService {
     const pendingTimer = this.verificationRecoveryTimers.get(key);
     if (pendingTimer) clearTimeout(pendingTimer);
     this.verificationRecoveryTimers.delete(key);
+    const attemptedRevisions = new Map<string, string>();
     const task = Promise.resolve().then(async () => {
       // A bootstrap failure callback must never wait on its own connection.
       await Promise.allSettled([this.clientInFlight.get(key), this.tokenRefreshInFlight.get(key), this.credentialRefreshInFlight.get(key)]);
@@ -361,12 +375,16 @@ export class XianyuImService {
       if (!account || account.status === 'disabled' || (!account.riskEpisode && account.status !== 'verification_required')) return;
       const credential = await this.store.getCredential(adminId, accountId);
       if (this.closed || credential?.status !== 'active' || !credential.cookieHeader) return;
+      for (const risk of await this.store.listAccountVerificationRisks(adminId, accountId)) attemptedRevisions.set(risk.source, risk.revision);
       console.info(JSON.stringify({ component: 'xianyu-im', event: 'verification_recovery_started', adminId, accountId, source }));
       // A prior browser recovery may already have restored this API. Recheck
       // before forcing another Token exchange/challenge against a healthy IM.
       await recheckVerificationRisks(this.store, this.mtop, adminId, accountId);
+      await recoverVerificationReads(this.store, this.mtop, this.verificationBrowser!, adminId, accountId);
       let remaining = await this.store.getAccount(adminId, accountId);
-      if (remaining?.riskEpisode || remaining?.status === 'verification_required') {
+      const remainingRisks = await this.store.listAccountVerificationRisks(adminId, accountId);
+      if ((remaining?.riskEpisode || remaining?.status === 'verification_required')
+        && remainingRisks.some(risk => isImVerificationSource(risk.source))) {
         await this.refreshActiveCredential(adminId, accountId, { forceCredentialRefresh: true });
         await recheckVerificationRisks(this.store, this.mtop, adminId, accountId);
         remaining = await this.store.getAccount(adminId, accountId);
@@ -379,15 +397,37 @@ export class XianyuImService {
         remaining = await this.store.getAccount(adminId, accountId);
       }
       if (remaining?.riskEpisode || remaining?.status === 'verification_required') {
+        if (!remainingRisks.some(risk => this.verificationRecoverySignals.get(key)?.has(risk.source)
+          && attemptedRevisions.get(risk.source) !== risk.revision)) {
+          this.verificationRetryAfter.set(key, Date.now() + 30_000);
+        }
         console.warn(JSON.stringify({ component: 'xianyu-im', event: 'verification_recovery_pending', adminId, accountId,
           source, riskSource: remaining.riskSource, errorCode: 'XIANYU_VERIFICATION_RISK_UNRESOLVED' }));
         return;
       }
       console.info(JSON.stringify({ component: 'xianyu-im', event: 'verification_recovery_completed', adminId, accountId, source }));
     }).catch(error => {
+      this.verificationRetryAfter.set(key, Date.now() + 30_000);
       console.warn(JSON.stringify({ component: 'xianyu-im', event: 'verification_recovery_failed', adminId, accountId, errorCode: recoveryErrorCode(error) }));
-    }).finally(() => {
-      if (this.verificationRecoveryInFlight.get(key) === task) this.verificationRecoveryInFlight.delete(key);
+    }).finally(async () => {
+      let pendingSource: string | undefined;
+      try {
+        if (!this.closed && this.verificationRecoverySignals.has(key)) {
+          const generation = this.verificationRecoverySignalVersions.get(key);
+          const pending = await this.store.listAccountVerificationRisks(adminId, accountId);
+          pendingSource = pending.find(risk => this.verificationRecoverySignals.get(key)?.has(risk.source)
+            && attemptedRevisions.get(risk.source) !== risk.revision)?.source;
+          if (!pendingSource && generation !== this.verificationRecoverySignalVersions.get(key)) {
+            pendingSource = this.verificationRecoverySignals.get(key)?.values().next().value;
+          }
+        }
+      } catch { console.warn(JSON.stringify({ component: 'xianyu-verification', event: 'pending_risk_scan_failed', accountId })); }
+      finally {
+        if (this.verificationRecoveryInFlight.get(key) === task) this.verificationRecoveryInFlight.delete(key);
+        this.verificationRecoverySignals.delete(key);
+        this.verificationRecoverySignalVersions.delete(key);
+      }
+      if (!this.closed && pendingSource) this.requestVerificationRecovery(adminId, accountId, pendingSource);
     });
     this.verificationRecoveryInFlight.set(key, task);
   }

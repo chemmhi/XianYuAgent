@@ -169,6 +169,7 @@ test('reports final MTOP validation failures to the account health callback', as
         errorCode: 'ACCOUNT_VALIDATION_REQUIRED',
         message: 'FAIL_SYS_USER_VALIDATE::请完成验证',
         accountInvalid: true,
+        recoveryRequest: { kind: 'mtop_read', api: 'mtop.idle.web.xyh.item.list', version: '1.0', data: {}, extraParams: {}, referer: 'https://www.goofish.com/im' },
       },
     ]);
   } finally {

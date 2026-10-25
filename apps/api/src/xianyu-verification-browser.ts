@@ -9,6 +9,8 @@ import { acquireXianyuVerificationProfileLock } from './xianyu-verification-prof
 import { XianyuSliderSolver, type XianyuSliderMode } from './xianyu-slider-solver.js';
 import { fetchXianyuBrowserImToken, type XianyuBrowserImToken, type XianyuBrowserImTokenRequest } from './xianyu-browser-im-token.js';
 import { observeXianyuSliderVerdicts } from './xianyu-slider-verdict.js';
+import { verifyXianyuBrowserRead } from './xianyu-browser-mtop.js';
+import type { XianyuReadRequest } from './xianyu-verification-request.js';
 
 export type XianyuVerificationBrowserMode = 'disabled' | 'launch';
 
@@ -31,6 +33,7 @@ export interface XianyuVerificationBrowserResult {
   finalUrl: string;
   cookieSnapshot: XianyuCookieSnapshot;
   imToken?: XianyuBrowserImToken;
+  verifiedRead?: { api: string; userId: string };
 }
 
 const DEFAULT_MAX_WAIT_MS = 3 * 60_000;
@@ -108,12 +111,13 @@ export class XianyuVerificationBrowser {
     maxWaitMs?: number;
     pollIntervalMs?: number;
     imTokenRequest?: XianyuBrowserImTokenRequest;
+    readRequest?: { request: XianyuReadRequest; expectedUserId: string };
   }): Promise<XianyuVerificationBrowserResult> {
     if (this.mode === 'disabled') throw new Error('XIANYU_VERIFICATION_BROWSER_DISABLED');
     assertVerificationUrl(input.verificationUrl);
     const profileDir = await this.resolveProfileDir(input.profileKey);
     const profileLockKey = normalizeProfileLockKey(profileDir);
-    const verificationKey = `${profileLockKey}\u0000${input.verificationUrl}\u0000${JSON.stringify(input.initialCookieSnapshot ?? [])}\u0000${JSON.stringify(input.imTokenRequest ?? null)}`;
+    const verificationKey = `${profileLockKey}\u0000${input.verificationUrl}\u0000${JSON.stringify(input.initialCookieSnapshot ?? [])}\u0000${JSON.stringify(input.imTokenRequest ?? null)}\u0000${JSON.stringify(input.readRequest ?? null)}`;
     const active = activeVerifications.get(verificationKey);
     if (active) return active;
 
@@ -148,6 +152,7 @@ export class XianyuVerificationBrowser {
     maxWaitMs?: number;
     pollIntervalMs?: number;
     imTokenRequest?: XianyuBrowserImTokenRequest;
+    readRequest?: { request: XianyuReadRequest; expectedUserId: string };
   }, profileDir: string): Promise<XianyuVerificationBrowserResult> {
     const maxWaitMs = Math.max(250, Math.floor(input.maxWaitMs ?? this.maxWaitMs));
     const pollIntervalMs = Math.max(25, Math.floor(input.pollIntervalMs ?? this.pollIntervalMs));
@@ -194,7 +199,7 @@ export class XianyuVerificationBrowser {
               // account identity in this same Chrome session. A challenge may
               // keep its URL or reuse x5sec even after code=0; neither should
               // block that authoritative business check for another 3 minutes.
-              if (input.imTokenRequest) return;
+              if (input.imTokenRequest || input.readRequest) return;
             }
           }
 
@@ -224,9 +229,12 @@ export class XianyuVerificationBrowser {
           const imToken = input.imTokenRequest
             ? await fetchXianyuBrowserImToken(context, page, input.imTokenRequest, solveChallenge)
             : undefined;
-          if (!input.imTokenRequest) await solveChallenge(input.verificationUrl);
+          const verifiedRead = input.readRequest
+            ? await verifyXianyuBrowserRead(context, page, input.readRequest.request, input.readRequest.expectedUserId, solveChallenge)
+            : undefined;
+          if (!input.imTokenRequest && !input.readRequest) await solveChallenge(input.verificationUrl);
           return { finalUrl: page.url(), cookieSnapshot: dropStaleCaptchaChallengeCookies(mapCookies(await context.cookies())),
-            ...(imToken ? { imToken } : {}) };
+            ...(imToken ? { imToken } : {}), ...(verifiedRead ? { verifiedRead } : {}) };
         } finally { await verdicts.close(); }
       } finally {
         await closeVerificationPages(context);
