@@ -10,6 +10,7 @@ import { XianyuSliderSolver, type XianyuSliderMode } from './xianyu-slider-solve
 import { fetchXianyuBrowserImToken, type XianyuBrowserImToken, type XianyuBrowserImTokenRequest } from './xianyu-browser-im-token.js';
 import { observeXianyuSliderVerdicts } from './xianyu-slider-verdict.js';
 import { verifyXianyuBrowserRead } from './xianyu-browser-mtop.js';
+import { browserStageError } from './xianyu-browser-challenge-handoff.js';
 import type { XianyuReadRequest } from './xianyu-verification-request.js';
 
 export type XianyuVerificationBrowserMode = 'disabled' | 'launch';
@@ -173,12 +174,16 @@ export class XianyuVerificationBrowser {
         await context.addInitScript({ content: buildAutomationEvasionScript() });
         const page = await this.reuseVerificationPage(context);
         const initialSnapshot = normalizeCookieSnapshot(input.initialCookieSnapshot) ?? [];
-        if (initialSnapshot.length > 0) await context.addCookies(toBrowserCookies(initialSnapshot, input.verificationUrl));
+        if (initialSnapshot.length > 0) {
+          try { await context.addCookies(toBrowserCookies(initialSnapshot, input.verificationUrl)); }
+          catch (error) { throw browserStageError('XIANYU_VERIFICATION', 'INITIAL_COOKIES', error); }
+        }
         const verdicts = observeXianyuSliderVerdicts(page);
         const solveChallenge = async (verificationUrl: string): Promise<void> => {
           assertVerificationUrl(verificationUrl);
           const priorSnapshot = mapCookies(await context.cookies());
-          await page.goto(verificationUrl, { waitUntil: 'domcontentloaded', timeout: maxWaitMs });
+          try { await page.goto(verificationUrl, { waitUntil: 'domcontentloaded', timeout: maxWaitMs }); }
+          catch (error) { throw browserStageError('XIANYU_VERIFICATION', 'CHALLENGE_NAVIGATION', error); }
           await waitForPageContent(page, Math.min(maxWaitMs, 12_000), pollIntervalMs);
           await sleep(750);
 
@@ -195,8 +200,8 @@ export class XianyuVerificationBrowser {
               console.warn(JSON.stringify({ component: 'xianyu-verification', event: 'slider_manual_fallback_wait', reason }));
             } else {
               console.info(JSON.stringify({ component: 'xianyu-verification', event: 'slider_auto_solve_succeeded', strategy: 'ydisks', attempts: sliderResult.attempts, distance: sliderResult.distance, trajectoryPoints: sliderResult.trajectoryPoints, protocolCodes: sliderResult.protocolCodes }));
-              // The native caller immediately re-requests Token and verifies
-              // account identity in this same Chrome session. A challenge may
+              // The native transport waits for page session callbacks before
+              // re-requesting the API and verifying identity. A challenge may
               // keep its URL or reuse x5sec even after code=0; neither should
               // block that authoritative business check for another 3 minutes.
               if (input.imTokenRequest || input.readRequest) return;

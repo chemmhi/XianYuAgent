@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { browserStageError, completeBrowserChallenge } from './xianyu-browser-challenge-handoff.js';
 import type { XianyuVerificationContext, XianyuVerificationPage } from './xianyu-browser-port.js';
 import { inspectXianyuVerification } from './xianyu-verification-response.js';
 import { resolveVerificationReadRequest, type XianyuReadRequest } from './xianyu-verification-request.js';
@@ -11,13 +12,23 @@ export function createBrowserMtopTransport(context: XianyuVerificationContext, p
   let challenges = 0;
   return async (request: BrowserRequest): Promise<Record<string, unknown>> => {
     const prepare = async () => {
-      await page.goto(`${new URL(request.referer).origin}/robots.txt`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-      const stale = (await context.cookies()).filter(cookie => ['x5secdata', 'x5sectag', 'x5step'].includes(cookie.name));
-      if (stale.length) await context.addCookies(stale.map(cookie => ({ ...cookie, value: '', expires: 1 })));
+      const origin = new URL(request.referer).origin;
+      // A challenge callback can stay on the same origin. Leaving that page
+      // immediately after code=0 aborts its session exchange.
+      if (!page.url().startsWith(`${origin}/`)) {
+        try { await page.goto(`${origin}/robots.txt`, { waitUntil: 'domcontentloaded', timeout: 30_000 }); }
+        catch (error) { throw browserStageError(prefix, 'PREPARE_NAVIGATION', error); }
+      }
+      try {
+        const stale = (await context.cookies()).filter(cookie => ['x5secdata', 'x5sectag', 'x5step'].includes(cookie.name));
+        if (stale.length) await context.addCookies(stale.map(cookie => ({ ...cookie, value: '', expires: 1 })));
+      } catch (error) { throw browserStageError(prefix, 'PREPARE_COOKIES', error); }
     };
     await prepare();
     for (let attempt = 0; attempt < 6; attempt++) {
-      const cookieHeader = await page.evaluate(() => document.cookie);
+      let cookieHeader: string;
+      try { cookieHeader = await page.evaluate(() => document.cookie); }
+      catch (error) { throw browserStageError(prefix, 'READ_COOKIES', error); }
       const token = cookieHeader.split(';').map(value => value.trim()).find(value => value.startsWith('_m_h5_tk='))
         ?.slice('_m_h5_tk='.length).split('_', 1)[0] ?? '';
       const data = JSON.stringify(request.data);
@@ -57,7 +68,7 @@ export function createBrowserMtopTransport(context: XianyuVerificationContext, p
         if (url.protocol !== 'https:' || !/(^|\.)goofish\.com$/.test(url.hostname) || url.username || url.password || url.port) throw new Error(`${prefix}_CHALLENGE_URL_INVALID`);
         if (challenges >= 2 || attempt >= 5) throw new Error(`${prefix}_CHALLENGE_UNRESOLVED`);
         challenges++;
-        await onChallenge(url.href);
+        await completeBrowserChallenge(page, () => onChallenge(url.href), prefix);
         await prepare();
         continue;
       }

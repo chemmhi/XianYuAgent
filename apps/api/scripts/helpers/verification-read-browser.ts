@@ -8,6 +8,7 @@ export function readBrowserFixture(api: string, userId: string, outcome = 'succe
   const base = createPatchrightVerificationBrowserFactory();
   const requests: string[] = [];
   let slides = 0;
+  let finishes = 0;
   let identityPassed = false;
   const factory: XianyuVerificationBrowserFactory = { launchPersistentContext: async options => {
     const context = await base.launchPersistentContext(options);
@@ -25,7 +26,8 @@ export function readBrowserFixture(api: string, userId: string, outcome = 'succe
           button.addEventListener('mousedown',e=>{held=true;start=e.clientX;});
           document.addEventListener('mousemove',e=>{if(held){distance=e.clientX-start;trusted+=Number(e.isTrusted);button.style.left=Math.min(258,Math.max(0,distance))+'px';}});
           document.addEventListener('mouseup',()=>{held=false;});
-          button.addEventListener('click',async()=>{if(distance>=258&&!submitted){submitted=true;await fetch('/slide?kind=${url.searchParams.get('kind')}',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({distance,trusted})});}});
+          button.addEventListener('click',async()=>{if(distance>=258&&!submitted){submitted=true;const verdict=await (await fetch('/slide?kind=${url.searchParams.get('kind')}',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({distance,trusted})})).json();
+          if(verdict.code===0&&${JSON.stringify(outcome.startsWith('async-'))})setTimeout(()=>{${outcome === 'async-navigation' ? "location.href='/finish'" : "void fetch('/finish')"}},50);}});
           </script>` });
         return;
       }
@@ -35,7 +37,15 @@ export function readBrowserFixture(api: string, userId: string, outcome = 'succe
         assert.ok(request.postDataJSON().distance >= 258);
         if (url.searchParams.get('kind') === 'identity') identityPassed = true;
         await route.fulfill({ status: 200, headers: { 'content-type': 'application/json',
-          'set-cookie': 'x5sec=read-passed; Domain=.goofish.com; Path=/; Secure; SameSite=None' }, body: JSON.stringify({ code: 0, success: true }) });
+          'set-cookie': `${outcome.startsWith('async-') ? 'x5secdata=callback-needed' : 'x5sec=read-passed'}; Domain=.goofish.com; Path=/; Secure; SameSite=None` }, body: JSON.stringify({ code: 0, success: true }) });
+        return;
+      }
+      if (url.pathname === '/finish') {
+        await new Promise(resolve => setTimeout(resolve, 1_200));
+        assert.ok((await context.cookies()).some(cookie => cookie.name === 'x5secdata' && cookie.value === 'callback-needed'), 'callback cookies must survive until the session exchange completes');
+        finishes++;
+        await route.fulfill({ status: 200, headers: { 'content-type': 'text/html',
+          'set-cookie': 'x5sec=read-passed; Domain=.goofish.com; Path=/; Secure; SameSite=None' }, body: '<!doctype html><p>session exchange completed</p>' });
         return;
       }
       if (!url.pathname.startsWith('/h5/')) {
@@ -74,5 +84,5 @@ export function readBrowserFixture(api: string, userId: string, outcome = 'succe
     });
     return context;
   } };
-  return { factory, requests, slides: () => slides };
+  return { factory, requests, slides: () => slides, finishes: () => finishes };
 }
