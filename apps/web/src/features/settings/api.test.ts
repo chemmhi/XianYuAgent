@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { createCredentialApi } from './api';
+import { createCredentialApi, createInviteApi } from './api';
+
+describe('invite api adapter', () => {
+  it('maps both UI statuses to the supported server actions and encodes invite ids', async () => {
+    const paths: string[] = [];
+    const api = createInviteApi({
+      get: async <T>() => ({ success: true, data: {} }) as T,
+      post: async <T>(path: string) => { paths.push(path); return { success: true, data: { updated: true } } as T; },
+    });
+    await api.setStatus('invite/one', 'disabled');
+    await api.setStatus('invite/one', 'active');
+    expect(paths).toEqual(['/api/v1/auth/invites/invite%2Fone/disable', '/api/v1/auth/invites/invite%2Fone/enable']);
+  });
+});
 
 describe('credential api adapter', () => {
   it('keeps account scope in list and uses redacted credential refs', async () => {
