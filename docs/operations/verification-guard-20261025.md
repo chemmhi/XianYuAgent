@@ -1,6 +1,6 @@
 # 闲鱼统一验证恢复守卫（2026-10-25）
 
-状态：本地实现与验证 PASS，独立 Agent 最终复审 PASS，待合入。只提交并合入本地 main，不推送、不部署。
+状态：本地实现与验证 PASS，独立 Agent 最终复审 PASS，已合入本地 main。只提交并合入本地 main，不推送、不部署。
 
 现状：Node 24 / TypeScript；`XianyuMtopClient.call` 统一签名、Cookie、错误识别，app.ts 持久化风险并通过 Redis 唤醒 API owner。恢复被绑定在 IM Token 验证上，原接口复验只有商品详情。腾讯生产只读日志确认订单返回 SESSION_EXPIRED、商品详情返回 USER_VALIDATE；滑块成功后仍有浏览器 Token 请求失败，不能宣称生产挑战已恢复。
 
@@ -43,3 +43,5 @@ node --import tsx --test apps/api/scripts/xianyu-verification-guard-e2e.test.ts 
 ## 环境阻塞与未覆盖项
 
 无本地验证阻塞。纯后端与浏览器适配变更，无前端布局变化；视觉回归不适用。未使用本次代码写生产凭证、推送或部署，因此不能声称腾讯服务器已恢复。真实闲鱼挑战放行仍需发布后观察。CORS 阻断而无法读取响应、没有安全验证地址或平台持续拒绝时明确失败并保留风险；探针健康不能证明某个写接口健康。旧 item_detail 兼容仅面向历史数据库上下文，无新增迁移。
+
+本地交付：功能提交 `bc480a2`，main 合并 `6e1166d`。合并后 API 构建及含真实 PostgreSQL/Redis 的验证恢复回归 62/62 通过，diff 检查通过。临时测试 PostgreSQL 容器已清理，独立工作区已请求归档。原主工作区已有的文档登记改动保留且未混入提交。未推送、未部署。

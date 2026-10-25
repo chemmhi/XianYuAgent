@@ -1,10 +1,10 @@
 # XianyuSellerAgent 项目状态
 
-## 2026-10-25 闲鱼统一验证恢复守卫（本地验证与独立审核 PASS）
+## 2026-10-25 闲鱼统一验证恢复守卫（已合本地 main，独立审核 PASS）
 
 - HTTP/浏览器/图片上传共享验证识别；只读原接口独立挑战恢复，写/未知接口安全探针独立触发，解除 IM Token 健康门控；未重放写请求。
 - 前后复验均缓冲 Cookie 并按凭证 generation CAS，风险按来源/revision 清理；修复同源新风险和最后扫描丢唤醒。
-- 完整 API 345 项及既有 smoke、Chrome/PG/Redis 组合59项、原IM原生Chrome9项通过；独立 reviewer 最终 PASS，6项问题全关闭。仅合本地 main，不推送、不发布。详见 [证据与边界](docs/operations/verification-guard-20261025.md)。
+- 完整 API 345 项及既有 smoke、Chrome/PG/Redis 组合59项、原IM原生Chrome9项通过；独立 reviewer 最终 PASS，6项问题全关闭。功能提交 `bc480a2`、合并 `6e1166d`；合后构建及62项PG/Redis复验通过。仅合本地 main，不推送、不发布。详见 [证据与边界](docs/operations/verification-guard-20261025.md)。
 
 ## 2026-10-25 评价自动化开关与幂等恢复（最终组合审核 PASS，仅合本地 main）
 

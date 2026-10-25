@@ -4,6 +4,7 @@
 
 - 独立 reviewer `/root/guard_design_review`：设计审核通过；两轮实现复核提出 R1–R6（最高P1），已修复并最终 PASS，无开放P0/P1/P2。覆盖公共入口、只读重放、身份、凭证CAS、风险revision、并发唤醒、上传边界及安全HTML。
 - reviewer 独立构建、32/32相关回归和diff检查通过；主agent完整API345项、既有smoke、真实Chrome/PG/Redis59项及原IM Chrome9项通过。仅本地main合入，不推送不部署；真实平台放行不由受控测试代表。
+- 本地功能 `bc480a2`、main合并 `6e1166d`；合并后API构建及62/62恢复测试（含PG/Redis）通过，未推送未部署。
 - [修复、复验、环境与回滚记录](operations/verification-guard-20261025.md)。
 
 ## 2026-10-24 分时段随机 HTTP 会话维护
