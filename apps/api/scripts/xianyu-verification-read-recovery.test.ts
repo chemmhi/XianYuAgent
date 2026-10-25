@@ -9,6 +9,7 @@ import { XianyuMtopClient } from '../src/xianyu-mtop.js';
 import { XianyuImService } from '../src/xianyu-im-service.js';
 import { recoverVerificationReads } from '../src/xianyu-verification-read-recovery.js';
 import { createVerificationReadRequest, resolveVerificationReadRequest } from '../src/xianyu-verification-request.js';
+import { browserStageError } from '../src/xianyu-browser-challenge-handoff.js';
 
 const ITEMS = 'mtop.idle.web.xyh.item.list';
 const ORDERS = 'mtop.taobao.idle.trade.merchant.sold.get';
@@ -124,6 +125,112 @@ for (const kind of dbUrl ? ['memory', 'postgres'] : ['memory']) {
         if (['browser-failed', 'wrong-identity', 'write-failed', 'revoked'].includes(outcome)) assert.match(saved!.cookieHeader!, /old_suffix/);
         assert.ok(!f.requests.some(api => api.endsWith('login.token')));
       } finally { await f.close(); }
+    });
+  }
+
+  for (const failurePhase of ['browser', 'handoff', 'server-recheck']) test(`${kind}: a failed ${failurePhase} source preserves its risk while later reads recover`, async t => {
+    const f = await fixture();
+    const warnings: string[] = [];
+    t.mock.method(console, 'warn', (line: string) => { warnings.push(line); });
+    if (failurePhase === 'browser') f.during(async api => { if (api === ITEMS) throw new Error('https://secret.example/?cookie=private'); });
+    else if (failurePhase === 'handoff') f.during(async api => { if (api === ITEMS) throw browserStageError('XIANYU_BROWSER_MTOP', 'PREPARE_NAVIGATION', new Error('net::ERR_ABORTED https://secret.example/?cookie=private')); });
+    else {
+      const create = f.mtop.createCredentialSession.bind(f.mtop);
+      f.mtop.createCredentialSession = (...args) => {
+        const session = create(...args);
+        const recheck = session.client.recheckReadRequest.bind(session.client);
+        session.client.recheckReadRequest = async (...input) => {
+          if (input[2].api === ITEMS) throw new Error('https://secret.example/?cookie=private');
+          return recheck(...input);
+        };
+        return session;
+      };
+    }
+    try {
+      await f.risk(ITEMS);
+      await f.risk(ORDERS);
+      // Put the failing source first independently of each store's sort order.
+      const list = f.store.listAccountVerificationRisks.bind(f.store);
+      f.store.listAccountVerificationRisks = async (a, b) => (await list(a, b)).sort((a, b) => Number(b.source === ITEMS) - Number(a.source === ITEMS));
+      await assert.rejects(f.recover);
+      assert.deepEqual(f.browserCalls, [ITEMS, ORDERS]);
+      assert.deepEqual((await list(f.admin.id, f.account.id)).map(r => r.source), [ITEMS]);
+      assert.match((await f.store.getCredential(f.admin.id, f.account.id))!.cookieHeader!, /fresh_suffix/);
+      assert.equal(warnings.some(line => /secret\.example|private/.test(line)), false);
+      if (failurePhase === 'handoff') assert.ok(warnings.some(line => line.includes('XIANYU_BROWSER_MTOP_PREPARE_NAVIGATION_NAVIGATION_ABORTED')));
+    } finally { await f.close(); }
+  });
+
+  for (const accountChange of ['revoked', 'new-login']) test(`${kind}: ${accountChange} during read recovery fences later sources and IM`, async () => {
+    const f = await fixture();
+    const service = new XianyuImService(f.store, f.mtop, {} as never, undefined, undefined, f.browser);
+    const internal = service as any;
+    let refreshed = 0;
+    internal.refreshActiveCredential = async () => { refreshed++; };
+    f.during(async () => {
+      if (accountChange === 'revoked') {
+        await f.store.revokeCredential(f.admin.id, f.account.id);
+        throw new Error('browser failed after revocation');
+      }
+      await f.store.upsertCredential({ adminId: f.admin.id, accountId: f.account.id, platform: 'xianyu',
+        cookieHeader: 'unb=new-login; _m_h5_tk=new-login_suffix', accessToken: 'new-login-token' });
+    });
+    try {
+      await f.risk();
+      await f.risk(ORDERS);
+      const list = f.store.listAccountVerificationRisks.bind(f.store);
+      f.store.listAccountVerificationRisks = async (a, b) => (await list(a, b)).sort((a, b) => Number(b.source === ITEMS) - Number(a.source === ITEMS));
+      await f.store.recordAccountRisk({ adminId: f.admin.id, accountId: f.account.id, source: 'im_listener', code: 'ACCOUNT_VALIDATION_REQUIRED' });
+      service.requestVerificationRecovery(f.admin.id, f.account.id, ITEMS);
+      await internal.verificationRecoveryInFlight.get(`${f.admin.id}:${f.account.id}`);
+      assert.equal(refreshed, 0, 'invalidated account generation must stop IM recovery');
+      assert.deepEqual(f.browserCalls, [ITEMS]);
+      assert.equal((await list(f.admin.id, f.account.id)).length, 3);
+      const saved = await f.store.getCredential(f.admin.id, f.account.id);
+      if (accountChange === 'revoked') assert.equal(saved?.status, 'revoked');
+      else assert.equal(saved?.accessToken, 'new-login-token');
+    } finally { await service.close(); await f.close(); }
+  });
+
+  for (const failurePhase of ['browser', 'server-probe']) {
+    test(`${kind}: ${failurePhase} read failure does not starve IM recovery or report completion`, async t => {
+      const f = await fixture();
+      const events: string[] = [];
+      t.mock.method(console, 'warn', (line: string) => { events.push(line); });
+      t.mock.method(console, 'info', (line: string) => { events.push(line); });
+      const service = new XianyuImService(f.store, f.mtop, {} as never, undefined, undefined, f.browser);
+      const internal = service as any;
+      const key = `${f.admin.id}:${f.account.id}`;
+      let refreshed = 0;
+      internal.clients.set(key, { connected: true, disconnect: async () => undefined,
+        refreshSession: async () => internal.refreshCredential(f.admin.id, await f.store.getAccount(f.admin.id, f.account.id), await f.store.getCredential(f.admin.id, f.account.id)) });
+      f.mtop.fetchImToken = async () => {
+        refreshed++;
+        return { success: false, accountInvalid: true, errorCode: 'ACCOUNT_VALIDATION_REQUIRED',
+          verificationUrl: 'https://www.goofish.com/punish', cookieHeader: (await f.store.getCredential(f.admin.id, f.account.id))!.cookieHeader };
+      };
+      const browserRead = f.browser.waitForCompletion;
+      f.browser.waitForCompletion = async (input: any) => input.imTokenRequest ? {
+        finalUrl: 'https://www.goofish.com/im',
+        cookieSnapshot: [
+          { name: 'unb', value: f.account.sellerRef, domain: '.goofish.com', path: '/' },
+          { name: '_m_h5_tk', value: 'restored_suffix', domain: '.goofish.com', path: '/' },
+        ], imToken: { accessToken: 'restored-im-token', deviceId: 'device', userId: f.account.sellerRef },
+      } : browserRead(input);
+      if (failurePhase === 'browser') f.during(async api => { if (api === ITEMS) throw new Error('sensitive browser diagnostic'); });
+      else f.mtop.createCredentialSession = () => { throw new Error('sensitive transport diagnostic'); };
+      try {
+        await f.risk();
+        await f.store.recordAccountRisk({ adminId: f.admin.id, accountId: f.account.id, source: 'mtop.taobao.idlemessage.pc.login.token', code: 'ACCOUNT_VALIDATION_REQUIRED' });
+        service.requestVerificationRecovery(f.admin.id, f.account.id, ITEMS);
+        await internal.verificationRecoveryInFlight.get(key);
+        assert.equal(refreshed, 1);
+        assert.equal((await f.store.getCredential(f.admin.id, f.account.id))?.accessToken, 'restored-im-token');
+        assert.deepEqual((await f.store.listAccountVerificationRisks(f.admin.id, f.account.id)).map(r => r.source), [ITEMS]);
+        assert.equal(events.some(line => line.includes('verification_recovery_completed')), false);
+        assert.ok(events.some(line => line.includes('verification_recovery_pending')));
+        assert.equal(events.some(line => line.includes('sensitive')), false);
+      } finally { await service.close(); await f.close(); }
     });
   }
 

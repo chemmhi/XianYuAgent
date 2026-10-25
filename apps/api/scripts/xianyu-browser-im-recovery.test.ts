@@ -40,6 +40,7 @@ for (const outcome of [...successfulOutcomes, 'wrong-account', 'missing-token', 
     let cookieAtLogin = '';
     let browserClosed = false;
     let slideAttempts = 0;
+    let sessionExchanges = 0;
     const browser = new XianyuVerificationBrowser({ mode: 'launch', sliderMode: 'auto', headless: true,
       userDataDir: profile, maxWaitMs: 6_000, pollIntervalMs: 25,
       browserFactory: { launchPersistentContext: async options => {
@@ -74,8 +75,17 @@ for (const outcome of [...successfulOutcomes, 'wrong-account', 'missing-token', 
             assert.ok(gesture.distance >= 258 && gesture.distance <= 279);
             assert.ok(gesture.trusted > 20, 'must replay real Chrome pointer events');
             await route.fulfill({ status: 200, headers: { 'content-type': 'application/json',
-              ...(!['rejected-slider', 'accepted-without-cookie-change'].includes(outcome) ? { 'set-cookie': `x5sec=native-passed-${slideAttempts}; Domain=.goofish.com; Path=/; Secure; SameSite=None` } : {}) },
+              ...(!['success', 'rejected-slider', 'accepted-without-cookie-change'].includes(outcome) ? { 'set-cookie': `x5sec=native-passed-${slideAttempts}; Domain=.goofish.com; Path=/; Secure; SameSite=None` } : {}) },
               body: JSON.stringify({ code: outcome === 'rejected-slider' ? 300 : 0, success: true }) });
+            return;
+          }
+          if (url.pathname === '/im' && outcome === 'success') {
+            // The platform accepts the gesture first; the page callback, not
+            // the /slide response, establishes the usable browser session.
+            await new Promise(resolve => setTimeout(resolve, 1_200));
+            sessionExchanges++;
+            await route.fulfill({ status: 200, headers: { 'content-type': 'text/html',
+              'set-cookie': 'x5sec=native-passed-callback; Domain=.goofish.com; Path=/; Secure; SameSite=None' }, body: '<!doctype html><p>session ready</p>' });
             return;
           }
           if (!url.pathname.startsWith('/h5/')) {
@@ -133,6 +143,7 @@ for (const outcome of [...successfulOutcomes, 'wrong-account', 'missing-token', 
       try {
         const saved = await reader.getCredential(admin.id, account.id);
         if (successfulOutcomes.includes(outcome)) {
+          if (outcome === 'success') assert.equal(sessionExchanges, 1);
           assert.equal(saved?.accessToken, 'native-access');
           assert.equal(saved?.deviceId, 'native-device');
           assert.equal(saved?.metadata?.loginMethod, 'qr_http');

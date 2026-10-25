@@ -22,7 +22,7 @@ if (databaseUrl) {
   assert.ok(['127.0.0.1', 'localhost'].includes(url.hostname) && url.pathname === '/xianyu_native_recovery_test');
   for (const api of [ITEMS, ORDERS]) test(`HTTP manual ${api === ITEMS ? 'product sync' : 'order refresh'} -> native Chrome challenge -> PostgreSQL -> successful retry`, async () => {
     const userId = randomUUID();
-    const native = readBrowserFixture(api, userId);
+    const native = readBrowserFixture(api, userId, api === ITEMS ? 'async-fetch' : 'async-navigation');
     const profile = await mkdtemp(join(tmpdir(), 'xianyu-read-e2e-'));
     const runtime = createApp(loadConfig({ ALLOW_IN_MEMORY: 'false', DATABASE_URL: databaseUrl, REDIS_URL: '', PORT: '0',
       COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', XIANYU_VERIFICATION_BROWSER_MODE: 'launch', XIANYU_VERIFICATION_SLIDER_MODE: 'auto',
@@ -84,6 +84,7 @@ if (databaseUrl) {
         else assert.equal((await reader.listOrders(admin.id, { accountId: account.id })).items[0].orderNo, 'order-e2e');
       } finally { await reader.close(); }
       assert.equal(native.slides(), 1);
+      assert.equal(native.finishes(), 1, 'session is issued by the asynchronous callback, not by the slider verdict');
       assert.ok(!native.requests.some(value => value.endsWith('login.token')));
       assert.ok(!remoteRequests.some(value => value.endsWith('login.token')));
     } finally {

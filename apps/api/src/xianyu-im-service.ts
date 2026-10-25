@@ -15,7 +15,7 @@ import type { XianyuImOwnerClient } from './xianyu-im-owner-rpc.js';
 import { planXianyuChatRefresh } from './xianyu-chat-refresh-policy.js';
 import { refreshXianyuChatRequests } from './xianyu-chat-refresh.js';
 import { recheckVerificationRisks } from './xianyu-verification-risk-recheck.js';
-import { recoverVerificationReads } from './xianyu-verification-read-recovery.js';
+import { recoverVerificationReads, XianyuReadRecoveryError } from './xianyu-verification-read-recovery.js';
 import { isImVerificationSource } from './xianyu-verification-request.js';
 
 interface ExternalPage {
@@ -379,14 +379,31 @@ export class XianyuImService {
       console.info(JSON.stringify({ component: 'xianyu-im', event: 'verification_recovery_started', adminId, accountId, source }));
       // A prior browser recovery may already have restored this API. Recheck
       // before forcing another Token exchange/challenge against a healthy IM.
-      await recheckVerificationRisks(this.store, this.mtop, adminId, accountId);
-      await recoverVerificationReads(this.store, this.mtop, this.verificationBrowser!, adminId, accountId);
+      let readRecoveryFailed = false;
+      const recheckReads = async () => {
+        try { await recheckVerificationRisks(this.store, this.mtop, adminId, accountId); }
+        catch {
+          readRecoveryFailed = true;
+          console.warn(JSON.stringify({ component: 'xianyu-im', event: 'verification_read_recheck_failed', adminId, accountId,
+            errorCode: 'XIANYU_VERIFICATION_READ_RECHECK_FAILED' }));
+        }
+      };
+      await recheckReads();
+      try { await recoverVerificationReads(this.store, this.mtop, this.verificationBrowser!, adminId, accountId); }
+      catch (error) {
+        if (error instanceof XianyuReadRecoveryError && error.abortAccountRecovery) throw error;
+        readRecoveryFailed = true;
+        console.warn(JSON.stringify({ component: 'xianyu-im', event: 'verification_read_recovery_failed', adminId, accountId,
+          errorCode: 'XIANYU_VERIFICATION_READ_RECOVERY_FAILED' }));
+      }
       let remaining = await this.store.getAccount(adminId, accountId);
+      if (this.closed || !remaining || remaining.status === 'disabled' || remaining.status === 'expired') return;
+      if ((await this.store.getCredential(adminId, accountId))?.status !== 'active') return;
       const remainingRisks = await this.store.listAccountVerificationRisks(adminId, accountId);
       if ((remaining?.riskEpisode || remaining?.status === 'verification_required')
         && remainingRisks.some(risk => isImVerificationSource(risk.source))) {
         await this.refreshActiveCredential(adminId, accountId, { forceCredentialRefresh: true });
-        await recheckVerificationRisks(this.store, this.mtop, adminId, accountId);
+        await recheckReads();
         remaining = await this.store.getAccount(adminId, accountId);
       }
       if (this.closed || !remaining || remaining.status === 'disabled' || remaining.status === 'expired') return;
@@ -396,13 +413,13 @@ export class XianyuImService {
         await this.ensureClient(adminId, accountId);
         remaining = await this.store.getAccount(adminId, accountId);
       }
-      if (remaining?.riskEpisode || remaining?.status === 'verification_required') {
+      if (readRecoveryFailed || remaining?.riskEpisode || remaining?.status === 'verification_required') {
         if (!remainingRisks.some(risk => this.verificationRecoverySignals.get(key)?.has(risk.source)
           && attemptedRevisions.get(risk.source) !== risk.revision)) {
           this.verificationRetryAfter.set(key, Date.now() + 30_000);
         }
         console.warn(JSON.stringify({ component: 'xianyu-im', event: 'verification_recovery_pending', adminId, accountId,
-          source, riskSource: remaining.riskSource, errorCode: 'XIANYU_VERIFICATION_RISK_UNRESOLVED' }));
+          source, riskSource: remaining?.riskSource, errorCode: readRecoveryFailed ? 'XIANYU_VERIFICATION_READ_RECOVERY_FAILED' : 'XIANYU_VERIFICATION_RISK_UNRESOLVED' }));
         return;
       }
       console.info(JSON.stringify({ component: 'xianyu-im', event: 'verification_recovery_completed', adminId, accountId, source }));

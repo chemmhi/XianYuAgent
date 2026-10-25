@@ -1,5 +1,11 @@
 # XianyuSellerAgent 项目状态
 
+## 2026-10-25 挑战后会话交接与来源隔离（本地门禁、两轮独立审核 PASS）
+
+- 真实Chrome复现code0后强制跳转取消异步会话交换；公共transport先完成回调再业务/身份复验，同origin不再导航。最近守卫另有单一read异常阻断其他read/IM的新回归，已按来源隔离，保留CAS/注销/新登录保护与失败风险。
+- API352项及smoke、Memory/PG/Redis97项、handoff5项、HTTP/Chrome/PG9项、IM/Chrome/PG9项通过。独立 reviewer `/root/guard_design_review` 两轮PASS，无P0-P2。没有前端改动，未重复视觉测试；真实平台两次隔离诊断code300，生产恢复仍待验收，不能用本地复现认定每次生产失败的唯一原因。
+- 用户追加要求本次推送，合本地main后通过GitHub既定流程发布，禁止手改服务器源码或导入实验凭证。最近三条标题乱码来自提交消息编码链路；用户已明确授权修复本地和远端历史，仅改标题/必要parent SHA，内容与作者时间不变，保留旧main备份并用force-with-lease。[根因、验证与发布边界](docs/operations/post-challenge-recovery-20261025.md)。
+
 ## 2026-10-25 闲鱼统一验证恢复守卫（已合本地 main，独立审核 PASS）
 
 - HTTP/浏览器/图片上传共享验证识别；只读原接口独立挑战恢复，写/未知接口安全探针独立触发，解除 IM Token 健康门控；未重放写请求。
