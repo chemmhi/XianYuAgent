@@ -24,11 +24,18 @@ import '../../product-automation/product-automation.css';
 
 export interface ProductsPageProps { api?: ProductsApi; accountsApi?: AccountsApi; automationApi?: ProductAutomationApi; }
 
-export function ProductsPage({ api: providedApi, automationApi: providedAutomationApi }: ProductsPageProps) {
+export function ProductsPage(props: ProductsPageProps) {
+  const { currentAccountId, accountsLoading, accountsError } = useAccountContext();
+  if (!currentAccountId) return <section className="page-stack products-domain"><article className="card panel"><h2>商品目录</h2><p role="status">{accountsLoading ? '正在读取账号…' : accountsError ? '账号信息暂不可用，请刷新页面后重试。' : '请先在账号管理中添加或选择一个可用账号。'}</p></article></section>;
+  return <AccountProductsPage key={currentAccountId} {...props} accountId={currentAccountId} />;
+}
+
+function AccountProductsPage({ api: providedApi, automationApi: providedAutomationApi, accountId }: ProductsPageProps & { accountId: string }) {
   const api = useMemo(() => resolveRuntimeApi(providedApi, createMockProductsApi, 'PRODUCTS_API_NOT_PROVIDED'), [providedApi]);
   const automationApi = useMemo(() => resolveRuntimeApi(providedAutomationApi, createMockProductAutomationApi, 'PRODUCT_AUTOMATION_API_NOT_PROVIDED'), [providedAutomationApi]);
-  const { currentAccountId, currentAccount, accountsLoading, accountsError } = useAccountContext();
-  const scopedAccountId = currentAccountId ?? '__no_active_account__';
+  const { currentAccount, accountsLoading, accountsError } = useAccountContext();
+  const currentAccountId = accountId;
+  const scopedAccountId = accountId;
   const controller = useProductsController({ api, initialFilters: { accountId: scopedAccountId, sortBy: 'xianyuOrder', sortOrder: 'asc' } });
   const [drawer, setDrawer] = useState<{ mode: 'create' | 'edit'; product?: NonNullable<typeof controller.detail.data> } | null>(null);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);

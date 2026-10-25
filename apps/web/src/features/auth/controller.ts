@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AdminProfile, AuthApi, AuthSessionView } from './api';
+import type { SessionBoundary } from './session-boundary';
 
 export type AuthPhase = 'checking' | 'authenticated' | 'bootstrap-required' | 'login-required' | 'error';
 
@@ -39,53 +40,66 @@ function stateFromSession(session: AuthSessionView): Pick<AuthState, 'phase' | '
   return { phase: 'login-required', session, admin: null, error: null, busy: false };
 }
 
-export function useAuthController(api: AuthApi): AuthController {
+export function useAuthController(api: AuthApi, sessionBoundary?: SessionBoundary): AuthController {
   const [state, setState] = useState<AuthState>({ phase: 'checking', session: null, admin: null, error: null, busy: false });
+  useEffect(() => sessionBoundary?.subscribe(() => setState(loggedOutState(new Error('登录已失效，请重新登录；若账号已禁用或到期，请联系管理员。')))), [sessionBoundary]);
 
   const refresh = useCallback(async () => {
+    const request = sessionBoundary?.advance();
     setState((previous) => ({ ...previous, phase: 'checking', error: null, busy: false }));
     try {
       const session = await api.getSession();
+      if (request !== sessionBoundary?.current()) return;
       setState(stateFromSession(session));
     } catch (error) {
+      if (request !== sessionBoundary?.current()) return;
       setState({ phase: 'error', session: null, admin: null, error: errorMessage(error), busy: false });
     }
-  }, [api]);
+  }, [api, sessionBoundary]);
 
   const login = useCallback(async (input: { email: string; password: string }) => {
+    const request = sessionBoundary?.advance();
     setState((previous) => ({ ...previous, error: null, busy: true }));
     try {
       const session = await api.login(input);
+      if (request !== sessionBoundary?.current()) return;
       setState(stateFromSession({ ...session, authenticated: true, bootstrapRequired: false }));
     } catch (error) {
+      if (request !== sessionBoundary?.current()) return;
       setState((previous) => ({ ...previous, phase: 'login-required', error: errorMessage(error), busy: false }));
       throw error;
     }
-  }, [api]);
+  }, [api, sessionBoundary]);
 
-  const register = useCallback(async (input: { inviteCode: string; email: string; password: string; displayName: string }) => { setState((previous) => ({ ...previous, error: null, busy: true })); try { const session = await api.register(input); setState(stateFromSession({ ...session, authenticated: true, bootstrapRequired: false })); } catch (error) { setState((previous) => ({ ...previous, phase: 'login-required', error: errorMessage(error), busy: false })); throw error; } }, [api]);
+  const register = useCallback(async (input: { inviteCode: string; email: string; password: string; displayName: string }) => { const request = sessionBoundary?.advance(); setState((previous) => ({ ...previous, error: null, busy: true })); try { const session = await api.register(input); if (request !== sessionBoundary?.current()) return; setState(stateFromSession({ ...session, authenticated: true, bootstrapRequired: false })); } catch (error) { if (request !== sessionBoundary?.current()) return; setState((previous) => ({ ...previous, phase: 'login-required', error: errorMessage(error), busy: false })); throw error; } }, [api, sessionBoundary]);
 
   const bootstrap = useCallback(async (input: { email: string; password: string; displayName: string }) => {
+    const request = sessionBoundary?.advance();
     setState((previous) => ({ ...previous, error: null, busy: true }));
     try {
       const session = await api.bootstrap(input);
+      if (request !== sessionBoundary?.current()) return;
       setState(stateFromSession({ ...session, authenticated: true, bootstrapRequired: false }));
     } catch (error) {
+      if (request !== sessionBoundary?.current()) return;
       setState((previous) => ({ ...previous, phase: 'bootstrap-required', error: errorMessage(error), busy: false }));
       throw error;
     }
-  }, [api]);
+  }, [api, sessionBoundary]);
 
   const logout = useCallback(async () => {
+    const request = sessionBoundary?.advance();
     setState((previous) => ({ ...previous, error: null, busy: true }));
     try {
       await api.logout();
+      if (request !== sessionBoundary?.current()) return;
       setState(loggedOutState());
     } catch (error) {
+      if (request !== sessionBoundary?.current()) return;
       // The local shell must disappear even if the server revoke fails.
       setState(loggedOutState(error));
     }
-  }, [api]);
+  }, [api, sessionBoundary]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 

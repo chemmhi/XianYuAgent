@@ -1,0 +1,9 @@
+{
+  "apiRequestCount": 0,
+  "urls": [
+    "http://127.0.0.1:18081/brand/agent-fish.svg",
+    "http://127.0.0.1:18081/brand/agent-fish.svg"
+  ],
+  "truncated": false,
+  "hasMore": false
+}

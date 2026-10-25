@@ -827,3 +827,11 @@ Review conclusion: workspace confirmation fixes were merged after code review an
 | S5-R148 | 合并 / 主线门禁 | 合并后 main 是否完成定向回归、TypeScript 编译、diff-check、worktree/branch 清理和远程推送 | root | PASS | merge commit、main 定向回归 158/158、API TypeScript、git diff --check、registry cleanup、git push origin main |
 
 本轮结论：自动回复 Agent 仅在 Responses API 上启用 structured output；OpenAI 发送 strict: true，DeepSeek 省略 strict；openai-compatible 仅作为 OpenAI 兼容别名；未知 Provider fail-closed；不新增 Chat Completions structured output、灰度、总开关、fallback、JSON 修复重试或原始输出保存。
+
+## 2026-10-25 邀请码UI与共享字段校验
+
+status_route_review按S1/S2/S3a/S3b/S3c独立审核并修复阻塞后PASS；isolation_review整合PASS。修复DOM稳定/错误焦点、A账号晚到保存污染B、旧error首帧、折叠高级字段、禁用自动化规则契约。完整证据见evidence/invite-registration-20261025/ui-validation/README.md。
+
+## 2026-10-25 邀请授权与会话边界最终审核
+
+isolation_review审核后端、logout例外、WS no-touch、入队后失权与并发恢复，全部PASS；status_route_review审核刷新邮箱列、激活操作、会话代际/CSRF隔离及无账号wrapper，全部PASS。整合Web483/API25/build通过；详见访问生命周期验收。

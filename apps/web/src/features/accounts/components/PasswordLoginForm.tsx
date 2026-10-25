@@ -1,3 +1,4 @@
+import { Form } from '../../../shared/ui/Form';
 import { useState, type FormEvent } from 'react';
 import type { AccountsApi } from '../api';
 import { InputField } from '../../../shared/ui/InputField';
@@ -13,11 +14,6 @@ export function PasswordLoginForm({ api, onCompleted }: { api: AccountsApi; onCo
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!account.trim() || !password) {
-      setPhase('error');
-      showToast({ id: 'account-password-login', tone: 'error', message: '请输入闲鱼账号和密码' });
-      return;
-    }
     setPhase('submitting');
     dismissToast('account-password-login');
     try {
@@ -30,11 +26,11 @@ export function PasswordLoginForm({ api, onCompleted }: { api: AccountsApi; onCo
   }
 
   return (
-    <form className="account-login-form" onSubmit={submit}>
-      <InputField label="闲鱼账号" value={account} onChange={(event) => setAccount(event.target.value)} placeholder="手机号或用户名" autoFocus />
-      <InputField label="密码" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" />
+    <Form className="account-login-form" onSubmit={submit}>
+      <InputField label="闲鱼账号" required value={account} onChange={(event) => setAccount(event.target.value)} placeholder="手机号或用户名" autoFocus />
+      <InputField label="密码" required type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" />
       <p className="account-login-hint">账号密码登录由后端适配器处理；若闲鱼要求人脸或验证码，界面会保留明确的验证失败状态，不会伪造成功。</p>
       <div className="modal-actions"><Button variant="primary" type="submit" disabled={phase === 'submitting'}>{phase === 'submitting' ? '提交中…' : '登录并添加账号'}</Button></div>
-    </form>
+    </Form>
   );
 }

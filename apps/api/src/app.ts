@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocket, WebSocketServer } from 'ws';
+import { realtimeSessionAccess } from './realtime-session-access.js';
 import { loadConfig, type AppConfig } from './config.js';
 import { mergeAutoReplyAgentRuntimeConfig, resolveAutoReplyAgentConfig } from './auto-reply-agent-config.js';
 import type { AuthContext } from './services.js';
@@ -453,6 +454,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
 
   const workspaceCommands = new WorkspaceCommandOrchestrator({
     store,
+    assertActorAccess: adminId => auth.assertActorAccess(adminId),
     accounts,
     products,
     productSync,
@@ -499,7 +501,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     const configured = await openaiSettings.resolveForRuntime(adminId, accountId);
     if (configured.length === 0) return undefined;
     return resolveAccountModelClient(adminId, accountId);
-  });
+  }, adminId => auth.assertActorAccess(adminId));
 
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
@@ -540,7 +542,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     socket.destroy();
   });
   wsServer.on('connection', (socket: WebSocket, request: IncomingMessage) => {
-    const context = (request as IncomingMessage & { __xianyuConversationContext?: { adminId: string; conversationId: string; cursor: number } }).__xianyuConversationContext;
+    const context = (request as IncomingMessage & { __xianyuConversationContext?: { adminId: string; sessionId: string; conversationId: string; cursor: number } }).__xianyuConversationContext;
     if (context) void attachConversationSocket(runtime, socket, request, context);
   });
   return runtime;
@@ -772,7 +774,9 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     return { statusCode: 200, body: success(ctx, { session: { id: result.session.id, expiresAt: result.session.expiresAt }, profile: { id: result.admin.id, email: result.admin.email, displayName: result.admin.displayName, role: result.admin.role } }).body };
   }
 
-  const authContext = await requireAuth(auth, ctx);
+  const authContext = ctx.path === '/api/v1/auth/logout' && ctx.method === 'POST'
+    ? await auth.contextForLogout(ctx.cookies.session_id) : await requireAuth(auth, ctx);
+  if (!authContext) throw new ServiceError(401, 'UNAUTHENTICATED', 'session required');
   if (ctx.path === '/api/v1/auth/invites' && ctx.method === 'GET') return { statusCode:200, body: success(ctx, { items: await invites.list(authContext.admin.id) }).body };
   if (ctx.path === '/api/v1/auth/invites' && ctx.method === 'POST') { await auth.validateCsrf(authContext, ctx.headers, ctx.cookies); const result=await invites.create({adminId:authContext.admin.id,requestKey:String(ctx.body.requestKey ?? ''),days:Number(ctx.body.days ?? 7),requestId:ctx.requestId,traceId:ctx.traceId}); return {statusCode:201,body:success(ctx,{invite:{...result.invite,code:result.code}}).body}; }
   const inviteRevoke=ctx.path.match(/^\/api\/v1\/auth\/invites\/([^/]+)$/);
@@ -1781,7 +1785,8 @@ async function handleWorkspaceUpgrade(runtime: AppRuntime, request: IncomingMess
       if (new URL(origin).host !== request.headers.host) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
     } catch { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
   }
-  const authContext = await runtime.auth.contextFromSession(parseCookies(request.headers.cookie).session_id);
+  const sessionId = parseCookies(request.headers.cookie).session_id;
+  const authContext = await runtime.auth.accessFromSession(sessionId);
   if (!authContext) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
   const runId = decodeURIComponent(match[1]);
   let run;
@@ -1798,11 +1803,17 @@ async function handleWorkspaceUpgrade(runtime: AppRuntime, request: IncomingMess
   const accept = createHash('sha1').update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
   socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
   let closed = false;
+  const access = realtimeSessionAccess(async () => Boolean(await runtime.auth.accessFromSession(sessionId)), () => {
+    closed = true;
+    const closeFrame = Buffer.alloc(4); closeFrame[0] = 0x88; closeFrame[1] = 2; closeFrame.writeUInt16BE(1008, 2);
+    socket.end(closeFrame);
+  });
   const requestedCursor = Number(url.searchParams.get('after') ?? 0);
   let cursor = Number.isFinite(requestedCursor) ? Math.max(0, Math.trunc(requestedCursor)) : 0;
-  socket.on('close', () => { closed = true; });
-  socket.on('error', () => { closed = true; });
+  socket.on('close', () => { closed = true; access.stop(); });
+  socket.on('error', () => { closed = true; access.stop(); });
   socket.on('data', () => { /* client frames are intentionally ignored in the read-only VS6A stream */ });
+  if (!await access.check()) return;
   writeWsFrame(socket, JSON.stringify({ type: 'snapshot', run, cursor }));
   while (!closed) {
     let events;
@@ -1813,12 +1824,14 @@ async function handleWorkspaceUpgrade(runtime: AppRuntime, request: IncomingMess
       throw error;
     }
     for (const event of events) {
-      if (closed) break;
+      if (closed || !await access.check()) break;
       cursor = Math.max(cursor, event.sequence);
       writeWsFrame(socket, JSON.stringify({ type: 'event', cursor, event }));
     }
+    if (closed) break;
     if (isTerminalRunStatus(run.status) && events.length === 0) break;
     await new Promise((resolve) => setTimeout(resolve, 100));
+    if (closed) break;
     let latest;
     try {
       latest = await runtime.workspace.getRun({ adminId: authContext.admin.id, runId });
@@ -1834,6 +1847,7 @@ async function handleWorkspaceUpgrade(runtime: AppRuntime, request: IncomingMess
     run.resultSummary = latest.resultSummary;
     run.errorCode = latest.errorCode;
   }
+  access.stop();
   if (!closed) socket.end();
 }
 
@@ -2064,7 +2078,7 @@ async function handleConversationUpgrade(runtime: AppRuntime, wsServer: WebSocke
   const origin = request.headers.origin;
   if (!origin || !runtime.config.webSocketAllowedOrigins.includes(origin)) { rejectUpgrade(socket, 403, 'origin forbidden'); return; }
   const cookies = parseCookies(request.headers.cookie);
-  const authContext = await runtime.auth.contextFromSession(cookies.session_id);
+  const authContext = await runtime.auth.accessFromSession(cookies.session_id);
   if (!authContext) { rejectUpgrade(socket, 401, 'session required'); return; }
   const conversationId = decodeURIComponent(match[1]);
   try {
@@ -2076,42 +2090,49 @@ async function handleConversationUpgrade(runtime: AppRuntime, wsServer: WebSocke
   }
   const rawCursor = Number(url.searchParams.get('cursor') ?? '0');
   const cursor = Number.isSafeInteger(rawCursor) && rawCursor >= 0 ? rawCursor : 0;
-  Object.assign(request, { __xianyuConversationContext: { adminId: authContext.admin.id, conversationId, cursor } });
+  Object.assign(request, { __xianyuConversationContext: { adminId: authContext.admin.id, sessionId: authContext.session.id, conversationId, cursor } });
   wsServer.handleUpgrade(request, socket, head, (client) => wsServer.emit('connection', client, request));
 }
 
-async function attachConversationSocket(runtime: AppRuntime, socket: WebSocket, _request: IncomingMessage, context: { adminId: string; conversationId: string; cursor: number }): Promise<void> {
+async function attachConversationSocket(runtime: AppRuntime, socket: WebSocket, _request: IncomingMessage, context: { adminId: string; sessionId: string; conversationId: string; cursor: number }): Promise<void> {
   let sentCursor = context.cursor;
   let ready = false;
   let queue: import('./messages.js').RealtimeEventVM[] = [];
+  const access = realtimeSessionAccess(async () => Boolean(await runtime.auth.accessFromSession(context.sessionId)), () => { socket.close(1008, 'session access expired'); unsubscribe(); });
+  let sends = Promise.resolve();
+  const enqueue = (event: import('./messages.js').RealtimeEventVM) => {
+    sends = sends.then(async () => {
+      if (socket.readyState !== WebSocket.OPEN || event.cursor <= sentCursor || event.eventId === '' || !await access.check()) return;
+      sentCursor = event.cursor;
+      sendSocketEvent(socket, event);
+    }).catch(() => { access.stop(); socket.close(1011, 'realtime unavailable'); unsubscribe(); });
+    return sends;
+  };
   const unsubscribe = runtime.messages.realtime.subscribe(context.conversationId, (event) => {
     if (!ready) { queue.push(event); return; }
-    if (event.cursor <= sentCursor || event.eventId === '') return;
-    sentCursor = event.cursor;
-    sendSocketEvent(socket, event);
+    void enqueue(event);
   });
-  socket.on('close', unsubscribe);
-  socket.on('error', unsubscribe);
+  const cleanup = () => { access.stop(); unsubscribe(); queue = []; };
+  socket.on('close', cleanup);
+  socket.on('error', cleanup);
   try {
     if (socket.readyState !== WebSocket.OPEN) return;
     const backlog = await runtime.messages.listEvents(context.adminId, context.conversationId, context.cursor, 200);
     for (const event of backlog) {
-      if (event.cursor <= sentCursor) continue;
-      sentCursor = event.cursor;
-      sendSocketEvent(socket, event);
+      await enqueue(event);
+    }
+    while (queue.length) {
+      const pending = queue; queue = [];
+      for (const event of pending.sort((left, right) => left.cursor - right.cursor)) void enqueue(event);
+      await sends;
     }
     ready = true;
-    const pending = queue;
-    queue = [];
-    for (const event of pending.sort((left, right) => left.cursor - right.cursor)) {
-      if (event.cursor <= sentCursor) continue;
-      sentCursor = event.cursor;
-      sendSocketEvent(socket, event);
-    }
-    if (socket.readyState === WebSocket.OPEN) sendSocketEvent(socket, { eventId: `connection:${context.conversationId}:${Date.now()}`, conversationId: context.conversationId, accountId: (await runtime.messages.getConversation(context.adminId, context.conversationId)).accountId, cursor: sentCursor, type: 'chat.connection.changed', occurredAt: new Date().toISOString(), traceId: `ws:${context.conversationId}`, payload: { status: 'connected', cursor: sentCursor } });
+    if (socket.readyState !== WebSocket.OPEN) return;
+    const accountId = (await runtime.messages.getConversation(context.adminId, context.conversationId)).accountId;
+    if (socket.readyState === WebSocket.OPEN && await access.check()) sendSocketEvent(socket, { eventId: `connection:${context.conversationId}:${Date.now()}`, conversationId: context.conversationId, accountId, cursor: sentCursor, type: 'chat.connection.changed', occurredAt: new Date().toISOString(), traceId: `ws:${context.conversationId}`, payload: { status: 'connected', cursor: sentCursor } });
   } catch {
     if (socket.readyState === WebSocket.OPEN) socket.close(1011, 'realtime unavailable');
-    unsubscribe();
+    cleanup();
   }
 }
 

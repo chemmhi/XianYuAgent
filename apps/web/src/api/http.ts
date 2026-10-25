@@ -1,8 +1,11 @@
+import type { SessionBoundary } from '../features/auth/session-boundary';
+
 export interface HttpClientOptions {
   baseUrl?: string;
   getToken?: () => string | null;
   getCsrfToken?: () => string | null;
   credentials?: RequestCredentials;
+  sessionBoundary?: SessionBoundary;
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 45_000;
@@ -33,6 +36,8 @@ export function createHttpClient(options: HttpClientOptions = {}) {
   }
 
   async function request<T>(path: string, init: RequestInit = {}, allowCsrfRetry = true, preferCookieCsrf = false): Promise<T> {
+    const requestGeneration = options.sessionBoundary?.current();
+    const sameSession = () => requestGeneration === options.sessionBoundary?.current();
     const headers = new Headers(init.headers);
     if (!headers.has('Accept')) headers.set('Accept', 'application/json');
     if (init.body && typeof init.body === 'string' && !headers.has('Content-Type')) {
@@ -50,7 +55,9 @@ export function createHttpClient(options: HttpClientOptions = {}) {
       if (csrfToken) headers.set('X-CSRF-Token', csrfToken);
     }
 
-    const signal = init.signal ?? AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS);
+    const suppliedSignal = init.signal ?? AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS);
+    const boundarySignal = options.sessionBoundary?.signal();
+    const signal = boundarySignal ? AbortSignal.any([suppliedSignal, boundarySignal]) : suppliedSignal;
     let response: Response;
     try {
       response = await fetch(joinUrl(baseUrl, path), { ...init, headers, credentials: options.credentials ?? 'include', signal });
@@ -70,7 +77,10 @@ export function createHttpClient(options: HttpClientOptions = {}) {
         ? String((payload as { message?: unknown }).message ?? '请求失败')
         : `请求失败（${response.status}）`;
       const error = new ApiError(message, response.status, payload);
-      if (allowCsrfRetry && response.status === 403 && isCsrfInvalidPayload(payload) && await refreshCsrfCookie()) {
+      if (response.status === 401 && !path.startsWith('/api/v1/auth/') && isRecord(payload) && isRecord(payload.error) && payload.error.code === 'UNAUTHENTICATED' && requestGeneration !== undefined) {
+        options.sessionBoundary?.expire(requestGeneration);
+      }
+      if (allowCsrfRetry && sameSession() && response.status === 403 && isCsrfInvalidPayload(payload) && await refreshCsrfCookie(signal) && sameSession()) {
         const retryHeaders = new Headers(init.headers);
         retryHeaders.delete('X-CSRF-Token');
         return request<T>(path, { ...init, headers: retryHeaders }, false, true);
@@ -81,12 +91,13 @@ export function createHttpClient(options: HttpClientOptions = {}) {
     return payload as T;
   }
 
-  async function refreshCsrfCookie(): Promise<boolean> {
+  async function refreshCsrfCookie(signal: AbortSignal): Promise<boolean> {
     try {
       const response = await fetch(joinUrl(baseUrl, '/api/v1/auth/session'), {
         method: 'GET',
         headers: { Accept: 'application/json' },
         credentials: options.credentials ?? 'include',
+        signal,
       });
       if (!response.ok) return false;
       const payload = await response.json() as unknown;

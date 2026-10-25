@@ -330,3 +330,11 @@
 
 | WS-RISK-07 | 前端过滤已持久化 `workspace.execution.summary`，导致真实推理摘要在首个工具事件到达后消失 | 保留 `workspace.execution.summary` 投影；继续过滤 `reasoning.delta` / `context.compacted`；补充 17 项定向测试、Web 全量回归和内置浏览器稳定 DOM 复验 | CLOSED in `07b7694`; production recheck follow-up |
 | S5-RISK-071 | Responses Provider 的 structured output 语义存在差异，若静默按 OpenAI 处理会导致 schema 请求被拒绝或返回不可解析结果 | P1 | 仅支持 OpenAI/DeepSeek Responses；OpenAI 发送 strict:true，DeepSeek 省略 strict；openai-compatible 映射 OpenAI；未知 Provider fail-closed；补齐 provider、failed/incomplete/refusal 回归 | CLOSED |
+
+## 2026-10-25 字段迁移回归与隔离
+
+已关闭：跨账号晚到响应和旧错误闪现、状态变更导致表格移动、删除原生确认、字段原生气泡。剩余验收限制：未验证真实闲鱼/外部模型端到端；测试种子不含真实凭证。无API/迁移变更，保留既有bundle体积提示。详见本次ui-validation验收记录。
+
+## 2026-10-25 邀请授权门禁
+
+已关闭：已激活用户永久授权、失权旧WS泄漏、入队后未处理Promise、旧401退出新用户、旧CSRF借新cookie重放、无账号sentinel入PG。边界：已开始的单次外部请求不可撤回，后台自动回复未被全局停用；新授权索引需随发布运行迁移068。

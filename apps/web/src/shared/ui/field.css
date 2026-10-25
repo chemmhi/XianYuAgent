@@ -1,5 +1,12 @@
 .ui-field { display: grid; gap: 6px; min-width: 0; color: var(--muted); font-size: 14px; font-weight: 600; line-height: 1.55; }
 .ui-field-label { display: inline-flex; align-items: baseline; gap: 3px; min-height: 20px; line-height: 1.4; }
 .ui-field-required { color: var(--danger); }
-.ui-field-hint { margin: 0; color: var(--sub); font-size: 12px; font-weight: 400; line-height: 1.5; }
-.ui-field-error { color: var(--danger); font-size: 12px; font-weight: 400; line-height: 1.5; }
+.ui-field-hint { display: block; margin: 0; color: var(--sub); font-size: 12px; font-weight: 400; line-height: 1.5; }
+.ui-field-error { display: block; color: var(--danger); font-size: 12px; font-weight: 400; line-height: 1.5; }
+.ui-field-message-placeholder { display: block; min-height: 18px; font-size: 12px; line-height: 1.5; }
+.ui-input-control[aria-invalid="true"], .ui-textarea-control[aria-invalid="true"], .ui-select-trigger[aria-invalid="true"],
+.ui-input-control[aria-invalid="true"]:hover, .ui-textarea-control[aria-invalid="true"]:hover,
+.ui-select-control .ui-select-trigger[aria-invalid="true"]:hover:not(:disabled) { border-color: var(--danger); }
+.ui-input-control[aria-invalid="true"]:focus, .ui-textarea-control[aria-invalid="true"]:focus,
+.ui-select-control .ui-select-trigger[aria-invalid="true"]:focus-visible,
+.ui-select-control.is-open .ui-select-trigger[aria-invalid="true"] { border-color: var(--danger); box-shadow: 0 0 0 3px rgb(185 28 28 / 9%); }

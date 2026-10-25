@@ -17,9 +17,9 @@ export async function testDatabase() {
     return { pool, url: url.href, async close() { await pool.end(); await owner.query('DROP DATABASE ' + name + ' WITH (FORCE)'); await owner.end(); } };
   } catch (error) { await pool.end(); await owner.query('DROP DATABASE ' + name + ' WITH (FORCE)'); await owner.end(); throw error; }
 }
-export async function fixture(kind = 'memory') {
+export async function fixture(kind = 'memory', env = {}) {
   const db = kind === 'postgres' ? await testDatabase() : undefined;
-  const config = loadConfig({ HOST: '127.0.0.1', PORT: '0', ALLOW_IN_MEMORY: String(!db), DATABASE_URL: db?.url ?? '', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', REDIS_URL: '', XIANYU_VERIFICATION_BROWSER_MODE: 'disabled', MODEL_PROVIDER_FAILOVER_V2: 'false', CREDENTIAL_ENCRYPTION_KEY: 'invite-test-encryption-key-32-chars' });
+  const config = loadConfig({ HOST: '127.0.0.1', PORT: '0', ALLOW_IN_MEMORY: String(!db), DATABASE_URL: db?.url ?? '', COOKIE_SECURE: 'false', XIANYU_QR_MODE: 'stub', REDIS_URL: '', XIANYU_VERIFICATION_BROWSER_MODE: 'disabled', MODEL_PROVIDER_FAILOVER_V2: 'false', CREDENTIAL_ENCRYPTION_KEY: 'invite-test-encryption-key-32-chars', ...env });
   const runtime = createApp(config);
   await runtime.listen();
   const origin = 'http://127.0.0.1:' + runtime.server.address().port;
@@ -29,6 +29,13 @@ export async function fixture(kind = 'memory') {
   }
   async function actor(email, role = 'admin') {
     const { hashPassword } = await import('../../src/security.ts');
+    if (role === 'user') {
+      const admins = await Promise.all((await runtime.store.listAdminIds()).map(id => runtime.store.findAdminById(id)));
+      const owner = admins.find(item => item?.role === 'admin') ?? await runtime.store.createAdmin({ email: 'fixture-owner-' + randomUUID() + '@example.com', passwordHash: await hashPassword('password-123'), displayName: 'Fixture Owner' });
+      const invitation = await runtime.invites.create({ adminId: owner.id, requestKey: 'fixture-' + randomUUID(), days: 7 });
+      const registered = await runtime.auth.register({ code: invitation.code, email, password: 'password-123', displayName: email });
+      return { id: registered.admin.id, cookie: 'session_id=' + registered.session.id + '; csrf_token=' + registered.csrfToken, csrf: registered.csrfToken, inviteId: invitation.invite.id, inviteCode: invitation.code, createdBy: owner.id };
+    }
     const record = await runtime.store.createAdmin({ email, passwordHash: await hashPassword('password-123'), displayName: email });
     if (db) await db.pool.query('update auth.admins set role=$1 where id=$2', [role, record.id]);
     else record.role = role;

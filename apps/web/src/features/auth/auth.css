@@ -8,5 +8,8 @@
 .auth-state { justify-items: start; }
 
 .auth-form .ui-input-control[aria-invalid="true"]{border-color:var(--danger);box-shadow:0 0 0 2px rgba(180,35,24,.1)}
-
-.auth-confirm-field{position:relative;padding-bottom:20px}.auth-confirm-field .ui-field-error{position:absolute;left:0;bottom:0;line-height:16px}
+.auth-form{row-gap:0}
+.auth-form-heading{margin-bottom:16px}
+.auth-form>.ui-field{position:relative;padding-bottom:24px}
+.auth-form>.ui-field>.ui-field-error,.auth-form>.ui-field>.ui-field-message-placeholder{position:absolute;left:0;right:0;bottom:3px;min-height:18px}
+.auth-form>.btn+.btn{margin-top:12px}

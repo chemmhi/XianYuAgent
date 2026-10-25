@@ -533,3 +533,11 @@
 - 范围：当前仅 OpenAI、DeepSeek；不新增 Chat Completions structured output、灰度、总开关、fallback、JSON 修复重试或原始输出保存。
 - 验证：独立 reviewer /root/repair_review PASS；主线定向回归 158/158、API TypeScript compile、git diff --check、合并与远程推送通过。
 - 合并提交：c432078164d558c91cf02a06fcc20558265c5612。
+
+## 2026-10-25 邀请码交互及字段校验（本地整合PASS）
+
+独立分片审核和整合审核PASS；Web471、邀请/隔离API18、build/typecheck通过；真实Chrome验证生成/复制/启停/续期/删除、字段错误及合法PG保存。邀请码按管理员created_by隔离，业务设置按闲鱼账号隔离；晚到响应竞态已修复。证据：[验收记录](docs/evidence/invite-registration-20261025/ui-validation/README.md)。
+
+## 2026-10-25 已激活用户访问生命周期（整合PASS）
+
+刷新/用户名邮箱列、激活用户启停续期、旧会话/WS/工具写权限门禁已完成并逐片独立审核。Web483、授权与隔离API25、API/Web build通过；真实双浏览器验证启停/到期/续期恢复和PG清理。详见[验收记录](docs/evidence/invite-registration-20261025/access-lifecycle/README.md)。

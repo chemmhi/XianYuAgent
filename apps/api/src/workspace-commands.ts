@@ -35,6 +35,7 @@ export interface WorkspaceCommandDependencies {
   autoReplyActivity: AutoReplyActivityService;
   autoReplyAgentSettings: AutoReplyAgentSettingsService;
   openaiSettings: OpenAISettingsService;
+  assertActorAccess?: (adminId: string) => Promise<void>;
   verifyAccount?: (input: { adminId: string; accountId: string; requestId: string; traceId: string }) => Promise<{ success: boolean; accountInvalid?: boolean; errorCode?: string; message?: string }>;
   startLoginRecovery?: (input: { adminId: string; accountId: string; requestId: string; traceId: string }) => Promise<{ loginSessionId: string; accountId: string; status: string; expiresAt: string; pollAfterMs?: number; verificationUrl?: string; qrImageDataUrl?: string; errorCode?: string }>;
 }
@@ -121,6 +122,7 @@ export class WorkspaceCommandOrchestrator {
   }
 
   async executeModelTool(name: string, args: Record<string, unknown>, input: WorkspaceCommandInput): Promise<WorkspaceModelToolResult> {
+    await this.deps.assertActorAccess?.(input.adminId);
     const instruction = typeof args.instruction === 'string' ? args.instruction.trim() : '';
     const operation = typeof args.operation === 'string' ? args.operation.trim() : '';
     if (name === 'workspace_product_search') {
@@ -172,6 +174,7 @@ export class WorkspaceCommandOrchestrator {
   }
 
   async prepareWrite(input: WorkspaceCommandInput): Promise<NativeWorkspaceWritePlan | undefined> {
+    await this.deps.assertActorAccess?.(input.adminId);
     const existing = await prepareNativeWorkspaceWrite({ store: this.deps.store, adminId: input.adminId, accountId: input.accountId, instruction: input.instruction, operation: input.operation, parameters: input.parameters });
     if (existing) return existing;
     if (input.operation) return this.prepareStructuredWrite(input);
@@ -328,6 +331,7 @@ export class WorkspaceCommandOrchestrator {
   }
 
   async execute(input: WorkspaceCommandInput): Promise<WorkspaceCommandResult | undefined> {
+    await this.deps.assertActorAccess?.(input.adminId);
     const normalized = input.instruction.replace(/\s+/g, ' ').trim();
     if (shouldDelegateNativeRead(normalized)) return executeNativeWorkspaceRead({ store: this.deps.store, adminId: input.adminId, accountId: input.accountId, instruction: normalized });
     const kind = detectCommand(normalized);
@@ -438,6 +442,7 @@ export class WorkspaceCommandOrchestrator {
   }
 
   async confirm(input: { plan: NativeWorkspaceWritePlan; run: RunRecord; step: StepRecord; adminId: string; requestId: string; traceId: string }): Promise<{ resultSummary: string; outputSummary: string; data?: Record<string, unknown> }> {
+    await this.deps.assertActorAccess?.(input.adminId);
     const { action, accountId } = input.plan.manifest;
     const execution = input.plan.executionPlan ?? input.plan.manifest;
     if (action === 'product_publish') {
@@ -528,6 +533,7 @@ export class WorkspaceCommandOrchestrator {
     if (images.length === 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'product publish requires at least one stored product image');
     const attrs = product.attributes?.publish && typeof product.attributes.publish === 'object' ? product.attributes.publish as Record<string, unknown> : {};
     const postageMode = normalizePostageMode(attrs.postageMode);
+    await this.deps.assertActorAccess?.(input.adminId);
     const published = await this.deps.productPublisher.publish({
       adminId: input.adminId,
       accountId,

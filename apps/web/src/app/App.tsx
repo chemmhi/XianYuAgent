@@ -5,6 +5,7 @@ import { createAccountsApi } from '../features/accounts/api';
 import { AccountsPage } from '../features/accounts/components/AccountsPage';
 import { createAuthApi, type AdminProfile } from '../features/auth/api';
 import { AuthGate } from '../features/auth/components/AuthGate';
+import { createSessionBoundary } from '../features/auth/session-boundary';
 import { createProductsApi } from '../features/products/api';
 import { ProductsPage } from '../features/products/components/ProductsPage';
 import { createMockProductAutomationApi, createProductAutomationApi } from '../features/product-automation/api';
@@ -73,10 +74,11 @@ export default function App() {
   if (window.location.pathname === '/controls') return <ControlsPreview />;
   const [page, setPage] = useState<PageKey>(() => pageFromPath(window.location.pathname));
   const dashboardMode = resolveDashboardMode(apiMode, import.meta.env.VITE_DASHBOARD_MODE);
+  const sessionBoundary = useMemo(createSessionBoundary, []);
   const transport = useMemo(() => {
-    const transport = createHttpClient({ baseUrl: import.meta.env.VITE_API_BASE_URL ?? '', credentials: 'include' });
+    const transport = createHttpClient({ baseUrl: import.meta.env.VITE_API_BASE_URL ?? '', credentials: 'include', sessionBoundary });
     return transport;
-  }, []);
+  }, [sessionBoundary]);
   const authApi = useMemo(() => createAuthApi({ get: transport.get, post: transport.post }), [transport]);
   const accountsApi = useMemo(() => createAccountsApi({ get: transport.get, post: transport.post, delete: transport.delete }), [transport]);
   const productsApi = useMemo(() => createProductsApi({ get: transport.get, post: transport.post, patch: transport.patch }), [transport]);
@@ -107,7 +109,7 @@ export default function App() {
     setPage(next);
   }
 
-  return <AuthGate api={authApi}>
+  return <AuthGate api={authApi} sessionBoundary={sessionBoundary}>
     {(admin, auth) => <ToastProvider><AccountContextProvider api={accountsApi}>
       <AuthenticatedShell admin={admin} onLogout={auth.logout} logoutBusy={auth.busy} page={page} accountsApi={accountsApi} productsApi={productsApi} productAutomationApi={productAutomationApi} couponsApi={couponsApi} messagesApi={messagesApi} workspaceApi={workspaceApi} ordersApi={ordersApi} settingsApi={settingsApi} inviteApi={inviteApi} autoReplyAgentSettingsApi={autoReplyAgentSettingsApi} openaiSettingsApi={openaiSettingsApi} modelProviderApi={modelProviderApi} agentDynamicsApi={agentDynamicsApi} dashboardApi={dashboardApi} navigate={navigate} />
     </AccountContextProvider></ToastProvider>}
