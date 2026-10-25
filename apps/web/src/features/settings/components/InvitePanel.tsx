@@ -4,6 +4,7 @@ import { InputField } from '../../../shared/ui/InputField';
 import { useToast } from '../../../shared/ui/ToastProvider';
 import type { InviteApi, InviteVM } from '../api';
 import { InviteRenewModal } from './InviteRenewModal';
+import { InviteDeleteModal } from './InviteDeleteModal';
 import { InviteTable, type InvitePending } from './InviteTable';
 import './invite-panel.css';
 
@@ -16,6 +17,7 @@ export function InvitePanel({ api }: { api: InviteApi }) {
   const [creationDays, setCreationDays] = useState('7');
   const [creationError, setCreationError] = useState<string | null>(null);
   const [renewingInvite, setRenewingInvite] = useState<InviteVM | null>(null);
+  const [deletingInvite, setDeletingInvite] = useState<InviteVM | null>(null);
   const locked = useRef(false);
   const { showToast, dismissToast } = useToast();
   const feedback = (message: string, tone: 'success' | 'error' | 'info' = 'error') => showToast({ id: 'invite-feedback', tone, message });
@@ -91,10 +93,12 @@ export function InvitePanel({ api }: { api: InviteApi }) {
   }
 
   async function remove(item: InviteVM) {
+    if (locked.current || reading.current) throw new Error('操作进行中，请稍候');
     const used = item.status === 'used' || Boolean(item.usedAt);
-    if (used) { if (!window.confirm('该邀请码已激活账号，删除将清空该用户的全部数据，是否继续？')) return; if (!window.confirm('这是不可恢复的危险操作，请再次确认删除并清空该用户数据。')) return; }
-    else if (!window.confirm('确认删除该邀请码？')) return;
-    await perform({ id: item.id, action: 'delete' }, async () => { await api.revoke(item.id, used); setItems(current => current.filter(candidate => candidate.id !== item.id)); feedback(used ? '邀请码及激活用户数据已删除' : '邀请码已删除', 'success'); });
+    locked.current = true;
+    setPending({ id: item.id, action: 'delete' });
+    try { await api.revoke(item.id, used); setItems(current => current.filter(candidate => candidate.id !== item.id)); feedback(used ? '邀请码及激活用户数据已删除' : '邀请码已删除', 'success'); }
+    finally { locked.current = false; setPending(null); }
   }
 
   return <div className="settings-content">
@@ -102,7 +106,8 @@ export function InvitePanel({ api }: { api: InviteApi }) {
     <article className="card panel invite-table-card"><div className="panel-head"><div><h2>邀请码列表</h2><p>状态、到期日期和激活账号均来自服务端。</p></div><div className="invite-toolbar-actions">
       <label className="invite-expiry-input">生成有效期（天）<InputField aria-label="生成有效期（天）" type="number" min="1" max="30" value={creationDays} disabled={Boolean(pending) || loading} aria-invalid={Boolean(creationError) || undefined} aria-describedby={creationError ? 'invite-creation-error' : undefined} onChange={event => { setCreationDays(event.target.value); setCreationError(null); }} /><span>天</span>{creationError && <span className="invite-expiry-validation" id="invite-creation-error">{creationError}</span>}</label>
       <Button variant="primary" type="button" disabled={Boolean(pending) || loading} onClick={() => void create()}>{pending?.action === 'create' ? '生成中…' : loading ? '读取中…' : '生成邀请码'}</Button>
-    </div></div><InviteTable items={items} newIds={newIds} pending={pending} loading={loading} onCopy={item => void copy(item)} onStatus={(item, next) => void status(item, next)} onRenew={setRenewingInvite} onDelete={item => void remove(item)} /></article>
+    </div></div><InviteTable items={items} newIds={newIds} pending={pending} loading={loading} onCopy={item => void copy(item)} onStatus={(item, next) => void status(item, next)} onRenew={setRenewingInvite} onDelete={setDeletingInvite} /></article>
     {renewingInvite && <InviteRenewModal invite={renewingInvite} onClose={() => setRenewingInvite(null)} onRenew={renew} />}
+    {deletingInvite && <InviteDeleteModal invite={deletingInvite} onClose={() => setDeletingInvite(null)} onDelete={() => remove(deletingInvite)} />}
   </div>;
 }
