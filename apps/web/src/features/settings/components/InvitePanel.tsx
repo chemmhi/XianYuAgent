@@ -56,6 +56,13 @@ export function InvitePanel({ api }: { api: InviteApi }) {
     catch { showToast({ id: 'invite-feedback', tone: 'info', message: `${message}，列表刷新失败`, actions: [{ label: '刷新列表', onClick: () => { void reload().then(() => dismissToast('invite-feedback'), loadError); } }] }); }
   }
 
+  async function manualRefresh() {
+    if (locked.current || reading.current) return;
+    dismissToast('invite-feedback');
+    try { await reload(); feedback('邀请码列表已刷新', 'success'); }
+    catch { loadError(); }
+  }
+
   async function create() {
     const days = Number(creationDays);
     if (!Number.isInteger(days) || days < 1 || days > 30) { setCreationError('有效期需为 1-30 天的整数'); return; }
@@ -106,6 +113,7 @@ export function InvitePanel({ api }: { api: InviteApi }) {
     <article className="card panel invite-table-card"><div className="panel-head"><div><h2>邀请码列表</h2><p>状态、到期日期和激活账号均来自服务端。</p></div><div className="invite-toolbar-actions">
       <label className="invite-expiry-input">生成有效期（天）<InputField aria-label="生成有效期（天）" type="number" min="1" max="30" value={creationDays} disabled={Boolean(pending) || loading} aria-invalid={Boolean(creationError) || undefined} aria-describedby={creationError ? 'invite-creation-error' : undefined} onChange={event => { setCreationDays(event.target.value); setCreationError(null); }} /><span>天</span>{creationError && <span className="invite-expiry-validation" id="invite-creation-error">{creationError}</span>}</label>
       <Button variant="primary" type="button" disabled={Boolean(pending) || loading} onClick={() => void create()}>{pending?.action === 'create' ? '生成中…' : loading ? '读取中…' : '生成邀请码'}</Button>
+      <Button variant="ghost" type="button" disabled={Boolean(pending) || loading} onClick={() => void manualRefresh()}>{loading ? '刷新中…' : '刷新'}</Button>
     </div></div><InviteTable items={items} newIds={newIds} pending={pending} loading={loading} onCopy={item => void copy(item)} onStatus={(item, next) => void status(item, next)} onRenew={setRenewingInvite} onDelete={setDeletingInvite} /></article>
     {renewingInvite && <InviteRenewModal invite={renewingInvite} onClose={() => setRenewingInvite(null)} onRenew={renew} />}
     {deletingInvite && <InviteDeleteModal invite={deletingInvite} onClose={() => setDeletingInvite(null)} onDelete={() => remove(deletingInvite)} />}

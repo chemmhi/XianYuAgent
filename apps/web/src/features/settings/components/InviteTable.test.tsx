@@ -25,4 +25,12 @@ describe('InviteTable actions', () => {
     expect(html).toContain('处理中…');
     expect(html.match(/disabled=""/g)).toHaveLength(3);
   });
+  it('keeps activated username and email in separate columns', () => {
+    const html = render({ ...invite, status: 'used', usedAt: '2026-10-25T01:00:00Z', usedByDisplayName: '测试用户', usedByEmail: 'person@example.com' });
+    expect(html).toContain('<th>用户名</th><th>邮箱</th>');
+    expect(html).toContain('class="invite-user-cell" title="测试用户">测试用户</td>');
+    expect(html).toContain('class="invite-email-cell" title="person@example.com">person@example.com</td>');
+    expect(html.match(/<th>/g)).toHaveLength(6);
+  });
+
 });

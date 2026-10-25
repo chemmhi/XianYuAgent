@@ -20,13 +20,14 @@ export function InviteTable({ items, newIds, pending, loading = false, onCopy, o
 }) {
   const blocked = Boolean(pending) || loading;
   return <div className="invite-table-wrap"><table className="invite-table" aria-label="邀请码列表" aria-busy={blocked}>
-    <colgroup><col className="invite-col-code" /><col className="invite-col-status" /><col className="invite-col-expiry" /><col className="invite-col-user" /><col className="invite-col-actions" /></colgroup>
-    <thead><tr><th>邀请码</th><th>状态</th><th>到期日期</th><th>激活账号</th><th>操作</th></tr></thead>
+    <colgroup><col className="invite-col-code" /><col className="invite-col-status" /><col className="invite-col-expiry" /><col className="invite-col-user" /><col className="invite-col-email" /><col className="invite-col-actions" /></colgroup>
+    <thead><tr><th>邀请码</th><th>状态</th><th>到期日期</th><th>用户名</th><th>邮箱</th><th>操作</th></tr></thead>
     <tbody>{items.map(item => <tr key={item.id}>
       <td><div className="invite-code-cell"><code>{item.code}</code><button className="invite-copy-button" type="button" aria-label={`复制邀请码 ${item.code ?? ''}`} title="复制邀请码" disabled={!item.code} onClick={() => onCopy(item)}><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="8" height="9" rx="1.5" /><path d="M10 3V2H2v9h1" /></svg></button>{newIds.has(item.id) && <span className="invite-new-badge">NEW</span>}</div></td>
       <td><span className={`status-pill invite-status-${item.status}`}>{statusLabels[item.status ?? 'active']}</span></td>
       <td>{new Date(item.expiresAt).toLocaleDateString()}</td>
-      <td className="invite-user-cell" title={item.usedByEmail}>{item.usedByDisplayName || item.usedByEmail || '—'}</td>
+      <td className="invite-user-cell" title={item.usedByDisplayName}>{item.usedByDisplayName || '—'}</td>
+      <td className="invite-email-cell" title={item.usedByEmail}>{item.usedByEmail || '—'}</td>
       <td><div className="invite-actions">
         <span className="invite-status-action">{(item.status === 'active' || item.status === 'disabled') && <Button variant="ghost" type="button" disabled={blocked} onClick={() => onStatus(item, item.status === 'active' ? 'disabled' : 'active')}>{pending?.id === item.id && ['enable', 'disable'].includes(pending.action) ? '处理中…' : item.status === 'active' ? '禁用' : '启用'}</Button>}</span>
         <span className="invite-renew-action">{item.status !== 'used' && <Button variant="ghost" type="button" disabled={blocked} onClick={() => onRenew(item)}>续期</Button>}</span>
