@@ -1,3 +1,4 @@
+import { AccountContextState } from '../../../app/AccountContextState';
 import { Form } from '../../../shared/ui/Form';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { chooseFirstAvailableAccountId, useAccountContext } from '../../../app/account-context';
@@ -56,7 +57,7 @@ export function SettingsPage({ adminRole, inviteApi, api: providedApi, agentApi:
           {tabs.filter((tab) => tab.id !== 'invites' || adminRole === 'admin').map((tab) => <button key={tab.id} type="button" className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)}><span className="settings-tab-label">{tab.label}</span><span className="settings-tab-mobile-label">{tab.mobileLabel}</span><small>{tab.meta}</small></button>)}
         </aside>
         <div className="settings-active">
-          {activeTab === 'invites' ? <InvitePanel api={inviteApi} /> : activeTab === 'autoReply' ? <AutoReplyAgentPanel key={currentAccountId ?? ""} controller={agentController} accountName={selectedAccount?.displayName} accountId={currentAccountId} /> : <OpenAISettingsPanel key={currentAccountId ?? ""} accountId={currentAccountId ?? ''} accountName={selectedAccount?.displayName} api={openaiApi} modelApi={modelApi} accountsLoading={accountsLoading} accountsError={accountsError} />}
+          {activeTab === 'invites' ? <InvitePanel api={inviteApi} /> : accountsLoading || accountsError || !currentAccountId ? <AccountContextState /> : activeTab === 'autoReply' ? <AutoReplyAgentPanel key={currentAccountId ?? ""} controller={agentController} accountName={selectedAccount?.displayName} accountId={currentAccountId} /> : <OpenAISettingsPanel key={currentAccountId ?? ""} accountId={currentAccountId ?? ''} accountName={selectedAccount?.displayName} api={openaiApi} modelApi={modelApi} accountsLoading={accountsLoading} accountsError={accountsError} />}
         </div>
       </div>
       {editor && <CredentialEditor mode={editor} accountId={currentAccountId ?? ''} credential={selectedCredential} onClose={() => { setEditor(null); setSelectedCredential(undefined); }} onCreate={controller.create} onUpdate={controller.update} onRotate={controller.rotate} />}

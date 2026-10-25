@@ -42,6 +42,7 @@ export interface AppConfig {
   /** Shared buyer allowlist used by Auto Reply and product automation. */
   autoReplyAgent?: AutoReplyAgentRuntimeConfig;
   credentialEncryptionKey: string;
+  imOwnerSecret?: string;
   objectStorageEndpoint: string;
   objectStoragePublicEndpoint?: string;
   objectStorageAccessKey: string;
@@ -119,6 +120,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     piSkillRoot: resolve(env.PI_SKILL_ROOT?.trim() || resolve(homedir(), '.pi', 'skills')),
     autoReplyModelEnabled: asBoolean(env.AUTO_REPLY_MODEL_ENABLED, Boolean(modelApiKey && modelBaseUrl && modelName)),
     credentialEncryptionKey: env.CREDENTIAL_ENCRYPTION_KEY?.trim() || 'development-only-credential-key-change-me',
+    imOwnerSecret: env.XIANYU_IM_OWNER_SECRET?.trim() || undefined,
     objectStorageEndpoint: env.OBJECT_STORAGE_ENDPOINT?.trim() || 'http://127.0.0.1:19000',
     objectStoragePublicEndpoint: env.OBJECT_STORAGE_PUBLIC_ENDPOINT?.trim() || undefined,
     objectStorageAccessKey: env.OBJECT_STORAGE_ACCESS_KEY?.trim() || 'xianyu',

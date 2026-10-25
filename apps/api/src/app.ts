@@ -108,6 +108,8 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
   const objectStorage: ObjectStorage = config.allowInMemory
     ? new MemoryObjectStorage()
     : new S3CompatibleObjectStorage({ endpoint: config.objectStorageEndpoint, publicEndpoint: config.objectStoragePublicEndpoint, accessKey: config.objectStorageAccessKey, secretKey: config.objectStorageSecretKey, bucket: config.objectStorageBucket, region: config.objectStorageRegion });
+  const putAccountObject = objectStorage.putObject.bind(objectStorage);
+  objectStorage.putObject = input => store.withAccountArtifactWrite(input.key, () => putAccountObject(input));
   const couponAssets = new CouponAssetService(store, objectStorage);
   const autoReplyGodView = createAutoReplyGodViewSink();
   const autoReplyAgentConfig = config.autoReplyAgent ?? resolveAutoReplyAgentConfig();
@@ -120,6 +122,13 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     const auditId = createId();
     await store.recordAudit({ id: auditId, actorType: 'admin', actorId: input.actorId, action: input.action, targetRef: input.targetRef, requestId: input.requestId, traceId: input.traceId, payloadDigest: digestJson(input.payload), accountId: input.accountId, createdAt: new Date().toISOString() });
     return auditId;
+  }, async (resources) => {
+    qrLogin.forgetSessions(resources.loginSessionIds);
+    await xianyuIm.deleteAccountState('account-deletion', resources.accountId);
+    await modelProviderRuntime.deleteAccount(resources.accountId);
+    for (const key of [resources.accountId, ...resources.loginSessionIds]) await (verificationBrowser ?? new XianyuVerificationBrowser({ userDataDir: config.xianyuVerificationBrowserUserDataDir })).deleteProfile(key);
+    await objectStorage.deletePrefix(`coupons/${resources.accountId}/`);
+    for (const id of resources.productIds) await objectStorage.deletePrefix(`products/${id}/`);
   });
   const coupons = new CouponService(store, async (input) => {
     const auditId = createId();
@@ -138,8 +147,9 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
   });
   let xianyu: XianyuMtopClient;
   let xianyuIm!: XianyuImService;
+  const imOwnerSecret = config.imOwnerSecret ?? config.credentialEncryptionKey;
   const imOwnerClient = options.imOwnerUrl
-    ? new XianyuImOwnerClient(options.imOwnerUrl, config.credentialEncryptionKey, config.xianyuVerificationBrowserMaxWaitMs * 2 + 60_000)
+    ? new XianyuImOwnerClient(options.imOwnerUrl, imOwnerSecret, config.xianyuVerificationBrowserMaxWaitMs * 2 + 60_000)
     : undefined;
   const verificationBrowser = config.xianyuVerificationBrowserMode === 'disabled' || options.verificationRecoveryOwner === false || Boolean(imOwnerClient)
     ? undefined
@@ -188,6 +198,8 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     return auditId;
   }, fetch, config.modelWireApi);
   const modelProviderRuntime = new ModelProviderRuntimePool({
+    withAccountGuard: (accountId, work) => store.withAccountWriteGuard(accountId, work),
+    accountAvailable: (adminId, accountId) => store.hasAccountScope(adminId, accountId),
     redisUrl: config.allowInMemory ? undefined : config.redisUrl,
     overallTimeoutMs: 60_000,
     createClient: (resolved) => openaiSettings.createRuntimeClient(resolved),
@@ -449,7 +461,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     await store.enqueuePaymentEvent({ adminId, accountId, eventRef: event.externalMessageRef, orderNo: extractTrustedOrderNo(event.raw), buyerRef: event.senderRef, itemRef: event.itemRef, conversationRef: event.externalConversationRef, receivedAt: trustedPaymentOccurredAt(event), observedAt: new Date().toISOString() });
     void paymentEventWorker.pollOnce().catch((error) => console.error(JSON.stringify({ component: 'payment-event-worker', event: 'wake_failed', accountId, error: error instanceof Error ? error.message : String(error) })));
   }, async (adminId, accountId, source) => { await verificationRecoveryBridge?.publish({ adminId, accountId, source }); }, imOwnerClient);
-  const imOwnerServer = imOwnerClient ? undefined : new XianyuImOwnerServer(config.credentialEncryptionKey, xianyuIm, store);
+  const imOwnerServer = imOwnerClient ? undefined : new XianyuImOwnerServer(imOwnerSecret, xianyuIm, store);
 
   const workspaceCommands = new WorkspaceCommandOrchestrator({
     store,
@@ -1310,7 +1322,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     const accountId = decodeURIComponent(accountMatch[1]);
     if (!accountMatch[2] && ctx.method === 'GET') return { statusCode: 200, body: success(ctx, await accounts.get(authContext.admin.id, accountId)).body };
      if (!accountMatch[2] && ctx.method === 'PATCH') return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, await accounts.update({ adminId: authContext.admin.id, accountId, patch: { sellerRef: optionalString(ctx.body.sellerRef), displayName: optionalString(ctx.body.displayName), remark: optionalString(ctx.body.remark), avatarUrl: optionalString(ctx.body.avatarUrl), platformUserId: optionalString(ctx.body.platformUserId), status: typeof ctx.body.status === 'string' ? ctx.body.status as never : undefined }, requestId: ctx.requestId, traceId: ctx.traceId })));
-     if (!accountMatch[2] && ctx.method === 'DELETE') return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, { account: await accounts.delete({ adminId: authContext.admin.id, accountId, requestId: ctx.requestId, traceId: ctx.traceId }), deleted: true }));
+     if (!accountMatch[2] && ctx.method === 'DELETE') return mutation(runtime, ctx, authContext, accountId, async () => { await accounts.delete({ adminId: authContext.admin.id, accountId, requestId: ctx.requestId, traceId: ctx.traceId }); return success(ctx, { deleted: true }); });
     if (accountMatch[2] === 'connection' && ctx.method === 'GET') {
       const account = await accounts.get(authContext.admin.id, accountId);
       return { statusCode: 200, body: success(ctx, connectionView(account)).body };

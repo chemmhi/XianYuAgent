@@ -37,6 +37,8 @@ $env:VITE_API_MODE = "live"
 npm run dev
 ```
 
+根命令 `npm run dev` 会给 API 和 Worker 共享本次启动专用的随机 IM 通信密钥，保持已有凭证加密密钥不变。单独运行 `dev:api` / `dev:worker` 时，需给两者设置相同的 `XIANYU_IM_OWNER_SECRET`（至少 32 字符）；未设置时沿用 `CREDENTIAL_ENCRYPTION_KEY` 作为内部认证密钥。
+
 Stop the managed local dev process tree:
 
 ```powershell
@@ -72,6 +74,7 @@ npm run typecheck
 npm run build
 npm test
 npm run test:dev-lifecycle
+npm run test:dev-compose
 npm run test:e2e:chrome
 npm run verify
 ```
@@ -96,6 +99,8 @@ npm run compose:down
 ```
 
 Compose 当前负责 API、Worker、PostgreSQL、Redis 和 MinIO；对象存储映射到 `19000/19001`，保留 `9000` 给 PRD 参考项目；本地前端由根命令 `npm run dev` 启动。
+
+开发环境 MinIO 默认使用与生产相同的 `minio/minio:latest` 镜像。需要使用镜像代理或固定版本时，在根目录 `.env` 设置 `OBJECT_STORAGE_IMAGE=镜像地址:版本`，或通过同名环境变量覆盖。`npm run test:dev-compose` 验证默认值和覆盖行为，需要 Docker Compose CLI，不会启动容器或拉取镜像。
 
 ## 生产部署（GitHub Push 自动部署）
 

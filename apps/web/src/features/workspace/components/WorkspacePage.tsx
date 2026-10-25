@@ -1,3 +1,4 @@
+import { AccountContextState } from '../../../app/AccountContextState';
 import { Form } from '../../../shared/ui/Form';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useAccountContext } from '../../../app/account-context';
@@ -160,13 +161,11 @@ export function WorkspacePage({ api }: WorkspacePageProps) {
     if (currentRun.status === 'waiting_confirmation' && state.confirmation) void controller.cancelRun();
     else void controller.cancelActiveRun();
   }
-  function chooseAccount() { window.history.pushState({}, '', '/accounts'); window.dispatchEvent(new PopStateEvent('popstate')); }
+  if (accountsLoading || accountsError || contextMissing) return <AccountContextState />;
 
   return <section className="page-stack workspace-domain" data-workspace-domain>
-    {accountsError && <div className="workspace-inline-error" role="alert">账号上下文加载失败：{accountsError}</div>}
     {errorToast && <Toast message={errorToast} tone="error" onDismiss={() => setErrorToast(null)} />}
-    {contextMissing ? <WorkspaceState title="请先选择账号" message="每个工作区会话都绑定一个可用的闲鱼账号。" action={<button className="btn primary" type="button" onClick={chooseAccount}>前往账号管理</button>} />
-      : state.phase === 'forbidden' ? <WorkspaceState title="暂无工作区权限" message={state.error ?? '当前账号范围无法读取工作区。'} action={<button className="btn ghost" type="button" onClick={() => void controller.reload()}>重新加载</button>} />
+    {state.phase === 'forbidden' ? <WorkspaceState title="暂无工作区权限" message={state.error ?? '当前账号范围无法读取工作区。'} action={<button className="btn ghost" type="button" onClick={() => void controller.reload()}>重新加载</button>} />
         : <div className="workspace-surface">
           <div className="workspace-mobile-compact-header"><strong>Workspace</strong><span>{currentAccount?.displayName ?? '账号 A'} · 在线</span></div>
           <div className="workspace-page-body">

@@ -1,3 +1,4 @@
+import { AccountContextState } from '../../../app/AccountContextState';
 import { useEffect, useMemo, useState } from 'react';
 import type { AccountsApi } from '../../accounts/api';
 import { useAccountContext } from '../../../app/account-context';
@@ -26,7 +27,7 @@ export interface ProductsPageProps { api?: ProductsApi; accountsApi?: AccountsAp
 
 export function ProductsPage(props: ProductsPageProps) {
   const { currentAccountId, accountsLoading, accountsError } = useAccountContext();
-  if (!currentAccountId) return <section className="page-stack products-domain"><article className="card panel"><h2>商品目录</h2><p role="status">{accountsLoading ? '正在读取账号…' : accountsError ? '账号信息暂不可用，请刷新页面后重试。' : '请先在账号管理中添加或选择一个可用账号。'}</p></article></section>;
+  if (accountsLoading || accountsError || !currentAccountId) return <AccountContextState />;
   return <AccountProductsPage key={currentAccountId} {...props} accountId={currentAccountId} />;
 }
 

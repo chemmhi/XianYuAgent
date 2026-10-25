@@ -1,3 +1,4 @@
+import { AccountContextState } from '../../../app/AccountContextState';
 import { Form } from '../../../shared/ui/Form';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAccountContext } from '../../../app/account-context';
@@ -153,10 +154,7 @@ export function MessagesPage({ api: providedApi, active = true }: { api?: Messag
     setEmojiOpen(false);
   };
 
-  if (accountsLoading) return <section className="page-stack messages-domain"><div className="messages-state">正在加载账号范围…</div></section>;
-  if (accountsError) return <section className="page-stack messages-domain"><div className="messages-state messages-error" role="alert">{accountsError}</div></section>;
-  if (accounts.length === 0) return <section className="page-stack messages-domain"><div className="messages-state"><strong>请先连接闲鱼账号</strong><span>在线聊天需要先在账号管理中连接至少一个可用账号。</span><a className="btn ghost" href="/accounts">前往账号管理</a></div></section>;
-  if (!currentAccountId || !currentAccount) return <section className="page-stack messages-domain"><div className="messages-state"><strong>请先设置当前账号</strong><span>聊天页沿用账号管理中的全局账号上下文，不在此处切换账号。</span><a className="btn ghost" href="/accounts">前往账号管理</a></div></section>;
+  if (accountsLoading || accountsError || !currentAccountId || !currentAccount) return <AccountContextState />;
 
   return <section className="page-stack messages-domain" data-messages-domain>
     <div className="messages-layout card panel">

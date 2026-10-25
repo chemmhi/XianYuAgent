@@ -1,0 +1,9 @@
+{
+  "database": "isolated PostgreSQL",
+  "storage": "real MinIO",
+  "browser": "Chrome/CDP",
+  "cancellationPreservedData": true,
+  "uiDeletionRemovedDatabaseAndObjects": true,
+  "invitedUserRebindHasFreshIdAndEmptyData": true,
+  "externalXianyuAdapter": "stub"
+}

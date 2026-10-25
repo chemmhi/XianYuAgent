@@ -5,14 +5,23 @@ import net from 'node:net';
 import test from 'node:test';
 import { createDevEnvironment, findAvailablePort, resolveDevPorts } from './dev-ports.mjs';
 
-async function listen(port = 0) {
+async function listen(port = 0, host = '0.0.0.0') {
   const server = net.createServer();
-  server.listen(port, '0.0.0.0');
+  server.listen(port, host);
   await once(server, 'listening');
   return server;
 }
 
 const close = (server) => new Promise((resolve) => server.close(resolve));
+
+test('does not select a port already used by a loopback-only server', async (t) => {
+  const { port, servers } = await range(t);
+  await close(servers[0]);
+  const existing = await listen(port, '127.0.0.1');
+  t.after(() => close(existing));
+  assert.ok(await findAvailablePort(port) > port);
+  assert.equal(existing.listening, true);
+});
 
 async function range(t) {
   for (let attempt = 0; attempt < 30; attempt += 1) {
@@ -85,4 +94,20 @@ test('synchronizes ports and proxy while preserving custom WebSocket origins and
     'http://localhost:5175', 'http://127.0.0.1:5175',
   ]);
   assert.equal(original.VITE_API_PROXY_TARGET, 'http://127.0.0.1:8080');
+});
+
+test('shares a fresh internal IM secret without changing persisted credential encryption', () => {
+  const original = { CREDENTIAL_ENCRYPTION_KEY: 'existing-encryption-key' };
+  const first = createDevEnvironment({ apiPort: 8080, webPort: 5173 }, original);
+  const second = createDevEnvironment({ apiPort: 8080, webPort: 5173 }, original);
+  assert.match(first.XIANYU_IM_OWNER_SECRET, /^[a-f0-9]{64}$/);
+  assert.notEqual(first.XIANYU_IM_OWNER_SECRET, second.XIANYU_IM_OWNER_SECRET);
+  assert.equal(first.CREDENTIAL_ENCRYPTION_KEY, original.CREDENTIAL_ENCRYPTION_KEY);
+  assert.equal(original.XIANYU_IM_OWNER_SECRET, undefined);
+});
+
+test('preserves an explicitly configured internal IM secret', () => {
+  const secret = 'configured-im-owner-secret-with-32-characters';
+  const env = createDevEnvironment({ apiPort: 8080, webPort: 5173 }, { XIANYU_IM_OWNER_SECRET: secret });
+  assert.equal(env.XIANYU_IM_OWNER_SECRET, secret);
 });

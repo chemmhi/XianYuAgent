@@ -1,4 +1,5 @@
 import { isRecoverableAutomationSkip, RECOVERABLE_AUTOMATION_SKIP_REASONS } from './product-automation-execution-policy.js';
+import { purgeAccountRows, type AccountDeletionCleanup } from './account-purge-postgres.js';
 import { inviteAccessStatus } from './invite-access.js';
 import { Pool, type PoolClient } from 'pg';
 import type { AccountVerificationRisk, CredentialRefreshUpdate, VerificationRecoveryRequest } from './domain.js';
@@ -91,10 +92,15 @@ export class PostgresStore implements Store {
   readonly kind = 'postgres' as const;
   readonly pool: Pool;
   private toInvite(row: Row): import('./domain.js').InviteRecord { const usedAt=iso(row.used_at); const disabledAt=iso(row.disabled_at); const deletedAt=iso(row.deleted_at); const expiresAt=dateIso(row.expires_at); const status=deletedAt?'deleted':usedAt?'used':disabledAt||row.revoked_at?'disabled':Date.parse(expiresAt)<=Date.now()?'expired':'active'; return { id:String(row.id), codeHash:row.code_hash?String(row.code_hash):undefined, codeCiphertext:row.code_ciphertext?String(row.code_ciphertext):undefined, codePrefix:String(row.code_prefix), createdBy:String(row.created_by), requestKey:String(row.request_key), expiresAt, usedAt, usedBy:row.used_by?String(row.used_by):undefined, usedByEmail:row.used_by_email?String(row.used_by_email):undefined, usedByDisplayName:row.used_by_display_name?String(row.used_by_display_name):undefined, disabledAt, deletedAt, revokedAt:iso(row.revoked_at), createdAt:dateIso(row.created_at), status, accessStatus:inviteAccessStatus({disabledAt,revokedAt:iso(row.revoked_at),deletedAt,expiresAt}) }; }
+  private readonly accountLifecyclePool: Pool;
   private readonly outboundLockPool: Pool;
   private readonly deliveryPlanPool: Pool;
   constructor(databaseUrl: string) {
     this.pool = new Pool({ connectionString: databaseUrl });
+    // Lifecycle guards may call services which query the ordinary pool. Keep
+    // their lock-holding connections separate to avoid pool starvation.
+    this.accountLifecyclePool = new Pool({ connectionString: databaseUrl, max: 10 });
+    this.accountLifecyclePool.on('error', () => undefined);
     this.outboundLockPool = new Pool({ connectionString: databaseUrl, max: 10 });
     this.deliveryPlanPool = new Pool({ connectionString: databaseUrl, max: 2 });
     // A database restart emits errors on idle clients. Keep the process alive
@@ -233,7 +239,7 @@ export class PostgresStore implements Store {
   async revokeScope(adminId: string, accountId: string, scope: string): Promise<void> { await this.pool.query('update auth.account_scopes set status=\'revoked\', revoked_at=now() where admin_id=$1 and account_id=$2 and scope=$3', [adminId, accountId, scope]); }
   async listAccounts(adminId: string, query: AccountListQuery = {}): Promise<AccountListResult> {
     const params: unknown[] = [adminId];
-    const conditions = ["EXISTS (SELECT 1 FROM auth.account_scopes scope WHERE scope.account_id=a.id AND scope.admin_id=$1 AND scope.status='active' AND (scope.expires_at IS NULL OR scope.expires_at>now()))", "a.status <> 'disabled'"];
+    const conditions = ["EXISTS (SELECT 1 FROM auth.account_scopes scope WHERE scope.account_id=a.id AND scope.admin_id=$1 AND ((scope.status='active' AND (scope.expires_at IS NULL OR scope.expires_at>now())) OR (a.deletion_started_at IS NOT NULL AND scope.scope='manage' AND scope.status='revoked')))", "(a.status <> 'disabled' OR a.deletion_started_at IS NOT NULL)"];
     const effectiveStatus = "(case when a.risk_episode is not null then 'verification_required' when a.status in ('disabled','expired') then a.status when a.degraded_source is not null then 'degraded' when a.status='connected' and not (a.transport_status='connected' and a.transport_seen_at>now()-interval '15 seconds') then 'disconnected' else a.status end)";
     const addParam = (value: unknown) => { params.push(value); return `$${params.length}`; };
     const search = query.search?.trim();
@@ -253,13 +259,13 @@ export class PostgresStore implements Store {
     return { items: rows.rows.map(this.toAccount), page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
   }
   async getAccount(adminId: string, accountId: string): Promise<AccountRecord | undefined> { const result = await this.pool.query('select a.* from accounts.accounts a join auth.account_scopes s on s.account_id=a.id where a.id=$1 and s.admin_id=$2 and s.status=\'active\' and a.status<>\'disabled\' and (s.expires_at is null or s.expires_at>now())', [accountId, adminId]); return result.rows[0] ? this.toAccount(result.rows[0]) : undefined; }
-  async getAccountForLogin(adminId: string, accountId: string): Promise<AccountRecord | undefined> { const result = await this.pool.query('select a.* from accounts.accounts a join auth.account_scopes s on s.account_id=a.id where a.id=$1 and s.admin_id=$2 and s.scope=\'manage\' limit 1', [accountId, adminId]); return result.rows[0] ? this.toAccount(result.rows[0]) : undefined; }
-  async findAccountForLogin(input: { adminId: string; platform: string; sellerRef: string }): Promise<AccountRecord | undefined> { const result = await this.pool.query('select a.* from accounts.accounts a join auth.account_scopes s on s.account_id=a.id where a.platform=$1 and a.seller_ref=$2 and s.admin_id=$3 and s.scope=\'manage\' limit 1', [input.platform, input.sellerRef, input.adminId]); return result.rows[0] ? this.toAccount(result.rows[0]) : undefined; }
+  async getAccountForLogin(adminId: string, accountId: string): Promise<AccountRecord | undefined> { const result = await this.pool.query('select a.* from accounts.accounts a join auth.account_scopes s on s.account_id=a.id where a.id=$1 and s.admin_id=$2 and s.scope=\'manage\' and a.deletion_started_at is null limit 1', [accountId, adminId]); return result.rows[0] ? this.toAccount(result.rows[0]) : undefined; }
+  async findAccountForLogin(input: { adminId: string; platform: string; sellerRef: string }): Promise<AccountRecord | undefined> { const result = await this.pool.query('select a.* from accounts.accounts a join auth.account_scopes s on s.account_id=a.id where a.platform=$1 and a.seller_ref=$2 and s.admin_id=$3 and s.scope=\'manage\' and a.deletion_started_at is null limit 1', [input.platform, input.sellerRef, input.adminId]); return result.rows[0] ? this.toAccount(result.rows[0]) : undefined; }
   async restoreAccountForLogin(adminId: string, accountId: string): Promise<AccountRecord | undefined> {
     const client = await this.pool.connect();
     try {
       await client.query('begin');
-      const current = await client.query('select a.* from accounts.accounts a join auth.account_scopes s on s.account_id=a.id where a.id=$1 and s.admin_id=$2 and s.scope=\'manage\' limit 1 for update', [accountId, adminId]);
+      const current = await client.query('select a.* from accounts.accounts a join auth.account_scopes s on s.account_id=a.id where a.id=$1 and s.admin_id=$2 and s.scope=\'manage\' and a.deletion_started_at is null limit 1 for update', [accountId, adminId]);
       if (!current.rows[0]) { await client.query('rollback'); return undefined; }
       await client.query('insert into auth.account_scopes (id,admin_id,account_id,scope,status) values ($1,$2,$3,\'manage\',\'active\') on conflict (admin_id,account_id,scope) do update set status=\'active\', revoked_at=null, expires_at=null', [createId(), adminId, accountId]);
       const result = await client.query("update accounts.accounts set status=case when status='disabled' then 'pending' else status end, updated_at=now() where id=$1 returning *", [accountId]);
@@ -393,7 +399,57 @@ export class PostgresStore implements Store {
       and exists(select 1 from auth.account_scopes s where s.admin_id=$1 and s.account_id=n.account_id and s.status='active')`, [adminId, id]);
     return (result.rowCount ?? 0) === 1;
   }
-  async deleteAccount(adminId: string, accountId: string): Promise<AccountRecord | undefined> { const client = await this.pool.connect(); try { await client.query('begin'); const current = await client.query('select a.* from accounts.accounts a join auth.account_scopes s on s.account_id=a.id where a.id=$1 and s.admin_id=$2 and s.status=\'active\' and a.status<>\'disabled\' and (s.expires_at is null or s.expires_at>now()) for update', [accountId, adminId]); if (!current.rows[0]) { await client.query('rollback'); return undefined; } const result = await client.query('update accounts.accounts set status=\'disabled\', updated_at=now() where id=$1 returning *', [accountId]); await client.query('update auth.account_credentials set status=\'revoked\', updated_at=now() where account_id=$1 and status=\'active\'', [accountId]); await client.query('update auth.account_scopes set status=\'revoked\', revoked_at=now() where account_id=$1 and status=\'active\'', [accountId]); await client.query('commit'); return result.rows[0] ? this.toAccount(result.rows[0]) : undefined; } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); } }
+  async withAccountArtifactWrite<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const match = /^(coupons|products)\/([0-9a-f-]{36})\//i.exec(key);
+    if (!match) throw new Error('ACCOUNT_ARTIFACT_KEY_INVALID');
+    const owner = match[1] === 'coupons' ? match[2] : (await this.pool.query('select account_id from products.products where id=$1', [match[2]])).rows[0]?.account_id;
+    if (!owner) throw new Error('ACCOUNT_ARTIFACT_OWNER_MISSING');
+    return this.withAccountWriteGuard(owner, work);
+  }
+
+  async withAccountWriteGuard<T>(accountId: string, work: () => Promise<T>): Promise<T> {
+    const client = await this.accountLifecyclePool.connect();
+    try {
+      await client.query('begin');
+      const writable = await client.query("select 1 from accounts.accounts where id=$1 and deletion_started_at is null and status<>'disabled'", [accountId]);
+      if (!writable.rows[0]) throw new Error('ACCOUNT_DELETION_IN_PROGRESS');
+      await client.query('select pg_advisory_xact_lock_shared(hashtextextended($1,0))', [`account-data:${accountId}`]);
+      const active = await client.query("select 1 from accounts.accounts where id=$1 and deletion_started_at is null and status<>'disabled'", [accountId]);
+      if (!active.rows[0]) throw new Error('ACCOUNT_DELETION_IN_PROGRESS');
+      const result = await work(); await client.query('commit'); return result;
+    } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
+  }
+
+  async deleteAccount(adminId: string, accountId: string, cleanup?: AccountDeletionCleanup, onlyPreviouslyDeleted = false): Promise<AccountRecord | undefined> {
+    const client = await this.accountLifecyclePool.connect();
+    let artifactsLocked = false;
+    try {
+      await client.query('begin');
+      const current = await client.query(`select a.* from accounts.accounts a where a.id=$1
+        and (not $3::boolean or (a.status='disabled' and not exists(select 1 from auth.account_scopes live where live.account_id=a.id and live.status='active')))
+        and exists(
+        select 1 from auth.account_scopes s where s.account_id=a.id and s.admin_id=$2 and s.scope='manage'
+        and ((s.status='active' and (s.expires_at is null or s.expires_at>now())) or (a.status='disabled' and s.status='revoked'))) for update`, [accountId, adminId, onlyPreviouslyDeleted]);
+      if (!current.rows[0]) { await client.query('rollback'); return undefined; }
+      // Commit the fence before draining work that may be finishing a DB write.
+      await client.query("update accounts.accounts set status='disabled', deletion_started_at=coalesce(deletion_started_at,now()), updated_at=now() where id=$1", [accountId]);
+      await client.query("update auth.account_scopes set status='revoked',revoked_at=now() where account_id=$1", [accountId]);
+      await client.query("update auth.account_credentials set status='revoked',updated_at=now() where account_id=$1", [accountId]);
+      await client.query('commit');
+      await client.query('select pg_advisory_lock(hashtextextended($1,0))', [`account-data:${accountId}`]);
+      artifactsLocked = true;
+      const products = await client.query('select id from products.products where account_id=$1', [accountId]);
+      const sessions = await client.query('select id from auth.account_login_sessions where account_id=$1', [accountId]);
+      await cleanup?.({ accountId, productIds: products.rows.map(row => String(row.id)), loginSessionIds: sessions.rows.map(row => String(row.id)) });
+      await client.query('begin');
+      await client.query('select id from accounts.accounts where id=$1 for update', [accountId]);
+      await purgeAccountRows(client, accountId);
+      await client.query('commit');
+      return { ...this.toAccount(current.rows[0]), status: 'disabled' };
+    } catch (error) { await client.query('rollback'); throw error; } finally {
+      try { if (artifactsLocked) await client.query('select pg_advisory_unlock(hashtextextended($1,0))', [`account-data:${accountId}`]); } finally { client.release(); }
+    }
+  }
   async listProducts(adminId: string, query: ProductListQuery): Promise<ProductListResult> {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
@@ -2513,7 +2569,7 @@ export class PostgresStore implements Store {
     const result = await this.pool.query("update execution.outbox_jobs set status='pending',available_at=coalesce($3::timestamptz,now()),locked_at=null,lease_expires_at=null,lease_owner=null,updated_at=now() where scope=$1 and id=$2 and status in ('retryable','dead_lettered') returning *", [input.scope, input.id, input.availableAt ?? null]);
     return result.rows[0] ? this.toAutoReplyOutbox(result.rows[0]) : undefined;
   }
-  async close(): Promise<void> { await Promise.all([this.pool.end(), this.outboundLockPool.end(), this.deliveryPlanPool.end()]); }
+  async close(): Promise<void> { await Promise.all([this.pool.end(), this.outboundLockPool.end(), this.deliveryPlanPool.end(), this.accountLifecyclePool.end()]); }
 
   private async expireCouponReservations(client: PoolClient): Promise<number> {
     const result = await client.query(`with expired as (

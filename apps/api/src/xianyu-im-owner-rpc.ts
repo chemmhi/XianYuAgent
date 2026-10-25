@@ -5,7 +5,7 @@ import { idempotent, ServiceError } from './services.js';
 import { XianyuImSendNotStartedError, type XianyuImService } from './xianyu-im-service.js';
 
 export const IM_OWNER_RPC_PATH = '/internal/xianyu-im/v1';
-const METHODS = ['isReady', 'startListener', 'resetClient', 'listConversations', 'listMessages',
+const METHODS = ['isReady', 'startListener', 'resetClient', 'deleteAccountState', 'listConversations', 'listMessages',
   'markConversationRead', 'recoverRecentMessages', 'verifyPartialDeliveryImage', 'sendExternalText', 'sendText', 'sendImage'] as const;
 type Method = typeof METHODS[number];
 type Operations = Pick<XianyuImService, Method>;
@@ -103,7 +103,7 @@ export class XianyuImOwnerServer {
       const method = input.method, args = input.args.map(value => value === null ? undefined : value);
       send = SEND_METHODS.has(method);
       const [adminId, accountId] = args as [string, string];
-      if (!await this.store.hasAccountScope(adminId, accountId)) throw new ServiceError(403, 'ACCOUNT_SCOPE_FORBIDDEN', 'Account scope required');
+      if (method !== 'deleteAccountState' && !await this.store.hasAccountScope(adminId, accountId)) throw new ServiceError(403, 'ACCOUNT_SCOPE_FORBIDDEN', 'Account scope required');
       const fingerprint = createHash('sha256').update(JSON.stringify({ method, args: send ? args.slice(0, 5) : args })).digest('hex');
       if (method === 'sendImage') {
         const file = args[3] as { filename?: unknown; contentType?: unknown; data?: unknown };

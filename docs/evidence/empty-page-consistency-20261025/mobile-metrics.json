@@ -1,0 +1,138 @@
+[
+  {
+    "name": "仪表盘",
+    "box": {
+      "bottom": 828,
+      "height": 665.21875,
+      "left": 16,
+      "right": 374,
+      "top": 162.78125,
+      "width": 358,
+      "x": 16,
+      "y": 162.78125
+    },
+    "buttonVisible": true,
+    "centerDx": 0,
+    "centerDy": 0,
+    "overflow": false
+  },
+  {
+    "name": "Workspace",
+    "box": {
+      "bottom": 828,
+      "height": 812,
+      "left": 16,
+      "right": 374,
+      "top": 16,
+      "width": 358,
+      "x": 16,
+      "y": 16
+    },
+    "buttonVisible": true,
+    "centerDx": 0,
+    "centerDy": 0,
+    "overflow": false
+  },
+  {
+    "name": "在线聊天",
+    "box": {
+      "bottom": 828,
+      "height": 665.21875,
+      "left": 16,
+      "right": 374,
+      "top": 162.78125,
+      "width": 358,
+      "x": 16,
+      "y": 162.78125
+    },
+    "buttonVisible": true,
+    "centerDx": 0,
+    "centerDy": 0,
+    "overflow": false
+  },
+  {
+    "name": "商品管理",
+    "box": {
+      "bottom": 828,
+      "height": 812,
+      "left": 16,
+      "right": 374,
+      "top": 16,
+      "width": 358,
+      "x": 16,
+      "y": 16
+    },
+    "buttonVisible": true,
+    "centerDx": 0,
+    "centerDy": 0,
+    "overflow": false
+  },
+  {
+    "name": "卡券管理",
+    "box": {
+      "bottom": 828,
+      "height": 690,
+      "left": 16,
+      "right": 374,
+      "top": 138,
+      "width": 358,
+      "x": 16,
+      "y": 138
+    },
+    "buttonVisible": true,
+    "centerDx": 0,
+    "centerDy": 0,
+    "overflow": false
+  },
+  {
+    "name": "订单管理",
+    "box": {
+      "bottom": 828,
+      "height": 690,
+      "left": 16,
+      "right": 374,
+      "top": 138,
+      "width": 358,
+      "x": 16,
+      "y": 138
+    },
+    "buttonVisible": true,
+    "centerDx": 0,
+    "centerDy": 0,
+    "overflow": false
+  },
+  {
+    "name": "Agent 动态",
+    "box": {
+      "bottom": 828,
+      "height": 665.21875,
+      "left": 16,
+      "right": 374,
+      "top": 162.78125,
+      "width": 358,
+      "x": 16,
+      "y": 162.78125
+    },
+    "buttonVisible": true,
+    "centerDx": 0,
+    "centerDy": 0,
+    "overflow": false
+  },
+  {
+    "name": "设置",
+    "box": {
+      "bottom": 746,
+      "height": 654,
+      "left": 16,
+      "right": 374,
+      "top": 92,
+      "width": 358,
+      "x": 16,
+      "y": 92
+    },
+    "buttonVisible": true,
+    "centerDx": 0,
+    "centerDy": 0,
+    "overflow": false
+  }
+]

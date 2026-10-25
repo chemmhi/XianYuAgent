@@ -21,10 +21,27 @@ describe('AccountStateView', () => {
       onRetry: vi.fn(),
     }));
 
-    expect(emptyHtml).toContain('accounts-domain-state-empty');
+    expect(emptyHtml).toContain('class="page-state"');
     expect(errorHtml).toContain('accounts-domain-state-error');
     expect(errorHtml).not.toContain('role="alert"');
     expect(errorHtml).not.toContain('网络不可用');
     expect(errorHtml).toContain('重新加载');
+  });
+});
+
+describe('account empty state', () => {
+  it('guides a new user to add an account with the shared primary button', () => {
+    const html = renderToStaticMarkup(<AccountStateView phase="empty" error={null} onRetry={() => undefined} hasAccounts={false} onAddAccount={() => undefined} />);
+    expect(html).toContain('尚未添加闲鱼账号');
+    expect(html).toContain('ui-button-primary');
+    expect(html).toContain('添加闲鱼账号');
+    expect(html).not.toContain('调整搜索');
+  });
+
+  it('preserves search guidance when existing accounts do not match filters', () => {
+    const html = renderToStaticMarkup(<AccountStateView phase="empty" error={null} onRetry={() => undefined} hasAccounts onAddAccount={() => undefined} />);
+    expect(html).toContain('暂无匹配账号');
+    expect(html).toContain('调整搜索或筛选条件后重试。');
+    expect(html).not.toContain('添加闲鱼账号');
   });
 });

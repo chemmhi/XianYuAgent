@@ -350,9 +350,11 @@ test('listener startup delegates to the account-scoped client bootstrap', async 
   const calls: string[] = [];
   const unsafe = service as unknown as {
     ensureClient: (adminId: string, accountId: string) => Promise<unknown>;
+    deletedAccounts: Set<string>;
     credentialRefreshTimers: Map<string, unknown>;
     credentialRefreshInFlight: Map<string, Promise<void>>;
   };
+  unsafe.deletedAccounts = new Set();
   unsafe.credentialRefreshTimers = new Map();
   unsafe.credentialRefreshInFlight = new Map();
   unsafe.ensureClient = async (adminId, accountId) => {

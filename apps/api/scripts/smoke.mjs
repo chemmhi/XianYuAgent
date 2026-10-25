@@ -160,7 +160,7 @@ try {
   });
   assert.equal(deleted.response.status, 200);
   assert.equal(deleted.body.data.deleted, true);
-  assert.equal(deleted.body.data.account.status, 'disabled');
+  assert.equal(deleted.body.data.account, undefined);
   const afterDeleteList = await request('/api/v1/accounts', { headers: { cookie } });
   assert.equal(afterDeleteList.response.status, 200);
   assert.equal(afterDeleteList.body.data.items.length, 0);
@@ -171,8 +171,7 @@ try {
     headers: { cookie, 'X-CSRF-Token': decodeURIComponent(csrf), 'Idempotency-Key': 'account-delete-1' },
     body: JSON.stringify({}),
   });
-  assert.equal(deletedReplay.response.status, 200);
-  assert.deepEqual(deletedReplay.body, deleted.body);
+  assert.equal(deletedReplay.response.status, 404);
 
   console.log('env0 smoke passed');
 } finally {

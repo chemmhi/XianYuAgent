@@ -1,3 +1,4 @@
+import { AccountContextState } from '../../../app/AccountContextState';
 import { useMemo } from 'react';
 import { useAccountContext } from '../../../app/account-context';
 import type { PageKey } from '../../../app/navigation';
@@ -41,10 +42,7 @@ export function AgentDynamicsPage({ api: providedApi, onNavigate }: AgentDynamic
     { value: '7d' as const, label: '最近 7 天' },
   ];
 
-  if (accountsLoading) return <section className="agent-dynamics-context-state"><div>正在加载账号范围…</div></section>;
-  if (accountsError) return <section className="agent-dynamics-context-state error" role="alert"><strong>账号上下文加载失败</strong><span>{accountsError}</span></section>;
-  if (accounts.length === 0) return <section className="agent-dynamics-context-state"><strong>请先连接闲鱼账号</strong><span>Agent 动态需要先连接至少一个可用账号。</span><a className="agent-dynamics-btn" href="/accounts">前往账号管理</a></section>;
-  if (!currentAccountId || !currentAccount) return <section className="agent-dynamics-context-state"><strong>请先设置当前账号</strong><span>Agent 动态沿用账号管理中的全局账号上下文，不在此处切换账号。</span><a className="agent-dynamics-btn" href="/accounts">前往账号管理</a></section>;
+  if (accountsLoading || accountsError || !currentAccountId || !currentAccount) return <AccountContextState />;
 
   return <div className="agent-dynamics-app">
     <section className="agent-dynamics-shell">

@@ -1,4 +1,5 @@
 import net from 'node:net';
+import { randomBytes } from 'node:crypto';
 
 function parsePort(value, name) {
   const port = Number(value);
@@ -25,7 +26,11 @@ export async function findAvailablePort(startPort, { host = '0.0.0.0', exclude =
   const start = parsePort(startPort, 'Starting port');
   const excluded = new Set(exclude);
   for (let port = start; port <= 65535; port += 1) {
-    if (!excluded.has(port) && await canListen(port, host)) return port;
+    if (excluded.has(port) || !await canListen(port, host)) continue;
+    // Windows permits a wildcard bind alongside an existing loopback bind.
+    // Probe the advertised local address too, or browsers reach that owner.
+    if (host === '0.0.0.0' && !await canListen(port, '127.0.0.1')) continue;
+    return port;
   }
   throw new Error(`No available port between ${start} and 65535 on ${host}.`);
 }
@@ -46,6 +51,9 @@ export function createDevEnvironment({ apiPort, webPort }, env = process.env) {
   }
   return {
     ...env,
+    // One launch shares an RPC secret across API/Worker. Keep the persisted
+    // credential-encryption key unchanged when a developer has not set one.
+    XIANYU_IM_OWNER_SECRET: env.XIANYU_IM_OWNER_SECRET?.trim() || randomBytes(32).toString('hex'),
     PORT: String(apiPort),
     VITE_PORT: String(webPort),
     VITE_API_PROXY_TARGET: `http://127.0.0.1:${apiPort}`,

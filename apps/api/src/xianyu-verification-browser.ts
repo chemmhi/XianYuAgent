@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { dropStaleCaptchaChallengeCookies, normalizeCookieSnapshot, type XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
@@ -89,6 +89,16 @@ export class XianyuVerificationBrowser {
   }
 
   get enabled(): boolean { return this.mode !== 'disabled'; }
+
+  async deleteProfile(profileKey: string): Promise<void> {
+    if (!/^[0-9a-f-]{36}$/i.test(profileKey)) throw new Error('ACCOUNT_PROFILE_KEY_INVALID');
+    const directory = join(this.configuredUserDataDir ?? resolveDefaultVerificationUserDataDir(), sanitizeProfileKey(profileKey));
+    const key = normalizeProfileLockKey(directory);
+    await profileVerificationTails.get(key);
+    try { await stat(directory); } catch (error) { if ((error as { code?: string }).code === 'ENOENT') return; throw error; }
+    const release = await acquireXianyuVerificationProfileLock(directory, this.maxWaitMs);
+    try { await rm(directory, { recursive: true, force: true }); } finally { await release(); }
+  }
 
   async waitForCompletion(input: {
     verificationUrl: string;
