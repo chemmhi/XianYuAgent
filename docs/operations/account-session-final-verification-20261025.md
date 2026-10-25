@@ -1,8 +1,12 @@
-# 逐星智能生产恢复最终验收（2026-10-25）
+# 逐星智能生产会话核验（2026-10-25，含状态反复与时间更正）
 
 ## 结论
 
-本次验收目标是生产账号“逐星智能”恢复正常。2026-10-25 11:37:50（Asia/Shanghai）对腾讯云生产 PostgreSQL 只读核验得到：
+**2026-10-25 16:11:01 +08:00 的最新只读核验显示：账号再次需要验证，持续恢复尚未达成。** 账号状态为 `verification_required`，传输为 `disconnected`，`transportFresh=false`；最近心跳为 `2026-10-25T15:17:36.394465+08:00`。风险码为 `ACCOUNT_VALIDATION_REQUIRED`，来源为 `im_listener`，凭证状态仍为 `active`。凭证 active 和服务健康不能替代真实连接结果。
+
+同轮生产 Git SHA 为 `591ce9682752eea267a504a542182d269c141852`，`healthz` 和 `readyz` 返回成功。目标账号的运行日志包含恢复失败及 `ACCOUNT_VALIDATION_REQUIRED`、`XIANYU_BROWSER_IM_REQUEST_FAILED`，未据此宣称新的真实挑战成功。本轮只读核验没有触发新的挑战、刷新 Token 或写回凭证。
+
+以下是历史时点记录，不能作为最新状态。本次验收目标是生产账号“逐星智能”恢复正常。2026-10-25 **03:37:50 +08:00**（Asia/Shanghai）对腾讯云生产 PostgreSQL 只读核验得到：
 
 - 账号 UUID：`1d274de5-38b8-4c9b-83ed-d8ba803685ac`
 - 账号状态：`connected`
@@ -35,7 +39,7 @@
 
 ## 接口与参数记录口径
 
-原始请求、响应、浏览器事件、设备标识、Cookie 属性、浏览器环境和参数正文均保存在本地忽略目录，不提交到 Git：
+历史已采集的请求、响应、浏览器事件、设备标识、Cookie 属性、浏览器环境和参数正文保存在本地忽略目录，不提交到 Git。覆盖范围以完整性清单和采集缺口为准，不表示每一次生产恢复都已有完整记录：
 
 `F:\ChenHai\Project\XianYuAgent\artifacts\slider-recording\20261024-ydisks-local`
 
@@ -43,7 +47,7 @@
 
 `F:\ChenHai\Project\XianYuAgent\artifacts\slider-recording\20261024-session-cookie-fix`
 
-记录至少覆盖：
+已有记录与核验应关联以下字段；具体缺失项以各阶段记录为准：
 
 - 平台 Token 请求的 API、版本、请求时间、设备标识、请求体/响应关联和 Set-Cookie 变化；
 - 同一浏览器 profile 的 Cookie 快照、domain/path/secure/httpOnly/sameSite/partitionKey 及跨站祖先标记；
@@ -63,14 +67,20 @@
 - 内存与隔离 PostgreSQL 风险 revision/CAS、写入失败保护和并发新风险保护；
 - MTOP Cookie 增量合并、分区 Cookie、IM 注册和监听器恢复。
 
-生产部署流程仍是：本地修改和测试 → GitHub main → GitHub Actions → 服务器拉取同一 SHA → 统一部署脚本 → healthz/readyz → 账号只读状态核验。没有手工修改服务器源码、导入实验凭证或直接改生产状态。
+生产部署流程仍是：本地修改和测试 → GitHub main → GitHub Actions → 服务器拉取同一 SHA → 统一部署脚本 → healthz/readyz → 账号只读状态核验。本轮复核没有修改服务器源码、导入实验凭证或直接改生产状态；这不是对全部其他历史操作的审计结论。
 
 ## 长期限制
 
-生产状态证明的是本次真实服务运行时已恢复；平台挑战、Cookie 有效期和远端风控具有时效性。后续任务仍必须重新核验业务 Token、登录身份、IM connected、凭证状态和风险状态，不能只看 HTTP 200、页面跳转或单次滑块 verdict。
+历史正常状态仅证明那些观察时点的数据库与连接状态；最新复核已经发现状态反复。平台挑战、Cookie 有效期和远端风控具有时效性。后续仍必须核验业务 Token、登录身份、IM connected、心跳新鲜度、凭证状态和风险状态，不能只看 HTTP 200、页面跳转或单次滑块 verdict。状态快照也不能单独证明一次新的自动挑战已经完整执行成功。
 
 ## 文档提交后的再次核验
 
 - 文档提交 `b5744923911ae0a213c86af388667595825f4c03` 已由 GitHub Actions 运行 [40126486116](https://github.com/chemmhi/XianYuAgent/actions/runs/40126486116) 成功部署。该提交只改变文档和永久记忆入口，未改变服务算法或凭证数据。
-- 2026-10-25 11:45:09（Asia/Shanghai）服务器 Git SHA 为 `b5744923911ae0a213c86af388667595825f4c03`，`healthz` 与 `readyz` 均返回成功。
+- 2026-10-25 **03:45:09 +08:00**（Asia/Shanghai）服务器 Git SHA 为 `b5744923911ae0a213c86af388667595825f4c03`，`healthz` 与 `readyz` 均返回成功。
 - 同时段生产只读核验仍为：`逐星智能` `status=connected`、`transport=connected`、`credentialStatus=active`、`riskCode=null`、`riskSource=null`。
+
+## 时间更正与最新证据位置
+
+此前文档及回复将已包含 `+08:00` 的服务器时间再次增加八小时，错误写成 11:37、11:45、11:49。正确历史时间分别为 03:37:50、03:45:09、03:49:39，均为 2026-10-25 的上海时间。原始返回值保持不变。
+
+本轮原始日志、SQL、命令输入和只读结果保存在本地忽略目录 `artifacts/slider-recording/20261025-status-correction/`。旧封存目录不修改。本轮不增加求解算法、轨迹参数或自动挑战执行步骤；没有重新执行历史测试，也不将历史测试结果当作本轮生产验收。
