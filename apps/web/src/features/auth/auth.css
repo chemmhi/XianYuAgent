@@ -4,6 +4,9 @@
 .auth-form-heading { display: grid; gap: 7px; margin-bottom: 4px; }
 .auth-form-heading h1, .auth-state h1 { margin: 0; color: var(--text); font-size: 26px; }
 .auth-form-heading p:not(.eyebrow), .auth-state p:not(.eyebrow) { margin: 0; color: var(--sub); line-height: 1.6; font-size: 13px; }
-.auth-form-error { margin: 0; padding: 10px 12px; border: 1px solid rgba(180,35,24,.18); border-radius: 8px; background: var(--danger-bg); color: var(--danger); font-size: 12px; line-height: 1.5; }
 .auth-submit { width: 100%; margin-top: 4px; }
 .auth-state { justify-items: start; }
+
+.auth-form .ui-input-control[aria-invalid="true"]{border-color:var(--danger);box-shadow:0 0 0 2px rgba(180,35,24,.1)}
+
+.auth-confirm-field{position:relative;padding-bottom:20px}.auth-confirm-field .ui-field-error{position:absolute;left:0;bottom:0;line-height:16px}

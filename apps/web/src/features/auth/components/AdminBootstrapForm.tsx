@@ -2,14 +2,14 @@ import { useState, type FormEvent } from 'react';
 import { Button } from '../../../shared/ui/Button';
 import { InputField } from '../../../shared/ui/InputField';
 
-export function AdminBootstrapForm({ busy, error, onSubmit }: { busy: boolean; error: string | null; onSubmit: (input: { email: string; password: string; displayName: string }) => Promise<void> }) {
+export function AdminBootstrapForm({ busy, onSubmit }: { busy: boolean; onSubmit: (input: { email: string; password: string; displayName: string }) => Promise<void> }) {
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    try { await onSubmit({ displayName: displayName.trim(), email: email.trim(), password }); } catch { /* controller exposes the field-level error */ }
+    try { await onSubmit({ displayName: displayName.trim(), email: email.trim(), password }); } catch { /* AuthGate reports the request error through the shared Toast */ }
   }
 
   return (
@@ -18,7 +18,6 @@ export function AdminBootstrapForm({ busy, error, onSubmit }: { busy: boolean; e
       <InputField label="显示名称" autoComplete="name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} required />
       <InputField label="管理员邮箱" type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required />
       <InputField label="设置密码" type="password" autoComplete="new-password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} required />
-      {error && <p className="auth-form-error" role="alert">{error}</p>}
       <Button variant="primary" className="auth-submit" type="submit" disabled={busy}>{busy ? '初始化中…' : '创建管理员并继续'}</Button>
     </form>
   );
