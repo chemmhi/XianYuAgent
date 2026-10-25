@@ -18,6 +18,7 @@
     "dev:stop": "node scripts/dev-stop.mjs",
     "deps:ci": "npm run dev:stop && npm ci",
     "test:dev-lifecycle": "node --test scripts/dev-lifecycle.test.mjs scripts/dev-ports.test.mjs scripts/dev-runner.test.mjs",
+    "test:dev-compose": "node --test scripts/dev-compose.test.mjs",
     "dev:prepare": "docker compose stop api worker && docker compose up -d postgres redis object-storage && npm run db:migrate",
     "infra:up": "docker compose up -d postgres redis object-storage",
     "infra:down": "docker compose stop postgres redis object-storage",
