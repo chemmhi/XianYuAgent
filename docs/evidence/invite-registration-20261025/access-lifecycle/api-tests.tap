@@ -1,0 +1,36 @@
+✔ memory: a pre-existing run cannot execute another user tool or confirmation after losing access (261.7743ms)
+✔ postgres: a pre-existing run cannot execute another user tool or confirmation after losing access (2105.7323ms)
+✔ memory: both realtime channels reject post-revocation frames and idle expiry without refreshing sessions (2367.7681ms)
+{"component":"workspace-ws","event":"upgrade_failed","errorCode":"Error"}
+✔ postgres: both realtime channels reject post-revocation frames and idle expiry without refreshing sessions (3096.5148ms)
+✔ access status preserves exact expiry and independent revocation semantics (2.2975ms)
+✔ memory: activated invite access governs fresh login and existing sessions without affecting other actors (643.5245ms)
+✔ postgres: activated invite access governs fresh login and existing sessions without affecting other actors (1725.8864ms)
+✔ memory: invite generation and atomic registration (466.2793ms)
+✔ postgres: invite generation and atomic registration (1912.5247ms)
+▶ memory: platform-user isolation and existing settings compatibility
+  ✔ authenticated idempotency cannot replay another user settings (40.0187ms)
+  ✔ account, model, conversation and workspace read/write are scoped (24.406ms)
+  ✔ credential creation/update/action cache never crosses platform users (18.0385ms)
+  ✔ workspace and conversation WebSockets reject foreign resource subscriptions (14.2316ms)
+  ✔ Cookie rebinding cannot overwrite either user credentials (5.8006ms)
+  ✔ host Skills are rejected at HTTP, natural-language and model-tool boundaries (11.5779ms)
+  ✔ invited-user model URLs/probes cannot reach arbitrary hosts; own trusted config still saves (2.4499ms)
+✔ memory: platform-user isolation and existing settings compatibility (241.0774ms)
+▶ postgres: platform-user isolation and existing settings compatibility
+  ✔ authenticated idempotency cannot replay another user settings (81.8947ms)
+  ✔ account, model, conversation and workspace read/write are scoped (109.113ms)
+  ✔ credential creation/update/action cache never crosses platform users (167.0058ms)
+  ✔ workspace and conversation WebSockets reject foreign resource subscriptions (31.4118ms)
+  ✔ Cookie rebinding cannot overwrite either user credentials (66.8797ms)
+  ✔ host Skills are rejected at HTTP, natural-language and model-tool boundaries (84.4822ms)
+  ✔ invited-user model URLs/probes cannot reach arbitrary hosts; own trusted config still saves (36.8819ms)
+✔ postgres: platform-user isolation and existing settings compatibility (2015.9581ms)
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6376.801
