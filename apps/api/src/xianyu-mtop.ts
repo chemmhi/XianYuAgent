@@ -35,7 +35,7 @@ class AccountHealthPersistenceError extends Error {
   constructor(cause: unknown) { super('ACCOUNT_HEALTH_PERSIST_FAILED', { cause }); }
 }
 
-export interface MtopCredential { cookieHeader?: string; deviceId?: string; metadata?: Record<string, string>; }
+export interface MtopCredential { cookieHeader?: string; deviceId?: string; metadata?: Record<string, string>; id?: string; updatedAt?: string; generation?: number; accessToken?: string; expiresAt?: string; }
 
 export interface MtopResult {
   success: boolean;
@@ -44,6 +44,8 @@ export interface MtopResult {
   message?: string;
   response?: Record<string, unknown>;
   cookieHeader: string;
+  /** Internal, non-enumerable request evidence; never serialize credentials. */
+  credential?: MtopCredential;
 }
 
 export interface XianyuItemsPageResult extends MtopResult, ProductSyncPageResult {}
@@ -103,8 +105,8 @@ export interface XianyuChatImageUploadResult {
 export interface XianyuMtopClientOptions {
   timeoutMs?: number;
   loadCredential: (adminId: string, accountId: string) => Promise<MtopCredential | undefined>;
-  saveCookie: (adminId: string, accountId: string, cookieHeader: string, metadata?: Record<string, string>) => Promise<void>;
-  onFailure?: (input: { adminId: string; accountId: string; api: string; errorCode?: string; message?: string; accountInvalid: boolean; recoveryRequest?: VerificationRecoveryRequest }) => Promise<void> | void;
+  saveCookie: (adminId: string, accountId: string, cookieHeader: string, metadata?: Record<string, string>, expected?: MtopCredential) => Promise<void | MtopCredential>;
+  onFailure?: (input: { adminId: string; accountId: string; api: string; errorCode?: string; message?: string; accountInvalid: boolean; recoveryRequest?: VerificationRecoveryRequest; credential?: MtopCredential }) => Promise<void> | void;
   onSuccess?: (input: { adminId: string; accountId: string; api: string; startedAt: string }) => Promise<void> | void;
 }
 
@@ -131,15 +133,15 @@ export class XianyuMtopClient {
     const client = new XianyuMtopClient({ timeoutMs: this.timeoutMs,
       loadCredential: async (admin, account) => admin === adminId && account === accountId ? snapshot : undefined,
       saveCookie: async (_admin, _account, cookieHeader, metadata) => { snapshot = { ...snapshot, cookieHeader, metadata }; },
-      onFailure: this.onFailure, onSuccess: this.onSuccess });
+      onFailure: input => this.onFailure?.(bindMtopCredential({ ...input }, credential)), onSuccess: this.onSuccess });
     return { client, getCredential: () => snapshot };
   }
 
   private async reportFailure(input: Parameters<NonNullable<XianyuMtopClientOptions['onFailure']>>[0]): Promise<void> {
-    const { adminId, accountId, api, errorCode, message, accountInvalid, recoveryRequest } = input;
+    const { adminId, accountId, api, errorCode, message, accountInvalid, recoveryRequest, credential } = input;
     try {
-      await this.onFailure?.({ adminId, accountId, api, errorCode, message, accountInvalid,
-        ...(recoveryRequest ? { recoveryRequest } : {}) });
+      await this.onFailure?.(bindMtopCredential({ adminId, accountId, api, errorCode, message, accountInvalid,
+        ...(recoveryRequest ? { recoveryRequest } : {}) }, credential));
     }
     catch (error) { throw new AccountHealthPersistenceError(error); }
   }
@@ -157,16 +159,16 @@ export class XianyuMtopClient {
     return this.call(adminId, accountId, api, version, data, extraParams, options);
   }
 
-  async fetchImToken(adminId: string, accountId: string, deviceId: string, options: MtopRequestOptions = {}): Promise<{ success: boolean; accountInvalid: boolean; errorCode?: string; message?: string; accessToken?: string; verificationUrl?: string; response?: Record<string, unknown>; cookieHeader: string }> {
+  async fetchImToken(adminId: string, accountId: string, deviceId: string, options: MtopRequestOptions = {}): Promise<{ success: boolean; accountInvalid: boolean; errorCode?: string; message?: string; accessToken?: string; verificationUrl?: string; response?: Record<string, unknown>; cookieHeader: string; credential?: MtopCredential }> {
     const result = await this.call(adminId, accountId, 'mtop.taobao.idlemessage.pc.login.token', '1.0', { appKey: XIANYU_IM_APP_KEY, deviceId }, { spm_cnt: 'a21ybx.im.0.0', spm_pre: 'a21ybx.item.want.1.14ad3da6ALVq3n', log_id: '14ad3da6ALVq3n' }, options);
     const accessToken = nestedString(result.response, ['data', 'accessToken']);
     const verificationUrl = extractVerificationUrl(result.response);
     if (!result.success || !accessToken) {
       const failure = { success: false, accountInvalid: result.accountInvalid, errorCode: result.errorCode ?? 'IM_TOKEN_MISSING', message: result.message ?? 'unable to obtain im token', verificationUrl, response: result.response, cookieHeader: result.cookieHeader };
-      if (result.success) await this.reportFailure({ adminId, accountId, api: 'mtop.taobao.idlemessage.pc.login.token', ...failure });
-      return failure;
+      if (result.success) await this.reportFailure({ adminId, accountId, api: 'mtop.taobao.idlemessage.pc.login.token', credential: result.credential, ...failure });
+      return bindMtopCredential(failure, result.credential);
     }
-    return { success: true, accountInvalid: false, accessToken, response: result.response, cookieHeader: result.cookieHeader };
+    return bindMtopCredential({ success: true, accountInvalid: false, accessToken, response: result.response, cookieHeader: result.cookieHeader }, result.credential);
   }
 
   async fetchProfile(adminId: string, accountId: string): Promise<MtopResult> {
@@ -200,7 +202,8 @@ export class XianyuMtopClient {
     // The IM WebSocket can remain connected after the browser-side MTOP
     // session expires. Re-run the IM token flow so MTOP can rotate the
     // persisted Cookie snapshot, then retry the upload with that cookie.
-    const credential = await this.loadCredential(adminId, accountId);
+    const loadedCredential = await this.loadCredential(adminId, accountId);
+    const credential = loadedCredential && structuredClone(loadedCredential);
     const refreshed = await this.fetchImToken(adminId, accountId, credential?.deviceId ?? `xianyu-${accountId}`);
     if (!refreshed.success) return firstAttempt;
     const retryStartedAt = new Date().toISOString();
@@ -216,7 +219,8 @@ export class XianyuMtopClient {
   }
 
   private async uploadChatImageOnce(adminId: string, accountId: string, filename: string, contentType: string, data: Buffer): Promise<XianyuChatImageUploadResult> {
-    const credential = await this.loadCredential(adminId, accountId);
+    const loadedCredential = await this.loadCredential(adminId, accountId);
+    const credential = loadedCredential && structuredClone(loadedCredential);
     const initialCookieHeader = credential?.cookieHeader?.trim() ?? '';
     let cookieHeader = initialCookieHeader;
     let cookieSnapshot: XianyuCookieSnapshot | undefined = cookieSnapshotFromMetadata(credential?.metadata);
@@ -262,7 +266,7 @@ export class XianyuMtopClient {
       }
       const nextMetadata = cookieSnapshot ? metadataWithCookieSnapshot(initialMetadata, cookieSnapshot) : initialMetadata;
       if (cookieHeader !== initialCookieHeader || (cookieSnapshot && JSON.stringify(nextMetadata) !== JSON.stringify(initialMetadata))) {
-        await this.saveCookie(adminId, accountId, cookieHeader, nextMetadata);
+        { const saved = await this.saveCookie(adminId, accountId, cookieHeader, nextMetadata, credential); if (saved && credential) Object.assign(credential, saved); }
       }
       const raw = await response.text();
       let parsed: unknown;
@@ -295,7 +299,8 @@ export class XianyuMtopClient {
   }
 
   async fetchItemsPage(adminId: string, accountId: string, pageNumber = 1, pageSize = 20): Promise<XianyuItemsPageResult> {
-    const credential = await this.loadCredential(adminId, accountId);
+    const loadedCredential = await this.loadCredential(adminId, accountId);
+    const credential = loadedCredential && structuredClone(loadedCredential);
     const cookieHeader = credential?.cookieHeader?.trim() ?? '';
     const userId = cookieValue(cookieHeader, 'unb');
     const response = await this.call(adminId, accountId, 'mtop.idle.web.xyh.item.list', '1.0', {
@@ -507,7 +512,8 @@ export class XianyuMtopClient {
   async call(adminId: string, accountId: string, api: string, version: string, data: Record<string, unknown>, extraParams: Record<string, string> = {}, requestOptions: MtopRequestOptions = {}): Promise<MtopResult> {
     const startedAt = new Date().toISOString();
     const recoveryRequest = createVerificationReadRequest(api, version, data, extraParams, requestOptions.referer);
-    const credential = await this.loadCredential(adminId, accountId);
+    const loadedCredential = await this.loadCredential(adminId, accountId);
+    const credential = loadedCredential && structuredClone(loadedCredential);
     const initialCookieHeader = credential?.cookieHeader?.trim() ?? '';
     let cookieHeader = initialCookieHeader;
     let cookieSnapshot: XianyuCookieSnapshot | undefined = cookieSnapshotFromMetadata(credential?.metadata);
@@ -515,8 +521,8 @@ export class XianyuMtopClient {
     if (!cookieHeader && cookieSnapshot) cookieHeader = cookieHeaderFromSnapshot(cookieSnapshot);
     if (!cookieHeader) {
       const result = { success: false, accountInvalid: true, errorCode: 'CREDENTIAL_MISSING', message: 'account credential is missing', cookieHeader };
-      await this.reportFailure({ adminId, accountId, api, recoveryRequest, ...result });
-      return result;
+      await this.reportFailure({ adminId, accountId, api, recoveryRequest, credential, ...result });
+      return bindMtopCredential(result, credential);
     }
     // A manually refreshed raw Cookie is authoritative. Once it diverges from
     // the persisted browser snapshot, discard the stale snapshot for the whole
@@ -551,8 +557,8 @@ export class XianyuMtopClient {
       const token = (useSnapshot ? snapshotToken : cookieValue(cookieHeader, '_m_h5_tk')).split('_', 1)[0] ?? '';
       if (!token) {
         const result = { success: false, accountInvalid: true, errorCode: 'MTOP_TOKEN_MISSING', message: 'credential does not contain _m_h5_tk', cookieHeader };
-        await this.reportFailure({ adminId, accountId, api, recoveryRequest, ...result });
-        return result;
+        await this.reportFailure({ adminId, accountId, api, recoveryRequest, credential, ...result });
+        return bindMtopCredential(result, credential);
       }
       const timestamp = String(Date.now());
       const params = new URLSearchParams({
@@ -599,7 +605,7 @@ export class XianyuMtopClient {
           cookieHeader = mergeCookies(cookieHeader, setCookies);
         }
         const nextMetadata = cookieSnapshot ? metadataWithCookieSnapshot(requestMetadata, cookieSnapshot) : requestMetadata;
-        if (cookieHeader !== initialCookieHeader || JSON.stringify(nextMetadata) !== JSON.stringify(initialMetadata)) await this.saveCookie(adminId, accountId, cookieHeader, nextMetadata);
+        if (cookieHeader !== initialCookieHeader || JSON.stringify(nextMetadata) !== JSON.stringify(initialMetadata)) { const saved = await this.saveCookie(adminId, accountId, cookieHeader, nextMetadata, credential); if (saved && credential) Object.assign(credential, saved); }
         const raw = await response.text();
         let payload: Record<string, unknown>;
         try { payload = JSON.parse(raw) as Record<string, unknown>; }
@@ -609,49 +615,49 @@ export class XianyuMtopClient {
           const result = { success: false, accountInvalid: validation || sessionExpired,
             errorCode: validation ? 'ACCOUNT_VALIDATION_REQUIRED' : sessionExpired ? 'SESSION_EXPIRED' : 'MTOP_INVALID_RESPONSE',
             message: 'xianyu returned a non-JSON response', cookieHeader };
-          await this.reportFailure({ adminId, accountId, api, recoveryRequest, ...result });
-          return result;
+          await this.reportFailure({ adminId, accountId, api, recoveryRequest, credential, ...result });
+          return bindMtopCredential(result, credential);
         }
         const ret = Array.isArray(payload.ret) ? payload.ret.map(String) : [];
         const retMessage = ret[0] ?? '';
         if (inspectXianyuVerification(payload).required) {
           const result = { success: false, accountInvalid: true, errorCode: 'ACCOUNT_VALIDATION_REQUIRED', message: retMessage || 'xianyu verification required', response: payload, cookieHeader };
-          await this.reportFailure({ adminId, accountId, api, recoveryRequest, ...result });
-          return result;
+          await this.reportFailure({ adminId, accountId, api, recoveryRequest, credential, ...result });
+          return bindMtopCredential(result, credential);
         }
         if (ret.length > 0 && ret.every(value => value.startsWith('SUCCESS::'))) {
           try { await this.onSuccess?.({ adminId, accountId, api, startedAt }); }
           catch (error) { console.error(JSON.stringify({ component: 'xianyu-account-health', event: 'success_report_failed', accountId, api, error: error instanceof Error ? error.message : String(error) })); }
-          return { success: true, accountInvalid: false, response: payload, cookieHeader };
+          return bindMtopCredential({ success: true, accountInvalid: false, response: payload, cookieHeader }, credential);
         }
         if (isTokenExpired(retMessage)) {
           lastError = retMessage;
           if (setCookies.length > 0) continue;
           const result = { success: false, accountInvalid: true, errorCode: 'MTOP_TOKEN_EXPIRED', message: retMessage || 'mtop token expired', response: payload, cookieHeader };
-          await this.reportFailure({ adminId, accountId, api, recoveryRequest, ...result });
-          return result;
+          await this.reportFailure({ adminId, accountId, api, recoveryRequest, credential, ...result });
+          return bindMtopCredential(result, credential);
         }
         if (isSessionExpired(ret)) {
           const result = { success: false, accountInvalid: true, errorCode: 'SESSION_EXPIRED', message: retMessage, response: payload, cookieHeader };
-          await this.reportFailure({ adminId, accountId, api, recoveryRequest, ...result });
-          return result;
+          await this.reportFailure({ adminId, accountId, api, recoveryRequest, credential, ...result });
+          return bindMtopCredential(result, credential);
         }
         if (isPermissionFailure(retMessage)) {
           const result = { success: false, accountInvalid: false, errorCode: 'MTOP_PERMISSION_DENIED', message: retMessage, response: payload, cookieHeader };
-          await this.reportFailure({ adminId, accountId, api, recoveryRequest, ...result });
-          return result;
+          await this.reportFailure({ adminId, accountId, api, recoveryRequest, credential, ...result });
+          return bindMtopCredential(result, credential);
         }
         const result = { success: false, accountInvalid: false, errorCode: 'MTOP_BUSINESS_ERROR', message: retMessage || 'mtop request failed', response: payload, cookieHeader };
-        await this.reportFailure({ adminId, accountId, api, recoveryRequest, ...result });
-        return result;
+        await this.reportFailure({ adminId, accountId, api, recoveryRequest, credential, ...result });
+        return bindMtopCredential(result, credential);
       } catch (error) {
         if (error instanceof AccountHealthPersistenceError) throw error;
         lastError = error instanceof Error ? error.message : String(error);
       }
     }
     const result = { success: false, accountInvalid: false, errorCode: 'MTOP_RETRY_EXHAUSTED', message: lastError, cookieHeader };
-    await this.reportFailure({ adminId, accountId, api, recoveryRequest, ...result });
-    return result;
+    await this.reportFailure({ adminId, accountId, api, recoveryRequest, credential, ...result });
+    return bindMtopCredential(result, credential);
   }
 }
 
@@ -931,3 +937,8 @@ function parsePix(value: string | undefined): [number, number] {
 }
 
 function record(value: unknown): Record<string, any> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}; }
+
+function bindMtopCredential<T extends object>(result: T, credential?: MtopCredential): T & { credential?: MtopCredential } {
+  if (credential) Object.defineProperty(result, 'credential', { value: structuredClone(credential), enumerable: false });
+  return result;
+}

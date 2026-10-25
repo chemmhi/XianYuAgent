@@ -13,17 +13,18 @@ describe('xianyu IM credential refresh', () => {
       recordAccountDegraded: async () => undefined,
       clearAccountDegraded: async () => undefined,
       getCredential: async () => ({ metadata: previousMetadata, expiresAt: '2026-10-01T00:00:00.000Z' }),
-      upsertCredential: async (input: Record<string, unknown>) => { captured = input; return input; },
+      commitCredentialRefresh: async (input: Record<string, unknown>) => { captured = input; return input; },
     };
     const service = new XianyuImService(store as never, {} as never, {} as never);
-    await (service as unknown as { saveCredential: (adminId: string, account: { id: string; platform: string }, credential: Record<string, unknown>) => Promise<void> }).saveCredential(
+    await (service as unknown as { saveCredential: (adminId: string, account: { id: string; platform: string }, credential: Record<string, unknown>, expected: Record<string, unknown>) => Promise<void> }).saveCredential(
       'admin-1',
       { id: 'account-1', platform: 'xianyu' },
       { cookieHeader: 'unb=seller-1; _m_h5_tk=rotated', accessToken: 'access-2', deviceId: 'device-1' },
+      { metadata: previousMetadata, expiresAt: '2026-10-01T00:00:00.000Z' },
     );
 
     assert.deepEqual(captured?.metadata, previousMetadata);
-    assert.equal(captured?.expiresAt, '2026-10-01T00:00:00.000Z');
+    assert.equal((captured?.expected as Record<string, unknown>)?.expiresAt, '2026-10-01T00:00:00.000Z');
     assert.equal(captured?.accessToken, 'access-2');
   });
 
@@ -32,7 +33,7 @@ describe('xianyu IM credential refresh', () => {
       listAccountVerificationRisks: async () => [],
       recordAccountDegraded: async () => undefined,
       clearAccountDegraded: async () => undefined,
-      upsertCredential: async () => { throw new Error('should not persist invalid token'); },
+      commitCredentialRefresh: async () => { throw new Error('should not persist invalid token'); },
     };
     const mtop = {
       fetchImToken: async () => ({ success: false, accountInvalid: true, errorCode: 'ACCOUNT_VALIDATION_REQUIRED', message: 'FAIL_SYS_USER_VALIDATE', cookieHeader: '' }),
@@ -70,7 +71,7 @@ describe('xianyu IM credential refresh', () => {
         },
         expiresAt: '2026-10-01T00:00:00.000Z',
       }),
-      upsertCredential: async (input: Record<string, unknown>) => { saved.push(input); return input; },
+      commitCredentialRefresh: async (input: Record<string, unknown>) => { saved.push(input); return input; },
     };
     const verificationBrowser = {
       enabled: true,
@@ -104,7 +105,7 @@ describe('xianyu IM credential refresh', () => {
     const result = await (service as unknown as { refreshCredential: (adminId: string, account: { id: string; platform: string }, credential: Record<string, unknown>) => Promise<Record<string, unknown>> }).refreshCredential(
       'admin-1',
       { id: 'account-1', platform: 'xianyu' },
-      { cookieHeader: 'unb=seller-1; _m_h5_tk=token-1', metadata: {}, expiresAt: '2026-10-01T00:00:00.000Z' },
+      await store.getCredential(),
     );
 
     assert.equal(fetchCount, 2);
@@ -123,7 +124,7 @@ describe('xianyu IM credential refresh', () => {
       recordAccountDegraded: async () => undefined,
       clearAccountDegraded: async () => undefined,
       getCredential: async () => ({ cookieHeader: 'unb=seller-1; _m_h5_tk=token-1', metadata: {}, expiresAt: '2026-10-01T00:00:00.000Z' }),
-      upsertCredential: async () => { throw new Error('should not persist failed verification'); },
+      commitCredentialRefresh: async () => { throw new Error('should not persist failed verification'); },
     };
     const service = new XianyuImService(store as never, {
       fetchImToken: async () => ({ success: false, accountInvalid: true, errorCode: 'ACCOUNT_VALIDATION_REQUIRED', message: 'FAIL_SYS_USER_VALIDATE', verificationUrl: 'https://punish.goofish.com/verify?token=redacted', cookieHeader: 'unb=seller-1; _m_h5_tk=token-1' }),
@@ -157,7 +158,7 @@ describe('xianyu IM credential refresh', () => {
       recordAccountDegraded: async () => undefined,
       clearAccountDegraded: async () => undefined,
       getCredential: async () => ({ cookieHeader: 'unb=seller-1; _m_h5_tk=token-1', metadata: {}, expiresAt: '2026-10-01T00:00:00.000Z' }),
-      upsertCredential: async () => { throw new Error('should not persist failed verification'); },
+      commitCredentialRefresh: async () => { throw new Error('should not persist failed verification'); },
     };
     const service = new XianyuImService(store as never, {
       fetchImToken: async () => ({ success: false, accountInvalid: true, errorCode: 'ACCOUNT_VALIDATION_REQUIRED', message: 'FAIL_SYS_USER_VALIDATE', verificationUrl: 'https://punish.goofish.com/verify?token=redacted', cookieHeader: 'unb=seller-1; _m_h5_tk=token-1' }),
@@ -374,7 +375,7 @@ describe('xianyu IM credential refresh', () => {
       recordAccountRisk: async () => undefined,
       clearAccountDegraded: async () => undefined,
       setAccountTransport: async () => undefined,
-      upsertCredential: async (input: Record<string, unknown>) => input,
+      commitCredentialRefresh: async (input: Record<string, unknown>) => input,
     };
     const service = new XianyuImService(store as never, { fetchImToken: async () => {
       refreshCalls += 1;

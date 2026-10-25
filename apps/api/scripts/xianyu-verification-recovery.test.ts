@@ -46,7 +46,13 @@ export async function fixture() {
   const internal = service as any;
   internal.scheduleRecentMessageRecovery = () => undefined;
   internal.clients.set(`admin-1:${account.id}`, { connected: true, connect: async () => undefined,
-    refreshSession: async () => internal.refreshCredential('admin-1', await store.getAccount('admin-1', account.id), await store.getCredential('admin-1', account.id)),
+    refreshSession: async () => {
+      await internal.refreshCredential('admin-1', await store.getAccount('admin-1', account.id), await store.getCredential('admin-1', account.id));
+      // Fake client models successful registration after refresh, not token persistence alone.
+      await store.setAccountTransport({ adminId: 'admin-1', accountId: account.id, status: 'connected' });
+      for (const risk of await store.listAccountVerificationRisks('admin-1', account.id)) await store.clearAccountRisk({ adminId: 'admin-1', accountId: account.id,
+        source: risk.source, episode: risk.episode, expectedRiskRevision: risk.revision, startedAt: new Date().toISOString() });
+    },
     disconnect: async () => undefined });
   const risk = () => store.recordAccountRisk({ adminId: 'admin-1', accountId: account.id, source: XIANYU_IM_TOKEN_API, code: 'ACCOUNT_VALIDATION_REQUIRED' });
   const settled = () => until(() => internal.verificationRecoveryInFlight.size === 0);
@@ -124,7 +130,7 @@ test('forced recovery refreshes a cached credential before constructing a replac
   const f = await fixture();
   const connect = XianyuImClient.prototype.connect;
   const registeredTokens: string[] = [];
-  XianyuImClient.prototype.connect = async function () { registeredTokens.push((this as any).credential.accessToken); };
+  XianyuImClient.prototype.connect = async function () { if (this.connected) return; registeredTokens.push((this as any).credential.accessToken); await (this as any).onStatusChange?.('connected'); Object.defineProperty(this, 'connected', { value: true }); await (this as any).onHeartbeat?.(new Date().toISOString()); };
   try {
     f.internal.clients.clear();
     await f.internal.ensureClient('admin-1', f.account.id, { forceCredentialRefresh: true });
@@ -138,7 +144,7 @@ test('startup with persisted risk obtains a fresh token before registering a cac
   const f = await fixture();
   const connect = XianyuImClient.prototype.connect;
   const registeredTokens: string[] = [];
-  XianyuImClient.prototype.connect = async function () { registeredTokens.push((this as any).credential.accessToken); };
+  XianyuImClient.prototype.connect = async function () { if (this.connected) return; registeredTokens.push((this as any).credential.accessToken); await (this as any).onStatusChange?.('connected'); Object.defineProperty(this, 'connected', { value: true }); await (this as any).onHeartbeat?.(new Date().toISOString()); };
   try {
     f.internal.clients.clear();
     await f.risk();

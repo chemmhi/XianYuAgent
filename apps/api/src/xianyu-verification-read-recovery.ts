@@ -56,7 +56,7 @@ export async function recoverVerificationReads(store: Store, mtop: XianyuMtopCli
       const committed = await store.commitCredentialRefresh({ adminId, accountId, expected: committedGeneration,
         cookieHeader: final.cookieHeader!, accessToken: committedGeneration.accessToken, deviceId: committedGeneration.deviceId, metadata: final.metadata ?? {} });
       if (!committed) throw new Error('XIANYU_VERIFICATION_CREDENTIAL_CHANGED');
-      await store.clearAccountRisk({ adminId, accountId, source: risk.source, episode: risk.episode, expectedRiskRevision: risk.revision, startedAt });
+      await store.clearAccountRisk({ adminId, accountId, source: risk.source, episode: risk.episode, expectedRiskRevision: risk.revision, expectedGeneration: expected.generation, startedAt });
     } catch (error) {
       errors.push(error);
       // A new login/revocation invalidates the account generation, whereas a

@@ -372,6 +372,7 @@ test('concurrent listener startup shares one account-scoped client connection', 
   const store = {
     getAccount: async () => account,
     getCredential: async () => credential,
+    listAccountVerificationRisks: async () => [],
   } as never;
   const service = new XianyuImService(store, {} as never, {} as never);
   const originalConnect = XianyuImClient.prototype.connect;

@@ -46,10 +46,12 @@ async function fixture(mode: string, enableRecovery = false) {
   let browserCalls = 0;
   let liveCookieWrites = 0;
   const mtop = new XianyuMtopClient({ loadCredential: async () => store.getCredential(admin.id, account.id),
-    saveCookie: async (_admin, _account, cookieHeader, metadata) => {
+    saveCookie: async (_admin, _account, cookieHeader, metadata, expected) => {
       liveCookieWrites++;
-      const current = await store.getCredential(admin.id, account.id);
-      await store.upsertCredential({ ...current!, adminId: admin.id, accountId: account.id, platform: 'xianyu', cookieHeader, metadata });
+      assert.ok(expected?.id);
+      const saved = await store.commitCredentialRefresh({ adminId: admin.id, accountId: account.id, expected: expected as import('../src/domain.js').CredentialRecord,
+        cookieHeader, metadata: metadata ?? {}, deviceId: expected.deviceId, accessToken: expected.accessToken });
+      assert.ok(saved, 'real callback uses conditional generation commit'); return saved;
     },
     onFailure: async ({ api }) => {
       riskSignals++;
@@ -66,7 +68,12 @@ async function fixture(mode: string, enableRecovery = false) {
   service = new XianyuImService(store, mtop, {} as never, undefined, undefined, browser as never);
   const internal = service as any;
   internal.clients.set(`${admin.id}:${account.id}`, { connected: true, deviceId: 'device-1', updateCredential: () => { updates++; },
-    refreshSession: async () => internal.refreshCredential(admin.id, await store.getAccount(admin.id, account.id), await store.getCredential(admin.id, account.id)),
+    refreshSession: async () => {
+      await internal.refreshCredential(admin.id, await store.getAccount(admin.id, account.id), await store.getCredential(admin.id, account.id));
+      await store.setAccountTransport({ adminId: admin.id, accountId: account.id, status: 'connected' });
+      for (const risk of await store.listAccountVerificationRisks(admin.id, account.id)) await store.clearAccountRisk({ adminId: admin.id, accountId: account.id,
+        source: risk.source, episode: risk.episode, expectedRiskRevision: risk.revision, startedAt: new Date().toISOString() });
+    },
     disconnect: async () => undefined });
   return { store, admin, account, credential, service, internal, release, entered,
     holdToken: () => { holdApi = 'login.token'; }, challenge: () => { challenge = true; }, riskSignals: () => riskSignals,

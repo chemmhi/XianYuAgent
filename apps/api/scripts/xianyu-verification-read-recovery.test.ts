@@ -209,6 +209,13 @@ for (const kind of dbUrl ? ['memory', 'postgres'] : ['memory']) {
         return { success: false, accountInvalid: true, errorCode: 'ACCOUNT_VALIDATION_REQUIRED',
           verificationUrl: 'https://www.goofish.com/punish', cookieHeader: (await f.store.getCredential(f.admin.id, f.account.id))!.cookieHeader };
       };
+      const credentialSession = f.mtop.createCredentialSession.bind(f.mtop);
+      f.mtop.createCredentialSession = (...args) => {
+        const isolated = credentialSession(...args);
+        isolated.client.fetchImToken = f.mtop.fetchImToken;
+        if (failurePhase === 'server-probe') isolated.client.recheckReadRequest = async () => { throw new Error('sensitive transport diagnostic'); };
+        return isolated;
+      };
       const browserRead = f.browser.waitForCompletion;
       f.browser.waitForCompletion = async (input: any) => input.imTokenRequest ? {
         finalUrl: 'https://www.goofish.com/im',
@@ -218,7 +225,6 @@ for (const kind of dbUrl ? ['memory', 'postgres'] : ['memory']) {
         ], imToken: { accessToken: 'restored-im-token', deviceId: 'device', userId: f.account.sellerRef },
       } : browserRead(input);
       if (failurePhase === 'browser') f.during(async api => { if (api === ITEMS) throw new Error('sensitive browser diagnostic'); });
-      else f.mtop.createCredentialSession = () => { throw new Error('sensitive transport diagnostic'); };
       try {
         await f.risk();
         await f.store.recordAccountRisk({ adminId: f.admin.id, accountId: f.account.id, source: 'mtop.taobao.idlemessage.pc.login.token', code: 'ACCOUNT_VALIDATION_REQUIRED' });
@@ -226,7 +232,9 @@ for (const kind of dbUrl ? ['memory', 'postgres'] : ['memory']) {
         await internal.verificationRecoveryInFlight.get(key);
         assert.equal(refreshed, 1);
         assert.equal((await f.store.getCredential(f.admin.id, f.account.id))?.accessToken, 'restored-im-token');
-        assert.deepEqual((await f.store.listAccountVerificationRisks(f.admin.id, f.account.id)).map(r => r.source), [ITEMS]);
+        // This boundary fixture has no registered socket or heartbeat. Saving a
+        // token must preserve its risk as well as the independently failed read.
+        assert.deepEqual((await f.store.listAccountVerificationRisks(f.admin.id, f.account.id)).map(r => r.source).sort(), [ITEMS, 'mtop.taobao.idlemessage.pc.login.token'].sort());
         assert.equal(events.some(line => line.includes('verification_recovery_completed')), false);
         assert.ok(events.some(line => line.includes('verification_recovery_pending')));
         assert.equal(events.some(line => line.includes('sensitive')), false);

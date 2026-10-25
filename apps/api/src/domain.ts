@@ -594,6 +594,7 @@ export interface SessionRecord {
 }
 
 export interface AccountRecord {
+  credentialGeneration?: number;
   id: string;
   platform: string;
   sellerRef: string;
@@ -1188,6 +1189,7 @@ export interface AutoReplyMessageListResult {
 }
 
 export interface CredentialRecord {
+  generation?: number;
   id: string;
   accountId: string;
   platform: string;
@@ -1462,12 +1464,12 @@ export interface Store {
   restoreAccountForLogin(adminId: string, accountId: string): Promise<AccountRecord | undefined>;
   createAccount(input: { platform: string; sellerRef: string; displayName?: string; adminId: string }): Promise<AccountRecord>;
   updateAccount(adminId: string, accountId: string, patch: { sellerRef?: string; displayName?: string; remark?: string; avatarUrl?: string; platformUserId?: string; status?: AccountStatus; lastConnectedAt?: string }): Promise<AccountRecord | undefined>;
-  recordAccountRisk(input: { adminId: string; accountId: string; code: string; source: string; recoveryRequest?: VerificationRecoveryRequest }): Promise<AccountRecord | undefined>;
+  recordAccountRisk(input: { adminId: string; accountId: string; code: string; source: string; recoveryRequest?: VerificationRecoveryRequest; expectedGeneration?: number }): Promise<AccountRecord | undefined>;
   listAccountVerificationRisks(adminId: string, accountId: string): Promise<AccountVerificationRisk[]>;
-  clearAccountRisk(input: { adminId: string; accountId: string; episode: string; source: string; startedAt: string; expectedRiskRevision?: string }): Promise<AccountRecord | undefined>;
-  recordAccountDegraded(input: { adminId: string; accountId: string; source: string }): Promise<AccountRecord | undefined>;
-  clearAccountDegraded(input: { adminId: string; accountId: string; source: string; startedAt: string }): Promise<AccountRecord | undefined>;
-  setAccountTransport(input: { adminId: string; accountId: string; status: 'connecting' | 'connected' | 'disconnected' | 'failed' }): Promise<void>;
+  clearAccountRisk(input: { adminId: string; accountId: string; episode: string; source: string; startedAt: string; expectedRiskRevision?: string; expectedGeneration?: number; isCurrent?: () => boolean }): Promise<AccountRecord | undefined>;
+  recordAccountDegraded(input: { adminId: string; accountId: string; source: string; expectedGeneration?: number }): Promise<AccountRecord | undefined>;
+  clearAccountDegraded(input: { adminId: string; accountId: string; source: string; startedAt: string; expectedGeneration?: number; isCurrent?: () => boolean }): Promise<AccountRecord | undefined>;
+  setAccountTransport(input: { adminId: string; accountId: string; status: 'connecting' | 'connected' | 'disconnected' | 'failed'; expectedGeneration?: number }): Promise<void>;
   flushAccountRiskAlerts(limit: number): Promise<number>;
   listRiskNotifications(adminId: string): Promise<Array<{ id: string; accountId: string; eventType: 'verification_required' | 'verification_cleared'; createdAt: string }>>;
   acknowledgeRiskNotification(adminId: string, id: string): Promise<boolean>;
@@ -1479,10 +1481,11 @@ export interface Store {
   getLoginSessionById(adminId: string, sessionId: string): Promise<LoginSessionRecord | undefined>;
   updateLoginSession(adminId: string, accountId: string | undefined, sessionId: string, patch: { accountId?: string; status?: LoginSessionStatus; expiresAt?: string; completedAt?: string; failureCode?: string }): Promise<LoginSessionRecord | undefined>;
   getCredential(adminId: string, accountId: string): Promise<CredentialRecord | undefined>;
-  upsertCredential(input: { adminId: string; accountId: string; platform: string; cookieHeader?: string; accessToken?: string; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string }): Promise<CredentialRecord>;
+  upsertCredential(input: { adminId: string; accountId: string; platform: string; cookieHeader?: string; accessToken?: string; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string; loginReservation?: { loginSessionId: string; reservationId: string; generation: number } }): Promise<CredentialRecord>;
+  beginCredentialLogin(input: { adminId: string; accountId: string; loginSessionId: string }): Promise<{ reservationId: string; generation: number }>;
   commitCredentialRefresh(input: CredentialRefreshUpdate): Promise<CredentialRecord | undefined>;
   revokeCredential(adminId: string, accountId: string): Promise<CredentialRecord | undefined>;
-  markCredentialVerified(input: { adminId: string; accountId: string; status: CredentialStatus; expiresAt?: string }): Promise<CredentialRecord | undefined>;
+  markCredentialVerified(input: { adminId: string; accountId: string; status: CredentialStatus; expiresAt?: string; expectedGeneration?: number; expected?: CredentialRecord }): Promise<CredentialRecord | undefined>;
   listCredentialRefs(adminId: string, accountId: string): Promise<CredentialRefRecord[]>;
   getCredentialRef(adminId: string, credentialId: string): Promise<CredentialRefRecord | undefined>;
   getCredentialRefSecret(adminId: string, credentialId: string): Promise<CredentialRefSecretRecord | undefined>;

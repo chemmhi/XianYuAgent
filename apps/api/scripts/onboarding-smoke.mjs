@@ -3,6 +3,9 @@ import { createApp } from '../dist/app.js';
 
 const port = 18180 + (process.pid % 400);
 const runtime = createApp({ host: '127.0.0.1', port, cookieSecure: false, allowInMemory: true, sessionIdleMs: 1_800_000, sessionAbsoluteMs: 28_800_000, xianyuQrMode: 'stub' });
+// This login/profile fixture has no platform socket. IM health is verified in
+// the real local WebSocket suite, rather than inferred from cookie acceptance.
+runtime.xianyuIm.startListener = async () => undefined;
 runtime.xianyu.verifyLogin = async () => ({ success: true, accountInvalid: false, cookieHeader: 'unb=real-seller; _m_h5_tk=token_1' });
 runtime.xianyu.fetchProfile = async () => ({ success: true, accountInvalid: false, cookieHeader: 'unb=real-seller; _m_h5_tk=token_1', response: { data: { userNick: '真实闲鱼昵称', userId: 'real-seller', avatarUrl: 'https://img.example/avatar.png', shopName: '真实店铺备注' } } });
 await runtime.listen();
@@ -38,7 +41,8 @@ try {
   const listed = await request('/api/v1/accounts', { headers: { cookie } });
   assert.equal(listed.body.data.items.length, 1);
   assert.equal(listed.body.data.items[0].sellerRef, 'real-seller');
-  assert.equal(listed.body.data.items[0].status, 'connected');
+  assert.equal(listed.body.data.items[0].status, 'disconnected');
+  assert.equal((await runtime.store.getCredential(bootstrap.body.data.profile.id, listed.body.data.items[0].id))?.status, 'active');
   console.log('onboarding cookie login smoke passed');
 } finally {
   await runtime.close();

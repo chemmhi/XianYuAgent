@@ -28,6 +28,6 @@ export async function recheckVerificationRisks(store: Store, mtop: XianyuMtopCli
       cookieHeader: final.cookieHeader!, accessToken: expected.accessToken, deviceId: expected.deviceId, metadata: final.metadata ?? {} });
     if (!saved) continue;
     await store.clearAccountRisk({ adminId, accountId, source: risk.source, episode: risk.episode,
-      expectedRiskRevision: risk.revision, startedAt });
+      expectedRiskRevision: risk.revision, expectedGeneration: expected.generation, startedAt });
   }
 }

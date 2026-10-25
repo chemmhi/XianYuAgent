@@ -4,7 +4,7 @@ import { ServiceError } from './services.js';
 import { classifyXianyuFailure } from './xianyu-account-health.js';
 import type { MessageService } from './messages.js';
 import type { AutoReplyProcessResult, AutoReplyService } from './auto-reply.js';
-import { XianyuImClient, XianyuImMessageEvent, XianyuImReadReceiptEvent, XianyuImCredential, XIANYU_IM_TOKEN_API } from './xianyu-im.js';
+import { XianyuImClient, XianyuImMessageEvent, XianyuImReadReceiptEvent, XianyuImCredential, type XianyuImClientOptions, XIANYU_IM_TOKEN_API } from './xianyu-im.js';
 import { hasXianyuStructuredSystemMarker, matchesXianyuOrderStatus, parseXianyuSystemMessageKind } from './xianyu-system-message.js';
 import { XianyuMtopClient } from './xianyu-mtop.js';
 import type { ProductAutomationImEventResult, ProductAutomationTrigger } from './product-automation-trigger.js';
@@ -45,6 +45,7 @@ export class XianyuImService {
   private readonly recoveryRetryAfter = new Map<string, number>();
   private readonly credentialRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly chatRefreshInFlight = new Map<string, Promise<boolean>>();
+  private readonly clientHealthLanes = new Map<string, Promise<void>>();
   private readonly transportHeartbeatTimers = new Map<string, ReturnType<typeof setInterval>>();
   private readonly credentialRefreshInFlight = new Map<string, Promise<void>>();
   private readonly tokenRefreshInFlight = new Map<string, Promise<CredentialRecord>>();
@@ -69,6 +70,7 @@ export class XianyuImService {
     private readonly refreshOrdersForTrustedOrderEvent?: (input: { adminId: string; accountId: string; event: XianyuImMessageEvent }) => Promise<void>,
     private readonly notifyVerificationRequired?: (adminId: string, accountId: string, source: string) => Promise<void>,
     private readonly ownerClient?: XianyuImOwnerClient,
+    private readonly imClientFactory: (options: XianyuImClientOptions) => XianyuImClient = options => new XianyuImClient(options),
   ) {
     this.inboundInboxWorker = new InboundInboxWorker(store, this, {
       workerId: `listener-fallback:${process.pid}:${randomUUID()}`,
@@ -623,38 +625,77 @@ export class XianyuImService {
       try {
         const account = await this.store.getAccount(adminId, accountId);
         if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found');
-        let credential = await this.store.getCredential(adminId, accountId);
-        if (!credential?.cookieHeader) throw new ServiceError(409, 'CREDENTIAL_MISSING', 'account credential is missing');
+        const loadedCredential = await this.store.getCredential(adminId, accountId);
+        if (!loadedCredential?.cookieHeader) throw new ServiceError(409, 'CREDENTIAL_MISSING', 'account credential is missing');
+        let connectionRisks = await this.store.listAccountVerificationRisks(adminId, accountId);
+        let tokenRechecked = false;
+        let credential: CredentialRecord = loadedCredential;
         if (!credential.accessToken || options.forceCredentialRefresh
           || (this.verificationBrowser?.enabled && account.status === 'verification_required')) {
           credential = await this.refreshCredential(adminId, account, credential);
+          tokenRechecked = true;
         }
+        credential = structuredClone(credential);
         let connectionAttemptStartedAt = new Date().toISOString();
-        const client = new XianyuImClient({
+        const client = this.imClientFactory({
           accountId,
           credential: toImCredential(credential),
           selfUserIds: [account.sellerRef, account.platformUserId].filter((value): value is string => Boolean(value)),
           refreshCredential: async () => {
             const current = await this.store.getCredential(adminId, accountId);
             if (!current?.cookieHeader) throw new ServiceError(409, 'CREDENTIAL_MISSING', 'account credential is missing');
-            return toImCredential(await this.refreshCredential(adminId, account, current));
+            if (current.generation !== credential.generation || current.status !== 'active') throw new ServiceError(409, 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED', '账号凭证已变化');
+            connectionRisks = await this.store.listAccountVerificationRisks(adminId, accountId);
+            connectionAttemptStartedAt = new Date().toISOString();
+            credential = structuredClone(await this.refreshCredential(adminId, account, current));
+            tokenRechecked = true;
+            return toImCredential(credential);
           },
-          onStatusChange: async (status) => {
-            if (status === 'connecting' || status === 'reconnecting') connectionAttemptStartedAt = new Date().toISOString();
-            const transport = status === 'connected' ? 'connected' : status === 'connecting' || status === 'reconnecting' ? 'connecting' : status === 'failed' ? 'failed' : 'disconnected';
-            if (transport !== 'connected') this.stopTransportHeartbeat(key);
-            await this.store.setAccountTransport({ adminId, accountId, status: transport });
-            if (status === 'connected') {
-              const accountWithRisk = await this.store.getAccount(adminId, accountId);
-              if (accountWithRisk?.riskEpisode) {
-                for (const source of ['im_listener', 'xianyu']) await this.store.clearAccountRisk({ adminId, accountId, episode: accountWithRisk.riskEpisode, source, startedAt: connectionAttemptStartedAt });
+          onStatusChange: (status) => {
+            const generation = credential.generation;
+            return this.serializeClientHealth(key, async () => {
+              // An old client cannot publish after reset/replacement. All
+              // heartbeat and status writes for this account share this lane.
+              if (this.clients.has(key) && this.clients.get(key) !== client) return;
+              const generationNow = await this.store.getCredential(adminId, accountId);
+              if (generationNow?.generation !== generation || generationNow?.status !== 'active') return;
+              if (status === 'connected' && !client.connected) return;
+              if (status === 'connecting' || status === 'reconnecting') connectionAttemptStartedAt = new Date().toISOString();
+              const transport = status === 'connected' ? 'connecting' : status === 'connecting' || status === 'reconnecting' ? 'connecting' : status === 'failed' ? 'failed' : 'disconnected';
+              this.stopTransportHeartbeat(key);
+              await this.store.setAccountTransport({ adminId, accountId, status: transport, expectedGeneration: generation });
+            });
+          },
+          onHeartbeat: (receivedAt, epoch) => {
+            // Freeze the socket generation and recovery evidence before any
+            // queue/storage wait. Reconnect on this same object is a new epoch.
+            const generation = credential.generation;
+            const risks = structuredClone(connectionRisks);
+            const startedAt = connectionAttemptStartedAt;
+            const tokenVerified = tokenRechecked;
+            const connectionEpoch = epoch ?? client.connectionEpoch;
+            const live = () => client.connected && client.connectionEpoch === connectionEpoch
+              && (!this.clients.has(key) || this.clients.get(key) === client)
+              && Date.now() - Date.parse(receivedAt) <= 5_000;
+            return this.serializeClientHealth(key, async () => {
+              if (!live()) return;
+              const current = await this.store.getCredential(adminId, accountId);
+              if (!live() || !current || current.generation !== generation || current.status !== 'active') return;
+              await this.store.setAccountTransport({ adminId, accountId, status: 'connected', expectedGeneration: generation });
+              if (!live()) return;
+              for (const risk of risks) {
+                if (!live()) return;
+                if (!['im_listener', 'xianyu', XIANYU_IM_TOKEN_API].includes(risk.source)) continue;
+                if (risk.source === XIANYU_IM_TOKEN_API && !tokenVerified) continue;
+                await this.store.clearAccountRisk({ adminId, accountId, episode: risk.episode, source: risk.source,
+                  expectedRiskRevision: risk.revision, expectedGeneration: generation, startedAt, isCurrent: live });
+                if (!live()) return;
               }
-              await this.store.clearAccountDegraded({ adminId, accountId, source: 'im_listener', startedAt: connectionAttemptStartedAt });
-              this.startTransportHeartbeat(key, adminId, accountId, client);
-              this.scheduleRecentMessageRecovery(adminId, accountId);
-            }
+              await this.store.clearAccountDegraded({ adminId, accountId, source: 'im_listener', startedAt, expectedGeneration: generation, isCurrent: live });
+              if (live()) this.scheduleRecentMessageRecovery(adminId, accountId);
+            });
           },
-          onFailure: async (error) => { await this.markAccountFailure(adminId, accountId, error, 'im_listener'); },
+          onFailure: async (error) => { await this.markAccountFailure(adminId, accountId, error, 'im_listener', credential.generation); },
           onEvent: async (event) => {
             await this.handleExternalEvent(adminId, event, { deferAutoReply: true });
             // The dedicated worker remains the durable primary path. Wake a
@@ -663,7 +704,7 @@ export class XianyuImService {
             this.wakeInboundInboxWorker();
           },
           onQuarantine: async (event) => { await this.store.recordInboundQuarantine(event); },
-          saveCredential: async (next) => { await this.saveCredential(adminId, account, next); },
+          saveCredential: async (next) => { credential = structuredClone(await this.saveCredential(adminId, account, next, credential)); },
         });
         try { await client.connect(); } catch (error) {
           if (this.clients.get(key) === client) this.clients.delete(key);
@@ -701,14 +742,15 @@ export class XianyuImService {
   }
 
   private async refreshCredentialInternal(adminId: string, account: AccountRecord, credential: CredentialRecord): Promise<CredentialRecord> {
+    const initial = structuredClone(credential);
+    const isolated = this.mtop.createCredentialSession?.(adminId, account.id, initial);
+    const tokenClient = isolated?.client ?? this.mtop;
     const deviceId = credential.deviceId ?? `xianyu-${account.id}`;
-    let token = await this.mtop.fetchImToken(adminId, account.id, deviceId);
+    let token = await tokenClient.fetchImToken(adminId, account.id, deviceId);
     if (!token.success || !token.accessToken) {
       if (token.errorCode === 'ACCOUNT_VALIDATION_REQUIRED' && this.verificationBrowser?.enabled && token.verificationUrl) {
-        const latest = await this.store.getCredential(adminId, account.id) ?? credential;
+        const latest = initial;
         const nativeRecoveryStartedAt = new Date().toISOString();
-        const nativeRiskRevision = (await this.store.listAccountVerificationRisks(adminId, account.id))
-          .find(risk => risk.source === XIANYU_IM_TOKEN_API)?.revision;
         // Keep stable account cookies from the browser snapshot, but prefer
         // the fresh flat header returned by this validation response. The
         // x5secdata/x5sectag markers in that header bind the challenge URL to
@@ -760,7 +802,7 @@ export class XianyuImService {
             ? mergedSnapshot.filter(cookie => /(^|\.)goofish\.com$/.test(cookie.domain ?? '')
               && cookie._crHasCrossSiteAncestor !== true)
             : mergedSnapshot);
-          const current = await this.store.getCredential(adminId, account.id) ?? latest;
+          const current = latest;
           const browserMetadata = metadataWithCookieSnapshot(current.metadata, mergedSnapshot);
           if (completed.imToken) {
             const native = completed.imToken;
@@ -770,29 +812,32 @@ export class XianyuImService {
             }
             // Save the matching cookie snapshot and native token together before
             // any IM client can use the recovered credential.
-            const saved = await this.store.upsertCredential({ adminId, accountId: account.id, platform: account.platform,
-              cookieHeader: browserCookieHeader, accessToken: native.accessToken, deviceId,
-              metadata: browserMetadata, expiresAt: current.expiresAt });
-            const recoveredAccount = await this.store.getAccount(adminId, account.id);
-            if (recoveredAccount?.riskEpisode && nativeRiskRevision) await this.store.clearAccountRisk({ adminId, accountId: account.id,
-              episode: recoveredAccount.riskEpisode, source: XIANYU_IM_TOKEN_API, startedAt: nativeRecoveryStartedAt,
-              expectedRiskRevision: nativeRiskRevision });
+            const saved = await this.store.commitCredentialRefresh({ adminId, accountId: account.id, expected: current,
+              cookieHeader: browserCookieHeader, accessToken: native.accessToken, deviceId, metadata: browserMetadata });
+            if (!saved) throw new ServiceError(409, 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED', '账号凭证已变化');
             await this.store.clearAccountDegraded({ adminId, accountId: account.id, source: XIANYU_IM_TOKEN_API, startedAt: nativeRecoveryStartedAt });
             return saved;
           }
-          await this.store.upsertCredential({
+          const fallbackHeader = browserCookieHeader || token.cookieHeader || latest.cookieHeader || credential.cookieHeader;
+          if (!fallbackHeader) throw new ServiceError(409, 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED', '账号凭证已变化');
+          const first = await this.store.commitCredentialRefresh({
             adminId,
             accountId: account.id,
-            platform: account.platform,
-            cookieHeader: browserCookieHeader || token.cookieHeader || latest.cookieHeader || credential.cookieHeader,
+            expected: current,
+            cookieHeader: fallbackHeader,
             deviceId,
+            accessToken: current.accessToken,
             metadata: browserMetadata,
-            expiresAt: latest.expiresAt ?? credential.expiresAt,
           });
-          token = await this.mtop.fetchImToken(adminId, account.id, deviceId);
+          if (!first) throw new ServiceError(409, 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED', '账号凭证已变化');
+          const retryExpected = structuredClone(first);
+          const retrySession = this.mtop.createCredentialSession?.(adminId, account.id, retryExpected);
+          token = await (retrySession?.client ?? this.mtop).fetchImToken(adminId, account.id, deviceId);
           if (token.success && token.accessToken) {
-            const persisted = await this.store.getCredential(adminId, account.id);
-            return this.store.upsertCredential({ adminId, accountId: account.id, platform: account.platform, cookieHeader: token.cookieHeader, accessToken: token.accessToken, deviceId, metadata: persisted?.metadata ?? browserMetadata, expiresAt: persisted?.expiresAt ?? latest.expiresAt ?? credential.expiresAt });
+            const buffered = retrySession?.getCredential() ?? retryExpected;
+            const saved = await this.store.commitCredentialRefresh({ adminId, accountId: account.id, expected: retryExpected, cookieHeader: token.cookieHeader, accessToken: token.accessToken, deviceId, metadata: buffered.metadata ?? retryExpected.metadata });
+            if (!saved) throw new ServiceError(409, 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED', '账号凭证已变化');
+            return saved;
           }
           this.verificationRetryAfter.set(verificationKey, Date.now() + 30_000);
         }
@@ -803,8 +848,10 @@ export class XianyuImService {
         : token.message ?? 'unable to obtain xianyu im token';
       throw new ServiceError(statusCode, token.errorCode ?? 'IM_TOKEN_FAILED', message);
     }
-    const current = await this.store.getCredential(adminId, account.id) ?? credential;
-    return this.store.upsertCredential({ adminId, accountId: account.id, platform: account.platform, cookieHeader: token.cookieHeader, accessToken: token.accessToken, deviceId, metadata: current.metadata, expiresAt: current.expiresAt });
+    const buffered = isolated?.getCredential() ?? initial;
+    const saved = await this.store.commitCredentialRefresh({ adminId, accountId: account.id, expected: initial, cookieHeader: token.cookieHeader, accessToken: token.accessToken, deviceId, metadata: buffered.metadata ?? initial.metadata });
+    if (!saved) throw new ServiceError(409, 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED', '账号凭证已变化');
+    return saved;
   }
 
   private scheduleCredentialRefresh(adminId: string, accountId: string): void {
@@ -905,21 +952,21 @@ export class XianyuImService {
     return task;
   }
 
-  private async markAccountFailure(adminId: string, accountId: string, error: unknown, source = 'im'): Promise<void> {
+  private async markAccountFailure(adminId: string, accountId: string, error: unknown, source = 'im', expectedGeneration?: number): Promise<void> {
       const account = await this.store.getAccount(adminId, accountId);
-      if (!account || account.status === 'disabled') return;
+      if (!account || account.status === 'disabled' || (expectedGeneration !== undefined && account.credentialGeneration !== expectedGeneration)) return;
       const code = error instanceof ServiceError ? error.code : (error as { code?: unknown } | null)?.code;
       const normalizedCode = typeof code === 'string' ? code : error instanceof Error ? error.message : String(error);
       const classification = classifyXianyuFailure({ errorCode: normalizedCode });
       if (classification.kind === 'verification_required') {
-        await this.store.recordAccountRisk({ adminId, accountId, code: normalizedCode.slice(0, 120), source });
+        await this.store.recordAccountRisk({ adminId, accountId, code: normalizedCode.slice(0, 120), source, expectedGeneration });
         this.requestVerificationRecovery(adminId, accountId, source);
         await this.notifyVerificationRequired?.(adminId, accountId, source);
         return;
       }
       const status = classification.accountStatus!;
       if (account.status === 'expired' && status === 'degraded') return;
-      if (status === 'degraded') await this.store.recordAccountDegraded({ adminId, accountId, source });
+      if (status === 'degraded') await this.store.recordAccountDegraded({ adminId, accountId, source, expectedGeneration });
       else if (account.status !== status) await this.store.updateAccount(adminId, accountId, { status });
   }
 
@@ -973,15 +1020,12 @@ export class XianyuImService {
     if (account) await this.store.clearAccountDegraded({ adminId, accountId, source: 'im', startedAt });
   }
 
-  private startTransportHeartbeat(key: string, adminId: string, accountId: string, client: XianyuImClient): void {
-    this.stopTransportHeartbeat(key);
-    const timer = setInterval(() => {
-      if (!client.connected) { this.stopTransportHeartbeat(key); return; }
-      void this.store.setAccountTransport({ adminId, accountId, status: 'connected' }).catch((error) => {
-        console.error(JSON.stringify({ component: 'xianyu-im-listener', event: 'transport_heartbeat_failed', accountId, errorCode: recoveryErrorCode(error) }));
-      });
-    }, 5_000);
-    this.transportHeartbeatTimers.set(key, timer);
+  private serializeClientHealth(key: string, work: () => Promise<void>): Promise<void> {
+    const prior = this.clientHealthLanes.get(key) ?? Promise.resolve();
+    const task = prior.catch(() => undefined).then(work);
+    this.clientHealthLanes.set(key, task);
+    void task.finally(() => { if (this.clientHealthLanes.get(key) === task) this.clientHealthLanes.delete(key); }).catch(() => undefined);
+    return task;
   }
 
   private stopTransportHeartbeat(key: string): void {
@@ -990,22 +1034,22 @@ export class XianyuImService {
     this.transportHeartbeatTimers.delete(key);
   }
 
-  private async saveCredential(adminId: string, account: AccountRecord, credential: XianyuImCredential): Promise<void> {
+  private async saveCredential(adminId: string, account: AccountRecord, credential: XianyuImCredential, expected: CredentialRecord): Promise<CredentialRecord> {
     // IM token refresh callbacks only carry the refreshed transport fields.
     // Preserve the browser cookie snapshot and expiry metadata already stored
     // by QR/cookie login; dropping them forces image uploads back to a stale
     // flat Cookie header and causes SESSION_EXPIRED on the upload host.
-    const current = await this.store.getCredential(adminId, account.id);
-    await this.store.upsertCredential({
+    const saved = await this.store.commitCredentialRefresh({
       adminId,
       accountId: account.id,
-      platform: account.platform,
+      expected: structuredClone(expected),
       cookieHeader: credential.cookieHeader,
       accessToken: credential.accessToken,
       deviceId: credential.deviceId,
-      metadata: current?.metadata,
-      expiresAt: current?.expiresAt,
+      metadata: expected.metadata,
     });
+    if (!saved) throw new ServiceError(409, 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED', '账号凭证已变化');
+    return saved;
   }
 
   private async enrichConversationIdentity(adminId: string, accountId: string, parsed: { externalConversationRef: string; buyerRef: string; buyerDisplayName?: string; buyerAvatarUrl?: string; itemRef?: string; itemTitle?: string; itemImageUrl?: string; unreadCount?: number; lastMessagePreview?: string; lastMessageAt?: string }): Promise<typeof parsed> {

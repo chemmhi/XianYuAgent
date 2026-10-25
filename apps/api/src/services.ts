@@ -581,7 +581,7 @@ export class CredentialService {
     return credential;
   }
 
-  async save(input: { adminId: string; accountId: string; cookieHeader?: string; accessToken?: string; clearAccessToken?: boolean; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string; requestId: string; traceId: string }): Promise<CredentialRecord> {
+  async save(input: { adminId: string; accountId: string; cookieHeader?: string; accessToken?: string; clearAccessToken?: boolean; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string; requestId: string; traceId: string; loginReservation?: { loginSessionId: string; reservationId: string; generation: number } }): Promise<CredentialRecord> {
     const account = await this.store.getAccount(input.adminId, input.accountId);
     if (!account) throw new ServiceError(404, 'NOT_FOUND', 'account not found');
     if (input.cookieHeader) {
@@ -596,7 +596,7 @@ export class CredentialService {
     const metadata = { ...(current?.metadata ?? {}), ...(input.metadata ?? {}) };
     if (!cookieHeader && !accessToken && !deviceId && Object.keys(metadata).length === 0) throw new ServiceError(422, 'VALIDATION_FAILED', 'at least one credential field is required');
     if (input.expiresAt && !Number.isFinite(Date.parse(input.expiresAt))) throw new ServiceError(422, 'VALIDATION_FAILED', 'expiresAt must be an ISO timestamp');
-    const credential = await this.store.upsertCredential({ adminId: input.adminId, accountId: input.accountId, platform: account.platform, cookieHeader, accessToken, deviceId, metadata, expiresAt: input.expiresAt ?? current?.expiresAt });
+    const credential = await this.store.upsertCredential({ adminId: input.adminId, accountId: input.accountId, platform: account.platform, cookieHeader, accessToken, deviceId, metadata, expiresAt: input.expiresAt ?? current?.expiresAt, loginReservation: input.loginReservation });
     // Saving a Cookie is not proof that a platform verification challenge cleared.
     await this.audit({ actorId: input.adminId, action: current ? 'account.credential.updated' : 'account.credential.created', targetRef: credential.id, requestId: input.requestId, traceId: input.traceId, payload: { fields: Object.keys({ cookieHeader: input.cookieHeader, accessToken: input.accessToken, deviceId: input.deviceId, metadata: input.metadata, expiresAt: input.expiresAt }).filter((key) => input[key as keyof typeof input] !== undefined) }, accountId: input.accountId });
     return credential;
@@ -610,11 +610,11 @@ export class CredentialService {
     return credential;
   }
 
-  async verify(input: { adminId: string; accountId: string; status: CredentialRecord['status']; expiresAt?: string; requestId: string; traceId: string }): Promise<CredentialRecord> {
+  async verify(input: { adminId: string; accountId: string; status: CredentialRecord['status']; expiresAt?: string; requestId: string; traceId: string; expectedGeneration?: number; expected?: CredentialRecord; mode?: 'manual' }): Promise<CredentialRecord> {
     if (!['active', 'expired', 'revoked'].includes(input.status)) throw new ServiceError(422, 'VALIDATION_FAILED', 'invalid credential status');
-    const credential = await this.store.markCredentialVerified(input);
-    if (!credential) throw new ServiceError(404, 'NOT_FOUND', 'credential not found');
-    await this.store.updateAccount(input.adminId, input.accountId, { status: input.status === 'active' ? 'connected' : input.status === 'revoked' ? 'disconnected' : 'expired', ...(input.status === 'active' ? { lastConnectedAt: new Date().toISOString() } : {}) });
+    const expected = input.mode === 'manual' ? structuredClone(await this.store.getCredential(input.adminId, input.accountId)) : input.expected;
+    const credential = await this.store.markCredentialVerified({ ...input, expected });
+    if (!credential) throw new ServiceError(409, 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED', '账号凭证已变化，请重新校验');
     await this.audit({ actorId: input.adminId, action: 'account.credential.verified', targetRef: credential.id, requestId: input.requestId, traceId: input.traceId, payload: { status: credential.status }, accountId: input.accountId });
     return credential;
   }

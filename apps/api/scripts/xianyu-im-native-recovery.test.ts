@@ -58,7 +58,7 @@ test('native browser recovery persists token, device and partitioned cookies thr
 test('native recovery propagates database write failure and keeps the previous credential', async () => {
   const f = await fixture();
   const writeFailure = new Error('database unavailable');
-  f.store.upsertCredential = async () => { throw writeFailure; };
+  f.store.commitCredentialRefresh = async () => { throw writeFailure; };
   await assert.rejects(f.refresh, error => error === writeFailure);
   assert.equal((await f.store.getCredential(f.admin.id, f.account.id))?.cookieHeader, f.credential.cookieHeader);
 });
@@ -72,18 +72,22 @@ test('native recovery refuses credentials for a different account or device', as
   }
 });
 
-test('ordinary token refresh retains the cookie snapshot most recently saved by MTOP', async () => {
+test('ordinary token refresh retains the request-local MTOP cookie snapshot until its atomic commit', async () => {
   const f = await fixture();
   const metadata = metadataWithCookieSnapshot({ loginMethod: 'qr_http' }, f.result.cookieSnapshot);
-  const service = new XianyuImService(f.store, { fetchImToken: async () => {
-    await f.store.upsertCredential({ adminId: f.admin.id, accountId: f.account.id, platform: 'xianyu',
-      cookieHeader: 'unb=seller-1; _m_h5_tk=native_suffix', metadata });
-    return { success: true, accessToken: 'http-access', cookieHeader: 'unb=seller-1; _m_h5_tk=native_suffix' };
-  } } as never, {} as never);
+  let buffered = { ...structuredClone(f.credential), metadata };
+  const service = new XianyuImService(f.store, { createCredentialSession: () => ({
+    client: { fetchImToken: async () => {
+      buffered = { ...buffered, cookieHeader: 'unb=seller-1; _m_h5_tk=native_suffix' };
+      assert.equal((await f.store.getCredential(f.admin.id, f.account.id))?.cookieHeader, f.credential.cookieHeader, 'Set-Cookie is buffered, not persisted before final token CAS');
+      return { success: true, accessToken: 'http-access', cookieHeader: buffered.cookieHeader };
+    } }, getCredential: () => buffered,
+  }) } as never, {} as never);
   await (service as unknown as {
     refreshCredential(adminId: string, account: AccountRecord, credential: CredentialRecord): Promise<CredentialRecord>;
   }).refreshCredential(f.admin.id, f.account, structuredClone(f.credential));
   assert.deepEqual((await f.store.getCredential(f.admin.id, f.account.id))?.metadata, metadata);
+  assert.equal((await f.store.getCredential(f.admin.id, f.account.id))?.accessToken, 'http-access');
 });
 
 test('native recovery does not replace stored credentials with an empty browser cookie snapshot', async () => {
@@ -93,20 +97,21 @@ test('native recovery does not replace stored credentials with an empty browser 
   assert.equal((await f.store.getCredential(f.admin.id, f.account.id))?.cookieHeader, f.credential.cookieHeader);
 });
 
-test('verified native token clears its API risk only after credentials are persisted', async () => {
+test('verified native token preserves verification risks until actual IM registration', async () => {
   const f = await fixture();
   await f.store.recordAccountRisk({ adminId: f.admin.id, accountId: f.account.id, source: 'mtop.taobao.idlemessage.pc.login.token', code: 'ACCOUNT_VALIDATION_REQUIRED' });
   await f.store.recordAccountRisk({ adminId: f.admin.id, accountId: f.account.id, source: 'im_listener', code: 'ACCOUNT_VALIDATION_REQUIRED' });
   await f.refresh();
   assert.equal((await f.store.getCredential(f.admin.id, f.account.id))?.accessToken, 'native-access');
   assert.equal((await f.store.getAccount(f.admin.id, f.account.id))?.riskSource, 'im_listener', 'socket risk must await real registration');
+  assert.equal((await f.store.listAccountVerificationRisks(f.admin.id, f.account.id)).length, 2, 'saving a token alone must not clear either IM risk');
 });
 
 test('native recovery cannot clear a newer token risk created after its revision snapshot', async () => {
   const f = await fixture();
   await f.store.recordAccountRisk({ adminId: f.admin.id, accountId: f.account.id, source: 'mtop.taobao.idlemessage.pc.login.token', code: 'ACCOUNT_VALIDATION_REQUIRED' });
-  const originalUpsert = f.store.upsertCredential.bind(f.store);
-  f.store.upsertCredential = async (input) => {
+  const originalUpsert = f.store.commitCredentialRefresh.bind(f.store);
+  f.store.commitCredentialRefresh = async (input) => {
     const saved = await originalUpsert(input);
     await f.store.recordAccountRisk({ adminId: f.admin.id, accountId: f.account.id, source: 'mtop.taobao.idlemessage.pc.login.token', code: 'ACCOUNT_VALIDATION_REQUIRED' });
     return saved;

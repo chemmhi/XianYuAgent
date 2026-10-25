@@ -109,6 +109,7 @@ function cloneRepairPolicy(bundle: AutoReplyRepairPolicyBundle): AutoReplyRepair
 }
 
 export class MemoryStore implements Store {
+  private readonly credentialLoginClaims = new Map<string, { loginSessionId: string; reservationId: string; generation: number; until: number }>();
   readonly kind = 'memory' as const;
   private readonly artifactWrites = new Map<string, Set<Promise<unknown>>>();
   private readonly deletionRequested = new Set<string>();
@@ -267,9 +268,9 @@ export class MemoryStore implements Store {
     return account;
   }
   async updateAccount(adminId: string, accountId: string, patch: { sellerRef?: string; displayName?: string; remark?: string; avatarUrl?: string; platformUserId?: string; status?: AccountRecord['status']; lastConnectedAt?: string }): Promise<AccountRecord | undefined> { const account = await this.getAccount(adminId, accountId); if (!account) return undefined; if (patch.sellerRef && !(await this.isAccountIdentityAvailable(account.platform, patch.sellerRef, accountId)) || patch.platformUserId && !(await this.isAccountIdentityAvailable(account.platform, patch.platformUserId, accountId))) throw new Error('ACCOUNT_DUPLICATE'); if (patch.sellerRef !== undefined) account.sellerRef = patch.sellerRef; if (patch.displayName !== undefined) account.displayName = patch.displayName; if (patch.remark !== undefined) account.remark = patch.remark; if (patch.avatarUrl !== undefined) account.avatarUrl = patch.avatarUrl; if (patch.platformUserId !== undefined) account.platformUserId = patch.platformUserId; if (patch.status !== undefined && !account.riskEpisode && !account.degradedSource) account.status = patch.status; if (patch.lastConnectedAt !== undefined) account.lastConnectedAt = patch.lastConnectedAt; account.updatedAt = new Date().toISOString(); return account; }
-  async recordAccountDegraded(input: { adminId: string; accountId: string; source: string }): Promise<AccountRecord | undefined> {
+  async recordAccountDegraded(input: { adminId: string; accountId: string; source: string; expectedGeneration?: number }): Promise<AccountRecord | undefined> {
     const account = await this.getAccount(input.adminId, input.accountId);
-    if (!account || ['disabled', 'expired'].includes(account.status)) return account;
+    if (!account || ['disabled', 'expired'].includes(account.status) || (input.expectedGeneration !== undefined && (account.credentialGeneration ?? 1) !== input.expectedGeneration)) return account;
     if (!account.riskEpisode) account.status = 'degraded';
     account.degradedSource = input.source;
     account.degradedAt = new Date().toISOString();
@@ -277,9 +278,9 @@ export class MemoryStore implements Store {
     this.healthSignals.set(`${account.id}:degraded:${input.source}`, { accountId: account.id, kind: 'degraded', source: input.source, seenAt: account.degradedAt });
     return account;
   }
-  async clearAccountDegraded(input: { adminId: string; accountId: string; source: string; startedAt: string }): Promise<AccountRecord | undefined> {
+  async clearAccountDegraded(input: { adminId: string; accountId: string; source: string; startedAt: string; expectedGeneration?: number; isCurrent?: () => boolean }): Promise<AccountRecord | undefined> {
     const account = await this.getAccount(input.adminId, input.accountId);
-    if (!account) return account;
+    if (!account || input.isCurrent?.() === false || (input.expectedGeneration !== undefined && (account.credentialGeneration ?? 1) !== input.expectedGeneration)) return account;
     const key = `${account.id}:degraded:${input.source}`;
     const signal = this.healthSignals.get(key);
     if (!signal || signal.seenAt > input.startedAt) return account;
@@ -291,9 +292,9 @@ export class MemoryStore implements Store {
     account.updatedAt = new Date().toISOString();
     return account;
   }
-  async recordAccountRisk(input: { adminId: string; accountId: string; code: string; source: string; recoveryRequest?: VerificationRecoveryRequest }): Promise<AccountRecord | undefined> {
+  async recordAccountRisk(input: { adminId: string; accountId: string; code: string; source: string; recoveryRequest?: VerificationRecoveryRequest; expectedGeneration?: number }): Promise<AccountRecord | undefined> {
     const account = await this.getAccount(input.adminId, input.accountId);
-    if (!account || account.status === 'disabled') return undefined;
+    if (!account || account.status === 'disabled' || (input.expectedGeneration !== undefined && (account.credentialGeneration ?? 1) !== input.expectedGeneration)) return undefined;
     const now = new Date().toISOString();
     if (!account.riskEpisode) { account.riskEpisode = createId(); account.riskFirstSeenAt = now; }
     this.healthSignals.set(`${account.id}:verification_required:${input.source}`, { accountId: account.id, kind: 'verification_required', source: input.source, code: input.code, episode: account.riskEpisode, revision: createId(), seenAt: now, recoveryRequest: input.recoveryRequest ? structuredClone(input.recoveryRequest) : undefined });
@@ -311,9 +312,10 @@ export class MemoryStore implements Store {
     return [...this.healthSignals.values()].filter(s => s.accountId === accountId && s.kind === 'verification_required' && s.episode)
       .map(s => ({ source: s.source, episode: s.episode!, revision: s.revision!, lastSeenAt: s.seenAt, recoveryRequest: s.recoveryRequest ? structuredClone(s.recoveryRequest) : undefined }));
   }
-  async clearAccountRisk(input: { adminId: string; accountId: string; episode: string; source: string; startedAt: string; expectedRiskRevision?: string }): Promise<AccountRecord | undefined> {
+  async clearAccountRisk(input: { adminId: string; accountId: string; episode: string; source: string; startedAt: string; expectedRiskRevision?: string; expectedGeneration?: number; isCurrent?: () => boolean }): Promise<AccountRecord | undefined> {
     const account = await this.getAccount(input.adminId, input.accountId);
-    if (!account || account.status !== 'verification_required' || account.riskEpisode !== input.episode) return account;
+    if (!account || input.isCurrent?.() === false || account.status !== 'verification_required' || account.riskEpisode !== input.episode
+      || (input.expectedGeneration !== undefined && (account.credentialGeneration ?? 1) !== input.expectedGeneration)) return account;
     const signalKey = `${account.id}:verification_required:${input.source}`;
     const signal = this.healthSignals.get(signalKey);
     if (input.expectedRiskRevision && signal?.revision !== input.expectedRiskRevision) return account;
@@ -363,9 +365,10 @@ export class MemoryStore implements Store {
     notification.read = true;
     return true;
   }
-  async setAccountTransport(input: { adminId: string; accountId: string; status: 'connecting' | 'connected' | 'disconnected' | 'failed' }): Promise<void> {
+  async setAccountTransport(input: { adminId: string; accountId: string; status: 'connecting' | 'connected' | 'disconnected' | 'failed'; expectedGeneration?: number }): Promise<void> {
     const account = await this.getAccount(input.adminId, input.accountId);
     if (!account) return;
+    if (input.expectedGeneration !== undefined && (account.credentialGeneration ?? 1) !== input.expectedGeneration) return;
     const wasConnected = account.transportStatus === 'connected';
     account.transportStatus = input.status;
     if (input.status === 'connected') account.transportSeenAt = new Date().toISOString();
@@ -1710,14 +1713,41 @@ export class MemoryStore implements Store {
     }
     return credential;
   }
-  async upsertCredential(input: { adminId: string; accountId: string; platform: string; cookieHeader?: string; accessToken?: string; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string }): Promise<CredentialRecord> {
+  async beginCredentialLogin(input: { adminId: string; accountId: string; loginSessionId: string }) {
+    const scopes = await this.listScopes(input.adminId); const account = this.accounts.get(input.accountId);
+    const login = this.loginSessions.get(input.loginSessionId);
+    if (!account || this.deletionRequested.has(input.accountId) || !scopes.some(scope => scope.accountId === input.accountId && scope.scope === 'manage')) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    if (!login || login.adminId !== input.adminId || Date.parse(login.expiresAt) <= Date.now() || ['failed','succeeded','cancelled','expired'].includes(login.status)) throw new Error('LOGIN_SESSION_EXPIRED');
+    const claim = this.credentialLoginClaims.get(input.accountId);
+    if (claim && claim.until > Date.now()) { if (claim.loginSessionId !== input.loginSessionId) throw new Error('LOGIN_ACCOUNT_BUSY'); return claim; }
+    const generation = (account.credentialGeneration ?? 1) + 1; account.credentialGeneration = generation;
+    const next = { loginSessionId: input.loginSessionId, reservationId: createId(), generation, until: Date.now() + 300_000 };
+    this.credentialLoginClaims.set(input.accountId, next); return next;
+  }
+  async upsertCredential(input: { adminId: string; accountId: string; platform: string; cookieHeader?: string; accessToken?: string; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string; loginReservation?: { loginSessionId: string; reservationId: string; generation: number } }): Promise<CredentialRecord> {
     if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const account = this.accounts.get(input.accountId)!;
+    if (!(await this.listScopes(input.adminId)).some(scope => scope.accountId === input.accountId && scope.scope === 'manage'
+      && (!scope.expiresAt || Date.parse(scope.expiresAt) > Date.now()))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    if (this.deletionRequested.has(input.accountId)) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
+    const claim = this.credentialLoginClaims.get(input.accountId);
+    let generation: number;
+    if (input.loginReservation) {
+      const r = input.loginReservation, login = this.loginSessions.get(r.loginSessionId);
+      if (!claim || claim.reservationId !== r.reservationId || claim.generation !== r.generation || account.credentialGeneration !== r.generation
+        || !login || login.adminId !== input.adminId || Date.parse(login.expiresAt) <= Date.now() || ['failed','cancelled','expired','succeeded'].includes(login.status)) throw new Error('XIANYU_VERIFICATION_CREDENTIAL_CHANGED');
+      generation = r.generation; login.accountId = input.accountId; this.credentialLoginClaims.delete(input.accountId);
+    } else {
+      if (claim && claim.until > Date.now()) throw new Error('LOGIN_ACCOUNT_BUSY');
+      generation = (account.credentialGeneration ?? 1) + 1; account.credentialGeneration = generation;
+    }
     const now = new Date().toISOString();
     const existing = this.credentials.get(input.accountId);
     const credential: CredentialRecord = existing
       ? Object.assign(existing, {
           platform: input.platform,
           status: 'active' as const,
+          generation,
           cookieHeader: input.cookieHeader,
           accessToken: input.accessToken,
           deviceId: input.deviceId,
@@ -1726,7 +1756,7 @@ export class MemoryStore implements Store {
           updatedAt: now,
         })
       : {
-          id: createId(), accountId: input.accountId, platform: input.platform, status: 'active',
+          id: createId(), accountId: input.accountId, platform: input.platform, status: 'active', generation,
           cookieHeader: input.cookieHeader, accessToken: input.accessToken, deviceId: input.deviceId,
           metadata: input.metadata ?? {}, expiresAt: input.expiresAt, createdAt: now, updatedAt: now,
         };
@@ -1738,7 +1768,9 @@ export class MemoryStore implements Store {
     // No await between the comparison and mutation: this is an atomic CAS in memory.
     const current = this.credentials.get(input.accountId);
     const expected = input.expected;
-    if (!current || this.accounts.get(input.accountId)?.status === 'disabled' || current.status !== 'active'
+    if (!current || this.accounts.get(input.accountId)?.status === 'disabled' || this.deletionRequested.has(input.accountId) || current.status !== 'active'
+      || (current.generation ?? 1) !== (expected.generation ?? 1) || (this.accounts.get(input.accountId)?.credentialGeneration ?? 1) !== (expected.generation ?? 1)
+      || (this.credentialLoginClaims.get(input.accountId)?.until ?? 0) > Date.now()
       || (current.expiresAt && Date.parse(current.expiresAt) <= Date.now())
       || current.id !== expected.id || current.cookieHeader !== expected.cookieHeader || current.accessToken !== expected.accessToken
       || current.deviceId !== expected.deviceId || current.updatedAt !== expected.updatedAt || current.expiresAt !== expected.expiresAt
@@ -1750,17 +1782,35 @@ export class MemoryStore implements Store {
   async revokeCredential(adminId: string, accountId: string): Promise<CredentialRecord | undefined> {
     const credential = await this.getCredential(adminId, accountId);
     if (!credential) return undefined;
+    const account = this.accounts.get(accountId)!; account.credentialGeneration = (account.credentialGeneration ?? 1) + 1;
+    credential.generation = account.credentialGeneration;
+    this.credentialLoginClaims.delete(accountId);
     credential.status = 'revoked';
     credential.updatedAt = new Date().toISOString();
     return credential;
   }
-  async markCredentialVerified(input: { adminId: string; accountId: string; status: CredentialRecord['status']; expiresAt?: string }): Promise<CredentialRecord | undefined> {
+  async markCredentialVerified(input: { adminId: string; accountId: string; status: CredentialRecord['status']; expiresAt?: string; expectedGeneration?: number; expected?: CredentialRecord }): Promise<CredentialRecord | undefined> {
+    if (input.status === 'revoked') return this.revokeCredential(input.adminId, input.accountId);
     const credential = await this.getCredential(input.adminId, input.accountId);
     if (!credential) return undefined;
+    const expected = input.expected;
+    if (!expected || credential.id !== expected.id || credential.status !== expected.status || credential.lastVerifiedAt !== expected.lastVerifiedAt
+      || credential.cookieHeader !== expected.cookieHeader
+      || credential.accessToken !== expected.accessToken || credential.deviceId !== expected.deviceId
+      || credential.updatedAt !== expected.updatedAt || credential.expiresAt !== expected.expiresAt
+      || JSON.stringify(credential.metadata) !== JSON.stringify(expected.metadata)
+      || credential.status === 'revoked' || (credential.generation ?? 1) !== (expected.generation ?? 1)
+      || (this.accounts.get(input.accountId)?.credentialGeneration ?? 1) !== (credential.generation ?? 1)) return undefined;
     credential.status = input.status;
     credential.expiresAt = input.expiresAt ?? credential.expiresAt;
     credential.lastVerifiedAt = new Date().toISOString();
     credential.updatedAt = credential.lastVerifiedAt;
+    const account = this.accounts.get(input.accountId);
+    if (account && !account.riskEpisode && account.status !== 'disabled') {
+      account.status = input.status === 'expired' ? 'expired'
+        : account.transportStatus === 'connected' && account.transportSeenAt && Date.parse(account.transportSeenAt) > Date.now() - 15_000 ? 'connected' : 'disconnected';
+      account.updatedAt = credential.updatedAt;
+    }
     return credential;
   }
   async listCredentialRefs(adminId: string, accountId: string): Promise<CredentialRefRecord[]> {

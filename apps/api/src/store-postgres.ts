@@ -2,6 +2,7 @@ import { isRecoverableAutomationSkip, RECOVERABLE_AUTOMATION_SKIP_REASONS } from
 import { purgeAccountRows, type AccountDeletionCleanup } from './account-purge-postgres.js';
 import { inviteAccessStatus } from './invite-access.js';
 import { Pool, type PoolClient } from 'pg';
+import { beginPostgresCredentialLogin, writePostgresCredential, type ExplicitCredentialWrite } from './credential-generation-postgres.js';
 import type { AccountVerificationRisk, CredentialRefreshUpdate, VerificationRecoveryRequest } from './domain.js';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import type { AccountListQuery, AccountListResult, AccountRecord, AccountScopeRecord, AgentSessionRecord, AdminRecord, AuditEventRecord, AutoReplyActivitySummary, AutoReplyAgentConfig, AutoReplyAgentConfigPatch, AutoReplyAgentConfigRecord, AutoReplyOutboxRecord, AutoReplyRepairPolicyBundle, AutoReplyRunDetailRecord, AutoReplyRunEventRecord, AutoReplyRunListItem, AutoReplyRunListQuery, AutoReplyRunListResult, AutoReplyRunRecord, AutoReplyRunUpdate, AutoReplyDecision, AutoReplyRunStage, AutoReplyRunStatus, AutoReplyConversationContext, AutoReplyConversationListQuery, AutoReplyConversationListResult, AutoReplyMessageContext, AutoReplyMessageListQuery, AutoReplyMessageListResult, AutoReplyOrderContext, AutoReplyOrderListQuery, AutoReplyOrderListResult, AutoReplyProductContext, AutoReplyProductListQuery, AutoReplyProductListResult, AutoReplyProductLookup, ConversationEventRecord, ConversationListQuery, ConversationListResult, ConversationRecord, CouponAssetRecord, CouponBatchListQuery, CouponBatchListResult, CouponBatchMetadata, CouponBatchRecord, CouponBatchStatus, CouponBindingRecord, CouponItemRecord, CouponReservationPurpose, CouponReservationRecord, CredentialRecord, CredentialRefRecord, CredentialRefStatus, DeliveryRecord, DeliveryRecordStatus, IdempotencyRecord, InboundInboxRecord, InboundQuarantineRecord, LoginSessionRecord, MessageListQuery, MessageListResult, MessageRecord, ModelProviderRoutingRecord, ModelProviderRoutingMode, OrderListQuery, OrderListResult, OrderRecord, OrderSource, OrderUpsertResult, ProductAssetRecord, ProductAutomationBatchResult, ProductAutomationConfig, ProductAutomationConfigRecord, ProductKnowledgeBaseMessageRecord, ProductListQuery, ProductListResult, ProductPatch, ProductRecord, ProductSkuRecord, ProductStatus, RunEventRecord, RunRecord, RunStatus, SessionRecord, StepRecord, StepStatus, Store, WorkspaceConfirmationRecord, WorkspaceMessageRecord, WorkspaceMessageType, XianyuItemDetailPersistenceInput, XianyuOrderItem, XianyuProductItem, ProductUpsertResult, AutomationExecutionLedgerRecord } from './domain.js';
@@ -275,12 +276,12 @@ export class PostgresStore implements Store {
   }
   async createAccount(input: { platform: string; sellerRef: string; displayName?: string; adminId: string }): Promise<AccountRecord> { const client = await this.pool.connect(); try { await client.query('begin'); const accountResult = await client.query('insert into accounts.accounts (id,platform,seller_ref,display_name,status) values ($1,$2,$3,$4,\'pending\') returning *', [createId(), input.platform, input.sellerRef, input.displayName ?? null]); const account = this.toAccount(accountResult.rows[0]); await client.query('insert into auth.account_scopes (id,admin_id,account_id,scope,status) values ($1,$2,$3,\'manage\',\'active\')', [createId(), input.adminId, account.id]); await client.query('commit'); return account; } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); } }
   async updateAccount(adminId: string, accountId: string, patch: { sellerRef?: string; displayName?: string; remark?: string; avatarUrl?: string; platformUserId?: string; status?: AccountRecord['status']; lastConnectedAt?: string }): Promise<AccountRecord | undefined> { const current = await this.getAccount(adminId, accountId); if (!current) return undefined; const result = await this.pool.query("update accounts.accounts set seller_ref=coalesce($2,seller_ref), display_name=coalesce($3,display_name), remark=coalesce($4,remark), avatar_url=coalesce($5,avatar_url), platform_user_id=coalesce($6,platform_user_id), status=case when risk_episode is not null then 'verification_required' when degraded_source is not null then 'degraded' else coalesce($7,status) end, last_connected_at=coalesce($8,last_connected_at), updated_at=now() where id=$1 returning *", [accountId, patch.sellerRef ?? null, patch.displayName ?? null, patch.remark ?? null, patch.avatarUrl ?? null, patch.platformUserId ?? null, patch.status ?? null, patch.lastConnectedAt ?? null]); return result.rows[0] ? this.toAccount(result.rows[0]) : undefined; }
-  async recordAccountDegraded(input: { adminId: string; accountId: string; source: string }): Promise<AccountRecord | undefined> {
+  async recordAccountDegraded(input: { adminId: string; accountId: string; source: string; expectedGeneration?: number }): Promise<AccountRecord | undefined> {
     const client = await this.pool.connect();
     try {
       await client.query('begin');
       const account = await client.query("select a.* from accounts.accounts a join auth.account_scopes s on s.account_id=a.id where a.id=$1 and s.admin_id=$2 and s.status='active' for update", [input.accountId, input.adminId]);
-      if (!account.rows[0] || ['disabled', 'expired'].includes(account.rows[0].status)) { await client.query('commit'); return account.rows[0] ? this.toAccount(account.rows[0]) : undefined; }
+      if (!account.rows[0] || ['disabled', 'expired'].includes(account.rows[0].status) || (input.expectedGeneration !== undefined && Number(account.rows[0].credential_generation) !== input.expectedGeneration)) { await client.query('commit'); return account.rows[0] ? this.toAccount(account.rows[0]) : undefined; }
       await client.query(`insert into accounts.health_signals(account_id,kind,source,last_seen_at) values ($1,'degraded',$2,now())
         on conflict(account_id,kind,source) do update set last_seen_at=excluded.last_seen_at`, [input.accountId, input.source]);
       const updated = await client.query("update accounts.accounts set status=case when risk_episode is not null then 'verification_required' else 'degraded' end,degraded_source=$2,degraded_at=now(),updated_at=now() where id=$1 returning *", [input.accountId, input.source]);
@@ -288,29 +289,32 @@ export class PostgresStore implements Store {
       return this.toAccount(updated.rows[0]);
     } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
   }
-  async clearAccountDegraded(input: { adminId: string; accountId: string; source: string; startedAt: string }): Promise<AccountRecord | undefined> {
+  async clearAccountDegraded(input: { adminId: string; accountId: string; source: string; startedAt: string; expectedGeneration?: number; isCurrent?: () => boolean }): Promise<AccountRecord | undefined> {
     const client = await this.pool.connect();
     try {
       await client.query('begin');
       const account = await client.query("select a.* from accounts.accounts a join auth.account_scopes s on s.account_id=a.id where a.id=$1 and s.admin_id=$2 and s.status='active' for update", [input.accountId, input.adminId]);
-      if (!account.rows[0]) { await client.query('commit'); return undefined; }
+      if (!account.rows[0] || (input.expectedGeneration !== undefined && Number(account.rows[0].credential_generation) !== input.expectedGeneration)) { await client.query('commit'); return undefined; }
+      if (input.isCurrent?.() === false) { await client.query('rollback'); return this.toAccount(account.rows[0]); }
       const removed = await client.query("delete from accounts.health_signals where account_id=$1 and kind='degraded' and (source=$2 or source='legacy') and last_seen_at<=$3::timestamptz returning source", [input.accountId, input.source, input.startedAt]);
+      if (input.isCurrent?.() === false) { await client.query('rollback'); return this.toAccount(account.rows[0]); }
       if (!removed.rows[0]) { await client.query('commit'); return this.toAccount(account.rows[0]); }
       const remaining = await client.query("select source,last_seen_at from accounts.health_signals where account_id=$1 and kind='degraded' order by last_seen_at desc limit 1", [input.accountId]);
       const updated = await client.query(`update accounts.accounts set degraded_source=$2,degraded_at=$3,
         status=case when risk_episode is not null then 'verification_required' when status in ('disabled','expired') then status
           when $2::text is not null then 'degraded' when transport_status='connected' and transport_seen_at>now()-interval '15 seconds' then 'connected' else 'disconnected' end,
         updated_at=now() where id=$1 returning *`, [input.accountId, remaining.rows[0]?.source ?? null, remaining.rows[0]?.last_seen_at ?? null]);
+      if (input.isCurrent?.() === false) { await client.query('rollback'); return this.toAccount(account.rows[0]); }
       await client.query('commit');
       return this.toAccount(updated.rows[0]);
     } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
   }
-  async recordAccountRisk(input: { adminId: string; accountId: string; code: string; source: string; recoveryRequest?: VerificationRecoveryRequest }): Promise<AccountRecord | undefined> {
+  async recordAccountRisk(input: { adminId: string; accountId: string; code: string; source: string; recoveryRequest?: VerificationRecoveryRequest; expectedGeneration?: number }): Promise<AccountRecord | undefined> {
     const client = await this.pool.connect();
     try {
       await client.query('begin');
       const row = await client.query("select a.* from accounts.accounts a join auth.account_scopes s on s.account_id=a.id where a.id=$1 and s.admin_id=$2 and s.status='active' and a.status<>'disabled' for update", [input.accountId, input.adminId]);
-      if (!row.rows[0]) { await client.query('rollback'); return undefined; }
+      if (!row.rows[0] || (input.expectedGeneration !== undefined && Number(row.rows[0].credential_generation) !== input.expectedGeneration)) { await client.query('rollback'); return undefined; }
       const episode = row.rows[0].risk_episode ? String(row.rows[0].risk_episode) : createId();
       await client.query(`insert into accounts.health_signals(account_id,kind,source,code,episode,last_seen_at,recovery_request_json,risk_revision)
         values ($1,'verification_required',$2,$3,$4,now(),$5::jsonb,$6::uuid)
@@ -328,15 +332,18 @@ export class PostgresStore implements Store {
       and exists(select 1 from auth.account_scopes s where s.account_id=h.account_id and s.admin_id=$1 and s.status='active' and (s.expires_at is null or s.expires_at>now()))`, [adminId, accountId]);
     return rows.rows.map(r => ({ source: String(r.source), episode: String(r.episode), revision: String(r.risk_revision), lastSeenAt: dateIso(r.last_seen_at), recoveryRequest: r.recovery_request_json ?? undefined }));
   }
-  async clearAccountRisk(input: { adminId: string; accountId: string; episode: string; source: string; startedAt: string; expectedRiskRevision?: string }): Promise<AccountRecord | undefined> {
+  async clearAccountRisk(input: { adminId: string; accountId: string; episode: string; source: string; startedAt: string; expectedRiskRevision?: string; expectedGeneration?: number; isCurrent?: () => boolean }): Promise<AccountRecord | undefined> {
     const client = await this.pool.connect();
     try {
       await client.query('begin');
       const account = await client.query("select a.* from accounts.accounts a join auth.account_scopes s on s.account_id=a.id where a.id=$1 and s.admin_id=$2 and s.status='active' for update", [input.accountId, input.adminId]);
-      if (!account.rows[0] || String(account.rows[0].risk_episode ?? '') !== input.episode) { await client.query('commit'); return account.rows[0] ? this.toAccount(account.rows[0]) : undefined; }
+      if (!account.rows[0] || String(account.rows[0].risk_episode ?? '') !== input.episode
+        || (input.expectedGeneration !== undefined && Number(account.rows[0].credential_generation) !== input.expectedGeneration)) { await client.query('commit'); return account.rows[0] ? this.toAccount(account.rows[0]) : undefined; }
+      if (input.isCurrent?.() === false) { await client.query('rollback'); return this.toAccount(account.rows[0]); }
       const removed = await client.query(`delete from accounts.health_signals where account_id=$1 and kind='verification_required' and episode=$2::uuid
         and (source=$3 or source='legacy') and last_seen_at<=$4::timestamptz
         and ($5::uuid is null or risk_revision=$5::uuid) returning source`, [input.accountId, input.episode, input.source, input.startedAt, input.expectedRiskRevision ?? null]);
+      if (input.isCurrent?.() === false) { await client.query('rollback'); return this.toAccount(account.rows[0]); }
       if (!removed.rows[0]) { await client.query('commit'); return this.toAccount(account.rows[0]); }
       const remaining = await client.query("select source,code,last_seen_at from accounts.health_signals where account_id=$1 and kind='verification_required' and episode=$2::uuid order by last_seen_at desc limit 1", [input.accountId, input.episode]);
       let updated;
@@ -349,20 +356,22 @@ export class PostgresStore implements Store {
         await client.query("insert into accounts.risk_alert_outbox (account_id,episode,event_type) values ($1,$2,'verification_cleared') on conflict do nothing", [input.accountId, input.episode]);
         await client.query("update orders.payment_event_jobs set next_attempt_at=now(),updated_at=now() where account_id=$1 and status in ('pending','resolve_pending') and last_error ~ 'ACCOUNT_NOT_READY|ACCOUNT_VALIDATION_REQUIRED|SESSION_EXPIRED|CREDENTIAL_MISSING|MTOP_RETRY_EXHAUSTED'", [input.accountId]);
       }
+      if (input.isCurrent?.() === false) { await client.query('rollback'); return this.toAccount(account.rows[0]); }
       await client.query('commit');
       return this.toAccount(updated.rows[0]);
     } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
   }
-  async setAccountTransport(input: { adminId: string; accountId: string; status: 'connecting' | 'connected' | 'disconnected' | 'failed' }): Promise<void> {
+  async setAccountTransport(input: { adminId: string; accountId: string; status: 'connecting' | 'connected' | 'disconnected' | 'failed'; expectedGeneration?: number }): Promise<void> {
     const updated = await this.pool.query(`with previous as materialized (select id,transport_status from accounts.accounts where id=$2), updated as (
       update accounts.accounts a set transport_status=$3,transport_seen_at=case when $3='connected' then now() else transport_seen_at end,
       status=case when a.risk_episode is not null or a.status in ('disabled','expired','verification_required') then a.status
         when $3='connected' and a.status in ('pending','disconnected','connected') then 'connected'
         when $3<>'connected' and a.status='connected' then 'disconnected' else a.status end,
       last_connected_at=case when $3='connected' then now() else last_connected_at end,updated_at=now()
-      from previous where a.id=previous.id and exists(select 1 from auth.account_scopes s where s.admin_id=$1 and s.account_id=a.id and s.status='active')
+      from previous where a.id=previous.id and a.deletion_started_at is null and ($4::bigint is null or a.credential_generation=$4)
+        and exists(select 1 from auth.account_scopes s where s.admin_id=$1 and s.account_id=a.id and s.status='active' and (s.expires_at is null or s.expires_at>now()))
       returning previous.transport_status as old_status) select old_status from updated`,
-    [input.adminId, input.accountId, input.status]);
+    [input.adminId, input.accountId, input.status, input.expectedGeneration ?? null]);
     if (input.status === 'connected' && updated.rows[0] && updated.rows[0].old_status !== 'connected') await this.pool.query("update orders.payment_event_jobs set next_attempt_at=now(),updated_at=now() where account_id=$1 and status in ('pending','resolve_pending') and last_error='XIANYU_IM_NOT_READY'", [input.accountId]);
   }
   async flushAccountRiskAlerts(limit: number): Promise<number> {
@@ -2093,49 +2102,97 @@ export class PostgresStore implements Store {
   async getLoginSessionById(adminId: string, sessionId: string): Promise<LoginSessionRecord | undefined> { const result = await this.pool.query('select s.* from auth.account_login_sessions s left join auth.account_scopes scope on scope.account_id=s.account_id and scope.admin_id=$2 and scope.status=\'active\' and (scope.expires_at is null or scope.expires_at>now()) where s.id=$1 and (s.admin_id=$2 or scope.admin_id is not null)', [sessionId, adminId]); return this.normalizeLoginSession(result.rows[0]); }
   async updateLoginSession(adminId: string, accountId: string | undefined, sessionId: string, patch: { accountId?: string; status?: LoginSessionRecord['status']; expiresAt?: string; completedAt?: string; failureCode?: string }): Promise<LoginSessionRecord | undefined> { const current = accountId ? await this.getLoginSession(adminId, accountId, sessionId) : await this.getLoginSessionById(adminId, sessionId); if (!current) return undefined; const result = await this.pool.query('update auth.account_login_sessions set account_id=coalesce($2,account_id), status=coalesce($3,status), expires_at=coalesce($4,expires_at), completed_at=coalesce($5,completed_at), failure_code=coalesce($6,failure_code) where id=$1 and (admin_id=$7 or account_id=$8) returning *', [sessionId, patch.accountId ?? null, patch.status ?? null, patch.expiresAt ?? null, patch.completedAt ?? null, patch.failureCode ?? null, adminId, accountId ?? null]); return result.rows[0] ? this.toLoginSession(result.rows[0]) : current; }
   async getCredential(adminId: string, accountId: string): Promise<CredentialRecord | undefined> {
-    const result = await this.pool.query('select c.* from auth.account_credentials c join auth.account_scopes scope on scope.account_id=c.account_id where c.account_id=$1 and scope.admin_id=$2 and scope.status=\'active\' and (scope.expires_at is null or scope.expires_at>now()) limit 1', [accountId, adminId]);
+    const select = 'select c.* from auth.account_credentials c join auth.account_scopes scope on scope.account_id=c.account_id where c.account_id=$1 and scope.admin_id=$2 and scope.status=\'active\' and (scope.expires_at is null or scope.expires_at>now()) limit 1';
+    const result = await this.pool.query(select, [accountId, adminId]);
     if (!result.rows[0]) return undefined;
     const row = result.rows[0];
     if (row.status === 'active' && row.expires_at && new Date(String(row.expires_at)).getTime() <= Date.now()) {
-      await this.pool.query('update auth.account_credentials set status=\'expired\', updated_at=now() where id=$1 and status=\'active\'', [row.id]);
-      await this.pool.query("update accounts.accounts set status='expired', updated_at=now() where id=$1 and status in ('pending','disconnected','connected') and risk_episode is null and degraded_source is null", [accountId]);
-      row.status = 'expired';
+      const expected = this.toCredential(row);
+      // A read that observed old expiry must not expire a newer login or a
+      // same-generation refresh while it was waiting to save that observation.
+      // Account health changes only if the exact credential CAS won, under the
+      // same account generation lock used by explicit login and refresh.
+      const expired = await this.pool.query(`/* credential_lazy_expiry */ with generation_lock as materialized (
+        select id from accounts.accounts where id=$1 and credential_generation=$3 and deletion_started_at is null and status<>'disabled' for update
+      ), expired as (
+        update auth.account_credentials c set status='expired',updated_at=now()
+        where c.account_id=$1 and c.id=$4 and c.status='active' and c.generation=$3
+          and c.expires_at=$5::timestamptz and c.expires_at<=now()
+          and c.cookie_header is not distinct from $6 and c.access_token is not distinct from $7
+          and c.device_id is not distinct from $8 and c.metadata_json=$9::jsonb
+          and date_trunc('milliseconds',c.updated_at)=$10::timestamptz
+          and date_trunc('milliseconds',c.last_verified_at) is not distinct from $11::timestamptz
+          and exists(select 1 from generation_lock a where a.id=c.account_id)
+          and not exists(select 1 from accounts.verification_account_claims v where v.account_id=c.account_id and v.expires_at>now())
+          and exists(select 1 from auth.account_scopes scope where scope.account_id=c.account_id and scope.admin_id=$2 and scope.status='active' and (scope.expires_at is null or scope.expires_at>now()))
+        returning c.*
+      ), account_status as (
+        update accounts.accounts set status='expired',updated_at=now() where id=$1 and credential_generation=$3
+          and status in ('pending','disconnected','connected') and risk_episode is null and degraded_source is null
+          and exists(select 1 from expired)
+      ) select * from expired`, [accountId, adminId, expected.generation ?? 1, expected.id, expected.expiresAt,
+        expected.cookieHeader ?? null, expected.accessToken ?? null, expected.deviceId ?? null, JSON.stringify(expected.metadata), expected.updatedAt, expected.lastVerifiedAt ?? null]);
+      if (expired.rows[0]) return this.toCredential(expired.rows[0]);
+      // CAS lost: return a new read, never label the stale SELECT as expired.
+      const latest = await this.pool.query(select, [accountId, adminId]);
+      return latest.rows[0] ? this.toCredential(latest.rows[0]) : undefined;
     }
     return this.toCredential(row);
   }
-  async upsertCredential(input: { adminId: string; accountId: string; platform: string; cookieHeader?: string; accessToken?: string; deviceId?: string; metadata?: Record<string, string>; expiresAt?: string }): Promise<CredentialRecord> {
-    if (!(await this.hasAccountScope(input.adminId, input.accountId))) throw new Error('ACCOUNT_SCOPE_FORBIDDEN');
-    const result = await this.pool.query('insert into auth.account_credentials (id,account_id,platform,status,cookie_header,access_token,device_id,metadata_json,expires_at) values ($1,$2,$3,\'active\',$4,$5,$6,$7::jsonb,$8) on conflict (account_id) do update set platform=excluded.platform,status=\'active\',cookie_header=excluded.cookie_header,access_token=excluded.access_token,device_id=excluded.device_id,metadata_json=excluded.metadata_json,expires_at=excluded.expires_at,updated_at=now() returning *', [createId(), input.accountId, input.platform, input.cookieHeader ?? null, input.accessToken ?? null, input.deviceId ?? null, JSON.stringify(input.metadata ?? {}), input.expiresAt ?? null]);
-    return this.toCredential(result.rows[0]);
-  }
+  async upsertCredential(input: ExplicitCredentialWrite): Promise<CredentialRecord> { return this.toCredential(await writePostgresCredential(this.pool, input)); }
+  async beginCredentialLogin(input: { adminId: string; accountId: string; loginSessionId: string }) { return beginPostgresCredentialLogin(this.pool, input); }
   async commitCredentialRefresh(input: CredentialRefreshUpdate): Promise<CredentialRecord | undefined> {
     const expected = input.expected;
-    const result = await this.pool.query(`update auth.account_credentials c
+    const result = await this.pool.query(`with generation_lock as materialized (
+      select id from accounts.accounts where id=$1 and credential_generation=$14 and deletion_started_at is null and status<>'disabled' for update
+    ) update auth.account_credentials c
       set cookie_header=$4, access_token=$5, device_id=$6, metadata_json=$7::jsonb, updated_at=now()
       where c.account_id=$1 and c.id=$3 and c.status='active' and (c.expires_at is null or c.expires_at>now())
         and c.cookie_header is not distinct from $8 and c.access_token is not distinct from $9
         and c.device_id is not distinct from $10 and c.metadata_json=$11::jsonb
         and date_trunc('milliseconds',c.updated_at)=$12::timestamptz
-        and c.expires_at is not distinct from $13::timestamptz
+        and c.expires_at is not distinct from $13::timestamptz and c.generation=$14
+        and exists(select 1 from generation_lock a where a.id=c.account_id)
+        and not exists(select 1 from accounts.verification_account_claims v where v.account_id=c.account_id and v.expires_at>now())
         and exists (select 1 from auth.account_scopes s join accounts.accounts a on a.id=s.account_id
           where s.account_id=c.account_id and s.admin_id=$2 and s.status='active'
             and (s.expires_at is null or s.expires_at>now()) and a.status<>'disabled')
       returning c.*`, [input.accountId, input.adminId, expected.id, input.cookieHeader, input.accessToken, input.deviceId,
       JSON.stringify(input.metadata), expected.cookieHeader ?? null, expected.accessToken ?? null, expected.deviceId ?? null,
-      JSON.stringify(expected.metadata), expected.updatedAt, expected.expiresAt ?? null]);
+      JSON.stringify(expected.metadata), expected.updatedAt, expected.expiresAt ?? null, expected.generation ?? 1]);
     return result.rows[0] ? this.toCredential(result.rows[0]) : undefined;
   }
   async revokeCredential(adminId: string, accountId: string): Promise<CredentialRecord | undefined> {
     const current = await this.getCredential(adminId, accountId);
     if (!current) return undefined;
-    const result = await this.pool.query('update auth.account_credentials set status=\'revoked\',updated_at=now() where id=$1 returning *', [current.id]);
+    const result = await this.pool.query(`with bumped as (update accounts.accounts set credential_generation=credential_generation+1 where id=$1 returning credential_generation),
+      released as (delete from accounts.verification_account_claims where account_id=$1)
+      update auth.account_credentials set status='revoked',generation=bumped.credential_generation,updated_at=now() from bumped where id=$2 returning auth.account_credentials.*`, [accountId, current.id]);
     return result.rows[0] ? this.toCredential(result.rows[0]) : current;
   }
-  async markCredentialVerified(input: { adminId: string; accountId: string; status: CredentialRecord['status']; expiresAt?: string }): Promise<CredentialRecord | undefined> {
-    const current = await this.getCredential(input.adminId, input.accountId);
-    if (!current) return undefined;
-    const result = await this.pool.query('update auth.account_credentials set status=$2,last_verified_at=now(),expires_at=coalesce($3,expires_at),updated_at=now() where id=$1 returning *', [current.id, input.status, input.expiresAt ?? null]);
-    return result.rows[0] ? this.toCredential(result.rows[0]) : current;
+  async markCredentialVerified(input: { adminId: string; accountId: string; status: CredentialRecord['status']; expiresAt?: string; expectedGeneration?: number; expected?: CredentialRecord }): Promise<CredentialRecord | undefined> {
+    if (input.status === 'revoked') return this.revokeCredential(input.adminId, input.accountId);
+    const expected = input.expected;
+    if (!expected) return undefined;
+    const result = await this.pool.query(`with generation_lock as materialized (
+      select id from accounts.accounts where id=$1 and credential_generation=$4 and deletion_started_at is null and status<>'disabled' for update
+    ), verified as (update auth.account_credentials c set status=$2,last_verified_at=now(),expires_at=coalesce($3,expires_at),updated_at=now()
+      where c.account_id=$1 and c.id=$5 and c.status<>'revoked' and c.generation=$4
+      and c.status=$13 and date_trunc('milliseconds',c.last_verified_at) is not distinct from $14::timestamptz
+      and c.cookie_header is not distinct from $6 and c.access_token is not distinct from $7
+      and c.device_id is not distinct from $8 and c.metadata_json=$9::jsonb
+      and date_trunc('milliseconds',c.updated_at)=$10::timestamptz and c.expires_at is not distinct from $11::timestamptz
+      and exists(select 1 from generation_lock a where a.id=c.account_id)
+      and not exists(select 1 from accounts.verification_account_claims v where v.account_id=c.account_id and v.expires_at>now())
+      and exists(select 1 from auth.account_scopes s where s.account_id=c.account_id and s.admin_id=$12 and s.status='active' and (s.expires_at is null or s.expires_at>now()))
+      returning c.*), account_status as (
+        update accounts.accounts a set status=case when a.risk_episode is not null then a.status
+          when $2='expired' then 'expired' when a.transport_status='connected' and a.transport_seen_at>now()-interval '15 seconds' then 'connected' else 'disconnected' end,
+          updated_at=now() where a.id=$1 and exists(select 1 from verified)
+      ) select * from verified`, [input.accountId, input.status, input.expiresAt ?? null, expected.generation ?? 1, expected.id,
+        expected.cookieHeader ?? null, expected.accessToken ?? null, expected.deviceId ?? null, JSON.stringify(expected.metadata),
+        expected.updatedAt, expected.expiresAt ?? null, input.adminId, expected.status, expected.lastVerifiedAt ?? null]);
+    return result.rows[0] ? this.toCredential(result.rows[0]) : undefined;
   }
   async listCredentialRefs(adminId: string, accountId: string): Promise<CredentialRefRecord[]> {
     const result = await this.pool.query(`select r.*, v.metadata_json, v.checksum
@@ -2675,7 +2732,7 @@ export class PostgresStore implements Store {
     const transportSeenAt = iso(row.transport_seen_at);
     const transportFresh = row.transport_status === 'connected' && transportSeenAt !== undefined && Date.parse(transportSeenAt) > Date.now() - 15_000;
     const status = row.risk_episode ? 'verification_required' : ['disabled', 'expired'].includes(String(row.status)) ? row.status as AccountRecord['status'] : row.degraded_source ? 'degraded' : row.status === 'connected' && !transportFresh ? 'disconnected' : row.status as AccountRecord['status'];
-    return { id: String(row.id), platform: String(row.platform), sellerRef: String(row.seller_ref), displayName: row.display_name ? String(row.display_name) : undefined, remark: row.remark ? String(row.remark) : undefined, avatarUrl: row.avatar_url ? String(row.avatar_url) : undefined, platformUserId: row.platform_user_id ? String(row.platform_user_id) : undefined, status, createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString(), lastConnectedAt: iso(row.last_connected_at), riskCode: row.risk_code ? String(row.risk_code) : undefined, riskSource: row.risk_source ? String(row.risk_source) : undefined, riskFirstSeenAt: iso(row.risk_first_seen_at), riskLastSeenAt: iso(row.risk_last_seen_at), riskEpisode: row.risk_episode ? String(row.risk_episode) : undefined, degradedSource: row.degraded_source ? String(row.degraded_source) : undefined, degradedAt: iso(row.degraded_at), transportStatus: row.transport_status as AccountRecord['transportStatus'], transportSeenAt };
+    return { credentialGeneration: Number(row.credential_generation ?? 1), id: String(row.id), platform: String(row.platform), sellerRef: String(row.seller_ref), displayName: row.display_name ? String(row.display_name) : undefined, remark: row.remark ? String(row.remark) : undefined, avatarUrl: row.avatar_url ? String(row.avatar_url) : undefined, platformUserId: row.platform_user_id ? String(row.platform_user_id) : undefined, status, createdAt: new Date(String(row.created_at)).toISOString(), updatedAt: new Date(String(row.updated_at)).toISOString(), lastConnectedAt: iso(row.last_connected_at), riskCode: row.risk_code ? String(row.risk_code) : undefined, riskSource: row.risk_source ? String(row.risk_source) : undefined, riskFirstSeenAt: iso(row.risk_first_seen_at), riskLastSeenAt: iso(row.risk_last_seen_at), riskEpisode: row.risk_episode ? String(row.risk_episode) : undefined, degradedSource: row.degraded_source ? String(row.degraded_source) : undefined, degradedAt: iso(row.degraded_at), transportStatus: row.transport_status as AccountRecord['transportStatus'], transportSeenAt };
   }
   private toProduct(row: Row): ProductRecord {
     const attributes = row.attributes_json && typeof row.attributes_json === 'object' && !Array.isArray(row.attributes_json) ? row.attributes_json as Record<string, unknown> : {};
@@ -2829,7 +2886,7 @@ export class PostgresStore implements Store {
   private toLoginSession(row: Row): LoginSessionRecord { return { id: String(row.id), adminId: row.admin_id ? String(row.admin_id) : undefined, accountId: row.account_id ? String(row.account_id) : undefined, provisionalAccountRef: row.provisional_account_ref ? String(row.provisional_account_ref) : undefined, loginMethod: String(row.login_method), status: row.status as LoginSessionRecord['status'], startedAt: new Date(String(row.started_at)).toISOString(), expiresAt: new Date(String(row.expires_at)).toISOString(), completedAt: iso(row.completed_at), failureCode: row.failure_code ? String(row.failure_code) : undefined, qrTokenRef: row.qr_token_ref ? String(row.qr_token_ref) : undefined }; }
   private toCredential(row: Row): CredentialRecord {
     const metadata = row.metadata_json && typeof row.metadata_json === 'object' && !Array.isArray(row.metadata_json) ? Object.fromEntries(Object.entries(row.metadata_json as Record<string, unknown>).map(([key, value]) => [key, String(value)])) : {};
-    return { id: String(row.id), accountId: String(row.account_id), platform: String(row.platform), status: row.status as CredentialRecord['status'], cookieHeader: row.cookie_header ? String(row.cookie_header) : undefined, accessToken: row.access_token ? String(row.access_token) : undefined, deviceId: row.device_id ? String(row.device_id) : undefined, metadata, expiresAt: iso(row.expires_at), lastVerifiedAt: iso(row.last_verified_at), createdAt: dateIso(row.created_at), updatedAt: dateIso(row.updated_at) };
+    return { generation: Number(row.generation ?? 1), id: String(row.id), accountId: String(row.account_id), platform: String(row.platform), status: row.status as CredentialRecord['status'], cookieHeader: row.cookie_header ? String(row.cookie_header) : undefined, accessToken: row.access_token ? String(row.access_token) : undefined, deviceId: row.device_id ? String(row.device_id) : undefined, metadata, expiresAt: iso(row.expires_at), lastVerifiedAt: iso(row.last_verified_at), createdAt: dateIso(row.created_at), updatedAt: dateIso(row.updated_at) };
   }
   private toCredentialRef(row: Row): CredentialRefRecord {
     const metadata = row.metadata_json && typeof row.metadata_json === 'object' && !Array.isArray(row.metadata_json)

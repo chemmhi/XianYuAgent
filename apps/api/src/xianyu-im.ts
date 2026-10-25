@@ -104,6 +104,8 @@ export interface XianyuImClientOptions {
   webSocketFactory?: (url: string, options: { headers: Record<string, string> }) => ImWebSocket;
   refreshCredential?: () => Promise<XianyuImCredential>;
   onStatusChange?: (status: XianyuImConnectionStatus) => Promise<void> | void;
+  /** Only a successful, mid-matched platform heartbeat on the registered socket. */
+  onHeartbeat?: (receivedAt: string, connectionEpoch: number) => Promise<void> | void;
   onFailure?: (error: unknown) => Promise<void> | void;
   saveCredential?: (credential: XianyuImCredential) => Promise<void>;
   onEvent?: (event: XianyuImEvent) => Promise<void> | void;
@@ -135,6 +137,9 @@ export class XianyuImClient {
   private readonly webSocketFactory: NonNullable<XianyuImClientOptions['webSocketFactory']>;
   private readonly refreshCredential?: XianyuImClientOptions['refreshCredential'];
   private readonly onStatusChange?: XianyuImClientOptions['onStatusChange'];
+  private readonly onHeartbeat?: XianyuImClientOptions['onHeartbeat'];
+  private heartbeatInFlight?: Promise<void>;
+  private statusCallbackTail: Promise<void> = Promise.resolve();
   private readonly onFailure?: XianyuImClientOptions['onFailure'];
   private readonly saveCredential?: XianyuImClientOptions['saveCredential'];
   private readonly onEvent?: XianyuImClientOptions['onEvent'];
@@ -157,11 +162,12 @@ export class XianyuImClient {
     this.accountId = options.accountId;
     this.credential = { ...options.credential };
     this.timeoutMs = options.timeoutMs ?? 20_000;
-    this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? 15_000;
+    this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? 5_000;
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.webSocketFactory = options.webSocketFactory ?? ((url, wsOptions) => new WebSocket(url, wsOptions) as unknown as ImWebSocket);
     this.refreshCredential = options.refreshCredential;
     this.onStatusChange = options.onStatusChange;
+    this.onHeartbeat = options.onHeartbeat;
     this.onFailure = options.onFailure;
     this.saveCredential = options.saveCredential;
     this.onEvent = options.onEvent;
@@ -172,6 +178,7 @@ export class XianyuImClient {
     if (!this.credential.deviceId) this.credential.deviceId = createDeviceId(this.myId);
   }
 
+  get connectionEpoch(): number { return this.connectionGeneration; }
   get status(): XianyuImConnectionStatus { return this._status; }
   get connected(): boolean { return this._status === 'connected' && this.socket?.readyState === 1; }
   get deviceId(): string { return this.credential.deviceId ?? ''; }
@@ -188,16 +195,9 @@ export class XianyuImClient {
   private setStatus(status: XianyuImConnectionStatus): void {
     if (this._status === status) return;
     this._status = status;
-    try {
-      const result = this.onStatusChange?.(status);
-      if (result && typeof (result as PromiseLike<void>).then === 'function') {
-        void Promise.resolve(result).catch((error) => {
-          console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'status_callback_failed', accountId: this.accountId, status, errorCode: eventErrorCode(error) }));
-        });
-      }
-    } catch (error) {
+    this.statusCallbackTail = this.statusCallbackTail.then(async () => { await this.onStatusChange?.(status); }).catch((error) => {
       console.warn(JSON.stringify({ component: 'xianyu-im-listener', event: 'status_callback_failed', accountId: this.accountId, status, errorCode: eventErrorCode(error) }));
-    }
+    });
   }
 
   private async notifyFailure(error: unknown): Promise<void> {
@@ -361,10 +361,10 @@ export class XianyuImClient {
       this.setStatus('connected');
       this.reconnectAttempt = 0;
       this.connectionGeneration += 1;
-      this.heartbeatTimer = setInterval(() => {
-        if (!this.connected) return;
-        try { this.sendRaw({ lwp: '/!', headers: { mid: createMid() } }); } catch { /* close handler exposes status */ }
-      }, this.heartbeatIntervalMs);
+      // Registration alone is not fresh liveness evidence. Match a subsequent
+      // platform /! acknowledgement before publishing a heartbeat to the owner.
+      void this.probeHeartbeat();
+      this.heartbeatTimer = setInterval(() => { void this.probeHeartbeat(); }, this.heartbeatIntervalMs);
     } catch (error) {
       this.setStatus('failed');
       await this.cleanupSocket();
@@ -372,6 +372,24 @@ export class XianyuImClient {
       await this.notifyFailure(error);
       throw error;
     }
+  }
+
+  private probeHeartbeat(): Promise<void> {
+    if (this.heartbeatInFlight) return this.heartbeatInFlight;
+    if (!this.connected) return Promise.resolve();
+    const socket = this.socket;
+    const generation = this.connectionGeneration;
+    const task = (async () => {
+      try {
+        const mid = createMid();
+        await this.sendAndWait(mid, { lwp: '/!', headers: { mid } }, Math.min(this.timeoutMs, this.heartbeatIntervalMs));
+        const receivedAt = new Date().toISOString();
+        await this.statusCallbackTail;
+        if (this.connected && this.socket === socket && this.connectionGeneration === generation) await this.onHeartbeat?.(receivedAt, generation);
+      } catch { /* Missing acknowledgements never manufacture a fresh heartbeat. */ }
+    })().finally(() => { if (this.heartbeatInFlight === task) this.heartbeatInFlight = undefined; });
+    this.heartbeatInFlight = task;
+    return task;
   }
 
   private setupSocket(): ImWebSocket {
@@ -424,6 +442,7 @@ export class XianyuImClient {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     this.heartbeatTimer = undefined;
     this.syncStatePromise = undefined;
+    this.heartbeatInFlight = undefined;
     this.rejectPending('xianyu IM connection closed');
     const socket = this.socket;
     this.socket = undefined;

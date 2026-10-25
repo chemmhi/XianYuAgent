@@ -367,16 +367,17 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
       console.info(JSON.stringify({ component: 'xianyu-qr', event: 'credential_saved', sessionId, adminId, accountId: resolvedAccountId }));
       await xianyuIm.resetClient(adminId, resolvedAccountId);
       console.info(JSON.stringify({ component: 'xianyu-qr', event: 'im_client_reset', sessionId, adminId, accountId: resolvedAccountId }));
+      const verificationExpected = structuredClone(await store.getCredential(adminId, resolvedAccountId));
       const verification = await xianyu.verifyLogin(adminId, resolvedAccountId);
       console.info(JSON.stringify({ component: 'xianyu-qr', event: 'verify_result', sessionId, adminId, accountId: resolvedAccountId, success: verification.success, accountInvalid: verification.accountInvalid, errorCode: verification.errorCode }));
       if (!verification.success) {
         const status = 'expired' as const;
-        try { await credentials.verify({ adminId, accountId: resolvedAccountId, status, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` }); } catch { /* preserve original verification error */ }
+        try { await credentials.verify({ expected: (verification.credential ?? verificationExpected) as import('./domain.js').CredentialRecord | undefined, adminId, accountId: resolvedAccountId, status, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` }); } catch { /* preserve original verification error */ }
         console.warn(JSON.stringify({ component: 'xianyu-qr', event: 'verify_failed_account_expired', sessionId, adminId, accountId: resolvedAccountId, errorCode: verification.errorCode }));
         await accounts.updateLoginSession({ adminId, accountId: resolvedAccountId, sessionId, patch: { status: 'failed', failureCode: verification.errorCode ?? 'LOGIN_STATE_VERIFY_FAILED', completedAt: new Date().toISOString() }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
         throw new Error(verification.errorCode ?? 'LOGIN_STATE_VERIFY_FAILED');
       }
-      await credentials.verify({ adminId, accountId: resolvedAccountId, status: 'active', requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
+      await credentials.verify({ expected: (verification.credential ?? verificationExpected) as import('./domain.js').CredentialRecord | undefined, adminId, accountId: resolvedAccountId, status: 'active', requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
       console.info(JSON.stringify({ component: 'xianyu-qr', event: 'credential_verified_active', sessionId, adminId, accountId: resolvedAccountId }));
       await hydrateAccountProfile({ accounts, xianyu, adminId, accountId: resolvedAccountId, fallbackSellerRef: unb, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
       await accounts.updateLoginSession({ adminId, accountId: resolvedAccountId, sessionId, patch: { status: 'succeeded', completedAt: new Date().toISOString(), failureCode: undefined }, requestId: `qr:${sessionId}`, traceId: `qr:${sessionId}` });
@@ -389,21 +390,23 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
   });
   xianyu = new XianyuMtopClient({
     loadCredential: async (adminId, accountId) => store.getCredential(adminId, accountId),
-    saveCookie: async (adminId, accountId, cookieHeader, metadata) => {
-      const account = await store.getAccount(adminId, accountId);
-      if (!account) return;
-      console.info(JSON.stringify({ component: 'xianyu-mtop', event: 'cookie_saved', adminId, accountId, hasMetadata: Boolean(metadata) }));
-      await credentials.save({ adminId, accountId, cookieHeader, metadata, requestId: 'xianyu-mtop', traceId: 'xianyu-mtop' });
+    saveCookie: async (adminId, accountId, cookieHeader, metadata, expected) => {
+      if (!expected?.id) throw new ServiceError(409, 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED', '凭证已变化，请重试');
+      const saved = await store.commitCredentialRefresh({ adminId, accountId, expected: expected as import('./domain.js').CredentialRecord,
+        cookieHeader, accessToken: expected.accessToken, deviceId: expected.deviceId, metadata: metadata ?? {} });
+      if (!saved) throw new ServiceError(409, 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED', '凭证已变化，请重试');
+      return saved;
     },
-    onFailure: async ({ adminId, accountId, api, errorCode, message, accountInvalid, recoveryRequest }) => {
+    onFailure: async ({ adminId, accountId, api, errorCode, message, accountInvalid, recoveryRequest, credential }) => {
       console.warn(JSON.stringify({ component: 'xianyu-mtop', event: 'external_failure', adminId, accountId, api, errorCode, accountInvalid, message: message?.slice(0, 160) }));
-      await markXianyuAccountFailure(store, adminId, accountId, { errorCode, message, accountInvalid, source: api, recoveryRequest });
+      await markXianyuAccountFailure(store, adminId, accountId, { errorCode, message, accountInvalid, source: api, recoveryRequest, expected: credential as import('./domain.js').CredentialRecord | undefined });
       if (classifyXianyuFailure({ errorCode, message, accountInvalid }).kind === 'verification_required') {
         xianyuIm.requestVerificationRecovery(adminId, accountId, api);
         await verificationRecoveryBridge?.publish({ adminId, accountId, source: api });
       }
     },
     onSuccess: async ({ adminId, accountId, api, startedAt }) => {
+      if (api === 'mtop.taobao.idlemessage.pc.login.token') return; // IM registration plus a fresh platform heartbeat owns this source.
       const account = await store.getAccount(adminId, accountId);
       if (account?.riskEpisode) await store.clearAccountRisk({ adminId, accountId, episode: account.riskEpisode, source: api, startedAt });
       if (account) await store.clearAccountDegraded({ adminId, accountId, source: api, startedAt });
@@ -484,9 +487,9 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     autoReplyAgentSettings,
     openaiSettings,
     verifyAccount: async ({ adminId, accountId, requestId, traceId }) => {
+      const verificationExpected = structuredClone(await store.getCredential(adminId, accountId));
       const verification = await xianyu.verifyLogin(adminId, accountId);
-      await accounts.update({ adminId, accountId, patch: { status: verification.success ? 'connected' : verification.accountInvalid ? 'expired' : 'degraded' }, requestId, traceId });
-      try { await credentials.verify({ adminId, accountId, status: verification.success ? 'active' : 'expired', requestId, traceId }); } catch { /* keep account health as the primary signal when no credential row exists */ }
+      try { await credentials.verify({ expected: (verification.credential ?? verificationExpected) as import('./domain.js').CredentialRecord | undefined, adminId, accountId, status: verification.success ? 'active' : 'expired', requestId, traceId }); } catch { /* keep account health as the primary signal when no credential row exists */ }
       return { success: verification.success, accountInvalid: verification.accountInvalid, errorCode: verification.errorCode, message: verification.message };
     },
     startLoginRecovery: async ({ adminId, accountId, requestId, traceId }) => {
@@ -586,20 +589,23 @@ async function startXianyuListenerBestEffort(runtime: AppRuntime, adminId: strin
   }
 }
 
-async function markXianyuAccountFailure(store: Store, adminId: string, accountId: string, input: { errorCode?: string; message?: string; accountInvalid: boolean; source?: string; recoveryRequest?: VerificationRecoveryRequest }): Promise<void> {
+async function markXianyuAccountFailure(store: Store, adminId: string, accountId: string, input: { errorCode?: string; message?: string; accountInvalid: boolean; source?: string; recoveryRequest?: VerificationRecoveryRequest; expected?: import('./domain.js').CredentialRecord }): Promise<void> {
     const account = await store.getAccount(adminId, accountId);
     if (!account || account.status === 'disabled') return;
     const classification = classifyXianyuFailure(input);
     if (classification.kind === 'verification_required') {
-      await store.recordAccountRisk({ adminId, accountId, code: input.errorCode ?? 'ACCOUNT_VALIDATION_REQUIRED', source: input.source ?? 'xianyu', recoveryRequest: input.recoveryRequest });
+      await store.recordAccountRisk({ adminId, accountId, code: input.errorCode ?? 'ACCOUNT_VALIDATION_REQUIRED', source: input.source ?? 'xianyu', recoveryRequest: input.recoveryRequest, expectedGeneration: input.expected?.generation });
       return;
     }
     const status = classification.accountStatus!;
     if (classification.kind === 'reauth_required') {
-      try { await store.markCredentialVerified({ adminId, accountId, status: 'expired' }); } catch { /* account status remains the primary signal */ }
+      if (!input.expected) return;
+      const marked = await store.markCredentialVerified({ adminId, accountId, status: 'expired', expected: input.expected });
+      if (!marked) return;
+      return; // The credential CAS also updates health under the same generation lock.
     }
     if (account.status === 'expired' && status === 'degraded') return;
-    if (status === 'degraded') await store.recordAccountDegraded({ adminId, accountId, source: input.source ?? 'xianyu' });
+    if (status === 'degraded') await store.recordAccountDegraded({ adminId, accountId, source: input.source ?? 'xianyu', expectedGeneration: input.expected?.generation });
     else if (account.status !== status) await store.updateAccount(adminId, accountId, { status });
 }
 
@@ -1200,13 +1206,14 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
         await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId: undefined, sessionId: loginSession.id, patch: { accountId: account.id }, requestId: ctx.requestId, traceId: ctx.traceId });
         await credentials.save({ adminId: authContext.admin.id, accountId: account.id, cookieHeader, clearAccessToken: true, metadata: { unb, loginMethod: 'cookie' }, requestId: ctx.requestId, traceId: ctx.traceId });
         await runtime.xianyuIm.resetClient(authContext.admin.id, account.id);
+        const verificationExpected = structuredClone(await store.getCredential(authContext.admin.id, account.id));
         const verification = await runtime.xianyu.verifyLogin(authContext.admin.id, account.id);
         if (!verification.success) {
-          await credentials.verify({ adminId: authContext.admin.id, accountId: account.id, status: 'expired', requestId: ctx.requestId, traceId: ctx.traceId });
+          await credentials.verify({ expected: (verification.credential ?? verificationExpected) as import('./domain.js').CredentialRecord | undefined, adminId: authContext.admin.id, accountId: account.id, status: 'expired', requestId: ctx.requestId, traceId: ctx.traceId });
           await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId: account.id, sessionId: loginSession.id, patch: { status: 'failed', failureCode: verification.errorCode ?? 'COOKIE_VERIFY_FAILED', completedAt: new Date().toISOString() }, requestId: ctx.requestId, traceId: ctx.traceId });
           throw new ServiceError(422, 'COOKIE_VERIFY_FAILED', verification.message ?? '闲鱼 Cookie 校验失败');
         }
-        await credentials.verify({ adminId: authContext.admin.id, accountId: account.id, status: 'active', requestId: ctx.requestId, traceId: ctx.traceId });
+        await credentials.verify({ expected: (verification.credential ?? verificationExpected) as import('./domain.js').CredentialRecord | undefined, adminId: authContext.admin.id, accountId: account.id, status: 'active', requestId: ctx.requestId, traceId: ctx.traceId });
         await hydrateAccountProfile({ accounts, xianyu: runtime.xianyu, adminId: authContext.admin.id, accountId: account.id, fallbackSellerRef: unb, requestId: ctx.requestId, traceId: ctx.traceId });
         const completed = await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId: account.id, sessionId: loginSession.id, patch: { status: 'succeeded', completedAt: new Date().toISOString(), failureCode: undefined }, requestId: ctx.requestId, traceId: ctx.traceId });
         void startXianyuListenerBestEffort(runtime, authContext.admin.id, account.id);
@@ -1251,7 +1258,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     }
     if (action === 'revoke' && (ctx.method === 'POST' || ctx.method === 'DELETE')) return mutation(runtime, ctx, authContext, accountId, async () => success(ctx, credentialMutationView(await credentials.revoke({ adminId: authContext.admin.id, accountId, requestId: ctx.requestId, traceId: ctx.traceId }))));
     if (action === 'verify' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, accountId, async () => {
-      const credential = await credentials.verify({ adminId: authContext.admin.id, accountId, status: (typeof ctx.body.status === 'string' ? ctx.body.status : 'active') as never, expiresAt: typeof ctx.body.expiresAt === 'string' ? ctx.body.expiresAt : undefined, requestId: ctx.requestId, traceId: ctx.traceId });
+      const credential = await credentials.verify({ mode: 'manual', adminId: authContext.admin.id, accountId, status: (typeof ctx.body.status === 'string' ? ctx.body.status : 'active') as never, expiresAt: typeof ctx.body.expiresAt === 'string' ? ctx.body.expiresAt : undefined, requestId: ctx.requestId, traceId: ctx.traceId });
       if (credential.status === 'active') void startXianyuListenerBestEffort(runtime, authContext.admin.id, accountId);
       return success(ctx, credentialMutationView(credential));
     });
@@ -1332,13 +1339,14 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     }
     if (accountMatch[2] === 'connection/verify' && ctx.method === 'POST') {
       const result = await mutation(runtime, ctx, authContext, accountId, async () => {
+        const verificationExpected = structuredClone(await store.getCredential(authContext.admin.id, accountId));
         const verification = await runtime.xianyu.verifyLogin(authContext.admin.id, accountId);
         if (verification.success) {
-          await credentials.verify({ adminId: authContext.admin.id, accountId, status: 'active', requestId: ctx.requestId, traceId: ctx.traceId });
+          await credentials.verify({ expected: (verification.credential ?? verificationExpected) as import('./domain.js').CredentialRecord | undefined, adminId: authContext.admin.id, accountId, status: 'active', requestId: ctx.requestId, traceId: ctx.traceId });
           void startXianyuListenerBestEffort(runtime, authContext.admin.id, accountId);
         } else if (verification.accountInvalid) {
           const status = 'expired' as const;
-          try { await credentials.verify({ adminId: authContext.admin.id, accountId, status, requestId: ctx.requestId, traceId: ctx.traceId }); } catch { /* missing credential remains a verification failure */ }
+          try { await credentials.verify({ expected: (verification.credential ?? verificationExpected) as import('./domain.js').CredentialRecord | undefined, adminId: authContext.admin.id, accountId, status, requestId: ctx.requestId, traceId: ctx.traceId }); } catch { /* missing credential remains a verification failure */ }
         }
         return success(ctx, { success: verification.success, accountInvalid: verification.accountInvalid, errorCode: verification.errorCode, message: verification.message, response: verification.response });
       });
