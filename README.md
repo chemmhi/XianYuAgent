@@ -37,6 +37,8 @@ $env:VITE_API_MODE = "live"
 npm run dev
 ```
 
+根命令 `npm run dev` 会给 API 和 Worker 共享本次启动专用的随机 IM 通信密钥，保持已有凭证加密密钥不变。单独运行 `dev:api` / `dev:worker` 时，需给两者设置相同的 `XIANYU_IM_OWNER_SECRET`（至少 32 字符）；未设置时沿用 `CREDENTIAL_ENCRYPTION_KEY` 作为内部认证密钥。
+
 Stop the managed local dev process tree:
 
 ```powershell
