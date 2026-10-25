@@ -187,3 +187,4 @@ body .app-viewport .automation-drawer .automation-error,
 body .app-viewport .automation-drawer .automation-loading{font-size:var(--font-size-body);line-height:var(--font-line-body)}
 body .app-viewport .automation-drawer .automation-drawer-footer{font-size:var(--font-size-meta);line-height:var(--font-line-meta)}
 body .app-viewport .automation-drawer .automation-drawer-footer .btn{font-size:var(--font-size-body-compact);line-height:1.45}
+.automation-config-card-head .btn[aria-invalid="true"] { border-color: var(--danger); }

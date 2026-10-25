@@ -1,8 +1,12 @@
-import { createElement } from 'react';
+import { createElement, type ComponentProps } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { buildCouponPayload, CouponCreateModal, type CouponCreateFormState, validateCouponForm } from './CouponCreateModal';
 import type { CouponBatchVM } from '../types';
+import { ToastProvider } from '../../../shared/ui/ToastProvider';
+import { couponContextError, validateCouponFields } from '../coupon-form-validation';
+
+function renderCoupon(props: ComponentProps<typeof CouponCreateModal>) { return renderToStaticMarkup(createElement(ToastProvider, { children: createElement(CouponCreateModal, props) })); }
 
 const baseForm: CouponCreateFormState = {
   accountId: 'account-001', label: '', purpose: 'text', textContent: '', dataContent: '',
@@ -15,8 +19,23 @@ function batch(purpose: CouponBatchVM['purpose'], metadata: CouponBatchVM['metad
 }
 
 describe('CouponCreateModal', () => {
+  it('maps visible business validation to the affected fields', () => {
+    expect(validateCouponFields({ ...baseForm, label: '卡券', purpose: 'api', apiHeaders: '{bad', apiParams: '{bad', multiSpec: true })).toEqual({
+      apiUrl: '请输入API地址。', apiHeaders: '请求头格式错误，请输入有效的JSON。', apiParams: '请求参数格式错误，请输入有效的JSON。',
+      specName: '多规格卡券必须填写规格名称和规格值。', specValue: '多规格卡券必须填写规格名称和规格值。',
+    });
+    expect(validateCouponFields({ ...baseForm, label: '卡券', textContent: '内容', description: '缺少占位符' }).description).toContain('{DELIVERY_CONTENT}');
+    expect(couponContextError({ ...baseForm, accountId: '' })).toContain('可用账号');
+  });
+  it('does not let hidden API or disabled specification drafts block other card types', () => {
+    const legacy = { ...baseForm, label: '文本卡券', textContent: '内容', apiUrl: '', apiHeaders: '{bad', apiParams: '{bad', specName: '', specValue: '' };
+    expect(validateCouponFields(legacy)).toEqual({});
+    expect(validateCouponForm(legacy)).toBe('');
+    expect(validateCouponFields({ ...legacy, purpose: 'image', description: '图片备注无需占位符' })).toEqual({});
+    expect(validateCouponFields({ ...legacy, purpose: 'data', dataContent: '卡密' })).toEqual({});
+  });
   it('matches the reference field set while omitting the two requested docking controls', () => {
-    const html = renderToStaticMarkup(createElement(CouponCreateModal, { submitting: false, onClose: vi.fn(), onSubmit: vi.fn(async () => {}) }));
+    const html = renderCoupon({ submitting: false, onClose: vi.fn(), onSubmit: vi.fn(async () => {}) });
     expect(html).toContain('固定文字配置');
     expect(html).toContain('图片配置（可选，最多3张）');
     expect(html).toContain('type=\"file\"');
@@ -36,15 +55,17 @@ describe('CouponCreateModal', () => {
     expect(html).toContain('coupons-purpose-field');
     expect(html).toContain('coupons-field-label');
     expect(html).toContain('coupons-checkbox-row');
+    expect(html).toContain('noValidate=""');
+    expect(html).not.toContain('coupons-form-error');
   });
 
   it('keeps API and data fields conditional on card type', () => {
-    const apiHtml = renderToStaticMarkup(createElement(CouponCreateModal, { submitting: false, batch: batch('api', { apiConfig: { url: '', method: 'POST', timeout: 60, headers: '', params: '', responseField: '' } }), onClose: vi.fn(), onSubmit: vi.fn(async () => {}) }));
+    const apiHtml = renderCoupon({ submitting: false, batch: batch('api', { apiConfig: { url: '', method: 'POST', timeout: 60, headers: '', params: '', responseField: '' } }), onClose: vi.fn(), onSubmit: vi.fn(async () => {}) });
     expect(apiHtml).toContain('type=\"url\"');
     expect(apiHtml).toContain('POST请求可用参数（点击添加）：');
     expect(apiHtml).toContain('接口返回纯文本时若填写本字段，会因无法解析而取值失败，请务必留空。');
     expect((apiHtml.match(/ui-select-control/g) ?? []).length).toBe(2);
-    const dataHtml = renderToStaticMarkup(createElement(CouponCreateModal, { submitting: false, batch: batch('data'), onClose: vi.fn(), onSubmit: vi.fn(async () => {}) }));
+    const dataHtml = renderCoupon({ submitting: false, batch: batch('data'), onClose: vi.fn(), onSubmit: vi.fn(async () => {}) });
     expect(dataHtml).toContain('批量数据配置');
     expect(dataHtml).toContain('支持格式：卡号:密码 或 单独的兑换码');
     expect(dataHtml).toContain('图片配置（可选，最多3张）');

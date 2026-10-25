@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ProductCouponVM, ProductVM } from '../../products/types';
 import { InputField } from '../../../shared/ui/InputField';
 import { TextAreaField } from '../../../shared/ui/TextAreaField';
 import { CouponPickerDialog } from './CouponPickerDialog';
 import type { AutomationCoupon, AutomationRuleKey, ProductAutomationConfig, ProductAutomationUpdate } from '../types';
+import { firstAutomationErrorTab, validateAutomationFields, type AutomationFieldErrors, type AutomationRuleErrors } from '../validation';
 
 type CouponRuleKey = Extract<AutomationRuleKey, 'delivery' | 'gift'>;
 
@@ -32,14 +33,24 @@ export function AutomationDrawer({ open, product, accountLabel = '当前账号',
   const pickerCoupons = useMemo(() => buildAutomationCouponOptions(coupons, product?.couponBatches ?? []), [coupons, product]);
   const [draft, setDraft] = useState<ProductAutomationConfig | null>(() => draftOverride ?? (config ? hydrateDraft(config, boundCouponIds, pickerCoupons) : config));
   const [couponTarget, setCouponTarget] = useState<CouponRuleKey | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<AutomationFieldErrors>({});
+  const panelRef = useRef<HTMLElement>(null);
+  const focusErrorRequested = useRef(false);
 
   useEffect(() => {
     if (open) {
       setDraft(draftOverride ?? (config ? hydrateDraft(config, boundCouponIds, pickerCoupons) : config));
       setActiveTab('delivery');
       setCouponTarget(null);
+      setFieldErrors({});
     }
   }, [boundCouponIds, config, draftOverride, open, pickerCoupons]);
+
+  useEffect(() => {
+    if (!focusErrorRequested.current) return;
+    focusErrorRequested.current = false;
+    panelRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+  }, [activeTab, fieldErrors]);
 
   const selectedCoupons = useMemo(
     () => (key: AutomationRuleKey) => pickerCoupons.filter((coupon) => draft?.[key].couponIds?.includes(coupon.id)),
@@ -51,16 +62,26 @@ export function AutomationDrawer({ open, product, accountLabel = '当前账号',
   const rule = draft?.[activeTab];
   const updateRule = (patch: Partial<NonNullable<typeof rule>>) => {
     setDraft((previous) => previous ? { ...previous, [activeTab]: { ...previous[activeTab], ...patch } } : previous);
+    setFieldErrors(previous => {
+      const next = { ...previous };
+      if ('enabled' in patch) delete next[activeTab];
+      else { const fields = { ...next[activeTab] }; for (const key of Object.keys(patch) as Array<keyof typeof fields>) delete fields[key]; next[activeTab] = fields; }
+      return next;
+    });
   };
   const save = async () => {
     if (!draft) return;
+    const errors = validateAutomationFields(draft);
+    setFieldErrors(errors);
+    const firstTab = firstAutomationErrorTab(errors);
+    if (firstTab) { focusErrorRequested.current = true; setActiveTab(firstTab); return; }
     await onSave(buildValidatedAutomationUpdate(draft));
   };
   const close = () => onClose(draft);
 
   return (
     <div className="products-detail-backdrop automation-drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
-      <aside className="products-detail-panel automation-drawer" role="dialog" aria-modal="true" aria-label="自动化配置" data-testid="automation-drawer">
+      <aside ref={panelRef} className="products-detail-panel automation-drawer" role="dialog" aria-modal="true" aria-label="自动化配置" data-testid="automation-drawer">
         <header className="automation-drawer-head">
           <div className="automation-drawer-top">
             <div>
@@ -88,7 +109,7 @@ export function AutomationDrawer({ open, product, accountLabel = '当前账号',
 
         <div className="automation-drawer-body">
           {loadPhase === 'loading' && <div className="automation-loading">正在加载自动化配置…</div>}
-          {rule && <RulePanel tab={activeTab} rule={rule} selectedCoupons={selectedCoupons(activeTab)} onToggle={(enabled) => updateRule({ enabled })} onCouponChoose={() => { if (activeTab === 'delivery' || activeTab === 'gift') setCouponTarget(activeTab); }} onChange={(patch) => updateRule(patch)} />}
+          {rule && <RulePanel tab={activeTab} rule={rule} errors={fieldErrors[activeTab] ?? {}} selectedCoupons={selectedCoupons(activeTab)} onToggle={(enabled) => updateRule({ enabled })} onCouponChoose={() => { if (activeTab === 'delivery' || activeTab === 'gift') setCouponTarget(activeTab); }} onChange={(patch) => updateRule(patch)} />}
         </div>
 
         <footer className="automation-drawer-footer">
@@ -109,6 +130,7 @@ export function AutomationDrawer({ open, product, accountLabel = '当前账号',
         onCancel={() => setCouponTarget(null)}
         onSave={(ids) => {
           setDraft((previous) => previous ? { ...previous, [couponTarget]: { ...previous[couponTarget], couponIds: ids } } : previous);
+          setFieldErrors(previous => { const next = { ...previous }; delete next[couponTarget]; return next; });
           setCouponTarget(null);
         }}
       />}
@@ -116,10 +138,11 @@ export function AutomationDrawer({ open, product, accountLabel = '当前账号',
   );
 }
 
-function RulePanel({ tab, rule, selectedCoupons, onToggle, onCouponChoose, onChange }: {
+function RulePanel({ tab, rule, errors, selectedCoupons, onToggle, onCouponChoose, onChange }: {
   tab: AutomationRuleKey;
   rule: NonNullable<ProductAutomationConfig>[AutomationRuleKey];
   selectedCoupons: AutomationCoupon[];
+  errors: AutomationRuleErrors;
   onToggle: (enabled: boolean) => void;
   onCouponChoose: () => void;
   onChange: (patch: Partial<typeof rule>) => void;
@@ -140,7 +163,7 @@ function RulePanel({ tab, rule, selectedCoupons, onToggle, onCouponChoose, onCha
       {isCouponRule && <div className="automation-config-card">
         <div className="automation-config-card-head">
           <h4>{tab === 'gift' ? '赠品卡券' : '发货卡券'}</h4>
-          <button className="btn ghost btn-small" type="button" data-testid={`choose-${tab}-coupon`} onClick={onCouponChoose}>选择卡券</button>
+          <button className="btn ghost btn-small" type="button" data-testid={`choose-${tab}-coupon`} aria-invalid={Boolean(errors.couponIds) || undefined} aria-describedby={errors.couponIds ? `automation-${tab}-coupon-error` : undefined} onClick={onCouponChoose}>选择卡券</button>
         </div>
         <div className="automation-selected-coupon">
           <div>
@@ -152,15 +175,16 @@ function RulePanel({ tab, rule, selectedCoupons, onToggle, onCouponChoose, onCha
             )) : <div className="automation-selected-coupon-item"><strong>未选择{tab === 'gift' ? '赠品' : '发货'}卡券</strong><small>请先选择可用卡券</small></div>}
           </div>
         </div>
+        {errors.couponIds && <span className="ui-field-error" id={`automation-${tab}-coupon-error`}>{errors.couponIds}</span>}
         {tab === 'delivery' && <div className="automation-sub-option">
           <div><strong>自动确认发货</strong><small>发卡成功后执行</small></div>
           <button className={`automation-switch${rule.autoConfirm ? ' on' : ''}`} type="button" data-testid="auto-confirm-delivery" aria-label={`自动确认发货${rule.autoConfirm ? '已开启' : '已关闭'}`} aria-pressed={Boolean(rule.autoConfirm)} onClick={() => onChange({ autoConfirm: !rule.autoConfirm })}><span /></button>
         </div>}
       </div>}
 
-      {tab === 'reprice' && <div className="automation-config-card"><div className="automation-field-grid"><InputField label="目标价格" aria-label="目标价格" value={((rule.targetPriceMinor ?? 0) / 100).toFixed(2)} onChange={(event) => onChange({ targetPriceMinor: Math.round(Number(event.target.value || 0) * 100) })} /><InputField label="改价后发送文本" aria-label="改价后发送文本" value={rule.repriceMessage ?? ''} onChange={(event) => onChange({ repriceMessage: event.target.value })} /></div></div>}
+      {tab === 'reprice' && <div className="automation-config-card"><div className="automation-field-grid"><InputField label="目标价格" error={errors.targetPriceMinor} aria-label="目标价格" value={((rule.targetPriceMinor ?? 0) / 100).toFixed(2)} onChange={(event) => onChange({ targetPriceMinor: Math.round(Number(event.target.value || 0) * 100) })} /><InputField label="改价后发送文本" error={errors.repriceMessage} aria-label="改价后发送文本" value={rule.repriceMessage ?? ''} onChange={(event) => onChange({ repriceMessage: event.target.value })} /></div></div>}
 
-      {tab === 'review' && <div className="automation-config-card"><div className="automation-field-grid"><InputField label="首次提醒（分钟）" aria-label="首次提醒" type="number" min="1" value={rule.reviewInitialMinutes ?? 72 * 60} onChange={(event) => onChange({ reviewInitialMinutes: Number(event.target.value) })} /><InputField label="重复提醒间隔（分钟）" aria-label="重复提醒间隔" type="number" min="1" value={rule.reviewRepeatMinutes ?? 24 * 60} onChange={(event) => onChange({ reviewRepeatMinutes: Number(event.target.value) })} /><InputField label="最多提醒次数" aria-label="最多提醒次数" type="number" min="1" value={rule.reviewMaxCount ?? 1} onChange={(event) => onChange({ reviewMaxCount: Number(event.target.value) })} /><TextAreaField label="提醒文案" aria-label="提醒文案" value={rule.reviewMessage ?? ''} onChange={(event) => onChange({ reviewMessage: event.target.value })} /></div></div>}
+      {tab === 'review' && <div className="automation-config-card"><div className="automation-field-grid"><InputField label="首次提醒（分钟）" error={errors.reviewInitialMinutes} aria-label="首次提醒" type="number" min="1" max="43200" step="1" value={rule.reviewInitialMinutes ?? 72 * 60} onChange={(event) => onChange({ reviewInitialMinutes: Number(event.target.value) })} /><InputField label="重复提醒间隔（分钟）" error={errors.reviewRepeatMinutes} aria-label="重复提醒间隔" type="number" min="1" max="43200" step="1" value={rule.reviewRepeatMinutes ?? 24 * 60} onChange={(event) => onChange({ reviewRepeatMinutes: Number(event.target.value) })} /><InputField label="最多提醒次数" error={errors.reviewMaxCount} aria-label="最多提醒次数" type="number" min="1" max="10" step="1" value={rule.reviewMaxCount ?? 1} onChange={(event) => onChange({ reviewMaxCount: Number(event.target.value) })} /><TextAreaField label="提醒文案" error={errors.reviewMessage} aria-label="提醒文案" value={rule.reviewMessage ?? ''} onChange={(event) => onChange({ reviewMessage: event.target.value })} /></div></div>}
 
       {(tab === 'delivery' || tab === 'gift') && <div className="automation-preview"><p className="automation-kicker">规则预览</p><div><span>{tab === 'gift' ? '买家完成评价' : '买家付款'}</span><b>→</b><span>使用已选{tab === 'gift' ? '赠品' : '发货'}卡券</span>{tab === 'delivery' && <><b>→</b><span>确认发货</span></>}</div></div>}
       {tab === 'delivery' && <div className="automation-alert"><strong>风险提示</strong><span>卡券发送失败或外部结果未知时，不会自动确认发货，订单会进入人工复核。</span></div>}
