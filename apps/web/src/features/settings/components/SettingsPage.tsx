@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { chooseFirstAvailableAccountId, useAccountContext } from '../../../app/account-context';
-import { createCredentialApi, createMockAutoReplyAgentSettingsApi, createMockCredentialApi, createMockOpenAISettingsApi, type AutoReplyAgentSettingsApi, type CredentialApi, type OpenAISettingsApi, type InviteApi, type InviteVM } from '../api';
+import { createCredentialApi, createMockAutoReplyAgentSettingsApi, createMockCredentialApi, createMockOpenAISettingsApi, type AutoReplyAgentSettingsApi, type CredentialApi, type OpenAISettingsApi, type InviteApi } from '../api';
 import { resolveRuntimeApi } from '../../../api/runtime';
 import { useAutoReplyAgentSettingsController } from '../agent-settings-controller';
 import { AutoReplyAgentPanel } from './AutoReplyAgentPanel';
@@ -11,8 +11,7 @@ import type { ModelProviderApi } from '../model-provider-api';
 import type { ProviderModelsVM } from '../model-provider-api';
 import { Button } from '../../../shared/ui/Button';
 import { InputField } from '../../../shared/ui/InputField';
-import { useToast } from '../../../shared/ui/ToastProvider';
-import { InviteRenewModal } from './InviteRenewModal';
+import { InvitePanel } from './InvitePanel';
 import './settings.css';
 
 type TabKey = 'autoReply' | 'model' | 'invites';
@@ -129,15 +128,4 @@ function ReferencePanel({ tab }: { tab: TabKey }) {
   };
   const panel = content[tab];
   return <div className="settings-content"><article className="card panel"><div className="panel-head"><div><p className="eyebrow">Settings Reference</p><h2>{panel.title}</h2><p>{panel.description}</p></div><span className="settings-scope-chip">后续切片</span></div><div className="settings-reference-list">{panel.rows.map(([label, value, tone]) => <div key={label}><strong>{label}</strong><span>{value}</span><em>{tone}</em></div>)}</div>{tab === 'model' && <span className="settings-scope-chip">当前用户账号范围</span>}</article></div>;
-}
-
-function InvitePanel({ api }: { api: InviteApi }) {
-  const [items,setItems]=useState<InviteVM[]>([]); const [newIds,setNewIds]=useState<Set<string>>(new Set()); const {showToast,dismissToast}=useToast(); const notify=(message:string)=>showToast({id:'invite-feedback',tone:'error',message}); const [busy,setBusy]=useState(false); const [creationDays,setCreationDays]=useState('7'); const [creationError,setCreationError]=useState<string|null>(null); const [renewingInvite,setRenewingInvite]=useState<InviteVM|null>(null);
-  const reload=async()=>{try{setItems((await api.list()).items);dismissToast('invite-feedback');}catch(error){showToast({id:'invite-feedback',tone:'error',message:error instanceof Error?error.message:'邀请码读取失败',actions:[{label:'重试',onClick:()=>void reload()}]});}};
-  useEffect(()=>{void reload();},[api]);
-  async function create(){const days=Number(creationDays);if(!Number.isInteger(days)||days<1||days>30){setCreationError('有效期需为 1-30 天的整数');return;}setBusy(true);setCreationError(null);dismissToast('invite-feedback');try{const result=await api.create({requestKey:'invite-'+Date.now()+'-'+Math.random().toString(36).slice(2),days});setNewIds(current=>new Set(current).add(result.invite.id));setItems(current=>[result.invite,...current]);}catch(error){notify(error instanceof Error?error.message:'邀请码生成失败');}finally{setBusy(false);}}
-  async function status(item:InviteVM,next:'active'|'disabled'){dismissToast('invite-feedback');try{await api.setStatus(item.id,next);await reload();}catch(error){notify(error instanceof Error?error.message:'状态更新失败');}}
-  async function remove(item:InviteVM){const used=item.status==='used'||Boolean(item.usedAt); if(used){if(!window.confirm('该邀请码已激活账号，删除将清空该用户的全部数据，是否继续？'))return; if(!window.confirm('这是不可恢复的危险操作，请再次确认删除并清空该用户数据。'))return;}else if(!window.confirm('确认删除该邀请码？'))return; dismissToast('invite-feedback');try{await api.revoke(item.id,used);setItems(current=>current.filter(candidate=>candidate.id!==item.id));}catch(error){notify(error instanceof Error?error.message:'删除失败');}}
-  const label=(item:InviteVM)=>item.status==='used'?'已激活':item.status==='disabled'?'已禁用':item.status==='expired'?'已过期':item.status==='deleted'?'已删除':'有效';
-  return <div className="settings-content"><article className="card panel settings-hero"><div><p className="eyebrow">Invitation Codes</p><h2>邀请码管理</h2><p>邀请码为注册凭证，完整邀请码仅管理员可见，数据库使用加密保存。</p></div></article><article className="card panel invite-table-card"><div className="panel-head"><div><h2>邀请码列表</h2><p>状态、到期日期和激活账号均来自服务端。</p></div><div className="invite-toolbar-actions"><label className="invite-expiry-input">生成有效期（天）<InputField aria-label="生成有效期（天）" type="number" min="1" max="30" value={creationDays} aria-invalid={Boolean(creationError)||undefined} aria-describedby={creationError?'invite-creation-error':undefined} onChange={event=>{setCreationDays(event.target.value);setCreationError(null);}} /><span>天</span>{creationError&&<span className="invite-expiry-validation" id="invite-creation-error">{creationError}</span>}</label><Button variant="primary" type="button" disabled={busy} onClick={()=>void create()}>{busy?'生成中…':'生成邀请码'}</Button></div></div><div className="invite-table-wrap"><table className="invite-table"><thead><tr><th>邀请码</th><th>状态</th><th>到期日期</th><th>激活账号</th><th>操作</th></tr></thead><tbody>{items.map(item=><tr key={item.id}><td><code>{item.code}</code>{newIds.has(item.id)&&<span className="invite-new-badge">NEW</span>}</td><td><span className="status-pill">{label(item)}</span></td><td>{new Date(item.expiresAt).toLocaleDateString()}</td><td>{item.usedByDisplayName||item.usedByEmail||'—'}</td><td className="invite-actions">{item.status==='active'&&<Button variant="ghost" type="button" onClick={()=>void status(item,'disabled')}>禁用</Button>}{item.status==='disabled'&&<Button variant="ghost" type="button" onClick={()=>void status(item,'active')}>启用</Button>}{item.status!=='used'&&<Button variant="ghost" type="button" onClick={()=>setRenewingInvite(item)}>续期</Button>}<Button variant="danger" type="button" onClick={()=>void remove(item)}>删除</Button></td></tr>)}</tbody></table></div></article>{renewingInvite&&<InviteRenewModal invite={renewingInvite} onClose={()=>setRenewingInvite(null)} onRenew={async days=>{await api.renew(renewingInvite.id,days);await reload();}} />}</div>;
 }
