@@ -29,7 +29,10 @@ async function reserveRange() {
       // Avoid the OS ephemeral range: outbound connections must not claim
       // a released candidate while the npm subprocess starts.
       const port = 20_000 + randomInt(9_996);
-      servers.push(await listen(port));
+      const loopbackOwner = net.createServer();
+      loopbackOwner.listen(port, '127.0.0.1');
+      await once(loopbackOwner, 'listening');
+      servers.push(loopbackOwner);
       for (let offset = 1; offset < 4; offset += 1) servers.push(await listen(port + offset));
       return { port, servers };
     } catch (error) {
