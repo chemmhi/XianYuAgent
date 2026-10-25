@@ -1,3 +1,4 @@
+import { AccountContextState } from '../../../app/AccountContextState';
 import { useState } from 'react';
 import { useAccountContext } from '../../../app/account-context';
 import type { PageKey } from '../../../app/navigation';
@@ -33,6 +34,8 @@ export function DashboardPage({ api, onNavigate }: { api?: DashboardApi; apiMode
     }
     setRiskDrawer(target);
   }
+
+  if (accountsLoading || accountsError || accountContextMissing) return <AccountContextState />;
 
   const activeTodo = controller.state.data?.riskTodos.find((item) => item.id === riskDrawer);
   return <div className="dashboard-experience">

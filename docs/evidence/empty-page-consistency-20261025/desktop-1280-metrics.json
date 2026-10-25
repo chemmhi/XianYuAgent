@@ -1,0 +1,66 @@
+[
+  {
+    "name": "仪表盘",
+    "bottom": 698,
+    "centerDx": 0,
+    "centerDy": 0.0078125,
+    "height": 676,
+    "top": 22
+  },
+  {
+    "name": "Workspace",
+    "bottom": 698,
+    "centerDx": 0,
+    "centerDy": 0.0078125,
+    "height": 676,
+    "top": 22
+  },
+  {
+    "name": "在线聊天",
+    "bottom": 698,
+    "centerDx": 0,
+    "centerDy": 0.0078125,
+    "height": 676,
+    "top": 22
+  },
+  {
+    "name": "商品管理",
+    "bottom": 698,
+    "centerDx": 0,
+    "centerDy": 0.0078125,
+    "height": 676,
+    "top": 22
+  },
+  {
+    "name": "卡券管理",
+    "bottom": 698,
+    "centerDx": 0,
+    "centerDy": 0.0078125,
+    "height": 676,
+    "top": 22
+  },
+  {
+    "name": "订单管理",
+    "bottom": 698,
+    "centerDx": 0,
+    "centerDy": 0.0078125,
+    "height": 676,
+    "top": 22
+  },
+  {
+    "name": "Agent 动态",
+    "bottom": 698,
+    "centerDx": 0,
+    "centerDy": 0.0078125,
+    "height": 676,
+    "top": 22
+  },
+  {
+    "name": "设置",
+    "bottom": 698,
+    "centerDx": 0,
+    "centerDy": 0.0078125,
+    "height": 676,
+    "top": 22
+  }
+]

@@ -1,0 +1,50 @@
+.page-state {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  min-height: 280px;
+  padding: 32px 24px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+  text-align: center;
+}
+.page-state-content { display: flex; flex-direction: column; align-items: center; gap: 12px; max-width: 480px; }
+.page-state-content > h2 { margin: 0; color: var(--text); font-size: 16px; line-height: 1.5; }
+.page-state-content > p { margin: 0; color: var(--sub); font-size: 14px; line-height: 1.65; overflow-wrap: anywhere; }
+.page-state-action { display: flex; justify-content: center; margin-top: 4px; }
+.account-context-state { display: flex; flex: 1; min-width: 0; min-height: 0; }
+
+/* Full-page account guidance uses the same inset even on full-bleed routes. */
+.desktop-shell .desktop-body > main:has(> .account-context-state),
+.desktop-shell .desktop-body > main:has(> div:not([hidden]) > .account-context-state) {
+  display: flex;
+  flex-direction: column;
+  padding: 22px 28px;
+}
+.desktop-body > main > div:not([hidden]):has(> .account-context-state) { display: flex; flex: 1; min-height: 0; }
+.settings-active:has(> .account-context-state) { display: flex; flex-direction: column; }
+.accounts-domain-panel > .page-state { border: 0; box-shadow: none; }
+
+@media (max-width: 900px) {
+  body .app-viewport .desktop-shell:has(> .desktop-body > main > .account-context-state, > .desktop-body > main > div:not([hidden]) > .account-context-state) {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+  body .app-viewport .desktop-shell:has(> .desktop-body > main > .account-context-state, > .desktop-body > main > div:not([hidden]) > .account-context-state) > .sidebar { flex: 0 0 auto; }
+  body .app-viewport .desktop-shell:has(> .desktop-body > main > .account-context-state, > .desktop-body > main > div:not([hidden]) > .account-context-state) > .desktop-body { flex: 1; height: auto; min-height: 0; }
+  .desktop-shell .desktop-body > main:has(> .account-context-state),
+  .desktop-shell .desktop-body > main:has(> div:not([hidden]) > .account-context-state) { padding: 16px; min-height: 0; }
+  .settings-page:has(.account-context-state) { height: calc(100dvh - 28px); min-height: 0; }
+  .settings-grid:has(.account-context-state) { display: flex; flex-direction: column; }
+  .settings-grid:has(.account-context-state) > .settings-tabs { flex-shrink: 0; }
+  .settings-active:has(> .account-context-state) { flex: 1; margin-top: 14px; min-height: 0; }
+  .page-state { padding: 28px 20px; }
+}

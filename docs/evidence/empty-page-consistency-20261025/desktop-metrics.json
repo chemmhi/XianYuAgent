@@ -1,0 +1,720 @@
+{
+  "before": [
+    {
+      "name": "仪表盘",
+      "url": "http://127.0.0.1:15173/dashboard",
+      "blocks": [
+        {
+          "align": "start",
+          "background": "rgba(0, 0, 0, 0)",
+          "cls": "dashboard-page-stack dashboard-state-stack",
+          "rect": {
+            "bottom": 322,
+            "height": 300,
+            "left": 253,
+            "right": 1252,
+            "top": 22,
+            "width": 999,
+            "x": 253,
+            "y": 22
+          }
+        },
+        {
+          "align": "start",
+          "background": "rgb(255, 255, 255)",
+          "cls": "dashboard-state-card",
+          "rect": {
+            "bottom": 322,
+            "height": 300,
+            "left": 253,
+            "right": 1252,
+            "top": 22,
+            "width": 999,
+            "x": 253,
+            "y": 22
+          }
+        }
+      ],
+      "main": {
+        "bottom": 720,
+        "height": 720,
+        "left": 225,
+        "right": 1280,
+        "top": 0,
+        "width": 1055,
+        "x": 225,
+        "y": 0
+      },
+      "text": "请先选择当前账号\n\n请先在账号管理中选择当前账号。\n\n前往账号管理"
+    },
+    {
+      "name": "Workspace",
+      "url": "http://127.0.0.1:15173/workspace",
+      "blocks": [
+        {
+          "align": "start",
+          "background": "rgba(0, 0, 0, 0)",
+          "cls": "page-stack workspace-domain",
+          "rect": {
+            "bottom": 720,
+            "height": 720,
+            "left": 224,
+            "right": 1280,
+            "top": 0,
+            "width": 1056,
+            "x": 224,
+            "y": 0
+          }
+        },
+        {
+          "align": "center",
+          "background": "rgba(0, 0, 0, 0)",
+          "cls": "workspace-state ",
+          "rect": {
+            "bottom": 240,
+            "height": 240,
+            "left": 224,
+            "right": 1280,
+            "top": 0,
+            "width": 1056,
+            "x": 224,
+            "y": 0
+          }
+        }
+      ],
+      "main": {
+        "bottom": 720,
+        "height": 720,
+        "left": 224,
+        "right": 1280,
+        "top": 0,
+        "width": 1056,
+        "x": 224,
+        "y": 0
+      },
+      "text": "请先选择账号\n每个工作区会话都绑定一个可用的闲鱼账号。\n前往账号管理"
+    },
+    {
+      "name": "账号管理",
+      "url": "http://127.0.0.1:15173/accounts",
+      "blocks": [
+        {
+          "align": "start",
+          "background": "rgba(0, 0, 0, 0)",
+          "cls": "page-stack accounts-domain",
+          "rect": {
+            "bottom": 698,
+            "height": 676,
+            "left": 253,
+            "right": 1252,
+            "top": 22,
+            "width": 999,
+            "x": 253,
+            "y": 22
+          }
+        },
+        {
+          "align": "start",
+          "background": "rgb(255, 255, 255)",
+          "cls": "card kpi-card",
+          "rect": {
+            "bottom": 145.09375,
+            "height": 123.09375,
+            "left": 253,
+            "right": 576.65625,
+            "top": 22,
+            "width": 323.65625,
+            "x": 253,
+            "y": 22
+          }
+        },
+        {
+          "align": "start",
+          "background": "rgb(255, 255, 255)",
+          "cls": "card kpi-card",
+          "rect": {
+            "bottom": 145.09375,
+            "height": 123.09375,
+            "left": 590.65625,
+            "right": 914.328125,
+            "top": 22,
+            "width": 323.671875,
+            "x": 590.65625,
+            "y": 22
+          }
+        },
+        {
+          "align": "start",
+          "background": "rgb(255, 255, 255)",
+          "cls": "card kpi-card",
+          "rect": {
+            "bottom": 145.09375,
+            "height": 123.09375,
+            "left": 928.328125,
+            "right": 1251.984375,
+            "top": 22,
+            "width": 323.65625,
+            "x": 928.328125,
+            "y": 22
+          }
+        },
+        {
+          "align": "start",
+          "background": "rgb(255, 255, 255)",
+          "cls": "card panel accounts-domain-panel",
+          "rect": {
+            "bottom": 698,
+            "height": 534.90625,
+            "left": 253,
+            "right": 1252,
+            "top": 163.09375,
+            "width": 999,
+            "x": 253,
+            "y": 163.09375
+          }
+        },
+        {
+          "align": "center",
+          "background": "rgba(0, 0, 0, 0)",
+          "cls": "accounts-domain-state accounts-domain-state-empty",
+          "rect": {
+            "bottom": 681,
+            "height": 389.515625,
+            "left": 272,
+            "right": 1233,
+            "top": 291.484375,
+            "width": 961,
+            "x": 272,
+            "y": 291.484375
+          }
+        }
+      ],
+      "main": {
+        "bottom": 720,
+        "height": 720,
+        "left": 225,
+        "right": 1280,
+        "top": 0,
+        "width": 1055,
+        "x": 225,
+        "y": 0
+      },
+      "text": "已绑定账号\n0\n0 个在线\n当前可用连接\n当前账号\n—\n账号上下文\n请先选择账号\n需要处理\n0\n状态健康\n不展示敏感凭证\n账号列表\n\n按账号范围查看连接状态与可用能力，凭证正文不在列表中展示。\n\n全部状态\n已连接\n降级\n已断开\n已过期\n已停用\n待连接\n全部状态\n全部连接\n在线\n离线\n连接中\n已过期\n未知\n全部连接\n刷新\n添加闲鱼账号\n暂无匹配账号\n调整搜索或筛选条件后重试。"
+    },
+    {
+      "name": "在线聊天",
+      "url": "http://127.0.0.1:15173/messages",
+      "blocks": [
+        {
+          "align": "start",
+          "background": "rgba(0, 0, 0, 0)",
+          "cls": "page-stack messages-domain",
+          "rect": {
+            "bottom": 178.78125,
+            "height": 156.78125,
+            "left": 253,
+            "right": 1252,
+            "top": 22,
+            "width": 999,
+            "x": 253,
+            "y": 22
+          }
+        },
+        {
+          "align": "start",
+          "background": "rgba(0, 0, 0, 0)",
+          "cls": "messages-state",
+          "rect": {
+            "bottom": 178.78125,
+            "height": 156.78125,
+            "left": 253,
+            "right": 1252,
+            "top": 22,
+            "width": 999,
+            "x": 253,
+            "y": 22
+          }
+        }
+      ],
+      "main": {
+        "bottom": 720,
+        "height": 720,
+        "left": 225,
+        "right": 1280,
+        "top": 0,
+        "width": 1055,
+        "x": 225,
+        "y": 0
+      },
+      "text": "请先连接闲鱼账号\n在线聊天需要先在账号管理中连接至少一个可用账号。\n前往账号管理"
+    },
+    {
+      "name": "商品管理",
+      "url": "http://127.0.0.1:15173/products",
+      "blocks": [
+        {
+          "align": "start",
+          "background": "rgba(0, 0, 0, 0)",
+          "cls": "page-stack products-domain",
+          "rect": {
+            "bottom": 698,
+            "height": 676,
+            "left": 252,
+            "right": 1252,
+            "top": 22,
+            "width": 1000,
+            "x": 252,
+            "y": 22
+          }
+        },
+        {
+          "align": "start",
+          "background": "rgb(255, 255, 255)",
+          "cls": "card panel",
+          "rect": {
+            "bottom": 111.484375,
+            "height": 89.484375,
+            "left": 252,
+            "right": 1252,
+            "top": 22,
+            "width": 1000,
+            "x": 252,
+            "y": 22
+          }
+        }
+      ],
+      "main": {
+        "bottom": 720,
+        "height": 720,
+        "left": 224,
+        "right": 1280,
+        "top": 0,
+        "width": 1056,
+        "x": 224,
+        "y": 0
+      },
+      "text": "商品目录\n\n请先在账号管理中添加或选择一个可用账号。"
+    },
+    {
+      "name": "卡券管理",
+      "url": "http://127.0.0.1:15173/coupons",
+      "blocks": [
+        {
+          "align": "start",
+          "background": "rgba(0, 0, 0, 0)",
+          "cls": "page-stack coupons-domain",
+          "rect": {
+            "bottom": 698,
+            "height": 676,
+            "left": 253,
+            "right": 1252,
+            "top": 22,
+            "width": 999,
+            "x": 253,
+            "y": 22
+          }
+        },
+        {
+          "align": "start",
+          "background": "rgb(255, 255, 255)",
+          "cls": "card panel coupons-panel",
+          "rect": {
+            "bottom": 698,
+            "height": 676,
+            "left": 253,
+            "right": 1252,
+            "top": 22,
+            "width": 999,
+            "x": 253,
+            "y": 22
+          }
+        }
+      ],
+      "main": {
+        "bottom": 720,
+        "height": 720,
+        "left": 225,
+        "right": 1280,
+        "top": 0,
+        "width": 1055,
+        "x": 225,
+        "y": 0
+      },
+      "text": "卡券列表\n请先在账号管理中添加或选择一个可用账号。"
+    },
+    {
+      "name": "订单管理",
+      "url": "http://127.0.0.1:15173/orders",
+      "blocks": [
+        {
+          "align": "start",
+          "background": "rgba(0, 0, 0, 0)",
+          "cls": "page-stack orders-domain",
+          "rect": {
+            "bottom": 698,
+            "height": 676,
+            "left": 253,
+            "right": 1252,
+            "top": 22,
+            "width": 999,
+            "x": 253,
+            "y": 22
+          }
+        },
+        {
+          "align": "start",
+          "background": "rgb(255, 255, 255)",
+          "cls": "card panel orders-panel",
+          "rect": {
+            "bottom": 698,
+            "height": 676,
+            "left": 253,
+            "right": 1252,
+            "top": 22,
+            "width": 999,
+            "x": 253,
+            "y": 22
+          }
+        },
+        {
+          "align": "center",
+          "background": "rgba(0, 0, 0, 0)",
+          "cls": "orders-state orders-state-empty",
+          "rect": {
+            "bottom": 681,
+            "height": 557.515625,
+            "left": 272,
+            "right": 1233,
+            "top": 123.484375,
+            "width": 961,
+            "x": 272,
+            "y": 123.484375
+          }
+        }
+      ],
+      "main": {
+        "bottom": 720,
+        "height": 720,
+        "left": 225,
+        "right": 1280,
+        "top": 0,
+        "width": 1055,
+        "x": 225,
+        "y": 0
+      },
+      "text": "订单列表\n\n请先在账号管理选择当前账号\n\n全部\n待付款\n待发货\n待收货\n待评价\n退款中\n全部\n刷新\n同步闲鱼\n请先选择运营账号\n订单数据按账号隔离，请在账号管理中选择当前账号后再查看订单。\n去选择账号"
+    },
+    {
+      "name": "Agent 动态",
+      "url": "http://127.0.0.1:15173/agent-dynamics",
+      "blocks": [
+        {
+          "align": "center",
+          "background": "rgba(0, 0, 0, 0)",
+          "cls": "agent-dynamics-context-state",
+          "rect": {
+            "bottom": 720,
+            "height": 720,
+            "left": 225,
+            "right": 1280,
+            "top": 0,
+            "width": 1055,
+            "x": 225,
+            "y": 0
+          }
+        }
+      ],
+      "main": {
+        "bottom": 720,
+        "height": 720,
+        "left": 225,
+        "right": 1280,
+        "top": 0,
+        "width": 1055,
+        "x": 225,
+        "y": 0
+      },
+      "text": "请先连接闲鱼账号\nAgent 动态需要先连接至少一个可用账号。\n前往账号管理"
+    },
+    {
+      "name": "设置",
+      "url": "http://127.0.0.1:15173/settings",
+      "blocks": [
+        {
+          "align": "start",
+          "background": "rgba(0, 0, 0, 0)",
+          "cls": "page-stack settings-page",
+          "rect": {
+            "bottom": 698,
+            "height": 676,
+            "left": 253,
+            "right": 1252,
+            "top": 22,
+            "width": 999,
+            "x": 253,
+            "y": 22
+          }
+        },
+        {
+          "align": "start",
+          "background": "rgba(0, 0, 0, 0)",
+          "cls": "settings-active",
+          "rect": {
+            "bottom": 698,
+            "height": 676,
+            "left": 547,
+            "right": 1252,
+            "top": 22,
+            "width": 705,
+            "x": 547,
+            "y": 22
+          }
+        },
+        {
+          "align": "left",
+          "background": "rgb(255, 255, 255)",
+          "cls": "settings-state empty",
+          "rect": {
+            "bottom": 127.984375,
+            "height": 105.984375,
+            "left": 547,
+            "right": 1252,
+            "top": 22,
+            "width": 705,
+            "x": 547,
+            "y": 22
+          }
+        }
+      ],
+      "main": {
+        "bottom": 720,
+        "height": 720,
+        "left": 225,
+        "right": 1280,
+        "top": 0,
+        "width": 1055,
+        "x": 225,
+        "y": 0
+      },
+      "text": "自动回复 Agent\nBuyer Agent\nOpenAI API\nModelClient\n请先在账号管理中设置当前账号\n自动回复 Agent 配置按闲鱼账号隔离，未选择账号时不会读取或编辑配置。"
+    }
+  ],
+  "after": [
+    {
+      "name": "仪表盘",
+      "url": "http://127.0.0.1:15173/dashboard",
+      "box": {
+        "bottom": 926,
+        "height": 904,
+        "left": 253,
+        "right": 1892,
+        "top": 22,
+        "width": 1639,
+        "x": 253,
+        "y": 22
+      },
+      "button": {
+        "bg": "rgb(36, 90, 141)",
+        "borderRadius": "8px",
+        "color": "rgb(255, 255, 255)",
+        "fontSize": "13px",
+        "height": 32,
+        "width": 104
+      },
+      "centerDx": 0,
+      "centerDy": 0.0078125,
+      "overflow": false,
+      "text": "请先连接或选择闲鱼账号\n\n请在账号管理中添加闲鱼账号，或选择一个可用账号后继续。\n\n前往账号管理"
+    },
+    {
+      "name": "Workspace",
+      "url": "http://127.0.0.1:15173/workspace",
+      "box": {
+        "bottom": 926,
+        "height": 904,
+        "left": 252,
+        "right": 1892,
+        "top": 22,
+        "width": 1640,
+        "x": 252,
+        "y": 22
+      },
+      "button": {
+        "bg": "rgb(36, 90, 141)",
+        "borderRadius": "8px",
+        "color": "rgb(255, 255, 255)",
+        "fontSize": "13px",
+        "height": 32,
+        "width": 104
+      },
+      "centerDx": 0,
+      "centerDy": 0.0078125,
+      "overflow": false,
+      "text": "请先连接或选择闲鱼账号\n\n请在账号管理中添加闲鱼账号，或选择一个可用账号后继续。\n\n前往账号管理"
+    },
+    {
+      "name": "在线聊天",
+      "url": "http://127.0.0.1:15173/messages",
+      "box": {
+        "bottom": 926,
+        "height": 904,
+        "left": 253,
+        "right": 1892,
+        "top": 22,
+        "width": 1639,
+        "x": 253,
+        "y": 22
+      },
+      "button": {
+        "bg": "rgb(36, 90, 141)",
+        "borderRadius": "8px",
+        "color": "rgb(255, 255, 255)",
+        "fontSize": "13px",
+        "height": 32,
+        "width": 104
+      },
+      "centerDx": 0,
+      "centerDy": 0.0078125,
+      "overflow": false,
+      "text": "请先连接或选择闲鱼账号\n\n请在账号管理中添加闲鱼账号，或选择一个可用账号后继续。\n\n前往账号管理"
+    },
+    {
+      "name": "商品管理",
+      "url": "http://127.0.0.1:15173/products",
+      "box": {
+        "bottom": 926,
+        "height": 904,
+        "left": 252,
+        "right": 1892,
+        "top": 22,
+        "width": 1640,
+        "x": 252,
+        "y": 22
+      },
+      "button": {
+        "bg": "rgb(36, 90, 141)",
+        "borderRadius": "8px",
+        "color": "rgb(255, 255, 255)",
+        "fontSize": "13px",
+        "height": 32,
+        "width": 104
+      },
+      "centerDx": 0,
+      "centerDy": 0.0078125,
+      "overflow": false,
+      "text": "请先连接或选择闲鱼账号\n\n请在账号管理中添加闲鱼账号，或选择一个可用账号后继续。\n\n前往账号管理"
+    },
+    {
+      "name": "卡券管理",
+      "url": "http://127.0.0.1:15173/coupons",
+      "box": {
+        "bottom": 926,
+        "height": 904,
+        "left": 253,
+        "right": 1892,
+        "top": 22,
+        "width": 1639,
+        "x": 253,
+        "y": 22
+      },
+      "button": {
+        "bg": "rgb(36, 90, 141)",
+        "borderRadius": "8px",
+        "color": "rgb(255, 255, 255)",
+        "fontSize": "13px",
+        "height": 32,
+        "width": 104
+      },
+      "centerDx": 0,
+      "centerDy": 0.0078125,
+      "overflow": false,
+      "text": "请先连接或选择闲鱼账号\n\n请在账号管理中添加闲鱼账号，或选择一个可用账号后继续。\n\n前往账号管理"
+    },
+    {
+      "name": "订单管理",
+      "url": "http://127.0.0.1:15173/orders",
+      "box": {
+        "bottom": 926,
+        "height": 904,
+        "left": 253,
+        "right": 1892,
+        "top": 22,
+        "width": 1639,
+        "x": 253,
+        "y": 22
+      },
+      "button": {
+        "bg": "rgb(36, 90, 141)",
+        "borderRadius": "8px",
+        "color": "rgb(255, 255, 255)",
+        "fontSize": "13px",
+        "height": 32,
+        "width": 104
+      },
+      "centerDx": 0,
+      "centerDy": 0.0078125,
+      "overflow": false,
+      "text": "请先连接或选择闲鱼账号\n\n请在账号管理中添加闲鱼账号，或选择一个可用账号后继续。\n\n前往账号管理"
+    },
+    {
+      "name": "Agent 动态",
+      "url": "http://127.0.0.1:15173/agent-dynamics",
+      "box": {
+        "bottom": 926,
+        "height": 904,
+        "left": 253,
+        "right": 1892,
+        "top": 22,
+        "width": 1639,
+        "x": 253,
+        "y": 22
+      },
+      "button": {
+        "bg": "rgb(36, 90, 141)",
+        "borderRadius": "8px",
+        "color": "rgb(255, 255, 255)",
+        "fontSize": "13px",
+        "height": 32,
+        "width": 104
+      },
+      "centerDx": 0,
+      "centerDy": 0.0078125,
+      "overflow": false,
+      "text": "请先连接或选择闲鱼账号\n\n请在账号管理中添加闲鱼账号，或选择一个可用账号后继续。\n\n前往账号管理"
+    },
+    {
+      "name": "设置",
+      "url": "http://127.0.0.1:15173/settings",
+      "box": {
+        "bottom": 926,
+        "height": 904,
+        "left": 547,
+        "right": 1892,
+        "top": 22,
+        "width": 1345,
+        "x": 547,
+        "y": 22
+      },
+      "button": {
+        "bg": "rgb(36, 90, 141)",
+        "borderRadius": "8px",
+        "color": "rgb(255, 255, 255)",
+        "fontSize": "13px",
+        "height": 32,
+        "width": 104
+      },
+      "centerDx": 0,
+      "centerDy": 0.0078125,
+      "overflow": false,
+      "text": "请先连接或选择闲鱼账号\n\n请在账号管理中添加闲鱼账号，或选择一个可用账号后继续。\n\n前往账号管理"
+    }
+  ],
+  "modelMetric": {
+    "bottom": 926,
+    "centerDx": 0,
+    "centerDy": 0.0078125,
+    "height": 904,
+    "text": "请先连接或选择闲鱼账号\n\n请在账号管理中添加闲鱼账号，或选择一个可用账号后继续。\n\n前往账号管理",
+    "top": 22
+  }
+}

@@ -1,3 +1,4 @@
+import { AccountContextState } from '../../../app/AccountContextState';
 import { useEffect, useMemo, useState } from 'react';
 import { useAccountContext } from '../../../app/account-context';
 import { createMockCouponsApi, type CouponsApi } from '../api';
@@ -18,7 +19,7 @@ export interface CouponsPageProps { api?: CouponsApi; productsApi?: ProductsApi;
 
 export function CouponsPage(props: CouponsPageProps) {
   const { currentAccountId, accountsLoading, accountsError } = useAccountContext();
-  if (!currentAccountId) return <section className="page-stack coupons-domain" data-coupons-domain><article className="card panel coupons-panel"><h2>卡券列表</h2><div className="coupons-context-note" role="status">{accountsLoading ? '正在读取账号…' : accountsError ? '账号信息暂不可用，请刷新页面后重试。' : '请先在账号管理中添加或选择一个可用账号。'}</div></article></section>;
+  if (accountsLoading || accountsError || !currentAccountId) return <AccountContextState />;
   return <AccountCouponsPage key={currentAccountId} {...props} accountId={currentAccountId} />;
 }
 

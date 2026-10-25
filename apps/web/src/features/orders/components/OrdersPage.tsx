@@ -1,3 +1,4 @@
+import { AccountContextState } from '../../../app/AccountContextState';
 import { useEffect, useMemo, useState } from 'react';
 import { useAccountContext } from '../../../app/account-context';
 import { createMockOrdersApi, type OrdersApi } from '../api';
@@ -34,6 +35,8 @@ export function OrdersPage({ api: providedApi }: { api?: OrdersApi }) {
     const timeout = window.setTimeout(() => setSyncToast(null), 5000);
     return () => window.clearTimeout(timeout);
   }, [controller.syncError]);
+  if (accountsLoading || contextLoadFailure || contextMissing) return <AccountContextState />;
+
   return <section className="page-stack orders-domain" data-orders-domain>
     <article className="card panel orders-panel">
       <OrderSyncToolbar currentAccount={currentAccount} contextLoading={accountsLoading} contextMissing={contextMissing} loading={controller.state.phase === 'loading'} syncing={controller.syncing} filters={controller.filters} contextError={accountsError && !contextLoadFailure ? '账号上下文加载失败' : undefined} onFilterChange={(patch) => setFilters((previous) => ({ ...previous, ...patch }))} onRefresh={() => void controller.reload()} onSync={() => void controller.refreshFromXianyu()} />

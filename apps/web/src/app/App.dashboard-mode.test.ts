@@ -74,8 +74,10 @@ describe('dashboard API mode resolution', () => {
     expect(html).not.toContain('dashboard-sidebar');
     expect(html).not.toContain('dashboard-desktop-shell');
     expect(html).not.toContain('dashboard-mobile-frame');
-    expect(html).toContain('dashboard-desktop-content');
-    expect(html).toContain('dashboard-mobile-content');
+    // The initial account read uses the shared page state inside the same shell.
+    expect(html).toContain('class="account-context-state"');
+    expect(html).toContain('正在加载账号…');
+    expect(html).toContain('aria-busy="true"');
     expect(html).toContain('hidden=""');
   });
 
