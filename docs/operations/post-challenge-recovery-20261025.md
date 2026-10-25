@@ -1,6 +1,6 @@
 # 滑块通过后的恢复失败排查（2026-10-25）
 
-状态：本地修复、组合复验与两轮独立审核 PASS，待main合并。用户随后明确要求“这一步需要推送”，授权本次推送并由既定 Actions 发布；生产真实挑战恢复未验收。
+状态：本地修复、组合复验与两轮独立审核 PASS；功能 `5fa0c15` 已在merge lock内合入main `9ef00d6`，合并后构建及102项Chrome/PG/Redis恢复复验通过。用户随后明确要求“这一步需要推送”，授权本次推送并由既定 Actions 发布；生产真实挑战恢复未验收。
 
 修改前检查：Node 24 / TypeScript / node:test；公共浏览器传输位于 xianyu-browser-mtop.ts，滑块与生命周期在 xianyu-verification-browser.ts，旧实现由 xianyu-browser-im-token.ts 独立负责。最近 bc480a2 抽出公共传输，额外在每次调用前准备页面。现有 Chrome 夹具涵盖平台 verdict、Cookie 轮换与 URL 不变，但没有可靠模拟真实挑战页面的异步跳转和回调。
 
@@ -33,6 +33,7 @@
 - 组合 Memory/真实PG/Redis 恢复、凭证、守卫与启动测试：97/97，无skip。命令为 node --import tsx --test，文件包括 verification-read-recovery、verification-risk-recheck、verification-recovery、verification-guard-entry、im-credential、im-native-recovery、listener-startup。
 - 原 IM Chrome/Memory 9/9；强化异步会话交换后的 IM Chrome/PG 9/9；最终组合 `npm test --workspace apps/api` 352/352（264+24+17+47）及全部既有smoke通过，无skip。API TypeScript构建通过。
 - 独立 reviewer `/root/guard_design_review` 两轮均 PASS，无P0-P2。首轮实际重跑构建与5项新回归，最终组合再独立执行构建、26项handoff/read恢复/安全边界测试及暂存/未暂存diff-check，确认来源隔离和typed阶段错误。
+- 合并后 `npm run build --workspace apps/api` 及97项恢复+5项handoff合计102/102通过，无skip。feature rebase前后tree一致，三条历史消息对象由独立reviewer逐字节核验PASS。
 
 ## GitHub Actions 中文乱码
 

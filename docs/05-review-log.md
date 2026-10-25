@@ -5,6 +5,7 @@
 - 独立 reviewer `/root/guard_design_review`：两轮 PASS，无P0-P2。首轮浏览器公共交接审核，实际build及5项回归；最终审核组合暂存/未暂存差异，实际build及26项Chrome/来源隔离/CAS/注销/新登录/脱敏回归。
 - 来源隔离实现由独立子切片 `/root/post_challenge_audit` 提供，最终由其他 reviewer 审核，无自审替代。主agent组合API352项及smoke、97项PG/Redis恢复、两组9项Chrome/PG、handoff5项全部通过，无skip。
 - 代码门禁 PASS；真实闲鱼恢复待部署后核验，本地受控平台测试不替代生产结果。用户最终追加推送授权。[完整证据与局限](operations/post-challenge-recovery-20261025.md)。
+- main合并 `9ef00d6`，合后build及102项复验PASS；用户另明确允许修复远端三条乱码历史，reviewer独立比较原始commit对象，除标题/必要parent映射外headers及tree完全不变，历史修复核验PASS。
 
 ## 2026-10-25 闲鱼统一验证恢复守卫
 
