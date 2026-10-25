@@ -16,6 +16,8 @@ import {
   type XianyuCookieSnapshot,
 } from './xianyu-cookie-jar.js';
 import { XIANYU_USER_AGENT, xianyuSecChUa, xianyuSecChUaPlatform } from './xianyu-browser-identity.js';
+import { createVerificationReadRequest, resolveVerificationReadRequest, type XianyuReadRequest } from './xianyu-verification-request.js';
+import { inspectXianyuVerification } from './xianyu-verification-response.js';
 
 const APP_KEY = '34839810';
 export const XIANYU_IM_APP_KEY = '444e9908a51d1cb236a27862abc769c9';
@@ -263,13 +265,18 @@ export class XianyuMtopClient {
         await this.saveCookie(adminId, accountId, cookieHeader, nextMetadata);
       }
       const raw = await response.text();
+      let parsed: unknown;
+      try { parsed = JSON.parse(raw); } catch { /* HTML validation pages are classified below. */ }
+      if (inspectXianyuVerification(parsed, parsed ? '' : raw).required) {
+        return { success: false, accountInvalid: true, errorCode: 'ACCOUNT_VALIDATION_REQUIRED', message: 'xianyu upload verification required', cookieHeader };
+      }
       if (response.status < 200 || response.status >= 300) {
         const accountInvalid = isSessionExpiredText(raw);
         return { success: false, accountInvalid, errorCode: accountInvalid ? 'SESSION_EXPIRED' : 'IMAGE_UPLOAD_HTTP_ERROR', message: accountInvalid ? 'xianyu session expired' : `image upload failed: http=${response.status}`, cookieHeader };
       }
       let payload: Record<string, any>;
       try { payload = JSON.parse(raw) as Record<string, any>; } catch {
-        const accountInvalid = /<html|<!doctype/i.test(raw) || isSessionExpiredText(raw);
+        const accountInvalid = isSessionExpiredText(raw);
         return { success: false, accountInvalid, errorCode: accountInvalid ? 'SESSION_EXPIRED' : 'IMAGE_UPLOAD_INVALID_RESPONSE', message: accountInvalid ? 'xianyu session expired' : 'image upload response is not valid JSON', cookieHeader };
       }
       if (isSessionExpiredText(raw)) return { success: false, accountInvalid: true, errorCode: 'SESSION_EXPIRED', message: 'xianyu session expired', cookieHeader };
@@ -337,6 +344,14 @@ export class XianyuMtopClient {
   async recheckItemDetail(adminId: string, accountId: string, itemId: string): Promise<XianyuItemDetailResult> {
     return new XianyuMtopClient({ timeoutMs: this.timeoutMs, loadCredential: this.loadCredential, saveCookie: this.saveCookie })
       .fetchItemDetail(adminId, accountId, itemId);
+  }
+
+  /** Recovery owns the risk revision; do not recursively run ordinary hooks. */
+  async recheckReadRequest(adminId: string, accountId: string, request: XianyuReadRequest): Promise<MtopResult> {
+    const checked = resolveVerificationReadRequest(request.api, request);
+    if (!checked) throw new Error('XIANYU_VERIFICATION_REQUEST_INVALID');
+    return new XianyuMtopClient({ timeoutMs: this.timeoutMs, loadCredential: this.loadCredential, saveCookie: this.saveCookie })
+      .call(adminId, accountId, checked.api, checked.version, checked.data, checked.extraParams, { referer: checked.referer });
   }
 
   async fetchSoldOrders(adminId: string, accountId: string, data: Record<string, unknown> = {}): Promise<MtopResult> {
@@ -491,9 +506,7 @@ export class XianyuMtopClient {
 
   async call(adminId: string, accountId: string, api: string, version: string, data: Record<string, unknown>, extraParams: Record<string, string> = {}, requestOptions: MtopRequestOptions = {}): Promise<MtopResult> {
     const startedAt = new Date().toISOString();
-    const itemId = typeof data.itemId === 'string' || typeof data.itemId === 'number' ? String(data.itemId).trim() : '';
-    const recoveryRequest: VerificationRecoveryRequest | undefined = api === 'mtop.taobao.idle.pc.detail' && itemId && itemId.length <= 128
-      ? { kind: 'item_detail', itemId } : undefined;
+    const recoveryRequest = createVerificationReadRequest(api, version, data, extraParams, requestOptions.referer);
     const credential = await this.loadCredential(adminId, accountId);
     const initialCookieHeader = credential?.cookieHeader?.trim() ?? '';
     let cookieHeader = initialCookieHeader;
@@ -587,10 +600,26 @@ export class XianyuMtopClient {
         }
         const nextMetadata = cookieSnapshot ? metadataWithCookieSnapshot(requestMetadata, cookieSnapshot) : requestMetadata;
         if (cookieHeader !== initialCookieHeader || JSON.stringify(nextMetadata) !== JSON.stringify(initialMetadata)) await this.saveCookie(adminId, accountId, cookieHeader, nextMetadata);
-        const payload = await response.json() as Record<string, unknown>;
+        const raw = await response.text();
+        let payload: Record<string, unknown>;
+        try { payload = JSON.parse(raw) as Record<string, unknown>; }
+        catch {
+          const validation = inspectXianyuVerification({ url: response.url }, raw).required;
+          const sessionExpired = response.status === 401 || isSessionExpiredText(raw);
+          const result = { success: false, accountInvalid: validation || sessionExpired,
+            errorCode: validation ? 'ACCOUNT_VALIDATION_REQUIRED' : sessionExpired ? 'SESSION_EXPIRED' : 'MTOP_INVALID_RESPONSE',
+            message: 'xianyu returned a non-JSON response', cookieHeader };
+          await this.reportFailure({ adminId, accountId, api, recoveryRequest, ...result });
+          return result;
+        }
         const ret = Array.isArray(payload.ret) ? payload.ret.map(String) : [];
         const retMessage = ret[0] ?? '';
-        if (retMessage.includes('SUCCESS::')) {
+        if (inspectXianyuVerification(payload).required) {
+          const result = { success: false, accountInvalid: true, errorCode: 'ACCOUNT_VALIDATION_REQUIRED', message: retMessage || 'xianyu verification required', response: payload, cookieHeader };
+          await this.reportFailure({ adminId, accountId, api, recoveryRequest, ...result });
+          return result;
+        }
+        if (ret.length > 0 && ret.every(value => value.startsWith('SUCCESS::'))) {
           try { await this.onSuccess?.({ adminId, accountId, api, startedAt }); }
           catch (error) { console.error(JSON.stringify({ component: 'xianyu-account-health', event: 'success_report_failed', accountId, api, error: error instanceof Error ? error.message : String(error) })); }
           return { success: true, accountInvalid: false, response: payload, cookieHeader };
@@ -604,11 +633,6 @@ export class XianyuMtopClient {
         }
         if (isSessionExpired(ret)) {
           const result = { success: false, accountInvalid: true, errorCode: 'SESSION_EXPIRED', message: retMessage, response: payload, cookieHeader };
-          await this.reportFailure({ adminId, accountId, api, recoveryRequest, ...result });
-          return result;
-        }
-        if (isValidationFailure(retMessage)) {
-          const result = { success: false, accountInvalid: true, errorCode: 'ACCOUNT_VALIDATION_REQUIRED', message: retMessage, response: payload, cookieHeader };
           await this.reportFailure({ adminId, accountId, api, recoveryRequest, ...result });
           return result;
         }
@@ -837,7 +861,6 @@ function isSessionExpiredText(value: string): boolean {
   const normalized = value.toLowerCase();
   return normalized.includes('fail_sys_session_expired') || normalized.includes('session_expired') || normalized.includes('session expired') || normalized.includes('session杩囨湡') || normalized.includes('会话已过期') || normalized.includes('登录已失效');
 }
-function isValidationFailure(value: string): boolean { const normalized = value.toLowerCase(); return ['fail_sys_user_validate', 'rgv587', 'fail_sys_illegal_access', 'fail_biz_wua_is_machine', 'wua_is_machine', 'captcha', 'validate', 'punish', 'x5sec'].some((marker) => normalized.includes(marker)); }
 function isPermissionFailure(value: string): boolean { const normalized = value.toLowerCase(); return normalized.includes('permission_exception') || normalized.includes('permission denied') || value.includes('无权限访问'); }
 function refererFor(api: string): string { if (api.includes('merchant.sold') || api.includes('order')) return 'https://seller.goofish.com/'; if (api.includes('loginuser')) return 'https://www.goofish.com/im'; return 'https://www.goofish.com/'; }
 

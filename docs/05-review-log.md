@@ -1,5 +1,11 @@
 # XianyuSellerAgent 阶段评审记录
 
+## 2026-10-25 闲鱼统一验证恢复守卫
+
+- 独立 reviewer `/root/guard_design_review`：设计审核通过；两轮实现复核提出 R1–R6（最高P1），已修复并最终 PASS，无开放P0/P1/P2。覆盖公共入口、只读重放、身份、凭证CAS、风险revision、并发唤醒、上传边界及安全HTML。
+- reviewer 独立构建、32/32相关回归和diff检查通过；主agent完整API345项、既有smoke、真实Chrome/PG/Redis59项及原IM Chrome9项通过。仅本地main合入，不推送不部署；真实平台放行不由受控测试代表。
+- [修复、复验、环境与回滚记录](operations/verification-guard-20261025.md)。
+
 ## 2026-10-24 分时段随机 HTTP 会话维护
 
 - 独立 reviewer：`/root/independent_review`。首轮 FAIL：R1/P1 在途 Set-Cookie 覆盖人工更新/复活撤销凭证，R2/P2 周期和按需续期单向互斥；两项均已修复并 VERIFIED/CLOSED。

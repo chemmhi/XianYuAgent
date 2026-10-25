@@ -1207,8 +1207,8 @@ export interface CredentialRefreshUpdate {
   accountId: string;
   expected: CredentialRecord;
   cookieHeader: string;
-  accessToken: string;
-  deviceId: string;
+  accessToken?: string;
+  deviceId?: string;
   metadata: Record<string, string>;
 }
 
@@ -1416,7 +1416,8 @@ export interface WorkspaceConfirmationRecord {
 }
 
 /** Only replayable read operations belong here; never store mutation payloads. */
-export interface VerificationRecoveryRequest { kind: 'item_detail'; itemId: string }
+export type VerificationRecoveryRequest = { kind: 'item_detail'; itemId: string }
+  | import('./xianyu-verification-request.js').XianyuReadRequest;
 export interface AccountVerificationRisk {
   source: string;
   episode: string;

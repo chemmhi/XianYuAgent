@@ -13,6 +13,7 @@ import type { ProductListResult, ProductRecord, Store, VerificationRecoveryReque
 import { createId, digestJson } from './security.js';
 import { XianyuQrLoginAdapter, type XianyuQrPublicSession } from './xianyu-qr-login.js';
 import { XianyuVerificationBrowser } from './xianyu-verification-browser.js';
+import type { XianyuVerificationBrowserFactory } from './xianyu-browser-port.js';
 import { XianyuMtopClient } from './xianyu-mtop.js';
 import { metadataWithCookieSnapshot } from './xianyu-cookie-jar.js';
 import { XianyuImService } from './xianyu-im-service.js';
@@ -98,6 +99,7 @@ export interface AppRuntime {
 }
 
 export interface CreateAppOptions {
+  verificationBrowserFactory?: XianyuVerificationBrowserFactory;
   autoReplyAcknowledgementEvaluator?: AutoReplyAcknowledgementEvaluator;
   verificationRecoveryOwner?: boolean;
   imOwnerUrl?: string;
@@ -154,6 +156,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
   const verificationBrowser = config.xianyuVerificationBrowserMode === 'disabled' || options.verificationRecoveryOwner === false || Boolean(imOwnerClient)
     ? undefined
     : new XianyuVerificationBrowser({
+      browserFactory: options.verificationBrowserFactory,
       mode: config.xianyuVerificationBrowserMode,
       sliderMode: config.xianyuVerificationSliderMode,
       sliderMaxRetries: config.xianyuVerificationSliderMaxRetries,
