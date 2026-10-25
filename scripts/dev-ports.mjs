@@ -26,7 +26,11 @@ export async function findAvailablePort(startPort, { host = '0.0.0.0', exclude =
   const start = parsePort(startPort, 'Starting port');
   const excluded = new Set(exclude);
   for (let port = start; port <= 65535; port += 1) {
-    if (!excluded.has(port) && await canListen(port, host)) return port;
+    if (excluded.has(port) || !await canListen(port, host)) continue;
+    // Windows permits a wildcard bind alongside an existing loopback bind.
+    // Probe the advertised local address too, or browsers reach that owner.
+    if (host === '0.0.0.0' && !await canListen(port, '127.0.0.1')) continue;
+    return port;
   }
   throw new Error(`No available port between ${start} and 65535 on ${host}.`);
 }

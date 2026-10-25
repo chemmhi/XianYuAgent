@@ -5,14 +5,23 @@ import net from 'node:net';
 import test from 'node:test';
 import { createDevEnvironment, findAvailablePort, resolveDevPorts } from './dev-ports.mjs';
 
-async function listen(port = 0) {
+async function listen(port = 0, host = '0.0.0.0') {
   const server = net.createServer();
-  server.listen(port, '0.0.0.0');
+  server.listen(port, host);
   await once(server, 'listening');
   return server;
 }
 
 const close = (server) => new Promise((resolve) => server.close(resolve));
+
+test('does not select a port already used by a loopback-only server', async (t) => {
+  const { port, servers } = await range(t);
+  await close(servers[0]);
+  const existing = await listen(port, '127.0.0.1');
+  t.after(() => close(existing));
+  assert.ok(await findAvailablePort(port) > port);
+  assert.equal(existing.listening, true);
+});
 
 async function range(t) {
   for (let attempt = 0; attempt < 30; attempt += 1) {
