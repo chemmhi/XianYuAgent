@@ -78,7 +78,7 @@ export class OrderDeliveryService {
     const record = await this.deps.store.createDeliveryRecord({ adminId: input.adminId, orderId: order.id, orderNo: order.orderNo, accountId: order.accountId, deliveryType: preview.deliveryType, idempotencyScope: scope, idempotencyKey: input.idempotencyKey, attempt, trackingRef: input.trackingRef });
     await this.deps.store.updateDeliveryRecord({ adminId: input.adminId, id: record.id, status: 'running' });
     await this.deps.store.updateOrderDelivery({ adminId: input.adminId, accountId: order.accountId, orderNo: order.orderNo, deliveryStatus: 'reserving', deliveryType: preview.deliveryType });
-    const outbox = await this.deps.store.enqueueAutoReplyOutbox({ scope, aggregateType: 'order', aggregateId: order.id, operation: 'order_delivery', idempotencyKey: input.idempotencyKey, payload: { orderNo: order.orderNo, deliveryType: preview.deliveryType, couponBatchIds: preview.couponBatchIds, trackingRef: input.trackingRef ? '[REDACTED]' : undefined }, traceId: input.traceId });
+    const outbox = await this.deps.store.enqueueAutoReplyOutbox({ scope, aggregateType: 'order', aggregateId: order.id, operation: 'order_delivery', idempotencyKey: input.idempotencyKey, payload: { accountId: order.accountId, orderNo: order.orderNo, deliveryType: preview.deliveryType, couponBatchIds: preview.couponBatchIds, trackingRef: input.trackingRef ? '[REDACTED]' : undefined }, traceId: input.traceId });
     const workerId = `order-delivery:${record.id}`;
     const claimed = await this.deps.store.claimAutoReplyOutbox({ scope, workerId, limit: 1, leaseMs: 120_000, id: outbox.record.id });
     if (!claimed[0]) throw new ServiceError(409, 'DELIVERY_OUTBOX_CONFLICT', 'delivery outbox is already claimed');

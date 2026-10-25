@@ -5,6 +5,8 @@ import { ModelClientService, type ModelClientRuntimeSnapshot, type ModelProvider
 import { PiModelClientError, type ModelClient } from './pi-runtime.js';
 
 export interface ModelProviderRuntimePoolOptions {
+  withAccountGuard?: <T>(accountId: string, work: () => Promise<T>) => Promise<T>;
+  accountAvailable?: (adminId: string, accountId: string) => Promise<boolean>;
   createClient: (config: OpenAIResolvedConfig) => Promise<ModelClient>;
   loadAccount?: (adminId: string, accountId: string) => Promise<{ configs: OpenAIResolvedConfig[]; mode: 'auto' | 'manual_primary' | 'manual_backup'; preferredRole?: ModelProviderRole; routingVersion: number; configGeneration: number }>;
   overallTimeoutMs?: number;
@@ -29,6 +31,7 @@ export class ModelProviderRuntimePool {
   private readonly redis?: Redis;
   private scheduler?: ReturnType<typeof setInterval>;
   private closed = false;
+  private readonly deletedAccounts = new Set<string>();
 
   constructor(private readonly options: ModelProviderRuntimePoolOptions) {
     if (options.redisUrl?.trim()) {
@@ -45,6 +48,7 @@ export class ModelProviderRuntimePool {
   }
 
   async resolve(input: { adminId: string; accountId: string; configs: OpenAIResolvedConfig[]; mode: 'auto' | 'manual_primary' | 'manual_backup'; preferredRole?: ModelProviderRole; routingVersion: number; configGeneration?: number }): Promise<ModelClientService> {
+    if (this.deletedAccounts.has(input.accountId) || (this.options.accountAvailable && !await this.options.accountAvailable(input.adminId, input.accountId))) throw new Error('MODEL_ACCOUNT_DELETED');
     const configs = input.configs.slice(0, 2);
     const generation = Math.max(0, Math.trunc(input.configGeneration ?? configs.reduce((max, item) => Math.max(max, item.version), 0)));
     const signature = configs.map((item) => `${item.role}:${item.id ?? 'none'}:${item.version}:${item.fingerprint ?? ''}`).join('|');
@@ -77,6 +81,7 @@ export class ModelProviderRuntimePool {
       });
       const probeTimeoutMs: Partial<Record<ModelProviderRole, number>> = {};
       for (const item of configs) probeTimeoutMs[item.role] = normalizedProbeTimeoutMs(item);
+      if ((this.options.accountAvailable && !await this.options.accountAvailable(input.adminId, input.accountId)) || this.deletedAccounts.has(input.accountId)) throw new Error('MODEL_ACCOUNT_DELETED');
       this.entries.set(key, { signature, generation, service, lastUsedAt: Date.now(), adminId: input.adminId, accountId: input.accountId, probeTimeoutMs });
     } else {
       service = existing.service;
@@ -103,15 +108,19 @@ export class ModelProviderRuntimePool {
   }
 
   async syncRouting(input: { accountId: string; routing: unknown }): Promise<void> {
-    if (!this.redis || this.closed) return;
-    try {
-      await this.ensureRedis();
-      await this.redis.set(`${ROUTING_PREFIX}:${input.accountId}`, JSON.stringify(input.routing));
-      await this.redis.publish(`${ROUTING_PREFIX}:events`, JSON.stringify({ accountId: input.accountId }));
-    } catch (error) {
-      void this.options.onRedisDegraded?.({ accountId: input.accountId, error });
-      throw new Error('MODEL_ROUTING_STATE_UNAVAILABLE');
-    }
+    if (!this.redis || this.closed || this.deletedAccounts.has(input.accountId)) return;
+    const redis = this.redis;
+    const write = async () => {
+      try {
+        await this.ensureRedis();
+        await redis.set(`${ROUTING_PREFIX}:${input.accountId}`, JSON.stringify(input.routing));
+        await redis.publish(`${ROUTING_PREFIX}:events`, JSON.stringify({ accountId: input.accountId }));
+      } catch (error) {
+        void this.options.onRedisDegraded?.({ accountId: input.accountId, error });
+        throw new Error('MODEL_ROUTING_STATE_UNAVAILABLE');
+      }
+    };
+    if (this.options.withAccountGuard) await this.options.withAccountGuard(input.accountId, write); else await write();
   }
 
   async readRoutingMirror(accountId: string): Promise<ModelProviderRoutingRecord | undefined> {
@@ -141,6 +150,8 @@ export class ModelProviderRuntimePool {
   async probeDue(): Promise<void> {
     for (const entry of this.entries.values()) {
       try {
+        if (this.deletedAccounts.has(entry.accountId) || (this.options.accountAvailable && !await this.options.accountAvailable(entry.adminId, entry.accountId))) { await this.deleteAccount(entry.accountId); continue; }
+        if (this.options.loadAccount) await this.options.loadAccount(entry.adminId, entry.accountId);
         const snapshot = entry.service.getRuntimeSnapshot();
         for (const role of ['primary', 'backup'] as const) {
           const state = snapshot.providerStates[role];
@@ -176,6 +187,27 @@ export class ModelProviderRuntimePool {
     }
   }
 
+  async deleteAccount(accountId: string): Promise<void> {
+    this.deletedAccounts.add(accountId);
+    for (const [key, entry] of this.entries) if (entry.accountId === accountId) {
+      this.entries.delete(key);
+      if (!this.options.withAccountGuard) await this.persistChains.get(key);
+      this.persistChains.delete(key);
+    }
+    if (!this.redis) return;
+    await this.ensureRedis();
+    for (const pattern of [`${STATE_PREFIX}:${accountId}:*`, `${ROUTING_PREFIX}:${accountId}`, `model:probe:lease:${accountId}:*`]) {
+      let cursor = '0';
+      do { const result = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100); cursor = result[0]; if (result[1].length) await this.redis.del(...result[1]); } while (cursor !== '0');
+    }
+    let cursor = '0';
+    do {
+      const result = await this.redis.zscan(DUE_KEY, cursor, 'MATCH', `*:${accountId}:*`, 'COUNT', 100); cursor = result[0];
+      const members = result[1].filter((_, index) => index % 2 === 0);
+      if (members.length) await this.redis.zrem(DUE_KEY, ...members);
+    } while (cursor !== '0');
+  }
+
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
@@ -196,6 +228,15 @@ export class ModelProviderRuntimePool {
   }
 
   private async writeEntrySnapshot(adminId: string, accountId: string): Promise<void> {
+    if (this.deletedAccounts.has(accountId)) return;
+    if (this.options.withAccountGuard) {
+      try { await this.options.withAccountGuard(accountId, () => this.writeGuardedEntrySnapshot(adminId, accountId)); } catch { /* deletion fences stale cross-process callbacks */ }
+      return;
+    }
+    await this.writeGuardedEntrySnapshot(adminId, accountId);
+  }
+
+  private async writeGuardedEntrySnapshot(adminId: string, accountId: string): Promise<void> {
     const snapshot = this.getSnapshot(adminId, accountId);
     if (!snapshot) return;
     await this.options.onStateChange?.({ adminId, accountId, snapshot });

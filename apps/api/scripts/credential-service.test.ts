@@ -10,6 +10,8 @@ test('clears a stale IM access token when a fresh browser cookie replaces creden
   };
   const account = { id: 'account-1', platform: 'xianyu', status: 'connected' };
   const store = {
+    isAccountIdentityAvailable: async () => true,
+    findAdminById: async () => ({ role: 'admin' }),
     getAccount: async () => account,
     getCredential: async () => credential,
     upsertCredential: async (input: any) => { credential = { ...credential, ...input, accessToken: input.accessToken }; return credential; },
@@ -35,6 +37,8 @@ test('preserves the IM access token for MTOP cookie refresh persistence', async 
   };
   const account = { id: 'account-1', platform: 'xianyu', status: 'connected' };
   const store = {
+    isAccountIdentityAvailable: async () => true,
+    findAdminById: async () => ({ role: 'admin' }),
     getAccount: async () => account,
     getCredential: async () => credential,
     upsertCredential: async (input: any) => { credential = { ...credential, ...input }; return credential; },

@@ -95,6 +95,10 @@ export class XianyuQrLoginAdapter {
     this.allowManualVerificationFallback = options.allowManualVerificationFallback ?? true;
   }
 
+  forgetSessions(sessionIds: string[]): void {
+    for (const id of sessionIds) this.sessions.delete(id);
+  }
+
   async create(input: { sessionId: string; adminId: string; accountId?: string }): Promise<XianyuQrPublicSession> {
     const previous = this.sessions.get(input.sessionId);
     if (previous) {

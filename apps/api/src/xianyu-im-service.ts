@@ -49,6 +49,7 @@ export class XianyuImService {
   private readonly verificationRecoveryInFlight = new Map<string, Promise<void>>();
   private readonly verificationRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private closed = false;
+  private readonly deletedAccounts = new Set<string>();
   private readonly identityCache = new Map<string, { buyerDisplayName?: string; buyerAvatarUrl?: string }>();
   private readonly inboundInboxWorker: InboundInboxWorker;
   private inboundInboxWakeInFlight?: Promise<void>;
@@ -324,6 +325,7 @@ export class XianyuImService {
    */
   async startListener(adminId: string, accountId: string): Promise<void> {
     if (this.ownerClient) return this.ownerClient.call('startListener', [adminId, accountId]);
+    if (this.deletedAccounts.has(accountId)) throw new ServiceError(404, 'NOT_FOUND', 'account not found');
     // Register the keepalive before bootstrap so an active login is retried
     // even when the first socket/token exchange fails transiently.
     this.scheduleCredentialRefresh(adminId, accountId);
@@ -335,7 +337,7 @@ export class XianyuImService {
   /** Wake recovery after a committed risk signal without blocking its request. */
   requestVerificationRecovery(adminId: string, accountId: string, source: string): void {
     const key = `${adminId}:${accountId}`;
-    if (this.closed || !this.verificationBrowser?.enabled || this.verificationRecoveryInFlight.has(key)) return;
+    if (this.closed || this.deletedAccounts.has(accountId) || !this.verificationBrowser?.enabled || this.verificationRecoveryInFlight.has(key)) return;
     const retryInMs = (this.verificationRetryAfter.get(key) ?? 0) - Date.now();
     if (retryInMs > 0) {
       if (!this.verificationRecoveryTimers.has(key)) {
@@ -498,6 +500,26 @@ export class XianyuImService {
     return undefined;
   }
 
+  async deleteAccountState(adminId: string, accountId: string): Promise<void> {
+    if (this.ownerClient) return this.ownerClient.call('deleteAccountState', [adminId, accountId]);
+    this.deletedAccounts.add(accountId);
+    const matches = (key: string) => key.endsWith(`:${accountId}`);
+    for (const timers of [this.credentialRefreshTimers, this.verificationRecoveryTimers]) {
+      for (const [key, timer] of timers) if (matches(key)) { clearTimeout(timer); timers.delete(key); }
+    }
+    for (const [key, timer] of this.transportHeartbeatTimers) if (matches(key)) { clearInterval(timer); this.transportHeartbeatTimers.delete(key); }
+    const pending: Promise<unknown>[] = [];
+    for (const entries of [this.clientInFlight, this.verificationInFlight, this.recoveryInFlight, this.chatRefreshInFlight, this.credentialRefreshInFlight, this.tokenRefreshInFlight, this.verificationRecoveryInFlight]) {
+      for (const [key, promise] of entries) if (matches(key)) pending.push(promise);
+    }
+    await Promise.allSettled(pending);
+    for (const [key, client] of this.clients) if (matches(key)) { this.clients.delete(key); await client.disconnect(); }
+    for (const entries of [this.clientInFlight, this.verificationInFlight, this.recoveryInFlight, this.recoveryRetryAfter, this.verificationRetryAfter, this.chatRefreshInFlight, this.credentialRefreshInFlight, this.tokenRefreshInFlight, this.verificationRecoveryInFlight]) {
+      for (const key of entries.keys()) if (matches(key)) entries.delete(key);
+    }
+    for (const key of this.identityCache.keys()) if (key.startsWith(`${accountId}:`)) this.identityCache.delete(key);
+  }
+
   async resetClient(adminId: string, accountId: string): Promise<void> {
     if (this.ownerClient) return this.ownerClient.call('resetClient', [adminId, accountId]);
     const key = `${adminId}:${accountId}`;
@@ -516,6 +538,7 @@ export class XianyuImService {
 
   private async ensureClient(adminId: string, accountId: string, options: { forceCredentialRefresh?: boolean } = {}): Promise<XianyuImClient> {
     if (this.ownerClient) throw new ServiceError(503, 'XIANYU_IM_OWNER_REQUIRED', 'IM connections belong to the API process');
+    if (this.deletedAccounts.has(accountId)) throw new ServiceError(404, 'NOT_FOUND', 'account not found');
     const key = `${adminId}:${accountId}`;
     if (options.forceCredentialRefresh) {
       const existing = this.clients.get(key);
@@ -728,6 +751,7 @@ export class XianyuImService {
   }
 
   private scheduleCredentialRefresh(adminId: string, accountId: string): void {
+    if (this.deletedAccounts.has(accountId)) return;
     const key = `${adminId}:${accountId}`;
     if (this.closed || this.credentialRefreshTimers.has(key)) return;
     const plan = planXianyuChatRefresh();

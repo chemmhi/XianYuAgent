@@ -146,21 +146,20 @@ try {
   });
   assert.equal(deleted.response.status, 200);
   assert.equal(deleted.body.data.deleted, true);
-  assert.equal(deleted.body.data.account.status, 'disabled');
+  assert.equal(deleted.body.data.account, undefined);
   const accountsAfterDelete = await request('/api/v1/accounts', { headers: { cookie } });
   assert.equal(accountsAfterDelete.response.status, 200);
   assert.equal(accountsAfterDelete.body.data.items.some((item) => item.id === accountId), false);
   const accountAfterDelete = await request(`/api/v1/accounts/${encodeURIComponent(accountId)}`, { headers: { cookie } });
   assert.equal(accountAfterDelete.response.status, 404);
   const credentialRow = await runtime.store.pool.query('select status from auth.account_credentials where account_id=$1', [accountId]);
-  assert.equal(credentialRow.rows[0]?.status, 'revoked');
+  assert.equal(credentialRow.rowCount, 0);
   const deletedReplay = await request(`/api/v1/accounts/${encodeURIComponent(accountId)}`, {
     method: 'DELETE',
     headers: { cookie, 'X-CSRF-Token': csrf, 'Idempotency-Key': `products-postgres-account-delete-${process.pid}` },
     body: JSON.stringify({}),
   });
-  assert.equal(deletedReplay.response.status, 200);
-  assert.deepEqual(deletedReplay.body, deleted.body);
+  assert.equal(deletedReplay.response.status, 404);
   console.log('products postgres smoke passed');
 } finally {
   if (accountId) await runtime.store.pool.query('delete from products.products where account_id=$1', [accountId]);
