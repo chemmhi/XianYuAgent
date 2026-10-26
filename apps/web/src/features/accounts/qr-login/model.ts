@@ -11,6 +11,9 @@ export interface QrLoginSessionVM {
   qrImageRef?: string;
   verificationUrl?: string;
   verificationAutoLaunch?: boolean;
+  verificationSessionId?: string;
+  verificationPresentation?: 'remote';
+  verificationPending?: boolean;
   expiresAt: string;
   pollAfterMs: number;
   connection?: AccountConnectionVM;

@@ -12,7 +12,7 @@ async function until<T>(read: () => Promise<T>, predicate: (value: T) => boolean
 }
 function fixture(options: { auto?: boolean; stuckRelease?: boolean; drain?: number; authorize?: () => Promise<boolean> } = {}) {
   let now = 100_000, mono = 100_000, verdict: { sequence: number; code: number; success: boolean } | undefined;
-  let gestures = 0, releases = 0, closed = 0, pending = 0;
+  let gestures = 0, releases = 0, closed = 0, pending = 0, issued = 0;
   const repo = new MemoryVerificationRepository();
   const coordinator = new VerificationCoordinator(repo, { authorize: options.authorize ?? (async () => true), health: async () => 'pending' },
     { now: () => now, monotonic: () => mono }, { ...VERIFICATION_TIMING, drain: options.drain ?? 30 });
@@ -22,7 +22,7 @@ function fixture(options: { auto?: boolean; stuckRelease?: boolean; drain?: numb
     capture: async () => frame, canSend: async () => true,
     pointer: async (_input, admit) => { if (!await admit()) throw new Error('denied'); },
     release: async () => { releases++; if (options.stuckRelease) await new Promise(() => undefined); }, close: async () => undefined, invalidate: () => undefined,
-  }, closeContext: async () => { closed++; }, verdict: () => verdict, pendingAnswers: () => pending,
+  }, closeContext: async () => { closed++; }, verdict: () => verdict, verdictSequence: () => issued, pendingAnswers: () => pending,
     autoAttempt: async (admit, before) => { await before(); await admit(); gestures++; if (options.auto) { verdict = { sequence: 1, code: 0, success: true }; return { success: true }; } return { success: false }; } };
   const start = () => { const task = coordinator.solve(challenge); void task.catch(() => undefined); return task; };
   const row = async () => (await repo.list())[0]!;
@@ -36,7 +36,10 @@ function fixture(options: { auto?: boolean; stuckRelease?: boolean; drain?: numb
   };
   const claim = (ready: VerificationSession) => coordinator.claim(ready.id, { adminId: subject.adminId, authSessionId: 'auth', clientId: 'client', connectionId: 'connection', version: ready.version, frameId: frame.frameId });
   return { coordinator, repo, subject, frame, challenge, start, row, prepare, claim, advance: (ms: number) => { now += ms; mono += ms; },
-    answer: () => { verdict = { sequence: 1, code: 0, success: true }; }, pending: (value: number) => { pending = value; },
+    answer: () => { verdict = { sequence: ++issued, code: 0, success: true }; },
+    rejectAnswer: () => { verdict = { sequence: ++issued, code: 300, success: true }; },
+    beginAnswer: () => { verdict = undefined; return ++issued; },
+    finishAnswer: (sequence: number, code: number) => { verdict = { sequence, code, success: true }; }, pending: (value: number) => { pending = value; },
     counts: () => ({ gestures, releases, closed }) };
 }
 
@@ -96,7 +99,66 @@ test('manual-only retry does not silently fall back to auto, even without any vi
   const f = fixture({ auto: true });
   try {
     await f.coordinator.retry(f.subject, 'manual_only'); const task = f.start(); await until(f.row, row => !!row);
-    f.advance(2_001); await assert.rejects(task, /WAITING_FOR_HUMAN/); assert.equal(f.counts().gestures, 0);
+    f.advance(2_001); await assert.rejects(task, /PRESENTATION_NOT_READY/); assert.equal(f.counts().gestures, 0);
+  } finally { await f.coordinator.close(); }
+});
+
+test('manual code300 remains actionable during the original 30s and expires as platform rejected', async () => {
+  const f = fixture({ auto: true });
+  try {
+    await f.coordinator.retry(f.subject, 'manual_only'); const { task, ready } = await f.prepare(); const claimed = await f.claim(ready);
+    f.rejectAnswer(); const rejected = await until(f.row, row => row.platformResult?.status === 'rejected');
+    assert.equal(rejected.platformResult!.code, 300); assert.equal(rejected.state, 'human_active'); assert.equal(rejected.humanDeadline, claimed.humanDeadline);
+    for (let step = 0; step < 6; step++) { f.advance(5_000); f.coordinator.presence(f.subject.adminId, 'client', true); await f.coordinator.presentation(ready.id, f.subject.adminId, 'client'); await pause(); }
+    await until(f.row, row => row.state === 'settling'); f.advance(501);
+    await assert.rejects(task, /VERIFICATION_PLATFORM_REJECTED/); assert.equal((await f.row()).failureCode, 'VERIFICATION_PLATFORM_REJECTED'); assert.equal(f.counts().gestures, 0);
+  } finally { await f.coordinator.close(); }
+});
+
+test('a pending request watermark prevents old parsed verdicts entering a new challenge generation', async () => {
+  const f = fixture();
+  try {
+    const { task, ready } = await f.prepare(); await f.claim(ready); f.answer(); await task;
+    const oldRequest = f.beginAnswer();
+    const continued = f.coordinator.continueChallenge(ready.id, f.challenge); void continued.catch(() => undefined);
+    await until(f.row, row => row.challengeGeneration === 2);
+    f.finishAnswer(oldRequest, 300); await pause(); assert.equal((await f.row()).platformResult, undefined);
+    assert.equal((await f.row()).state, 'preparing');
+    f.finishAnswer(oldRequest, 0); await pause(); assert.equal((await f.row()).platformResult, undefined);
+    assert.equal((await f.row()).state, 'preparing');
+  } finally { await f.coordinator.close(); }
+});
+
+test('manual preparing timeout distinguishes unavailable presentation from an unclaimed ready frame', async () => {
+  const f = fixture({ auto: true });
+  try {
+    await f.coordinator.retry(f.subject, 'manual_only'); f.coordinator.presence(f.subject.adminId, 'client', true);
+    const task = f.start(); await until(f.row, row => !!row);
+    for (let i = 0; i < 2; i++) { f.advance(4_001); f.coordinator.presence(f.subject.adminId, 'client', true); await pause(); }
+    await assert.rejects(task, /PRESENTATION_NOT_READY/);
+    const failed = await f.row(); assert.equal(failed.priorityDeadline, undefined); assert.equal(failed.state, 'failed'); assert.equal(f.counts().gestures, 0);
+  } finally { await f.coordinator.close(); }
+  const ready = fixture({ auto: true });
+  try {
+    await ready.coordinator.retry(ready.subject, 'manual_only'); const { task } = await ready.prepare();
+    for (let i = 0; i < 2; i++) { ready.advance(4_001); ready.coordinator.presence(ready.subject.adminId, 'client', true); await pause(); }
+    await assert.rejects(task, /WAITING_FOR_HUMAN/); assert.equal((await ready.row()).state, 'failed'); assert.equal(ready.counts().gestures, 0);
+  } finally { await ready.coordinator.close(); }
+});
+
+test('disabled automatic solver remains manual-only across explicit auto/retry/release commands', async () => {
+  const f = fixture({ auto: true }); f.challenge.autoAllowed = false;
+  try {
+    await f.coordinator.retry(f.subject, 'manual_then_auto'); const { ready } = await f.prepare();
+    assert.equal(ready.mode, 'manual_only'); assert.equal(ready.autoAllowed, false);
+    await assert.rejects(f.coordinator.auto(ready.id, f.subject.adminId), /AUTO_DISABLED/);
+    await assert.rejects(f.coordinator.retry(f.subject, 'manual_then_auto'), /AUTO_DISABLED/);
+    await f.claim(ready);
+    await assert.rejects(f.coordinator.release(ready.id, f.subject.adminId, 'client', true), /AUTO_DISABLED/);
+    assert.equal((await f.row()).state, 'human_active'); assert.equal(f.counts().gestures, 0);
+    await f.coordinator.release(ready.id, f.subject.adminId, 'client', false);
+    assert.equal((await f.row()).state, 'settling'); f.advance(501);
+    await until(f.row, row => row.state === 'cancelled'); assert.equal(f.counts().gestures, 0);
   } finally { await f.coordinator.close(); }
 });
 

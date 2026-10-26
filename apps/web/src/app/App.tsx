@@ -32,6 +32,7 @@ import { AgentDynamicsPage } from '../features/agent-dynamics/components/AgentDy
 import { ControlsPreview } from '../shared/ui/ControlsPreview';
 import { Logo } from '../shared/ui/Logo';
 import { logoAssetPath, resolveLogoVariant } from '../shared/ui/brand';
+import { AccountVerificationProvider } from './VerificationBridge';
 
 const activeLogoVariant = resolveLogoVariant(import.meta.env.VITE_LOGO_VARIANT);
 
@@ -110,9 +111,9 @@ export default function App() {
   }
 
   return <AuthGate api={authApi} sessionBoundary={sessionBoundary}>
-    {(admin, auth) => <ToastProvider><AccountContextProvider api={accountsApi}>
+    {(admin, auth) => <ToastProvider><AccountContextProvider api={accountsApi}><AccountVerificationProvider transport={transport} baseUrl={import.meta.env.VITE_API_BASE_URL ?? ''}>
       <AuthenticatedShell admin={admin} onLogout={auth.logout} logoutBusy={auth.busy} page={page} accountsApi={accountsApi} productsApi={productsApi} productAutomationApi={productAutomationApi} couponsApi={couponsApi} messagesApi={messagesApi} workspaceApi={workspaceApi} ordersApi={ordersApi} settingsApi={settingsApi} inviteApi={inviteApi} autoReplyAgentSettingsApi={autoReplyAgentSettingsApi} openaiSettingsApi={openaiSettingsApi} modelProviderApi={modelProviderApi} agentDynamicsApi={agentDynamicsApi} dashboardApi={dashboardApi} navigate={navigate} />
-    </AccountContextProvider></ToastProvider>}
+    </AccountVerificationProvider></AccountContextProvider></ToastProvider>}
   </AuthGate>;
 }
 

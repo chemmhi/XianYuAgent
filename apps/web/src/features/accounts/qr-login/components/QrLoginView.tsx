@@ -1,11 +1,18 @@
 import { qrStatusLabel, secondsUntilQrExpiry, type QrLoginModel } from '../model';
+import { VerificationQrPanel } from '../../../verification/VerificationProvider';
 
 interface QrLoginViewProps {
   model: QrLoginModel;
+  onCancel?: () => void;
 }
 
-export function QrLoginView({ model }: QrLoginViewProps) {
+export function QrLoginView({ model, onCancel }: QrLoginViewProps) {
   const session = model.session;
+  if (session?.verificationPresentation === 'remote' && session.status === 'verification_required') return <div className="qr-login-view">
+    <VerificationQrPanel loginSessionId={session.qrSessionId} />
+    <p>收起此窗口后登录仍会在后台继续。</p>
+    {onCancel && <button className="btn danger" type="button" onClick={onCancel}>取消此次登录</button>}
+  </div>;
   const terminal = ['succeeded', 'expired', 'failed', 'cancelled', 'verification_required'].includes(model.phase);
   const badgeClass = session?.status === 'succeeded'
     ? 'badge-ok'
@@ -29,7 +36,7 @@ export function QrLoginView({ model }: QrLoginViewProps) {
         </div>
         {session.verificationUrl && <a className="qr-login-link" href={session.verificationUrl} target="_blank" rel="noreferrer">在新窗口打开验证链接</a>}
         {session.status === 'verification_required' && <div className="qr-login-error" role="alert"><strong>需要完成人工验证</strong><span>{session.verificationAutoLaunch ? '验证页已由浏览器打开，请完成页面上的验证；完成后系统会自动继续登录。' : '闲鱼已要求额外验证。请打开验证链接完成验证后再重试，系统不会伪造登录成功。'}</span></div>}
-        {session.status === 'succeeded' && <div className="qr-login-success" role="status"><strong>账号已重新连接</strong><span>凭证已由服务端保存并完成登录态校验。</span></div>}
+        {session.status === 'succeeded' && <div className="qr-login-success" role="status"><strong>登录成功</strong><span>登录态已校验，聊天连接状态请查看账号列表。</span></div>}
       </>}
     </div>
   );

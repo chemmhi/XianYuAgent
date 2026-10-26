@@ -1,7 +1,9 @@
+import type { VerificationRuntime } from './verification-runtime.js';
+import type { VerificationSubject } from './verification-domain.js';
 import { mkdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { dropStaleCaptchaChallengeCookies, normalizeCookieSnapshot, type XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
+import { normalizeCookieSnapshot, type XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
 import { createPatchrightVerificationBrowserFactory } from './patchright-verification-browser.js';
 import { XIANYU_USER_AGENT } from './xianyu-browser-identity.js';
 import type { XianyuVerificationBrowserFactory, XianyuVerificationContext, XianyuVerificationCookie, XianyuVerificationPage } from './xianyu-browser-port.js';
@@ -12,10 +14,14 @@ import { observeXianyuSliderVerdicts } from './xianyu-slider-verdict.js';
 import { verifyXianyuBrowserRead } from './xianyu-browser-mtop.js';
 import { browserStageError } from './xianyu-browser-challenge-handoff.js';
 import type { XianyuReadRequest } from './xianyu-verification-request.js';
+import { presentNativeXianyuChallengeFrame } from './xianyu-native-challenge-frame.js';
+import { isNativeXianyuMtopChallenge } from './xianyu-challenge-presentation.js';
+import { nativeVerificationCandidate } from './verification-native-candidate.js';
 
 export type XianyuVerificationBrowserMode = 'disabled' | 'launch';
 
 export interface XianyuVerificationBrowserOptions {
+  verificationRuntime?: VerificationRuntime;
   mode?: XianyuVerificationBrowserMode;
   sliderMode?: XianyuSliderMode;
   sliderMaxRetries?: number;
@@ -31,6 +37,7 @@ export interface XianyuVerificationBrowserOptions {
 }
 
 export interface XianyuVerificationBrowserResult {
+  verificationSessionId?: string;
   finalUrl: string;
   cookieSnapshot: XianyuCookieSnapshot;
   imToken?: XianyuBrowserImToken;
@@ -75,9 +82,11 @@ export class XianyuVerificationBrowser {
   private readonly pollIntervalMs: number;
   private readonly allowManualFallback: boolean;
   private readonly userAgent?: string;
+  private readonly verificationRuntime?: VerificationRuntime;
   private readonly browserFactory: XianyuVerificationBrowserFactory;
 
   constructor(options: XianyuVerificationBrowserOptions = {}) {
+    this.verificationRuntime = options.verificationRuntime;
     this.mode = options.mode ?? 'disabled';
     this.sliderMode = options.sliderMode ?? 'disabled';
     this.sliderMaxRetries = Math.max(1, Math.floor(options.sliderMaxRetries ?? 3));
@@ -93,6 +102,9 @@ export class XianyuVerificationBrowser {
   }
 
   get enabled(): boolean { return this.mode !== 'disabled'; }
+  remoteEnabled(subject: VerificationSubject) { return this.verificationRuntime?.eligible(subject) ?? false; }
+  async cancelSubject(id: string) { await this.verificationRuntime?.cancel(id); }
+  async failSession(id: string, code: string) { await this.verificationRuntime?.coordinator.failById(id, code); }
 
   async deleteProfile(profileKey: string): Promise<void> {
     if (!/^[0-9a-f-]{36}$/i.test(profileKey)) throw new Error('ACCOUNT_PROFILE_KEY_INVALID');
@@ -106,6 +118,8 @@ export class XianyuVerificationBrowser {
 
   async waitForCompletion(input: {
     verificationUrl: string;
+    verificationSubject?: VerificationSubject;
+    onVerificationSession?: (id: string) => void;
     profileKey?: string;
     initialCookieSnapshot?: XianyuCookieSnapshot;
     allowManualFallback?: boolean;
@@ -118,7 +132,7 @@ export class XianyuVerificationBrowser {
     assertVerificationUrl(input.verificationUrl);
     const profileDir = await this.resolveProfileDir(input.profileKey);
     const profileLockKey = normalizeProfileLockKey(profileDir);
-    const verificationKey = `${profileLockKey}\u0000${input.verificationUrl}\u0000${JSON.stringify(input.initialCookieSnapshot ?? [])}\u0000${JSON.stringify(input.imTokenRequest ?? null)}\u0000${JSON.stringify(input.readRequest ?? null)}`;
+    const verificationKey = `${JSON.stringify(input.verificationSubject ?? null)}\u0000${profileLockKey}\u0000${input.verificationUrl}\u0000${JSON.stringify(input.initialCookieSnapshot ?? [])}\u0000${JSON.stringify(input.imTokenRequest ?? null)}\u0000${JSON.stringify(input.readRequest ?? null)}`;
     const active = activeVerifications.get(verificationKey);
     if (active) return active;
 
@@ -147,6 +161,8 @@ export class XianyuVerificationBrowser {
 
   private async runVerification(input: {
     verificationUrl: string;
+    verificationSubject?: VerificationSubject;
+    onVerificationSession?: (id: string) => void;
     profileKey?: string;
     initialCookieSnapshot?: XianyuCookieSnapshot;
     allowManualFallback?: boolean;
@@ -178,14 +194,50 @@ export class XianyuVerificationBrowser {
           try { await context.addCookies(toBrowserCookies(initialSnapshot, input.verificationUrl)); }
           catch (error) { throw browserStageError('XIANYU_VERIFICATION', 'INITIAL_COOKIES', error); }
         }
+        let verificationSessionId: string | undefined;
         const verdicts = observeXianyuSliderVerdicts(page);
         const solveChallenge = async (verificationUrl: string): Promise<void> => {
           assertVerificationUrl(verificationUrl);
           const priorSnapshot = mapCookies(await context.cookies());
-          try { await page.goto(verificationUrl, { waitUntil: 'domcontentloaded', timeout: maxWaitMs }); }
+          const useNativeFrontend = input.verificationSubject && this.verificationRuntime?.eligible(input.verificationSubject)
+            && this.verificationRuntime.config.xianyuVerificationNativeEnabled === true && isNativeXianyuMtopChallenge(verificationUrl);
+          try {
+            const embedded = !useNativeFrontend && input.verificationSubject && this.verificationRuntime?.eligible(input.verificationSubject)
+              && await presentNativeXianyuChallengeFrame(page, verificationUrl, maxWaitMs);
+            if (!useNativeFrontend && !embedded) await page.goto(verificationUrl, { waitUntil: 'domcontentloaded', timeout: maxWaitMs });
+          }
           catch (error) { throw browserStageError('XIANYU_VERIFICATION', 'CHALLENGE_NAVIGATION', error); }
           await waitForPageContent(page, Math.min(maxWaitMs, 12_000), pollIntervalMs);
           await sleep(750);
+
+          if (input.verificationSubject && this.verificationRuntime?.eligible(input.verificationSubject)) {
+            verificationSessionId = await this.verificationRuntime.runChallenge({
+              subject: input.verificationSubject, page, previousId: verificationSessionId,
+              onCreated: id => { verificationSessionId = id; input.onVerificationSession?.(id); },
+              closeContext: () => context.close(), verdict: verdicts.read, verdictSequence: verdicts.watermark, pendingAnswers: verdicts.pendingAnswers,
+              autoAllowed: this.sliderMode === 'auto',
+              ...(useNativeFrontend ? { native: { url: verificationUrl, applyCandidate: async (value: unknown) => {
+                const candidate = nativeVerificationCandidate(value, verificationUrl, Date.now());
+                // Only the issued host's one candidate Cookie enters this
+                // original context. Existing session cookies remain intact.
+                await context.addCookies([{ name: 'x5sec', value: candidate.value, domain: candidate.host, path: '/',
+                  expires: Math.floor(candidate.expire / 1000), secure: true, httpOnly: false, sameSite: 'None' }]);
+              } } } : {}),
+              autoAttempt: async (admit, beforeAttempt) => {
+                if (this.sliderMode !== 'auto') throw new Error('VERIFICATION_AUTO_DISABLED');
+                if (useNativeFrontend) {
+                  await admit();
+                  const embedded = await presentNativeXianyuChallengeFrame(page, verificationUrl, maxWaitMs);
+                  if (!embedded) throw new Error('VERIFICATION_NATIVE_AUTO_UNAVAILABLE');
+                  await waitForPageContent(page, Math.min(maxWaitMs, 12_000), pollIntervalMs);
+                  await sleep(750);
+                }
+                return new XianyuSliderSolver(page, { maxRetries: this.sliderMaxRetries,
+                  logger: console, readVerdict: verdicts.read, admit, beforeAttempt }).solve();
+              },
+            });
+            return;
+          }
 
           if (this.sliderMode === 'auto') {
             const sliderResult = await new XianyuSliderSolver(page, {
@@ -238,8 +290,12 @@ export class XianyuVerificationBrowser {
             ? await verifyXianyuBrowserRead(context, page, input.readRequest.request, input.readRequest.expectedUserId, solveChallenge)
             : undefined;
           if (!input.imTokenRequest && !input.readRequest) await solveChallenge(input.verificationUrl);
-          return { finalUrl: page.url(), cookieSnapshot: dropStaleCaptchaChallengeCookies(mapCookies(await context.cookies())),
+          if (verificationSessionId) await this.verificationRuntime?.coordinator.rechecking(verificationSessionId);
+          return { verificationSessionId, finalUrl: page.url(), cookieSnapshot: mapCookies(await context.cookies()),
             ...(imToken ? { imToken } : {}), ...(verifiedRead ? { verifiedRead } : {}) };
+        } catch (error) {
+          if (verificationSessionId) await this.verificationRuntime?.coordinator.failById(verificationSessionId, 'VERIFICATION_BUSINESS_RECHECK_FAILED').catch(() => undefined);
+          throw error;
         } finally { await verdicts.close(); }
       } finally {
         await closeVerificationPages(context);

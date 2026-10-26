@@ -52,7 +52,7 @@ describe('xianyu IM credential refresh', () => {
     );
   });
 
-  it('runs the configured verification browser for IM token validation and retries with cleaned cookies', async () => {
+  it('runs the configured verification browser with the request-local jar and retries with the final browser cookies', async () => {
     let fetchCount = 0;
     const saved: Array<Record<string, unknown>> = [];
     const store = {
@@ -93,13 +93,28 @@ describe('xianyu IM credential refresh', () => {
         };
       },
     };
-    const service = new XianyuImService(store as never, {
-      fetchImToken: async () => {
+    const fetchImToken = async () => {
         fetchCount += 1;
         return fetchCount === 1
           ? { success: false, accountInvalid: true, errorCode: 'ACCOUNT_VALIDATION_REQUIRED', message: 'FAIL_SYS_USER_VALIDATE', verificationUrl: 'https://punish.goofish.com/verify?token=redacted', cookieHeader: 'unb=seller-1; cookie2=session; _m_h5_tk=token-rotated_suffix; x5secdata=challenge' }
           : { success: true, accountInvalid: false, accessToken: 'access-2', cookieHeader: 'unb=seller-1; _m_h5_tk=token-2_suffix; x5sec=passed' };
-      },
+    };
+    const service = new XianyuImService(store as never, {
+      fetchImToken,
+      // Model the actual MTOP transport contract: Set-Cookie rotation updates
+      // the request-local snapshot, not only a detached flat response header.
+      createCredentialSession: (_admin: string, _account: string, expected: Record<string, unknown>) => ({
+        client: { fetchImToken },
+        getCredential: () => fetchCount === 1 ? { ...expected,
+          cookieHeader: 'unb=seller-1; cookie2=session; _m_h5_tk=token-rotated_suffix; x5secdata=challenge',
+          metadata: { cookies_refresh_snapshot: JSON.stringify([
+            { name: 'unb', value: 'seller-1', domain: '.goofish.com', path: '/' },
+            { name: 'cookie2', value: 'session', domain: '.goofish.com', path: '/', httpOnly: true, secure: true, sameSite: 'None' },
+            { name: '_m_h5_tk', value: 'token-rotated_suffix', domain: '.goofish.com', path: '/', secure: true, sameSite: 'None' },
+            { name: 'x5secdata', value: 'challenge', domain: '.goofish.com', path: '/' },
+          ]) },
+        } : expected,
+      }),
     } as never, {} as never, undefined, undefined, verificationBrowser as never);
 
     const result = await (service as unknown as { refreshCredential: (adminId: string, account: { id: string; platform: string }, credential: Record<string, unknown>) => Promise<Record<string, unknown>> }).refreshCredential(
@@ -112,7 +127,7 @@ describe('xianyu IM credential refresh', () => {
     assert.equal(result.accessToken, 'access-2');
     assert.equal(saved.length, 2);
     assert.match(String(saved[0]?.cookieHeader), /x5sec=passed/);
-    assert.doesNotMatch(String(saved[0]?.cookieHeader), /x5secdata=/);
+    assert.match(String(saved[0]?.cookieHeader), /x5secdata=stale/);
     assert.equal(saved[1]?.accessToken, 'access-2');
   });
 

@@ -2,7 +2,7 @@ import type { Store } from './domain.js';
 import type { XianyuMtopClient } from './xianyu-mtop.js';
 import type { XianyuVerificationBrowser } from './xianyu-verification-browser.js';
 import { createVerificationReadRequest, isImVerificationSource, resolveVerificationReadRequest } from './xianyu-verification-request.js';
-import { cookieHeaderFromSnapshot, cookieSnapshotFromMetadata, dropStaleCaptchaChallengeCookies, metadataWithCookieSnapshot } from './xianyu-cookie-jar.js';
+import { cookieHeaderFromSnapshot, cookieSnapshotFromMetadata, normalizeCookieSnapshot, metadataWithCookieSnapshot } from './xianyu-cookie-jar.js';
 import { XianyuBrowserStageError } from './xianyu-browser-challenge-handoff.js';
 
 export class XianyuReadRecoveryError extends AggregateError {
@@ -24,6 +24,7 @@ export async function recoverVerificationReads(store: Store, mtop: XianyuMtopCli
     // Triggering recovery is independent of replay permission. A mutation or
     // unknown API gets a browser-owned safe probe, never its original write.
     const browserRequest = request ?? createVerificationReadRequest('mtop.taobao.idlemessage.pc.loginuser.get', '1.0', {}, { needLogin: 'false' })!;
+    let verificationSessionId: string | undefined;
     try {
       const account = await store.getAccount(adminId, accountId);
       const credential = await store.getCredential(adminId, accountId);
@@ -32,11 +33,12 @@ export async function recoverVerificationReads(store: Store, mtop: XianyuMtopCli
       const expected = structuredClone(credential);
       const startedAt = new Date().toISOString();
       const expectedUserId = account.platformUserId ?? account.sellerRef;
-      const completed = await browser.waitForCompletion({ verificationUrl: 'https://www.goofish.com/punish',
+      const completed = await browser.waitForCompletion({ verificationUrl: 'https://www.goofish.com/punish', verificationSubject: { adminId, accountId, credentialGeneration: expected.generation, source: risk.source },
         profileKey: accountId, initialCookieSnapshot: cookieSnapshotFromMetadata(expected.metadata)
           ?? headerSnapshot(expected.cookieHeader!), allowManualFallback: false,
         readRequest: { request: browserRequest, expectedUserId } });
-      const snapshot = dropStaleCaptchaChallengeCookies(completed.cookieSnapshot);
+      verificationSessionId = completed.verificationSessionId;
+      const snapshot = normalizeCookieSnapshot(completed.cookieSnapshot) ?? [];
       const cookieHeader = cookieHeaderFromSnapshot(snapshot.filter(cookie => /(^|\.)goofish\.com$/.test(cookie.domain ?? '') && cookie._crHasCrossSiteAncestor !== true));
       if (!cookieHeader || completed.verifiedRead?.api !== browserRequest.api || completed.verifiedRead.userId !== expectedUserId) throw new Error('XIANYU_BROWSER_MTOP_IDENTITY_MISMATCH');
       const saved = await store.commitCredentialRefresh({ adminId, accountId, expected, cookieHeader,
@@ -58,6 +60,7 @@ export async function recoverVerificationReads(store: Store, mtop: XianyuMtopCli
       if (!committed) throw new Error('XIANYU_VERIFICATION_CREDENTIAL_CHANGED');
       await store.clearAccountRisk({ adminId, accountId, source: risk.source, episode: risk.episode, expectedRiskRevision: risk.revision, expectedGeneration: expected.generation, startedAt });
     } catch (error) {
+      if (verificationSessionId) await browser.failSession?.(verificationSessionId, 'VERIFICATION_READ_RECHECK_FAILED');
       errors.push(error);
       // A new login/revocation invalidates the account generation, whereas a
       // failed API challenge must not prevent independent sources recovering.

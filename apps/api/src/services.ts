@@ -58,6 +58,11 @@ export class AuthService {
     return { admin, session, csrfToken, scopes: await this.store.listScopes(admin.id) };
   }
 
+  async contextWithoutTouch(sessionId: string | undefined): Promise<AuthContext | undefined> {
+    const access = await this.accessFromSession(sessionId);
+    return access ? { ...access, csrfToken: this.sessionTokens.get(access.session.id) ?? '', scopes: await this.store.listScopes(access.admin.id) } : undefined;
+  }
+
   /** Realtime streams must not extend the session's idle lifetime. */
   async accessFromSession(sessionId: string | undefined): Promise<{ admin: AdminRecord; session: SessionRecord } | undefined> {
     if (!sessionId) return undefined;

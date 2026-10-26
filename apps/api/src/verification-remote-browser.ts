@@ -1,17 +1,19 @@
+import { verificationSafeRegion, verificationFrameBounds, verificationPixelsOwned, VERIFICATION_NC_REFRESH_CONTROLS, type VerificationRegionKind } from './verification-safe-region.js';
 import { randomUUID } from 'node:crypto';
 import type { Page, Frame, Locator } from 'patchright';
 import type { XianyuVerificationPage } from './xianyu-browser-port.js';
+import { verificationInputSnapshot, verificationInputSnapshotFailure, type VerificationInputSnapshot } from './verification-input-snapshot.js';
 
 export interface VerificationGeometry { x: number; y: number; width: number; height: number }
 export interface VerificationFrame {
   frameId: string; streamEpoch: number; geometryRevision: number; capturedAt: number;
-  width: number; height: number; image: Buffer;
+  width: number; height: number; image: Buffer; regionKind?: VerificationRegionKind;
 }
 export interface VerificationPointer {
   type: 'down' | 'move' | 'up'; x: number; y: number; frameId: string;
   streamEpoch: number; geometryRevision: number; sequence: number;
 }
-interface LocatedChallenge { locator: Locator; geometry: VerificationGeometry; identity: string }
+interface LocatedChallenge { locator: Locator; geometry: VerificationGeometry; identity: string; kind: VerificationRegionKind; inputSnapshot?: VerificationInputSnapshot }
 const CONTAINERS = ['.nc-container', '#nocaptcha', '.scratch-captcha', '.scratch-captcha-slider'];
 const BUTTONS = '#nc_1_n1z,.btn_slide,#scratch-captcha-btn,.scratch-captcha-slider .button';
 
@@ -25,7 +27,7 @@ export class VerificationRemoteBrowser {
   private pressed = false;
   private inputGeneration = 0;
   private lastSequence = 0;
-  private readonly frames = new Map<string, { at: number; geometry: VerificationGeometry; identity: string }>();
+  private readonly frames = new Map<string, { at: number; geometry: VerificationGeometry; identity: string; inputSnapshot?: VerificationInputSnapshot }>();
   private tail: Promise<unknown> = Promise.resolve();
   private readonly navigation = (_frame: Frame) => this.invalidate();
   private readonly popup = (popup: Page) => { this.invalidate(); void popup.close().catch(() => undefined); };
@@ -33,7 +35,7 @@ export class VerificationRemoteBrowser {
   private readonly download = (download: { cancel(): Promise<void> }) => { this.invalidate(); void download.cancel().catch(() => undefined); };
 
   constructor(page: XianyuVerificationPage, private readonly options: {
-    allowedOrigins?: readonly string[]; now?: () => number; beforeCapture?: () => Promise<void>;
+    allowedOrigins?: readonly string[]; now?: () => number; onInvalidate?: (streamEpoch: number) => void; beforeCapture?: () => Promise<void>;
   } = {}) {
     this.page = page as unknown as Page;
     this.page.on('framenavigated', this.navigation);
@@ -52,7 +54,7 @@ export class VerificationRemoteBrowser {
   }
 
   invalidate(): void {
-    this.streamEpoch++; this.inputGeneration++; this.frames.clear(); this.identity = '';
+    this.streamEpoch++; this.inputGeneration++; this.frames.clear(); this.identity = ''; this.options.onInvalidate?.(this.streamEpoch);
     if (this.pressed) void this.queueRelease().catch(() => { this.closed = true; });
   }
 
@@ -63,22 +65,39 @@ export class VerificationRemoteBrowser {
       if (!this.allowed(frame.url())) continue;
       for (const selector of CONTAINERS) {
         const locator = frame.locator(selector).first();
-        if (!await locator.isVisible().catch(() => false) || !await locator.locator(BUTTONS).first().isVisible().catch(() => false)) continue;
-        const box = await locator.boundingBox();
-        if (!box || box.width < 40 || box.height < 15) continue;
+        if (!await locator.isVisible().catch(() => false)) continue;
+        const handle = await locator.locator(BUTTONS).first().isVisible().catch(() => false);
+        const refresh = selector === '.nc-container' && await locator.locator(VERIFICATION_NC_REFRESH_CONTROLS.split(',').map(selector => `${selector}:visible`).join(',')).first().isVisible().catch(() => false);
+        if (!handle && !refresh) continue;
+        const region = await verificationSafeRegion(frame, locator);
+        if (!region) continue;
+        const box = region.box;
+        if (box.width < 40 || box.height < 15) continue;
         const viewport = await this.page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
-        const geometry = { x: Math.max(0, box.x), y: Math.max(0, box.y),
-          width: Math.min(box.x + box.width, viewport.width) - Math.max(0, box.x),
-          height: Math.min(box.y + box.height, viewport.height) - Math.max(0, box.y) };
+        const bounds = await verificationFrameBounds(frame, viewport);
+        if (!bounds) continue;
+        const geometry = { x: Math.max(bounds.x, box.x), y: Math.max(bounds.y, box.y),
+          width: Math.min(box.x + box.width, bounds.x + bounds.width) - Math.max(bounds.x, box.x),
+          height: Math.min(box.y + box.height, bounds.y + bounds.height) - Math.max(bounds.y, box.y) };
         if (geometry.width < 40 || geometry.height < 15 || geometry.width * geometry.height > 1_000_000) continue;
-        const nodeId = await locator.evaluate(element => {
+        if (region.kind !== 'slider_component' && (Math.abs(geometry.width - box.width) > 1 || Math.abs(geometry.height - box.height) > 1)) continue;
+        if (!await verificationPixelsOwned(frame, region.locator, geometry)) continue;
+        const nodeId = await region.locator.evaluate(element => {
           const state = globalThis as typeof globalThis & { __verificationNodeIds?: WeakMap<Element, number>; __verificationNodeSequence?: number };
           state.__verificationNodeIds ??= new WeakMap();
           let id = state.__verificationNodeIds.get(element);
           if (!id) { id = (state.__verificationNodeSequence ?? 0) + 1; state.__verificationNodeSequence = id; state.__verificationNodeIds.set(element, id); }
           return id;
         });
-        return { locator, geometry, identity: JSON.stringify([this.page.url(), urls, selector, nodeId, geometry]) };
+        const sliderNodeId = await locator.evaluate(element => {
+          const state = globalThis as typeof globalThis & { __verificationNodeIds: WeakMap<Element, number>; __verificationNodeSequence: number };
+          let id = state.__verificationNodeIds.get(element);
+          if (!id) { id = ++state.__verificationNodeSequence; state.__verificationNodeIds.set(element, id); }
+          return id;
+        });
+        const inputSnapshot = await verificationInputSnapshot(frame, region.locator, selector, geometry);
+        if (!inputSnapshot) continue;
+        return { locator: region.locator, geometry, kind: region.kind, inputSnapshot, identity: JSON.stringify([this.page.url(), urls, selector, nodeId, sliderNodeId, region.kind, geometry, inputSnapshot?.revision]) };
       }
     }
   }
@@ -86,31 +105,45 @@ export class VerificationRemoteBrowser {
   async capture(): Promise<VerificationFrame | undefined> {
     const startEpoch = this.streamEpoch;
     const before = await this.locate();
+    if (startEpoch !== this.streamEpoch || this.closed) return;
     if (!before) { this.invalidate(); return; }
     if (this.identity && this.identity !== before.identity) { this.invalidate(); this.geometryRevision++; return; }
     this.identity = before.identity;
     await this.options.beforeCapture?.();
-    const image = await this.page.screenshot({ type: 'jpeg', quality: 65, clip: before.geometry, timeout: 2_000 }).catch(() => undefined);
+    // Screenshot's default caret hiding temporarily mutates every input's
+    // inline style, including inputs outside the allowed ROI. Avoid making
+    // our own DOM mutations indistinguishable from a page safety change.
+    const capturedAt = this.now();
+    const image = await this.page.screenshot({ type: 'jpeg', quality: 65, caret: 'initial', clip: before.geometry, timeout: 2_000 }).catch(() => undefined);
     const after = await this.locate();
-    if (!image || image.length > 250_000 || this.closed || startEpoch !== this.streamEpoch || before.identity !== after?.identity) {
-      this.invalidate(); return;
-    }
-    const frameId = randomUUID(), capturedAt = this.now();
-    this.frames.set(frameId, { at: capturedAt, geometry: before.geometry, identity: before.identity });
-    for (const [id, frame] of this.frames) if (frame.at < capturedAt - 2_000) this.frames.delete(id);
+    if (startEpoch !== this.streamEpoch || this.closed) return;
+    if (before.identity !== after?.identity) { this.invalidate(); return; }
+    // Failed/late encodings only discard their candidate. They do not revoke
+    // an independent newer frame or release a currently admitted mouse drag.
+    if (!image || image.length > 250_000 || this.now() - capturedAt > 2_000) return;
+    const frameId = randomUUID();
+    this.frames.set(frameId, { at: capturedAt, geometry: before.geometry, identity: before.identity, inputSnapshot: after?.inputSnapshot });
+    for (const [id, frame] of this.frames) if (frame.at < this.now() - 2_000) this.frames.delete(id);
     return { frameId, streamEpoch: this.streamEpoch, geometryRevision: this.geometryRevision,
-      capturedAt, width: before.geometry.width, height: before.geometry.height, image };
+      capturedAt, width: before.geometry.width, height: before.geometry.height, regionKind: before.kind, image };
   }
 
   /** Must be called after encoding, immediately before sending a captured frame. */
   async canSend(frame: VerificationFrame): Promise<boolean> {
-    const located = await this.locate();
+    const epoch = this.streamEpoch;
     const saved = this.frames.get(frame.frameId);
-    if (!saved || frame.streamEpoch !== this.streamEpoch || frame.geometryRevision !== this.geometryRevision
-      || !located || located.identity !== saved.identity || this.now() - saved.at > 2_000) {
+    if (!saved || !this.isCurrent(frame)) return false;
+    const failure = saved.inputSnapshot ? await verificationInputSnapshotFailure(saved.inputSnapshot) : 'VERIFICATION_FRAME_STALE_CONTEXT';
+    if (epoch !== this.streamEpoch || !this.isCurrent(frame)) return false;
+    if (failure) {
       this.invalidate(); return false;
     }
     return true;
+  }
+
+  isCurrent(frame: VerificationFrame): boolean {
+    const saved = this.frames.get(frame.frameId);
+    return !this.closed && !!saved && frame.streamEpoch === this.streamEpoch && frame.geometryRevision === this.geometryRevision && this.now() - saved.at <= 2_000;
   }
 
   async pointer(input: VerificationPointer, admit: () => Promise<boolean>): Promise<void> {
@@ -123,22 +156,26 @@ export class VerificationRemoteBrowser {
       const valid = () => !this.closed && inputGeneration === this.inputGeneration && !!frame
         && this.frames.get(input.frameId) === frame && input.streamEpoch === this.streamEpoch
         && input.geometryRevision === this.geometryRevision && this.now() - frame.at <= 2_000;
-      const check = async () => {
-        if (!valid()) throw new Error('VERIFICATION_FRAME_STALE');
+      const stale = () => frame && this.now() - frame.at > 2_000 ? 'VERIFICATION_FRAME_STALE_EXPIRED' : 'VERIFICATION_FRAME_STALE_EPOCH';
+      const check = async (prepareTelemetry = false) => {
+        if (!valid()) throw new Error(stale());
         if (!await admit()) throw new Error('VERIFICATION_CONTROL_EXPIRED');
         if (!valid()) throw new Error('VERIFICATION_FRAME_STALE');
-        const located = await this.locate();
-        if (!valid() || located?.identity !== frame!.identity) throw new Error('VERIFICATION_FRAME_STALE');
+        const failure = frame!.inputSnapshot ? await verificationInputSnapshotFailure(frame!.inputSnapshot, prepareTelemetry) : 'VERIFICATION_FRAME_STALE_CONTEXT';
+        if (failure) {
+          const located = await this.locate();
+          if (!valid() || located?.identity !== frame!.identity) throw new Error(failure);
+          frame!.inputSnapshot = located.inputSnapshot;
+        }
+        if (!valid()) throw new Error('VERIFICATION_FRAME_STALE');
       };
       await check();
       this.lastSequence = input.sequence;
       if (input.type === 'down' && this.pressed) throw new Error('VERIFICATION_POINTER_PRESSED');
       if (input.type === 'up' && !this.pressed) return;
       const { x, y, width, height } = frame!.geometry;
-      await check();
-      if (!valid()) throw new Error('VERIFICATION_FRAME_STALE');
       await this.page.mouse.move(x + input.x * Math.max(0, width - 1), y + input.y * Math.max(0, height - 1));
-      await check();
+      if (input.type !== 'move') await check(input.type === 'down');
       if (!valid()) throw new Error('VERIFICATION_FRAME_STALE');
       if (input.type === 'down') { this.pressed = true; await this.page.mouse.down({ button: 'left' }); }
       if (input.type === 'up') { await this.page.mouse.up({ button: 'left' }); this.pressed = false; }

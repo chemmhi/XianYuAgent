@@ -33,6 +33,8 @@ export interface XianyuQrPublicSession {
   errorCode?: string;
   verificationUrl?: string;
   verificationAutoLaunch?: boolean;
+  verificationSessionId?: string;
+  verificationRemote?: boolean;
 }
 
 export type XianyuQrStatusEvent = XianyuQrPublicSession & { adminId: string };
@@ -73,6 +75,7 @@ interface InternalSession {
   errorCode?: string;
   verificationUrl?: string;
   completionNotified: boolean;
+  verificationSessionId?: string;
 }
 
 export class XianyuQrLoginAdapter {
@@ -96,7 +99,7 @@ export class XianyuQrLoginAdapter {
   }
 
   forgetSessions(sessionIds: string[]): void {
-    for (const id of sessionIds) this.sessions.delete(id);
+    for (const id of sessionIds) { void this.verificationBrowser?.cancelSubject?.(id); this.sessions.delete(id); }
   }
 
   async create(input: { sessionId: string; adminId: string; accountId?: string }): Promise<XianyuQrPublicSession> {
@@ -105,6 +108,7 @@ export class XianyuQrLoginAdapter {
       // Renewal reuses the persisted login-session id. Mark the previous
       // in-memory session terminal before replacing it so its monitor can
       // stop even if it is between polls.
+      await this.verificationBrowser?.cancelSubject?.(input.sessionId);
       previous.status = 'cancelled';
       previous.errorCode = 'QR_REPLACED';
     }
@@ -141,6 +145,7 @@ export class XianyuQrLoginAdapter {
     if (!session) return undefined;
     if (Date.now() >= session.expiresAt && !['succeeded', 'cancelled', 'failed'].includes(session.status)) {
       session.status = 'expired';
+      void this.verificationBrowser?.cancelSubject?.(sessionId);
       session.errorCode = 'QR_EXPIRED';
     }
     return this.toPublic(session);
@@ -150,7 +155,14 @@ export class XianyuQrLoginAdapter {
     const session = this.sessions.get(sessionId);
     if (!session) return undefined;
     if (!['succeeded', 'expired', 'failed'].includes(session.status)) session.status = 'cancelled';
+    void this.verificationBrowser?.cancelSubject?.(sessionId);
     return this.toPublic(session);
+  }
+
+  async retryVerification(sessionId: string) {
+    const session = this.sessions.get(sessionId);
+    if (!session || !this.isCurrent(session) || session.status !== 'verification_required' || Date.now() >= session.expiresAt) return;
+    await this.monitor(sessionId);
   }
 
   private async monitor(sessionId: string): Promise<void> {
@@ -179,6 +191,8 @@ export class XianyuQrLoginAdapter {
               try {
                 const completed = await this.verificationBrowser.waitForCompletion({
                   verificationUrl: result.iframeRedirectUrl,
+                  verificationSubject: { adminId: session.adminId, loginSessionId: session.sessionId, flowId: session.sessionId, expiresAt: session.expiresAt },
+                  onVerificationSession: id => { session.verificationSessionId = id; void this.emitStatus(session).catch(() => undefined); },
                   profileKey: session.accountId ?? session.sessionId,
                   initialCookieSnapshot: session.jar,
                   allowManualFallback: this.allowManualVerificationFallback,
@@ -300,6 +314,7 @@ export class XianyuQrLoginAdapter {
       session.status = 'succeeded';
       session.errorCode = undefined;
     } catch (error) {
+      if (session.verificationSessionId) await this.verificationBrowser?.failSession?.(session.verificationSessionId, 'VERIFICATION_QR_EXCHANGE_FAILED');
       session.status = 'failed';
       session.errorCode = classifyError(error);
       throw error;
@@ -329,7 +344,7 @@ export class XianyuQrLoginAdapter {
   }
 
   private toPublic(session: InternalSession): XianyuQrPublicSession {
-    return { sessionId: session.sessionId, accountId: session.accountId, status: session.status, qrImageDataUrl: session.qrImageDataUrl, expiresAt: new Date(session.expiresAt).toISOString(), pollAfterMs: this.pollIntervalMs, errorCode: session.errorCode, verificationUrl: session.verificationUrl, ...(this.verificationBrowser?.enabled ? { verificationAutoLaunch: true } : {}) };
+    return { sessionId: session.sessionId, accountId: session.accountId, status: session.status, qrImageDataUrl: session.qrImageDataUrl, expiresAt: new Date(session.expiresAt).toISOString(), pollAfterMs: this.pollIntervalMs, errorCode: session.errorCode, verificationUrl: this.verificationBrowser?.remoteEnabled?.({ adminId: session.adminId, loginSessionId: session.sessionId }) ? undefined : session.verificationUrl, ...(this.verificationBrowser?.remoteEnabled?.({ adminId: session.adminId, loginSessionId: session.sessionId }) ? { verificationSessionId: session.verificationSessionId, verificationRemote: true } : {}), ...(this.verificationBrowser?.enabled ? { verificationAutoLaunch: true } : {}) };
   }
 
   private async emitStatus(session: InternalSession): Promise<void> {

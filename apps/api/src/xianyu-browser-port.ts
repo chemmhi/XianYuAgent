@@ -16,6 +16,7 @@ export interface XianyuVerificationPage extends XianyuSliderPage {
 }
 
 export interface XianyuVerificationRequest {
+  url?(): string;
   resourceType(): string;
 }
 
@@ -28,6 +29,7 @@ export interface XianyuVerificationPageEvents {
 
 export interface XianyuVerificationResponse {
   url(): string;
+  request?(): XianyuVerificationRequest;
   json(): Promise<unknown>;
 }
 

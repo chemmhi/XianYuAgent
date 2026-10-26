@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { AccountRecord, ConversationRecord, CredentialRecord, InboundInboxRecord, Store } from './domain.js';
+import type { AccountRecord, AccountVerificationRisk, ConversationRecord, CredentialRecord, InboundInboxRecord, Store } from './domain.js';
 import { ServiceError } from './services.js';
 import { classifyXianyuFailure } from './xianyu-account-health.js';
 import type { MessageService } from './messages.js';
@@ -9,7 +9,7 @@ import { hasXianyuStructuredSystemMarker, matchesXianyuOrderStatus, parseXianyuS
 import { XianyuMtopClient } from './xianyu-mtop.js';
 import type { ProductAutomationImEventResult, ProductAutomationTrigger } from './product-automation-trigger.js';
 import { InboundInboxWorker } from './inbound-inbox-worker.js';
-import { cookieHeaderFromSnapshot, cookieSnapshotFromMetadata, dropStaleCaptchaChallengeCookies, metadataWithCookieSnapshot, type XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
+import { cookieHeaderFromSnapshot, cookieSnapshotFromMetadata, normalizeCookieSnapshot, metadataWithCookieSnapshot, type XianyuCookieSnapshot } from './xianyu-cookie-jar.js';
 import type { XianyuVerificationBrowser, XianyuVerificationBrowserResult } from './xianyu-verification-browser.js';
 import type { XianyuImOwnerClient } from './xianyu-im-owner-rpc.js';
 import { planXianyuChatRefresh } from './xianyu-chat-refresh-policy.js';
@@ -45,6 +45,8 @@ export class XianyuImService {
   private readonly recoveryRetryAfter = new Map<string, number>();
   private readonly credentialRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly chatRefreshInFlight = new Map<string, Promise<boolean>>();
+  private readonly credentialVerificationSessions = new WeakMap<CredentialRecord, string>();
+  private readonly credentialRecoveryRisks = new WeakMap<CredentialRecord, AccountVerificationRisk[]>();
   private readonly clientHealthLanes = new Map<string, Promise<void>>();
   private readonly transportHeartbeatTimers = new Map<string, ReturnType<typeof setInterval>>();
   private readonly credentialRefreshInFlight = new Map<string, Promise<void>>();
@@ -340,6 +342,16 @@ export class XianyuImService {
     if (client) this.scheduleRecentMessageRecovery(adminId, accountId);
   }
 
+  async requestManualVerification(adminId: string, accountId: string) {
+    // Explicit human intent bypasses the automatic backoff, never its budgets.
+    // The coordinator has already persisted manual_only before waking us.
+    const key = `${adminId}:${accountId}`;
+    this.verificationRetryAfter.delete(key);
+    const timer = this.verificationRecoveryTimers.get(key); if (timer) clearTimeout(timer);
+    this.verificationRecoveryTimers.delete(key);
+    this.requestVerificationRecovery(adminId, accountId, 'manual_retry');
+  }
+
   /** Wake recovery after a committed risk signal without blocking its request. */
   requestVerificationRecovery(adminId: string, accountId: string, source: string): void {
     const key = `${adminId}:${accountId}`;
@@ -442,6 +454,13 @@ export class XianyuImService {
         }
       } catch { console.warn(JSON.stringify({ component: 'xianyu-verification', event: 'pending_risk_scan_failed', accountId })); }
       finally {
+        // Manual retry is an explicit intent, not a risk source/revision. A
+        // cancelled browser can still be unwinding when the next click lands.
+        // Preserve that wake even when the old attempt's risk did not change,
+        // and override backoff written by that old attempt's catch handler.
+        if (this.verificationRecoverySignals.get(key)?.has('manual_retry')) {
+          pendingSource = 'manual_retry'; this.verificationRetryAfter.delete(key);
+        }
         if (this.verificationRecoveryInFlight.get(key) === task) this.verificationRecoveryInFlight.delete(key);
         this.verificationRecoverySignals.delete(key);
         this.verificationRecoverySignalVersions.delete(key);
@@ -634,7 +653,9 @@ export class XianyuImService {
           || (this.verificationBrowser?.enabled && account.status === 'verification_required')) {
           credential = await this.refreshCredential(adminId, account, credential);
           tokenRechecked = true;
+          connectionRisks = this.credentialRecoveryRisks.get(credential) ?? connectionRisks;
         }
+        let verificationSessionId = this.credentialVerificationSessions.get(credential);
         credential = structuredClone(credential);
         let connectionAttemptStartedAt = new Date().toISOString();
         const client = this.imClientFactory({
@@ -647,7 +668,10 @@ export class XianyuImService {
             if (current.generation !== credential.generation || current.status !== 'active') throw new ServiceError(409, 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED', '账号凭证已变化');
             connectionRisks = await this.store.listAccountVerificationRisks(adminId, accountId);
             connectionAttemptStartedAt = new Date().toISOString();
-            credential = structuredClone(await this.refreshCredential(adminId, account, current));
+            const refreshed = await this.refreshCredential(adminId, account, current);
+            connectionRisks = this.credentialRecoveryRisks.get(refreshed) ?? connectionRisks;
+            verificationSessionId = this.credentialVerificationSessions.get(refreshed);
+            credential = structuredClone(refreshed);
             tokenRechecked = true;
             return toImCredential(credential);
           },
@@ -707,6 +731,7 @@ export class XianyuImService {
           saveCredential: async (next) => { credential = structuredClone(await this.saveCredential(adminId, account, next, credential)); },
         });
         try { await client.connect(); } catch (error) {
+          if (verificationSessionId) await this.verificationBrowser?.failSession?.(verificationSessionId, 'VERIFICATION_IM_REGISTRATION_FAILED');
           if (this.clients.get(key) === client) this.clients.delete(key);
           // A failed bootstrap can schedule the client's internal reconnect
           // timer before surfacing the original error. Stop that client here
@@ -743,6 +768,9 @@ export class XianyuImService {
 
   private async refreshCredentialInternal(adminId: string, account: AccountRecord, credential: CredentialRecord): Promise<CredentialRecord> {
     const initial = structuredClone(credential);
+    let recoveryRisks = await this.store.listAccountVerificationRisks(adminId, account.id);
+    const remember = (saved: CredentialRecord, sessionId?: string) => { this.credentialRecoveryRisks.set(saved, structuredClone(recoveryRisks));
+      if (sessionId) this.credentialVerificationSessions.set(saved, sessionId); return saved; };
     const isolated = this.mtop.createCredentialSession?.(adminId, account.id, initial);
     const tokenClient = isolated?.client ?? this.mtop;
     const deviceId = credential.deviceId ?? `xianyu-${account.id}`;
@@ -750,15 +778,17 @@ export class XianyuImService {
     if (!token.success || !token.accessToken) {
       if (token.errorCode === 'ACCOUNT_VALIDATION_REQUIRED' && this.verificationBrowser?.enabled && token.verificationUrl) {
         const latest = initial;
+        recoveryRisks = await this.store.listAccountVerificationRisks(adminId, account.id);
         const nativeRecoveryStartedAt = new Date().toISOString();
-        // Keep stable account cookies from the browser snapshot, but prefer
-        // the fresh flat header returned by this validation response. The
-        // x5secdata/x5sectag markers in that header bind the challenge URL to
-        // this browser session and must be present while solving it.
-        const initialSnapshot = mergeCookieSnapshots(
-          cookieSnapshotFromMetadata(latest.metadata)?.filter((cookie) => !isCaptchaChallengeCookie(cookie.name)),
-          cookieSnapshotFromHeader(token.cookieHeader || latest.cookieHeader || credential.cookieHeader),
-        );
+        // Prefer the request-local Set-Cookie jar, preserving host-only/path,
+        // security and partition attributes. A flat header cannot reconstruct
+        // these identities and must not widen a known host-only credential.
+        const requestLocal = isolated?.getCredential();
+        // A request-local null snapshot explicitly invalidates stale metadata.
+        // Never resurrect the pre-request jar after header rotation.
+        const snapshotSource = requestLocal ?? (token.cookieHeader && token.cookieHeader !== latest.cookieHeader ? undefined : latest);
+        const initialSnapshot = cookieSnapshotFromMetadata(snapshotSource?.metadata)
+          ?? cookieSnapshotFromHeader(token.cookieHeader || requestLocal?.cookieHeader || latest.cookieHeader || credential.cookieHeader);
         let completed: XianyuVerificationBrowserResult | undefined;
         const verificationKey = `${adminId}:${account.id}`;
         try {
@@ -773,6 +803,7 @@ export class XianyuImService {
           } else {
             const verificationPromise = this.verificationBrowser.waitForCompletion({
               verificationUrl: token.verificationUrl,
+              verificationSubject: { adminId, accountId: account.id, credentialGeneration: initial.generation, source: XIANYU_IM_TOKEN_API },
               profileKey: account.id,
               initialCookieSnapshot: initialSnapshot,
               allowManualFallback: false,
@@ -795,9 +826,9 @@ export class XianyuImService {
         }
         // Database failures must propagate, rather than becoming a slider failure.
         if (completed) {
-          const mergedSnapshot = dropStaleCaptchaChallengeCookies(completed.imToken
-            ? completed.cookieSnapshot
-            : mergeCookieSnapshots(initialSnapshot, completed.cookieSnapshot));
+          const mergedSnapshot = completed.imToken
+            ? normalizeCookieSnapshot(completed.cookieSnapshot) ?? []
+            : mergeCookieSnapshots(initialSnapshot, completed.cookieSnapshot);
           const browserCookieHeader = cookieHeaderFromSnapshot(completed.imToken
             ? mergedSnapshot.filter(cookie => /(^|\.)goofish\.com$/.test(cookie.domain ?? '')
               && cookie._crHasCrossSiteAncestor !== true)
@@ -814,9 +845,12 @@ export class XianyuImService {
             // any IM client can use the recovered credential.
             const saved = await this.store.commitCredentialRefresh({ adminId, accountId: account.id, expected: current,
               cookieHeader: browserCookieHeader, accessToken: native.accessToken, deviceId, metadata: browserMetadata });
-            if (!saved) throw new ServiceError(409, 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED', '账号凭证已变化');
+            if (!saved) {
+              if (completed.verificationSessionId) await this.verificationBrowser?.failSession?.(completed.verificationSessionId, 'VERIFICATION_CREDENTIAL_CHANGED');
+              throw new ServiceError(409, 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED', '账号凭证已变化');
+            }
             await this.store.clearAccountDegraded({ adminId, accountId: account.id, source: XIANYU_IM_TOKEN_API, startedAt: nativeRecoveryStartedAt });
-            return saved;
+            return remember(saved, completed.verificationSessionId);
           }
           const fallbackHeader = browserCookieHeader || token.cookieHeader || latest.cookieHeader || credential.cookieHeader;
           if (!fallbackHeader) throw new ServiceError(409, 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED', '账号凭证已变化');
@@ -836,8 +870,11 @@ export class XianyuImService {
           if (token.success && token.accessToken) {
             const buffered = retrySession?.getCredential() ?? retryExpected;
             const saved = await this.store.commitCredentialRefresh({ adminId, accountId: account.id, expected: retryExpected, cookieHeader: token.cookieHeader, accessToken: token.accessToken, deviceId, metadata: buffered.metadata ?? retryExpected.metadata });
-            if (!saved) throw new ServiceError(409, 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED', '账号凭证已变化');
-            return saved;
+            if (!saved) {
+              if (completed.verificationSessionId) await this.verificationBrowser?.failSession?.(completed.verificationSessionId, 'VERIFICATION_CREDENTIAL_CHANGED');
+              throw new ServiceError(409, 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED', '账号凭证已变化');
+            }
+            return remember(saved, completed.verificationSessionId);
           }
           this.verificationRetryAfter.set(verificationKey, Date.now() + 30_000);
         }
@@ -851,7 +888,7 @@ export class XianyuImService {
     const buffered = isolated?.getCredential() ?? initial;
     const saved = await this.store.commitCredentialRefresh({ adminId, accountId: account.id, expected: initial, cookieHeader: token.cookieHeader, accessToken: token.accessToken, deviceId, metadata: buffered.metadata ?? initial.metadata });
     if (!saved) throw new ServiceError(409, 'XIANYU_VERIFICATION_CREDENTIAL_CHANGED', '账号凭证已变化');
-    return saved;
+    return remember(saved);
   }
 
   private scheduleCredentialRefresh(adminId: string, accountId: string): void {
@@ -1494,10 +1531,6 @@ function mergeCookieSnapshots(base: XianyuCookieSnapshot | undefined, updates: X
 
 function cookieIdentity(cookie: XianyuCookieSnapshot[number]): string {
   return `${cookie.name}\u0000${cookie.domain ?? ''}\u0000${cookie.path ?? '/'}\u0000${cookie.partitionKey ?? ''}`;
-}
-
-function isCaptchaChallengeCookie(name: string): boolean {
-  return new Set(['x5secdata', 'x5sectag', 'x5step']).has(name.toLowerCase());
 }
 
 function cookieSnapshotFromHeader(cookieHeader: string | undefined): XianyuCookieSnapshot {

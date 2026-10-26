@@ -1,5 +1,6 @@
 import { AccountConnectionBadge, AccountCredentialBadge, AccountStatusBadge } from './AccountStatusBadge';
 import type { AccountVM } from '../types';
+import { VerificationAccountActions } from '../../verification/VerificationProvider';
 
 export function AccountTable({ accounts, activeAccountId, page, total, totalPages, onPageChange, onReauthorize, onSwitch, onDelete }: {
   accounts: AccountVM[];
@@ -46,6 +47,7 @@ export function AccountTable({ accounts, activeAccountId, page, total, totalPage
             <span role="cell"><AccountCredentialBadge state={account.credentialState} /></span>
             <span role="cell" className="accounts-domain-updated">{formatUpdatedAt(account.updatedAt)}</span>
             <span role="cell" className="accounts-domain-row-actions">
+              {account.status === 'verification_required' && <VerificationAccountActions accountId={account.id} />}
               <button className={account.id === activeAccountId ? 'btn primary' : 'btn ghost'} type="button" data-testid="account-switch" onClick={() => onSwitch(account)} disabled={account.id === activeAccountId || account.status === 'disabled'}>{account.id === activeAccountId ? '当前账号' : '切换账号'}</button>
               <button className={account.status === 'connected' ? 'btn ghost' : 'btn primary'} type="button" onClick={() => onReauthorize(account)}>{account.status === 'connected' ? '重新授权' : '扫码授权'}</button>
               <button className="btn danger" type="button" data-testid="account-delete" onClick={() => onDelete(account)}>删除账号</button>

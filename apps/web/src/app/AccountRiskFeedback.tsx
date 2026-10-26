@@ -33,7 +33,7 @@ export function AccountRiskFeedback({ onViewAccounts }: { onViewAccounts: () => 
     const noticeKey = JSON.stringify([keys, riskNotifications.map((notice) => notice.id)]);
     currentNotice.current = noticeKey;
     const message = risks.length > 0
-      ? `${risks.length} 个闲鱼账号需要安全验证：${risks.map((account) => `${account.displayName || '闲鱼账号'}（${accountRiskLabel(account.riskCode)}）`).join('、')}。请完成验证后重新授权。`
+      ? `${risks.length} 个闲鱼账号需要安全验证：${risks.map((account) => `${account.displayName || '闲鱼账号'}（${accountRiskLabel(account.riskCode)}）`).join('、')}。请查看账号的验证进度并按提示处理。`
       : '账号验证状态已更新，请查看账号状态。';
     const publish = (failure?: string, busy = false) => {
       const notice: ToastNotice = {

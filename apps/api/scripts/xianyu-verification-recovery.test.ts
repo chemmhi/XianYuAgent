@@ -111,6 +111,26 @@ test('failed verification keeps credentials and a new signal retries after the s
   } finally { await f.service.close(); }
 });
 
+test('manual retry during a cancelled recovery survives its finally scan and bypasses the old backoff', async () => {
+  const f = await fixture(); let release!: () => void, releaseScan!: () => void, scanEntered!: () => void;
+  f.hold(new Promise<void>(resolve => { release = resolve; }));
+  const scan = new Promise<void>(resolve => { releaseScan = resolve; }), entered = new Promise<void>(resolve => { scanEntered = resolve; });
+  try {
+    await f.risk(); f.fail(); f.service.requestVerificationRecovery('admin-1', f.account.id, 'im_listener');
+    await until(() => f.browserCalls() === 1);
+    // Give finally an unrelated automatic signal to scan, then hold that
+    // database read after the old browser has already closed/rejected.
+    f.service.requestVerificationRecovery('admin-1', f.account.id, 'read_extra');
+    const original = f.store.listAccountVerificationRisks.bind(f.store); let arm = true;
+    f.store.listAccountVerificationRisks = async (...args) => { if (arm) { arm = false; scanEntered(); await scan; } return original(...args); };
+    release(); await entered;
+    assert.equal(f.internal.verificationRecoveryInFlight.size, 1);
+    await f.service.requestManualVerification('admin-1', f.account.id);
+    releaseScan(); await until(() => f.browserCalls() === 2); await f.settled();
+    assert.equal(f.browserCalls(), 2); assert.equal(f.internal.verificationRecoveryTimers.size, 0, 'manual intent must not wait for a 30s automatic timer');
+  } finally { release(); releaseScan(); await f.service.close(); }
+});
+
 test('healthy, revoked and disabled accounts do not launch recovery, and shutdown ignores late signals', async () => {
   for (const state of ['healthy', 'revoked', 'disabled', 'closed']) {
     const f = await fixture();

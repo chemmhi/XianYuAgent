@@ -1,0 +1,38 @@
+/* Modal, typography and buttons use the existing modal/card and shared Button rules. */
+.verification-backdrop { z-index: 45; }
+.modal-card.verification-modal { display: flex; flex-direction: column; width: min(640px, 100%); height: 540px; max-height: calc(100dvh - 56px); overflow: hidden; }
+.verification-modal > .modal-head { flex: 0 0 auto; }
+.verification-modal-body { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: auto; }
+.verification-modal-body > :not(.verification-panel) { flex: 0 0 auto; }
+.verification-panel { display: flex; flex-direction: column; gap: 14px; min-width: 0; text-align: left; }
+.verification-modal-body > .verification-panel { flex: 1; min-height: 0; }
+.verification-panel > :not(.verification-image) { flex: 0 0 auto; }
+.verification-summary { display: flex; flex-direction: column; gap: 14px; }
+.verification-state { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--text); }
+.verification-countdown { color: var(--info); font-weight: 700; font-variant-numeric: tabular-nums; }
+.verification-image { --verification-image-height: min(320px, 60dvh); position: relative; display: grid; place-items: center; flex: 0 0 auto; height: var(--verification-image-height); min-width: 0; }
+.verification-modal-body .verification-image { --verification-image-height: 100cqh; container-type: size; flex: 1 1 320px; height: auto; min-height: 180px; }
+.verification-panel.is-finished .verification-image { container-type: normal; flex: 0 0 auto; height: auto; min-height: 0; place-items: start; }
+.verification-image img { display: block; height: auto; user-select: none; -webkit-user-drag: none; }
+.verification-image.is-controlling img { cursor: grab; }
+.verification-image-placeholder { padding: 14px; color: var(--sub); }
+.verification-result { width: 100%; }
+.verification-stale { position: absolute; inset: auto 0 0; background: var(--card); color: var(--sub); text-align: center; }
+.verification-panel .verification-actions { margin-top: 0; }
+.verification-actions { flex-wrap: wrap; }
+.verification-actions:empty { display: none; }
+.verification-error { color: var(--danger); }
+.verification-success { color: var(--success); }
+.verification-results { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.verification-results li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; }
+.verification-results small { flex-basis: 100%; color: var(--sub); }
+.verification-entry { position: fixed; right: 24px; bottom: 24px; z-index: 34; display: flex; align-items: center; gap: 8px; max-width: calc(100vw - 32px); padding: 14px 16px; color: var(--text); font-size: 12px; }
+.verification-queue { display: flex; gap: 8px; overflow: auto; margin-bottom: 14px; }
+.verification-queue button { white-space: nowrap; }
+.verification-queue button[aria-current=true] { border-color: var(--link); color: var(--link); }
+.verification-close-confirm { padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
+@media (max-width: 900px) {
+  .modal-backdrop.verification-backdrop { align-items: center; }
+  .verification-entry { right: 16px; bottom: 16px; }
+}
+.verification-native-frame { position: absolute; left: 50%; top: 50%; width: 420px; height: 320px; border: 0; background: #fff; transform-origin: center; }

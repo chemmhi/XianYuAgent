@@ -19,10 +19,9 @@ export function createBrowserMtopTransport(context: XianyuVerificationContext, p
         try { await page.goto(`${origin}/robots.txt`, { waitUntil: 'domcontentloaded', timeout: 30_000 }); }
         catch (error) { throw browserStageError(prefix, 'PREPARE_NAVIGATION', error); }
       }
-      try {
-        const stale = (await context.cookies()).filter(cookie => ['x5secdata', 'x5sectag', 'x5step'].includes(cookie.name));
-        if (stale.length) await context.addCookies(stale.map(cookie => ({ ...cookie, value: '', expires: 1 })));
-      } catch (error) { throw browserStageError(prefix, 'PREPARE_COOKIES', error); }
+      // The platform owns this context's cookie lifecycle. Native successful
+      // retries retain x5sectag beside the newly issued x5sec; deleting names
+      // here changes the challenge session before the original API is retried.
     };
     await prepare();
     for (let attempt = 0; attempt < 6; attempt++) {

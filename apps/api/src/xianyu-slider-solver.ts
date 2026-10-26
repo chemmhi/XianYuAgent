@@ -13,6 +13,8 @@ export interface XianyuSliderSolverOptions {
   retryDelayMs?: number;
   rng?: () => number;
   logger?: Pick<Console, 'info' | 'warn'>;
+  admit?: () => Promise<void>;
+  beforeAttempt?: () => Promise<void>;
   readVerdict?: () => { sequence: number; code?: number; success?: boolean } | undefined;
 }
 
@@ -84,6 +86,8 @@ export class XianyuSliderSolver {
   private readonly retryDelayMs: number;
   private readonly rng: () => number;
   private readonly logger?: Pick<Console, 'info' | 'warn'>;
+  private readonly admit?: () => Promise<void>;
+  private readonly beforeAttempt?: () => Promise<void>;
   private readonly readVerdict?: XianyuSliderSolverOptions['readVerdict'];
 
   constructor(private readonly page: XianyuSliderPage, options: XianyuSliderSolverOptions = {}) {
@@ -95,6 +99,7 @@ export class XianyuSliderSolver {
     this.rng = options.rng ?? Math.random;
     this.logger = options.logger;
     this.readVerdict = options.readVerdict;
+    this.admit = options.admit; this.beforeAttempt = options.beforeAttempt;
   }
 
   async solve(): Promise<XianyuSliderSolveResult> {
@@ -107,7 +112,7 @@ export class XianyuSliderSolver {
       errors: [],
       protocolCodes: [],
     };
-    await prepareYdisksPage(this.page, this.rng);
+    await prepareYdisksPage(this.page, this.rng, this.admit);
 
     for (let attempt = 1; attempt <= this.maxRetries; attempt += 1) {
       result.attempts = attempt;
@@ -142,7 +147,8 @@ export class XianyuSliderSolver {
           const verdict = this.readVerdict?.();
           return Boolean(verdict && verdict.sequence > verdictStart && verdict.code === 0 && verdict.success === true);
         };
-        await executeYdisksGesture(this.page, elements.button, elements.buttonRect, generated, this.rng, accepted);
+        await this.beforeAttempt?.();
+        await executeYdisksGesture(this.page, elements.button, elements.buttonRect, generated, this.rng, accepted, this.admit);
 
         const verification = await this.waitForVerificationResult(elements.container, verdictStart);
         const verdict = this.readVerdict?.();
@@ -158,6 +164,7 @@ export class XianyuSliderSolver {
         if (attempt >= this.maxRetries) break;
         if (!await this.recoverControl(() => { result.retryClicked = true; })) break;
       } catch (error) {
+        if (String((error as { code?: string })?.code ?? '').startsWith('VERIFICATION_')) throw error;
         const message = error instanceof Error ? error.message : String(error);
         result.failureReason = `exception:${error instanceof Error ? error.name : 'Error'}`;
         result.errors.push(message);
@@ -222,6 +229,7 @@ export class XianyuSliderSolver {
 
   private async clickRetry(retry: XianyuSliderLocator): Promise<boolean> {
     try {
+      await this.admit?.();
       await retry.click({ timeout: this.elementTimeoutMs });
       return true;
     } catch {

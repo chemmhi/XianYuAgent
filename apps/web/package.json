@@ -9,6 +9,7 @@
     "build": "npm run typecheck && vite build",
     "test": "vitest run",
     "test:e2e:chrome": "node scripts/e2e-chrome.mjs",
+    "test:e2e:verification": "node --import tsx scripts/e2e-manual-verification.mjs && node --import tsx scripts/e2e-verification-boundaries.mjs && npm run test:e2e:verification:native",
     "test:e2e:chrome:account-feedback": "node --import tsx scripts/e2e-account-feedback.mjs",
     "test:e2e:chrome:brand-block": "node scripts/e2e-brand-block-chrome.mjs",
     "test:e2e:chrome:dashboard": "node scripts/e2e-dashboard-chrome.mjs",
@@ -27,7 +28,8 @@
     "test:e2e:chrome:settings": "node scripts/e2e-settings-chrome.mjs",
     "test:e2e:chrome:settings:openai": "node scripts/e2e-settings-openai-chrome.mjs",
     "test:e2e:chrome:agent-dynamics": "node scripts/e2e-agent-dynamics-chrome.mjs",
-    "test:e2e:chrome:account-delete": "node --import tsx scripts/e2e-account-hard-delete.mjs"
+    "test:e2e:chrome:account-delete": "node --import tsx scripts/e2e-account-hard-delete.mjs",
+    "test:e2e:verification:native": "node --import tsx scripts/e2e-native-verification.mjs"
   },
   "dependencies": {
     "react": "19.2.8",

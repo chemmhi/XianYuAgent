@@ -69,10 +69,12 @@ async function bounded<T>(task: Promise<T>, ms: number): Promise<T> {
   try { return await Promise.race([task, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('YDISKS_CONTROL_TIMEOUT')), ms); })]); }
   finally { if (timer) clearTimeout(timer); }
 }
-export async function prepareYdisksPage(page: XianyuSliderPage, rng = Math.random): Promise<void> {
+export async function prepareYdisksPage(page: XianyuSliderPage, rng = Math.random, admit?: () => Promise<void>): Promise<void> {
   await wait(uniform(rng, 300, 800));
+  await admit?.();
   await page.mouse.move(640, 360);
   await wait(uniform(rng, 20, 50));
+  await admit?.();
   await page.mouse.wheel(0, integer(rng, 200, 500));
   await wait(uniform(rng, 20, 50));
 }
@@ -94,29 +96,35 @@ export async function replayYdisksTrajectory(points: readonly SliderTrajectoryPo
 }
 
 export async function executeYdisksGesture(page: XianyuSliderPage, button: XianyuSliderLocator, rect: XianyuSliderRect,
-  trajectory: YdisksTrajectory, rng = Math.random, stopWhen: () => boolean = () => false): Promise<void> {
+  trajectory: YdisksTrajectory, rng = Math.random, stopWhen: () => boolean = () => false, admit?: () => Promise<void>): Promise<void> {
   const x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
   await wait(uniform(rng, 100, 300));
+  await admit?.();
   await page.mouse.move(x + uniform(rng, -30, -10), y + uniform(rng, -15, 15), { steps: integer(rng, 5, 10) });
   await wait(uniform(rng, 150, 300));
+  await admit?.();
   await page.mouse.move(x, y, { steps: integer(rng, 3, 6) });
   await wait(uniform(rng, 100, 250));
+  await admit?.();
   await button.hover({ timeout: 2000 });
   await wait(uniform(rng, 100, 300));
+  await admit?.();
   await page.mouse.move(x, y);
   await wait(uniform(rng, 50, 150));
   let pressed = false;
   try {
+    await admit?.();
     await page.mouse.down({ button: 'left' });
     pressed = true;
     await wait(uniform(rng, 50, 150));
-    const end = await replayYdisksTrajectory(trajectory.points, x, y, (px, py) => page.mouse.move(px, py), { stopWhen });
+    const end = await replayYdisksTrajectory(trajectory.points, x, y, async (px, py) => { await admit?.(); await page.mouse.move(px, py); }, { stopWhen });
     await page.mouse.up({ button: 'left' });
     pressed = false;
     await wait(uniform(rng, 10, 30));
     if (!stopWhen()) {
       // NC requires its confirmation event after release. Use the locator's
       // frame context so iframe controls receive the same event as upstream.
+      await admit?.();
       await bounded(button.evaluate((slider, point) => slider.dispatchEvent(new MouseEvent('click', {
         bubbles: true, cancelable: true, view: window, clientX: point.x, clientY: point.y, button: 0,
       })), end, { timeout: 2000 }), 2000).catch(() => undefined);

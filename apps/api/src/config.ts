@@ -29,6 +29,10 @@ export interface AppConfig {
   xianyuVerificationBrowserExecutablePath?: string;
   xianyuVerificationBrowserUserDataDir?: string;
   xianyuVerificationBrowserMaxWaitMs: number;
+  xianyuVerificationRemoteEnabled?: boolean;
+  xianyuVerificationNativeEnabled?: boolean;
+  xianyuVerificationRemoteAccounts?: string[];
+  xianyuVerificationRemoteAdmins?: string[];
   webSocketAllowedOrigins: string[];
   agentRuntime: AgentRuntimeMode;
   modelApiKey?: string;
@@ -109,6 +113,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     xianyuVerificationBrowserExecutablePath: env.XIANYU_VERIFICATION_BROWSER_EXECUTABLE?.trim() || undefined,
     xianyuVerificationBrowserUserDataDir: env.XIANYU_VERIFICATION_BROWSER_USER_DATA_DIR?.trim() || undefined,
     xianyuVerificationBrowserMaxWaitMs: positiveNumber(env.XIANYU_VERIFICATION_BROWSER_MAX_WAIT_MS, 3 * 60_000),
+    xianyuVerificationRemoteEnabled: asBoolean(env.XIANYU_VERIFICATION_REMOTE_ENABLED, false),
+    xianyuVerificationNativeEnabled: asBoolean(env.XIANYU_VERIFICATION_NATIVE_ENABLED, false),
+    xianyuVerificationRemoteAccounts: (env.XIANYU_VERIFICATION_REMOTE_ACCOUNTS ?? '').split(',').map(value => value.trim()).filter(Boolean),
+    xianyuVerificationRemoteAdmins: (env.XIANYU_VERIFICATION_REMOTE_ADMINS ?? '').split(',').map(value => value.trim()).filter(Boolean),
     webSocketAllowedOrigins: (env.WS_ALLOWED_ORIGINS ?? 'http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080').split(',').map((value) => value.trim()).filter(Boolean),
     agentRuntime,
     modelApiKey,

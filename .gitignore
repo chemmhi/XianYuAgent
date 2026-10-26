@@ -16,6 +16,12 @@ apps/*/package-lock.json
 .env
 **/.env
 
+# Local investigation helpers and private browser captures are never source.
+.codex-*
+**/network-private.ndjson
+**/archive.har
+docs/evidence/manual-verification/*.json
+
 artifacts/
 
 # Generated visual evidence

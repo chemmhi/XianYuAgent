@@ -13,7 +13,7 @@ export async function fetchXianyuBrowserImToken(context: XianyuVerificationConte
   const token = await call({ api: XIANYU_IM_TOKEN_API, version: '1.0', data: { appKey: XIANYU_IM_APP_ID, deviceId: input.deviceId }, referer });
   if (typeof token.accessToken !== 'string' || !token.accessToken.trim()) throw new Error('XIANYU_BROWSER_IM_TOKEN_MISSING');
   const login = await call({ api: 'mtop.taobao.idlemessage.pc.loginuser.get', version: '1.0', data: {}, extraParams: { needLogin: 'false' }, referer });
-  const userId = String(login.userId ?? token.userId ?? '');
+  const userId = String(login.userId ?? '');
   if (!input.expectedUserId || userId !== input.expectedUserId || (token.userId !== undefined && String(token.userId) !== input.expectedUserId)) throw new Error('XIANYU_BROWSER_IM_IDENTITY_MISMATCH');
   return { accessToken: token.accessToken, deviceId: input.deviceId, userId };
 }

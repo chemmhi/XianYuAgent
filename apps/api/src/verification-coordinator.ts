@@ -1,23 +1,26 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { performance } from 'node:perf_hooks';
 import { VerificationError, VERIFICATION_TERMINAL, VERIFICATION_TIMING as T, verificationSubjectKey, verificationBuckets,
   type VerificationSession, type VerificationSubject, type VerificationChallenge, type VerificationMode } from './verification-domain.js';
 import type { VerificationRepository } from './verification-repository.js';
 import type { VerificationFrame, VerificationPointer } from './verification-remote-browser.js';
+import { nativeVerificationCandidate, nativeVerificationUrl, type NativeVerificationControl } from './verification-native-candidate.js';
 
 interface Active {
   row: VerificationSession; challenge: VerificationChallenge; tail: Promise<unknown>; result: Promise<void>;
   resolve(): void; reject(error: Error): void; leaseAt: number; persistedAt: number; tickBusy: boolean;
   stopping: boolean; autoRunning: boolean; budgetReserved: boolean; verdictStart: number; settlingAt?: number;
   lastPendingAt: number; frames: Map<string, { frame: VerificationFrame; clientId: string }>; releaseTask?: Promise<void>;
-  suspended?: boolean; settleGoal?: 'auto' | 'human' | 'stop';
+  suspended?: boolean; settleGoal?: 'auto' | 'human' | 'stop' | 'cancel';
   recheckingAt?: number;
   contextCloseTask?: Promise<void>;
+  nativeLease?: { id: string; adminId: string; authSessionId: string; clientId: string; until: number; generation: number; claimVersion?: number; claimEpoch?: number };
+  nativeOperation?: { control: NativeVerificationControl; fingerprint: string; task: Promise<VerificationSession> };
 }
 export interface VerificationAccess {
   authorize(subject: VerificationSubject, adminId: string): Promise<boolean>;
-  health(subject: VerificationSubject): Promise<'ready' | 'partial' | 'pending' | 'cancelled'>;
+  health(subject: VerificationSubject, session?: VerificationSession): Promise<'ready' | 'partial' | 'pending' | 'cancelled'>;
 }
 export class VerificationCoordinator {
   readonly events = new EventEmitter();
@@ -49,9 +52,9 @@ export class VerificationCoordinator {
     }, 100); this.watchdog.unref();
   }
   presence(adminId: string, clientId: string, visible: boolean) { this.viewers.set(clientId, { adminId, visible, at: this.clock.now() }); }
-  disconnect(clientId: string) {
-    this.viewers.delete(clientId);
-    for (const rt of this.active.values()) if (rt.row.controller?.clientId === clientId && rt.row.state === 'human_active') {
+  disconnect(clientId: string, connectionId?: string) {
+    if (!connectionId) this.viewers.delete(clientId);
+    for (const rt of this.active.values()) if (!rt.challenge.native && rt.row.controller?.clientId === clientId && (!connectionId || rt.row.controller.connectionId === connectionId) && rt.row.state === 'human_active') {
       rt.suspended = true;
       const deadline = Math.min(this.clock.now() + this.timing.reconnect, rt.row.humanDeadline!);
       void this.change(rt, next => {
@@ -100,7 +103,7 @@ export class VerificationCoordinator {
   }
   private get(id: string) { const rt = this.active.get(id); if (!rt) throw new VerificationError('VERIFICATION_NOT_ACTIVE', 410); return rt; }
 
-  async solve(challenge: VerificationChallenge): Promise<string> {
+  async solve(challenge: VerificationChallenge, onCreated?: (id: string) => void): Promise<string> {
     await this.start();
     const key = verificationSubjectKey(challenge.subject);
     if (this.closingSubjects.has(key)) throw new VerificationError('VERIFICATION_CLOSING');
@@ -113,20 +116,46 @@ export class VerificationCoordinator {
     if (!await this.access.authorize(challenge.subject, challenge.subject.adminId)) throw new VerificationError('VERIFICATION_FORBIDDEN', 403);
     const now = this.clock.now();
     const row = await this.repository.create({ id: randomUUID(), subject: challenge.subject, ownerId: this.ownerId,
-      state: 'preparing', mode: this.intents.get(key) ?? 'manual_then_auto', version: 1, eventSequence: 0,
+      state: 'preparing', mode: challenge.autoAllowed === false ? 'manual_only' : this.intents.get(key) ?? 'manual_then_auto', autoAllowed: challenge.autoAllowed, version: 1, eventSequence: 0,
       createdAt: now, updatedAt: now, readyAt: now, expiresAt: Math.min(now + this.timing.total, challenge.subject.expiresAt ?? Infinity),
       setupDeadline: now + this.timing.setup, discoveryDeadline: now + this.timing.discovery,
-      priorityConsumed: false, controlEpoch: 0, autoAttempts: 0, challengeGeneration: 1 });
+      priorityConsumed: false, controlEpoch: 0, autoAttempts: 0, challengeGeneration: 1,
+      ...(challenge.native ? { presentationKind: 'native_iframe' as const } : {}) });
     this.intents.delete(key);
     let resolve!: () => void, reject!: (error: Error) => void;
     const result = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
     const rt: Active = { row, challenge, tail: Promise.resolve(), result, resolve, reject,
       leaseAt: this.clock.monotonic(), persistedAt: now, tickBusy: false, stopping: false, autoRunning: false,
-      budgetReserved: false, verdictStart: challenge.verdict()?.sequence ?? 0, lastPendingAt: now, frames: new Map() };
-    this.active.set(row.id, rt); this.events.emit('updated', structuredClone(row));
+      budgetReserved: false, verdictStart: challenge.verdictSequence?.() ?? challenge.verdict()?.sequence ?? 0, lastPendingAt: now, frames: new Map() };
+    this.active.set(row.id, rt); this.events.emit('updated', structuredClone(row)); onCreated?.(row.id);
     runtime = rt;
     } finally { this.pendingStarts.delete(key); }
     await runtime.result; return runtime.row.id;
+  }
+
+  async continueChallenge(id: string, challenge: VerificationChallenge): Promise<string> {
+    const rt = this.get(id); await this.authorize(rt, challenge.subject.adminId); this.assertLease(rt);
+    if (rt.nativeOperation && rt.row.state === 'settling') throw new VerificationError('VERIFICATION_NATIVE_RESULT_PENDING');
+    if (verificationSubjectKey(rt.row.subject) !== verificationSubjectKey(challenge.subject)
+      || challenge.subject.credentialGeneration !== rt.row.subject.credentialGeneration) throw new VerificationError('VERIFICATION_SUBJECT_CHANGED');
+    if (!['handoff', 'rechecking'].includes(rt.row.state) || rt.row.challengeGeneration >= 2) {
+      await this.fail(rt, 'VERIFICATION_CHALLENGE_LIMIT'); throw new VerificationError('VERIFICATION_CHALLENGE_LIMIT');
+    }
+    await rt.challenge.browser.close();
+    await this.change(rt, next => {
+      if (!['handoff', 'rechecking'].includes(next.state)) throw new VerificationError('VERIFICATION_STATE_CHANGED');
+      next.challengeGeneration++; next.state = 'preparing'; next.presentation = undefined; next.platformResult = undefined;
+      next.presentationKind = challenge.native ? 'native_iframe' : undefined; next.resultCandidateReceived = undefined;
+      next.autoAllowed = next.autoAllowed !== false && challenge.autoAllowed !== false;
+      if (!next.autoAllowed) next.mode = 'manual_only';
+      next.setupDeadline = Math.min(this.clock.now() + this.timing.setup, next.expiresAt);
+      next.discoveryDeadline = this.clock.now() + this.timing.discovery;
+    });
+    rt.challenge = challenge; rt.frames.clear(); rt.verdictStart = challenge.verdictSequence?.() ?? challenge.verdict()?.sequence ?? 0;
+    rt.nativeLease = undefined; rt.nativeOperation = undefined;
+    rt.result = new Promise<void>((resolve, reject) => { rt.resolve = resolve; rt.reject = reject; });
+    rt.suspended = false; rt.settlingAt = undefined; rt.releaseTask = undefined;
+    await rt.result; return id;
   }
 
   async list(adminId: string) {
@@ -139,8 +168,130 @@ export class VerificationCoordinator {
     if (!row || !await this.access.authorize(row.subject, adminId)) throw new VerificationError('VERIFICATION_NOT_FOUND', 404);
     return row;
   }
+  async nativePresentation(id: string, input: { adminId: string; authSessionId: string; clientId: string; challengeGeneration: number }) {
+    const rt = this.get(id); await this.authorize(rt, input.adminId); this.assertLease(rt);
+    if (!rt.challenge.native || rt.nativeOperation) throw new VerificationError('VERIFICATION_NATIVE_UNAVAILABLE');
+    const old = rt.nativeLease;
+    if (old && (old.adminId !== input.adminId || old.authSessionId !== input.authSessionId || old.clientId !== input.clientId)
+      && (old.until > this.clock.now() || rt.row.state === 'human_active')) throw new VerificationError('VERIFICATION_CONTROL_BUSY');
+    const lease = old && old.adminId === input.adminId && old.authSessionId === input.authSessionId && old.clientId === input.clientId
+      ? old : { id: randomUUID(), adminId: input.adminId, authSessionId: input.authSessionId, clientId: input.clientId,
+        until: 0, generation: rt.row.challengeGeneration };
+    rt.nativeLease = lease;
+    const row = await this.change(rt, next => {
+      if (next.challengeGeneration !== input.challengeGeneration || !['preparing', 'priority_wait', 'human_active'].includes(next.state)
+        || rt.nativeLease !== lease || rt.nativeOperation) throw new VerificationError('VERIFICATION_STATE_CHANGED');
+      if (next.state === 'human_active' && (this.clock.now() >= next.humanDeadline! || lease.until <= this.clock.now())) throw new VerificationError('VERIFICATION_CONTROL_EXPIRED');
+      if (next.state === 'preparing') {
+        if (this.clock.now() >= next.setupDeadline) throw new VerificationError('VERIFICATION_PRESENTATION_EXPIRED');
+        next.state = 'priority_wait'; next.priorityConsumed = true;
+        next.priorityDeadline = Math.min(this.clock.now() + (next.mode === 'manual_only' ? this.timing.setup : this.timing.priority), next.expiresAt);
+      }
+      next.presentation = { adminId: input.adminId, clientId: input.clientId, until: this.clock.now() + this.timing.presentation };
+    });
+    lease.until = row.presentation!.until;
+    return { row, leaseId: lease.id };
+  }
+  private nativeControl(rt: Active, input: Omit<NativeVerificationControl, 'controlEpoch'> & { controlEpoch?: number }) {
+    this.assertLease(rt);
+    const lease = rt.nativeLease;
+    if (!rt.challenge.native || !lease || lease.id !== input.leaseId || lease.adminId !== input.adminId
+      || lease.authSessionId !== input.authSessionId || lease.clientId !== input.clientId || lease.until <= this.clock.now()
+      || lease.generation !== input.challengeGeneration || rt.row.challengeGeneration !== input.challengeGeneration) {
+      throw new VerificationError('VERIFICATION_CONTROL_EXPIRED');
+    }
+    return lease;
+  }
+  async nativeClaim(id: string, input: Omit<NativeVerificationControl, 'controlEpoch'> & { version: number }) {
+    const rt = this.get(id); await this.authorize(rt, input.adminId);
+    const lease = this.nativeControl(rt, input);
+    if (!Number.isSafeInteger(input.version) || rt.nativeOperation) throw new VerificationError('VERIFICATION_STATE_CHANGED');
+    const sameClaim = rt.row.state === 'human_active' && lease.claimVersion === input.version && lease.claimEpoch === rt.row.controlEpoch
+      && rt.row.controller?.authSessionId === input.authSessionId && rt.row.controller.clientId === input.clientId;
+    if (!sameClaim) await this.change(rt, next => {
+      this.nativeControl(rt, input);
+      if (next.version !== input.version) throw new VerificationError('VERIFICATION_VERSION_CHANGED');
+      if (next.state !== 'priority_wait' || this.clock.now() >= next.priorityDeadline!) throw new VerificationError('VERIFICATION_AUTO_STARTED');
+      next.state = 'human_active'; next.humanDeadline ??= Math.min(this.clock.now() + this.timing.human, next.expiresAt);
+      next.controlEpoch++; next.controller = { adminId: input.adminId, authSessionId: input.authSessionId,
+        clientId: input.clientId, connectionId: `native:${lease.id}` };
+    });
+    if (this.clock.now() >= rt.row.humanDeadline!) throw new VerificationError('VERIFICATION_CONTROL_EXPIRED');
+    lease.claimVersion = input.version; lease.claimEpoch = rt.row.controlEpoch;
+    return { row: rt.row, leaseId: lease.id, url: nativeVerificationUrl(rt.challenge.native!.url),
+      origin: new URL(rt.challenge.native!.url).origin };
+  }
+  /** Final synchronous fence after HTTP auth/DTO awaits, immediately before
+   * disclosing an ephemeral native challenge URL. */
+  assertNativeClaimCurrent(id: string, input: NativeVerificationControl) {
+    const rt = this.get(id); this.nativeControl(rt, input);
+    if (rt.nativeOperation || rt.row.state !== 'human_active' || rt.row.controlEpoch !== input.controlEpoch
+      || rt.row.controller?.adminId !== input.adminId || rt.row.controller.authSessionId !== input.authSessionId
+      || rt.row.controller.clientId !== input.clientId || this.clock.now() >= rt.row.humanDeadline!) {
+      throw new VerificationError('VERIFICATION_CONTROL_EXPIRED');
+    }
+  }
+  async nativeResult(id: string, input: NativeVerificationControl, value: unknown, externalAccess: () => Promise<boolean>) {
+    const rt = this.get(id); await this.authorize(rt, input.adminId);
+    const candidate = nativeVerificationCandidate(value, rt.challenge.native?.url ?? '', this.clock.now());
+    const fingerprint = createHash('sha256').update(JSON.stringify(candidate)).digest('hex');
+    if (rt.nativeOperation) {
+      const op = rt.nativeOperation;
+      if (JSON.stringify(op.control) !== JSON.stringify(input) || op.fingerprint !== fingerprint || !await externalAccess()) throw new VerificationError('VERIFICATION_CONTROL_EXPIRED');
+      return op.task;
+    }
+    this.nativeControl(rt, input);
+    if (rt.row.state !== 'human_active' || rt.row.controlEpoch !== input.controlEpoch || this.clock.now() >= rt.row.humanDeadline!
+      || rt.row.controller?.authSessionId !== input.authSessionId || rt.row.controller.clientId !== input.clientId || !await externalAccess()) throw new VerificationError('VERIFICATION_CONTROL_EXPIRED');
+    // Another result may have reserved its operation while auth was awaited.
+    const concurrent = this.get(id).nativeOperation;
+    if (concurrent) {
+      if (JSON.stringify(concurrent.control) !== JSON.stringify(input) || concurrent.fingerprint !== fingerprint) throw new VerificationError('VERIFICATION_CONTROL_EXPIRED');
+      return concurrent.task;
+    }
+    const challenge = rt.challenge;
+    let resolve!: (row: VerificationSession) => void, reject!: (error: unknown) => void;
+    const task = new Promise<VerificationSession>((yes, no) => { resolve = yes; reject = no; });
+    const operation = { control: { ...input }, fingerprint, task }; rt.nativeOperation = operation;
+    void (async () => {
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await this.change(rt, next => {
+          this.nativeControl(rt, input);
+          if (rt.nativeOperation !== operation || next.state !== 'human_active' || next.controlEpoch !== input.controlEpoch || this.clock.now() >= next.humanDeadline!) throw new VerificationError('VERIFICATION_CONTROL_EXPIRED');
+          next.state = 'settling'; next.resultCandidateReceived = true; next.controlEpoch++;
+          next.controller = undefined; next.presentation = undefined;
+        });
+        await this.authorize(rt, input.adminId); this.assertLease(rt);
+        if (!await externalAccess()) throw new VerificationError('VERIFICATION_SESSION_EXPIRED', 401);
+        await Promise.race([challenge.native!.applyCandidate(candidate), new Promise<never>((_, no) => {
+          timeout = setTimeout(() => no(new VerificationError('VERIFICATION_NATIVE_APPLY_TIMEOUT')), this.timing.drain);
+        })]);
+        await this.authorize(rt, input.adminId); this.assertLease(rt);
+        if (!await externalAccess() || rt.nativeOperation !== operation || rt.challenge !== challenge
+          || rt.row.challengeGeneration !== input.challengeGeneration || rt.row.state !== 'settling') throw new VerificationError('VERIFICATION_CONTROL_EXPIRED');
+        // A candidate only permits the original business probe. It never
+        // fabricates a backend slide verdict or persists account credentials.
+        await this.handoff(rt, async () => {
+          await this.authorize(rt, input.adminId); this.assertLease(rt);
+          if (!await externalAccess() || rt.nativeOperation !== operation || rt.challenge !== challenge
+            || rt.row.challengeGeneration !== input.challengeGeneration) throw new VerificationError('VERIFICATION_CONTROL_EXPIRED');
+        }); resolve(rt.row);
+      } catch (error) {
+        await this.fail(rt, error instanceof VerificationError ? error.code : 'VERIFICATION_NATIVE_APPLY_FAILED').catch(() => undefined);
+        reject(error instanceof VerificationError ? error : new VerificationError('VERIFICATION_NATIVE_APPLY_FAILED'));
+      } finally { if (timeout) clearTimeout(timeout); }
+    })();
+    return task;
+  }
+  async nativeCancel(id: string, input: NativeVerificationControl) {
+    const rt = this.get(id); await this.authorize(rt, input.adminId); this.nativeControl(rt, input);
+    if (rt.row.controlEpoch !== input.controlEpoch && rt.nativeOperation?.control.controlEpoch !== input.controlEpoch) throw new VerificationError('VERIFICATION_CONTROL_EXPIRED');
+    await this.fail(rt, 'VERIFICATION_CANCELLED', 'cancelled'); return rt.row;
+  }
   async presentation(id: string, adminId: string, clientId: string, frameId?: string) {
     const rt = this.get(id); await this.authorize(rt, adminId);
+    if (rt.challenge.native) throw new VerificationError('VERIFICATION_NATIVE_PRESENTATION_REQUIRED');
     const viewer = this.viewers.get(clientId);
     if (viewer?.adminId !== adminId || !viewer.visible || this.clock.now() - viewer.at >= 6_000) throw new VerificationError('VERIFICATION_NOT_VISIBLE');
     if (rt.row.controller && rt.row.controller.clientId !== clientId) throw new VerificationError('VERIFICATION_CONTROL_BUSY');
@@ -150,19 +301,22 @@ export class VerificationCoordinator {
       if (!sent || sent.clientId !== clientId || !await rt.challenge.browser.canSend(sent.frame)) throw new VerificationError('VERIFICATION_FRAME_STALE');
     }
     return this.change(rt, next => {
-      if (VERIFICATION_TERMINAL.has(next.state)) throw new VerificationError('VERIFICATION_NOT_ACTIVE', 410);
+      if (!['preparing', 'priority_wait', 'human_active', 'auto_active'].includes(next.state)) throw new VerificationError('VERIFICATION_NOT_ACTIVE', 410);
       if (next.controller && next.controller.clientId !== clientId) throw new VerificationError('VERIFICATION_CONTROL_BUSY');
       if (next.presentation && next.presentation.clientId !== clientId && next.presentation.until > this.clock.now()) throw new VerificationError('VERIFICATION_PRESENTATION_BUSY');
       next.presentation = { adminId, clientId, until: this.clock.now() + this.timing.presentation };
       if (frameId && next.state === 'preparing') {
         if (this.clock.now() >= next.setupDeadline) throw new VerificationError('VERIFICATION_PRESENTATION_EXPIRED');
-        next.state = 'priority_wait'; next.priorityConsumed = true;
-        next.priorityDeadline = Math.min(this.clock.now() + (next.mode === 'manual_only' ? this.timing.setup : this.timing.priority), next.expiresAt);
+        next.state = 'priority_wait';
+        next.priorityDeadline = Math.min(next.priorityConsumed && next.challengeGeneration > 1 ? (next.humanDeadline ?? this.clock.now())
+          : this.clock.now() + (next.mode === 'manual_only' ? this.timing.setup : this.timing.priority), next.expiresAt);
+        next.priorityConsumed = true;
       }
     });
   }
   async frame(id: string, adminId: string, clientId: string) {
     const rt = this.get(id); await this.authorize(rt, adminId); this.assertLease(rt);
+    if (rt.challenge.native) return;
     if (rt.row.presentation?.clientId !== clientId || rt.row.presentation.until <= this.clock.now()
       || !['preparing', 'priority_wait', 'human_active', 'auto_active'].includes(rt.row.state)) return;
     const frame = await rt.challenge.browser.capture();
@@ -173,6 +327,19 @@ export class VerificationCoordinator {
     for (const [key, value] of rt.frames) if (this.clock.now() - value.frame.capturedAt > 2_000) rt.frames.delete(key);
     return frame;
   }
+  async sendFrame(id: string, adminId: string, clientId: string, frame: VerificationFrame, send: () => void, externalAccess?: () => Promise<boolean>, finalAccess?: () => boolean) {
+    const rt = this.get(id); await this.authorize(rt, adminId); this.assertLease(rt);
+    if (rt.row.presentation?.clientId !== clientId || rt.row.presentation.until <= this.clock.now()) return;
+    if (!await rt.challenge.browser.canSend(frame)) return;
+    if (externalAccess && !await externalAccess()) return;
+    if (!await rt.challenge.browser.canSend(frame)) return;
+    if (externalAccess && !await externalAccess()) return;
+    if (rt.challenge.browser.isCurrent && !rt.challenge.browser.isCurrent(frame)) return;
+    if (finalAccess && !finalAccess()) return;
+    this.assertLease(rt);
+    if (rt.row.presentation?.clientId === clientId && rt.row.presentation.until > this.clock.now()) send();
+  }
+
   async claim(id: string, input: { adminId: string; authSessionId: string; clientId: string; connectionId: string; version: number; frameId: string; resume?: boolean }) {
     const rt = this.get(id); await this.authorize(rt, input.adminId); this.assertLease(rt);
     const sent = rt.frames.get(input.frameId);
@@ -180,12 +347,13 @@ export class VerificationCoordinator {
     const saved = await this.change(rt, next => {
       if (next.presentation?.clientId !== input.clientId || next.presentation.until <= this.clock.now()) throw new VerificationError('VERIFICATION_PRESENTATION_EXPIRED');
       if (input.resume && next.state === 'human_active' && next.controller?.clientId === input.clientId
-        && next.controller.authSessionId === input.authSessionId && (next.reconnectDeadline ?? Infinity) > this.clock.now()) {
+        && next.controller.authSessionId === input.authSessionId && next.reconnectDeadline !== undefined
+        && next.controller.connectionId !== input.connectionId && next.reconnectDeadline > this.clock.now()) {
         next.reconnectDeadline = undefined;
       } else {
         if (next.version !== input.version) throw new VerificationError('VERIFICATION_VERSION_CHANGED');
         if (next.state !== 'priority_wait' || this.clock.now() >= next.priorityDeadline!) throw new VerificationError('VERIFICATION_AUTO_STARTED');
-        next.humanDeadline = Math.min(this.clock.now() + this.timing.human, next.expiresAt); next.state = 'human_active';
+        next.humanDeadline = Math.min(next.challengeGeneration > 1 && next.humanDeadline ? next.humanDeadline : this.clock.now() + this.timing.human, next.expiresAt); next.state = 'human_active';
       }
       next.controlEpoch++; next.controller = { adminId: input.adminId, authSessionId: input.authSessionId, clientId: input.clientId, connectionId: input.connectionId };
     });
@@ -221,8 +389,9 @@ export class VerificationCoordinator {
   }
   async release(id: string, adminId: string, clientId: string, toAuto = true) {
     const rt = this.get(id); await this.authorize(rt, adminId);
+    if (toAuto && rt.row.autoAllowed === false) throw new VerificationError('VERIFICATION_AUTO_DISABLED', 503);
     if (rt.row.controller?.clientId !== clientId || rt.row.state !== 'human_active') throw new VerificationError('VERIFICATION_CONTROL_BUSY');
-    try { await this.beginSettling(rt, toAuto); }
+    try { await this.beginSettling(rt, toAuto, toAuto ? 'auto' : 'cancel'); }
     catch (error) {
       if (!(error instanceof VerificationError && error.code === 'VERIFICATION_STATE_CHANGED')) await this.fail(rt, 'VERIFICATION_RELEASE_TIMEOUT');
       throw error;
@@ -231,6 +400,7 @@ export class VerificationCoordinator {
   }
   async auto(id: string, adminId: string) {
     const rt = this.get(id); await this.authorize(rt, adminId);
+    if (rt.row.autoAllowed === false) throw new VerificationError('VERIFICATION_AUTO_DISABLED', 503);
     if (rt.row.state !== 'priority_wait' && rt.row.state !== 'preparing') throw new VerificationError('VERIFICATION_STATE_CHANGED');
     await this.change(rt, next => {
       if (!['preparing', 'priority_wait'].includes(next.state)) throw new VerificationError('VERIFICATION_STATE_CHANGED');
@@ -247,6 +417,7 @@ export class VerificationCoordinator {
     const key = verificationSubjectKey(subject);
     const active = [...this.active.values()].find(rt => verificationSubjectKey(rt.row.subject) === key && !VERIFICATION_TERMINAL.has(rt.row.state));
     if (active) {
+      if (mode === 'manual_then_auto' && active.row.autoAllowed === false) throw new VerificationError('VERIFICATION_AUTO_DISABLED', 503);
       if (active.row.state === 'auto_active') return this.requestHuman(active.row.id, subject.adminId);
       if (['preparing', 'priority_wait'].includes(active.row.state)) await this.change(active, next => { next.mode = mode; });
       return active.row;
@@ -254,7 +425,19 @@ export class VerificationCoordinator {
     this.intents.set(key, mode); return undefined;
   }
   private accepted(rt: Active) { const v = rt.challenge.verdict(); return v && v.sequence > rt.verdictStart && v.code === 0 && v.success === true; }
-  private async beginSettling(rt: Active, toAuto = false, goal: 'auto' | 'human' | 'stop' = 'auto') {
+  private async recordPlatformResult(rt: Active) {
+    const challenge = rt.challenge, generation = rt.row.challengeGeneration, verdict = challenge.verdict();
+    if (!verdict || verdict.sequence <= rt.verdictStart || !Number.isSafeInteger(verdict.sequence)
+      || !Number.isInteger(verdict.code) || verdict.code! < 0 || verdict.code! > 9999
+      || verdict.sequence <= (rt.row.platformResult?.sequence ?? 0)) return;
+    await this.change(rt, next => {
+      if (rt.challenge !== challenge || next.challengeGeneration !== generation || verdict.sequence <= rt.verdictStart
+        || verdict.sequence <= (next.platformResult?.sequence ?? 0)) throw new VerificationError('VERIFICATION_STATE_CHANGED');
+      next.platformResult = { status: verdict.code === 0 && verdict.success === true ? 'accepted' : 'rejected', code: verdict.code!,
+        sequence: verdict.sequence, challengeGeneration: generation, observedAt: this.clock.now() };
+    });
+  }
+  private async beginSettling(rt: Active, toAuto = false, goal: 'auto' | 'human' | 'stop' | 'cancel' = 'auto') {
     rt.suspended = true;
     rt.settlingAt = undefined;
     await this.change(rt, next => {
@@ -266,9 +449,18 @@ export class VerificationCoordinator {
     await this.releaseBounded(rt); rt.settlingAt = this.clock.now(); rt.lastPendingAt = this.clock.now();
   }
   private async startAuto(rt: Active) {
-    if (rt.autoRunning || rt.stopping) return;
+    if (rt.autoRunning || rt.stopping || rt.nativeOperation) return;
+    if (rt.challenge.native && rt.nativeLease?.claimEpoch !== undefined) {
+      await this.fail(rt, 'VERIFICATION_NATIVE_HUMAN_RESULT_UNKNOWN'); return;
+    }
     if (rt.row.state === 'settling' && (rt.releaseTask || rt.settlingAt === undefined)) return;
-    if (rt.row.mode === 'manual_only') { await this.fail(rt, 'VERIFICATION_WAITING_FOR_HUMAN'); return; }
+    if (rt.row.mode === 'manual_only') {
+      await this.recordPlatformResult(rt);
+      if (this.accepted(rt)) { await this.handoff(rt); return; }
+      await this.fail(rt, rt.row.state === 'preparing' ? 'VERIFICATION_PRESENTATION_NOT_READY'
+        : rt.row.platformResult?.challengeGeneration === rt.row.challengeGeneration && rt.row.platformResult.status === 'rejected'
+          ? 'VERIFICATION_PLATFORM_REJECTED' : 'VERIFICATION_WAITING_FOR_HUMAN'); return;
+    }
     rt.autoRunning = true;
     try {
       this.assertLease(rt);
@@ -307,13 +499,13 @@ export class VerificationCoordinator {
     rt.challenge.browser.invalidate(); rt.frames.clear();
     await this.change(rt, next => { next.mode = 'manual_only'; next.state = 'preparing'; next.humanRequested = false; next.setupDeadline = Math.min(this.clock.now() + this.timing.setup, next.expiresAt); });
   }
-  private async handoff(rt: Active) {
+  private async handoff(rt: Active, finalAccess?: () => Promise<void>) {
     if (VERIFICATION_TERMINAL.has(rt.row.state) || ['handoff', 'rechecking'].includes(rt.row.state)) return;
     await this.change(rt, next => {
       if (VERIFICATION_TERMINAL.has(next.state) || ['handoff', 'rechecking'].includes(next.state)) throw new VerificationError('VERIFICATION_STATE_CHANGED');
       next.state = 'handoff'; next.controlEpoch++; next.controller = undefined; next.presentation = undefined;
     });
-    rt.challenge.browser.invalidate(); await this.releaseBounded(rt); rt.resolve();
+    rt.challenge.browser.invalidate(); await this.releaseBounded(rt); await finalAccess?.(); rt.resolve();
   }
   async rechecking(id: string) {
     const rt = this.active.get(id); if (!rt) return;
@@ -349,10 +541,16 @@ export class VerificationCoordinator {
         if (!await this.access.authorize(rt.row.subject, rt.row.subject.adminId)) { await this.fail(rt, 'VERIFICATION_FORBIDDEN', 'cancelled'); return; }
         await this.change(rt, () => undefined);
       }
-      if (rt.row.state === 'preparing' && (now >= rt.row.setupDeadline || now >= rt.row.discoveryDeadline && !this.available(rt.row.subject.adminId))) void this.startAuto(rt);
+      await this.recordPlatformResult(rt);
+      if (rt.nativeOperation && rt.row.state === 'settling') return;
+      if (rt.row.state === 'preparing' && (now >= rt.row.setupDeadline || now >= rt.row.discoveryDeadline && !(rt.challenge.native
+        ? !!rt.nativeLease && rt.nativeLease.until > now : this.available(rt.row.subject.adminId)))) void this.startAuto(rt);
       else if (rt.row.state === 'priority_wait' && now >= rt.row.priorityDeadline!) void this.startAuto(rt);
       else if (rt.row.state === 'human_active') {
         if (this.accepted(rt)) await this.handoff(rt);
+        else if (rt.challenge.native) {
+          if (now >= rt.row.humanDeadline! || !rt.nativeLease || now >= rt.nativeLease.until) await this.fail(rt, 'VERIFICATION_NATIVE_HUMAN_RESULT_UNKNOWN');
+        }
         else if (now >= rt.row.humanDeadline! || rt.row.reconnectDeadline && now >= rt.row.reconnectDeadline) await this.beginSettling(rt);
         else if (!rt.row.reconnectDeadline && (!this.viewers.get(rt.row.controller!.clientId)?.visible || now >= (rt.row.presentation?.until ?? 0))) this.disconnect(rt.row.controller!.clientId);
       } else if (rt.row.state === 'settling' && rt.settlingAt) {
@@ -361,13 +559,14 @@ export class VerificationCoordinator {
           const pending = rt.challenge.pendingAnswers(); if (pending) rt.lastPendingAt = now;
           if (!pending && now - rt.lastPendingAt >= 500) {
             if (rt.settleGoal === 'human') await this.offerHuman(rt);
+            else if (rt.settleGoal === 'cancel') await this.fail(rt, 'VERIFICATION_CANCELLED', 'cancelled');
             else if (rt.settleGoal === 'stop') await this.fail(rt, 'VERIFICATION_AUTO_SOLVE_FAILED');
             else void this.startAuto(rt);
           }
           else if (now - rt.settlingAt >= this.timing.settling) await this.fail(rt, 'VERIFICATION_OUTCOME_UNKNOWN');
         }
       } else if (rt.row.state === 'rechecking') {
-        const health = await this.access.health(rt.row.subject);
+        const health = await this.access.health(rt.row.subject, rt.row);
         if (health === 'cancelled') await this.fail(rt, 'VERIFICATION_CANCELLED', 'cancelled');
         else if (health === 'ready' || health === 'partial') {
           await this.change(rt, next => { next.state = health === 'ready' ? 'succeeded' : 'completed_partial'; }); this.active.delete(rt.row.id);

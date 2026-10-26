@@ -1,11 +1,12 @@
 /** A realtime connection must recheck authorization without refreshing session idle time. */
-export function realtimeSessionAccess(checkAccess: () => Promise<boolean>, onDenied: () => void, intervalMs = 1000): { check: () => Promise<boolean>; stop: () => void } {
+export function realtimeSessionAccess(checkAccess: () => Promise<boolean>, onDenied: () => void, intervalMs = 1000): { check: () => Promise<boolean>; current: () => boolean; stop: () => void } {
   let stopped = false;
+  let approvedAt = 0;
   let checkingHeartbeat = false;
   function stop() { stopped = true; clearInterval(timer); }
   async function check(): Promise<boolean> {
     if (stopped) return false;
-    try { if (await checkAccess()) return !stopped; } catch { /* Database/auth failures deny further frames. */ }
+    try { if (await checkAccess()) { approvedAt = Date.now(); return !stopped; } } catch { /* Database/auth failures deny further frames. */ }
     if (!stopped) { stop(); onDenied(); }
     return false;
   }
@@ -15,5 +16,5 @@ export function realtimeSessionAccess(checkAccess: () => Promise<boolean>, onDen
     void check().finally(() => { checkingHeartbeat = false; });
   }, intervalMs);
   timer.unref();
-  return { check, stop };
+  return { check, current: () => !stopped && Date.now() - approvedAt < intervalMs, stop };
 }

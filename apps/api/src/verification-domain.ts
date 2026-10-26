@@ -1,10 +1,11 @@
 import type { VerificationFrame, VerificationPointer } from './verification-remote-browser.js';
+import type { NativeVerificationChallenge } from './verification-native-candidate.js';
 
 export type VerificationState = 'preparing' | 'priority_wait' | 'human_active' | 'auto_active' | 'settling' | 'handoff' | 'rechecking'
   | 'succeeded' | 'completed_partial' | 'failed' | 'expired' | 'cancelled';
 export type VerificationMode = 'manual_then_auto' | 'manual_only';
 export interface VerificationSubject {
-  adminId: string; accountId?: string; loginSessionId?: string; expiresAt?: number; flowId?: string;
+  adminId: string; accountId?: string; loginSessionId?: string; expiresAt?: number; flowId?: string; credentialGeneration?: number; source?: string;
 }
 export interface VerificationSession {
   id: string; subject: VerificationSubject; ownerId: string; state: VerificationState; mode: VerificationMode;
@@ -15,6 +16,10 @@ export interface VerificationSession {
   presentation?: { adminId: string; clientId: string; until: number };
   autoAttempts: number; challengeGeneration: number; failureCode?: string; humanRequested?: boolean;
   sourceResults?: Array<{ source: string; status: 'verified' | 'probe_only' | 'failed' | 'superseded'; nextAction?: string }>;
+  autoAllowed?: boolean;
+  presentationKind?: 'native_iframe';
+  resultCandidateReceived?: boolean;
+  platformResult?: { status: 'accepted' | 'rejected'; code: number; sequence: number; challengeGeneration: number; observedAt: number };
 }
 export const VERIFICATION_TERMINAL = new Set<VerificationState>(['succeeded', 'completed_partial', 'failed', 'expired', 'cancelled']);
 export const VERIFICATION_TIMING = Object.freeze({ priority: 5_000, human: 30_000, discovery: 2_000, setup: 8_000,
@@ -33,12 +38,17 @@ export function publicVerificationSession(session: VerificationSession) {
 export interface VerificationBrowserPort {
   capture(): Promise<VerificationFrame | undefined>;
   canSend(frame: VerificationFrame): Promise<boolean>;
+  isCurrent?(frame: VerificationFrame): boolean;
   pointer(input: VerificationPointer, admit: () => Promise<boolean>): Promise<void>;
   release(): Promise<void>; close(): Promise<void>; invalidate(): void;
 }
 export interface VerificationChallenge {
   subject: VerificationSubject; browser: VerificationBrowserPort; closeContext: () => Promise<void>;
+  autoAllowed?: boolean;
+  native?: NativeVerificationChallenge;
   verdict: () => { sequence: number; code?: number; success?: boolean } | undefined;
+  /** Submission watermark also includes requests whose JSON is still pending. */
+  verdictSequence?: () => number;
   pendingAnswers: () => number;
   autoAttempt: (admit: () => Promise<void>, beforeAttempt: () => Promise<void>) => Promise<{ success: boolean }>;
 }

@@ -7,6 +7,36 @@ import type { BrowserContext } from 'patchright';
 import { createPatchrightVerificationBrowserFactory } from '../src/patchright-verification-browser.js';
 import { VerificationRemoteBrowser } from '../src/verification-remote-browser.js';
 
+test('a stale pump candidate or transient encoder failure never releases a newer live human drag', async () => {
+  const profile = await mkdtemp(join(tmpdir(), 'verification-pump-candidate-'));
+  const context = await createPatchrightVerificationBrowserFactory().launchPersistentContext({ profileDir: profile, headless: true, hideWindow: false });
+  await (context as unknown as BrowserContext).route('**/*', route => route.fulfill({ contentType: 'text/html;charset=utf-8', body:
+    '<div class="nc-container" style="width:320px;height:50px;background:#ddd"><span id="nc_1_n1z" style="display:block;width:42px;height:30px">拖</span></div><script>document.body.dataset.ups="0";document.onmouseup=()=>document.body.dataset.ups=String(Number(document.body.dataset.ups)+1);</script>' }));
+  const page = context.pages()[0]; let now = Date.now();
+  const remote = new VerificationRemoteBrowser(page, { now: () => now });
+  try {
+    await page.goto('https://www.goofish.com/punish');
+    const old = await remote.capture(); assert.ok(old);
+    const part = (remote as any).frames.get(old.frameId).inputSnapshot.parts[0], evaluate = part.region.evaluate.bind(part.region);
+    let unblock!: () => void, enter!: () => void, armed = true;
+    const entered = new Promise<void>(resolve => { enter = resolve; }), gate = new Promise<void>(resolve => { unblock = resolve; });
+    part.region.evaluate = async (...args: any[]) => { if (armed) { armed = false; enter(); await gate; } return evaluate(...args); };
+    const lateOldCandidate = remote.canSend(old); await entered;
+    now += 2_001; const fresh = await remote.capture(); assert.ok(fresh);
+    await remote.pointer({ ...fresh, type: 'down', x: .05, y: .3, sequence: 1 }, async () => true);
+    unblock(); assert.equal(await lateOldCandidate, false, 'an old asynchronous send must not revoke a newer in-progress drag');
+    assert.equal(await remote.canSend(old), false, 'an old 2s candidate must still be refused');
+    assert.equal(remote.isCurrent(fresh), true, 'dropping the old candidate must preserve the fresh epoch and active mouse');
+    const screenshot = (page as any).screenshot.bind(page); (page as any).screenshot = async () => { throw new Error('controlled encoder timeout'); };
+    assert.equal(await remote.capture(), undefined); (page as any).screenshot = screenshot;
+    assert.equal(remote.isCurrent(fresh), true, 'a transient encoding failure is not a changed security context');
+    await remote.pointer({ ...fresh, type: 'move', x: .8, y: .3, sequence: 2 }, async () => true);
+    assert.equal(await page.evaluate(() => document.body.dataset.ups), '0');
+    await remote.pointer({ ...fresh, type: 'up', x: .8, y: .3, sequence: 3 }, async () => true);
+    assert.equal(await page.evaluate(() => document.body.dataset.ups), '1');
+  } finally { await remote.close(); await context.close(); await rm(profile, { recursive: true, force: true }); }
+});
+
 test('original Chrome page: cross-origin iframe and human drag produce a controlled protocol verdict', async () => {
   const profile = await mkdtemp(join(tmpdir(), 'verification-remote-'));
   const context = await createPatchrightVerificationBrowserFactory().launchPersistentContext({ profileDir: profile, headless: true, hideWindow: false });
@@ -15,7 +45,7 @@ test('original Chrome page: cross-origin iframe and human drag produce a control
   await raw.route('**/*', async route => {
     const url = new URL(route.request().url());
     if (url.pathname === '/slide') { accepted++; await route.fulfill({ contentType: 'application/json', body: '{"code":0,"success":true}' }); return; }
-    await route.fulfill({ contentType: 'text/html', body: url.hostname === 'www.goofish.com'
+    await route.fulfill({ contentType: 'text/html;charset=utf-8', body: url.hostname === 'www.goofish.com'
       ? '<p>private account data outside crop</p><iframe src="https://captcha.goofish.com/challenge" style="width:500px;height:200px"></iframe>'
       : '<div class="nc-container" style="position:relative;margin:20px;width:320px;height:50px;background:#ddd"><button id="nc_1_n1z" style="width:40px;height:50px">拖</button></div><script>let down=false;document.querySelector("button").onmousedown=()=>down=true;document.onmouseup=e=>{if(down&&e.clientX>250)fetch("/slide");down=false};</script>' });
   });
@@ -43,7 +73,7 @@ test('original Chrome page: cross-origin iframe and human drag produce a control
 test('capture spanning navigation or SPA replacement is discarded; unknown pages never stream', async () => {
   const profile = await mkdtemp(join(tmpdir(), 'verification-frame-fence-'));
   const context = await createPatchrightVerificationBrowserFactory().launchPersistentContext({ profileDir: profile, headless: true, hideWindow: false });
-  await (context as unknown as BrowserContext).route('**/*', route => route.fulfill({ contentType: 'text/html',
+  await (context as unknown as BrowserContext).route('**/*', route => route.fulfill({ contentType: 'text/html;charset=utf-8',
     body: '<div class="nc-container" style="width:300px;height:50px"><button id="nc_1_n1z">verify</button></div>' }));
   const page = context.pages()[0];
   let replace = true;
@@ -62,7 +92,7 @@ test('capture spanning navigation or SPA replacement is discarded; unknown pages
 test('navigation during asynchronous authorization and release cancel queued input before dispatch', async () => {
   const profile = await mkdtemp(join(tmpdir(), 'verification-dispatch-fence-'));
   const context = await createPatchrightVerificationBrowserFactory().launchPersistentContext({ profileDir: profile, headless: true, hideWindow: false });
-  await (context as unknown as BrowserContext).route('**/*', route => route.fulfill({ contentType: 'text/html',
+  await (context as unknown as BrowserContext).route('**/*', route => route.fulfill({ contentType: 'text/html;charset=utf-8',
     body: '<div class="nc-container" style="width:300px;height:50px"><button id="nc_1_n1z">verify</button></div><script>document.body.dataset.downs="0";document.onmousedown=()=>document.body.dataset.downs=String(Number(document.body.dataset.downs)+1);</script>' }));
   const page = context.pages()[0]; const remote = new VerificationRemoteBrowser(page);
   try {
@@ -99,7 +129,7 @@ test('navigation during asynchronous authorization and release cancel queued inp
 test('negative container coordinates crop only the viewport intersection', async () => {
   const profile = await mkdtemp(join(tmpdir(), 'verification-crop-'));
   const context = await createPatchrightVerificationBrowserFactory().launchPersistentContext({ profileDir: profile, headless: true, hideWindow: false });
-  await (context as unknown as BrowserContext).route('**/*', route => route.fulfill({ contentType: 'text/html', body:
+  await (context as unknown as BrowserContext).route('**/*', route => route.fulfill({ contentType: 'text/html;charset=utf-8', body:
     '<div class="nc-container" style="position:absolute;left:-100px;top:-10px;width:320px;height:50px"><button id="nc_1_n1z">verify</button></div><p>private</p>' }));
   const page = context.pages()[0]; const remote = new VerificationRemoteBrowser(page);
   try {
@@ -126,7 +156,7 @@ test('top-level and iframe navigation during capture are discarded, as are frame
     const raw = context as unknown as BrowserContext;
     await raw.route('**/*', route => {
       const url = new URL(route.request().url());
-      return route.fulfill({ contentType: 'text/html', body: url.pathname === '/private'
+      return route.fulfill({ contentType: 'text/html;charset=utf-8', body: url.pathname === '/private'
         ? '<p style="background:magenta">private messages</p>' : url.hostname === 'www.goofish.com'
           ? '<iframe src="https://captcha.goofish.com/challenge"></iframe>'
           : '<div class="nc-container" style="width:280px;height:50px"><button id="nc_1_n1z">verify</button></div>' });
@@ -150,8 +180,8 @@ test('scaled pointer/touch input maps to the original page and JPEG excludes adj
   const profile = await mkdtemp(join(tmpdir(), 'verification-touch-'));
   const context = await createPatchrightVerificationBrowserFactory().launchPersistentContext({ profileDir: profile, headless: true, hideWindow: false });
   const raw = context as unknown as BrowserContext;
-  await raw.route('**/*', route => route.fulfill({ contentType: 'text/html', body:
-    '<body style="margin:0;background:rgb(255,0,255)"><div class="nc-container" style="position:absolute;left:-100px;top:0;width:320px;height:50px;background:rgb(0,200,0)"><button id="nc_1_n1z">verify</button></div><script>document.body.dataset.events="";document.onmousedown=e=>document.body.dataset.events+=`down:${e.isTrusted}:${Math.round(e.clientX)},`;document.onmouseup=e=>document.body.dataset.events+="up,";</script>' }));
+  await raw.route('**/*', route => route.fulfill({ contentType: 'text/html;charset=utf-8', body:
+    '<body style="margin:0;background:rgb(255,0,255)"><input type="text" hidden disabled id="fixture-events" value=""><div class="nc-container" style="position:absolute;left:-100px;top:0;width:320px;height:50px;background:rgb(0,200,0)"><button id="nc_1_n1z">verify</button></div><script>document.getElementById("fixture-events").value="";document.onmousedown=e=>document.getElementById("fixture-events").value+=`down:${e.isTrusted}:${Math.round(e.clientX)},`;document.onmouseup=e=>document.getElementById("fixture-events").value+="up,";</script>' }));
   const page = context.pages()[0]; const remote = new VerificationRemoteBrowser(page);
   const { chromium } = await import('patchright');
   const operator = await chromium.launch({ channel: 'chrome', headless: true });
@@ -174,7 +204,7 @@ test('scaled pointer/touch input maps to the original page and JPEG excludes adj
     });
     assert.ok(pixel[0] < 20 && pixel[1] > 170 && pixel[2] < 20, `crop leaked adjacent pixels: ${pixel}`);
     await view.touchscreen.tap(173, 45); await Promise.all(inputs);
-    assert.match(await page.evaluate(() => document.body.dataset.events), /down:true:10[89],up,/);
+    assert.match(await page.evaluate(() => (document.getElementById('fixture-events') as HTMLInputElement).value), /down:true:10[89],up,/);
     await remote.close();
     await assert.rejects(remote.pointer({ ...frame, type: 'down', x: .5, y: .5, sequence: ++sequence }, async () => true), /STALE|CLOSED/);
   } finally { await operator.close(); await remote.close(); await context.close(); await rm(profile, { recursive: true, force: true }); }

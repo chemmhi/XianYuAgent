@@ -1,3 +1,8 @@
+import { VerificationRuntime, type VerificationRuntimeOptions } from './verification-runtime.js';
+import { VerificationRealtime } from './verification-realtime.js';
+import { verificationHttp } from './verification-http.js';
+import { VerificationError } from './verification-domain.js';
+import type { XianyuImClient, XianyuImClientOptions } from './xianyu-im.js';
 import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -93,6 +98,9 @@ export interface AppRuntime {
   xianyuItemDetail: XianyuItemDetailService;
   objectStorage: ObjectStorage;
   xianyuIm: XianyuImService;
+  verification?: VerificationRuntime;
+  verificationRealtime?: VerificationRealtime;
+  verificationBrowser?: XianyuVerificationBrowser;
   server: Server;
   listen(): Promise<void>;
   close(): Promise<void>;
@@ -100,6 +108,8 @@ export interface AppRuntime {
 
 export interface CreateAppOptions {
   verificationBrowserFactory?: XianyuVerificationBrowserFactory;
+  verificationRuntimeOptions?: VerificationRuntimeOptions;
+  imClientFactory?: (options: XianyuImClientOptions) => XianyuImClient;
   autoReplyAcknowledgementEvaluator?: AutoReplyAcknowledgementEvaluator;
   verificationRecoveryOwner?: boolean;
   imOwnerUrl?: string;
@@ -126,6 +136,8 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     return auditId;
   }, async (resources) => {
     qrLogin.forgetSessions(resources.loginSessionIds);
+    await verification?.cancel(resources.accountId);
+    for (const id of resources.loginSessionIds) await verification?.cancel(id);
     await xianyuIm.deleteAccountState('account-deletion', resources.accountId);
     await modelProviderRuntime.deleteAccount(resources.accountId);
     for (const key of [resources.accountId, ...resources.loginSessionIds]) await (verificationBrowser ?? new XianyuVerificationBrowser({ userDataDir: config.xianyuVerificationBrowserUserDataDir })).deleteProfile(key);
@@ -153,10 +165,17 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
   const imOwnerClient = options.imOwnerUrl
     ? new XianyuImOwnerClient(options.imOwnerUrl, imOwnerSecret, config.xianyuVerificationBrowserMaxWaitMs * 2 + 60_000)
     : undefined;
+  const verification = config.xianyuVerificationRemoteEnabled && options.verificationRecoveryOwner !== false && !imOwnerClient
+    ? new VerificationRuntime(store, auth, config, options.verificationRuntimeOptions, subject => {
+      if (subject.accountId) void xianyuIm.requestManualVerification(subject.adminId, subject.accountId).catch(() => undefined);
+      else if (subject.loginSessionId) void qrLogin.retryVerification(subject.loginSessionId);
+    }) : undefined;
+  const verificationRealtime = verification ? new VerificationRealtime(verification) : undefined;
   const verificationBrowser = config.xianyuVerificationBrowserMode === 'disabled' || options.verificationRecoveryOwner === false || Boolean(imOwnerClient)
     ? undefined
     : new XianyuVerificationBrowser({
       browserFactory: options.verificationBrowserFactory,
+      verificationRuntime: verification,
       mode: config.xianyuVerificationBrowserMode,
       sliderMode: config.xianyuVerificationSliderMode,
       sliderMaxRetries: config.xianyuVerificationSliderMaxRetries,
@@ -466,7 +485,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
     if (!isTrustedPaidEvent(event)) return;
     await store.enqueuePaymentEvent({ adminId, accountId, eventRef: event.externalMessageRef, orderNo: extractTrustedOrderNo(event.raw), buyerRef: event.senderRef, itemRef: event.itemRef, conversationRef: event.externalConversationRef, receivedAt: trustedPaymentOccurredAt(event), observedAt: new Date().toISOString() });
     void paymentEventWorker.pollOnce().catch((error) => console.error(JSON.stringify({ component: 'payment-event-worker', event: 'wake_failed', accountId, error: error instanceof Error ? error.message : String(error) })));
-  }, async (adminId, accountId, source) => { await verificationRecoveryBridge?.publish({ adminId, accountId, source }); }, imOwnerClient);
+  }, async (adminId, accountId, source) => { await verificationRecoveryBridge?.publish({ adminId, accountId, source }); }, imOwnerClient, options.imClientFactory);
   const imOwnerServer = imOwnerClient ? undefined : new XianyuImOwnerServer(imOwnerSecret, xianyuIm, store);
 
   const workspaceCommands = new WorkspaceCommandOrchestrator({
@@ -497,7 +516,7 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
       if (config.xianyuQrMode === 'stub') return { loginSessionId: loginSession.id, accountId, status: loginSession.status, expiresAt: loginSession.expiresAt };
       try {
         const qrSession = await qrLogin.create({ sessionId: loginSession.id, adminId, accountId });
-        return { loginSessionId: loginSession.id, accountId, status: qrSession.status, expiresAt: qrSession.expiresAt, pollAfterMs: qrSession.pollAfterMs, verificationUrl: qrSession.verificationUrl, qrImageDataUrl: qrSession.qrImageDataUrl };
+        return { loginSessionId: loginSession.id, accountId, status: qrSession.status, expiresAt: qrSession.expiresAt, pollAfterMs: qrSession.pollAfterMs, verificationSessionId: qrSession.verificationSessionId, verificationRemote: qrSession.verificationRemote, verificationUrl: qrSession.verificationUrl, qrImageDataUrl: qrSession.qrImageDataUrl };
       } catch (error) {
         await accounts.updateLoginSession({ adminId, accountId, sessionId: loginSession.id, patch: { status: 'failed', failureCode: error instanceof Error ? error.message : 'QR_GENERATE_FAILED', completedAt: new Date().toISOString() }, requestId, traceId });
         throw new ServiceError(502, 'QR_GENERATE_FAILED', 'unable to generate xianyu qr session');
@@ -523,14 +542,17 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
   const server = createServer((request, response) => { void handleRequest(runtime, request, response); });
   const runtime: AppRuntime = {
     config, store, auth, invites, accounts, coupons, orders, orderDelivery, products, productPublisher, productKnowledgeBase, productAutomation, productAutomationTrigger, productAutomationWorker, paymentEventWorker, productSync, credentials, apiKeyCredentials, openaiSettings, modelProviderRuntime, dashboard, messages, autoReply, autoReplyRepair, autoReplyAgentSettings, autoReplyActivity, redisRealtime, verificationRecoveryBridge, imOwnerServer, workspace, piSkills, workspaceCommands, workspaceRuntime, qrLogin, xianyu, xianyuItemDetail, objectStorage, xianyuIm,
-    server,
+    server, verification, verificationRealtime, verificationBrowser,
     async listen() {
+      await verification?.coordinator.start();
       await new Promise<void>((resolve) => runtime.server.listen(config.port, config.host, resolve));
       if (verificationBrowser?.enabled) verificationRecoveryBridge?.startConsumer(() => startAllRecoverableListenersBestEffort(runtime));
       await bootstrapRepairPoliciesBestEffort(runtime);
       if (config.xianyuQrMode === 'real') void startAllRecoverableListenersBestEffort(runtime);
     },
     async close() {
+      await verificationRealtime?.close();
+      await verification?.close();
       for (const client of wsServer.clients) client.close(1001, 'server shutdown');
       await new Promise<void>((resolve) => wsServer.close(() => resolve()));
       workspaceRuntime.stop();
@@ -545,6 +567,10 @@ export function createApp(config: AppConfig = loadConfig(), options: CreateAppOp
   };
   server.on('upgrade', (request, socket, head) => {
     const pathname = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`).pathname;
+    if (pathname === '/api/v1/verification-events' || /^\/api\/v1\/verification-sessions\/[^/]+\/stream$/.test(pathname)) {
+      if (verificationRealtime) void verificationRealtime.upgrade(request, socket, head); else socket.destroy();
+      return;
+    }
     if (/^\/api\/v1\/conversations\/[^/]+\/events$/.test(pathname)) {
       void handleConversationUpgrade(runtime, wsServer, request, socket, head);
       return;
@@ -726,6 +752,7 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
   const ids = createIds();
   const ctx: RequestContext = { requestId: ids.requestId, traceId: ids.traceId, method, path: url.pathname, query: Object.fromEntries(url.searchParams.entries()), body: {}, headers: Object.fromEntries(Object.entries(request.headers).map(([key, value]) => [key.toLowerCase(), Array.isArray(value) ? value[0] : value])), cookies: parseCookies(request.headers.cookie) };
+  if (/^\/api\/v1\/verification-sessions(?:\/|$)/.test(ctx.path)) response.setHeader('Cache-Control', 'no-store');
   try {
     if (url.pathname === IM_OWNER_RPC_PATH) {
       if (!runtime.imOwnerServer) { writeJson(response, 503, { ok: false, error: { code: 'XIANYU_IM_OWNER_UNAVAILABLE', statusCode: 503 } }); return; }
@@ -737,7 +764,7 @@ async function handleRequest(runtime: AppRuntime, request: IncomingMessage, resp
     const result = await dispatch(runtime, ctx, response);
     if (result) writeJson(response, result.statusCode, result.body);
   } catch (error) {
-    const serviceError = error instanceof ServiceError ? error : error instanceof PiSkillError && error.code === 'FORBIDDEN' ? new ServiceError(403, 'FORBIDDEN', error.message) : undefined;
+    const serviceError = error instanceof ServiceError ? error : error instanceof VerificationError ? new ServiceError(error.statusCode, error.code, error.message) : error instanceof PiSkillError && error.code === 'FORBIDDEN' ? new ServiceError(403, 'FORBIDDEN', error.message) : undefined;
     const mapped = serviceError ?? new ServiceError(500, 'INTERNAL_ERROR', error instanceof Error ? error.message : 'internal error');
     const body = failure(ctx, mapped.statusCode, mapped.code, mapped.message, mapped.details);
     writeJson(response, body.statusCode, body.body);
@@ -795,7 +822,8 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   }
 
   const authContext = ctx.path === '/api/v1/auth/logout' && ctx.method === 'POST'
-    ? await auth.contextForLogout(ctx.cookies.session_id) : await requireAuth(auth, ctx);
+    ? await auth.contextForLogout(ctx.cookies.session_id) : ctx.path.startsWith('/api/v1/verification-')
+      ? await auth.contextWithoutTouch(ctx.cookies.session_id) : await requireAuth(auth, ctx);
   if (!authContext) throw new ServiceError(401, 'UNAUTHENTICATED', 'session required');
   if (ctx.path === '/api/v1/auth/invites' && ctx.method === 'GET') return { statusCode:200, body: success(ctx, { items: await invites.list(authContext.admin.id) }).body };
   if (ctx.path === '/api/v1/auth/invites' && ctx.method === 'POST') { await auth.validateCsrf(authContext, ctx.headers, ctx.cookies); const result=await invites.create({adminId:authContext.admin.id,requestKey:String(ctx.body.requestKey ?? ''),days:Number(ctx.body.days ?? 7),requestId:ctx.requestId,traceId:ctx.traceId}); return {statusCode:201,body:success(ctx,{invite:{...result.invite,code:result.code}}).body}; }
@@ -804,6 +832,10 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
   const inviteAction=ctx.path.match(/^\/api\/v1\/auth\/invites\/([^/]+)\/(enable|disable|renew)$/);
   if (inviteAction && ctx.method === 'POST') { await auth.validateCsrf(authContext,ctx.headers,ctx.cookies); const id=decodeURIComponent(inviteAction[1]); if(inviteAction[2]==='renew') return {statusCode:200,body:success(ctx,{expiresAt:await invites.renew(authContext.admin.id,id,Number(ctx.body.days??7),ctx.requestId,ctx.traceId)}).body}; await invites.setStatus(authContext.admin.id,id,inviteAction[2]==='enable'?'active':'disabled',ctx.requestId,ctx.traceId); return {statusCode:200,body:success(ctx,{updated:true}).body}; }
   if (ctx.method !== 'GET' && ctx.method !== 'HEAD' && ctx.path !== '/api/v1/auth/logout') await auth.validateCsrf(authContext, ctx.headers, ctx.cookies);
+  if (ctx.path === '/api/v1/verification-sessions' || ctx.path.startsWith('/api/v1/verification-sessions/')) {
+    if (!runtime.verification || !runtime.verificationRealtime) throw new ServiceError(503, 'VERIFICATION_DISABLED', '远程验证未启用');
+    return verificationHttp(runtime.verification, runtime.verificationRealtime, ctx, authContext);
+  }
   if (ctx.path === '/api/v1/auth/logout' && ctx.method === 'POST') {
     await auth.validateCsrf(authContext, ctx.headers, ctx.cookies);
     await auth.logout(authContext);
@@ -1161,7 +1193,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
       if (config.xianyuQrMode === 'stub') return success(ctx, toQrSessionView(loginSession), 201);
       try {
         const qrSession = await runtime.qrLogin.create({ sessionId: loginSession.id, adminId: authContext.admin.id, accountId: loginSession.accountId });
-        return success(ctx, { ...toQrSessionView(loginSession), qrImageDataUrl: qrSession.qrImageDataUrl, pollAfterMs: qrSession.pollAfterMs, expiresAt: qrSession.expiresAt, status: qrSession.status, errorCode: qrSession.errorCode, verificationUrl: qrSession.verificationUrl }, 201);
+        return success(ctx, { ...toQrSessionView(loginSession), qrImageDataUrl: qrSession.qrImageDataUrl, pollAfterMs: qrSession.pollAfterMs, expiresAt: qrSession.expiresAt, status: qrSession.status, errorCode: qrSession.errorCode, verificationSessionId: qrSession.verificationSessionId, verificationRemote: qrSession.verificationRemote, verificationUrl: qrSession.verificationUrl }, 201);
       } catch (error) {
         await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId, sessionId: loginSession.id, patch: { status: 'failed', failureCode: error instanceof Error ? error.message : 'QR_GENERATE_FAILED', completedAt: new Date().toISOString() }, requestId: ctx.requestId, traceId: ctx.traceId });
         throw new ServiceError(502, 'QR_GENERATE_FAILED', 'unable to generate xianyu qr session');
@@ -1174,7 +1206,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
     const local = await accounts.getLoginSessionById({ adminId: authContext.admin.id, sessionId });
     const external = runtime.qrLogin.get(sessionId);
     const terminal = ['succeeded', 'cancelled', 'failed', 'expired'].includes(local.status);
-    return { statusCode: 200, body: success(ctx, external ? { ...toQrSessionView(local), qrImageDataUrl: external.qrImageDataUrl, pollAfterMs: external.pollAfterMs, expiresAt: external.expiresAt, status: terminal ? local.status : external.status, errorCode: terminal ? local.failureCode : external.errorCode, verificationUrl: external.verificationUrl, verificationAutoLaunch: external.verificationAutoLaunch } : toQrSessionView(local)).body };
+    return { statusCode: 200, body: success(ctx, external ? { ...toQrSessionView(local), qrImageDataUrl: external.qrImageDataUrl, pollAfterMs: external.pollAfterMs, expiresAt: external.expiresAt, status: terminal ? local.status : external.status, errorCode: terminal ? local.failureCode : external.errorCode, verificationUrl: external.verificationUrl, verificationAutoLaunch: external.verificationAutoLaunch, verificationSessionId: external.verificationSessionId, verificationRemote: external.verificationRemote } : toQrSessionView(local)).body };
   }
   const globalQrAction = ctx.path.match(/^\/api\/v1\/auth\/qr-sessions\/([^/]+)\/(cancel|renew)$/);
   if (globalQrAction && ctx.method === 'POST') {
@@ -1190,7 +1222,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
       const renewed = await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId, sessionId, patch: { status: 'waiting', expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(), failureCode: undefined }, requestId: ctx.requestId, traceId: ctx.traceId });
       if (config.xianyuQrMode === 'stub') return success(ctx, toQrSessionView(renewed));
       const qrSession = await runtime.qrLogin.create({ sessionId, adminId: authContext.admin.id, accountId: renewed.accountId });
-      return success(ctx, { ...toQrSessionView(renewed), qrImageDataUrl: qrSession.qrImageDataUrl, pollAfterMs: qrSession.pollAfterMs, expiresAt: qrSession.expiresAt, status: qrSession.status, errorCode: qrSession.errorCode, verificationUrl: qrSession.verificationUrl });
+      return success(ctx, { ...toQrSessionView(renewed), qrImageDataUrl: qrSession.qrImageDataUrl, pollAfterMs: qrSession.pollAfterMs, expiresAt: qrSession.expiresAt, status: qrSession.status, errorCode: qrSession.errorCode, verificationSessionId: qrSession.verificationSessionId, verificationRemote: qrSession.verificationRemote, verificationUrl: qrSession.verificationUrl });
     });
   }
 
@@ -1273,7 +1305,7 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
         if (loginMethod !== 'qr' || config.xianyuQrMode === 'stub') return success(ctx, loginSession, 201);
         try {
           const qrSession = await runtime.qrLogin.create({ sessionId: loginSession.id, adminId: authContext.admin.id, accountId });
-          return success(ctx, { ...toQrSessionView(loginSession), qrImageDataUrl: qrSession.qrImageDataUrl, pollAfterMs: qrSession.pollAfterMs, expiresAt: qrSession.expiresAt, status: qrSession.status, errorCode: qrSession.errorCode, verificationUrl: qrSession.verificationUrl }, 201);
+          return success(ctx, { ...toQrSessionView(loginSession), qrImageDataUrl: qrSession.qrImageDataUrl, pollAfterMs: qrSession.pollAfterMs, expiresAt: qrSession.expiresAt, status: qrSession.status, errorCode: qrSession.errorCode, verificationSessionId: qrSession.verificationSessionId, verificationRemote: qrSession.verificationRemote, verificationUrl: qrSession.verificationUrl }, 201);
         } catch (error) {
           await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId, sessionId: loginSession.id, patch: { status: 'failed', failureCode: error instanceof Error ? error.message : 'QR_GENERATE_FAILED', completedAt: new Date().toISOString() }, requestId: ctx.requestId, traceId: ctx.traceId });
           throw new ServiceError(502, 'QR_GENERATE_FAILED', 'unable to generate xianyu qr session');
@@ -1285,14 +1317,14 @@ async function dispatch(runtime: AppRuntime, ctx: RequestContext, response: Serv
       const local = await accounts.getLoginSession({ adminId: authContext.admin.id, accountId, sessionId });
       const external = runtime.qrLogin.get(sessionId);
       const terminal = ['succeeded', 'cancelled', 'failed', 'expired'].includes(local.status);
-      return { statusCode: 200, body: success(ctx, external ? { ...toQrSessionView(local), qrImageDataUrl: external.qrImageDataUrl, pollAfterMs: external.pollAfterMs, expiresAt: external.expiresAt, status: terminal ? local.status : external.status, errorCode: terminal ? local.failureCode : external.errorCode, verificationUrl: external.verificationUrl, verificationAutoLaunch: external.verificationAutoLaunch } : local).body };
+      return { statusCode: 200, body: success(ctx, external ? { ...toQrSessionView(local), qrImageDataUrl: external.qrImageDataUrl, pollAfterMs: external.pollAfterMs, expiresAt: external.expiresAt, status: terminal ? local.status : external.status, errorCode: terminal ? local.failureCode : external.errorCode, verificationUrl: external.verificationUrl, verificationAutoLaunch: external.verificationAutoLaunch, verificationSessionId: external.verificationSessionId, verificationRemote: external.verificationRemote } : local).body };
     }
     if (sessionId && loginSessionMatch[3] === 'cancel' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, accountId, async () => { runtime.qrLogin.cancel(sessionId); return success(ctx, await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId, sessionId, patch: { status: 'cancelled', completedAt: new Date().toISOString() }, requestId: ctx.requestId, traceId: ctx.traceId })); });
     if (sessionId && loginSessionMatch[3] === 'renew' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, accountId, async () => {
       const renewed = await accounts.updateLoginSession({ adminId: authContext.admin.id, accountId, sessionId, patch: { status: 'waiting', expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(), failureCode: undefined }, requestId: ctx.requestId, traceId: ctx.traceId });
       if (config.xianyuQrMode === 'stub') return success(ctx, renewed);
       const qrSession = await runtime.qrLogin.create({ sessionId, adminId: authContext.admin.id, accountId });
-      return success(ctx, { ...toQrSessionView(renewed), qrImageDataUrl: qrSession.qrImageDataUrl, pollAfterMs: qrSession.pollAfterMs, expiresAt: qrSession.expiresAt, status: qrSession.status, errorCode: qrSession.errorCode, verificationUrl: qrSession.verificationUrl });
+      return success(ctx, { ...toQrSessionView(renewed), qrImageDataUrl: qrSession.qrImageDataUrl, pollAfterMs: qrSession.pollAfterMs, expiresAt: qrSession.expiresAt, status: qrSession.status, errorCode: qrSession.errorCode, verificationSessionId: qrSession.verificationSessionId, verificationRemote: qrSession.verificationRemote, verificationUrl: qrSession.verificationUrl });
     });
     if (sessionId && loginSessionMatch[3] === 'complete' && ctx.method === 'POST') return mutation(runtime, ctx, authContext, accountId, async () => {
       const result = await credentials.completeLoginSession({
