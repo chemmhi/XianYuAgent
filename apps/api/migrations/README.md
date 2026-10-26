@@ -47,12 +47,13 @@
 
 ## 051 入站 quarantine 保留与运维纪律
 
-- Worker 默认每 5 分钟按 7 天保留窗口分批删除，单批默认 10,000 行；`INBOUND_QUARANTINE_*` 可在生产环境覆盖。
-- 保留窗口同时适用于已解决和未解决记录；quarantine 只保留摘要/预览，不是可无限期重放的消息队列。若需要更长取证窗口，应先调大 `INBOUND_QUARANTINE_RETENTION_DAYS`。
+- Worker 对 quarantine 和 audit_events 统一固定保留最近 72 小时，每分钟每表最多 20 批（每批 10,000 行）或 15 秒；`RECORD_CLEANUP_BATCH_SIZE`、`RECORD_CLEANUP_POLL_MS` 仅控制吞吐，旧 `INBOUND_QUARANTINE_*` 失效。
+- 保留窗口同时适用于已解决、未解决及关键审计记录；quarantine 只保留摘要/预览，不是可无限期重放的消息队列。普通自动化 skipped 和相同系统推送按小时合并计数，关键审计在窗口内保持明细。
 - 051 使用 `CREATE INDEX CONCURRENTLY`，单独成文件且迁移执行器不得把该 SQL 包在显式事务中；052 的表参数 DDL 保持独立，避免与 051 合并成多语句事务请求。
 - 若 051 在构建索引期间失败，迁移执行器重试前会检查并并发删除同名 `indisvalid=false` 索引，再重新创建；发布后可用 `pg_index.indisvalid` 做一次验收确认。
 - DELETE 只阻止表继续增长并让空间进入 PostgreSQL 可复用池，不保证立即缩小数据卷；既有 backlog 清理后，低峰执行 `VACUUM (ANALYZE) messages.auto_reply_inbound_quarantine`，需要立即归还文件空间时再单独评估 `VACUUM FULL`/`pg_repack`。
-- 发布验收至少检查：worker 日志出现 `quarantineCleanupWorker=enabled`，quarantine 的 `count(*)` 与最老 `created_at` 持续下降，`pg_stat_user_tables.n_dead_tup` 未持续失控。
+- 发布验收至少检查：worker 日志出现 `recordRetentionDays=3`，两表过期条数清零，`pg_stat_user_tables.n_dead_tup` 未持续失控。
+- 071 将已核验发货恢复证据回填到 `orders.delivery_send_steps.recovery_verified_at`；072–074 单独在线创建审计时间索引和两表唯一去重索引，残留无效索引由迁移器重建。必须先停止旧 API/Worker、完成迁移，再启动新进程和清存量；清理审计后不可回滚至依赖 audit 判断恢复保护的旧版本。详见 [运维说明](../../../docs/operations/record-retention.md)。
 
 迁移执行顺序以完整文件名的字典序为准，数字前缀在历史目录中允许重复（例如 `031_auto_reply_*` 与 `031_product_automation.sql`）；新增迁移应优先使用唯一前缀，并确保 SQL 幂等且依赖在完整文件名顺序下成立。
 

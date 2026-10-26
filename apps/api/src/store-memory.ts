@@ -1,3 +1,4 @@
+import { auditDedupeKey, cleanupBatchLimit, quarantineDedupeKey } from './record-retention-policy.js';
 import { isRecoverableAutomationSkip } from './product-automation-execution-policy.js';
 import { messageConnectionStatus } from './account-connection.js';
 import { purgeMemoryRepairAccount } from './auto-reply-repair-repository.js';
@@ -182,6 +183,8 @@ export class MemoryStore implements Store {
   private readonly workspaceConfirmations = new Map<string, WorkspaceConfirmationRecord>();
   private runEventSequence = 0;
   readonly audits: AuditEventRecord[] = [];
+  private readonly auditSummaries = new Map<string, AuditEventRecord>();
+  private readonly quarantineSummaries = new Map<string, InboundQuarantineRecord>();
 
   async health(): Promise<{ kind: string; reachable: boolean }> { return { kind: this.kind, reachable: true }; }
   async isAccountIdentityAvailable(platform: string, sellerRef: string, excludeAccountId: string): Promise<boolean> { return ![...this.accounts.values()].some(account => account.id !== excludeAccountId && account.platform === platform && (account.sellerRef === sellerRef || account.platformUserId === sellerRef)); }
@@ -1630,21 +1633,29 @@ export class MemoryStore implements Store {
 
   async recordInboundQuarantine(input: { accountId: string; reasonCode: string; payloadDigest: string; payloadPreview?: string; payloadSize: number; receivedAt?: string }): Promise<InboundQuarantineRecord> {
     const now = new Date().toISOString();
-    const record: InboundQuarantineRecord = { id: createId(), accountId: input.accountId, reasonCode: input.reasonCode, payloadDigest: input.payloadDigest, payloadPreview: input.payloadPreview?.slice(0, 500), payloadSize: Math.max(0, Math.trunc(input.payloadSize)), receivedAt: input.receivedAt ?? now, createdAt: now };
+    const key = quarantineDedupeKey(input, now);
+    const existing = key ? this.quarantineSummaries.get(key) : undefined;
+    if (existing) {
+      existing.occurrenceCount = (existing.occurrenceCount ?? 1) + 1;
+      existing.lastSeenAt = now;
+      return { ...existing };
+    }
+    const record: InboundQuarantineRecord = { id: createId(), accountId: input.accountId, reasonCode: input.reasonCode, payloadDigest: input.payloadDigest, payloadPreview: input.payloadPreview?.slice(0, 500), payloadSize: Math.max(0, Math.trunc(input.payloadSize)), receivedAt: input.receivedAt ?? now, createdAt: now, occurrenceCount: 1, lastSeenAt: now };
     this.inboundQuarantine.set(record.id, record);
+    if (key) this.quarantineSummaries.set(key, record);
     return { ...record };
   }
 
   async cleanupInboundQuarantine(input: { createdBefore: string; limit?: number }): Promise<number> {
     const cutoff = Date.parse(input.createdBefore);
     if (!Number.isFinite(cutoff)) throw new Error('INBOUND_QUARANTINE_CUTOFF_INVALID');
-    const requestedLimit = input.limit ?? 1_000;
-    const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(50_000, Math.trunc(requestedLimit))) : 1_000;
+    const limit = cleanupBatchLimit(input.limit);
     const candidates = [...this.inboundQuarantine.entries()]
       .filter(([, record]) => Date.parse(record.createdAt) < cutoff)
       .sort(([, left], [, right]) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
       .slice(0, limit);
     for (const [id] of candidates) this.inboundQuarantine.delete(id);
+    for (const [key, record] of this.quarantineSummaries) if (!this.inboundQuarantine.has(record.id)) this.quarantineSummaries.delete(key);
     return candidates.length;
   }
 
@@ -2038,7 +2049,28 @@ export class MemoryStore implements Store {
     Object.assign(record, { status: 'dead_lettered' as const, lastErrorCode: input.errorCode, lastErrorDigest: input.errorDigest, lockedAt: undefined, leaseExpiresAt: undefined, leaseOwner: undefined, updatedAt: now });
     return true;
   }
-  async recordAudit(event: AuditEventRecord): Promise<void> { this.audits.push(event); }
+  async recordAudit(event: AuditEventRecord, options?: { routine?: boolean }): Promise<void> {
+    const key = auditDedupeKey(event, options?.routine);
+    const existing = key ? this.auditSummaries.get(key) : undefined;
+    if (existing) {
+      existing.occurrenceCount = (existing.occurrenceCount ?? 1) + 1;
+      if (event.createdAt > (existing.lastSeenAt ?? existing.createdAt)) existing.lastSeenAt = event.createdAt;
+      return;
+    }
+    const record = { ...event, occurrenceCount: 1, lastSeenAt: event.createdAt };
+    this.audits.push(record);
+    if (key) this.auditSummaries.set(key, record);
+  }
+  async cleanupAuditEvents(input: { createdBefore: string; limit?: number }): Promise<number> {
+    const cutoff = Date.parse(input.createdBefore);
+    if (!Number.isFinite(cutoff)) throw new Error('RECORD_RETENTION_TIME_INVALID');
+    const victims = new Set(this.audits.filter(event => Date.parse(event.createdAt) < cutoff)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+      .slice(0, cleanupBatchLimit(input.limit)).map(event => event.id));
+    for (let index = this.audits.length - 1; index >= 0; index--) if (victims.has(this.audits[index]!.id)) this.audits.splice(index, 1);
+    for (const [key, record] of this.auditSummaries) if (victims.has(record.id)) this.auditSummaries.delete(key);
+    return victims.size;
+  }
 
   async listAgentSessions(adminId: string, query: { accountId?: string; search?: string } = {}): Promise<AgentSessionRecord[]> {
     const scopedAccountIds = new Set((await this.listScopes(adminId)).map((scope) => scope.accountId));

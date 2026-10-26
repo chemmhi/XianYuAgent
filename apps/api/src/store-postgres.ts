@@ -1,4 +1,5 @@
 import { isRecoverableAutomationSkip, RECOVERABLE_AUTOMATION_SKIP_REASONS } from './product-automation-execution-policy.js';
+import { cleanupRecordTable, writeAuditEvent, writeInboundQuarantine } from './record-retention-postgres.js';
 import { ACCOUNT_MESSAGE_CONNECTION_SQL } from './account-connection.js';
 import { purgeAccountRows, type AccountDeletionCleanup } from './account-purge-postgres.js';
 import { inviteAccessStatus } from './invite-access.js';
@@ -130,9 +131,8 @@ export class PostgresStore implements Store {
   }
   async withVerifiedPartialDeliveryPlan<T>(input: { accountId: string; orderNo: string; executionKey: string; reservationId: string }, work: () => Promise<T>): Promise<T> {
     const recovery = await this.pool.query(`select 1 from orders.delivery_send_steps s
-      join observability.audit_events a on a.trace_id='delivery-recovery:' || s.order_no || ':' || s.external_ref
-        and a.account_id=s.account_id and a.action='delivery.partial_recovery_verified'
       where s.account_id=$1 and s.order_no=$2 and s.execution_key=$3
+        and s.recovery_verified_at is not null
         and s.step_key like '%:image:0' and s.status='succeeded' limit 1`, [input.accountId, input.orderNo, input.executionKey]);
     if (!recovery.rows.length) return work();
     const client = await this.deliveryPlanPool.connect();
@@ -953,7 +953,7 @@ export class PostgresStore implements Store {
       if (ledger.rows.length !== 1 || ledger.rows[0].status !== 'completed' || ledger.rows[0].result_json?.status !== 'manual_review' || ledger.rows[0].result_json?.reason !== 'DELIVERY_SEND_RESULT_UNKNOWN') throw new Error('DELIVERY_RECOVERY_LEDGER_MISMATCH');
       const jobs = await client.query('select * from orders.payment_event_jobs where account_id=$1 and order_no=$2 for update', [input.accountId, input.orderNo]);
       if (jobs.rows.length !== 1 || jobs.rows[0].admin_id !== input.adminId || jobs.rows[0].status !== 'manual_review') throw new Error('DELIVERY_RECOVERY_JOB_MISMATCH');
-      await client.query("update orders.delivery_send_steps set status='succeeded',external_ref=$4,updated_at=now() where account_id=$1 and order_no=$2 and step_key=$3", [input.accountId, input.orderNo, input.stepKey, input.externalMessageRef]);
+      await client.query("update orders.delivery_send_steps set status='succeeded',external_ref=$4,recovery_verified_at=now(),updated_at=now() where account_id=$1 and order_no=$2 and step_key=$3", [input.accountId, input.orderNo, input.stepKey, input.externalMessageRef]);
       await client.query("update orders.delivery_send_guards set status='active',updated_at=now() where account_id=$1 and order_no=$2", [input.accountId, input.orderNo]);
       await client.query("update coupons.coupon_reservations set status='reserved',reason=null,lease_until=now()+interval '15 minutes',updated_at=now() where id=$1", [reservation.rows[0].id]);
       await client.query("update coupons.coupon_items set reserved_until=now()+interval '15 minutes' where id=any($1::uuid[])", [items.rows.map((item) => item.id)]);
@@ -2013,26 +2013,11 @@ export class PostgresStore implements Store {
   }
 
   async recordInboundQuarantine(input: { accountId: string; reasonCode: string; payloadDigest: string; payloadPreview?: string; payloadSize: number; receivedAt?: string }): Promise<InboundQuarantineRecord> {
-    const result = await this.pool.query('insert into messages.auto_reply_inbound_quarantine (account_id,reason_code,payload_digest,payload_preview,payload_size,received_at) values ($1,$2,$3,$4,$5,coalesce($6::timestamptz,now())) returning *', [input.accountId, input.reasonCode, input.payloadDigest, input.payloadPreview?.slice(0, 500) ?? null, Math.max(0, Math.trunc(input.payloadSize)), input.receivedAt ?? null]);
-    const row = result.rows[0];
-    return { id: String(row.id), accountId: String(row.account_id), reasonCode: String(row.reason_code), payloadDigest: String(row.payload_digest), payloadPreview: row.payload_preview ? String(row.payload_preview) : undefined, payloadSize: Number(row.payload_size ?? 0), receivedAt: dateIso(row.received_at), resolvedAt: iso(row.resolved_at), createdAt: dateIso(row.created_at) };
+    return writeInboundQuarantine(this.pool, input);
   }
 
   async cleanupInboundQuarantine(input: { createdBefore: string; limit?: number }): Promise<number> {
-    const requestedLimit = input.limit ?? 1_000;
-    const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(50_000, Math.trunc(requestedLimit))) : 1_000;
-    const result = await this.pool.query(`with victims as (
-        select id
-        from messages.auto_reply_inbound_quarantine
-        where created_at < $1::timestamptz
-        order by created_at asc, id asc
-        for update skip locked
-        limit $2
-      )
-      delete from messages.auto_reply_inbound_quarantine quarantine
-      using victims
-      where quarantine.id = victims.id`, [input.createdBefore, limit]);
-    return Number(result.rowCount ?? 0);
+    return cleanupRecordTable(this.pool, 'messages.auto_reply_inbound_quarantine', input);
   }
 
   async getAutoReplyActivitySummary(adminId: string, query: { accountId?: string; from: string; to: string }): Promise<AutoReplyActivitySummary> {
@@ -2442,7 +2427,8 @@ export class PostgresStore implements Store {
     const result = await this.pool.query(`update execution.outbox_jobs set status='dead_lettered',last_error_code=$3,last_error_digest=$4,locked_at=null,lease_expires_at=null,lease_owner=null,updated_at=now() where id=$1 and status='processing' and lease_owner=$2`, [input.id, input.workerId, input.errorCode, input.errorDigest]);
     return result.rowCount === 1;
   }
-  async recordAudit(event: AuditEventRecord): Promise<void> { await this.pool.query('insert into observability.audit_events (id,actor_type,actor_id,action,target_ref,request_id,trace_id,payload_digest,account_id,reason) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [event.id, event.actorType, event.actorId ?? null, event.action, event.targetRef ?? null, event.requestId, event.traceId, event.payloadDigest, event.accountId ?? null, event.reason ?? null]); }
+  async recordAudit(event: AuditEventRecord, options?: { routine?: boolean }): Promise<void> { await writeAuditEvent(this.pool, event, options?.routine); }
+  async cleanupAuditEvents(input: { createdBefore: string; limit?: number }): Promise<number> { return cleanupRecordTable(this.pool, 'observability.audit_events', input); }
 
   async listAgentSessions(adminId: string, query: { accountId?: string; search?: string } = {}): Promise<AgentSessionRecord[]> {
     const params: unknown[] = [adminId];
